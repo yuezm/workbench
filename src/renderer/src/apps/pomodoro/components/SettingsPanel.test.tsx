@@ -16,7 +16,7 @@ describe('SettingsPanel', () => {
     ['专注（分钟）', { focusMin: 50 }],
     ['短休息（分钟）', { shortBreakMin: 10 }],
     ['长休息（分钟）', { longBreakMin: 20 }],
-    ['每几轮长休（轮）', { roundsBeforeLongBreak: 6 }]
+    ['每几轮长休（轮）', { roundsBeforeLongBreak: 6 }],
   ])('提交"%s"触发 onChange 携带对应字段', (label, expectedPatch) => {
     const onChange = vi.fn()
     render(<SettingsPanel config={DEFAULT_CONFIG} running={false} onChange={onChange} />)

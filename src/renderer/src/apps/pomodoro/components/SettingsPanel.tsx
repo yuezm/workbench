@@ -15,7 +15,7 @@ function NumberField({
   label,
   value,
   disabled,
-  onCommit
+  onCommit,
 }: {
   label: string
   value: number
@@ -37,21 +37,17 @@ function NumberField({
         inputMode="numeric"
         className={cn(
           'h-10 rounded-xl border border-line bg-black/20 px-3 text-sm text-ink tabular-nums',
-          'outline-none transition-all duration-200',
+          'transition-all duration-200 outline-none',
           'hover:border-line-strong',
           'focus:border-focus/60 focus:ring-2 focus:ring-focus/25',
-          'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line'
+          'disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line',
         )}
       />
     </label>
   )
 }
 
-export function SettingsPanel({
-  config,
-  running,
-  onChange
-}: SettingsPanelProps): ReactElement {
+export function SettingsPanel({ config, running, onChange }: SettingsPanelProps): ReactElement {
   return (
     <details className="group w-full max-w-md animate-rise [animation-delay:160ms]">
       <summary
@@ -59,7 +55,7 @@ export function SettingsPanel({
           'flex cursor-pointer list-none items-center justify-between rounded-2xl',
           'border border-line bg-white/[0.03] px-5 py-3 backdrop-blur-md',
           'text-sm text-ink-dim transition-colors duration-200',
-          'hover:bg-white/[0.05] hover:text-ink [&::-webkit-details-marker]:hidden'
+          'hover:bg-white/[0.05] hover:text-ink [&::-webkit-details-marker]:hidden',
         )}
       >
         <span className="inline-flex items-center gap-2">

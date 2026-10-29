@@ -11,8 +11,8 @@ function createWindow(): void {
     backgroundColor: '#16161e',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
-      sandbox: false
-    }
+      sandbox: false,
+    },
   })
 
   win.on('ready-to-show', () => win.show())

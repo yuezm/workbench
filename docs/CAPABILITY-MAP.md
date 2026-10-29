@@ -10,10 +10,10 @@
 
 ## 模块
 
-| Module id | 职责 | 依赖 | Spec |
-|---|---|---|---|
-| `shell` | Electron 外壳：主进程/窗口管理、侧边栏导航、app 注册与挂载机制（AppDefinition 契约）、跨进程系统能力桥接（系统通知统一 API） | — | [SPEC-shell.md](./specs/SPEC-shell.md) |
-| `pomodoro` | 番茄钟 app：计时状态机、计时 UI、响铃、时长设置 | shell | [SPEC-pomodoro.md](./specs/SPEC-pomodoro.md) |
+| Module id  | 职责                                                                                                                         | 依赖  | Spec                                         |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------- |
+| `shell`    | Electron 外壳：主进程/窗口管理、侧边栏导航、app 注册与挂载机制（AppDefinition 契约）、跨进程系统能力桥接（系统通知统一 API） | —     | [SPEC-shell.md](./specs/SPEC-shell.md)       |
+| `pomodoro` | 番茄钟 app：计时状态机、计时 UI、响铃、时长设置                                                                              | shell | [SPEC-pomodoro.md](./specs/SPEC-pomodoro.md) |
 
 ## 边界决定
 

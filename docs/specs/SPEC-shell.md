@@ -7,6 +7,7 @@
 搭建一个可长期扩展的 Electron 桌面工作台外壳：左侧边栏列出所有已注册的 app，内容区挂载当前选中的 app。核心价值在于 **app 注册机制**——未来新增 app 不需要改动外壳代码。shell 自己不包含任何具体 app 的业务逻辑；第一个消费者 `pomodoro` 用于验证这套机制。
 
 **用户故事：**
+
 - 作为使用者，我打开工作台后能在侧边栏看到所有 app，点击即切换，界面保持无整页刷新。
 - 作为开发者（我自己），我新增一个 app 时只需要：新建 app 目录、实现 `AppDefinition`、在注册表加一行。
 
@@ -70,34 +71,32 @@ shell 拥有并定义"一个 app 是什么"。注册表是 app 的唯一数据�
 
 ```ts
 // renderer/shell/types.ts
-import type { ComponentType } from 'react';
+import type { ComponentType } from 'react'
 
 /** 图标组件入参 */
 export interface AppIconProps {
   /** 尺寸（像素） */
-  size?: number;
+  size?: number
 }
 
 export interface AppDefinition {
   /** 唯一 id，kebab-case，如 'pomodoro' */
-  id: string;
+  id: string
   /** 侧边栏显示名 */
-  name: string;
+  name: string
   /** 侧边栏图标 */
-  icon: ComponentType<AppIconProps>;
+  icon: ComponentType<AppIconProps>
   /** 内容区挂载的入口组件 */
-  component: ComponentType;
+  component: ComponentType
 }
 ```
 
 ```ts
 // renderer/shell/registry.ts
-import type { AppDefinition } from './types';
-import { pomodoroApp } from '../apps/pomodoro';
+import type { AppDefinition } from './types'
+import { pomodoroApp } from '../apps/pomodoro'
 
-export const apps: AppDefinition[] = [
-  pomodoroApp,
-];
+export const apps: AppDefinition[] = [pomodoroApp]
 ```
 
 **跨进程 API（preload 暴露，契约定义在 `src/shared/workbench-api.ts`）：**
@@ -106,9 +105,9 @@ export const apps: AppDefinition[] = [
 // renderer 通过 window.workbench 调用，禁止直接 import electron
 export interface WorkbenchApi {
   /** 发送一条系统通知 */
-  notify(title: string, body?: string): void;
+  notify(title: string, body?: string): void
 }
-export const NOTIFY_CHANNEL = 'workbench:notify';
+export const NOTIFY_CHANNEL = 'workbench:notify'
 ```
 
 ## Code Style
@@ -119,8 +118,8 @@ export const NOTIFY_CHANNEL = 'workbench:notify';
 
 ```tsx
 export function Sidebar() {
-  const [activeId, setActiveId] = useState(apps[0]?.id);
-  const active = apps.find((a) => a.id === activeId);
+  const [activeId, setActiveId] = useState(apps[0]?.id)
+  const active = apps.find((a) => a.id === activeId)
   return (
     <div className={styles.layout}>
       <nav className={styles.sidebar}>
@@ -130,11 +129,9 @@ export function Sidebar() {
           </button>
         ))}
       </nav>
-      <main className={styles.content}>
-        {active ? <active.component /> : null}
-      </main>
+      <main className={styles.content}>{active ? <active.component /> : null}</main>
     </div>
-  );
+  )
 }
 ```
 

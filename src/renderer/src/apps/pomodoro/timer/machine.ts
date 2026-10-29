@@ -12,7 +12,7 @@ export function createInitialState(config: PomodoroConfig = DEFAULT_CONFIG): Pom
     endsAt: null,
     completedRounds: 0,
     justCompleted: false,
-    config
+    config,
   }
 }
 
@@ -59,7 +59,7 @@ function advance(state: PomodoroState, countRound: boolean): PomodoroState {
     remainingMs: phaseDurationMs(state.config, nextPhase),
     endsAt: null,
     completedRounds,
-    justCompleted: countRound
+    justCompleted: countRound,
   }
 }
 
@@ -75,7 +75,7 @@ export function reduce(state: PomodoroState, event: PomodoroEvent): PomodoroStat
         ...state,
         phase: state.phase === 'idle' ? 'focus' : state.phase,
         endsAt: event.now + state.remainingMs,
-        justCompleted: false
+        justCompleted: false,
       }
     }
     case 'PAUSE': {
@@ -84,7 +84,7 @@ export function reduce(state: PomodoroState, event: PomodoroEvent): PomodoroStat
         ...state,
         remainingMs: Math.max(0, state.endsAt - event.now),
         endsAt: null,
-        justCompleted: false
+        justCompleted: false,
       }
     }
     case 'TICK': {
@@ -109,23 +109,23 @@ export function reduce(state: PomodoroState, event: PomodoroEvent): PomodoroStat
         focusMin: clamp(event.patch.focusMin ?? state.config.focusMin, CONFIG_LIMITS.focusMin),
         shortBreakMin: clamp(
           event.patch.shortBreakMin ?? state.config.shortBreakMin,
-          CONFIG_LIMITS.shortBreakMin
+          CONFIG_LIMITS.shortBreakMin,
         ),
         longBreakMin: clamp(
           event.patch.longBreakMin ?? state.config.longBreakMin,
-          CONFIG_LIMITS.longBreakMin
+          CONFIG_LIMITS.longBreakMin,
         ),
         roundsBeforeLongBreak: clamp(
           event.patch.roundsBeforeLongBreak ?? state.config.roundsBeforeLongBreak,
-          CONFIG_LIMITS.roundsBeforeLongBreak
-        )
+          CONFIG_LIMITS.roundsBeforeLongBreak,
+        ),
       }
       return {
         ...state,
         config,
         // 仅 idle 态重算展示剩余时间；暂停中的冻结时长不变，新时长作用于下一阶段
         remainingMs: state.phase === 'idle' ? config.focusMin * MIN : state.remainingMs,
-        justCompleted: false
+        justCompleted: false,
       }
     }
   }

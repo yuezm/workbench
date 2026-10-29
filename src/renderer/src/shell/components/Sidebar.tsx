@@ -43,7 +43,7 @@ export function Sidebar({ apps, activeId, onSelect }: SidebarProps): ReactElemen
                 'focus-visible:ring-2 focus-visible:ring-focus/60',
                 active
                   ? 'bg-white/[0.07] text-ink shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'
-                  : 'text-ink-dim hover:bg-white/[0.04] hover:text-ink'
+                  : 'text-ink-dim hover:bg-white/[0.04] hover:text-ink',
               )}
               aria-current={active ? 'page' : undefined}
               onClick={() => onSelect(app.id)}
@@ -53,7 +53,7 @@ export function Sidebar({ apps, activeId, onSelect }: SidebarProps): ReactElemen
                 className={cn(
                   'absolute top-1/2 left-0 h-4 w-0.5 -translate-y-1/2 rounded-full',
                   'bg-gradient-to-b from-focus to-long transition-opacity duration-200',
-                  active ? 'opacity-100' : 'opacity-0'
+                  active ? 'opacity-100' : 'opacity-0',
                 )}
               />
               <span
@@ -61,7 +61,7 @@ export function Sidebar({ apps, activeId, onSelect }: SidebarProps): ReactElemen
                   'grid size-7 shrink-0 place-items-center rounded-lg transition-colors duration-200',
                   active
                     ? 'bg-focus/15 text-focus'
-                    : 'bg-white/[0.04] text-ink-faint group-hover:text-ink-dim'
+                    : 'bg-white/[0.04] text-ink-faint group-hover:text-ink-dim',
                 )}
               >
                 <app.icon size={15} />

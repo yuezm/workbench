@@ -8,7 +8,7 @@ describe('formatRemaining', () => {
     [0, '00:00'],
     [65_500, '01:06'],
     [5_000, '00:05'],
-    [999, '00:01']
+    [999, '00:01'],
   ])('%d ms → %s（向上取整到秒）', (ms, expected) => {
     expect(formatRemaining(ms)).toBe(expected)
   })
@@ -22,7 +22,7 @@ describe('TimerDisplay', () => {
         remainingMs={25 * 60_000}
         completedRounds={2}
         roundsBeforeLongBreak={4}
-      />
+      />,
     )
     expect(screen.getByText('专注')).toBeInTheDocument()
     expect(screen.getByText('25:00')).toBeInTheDocument()
@@ -35,7 +35,7 @@ describe('TimerDisplay', () => {
         remainingMs={3 * 60_000}
         completedRounds={2}
         roundsBeforeLongBreak={4}
-      />
+      />,
     )
     expect(screen.getByText(/2\s*\/\s*4/)).toBeInTheDocument()
     expect(screen.getByText('短休息')).toBeInTheDocument()
@@ -48,7 +48,7 @@ describe('TimerDisplay', () => {
         remainingMs={10 * 60_000}
         completedRounds={4}
         roundsBeforeLongBreak={4}
-      />
+      />,
     )
     expect(screen.getByText('长休息')).toBeInTheDocument()
   })

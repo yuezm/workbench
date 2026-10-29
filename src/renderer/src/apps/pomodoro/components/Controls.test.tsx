@@ -8,7 +8,7 @@ function setup(running: boolean) {
     onStart: vi.fn(),
     onPause: vi.fn(),
     onReset: vi.fn(),
-    onSkip: vi.fn()
+    onSkip: vi.fn(),
   }
   render(<Controls running={running} {...handlers} />)
   return handlers
@@ -20,7 +20,7 @@ describe('Controls', () => {
       onStart: vi.fn(),
       onPause: vi.fn(),
       onReset: vi.fn(),
-      onSkip: vi.fn()
+      onSkip: vi.fn(),
     }
     const { unmount } = render(<Controls running={false} {...handlers} />)
     expect(screen.getByRole('button', { name: '开始' })).toBeInTheDocument()

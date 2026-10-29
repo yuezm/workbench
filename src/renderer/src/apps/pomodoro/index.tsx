@@ -28,5 +28,5 @@ export const pomodoroApp: AppDefinition = {
   id: 'pomodoro',
   name: '番茄时钟',
   icon: PomodoroIcon,
-  component: PomodoroPage
+  component: PomodoroPage,
 }

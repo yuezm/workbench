@@ -11,7 +11,7 @@ export const PHASE_LABELS: Record<PomodoroState['phase'], string> = {
   idle: '专注',
   focus: '专注',
   shortBreak: '短休息',
-  longBreak: '长休息'
+  longBreak: '长休息',
 }
 
 export interface PomodoroController {
@@ -62,7 +62,7 @@ export function usePomodoro(deps?: UsePomodoroDeps): PomodoroController {
   const skip = useCallback(() => dispatch({ type: 'SKIP' }), [])
   const setConfig = useCallback(
     (patch: Partial<PomodoroConfig>) => dispatch({ type: 'SET_CONFIG', patch }),
-    []
+    [],
   )
 
   return { state, start, pause, reset, skip, setConfig }

@@ -27,12 +27,7 @@ function defaultFactory(): RingAudioContext {
   return new AudioContext()
 }
 
-function tone(
-  ctx: RingAudioContext,
-  frequency: number,
-  startAt: number,
-  durationS: number
-): void {
+function tone(ctx: RingAudioContext, frequency: number, startAt: number, durationS: number): void {
   const osc = ctx.createOscillator()
   const gain = ctx.createGain()
   osc.type = 'sine'
@@ -46,9 +41,7 @@ function tone(
   osc.stop(startAt + durationS + 0.05)
 }
 
-export function createRingPlayer(
-  factory: AudioContextFactory = defaultFactory
-): RingPlayer {
+export function createRingPlayer(factory: AudioContextFactory = defaultFactory): RingPlayer {
   let ctx: RingAudioContext | null = null
 
   return {
@@ -59,6 +52,6 @@ export function createRingPlayer(
       NOTES_HZ.forEach((frequency, i) => {
         tone(ctx!, frequency, t0 + i * NOTE_GAP_S, NOTE_DUR_S)
       })
-    }
+    },
   }
 }

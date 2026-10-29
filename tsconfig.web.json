@@ -20,10 +20,5 @@
       "@renderer/*": ["./src/renderer/src/*"]
     }
   },
-  "include": [
-    "src/renderer/src/**/*",
-    "src/shared/**/*",
-    "vitest.config.mts",
-    "vitest.setup.ts"
-  ]
+  "include": ["src/renderer/src/**/*", "src/shared/**/*", "vitest.config.mts", "vitest.setup.ts"]
 }

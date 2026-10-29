@@ -23,7 +23,7 @@ function fakeContext() {
         type: '',
         frequency: 0,
         startedAt: undefined,
-        stoppedAt: undefined
+        stoppedAt: undefined,
       }
       const osc = {
         type: '',
@@ -36,7 +36,7 @@ function fakeContext() {
         },
         stop(at?: number) {
           record.stoppedAt = at
-        }
+        },
       }
       oscillators.push(record)
       return osc as unknown as OscillatorNode
@@ -46,11 +46,11 @@ function fakeContext() {
         gain: {
           value: 0,
           setValueAtTime: vi.fn(),
-          exponentialRampToValueAtTime: vi.fn()
+          exponentialRampToValueAtTime: vi.fn(),
         },
-        connect: vi.fn()
+        connect: vi.fn(),
       } as unknown as GainNode
-    }
+    },
   }
 
   return { ctx, oscillators, resume }

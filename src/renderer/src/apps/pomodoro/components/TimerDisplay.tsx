@@ -17,7 +17,7 @@ const PHASE_THEME: Record<Phase, { text: string; dot: string; from: string; to: 
   idle: { text: 'text-focus', dot: 'bg-focus', from: '#8b7cf7', to: '#6d5ce8' },
   focus: { text: 'text-focus', dot: 'bg-focus', from: '#8b7cf7', to: '#6d5ce8' },
   shortBreak: { text: 'text-short', dot: 'bg-short', from: '#2dd4a8', to: '#14b8a6' },
-  longBreak: { text: 'text-long', dot: 'bg-long', from: '#4aa8f7', to: '#3b82f6' }
+  longBreak: { text: 'text-long', dot: 'bg-long', from: '#4aa8f7', to: '#3b82f6' },
 }
 
 const RING_SIZE = 296
@@ -39,7 +39,7 @@ export function TimerDisplay({
   remainingMs,
   completedRounds,
   roundsBeforeLongBreak,
-  totalMs
+  totalMs,
 }: TimerDisplayProps): ReactElement {
   const gradId = useId()
   const theme = PHASE_THEME[phase]
@@ -48,7 +48,7 @@ export function TimerDisplay({
     totalMs !== undefined && totalMs > 0 ? Math.min(1, Math.max(0, remainingMs / totalMs)) : 1
 
   return (
-    <div className="animate-rise relative grid place-items-center">
+    <div className="relative grid animate-rise place-items-center">
       {/* 进度环 */}
       <svg
         width={RING_SIZE}
@@ -91,7 +91,7 @@ export function TimerDisplay({
         <span
           className={cn(
             'inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.03] px-4 py-1.5',
-            'text-xs tracking-[0.3em] text-ink-dim backdrop-blur-sm'
+            'text-xs tracking-[0.3em] text-ink-dim backdrop-blur-sm',
           )}
         >
           <i className={cn('size-1.5 rounded-full', theme.dot)} aria-hidden="true" />
@@ -101,7 +101,7 @@ export function TimerDisplay({
         <span
           className={cn(
             'bg-gradient-to-b from-white to-white/60 bg-clip-text tabular-nums',
-            'text-[80px] leading-none font-extralight tracking-tight text-transparent'
+            'text-[80px] leading-none font-extralight tracking-tight text-transparent',
           )}
         >
           {formatRemaining(remainingMs)}
@@ -114,7 +114,7 @@ export function TimerDisplay({
               aria-hidden="true"
               className={cn(
                 'size-1.5 rounded-full transition-colors duration-300',
-                i < completedRounds ? theme.dot : 'bg-white/10'
+                i < completedRounds ? theme.dot : 'bg-white/10',
               )}
               style={i < completedRounds ? { boxShadow: `0 0 6px ${theme.from}` } : undefined}
             />

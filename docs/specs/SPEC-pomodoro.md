@@ -7,6 +7,7 @@
 工作台的第一个 app：标准番茄钟，用于学习/工作时专注计时。核心是一台**可测试的计时状态机**：25 分钟专注 + 5 分钟短休息，每完成 4 轮专注进入一次 15 分钟长休息；三段时长与长休间隔可配置；支持开始/暂停/重置/跳过；阶段结束时响铃并弹系统通知。
 
 **用户故事：**
+
 - 作为使用者，我点击开始后进入专注倒计时；一个阶段结束时有声音和系统通知提醒我切换状态。
 - 作为使用者，我可以跳过当前阶段、暂停/恢复、或整体重置。
 - 作为使用者，我可以把各阶段时长调成适合我的节奏（仅运行期生效，不保存）。
@@ -51,23 +52,23 @@ src/renderer/src/apps/pomodoro/
 
 **配置（默认值）：**
 
-| 配置项 | 默认 | 范围 |
-|---|---|---|
-| focusMin | 25 | 1–120 分钟 |
-| shortBreakMin | 5 | 1–30 分钟 |
-| longBreakMin | 15 | 1–60 分钟 |
-| roundsBeforeLongBreak | 4 | 2–8 轮 |
+| 配置项                | 默认 | 范围       |
+| --------------------- | ---- | ---------- |
+| focusMin              | 25   | 1–120 分钟 |
+| shortBreakMin         | 5    | 1–30 分钟  |
+| longBreakMin          | 15   | 1–60 分钟  |
+| roundsBeforeLongBreak | 4    | 2–8 轮     |
 
 **事件与转移：**
 
-| 事件 | 行为 |
-|---|---|
-| START | 从 `paused`/就绪态开始倒计时 |
-| TICK | 剩余时间随真实时间递减（基于时间戳差值，非 interval 累加） |
+| 事件                             | 行为                                                                                              |
+| -------------------------------- | ------------------------------------------------------------------------------------------------- |
+| START                            | 从 `paused`/就绪态开始倒计时                                                                      |
+| TICK                             | 剩余时间随真实时间递减（基于时间戳差值，非 interval 累加）                                        |
 | PHASE_COMPLETE（倒计时自然到 0） | 响铃 + 系统通知；切换到下一阶段并**暂停等待用户确认**；若刚结束的是 focus，`completedRounds += 1` |
-| PAUSE | 冻结剩余时间 |
-| SKIP | 不响铃、不计轮数，直接切换到下一阶段（就绪态）；跳过 focus **不**计入已完成轮数 |
-| RESET | 回到初始态：idle/focus、计时清零、`completedRounds` 清零 |
+| PAUSE                            | 冻结剩余时间                                                                                      |
+| SKIP                             | 不响铃、不计轮数，直接切换到下一阶段（就绪态）；跳过 focus **不**计入已完成轮数                   |
+| RESET                            | 回到初始态：idle/focus、计时清零、`completedRounds` 清零                                          |
 
 **下一阶段规则：** focus 结束 → `completedRounds % roundsBeforeLongBreak === 0` 时进 `longBreak`，否则进 `shortBreak`；break 结束 → 回 `focus`。
 
@@ -79,8 +80,8 @@ src/renderer/src/apps/pomodoro/
 
 ```ts
 export function tick(state: PomodoroState, now: number): PomodoroState {
-  const remaining = state.endsAt === null ? state.remainingMs : Math.max(0, state.endsAt - now);
-  return remaining === 0 ? onPhaseComplete(state) : { ...state, remainingMs: remaining };
+  const remaining = state.endsAt === null ? state.remainingMs : Math.max(0, state.endsAt - now)
+  return remaining === 0 ? onPhaseComplete(state) : { ...state, remainingMs: remaining }
 }
 ```
 

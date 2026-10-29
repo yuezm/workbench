@@ -16,7 +16,7 @@ describe('Sidebar', () => {
     render(<Sidebar apps={apps} activeId={apps[0]!.id} onSelect={() => {}} />)
     expect(screen.getByRole('button', { name: apps[0]!.name })).toHaveAttribute(
       'aria-current',
-      'page'
+      'page',
     )
   })
 

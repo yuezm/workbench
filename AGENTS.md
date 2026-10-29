@@ -21,6 +21,7 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 
 - [CAPABILITY-MAP](docs/CAPABILITY-MAP.md)：模块索引、边界决定、构建顺序
 - [docs/specs/](docs/specs/)：各模块 Spec（shell、pomodoro）
+- [docs/testing/](docs/testing/)：测试策略（TESTING）与用例目录（TEST-CASES）；改代码前后跑 `pnpm check`
 - [docs/planning/](docs/planning/)：计划与任务
 
 ## 禁止事项

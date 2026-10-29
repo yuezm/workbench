@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  CONFIG_LIMITS,
-  DEFAULT_CONFIG,
-  createInitialState,
-  reduce
-} from './machine'
+import { CONFIG_LIMITS, DEFAULT_CONFIG, createInitialState, reduce } from './machine'
 import type { PomodoroConfig, PomodoroState } from './types'
 
 const MIN = 60_000
@@ -56,7 +51,7 @@ describe('START / PAUSE / TICK', () => {
     const paused = run(
       createInitialState(),
       { type: 'START', now: 0 },
-      { type: 'PAUSE', now: 30_000 }
+      { type: 'PAUSE', now: 30_000 },
     )
     const s = run(paused, { type: 'START', now: 100_000 })
     expect(s.endsAt).toBe(100_000 + (25 * MIN - 30_000))
@@ -66,12 +61,10 @@ describe('START / PAUSE / TICK', () => {
     const paused = run(
       createInitialState(),
       { type: 'START', now: 0 },
-      { type: 'PAUSE', now: 30_000 }
+      { type: 'PAUSE', now: 30_000 },
     )
     expect(run(paused, { type: 'TICK', now: 500_000 })).toEqual(paused)
-    expect(run(createInitialState(), { type: 'TICK', now: 500_000 })).toEqual(
-      createInitialState()
-    )
+    expect(run(createInitialState(), { type: 'TICK', now: 500_000 })).toEqual(createInitialState())
   })
 
   it('PAUSE 在未运行（idle）状态下为 no-op', () => {
@@ -104,7 +97,7 @@ describe('阶段自然结束（PHASE_COMPLETE 语义）', () => {
     const afterFocus = run(
       createInitialState(),
       { type: 'START', now: 0 },
-      { type: 'TICK', now: 25 * MIN }
+      { type: 'TICK', now: 25 * MIN },
     )
     const s = run(afterFocus, { type: 'START', now: 0 }, { type: 'TICK', now: 5 * MIN })
     expect(s.phase).toBe('focus')
@@ -146,7 +139,7 @@ describe('SKIP', () => {
     const afterFocus = run(
       createInitialState(),
       { type: 'START', now: 0 },
-      { type: 'TICK', now: 25 * MIN }
+      { type: 'TICK', now: 25 * MIN },
     )
     const s = run(afterFocus, { type: 'SKIP' })
     expect(s.phase).toBe('focus')
@@ -167,7 +160,7 @@ describe('RESET', () => {
       customized,
       { type: 'START', now: 0 },
       { type: 'TICK', now: 25 * MIN },
-      { type: 'START', now: 0 }
+      { type: 'START', now: 0 },
     )
     const s = run(mid, { type: 'RESET' })
     expect(s.phase).toBe('idle')
@@ -196,7 +189,7 @@ describe('SET_CONFIG', () => {
     const paused = run(
       createInitialState(),
       { type: 'START', now: 0 },
-      { type: 'PAUSE', now: 30_000 }
+      { type: 'PAUSE', now: 30_000 },
     )
     const s = run(paused, { type: 'SET_CONFIG', patch: { shortBreakMin: 10 } })
     expect(s.config.shortBreakMin).toBe(10)
@@ -208,7 +201,7 @@ describe('SET_CONFIG', () => {
       focusMin: 999,
       shortBreakMin: 0,
       longBreakMin: -5,
-      roundsBeforeLongBreak: 100
+      roundsBeforeLongBreak: 100,
     })
     expect(s.config.focusMin).toBe(CONFIG_LIMITS.focusMin.max)
     expect(s.config.shortBreakMin).toBe(CONFIG_LIMITS.shortBreakMin.min)
@@ -255,7 +248,7 @@ describe('justCompleted 标记（供 UI 区分自然完成与跳过）', () => {
     const completed = run(
       createInitialState(),
       { type: 'START', now: 0 },
-      { type: 'TICK', now: 25 * MIN }
+      { type: 'TICK', now: 25 * MIN },
     )
     expect(run(completed, { type: 'START', now: 100 }).justCompleted).toBe(false)
     expect(run(completed, { type: 'RESET' }).justCompleted).toBe(false)

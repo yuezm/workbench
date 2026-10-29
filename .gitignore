@@ -10,10 +10,13 @@ release/
 # ---- 测试 / 覆盖率 ----
 coverage/
 test-results/
+playwright-report/
+blob-report/
 *.lcov
 
 # ---- 工具缓存 ----
 .eslintcache
+.husky/_/
 
 # ---- 日志 ----
 *.log
@@ -32,6 +35,7 @@ pnpm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+.zcode/
 *.swp
 *.swo
 *~

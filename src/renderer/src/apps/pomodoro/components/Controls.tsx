@@ -33,10 +33,10 @@ export function Controls({
   onStart,
   onPause,
   onReset,
-  onSkip
+  onSkip,
 }: ControlsProps): ReactElement {
   return (
-    <div className="animate-rise flex items-center gap-3 [animation-delay:80ms]">
+    <div className="flex animate-rise items-center gap-3 [animation-delay:80ms]">
       {running ? (
         <Button variant="primary" size="lg" onClick={onPause}>
           <Icon>

@@ -20,14 +20,14 @@ export const DEFAULT_CONFIG: PomodoroConfig = {
   focusMin: 25,
   shortBreakMin: 5,
   longBreakMin: 15,
-  roundsBeforeLongBreak: 4
+  roundsBeforeLongBreak: 4,
 }
 
 export const CONFIG_LIMITS: Record<keyof PomodoroConfig, ConfigRange> = {
   focusMin: { min: 1, max: 120 },
   shortBreakMin: { min: 1, max: 30 },
   longBreakMin: { min: 1, max: 60 },
-  roundsBeforeLongBreak: { min: 2, max: 8 }
+  roundsBeforeLongBreak: { min: 2, max: 8 },
 }
 
 export type PomodoroEvent =

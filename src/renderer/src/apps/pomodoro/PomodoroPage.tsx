@@ -18,13 +18,7 @@ export function PomodoroPage(): ReactElement {
         roundsBeforeLongBreak={state.config.roundsBeforeLongBreak}
         totalMs={phaseDurationMs(state.config, state.phase)}
       />
-      <Controls
-        running={running}
-        onStart={start}
-        onPause={pause}
-        onReset={reset}
-        onSkip={skip}
-      />
+      <Controls running={running} onStart={start} onPause={pause} onReset={reset} onSkip={skip} />
       <SettingsPanel config={state.config} running={running} onChange={setConfig} />
     </div>
   )

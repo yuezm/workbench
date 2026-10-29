@@ -1,0 +1,38 @@
+/* 深色主题基座：全局设计变量 */
+:root {
+  --bg: #16161e;
+  --bg-panel: #1c1c28;
+  --bg-hover: #262636;
+  --border: #2a2a3c;
+  --text: #e4e4ef;
+  --text-dim: #8b8ba3;
+  --accent: #7c6cf0;
+  --accent-soft: #2d2a4a;
+  --danger: #e0566a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    'Microsoft YaHei',
+    sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}

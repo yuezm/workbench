@@ -1,0 +1,39 @@
+appId: com.workbench.desktop
+productName: Workbench
+copyright: Copyright © 2026 Workbench
+
+directories:
+  output: dist
+  buildResources: build
+
+# 只打包构建产物与清单，源码/测试/配置不打进安装包
+files:
+  - out/**/*
+  - package.json
+
+# 国内网络：从 npmmirror 拉取 Electron 二进制
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: 工作台
+  deleteAppDataOnUninstall: false
+  artifactName: ${name}-${version}-setup.${ext}
+
+portable:
+  artifactName: ${name}-${version}-portable.${ext}

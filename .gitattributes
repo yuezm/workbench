@@ -1,0 +1,10 @@
+# 统一换行：默认 LF；二进制资源不做文本转换
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.woff binary
+*.woff2 binary

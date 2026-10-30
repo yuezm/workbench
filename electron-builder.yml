@@ -11,9 +11,12 @@ files:
   - out/**/*
   - package.json
 
-# 托盘图标（主进程从 process.resourcesPath 读取）
+# 托盘图标（主进程从 process.resourcesPath 读取）。
+# 注意：extraResources 的字符串路径相对 buildResources 解析，这里
+# buildResources 也是 resources/，必须用 from/to 显式指定，否则静默漏拷。
 extraResources:
-  - resources/tray.png
+  - from: resources/tray.png
+    to: tray.png
 
 # 国内网络：从 npmmirror 拉取 Electron 二进制
 electronDownload:

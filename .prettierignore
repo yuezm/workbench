@@ -3,6 +3,6 @@ out/
 dist/
 release/
 coverage/
-build/
+resources/
 pnpm-lock.yaml
 .husky/_/

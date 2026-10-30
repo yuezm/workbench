@@ -59,9 +59,9 @@ workbench/
 │           │   └── styles/     #   全局深色主题变量（global.css）
 │           └── apps/
 │               └── pomodoro/   # 【pomodoro】见 SPEC-pomodoro.md
-├── build/                 # 打包资源（icon.png / icon.ico）
+├── resources/             # 打包资源（icon.png / icon.ico）
 ├── docs/                  # CAPABILITY-MAP.md / specs/ / planning/
-├── scripts/               # 构建辅助脚本（make-icon.py）
+├── scripts/               # 构建辅助脚本（make-icon.mjs）
 └── package.json
 ```
 

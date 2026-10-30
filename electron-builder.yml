@@ -4,7 +4,7 @@ copyright: Copyright © 2026 Workbench
 
 directories:
   output: dist
-  buildResources: build
+  buildResources: resources
 
 # 只打包构建产物与清单，源码/测试/配置不打进安装包
 files:
@@ -16,7 +16,7 @@ electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
 
 win:
-  icon: build/icon.ico
+  icon: resources/icon.ico
   target:
     - target: nsis
       arch:

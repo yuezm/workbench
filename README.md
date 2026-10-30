@@ -28,12 +28,12 @@ npm run build      # 类型检查 + 编译 + 打包安装程序（产物在 dist
 
 ```
 workbench/
-├── build/                 # 打包资源（图标 icon.png / icon.ico）
+├── resources/             # 打包资源（图标 icon.png / icon.ico）
 ├── docs/                  # 文档索引与规格、计划
 │   ├── CAPABILITY-MAP.md  #   模块索引（module id 以此为准）
 │   ├── specs/             #   SPEC-shell.md / SPEC-pomodoro.md
 │   └── planning/          #   plan.md / todo.md
-├── scripts/               # 构建辅助脚本（make-icon.py）
+├── scripts/               # 构建辅助脚本（make-icon.mjs）
 ├── src/
 │   ├── main/              # Electron 主进程（窗口、生命周期、IPC）
 │   ├── preload/           # contextBridge，向 renderer 暴露受控 API
@@ -63,4 +63,4 @@ workbench/
 
 - **命名**：组件 PascalCase，函数/变量 camelCase，常量 UPPER_SNAKE_CASE；组件文件名与导出组件名一致（如 `Workbench.tsx` → `Workbench`），CSS Module 用 kebab-case（`workbench.module.css`）。测试文件就近放置为 `*.test.ts(x)`。
 - **代码风格**：见 `.editorconfig`（UTF-8、LF、2 空格、行尾去空白）；ESLint 配置见 `eslint.config.mjs`，`npm run lint:fix` 可自动修复。
-- **忽略规则**：见 `.gitignore`（依赖、构建产物、覆盖率、日志、本地 env、编辑器/OS 文件；`build/` 图标与文档会入库）。
+- **忽略规则**：见 `.gitignore`（依赖、构建产物、覆盖率、日志、本地 env、编辑器/OS 文件；`resources/` 图标与文档会入库）。

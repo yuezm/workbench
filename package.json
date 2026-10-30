@@ -14,6 +14,7 @@
     "build:compile": "pnpm run typecheck && electron-vite build",
     "build": "pnpm run build:compile && pnpm run dist",
     "dist": "electron-builder --win",
+    "icon": "node scripts/make-icon.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

@@ -49,8 +49,8 @@ app.whenReady().then(() => {
   createWindow()
 
   const trayIconPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'icon.png')
-    : path.join(app.getAppPath(), 'resources', 'icon.png')
+    ? path.join(process.resourcesPath, 'tray.png')
+    : path.join(app.getAppPath(), 'resources', 'tray.png')
   createTray(trayIconPath, () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
     win?.show()

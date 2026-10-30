@@ -1,7 +1,11 @@
 import { app, Menu, nativeImage, Tray } from 'electron'
 
 export function createTray(iconPath: string, onShow: () => void): Tray {
-  const tray = new Tray(nativeImage.createFromPath(iconPath))
+  const icon = nativeImage.createFromPath(iconPath)
+  if (icon.isEmpty()) {
+    console.warn(`[tray] 托盘图标加载失败: ${iconPath}`)
+  }
+  const tray = new Tray(icon)
   tray.setToolTip('工作台')
   tray.setContextMenu(
     Menu.buildFromTemplate([

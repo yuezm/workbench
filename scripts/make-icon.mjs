@@ -2,7 +2,8 @@
 /**
  * 生成 Workbench 应用图标（仪表盘磁贴主题）
  *
- * 输出：resources/icon.png（512×512）与 resources/icon.ico（16/24/32/48/64/128/256）。
+ * 输出：resources/icon.png（512×512）、resources/icon.ico（16/24/32/48/64/128/256）
+ * 与 resources/tray.png（32×32，托盘专用高对比图标）。
  * 纯 Node 实现，不依赖第三方包：自写 PNG 编码（zlib）与 ICO 封装（32bit DIB）。
  *
  * 用法：node scripts/make-icon.mjs [--out <dir>]
@@ -450,6 +451,37 @@ function encodeIco(images) {
 
 /* ---------------------------------------------------------------- 入口 */
 
+/**
+ * 托盘专用：品牌紫→蓝渐变超椭圆 + 白色四角星。
+ * 应用图标主体是深色渐变，缩到托盘尺寸后在深色任务栏上看不见，必须高对比。
+ */
+function renderTrayScene(size) {
+  const W = size * SS
+  const raster = new Raster(W, W)
+  paint(
+    raster,
+    (x, y) => superellipseCoverage(x, y, W / 2, W / 2, W / 2, 5),
+    (x, y) => mix(FOCUS, LONG, (x + y) / (2 * W)),
+  )
+
+  const scale = (W * 0.44) / 16
+  const polygon = starPolygon().map(([px, py]) => [
+    W / 2 + (px - 12) * scale,
+    W / 2 + (py - 10) * scale,
+  ])
+  const mask = rasterizePolygon(polygon, W, W)
+  paint(
+    raster,
+    (x, y) => mask[Math.floor(y) * W + Math.floor(x)],
+    () => INK,
+    0.95,
+  )
+
+  return raster.resize(size, size)
+}
+
+const TRAY_SIZE = 32
+
 function parseArgs(argv) {
   let out = resolve(ROOT, 'resources')
   for (let i = 0; i < argv.length; i++) {
@@ -468,5 +500,10 @@ writeFileSync(pngPath, png)
 const icoPath = resolve(outDir, 'icon.ico')
 writeFileSync(icoPath, encodeIco(ICO_SIZES.map((size) => renderScene(size))))
 
+const tray = encodePng(renderTrayScene(TRAY_SIZE))
+const trayPath = resolve(outDir, 'tray.png')
+writeFileSync(trayPath, tray)
+
 console.log('wrote', pngPath, png.length, 'bytes')
 console.log('wrote', icoPath)
+console.log('wrote', trayPath, tray.length, 'bytes')

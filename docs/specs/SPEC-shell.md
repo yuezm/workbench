@@ -9,6 +9,7 @@
 **用户故事：**
 
 - 作为使用者，我打开工作台后能在侧边栏看到所有 app，点击即切换，界面保持无整页刷新。
+- 作为使用者，我点击窗口关闭按钮（X）时窗口隐藏到系统托盘，程序继续在后台运行；从托盘菜单可重新显示窗口或真正退出。
 - 作为开发者（我自己），我新增一个 app 时只需要：新建 app 目录、实现 `AppDefinition`、在注册表加一行。
 
 ## Tech Stack
@@ -39,7 +40,8 @@ Lint:   npm run lint
 workbench/
 ├── src/
 │   ├── main/               # 【shell】Electron 主进程
-│   │   ├── index.ts        #   窗口创建、生命周期、AppUserModelId
+│   │   ├── index.ts        #   窗口创建、生命周期（关闭即隐藏到托盘）、AppUserModelId
+│   │   ├── tray.ts         #   系统托盘：图标、菜单（显示/退出）
 │   │   └── ipc.ts          #   IPC handlers（notify）
 │   ├── preload/            # 【shell】contextBridge，向 renderer 暴露受控 API
 │   │   └── index.ts
@@ -156,7 +158,8 @@ export function Sidebar() {
 2. 新增一个 app 只需三步：新建 `src/renderer/apps/<id>/`、实现 `AppDefinition`、注册表加一行；外壳代码（Sidebar/App/主进程）零改动。（验收方式：以 pomodoro 的接入过程为证 + registry 类型约束。）
 3. `apps` 注册表被类型与测试双重约束：id 重复或字段缺失会在编译期/测试期暴露。
 4. renderer 调用 `window.workbench.notify(...)` 能弹出系统通知（手动验收）。
-5. `npm run build` 通过；`npm test` 全绿。
+5. 点击窗口 X 后窗口隐藏、程序驻留系统托盘；托盘单击/菜单"显示工作台"可恢复窗口，菜单"退出"才真正退出进程（手动验收）。
+6. `npm run build` 通过；`npm test` 全绿。
 
 ## Open Questions
 

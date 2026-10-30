@@ -11,6 +11,10 @@ files:
   - out/**/*
   - package.json
 
+# 托盘图标（主进程从 process.resourcesPath 读取）
+extraResources:
+  - resources/icon.png
+
 # 国内网络：从 npmmirror 拉取 Electron 二进制
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/

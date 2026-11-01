@@ -1,12 +1,24 @@
 #!/usr/bin/env node
 /**
- * 生成 Workbench 应用图标（仪表盘磁贴主题）
+ * 生成 Workbench 应用图标与托盘图标
  *
- * 输出：resources/icon.png（512×512）、resources/icon.ico（16/24/32/48/64/128/256）
- * 与 resources/tray.png（32×32，托盘专用高对比图标）。
+ * 输出：
+ *   resources/icon.png      （512×512，应用图标）
+ *   resources/icon.ico      （16/24/32/48/64/128/256）
+ *   resources/tray.png      （16×16，托盘 1x）
+ *   resources/tray@2x.png   （32×32，托盘 2x，高 DPI 用）
+ *
  * 纯 Node 实现，不依赖第三方包：自写 PNG 编码（zlib）与 ICO 封装（32bit DIB）。
  *
- * 用法：node scripts/make-icon.mjs [--out <dir>]
+ * 用法：
+ *   node scripts/make-icon.mjs [--out <dir>] [--tray <variant>] [--tray-only]
+ *
+ * 托盘变体（--tray）：
+ *   tiles   紫底 + 2×2 白色磁贴（默认，应用图标核心意象的反色版）
+ *   panel   紫底 + 两根白色横条（面板 / 列表意象）
+ *   solid   纯色实心底板，不加图形（最克制）
+ *   star    紫底 + 白色四角星
+ *   tile    紫蓝渐变超椭圆 + 白色四角星（旧版样式，留作对照）
  */
 import { deflateSync } from 'node:zlib'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -19,6 +31,10 @@ const SIZE = 512
 const SS = 4 // 每个输出像素的超采样数（抗锯齿）
 const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256]
 const STAR_IN_ACCENT = true // 高亮磁贴内放四角星品牌标
+
+const TRAY_1X = 16 // 托盘 1x：Windows 100% 缩放下通知区域就是 16px
+const TRAY_2X = 32 // 托盘 2x：高 DPI 下使用
+const DEFAULT_TRAY_VARIANT = 'tiles'
 
 /* ---------------------------------------------------------------- 调色板 */
 
@@ -132,6 +148,21 @@ function roundedBoxCoverage(px, py, x0, y0, x1, y1, r) {
   return Math.min(1, Math.max(0, 0.5 - dist))
 }
 
+/** 圆角矩形描边覆盖率（外框减去内框） */
+function roundedBoxRingCoverage(px, py, x0, y0, x1, y1, r, stroke) {
+  const outer = roundedBoxCoverage(px, py, x0, y0, x1, y1, r)
+  const inner = roundedBoxCoverage(
+    px,
+    py,
+    x0 + stroke,
+    y0 + stroke,
+    x1 - stroke,
+    y1 - stroke,
+    Math.max(0, r - stroke),
+  )
+  return Math.max(0, outer - inner)
+}
+
 /** 把颜色按 t∈[0,1] 在两个颜色间插值 */
 function mix(a, b, t) {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
@@ -238,6 +269,28 @@ function rasterizePolygon(points, width, height) {
   return mask
 }
 
+/** 把四角星多边形按比例缩放并居中到画布上 */
+function starPolygonAt(width, height, span) {
+  const scale = span / 16 // 星形在源视口里横跨 16 个单位
+  const polygon = starPolygon().map(([px, py]) => [
+    width / 2 + (px - 12) * scale,
+    height / 2 + (py - 10) * scale,
+  ])
+  return polygon
+}
+
+/** 把多边形掩膜刷到画布上 */
+function paintPolygon(raster, polygon, color, alpha = 1) {
+  const W = raster.width
+  const mask = rasterizePolygon(polygon, W, W)
+  paint(
+    raster,
+    (x, y) => mask[Math.floor(y) * W + Math.floor(x)],
+    () => color,
+    alpha,
+  )
+}
+
 /* ---------------------------------------------------------------- 场景 */
 
 /**
@@ -337,6 +390,120 @@ function renderScene(size) {
   return raster.resize(size, size)
 }
 
+/* ---------------------------------------------------------------- 托盘 */
+
+/**
+ * 托盘只有 16px，复杂图形一定会糊：渐变、细描边、凹曲线都会退化。
+ * 所以统一走「实色底 + 一两个大留白图形」的路子，保证 16px 下轮廓依旧干净。
+ */
+
+/** 托盘底板：圆角方块（比超椭圆更硬朗，16px 下轮廓更利落） */
+function paintTrayPlate(raster, color = FOCUS) {
+  const W = raster.width
+  paint(
+    raster,
+    (x, y) => roundedBoxCoverage(x, y, W * 0.03, W * 0.03, W * 0.97, W * 0.97, W * 0.24),
+    () => color,
+  )
+}
+
+/** 变体：紫底 + 2×2 白色磁贴（应用图标核心意象的反色版） */
+function renderTrayTiles(size) {
+  const W = size * SS
+  const raster = new Raster(W, W)
+  paintTrayPlate(raster)
+  const margin = W * 0.215
+  const gap = W * 0.075
+  const tile = (W - margin * 2 - gap) / 2
+  const radius = tile * 0.3
+  for (const [col, row] of [
+    [0, 0],
+    [1, 0],
+    [0, 1],
+    [1, 1],
+  ]) {
+    const x0 = margin + col * (tile + gap)
+    const y0 = margin + row * (tile + gap)
+    paint(
+      raster,
+      (x, y) => roundedBoxCoverage(x, y, x0, y0, x0 + tile, y0 + tile, radius),
+      () => INK,
+      0.97,
+    )
+  }
+  return raster.resize(size, size)
+}
+
+/** 变体：紫底 + 两根白色横条（面板 / 列表意象） */
+function renderTrayPanel(size) {
+  const W = size * SS
+  const raster = new Raster(W, W)
+  paintTrayPlate(raster)
+  const barW = W * 0.5
+  const barH = W * 0.125
+  const gap = W * 0.145
+  const x0 = (W - barW) / 2
+  for (const row of [0, 1]) {
+    const y0 = (W - (barH * 2 + gap)) / 2 + row * (barH + gap)
+    paint(
+      raster,
+      (x, y) => roundedBoxCoverage(x, y, x0, y0, x0 + barW, y0 + barH, barH / 2),
+      () => INK,
+      0.97,
+    )
+  }
+  return raster.resize(size, size)
+}
+
+/** 变体：纯色实心底板，不加图形（最克制） */
+function renderTraySolid(size) {
+  const W = size * SS
+  const raster = new Raster(W, W)
+  paintTrayPlate(raster)
+  return raster.resize(size, size)
+}
+
+/** 变体：紫底 + 白色四角星（保留品牌标，但放大到能读出星形） */
+function renderTrayStar(size) {
+  const W = size * SS
+  const raster = new Raster(W, W)
+  paintTrayPlate(raster)
+  paintPolygon(raster, starPolygonAt(W, W, W * 0.58), INK, 0.97)
+  return raster.resize(size, size)
+}
+
+/** 变体：紫蓝渐变超椭圆 + 白色四角星（旧版托盘样式，留作对照） */
+function renderTrayTile(size) {
+  const W = size * SS
+  const raster = new Raster(W, W)
+  paint(
+    raster,
+    (x, y) => superellipseCoverage(x, y, W / 2, W / 2, W / 2, 5),
+    (x, y) => mix(FOCUS, LONG, (x + y) / (2 * W)),
+  )
+  paintPolygon(raster, starPolygonAt(W, W, W * 0.44), INK, 0.95)
+  return raster.resize(size, size)
+}
+
+const TRAY_RENDERERS = {
+  tiles: renderTrayTiles,
+  panel: renderTrayPanel,
+  solid: renderTraySolid,
+  star: renderTrayStar,
+  tile: renderTrayTile,
+}
+
+export const TRAY_VARIANTS = Object.keys(TRAY_RENDERERS)
+
+/** 按变体名渲染托盘图标，返回 straight alpha 的 RGBA8 图像 */
+export function renderTray(variant, size) {
+  const renderer = TRAY_RENDERERS[variant]
+  if (!renderer) {
+    throw new Error(`未知托盘图标变体：${variant}（可用：${TRAY_VARIANTS.join(', ')}）`)
+  }
+  return renderer(size)
+}
+
 /* ---------------------------------------------------------------- PNG */
 
 const CRC_TABLE = (() => {
@@ -364,7 +531,7 @@ function chunk(type, data) {
   return Buffer.concat([length, body, crc])
 }
 
-function encodePng({ width, height, data }) {
+export function encodePng({ width, height, data }) {
   const raw = Buffer.alloc((width * 4 + 1) * height)
   for (let y = 0; y < height; y++) {
     raw[y * (width * 4 + 1)] = 0 // filter: none
@@ -451,59 +618,43 @@ function encodeIco(images) {
 
 /* ---------------------------------------------------------------- 入口 */
 
-/**
- * 托盘专用：品牌紫→蓝渐变超椭圆 + 白色四角星。
- * 应用图标主体是深色渐变，缩到托盘尺寸后在深色任务栏上看不见，必须高对比。
- */
-function renderTrayScene(size) {
-  const W = size * SS
-  const raster = new Raster(W, W)
-  paint(
-    raster,
-    (x, y) => superellipseCoverage(x, y, W / 2, W / 2, W / 2, 5),
-    (x, y) => mix(FOCUS, LONG, (x + y) / (2 * W)),
-  )
-
-  const scale = (W * 0.44) / 16
-  const polygon = starPolygon().map(([px, py]) => [
-    W / 2 + (px - 12) * scale,
-    W / 2 + (py - 10) * scale,
-  ])
-  const mask = rasterizePolygon(polygon, W, W)
-  paint(
-    raster,
-    (x, y) => mask[Math.floor(y) * W + Math.floor(x)],
-    () => INK,
-    0.95,
-  )
-
-  return raster.resize(size, size)
-}
-
-const TRAY_SIZE = 32
-
 function parseArgs(argv) {
-  let out = resolve(ROOT, 'resources')
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--out') out = resolve(process.cwd(), argv[++i])
+  const options = {
+    out: resolve(ROOT, 'resources'),
+    variant: DEFAULT_TRAY_VARIANT,
+    trayOnly: false,
   }
-  return out
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--out') options.out = resolve(process.cwd(), argv[++i])
+    else if (argv[i] === '--tray') options.variant = argv[++i]
+    else if (argv[i] === '--tray-only') options.trayOnly = true
+  }
+  return options
 }
 
-const outDir = parseArgs(process.argv.slice(2))
-mkdirSync(outDir, { recursive: true })
+function main(argv) {
+  const options = parseArgs(argv)
+  mkdirSync(options.out, { recursive: true })
 
-const png = encodePng(renderScene(SIZE))
-const pngPath = resolve(outDir, 'icon.png')
-writeFileSync(pngPath, png)
+  if (!options.trayOnly) {
+    const pngPath = resolve(options.out, 'icon.png')
+    writeFileSync(pngPath, encodePng(renderScene(SIZE)))
+    console.log('wrote', pngPath)
 
-const icoPath = resolve(outDir, 'icon.ico')
-writeFileSync(icoPath, encodeIco(ICO_SIZES.map((size) => renderScene(size))))
+    const icoPath = resolve(options.out, 'icon.ico')
+    writeFileSync(icoPath, encodeIco(ICO_SIZES.map((size) => renderScene(size))))
+    console.log('wrote', icoPath)
+  }
 
-const tray = encodePng(renderTrayScene(TRAY_SIZE))
-const trayPath = resolve(outDir, 'tray.png')
-writeFileSync(trayPath, tray)
+  const trayPath = resolve(options.out, 'tray.png')
+  writeFileSync(trayPath, encodePng(renderTray(options.variant, TRAY_1X)))
+  console.log('wrote', trayPath, `(${options.variant} @${TRAY_1X}px)`)
 
-console.log('wrote', pngPath, png.length, 'bytes')
-console.log('wrote', icoPath)
-console.log('wrote', trayPath, tray.length, 'bytes')
+  const tray2xPath = resolve(options.out, 'tray@2x.png')
+  writeFileSync(tray2xPath, encodePng(renderTray(options.variant, TRAY_2X)))
+  console.log('wrote', tray2xPath, `(${options.variant} @${TRAY_2X}px)`)
+}
+
+const invokedDirectly =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (invokedDirectly) main(process.argv.slice(2))

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import type {
   Agent,
   Run,
@@ -54,7 +54,7 @@ export function AiWorkflowPage(): ReactElement {
     }
   }
 
-  const reload = async (): Promise<void> => {
+  const reload = useCallback(async (): Promise<void> => {
     try {
       const [w, a, t] = await Promise.all([
         wfApi().workflows.list(),
@@ -69,7 +69,14 @@ export function AiWorkflowPage(): ReactElement {
     } catch (e) {
       setError(errMsg(e))
     }
-  }
+  }, [activeId])
+
+  // 用 ref 持有最新的 reload：onChanged 订阅只建立一次，但回调必须看到最新 activeId，
+  // 否则外部变更（如 run 完成）会用初始的 undefined 去拉任务，把看板清空。
+  const reloadRef = useRef(reload)
+  useEffect(() => {
+    reloadRef.current = reload
+  }, [reload])
 
   useEffect(() => {
     let alive = true
@@ -84,7 +91,7 @@ export function AiWorkflowPage(): ReactElement {
         if (alive) setError(errMsg(e))
       }
     })()
-    const off = wfApi().onChanged(() => void reload())
+    const off = wfApi().onChanged(() => void reloadRef.current())
     return () => {
       alive = false
       off()

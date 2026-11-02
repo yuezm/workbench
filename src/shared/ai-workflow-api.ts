@@ -60,7 +60,6 @@ export interface WorkflowStage {
 }
 
 export interface StageInput {
-  id?: string
   name: string
   entryMode: EntryMode
   agentId?: string | null

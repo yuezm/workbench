@@ -103,7 +103,7 @@ function makeApi() {
       remove: vi.fn(),
     },
     tasks: {
-      list: vi.fn(async () => state.tasks),
+      list: vi.fn(async (_workflowId: string) => state.tasks),
       move: vi.fn(async () => {}),
       create: vi.fn(async (input: { title: string }) => {
         const n = { ...task, id: 't2', title: input.title }
@@ -267,6 +267,8 @@ describe('AiWorkflowPage', () => {
     const before = api.workflows.list.mock.calls.length
     await reloadCb?.()
     await waitFor(() => expect(api.workflows.list.mock.calls.length).toBeGreaterThan(before))
+    // 回归：onChanged 回调必须用最新 activeId 拉任务（不能是初始 undefined）
+    await waitFor(() => expect(api.tasks.list.mock.calls.at(-1)?.[0]).toBe('w1'))
 
     // 再次触发，但工作流列表为空：覆盖 activeId 回填分支
     api.workflows.list.mockResolvedValueOnce([])

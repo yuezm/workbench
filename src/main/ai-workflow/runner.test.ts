@@ -214,4 +214,22 @@ describe('Runner', () => {
     await runner.execute(run.id)
     expect(repo.runGet(run.id).error).toContain('boom-str')
   })
+
+  it('任务在 run 执行中被删除：execute 不抛未捕获错误', async () => {
+    const s = seed()
+    const agent = repo.agentGet(repo.workflowGet(s.workflowId).stages[0].agentId as string)
+    const run = queuedRun(s.task.id, s.task.currentStageId as string, agent.id)
+    let release!: (r: { code: number; output: string }) => void
+    const adapter: RuntimeAdapter = {
+      run: () =>
+        new Promise((resolve) => {
+          release = resolve
+        }),
+    }
+    const runner = new Runner({ repo, notifyChanged, adapterFor: () => adapter })
+    const p = runner.execute(run.id)
+    repo.taskRemove(s.task.id)
+    release({ code: 0, output: 'ok' })
+    await expect(p).resolves.toBeUndefined()
+  })
 })

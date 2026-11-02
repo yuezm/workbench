@@ -84,6 +84,85 @@ describe('ai-workflow handler：工作流/阶段', () => {
   })
 })
 
+interface Wf {
+  id: string
+  stages: Array<{ id: string }>
+}
+
+describe('ai-workflow handler：任务/运行', () => {
+  function seedAgent(): string {
+    const rt = handle('runtimes.create', [{ name: 'ds', command: 'dsh' }]) as { id: string }
+    const ag = handle('agents.create', [
+      { name: 'coder', runtimeId: rt.id, systemPrompt: 'sys' },
+    ]) as { id: string }
+    return ag.id
+  }
+
+  it('none → user 流转；非法 approve 抛错；可删除', () => {
+    const wf = handle('workflows.create', [
+      {
+        name: 'w',
+        stages: [
+          { name: '待办', entryMode: 'none' },
+          { name: '审核', entryMode: 'user' },
+        ],
+      },
+    ]) as Wf
+    const task = handle('tasks.create', [{ title: 'T', workflowId: wf.id }]) as {
+      id: string
+      currentStageId: string
+    }
+    expect(task.currentStageId).toBe(wf.stages[0].id)
+    expect(() => handle('tasks.move', [task.id, 'approve'])).toThrow(/交给用户/)
+
+    const moved = handle('tasks.move', [task.id, 'next']) as { currentStageId: string }
+    expect(moved.currentStageId).toBe(wf.stages[1].id)
+
+    const done = handle('tasks.move', [task.id, 'approve']) as { status: string }
+    expect(done.status).toBe('completed')
+    expect((handle('tasks.list', [wf.id]) as unknown[]).length).toBe(1)
+
+    handle('tasks.remove', [task.id])
+    expect(handle('tasks.list', [wf.id])).toEqual([])
+  })
+
+  it('agent 阶段创建即入队 run；approve/reject/next 均被拒（按阶段类型）', () => {
+    const agentId = seedAgent()
+    const wf = handle('workflows.create', [
+      {
+        name: 'w2',
+        stages: [
+          { name: '执行', entryMode: 'agent', agentId },
+          { name: '完成', entryMode: 'none' },
+        ],
+      },
+    ]) as Wf
+    const task = handle('tasks.create', [{ title: 'T2', description: 'd', workflowId: wf.id }]) as {
+      id: string
+    }
+    const runs = handle('runs.listByTask', [task.id]) as Array<{ status: string; prompt: string }>
+    expect(runs).toHaveLength(1)
+    expect(runs[0].status).toBe('queued')
+    expect(runs[0].prompt).toContain('sys')
+
+    expect(() => handle('tasks.move', [task.id, 'approve'])).toThrow()
+    expect(() => handle('tasks.move', [task.id, 'reject'])).toThrow(/打回/)
+    expect(() => handle('tasks.move', [task.id, 'next'])).toThrow(/不交接/)
+  })
+
+  it('reject 在首阶段原地', () => {
+    const wf = handle('workflows.create', [
+      { name: 'w3', stages: [{ name: '待办', entryMode: 'none' }] },
+    ]) as Wf
+    const task = handle('tasks.create', [{ title: 'T3', workflowId: wf.id }]) as {
+      id: string
+      currentStageId: string
+    }
+    const r = handle('tasks.move', [task.id, 'reject']) as { currentStageId: string }
+    expect(r.currentStageId).toBe(wf.stages[0].id)
+  })
+})
+
 describe('registerAiWorkflowIpc', () => {
   it('在单一 RPC 通道上注册 handler', () => {
     registerAiWorkflowIpc({ repo, notifyChanged: notify as unknown as () => void })

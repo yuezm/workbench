@@ -46,6 +46,8 @@
 
 E2E 说明：`electron.launch({ args: ['.'] })` 按 package.json `main` 加载 `out/main/index.js`，因此**每次先构建再测**；不需要下载任何 Playwright 浏览器（pnpm 默认也阻止了该下载）。
 
+> 若在 Electron 宿主进程（如某些 IDE / Agent 环境）里跑 E2E，需先清除继承的 `ELECTRON_RUN_AS_NODE`，否则 Electron 会以 Node 模式启动、`electron.app` 为 undefined。CI 不受影响。
+
 > 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`check:fast` 供编辑后快跑（秒级），`check` 供任务结束/推送（含改动行覆盖率与依赖审计）。
 
 ## Git hooks（husky，提交即门禁）

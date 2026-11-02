@@ -38,67 +38,67 @@ T2 契约/preload ─→ T4 阶段状态机 ┘
 
 ### Phase 1: 地基（数据 + 契约）
 
-- [ ] T1: SQLite 基座（`db.ts` + `schema.sql` + migration + 建表/外键测试）
-- [ ] T2: 共享契约与 preload 暴露（`ai-workflow-api.ts` + `window.aiWorkflow` + 全局声明 + preload 测试）
-- [ ] T3: repository 全实体 CRUD（约束/级联/被引用拒绝 + 临时 SQLite 测试）
+- [x] T1: SQLite 基座（`db.ts` + `schema.sql` + migration + 建表/外键测试）
+- [x] T2: 共享契约与 preload 暴露（`ai-workflow-api.ts` + `window.aiWorkflow` + 全局声明 + preload 测试）
+- [x] T3: repository 全实体 CRUD（约束/级联/被引用拒绝 + 临时 SQLite 测试）
 
 ### Checkpoint A（T1–T3）
 
-- [ ] `pnpm test` 全绿；`pnpm typecheck` 通过；临时库建表与外键约束符合 spec。
+- [x] `pnpm test` 全绿；`pnpm typecheck` 通过；临时库建表与外键约束符合 spec。
 
 ### Phase 2: 核心逻辑（最高风险先做）
 
-- [ ] T4: 阶段状态机 `stage-machine.ts`（进入效果 + 默认目标解析 + 事件转移；分支覆盖 100%）
-- [ ] T5: app 骨架与注册（`index.tsx` + `AiWorkflowPage.tsx` 骨架 + `api.ts` + registry 一行）
+- [x] T4: 阶段状态机 `stage-machine.ts`（进入效果 + 默认目标解析 + 事件转移；分支覆盖 100%）
+- [x] T5: app 骨架与注册（`index.tsx` + `AiWorkflowPage.tsx` 骨架 + `api.ts` + registry 一行）
 
 ### Checkpoint B（T4–T5）
 
-- [ ] 阶段状态机单测分支 100%；侧边栏出现「AI 工作流」并可切换。
+- [x] 阶段状态机单测分支 100%；侧边栏出现「AI 工作流」并可切换。
 
 ### Phase 3: 运行时与智能体（垂直切片 1）
 
-- [ ] T6: runtimes/agents IPC handlers + main 注册 + 契约测试
-- [ ] T7: RuntimeManager + AgentManager UI + 挂载（增删改、绑定运行时/System Prompt）
+- [x] T6: runtimes/agents IPC handlers + main 注册 + 契约测试
+- [x] T7: RuntimeManager + AgentManager UI + 挂载（增删改、绑定运行时/System Prompt）
 
 ### Checkpoint C（T6–T7）
 
-- [ ] 能增删改运行时与智能体，重启后仍在。
+- [x] 能增删改运行时与智能体，重启后仍在。
 
 ### Phase 4: 工作流与阶段（垂直切片 2）
 
-- [ ] T8: workflows/stages IPC（含有序 stages 读取、阶段三项目标校验）
-- [ ] T9: WorkflowSwitcher + WorkflowEditor UI（阶段增删改、进入时/完成后进入/打回退回到）
+- [x] T8: workflows/stages IPC（含有序 stages 读取、阶段三项目标校验）
+- [x] T9: WorkflowSwitcher + WorkflowEditor UI（阶段增删改、进入时/完成后进入/打回退回到）
 
 ### Checkpoint D（T8–T9）
 
-- [ ] 能建 ≥3 阶段工作流并正确保存阶段配置。
+- [x] 能建 ≥3 阶段工作流并正确保存阶段配置。
 
 ### Phase 5: 看板与任务（垂直切片 3）
 
-- [ ] T10: tasks IPC + move 动作（接 stage-machine 产出流转）+ 契约/流转测试
-- [ ] T11: KanbanBoard + TaskCard UI（按阶段分列、user 阶段通过/打回、none 阶段推进）
-- [ ] T11b: TaskDialog（任务新建/编辑）
+- [x] T10: tasks IPC + move 动作（接 stage-machine 产出流转）+ 契约/流转测试
+- [x] T11: KanbanBoard + TaskCard UI（按阶段分列、user 阶段通过/打回、none 阶段推进）
+- [x] T11b: TaskDialog（任务新建/编辑）
 
 ### Checkpoint E（T10–T11）
 
-- [ ] 新建任务入首阶段；不接真实执行的前提下，可手动把任务推过 none/user 阶段（agent 阶段待 Phase 6）。
+- [x] 新建任务入首阶段；不接真实执行的前提下，可手动把任务推过 none/user 阶段（agent 阶段待 Phase 6）。
 
 ### Phase 6: 执行（垂直切片 4）
 
-- [ ] T12: `RuntimeAdapter` + `deepseek-harness.ts` + `runner.ts`（单并发队列、成功/失败/取消、changed 事件；假 adapter 测试）
-- [ ] T13: RunLog UI + `onChanged` 订阅接线（运行中/完成/失败展示输出）
+- [x] T12: `RuntimeAdapter` + `deepseek-harness.ts` + `runner.ts`（单并发队列、成功/失败/取消、changed 事件；假 adapter 测试）
+- [x] T13: RunLog UI + `onChanged` 订阅接线（运行中/完成/失败展示输出）
 
 ### Checkpoint F（T12–T13）
 
-- [ ] 用假 adapter 跑通「agent 阶段自动执行 → 成功推进 / 失败退回」；DSH 真跑留手动验收。
+- [x] 用假 adapter 跑通「agent 阶段自动执行 → 成功推进 / 失败退回」；DSH 真跑留手动验收。
 
 ### Phase 7: 收尾
 
-- [ ] T14: 整体验收与门禁（`pnpm check` 全绿；手动：加 DSH 运行时 → 建智能体 → 建含 agent 阶段的工作流 → 任务真跑全流程 → 重启数据仍在）
+- [x] T14: 整体验收与门禁（`pnpm check` 全绿；手动：加 DSH 运行时 → 建智能体 → 建含 agent 阶段的工作流 → 任务真跑全流程 → 重启数据仍在）
 
 ### Checkpoint G（完成）
 
-- [ ] 满足 SPEC 全部 Success Criteria（DSH 真跑为手动验收项）；覆盖率门禁通过。
+- [x] 满足 SPEC 全部 Success Criteria（DSH 真跑为手动验收项）；覆盖率门禁通过。
 
 ## Risks and Mitigations
 

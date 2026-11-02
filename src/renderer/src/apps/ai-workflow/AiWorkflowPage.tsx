@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type {
   Agent,
+  Run,
   Task,
   TaskInput,
   TaskMoveAction,
@@ -10,6 +11,7 @@ import type {
 import { wfApi } from './api'
 import { AgentManager } from './components/AgentManager'
 import { KanbanBoard } from './components/KanbanBoard'
+import { RunLog } from './components/RunLog'
 import { RuntimeManager } from './components/RuntimeManager'
 import { TaskDialog } from './components/TaskDialog'
 import { WorkflowEditor } from './components/WorkflowEditor'
@@ -25,6 +27,20 @@ export function AiWorkflowPage(): ReactElement {
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<WorkflowWithStages | null | undefined>(undefined)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
+  const [runs, setRuns] = useState<Run[]>([])
+
+  const loadRunsFor = async (taskId: string | undefined): Promise<void> => {
+    if (!taskId) {
+      setRuns([])
+      return
+    }
+    try {
+      setRuns(await wfApi().runs.listByTask(taskId))
+    } catch (e) {
+      setError(errMsg(e))
+    }
+  }
 
   const loadTasksFor = async (id: string | undefined): Promise<void> => {
     if (!id) {
@@ -95,6 +111,26 @@ export function AiWorkflowPage(): ReactElement {
     }
   }, [activeId])
 
+  useEffect(() => {
+    let alive = true
+    const run = async (): Promise<void> => {
+      if (!selectedTaskId) {
+        if (alive) setRuns([])
+        return
+      }
+      try {
+        const r = await wfApi().runs.listByTask(selectedTaskId)
+        if (alive) setRuns(r)
+      } catch (e) {
+        if (alive) setError(errMsg(e))
+      }
+    }
+    void run()
+    return () => {
+      alive = false
+    }
+  }, [selectedTaskId])
+
   const save = async (input: WorkflowInput): Promise<void> => {
     try {
       let targetId = activeId
@@ -107,6 +143,7 @@ export function AiWorkflowPage(): ReactElement {
       }
       await reload()
       await loadTasksFor(targetId)
+      await loadRunsFor(selectedTaskId)
       setEditing(undefined)
     } catch (e) {
       setError(errMsg(e))
@@ -118,6 +155,7 @@ export function AiWorkflowPage(): ReactElement {
       try {
         await wfApi().tasks.move(id, action)
         await loadTasksFor(activeId)
+        await loadRunsFor(selectedTaskId)
       } catch (e) {
         setError(errMsg(e))
       }
@@ -128,6 +166,7 @@ export function AiWorkflowPage(): ReactElement {
     try {
       await wfApi().tasks.create(input)
       await loadTasksFor(activeId)
+      await loadRunsFor(selectedTaskId)
       setDialogOpen(false)
     } catch (e) {
       setError(errMsg(e))
@@ -186,6 +225,28 @@ export function AiWorkflowPage(): ReactElement {
         <div className="grid flex-1 place-items-center rounded-2xl border border-line bg-white/[0.02] px-6 py-10 text-center text-sm text-ink-faint">
           尚无工作流。点击「新建工作流」开始。
         </div>
+      )}
+
+      {active && (
+        <details className="rounded-2xl border border-line bg-white/[0.02] p-4">
+          <summary className="cursor-pointer text-sm font-medium text-ink">运行记录</summary>
+          <div className="mt-3 flex flex-col gap-2">
+            <select
+              aria-label="选择任务查看运行"
+              className="rounded-lg border border-line bg-white/[0.03] px-2.5 py-1.5 text-sm text-ink outline-none focus:border-focus"
+              value={selectedTaskId ?? ''}
+              onChange={(e) => setSelectedTaskId(e.target.value || undefined)}
+            >
+              <option value="">（选择任务）</option>
+              {tasks.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.title}
+                </option>
+              ))}
+            </select>
+            <RunLog runs={runs} />
+          </div>
+        </details>
       )}
 
       {dialogOpen && activeId && (

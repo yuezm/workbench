@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import type { AgentInput, RuntimeInput } from '../../shared/ai-workflow-api'
+import type { AgentInput, RuntimeInput, WorkflowInput } from '../../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../shared/ai-workflow-api'
 import type { Repository } from './repository'
 
@@ -28,6 +28,12 @@ export function createAiWorkflowHandler(
     'agents.update': (a) =>
       mutate(() => repo.agentUpdate(a[0] as string, a[1] as Partial<AgentInput>)),
     'agents.remove': (a) => mutate(() => repo.agentRemove(a[0] as string)),
+
+    'workflows.list': () => repo.workflowsList(),
+    'workflows.create': (a) => mutate(() => repo.workflowCreate(a[0] as WorkflowInput)),
+    'workflows.update': (a) =>
+      mutate(() => repo.workflowUpdate(a[0] as string, a[1] as WorkflowInput)),
+    'workflows.remove': (a) => mutate(() => repo.workflowRemove(a[0] as string)),
   }
 
   return (method, args) => {

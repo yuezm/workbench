@@ -46,6 +46,44 @@ describe('ai-workflow handler：运行时/智能体', () => {
   })
 })
 
+describe('ai-workflow handler：工作流/阶段', () => {
+  it('create / list / update / remove', () => {
+    const wf = handle('workflows.create', [
+      {
+        name: '研发',
+        stages: [
+          { name: '待办', entryMode: 'none' },
+          { name: '进行中', entryMode: 'none' },
+        ],
+      },
+    ]) as { id: string; stages: unknown[] }
+    expect(wf.stages).toHaveLength(2)
+    expect((handle('workflows.list', []) as unknown[]).length).toBe(1)
+
+    const up = handle('workflows.update', [
+      wf.id,
+      {
+        name: '研发2',
+        stages: [
+          { name: 'a', entryMode: 'none' },
+          { name: 'b', entryMode: 'none' },
+          { name: 'c', entryMode: 'none' },
+        ],
+      },
+    ]) as { stages: unknown[] }
+    expect(up.stages).toHaveLength(3)
+
+    handle('workflows.remove', [wf.id])
+    expect(handle('workflows.list', [])).toEqual([])
+  })
+
+  it('agent 阶段缺智能体报错', () => {
+    expect(() =>
+      handle('workflows.create', [{ name: 'x', stages: [{ name: 'a', entryMode: 'agent' }] }]),
+    ).toThrow(/智能体/)
+  })
+})
+
 describe('registerAiWorkflowIpc', () => {
   it('在单一 RPC 通道上注册 handler', () => {
     registerAiWorkflowIpc({ repo, notifyChanged: notify as unknown as () => void })

@@ -6,6 +6,8 @@ beforeEach(() => {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = {
     runtimes: { list: vi.fn().mockResolvedValue([]) },
     agents: { list: vi.fn().mockResolvedValue([]) },
+    workflows: { list: vi.fn().mockResolvedValue([]) },
+    onChanged: vi.fn(() => () => {}),
   }
 })
 

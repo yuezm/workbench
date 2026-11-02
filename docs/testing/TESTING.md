@@ -33,18 +33,20 @@
 
 ## 常用命令
 
-| 命令                                | 作用                                                               |
-| ----------------------------------- | ------------------------------------------------------------------ |
-| `pnpm test` / `pnpm test:watch`     | 全部单测+契约测试（2.5s）/ 监听模式                                |
-| `pnpm test:coverage`                | 同上 + 覆盖率阈值门禁                                              |
-| `pnpm lint` / `pnpm lint:fix`       | ESLint（含 react-hooks 规则）                                      |
-| `pnpm format` / `pnpm format:check` | Prettier 全仓写 / 只检查                                           |
-| `pnpm typecheck`                    | tsc node + web 双工程（含 e2e 与测试文件）                         |
-| `pnpm check`                        | typecheck + lint + test:coverage（本地全量快速门禁）               |
-| `pnpm e2e`                          | `build:compile`（typecheck+构建 out/）→ Playwright 跑真实 Electron |
-| `pnpm e2e -- --ui`                  | Playwright UI 模式调试单条用例                                     |
+| 命令                                | 作用                                                                                                                 |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `pnpm test` / `pnpm test:watch`     | 全部单测+契约测试（2.5s）/ 监听模式                                                                                  |
+| `pnpm test:coverage`                | 同上 + 覆盖率阈值门禁                                                                                                |
+| `pnpm lint` / `pnpm lint:fix`       | ESLint（含 react-hooks 规则）                                                                                        |
+| `pnpm format` / `pnpm format:check` | Prettier 全仓写 / 只检查                                                                                             |
+| `pnpm typecheck`                    | tsc node + web 双工程（含 e2e 与测试文件）                                                                           |
+| `pnpm check`                        | check:fast(type+lint+floor+secrets) + test:coverage + 改动行覆盖率 + 依赖审计（本地全量门禁，数值见 CONSTRAINTS.md） |
+| `pnpm e2e`                          | `build:compile`（typecheck+构建 out/）→ Playwright 跑真实 Electron                                                   |
+| `pnpm e2e -- --ui`                  | Playwright UI 模式调试单条用例                                                                                       |
 
 E2E 说明：`electron.launch({ args: ['.'] })` 按 package.json `main` 加载 `out/main/index.js`，因此**每次先构建再测**；不需要下载任何 Playwright 浏览器（pnpm 默认也阻止了该下载）。
+
+> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`check:fast` 供编辑后快跑（秒级），`check` 供任务结束/推送（含改动行覆盖率与依赖审计）。
 
 ## Git hooks（husky，提交即门禁）
 

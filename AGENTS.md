@@ -7,6 +7,10 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 - 使用`简体中文`进行回答
 - 如果不确定，就问清楚，而不是猜测；无法提问时，按已有 Spec 和保守选择执行，并明确说明假设
 
+## 质量约束
+
+- 写代码前先读 [CONSTRAINTS.md](CONSTRAINTS.md)，**不得为了过关而放松它**；改代码前后跑 `pnpm check`。
+
 ## 设计原则
 
 - UI 采用 macOS 风格：克制配色、圆角卡片、细腻留白、原生控件质感；样式用 Tailwind，组件放 `components/ui/`
@@ -20,7 +24,7 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 ## 文档导航（按需读取）
 
 - [CAPABILITY-MAP](docs/CAPABILITY-MAP.md)：模块索引、边界决定、构建顺序
-- [docs/specs/](docs/specs/)：各模块 Spec（shell、pomodoro）
+- [docs/specs/](docs/specs/)：各模块 Spec（shell、pomodoro、ai-workflow）
 - [docs/testing/](docs/testing/)：测试策略（TESTING）与用例目录（TEST-CASES）；改代码前后跑 `pnpm check`
 - [docs/planning/](docs/planning/)：计划与任务
 

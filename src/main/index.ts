@@ -2,6 +2,10 @@ import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
+import { openDb } from './ai-workflow/db'
+import { Repository } from './ai-workflow/repository'
+import { registerAiWorkflowIpc } from './ai-workflow/ipc'
+import { AI_WORKFLOW_CHANGED } from '../shared/ai-workflow-api'
 
 let quitting = false
 let win: BrowserWindow | null = null
@@ -45,6 +49,15 @@ app.whenReady().then(() => {
   // Windows 通知归属需要 AppUserModelId
   app.setAppUserModelId('com.workbench.desktop')
   registerIpcHandlers()
+
+  // ai-workflow：打开本地 SQLite，注册 RPC；变更广播给所有窗口
+  const aiRepo = new Repository(openDb(path.join(app.getPath('userData'), 'ai-workflow.db')))
+  registerAiWorkflowIpc({
+    repo: aiRepo,
+    notifyChanged: () => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
+    },
+  })
 
   createWindow()
 

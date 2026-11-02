@@ -64,8 +64,10 @@ export interface StageInput {
   name: string
   entryMode: EntryMode
   agentId?: string | null
-  onCompleteStageId?: string | null
-  onRejectStageId?: string | null
+  /** 完成后进入：目标阶段在 stages 数组中的下标；null/undefined = 默认（下一阶段 / 终端） */
+  onCompleteIndex?: number | null
+  /** 打回时退回到：目标阶段下标；null/undefined = 默认（上一阶段 / 原地） */
+  onRejectIndex?: number | null
 }
 
 export interface Workflow {

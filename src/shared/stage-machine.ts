@@ -1,4 +1,4 @@
-import type { Task, WorkflowStage, WorkflowWithStages } from '../../../../../shared/ai-workflow-api'
+import type { Task, WorkflowStage, WorkflowWithStages } from './ai-workflow-api'
 
 /** 进入某阶段后需要执行的效果（由 runner / UI 实际落地）。 */
 export type StageEffect =

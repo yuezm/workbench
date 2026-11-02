@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Task, WorkflowStage, WorkflowWithStages } from '../../../../../shared/ai-workflow-api'
+import type { Task, WorkflowStage, WorkflowWithStages } from './ai-workflow-api'
 import {
   enterStage,
   entryEffects,
@@ -116,7 +116,7 @@ describe('enterStage', () => {
 
 describe('moveTask', () => {
   const flow = wf([s0, s1, s2])
-  const event = (e: StageEvent) => e
+  const event = (e: StageEvent): StageEvent => e
 
   it('当前阶段不在工作流 → 原样返回', () => {
     const t = task('ghost')

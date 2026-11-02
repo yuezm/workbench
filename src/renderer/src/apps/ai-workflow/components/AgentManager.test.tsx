@@ -73,10 +73,14 @@ describe('AgentManager', () => {
     await waitFor(() => expect(remove).toHaveBeenCalledWith('a1'))
   })
 
-  it('无运行时则禁用添加并提示；未知运行时的智能体显示原始 id', async () => {
+  it('无运行时则禁用添加并提示；未知运行时的智能体显示原始 id 与描述', async () => {
     setApi({
       agents: {
-        list: vi.fn().mockResolvedValue([agent({ id: 'a1', name: 'x', runtimeId: 'ghost' })]),
+        list: vi
+          .fn()
+          .mockResolvedValue([
+            agent({ id: 'a1', name: 'x', runtimeId: 'ghost', description: '有描述' }),
+          ]),
         create: vi.fn(),
         remove: vi.fn(),
         update: vi.fn(),
@@ -85,15 +89,16 @@ describe('AgentManager', () => {
     } as unknown as Partial<AiWorkflowApi>)
 
     render(<AgentManager />)
-    expect(await screen.findByText('ghost')).toBeInTheDocument()
+    expect(await screen.findByText(/ghost/)).toBeInTheDocument()
+    expect(screen.getByText(/有描述/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
     expect(screen.getByText(/请先在上方添加一个运行时/)).toBeInTheDocument()
   })
 
-  it('加载失败展示错误', async () => {
+  it('加载失败展示错误（非 Error 也会字符串化）', async () => {
     setApi({
       agents: {
-        list: vi.fn().mockRejectedValue(new Error('boom')),
+        list: vi.fn().mockRejectedValue('boom'),
         create: vi.fn(),
         remove: vi.fn(),
         update: vi.fn(),
@@ -124,5 +129,16 @@ describe('AgentManager', () => {
 
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
     expect(await screen.findByText('remove-fail')).toBeInTheDocument()
+  })
+
+  it('加载未完成即卸载不报错', async () => {
+    const slow = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve([]), 10)))
+    setApi({
+      agents: { list: slow, create: vi.fn(), remove: vi.fn(), update: vi.fn() },
+      runtimes: { list: vi.fn().mockResolvedValue([]) },
+    } as unknown as Partial<AiWorkflowApi>)
+    const { unmount } = render(<AgentManager />)
+    unmount()
+    await new Promise((r) => setTimeout(r, 20))
   })
 })

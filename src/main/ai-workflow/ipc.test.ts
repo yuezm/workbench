@@ -163,6 +163,42 @@ describe('ai-workflow handler：任务/运行', () => {
   })
 })
 
+describe('ipc 补充', () => {
+  it('runtimes/agents update 与 agents.list', () => {
+    const rt = handle('runtimes.create', [{ name: 'ds', command: 'dsh' }]) as { id: string }
+    handle('runtimes.update', [rt.id, { name: 'ds2' }])
+    const ag = handle('agents.create', [{ name: 'a', runtimeId: rt.id }]) as { id: string }
+    handle('agents.update', [ag.id, { name: 'b' }])
+    expect((handle('agents.list', []) as Array<{ name: string }>)[0].name).toBe('b')
+    expect((handle('runtimes.list', []) as Array<{ name: string }>)[0].name).toBe('ds2')
+  })
+
+  it('tasks.move reject 在 user 阶段退回上一阶段', () => {
+    const wf = handle('workflows.create', [
+      {
+        name: 'w',
+        stages: [
+          { name: 'a', entryMode: 'none' },
+          { name: 'b', entryMode: 'user' },
+        ],
+      },
+    ]) as Wf
+    const task = handle('tasks.create', [{ title: 't', workflowId: wf.id }]) as { id: string }
+    handle('tasks.move', [task.id, 'next'])
+    const back = handle('tasks.move', [task.id, 'reject']) as { currentStageId: string }
+    expect(back.currentStageId).toBe(wf.stages[0].id)
+  })
+
+  it('tasks.move 当前阶段无效时抛错', () => {
+    const wf = handle('workflows.create', [
+      { name: 'w', stages: [{ name: 'a', entryMode: 'none' }] },
+    ]) as Wf
+    const task = handle('tasks.create', [{ title: 't', workflowId: wf.id }]) as { id: string }
+    repo.taskUpdate(task.id, { currentStageId: null })
+    expect(() => handle('tasks.move', [task.id, 'next'])).toThrow(/无效/)
+  })
+})
+
 describe('registerAiWorkflowIpc', () => {
   it('在单一 RPC 通道上注册 handler', () => {
     registerAiWorkflowIpc({ repo, notifyChanged: notify as unknown as () => void })

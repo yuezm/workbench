@@ -57,4 +57,32 @@ describe('createDeepseekHarnessAdapter（spawn 真实进程）', () => {
     expect(res.output).toContain('OK-OUT')
     expect(streamed).toContain('OK-OUT')
   })
+
+  it('stdin 模式：把 prompt 通过标准输入传给进程', async () => {
+    const script = join(dir, 'echo.mjs')
+    writeFileSync(script, 'process.stdin.on("data", (d) => process.stdout.write(d))')
+    const adapter = createDeepseekHarnessAdapter(
+      rt({ command: process.execPath, args: [script], promptMode: 'stdin' }),
+    )
+    const res = await adapter.run({
+      prompt: 'PING',
+      workdir: dir,
+      signal: new AbortController().signal,
+      onOutput: () => {},
+    })
+    expect(res.output).toContain('PING')
+  })
+
+  it('命令不存在时返回非零退出码', async () => {
+    const adapter = createDeepseekHarnessAdapter(
+      rt({ command: 'definitely-not-a-real-cmd-xyz-123' }),
+    )
+    const res = await adapter.run({
+      prompt: '',
+      workdir: dir,
+      signal: new AbortController().signal,
+      onOutput: () => {},
+    })
+    expect(res.code).not.toBe(0)
+  })
 })

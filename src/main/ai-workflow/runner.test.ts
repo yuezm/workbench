@@ -135,4 +135,83 @@ describe('Runner', () => {
     await new Promise((r) => setTimeout(r, 40))
     expect(repo.runGet(run.id).status).toBe('succeeded')
   })
+
+  it('默认构造（无 adapterFor）；execute 不存在 run 直接返回；cancel 未知 id 无副作用', async () => {
+    const runner = new Runner({ repo, notifyChanged })
+    await runner.execute('ghost')
+    expect(() => runner.cancel('ghost')).not.toThrow()
+  })
+
+  it('adapter 抛错：run 记 failed，错误信息写入', async () => {
+    const s = seed()
+    const agent = repo.agentGet(repo.workflowGet(s.workflowId).stages[0].agentId as string)
+    const run = queuedRun(s.task.id, s.task.currentStageId as string, agent.id)
+    const adapter: RuntimeAdapter = {
+      run: async () => {
+        throw new Error('boom')
+      },
+    }
+    const runner = new Runner({ repo, notifyChanged, adapterFor: () => adapter })
+    await runner.execute(run.id)
+    const r = repo.runGet(run.id)
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('boom')
+  })
+
+  it('输出回退：adapter 返回空 output 时用流式累积', async () => {
+    const s = seed()
+    const agent = repo.agentGet(repo.workflowGet(s.workflowId).stages[0].agentId as string)
+    const run = queuedRun(s.task.id, s.task.currentStageId as string, agent.id)
+    const adapter: RuntimeAdapter = {
+      run: async ({ onOutput }) => {
+        onOutput('streamed')
+        return { code: 0, output: '' }
+      },
+    }
+    const runner = new Runner({ repo, notifyChanged, adapterFor: () => adapter })
+    await runner.execute(run.id)
+    expect(repo.runGet(run.id).output).toBe('streamed')
+  })
+
+  it('execute 非 queued 的 run 直接返回', async () => {
+    const s = seed()
+    const agent = repo.agentGet(repo.workflowGet(s.workflowId).stages[0].agentId as string)
+    const run = queuedRun(s.task.id, s.task.currentStageId as string, agent.id)
+    repo.runUpdate(run.id, { status: 'succeeded' })
+    const runner = new Runner({ repo, notifyChanged, adapterFor: () => ({ run: vi.fn() }) })
+    await runner.execute(run.id)
+    expect(repo.runGet(run.id).status).toBe('succeeded')
+  })
+
+  it('abort 后 adapter 仍 resolve → cancelled 且不推进任务', async () => {
+    const s = seed()
+    const agent = repo.agentGet(repo.workflowGet(s.workflowId).stages[0].agentId as string)
+    const run = queuedRun(s.task.id, s.task.currentStageId as string, agent.id)
+    const adapter: RuntimeAdapter = {
+      run: ({ signal }) =>
+        new Promise((resolve) => {
+          signal.addEventListener('abort', () => resolve({ code: 0, output: 'x' }))
+        }),
+    }
+    const runner = new Runner({ repo, notifyChanged, adapterFor: () => adapter })
+    const p = runner.execute(run.id)
+    runner.cancel(run.id)
+    await p
+    expect(repo.runGet(run.id).status).toBe('cancelled')
+    expect(repo.taskGet(s.task.id).currentStageId).toBe(s.task.currentStageId)
+  })
+
+  it('adapter 抛非 Error → failed 且错误被字符串化', async () => {
+    const s = seed()
+    const agent = repo.agentGet(repo.workflowGet(s.workflowId).stages[0].agentId as string)
+    const run = queuedRun(s.task.id, s.task.currentStageId as string, agent.id)
+    const adapter: RuntimeAdapter = {
+      run: async () => {
+        throw 'boom-str'
+      },
+    }
+    const runner = new Runner({ repo, notifyChanged, adapterFor: () => adapter })
+    await runner.execute(run.id)
+    expect(repo.runGet(run.id).error).toContain('boom-str')
+  })
 })

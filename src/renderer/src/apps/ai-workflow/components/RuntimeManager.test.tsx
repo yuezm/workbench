@@ -72,7 +72,7 @@ describe('RuntimeManager', () => {
   })
 
   it('加载失败展示错误', async () => {
-    const list = vi.fn().mockRejectedValue(new Error('boom'))
+    const list = vi.fn().mockRejectedValue('boom')
     setApi({
       runtimes: { list, create: vi.fn(), remove: vi.fn(), update: vi.fn() },
     } as unknown as Partial<AiWorkflowApi>)

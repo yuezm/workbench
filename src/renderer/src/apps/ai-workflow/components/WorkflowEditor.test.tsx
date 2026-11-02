@@ -26,10 +26,15 @@ describe('WorkflowEditor', () => {
     await user.type(screen.getByLabelText('阶段1名称'), '待办')
 
     await user.selectOptions(screen.getByLabelText('阶段1进入方式'), 'agent')
+    await user.selectOptions(screen.getByLabelText('阶段1智能体'), '')
     await user.selectOptions(screen.getByLabelText('阶段1智能体'), 'ag1')
 
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
     await user.selectOptions(screen.getByLabelText('阶段2完成后进入'), '0')
+    await user.selectOptions(screen.getByLabelText('阶段2完成后进入'), '')
+    await user.selectOptions(screen.getByLabelText('阶段2完成后进入'), '0')
+    await user.selectOptions(screen.getByLabelText('阶段2打回退回到'), '0')
+    await user.selectOptions(screen.getByLabelText('阶段2打回退回到'), '')
     await user.selectOptions(screen.getByLabelText('阶段2打回退回到'), '0')
 
     // 再加一个阶段后删除，覆盖删除分支

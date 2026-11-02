@@ -93,4 +93,43 @@ describe('preload 桥接契约', () => {
     off()
     expect(ipcRenderer.off).toHaveBeenCalledWith(AI_WORKFLOW_CHANGED, listener)
   })
+
+  it('覆盖其余全部方法：都走同一 RPC 通道', async () => {
+    const { aiWorkflow } = await loadExposed()
+    await aiWorkflow.runtimes.create({ name: 'ds', command: 'dsh' })
+    await aiWorkflow.runtimes.list()
+    await aiWorkflow.runtimes.update('r1', { name: 'x' })
+    await aiWorkflow.runtimes.remove('r1')
+    await aiWorkflow.agents.list()
+    await aiWorkflow.agents.create({ name: 'a', runtimeId: 'r1' })
+    await aiWorkflow.agents.update('a1', { name: 'b' })
+    await aiWorkflow.agents.remove('a1')
+    await aiWorkflow.workflows.list()
+    await aiWorkflow.workflows.create({ name: 'w', stages: [] })
+    await aiWorkflow.workflows.update('w1', { name: 'w2', stages: [] })
+    await aiWorkflow.workflows.remove('w1')
+    await aiWorkflow.tasks.list('w1')
+    await aiWorkflow.tasks.create({ title: 't', workflowId: 'w1' })
+    await aiWorkflow.tasks.remove('t1')
+    const methods = vi.mocked(ipcRenderer.invoke).mock.calls.map((c) => c[1])
+    expect(methods).toEqual(
+      expect.arrayContaining([
+        'runtimes.create',
+        'runtimes.list',
+        'runtimes.update',
+        'runtimes.remove',
+        'agents.list',
+        'agents.create',
+        'agents.update',
+        'agents.remove',
+        'workflows.list',
+        'workflows.create',
+        'workflows.update',
+        'workflows.remove',
+        'tasks.list',
+        'tasks.create',
+        'tasks.remove',
+      ]),
+    )
+  })
 })

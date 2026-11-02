@@ -437,6 +437,13 @@ export class Repository {
         .all(taskId) as unknown as RunRow[]
     ).map(mapRun)
   }
+  runsListByStatus(status: RunStatus): Run[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM runs WHERE status=? ORDER BY created_at')
+        .all(status) as unknown as RunRow[]
+    ).map(mapRun)
+  }
   runCreate(input: {
     taskId: string
     stageId: string | null

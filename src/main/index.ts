@@ -5,6 +5,7 @@ import { createTray } from './tray'
 import { openDb } from './ai-workflow/db'
 import { Repository } from './ai-workflow/repository'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
+import { Runner } from './ai-workflow/runner'
 import { AI_WORKFLOW_CHANGED } from '../shared/ai-workflow-api'
 
 let quitting = false
@@ -50,14 +51,18 @@ app.whenReady().then(() => {
   app.setAppUserModelId('com.workbench.desktop')
   registerIpcHandlers()
 
-  // ai-workflow：打开本地 SQLite，注册 RPC；变更广播给所有窗口
+  // ai-workflow：打开本地 SQLite，注册 RPC 与运行队列；变更广播给所有窗口
+  const broadcastChanged = (): void => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
+  }
   const aiRepo = new Repository(openDb(path.join(app.getPath('userData'), 'ai-workflow.db')))
+  const runner = new Runner({ repo: aiRepo, notifyChanged: broadcastChanged })
   registerAiWorkflowIpc({
     repo: aiRepo,
-    notifyChanged: () => {
-      for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
-    },
+    notifyChanged: broadcastChanged,
+    onQueue: (runId) => runner.enqueue(runId),
   })
+  runner.resumeQueued()
 
   createWindow()
 

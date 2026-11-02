@@ -14,7 +14,8 @@
  *   node scripts/make-icon.mjs [--out <dir>] [--tray <variant>] [--tray-only]
  *
  * 托盘变体（--tray）：
- *   tiles   紫底 + 2×2 白色磁贴（默认，应用图标核心意象的反色版）
+ *   app     直接复用应用图标（深色超椭圆 + 2×2 磁贴 + 高亮星标），与桌面图标一致（默认）
+ *   tiles   紫底 + 2×2 白色磁贴（应用图标核心意象的反色版）
  *   panel   紫底 + 两根白色横条（面板 / 列表意象）
  *   solid   纯色实心底板，不加图形（最克制）
  *   star    紫底 + 白色四角星
@@ -34,7 +35,7 @@ const STAR_IN_ACCENT = true // 高亮磁贴内放四角星品牌标
 
 const TRAY_1X = 16 // 托盘 1x：Windows 100% 缩放下通知区域就是 16px
 const TRAY_2X = 32 // 托盘 2x：高 DPI 下使用
-const DEFAULT_TRAY_VARIANT = 'tiles'
+const DEFAULT_TRAY_VARIANT = 'app'
 
 /* ---------------------------------------------------------------- 调色板 */
 
@@ -407,6 +408,11 @@ function paintTrayPlate(raster, color = FOCUS) {
   )
 }
 
+/** 变体：直接复用应用图标场景，保证托盘与桌面图标一致 */
+function renderTrayApp(size) {
+  return renderScene(size)
+}
+
 /** 变体：紫底 + 2×2 白色磁贴（应用图标核心意象的反色版） */
 function renderTrayTiles(size) {
   const W = size * SS
@@ -486,6 +492,7 @@ function renderTrayTile(size) {
 }
 
 const TRAY_RENDERERS = {
+  app: renderTrayApp,
   tiles: renderTrayTiles,
   panel: renderTrayPanel,
   solid: renderTraySolid,

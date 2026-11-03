@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Task, WorkflowStage, WorkflowWithStages } from './ai-workflow-api'
 import {
+  completeTask,
   enterStage,
   entryEffects,
   moveTask,
+  moveTaskToStage,
   resolveNextStage,
   resolveRejectStage,
   type StageEvent,
@@ -114,55 +116,101 @@ describe('enterStage', () => {
   })
 })
 
-describe('moveTask', () => {
+describe('moveTask（自动流转）', () => {
   const flow = wf([s0, s1, s2])
-  const event = (e: StageEvent): StageEvent => e
 
   it('当前阶段不在工作流 → 原样返回', () => {
     const t = task('ghost')
-    expect(moveTask(t, event({ type: 'APPROVE' }), flow)).toEqual({ task: t, effects: [] })
+    const e: StageEvent = { type: 'RUN_SUCCEEDED', runId: 'r' }
+    expect(moveTask(t, e, flow)).toEqual({ task: t, effects: [] })
   })
 
   it('任务已完成 → 原样返回', () => {
     const t = task('s1', 'completed')
-    expect(moveTask(t, event({ type: 'APPROVE' }), flow)).toEqual({ task: t, effects: [] })
+    const e: StageEvent = { type: 'RUN_FAILED', runId: 'r' }
+    expect(moveTask(t, e, flow)).toEqual({ task: t, effects: [] })
   })
 
-  it.each<StageEvent>([
-    { type: 'RUN_SUCCEEDED', runId: 'r' },
-    { type: 'APPROVE' },
-    { type: 'MOVE_NEXT' },
-  ])('$type 推进到下一阶段', (e) => {
-    const r = moveTask(task('s1'), e, flow)
+  it('RUN_SUCCEEDED 推进到下一阶段', () => {
+    const r = moveTask(task('s1'), { type: 'RUN_SUCCEEDED', runId: 'r' }, flow)
     expect(r.task.currentStageId).toBe('s2')
     expect(r.task.status).toBe('active')
     expect(r.effects).toEqual([{ type: 'none' }])
   })
 
   it('RUN_SUCCEEDED 在最后阶段 → 任务完成', () => {
-    const r = moveTask(task('s2'), event({ type: 'RUN_SUCCEEDED', runId: 'r' }), flow)
+    const r = moveTask(task('s2'), { type: 'RUN_SUCCEEDED', runId: 'r' }, flow)
     expect(r.task.status).toBe('completed')
     expect(r.effects).toEqual([])
   })
 
-  it.each<StageEvent>([{ type: 'RUN_FAILED', runId: 'r' }, { type: 'REJECT' }])(
-    '$type 退回上一阶段',
-    (e) => {
-      const r = moveTask(task('s2'), e, flow)
-      expect(r.task.currentStageId).toBe('s1')
-      expect(r.task.status).toBe('active')
-    },
-  )
+  it('RUN_FAILED 退回上一阶段', () => {
+    const r = moveTask(task('s2'), { type: 'RUN_FAILED', runId: 'r' }, flow)
+    expect(r.task.currentStageId).toBe('s1')
+    expect(r.task.status).toBe('active')
+  })
 
-  it('REJECT 在首阶段 → 原地', () => {
-    const r = moveTask(task('s0'), event({ type: 'REJECT' }), flow)
+  it('RUN_FAILED 在首阶段 → 原地', () => {
+    const r = moveTask(task('s0'), { type: 'RUN_FAILED', runId: 'r' }, flow)
     expect(r.task.currentStageId).toBe('s0')
   })
 
   it('进入下一阶段时若是 user 阶段 → 产生 waitUser 效果', () => {
     const userS = stage({ id: 'u', position: 1, entryMode: 'user' })
     const f = wf([s0, userS])
-    const r = moveTask(task('s0'), event({ type: 'APPROVE' }), f)
+    const r = moveTask(task('s0'), { type: 'RUN_SUCCEEDED', runId: 'r' }, f)
     expect(r.effects).toEqual([{ type: 'waitUser' }])
+  })
+})
+
+describe('moveTaskToStage（手动拖拽）', () => {
+  const flow = wf([s0, s1, s2])
+
+  it('直接落到任意阶段，不套用完成后/打回目标', () => {
+    // s0 配了「完成后进入 s2」，拖拽仍以落点为准
+    const from = stage({ id: 's0', position: 0, onCompleteStageId: 's2' })
+    const f = wf([from, s1, s2])
+    const r = moveTaskToStage(task('s0'), 's1', f)
+    expect(r.task.currentStageId).toBe('s1')
+    expect(r.task.status).toBe('active')
+    expect(r.effects).toEqual([{ type: 'none' }])
+  })
+
+  it('可以往回拖', () => {
+    const r = moveTaskToStage(task('s2'), 's0', flow)
+    expect(r.task.currentStageId).toBe('s0')
+  })
+
+  it('拖到 user / agent 阶段 → 产生对应进入效果', () => {
+    const userS = stage({ id: 'u', position: 1, entryMode: 'user' })
+    const agentS = stage({ id: 'a', position: 2, entryMode: 'agent', agentId: 'ag1' })
+    expect(moveTaskToStage(task('s0'), 'u', wf([s0, userS])).effects).toEqual([
+      { type: 'waitUser' },
+    ])
+    expect(moveTaskToStage(task('s0'), 'a', wf([s0, agentS])).effects).toEqual([
+      { type: 'createRun', stageId: 'a', agentId: 'ag1' },
+    ])
+  })
+
+  it('目标阶段不存在 → 原样返回', () => {
+    const t = task('s0')
+    expect(moveTaskToStage(t, 'ghost', flow)).toEqual({ task: t, effects: [] })
+  })
+
+  it('落在当前阶段 → 原样返回', () => {
+    const t = task('s1')
+    expect(moveTaskToStage(t, 's1', flow)).toEqual({ task: t, effects: [] })
+  })
+
+  it('已完成任务不参与拖拽', () => {
+    const t = task('s1', 'completed')
+    expect(moveTaskToStage(t, 's2', flow)).toEqual({ task: t, effects: [] })
+  })
+})
+
+describe('completeTask', () => {
+  it('标记为 completed，其余字段不变', () => {
+    const t = task('s1')
+    expect(completeTask(t)).toEqual({ ...t, status: 'completed' })
   })
 })

@@ -1,21 +1,24 @@
-import type { ReactElement } from 'react'
-import type {
-  Task,
-  TaskMoveAction,
-  WorkflowWithStages,
-} from '../../../../../shared/ai-workflow-api'
+import { useState, type DragEvent, type ReactElement } from 'react'
+import type { Task, WorkflowWithStages } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
+import { cn } from '../../../lib/cn'
 import { TaskCard } from './TaskCard'
 
 interface KanbanBoardProps {
   workflow: WorkflowWithStages
   tasks: Task[]
-  onMove: (taskId: string, action: TaskMoveAction) => void
+  /** 卡片拖到某个阶段列 */
+  onMoveToStage: (taskId: string, stageId: string) => void
+  /** 卡片拖到「已完成」区 */
+  onCompleteTask: (taskId: string) => void
   onNewTask: () => void
 }
 
 /** 列头圆点按列序循环取四色点缀 */
 const DOT_COLORS = ['bg-focus', 'bg-short', 'bg-long', 'bg-focus-deep'] as const
+
+/** 「已完成」落点：不是阶段，用哨兵值参与高亮判断 */
+const DONE_TARGET = '__done__'
 
 /** 看板图标：三列分栏 */
 function BoardIcon(): ReactElement {
@@ -39,9 +42,43 @@ function BoardIcon(): ReactElement {
 export function KanbanBoard({
   workflow,
   tasks,
-  onMove,
+  onMoveToStage,
+  onCompleteTask,
   onNewTask,
 }: KanbanBoardProps): ReactElement {
+  /** 当前被拖动的任务（同一看板内拖拽，状态足够，不依赖 dataTransfer） */
+  const [dragging, setDragging] = useState<Task | null>(null)
+  const [overTarget, setOverTarget] = useState<string | null>(null)
+
+  const activeTasks = tasks.filter((t) => t.status === 'active')
+  const completedCount = tasks.filter((t) => t.status === 'completed').length
+
+  const stopDrag = (): void => {
+    setDragging(null)
+    setOverTarget(null)
+  }
+
+  const allowDrop = (target: string, event: DragEvent<HTMLElement>): void => {
+    if (!dragging) return
+    event.preventDefault()
+    setOverTarget(target)
+  }
+
+  const dropOnStage = (stageId: string, event: DragEvent<HTMLElement>): void => {
+    event.preventDefault()
+    const task = dragging
+    stopDrag()
+    if (!task || task.currentStageId === stageId) return
+    onMoveToStage(task.id, stageId)
+  }
+
+  const dropOnDone = (event: DragEvent<HTMLElement>): void => {
+    event.preventDefault()
+    const task = dragging
+    stopDrag()
+    if (task) onCompleteTask(task.id)
+  }
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
@@ -50,6 +87,7 @@ export function KanbanBoard({
             <BoardIcon />
           </span>
           工作流「{workflow.name}」
+          <span className="text-[11px] font-normal text-ink-faint">拖拽卡片切换阶段</span>
         </h2>
         <Button type="button" variant="primary" size="sm" onClick={onNewTask}>
           新建任务
@@ -57,11 +95,23 @@ export function KanbanBoard({
       </div>
       <div className="flex gap-3 overflow-x-auto pb-2">
         {workflow.stages.map((stage, index) => {
-          const cards = tasks.filter((t) => t.status === 'active' && t.currentStageId === stage.id)
+          const cards = activeTasks.filter((t) => t.currentStageId === stage.id)
+          const isOver = overTarget === stage.id
           return (
             <div
               key={stage.id}
-              className="flex w-64 shrink-0 animate-rise flex-col gap-2.5 rounded-2xl border border-line bg-white/[0.02] p-2.5"
+              role="group"
+              aria-label={`阶段：${stage.name}`}
+              onDragOver={(e) => allowDrop(stage.id, e)}
+              onDragLeave={() => setOverTarget(null)}
+              onDrop={(e) => dropOnStage(stage.id, e)}
+              className={cn(
+                'flex w-64 shrink-0 animate-rise flex-col gap-2.5 rounded-2xl border p-2.5',
+                'transition-colors duration-150',
+                isOver
+                  ? 'border-focus/60 bg-focus/[0.07]'
+                  : 'border-line bg-white/[0.02] hover:border-line-strong',
+              )}
               style={{ animationDelay: `${index * 60}ms` }}
             >
               <div className="flex items-center justify-between px-1.5 pt-0.5 pb-1">
@@ -79,16 +129,51 @@ export function KanbanBoard({
                 </span>
               </div>
               {cards.length === 0 ? (
-                <p className="grid place-items-center py-4 text-xs text-ink-faint">空</p>
+                <p className="grid place-items-center py-4 text-xs text-ink-faint">
+                  {dragging ? '拖到这里' : '空'}
+                </p>
               ) : (
                 cards.map((task) => (
-                  <TaskCard key={task.id} task={task} stage={stage} onMove={onMove} />
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    stage={stage}
+                    dragging={dragging?.id === task.id}
+                    onDragStart={setDragging}
+                    onDragEnd={stopDrag}
+                  />
                 ))
               )}
               <div className="mt-auto h-px w-full bg-white/[0.05]" aria-hidden="true" />
             </div>
           )
         })}
+
+        {/* 终端落点：拖到这里 = 任务走完、移出看板 */}
+        <div
+          role="group"
+          aria-label="已完成区"
+          onDragOver={(e) => allowDrop(DONE_TARGET, e)}
+          onDragLeave={() => setOverTarget(null)}
+          onDrop={dropOnDone}
+          className={cn(
+            'flex w-44 shrink-0 flex-col gap-2.5 rounded-2xl border border-dashed p-2.5',
+            'transition-colors duration-150',
+            overTarget === DONE_TARGET
+              ? 'border-short/60 bg-short/[0.07]'
+              : 'border-line bg-white/[0.01]',
+          )}
+        >
+          <div className="flex items-center justify-between px-1.5 pt-0.5 pb-1">
+            <span className="text-[13px] font-medium tracking-wide text-ink-dim">已完成</span>
+            <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+              {completedCount}
+            </span>
+          </div>
+          <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-[11px] leading-relaxed text-ink-faint">
+            拖到这里完成任务
+          </p>
+        </div>
       </div>
     </section>
   )

@@ -1,23 +1,25 @@
 import { useState, type ReactElement } from 'react'
-import type { TaskInput } from '../../../../../shared/ai-workflow-api'
+import type { TaskInput, WorkflowWithStages } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
 import { Input, fieldCls } from '../../../components/ui/input'
+import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 
 interface TaskDialogProps {
-  workflowId: string
+  workflow: WorkflowWithStages
   onSave: (input: TaskInput) => Promise<void>
   onCancel: () => void
 }
 
 const textareaCls = cn(fieldCls, 'min-h-24 resize-y py-2 leading-relaxed')
 
-/** 新建任务弹窗 */
-export function TaskDialog({ workflowId, onSave, onCancel }: TaskDialogProps): ReactElement {
+/** 新建任务弹窗：可指定从哪个阶段开始（默认首阶段） */
+export function TaskDialog({ workflow, onSave, onCancel }: TaskDialogProps): ReactElement {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [stageId, setStageId] = useState(workflow.stages[0]?.id ?? '')
   const [saving, setSaving] = useState(false)
 
   const submit = async (ev: React.FormEvent): Promise<void> => {
@@ -25,7 +27,7 @@ export function TaskDialog({ workflowId, onSave, onCancel }: TaskDialogProps): R
     if (!title.trim()) return
     setSaving(true)
     try {
-      await onSave({ title, description, workflowId })
+      await onSave({ title, description, workflowId: workflow.id, stageId })
     } finally {
       setSaving(false)
     }
@@ -51,6 +53,17 @@ export function TaskDialog({ workflowId, onSave, onCancel }: TaskDialogProps): R
             onChange={(e) => setDescription(e.target.value)}
           />
         </Field>
+        <Field label="起始阶段">
+          <Select
+            ariaLabel="起始阶段"
+            value={stageId}
+            onChange={setStageId}
+            options={workflow.stages.map((s) => ({ value: s.id, label: s.name }))}
+          />
+        </Field>
+        <p className="text-[11px] leading-relaxed text-ink-faint">
+          进入「交给智能体」的阶段会立刻执行；建好后可在看板上拖拽卡片换阶段。
+        </p>
 
         <div className="mt-2 flex items-center justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onCancel}>

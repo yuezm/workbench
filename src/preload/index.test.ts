@@ -79,10 +79,10 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.runtimes.create(input)
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'runtimes.create', [input])
 
-    await aiWorkflow.tasks.move('t1', 'approve')
-    expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'tasks.move', [
+    await aiWorkflow.tasks.moveToStage('t1', 's2')
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'tasks.moveToStage', [
       't1',
-      'approve',
+      's2',
     ])
 
     await aiWorkflow.runs.listByTask('t1')
@@ -117,7 +117,9 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.workflows.update('w1', { name: 'w2', stages: [] })
     await aiWorkflow.workflows.remove('w1')
     await aiWorkflow.tasks.list('w1')
-    await aiWorkflow.tasks.create({ title: 't', workflowId: 'w1' })
+    await aiWorkflow.tasks.create({ title: 't', workflowId: 'w1', stageId: 's1' })
+    await aiWorkflow.tasks.moveToStage('t1', 's1')
+    await aiWorkflow.tasks.complete('t1')
     await aiWorkflow.tasks.remove('t1')
     const methods = vi.mocked(ipcRenderer.invoke).mock.calls.map((c) => c[1])
     expect(methods).toEqual(
@@ -137,6 +139,8 @@ describe('preload 桥接契约', () => {
         'workflows.remove',
         'tasks.list',
         'tasks.create',
+        'tasks.moveToStage',
+        'tasks.complete',
         'tasks.remove',
       ]),
     )

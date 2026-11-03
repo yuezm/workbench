@@ -35,6 +35,18 @@ describe('repository 错误分支与补充路径', () => {
     ).toThrow(/名称/)
   })
 
+  it('起始阶段必须属于该工作流', () => {
+    const wf = repo.workflowCreate({ name: 'w', stages: [{ name: 'a', entryMode: 'none' }] })
+    const other = repo.workflowCreate({ name: 'o', stages: [{ name: 'b', entryMode: 'none' }] })
+    expect(() =>
+      repo.taskCreate({ title: 't', workflowId: wf.id, stageId: other.stages[0].id }),
+    ).toThrow(/起始阶段/)
+    // 空字符串按「未指定」处理，回落到首阶段
+    expect(repo.taskCreate({ title: 't2', workflowId: wf.id, stageId: '' }).currentStageId).toBe(
+      wf.stages[0].id,
+    )
+  })
+
   it('事务回滚：阶段引用不存在的智能体时整体失败', () => {
     expect(() =>
       repo.workflowCreate({

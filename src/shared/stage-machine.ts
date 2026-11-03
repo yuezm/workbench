@@ -4,13 +4,9 @@ import type { Task, WorkflowStage, WorkflowWithStages } from './ai-workflow-api'
 export type StageEffect =
   { type: 'createRun'; stageId: string; agentId: string } | { type: 'waitUser' } | { type: 'none' }
 
-/** 阶段流转事件。 */
+/** 阶段流转事件（只含自动流转；手动流转走 moveTaskToStage / completeTask）。 */
 export type StageEvent =
-  | { type: 'RUN_SUCCEEDED'; runId: string }
-  | { type: 'RUN_FAILED'; runId: string }
-  | { type: 'APPROVE' }
-  | { type: 'REJECT' }
-  | { type: 'MOVE_NEXT' }
+  { type: 'RUN_SUCCEEDED'; runId: string } | { type: 'RUN_FAILED'; runId: string }
 
 /** 读取某阶段「进入时」应产生的效果。 */
 export function entryEffects(stage: WorkflowStage): StageEffect[] {
@@ -84,18 +80,36 @@ export function moveTask(
     if (!next) return { task: { ...task, status: 'completed' }, effects: [] }
     return enterStage({ ...task, status: 'active' }, next, workflow)
   }
-  const toReject = (): { task: Task; effects: StageEffect[] } => {
-    const target = resolveRejectStage(current, workflow)
-    return enterStage({ ...task, status: 'active' }, target, workflow)
-  }
 
   switch (event.type) {
     case 'RUN_SUCCEEDED':
-    case 'APPROVE':
-    case 'MOVE_NEXT':
       return toNext()
     case 'RUN_FAILED':
-    case 'REJECT':
-      return toReject()
+      return enterStage(
+        { ...task, status: 'active' },
+        resolveRejectStage(current, workflow),
+        workflow,
+      )
   }
+}
+
+/**
+ * 纯函数：看板拖拽 —— 把任务直接放到目标阶段，不套用「完成后进入 / 打回退回到」。
+ * 任务已完成、目标不存在或就落在当前阶段时原样返回。
+ */
+export function moveTaskToStage(
+  task: Task,
+  stageId: string,
+  workflow: WorkflowWithStages,
+): { task: Task; effects: StageEffect[] } {
+  const target = workflow.stages.find((s) => s.id === stageId)
+  if (task.status === 'completed' || !target || target.id === task.currentStageId) {
+    return { task, effects: [] }
+  }
+  return enterStage(task, target, workflow)
+}
+
+/** 纯函数：看板拖到「已完成」区 —— 任务移出看板。 */
+export function completeTask(task: Task): Task {
+  return { ...task, status: 'completed' }
 }

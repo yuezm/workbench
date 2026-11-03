@@ -1,5 +1,4 @@
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Task, WorkflowStage } from '../../../../../shared/ai-workflow-api'
 import { TaskCard } from './TaskCard'
@@ -28,28 +27,54 @@ const task: Task = {
 }
 
 describe('TaskCard', () => {
-  it('user 阶段显示通过/打回并回调', async () => {
-    const onMove = vi.fn()
-    const user = userEvent.setup()
-    render(<TaskCard task={task} stage={stage('user')} onMove={onMove} />)
+  it('渲染标题/描述；不交接阶段可拖拽并回调拖拽事件', () => {
+    const onDragStart = vi.fn()
+    const onDragEnd = vi.fn()
+    render(
+      <TaskCard
+        task={task}
+        stage={stage('none')}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+      />,
+    )
     expect(screen.getByText('写代码')).toBeInTheDocument()
     expect(screen.getByText('细节')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '通过' }))
-    expect(onMove).toHaveBeenCalledWith('t1', 'approve')
-    await user.click(screen.getByRole('button', { name: '打回' }))
-    expect(onMove).toHaveBeenCalledWith('t1', 'reject')
+    expect(screen.getByText('拖到其它阶段推进')).toBeInTheDocument()
+
+    const card = screen.getByLabelText('任务：写代码')
+    expect(card).toHaveAttribute('draggable', 'true')
+    fireEvent.dragStart(card)
+    expect(onDragStart).toHaveBeenCalledWith(task)
+    fireEvent.dragEnd(card)
+    expect(onDragEnd).toHaveBeenCalled()
   })
 
-  it('none 阶段显示推进', async () => {
-    const onMove = vi.fn()
-    const user = userEvent.setup()
-    render(<TaskCard task={{ ...task, description: '' }} stage={stage('none')} onMove={onMove} />)
-    await user.click(screen.getByRole('button', { name: '推进' }))
-    expect(onMove).toHaveBeenCalledWith('t1', 'next')
+  it('拖拽中卡片半透明', () => {
+    render(
+      <TaskCard
+        task={{ ...task, description: '' }}
+        stage={stage('none')}
+        dragging
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText('任务：写代码').className).toContain('opacity-40')
   })
 
-  it('agent 阶段显示执行中', () => {
-    render(<TaskCard task={task} stage={stage('agent')} onMove={vi.fn()} />)
+  it('user 阶段提示等待你处理，不再有通过/打回按钮', () => {
+    render(<TaskCard task={task} stage={stage('user')} onDragStart={vi.fn()} onDragEnd={vi.fn()} />)
+    expect(screen.getByText('等待你处理')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '通过' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '打回' })).not.toBeInTheDocument()
+  })
+
+  it('agent 阶段显示执行中且不可拖拽', () => {
+    render(
+      <TaskCard task={task} stage={stage('agent')} onDragStart={vi.fn()} onDragEnd={vi.fn()} />,
+    )
     expect(screen.getByText(/执行中/)).toBeInTheDocument()
+    expect(screen.getByLabelText('任务：写代码')).toHaveAttribute('draggable', 'false')
   })
 })

@@ -99,15 +99,25 @@ describe('repository workflows/stages', () => {
 })
 
 describe('repository tasks/runs', () => {
-  it('新建任务进入首阶段；级联删除', () => {
+  it('新建任务进入首阶段；可指定起始阶段；级联删除', () => {
     const wf = repo.workflowCreate({
       name: 'wf',
-      stages: [{ name: 's1', entryMode: 'none' }],
+      stages: [
+        { name: 's1', entryMode: 'none' },
+        { name: 's2', entryMode: 'none' },
+      ],
     })
     const task = repo.taskCreate({ title: '做点事', workflowId: wf.id })
     expect(task.currentStageId).toBe(wf.stages[0].id)
     expect(task.status).toBe('active')
     expect(repo.tasksList(wf.id)).toHaveLength(1)
+
+    const late = repo.taskCreate({
+      title: '从第二阶段开始',
+      workflowId: wf.id,
+      stageId: wf.stages[1].id,
+    })
+    expect(late.currentStageId).toBe(wf.stages[1].id)
 
     const run = repo.runCreate({
       taskId: task.id,

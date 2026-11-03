@@ -1,7 +1,9 @@
 import type { Task, WorkflowStage } from '../../shared/ai-workflow-api'
 import {
+  completeTask as completeTaskInState,
   entryEffects,
   moveTask,
+  moveTaskToStage as moveTaskToStageInState,
   type StageEffect,
   type StageEvent,
 } from '../../shared/stage-machine'
@@ -69,4 +71,45 @@ export function advanceTask(
   })
   applyEffects(repo, saved, effects, onQueue)
   return saved
+}
+
+/** 取任务当前阶段；阶段缺失说明数据不一致，直接拒绝变更。 */
+function currentStageOf(repo: Repository, task: Task): WorkflowStage {
+  const wf = repo.workflowGet(task.workflowId)
+  const stage = wf.stages.find((s) => s.id === task.currentStageId)
+  if (!stage) throw new Error('任务当前阶段无效')
+  return stage
+}
+
+/**
+ * 看板拖拽：把任务放到目标阶段并落地该阶段的进入效果。
+ * 执行中的阶段由 run 结果推进，不接受手动拖拽。
+ */
+export function moveTaskToStage(
+  repo: Repository,
+  taskId: string,
+  stageId: string,
+  onQueue: Enqueue,
+): Task {
+  const task = repo.taskGet(taskId)
+  const wf = repo.workflowGet(task.workflowId)
+  const current = wf.stages.find((s) => s.id === task.currentStageId)
+  if (!current) throw new Error('任务当前阶段无效')
+  if (current.entryMode === 'agent') throw new Error('执行中的阶段不能拖动')
+  if (!wf.stages.some((s) => s.id === stageId)) throw new Error('目标阶段无效: ' + stageId)
+  const { task: next, effects } = moveTaskToStageInState(task, stageId, wf)
+  const saved = repo.taskUpdate(taskId, {
+    currentStageId: next.currentStageId,
+    status: next.status,
+  })
+  applyEffects(repo, saved, effects, onQueue)
+  return saved
+}
+
+/** 看板拖到「已完成」区：任务移出看板。 */
+export function completeTask(repo: Repository, taskId: string): Task {
+  const task = repo.taskGet(taskId)
+  const stage = currentStageOf(repo, task)
+  if (stage.entryMode === 'agent') throw new Error('执行中的阶段不能完成')
+  return repo.taskUpdate(taskId, { status: completeTaskInState(task).status })
 }

@@ -114,7 +114,7 @@ describe('ai-workflow handler：任务/运行', () => {
     return ag.id
   }
 
-  it('none → user 流转；非法 approve 抛错；可删除', () => {
+  it('从指定阶段开始；可拖回前一阶段；可拖到「已完成」；可删除', () => {
     const wf = handle('workflows.create', [
       {
         name: 'w',
@@ -124,17 +124,17 @@ describe('ai-workflow handler：任务/运行', () => {
         ],
       },
     ]) as Wf
-    const task = handle('tasks.create', [{ title: 'T', workflowId: wf.id }]) as {
-      id: string
+    const task = handle('tasks.create', [
+      { title: 'T', workflowId: wf.id, stageId: wf.stages[1].id },
+    ]) as { id: string; currentStageId: string }
+    expect(task.currentStageId).toBe(wf.stages[1].id)
+
+    const moved = handle('tasks.moveToStage', [task.id, wf.stages[0].id]) as {
       currentStageId: string
     }
-    expect(task.currentStageId).toBe(wf.stages[0].id)
-    expect(() => handle('tasks.move', [task.id, 'approve'])).toThrow(/交给用户/)
+    expect(moved.currentStageId).toBe(wf.stages[0].id)
 
-    const moved = handle('tasks.move', [task.id, 'next']) as { currentStageId: string }
-    expect(moved.currentStageId).toBe(wf.stages[1].id)
-
-    const done = handle('tasks.move', [task.id, 'approve']) as { status: string }
+    const done = handle('tasks.complete', [task.id]) as { status: string }
     expect(done.status).toBe('completed')
     expect((handle('tasks.list', [wf.id]) as unknown[]).length).toBe(1)
 
@@ -142,7 +142,19 @@ describe('ai-workflow handler：任务/运行', () => {
     expect(handle('tasks.list', [wf.id])).toEqual([])
   })
 
-  it('agent 阶段创建即入队 run；approve/reject/next 均被拒（按阶段类型）', () => {
+  it('起始阶段不属于该工作流时拒绝', () => {
+    const a = handle('workflows.create', [
+      { name: 'a', stages: [{ name: 'x', entryMode: 'none' }] },
+    ]) as Wf
+    const b = handle('workflows.create', [
+      { name: 'b', stages: [{ name: 'y', entryMode: 'none' }] },
+    ]) as Wf
+    expect(() =>
+      handle('tasks.create', [{ title: 'T', workflowId: a.id, stageId: b.stages[0].id }]),
+    ).toThrow(/起始阶段/)
+  })
+
+  it('拖到 agent 阶段即入队 run；执行中的阶段不能拖动或完成', () => {
     const agentId = seedAgent()
     const wf = handle('workflows.create', [
       {
@@ -161,25 +173,31 @@ describe('ai-workflow handler：任务/运行', () => {
     expect(runs[0].status).toBe('queued')
     expect(runs[0].prompt).toContain('sys')
 
-    expect(() => handle('tasks.move', [task.id, 'approve'])).toThrow()
-    expect(() => handle('tasks.move', [task.id, 'reject'])).toThrow(/打回/)
-    expect(() => handle('tasks.move', [task.id, 'next'])).toThrow(/不交接/)
+    expect(() => handle('tasks.moveToStage', [task.id, wf.stages[1].id])).toThrow(/不能拖动/)
+    expect(() => handle('tasks.complete', [task.id])).toThrow(/不能完成/)
   })
 
-  it('reject 在首阶段原地', () => {
+  it('目标阶段无效 / 当前阶段无效时抛错', () => {
     const wf = handle('workflows.create', [
       { name: 'w3', stages: [{ name: '待办', entryMode: 'none' }] },
     ]) as Wf
-    const task = handle('tasks.create', [{ title: 'T3', workflowId: wf.id }]) as {
-      id: string
-      currentStageId: string
-    }
-    const r = handle('tasks.move', [task.id, 'reject']) as { currentStageId: string }
-    expect(r.currentStageId).toBe(wf.stages[0].id)
+    const task = handle('tasks.create', [{ title: 'T3', workflowId: wf.id }]) as { id: string }
+    expect(() => handle('tasks.moveToStage', [task.id, 'ghost'])).toThrow(/目标阶段无效/)
+
+    repo.taskUpdate(task.id, { currentStageId: null })
+    expect(() => handle('tasks.moveToStage', [task.id, wf.stages[0].id])).toThrow(/无效/)
+    expect(() => handle('tasks.complete', [task.id])).toThrow(/无效/)
   })
 })
 
 describe('ipc 补充', () => {
+  it('agents.remove 删除未被引用的智能体', () => {
+    const rt = handle('runtimes.create', [{ name: 'ds', command: 'dsh' }]) as { id: string }
+    const ag = handle('agents.create', [{ name: 'a', runtimeId: rt.id }]) as { id: string }
+    handle('agents.remove', [ag.id])
+    expect(handle('agents.list', [])).toEqual([])
+  })
+
   it('runtimes/agents update 与 agents.list', () => {
     const rt = handle('runtimes.create', [{ name: 'ds', command: 'dsh' }]) as { id: string }
     handle('runtimes.update', [rt.id, { name: 'ds2' }])
@@ -189,7 +207,7 @@ describe('ipc 补充', () => {
     expect((handle('runtimes.list', []) as Array<{ name: string }>)[0].name).toBe('ds2')
   })
 
-  it('tasks.move reject 在 user 阶段退回上一阶段', () => {
+  it('tasks.complete 在首阶段直接完成；完成后不再随拖拽变化', () => {
     const wf = handle('workflows.create', [
       {
         name: 'w',
@@ -200,18 +218,13 @@ describe('ipc 补充', () => {
       },
     ]) as Wf
     const task = handle('tasks.create', [{ title: 't', workflowId: wf.id }]) as { id: string }
-    handle('tasks.move', [task.id, 'next'])
-    const back = handle('tasks.move', [task.id, 'reject']) as { currentStageId: string }
-    expect(back.currentStageId).toBe(wf.stages[0].id)
-  })
-
-  it('tasks.move 当前阶段无效时抛错', () => {
-    const wf = handle('workflows.create', [
-      { name: 'w', stages: [{ name: 'a', entryMode: 'none' }] },
-    ]) as Wf
-    const task = handle('tasks.create', [{ title: 't', workflowId: wf.id }]) as { id: string }
-    repo.taskUpdate(task.id, { currentStageId: null })
-    expect(() => handle('tasks.move', [task.id, 'next'])).toThrow(/无效/)
+    handle('tasks.complete', [task.id])
+    const after = handle('tasks.moveToStage', [task.id, wf.stages[1].id]) as {
+      status: string
+      currentStageId: string
+    }
+    expect(after.status).toBe('completed')
+    expect(after.currentStageId).toBe(wf.stages[0].id)
   })
 })
 

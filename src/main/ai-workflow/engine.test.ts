@@ -2,7 +2,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from './db'
-import { advanceTask, applyEffects, enterTaskStage } from './engine'
+import { advanceTask, applyEffects, completeTask, enterTaskStage, moveTaskToStage } from './engine'
 import { Repository } from './repository'
 import type { Task } from '../../shared/ai-workflow-api'
 
@@ -72,14 +72,25 @@ describe('engine', () => {
     expect(onQueue).toHaveBeenCalledTimes(1)
   })
 
+  it('enterTaskStage：当前阶段不在工作流时不产生效果', () => {
+    const { wf } = seed()
+    const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
+    repo.taskUpdate(task.id, { currentStageId: null })
+    const onQueue = vi.fn()
+    enterTaskStage(repo, repo.taskGet(task.id), onQueue)
+    expect(onQueue).not.toHaveBeenCalled()
+  })
+
   it('advanceTask：当前阶段无效时抛错', () => {
     const { wf } = seed()
     const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
     repo.taskUpdate(task.id, { currentStageId: null })
-    expect(() => advanceTask(repo, task.id, { type: 'MOVE_NEXT' }, () => {})).toThrow(/无效/)
+    expect(() =>
+      advanceTask(repo, task.id, { type: 'RUN_SUCCEEDED', runId: 'r' }, () => {}),
+    ).toThrow(/无效/)
   })
 
-  it('advanceTask：推进到终端完成', () => {
+  it('advanceTask：成功到终端 → 任务完成', () => {
     const { wf } = seed()
     const task = repo.taskCreate({ title: 'T', workflowId: wf.id }) as Task
     // 直接放到最后一个阶段并无下一阶段：更新工作流仅一阶段
@@ -88,7 +99,53 @@ describe('engine', () => {
       stages: [{ name: 'only', entryMode: 'none' }],
     })
     repo.taskUpdate(task.id, { currentStageId: one.stages[0].id })
-    const done = advanceTask(repo, task.id, { type: 'MOVE_NEXT' }, () => {})
+    const done = advanceTask(repo, task.id, { type: 'RUN_SUCCEEDED', runId: 'r' }, () => {})
     expect(done.status).toBe('completed')
+  })
+
+  it('moveTaskToStage：拖到 agent 阶段即入队 run', () => {
+    const { wf } = seed()
+    const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
+    const onQueue = vi.fn()
+    const moved = moveTaskToStage(repo, task.id, wf.stages[1].id, onQueue)
+    expect(moved.currentStageId).toBe(wf.stages[1].id)
+    expect(onQueue).toHaveBeenCalledTimes(1)
+  })
+
+  it('moveTaskToStage：目标阶段无效抛错', () => {
+    const { wf } = seed()
+    const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
+    expect(() => moveTaskToStage(repo, task.id, 'ghost', () => {})).toThrow(/目标阶段无效/)
+  })
+
+  it('moveTaskToStage：执行中的阶段不能拖动', () => {
+    const { wf } = seed()
+    const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
+    repo.taskUpdate(task.id, { currentStageId: wf.stages[1].id })
+    expect(() => moveTaskToStage(repo, task.id, wf.stages[0].id, () => {})).toThrow(/不能拖动/)
+  })
+
+  it('moveTaskToStage：当前阶段无效抛错', () => {
+    const { wf } = seed()
+    const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
+    repo.taskUpdate(task.id, { currentStageId: null })
+    expect(() => moveTaskToStage(repo, task.id, wf.stages[0].id, () => {})).toThrow(/无效/)
+  })
+
+  it('completeTask：置为 completed；执行中不能完成', () => {
+    const { wf } = seed()
+    const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
+    expect(completeTask(repo, task.id).status).toBe('completed')
+
+    const running = repo.taskCreate({ title: 'T2', workflowId: wf.id })
+    repo.taskUpdate(running.id, { currentStageId: wf.stages[1].id })
+    expect(() => completeTask(repo, running.id)).toThrow(/不能完成/)
+  })
+
+  it('completeTask：当前阶段无效抛错', () => {
+    const { wf } = seed()
+    const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
+    repo.taskUpdate(task.id, { currentStageId: null })
+    expect(() => completeTask(repo, task.id)).toThrow(/无效/)
   })
 })

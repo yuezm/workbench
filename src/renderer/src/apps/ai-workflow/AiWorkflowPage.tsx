@@ -4,7 +4,6 @@ import type {
   Run,
   Task,
   TaskInput,
-  TaskMoveAction,
   WorkflowInput,
   WorkflowWithStages,
 } from '../../../../shared/ai-workflow-api'
@@ -175,10 +174,22 @@ export function AiWorkflowPage(): ReactElement {
     }
   }
 
-  const move = (id: string, action: TaskMoveAction): void => {
+  const moveToStage = (id: string, stageId: string): void => {
     void (async () => {
       try {
-        await wfApi().tasks.move(id, action)
+        await wfApi().tasks.moveToStage(id, stageId)
+        await loadTasksFor(activeId ?? '')
+        await loadRunsFor(selectedTaskId)
+      } catch (e) {
+        setError(errMsg(e))
+      }
+    })()
+  }
+
+  const completeTask = (id: string): void => {
+    void (async () => {
+      try {
+        await wfApi().tasks.complete(id)
         await loadTasksFor(activeId ?? '')
         await loadRunsFor(selectedTaskId)
       } catch (e) {
@@ -232,12 +243,13 @@ export function AiWorkflowPage(): ReactElement {
               <KanbanBoard
                 workflow={active}
                 tasks={tasks}
-                onMove={move}
+                onMoveToStage={moveToStage}
+                onCompleteTask={completeTask}
                 onNewTask={() => setDialogOpen(true)}
               />
             ) : (
               <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
-                尚无工作流。到「设置」里的「工作流配置」新建一条，再回来推进任务。
+                尚无工作流。到「设置」里的「工作流配置」新建一条，再回来建任务并拖拽推进。
               </div>
             )}
           </section>
@@ -299,12 +311,8 @@ export function AiWorkflowPage(): ReactElement {
         </div>
       )}
 
-      {dialogOpen && activeId && (
-        <TaskDialog
-          workflowId={activeId}
-          onSave={createTask}
-          onCancel={() => setDialogOpen(false)}
-        />
+      {dialogOpen && active && (
+        <TaskDialog workflow={active} onSave={createTask} onCancel={() => setDialogOpen(false)} />
       )}
 
       {editing !== undefined && (

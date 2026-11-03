@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -104,7 +104,8 @@ function makeApi() {
     },
     tasks: {
       list: vi.fn(async (_workflowId: string) => state.tasks),
-      move: vi.fn(async () => {}),
+      moveToStage: vi.fn(async () => {}),
+      complete: vi.fn(async () => {}),
       create: vi.fn(async (input: { title: string }) => {
         const n = { ...task, id: 't2', title: input.title }
         state.tasks = [...state.tasks, n]
@@ -119,6 +120,12 @@ function makeApi() {
 
 function install(api: unknown): void {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
+}
+
+/** 把任务卡拖到落点：cardLabel 为卡片 aria-label，targetLabel 为阶段列 / 已完成区 aria-label */
+async function dragTo(cardLabel: string, targetLabel: string): Promise<void> {
+  fireEvent.dragStart(await screen.findByLabelText(cardLabel))
+  fireEvent.drop(screen.getByRole('group', { name: targetLabel }))
 }
 
 /** 切到视图页签：工作台 / 设置 */
@@ -138,7 +145,7 @@ async function openSection(
 beforeEach(() => vi.clearAllMocks())
 
 describe('AiWorkflowPage', () => {
-  it('看板/运行记录/推进/新建任务/编辑与新建工作流全流程', async () => {
+  it('看板/运行记录/拖拽/新建任务/编辑与新建工作流全流程', async () => {
     const api = makeApi()
     install(api)
     const user = userEvent.setup()
@@ -152,13 +159,20 @@ describe('AiWorkflowPage', () => {
     await waitFor(() => expect(api.runs.listByTask).toHaveBeenCalledWith('t1'))
     expect(await screen.findByText('hello')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '推进' }))
-    await waitFor(() => expect(api.tasks.move).toHaveBeenCalledWith('t1', 'next'))
+    // 拖到另一阶段
+    await dragTo('任务：任务A', '阶段：审核')
+    await waitFor(() => expect(api.tasks.moveToStage).toHaveBeenCalledWith('t1', 's1'))
 
     await user.click(screen.getByRole('button', { name: '新建任务' }))
+    expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('待办')
     await user.type(screen.getByLabelText('任务标题'), '新任务')
     await user.click(screen.getByRole('button', { name: '创建任务' }))
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
+    expect(api.tasks.create.mock.calls[0][0]).toMatchObject({ workflowId: 'w1', stageId: 's0' })
+
+    // 拖到「已完成」区
+    await dragTo('任务：新任务', '已完成区')
+    await waitFor(() => expect(api.tasks.complete).toHaveBeenCalledWith('t2'))
 
     // 工作流定义在「工作流配置」视图里
     await openSection(user, '工作流配置')
@@ -258,20 +272,29 @@ describe('AiWorkflowPage', () => {
     await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
     await user.click(screen.getByRole('option', { name: '任务A' }))
     expect(await screen.findByText('rboom')).toBeInTheDocument()
-    // 通过/推进时也会尝试刷新运行记录，覆盖 loadRunsFor 的错误分支
-    await user.click(await screen.findByRole('button', { name: '推进' }))
+    // 拖拽后也会尝试刷新运行记录，覆盖 loadRunsFor 的错误分支
+    await dragTo('任务：任务A', '阶段：审核')
     expect(await screen.findByText('rboom')).toBeInTheDocument()
   })
 
-  it('推进失败展示错误', async () => {
+  it('拖拽失败展示错误', async () => {
     const api = makeApi()
-    api.tasks.move.mockRejectedValue(new Error('mboom'))
+    api.tasks.moveToStage.mockRejectedValue(new Error('mboom'))
     install(api)
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await screen.findByText(/工作流「研发」/)
-    await user.click(await screen.findByRole('button', { name: '推进' }))
+    await dragTo('任务：任务A', '阶段：审核')
     expect(await screen.findByText('mboom')).toBeInTheDocument()
+  })
+
+  it('拖到已完成失败展示错误', async () => {
+    const api = makeApi()
+    api.tasks.complete.mockRejectedValue(new Error('dboom'))
+    install(api)
+    render(<AiWorkflowPage />)
+    await screen.findByText(/工作流「研发」/)
+    await dragTo('任务：任务A', '已完成区')
+    expect(await screen.findByText('dboom')).toBeInTheDocument()
   })
 
   it('创建任务失败展示错误', async () => {
@@ -301,15 +324,15 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText('sboom')).toBeInTheDocument()
   })
 
-  it('推进未选任务刷新；清空运行选择；取消编辑与对话框', async () => {
+  it('拖拽未选任务也刷新；清空运行选择；取消编辑与对话框', async () => {
     const api = makeApi()
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await screen.findByText(/工作流「研发」/)
 
-    await user.click(await screen.findByRole('button', { name: '推进' }))
-    await waitFor(() => expect(api.tasks.move).toHaveBeenCalled())
+    await dragTo('任务：任务A', '阶段：审核')
+    await waitFor(() => expect(api.tasks.moveToStage).toHaveBeenCalled())
 
     await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
     await user.click(screen.getByRole('option', { name: '任务A' }))
@@ -325,6 +348,11 @@ describe('AiWorkflowPage', () => {
     await openSection(user, '工作流配置')
     await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
     await user.click(screen.getByRole('button', { name: '取消' }))
+
+    // 再次打开：用 Esc 关闭弹窗
+    await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
+    await user.keyboard('{Escape}')
+    expect(screen.queryByLabelText('工作流名称')).not.toBeInTheDocument()
   })
 
   it('onChanged 触发重新加载', async () => {
@@ -349,14 +377,13 @@ describe('AiWorkflowPage', () => {
     await waitFor(() => expect(api.workflows.list.mock.calls.length).toBeGreaterThan(before + 1))
   })
 
-  it('移动后任务刷新失败展示错误', async () => {
+  it('拖拽后任务刷新失败展示错误', async () => {
     const api = makeApi()
     api.tasks.list.mockResolvedValueOnce([task]).mockRejectedValue(new Error('tb'))
     install(api)
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await screen.findByText(/工作流「研发」/)
-    await user.click(await screen.findByRole('button', { name: '推进' }))
+    await dragTo('任务：任务A', '阶段：审核')
     expect(await screen.findByText('tb')).toBeInTheDocument()
   })
 
@@ -414,6 +441,75 @@ describe('AiWorkflowPage', () => {
     install(api)
     const { unmount } = render(<AiWorkflowPage />)
     unmount()
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it('任务列表请求未完成即卸载：成功返回不写状态', async () => {
+    const api = makeApi()
+    let resolveTasks!: (v: Task[]) => void
+    api.tasks.list.mockImplementationOnce(
+      () =>
+        new Promise<Task[]>((res) => {
+          resolveTasks = res
+        }),
+    )
+    install(api)
+    const { unmount } = render(<AiWorkflowPage />)
+    await screen.findByText(/工作流「研发」/)
+    unmount()
+    resolveTasks([task])
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it('任务列表请求未完成即卸载：失败不写状态', async () => {
+    const api = makeApi()
+    let rejectTasks!: (e: unknown) => void
+    api.tasks.list.mockImplementationOnce(
+      () =>
+        new Promise<Task[]>((_res, rej) => {
+          rejectTasks = rej
+        }),
+    )
+    install(api)
+    const { unmount } = render(<AiWorkflowPage />)
+    await screen.findByText(/工作流「研发」/)
+    unmount()
+    rejectTasks(new Error('late'))
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it('运行记录请求未完成即卸载：成功与失败都不写状态', async () => {
+    const api = makeApi()
+    let resolveRuns!: (v: Run[]) => void
+    let rejectRuns!: (e: unknown) => void
+    api.runs.listByTask
+      .mockImplementationOnce(
+        () =>
+          new Promise<Run[]>((res) => {
+            resolveRuns = res
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Run[]>((_res, rej) => {
+            rejectRuns = rej
+          }),
+      )
+    install(api)
+    const user = userEvent.setup()
+
+    const first = render(<AiWorkflowPage />)
+    await user.click(await screen.findByRole('combobox', { name: '选择任务查看运行' }))
+    await user.click(await screen.findByRole('option', { name: '任务A' }))
+    first.unmount()
+    resolveRuns([run])
+    await new Promise((r) => setTimeout(r, 0))
+
+    const second = render(<AiWorkflowPage />)
+    await user.click(await screen.findByRole('combobox', { name: '选择任务查看运行' }))
+    await user.click(await screen.findByRole('option', { name: '任务A' }))
+    second.unmount()
+    rejectRuns(new Error('late'))
     await new Promise((r) => setTimeout(r, 0))
   })
 })

@@ -381,7 +381,9 @@ export class Repository {
   taskCreate(input: TaskInput): Task {
     if (!input.title?.trim()) throw new Error('任务标题必填')
     const wf = this.workflowGet(input.workflowId)
-    const first = wf.stages[0]?.id ?? null
+    const stageId = input.stageId || wf.stages[0]?.id || null
+    if (stageId && !wf.stages.some((s) => s.id === stageId))
+      throw new Error('起始阶段不属于该工作流: ' + stageId)
     const id = randomUUID()
     const ts = now()
     this.db
@@ -393,7 +395,7 @@ export class Repository {
         input.title.trim(),
         input.description ?? '',
         input.workflowId,
-        first,
+        stageId,
         'active',
         ts,
         ts,

@@ -38,7 +38,8 @@ const aiWorkflow: AiWorkflowApi = {
   tasks: {
     list: (workflowId) => invoke('tasks.list', workflowId),
     create: (input) => invoke('tasks.create', input),
-    move: (id, action) => invoke('tasks.move', id, action),
+    moveToStage: (id, stageId) => invoke('tasks.moveToStage', id, stageId),
+    complete: (id) => invoke('tasks.complete', id),
     remove: (id) => invoke('tasks.remove', id),
   },
   runs: {

@@ -10,7 +10,6 @@ export type PromptMode = 'stdin' | 'arg'
 export type EntryMode = 'none' | 'agent' | 'user'
 export type TaskStatus = 'active' | 'completed'
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-export type TaskMoveAction = 'approve' | 'reject' | 'next'
 
 export interface Runtime {
   id: string
@@ -111,6 +110,8 @@ export interface TaskInput {
   title: string
   description?: string
   workflowId: string
+  /** 起始阶段；缺省为首阶段 */
+  stageId?: string
 }
 
 export interface Run {
@@ -151,7 +152,10 @@ export interface AiWorkflowApi {
   tasks: {
     list(workflowId: string): Promise<Task[]>
     create(input: TaskInput): Promise<Task>
-    move(id: string, action: TaskMoveAction): Promise<Task>
+    /** 看板拖拽：把任务直接放到目标阶段（执行中的阶段除外） */
+    moveToStage(id: string, stageId: string): Promise<Task>
+    /** 看板拖拽到「已完成」区：任务移出看板 */
+    complete(id: string): Promise<Task>
     remove(id: string): Promise<void>
   }
   runs: {

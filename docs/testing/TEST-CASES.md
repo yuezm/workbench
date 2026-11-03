@@ -40,21 +40,21 @@
 
 ## ai-workflow（工作流与执行）
 
-| 用例       | SPEC 规则                                                           | 层级 | 测试位置                                            |
-| ---------- | ------------------------------------------------------------------- | ---- | --------------------------------------------------- |
-| TC-AIW-001 | 三种 `entry_mode` 的进入效果（none/agent/user）                     | 单元 | `src/shared/stage-machine.test.ts`                  |
-| TC-AIW-002 | 默认目标解析：完成后下一阶段/终端完成；打回上一阶段/首阶段原地      | 单元 | `src/shared/stage-machine.test.ts`                  |
-| TC-AIW-003 | 事件转移：RUN_SUCCEEDED / RUN_FAILED / APPROVE / REJECT / MOVE_NEXT | 单元 | `src/shared/stage-machine.test.ts`                  |
-| TC-AIW-004 | 建表 6 张、外键开启、schema 幂等、外键违反被拒                      | 单元 | `src/main/ai-workflow/db.test.ts`                   |
-| TC-AIW-005 | repository CRUD、唯一/外键/级联、被引用删除拒绝、阶段回挂           | 单元 | `repository.test.ts` + `repository.extra.test.ts`   |
-| TC-AIW-006 | 阶段目标下标校验（越界/自指）、agent 阶段必须选智能体               | 单元 | `repository.extra.test.ts` + `ipc.test.ts`          |
-| TC-AIW-007 | 任务创建进入首阶段、move 语义、agent 阶段入队 queued run            | 契约 | `src/main/ai-workflow/ipc.test.ts`                  |
-| TC-AIW-008 | runner：单并发串行、成功推进、失败退回、取消、resumeQueued          | 单元 | `runner.test.ts`                                    |
-| TC-AIW-009 | DSH adapter：参数模板/`{prompt}`/stdin、输出捕获、退出码            | 单元 | `runtime/deepseek-harness.test.ts`（真实 spawn）    |
-| TC-AIW-010 | `window.aiWorkflow` 契约：方法转发、onChanged 订阅/退订             | 契约 | `src/preload/index.test.ts`                         |
-| TC-AIW-011 | 页面全流程与各错误分支（加载/移动/创建/保存/运行记录）              | 单元 | `AiWorkflowPage.test.tsx`                           |
-| TC-AIW-012 | 组件交互：看板/TaskCard/编辑器/管理面板/运行记录                    | 单元 | `components/*.test.tsx`                             |
-| TC-AIW-013 | 架构边界：renderer 禁 electron/Node、main 禁 import renderer        | 静态 | ESLint `no-restricted-imports`（见 CONSTRAINTS.md） |
+| 用例       | SPEC 规则                                                                     | 层级 | 测试位置                                            |
+| ---------- | ----------------------------------------------------------------------------- | ---- | --------------------------------------------------- |
+| TC-AIW-001 | 三种 `entry_mode` 的进入效果（none/agent/user）                               | 单元 | `src/shared/stage-machine.test.ts`                  |
+| TC-AIW-002 | 默认目标解析：完成后下一阶段/终端完成；打回上一阶段/首阶段原地                | 单元 | `src/shared/stage-machine.test.ts`                  |
+| TC-AIW-003 | 事件转移：RUN_SUCCEEDED / RUN_FAILED；手动 MOVE_TO / COMPLETE                 | 单元 | `src/shared/stage-machine.test.ts`                  |
+| TC-AIW-004 | 建表 6 张、外键开启、schema 幂等、外键违反被拒                                | 单元 | `src/main/ai-workflow/db.test.ts`                   |
+| TC-AIW-005 | repository CRUD、唯一/外键/级联、被引用删除拒绝、阶段回挂                     | 单元 | `repository.test.ts` + `repository.extra.test.ts`   |
+| TC-AIW-006 | 阶段目标下标校验（越界/自指）、agent 阶段必须选智能体                         | 单元 | `repository.extra.test.ts` + `ipc.test.ts`          |
+| TC-AIW-007 | 任务创建可指定起始阶段；拖拽落点进入阶段；拖到「已完成」；执行中拒绝拖动/完成 | 契约 | `src/main/ai-workflow/ipc.test.ts`                  |
+| TC-AIW-008 | runner：单并发串行、成功推进、失败退回、取消、resumeQueued                    | 单元 | `runner.test.ts`                                    |
+| TC-AIW-009 | DSH adapter：参数模板/`{prompt}`/stdin、输出捕获、退出码                      | 单元 | `runtime/deepseek-harness.test.ts`（真实 spawn）    |
+| TC-AIW-010 | `window.aiWorkflow` 契约：方法转发、onChanged 订阅/退订                       | 契约 | `src/preload/index.test.ts`                         |
+| TC-AIW-011 | 页面全流程与各错误分支（加载/拖拽/完成/创建/保存/运行记录）                   | 单元 | `AiWorkflowPage.test.tsx`                           |
+| TC-AIW-012 | 组件交互：看板拖放、卡片可拖性、起始阶段选择、编辑器与管理面板                | 单元 | `components/*.test.tsx`                             |
+| TC-AIW-013 | 架构边界：renderer 禁 electron/Node、main 禁 import renderer                  | 静态 | ESLint `no-restricted-imports`（见 CONSTRAINTS.md） |
 
 ## E2E（构建产物 + 真实 Electron）
 
@@ -67,16 +67,16 @@
 
 ## 手动验收清单（感官/系统行为，无法自动化）
 
-| 用例       | 验证点                                                            | 来源                             |
-| ---------- | ----------------------------------------------------------------- | -------------------------------- |
-| TC-MAN-001 | 阶段自然结束时铃声可闻                                            | SPEC-pomodoro Success Criteria 4 |
-| TC-MAN-002 | 系统通知在 Windows 通知中心弹出（AppUserModelId 生效，归属正确）  | 同上                             |
-| TC-MAN-003 | 窗口失焦、系统休眠恢复后倒计时仍准确                              | SPEC-pomodoro Success Criteria 5 |
-| TC-MAN-004 | 各段时长设为秒级，手走完整 4 轮流程：正确进长休、休息后回专注     | SPEC-pomodoro Success Criteria 2 |
-| TC-MAN-005 | 打包版（`pnpm build` 产物）中通知与铃声正常                       | SPEC-shell Success Criteria 4    |
-| TC-MAN-006 | 添加 DeepSeek Harness 运行时，agent 阶段真跑并回写输出            | SPEC-ai-workflow Success 3       |
-| TC-MAN-007 | 重启工作台后运行时/智能体/工作流/任务/运行记录仍在（SQLite 落盘） | SPEC-ai-workflow Success 1       |
-| TC-MAN-008 | 人工阶段「通过 / 打回」按配置目标推进 / 退回                      | SPEC-ai-workflow Success 4       |
+| 用例       | 验证点                                                             | 来源                             |
+| ---------- | ------------------------------------------------------------------ | -------------------------------- |
+| TC-MAN-001 | 阶段自然结束时铃声可闻                                             | SPEC-pomodoro Success Criteria 4 |
+| TC-MAN-002 | 系统通知在 Windows 通知中心弹出（AppUserModelId 生效，归属正确）   | 同上                             |
+| TC-MAN-003 | 窗口失焦、系统休眠恢复后倒计时仍准确                               | SPEC-pomodoro Success Criteria 5 |
+| TC-MAN-004 | 各段时长设为秒级，手走完整 4 轮流程：正确进长休、休息后回专注      | SPEC-pomodoro Success Criteria 2 |
+| TC-MAN-005 | 打包版（`pnpm build` 产物）中通知与铃声正常                        | SPEC-shell Success Criteria 4    |
+| TC-MAN-006 | 添加 DeepSeek Harness 运行时，agent 阶段真跑并回写输出             | SPEC-ai-workflow Success 3       |
+| TC-MAN-007 | 重启工作台后运行时/智能体/工作流/任务/运行记录仍在（SQLite 落盘）  | SPEC-ai-workflow Success 1       |
+| TC-MAN-008 | 看板拖拽换阶段与拖到「已完成」的手感与落点高亮（执行中卡片不可拖） | SPEC-ai-workflow Success 4       |
 
 ## 质量门禁摘要
 

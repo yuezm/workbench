@@ -20,6 +20,15 @@
 - 作为使用者，我新建一个任务、选中该工作流；任务进入首阶段，按阶段配置自动交给智能体执行或停下等我处理；我在看板上点「通过 / 打回」，卡片按配置推进或退回。
 - 作为使用者，关掉工作台再打开，我的运行时/智能体/工作流/任务/运行记录都还在。
 
+## 界面结构（2026-11-03 调整）
+
+app 内只有一个页面，顶部用分段控件（`components/ui/segmented.tsx`）在两个互斥视图间切换：
+
+- **工作台**（默认）：左侧看板（列 = 当前工作流的阶段），右侧运行记录面板（按任务查看 run）。顶栏只保留工作流切换器与「新建任务」。
+- **设置**：运行时 / 智能体 / 工作流定义三块配置区；工作流的新建与编辑入口在「工作流」区，编辑时其下展开 `WorkflowEditor`。
+
+规则：配置项（运行时、智能体、工作流定义）**只在设置视图出现**，工作台不展示任何配置表单。
+
 ## Tech Stack
 
 - 与 shell 相同：Electron 45 + electron-vite 6 + React 19 + TypeScript 6（strict）。
@@ -46,7 +55,7 @@ Check:    pnpm check           # typecheck + lint + test:coverage（提交前必
 ```
 src/renderer/src/apps/ai-workflow/
 ├── index.tsx                  # AppDefinition（aiWorkflowApp：id/name/icon/component）
-├── AiWorkflowPage.tsx         # 布局：工作流切换 + 看板 + 管理面板入口
+├── AiWorkflowPage.tsx         # 布局：工作台 / 设置 双视图（见「界面结构」）
 ├── api.ts                     # 对 window.aiWorkflow 的薄封装（类型安全）
 ├── model/
 │   ├── types.ts               # 领域实体类型（Runtime/Agent/Workflow/Stage/Task/Run）
@@ -55,10 +64,11 @@ src/renderer/src/apps/ai-workflow/
 ├── hooks/
 │   └── useWorkflow.ts         # 拉取数据 + 订阅 onChanged 失效刷新
 └── components/
-    ├── WorkflowSwitcher.tsx   # 顶部工作流切换
+    ├── WorkflowSwitcher.tsx   # 看板顶部：切换当前查看的工作流
+    ├── WorkflowManager.tsx    # 设置区：工作流清单（新建 / 选择 / 编辑）
     ├── KanbanBoard.tsx        # 列 = 阶段；渲染任务卡
     ├── TaskCard.tsx           # 标题/阶段/指派对象/通过·打回按钮
-    ├── TaskDialog.tsx         # 新建/编辑任务
+    ├── TaskDialog.tsx         # 新建/编辑任务（居中模态）
     ├── WorkflowEditor.tsx     # 阶段增删改：进入时/完成后进入/打回退回到
     ├── RuntimeManager.tsx     # 运行时增删改
     ├── AgentManager.tsx       # 智能体增删改（名称/描述/运行时/System Prompt）

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import type {
   Agent,
   Run,
@@ -8,6 +8,7 @@ import type {
   WorkflowInput,
   WorkflowWithStages,
 } from '../../../../shared/ai-workflow-api'
+import { Segmented } from '../../components/ui/segmented'
 import { wfApi } from './api'
 import { AgentManager } from './components/AgentManager'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -15,9 +16,57 @@ import { RunLog } from './components/RunLog'
 import { RuntimeManager } from './components/RuntimeManager'
 import { TaskDialog } from './components/TaskDialog'
 import { WorkflowEditor } from './components/WorkflowEditor'
+import { WorkflowManager } from './components/WorkflowManager'
 import { WorkflowSwitcher } from './components/WorkflowSwitcher'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+type View = 'board' | 'settings'
+
+function SectionIcon({ path }: { path: string }): ReactElement {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={path} />
+    </svg>
+  )
+}
+
+function SettingsSection({
+  title,
+  hint,
+  icon,
+  children,
+}: {
+  title: string
+  hint: string
+  icon: ReactNode
+  children: ReactNode
+}): ReactElement {
+  return (
+    <section className="animate-rise rounded-2xl border border-line bg-white/[0.03] p-5 shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)] backdrop-blur-xl">
+      <header className="mb-4 flex items-center gap-2.5">
+        <span className="grid size-7 place-items-center rounded-lg bg-focus/15 text-focus">
+          {icon}
+        </span>
+        <span className="flex flex-col leading-tight">
+          <h2 className="text-[13px] font-medium tracking-wide text-ink">{title}</h2>
+          <span className="text-[11px] text-ink-faint">{hint}</span>
+        </span>
+      </header>
+      {children}
+    </section>
+  )
+}
 
 export function AiWorkflowPage(): ReactElement {
   const [workflows, setWorkflows] = useState<WorkflowWithStages[]>([])
@@ -29,6 +78,7 @@ export function AiWorkflowPage(): ReactElement {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
   const [runs, setRuns] = useState<Run[]>([])
+  const [view, setView] = useState<View>('board')
 
   const loadRunsFor = async (taskId: string | undefined): Promise<void> => {
     if (!taskId) {
@@ -42,11 +92,7 @@ export function AiWorkflowPage(): ReactElement {
     }
   }
 
-  const loadTasksFor = async (id: string | undefined): Promise<void> => {
-    if (!id) {
-      setTasks([])
-      return
-    }
+  const loadTasksFor = async (id: string): Promise<void> => {
     try {
       setTasks(await wfApi().tasks.list(id))
     } catch (e) {
@@ -140,7 +186,7 @@ export function AiWorkflowPage(): ReactElement {
 
   const save = async (input: WorkflowInput): Promise<void> => {
     try {
-      let targetId = activeId
+      let targetId = editing ? editing.id : (activeId ?? '')
       if (editing) {
         await wfApi().workflows.update(editing.id, input)
       } else {
@@ -161,7 +207,7 @@ export function AiWorkflowPage(): ReactElement {
     void (async () => {
       try {
         await wfApi().tasks.move(id, action)
-        await loadTasksFor(activeId)
+        await loadTasksFor(activeId ?? '')
         await loadRunsFor(selectedTaskId)
       } catch (e) {
         setError(errMsg(e))
@@ -172,7 +218,7 @@ export function AiWorkflowPage(): ReactElement {
   const createTask = async (input: TaskInput): Promise<void> => {
     try {
       await wfApi().tasks.create(input)
-      await loadTasksFor(activeId)
+      await loadTasksFor(activeId ?? '')
       await loadRunsFor(selectedTaskId)
       setDialogOpen(false)
     } catch (e) {
@@ -183,64 +229,52 @@ export function AiWorkflowPage(): ReactElement {
   const active = workflows.find((w) => w.id === activeId)
 
   return (
-    <div className="flex h-full flex-col gap-4 overflow-auto p-6">
-      <header className="flex items-center justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-ink">AI 工作流</h1>
-          <p className="mt-1 text-sm text-ink-dim">配置运行时与智能体，用看板推进多阶段工作流。</p>
+    <div className="flex h-full flex-col">
+      {/* 顶栏：标题 + 工作流切换 + 视图切换 */}
+      <header className="flex shrink-0 items-center gap-4 border-b border-line bg-white/[0.02] px-6 py-3 backdrop-blur-xl">
+        <h1 className="text-[15px] font-semibold tracking-wide text-ink">AI 工作流</h1>
+        {view === 'board' && (
+          <WorkflowSwitcher workflows={workflows} activeId={activeId} onSelect={setActiveId} />
+        )}
+        <div className="ml-auto">
+          <Segmented
+            value={view}
+            onChange={setView}
+            ariaLabel="视图切换"
+            options={[
+              { value: 'board', label: '工作台' },
+              { value: 'settings', label: '设置' },
+            ]}
+          />
         </div>
-        <WorkflowSwitcher
-          workflows={workflows}
-          activeId={activeId}
-          onSelect={setActiveId}
-          onNew={() => setEditing(null)}
-          onEdit={() => setEditing(active ?? null)}
-        />
       </header>
 
-      {error && <p className="rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-400">{error}</p>}
-
-      <details open className="rounded-2xl border border-line bg-white/[0.02] p-4">
-        <summary className="cursor-pointer text-sm font-medium text-ink">运行时</summary>
-        <div className="mt-3">
-          <RuntimeManager />
-        </div>
-      </details>
-
-      <details className="rounded-2xl border border-line bg-white/[0.02] p-4">
-        <summary className="cursor-pointer text-sm font-medium text-ink">智能体</summary>
-        <div className="mt-3">
-          <AgentManager />
-        </div>
-      </details>
-
-      {editing !== undefined ? (
-        <WorkflowEditor
-          workflow={editing}
-          agents={agents}
-          onSave={save}
-          onCancel={() => setEditing(undefined)}
-        />
-      ) : active ? (
-        <KanbanBoard
-          workflow={active}
-          tasks={tasks}
-          onMove={move}
-          onNewTask={() => setDialogOpen(true)}
-        />
-      ) : (
-        <div className="grid flex-1 place-items-center rounded-2xl border border-line bg-white/[0.02] px-6 py-10 text-center text-sm text-ink-faint">
-          尚无工作流。点击「新建工作流」开始。
-        </div>
+      {error && (
+        <p className="mx-6 mt-4 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</p>
       )}
 
-      {active && (
-        <details className="rounded-2xl border border-line bg-white/[0.02] p-4">
-          <summary className="cursor-pointer text-sm font-medium text-ink">运行记录</summary>
-          <div className="mt-3 flex flex-col gap-2">
+      {view === 'board' ? (
+        <div className="flex min-h-0 flex-1 gap-4 p-6">
+          <section className="flex min-w-0 flex-1 flex-col gap-3">
+            {active ? (
+              <KanbanBoard
+                workflow={active}
+                tasks={tasks}
+                onMove={move}
+                onNewTask={() => setDialogOpen(true)}
+              />
+            ) : (
+              <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
+                尚无工作流。到「设置」里新建一条，再回来推进任务。
+              </div>
+            )}
+          </section>
+
+          <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-hidden rounded-2xl border border-line bg-white/[0.02] p-4">
+            <h2 className="text-[13px] font-medium tracking-wide text-ink">运行记录</h2>
             <select
               aria-label="选择任务查看运行"
-              className="rounded-lg border border-line bg-white/[0.03] px-2.5 py-1.5 text-sm text-ink outline-none focus:border-focus"
+              className="h-9 w-full rounded-lg border border-line bg-black/25 px-3 text-sm text-ink transition-colors duration-200 outline-none hover:border-line-strong focus:border-focus/70"
               value={selectedTaskId ?? ''}
               onChange={(e) => setSelectedTaskId(e.target.value || undefined)}
             >
@@ -251,9 +285,55 @@ export function AiWorkflowPage(): ReactElement {
                 </option>
               ))}
             </select>
-            <RunLog runs={runs} />
-          </div>
-        </details>
+            <div className="min-h-0 flex-1 overflow-auto pr-1">
+              <RunLog runs={runs} />
+            </div>
+          </aside>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
+          <SettingsSection
+            title="运行时"
+            hint="本机执行的 CLI，智能体绑定到运行时"
+            icon={<SectionIcon path="M4 5h16v4H4zM6 9v10h12V9M10 13h4" />}
+          >
+            <RuntimeManager />
+          </SettingsSection>
+
+          <SettingsSection
+            title="智能体"
+            hint="运行时 + 能力（System Prompt）"
+            icon={
+              <SectionIcon path="M12 3a4 4 0 0 1 4 4v1a4 4 0 0 1-4 4 4 4 0 0 1-4-4V7a4 4 0 0 1 4-4ZM5 21a7 7 0 0 1 14 0z" />
+            }
+          >
+            <AgentManager />
+          </SettingsSection>
+
+          <SettingsSection
+            title="工作流"
+            hint="阶段序列与流转规则"
+            icon={<SectionIcon path="M4 6h6v5H4zM14 6h6v5h-6zM4 13h16v5H4z" />}
+          >
+            <WorkflowManager
+              workflows={workflows}
+              activeId={activeId}
+              onSelect={setActiveId}
+              onEdit={(w) => setEditing(w)}
+              onNew={() => setEditing(null)}
+            />
+            {editing !== undefined && (
+              <div className="mt-4">
+                <WorkflowEditor
+                  workflow={editing}
+                  agents={agents}
+                  onSave={save}
+                  onCancel={() => setEditing(undefined)}
+                />
+              </div>
+            )}
+          </SettingsSection>
+        </div>
       )}
 
       {dialogOpen && activeId && (

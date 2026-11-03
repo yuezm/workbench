@@ -87,4 +87,16 @@ describe('WorkflowEditor', () => {
     expect(screen.getByLabelText('阶段1完成后进入')).toHaveValue('1')
     expect(screen.getByLabelText('阶段2打回退回到')).toHaveValue('0')
   })
+
+  it('工作流没有描述时描述输入框留空', () => {
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '无描述',
+      description: undefined as unknown as string,
+      createdAt: 't',
+      stages: [],
+    }
+    render(<WorkflowEditor workflow={existing} agents={[]} onSave={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.getByLabelText('工作流描述')).toHaveValue('')
+  })
 })

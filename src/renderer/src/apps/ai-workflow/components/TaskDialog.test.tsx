@@ -29,4 +29,20 @@ describe('TaskDialog', () => {
     await user.click(screen.getByRole('button', { name: '创建任务' }))
     expect(onSave).not.toHaveBeenCalled()
   })
+
+  it('Esc 关闭弹窗', async () => {
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(<TaskDialog workflowId="w1" onSave={vi.fn()} onCancel={onCancel} />)
+    await user.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalled()
+  })
+
+  it('右上角关闭按钮回调取消', async () => {
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(<TaskDialog workflowId="w1" onSave={vi.fn()} onCancel={onCancel} />)
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    expect(onCancel).toHaveBeenCalled()
+  })
 })

@@ -141,4 +141,63 @@ describe('AgentManager', () => {
     unmount()
     await new Promise((r) => setTimeout(r, 20))
   })
+
+  it('刷新列表失败展示错误', async () => {
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce([agent()])
+      .mockRejectedValue(new Error('reload-boom'))
+    setApi({
+      agents: {
+        list,
+        create: vi.fn().mockResolvedValue(agent({ id: 'a2' })),
+        remove: vi.fn(),
+        update: vi.fn(),
+      },
+      runtimes: { list: vi.fn().mockResolvedValue([rt]) },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<AgentManager />)
+    expect(await screen.findByText('old')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText('智能体名称'), 'x')
+    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    expect(await screen.findByText('reload-boom')).toBeInTheDocument()
+  })
+
+  it('新增运行时后经变更事件同步绑定下拉', async () => {
+    let runtimes: Runtime[] = []
+    let changed: (() => void) | undefined
+    setApi({
+      agents: {
+        list: vi.fn().mockResolvedValue([]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+      },
+      runtimes: {
+        list: vi.fn(async () => runtimes),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+      },
+      onChanged: vi.fn((cb: () => void) => {
+        changed = cb
+        return () => {}
+      }),
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<AgentManager />)
+    expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
+
+    runtimes = [rt]
+    changed?.()
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加智能体' })).toBeEnabled())
+    expect(screen.getByLabelText('智能体运行时')).toHaveValue('r1')
+
+    // 运行时被删光后，下拉回落到空
+    runtimes = []
+    changed?.()
+    await waitFor(() => expect(screen.getByLabelText('智能体运行时')).toHaveValue(''))
+  })
 })

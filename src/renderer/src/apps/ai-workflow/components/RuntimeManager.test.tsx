@@ -98,4 +98,33 @@ describe('RuntimeManager', () => {
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
     expect(await screen.findByText('remove-fail')).toBeInTheDocument()
   })
+
+  it('加载未完成即卸载不报错', async () => {
+    const slow = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve([]), 10)))
+    setApi({
+      runtimes: { list: slow, create: vi.fn(), remove: vi.fn(), update: vi.fn() },
+    } as unknown as Partial<AiWorkflowApi>)
+    const { unmount } = render(<RuntimeManager />)
+    unmount()
+    await new Promise((r) => setTimeout(r, 20))
+  })
+
+  it('刷新列表失败展示错误', async () => {
+    const list = vi.fn().mockResolvedValueOnce([base]).mockRejectedValue(new Error('reload-boom'))
+    setApi({
+      runtimes: {
+        list,
+        create: vi.fn().mockResolvedValue({ ...base, id: 'r2' }),
+        remove: vi.fn(),
+        update: vi.fn(),
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    expect(await screen.findByText('ds')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText('运行时名称'), 'x')
+    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    expect(await screen.findByText('reload-boom')).toBeInTheDocument()
+  })
 })

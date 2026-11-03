@@ -6,6 +6,8 @@ import type {
   WorkflowInput,
   WorkflowWithStages,
 } from '../../../../../shared/ai-workflow-api'
+import { Button } from '../../../components/ui/button'
+import { cn } from '../../../lib/cn'
 
 interface WorkflowEditorProps {
   workflow: WorkflowWithStages | null
@@ -14,8 +16,11 @@ interface WorkflowEditorProps {
   onCancel: () => void
 }
 
+const panelCls =
+  'rounded-2xl border border-line bg-white/[0.03] backdrop-blur-xl shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)]'
 const inputCls =
-  'rounded-lg border border-line bg-white/[0.03] px-2 py-1 text-sm text-ink outline-none focus:border-focus'
+  'h-9 w-full rounded-lg border border-line bg-black/25 px-3 text-sm text-ink placeholder:text-ink-faint outline-none transition-colors duration-200 hover:border-line-strong focus:border-focus/70 focus:bg-black/35'
+const labelCls = 'text-[11px] font-medium tracking-wide text-ink-faint'
 
 function indexOfId(workflow: WorkflowWithStages, id: string | null): number {
   if (!id) return -1
@@ -45,6 +50,29 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       }
     }),
   }
+}
+
+function WorkflowIcon({ className }: { className?: string }): ReactElement {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <circle cx="6" cy="6" r="2.2" />
+      <circle cx="6" cy="18" r="2.2" />
+      <circle cx="18" cy="12" r="2.2" />
+      <path d="M6 8.2v7.6" />
+      <path d="M8.2 6h3.3a3.9 3.9 0 0 1 4.3 3.9" />
+    </svg>
+  )
 }
 
 export function WorkflowEditor({
@@ -89,13 +117,18 @@ export function WorkflowEditor({
   const targetOptions = draft.stages.map((s, i) => ({ i, name: s.name || `阶段${i + 1}` }))
 
   return (
-    <form
-      className="flex flex-col gap-3 rounded-2xl border border-line bg-white/[0.03] p-4"
-      onSubmit={save}
-    >
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-xs text-ink-dim">
-          工作流名称
+    <form className={cn(panelCls, 'flex animate-rise flex-col gap-5 p-5')} onSubmit={save}>
+      <div className="flex items-center gap-2">
+        <WorkflowIcon className="text-focus" />
+        <div className="flex flex-col">
+          <h3 className="text-[13px] font-medium tracking-wide text-ink">工作流定义</h3>
+          <p className="text-xs text-ink-faint">配置阶段流转与智能体分工</p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex w-56 flex-col gap-1.5">
+          <span className={labelCls}>工作流名称</span>
           <input
             aria-label="工作流名称"
             className={inputCls}
@@ -103,8 +136,8 @@ export function WorkflowEditor({
             onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
           />
         </label>
-        <label className="flex flex-1 flex-col gap-1 text-xs text-ink-dim">
-          描述
+        <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <span className={labelCls}>描述</span>
           <input
             aria-label="工作流描述"
             className={inputCls}
@@ -114,118 +147,120 @@ export function WorkflowEditor({
         </label>
       </div>
 
-      <ul className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         {draft.stages.map((s, i) => (
-          <li key={i} className="flex flex-wrap items-end gap-2 rounded-xl border border-line p-2">
-            <label className="flex flex-col gap-1 text-xs text-ink-dim">
-              阶段名
-              <input
-                aria-label={`阶段${i + 1}名称`}
-                className={inputCls}
-                value={s.name}
-                onChange={(e) => patchStage(i, { name: e.target.value })}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-ink-dim">
-              进入时
-              <select
-                aria-label={`阶段${i + 1}进入方式`}
-                className={inputCls}
-                value={s.entryMode}
-                onChange={(e) => patchStage(i, { entryMode: e.target.value as EntryMode })}
-              >
-                <option value="none">不交接</option>
-                <option value="agent">交给智能体</option>
-                <option value="user">交给用户</option>
-              </select>
-            </label>
-            {s.entryMode === 'agent' && (
-              <label className="flex flex-col gap-1 text-xs text-ink-dim">
-                智能体
-                <select
-                  aria-label={`阶段${i + 1}智能体`}
+          <div key={i} className="rounded-xl border border-line bg-white/[0.02] p-3">
+            <div className="flex items-end gap-3">
+              <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-[11px] font-medium text-focus">
+                {i + 1}
+              </span>
+              <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <span className={labelCls}>阶段名</span>
+                <input
+                  aria-label={`阶段${i + 1}名称`}
                   className={inputCls}
-                  value={s.agentId ?? ''}
-                  onChange={(e) => patchStage(i, { agentId: e.target.value || null })}
+                  value={s.name}
+                  onChange={(e) => patchStage(i, { name: e.target.value })}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-red-400 hover:text-red-300"
+                onClick={() => removeStage(i)}
+              >
+                删除阶段
+              </Button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <label className="flex flex-col gap-1.5">
+                <span className={labelCls}>进入时</span>
+                <select
+                  aria-label={`阶段${i + 1}进入方式`}
+                  className={inputCls}
+                  value={s.entryMode}
+                  onChange={(e) => patchStage(i, { entryMode: e.target.value as EntryMode })}
                 >
-                  <option value="">（选择）</option>
-                  {agents.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
+                  <option value="none">不交接</option>
+                  <option value="agent">交给智能体</option>
+                  <option value="user">交给用户</option>
+                </select>
+              </label>
+              {s.entryMode === 'agent' && (
+                <label className="flex flex-col gap-1.5">
+                  <span className={labelCls}>智能体</span>
+                  <select
+                    aria-label={`阶段${i + 1}智能体`}
+                    className={inputCls}
+                    value={s.agentId ?? ''}
+                    onChange={(e) => patchStage(i, { agentId: e.target.value || null })}
+                  >
+                    <option value="">（选择）</option>
+                    {agents.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="flex flex-col gap-1.5">
+                <span className={labelCls}>完成后进入</span>
+                <select
+                  aria-label={`阶段${i + 1}完成后进入`}
+                  className={inputCls}
+                  value={s.onCompleteIndex ?? ''}
+                  onChange={(e) =>
+                    patchStage(i, {
+                      onCompleteIndex: e.target.value === '' ? null : Number(e.target.value),
+                    })
+                  }
+                >
+                  <option value="">下一阶段/结束</option>
+                  {targetOptions.map((t) => (
+                    <option key={t.i} value={t.i}>
+                      {t.name}
                     </option>
                   ))}
                 </select>
               </label>
-            )}
-            <label className="flex flex-col gap-1 text-xs text-ink-dim">
-              完成后进入
-              <select
-                aria-label={`阶段${i + 1}完成后进入`}
-                className={inputCls}
-                value={s.onCompleteIndex ?? ''}
-                onChange={(e) =>
-                  patchStage(i, {
-                    onCompleteIndex: e.target.value === '' ? null : Number(e.target.value),
-                  })
-                }
-              >
-                <option value="">下一阶段/结束</option>
-                {targetOptions.map((t) => (
-                  <option key={t.i} value={t.i}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-ink-dim">
-              打回退回到
-              <select
-                aria-label={`阶段${i + 1}打回退回到`}
-                className={inputCls}
-                value={s.onRejectIndex ?? ''}
-                onChange={(e) =>
-                  patchStage(i, {
-                    onRejectIndex: e.target.value === '' ? null : Number(e.target.value),
-                  })
-                }
-              >
-                <option value="">上一阶段/原地</option>
-                {targetOptions.map((t) => (
-                  <option key={t.i} value={t.i}>
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="text-xs text-red-400 hover:underline"
-              onClick={() => removeStage(i)}
-            >
-              删除阶段
-            </button>
-          </li>
+              <label className="flex flex-col gap-1.5">
+                <span className={labelCls}>打回退回到</span>
+                <select
+                  aria-label={`阶段${i + 1}打回退回到`}
+                  className={inputCls}
+                  value={s.onRejectIndex ?? ''}
+                  onChange={(e) =>
+                    patchStage(i, {
+                      onRejectIndex: e.target.value === '' ? null : Number(e.target.value),
+                    })
+                  }
+                >
+                  <option value="">上一阶段/原地</option>
+                  {targetOptions.map((t) => (
+                    <option key={t.i} value={t.i}>
+                      {t.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </div>
         ))}
-      </ul>
+      </div>
 
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="rounded-lg border border-line px-3 py-1.5 text-sm text-ink-dim"
-          onClick={addStage}
-        >
+      <div className="flex items-center gap-2 border-t border-line pt-4">
+        <Button type="button" variant="secondary" size="sm" onClick={addStage}>
           添加阶段
-        </button>
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-lg bg-focus/15 px-3 py-1.5 text-sm text-focus disabled:opacity-40"
-        >
+        </Button>
+        <Button type="submit" variant="primary" size="sm" disabled={saving} className="ml-auto">
           保存工作流
-        </button>
-        <button type="button" className="text-sm text-ink-faint hover:underline" onClick={onCancel}>
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           取消
-        </button>
+        </Button>
       </div>
     </form>
   )

@@ -1,11 +1,65 @@
-import { useEffect, useState, type ReactElement } from 'react'
-import type { Agent, Runtime } from '../../../../../shared/ai-workflow-api'
+import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import type { Agent, AiWorkflowApi, Runtime } from '../../../../../shared/ai-workflow-api'
+import { Button } from '../../../components/ui/button'
+import { cn } from '../../../lib/cn'
 import { wfApi } from '../api'
 
+const panelCls =
+  'rounded-2xl border border-line bg-white/[0.03] backdrop-blur-xl shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)]'
 const inputCls =
-  'rounded-lg border border-line bg-white/[0.03] px-2.5 py-1.5 text-sm text-ink outline-none focus:border-focus'
+  'h-9 w-full rounded-lg border border-line bg-black/25 px-3 text-sm text-ink placeholder:text-ink-faint outline-none transition-colors duration-200 hover:border-line-strong focus:border-focus/70 focus:bg-black/35'
+const labelCls = 'text-[11px] font-medium tracking-wide text-ink-faint'
+const badgeCls = 'rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] tabular-nums text-ink-dim'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+/** 订阅 ai-workflow 变更事件；注入的 api 可能没有 onChanged（测试桩） */
+function subscribe(cb: () => void): () => void {
+  const onChanged = (wfApi() as Partial<AiWorkflowApi>).onChanged
+  return onChanged ? onChanged(cb) : () => {}
+}
+
+function RobotIcon({ className }: { className?: string }): ReactElement {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <rect x="4" y="8" width="16" height="12" rx="3" />
+      <path d="M12 8V4.5" />
+      <path d="M9 14h.01M15 14h.01" />
+      <path d="M9.5 17.5h5" />
+    </svg>
+  )
+}
+
+function ListIcon({ className }: { className?: string }): ReactElement {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M8 6h13M8 12h13M8 18h13" />
+      <path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
+    </svg>
+  )
+}
 
 export function AgentManager(): ReactElement {
   const [agents, setAgents] = useState<Agent[]>([])
@@ -16,17 +70,18 @@ export function AgentManager(): ReactElement {
   const [runtimeId, setRuntimeId] = useState('')
   const [systemPrompt, setSystemPrompt] = useState('')
 
-  const reload = async (): Promise<void> => {
+  const refresh = useCallback(async (): Promise<void> => {
     try {
       const [a, r] = await Promise.all([wfApi().agents.list(), wfApi().runtimes.list()])
       setAgents(a)
       setRuntimes(r)
-      setRuntimeId((prev) => prev || r[0]?.id || '')
+      setRuntimeId((prev) => (prev && r.some((x) => x.id === prev) ? prev : (r[0]?.id ?? '')))
       setError(null)
     } catch (e) {
       setError(errMsg(e))
     }
-  }
+  }, [])
+
   useEffect(() => {
     let alive = true
     void (async () => {
@@ -40,10 +95,15 @@ export function AgentManager(): ReactElement {
         if (alive) setError(errMsg(e))
       }
     })()
+    // 运行时是本表单的上游：新增/删除运行时后要同步「绑定运行时」下拉
+    const off = subscribe(() => {
+      if (alive) void refresh()
+    })
     return () => {
       alive = false
+      off()
     }
-  }, [])
+  }, [refresh])
 
   const submit = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
@@ -52,7 +112,7 @@ export function AgentManager(): ReactElement {
       setName('')
       setDescription('')
       setSystemPrompt('')
-      await reload()
+      await refresh()
     } catch (e) {
       setError(errMsg(e))
     }
@@ -60,7 +120,7 @@ export function AgentManager(): ReactElement {
   const remove = async (id: string): Promise<void> => {
     try {
       await wfApi().agents.remove(id)
-      await reload()
+      await refresh()
     } catch (e) {
       setError(errMsg(e))
     }
@@ -69,86 +129,123 @@ export function AgentManager(): ReactElement {
   const runtimeName = (id: string): string => runtimes.find((r) => r.id === id)?.name ?? id
 
   return (
-    <div className="flex flex-col gap-3">
-      {runtimes.length === 0 && (
-        <p className="text-xs text-ink-faint">请先在上方添加一个运行时。</p>
-      )}
-      <form className="flex flex-wrap items-end gap-2" onSubmit={submit}>
-        <label className="flex flex-col gap-1 text-xs text-ink-dim">
-          名称
-          <input
-            aria-label="智能体名称"
-            className={inputCls}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-ink-dim">
-          运行时
-          <select
-            aria-label="智能体运行时"
-            className={inputCls}
-            value={runtimeId}
-            onChange={(e) => setRuntimeId(e.target.value)}
-          >
-            {runtimes.length === 0 && <option value="">（无）</option>}
-            {runtimes.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-ink-dim">
-          描述
-          <input
-            aria-label="智能体描述"
-            className={inputCls}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-1 flex-col gap-1 text-xs text-ink-dim">
-          能力（System Prompt）
-          <input
-            aria-label="智能体能力"
-            className={inputCls}
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-          />
-        </label>
-        <button
-          type="submit"
-          disabled={!runtimeId}
-          className="rounded-lg bg-focus/15 px-3 py-1.5 text-sm text-focus hover:bg-focus/25 disabled:opacity-40"
-        >
-          添加智能体
-        </button>
+    <div className="flex flex-col gap-4">
+      {/* 新增智能体 */}
+      <form className={cn(panelCls, 'flex animate-rise flex-col gap-4 p-5')} onSubmit={submit}>
+        <div className="flex items-center gap-2">
+          <RobotIcon className="text-focus" />
+          <h3 className="text-[13px] font-medium tracking-wide text-ink">新增智能体</h3>
+        </div>
+
+        {runtimes.length === 0 && (
+          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
+            请先在上方添加一个运行时。
+          </p>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className={labelCls}>名称</span>
+            <input
+              aria-label="智能体名称"
+              className={inputCls}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className={labelCls}>绑定运行时</span>
+            <select
+              aria-label="智能体运行时"
+              className={inputCls}
+              value={runtimeId}
+              onChange={(e) => setRuntimeId(e.target.value)}
+            >
+              {runtimes.length === 0 && <option value="">（无）</option>}
+              {runtimes.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="col-span-2 flex flex-col gap-1.5">
+            <span className={labelCls}>描述</span>
+            <input
+              aria-label="智能体描述"
+              className={inputCls}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </label>
+          <label className="col-span-2 flex flex-col gap-1.5">
+            <span className={labelCls}>能力（System Prompt）</span>
+            <input
+              aria-label="智能体能力"
+              className={cn(inputCls, 'font-mono')}
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+            />
+          </label>
+        </div>
+
+        <div className="flex justify-end">
+          <Button type="submit" variant="primary" size="sm" disabled={!runtimeId}>
+            添加智能体
+          </Button>
+        </div>
       </form>
 
-      {error && <p className="text-xs text-red-400">{error}</p>}
+      {error && (
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+          {error}
+        </p>
+      )}
 
-      <ul className="flex flex-col divide-y divide-line rounded-xl border border-line">
-        {agents.length === 0 && <li className="px-3 py-2 text-xs text-ink-faint">暂无智能体</li>}
-        {agents.map((a) => (
-          <li key={a.id} className="flex items-center justify-between px-3 py-2 text-sm">
-            <span className="flex flex-col">
-              <span className="font-medium text-ink">{a.name}</span>
-              <span className="text-xs text-ink-faint">
-                {runtimeName(a.runtimeId)}
-                {a.description ? ` · ${a.description}` : ''}
-              </span>
-            </span>
-            <button
-              type="button"
-              className="text-xs text-red-400 hover:underline"
-              onClick={() => void remove(a.id)}
+      {/* 已有智能体 */}
+      <section
+        className={cn(panelCls, 'flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]')}
+      >
+        <div className="flex items-center gap-2">
+          <ListIcon className="text-ink-dim" />
+          <h3 className="text-[13px] font-medium tracking-wide text-ink">已配置智能体</h3>
+          <span className={cn(badgeCls, 'ml-auto')}>{agents.length}</span>
+        </div>
+
+        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+          {agents.length === 0 && (
+            <li className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
+              暂无智能体
+            </li>
+          )}
+          {agents.map((a) => (
+            <li
+              key={a.id}
+              className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
             >
-              删除
-            </button>
-          </li>
-        ))}
-      </ul>
+              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                <RobotIcon />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="truncate text-sm font-medium text-ink">{a.name}</span>
+                <span className="truncate text-[11px] text-ink-faint">
+                  {runtimeName(a.runtimeId)}
+                  {a.description ? ` · ${a.description}` : ''}
+                </span>
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-red-400 hover:text-red-300"
+                onClick={() => void remove(a.id)}
+              >
+                删除
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
   )
 }

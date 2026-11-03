@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import type { Task, TaskMoveAction, WorkflowStage } from '../../../../../shared/ai-workflow-api'
+import { Button } from '../../../components/ui/button'
 
 interface TaskCardProps {
   task: Task
@@ -9,38 +10,43 @@ interface TaskCardProps {
 
 export function TaskCard({ task, stage, onMove }: TaskCardProps): ReactElement {
   return (
-    <article className="flex flex-col gap-2 rounded-xl border border-line bg-white/[0.03] p-2.5">
-      <span className="text-sm font-medium text-ink">{task.title}</span>
-      {task.description && <p className="text-xs text-ink-faint">{task.description}</p>}
-      <div className="flex gap-2">
+    <article className="group flex flex-col gap-2 rounded-xl border border-line bg-white/[0.04] p-3 shadow-[0_1px_0_rgb(255_255_255/4%)_inset] transition-all duration-200 hover:border-line-strong hover:bg-white/[0.06]">
+      <h3 className="text-sm leading-snug font-medium text-ink">{task.title}</h3>
+      {task.description && (
+        <p className="line-clamp-3 text-xs leading-relaxed text-ink-faint">{task.description}</p>
+      )}
+      <div className="mt-1 flex items-center gap-2">
         {stage.entryMode === 'user' && (
           <>
-            <button
+            <Button
               type="button"
-              className="rounded-md bg-focus/15 px-2 py-0.5 text-xs text-focus"
+              variant="primary"
+              size="sm"
               onClick={() => onMove(task.id, 'approve')}
             >
               通过
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="rounded-md border border-line px-2 py-0.5 text-xs text-ink-dim"
+              variant="secondary"
+              size="sm"
               onClick={() => onMove(task.id, 'reject')}
             >
               打回
-            </button>
+            </Button>
           </>
         )}
         {stage.entryMode === 'none' && (
-          <button
-            type="button"
-            className="rounded-md bg-focus/15 px-2 py-0.5 text-xs text-focus"
-            onClick={() => onMove(task.id, 'next')}
-          >
+          <Button type="button" variant="primary" size="sm" onClick={() => onMove(task.id, 'next')}>
             推进
-          </button>
+          </Button>
         )}
-        {stage.entryMode === 'agent' && <span className="text-xs text-ink-faint">执行中…</span>}
+        {stage.entryMode === 'agent' && (
+          <span className="flex items-center gap-2 text-xs text-ink-faint">
+            <span className="size-1.5 animate-pulse rounded-full bg-focus" aria-hidden="true" />
+            执行中…
+          </span>
+        )}
       </div>
     </article>
   )

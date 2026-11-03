@@ -121,6 +121,11 @@ function install(api: unknown): void {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
 }
 
+/** 切到「设置」视图：运行时/智能体/工作流定义都在这里 */
+async function openSettings(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('tab', { name: '设置' }))
+}
+
 beforeEach(() => vi.clearAllMocks())
 
 describe('AiWorkflowPage', () => {
@@ -149,7 +154,9 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('button', { name: '创建任务' }))
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
 
-    await user.click(screen.getByRole('button', { name: '编辑' }))
+    // 工作流定义在「设置」视图里
+    await openSettings(user)
+    await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
     expect(await screen.findByLabelText('工作流名称')).toHaveValue('研发')
     await user.clear(screen.getByLabelText('工作流名称'))
     await user.type(screen.getByLabelText('工作流名称'), '研发v2')
@@ -161,6 +168,24 @@ describe('AiWorkflowPage', () => {
     await user.type(screen.getByLabelText('工作流名称'), '第二条')
     await user.click(screen.getByRole('button', { name: '保存工作流' }))
     await waitFor(() => expect(api.workflows.create).toHaveBeenCalled())
+  })
+
+  it('默认看工作台，设置视图里有运行时/智能体/工作流三个区块', async () => {
+    const api = makeApi()
+    install(api)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+    expect(screen.queryByText('运行时')).not.toBeInTheDocument()
+
+    await openSettings(user)
+    expect(await screen.findByRole('heading', { name: '运行时' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '智能体' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '工作流' })).toBeInTheDocument()
+    // 运行时与智能体管理器已挂载
+    expect(await screen.findByLabelText('运行时名称')).toBeInTheDocument()
+    expect(screen.getByLabelText('智能体名称')).toBeInTheDocument()
   })
 
   it('加载失败展示错误', async () => {
@@ -228,7 +253,8 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await screen.findByText(/工作流「研发」/)
-    await user.click(screen.getByRole('button', { name: '编辑' }))
+    await openSettings(user)
+    await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
     await screen.findByLabelText('工作流名称')
     await user.click(screen.getByRole('button', { name: '保存工作流' }))
     expect(await screen.findByText('sboom')).toBeInTheDocument()
@@ -250,7 +276,8 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '取消' }))
 
-    await user.click(screen.getByRole('button', { name: '编辑' }))
+    await openSettings(user)
+    await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
     await user.click(screen.getByRole('button', { name: '取消' }))
   })
 
@@ -285,6 +312,55 @@ describe('AiWorkflowPage', () => {
     await screen.findByText(/工作流「研发」/)
     await user.click(await screen.findByRole('button', { name: '推进' }))
     expect(await screen.findByText('tb')).toBeInTheDocument()
+  })
+
+  it('onChanged 后刷新失败展示错误', async () => {
+    const api = makeApi()
+    let reloadCb: (() => void) | undefined
+    ;(api as unknown as { onChanged: (cb: () => void) => () => void }).onChanged = (cb) => {
+      reloadCb = cb
+      return () => {}
+    }
+    api.workflows.list.mockResolvedValueOnce([wf]).mockRejectedValue(new Error('reload-boom'))
+    install(api)
+    render(<AiWorkflowPage />)
+    await screen.findByText(/工作流「研发」/)
+    await reloadCb?.()
+    expect(await screen.findByText('reload-boom')).toBeInTheDocument()
+  })
+
+  it('没有工作流时可直接新建', async () => {
+    const api = makeApi()
+    api.workflows.list.mockResolvedValue([])
+    let reloadCb: (() => void) | undefined
+    ;(api as unknown as { onChanged: (cb: () => void) => () => void }).onChanged = (cb) => {
+      reloadCb = cb
+      return () => {}
+    }
+    install(api)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    await openSettings(user)
+    await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    await user.type(screen.getByLabelText('工作流名称'), '第一条')
+    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+    await waitFor(() => expect(api.workflows.create).toHaveBeenCalled())
+
+    // 空清单时刷新走 activeId 为空的分支
+    await reloadCb?.()
+    await waitFor(() => expect(api.workflows.list.mock.calls.length).toBeGreaterThan(1))
+  })
+
+  it('卸载后异步失败不再更新状态', async () => {
+    const api = makeApi()
+    api.workflows.list.mockRejectedValue(new Error('boom'))
+    api.tasks.list.mockRejectedValue(new Error('tboom'))
+    api.runs.listByTask.mockRejectedValue(new Error('rboom'))
+    install(api)
+    const { unmount } = render(<AiWorkflowPage />)
+    unmount()
+    await new Promise((r) => setTimeout(r, 30))
   })
 
   it('异步未完成即卸载不报错', async () => {

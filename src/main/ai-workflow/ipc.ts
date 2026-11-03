@@ -10,6 +10,7 @@ import { AI_WORKFLOW_CHANNEL } from '../../shared/ai-workflow-api'
 import type { StageEvent } from '../../shared/stage-machine'
 import { advanceTask, enterTaskStage, type Enqueue } from './engine'
 import type { Repository } from './repository'
+import { detectInstalledRuntimes } from './runtime/detect'
 
 /** 纯分发器：方法名 + 参数 → 结果；不含 electron 依赖，便于单测。 */
 export type AiWorkflowHandler = (method: string, args: unknown[]) => unknown
@@ -31,6 +32,8 @@ export function createAiWorkflowHandler(
     'runtimes.update': (a) =>
       mutate(() => repo.runtimeUpdate(a[0] as string, a[1] as Partial<RuntimeInput>)),
     'runtimes.remove': (a) => mutate(() => repo.runtimeRemove(a[0] as string)),
+    // 只读探测：不写库、不触发 changed
+    'runtimes.detect': () => detectInstalledRuntimes(),
 
     'agents.list': () => repo.agentsList(),
     'agents.create': (a) => mutate(() => repo.agentCreate(a[0] as AgentInput)),

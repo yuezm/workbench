@@ -1,6 +1,10 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type { TaskInput } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
+import { Field } from '../../../components/ui/field'
+import { Input, fieldCls } from '../../../components/ui/input'
+import { panelCls } from '../../../components/ui/panel'
+import { cn } from '../../../lib/cn'
 
 interface TaskDialogProps {
   workflowId: string
@@ -8,14 +12,7 @@ interface TaskDialogProps {
   onCancel: () => void
 }
 
-const fieldCls =
-  'w-full rounded-lg border border-line bg-black/25 px-3 text-sm text-ink placeholder:text-ink-faint outline-none transition-colors duration-200 hover:border-line-strong focus:border-focus/70 focus:bg-black/35'
-
-const inputCls = `${fieldCls} h-9`
-
-const textareaCls = `${fieldCls} min-h-24 resize-y py-2 leading-relaxed`
-
-const labelCls = 'text-[11px] font-medium tracking-wide text-ink-faint'
+const textareaCls = cn(fieldCls, 'min-h-24 resize-y py-2 leading-relaxed')
 
 /** 关闭图标 */
 function CloseIcon(): ReactElement {
@@ -63,7 +60,10 @@ export function TaskDialog({ workflowId, onSave, onCancel }: TaskDialogProps): R
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-6 backdrop-blur-sm">
       <form
-        className="w-full max-w-md rounded-2xl border border-line bg-surface/95 p-5 shadow-[0_30px_80px_-30px_rgb(0_0_0/85%)]"
+        className={cn(
+          panelCls,
+          'w-full max-w-md bg-surface/95 p-5 shadow-[0_30px_80px_-30px_rgb(0_0_0/85%)]',
+        )}
         onSubmit={submit}
       >
         <div className="flex items-center justify-between gap-3">
@@ -79,18 +79,15 @@ export function TaskDialog({ workflowId, onSave, onCancel }: TaskDialogProps): R
         </div>
 
         <div className="mt-4 flex flex-col gap-3">
-          <label className="flex flex-col gap-1.5">
-            <span className={labelCls}>任务标题</span>
-            <input
+          <Field label="任务标题">
+            <Input
               aria-label="任务标题"
-              className={inputCls}
               placeholder="给任务起个名字"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
             />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className={labelCls}>任务描述</span>
+          </Field>
+          <Field label="任务描述">
             <textarea
               aria-label="任务描述"
               className={textareaCls}
@@ -98,7 +95,7 @@ export function TaskDialog({ workflowId, onSave, onCancel }: TaskDialogProps): R
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
-          </label>
+          </Field>
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">

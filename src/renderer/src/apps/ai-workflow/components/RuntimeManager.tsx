@@ -1,21 +1,24 @@
-import { useEffect, useState, type ReactElement } from 'react'
-import type { Runtime } from '../../../../../shared/ai-workflow-api'
+import { useCallback, useEffect, useState, type ReactElement } from 'react'
+import type { AiWorkflowApi, DetectedRuntime, Runtime } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
+import { Field } from '../../../components/ui/field'
+import { Input } from '../../../components/ui/input'
+import { Panel, badgeCls } from '../../../components/ui/panel'
+import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 import { wfApi } from '../api'
-
-const panelCls =
-  'rounded-2xl border border-line bg-white/[0.03] backdrop-blur-xl shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)]'
-const inputCls =
-  'h-9 w-full rounded-lg border border-line bg-black/25 px-3 text-sm text-ink placeholder:text-ink-faint outline-none transition-colors duration-200 hover:border-line-strong focus:border-focus/70 focus:bg-black/35'
-const labelCls = 'text-[11px] font-medium tracking-wide text-ink-faint'
-const badgeCls = 'rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] tabular-nums text-ink-dim'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 function parseArgs(text: string): string[] {
   const t = text.trim()
   return t ? t.split(/\s+/) : []
+}
+
+/** 检测接口可能不存在（测试桩 / 旧 preload）：缺失时返回空清单 */
+function detectRuntimes(): Promise<DetectedRuntime[]> {
+  const fn = (wfApi().runtimes as Partial<AiWorkflowApi['runtimes']>).detect
+  return fn ? fn() : Promise.resolve([])
 }
 
 function TerminalIcon({ className }: { className?: string }): ReactElement {
@@ -58,8 +61,30 @@ function ListIcon({ className }: { className?: string }): ReactElement {
   )
 }
 
+function ScanIcon({ className }: { className?: string }): ReactElement {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" />
+      <path d="M12 9v6M9 12h6" />
+    </svg>
+  )
+}
+
 export function RuntimeManager(): ReactElement {
   const [items, setItems] = useState<Runtime[]>([])
+  const [detected, setDetected] = useState<DetectedRuntime[]>([])
+  const [detecting, setDetecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [command, setCommand] = useState('dsh')
@@ -67,20 +92,49 @@ export function RuntimeManager(): ReactElement {
   const [promptMode, setPromptMode] = useState<'arg' | 'stdin'>('arg')
   const [workdir, setWorkdir] = useState('')
 
-  const reload = async (): Promise<void> => {
+  const reload = useCallback(async (): Promise<void> => {
     try {
       setItems(await wfApi().runtimes.list())
       setError(null)
     } catch (e) {
       setError(errMsg(e))
     }
-  }
+  }, [])
+
+  const scan = useCallback(async (): Promise<void> => {
+    setDetecting(true)
+    try {
+      setDetected(await detectRuntimes())
+      setError(null)
+    } catch (e) {
+      setError(errMsg(e))
+    } finally {
+      setDetecting(false)
+    }
+  }, [])
+
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
         const list = await wfApi().runtimes.list()
         if (alive) setItems(list)
+      } catch (e) {
+        if (alive) setError(errMsg(e))
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // 进入设置即自动识别本机已安装的 CLI
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const list = await detectRuntimes()
+        if (alive) setDetected(list)
       } catch (e) {
         if (alive) setError(errMsg(e))
       }
@@ -117,64 +171,126 @@ export function RuntimeManager(): ReactElement {
     }
   }
 
+  /** 把检测到的 CLI 预填进表单；名称与既有运行时冲突时加命令后缀 */
+  const prefill = (d: DetectedRuntime): void => {
+    const taken = items.some((r) => r.name === d.label)
+    setName(taken ? `${d.label} (${d.command})` : d.label)
+    setCommand(d.command)
+  }
+
+  const addedCommands = new Set(items.map((r) => r.command))
+
   return (
     <div className="flex flex-col gap-4">
+      {/* 自动识别本机已安装的运行时 */}
+      <Panel className="flex animate-rise flex-col gap-3 p-5">
+        <div className="flex items-center gap-2">
+          <ScanIcon className="text-focus" />
+          <h3 className="text-[13px] font-medium tracking-wide text-ink">已安装的运行时</h3>
+          <span className={cn(badgeCls, 'ml-auto')}>{detected.length}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={detecting}
+            onClick={() => void scan()}
+          >
+            {detecting ? '扫描中…' : '重新扫描'}
+          </Button>
+        </div>
+
+        {detected.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-line px-3 py-4 text-xs text-ink-faint">
+            {detecting
+              ? '正在扫描本机 PATH…'
+              : '未检测到已安装的 CLI（dsh / claude / codex / gemini / opencode 等），可在下方手动填写命令。'}
+          </p>
+        ) : (
+          <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+            {detected.map((d) => {
+              const added = addedCommands.has(d.command)
+              return (
+                <li
+                  key={d.command}
+                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
+                >
+                  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                    <TerminalIcon />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-sm font-medium text-ink">{d.label}</span>
+                    <span className="truncate font-mono text-[11px] text-ink-faint" title={d.path}>
+                      {d.path}
+                    </span>
+                  </span>
+                  {added ? (
+                    <span className="rounded-full bg-white/[0.07] px-2 py-1 text-[11px] text-ink-faint">
+                      已添加
+                    </span>
+                  ) : (
+                    <Button type="button" variant="secondary" size="sm" onClick={() => prefill(d)}>
+                      使用
+                    </Button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Panel>
+
       {/* 新增运行时 */}
-      <form className={cn(panelCls, 'flex animate-rise flex-col gap-4 p-5')} onSubmit={submit}>
+      <form
+        className={cn(
+          'flex animate-rise flex-col gap-4 rounded-2xl border border-line bg-white/[0.03] p-5',
+          'shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)] backdrop-blur-xl',
+          '[animation-delay:80ms]',
+        )}
+        onSubmit={submit}
+      >
         <div className="flex items-center gap-2">
           <TerminalIcon className="text-focus" />
           <h3 className="text-[13px] font-medium tracking-wide text-ink">新增运行时</h3>
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <label className="flex flex-col gap-1.5">
-            <span className={labelCls}>名称</span>
-            <input
-              aria-label="运行时名称"
-              className={inputCls}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className={labelCls}>命令</span>
-            <input
+          <Field label="名称">
+            <Input aria-label="运行时名称" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="命令">
+            <Input
               aria-label="运行时命令"
-              className={inputCls}
               value={command}
               onChange={(e) => setCommand(e.target.value)}
             />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className={labelCls}>prompt 传递</span>
-            <select
-              aria-label="prompt 传递方式"
-              className={inputCls}
+          </Field>
+          <Field label="prompt 传递">
+            <Select
+              ariaLabel="prompt 传递方式"
               value={promptMode}
-              onChange={(e) => setPromptMode(e.target.value as 'arg' | 'stdin')}
-            >
-              <option value="arg">参数</option>
-              <option value="stdin">标准输入</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1.5 sm:col-span-2">
-            <span className={labelCls}>参数（空格分隔，可用 {'{prompt}'}）</span>
-            <input
+              onChange={(v) => setPromptMode(v === 'stdin' ? 'stdin' : 'arg')}
+              options={[
+                { value: 'arg', label: '参数' },
+                { value: 'stdin', label: '标准输入' },
+              ]}
+            />
+          </Field>
+          <Field label={`参数（空格分隔，可用 {'{prompt}'}）`} className="sm:col-span-2">
+            <Input
               aria-label="运行时参数"
-              className={cn(inputCls, 'font-mono')}
+              className="font-mono"
               value={argsText}
               onChange={(e) => setArgsText(e.target.value)}
             />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className={labelCls}>工作目录（可选）</span>
-            <input
+          </Field>
+          <Field label="工作目录（可选）">
+            <Input
               aria-label="运行时工作目录"
-              className={cn(inputCls, 'font-mono')}
+              className="font-mono"
               value={workdir}
               onChange={(e) => setWorkdir(e.target.value)}
             />
-          </label>
+          </Field>
         </div>
 
         <div className="flex justify-end">
@@ -191,9 +307,7 @@ export function RuntimeManager(): ReactElement {
       )}
 
       {/* 已有运行时 */}
-      <section
-        className={cn(panelCls, 'flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]')}
-      >
+      <Panel className="flex animate-rise flex-col gap-3 p-5 [animation-delay:160ms]">
         <div className="flex items-center gap-2">
           <ListIcon className="text-ink-dim" />
           <h3 className="text-[13px] font-medium tracking-wide text-ink">已配置运行时</h3>
@@ -232,7 +346,7 @@ export function RuntimeManager(): ReactElement {
             </li>
           ))}
         </ul>
-      </section>
+      </Panel>
     </div>
   )
 }

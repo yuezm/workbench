@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { WorkflowWithStages } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
+import { Select } from '../../../components/ui/select'
 
 interface WorkflowSwitcherProps {
   workflows: WorkflowWithStages[]
@@ -23,7 +24,7 @@ export function WorkflowSwitcher({
   const active = workflows.find((w) => w.id === activeId)
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center gap-2.5 rounded-xl border border-line bg-black/25 px-3 py-1.5 backdrop-blur-sm transition-colors duration-200 hover:border-line-strong">
+      <div className="flex items-center gap-2 rounded-xl border border-line bg-black/25 py-1 pr-1.5 pl-3 backdrop-blur-sm transition-colors duration-200 hover:border-line-strong">
         <svg
           width="14"
           height="14"
@@ -41,33 +42,16 @@ export function WorkflowSwitcher({
           <rect x="17" y="4" width="4" height="13" rx="1.2" />
         </svg>
         <span className="text-xs text-ink-faint">工作流</span>
-        <select
-          aria-label="选择工作流"
-          className="max-w-56 appearance-none bg-transparent text-sm text-ink outline-none"
+        <Select
+          ariaLabel="选择工作流"
           value={activeId ?? ''}
-          onChange={(e) => onSelect(e.target.value)}
-        >
-          <option value="">（未选择）</option>
-          {workflows.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          className="pointer-events-none -ml-1 text-ink-faint"
-        >
-          <path d="m6 9 6 6 6-6" />
-        </svg>
+          onChange={onSelect}
+          options={[
+            { value: '', label: '（未选择）' },
+            ...workflows.map((w) => ({ value: w.id, label: w.name })),
+          ]}
+          className="h-8 w-auto max-w-56 border-0 bg-transparent px-1 hover:border-0 focus:bg-transparent"
+        />
         {active && (
           <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
             {active.stages.length} 阶段

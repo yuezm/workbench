@@ -64,6 +64,13 @@ describe('preload 桥接契约', () => {
       'tasks',
       'workflows',
     ])
+    expect(Object.keys(aiWorkflow.runtimes).sort()).toEqual([
+      'create',
+      'detect',
+      'list',
+      'remove',
+      'update',
+    ])
   })
 
   it('方法经单一 RPC 通道转发 method + args', async () => {
@@ -100,6 +107,7 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.runtimes.list()
     await aiWorkflow.runtimes.update('r1', { name: 'x' })
     await aiWorkflow.runtimes.remove('r1')
+    await aiWorkflow.runtimes.detect()
     await aiWorkflow.agents.list()
     await aiWorkflow.agents.create({ name: 'a', runtimeId: 'r1' })
     await aiWorkflow.agents.update('a1', { name: 'b' })
@@ -118,6 +126,7 @@ describe('preload 桥接契约', () => {
         'runtimes.list',
         'runtimes.update',
         'runtimes.remove',
+        'runtimes.detect',
         'agents.list',
         'agents.create',
         'agents.update',

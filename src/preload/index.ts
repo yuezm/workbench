@@ -21,6 +21,7 @@ const aiWorkflow: AiWorkflowApi = {
     create: (input) => invoke('runtimes.create', input),
     update: (id, patch) => invoke('runtimes.update', id, patch),
     remove: (id) => invoke('runtimes.remove', id),
+    detect: () => invoke('runtimes.detect'),
   },
   agents: {
     list: () => invoke('agents.list'),

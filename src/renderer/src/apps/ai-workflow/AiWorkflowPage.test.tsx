@@ -136,13 +136,10 @@ describe('AiWorkflowPage', () => {
     render(<AiWorkflowPage />)
 
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
-    await waitFor(() =>
-      expect(
-        screen.getByLabelText('选择任务查看运行').querySelectorAll('option').length,
-      ).toBeGreaterThan(1),
-    )
+    await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
 
-    await user.selectOptions(screen.getByLabelText('选择任务查看运行'), 't1')
+    await user.click(screen.getByRole('option', { name: '任务A' }))
     await waitFor(() => expect(api.runs.listByTask).toHaveBeenCalledWith('t1'))
     expect(await screen.findByText('hello')).toBeInTheDocument()
 
@@ -210,12 +207,9 @@ describe('AiWorkflowPage', () => {
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await waitFor(() =>
-      expect(
-        screen.getByLabelText('选择任务查看运行').querySelectorAll('option').length,
-      ).toBeGreaterThan(1),
-    )
-    await user.selectOptions(screen.getByLabelText('选择任务查看运行'), 't1')
+    await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
+    await user.click(screen.getByRole('option', { name: '任务A' }))
     expect(await screen.findByText('rboom')).toBeInTheDocument()
     // 通过/推进时也会尝试刷新运行记录，覆盖 loadRunsFor 的错误分支
     await user.click(await screen.findByRole('button', { name: '推进' }))
@@ -270,8 +264,13 @@ describe('AiWorkflowPage', () => {
     await user.click(await screen.findByRole('button', { name: '推进' }))
     await waitFor(() => expect(api.tasks.move).toHaveBeenCalled())
 
-    await user.selectOptions(screen.getByLabelText('选择任务查看运行'), 't1')
-    await user.selectOptions(screen.getByLabelText('选择任务查看运行'), '')
+    await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
+    await user.click(screen.getByRole('option', { name: '任务A' }))
+    await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
+    await user.click(screen.getByRole('option', { name: '（选择任务）' }))
+    expect(screen.getByRole('combobox', { name: '选择任务查看运行' })).toHaveTextContent(
+      '（选择任务）',
+    )
 
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '取消' }))

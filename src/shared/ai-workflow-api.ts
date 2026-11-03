@@ -32,6 +32,16 @@ export interface RuntimeInput {
   workdir?: string | null
 }
 
+/** 本机已安装的 agent CLI 探测结果（用于表单预填，不自动创建运行时） */
+export interface DetectedRuntime {
+  /** CLI 命令名，如 dsh / claude */
+  command: string
+  /** 展示名，如 "DeepSeek Harness" */
+  label: string
+  /** 可执行文件绝对路径 */
+  path: string
+}
+
 export interface Agent {
   id: string
   name: string
@@ -123,6 +133,8 @@ export interface AiWorkflowApi {
     create(input: RuntimeInput): Promise<Runtime>
     update(id: string, patch: Partial<RuntimeInput>): Promise<Runtime>
     remove(id: string): Promise<void>
+    /** 探测本机已安装的 agent CLI，供表单预填；只读，不创建记录 */
+    detect(): Promise<DetectedRuntime[]>
   }
   agents: {
     list(): Promise<Agent[]>

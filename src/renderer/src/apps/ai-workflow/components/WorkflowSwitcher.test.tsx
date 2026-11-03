@@ -23,7 +23,9 @@ describe('WorkflowSwitcher', () => {
         onEdit={onEdit}
       />,
     )
-    await user.selectOptions(screen.getByLabelText('选择工作流'), 'w2')
+    await user.click(screen.getByRole('combobox', { name: '选择工作流' }))
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+    await user.click(screen.getByRole('option', { name: 'B' }))
     expect(onSelect).toHaveBeenCalledWith('w2')
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
     expect(onNew).toHaveBeenCalled()

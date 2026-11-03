@@ -55,7 +55,8 @@ describe('AgentManager', () => {
     expect(await screen.findByText('old')).toBeInTheDocument()
     const user = userEvent.setup()
     await user.type(screen.getByLabelText('智能体名称'), 'coder')
-    await user.selectOptions(screen.getByLabelText('智能体运行时'), 'r2')
+    await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
+    await user.click(screen.getByRole('option', { name: 'claude' }))
     await user.type(screen.getByLabelText('智能体描述'), '写代码')
     await user.type(screen.getByLabelText('智能体能力'), 'you are coder')
     await user.click(screen.getByRole('button', { name: '添加智能体' }))
@@ -194,10 +195,14 @@ describe('AgentManager', () => {
     changed?.()
     await waitFor(() => expect(screen.getByRole('button', { name: '添加智能体' })).toBeEnabled())
     expect(screen.getByLabelText('智能体运行时')).toHaveValue('r1')
+    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('ds')
 
     // 运行时被删光后，下拉回落到空
     runtimes = []
     changed?.()
     await waitFor(() => expect(screen.getByLabelText('智能体运行时')).toHaveValue(''))
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('（无）'),
+    )
   })
 })

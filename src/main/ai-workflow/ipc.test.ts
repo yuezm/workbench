@@ -1,5 +1,6 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from './db'
 import { createAiWorkflowHandler, registerAiWorkflowIpc } from './ipc'
@@ -43,6 +44,21 @@ describe('ai-workflow handler：运行时/智能体', () => {
 
   it('未知方法抛错', () => {
     expect(() => handle('nope.nope', [])).toThrow(/未知方法/)
+  })
+
+  it('runtimes.detect 返回已安装 CLI 清单且不触发 changed', () => {
+    const result = handle('runtimes.detect', []) as Array<{
+      command: string
+      label: string
+      path: string
+    }>
+    expect(Array.isArray(result)).toBe(true)
+    for (const item of result) {
+      expect(typeof item.command).toBe('string')
+      expect(typeof item.label).toBe('string')
+      expect(path.isAbsolute(item.path)).toBe(true)
+    }
+    expect(notify).not.toHaveBeenCalled()
   })
 })
 

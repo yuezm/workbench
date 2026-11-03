@@ -8,7 +8,10 @@ import type {
   WorkflowInput,
   WorkflowWithStages,
 } from '../../../../shared/ai-workflow-api'
+import { Panel, panelCls } from '../../components/ui/panel'
 import { Segmented } from '../../components/ui/segmented'
+import { Select } from '../../components/ui/select'
+import { cn } from '../../lib/cn'
 import { wfApi } from './api'
 import { AgentManager } from './components/AgentManager'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -53,7 +56,7 @@ function SettingsSection({
   children: ReactNode
 }): ReactElement {
   return (
-    <section className="animate-rise rounded-2xl border border-line bg-white/[0.03] p-5 shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)] backdrop-blur-xl">
+    <Panel className="animate-rise p-5">
       <header className="mb-4 flex items-center gap-2.5">
         <span className="grid size-7 place-items-center rounded-lg bg-focus/15 text-focus">
           {icon}
@@ -64,7 +67,7 @@ function SettingsSection({
         </span>
       </header>
       {children}
-    </section>
+    </Panel>
   )
 }
 
@@ -270,21 +273,22 @@ export function AiWorkflowPage(): ReactElement {
             )}
           </section>
 
-          <aside className="flex w-80 shrink-0 flex-col gap-3 overflow-hidden rounded-2xl border border-line bg-white/[0.02] p-4">
+          <aside
+            className={cn(
+              panelCls,
+              'flex w-80 shrink-0 flex-col gap-3 overflow-hidden bg-white/[0.02] p-4',
+            )}
+          >
             <h2 className="text-[13px] font-medium tracking-wide text-ink">运行记录</h2>
-            <select
-              aria-label="选择任务查看运行"
-              className="h-9 w-full rounded-lg border border-line bg-black/25 px-3 text-sm text-ink transition-colors duration-200 outline-none hover:border-line-strong focus:border-focus/70"
+            <Select
+              ariaLabel="选择任务查看运行"
               value={selectedTaskId ?? ''}
-              onChange={(e) => setSelectedTaskId(e.target.value || undefined)}
-            >
-              <option value="">（选择任务）</option>
-              {tasks.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.title}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => setSelectedTaskId(v || undefined)}
+              options={[
+                { value: '', label: '（选择任务）' },
+                ...tasks.map((t) => ({ value: t.id, label: t.title })),
+              ]}
+            />
             <div className="min-h-0 flex-1 overflow-auto pr-1">
               <RunLog runs={runs} />
             </div>

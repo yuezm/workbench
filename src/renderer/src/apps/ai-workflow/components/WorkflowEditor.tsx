@@ -7,6 +7,10 @@ import type {
   WorkflowWithStages,
 } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
+import { Field } from '../../../components/ui/field'
+import { Input } from '../../../components/ui/input'
+import { panelCls } from '../../../components/ui/panel'
+import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 
 interface WorkflowEditorProps {
@@ -15,12 +19,6 @@ interface WorkflowEditorProps {
   onSave: (input: WorkflowInput) => Promise<void>
   onCancel: () => void
 }
-
-const panelCls =
-  'rounded-2xl border border-line bg-white/[0.03] backdrop-blur-xl shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)]'
-const inputCls =
-  'h-9 w-full rounded-lg border border-line bg-black/25 px-3 text-sm text-ink placeholder:text-ink-faint outline-none transition-colors duration-200 hover:border-line-strong focus:border-focus/70 focus:bg-black/35'
-const labelCls = 'text-[11px] font-medium tracking-wide text-ink-faint'
 
 function indexOfId(workflow: WorkflowWithStages, id: string | null): number {
   if (!id) return -1
@@ -127,24 +125,20 @@ export function WorkflowEditor({
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex w-56 flex-col gap-1.5">
-          <span className={labelCls}>工作流名称</span>
-          <input
+        <Field label="工作流名称" className="w-56">
+          <Input
             aria-label="工作流名称"
-            className={inputCls}
             value={draft.name}
             onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
           />
-        </label>
-        <label className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span className={labelCls}>描述</span>
-          <input
+        </Field>
+        <Field label="描述" className="min-w-0 flex-1">
+          <Input
             aria-label="工作流描述"
-            className={inputCls}
             value={draft.description ?? ''}
             onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
           />
-        </label>
+        </Field>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -154,15 +148,13 @@ export function WorkflowEditor({
               <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-[11px] font-medium text-focus">
                 {i + 1}
               </span>
-              <label className="flex min-w-0 flex-1 flex-col gap-1.5">
-                <span className={labelCls}>阶段名</span>
-                <input
+              <Field label="阶段名" className="min-w-0 flex-1">
+                <Input
                   aria-label={`阶段${i + 1}名称`}
-                  className={inputCls}
                   value={s.name}
                   onChange={(e) => patchStage(i, { name: e.target.value })}
                 />
-              </label>
+              </Field>
               <Button
                 type="button"
                 variant="ghost"
@@ -175,77 +167,53 @@ export function WorkflowEditor({
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-              <label className="flex flex-col gap-1.5">
-                <span className={labelCls}>进入时</span>
-                <select
-                  aria-label={`阶段${i + 1}进入方式`}
-                  className={inputCls}
+              <Field label="进入时">
+                <Select
+                  ariaLabel={`阶段${i + 1}进入方式`}
                   value={s.entryMode}
-                  onChange={(e) => patchStage(i, { entryMode: e.target.value as EntryMode })}
-                >
-                  <option value="none">不交接</option>
-                  <option value="agent">交给智能体</option>
-                  <option value="user">交给用户</option>
-                </select>
-              </label>
+                  onChange={(v) => patchStage(i, { entryMode: v as EntryMode })}
+                  options={[
+                    { value: 'none', label: '不交接' },
+                    { value: 'agent', label: '交给智能体' },
+                    { value: 'user', label: '交给用户' },
+                  ]}
+                />
+              </Field>
               {s.entryMode === 'agent' && (
-                <label className="flex flex-col gap-1.5">
-                  <span className={labelCls}>智能体</span>
-                  <select
-                    aria-label={`阶段${i + 1}智能体`}
-                    className={inputCls}
+                <Field label="智能体">
+                  <Select
+                    ariaLabel={`阶段${i + 1}智能体`}
                     value={s.agentId ?? ''}
-                    onChange={(e) => patchStage(i, { agentId: e.target.value || null })}
-                  >
-                    <option value="">（选择）</option>
-                    {agents.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    onChange={(v) => patchStage(i, { agentId: v || null })}
+                    options={[
+                      { value: '', label: '（选择）' },
+                      ...agents.map((a) => ({ value: a.id, label: a.name })),
+                    ]}
+                  />
+                </Field>
               )}
-              <label className="flex flex-col gap-1.5">
-                <span className={labelCls}>完成后进入</span>
-                <select
-                  aria-label={`阶段${i + 1}完成后进入`}
-                  className={inputCls}
-                  value={s.onCompleteIndex ?? ''}
-                  onChange={(e) =>
-                    patchStage(i, {
-                      onCompleteIndex: e.target.value === '' ? null : Number(e.target.value),
-                    })
-                  }
-                >
-                  <option value="">下一阶段/结束</option>
-                  {targetOptions.map((t) => (
-                    <option key={t.i} value={t.i}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-1.5">
-                <span className={labelCls}>打回退回到</span>
-                <select
-                  aria-label={`阶段${i + 1}打回退回到`}
-                  className={inputCls}
-                  value={s.onRejectIndex ?? ''}
-                  onChange={(e) =>
-                    patchStage(i, {
-                      onRejectIndex: e.target.value === '' ? null : Number(e.target.value),
-                    })
-                  }
-                >
-                  <option value="">上一阶段/原地</option>
-                  {targetOptions.map((t) => (
-                    <option key={t.i} value={t.i}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <Field label="完成后进入">
+                <Select
+                  ariaLabel={`阶段${i + 1}完成后进入`}
+                  value={s.onCompleteIndex == null ? '' : String(s.onCompleteIndex)}
+                  onChange={(v) => patchStage(i, { onCompleteIndex: v === '' ? null : Number(v) })}
+                  options={[
+                    { value: '', label: '下一阶段/结束' },
+                    ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
+                  ]}
+                />
+              </Field>
+              <Field label="打回退回到">
+                <Select
+                  ariaLabel={`阶段${i + 1}打回退回到`}
+                  value={s.onRejectIndex == null ? '' : String(s.onRejectIndex)}
+                  onChange={(v) => patchStage(i, { onRejectIndex: v === '' ? null : Number(v) })}
+                  options={[
+                    { value: '', label: '上一阶段/原地' },
+                    ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
+                  ]}
+                />
+              </Field>
             </div>
           </div>
         ))}

@@ -9,6 +9,7 @@
 在工作台内新增 `ai-workflow` app：把「运行时 → 智能体 → 自定义多阶段工作流 → 看板任务」串成一个能在本地跑起来的最小闭环。
 
 - 配置**运行时**：MVP 只打通本机已安装的 **DeepSeek Harness** CLI；其余运行时（claude code / codex / oh-my-pi 等）后续按同一适配接口接入。
+- **识别**已安装的运行时：设置页扫描本机 PATH，自动列出已安装的 agent CLI，点「使用」把名称与命令预填进新增表单（不自动建记录，参数仍由用户确认）。
 - 配置**智能体**：名称、描述、执行配置（绑定某个运行时）、能力（System Prompt）。
 - 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【进入时】【完成后进入】【打回时退回到】。
 - 用**看板**查看与推进任务：列 = 当前所选工作流的阶段；任务卡随阶段流转。
@@ -25,7 +26,7 @@
 app 内只有一个页面，顶部用分段控件（`components/ui/segmented.tsx`）在两个互斥视图间切换：
 
 - **工作台**（默认）：左侧看板（列 = 当前工作流的阶段），右侧运行记录面板（按任务查看 run）。顶栏只保留工作流切换器与「新建任务」。
-- **设置**：运行时 / 智能体 / 工作流定义三块配置区；工作流的新建与编辑入口在「工作流」区，编辑时其下展开 `WorkflowEditor`。
+- **设置**：运行时 / 智能体 / 工作流定义三块配置区；运行时区顶部是「已安装的运行时」检测清单（自动扫描本机 CLI，可一键预填下方新增表单）；工作流的新建与编辑入口在「工作流」区，编辑时其下展开 `WorkflowEditor`。
 
 规则：配置项（运行时、智能体、工作流定义）**只在设置视图出现**，工作台不展示任何配置表单。
 
@@ -149,6 +150,25 @@ export interface RuntimeAdapter {
 - 取消：任务被删除或工作流被删时，中止对应 `AbortController`，run 记 `cancelled`。
 - 凭据：沿用本机 CLI 已有的登录态，**不把任何 token 存进数据库**。
 
+## 运行时识别（2026-11-03 新增）
+
+`src/main/ai-workflow/runtime/detect.ts` 扫描本机，返回已安装的 agent CLI 清单：
+
+```ts
+export interface DetectedRuntime {
+  command: string // CLI 命令名，如 dsh / claude
+  label: string // 展示名，如 "DeepSeek Harness"
+  path: string // 可执行文件绝对路径
+}
+```
+
+- **扫描目录**：`process.env.PATH` 全部条目 + 常见全局安装目录（`%APPDATA%/npm`、`~/.local/bin`、`~/.npm-global/bin`、`~/.bun/bin`、`/usr/local/bin`、`/opt/homebrew/bin`、`~/.claude/local`）；不存在的目录跳过。
+- **候选清单**（固定顺序）：`dsh`、`claude`、`codex`、`gemini`、`opencode`、`aider`、`cursor-agent`、`qwen`、`goose`、`crush`。
+- **命中判定**：Windows 命中 `<cmd>.exe|.cmd|.bat|.ps1` 任一（npm 全局装的是 shim）；POSIX 命中同名且有可执行位（`mode & 0o111`）。同一命令多处命中取 PATH 中靠前者。
+- **零副作用**：不 spawn 任何进程、不读版本号，只读文件系统。
+- **UI 行为**：设置页「运行时」区顶部列出检测结果与路径；点「使用」把 `label`/`command` 预填到新增表单（名称与现有运行时重名时改为 `label (command)`），参数与 prompt 模式仍由用户确认后保存。已添加过的命令显示「已添加」并禁用按钮。
+- 检测只影响**表单预填**，不新建运行时记录，因此不触及「接入第二个运行时需先确认」的边界。
+
 ## IPC 契约（`window.aiWorkflow`）
 
 契约定义在 `src/shared/ai-workflow-api.ts`，preload 原样透传，renderer 禁止直接 import electron/fs/child_process。
@@ -160,6 +180,8 @@ export interface AiWorkflowApi {
     create(input: RuntimeInput): Promise<Runtime>
     update(id: string, patch: Partial<RuntimeInput>): Promise<Runtime>
     remove(id: string): Promise<void>
+    /** 扫描本机已安装的 agent CLI（只读，不写库、不发 changed） */
+    detect(): Promise<DetectedRuntime[]>
   }
   agents: { list(): Promise<Agent[]>; create(...): ...; update(...): ...; remove(id): Promise<void> }
   workflows: {

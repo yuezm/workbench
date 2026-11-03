@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type { Agent, AiWorkflowApi, Runtime } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
+import { Field } from '../../../components/ui/field'
+import { Input } from '../../../components/ui/input'
+import { Panel, badgeCls, panelCls } from '../../../components/ui/panel'
+import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 import { wfApi } from '../api'
-
-const panelCls =
-  'rounded-2xl border border-line bg-white/[0.03] backdrop-blur-xl shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)]'
-const inputCls =
-  'h-9 w-full rounded-lg border border-line bg-black/25 px-3 text-sm text-ink placeholder:text-ink-faint outline-none transition-colors duration-200 hover:border-line-strong focus:border-focus/70 focus:bg-black/35'
-const labelCls = 'text-[11px] font-medium tracking-wide text-ink-faint'
-const badgeCls = 'rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] tabular-nums text-ink-dim'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -144,49 +141,36 @@ export function AgentManager(): ReactElement {
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1.5">
-            <span className={labelCls}>名称</span>
-            <input
-              aria-label="智能体名称"
-              className={inputCls}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1.5">
-            <span className={labelCls}>绑定运行时</span>
-            <select
-              aria-label="智能体运行时"
-              className={inputCls}
+          <Field label="名称">
+            <Input aria-label="智能体名称" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="绑定运行时">
+            <Select
+              ariaLabel="智能体运行时"
               value={runtimeId}
-              onChange={(e) => setRuntimeId(e.target.value)}
-            >
-              {runtimes.length === 0 && <option value="">（无）</option>}
-              {runtimes.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="col-span-2 flex flex-col gap-1.5">
-            <span className={labelCls}>描述</span>
-            <input
+              onChange={setRuntimeId}
+              options={
+                runtimes.length === 0
+                  ? [{ value: '', label: '（无）' }]
+                  : runtimes.map((r) => ({ value: r.id, label: r.name }))
+              }
+            />
+          </Field>
+          <Field label="描述" className="col-span-2">
+            <Input
               aria-label="智能体描述"
-              className={inputCls}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
-          </label>
-          <label className="col-span-2 flex flex-col gap-1.5">
-            <span className={labelCls}>能力（System Prompt）</span>
-            <input
+          </Field>
+          <Field label="能力（System Prompt）" className="col-span-2">
+            <Input
               aria-label="智能体能力"
-              className={cn(inputCls, 'font-mono')}
+              className="font-mono"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
             />
-          </label>
+          </Field>
         </div>
 
         <div className="flex justify-end">
@@ -203,9 +187,7 @@ export function AgentManager(): ReactElement {
       )}
 
       {/* 已有智能体 */}
-      <section
-        className={cn(panelCls, 'flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]')}
-      >
+      <Panel className="flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]">
         <div className="flex items-center gap-2">
           <ListIcon className="text-ink-dim" />
           <h3 className="text-[13px] font-medium tracking-wide text-ink">已配置智能体</h3>
@@ -245,7 +227,7 @@ export function AgentManager(): ReactElement {
             </li>
           ))}
         </ul>
-      </section>
+      </Panel>
     </div>
   )
 }

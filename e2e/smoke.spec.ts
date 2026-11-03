@@ -13,7 +13,7 @@ test.afterEach(async () => {
   await electronApp.close()
 })
 
-test('启动冒烟：窗口标题与侧边栏导航就绪', async () => {
+test('启动冒烟：窗口标题与顶部 app 标签栏就绪', async () => {
   expect(await page.title()).toBe('Workbench')
   const nav = page.getByRole('navigation', { name: '应用导航' })
   await expect(nav).toBeVisible()

@@ -18,14 +18,23 @@ test.afterEach(async () => {
   await electronApp.close()
 })
 
-test('AI 工作流：侧边栏可进入，设置里左侧栏目切换各配置页且新建才弹表单', async () => {
+test('AI 工作流：顶部标签可进入，单列侧栏切换栏目，设置里各配置页且新建才弹表单', async () => {
   await page.getByRole('button', { name: 'AI 工作流' }).click()
   await expect(page.getByRole('heading', { name: 'AI 工作流' })).toBeVisible()
 
-  // 工作台里看不到设置栏目
+  // 工作台默认落在聊天栏：侧栏顶部是聊天/任务切换条 + 会话清单；设置栏目不可见
+  await expect(page.getByRole('navigation', { name: '工作台栏目' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '聊天' })).toHaveAttribute('aria-current', 'page')
+  await expect(page.getByRole('button', { name: '新对话' })).toBeVisible()
+  await expect(page.getByLabel('消息输入')).toBeVisible()
   await expect(page.getByRole('navigation', { name: '设置栏目' })).toBeHidden()
 
-  // 打开设置：左侧二级栏目
+  // 切到任务栏：侧栏换成工作流切换器，内容区看板运行记录就位
+  await page.getByRole('button', { name: '任务' }).click()
+  await expect(page.getByRole('combobox', { name: '选择任务查看运行' })).toBeVisible()
+  await expect(page.getByLabel('消息输入')).toBeHidden()
+
+  // 侧栏底部切到设置：设置栏目
   await page.getByRole('tab', { name: '设置' }).click()
   await expect(page.getByRole('navigation', { name: '设置栏目' })).toBeVisible()
 
@@ -48,7 +57,7 @@ test('AI 工作流：侧边栏可进入，设置里左侧栏目切换各配置�
 
   // 工作流配置
   await page.getByRole('button', { name: '工作流配置' }).click()
-  // exact：避免与顶栏「AI 工作流」标题一起命中
+  // exact：栏目标题「工作流」与其它含「工作流」的文案区分开
   await expect(page.getByRole('heading', { name: '工作流', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '智能体' })).toBeHidden()
 })

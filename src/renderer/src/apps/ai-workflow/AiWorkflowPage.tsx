@@ -14,6 +14,8 @@ import { Select } from '../../components/ui/select'
 import { cn } from '../../lib/cn'
 import { wfApi } from './api'
 import { AgentManager } from './components/AgentManager'
+import { ChatPanel } from './components/ChatPanel'
+import { ConversationList } from './components/ConversationList'
 import { KanbanBoard } from './components/KanbanBoard'
 import { RunLog } from './components/RunLog'
 import { RuntimeManager } from './components/RuntimeManager'
@@ -22,11 +24,13 @@ import { TaskDialog } from './components/TaskDialog'
 import { WorkflowEditor } from './components/WorkflowEditor'
 import { WorkflowManager } from './components/WorkflowManager'
 import { WorkflowSwitcher } from './components/WorkflowSwitcher'
+import { WorkspaceNav, type WorkspaceSection } from './components/WorkspaceNav'
+import { useChat } from './hooks/useChat'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** 两个互斥视图：工作台与设置 */
-type View = 'board' | 'settings'
+type View = 'workspace' | 'settings'
 
 /** 设置区页头：标题 + 一句话说明 */
 function SectionHeader({ title, hint }: { title: string; hint: string }): ReactElement {
@@ -48,8 +52,12 @@ export function AiWorkflowPage(): ReactElement {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
   const [runs, setRuns] = useState<Run[]>([])
-  const [view, setView] = useState<View>('board')
+  const [view, setView] = useState<View>('workspace')
+  /** 工作台侧栏栏目：聊天（主动对话）/ 任务（看板与运行记录） */
+  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('chat')
   const [section, setSection] = useState<SettingsSection>('runtimes')
+  /** 聊天状态机：侧栏（会话清单）与内容区（消息流）共用同一份 */
+  const chat = useChat(agents)
 
   const loadRunsFor = async (taskId: string | undefined): Promise<void> => {
     if (!taskId) {
@@ -212,74 +220,118 @@ export function AiWorkflowPage(): ReactElement {
   const active = workflows.find((w) => w.id === activeId)
 
   return (
-    <div className="flex h-full flex-col">
-      {/* 顶栏：标题 + 工作流切换 + 视图切换 */}
-      <header className="flex shrink-0 items-center gap-4 border-b border-line bg-white/[0.02] px-6 py-3 backdrop-blur-xl">
-        <h1 className="text-[15px] font-semibold tracking-wide text-ink">AI 工作流</h1>
-        {view === 'board' && (
-          <WorkflowSwitcher workflows={workflows} activeId={activeId} onSelect={setActiveId} />
+    // 两栏：单列侧栏（w-64）+ 内容区，吃满 shell 顶部栏以下的高度
+    <div className="flex h-full min-h-0">
+      <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-white/[0.02]">
+        {/* 应用标识：顶部栏只显示 app 标签，进到 app 内用次级标题交代当前所在 */}
+        <h2 className="shrink-0 px-4 pt-3.5 pb-1 text-[13px] font-semibold tracking-wide text-ink">
+          AI 工作流
+        </h2>
+        {view === 'workspace' ? (
+          <div className="flex min-h-0 flex-1 flex-col p-3">
+            <WorkspaceNav value={workspaceSection} onChange={setWorkspaceSection}>
+              {workspaceSection === 'chat' ? (
+                <ConversationList
+                  agents={agents}
+                  agentId={chat.agentId}
+                  onAgentChange={chat.setAgentId}
+                  conversations={chat.conversations}
+                  activeId={chat.activeId}
+                  onSelect={chat.selectConversation}
+                  onCreate={() => void chat.createConversation()}
+                  onRemove={(id) => void chat.removeConversation(id)}
+                  creating={chat.creating}
+                />
+              ) : (
+                <WorkflowSwitcher
+                  workflows={workflows}
+                  activeId={activeId}
+                  onSelect={setActiveId}
+                />
+              )}
+            </WorkspaceNav>
+          </div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-auto p-3">
+            <SettingsNav value={section} onChange={setSection} />
+          </div>
         )}
-        <div className="ml-auto">
+
+        <div className="border-t border-line p-3">
           <Segmented
             value={view}
             onChange={setView}
             ariaLabel="视图切换"
             options={[
-              { value: 'board', label: '工作台' },
+              { value: 'workspace', label: '工作台' },
               { value: 'settings', label: '设置' },
             ]}
           />
         </div>
-      </header>
+      </aside>
 
-      {error && editing === undefined && (
-        <p className="mx-6 mt-4 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</p>
-      )}
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {error && editing === undefined && (
+          <p className="mx-4 mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            {error}
+          </p>
+        )}
 
-      {view === 'board' && (
-        <div className="flex min-h-0 flex-1 gap-4 p-6">
-          <section className="flex min-w-0 flex-1 flex-col gap-3">
-            {active ? (
-              <KanbanBoard
-                workflow={active}
-                tasks={tasks}
-                onMoveToStage={moveToStage}
-                onCompleteTask={completeTask}
-                onNewTask={() => setDialogOpen(true)}
+        {view === 'workspace' && workspaceSection === 'chat' && (
+          <ChatPanel
+            agents={agents}
+            conversation={chat.active}
+            messages={chat.messages}
+            streaming={chat.streaming}
+            sending={chat.sending}
+            error={chat.error}
+            onSend={chat.sendMessage}
+            onCancel={() => void chat.cancelRun()}
+          />
+        )}
+
+        {view === 'workspace' && workspaceSection === 'tasks' && (
+          <div className="flex min-h-0 flex-1 gap-4 p-6">
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+              {active ? (
+                <KanbanBoard
+                  workflow={active}
+                  tasks={tasks}
+                  onMoveToStage={moveToStage}
+                  onCompleteTask={completeTask}
+                  onNewTask={() => setDialogOpen(true)}
+                />
+              ) : (
+                <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
+                  尚无工作流。到「设置」里的「工作流配置」新建一条，再回来建任务并拖拽推进。
+                </div>
+              )}
+            </section>
+
+            <aside
+              className={cn(
+                panelCls,
+                'flex w-80 shrink-0 flex-col gap-3 overflow-hidden bg-white/[0.02] p-4',
+              )}
+            >
+              <h2 className="text-[13px] font-medium tracking-wide text-ink">运行记录</h2>
+              <Select
+                ariaLabel="选择任务查看运行"
+                value={selectedTaskId ?? ''}
+                onChange={(v) => setSelectedTaskId(v || undefined)}
+                options={[
+                  { value: '', label: '（选择任务）' },
+                  ...tasks.map((t) => ({ value: t.id, label: t.title })),
+                ]}
               />
-            ) : (
-              <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
-                尚无工作流。到「设置」里的「工作流配置」新建一条，再回来建任务并拖拽推进。
+              <div className="min-h-0 flex-1 overflow-auto pr-1">
+                <RunLog runs={runs} />
               </div>
-            )}
-          </section>
+            </aside>
+          </div>
+        )}
 
-          <aside
-            className={cn(
-              panelCls,
-              'flex w-80 shrink-0 flex-col gap-3 overflow-hidden bg-white/[0.02] p-4',
-            )}
-          >
-            <h2 className="text-[13px] font-medium tracking-wide text-ink">运行记录</h2>
-            <Select
-              ariaLabel="选择任务查看运行"
-              value={selectedTaskId ?? ''}
-              onChange={(v) => setSelectedTaskId(v || undefined)}
-              options={[
-                { value: '', label: '（选择任务）' },
-                ...tasks.map((t) => ({ value: t.id, label: t.title })),
-              ]}
-            />
-            <div className="min-h-0 flex-1 overflow-auto pr-1">
-              <RunLog runs={runs} />
-            </div>
-          </aside>
-        </div>
-      )}
-
-      {view === 'settings' && (
-        <div className="flex min-h-0 flex-1">
-          <SettingsNav value={section} onChange={setSection} />
+        {view === 'settings' && (
           <div className="flex min-h-0 flex-1 flex-col overflow-auto p-6">
             {section === 'runtimes' && (
               <>
@@ -308,8 +360,8 @@ export function AiWorkflowPage(): ReactElement {
               </>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </main>
 
       {dialogOpen && active && (
         <TaskDialog workflow={active} onSave={createTask} onCancel={() => setDialogOpen(false)} />

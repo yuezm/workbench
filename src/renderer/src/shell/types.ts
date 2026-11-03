@@ -13,9 +13,9 @@ export interface AppIconProps {
 export interface AppDefinition {
   /** 唯一 id，kebab-case */
   id: string
-  /** 侧边栏显示名 */
+  /** 顶部导航显示名 */
   name: string
-  /** 侧边栏图标 */
+  /** 顶部导航图标 */
   icon: ComponentType<AppIconProps>
   /** 内容区挂载的入口组件 */
   component: ComponentType

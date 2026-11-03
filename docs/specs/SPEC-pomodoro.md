@@ -106,7 +106,7 @@ export function tick(state: PomodoroState, now: number): PomodoroState {
 3. 开始/暂停/重置/跳过行为与状态机表格完全一致（由状态机单测证明，含"跳过专注不计轮"）。
 4. 阶段自然结束时：响铃播放 + 系统通知弹出（含下个阶段名称），并停在下一阶段等待确认。
 5. 倒计时在窗口失焦、系统休眠恢复后仍准确（时间戳机制，单测以大幅跳跃的时间戳模拟）。
-6. 侧边栏高亮当前 app（由 shell 承载，pomodoro 无需感知）。
+6. 顶部 app 标签栏高亮当前 app（由 shell 承载，pomodoro 无需感知）。
 
 ## Open Questions
 

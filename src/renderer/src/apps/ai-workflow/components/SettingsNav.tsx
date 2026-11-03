@@ -26,13 +26,10 @@ const ITEMS: NavItem[] = [
   { value: 'workflows', label: '工作流配置', path: 'M4 6h6v5H4zM14 6h6v5h-6zM4 13h16v5H4z' },
 ]
 
-/** 设置页左侧的二级栏目：运行时 / 智能体 / 工作流 */
+/** 设置页左侧的二级栏目：运行时 / 智能体 / 工作流（外壳由父级侧栏提供） */
 export function SettingsNav({ value, onChange }: SettingsNavProps): ReactElement {
   return (
-    <nav
-      aria-label="设置栏目"
-      className="flex w-48 shrink-0 flex-col gap-1 border-r border-line bg-white/[0.02] p-3"
-    >
+    <nav aria-label="设置栏目" className="flex flex-col gap-1">
       {ITEMS.map((item) => {
         const active = item.value === value
         return (

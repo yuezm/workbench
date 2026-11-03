@@ -2,7 +2,7 @@
 
 Electron 桌面「工作台」外壳 + 内置番茄时钟 app。自用、单用户、本地运行、无登录，v1 数据不落盘。
 
-外壳（`shell`）负责窗口、侧边栏导航与 app 注册机制；`pomodoro` 是第一个按 `AppDefinition` 契约接入的 app。新增 app 只需三步：新建 app 目录、实现 `AppDefinition`、在注册表加一行，外壳代码零改动。
+外壳（`shell`）负责窗口、顶部 app 标签栏导航与 app 注册机制；`pomodoro` 是第一个按 `AppDefinition` 契约接入的 app。新增 app 只需三步：新建 app 目录、实现 `AppDefinition`、在注册表加一行，外壳代码零改动。
 
 ## 技术栈
 
@@ -43,7 +43,7 @@ workbench/
 │       └── src/
 │           ├── main.tsx   # 渲染入口，挂载 Workbench
 │           ├── shared/    # window.workbench 全局类型声明
-│           ├── shell/     # 外壳：Workbench、Sidebar、registry、types
+│           ├── shell/     # 外壳：Workbench、TopBar、registry、types
 │           └── apps/
 │               └── pomodoro/  # 番茄时钟 app
 ├── electron-builder.yml

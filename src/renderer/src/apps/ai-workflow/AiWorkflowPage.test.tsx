@@ -85,6 +85,8 @@ function makeApi() {
       create: vi.fn(),
       update: vi.fn(),
       remove: vi.fn(),
+      detect: vi.fn(async () => []),
+      test: vi.fn(async () => ({ ok: true, code: 0, elapsedMs: 1, output: 'OK', error: null })),
     },
     agents: {
       list: vi.fn(async () => state.agents),
@@ -114,6 +116,15 @@ function makeApi() {
       remove: vi.fn(),
     },
     runs: { listByTask: vi.fn(async () => state.runs) },
+    chat: {
+      listConversations: vi.fn(async () => []),
+      createConversation: vi.fn(),
+      removeConversation: vi.fn(),
+      listMessages: vi.fn(async () => []),
+      send: vi.fn(async () => {}),
+      cancel: vi.fn(async () => {}),
+      onEvent: vi.fn(() => () => {}),
+    },
     onChanged: vi.fn(() => () => {}),
   }
 }
@@ -142,6 +153,11 @@ async function openSection(
   await user.click(screen.getByRole('button', { name: section }))
 }
 
+/** 工作台默认落在「聊天」栏：看板相关用例先切到「任务」栏 */
+async function openTasks(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('button', { name: '任务' }))
+}
+
 beforeEach(() => vi.clearAllMocks())
 
 describe('AiWorkflowPage', () => {
@@ -150,6 +166,7 @@ describe('AiWorkflowPage', () => {
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
 
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
@@ -195,6 +212,7 @@ describe('AiWorkflowPage', () => {
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
 
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.queryByText('运行时')).not.toBeInTheDocument()
@@ -268,6 +286,7 @@ describe('AiWorkflowPage', () => {
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
     await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
     await user.click(screen.getByRole('option', { name: '任务A' }))
@@ -281,7 +300,9 @@ describe('AiWorkflowPage', () => {
     const api = makeApi()
     api.tasks.moveToStage.mockRejectedValue(new Error('mboom'))
     install(api)
+    const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     await dragTo('任务：任务A', '阶段：审核')
     expect(await screen.findByText('mboom')).toBeInTheDocument()
@@ -291,7 +312,9 @@ describe('AiWorkflowPage', () => {
     const api = makeApi()
     api.tasks.complete.mockRejectedValue(new Error('dboom'))
     install(api)
+    const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     await dragTo('任务：任务A', '已完成区')
     expect(await screen.findByText('dboom')).toBeInTheDocument()
@@ -303,6 +326,7 @@ describe('AiWorkflowPage', () => {
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.type(screen.getByLabelText('任务标题'), 'x')
@@ -316,6 +340,7 @@ describe('AiWorkflowPage', () => {
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     await openSection(user, '工作流配置')
     await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
@@ -329,6 +354,7 @@ describe('AiWorkflowPage', () => {
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
 
     await dragTo('任务：任务A', '阶段：审核')
@@ -363,7 +389,9 @@ describe('AiWorkflowPage', () => {
       return () => {}
     }
     install(api)
+    const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     const before = api.workflows.list.mock.calls.length
     await reloadCb?.()
@@ -381,7 +409,9 @@ describe('AiWorkflowPage', () => {
     const api = makeApi()
     api.tasks.list.mockResolvedValueOnce([task]).mockRejectedValue(new Error('tb'))
     install(api)
+    const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     await dragTo('任务：任务A', '阶段：审核')
     expect(await screen.findByText('tb')).toBeInTheDocument()
@@ -396,7 +426,9 @@ describe('AiWorkflowPage', () => {
     }
     api.workflows.list.mockResolvedValueOnce([wf]).mockRejectedValue(new Error('reload-boom'))
     install(api)
+    const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     await reloadCb?.()
     expect(await screen.findByText('reload-boom')).toBeInTheDocument()
@@ -454,7 +486,9 @@ describe('AiWorkflowPage', () => {
         }),
     )
     install(api)
+    const user = userEvent.setup()
     const { unmount } = render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     unmount()
     resolveTasks([task])
@@ -471,7 +505,9 @@ describe('AiWorkflowPage', () => {
         }),
     )
     install(api)
+    const user = userEvent.setup()
     const { unmount } = render(<AiWorkflowPage />)
+    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     unmount()
     rejectTasks(new Error('late'))
@@ -499,6 +535,7 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
 
     const first = render(<AiWorkflowPage />)
+    await openTasks(user)
     await user.click(await screen.findByRole('combobox', { name: '选择任务查看运行' }))
     await user.click(await screen.findByRole('option', { name: '任务A' }))
     first.unmount()
@@ -506,10 +543,96 @@ describe('AiWorkflowPage', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     const second = render(<AiWorkflowPage />)
+    await openTasks(user)
     await user.click(await screen.findByRole('combobox', { name: '选择任务查看运行' }))
     await user.click(await screen.findByRole('option', { name: '任务A' }))
     second.unmount()
     rejectRuns(new Error('late'))
     await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it('工作台默认落在聊天栏；任务栏显示看板与运行记录；切回聊天隐藏看板', async () => {
+    const api = makeApi()
+    install(api)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    // 页头已移除：一级标题归 shell 顶部栏；app 侧栏用 h2 标识当前所在
+    expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
+    // 默认聊天：侧栏顶部是工作台栏目，下方紧接会话清单
+    expect(await screen.findByRole('navigation', { name: '工作台栏目' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '聊天' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '新对话' })).toBeInTheDocument()
+    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
+    expect(screen.queryByText(/工作流「研发」/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '选择任务查看运行' })).not.toBeInTheDocument()
+    // 工作流切换器只在任务栏目显示
+    expect(screen.queryByRole('combobox', { name: '选择工作流' })).not.toBeInTheDocument()
+
+    // 切到任务：看板与运行记录就位，侧栏换成工作流切换器
+    await openTasks(user)
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '选择任务查看运行' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '选择工作流' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '新对话' })).not.toBeInTheDocument()
+
+    // 切回聊天：看板隐藏，会话清单回来
+    await user.click(screen.getByRole('button', { name: '聊天' }))
+    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
+    expect(screen.queryByText(/工作流「研发」/)).not.toBeInTheDocument()
+
+    // 设置视图不显示工作台栏目
+    await openSection(user, '运行时配置')
+    expect(screen.queryByRole('navigation', { name: '工作台栏目' })).not.toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: '设置栏目' })).toBeInTheDocument()
+  })
+
+  it('侧栏底部的视图切换在工作台与设置间往返', async () => {
+    const api = makeApi()
+    install(api)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    // 底部固定分段控件：两个 tab 常驻
+    expect(await screen.findByRole('tab', { name: '工作台' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'false')
+
+    await user.click(screen.getByRole('tab', { name: '设置' }))
+    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('navigation', { name: '设置栏目' })).toBeInTheDocument()
+    // 默认设置栏目 = 运行时配置
+    expect(await screen.findByRole('heading', { name: '运行时' })).toBeInTheDocument()
+    // 内容区让位给设置内容
+    expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: '工作台' }))
+    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '运行时' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: '设置栏目' })).not.toBeInTheDocument()
+  })
+
+  it('任务栏的工作流切换器换工作流后看板随之切换', async () => {
+    const api = makeApi()
+    const second: WorkflowWithStages = {
+      ...wf,
+      id: 'w2',
+      name: '写作',
+      stages: [stage('s9', '草稿', 0, 'none')],
+    }
+    api.workflows.list.mockResolvedValue([wf, second])
+    install(api)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: '选择工作流' }))
+    await user.click(await screen.findByRole('option', { name: '写作' }))
+    expect(await screen.findByText(/工作流「写作」/)).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: '阶段：草稿' })).toBeInTheDocument()
   })
 })

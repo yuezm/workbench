@@ -80,7 +80,7 @@ export function KanbanBoard({
   }
 
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
           <span className="text-focus">
@@ -93,7 +93,7 @@ export function KanbanBoard({
           新建任务
         </Button>
       </div>
-      <div className="flex gap-3">
+      <div className="flex min-h-0 flex-1 gap-3">
         <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto pb-2">
           {workflow.stages.map((stage, index) => {
             const cards = activeTasks.filter((t) => t.currentStageId === stage.id)

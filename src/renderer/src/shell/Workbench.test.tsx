@@ -21,7 +21,7 @@ describe('Workbench 外壳', () => {
     expect(screen.queryByText('内容B')).not.toBeInTheDocument()
   })
 
-  it('点击侧边栏切换内容区 app，且无整页刷新', async () => {
+  it('点击顶部标签切换内容区 app，且无整页刷新', async () => {
     render(<Workbench apps={fakeApps} />)
     await userEvent.click(screen.getByRole('button', { name: '应用B' }))
     expect(screen.getByText('内容B')).toBeInTheDocument()

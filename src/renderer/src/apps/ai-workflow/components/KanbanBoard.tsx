@@ -93,63 +93,65 @@ export function KanbanBoard({
           新建任务
         </Button>
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-2">
-        {workflow.stages.map((stage, index) => {
-          const cards = activeTasks.filter((t) => t.currentStageId === stage.id)
-          const isOver = overTarget === stage.id
-          return (
-            <div
-              key={stage.id}
-              role="group"
-              aria-label={`阶段：${stage.name}`}
-              onDragOver={(e) => allowDrop(stage.id, e)}
-              onDragLeave={() => setOverTarget(null)}
-              onDrop={(e) => dropOnStage(stage.id, e)}
-              className={cn(
-                'flex w-64 shrink-0 animate-rise flex-col gap-2.5 rounded-2xl border p-2.5',
-                'transition-colors duration-150',
-                isOver
-                  ? 'border-focus/60 bg-focus/[0.07]'
-                  : 'border-line bg-white/[0.02] hover:border-line-strong',
-              )}
-              style={{ animationDelay: `${index * 60}ms` }}
-            >
-              <div className="flex items-center justify-between px-1.5 pt-0.5 pb-1">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`size-1.5 shrink-0 rounded-full ${DOT_COLORS[index % DOT_COLORS.length]}`}
-                    aria-hidden="true"
-                  />
-                  <span className="text-[13px] font-medium tracking-wide text-ink">
-                    {stage.name}
+      <div className="flex gap-3">
+        <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto pb-2">
+          {workflow.stages.map((stage, index) => {
+            const cards = activeTasks.filter((t) => t.currentStageId === stage.id)
+            const isOver = overTarget === stage.id
+            return (
+              <div
+                key={stage.id}
+                role="group"
+                aria-label={`阶段：${stage.name}`}
+                onDragOver={(e) => allowDrop(stage.id, e)}
+                onDragLeave={() => setOverTarget(null)}
+                onDrop={(e) => dropOnStage(stage.id, e)}
+                className={cn(
+                  'flex w-64 shrink-0 animate-rise flex-col gap-2.5 rounded-2xl border p-2.5',
+                  'transition-colors duration-150',
+                  isOver
+                    ? 'border-focus/60 bg-focus/[0.07]'
+                    : 'border-line bg-white/[0.02] hover:border-line-strong',
+                )}
+                style={{ animationDelay: `${index * 60}ms` }}
+              >
+                <div className="flex items-center justify-between px-1.5 pt-0.5 pb-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`size-1.5 shrink-0 rounded-full ${DOT_COLORS[index % DOT_COLORS.length]}`}
+                      aria-hidden="true"
+                    />
+                    <span className="text-[13px] font-medium tracking-wide text-ink">
+                      {stage.name}
+                    </span>
+                  </div>
+                  <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+                    {cards.length}
                   </span>
                 </div>
-                <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
-                  {cards.length}
-                </span>
+                {cards.length === 0 ? (
+                  <p className="grid place-items-center py-4 text-xs text-ink-faint">
+                    {dragging ? '拖到这里' : '空'}
+                  </p>
+                ) : (
+                  cards.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      stage={stage}
+                      dragging={dragging?.id === task.id}
+                      onDragStart={setDragging}
+                      onDragEnd={stopDrag}
+                    />
+                  ))
+                )}
+                <div className="mt-auto h-px w-full bg-white/[0.05]" aria-hidden="true" />
               </div>
-              {cards.length === 0 ? (
-                <p className="grid place-items-center py-4 text-xs text-ink-faint">
-                  {dragging ? '拖到这里' : '空'}
-                </p>
-              ) : (
-                cards.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    stage={stage}
-                    dragging={dragging?.id === task.id}
-                    onDragStart={setDragging}
-                    onDragEnd={stopDrag}
-                  />
-                ))
-              )}
-              <div className="mt-auto h-px w-full bg-white/[0.05]" aria-hidden="true" />
-            </div>
-          )
-        })}
+            )
+          })}
+        </div>
 
-        {/* 终端落点：拖到这里 = 任务走完、移出看板 */}
+        {/* 终端落点：固定在右侧不随阶段列滚动，拖到这里 = 任务走完、移出看板 */}
         <div
           role="group"
           aria-label="已完成区"
@@ -157,7 +159,7 @@ export function KanbanBoard({
           onDragLeave={() => setOverTarget(null)}
           onDrop={dropOnDone}
           className={cn(
-            'flex w-44 shrink-0 flex-col gap-2.5 rounded-2xl border border-dashed p-2.5',
+            'flex w-40 shrink-0 flex-col gap-2.5 self-stretch rounded-2xl border border-dashed p-2.5',
             'transition-colors duration-150',
             overTarget === DONE_TARGET
               ? 'border-short/60 bg-short/[0.07]'

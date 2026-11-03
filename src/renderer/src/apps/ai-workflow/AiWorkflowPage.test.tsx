@@ -121,9 +121,18 @@ function install(api: unknown): void {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
 }
 
-/** 切到「设置」视图：运行时/智能体/工作流定义都在这里 */
-async function openSettings(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getByRole('tab', { name: '设置' }))
+/** 切到视图页签：工作台 / 设置 */
+async function openView(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+  await user.click(screen.getByRole('tab', { name }))
+}
+
+/** 打开设置并切到左侧二级栏目：运行时配置 / 智能体配置 / 工作流配置 */
+async function openSection(
+  user: ReturnType<typeof userEvent.setup>,
+  section: string,
+): Promise<void> {
+  await openView(user, '设置')
+  await user.click(screen.getByRole('button', { name: section }))
 }
 
 beforeEach(() => vi.clearAllMocks())
@@ -151,8 +160,8 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('button', { name: '创建任务' }))
     await waitFor(() => expect(api.tasks.create).toHaveBeenCalled())
 
-    // 工作流定义在「设置」视图里
-    await openSettings(user)
+    // 工作流定义在「工作流配置」视图里
+    await openSection(user, '工作流配置')
     await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
     expect(await screen.findByLabelText('工作流名称')).toHaveValue('研发')
     await user.clear(screen.getByLabelText('工作流名称'))
@@ -167,7 +176,7 @@ describe('AiWorkflowPage', () => {
     await waitFor(() => expect(api.workflows.create).toHaveBeenCalled())
   })
 
-  it('默认看工作台，设置视图里有运行时/智能体/工作流三个区块', async () => {
+  it('配置项都收在设置里，左侧二级栏目切换，互不混排', async () => {
     const api = makeApi()
     install(api)
     const user = userEvent.setup()
@@ -175,14 +184,52 @@ describe('AiWorkflowPage', () => {
 
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.queryByText('运行时')).not.toBeInTheDocument()
+    // 工作台里没有设置栏目
+    expect(screen.queryByRole('navigation', { name: '设置栏目' })).not.toBeInTheDocument()
 
-    await openSettings(user)
+    await openSection(user, '运行时配置')
     expect(await screen.findByRole('heading', { name: '运行时' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建运行时' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '智能体' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '工作流' })).not.toBeInTheDocument()
+
+    await openSection(user, '智能体配置')
+    expect(await screen.findByRole('heading', { name: '智能体' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '智能体' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建智能体' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '运行时' })).not.toBeInTheDocument()
+
+    await openSection(user, '工作流配置')
+    expect(await screen.findByRole('heading', { name: '工作流' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '工作流' })).toBeInTheDocument()
-    // 运行时与智能体管理器已挂载
+    expect(screen.getByRole('button', { name: '新建工作流' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '智能体' })).not.toBeInTheDocument()
+  })
+
+  it('配置页默认不显示新增表单，点击新建才弹出', async () => {
+    const api = makeApi()
+    install(api)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    await openSection(user, '运行时配置')
+    expect(await screen.findByRole('button', { name: '新建运行时' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '新建运行时' }))
     expect(await screen.findByLabelText('运行时名称')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
+
+    await openSection(user, '智能体配置')
+    await user.click(await screen.findByRole('button', { name: '新建智能体' }))
+    expect(await screen.findByLabelText('智能体名称')).toBeInTheDocument()
     expect(screen.getByLabelText('智能体名称')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByLabelText('智能体名称')).not.toBeInTheDocument()
+
+    await openSection(user, '工作流配置')
+    await user.click(await screen.findByRole('button', { name: '新建工作流' }))
+    expect(await screen.findByLabelText('工作流名称')).toBeInTheDocument()
   })
 
   it('加载失败展示错误', async () => {
@@ -247,7 +294,7 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await screen.findByText(/工作流「研发」/)
-    await openSettings(user)
+    await openSection(user, '工作流配置')
     await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
     await screen.findByLabelText('工作流名称')
     await user.click(screen.getByRole('button', { name: '保存工作流' }))
@@ -275,7 +322,7 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '取消' }))
 
-    await openSettings(user)
+    await openSection(user, '工作流配置')
     await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
     await user.click(screen.getByRole('button', { name: '取消' }))
   })
@@ -340,7 +387,7 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    await openSettings(user)
+    await openSection(user, '工作流配置')
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
     await user.type(screen.getByLabelText('工作流名称'), '第一条')
     await user.click(screen.getByRole('button', { name: '保存工作流' }))

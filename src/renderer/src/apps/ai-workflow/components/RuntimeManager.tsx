@@ -1,19 +1,17 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import type { AiWorkflowApi, DetectedRuntime, Runtime } from '../../../../../shared/ai-workflow-api'
+import type {
+  AiWorkflowApi,
+  DetectedRuntime,
+  Runtime,
+  RuntimeInput,
+} from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
-import { Field } from '../../../components/ui/field'
-import { Input } from '../../../components/ui/input'
 import { Panel, badgeCls } from '../../../components/ui/panel'
-import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 import { wfApi } from '../api'
+import { RuntimeDialog } from './RuntimeDialog'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-
-function parseArgs(text: string): string[] {
-  const t = text.trim()
-  return t ? t.split(/\s+/) : []
-}
 
 /** 检测接口可能不存在（测试桩 / 旧 preload）：缺失时返回空清单 */
 function detectRuntimes(): Promise<DetectedRuntime[]> {
@@ -81,16 +79,14 @@ function ScanIcon({ className }: { className?: string }): ReactElement {
   )
 }
 
+/** 运行时页：检测清单 + 已配置清单；新建走弹窗表单 */
 export function RuntimeManager(): ReactElement {
   const [items, setItems] = useState<Runtime[]>([])
   const [detected, setDetected] = useState<DetectedRuntime[]>([])
   const [detecting, setDetecting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [name, setName] = useState('')
-  const [command, setCommand] = useState('dsh')
-  const [argsText, setArgsText] = useState('')
-  const [promptMode, setPromptMode] = useState<'arg' | 'stdin'>('arg')
-  const [workdir, setWorkdir] = useState('')
+  /** 非空 = 弹窗打开中，值为表单预填 */
+  const [draft, setDraft] = useState<RuntimeInput | null>(null)
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -128,7 +124,7 @@ export function RuntimeManager(): ReactElement {
     }
   }, [])
 
-  // 进入设置即自动识别本机已安装的 CLI
+  // 进入该页即自动识别本机已安装的 CLI
   useEffect(() => {
     let alive = true
     void (async () => {
@@ -144,24 +140,12 @@ export function RuntimeManager(): ReactElement {
     }
   }, [])
 
-  const submit = async (ev: React.FormEvent): Promise<void> => {
-    ev.preventDefault()
-    try {
-      await wfApi().runtimes.create({
-        name,
-        command,
-        args: parseArgs(argsText),
-        promptMode,
-        workdir: workdir.trim() || null,
-      })
-      setName('')
-      setArgsText('')
-      setWorkdir('')
-      await reload()
-    } catch (e) {
-      setError(errMsg(e))
-    }
+  const create = async (input: RuntimeInput): Promise<void> => {
+    await wfApi().runtimes.create(input)
+    setDraft(null)
+    await reload()
   }
+
   const remove = async (id: string): Promise<void> => {
     try {
       await wfApi().runtimes.remove(id)
@@ -171,11 +155,16 @@ export function RuntimeManager(): ReactElement {
     }
   }
 
-  /** 把检测到的 CLI 预填进表单；名称与既有运行时冲突时加命令后缀 */
+  /** 把检测到的 CLI 预填进弹窗表单；名称与既有运行时冲突时加命令后缀 */
   const prefill = (d: DetectedRuntime): void => {
     const taken = items.some((r) => r.name === d.label)
-    setName(taken ? `${d.label} (${d.command})` : d.label)
-    setCommand(d.command)
+    setDraft({
+      name: taken ? `${d.label} (${d.command})` : d.label,
+      command: d.command,
+      args: [],
+      promptMode: 'arg',
+      workdir: null,
+    })
   }
 
   const addedCommands = new Set(items.map((r) => r.command))
@@ -239,67 +228,6 @@ export function RuntimeManager(): ReactElement {
         )}
       </Panel>
 
-      {/* 新增运行时 */}
-      <form
-        className={cn(
-          'flex animate-rise flex-col gap-4 rounded-2xl border border-line bg-white/[0.03] p-5',
-          'shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)] backdrop-blur-xl',
-          '[animation-delay:80ms]',
-        )}
-        onSubmit={submit}
-      >
-        <div className="flex items-center gap-2">
-          <TerminalIcon className="text-focus" />
-          <h3 className="text-[13px] font-medium tracking-wide text-ink">新增运行时</h3>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <Field label="名称">
-            <Input aria-label="运行时名称" value={name} onChange={(e) => setName(e.target.value)} />
-          </Field>
-          <Field label="命令">
-            <Input
-              aria-label="运行时命令"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-            />
-          </Field>
-          <Field label="prompt 传递">
-            <Select
-              ariaLabel="prompt 传递方式"
-              value={promptMode}
-              onChange={(v) => setPromptMode(v === 'stdin' ? 'stdin' : 'arg')}
-              options={[
-                { value: 'arg', label: '参数' },
-                { value: 'stdin', label: '标准输入' },
-              ]}
-            />
-          </Field>
-          <Field label={`参数（空格分隔，可用 {'{prompt}'}）`} className="sm:col-span-2">
-            <Input
-              aria-label="运行时参数"
-              className="font-mono"
-              value={argsText}
-              onChange={(e) => setArgsText(e.target.value)}
-            />
-          </Field>
-          <Field label="工作目录（可选）">
-            <Input
-              aria-label="运行时工作目录"
-              className="font-mono"
-              value={workdir}
-              onChange={(e) => setWorkdir(e.target.value)}
-            />
-          </Field>
-        </div>
-
-        <div className="flex justify-end">
-          <Button type="submit" variant="primary" size="sm">
-            添加运行时
-          </Button>
-        </div>
-      </form>
-
       {error && (
         <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
           {error}
@@ -307,11 +235,22 @@ export function RuntimeManager(): ReactElement {
       )}
 
       {/* 已有运行时 */}
-      <Panel className="flex animate-rise flex-col gap-3 p-5 [animation-delay:160ms]">
+      <Panel className="flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]">
         <div className="flex items-center gap-2">
           <ListIcon className="text-ink-dim" />
           <h3 className="text-[13px] font-medium tracking-wide text-ink">已配置运行时</h3>
-          <span className={cn(badgeCls, 'ml-auto')}>{items.length}</span>
+          <span className={cn(badgeCls)}>{items.length}</span>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            className="ml-auto"
+            onClick={() =>
+              setDraft({ name: '', command: 'dsh', args: [], promptMode: 'arg', workdir: null })
+            }
+          >
+            新建运行时
+          </Button>
         </div>
 
         <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
@@ -347,6 +286,10 @@ export function RuntimeManager(): ReactElement {
           ))}
         </ul>
       </Panel>
+
+      {draft !== null && (
+        <RuntimeDialog initial={draft} onSubmit={create} onCancel={() => setDraft(null)} />
+      )}
     </div>
   )
 }

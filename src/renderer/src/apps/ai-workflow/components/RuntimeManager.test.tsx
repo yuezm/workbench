@@ -27,6 +27,29 @@ const base: Runtime = {
 beforeEach(() => vi.clearAllMocks())
 
 describe('RuntimeManager', () => {
+  it('默认只显示清单，点击「新建运行时」才弹出表单', async () => {
+    const user = userEvent.setup()
+    setApi({
+      runtimes: {
+        list: vi.fn().mockResolvedValue([base]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    expect(await screen.findByText('ds')).toBeInTheDocument()
+    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新建运行时' }))
+    expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
+
+    // 取消后表单关闭
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
+  })
+
   it('加载列表、新建（含参数/prompt 模式/工作目录）并删除', async () => {
     let store: Runtime[] = [base]
     const list = vi.fn(async () => store)
@@ -54,6 +77,7 @@ describe('RuntimeManager', () => {
     expect(await screen.findByText('ds')).toBeInTheDocument()
 
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '新建运行时' }))
     await user.type(screen.getByLabelText('运行时名称'), 'claude')
     await user.clear(screen.getByLabelText('运行时命令'))
     await user.type(screen.getByLabelText('运行时命令'), 'claude-cli')
@@ -72,6 +96,8 @@ describe('RuntimeManager', () => {
       workdir: 'D:/work',
     })
     expect(await screen.findByText('claude')).toBeInTheDocument()
+    // 保存成功后弹窗关闭
+    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
 
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
     await waitFor(() => expect(remove).toHaveBeenCalledWith('r1'))
@@ -86,7 +112,7 @@ describe('RuntimeManager', () => {
     expect(await screen.findByText('boom')).toBeInTheDocument()
   })
 
-  it('新建失败与删除失败均展示错误', async () => {
+  it('新建失败在弹窗内展示错误并保持打开；删除失败展示错误', async () => {
     const list = vi.fn().mockResolvedValue([base])
     const create = vi.fn().mockRejectedValue(new Error('create-fail'))
     const remove = vi.fn().mockRejectedValue(new Error('remove-fail'))
@@ -97,10 +123,13 @@ describe('RuntimeManager', () => {
     render(<RuntimeManager />)
     expect(await screen.findByText('ds')).toBeInTheDocument()
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '新建运行时' }))
     await user.type(screen.getByLabelText('运行时名称'), 'x')
     await user.click(screen.getByRole('button', { name: '添加运行时' }))
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
+    expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
 
+    await user.click(screen.getByRole('button', { name: '取消' }))
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
     expect(await screen.findByText('remove-fail')).toBeInTheDocument()
   })
@@ -129,6 +158,7 @@ describe('RuntimeManager', () => {
     render(<RuntimeManager />)
     expect(await screen.findByText('ds')).toBeInTheDocument()
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '新建运行时' }))
     await user.type(screen.getByLabelText('运行时名称'), 'x')
     await user.click(screen.getByRole('button', { name: '添加运行时' }))
     expect(await screen.findByText('reload-boom')).toBeInTheDocument()

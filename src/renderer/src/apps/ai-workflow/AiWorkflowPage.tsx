@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import type {
   Agent,
   Run,
@@ -8,7 +8,8 @@ import type {
   WorkflowInput,
   WorkflowWithStages,
 } from '../../../../shared/ai-workflow-api'
-import { Panel, panelCls } from '../../components/ui/panel'
+import { Dialog } from '../../components/ui/dialog'
+import { panelCls } from '../../components/ui/panel'
 import { Segmented } from '../../components/ui/segmented'
 import { Select } from '../../components/ui/select'
 import { cn } from '../../lib/cn'
@@ -17,6 +18,7 @@ import { AgentManager } from './components/AgentManager'
 import { KanbanBoard } from './components/KanbanBoard'
 import { RunLog } from './components/RunLog'
 import { RuntimeManager } from './components/RuntimeManager'
+import { SettingsNav, type SettingsSection } from './components/SettingsNav'
 import { TaskDialog } from './components/TaskDialog'
 import { WorkflowEditor } from './components/WorkflowEditor'
 import { WorkflowManager } from './components/WorkflowManager'
@@ -24,50 +26,16 @@ import { WorkflowSwitcher } from './components/WorkflowSwitcher'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
+/** 两个互斥视图：工作台与设置 */
 type View = 'board' | 'settings'
 
-function SectionIcon({ path }: { path: string }): ReactElement {
+/** 设置区页头：标题 + 一句话说明 */
+function SectionHeader({ title, hint }: { title: string; hint: string }): ReactElement {
   return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d={path} />
-    </svg>
-  )
-}
-
-function SettingsSection({
-  title,
-  hint,
-  icon,
-  children,
-}: {
-  title: string
-  hint: string
-  icon: ReactNode
-  children: ReactNode
-}): ReactElement {
-  return (
-    <Panel className="animate-rise p-5">
-      <header className="mb-4 flex items-center gap-2.5">
-        <span className="grid size-7 place-items-center rounded-lg bg-focus/15 text-focus">
-          {icon}
-        </span>
-        <span className="flex flex-col leading-tight">
-          <h2 className="text-[13px] font-medium tracking-wide text-ink">{title}</h2>
-          <span className="text-[11px] text-ink-faint">{hint}</span>
-        </span>
-      </header>
-      {children}
-    </Panel>
+    <header className="mb-4 flex flex-col gap-0.5">
+      <h2 className="text-[15px] font-semibold tracking-wide text-ink">{title}</h2>
+      <span className="text-xs text-ink-faint">{hint}</span>
+    </header>
   )
 }
 
@@ -82,6 +50,7 @@ export function AiWorkflowPage(): ReactElement {
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
   const [runs, setRuns] = useState<Run[]>([])
   const [view, setView] = useState<View>('board')
+  const [section, setSection] = useState<SettingsSection>('runtimes')
 
   const loadRunsFor = async (taskId: string | undefined): Promise<void> => {
     if (!taskId) {
@@ -252,11 +221,11 @@ export function AiWorkflowPage(): ReactElement {
         </div>
       </header>
 
-      {error && (
+      {error && editing === undefined && (
         <p className="mx-6 mt-4 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">{error}</p>
       )}
 
-      {view === 'board' ? (
+      {view === 'board' && (
         <div className="flex min-h-0 flex-1 gap-4 p-6">
           <section className="flex min-w-0 flex-1 flex-col gap-3">
             {active ? (
@@ -268,7 +237,7 @@ export function AiWorkflowPage(): ReactElement {
               />
             ) : (
               <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
-                尚无工作流。到「设置」里新建一条，再回来推进任务。
+                尚无工作流。到「设置」里的「工作流配置」新建一条，再回来推进任务。
               </div>
             )}
           </section>
@@ -294,49 +263,39 @@ export function AiWorkflowPage(): ReactElement {
             </div>
           </aside>
         </div>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-6">
-          <SettingsSection
-            title="运行时"
-            hint="本机执行的 CLI，智能体绑定到运行时"
-            icon={<SectionIcon path="M4 5h16v4H4zM6 9v10h12V9M10 13h4" />}
-          >
-            <RuntimeManager />
-          </SettingsSection>
+      )}
 
-          <SettingsSection
-            title="智能体"
-            hint="运行时 + 能力（System Prompt）"
-            icon={
-              <SectionIcon path="M12 3a4 4 0 0 1 4 4v1a4 4 0 0 1-4 4 4 4 0 0 1-4-4V7a4 4 0 0 1 4-4ZM5 21a7 7 0 0 1 14 0z" />
-            }
-          >
-            <AgentManager />
-          </SettingsSection>
-
-          <SettingsSection
-            title="工作流"
-            hint="阶段序列与流转规则"
-            icon={<SectionIcon path="M4 6h6v5H4zM14 6h6v5h-6zM4 13h16v5H4z" />}
-          >
-            <WorkflowManager
-              workflows={workflows}
-              activeId={activeId}
-              onSelect={setActiveId}
-              onEdit={(w) => setEditing(w)}
-              onNew={() => setEditing(null)}
-            />
-            {editing !== undefined && (
-              <div className="mt-4">
-                <WorkflowEditor
-                  workflow={editing}
-                  agents={agents}
-                  onSave={save}
-                  onCancel={() => setEditing(undefined)}
-                />
-              </div>
+      {view === 'settings' && (
+        <div className="flex min-h-0 flex-1">
+          <SettingsNav value={section} onChange={setSection} />
+          <div className="flex min-h-0 flex-1 flex-col overflow-auto p-6">
+            {section === 'runtimes' && (
+              <>
+                <SectionHeader title="运行时" hint="本机执行的 CLI，智能体绑定到运行时" />
+                <RuntimeManager />
+              </>
             )}
-          </SettingsSection>
+
+            {section === 'agents' && (
+              <>
+                <SectionHeader title="智能体" hint="运行时 + 能力（System Prompt）" />
+                <AgentManager />
+              </>
+            )}
+
+            {section === 'workflows' && (
+              <>
+                <SectionHeader title="工作流" hint="阶段序列与流转规则" />
+                <WorkflowManager
+                  workflows={workflows}
+                  activeId={activeId}
+                  onSelect={setActiveId}
+                  onEdit={(w) => setEditing(w)}
+                  onNew={() => setEditing(null)}
+                />
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -346,6 +305,22 @@ export function AiWorkflowPage(): ReactElement {
           onSave={createTask}
           onCancel={() => setDialogOpen(false)}
         />
+      )}
+
+      {editing !== undefined && (
+        <Dialog onClose={() => setEditing(undefined)} className="max-w-3xl">
+          {error && (
+            <p className="mb-3 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+              {error}
+            </p>
+          )}
+          <WorkflowEditor
+            workflow={editing}
+            agents={agents}
+            onSave={save}
+            onCancel={() => setEditing(undefined)}
+          />
+        </Dialog>
       )}
     </div>
   )

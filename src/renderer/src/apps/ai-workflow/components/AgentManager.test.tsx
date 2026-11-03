@@ -35,6 +35,29 @@ function agent(over: Partial<Agent> = {}): Agent {
 beforeEach(() => vi.clearAllMocks())
 
 describe('AgentManager', () => {
+  it('默认只显示清单，点击「新建智能体」才弹出表单', async () => {
+    setApi({
+      agents: {
+        list: vi.fn().mockResolvedValue([agent()]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+      },
+      runtimes: { list: vi.fn().mockResolvedValue([rt]) },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    const user = userEvent.setup()
+    render(<AgentManager />)
+    expect(await screen.findByText('old')).toBeInTheDocument()
+    expect(screen.queryByLabelText('智能体名称')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新建智能体' }))
+    expect(screen.getByLabelText('智能体名称')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByLabelText('智能体名称')).not.toBeInTheDocument()
+  })
+
   it('加载运行时后新建智能体（切换运行时、填描述与能力）并删除', async () => {
     let agents: Agent[] = [agent()]
     const agentList = vi.fn(async () => agents)
@@ -54,6 +77,7 @@ describe('AgentManager', () => {
     render(<AgentManager />)
     expect(await screen.findByText('old')).toBeInTheDocument()
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '新建智能体' }))
     await user.type(screen.getByLabelText('智能体名称'), 'coder')
     await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
     await user.click(screen.getByRole('option', { name: 'claude' }))
@@ -89,9 +113,12 @@ describe('AgentManager', () => {
       runtimes: { list: vi.fn().mockResolvedValue([]) },
     } as unknown as Partial<AiWorkflowApi>)
 
+    const user = userEvent.setup()
     render(<AgentManager />)
     expect(await screen.findByText(/ghost/)).toBeInTheDocument()
     expect(screen.getByText(/有描述/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新建智能体' }))
     expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
     expect(screen.getByText(/请先在上方添加一个运行时/)).toBeInTheDocument()
   })
@@ -110,7 +137,7 @@ describe('AgentManager', () => {
     expect(await screen.findByText('boom')).toBeInTheDocument()
   })
 
-  it('新建失败与删除失败均展示错误', async () => {
+  it('新建失败在弹窗内展示错误；删除失败展示错误', async () => {
     setApi({
       agents: {
         list: vi.fn().mockResolvedValue([agent()]),
@@ -124,10 +151,12 @@ describe('AgentManager', () => {
     render(<AgentManager />)
     expect(await screen.findByText('old')).toBeInTheDocument()
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '新建智能体' }))
     await user.type(screen.getByLabelText('智能体名称'), 'x')
     await user.click(screen.getByRole('button', { name: '添加智能体' }))
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
 
+    await user.click(screen.getByRole('button', { name: '取消' }))
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
     expect(await screen.findByText('remove-fail')).toBeInTheDocument()
   })
@@ -161,6 +190,7 @@ describe('AgentManager', () => {
     render(<AgentManager />)
     expect(await screen.findByText('old')).toBeInTheDocument()
     const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '新建智能体' }))
     await user.type(screen.getByLabelText('智能体名称'), 'x')
     await user.click(screen.getByRole('button', { name: '添加智能体' }))
     expect(await screen.findByText('reload-boom')).toBeInTheDocument()
@@ -188,7 +218,9 @@ describe('AgentManager', () => {
       }),
     } as unknown as Partial<AiWorkflowApi>)
 
+    const user = userEvent.setup()
     render(<AgentManager />)
+    await user.click(screen.getByRole('button', { name: '新建智能体' }))
     expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
 
     runtimes = [rt]

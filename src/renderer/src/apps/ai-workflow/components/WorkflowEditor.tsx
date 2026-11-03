@@ -9,9 +9,7 @@ import type {
 import { Button } from '../../../components/ui/button'
 import { Field } from '../../../components/ui/field'
 import { Input } from '../../../components/ui/input'
-import { panelCls } from '../../../components/ui/panel'
 import { Select } from '../../../components/ui/select'
-import { cn } from '../../../lib/cn'
 
 interface WorkflowEditorProps {
   workflow: WorkflowWithStages | null
@@ -115,7 +113,7 @@ export function WorkflowEditor({
   const targetOptions = draft.stages.map((s, i) => ({ i, name: s.name || `阶段${i + 1}` }))
 
   return (
-    <form className={cn(panelCls, 'flex animate-rise flex-col gap-5 p-5')} onSubmit={save}>
+    <form className="flex flex-col gap-5" onSubmit={save}>
       <div className="flex items-center gap-2">
         <WorkflowIcon className="text-focus" />
         <div className="flex flex-col">

@@ -107,8 +107,8 @@ export function KanbanBoard({
                 onDragLeave={() => setOverTarget(null)}
                 onDrop={(e) => dropOnStage(stage.id, e)}
                 className={cn(
-                  'flex w-64 shrink-0 animate-rise flex-col gap-2.5 rounded-2xl border p-2.5',
-                  'transition-colors duration-150',
+                  'flex min-w-[150px] flex-1 flex-col gap-2.5 rounded-2xl border p-2.5',
+                  'animate-rise transition-colors duration-150',
                   isOver
                     ? 'border-focus/60 bg-focus/[0.07]'
                     : 'border-line bg-white/[0.02] hover:border-line-strong',
@@ -159,7 +159,7 @@ export function KanbanBoard({
           onDragLeave={() => setOverTarget(null)}
           onDrop={dropOnDone}
           className={cn(
-            'flex w-40 shrink-0 flex-col gap-2.5 self-stretch rounded-2xl border border-dashed p-2.5',
+            'flex w-28 shrink-0 flex-col gap-2.5 self-stretch rounded-2xl border border-dashed p-2',
             'transition-colors duration-150',
             overTarget === DONE_TARGET
               ? 'border-short/60 bg-short/[0.07]'

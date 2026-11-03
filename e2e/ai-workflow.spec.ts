@@ -48,6 +48,7 @@ test('AI 工作流：侧边栏可进入，设置里左侧栏目切换各配置�
 
   // 工作流配置
   await page.getByRole('button', { name: '工作流配置' }).click()
-  await expect(page.getByRole('heading', { name: '工作流' })).toBeVisible()
+  // exact：避免与顶栏「AI 工作流」标题一起命中
+  await expect(page.getByRole('heading', { name: '工作流', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '智能体' })).toBeHidden()
 })

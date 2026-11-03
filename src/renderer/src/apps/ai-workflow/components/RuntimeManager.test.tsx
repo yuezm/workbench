@@ -6,6 +6,7 @@ import type {
   DetectedRuntime,
   Runtime,
   RuntimeInput,
+  RuntimeTestResult,
 } from '../../../../../shared/ai-workflow-api'
 import { RuntimeManager } from './RuntimeManager'
 
@@ -278,5 +279,213 @@ describe('RuntimeManager', () => {
     await user.click(screen.getByRole('button', { name: '重新扫描' }))
     expect(await screen.findByText('Codex CLI')).toBeInTheDocument()
     expect(detect).toHaveBeenCalledTimes(2)
+  })
+
+  it('点击「测试」以该运行时 id 调用；测试中禁用并显示「测试中…」，成功后显示连通与耗时', async () => {
+    let release: (result: RuntimeTestResult) => void = () => {}
+    const test = vi.fn(
+      () =>
+        new Promise<RuntimeTestResult>((resolve) => {
+          release = resolve
+        }),
+    )
+    setApi({
+      runtimes: {
+        list: vi.fn().mockResolvedValue([base]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+        detect: vi.fn(async () => []),
+        test,
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
+
+    expect(test).toHaveBeenCalledWith('r1')
+    const pending = screen.getByRole('button', { name: '测试运行时 ds' })
+    expect(pending).toBeDisabled()
+    expect(pending).toHaveTextContent('测试中…')
+    // 测试中不影响其它按钮
+    expect(screen.getByRole('button', { name: '新建运行时' })).toBeEnabled()
+
+    release({ ok: true, code: 0, elapsedMs: 12, output: 'OK', error: null })
+
+    const badge = await screen.findByText('连通 · 12ms')
+    expect(badge.className).toContain('text-emerald-300')
+    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toHaveTextContent('测试')
+  })
+
+  it('测试失败显示行内失败文案，title 携带输出尾部，且不进页面级 error', async () => {
+    const test = vi.fn().mockResolvedValue({
+      ok: false,
+      code: 3,
+      elapsedMs: 8,
+      output: 'stderr 尾部',
+      error: '退出码 3',
+    } satisfies RuntimeTestResult)
+    setApi({
+      runtimes: {
+        list: vi.fn().mockResolvedValue([base]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+        detect: vi.fn(async () => []),
+        test,
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
+
+    const badge = await screen.findByText('失败：退出码 3')
+    expect(badge.className).toContain('text-red-300')
+    expect(badge).toHaveAttribute('title', 'stderr 尾部')
+    // 连通性失败只是该行的行内结果：出现在运行时行内，且没有别处再渲染一份
+    expect(badge.closest('li')).not.toBeNull()
+    expect(screen.getAllByText('失败：退出码 3')).toHaveLength(1)
+  })
+
+  it('失败结果缺少原因时用兜底文案', async () => {
+    const test = vi.fn().mockResolvedValue({
+      ok: false,
+      code: null,
+      elapsedMs: 1,
+      output: '',
+      error: null,
+    } satisfies RuntimeTestResult)
+    setApi({
+      runtimes: {
+        list: vi.fn().mockResolvedValue([base]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+        detect: vi.fn(async () => []),
+        test,
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
+    expect(await screen.findByText('失败：未知错误')).toBeInTheDocument()
+  })
+
+  it('不同行的测试状态与结果互相独立', async () => {
+    const other: Runtime = { ...base, id: 'r2', name: 'claude', command: 'claude' }
+    let release: (result: RuntimeTestResult) => void = () => {}
+    const test = vi.fn(
+      (id: string) =>
+        new Promise<RuntimeTestResult>((resolve) => {
+          if (id === 'r1') release = resolve
+          else resolve({ ok: false, code: 1, elapsedMs: 3, output: 'c2', error: '退出码 1' })
+        }),
+    )
+    setApi({
+      runtimes: {
+        list: vi.fn().mockResolvedValue([base, other]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+        detect: vi.fn(async () => []),
+        test,
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
+
+    // r1 测试中，r2 仍可点
+    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '测试运行时 claude' })).toBeEnabled()
+
+    release({ ok: true, code: 0, elapsedMs: 7, output: 'OK', error: null })
+    expect(await screen.findByText('连通 · 7ms')).toBeInTheDocument()
+    // r2 没有结果
+    expect(screen.queryByText('失败：退出码 1')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '测试运行时 claude' }))
+    expect(await screen.findByText('失败：退出码 1')).toBeInTheDocument()
+    expect(screen.getByText('连通 · 7ms')).toBeInTheDocument()
+  })
+
+  it('旧桩没有 test 方法时点击后显示失败而不是崩溃', async () => {
+    setApi({
+      runtimes: {
+        list: vi.fn().mockResolvedValue([base]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+        detect: vi.fn(async () => []),
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
+    expect(await screen.findByText('失败：当前 preload 不支持连通性测试')).toBeInTheDocument()
+  })
+
+  it('「重新扫描」失败展示错误', async () => {
+    const detect = vi
+      .fn<() => Promise<DetectedRuntime[]>>()
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error('rescan-boom'))
+    setApi({
+      runtimes: {
+        list: vi.fn().mockResolvedValue([base]),
+        create: vi.fn(),
+        remove: vi.fn(),
+        update: vi.fn(),
+        detect,
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '重新扫描' }))
+    expect(await screen.findByText('rescan-boom')).toBeInTheDocument()
+  })
+
+  it('结果按 id 记住：删除条目清掉其结论，重新扫描清空全部结论', async () => {
+    const other: Runtime = { ...base, id: 'r2', name: 'claude', command: 'claude' }
+    let store: Runtime[] = [base, other]
+    const list = vi.fn(async () => store)
+    const remove = vi.fn(async (id: string) => {
+      store = store.filter((x) => x.id !== id)
+    })
+    const test = vi
+      .fn()
+      .mockResolvedValue({ ok: true, code: 0, elapsedMs: 5, output: 'OK', error: null })
+    setApi({
+      runtimes: {
+        list,
+        create: vi.fn(),
+        remove,
+        update: vi.fn(),
+        detect: vi.fn(async () => []),
+        test,
+      },
+    } as unknown as Partial<AiWorkflowApi>)
+
+    render(<RuntimeManager />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
+    await user.click(screen.getByRole('button', { name: '测试运行时 claude' }))
+    await waitFor(() => expect(screen.getAllByText('连通 · 5ms')).toHaveLength(2))
+
+    // 删除 ds 后只剩 claude 的结论
+    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
+    await waitFor(() => expect(screen.queryByText('ds')).not.toBeInTheDocument())
+    expect(screen.getAllByText('连通 · 5ms')).toHaveLength(1)
+
+    // 重新扫描清空结论
+    await user.click(screen.getByRole('button', { name: '重新扫描' }))
+    await waitFor(() => expect(screen.queryByText('连通 · 5ms')).not.toBeInTheDocument())
   })
 })

@@ -5,8 +5,9 @@ import { createTray } from './tray'
 import { openDb } from './ai-workflow/db'
 import { Repository } from './ai-workflow/repository'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
+import { ChatService } from './ai-workflow/chat'
 import { Runner } from './ai-workflow/runner'
-import { AI_WORKFLOW_CHANGED } from '../shared/ai-workflow-api'
+import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
 
 let quitting = false
 let win: BrowserWindow | null = null
@@ -57,10 +58,17 @@ app.whenReady().then(() => {
   }
   const aiRepo = new Repository(openDb(path.join(app.getPath('userData'), 'ai-workflow.db')))
   const runner = new Runner({ repo: aiRepo, notifyChanged: broadcastChanged })
+  const chat = new ChatService({
+    repo: aiRepo,
+    emit: (event) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHAT, event)
+    },
+  })
   registerAiWorkflowIpc({
     repo: aiRepo,
     notifyChanged: broadcastChanged,
     onQueue: (runId) => runner.enqueue(runId),
+    chat,
   })
   runner.resumeQueued()
 

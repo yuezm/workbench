@@ -1,8 +1,12 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { WorkbenchApi } from '../shared/workbench-api'
 import { NOTIFY_CHANNEL } from '../shared/workbench-api'
-import type { AiWorkflowApi } from '../shared/ai-workflow-api'
-import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHANNEL } from '../shared/ai-workflow-api'
+import type { AiWorkflowApi, ChatStreamEvent } from '../shared/ai-workflow-api'
+import {
+  AI_WORKFLOW_CHANGED,
+  AI_WORKFLOW_CHANNEL,
+  AI_WORKFLOW_CHAT,
+} from '../shared/ai-workflow-api'
 
 const workbench: WorkbenchApi = {
   notify: (title, body) => {
@@ -22,6 +26,7 @@ const aiWorkflow: AiWorkflowApi = {
     update: (id, patch) => invoke('runtimes.update', id, patch),
     remove: (id) => invoke('runtimes.remove', id),
     detect: () => invoke('runtimes.detect'),
+    test: (id) => invoke('runtimes.test', id),
   },
   agents: {
     list: () => invoke('agents.list'),
@@ -44,6 +49,21 @@ const aiWorkflow: AiWorkflowApi = {
   },
   runs: {
     listByTask: (taskId) => invoke('runs.listByTask', taskId),
+  },
+  chat: {
+    listConversations: () => invoke('chat.listConversations'),
+    createConversation: (agentId) => invoke('chat.createConversation', agentId),
+    removeConversation: (id) => invoke('chat.removeConversation', id),
+    listMessages: (conversationId) => invoke('chat.listMessages', conversationId),
+    send: (conversationId, content) => invoke('chat.send', conversationId, content),
+    cancel: (conversationId) => invoke('chat.cancel', conversationId),
+    onEvent: (cb) => {
+      const listener = (_event: IpcRendererEvent, event: ChatStreamEvent): void => cb(event)
+      ipcRenderer.on(AI_WORKFLOW_CHAT, listener)
+      return () => {
+        ipcRenderer.off(AI_WORKFLOW_CHAT, listener)
+      }
+    },
   },
   onChanged: (cb) => {
     const listener = (): void => cb()

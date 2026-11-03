@@ -4,11 +4,17 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { openDb } from './db'
 import { createAiWorkflowHandler, registerAiWorkflowIpc } from './ipc'
+import type { ChatService } from './chat'
 import { Repository } from './repository'
 import { AI_WORKFLOW_CHANNEL } from '../../shared/ai-workflow-api'
 
-const { ipcMainMock } = vi.hoisted(() => ({ ipcMainMock: { handle: vi.fn() } }))
+const { ipcMainMock, probeRuntimeMock } = vi.hoisted(() => ({
+  ipcMainMock: { handle: vi.fn() },
+  probeRuntimeMock: vi.fn(),
+}))
 vi.mock('electron', () => ({ ipcMain: ipcMainMock }))
+// 默认探测走真实 spawn，单测里替换掉，避免起本机 CLI
+vi.mock('./runtime/probe', () => ({ probeRuntime: probeRuntimeMock }))
 
 let db: DatabaseSync
 let repo: Repository
@@ -20,7 +26,7 @@ beforeEach(() => {
   db = openDb(':memory:')
   repo = new Repository(db)
   notify = vi.fn()
-  handle = createAiWorkflowHandler(repo, notify as unknown as () => void)
+  handle = createAiWorkflowHandler({ repo, notifyChanged: notify as unknown as () => void })
 })
 afterEach(() => db.close())
 
@@ -59,6 +65,88 @@ describe('ai-workflow handler：运行时/智能体', () => {
       expect(path.isAbsolute(item.path)).toBe(true)
     }
     expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('runtimes.test 探测指定运行时且不写库、不触发 changed', async () => {
+    const rt = handle('runtimes.create', [{ name: 'ds', command: 'dsh' }]) as { id: string }
+    notify.mockClear()
+    const probe = vi.fn(async () => ({
+      ok: true,
+      code: 0,
+      elapsedMs: 12,
+      output: 'OK',
+      error: null,
+    }))
+    const h = createAiWorkflowHandler({
+      repo,
+      notifyChanged: notify as unknown as () => void,
+      probeRuntime: probe,
+    })
+    const result = await h('runtimes.test', [rt.id])
+    expect(probe).toHaveBeenCalledWith(expect.objectContaining({ id: rt.id, command: 'dsh' }))
+    expect(result).toMatchObject({ ok: true, code: 0 })
+    expect(notify).not.toHaveBeenCalled()
+
+    // 未注入探测实现时用默认 probeRuntime（此处已 mock，避免真起本机 CLI）
+    probeRuntimeMock.mockResolvedValue({ ok: true, code: 0, elapsedMs: 5, output: '', error: null })
+    const bare = createAiWorkflowHandler({ repo, notifyChanged: notify as unknown as () => void })
+    await bare('runtimes.test', [rt.id])
+    expect(probeRuntimeMock).toHaveBeenCalledWith(expect.objectContaining({ id: rt.id }))
+
+    // 运行时不存在时是同步抛错（handler 同步执行），不是 rejected promise
+    expect(() => h('runtimes.test', ['ghost'])).toThrow(/运行时不存在/)
+  })
+})
+
+describe('ai-workflow handler：聊天', () => {
+  interface FakeChat {
+    send: ReturnType<typeof vi.fn>
+    cancel: ReturnType<typeof vi.fn>
+  }
+  function withChat(): { h: ReturnType<typeof createAiWorkflowHandler>; chat: FakeChat } {
+    const chat: FakeChat = { send: vi.fn(async () => {}), cancel: vi.fn() }
+    const h = createAiWorkflowHandler({
+      repo,
+      notifyChanged: notify as unknown as () => void,
+      chat: chat as unknown as ChatService,
+    })
+    return { h, chat }
+  }
+
+  function seedAgent(h: ReturnType<typeof createAiWorkflowHandler>): string {
+    const rt = h('runtimes.create', [{ name: 'ds', command: 'dsh' }]) as { id: string }
+    const ag = h('agents.create', [{ name: 'coder', runtimeId: rt.id }]) as { id: string }
+    return ag.id
+  }
+
+  it('会话与消息路由走仓库，写操作触发 changed', () => {
+    const { h } = withChat()
+    const agentId = seedAgent(h)
+    notify.mockClear()
+    const conv = h('chat.createConversation', [agentId]) as { id: string; title: string }
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(conv.title).toBe('新对话')
+
+    expect((h('chat.listConversations', []) as unknown[]).length).toBe(1)
+    expect(h('chat.listMessages', [conv.id])).toEqual([])
+
+    h('chat.removeConversation', [conv.id])
+    expect(notify).toHaveBeenCalledTimes(2)
+    expect(h('chat.listConversations', [])).toEqual([])
+  })
+
+  it('chat.send / chat.cancel 交给聊天服务；服务缺失时明确报错', () => {
+    const { h, chat } = withChat()
+    const agentId = seedAgent(h)
+    const conv = h('chat.createConversation', [agentId]) as { id: string }
+    h('chat.send', [conv.id, '你好'])
+    expect(chat.send).toHaveBeenCalledWith(conv.id, '你好')
+    h('chat.cancel', [conv.id])
+    expect(chat.cancel).toHaveBeenCalledWith(conv.id)
+
+    const bare = createAiWorkflowHandler({ repo, notifyChanged: notify as unknown as () => void })
+    expect(() => bare('chat.send', [conv.id, 'hi'])).toThrow(/聊天服务未就绪/)
+    expect(() => bare('chat.cancel', [conv.id])).toThrow(/聊天服务未就绪/)
   })
 })
 

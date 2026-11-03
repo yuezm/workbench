@@ -41,6 +41,20 @@ export interface DetectedRuntime {
   path: string
 }
 
+/** 运行时连通性测试结果（只读探测：不写库、不建 run、不触发 changed） */
+export interface RuntimeTestResult {
+  /** 命令能启动、正常退出（退出码 0）且未超时 */
+  ok: boolean
+  /** 进程退出码；没能启动或超时为 null */
+  code: number | null
+  /** 从发起探测到结束的耗时（毫秒） */
+  elapsedMs: number
+  /** 输出尾部（已截断），供失败排查 */
+  output: string
+  /** 失败原因：超时 / 退出码 / 启动失败；成功为 null */
+  error: string | null
+}
+
 export interface Agent {
   id: string
   name: string
@@ -128,6 +142,35 @@ export interface Run {
   createdAt: string
 }
 
+export type ChatRole = 'user' | 'assistant'
+
+/** 一段独立对话：绑定一个智能体，与工作流/任务无关 */
+export interface ChatConversation {
+  id: string
+  title: string
+  agentId: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatMessage {
+  id: string
+  conversationId: string
+  role: ChatRole
+  content: string
+  /** 该条助手消息的失败原因（非零退出 / 超时 / 取消）；成功与用户消息为 null */
+  error: string | null
+  createdAt: string
+}
+
+/** 聊天流事件：本轮执行的增量输出与结束通知（结束时结果已落库） */
+export interface ChatStreamEvent {
+  conversationId: string
+  type: 'chunk' | 'end'
+  /** 仅 chunk 事件携带 */
+  chunk?: string
+}
+
 export interface AiWorkflowApi {
   runtimes: {
     list(): Promise<Runtime[]>
@@ -136,6 +179,8 @@ export interface AiWorkflowApi {
     remove(id: string): Promise<void>
     /** 探测本机已安装的 agent CLI，供表单预填；只读，不创建记录 */
     detect(): Promise<DetectedRuntime[]>
+    /** 连通性测试：真实调用一次该运行时，不写库、不建 run */
+    test(id: string): Promise<RuntimeTestResult>
   }
   agents: {
     list(): Promise<Agent[]>
@@ -161,6 +206,19 @@ export interface AiWorkflowApi {
   runs: {
     listByTask(taskId: string): Promise<Run[]>
   }
+  /** 主动对话：独立于工作流与任务，选中智能体直接聊 */
+  chat: {
+    listConversations(): Promise<ChatConversation[]>
+    createConversation(agentId: string): Promise<ChatConversation>
+    removeConversation(id: string): Promise<void>
+    listMessages(conversationId: string): Promise<ChatMessage[]>
+    /** 发起一轮：先落用户消息，再异步执行；输出经 onEvent 推送 */
+    send(conversationId: string, content: string): Promise<void>
+    /** 中止该对话正在执行的一轮 */
+    cancel(conversationId: string): Promise<void>
+    /** 订阅流事件；返回取消订阅函数 */
+    onEvent(cb: (event: ChatStreamEvent) => void): () => void
+  }
   /** 任意变更/运行进度后触发；返回取消订阅函数 */
   onChanged(cb: () => void): () => void
 }
@@ -169,3 +227,5 @@ export interface AiWorkflowApi {
 export const AI_WORKFLOW_CHANNEL = 'ai-workflow:invoke'
 /** main -> renderer 变更通知 */
 export const AI_WORKFLOW_CHANGED = 'ai-workflow:changed'
+/** main -> renderer 聊天流事件（增量输出 / 本轮结束） */
+export const AI_WORKFLOW_CHAT = 'ai-workflow:chat'

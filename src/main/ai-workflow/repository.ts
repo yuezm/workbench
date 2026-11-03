@@ -3,6 +3,9 @@ import type { DatabaseSync } from 'node:sqlite'
 import type {
   Agent,
   AgentInput,
+  ChatConversation,
+  ChatMessage,
+  ChatRole,
   Run,
   RunStatus,
   Runtime,
@@ -75,6 +78,22 @@ interface RunRow {
   created_at: string
 }
 
+interface ChatConversationRow {
+  id: string
+  title: string
+  agent_id: string
+  created_at: string
+  updated_at: string
+}
+interface ChatMessageRow {
+  id: string
+  conversation_id: string
+  role: string
+  content: string
+  error: string | null
+  created_at: string
+}
+
 const now = (): string => new Date().toISOString()
 
 const mapRuntime = (r: RuntimeRow): Runtime => ({
@@ -126,6 +145,21 @@ const mapRun = (r: RunRow): Run => ({
   error: r.error,
   startedAt: r.started_at,
   endedAt: r.ended_at,
+  createdAt: r.created_at,
+})
+const mapChatConversation = (r: ChatConversationRow): ChatConversation => ({
+  id: r.id,
+  title: r.title,
+  agentId: r.agent_id,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+})
+const mapChatMessage = (r: ChatMessageRow): ChatMessage => ({
+  id: r.id,
+  conversationId: r.conversation_id,
+  role: r.role as ChatRole,
+  content: r.content,
+  error: r.error,
   createdAt: r.created_at,
 })
 
@@ -250,7 +284,7 @@ export class Repository {
     try {
       this.db.prepare('DELETE FROM agents WHERE id=?').run(id)
     } catch {
-      throw new Error('智能体被工作流阶段引用，无法删除: ' + id)
+      throw new Error('智能体被工作流阶段或对话引用，无法删除: ' + id)
     }
   }
 
@@ -477,5 +511,77 @@ export class Repository {
         id,
       )
     return this.runGet(id)
+  }
+
+  // ---------- 对话 ----------
+  chatConversationsList(): ChatConversation[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM chat_conversations ORDER BY updated_at DESC, created_at DESC')
+        .all() as unknown as ChatConversationRow[]
+    ).map(mapChatConversation)
+  }
+  chatConversationGet(id: string): ChatConversation {
+    const row = this.db
+      .prepare('SELECT * FROM chat_conversations WHERE id=?')
+      .get(id) as unknown as ChatConversationRow | undefined
+    if (!row) throw new Error('对话不存在: ' + id)
+    return mapChatConversation(row)
+  }
+  chatConversationCreate(agentId: string): ChatConversation {
+    // 先确认智能体存在：外键报错不便于定位，这里给出可读文案
+    this.agentGet(agentId)
+    const id = randomUUID()
+    const ts = now()
+    this.db
+      .prepare(
+        'INSERT INTO chat_conversations (id,title,agent_id,created_at,updated_at) VALUES (?,?,?,?,?)',
+      )
+      .run(id, '新对话', agentId, ts, ts)
+    return this.chatConversationGet(id)
+  }
+  chatConversationRemove(id: string): void {
+    // 消息由外键 ON DELETE CASCADE 一并删除
+    this.db.prepare('DELETE FROM chat_conversations WHERE id=?').run(id)
+  }
+  chatConversationRename(id: string, title: string): void {
+    this.db
+      .prepare('UPDATE chat_conversations SET title=?, updated_at=? WHERE id=?')
+      .run(title, now(), id)
+  }
+  chatConversationTouch(id: string): void {
+    this.db.prepare('UPDATE chat_conversations SET updated_at=? WHERE id=?').run(now(), id)
+  }
+  chatMessagesList(conversationId: string): ChatMessage[] {
+    // created_at 只有毫秒精度：同毫秒时用 rowid 兜底，保证轮次顺序稳定
+    return (
+      this.db
+        .prepare('SELECT * FROM chat_messages WHERE conversation_id=? ORDER BY created_at, rowid')
+        .all(conversationId) as unknown as ChatMessageRow[]
+    ).map(mapChatMessage)
+  }
+  chatMessageCreate(input: {
+    conversationId: string
+    role: ChatRole
+    content: string
+    error?: string | null
+  }): ChatMessage {
+    const id = randomUUID()
+    const error = input.error ?? null
+    const createdAt = now()
+    // 对话不存在时外键直接报错，不留下孤立消息
+    this.db
+      .prepare(
+        'INSERT INTO chat_messages (id,conversation_id,role,content,error,created_at) VALUES (?,?,?,?,?,?)',
+      )
+      .run(id, input.conversationId, input.role, input.content, error, createdAt)
+    return {
+      id,
+      conversationId: input.conversationId,
+      role: input.role,
+      content: input.content,
+      error,
+      createdAt,
+    }
   }
 }

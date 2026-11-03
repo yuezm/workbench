@@ -308,3 +308,46 @@
 
 - [x] SPEC Success Criteria 全部满足（DSH 真跑为手动项）
 - [x] 覆盖率门禁通过，可交付审阅
+
+## Phase 8: 2026-11-03 增量（连通性测试 + 工作台聊天）
+
+## Task 15: 运行时连通性测试
+
+**Description:** 已配置运行时增加「测试」按钮，真实调用一次以判断是否联通。
+
+**Acceptance criteria:**
+
+- [x] `runtime/probe.ts`：`probeRuntime` 跑固定探针、30s 超时、非零退出/启动失败均落成 `RuntimeTestResult`，绝不外抛；输出尾部截断
+- [x] 探测零副作用：不写库、不建 run、不发 `changed`；IPC `runtimes.test` 只读
+- [x] 运行时页每行「测试」：pending 禁用、成功显示「连通 · Nms」、失败显示原因，行间独立
+
+**Verification:**
+
+- [x] `pnpm test -- src/main/ai-workflow/runtime/probe.test.ts .../RuntimeManager.test.tsx`
+- [x] `pnpm check`
+
+**Dependencies:** T12　**Files:** `runtime/probe.ts(+test)`、`RuntimeManager.tsx(+test)`、`ipc.ts`、`preload/index.ts`　**Scope:** M
+
+## Task 16: 工作台左侧分栏（聊天 / 任务）+ 聊天持久化
+
+**Description:** 工作台与设置一样改为左侧二级栏目；聊天为默认栏目，独立于工作流，记录落 SQLite。
+
+**Acceptance criteria:**
+
+- [x] `WorkspaceNav`（聊天 / 任务）+ 页面布局：默认聊天、任务栏保留看板与运行记录、设置视图无工作台栏目
+- [x] `chat_conversations` / `chat_messages` 两张表与仓储：会话顺序按 `updated_at`，消息同毫秒按 rowid，删对话级联删消息，智能体被对话引用时拒删
+- [x] `ChatService`：每轮拼完整历史单次调用、chunk 实时推送、`end` 收尾、失败/取消落库、同一对话并发拒绝
+- [x] `ChatPanel`：新建/切换/删除会话、流式回显、停止、错误条、卸载退订
+- [x] preload/preload 测试覆盖 `chat.*` 与 `onEvent`；`db.test.ts` 改为 8 张表
+
+**Verification:**
+
+- [x] `pnpm test -- src/main/ai-workflow/chat.test.ts repository.chat.test.ts .../ChatPanel.test.tsx`
+- [x] `pnpm check`、`pnpm e2e`（真实 Electron：默认聊天栏、切任务、设置栏目）
+
+**Dependencies:** T15（共用契约文件）　**Files:** `src/shared/ai-workflow-api.ts`、`schema.ts`、`repository.ts`、`chat.ts`、`ipc.ts`、`preload/index.ts`、`ChatPanel.tsx`、`WorkspaceNav.tsx`、`AiWorkflowPage.tsx`（各含测试）　**Scope:** L
+
+### ✅ Checkpoint H
+
+- [x] SPEC Success Criteria 7–9 满足（运行时测试、工作台分栏、聊天落盘）
+- [x] 覆盖率与改动行门禁通过；e2e 全绿

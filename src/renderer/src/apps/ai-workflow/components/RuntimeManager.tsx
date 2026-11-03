@@ -4,6 +4,7 @@ import type {
   DetectedRuntime,
   Runtime,
   RuntimeInput,
+  RuntimeTestResult,
 } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
 import { Panel, badgeCls } from '../../../components/ui/panel'
@@ -17,6 +18,22 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 function detectRuntimes(): Promise<DetectedRuntime[]> {
   const fn = (wfApi().runtimes as Partial<AiWorkflowApi['runtimes']>).detect
   return fn ? fn() : Promise.resolve([])
+}
+
+/** 连通性测试接口同理；缺失时显式失败，由行内结果展示 */
+async function testRuntime(id: string): Promise<RuntimeTestResult> {
+  const fn = (wfApi().runtimes as Partial<AiWorkflowApi['runtimes']>).test
+  if (!fn) throw new Error('当前 preload 不支持连通性测试')
+  return fn(id)
+}
+
+/** 只保留仍在清单里的运行时结果（删除条目后不残留旧结论） */
+function keepResults(
+  prev: Record<string, RuntimeTestResult>,
+  list: Runtime[],
+): Record<string, RuntimeTestResult> {
+  const ids = new Set(list.map((r) => r.id))
+  return Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)))
 }
 
 function TerminalIcon({ className }: { className?: string }): ReactElement {
@@ -87,10 +104,16 @@ export function RuntimeManager(): ReactElement {
   const [error, setError] = useState<string | null>(null)
   /** 非空 = 弹窗打开中，值为表单预填 */
   const [draft, setDraft] = useState<RuntimeInput | null>(null)
+  /** 正在测试的运行时 id（各行的按钮状态互相独立） */
+  const [testingId, setTestingId] = useState<string | null>(null)
+  /** 各运行时最近一次连通性测试结果，按 id 记住 */
+  const [testResults, setTestResults] = useState<Record<string, RuntimeTestResult>>({})
 
   const reload = useCallback(async (): Promise<void> => {
     try {
-      setItems(await wfApi().runtimes.list())
+      const list = await wfApi().runtimes.list()
+      setItems(list)
+      setTestResults((prev) => keepResults(prev, list))
       setError(null)
     } catch (e) {
       setError(errMsg(e))
@@ -101,6 +124,8 @@ export function RuntimeManager(): ReactElement {
     setDetecting(true)
     try {
       setDetected(await detectRuntimes())
+      // 重新扫描后旧的连通性结论可能已过期，统一清掉
+      setTestResults({})
       setError(null)
     } catch (e) {
       setError(errMsg(e))
@@ -152,6 +177,25 @@ export function RuntimeManager(): ReactElement {
       await reload()
     } catch (e) {
       setError(errMsg(e))
+    }
+  }
+
+  /**
+   * 连通性测试：只影响该行的行内结果，不阻塞整页、不写页面级 error。
+   * 失败（含 preload 缺接口）同样落成该行的失败结论。
+   */
+  const runTest = async (id: string): Promise<void> => {
+    setTestingId(id)
+    try {
+      const result = await testRuntime(id)
+      setTestResults((prev) => ({ ...prev, [id]: result }))
+    } catch (e) {
+      setTestResults((prev) => ({
+        ...prev,
+        [id]: { ok: false, code: null, elapsedMs: 0, output: '', error: errMsg(e) },
+      }))
+    } finally {
+      setTestingId(null)
     }
   }
 
@@ -259,31 +303,61 @@ export function RuntimeManager(): ReactElement {
               暂无运行时
             </li>
           )}
-          {items.map((r) => (
-            <li
-              key={r.id}
-              className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
-            >
-              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
-                <TerminalIcon />
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="truncate text-sm font-medium text-ink">{r.name}</span>
-                <span className="truncate font-mono text-[11px] text-ink-faint">
-                  {r.command} {r.args.join(' ')} · {r.promptMode}
-                </span>
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-red-400 hover:text-red-300"
-                onClick={() => void remove(r.id)}
+          {items.map((r) => {
+            const testing = testingId === r.id
+            const result = testResults[r.id]
+            return (
+              <li
+                key={r.id}
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
               >
-                删除
-              </Button>
-            </li>
-          ))}
+                <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                  <TerminalIcon />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate text-sm font-medium text-ink">{r.name}</span>
+                  <span className="truncate font-mono text-[11px] text-ink-faint">
+                    {r.command} {r.args.join(' ')} · {r.promptMode}
+                  </span>
+                </span>
+                {result && !testing && (
+                  <span
+                    // 输出尾部放进 title，失败时便于直接排查 stderr
+                    title={result.output}
+                    className={cn(
+                      'max-w-56 shrink-0 truncate rounded-full px-2 py-1 text-[11px] tabular-nums',
+                      result.ok
+                        ? 'bg-emerald-400/10 text-emerald-300'
+                        : 'bg-red-400/10 text-red-300',
+                    )}
+                  >
+                    {result.ok
+                      ? `连通 · ${result.elapsedMs}ms`
+                      : `失败：${result.error ?? '未知错误'}`}
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label={`测试运行时 ${r.name}`}
+                  disabled={testing}
+                  onClick={() => void runTest(r.id)}
+                >
+                  {testing ? '测试中…' : '测试'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-red-400 hover:text-red-300"
+                  onClick={() => void remove(r.id)}
+                >
+                  删除
+                </Button>
+              </li>
+            )
+          })}
         </ul>
       </Panel>
 

@@ -17,10 +17,12 @@ function tableNames(d: DatabaseSync): string[] {
 }
 
 describe('openDb', () => {
-  it('创建全部 6 张表', () => {
+  it('创建全部 8 张表', () => {
     db = openDb(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
+      'chat_conversations',
+      'chat_messages',
       'runs',
       'runtimes',
       'tasks',

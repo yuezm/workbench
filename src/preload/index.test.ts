@@ -4,7 +4,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type { WorkbenchApi } from '../shared/workbench-api'
 import { NOTIFY_CHANNEL } from '../shared/workbench-api'
 import type { AiWorkflowApi } from '../shared/ai-workflow-api'
-import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHANNEL } from '../shared/ai-workflow-api'
+import {
+  AI_WORKFLOW_CHANGED,
+  AI_WORKFLOW_CHANNEL,
+  AI_WORKFLOW_CHAT,
+} from '../shared/ai-workflow-api'
 
 const { contextBridgeMock, ipcRendererMock } = vi.hoisted(() => ({
   contextBridgeMock: { exposeInMainWorld: vi.fn() },
@@ -54,10 +58,11 @@ describe('preload 桥接契约', () => {
     })
   })
 
-  it('window.aiWorkflow 形状：五组方法 + onChanged', async () => {
+  it('window.aiWorkflow 形状：六组方法 + onChanged', async () => {
     const { aiWorkflow } = await loadExposed()
     expect(Object.keys(aiWorkflow).sort()).toEqual([
       'agents',
+      'chat',
       'onChanged',
       'runs',
       'runtimes',
@@ -69,6 +74,7 @@ describe('preload 桥接契约', () => {
       'detect',
       'list',
       'remove',
+      'test',
       'update',
     ])
   })
@@ -101,6 +107,22 @@ describe('preload 桥接契约', () => {
     expect(ipcRenderer.off).toHaveBeenCalledWith(AI_WORKFLOW_CHANGED, listener)
   })
 
+  it('chat.onEvent 订阅 CHAT 事件、透传事件体并可退订', async () => {
+    const { aiWorkflow } = await loadExposed()
+    const cb = vi.fn()
+    const off = aiWorkflow.chat.onEvent(cb)
+    expect(ipcRenderer.on).toHaveBeenCalledWith(AI_WORKFLOW_CHAT, expect.any(Function))
+    const listener = vi.mocked(ipcRenderer.on).mock.calls[0][1] as (
+      e: unknown,
+      payload: { conversationId: string; type: 'chunk'; chunk: string },
+    ) => void
+    const payload = { conversationId: 'c1', type: 'chunk' as const, chunk: 'hi' }
+    listener({}, payload)
+    expect(cb).toHaveBeenCalledWith(payload)
+    off()
+    expect(ipcRenderer.off).toHaveBeenCalledWith(AI_WORKFLOW_CHAT, listener)
+  })
+
   it('覆盖其余全部方法：都走同一 RPC 通道', async () => {
     const { aiWorkflow } = await loadExposed()
     await aiWorkflow.runtimes.create({ name: 'ds', command: 'dsh' })
@@ -108,6 +130,7 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.runtimes.update('r1', { name: 'x' })
     await aiWorkflow.runtimes.remove('r1')
     await aiWorkflow.runtimes.detect()
+    await aiWorkflow.runtimes.test('r1')
     await aiWorkflow.agents.list()
     await aiWorkflow.agents.create({ name: 'a', runtimeId: 'r1' })
     await aiWorkflow.agents.update('a1', { name: 'b' })
@@ -121,6 +144,12 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.tasks.moveToStage('t1', 's1')
     await aiWorkflow.tasks.complete('t1')
     await aiWorkflow.tasks.remove('t1')
+    await aiWorkflow.chat.listConversations()
+    await aiWorkflow.chat.createConversation('a1')
+    await aiWorkflow.chat.removeConversation('c1')
+    await aiWorkflow.chat.listMessages('c1')
+    await aiWorkflow.chat.send('c1', '你好')
+    await aiWorkflow.chat.cancel('c1')
     const methods = vi.mocked(ipcRenderer.invoke).mock.calls.map((c) => c[1])
     expect(methods).toEqual(
       expect.arrayContaining([
@@ -129,6 +158,7 @@ describe('preload 桥接契约', () => {
         'runtimes.update',
         'runtimes.remove',
         'runtimes.detect',
+        'runtimes.test',
         'agents.list',
         'agents.create',
         'agents.update',
@@ -142,6 +172,12 @@ describe('preload 桥接契约', () => {
         'tasks.moveToStage',
         'tasks.complete',
         'tasks.remove',
+        'chat.listConversations',
+        'chat.createConversation',
+        'chat.removeConversation',
+        'chat.listMessages',
+        'chat.send',
+        'chat.cancel',
       ]),
     )
   })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { StageInput } from '../../protocol/types'
+import type { StageInput } from '../../protocol/entities'
 import { validateStageSet } from './stage-validation'
 
 const stage = (over: Partial<StageInput> = {}): StageInput => ({

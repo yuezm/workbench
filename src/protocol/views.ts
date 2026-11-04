@@ -1,0 +1,51 @@
+/**
+ * M1 视图契约：宿主按 `viewSpec` 装载投影切片，`query(view, params)` 返回。
+ *
+ * 只落内核侧 `decide` 与看板当前需要的最小集；M5 的完整视图清单
+ * （threads / cards / conversations / timeline 等）届时在此扩展。
+ */
+import type { Agent, Runtime, Task, WorkflowWithStages } from './entities'
+
+/** 视图 id 全集；新增视图必须先登记在这里，命令/宿主不得传任意字符串。 */
+export const VIEW_IDS = [
+  'workflows.all',
+  'agents.all',
+  'runtimes.all',
+  'tasks.byWorkflow',
+  'task.byId',
+  'runs.active-by-task',
+] as const
+
+export type ViewId = (typeof VIEW_IDS)[number]
+
+/**
+ * 活跃 run 的最小投影：内核只用它判断「该任务是否执行中」。
+ * run 全量契约（prompt / usage / 事件流）留在 shared，M2 随生命周期入账再迁入。
+ */
+export interface ActiveRun {
+  id: string
+  taskId: string
+  stageId: string | null
+  status: 'queued' | 'running'
+}
+
+/** 需要参数的视图 → 参数形状；无参数视图不出现在这里。 */
+export interface ViewArgs {
+  'tasks.byWorkflow': { workflowId: string }
+  'task.byId': { taskId: string }
+  'runs.active-by-task': { taskId: string }
+}
+
+/** 视图 id → 返回类型。 */
+export interface ViewResults {
+  'workflows.all': WorkflowWithStages[]
+  'agents.all': Agent[]
+  'runtimes.all': Runtime[]
+  'tasks.byWorkflow': Task[]
+  'task.byId': Task | null
+  'runs.active-by-task': ActiveRun[]
+}
+
+export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined
+
+export type ViewResult<T extends ViewId> = ViewResults[T]

@@ -1,4 +1,4 @@
-import type { StageInput } from '../../protocol/types'
+import type { StageInput } from '../../protocol/entities'
 
 /**
  * 纯函数：校验一条工作流的阶段配置。

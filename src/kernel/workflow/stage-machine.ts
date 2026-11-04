@@ -1,4 +1,4 @@
-import type { Task, WorkflowStage, WorkflowWithStages } from '../../protocol/types'
+import type { Task, WorkflowStage, WorkflowWithStages } from '../../protocol/entities'
 
 /** 进入某阶段后需要执行的效果（由 runner / UI 实际落地）。 */
 export type StageEffect =

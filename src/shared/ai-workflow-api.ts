@@ -9,75 +9,42 @@
  * 健康状态由 --probe 帧给出，执行结果归一为运行事件流 + 终态结果。
  */
 
+import type {
+  Agent,
+  AgentInput,
+  Runtime,
+  RuntimeInput,
+  RuntimeProbe,
+  Task,
+  TaskInput,
+  WorkflowInput,
+  WorkflowWithStages,
+} from '../protocol/entities'
+
+// ---------- 实体契约（五张投影表） ----------
+// 行类型与输入类型定义在 protocol 层（kernel 只依赖 protocol），这里 re-export
+// 供 preload / renderer 使用；字段与旧定义逐一对应，IPC 形状不变。
+export type {
+  Agent,
+  AgentInput,
+  EntryMode,
+  PermissionMode,
+  Runtime,
+  RuntimeInput,
+  RuntimeProbe,
+  RuntimeProbeState,
+  RuntimeProtocolFamily,
+  StageInput,
+  Task,
+  TaskInput,
+  TaskStatus,
+  Workflow,
+  WorkflowInput,
+  WorkflowStage,
+  WorkflowWithStages,
+} from '../protocol/entities'
+
 // ---------- 运行时 ----------
-
-/** 执行协议族；新增协议 = 新增后端实现，不改 UI 契约 */
-export type RuntimeProtocolFamily = 'dsh'
-
-/** 非交互权限：stdio 传输没有审批往返，越界操作直接失败 */
-export type PermissionMode = 'read-only' | 'workspace-write' | 'danger-full-access'
-
-/** 运行时健康状态（持久化的是最近一次探测结论） */
-export type RuntimeProbeState = 'ready' | 'unavailable'
-
-/** 一次探测的结论（--probe 帧 + CLI 版本 + 可执行文件解析） */
-export interface RuntimeProbe {
-  state: RuntimeProbeState
-  /** 解析到的可执行文件绝对路径；解析失败为 null */
-  path: string | null
-  /** CLI 版本（dsh --version）；读不到为 null */
-  cliVersion: string | null
-  /** 协议版本（--probe 帧的 protocol_version）；失败为 null */
-  protocolVersion: number | null
-  /** 协议插件版本（--probe 帧的 plugin_version，可空） */
-  pluginVersion: string | null
-  /** 失败原因；ready 时为 null */
-  error: string | null
-  /** 输出尾部（诊断用，已截断） */
-  output: string
-  /** 探测耗时（毫秒） */
-  elapsedMs: number
-  /** 探测完成时间（ISO） */
-  checkedAt: string
-}
-
-/** 运行时配置（本机执行环境实例） */
-export interface Runtime {
-  id: string
-  name: string
-  protocolFamily: RuntimeProtocolFamily
-  /** 启动命令：命令名或绝对路径（默认 dsh） */
-  command: string
-  /** 协议 profile（默认 multica，由该 profile 提供 --stdio/--probe） */
-  profile: string
-  permissionMode: PermissionMode
-  /** 模型 id（provider/model 形式）；null = 用 CLI 默认模型 */
-  model: string | null
-  /** 推理强度；null = 用模型默认 */
-  reasoningEffort: string | null
-  /** 执行工作目录；null = 主进程当前目录 */
-  workdir: string | null
-  /** 并发上限（同一运行时同时执行的任务数） */
-  maxConcurrent: number
-  /** 停用后不再派发执行 */
-  enabled: boolean
-  createdAt: string
-  /** 最近一次探测结论；从未探测为 null */
-  lastProbe: RuntimeProbe | null
-}
-
-export interface RuntimeInput {
-  name: string
-  protocolFamily?: RuntimeProtocolFamily
-  command?: string
-  profile?: string
-  permissionMode?: PermissionMode
-  model?: string | null
-  reasoningEffort?: string | null
-  workdir?: string | null
-  maxConcurrent?: number
-  enabled?: boolean
-}
 
 /** 运行时的动态负载（不落库，按 runs 现算） */
 export interface RuntimeStatus {
@@ -116,7 +83,6 @@ export interface RuntimeModelOption {
 
 // ---------- 运行 ----------
 
-export type TaskStatus = 'active' | 'completed'
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
 /** 运行失败归类：UI 按此给出可操作提示 */
@@ -184,83 +150,6 @@ export interface Run {
   startedAt: string | null
   endedAt: string | null
   createdAt: string
-}
-
-// ---------- 智能体 / 工作流 / 看板 ----------
-
-export interface Agent {
-  id: string
-  name: string
-  description: string
-  runtimeId: string
-  systemPrompt: string
-  createdAt: string
-}
-
-export interface AgentInput {
-  name: string
-  description?: string
-  runtimeId: string
-  systemPrompt?: string
-}
-
-export type EntryMode = 'none' | 'agent' | 'user'
-
-export interface WorkflowStage {
-  id: string
-  workflowId: string
-  name: string
-  position: number
-  entryMode: EntryMode
-  agentId: string | null
-  onCompleteStageId: string | null
-  onRejectStageId: string | null
-}
-
-export interface StageInput {
-  name: string
-  entryMode: EntryMode
-  agentId?: string | null
-  /** 完成后进入：目标阶段在 stages 数组中的下标；null/undefined = 默认（下一阶段 / 终端） */
-  onCompleteIndex?: number | null
-  /** 打回时退回到：目标阶段下标；null/undefined = 默认（上一阶段 / 原地） */
-  onRejectIndex?: number | null
-}
-
-export interface Workflow {
-  id: string
-  name: string
-  description: string
-  createdAt: string
-}
-
-export interface WorkflowWithStages extends Workflow {
-  stages: WorkflowStage[]
-}
-
-export interface WorkflowInput {
-  name: string
-  description?: string
-  stages: StageInput[]
-}
-
-export interface Task {
-  id: string
-  title: string
-  description: string
-  workflowId: string
-  currentStageId: string | null
-  status: TaskStatus
-  createdAt: string
-  updatedAt: string
-}
-
-export interface TaskInput {
-  title: string
-  description?: string
-  workflowId: string
-  /** 起始阶段；缺省为首阶段 */
-  stageId?: string
 }
 
 // ---------- 聊天 ----------

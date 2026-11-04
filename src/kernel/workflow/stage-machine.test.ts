@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Task, WorkflowStage, WorkflowWithStages } from '../../protocol/types'
+import type { Task, WorkflowStage, WorkflowWithStages } from '../../protocol/entities'
 import { moveTask, moveTaskToStage } from './stage-machine'
 
 const stage = (id: string, over: Partial<WorkflowStage> = {}): WorkflowStage => ({

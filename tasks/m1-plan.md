@@ -131,6 +131,17 @@ T1/T2 串行做；T3/T4 与 T5 可并行（写作用域不重叠：`kernel/**` v
 | 存量导入重复或丢行                       | 高   | `facts` 空才导入、单事务、分批 500、导入后校验五表行数与原表一致                           |
 | `run_events`/聊天表被误清                | 高   | 投影集白名单常量唯一；重建事务只清白名单表                                                 |
 
+## 实施偏差（M1 执行中确认）
+
+1. **View 只含五表 + `activeTaskIds`**：`runs` 不在投影集（M2 入账），「执行中」由 store 装载活跃 run 的 taskId 集合给出，内核不查库。
+2. **事实 payload 携带完整实体行**（含 `Runtime.lastProbe`）：保证 `project(fact)` 纯函数、增量与重建逐行等价；凭据类字段仍不进事实。
+3. **`workflow.update` 用可选 `StageInput.id` 差量**：有 id 且存在 → `stage.updated`；无 id → 新阶段；缺失旧阶段 → tombstone；删除阶段上的任务按 position 重挂。UI 暂不发 id，行为等价旧「重建阶段 + 按 position 回挂」。另新增「有活跃 run 拒绝改阶段」（SPEC-kernel:200，旧实现缺失）。
+4. **删除不存在的实体**沿用旧行为：静默成功、0 事实；create/update 的 not_found 仍 reject。
+5. **FK 口径**：增量写 `foreign_keys=ON`（保留旧级联：workflow.remove → task 删除 → runs 级联）；重建临时 `foreign_keys=OFF`，只清白名单五表，`runs`/`run_events`/聊天不动。因此重建后 `runs` 可能残留，属 M1 已知边界，M2 入账后消除。
+6. **`timeline()` 只在内核**（有单测），不进 `KernelPort`/store；M5 视图层再暴露。
+7. **启动顺序**：`importLegacyIfNeeded` → `ensureProjection`（先导入更安全：空事实 + 存量投影时不会因指纹失配把存量当投影清掉）。
+8. **`agents.remove` 被对话引用**时错误文案退化为 SQLite FK 原文（删除仍被拒绝、数据不丢）；M2 把会话纳入 View 后恢复可读文案。
+
 ## 不在本次范围
 
 `events/threads/cards/rules` 事实、运行生命周期入账（M2）、执行器插件拆分（M3）、IPC 三动词重构（M5）、UI 改造。M1 只换账本与五张业务表。

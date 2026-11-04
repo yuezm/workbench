@@ -83,9 +83,10 @@ if (app.requestSingleInstanceLock()) {
     // 内核门面：decide / project / viewSpec 是纯函数，store 只依赖这个端口。
     const kernel: KernelPort = { decide, project, viewSpec }
     const store = createStore({ db, kernel })
-    // 启动顺序：先对账投影（指纹失配/seq 落后则从事实重建），再把 v2 存量导成导入根。
-    store.ensureProjection()
+    // 启动顺序：先把 v2 存量导成事实导入根，再对账投影（指纹失配/seq 落后则从事实重建）。
+    // 先导入更安全：空事实 + 存量投影时不会因为指纹失配把存量当投影清掉。
     importLegacyIfNeeded(db, kernel)
+    store.ensureProjection()
     const aiRepo = new Repository(db)
     // 协议后端：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
     // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。

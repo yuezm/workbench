@@ -1,31 +1,43 @@
 // @vitest-environment node
-import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Agent } from '../../shared/ai-workflow-api'
-import { openDb } from './db'
 import { Repository } from './repository'
+import {
+  createAgent,
+  createRuntime,
+  createWorld,
+  removeAgent,
+  resetCommandIds,
+  type TestWorld,
+} from './test-support'
 
-let db: DatabaseSync
+let world: TestWorld
 let repo: Repository
 
 beforeEach(() => {
-  db = openDb(':memory:')
-  repo = new Repository(db)
+  resetCommandIds()
+  world = createWorld()
+  repo = world.repo
 })
 afterEach(() => {
   vi.useRealTimers()
-  db.close()
+  world.db.close()
 })
 
 /** 建运行时 + 智能体，返回智能体 */
 function seedAgent(name = 'coder'): Agent {
-  const rt = repo.runtimeCreate({ name: 'ds-' + name, command: 'dsh' })
-  return repo.agentCreate({ name, runtimeId: rt.id, systemPrompt: 'you are coder' })
+  const rt = createRuntime(world, { name: 'ds-' + name, command: 'dsh' })
+  return createAgent(world, { name, runtimeId: rt.id, systemPrompt: 'you are coder' })
 }
 
 /** 当前对话列表的 id 顺序 */
 function ids(): string[] {
   return repo.chatConversationsList().map((c) => c.id)
+}
+
+/** 投影里的智能体清单（确认删除失败后仍在）。 */
+function agentList(worldArg: TestWorld): Array<{ id: string }> {
+  return worldArg.store.query('agents.all')
 }
 
 describe('repository 对话与消息', () => {
@@ -67,7 +79,7 @@ describe('repository 对话与消息', () => {
     expect(ids()).toEqual([b.id, a.id])
 
     // updated_at 相同时用 created_at 倒序兜底，顺序仍然稳定
-    db.prepare('UPDATE chat_conversations SET updated_at=?').run('2026-01-01T00:00:09.000Z')
+    world.db.prepare('UPDATE chat_conversations SET updated_at=?').run('2026-01-01T00:00:09.000Z')
     expect(ids()).toEqual([b.id, a.id])
   })
 
@@ -129,10 +141,12 @@ describe('repository 对话与消息', () => {
     ).toThrow()
   })
 
-  it('智能体被对话引用时无法删除', () => {
+  it('智能体被对话引用时无法删除（外键 RESTRICT 兜底）', () => {
     const agent = seedAgent()
     repo.chatConversationCreate(agent.id)
-    expect(() => repo.agentRemove(agent.id)).toThrow(/引用/)
+    // 对话不在内核视图里，拒绝来自写库时的外键；错误照实抛给调用方（旧实现包成「引用」文案）
+    expect(() => removeAgent(world, agent.id)).toThrow(/引用|FOREIGN KEY/)
+    expect(agentList(world)).toHaveLength(1)
   })
 
   it('会话 id 可写入/清空（跨轮续接用）', () => {

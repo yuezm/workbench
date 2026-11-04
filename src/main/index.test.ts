@@ -22,6 +22,10 @@ const {
   openDbMock,
   RepositoryMock,
   RepositoryImpl,
+  createStoreMock,
+  storeMock,
+  importLegacyMock,
+  startupOrder,
 } = vi.hoisted(() => {
   interface WindowMock {
     webContents: { send: ReturnType<typeof vi.fn>; setWindowOpenHandler: ReturnType<typeof vi.fn> }
@@ -73,6 +77,16 @@ const {
     }
   }
 
+  // store 门面：入口只用到 ensureProjection；其余方法由 IPC 使用，测试里不需要真实现。
+  const storeMock = { ensureProjection: vi.fn(() => ({ rebuilt: false })) }
+  const createStoreMock = vi.fn((_options: unknown) => storeMock)
+  const importLegacyMock = vi.fn(() => ({
+    imported: false,
+    counts: { tasks: 0, workflows: 0, workflow_stages: 0, agents: 0, runtimes: 0 },
+  }))
+  /** 启动装配顺序：openDb → createStore → ensureProjection → importLegacy → Repository。 */
+  const startupOrder: string[] = []
+
   return {
     appMock: {
       whenReady: vi.fn(async () => undefined),
@@ -98,6 +112,10 @@ const {
     openDbMock: vi.fn(() => ({})),
     RepositoryMock,
     RepositoryImpl,
+    createStoreMock,
+    storeMock,
+    importLegacyMock,
+    startupOrder,
   }
 })
 
@@ -113,6 +131,8 @@ vi.mock('./ai-workflow/chat', () => ({ ChatService: ChatServiceImpl }))
 vi.mock('./ai-workflow/db', () => ({ openDb: openDbMock }))
 vi.mock('./ai-workflow/repository', () => ({ Repository: RepositoryImpl }))
 vi.mock('./ai-workflow/runner', () => ({ Runner: RunnerImpl }))
+vi.mock('../host/store/index', () => ({ createStore: createStoreMock }))
+vi.mock('../host/store/import', () => ({ importLegacyIfNeeded: importLegacyMock }))
 
 /** 入口是单例：每个用例重新加载一次，各自触发启动装配 */
 async function importEntry(): Promise<void> {
@@ -140,6 +160,7 @@ function appHandler(name: string): () => void {
 }
 
 type IpcDeps = {
+  store: unknown
   notifyChanged: () => void
   onQueue: (runId: string) => void
   chat: unknown
@@ -159,7 +180,30 @@ describe('主进程入口装配', () => {
     vi.clearAllMocks()
     windows.length = 0
     runnerInstances.length = 0
+    startupOrder.length = 0
     delete process.env['ELECTRON_RENDERER_URL']
+    openDbMock.mockImplementation(() => {
+      startupOrder.push('openDb')
+      return {}
+    })
+    createStoreMock.mockImplementation(() => {
+      startupOrder.push('createStore')
+      return storeMock
+    })
+    storeMock.ensureProjection.mockImplementation(() => {
+      startupOrder.push('ensureProjection')
+      return { rebuilt: false }
+    })
+    importLegacyMock.mockImplementation(() => {
+      startupOrder.push('importLegacy')
+      return {
+        imported: false,
+        counts: { tasks: 0, workflows: 0, workflow_stages: 0, agents: 0, runtimes: 0 },
+      }
+    })
+    RepositoryMock.mockImplementation(() => {
+      startupOrder.push('repository')
+    })
   })
 
   it('创建窗口与托盘，并把聊天服务接进 ai-workflow IPC', async () => {
@@ -178,15 +222,44 @@ describe('主进程入口装配', () => {
     expect(RunnerMock).toHaveBeenCalledWith(
       expect.objectContaining({
         repo: expect.anything(),
+        store: storeMock,
         notifyChanged: expect.any(Function),
       }),
     )
+    // IPC 也拿到同一个 store（唯一写入口）
+    expect(ipcDeps().store).toBe(storeMock)
     expect(runnerInstances[0].resumeQueued).toHaveBeenCalledTimes(1)
     // 协议后端工厂接到 IPC，且能按协议族构造出真实后端
     const backend = ipcDeps().backendFor('dsh')
     expect(typeof backend.probe).toBe('function')
     expect(typeof backend.models).toBe('function')
     expect(typeof backend.execute).toBe('function')
+  })
+
+  it('启动顺序：开库 → 建 store → 对账投影 → 导入存量 → 建仓储', async () => {
+    await loadEntry()
+
+    expect(startupOrder).toEqual([
+      'openDb',
+      'createStore',
+      'ensureProjection',
+      'importLegacy',
+      'repository',
+    ])
+    // store 拿到的是内核门面：decide / project / viewSpec 三个纯函数
+    const options = createStoreMock.mock.calls[0][0] as {
+      db: unknown
+      kernel: { decide: unknown; project: unknown; viewSpec: unknown }
+    }
+    expect(options.db).toBeDefined()
+    expect(typeof options.kernel.decide).toBe('function')
+    expect(typeof options.kernel.project).toBe('function')
+    expect(typeof options.kernel.viewSpec).toBe('function')
+    // 导入接到同一个 db 与 kernel；投影对账必须在导入之前（空库写 meta，存量再导入）
+    expect(importLegacyMock).toHaveBeenCalledWith(options.db, options.kernel)
+    expect(startupOrder.indexOf('ensureProjection')).toBeLessThan(
+      startupOrder.indexOf('importLegacy'),
+    )
   })
 
   it('拿到单实例锁：不退出，正常装配窗口与 IPC', async () => {
@@ -209,6 +282,9 @@ describe('主进程入口装配', () => {
     expect(registerAiWorkflowIpcMock).not.toHaveBeenCalled()
     expect(createTrayMock).not.toHaveBeenCalled()
     expect(openDbMock).not.toHaveBeenCalled()
+    expect(createStoreMock).not.toHaveBeenCalled()
+    expect(storeMock.ensureProjection).not.toHaveBeenCalled()
+    expect(importLegacyMock).not.toHaveBeenCalled()
     expect(RepositoryMock).not.toHaveBeenCalled()
     expect(ChatServiceMock).not.toHaveBeenCalled()
     expect(RunnerMock).not.toHaveBeenCalled()

@@ -1,20 +1,26 @@
 // @vitest-environment node
-import type { DatabaseSync } from 'node:sqlite'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RuntimeProbe } from '../../shared/ai-workflow-api'
+import type { Runtime, RuntimeProbe, WorkflowWithStages } from '../../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../shared/ai-workflow-api'
 import type { ChatService } from './chat'
-import { openDb } from './db'
 import { createAiWorkflowHandler, registerAiWorkflowIpc, type AiWorkflowHandler } from './ipc'
-import { Repository } from './repository'
 import type { RuntimeBackend } from './runtime/registry'
+import {
+  createAgent,
+  createRuntime,
+  createTask,
+  createWorld,
+  resetCommandIds,
+  runtimeById,
+  updateRuntime,
+  type TestWorld,
+} from './test-support'
 
 const { ipcMainMock } = vi.hoisted(() => ({ ipcMainMock: { handle: vi.fn() } }))
 vi.mock('electron', () => ({ ipcMain: ipcMainMock }))
 
-let db: DatabaseSync
-let repo: Repository
+let world: TestWorld
 let notify: ReturnType<typeof vi.fn>
 let handle: AiWorkflowHandler
 let probe: ReturnType<typeof vi.fn>
@@ -38,17 +44,23 @@ function readyProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
 
 function makeHandler(overrides: Partial<Parameters<typeof createAiWorkflowHandler>[0]> = {}) {
   return createAiWorkflowHandler({
-    repo,
+    store: world.store,
+    repo: world.repo,
     notifyChanged: notify as unknown as () => void,
     backendFor: () => backend,
     ...overrides,
   })
 }
 
+/** 把任务投影改成非法状态（绕过 store 造数据损坏场景）。 */
+function corruptTaskStage(taskId: string): void {
+  world.db.prepare('UPDATE tasks SET current_stage_id=NULL WHERE id=?').run(taskId)
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
-  db = openDb(':memory:')
-  repo = new Repository(db)
+  resetCommandIds()
+  world = createWorld()
   notify = vi.fn()
   probe = vi.fn(async () => readyProbe())
   models = vi.fn(async () => [
@@ -68,17 +80,19 @@ beforeEach(() => {
   }
   handle = makeHandler()
 })
-afterEach(() => db.close())
+afterEach(() => world.db.close())
 
 describe('ai-workflow handler：运行时', () => {
   it('create 先探测再落库，返回 lastProbe 并触发 changed', async () => {
     const runtime = (await handle('runtimes.create', [
       { name: 'ds', command: 'dsh', profile: 'multica' },
-    ])) as { id: string; lastProbe: RuntimeProbe }
+    ])) as Runtime
     expect(probe).toHaveBeenCalledWith({ command: 'dsh', profile: 'multica' })
     expect(runtime.lastProbe).toEqual(readyProbe())
     const list = (await handle('runtimes.list', [])) as Array<{ name: string }>
     expect(list.map((r) => r.name)).toEqual(['ds'])
+    // 配置事实与探测事实都已落投影
+    expect(runtimeById(world.store, runtime.id).lastProbe).toEqual(readyProbe())
     expect(notify).toHaveBeenCalledTimes(1)
     // list 不触发
     expect(notify).toHaveBeenCalledTimes(1)
@@ -92,7 +106,7 @@ describe('ai-workflow handler：运行时', () => {
   it('create 探测失败且没有 error 文案：给出「未知错误」', async () => {
     probe.mockResolvedValueOnce(readyProbe({ state: 'unavailable', error: null }))
     await expect(handle('runtimes.create', [{ name: 'bad2' }])).rejects.toThrow(/未知错误/)
-    expect(repo.runtimesList()).toHaveLength(0)
+    expect(world.store.query('runtimes.all')).toHaveLength(0)
   })
   it('create 探测失败：抛可读错误且不落库', async () => {
     probe.mockResolvedValueOnce(
@@ -101,38 +115,42 @@ describe('ai-workflow handler：运行时', () => {
     await expect(handle('runtimes.create', [{ name: 'bad' }])).rejects.toThrow(
       /探测失败：找不到命令/,
     )
-    expect(repo.runtimesList()).toHaveLength(0)
+    expect(world.store.query('runtimes.all')).toHaveLength(0)
     expect(notify).not.toHaveBeenCalled()
+  })
+  it('create 名称重复：决策拒绝，错误文案原样抛出', async () => {
+    createRuntime(world, { name: 'ds' })
+    await expect(handle('runtimes.create', [{ name: 'ds' }])).rejects.toThrow(/已存在/)
   })
 
   it('update 保存后重新探测并把结论写回', async () => {
-    const runtime = repo.runtimeCreate({ name: 'ds' })
+    const runtime = createRuntime(world, { name: 'ds' })
     probe.mockResolvedValueOnce(readyProbe({ cliVersion: '9.9.9' }))
     const updated = (await handle('runtimes.update', [
       runtime.id,
       { command: 'dsh2', profile: 'p2' },
-    ])) as { command: string; lastProbe: RuntimeProbe }
+    ])) as Runtime
     expect(probe).toHaveBeenCalledWith({ command: 'dsh2', profile: 'p2' })
     expect(updated.command).toBe('dsh2')
-    expect(updated.lastProbe.cliVersion).toBe('9.9.9')
+    expect(updated.lastProbe?.cliVersion).toBe('9.9.9')
     expect(notify).toHaveBeenCalledTimes(1)
   })
 
   it('probe 直接探测并落库；运行时不存在时报错', async () => {
-    const runtime = repo.runtimeCreate({ name: 'ds' })
+    const runtime = createRuntime(world, { name: 'ds' })
     const result = (await handle('runtimes.probe', [runtime.id])) as RuntimeProbe
     expect(result).toEqual(readyProbe())
-    expect(repo.runtimeGet(runtime.id).lastProbe).toEqual(readyProbe())
+    expect(runtimeById(world.store, runtime.id).lastProbe).toEqual(readyProbe())
     expect(notify).toHaveBeenCalledTimes(1)
     await expect(handle('runtimes.probe', ['ghost'])).rejects.toThrow(/运行时不存在/)
   })
 
   it('statuses 汇总实时负载（含 0 负载的运行时）', async () => {
-    const a = repo.runtimeCreate({ name: 'a', maxConcurrent: 2 })
-    const b = repo.runtimeCreate({ name: 'b' })
-    const wf = repo.workflowCreate({ name: 'w', stages: [{ name: 's', entryMode: 'none' }] })
-    const task = repo.taskCreate({ title: 't', workflowId: wf.id })
-    repo.runCreate({
+    const a = createRuntime(world, { name: 'a', maxConcurrent: 2 })
+    const b = createRuntime(world, { name: 'b' })
+    const workflowId = createWorkflowHandlerWorkflow()
+    const task = createTask(world, { title: 't', workflowId })
+    world.repo.runCreate({
       taskId: task.id,
       stageId: null,
       agentId: null,
@@ -140,7 +158,7 @@ describe('ai-workflow handler：运行时', () => {
       prompt: 'p',
       status: 'queued',
     })
-    repo.runCreate({
+    world.repo.runCreate({
       taskId: task.id,
       stageId: null,
       agentId: null,
@@ -161,7 +179,7 @@ describe('ai-workflow handler：运行时', () => {
   })
 
   it('models 读该运行时的模型目录', async () => {
-    const runtime = repo.runtimeCreate({ name: 'ds', command: 'dsh3', profile: 'p3' })
+    const runtime = createRuntime(world, { name: 'ds', command: 'dsh3', profile: 'p3' })
     const list = (await handle('runtimes.models', [runtime.id])) as Array<{ id: string }>
     expect(models).toHaveBeenCalledWith({ command: 'dsh3', profile: 'p3' })
     expect(list[0].id).toBe('magpie/auto%2Fflash')
@@ -185,7 +203,7 @@ describe('ai-workflow handler：运行时', () => {
   })
 
   it('agents.create 绑定运行时；被引用运行时删除报错且不触发 changed', () => {
-    const rt = repo.runtimeCreate({ name: 'ds' })
+    const rt = createRuntime(world, { name: 'ds' })
     handle('agents.create', [{ name: 'coder', runtimeId: rt.id }])
     expect(notify).toHaveBeenCalledTimes(1)
     notify.mockClear()
@@ -197,6 +215,14 @@ describe('ai-workflow handler：运行时', () => {
     expect(() => handle('nope.nope', [])).toThrow(/未知方法/)
   })
 })
+
+/** 建一个只有单个 none 阶段的工作流（statuses/任务用例共用）。 */
+function createWorkflowHandlerWorkflow(): string {
+  const workflow = handle('workflows.create', [
+    { name: 'w', stages: [{ name: 's', entryMode: 'none' }] },
+  ]) as WorkflowWithStages
+  return workflow.id
+}
 
 describe('ai-workflow handler：聊天', () => {
   interface FakeChat {
@@ -212,7 +238,7 @@ describe('ai-workflow handler：聊天', () => {
   }
 
   function seedAgent(h: AiWorkflowHandler): string {
-    const rt = repo.runtimeCreate({ name: 'ds' })
+    const rt = createRuntime(world, { name: 'ds' })
     return (h('agents.create', [{ name: 'coder', runtimeId: rt.id }]) as { id: string }).id
   }
 
@@ -288,11 +314,20 @@ describe('ai-workflow handler：工作流/阶段', () => {
       handle('workflows.create', [{ name: 'x', stages: [{ name: 'a', entryMode: 'agent' }] }]),
     ).toThrow(/智能体/)
   })
+
+  it('更新缺失工作流：错误文案透传', () => {
+    expect(() =>
+      handle('workflows.update', [
+        'ghost',
+        { name: 'x', stages: [{ name: 'a', entryMode: 'none' }] },
+      ]),
+    ).toThrow(/工作流不存在/)
+  })
 })
 
 describe('ai-workflow handler：任务/运行', () => {
   function seedAgent(): string {
-    const rt = repo.runtimeCreate({ name: 'ds' })
+    const rt = createRuntime(world, { name: 'ds' })
     return (
       handle('agents.create', [{ name: 'coder', runtimeId: rt.id, systemPrompt: 'sys' }]) as {
         id: string
@@ -362,6 +397,7 @@ describe('ai-workflow handler：任务/运行', () => {
     expect(runs).toHaveLength(1)
     expect(runs[0].status).toBe('queued')
     expect(runs[0].prompt).toContain('sys')
+    expect(runs[0].prompt).toContain('# 阶段：执行')
     expect(runs[0].runtimeId).toBeTruthy()
 
     expect(() => handle('tasks.moveToStage', [task.id, wf.stages[1].id])).toThrow(/不能拖动/)
@@ -382,7 +418,7 @@ describe('ai-workflow handler：任务/运行', () => {
     const task = handle('tasks.create', [{ title: 'T3', workflowId: wf.id }]) as { id: string }
     const run = (handle('runs.listByTask', [task.id]) as Array<{ id: string }>)[0]
     expect(handle('runs.events', [run.id])).toEqual([])
-    repo.runEventsAppend(run.id, [{ seq: 1, type: 'text', text: 'hi' }])
+    world.repo.runEventsAppend(run.id, [{ seq: 1, type: 'text', text: 'hi' }])
     expect(handle('runs.events', [run.id])).toEqual([{ seq: 1, type: 'text', text: 'hi' }])
     expect(handle('runs.events', ['ghost'])).toEqual([])
   })
@@ -394,7 +430,7 @@ describe('ai-workflow handler：任务/运行', () => {
     const task = handle('tasks.create', [{ title: 'T4', workflowId: wf.id }]) as { id: string }
     expect(() => handle('tasks.moveToStage', [task.id, 'ghost'])).toThrow(/目标阶段无效/)
 
-    repo.taskUpdate(task.id, { currentStageId: null })
+    corruptTaskStage(task.id)
     expect(() => handle('tasks.moveToStage', [task.id, wf.stages[0].id])).toThrow(/无效/)
     expect(() => handle('tasks.complete', [task.id])).toThrow(/无效/)
   })
@@ -402,19 +438,19 @@ describe('ai-workflow handler：任务/运行', () => {
 
 describe('ipc 补充', () => {
   it('agents.remove 删除未被引用的智能体', () => {
-    const rt = repo.runtimeCreate({ name: 'ds' })
+    const rt = createRuntime(world, { name: 'ds' })
     const ag = handle('agents.create', [{ name: 'a', runtimeId: rt.id }]) as { id: string }
     handle('agents.remove', [ag.id])
     expect(handle('agents.list', [])).toEqual([])
   })
 
   it('runtimes/agents update 与 agents.list', async () => {
-    const rt = repo.runtimeCreate({ name: 'ds' })
+    const rt = createRuntime(world, { name: 'ds' })
     await handle('runtimes.update', [rt.id, { name: 'ds2' }])
     const ag = handle('agents.create', [{ name: 'a', runtimeId: rt.id }]) as { id: string }
     handle('agents.update', [ag.id, { name: 'b' }])
     expect((handle('agents.list', []) as Array<{ name: string }>)[0].name).toBe('b')
-    expect((repo.runtimesList() as Array<{ name: string }>)[0].name).toBe('ds2')
+    expect((world.store.query('runtimes.all') as Array<{ name: string }>)[0].name).toBe('ds2')
   })
 
   it('tasks.complete 在首阶段直接完成；完成后不再随拖拽变化', () => {
@@ -436,12 +472,26 @@ describe('ipc 补充', () => {
     expect(after.status).toBe('completed')
     expect(after.currentStageId).toBe(wf.stages[0].id)
   })
+
+  it('停用运行时后智能体仍可读；停用不改变 lastProbe', async () => {
+    const rt = createRuntime(world, { name: 'ds' })
+    const disabled = updateRuntime(world, rt.id, { enabled: false })
+    expect(disabled.enabled).toBe(false)
+    expect(disabled.lastProbe).toBeNull()
+    expect(createAgent(world, { name: 'a', runtimeId: rt.id }).runtimeId).toBe(rt.id)
+    expect(agentList(world)).toHaveLength(1)
+  })
 })
+
+function agentList(worldArg: TestWorld): Array<{ id: string }> {
+  return worldArg.store.query('agents.all')
+}
 
 describe('registerAiWorkflowIpc', () => {
   it('在单一 RPC 通道上注册 handler', () => {
     registerAiWorkflowIpc({
-      repo,
+      store: world.store,
+      repo: world.repo,
       notifyChanged: notify as unknown as () => void,
       backendFor: () => backend,
     })

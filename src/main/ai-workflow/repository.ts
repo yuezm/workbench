@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import { validateStageSet } from '../../kernel/workflow/stage-validation'
 import type {
   Agent,
-  AgentInput,
   ChatConversation,
   ChatMessage,
   ChatRole,
@@ -13,17 +11,8 @@ import type {
   RunStatus,
   RunUsage,
   Runtime,
-  RuntimeInput,
   RuntimeProbe,
   RuntimeProtocolFamily,
-  StageInput,
-  Task,
-  TaskInput,
-  TaskStatus,
-  Workflow,
-  WorkflowInput,
-  WorkflowStage,
-  WorkflowWithStages,
 } from '../../shared/ai-workflow-api'
 
 interface RuntimeRow {
@@ -48,32 +37,6 @@ interface AgentRow {
   runtime_id: string
   system_prompt: string
   created_at: string
-}
-interface WorkflowRow {
-  id: string
-  name: string
-  description: string
-  created_at: string
-}
-interface StageRow {
-  id: string
-  workflow_id: string
-  name: string
-  position: number
-  entry_mode: string
-  agent_id: string | null
-  on_complete_stage_id: string | null
-  on_reject_stage_id: string | null
-}
-interface TaskRow {
-  id: string
-  title: string
-  description: string
-  workflow_id: string
-  current_stage_id: string | null
-  status: string
-  created_at: string
-  updated_at: string
 }
 interface RunRow {
   id: string
@@ -119,20 +82,6 @@ interface ChatMessageRow {
 
 const now = (): string => new Date().toISOString()
 
-const PROTOCOL_FAMILIES: readonly RuntimeProtocolFamily[] = ['dsh']
-const PERMISSION_MODES: readonly PermissionMode[] = [
-  'read-only',
-  'workspace-write',
-  'danger-full-access',
-]
-
-/** 并发上限归一：至少 1，最多 8（本地单机没必要更多） */
-function normalizeConcurrency(value: number | undefined): number {
-  if (value === undefined) return 1
-  if (!Number.isInteger(value) || value < 1) throw new Error('并发上限必须是正整数')
-  return Math.min(value, 8)
-}
-
 const mapRuntime = (r: RuntimeRow): Runtime => ({
   id: r.id,
   name: r.name,
@@ -155,26 +104,6 @@ const mapAgent = (r: AgentRow): Agent => ({
   runtimeId: r.runtime_id,
   systemPrompt: r.system_prompt,
   createdAt: r.created_at,
-})
-const mapStage = (r: StageRow): WorkflowStage => ({
-  id: r.id,
-  workflowId: r.workflow_id,
-  name: r.name,
-  position: r.position,
-  entryMode: r.entry_mode as WorkflowStage['entryMode'],
-  agentId: r.agent_id,
-  onCompleteStageId: r.on_complete_stage_id,
-  onRejectStageId: r.on_reject_stage_id,
-})
-const mapTask = (r: TaskRow): Task => ({
-  id: r.id,
-  title: r.title,
-  description: r.description,
-  workflowId: r.workflow_id,
-  currentStageId: r.current_stage_id,
-  status: r.status as TaskStatus,
-  createdAt: r.created_at,
-  updatedAt: r.updated_at,
 })
 const mapRun = (r: RunRow): Run => ({
   id: r.id,
@@ -212,110 +141,29 @@ const mapChatMessage = (r: ChatMessageRow): ChatMessage => ({
   createdAt: r.created_at,
 })
 
-/** 数据访问层：纯 SQL，不含业务规则。 */
+/**
+ * 数据访问层：只保留**运行侧**与聊天（M1 投影集之外、仍直接读写）的 SQL。
+ *
+ * 五张投影表（tasks / workflows / workflow_stages / agents / runtimes）的写路径已收口到
+ * `host/store`：这里不再有它们的 INSERT/UPDATE/DELETE，也不再承载配置/任务的 CRUD。
+ * 仅 `runtimeGet` / `agentGet` 因 runner / chat 现读执行配置而临时保留，T8 收尾时随
+ * 调用方切到 `store.query` 一并删除。
+ */
 export class Repository {
   constructor(private readonly db: DatabaseSync) {}
 
-  private tx<T>(fn: () => T): T {
-    this.db.exec('BEGIN')
-    try {
-      const out = fn()
-      this.db.exec('COMMIT')
-      return out
-    } catch (e) {
-      this.db.exec('ROLLBACK')
-      throw e
-    }
-  }
-
-  // ---------- runtimes ----------
-  runtimesList(): Runtime[] {
-    return (
-      this.db.prepare('SELECT * FROM runtimes ORDER BY created_at').all() as unknown as RuntimeRow[]
-    ).map(mapRuntime)
-  }
+  // ---------- 执行配置只读（runner / chat 过渡期使用） ----------
   runtimeGet(id: string): Runtime {
     const row = this.db.prepare('SELECT * FROM runtimes WHERE id=?').get(id) as unknown as
       RuntimeRow | undefined
     if (!row) throw new Error('运行时不存在: ' + id)
     return mapRuntime(row)
   }
-  runtimeCreate(input: RuntimeInput): Runtime {
-    if (!input.name?.trim()) throw new Error('运行时名称必填')
-    const protocolFamily = input.protocolFamily ?? 'dsh'
-    if (!PROTOCOL_FAMILIES.includes(protocolFamily))
-      throw new Error('不支持的协议族: ' + protocolFamily)
-    const permissionMode = input.permissionMode ?? 'workspace-write'
-    if (!PERMISSION_MODES.includes(permissionMode))
-      throw new Error('不支持的权限模式: ' + permissionMode)
-    const id = randomUUID()
-    this.db
-      .prepare(
-        `INSERT INTO runtimes
-          (id,name,protocol_family,command,profile,permission_mode,model,reasoning_effort,
-           workdir,max_concurrent,enabled,last_probe_json,created_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,?)`,
-      )
-      .run(
-        id,
-        input.name.trim(),
-        protocolFamily,
-        input.command?.trim() || 'dsh',
-        input.profile?.trim() || 'multica',
-        permissionMode,
-        input.model ?? null,
-        input.reasoningEffort ?? null,
-        input.workdir ?? null,
-        normalizeConcurrency(input.maxConcurrent),
-        input.enabled === false ? 0 : 1,
-        now(),
-      )
-    return this.runtimeGet(id)
-  }
-  runtimeUpdate(id: string, patch: Partial<RuntimeInput>): Runtime {
-    const cur = this.runtimeGet(id)
-    if (patch.protocolFamily !== undefined && !PROTOCOL_FAMILIES.includes(patch.protocolFamily))
-      throw new Error('不支持的协议族: ' + patch.protocolFamily)
-    if (patch.permissionMode !== undefined && !PERMISSION_MODES.includes(patch.permissionMode))
-      throw new Error('不支持的权限模式: ' + patch.permissionMode)
-    this.db
-      .prepare(
-        `UPDATE runtimes SET
-          name=?, protocol_family=?, command=?, profile=?, permission_mode=?,
-          model=?, reasoning_effort=?, workdir=?, max_concurrent=?, enabled=?
-         WHERE id=?`,
-      )
-      .run(
-        patch.name?.trim() || cur.name,
-        patch.protocolFamily ?? cur.protocolFamily,
-        patch.command?.trim() || cur.command,
-        patch.profile?.trim() || cur.profile,
-        patch.permissionMode ?? cur.permissionMode,
-        patch.model !== undefined ? patch.model : cur.model,
-        patch.reasoningEffort !== undefined ? patch.reasoningEffort : cur.reasoningEffort,
-        patch.workdir !== undefined ? patch.workdir : cur.workdir,
-        patch.maxConcurrent !== undefined
-          ? normalizeConcurrency(patch.maxConcurrent)
-          : cur.maxConcurrent,
-        patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : cur.enabled ? 1 : 0,
-        id,
-      )
-    return this.runtimeGet(id)
-  }
-  /** 写入最近一次探测结论（探测结果同时是 UI 的健康状态来源） */
-  runtimeSetProbe(id: string, probe: RuntimeProbe): Runtime {
-    this.runtimeGet(id)
-    this.db
-      .prepare('UPDATE runtimes SET last_probe_json=? WHERE id=?')
-      .run(JSON.stringify(probe), id)
-    return this.runtimeGet(id)
-  }
-  runtimeRemove(id: string): void {
-    try {
-      this.db.prepare('DELETE FROM runtimes WHERE id=?').run(id)
-    } catch {
-      throw new Error('运行时被智能体引用，无法删除: ' + id)
-    }
+  agentGet(id: string): Agent {
+    const row = this.db.prepare('SELECT * FROM agents WHERE id=?').get(id) as unknown as
+      AgentRow | undefined
+    if (!row) throw new Error('智能体不存在: ' + id)
+    return mapAgent(row)
   }
   /** 各运行时的在跑/排队数（只统计 active run） */
   runtimeWorkloads(): Array<{ runtimeId: string; running: number; queued: number }> {
@@ -334,213 +182,6 @@ export class Repository {
       byId.set(row.runtime_id, entry)
     }
     return [...byId.values()]
-  }
-
-  // ---------- agents ----------
-  agentsList(): Agent[] {
-    return (
-      this.db.prepare('SELECT * FROM agents ORDER BY created_at').all() as unknown as AgentRow[]
-    ).map(mapAgent)
-  }
-  agentGet(id: string): Agent {
-    const row = this.db.prepare('SELECT * FROM agents WHERE id=?').get(id) as unknown as
-      AgentRow | undefined
-    if (!row) throw new Error('智能体不存在: ' + id)
-    return mapAgent(row)
-  }
-  agentCreate(input: AgentInput): Agent {
-    if (!input.name?.trim()) throw new Error('智能体名称必填')
-    this.runtimeGet(input.runtimeId)
-    const id = randomUUID()
-    this.db
-      .prepare(
-        'INSERT INTO agents (id,name,description,runtime_id,system_prompt,created_at) VALUES (?,?,?,?,?,?)',
-      )
-      .run(
-        id,
-        input.name.trim(),
-        input.description ?? '',
-        input.runtimeId,
-        input.systemPrompt ?? '',
-        now(),
-      )
-    return this.agentGet(id)
-  }
-  agentUpdate(id: string, patch: Partial<AgentInput>): Agent {
-    const cur = this.agentGet(id)
-    if (patch.runtimeId) this.runtimeGet(patch.runtimeId)
-    this.db
-      .prepare('UPDATE agents SET name=?, description=?, runtime_id=?, system_prompt=? WHERE id=?')
-      .run(
-        patch.name?.trim() ?? cur.name,
-        patch.description ?? cur.description,
-        patch.runtimeId ?? cur.runtimeId,
-        patch.systemPrompt ?? cur.systemPrompt,
-        id,
-      )
-    return this.agentGet(id)
-  }
-  agentRemove(id: string): void {
-    try {
-      this.db.prepare('DELETE FROM agents WHERE id=?').run(id)
-    } catch {
-      throw new Error('智能体被工作流阶段或对话引用，无法删除: ' + id)
-    }
-  }
-
-  // ---------- workflows / stages ----------
-  private stagesOf(workflowId: string): WorkflowStage[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM workflow_stages WHERE workflow_id=? ORDER BY position')
-        .all(workflowId) as unknown as StageRow[]
-    ).map(mapStage)
-  }
-  workflowGet(id: string): WorkflowWithStages {
-    const row = this.db.prepare('SELECT * FROM workflows WHERE id=?').get(id) as unknown as
-      WorkflowRow | undefined
-    if (!row) throw new Error('工作流不存在: ' + id)
-    const wf: Workflow = {
-      id: row.id,
-      name: row.name,
-      description: row.description,
-      createdAt: row.created_at,
-    }
-    return { ...wf, stages: this.stagesOf(id) }
-  }
-  workflowsList(): WorkflowWithStages[] {
-    const rows = this.db
-      .prepare('SELECT id FROM workflows ORDER BY created_at')
-      .all() as unknown as Array<{
-      id: string
-    }>
-    return rows.map((r) => this.workflowGet(r.id))
-  }
-  private insertStages(workflowId: string, stages: StageInput[]): void {
-    const ids = stages.map(() => randomUUID())
-    const ins = this.db.prepare(
-      'INSERT INTO workflow_stages (id,workflow_id,name,position,entry_mode,agent_id,on_complete_stage_id,on_reject_stage_id,created_at) VALUES (?,?,?,?,?,?,NULL,NULL,?)',
-    )
-    const upd = this.db.prepare(
-      'UPDATE workflow_stages SET on_complete_stage_id=?, on_reject_stage_id=? WHERE id=?',
-    )
-    const ts = now()
-    stages.forEach((s, i) => {
-      ins.run(ids[i], workflowId, s.name.trim(), i, s.entryMode, s.agentId ?? null, ts)
-    })
-    stages.forEach((s, i) => {
-      const oc = s.onCompleteIndex ?? null
-      const orj = s.onRejectIndex ?? null
-      upd.run(oc === null ? null : ids[oc], orj === null ? null : ids[orj], ids[i])
-    })
-  }
-  workflowCreate(input: WorkflowInput): WorkflowWithStages {
-    if (!input.name?.trim()) throw new Error('工作流名称必填')
-    const invalid = validateStageSet(input.stages)
-    if (invalid) throw new Error(invalid)
-    const id = randomUUID()
-    this.tx(() => {
-      this.db
-        .prepare('INSERT INTO workflows (id,name,description,created_at) VALUES (?,?,?,?)')
-        .run(id, input.name.trim(), input.description ?? '', now())
-      this.insertStages(id, input.stages)
-    })
-    return this.workflowGet(id)
-  }
-  workflowUpdate(id: string, input: WorkflowInput): WorkflowWithStages {
-    if (!input.name?.trim()) throw new Error('工作流名称必填')
-    const invalid = validateStageSet(input.stages)
-    if (invalid) throw new Error(invalid)
-    this.workflowGet(id)
-    this.tx(() => {
-      this.db
-        .prepare('UPDATE workflows SET name=?, description=? WHERE id=?')
-        .run(input.name.trim(), input.description ?? '', id)
-      // 记录任务当前阶段的位置，重建阶段后按位置回挂，避免任务丢阶段
-      const tasks = this.db
-        .prepare('SELECT id, current_stage_id FROM tasks WHERE workflow_id=?')
-        .all(id) as unknown as Array<{ id: string; current_stage_id: string | null }>
-      const posRows = this.db
-        .prepare('SELECT id, position FROM workflow_stages WHERE workflow_id=?')
-        .all(id) as unknown as Array<{ id: string; position: number }>
-      const posOf = new Map(posRows.map((r) => [r.id, r.position]))
-      this.db.prepare('DELETE FROM workflow_stages WHERE workflow_id=?').run(id)
-      this.insertStages(id, input.stages)
-      const newStages = this.stagesOf(id)
-      for (const t of tasks) {
-        const oldPos = t.current_stage_id ? posOf.get(t.current_stage_id) : undefined
-        if (oldPos === undefined) continue
-        const target = newStages[Math.min(oldPos, newStages.length - 1)]
-        this.db
-          .prepare('UPDATE tasks SET current_stage_id=? WHERE id=?')
-          .run(target?.id ?? null, t.id)
-      }
-    })
-    return this.workflowGet(id)
-  }
-  workflowRemove(id: string): void {
-    this.db.prepare('DELETE FROM workflows WHERE id=?').run(id)
-  }
-
-  // ---------- tasks ----------
-  taskGet(id: string): Task {
-    const row = this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id) as unknown as
-      TaskRow | undefined
-    if (!row) throw new Error('任务不存在: ' + id)
-    return mapTask(row)
-  }
-  tasksList(workflowId: string): Task[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM tasks WHERE workflow_id=? ORDER BY created_at')
-        .all(workflowId) as unknown as TaskRow[]
-    ).map(mapTask)
-  }
-  taskCreate(input: TaskInput): Task {
-    if (!input.title?.trim()) throw new Error('任务标题必填')
-    const wf = this.workflowGet(input.workflowId)
-    const stageId = input.stageId || wf.stages[0]?.id || null
-    if (stageId && !wf.stages.some((s) => s.id === stageId))
-      throw new Error('起始阶段不属于该工作流: ' + stageId)
-    const id = randomUUID()
-    const ts = now()
-    this.db
-      .prepare(
-        'INSERT INTO tasks (id,title,description,workflow_id,current_stage_id,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)',
-      )
-      .run(
-        id,
-        input.title.trim(),
-        input.description ?? '',
-        input.workflowId,
-        stageId,
-        'active',
-        ts,
-        ts,
-      )
-    return this.taskGet(id)
-  }
-  taskUpdate(
-    id: string,
-    patch: Partial<Pick<Task, 'title' | 'description' | 'currentStageId' | 'status'>>,
-  ): Task {
-    const cur = this.taskGet(id)
-    this.db
-      .prepare(
-        'UPDATE tasks SET title=?, description=?, current_stage_id=?, status=?, updated_at=? WHERE id=?',
-      )
-      .run(
-        patch.title?.trim() ?? cur.title,
-        patch.description ?? cur.description,
-        patch.currentStageId !== undefined ? patch.currentStageId : cur.currentStageId,
-        patch.status ?? cur.status,
-        now(),
-        id,
-      )
-    return this.taskGet(id)
-  }
-  taskRemove(id: string): void {
-    this.db.prepare('DELETE FROM tasks WHERE id=?').run(id)
   }
 
   // ---------- runs ----------

@@ -1,14 +1,20 @@
 // @vitest-environment node
-import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { ChatStreamEvent, RunEvent } from '../../shared/ai-workflow-api'
 import { buildChatPrompt, ChatService, titleFromContent } from './chat'
-import { openDb } from './db'
 import { Repository } from './repository'
 import type { DshRunOutcome, DshRunRequest } from './runtime/dsh'
 import type { RuntimeBackend } from './runtime/registry'
+import {
+  createAgent,
+  createRuntime,
+  createWorld,
+  resetCommandIds,
+  updateRuntime,
+  type TestWorld,
+} from './test-support'
 
-let db: DatabaseSync
+let world: TestWorld
 let repo: Repository
 
 function outcome(over: Partial<DshRunOutcome> = {}): DshRunOutcome {
@@ -39,8 +45,8 @@ function harness(
   execute: RuntimeBackend['execute'],
   options: { systemPrompt?: string } = {},
 ): Harness {
-  const runtime = repo.runtimeCreate({ name: 'r-' + Math.random().toString(36).slice(2, 8) })
-  const agent = repo.agentCreate({
+  const runtime = createRuntime(world, { name: 'r-' + Math.random().toString(36).slice(2, 8) })
+  const agent = createAgent(world, {
     name: 'coder',
     runtimeId: runtime.id,
     systemPrompt: options.systemPrompt ?? '你是助手',
@@ -75,10 +81,11 @@ async function waitFor(cond: () => boolean): Promise<void> {
 }
 
 beforeEach(() => {
-  db = openDb(':memory:')
-  repo = new Repository(db)
+  resetCommandIds()
+  world = createWorld()
+  repo = world.repo
 })
-afterEach(() => db.close())
+afterEach(() => world.db.close())
 
 describe('titleFromContent', () => {
   it('取首行、去空白、超长截断', () => {
@@ -262,7 +269,7 @@ describe('ChatService', () => {
     const h = harness(vi.fn(async (_request: DshRunRequest) => outcome()))
     const conversation = repo.chatConversationGet(h.conversationId)
     const agent = repo.agentGet(conversation.agentId)
-    repo.runtimeUpdate(agent.runtimeId, { enabled: false })
+    updateRuntime(world, agent.runtimeId, { enabled: false })
     await expect(h.service.send(h.conversationId, '问')).rejects.toThrow(/已停用/)
     expect(repo.chatMessagesList(h.conversationId)).toHaveLength(0)
   })
@@ -287,8 +294,8 @@ describe('ChatService', () => {
   })
 
   it('推送失败不影响收尾（emit 抛错被吞掉）', async () => {
-    const runtime = repo.runtimeCreate({ name: 'r2' })
-    const agent = repo.agentCreate({ name: 'a', runtimeId: runtime.id })
+    const runtime = createRuntime(world, { name: 'r2' })
+    const agent = createAgent(world, { name: 'a', runtimeId: runtime.id })
     const conversation = repo.chatConversationCreate(agent.id)
     const service = new ChatService({
       repo,
@@ -397,8 +404,8 @@ describe('ChatService', () => {
 
 describe('默认 requestId', () => {
   it('不注入 requestId 时用 uuid', async () => {
-    const runtime = repo.runtimeCreate({ name: 'r-default' })
-    const agent = repo.agentCreate({ name: 'a', runtimeId: runtime.id })
+    const runtime = createRuntime(world, { name: 'r-default' })
+    const agent = createAgent(world, { name: 'a', runtimeId: runtime.id })
     const conversation = repo.chatConversationCreate(agent.id)
     const execute = vi.fn(async (_request: DshRunRequest) => outcome())
     const service = new ChatService({
@@ -442,8 +449,8 @@ describe('chat 失败兜底分支', () => {
     service: ChatService
     conversationId: string
   } {
-    const runtime = repo.runtimeCreate({ name: 'r-' + Math.random().toString(36).slice(2, 8) })
-    const agent = repo.agentCreate({ name: 'a', runtimeId: runtime.id })
+    const runtime = createRuntime(world, { name: 'r-' + Math.random().toString(36).slice(2, 8) })
+    const agent = createAgent(world, { name: 'a', runtimeId: runtime.id })
     const conversation = repo.chatConversationCreate(agent.id)
     const service = new ChatService({
       repo,

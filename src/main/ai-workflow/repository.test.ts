@@ -1,206 +1,113 @@
 // @vitest-environment node
-import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { openDb } from './db'
+import type { Run, Runtime, Task } from '../../shared/ai-workflow-api'
 import { Repository } from './repository'
+import {
+  agentById,
+  createAgent,
+  createRuntime,
+  createTask,
+  createWorkflow,
+  createWorld,
+  resetCommandIds,
+  runtimeById,
+  type TestWorld,
+} from './test-support'
 
-let db: DatabaseSync
+let world: TestWorld
 let repo: Repository
 
 beforeEach(() => {
-  db = openDb(':memory:')
-  repo = new Repository(db)
+  resetCommandIds()
+  world = createWorld()
+  repo = world.repo
 })
-afterEach(() => db.close())
+afterEach(() => world.db.close())
 
-function seedRuntime(name = 'ds') {
-  return repo.runtimeCreate({ name, command: 'dsh', profile: 'multica' })
+/** 建运行时 + 智能体 + 单阶段工作流 + 任务，返回种子 id。 */
+function seed(): { runtime: Runtime; agentId: string; workflowId: string; task: Task } {
+  const runtime = createRuntime(world, { name: 'ds', command: 'dsh', profile: 'multica' })
+  const agent = createAgent(world, { name: 'coder', runtimeId: runtime.id, systemPrompt: 'sys' })
+  const workflow = createWorkflow(world, {
+    name: 'w',
+    stages: [{ name: 's', entryMode: 'none' }],
+  })
+  const task = createTask(world, { title: 't', workflowId: workflow.id })
+  return { runtime, agentId: agent.id, workflowId: workflow.id, task }
 }
-function seedAgent(name = 'coder') {
-  const rt = seedRuntime()
-  return repo.agentCreate({ name, runtimeId: rt.id, systemPrompt: 'you are coder' })
+
+function queuedRun(taskId: string, runtimeId: string | null = null): Run {
+  return repo.runCreate({
+    taskId,
+    stageId: null,
+    agentId: null,
+    runtimeId,
+    prompt: 'p',
+    status: 'queued',
+  })
 }
 
-describe('repository runtimes/agents', () => {
-  it('CRUD 运行时，名称唯一', () => {
-    const rt = seedRuntime('ds')
-    expect(rt.protocolFamily).toBe('dsh')
-    expect(rt.profile).toBe('multica')
-    expect(rt.permissionMode).toBe('workspace-write')
-    expect(rt.maxConcurrent).toBe(1)
-    expect(rt.enabled).toBe(true)
-    expect(rt.model).toBeNull()
-    expect(rt.lastProbe).toBeNull()
-    expect(() => seedRuntime('ds')).toThrow()
-    const updated = repo.runtimeUpdate(rt.id, { name: 'ds2' })
-    expect(updated.name).toBe('ds2')
-    repo.runtimeRemove(rt.id)
-    expect(repo.runtimesList()).toHaveLength(0)
+describe('repository：执行配置只读', () => {
+  it('runtimeGet 返回完整配置行（默认值 / 探测结论）', () => {
+    const runtime = createRuntime(world, { name: 'ds', command: 'dsh' })
+    const loaded = runtimeById(world.store, runtime.id)
+    expect(loaded.protocolFamily).toBe('dsh')
+    expect(loaded.profile).toBe('multica')
+    expect(loaded.permissionMode).toBe('workspace-write')
+    expect(loaded.maxConcurrent).toBe(1)
+    expect(loaded.enabled).toBe(true)
+    expect(loaded.model).toBeNull()
+    expect(loaded.lastProbe).toBeNull()
+    expect(repo.runtimeGet(runtime.id)).toEqual(loaded)
+    expect(() => repo.runtimeGet('ghost')).toThrow(/运行时不存在/)
   })
 
-  it('运行时配置字段可更新；探测结论可持久化', () => {
-    const rt = seedRuntime()
-    const updated = repo.runtimeUpdate(rt.id, {
-      protocolFamily: 'dsh',
-      command: 'dsh2',
-      profile: 'p2',
-      permissionMode: 'danger-full-access',
-      model: 'magpie/auto%2Fflash',
-      reasoningEffort: 'high',
-      workdir: 'C:/w',
-      maxConcurrent: 3,
-      enabled: false,
-    })
-    expect(updated).toMatchObject({
-      command: 'dsh2',
-      profile: 'p2',
-      permissionMode: 'danger-full-access',
-      model: 'magpie/auto%2Fflash',
-      reasoningEffort: 'high',
-      workdir: 'C:/w',
-      maxConcurrent: 3,
-      enabled: false,
-    })
-    const probe = {
-      state: 'ready' as const,
-      path: 'C:/bin/dsh.cmd',
-      cliVersion: '0.2.1',
-      protocolVersion: 1,
-      pluginVersion: '0.1.0',
-      error: null,
-      output: '',
-      elapsedMs: 5,
-      checkedAt: '2026-01-01T00:00:00.000Z',
-    }
-    expect(repo.runtimeSetProbe(rt.id, probe).lastProbe).toEqual(probe)
-    // 默认值回填
-    const fresh = seedRuntime('fresh')
-    expect(repo.runtimeUpdate(fresh.id, {}).enabled).toBe(true)
-  })
-
-  it('智能体绑定运行时；被引用的运行时不可删除', () => {
-    const agent = seedAgent()
-    expect(agent.runtimeId).toBeTruthy()
-    expect(() => repo.runtimeRemove(agent.runtimeId)).toThrow(/引用/)
+  it('agentGet 返回绑定运行时的智能体；不存在抛错', () => {
+    const { runtime, agentId } = seed()
+    const agent = agentById(world.store, agentId)
+    expect(agent.runtimeId).toBe(runtime.id)
+    expect(agent.systemPrompt).toBe('sys')
+    expect(repo.agentGet(agentId)).toEqual(agent)
+    expect(() => repo.agentGet('ghost')).toThrow(/智能体不存在/)
   })
 })
 
-describe('repository workflows/stages', () => {
-  it('创建工作流并按 position 返回有序阶段；按下标解析目标', () => {
-    const wf = repo.workflowCreate({
-      name: '研发',
-      stages: [
-        { name: '待办', entryMode: 'none' },
-        { name: '进行中', entryMode: 'none', onCompleteIndex: 2, onRejectIndex: 0 },
-        { name: '审核中', entryMode: 'none' },
-      ],
-    })
-    expect(wf.stages.map((s) => s.name)).toEqual(['待办', '进行中', '审核中'])
-    expect(wf.stages[1].onCompleteStageId).toBe(wf.stages[2].id)
-    expect(wf.stages[1].onRejectStageId).toBe(wf.stages[0].id)
-    expect(wf.stages.every((s) => s.onCompleteStageId || s.onRejectStageId || true)).toBe(true)
+describe('repository：runs', () => {
+  it('runCreate / runGet / runsListByTask / runsListByStatus', () => {
+    const { task } = seed()
+    const run = queuedRun(task.id)
+    expect(run.taskId).toBe(task.id)
+    expect(run.status).toBe('queued')
+    expect(run.prompt).toBe('p')
+    expect(run.output).toBe('')
+    expect(run.agentId).toBeNull()
+    expect(run.runtimeId).toBeNull()
+    expect(run.sessionId).toBeNull()
+    expect(run.usage).toBeNull()
+    expect(run.startedAt).toBeNull()
+    expect(run.endedAt).toBeNull()
+    expect(repo.runGet(run.id).id).toBe(run.id)
+    expect(repo.runsListByTask(task.id)).toEqual([run])
+    expect(repo.runsListByStatus('queued')).toEqual([run])
+    expect(repo.runsListByStatus('succeeded')).toEqual([])
+    expect(() => repo.runGet('ghost')).toThrow(/运行记录不存在/)
   })
 
-  it('校验：agent 模式必须选智能体；目标下标越界/自指报错', () => {
-    expect(() =>
-      repo.workflowCreate({ name: 'x', stages: [{ name: 'a', entryMode: 'agent' }] }),
-    ).toThrow(/智能体/)
-    expect(() =>
-      repo.workflowCreate({
-        name: 'x',
-        stages: [{ name: 'a', entryMode: 'none', onCompleteIndex: 5 }],
-      }),
-    ).toThrow(/越界/)
-    expect(() =>
-      repo.workflowCreate({
-        name: 'x',
-        stages: [{ name: 'a', entryMode: 'none', onCompleteIndex: 0 }],
-      }),
-    ).toThrow(/自己/)
+  it('runUpdate 更新状态与时间戳', () => {
+    const { task } = seed()
+    const run = queuedRun(task.id)
+    const updated = repo.runUpdate(run.id, { status: 'running', startedAt: 't1' })
+    expect(updated.status).toBe('running')
+    expect(updated.startedAt).toBe('t1')
+    expect(repo.runGet(run.id).status).toBe('running')
+    expect(repo.runsListByStatus('queued')).toEqual([])
+    expect(repo.runsListByStatus('running')).toHaveLength(1)
   })
 
-  it('更新工作流同样走阶段校验：非法阶段集合被拒绝', () => {
-    const wf = repo.workflowCreate({ name: 'x', stages: [{ name: 'a', entryMode: 'none' }] })
-    expect(() => repo.workflowUpdate(wf.id, { name: 'x', stages: [] })).toThrow(/至少需要/)
-    expect(() =>
-      repo.workflowUpdate(wf.id, { name: 'x', stages: [{ name: 'a', entryMode: 'agent' }] }),
-    ).toThrow(/智能体/)
-  })
-
-  it('更新工作流重建阶段，并按位置回挂任务当前阶段', () => {
-    const wf = repo.workflowCreate({
-      name: '研发',
-      stages: [
-        { name: '待办', entryMode: 'none' },
-        { name: '进行中', entryMode: 'none' },
-      ],
-    })
-    const task = repo.taskCreate({ title: 't', workflowId: wf.id })
-    // 手动把任务推到第 2 阶段（position 1）
-    repo.taskUpdate(task.id, { currentStageId: wf.stages[1].id })
-    const wf2 = repo.workflowUpdate(wf.id, {
-      name: '研发v2',
-      stages: [
-        { name: '待办', entryMode: 'none' },
-        { name: '进行中', entryMode: 'none' },
-        { name: '已完成', entryMode: 'none' },
-      ],
-    })
-    expect(wf2.stages).toHaveLength(3)
-    expect(repo.taskGet(task.id).currentStageId).toBe(wf2.stages[1].id)
-  })
-})
-
-describe('repository tasks/runs', () => {
-  it('新建任务进入首阶段；可指定起始阶段；级联删除', () => {
-    const wf = repo.workflowCreate({
-      name: 'wf',
-      stages: [
-        { name: 's1', entryMode: 'none' },
-        { name: 's2', entryMode: 'none' },
-      ],
-    })
-    const task = repo.taskCreate({ title: '做点事', workflowId: wf.id })
-    expect(task.currentStageId).toBe(wf.stages[0].id)
-    expect(task.status).toBe('active')
-    expect(repo.tasksList(wf.id)).toHaveLength(1)
-
-    const late = repo.taskCreate({
-      title: '从第二阶段开始',
-      workflowId: wf.id,
-      stageId: wf.stages[1].id,
-    })
-    expect(late.currentStageId).toBe(wf.stages[1].id)
-
-    const run = repo.runCreate({
-      taskId: task.id,
-      stageId: wf.stages[0].id,
-      agentId: null,
-      runtimeId: null,
-      prompt: 'p',
-      status: 'queued',
-    })
-    expect(repo.runsListByTask(task.id)).toHaveLength(1)
-    expect(repo.runUpdate(run.id, { status: 'running', startedAt: 't1' }).status).toBe('running')
-
-    repo.workflowRemove(wf.id)
-    expect(repo.tasksList(wf.id)).toHaveLength(0)
-    expect(() => repo.runGet(run.id)).toThrow()
-  })
-
-  it('run 的新增字段（runtime/session/usage/errorCode/events）可写可读', () => {
-    const rt = repo.runtimeCreate({ name: 'r', command: 'dsh' })
-    const wf = repo.workflowCreate({ name: 'w', stages: [{ name: 's', entryMode: 'none' }] })
-    const task = repo.taskCreate({ title: 't', workflowId: wf.id })
-    const run = repo.runCreate({
-      taskId: task.id,
-      stageId: wf.stages[0].id,
-      agentId: null,
-      runtimeId: rt.id,
-      prompt: 'p',
-      status: 'queued',
-    })
-    expect(run.runtimeId).toBe(rt.id)
+  it('run 的新增字段（runtime/session/usage/errorCode）可写可读', () => {
+    const { runtime, task } = seed()
+    const run = queuedRun(task.id, runtime.id)
+    expect(run.runtimeId).toBe(runtime.id)
     const updated = repo.runUpdate(run.id, {
       status: 'failed',
       error: 'boom',
@@ -220,7 +127,20 @@ describe('repository tasks/runs', () => {
     })
     // null 清除 usage
     expect(repo.runUpdate(run.id, { usage: null }).usage).toBeNull()
+  })
 
+  it('runUpdate 未给的字段保持原值（output 只改一个字段）', () => {
+    const { task } = seed()
+    const run = queuedRun(task.id)
+    const updated = repo.runUpdate(run.id, { output: 'o' })
+    expect(updated.status).toBe('queued')
+    expect(updated.output).toBe('o')
+    expect(updated.error).toBeNull()
+  })
+
+  it('runEventsAppend / runEventsList：按 seq 幂等覆盖', () => {
+    const { task } = seed()
+    const run = queuedRun(task.id)
     repo.runEventsAppend(run.id, [
       { seq: 1, type: 'text', text: 'a' },
       { seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' },
@@ -233,21 +153,24 @@ describe('repository tasks/runs', () => {
     ])
     // 空事件数组是 no-op
     expect(() => repo.runEventsAppend(run.id, [])).not.toThrow()
+    expect(repo.runEventsList(run.id)).toHaveLength(3)
     // 重复 seq 覆盖而不是新增
     repo.runEventsAppend(run.id, [{ seq: 1, type: 'text', text: 'b' }])
     expect(repo.runEventsList(run.id)[0]).toEqual({ seq: 1, type: 'text', text: 'b' })
+    expect(repo.runEventsList(run.id)).toHaveLength(3)
+    expect(repo.runEventsList('ghost')).toEqual([])
   })
+})
 
-  it('runtimeWorkloads 只统计 queued/running', () => {
-    const rt = repo.runtimeCreate({ name: 'r', command: 'dsh' })
-    const wf = repo.workflowCreate({ name: 'w', stages: [{ name: 's', entryMode: 'none' }] })
-    const task = repo.taskCreate({ title: 't', workflowId: wf.id })
+describe('repository：运行时负载与活跃 run', () => {
+  it('runtimeWorkloads 只统计 queued/running，按运行时分组', () => {
+    const { runtime, task } = seed()
     const make = (status: 'queued' | 'running' | 'succeeded') =>
       repo.runCreate({
         taskId: task.id,
         stageId: null,
         agentId: null,
-        runtimeId: rt.id,
+        runtimeId: runtime.id,
         prompt: 'p',
         status,
       })
@@ -256,10 +179,50 @@ describe('repository tasks/runs', () => {
     const running = make('running')
     make('succeeded')
     repo.runUpdate(running.id, { status: 'running' })
-    expect(repo.runtimeWorkloads()).toEqual([{ runtimeId: rt.id, running: 1, queued: 2 }])
-    // activeRunForTask：只认 queued/running，取最新一条
-    expect(repo.activeRunForTask(task.id)?.status).toBe('running')
-    const other = repo.taskCreate({ title: 't2', workflowId: wf.id })
-    expect(repo.activeRunForTask(other.id)).toBeNull()
+    expect(repo.runtimeWorkloads()).toEqual([{ runtimeId: runtime.id, running: 1, queued: 2 }])
+    // 未关联运行时的 run 不计入
+    const orphan = createTask(world, { title: 't2', workflowId: createWorkflowSingle().id })
+    repo.runCreate({
+      taskId: orphan.id,
+      stageId: null,
+      agentId: null,
+      runtimeId: null,
+      prompt: 'p',
+      status: 'running',
+    })
+    expect(repo.runtimeWorkloads()).toEqual([{ runtimeId: runtime.id, running: 1, queued: 2 }])
+  })
+
+  it('activeRunForTask：只认 queued/running，取最新一条', () => {
+    const { task } = seed()
+    expect(repo.activeRunForTask(task.id)).toBeNull()
+    repo.runCreate({
+      taskId: task.id,
+      stageId: null,
+      agentId: null,
+      runtimeId: null,
+      prompt: 'p',
+      status: 'succeeded',
+    })
+    expect(repo.activeRunForTask(task.id)).toBeNull()
+    const running = queuedRun(task.id)
+    repo.runUpdate(running.id, { status: 'running' })
+    expect(repo.activeRunForTask(task.id)?.id).toBe(running.id)
+    // 失败后不再算「执行中」
+    repo.runUpdate(running.id, { status: 'failed' })
+    expect(repo.activeRunForTask(task.id)).toBeNull()
+  })
+
+  it('同一毫秒创建多条 run：按 rowid 取最新一条', () => {
+    const { task } = seed()
+    const first = queuedRun(task.id)
+    const second = queuedRun(task.id)
+    expect(repo.activeRunForTask(task.id)?.id).toBe(second.id)
+    expect(repo.activeRunForTask(task.id)?.id).not.toBe(first.id)
   })
 })
+
+/** 单阶段工作流（负载用例中用不到阶段，仅为满足任务外键）。 */
+function createWorkflowSingle(): { id: string } {
+  return createWorkflow(world, { name: 'w-extra', stages: [{ name: 's', entryMode: 'none' }] })
+}

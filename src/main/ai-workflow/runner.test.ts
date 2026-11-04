@@ -2,12 +2,25 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { RunUsage, Task } from '../../shared/ai-workflow-api'
-import { openDb } from './db'
 import { Repository } from './repository'
 import { Runner } from './runner'
 import type { DshRunOutcome } from './runtime/dsh'
 import type { RuntimeBackend } from './runtime/registry'
+import {
+  createAgent,
+  createRuntime,
+  createTask,
+  createWorkflow,
+  createWorld,
+  removeAgent,
+  removeTask,
+  resetCommandIds,
+  taskById,
+  updateRuntime,
+  type TestWorld,
+} from './test-support'
 
+let world: TestWorld
 let db: DatabaseSync
 let repo: Repository
 let notify: Mock<() => void>
@@ -48,20 +61,24 @@ interface Seed {
 }
 
 function seed(maxConcurrent = 1): Seed {
-  const runtime = repo.runtimeCreate({
+  const runtime = createRuntime(world, {
     name: 'ds-' + Math.random().toString(36).slice(2, 8),
     command: 'dsh',
     maxConcurrent,
   })
-  const agent = repo.agentCreate({ name: 'coder', runtimeId: runtime.id, systemPrompt: 'sys' })
-  const wf = repo.workflowCreate({
+  const agent = createAgent(world, {
+    name: 'coder',
+    runtimeId: runtime.id,
+    systemPrompt: 'sys',
+  })
+  const wf = createWorkflow(world, {
     name: 'w',
     stages: [
       { name: '执行', entryMode: 'agent', agentId: agent.id },
       { name: '完成', entryMode: 'none' },
     ],
   })
-  const task = repo.taskCreate({ title: 'T', description: 'd', workflowId: wf.id })
+  const task = createTask(world, { title: 'T', description: 'd', workflowId: wf.id })
   return {
     task,
     runtimeId: runtime.id,
@@ -89,6 +106,7 @@ function queuedRun(
 function makeRunner(execute: RuntimeBackend['execute']): Runner {
   return new Runner({
     repo,
+    store: world.store,
     notifyChanged,
     backendFor: () => backend(execute),
     now: () => '2026-01-01T00:00:00.000Z',
@@ -98,12 +116,14 @@ function makeRunner(execute: RuntimeBackend['execute']): Runner {
 }
 
 beforeEach(() => {
-  db = openDb(':memory:')
-  repo = new Repository(db)
+  resetCommandIds()
+  world = createWorld()
+  db = world.db
+  repo = world.repo
   notify = vi.fn<() => void>()
   notifyChanged = () => notify()
 })
-afterEach(() => db.close())
+afterEach(() => world.db.close())
 
 describe('Runner', () => {
   it('成功：run 全字段落库、事件保存、任务推进到下一阶段', async () => {
@@ -130,7 +150,7 @@ describe('Runner', () => {
     expect(saved.startedAt).toBe('2026-01-01T00:00:00.000Z')
     expect(saved.endedAt).toBe('2026-01-01T00:00:00.000Z')
     expect(repo.runEventsList(run.id).map((e) => e.text)).toEqual(['a', 'b'])
-    expect(repo.taskGet(s.task.id).currentStageId).toBe(s.stage1Id)
+    expect(taskById(world.store, s.task.id).currentStageId).toBe(s.stage1Id)
     expect(events).toHaveLength(1)
     expect(notify).toHaveBeenCalled()
   })
@@ -165,7 +185,7 @@ describe('Runner', () => {
     expect(saved.status).toBe('failed')
     expect(saved.errorCode).toBe('exit_nonzero')
     expect(saved.error).toBe('退出码 1')
-    expect(repo.taskGet(s.task.id).currentStageId).toBe(s.task.currentStageId)
+    expect(taskById(world.store, s.task.id).currentStageId).toBe(s.task.currentStageId)
   })
 
   it('缺智能体：runtime_missing', async () => {
@@ -183,10 +203,10 @@ describe('Runner', () => {
   it('智能体在 run 期间被删除：runtime_missing', async () => {
     const s = seed()
     // 新建一个不被任何阶段引用的智能体，run 之后删掉它
-    const extraRuntime = repo.runtimeCreate({ name: 'extra' })
-    const extraAgent = repo.agentCreate({ name: 'temp', runtimeId: extraRuntime.id })
+    const extraRuntime = createRuntime(world, { name: 'extra' })
+    const extraAgent = createAgent(world, { name: 'temp', runtimeId: extraRuntime.id })
     const run = queuedRun(s, extraAgent.id, extraRuntime.id)
-    repo.agentRemove(extraAgent.id)
+    removeAgent(world, extraAgent.id)
     const runner = makeRunner(async () => outcome())
     runner.enqueue(run.id)
     await runner.waitForIdle()
@@ -196,7 +216,7 @@ describe('Runner', () => {
   it('运行时停用：runtime_disabled，不调用后端', async () => {
     const s = seed()
     const run = queuedRun(s)
-    repo.runtimeUpdate(s.runtimeId, { enabled: false })
+    updateRuntime(world, s.runtimeId, { enabled: false })
     const execute = vi.fn()
     const runner = makeRunner(execute)
     runner.enqueue(run.id)
@@ -326,6 +346,7 @@ describe('Runner', () => {
     const execute = vi.fn(async () => outcome())
     const runner = new Runner({
       repo,
+      store: world.store,
       notifyChanged,
       backendFor: () => backend(execute),
       now: () => 't',
@@ -375,7 +396,7 @@ describe('Runner 边界', () => {
     )
     runner.enqueue(run.id)
     await new Promise((resolve) => setTimeout(resolve, 5))
-    repo.taskRemove(s.task.id)
+    removeTask(world, s.task.id)
     ;(release as unknown as () => void)()
     await runner.waitForIdle()
     expect(() => repo.runGet(run.id)).toThrow()
@@ -385,7 +406,12 @@ describe('Runner 边界', () => {
     const s = seed()
     const run = queuedRun(s)
     const execute = vi.fn(async () => outcome())
-    const runner = new Runner({ repo, notifyChanged, backendFor: () => backend(execute) })
+    const runner = new Runner({
+      repo,
+      store: world.store,
+      notifyChanged,
+      backendFor: () => backend(execute),
+    })
     runner.enqueue(run.id)
     await runner.waitForIdle()
     const saved = repo.runGet(run.id)
@@ -430,16 +456,16 @@ describe('Runner 推进与兜底', () => {
   })
 
   it('成功推进到下一个 agent 阶段：自动创建并执行下一条 run', async () => {
-    const runtime = repo.runtimeCreate({ name: 'chain' })
-    const agent = repo.agentCreate({ name: 'a', runtimeId: runtime.id })
-    const wf = repo.workflowCreate({
+    const runtime = createRuntime(world, { name: 'chain' })
+    const agent = createAgent(world, { name: 'a', runtimeId: runtime.id })
+    const wf = createWorkflow(world, {
       name: 'chain',
       stages: [
         { name: '执行1', entryMode: 'agent', agentId: agent.id },
         { name: '执行2', entryMode: 'agent', agentId: agent.id },
       ],
     })
-    const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
+    const task = createTask(world, { title: 'T', workflowId: wf.id })
     const execute = vi.fn(async () => outcome({ output: 'ok' }))
     const runner = makeRunner(execute)
     // 从首阶段进入效果开始：先手动入队第一条 run
@@ -459,6 +485,6 @@ describe('Runner 推进与兜底', () => {
     const runs = repo.runsListByTask(task.id)
     expect(runs).toHaveLength(2)
     expect(runs.every((run) => run.status === 'succeeded')).toBe(true)
-    expect(repo.taskGet(task.id).currentStageId).toBe(wf.stages[1].id)
+    expect(taskById(world.store, task.id).currentStageId).toBe(wf.stages[1].id)
   })
 })

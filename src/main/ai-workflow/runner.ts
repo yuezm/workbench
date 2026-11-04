@@ -8,13 +8,16 @@ import type {
   RuntimeProtocolFamily,
 } from '../../shared/ai-workflow-api'
 import type { StageEvent } from '../../shared/stage-machine'
-import { advanceTask } from './engine'
+import type { Store } from '../../host/store/index'
+import { advanceTask } from '../../host/task-effects'
 import type { Repository } from './repository'
 import type { RuntimeBackend } from './runtime/registry'
 import { RUN_TIMEOUT_MS } from './runtime/dsh'
 
 export interface RunnerDeps {
   repo: Repository
+  /** 任务阶段推进经 store 写回（唯一写入口） */
+  store: Store
   notifyChanged: () => void
   /** 按协议族返回后端（装配时注入；测试用假后端） */
   backendFor: (family: RuntimeProtocolFamily) => RuntimeBackend
@@ -32,6 +35,7 @@ export interface RunnerDeps {
  */
 export class Runner {
   private readonly repo: Repository
+  private readonly store: Store
   private readonly backendFor: (family: RuntimeProtocolFamily) => RuntimeBackend
   private readonly now: () => string
   private readonly requestId: () => string
@@ -44,6 +48,7 @@ export class Runner {
 
   constructor(private readonly deps: RunnerDeps) {
     this.repo = deps.repo
+    this.store = deps.store
     this.backendFor = deps.backendFor
     this.now = deps.now ?? (() => new Date().toISOString())
     this.requestId = deps.requestId ?? (() => randomUUID())
@@ -292,7 +297,11 @@ export class Runner {
   /** 推进阶段；run 所属任务/工作流已删除时静默结束 */
   private advance(run: Run, event: StageEvent): void {
     try {
-      advanceTask(this.repo, run.taskId, event, (id) => this.enqueue(id))
+      advanceTask(
+        { store: this.store, repo: this.repo, onQueue: (id) => this.enqueue(id) },
+        run.taskId,
+        event,
+      )
     } catch {
       // 阶段推进失败不影响 run 结果记录
     }

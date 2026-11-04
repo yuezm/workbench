@@ -1,6 +1,12 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
+import { decide } from '../kernel/decide'
+import { project } from '../kernel/project'
+import { viewSpec } from '../kernel/view-spec'
+import type { KernelPort } from '../kernel/types'
+import { createStore } from '../host/store/index'
+import { importLegacyIfNeeded } from '../host/store/import'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
 import { openDb } from './ai-workflow/db'
@@ -73,7 +79,14 @@ if (app.requestSingleInstanceLock()) {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
     }
     const userData = app.getPath('userData')
-    const aiRepo = new Repository(openDb(path.join(userData, 'ai-workflow.db')))
+    const db = openDb(path.join(userData, 'ai-workflow.db'))
+    // 内核门面：decide / project / viewSpec 是纯函数，store 只依赖这个端口。
+    const kernel: KernelPort = { decide, project, viewSpec }
+    const store = createStore({ db, kernel })
+    // 启动顺序：先对账投影（指纹失配/seq 落后则从事实重建），再把 v2 存量导成导入根。
+    store.ensureProjection()
+    importLegacyIfNeeded(db, kernel)
+    const aiRepo = new Repository(db)
     // 协议后端：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
     // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。
     const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
@@ -81,7 +94,12 @@ if (app.requestSingleInstanceLock()) {
     const runtimeDeps = { sessionRoot: sessionsDir }
     const backendFor = (family: RuntimeProtocolFamily): RuntimeBackend =>
       createRuntimeBackend(family, runtimeDeps)
-    const runner = new Runner({ repo: aiRepo, notifyChanged: broadcastChanged, backendFor })
+    const runner = new Runner({
+      repo: aiRepo,
+      store,
+      notifyChanged: broadcastChanged,
+      backendFor,
+    })
     const chat = new ChatService({
       repo: aiRepo,
       backendFor,
@@ -90,6 +108,7 @@ if (app.requestSingleInstanceLock()) {
       },
     })
     registerAiWorkflowIpc({
+      store,
       repo: aiRepo,
       notifyChanged: broadcastChanged,
       onQueue: (runId) => runner.enqueue(runId),

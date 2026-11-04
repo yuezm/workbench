@@ -23,6 +23,7 @@
     "e2e/**/*",
     "e2e-packaged/**/*",
     "src/main/**/*",
+    "src/host/**/*",
     "src/preload/**/*",
     "src/kernel/**/*",
     "src/protocol/**/*",

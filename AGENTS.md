@@ -23,6 +23,7 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 - 真相源唯一：事实日志只追加，投影表可重建；禁止绕过 `decide` 直接改业务表
 - 「执行中」「打回后是否重试」这类派生规则只在 kernel；UI 与插件只读视图、只发命令
 - 新增 app：`src/renderer/src/apps/<id>/` + 插件清单一行；新增运行时协议：`src/plugins/executors/<id>/` + registry 一行，在运行时配置里选它；派活目标始终是智能体，执行器只是协议适配
+- 测试统一放 `tests/`，与 `src/` 同构镜像（`src/kernel/decide.ts` ↔ `tests/kernel/decide.test.ts`）；`src/` 只放产品代码，测试夹具也放 `tests/`；E2E 在 `tests/e2e/`、打包冒烟在 `tests/e2e-packaged/`
 - 模块划分与依赖方向以 CAPABILITY-MAP 为准；重构总纲见 ARCHITECTURE，分阶段见 refactor-plan
 
 ## 文档导航（按需读取）

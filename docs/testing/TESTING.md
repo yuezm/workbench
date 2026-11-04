@@ -17,12 +17,18 @@
             └─────────────────────────────┘
 ```
 
-| 层        | 位置                        | 工具                                          | 职责                                                       |
-| --------- | --------------------------- | --------------------------------------------- | ---------------------------------------------------------- |
-| 静态检查  | 根配置                      | tsc（node/web 双工程）、ESLint flat、Prettier | 类型、hooks 规则、格式一致                                 |
-| 单元      | 被测模块旁 `*.test.ts(x)`   | Vitest + jsdom + RTL                          | 纯逻辑与孤立组件；业务规则 100% 落在 machine.ts 并分支全测 |
-| 集成/契约 | `src/main/`、`src/preload/` | Vitest（node 环境 + mock electron）           | 跨进程契约不漂移：channel、payload、暴露的 API 形状        |
-| E2E       | `e2e/*.spec.ts`             | Playwright `_electron.launch`                 | 构建产物（out/）里真实 Electron 的关键路径                 |
+| 层        | 位置                            | 工具                                          | 职责                                                       |
+| --------- | ------------------------------- | --------------------------------------------- | ---------------------------------------------------------- |
+| 静态检查  | 根配置                          | tsc（node/web 双工程）、ESLint flat、Prettier | 类型、hooks 规则、格式一致                                 |
+| 单元      | `tests/**`（与 `src/` 同构）    | Vitest + jsdom + RTL                          | 纯逻辑与孤立组件；业务规则 100% 落在 machine.ts 并分支全测 |
+| 集成/契约 | `tests/main/`、`tests/preload/` | Vitest（node 环境 + mock electron）           | 跨进程契约不漂移：channel、payload、暴露的 API 形状        |
+| E2E       | `tests/e2e/*.spec.ts`           | Playwright `_electron.launch`                 | 构建产物（out/）里真实 Electron 的关键路径                 |
+
+目录约定（2026-11-04 起）：
+
+- 测试统一放 `tests/`，与 `src/` **同构镜像**：`src/kernel/decide.ts` ↔ `tests/kernel/decide.test.ts`，`src/renderer/src/apps/pomodoro/audio.ts` ↔ `tests/renderer/src/apps/pomodoro/audio.test.ts`。
+- `src/` 只放产品代码；测试夹具（如 `test-support.ts`、`fake-kernel.ts`）也随测试放进 `tests/`。
+- E2E 放 `tests/e2e/`，打包产物冒烟放 `tests/e2e-packaged/`（Playwright 各自的 `testDir`）。
 
 约定：
 

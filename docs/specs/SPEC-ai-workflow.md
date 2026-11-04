@@ -393,7 +393,7 @@ export function completeTask(task: Task): Task
 
 ## Testing Strategy
 
-- 框架：Vitest + @testing-library/react，测试就近放置（`*.test.ts(x)`）。
+- 框架：Vitest + @testing-library/react，测试统一放 `tests/`，与 `src/` 同构镜像（`src/main/ai-workflow/db.ts` ↔ `tests/main/ai-workflow/db.test.ts`，文件名后缀 `*.test.ts(x)`）。
 - **阶段状态机（重点，要求分支全覆盖）：** `stage-machine.ts` 纯函数单测——三种 `entry_mode` 的进入效果、`on_complete`/`on_reject` 显式配置与默认解析（下一阶段 / 上一阶段 / 终端 completed / 首阶段原地）、多阶段串联、终端完成、`RUN_FAILED` 打回原地时无 effects（不重试）；以及 `moveTaskToStage`（跨阶段落点、目标不存在、落在当前阶段、已完成不参与）与 `completeTask`。
 - **repository：** 用临时 SQLite 文件（或 `:memory:`）测 CRUD 与外键/唯一约束、级联删除、被引用拒绝、起始阶段校验；聊天表另测会话顺序（`updated_at`）、消息顺序（同毫秒按 rowid）、删对话级联删消息、智能体被对话引用时拒绝删除。
 - **runner：** 注入假协议后端（不启真进程）测同运行时 `maxConcurrent` 限流、多运行时并行、成功/失败/取消/超时 → 终态与 `errorCode` → 触发流转 → `changed` 事件；运行时缺失/停用路径。

@@ -48,26 +48,32 @@
 - 写路径：生产代码五表 `INSERT` 只在 `src/host/store/projection-apply.ts`；`repository` 旧写方法与 `engine.ts` 已删除；`main` 不再直写业务表。
 - 已知边界：重建后 `runs` 可能残留（不在投影集，M2 消除）；`agents.remove` 被对话引用时错误文案退化为 SQLite FK 原文；`decide.ts` 三处公共入口不可达的防御分支不计覆盖率。
 
+## 测试目录重组（2026-11-04）
+
+- 范围：`src/**` 下的 87 个 `*.test.ts(x)` 与 3 个测试夹具（`host/store/{test-support,fake-kernel}.ts`、`main/ai-workflow/test-support.ts`）搬到 `tests/`，与 `src/` **同构镜像**；`e2e/`、`e2e-packaged/` 搬到 `tests/e2e`、`tests/e2e-packaged`。`src/` 只剩产品代码。
+- 门禁同步：vitest `include` 指向 `tests/**`；tsconfig node/web 双工程按层收编 `tests/`；ESLint 架构边界规则（renderer 禁 Electron/Node、main 禁 import renderer）同样覆盖 `tests/` 对应层，强度不因搬家下降；Playwright 两个 `testDir` 指向 `tests/e2e*`；`floor-guard` 增加「src→tests 迁移识别」，避免一次性提交把搬家误判成删测试。
+- 证据：`pnpm check` 全绿（78 文件 / 772 用例；覆盖率 99.71/97.59/99.52/99.85，与基线逐项相同；改动行无变更故跳过）；`pnpm e2e` 5/5。行为零变化，只改位置与导入路径。
+
 ## 文件去向
 
-| 现状                                      | 行数                  | 去向                                                                                             |
-| ----------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
-| `shared/stage-machine.ts`                 | 116                   | `kernel/workflow/stage-machine.ts`（原样）                                                       |
-| `main/ai-workflow/engine.ts`              | 118                   | 效果意图 → `kernel/workflow/decide.ts`；写库/入队 → `host/effects.ts`                            |
-| `main/ai-workflow/runner.ts`              | 300                   | 调度/租约/退避 → kernel + `host/scheduler.ts`；spawn → 执行器插件                                |
-| `main/ai-workflow/chat.ts`                | 234                   | 轮次策略 → kernel（`purpose='chat'`）；执行 → 执行器插件                                         |
-| `main/ai-workflow/repository.ts`          | 763                   | SQL 适配 → `host/store/**`；`:418-435,474-492` 的规则外迁 kernel                                 |
-| `main/ai-workflow/{schema,migrate,db}.ts` | 298                   | `host/db.ts` + `host/store/schema.ts`；迁移脚本删除，改为格式指纹 + `snapshot.imported`          |
-| `main/ai-workflow/ipc.ts` + `preload`     | 241                   | `host/ipc.ts`（三动词）；契约类型进 `src/protocol`                                               |
-| `main/ai-workflow/runtime/dsh.ts`         | 890                   | `plugins/executors/dsh/index.ts`（整文件）                                                       |
-| `runtime/{process,executable}.ts`         | 240                   | `host/process.ts` + `host/executable.ts`（宿主能力，插件经 sdk 使用）                            |
-| `runtime/{registry,detect}.ts`            | 102                   | 删除；由运行时配置的 `executorKey` + `plugins/registry.ts` 与各插件 `detect()` 取代              |
-| `shared/ai-workflow-api.ts`               | 366                   | 拆成 `protocol/{commands,views,entities}.ts`                                                     |
-| `main/{index,ipc,tray}.ts`                | 162                   | `host/{boot,ipc,tray}.ts`                                                                        |
-| `renderer/shell/{types,registry}.ts`      | 28                    | `AppPlugin` 契约 + 插件清单                                                                      |
-| `apps/ai-workflow/**`                     | 7188                  | 保留 UI；删派生逻辑（`KanbanBoard.tsx:30,76-106`、`AiWorkflowPage.tsx:82-119`、`RunLog.tsx:13`） |
-| `apps/pomodoro/**`                        | 1414                  | 原样保留，补 `events: ['pomodoro.*']`                                                            |
-| 全部 `*.test.ts(x)`、`e2e/`               | 约 9k 行（55 个文件） | 跟随改名迁移；随 API 删除的测试可删，但必须有等价覆盖；禁止删断言或改预期                        |
+| 现状                                      | 行数                  | 去向                                                                                                               |
+| ----------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `shared/stage-machine.ts`                 | 116                   | `kernel/workflow/stage-machine.ts`（原样）                                                                         |
+| `main/ai-workflow/engine.ts`              | 118                   | 效果意图 → `kernel/workflow/decide.ts`；写库/入队 → `host/effects.ts`                                              |
+| `main/ai-workflow/runner.ts`              | 300                   | 调度/租约/退避 → kernel + `host/scheduler.ts`；spawn → 执行器插件                                                  |
+| `main/ai-workflow/chat.ts`                | 234                   | 轮次策略 → kernel（`purpose='chat'`）；执行 → 执行器插件                                                           |
+| `main/ai-workflow/repository.ts`          | 763                   | SQL 适配 → `host/store/**`；`:418-435,474-492` 的规则外迁 kernel                                                   |
+| `main/ai-workflow/{schema,migrate,db}.ts` | 298                   | `host/db.ts` + `host/store/schema.ts`；迁移脚本删除，改为格式指纹 + `snapshot.imported`                            |
+| `main/ai-workflow/ipc.ts` + `preload`     | 241                   | `host/ipc.ts`（三动词）；契约类型进 `src/protocol`                                                                 |
+| `main/ai-workflow/runtime/dsh.ts`         | 890                   | `plugins/executors/dsh/index.ts`（整文件）                                                                         |
+| `runtime/{process,executable}.ts`         | 240                   | `host/process.ts` + `host/executable.ts`（宿主能力，插件经 sdk 使用）                                              |
+| `runtime/{registry,detect}.ts`            | 102                   | 删除；由运行时配置的 `executorKey` + `plugins/registry.ts` 与各插件 `detect()` 取代                                |
+| `shared/ai-workflow-api.ts`               | 366                   | 拆成 `protocol/{commands,views,entities}.ts`                                                                       |
+| `main/{index,ipc,tray}.ts`                | 162                   | `host/{boot,ipc,tray}.ts`                                                                                          |
+| `renderer/shell/{types,registry}.ts`      | 28                    | `AppPlugin` 契约 + 插件清单                                                                                        |
+| `apps/ai-workflow/**`                     | 7188                  | 保留 UI；删派生逻辑（`KanbanBoard.tsx:30,76-106`、`AiWorkflowPage.tsx:82-119`、`RunLog.tsx:13`）                   |
+| `apps/pomodoro/**`                        | 1414                  | 原样保留，补 `events: ['pomodoro.*']`                                                                              |
+| 全部 `*.test.ts(x)`、`e2e/`               | 约 9k 行（55 个文件） | 跟随改名迁移（现统一在 `tests/`，与 `src/` 同构镜像）；随 API 删除的测试可删，但必须有等价覆盖；禁止删断言或改预期 |
 
 ## 必须保住的行为（迁移清单）
 

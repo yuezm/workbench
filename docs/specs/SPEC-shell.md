@@ -151,7 +151,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 
 ## Testing Strategy
 
-- 框架：Vitest + @testing-library/react，测试文件就近放在被测模块旁（`*.test.ts(x)`）。
+- 框架：Vitest + @testing-library/react，测试统一放 `tests/`，与 `src/` 同构镜像（`src/shell/registry.ts` ↔ `tests/renderer/src/shell/registry.test.ts`，文件名后缀 `*.test.ts(x)`）。
 - 测什么：
   - registry：id 唯一、必填字段齐全（遍历断言）。
   - TopBar：渲染出所有注册 app；选中项 `aria-current="page"`；点击切换内容区。

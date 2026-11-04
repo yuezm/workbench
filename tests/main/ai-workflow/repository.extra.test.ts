@@ -232,4 +232,38 @@ describe('repository 错误分支与补充路径', () => {
     expect(run.stageId).toBeNull()
     expect(repo.runsListByTask(task.id)).toHaveLength(1)
   })
+
+  it('staleChatRuns：只返回 purpose=chat 且 running 的 run（T14b 对账）', () => {
+    const { agent, task } = seed()
+    const fact = world.store.dispatch({ type: 'conversation.create', agentId: agent.id }).facts[0]
+    const conversationId = (fact.payload as { conversation: { id: string } }).conversation.id
+
+    const makeRun = (status: 'running' | 'succeeded'): string =>
+      repo.runCreate({
+        taskId: task.id,
+        stageId: null,
+        agentId: agent.id,
+        runtimeId: agent.runtimeId,
+        prompt: 'p',
+        status,
+      }).id
+
+    // 命中：聊天的 running run（带租约与轮次）
+    const chatRunning = makeRun('running')
+    world.db
+      .prepare(
+        "UPDATE runs SET purpose='chat', conversation_id=?, turn=3, lease_id='lease-1' WHERE id=?",
+      )
+      .run(conversationId, chatRunning)
+    // 过滤：阶段 run 即使 running 也不返回
+    const stageRunning = makeRun('running')
+    // 过滤：聊天已终态的不返回
+    const chatDone = makeRun('succeeded')
+    world.db
+      .prepare("UPDATE runs SET purpose='chat', conversation_id=? WHERE id=?")
+      .run(conversationId, chatDone)
+
+    expect(stageRunning).not.toBe(chatRunning)
+    expect(repo.staleChatRuns()).toEqual([{ id: chatRunning, leaseId: 'lease-1', turn: 3 }])
+  })
 })

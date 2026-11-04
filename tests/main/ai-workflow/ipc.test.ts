@@ -270,6 +270,14 @@ describe('ai-workflow handler：聊天', () => {
     expect(world.store.query('conversations.all')).toEqual([])
   })
 
+  it('conversation.create 缺事实防御：dispatch 未产 conversation.created 时抛错', () => {
+    const handler = makeHandler({ dispatch: () => ({ facts: [] }) })
+
+    expect(() => handler('chat.createConversation', ['ag-1'])).toThrow(
+      '缺少事实: conversation.created',
+    )
+  })
+
   it('chat.send 落用户消息与 run.queued；并发/空内容/未知对话都 reject', () => {
     const agentId = seedAgent(handle)
     const conv = handle('chat.createConversation', [agentId]) as { id: string }

@@ -77,7 +77,7 @@ const {
   // store 门面：入口用到 ensureProjection / query / nextWakeAt；其余由 IPC 使用。
   const storeMock = {
     ensureProjection: vi.fn(() => ({ rebuilt: false })),
-    query: vi.fn(() => []),
+    query: vi.fn((_table: string, _params?: unknown): unknown => []),
     nextWakeAt: vi.fn(() => null),
     dispatch: vi.fn((_input: unknown) => ({ facts: [] })),
   }
@@ -607,5 +607,79 @@ describe('主进程入口装配', () => {
 
     appHandler('window-all-closed')()
     expect(appMock.quit).toHaveBeenCalledTimes(1)
+  })
+
+  it('chatFallbackPrompt：续接被拒时用完整历史 prompt；非 chat / 缺配置返回 null', async () => {
+    await loadEntry()
+
+    const fallback = schedulerDeps().chatFallbackPrompt as (run: unknown) => string | null
+    const agent = {
+      id: 'ag-1',
+      systemPrompt: '你是助手。',
+      name: '助手',
+      description: '',
+      runtimeId: 'rt-1',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
+    const messages = [
+      { id: 'm1', conversationId: 'cv-1', role: 'user', content: '早' },
+      { id: 'm2', conversationId: 'cv-1', role: 'assistant', content: '早呀' },
+    ]
+    const run = { id: 'run-1', purpose: 'chat', conversationId: 'cv-1', agentId: 'ag-1' }
+
+    storeMock.query.mockImplementation((table: string) =>
+      table === 'agents.all' ? [agent] : messages,
+    )
+    expect(fallback(run)).toBe(
+      '你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n\n请回答最后一条用户消息。',
+    )
+
+    // 非聊天 run / 没有对话：回退不适用
+    expect(fallback({ ...run, purpose: 'stage' })).toBeNull()
+    expect(fallback({ ...run, conversationId: null })).toBeNull()
+
+    // 智能体不存在：不拼 prompt
+    storeMock.query.mockImplementation((table: string) => (table === 'agents.all' ? [] : messages))
+    expect(fallback(run)).toBeNull()
+
+    // 对话还没有消息：不拼 prompt
+    storeMock.query.mockImplementation((table: string) => (table === 'agents.all' ? [agent] : []))
+    expect(fallback(run)).toBeNull()
+  })
+
+  it('聊天流旁路：窗口 webContents 已销毁时丢弃推送，不打断其它窗口', async () => {
+    await loadEntry()
+
+    const deps = schedulerDeps()
+    windows[0].webContents.send.mockImplementationOnce(() => {
+      throw new Error('webContents 已销毁')
+    })
+
+    expect(() => deps.onChatStream?.('c1', { seq: 1, type: 'text', text: 'x' })).not.toThrow()
+    // 下一次推送不受影响
+    deps.onChatStream?.('c1', { seq: 2, type: 'text', text: 'y' })
+    expect(windows[0].webContents.send).toHaveBeenCalledTimes(2)
+  })
+
+  it('打包态：托盘图标取 process.resourcesPath', async () => {
+    appMock.isPackaged = true
+    try {
+      await loadEntry()
+      expect(createTrayMock.mock.calls[0]?.[0]).toBe(process.resourcesPath)
+    } finally {
+      appMock.isPackaged = false
+    }
+  })
+
+  it('window-all-closed 在 macOS 不退出应用', async () => {
+    const original = process.platform
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    try {
+      await loadEntry()
+      appHandler('window-all-closed')()
+      expect(appMock.quit).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(process, 'platform', { value: original, configurable: true })
+    }
   })
 })

@@ -811,6 +811,25 @@ describe('executeDshRun', () => {
     child.close(null)
   })
 
+  it('关闭收尾 flush 期间再 abort：terminate 看到 closed 直接返回（T14bc 覆盖率）', async () => {
+    const h = harness()
+    const controller = new AbortController()
+    const running = executeDshRun(
+      request({ signal: controller.signal, onEvent: () => controller.abort() }),
+      depsOf(h, { grace: { cancel: 5, kill: 5 } }),
+    )
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    // 半行文本帧留在缓冲：close 时 lines.flush() 解析 → onEvent 同步 abort
+    child.emitStdout(frame({ v: 1, type: 'text', content: 'x' }).slice(0, -1))
+    child.close(0)
+
+    const outcome = await running
+    expect(outcome.status).toBe('failed')
+    // 已关闭的进程不再杀进程树
+    expect(h.killedTrees).toEqual([])
+  })
+
   it('进程已关闭后不再杀进程树', async () => {
     const h = harness()
     const controller = new AbortController()

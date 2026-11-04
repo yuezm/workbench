@@ -1089,4 +1089,37 @@ describe('importLegacyIfNeeded：旧聊天表迁移（T14b）', () => {
     expect(tables).not.toContain('messages')
     expect(legacyChatTables(db)).toEqual([])
   })
+
+  it('已有聊天事实：跳过旧表补迁移，仍删旧表完成清理', () => {
+    const db = memory()
+    seedEntities(db)
+    importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+    seedLegacyChat(db)
+
+    const chatFact = {
+      type: 'conversation.created' as const,
+      actor: { kind: 'owner' as const, via: 'ui' as const },
+      at: IMPORT_AT,
+      payload: {
+        conversation: {
+          id: 'cv-fact',
+          title: '事实对话',
+          agentId: 'ag-1',
+          sessionId: null,
+          createdAt: IMPORT_AT,
+          updatedAt: IMPORT_AT,
+        },
+      },
+    }
+    appendFacts(db, [chatFact])
+    const before = allFacts(db).length
+
+    const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+
+    // 聊天事实已经存在：不再补迁移（不追加 conversations/messages 导入根）
+    expect(result.imported).toBe(false)
+    expect(result.counts).toMatchObject({ conversations: 0, messages: 0 })
+    expect(allFacts(db)).toHaveLength(before)
+    expect(legacyChatTables(db)).toEqual([])
+  })
 })

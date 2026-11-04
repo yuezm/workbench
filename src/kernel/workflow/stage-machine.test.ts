@@ -61,4 +61,40 @@ describe('kernel 阶段状态机', () => {
 
     expect(moveTaskToStage(current, 'ghost', workflow())).toEqual({ task: current, effects: [] })
   })
+
+  it('RUN_SUCCEEDED 按 onCompleteStageId 跳过中间阶段', () => {
+    const flow: WorkflowWithStages = {
+      ...workflow(),
+      stages: [
+        stage('s0', { onCompleteStageId: 's2' }),
+        stage('s1'),
+        stage('s2', { entryMode: 'agent', agentId: 'ag1' }),
+      ],
+    }
+
+    const { task: next, effects } = moveTask(
+      task('s0'),
+      { type: 'RUN_SUCCEEDED', runId: 'r1' },
+      flow,
+    )
+
+    expect(next.currentStageId).toBe('s2')
+    expect(effects).toEqual([{ type: 'createRun', stageId: 's2', agentId: 'ag1' }])
+  })
+
+  it('RUN_FAILED 按 onRejectStageId 打回非原地并重触发进入效果', () => {
+    const flow: WorkflowWithStages = {
+      ...workflow(),
+      stages: [
+        stage('s0', { entryMode: 'agent', agentId: 'ag0' }),
+        stage('s1'),
+        stage('s2', { onRejectStageId: 's0' }),
+      ],
+    }
+
+    const { task: next, effects } = moveTask(task('s2'), { type: 'RUN_FAILED', runId: 'r1' }, flow)
+
+    expect(next.currentStageId).toBe('s0')
+    expect(effects).toEqual([{ type: 'createRun', stageId: 's0', agentId: 'ag0' }])
+  })
 })

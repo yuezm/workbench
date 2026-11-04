@@ -191,7 +191,7 @@ describe('rebuild：增量应用与重建等价', () => {
     expect(dumpProjection(db)).toEqual(incremental)
   })
 
-  it('重建保留白名单外的表（runs / run_events / chat_*），只重放五表事实', () => {
+  it('重建清空运行/聊天四表：没有事实支撑的行不会保留', () => {
     const db = memory()
     const store = createStore({
       db,
@@ -212,6 +212,7 @@ describe('rebuild：增量应用与重建等价', () => {
       input: { title: '任务', workflowId: 'wf-1' },
     })
 
+    // 旧写路径（T16 前仍存在）直接落库的运行/聊天行：重建后必须消失。
     db.prepare('INSERT INTO runs (id, task_id, status, created_at) VALUES (?, ?, ?, ?)').run(
       'run-1',
       'tk-1',
@@ -225,32 +226,19 @@ describe('rebuild：增量应用与重建等价', () => {
       SAMPLE_AT,
     )
     db.prepare(
-      'INSERT INTO chat_conversations (id, title, agent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO conversations (id, title, agent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
     ).run('cv-1', '对话', 'ag-1', SAMPLE_AT, SAMPLE_AT)
     db.prepare(
-      'INSERT INTO chat_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
     ).run('ms-1', 'cv-1', 'user', '你好', SAMPLE_AT)
-
-    const runEventsBefore = db
-      .prepare(
-        'SELECT run_id, seq, type, payload_json, created_at FROM run_events ORDER BY run_id, seq',
-      )
-      .all()
-    const chatBefore = db.prepare('SELECT * FROM chat_conversations ORDER BY id').all()
-    const messagesBefore = db.prepare('SELECT * FROM chat_messages ORDER BY id').all()
 
     store.rebuild()
 
-    expect(
-      db
-        .prepare(
-          'SELECT run_id, seq, type, payload_json, created_at FROM run_events ORDER BY run_id, seq',
-        )
-        .all(),
-    ).toEqual(runEventsBefore)
-    expect(db.prepare('SELECT * FROM chat_conversations ORDER BY id').all()).toEqual(chatBefore)
-    expect(db.prepare('SELECT * FROM chat_messages ORDER BY id').all()).toEqual(messagesBefore)
-    // 五表由事实重建（不是残留的旧行）
+    expect(countRows(db, 'runs')).toBe(0)
+    expect(countRows(db, 'run_events')).toBe(0)
+    expect(countRows(db, 'conversations')).toBe(0)
+    expect(countRows(db, 'messages')).toBe(0)
+    // 实体五表由事实重建（不是残留的旧行）
     expect(store.query('runtimes.all')).toEqual([sample.runtime()])
     expect(store.query('agents.all')).toEqual([sample.agent()])
     expect(countRows(db, 'workflow_stages')).toBe(1)

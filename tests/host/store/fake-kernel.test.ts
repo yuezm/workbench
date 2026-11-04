@@ -1,10 +1,20 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../../src/protocol/entities'
+import type {
+  Agent,
+  Conversation,
+  Message,
+  RunRow,
+  Runtime,
+  Task,
+  Workflow,
+  WorkflowStage,
+} from '../../../src/protocol/entities'
 import type { Command } from '../../../src/protocol/commands'
 import type { FactPayload, FactType } from '../../../src/protocol/facts'
 import type { Change, Environment, Fact, FactDraft, Id, View } from '../../../src/kernel/types'
 import { PROJECTION_TABLES } from '../../../src/host/schema'
+import { DEFAULT_LIMITS } from '../../../src/host/store/index'
 import { createFakeKernel, defaultDecide, defaultProject } from './fake-kernel'
 import { SAMPLE_AT, sample, sampleProbe } from './test-support'
 
@@ -14,6 +24,9 @@ interface Seed {
   agents?: Agent[]
   runtimes?: Runtime[]
   tasks?: Task[]
+  runs?: RunRow[]
+  conversations?: Conversation[]
+  messages?: Message[]
   active?: Id[]
 }
 
@@ -24,6 +37,9 @@ const view = (seed: Seed = {}): View => ({
   agents: new Map((seed.agents ?? []).map((row) => [row.id, row])),
   runtimes: new Map((seed.runtimes ?? []).map((row) => [row.id, row])),
   tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
+  runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
+  conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
+  messages: new Map((seed.messages ?? []).map((row) => [row.id, row])),
   activeTaskIds: new Set(seed.active ?? []),
 })
 
@@ -32,7 +48,7 @@ const env = (): Environment => {
   const counters = new Map<string, number>()
   return {
     timezone: 'Asia/Shanghai',
-    limits: { maxStagesPerWorkflow: 50, maxArrayLength: 500 },
+    limits: DEFAULT_LIMITS,
     nextId: (kind) => {
       const next = (counters.get(kind) ?? 0) + 1
       counters.set(kind, next)

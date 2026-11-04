@@ -1,5 +1,5 @@
 /**
- * store 测试夹具：内存 SQLite（v2 全量 schema + 账本表）、五表样例行、投影快照。
+ * store 测试夹具：内存 SQLite（v2 全量 schema + 账本表）、九张投影表的样例行、投影快照。
  *
  * 只被 `src/host/store/*.test.ts` import，不参与运行时装配；测试注入确定性 now / newId，
  * 因此断言可以逐列全等，不依赖时钟与随机数。
@@ -7,6 +7,10 @@
 import { DatabaseSync } from 'node:sqlite'
 import type {
   Agent,
+  Conversation,
+  Message,
+  RunEventRow,
+  RunRow,
   Runtime,
   RuntimeProbe,
   Task,
@@ -122,56 +126,201 @@ export const sample = {
       ...overrides,
     }
   },
+  run(overrides: Partial<RunRow> = {}): RunRow {
+    return {
+      id: 'run-1',
+      purpose: 'stage',
+      taskId: 'tk-1',
+      stageId: 'st-1',
+      agentId: 'ag-1',
+      runtimeId: 'rt-1',
+      status: 'queued',
+      ruleId: null,
+      rulesVersion: 0,
+      executorKey: 'dsh',
+      threadId: null,
+      cwd: 'D:/work',
+      access: 'edit',
+      skill: null,
+      promptRef: null,
+      eventIds: [],
+      hops: 0,
+      turn: 1,
+      resumeSessionId: null,
+      threadContextRef: null,
+      queueSeq: 1,
+      prompt: '做点什么',
+      output: '',
+      error: null,
+      errorCode: null,
+      exitCode: null,
+      sessionId: null,
+      usage: null,
+      durationMs: null,
+      startedAt: null,
+      endedAt: null,
+      createdAt: SAMPLE_AT,
+      conversationId: null,
+      leaseId: null,
+      attempt: 0,
+      attempts: 0,
+      leaseUntil: null,
+      notBefore: null,
+      deadlineAt: null,
+      cancelRequested: false,
+      ...overrides,
+    }
+  },
+  runEvent(overrides: Partial<RunEventRow> = {}): RunEventRow {
+    return {
+      runId: 'run-1',
+      seq: 1,
+      type: 'text',
+      text: 'hi',
+      ...overrides,
+    }
+  },
+  conversation(overrides: Partial<Conversation> = {}): Conversation {
+    return {
+      id: 'cv-1',
+      title: '新对话',
+      agentId: 'ag-1',
+      sessionId: null,
+      createdAt: SAMPLE_AT,
+      updatedAt: SAMPLE_AT,
+      ...overrides,
+    }
+  },
+  message(overrides: Partial<Message> = {}): Message {
+    return {
+      id: 'ms-1',
+      conversationId: 'cv-1',
+      role: 'user',
+      content: '你好',
+      error: null,
+      createdAt: SAMPLE_AT,
+      ...overrides,
+    }
+  },
 }
 
-/** 五表列清单（与 `projection-apply` 的写列一一对应）；快照只取这些列。 */
-const PROJECTION_COLUMNS: Record<string, readonly string[]> = {
-  tasks: [
-    'id',
-    'title',
-    'description',
-    'workflow_id',
-    'current_stage_id',
-    'status',
-    'created_at',
-    'updated_at',
-  ],
-  workflows: ['id', 'name', 'description', 'created_at'],
-  workflow_stages: [
-    'id',
-    'workflow_id',
-    'name',
-    'position',
-    'entry_mode',
-    'agent_id',
-    'on_complete_stage_id',
-    'on_reject_stage_id',
-    'created_at',
-  ],
-  agents: ['id', 'name', 'description', 'runtime_id', 'system_prompt', 'created_at'],
-  runtimes: [
-    'id',
-    'name',
-    'protocol_family',
-    'command',
-    'profile',
-    'permission_mode',
-    'model',
-    'reasoning_effort',
-    'workdir',
-    'max_concurrent',
-    'enabled',
-    'last_probe_json',
-    'created_at',
-  ],
+/** 九表列清单（与 `projection-apply` 的写列一一对应）与快照排序键；快照只取这些列。 */
+const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: string }> = {
+  tasks: {
+    columns: [
+      'id',
+      'title',
+      'description',
+      'workflow_id',
+      'current_stage_id',
+      'status',
+      'created_at',
+      'updated_at',
+    ],
+    orderBy: 'id',
+  },
+  workflows: { columns: ['id', 'name', 'description', 'created_at'], orderBy: 'id' },
+  workflow_stages: {
+    columns: [
+      'id',
+      'workflow_id',
+      'name',
+      'position',
+      'entry_mode',
+      'agent_id',
+      'on_complete_stage_id',
+      'on_reject_stage_id',
+      'created_at',
+    ],
+    orderBy: 'id',
+  },
+  agents: {
+    columns: ['id', 'name', 'description', 'runtime_id', 'system_prompt', 'created_at'],
+    orderBy: 'id',
+  },
+  runtimes: {
+    columns: [
+      'id',
+      'name',
+      'protocol_family',
+      'command',
+      'profile',
+      'permission_mode',
+      'model',
+      'reasoning_effort',
+      'workdir',
+      'max_concurrent',
+      'enabled',
+      'last_probe_json',
+      'created_at',
+    ],
+    orderBy: 'id',
+  },
+  runs: {
+    columns: [
+      'id',
+      'purpose',
+      'task_id',
+      'stage_id',
+      'agent_id',
+      'runtime_id',
+      'conversation_id',
+      'rule_id',
+      'rules_version',
+      'executor_key',
+      'thread_id',
+      'cwd',
+      'access',
+      'skill',
+      'prompt_ref',
+      'event_ids_json',
+      'hops',
+      'turn',
+      'resume_session_id',
+      'thread_context_ref',
+      'queue_seq',
+      'status',
+      'prompt',
+      'output',
+      'error',
+      'error_code',
+      'exit_code',
+      'session_id',
+      'usage_json',
+      'duration_ms',
+      'lease_id',
+      'attempt',
+      'attempts',
+      'lease_until',
+      'not_before',
+      'deadline_at',
+      'cancel_requested',
+      'started_at',
+      'ended_at',
+      'created_at',
+    ],
+    orderBy: 'id',
+  },
+  run_events: {
+    columns: ['run_id', 'seq', 'type', 'payload_json', 'created_at'],
+    orderBy: 'run_id, seq',
+  },
+  conversations: {
+    columns: ['id', 'title', 'agent_id', 'session_id', 'created_at', 'updated_at'],
+    orderBy: 'id',
+  },
+  messages: {
+    columns: ['id', 'conversation_id', 'role', 'content', 'error', 'created_at'],
+    orderBy: 'id',
+  },
 }
 
-/** 五表逐行快照（列固定、按 id 排序），用于「增量 vs 重建」逐表全等比较。 */
+/** 九表逐行快照（列固定、按表内排序键），用于「增量 vs 重建」逐表全等比较。 */
 export function dumpProjection(db: DatabaseSync): Record<string, unknown[]> {
   const snapshot: Record<string, unknown[]> = {}
-  for (const [table, columns] of Object.entries(PROJECTION_COLUMNS)) {
+  for (const [table, spec] of Object.entries(PROJECTION_COLUMNS)) {
     snapshot[table] = db
-      .prepare(`SELECT ${columns.join(', ')} FROM ${table} ORDER BY id`)
+      .prepare(`SELECT ${spec.columns.join(', ')} FROM ${table} ORDER BY ${spec.orderBy}`)
       .all() as unknown as unknown[]
   }
   return snapshot

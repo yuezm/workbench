@@ -11,7 +11,7 @@ import type {
 } from '../../src/protocol/entities'
 import type { FactPayload, FactType } from '../../src/protocol/facts'
 import { decide } from '../../src/kernel/decide'
-import type { Environment, FactDraft, Id, IdKind, View } from '../../src/kernel/types'
+import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
 const LATER = '2026-01-02T00:00:00.000Z'
@@ -112,15 +112,34 @@ const view = (seed: Seed = {}): View => ({
   agents: new Map((seed.agents ?? []).map((row) => [row.id, row])),
   runtimes: new Map((seed.runtimes ?? []).map((row) => [row.id, row])),
   tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
+  runs: new Map(),
+  conversations: new Map(),
+  messages: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
 })
+
+/** 与 `host/store/index` 的 `DEFAULT_LIMITS` 同值；内核单测不 import 宿主实现。 */
+const LIMITS: Limits = {
+  maxStagesPerWorkflow: 50,
+  maxArrayLength: 500,
+  maxHops: 8,
+  leaseMs: 120_000,
+  heartbeatMs: 30_000,
+  maxAttempts: 3,
+  backoffBaseMs: 300_000,
+  backoffCapMs: 3_600_000,
+  runTimeoutMs: 1_800_000,
+  cancelGraceMs: 3_000,
+  killAfterMs: 2_000,
+  maxFramesPerBatch: 500,
+}
 
 /** 确定性 id 生成器：每类实体独立计数，测试可断言具体 id。 */
 const env = (): Environment => {
   const counters = new Map<IdKind, number>()
   return {
     timezone: 'Asia/Shanghai',
-    limits: { maxStagesPerWorkflow: 50, maxArrayLength: 500 },
+    limits: LIMITS,
     nextId: (kind) => {
       const next = (counters.get(kind) ?? 0) + 1
       counters.set(kind, next)

@@ -2,8 +2,18 @@ import { describe, expect, it } from 'vitest'
 import type {
   Agent as SharedAgent,
   AgentInput as SharedAgentInput,
+  ChatConversation as SharedChatConversation,
+  ChatMessage as SharedChatMessage,
+  ChatRole as SharedChatRole,
   EntryMode as SharedEntryMode,
   PermissionMode as SharedPermissionMode,
+  Run as SharedRun,
+  RunErrorCode as SharedRunErrorCode,
+  RunEvent as SharedRunEvent,
+  RunEventType as SharedRunEventType,
+  RunPurpose as SharedRunPurpose,
+  RunStatus as SharedRunStatus,
+  RunUsage as SharedRunUsage,
   Runtime as SharedRuntime,
   RuntimeInput as SharedRuntimeInput,
   RuntimeProbe as SharedRuntimeProbe,
@@ -19,16 +29,37 @@ import type {
   WorkflowWithStages as SharedWorkflowWithStages,
 } from '../../src/shared/ai-workflow-api'
 import {
+  ACCESS_LEVELS,
+  CHAT_ROLES,
   ENTRY_MODES,
   ENTITY_TABLES,
   PERMISSION_MODES,
   PROBE_STATES,
   PROTOCOL_FAMILIES,
+  RUN_ERROR_CODES,
+  RUN_EVENT_TYPES,
+  RUN_PURPOSES,
+  RUN_STATUSES,
+  RUN_TERMINAL_STATUSES,
   TASK_STATUSES,
+  type Access,
   type Agent,
   type AgentInput,
+  type ChatRole,
+  type Conversation,
   type EntryMode,
+  type Message,
   type PermissionMode,
+  type Run,
+  type RunErrorCode,
+  type RunEvent,
+  type RunEventRow,
+  type RunEventType,
+  type RunPurpose,
+  type RunRow,
+  type RunStatus,
+  type RunTerminalStatus,
+  type RunUsage,
   type Runtime,
   type RuntimeInput,
   type RuntimeProbe,
@@ -71,6 +102,16 @@ const contractChecks: [
   Assert<Equal<TaskStatus, SharedTaskStatus>>,
   Assert<Equal<Task, SharedTask>>,
   Assert<Equal<TaskInput, SharedTaskInput>>,
+  Assert<Equal<RunStatus, SharedRunStatus>>,
+  Assert<Equal<RunErrorCode, SharedRunErrorCode>>,
+  Assert<Equal<RunEventType, SharedRunEventType>>,
+  Assert<Equal<RunEvent, SharedRunEvent>>,
+  Assert<Equal<RunUsage, SharedRunUsage>>,
+  Assert<Equal<Run, SharedRun>>,
+  Assert<Equal<RunPurpose, SharedRunPurpose>>,
+  Assert<Equal<ChatRole, SharedChatRole>>,
+  Assert<Equal<Conversation, SharedChatConversation>>,
+  Assert<Equal<Message, SharedChatMessage>>,
 ] = [
   true,
   true,
@@ -89,7 +130,66 @@ const contractChecks: [
   true,
   true,
   true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
 ]
+
+/**
+ * IPC 形状锁定：`Run` / `RunEvent` 是 M1 就发给 renderer 的类型，
+ * 字段名与可空性必须与旧定义逐字一致（调度列在 `RunRow` 上，不外露）。
+ */
+interface ExpectedIpcRun {
+  id: string
+  taskId: string
+  stageId: string | null
+  agentId: string | null
+  runtimeId: string | null
+  status: RunStatus
+  prompt: string
+  output: string
+  error: string | null
+  errorCode: RunErrorCode | null
+  exitCode: number | null
+  sessionId: string | null
+  usage: RunUsage | null
+  durationMs: number | null
+  startedAt: string | null
+  endedAt: string | null
+  createdAt: string
+}
+
+interface ExpectedIpcRunEvent {
+  seq: number
+  type: RunEventType
+  text?: string
+  tool?: string
+  callId?: string
+  input?: string
+  output?: string
+  isError?: boolean
+  status?: string
+}
+
+const ipcShapeChecks: [
+  Assert<Equal<SharedRun, ExpectedIpcRun>>,
+  Assert<Equal<SharedRunEvent, ExpectedIpcRunEvent>>,
+  // 投影行 = IPC 行 + 调度列；`taskId` 在投影里可空（聊天 run 不挂任务）
+  Assert<Equal<RunRow['purpose'], RunPurpose>>,
+  Assert<Equal<RunRow['taskId'], string | null>>,
+] = [true, true, true, true]
+
+const runShapeChecks: [
+  Assert<Equal<RunTerminalStatus, 'succeeded' | 'failed' | 'cancelled'>>,
+  Assert<Equal<Access, 'read' | 'edit' | 'full'>>,
+] = [true, true]
 
 const sampleRuntime = {
   id: 'rt1',
@@ -146,6 +246,78 @@ const sampleTask = {
   updatedAt: '2026-01-01T00:00:00.000Z',
 } satisfies Task
 
+const sampleRun = {
+  id: 'run-1',
+  taskId: 't1',
+  stageId: 'st1',
+  agentId: 'ag1',
+  runtimeId: 'rt1',
+  status: 'running',
+  prompt: '提示词',
+  output: '',
+  error: null,
+  errorCode: null,
+  exitCode: null,
+  sessionId: null,
+  usage: null,
+  durationMs: null,
+  startedAt: null,
+  endedAt: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+} satisfies Run
+
+const sampleRunRow = {
+  ...sampleRun,
+  purpose: 'stage',
+  conversationId: null,
+  ruleId: null,
+  rulesVersion: 0,
+  executorKey: 'dsh',
+  threadId: null,
+  cwd: 'D:/work',
+  access: 'edit',
+  skill: null,
+  promptRef: null,
+  eventIds: [],
+  hops: 0,
+  turn: 1,
+  resumeSessionId: null,
+  threadContextRef: null,
+  queueSeq: 1,
+  leaseId: 'run-1:1',
+  attempt: 1,
+  attempts: 0,
+  leaseUntil: '2026-01-01T00:02:00.000Z',
+  notBefore: null,
+  deadlineAt: '2026-01-01T00:30:00.000Z',
+  cancelRequested: false,
+} satisfies RunRow
+
+const sampleRunEvent = {
+  runId: 'run-1',
+  seq: 1,
+  type: 'text',
+  text: 'hi',
+} satisfies RunEventRow
+
+const sampleConversation = {
+  id: 'cv1',
+  title: '新对话',
+  agentId: 'ag1',
+  sessionId: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+} satisfies Conversation
+
+const sampleMessage = {
+  id: 'm1',
+  conversationId: 'cv1',
+  role: 'user',
+  content: '你好',
+  error: null,
+  createdAt: '2026-01-01T00:00:00.000Z',
+} satisfies Message
+
 const keysOf = (row: object): string[] => Object.keys(row).sort()
 
 describe('protocol/entities', () => {
@@ -166,6 +338,36 @@ describe('protocol/entities', () => {
     expect([...PROBE_STATES]).toEqual(['ready', 'unavailable'])
     expect([...ENTRY_MODES]).toEqual(['none', 'agent', 'user'])
     expect([...TASK_STATUSES]).toEqual(['active', 'completed'])
+    expect([...RUN_STATUSES]).toEqual([
+      'queued',
+      'running',
+      'waiting',
+      'succeeded',
+      'failed',
+      'cancelled',
+    ])
+    expect([...RUN_TERMINAL_STATUSES]).toEqual(['succeeded', 'failed', 'cancelled'])
+    expect([...RUN_ERROR_CODES]).toEqual([
+      'spawn_failed',
+      'exit_nonzero',
+      'run_failed',
+      'timeout',
+      'cancelled',
+      'protocol_error',
+      'no_result',
+      'runtime_missing',
+      'runtime_disabled',
+      'executor_lost',
+    ])
+    expect([...RUN_PURPOSES]).toEqual(['stage', 'chat'])
+    expect([...RUN_EVENT_TYPES]).toEqual(['status', 'text', 'thinking', 'tool_call', 'tool_result'])
+    expect([...CHAT_ROLES]).toEqual(['user', 'assistant'])
+    expect([...ACCESS_LEVELS]).toEqual(['read', 'edit', 'full'])
+  })
+
+  it('M2 新增取值只增不改：waiting 与 executor_lost 追加在末尾', () => {
+    expect(RUN_STATUSES.indexOf('waiting')).toBe(2)
+    expect(RUN_ERROR_CODES.indexOf('executor_lost')).toBe(RUN_ERROR_CODES.length - 1)
   })
 
   it('五张表的行字段与现有投影列（camelCase 映射）逐一对应', () => {
@@ -216,7 +418,104 @@ describe('protocol/entities', () => {
   })
 
   it('与 shared/ai-workflow-api 的实体类型逐一相等（类型级断言）', () => {
-    expect(contractChecks).toHaveLength(17)
+    expect(contractChecks).toHaveLength(27)
     expect(contractChecks.every(Boolean)).toBe(true)
+  })
+
+  it('IPC 形状锁定：Run / RunEvent 与旧定义逐字段一致', () => {
+    expect(ipcShapeChecks.every(Boolean)).toBe(true)
+    expect(runShapeChecks.every(Boolean)).toBe(true)
+  })
+
+  it('投影行 = IPC 行 + 调度列（租约 / 尝试 / 退避 / 超时 / 取消 / 入队上下文）', () => {
+    expect(keysOf(sampleRunRow)).toEqual([
+      'access',
+      'agentId',
+      'attempt',
+      'attempts',
+      'cancelRequested',
+      'conversationId',
+      'createdAt',
+      'cwd',
+      'deadlineAt',
+      'durationMs',
+      'endedAt',
+      'error',
+      'errorCode',
+      'eventIds',
+      'executorKey',
+      'exitCode',
+      'hops',
+      'id',
+      'leaseId',
+      'leaseUntil',
+      'notBefore',
+      'output',
+      'prompt',
+      'promptRef',
+      'purpose',
+      'queueSeq',
+      'resumeSessionId',
+      'ruleId',
+      'rulesVersion',
+      'runtimeId',
+      'sessionId',
+      'skill',
+      'stageId',
+      'startedAt',
+      'status',
+      'taskId',
+      'threadContextRef',
+      'threadId',
+      'turn',
+      'usage',
+    ])
+    const runKeys = new Set(keysOf(sampleRun))
+    const schedulingKeys = keysOf(sampleRunRow).filter((key) => !runKeys.has(key))
+    expect(schedulingKeys).toEqual([
+      'access',
+      'attempt',
+      'attempts',
+      'cancelRequested',
+      'conversationId',
+      'cwd',
+      'deadlineAt',
+      'eventIds',
+      'executorKey',
+      'hops',
+      'leaseId',
+      'leaseUntil',
+      'notBefore',
+      'promptRef',
+      'purpose',
+      'queueSeq',
+      'resumeSessionId',
+      'ruleId',
+      'rulesVersion',
+      'skill',
+      'threadContextRef',
+      'threadId',
+      'turn',
+    ])
+  })
+
+  it('运行事件投影行带 runId（键是 `<runId>:<seq>`），对话/消息行对应旧聊天表列', () => {
+    expect(keysOf(sampleRunEvent)).toEqual(['runId', 'seq', 'text', 'type'])
+    expect(keysOf(sampleConversation)).toEqual([
+      'agentId',
+      'createdAt',
+      'id',
+      'sessionId',
+      'title',
+      'updatedAt',
+    ])
+    expect(keysOf(sampleMessage)).toEqual([
+      'content',
+      'conversationId',
+      'createdAt',
+      'error',
+      'id',
+      'role',
+    ])
   })
 })

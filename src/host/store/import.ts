@@ -1,24 +1,44 @@
 /**
- * v2 存量导入（M1 T6）：`facts` 为空且五张投影表有数据时，把旧表按 FK 安全顺序、
- * 每批 ≤500 行写成 `snapshot.imported` 事实根，之后日志即唯一权威。
+ * v2 存量导入：把旧表写成 `snapshot.imported` 事实根，之后日志即唯一权威。
  *
- * 约定（tasks/m1-plan.md「存量导入」、SPEC-kernel「导入根」）：
- * - 只写一次：`facts` 非空直接 no-op；导入失败整体回滚，可安全重试。
- * - 读旧表用显式列清单（不 `SELECT *` 猜列），snake_case → `protocol/entities` 行。
- * - 每行实体 = 事实 payload 里的一行，`project(fact)` 是纯函数：同一批事实 fold 两次
- *   （导入时的增量写入与以后的重建）必须得到同一份投影。
- * - `workflow_stages.created_at` 不在行类型里：投影插入用事实 `at`；旧表里已有行时
- *   upsert 会保留旧 created_at，因此导入后显式对齐成 `at`，与重建结果一致。
- * - 导入根没有 `cause`：`timeline` 标「迁移导入」，不伪造因果链。
+ * 两条路径（都对同一份事实日志幂等）：
  *
- * 事务：整次导入一个事务（`append` + `project` + 落投影 + 写 `projection_meta`）；
- * 事务内 `PRAGMA defer_foreign_keys = ON`，让「阶段自引用、跨批引用」的外键在 COMMIT 时统一校验。
+ * 1. **首次迁移**（`facts` 为空）：把实体五表 + `runs` / `run_events` 按 FK 安全顺序
+ *    （runtimes → agents → workflows → workflow_stages → tasks → runs → run_events）
+ *    读出、每批 ≤500 行写一条导入根；同一事务里先清空九张投影表再按导入根回填，
+ *    最后写 `projection_meta`，之后 `ensureProjection` 直接放行。清空是必须的：
+ *    `run_events` 纯追加（重复 `(run_id,seq)` 撞主键），不清就无法与旧行共存；
+ *    先清后填也让「首次迁移的结果」与「按事实重建的结果」严格是同一个 fold。
+ * 2. **M2 升级补迁移**（`facts` 非空）：M1 只把实体五表写成了事实，`runs` / `run_events`
+ *    仍是旧写路径留下的非事实数据；此时**只补运行两表**，条件为「事实日志里没有任何
+ *    运行事实、也没有 runs/run_events 的导入根」且「`runs` 表有存量行」。
+ *    这条路径只追加事实、不落投影、不写元信息——随后的 `ensureProjection` 会因指纹
+ *    失配整体重建，把导入根与后续事实一起重新 fold 成同一份投影（也避免在过期投影上
+ *    做部分写入）。
+ *
+ * 幂等：导入根本身就是 marker——首次迁移后 `facts` 非空、补迁移后事实里有
+ * `snapshot.imported(runs/run_events)` 或 `run.*` 事实，两条路径都会在下次启动 no-op。
+ * 失败整体回滚，可安全重试。
+ *
+ * 读旧表用显式列清单（不 `SELECT *` 猜列）：`runs` 只读 v2 的列，M2 新增的调度列
+ * 在导入前按固定默认值归一（见 `toRunRow`）——存量行没有这些值，节省一次全表 UPDATE。
+ * `run_events` 只读 `(run_id, seq, type, payload_json)`：事件的时间戳不进行类型，
+ * 投影 `created_at` 统一取导入根的时刻（与「重建只靠事实」一致，不伪装逐事件时间）。
+ *
+ * 导入根没有 `cause`：`timeline` 标「迁移导入」，不伪造因果链。
+ * 聊天表（`conversations` / `messages` 与旧 `chat_*`）不在本阶段迁移范围（T14）。
  */
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   Agent,
   EntryMode,
   PermissionMode,
+  RunErrorCode,
+  RunEventRow,
+  RunEventType,
+  RunRow,
+  RunStatus,
+  RunUsage,
   Runtime,
   RuntimeProbe,
   RuntimeProtocolFamily,
@@ -27,7 +47,15 @@ import type {
   Workflow,
   WorkflowStage,
 } from '../../protocol/entities'
-import type { FactDraft, Iso, KernelPort, ProjectionRow, ProjectionTable } from '../../kernel/types'
+import type { SnapshotImportedPayload } from '../../protocol/facts'
+import type {
+  FactDraft,
+  Fact,
+  Iso,
+  KernelPort,
+  ProjectionRow,
+  ProjectionTable,
+} from '../../kernel/types'
 import { withTx } from '../schema'
 import { currentProjectionFormat, writeProjectionMeta } from './projection'
 import { appendFacts, factsCount, lastSeq } from './facts'
@@ -40,13 +68,26 @@ export const IMPORT_BATCH_SIZE = 500
 export const IMPORT_ACTOR = { kind: 'host', via: 'reconcile' } as const
 
 /**
- * 读表顺序 = FK 依赖顺序：runtimes → agents → workflows → workflow_stages → tasks。
- * 同表内部的行间引用（阶段自引用）交给延迟外键在 COMMIT 时校验。
+ * 首次迁移的读表顺序 = FK 依赖顺序：
+ * runtimes → agents → workflows → workflow_stages → tasks → runs → run_events。
+ * 同表内部的行间引用（阶段自引用）交给延迟外键在 COMMIT 时校验；
+ * `run_events` 在 `runs` 之后，`runs` 在它引用的四张表之后。
  */
-export const IMPORT_ORDER = ['runtimes', 'agents', 'workflows', 'workflow_stages', 'tasks'] as const
+export const IMPORT_ORDER = [
+  'runtimes',
+  'agents',
+  'workflows',
+  'workflow_stages',
+  'tasks',
+  'runs',
+  'run_events',
+] as const
+
+/** 可迁移的表（导入根 payload 的判别键子集；聊天两表留到 T14）。 */
+export type ImportTable = (typeof IMPORT_ORDER)[number]
 
 export interface ImportLegacyOptions {
-  /** 导入事实的 `at`（同时是阶段行的 created_at 来源）；默认当前时刻。 */
+  /** 导入事实的 `at`（同时是阶段行 / 事件行的 created_at 来源）；默认当前时刻。 */
   at?: Iso
 }
 
@@ -111,16 +152,106 @@ interface TaskRow {
   updated_at: string
 }
 
+/**
+ * 旧 `runs` 行：只列 v2 就有的列。
+ * M2 新增列（purpose / 调度列 / 规则列 / 上下文列）由 `toRunRow` 补默认值，
+ * 所以这条 SELECT 在旧结构与新结构上都能跑。
+ */
+interface LegacyRunRow {
+  id: string
+  task_id: string
+  stage_id: string | null
+  agent_id: string | null
+  runtime_id: string | null
+  status: string
+  prompt: string
+  output: string
+  error: string | null
+  error_code: string | null
+  exit_code: number | null
+  session_id: string | null
+  usage_json: string | null
+  duration_ms: number | null
+  started_at: string | null
+  ended_at: string | null
+  created_at: string
+}
+
+interface LegacyRunEventRow {
+  run_id: string
+  seq: number
+  type: string
+  payload_json: string
+}
+
 interface LegacyRows {
   runtimes: Runtime[]
   agents: Agent[]
   workflows: Workflow[]
   workflow_stages: WorkflowStage[]
   tasks: Task[]
+  runs: RunRow[]
+  run_events: RunEventRow[]
 }
 
-/** 五表读取：每张表逐列写死，列名变更必须在这里同步（与 `views.ts` / `projection-apply.ts` 对齐）。 */
-function readLegacyRows(db: DatabaseSync): LegacyRows {
+/**
+ * 旧 `runs` 行 → `RunRow`：缺的 M2 列补固定默认值（任务口径见 T2）。
+ * `status` / 提示词 / 输出 / 用量 / 时间戳保留原值；`attempt=1`（存量 run 至少被领取过一次）、
+ * `queueSeq=0`（无稳定入队序，领取时按 notBefore + queueSeq 排在同一档次）。
+ */
+function toRunRow(row: LegacyRunRow): RunRow {
+  return {
+    id: row.id,
+    purpose: 'stage',
+    taskId: row.task_id,
+    stageId: row.stage_id,
+    agentId: row.agent_id,
+    runtimeId: row.runtime_id,
+    conversationId: null,
+    ruleId: null,
+    rulesVersion: 0,
+    executorKey: '',
+    threadId: null,
+    cwd: '',
+    access: 'edit',
+    skill: null,
+    promptRef: null,
+    eventIds: [],
+    hops: 0,
+    turn: 1,
+    resumeSessionId: null,
+    threadContextRef: null,
+    queueSeq: 0,
+    status: row.status as RunStatus,
+    prompt: row.prompt,
+    output: row.output,
+    error: row.error,
+    errorCode: row.error_code === null ? null : (row.error_code as RunErrorCode),
+    exitCode: row.exit_code,
+    sessionId: row.session_id,
+    usage: row.usage_json === null ? null : (JSON.parse(row.usage_json) as RunUsage),
+    durationMs: row.duration_ms,
+    leaseId: null,
+    attempt: 1,
+    attempts: 0,
+    leaseUntil: null,
+    notBefore: null,
+    deadlineAt: null,
+    cancelRequested: false,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    createdAt: row.created_at,
+  }
+}
+
+/** 旧事件行 → `RunEventRow`：payload 里的字段平铺回事件（与旧仓储的还原口径一致）。 */
+function toRunEventRow(row: LegacyRunEventRow): RunEventRow {
+  const payload = JSON.parse(row.payload_json) as Omit<RunEventRow, 'runId' | 'seq' | 'type'>
+  return { runId: row.run_id, seq: row.seq, type: row.type as RunEventType, ...payload }
+}
+
+/** 实体五表读取：每张表逐列写死，列名变更必须在这里同步（与 `views.ts` / `projection-apply.ts` 对齐）。 */
+function readLegacyEntityRows(db: DatabaseSync): Omit<LegacyRows, 'runs' | 'run_events'> {
   const runtimes = (
     db
       .prepare(
@@ -213,53 +344,68 @@ function readLegacyRows(db: DatabaseSync): LegacyRows {
   return { runtimes, agents, workflows, workflow_stages, tasks }
 }
 
+/** 旧 `runs` 读取（只读 v2 列；按 created_at, rowid 保持旧看板顺序）。 */
+function readLegacyRunRows(db: DatabaseSync): RunRow[] {
+  const rows = db
+    .prepare(
+      `SELECT id, task_id, stage_id, agent_id, runtime_id, status, prompt, output, error,
+              error_code, exit_code, session_id, usage_json, duration_ms, started_at,
+              ended_at, created_at
+       FROM runs ORDER BY created_at, rowid`,
+    )
+    .all() as unknown as LegacyRunRow[]
+  return rows.map(toRunRow)
+}
+
+/** 旧 `run_events` 读取：`(run_id, seq)` 原样保留，顺序即重建顺序。 */
+function readLegacyRunEventRows(db: DatabaseSync): RunEventRow[] {
+  const rows = db
+    .prepare('SELECT run_id, seq, type, payload_json FROM run_events ORDER BY run_id, seq')
+    .all() as unknown as LegacyRunEventRow[]
+  return rows.map(toRunEventRow)
+}
+
+function readLegacyRows(db: DatabaseSync): LegacyRows {
+  return {
+    ...readLegacyEntityRows(db),
+    runs: readLegacyRunRows(db),
+    run_events: readLegacyRunEventRows(db),
+  }
+}
+
 const emptyCounts = (): Record<ProjectionTable, number> => ({
   tasks: 0,
   workflows: 0,
   workflow_stages: 0,
   agents: 0,
   runtimes: 0,
+  runs: 0,
+  run_events: 0,
+  conversations: 0,
+  messages: 0,
 })
 
 /** 一组行 + 表名 → `snapshot.imported` 草稿（payload 按表收窄成判别联合）。 */
-function buildDraft(table: ProjectionTable, rows: readonly ProjectionRow[], at: Iso): FactDraft {
-  switch (table) {
-    case 'runtimes':
-      return {
-        type: 'snapshot.imported',
-        actor: IMPORT_ACTOR,
-        at,
-        payload: { table, rows: rows as Runtime[], importedFrom: 'v2' },
-      }
-    case 'agents':
-      return {
-        type: 'snapshot.imported',
-        actor: IMPORT_ACTOR,
-        at,
-        payload: { table, rows: rows as Agent[], importedFrom: 'v2' },
-      }
-    case 'workflows':
-      return {
-        type: 'snapshot.imported',
-        actor: IMPORT_ACTOR,
-        at,
-        payload: { table, rows: rows as Workflow[], importedFrom: 'v2' },
-      }
-    case 'workflow_stages':
-      return {
-        type: 'snapshot.imported',
-        actor: IMPORT_ACTOR,
-        at,
-        payload: { table, rows: rows as WorkflowStage[], importedFrom: 'v2' },
-      }
-    case 'tasks':
-      return {
-        type: 'snapshot.imported',
-        actor: IMPORT_ACTOR,
-        at,
-        payload: { table, rows: rows as Task[], importedFrom: 'v2' },
-      }
-  }
+function buildDraft(table: ImportTable, rows: readonly ProjectionRow[], at: Iso): FactDraft {
+  const payload: SnapshotImportedPayload = (() => {
+    switch (table) {
+      case 'runtimes':
+        return { table, rows: rows as Runtime[], importedFrom: 'v2' }
+      case 'agents':
+        return { table, rows: rows as Agent[], importedFrom: 'v2' }
+      case 'workflows':
+        return { table, rows: rows as Workflow[], importedFrom: 'v2' }
+      case 'workflow_stages':
+        return { table, rows: rows as WorkflowStage[], importedFrom: 'v2' }
+      case 'tasks':
+        return { table, rows: rows as Task[], importedFrom: 'v2' }
+      case 'runs':
+        return { table, rows: rows as RunRow[], importedFrom: 'v2' }
+      case 'run_events':
+        return { table, rows: rows as RunEventRow[], importedFrom: 'v2' }
+    }
+  })()
+  return { type: 'snapshot.imported', actor: IMPORT_ACTOR, at, payload }
 }
 
 /** 导入后逐表校验行数；不符就抛错，由外层事务整体回滚。 */
@@ -274,24 +420,43 @@ function verifyCounts(db: DatabaseSync, counts: Record<ProjectionTable, number>)
   }
 }
 
+/** 事实日志里是否已经有运行历史（运行事实或 runs/run_events 的导入根）——补迁移的跳过条件。 */
+function hasRunHistory(db: DatabaseSync): boolean {
+  const runFact = db.prepare("SELECT 1 AS hit FROM facts WHERE type LIKE 'run.%' LIMIT 1").get()
+  if (runFact !== undefined) return true
+  const roots = db
+    .prepare("SELECT payload FROM facts WHERE type = 'snapshot.imported'")
+    .all() as unknown as Array<{ payload: string }>
+  return roots.some((root) => {
+    const table = (JSON.parse(root.payload) as { table?: string }).table
+    return table === 'runs' || table === 'run_events'
+  })
+}
+
+/** 按表分批追加导入根；返回每表写入的行数（调用方决定是否落投影）。 */
+function appendImportFacts(
+  db: DatabaseSync,
+  table: ImportTable,
+  rows: readonly ProjectionRow[],
+  at: Iso,
+  onFact?: (fact: Fact, batch: readonly ProjectionRow[]) => void,
+): number {
+  for (let start = 0; start < rows.length; start += IMPORT_BATCH_SIZE) {
+    const batch = rows.slice(start, start + IMPORT_BATCH_SIZE)
+    const [fact] = appendFacts(db, [buildDraft(table, batch, at)])
+    onFact?.(fact, batch)
+  }
+  return rows.length
+}
+
 /**
- * 需要时导入 v2 存量五表；幂等。
- *
- * - `facts` 非空 → 不动作（已经导入过 / 新库已开始记账），返回 `imported: false`。
- * - 五表全空 → 不产事实、不写 `projection_meta`（空库由调用方的 `ensureProjection` 收尾）。
- * - 否则单事务内按表分批追加 `snapshot.imported` → `project(fact)` → 落投影 → 写元信息。
- *
- * @param db 已打开且建好 schema 的连接（`openDatabase`）
- * @param kernel 内核端口；只用到 `project`
- * @param options 导入时刻（事实 `at` 与阶段 created_at）；默认当前时刻
+ * 首次迁移（`facts` 为空）：实体五表 + 运行两表 → 导入根 + 投影 + 元信息，单事务。
  */
-export function importLegacyIfNeeded(
+function importEmptyLedger(
   db: DatabaseSync,
   kernel: KernelPort,
-  options: ImportLegacyOptions = {},
+  options: ImportLegacyOptions,
 ): ImportLegacyResult {
-  if (factsCount(db) !== 0) return { imported: false, counts: emptyCounts() }
-
   const legacy = readLegacyRows(db)
   const total = IMPORT_ORDER.reduce((sum, table) => sum + legacy[table].length, 0)
   if (total === 0) return { imported: false, counts: emptyCounts() }
@@ -304,18 +469,20 @@ export function importLegacyIfNeeded(
   withTx(db, () => {
     // 阶段自引用、跨批引用都要等 COMMIT 再校验（事务结束自动复位）。
     db.exec('PRAGMA defer_foreign_keys = ON')
+    // 这次迁移之后投影完全由事实生成：先清空九表再按导入根回填。
+    // `run_events` 是纯追加（重复 (run_id,seq) 撞主键），不清掉就无法与旧行共存；
+    // 顺带让「首次迁移的结果」与「按事实重建的结果」是同一个 fold。
+    writer.clear()
 
     for (const table of IMPORT_ORDER) {
       const rows = legacy[table]
-      counts[table] = rows.length
-      for (let start = 0; start < rows.length; start += IMPORT_BATCH_SIZE) {
-        const batch = rows.slice(start, start + IMPORT_BATCH_SIZE)
-        const [fact] = appendFacts(db, [buildDraft(table, batch, at)])
+      counts[table] = appendImportFacts(db, table, rows, at, (fact, batch) => {
         writer.applyAll(kernel.project(fact).map((change) => ({ change, at: fact.at })))
         if (table === 'workflow_stages') {
+          // 阶段行的 created_at 不在行类型里：旧表已有值，导入后对齐成导入 at（与重建等价）。
           for (const row of batch as WorkflowStage[]) touchStageCreatedAt.run(fact.at, row.id)
         }
-      }
+      })
     }
 
     verifyCounts(db, counts)
@@ -323,4 +490,49 @@ export function importLegacyIfNeeded(
   })
 
   return { imported: true, counts }
+}
+
+/**
+ * M2 升级补迁移（`facts` 非空）：只补运行两表的事实根。
+ *
+ * 不落投影、不写元信息：调用方紧随其后的 `ensureProjection` 会按新指纹重建，
+ * 重建与「导入时直接落投影」走同一条 `project` 路径，所以结果等价。
+ */
+function backfillRuns(db: DatabaseSync, options: ImportLegacyOptions): ImportLegacyResult {
+  const counts = emptyCounts()
+  if (hasRunHistory(db)) return { imported: false, counts }
+
+  const runs = readLegacyRunRows(db)
+  if (runs.length === 0) return { imported: false, counts }
+  const events = readLegacyRunEventRows(db)
+
+  const at = options.at ?? new Date().toISOString()
+  withTx(db, () => {
+    db.exec('PRAGMA defer_foreign_keys = ON')
+    counts.runs = appendImportFacts(db, 'runs', runs, at)
+    counts.run_events = appendImportFacts(db, 'run_events', events, at)
+  })
+
+  return { imported: true, counts }
+}
+
+/**
+ * 需要时导入 v2 存量；幂等。
+ *
+ * - `facts` 为空 → 首次迁移：实体五表 + `runs` / `run_events`，同一事务落投影并写元信息。
+ * - `facts` 非空 → 只补运行两表（M1 存量）：没有运行历史且 `runs` 表有行时才动作。
+ *   这条路径**要求调用方随后调用 `ensureProjection()`**（启动顺序：导入 → 对账重建）。
+ * - 没有可导入的行 → 不产事实、不写 `projection_meta`。
+ *
+ * @param db 已打开且建好 schema 的连接（`openDatabase`）
+ * @param kernel 内核端口；首次迁移用到 `project`
+ * @param options 导入时刻（事实 `at`，也是阶段行 / 事件行的 created_at）；默认当前时刻
+ */
+export function importLegacyIfNeeded(
+  db: DatabaseSync,
+  kernel: KernelPort,
+  options: ImportLegacyOptions = {},
+): ImportLegacyResult {
+  if (factsCount(db) === 0) return importEmptyLedger(db, kernel, options)
+  return backfillRuns(db, options)
 }

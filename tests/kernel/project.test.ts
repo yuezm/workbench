@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type {
   Agent,
+  Conversation,
+  Message,
+  RunEventRow,
+  RunRow,
   Runtime,
   RuntimeProbe,
   Task,
@@ -85,6 +89,78 @@ const task = (over: Partial<Task> = {}): Task => ({
   ...over,
 })
 
+const run = (over: Partial<RunRow> = {}): RunRow => ({
+  id: 'run-1',
+  purpose: 'stage',
+  taskId: 't-1',
+  stageId: 'st-1',
+  agentId: 'ag-1',
+  runtimeId: 'rt-1',
+  status: 'queued',
+  ruleId: null,
+  rulesVersion: 0,
+  executorKey: 'dsh',
+  threadId: null,
+  cwd: 'D:/work',
+  access: 'edit',
+  skill: null,
+  promptRef: null,
+  eventIds: [],
+  hops: 0,
+  turn: 1,
+  resumeSessionId: null,
+  threadContextRef: null,
+  queueSeq: 0,
+  prompt: '做点什么',
+  output: '',
+  error: null,
+  errorCode: null,
+  exitCode: null,
+  sessionId: null,
+  usage: null,
+  durationMs: null,
+  startedAt: null,
+  endedAt: null,
+  createdAt: AT,
+  conversationId: null,
+  leaseId: null,
+  attempt: 0,
+  attempts: 0,
+  leaseUntil: null,
+  notBefore: null,
+  deadlineAt: null,
+  cancelRequested: false,
+  ...over,
+})
+
+const runEvent = (over: Partial<RunEventRow> = {}): RunEventRow => ({
+  runId: 'run-1',
+  seq: 1,
+  type: 'text',
+  text: 'hi',
+  ...over,
+})
+
+const conversation = (over: Partial<Conversation> = {}): Conversation => ({
+  id: 'cv-1',
+  title: '新对话',
+  agentId: 'ag-1',
+  sessionId: null,
+  createdAt: AT,
+  updatedAt: AT,
+  ...over,
+})
+
+const message = (over: Partial<Message> = {}): Message => ({
+  id: 'ms-1',
+  conversationId: 'cv-1',
+  role: 'user',
+  content: '你好',
+  error: null,
+  createdAt: AT,
+  ...over,
+})
+
 const fact = <T extends FactType>(
   seq: number,
   type: T,
@@ -92,9 +168,16 @@ const fact = <T extends FactType>(
   cause?: number,
 ): Fact<T> => ({ seq, type, actor: ACTOR, at: AT, payload, cause })
 
-const put = (table: ProjectionTable, row: ProjectionRow): Change => ({
+const put = (table: ProjectionTable, row: ProjectionRow & { id: Id }): Change => ({
   table,
   key: row.id,
+  row,
+})
+
+/** 显式键的 upsert（`run_events` 行没有 `id`）。 */
+const putKeyed = (table: ProjectionTable, key: Id, row: ProjectionRow): Change => ({
+  table,
+  key,
   row,
 })
 
@@ -108,6 +191,10 @@ const emptyTables = (): Tables => ({
   workflow_stages: new Map(),
   agents: new Map(),
   runtimes: new Map(),
+  runs: new Map(),
+  run_events: new Map(),
+  conversations: new Map(),
+  messages: new Map(),
 })
 
 /** 按 seq 顺序 fold 事实：投影应用器的最小等价实现（重建与实时写入共用路径）。 */
@@ -292,5 +379,215 @@ describe('kernel/project', () => {
 
     expect(tables.tasks.size).toBe(1)
     expect(tables.tasks.get('t-1')).toEqual(task({ title: '重建' }))
+  })
+})
+
+describe('kernel/project：运行事实', () => {
+  it('run.queued：整行 upsert，queueSeq 用事实 seq 回填', () => {
+    const row = run({ queueSeq: 0 })
+
+    expect(project(fact(30, 'run.queued', { run: row }))).toEqual([
+      put('runs', run({ queueSeq: 30 })),
+    ])
+  })
+
+  it('其余 run 状态事实：payload.run 整行 upsert（不需要合并旧行）', () => {
+    const claimed = run({
+      status: 'running',
+      leaseId: 'run-1:1',
+      attempt: 1,
+      leaseUntil: '2026-11-04T12:02:00.000Z',
+      deadlineAt: '2026-11-04T12:30:00.000Z',
+      startedAt: AT,
+    })
+    expect(project(fact(31, 'run.claimed', { run: claimed }))).toEqual([put('runs', claimed)])
+
+    const extended = { ...claimed, leaseUntil: '2026-11-04T12:04:00.000Z' }
+    expect(project(fact(32, 'run.lease_extended', { run: extended }))).toEqual([
+      put('runs', extended),
+    ])
+
+    const waiting = run({ status: 'waiting', turn: 2, leaseId: null, leaseUntil: null })
+    expect(project(fact(33, 'run.waiting', { run: waiting, cardIds: ['card-1'] }))).toEqual([
+      put('runs', waiting),
+    ])
+
+    const abandoned = run({
+      status: 'queued',
+      attempts: 1,
+      notBefore: '2026-11-04T12:10:00.000Z',
+    })
+    expect(project(fact(34, 'run.abandoned', { run: abandoned }))).toEqual([put('runs', abandoned)])
+
+    const usage = {
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheReadTokens: 1,
+      cacheWriteTokens: 2,
+    }
+    const running = run({ status: 'running', usage })
+    expect(project(fact(35, 'run.usage', { run: running }))).toEqual([put('runs', running)])
+
+    const cancelled = run({ status: 'cancelled', cancelRequested: true, endedAt: AT })
+    expect(project(fact(36, 'run.cancel_requested', { run: cancelled, by: 'owner' }))).toEqual([
+      put('runs', cancelled),
+    ])
+    expect(project(fact(37, 'run.cancelled', { run: cancelled }))).toEqual([put('runs', cancelled)])
+
+    const failed = run({
+      status: 'failed',
+      error: '超时',
+      errorCode: 'timeout',
+      endedAt: AT,
+    })
+    expect(project(fact(38, 'run.failed', { run: failed }))).toEqual([put('runs', failed)])
+
+    const succeeded = run({ status: 'succeeded', output: '完成', endedAt: AT })
+    expect(project(fact(39, 'run.succeeded', { run: succeeded }))).toEqual([put('runs', succeeded)])
+  })
+
+  it('run.frames：逐帧追加，Change.key = <runId>:<seq>', () => {
+    const frames = [
+      runEvent({ seq: 1, type: 'status', status: 'running' }),
+      runEvent({ seq: 2, type: 'text', text: 'ok' }),
+      runEvent({ runId: 'run-2', seq: 1, type: 'text', text: '另一 run' }),
+    ]
+
+    expect(project(fact(40, 'run.frames', { runId: 'run-1', turn: 1, frames }))).toEqual([
+      putKeyed('run_events', 'run-1:1', frames[0]),
+      putKeyed('run_events', 'run-1:2', frames[1]),
+      putKeyed('run_events', 'run-2:1', frames[2]),
+    ])
+  })
+
+  it('run.receipt_rejected 只审计、无投影变更', () => {
+    expect(
+      project(
+        fact(41, 'run.receipt_rejected', {
+          runId: 'run-1',
+          leaseId: 'run-1:1',
+          turn: 2,
+          reason: 'stale_lease',
+        }),
+      ),
+    ).toEqual([])
+  })
+
+  it('run.removed 只删 runs 行；run_events 由宿主按 run_id 联删', () => {
+    expect(project(fact(42, 'run.removed', { runId: 'run-1' }))).toEqual([unset('runs', 'run-1')])
+  })
+})
+
+describe('kernel/project：对话与消息', () => {
+  it('conversation.created / updated：整行 upsert', () => {
+    expect(project(fact(50, 'conversation.created', { conversation: conversation() }))).toEqual([
+      put('conversations', conversation()),
+    ])
+    expect(
+      project(
+        fact(51, 'conversation.updated', {
+          conversation: conversation({ title: '改名', sessionId: 's-1', updatedAt: AT }),
+        }),
+      ),
+    ).toEqual([
+      put('conversations', conversation({ title: '改名', sessionId: 's-1', updatedAt: AT })),
+    ])
+  })
+
+  it('conversation.removed：只删 conversations 行；messages 由宿主按 conversation_id 联删', () => {
+    expect(project(fact(52, 'conversation.removed', { conversation: conversation() }))).toEqual([
+      unset('conversations', 'cv-1'),
+    ])
+  })
+
+  it('message.appended：createdAt 取事实 at，error 缺省为 null', () => {
+    expect(
+      project(
+        fact(53, 'message.appended', {
+          conversationId: 'cv-1',
+          messageId: 'ms-1',
+          role: 'user',
+          content: '你好',
+        }),
+      ),
+    ).toEqual([put('messages', message())])
+
+    expect(
+      project(
+        fact(54, 'message.appended', {
+          conversationId: 'cv-1',
+          messageId: 'ms-2',
+          role: 'assistant',
+          content: '',
+          runId: 'run-1',
+          error: '超时',
+        }),
+      ),
+    ).toEqual([
+      put('messages', message({ id: 'ms-2', role: 'assistant', content: '', error: '超时' })),
+    ])
+  })
+})
+
+describe('kernel/project：四张新表的 snapshot.imported', () => {
+  it('runs 按行 upsert（queueSeq 缺省由宿主补）', () => {
+    expect(
+      project(
+        fact(60, 'snapshot.imported', {
+          table: 'runs',
+          rows: [run({ queueSeq: 0 }), run({ id: 'run-2' })],
+          importedFrom: 'v2',
+        }),
+      ),
+    ).toEqual([put('runs', run({ queueSeq: 0 })), put('runs', run({ id: 'run-2' }))])
+  })
+
+  it('run_events 按 (runId,seq) 拼 key', () => {
+    expect(
+      project(
+        fact(61, 'snapshot.imported', {
+          table: 'run_events',
+          rows: [
+            runEvent({ seq: 1 }),
+            runEvent({ runId: 'run-2', seq: 1, type: 'status', status: 'running' }),
+          ],
+          importedFrom: 'v2',
+        }),
+      ),
+    ).toEqual([
+      putKeyed('run_events', 'run-1:1', runEvent({ seq: 1 })),
+      putKeyed(
+        'run_events',
+        'run-2:1',
+        runEvent({ runId: 'run-2', seq: 1, type: 'status', status: 'running' }),
+      ),
+    ])
+  })
+
+  it('conversations / messages 按 id upsert', () => {
+    expect(
+      project(
+        fact(62, 'snapshot.imported', {
+          table: 'conversations',
+          rows: [conversation(), conversation({ id: 'cv-2' })],
+          importedFrom: 'v2',
+        }),
+      ),
+    ).toEqual([
+      put('conversations', conversation()),
+      put('conversations', conversation({ id: 'cv-2' })),
+    ])
+    expect(
+      project(
+        fact(63, 'snapshot.imported', {
+          table: 'messages',
+          rows: [message(), message({ id: 'ms-2', role: 'assistant' })],
+          importedFrom: 'v2',
+        }),
+      ),
+    ).toEqual([
+      put('messages', message()),
+      put('messages', message({ id: 'ms-2', role: 'assistant' })),
+    ])
   })
 })

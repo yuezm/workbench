@@ -7,7 +7,8 @@ import type {
   WorkflowInput,
 } from '../../src/protocol/entities'
 import { ENTITY_TABLES } from '../../src/protocol/entities'
-import type { ProjectionTable } from '../../src/kernel/types'
+import { HOST_INPUT_NAMES, type Input } from '../../src/protocol/inputs'
+import { PROJECTION_TABLES, type ProjectionTable } from '../../src/kernel/types'
 import { viewSpec } from '../../src/kernel/view-spec'
 
 const workflowInput: WorkflowInput = {
@@ -24,7 +25,7 @@ const runtimeInput: RuntimeInput = { name: '本机 dsh' }
 
 const taskInput: TaskInput = { title: '任务', workflowId: 'wf-1' }
 
-const samples: Command[] = [
+const commandSamples: Command[] = [
   { commandId: 'c1', type: 'workflow.create', input: workflowInput },
   { commandId: 'c2', type: 'workflow.update', id: 'wf-1', input: workflowInput },
   { commandId: 'c3', type: 'workflow.remove', id: 'wf-1' },
@@ -56,7 +57,26 @@ const samples: Command[] = [
   { commandId: 'c14', type: 'task.remove', id: 't-1' },
 ]
 
-const expected: Record<Command['type'], ProjectionTable[]> = {
+const hostSamples: Input[] = [
+  { type: 'run.claim', runtimeId: 'rt-1', capacity: 2 },
+  { type: 'run.heartbeat', runId: 'run-1', leaseId: 'run-1:1' },
+  {
+    type: 'run.receipt',
+    runId: 'run-1',
+    receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1 },
+  },
+  { type: 'run.host_settled', runId: 'run-1', status: 'cancelled', errorCode: 'cancelled' },
+  { type: 'run.cancel', runId: 'run-1' },
+  { type: 'clock.tick' },
+  { type: 'conversation.create', agentId: 'ag-1' },
+  { type: 'conversation.send', conversationId: 'cv-1', content: '你好' },
+  { type: 'conversation.rename', conversationId: 'cv-1', title: '新标题' },
+  { type: 'conversation.remove', conversationId: 'cv-1' },
+]
+
+const samples: Input[] = [...commandSamples, ...hostSamples]
+
+const expected: Record<Input['type'], ProjectionTable[]> = {
   'workflow.create': ['agents'],
   'workflow.update': ['workflows', 'workflow_stages', 'agents', 'tasks'],
   'workflow.remove': ['workflows', 'workflow_stages', 'tasks'],
@@ -71,40 +91,67 @@ const expected: Record<Command['type'], ProjectionTable[]> = {
   'task.move': ['tasks', 'workflows', 'workflow_stages'],
   'task.complete': ['tasks', 'workflows', 'workflow_stages'],
   'task.remove': ['tasks'],
+  'run.claim': ['runs', 'runtimes'],
+  'run.heartbeat': ['runs'],
+  'run.receipt': ['runs', 'tasks', 'workflows', 'workflow_stages'],
+  'run.host_settled': ['runs'],
+  'run.cancel': ['runs'],
+  'clock.tick': ['runs'],
+  'conversation.create': ['agents'],
+  'conversation.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
+  'conversation.rename': ['conversations'],
+  'conversation.remove': ['conversations', 'messages'],
 }
 
-const byType = new Map(samples.map((command) => [command.type, command]))
+const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖全部 14 条 M1 命令，并返回各自的投影切片', () => {
+  it('覆盖 14 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
     expect(COMMAND_NAMES.length).toBe(14)
-    expect(samples.length).toBe(COMMAND_NAMES.length)
+    expect(HOST_INPUT_NAMES.length).toBe(10)
+    expect(commandSamples.length).toBe(COMMAND_NAMES.length)
+    expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)
+    expect(new Set(samples.map((input) => input.type)).size).toBe(
+      COMMAND_NAMES.length + HOST_INPUT_NAMES.length,
+    )
 
-    for (const name of COMMAND_NAMES) {
-      const command = byType.get(name)
-      expect(command, name).toBeDefined()
-      expect(viewSpec(command as Command), name).toEqual(expected[name])
+    for (const type of [...COMMAND_NAMES, ...HOST_INPUT_NAMES]) {
+      const input = byType.get(type)
+      expect(input, type).toBeDefined()
+      expect(viewSpec(input as Input), type).toEqual(expected[type])
     }
   })
 
-  it('不整库装载：每条命令的切片都小于五张表', () => {
-    for (const command of samples) {
-      expect(viewSpec(command).length, command.type).toBeLessThan(ENTITY_TABLES.length)
+  it('不整库装载：每条输入的切片都小于投影全集', () => {
+    for (const input of samples) {
+      expect(viewSpec(input).length, input.type).toBeLessThan(PROJECTION_TABLES.length)
     }
   })
 
   it('切片只含投影表白名单内的表且不重复', () => {
-    const allowed = new Set<string>(ENTITY_TABLES)
-    for (const command of samples) {
-      const spec = viewSpec(command)
-      expect(new Set(spec).size, command.type).toBe(spec.length)
-      for (const table of spec) expect(allowed.has(table), `${command.type} → ${table}`).toBe(true)
+    const allowed = new Set<string>(PROJECTION_TABLES)
+    for (const input of samples) {
+      const spec = viewSpec(input)
+      expect(new Set(spec).size, input.type).toBe(spec.length)
+      for (const table of spec) expect(allowed.has(table), `${input.type} → ${table}`).toBe(true)
     }
   })
 
+  it('实体表（ENTITY_TABLES）是投影全集的子集', () => {
+    const projection = new Set<string>(PROJECTION_TABLES)
+    for (const table of ENTITY_TABLES) expect(projection.has(table), table).toBe(true)
+  })
+
   it('任务拖拽/完成要判断「执行中」，必须装载 tasks（宿主同时装 activeTaskIds）', () => {
-    expect(viewSpec(byType.get('task.move') as Command)).toContain('tasks')
-    expect(viewSpec(byType.get('task.complete') as Command)).toContain('tasks')
-    expect(viewSpec(byType.get('task.remove') as Command)).toEqual(['tasks'])
+    expect(viewSpec(byType.get('task.move') as Input)).toContain('tasks')
+    expect(viewSpec(byType.get('task.complete') as Input)).toContain('tasks')
+    expect(viewSpec(byType.get('task.remove') as Input)).toEqual(['tasks'])
+  })
+
+  it('运行/对话输入只声明自己需要的切片（领取要运行时配置、回执要阶段流转）', () => {
+    expect(viewSpec(byType.get('run.claim') as Input)).toContain('runtimes')
+    expect(viewSpec(byType.get('run.receipt') as Input)).toContain('workflow_stages')
+    expect(viewSpec(byType.get('conversation.send') as Input)).toContain('conversations')
+    expect(viewSpec(byType.get('clock.tick') as Input)).toEqual(['runs'])
   })
 })

@@ -2,6 +2,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '../../../src/kernel/types'
+import type { RunRow } from '../../../src/protocol/entities'
 import { withTx } from '../../../src/host/schema'
 import { StoreError } from '../../../src/host/store/errors'
 import { createProjectionWriter } from '../../../src/host/store/projection-apply'
@@ -254,7 +255,56 @@ describe('createProjectionWriter：显式行映射', () => {
     expect((unknownRow as StoreError).code).toBe('invalid_input')
   })
 
-  it('clear 只清五张投影表，运行记录原样保留（重建事务关外键）', () => {
+  it('存量 run 行缺 M2 新列：写入时补默认值（导入兼容）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    // 模拟 v2 存量：只有 M1 时代 runs 表的列，M2 新列全缺。
+    const legacyRuntime = {
+      id: 'run-old',
+      taskId: null,
+      stageId: null,
+      agentId: null,
+      runtimeId: null,
+      status: 'succeeded',
+      prompt: '旧提示词',
+      output: '旧输出',
+      error: null,
+      errorCode: null,
+      exitCode: 0,
+      sessionId: null,
+      usage: null,
+      durationMs: 12,
+      startedAt: SAMPLE_AT,
+      endedAt: SAMPLE_AT,
+      createdAt: SAMPLE_AT,
+    } as unknown as RunRow
+
+    writer.apply({ table: 'runs', key: 'run-old', row: legacyRuntime }, SAMPLE_AT)
+
+    expect(
+      db
+        .prepare(
+          `SELECT purpose, rule_id, rules_version, executor_key, cwd, access, event_ids_json,
+                  hops, turn, queue_seq, cancel_requested
+           FROM runs WHERE id = 'run-old'`,
+        )
+        .get(),
+    ).toEqual({
+      purpose: 'stage',
+      rule_id: null,
+      rules_version: 0,
+      executor_key: '',
+      cwd: '',
+      access: 'edit',
+      event_ids_json: '[]',
+      hops: 0,
+      turn: 1,
+      queue_seq: 0,
+      cancel_requested: 0,
+    })
+  })
+
+  it('clear 清空九张投影表（重建事务关外键）', () => {
     const db = memory()
     const writer = createProjectionWriter(db)
     const runtime = sample.runtime()
@@ -262,21 +312,23 @@ describe('createProjectionWriter：显式行映射', () => {
     const workflow = sample.workflow()
     const stage = sample.stage()
     const task = sample.task()
+    const run = sample.run({ status: 'running' })
+    const conversation = sample.conversation()
+    const message = sample.message()
     for (const change of [
       { table: 'runtimes', key: runtime.id, row: runtime },
       { table: 'agents', key: agent.id, row: agent },
       { table: 'workflows', key: workflow.id, row: workflow },
       { table: 'workflow_stages', key: stage.id, row: stage },
       { table: 'tasks', key: task.id, row: task },
+      { table: 'runs', key: run.id, row: run },
+      { table: 'run_events', key: 'run-1:1', row: sample.runEvent() },
+      { table: 'conversations', key: conversation.id, row: conversation },
+      { table: 'messages', key: message.id, row: message },
     ] as Change[]) {
       writer.apply(change, SAMPLE_AT)
     }
-    db.prepare('INSERT INTO runs (id, task_id, status, created_at) VALUES (?, ?, ?, ?)').run(
-      'run-1',
-      'tk-1',
-      'running',
-      SAMPLE_AT,
-    )
+    expect(countRows(db, 'run_events')).toBe(1)
 
     db.exec('PRAGMA foreign_keys = OFF')
     try {
@@ -285,9 +337,18 @@ describe('createProjectionWriter：显式行映射', () => {
       db.exec('PRAGMA foreign_keys = ON')
     }
 
-    for (const table of ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']) {
+    for (const table of [
+      'tasks',
+      'workflows',
+      'workflow_stages',
+      'agents',
+      'runtimes',
+      'runs',
+      'run_events',
+      'conversations',
+      'messages',
+    ]) {
       expect(countRows(db, table)).toBe(0)
     }
-    expect(countRows(db, 'runs')).toBe(1)
   })
 })

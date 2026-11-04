@@ -19,14 +19,14 @@ export const VIEW_IDS = [
 export type ViewId = (typeof VIEW_IDS)[number]
 
 /**
- * 活跃 run 的最小投影：内核只用它判断「该任务是否执行中」。
- * run 全量契约（prompt / usage / 事件流）留在 shared，M2 随生命周期入账再迁入。
+ * 活跃 run 的最小投影：内核用它判断「该任务是否执行中」，看板用它展示进行中的运行。
+ * `waiting` 是挂起等回答的运行（已释放并发位，但仍算执行中，D12）。
  */
 export interface ActiveRun {
   id: string
   taskId: string
   stageId: string | null
-  status: 'queued' | 'running'
+  status: 'queued' | 'running' | 'waiting'
 }
 
 /** 需要参数的视图 → 参数形状；无参数视图不出现在这里。 */

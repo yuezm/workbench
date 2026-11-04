@@ -1,6 +1,17 @@
 /**
- * 投影变更落库：`Change.row` ↔ 五张投影表的 snake_case 列，逐列显式映射
- * （不 `SELECT *`、不猜列名）；五表主键都是 `id`，`row === null` 表示删除。
+ * 投影变更落库：`Change.row` ↔ 九张投影表的 snake_case 列，逐列显式映射
+ * （不 `SELECT *`、不猜列名）。
+ *
+ * - 实体五表 / runs / conversations / messages 的整行：主键 `id`，`row === null` 删除。
+ * - `run_events`：主键 `(run_id, seq)`，`Change.key = '<runId>:<seq>'`；**纯追加**，
+ *   重复键直接撞唯一约束报错（禁止 `INSERT OR REPLACE` 覆盖历史）。
+ *
+ * 级联删除由父键显式完成（事实只携带父 id）：删除 `runs` 行先按 `run_id` 删 `run_events`；
+ * 删除 `conversations` 行先按 `conversation_id` 删 `messages`。重建时同样走这条路径，
+ * 所以「删任务 → `run.removed` → 重建」与旧 SQL 级联的可见结果一致（D13）。
+ *
+ * 运行类事实携带完整 `RunRow`（`kernel/project` 只回填 `queueSeq`）：这里整行 upsert；
+ * `snapshot.imported` 的存量行可能缺 M2 新列，由 `normalizeRun` 补默认值。
  *
  * `workflow_stages.created_at` 不在 `WorkflowStage` 行类型里（契约不含该字段），
  * 首次插入时用事实的 `at` 顶上，更新时保留原值——重建与增量因此得到相同的行。
@@ -14,8 +25,18 @@
  *
  * 语句在 writer 创建时一次性 prepare：重建要 fold 上万条事实，不能每条都重新编译 SQL。
  */
-import type { DatabaseSync } from 'node:sqlite'
-import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../protocol/entities'
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
+import type {
+  Agent,
+  Conversation,
+  Message,
+  RunEventRow,
+  RunRow,
+  Runtime,
+  Task,
+  Workflow,
+  WorkflowStage,
+} from '../../protocol/entities'
 import type { Change, Iso, ProjectionRow, ProjectionTable } from '../../kernel/types'
 import { StoreError } from './errors'
 
@@ -30,12 +51,131 @@ export interface ProjectionWriter {
   /** 整批应用（一次 dispatch / 一次重建的全部变更）：跨行换序在批内合法。 */
   applyAll(writes: readonly ProjectionWrite[]): void
   /**
-   * 清空白名单五表。
+   * 清空白名单九表。
    *
    * 只能在 `PRAGMA foreign_keys = OFF` 的重建事务里调用：`runs.task_id` 是
    * `ON DELETE CASCADE`，外键开启时清 `tasks` 会连带删掉运行记录与 `run_events`。
+   * 顺序按外键依赖倒序（run_events → runs → messages → conversations → tasks → …），
+   * 外键关掉时只是让意图可读。
    */
   clear(): void
+}
+
+/** `RunRow` 字段 → `runs` 列（顺序与 schema DDL 一致；整行 upsert 与快照列清单共用）。 */
+const RUN_FIELDS: ReadonlyArray<readonly [keyof RunRow, string]> = [
+  ['purpose', 'purpose'],
+  ['taskId', 'task_id'],
+  ['stageId', 'stage_id'],
+  ['agentId', 'agent_id'],
+  ['runtimeId', 'runtime_id'],
+  ['conversationId', 'conversation_id'],
+  ['ruleId', 'rule_id'],
+  ['rulesVersion', 'rules_version'],
+  ['executorKey', 'executor_key'],
+  ['threadId', 'thread_id'],
+  ['cwd', 'cwd'],
+  ['access', 'access'],
+  ['skill', 'skill'],
+  ['promptRef', 'prompt_ref'],
+  ['eventIds', 'event_ids_json'],
+  ['hops', 'hops'],
+  ['turn', 'turn'],
+  ['resumeSessionId', 'resume_session_id'],
+  ['threadContextRef', 'thread_context_ref'],
+  ['queueSeq', 'queue_seq'],
+  ['status', 'status'],
+  ['prompt', 'prompt'],
+  ['output', 'output'],
+  ['error', 'error'],
+  ['errorCode', 'error_code'],
+  ['exitCode', 'exit_code'],
+  ['sessionId', 'session_id'],
+  ['usage', 'usage_json'],
+  ['durationMs', 'duration_ms'],
+  ['leaseId', 'lease_id'],
+  ['attempt', 'attempt'],
+  ['attempts', 'attempts'],
+  ['leaseUntil', 'lease_until'],
+  ['notBefore', 'not_before'],
+  ['deadlineAt', 'deadline_at'],
+  ['cancelRequested', 'cancel_requested'],
+  ['startedAt', 'started_at'],
+  ['endedAt', 'ended_at'],
+  ['createdAt', 'created_at'],
+]
+
+/**
+ * 规整 run 行的缺省值：`snapshot.imported` 的存量行可能缺 M2 新列（T2 迁移），
+ * 补默认值后与实时写入得到同一行；`queueSeq` 默认 0 表示「早期导入、无稳定入队序」。
+ */
+const normalizeRun = (run: RunRow): RunRow => ({
+  id: run.id,
+  purpose: run.purpose ?? 'stage',
+  taskId: run.taskId ?? null,
+  stageId: run.stageId ?? null,
+  agentId: run.agentId ?? null,
+  runtimeId: run.runtimeId ?? null,
+  conversationId: run.conversationId ?? null,
+  ruleId: run.ruleId ?? null,
+  rulesVersion: run.rulesVersion ?? 0,
+  executorKey: run.executorKey ?? '',
+  threadId: run.threadId ?? null,
+  cwd: run.cwd ?? '',
+  access: run.access ?? 'edit',
+  skill: run.skill ?? null,
+  promptRef: run.promptRef ?? null,
+  eventIds: run.eventIds ?? [],
+  hops: run.hops ?? 0,
+  turn: run.turn ?? 1,
+  resumeSessionId: run.resumeSessionId ?? null,
+  threadContextRef: run.threadContextRef ?? null,
+  queueSeq: run.queueSeq ?? 0,
+  status: run.status,
+  prompt: run.prompt ?? '',
+  output: run.output ?? '',
+  error: run.error ?? null,
+  errorCode: run.errorCode ?? null,
+  exitCode: run.exitCode ?? null,
+  sessionId: run.sessionId ?? null,
+  usage: run.usage ?? null,
+  durationMs: run.durationMs ?? null,
+  leaseId: run.leaseId ?? null,
+  attempt: run.attempt ?? 0,
+  attempts: run.attempts ?? 0,
+  leaseUntil: run.leaseUntil ?? null,
+  notBefore: run.notBefore ?? null,
+  deadlineAt: run.deadlineAt ?? null,
+  cancelRequested: run.cancelRequested ?? false,
+  startedAt: run.startedAt ?? null,
+  endedAt: run.endedAt ?? null,
+  createdAt: run.createdAt,
+})
+
+/** 行内值 → SQLite 可绑定的值（`usage` / `eventIds` 存 JSON、布尔存 0/1）。 */
+const runValue = (field: keyof RunRow, run: RunRow): SQLInputValue => {
+  switch (field) {
+    case 'usage':
+      return run.usage === null ? null : JSON.stringify(run.usage)
+    case 'eventIds':
+      return JSON.stringify(run.eventIds)
+    case 'cancelRequested':
+      return run.cancelRequested ? 1 : 0
+    default:
+      return run[field] as SQLInputValue
+  }
+}
+
+/**
+ * `run_events.payload_json` 沿用 v2 的存放口径：事件里除 `runId/seq/type`
+ * 之外的字段组成 JSON 对象（旧的 `repository.runEventsList` 按同一口径还原）。
+ */
+const runEventPayload = (event: RunEventRow): string => {
+  const payload: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(event)) {
+    if (key === 'runId' || key === 'seq' || key === 'type' || value === undefined) continue
+    payload[key] = value
+  }
+  return JSON.stringify(payload)
 }
 
 export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
@@ -102,7 +242,41 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          last_probe_json = excluded.last_probe_json,
          created_at = excluded.created_at`,
     ),
+    conversations: db.prepare(
+      `INSERT INTO conversations (id, title, agent_id, session_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         title = excluded.title,
+         agent_id = excluded.agent_id,
+         session_id = excluded.session_id,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at`,
+    ),
+    messages: db.prepare(
+      `INSERT INTO messages (id, conversation_id, role, content, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         conversation_id = excluded.conversation_id,
+         role = excluded.role,
+         content = excluded.content,
+         error = excluded.error,
+         created_at = excluded.created_at`,
+    ),
   }
+
+  const runColumns = RUN_FIELDS.map(([, column]) => column).join(', ')
+  const runPlaceholders = RUN_FIELDS.map(() => '?').join(', ')
+  const runUpdates = RUN_FIELDS.map(([, column]) => `${column} = excluded.${column}`).join(', ')
+  const insertRun = db.prepare(
+    `INSERT INTO runs (id, ${runColumns}) VALUES (?, ${runPlaceholders})
+     ON CONFLICT(id) DO UPDATE SET ${runUpdates}`,
+  )
+
+  /** 运行事件纯追加：重复 `(run_id, seq)` 撞主键报错，不覆盖。 */
+  const insertRunEvent = db.prepare(
+    `INSERT INTO run_events (run_id, seq, type, payload_json, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  )
 
   const deletes = {
     tasks: db.prepare('DELETE FROM tasks WHERE id = ?'),
@@ -110,9 +284,17 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     workflow_stages: db.prepare('DELETE FROM workflow_stages WHERE id = ?'),
     agents: db.prepare('DELETE FROM agents WHERE id = ?'),
     runtimes: db.prepare('DELETE FROM runtimes WHERE id = ?'),
+    runs: db.prepare('DELETE FROM runs WHERE id = ?'),
+    run_events: db.prepare('DELETE FROM run_events WHERE run_id = ?'),
+    conversations: db.prepare('DELETE FROM conversations WHERE id = ?'),
+    messages: db.prepare('DELETE FROM messages WHERE conversation_id = ?'),
   }
 
   const clearAll = {
+    run_events: db.prepare('DELETE FROM run_events'),
+    runs: db.prepare('DELETE FROM runs'),
+    messages: db.prepare('DELETE FROM messages'),
+    conversations: db.prepare('DELETE FROM conversations'),
     tasks: db.prepare('DELETE FROM tasks'),
     workflow_stages: db.prepare('DELETE FROM workflow_stages'),
     workflows: db.prepare('DELETE FROM workflows'),
@@ -190,6 +372,36 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         runtime.createdAt,
       )
     },
+    runs: (row) => {
+      const run = normalizeRun(row as RunRow)
+      insertRun.run(run.id, ...RUN_FIELDS.map(([field]) => runValue(field, run)))
+    },
+    run_events: (row, at) => {
+      const event = row as RunEventRow
+      insertRunEvent.run(event.runId, event.seq, event.type, runEventPayload(event), at)
+    },
+    conversations: (row) => {
+      const conversation = row as Conversation
+      upserts.conversations.run(
+        conversation.id,
+        conversation.title,
+        conversation.agentId,
+        conversation.sessionId,
+        conversation.createdAt,
+        conversation.updatedAt,
+      )
+    },
+    messages: (row) => {
+      const message = row as Message
+      upserts.messages.run(
+        message.id,
+        message.conversationId,
+        message.role,
+        message.content,
+        message.error,
+        message.createdAt,
+      )
+    },
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */
@@ -206,6 +418,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       throw new StoreError('invalid_input', `未知投影表: ${String(change.table)}`)
     }
     if (change.row === null) {
+      // 级联删除由父键显式完成（事实只携带父 id）：run → run_events；conversation → messages。
+      if (change.table === 'runs') deletes.run_events.run(change.key)
+      if (change.table === 'conversations') deletes.messages.run(change.key)
       deletes[change.table].run(change.key)
       return
     }
@@ -226,7 +441,10 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
   const apply = (change: Change, at: Iso): void => applyAll([{ change, at }])
 
   const clear = (): void => {
-    // 顺序按外键依赖倒序（任务 → 阶段 → 工作流 → 智能体 → 运行时）；重建事务关了外键，顺序只为可读。
+    clearAll.run_events.run()
+    clearAll.runs.run()
+    clearAll.messages.run()
+    clearAll.conversations.run()
     clearAll.tasks.run()
     clearAll.workflow_stages.run()
     clearAll.workflows.run()

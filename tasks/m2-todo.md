@@ -289,7 +289,7 @@
 **验收标准：**
 
 - [ ] 生产代码 `INSERT/UPDATE runs`、`run_events` 只出现在 `host/store/projection-apply.ts`
-- [ ] 无 `.skip`、无删断言；旧测试等价覆盖已存在；`stage-machine` 分支 100% 保持
+- [ ] 无跳过用例、无删断言；旧测试等价覆盖已存在；`stage-machine` 分支 100% 保持
 - [ ] 所有新增 `src/**` 文件均被测试 import（改动行覆盖率）
 
 **验证：**
@@ -316,12 +316,19 @@
 
 ## 进度记录（开工后填）
 
-- 分支 / 起点 commit：`________`
-- 检查点通过时间：A `____` / B `____` / C `____` / D `____` / E `____`
+- 分支 / 起点 commit：`refactor/m2-lifecycle`，起点 `20c84b6`；计划文档 `966b850`、SPEC 修订 `b2ccd64`。
+- 检查点通过时间：A `2026-11-05 00:32` / B `____` / C `____` / D `____` / E `____`
+- 检查点 A 证据：`pnpm check` 全绿（81 文件 / 846 用例；改动行 251/254 = 98.82%）；`typecheck`/`lint` 0 error；M1 真实库副本升级后 runs 15 / run_events 98 逐行保留，`importLegacyIfNeeded` 写入 7 张导入根，`rebuild()` 后逐表全等。
 
 ## 实现偏差（执行中确认后写）
 
-1. `________`
+1. **run.\* 状态事实携带完整 `run: RunRow`**（原 T1 的扁平 payload 无法让 `project` 纯函数产出整行、也无法重建）；`RunRow` 由此扩到完整投影行（+23 列，含 `queueSeq`），`run.queued` 的 `queueSeq` 由 `project` 用事实 `seq` 回填。
+2. **新增 T2b（旧库 `runs` 物理升级）**：`CREATE TABLE IF NOT EXISTS` 不补列，M1/v2 旧库首启会失败；在 `openDatabase` 的 `SCHEMA_SQL` 之后、导入之前做一次性重建升级，失败整体回滚。该任务不在原计划内，由 T2 验收发现后补。
+3. **过渡期保留旧 `chat_conversations` / `chat_messages` 表**（T14 删除）：conversations/messages 投影为空；T2 只迁移 `runs`/`run_events`，聊天迁移随 T14。
+4. **`RunStatus` 加 `waiting` 的连带 UI 改动提前到 T4**：`RunLog.tsx` 两处 `Record` 与 `KanbanBoard.hasActiveRun` 必须先改，否则 `typecheck:web` 红。只改状态映射，不动交互。
+5. **`floor-guard` 误伤文档**：计划文档里的 `.skip` 字样被判定 `test-made-easier`，已改写为「跳过用例」。
+6. **领取排序兜底**：`queueSeq` 之外用 `createdAt` + `id` 兜底（存量导入行 `queueSeq=0`）。
+7. **`activeTaskIds` 额外限定 `purpose='stage'` 且 `task_id IS NOT NULL`**：聊天 run 不参与任务「执行中」判定。
 
 ## M2 退出记录（验收后写）
 

@@ -8,7 +8,6 @@
 import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../../src/protocol/entities'
 import type {
   AgentCreateCommand,
-  Command,
   RuntimeCreateCommand,
   RuntimeProbedCommand,
   TaskCreateCommand,
@@ -17,6 +16,7 @@ import type {
   WorkflowCreateCommand,
   WorkflowRemoveCommand,
 } from '../../../src/protocol/commands'
+import type { Input } from '../../../src/protocol/inputs'
 import type { StageInput } from '../../../src/protocol/entities'
 import type {
   Actor,
@@ -211,7 +211,7 @@ export const defaultDecide: KernelPort['decide'] = (view, input, at, env) => {
   }
 }
 
-const upsert = (table: ProjectionTable, row: ProjectionRow): Change[] => [
+const upsert = (table: ProjectionTable, row: ProjectionRow & { id: string }): Change[] => [
   { table, key: row.id, row },
 ]
 
@@ -262,7 +262,7 @@ export interface FakeKernel extends KernelPort {
   /** 每次 `decide` 收到的视图（断言装载切片用）。 */
   readonly views: View[]
   /** 每次 `viewSpec` 的输入。 */
-  readonly viewSpecInputs: Command[]
+  readonly viewSpecInputs: Input[]
   /** 每次 `project` 收到的事实。 */
   readonly projected: Fact[]
 }
@@ -273,7 +273,7 @@ export function createFakeKernel(options: FakeKernelOptions = {}): FakeKernel {
   const projectImpl = options.project ?? defaultProject
   const viewSpecImpl: KernelPort['viewSpec'] = options.viewSpec ?? (() => [...PROJECTION_TABLES])
   const views: View[] = []
-  const viewSpecInputs: Command[] = []
+  const viewSpecInputs: Input[] = []
   const projected: Fact[] = []
   return {
     views,

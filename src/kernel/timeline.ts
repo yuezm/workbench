@@ -4,12 +4,16 @@
  * 纯函数、无 IO；只接受宿主交来的事实序列（未排序也可以，输出总是按 seq 升序）。
  * 迁移导入根 `snapshot.imported` 是基线而不是因果链的一环——它被标成「迁移导入」，
  * 不向上追溯，也不伪造来由。
+ *
+ * 可追溯实体在 M2 扩到运行与对话：`run` 是运行类事实的主体，`conversation` / `message`
+ * 是聊天事实的主体（`message.appended` 同时命中它所属的对话，方便从对话视角看整段历史）。
  */
 import type { FactType, SnapshotImportedPayload } from '../protocol/facts'
 import type { Fact, Id, Seq } from './types'
 
-/** 可追溯的实体范围（M1 投影集五表；run/thread/card 等在 M2 之后补）。 */
-export type TimelineScope = 'task' | 'workflow' | 'stage' | 'agent' | 'runtime'
+/** 可追溯的实体范围（投影九表中的可展示实体）。 */
+export type TimelineScope =
+  'task' | 'workflow' | 'stage' | 'agent' | 'runtime' | 'run' | 'conversation' | 'message'
 
 /** 导入根在时间线上的标注文案。 */
 export const IMPORT_ROOT_LABEL = '迁移导入'
@@ -43,6 +47,17 @@ function importRefs(payload: SnapshotImportedPayload): EntityRef[] {
       return payload.rows.map((row) => ({ scope: 'agent', id: row.id }))
     case 'runtimes':
       return payload.rows.map((row) => ({ scope: 'runtime', id: row.id }))
+    case 'runs':
+      return payload.rows.map((row) => ({ scope: 'run', id: row.id }))
+    case 'run_events':
+      return payload.rows.map((row) => ({ scope: 'run', id: row.runId }))
+    case 'conversations':
+      return payload.rows.map((row) => ({ scope: 'conversation', id: row.id }))
+    case 'messages':
+      return payload.rows.flatMap((row) => [
+        { scope: 'conversation', id: row.conversationId },
+        { scope: 'message', id: row.id },
+      ])
   }
 }
 
@@ -70,6 +85,31 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'task.completed':
     case 'task.removed':
       return [{ scope: 'task', id: fact.payload.task.id }]
+    case 'run.queued':
+    case 'run.claimed':
+    case 'run.lease_extended':
+    case 'run.waiting':
+    case 'run.abandoned':
+    case 'run.succeeded':
+    case 'run.failed':
+    case 'run.cancelled':
+    case 'run.usage':
+    case 'run.cancel_requested':
+      // 运行状态事实携带完整 RunRow；帧 / 审计 / 删除事实只带 runId。
+      return [{ scope: 'run', id: fact.payload.run.id }]
+    case 'run.frames':
+    case 'run.receipt_rejected':
+    case 'run.removed':
+      return [{ scope: 'run', id: fact.payload.runId }]
+    case 'conversation.created':
+    case 'conversation.updated':
+    case 'conversation.removed':
+      return [{ scope: 'conversation', id: fact.payload.conversation.id }]
+    case 'message.appended':
+      return [
+        { scope: 'conversation', id: fact.payload.conversationId },
+        { scope: 'message', id: fact.payload.messageId },
+      ]
     case 'snapshot.imported':
       return importRefs(fact.payload)
   }

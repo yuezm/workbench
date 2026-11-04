@@ -407,8 +407,8 @@ describe('强杀重启：事实已提交、投影落后', () => {
   })
 })
 
-describe('重建边界：白名单外的表', () => {
-  it('runs / run_events / chat_* 重建后原样保留', () => {
+describe('重建边界：运行/聊天四表纳入白名单', () => {
+  it('runs / run_events / conversations / messages 没有事实支撑的行重建后清空', () => {
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
@@ -436,7 +436,9 @@ describe('重建边界：白名单外的表', () => {
       input: { title: '任务', workflowId: workflow.id },
     })
     const task = findTask(store, workflow.id, '任务')
+    const entitiesBefore = dumpProjection(db)
 
+    // 旧写路径直接落库、没有对应事实的运行/聊天行：重建后不应保留。
     db.prepare('INSERT INTO runs (id, task_id, status, created_at) VALUES (?, ?, ?, ?)').run(
       'run-1',
       task.id,
@@ -447,40 +449,20 @@ describe('重建边界：白名单外的表', () => {
       'INSERT INTO run_events (run_id, seq, type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)',
     ).run('run-1', 1, 'status', '{"state":"running"}', AT)
     db.prepare(
-      'INSERT INTO run_events (run_id, seq, type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('run-1', 2, 'text', '{"text":"hi"}', AT)
-    db.prepare(
-      'INSERT INTO chat_conversations (id, title, agent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO conversations (id, title, agent_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
     ).run('cv-1', '对话', agent.id, AT, AT)
     db.prepare(
-      'INSERT INTO chat_messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
+      'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
     ).run('ms-1', 'cv-1', 'user', '你好', AT)
-
-    const runsBefore = db.prepare('SELECT * FROM runs ORDER BY id').all()
-    const eventsBefore = db
-      .prepare(
-        'SELECT run_id, seq, type, payload_json, created_at FROM run_events ORDER BY run_id, seq',
-      )
-      .all()
-    const conversationsBefore = db.prepare('SELECT * FROM chat_conversations ORDER BY id').all()
-    const messagesBefore = db.prepare('SELECT * FROM chat_messages ORDER BY id').all()
-    const incremental = dumpProjection(db)
 
     store.rebuild()
 
-    expect(dumpProjection(db)).toEqual(incremental)
-    expect(db.prepare('SELECT * FROM runs ORDER BY id').all()).toEqual(runsBefore)
-    expect(
-      db
-        .prepare(
-          'SELECT run_id, seq, type, payload_json, created_at FROM run_events ORDER BY run_id, seq',
-        )
-        .all(),
-    ).toEqual(eventsBefore)
-    expect(db.prepare('SELECT * FROM chat_conversations ORDER BY id').all()).toEqual(
-      conversationsBefore,
-    )
-    expect(db.prepare('SELECT * FROM chat_messages ORDER BY id').all()).toEqual(messagesBefore)
+    const rebuilt = dumpProjection(db)
+    expect(rebuilt).toEqual(entitiesBefore)
+    expect(rebuilt.runs).toEqual([])
+    expect(rebuilt.run_events).toEqual([])
+    expect(rebuilt.conversations).toEqual([])
+    expect(rebuilt.messages).toEqual([])
   })
 })
 

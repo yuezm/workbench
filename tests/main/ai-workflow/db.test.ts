@@ -21,13 +21,15 @@ function tableNames(d: DatabaseSync): string[] {
 }
 
 describe('openDb', () => {
-  it('创建全部 11 张表', () => {
+  it('创建全部 13 张表（九张投影 + 两张过渡期 legacy chat + 账本）', () => {
     db = openDb(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
       'chat_conversations',
       'chat_messages',
+      'conversations',
       'facts',
+      'messages',
       'projection_meta',
       'run_events',
       'runs',

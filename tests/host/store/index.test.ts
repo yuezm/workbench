@@ -498,14 +498,18 @@ describe('createStore：依赖注入', () => {
       now: () => SAMPLE_AT,
       newId: sequenceIds('id-1'),
       timezone: 'Asia/Shanghai',
-      limits: { maxStagesPerWorkflow: 3, maxArrayLength: 7 },
+      limits: { ...DEFAULT_LIMITS, maxStagesPerWorkflow: 3, maxArrayLength: 7 },
     })
 
     store.dispatch({ type: 'task.remove', commandId: 'c-1', id: 'tk-1' })
 
     expect(seenAt).toBe(SAMPLE_AT)
     expect(seenEnv?.timezone).toBe('Asia/Shanghai')
-    expect(seenEnv?.limits).toEqual({ maxStagesPerWorkflow: 3, maxArrayLength: 7 })
+    expect(seenEnv?.limits).toEqual({
+      ...DEFAULT_LIMITS,
+      maxStagesPerWorkflow: 3,
+      maxArrayLength: 7,
+    })
     expect(seenEnv?.nextId('task')).toBe('id-1')
   })
 

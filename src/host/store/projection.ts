@@ -4,9 +4,10 @@
  * 触发条件（SPEC-host「存储与单实例」）：`format` 与当前「投影 DDL + 内核版本」算出的
  * 指纹不符，或 `meta.seq` 落后于 `max(facts.seq)`。
  *
- * 重建只清白名单五表，其余表（`runs` / `run_events` / `chat_*`）不动。为了让
- * `DELETE FROM tasks` 不级联删掉运行记录（`runs.task_id ON DELETE CASCADE`），
- * 重建事务外临时关闭外键、结束后在 `finally` 里恢复。
+ * 重建清空白名单九表（实体五表 + runs / run_events / conversations / messages），
+ * 再按 seq 顺序重放全部事实。为了让清 `tasks` 不级联删掉运行记录
+ * （`runs.task_id ON DELETE CASCADE`），重建事务外临时关闭外键、结束后在 `finally`
+ * 里恢复；`run_events` / `messages` 的删除顺序由 writer 的 `clear()` 固定。
  */
 import type { DatabaseSync } from 'node:sqlite'
 import type { KernelPort } from '../../kernel/types'
@@ -49,7 +50,7 @@ const readForeignKeys = (db: DatabaseSync): boolean => {
   return row.foreign_keys === 1
 }
 
-/** 强制重建：清空白名单五表 → 按 seq 顺序 fold `project` → 写回元信息（单事务）。 */
+/** 强制重建：清空白名单九表 → 按 seq 顺序 fold `project` → 写回元信息（单事务）。 */
 export function rebuildProjection(db: DatabaseSync, kernel: KernelPort): void {
   const format = currentProjectionFormat()
   const facts = allFacts(db)

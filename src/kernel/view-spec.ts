@@ -1,16 +1,17 @@
 /**
- * 命令 → 需要装载的投影切片。
+ * 输入 → 需要装载的投影切片。
  *
- * 宿主按这张表装 `View`，内核不查库、也不要求全量装载；M1 先按表粒度切
- * （`ProjectionTable`），M5 需要更细时再收窄到按 id。
+ * 宿主按这张表装 `View`，内核不查库、也不要求全量装载；M2 起输入是
+ * `Command | HostInput`（`protocol/inputs`），命令的切片与 M1 保持一致，
+ * 运行/对话输入只声明自己真正需要的那几张表。
  *
- * 约定：返回 `tasks` 的命令同时要装 `View.activeTaskIds`（宿主按 `runs` 现算的
- * queued/running 任务集合），「执行中」只认它。
+ * 约定：返回 `tasks` 的输入同时要装 `View.activeTaskIds`（宿主按 `runs` 现算的
+ * queued/running/waiting 任务集合），「执行中」只认它。
  */
-import type { Command } from '../protocol/commands'
+import type { Input } from '../protocol/inputs'
 import type { ProjectionTable } from './types'
 
-export function viewSpec(input: Command): ProjectionTable[] {
+export function viewSpec(input: Input): ProjectionTable[] {
   switch (input.type) {
     case 'workflow.create':
       // 阶段绑定的智能体必须存在（旧实现靠外键，M1 由内核校验）
@@ -44,5 +45,31 @@ export function viewSpec(input: Command): ProjectionTable[] {
       return ['tasks', 'workflows', 'workflow_stages']
     case 'task.remove':
       return ['tasks']
+    case 'run.claim':
+      // 候选 run 来自 runs 投影；运行时配置（启用 / 并发上限）来自 runtimes
+      return ['runs', 'runtimes']
+    case 'run.heartbeat':
+      // 只校验租约是否匹配，不改其它表
+      return ['runs']
+    case 'run.receipt':
+      // 终态写 runs；阶段 run 还要判定阶段流转（任务 + 工作流阶段）
+      return ['runs', 'tasks', 'workflows', 'workflow_stages']
+    case 'run.host_settled':
+    case 'run.cancel':
+      return ['runs']
+    case 'clock.tick':
+      // M2 只处理运行到期（租约 / 退避 / 超时）；cron 与卡片超时后续里程碑再补
+      return ['runs']
+    case 'conversation.create':
+      // 对话绑定的智能体必须存在
+      return ['agents']
+    case 'conversation.send':
+      // 同一对话同时只跑一轮（runs）+ 智能体/运行时决定 execution 配置
+      return ['conversations', 'messages', 'runs', 'agents', 'runtimes']
+    case 'conversation.rename':
+      return ['conversations']
+    case 'conversation.remove':
+      // 消息随对话一并删除，删除前要能解释历史
+      return ['conversations', 'messages']
   }
 }

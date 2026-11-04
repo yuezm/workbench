@@ -26,9 +26,11 @@ const DOT_COLORS = ['bg-focus', 'bg-short', 'bg-long', 'bg-focus-deep'] as const
 /** 「已完成」落点：不是阶段，用哨兵值参与高亮判断 */
 const DONE_TARGET = '__done__'
 
-/** 活跃 run：queued/running 才算任务正在执行（失败/完成/取消都不再锁卡片） */
+/** 活跃 run：queued/running/waiting 都算任务正在执行（失败/完成/取消都不再锁卡片） */
 function hasActiveRun(runs: Run[]): boolean {
-  return runs.some((run) => run.status === 'queued' || run.status === 'running')
+  return runs.some(
+    (run) => run.status === 'queued' || run.status === 'running' || run.status === 'waiting',
+  )
 }
 
 /** 订阅 ai-workflow 变更事件；注入的 api 可能没有 onChanged（测试桩） */

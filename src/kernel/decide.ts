@@ -9,8 +9,11 @@
  * 阶段规则只复用 `kernel/workflow/{stage-machine,stage-validation}.ts`：拖拽落点即目标、
  * 打回原地零效果等判定不在这里另写一份。进入阶段的效果（建 run / 等人）由宿主在
  * 提交成功后按新视图执行，`decide` 只产事实。
+ *
+ * M2 起入参放宽为 `protocol/inputs` 的 `Input`（命令 + 宿主内部输入）。T5 只实现
+ * `run.claim` / `run.heartbeat`，其余宿主输入暂以 `reject('unsupported')` 兜底，
+ * 由 T6/T7/T14 逐个补齐；14 条命令的行为与文案不变。
  */
-import type { Command } from '../protocol/commands'
 import type {
   Agent,
   Runtime,
@@ -21,7 +24,9 @@ import type {
   WorkflowWithStages,
 } from '../protocol/entities'
 import type { FactPayload, FactType } from '../protocol/facts'
+import type { Input } from '../protocol/inputs'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, Reason, View } from './types'
+import { claimFacts, heartbeatFacts, pickClaims } from './run'
 import { completeTask, moveTaskToStage } from './workflow/stage-machine'
 import { validateStageSet } from './workflow/stage-validation'
 
@@ -42,6 +47,9 @@ const CONCURRENCY_CAP = 8
 
 /** M1 的命令全部来自 owner（renderer 经宿主派发），事实的 actor 不带来源推导。 */
 const OWNER: Actor = { kind: 'owner', via: 'ui' }
+
+/** 宿主调度器发起的领取 / 续租：actor 标明来源，便于 why 链区分。 */
+const HOST_SCHEDULER: Actor = { kind: 'host', via: 'scheduler' }
 
 const done = (facts: FactDraft[]): Decision => ({ facts })
 
@@ -160,7 +168,7 @@ function hasActiveRun(view: View, workflowId: Id): boolean {
   return false
 }
 
-export function decide(view: View, input: Command, now: Iso, env: Environment): Decision {
+export function decide(view: View, input: Input, now: Iso, env: Environment): Decision {
   const draft = <T extends FactType>(type: T, payload: FactPayload<T>): FactDraft<T> => ({
     type,
     actor: OWNER,
@@ -479,5 +487,37 @@ export function decide(view: View, input: Command, now: Iso, env: Environment): 
       if (!task) return done([])
       return done([draft('task.removed', { task })])
     }
+
+    // ---------- 运行（宿主内部输入） ----------
+    case 'run.claim': {
+      const runtime = view.runtimes.get(input.runtimeId)
+      if (!runtime) return reject('not_found', '运行时不存在: ' + input.runtimeId)
+      if (!runtime.enabled) return reject('conflict', '运行时未启用: ' + input.runtimeId)
+      if (
+        !Number.isInteger(input.capacity) ||
+        input.capacity < CONCURRENCY_FLOOR ||
+        input.capacity > CONCURRENCY_CAP
+      ) {
+        return reject('invalid_input', '领取数量必须是 1–8 的整数')
+      }
+      const claimed = pickClaims(view, runtime, input.capacity, now)
+      return done(claimFacts(claimed, now, env.limits, HOST_SCHEDULER))
+    }
+
+    case 'run.heartbeat': {
+      // 租约不匹配只静默丢弃：心跳由调度器定时发，产 reject 只会变成噪音（D1）
+      return done(heartbeatFacts(view, input.runId, input.leaseId, now, env.limits, HOST_SCHEDULER))
+    }
+
+    // T6/T7/T14 逐个补齐；在补齐前显式拒绝，避免未知输入被静默当成零事实
+    case 'run.receipt':
+    case 'run.host_settled':
+    case 'run.cancel':
+    case 'clock.tick':
+    case 'conversation.create':
+    case 'conversation.send':
+    case 'conversation.rename':
+    case 'conversation.remove':
+      return reject('unsupported', '输入暂未支持: ' + input.type)
   }
 }

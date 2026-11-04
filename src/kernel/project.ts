@@ -1,13 +1,19 @@
 /**
- * 事实 → 投影变更（五张业务表）。
+ * 事实 → 投影变更（实体五表 + runs / run_events / conversations / messages）。
  *
- * 纯函数、无 IO：一行事实映射一行投影——实体类事实 upsert 那一行，删除类事实的
- * payload 行本身就是 tombstone，投影写 `row: null`。`snapshot.imported` 是唯一批量例外，
- * 按 `payload.table` 批量 upsert。
+ * 纯函数、无 IO。实体类事实一行映射一行（payload 行即完整行，删除类事实的行是
+ * tombstone，投影写 `row: null`）；`snapshot.imported` 是批量例外，按 `payload.table`
+ * 批量 upsert。
+ *
+ * 运行类事实与实体事实同口径：**每条状态事实携带完整的 `run: RunRow`**，`project`
+ * 只做「事实 → 行」的搬运（`run.queued` 额外用事实的 `seq` 回填 `queueSeq`，供领取 FIFO
+ * 的稳定序号）。这样重建只靠事实、不需要回查数据库。
+ *
+ * `run_events` 是纯追加：`Change.key = '<runId>:<seq>'`，冲突即报错（禁止覆盖历史）。
+ * 级联删除由宿主按父键完成：`run.removed` 只产 `runs` 删除，`projection-apply` 删行时
+ * 按 `run_id` 联删 `run_events`；`conversation.removed` 同理联删 `messages`。
  *
  * 实时写入与重建共用这一条路径，所以同一事实序列按 seq fold 两次结果必然相同。
- * 删除**不依赖 SQL 级联**：重建时会临时关外键，级联不会发生，级联删除由 `decide`
- * 显式发事实（`workflow.remove` 会逐个产出 stage/task 的 tombstone）。
  */
 import type { FactType, SnapshotImportedPayload } from '../protocol/facts'
 import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from './types'
@@ -18,13 +24,23 @@ import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from './types'
  */
 type AnyFact = { [K in FactType]: Fact<K> }[FactType]
 
-const put = (table: ProjectionTable, row: ProjectionRow): Change => ({
+/** 整行 upsert（主键即 `row.id`）。 */
+const put = (table: ProjectionTable, row: ProjectionRow & { id: Id }): Change => ({
   table,
   key: row.id,
   row,
 })
 
+/** 显式指定投影键的 upsert（`run_events` 的主键是 `(runId, seq)`，行里没有 `id`）。 */
+const putKeyed = (table: ProjectionTable, key: Id, row: ProjectionRow): Change => ({
+  table,
+  key,
+  row,
+})
+
 const remove = (table: ProjectionTable, key: Id): Change => ({ table, key, row: null })
+
+const runEventKey = (runId: Id, seq: number): Id => `${runId}:${seq}`
 
 function importChanges(payload: SnapshotImportedPayload): Change[] {
   switch (payload.table) {
@@ -38,6 +54,15 @@ function importChanges(payload: SnapshotImportedPayload): Change[] {
       return payload.rows.map((row) => put('agents', row))
     case 'runtimes':
       return payload.rows.map((row) => put('runtimes', row))
+    case 'runs':
+      // 存量行可能缺 M2 新列：默认值由宿主 writer 归一（见 `projection-apply`）。
+      return payload.rows.map((row) => put('runs', row))
+    case 'run_events':
+      return payload.rows.map((row) => putKeyed('run_events', runEventKey(row.runId, row.seq), row))
+    case 'conversations':
+      return payload.rows.map((row) => put('conversations', row))
+    case 'messages':
+      return payload.rows.map((row) => put('messages', row))
   }
 }
 
@@ -70,6 +95,49 @@ function changesOf(fact: AnyFact): Change[] {
       return [put('tasks', fact.payload.task)]
     case 'task.removed':
       return [remove('tasks', fact.payload.task.id)]
+    case 'run.queued':
+      // 入队事实是唯一需要回填字段的 run 事实：queueSeq 取事实 seq（领取 FIFO 稳定序号）。
+      return [put('runs', { ...fact.payload.run, queueSeq: fact.seq })]
+    case 'run.claimed':
+    case 'run.lease_extended':
+    case 'run.waiting':
+    case 'run.abandoned':
+    case 'run.succeeded':
+    case 'run.failed':
+    case 'run.cancelled':
+    case 'run.usage':
+    case 'run.cancel_requested':
+      // 完整行演进：状态、租约、终态、用量、取消标记都在 payload.run 里。
+      return [put('runs', fact.payload.run)]
+    case 'run.frames':
+      return fact.payload.frames.map((frame) =>
+        putKeyed('run_events', runEventKey(frame.runId, frame.seq), frame),
+      )
+    case 'run.receipt_rejected':
+      // 审计事实：迟到 / 重复 / 不匹配的回执不覆盖终态。
+      return []
+    case 'run.removed':
+      // 只删 runs：`run_events` 由宿主按 run_id 联删（事实只携带 runId）。
+      return [remove('runs', fact.payload.runId)]
+    case 'conversation.created':
+    case 'conversation.updated':
+      return [put('conversations', fact.payload.conversation)]
+    case 'conversation.removed':
+      // 只删 conversations：`messages` 由宿主按 conversation_id 联删。
+      return [remove('conversations', fact.payload.conversation.id)]
+    case 'message.appended': {
+      const payload = fact.payload
+      return [
+        put('messages', {
+          id: payload.messageId,
+          conversationId: payload.conversationId,
+          role: payload.role,
+          content: payload.content,
+          error: payload.error ?? null,
+          createdAt: fact.at,
+        }),
+      ]
+    }
     case 'snapshot.imported':
       return importChanges(fact.payload)
   }

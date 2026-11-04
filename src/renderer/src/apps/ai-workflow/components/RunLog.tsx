@@ -19,6 +19,7 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 const STATUS_LABEL: Record<RunStatus, string> = {
   queued: '排队中',
   running: '运行中',
+  waiting: '等待回答',
   succeeded: '成功',
   failed: '失败',
   cancelled: '已取消',
@@ -28,6 +29,7 @@ const STATUS_LABEL: Record<RunStatus, string> = {
 const STATUS_TONE: Record<RunStatus, string> = {
   queued: 'text-focus',
   running: 'text-focus',
+  waiting: 'text-long',
   succeeded: 'text-short',
   failed: 'text-red-400',
   cancelled: 'text-ink-faint',
@@ -42,6 +44,7 @@ const ERROR_CODE_LABEL: Record<RunErrorCode, string> = {
   no_result: '没有终态结果',
   runtime_missing: '运行时不存在',
   runtime_disabled: '运行时已停用',
+  executor_lost: '执行器失联',
   run_failed: '执行失败',
 }
 

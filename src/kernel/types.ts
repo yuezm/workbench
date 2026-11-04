@@ -1,34 +1,61 @@
 /**
- * 内核契约（M1 子集）：事实、视图、决策、投影变更。
+ * 内核契约：事实、视图、决策、投影变更。
  *
- * 纯类型 + 一个版本常量；没有 IO / 时钟 / 随机数。宿主负责把 `now`、id 生成器、
+ * 纯类型 + 版本常量；没有 IO / 时钟 / 随机数。宿主负责把 `now`、id 生成器、
  * 视图切片装好再调用 `decide`。
  *
- * 与 SPEC-kernel 的差异（记录在 tasks/m1-plan.md）：
- * - `View` 只含 M1 投影集（五表）+ 活跃任务集合；rules/threads/cards/消息等 M2/M6 再补。
- * - 事实 payload 里的实体行是完整行（含 lastProbe），这样 `project(fact)` 是纯函数：
- *   一行事实 → 一行投影，重建与实时写入走同一条路径。凭据类字段仍不进事实。
+ * M2 起投影集扩到「实体五表 + runs / run_events / conversations / messages」：
+ * `ProjectionTable` 是投影全集，`View` 只装 decide 需要的那几片（`run_events`
+ * 不进 View，事件只在写入 / 重建时经 `project` 落库）。
+ * 事实 payload 里的实体行是完整行（含 lastProbe），这样 `project(fact)` 是纯函数：
+ * 一行事实 → 一行投影，重建与实时写入走同一条路径。凭据类字段仍不进事实。
  */
-import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../protocol/entities'
+import type {
+  Agent,
+  Conversation,
+  Message,
+  RunEventRow,
+  RunRow,
+  Runtime,
+  Task,
+  Workflow,
+  WorkflowStage,
+} from '../protocol/entities'
 import type { FactPayload, FactType } from '../protocol/facts'
-import type { Command } from '../protocol/commands'
+import type { Input } from '../protocol/inputs'
 
 export type Seq = number
 export type Id = string
 export type Iso = string
 
 /** 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。 */
-export const KERNEL_VERSION = 'm1.0.0'
+export const KERNEL_VERSION = 'm2.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
   | { kind: 'host'; via: 'timer' | 'scheduler' | 'reconcile' | 'timeout' | 'cancel' }
   | { kind: 'kernel' }
 
-/** M1 投影集：只有这些表可由事实重建。 */
-export type ProjectionTable = 'tasks' | 'workflows' | 'workflow_stages' | 'agents' | 'runtimes'
+/**
+ * 投影表全集：只有这些表可由事实重建（`host` 的清空白名单与指纹必须与之一致）。
+ * M2 在实体五表之后追加运行生命周期相关的四张表。
+ */
+export const PROJECTION_TABLES = [
+  'tasks',
+  'workflows',
+  'workflow_stages',
+  'agents',
+  'runtimes',
+  'runs',
+  'run_events',
+  'conversations',
+  'messages',
+] as const
 
-export type ProjectionRow = Task | Workflow | WorkflowStage | Agent | Runtime
+export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
+
+export type ProjectionRow =
+  Task | Workflow | WorkflowStage | Agent | Runtime | RunRow | RunEventRow | Conversation | Message
 
 export interface FactDraft<T extends FactType = FactType> {
   type: T
@@ -58,17 +85,50 @@ export interface View {
   agents: Map<Id, Agent>
   runtimes: Map<Id, Runtime>
   tasks: Map<Id, Task>
-  /** 存在 queued/running run 的任务；「执行中」只认它，不由 UI 推导。 */
+  /** M2：运行投影（领取 / 租约 / 终态判定都只读它，不查非投影表） */
+  runs: Map<Id, RunRow>
+  conversations: Map<Id, Conversation>
+  messages: Map<Id, Message>
+  /** 存在 queued/running/waiting run 的任务；「执行中」只认它，不由 UI 推导。 */
   activeTaskIds: Set<Id>
 }
 
+/**
+ * 内核限制：容量 / 租约 / 退避 / 超时 / 帧批次。
+ *
+ * `maxStagesPerWorkflow` 与 `maxArrayLength` 是 M1 留下的边界保护（阶段数量、
+ * 事实 payload 数组长度）；其余取 SPEC-kernel「类型契约」的原值，宿主可注入缩短
+ * （测试用），但语义不变。
+ */
 export interface Limits {
+  /** 工作流阶段数上限（与 `protocol/validate` 的 stages 上限一致） */
   maxStagesPerWorkflow: number
-  /** 事实 payload 里数组字段的上限（重建/装载的边界保护）。 */
+  /** 事实 payload 里数组字段的上限（重建/装载的边界保护） */
   maxArrayLength: number
+  /** 跳数熔断：`hops > maxHops` 只记 `event.dropped` */
+  maxHops: number
+  /** 领取租约时长 */
+  leaseMs: number
+  /** 心跳间隔（小于 leaseMs，留出续租失败的重试窗口） */
+  heartbeatMs: number
+  /** 累计失败次数上限：达到后落 `run.failed{executor_lost}` */
+  maxAttempts: number
+  /** 退避基数：`backoffBaseMs × 2^(attempts-1)` */
+  backoffBaseMs: number
+  /** 退避封顶（1 h） */
+  backoffCapMs: number
+  /** 单次运行超时（30 min），到期由 `clock.tick` 产 `run.failed{timeout}` */
+  runTimeoutMs: number
+  /** 取消宽限：cancel 帧后等待回执的时长 */
+  cancelGraceMs: number
+  /** SIGTERM 之后到 SIGKILL 的时长 */
+  killAfterMs: number
+  /** 单条 `run.frames` 事实的帧数上限，超出分包（不丢弃） */
+  maxFramesPerBatch: number
 }
 
-export type IdKind = 'workflow' | 'stage' | 'agent' | 'runtime' | 'task'
+export type IdKind =
+  'workflow' | 'stage' | 'agent' | 'runtime' | 'task' | 'run' | 'message' | 'conversation'
 
 /** 宿主在边界注入：时区、限制、id 生成器（内核不取随机数）。 */
 export interface Environment {
@@ -85,9 +145,16 @@ export interface Decision {
   reject?: { code: Reason; message: string }
 }
 
-/** 宿主侧内核门面：store 只依赖这三个函数，不直连具体实现。 */
+/**
+ * 宿主侧内核门面：store 只依赖这三个函数，不直连具体实现。
+ *
+ * 参数写成方法签名（而非函数属性）：M2 期间 `decide` 的实现仍只认 `Command`
+ * （`run.*` / `clock.tick` / `conversation.*` 的决策随 T5–T7 补齐），方法签名的
+ * 双变参数检查让现有实现可以先挂上来；契约（入参 `Input`）以这里为准，
+ * 实现补齐后把 `decide` 的入参一起放宽即可，调用方不变。
+ */
 export interface KernelPort {
-  decide: (view: View, input: Command, now: Iso, env: Environment) => Decision
-  project: (fact: Fact) => Change[]
-  viewSpec: (input: Command) => ProjectionTable[]
+  decide(view: View, input: Input, now: Iso, env: Environment): Decision
+  project(fact: Fact): Change[]
+  viewSpec(input: Input): ProjectionTable[]
 }

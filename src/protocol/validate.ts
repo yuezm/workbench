@@ -1,15 +1,27 @@
 /**
- * 命令形状校验：宿主入口在派发前调用，renderer 传入的数据按不可信处理。
+ * 输入形状校验：宿主入口在派发前调用，renderer 传入的数据按不可信处理。
  *
+ * 两个入口：`validateCommand`（命令，M1 起）与 `validateInput`（命令 + 宿主内部输入，M2）。
  * 纯函数、不抛异常：非法输入返回 `{ ok: false, message }`，由宿主转成 IPC 错误码。
  * 只校验形状（必填 / 类型 / 长度上限 / 数组上限 / 枚举 / 数值范围）；
  * 引用是否存在、名称是否唯一、阶段流转是否合法由 `decide` 判断。
  */
 import { COMMAND_NAMES, type Command, type CommandName } from './commands'
-import { ENTRY_MODES, PERMISSION_MODES, PROBE_STATES, PROTOCOL_FAMILIES } from './entities'
+import {
+  ENTRY_MODES,
+  PERMISSION_MODES,
+  PROBE_STATES,
+  PROTOCOL_FAMILIES,
+  RUN_ERROR_CODES,
+  RUN_TERMINAL_STATUSES,
+} from './entities'
+import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
 
 /** 校验通过返回收窄后的命令；失败返回首条错误文案。 */
 export type ValidateResult = { ok: true; command: Command } | { ok: false; message: string }
+
+/** `validateInput` 的结果：命令与宿主内部输入共用。 */
+export type ValidateInputResult = { ok: true; input: Input } | { ok: false; message: string }
 
 /** 字段上限（字符数 / 数量）：超限一律拒收，不截断。 */
 export const COMMAND_LIMITS = {
@@ -30,6 +42,25 @@ export const COMMAND_LIMITS = {
   protocolVersion: 1_000_000,
   stages: 50,
   maxConcurrent: 8,
+  /** 领取容量上限：与运行时并发上限一致（1–8） */
+  claimCapacity: 8,
+  /** 租约 / 会话 / 幂等键等 id 类字符串 */
+  leaseId: 200,
+  sessionId: 200,
+  /** 轮次 / 尝试次数等计数的整型上限（防御性，超限即非法） */
+  turn: 1_000_000,
+  /** 聊天正文上限（与旧 ChatService 的校验一致） */
+  content: 20_000,
+  /** 回执里的数组字段（ask / events / notices / resolves）上限 */
+  receiptItems: 100,
+  /** 选项文案条数上限 */
+  askOptions: 20,
+  /** 事件摘要上限（SPEC-kernel：≤200 字） */
+  summary: 200,
+  /** 时间戳字符串长度上限（ISO 8601 远小于此） */
+  iso: 64,
+  /** token 用量上限（单次运行不会超过） */
+  tokens: 1_000_000_000_000,
 } as const
 
 type Obj = Record<string, unknown>
@@ -264,4 +295,176 @@ export function validateCommand(input: unknown): ValidateResult {
   if (error) return { ok: false, message: error }
 
   return { ok: true, command: command as unknown as Command }
+}
+
+// ---------- 宿主内部输入（M2） ----------
+
+/** 只校验类型、不设上限的字符串：运行输出正文长度不设限（协议帧原样入账）。 */
+const optionalString = (value: unknown, label: string): Check => {
+  if (value === undefined || value === null) return null
+  return typeof value === 'string' ? null : `${label}必须是字符串`
+}
+
+/** 数组字段：类型、条数上限，再逐项校验。 */
+const checkList = (
+  value: unknown,
+  label: string,
+  max: number,
+  item: (entry: unknown, itemLabel: string) => Check,
+): Check => {
+  if (value === undefined || value === null) return null
+  if (!Array.isArray(value)) return `${label} 必须是数组`
+  if (value.length > max) return `${label} 最多 ${max} 项`
+  for (let i = 0; i < value.length; i += 1) {
+    const error = item(value[i], `${label}[${i}]`)
+    if (error) return error
+  }
+  return null
+}
+
+const checkUsage = (value: unknown, label: string): Check => {
+  const usage = asRecord(value)
+  if (!usage) return `${label} 必须是对象`
+  return (
+    integerIn(usage.inputTokens, `${label}.inputTokens`, 0, COMMAND_LIMITS.tokens) ??
+    integerIn(usage.outputTokens, `${label}.outputTokens`, 0, COMMAND_LIMITS.tokens) ??
+    integerIn(usage.cacheReadTokens, `${label}.cacheReadTokens`, 0, COMMAND_LIMITS.tokens) ??
+    integerIn(usage.cacheWriteTokens, `${label}.cacheWriteTokens`, 0, COMMAND_LIMITS.tokens)
+  )
+}
+
+const checkAsk = (value: unknown, label: string): Check => {
+  const ask = asRecord(value)
+  if (!ask) return `${label} 必须是对象`
+  return (
+    required(ask.title, `${label}.title`, COMMAND_LIMITS.title) ??
+    optionalText(ask.text, `${label}.text`, COMMAND_LIMITS.description) ??
+    (Array.isArray(ask.options)
+      ? checkList(ask.options, `${label}.options`, COMMAND_LIMITS.askOptions, (option, at) =>
+          text(option, at, COMMAND_LIMITS.title),
+        )
+      : `${label}.options 必须是数组`) ??
+    optionalText(ask.key, `${label}.key`, COMMAND_LIMITS.id)
+  )
+}
+
+const checkRawEvent = (value: unknown, label: string): Check => {
+  const event = asRecord(value)
+  if (!event) return `${label} 必须是对象`
+  return (
+    required(event.source, `${label}.source`, COMMAND_LIMITS.name) ??
+    required(event.type, `${label}.type`, COMMAND_LIMITS.name) ??
+    required(event.subject, `${label}.subject`, COMMAND_LIMITS.title) ??
+    optionalText(event.summary, `${label}.summary`, COMMAND_LIMITS.summary) ??
+    optionalString(event.detail, `${label}.detail`) ??
+    optionalText(event.link, `${label}.link`, COMMAND_LIMITS.workdir) ??
+    optionalText(event.dedupeKey, `${label}.dedupeKey`, COMMAND_LIMITS.id)
+  )
+}
+
+/** 执行器回执：`leaseId` / `turn` 必填（D15），其余按 SPEC-plugins 逐项校验。 */
+const checkReceipt = (value: unknown): Check => {
+  const receipt = asRecord(value)
+  if (!receipt) return 'receipt 必须是对象'
+  return (
+    requiredEnum(receipt.status, 'receipt.status', RUN_TERMINAL_STATUSES) ??
+    required(receipt.leaseId, 'receipt.leaseId', COMMAND_LIMITS.leaseId) ??
+    integerIn(receipt.turn, 'receipt.turn', 1, COMMAND_LIMITS.turn) ??
+    optionalString(receipt.output, 'receipt.output') ??
+    optionalText(receipt.sessionId, 'receipt.sessionId', COMMAND_LIMITS.sessionId) ??
+    (receipt.usage === undefined || receipt.usage === null
+      ? null
+      : checkUsage(receipt.usage, 'receipt.usage')) ??
+    checkList(receipt.ask, 'receipt.ask', COMMAND_LIMITS.receiptItems, checkAsk) ??
+    checkList(receipt.notices, 'receipt.notices', COMMAND_LIMITS.receiptItems, (notice, at) =>
+      text(notice, at, COMMAND_LIMITS.description),
+    ) ??
+    checkList(receipt.resolves, 'receipt.resolves', COMMAND_LIMITS.receiptItems, (id, at) =>
+      required(id, at, COMMAND_LIMITS.id),
+    ) ??
+    optionalText(receipt.later, 'receipt.later', COMMAND_LIMITS.iso) ??
+    checkList(receipt.events, 'receipt.events', COMMAND_LIMITS.receiptItems, checkRawEvent) ??
+    optionalEnum(receipt.errorCode, 'receipt.errorCode', RUN_ERROR_CODES) ??
+    optionalIntegerIn(receipt.exitCode, 'receipt.exitCode', -1_000_000, 1_000_000) ??
+    optionalIntegerIn(receipt.durationMs, 'receipt.durationMs', 0, COMMAND_LIMITS.elapsedMs) ??
+    optionalBoolean(receipt.resumeRejected, 'receipt.resumeRejected')
+  )
+}
+
+const checkHostPayload = (type: HostInputName, input: Obj): Check => {
+  switch (type) {
+    case 'run.claim':
+      return (
+        requiredId(input.runtimeId, 'runtimeId') ??
+        integerIn(input.capacity, 'capacity', 1, COMMAND_LIMITS.claimCapacity)
+      )
+    case 'run.heartbeat':
+      return (
+        requiredId(input.runId, 'runId') ??
+        required(input.leaseId, 'leaseId', COMMAND_LIMITS.leaseId)
+      )
+    case 'run.receipt':
+      return requiredId(input.runId, 'runId') ?? checkReceipt(input.receipt)
+    case 'run.host_settled':
+      return (
+        requiredId(input.runId, 'runId') ??
+        optionalId(input.leaseId, 'leaseId') ??
+        optionalIntegerIn(input.turn, 'turn', 1, COMMAND_LIMITS.turn) ??
+        requiredEnum(input.status, 'status', RUN_TERMINAL_STATUSES) ??
+        optionalEnum(input.errorCode, 'errorCode', RUN_ERROR_CODES) ??
+        optionalText(input.error, 'error', COMMAND_LIMITS.description) ??
+        optionalString(input.output, 'output') ??
+        optionalText(input.sessionId, 'sessionId', COMMAND_LIMITS.sessionId) ??
+        (input.usage === undefined || input.usage === null
+          ? null
+          : checkUsage(input.usage, 'usage')) ??
+        optionalIntegerIn(input.exitCode, 'exitCode', -1_000_000, 1_000_000) ??
+        optionalIntegerIn(input.durationMs, 'durationMs', 0, COMMAND_LIMITS.elapsedMs)
+      )
+    case 'run.cancel':
+      return requiredId(input.runId, 'runId')
+    case 'clock.tick':
+      return null
+    case 'conversation.create':
+      return (
+        requiredId(input.agentId, 'agentId') ??
+        optionalText(input.title, 'title', COMMAND_LIMITS.title)
+      )
+    case 'conversation.send':
+      return (
+        requiredId(input.conversationId, 'conversationId') ??
+        required(input.content, 'content', COMMAND_LIMITS.content)
+      )
+    case 'conversation.rename':
+      return (
+        requiredId(input.conversationId, 'conversationId') ??
+        required(input.title, 'title', COMMAND_LIMITS.title)
+      )
+    case 'conversation.remove':
+      return requiredId(input.conversationId, 'conversationId')
+  }
+}
+
+/**
+ * 校验一条来自任意边界的输入：命令走 `validateCommand`（行为不变），
+ * 宿主内部输入按各自载荷校验；两者都不是则返回 `invalid_input` 语义的文案。
+ */
+export function validateInput(input: unknown): ValidateInputResult {
+  const record = asRecord(input)
+  if (!record) return { ok: false, message: '输入必须是对象' }
+
+  const rawType = record.type
+  if (typeof rawType === 'string' && (COMMAND_NAMES as readonly string[]).includes(rawType)) {
+    const validated = validateCommand(record)
+    return validated.ok ? { ok: true, input: validated.command } : validated
+  }
+
+  if (typeof rawType !== 'string' || !(HOST_INPUT_NAMES as readonly string[]).includes(rawType)) {
+    return { ok: false, message: `未知输入: ${String(rawType)}` }
+  }
+
+  const error = checkHostPayload(rawType as HostInputName, record)
+  if (error) return { ok: false, message: error }
+
+  return { ok: true, input: record as unknown as Input }
 }

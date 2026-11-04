@@ -12,6 +12,10 @@
 import type {
   Agent,
   AgentInput,
+  Conversation as ChatConversation,
+  Message as ChatMessage,
+  Run,
+  RunEvent,
   Runtime,
   RuntimeInput,
   RuntimeProbe,
@@ -81,101 +85,23 @@ export interface RuntimeModelOption {
   defaultThinkingLevel: string | null
 }
 
-// ---------- 运行 ----------
-
-export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
-
-/** 运行失败归类：UI 按此给出可操作提示 */
-export type RunErrorCode =
-  | 'spawn_failed'
-  | 'exit_nonzero'
-  | 'run_failed'
-  | 'timeout'
-  | 'cancelled'
-  | 'protocol_error'
-  | 'no_result'
-  | 'runtime_missing'
-  | 'runtime_disabled'
-
-export type RunEventType = 'status' | 'text' | 'thinking' | 'tool_call' | 'tool_result'
-
-/** 运行过程中的一条事件（顺序由 seq 保证） */
-export interface RunEvent {
-  seq: number
-  type: RunEventType
-  /** text / thinking 的增量文本 */
-  text?: string
-  /** tool_call / tool_result 的工具名 */
-  tool?: string
-  /** tool_call / tool_result 的调用 id */
-  callId?: string
-  /** tool_call 的参数（JSON 字符串） */
-  input?: string
-  /** tool_result 的输出 */
-  output?: string
-  /** tool_result 是否失败 */
-  isError?: boolean
-  /** status 事件的阶段文案（如 running） */
-  status?: string
-}
-
-/** 一次运行的 token 用量（按协议帧累加） */
-export interface RunUsage {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens: number
-  cacheWriteTokens: number
-}
-
-export interface Run {
-  id: string
-  taskId: string
-  stageId: string | null
-  agentId: string | null
-  /** 执行该 run 的运行时（运行时被删后置空） */
-  runtimeId: string | null
-  status: RunStatus
-  prompt: string
-  /** 最终文本输出（事件流的 text 汇总） */
-  output: string
-  error: string | null
-  errorCode: RunErrorCode | null
-  /** CLI 进程退出码；未能启动或超时后强杀为 null */
-  exitCode: number | null
-  /** 协议会话 id（可用于续接） */
-  sessionId: string | null
-  usage: RunUsage | null
-  /** 执行耗时（毫秒） */
-  durationMs: number | null
-  startedAt: string | null
-  endedAt: string | null
-  createdAt: string
-}
-
-// ---------- 聊天 ----------
-
-export type ChatRole = 'user' | 'assistant'
-
-/** 一段独立对话：绑定一个智能体，与工作流/任务无关 */
-export interface ChatConversation {
-  id: string
-  title: string
-  agentId: string
-  /** 上一轮的协议会话 id；下一轮用它续接，避免整段历史重发 */
-  sessionId: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ChatMessage {
-  id: string
-  conversationId: string
-  role: ChatRole
-  content: string
-  /** 该条助手消息的失败原因（非零退出 / 超时 / 取消）；成功与用户消息为 null */
-  error: string | null
-  createdAt: string
-}
+// ---------- 运行 / 对话 ----------
+// 契约搬到了 protocol/entities（kernel 与本层共用一份）：这里只 re-export，
+// 旧的导出名（`Run` / `RunEvent` / `RunStatus` / `ChatConversation` / `ChatMessage`）
+// 与字段逐一对应，IPC 形状不变；`waiting` 与 `executor_lost` 是 M2 新增的取值，
+// 只增不改（旧值语义不变）。
+export type {
+  ChatRole,
+  Conversation as ChatConversation,
+  Message as ChatMessage,
+  Run,
+  RunErrorCode,
+  RunEvent,
+  RunEventType,
+  RunPurpose,
+  RunStatus,
+  RunUsage,
+} from '../protocol/entities'
 
 /** 聊天流事件：本轮执行的增量事件与结束通知（结束时结果已落库） */
 export interface ChatStreamEvent {

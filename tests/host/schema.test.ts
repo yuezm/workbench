@@ -184,13 +184,15 @@ describe('五张投影表与改前 DDL 一致', () => {
     }
   })
 
-  it('SCHEMA_SQL 仍只建改前那 9 张表（账本表由 FACTS_SQL 单独建）', () => {
+  it('SCHEMA_SQL 建 11 张表：九张投影 + 两张过渡期 legacy 聊天表', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
       'agents',
       'chat_conversations',
       'chat_messages',
+      'conversations',
+      'messages',
       'run_events',
       'runs',
       'runtimes',
@@ -198,6 +200,13 @@ describe('五张投影表与改前 DDL 一致', () => {
       'workflow_stages',
       'workflows',
     ])
+  })
+
+  it('legacy 聊天表不进投影白名单 / 指纹（T14 前旧写路径的过渡表）', () => {
+    expect(PROJECTION_TABLES).not.toContain('chat_conversations')
+    expect(PROJECTION_TABLES).not.toContain('chat_messages')
+    expect(PROJECTION_DDL).not.toContain('chat_conversations')
+    expect(PROJECTION_DDL).not.toContain('chat_messages')
   })
 })
 
@@ -295,13 +304,17 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为五张投影表', () => {
+  it('白名单固定为九张投影表（实体五表 + 运行/聊天四表）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
       'workflow_stages',
       'agents',
       'runtimes',
+      'runs',
+      'run_events',
+      'conversations',
+      'messages',
     ])
   })
 
@@ -314,7 +327,7 @@ describe('投影白名单与指纹', () => {
     expect(PROJECTION_DDL).not.toContain('facts')
   })
 
-  it('指纹 = sha256(五表 DDL + 内核版本)', () => {
+  it('指纹 = sha256(九表 DDL + 内核版本)', () => {
     const expected = createHash('sha256').update(`${PROJECTION_DDL}\nkernel-1`).digest('hex')
     expect(projectionFormat('kernel-1')).toBe(expected)
     expect(projectionFormat('kernel-1')).toMatch(/^[0-9a-f]{64}$/)

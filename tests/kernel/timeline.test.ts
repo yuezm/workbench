@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../src/protocol/entities'
+import type {
+  Agent,
+  Conversation,
+  RunRow,
+  Runtime,
+  Task,
+  Workflow,
+  WorkflowStage,
+} from '../../src/protocol/entities'
 import type { FactPayload, FactType } from '../../src/protocol/facts'
 import { IMPORT_ROOT_LABEL, timeline } from '../../src/kernel/timeline'
 import type { Fact } from '../../src/kernel/types'
@@ -61,6 +69,60 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   currentStageId: 'st-1',
   status: 'active',
+  createdAt: AT,
+  updatedAt: AT,
+  ...over,
+})
+
+const run = (over: Partial<RunRow> = {}): RunRow => ({
+  id: 'run-1',
+  purpose: 'stage',
+  taskId: 't-1',
+  stageId: 'st-1',
+  agentId: 'ag-1',
+  runtimeId: 'rt-1',
+  status: 'queued',
+  ruleId: null,
+  rulesVersion: 0,
+  executorKey: 'dsh',
+  threadId: null,
+  cwd: 'D:/work',
+  access: 'edit',
+  skill: null,
+  promptRef: null,
+  eventIds: [],
+  hops: 0,
+  turn: 1,
+  resumeSessionId: null,
+  threadContextRef: null,
+  queueSeq: 1,
+  prompt: '做点什么',
+  output: '',
+  error: null,
+  errorCode: null,
+  exitCode: null,
+  sessionId: null,
+  usage: null,
+  durationMs: null,
+  startedAt: null,
+  endedAt: null,
+  createdAt: AT,
+  conversationId: null,
+  leaseId: null,
+  attempt: 0,
+  attempts: 0,
+  leaseUntil: null,
+  notBefore: null,
+  deadlineAt: null,
+  cancelRequested: false,
+  ...over,
+})
+
+const conversation = (over: Partial<Conversation> = {}): Conversation => ({
+  id: 'cv-1',
+  title: '新对话',
+  agentId: 'ag-1',
+  sessionId: null,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -246,5 +308,97 @@ describe('kernel/timeline', () => {
       '2:task.moved',
       '3:task.completed',
     ])
+  })
+
+  it('运行时间线：状态事实按 payload.run.id 命中，帧/审计/删除按 runId 命中', () => {
+    const frames = [{ runId: 'run-1', seq: 1, type: 'text' as const, text: 'hi' }]
+    const facts: Fact[] = [
+      fact(1, 'run.queued', { run: run() }),
+      fact(2, 'run.claimed', { run: run({ status: 'running', leaseId: 'run-1:1' }) }),
+      fact(3, 'run.frames', { runId: 'run-1', turn: 1, frames }),
+      fact(4, 'run.receipt_rejected', {
+        runId: 'run-1',
+        leaseId: 'run-1:0',
+        turn: 1,
+        reason: 'stale_lease',
+      }),
+      fact(5, 'run.removed', { runId: 'run-1' }),
+      fact(6, 'run.queued', { run: run({ id: 'run-2' }) }),
+    ]
+
+    expect(kinds(timeline(facts, 'run', 'run-1'))).toEqual([
+      '1:run.queued',
+      '2:run.claimed',
+      '3:run.frames',
+      '4:run.receipt_rejected',
+      '5:run.removed',
+    ])
+    expect(kinds(timeline(facts, 'run', 'run-2'))).toEqual(['6:run.queued'])
+  })
+
+  it('对话时间线：消息同时归到所属对话；消息自身范围只命中 message.appended', () => {
+    const facts: Fact[] = [
+      fact(1, 'conversation.created', { conversation: conversation() }),
+      fact(2, 'message.appended', {
+        conversationId: 'cv-1',
+        messageId: 'ms-1',
+        role: 'user',
+        content: '你好',
+      }),
+      fact(3, 'conversation.updated', {
+        conversation: conversation({ title: '改名' }),
+      }),
+      fact(4, 'message.appended', {
+        conversationId: 'cv-2',
+        messageId: 'ms-2',
+        role: 'user',
+        content: '别的对话',
+      }),
+    ]
+
+    expect(kinds(timeline(facts, 'conversation', 'cv-1'))).toEqual([
+      '1:conversation.created',
+      '2:message.appended',
+      '3:conversation.updated',
+    ])
+    expect(kinds(timeline(facts, 'message', 'ms-1'))).toEqual(['2:message.appended'])
+    expect(kinds(timeline(facts, 'conversation', 'cv-2'))).toEqual(['4:message.appended'])
+  })
+
+  it('运行/对话四表导入根落到对应实体范围', () => {
+    const facts: Fact[] = [
+      imported(1, { table: 'runs', rows: [run()], importedFrom: 'v2' }),
+      imported(2, {
+        table: 'run_events',
+        rows: [{ runId: 'run-1', seq: 1, type: 'text', text: 'hi' }],
+        importedFrom: 'v2',
+      }),
+      imported(3, { table: 'conversations', rows: [conversation()], importedFrom: 'v2' }),
+      imported(4, {
+        table: 'messages',
+        rows: [
+          {
+            id: 'ms-1',
+            conversationId: 'cv-1',
+            role: 'user',
+            content: '你好',
+            error: null,
+            createdAt: AT,
+          },
+        ],
+        importedFrom: 'v2',
+      }),
+    ]
+
+    expect(kinds(timeline(facts, 'run', 'run-1'))).toEqual([
+      '1:snapshot.imported',
+      '2:snapshot.imported',
+    ])
+    expect(kinds(timeline(facts, 'conversation', 'cv-1'))).toEqual([
+      '3:snapshot.imported',
+      '4:snapshot.imported',
+    ])
+    expect(kinds(timeline(facts, 'message', 'ms-1'))).toEqual(['4:snapshot.imported'])
+    expect(timeline(facts, 'run', 'run-404')).toEqual([])
   })
 })

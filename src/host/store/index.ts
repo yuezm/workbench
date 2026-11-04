@@ -37,8 +37,24 @@ import { loadView, queryView } from './views'
 export { StoreError } from './errors'
 export type { StoreErrorCode } from './errors'
 
-/** M1 默认限制：阶段上限与 `protocol/validate` 一致；数组上限取迁移/帧批次量级。 */
-export const DEFAULT_LIMITS: Limits = { maxStagesPerWorkflow: 50, maxArrayLength: 500 }
+/**
+ * 默认限制：M1 的两项（阶段上限与 `protocol/validate` 一致、数组上限取迁移/帧批次量级）
+ * + M2 的调度口径（SPEC-kernel「类型契约」原值；测试可注入缩短，语义不变）。
+ */
+export const DEFAULT_LIMITS: Limits = {
+  maxStagesPerWorkflow: 50,
+  maxArrayLength: 500,
+  maxHops: 8,
+  leaseMs: 120_000,
+  heartbeatMs: 30_000,
+  maxAttempts: 3,
+  backoffBaseMs: 300_000,
+  backoffCapMs: 3_600_000,
+  runTimeoutMs: 1_800_000,
+  cancelGraceMs: 3_000,
+  killAfterMs: 2_000,
+  maxFramesPerBatch: 500,
+}
 
 export interface StoreOptions {
   db: DatabaseSync

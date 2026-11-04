@@ -65,6 +65,12 @@ const hostSamples: Input[] = [
     runId: 'run-1',
     receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1 },
   },
+  {
+    type: 'run.frames',
+    runId: 'run-1',
+    turn: 1,
+    frames: [{ runId: 'run-1', seq: 1, type: 'text', text: 'hi' }],
+  },
   { type: 'run.host_settled', runId: 'run-1', status: 'cancelled', errorCode: 'cancelled' },
   { type: 'run.cancel', runId: 'run-1' },
   { type: 'clock.tick' },
@@ -87,13 +93,14 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'runtime.update': ['runtimes'],
   'runtime.remove': ['runtimes', 'agents'],
   'runtime.probed': ['runtimes'],
-  'task.create': ['workflows', 'workflow_stages'],
-  'task.move': ['tasks', 'workflows', 'workflow_stages'],
-  'task.complete': ['tasks', 'workflows', 'workflow_stages'],
+  'task.create': ['workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'task.move': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'task.complete': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
   'task.remove': ['tasks'],
   'run.claim': ['runs', 'runtimes'],
   'run.heartbeat': ['runs'],
-  'run.receipt': ['runs', 'tasks', 'workflows', 'workflow_stages'],
+  'run.receipt': ['runs', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'run.frames': ['runs'],
   'run.host_settled': ['runs'],
   'run.cancel': ['runs'],
   'clock.tick': ['runs'],
@@ -108,7 +115,7 @@ const byType = new Map(samples.map((input) => [input.type, input]))
 describe('kernel/view-spec', () => {
   it('覆盖 14 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
     expect(COMMAND_NAMES.length).toBe(14)
-    expect(HOST_INPUT_NAMES.length).toBe(10)
+    expect(HOST_INPUT_NAMES.length).toBe(11)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)
     expect(new Set(samples.map((input) => input.type)).size).toBe(

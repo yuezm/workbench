@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../../src/shared/ai-workflow-api'
 
 /**
- * 主进程入口只做装配：mock 掉 electron 与各模块，验证窗口/托盘/退出流程
- * 与 ai-workflow 的接线（聊天服务、变更广播），不起真实窗口与数据库。
+ * 主进程入口只做装配：mock 掉 electron 与各模块，验证窗口/托盘/退出流程，
+ * 以及 ai-workflow 的接线（store → effects/scheduler/clock → IPC、聊天广播）。
  */
 const {
   appMock,
@@ -16,15 +16,21 @@ const {
   registerAiWorkflowIpcMock,
   ChatServiceMock,
   ChatServiceImpl,
-  RunnerMock,
-  RunnerImpl,
-  runnerInstances,
   openDbMock,
   RepositoryMock,
   RepositoryImpl,
   createStoreMock,
   storeMock,
   importLegacyMock,
+  createSchedulerMock,
+  schedulerMock,
+  createEffectsMock,
+  effectsMock,
+  createClockMock,
+  clockMock,
+  createRuntimeExecutorsMock,
+  executorsMock,
+  defaultLimitsMock,
   startupOrder,
 } = vi.hoisted(() => {
   interface WindowMock {
@@ -60,31 +66,56 @@ const {
       ChatServiceMock(deps)
     }
   }
-  const RunnerMock = vi.fn()
-  const runnerInstances: RunnerImpl[] = []
-  class RunnerImpl {
-    enqueue = vi.fn()
-    resumeQueued = vi.fn()
-    constructor(deps: unknown) {
-      RunnerMock(deps)
-      runnerInstances.push(this)
-    }
-  }
   const RepositoryMock = vi.fn()
   class RepositoryImpl {
+    runEventsList = vi.fn(() => [])
     constructor(...args: unknown[]) {
       RepositoryMock(...args)
     }
   }
 
-  // store 门面：入口只用到 ensureProjection；其余方法由 IPC 使用，测试里不需要真实现。
-  const storeMock = { ensureProjection: vi.fn(() => ({ rebuilt: false })) }
+  // store 门面：入口用到 ensureProjection / query / nextWakeAt；其余由 IPC 使用。
+  const storeMock = {
+    ensureProjection: vi.fn(() => ({ rebuilt: false })),
+    query: vi.fn(() => []),
+    nextWakeAt: vi.fn(() => null),
+  }
   const createStoreMock = vi.fn((_options: unknown) => storeMock)
   const importLegacyMock = vi.fn(() => ({
     imported: false,
-    counts: { tasks: 0, workflows: 0, workflow_stages: 0, agents: 0, runtimes: 0 },
+    counts: {
+      tasks: 0,
+      workflows: 0,
+      workflow_stages: 0,
+      agents: 0,
+      runtimes: 0,
+      runs: 0,
+      run_events: 0,
+      conversations: 0,
+      messages: 0,
+    },
   }))
-  /** 启动装配顺序：openDb → createStore → importLegacy → ensureProjection → Repository。 */
+  const defaultLimitsMock = { heartbeatMs: 30_000, runTimeoutMs: 1_800_000, maxFramesPerBatch: 500 }
+
+  const schedulerMock = {
+    wake: vi.fn(),
+    start: vi.fn(),
+    cancel: vi.fn(),
+    active: vi.fn(() => []),
+    idle: vi.fn(async () => undefined),
+  }
+  const createSchedulerMock = vi.fn((_deps: unknown) => schedulerMock)
+  const effectsMock = {
+    dispatch: vi.fn((_input: unknown) => ({ facts: [] })),
+    afterCommit: vi.fn(),
+  }
+  const createEffectsMock = vi.fn((_deps: unknown) => effectsMock)
+  const clockMock = { start: vi.fn(), stop: vi.fn(), wake: vi.fn(), nextAt: vi.fn(() => null) }
+  const createClockMock = vi.fn((_deps: unknown) => clockMock)
+  const executorsMock = { forRuntime: vi.fn() }
+  const createRuntimeExecutorsMock = vi.fn((_deps: unknown) => executorsMock)
+
+  /** 启动装配顺序：openDb → createStore → importLegacy → ensureProjection → Repository → … */
   const startupOrder: string[] = []
 
   return {
@@ -106,15 +137,21 @@ const {
     registerAiWorkflowIpcMock: vi.fn(),
     ChatServiceMock,
     ChatServiceImpl,
-    RunnerMock,
-    RunnerImpl,
-    runnerInstances,
     openDbMock: vi.fn(() => ({})),
     RepositoryMock,
     RepositoryImpl,
     createStoreMock,
     storeMock,
     importLegacyMock,
+    createSchedulerMock,
+    schedulerMock,
+    createEffectsMock,
+    effectsMock,
+    createClockMock,
+    clockMock,
+    createRuntimeExecutorsMock,
+    executorsMock,
+    defaultLimitsMock,
     startupOrder,
   }
 })
@@ -132,9 +169,17 @@ vi.mock('../../src/main/ai-workflow/ipc', () => ({
 vi.mock('../../src/main/ai-workflow/chat', () => ({ ChatService: ChatServiceImpl }))
 vi.mock('../../src/main/ai-workflow/db', () => ({ openDb: openDbMock }))
 vi.mock('../../src/main/ai-workflow/repository', () => ({ Repository: RepositoryImpl }))
-vi.mock('../../src/main/ai-workflow/runner', () => ({ Runner: RunnerImpl }))
-vi.mock('../../src/host/store/index', () => ({ createStore: createStoreMock }))
+vi.mock('../../src/main/ai-workflow/executor-port', () => ({
+  createRuntimeExecutors: createRuntimeExecutorsMock,
+}))
+vi.mock('../../src/host/store/index', () => ({
+  createStore: createStoreMock,
+  DEFAULT_LIMITS: defaultLimitsMock,
+}))
 vi.mock('../../src/host/store/import', () => ({ importLegacyIfNeeded: importLegacyMock }))
+vi.mock('../../src/host/scheduler', () => ({ createScheduler: createSchedulerMock }))
+vi.mock('../../src/host/effects', () => ({ createEffects: createEffectsMock }))
+vi.mock('../../src/host/clock', () => ({ createClock: createClockMock }))
 
 /** 入口是单例：每个用例重新加载一次，各自触发启动装配 */
 async function importEntry(): Promise<void> {
@@ -163,8 +208,7 @@ function appHandler(name: string): () => void {
 
 type IpcDeps = {
   store: unknown
-  notifyChanged: () => void
-  onQueue: (runId: string) => void
+  dispatch: (input: unknown) => { facts: unknown[] }
   chat: unknown
   backendFor: (family: 'dsh') => {
     probe: unknown
@@ -177,11 +221,41 @@ function ipcDeps(): IpcDeps {
   return registerAiWorkflowIpcMock.mock.calls[0][0] as IpcDeps
 }
 
+type SchedulerDeps = {
+  dispatch: (input: unknown) => { facts: unknown[] }
+  runtimes: () => unknown[]
+  executors: unknown
+  limits: unknown
+  lastFrameSeq: (runId: string) => number
+}
+
+function schedulerDeps(): SchedulerDeps {
+  return createSchedulerMock.mock.calls[0][0] as SchedulerDeps
+}
+
+type EffectsDeps = {
+  store: unknown
+  scheduler: () => unknown
+  notifyChanged: () => void
+}
+
+function effectsDeps(): EffectsDeps {
+  return createEffectsMock.mock.calls[0][0] as EffectsDeps
+}
+
+type ClockDeps = {
+  store: { dispatch: (input: unknown) => unknown; nextWakeAt: (at: string) => unknown }
+  onTick: () => void
+}
+
+function clockDeps(): ClockDeps {
+  return createClockMock.mock.calls[0][0] as ClockDeps
+}
+
 describe('主进程入口装配', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     windows.length = 0
-    runnerInstances.length = 0
     startupOrder.length = 0
     delete process.env['ELECTRON_RENDERER_URL']
     openDbMock.mockImplementation(() => {
@@ -200,7 +274,17 @@ describe('主进程入口装配', () => {
       startupOrder.push('importLegacy')
       return {
         imported: false,
-        counts: { tasks: 0, workflows: 0, workflow_stages: 0, agents: 0, runtimes: 0 },
+        counts: {
+          tasks: 0,
+          workflows: 0,
+          workflow_stages: 0,
+          agents: 0,
+          runtimes: 0,
+          runs: 0,
+          run_events: 0,
+          conversations: 0,
+          messages: 0,
+        },
       }
     })
     RepositoryMock.mockImplementation(() => {
@@ -219,18 +303,19 @@ describe('主进程入口装配', () => {
 
     expect(ChatServiceMock).toHaveBeenCalledTimes(1)
     expect(ipcDeps().chat).toBeDefined()
-    // 仓库实例与 runner 共享同一数据库连接，runner 接收变更广播函数
+    // 仓库与执行器共享同一会话根目录（会话续接要落 userData）
     expect(RepositoryMock).toHaveBeenCalledTimes(1)
-    expect(RunnerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        repo: expect.anything(),
-        store: storeMock,
-        notifyChanged: expect.any(Function),
-      }),
+    expect(createRuntimeExecutorsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionRoot: expect.stringContaining('sessions') }),
     )
-    // IPC 也拿到同一个 store（唯一写入口）
+    // IPC 拿到同一个 store（唯一读入口）与统一写入口（effects.dispatch）
     expect(ipcDeps().store).toBe(storeMock)
-    expect(runnerInstances[0].resumeQueued).toHaveBeenCalledTimes(1)
+    ipcDeps().dispatch({ type: 'task.remove', commandId: 'c', id: 't' })
+    expect(effectsMock.dispatch).toHaveBeenCalledWith({
+      type: 'task.remove',
+      commandId: 'c',
+      id: 't',
+    })
     // 协议后端工厂接到 IPC，且能按协议族构造出真实后端
     const backend = ipcDeps().backendFor('dsh')
     expect(typeof backend.probe).toBe('function')
@@ -248,20 +333,53 @@ describe('主进程入口装配', () => {
       'ensureProjection',
       'repository',
     ])
-    // store 拿到的是内核门面：decide / project / viewSpec 三个纯函数
+    // store 拿到的是内核门面：decide / project / viewSpec / nextWakeAt 纯函数
     const options = createStoreMock.mock.calls[0][0] as {
       db: unknown
-      kernel: { decide: unknown; project: unknown; viewSpec: unknown }
+      kernel: { decide: unknown; project: unknown; viewSpec: unknown; nextWakeAt: unknown }
     }
     expect(options.db).toBeDefined()
     expect(typeof options.kernel.decide).toBe('function')
     expect(typeof options.kernel.project).toBe('function')
     expect(typeof options.kernel.viewSpec).toBe('function')
+    expect(typeof options.kernel.nextWakeAt).toBe('function')
     // 导入接到同一个 db 与 kernel；先导入存量再对账投影（空库无事实时不会清表）
     expect(importLegacyMock).toHaveBeenCalledWith(options.db, options.kernel)
-    expect(startupOrder.indexOf('importLegacy')).toBeLessThan(
-      startupOrder.indexOf('ensureProjection'),
-    )
+  })
+
+  it('执行链装配：scheduler 走 effects.dispatch，clock 到点唤醒 scheduler，启动先领一次', async () => {
+    await loadEntry()
+
+    // scheduler 的写入口包了 effects.dispatch
+    schedulerDeps().dispatch({ type: 'run.claim' })
+    expect(effectsMock.dispatch).toHaveBeenCalledWith({ type: 'run.claim' })
+    // 执行器工厂与 limits 都注入到 scheduler；运行时从 store 读
+    expect(schedulerDeps().executors).toBe(executorsMock)
+    expect(schedulerDeps().limits).toBe(defaultLimitsMock)
+    schedulerDeps().runtimes()
+    expect(storeMock.query).toHaveBeenCalledWith('runtimes.all')
+    // 帧 seq 从仓储读（重启后续接全局单调）
+    expect(schedulerDeps().lastFrameSeq('run-1')).toBe(0)
+
+    // effects：调度器惰性解析 + 变更广播接到窗口
+    expect(effectsDeps().scheduler()).toBe(schedulerMock)
+    effectsDeps().notifyChanged()
+    expect(windows[0].webContents.send).toHaveBeenCalledWith(AI_WORKFLOW_CHANGED)
+
+    // clock：dispatch 也走 effects；onTick 唤醒调度器；nextWakeAt 透传 store
+    clockDeps().store.dispatch({ type: 'clock.tick' })
+    expect(effectsMock.dispatch).toHaveBeenCalledWith({ type: 'clock.tick' })
+    clockDeps().store.nextWakeAt('2026-01-01T00:00:00.000Z')
+    expect(storeMock.nextWakeAt).toHaveBeenCalledWith('2026-01-01T00:00:00.000Z')
+    clockDeps().onTick()
+    expect(schedulerMock.wake).toHaveBeenCalled()
+    // 时钟取真实毫秒时间戳（内核只认注入的 now，不读系统时钟）
+    expect(typeof (createClockMock.mock.calls[0][0] as { now: () => string }).now()).toBe('string')
+
+    // 启动：先主动领一次，再挂定时器
+    expect(schedulerMock.wake).toHaveBeenCalled()
+    expect(clockMock.start).toHaveBeenCalledTimes(1)
+    expect(startupOrder).not.toContain('runner')
   })
 
   it('拿到单实例锁：不退出，正常装配窗口与 IPC', async () => {
@@ -289,7 +407,10 @@ describe('主进程入口装配', () => {
     expect(importLegacyMock).not.toHaveBeenCalled()
     expect(RepositoryMock).not.toHaveBeenCalled()
     expect(ChatServiceMock).not.toHaveBeenCalled()
-    expect(RunnerMock).not.toHaveBeenCalled()
+    expect(createSchedulerMock).not.toHaveBeenCalled()
+    expect(createEffectsMock).not.toHaveBeenCalled()
+    expect(createClockMock).not.toHaveBeenCalled()
+    expect(createRuntimeExecutorsMock).not.toHaveBeenCalled()
     expect(windows).toHaveLength(0)
   })
 
@@ -363,17 +484,6 @@ describe('主进程入口装配', () => {
     windows.length = 0
     appHandler('activate')()
     expect(windows).toHaveLength(1)
-  })
-
-  it('变更与排队回调接到 runner / 窗口广播', async () => {
-    await loadEntry()
-    const deps = ipcDeps()
-
-    deps.notifyChanged()
-    expect(windows[0].webContents.send).toHaveBeenCalledWith(AI_WORKFLOW_CHANGED)
-
-    deps.onQueue('run-1')
-    expect(runnerInstances[0].enqueue).toHaveBeenCalledWith('run-1')
   })
 
   it('聊天流事件广播到所有窗口的 webContents', async () => {

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Command } from '../../src/protocol/commands'
+import type { Input } from '../../src/protocol/inputs'
 import type {
   Agent,
+  RunRow,
   Runtime,
   RuntimeProbe,
   StageInput,
@@ -10,7 +12,9 @@ import type {
   WorkflowStage,
 } from '../../src/protocol/entities'
 import type { FactPayload, FactType } from '../../src/protocol/facts'
+import type { HostInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
+import { taskPrompt } from '../../src/kernel/prompt'
 import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
@@ -89,6 +93,51 @@ const task = (over: Partial<Task> = {}): Task => ({
   ...over,
 })
 
+/** 领取中的 run 行（回执链条用例的种子）。 */
+const runRow = (over: Partial<RunRow> = {}): RunRow => ({
+  id: 'run-1',
+  purpose: 'stage',
+  taskId: 't-1',
+  conversationId: null,
+  stageId: 'st-1',
+  agentId: 'ag-1',
+  runtimeId: 'rt-1',
+  ruleId: null,
+  rulesVersion: 0,
+  executorKey: 'dsh',
+  threadId: null,
+  cwd: '',
+  access: 'edit',
+  skill: null,
+  promptRef: null,
+  eventIds: [],
+  hops: 0,
+  turn: 1,
+  resumeSessionId: null,
+  threadContextRef: null,
+  queueSeq: 1,
+  status: 'running',
+  prompt: 'p',
+  output: '',
+  error: null,
+  errorCode: null,
+  exitCode: null,
+  sessionId: null,
+  usage: null,
+  durationMs: null,
+  leaseId: 'run-1:1',
+  attempt: 1,
+  attempts: 0,
+  leaseUntil: LATER,
+  notBefore: null,
+  deadlineAt: LATER,
+  cancelRequested: false,
+  startedAt: NOW,
+  endedAt: null,
+  createdAt: CREATED,
+  ...over,
+})
+
 const at = <T extends FactType>(type: T, payload: FactPayload<T>): FactDraft<T> => ({
   type,
   actor: ACTOR,
@@ -102,6 +151,7 @@ interface Seed {
   agents?: Agent[]
   runtimes?: Runtime[]
   tasks?: Task[]
+  runs?: RunRow[]
   active?: Id[]
 }
 
@@ -112,7 +162,7 @@ const view = (seed: Seed = {}): View => ({
   agents: new Map((seed.agents ?? []).map((row) => [row.id, row])),
   runtimes: new Map((seed.runtimes ?? []).map((row) => [row.id, row])),
   tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
-  runs: new Map(),
+  runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map(),
   messages: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
@@ -152,6 +202,8 @@ const env = (): Environment => {
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 type CommandDraft = DistributiveOmit<Command, 'commandId'>
 const command = (base: CommandDraft): Command => ({ commandId: 'cmd-1', ...base }) as Command
+/** 宿主内部输入字面量入口（回执 / 帧 / 领取等，不经 IPC）。 */
+const host = (input: HostInput): Input => input
 
 describe('kernel/decide 运行时', () => {
   it('runtime.create：默认值回填，事实携带完整行（含 lastProbe: null）', () => {
@@ -1148,6 +1200,510 @@ describe('kernel/decide 任务', () => {
 
     expect(decide(view(), command({ type: 'task.remove', id: 't-404' }), NOW, env())).toEqual({
       facts: [],
+    })
+  })
+})
+
+describe('kernel/decide 进入效果（run.queued）', () => {
+  /** agent 阶段 + 智能体 + 运行时齐全的种子。 */
+  const agentView = (over: Partial<Seed> = {}): View =>
+    view({
+      workflows: [workflow()],
+      stages: [stage({ id: 'st-1', entryMode: 'agent', agentId: 'ag-1' })],
+      agents: [agent()],
+      runtimes: [runtime({ workdir: 'C:/work' })],
+      ...over,
+    })
+
+  const entryRun = (facts: FactDraft[], id = 'run-new-1') => {
+    const fact = facts.find((item) => item.type === 'run.queued')
+    expect(fact, '应产 run.queued').toBeDefined()
+    const run = (fact?.payload as { run: RunRow }).run
+    expect(run.id).toBe(id)
+    return run
+  }
+
+  it('task.create 进 agent 阶段：同批产 run.queued，行字段与提示词逐字正确', () => {
+    expect(
+      decide(
+        agentView(),
+        command({ type: 'task.create', input: { title: '写计划', workflowId: 'wf-1' } }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({
+      facts: [
+        at('task.created', {
+          task: task({
+            id: 'task-new-1',
+            title: '写计划',
+            currentStageId: 'st-1',
+            createdAt: NOW,
+            updatedAt: NOW,
+          }),
+        }),
+        at('run.queued', {
+          run: {
+            id: 'run-new-1',
+            purpose: 'stage',
+            taskId: 'task-new-1',
+            conversationId: null,
+            stageId: 'st-1',
+            agentId: 'ag-1',
+            runtimeId: 'rt-1',
+            ruleId: null,
+            rulesVersion: 0,
+            executorKey: 'dsh',
+            threadId: null,
+            cwd: 'C:/work',
+            access: 'edit',
+            skill: null,
+            promptRef: null,
+            eventIds: [],
+            hops: 0,
+            turn: 1,
+            resumeSessionId: null,
+            threadContextRef: null,
+            queueSeq: 0,
+            status: 'queued',
+            prompt: 'sys\n\n# 任务：写计划\n\n# 阶段：待办',
+            output: '',
+            error: null,
+            errorCode: null,
+            exitCode: null,
+            sessionId: null,
+            usage: null,
+            durationMs: null,
+            leaseId: null,
+            attempt: 0,
+            attempts: 0,
+            leaseUntil: null,
+            notBefore: null,
+            deadlineAt: null,
+            cancelRequested: false,
+            startedAt: null,
+            endedAt: null,
+            createdAt: NOW,
+          },
+        }),
+      ],
+    })
+  })
+
+  it('user / none 入口：只建任务，不产 run.queued', () => {
+    for (const entryMode of ['user', 'none'] as const) {
+      const decision = decide(
+        agentView({ stages: [stage({ id: 'st-1', entryMode })] }),
+        command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } }),
+        NOW,
+        env(),
+      )
+      expect(decision.facts.map((fact) => fact.type)).toEqual(['task.created'])
+    }
+  })
+
+  it('缺智能体 / 缺运行时：只建任务，不产 run.queued', () => {
+    const missingAgent = decide(
+      agentView({ agents: [] }),
+      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } }),
+      NOW,
+      env(),
+    )
+    expect(missingAgent.facts.map((fact) => fact.type)).toEqual(['task.created'])
+
+    const missingRuntime = decide(
+      agentView({ runtimes: [] }),
+      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } }),
+      NOW,
+      env(),
+    )
+    expect(missingRuntime.facts.map((fact) => fact.type)).toEqual(['task.created'])
+
+    const noAgentBound = decide(
+      agentView({ stages: [stage({ id: 'st-1', entryMode: 'agent', agentId: null })] }),
+      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } }),
+      NOW,
+      env(),
+    )
+    expect(noAgentBound.facts.map((fact) => fact.type)).toEqual(['task.created'])
+  })
+
+  it('权限模式映射到 access：read-only→read、workspace-write→edit、danger-full-access→full', () => {
+    const cases = [
+      ['read-only', 'read'],
+      ['workspace-write', 'edit'],
+      ['danger-full-access', 'full'],
+    ] as const
+    for (const [permissionMode, access] of cases) {
+      const decision = decide(
+        agentView({ runtimes: [runtime({ permissionMode })] }),
+        command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } }),
+        NOW,
+        env(),
+      )
+      expect(entryRun(decision.facts).access).toBe(access)
+    }
+  })
+
+  it('task.move 进 agent 阶段：任务事实 + run.queued（提示词用目标阶段名）', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [
+        stage({ id: 'st-1', position: 0 }),
+        stage({ id: 'st-2', position: 1, name: '实现', entryMode: 'agent', agentId: 'ag-1' }),
+      ],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [task({ id: 't-1' })],
+    })
+
+    const decision = decide(
+      seeded,
+      command({ type: 'task.move', id: 't-1', stageId: 'st-2' }),
+      NOW,
+      env(),
+    )
+
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['task.moved', 'run.queued'])
+    const run = entryRun(decision.facts)
+    expect(run).toMatchObject({
+      taskId: 't-1',
+      stageId: 'st-2',
+      agentId: 'ag-1',
+      runtimeId: 'rt-1',
+      status: 'queued',
+      turn: 1,
+      attempt: 0,
+      queueSeq: 0,
+    })
+    expect(run.prompt).toBe('sys\n\n# 任务：任务\n\n# 阶段：实现')
+  })
+
+  it('task.move 原地（from===to）或已完成任务：不产 run.queued', () => {
+    const sameStage = decide(
+      view({
+        workflows: [workflow()],
+        stages: [stage({ id: 'st-1', entryMode: 'agent', agentId: 'ag-1' })],
+        agents: [agent()],
+        runtimes: [runtime()],
+        tasks: [task({ id: 't-1', currentStageId: 'st-1' })],
+      }),
+      command({ type: 'task.move', id: 't-1', stageId: 'st-1' }),
+      NOW,
+      env(),
+    )
+    expect(sameStage.facts.map((fact) => fact.type)).toEqual(['task.moved'])
+
+    const completed = decide(
+      agentView({
+        stages: [
+          stage({ id: 'st-1', position: 0 }),
+          stage({ id: 'st-2', position: 1, entryMode: 'agent', agentId: 'ag-1' }),
+        ],
+        tasks: [task({ id: 't-1', status: 'completed' })],
+      }),
+      command({ type: 'task.move', id: 't-1', stageId: 'st-2' }),
+      NOW,
+      env(),
+    )
+    expect(completed.facts.map((fact) => fact.type)).toEqual(['task.moved'])
+  })
+
+  it('同一任务每次进入 agent 阶段都重新建 run（往返两次各一条）', () => {
+    const base = {
+      workflows: [workflow()],
+      stages: [
+        stage({ id: 'st-1', position: 0 }),
+        stage({ id: 'st-2', position: 1, entryMode: 'agent', agentId: 'ag-1' }),
+      ],
+      agents: [agent()],
+      runtimes: [runtime()],
+    }
+    const first = decide(
+      view({ ...base, tasks: [task({ id: 't-1', currentStageId: 'st-1' })] }),
+      command({ type: 'task.move', id: 't-1', stageId: 'st-2' }),
+      NOW,
+      env(),
+    )
+    const back = decide(
+      view({ ...base, tasks: [task({ id: 't-1', currentStageId: 'st-2' })] }),
+      command({ type: 'task.move', id: 't-1', stageId: 'st-1' }),
+      NOW,
+      env(),
+    )
+    const again = decide(
+      view({ ...base, tasks: [task({ id: 't-1', currentStageId: 'st-1' })] }),
+      command({ type: 'task.move', id: 't-1', stageId: 'st-2' }),
+      NOW,
+      env(),
+    )
+
+    expect(first.facts.map((fact) => fact.type)).toEqual(['task.moved', 'run.queued'])
+    expect(back.facts.map((fact) => fact.type)).toEqual(['task.moved'])
+    expect(again.facts.map((fact) => fact.type)).toEqual(['task.moved', 'run.queued'])
+  })
+
+  it('回执成功流转到 agent 阶段：run.succeeded + task.moved + 下一轮 run.queued', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [
+        stage({
+          id: 'st-1',
+          position: 0,
+          entryMode: 'agent',
+          agentId: 'ag-1',
+          onCompleteStageId: 'st-2',
+        }),
+        stage({ id: 'st-2', position: 1, name: '实现', entryMode: 'agent', agentId: 'ag-1' }),
+      ],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [task({ id: 't-1' })],
+      runs: [runRow({ id: 'run-1' })],
+      active: ['t-1'],
+    })
+
+    const decision = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, output: 'done' },
+      }),
+      NOW,
+      env(),
+    )
+
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'run.succeeded',
+      'task.moved',
+      'run.queued',
+    ])
+    const moved = decision.facts[1]?.payload as { from: string | null; to: string | null }
+    expect(moved).toMatchObject({ from: 'st-1', to: 'st-2' })
+    const queued = entryRun(decision.facts)
+    expect(queued).toMatchObject({ taskId: 't-1', stageId: 'st-2', status: 'queued' })
+    expect(queued.prompt).toBe('sys\n\n# 任务：任务\n\n# 阶段：实现')
+    // 进入效果由宿主调度器发起（actor 标明来源）
+    expect(decision.facts[2]?.actor).toEqual({ kind: 'host', via: 'scheduler' })
+  })
+
+  it('回执失败打回到另一个 agent 阶段：同样产下一轮 run.queued', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [
+        stage({ id: 'st-0', position: 0, name: '重做', entryMode: 'agent', agentId: 'ag-1' }),
+        stage({
+          id: 'st-1',
+          position: 1,
+          entryMode: 'agent',
+          agentId: 'ag-1',
+          onRejectStageId: 'st-0',
+        }),
+      ],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [task({ id: 't-1' })],
+      runs: [runRow({ id: 'run-1' })],
+      active: ['t-1'],
+    })
+
+    const decision = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: {
+          status: 'failed',
+          leaseId: 'run-1:1',
+          turn: 1,
+          errorCode: 'exit_nonzero',
+          error: '退出码 1',
+        },
+      }),
+      NOW,
+      env(),
+    )
+
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'run.failed',
+      'task.moved',
+      'run.queued',
+    ])
+    expect(entryRun(decision.facts)).toMatchObject({ stageId: 'st-0', taskId: 't-1' })
+  })
+
+  it('回执失败打回原地 / 取消：零流转、不重建 run', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage({ id: 'st-1', entryMode: 'agent', agentId: 'ag-1' })],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [task({ id: 't-1' })],
+      runs: [runRow({ id: 'run-1' })],
+      active: ['t-1'],
+    })
+
+    const failed = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: { status: 'failed', leaseId: 'run-1:1', turn: 1, errorCode: 'run_failed' },
+      }),
+      NOW,
+      env(),
+    )
+    expect(failed.facts.map((fact) => fact.type)).toEqual(['run.failed'])
+
+    const cancelled = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: { status: 'cancelled', leaseId: 'run-1:1', turn: 1, errorCode: 'cancelled' },
+      }),
+      NOW,
+      env(),
+    )
+    expect(cancelled.facts.map((fact) => fact.type)).toEqual(['run.cancelled'])
+  })
+})
+
+describe('kernel/decide run.frames', () => {
+  it('执行中的 run：帧按宿主分配的 seq 原样入账（actor 标调度器）', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage()],
+      tasks: [task({ id: 't-1' })],
+      runs: [runRow({ id: 'run-1' })],
+    })
+    const frames = [
+      { runId: 'run-1', seq: 1, type: 'text' as const, text: 'hi' },
+      { runId: 'run-1', seq: 2, type: 'status' as const, status: 'running' },
+    ]
+
+    expect(
+      decide(seeded, host({ type: 'run.frames', runId: 'run-1', turn: 1, frames }), NOW, env()),
+    ).toEqual({
+      facts: [
+        {
+          type: 'run.frames',
+          actor: { kind: 'host', via: 'scheduler' },
+          at: NOW,
+          payload: { runId: 'run-1', turn: 1, frames },
+        },
+      ],
+    })
+  })
+
+  it('终态 / 不存在 / 轮次不匹配：静默零事实', () => {
+    const terminal = view({
+      tasks: [task({ id: 't-1' })],
+      runs: [runRow({ id: 'run-1', status: 'succeeded' })],
+    })
+    const frames = [{ runId: 'run-1', seq: 1, type: 'text' as const, text: 'x' }]
+
+    expect(
+      decide(terminal, host({ type: 'run.frames', runId: 'run-1', turn: 1, frames }), NOW, env()),
+    ).toEqual({ facts: [] })
+
+    expect(
+      decide(view(), host({ type: 'run.frames', runId: 'ghost', turn: 1, frames }), NOW, env()),
+    ).toEqual({ facts: [] })
+
+    const running = view({ tasks: [task({ id: 't-1' })], runs: [runRow({ id: 'run-1' })] })
+    const otherTurn = frames.map((frame) => ({ ...frame }))
+    expect(
+      decide(
+        running,
+        host({ type: 'run.frames', runId: 'run-1', turn: 2, frames: otherTurn }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [] })
+  })
+})
+
+describe('kernel/prompt taskPrompt', () => {
+  it('空段过滤：空 systemPrompt / 空描述不产生多余空行', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage({ id: 'st-1', name: '执行', entryMode: 'agent', agentId: 'ag-1' })],
+      agents: [agent({ systemPrompt: '' })],
+      runtimes: [runtime()],
+    })
+    const decision = decide(
+      seeded,
+      command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1' } }),
+      NOW,
+      env(),
+    )
+    const queued = decision.facts.find((fact) => fact.type === 'run.queued')
+    const run = (queued?.payload as { run: RunRow }).run
+    expect(run.prompt).toBe('# 任务：T\n\n# 阶段：执行')
+  })
+
+  it('描述非空时按「智能体 → 任务 → 描述 → 阶段」顺序、两两空行分隔', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage({ id: 'st-1', name: '执行', entryMode: 'agent', agentId: 'ag-1' })],
+      agents: [agent({ systemPrompt: 'sys' })],
+      runtimes: [runtime()],
+    })
+    const decision = decide(
+      seeded,
+      command({
+        type: 'task.create',
+        input: { title: 'T', description: '做点事', workflowId: 'wf-1' },
+      }),
+      NOW,
+      env(),
+    )
+    const queued = decision.facts.find((fact) => fact.type === 'run.queued')
+    const run = (queued?.payload as { run: RunRow }).run
+    expect(run.prompt).toBe('sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行')
+  })
+})
+
+describe('kernel/prompt taskPrompt（无阶段名）', () => {
+  it('stageName 为 null 时不拼阶段段', () => {
+    expect(
+      taskPrompt(agent({ systemPrompt: 'sys' }), task({ title: 'T', description: 'd' }), null),
+    ).toBe('sys\n\n# 任务：T\n\nd')
+  })
+})
+
+describe('kernel/decide 引用扫描', () => {
+  it('runtime.remove：多智能体时只拦截真正引用它的那个', () => {
+    const other = runtime({ id: 'rt-2', name: '另一个运行时' })
+    const second = agent({ id: 'ag-2', runtimeId: 'rt-2' })
+    const seeded = view({
+      runtimes: [runtime(), other],
+      agents: [agent(), second],
+    })
+
+    // 第一个智能体不引用 rt-2：扫描继续，最终命中第二个
+    expect(decide(seeded, command({ type: 'runtime.remove', id: 'rt-2' }), NOW, env())).toEqual({
+      facts: [],
+      reject: { code: 'conflict', message: '运行时被智能体引用，无法删除: rt-2' },
+    })
+  })
+
+  it('agent.remove：前序阶段绑了别的智能体时仍识别出后续引用', () => {
+    const second = agent({ id: 'ag-2' })
+    const seeded = view({
+      runtimes: [runtime()],
+      agents: [agent(), second],
+      stages: [
+        stage({ id: 'st-1', position: 0, agentId: 'ag-1' }),
+        stage({ id: 'st-2', position: 1, agentId: 'ag-2' }),
+      ],
+    })
+
+    expect(decide(seeded, command({ type: 'agent.remove', id: 'ag-2' }), NOW, env())).toEqual({
+      facts: [],
+      reject: { code: 'conflict', message: '智能体被工作流阶段或对话引用，无法删除: ag-2' },
     })
   })
 })

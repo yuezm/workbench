@@ -14,13 +14,14 @@
  */
 import type { Command } from './commands'
 import { COMMAND_NAMES } from './commands'
-import type { RunErrorCode, RunTerminalStatus, RunUsage } from './entities'
+import type { RunErrorCode, RunEventRow, RunTerminalStatus, RunUsage } from './entities'
 
 /** 宿主内部输入名全集：不经 IPC，只由宿主（scheduler / clock / reconcile / chat 入口）发。 */
 export const HOST_INPUT_NAMES = [
   'run.claim',
   'run.heartbeat',
   'run.receipt',
+  'run.frames',
   'run.host_settled',
   'run.cancel',
   'clock.tick',
@@ -119,6 +120,18 @@ export interface RunReceiptInput {
 }
 
 /**
+ * 运行帧批量入账（D6/D7）：帧 `seq` 由宿主按 run **全局单调**分配（跨 turn 递增），
+ * 执行器本地 seq 丢弃；单批 ≤ `maxFramesPerBatch`，超出由宿主分包为多条输入。
+ * 数据源始终是 `run.frames` 事实，实时旁路只影响显示。
+ */
+export interface RunFramesInput {
+  type: 'run.frames'
+  runId: string
+  turn: number
+  frames: RunEventRow[]
+}
+
+/**
  * 宿主兜底终态（D14）：执行器不可达 / 超时无回执 / 取消无回执时，由宿主写终态。
  * 仅宿主 actor 可发，`errorCode` 取 `timeout` / `executor_lost` / `cancelled` 之一。
  */
@@ -180,6 +193,7 @@ export type HostInput =
   | RunClaimInput
   | RunHeartbeatInput
   | RunReceiptInput
+  | RunFramesInput
   | RunHostSettledInput
   | RunCancelInput
   | ClockTickInput

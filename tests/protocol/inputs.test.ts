@@ -57,6 +57,15 @@ const validInputs: Input[] = [
       resumeRejected: true,
     },
   },
+  {
+    type: 'run.frames',
+    runId: 'run-1',
+    turn: 1,
+    frames: [
+      { runId: 'run-1', seq: 1, type: 'text', text: 'hi' },
+      { runId: 'run-1', seq: 2, type: 'tool_call', tool: 'read', callId: 'c-1', input: '{}' },
+    ],
+  },
   { type: 'run.host_settled', runId: 'run-1', status: 'cancelled', errorCode: 'cancelled' },
   { type: 'run.host_settled', runId: 'run-1', leaseId: 'run-1:1', turn: 1, status: 'failed' },
   { type: 'run.cancel', runId: 'run-1' },
@@ -87,6 +96,7 @@ describe('protocol/inputs', () => {
       'run.claim',
       'run.heartbeat',
       'run.receipt',
+      'run.frames',
       'run.host_settled',
       'run.cancel',
       'clock.tick',
@@ -267,5 +277,99 @@ describe('protocol/inputs', () => {
 
   it('执行器端口版本常量随契约暴露（M3 兼容判断用）', () => {
     expect(EXECUTOR_PORT_VERSION).toBe(1)
+  })
+})
+
+describe('protocol/inputs run.frames 校验', () => {
+  const frame = { runId: 'run-1', seq: 1, type: 'text', text: 'hi' }
+
+  it('合法帧批通过', () => {
+    expect(validateInput({ type: 'run.frames', runId: 'run-1', turn: 1, frames: [frame] })).toEqual(
+      { ok: true, input: { type: 'run.frames', runId: 'run-1', turn: 1, frames: [frame] } },
+    )
+  })
+
+  it('非法载荷逐项拒绝', () => {
+    const rejected = (input: unknown): string => {
+      const result = validateInput(input)
+      expect(result.ok).toBe(false)
+      return (result as { ok: false; message: string }).message
+    }
+
+    expect(rejected({ type: 'run.frames', turn: 1, frames: [frame] })).toBe('runId必填')
+    expect(rejected({ type: 'run.frames', runId: 'run-1', turn: 0, frames: [frame] })).toBe(
+      'turn必须在 1 到 1000000 之间',
+    )
+    expect(rejected({ type: 'run.frames', runId: 'run-1', turn: 1, frames: 'x' })).toBe(
+      'frames 必须是数组',
+    )
+    expect(rejected({ type: 'run.frames', runId: 'run-1', turn: 1, frames: [] })).toBe(
+      'frames 至少 1 帧',
+    )
+    expect(
+      rejected({
+        type: 'run.frames',
+        runId: 'run-1',
+        turn: 1,
+        frames: Array.from({ length: 501 }, (_item, index) => ({ ...frame, seq: index + 1 })),
+      }),
+    ).toBe('frames 最多 500 帧')
+    expect(rejected({ type: 'run.frames', runId: 'run-1', turn: 1, frames: [null] })).toBe(
+      'frames[0] 必须是对象',
+    )
+    expect(
+      rejected({ type: 'run.frames', runId: 'run-1', turn: 1, frames: [{ ...frame, seq: 0 }] }),
+    ).toBe('frames[0].seq必须在 1 到 1000000000 之间')
+    expect(
+      rejected({
+        type: 'run.frames',
+        runId: 'run-1',
+        turn: 1,
+        frames: [{ ...frame, type: 'nope' }],
+      }),
+    ).toContain('frames[0].type取值必须是')
+    expect(
+      rejected({
+        type: 'run.frames',
+        runId: 'run-1',
+        turn: 1,
+        frames: [frame, { ...frame, runId: 'run-2' }],
+      }),
+    ).toBe('frames[*].runId 必须与 runId 一致')
+  })
+})
+
+describe('protocol/inputs 其余边界', () => {
+  it('receipt.ask / receipt.events 非对象逐项拒绝', () => {
+    const base = { status: 'succeeded', leaseId: 'run-1:1', turn: 1 }
+    const rejected = (receipt: Record<string, unknown>): string => {
+      const result = validateInput({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: { ...base, ...receipt },
+      })
+      expect(result.ok).toBe(false)
+      return (result as { ok: false; message: string }).message
+    }
+    expect(rejected({ ask: [null] })).toBe('receipt.ask[0] 必须是对象')
+    expect(rejected({ events: [null] })).toBe('receipt.events[0] 必须是对象')
+  })
+
+  it('run.host_settled 的可选字段全部通过（含 error / usage / exitCode / durationMs）', () => {
+    const input = {
+      type: 'run.host_settled',
+      runId: 'run-1',
+      leaseId: 'run-1:1',
+      turn: 1,
+      status: 'failed',
+      errorCode: 'timeout',
+      error: '运行超时',
+      output: '半截',
+      sessionId: 'sess-1',
+      usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 },
+      exitCode: 1,
+      durationMs: 10,
+    }
+    expect(validateInput(input)).toEqual({ ok: true, input })
   })
 })

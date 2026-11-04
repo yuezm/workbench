@@ -1,6 +1,6 @@
 // @vitest-environment node
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { Runtime, RuntimeProbe, WorkflowWithStages } from '../../../src/shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../../src/shared/ai-workflow-api'
 import type { ChatService } from '../../../src/main/ai-workflow/chat'
@@ -25,7 +25,7 @@ const { ipcMainMock } = vi.hoisted(() => ({ ipcMainMock: { handle: vi.fn() } }))
 vi.mock('electron', () => ({ ipcMain: ipcMainMock }))
 
 let world: TestWorld
-let notify: ReturnType<typeof vi.fn>
+let notify: Mock<() => void>
 let handle: AiWorkflowHandler
 let probe: ReturnType<typeof vi.fn>
 let models: ReturnType<typeof vi.fn>
@@ -46,11 +46,22 @@ function readyProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
   }
 }
 
+/**
+ * 测试用统一写入口：真实 store.dispatch + 变更通知（模拟装配根的 effects.dispatch）。
+ * handler 自身不再直接通知，通知语义由 effects 承担。
+ */
+function dispatch(input: unknown): ReturnType<TestWorld['store']['dispatch']> {
+  const result = world.store.dispatch(input)
+  notify()
+  return result
+}
+
 function makeHandler(overrides: Partial<Parameters<typeof createAiWorkflowHandler>[0]> = {}) {
   return createAiWorkflowHandler({
     store: world.store,
     repo: world.repo,
-    notifyChanged: notify as unknown as () => void,
+    dispatch,
+    notifyChanged: () => notify(),
     backendFor: () => backend,
     ...overrides,
   })
@@ -65,7 +76,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   resetCommandIds()
   world = createWorld()
-  notify = vi.fn()
+  notify = vi.fn<() => void>()
   probe = vi.fn(async () => readyProbe())
   models = vi.fn(async () => [
     {
@@ -97,9 +108,9 @@ describe('ai-workflow handler：运行时', () => {
     expect(list.map((r) => r.name)).toEqual(['ds'])
     // 配置事实与探测事实都已落投影
     expect(runtimeById(world.store, runtime.id).lastProbe).toEqual(readyProbe())
-    expect(notify).toHaveBeenCalledTimes(1)
-    // list 不触发
-    expect(notify).toHaveBeenCalledTimes(1)
+    // 两次提交（配置事实 + 探测事实）各通知一次；list 不触发通知
+    expect(notify).toHaveBeenCalledTimes(2)
+    expect(notify).toHaveBeenCalledTimes(2)
   })
 
   it('create 缺省命令/profile 时用 dsh + multica 探测', async () => {
@@ -137,7 +148,8 @@ describe('ai-workflow handler：运行时', () => {
     expect(probe).toHaveBeenCalledWith({ command: 'dsh2', profile: 'p2' })
     expect(updated.command).toBe('dsh2')
     expect(updated.lastProbe?.cliVersion).toBe('9.9.9')
-    expect(notify).toHaveBeenCalledTimes(1)
+    // 配置事实 + 探测事实两次提交
+    expect(notify).toHaveBeenCalledTimes(2)
   })
 
   it('probe 直接探测并落库；运行时不存在时报错', async () => {
@@ -496,7 +508,7 @@ describe('registerAiWorkflowIpc', () => {
     registerAiWorkflowIpc({
       store: world.store,
       repo: world.repo,
-      notifyChanged: notify as unknown as () => void,
+      dispatch,
       backendFor: () => backend,
     })
     expect(ipcMainMock.handle).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, expect.any(Function))

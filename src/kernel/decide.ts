@@ -7,8 +7,9 @@
  * 在迁移期零改动。
  *
  * 阶段规则只复用 `kernel/workflow/{stage-machine,stage-validation}.ts`：拖拽落点即目标、
- * 打回原地零效果等判定不在这里另写一份。进入阶段的效果（建 run / 等人）由宿主在
- * 提交成功后按新视图执行，`decide` 只产事实。
+ * 打回原地零效果等判定不在这里另写一份。进入阶段的**效果**（建 run）也由内核产事实：
+ * `task.created` / `task.moved` / 回执流转到 agent 阶段时直接追加 `run.queued`，
+ * 宿主只负责领取与执行，不再在提交后补写。
  *
  * M2 起入参放宽为 `protocol/inputs` 的 `Input`（命令 + 宿主内部输入）。T5–T7 实现
  * `run.claim` / `run.heartbeat` / `run.receipt` / `run.cancel` / `run.host_settled` /
@@ -29,6 +30,7 @@ import type { FactPayload, FactType } from '../protocol/facts'
 import type { Input } from '../protocol/inputs'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, Reason, View } from './types'
 import type { SettledRun } from './run'
+import { taskPrompt } from './prompt'
 import {
   abandonedFacts,
   claimFacts,
@@ -221,7 +223,7 @@ const hostDraft = <T extends FactType>(
 /**
  * 阶段 run 终态 → 阶段流转事实：成功进下一阶段（无下一阶段则完成），失败按
  * `on_reject` 打回；打回原地 / 任务已完成 / 阶段无效 / 任务已删时零事实，取消不推进。
- * 目标阶段的进入效果（建下一条 run）由 T10 接线时补，本任务不产 `run.queued`。
+ * 目标阶段的进入效果（建下一条 run）由 `run.receipt` 分支在拿到 `task.moved` 后补。
  */
 function stageTransitionFacts(view: View, run: SettledRun, now: Iso): FactDraft[] {
   if (run.status === 'cancelled' || run.taskId === null) return []
@@ -277,6 +279,82 @@ function chatMessageFacts(
       now,
     ),
   ]
+}
+
+/** 权限模式 → 协议帧的 access 级别（SPEC-plugins「Turn」）。 */
+const ACCESS_BY_PERMISSION: Record<Runtime['permissionMode'], RunRow['access']> = {
+  'read-only': 'read',
+  'workspace-write': 'edit',
+  'danger-full-access': 'full',
+}
+
+/**
+ * 进入阶段的效果：落点阶段 `entryMode='agent'` 且智能体 / 运行时都在时，产一条
+ * `run.queued`（完整 RunRow，宿主直接领取执行）。
+ *
+ * 每次进入都触发（人工拖拽、建任务、回执流转到目标阶段都重新建 run）；以下零事实：
+ * - 阶段是 `user` / `none`（等人或仅停留）；
+ * - 任务已完成 / 无当前阶段；
+ * - 阶段没有绑定智能体，或智能体 / 运行时已不存在（旧 `applyStageEffects` 同口径：
+ *   缺配置时只建任务，不建 run）。
+ */
+function entryRunFacts(
+  view: View,
+  task: Task,
+  now: Iso,
+  env: Environment,
+  actor: Actor,
+): FactDraft<'run.queued'>[] {
+  if (task.status !== 'active' || task.currentStageId === null) return []
+  const stage = view.stages.get(task.currentStageId)
+  if (!stage || stage.entryMode !== 'agent') return []
+  const agent = stage.agentId === null ? undefined : view.agents.get(stage.agentId)
+  if (!agent) return []
+  const runtime = view.runtimes.get(agent.runtimeId)
+  if (!runtime) return []
+  const run: RunRow = {
+    id: env.nextId('run'),
+    purpose: 'stage',
+    taskId: task.id,
+    conversationId: null,
+    stageId: stage.id,
+    agentId: agent.id,
+    runtimeId: runtime.id,
+    ruleId: null,
+    rulesVersion: 0,
+    executorKey: runtime.protocolFamily,
+    threadId: null,
+    cwd: runtime.workdir ?? '',
+    access: ACCESS_BY_PERMISSION[runtime.permissionMode],
+    skill: null,
+    promptRef: null,
+    eventIds: [],
+    hops: 0,
+    turn: 1,
+    resumeSessionId: null,
+    threadContextRef: null,
+    queueSeq: 0,
+    status: 'queued',
+    prompt: taskPrompt(agent, task, stage.name),
+    output: '',
+    error: null,
+    errorCode: null,
+    exitCode: null,
+    sessionId: null,
+    usage: null,
+    durationMs: null,
+    leaseId: null,
+    attempt: 0,
+    attempts: 0,
+    leaseUntil: null,
+    notBefore: null,
+    deadlineAt: null,
+    cancelRequested: false,
+    startedAt: null,
+    endedAt: null,
+    createdAt: now,
+  }
+  return [{ type: 'run.queued', actor, at: now, payload: { run } }]
 }
 
 export function decide(view: View, input: Input, now: Iso, env: Environment): Decision {
@@ -510,12 +588,13 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         if (stageId === null) continue
         const previous = removedById.get(stageId)
         if (!previous) continue
-        const target = rows.at(Math.min(previous.position, rows.length - 1))
+        // 校验保证 input.stages 至少一个阶段，rows 非空：下标一定落在合法位置
+        const target = rows[Math.min(previous.position, rows.length - 1)]
         facts.push(
           draft('task.moved', {
-            task: { ...task, currentStageId: target?.id ?? null },
+            task: { ...task, currentStageId: target.id },
             from: stageId,
-            to: target?.id ?? null,
+            to: target.id,
           }),
         )
       }
@@ -562,7 +641,10 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         createdAt: now,
         updatedAt: now,
       }
-      return done([draft('task.created', { task })])
+      const facts: FactDraft[] = [draft('task.created', { task })]
+      // 进入效果：首阶段是 agent 时立刻入队一条 run（与旧宿主 applyStageEffects 同口径）
+      facts.push(...entryRunFacts(view, task, now, env, OWNER))
+      return done(facts)
     }
 
     case 'task.move': {
@@ -579,9 +661,14 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       if (!target) return reject('not_found', '目标阶段无效: ' + input.stageId)
       const next = moveTaskToStage(task, target.id, flow).task
       const moved: Task = { ...next, updatedAt: now }
-      return done([
+      const facts: FactDraft[] = [
         draft('task.moved', { task: moved, from: task.currentStageId, to: moved.currentStageId }),
-      ])
+      ]
+      // 进入效果：落点阶段的 agent 入口每次进入都重新建 run；原地（from=to）不重建
+      if (moved.currentStageId !== task.currentStageId) {
+        facts.push(...entryRunFacts(view, moved, now, env, OWNER))
+      }
+      return done(facts)
     }
 
     case 'task.complete': {
@@ -629,6 +716,21 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       return done(heartbeatFacts(view, input.runId, input.leaseId, now, env.limits, HOST_SCHEDULER))
     }
 
+    case 'run.frames': {
+      const run = view.runs.get(input.runId)
+      // run 已终态 / 已删 / 轮次变了：帧无处可写，静默丢弃（数据源仍是 run.frames 事实，
+      // 丢了也不影响终态；不产 reject，避免宿主 flush 时把 run 判死）
+      if (!run || run.status !== 'running' || run.turn !== input.turn) return done([])
+      return done([
+        {
+          type: 'run.frames',
+          actor: HOST_SCHEDULER,
+          at: now,
+          payload: { runId: input.runId, turn: input.turn, frames: input.frames },
+        },
+      ])
+    }
+
     case 'run.receipt': {
       const run = view.runs.get(input.runId)
       // 回执对不上任何 run（任务已删 / 宿主重放）：报 not_found，不伪造审计事实
@@ -643,7 +745,16 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       }
       const settled = settledRun(run, input.receipt, now)
       const facts: FactDraft[] = [...settlementFacts(settled, now, HOST_SCHEDULER)]
-      if (run.purpose === 'stage') facts.push(...stageTransitionFacts(view, settled, now))
+      if (run.purpose === 'stage') {
+        const transition = stageTransitionFacts(view, settled, now)
+        facts.push(...transition)
+        // 进入效果：流转到目标阶段后若目标阶段是 agent 入口，立刻入队下一轮（形成链条）
+        for (const fact of transition) {
+          if (fact.type !== 'task.moved') continue
+          const movedTask = (fact.payload as { task: Task }).task
+          facts.push(...entryRunFacts(view, movedTask, now, env, HOST_SCHEDULER))
+        }
+      }
       if (run.purpose === 'chat') facts.push(...chatMessageFacts(run, settled, now, env))
       return done(facts)
     }

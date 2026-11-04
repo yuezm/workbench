@@ -103,6 +103,15 @@ for (const { file, text } of added) {
 const deletedSet = new Set(deleted)
 const sourceOf = (f) =>
   f.replace(/\.(test|spec)\.(ts|tsx)$/, '.$2').replace(/_test\.(go|py)$/, '.$1')
+// 测试与源码同构镜像：源码在 src/<layer>/、测试在 tests/<layer>/ 时，删测试的「被测源码」
+// 不在同目录。两处都查，才能识别「源码与其测试一起删除」= 死代码清理，而不是放松门槛。
+const sourceCandidates = (f) => {
+  const candidates = [sourceOf(f)]
+  if (f.startsWith('tests/')) {
+    candidates.push('src/' + f.slice('tests/'.length).replace(/\.(test|spec)\.(ts|tsx)$/, '.$2'))
+  }
+  return candidates
+}
 // 测试目录搬家（src/**.test.ts → tests/**.test.ts）：旧路径删除 + 新路径新增 = 迁移，不是删测试。
 // git 有时识别不出 rename（相似度阈值），此时会退化成 delete + add，用路径对应关系兜底。
 const migratedCounterpart = (f) => {
@@ -114,7 +123,7 @@ const migratedCounterpart = (f) => {
 }
 for (const f of deleted) {
   if (!isTest(f)) continue
-  if (deletedSet.has(sourceOf(f))) continue
+  if (sourceCandidates(f).some((source) => deletedSet.has(source))) continue
   if (migratedCounterpart(f)) continue
   flag('test-deleted', f, 'file deleted')
 }

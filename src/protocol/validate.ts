@@ -13,6 +13,7 @@ import {
   PROBE_STATES,
   PROTOCOL_FAMILIES,
   RUN_ERROR_CODES,
+  RUN_EVENT_TYPES,
   RUN_TERMINAL_STATUSES,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
@@ -61,6 +62,10 @@ export const COMMAND_LIMITS = {
   iso: 64,
   /** token 用量上限（单次运行不会超过） */
   tokens: 1_000_000_000_000,
+  /** 单条 `run.frames` 输入的帧数上限（与 `Limits.maxFramesPerBatch` 同值；超出由宿主分包） */
+  frames: 500,
+  /** 帧 seq 上限（宿主按 run 全局单调分配，防御性上界） */
+  frameSeq: 1_000_000_000,
 } as const
 
 type Obj = Record<string, unknown>
@@ -362,6 +367,39 @@ const checkRawEvent = (value: unknown, label: string): Check => {
   )
 }
 
+/** 运行帧（`run.frames` 的单帧）：`seq` 由宿主分配，`type` 是事件类型枚举，其余为可选负载。 */
+const checkFrame = (value: unknown, label: string): Check => {
+  const frame = asRecord(value)
+  if (!frame) return `${label} 必须是对象`
+  return (
+    requiredId(frame.runId, `${label}.runId`) ??
+    integerIn(frame.seq, `${label}.seq`, 1, COMMAND_LIMITS.frameSeq) ??
+    requiredEnum(frame.type, `${label}.type`, RUN_EVENT_TYPES) ??
+    optionalString(frame.text, `${label}.text`) ??
+    optionalText(frame.tool, `${label}.tool`, COMMAND_LIMITS.name) ??
+    optionalText(frame.callId, `${label}.callId`, COMMAND_LIMITS.id) ??
+    optionalString(frame.input, `${label}.input`) ??
+    optionalString(frame.output, `${label}.output`) ??
+    optionalBoolean(frame.isError, `${label}.isError`) ??
+    optionalText(frame.status, `${label}.status`, COMMAND_LIMITS.name)
+  )
+}
+
+/** 帧批：1 帧起、≤ `frames` 帧；每帧的 `runId` 必须与输入一致（防跨 run 串帧）。 */
+const checkFrames = (value: unknown, runId: unknown): Check => {
+  if (!Array.isArray(value)) return 'frames 必须是数组'
+  if (value.length === 0) return 'frames 至少 1 帧'
+  if (value.length > COMMAND_LIMITS.frames) return `frames 最多 ${COMMAND_LIMITS.frames} 帧`
+  for (let i = 0; i < value.length; i += 1) {
+    const error = checkFrame(value[i], `frames[${i}]`)
+    if (error) return error
+  }
+  for (const frame of value as Array<Record<string, unknown>>) {
+    if (frame.runId !== runId) return 'frames[*].runId 必须与 runId 一致'
+  }
+  return null
+}
+
 /** 执行器回执：`leaseId` / `turn` 必填（D15），其余按 SPEC-plugins 逐项校验。 */
 const checkReceipt = (value: unknown): Check => {
   const receipt = asRecord(value)
@@ -406,6 +444,12 @@ const checkHostPayload = (type: HostInputName, input: Obj): Check => {
       )
     case 'run.receipt':
       return requiredId(input.runId, 'runId') ?? checkReceipt(input.receipt)
+    case 'run.frames':
+      return (
+        requiredId(input.runId, 'runId') ??
+        integerIn(input.turn, 'turn', 1, COMMAND_LIMITS.turn) ??
+        checkFrames(input.frames, input.runId)
+      )
     case 'run.host_settled':
       return (
         requiredId(input.runId, 'runId') ??

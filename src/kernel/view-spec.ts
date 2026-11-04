@@ -39,10 +39,11 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'runtime.probed':
       return ['runtimes']
     case 'task.create':
-      return ['workflows', 'workflow_stages']
+      // 进入效果要判定落点是否 agent 入口并拼提示词 → 需要智能体与运行时配置
+      return ['workflows', 'workflow_stages', 'agents', 'runtimes']
     case 'task.move':
     case 'task.complete':
-      return ['tasks', 'workflows', 'workflow_stages']
+      return ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
     case 'task.remove':
       return ['tasks']
     case 'run.claim':
@@ -51,9 +52,12 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'run.heartbeat':
       // 只校验租约是否匹配，不改其它表
       return ['runs']
+    case 'run.frames':
+      // 帧入账要确认 run 仍在执行且轮次匹配；帧本身只写 run_events
+      return ['runs']
     case 'run.receipt':
-      // 终态写 runs；阶段 run 还要判定阶段流转（任务 + 工作流阶段）
-      return ['runs', 'tasks', 'workflows', 'workflow_stages']
+      // 终态写 runs；阶段 run 还要判定阶段流转与下一轮进入效果（任务 / 阶段 / 智能体 / 运行时）
+      return ['runs', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
     case 'run.host_settled':
     case 'run.cancel':
       return ['runs']

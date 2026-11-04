@@ -1,0 +1,754 @@
+// @vitest-environment node
+import type { DatabaseSync } from 'node:sqlite'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { decide } from '../../src/kernel/decide'
+import { project } from '../../src/kernel/project'
+import { viewSpec } from '../../src/kernel/view-spec'
+import type { KernelPort } from '../../src/kernel/types'
+import type {
+  Agent,
+  RunRow,
+  Runtime,
+  RuntimeInput,
+  Task,
+  WorkflowStage,
+} from '../../src/protocol/entities'
+import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../../src/protocol/executor'
+import { openDatabase } from '../../src/host/db'
+import { createScheduler, type Scheduler, type SchedulerTimer } from '../../src/host/scheduler'
+import { createStore, type Store } from '../../src/host/store/index'
+
+const kernel: KernelPort = { decide, project, viewSpec }
+
+interface World {
+  db: DatabaseSync
+  store: Store
+}
+
+let world: World
+let commandSeq = 0
+
+const nextCommandId = (): string => {
+  commandSeq += 1
+  return `cmd-${commandSeq}`
+}
+
+const usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }
+
+/** 假定时器：记录 interval 回调，测试手动触发心跳；不真的挂系统定时器。 */
+function fakeTimer(): SchedulerTimer & { handlers: Array<() => void>; cleared: number } {
+  const handlers: Array<() => void> = []
+  const state = { cleared: 0 }
+  return {
+    handlers,
+    get cleared() {
+      return state.cleared
+    },
+    setInterval: (callback) => {
+      handlers.push(callback)
+      return { handle: handlers.length - 1 }
+    },
+    clearInterval: () => {
+      state.cleared += 1
+    },
+  }
+}
+
+/** 成功/失败回执：leaseId 与 turn 由 Turn 原样带回。 */
+const receiptOf = (turn: Turn, over: Partial<Receipt> = {}): Receipt => ({
+  status: 'succeeded',
+  leaseId: turn.leaseId,
+  turn: turn.turn,
+  output: 'ok',
+  usage,
+  durationMs: 7,
+  exitCode: 0,
+  sessionId: 'sess-1',
+  ...over,
+})
+
+const portOf = (
+  handler: (turn: Turn, io: ExecutorIO) => Promise<Receipt> | Receipt,
+): ExecutorPort => ({
+  run: async (turn, io) => handler(turn, io),
+})
+
+interface Deferred {
+  promise: Promise<void>
+  resolve: () => void
+}
+
+function deferred(): Deferred {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+function makeScheduler(
+  port: ExecutorPort,
+  overrides: Partial<Parameters<typeof createScheduler>[0]> = {},
+): Scheduler {
+  return createScheduler({
+    dispatch: (input) => world.store.dispatch(input),
+    runtimes: () => world.store.query('runtimes.all'),
+    executors: { forRuntime: () => port },
+    timer: fakeTimer(),
+    limits: { heartbeatMs: 1_000, runTimeoutMs: 10_000, maxFramesPerBatch: 500 },
+    ...overrides,
+  })
+}
+
+// ---------- 种子（全部走真实决策路径，run 由内核进入效果产生） ----------
+
+function createRuntime(input: Partial<RuntimeInput> & { name: string }): Runtime {
+  const facts = world.store.dispatch({
+    type: 'runtime.create',
+    commandId: nextCommandId(),
+    input,
+  }).facts
+  const id = (
+    facts.find((fact) => fact.type === 'runtime.created')?.payload as { runtime: Runtime }
+  ).runtime.id
+  return world.store.query('runtimes.all').find((runtime) => runtime.id === id) as Runtime
+}
+
+function createAgent(runtimeId: string, systemPrompt = 'sys'): Agent {
+  const facts = world.store.dispatch({
+    type: 'agent.create',
+    commandId: nextCommandId(),
+    input: { name: 'coder', runtimeId, systemPrompt },
+  }).facts
+  const id = (facts.find((fact) => fact.type === 'agent.created')?.payload as { agent: Agent })
+    .agent.id
+  return world.store.query('agents.all').find((agent) => agent.id === id) as Agent
+}
+
+interface Seeded {
+  runtime: Runtime
+  agent: Agent
+  task: Task
+  workflowId: string
+  stages: { first: string; second: string }
+  runId: string
+}
+
+/**
+ * 建一条「运行时 + 智能体 + 两阶段工作流（首阶段 agent、次阶段 none）+ 任务」的世界；
+ * 任务进入 agent 首阶段时，内核自动入队一条 run（T10 把进入效果搬进内核）。
+ */
+function seed(maxConcurrent = 1, runtimePatch: Partial<RuntimeInput> = {}): Seeded {
+  const runtime = createRuntime({ name: 'rt-' + commandSeq, maxConcurrent, ...runtimePatch })
+  const agent = createAgent(runtime.id)
+  const workflowFacts = world.store.dispatch({
+    type: 'workflow.create',
+    commandId: nextCommandId(),
+    input: {
+      name: 'w',
+      stages: [
+        { name: '执行', entryMode: 'agent', agentId: agent.id },
+        { name: '完成', entryMode: 'none' },
+      ],
+    },
+  }).facts
+  const workflowId = (
+    workflowFacts.find((fact) => fact.type === 'workflow.created')?.payload as {
+      workflow: { id: string }
+    }
+  ).workflow.id
+  const stageIds = workflowFacts
+    .filter((fact) => fact.type === 'stage.created')
+    .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
+    .sort((left, right) => left.position - right.position)
+    .map((stage) => stage.id)
+  const taskFacts = world.store.dispatch({
+    type: 'task.create',
+    commandId: nextCommandId(),
+    input: { title: 'T', description: 'd', workflowId },
+  }).facts
+  const task = (taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task })
+    .task
+  const run = dbRun(task.id)
+  return {
+    runtime,
+    agent,
+    task,
+    workflowId,
+    stages: { first: stageIds[0], second: stageIds[1] },
+    runId: String(run.id),
+  }
+}
+
+/** 任务的第 index 条 run 行（按入队顺序）。 */
+function dbRun(taskId: string, index = 0): Record<string, unknown> {
+  const rows = world.db
+    .prepare('SELECT * FROM runs WHERE task_id = ? ORDER BY created_at, rowid')
+    .all(taskId) as unknown as Array<Record<string, unknown>>
+  const row = rows[index]
+  if (!row) throw new Error('没有 run 行')
+  return row
+}
+
+const runById = (runId: string): Record<string, unknown> | undefined =>
+  world.db.prepare('SELECT * FROM runs WHERE id = ?').get(runId) as unknown as
+    Record<string, unknown> | undefined
+
+const eventRows = (runId: string): Array<Record<string, unknown>> =>
+  world.db
+    .prepare('SELECT * FROM run_events WHERE run_id = ? ORDER BY seq')
+    .all(runId) as unknown as Array<Record<string, unknown>>
+
+const runStatuses = (taskId: string): string[] =>
+  (
+    world.db
+      .prepare('SELECT status FROM runs WHERE task_id = ? ORDER BY created_at, rowid')
+      .all(taskId) as unknown as Array<{ status: string }>
+  ).map((row) => row.status)
+
+const currentStage = (taskId: string): string | null =>
+  (world.store.query('task.byId', { taskId }) as Task | null)?.currentStageId ?? null
+
+const dispatch = (input: unknown): void => {
+  world.store.dispatch(input)
+}
+
+beforeEach(() => {
+  commandSeq = 0
+  const db = openDatabase(':memory:')
+  const store = createStore({ db, kernel })
+  store.ensureProjection()
+  world = { db, store }
+})
+
+afterEach(() => world.db.close())
+
+describe('createScheduler：执行一轮', () => {
+  it('成功：run 全字段落库、任务推进到下一阶段', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(portOf((turn) => receiptOf(turn, { output: 'ab' })))
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const run = runById(seeded.runId)
+    expect(run).toMatchObject({
+      status: 'succeeded',
+      output: 'ab',
+      error: null,
+      error_code: null,
+      exit_code: 0,
+      session_id: 'sess-1',
+      duration_ms: 7,
+      lease_id: null,
+      deadline_at: null,
+    })
+    expect(typeof run?.started_at).toBe('string')
+    expect(typeof run?.ended_at).toBe('string')
+    expect(run?.usage_json).toBe(JSON.stringify(usage))
+    expect(currentStage(seeded.task.id)).toBe(seeded.stages.second)
+  })
+
+  it('帧：io.emit 的事件按宿主 seq 入 run_events，超出单批上限分包', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        io.emit({ seq: 99, type: 'text', text: 'a' })
+        io.emit({ seq: 100, type: 'text', text: 'b' })
+        io.emit({ seq: 101, type: 'status', status: 'running' })
+        return receiptOf(turn)
+      }),
+      { limits: { heartbeatMs: 1_000, runTimeoutMs: 10_000, maxFramesPerBatch: 2 } },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const frames = eventRows(seeded.runId)
+    expect(frames.map((row) => row.seq)).toEqual([1, 2, 3])
+    expect(JSON.parse(String(frames[0]?.payload_json))).toEqual({ text: 'a' })
+    expect(JSON.parse(String(frames[2]?.payload_json))).toEqual({ status: 'running' })
+    const factCount = (
+      world.db
+        .prepare("SELECT COUNT(*) AS n FROM facts WHERE type = 'run.frames'")
+        .get() as unknown as {
+        n: number
+      }
+    ).n
+    expect(factCount).toBe(2)
+  })
+
+  it('帧 seq 从已有最大 seq 继续（重跑不覆盖历史）', async () => {
+    const seeded = seed()
+    world.db
+      .prepare(
+        'INSERT INTO run_events (run_id, seq, type, payload_json, created_at) VALUES (?,?,?,?,?)',
+      )
+      .run(seeded.runId, 5, 'text', JSON.stringify({ text: 'old' }), '2026-01-01T00:00:00.000Z')
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        io.emit({ seq: 1, type: 'text', text: 'new' })
+        return receiptOf(turn)
+      }),
+      { lastFrameSeq: () => 5 },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(eventRows(seeded.runId).map((row) => row.seq)).toEqual([5, 6])
+  })
+
+  it('不注入 timer / limits / lastFrameSeq：用默认值也能跑完', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(
+      portOf((turn) => receiptOf(turn)),
+      {
+        timer: undefined,
+        limits: undefined,
+        lastFrameSeq: undefined,
+      },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({ status: 'succeeded' })
+  })
+
+  it('执行器抛错：宿主兜底 failed/executor_lost，run 不悬空', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(
+      portOf(() => {
+        throw new Error('执行器不可达')
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'failed',
+      error_code: 'executor_lost',
+      error: '执行器不可达',
+      lease_id: null,
+    })
+  })
+
+  it('取消：abort 信号后按回执落 cancelled', async () => {
+    const seeded = seed()
+    let observed: AbortSignal | null = null
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        observed = turn.signal
+        await gate.promise
+        return receiptOf(turn, { status: 'cancelled', output: '', errorCode: 'cancelled' })
+      }),
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    scheduler.cancel(seeded.runId)
+    gate.resolve()
+    await scheduler.idle()
+
+    expect((observed as unknown as AbortSignal).aborted).toBe(true)
+    expect(runById(seeded.runId)).toMatchObject({ status: 'cancelled', error_code: 'cancelled' })
+  })
+
+  it('取消时执行器抛错：兜底 cancelled 而不是 executor_lost', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async () => {
+        await gate.promise
+        throw new Error('进程被终止')
+      }),
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    scheduler.cancel(seeded.runId)
+    gate.resolve()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'cancelled',
+      error_code: 'cancelled',
+      error: '进程被终止',
+    })
+  })
+
+  it('心跳：定时续租延长 lease_until，结束后清掉定时器', async () => {
+    const seeded = seed()
+    const timer = fakeTimer()
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    const before = String(runById(seeded.runId)?.lease_until)
+    expect(timer.handlers).toHaveLength(1)
+    timer.handlers[0]()
+    const after = String(runById(seeded.runId)?.lease_until)
+    expect(after > before).toBe(true)
+
+    gate.resolve()
+    await scheduler.idle()
+    expect(timer.cleared).toBe(1)
+  })
+
+  it('任务在 run 期间被删除：回执无处落库也不抛，执行记录随事实删除', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        await gate.promise
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    dispatch({ type: 'task.remove', commandId: nextCommandId(), id: seeded.task.id })
+    gate.resolve()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toBeUndefined()
+    expect(scheduler.active()).toEqual([])
+  })
+})
+
+describe('createScheduler：领取与并发', () => {
+  it('同一运行时按 maxConcurrent 限流，完成后自动领取下一条', async () => {
+    const seeded = seed(1)
+    const secondFacts = world.store.dispatch({
+      type: 'task.create',
+      commandId: nextCommandId(),
+      input: { title: 'T2', workflowId: seeded.workflowId, stageId: seeded.stages.first },
+    }).facts
+    const secondTaskId = (
+      secondFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task }
+    ).task.id
+
+    const releases = new Map<string, Deferred>()
+    let peak = 0
+    let active = 0
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        active += 1
+        peak = Math.max(peak, active)
+        const gate = deferred()
+        releases.set(turn.runId, gate)
+        await gate.promise
+        active -= 1
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    expect(peak).toBe(1)
+    expect(runStatuses(seeded.task.id)).toEqual(['running'])
+    expect(runStatuses(secondTaskId)).toEqual(['queued'])
+
+    const firstRunId = [...releases.keys()][0] as string
+    releases.get(firstRunId)?.resolve()
+    await vi.waitFor(() => expect(releases.size).toBe(2))
+    const secondRunId = [...releases.keys()][1] as string
+    releases.get(secondRunId)?.resolve()
+    await scheduler.idle()
+
+    expect(peak).toBe(1)
+    expect(runStatuses(seeded.task.id)).toEqual(['succeeded'])
+    expect(runStatuses(secondTaskId)).toEqual(['succeeded'])
+  })
+
+  it('不同运行时并行执行', async () => {
+    const first = seed(1)
+    const second = seed(1)
+    const releases = new Map<string, Deferred>()
+    let peak = 0
+    let active = 0
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        active += 1
+        peak = Math.max(peak, active)
+        const gate = deferred()
+        releases.set(turn.runId, gate)
+        await gate.promise
+        active -= 1
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    expect(peak).toBe(2)
+
+    for (const gate of releases.values()) gate.resolve()
+    await scheduler.idle()
+    expect(runById(first.runId)?.status).toBe('succeeded')
+    expect(runById(second.runId)?.status).toBe('succeeded')
+  })
+
+  it('重复 wake 不会重复领取或重复执行', async () => {
+    const seeded = seed()
+    const execute = vi.fn((turn: Turn) => receiptOf(turn))
+    const scheduler = makeScheduler(portOf(execute))
+
+    scheduler.wake()
+    scheduler.wake()
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(runById(seeded.runId)?.status).toBe('succeeded')
+  })
+
+  it('停用的运行时不会被领取：run 保持 queued，执行器不调用', async () => {
+    const seeded = seed()
+    dispatch({
+      type: 'runtime.update',
+      commandId: nextCommandId(),
+      id: seeded.runtime.id,
+      patch: { enabled: false },
+    })
+    const execute = vi.fn()
+    const scheduler = makeScheduler(portOf(execute))
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(runById(seeded.runId)).toMatchObject({ status: 'queued' })
+  })
+
+  it('接管已领取的 run：运行时缺失时由宿主兜底 failed/runtime_missing', async () => {
+    const seeded = seed()
+    world.store.dispatch({ type: 'run.claim', runtimeId: seeded.runtime.id, capacity: 1 })
+    const claimed = runById(seeded.runId) as Record<string, unknown>
+    expect(claimed.status).toBe('running')
+
+    // 运行时被删后 runs.runtime_id 置空（FK 的 ON DELETE SET NULL）：start 判 missing
+    world.db.exec('PRAGMA foreign_keys = OFF')
+    world.db.prepare('UPDATE runs SET runtime_id = NULL WHERE id = ?').run(seeded.runId)
+    world.db.exec('PRAGMA foreign_keys = ON')
+
+    const execute = vi.fn()
+    const scheduler = makeScheduler(portOf(execute))
+    scheduler.start({
+      id: seeded.runId,
+      runtimeId: null,
+      leaseId: String(claimed.lease_id),
+      turn: Number(claimed.turn),
+      status: 'running',
+    } as unknown as RunRow)
+    await scheduler.idle()
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'failed',
+      error_code: 'runtime_missing',
+    })
+  })
+
+  it('接管已领取的 run：运行时已停用时兜底 failed/runtime_disabled', async () => {
+    const seeded = seed()
+    world.store.dispatch({ type: 'run.claim', runtimeId: seeded.runtime.id, capacity: 1 })
+    const claimed = runById(seeded.runId) as Record<string, unknown>
+    dispatch({
+      type: 'runtime.update',
+      commandId: nextCommandId(),
+      id: seeded.runtime.id,
+      patch: { enabled: false },
+    })
+
+    const execute = vi.fn()
+    const scheduler = makeScheduler(portOf(execute))
+    scheduler.start({
+      id: seeded.runId,
+      runtimeId: seeded.runtime.id,
+      leaseId: String(claimed.lease_id),
+      turn: Number(claimed.turn),
+      status: 'running',
+    } as unknown as RunRow)
+    await scheduler.idle()
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'failed',
+      error_code: 'runtime_disabled',
+    })
+  })
+})
+
+describe('createScheduler：阶段链', () => {
+  it('链式阶段：成功后自动进入下一 agent 阶段并跑完', async () => {
+    const runtime = createRuntime({ name: 'chain', maxConcurrent: 1 })
+    const agent = createAgent(runtime.id)
+    const workflowFacts = world.store.dispatch({
+      type: 'workflow.create',
+      commandId: nextCommandId(),
+      input: {
+        name: 'chain',
+        stages: [
+          { name: '执行1', entryMode: 'agent', agentId: agent.id },
+          { name: '执行2', entryMode: 'agent', agentId: agent.id },
+        ],
+      },
+    }).facts
+    const workflowId = (
+      workflowFacts.find((fact) => fact.type === 'workflow.created')?.payload as {
+        workflow: { id: string }
+      }
+    ).workflow.id
+    const taskFacts = world.store.dispatch({
+      type: 'task.create',
+      commandId: nextCommandId(),
+      input: { title: 'T', workflowId },
+    }).facts
+    const taskId = (
+      taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task }
+    ).task.id
+
+    const execute = vi.fn((turn: Turn) => receiptOf(turn))
+    const scheduler = makeScheduler(portOf(execute))
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect(runStatuses(taskId)).toEqual(['succeeded', 'succeeded'])
+    expect((world.store.query('task.byId', { taskId }) as Task).status).toBe('completed')
+  })
+})
+
+describe('createScheduler：诊断', () => {
+  it('active() 暴露执行中的 run；没有执行时 idle 立即完成', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        await gate.promise
+        return receiptOf(turn)
+      }),
+    )
+
+    await scheduler.idle()
+    scheduler.wake()
+    await Promise.resolve()
+    expect(scheduler.active()).toEqual([seeded.runId])
+
+    gate.resolve()
+    await scheduler.idle()
+    expect(scheduler.active()).toEqual([])
+  })
+})
+
+describe('createScheduler：Turn 与旁路会话', () => {
+  it('Turn 取运行时配置的模型/推理强度；io.session 的会话兜底回执', async () => {
+    const seeded = seed(1, { model: 'provider/x', reasoningEffort: 'high', workdir: 'C:/work' })
+    let captured: Turn | null = null
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        captured = turn
+        io.session?.('sess-observed')
+        return receiptOf(turn, { sessionId: undefined })
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const turn = captured as unknown as Turn
+    expect(turn.model).toEqual({ provider: 'provider', id: 'x' })
+    expect(turn.effort).toBe('high')
+    expect(turn.cwd).toBe('C:/work')
+    expect(turn.timeoutMs).toBe(10_000)
+    expect(turn.runId).toBe(seeded.runId)
+    expect(runById(seeded.runId)?.session_id).toBe('sess-observed')
+  })
+
+  it('wake 重入：领取过程中再次 wake 只合并在下一轮，不重复执行', async () => {
+    const seeded = seed(1)
+    const box: { current?: Scheduler } = {}
+    let reentered = false
+    const execute = vi.fn((turn: Turn) => receiptOf(turn))
+    const scheduler = makeScheduler(portOf(execute), {
+      dispatch: (input) => {
+        if ((input as { type?: string }).type === 'run.claim' && !reentered) {
+          reentered = true
+          box.current?.wake()
+        }
+        return world.store.dispatch(input)
+      },
+    })
+    box.current = scheduler
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(reentered).toBe(true)
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(runById(seeded.runId)?.status).toBe('succeeded')
+  })
+})
+
+describe('createScheduler：防御性分支', () => {
+  it('同一 run 重复 start：第一次执行中不再重复派发', async () => {
+    const seeded = seed()
+    world.store.dispatch({ type: 'run.claim', runtimeId: seeded.runtime.id, capacity: 1 })
+    const claimed = runById(seeded.runId) as Record<string, unknown>
+    const row = {
+      id: seeded.runId,
+      runtimeId: seeded.runtime.id,
+      leaseId: String(claimed.lease_id),
+      turn: Number(claimed.turn),
+      status: 'running',
+    } as unknown as RunRow
+
+    const gate = deferred()
+    const execute = vi.fn(async (turn: Turn) => {
+      await gate.promise
+      return receiptOf(turn)
+    })
+    const scheduler = makeScheduler(portOf(execute))
+
+    scheduler.start(row)
+    scheduler.start(row)
+    await Promise.resolve()
+    expect(execute).toHaveBeenCalledTimes(1)
+
+    gate.resolve()
+    await scheduler.idle()
+    expect(runById(seeded.runId)?.status).toBe('succeeded')
+  })
+
+  it('异常数据：租约为空的 run 不挂心跳，执行器照常派发', async () => {
+    const seeded = seed()
+    world.store.dispatch({ type: 'run.claim', runtimeId: seeded.runtime.id, capacity: 1 })
+    const timer = fakeTimer()
+    const execute = vi.fn((turn: Turn) => receiptOf(turn))
+    const scheduler = makeScheduler(portOf(execute), { timer })
+
+    scheduler.start({
+      id: seeded.runId,
+      runtimeId: seeded.runtime.id,
+      leaseId: null,
+      turn: 1,
+      status: 'running',
+    } as unknown as RunRow)
+    await scheduler.idle()
+
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(timer.handlers).toHaveLength(0)
+  })
+})

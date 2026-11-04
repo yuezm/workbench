@@ -6,7 +6,10 @@ import { nextWakeAt } from '../kernel/next-wake'
 import { project } from '../kernel/project'
 import { viewSpec } from '../kernel/view-spec'
 import type { KernelPort } from '../kernel/types'
-import { createStore } from '../host/store/index'
+import { createClock } from '../host/clock'
+import { createEffects } from '../host/effects'
+import { createScheduler, type Scheduler } from '../host/scheduler'
+import { createStore, DEFAULT_LIMITS } from '../host/store/index'
 import { importLegacyIfNeeded } from '../host/store/import'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
@@ -14,7 +17,7 @@ import { openDb } from './ai-workflow/db'
 import { Repository } from './ai-workflow/repository'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
 import { ChatService } from './ai-workflow/chat'
-import { Runner } from './ai-workflow/runner'
+import { createRuntimeExecutors } from './ai-workflow/executor-port'
 import { createRuntimeBackend, type RuntimeBackend } from './ai-workflow/runtime/registry'
 import type { RuntimeProtocolFamily } from '../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
@@ -96,11 +99,22 @@ if (app.requestSingleInstanceLock()) {
     const runtimeDeps = { sessionRoot: sessionsDir }
     const backendFor = (family: RuntimeProtocolFamily): RuntimeBackend =>
       createRuntimeBackend(family, runtimeDeps)
-    const runner = new Runner({
-      repo: aiRepo,
+    // 执行器端口：调度器只认 `ExecutorPort`（host/executor），具体 dsh 实现在这里装配
+    const executors = createRuntimeExecutors(runtimeDeps)
+    // 写入口与提交后分发：effects.dispatch 是 IPC / scheduler / clock 的唯一写路径；
+    // effects 先建、scheduler 后建，靠闭包惰性取（getter 首次调用发生在装配完成之后）
+    const effects = createEffects({
       store,
+      scheduler: () => scheduler,
       notifyChanged: broadcastChanged,
-      backendFor,
+    })
+    const scheduler: Scheduler = createScheduler({
+      dispatch: (input) => effects.dispatch(input),
+      runtimes: () => store.query('runtimes.all'),
+      executors,
+      limits: DEFAULT_LIMITS,
+      // 重启后重跑同一 run 时帧 seq 继续全局单调（T12 会把这里换成投影内的最大 seq）
+      lastFrameSeq: (runId) => aiRepo.runEventsList(runId).at(-1)?.seq ?? 0,
     })
     const chat = new ChatService({
       repo: aiRepo,
@@ -111,13 +125,22 @@ if (app.requestSingleInstanceLock()) {
     })
     registerAiWorkflowIpc({
       store,
+      dispatch: (input) => effects.dispatch(input),
       repo: aiRepo,
-      notifyChanged: broadcastChanged,
-      onQueue: (runId) => runner.enqueue(runId),
       chat,
       backendFor,
     })
-    runner.resumeQueued()
+    // 启动：先领取遗留的 queued run，再挂唯一定时器（对账 T13 接在这之前）
+    scheduler.wake()
+    const clock = createClock({
+      store: {
+        dispatch: (input) => effects.dispatch(input),
+        nextWakeAt: (at) => store.nextWakeAt(at),
+      },
+      now: () => new Date().toISOString(),
+      onTick: () => scheduler.wake(),
+    })
+    clock.start()
 
     createWindow()
 

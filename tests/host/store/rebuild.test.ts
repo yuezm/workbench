@@ -159,8 +159,8 @@ describe('重建等价：≥200 条混合命令', () => {
     }
     const mainTasks = store.query('tasks.byWorkflow', { workflowId: main.id })
     const firstTaskId = must(mainTasks[0], '主任务 0').id
-    send({ type: 'task.move', id: firstTaskId, stageId: main.stages[1].id })
     send({ type: 'task.move', id: firstTaskId, stageId: main.stages[2].id })
+    send({ type: 'task.move', id: must(mainTasks[3], '主任务 3').id, stageId: main.stages[0].id })
     send({ type: 'task.complete', id: must(mainTasks[1], '主任务 1').id })
     send({ type: 'task.remove', id: must(mainTasks[2], '主任务 2').id })
     send({
@@ -175,6 +175,18 @@ describe('重建等价：≥200 条混合命令', () => {
           { name: '复盘', entryMode: 'none' },
         ],
       },
+    })
+
+    // 进入 agent 阶段 = 执行中（内核会入队 run）：放在 workflow.update 之后，
+    // 否则阶段变更会被「有执行中的任务」守卫拒绝
+    const updatedMain = findWorkflow(store, '主流程（改）')
+    send({
+      type: 'task.move',
+      id: firstTaskId,
+      stageId: must(
+        updatedMain.stages.find((item) => item.name === '实现'),
+        '实现阶段',
+      ).id,
     })
 
     // 临时流程：连带阶段与任务一起删除（workflow.remove 显式产出 tombstone）

@@ -95,9 +95,9 @@
 
 ## 检查点 A：基础设施完成
 
-- [ ] T1–T6 完成；`pnpm check` 全绿（覆盖率不低于基线）
-- [ ] 五张投影表可由事实重建，导入幂等；旧 `migrate.ts` 删除
-- [ ] `src/kernel` 纯度测试仍绿；`decide/project` 无 IO/时钟/随机
+- [x] T1–T6 完成；`pnpm check` 全绿（覆盖率不低于基线）
+- [x] 五张投影表可由事实重建，导入幂等；旧 `migrate.ts` 删除
+- [x] `src/kernel` 纯度测试仍绿；`decide/project` 无 IO/时钟/随机
 
 ## 阶段 2：收口与验收
 
@@ -107,10 +107,10 @@
 
 **验收标准：**
 
-- [ ] IPC 行为不变（现有 `ipc.test.ts` 断言全绿，仅装配方式变化）
-- [ ] `repository` 中 `runtimeCreate/Update/Remove/SetProbe`、`agent*`、`workflow*`、`taskCreate/Update/Remove` 删除；对应写 SQL 只在 `host/store`
-- [ ] `engine.ts` 不再含阶段规则（规则只在 kernel），仅执行「建 run + 回调调度」
-- [ ] 全局搜索确认无第二处写五表（`INSERT INTO tasks|workflows|workflow_stages|agents|runtimes` 只在 store）
+- [x] IPC 行为不变（现有 `ipc.test.ts` 断言全绿，仅装配方式变化）
+- [x] `repository` 中 `runtimeCreate/Update/Remove/SetProbe`、`agent*`、`workflow*`、`taskCreate/Update/Remove` 删除；对应写 SQL 只在 `host/store`
+- [x] `engine.ts` 不再含阶段规则（规则只在 kernel），仅执行「建 run + 回调调度」
+- [x] 全局搜索确认无第二处写五表（`INSERT INTO tasks|workflows|workflow_stages|agents|runtimes` 只在 store）
 
 **依赖：** T4、T5、T6 ｜ **涉及文件：** `src/main/ai-workflow/{ipc,engine}.ts`、`src/main/ai-workflow/repository.ts`、`src/host/task-effects.ts` ｜ **规模：** L
 
@@ -120,9 +120,9 @@
 
 **验收标准：**
 
-- [ ] `repository.ts` 处理 runs/run_events/chat 之外不再有五表 SQL；最终 `repository.ts` 可删除（runs/chat 部分后续 M2 再迁）
-- [ ] runner/chat 行为不变（`runner.test.ts`、`chat.test.ts` 全绿）
-- [ ] 测试迁移过程中不删断言、不改预期；被删 API 的覆盖由等价用例承担
+- [x] `repository.ts` 处理 runs/run_events/chat 之外不再有五表 SQL；最终 `repository.ts` 可删除（runs/chat 部分后续 M2 再迁）
+- [x] runner/chat 行为不变（`runner.test.ts`、`chat.test.ts` 全绿）
+- [x] 测试迁移过程中不删断言、不改预期；被删 API 的覆盖由等价用例承担
 
 **依赖：** T7 ｜ **涉及文件：** `src/main/ai-workflow/{runner,chat,repository}.ts`、测试 ｜ **规模：** M
 
@@ -132,10 +132,10 @@
 
 **验收标准：**
 
-- [ ] 随机事件序列（≥200 条）→ 实时投影 vs 重建投影逐表全等（含五表与 `run_events` 保留）
-- [ ] 强杀模拟：写完事实不应用投影即关闭 → 重启 `ensureProjection` 后与实时投影全等
-- [ ] `timeline(taskId)` 能还原创建/移动/完成的事实链；导入根标注正确
-- [ ] 投影集白名单外的表（`run_events`、聊天表）在重建后原样保留
+- [x] 随机事件序列（≥200 条）→ 实时投影 vs 重建投影逐表全等（含五表与 `run_events` 保留）
+- [x] 强杀模拟：写完事实不应用投影即关闭 → 重启 `ensureProjection` 后与实时投影全等
+- [x] `timeline(taskId)` 能还原创建/移动/完成的事实链；导入根标注正确
+- [x] 投影集白名单外的表（`run_events`、聊天表）在重建后原样保留
 
 **依赖：** T4、T5、T6 ｜ **涉及文件：** `src/host/store/*.test.ts`、`src/kernel/*.test.ts` ｜ **规模：** L
 
@@ -145,26 +145,26 @@
 
 **验收标准：**
 
-- [ ] 1 万事实重建 < 1 s（脚本或测试内计时，失败给可重复命令）
-- [ ] `pnpm check` 全绿、覆盖率不低于 99.60/96.71/99.39/99.79、改动行 ≥90%
-- [ ] `pnpm e2e` 全绿；真实 `pnpm dev` 启动后旧库直接可用（导入路径手动验收）
-- [ ] 备份进 M1 后恢复演练：把回滚点库复制回去 → 启动 → 五表数据完整
-- [ ] 更新 [refactor-plan](../docs/planning/refactor-plan.md)、[CAPABILITY-MAP](../docs/CAPABILITY-MAP.md)、`CONSTRAINTS.md` 基线
+- [x] 1 万事实重建 < 1 s（脚本或测试内计时，失败给可重复命令）
+- [x] `pnpm check` 全绿、覆盖率不低于 99.60/96.71/99.39/99.79、改动行 ≥90%
+- [x] `pnpm e2e` 全绿；真实 `pnpm dev` 启动后旧库直接可用（导入路径手动验收）
+- [x] 备份进 M1 后恢复演练：把回滚点库复制回去 → 启动 → 五表数据完整
+- [x] 更新 [refactor-plan](../docs/planning/refactor-plan.md)、[CAPABILITY-MAP](../docs/CAPABILITY-MAP.md)、`CONSTRAINTS.md` 基线
 
 **依赖：** T7、T8、T9 ｜ **涉及文件：** `docs/`、`tasks/` ｜ **规模：** S
 
 ## 进度记录（2026-11-04，分支 `refactor/m1-ledger`）
 
-| 任务 | 状态 | commit | 备注 |
-| ---- | ---- | ------ | ---- |
-| T1 host/db + schema | ✅ | `af85c38` | facts / projection_meta / 指纹 / withTx；DDL 逐列与改前一致 |
-| T2 protocol 契约 | ✅ | `7f12784` | entities/commands/facts/views/validate；shared 改为派生；`protocol/types.ts` 删除 |
-| T3/T4 kernel decide + project | ✅ | `ca56322` | 14 条命令、黄金用例 29 条；阶段规则只复用 stage-machine |
-| T5 host/store | ✅ | `ab449a3` | dispatch/query/ensureProjection/rebuild；假 kernel 可测；defer FK + stage position 兜底 |
-| T6 存量导入 | ✅ | `075edfc` | 五表分批 500 行 → `snapshot.imported`；幂等/回滚/重建等价；`migrate.ts` 删除 |
-| T7/T8 写路径切换 | ✅ | `7865ba6` | IPC→dispatch/query；engine→`host/task-effects`；repository 旧写方法删除；测试种子改真实 store |
-| T9 账本测试 | ⏳ | — | 重建等价/强杀重启/时间线（部分已由 T5/T6 覆盖），待补 10k 重建基准 |
-| T10 验收与收尾 | ⏳ | — | `pnpm check` 覆盖率收口中；e2e、文档、合并待做 |
+| 任务                          | 状态 | commit    | 备注                                                                                          |
+| ----------------------------- | ---- | --------- | --------------------------------------------------------------------------------------------- |
+| T1 host/db + schema           | ✅   | `af85c38` | facts / projection_meta / 指纹 / withTx；DDL 逐列与改前一致                                   |
+| T2 protocol 契约              | ✅   | `7f12784` | entities/commands/facts/views/validate；shared 改为派生；`protocol/types.ts` 删除             |
+| T3/T4 kernel decide + project | ✅   | `ca56322` | 14 条命令、黄金用例 29 条；阶段规则只复用 stage-machine                                       |
+| T5 host/store                 | ✅   | `ab449a3` | dispatch/query/ensureProjection/rebuild；假 kernel 可测；defer FK + stage position 兜底       |
+| T6 存量导入                   | ✅   | `075edfc` | 五表分批 500 行 → `snapshot.imported`；幂等/回滚/重建等价；`migrate.ts` 删除                  |
+| T7/T8 写路径切换              | ✅   | `7865ba6` | IPC→dispatch/query；engine→`host/task-effects`；repository 旧写方法删除；测试种子改真实 store |
+| T9 账本测试                   | ⏳   | —         | 重建等价/强杀重启/时间线（部分已由 T5/T6 覆盖），待补 10k 重建基准                            |
+| T10 验收与收尾                | ⏳   | —         | `pnpm check` 覆盖率收口中；e2e、文档、合并待做                                                |
 
 ### 实现偏差（执行中确认，均已写进 m1-plan）
 
@@ -176,3 +176,11 @@
 6. `timeline()` 只在内核提供（有单测），不进 `KernelPort`/store；M5 视图再暴露。
 7. 启动顺序：`importLegacyIfNeeded` → `ensureProjection`（先导入更安全，避免空事实时把存量当投影清掉）。
 8. `agents.remove` 被对话引用时错误文案退化为 SQLite FK 原文（删除仍被拒绝、数据不丢），M2 扩 View 后恢复可读文案。
+
+## M1 退出记录（2026-11-04，分支 `refactor/m1-ledger`）
+
+- 提交链：`af85c38`（host 基础设施）→ `7f12784`（protocol）→ `ca56322`（kernel decide/project）→ `ab449a3`（store）→ `075edfc`（存量导入，删 migrate）→ `7865ba6`（写路径切换）→ `5a23f60`（覆盖率收口）→ `f01240b`（账本专项测试）→ `6d043ed`（启动顺序 + 进度记录）。
+- 门禁：`pnpm check` 全绿——78 文件 / 772 用例，覆盖率 **99.71 / 97.59 / 99.52 / 99.85**（基线 99.60/96.71/99.39/99.79），改动行 **948/948 = 100%**；`pnpm e2e` 5/5。
+- 账本专项：`src/host/store/rebuild.test.ts` 覆盖 206 条混合命令的增量 vs 重建逐表全等、文件库强杀重启后 `ensureProjection` 追平、白名单外表保留、timeline 链；`rebuild.perf.test.ts` 1 万事实重建实测 **82.5–152.2 ms**（< 1 s 预算，8–12× 余量）。
+- 真实库导入验收：用 M0 备份库（`ai-workflow-2026-11-04T1940-pre-m1.db`）以临时 userData 启动 M1 应用，写入 5 条 `snapshot.imported`（facts seq 1–5，meta seq=5），投影五表与运行/聊天表行数与备份完全一致（tasks 1 / runs 15 / workflows 1 / stages 3 / agents 1 / runtimes 1 / chat 1+4 / run_events 98）。
+- 已知边界：`runs` 在重建后可能残留（不在投影集，M2 入账后消除）；`agents.remove` 被对话引用时错误文案退化为 SQLite FK 原文；`decide.ts` 3 处公共入口不可达的防御分支未覆盖（不为覆盖率放松实现）。

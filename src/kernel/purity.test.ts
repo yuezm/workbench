@@ -46,37 +46,50 @@ const toPosix = (p: string): string => p.split(sep).join('/')
 
 const lineOf = (text: string, index: number): number => text.slice(0, index).split('\n').length
 
-/** 只剥掉注释与模板字符串，保留 import 路径（它本身是字符串）以便单独检查。 */
-const stripComments = (code: string): string =>
-  code.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+const blank = (text: string): string => text.replace(/[^\n]/g, ' ')
 
-const importsOf = (code: string): string[] => {
-  const specifiers: string[] = []
+/** 去掉注释；字符串保留，因为 import 路径本身就是字符串。 */
+const stripComments = (code: string): string =>
+  code.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/\/\/[^\n]*/g, blank)
+
+/** 再去掉字符串与模板字面量，只留可执行代码（行号不因替换而偏移）。 */
+const stripLiterals = (code: string): string =>
+  stripComments(code)
+    .replace(/'(?:\\.|[^'\\\n])*'/g, blank)
+    .replace(/"(?:\\.|[^"\\\n])*"/g, blank)
+    .replace(/`(?:\\.|[^`\\])*`/g, blank)
+
+const importsOf = (code: string): Array<{ specifier: string; index: number }> => {
+  const found: Array<{ specifier: string; index: number }> = []
   const fromRe = /(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g
   const requireRe = /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g
   for (const re of [fromRe, requireRe]) {
-    for (const match of code.matchAll(re)) specifiers.push(match[1])
+    for (const match of code.matchAll(re)) {
+      found.push({ specifier: match[1], index: match.index ?? 0 })
+    }
   }
-  return specifiers
+  return found
 }
 
 const violationsOf = (file: string, source: string): string[] => {
   const code = stripComments(source)
   const found: string[] = []
 
-  for (const specifier of importsOf(code)) {
+  for (const { specifier, index } of importsOf(code)) {
+    const at = `${file}:${lineOf(code, index)}`
     if (FORBIDDEN_MODULES.includes(specifier)) {
-      found.push(`${file}: 禁止 import「${specifier}」`)
+      found.push(`${at} 禁止 import「${specifier}」`)
       continue
     }
     const posix = toPosix(specifier)
     const hit = FORBIDDEN_IMPORT_PREFIXES.find((prefix) => posix.includes(`/${prefix}`))
-    if (hit) found.push(`${file}: 禁止跨层 import「${specifier}」（只允许 src/protocol）`)
+    if (hit) found.push(`${at} 禁止跨层 import「${specifier}」（只允许 src/protocol）`)
   }
 
+  const symbols = stripLiterals(code)
   for (const { pattern, label } of FORBIDDEN_PATTERNS) {
-    for (const match of code.matchAll(pattern)) {
-      found.push(`${file}:${lineOf(code, match.index ?? 0)} 禁止使用 ${label}`)
+    for (const match of symbols.matchAll(pattern)) {
+      found.push(`${file}:${lineOf(symbols, match.index ?? 0)} 禁止使用 ${label}`)
     }
   }
 
@@ -94,5 +107,31 @@ describe('kernel 纯度', () => {
       violations,
       `kernel 是纯模块：\n${violations.join('\n')}\n（扫描 ${files.length} 个源文件）`,
     ).toEqual([])
+  })
+
+  it('护栏能抓到违规样本，并给出文件与行号', () => {
+    const dirty = [
+      "import { readFileSync } from 'node:fs'",
+      "import type { Task } from '../shared/ai-workflow-api'",
+      'export const noise = (): number => Date.now() + Math.random()',
+    ].join('\n')
+
+    expect(violationsOf('dirty.ts', dirty)).toEqual([
+      'dirty.ts:1 禁止 import「node:fs」',
+      'dirty.ts:2 禁止跨层 import「../shared/ai-workflow-api」（只允许 src/protocol）',
+      'dirty.ts:3 禁止使用 Date.now()',
+      'dirty.ts:3 禁止使用 Math.random()',
+    ])
+  })
+
+  it('不把注释与字符串里的禁用词当违规', () => {
+    const clean = [
+      "// 说明：这里不能写 Date.now()，也不能 import 'node:fs'",
+      "import type { Task } from '../protocol/types'",
+      "export const label = 'Date.now() 由宿主传入'",
+      'export const ok = (task: Task | null): boolean => task !== null',
+    ].join('\n')
+
+    expect(violationsOf('clean.ts', clean)).toEqual([])
   })
 })

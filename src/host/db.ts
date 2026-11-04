@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
-import { FACTS_SQL, withTx } from './schema'
+import { FACTS_SQL, INDEX_SQL, SCHEMA_SQL, SCHEMA_VERSION, withTx } from './schema'
 
 /** 忙等超时（毫秒）：并发写时等锁，而不是立刻抛 SQLITE_BUSY。 */
 const BUSY_TIMEOUT_MS = 5000
@@ -20,12 +20,14 @@ function assertIntegrity(db: DatabaseSync, filePath: string): void {
 }
 
 /**
- * 打开（或创建）数据库文件并建立账本基础设施，不含 schema 迁移、不设置 foreign_keys：
- * busy_timeout、打开时 integrity_check、文件库启用 WAL、facts / projection_meta 建表。
+ * 打开（或创建）数据库文件并建好全库 schema：busy_timeout、打开时 integrity_check、
+ * 文件库启用 WAL、五张业务表 + 运行/聊天表 + 账本表（全部 IF NOT EXISTS）、
+ * `PRAGMA user_version = SCHEMA_VERSION`。
  *
- * 迁移与 foreign_keys 由调用方组合（过渡期是 main/ai-workflow/db.ts 的 openDb），
- * host 侧不反向依赖 main。
+ * 手写 v1 → v2 迁移已删除：v2 存量数据由 `host/store/import.ts` 写成 `snapshot.imported`
+ * 事实后重建投影，因此这里只保证「库结构与当前版本对齐」。
  *
+ * 不设置 foreign_keys：保持连接默认（node:sqlite 默认开启），组合方需要时自行切换。
  * `:memory:` 没有 WAL（SQLite 会把 journal_mode 设成 memory），不在此分支处理。
  *
  * @param filePath SQLite 文件路径；`:memory:` 用于测试。
@@ -38,7 +40,12 @@ export function openDatabase(filePath: string): DatabaseSync {
     if (filePath !== ':memory:') {
       db.prepare('PRAGMA journal_mode = WAL').get()
     }
-    withTx(db, () => db.exec(FACTS_SQL))
+    withTx(db, () => {
+      db.exec(SCHEMA_SQL)
+      db.exec(INDEX_SQL)
+      db.exec(FACTS_SQL)
+      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
+    })
     return db
   } catch (e) {
     // 完整性检查或建表失败：关掉连接再抛，避免锁住数据库文件。

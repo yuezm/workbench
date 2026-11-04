@@ -5,7 +5,7 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { openDatabase } from './db'
-import { SCHEMA_SQL } from './schema'
+import { SCHEMA_SQL, SCHEMA_VERSION } from './schema'
 
 let db: DatabaseSync | null = null
 afterEach(() => {
@@ -20,10 +20,28 @@ function tableNames(d: DatabaseSync): string[] {
   return rows.map((row) => row.name).sort()
 }
 
+function userVersion(d: DatabaseSync): number {
+  return (d.prepare('PRAGMA user_version').get() as unknown as { user_version: number })
+    .user_version
+}
+
 describe('openDatabase', () => {
-  it(':memory: 只建账本表（facts / projection_meta），不含业务表', () => {
+  it(':memory: 建全 schema（9 张业务表 + facts / projection_meta）并写 user_version', () => {
     db = openDatabase(':memory:')
-    expect(tableNames(db)).toEqual(['facts', 'projection_meta'])
+    expect(tableNames(db)).toEqual([
+      'agents',
+      'chat_conversations',
+      'chat_messages',
+      'facts',
+      'projection_meta',
+      'run_events',
+      'runs',
+      'runtimes',
+      'tasks',
+      'workflow_stages',
+      'workflows',
+    ])
+    expect(userVersion(db)).toBe(SCHEMA_VERSION)
   })
 
   it('不动 foreign_keys：保持连接默认（node:sqlite 默认开启外键约束）', () => {
@@ -34,7 +52,16 @@ describe('openDatabase', () => {
     expect(rows[0]?.foreign_keys).toBe(1)
   })
 
-  it('已有 v2 旧库：补建账本表，数据与 user_version 不动', () => {
+  it('外键约束生效：引用不存在的运行时被拒绝', () => {
+    db = openDatabase(':memory:')
+    expect(() =>
+      db!
+        .prepare('INSERT INTO agents (id, name, runtime_id, created_at) VALUES (?, ?, ?, ?)')
+        .run('ag1', 'agent', 'missing-runtime', '2026-01-01T00:00:00.000Z'),
+    ).toThrow()
+  })
+
+  it('已有 v2 旧库：不重建、不清数据，user_version 保持当前版本', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'hostdb-legacy-'))
     const file = path.join(root, 'ai-workflow.db')
     const seeded = new DatabaseSync(file)
@@ -66,10 +93,42 @@ describe('openDatabase', () => {
       expect(
         (local.prepare('SELECT COUNT(*) AS n FROM runtimes').get() as unknown as { n: number }).n,
       ).toBe(1)
+      expect(userVersion(local)).toBe(SCHEMA_VERSION)
+    } finally {
+      local.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('结构已是 v2 但版本号落后：补索引与版本号，数据保留', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-version-'))
+    const file = path.join(root, 'ai-workflow.db')
+    const seeded = new DatabaseSync(file)
+    try {
+      seeded.exec(SCHEMA_SQL)
+      seeded.exec('PRAGMA user_version = 0')
+      seeded
+        .prepare('INSERT INTO runtimes (id, name, created_at) VALUES (?, ?, ?)')
+        .run('rt1', '旧运行时', '2026-01-01T00:00:00.000Z')
+    } finally {
+      seeded.close()
+    }
+
+    const local = openDatabase(file)
+    try {
+      expect(userVersion(local)).toBe(SCHEMA_VERSION)
       expect(
-        (local.prepare('PRAGMA user_version').get() as unknown as { user_version: number })
-          .user_version,
-      ).toBe(2)
+        (local.prepare('SELECT COUNT(*) AS n FROM runtimes').get() as unknown as { n: number }).n,
+      ).toBe(1)
+      expect(
+        (
+          local
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_tasks_workflow'",
+            )
+            .get() as unknown as { name: string } | undefined
+        )?.name,
+      ).toBe('idx_tasks_workflow')
     } finally {
       local.close()
       rmSync(root, { recursive: true, force: true })

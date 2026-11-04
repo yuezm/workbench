@@ -1,15 +1,16 @@
 /**
- * main/ai-workflow 测试夹具：内存库 + 真实 kernel + 真实 store。
+ * 宿主 IPC 测试夹具：内存库 + 真实 kernel + 真实 store。
  *
- * 五张业务表切成投影之后测试不能再直接写表：种子一律走 `store.dispatch`，
- * 断言读 `store.query`；runs / run_events / 聊天仍直接用 `Repository`（M1 不在投影集）。
+ * 读走 `store.query`（投影视图），种子一律走 `store.dispatch`（事实路径）——不直接写业务表。
+ * 按 id 取实体的助手与 IPC handler 共用同一实现（从 `main/ai-workflow/ipc` 导出）。
  */
 import type { DatabaseSync } from 'node:sqlite'
-import { decide } from '../../../src/kernel/decide'
-import { project } from '../../../src/kernel/project'
-import { viewSpec } from '../../../src/kernel/view-spec'
-import type { KernelPort } from '../../../src/kernel/types'
-import { createStore, type Store } from '../../../src/host/store/index'
+import { decide } from '../../src/kernel/decide'
+import { project } from '../../src/kernel/project'
+import { viewSpec } from '../../src/kernel/view-spec'
+import type { KernelPort } from '../../src/kernel/types'
+import { openDatabase } from '../../src/host/db'
+import { createStore, type Store } from '../../src/host/store/index'
 import type {
   Agent,
   AgentInput,
@@ -19,25 +20,20 @@ import type {
   TaskInput,
   WorkflowInput,
   WorkflowWithStages,
-} from '../../../src/shared/ai-workflow-api'
-import { openDb } from '../../../src/main/ai-workflow/db'
+} from '../../src/shared/ai-workflow-api'
 import {
   agentById,
   createdId,
   runtimeById,
   taskById,
   workflowById,
-} from '../../../src/main/ai-workflow/projection-lookup'
-import { Repository } from '../../../src/main/ai-workflow/repository'
+} from '../../src/main/ai-workflow/ipc'
 
-// 投影查询助手已抽到 projection-lookup（与 ipc.ts 共用）；这里保留同名转出，
-// 让既有测试夹具的 import 面不变。
-export { agentById, runtimeById, taskById, workflowById }
+export { agentById, createdId, runtimeById, taskById, workflowById }
 
 export interface TestWorld {
   db: DatabaseSync
   store: Store
-  repo: Repository
 }
 
 let commandSeq = 0
@@ -54,11 +50,11 @@ export function resetCommandIds(): void {
 }
 
 export function createWorld(): TestWorld {
-  const db = openDb(':memory:')
+  const db = openDatabase(':memory:')
   const kernel: KernelPort = { decide, project, viewSpec }
   const store = createStore({ db, kernel })
   store.ensureProjection()
-  return { db, store, repo: new Repository(db) }
+  return { db, store }
 }
 
 export function createRuntime(world: TestWorld, input: RuntimeInput): Runtime {
@@ -106,12 +102,4 @@ export function updateRuntime(world: TestWorld, id: string, patch: Partial<Runti
     patch,
   })
   return runtimeById(world.store, id)
-}
-
-export function removeAgent(world: TestWorld, id: string): void {
-  world.store.dispatch({ type: 'agent.remove', commandId: nextCommandId(), id })
-}
-
-export function removeTask(world: TestWorld, id: string): void {
-  world.store.dispatch({ type: 'task.remove', commandId: nextCommandId(), id })
 }

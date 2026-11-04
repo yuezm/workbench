@@ -14,9 +14,7 @@ const {
   createTrayMock,
   registerIpcHandlersMock,
   registerAiWorkflowIpcMock,
-  openDbMock,
-  RepositoryMock,
-  RepositoryImpl,
+  openDatabaseMock,
   createStoreMock,
   storeMock,
   importLegacyMock,
@@ -59,25 +57,17 @@ const {
     }
   }
 
-  // 构造调用记录：真实 class 承载实例方法，外层 vi.fn 记录构造参数
-  const RepositoryMock = vi.fn()
-  class RepositoryImpl {
-    runEventsList = vi.fn(() => [])
-    staleChatRuns = vi.fn(() => [])
-    // 启动对账读 run 状态：存在返回行，缺失抛错（main 的 runStatus 用 try/catch 归为 null）
-    runGet = vi.fn((id: string) => {
-      if (id === 'run-1') return { id, status: 'running' }
-      throw new Error('运行不存在: ' + id)
-    })
-    constructor(...args: unknown[]) {
-      RepositoryMock(...args)
-    }
-  }
-
   // store 门面：入口用到 ensureProjection / query / nextWakeAt；其余由 IPC 使用。
   const storeMock = {
     ensureProjection: vi.fn(() => ({ rebuilt: false })),
-    query: vi.fn((_table: string, _params?: unknown): unknown => []),
+    query: vi.fn((table: string, params?: unknown): unknown => {
+      if (table === 'run.last-event-seq') return 0
+      if (table === 'run.byId') {
+        const runId = (params as { runId?: string } | undefined)?.runId
+        return runId === 'run-1' ? { id: 'run-1', status: 'running' } : null
+      }
+      return []
+    }),
     nextWakeAt: vi.fn(() => null),
     dispatch: vi.fn((_input: unknown) => ({ facts: [] })),
   }
@@ -127,7 +117,7 @@ const {
   const killPidTreeMock = vi.fn(() => true)
   const reconcileMock = vi.fn((_deps: unknown) => ({ killed: 0, cleared: 0, facts: 0 }))
 
-  /** 启动装配顺序：openDb → createStore → importLegacy → ensureProjection → Repository → … */
+  /** 启动装配顺序：openDatabase → createStore → importLegacy → ensureProjection → 进程登记 → 对账 → … */
   const startupOrder: string[] = []
 
   return {
@@ -147,9 +137,7 @@ const {
     createTrayMock: vi.fn(),
     registerIpcHandlersMock: vi.fn(),
     registerAiWorkflowIpcMock: vi.fn(),
-    openDbMock: vi.fn(() => ({})),
-    RepositoryMock,
-    RepositoryImpl,
+    openDatabaseMock: vi.fn(() => ({})),
     createStoreMock,
     storeMock,
     importLegacyMock,
@@ -180,8 +168,7 @@ vi.mock('../../src/main/ipc', () => ({ registerIpcHandlers: registerIpcHandlersM
 vi.mock('../../src/main/ai-workflow/ipc', () => ({
   registerAiWorkflowIpc: registerAiWorkflowIpcMock,
 }))
-vi.mock('../../src/main/ai-workflow/db', () => ({ openDb: openDbMock }))
-vi.mock('../../src/main/ai-workflow/repository', () => ({ Repository: RepositoryImpl }))
+vi.mock('../../src/host/db', () => ({ openDatabase: openDatabaseMock }))
 vi.mock('../../src/main/ai-workflow/executor-port', () => ({
   createRuntimeExecutors: createRuntimeExecutorsMock,
 }))
@@ -227,7 +214,6 @@ function appHandler(name: string): () => void {
 type IpcDeps = {
   store: unknown
   dispatch: (input: unknown) => { facts: unknown[] }
-  chat: unknown
   backendFor: (family: 'dsh') => {
     probe: unknown
     models: unknown
@@ -292,8 +278,8 @@ describe('主进程入口装配', () => {
     windows.length = 0
     startupOrder.length = 0
     delete process.env['ELECTRON_RENDERER_URL']
-    openDbMock.mockImplementation(() => {
-      startupOrder.push('openDb')
+    openDatabaseMock.mockImplementation(() => {
+      startupOrder.push('openDatabase')
       return {}
     })
     createStoreMock.mockImplementation(() => {
@@ -320,9 +306,6 @@ describe('主进程入口装配', () => {
           messages: 0,
         },
       }
-    })
-    RepositoryMock.mockImplementation(() => {
-      startupOrder.push('repository')
     })
     createProcessRegistryMock.mockImplementation(() => {
       startupOrder.push('registry')
@@ -355,7 +338,6 @@ describe('主进程入口装配', () => {
     expect(createTrayMock).toHaveBeenCalledTimes(1)
 
     // 仓库与执行器共享同一会话根目录（会话续接要落 userData）
-    expect(RepositoryMock).toHaveBeenCalledTimes(1)
     expect(createRuntimeExecutorsMock).toHaveBeenCalledWith(
       expect.objectContaining({ sessionRoot: expect.stringContaining('sessions') }),
     )
@@ -378,11 +360,10 @@ describe('主进程入口装配', () => {
     await loadEntry()
 
     expect(startupOrder).toEqual([
-      'openDb',
+      'openDatabase',
       'createStore',
       'importLegacy',
       'ensureProjection',
-      'repository',
       'registry',
       'reconcile',
       'scheduler',
@@ -416,6 +397,8 @@ describe('主进程入口装配', () => {
     expect(storeMock.query).toHaveBeenCalledWith('runtimes.all')
     // 帧 seq 从仓储读（重启后续接全局单调）
     expect(schedulerDeps().lastFrameSeq('run-1')).toBe(0)
+    // 帧 seq 从 run_events 投影的 MAX(seq) 视图读（不再走仓储 SQL）
+    expect(storeMock.query).toHaveBeenCalledWith('run.last-event-seq', { runId: 'run-1' })
 
     // effects：调度器惰性解析 + 变更广播接到窗口
     expect(effectsDeps().scheduler()).toBe(schedulerMock)
@@ -453,6 +436,9 @@ describe('主进程入口装配', () => {
     expect(deps.runStatus('ghost')).toBeNull()
     // 崩溃时中断的聊天 run 由对账落兜底终态（查询来自仓储的投影读）
     expect(deps.staleChatRuns?.()).toEqual([])
+    expect(storeMock.query).toHaveBeenCalledWith('runs.stale-chat')
+    // run 状态读投影（run.byId），缺失即 null
+    expect(storeMock.query).toHaveBeenCalledWith('run.byId', { runId: 'ghost' })
     // 登记表与 scheduler 共用同一实例（执行期 begin/attachPid/remove 才接得上）
     expect(schedulerDeps().registry).toBe(registryMock)
     // 顺序：对账在 scheduler 装配、IPC 注册与定时器之前
@@ -493,11 +479,10 @@ describe('主进程入口装配', () => {
     expect(registerIpcHandlersMock).not.toHaveBeenCalled()
     expect(registerAiWorkflowIpcMock).not.toHaveBeenCalled()
     expect(createTrayMock).not.toHaveBeenCalled()
-    expect(openDbMock).not.toHaveBeenCalled()
+    expect(openDatabaseMock).not.toHaveBeenCalled()
     expect(createStoreMock).not.toHaveBeenCalled()
     expect(storeMock.ensureProjection).not.toHaveBeenCalled()
     expect(importLegacyMock).not.toHaveBeenCalled()
-    expect(RepositoryMock).not.toHaveBeenCalled()
     expect(createProcessRegistryMock).not.toHaveBeenCalled()
     expect(reconcileMock).not.toHaveBeenCalled()
     expect(killPidTreeMock).not.toHaveBeenCalled()

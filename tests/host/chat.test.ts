@@ -19,7 +19,6 @@ import { project } from '../../src/kernel/project'
 import { viewSpec } from '../../src/kernel/view-spec'
 import type { KernelPort } from '../../src/kernel/types'
 import { createAiWorkflowHandler, type AiWorkflowHandler } from '../../src/main/ai-workflow/ipc'
-import { Repository } from '../../src/main/ai-workflow/repository'
 import type { RuntimeBackend } from '../../src/main/ai-workflow/runtime/registry'
 import type { ChatConversation, ChatMessage, RunEvent } from '../../src/shared/ai-workflow-api'
 
@@ -60,7 +59,6 @@ interface StreamRecord {
 interface World {
   db: DatabaseSync
   store: Store
-  repo: Repository
   scheduler: Scheduler
   handler: AiWorkflowHandler
   streams: StreamRecord[]
@@ -85,7 +83,6 @@ function makeWorld(backend: ExecutorBackend): World {
   const db = openDatabase(':memory:')
   const store = createStore({ db, kernel })
   store.ensureProjection()
-  const repo = new Repository(db)
   const registry = createProcessRegistry(db)
   const streams: StreamRecord[] = []
   const breakStream = { value: false }
@@ -130,7 +127,6 @@ function makeWorld(backend: ExecutorBackend): World {
   const handler = createAiWorkflowHandler({
     store,
     dispatch: (input) => effects.dispatch(input),
-    repo,
     backendFor: () =>
       ({
         probe: vi.fn(),
@@ -144,7 +140,7 @@ function makeWorld(backend: ExecutorBackend): World {
     now: () => new Date().toISOString(),
     onTick: () => scheduler.wake(),
   })
-  return { db, store, repo, scheduler, handler, streams, requests: [], breakStream, clock }
+  return { db, store, scheduler, handler, streams, requests: [], breakStream, clock }
 }
 
 /** 后端按脚本返回：每次 execute 调一次 handler，同时记录请求。 */

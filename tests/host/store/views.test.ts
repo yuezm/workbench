@@ -107,6 +107,26 @@ const runDone = sample.run({
   usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 },
   endedAt: SAMPLE_AT,
 })
+const runStaleChat = sample.run({
+  id: 'run-stale-chat',
+  purpose: 'chat',
+  taskId: null,
+  stageId: null,
+  conversationId: 'cv-1',
+  status: 'running',
+  leaseId: 'run-stale-chat:1',
+  attempt: 1,
+  turn: 2,
+  queueSeq: 7,
+})
+/** 没有运行时的 run（手工 run）：负载视图不计入。 */
+const runNoRuntime = sample.run({
+  id: 'run-no-runtime',
+  taskId: null,
+  runtimeId: null,
+  status: 'running',
+  queueSeq: 8,
+})
 const conversation = sample.conversation({ id: 'cv-1', title: '排查问题' })
 const message = sample.message({ id: 'ms-1', conversationId: 'cv-1', content: '你好' })
 
@@ -163,6 +183,8 @@ function seedRunProjection(db: DatabaseSync): void {
     { table: 'runs', key: runChatOnTask.id, row: runChatOnTask },
     { table: 'runs', key: runChat.id, row: runChat },
     { table: 'runs', key: runDone.id, row: runDone },
+    { table: 'runs', key: runStaleChat.id, row: runStaleChat },
+    { table: 'runs', key: runNoRuntime.id, row: runNoRuntime },
     { table: 'conversations', key: conversation.id, row: conversation },
     { table: 'messages', key: message.id, row: message },
   ]
@@ -228,6 +250,8 @@ describe('loadView：按 viewSpec 装载切片', () => {
       'run-chat-on-task',
       'run-chat',
       'run-done',
+      'run-stale-chat',
+      'run-no-runtime',
     ])
     expect(view.runs.get('run-running')).toEqual(runRunning)
     expect(view.runs.get('run-waiting')).toEqual(runWaiting)
@@ -275,7 +299,7 @@ describe('loadView：按 viewSpec 装载切片', () => {
     seedRunProjection(db)
 
     const claimView = loadView(db, viewSpec({ type: 'run.claim', runtimeId: 'rt-1', capacity: 1 }))
-    expect(claimView.runs.size).toBe(6)
+    expect(claimView.runs.size).toBe(8)
     expect(claimView.runtimes.size).toBe(2)
     expect(claimView.tasks.size).toBe(0)
     expect(claimView.agents.size).toBe(0)
@@ -288,7 +312,7 @@ describe('loadView：按 viewSpec 装载切片', () => {
     )
     expect(chatView.conversations.size).toBe(1)
     expect(chatView.messages.size).toBe(1)
-    expect(chatView.runs.size).toBe(6)
+    expect(chatView.runs.size).toBe(8)
     expect(chatView.agents.size).toBe(1)
     expect(chatView.runtimes.size).toBe(2)
     expect(chatView.tasks.size).toBe(0)
@@ -395,5 +419,127 @@ describe('queryView：各视图', () => {
     }
     const taskParamError = captureError(() => queryView(db, 'task.byId', { taskId: 1 }))
     expect((taskParamError as StoreError).code).toBe('invalid_input')
+  })
+})
+
+/** 直接写 run_events（读路径用例只需要行；真实写入经投影 writer 的 run_events 分支）。 */
+function seedRunEvents(db: DatabaseSync): void {
+  const insert = db.prepare(
+    'INSERT INTO run_events (run_id, seq, type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)',
+  )
+  insert.run('run-running', 1, 'text', JSON.stringify({ text: '先想一下' }), SAMPLE_AT)
+  insert.run(
+    'run-running',
+    2,
+    'tool_call',
+    JSON.stringify({ tool: 'read', callId: 'c1', input: '{}' }),
+    SAMPLE_AT,
+  )
+  insert.run('run-done', 1, 'text', JSON.stringify({ text: '别的 run' }), SAMPLE_AT)
+}
+
+describe('queryView：运行历史与负载（T16 读路径收口）', () => {
+  it('runs.byTask：只取该任务的阶段 run，按创建顺序，调度列不外露', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    const runs = queryView(db, 'runs.byTask', { taskId: 'tk-1' }) as Array<Record<string, unknown>>
+    expect(runs.map((run) => run.id)).toEqual(['run-queued', 'run-running'])
+    expect(runs[0]).toMatchObject({
+      id: 'run-queued',
+      taskId: 'tk-1',
+      stageId: 'st-1',
+      status: 'queued',
+      output: '',
+      usage: null,
+    })
+    // IPC 行字段与 M1 一致：不含 purpose / lease / attempts 等调度列
+    for (const key of ['purpose', 'conversationId', 'leaseId', 'attempts', 'queueSeq']) {
+      expect(runs[0]).not.toHaveProperty(key)
+    }
+    // 聊天 run 即便挂着 task_id（旧数据）也不进阶段看板
+    expect(queryView(db, 'runs.byTask', { taskId: 'tk-2' })).toHaveLength(2)
+    expect(queryView(db, 'runs.byTask', { taskId: 'tk-missing' })).toEqual([])
+  })
+
+  it('run.byId：命中返回完整投影行（含调度列），未命中 null', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    expect(queryView(db, 'run.byId', { runId: 'run-running' })).toEqual(runRunning)
+    expect(queryView(db, 'run.byId', { runId: 'run-chat' })).toEqual(runChat)
+    expect(queryView(db, 'run.byId', { runId: 'ghost' })).toBeNull()
+  })
+
+  it('run.events：按 seq 排序返回事件流；没有事件 / 未知 run 都是空数组', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+    seedRunEvents(db)
+
+    expect(queryView(db, 'run.events', { runId: 'run-running' })).toEqual([
+      { seq: 1, type: 'text', text: '先想一下' },
+      { seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' },
+    ])
+    expect(queryView(db, 'run.events', { runId: 'run-done' })).toEqual([
+      { seq: 1, type: 'text', text: '别的 run' },
+    ])
+    expect(queryView(db, 'run.events', { runId: 'run-queued' })).toEqual([])
+    expect(queryView(db, 'run.events', { runId: 'ghost' })).toEqual([])
+  })
+
+  it('run.last-event-seq：取最大 seq，没有事件时为 0', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+    seedRunEvents(db)
+
+    expect(queryView(db, 'run.last-event-seq', { runId: 'run-running' })).toBe(2)
+    expect(queryView(db, 'run.last-event-seq', { runId: 'run-done' })).toBe(1)
+    expect(queryView(db, 'run.last-event-seq', { runId: 'run-queued' })).toBe(0)
+    expect(queryView(db, 'run.last-event-seq', { runId: 'ghost' })).toBe(0)
+  })
+
+  it('runtimes.workloads：只统计 queued / running，按运行时分组，忽略未绑定运行时的 run', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    // rt-1：running = run-running + run-stale-chat；queued = runQueued / runChatOnTask / runChat；
+    // waiting 与 succeeded 不计，run-no-runtime 未绑定运行时（忽略）
+    expect(queryView(db, 'runtimes.workloads')).toEqual([
+      { runtimeId: 'rt-1', running: 2, queued: 3 },
+    ])
+  })
+
+  it('runs.stale-chat：只取 running 的聊天 run（带 leaseId / turn）', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    expect(queryView(db, 'runs.stale-chat')).toEqual([
+      { id: 'run-stale-chat', leaseId: 'run-stale-chat:1', turn: 2 },
+    ])
+  })
+
+  it('空库：新视图返回空集合 / null / 0', () => {
+    const db = memory()
+
+    expect(queryView(db, 'runs.byTask', { taskId: 'tk-1' })).toEqual([])
+    expect(queryView(db, 'run.byId', { runId: 'run-1' })).toBeNull()
+    expect(queryView(db, 'run.events', { runId: 'run-1' })).toEqual([])
+    expect(queryView(db, 'run.last-event-seq', { runId: 'run-1' })).toBe(0)
+    expect(queryView(db, 'runtimes.workloads')).toEqual([])
+    expect(queryView(db, 'runs.stale-chat')).toEqual([])
+  })
+
+  it('新视图缺参数：StoreError(invalid_input)', () => {
+    const db = memory()
+    for (const view of ['runs.byTask', 'run.byId', 'run.events', 'run.last-event-seq'] as const) {
+      const error = captureError(() => queryView(db, view, {}))
+      expect((error as StoreError).code).toBe('invalid_input')
+    }
   })
 })

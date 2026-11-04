@@ -17,7 +17,9 @@ import type {
   EntryMode,
   Message,
   PermissionMode,
+  Run,
   RunErrorCode,
+  RunEvent,
   RunPurpose,
   RunRow,
   RunStatus,
@@ -31,7 +33,7 @@ import type {
   WorkflowStage,
   WorkflowWithStages,
 } from '../../protocol/entities'
-import type { ActiveRun, ViewId } from '../../protocol/views'
+import type { ActiveRun, RuntimeWorkload, StaleChatRun, ViewId } from '../../protocol/views'
 import { VIEW_IDS } from '../../protocol/views'
 import type { ProjectionTable, View } from '../../kernel/types'
 import { lastSeq } from './facts'
@@ -327,20 +329,127 @@ const readTasks = (db: DatabaseSync): Task[] =>
       .all() as unknown as TaskRow[]
   ).map(mapTask)
 
+/** `runs` 投影的列清单（逐列写死，不用 `SELECT *`）。 */
+const RUN_COLUMNS = `id, purpose, task_id, stage_id, agent_id, runtime_id, conversation_id, rule_id,
+        rules_version, executor_key, thread_id, cwd, access, skill, prompt_ref,
+        event_ids_json, hops, turn, resume_session_id, thread_context_ref, queue_seq,
+        status, prompt, output, error, error_code, exit_code, session_id, usage_json,
+        duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at,
+        cancel_requested, started_at, ended_at, created_at`
+
 const readRuns = (db: DatabaseSync): RunRow[] =>
   (
     db
-      .prepare(
-        `SELECT id, purpose, task_id, stage_id, agent_id, runtime_id, conversation_id, rule_id,
-                rules_version, executor_key, thread_id, cwd, access, skill, prompt_ref,
-                event_ids_json, hops, turn, resume_session_id, thread_context_ref, queue_seq,
-                status, prompt, output, error, error_code, exit_code, session_id, usage_json,
-                duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at,
-                cancel_requested, started_at, ended_at, created_at
-         FROM runs ORDER BY created_at, rowid`,
-      )
+      .prepare(`SELECT ${RUN_COLUMNS} FROM runs ORDER BY created_at, rowid`)
       .all() as unknown as RunDbRow[]
   ).map(mapRun)
+
+/**
+ * 投影行 → IPC 运行行：调度列不外露（与 M1 的 `Run` 字段一致）。
+ * `taskId` 由调用方传入（`runs.byTask` 的 SQL 已按 `task_id = ? AND purpose='stage'` 过滤）。
+ */
+const toRun = (row: RunDbRow, taskId: string): Run => {
+  const run = mapRun(row)
+  return {
+    id: run.id,
+    taskId,
+    stageId: run.stageId,
+    agentId: run.agentId,
+    runtimeId: run.runtimeId,
+    status: run.status,
+    prompt: run.prompt,
+    output: run.output,
+    error: run.error,
+    errorCode: run.errorCode,
+    exitCode: run.exitCode,
+    sessionId: run.sessionId,
+    usage: run.usage,
+    durationMs: run.durationMs,
+    startedAt: run.startedAt,
+    endedAt: run.endedAt,
+    createdAt: run.createdAt,
+  }
+}
+
+/**
+ * 任务的历史运行（`purpose='stage'`，按创建顺序）。
+ * 聊天 run 不挂任务；即便旧数据里挂了 `task_id` 也不混进阶段看板（与 `RunRow` 的文档口径一致）。
+ */
+const readRunsByTask = (db: DatabaseSync, taskId: string): Run[] =>
+  (
+    db
+      .prepare(
+        `SELECT ${RUN_COLUMNS} FROM runs
+         WHERE task_id = ? AND purpose = 'stage'
+         ORDER BY created_at, rowid`,
+      )
+      .all(taskId) as unknown as RunDbRow[]
+  ).map((row) => toRun(row, taskId))
+
+const readRunById = (db: DatabaseSync, runId: string): RunRow | null => {
+  const row = db.prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = ?`).get(runId) as unknown as
+    RunDbRow | undefined
+  return row ? mapRun(row) : null
+}
+
+interface RunEventDbRow {
+  run_id: string
+  seq: number
+  type: string
+  payload_json: string
+}
+
+/** 运行事件流：`payload_json` 还原为协议帧（`seq` / `type` 已在列里）。 */
+const readRunEvents = (db: DatabaseSync, runId: string): RunEvent[] =>
+  (
+    db
+      .prepare(
+        'SELECT run_id, seq, type, payload_json FROM run_events WHERE run_id = ? ORDER BY seq',
+      )
+      .all(runId) as unknown as RunEventDbRow[]
+  ).map((row) => {
+    const payload = JSON.parse(row.payload_json) as Omit<RunEvent, 'seq' | 'type'>
+    return { seq: row.seq, type: row.type as RunEvent['type'], ...payload }
+  })
+
+/** 该 run 已有的最大帧 seq（重启后重跑同一 run 时保证全局单调）；没有事件时为 0。 */
+const readLastEventSeq = (db: DatabaseSync, runId: string): number => {
+  const row = db
+    .prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM run_events WHERE run_id = ?')
+    .get(runId) as unknown as { seq: number }
+  return row.seq
+}
+
+/** 各运行时的在跑 / 排队数：只统计 active run 且限定了运行时。 */
+const readRuntimeWorkloads = (db: DatabaseSync): RuntimeWorkload[] => {
+  const rows = db
+    .prepare(
+      `SELECT runtime_id, status, COUNT(*) AS n FROM runs
+       WHERE runtime_id IS NOT NULL AND status IN ('queued','running')
+       GROUP BY runtime_id, status`,
+    )
+    .all() as unknown as Array<{ runtime_id: string; status: string; n: number }>
+  const byId = new Map<string, RuntimeWorkload>()
+  for (const row of rows) {
+    const entry = byId.get(row.runtime_id) ?? { runtimeId: row.runtime_id, running: 0, queued: 0 }
+    if (row.status === 'running') entry.running = row.n
+    else entry.queued = row.n
+    byId.set(row.runtime_id, entry)
+  }
+  return [...byId.values()]
+}
+
+/** 崩溃重启时要落兜底终态的聊天 run：`purpose='chat'` 且仍在 `running`。 */
+const readStaleChatRuns = (db: DatabaseSync): StaleChatRun[] =>
+  (
+    db
+      .prepare(
+        `SELECT id, lease_id, turn FROM runs
+         WHERE purpose = 'chat' AND status = 'running'
+         ORDER BY created_at, rowid`,
+      )
+      .all() as unknown as Array<{ id: string; lease_id: string | null; turn: number }>
+  ).map((row) => ({ id: row.id, leaseId: row.lease_id, turn: row.turn }))
 
 const readConversations = (db: DatabaseSync): Conversation[] =>
   (
@@ -508,5 +617,17 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readMessagesByConversation(db, readStringParam(params, 'conversationId'))
     case 'runs.active-by-conversation':
       return readActiveChatRuns(db, readStringParam(params, 'conversationId'))
+    case 'runs.byTask':
+      return readRunsByTask(db, readStringParam(params, 'taskId'))
+    case 'run.byId':
+      return readRunById(db, readStringParam(params, 'runId'))
+    case 'run.events':
+      return readRunEvents(db, readStringParam(params, 'runId'))
+    case 'run.last-event-seq':
+      return readLastEventSeq(db, readStringParam(params, 'runId'))
+    case 'runtimes.workloads':
+      return readRuntimeWorkloads(db)
+    case 'runs.stale-chat':
+      return readStaleChatRuns(db)
   }
 }

@@ -26,7 +26,11 @@
  * 投影 `created_at` 统一取导入根的时刻（与「重建只靠事实」一致，不伪装逐事件时间）。
  *
  * 导入根没有 `cause`：`timeline` 标「迁移导入」，不伪造因果链。
- * 聊天表（`conversations` / `messages` 与旧 `chat_*`）不在本阶段迁移范围（T14）。
+ * 聊天表（`conversations` / `messages` 与旧 `chat_*`，T14b）读成导入根后由投影重建、
+ * 随后删除旧表；表不存在（新库 / 已迁移）跳过。
+ *
+ * 本文件是 **M2 兼容层**：只为「M1 / v2 旧库升级到账本」服务，新库没有任何旧表可读。
+ * 迁移窗口关闭后整体删除，**M3 再删**（连同 `host/db.ts` 的旧 `runs` 一次性升级）。
  */
 import type { DatabaseSync } from 'node:sqlite'
 import type {

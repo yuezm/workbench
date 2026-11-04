@@ -13,12 +13,11 @@ import { killPidTree } from '../host/process'
 import { createProcessRegistry } from '../host/process-registry'
 import { reconcile } from '../host/reconcile'
 import { createScheduler, type Scheduler } from '../host/scheduler'
+import { openDatabase } from '../host/db'
 import { createStore, DEFAULT_LIMITS } from '../host/store/index'
 import { importLegacyIfNeeded } from '../host/store/import'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
-import { openDb } from './ai-workflow/db'
-import { Repository } from './ai-workflow/repository'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
 import { createRuntimeExecutors } from './ai-workflow/executor-port'
 import { createRuntimeBackend, type RuntimeBackend } from './ai-workflow/runtime/registry'
@@ -88,7 +87,7 @@ if (app.requestSingleInstanceLock()) {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
     }
     const userData = app.getPath('userData')
-    const db = openDb(path.join(userData, 'ai-workflow.db'))
+    const db = openDatabase(path.join(userData, 'ai-workflow.db'))
     // 内核门面：decide / project / viewSpec / nextWakeAt 是纯函数，store 与 clock 只依赖这个端口。
     const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
     const store = createStore({ db, kernel })
@@ -96,7 +95,6 @@ if (app.requestSingleInstanceLock()) {
     // 先导入更安全：空事实 + 存量投影时不会因为指纹失配把存量当投影清掉。
     importLegacyIfNeeded(db, kernel)
     store.ensureProjection()
-    const aiRepo = new Repository(db)
     // 协议后端：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
     // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。
     const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
@@ -114,16 +112,10 @@ if (app.requestSingleInstanceLock()) {
     const reconciled = reconcile({
       registry,
       // 崩溃时正在跑的聊天轮次：落 failed/executor_lost，内核补一条错误 assistant 消息
-      staleChatRuns: () => aiRepo.staleChatRuns(),
+      staleChatRuns: () => store.query('runs.stale-chat'),
       dispatch: (input) => store.dispatch(input),
       // 投影里的 run 状态；run 已随任务/工作流删除时视为缺失（只清登记行）
-      runStatus: (runId) => {
-        try {
-          return aiRepo.runGet(runId).status
-        } catch {
-          return null
-        }
-      },
+      runStatus: (runId) => store.query('run.byId', { runId })?.status ?? null,
       killPid: killPidTree,
     })
     // 摘要只用于诊断：残留进程与回收数量非零时留一条 warn（不建 UI 通道）
@@ -154,8 +146,8 @@ if (app.requestSingleInstanceLock()) {
       runtimes: () => store.query('runtimes.all'),
       executors,
       limits: DEFAULT_LIMITS,
-      // 重启后重跑同一 run 时帧 seq 继续全局单调（T12 会把这里换成投影内的最大 seq）
-      lastFrameSeq: (runId) => aiRepo.runEventsList(runId).at(-1)?.seq ?? 0,
+      // 重启后重跑同一 run 时帧 seq 继续全局单调（读 run_events 投影的 MAX(seq)）
+      lastFrameSeq: (runId) => store.query('run.last-event-seq', { runId }),
       registry,
       // 聊天 run 的帧实时旁路（AI_WORKFLOW_CHAT）：渲染端显示，入账仍走 run.frames
       onChatStream: (conversationId, event) =>
@@ -176,7 +168,6 @@ if (app.requestSingleInstanceLock()) {
     registerAiWorkflowIpc({
       store,
       dispatch: (input) => effects.dispatch(input),
-      repo: aiRepo,
       backendFor,
     })
     // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，

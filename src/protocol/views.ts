@@ -1,10 +1,21 @@
 /**
- * M1 视图契约：宿主按 `viewSpec` 装载投影切片，`query(view, params)` 返回。
+ * 视图契约：宿主按 `viewSpec` 装载投影切片交给内核，`query(view, params)` 供 IPC / 装配根读取。
  *
- * 只落内核侧 `decide` 与看板当前需要的最小集；M5 的完整视图清单
- * （threads / cards / timeline 等）届时在此扩展。
+ * 读视图只覆盖「前端与装配根当前需要的形状」：实体读路径、运行历史（`runs.byTask` /
+ * `run.events` / `run.last-event-seq`）、运行时负载与启动对账（`runs.stale-chat`）。
+ * M5 的完整视图清单（threads / cards / timeline 等）届时在此扩展。
  */
-import type { Agent, Conversation, Message, Runtime, Task, WorkflowWithStages } from './entities'
+import type {
+  Agent,
+  Conversation,
+  Message,
+  Run,
+  RunEvent,
+  RunRow,
+  Runtime,
+  Task,
+  WorkflowWithStages,
+} from './entities'
 
 /** 视图 id 全集；新增视图必须先登记在这里，命令/宿主不得传任意字符串。 */
 export const VIEW_IDS = [
@@ -17,6 +28,12 @@ export const VIEW_IDS = [
   'conversations.all',
   'messages.byConversation',
   'runs.active-by-conversation',
+  'runs.byTask',
+  'run.byId',
+  'run.events',
+  'run.last-event-seq',
+  'runtimes.workloads',
+  'runs.stale-chat',
 ] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
@@ -33,6 +50,20 @@ export interface ActiveRun {
   status: 'queued' | 'running' | 'waiting'
 }
 
+/** 运行时实时负载：在跑 / 排队数（`runtimes.statuses` 与调度器共用的口径）。 */
+export interface RuntimeWorkload {
+  runtimeId: string
+  running: number
+  queued: number
+}
+
+/** 启动对账要兜底终态的中断聊天 run（`purpose='chat'` + `running`）。 */
+export interface StaleChatRun {
+  id: string
+  leaseId: string | null
+  turn: number
+}
+
 /** 需要参数的视图 → 参数形状；无参数视图不出现在这里。 */
 export interface ViewArgs {
   'tasks.byWorkflow': { workflowId: string }
@@ -40,6 +71,10 @@ export interface ViewArgs {
   'runs.active-by-task': { taskId: string }
   'messages.byConversation': { conversationId: string }
   'runs.active-by-conversation': { conversationId: string }
+  'runs.byTask': { taskId: string }
+  'run.byId': { runId: string }
+  'run.events': { runId: string }
+  'run.last-event-seq': { runId: string }
 }
 
 /** 视图 id → 返回类型。 */
@@ -53,6 +88,12 @@ export interface ViewResults {
   'conversations.all': Conversation[]
   'messages.byConversation': Message[]
   'runs.active-by-conversation': ActiveRun[]
+  'runs.byTask': Run[]
+  'run.byId': RunRow | null
+  'run.events': RunEvent[]
+  'run.last-event-seq': number
+  'runtimes.workloads': RuntimeWorkload[]
+  'runs.stale-chat': StaleChatRun[]
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

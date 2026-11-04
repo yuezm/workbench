@@ -95,12 +95,15 @@ function upgradeLegacyRuns(db: DatabaseSync): boolean {
 
 /**
  * 打开（或创建）数据库文件并建好全库 schema：busy_timeout、打开时 integrity_check、
- * 文件库启用 WAL、九张投影表 + 两张过渡期 legacy 聊天表 + 账本表（全部 IF NOT EXISTS）、
+ * 文件库启用 WAL、九张投影表 + 账本表（全部 IF NOT EXISTS）、
  * 宿主私有 `process_registry`（T13）、旧库 `runs` 结构升级（M2）、`PRAGMA user_version = SCHEMA_VERSION`。
  *
  * 手写 v1 → v2 迁移已删除：v2 存量数据由 `host/store/import.ts` 写成 `snapshot.imported`
  * 事实后重建投影，因此这里只保证「库结构与当前版本对齐」；唯一的例外是 `runs`
  * 的列升级——它在导入事实之前完成，导入/backfill 才能写新列。
+ *
+ * 旧库一次性升级（`upgradeLegacyRuns`）与 v2 存量迁移（`host/store/import.ts` 的导入根 /
+ * 旧聊天表）是 M2 兼容层，只在旧库首次打开时触发，**M3 再删**（迁移窗口关闭后不再需要）。
  *
  * 不设置 foreign_keys：保持连接默认（node:sqlite 默认开启），组合方需要时自行切换；
  * `runs` 升级内部临时关外键并在 `finally` 恢复。

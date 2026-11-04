@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { Task } from '../../src/protocol/entities'
+import type { RunEvent, Task } from '../../src/protocol/entities'
 import {
   VIEW_IDS,
   type ActiveRun,
+  type RuntimeWorkload,
+  type StaleChatRun,
   type ViewId,
   type ViewParams,
   type ViewResult,
@@ -54,6 +56,12 @@ describe('protocol/views', () => {
       'conversations.all',
       'messages.byConversation',
       'runs.active-by-conversation',
+      'runs.byTask',
+      'run.byId',
+      'run.events',
+      'run.last-event-seq',
+      'runtimes.workloads',
+      'runs.stale-chat',
     ])
   })
 
@@ -76,5 +84,35 @@ describe('protocol/views', () => {
     expect(Object.keys(activeRun).sort()).toEqual(['id', 'stageId', 'status', 'taskId'])
     expect(activeRun.status).toBe('queued')
     expect(chatRun.taskId).toBeNull()
+  })
+})
+
+/** T16 读路径收口：运行历史 / 负载视图的参数与返回形状。 */
+const runsByTaskParams: Assert<Equal<ViewParams<'runs.byTask'>, { taskId: string }>> = true
+const runByIdParams: Assert<Equal<ViewParams<'run.byId'>, { runId: string }>> = true
+const runEventsParams: Assert<Equal<ViewParams<'run.events'>, { runId: string }>> = true
+const lastEventSeqParams: Assert<Equal<ViewParams<'run.last-event-seq'>, { runId: string }>> = true
+const workloadsNoParams: Assert<Equal<ViewParams<'runtimes.workloads'>, undefined>> = true
+const staleChatNoParams: Assert<Equal<ViewParams<'runs.stale-chat'>, undefined>> = true
+const runEventsResult: Assert<Equal<ViewResult<'run.events'>, RunEvent[]>> = true
+const lastEventSeqResult: Assert<Equal<ViewResult<'run.last-event-seq'>, number>> = true
+
+describe('protocol/views：T16 新增读视图', () => {
+  it('参数与返回类型映射（类型级断言）', () => {
+    expect(runsByTaskParams).toBe(true)
+    expect(runByIdParams).toBe(true)
+    expect(runEventsParams).toBe(true)
+    expect(lastEventSeqParams).toBe(true)
+    expect(workloadsNoParams).toBe(true)
+    expect(staleChatNoParams).toBe(true)
+    expect(runEventsResult).toBe(true)
+    expect(lastEventSeqResult).toBe(true)
+  })
+
+  it('运行时负载与中断聊天 run 的形状最小化', () => {
+    const workload: RuntimeWorkload = { runtimeId: 'rt-1', running: 1, queued: 2 }
+    const stale: StaleChatRun = { id: 'run-1', leaseId: 'run-1:1', turn: 2 }
+    expect(Object.keys(workload).sort()).toEqual(['queued', 'running', 'runtimeId'])
+    expect(Object.keys(stale).sort()).toEqual(['id', 'leaseId', 'turn'])
   })
 })

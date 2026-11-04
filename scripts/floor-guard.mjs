@@ -121,6 +121,11 @@ const sourceCandidates = (f) => {
 const RELOCATED_TESTS = {
   // T14b：repository 聊天 SQL 用例 → 宿主聊天执行链用例（IPC/scheduler/投影）
   'tests/main/ai-workflow/repository.chat.test.ts': 'tests/host/chat.test.ts',
+  // T16：main 层用例按层搬家（读路径收口后 host 已有等价覆盖）
+  'tests/main/ai-workflow/ipc.test.ts': 'tests/host/ipc.test.ts',
+  // repository 补充用例（runs / 负载 / 聊天投影）→ 投影视图与 IPC 用例
+  'tests/main/ai-workflow/repository.extra.test.ts': 'tests/host/ipc.test.ts',
+  'tests/main/index.test.ts': 'tests/host/boot.test.ts',
 }
 const migratedCounterpart = (f) => {
   const relocated = RELOCATED_TESTS[f]

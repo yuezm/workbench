@@ -1,24 +1,30 @@
 // @vitest-environment node
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import type { Runtime, RuntimeProbe, WorkflowWithStages } from '../../../src/shared/ai-workflow-api'
-import { AI_WORKFLOW_CHANNEL } from '../../../src/shared/ai-workflow-api'
+import type { Runtime, RuntimeProbe } from '../../src/shared/ai-workflow-api'
+import { AI_WORKFLOW_CHANNEL } from '../../src/shared/ai-workflow-api'
 import {
   createAiWorkflowHandler,
   registerAiWorkflowIpc,
   type AiWorkflowHandler,
-} from '../../../src/main/ai-workflow/ipc'
-import type { RuntimeBackend } from '../../../src/main/ai-workflow/runtime/registry'
+} from '../../src/main/ai-workflow/ipc'
+import type { RuntimeBackend } from '../../src/main/ai-workflow/runtime/registry'
 import {
+  agentById,
   createAgent,
   createRuntime,
   createTask,
+  createWorkflow,
   createWorld,
+  createdId,
+  nextCommandId,
   resetCommandIds,
   runtimeById,
+  taskById,
   updateRuntime,
+  workflowById,
   type TestWorld,
-} from './test-support'
+} from './ipc-support'
 
 const { ipcMainMock } = vi.hoisted(() => ({ ipcMainMock: { handle: vi.fn() } }))
 vi.mock('electron', () => ({ ipcMain: ipcMainMock }))
@@ -58,7 +64,6 @@ function dispatch(input: unknown): ReturnType<TestWorld['store']['dispatch']> {
 function makeHandler(overrides: Partial<Parameters<typeof createAiWorkflowHandler>[0]> = {}) {
   return createAiWorkflowHandler({
     store: world.store,
-    repo: world.repo,
     dispatch,
     backendFor: () => backend,
     ...overrides,
@@ -162,24 +167,16 @@ describe('ai-workflow handler：运行时', () => {
   it('statuses 汇总实时负载（含 0 负载的运行时）', async () => {
     const a = createRuntime(world, { name: 'a', maxConcurrent: 2 })
     const b = createRuntime(world, { name: 'b' })
-    const workflowId = createWorkflowHandlerWorkflow()
-    const task = createTask(world, { title: 't', workflowId })
-    world.repo.runCreate({
-      taskId: task.id,
-      stageId: null,
-      agentId: null,
-      runtimeId: a.id,
-      prompt: 'p',
-      status: 'queued',
-    })
-    world.repo.runCreate({
-      taskId: task.id,
-      stageId: null,
-      agentId: null,
-      runtimeId: a.id,
-      prompt: 'p',
-      status: 'running',
-    })
+    // 走事实路径造两条 run：agent 阶段的任务进入时内核入队，领取一条变 running
+    const agentId = (
+      handle('agents.create', [{ name: 'coder', runtimeId: a.id }]) as { id: string }
+    ).id
+    const wf = handle('workflows.create', [
+      { name: 'w-load', stages: [{ name: '执行', entryMode: 'agent', agentId }] },
+    ]) as Wf
+    handle('tasks.create', [{ title: 't1', workflowId: wf.id }])
+    handle('tasks.create', [{ title: 't2', workflowId: wf.id }])
+    dispatch({ type: 'run.claim', runtimeId: a.id, capacity: 1 })
     const statuses = (await handle('runtimes.statuses', [])) as Array<{
       runtimeId: string
       workload: { running: number; queued: number; maxConcurrent: number }
@@ -229,14 +226,6 @@ describe('ai-workflow handler：运行时', () => {
     expect(() => handle('nope.nope', [])).toThrow(/未知方法/)
   })
 })
-
-/** 建一个只有单个 none 阶段的工作流（statuses/任务用例共用）。 */
-function createWorkflowHandlerWorkflow(): string {
-  const workflow = handle('workflows.create', [
-    { name: 'w', stages: [{ name: 's', entryMode: 'none' }] },
-  ]) as WorkflowWithStages
-  return workflow.id
-}
 
 describe('ai-workflow handler：聊天', () => {
   function seedAgent(h: AiWorkflowHandler): string {
@@ -488,9 +477,21 @@ describe('ai-workflow handler：任务/运行', () => {
       },
     ]) as Wf
     const task = handle('tasks.create', [{ title: 'T3', workflowId: wf.id }]) as { id: string }
-    const run = (handle('runs.listByTask', [task.id]) as Array<{ id: string }>)[0]
+    const run = (
+      handle('runs.listByTask', [task.id]) as Array<{
+        id: string
+        runtimeId: string
+      }>
+    )[0]
     expect(handle('runs.events', [run.id])).toEqual([])
-    world.repo.runEventsAppend(run.id, [{ seq: 1, type: 'text', text: 'hi' }])
+    // 领到 running 后按帧事实入账（帧 seq 由宿主分配）
+    dispatch({ type: 'run.claim', runtimeId: run.runtimeId, capacity: 1 })
+    dispatch({
+      type: 'run.frames',
+      runId: run.id,
+      turn: 1,
+      frames: [{ runId: run.id, seq: 1, type: 'text', text: 'hi' }],
+    })
     expect(handle('runs.events', [run.id])).toEqual([{ seq: 1, type: 'text', text: 'hi' }])
     expect(handle('runs.events', ['ghost'])).toEqual([])
   })
@@ -563,7 +564,6 @@ describe('registerAiWorkflowIpc', () => {
   it('在单一 RPC 通道上注册 handler', () => {
     registerAiWorkflowIpc({
       store: world.store,
-      repo: world.repo,
       dispatch,
       backendFor: () => backend,
     })
@@ -574,5 +574,142 @@ describe('registerAiWorkflowIpc', () => {
       a: unknown[],
     ) => unknown
     expect(h({}, 'runtimes.list', [])).toEqual([])
+  })
+})
+
+describe('ipc：投影查询助手（原 projection-lookup）', () => {
+  it('createdId 按事实类型取四类新实体 id', () => {
+    const runtime = createRuntime(world, { name: 'ds' })
+    const agentFacts = world.store.dispatch({
+      type: 'agent.create',
+      commandId: nextCommandId(),
+      input: { name: 'a2', runtimeId: runtime.id },
+    }).facts
+    const workflowFacts = world.store.dispatch({
+      type: 'workflow.create',
+      commandId: nextCommandId(),
+      input: { name: 'w2', stages: [{ name: 's', entryMode: 'none' }] },
+    }).facts
+    const workflow = workflowById(world.store, createdId(workflowFacts, 'workflow.created'))
+    const taskFacts = world.store.dispatch({
+      type: 'task.create',
+      commandId: nextCommandId(),
+      input: { title: 'T2', workflowId: workflow.id },
+    }).facts
+    const runtimeFacts = world.store.dispatch({
+      type: 'runtime.create',
+      commandId: nextCommandId(),
+      input: { name: 'ds2' },
+    }).facts
+
+    expect(runtimeById(world.store, createdId(runtimeFacts, 'runtime.created')).name).toBe('ds2')
+    expect(agentById(world.store, createdId(agentFacts, 'agent.created')).name).toBe('a2')
+    expect(workflowById(world.store, createdId(workflowFacts, 'workflow.created')).name).toBe('w2')
+    expect(taskById(world.store, createdId(taskFacts, 'task.created')).title).toBe('T2')
+  })
+
+  it('createdId：缺少事实 / 事实不携带实体 id 都报可读错误', () => {
+    expect(() => createdId([], 'runtime.created')).toThrow('缺少事实: runtime.created')
+
+    const runtime = createRuntime(world, { name: 'ds' })
+    const facts = world.store.dispatch({
+      type: 'runtime.update',
+      commandId: nextCommandId(),
+      id: runtime.id,
+      patch: { name: 'ds2' },
+    }).facts
+    expect(() => createdId(facts, 'runtime.updated')).toThrow('事实不携带实体 id: runtime.updated')
+  })
+
+  it('按 id 取投影行；取不到给可读错误', () => {
+    const runtime = createRuntime(world, { name: 'ds', maxConcurrent: 2 })
+    const agent = createAgent(world, { name: 'coder', runtimeId: runtime.id })
+    const workflow = createWorkflow(world, {
+      name: 'w',
+      stages: [{ name: 's', entryMode: 'none' }],
+    })
+    const task = createTask(world, { title: 'T', workflowId: workflow.id })
+
+    expect(runtimeById(world.store, runtime.id)).toEqual(runtime)
+    expect(agentById(world.store, agent.id)).toEqual(agent)
+    expect(workflowById(world.store, workflow.id)).toEqual(workflow)
+    expect(workflowById(world.store, workflow.id).stages).toHaveLength(1)
+    expect(taskById(world.store, task.id)).toEqual(task)
+
+    expect(() => runtimeById(world.store, 'ghost-rt')).toThrow('运行时不存在: ghost-rt')
+    expect(() => agentById(world.store, 'ghost-ag')).toThrow('智能体不存在: ghost-ag')
+    expect(() => workflowById(world.store, 'ghost-wf')).toThrow('工作流不存在: ghost-wf')
+    expect(() => taskById(world.store, 'ghost-tk')).toThrow('任务不存在: ghost-tk')
+  })
+})
+
+describe('ipc：运行历史读投影（原 repository runs 段）', () => {
+  function agentStageWorkflow(): { agentId: string; workflowId: string } {
+    const rt = createRuntime(world, { name: 'ds' })
+    const agentId = (
+      handle('agents.create', [{ name: 'coder', runtimeId: rt.id, systemPrompt: 'sys' }]) as {
+        id: string
+      }
+    ).id
+    const wf = handle('workflows.create', [
+      { name: 'w-history', stages: [{ name: '执行', entryMode: 'agent', agentId }] },
+    ]) as Wf
+    return { agentId, workflowId: wf.id }
+  }
+
+  it('runs.listByTask：只返回该任务的阶段 run（调度列不外露），聊天 run 不进看板', () => {
+    const { agentId, workflowId } = agentStageWorkflow()
+    const task = handle('tasks.create', [{ title: 'T', workflowId }]) as { id: string }
+    const runs = handle('runs.listByTask', [task.id]) as Array<Record<string, unknown>>
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toMatchObject({ taskId: task.id, status: 'queued' })
+    expect(runs[0]?.prompt).toContain('# 阶段：执行')
+    // IPC 行不含调度列（purpose / lease / attempts 等）
+    expect(runs[0]).not.toHaveProperty('purpose')
+    expect(runs[0]).not.toHaveProperty('leaseId')
+
+    // 同一任务的聊天 run（旧数据允许挂 task_id）不混进阶段历史
+    const conv = handle('chat.createConversation', [agentId]) as { id: string }
+    handle('chat.send', [conv.id, '问'])
+    expect(handle('runs.listByTask', [task.id])).toHaveLength(1)
+    expect(handle('runs.listByTask', ['ghost'])).toEqual([])
+  })
+
+  it('runs.events：按 seq 返回事件流；帧幂等覆盖不新增行', () => {
+    const { workflowId } = agentStageWorkflow()
+    const task = handle('tasks.create', [{ title: 'T2', workflowId }]) as { id: string }
+    const run = (
+      handle('runs.listByTask', [task.id]) as Array<{
+        id: string
+        runtimeId: string
+      }>
+    )[0]
+    dispatch({ type: 'run.claim', runtimeId: run.runtimeId, capacity: 1 })
+    dispatch({
+      type: 'run.frames',
+      runId: run.id,
+      turn: 1,
+      frames: [
+        { runId: run.id, seq: 1, type: 'text', text: 'a' },
+        { runId: run.id, seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' },
+      ],
+    })
+    expect(handle('runs.events', [run.id])).toEqual([
+      { seq: 1, type: 'text', text: 'a' },
+      { seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' },
+    ])
+    // 同一 (run, seq) 重放：投影纯追加，主键冲突直接拒绝（不覆盖历史）
+    expect(() =>
+      dispatch({
+        type: 'run.frames',
+        runId: run.id,
+        turn: 1,
+        frames: [{ runId: run.id, seq: 2, type: 'text', text: 'b' }],
+      }),
+    ).toThrow()
+    expect(handle('runs.events', [run.id])).toEqual([
+      { seq: 1, type: 'text', text: 'a' },
+      { seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' },
+    ])
   })
 })

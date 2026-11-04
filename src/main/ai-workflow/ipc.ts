@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { ipcMain } from 'electron'
+import type { Agent, Runtime, Task, WorkflowWithStages } from '../../protocol/entities'
 import type {
   AgentInput,
   ChatConversation,
-  Runtime,
   RuntimeInput,
   RuntimeProbe,
   RuntimeProtocolFamily,
@@ -12,9 +12,9 @@ import type {
   WorkflowInput,
 } from '../../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../shared/ai-workflow-api'
+import type { Fact } from '../../kernel/types'
+import type { FactType } from '../../protocol/facts'
 import type { Store } from '../../host/store/index'
-import { agentById, createdId, runtimeById, taskById, workflowById } from './projection-lookup'
-import type { Repository } from './repository'
 import { detectInstalledRuntimes } from './runtime/detect'
 import type { RuntimeBackend } from './runtime/registry'
 
@@ -22,21 +22,63 @@ import type { RuntimeBackend } from './runtime/registry'
 export type AiWorkflowHandler = (method: string, args: unknown[]) => unknown
 
 export interface AiWorkflowIpcDeps {
-  /** 唯一读入口：配置/任务/运行都读投影 */
+  /** 唯一读入口：配置/任务/运行/聊天都读投影视图 */
   store: Store
   /**
    * 唯一写入口（装配根传 `effects.dispatch`）：提交事实并触发提交后分发。
    * 任务进入阶段的 `run.queued` 由内核产出，这里不再补写任何执行记录。
    */
   dispatch: Store['dispatch']
-  /** 运行侧只读入口：
-uns.listByTask / 
-uns.events 等历史查询（T16 收口到投影后删除） */
-  repo: Repository
   /** 协议后端（装配时注入；测试用假实现） */
   backendFor: (family: RuntimeProtocolFamily) => RuntimeBackend
   /** 命令幂等键生成器（默认随机 UUID；测试可注入确定性值） */
   newCommandId?: () => string
+}
+
+/**
+ * 从刚提交的事实里取新实体 id（create 类命令用）。
+ * 读投影也能拿到，但用事实更直接：同一事务里刚写的行就是它，不存在并发歧义。
+ */
+export function createdId(facts: readonly Fact[], type: FactType): string {
+  const fact = facts.find((item) => item.type === type)
+  if (!fact) throw new Error('缺少事实: ' + type)
+  switch (fact.type) {
+    case 'runtime.created':
+      return (fact.payload as { runtime: Runtime }).runtime.id
+    case 'agent.created':
+      return (fact.payload as { agent: Agent }).agent.id
+    case 'workflow.created':
+      return (fact.payload as { workflow: WorkflowWithStages }).workflow.id
+    case 'task.created':
+      return (fact.payload as { task: Task }).task.id
+    default:
+      throw new Error('事实不携带实体 id: ' + fact.type)
+  }
+}
+
+/** 按 id 从投影视图取实体；取不到就抛可读错误（IPC 错误文案原样露给 UI）。 */
+export function runtimeById(store: Store, id: string): Runtime {
+  const runtime = store.query('runtimes.all').find((item) => item.id === id)
+  if (!runtime) throw new Error('运行时不存在: ' + id)
+  return runtime
+}
+
+export function agentById(store: Store, id: string): Agent {
+  const agent = store.query('agents.all').find((item) => item.id === id)
+  if (!agent) throw new Error('智能体不存在: ' + id)
+  return agent
+}
+
+export function workflowById(store: Store, id: string): WorkflowWithStages {
+  const workflow = store.query('workflows.all').find((item) => item.id === id)
+  if (!workflow) throw new Error('工作流不存在: ' + id)
+  return workflow
+}
+
+export function taskById(store: Store, id: string): Task {
+  const task = store.query('task.byId', { taskId: id })
+  if (!task) throw new Error('任务不存在: ' + id)
+  return task
 }
 
 /** 运行时配置里参与启动的部分（探测/模型目录只关心命令与 profile） */
@@ -48,7 +90,7 @@ function targetOf(runtime: Pick<Runtime, 'command' | 'profile'>): {
 }
 
 export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHandler {
-  const { repo, store, dispatch, backendFor } = deps
+  const { store, dispatch, backendFor } = deps
   const nextCommandId = deps.newCommandId ?? (() => randomUUID())
 
   /**
@@ -138,7 +180,9 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     'runtimes.probe': async (a) => probeAndSave(runtimeById(store, a[0] as string)),
     // 实时负载：在跑/排队数按运行时现算
     'runtimes.statuses': () => {
-      const workloads = new Map(repo.runtimeWorkloads().map((w) => [w.runtimeId, w]))
+      const workloads = new Map(
+        store.query('runtimes.workloads').map((item) => [item.runtimeId, item]),
+      )
       return store.query('runtimes.all').map((runtime): RuntimeStatus => ({
         runtimeId: runtime.id,
         workload: {
@@ -236,8 +280,9 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
       dispatch({ type: 'task.remove', commandId: nextCommandId(), id })
     },
 
-    'runs.listByTask': (a) => repo.runsListByTask(a[0] as string),
-    'runs.events': (a) => repo.runEventsList(a[0] as string),
+    // 运行历史读投影：任务下的阶段 run 与事件流（聊天 run 不挂任务，不进 runs.byTask）
+    'runs.listByTask': (a) => store.query('runs.byTask', { taskId: a[0] as string }),
+    'runs.events': (a) => store.query('run.events', { runId: a[0] as string }),
 
     // 聊天全部走事实：读走投影视图，写走 dispatch（effects 统一通知 UI）
     'chat.listConversations': () => store.query('conversations.all'),

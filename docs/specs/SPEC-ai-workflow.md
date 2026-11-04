@@ -1,5 +1,7 @@
 # Spec: ai-workflow（个人AI工作流）
 
+> **重构提示（2026-11-04）：** 目录结构与分层已由 [ARCHITECTURE](../ARCHITECTURE.md) 与 [SPEC-kernel](SPEC-kernel.md)、[SPEC-plugins](SPEC-plugins.md)、[SPEC-host](SPEC-host.md) 取代；本文的行为规格（阶段语义、终态归一、取消时序、探测、聊天续接、迁移规则）仍是迁移基线，M5 前逐条有效。
+
 > Module id：`ai-workflow`。索引见 [CAPABILITY-MAP.md](../CAPABILITY-MAP.md)。依赖 `shell`。确认日期：2026-11-02；运行时章节 2026-11-03 重做为 v2。
 >
 > 本 Spec 为 MVP：**本地单机最小闭环**。远端 Worker 仅留架构位、不实现（见 Open Questions / Out of scope）。设计参考 Multica 的「本地 UI/状态 + 本机 CLI 执行」边界。

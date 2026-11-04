@@ -1,0 +1,320 @@
+# Spec: kernel（内核）
+
+> Module id：`kernel`。索引见 [CAPABILITY-MAP.md](../CAPABILITY-MAP.md)。总纲见 [ARCHITECTURE.md](../ARCHITECTURE.md)。
+> 定位：主进程内的纯 TS 模块。无 IO、无时钟、无随机数、无网络、无产品名。
+
+## Objective
+
+把「事件 → 决策 → 事实 → 投影」这一条链固定下来，让任务流转、运行调度、审批挂起、失败重试、跳数熔断只在一个地方定义；宿主与插件只负责输入与执行。
+
+**非目标：** 开库、迁移、spawn、通知、UI、配置表单、HTTP。这些都在 `host` 或插件里。
+
+## 派活单位：智能体
+
+| 概念                       | 是什么                                                                                | 谁拥有                        |
+| -------------------------- | ------------------------------------------------------------------------------------- | ----------------------------- |
+| **智能体（Agent）**        | 派活目标：名称、描述、能力（System Prompt）、绑定的运行时                             | 用户配置，内核投影 `agents`   |
+| **运行时（Runtime）**      | 执行环境实例：执行器插件、命令、profile、权限模式、模型、工作目录、并发上限、启用开关 | 用户配置，内核投影 `runtimes` |
+| **执行器插件（Executor）** | 协议适配实现（dsh / command / claude…），无状态；只负责「怎么调起并读回一轮」         | 插件注册表                    |
+
+派活链固定为：**规则 → 任务（工作流 + 阶段）→ 阶段绑定的智能体 `agentId` → 该智能体的运行时 `runtimeId` → 运行时的 `executorKey` 选择执行器插件**。规则只建任务，不直接派 run。内核只透传 `executorKey` 字符串，不知道 dsh、claude 是什么。执行器插件不是派活目标，也不能自己挑活。
+
+## 类型契约
+
+```ts
+// src/kernel/types.ts
+export type Seq = number
+export type Id = string
+export type Iso = string
+export type Access = 'read' | 'edit' | 'full'
+
+export type Actor =
+  | { kind: 'owner'; via: 'ui' | 'channel' }
+  | { kind: 'plugin'; id: string; kind: PluginKind }
+  | { kind: 'host'; via: 'timer' | 'scheduler' | 'reconcile' | 'timeout' | 'cancel' }
+  | { kind: 'kernel' }
+
+export interface FactDraft<P = unknown> {
+  type: FactType
+  actor: Actor
+  at: Iso // 由边界传入的 now，内核不取时钟
+  cause?: Seq // 触发本事实的输入或事实，构成 why 链
+  hops?: number // 仅事件类事实
+  payload: P
+}
+
+export interface Fact<P = unknown> extends FactDraft<P> {
+  seq: Seq
+}
+
+/** 只读视图：宿主按 `viewSpec(input)` 装好切片，内核不查库。 */
+export interface View {
+  seq: Seq
+  rules: AutomationRule[]
+  rulesVersion: number
+  tasks: Map<Id, TaskRow>
+  workflows: Map<Id, WorkflowRow>
+  stages: Map<Id, StageRow>
+  agents: Map<Id, AgentRow>
+  runtimes: Map<Id, RuntimeRow>
+  threads: Map<Id, ThreadRow>
+  runs: Map<Id, RunRow>
+  cards: Map<Id, CardRow>
+  conversations: Map<Id, ConversationRow>
+  messages: Map<Id, MessageRow>
+  eventKeys: Set<string> // (source, dedupeKey) 去重
+}
+
+export interface Environment {
+  timezone: string
+  limits: Limits
+}
+
+export interface Limits {
+  maxHops: 8
+  leaseMs: 120_000
+  heartbeatMs: 30_000
+  maxAttempts: 3
+  backoffBaseMs: 300_000
+  backoffCapMs: 3_600_000
+  runTimeoutMs: 1_800_000
+  cancelGraceMs: 3_000
+  killAfterMs: 2_000
+  maxFramesPerBatch: 500 // 运行帧批进入账上限，超出截断并记一条 dropped
+}
+```
+
+## 函数
+
+| 函数                                      | 职责                                               | 约束                                |
+| ----------------------------------------- | -------------------------------------------------- | ----------------------------------- |
+| `viewSpec(input): Table[]`                | 声明该输入需要装载哪些投影切片                     | 纯；宿主据此装 `View`，避免全表装载 |
+| `decide(view, input, now, env): Decision` | 唯一决策入口：输入 → 事实                          | 纯；不抛异常，非法输入返回 `reject` |
+| `project(fact): Change[]`                 | 事实 → 投影变更                                    | 纯；实时写入与重建共用              |
+| `nextWakeAt(view, now, env): Iso \| null` | 下一个到期时刻（cron / `notBefore` / 租约 / 卡片） | 纯；宿主只挂一个定时器              |
+| `timeline(facts, scope, id)`              | `why` 时间线（事实 + cause 链）                    | 纯；供宿主查询与 UI 展示            |
+
+```ts
+export interface Decision {
+  facts: FactDraft[]
+  reject?: { code: Reason; message: string }
+}
+
+export type Table =
+  | 'tasks'
+  | 'workflows'
+  | 'stages'
+  | 'agents'
+  | 'runtimes'
+  | 'threads'
+  | 'runs'
+  | 'run_events'
+  | 'cards'
+  | 'conversations'
+  | 'messages'
+  | 'event_keys'
+  | 'rules'
+  | 'plugin_config'
+
+export interface Change {
+  table: Table
+  key: Id
+  row: Row | null
+} // row=null 为删除
+```
+
+**单写入者：** `decide` 只产出 `facts`；`project` 只产出 `changes`；写库只发生在宿主的一次事务里。内核里不得出现 `INSERT/UPDATE/DELETE`。
+
+## 输入目录
+
+| 输入                                                          | 来源                                     | 前置校验                                                                                     | 事实                                                                                                                                   |
+| ------------------------------------------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `event.received`                                              | source 插件、app 插件                    | 字段白名单、类型合法、`hops` ≤ 上限、不带 `cwd/agent/runtime/access`                         | `event.received` + 命中规则则 `task.created`（同一 `externalRef` 幂等）；任务进入阶段后再产生 `run.queued`；超过跳数则 `event.dropped` |
+| `run.claim`                                                   | 宿主调度器（未来远端 worker 用同一形状） | 运行时已配置且启用，`capacity` 1–8                                                           | `run.claimed` ×N（N ≤ capacity，且该运行时在跑数 < `maxConcurrent`）                                                                   |
+| `run.heartbeat`                                               | 宿主调度器                               | `leaseId` 匹配当前租约                                                                       | `run.lease_extended`                                                                                                                   |
+| `run.receipt`                                                 | 执行器插件（经宿主转交）                 | run 属于该运行时、`leaseId` 与 `turn` 匹配当前轮                                             | 终态事实 + 派生事件/卡片 + 阶段流转                                                                                                    |
+| `run.cancel`                                                  | owner                                    | run 处于 queued/claimed/waiting                                                              | `run.cancel_requested`                                                                                                                 |
+| `card.answer`                                                 | channel、owner                           | 卡片 open、选项合法、同一卡片只答一次                                                        | `card.answered` + `run.queued`（续接）                                                                                                 |
+| `task.create` / `task.move` / `task.complete` / `task.remove` | owner                                    | 工作流/阶段存在；有活跃 run 时拒绝移动/完成；`task.create` 可带 `threadKey` 手工归线程       | 任务事实 + 进入阶段效果（阶段绑定的智能体）                                                                                            |
+| `thread.note`                                                 | owner、执行器回执（经宿主）              | 线程 open、文本 ≤2000 字                                                                     | `thread.note_appended`                                                                                                                 |
+| `thread.close`                                                | owner                                    | 线程存在                                                                                     | `thread.closed`（reason=manual）；有新事件时自动重开                                                                                   |
+| `thread.bind`                                                 | owner                                    | 线程存在、`(source, externalRef)` 未被占用                                                   | `thread.bound`                                                                                                                         |
+| `workflow.*` / `agent.*` / `runtime.*`                        | owner                                    | 引用完整、名称唯一；有活跃 run 时拒绝改阶段；删运行时前校验被智能体引用                      | 配置事实                                                                                                                               |
+| `conversation.create` / `send` / `remove`                     | owner                                    | 同一对话同时只跑一轮                                                                         | `message.appended` + `run.queued`（`purpose='chat'`）；被拒绝时不落消息                                                                |
+| `rules.replace`                                               | owner                                    | 整批校验：`protocol/rules` 校验形状与字段上限，内核解析 `cron` 合法性，且 `agentId` 必须存在 | `rules.replaced`（版本 +1）；整批非法则拒绝，旧版继续生效                                                                              |
+| `clock.tick`                                                  | host 单定时器                            | —                                                                                            | 到期事实：重试、`later` 复查、租约过期、cron 到点、卡片超时                                                                            |
+
+去重与幂等：同一 `(source, dedupeKey)` 只处理一次，重复输入不产生事实；每轮回执按 `(runId, turn, payload 哈希)` 判定，同哈希返回上次结果、异哈希返回 `conflict`；所有命令带 `commandId`，重复提交返回原结果。
+
+## 事实目录
+
+| 事实                                                 | payload 关键字段                                                                                                                                                                                              | 投影                                      |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `event.received`                                     | `eventId, source, type, subject, summary, detailRef, link, hops, dedupeKey`                                                                                                                                   | `event_keys`、`runs`（合并时）            |
+| `event.merged`                                       | `runId, eventId`                                                                                                                                                                                              | `runs.eventIds`（仅 queued run 可合并）   |
+| `event.dropped`                                      | `eventId, hops, reason`                                                                                                                                                                                       | `event_keys`                              |
+| `run.queued`                                         | `runId, purpose, ruleId?, rulesVersion, agentId, runtimeId, executorKey, taskId?, stageId?, threadId?, cwd, access, skill?, promptRef, eventIds, hops, turn, resumeSessionId?, threadContextRef?, notBefore?` | `runs`                                    |
+| `run.claimed`                                        | `runId, leaseId, runtimeId, attempt, leaseUntil`                                                                                                                                                              | `runs.status/lease/attempt`               |
+| `run.lease_extended`                                 | `runId, leaseId, leaseUntil`                                                                                                                                                                                  | `runs.lease`                              |
+| `run.waiting`                                        | `runId, cardIds, turn`（同时释放租约与并发位）                                                                                                                                                                | `runs.status='waiting'`                   |
+| `run.frames`                                         | `runId, turn, frames[]`（协议帧批量入账；单批 ≤ `maxFramesPerBatch`）                                                                                                                                         | `run_events`                              |
+| `run.abandoned`                                      | `runId, leaseId, attempts, backoffUntil`                                                                                                                                                                      | `runs.status/attempts/notBefore`          |
+| `run.succeeded` / `run.failed` / `run.cancelled`     | `runId, output, sessionId, usage, errorCode, exitCode, durationMs`                                                                                                                                            | `runs`                                    |
+| `run.usage`                                          | `runId, input, output, cacheRead, cacheWrite, cost`（运行中增量；终态事实携带最终值覆盖）                                                                                                                     | `runs.usage`                              |
+| `run.cancel_requested`                               | `runId, by`                                                                                                                                                                                                   | `runs.cancelRequested`                    |
+| `card.opened`                                        | `cardId, runId, title, text, options, key, version`                                                                                                                                                           | `cards`                                   |
+| `card.updated`                                       | `cardId, version, changes`                                                                                                                                                                                    | `cards`                                   |
+| `card.delivered`                                     | `cardId, version, ref`                                                                                                                                                                                        | `cards.delivery`（`pending → delivered`） |
+| `card.delivery_failed`                               | `cardId, version, error`                                                                                                                                                                                      | `cards.delivery`（重投只补 `pending`）    |
+| `card.answered`                                      | `cardId, version, optionIndex, by`                                                                                                                                                                            | `cards`                                   |
+| `card.resolved`                                      | `cardId, reason`                                                                                                                                                                                              | `cards`                                   |
+| `task.created`                                       | `taskId, workflowId, stageId, threadId, parentTaskId?, title, descriptionRef?, origin: 'manual'\|'rule', ruleId?, externalRef?, labels?`                                                                      | `tasks`                                   |
+| `task.moved` / `task.completed` / `task.removed`     | 任务字段 / `from, to, by`                                                                                                                                                                                     | `tasks`                                   |
+| `thread.opened`                                      | `threadId, source, externalRef, title`                                                                                                                                                                        | `threads`                                 |
+| `thread.event_attached`                              | `threadId, eventId, summary?`                                                                                                                                                                                 | `threads.lastActivityAt`、事件关联        |
+| `thread.task_attached`                               | `threadId, taskId, ruleId?`                                                                                                                                                                                   | `threads.taskIds`                         |
+| `thread.note_appended`                               | `threadId, noteId, author, text`                                                                                                                                                                              | `threads.notes`                           |
+| `thread.closed` / `thread.reopened`                  | `threadId, reason` / `threadId, eventId`                                                                                                                                                                      | `threads.status`                          |
+| `thread.bound`                                       | `threadId, source, externalRef`（把手工线程绑定到外部入口）                                                                                                                                                   | `threads.source/externalRef`              |
+| `workflow.created` / `updated` / `removed`           | 定义（含阶段）；`versions`                                                                                                                                                                                    | `workflows`                               |
+| `stage.created` / `stage.updated` / `stage.deleted`  | 阶段定义 / `tombstone`                                                                                                                                                                                        | `stages`（id 稳定，删除不重建整表）       |
+| `agent.created` / `updated` / `removed`              | 定义（含 `runtimeId`、`systemPrompt`）                                                                                                                                                                        | `agents`                                  |
+| `runtime.created` / `updated` / `removed` / `probed` | 配置（含 `executorKey`）、探测结论                                                                                                                                                                            | `runtimes`                                |
+| `plugin.configured`                                  | `pluginId, kind, config`（secret 字段不进事实）                                                                                                                                                               | `plugin_config`                           |
+| `conversation.created` / `removed`                   | 对话、`agentId`                                                                                                                                                                                               | `conversations`                           |
+| `message.appended`                                   | `conversationId, messageId, role, content, runId?, error?`                                                                                                                                                    | `messages`                                |
+| `rules.replaced`                                     | `version, rules`                                                                                                                                                                                              | `rules`                                   |
+| `snapshot.imported`                                  | `table, rows[], importedFrom`（按表分批；M1 迁移专用，只写一次）                                                                                                                                              | 对应投影                                  |
+
+**导入根：** `snapshot.imported` 是没有 `cause` 的基线，`timeline` 对它返回「迁移导入」而不是伪造因果链。导入之后的事实才具备完整 `why`。
+
+## 阶段语义（不变）
+
+沿用 `src/shared/stage-machine.ts` 的全部规则与 15 条硬约束（见 `SPEC-ai-workflow.md`「阶段状态机」与 `TEST-CASES.md`）：
+
+- `entry_mode` = `none` / `agent` / `user`；每次进入阶段都重新触发进入效果。
+- 自动流转只由 `run.succeeded` / `run.failed` 触发；打回目标解析后等于当前阶段时**零效果**、不重建 run。
+- 人工拖拽落点即目标，不套用 `on_complete` / `on_reject`；有活跃 run（queued/claimed/waiting）时拒绝移动与完成。
+- 「执行中」由内核投影现算，UI 与插件不得自行推导。
+- 阶段 id 稳定：编辑工作流只发 `stage.created/updated/deleted`，不整表重建；删除用 tombstone，历史 run 的 `stageId` 不悬空。
+- 有活跃 run 的工作流拒绝改阶段（改前后端校验同一规则）。
+- 人工任务的分活入口：`task.create` 时选工作流与起始阶段；进入该阶段时按 `entry_mode` 决定交给阶段绑定的智能体（`agentId`）、停下等人、还是仅停留。任务本身不携带「派给谁」的指令，派发只来自阶段配置。
+
+## 规则
+
+```ts
+export interface AutomationRule {
+  id: Id
+  name: string
+  when: { source: string; types: string[] } | { cron: string }
+  to: {
+    workflowId: Id // 建任务到哪个工作流（与手工建任务同一套引擎）
+    stageId?: Id // 起始阶段；缺省用该工作流首阶段
+    task?: { titleFrom?: 'subject' | 'summary'; labels?: string[] }
+    thread?: { keyFrom: 'subject' | 'externalRef'; onExisting?: 'reuse-task' | 'new-task' }
+  }
+  prompt?: string
+  parallel?: number // 同规则并行数，默认 1
+  merge?: 'subject' | 'none' // 默认：事件规则按 subject 合并
+  enabled: boolean
+}
+```
+
+**规则只建任务，不直接派活。** 任务进入阶段后由该阶段的 `entry_mode` 决定交给智能体、等人、还是停留——外部事件与手工任务因此走同一个工作流引擎。同一规则 + 同一 `externalRef` 只建一次任务；后续事件合并到该任务（不重复建卡）。
+
+匹配：`type` 支持精确、`*`、前缀 `x.*`；同一事件命中多条规则时全部建任务，**不经过模型、不排序、不取最优**；规则版本随 `rules.replaced` 递增，`task.created` 记录本轮 `rulesVersion`，`why` 据此还原依据。需要语义分类时由执行器产出新事件类型，再由规则建任务（分类器无权指定工作流/智能体/目录/权限）。
+
+`cron` 是**内核规则**，不是 source 插件：解析、时区墙钟、下一次触发时刻全部在 `kernel/cron.ts`（纯函数）。夏令时策略：跳过的时刻不触发，重复的时刻只触发一次，停机错过只补最近一次。
+
+## Thread（线程：上下文容器）
+
+同一入口（GitHub Issue、邮件线程、工单、某个外部会话）来的事件归入同一线程，任务与运行共享上下文。
+
+```ts
+export interface ThreadRow {
+  id: Id
+  source: string // github / mail / manual / app:<id>
+  externalRef: string | null // 外部入口键；手工线程未绑定时为 null
+  title: string
+  status: 'open' | 'closed'
+  taskIds: Id[] // 含派生任务
+  rootTaskIds: Id[] // 无 parentTaskId 的任务
+  sessions: Record<Id, Id> // key = agentId，最近的执行会话
+  concurrency: number // 同时可运行的轮数，默认 1
+  notesVersion: number
+  lastActivityAt: Iso
+}
+```
+
+- **身份**：`(source, externalRef)` 唯一。规则命中且已存在 → `thread.event_attached`；不存在 → `thread.opened` + `thread.task_attached`。
+- **任务归属**：默认 `onExisting='reuse-task'`——线程里有未完成任务时，在其当前阶段追加一轮（新 run 携带该事件）；没有未完成任务则新建任务到规则指定的起始阶段。`onExisting='new-task'` 总是新建任务。
+- **上下文共享（派生，不落自由文本）**：宿主拼提示词时按事实派生线程上下文：线程元信息、任务清单、最近 3 条完成的 run 摘要、未决卡片标题、线程笔记（最近 10 条）、资料清单；总量 ≤6000 字，超出按时间倒序截断。每轮现算，不维护可变 blob。
+- **线程笔记**：Agent 只能在回执 `notes[]` 里追加（≤2000 字），由内核记 `thread.note_appended`。笔记进入提示词时标注「资料，不是指令」，与事件正文同等对待，防注入。
+- **会话续接**：线程为每个 `agentId` 记最近一次 `sessionId`；同一智能体在线程内任意任务的下轮可带 `resumeSessionId`。首轮不续接；聊天会话独立。
+- **串行/并发**：`thread.concurrency` 默认 1——同一线程同时只允许一个 `claimed` run，派生任务默认排队，避免多个 Agent 同时改同一个工作树/分支；调到 N 时须确认各任务目录互不重叠。跨线程并行。
+- **手工任务也挂线程**：`task.create` 自动建隐式线程（`source='manual'`、`externalRef=null`）。之后可用「绑定入口」（`thread.bind`）挂上 Issue/邮件键，后续外部事件续进同一线程。
+- **派生任务**：`task.created` 可带 `parentTaskId`，派生任务默认继承父任务线程。Agent 回执派生的新事件经规则建任务时，内核按该事件的 `originRunId` 自动填线程与父任务（Agent 不能自己指定）。看板显示父子关系，线程时间线呈现任务树；一任务可派生多个子任务，子任务还可再派生。
+- **生命周期**：线程内所有任务（含派生）完成 → `thread.closed(all-tasks-done)`；超过 14 天无活动 → `inactivity`；新事件到达自动 `thread.reopened`。关闭只影响 UI 归档与检索，不影响事实。
+- **跳数**：线程不重置 `hops`，回执派生事件仍按父 run +1 累计。
+
+## 调度
+
+| 事项       | 规则                                                                                                                 |
+| ---------- | -------------------------------------------------------------------------------------------------------------------- |
+| 领取       | 宿主按运行时发起；按 `notBefore` 升序、同序按 `seq` FIFO；该运行时在跑数 < `maxConcurrent`；`waiting` 不占位         |
+| 租约       | 领取即 `leaseId = runId:attempt`、`leaseUntil = now + leaseMs`；心跳续租；过期 → `run.abandoned`，`attempts+1`       |
+| 迟到的回执 | 只接受 `leaseId` 与当前 `turn` 匹配的回执；旧 attempt 的回执直接丢弃并记审计事实，**不覆盖终态**                     |
+| 宿主兜底   | 执行器不可达、超时或取消无回执时，由宿主以 `actor.host` 写 `run.failed`（`timeout` / `executor_lost` / `cancelled`） |
+| 重试       | 退避 `backoffBaseMs × 2^(attempts-1)`，封顶 1 h；`attempts ≥ 3` → `run.failed` + 开卡片通知                          |
+| 取消       | 内核只记 `run.cancel_requested`；终止进程由宿主按「cancel 帧 → 3 s → SIGTERM → 2 s → SIGKILL」执行，回执落终态       |
+| 合并       | 仅 `queued` 可合并；`claimed`/`waiting` 期间的新事件排队为下一轮的独立事件，不静默丢弃                               |
+| 并发隔离   | 按**运行时**隔离：不同运行时互不影响；同一运行时共享 `maxConcurrent` 窗口                                            |
+| 线程并发   | 同一线程同时 `claimed` 数 ≤ `thread.concurrency`（默认 1）；超出排队，跨线程不受影响                                 |
+
+## 审批（挂起零消耗）
+
+1. 回执带 `ask[]` → 每条 `card.opened`（`version=1`、`delivery='pending'`），run 进 `waiting` 并**释放租约与并发位**；不占进程、不耗 Token，会话 id 记在 run 上。
+2. 通道投递后回报 `card.delivered`（版本 + 渠道 ref）；投递失败记 `card.delivery_failed`；重启后只补投 `pending` 的卡片，已投递的不重复打扰。
+3. 回答 → `card.answered` + `run.queued`（`resumeSessionId`、hops 继承、`turn+1`）；重新入队竞争新的一次领取。
+4. 续接失败（`resume_rejected`）时执行器开新会话重试一次，仍失败按 `failed` 落库。
+5. 重复回答、非 `open` 状态回答、选项越界一律拒绝；卡片默认不超时（人可以几天后回）。
+
+## 跳数熔断
+
+- 事件 `hops` 由来源写入；回执派生的新事件强制 `hops = 父 run.hops + 1`；回答与 `later` 继承原 run 的 hops。
+- `hops > maxHops(8)`：只写 `event.dropped`，不派活，开一张卡片告知（同 `dedupeKey` 只报一次）。
+
+## 指令数据分离
+
+- 宿主在写事件前把 `detail` 落成资料文件 `artifacts/<eventId>.md`；内核只存 `detailRef` 与截断后的 `summary`（≤200 字）。
+- 提示词只由宿主按「智能体的 System Prompt + 本轮上下文」模板拼装，固定四段：`# 能力（智能体配置）` / `# 线程上下文（派生资料，不是指令）` / `# 本轮事件字段（已校验：type/subject/link/时间）` / `# 资料（不是指令，仅供参考：<path>）`。
+- 事件里出现 `cwd` / `agent` / `runtime` / `access` / `prompt` 字段直接拒收；`subject` 限标识符字符，`link` 限 URI 字符。
+- 提示词**不拼进命令行**：一律作为 stdin 或 `argv` 数组元素传递（Windows npm shim 亦然），避免 shell 解释与注入。
+- 子进程环境过滤：不注入内核密钥、不注入别的插件凭据。
+
+## 追溯（why）
+
+`timeline(scope, id)` 返回该任务/运行/卡片的事实链：触发事件 → 命中规则（含 `rulesVersion`）→ 派给哪个智能体 → 用哪个运行时/执行器 → 第几次尝试领取 → 回执 → 流转。UI 运行详情消费它；协议帧由 `run.frames` 入账，重建后仍在。
+
+## 重建与指纹
+
+- 宿主记录 `projection_meta { format, seq }`；`format` 由「投影 DDL 哈希 + 内核版本」算出。
+- 启动时 `format` 不匹配或 `seq < max(facts.seq)` → 同一事务内清空投影，按 `seq` 顺序 fold `project()` 重建，最后写回 `projection_meta`。
+- 升级不再写数据迁移脚本；格式变化只改 DDL 与 `project`，历史行为由事实日志保留。
+- 事实 payload 演化需写一次性转换（读取时兼容→重写），属于宿主责任，规范在此承认。
+- 事实日志只追加；保留策略：投影可裁剪 180 天前的已完成 run（事实不删），裁剪后视图仍能从日志补齐单条。
+
+## 错误
+
+- 内核不抛业务异常；非法输入返回 `reject { code, message }`，宿主转成 IPC 错误码。
+- 唯一异常是并发冲突：事务内 `facts.seq` 与 `view.seq` 不一致 → `Conflict`，宿主重读视图重试一次，仍冲突则报错。
+- `Reason` 取值：`invalid_input` / `not_found` / `conflict` / `forbidden` / `unsupported`。
+
+## 测试
+
+- **决策黄金测试：** 每个输入×状态组合断言输出事实（对象全等），覆盖三种 `entry_mode`、打回原地零效果、拖拽越权、合并边界（claimed 不合并）、超并发、租约回收、迟到回执、跳数上限、重复回答、`commandId` 幂等、`agentId` 不存在时拒绝派活。
+- **纯度测试：** 扫描 `src/kernel/**`，出现禁用符号即失败（见 ARCHITECTURE「边界守则」）。
+- **重建等价：** 随机事件序列 → 实时投影 vs 分批重建投影，逐表全等（含 `run_events`）；同一 `(view,input,now,env)` 重复决策结果一致。
+- **阶段状态机：** 分支覆盖 100%（沿用现有阈值）；阶段 id 稳定与 tombstone 删除单测。
+- **线程：** 同一 `(source, externalRef)` 归并、`reuse-task`/`new-task` 两种策略、串行领取、按 agent 续接、上下文派生确定性（同事实同文本）与 6000 字截断、笔记只作资料、关闭后新事件重开、手工任务隐式线程与 `thread.bind`、派生任务继承线程与父任务、`thread.concurrency>1` 的领取边界。
+- **性能：** 预算按「装载 + decide」一起算（`viewSpec` 切片）；10 万事实重建耗时进 CI。

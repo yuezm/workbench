@@ -55,6 +55,7 @@ workbench/
 
 ## 文档
 
+- [架构总纲：内核 + 插件](docs/ARCHITECTURE.md) · [重构计划](docs/planning/refactor-plan.md)
 - [能力地图 / 模块索引](docs/CAPABILITY-MAP.md)
 - [shell 规格](docs/specs/SPEC-shell.md) · [pomodoro 规格](docs/specs/SPEC-pomodoro.md)
 - [实施计划](docs/planning/plan.md) · [任务清单](docs/planning/todo.md)

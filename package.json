@@ -29,6 +29,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "e2e": "pnpm run build:compile && playwright test",
+    "e2e:packaged": "pnpm run build && playwright test -c playwright.packaged.config.ts",
+    "db:export": "node scripts/export-db.mjs",
     "postinstall": "node node_modules/electron/install.js",
     "prepare": "husky"
   },

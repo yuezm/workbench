@@ -12,6 +12,27 @@
 - 备份一份当前 `ai-workflow.db`。
 - 门禁命令统一带 `CONSTRAINTS_BASE=<起点 commit>`：`CONSTRAINTS_BASE=xxx pnpm check`。
 
+## 收尾执行记录（2026-11-04 晚，分支 `refactor/m0-exit`）
+
+T1/T2 所在分支 `refactor/m0-boundary` 已由用户合并进 `master`（tip `33e22e8`），但 T3–T9 当时并未完成。收尾从 `33e22e8` 切出 `refactor/m0-exit`，把剩余 6 个任务并行做完：
+
+| 任务    | 内容                                                | commit    | 状态               |
+| ------- | --------------------------------------------------- | --------- | ------------------ |
+| T4      | 阶段校验搬入 kernel 纯函数                          | `84f6bd7` | ✅                 |
+| T5 + T8 | WAL / busy_timeout / integrity_check + 只读导出脚本 | `5b026a6` | ✅                 |
+| T6      | e2e 独立临时 userData                               | `257d9b5` | ✅                 |
+| T7      | 单实例锁 + second-instance 唤出                     | `f2b3985` | ✅                 |
+| T3      | 打包冒烟（node:sqlite 可用性）                      | `22350ca` | ✅ 通过，M1 可开工 |
+| 脚本    | 注册 `db:export` / `e2e:packaged`                   | `aaef310` | ✅                 |
+
+与计划的偏差（已核实无行为风险）：
+
+1. **T5 与 T3 并行**：计划把 T5 排在 T3 结论之后；实际 T5 代码不依赖打包结论，只有「是否进 M1」受 T3 约束，T3 已通过。
+2. **打包冒烟用例名**为 `e2e-packaged/packaged-sqlite.spec.ts`（非计划里的 `packaged-smoke.spec.ts`），另抽出 `e2e-packaged/helpers/temp-userdata.ts` 做临时 userData。
+3. **T4 额外补 1 条 `workflowUpdate` 非法阶段用例**：把校验抽成纯函数后，更新侧适配分支需要独立覆盖（改动行覆盖率门禁），原测试断言未动。
+4. **T3 证据口径**：打包进程内 Node 为 24.22.1（Electron 45.1.0 内置），不是本机 shell 的 22.22.3；`readOnly` / WAL / integrity_check 行为两边一致。
+5. **检查点 A 的复核注记**：起点树 `pnpm check` 全绿、556 用例；`refactor/m0-boundary` 分支另含文档/护栏类提交 3 个，无越界代码改动。
+
 ## 已核实现状（2026-11-04）
 
 | 事实                                                                                                                          | 证据                                                                                                     |

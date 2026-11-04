@@ -34,6 +34,8 @@
 | `pomodoro`      | 番茄钟 app                                                                                          | shell | [SPEC-pomodoro.md](./specs/SPEC-pomodoro.md)       |
 | `ai-workflow`   | 运行时 + 智能体 + 工作流 + 看板 + 聊天 + SQLite 持久化（当前实现 `src/main/ai-workflow/`，4275 行） | shell | [SPEC-ai-workflow.md](./specs/SPEC-ai-workflow.md) |
 
+> 状态（2026-11-04）：**M0 已退出**。`src/kernel` 边界（纯度测试 + ESLint 禁入）、WAL + `integrity_check`、单实例锁、只读数据导出、打包冒烟（Electron 45 内置 node:sqlite 可用）均已落地并有测试证据，见 [refactor-plan](./planning/refactor-plan.md) 的 M0 退出记录。下一步 M1 账本：`facts` + 投影 + 重建，`src/main/ai-workflow/` 随 M1 逐步收口到 `src/host/store/`。
+
 ## 边界决定
 
 1. **真相源唯一**：任务/运行/卡片/对话的状态只能由事实日志派生；投影表可重建，不得绕过事实直接写业务数据。

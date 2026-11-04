@@ -14,7 +14,7 @@
 
 | 阶段                      | 内容                                                                                                                                                                                                                                     | 主要文件                                                                                       | 验收                                                                                                                                                         | 估时   |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
-| **M0 边界**               | 建 `src/kernel`、`src/protocol`、`src/sdk` 骨架；落纯度测试与 ESLint 禁入规则；把 `shared/stage-machine.ts` 与 repository 里的阶段规则搬进 kernel（旧路径 re-export）；单实例锁、WAL/`integrity_check`、事实导出脚本、Electron 打包冒烟  | `kernel/workflow/stage-machine.ts`、`kernel/purity.test.ts`、`host/db.ts`、`eslint.config.mjs` | 行为零变化；`pnpm check` 全绿；kernel 里写 `Date.now()` 或 `import fs` 会让测试失败；打包后 `node:sqlite` 可读写；双开被单实例锁挡住                         | 1–2 天 |
+| **M0 边界** ✅ 2026-11-04 | 建 `src/kernel`、`src/protocol`、`src/sdk` 骨架；落纯度测试与 ESLint 禁入规则；把 `shared/stage-machine.ts` 与 repository 里的阶段规则搬进 kernel（旧路径 re-export）；单实例锁、WAL/`integrity_check`、事实导出脚本、Electron 打包冒烟  | `kernel/workflow/stage-machine.ts`、`kernel/purity.test.ts`、`host/db.ts`、`eslint.config.mjs` | 行为零变化；`pnpm check` 全绿；kernel 里写 `Date.now()` 或 `import fs` 会让测试失败；打包后 `node:sqlite` 可读写；双开被单实例锁挡住                         | 1–2 天 |
 | **M1 账本**               | `facts` 表 + `project` + 事务提交 + `projection_meta` 指纹 + 重建 + `timeline` + `viewSpec` 切片；`tasks/workflows/stages/agents/runtimes` 改为投影；v2 存量按表分批写成 `snapshot.imported`（导入根无 `why`）                           | `kernel/{types,decide,project}.ts`、`host/store/*`、`host/db.ts`                               | 现有任务/阶段/工作流测试全绿；强杀后重启投影一致；1 万事实重建 < 1 s；旧 `repository` 的任务写方法删除；重建后 `run_events` 与 `rules` 可查                  | 3–4 天 |
 | **M2 运行生命周期**       | `run.queued/claimed/heartbeat/frames/waiting/abandoned/终态` 全部入账；`runner` 拆成 host 调度 + 执行器接口；租约、退避、启动对账；聊天并入 `purpose='chat'` 的统一执行路径                                                              | `kernel/decide.ts`、`host/{clock,effects,reconcile}.ts`、`host/scheduler.ts`                   | 崩溃恢复：强杀后 `claimed` 被回收、残留子进程被终止、任务可拖动；同运行时并发上限与 FIFO 不变；聊天与阶段执行共用一套测试                                    | 3–4 天 |
 | **M3 运行时与执行器插件** | `dsh` 整文件搬为执行器插件；新增 `command` 插件；`plugins/registry.ts`；运行时配置的 `executorKey` 选择插件；`detect` 归插件；新增运行时协议只改插件目录 + registry 一行                                                                 | `plugins/executors/**`、`protocol/runtime.ts`、`host/scheduler.ts`                             | 现有协议帧/终态/取消测试全绿；`detect` 零副作用；新增一个假运行时协议只写插件即跑通；派活始终经智能体                                                        | 2–3 天 |
@@ -25,6 +25,14 @@
 | **M7 可选**               | 外部插件子进程 + 能力授权；`webhook` 通道/来源；跨工作流交接（阶段完成在目标工作流建关联任务）；远端 Worker 执行器（架构位落地）                                                                                                         | `host/plugins/**`、`plugins/channels/webhook/**`、`kernel/workflow/handoff.ts`                 | 只在明确要做时启动；不阻塞主线                                                                                                                               | —      |
 
 累计 ≈ 18–23 人日。M0/M1/M2 是地基，串行；M3 可与 M4 并行；M5 依赖 M2；M6 依赖 M5；M6.5 依赖 M6。
+
+## M0 退出记录（2026-11-04）
+
+- 分支：`refactor/m0-boundary`（T1/T2，已合并进 `master`，tip `33e22e8`）+ `refactor/m0-exit`（T3–T9 收尾）。
+- 证据：`pnpm check` 全绿（58 文件 / 569 用例；覆盖率 99.60/96.71/99.39/99.79 不低于基线，改动行 100%）；`pnpm e2e` 5/5（每条用例独立临时 userData）；`pnpm e2e:packaged` 1/1（打包进程内 node:sqlite 建表/写入/读回）；打包产物双开实测第二次 129ms 退出、首实例存活。
+- 数据：备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-04T1940-pre-m1.db`（与源库 sha256 相同、`integrity_check=ok`、9 表 125 行）+ 同目录 JSON 导出，作为 M1 回滚点。
+- 已知口径：打包进程内置 Node 为 24.22.1（Electron 45.1.0）；`src/sdk` 仍未创建，推迟到 M1 首个消费者。
+- 任务级证据与偏差记录见 [tasks/todo.md](../../tasks/todo.md) 与 [tasks/plan.md](../../tasks/plan.md)。
 
 ## 文件去向
 
@@ -70,17 +78,17 @@
 
 ## 风险
 
-| 风险                                                               | 影响 | 对策                                                                          |
-| ------------------------------------------------------------------ | ---- | ----------------------------------------------------------------------------- |
-| 过渡期双写导致数据分叉                                             | 高   | 表变投影时同步删除旧写路径；禁止 `INSERT INTO tasks` 绕过事实                 |
-| 约 9k 行测试与 mock 面重写（组件测试直接赋值 `window.aiWorkflow`） | 高   | 先改契约再改组件；`kernelStore` 提供测试替身；逐文件迁移，不批量删除          |
-| 重建性能超出预期                                                   | 中   | `viewSpec` 按需切片；投影裁剪 180 天前已完成 run；重建进 CI 预算              |
-| `node:sqlite` 在 Electron 45 打包行为未验证                        | 中   | M0 就做打包冒烟，不通过则暂停 M1                                              |
-| 插件边界被逐步侵蚀                                                 | 中   | 纯度测试 + 禁止 import 扫描 + 每次 review 对照「边界守则」                    |
-| 个人数据丢失                                                       | 高   | M1 前备份 `ai-workflow.db`；`snapshot.imported` 幂等；提供「从事实导出 JSON」 |
-| 迟到回执 / 僵尸进程覆盖终态                                        | 高   | `leaseId + turn` 校验丢弃旧 attempt；宿主兜底写终态；对账先杀子进程再记账     |
-| 线程上下文膨胀或藏注入                                             | 中   | 派生 + 6000 字截断；笔记/事件只进资料段；「同事实同文本」单测                 |
-| M2 期间崩溃恢复语义变化                                            | 中   | 保留旧 runner 一版做对照测试；恢复用例逐条跑                                  |
+| 风险                                                               | 影响 | 对策                                                                                                                                                                                        |
+| ------------------------------------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 过渡期双写导致数据分叉                                             | 高   | 表变投影时同步删除旧写路径；禁止 `INSERT INTO tasks` 绕过事实                                                                                                                               |
+| 约 9k 行测试与 mock 面重写（组件测试直接赋值 `window.aiWorkflow`） | 高   | 先改契约再改组件；`kernelStore` 提供测试替身；逐文件迁移，不批量删除                                                                                                                        |
+| 重建性能超出预期                                                   | 中   | `viewSpec` 按需切片；投影裁剪 180 天前已完成 run；重建进 CI 预算                                                                                                                            |
+| `node:sqlite` 在 Electron 45 打包行为未验证                        | 中   | **已验证通过（2026-11-04）**：Electron 45.1.0 / 内置 Node 24.22.1，`e2e-packaged/packaged-sqlite.spec.ts` 在打包进程内建表→写入→读回成功，`user_version=2`、`integrity_check=ok`；M1 可开工 |
+| 插件边界被逐步侵蚀                                                 | 中   | 纯度测试 + 禁止 import 扫描 + 每次 review 对照「边界守则」                                                                                                                                  |
+| 个人数据丢失                                                       | 高   | M1 前备份 `ai-workflow.db`；`snapshot.imported` 幂等；提供「从事实导出 JSON」                                                                                                               |
+| 迟到回执 / 僵尸进程覆盖终态                                        | 高   | `leaseId + turn` 校验丢弃旧 attempt；宿主兜底写终态；对账先杀子进程再记账                                                                                                                   |
+| 线程上下文膨胀或藏注入                                             | 中   | 派生 + 6000 字截断；笔记/事件只进资料段；「同事实同文本」单测                                                                                                                               |
+| M2 期间崩溃恢复语义变化                                            | 中   | 保留旧 runner 一版做对照测试；恢复用例逐条跑                                                                                                                                                |
 
 ## 每阶段退出条件
 

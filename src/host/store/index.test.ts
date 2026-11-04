@@ -405,6 +405,40 @@ describe('dispatch：序号冲突', () => {
       '并发流程',
     ])
   })
+
+  it('重试时抛非冲突错误：原样透出，不包装成 conflict', () => {
+    const db = memory()
+    const other = createStore({
+      db,
+      kernel: createFakeKernel(),
+      now: () => SAMPLE_AT,
+      newId: sequenceIds('wf-other', 'st-other'),
+    })
+    let calls = 0
+    const kernel = createFakeKernel({
+      decide: (view, input, at, env) => {
+        calls += 1
+        if (calls === 1) {
+          other.dispatch(workflowCreate('并发流程', 1))
+          return defaultDecide(view, input, at, env)
+        }
+        throw new Error('重试失败')
+      },
+    })
+    const store = createStore({
+      db,
+      kernel,
+      now: () => SAMPLE_AT,
+      newId: () => 'own-id',
+    })
+
+    const error = captureError(() => store.dispatch(workflowCreate('我的流程', 1)))
+
+    expect(error.message).toBe('重试失败')
+    expect(kernel.views).toHaveLength(2)
+    expect(store.factsCount()).toBe(2)
+    expect(store.query('workflows.all').map((workflow) => workflow.name)).toEqual(['并发流程'])
+  })
 })
 
 describe('dispatch：视图装载切片', () => {
@@ -499,5 +533,15 @@ describe('createStore：依赖注入', () => {
     expect(sample.stage().workflowId).toBe('wf-1')
     expect(sample.task().currentStageId).toBe('st-1')
     expect(sample.agent().runtimeId).toBe('rt-1')
+  })
+
+  it('captureError 夹具：没抛错时自身报错，非 Error 抛出归一化', () => {
+    expect(() => captureError(() => undefined)).toThrow('预期抛错，但调用没有抛错')
+
+    const thrown = captureError(() => {
+      throw 'plain text'
+    })
+    expect(thrown).toBeInstanceOf(Error)
+    expect(thrown.message).toBe('plain text')
   })
 })

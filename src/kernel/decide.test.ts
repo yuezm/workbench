@@ -907,6 +907,29 @@ describe('kernel/decide 任务', () => {
     })
   })
 
+  it('task.create：工作流没有任何阶段时 currentStageId 落 null', () => {
+    expect(
+      decide(
+        view({ workflows: [workflow()] }),
+        command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({
+      facts: [
+        at('task.created', {
+          task: task({
+            id: 'task-new-1',
+            title: 't',
+            currentStageId: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+          }),
+        }),
+      ],
+    })
+  })
+
   it('task.create：标题必填、工作流必须存在、起始阶段必须属于该工作流', () => {
     const seeded = view({
       workflows: [workflow(), workflow({ id: 'wf-2' })],

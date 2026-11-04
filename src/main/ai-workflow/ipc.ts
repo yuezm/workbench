@@ -1,25 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { ipcMain } from 'electron'
 import type {
-  Agent,
   AgentInput,
   Runtime,
   RuntimeInput,
   RuntimeProbe,
   RuntimeProtocolFamily,
   RuntimeStatus,
-  Task,
   TaskInput,
-  Workflow,
   WorkflowInput,
-  WorkflowWithStages,
 } from '../../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../shared/ai-workflow-api'
-import type { Fact } from '../../kernel/types'
-import type { FactType } from '../../protocol/facts'
 import type { Store } from '../../host/store/index'
 import { applyTaskEffects, type TaskEffectsDeps } from '../../host/task-effects'
 import type { ChatService } from './chat'
+import { agentById, createdId, runtimeById, taskById, workflowById } from './projection-lookup'
 import type { Repository } from './repository'
 import { detectInstalledRuntimes } from './runtime/detect'
 import type { RuntimeBackend } from './runtime/registry'
@@ -53,27 +48,6 @@ function targetOf(runtime: Pick<Runtime, 'command' | 'profile'>): {
   return { command: runtime.command, profile: runtime.profile }
 }
 
-/**
- * 从刚提交的事实里取新实体 id（create 类命令用）。
- * 读投影也能拿到，但用事实更直接：同一事务里刚写的行就是它，不存在并发歧义。
- */
-function createdId(facts: readonly Fact[], type: FactType): string {
-  const fact = facts.find((item) => item.type === type)
-  if (!fact) throw new Error('缺少事实: ' + type)
-  switch (fact.type) {
-    case 'runtime.created':
-      return (fact.payload as { runtime: Runtime }).runtime.id
-    case 'agent.created':
-      return (fact.payload as { agent: Agent }).agent.id
-    case 'workflow.created':
-      return (fact.payload as { workflow: Workflow }).workflow.id
-    case 'task.created':
-      return (fact.payload as { task: Task }).task.id
-    default:
-      throw new Error('事实不携带实体 id: ' + fact.type)
-  }
-}
-
 export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHandler {
   const { repo, store, notifyChanged, onQueue = () => {}, backendFor } = deps
   const nextCommandId = deps.newCommandId ?? (() => randomUUID())
@@ -87,28 +61,6 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
   const chat = (): ChatService => {
     if (!deps.chat) throw new Error('聊天服务未就绪')
     return deps.chat
-  }
-
-  /** 读投影：store 是业务表的唯一读路径（runs / 聊天仍走 repo）。 */
-  const runtimeById = (id: string): Runtime => {
-    const runtime = store.query('runtimes.all').find((item) => item.id === id)
-    if (!runtime) throw new Error('运行时不存在: ' + id)
-    return runtime
-  }
-  const agentById = (id: string): Agent => {
-    const agent = store.query('agents.all').find((item) => item.id === id)
-    if (!agent) throw new Error('智能体不存在: ' + id)
-    return agent
-  }
-  const workflowById = (id: string): WorkflowWithStages => {
-    const workflow = store.query('workflows.all').find((item) => item.id === id)
-    if (!workflow) throw new Error('工作流不存在: ' + id)
-    return workflow
-  }
-  const taskById = (id: string): Task => {
-    const task = store.query('task.byId', { taskId: id })
-    if (!task) throw new Error('任务不存在: ' + id)
-    return task
   }
 
   const effectsDeps = (): TaskEffectsDeps => ({ store, repo, onQueue, commandId: nextCommandId })
@@ -150,7 +102,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
         probe,
       })
       notifyChanged()
-      return runtimeById(runtimeId)
+      return runtimeById(store, runtimeId)
     },
     // 保存后重新探测：配置可能暂时不可用，结论入账由 UI 呈现
     'runtimes.update': async (a) => {
@@ -161,10 +113,10 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
         id,
         patch: a[1] as Partial<RuntimeInput>,
       })
-      const runtime = runtimeById(id)
+      const runtime = runtimeById(store, id)
       await probeAndSave(runtime)
       notifyChanged()
-      return runtimeById(id)
+      return runtimeById(store, id)
     },
     'runtimes.remove': (a) =>
       mutate(() => {
@@ -174,7 +126,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     'runtimes.detect': () => detectInstalledRuntimes(),
     // 真实探测：入账结论（探测不调用模型、不建 run）
     'runtimes.probe': async (a) => {
-      const probe = await probeAndSave(runtimeById(a[0] as string))
+      const probe = await probeAndSave(runtimeById(store, a[0] as string))
       notifyChanged()
       return probe
     },
@@ -191,7 +143,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
       }))
     },
     'runtimes.models': (a) => {
-      const runtime = runtimeById(a[0] as string)
+      const runtime = runtimeById(store, a[0] as string)
       return backendFor(runtime.protocolFamily).models(targetOf(runtime))
     },
 
@@ -203,7 +155,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
           commandId: nextCommandId(),
           input: a[0] as AgentInput,
         }).facts
-        return agentById(createdId(facts, 'agent.created'))
+        return agentById(store, createdId(facts, 'agent.created'))
       }),
     'agents.update': (a) =>
       mutate(() => {
@@ -214,7 +166,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
           id,
           patch: a[1] as Partial<AgentInput>,
         })
-        return agentById(id)
+        return agentById(store, id)
       }),
     'agents.remove': (a) =>
       mutate(() => {
@@ -229,7 +181,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
           commandId: nextCommandId(),
           input: a[0] as WorkflowInput,
         }).facts
-        return workflowById(createdId(facts, 'workflow.created'))
+        return workflowById(store, createdId(facts, 'workflow.created'))
       }),
     'workflows.update': (a) =>
       mutate(() => {
@@ -240,7 +192,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
           id,
           input: a[1] as WorkflowInput,
         })
-        return workflowById(id)
+        return workflowById(store, id)
       }),
     'workflows.remove': (a) =>
       mutate(() => {
@@ -257,7 +209,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
           input: a[0] as TaskInput,
         }).facts
         applyTaskEffects(effectsDeps(), facts)
-        return taskById(createdId(facts, 'task.created'))
+        return taskById(store, createdId(facts, 'task.created'))
       }),
     // 看板拖拽：落点即目标阶段，进入效果照常执行
     'tasks.moveToStage': (a) =>
@@ -270,14 +222,14 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
           stageId: a[1] as string,
         }).facts
         applyTaskEffects(effectsDeps(), facts)
-        return taskById(id)
+        return taskById(store, id)
       }),
     // 看板拖到「已完成」区
     'tasks.complete': (a) =>
       mutate(() => {
         const id = a[0] as string
         store.dispatch({ type: 'task.complete', commandId: nextCommandId(), id })
-        return taskById(id)
+        return taskById(store, id)
       }),
     'tasks.remove': (a) =>
       mutate(() => {

@@ -219,6 +219,21 @@ describe('applyStageEffects', () => {
     })
     expect(run.input.prompt).toBe('sys\n\n# 任务：T\n\nd\n\n# 阶段：出门')
   })
+
+  it('createRun 的阶段不在工作流里：照常建 run，prompt 不带阶段段', () => {
+    const runtime = seedRuntime()
+    const agent = seedAgent(runtime.id)
+    const workflow = seedWorkflow([{ name: '出门', entryMode: 'agent', agentId: agent.id }])
+    const task = seedTask(workflow.id, workflow.stages[0].id)
+
+    const ids = applyStageEffects(effectsDeps(), task, [
+      { type: 'createRun', stageId: 'st-404', agentId: agent.id },
+    ])
+
+    expect(ids).toHaveLength(1)
+    expect(world.repo.runs[0].input.stageId).toBe('st-404')
+    expect(world.repo.runs[0].input.prompt).toBe('sys\n\n# 任务：T\n\nd')
+  })
 })
 
 describe('applyTaskEffects', () => {
@@ -305,6 +320,27 @@ describe('applyTaskEffects', () => {
         { type: 'createRun', stageId: workflow.stages[0].id, agentId: 'ghost' },
       ]),
     ).toThrow(/智能体不存在/)
+  })
+
+  it('非任务事实（配置类）：直接跳过，不建 run', () => {
+    const workflow = seedWorkflow([{ name: '待办', entryMode: 'none' }])
+    const configFact: Fact = {
+      seq: 1,
+      type: 'workflow.created',
+      actor: OWNER,
+      at: AT,
+      payload: {
+        workflow: {
+          id: workflow.id,
+          name: workflow.name,
+          description: workflow.description,
+          createdAt: workflow.createdAt,
+        },
+      },
+    }
+
+    expect(applyTaskEffects(effectsDeps(), [configFact])).toEqual([])
+    expect(world.repo.runs).toHaveLength(0)
   })
 })
 

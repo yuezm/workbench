@@ -11,11 +11,11 @@
 
 **验收标准：**
 
-- [ ] `openDb` 保留 PRAGMA（WAL / busy_timeout / integrity_check / foreign_keys）与错误关闭行为
-- [ ] `facts(seq INTEGER PRIMARY KEY AUTOINCREMENT, type, actor_json, at, cause, hops, payload)`；`projection_meta(id, format, seq)`；索引覆盖 `facts(type)`、`facts(cause)`
-- [ ] `withTx(db, fn)` 单事务；异常回滚
-- [ ] 投影表 DDL 与现有 `schema.ts` 五表逐列一致（含唯一约束与外键），测试逐列断言
-- [ ] `format` 指纹 = DDL 哈希 + `KERNEL_VERSION` 常量，变更即失配
+- [x] `openDb` 保留 PRAGMA（WAL / busy_timeout / integrity_check / foreign_keys）与错误关闭行为
+- [x] `facts(seq INTEGER PRIMARY KEY AUTOINCREMENT, type, actor_json, at, cause, hops, payload)`；`projection_meta(id, format, seq)`；索引覆盖 `facts(type)`、`facts(cause)`
+- [x] `withTx(db, fn)` 单事务；异常回滚
+- [x] 投影表 DDL 与现有 `schema.ts` 五表逐列一致（含唯一约束与外键），测试逐列断言
+- [x] `format` 指纹 = DDL 哈希 + `KERNEL_VERSION` 常量，变更即失配
 
 **验证：** `pnpm test src/host`；迁移期 `src/main/ai-workflow/db.ts` 暂时 re-export `host/db.ts`，旧测试不动仍绿。
 
@@ -27,12 +27,12 @@
 
 **验收标准：**
 
-- [ ] `entities.ts` 定义任务/工作流/阶段/智能体/运行时行类型（与现有 `shared/ai-workflow-api.ts` 字段逐一对应，`shared` 侧改为 re-export）
-- [ ] `facts.ts` 定义 M1 覆盖的事实名常量与 payload 类型
-- [ ] `commands.ts` 定义 M1 覆盖的命令（配置三组 + task 四命令）
-- [ ] `validate.ts` 校验命令形状（字符串长度、必填、数组上限），非法返回 `reason` + 文案，不抛
-- [ ] `protocol/types.ts` 删除；kernel 的 stage-machine / stage-validation import 同步更新
-- [ ] `pnpm typecheck`、`pnpm test src/kernel src/main` 全绿
+- [x] `entities.ts` 定义任务/工作流/阶段/智能体/运行时行类型（与现有 `shared/ai-workflow-api.ts` 字段逐一对应，`shared` 侧改为 re-export）
+- [x] `facts.ts` 定义 M1 覆盖的事实名常量与 payload 类型
+- [x] `commands.ts` 定义 M1 覆盖的命令（配置三组 + task 四命令）
+- [x] `validate.ts` 校验命令形状（字符串长度、必填、数组上限），非法返回 `reason` + 文案，不抛
+- [x] `protocol/types.ts` 删除；kernel 的 stage-machine / stage-validation import 同步更新
+- [x] `pnpm typecheck`、`pnpm test src/kernel src/main` 全绿
 
 **依赖：** T1 ｜ **涉及文件：** `src/protocol/*.ts`、`src/shared/ai-workflow-api.ts`、`src/kernel/workflow/*.ts` ｜ **规模：** M
 
@@ -42,12 +42,12 @@
 
 **验收标准：**
 
-- [ ] `decide` 纯函数：不读时钟/随机/文件/DB，`now`、id 生成、`env` 全部由参数传入
-- [ ] 工作流命令产出 `workflow.*` + `stage.*` 事实；阶段 id 由宿主传入的 id 生成器产生，更新不重建 id，删除用 tombstone 事实
-- [ ] 引用校验：agent 的 runtime 必须存在；runtime 被 agent 引用时不可删；名称唯一；有活跃 run 的工作流拒绝改阶段（`decide` 读 View 判断，不查库）
-- [ ] 非法输入返回 `reject { code, message }`，不抛异常
-- [ ] `viewSpec` 为每个输入返回所需投影切片（M1 先按表粒度，禁止 `['tasks','workflows',...]` 全量）
-- [ ] 黄金测试：每个命令 × 合法/非法状态，断言输出 `facts` 对象全等（含 `cause/hops` 不伪造）
+- [x] `decide` 纯函数：不读时钟/随机/文件/DB，`now`、id 生成、`env` 全部由参数传入
+- [x] 工作流命令产出 `workflow.*` + `stage.*` 事实；阶段 id 由宿主传入的 id 生成器产生，更新不重建 id，删除用 tombstone 事实
+- [x] 引用校验：agent 的 runtime 必须存在；runtime 被 agent 引用时不可删；名称唯一；有活跃 run 的工作流拒绝改阶段（`decide` 读 View 判断，不查库）
+- [x] 非法输入返回 `reject { code, message }`，不抛异常
+- [x] `viewSpec` 为每个输入返回所需投影切片（M1 先按表粒度，禁止 `['tasks','workflows',...]` 全量）
+- [x] 黄金测试：每个命令 × 合法/非法状态，断言输出 `facts` 对象全等（含 `cause/hops` 不伪造）
 
 **依赖：** T2 ｜ **涉及文件：** `src/kernel/types.ts`、`src/kernel/decide.ts`、`src/kernel/view-spec.ts`、对应测试 ｜ **规模：** M
 
@@ -57,11 +57,11 @@
 
 **验收标准：**
 
-- [ ] `task.create/move/complete/remove` 产出 `task.*` 事实；拖拽落点即目标；打回目标等于当前阶段时零效果；有活跃 run 时拒绝移动/完成（M1 的活跃 run 读 View 里 runs 表切片）
-- [ ] `project` 纯函数、可重放：同一事实序列重复 fold 结果全等；删除用 `row=null`
-- [ ] `timeline` 返回事实链，`snapshot.imported` 标注「迁移导入」，不对其伪造 `cause`
-- [ ] 单元测试覆盖五表的追加/更新/删除、tombstone、破坏性顺序（先建后删）
-- [ ] `decide` 输出的阶段流转规则与现有测试行为逐条一致（迁移清单第 1–5 条）
+- [x] `task.create/move/complete/remove` 产出 `task.*` 事实；拖拽落点即目标；打回目标等于当前阶段时零效果；有活跃 run 时拒绝移动/完成（M1 的活跃 run 读 View 里 runs 表切片）
+- [x] `project` 纯函数、可重放：同一事实序列重复 fold 结果全等；删除用 `row=null`
+- [x] `timeline` 返回事实链，`snapshot.imported` 标注「迁移导入」，不对其伪造 `cause`
+- [x] 单元测试覆盖五表的追加/更新/删除、tombstone、破坏性顺序（先建后删）
+- [x] `decide` 输出的阶段流转规则与现有测试行为逐条一致（迁移清单第 1–5 条）
 
 **依赖：** T3 ｜ **涉及文件：** `src/kernel/decide.ts`、`src/kernel/project.ts`、`src/kernel/timeline.ts`、对应测试 ｜ **规模：** M
 
@@ -71,11 +71,11 @@
 
 **验收标准：**
 
-- [ ] dispatch 事务内：`facts` 追加、投影变更、`projection_meta.seq` 三者原子提交；失败全部回滚
-- [ ] 并发冲突：事务内 `facts.seq` 与 `view.seq` 不一致 → 重读视图重试一次，再冲突则报错
-- [ ] 启动 `ensureProjection()`：format 失配或 seq 落后 → 清空投影集白名单表 → 按 seq fold 重建 → 写回 meta
-- [ ] `query` 装载切片（不整表），task/workflow/agent/runtime 读取方法替代 `repository` 对应读
-- [ ] 测试：内存 SQLite 上「决策 → 事实 → 投影」原子性、回滚、重建等价、viewSpec 切片
+- [x] dispatch 事务内：`facts` 追加、投影变更、`projection_meta.seq` 三者原子提交；失败全部回滚
+- [x] 并发冲突：事务内 `facts.seq` 与 `view.seq` 不一致 → 重读视图重试一次，再冲突则报错
+- [x] 启动 `ensureProjection()`：format 失配或 seq 落后 → 清空投影集白名单表 → 按 seq fold 重建 → 写回 meta
+- [x] `query` 装载切片（不整表），task/workflow/agent/runtime 读取方法替代 `repository` 对应读
+- [x] 测试：内存 SQLite 上「决策 → 事实 → 投影」原子性、回滚、重建等价、viewSpec 切片
 
 **依赖：** T1、T2 ｜ **涉及文件：** `src/host/store/**`、对应测试 ｜ **规模：** L
 
@@ -85,11 +85,11 @@
 
 **验收标准：**
 
-- [ ] 分批 ≤500 行、单事务、幂等（facts 非空即跳过）
-- [ ] 导入后五表行数/内容与导入前逐行相等（测试：造 v2 库 → 导入 → 查询逐行对比）
-- [ ] `timeline` 对导入根返回「迁移导入」；后续事实有完整 `cause`
-- [ ] 导入失败整体回滚，不留半套数据
-- [ ] `migrate.ts` 与 `migrate.test.ts` 删除（能力由 `snapshot.imported` + 指纹覆盖），`db.test.ts` 相应更新
+- [x] 分批 ≤500 行、单事务、幂等（facts 非空即跳过）
+- [x] 导入后五表行数/内容与导入前逐行相等（测试：造 v2 库 → 导入 → 查询逐行对比）
+- [x] `timeline` 对导入根返回「迁移导入」；后续事实有完整 `cause`
+- [x] 导入失败整体回滚，不留半套数据
+- [x] `migrate.ts` 与 `migrate.test.ts` 删除（能力由 `snapshot.imported` + 指纹覆盖），`db.test.ts` 相应更新
 
 **依赖：** T5 ｜ **涉及文件：** `src/host/store/import.ts`、`src/main/ai-workflow/migrate.ts`（删）、测试 ｜ **规模：** M
 
@@ -152,3 +152,27 @@
 - [ ] 更新 [refactor-plan](../docs/planning/refactor-plan.md)、[CAPABILITY-MAP](../docs/CAPABILITY-MAP.md)、`CONSTRAINTS.md` 基线
 
 **依赖：** T7、T8、T9 ｜ **涉及文件：** `docs/`、`tasks/` ｜ **规模：** S
+
+## 进度记录（2026-11-04，分支 `refactor/m1-ledger`）
+
+| 任务 | 状态 | commit | 备注 |
+| ---- | ---- | ------ | ---- |
+| T1 host/db + schema | ✅ | `af85c38` | facts / projection_meta / 指纹 / withTx；DDL 逐列与改前一致 |
+| T2 protocol 契约 | ✅ | `7f12784` | entities/commands/facts/views/validate；shared 改为派生；`protocol/types.ts` 删除 |
+| T3/T4 kernel decide + project | ✅ | `ca56322` | 14 条命令、黄金用例 29 条；阶段规则只复用 stage-machine |
+| T5 host/store | ✅ | `ab449a3` | dispatch/query/ensureProjection/rebuild；假 kernel 可测；defer FK + stage position 兜底 |
+| T6 存量导入 | ✅ | `075edfc` | 五表分批 500 行 → `snapshot.imported`；幂等/回滚/重建等价；`migrate.ts` 删除 |
+| T7/T8 写路径切换 | ✅ | `7865ba6` | IPC→dispatch/query；engine→`host/task-effects`；repository 旧写方法删除；测试种子改真实 store |
+| T9 账本测试 | ⏳ | — | 重建等价/强杀重启/时间线（部分已由 T5/T6 覆盖），待补 10k 重建基准 |
+| T10 验收与收尾 | ⏳ | — | `pnpm check` 覆盖率收口中；e2e、文档、合并待做 |
+
+### 实现偏差（执行中确认，均已写进 m1-plan）
+
+1. `View` 只含五张投影表 + `activeTaskIds`；`runs` 不在投影集（M2 入账），「执行中」判定用 `activeTaskIds`。
+2. 事实 payload 携带完整实体行（含 `Runtime.lastProbe`），保证 `project(fact)` 纯函数、增量与重建等价；凭据类字段不进事实。
+3. `workflow.update` 用可选 `StageInput.id` 差量；UI 暂不发 id，等价旧「重建阶段 + 按 position 回挂」；新增「有活跃 run 拒绝改阶段」（SPEC-kernel:200，旧实现缺失）。
+4. 删除不存在的实体沿用旧行为：静默成功、不产事实；create/update 的 not_found 仍 reject。
+5. FK 口径：增量写 FK ON（保留旧级联语义），重建临时 FK OFF 只清白名单五表；重建后 `runs` 可能残留，属 M1 已知边界（M2 消除）。
+6. `timeline()` 只在内核提供（有单测），不进 `KernelPort`/store；M5 视图再暴露。
+7. 启动顺序：`importLegacyIfNeeded` → `ensureProjection`（先导入更安全，避免空事实时把存量当投影清掉）。
+8. `agents.remove` 被对话引用时错误文案退化为 SQLite FK 原文（删除仍被拒绝、数据不丢），M2 扩 View 后恢复可读文案。

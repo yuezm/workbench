@@ -84,7 +84,7 @@ const {
     imported: false,
     counts: { tasks: 0, workflows: 0, workflow_stages: 0, agents: 0, runtimes: 0 },
   }))
-  /** 启动装配顺序：openDb → createStore → ensureProjection → importLegacy → Repository。 */
+  /** 启动装配顺序：openDb → createStore → importLegacy → ensureProjection → Repository。 */
   const startupOrder: string[] = []
 
   return {
@@ -236,14 +236,14 @@ describe('主进程入口装配', () => {
     expect(typeof backend.execute).toBe('function')
   })
 
-  it('启动顺序：开库 → 建 store → 对账投影 → 导入存量 → 建仓储', async () => {
+  it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储', async () => {
     await loadEntry()
 
     expect(startupOrder).toEqual([
       'openDb',
       'createStore',
-      'ensureProjection',
       'importLegacy',
+      'ensureProjection',
       'repository',
     ])
     // store 拿到的是内核门面：decide / project / viewSpec 三个纯函数
@@ -255,10 +255,10 @@ describe('主进程入口装配', () => {
     expect(typeof options.kernel.decide).toBe('function')
     expect(typeof options.kernel.project).toBe('function')
     expect(typeof options.kernel.viewSpec).toBe('function')
-    // 导入接到同一个 db 与 kernel；投影对账必须在导入之前（空库写 meta，存量再导入）
+    // 导入接到同一个 db 与 kernel；先导入存量再对账投影（空库无事实时不会清表）
     expect(importLegacyMock).toHaveBeenCalledWith(options.db, options.kernel)
-    expect(startupOrder.indexOf('ensureProjection')).toBeLessThan(
-      startupOrder.indexOf('importLegacy'),
+    expect(startupOrder.indexOf('importLegacy')).toBeLessThan(
+      startupOrder.indexOf('ensureProjection'),
     )
   })
 

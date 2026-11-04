@@ -8,8 +8,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { decide } from '../../kernel/decide'
 import { project } from '../../kernel/project'
 import { viewSpec } from '../../kernel/view-spec'
-import type { Fact, KernelPort } from '../../kernel/types'
-import type { FactType } from '../../protocol/facts'
+import type { KernelPort } from '../../kernel/types'
 import { createStore, type Store } from '../../host/store/index'
 import type {
   Agent,
@@ -18,12 +17,16 @@ import type {
   RuntimeInput,
   Task,
   TaskInput,
-  Workflow,
   WorkflowInput,
   WorkflowWithStages,
 } from '../../shared/ai-workflow-api'
 import { openDb } from './db'
+import { agentById, createdId, runtimeById, taskById, workflowById } from './projection-lookup'
 import { Repository } from './repository'
+
+// 投影查询助手已抽到 projection-lookup（与 ipc.ts 共用）；这里保留同名转出，
+// 让既有测试夹具的 import 面不变。
+export { agentById, runtimeById, taskById, workflowById }
 
 export interface TestWorld {
   db: DatabaseSync
@@ -50,48 +53,6 @@ export function createWorld(): TestWorld {
   const store = createStore({ db, kernel })
   store.ensureProjection()
   return { db, store, repo: new Repository(db) }
-}
-
-/** 从刚提交的事实里取新实体 id。 */
-function createdId(facts: readonly Fact[], type: FactType): string {
-  const fact = facts.find((item) => item.type === type)
-  if (!fact) throw new Error('缺少事实: ' + type)
-  switch (fact.type) {
-    case 'runtime.created':
-      return (fact.payload as { runtime: Runtime }).runtime.id
-    case 'agent.created':
-      return (fact.payload as { agent: Agent }).agent.id
-    case 'workflow.created':
-      return (fact.payload as { workflow: Workflow }).workflow.id
-    case 'task.created':
-      return (fact.payload as { task: Task }).task.id
-    default:
-      throw new Error('事实不携带实体 id: ' + fact.type)
-  }
-}
-
-export function runtimeById(store: Store, id: string): Runtime {
-  const runtime = store.query('runtimes.all').find((item) => item.id === id)
-  if (!runtime) throw new Error('运行时不存在: ' + id)
-  return runtime
-}
-
-export function agentById(store: Store, id: string): Agent {
-  const agent = store.query('agents.all').find((item) => item.id === id)
-  if (!agent) throw new Error('智能体不存在: ' + id)
-  return agent
-}
-
-export function workflowById(store: Store, id: string): WorkflowWithStages {
-  const workflow = store.query('workflows.all').find((item) => item.id === id)
-  if (!workflow) throw new Error('工作流不存在: ' + id)
-  return workflow
-}
-
-export function taskById(store: Store, id: string): Task {
-  const task = store.query('task.byId', { taskId: id })
-  if (!task) throw new Error('任务不存在: ' + id)
-  return task
 }
 
 export function createRuntime(world: TestWorld, input: RuntimeInput): Runtime {

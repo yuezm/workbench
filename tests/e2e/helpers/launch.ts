@@ -12,8 +12,22 @@ export interface LaunchedApp {
   page: Page
   /** 本次启动专用的临时 userData 目录，供断言启动隔离 */
   userDataDir: string
-  /** 关闭应用并删除临时 userData 目录 */
-  close: () => Promise<void>
+  /** 应用数据库文件（崩溃恢复等用例需要预置/复查投影） */
+  dbPath: string
+  /** 关闭应用；默认连临时 userData 一起删（重启用例可传 `removeUserData: false` 保留） */
+  close: (options?: { removeUserData?: boolean }) => Promise<void>
+}
+
+/** 新建一个空的临时 userData 目录（崩溃恢复用例要在启动前把种子库写进去）。 */
+export function createTempUserDataDir(): string {
+  return mkdtempSync(path.join(tmpdir(), 'workbench-e2e-'))
+}
+
+export interface LaunchOptions {
+  /** 复用已存在的 userData（崩溃恢复用例重启同一份数据）；缺省新建临时目录 */
+  userDataDir?: string
+  /** 启动前准备 userData（例如用真实 openDatabase/createStore 写入种子库） */
+  prepare?: (userDataDir: string) => void | Promise<void>
 }
 
 /**
@@ -33,10 +47,11 @@ function removeUserDataDir(userDataDir: string): void {
   rmSync(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 }
 
-export async function launchApp(): Promise<LaunchedApp> {
-  const userDataDir = mkdtempSync(path.join(tmpdir(), 'workbench-e2e-'))
+export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
+  const userDataDir = options.userDataDir ?? createTempUserDataDir()
   let app: ElectronApplication | undefined
   try {
+    await options.prepare?.(userDataDir)
     app = await electron.launch({
       args: ['.', `--user-data-dir=${userDataDir}`],
       env: childEnv(),
@@ -46,11 +61,12 @@ export async function launchApp(): Promise<LaunchedApp> {
       app,
       page,
       userDataDir,
-      close: async () => {
+      dbPath: path.join(userDataDir, 'ai-workflow.db'),
+      close: async (closeOptions = {}) => {
         try {
           await app?.close()
         } finally {
-          removeUserDataDir(userDataDir)
+          if (closeOptions.removeUserData ?? true) removeUserDataDir(userDataDir)
         }
       },
     }

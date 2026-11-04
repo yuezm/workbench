@@ -34,7 +34,7 @@
 | `pomodoro`      | 番茄钟 app                                                                                          | shell | [SPEC-pomodoro.md](./specs/SPEC-pomodoro.md)       |
 | `ai-workflow`   | 运行时 + 智能体 + 工作流 + 看板 + 聊天 + SQLite 持久化（当前实现 `src/main/ai-workflow/`，4275 行） | shell | [SPEC-ai-workflow.md](./specs/SPEC-ai-workflow.md) |
 
-> 状态（2026-11-04）：**M0、M1 已退出**。M0：kernel 边界、WAL + `integrity_check`、单实例锁、只读数据导出、打包冒烟。M1：`facts` 事实日志 + `project` 投影 + 重建 + `snapshot.imported` 存量导入；五张业务表（tasks/workflows/stages/agents/runtimes）已是投影，主进程写路径只剩 `src/host/store`，`repository` 旧写方法与 `engine.ts` 已删除。下一步 M2：运行生命周期入账（`run.*` 事实、租约与启动对账）。证据见 [refactor-plan](./planning/refactor-plan.md) 的 M0/M1 退出记录。
+> 状态（2026-11-05）：**M0、M1、M2 已退出**。M0：kernel 边界、WAL + `integrity_check`、单实例锁、只读数据导出、打包冒烟。M1：`facts` 事实日志 + `project` 投影 + 重建 + `snapshot.imported` 存量导入；五张业务表已是投影。M2：运行生命周期全部入账（`run.*` 事实、租约/心跳/退避/超时、`runs`/`run_events` 投影）、`host/scheduler` + 注入执行器端口、启动对账与 `process_registry`、聊天并入 `purpose='chat'`、取消链路；`repository`/`runner`/`ChatService` 已删除，`src/main/ai-workflow` 只剩 IPC 与执行器适配。下一步 M3：执行器插件化（`dsh` 搬 `plugins/executors`、`executorKey` 路由）。证据见 [refactor-plan](./planning/refactor-plan.md) 的 M0/M1/M2 退出记录。
 
 ## 边界决定
 

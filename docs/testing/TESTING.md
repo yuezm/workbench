@@ -21,7 +21,7 @@
 | --------- | ------------------------------- | --------------------------------------------- | ---------------------------------------------------------- |
 | 静态检查  | 根配置                          | tsc（node/web 双工程）、ESLint flat、Prettier | 类型、hooks 规则、格式一致                                 |
 | 单元      | `tests/**`（与 `src/` 同构）    | Vitest + jsdom + RTL                          | 纯逻辑与孤立组件；业务规则 100% 落在 machine.ts 并分支全测 |
-| 集成/契约 | `tests/main/`、`tests/preload/` | Vitest（node 环境 + mock electron）           | 跨进程契约不漂移：channel、payload、暴露的 API 形状        |
+| 集成/契约 | `tests/host/`、`tests/preload/` | Vitest（node 环境 + mock electron）           | 跨进程契约不漂移：channel、payload、暴露的 API 形状        |
 | E2E       | `tests/e2e/*.spec.ts`           | Playwright `_electron.launch`                 | 构建产物（out/）里真实 Electron 的关键路径                 |
 
 目录约定（2026-11-04 起）：
@@ -35,7 +35,8 @@
 - 契约测试**只守卫不改**：`WorkbenchApi` / `NOTIFY_CHANNEL` / `AppDefinition` 变更时，先改契约与消费方，再让测试跟随契约走。
 - E2E **有意不覆盖**阶段完成/系统通知（真实等待 ≥60s 且脆），该路径由 machine/usePomodoro 单测 + 手动验收覆盖。
 - renderer 单测默认 jsdom；main/preload 契约测试文件首行标 `// @vitest-environment node`。
-- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98（略低于 2026-10 基线 99.3/95.5/97.9/99.2）；`pnpm test:coverage` 跌破即失败。
+- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98；项目基线（2026-11-05 M2 退出）99.73 / 97.78 / 100 / 100，`pnpm test:coverage` 跌破基线即 finding。
+- M2 起 `runs` / `run_events` / `conversations` / `messages` 是事实投影：崩溃恢复用例在 `tests/e2e/crash-recovery.spec.ts`（临时 userData + 残留 pid + 重启），租约/退避/超时在 `tests/kernel/decide.run.test.ts`，调度/取消/帧在 `tests/host/{scheduler,cancel}.test.ts`。
 
 ## 常用命令
 

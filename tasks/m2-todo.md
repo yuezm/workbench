@@ -317,10 +317,12 @@
 ## 进度记录（开工后填）
 
 - 分支 / 起点 commit：`refactor/m2-lifecycle`，起点 `20c84b6`；计划文档 `966b850`、SPEC 修订 `b2ccd64`。
-- 检查点通过时间：A `2026-11-05 00:32` / B `2026-11-05 00:52` / C `2026-11-05 01:45` / D `____` / E `____`
+- 检查点通过时间：A `2026-11-05 00:32` / B `2026-11-05 00:52` / C `2026-11-05 01:45` / D `2026-11-05 02:50` / E `2026-11-05 03:12`
 - 检查点 A 证据：`pnpm check` 全绿（81 文件 / 846 用例；改动行 251/254 = 98.82%）；`typecheck`/`lint` 0 error；M1 真实库副本升级后 runs 15 / run_events 98 逐行保留，`importLegacyIfNeeded` 写入 7 张导入根，`rebuild()` 后逐表全等。
 - 检查点 B 证据：提交 `c7a25f5`；`tests/kernel` 9 文件 / 135 用例全绿（领取/租约/回执/终态/退避/超时/取消/host_settled/nextWakeAt）；执行器端口与进程层搬迁、`Receipt.error` 契约补齐；`pnpm check` 全绿。
 - 检查点 C 证据：提交 `961f404` + 覆盖率收口；`pnpm test` 87 文件 / 955 用例全绿；`pnpm check` exit 0；覆盖率 99.75/97.88/99.59/99.87、改动行 100%；scheduler 21 例等价覆盖旧 runner + 帧分包/seq 续接/取消竞态/心跳；旧 `runner.ts`/`task-effects.ts` 删除。
+- 检查点 D 证据：提交 `3fe037b`/`f8d3721`/`7bf0707` + 覆盖率 `e690a8f`；启动对账先杀残留进程树再记账、`process_registry` 回填/清理、超租约 abandoned、中断聊天落错误消息；取消宽限/强杀/退出 `cancelAll`；聊天 `purpose='chat'` 与阶段共用 scheduler（`tests/host/chat.test.ts` 21 例承接旧 27 例行为）；`pnpm check` exit 0。
+- 检查点 E 证据：提交 `00e7115`（读路径收口/仓库层删除/测试搬家）+ `e2e` 崩溃恢复用例；`pnpm e2e` 6/6（新增 `crash-recovery.spec.ts`：强杀后 claimed 回收、残留子进程被终止、`moveToStage` 可拖动、同 userData 重启一致）；`pnpm check` exit 0；覆盖率 99.73/97.78/100/100、改动行 99.32%。
 
 ## 实现偏差（执行中确认后写）
 
@@ -333,6 +335,12 @@
 7. **`activeTaskIds` 额外限定 `purpose='stage'` 且 `task_id IS NOT NULL`**：聊天 run 不参与任务「执行中」判定。
 8. **进入效果 `run.queued` 延后到 T10**：T6 只做回执/终态/流转；`task.create`/`task.move` 的进入效果与 `host/task-effects` 切换必须与 scheduler 接线同批完成，否则会与旧路径双写 run。
 9. **`Receipt` 补 `error?: string`**：SPEC-plugins 原契约只有 `errorCode`，无法重建 `runs.error` 与聊天失败文案；已修订 SPEC 与 `protocol/inputs.ts`，T6 终态/聊天消息使用它。
+10. **新增宿主输入 `run.frames`**（T12）：帧批量由内核校验入账（1–500 帧、seq 1..1e9、帧 runId 一致），`Protocol/Input` 面只增不改。
+11. **`process_registry` 宿主私有表**（T13）：不进投影白名单/指纹；`openDatabase` 单独执行 `PROCESS_REGISTRY_SQL`；`killPidTree` 供对账/取消复用。
+12. **取消分两段**（T15）：内核只记 `run.cancel_requested`，宿主 abort → cancelGraceMs → killPidTree → killAfterMs → `run.host_settled{cancelled}`；`cancelAll()` 在退出时 best-effort，排队中 run 直接落终态。
+13. **`floor-guard` 扩了迁移识别**：未跟踪新文件计入 addedPaths + `RELOCATED_TESTS` 显式搬家表（避免「新测试顶替删测试」被误判）。
+14. **旧聊天表迁移后即删**（T14b）：`import.ts` 读旧两表写 `snapshot.imported` 成功后 `DROP TABLE`；现有库首次 M2 启动完成迁移，空表也清理。
+15. **仓库层删除**（T16）：`main/ai-workflow/{repository,projection-lookup,db,schema}.ts` 与 `shared/stage-machine.ts` 删除，读路径全部走 `store.query` 的投影视图；旧库升级/聊天迁移作为兼容层保留，M3 再删。
 
 ## M2 退出记录（验收后写）
 

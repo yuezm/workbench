@@ -342,7 +342,10 @@
 14. **旧聊天表迁移后即删**（T14b）：`import.ts` 读旧两表写 `snapshot.imported` 成功后 `DROP TABLE`；现有库首次 M2 启动完成迁移，空表也清理。
 15. **仓库层删除**（T16）：`main/ai-workflow/{repository,projection-lookup,db,schema}.ts` 与 `shared/stage-machine.ts` 删除，读路径全部走 `store.query` 的投影视图；旧库升级/聊天迁移作为兼容层保留，M3 再删。
 
-## M2 退出记录（验收后写）
+## M2 退出记录（2026-11-05）
 
-- 提交链：`________`
-- 证据：`________`
+- 提交链：`966b850`（计划）+ `b2ccd64`（SPEC）→ `de59c01`（契约/投影/存量迁移/View）→ `c7a25f5`（回执终态/退避超时/执行器端口/进程层搬迁）→ `9292137`（clock）→ `961f404`（进入效果入内核 + scheduler/effects）→ `3fe037b`（启动对账/进程登记）→ `f8d3721`（帧批量/聊天内核化/取消）→ `7bf0707`（聊天并入 run/旧表清理）→ `e690a8f`（覆盖率）→ `00e7115`（读路径收口/仓库层删除/测试搬家）→ `07eecd4`（退出记录/崩溃 E2E/基线）。
+- 证据：`pnpm test` **84 文件 / 984 用例**全绿；`pnpm check` exit 0（覆盖率 **99.73 / 97.78 / 100 / 100**、改动行 **1024/1031 = 99.32%**）；`pnpm e2e` **6/6**（新增崩溃恢复用例：强杀后 claimed 回收、残留 pid 终止、任务可拖动、同 userData 重启一致）。
+- 真 CLI 手工验收（M1 真实库副本、未写真实数据）：阶段执行一轮 `status=succeeded`、输出 `PONG`、3.4 s；聊天一轮 `content=PONG`、4.5 s；应用启动完成旧库升级 + 投影重建。
+- 写路径：生产代码 `INSERT/UPDATE/DELETE runs|run_events` 只在 `src/host/store/projection-apply.ts`；`repository.ts`/`runner.ts`/`ChatService`/`shared/stage-machine.ts` 已删除。
+- 已知边界：`run.waiting` 只落事实与投影，卡片投递/回答闭环在 M4；`commandId` 幂等留 M5；旧库升级/聊天迁移兼容层与执行器适配层留 M3 首启后清理；`scheduler` 少量防御性早退分支未覆盖（公共路径不可达）。

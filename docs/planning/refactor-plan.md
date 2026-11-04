@@ -64,7 +64,8 @@
 ## M2 退出记录（2026-11-05）
 
 - 提交链：`de59c01`（契约/投影/存量迁移/View）→ `c7a25f5`（回执终态/退避超时/执行器端口/进程层搬迁）→ `9292137`（clock）→ `961f404`（进入效果入内核 + scheduler/effects 接线）→ `3fe037b`（启动对账/进程登记）→ `f8d3721`（帧批量/聊天内核化/取消链路）→ `7bf0707`（聊天并入 run + 旧表清理）→ `e690a8f`（覆盖率）→ `00e7115`（读路径收口/仓库层删除/测试搬家）。
-- 证据：`pnpm test` 84 文件 / 984 用例；`pnpm check` exit 0（覆盖率 99.73/97.78/100/100，改动行 1024/1031 = 99.32%）；`pnpm e2e` 5/5（含新增崩溃恢复用例）；M1 真实库副本升级后 `runs` 15 / `run_events` 98 逐行保留，7 张导入根 + 重建后逐表全等。
+- 证据：`pnpm test` 84 文件 / 984 用例；`pnpm check` exit 0（覆盖率 99.73/97.78/100/100，改动行 1024/1031 = 99.32%）；`pnpm e2e` 6/6（含新增崩溃恢复用例）；M1 真实库副本升级后 `runs` 15 / `run_events` 98 逐行保留，7 张导入根 + 重建后逐表全等。
+- 真 CLI 验收（M1 真实库副本，未写真实数据）：阶段执行 `succeeded` / 输出 `PONG` / 3.4 s；聊天一轮 `PONG` / 4.5 s。
 - 写路径：生产代码 `INSERT/UPDATE/DELETE runs|run_events` 只在 `src/host/store/projection-apply.ts`；`repository.ts`、`runner.ts`、`ChatService`、`shared/stage-machine.ts` 已删除；聊天与阶段共用 scheduler/执行器端口。
 - 已知边界：`run.waiting` 只落事实与投影，卡片投递/回答闭环在 M4；`commandId` 幂等留 M5；`resume_rejected` 重试在 M2 执行器适配层（M3 搬 dsh 插件）；旧库一次性升级/聊天迁移为兼容层，M3 首启后再删；`scheduler` 少量防御性早退分支未覆盖（公共路径不可达）。
 - 任务级证据与偏差见 [tasks/m2-todo.md](../../tasks/m2-todo.md) 与 [tasks/m2-plan.md](../../tasks/m2-plan.md)。

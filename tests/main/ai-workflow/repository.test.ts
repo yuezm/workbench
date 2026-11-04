@@ -10,6 +10,7 @@ import {
   createWorkflow,
   createWorld,
   resetCommandIds,
+  removeTask,
   runtimeById,
   type TestWorld,
 } from './test-support'
@@ -219,6 +220,20 @@ describe('repository：运行时负载与活跃 run', () => {
     const second = queuedRun(task.id)
     expect(repo.activeRunForTask(task.id)?.id).toBe(second.id)
     expect(repo.activeRunForTask(task.id)?.id).not.toBe(first.id)
+  })
+})
+
+describe('repository：测试夹具 removeTask（T12b 覆盖率）', () => {
+  it('走真实 task.remove 决策路径：产 task.removed 事实', () => {
+    const { task } = seed()
+    removeTask(world, task.id)
+
+    const types = (
+      world.db.prepare('SELECT type FROM facts ORDER BY seq').all() as unknown as Array<{
+        type: string
+      }>
+    ).map((row) => row.type)
+    expect(types).toContain('task.removed')
   })
 })
 

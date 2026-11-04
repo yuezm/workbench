@@ -520,3 +520,85 @@ describe('运行/聊天投影：冲突与联删', () => {
     expect(dumpProjection(db)).toEqual(incremental)
   })
 })
+
+describe('运行/聊天投影：run.frames 多批 / 跨 turn（T12）', () => {
+  it('同一 run 跨 turn 的帧 seq 连续、逐条顺序一致，重建后 run_events 逐行全等', () => {
+    const db = memory()
+    const runRow = sample.run({ id: 'run-frames', queueSeq: 0 })
+    const frameFact = (turn: number, frames: Array<{ seq: number; text: string }>): FactDraft =>
+      draft('run.frames', {
+        runId: 'run-frames',
+        turn,
+        frames: frames.map((frame) => ({
+          runId: 'run-frames',
+          seq: frame.seq,
+          type: 'text',
+          text: frame.text,
+        })),
+      })
+    const script: FactDraft[][] = [
+      [
+        draft('runtime.created', { runtime: sample.runtime() }),
+        draft('agent.created', { agent: sample.agent() }),
+        draft('workflow.created', { workflow: sample.workflow() }),
+        draft('stage.created', { stage: sample.stage() }),
+        draft('task.created', { task: sample.task() }),
+        draft('run.queued', { run: runRow }),
+        draft('run.claimed', { run: { ...runRow, status: 'running', attempt: 1 } }),
+      ],
+      // turn 1：两批（2 + 2），seq 1–4
+      [
+        frameFact(1, [
+          { seq: 1, text: 't1-a' },
+          { seq: 2, text: 't1-b' },
+        ]),
+      ],
+      [
+        frameFact(1, [
+          { seq: 3, text: 't1-c' },
+          { seq: 4, text: 't1-d' },
+        ]),
+      ],
+      // turn 2：续接后再来两批（3 + 2），seq 5–9 不允许回退
+      [draft('run.queued', { run: { ...runRow, status: 'queued', turn: 2 } })],
+      [
+        frameFact(2, [
+          { seq: 5, text: 't2-a' },
+          { seq: 6, text: 't2-b' },
+          { seq: 7, text: 't2-c' },
+        ]),
+      ],
+      [
+        frameFact(2, [
+          { seq: 8, text: 't2-d' },
+          { seq: 9, text: 't2-e' },
+        ]),
+      ],
+    ]
+    const store = seedStore(db, script)
+
+    const rows = db
+      .prepare(
+        'SELECT run_id, seq, type, payload_json, created_at FROM run_events ORDER BY run_id, seq',
+      )
+      .all() as unknown as Array<Record<string, unknown>>
+    expect(rows.map((row) => row.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(
+      rows.map((row) => (JSON.parse(String(row.payload_json)) as { text: string }).text),
+    ).toEqual(['t1-a', 't1-b', 't1-c', 't1-d', 't2-a', 't2-b', 't2-c', 't2-d', 't2-e'])
+    expect(rows.every((row) => row.run_id === 'run-frames')).toBe(true)
+
+    const incremental = dumpProjection(db)
+    store.rebuild()
+    expect(dumpProjection(db)).toEqual(incremental)
+    expect(
+      (
+        db
+          .prepare(
+            'SELECT run_id, seq, type, payload_json, created_at FROM run_events ORDER BY run_id, seq',
+          )
+          .all() as unknown as Array<Record<string, unknown>>
+      ).map((row) => row.seq),
+    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+  })
+})

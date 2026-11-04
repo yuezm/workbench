@@ -10,7 +10,7 @@ import type {
   RunRemovedPayload,
   RunWaitingPayload,
 } from '../../src/protocol/facts'
-import type { Input, Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
+import type { Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
 import { project } from '../../src/kernel/project'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
@@ -1328,20 +1328,11 @@ describe('kernel/decide run.host_settled 宿主兜底', () => {
   })
 })
 
-describe('kernel/decide 未实现的对话输入', () => {
-  it('T14 前统一 reject unsupported，不静默产零事实', () => {
-    const pending: Input[] = [
-      { type: 'conversation.create', agentId: 'ag-1' },
-      { type: 'conversation.send', conversationId: 'c-1', content: 'hi' },
-      { type: 'conversation.rename', conversationId: 'c-1', title: '标题' },
-      { type: 'conversation.remove', conversationId: 'c-1' },
-    ]
-
-    for (const each of pending) {
-      expect(decide(view(), each, NOW, env())).toEqual({
-        facts: [],
-        reject: { code: 'unsupported', message: '输入暂未支持: ' + each.type },
-      })
-    }
+describe('kernel/decide 对话输入（T14a 已实现，不再 unsupported）', () => {
+  it('conversation.create 走已实现分支：缺智能体时 not_found', () => {
+    expect(decide(view(), { type: 'conversation.create', agentId: 'ag-404' }, NOW, env())).toEqual({
+      facts: [],
+      reject: { code: 'not_found', message: '智能体不存在: ag-404' },
+    })
   })
 })

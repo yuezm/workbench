@@ -8,9 +8,12 @@
  *
  * 执行一轮：
  * - 执行器端口按运行时配置构造（`executors.forRuntime(runtime)`），`Turn` 取自 run 行；
- * - `io.emit` 的帧先进缓冲，**终态前**按 `≤ maxFramesPerBatch` 分包写 `run.frames`
- *   （帧 `seq` 由宿主按 run 全局单调分配，D6/D7）；
- * - 心跳定时 `run.heartbeat` 续租；取消走 `run.cancel_requested` → abort `signal`；
+ * - `io.emit` 的帧先进缓冲，**运行期**按 `frameFlushMs`（默认 16ms）批量或缓冲达到
+ *   `maxFramesPerBatch` 时立即 flush；每批按 `≤ maxFramesPerBatch` 分包写 `run.frames`
+ *   （帧 `seq` 由宿主按 run 全局单调分配，D6/D7），终态前再 flush 剩余帧；
+ * - 心跳定时 `run.heartbeat` 续租；`run.cancel_requested` → abort `signal`，再按
+ *   「`cancelGraceMs` 宽限（等执行器自己收尾）→ `killPidTree` → `killAfterMs` →
+ *   兜底 `run.host_settled{cancelled}`」收尾（T15）；
  * - 结束写 `run.receipt`；执行器抛错 / 无回执写 `run.host_settled`（`executor_lost`，
  *   取消时 `cancelled`），保证 run 不悬空（D14）。
  *
@@ -20,6 +23,7 @@
 import type { RunErrorCode, RunEvent, RunEventRow, RunRow, Runtime } from '../protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
 import type { Fact, Id, Iso } from '../kernel/types'
+import { killPidTree } from './process'
 import type { ProcessRegistry } from './process-registry'
 import type { DispatchResult } from './store/index'
 
@@ -38,13 +42,26 @@ export interface SchedulerLimits {
   heartbeatMs: number
   runTimeoutMs: number
   maxFramesPerBatch: number
+  /** 取消宽限：abort 后等执行器自己收尾的时长（缺省 3s，见 SPEC-kernel Limits） */
+  cancelGraceMs?: number
+  /** 宽限到期强杀后再等回执的时长（缺省 2s）；仍无回执由宿主写兜底终态 */
+  killAfterMs?: number
 }
 
-/** 定时器抽象：默认系统实现，测试注入假实现（心跳与退出收尾）。 */
+/** 定时器抽象：默认系统实现，测试注入假实现（心跳 / 帧批量窗口 / 退出收尾）。 */
 export interface SchedulerTimer {
   setInterval(callback: () => void, delayMs: number): unknown
   clearInterval(handle: unknown): void
+  /**
+   * 帧批量窗口用的单次定时器（每批帧 flush 后重挂）。缺省时回退系统 `setTimeout`，
+   * 只关心心跳的旧夹具不必实现这两个方法。
+   */
+  setTimeout?(callback: () => void, delayMs: number): unknown
+  clearTimeout?(handle: unknown): void
 }
+
+/** 帧批量入账的默认时间窗（毫秒）：16ms ≈ 一帧，避免每来一条帧都写一次库。 */
+export const DEFAULT_FRAME_FLUSH_MS = 16
 
 export interface SchedulerDeps {
   /** 统一写入口（effects.dispatch）：追加事实后自动分发，调度器自己的写入也走它 */
@@ -57,6 +74,8 @@ export interface SchedulerDeps {
   timer?: SchedulerTimer
   /** 调度限制；默认与 `DEFAULT_LIMITS` 同值 */
   limits?: SchedulerLimits
+  /** 帧批量窗口（毫秒）；默认 `DEFAULT_FRAME_FLUSH_MS`（16ms），测试可注入假 timer 手动推进 */
+  frameFlushMs?: number
   /**
    * 该 run 已有的最大帧 seq（重启后重跑同一 run 时保证 `(run_id,seq)` 全局单调）；
    * 缺省视为 0。装配根用仓储读 `run_events` 传入。
@@ -66,9 +85,11 @@ export interface SchedulerDeps {
    * 运行进程登记表（M2 T13）：执行开始写占位、pid 到达回填、结束删除；
    * 崩溃重启时由 `host/reconcile` 读取并清理。缺省不登记（测试 / 关闭对账的宿主）。
    */
-  registry?: Pick<ProcessRegistry, 'begin' | 'attachPid' | 'remove'>
+  registry?: Pick<ProcessRegistry, 'begin' | 'attachPid' | 'remove' | 'pidOf'>
   /** 当前时刻（写 `process_registry.started_at`）；默认系统时钟 */
   now?: () => Iso
+  /** 进程树终止（取消宽限到期强杀用）；默认 `killPidTree`，测试可注入假实现 */
+  killPid?: (pid: number) => boolean
 }
 
 export interface Scheduler {
@@ -76,8 +97,13 @@ export interface Scheduler {
   wake(): void
   /** 接管一条已领取的 run（wake 内部用；对账 / 测试也可直接调，重复调用零效果） */
   start(run: RunRow): void
-  /** 取消执行中的 run（abort 信号；终止时序由执行器负责） */
+  /**
+   * 取消一个 run：执行中就先 abort 再走宽限/强杀/兜底时序；排队中的 run 没有执行器，
+   * 直接写兜底终态 `run.host_settled{cancelled}`（看板立即解除「执行中」）。重复调用幂等。
+   */
   cancel(runId: Id): void
+  /** 退出用：对全部执行中的 run best-effort 取消（立即杀进程树 + 写兜底终态，不阻塞退出） */
+  cancelAll(): void
   /** 正在执行的 run（诊断 / 测试） */
   active(): Id[]
   /** 等所有执行结束（测试与退出前收尾） */
@@ -88,18 +114,23 @@ const DEFAULT_SCHEDULER_LIMITS: SchedulerLimits = {
   heartbeatMs: 30_000,
   runTimeoutMs: 1_800_000,
   maxFramesPerBatch: 500,
+  cancelGraceMs: 3_000,
+  killAfterMs: 2_000,
 }
 
 const systemTimer: SchedulerTimer = {
   setInterval: (callback, delayMs) => setInterval(callback, delayMs),
   clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
 
 /** 缺省登记表：宿主没接对账时执行链照常跑，只少了崩溃恢复线索。 */
-const noopRegistry: Pick<ProcessRegistry, 'begin' | 'attachPid' | 'remove'> = {
+const noopRegistry: Pick<ProcessRegistry, 'begin' | 'attachPid' | 'remove' | 'pidOf'> = {
   begin: () => undefined,
   attachPid: () => undefined,
   remove: () => undefined,
+  pidOf: () => null,
 }
 
 /** 运行时配置的 `provider/model` → `Turn.model`；格式不对不传（后端会给出可读错误）。 */
@@ -118,10 +149,25 @@ const framePayload = (event: RunEvent): Omit<RunEventRow, 'runId' | 'seq' | 'typ
 
 export function createScheduler(deps: SchedulerDeps): Scheduler {
   const timer = deps.timer ?? systemTimer
+  /** 单次定时器（帧批量窗口 / 取消宽限与强杀）：注入 timer 缺 `setTimeout` 时回退系统实现。 */
+  const injectedSetTimeout = timer.setTimeout?.bind(timer)
+  const injectedClearTimeout = timer.clearTimeout?.bind(timer)
+  const setOneShot = (callback: () => void, delayMs: number): unknown =>
+    injectedSetTimeout === undefined
+      ? setTimeout(callback, delayMs)
+      : injectedSetTimeout(callback, delayMs)
+  const clearOneShot = (handle: unknown): void => {
+    if (injectedClearTimeout === undefined) clearTimeout(handle as ReturnType<typeof setTimeout>)
+    else injectedClearTimeout(handle)
+  }
   const limits = deps.limits ?? DEFAULT_SCHEDULER_LIMITS
+  const frameFlushMs = deps.frameFlushMs ?? DEFAULT_FRAME_FLUSH_MS
   const lastFrameSeq = deps.lastFrameSeq ?? (() => 0)
   const registry = deps.registry ?? noopRegistry
   const now = deps.now ?? (() => new Date().toISOString())
+  const killPid = deps.killPid ?? killPidTree
+  const cancelGraceMs = limits.cancelGraceMs ?? 3_000
+  const killAfterMs = limits.killAfterMs ?? 2_000
   /** 执行中的 run → 取消信号。 */
   const controllers = new Map<Id, AbortController>()
   /** 每个 run 已分配到的最大帧 seq（跨 batch / 跨轮持续递增）。 */
@@ -129,6 +175,19 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const idleWaiters: Array<() => void> = []
   let pumping = false
   let wakeAgain = false
+  /** 退出中：不再领取新 run（cancelAll 置位后本实例只收尾，不再起新进程）。 */
+  let draining = false
+
+  /** 宿主兜底取消：没有执行器可等的 run（排队中 / 已结束）直接落终态。 */
+  const settleCancelled = (runId: Id): void => {
+    dispatch({
+      type: 'run.host_settled',
+      runId,
+      status: 'cancelled',
+      errorCode: 'cancelled',
+      error: '已取消',
+    })
+  }
 
   /** 写入口：单次写入失败（领取被拒 / run 已随任务删除）不让调度器中断。 */
   const dispatch = (input: unknown): Fact[] => {
@@ -208,10 +267,45 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     runtime: Runtime,
     controller: AbortController,
   ): Promise<void> => {
-    const frames: RunEvent[] = []
+    /** 本次执行的帧缓冲；`framesClosed` 之后（终态已定）不再接受新帧。 */
+    let frames: RunEvent[] = []
+    let flushTimer: unknown = null
+    let framesClosed = false
     let observedSession: string | null = null
+
+    /** flush 当前缓冲：先取消挂着的窗口定时器，再按 `≤ maxFramesPerBatch` 分包写事实。 */
+    const flushBuffered = (): void => {
+      if (flushTimer !== null) {
+        clearOneShot(flushTimer)
+        flushTimer = null
+      }
+      if (frames.length === 0) return
+      const buffered = frames
+      frames = []
+      flushFrames(run, buffered)
+    }
+
+    /** 挂一帧批量窗口：每批只挂一个；窗口到点 flush 缓冲（之后的帧再重新挂）。 */
+    const armFlushTimer = (): void => {
+      if (framesClosed || flushTimer !== null || frames.length === 0) return
+      flushTimer = setOneShot(() => {
+        flushTimer = null
+        flushBuffered()
+      }, frameFlushMs)
+    }
+
     const io: ExecutorIO = {
-      emit: (event) => frames.push(event),
+      emit: (event) => {
+        // 终态后执行器即便再回调也不写帧：事实只追加，不补历史（D6）。
+        if (framesClosed) return
+        frames.push(event)
+        // 缓冲达到单批上限：立刻 flush，不等到时间窗（D7 分包由 flushFrames 负责）。
+        if (frames.length >= limits.maxFramesPerBatch) {
+          flushBuffered()
+          return
+        }
+        armFlushTimer()
+      },
       session: (id) => {
         observedSession = id
       },
@@ -220,12 +314,86 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
     // 执行开始即登记（spawn 之前）：进程还没起来也不能丢线索（pid 留空，对账只清理）
     const heartbeat = startHeartbeat(run)
+    /** 取消时序的定时器（宽限 / 强杀后等待）；null = 没有进行中的取消链。 */
+    let cancelTimers: { grace: unknown; kill: unknown } | null = null
+    /** 收尾只做一次：flush、清定时器/心跳/登记、释放执行位、唤醒下一条。 */
+    let finished = false
+
+    const clearCancelTimers = (): void => {
+      if (cancelTimers === null) return
+      if (cancelTimers.grace !== null) clearOneShot(cancelTimers.grace)
+      if (cancelTimers.kill !== null) clearOneShot(cancelTimers.kill)
+      cancelTimers = null
+    }
+
+    const finishOnce = (): void => {
+      if (finished) return
+      finished = true
+      framesClosed = true
+      flushBuffered()
+      clearCancelTimers()
+      if (heartbeat !== null) timer.clearInterval(heartbeat)
+      // 终态事实已写：登记行没有保留价值（残留行只留给崩溃场景给对账用）
+      registry.remove(run.id)
+      controllers.delete(run.id)
+      frameSeq.delete(run.id)
+      // 释放了并发位：先领取下一条（链式阶段靠这里接上），再判断空闲；
+      // 顺序反了会让 idle() 在下一轮启动前就提前返回。
+      wake()
+      releaseIdle()
+    }
+
+    /** 宽限与强杀都到期仍无回执：宿主写兜底终态（帧先入账，不丢已产生的输出）。 */
+    const settleCancelledRun = (error: string): void => {
+      if (finished) return
+      framesClosed = true
+      flushBuffered()
+      dispatch({
+        type: 'run.host_settled',
+        runId: run.id,
+        leaseId: run.leaseId ?? undefined,
+        turn: run.turn,
+        status: 'cancelled',
+        errorCode: 'cancelled',
+        error,
+      })
+      finishOnce()
+    }
+
+    // 取消链路（T15）：abort → cancelGraceMs（等执行器自己交回执）
+    // → killPidTree（process_registry 里的 pid）→ killAfterMs → 兜底终态。
+    controller.signal.addEventListener(
+      'abort',
+      () => {
+        if (finished || cancelTimers !== null) return
+        cancelTimers = { grace: null, kill: null }
+        cancelTimers.grace = setOneShot(() => {
+          if (cancelTimers === null) return
+          cancelTimers.grace = null
+          // 宽限内没等到回执：按登记 pid 终止整棵进程树（Windows taskkill /T /F）
+          const pid = registry.pidOf(run.id)
+          if (pid !== null) killPid(pid)
+          if (cancelTimers === null) return
+          cancelTimers.kill = setOneShot(() => {
+            if (cancelTimers === null) return
+            cancelTimers.kill = null
+            settleCancelledRun('已取消')
+          }, killAfterMs)
+        }, cancelGraceMs)
+      },
+      { once: true },
+    )
+
     try {
       registry.begin(run.id, now())
       const receipt = await deps.executors
         .forRuntime(runtime)
         .run(turnOf(run, runtime, controller.signal), io)
-      flushFrames(run, frames)
+      // 兜底取消已落终态：迟到的回执不再写事实（清理统一走 finally）
+      if (finished) return
+      // 终态前先关缓冲再 flush：保证 receipt 之前所有帧都已入账（后续帧被拒绝）。
+      framesClosed = true
+      flushBuffered()
       // 执行器只经旁路报过 sessionId 时补进回执（终态行据此可续接）
       const finalReceipt: Receipt =
         receipt.sessionId === undefined && observedSession !== null
@@ -233,7 +401,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           : receipt
       dispatch({ type: 'run.receipt', runId: run.id, receipt: finalReceipt })
     } catch (error) {
-      flushFrames(run, frames)
+      // 宿主兜底终态已写过（执行器迟到的抛错只是收尾信号）
+      if (finished) return
+      framesClosed = true
+      flushBuffered()
       const message = error instanceof Error ? error.message : String(error)
       if (controller.signal.aborted) {
         dispatch({
@@ -257,9 +428,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         })
       }
     } finally {
-      if (heartbeat !== null) timer.clearInterval(heartbeat)
-      // 终态事实已写：登记行没有保留价值（残留行只留给崩溃场景给对账用）
-      registry.remove(run.id)
+      finishOnce()
     }
   }
 
@@ -276,14 +445,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     }
     const controller = new AbortController()
     controllers.set(run.id, controller)
-    void execute(run, runtime, controller).finally(() => {
-      controllers.delete(run.id)
-      frameSeq.delete(run.id)
-      // 释放了并发位：先领取下一条（链式阶段靠这里接上），再判断空闲；
-      // 顺序反了会让 idle() 在下一轮启动前就提前返回。
-      wake()
-      releaseIdle()
-    })
+    // 收尾（删控制器 / 唤醒 / 置空闲）统一在 execute 的 finally 里做：取消兜底路径
+    // 也要能提前释放执行位，不能在两条路径上各写一份。
+    void execute(run, runtime, controller)
   }
 
   const pump = (): void => {
@@ -301,6 +465,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   }
 
   function wake(): void {
+    // 退出中：不领新活，只等活跃 run 收尾（cancelAll 置位 draining）
+    if (draining) return
     if (pumping) {
       wakeAgain = true
       return
@@ -320,7 +486,29 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     wake,
     start,
     cancel: (runId) => {
-      controllers.get(runId)?.abort()
+      const controller = controllers.get(runId)
+      if (controller === undefined) {
+        // 排队中 / 已结束：没有执行器可等，直接写兜底终态（内核侧重复取消幂等）
+        settleCancelled(runId)
+        return
+      }
+      controller.abort()
+    },
+    cancelAll: () => {
+      draining = true
+      for (const runId of [...controllers.keys()]) {
+        const controller = controllers.get(runId)
+        if (controller === undefined) continue
+        // 退出不等待宽限：直接 abort + 杀进程树 + 写兜底终态（best-effort，不阻塞退出）
+        controller.abort()
+        const pid = registry.pidOf(runId)
+        if (pid !== null) killPid(pid)
+        registry.remove(runId)
+        controllers.delete(runId)
+        frameSeq.delete(runId)
+        settleCancelled(runId)
+      }
+      releaseIdle()
     },
     active: () => [...controllers.keys()],
     idle: () =>

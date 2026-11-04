@@ -56,8 +56,17 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 帧入账要确认 run 仍在执行且轮次匹配；帧本身只写 run_events
       return ['runs']
     case 'run.receipt':
-      // 终态写 runs；阶段 run 还要判定阶段流转与下一轮进入效果（任务 / 阶段 / 智能体 / 运行时）
-      return ['runs', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
+      // 终态写 runs；阶段 run 还要判定阶段流转与下一轮进入效果（任务 / 阶段 / 智能体 / 运行时）；
+      // 聊天 run 终态要把续接会话 id 落回对话
+      return [
+        'runs',
+        'tasks',
+        'workflows',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+        'conversations',
+      ]
     case 'run.host_settled':
     case 'run.cancel':
       return ['runs']

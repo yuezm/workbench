@@ -37,7 +37,7 @@ export interface AiWorkflowIpcDeps {
   backendFor: (family: RuntimeProtocolFamily) => RuntimeBackend
   /**
    * 聊天写路径的变更通知：T14 前聊天仍直写旧表（不经事实），需要显式通知 UI；
-   * 其余写操作由 ffects.dispatch 统一通知。
+   * 其余写操作由 effects.dispatch 统一通知。
    */
   notifyChanged?: () => void
   /** 命令幂等键生成器（默认随机 UUID；测试可注入确定性值） */
@@ -57,6 +57,23 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
   const nextCommandId = deps.newCommandId ?? (() => randomUUID())
 
   const notify = (): void => deps.notifyChanged?.()
+
+  /**
+   * 删除前先取消执行中的 run（T15）：先 `run.cancel`（内核记 `cancel_requested`，
+   * 宿主按「abort → 宽限 → 强杀 → 兜底终态」收尾），再删任务/工作流——否则投影里
+   * run 直接消失，执行器进程会成为孤儿，看板也会残留「执行中」。
+   */
+  const cancelRunsOf = (taskIds: readonly string[]): void => {
+    for (const taskId of taskIds) {
+      for (const run of store.query('runs.active-by-task', { taskId })) {
+        try {
+          dispatch({ type: 'run.cancel', runId: run.id })
+        } catch {
+          // run 在查询与取消之间刚好结束：删除本身不因此失败（内核拒绝已终态的取消）
+        }
+      }
+    }
+  }
 
   const chat = (): ChatService => {
     if (!deps.chat) throw new Error('聊天服务未就绪')
@@ -181,7 +198,10 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
       return workflowById(store, id)
     },
     'workflows.remove': (a) => {
-      dispatch({ type: 'workflow.remove', commandId: nextCommandId(), id: a[0] as string })
+      const id = a[0] as string
+      // 先取消该工作流下所有执行中的 run，再删（删除会让它们在投影里直接消失）
+      cancelRunsOf(store.query('tasks.byWorkflow', { workflowId: id }).map((task) => task.id))
+      dispatch({ type: 'workflow.remove', commandId: nextCommandId(), id })
     },
 
     'tasks.list': (a) => store.query('tasks.byWorkflow', { workflowId: a[0] as string }),
@@ -212,7 +232,10 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
       return taskById(store, id)
     },
     'tasks.remove': (a) => {
-      dispatch({ type: 'task.remove', commandId: nextCommandId(), id: a[0] as string })
+      const id = a[0] as string
+      // 先取消任务上执行中的 run，再删（避免删除后进程成孤儿、看板残留「执行中」）
+      cancelRunsOf([id])
+      dispatch({ type: 'task.remove', commandId: nextCommandId(), id })
     },
 
     'runs.listByTask': (a) => repo.runsListByTask(a[0] as string),

@@ -28,6 +28,8 @@ export interface ProcessRegistry {
   attachPid(runId: string, pid: number): void
   /** 执行结束 / 兜底终态写入后删除 */
   remove(runId: string): void
+  /** 该 run 当前登记的子进程 pid（没有登记 / pid 尚未回填时返回 null）；取消强杀用 */
+  pidOf(runId: string): number | null
   /** 对账用：全部残留行（按 started_at、run_id 升序） */
   list(): ProcessRegistryRow[]
   /** 对账完成后清表（逐行处置之后调用） */
@@ -53,6 +55,11 @@ export function createProcessRegistry(db: DatabaseSync): ProcessRegistry {
     },
     remove(runId) {
       db.prepare('DELETE FROM process_registry WHERE run_id = ?').run(runId)
+    },
+    pidOf(runId) {
+      const row = db.prepare('SELECT pid FROM process_registry WHERE run_id = ?').get(runId) as
+        { pid: number | null } | undefined
+      return row?.pid ?? null
     },
     list() {
       const rows = db

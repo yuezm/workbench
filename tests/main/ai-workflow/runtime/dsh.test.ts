@@ -321,6 +321,19 @@ describe('probeDshRuntime', () => {
     expect(h.killedTrees.length).toBeGreaterThan(0)
   })
 
+  it('collect 收尾幂等：spawn 报错后再 close，finish 直接早退（T12b 覆盖率）', async () => {
+    const h = harness()
+    const probe = probeDshRuntime(
+      { command: NODE, profile: 'multica' },
+      depsOf(h, { timeouts: { version: 50, probe: 50 } }),
+    )
+    // spawn 失败已 finish（并清掉自身定时器）；随后 close 再 finish → 直接早退
+    h.children[0].fail(new Error('spawn 失败'))
+    h.children[0].close(null)
+
+    expect((await probe).state).toBe('unavailable')
+  })
+
   it('spawn 抛错：unavailable', async () => {
     const spawn: SpawnFn = () => {
       throw new Error('spawn EPERM')
@@ -779,6 +792,23 @@ describe('executeDshRun', () => {
     expect(outcome.errorCode).toBe('timeout')
     expect(outcome.error).toContain('超时')
     expect(outcome.exitCode).toBeNull()
+  })
+
+  it('超时已收尾后子进程才 close：finish 幂等（T12b 覆盖率）', async () => {
+    const h = harness()
+    const running = executeDshRun(
+      request({ timeoutMs: 5 }),
+      depsOf(h, { grace: { cancel: 5, kill: 5 } }),
+    )
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    await new Promise((resolve) => setTimeout(resolve, 12))
+    child.close(null)
+    const outcome = await running
+    expect(outcome.status).toBe('timeout')
+
+    // 已收尾后再 close：第二次 finish 直接早退
+    child.close(null)
   })
 
   it('进程已关闭后不再杀进程树', async () => {

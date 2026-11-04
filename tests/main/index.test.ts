@@ -111,6 +111,7 @@ const {
     wake: vi.fn(),
     start: vi.fn(),
     cancel: vi.fn(),
+    cancelAll: vi.fn(),
     active: vi.fn(() => []),
     idle: vi.fn(async () => undefined),
   }
@@ -557,10 +558,12 @@ describe('主进程入口装配', () => {
     expect(shellMock.openExternal).toHaveBeenCalledWith('https://example.com')
   })
 
-  it('before-quit 之后关窗不再拦截', async () => {
+  it('before-quit：关窗不再拦截，并对活跃 run best-effort 取消', async () => {
     await loadEntry()
 
     appHandler('before-quit')()
+    // 退出前取消活跃 run（T15）：不等待回执，直接 cancelAll
+    expect(schedulerMock.cancelAll).toHaveBeenCalledTimes(1)
     const event = { preventDefault: vi.fn() }
     windowHandler('close')(event)
     expect(event.preventDefault).not.toHaveBeenCalled()

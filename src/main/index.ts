@@ -27,6 +27,8 @@ import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api
 
 let quitting = false
 let win: BrowserWindow | null = null
+/** 装配完成后的调度器句柄：退出流程要 best-effort 取消活跃 run（T15）。 */
+let activeScheduler: Scheduler | null = null
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -144,6 +146,8 @@ if (app.requestSingleInstanceLock()) {
       lastFrameSeq: (runId) => aiRepo.runEventsList(runId).at(-1)?.seq ?? 0,
       registry,
     })
+    // 退出流程据此取消活跃 run（before-quit 在模块作用域，拿不到这里的局部变量）
+    activeScheduler = scheduler
     const chat = new ChatService({
       repo: aiRepo,
       backendFor,
@@ -193,6 +197,8 @@ if (app.requestSingleInstanceLock()) {
 
 app.on('before-quit', () => {
   quitting = true
+  // 退出前 best-effort 取消活跃 run：立即杀进程树并写取消终态，不等待回执（不阻塞退出）
+  activeScheduler?.cancelAll()
 })
 
 app.on('window-all-closed', () => {

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   Agent,
+  ChatConversation,
   Run,
   Runtime,
   RuntimeProbe,
@@ -148,7 +149,7 @@ function makeApi() {
       events: vi.fn(async () => []),
     },
     chat: {
-      listConversations: vi.fn(async () => []),
+      listConversations: vi.fn(async (): Promise<ChatConversation[]> => []),
       createConversation: vi.fn(),
       removeConversation: vi.fn(),
       listMessages: vi.fn(async () => []),
@@ -665,5 +666,53 @@ describe('AiWorkflowPage', () => {
     await user.click(await screen.findByRole('option', { name: '写作' }))
     expect(await screen.findByText(/工作流「写作」/)).toBeInTheDocument()
     expect(screen.getByRole('group', { name: '阶段：草稿' })).toBeInTheDocument()
+  })
+
+  it('聊天栏：新对话触发创建、删除对话触发移除（T12b 覆盖率）', async () => {
+    const api = makeApi()
+    api.chat.listConversations.mockResolvedValue([
+      {
+        id: 'c1',
+        title: '第一段对话',
+        agentId: 'a1',
+        sessionId: null,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ])
+    install(api)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    await user.click(await screen.findByRole('button', { name: '新对话' }))
+    expect(api.chat.createConversation).toHaveBeenCalledTimes(1)
+
+    await user.click(await screen.findByRole('button', { name: '删除对话 第一段对话' }))
+    expect(api.chat.removeConversation).toHaveBeenCalledWith('c1')
+  })
+
+  it('聊天栏：发送中「停止」触发取消（T12b 覆盖率）', async () => {
+    const api = makeApi()
+    api.chat.listConversations.mockResolvedValue([
+      {
+        id: 'c1',
+        title: '第一段对话',
+        agentId: 'a1',
+        sessionId: null,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ])
+    // 发送挂起：保持 sending=true，「停止」按钮出现
+    api.chat.send.mockImplementation(() => new Promise<void>(() => {}))
+    install(api)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    await user.type(await screen.findByLabelText('消息输入'), '你好')
+    await user.click(screen.getByRole('button', { name: '发送' }))
+    await user.click(await screen.findByRole('button', { name: '停止' }))
+
+    expect(api.chat.cancel).toHaveBeenCalledWith('c1')
   })
 })

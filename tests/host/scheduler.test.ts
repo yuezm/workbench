@@ -35,22 +35,62 @@ const nextCommandId = (): string => {
 
 const usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
-/** 假定时器：记录 interval 回调，测试手动触发心跳；不真的挂系统定时器。 */
-function fakeTimer(): SchedulerTimer & { handlers: Array<() => void>; cleared: number } {
+interface FakeTimeout {
+  callback: () => void
+  delayMs: number
+  cancelled: boolean
+}
+
+interface FakeTimer extends SchedulerTimer {
+  handlers: Array<() => void>
+  /** 心跳 interval 被清理次数 */
+  readonly cleared: number
+  /** 帧窗口 timeout 被清理次数 */
+  readonly clearedTimeouts: number
+  /** 触发所有未取消的帧窗口定时器（模拟时间窗到点） */
+  fireTimeouts(): void
+  /** 尚未触发的帧窗口定时器 */
+  pendingTimeouts(): FakeTimeout[]
+}
+
+/** 假定时器：记录 interval 回调（测试手动触发心跳）与帧窗口 timeout（手动推进）。 */
+function fakeTimer(): FakeTimer {
   const handlers: Array<() => void> = []
-  const state = { cleared: 0 }
+  const timeouts: FakeTimeout[] = []
+  let cleared = 0
+  let clearedTimeouts = 0
   return {
     handlers,
     get cleared() {
-      return state.cleared
+      return cleared
+    },
+    get clearedTimeouts() {
+      return clearedTimeouts
     },
     setInterval: (callback) => {
       handlers.push(callback)
       return { handle: handlers.length - 1 }
     },
     clearInterval: () => {
-      state.cleared += 1
+      cleared += 1
     },
+    setTimeout: (callback, delayMs) => {
+      const entry: FakeTimeout = { callback, delayMs, cancelled: false }
+      timeouts.push(entry)
+      return entry
+    },
+    clearTimeout: (handle) => {
+      const entry = handle as FakeTimeout
+      if (!entry.cancelled) {
+        entry.cancelled = true
+        clearedTimeouts += 1
+      }
+    },
+    fireTimeouts: () => {
+      const pending = timeouts.splice(0).filter((entry) => !entry.cancelled)
+      for (const entry of pending) entry.callback()
+    },
+    pendingTimeouts: () => timeouts.filter((entry) => !entry.cancelled),
   }
 }
 
@@ -199,6 +239,62 @@ const eventRows = (runId: string): Array<Record<string, unknown>> =>
     .prepare('SELECT * FROM run_events WHERE run_id = ? ORDER BY seq')
     .all(runId) as unknown as Array<Record<string, unknown>>
 
+/** 事实日志里的类型序列（断言帧/回执/终态的事实先后）。 */
+const factTypes = (): string[] =>
+  (
+    world.db.prepare('SELECT type FROM facts ORDER BY seq').all() as unknown as Array<{
+      type: string
+    }>
+  ).map((row) => row.type)
+
+interface FrameFact {
+  seq: number
+  runId: string
+  turn: number
+  frames: Array<Record<string, unknown>>
+}
+
+/** `run.frames` 事实（按事实 seq 升序），payload 反序列化后返回。 */
+const frameFacts = (runId?: string): FrameFact[] =>
+  (
+    world.db
+      .prepare("SELECT seq, payload FROM facts WHERE type = 'run.frames' ORDER BY seq")
+      .all() as unknown as Array<{
+      seq: number
+      payload: string
+    }>
+  )
+    .map((row) => {
+      const payload = JSON.parse(row.payload) as {
+        runId: string
+        turn: number
+        frames: Array<Record<string, unknown>>
+      }
+      return { seq: row.seq, ...payload }
+    })
+    .filter((fact) => runId === undefined || fact.runId === runId)
+
+/** 某人 run 已写的最大帧 seq（模拟装配根注入的 `lastFrameSeq`）。 */
+const maxFrameSeq = (runId: string): number =>
+  (
+    world.db
+      .prepare('SELECT COALESCE(MAX(seq), 0) AS n FROM run_events WHERE run_id = ?')
+      .get(runId) as unknown as { n: number }
+  ).n
+
+/** 执行中按 turn 发起一次执行（测试跨 turn 的 seq 连续性用）。 */
+const claimedRow = (runId: string): RunRow => {
+  const row = runById(runId)
+  if (!row) throw new Error('缺少 run 行')
+  return {
+    id: String(row.id),
+    runtimeId: row.runtime_id === null ? null : String(row.runtime_id),
+    leaseId: row.lease_id === null ? null : String(row.lease_id),
+    turn: Number(row.turn),
+    status: row.status as RunRow['status'],
+  } as unknown as RunRow
+}
+
 const runStatuses = (taskId: string): string[] =>
   (
     world.db
@@ -221,7 +317,10 @@ beforeEach(() => {
   world = { db, store }
 })
 
-afterEach(() => world.db.close())
+afterEach(() => {
+  vi.useRealTimers()
+  world.db.close()
+})
 
 describe('createScheduler：执行一轮', () => {
   it('成功：run 全字段落库、任务推进到下一阶段', async () => {
@@ -765,5 +864,317 @@ describe('createScheduler：防御性分支', () => {
 
     expect(execute).toHaveBeenCalledTimes(1)
     expect(timer.handlers).toHaveLength(0)
+  })
+})
+
+describe('createScheduler：帧批量入账（T12）', () => {
+  it('运行中按时间窗 flush：16ms 到点写 run.frames，不必等终态', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const timer = fakeTimer()
+    const scheduler = makeScheduler(
+      portOf(async (turn, io) => {
+        io.emit({ seq: 1, type: 'text', text: 'a' })
+        io.emit({ seq: 2, type: 'text', text: 'b' })
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    // 还没到时间窗：帧只在缓冲里，没有写事实
+    expect(eventRows(seeded.runId)).toHaveLength(0)
+    expect(timer.pendingTimeouts().map((entry) => entry.delayMs)).toEqual([16])
+
+    timer.fireTimeouts()
+
+    // 窗口到点即入账；此时 run 仍在执行
+    expect(eventRows(seeded.runId).map((row) => row.seq)).toEqual([1, 2])
+    expect(runById(seeded.runId)?.status).toBe('running')
+
+    gate.resolve()
+    await scheduler.idle()
+    expect(runById(seeded.runId)?.status).toBe('succeeded')
+    expect(timer.pendingTimeouts()).toEqual([])
+  })
+
+  it('缓冲达到 maxFramesPerBatch 立即 flush，不等时间窗', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const timer = fakeTimer()
+    const scheduler = makeScheduler(
+      portOf(async (turn, io) => {
+        io.emit({ seq: 1, type: 'text', text: 'a' })
+        io.emit({ seq: 2, type: 'text', text: 'b' })
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer, limits: { heartbeatMs: 1_000, runTimeoutMs: 10_000, maxFramesPerBatch: 2 } },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+
+    expect(eventRows(seeded.runId).map((row) => row.seq)).toEqual([1, 2])
+    // 满批 flush 时把挂着的窗口定时器也清掉，避免多余的空 flush
+    expect(timer.pendingTimeouts()).toEqual([])
+
+    gate.resolve()
+    await scheduler.idle()
+    expect(eventRows(seeded.runId)).toHaveLength(2)
+  })
+
+  it('超过单批上限：分包成多条 run.frames，帧数与顺序不丢（D7）', async () => {
+    const seeded = seed()
+    const total = 501
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        // 执行器本地 seq 全是同一个值：宿主必须丢弃、按到达顺序重新分配
+        for (let index = 0; index < total; index += 1) {
+          io.emit({ seq: 999, type: 'text', text: `f${index}` })
+        }
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const facts = frameFacts(seeded.runId)
+    expect(facts.map((fact) => fact.frames.length)).toEqual([500, 1])
+    expect(facts.every((fact) => fact.frames.length <= 500)).toBe(true)
+
+    const rows = eventRows(seeded.runId)
+    expect(rows.map((row) => row.seq)).toEqual(Array.from({ length: total }, (_, i) => i + 1))
+    expect(
+      rows.map((row) => (JSON.parse(String(row.payload_json)) as { text: string }).text),
+    ).toEqual(Array.from({ length: total }, (_, index) => `f${index}`))
+  })
+
+  it('终态前 flush 剩余帧：run.frames 事实先于终态事实', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        io.emit({ seq: 1, type: 'text', text: 'a' })
+        io.emit({ seq: 2, type: 'status', status: 'running' })
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const lifecycle = factTypes().filter((type) =>
+      ['run.frames', 'run.succeeded', 'run.failed', 'run.cancelled'].includes(type),
+    )
+    expect(lifecycle).toEqual(['run.frames', 'run.succeeded'])
+    expect(eventRows(seeded.runId).map((row) => row.seq)).toEqual([1, 2])
+  })
+
+  it('终态后不再接受帧：迟到的 emit 不写 run_events / 事实', async () => {
+    const seeded = seed()
+    let captured: ExecutorIO | null = null
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        captured = io
+        io.emit({ seq: 1, type: 'text', text: 'a' })
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+    const eventsBefore = eventRows(seeded.runId)
+    const factsBefore = factTypes().length
+
+    ;(captured as unknown as ExecutorIO).emit({ seq: 2, type: 'text', text: 'late' })
+
+    expect(eventRows(seeded.runId)).toEqual(eventsBefore)
+    expect(factTypes()).toHaveLength(factsBefore)
+  })
+
+  it('seq 跨批 / 跨 turn 全局单调：起始 = 已有最大 seq + 1，执行器本地 seq 丢弃', async () => {
+    const seeded = seed()
+    world.store.dispatch({ type: 'run.claim', runtimeId: seeded.runtime.id, capacity: 1 })
+    const row = claimedRow(seeded.runId)
+    let round = 0
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        round += 1
+        for (let index = 0; index < 4; index += 1) {
+          io.emit({ seq: index + 1, type: 'text', text: `r${round}-${index}` })
+        }
+        return receiptOf(turn)
+      }),
+      {
+        limits: { heartbeatMs: 1_000, runTimeoutMs: 10_000, maxFramesPerBatch: 2 },
+        lastFrameSeq: maxFrameSeq,
+      },
+    )
+
+    // 第一轮（turn 1）：两批（2 + 2），seq 1–4
+    scheduler.start(row)
+    await scheduler.idle()
+
+    // 模拟 waiting 回答后续接（T6 的重置路径）：同一 run 回到 running、turn 2，
+    // 再交给调度器执行；本轮执行器本地 seq 又从 1 开始，宿主必须接着编号。
+    world.db
+      .prepare("UPDATE runs SET status = 'running', turn = 2, lease_id = ? WHERE id = ?")
+      .run(`${seeded.runId}:2`, seeded.runId)
+    scheduler.start({ ...row, turn: 2, leaseId: `${seeded.runId}:2` })
+    await scheduler.idle()
+
+    const rows = eventRows(seeded.runId)
+    expect(rows.map((row) => row.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+    expect(
+      rows.map((row) => (JSON.parse(String(row.payload_json)) as { text: string }).text),
+    ).toEqual(['r1-0', 'r1-1', 'r1-2', 'r1-3', 'r2-0', 'r2-1', 'r2-2', 'r2-3'])
+  })
+
+  it('结束后清理帧窗口定时器：无待触发回调，心跳 interval 只清一次', async () => {
+    seed()
+    const gate = deferred()
+    const timer = fakeTimer()
+    const scheduler = makeScheduler(
+      portOf(async (turn, io) => {
+        io.emit({ seq: 1, type: 'text', text: 'a' })
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    expect(timer.pendingTimeouts()).toHaveLength(1)
+
+    gate.resolve()
+    await scheduler.idle()
+
+    expect(timer.pendingTimeouts()).toEqual([])
+    expect(timer.clearedTimeouts).toBe(1)
+    expect(timer.cleared).toBe(1)
+  })
+
+  it('rebuild 后 run_events 与实时写入逐行全等（多批帧 + 终态）', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        for (let index = 0; index < 5; index += 1) {
+          io.emit({ seq: 1, type: 'text', text: `f${index}` })
+        }
+        return receiptOf(turn)
+      }),
+      { limits: { heartbeatMs: 1_000, runTimeoutMs: 10_000, maxFramesPerBatch: 2 } },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const selectEvents =
+      'SELECT run_id, seq, type, payload_json, created_at FROM run_events ORDER BY run_id, seq'
+    const before = world.db.prepare(selectEvents).all()
+    expect(frameFacts(seeded.runId)).toHaveLength(3)
+
+    world.store.rebuild()
+
+    expect(world.db.prepare(selectEvents).all()).toEqual(before)
+    expect(world.store.query('runs.active-by-task', { taskId: seeded.task.id })).toEqual([])
+  })
+})
+
+describe('createScheduler：默认定时器与帧窗口收尾（T12b）', () => {
+  it('不注入 timer：默认 systemTimer 按 16ms 窗口 flush，终态前清掉待触发窗口', async () => {
+    vi.useFakeTimers()
+    const seeded = seed()
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn, io) => {
+        io.emit({ seq: 1, type: 'text', text: 'a' })
+        io.emit({ seq: 2, type: 'text', text: 'b' })
+        await gate.promise
+        // 窗口 flush 之后再来的帧：终态前要清掉新挂的窗口定时器（默认 clearTimeout）
+        io.emit({ seq: 3, type: 'text', text: 'c' })
+        return receiptOf(turn)
+      }),
+      { timer: undefined },
+    )
+
+    scheduler.wake()
+    await vi.advanceTimersByTimeAsync(0)
+    // 还没到时间窗：帧只在缓冲里
+    expect(eventRows(seeded.runId)).toHaveLength(0)
+
+    vi.advanceTimersByTime(15)
+    expect(eventRows(seeded.runId)).toHaveLength(0)
+
+    vi.advanceTimersByTime(1)
+    expect(eventRows(seeded.runId).map((row) => row.seq)).toEqual([1, 2])
+    expect(runById(seeded.runId)?.status).toBe('running')
+
+    gate.resolve()
+    await scheduler.idle()
+
+    expect(eventRows(seeded.runId).map((row) => row.seq)).toEqual([1, 2, 3])
+    expect(runById(seeded.runId)?.status).toBe('succeeded')
+    // 心跳 interval 与帧窗口 timeout 都已清理
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('注入 timer 缺 clearTimeout：窗口清理回退系统 clearTimeout，帧不丢', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const timer: SchedulerTimer = {
+      setInterval: () => 0,
+      clearInterval: () => {},
+      setTimeout: () => 1,
+    }
+    const scheduler = makeScheduler(
+      portOf(async (turn, io) => {
+        io.emit({ seq: 1, type: 'text', text: 'a' })
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    expect(eventRows(seeded.runId)).toHaveLength(0)
+
+    gate.resolve()
+    await scheduler.idle()
+
+    expect(eventRows(seeded.runId).map((row) => row.seq)).toEqual([1])
+    expect(runById(seeded.runId)?.status).toBe('succeeded')
+  })
+
+  it('未注入登记表：取消宽限到期 pidOf 走缺省 null，强杀后写 cancelled', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const timer = fakeTimer()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    scheduler.cancel(seeded.runId)
+    // 宽限到期：缺省登记表 pidOf 返回 null → 不杀进程，挂强杀等待
+    timer.fireTimeouts()
+    expect(runById(seeded.runId)?.status).toBe('running')
+    // 强杀等待到期：宿主写兜底 cancelled
+    timer.fireTimeouts()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)?.status).toBe('cancelled')
+    expect(runById(seeded.runId)?.error_code).toBe('cancelled')
+    gate.resolve()
   })
 })

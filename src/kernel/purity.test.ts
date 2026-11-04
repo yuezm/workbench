@@ -99,6 +99,8 @@ const violationsOf = (file: string, source: string): string[] => {
 describe('kernel 纯度', () => {
   it('不出现宿主/Node 能力、时钟、随机数、网络与跨层依赖', () => {
     const files = kernelSources()
+    expect(files.length, 'kernel 至少要有 1 个源文件，否则护栏空转').toBeGreaterThan(0)
+
     const violations = files.flatMap((file) =>
       violationsOf(toPosix(relative(KERNEL_ROOT, file)), readFileSync(file, 'utf8')),
     )

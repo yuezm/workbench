@@ -9,7 +9,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import type { Command } from '../../protocol/commands'
+import type { Input } from '../../protocol/inputs'
 import type { ViewId, ViewParams, ViewResult } from '../../protocol/views'
 import type {
   Environment,
@@ -21,7 +21,7 @@ import type {
   Limits,
   Seq,
 } from '../../kernel/types'
-import { validateCommand } from '../../protocol/validate'
+import { validateInput } from '../../protocol/validate'
 import { withTx } from '../schema'
 import { lastSeq, appendFacts, factsCount, factsSince } from './facts'
 import { createProjectionWriter, type ProjectionWrite } from './projection-apply'
@@ -87,6 +87,11 @@ export interface Store {
   rebuild(): void
   factsSince(seq: Seq): Fact[]
   factsCount(): number
+  /**
+   * 下一次内核唤醒时刻（宿主唯一定时器用）：按 `clock.tick` 的 viewSpec 装载视图，
+   * 交给注入的 `kernel.nextWakeAt`；kernel 未提供该能力时返回 null（时钟不排期）。
+   */
+  nextWakeAt(now: Iso): Iso | null
 }
 
 const systemTimezone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -112,7 +117,7 @@ export function createStore(options: StoreOptions): Store {
   })
 
   /** 单次尝试：装载 → 决策 → 单事务写入；序号冲突抛 `SeqConflictError` 交给 dispatch 重试。 */
-  const attemptDispatch = (command: Command): DispatchResult => {
+  const attemptDispatch = (command: Input): DispatchResult => {
     const view = loadView(db, kernel.viewSpec(command))
     const decision = kernel.decide(view, command, now(), environment())
     if (decision.reject) throw new StoreError(decision.reject.code, decision.reject.message)
@@ -137,14 +142,14 @@ export function createStore(options: StoreOptions): Store {
   }
 
   const dispatch = (input: unknown): DispatchResult => {
-    const validated = validateCommand(input)
+    const validated = validateInput(input)
     if (!validated.ok) throw new StoreError('invalid_input', validated.message)
     try {
-      return attemptDispatch(validated.command)
+      return attemptDispatch(validated.input)
     } catch (error) {
       if (!(error instanceof SeqConflictError)) throw error
       try {
-        return attemptDispatch(validated.command)
+        return attemptDispatch(validated.input)
       } catch (retryError) {
         if (retryError instanceof SeqConflictError) {
           throw new StoreError('conflict', '事实日志序号冲突，请重试')
@@ -164,5 +169,10 @@ export function createStore(options: StoreOptions): Store {
     rebuild: () => rebuildProjection(db, kernel),
     factsSince: (seq) => factsSince(db, seq),
     factsCount: () => factsCount(db),
+    nextWakeAt: (at) => {
+      if (!kernel.nextWakeAt) return null
+      const view = loadView(db, kernel.viewSpec({ type: 'clock.tick' }))
+      return kernel.nextWakeAt(view, at, environment())
+    },
   }
 }

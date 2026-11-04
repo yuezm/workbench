@@ -146,15 +146,18 @@ export interface Decision {
 }
 
 /**
- * 宿主侧内核门面：store 只依赖这三个函数，不直连具体实现。
+ * 宿主侧内核门面：store 只依赖这三个函数（+ 可选的 `nextWakeAt`），不直连具体实现。
  *
- * 参数写成方法签名（而非函数属性）：M2 期间 `decide` 的实现仍只认 `Command`
- * （`run.*` / `clock.tick` / `conversation.*` 的决策随 T5–T7 补齐），方法签名的
- * 双变参数检查让现有实现可以先挂上来；契约（入参 `Input`）以这里为准，
- * 实现补齐后把 `decide` 的入参一起放宽即可，调用方不变。
+ * 参数写成方法签名（而非函数属性）：宿主注入的 `decide` / `viewSpec` 实现可以按
+ * `Input` 收窄检查；调用方（store / clock）只依赖这里的契约。
  */
 export interface KernelPort {
   decide(view: View, input: Input, now: Iso, env: Environment): Decision
   project(fact: Fact): Change[]
   viewSpec(input: Input): ProjectionTable[]
+  /**
+   * 下一次唤醒时刻（可选）：宿主时钟按它排唯一定时器。
+   * 未注入时 `Store.nextWakeAt` 返回 null（时钟不排期），便于过渡期只装 decide/project/viewSpec。
+   */
+  nextWakeAt?(view: View, now: Iso, env: Environment): Iso | null
 }

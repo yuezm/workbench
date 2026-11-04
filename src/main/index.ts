@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { decide } from '../kernel/decide'
+import { nextWakeAt } from '../kernel/next-wake'
 import { project } from '../kernel/project'
 import { viewSpec } from '../kernel/view-spec'
 import type { KernelPort } from '../kernel/types'
@@ -80,8 +81,8 @@ if (app.requestSingleInstanceLock()) {
     }
     const userData = app.getPath('userData')
     const db = openDb(path.join(userData, 'ai-workflow.db'))
-    // 内核门面：decide / project / viewSpec 是纯函数，store 只依赖这个端口。
-    const kernel: KernelPort = { decide, project, viewSpec }
+    // 内核门面：decide / project / viewSpec / nextWakeAt 是纯函数，store 与 clock 只依赖这个端口。
+    const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
     const store = createStore({ db, kernel })
     // 启动顺序：先把 v2 存量导成事实导入根，再对账投影（指纹失配/seq 落后则从事实重建）。
     // 先导入更安全：空事实 + 存量投影时不会因为指纹失配把存量当投影清掉。

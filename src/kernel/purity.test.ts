@@ -46,18 +46,85 @@ const toPosix = (p: string): string => p.split(sep).join('/')
 
 const lineOf = (text: string, index: number): number => text.slice(0, index).split('\n').length
 
-const blank = (text: string): string => text.replace(/[^\n]/g, ' ')
+interface Stripped {
+  /** 注释已移除、字符串保留：用来找 import 路径（路径本身就是字符串）。 */
+  withoutComments: string
+  /** 注释与字符串都已移除：用来找禁用符号。 */
+  withoutStrings: string
+}
 
-/** 去掉注释；字符串保留，因为 import 路径本身就是字符串。 */
-const stripComments = (code: string): string =>
-  code.replace(/\/\*[\s\S]*?\*\//g, blank).replace(/\/\/[^\n]*/g, blank)
+/**
+ * 单次扫描剥离注释与字面量。必须一遍扫完：先按行剥注释会把字符串里的 `//`
+ *（URL 之类）当成注释，把同一行后面的代码一起吞掉，造成漏报。
+ * 替换只填空格、保留换行，所以行号不偏移；模板字符串整体按字符串处理。
+ */
+const strip = (code: string): Stripped => {
+  const withoutComments: string[] = []
+  const withoutStrings: string[] = []
+  const keep = (ch: string): void => {
+    withoutComments.push(ch)
+    withoutStrings.push(ch)
+  }
+  const mask = (ch: string): void => {
+    withoutComments.push(ch === '\n' ? '\n' : ' ')
+    withoutStrings.push(ch === '\n' ? '\n' : ' ')
+  }
 
-/** 再去掉字符串与模板字面量，只留可执行代码（行号不因替换而偏移）。 */
-const stripLiterals = (code: string): string =>
-  stripComments(code)
-    .replace(/'(?:\\.|[^'\\\n])*'/g, blank)
-    .replace(/"(?:\\.|[^"\\\n])*"/g, blank)
-    .replace(/`(?:\\.|[^`\\])*`/g, blank)
+  let i = 0
+  while (i < code.length) {
+    const ch = code[i]
+
+    if (ch === '/' && code[i + 1] === '/') {
+      while (i < code.length && code[i] !== '\n') {
+        mask(code[i])
+        i += 1
+      }
+      continue
+    }
+
+    if (ch === '/' && code[i + 1] === '*') {
+      mask(code[i])
+      mask(code[i + 1])
+      i += 2
+      while (i < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
+        mask(code[i])
+        i += 1
+      }
+      if (i < code.length) {
+        mask(code[i])
+        mask(code[i + 1])
+        i += 2
+      }
+      continue
+    }
+
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch
+      withoutComments.push(ch)
+      withoutStrings.push(' ')
+      i += 1
+      while (i < code.length) {
+        const current = code[i]
+        if (current === '\\' && i + 1 < code.length) {
+          withoutComments.push(current, code[i + 1])
+          withoutStrings.push(' ', code[i + 1] === '\n' ? '\n' : ' ')
+          i += 2
+          continue
+        }
+        withoutComments.push(current)
+        withoutStrings.push(current === '\n' ? '\n' : ' ')
+        i += 1
+        if (current === quote) break
+      }
+      continue
+    }
+
+    keep(code[i])
+    i += 1
+  }
+
+  return { withoutComments: withoutComments.join(''), withoutStrings: withoutStrings.join('') }
+}
 
 const importsOf = (code: string): Array<{ specifier: string; index: number }> => {
   const found: Array<{ specifier: string; index: number }> = []
@@ -72,11 +139,11 @@ const importsOf = (code: string): Array<{ specifier: string; index: number }> =>
 }
 
 const violationsOf = (file: string, source: string): string[] => {
-  const code = stripComments(source)
+  const { withoutComments, withoutStrings } = strip(source)
   const found: string[] = []
 
-  for (const { specifier, index } of importsOf(code)) {
-    const at = `${file}:${lineOf(code, index)}`
+  for (const { specifier, index } of importsOf(withoutComments)) {
+    const at = `${file}:${lineOf(withoutComments, index)}`
     if (FORBIDDEN_MODULES.includes(specifier)) {
       found.push(`${at} 禁止 import「${specifier}」`)
       continue
@@ -86,10 +153,9 @@ const violationsOf = (file: string, source: string): string[] => {
     if (hit) found.push(`${at} 禁止跨层 import「${specifier}」（只允许 src/protocol）`)
   }
 
-  const symbols = stripLiterals(code)
   for (const { pattern, label } of FORBIDDEN_PATTERNS) {
-    for (const match of symbols.matchAll(pattern)) {
-      found.push(`${file}:${lineOf(symbols, match.index ?? 0)} 禁止使用 ${label}`)
+    for (const match of withoutStrings.matchAll(pattern)) {
+      found.push(`${file}:${lineOf(withoutStrings, match.index ?? 0)} 禁止使用 ${label}`)
     }
   }
 
@@ -135,5 +201,11 @@ describe('kernel 纯度', () => {
     ].join('\n')
 
     expect(violationsOf('clean.ts', clean)).toEqual([])
+  })
+
+  it('字符串里的 // 不会吞掉同一行后面的违规', () => {
+    const masked = "const url = 'https://example.com'; export const now = (): number => Date.now()"
+
+    expect(violationsOf('masked.ts', masked)).toEqual(['masked.ts:1 禁止使用 Date.now()'])
   })
 })

@@ -50,57 +50,73 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  // Windows 通知归属需要 AppUserModelId
-  app.setAppUserModelId('com.workbench.desktop')
-  registerIpcHandlers()
-
-  // ai-workflow：打开本地 SQLite，注册 RPC 与运行队列；变更广播给所有窗口
-  const broadcastChanged = (): void => {
-    for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
-  }
-  const userData = app.getPath('userData')
-  const aiRepo = new Repository(openDb(path.join(userData, 'ai-workflow.db')))
-  // 协议后端：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
-  // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。
-  const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
-  mkdirSync(sessionsDir, { recursive: true })
-  const runtimeDeps = { sessionRoot: sessionsDir }
-  const backendFor = (family: RuntimeProtocolFamily): RuntimeBackend =>
-    createRuntimeBackend(family, runtimeDeps)
-  const runner = new Runner({ repo: aiRepo, notifyChanged: broadcastChanged, backendFor })
-  const chat = new ChatService({
-    repo: aiRepo,
-    backendFor,
-    emit: (event) => {
-      for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHAT, event)
-    },
-  })
-  registerAiWorkflowIpc({
-    repo: aiRepo,
-    notifyChanged: broadcastChanged,
-    onQueue: (runId) => runner.enqueue(runId),
-    chat,
-    backendFor,
-  })
-  runner.resumeQueued()
-
-  createWindow()
-
-  const trayIconDir = app.isPackaged
-    ? process.resourcesPath
-    : path.join(app.getAppPath(), 'resources')
-  createTray(trayIconDir, () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+// 单实例：锁必须在 whenReady 之前判断。已有实例在跑时，本进程直接退出，
+// 不建窗口、不注册托盘、不开库、不注册 IPC，全部装配都留给第一个实例。
+if (app.requestSingleInstanceLock()) {
+  // 第二次启动：已有窗口就唤到前台，窗口全关了则重建
+  app.on('second-instance', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+      return
+    }
     win?.show()
     win?.focus()
   })
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    else win?.show()
+  app.whenReady().then(() => {
+    // Windows 通知归属需要 AppUserModelId
+    app.setAppUserModelId('com.workbench.desktop')
+    registerIpcHandlers()
+
+    // ai-workflow：打开本地 SQLite，注册 RPC 与运行队列；变更广播给所有窗口
+    const broadcastChanged = (): void => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
+    }
+    const userData = app.getPath('userData')
+    const aiRepo = new Repository(openDb(path.join(userData, 'ai-workflow.db')))
+    // 协议后端：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
+    // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。
+    const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
+    mkdirSync(sessionsDir, { recursive: true })
+    const runtimeDeps = { sessionRoot: sessionsDir }
+    const backendFor = (family: RuntimeProtocolFamily): RuntimeBackend =>
+      createRuntimeBackend(family, runtimeDeps)
+    const runner = new Runner({ repo: aiRepo, notifyChanged: broadcastChanged, backendFor })
+    const chat = new ChatService({
+      repo: aiRepo,
+      backendFor,
+      emit: (event) => {
+        for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHAT, event)
+      },
+    })
+    registerAiWorkflowIpc({
+      repo: aiRepo,
+      notifyChanged: broadcastChanged,
+      onQueue: (runId) => runner.enqueue(runId),
+      chat,
+      backendFor,
+    })
+    runner.resumeQueued()
+
+    createWindow()
+
+    const trayIconDir = app.isPackaged
+      ? process.resourcesPath
+      : path.join(app.getAppPath(), 'resources')
+    createTray(trayIconDir, () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      win?.show()
+      win?.focus()
+    })
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      else win?.show()
+    })
   })
-})
+} else {
+  app.quit()
+}
 
 app.on('before-quit', () => {
   quitting = true

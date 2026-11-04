@@ -78,6 +78,7 @@ const {
       whenReady: vi.fn(async () => undefined),
       setAppUserModelId: vi.fn(),
       getPath: vi.fn(() => '/tmp/workbench-entry-test'),
+      requestSingleInstanceLock: vi.fn(() => true),
       on: vi.fn(),
       quit: vi.fn(),
       isPackaged: false,
@@ -114,9 +115,13 @@ vi.mock('./ai-workflow/repository', () => ({ Repository: RepositoryImpl }))
 vi.mock('./ai-workflow/runner', () => ({ Runner: RunnerImpl }))
 
 /** 入口是单例：每个用例重新加载一次，各自触发启动装配 */
-async function loadEntry(): Promise<void> {
+async function importEntry(): Promise<void> {
   vi.resetModules()
   await import('./index')
+}
+
+async function loadEntry(): Promise<void> {
+  await importEntry()
   await vi.waitFor(() => expect(registerAiWorkflowIpcMock).toHaveBeenCalled())
 }
 
@@ -182,6 +187,45 @@ describe('主进程入口装配', () => {
     expect(typeof backend.probe).toBe('function')
     expect(typeof backend.models).toBe('function')
     expect(typeof backend.execute).toBe('function')
+  })
+
+  it('拿到单实例锁：不退出，正常装配窗口与 IPC', async () => {
+    await loadEntry()
+
+    expect(appMock.requestSingleInstanceLock).toHaveBeenCalledTimes(1)
+    expect(appMock.quit).not.toHaveBeenCalled()
+    expect(windows).toHaveLength(1)
+    expect(registerIpcHandlersMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('未拿到单实例锁：立即退出，不装配窗口/托盘/数据库/IPC', async () => {
+    appMock.requestSingleInstanceLock.mockReturnValueOnce(false)
+    await importEntry()
+
+    expect(appMock.quit).toHaveBeenCalledTimes(1)
+    expect(appMock.whenReady).not.toHaveBeenCalled()
+    expect(appMock.on).not.toHaveBeenCalledWith('second-instance', expect.any(Function))
+    expect(registerIpcHandlersMock).not.toHaveBeenCalled()
+    expect(registerAiWorkflowIpcMock).not.toHaveBeenCalled()
+    expect(createTrayMock).not.toHaveBeenCalled()
+    expect(openDbMock).not.toHaveBeenCalled()
+    expect(RepositoryMock).not.toHaveBeenCalled()
+    expect(ChatServiceMock).not.toHaveBeenCalled()
+    expect(RunnerMock).not.toHaveBeenCalled()
+    expect(windows).toHaveLength(0)
+  })
+
+  it('second-instance：有窗口时唤出，窗口都没了则重建', async () => {
+    await loadEntry()
+    const secondInstance = appHandler('second-instance')
+
+    secondInstance()
+    expect(windows[0].show).toHaveBeenCalledTimes(1)
+    expect(windows[0].focus).toHaveBeenCalledTimes(1)
+
+    windows.length = 0
+    secondInstance()
+    expect(windows).toHaveLength(1)
   })
 
   it('开发服务器地址存在时加载 URL', async () => {

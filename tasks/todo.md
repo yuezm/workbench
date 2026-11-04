@@ -11,19 +11,20 @@
 
 **验收标准：**
 
-- [ ] `src/protocol/types.ts` 只做类型转发（`Task`、`WorkflowStage`、`WorkflowWithStages`、`StageInput` 来自 `src/shared/ai-workflow-api`），无运行时代码
-- [ ] ESLint 对 `src/kernel/**` 禁 `electron`、`node:*`、`fs`、`path`、`os`、`child_process`、`crypto`、`**/shared/**`、`**/main/**`、`src/host`、`src/plugins`、`src/renderer`，只放行 `**/protocol/**`；`Date.now`、`Math.random` 用属性限制规则；`src/kernel/**/*.test.ts` 覆写为放开 import 限制（测试要读盘）
-- [ ] `src/kernel/purity.test.ts` 扫描 `src/kernel/**/*.ts`（排除 `*.test.ts`），命中 `electron`、`node:fs`、`node:child_process`、`node:http`、`fetch`、`Date.now(`、`Math.random(`、`randomUUID(` 任一即失败，并报出文件与行号；结果里打印扫描到的文件数
-- [ ] `tsconfig.node.json` 与 `tsconfig.web.json` 的 include 都含 `src/kernel/**/*` 与 `src/protocol/**/*`（两个工程都是 `composite`，漏配会报 TS6307）
+- [x] `src/protocol/types.ts` 只做类型转发（`Task`、`WorkflowStage`、`WorkflowWithStages`、`StageInput` 来自 `src/shared/ai-workflow-api`），无运行时代码
+- [x] ESLint 对 `src/kernel/**` 禁 `electron`、`node:*`、`fs`、`path`、`os`、`child_process`、`crypto`、`**/shared/**`、`**/main/**`、`src/host`、`src/plugins`、`src/renderer`，只放行 `**/protocol/**`；`Date.now`、`Math.random` 用属性限制规则；`src/kernel/**/*.test.ts` 覆写为放开 import 限制（测试要读盘）
+- [x] `src/kernel/purity.test.ts` 扫描 `src/kernel/**/*.ts`（排除 `*.test.ts`），命中 `electron`、`node:fs`、`node:child_process`、`node:http`、`fetch`、`Date.now(`、`Math.random(`、`randomUUID(` 任一即失败，并报出文件与行号；结果里打印扫描到的文件数
+- [x] `tsconfig.node.json` 与 `tsconfig.web.json` 的 include 都含 `src/kernel/**/*` 与 `src/protocol/**/*`（两个工程都是 `composite`，漏配会报 TS6307）
 
 **验证：**
 
-- [ ] `pnpm typecheck`、`pnpm lint`、`pnpm test src/kernel` 全绿
-- [ ] 反向验证（一次性，不提交）：临时建 `src/kernel/probe.ts` 写 `Math.random()`，并临时 import shared 类型 → 纯度测试与 lint 都必须失败；删除探针后恢复全绿
+- [x] `pnpm typecheck`、`pnpm lint`、`pnpm test src/kernel` 全绿
+- [x] 反向验证（一次性，不提交）：临时建 `src/kernel/probe.ts` 写 `Math.random()`，并临时 import shared 类型 → 纯度测试与 lint 都必须失败；删除探针后恢复全绿
 
 **依赖：** 无
 **涉及文件：** `src/protocol/types.ts`、`src/kernel/purity.test.ts`、`eslint.config.mjs`、`tsconfig.node.json`、`tsconfig.web.json`
 **规模：** M
+**完成：** commit `c3d9a4a`（2026-11-04）。探针被 lint 报 3 条、纯度测试报 3 条；删除后全量 548 用例通过、覆盖率 99.6/96.68/99.39/99.79 未变、`pnpm build:compile` 通过。
 
 ### T2 阶段状态机搬入 kernel，旧路径 re-export
 

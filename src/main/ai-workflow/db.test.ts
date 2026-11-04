@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { openDb } from './db'
@@ -51,5 +54,65 @@ describe('openDb', () => {
         .prepare('INSERT INTO agents (id, name, runtime_id, created_at) VALUES (?, ?, ?, ?)')
         .run('a1', 'agent', 'missing-runtime', new Date().toISOString()),
     ).toThrow()
+  })
+
+  it(':memory: 库可正常打开（WAL 不适用，不报错）', () => {
+    db = openDb(':memory:')
+    expect(
+      (db.prepare('SELECT COUNT(*) AS n FROM runtimes').get() as unknown as { n: number }).n,
+    ).toBe(0)
+    expect(
+      (db.prepare('PRAGMA integrity_check').get() as unknown as { integrity_check: string })
+        .integrity_check,
+    ).toBe('ok')
+  })
+
+  it('文件库启用 WAL 并设置 busy_timeout', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'aiwf-wal-'))
+    const file = path.join(root, 'ai-workflow.db')
+    const local = openDb(file)
+    try {
+      expect(
+        (local.prepare('PRAGMA journal_mode').get() as unknown as { journal_mode: string })
+          .journal_mode,
+      ).toBe('wal')
+      expect(
+        (local.prepare('PRAGMA busy_timeout').get() as unknown as { timeout: number }).timeout,
+      ).toBe(5000)
+      // WAL 真正落盘：迁移写入后主库旁应有 -wal 侧车
+      expect(existsSync(`${file}-wal`)).toBe(true)
+    } finally {
+      local.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('完整性检查失败：关闭连接并抛出可读错误', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'aiwf-corrupt-'))
+    const file = path.join(root, 'ai-workflow.db')
+    const seeded = new DatabaseSync(file)
+    const pageSize = (seeded.prepare('PRAGMA page_size').get() as unknown as { page_size: number })
+      .page_size
+    try {
+      seeded.exec('CREATE TABLE payload (id INTEGER PRIMARY KEY, body TEXT NOT NULL)')
+      const insert = seeded.prepare('INSERT INTO payload (body) VALUES (?)')
+      seeded.exec('BEGIN')
+      for (let i = 0; i < 200; i++) insert.run('x'.repeat(300))
+      seeded.exec('COMMIT')
+    } finally {
+      seeded.close()
+    }
+    // 只破坏最后一个数据页（文件头与 schema 页保持合法）：仍能打开，但 integrity_check 必然非 ok
+    const buf = readFileSync(file)
+    for (let i = buf.length - pageSize + 12; i < buf.length; i++) buf[i] = 0xab
+    writeFileSync(file, buf)
+
+    try {
+      expect(() => openDb(file)).toThrow(/数据库完整性检查失败/)
+      // 抛错前连接已关闭：Windows 上句柄未释放时删除会 EBUSY
+      expect(() => rmSync(file, { force: true })).not.toThrow()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

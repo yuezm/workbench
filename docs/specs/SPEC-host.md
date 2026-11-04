@@ -50,7 +50,7 @@ src/
 - 启动第一件事：`app.requestSingleInstanceLock()`；拿不到锁就聚焦已有窗口并退出（双实例同库会直接产生 `seq` 冲突）。
 - SQLite PRAGMA：`journal_mode=WAL`、`busy_timeout=5000`、`foreign_keys=ON`、`synchronous=NORMAL`；启动时跑 `PRAGMA integrity_check`，失败先备份坏库、再从事实重建。
 - 事务：追加事实 + 应用投影 + 更新 `projection_meta.seq` 在同一事务内完成；提交成功才向调用方应答。
-- 宿主兜底写入：执行器不可达、超时、取消无回执时，宿主以 `actor.host` 写 `run.failed`（`timeout`/`executor_lost`/`cancelled`），不让 run 悬空。
+- 宿主兜底写入：执行器不可达、超时或取消无回执时，宿主以 `run.host_settled` 输入写终态（`run.failed` 的 `timeout`/`executor_lost`，或 `run.cancelled` 的 `cancelled`；见 SPEC-kernel「输入目录」），不让 run 悬空。
 - 备份：`userData/workbench.db` 与 `userData/artifacts/` 直接复制即完整备份（事实日志自足）；设置页提供「导出全部事实为 JSON」。
 
 ## IPC 契约

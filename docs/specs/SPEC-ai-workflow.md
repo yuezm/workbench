@@ -264,12 +264,12 @@ export interface DetectedRuntime {
 
 ### 终态归一
 
-| 终态      | `run.status`               | `errorCode`                                                                                                              |
-| --------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| succeeded | `succeeded`                | null                                                                                                                     |
-| failed    | `failed`                   | `spawn_failed` / `exit_nonzero` / `run_failed` / `protocol_error` / `no_result` / `runtime_missing` / `runtime_disabled` |
-| cancelled | `cancelled`                | `cancelled`                                                                                                              |
-| timeout   | `failed`（timeout 计失败） | `timeout`                                                                                                                |
+| 终态      | `run.status`               | `errorCode`                                                                                                                                |
+| --------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| succeeded | `succeeded`                | null                                                                                                                                       |
+| failed    | `failed`                   | `spawn_failed` / `exit_nonzero` / `run_failed` / `protocol_error` / `no_result` / `runtime_missing` / `runtime_disabled` / `executor_lost` |
+| cancelled | `cancelled`                | `cancelled`                                                                                                                                |
+| timeout   | `failed`（timeout 计失败） | `timeout`                                                                                                                                  |
 
 `result` 帧的 `status` 归一：`completed`/`succeeded`/`success` → succeeded；`cancelled`/`canceled`/`aborted` → cancelled；`timeout`/`timed_out` → timeout；其余 → failed。
 
@@ -284,6 +284,7 @@ export interface DetectedRuntime {
 | `no_result`        | 进程结束但没有终态结果                                      |
 | `runtime_missing`  | 运行时不存在（被删）                                        |
 | `runtime_disabled` | 运行时已停用                                                |
+| `executor_lost`    | 执行器/子进程失联，租约过期被回收（run 计 `failed`；M2 起） |
 
 - `runs` 记录 `runtime_id`、`session_id`、`error_code`、`exit_code`、`duration_ms`、`usage`（列 `usage_json`）；运行事件另存 `run_events`（`seq` 单调递增；`payload_json` 存事件其余字段；`output` = `text` 汇总）。
 - 运行时被删后 `runs.runtime_id` 置空（历史记录保留）。

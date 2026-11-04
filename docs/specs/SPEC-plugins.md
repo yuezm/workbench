@@ -171,6 +171,10 @@ export interface ExecutorIO {
 
 export interface Receipt {
   status: 'succeeded' | 'failed' | 'cancelled'
+  /** 原样回传 Turn.leaseId（内核据此拒绝迟到尝试，见 SPEC-kernel「调度」） */
+  leaseId: string
+  /** 原样回传 Turn.turn */
+  turn: number
   output?: string
   sessionId?: string
   usage?: Usage

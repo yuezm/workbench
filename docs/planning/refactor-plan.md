@@ -54,6 +54,13 @@
 - 门禁同步：vitest `include` 指向 `tests/**`；tsconfig node/web 双工程按层收编 `tests/`；ESLint 架构边界规则（renderer 禁 Electron/Node、main 禁 import renderer）同样覆盖 `tests/` 对应层，强度不因搬家下降；Playwright 两个 `testDir` 指向 `tests/e2e*`；`floor-guard` 增加「src→tests 迁移识别」，避免一次性提交把搬家误判成删测试。
 - 证据：`pnpm check` 全绿（78 文件 / 772 用例；覆盖率 99.71/97.59/99.52/99.85，与基线逐项相同；改动行无变更故跳过）；`pnpm e2e` 5/5。行为零变化，只改位置与导入路径。
 
+## M2 开工记录（2026-11-04）
+
+- 分支 `refactor/m2-lifecycle`，起点 `master` @ `20c84b6`（M1 退出 + 测试目录重组后）；实施计划与任务清单见 [tasks/m2-plan.md](../../tasks/m2-plan.md)、[tasks/m2-todo.md](../../tasks/m2-todo.md)。
+- 范围口径：`runs` / `run_events` / 聊天表改为事实投影（`run.*`、`conversation.*`、`message.appended`）；存量按 `snapshot.imported` 分批迁移；`runner` 拆 `host/scheduler` + 注入执行器接口；租约/退避/启动对账；聊天并入 `purpose='chat'`。`card.*` 投递与回答留 M4，卡片闭环前执行适配层不产 `ask`；`src/plugins`/`src/sdk` 留 M3，IPC 三动词与 `commandId` 幂等留 M5。
+- 待评审口径（m2-plan「架构决议 D1–D15」）：投影新增 `waiting` 并顺带改 2 处 UI 状态映射；`executor_lost` 作为第 10 个 errorCode；超时走 `clock.tick`；`run_events` 用 `<runId>:<seq>` 全局 seq；帧超限分包；聊天补齐 conversations/messages 投影；新增 `run.receipt_rejected`/`run.removed`/`run.host_settled` 事实与宿主私有 `process_registry` 表。D4/D7/D10/D13/D14 需先修订 SPEC 再实现。
+- 回滚点：开工前 `pnpm db:export` 备份；M2 改写投影格式（`KERNEL_VERSION→m2.0.0`），回滚到 M1 需恢复数据库备份并重建。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

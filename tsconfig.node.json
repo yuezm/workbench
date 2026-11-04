@@ -22,6 +22,8 @@
     "e2e/**/*",
     "src/main/**/*",
     "src/preload/**/*",
+    "src/kernel/**/*",
+    "src/protocol/**/*",
     "src/shared/**/*"
   ]
 }

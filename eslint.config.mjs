@@ -64,6 +64,62 @@ export default tseslint.config(
       ],
     },
   },
+  // 架构边界（ARCHITECTURE「边界守则 1」）：kernel 是纯模块，只依赖 src/protocol 的类型；
+  // 时间、ID、随机数由宿主在边界传入，所以连 Date.now / Math.random 也禁。
+  {
+    files: ['src/kernel/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                'electron',
+                'node:*',
+                'fs',
+                'fs/*',
+                'path',
+                'os',
+                'child_process',
+                'crypto',
+                'net',
+                'dns',
+                'http',
+                'https',
+              ],
+              message: 'kernel 禁止使用宿主/Node 能力：时间与 ID 由宿主在边界传入。',
+            },
+            {
+              group: [
+                '**/shared/**',
+                '**/main/**',
+                '**/host/**',
+                '**/plugins/**',
+                '**/renderer/**',
+              ],
+              message: 'kernel 只允许依赖 src/protocol 的类型。',
+            },
+          ],
+        },
+      ],
+      'no-restricted-properties': [
+        'error',
+        { object: 'Date', property: 'now', message: 'kernel 不读时钟：now 由宿主传入。' },
+        { object: 'Math', property: 'random', message: 'kernel 不取随机数：ID 由宿主生成。' },
+      ],
+      'no-restricted-globals': ['error', { name: 'fetch', message: 'kernel 不发起网络请求。' }],
+    },
+  },
+  // kernel 的纯度测试要读盘扫描源码，测试文件放开上面三条限制。
+  {
+    files: ['src/kernel/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': 'off',
+      'no-restricted-properties': 'off',
+      'no-restricted-globals': 'off',
+    },
+  },
   // 末位关闭所有格式类规则，交给 Prettier
   prettier,
 )

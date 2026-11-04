@@ -32,22 +32,23 @@
 
 **验收标准：**
 
-- [ ] 两文件逻辑逐字一致（差异只有 import 行与路径注释）
-- [ ] `src/shared/stage-machine.ts` 只剩 re-export（≤ 15 行，无分支逻辑）
-- [ ] `engine.ts`、`runner.ts`、`src/shared/stage-machine.test.ts` 均未修改，测试全部通过
-- [ ] `src/kernel/workflow/stage-machine.ts` 分支覆盖 100%，且通过纯度测试
+- [x] 两文件逻辑逐字一致（差异只有 import 行与路径注释）
+- [x] `src/shared/stage-machine.ts` 只剩 re-export（≤ 15 行，无分支逻辑）
+- [x] `engine.ts`、`runner.ts`、`src/shared/stage-machine.test.ts` 均未修改，测试全部通过
+- [x] `src/kernel/workflow/stage-machine.ts` 分支覆盖 100%，且通过纯度测试
 
 **验证：**
 
-- [ ] `pnpm test src/shared/stage-machine.test.ts`、`pnpm test src/main/ai-workflow` 全绿
-- [ ] `pnpm test:coverage` 中该文件分支 100%
-- [ ] 新增 `src/kernel/workflow/stage-machine.test.ts` 薄冒烟（3 条断言：导出面存在、`moveTask` 正常流转、打回原地零效果）作为 kernel 侧锚点；不复制现有测试
-- [ ] `src/kernel/purity.test.ts` 收紧为「至少扫到 1 个非测试源文件」，本次改造后必须通过（T1 时护栏还在空转）
-- [ ] 反向验证（一次性，不提交）：在 `stage-machine.ts` 临时写 `Date.now()` → 纯度测试与 lint 都失败；删掉后恢复全绿
+- [x] `pnpm test src/shared/stage-machine.test.ts`、`pnpm test src/main/ai-workflow` 全绿
+- [x] `pnpm test:coverage` 中该文件分支 100%
+- [x] 新增 `src/kernel/workflow/stage-machine.test.ts` 薄冒烟（3 条断言：导出面存在、`moveTask` 正常流转、打回原地零效果）作为 kernel 侧锚点；不复制现有测试
+- [x] `src/kernel/purity.test.ts` 收紧为「至少扫到 1 个非测试源文件」，本次改造后必须通过（T1 时护栏还在空转）
+- [x] 反向验证（一次性，不提交）：在 `stage-machine.ts` 临时写 `Date.now()` → 纯度测试与 lint 都失败；删掉后恢复全绿
 
 **依赖：** T1
 **涉及文件：** `src/kernel/workflow/stage-machine.ts`、`src/kernel/workflow/stage-machine.test.ts`、`src/kernel/purity.test.ts`、`src/shared/stage-machine.ts`
 **规模：** S
+**完成：** commit `be60889`（2026-11-04）。探针 `workflow/__probe.ts` 报「禁止使用 Date.now()」并标行号（扫描 2 个源文件），删除后 6 个 kernel 用例全绿；全量 553 用例、覆盖率 99.6/96.68/99.39/99.79 未变、`build:compile` 通过。
 
 ## 检查点 A：阶段 1 完成
 

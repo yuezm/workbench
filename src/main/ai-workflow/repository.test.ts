@@ -119,6 +119,14 @@ describe('repository workflows/stages', () => {
     ).toThrow(/自己/)
   })
 
+  it('更新工作流同样走阶段校验：非法阶段集合被拒绝', () => {
+    const wf = repo.workflowCreate({ name: 'x', stages: [{ name: 'a', entryMode: 'none' }] })
+    expect(() => repo.workflowUpdate(wf.id, { name: 'x', stages: [] })).toThrow(/至少需要/)
+    expect(() =>
+      repo.workflowUpdate(wf.id, { name: 'x', stages: [{ name: 'a', entryMode: 'agent' }] }),
+    ).toThrow(/智能体/)
+  })
+
   it('更新工作流重建阶段，并按位置回挂任务当前阶段', () => {
     const wf = repo.workflowCreate({
       name: '研发',

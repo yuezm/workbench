@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
+import { validateStageSet } from '../../kernel/workflow/stage-validation'
 import type {
   Agent,
   AgentInput,
@@ -415,24 +416,6 @@ export class Repository {
     }>
     return rows.map((r) => this.workflowGet(r.id))
   }
-  private validateStages(stages: StageInput[]): void {
-    if (!stages.length) throw new Error('工作流至少需要一个阶段')
-    const n = stages.length
-    stages.forEach((s, i) => {
-      if (!s.name?.trim()) throw new Error(`第 ${i + 1} 个阶段名称必填`)
-      if (s.entryMode === 'agent' && !s.agentId)
-        throw new Error(`阶段「${s.name}」设为交给智能体时必须选择智能体`)
-      for (const [label, idx] of [
-        ['完成后进入', s.onCompleteIndex],
-        ['打回时退回到', s.onRejectIndex],
-      ] as const) {
-        if (idx === null || idx === undefined) continue
-        if (!Number.isInteger(idx) || idx < 0 || idx >= n)
-          throw new Error(`阶段「${s.name}」的${label}目标越界`)
-        if (idx === i) throw new Error(`阶段「${s.name}」的${label}不能指向自己`)
-      }
-    })
-  }
   private insertStages(workflowId: string, stages: StageInput[]): void {
     const ids = stages.map(() => randomUUID())
     const ins = this.db.prepare(
@@ -453,7 +436,8 @@ export class Repository {
   }
   workflowCreate(input: WorkflowInput): WorkflowWithStages {
     if (!input.name?.trim()) throw new Error('工作流名称必填')
-    this.validateStages(input.stages)
+    const invalid = validateStageSet(input.stages)
+    if (invalid) throw new Error(invalid)
     const id = randomUUID()
     this.tx(() => {
       this.db
@@ -465,7 +449,8 @@ export class Repository {
   }
   workflowUpdate(id: string, input: WorkflowInput): WorkflowWithStages {
     if (!input.name?.trim()) throw new Error('工作流名称必填')
-    this.validateStages(input.stages)
+    const invalid = validateStageSet(input.stages)
+    if (invalid) throw new Error(invalid)
     this.workflowGet(id)
     this.tx(() => {
       this.db

@@ -25,6 +25,7 @@
     "src/kernel/**/*",
     "src/protocol/**/*",
     "src/shared/**/*",
+    "tests/renderer/**/*",
     "vitest.config.mts",
     "vitest.setup.ts"
   ]

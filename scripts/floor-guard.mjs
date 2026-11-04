@@ -38,6 +38,7 @@ if (tracked === null) bail('could not diff against ' + mergeBase)
 const added = []
 const removed = []
 const deleted = []
+const addedPaths = new Set()
 const pathOf = (s) => s.replace(/^[ab]\//, '')
 let file = ''
 let oldFile = ''
@@ -51,6 +52,7 @@ for (const line of tracked.split('\n')) {
       const newFile = pathOf(line.slice(4))
       file = newFile === '/dev/null' ? oldFile : newFile
       if (newFile === '/dev/null') deleted.push(file)
+      else addedPaths.add(newFile)
     }
   } else if (line.startsWith('+')) added.push({ file, text: line.slice(1) })
   else if (line.startsWith('-')) removed.push({ file, text: line.slice(1) })
@@ -101,9 +103,19 @@ for (const { file, text } of added) {
 const deletedSet = new Set(deleted)
 const sourceOf = (f) =>
   f.replace(/\.(test|spec)\.(ts|tsx)$/, '.$2').replace(/_test\.(go|py)$/, '.$1')
+// 测试目录搬家（src/**.test.ts → tests/**.test.ts）：旧路径删除 + 新路径新增 = 迁移，不是删测试。
+// git 有时识别不出 rename（相似度阈值），此时会退化成 delete + add，用路径对应关系兜底。
+const migratedCounterpart = (f) => {
+  const strip = (p) => p.replace(/^(src|tests)\//, '')
+  for (const g of addedPaths) {
+    if (strip(g) === strip(f)) return g
+  }
+  return null
+}
 for (const f of deleted) {
   if (!isTest(f)) continue
   if (deletedSet.has(sourceOf(f))) continue
+  if (migratedCounterpart(f)) continue
   flag('test-deleted', f, 'file deleted')
 }
 const assertionRe = /\b(expect|assert|should)\b/

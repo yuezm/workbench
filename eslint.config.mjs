@@ -24,8 +24,9 @@ export default tseslint.config(
   reactHooks.configs.flat.recommended,
   // 架构边界（CONSTRAINTS.md「架构边界」维度）：renderer 只能走 window.* 桥接，不得碰 Electron/Node；
   // 依赖方向 renderer → main 单向，main 不得反向 import renderer。
+  // 测试目录与源码同构，tests/ 下对应层的用例同样受约束（门禁强度不因搬家而下降）。
   {
-    files: ['src/renderer/**/*.{ts,tsx}'],
+    files: ['src/renderer/**/*.{ts,tsx}', 'tests/renderer/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -52,7 +53,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/main/**/*.{ts,tsx}'],
+    files: ['src/main/**/*.{ts,tsx}', 'tests/main/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -113,7 +114,7 @@ export default tseslint.config(
   },
   // kernel 的纯度测试要读盘扫描源码，测试文件放开上面三条限制。
   {
-    files: ['src/kernel/**/*.test.{ts,tsx}'],
+    files: ['tests/kernel/**/*.test.{ts,tsx}'],
     rules: {
       'no-restricted-imports': 'off',
       'no-restricted-properties': 'off',

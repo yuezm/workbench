@@ -5,7 +5,7 @@ import { defineConfig } from '@playwright/test'
  * 用 Electron 自带 Chromium，不下载任何 Playwright 浏览器。
  */
 export default defineConfig({
-  testDir: './e2e',
+  testDir: './tests/e2e',
   timeout: 60_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,

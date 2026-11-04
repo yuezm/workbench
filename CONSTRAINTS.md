@@ -30,6 +30,7 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 
 - `src/renderer/**` 禁止 import `electron` 与 Node 内置（`fs` / `path` / `os` / `child_process` / `crypto` / `node:*`）；只能走 `window.workbench` / `window.aiWorkflow` 桥接。
 - `src/main/**` 禁止 import `renderer`（依赖方向单向：renderer → main）。
+- 测试同层同规：`tests/renderer/**` 禁 Electron/Node 内置，`tests/main/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。
 - app 之间不互相 import、app 只依赖 shell（`AppDefinition` 契约 + 桥接）——**暂无自动检查，靠 code review**。
 
 ## Measured, not yet enforced（只记录，不动）
@@ -63,3 +64,5 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 - 基线记录日期：2026-11-03。覆盖率提升后更新本文件基线；下降即为 finding。
 - 基线复核：2026-11-04（M0 退出）。覆盖率基线随 M0 收尾更新为上表数值（99.60 / 96.71 / 99.39 / 99.79）。
 - M1 复核：2026-11-04。账本落地后覆盖率更新为 99.71 / 97.59 / 99.52 / 99.85；改动行门禁 948/948 = 100%。
+- 测试目录重组复核：2026-11-04。测试与夹具搬到 `tests/`（与 `src/` 同构镜像）后覆盖率仍为 99.71 / 97.59 / 99.52 / 99.85，基线不变。
+- 改本文件的**规则行**时，保留原行、另起一行补充，不要就地改写措辞：`floor-guard` 按行文本匹配规则，措辞改写会被判成 `rule-removed`（收紧也会误报）。

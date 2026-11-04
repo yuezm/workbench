@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { COMMAND_NAMES, type Command } from '../../src/protocol/commands'
+import { EXECUTOR_PORT_VERSION } from '../../src/protocol/executor'
 import {
   HOST_INPUT_NAMES,
   INPUT_NAMES,
@@ -191,6 +192,7 @@ describe('protocol/inputs', () => {
 
     expect(rejected(withReceipt({ output: 7 }))).toBe('receipt.output必须是字符串')
     expect(rejected(withReceipt({ sessionId: 7 }))).toBe('receipt.sessionId必须是字符串')
+    expect(rejected(withReceipt({ error: 7 }))).toBe('receipt.error必须是字符串')
     expect(rejected(withReceipt({ usage: 'x' }))).toBe('receipt.usage 必须是对象')
     expect(rejected(withReceipt({ usage: { inputTokens: -1 } }))).toBe(
       'receipt.usage.inputTokens必须在 0 到 1000000000000 之间',
@@ -261,5 +263,9 @@ describe('protocol/inputs', () => {
     expect(rejected(host('conversation.rename', { conversationId: 'cv-1' }))).toBe('title必填')
     expect(rejected(host('conversation.rename', { title: 't' }))).toBe('conversationId必填')
     expect(rejected(host('conversation.remove', {}))).toBe('conversationId必填')
+  })
+
+  it('执行器端口版本常量随契约暴露（M3 兼容判断用）', () => {
+    expect(EXECUTOR_PORT_VERSION).toBe(1)
   })
 })

@@ -385,6 +385,7 @@ const checkReceipt = (value: unknown): Check => {
     optionalText(receipt.later, 'receipt.later', COMMAND_LIMITS.iso) ??
     checkList(receipt.events, 'receipt.events', COMMAND_LIMITS.receiptItems, checkRawEvent) ??
     optionalEnum(receipt.errorCode, 'receipt.errorCode', RUN_ERROR_CODES) ??
+    optionalText(receipt.error, 'receipt.error', COMMAND_LIMITS.description) ??
     optionalIntegerIn(receipt.exitCode, 'receipt.exitCode', -1_000_000, 1_000_000) ??
     optionalIntegerIn(receipt.durationMs, 'receipt.durationMs', 0, COMMAND_LIMITS.elapsedMs) ??
     optionalBoolean(receipt.resumeRejected, 'receipt.resumeRejected')

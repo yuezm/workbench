@@ -16,7 +16,7 @@ import {
   type DshDeps,
   type DshRunRequest,
 } from '../../../../src/main/ai-workflow/runtime/dsh'
-import type { SpawnFn, SpawnedProcess } from '../../../../src/main/ai-workflow/runtime/process'
+import type { SpawnFn, SpawnedProcess } from '../../../../src/host/process'
 
 /** 用 node 自身作为「存在的可执行文件」，避免依赖本机 dsh */
 const NODE = process.execPath

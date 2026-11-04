@@ -32,7 +32,7 @@ vi.mock('node:fs', async (importOriginal) => {
 })
 
 const { needsShell, resolveExecutable, findInDirs, commonGlobalDirs, defaultScanDirs } =
-  await import('../../../../src/main/ai-workflow/runtime/executable')
+  await import('../../../../src/host/executable')
 
 let root: string
 

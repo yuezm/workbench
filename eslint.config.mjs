@@ -65,6 +65,32 @@ export default tseslint.config(
       ],
     },
   },
+  // 架构边界（ARCHITECTURE「边界守则」/ SPEC-host「目录」）：host 是宿主层，只允许依赖
+  // protocol（与 kernel 类型）；具体执行器实现、窗口、托盘、IPC 都在 main，host 不反向 import。
+  // M2 起这条边界由 ESLint 强制（此前只靠约定）。
+  {
+    files: ['src/host/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'electron',
+              message: 'host 不直接依赖 Electron：窗口/托盘/IPC 由装配根 main 注入。',
+            },
+          ],
+          patterns: [
+            {
+              group: ['**/src/main/**', '**/main/**'],
+              message: 'host 不得 import 主进程装配层（依赖方向 main → host 单向）。',
+            },
+            { group: ['**/renderer/**'], message: 'host 不得 import renderer。' },
+          ],
+        },
+      ],
+    },
+  },
   // 架构边界（ARCHITECTURE「边界守则 1」）：kernel 是纯模块，只依赖 src/protocol 的类型；
   // 时间、ID、随机数由宿主在边界传入，所以连 Date.now / Math.random 也禁。
   {

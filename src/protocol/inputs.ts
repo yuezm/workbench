@@ -79,6 +79,8 @@ export interface Receipt {
   output?: string
   sessionId?: string
   usage?: RunUsage
+  /** 失败原因文案（给人看；`errorCode` 是归类）。M2 补：终态 `runs.error` 与 chat 失败消息都用它 */
+  error?: string
   ask?: Ask[]
   notices?: string[]
   /** 关掉的旧卡片 id */

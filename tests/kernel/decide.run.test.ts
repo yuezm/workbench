@@ -1,12 +1,18 @@
 /**
- * `run.claim` / `run.heartbeat` 的黄金用例（T5）：领取排序、按运行时开窗、租约计算、
- * 心跳匹配。夹具只装内核判定需要的切片（runs / runtimes），其余投影表留空。
+ * `run.claim` / `run.heartbeat` / `run.receipt` 的黄金用例（T5/T6）：领取排序、按运行时开窗、
+ * 租约计算、心跳匹配、回执校验、终态归一、waiting 与阶段流转。夹具只装内核判定需要的
+ * 切片（runs / runtimes / tasks / workflows / stages），其余投影表留空。
  */
 import { describe, expect, it } from 'vitest'
-import type { RunRow, Runtime } from '../../src/protocol/entities'
-import type { RunClaimedPayload } from '../../src/protocol/facts'
-import type { Input } from '../../src/protocol/inputs'
+import type { RunRow, Runtime, Task, Workflow, WorkflowStage } from '../../src/protocol/entities'
+import type {
+  RunClaimedPayload,
+  RunRemovedPayload,
+  RunWaitingPayload,
+} from '../../src/protocol/facts'
+import type { Input, Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
+import { project } from '../../src/kernel/project'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
@@ -93,20 +99,67 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
 interface Seed {
   runs?: RunRow[]
   runtimes?: Runtime[]
+  tasks?: Task[]
+  workflows?: Workflow[]
+  stages?: WorkflowStage[]
 }
 
 const view = (seed: Seed = {}): View => ({
   seq: 7,
-  workflows: new Map(),
-  stages: new Map(),
+  workflows: new Map((seed.workflows ?? []).map((row) => [row.id, row])),
+  stages: new Map((seed.stages ?? []).map((row) => [row.id, row])),
   agents: new Map(),
   runtimes: new Map((seed.runtimes ?? []).map((row) => [row.id, row])),
-  tasks: new Map(),
+  tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map(),
   messages: new Map(),
   activeTaskIds: new Set(),
 })
+
+const workflow = (over: Partial<Workflow> = {}): Workflow => ({
+  id: 'wf-1',
+  name: '研发',
+  description: '',
+  createdAt: CREATED,
+  ...over,
+})
+
+const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
+  id: 'st-1',
+  workflowId: 'wf-1',
+  name: '待办',
+  position: 0,
+  entryMode: 'agent',
+  agentId: 'ag-1',
+  onCompleteStageId: null,
+  onRejectStageId: null,
+  ...over,
+})
+
+const task = (over: Partial<Task> = {}): Task => ({
+  id: 't-1',
+  title: '任务',
+  description: '',
+  workflowId: 'wf-1',
+  currentStageId: 'st-1',
+  status: 'active',
+  createdAt: CREATED,
+  updatedAt: CREATED,
+  ...over,
+})
+
+/** 已领取的 run：默认与 `run()` 的 id 配套（leaseId = 'run-1:1'）。 */
+const running = (over: Partial<RunRow> = {}): RunRow =>
+  run({
+    status: 'running',
+    attempt: 1,
+    leaseId: 'run-1:1',
+    leaseUntil: '2026-11-04T12:02:00.000Z',
+    deadlineAt: '2026-11-04T12:30:00.000Z',
+    startedAt: NOW,
+    ...over,
+  })
 
 /** 确定性 id 生成器：领取不产实体 id，这里只满足 `Environment` 形状。 */
 const env = (over: Partial<Limits> = {}): Environment => {
@@ -132,6 +185,58 @@ const claim = (
 
 const claimedIds = (decision: ReturnType<typeof decide>): string[] =>
   decision.facts.map((fact) => (fact.payload as RunClaimedPayload).run.id)
+
+const receipt = (over: Partial<Receipt> = {}): Receipt => ({
+  status: 'succeeded',
+  leaseId: 'run-1:1',
+  turn: 1,
+  ...over,
+})
+
+const receive = (
+  target: View,
+  runId = 'run-1',
+  payload: Receipt = receipt(),
+  environment = env(),
+): ReturnType<typeof decide> =>
+  decide(target, { type: 'run.receipt', runId, receipt: payload }, NOW, environment)
+
+/** 终态 run 行的期望值：清租约 / 超时 / 结束时刻，其余按回执覆盖。 */
+const settledRow = (active: RunRow, over: Partial<RunRow> = {}): RunRow => ({
+  ...active,
+  output: '',
+  error: null,
+  errorCode: null,
+  exitCode: null,
+  sessionId: null,
+  usage: null,
+  durationMs: null,
+  endedAt: NOW,
+  leaseId: null,
+  leaseUntil: null,
+  deadlineAt: null,
+  ...over,
+})
+
+const HOST = { kind: 'host', via: 'scheduler' } as const
+
+const tick = (target: View, environment = env()): ReturnType<typeof decide> =>
+  decide(target, { type: 'clock.tick' }, NOW, environment)
+
+const cancel = (target: View, runId = 'run-1'): ReturnType<typeof decide> =>
+  decide(target, { type: 'run.cancel', runId }, NOW, env())
+
+const hostSettle = (
+  target: View,
+  over: Partial<RunHostSettledInput> = {},
+  environment = env(),
+): ReturnType<typeof decide> =>
+  decide(
+    target,
+    { type: 'run.host_settled', runId: 'run-1', status: 'failed', ...over },
+    NOW,
+    environment,
+  )
 
 describe('kernel/decide run.claim 领取', () => {
   it('超并发不领取：窗口 = maxConcurrent − running 数', () => {
@@ -460,17 +565,772 @@ describe('kernel/decide run.heartbeat 续租', () => {
   })
 })
 
-describe('kernel/decide 未实现的宿主输入', () => {
-  it('T5 阶段统一 reject unsupported，不静默产零事实', () => {
-    const pending: Input[] = [
+describe('kernel/decide run.receipt 回执', () => {
+  it('成功回执：run.succeeded 写终态并清租约/超时；任务不在视图时零流转', () => {
+    const active = running()
+    const decision = receive(
+      view({ runs: [active] }),
+      'run-1',
+      receipt({
+        output: '完成',
+        sessionId: 'sess-1',
+        usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 3, cacheWriteTokens: 4 },
+        exitCode: 0,
+        durationMs: 1_234,
+        // 成功回执即使带了失败文案也不落库
+        error: '不该出现在成功终态',
+      }),
+    )
+
+    expect(decision).toEqual({
+      facts: [
+        {
+          type: 'run.succeeded',
+          actor: HOST,
+          at: NOW,
+          payload: {
+            run: settledRow(active, {
+              status: 'succeeded',
+              output: '完成',
+              sessionId: 'sess-1',
+              usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 3, cacheWriteTokens: 4 },
+              exitCode: 0,
+              durationMs: 1_234,
+            }),
+          },
+        },
+      ],
+    })
+  })
+
+  it('失败回执：errorCode 缺省 run_failed，写 exitCode/durationMs 与失败文案', () => {
+    const active = running()
+    const decision = receive(
+      view({ runs: [active] }),
+      'run-1',
+      receipt({
+        status: 'failed',
+        exitCode: 1,
+        durationMs: 900,
+        error: '启动失败：找不到可执行文件',
+      }),
+    )
+
+    expect(decision).toEqual({
+      facts: [
+        {
+          type: 'run.failed',
+          actor: HOST,
+          at: NOW,
+          payload: {
+            run: settledRow(active, {
+              status: 'failed',
+              error: '启动失败：找不到可执行文件',
+              errorCode: 'run_failed',
+              exitCode: 1,
+              durationMs: 900,
+            }),
+          },
+        },
+      ],
+    })
+
+    // 回执带 errorCode 时按原值归类，不再回退 run_failed
+    const timeout = receive(
+      view({ runs: [running()] }),
+      'run-1',
+      receipt({ status: 'failed', errorCode: 'timeout' }),
+    )
+    expect((timeout.facts[0]?.payload as { run: RunRow }).run.errorCode).toBe('timeout')
+  })
+
+  it('取消回执：errorCode 缺省 cancelled，且不推进阶段', () => {
+    const active = running()
+    const decision = receive(
+      view({
+        runs: [active],
+        workflows: [workflow()],
+        stages: [stage()],
+        tasks: [task()],
+      }),
+      'run-1',
+      receipt({ status: 'cancelled' }),
+    )
+
+    expect(decision.facts).toEqual([
       {
-        type: 'run.receipt',
-        runId: 'run-1',
-        receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1 },
+        type: 'run.cancelled',
+        actor: HOST,
+        at: NOW,
+        payload: {
+          run: settledRow(active, { status: 'cancelled', errorCode: 'cancelled' }),
+        },
       },
-      { type: 'run.host_settled', runId: 'run-1', status: 'failed' },
-      { type: 'run.cancel', runId: 'run-1' },
-      { type: 'clock.tick' },
+    ])
+  })
+
+  it('迟到回执（旧 attempt 的 leaseId）：只记 receipt_rejected，不改状态', () => {
+    const active = running({ attempt: 2, leaseId: 'run-1:2' })
+    const decision = receive(
+      view({ runs: [active] }),
+      'run-1',
+      receipt({ leaseId: 'run-1:1', turn: 1 }),
+    )
+
+    expect(decision).toEqual({
+      facts: [
+        {
+          type: 'run.receipt_rejected',
+          actor: HOST,
+          at: NOW,
+          payload: { runId: 'run-1', leaseId: 'run-1:1', turn: 1, reason: 'lease_mismatch' },
+        },
+      ],
+    })
+  })
+
+  it('轮次不匹配（旧 turn）：只记 receipt_rejected', () => {
+    const active = running({ attempt: 2, leaseId: 'run-1:2', turn: 2 })
+    const decision = receive(
+      view({ runs: [active] }),
+      'run-1',
+      receipt({ leaseId: 'run-1:2', turn: 1 }),
+    )
+
+    expect(decision).toEqual({
+      facts: [
+        {
+          type: 'run.receipt_rejected',
+          actor: HOST,
+          at: NOW,
+          payload: { runId: 'run-1', leaseId: 'run-1:2', turn: 1, reason: 'turn_mismatch' },
+        },
+      ],
+    })
+  })
+
+  it('重复终态（run 已落任意终态）：只记 receipt_rejected', () => {
+    for (const status of ['succeeded', 'failed', 'cancelled'] as const) {
+      const done = running({ status, leaseId: null, endedAt: NOW })
+      const decision = receive(
+        view({ runs: [done] }),
+        'run-1',
+        receipt({ leaseId: 'run-1:1', turn: 1 }),
+      )
+
+      expect(decision).toEqual({
+        facts: [
+          {
+            type: 'run.receipt_rejected',
+            actor: HOST,
+            at: NOW,
+            payload: { runId: 'run-1', leaseId: 'run-1:1', turn: 1, reason: 'terminal' },
+          },
+        ],
+      })
+    }
+  })
+
+  it('未知 run：reject not_found，不伪造审计事实', () => {
+    expect(receive(view(), 'run-missing')).toEqual({
+      facts: [],
+      reject: { code: 'not_found', message: '运行不存在: run-missing' },
+    })
+  })
+
+  it('回执带 ask：run.waiting 释放租约/超时，且不占并发位', () => {
+    const active = running({ sessionId: 'sess-old' })
+    const decision = receive(
+      view({ runs: [active] }),
+      'run-1',
+      receipt({
+        status: 'succeeded',
+        ask: [{ title: '确认', options: ['好'] }],
+        sessionId: 'sess-wait',
+      }),
+    )
+
+    expect(decision.facts).toEqual([
+      {
+        type: 'run.waiting',
+        actor: HOST,
+        at: NOW,
+        payload: {
+          run: {
+            ...active,
+            status: 'waiting',
+            sessionId: 'sess-wait',
+            leaseId: null,
+            leaseUntil: null,
+            deadlineAt: null,
+          },
+          cardIds: [],
+        },
+      },
+    ])
+
+    // 用同一视图再领取：waiting 不占位，下一条 queued 可以被领取
+    const waiting = (decision.facts[0]?.payload as RunWaitingPayload).run
+    const nextClaim = claim(
+      view({
+        runtimes: [runtime({ maxConcurrent: 1 })],
+        runs: [waiting, run({ id: 'run-2', createdAt: '2026-01-01T00:00:02.000Z' })],
+      }),
+    )
+    expect(claimedIds(nextClaim)).toEqual(['run-2'])
+  })
+
+  it('回执 ask 且没带 sessionId：保留 run 上已有的会话 id', () => {
+    const active = running({ sessionId: 'sess-old' })
+    const decision = receive(
+      view({ runs: [active] }),
+      'run-1',
+      receipt({ ask: [{ title: '确认', options: ['好'] }] }),
+    )
+
+    expect((decision.facts[0]?.payload as RunWaitingPayload).run.sessionId).toBe('sess-old')
+  })
+
+  it('成功且还有下一阶段：产 task.moved 到下一阶段（updatedAt=now）', () => {
+    const active = running()
+    const current = task({ currentStageId: 'st-1' })
+    const decision = receive(
+      view({
+        runs: [active],
+        workflows: [workflow()],
+        stages: [stage({ id: 'st-1', position: 0 }), stage({ id: 'st-2', position: 1 })],
+        tasks: [current],
+      }),
+      'run-1',
+      receipt({ output: 'ok' }),
+    )
+
+    expect(decision.facts).toEqual([
+      {
+        type: 'run.succeeded',
+        actor: HOST,
+        at: NOW,
+        payload: { run: settledRow(active, { status: 'succeeded', output: 'ok' }) },
+      },
+      {
+        type: 'task.moved',
+        actor: HOST,
+        at: NOW,
+        payload: {
+          task: { ...current, currentStageId: 'st-2', updatedAt: NOW },
+          from: 'st-1',
+          to: 'st-2',
+        },
+      },
+    ])
+  })
+
+  it('成功且已是最后阶段：产 task.completed', () => {
+    const active = running()
+    const current = task()
+    const decision = receive(
+      view({
+        runs: [active],
+        workflows: [workflow()],
+        stages: [stage({ id: 'st-1', position: 0 })],
+        tasks: [current],
+      }),
+      'run-1',
+      receipt(),
+    )
+
+    expect(decision.facts[1]).toEqual({
+      type: 'task.completed',
+      actor: HOST,
+      at: NOW,
+      payload: { task: { ...current, status: 'completed', updatedAt: NOW } },
+    })
+  })
+
+  it('失败且打回目标就是原地：零流转效果，不重建 run', () => {
+    const decision = receive(
+      view({
+        runs: [running()],
+        workflows: [workflow()],
+        stages: [stage({ id: 'st-1', position: 0 })],
+        tasks: [task({ currentStageId: 'st-1' })],
+      }),
+      'run-1',
+      receipt({ status: 'failed' }),
+    )
+
+    expect(decision.facts).toHaveLength(1)
+    expect(decision.facts[0]?.type).toBe('run.failed')
+  })
+
+  it('失败且上一阶段存在：产 task.moved 打回上一阶段', () => {
+    const current = task({ currentStageId: 'st-2' })
+    const decision = receive(
+      view({
+        runs: [running()],
+        workflows: [workflow()],
+        stages: [stage({ id: 'st-1', position: 0 }), stage({ id: 'st-2', position: 1 })],
+        tasks: [current],
+      }),
+      'run-1',
+      receipt({ status: 'failed' }),
+    )
+
+    expect(decision.facts[1]).toEqual({
+      type: 'task.moved',
+      actor: HOST,
+      at: NOW,
+      payload: {
+        task: { ...current, currentStageId: 'st-1', updatedAt: NOW },
+        from: 'st-2',
+        to: 'st-1',
+      },
+    })
+  })
+
+  it('任务已完成 / 阶段无效：只落终态，零流转事实', () => {
+    const completed = task({ status: 'completed' })
+    const completedDecision = receive(
+      view({
+        runs: [running()],
+        workflows: [workflow()],
+        stages: [stage()],
+        tasks: [completed],
+      }),
+      'run-1',
+      receipt(),
+    )
+    expect(completedDecision.facts).toHaveLength(1)
+
+    const invalid = task({ currentStageId: 'st-missing' })
+    const invalidDecision = receive(
+      view({
+        runs: [running()],
+        workflows: [workflow()],
+        stages: [stage()],
+        tasks: [invalid],
+      }),
+      'run-1',
+      receipt(),
+    )
+    expect(invalidDecision.facts).toHaveLength(1)
+    expect(invalidDecision.facts[0]?.type).toBe('run.succeeded')
+  })
+
+  it('运行数据缺挂载（stage 缺 taskId / 工作流已删 / chat 缺 conversationId）：只落终态', () => {
+    const stageRun = running({
+      id: 'run-no-task',
+      taskId: null,
+      stageId: null,
+      leaseId: 'run-no-task:1',
+    })
+    expect(
+      receive(view({ runs: [stageRun] }), 'run-no-task', receipt({ leaseId: 'run-no-task:1' }))
+        .facts,
+    ).toHaveLength(1)
+
+    // 任务在，但它引用的工作流不在视图里
+    expect(
+      receive(view({ runs: [running()], stages: [stage()], tasks: [task()] }), 'run-1', receipt())
+        .facts,
+    ).toHaveLength(1)
+
+    const chatRun = running({
+      id: 'run-no-cv',
+      purpose: 'chat',
+      taskId: null,
+      stageId: null,
+      conversationId: null,
+      leaseId: 'run-no-cv:1',
+    })
+    expect(
+      receive(view({ runs: [chatRun] }), 'run-no-cv', receipt({ leaseId: 'run-no-cv:1' })).facts,
+    ).toHaveLength(1)
+  })
+
+  it('聊天终态：产 assistant message.appended（挂 runId，content=output）', () => {
+    const chat = running({
+      id: 'run-chat',
+      purpose: 'chat',
+      taskId: null,
+      stageId: null,
+      conversationId: 'cv-1',
+      leaseId: 'run-chat:1',
+    })
+    const decision = receive(
+      view({ runs: [chat] }),
+      'run-chat',
+      receipt({ leaseId: 'run-chat:1', output: '你好' }),
+    )
+
+    expect(decision.facts).toEqual([
+      {
+        type: 'run.succeeded',
+        actor: HOST,
+        at: NOW,
+        payload: { run: settledRow(chat, { status: 'succeeded', output: '你好' }) },
+      },
+      {
+        type: 'message.appended',
+        actor: HOST,
+        at: NOW,
+        payload: {
+          conversationId: 'cv-1',
+          messageId: 'message-new-1',
+          role: 'assistant',
+          content: '你好',
+          runId: 'run-chat',
+          error: null,
+        },
+      },
+    ])
+  })
+
+  it('聊天失败终态：run.error 与 message.error 都用回执失败文案', () => {
+    const chat = running({
+      id: 'run-chat',
+      purpose: 'chat',
+      taskId: null,
+      stageId: null,
+      conversationId: 'cv-1',
+      leaseId: 'run-chat:1',
+    })
+    const decision = receive(
+      view({ runs: [chat] }),
+      'run-chat',
+      receipt({ leaseId: 'run-chat:1', status: 'failed', error: '进程崩溃' }),
+    )
+
+    expect(decision.facts[0]).toEqual({
+      type: 'run.failed',
+      actor: HOST,
+      at: NOW,
+      payload: {
+        run: settledRow(chat, { status: 'failed', error: '进程崩溃', errorCode: 'run_failed' }),
+      },
+    })
+    expect(decision.facts[1]).toEqual({
+      type: 'message.appended',
+      actor: HOST,
+      at: NOW,
+      payload: {
+        conversationId: 'cv-1',
+        messageId: 'message-new-1',
+        role: 'assistant',
+        content: '',
+        runId: 'run-chat',
+        error: '进程崩溃',
+      },
+    })
+  })
+})
+
+describe('kernel/decide 删除任务与 run.removed（D13）', () => {
+  const removeTask = (target: View): ReturnType<typeof decide> =>
+    decide(target, { type: 'task.remove', commandId: 'cmd-1', id: 't-1' }, NOW, env())
+
+  it('task.remove：先按入队序删该任务的全部 run，再删任务', () => {
+    const decision = removeTask(
+      view({
+        tasks: [task()],
+        runs: [
+          run({ id: 'run-b', queueSeq: 2 }),
+          run({ id: 'run-a', queueSeq: 1 }),
+          run({ id: 'run-other', taskId: 't-2', queueSeq: 3 }),
+        ],
+      }),
+    )
+
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'run.removed',
+      'run.removed',
+      'task.removed',
+    ])
+    expect(
+      decision.facts.slice(0, 2).map((fact) => (fact.payload as RunRemovedPayload).runId),
+    ).toEqual(['run-a', 'run-b'])
+    expect((decision.facts[2]?.payload as { task: Task }).task.id).toBe('t-1')
+  })
+
+  it('task.remove：任务没有 run 时只产 task.removed', () => {
+    const decision = removeTask(view({ tasks: [task()] }))
+
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['task.removed'])
+  })
+
+  it('workflow.remove：级联删任务时逐任务先删 run 再删任务', () => {
+    const decision = decide(
+      view({
+        workflows: [workflow()],
+        stages: [stage({ id: 'st-1', position: 0 })],
+        tasks: [task({ id: 't-1' }), task({ id: 't-2' })],
+        runs: [
+          run({ id: 'run-1', taskId: 't-1', queueSeq: 1 }),
+          run({ id: 'run-2', taskId: 't-1', queueSeq: 2 }),
+          run({ id: 'run-3', taskId: 't-2', queueSeq: 3 }),
+        ],
+      }),
+      { type: 'workflow.remove', commandId: 'cmd-1', id: 'wf-1' },
+      NOW,
+      env(),
+    )
+
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'workflow.removed',
+      'stage.deleted',
+      'run.removed',
+      'run.removed',
+      'task.removed',
+      'run.removed',
+      'task.removed',
+    ])
+    expect(
+      decision.facts
+        .filter((fact) => fact.type === 'run.removed')
+        .map((fact) => (fact.payload as RunRemovedPayload).runId),
+    ).toEqual(['run-1', 'run-2', 'run-3'])
+  })
+
+  it('删除事实序列自洽：project 折叠后得到 runs / tasks 删除（重建等价）', () => {
+    const decision = removeTask(
+      view({
+        tasks: [task()],
+        runs: [run({ id: 'run-a', queueSeq: 1 }), run({ id: 'run-b', queueSeq: 2 })],
+      }),
+    )
+
+    const changes = decision.facts.flatMap((fact, index) => project({ ...fact, seq: index + 1 }))
+
+    expect(changes).toEqual([
+      { table: 'runs', key: 'run-a', row: null },
+      { table: 'runs', key: 'run-b', row: null },
+      { table: 'tasks', key: 't-1', row: null },
+    ])
+  })
+})
+
+describe('kernel/decide clock.tick 时间到期', () => {
+  it('租约过期：attempts+1、回 queued、notBefore=now+backoff，清租约与超时', () => {
+    const active = running({ leaseUntil: NOW, deadlineAt: FUTURE })
+    const decision = tick(
+      view({ runs: [active] }),
+      env({ backoffBaseMs: 1_000, backoffCapMs: 10_000 }),
+    )
+
+    expect(decision.facts).toEqual([
+      {
+        type: 'run.abandoned',
+        actor: { kind: 'host', via: 'timer' },
+        at: NOW,
+        payload: {
+          run: {
+            ...active,
+            status: 'queued',
+            attempts: 1,
+            notBefore: '2026-11-04T12:00:01.000Z',
+            leaseId: null,
+            leaseUntil: null,
+            deadlineAt: null,
+          },
+        },
+      },
+    ])
+  })
+
+  it('退避按 attempts 指数递增：第二次失败 = base × 2', () => {
+    const active = running({ leaseUntil: NOW, deadlineAt: FUTURE, attempts: 1 })
+    const decision = tick(
+      view({ runs: [active] }),
+      env({ backoffBaseMs: 1_000, backoffCapMs: 10_000 }),
+    )
+
+    expect((decision.facts[0]?.payload as { run: RunRow }).run).toMatchObject({
+      attempts: 2,
+      notBefore: '2026-11-04T12:00:02.000Z',
+    })
+  })
+
+  it('退避封顶 backoffCapMs', () => {
+    const active = running({ leaseUntil: NOW, deadlineAt: FUTURE, attempts: 5 })
+    const decision = tick(
+      view({ runs: [active] }),
+      env({ backoffBaseMs: 1_000, backoffCapMs: 3_000, maxAttempts: 10 }),
+    )
+
+    expect((decision.facts[0]?.payload as { run: RunRow }).run.notBefore).toBe(
+      '2026-11-04T12:00:03.000Z',
+    )
+  })
+
+  it('attempts 达到 maxAttempts：落 run.failed{executor_lost}，不再入队', () => {
+    const active = running({ leaseUntil: NOW, deadlineAt: FUTURE, attempts: 2 })
+    const decision = tick(view({ runs: [active] }), env({ maxAttempts: 3 }))
+
+    expect(decision.facts).toEqual([
+      {
+        type: 'run.failed',
+        actor: { kind: 'host', via: 'timer' },
+        at: NOW,
+        payload: {
+          run: settledRow(active, { status: 'failed', errorCode: 'executor_lost', attempts: 3 }),
+        },
+      },
+    ])
+  })
+
+  it('deadlineAt 到期：优先落 run.failed{timeout}（即使租约也过期）', () => {
+    const active = running({ leaseUntil: NOW, deadlineAt: NOW })
+    const decision = tick(view({ runs: [active] }))
+
+    expect(decision.facts).toEqual([
+      {
+        type: 'run.failed',
+        actor: { kind: 'host', via: 'timeout' },
+        at: NOW,
+        payload: { run: settledRow(active, { status: 'failed', errorCode: 'timeout' }) },
+      },
+    ])
+  })
+
+  it('未到期 / 终态 / waiting：零事实', () => {
+    expect(tick(view({ runs: [running({ leaseUntil: FUTURE, deadlineAt: FUTURE })] }))).toEqual({
+      facts: [],
+    })
+    expect(
+      tick(view({ runs: [running({ status: 'succeeded', leaseUntil: NOW, deadlineAt: NOW })] })),
+    ).toEqual({ facts: [] })
+    expect(
+      tick(view({ runs: [running({ status: 'waiting', leaseUntil: NOW, deadlineAt: NOW })] })),
+    ).toEqual({ facts: [] })
+  })
+})
+
+describe('kernel/decide run.cancel 取消', () => {
+  it('queued / running / waiting 可取消：产 run.cancel_requested 并标记 cancelRequested', () => {
+    for (const status of ['queued', 'running', 'waiting'] as const) {
+      const active = run({ status, leaseId: status === 'queued' ? null : 'run-1:1' })
+      expect(cancel(view({ runs: [active] }))).toEqual({
+        facts: [
+          {
+            type: 'run.cancel_requested',
+            actor: { kind: 'owner', via: 'ui' },
+            at: NOW,
+            payload: { run: { ...active, cancelRequested: true }, by: 'owner' },
+          },
+        ],
+      })
+    }
+  })
+
+  it('终态 reject conflict；不存在 reject not_found', () => {
+    expect(cancel(view({ runs: [run({ status: 'succeeded' })] }))).toEqual({
+      facts: [],
+      reject: { code: 'conflict', message: '运行已结束，无法取消: run-1' },
+    })
+    expect(cancel(view(), 'run-missing')).toEqual({
+      facts: [],
+      reject: { code: 'not_found', message: '运行不存在: run-missing' },
+    })
+  })
+
+  it('重复取消：零事实（幂等）', () => {
+    expect(cancel(view({ runs: [run({ status: 'running', cancelRequested: true })] }))).toEqual({
+      facts: [],
+    })
+  })
+})
+
+describe('kernel/decide run.host_settled 宿主兜底', () => {
+  it('failed：默认 executor_lost，写 error/output/session/usage/duration 并清租约', () => {
+    const active = running({ sessionId: 'sess-old' })
+    const usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 }
+    const decision = hostSettle(view({ runs: [active] }), {
+      status: 'failed',
+      leaseId: 'run-1:1',
+      turn: 1,
+      error: '执行器不可达',
+      output: '部分输出',
+      sessionId: 'sess-new',
+      usage,
+      durationMs: 500,
+    })
+
+    expect(decision).toEqual({
+      facts: [
+        {
+          type: 'run.failed',
+          actor: HOST,
+          at: NOW,
+          payload: {
+            run: settledRow(active, {
+              status: 'failed',
+              error: '执行器不可达',
+              errorCode: 'executor_lost',
+              output: '部分输出',
+              sessionId: 'sess-new',
+              usage,
+              durationMs: 500,
+            }),
+          },
+        },
+      ],
+    })
+  })
+
+  it('cancelled：默认 errorCode cancelled，actor host/cancel', () => {
+    const active = running()
+    const decision = hostSettle(view({ runs: [active] }), {
+      status: 'cancelled',
+      error: '已取消',
+    })
+
+    expect(decision.facts).toEqual([
+      {
+        type: 'run.cancelled',
+        actor: { kind: 'host', via: 'cancel' },
+        at: NOW,
+        payload: {
+          run: settledRow(active, {
+            status: 'cancelled',
+            error: '已取消',
+            errorCode: 'cancelled',
+          }),
+        },
+      },
+    ])
+  })
+
+  it('显式 errorCode（timeout）按原值归类', () => {
+    const decision = hostSettle(view({ runs: [running()] }), {
+      status: 'failed',
+      errorCode: 'timeout',
+    })
+
+    expect((decision.facts[0]?.payload as { run: RunRow }).run.errorCode).toBe('timeout')
+  })
+
+  it('迟到（leaseId / turn 不匹配）与重复（run 已终态）：零事实（幂等）', () => {
+    expect(
+      hostSettle(view({ runs: [running({ leaseId: 'run-1:2' })] }), { leaseId: 'run-1:1' }),
+    ).toEqual({ facts: [] })
+    expect(hostSettle(view({ runs: [running({ turn: 2 })] }), { turn: 1 })).toEqual({ facts: [] })
+    expect(hostSettle(view({ runs: [running({ status: 'succeeded' })] }))).toEqual({ facts: [] })
+  })
+
+  it('未知 run reject not_found；succeeded 状态不产成功终态', () => {
+    expect(hostSettle(view(), { runId: 'run-missing' })).toEqual({
+      facts: [],
+      reject: { code: 'not_found', message: '运行不存在: run-missing' },
+    })
+    expect(hostSettle(view({ runs: [running()] }), { status: 'succeeded' })).toEqual({
+      facts: [],
+    })
+  })
+})
+
+describe('kernel/decide 未实现的对话输入', () => {
+  it('T14 前统一 reject unsupported，不静默产零事实', () => {
+    const pending: Input[] = [
       { type: 'conversation.create', agentId: 'ag-1' },
       { type: 'conversation.send', conversationId: 'c-1', content: 'hi' },
       { type: 'conversation.rename', conversationId: 'c-1', title: '标题' },

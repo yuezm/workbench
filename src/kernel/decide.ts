@@ -10,12 +10,14 @@
  * 打回原地零效果等判定不在这里另写一份。进入阶段的效果（建 run / 等人）由宿主在
  * 提交成功后按新视图执行，`decide` 只产事实。
  *
- * M2 起入参放宽为 `protocol/inputs` 的 `Input`（命令 + 宿主内部输入）。T5 只实现
- * `run.claim` / `run.heartbeat`，其余宿主输入暂以 `reject('unsupported')` 兜底，
- * 由 T6/T7/T14 逐个补齐；14 条命令的行为与文案不变。
+ * M2 起入参放宽为 `protocol/inputs` 的 `Input`（命令 + 宿主内部输入）。T5–T7 实现
+ * `run.claim` / `run.heartbeat` / `run.receipt` / `run.cancel` / `run.host_settled` /
+ * `clock.tick`；其余（conversation.*）暂以 `reject('unsupported')` 兜底，由 T14 补齐；
+ * 14 条命令的行为与文案不变。
  */
 import type {
   Agent,
+  RunRow,
   Runtime,
   StageInput,
   Task,
@@ -26,8 +28,25 @@ import type {
 import type { FactPayload, FactType } from '../protocol/facts'
 import type { Input } from '../protocol/inputs'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, Reason, View } from './types'
-import { claimFacts, heartbeatFacts, pickClaims } from './run'
-import { completeTask, moveTaskToStage } from './workflow/stage-machine'
+import type { SettledRun } from './run'
+import {
+  abandonedFacts,
+  claimFacts,
+  deadlineReached,
+  heartbeatFacts,
+  hostSettledFacts,
+  leaseExpired,
+  pickClaims,
+  receiptRejection,
+  rejectedReceiptFacts,
+  settledRun,
+  settlementFacts,
+  timeoutFacts,
+  waitingFacts,
+  waitingRun,
+} from './run'
+import type { StageEvent } from './workflow/stage-machine'
+import { completeTask, moveTask, moveTaskToStage } from './workflow/stage-machine'
 import { validateStageSet } from './workflow/stage-validation'
 
 /**
@@ -50,6 +69,15 @@ const OWNER: Actor = { kind: 'owner', via: 'ui' }
 
 /** 宿主调度器发起的领取 / 续租：actor 标明来源，便于 why 链区分。 */
 const HOST_SCHEDULER: Actor = { kind: 'host', via: 'scheduler' }
+
+/** 唯一定时器（`clock.tick`）：租约过期 / 退避由 timer 触发。 */
+const HOST_TIMER: Actor = { kind: 'host', via: 'timer' }
+
+/** 运行超时：`deadlineAt` 到期由 timeout 触发（D5）。 */
+const HOST_TIMEOUT: Actor = { kind: 'host', via: 'timeout' }
+
+/** 宿主兜底取消：`run.host_settled{status:'cancelled'}`。 */
+const HOST_CANCEL: Actor = { kind: 'host', via: 'cancel' }
 
 const done = (facts: FactDraft[]): Decision => ({ facts })
 
@@ -78,6 +106,21 @@ function tasksOf(view: View, workflowId: Id): Task[] {
     if (task.workflowId === workflowId) tasks.push(task)
   }
   return tasks.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+}
+
+/**
+ * 任务下的全部 run，按入队序排（`queueSeq` → `createdAt` → `id`）。
+ * 删除任务时按这个顺序产 `run.removed`，让事实序列可复现（D13）。
+ */
+function runsOfTask(view: View, taskId: Id): RunRow[] {
+  const runs: RunRow[] = []
+  for (const run of view.runs.values()) {
+    if (run.taskId === taskId) runs.push(run)
+  }
+  return runs.sort(
+    (a, b) =>
+      a.queueSeq - b.queueSeq || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  )
 }
 
 function stageRow(workflowId: Id, ids: Id[], stage: StageInput, position: number): WorkflowStage {
@@ -166,6 +209,74 @@ function hasActiveRun(view: View, workflowId: Id): boolean {
     if (task.workflowId === workflowId && view.activeTaskIds.has(task.id)) return true
   }
   return false
+}
+
+/** 宿主侧事实草稿：回执由宿主转交，actor 统一标成调度器。 */
+const hostDraft = <T extends FactType>(
+  type: T,
+  payload: FactPayload<T>,
+  now: Iso,
+): FactDraft<T> => ({ type, actor: HOST_SCHEDULER, at: now, payload })
+
+/**
+ * 阶段 run 终态 → 阶段流转事实：成功进下一阶段（无下一阶段则完成），失败按
+ * `on_reject` 打回；打回原地 / 任务已完成 / 阶段无效 / 任务已删时零事实，取消不推进。
+ * 目标阶段的进入效果（建下一条 run）由 T10 接线时补，本任务不产 `run.queued`。
+ */
+function stageTransitionFacts(view: View, run: SettledRun, now: Iso): FactDraft[] {
+  if (run.status === 'cancelled' || run.taskId === null) return []
+  const task = view.tasks.get(run.taskId)
+  if (!task || task.status === 'completed') return []
+  const workflow = view.workflows.get(task.workflowId)
+  if (!workflow) return []
+  const flow = workflowWithStages(view, workflow)
+  if (!flow.stages.some((stage) => stage.id === task.currentStageId)) return []
+  const event: StageEvent =
+    run.status === 'succeeded'
+      ? { type: 'RUN_SUCCEEDED', runId: run.id }
+      : { type: 'RUN_FAILED', runId: run.id }
+  const next = moveTask(task, event, flow).task
+  if (next.status === 'completed') {
+    return [hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now)]
+  }
+  if (next.currentStageId !== null && next.currentStageId !== task.currentStageId) {
+    return [
+      hostDraft(
+        'task.moved',
+        {
+          task: { ...next, updatedAt: now },
+          from: task.currentStageId,
+          to: next.currentStageId,
+        },
+        now,
+      ),
+    ]
+  }
+  return []
+}
+
+/** 聊天 run 终态 → 一条 assistant 消息；用户消息由 `conversation.send` 产（T14）。 */
+function chatMessageFacts(
+  run: RunRow,
+  settled: SettledRun,
+  now: Iso,
+  env: Environment,
+): FactDraft[] {
+  if (run.conversationId === null) return []
+  return [
+    hostDraft(
+      'message.appended',
+      {
+        conversationId: run.conversationId,
+        messageId: env.nextId('message'),
+        role: 'assistant',
+        content: settled.output,
+        runId: run.id,
+        error: settled.error,
+      },
+      now,
+    ),
+  ]
 }
 
 export function decide(view: View, input: Input, now: Iso, env: Environment): Decision {
@@ -420,6 +531,10 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         facts.push(draft('stage.deleted', { stage }))
       }
       for (const task of tasksOf(view, current.id)) {
+        // D13：run 删除必须由事实显式表达（重建时外键级联不可用），先删 run 再删任务
+        for (const run of runsOfTask(view, task.id)) {
+          facts.push(draft('run.removed', { runId: run.id }))
+        }
         facts.push(draft('task.removed', { task }))
       }
       return done(facts)
@@ -485,7 +600,12 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
     case 'task.remove': {
       const task = view.tasks.get(input.id)
       if (!task) return done([])
-      return done([draft('task.removed', { task })])
+      // D13：先逐条删该任务的 run，再删任务；重建与旧 SQL 级联的可见结果一致
+      const facts: FactDraft[] = runsOfTask(view, task.id).map((run) =>
+        draft('run.removed', { runId: run.id }),
+      )
+      facts.push(draft('task.removed', { task }))
+      return done(facts)
     }
 
     // ---------- 运行（宿主内部输入） ----------
@@ -509,11 +629,59 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       return done(heartbeatFacts(view, input.runId, input.leaseId, now, env.limits, HOST_SCHEDULER))
     }
 
-    // T6/T7/T14 逐个补齐；在补齐前显式拒绝，避免未知输入被静默当成零事实
-    case 'run.receipt':
-    case 'run.host_settled':
-    case 'run.cancel':
-    case 'clock.tick':
+    case 'run.receipt': {
+      const run = view.runs.get(input.runId)
+      // 回执对不上任何 run（任务已删 / 宿主重放）：报 not_found，不伪造审计事实
+      if (!run) return reject('not_found', '运行不存在: ' + input.runId)
+      const rejection = receiptRejection(run, input.receipt)
+      if (rejection !== null) {
+        return done(rejectedReceiptFacts(run, input.receipt, rejection, now, HOST_SCHEDULER))
+      }
+      // 回执带 ask：挂起等回答，释放租约与并发位，不落终态（D12）
+      if ((input.receipt.ask?.length ?? 0) > 0) {
+        return done(waitingFacts(waitingRun(run, input.receipt), now, HOST_SCHEDULER))
+      }
+      const settled = settledRun(run, input.receipt, now)
+      const facts: FactDraft[] = [...settlementFacts(settled, now, HOST_SCHEDULER)]
+      if (run.purpose === 'stage') facts.push(...stageTransitionFacts(view, settled, now))
+      if (run.purpose === 'chat') facts.push(...chatMessageFacts(run, settled, now, env))
+      return done(facts)
+    }
+
+    case 'run.cancel': {
+      const run = view.runs.get(input.runId)
+      if (!run) return reject('not_found', '运行不存在: ' + input.runId)
+      if (run.status !== 'queued' && run.status !== 'running' && run.status !== 'waiting') {
+        return reject('conflict', '运行已结束，无法取消: ' + input.runId)
+      }
+      // 重复取消幂等：已请求过就零事实，等宿主按取消时序落终态
+      if (run.cancelRequested) return done([])
+      return done([
+        draft('run.cancel_requested', { run: { ...run, cancelRequested: true }, by: 'owner' }),
+      ])
+    }
+
+    case 'run.host_settled': {
+      const run = view.runs.get(input.runId)
+      if (!run) return reject('not_found', '运行不存在: ' + input.runId)
+      const actor = input.status === 'cancelled' ? HOST_CANCEL : HOST_SCHEDULER
+      return done(hostSettledFacts(run, input, now, actor))
+    }
+
+    case 'clock.tick': {
+      // 唯一定时器到点：先判整体超时（终态），再看租约过期（放弃 / 重试）
+      const facts: FactDraft[] = []
+      for (const run of view.runs.values()) {
+        if (deadlineReached(run, now)) {
+          facts.push(...timeoutFacts(run, now, HOST_TIMEOUT))
+        } else if (leaseExpired(run, now)) {
+          facts.push(...abandonedFacts(run, now, env.limits, HOST_TIMER))
+        }
+      }
+      return done(facts)
+    }
+
+    // T14 补齐；在补齐前显式拒绝，避免未知输入被静默当成零事实
     case 'conversation.create':
     case 'conversation.send':
     case 'conversation.rename':

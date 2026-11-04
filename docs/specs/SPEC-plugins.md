@@ -184,6 +184,8 @@ export interface Receipt {
   later?: Iso // 约时间复查
   events?: RawEvent[] // 派生新事件（hops 由内核加一）
   errorCode?: ErrorCode
+  /** 失败原因文案（给人看；与 errorCode 的归类分开） */
+  error?: string
   exitCode?: number
   durationMs?: number
   resumeRejected?: boolean

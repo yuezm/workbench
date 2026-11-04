@@ -6,7 +6,7 @@ import type {
   RuntimeModelOption,
   RuntimeProbe,
 } from '../../../shared/ai-workflow-api'
-import { needsShell, resolveExecutable } from './executable'
+import { needsShell, resolveExecutable } from '../../../host/executable'
 import {
   createLineReader,
   defaultSpawn,
@@ -14,7 +14,7 @@ import {
   tail,
   type SpawnFn,
   type SpawnedProcess,
-} from './process'
+} from '../../../host/process'
 
 /** dsh profile 暴露的 stdio 协议版本（与 Multica 的 DshProtocolVersion 一致） */
 export const DSH_PROTOCOL_VERSION = 1

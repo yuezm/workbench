@@ -1,5 +1,6 @@
 /**
- * 运行领取与租约（纯函数）：候选排序、按运行时开窗、`run.claimed` / `run.lease_extended` 事实。
+ * 运行领取、租约与回执（纯函数）：候选排序、按运行时开窗、`run.claimed` /
+ * `run.lease_extended` / 终态 / `run.waiting` / `run.receipt_rejected` 事实。
  *
  * 内核不读时钟、不取随机数：`now` 与 `Limits` 由宿主注入，`leaseUntil` / `deadlineAt`
  * 只做「now + 时长」的纯算术（`new Date(iso)` 仅用于解析宿主传入的时刻，不读当前时间）。
@@ -8,7 +9,8 @@
  * 是入队事实的 seq（由 `project` 在 `run.queued` 时回填），M1 存量导入的行没有
  * 各自的入队 seq，回退到 `createdAt` + `id` 保持稳定顺序。
  */
-import type { RunRow, Runtime } from '../protocol/entities'
+import type { RunRow, RunTerminalStatus, Runtime } from '../protocol/entities'
+import type { Receipt, RunHostSettledInput } from '../protocol/inputs'
 import type { Actor, FactDraft, Id, Iso, Limits, View } from './types'
 
 /** ISO 字符串比较（同格式时字典序即时间序；`now` 由宿主统一用 `toISOString` 产出）。 */
@@ -113,4 +115,213 @@ export function heartbeatFacts(
   if (!run || run.leaseId !== leaseId) return []
   const next: RunRow = { ...run, leaseUntil: plusMs(now, limits.leaseMs) }
   return [{ type: 'run.lease_extended', actor, at: now, payload: { run: next } }]
+}
+
+// ---------- 回执 ----------
+
+/** 终态 run 行：`status` 已归一，后续按事实名分派。 */
+export type SettledRun = RunRow & { status: RunTerminalStatus }
+
+/** 回执被拒原因（写进 `run.receipt_rejected.reason`，供 why 链审计）。 */
+export type ReceiptRejectionReason = 'terminal' | 'lease_mismatch' | 'turn_mismatch'
+
+const isTerminalStatus = (status: RunRow['status']): boolean =>
+  status === 'succeeded' || status === 'failed' || status === 'cancelled'
+
+/**
+ * 回执校验（SPEC-kernel「调度」）：先看终态，再比租约，最后比轮次。
+ * - `terminal`：run 已落终态，迟到 / 重复回执只审计；
+ * - `lease_mismatch`：旧 attempt 或别的租约；
+ * - `turn_mismatch`：上一轮的回执。
+ */
+export function receiptRejection(run: RunRow, receipt: Receipt): ReceiptRejectionReason | null {
+  if (isTerminalStatus(run.status)) return 'terminal'
+  if (run.leaseId !== receipt.leaseId) return 'lease_mismatch'
+  if (run.turn !== receipt.turn) return 'turn_mismatch'
+  return null
+}
+
+/** 迟到 / 重复 / 不匹配回执的审计事实：只记账，不覆盖终态（D10）。 */
+export function rejectedReceiptFacts(
+  run: RunRow,
+  receipt: Receipt,
+  reason: ReceiptRejectionReason,
+  now: Iso,
+  actor: Actor,
+): FactDraft<'run.receipt_rejected'>[] {
+  return [
+    {
+      type: 'run.receipt_rejected',
+      actor,
+      at: now,
+      payload: { runId: run.id, leaseId: receipt.leaseId, turn: receipt.turn, reason },
+    },
+  ]
+}
+
+/**
+ * 用回执构造终态 run 行：终态归一、写用量与退出信息、清租约与超时时刻（D5/D10）。
+ *
+ * `error` 取回执里的失败文案（给人看），`errorCode` 仍是归类；成功终态恒为 null
+ * （成功回执即使带了 error 也不落库）。
+ */
+export function settledRun(run: RunRow, receipt: Receipt, now: Iso): SettledRun {
+  const status = receipt.status
+  const errorCode =
+    status === 'succeeded'
+      ? null
+      : (receipt.errorCode ?? (status === 'failed' ? 'run_failed' : 'cancelled'))
+  return {
+    ...run,
+    status,
+    output: receipt.output ?? run.output,
+    error: status === 'succeeded' ? null : (receipt.error ?? null),
+    errorCode,
+    exitCode: receipt.exitCode ?? null,
+    sessionId: receipt.sessionId ?? run.sessionId,
+    usage: receipt.usage ?? run.usage,
+    durationMs: receipt.durationMs ?? null,
+    endedAt: now,
+    leaseId: null,
+    leaseUntil: null,
+    deadlineAt: null,
+  }
+}
+
+/** 终态事实：按归一后的 status 产 `run.succeeded` / `run.failed` / `run.cancelled`。 */
+export function settlementFacts(
+  run: SettledRun,
+  now: Iso,
+  actor: Actor,
+): FactDraft<'run.succeeded' | 'run.failed' | 'run.cancelled'>[] {
+  switch (run.status) {
+    case 'succeeded':
+      return [{ type: 'run.succeeded', actor, at: now, payload: { run } }]
+    case 'failed':
+      return [{ type: 'run.failed', actor, at: now, payload: { run } }]
+    case 'cancelled':
+      return [{ type: 'run.cancelled', actor, at: now, payload: { run } }]
+  }
+}
+
+/**
+ * 回执带 `ask[]`：挂起等回答（D12）。释放租约与超时时刻（并发位由 `occupiedSlots`
+ * 只数 `running` 自然让出）；会话 id 记在 run 上供续接。`cardIds` 在 M2 恒为空，
+ * 卡片由 M4 投递后补。
+ */
+export function waitingRun(run: RunRow, receipt: Receipt): RunRow & { status: 'waiting' } {
+  return {
+    ...run,
+    status: 'waiting',
+    sessionId: receipt.sessionId ?? run.sessionId,
+    leaseId: null,
+    leaseUntil: null,
+    deadlineAt: null,
+  }
+}
+
+export function waitingFacts(
+  run: RunRow & { status: 'waiting' },
+  now: Iso,
+  actor: Actor,
+): FactDraft<'run.waiting'>[] {
+  return [{ type: 'run.waiting', actor, at: now, payload: { run, cardIds: [] } }]
+}
+
+// ---------- 时间与宿主兜底 ----------
+
+/** 租约是否已过期（只有 running 持有租约）。 */
+export function leaseExpired(run: RunRow, now: Iso): boolean {
+  return run.status === 'running' && run.leaseUntil !== null && run.leaseUntil <= now
+}
+
+/** 运行是否已到单次超时时刻（只有 running 有 deadline）。 */
+export function deadlineReached(run: RunRow, now: Iso): boolean {
+  return run.status === 'running' && run.deadlineAt !== null && run.deadlineAt <= now
+}
+
+/** 退避时长：`backoffBaseMs × 2^(attempts-1)`，封顶 `backoffCapMs`（SPEC-kernel「调度」）。 */
+export function backoffMs(attempts: number, limits: Limits): number {
+  return Math.min(limits.backoffBaseMs * 2 ** (attempts - 1), limits.backoffCapMs)
+}
+
+/** 终态 run 行（失败/取消）：清租约与超时时刻、写 endedAt，其余按调用方覆盖。 */
+function terminalRow(run: RunRow, now: Iso, over: Partial<RunRow>): RunRow {
+  return {
+    ...run,
+    endedAt: now,
+    leaseId: null,
+    leaseUntil: null,
+    deadlineAt: null,
+    ...over,
+  }
+}
+
+/**
+ * 租约过期（D3）：`attempts+1` 后回 `queued` + 退避（`notBefore = now + backoff`），
+ * 达到 `maxAttempts` 时改为 `run.failed{executor_lost}`，不再入队。
+ */
+export function abandonedFacts(
+  run: RunRow,
+  now: Iso,
+  limits: Limits,
+  actor: Actor,
+): FactDraft<'run.abandoned' | 'run.failed'>[] {
+  const attempts = run.attempts + 1
+  if (attempts >= limits.maxAttempts) {
+    const failed = terminalRow(run, now, {
+      status: 'failed',
+      error: null,
+      errorCode: 'executor_lost',
+      attempts,
+    })
+    return [{ type: 'run.failed', actor, at: now, payload: { run: failed } }]
+  }
+  const next: RunRow = {
+    ...run,
+    status: 'queued',
+    attempts,
+    notBefore: plusMs(now, backoffMs(attempts, limits)),
+    leaseId: null,
+    leaseUntil: null,
+    deadlineAt: null,
+  }
+  return [{ type: 'run.abandoned', actor, at: now, payload: { run: next } }]
+}
+
+/** 单次运行超时（D5）：`deadlineAt` 到期 → `run.failed{errorCode:'timeout'}`，actor 由调用方给 host/timeout。 */
+export function timeoutFacts(run: RunRow, now: Iso, actor: Actor): FactDraft<'run.failed'>[] {
+  const failed = terminalRow(run, now, { status: 'failed', error: null, errorCode: 'timeout' })
+  return [{ type: 'run.failed', actor, at: now, payload: { run: failed } }]
+}
+
+/**
+ * 宿主兜底终态（D14）：执行器不可达 / 超时无回执 / 取消无回执时由宿主写终态。
+ *
+ * 只在 run 非终态且（可选的）`leaseId` / `turn` 与当前轮匹配时产事实；重复或迟到的
+ * `run.host_settled` 返回零事实（幂等）。宿主兜底不产成功终态。
+ */
+export function hostSettledFacts(
+  run: RunRow,
+  input: RunHostSettledInput,
+  now: Iso,
+  actor: Actor,
+): FactDraft<'run.failed' | 'run.cancelled'>[] {
+  if (isTerminalStatus(run.status) || input.status === 'succeeded') return []
+  if (input.leaseId !== undefined && run.leaseId !== input.leaseId) return []
+  if (input.turn !== undefined && run.turn !== input.turn) return []
+  const status = input.status
+  const next = terminalRow(run, now, {
+    status,
+    error: input.error ?? null,
+    errorCode: input.errorCode ?? (status === 'failed' ? 'executor_lost' : 'cancelled'),
+    output: input.output ?? run.output,
+    sessionId: input.sessionId ?? run.sessionId,
+    usage: input.usage ?? run.usage,
+    exitCode: input.exitCode ?? null,
+    durationMs: input.durationMs ?? null,
+  })
+  return status === 'failed'
+    ? [{ type: 'run.failed', actor, at: now, payload: { run: next } }]
+    : [{ type: 'run.cancelled', actor, at: now, payload: { run: next } }]
 }

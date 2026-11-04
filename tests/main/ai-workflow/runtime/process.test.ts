@@ -7,7 +7,7 @@ const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
 
 const { createLineReader, defaultSpawn, killProcessTree, tail } =
-  await import('../../../../src/main/ai-workflow/runtime/process')
+  await import('../../../../src/host/process')
 
 function fakeChild(): {
   pid: number

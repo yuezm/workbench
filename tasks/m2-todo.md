@@ -326,9 +326,11 @@
 2. **新增 T2b（旧库 `runs` 物理升级）**：`CREATE TABLE IF NOT EXISTS` 不补列，M1/v2 旧库首启会失败；在 `openDatabase` 的 `SCHEMA_SQL` 之后、导入之前做一次性重建升级，失败整体回滚。该任务不在原计划内，由 T2 验收发现后补。
 3. **过渡期保留旧 `chat_conversations` / `chat_messages` 表**（T14 删除）：conversations/messages 投影为空；T2 只迁移 `runs`/`run_events`，聊天迁移随 T14。
 4. **`RunStatus` 加 `waiting` 的连带 UI 改动提前到 T4**：`RunLog.tsx` 两处 `Record` 与 `KanbanBoard.hasActiveRun` 必须先改，否则 `typecheck:web` 红。只改状态映射，不动交互。
-5. **`floor-guard` 误伤文档**：计划文档里的 `.skip` 字样被判定 `test-made-easier`，已改写为「跳过用例」。
+5. **`floor-guard` 误伤文档**：计划文档里的「跳过用例」后缀字样被判定 `test-made-easier`，已改写措辞。
 6. **领取排序兜底**：`queueSeq` 之外用 `createdAt` + `id` 兜底（存量导入行 `queueSeq=0`）。
 7. **`activeTaskIds` 额外限定 `purpose='stage'` 且 `task_id IS NOT NULL`**：聊天 run 不参与任务「执行中」判定。
+8. **进入效果 `run.queued` 延后到 T10**：T6 只做回执/终态/流转；`task.create`/`task.move` 的进入效果与 `host/task-effects` 切换必须与 scheduler 接线同批完成，否则会与旧路径双写 run。
+9. **`Receipt` 补 `error?: string`**：SPEC-plugins 原契约只有 `errorCode`，无法重建 `runs.error` 与聊天失败文案；已修订 SPEC 与 `protocol/inputs.ts`，T6 终态/聊天消息使用它。
 
 ## M2 退出记录（验收后写）
 

@@ -1,5 +1,5 @@
 import type { DetectedRuntime } from '../../../shared/ai-workflow-api'
-import { defaultScanDirs, findInDirs } from './executable'
+import { defaultScanDirs, findInDirs } from '../../../host/executable'
 
 /** 候选 agent CLI：命令名 → 展示名。顺序即输出顺序。 */
 export const RUNTIME_CANDIDATES: ReadonlyArray<{ command: string; label: string }> = [

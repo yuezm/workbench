@@ -1,16 +1,16 @@
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { _electron as electron } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import { launchApp, type LaunchedApp } from './helpers/launch'
 
-let electronApp: ElectronApplication
+let launched: LaunchedApp
 let page: Page
 
 test.beforeEach(async () => {
-  electronApp = await electron.launch({ args: ['.'] })
-  page = await electronApp.firstWindow()
+  launched = await launchApp()
+  page = launched.page
 })
 
 test.afterEach(async () => {
-  await electronApp.close()
+  await launched.close()
 })
 
 /** 倒计时大数字（唯一匹配 mm:ss / mmm:ss 格式的文本） */

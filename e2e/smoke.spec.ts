@@ -1,16 +1,16 @@
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { _electron as electron } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import { launchApp, type LaunchedApp } from './helpers/launch'
 
-let electronApp: ElectronApplication
+let launched: LaunchedApp
 let page: Page
 
 test.beforeEach(async () => {
-  electronApp = await electron.launch({ args: ['.'] })
-  page = await electronApp.firstWindow()
+  launched = await launchApp()
+  page = launched.page
 })
 
 test.afterEach(async () => {
-  await electronApp.close()
+  await launched.close()
 })
 
 test('启动冒烟：窗口标题与顶部 app 标签栏就绪', async () => {

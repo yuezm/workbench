@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Agent, ChatConversation, ChatMessage } from '../../../../../shared/ai-workflow-api'
+import type { ChatStreamState } from '../hooks/useChat'
 import { ChatPanel, type ChatPanelProps } from './ChatPanel'
 
 const agent: Agent = {
@@ -14,7 +15,7 @@ const agent: Agent = {
 }
 
 function conv(id: string, title: string, agentId = 'a1'): ChatConversation {
-  return { id, title, agentId, createdAt: 't', updatedAt: 't' }
+  return { id, title, agentId, sessionId: null, createdAt: 't', updatedAt: 't' }
 }
 
 function msg(
@@ -27,12 +28,16 @@ function msg(
   return { id, conversationId, role, content, error, createdAt: 't' }
 }
 
+function stream(over: Partial<ChatStreamState> = {}): ChatStreamState {
+  return { text: '', thinking: '', tools: [], ...over }
+}
+
 function makeProps(overrides: Partial<ChatPanelProps> = {}): ChatPanelProps {
   return {
     agents: [agent],
     conversation: conv('c1', '第一段对话'),
     messages: [],
-    streaming: '',
+    streaming: stream(),
     sending: false,
     error: null,
     onSend: vi.fn(async () => true),
@@ -107,7 +112,7 @@ describe('ChatPanel', () => {
     expect(input).toHaveValue('发不出去')
   })
 
-  it('发送中显示「停止」并触发 onCancel，流式文本随增量显示', async () => {
+  it('发送中显示「停止」并触发 onCancel，流式正文随增量显示', async () => {
     const onCancel = vi.fn()
     const user = userEvent.setup()
     const { rerender } = render(<ChatPanel {...makeProps({ sending: true, onCancel })} />)
@@ -117,9 +122,34 @@ describe('ChatPanel', () => {
     expect(onCancel).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('button', { name: '发送' })).toBeNull()
 
-    rerender(<ChatPanel {...makeProps({ sending: true, streaming: '你好' })} />)
+    rerender(<ChatPanel {...makeProps({ sending: true, streaming: stream({ text: '你好' }) })} />)
     expect(screen.getByText('你好')).toBeInTheDocument()
     expect(screen.queryByText('正在输出…')).toBeNull()
+  })
+
+  it('流式 thinking 与工具事件以次要样式展示，工具内容过长会截断', () => {
+    const longContent = `{"path":"${'a'.repeat(200)}"}`
+    render(
+      <ChatPanel
+        {...makeProps({
+          sending: true,
+          streaming: stream({
+            thinking: '正在思考',
+            tools: [
+              { tool: 'read', content: longContent, isError: false },
+              { tool: 'grep', content: '短内容', isError: false },
+              { tool: 'write', content: '', isError: true },
+            ],
+          }),
+        })}
+      />,
+    )
+
+    expect(screen.getByText('正在思考').className).toContain('italic')
+    expect(screen.getByText(/read · \{"path":"a+…$/)).toBeInTheDocument()
+    expect(screen.getByText('grep · 短内容')).toBeInTheDocument()
+    const failed = screen.getByText('write')
+    expect(failed.className).toContain('text-red-300')
   })
 
   it('渲染消息流与消息级错误文案', () => {
@@ -141,7 +171,6 @@ describe('ChatPanel', () => {
 
   it('错误条渲染在输入区上方', () => {
     render(<ChatPanel {...makeProps({ error: '发送失败' })} />)
-
     expect(screen.getByText('发送失败')).toBeInTheDocument()
   })
 })

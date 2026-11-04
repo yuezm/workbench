@@ -3,7 +3,9 @@ import type {
   AgentInput,
   Runtime,
   RuntimeInput,
-  RuntimeTestResult,
+  RuntimeProbe,
+  RuntimeProtocolFamily,
+  RuntimeStatus,
   TaskInput,
   WorkflowInput,
 } from '../../shared/ai-workflow-api'
@@ -12,7 +14,7 @@ import type { ChatService } from './chat'
 import { completeTask, enterTaskStage, moveTaskToStage, type Enqueue } from './engine'
 import type { Repository } from './repository'
 import { detectInstalledRuntimes } from './runtime/detect'
-import { probeRuntime } from './runtime/probe'
+import type { RuntimeBackend } from './runtime/registry'
 
 /** 纯分发器：方法名 + 参数 → 结果；不含 electron 依赖，便于单测。 */
 export type AiWorkflowHandler = (method: string, args: unknown[]) => unknown
@@ -23,13 +25,20 @@ export interface AiWorkflowIpcDeps {
   onQueue?: Enqueue
   /** 聊天执行服务；缺省时 chat.* 明确报错，避免静默无输出 */
   chat?: ChatService
-  /** 运行时连通性探测；可注入假实现用于单测（缺省真实 spawn） */
-  probeRuntime?: (runtime: Runtime) => Promise<RuntimeTestResult>
+  /** 协议后端（装配时注入；测试用假实现） */
+  backendFor: (family: RuntimeProtocolFamily) => RuntimeBackend
+}
+
+/** 运行时配置里参与启动的部分（探测/模型目录只关心命令与 profile） */
+function targetOf(runtime: Pick<Runtime, 'command' | 'profile'>): {
+  command: string
+  profile: string
+} {
+  return { command: runtime.command, profile: runtime.profile }
 }
 
 export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHandler {
-  const { repo, notifyChanged, onQueue = () => {} } = deps
-  const probe = deps.probeRuntime ?? ((runtime: Runtime) => probeRuntime(runtime))
+  const { repo, notifyChanged, onQueue = () => {}, backendFor } = deps
 
   const mutate = (fn: () => unknown): unknown => {
     const result = fn()
@@ -42,16 +51,62 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     return deps.chat
   }
 
+  /** 探测并把结论写回运行时（探测错误不抛：落库成 unavailable） */
+  const probeAndSave = async (runtime: Runtime): Promise<RuntimeProbe> => {
+    const probe = await backendFor(runtime.protocolFamily).probe(targetOf(runtime))
+    repo.runtimeSetProbe(runtime.id, probe)
+    return probe
+  }
+
   const table: Record<string, (a: unknown[]) => unknown> = {
     'runtimes.list': () => repo.runtimesList(),
-    'runtimes.create': (a) => mutate(() => repo.runtimeCreate(a[0] as RuntimeInput)),
-    'runtimes.update': (a) =>
-      mutate(() => repo.runtimeUpdate(a[0] as string, a[1] as Partial<RuntimeInput>)),
+    // 创建前先探测：命令/profile 不通就不落库，避免留下不可用的记录
+    'runtimes.create': async (a) => {
+      const input = a[0] as RuntimeInput
+      const probe = await backendFor(input.protocolFamily ?? 'dsh').probe({
+        command: input.command?.trim() || 'dsh',
+        profile: input.profile?.trim() || 'multica',
+      })
+      if (probe.state !== 'ready') {
+        throw new Error(`探测失败：${probe.error ?? '未知错误'}`)
+      }
+      const runtime = repo.runtimeCreate(input)
+      const saved = repo.runtimeSetProbe(runtime.id, probe)
+      notifyChanged()
+      return saved
+    },
+    // 保存后重新探测：配置可能暂时不可用，结论落库由 UI 呈现
+    'runtimes.update': async (a) => {
+      const runtime = repo.runtimeUpdate(a[0] as string, a[1] as Partial<RuntimeInput>)
+      const probe = await probeAndSave(runtime)
+      notifyChanged()
+      return { ...runtime, lastProbe: probe }
+    },
     'runtimes.remove': (a) => mutate(() => repo.runtimeRemove(a[0] as string)),
-    // 只读探测：不写库、不触发 changed
+    // 只读探测：不 spawn、不写库
     'runtimes.detect': () => detectInstalledRuntimes(),
-    // 连通性测试：真实调用一次运行时，但不建 run、不写库
-    'runtimes.test': (a) => probe(repo.runtimeGet(a[0] as string)),
+    // 真实探测：写回结论（探测不调用模型、不建 run）
+    'runtimes.probe': async (a) => {
+      const probe = await probeAndSave(repo.runtimeGet(a[0] as string))
+      notifyChanged()
+      return probe
+    },
+    // 实时负载：在跑/排队数按运行时现算
+    'runtimes.statuses': () => {
+      const workloads = new Map(repo.runtimeWorkloads().map((w) => [w.runtimeId, w]))
+      return repo.runtimesList().map((runtime): RuntimeStatus => ({
+        runtimeId: runtime.id,
+        workload: {
+          running: workloads.get(runtime.id)?.running ?? 0,
+          queued: workloads.get(runtime.id)?.queued ?? 0,
+          maxConcurrent: runtime.maxConcurrent,
+        },
+      }))
+    },
+    'runtimes.models': (a) => {
+      const runtime = repo.runtimeGet(a[0] as string)
+      return backendFor(runtime.protocolFamily).models(targetOf(runtime))
+    },
 
     'agents.list': () => repo.agentsList(),
     'agents.create': (a) => mutate(() => repo.agentCreate(a[0] as AgentInput)),
@@ -79,6 +134,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     'tasks.remove': (a) => mutate(() => repo.taskRemove(a[0] as string)),
 
     'runs.listByTask': (a) => repo.runsListByTask(a[0] as string),
+    'runs.events': (a) => repo.runEventsList(a[0] as string),
 
     'chat.listConversations': () => repo.chatConversationsList(),
     'chat.createConversation': (a) => mutate(() => repo.chatConversationCreate(a[0] as string)),

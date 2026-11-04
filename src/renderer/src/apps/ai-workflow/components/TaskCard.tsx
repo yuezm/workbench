@@ -5,6 +5,8 @@ import { cn } from '../../../lib/cn'
 interface TaskCardProps {
   task: Task
   stage: WorkflowStage
+  /** 是否存在 queued/running 的 run：执行中的卡片由 run 结果推进，不可拖拽 */
+  executing: boolean
   /** 正在被拖动：本卡片半透明，表示这是拖拽源 */
   dragging?: boolean
   onDragStart: (task: Task) => void
@@ -15,18 +17,17 @@ interface TaskCardProps {
 const HINTS: Record<WorkflowStage['entryMode'], string> = {
   none: '拖到其它阶段推进',
   user: '等待你处理',
-  agent: '执行中…',
+  agent: '上次执行未完成，可拖走重试',
 }
 
 export function TaskCard({
   task,
   stage,
+  executing,
   dragging = false,
   onDragStart,
   onDragEnd,
 }: TaskCardProps): ReactElement {
-  // 执行中的卡片由 run 结果推进，不允许手动拖走
-  const executing = stage.entryMode === 'agent'
   return (
     <article
       draggable={!executing}
@@ -50,7 +51,7 @@ export function TaskCard({
         {executing && (
           <span className="size-1.5 animate-pulse rounded-full bg-focus" aria-hidden="true" />
         )}
-        {HINTS[stage.entryMode]}
+        {executing ? '执行中…' : HINTS[stage.entryMode]}
       </div>
     </article>
   )

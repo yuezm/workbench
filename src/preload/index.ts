@@ -26,7 +26,9 @@ const aiWorkflow: AiWorkflowApi = {
     update: (id, patch) => invoke('runtimes.update', id, patch),
     remove: (id) => invoke('runtimes.remove', id),
     detect: () => invoke('runtimes.detect'),
-    test: (id) => invoke('runtimes.test', id),
+    probe: (id) => invoke('runtimes.probe', id),
+    statuses: () => invoke('runtimes.statuses'),
+    models: (id) => invoke('runtimes.models', id),
   },
   agents: {
     list: () => invoke('agents.list'),
@@ -49,6 +51,7 @@ const aiWorkflow: AiWorkflowApi = {
   },
   runs: {
     listByTask: (taskId) => invoke('runs.listByTask', taskId),
+    events: (runId) => invoke('runs.events', runId),
   },
   chat: {
     listConversations: () => invoke('chat.listConversations'),

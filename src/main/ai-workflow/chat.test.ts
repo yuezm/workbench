@@ -1,384 +1,476 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  Agent,
-  ChatConversation,
-  ChatMessage,
-  ChatRole,
-  ChatStreamEvent,
-  Runtime,
-} from '../../shared/ai-workflow-api'
-import { buildChatPrompt, ChatService, titleFromContent, type ChatServiceDeps } from './chat'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+import type { ChatStreamEvent, RunEvent } from '../../shared/ai-workflow-api'
+import { buildChatPrompt, ChatService, titleFromContent } from './chat'
 import { openDb } from './db'
 import { Repository } from './repository'
-import type { RuntimeAdapter } from './runtime/deepseek-harness'
+import type { DshRunOutcome, DshRunRequest } from './runtime/dsh'
+import type { RuntimeBackend } from './runtime/registry'
 
 let db: DatabaseSync
 let repo: Repository
-let runtime: Runtime
-let agent: Agent
-let conversation: ChatConversation
+
+function outcome(over: Partial<DshRunOutcome> = {}): DshRunOutcome {
+  return {
+    status: 'succeeded',
+    output: '回答',
+    error: null,
+    errorCode: null,
+    exitCode: 0,
+    sessionId: 'sess-new',
+    resumeRejected: false,
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    durationMs: 1,
+    ...over,
+  }
+}
+
+interface Harness {
+  service: ChatService
+  conversationId: string
+  execute: ExecuteMock
+  events: ChatStreamEvent[]
+}
+
+type ExecuteMock = Mock<(request: DshRunRequest) => Promise<DshRunOutcome>>
+
+function harness(
+  execute: RuntimeBackend['execute'],
+  options: { systemPrompt?: string } = {},
+): Harness {
+  const runtime = repo.runtimeCreate({ name: 'r-' + Math.random().toString(36).slice(2, 8) })
+  const agent = repo.agentCreate({
+    name: 'coder',
+    runtimeId: runtime.id,
+    systemPrompt: options.systemPrompt ?? '你是助手',
+  })
+  const conversation = repo.chatConversationCreate(agent.id)
+  const events: ChatStreamEvent[] = []
+  const service = new ChatService({
+    repo,
+    emit: (event) => events.push(event),
+    backendFor: () => ({
+      probe: vi.fn(),
+      models: vi.fn(),
+      execute: execute as RuntimeBackend['execute'],
+    }),
+    requestId: () => 'req-1',
+    timeoutMs: 1_000,
+  })
+  return {
+    service,
+    conversationId: conversation.id,
+    execute: execute as unknown as ExecuteMock,
+    events,
+  }
+}
+
+async function waitFor(cond: () => boolean): Promise<void> {
+  for (let i = 0; i < 200; i += 1) {
+    if (cond()) return
+    await new Promise((resolve) => setTimeout(resolve, 1))
+  }
+  throw new Error('等待超时')
+}
 
 beforeEach(() => {
   db = openDb(':memory:')
   repo = new Repository(db)
-  runtime = repo.runtimeCreate({ name: 'ds', command: 'dsh', args: ['-p', '{prompt}'] })
-  agent = repo.agentCreate({ name: 'coder', runtimeId: runtime.id, systemPrompt: '你是助手' })
-  conversation = repo.chatConversationCreate(agent.id)
 })
-afterEach(() => {
-  vi.useRealTimers()
-  db.close()
-})
-
-interface Harness {
-  service: ChatService
-  events: ChatStreamEvent[]
-  /** 等本轮的 end 事件（每轮调用一次，注意在 send 之前创建） */
-  end(): Promise<void>
-  chunks(): string[]
-}
-
-function makeHarness(adapterFor: ChatServiceDeps['adapterFor']): Harness {
-  const events: ChatStreamEvent[] = []
-  let resolveEnd: (() => void) | undefined
-  const service = new ChatService({
-    repo,
-    emit: (event) => {
-      events.push(event)
-      if (event.type === 'end') resolveEnd?.()
-    },
-    adapterFor,
-  })
-  return {
-    service,
-    events,
-    end: () =>
-      new Promise<void>((resolve) => {
-        resolveEnd = resolve
-      }),
-    chunks: () => events.flatMap((e) => (e.type === 'chunk' ? [e.chunk ?? ''] : [])),
-  }
-}
-
-function messages(): ChatMessage[] {
-  return repo.chatMessagesList(conversation.id)
-}
-
-/** 发起一轮并等它结束（任何路径都会 emit end） */
-async function sendAndWait(h: Harness, content: string): Promise<void> {
-  const end = h.end()
-  await h.service.send(conversation.id, content)
-  await end
-}
+afterEach(() => db.close())
 
 describe('titleFromContent', () => {
-  it('取首行并去掉首尾空白', () => {
-    expect(titleFromContent('  第一行\n第二行  ')).toBe('第一行')
-  })
-
-  it('超过 24 字符截断并加省略号（按码点，不切 emoji）', () => {
-    const title = titleFromContent('一'.repeat(30))
-    expect(title).toBe('一'.repeat(24) + '…')
-    expect(title).toHaveLength(25)
-    expect(titleFromContent('😀'.repeat(30))).toBe('😀'.repeat(24) + '…')
-  })
-
-  it('恰好 24 字符不截断', () => {
-    const exact = '二'.repeat(24)
-    expect(titleFromContent(exact)).toBe(exact)
-  })
-
-  it('空内容 / 全是空白回落默认标题', () => {
+  it('取首行、去空白、超长截断', () => {
+    expect(titleFromContent('  第一行\n第二行 ')).toBe('第一行')
     expect(titleFromContent('')).toBe('新对话')
-    expect(titleFromContent('  \n\t ')).toBe('新对话')
+    expect(titleFromContent('   \n ')).toBe('新对话')
+    const long = '字'.repeat(30)
+    expect(titleFromContent(long)).toBe('字'.repeat(24) + '…')
   })
 })
 
 describe('buildChatPrompt', () => {
-  const msg = (role: ChatRole, content: string): ChatMessage => ({
-    id: role + content,
-    conversationId: 'c',
-    role,
-    content,
-    error: null,
-    createdAt: '2026-01-01T00:00:00.000Z',
-  })
-
-  it('带 systemPrompt：系统提示 + 对话记录 + 结尾提示', () => {
-    const prompt = buildChatPrompt(agent, [
-      msg('user', '你好'),
-      msg('assistant', '在'),
-      msg('user', '再看下'),
-    ])
-    expect(prompt.startsWith('你是助手')).toBe(true)
+  it('有 systemPrompt 时放在最前，并带对话记录与结尾提示', () => {
+    const prompt = buildChatPrompt(
+      { systemPrompt: '规则' } as never,
+      [
+        { role: 'user', content: '你好' },
+        { role: 'assistant', content: '在' },
+      ] as never,
+    )
+    expect(prompt.startsWith('规则')).toBe(true)
     expect(prompt).toContain('# 对话记录')
-    expect(prompt).toContain('用户：你好\n助手：在\n用户：再看下')
-    expect(prompt.trimEnd().endsWith('请回答最后一条用户消息。')).toBe(true)
+    expect(prompt).toContain('用户：你好')
+    expect(prompt).toContain('助手：在')
+    expect(prompt).toContain('请回答最后一条用户消息。')
   })
 
-  it('无 systemPrompt 时不带空段，直接以对话记录开头', () => {
-    const prompt = buildChatPrompt({ ...agent, systemPrompt: '   ' }, [msg('user', '只有一条')])
+  it('systemPrompt 为空时不插入空段', () => {
+    const prompt = buildChatPrompt(
+      { systemPrompt: '  ' } as never,
+      [{ role: 'user', content: 'hi' }] as never,
+    )
     expect(prompt.startsWith('# 对话记录')).toBe(true)
-    expect(prompt).not.toContain('\n\n\n')
-    expect(prompt).toContain('用户：只有一条')
   })
 })
 
 describe('ChatService', () => {
-  it('正常一轮：用户消息落库、首轮改标题、chunk 依次推送、assistant 落库并 end', async () => {
-    const adapter: RuntimeAdapter = {
-      run: async ({ onOutput }) => {
-        onOutput('你好')
-        onOutput('，世界')
-        return { code: 0, output: '你好，世界' }
-      },
-    }
-    const h = makeHarness(() => adapter)
-    await sendAndWait(h, '  帮我看下这段代码\n第二行  ')
+  it('首轮：写用户消息、执行、落助手消息并记录会话 id', async () => {
+    const execute = vi.fn(async (_request: DshRunRequest) => outcome({ output: '你好呀' }))
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '你好')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
 
-    expect(repo.chatConversationGet(conversation.id).title).toBe('帮我看下这段代码')
-    const list = messages()
-    expect(list.map((m) => m.role)).toEqual(['user', 'assistant'])
-    // 落库内容只去掉首尾空白，内部换行保留
-    expect(list[0].content).toBe('帮我看下这段代码\n第二行')
-    expect(list[0].error).toBeNull()
-    expect(list[1].content).toBe('你好，世界')
-    expect(list[1].error).toBeNull()
+    const messages = repo.chatMessagesList(h.conversationId)
+    expect(messages.map((m) => m.role)).toEqual(['user', 'assistant'])
+    expect(messages[1].content).toBe('你好呀')
+    expect(messages[1].error).toBeNull()
+    expect(repo.chatConversationGet(h.conversationId).sessionId).toBe('sess-new')
+    expect(repo.chatConversationGet(h.conversationId).title).toBe('你好')
 
-    expect(h.events[0]).toEqual({
-      conversationId: conversation.id,
-      type: 'chunk',
-      chunk: '你好',
+    const request = execute.mock.calls[0][0]
+    expect(request.prompt).toContain('你是助手')
+    expect(request.prompt).toContain('用户：你好')
+    expect(request.resumeSessionId).toBeNull()
+    expect(h.events.at(-1)).toEqual({ conversationId: h.conversationId, type: 'end' })
+  })
+
+  it('事件按流推送（text/tool），助手消息内容以最终输出为准', async () => {
+    const execute = vi.fn(async ({ onEvent }: { onEvent?: (event: RunEvent) => void }) => {
+      onEvent?.({ seq: 1, type: 'status', status: 'running' })
+      onEvent?.({ seq: 2, type: 'text', text: '流式' })
+      onEvent?.({ seq: 3, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' })
+      return outcome({ output: '最终' })
     })
-    expect(h.chunks()).toEqual(['你好', '，世界'])
-    expect(h.events.filter((e) => e.type === 'end')).toEqual([
-      { conversationId: conversation.id, type: 'end' },
-    ])
-    expect(h.service.isRunning(conversation.id)).toBe(false)
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '问题')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+
+    const types = h.events.filter((e) => e.type === 'event').map((e) => e.event?.type)
+    expect(types).toEqual(['status', 'text', 'tool_call'])
+    expect(repo.chatMessagesList(h.conversationId)[1].content).toBe('最终')
   })
 
-  it('第二轮带上完整历史且不改标题；结束后 touch updated_at；workdir 缺省回落 cwd', async () => {
-    const prompts: string[] = []
-    const workdirs: string[] = []
-    const adapter: RuntimeAdapter = {
-      run: async ({ prompt, workdir, onOutput }) => {
-        prompts.push(prompt)
-        workdirs.push(workdir)
-        onOutput('好的')
-        return { code: 0, output: '好的' }
-      },
-    }
-    const h = makeHarness(() => adapter)
-    await sendAndWait(h, '第一条')
-    const first = repo.chatConversationGet(conversation.id)
+  it('第二轮起用会话续接：只发新消息并带上 session id', async () => {
+    const execute = vi.fn(async (_request: DshRunRequest) => outcome({ output: '一' }))
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '第一问')
+    await waitFor(() => repo.chatConversationGet(h.conversationId).sessionId === 'sess-new')
 
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-02-02T00:00:00.000Z'))
-    await sendAndWait(h, '第二条')
-    const second = repo.chatConversationGet(conversation.id)
-
-    expect(second.title).toBe('第一条')
-    expect(second.updatedAt).toBe('2026-02-02T00:00:00.000Z')
-    expect(second.updatedAt).not.toBe(first.updatedAt)
-    expect(prompts[1]).toContain('用户：第一条')
-    expect(prompts[1]).toContain('助手：好的')
-    expect(prompts[1]).toContain('用户：第二条')
-    expect(workdirs).toEqual([process.cwd(), process.cwd()])
+    execute.mockImplementation(async () => outcome({ output: '二', sessionId: 'sess-2' }))
+    await h.service.send(h.conversationId, '第二问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 4)
+    const second = execute.mock.calls[1][0]
+    expect(second.prompt).toBe('第二问')
+    expect(second.resumeSessionId).toBe('sess-new')
+    expect(repo.chatConversationGet(h.conversationId).sessionId).toBe('sess-2')
   })
 
-  it('workdir 优先取运行时配置', async () => {
-    repo.runtimeUpdate(runtime.id, { workdir: 'D:/Codes/workbench' })
-    const workdirs: string[] = []
-    const h = makeHarness(() => ({
-      run: async ({ workdir }) => {
-        workdirs.push(workdir)
-        return { code: 0, output: 'ok' }
-      },
-    }))
-    await sendAndWait(h, 'hi')
-    expect(workdirs).toEqual(['D:/Codes/workbench'])
+  it('续接被拒：清 session 后用完整历史重试一次', async () => {
+    const execute = vi.fn(async (_request: DshRunRequest) => outcome({ output: '一' }))
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '第一问')
+    await waitFor(() => repo.chatConversationGet(h.conversationId).sessionId === 'sess-new')
+
+    execute.mockImplementationOnce(async () =>
+      outcome({
+        status: 'failed',
+        output: '',
+        error: '会话失效',
+        resumeRejected: true,
+        sessionId: 'sess-new',
+      }),
+    )
+    execute.mockImplementationOnce(async () => outcome({ output: '重试成功', sessionId: 'sess-3' }))
+    await h.service.send(h.conversationId, '第二问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 4)
+
+    expect(execute).toHaveBeenCalledTimes(3)
+    const retry = execute.mock.calls[2][0]
+    expect(retry.resumeSessionId).toBeNull()
+    expect(retry.prompt).toContain('# 对话记录')
+    const assistant = repo.chatMessagesList(h.conversationId)[3]
+    expect(assistant.content).toBe('重试成功')
+    expect(assistant.error).toBeNull()
+    expect(repo.chatConversationGet(h.conversationId).sessionId).toBe('sess-3')
   })
 
-  it('成功时 assistant content 取适配器返回的完整输出', async () => {
-    const adapter: RuntimeAdapter = {
-      run: async ({ onOutput }) => {
-        onOutput('片段')
-        return { code: 0, output: '片段+补全' }
-      },
-    }
-    const h = makeHarness(() => adapter)
-    await sendAndWait(h, 'hi')
-    expect(h.chunks()).toEqual(['片段'])
-    expect(messages().at(-1)?.content).toBe('片段+补全')
+  it('续接两次都被拒：落一条失败消息，不再重试', async () => {
+    const execute = vi.fn(async (_request: DshRunRequest) =>
+      outcome({ resumeRejected: true, status: 'failed' }),
+    )
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect(repo.chatMessagesList(h.conversationId)[1].error).toBe('执行失败')
   })
 
-  it('非零退出：记「退出码 N」，content 用已累积输出，仍发 end', async () => {
-    const h = makeHarness(() => ({
-      run: async ({ onOutput }) => (onOutput('半截'), { code: 2, output: '完整但不可信' }),
-    }))
-    await sendAndWait(h, '跑一下')
-
-    const last = messages().at(-1)
-    expect(last?.role).toBe('assistant')
-    expect(last?.error).toBe('退出码 2')
-    expect(last?.content).toBe('半截')
-    expect(h.events.at(-1)).toEqual({ conversationId: conversation.id, type: 'end' })
+  it('失败：助手消息记录 error，但保留会话 id 供续接', async () => {
+    const execute = vi.fn(async (_request: DshRunRequest) =>
+      outcome({ status: 'failed', output: '', error: '退出码 1', errorCode: 'exit_nonzero' }),
+    )
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    expect(repo.chatMessagesList(h.conversationId)[1].error).toBe('退出码 1')
+    expect(repo.chatConversationGet(h.conversationId).sessionId).toBe('sess-new')
   })
 
-  it('适配器 reject：error 记异常信息，content 保留累积输出', async () => {
-    const h = makeHarness(() => ({
-      run: async ({ onOutput }) => {
-        onOutput('半截')
-        throw new Error('spawn 失败')
-      },
-    }))
-    await sendAndWait(h, 'hi')
-
-    const last = messages().at(-1)
-    expect(last?.error).toBe('spawn 失败')
-    expect(last?.content).toBe('半截')
-    expect(h.events.at(-1)?.type).toBe('end')
+  it('取消：助手消息记「已取消」', async () => {
+    const execute = (({ signal }: { signal: AbortSignal }) =>
+      new Promise<DshRunOutcome>((resolve) => {
+        signal.addEventListener('abort', () =>
+          resolve(outcome({ status: 'cancelled', output: '', error: '已取消' })),
+        )
+      })) as unknown as RuntimeBackend['execute']
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '问')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(h.service.isRunning(h.conversationId)).toBe(true)
+    h.service.cancel(h.conversationId)
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    expect(repo.chatMessagesList(h.conversationId)[1].error).toBe('已取消')
+    expect(h.service.isRunning(h.conversationId)).toBe(false)
   })
 
-  it('适配器 reject 非 Error：错误被字符串化', async () => {
-    const h = makeHarness(() => ({
-      run: () => Promise.reject('boom-str'),
-    }))
-    await sendAndWait(h, 'hi')
-    expect(messages().at(-1)?.error).toBe('boom-str')
+  it('后端抛错：助手消息记录异常信息', async () => {
+    const execute = vi.fn(async (_request: DshRunRequest) => {
+      throw new Error('spawn 失败')
+    })
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    expect(repo.chatMessagesList(h.conversationId)[1].error).toBe('spawn 失败')
   })
 
-  it('取消：abort 后记「已取消」，content 用部分输出，仍发 end', async () => {
-    const h = makeHarness(() => ({
-      run: ({ signal, onOutput }) =>
-        new Promise((_resolve, reject) => {
-          onOutput('部分')
-          signal.addEventListener('abort', () => reject(new Error('aborted')))
-        }),
-    }))
-    const end = h.end()
-    await h.service.send(conversation.id, '取消我')
-    expect(h.service.isRunning(conversation.id)).toBe(true)
-
-    h.service.cancel(conversation.id)
-    await end
-
-    const last = messages().at(-1)
-    expect(last?.error).toBe('已取消')
-    expect(last?.content).toBe('部分')
-    expect(h.service.isRunning(conversation.id)).toBe(false)
-    expect(h.events.at(-1)?.type).toBe('end')
+  it('空消息 / 执行中重复发送：明确报错', async () => {
+    const execute = (({ signal }: { signal: AbortSignal }) =>
+      new Promise<DshRunOutcome>((resolve) => {
+        signal.addEventListener('abort', () => resolve(outcome({ status: 'cancelled' })))
+      })) as unknown as RuntimeBackend['execute']
+    const h = harness(execute)
+    await expect(h.service.send(h.conversationId, '   ')).rejects.toThrow(/不能为空/)
+    await h.service.send(h.conversationId, '问')
+    await expect(h.service.send(h.conversationId, '再问')).rejects.toThrow(/正在执行/)
+    h.service.cancel(h.conversationId)
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
   })
 
-  it('abort 后适配器仍 resolve：按取消记录并保留流式输出', async () => {
-    const h = makeHarness(() => ({
-      run: async ({ signal, onOutput }) => {
-        onOutput('流式')
-        await new Promise<void>((resolve) => {
-          signal.addEventListener('abort', () => resolve())
-        })
-        return { code: 0, output: '完整输出' }
-      },
-    }))
-    const end = h.end()
-    await h.service.send(conversation.id, 'hi')
-    h.service.cancel(conversation.id)
-    await end
-
-    const last = messages().at(-1)
-    expect(last?.error).toBe('已取消')
-    expect(last?.content).toBe('流式')
+  it('运行时停用：发送前就报错，不写消息', async () => {
+    const h = harness(vi.fn(async (_request: DshRunRequest) => outcome()))
+    const conversation = repo.chatConversationGet(h.conversationId)
+    const agent = repo.agentGet(conversation.agentId)
+    repo.runtimeUpdate(agent.runtimeId, { enabled: false })
+    await expect(h.service.send(h.conversationId, '问')).rejects.toThrow(/已停用/)
+    expect(repo.chatMessagesList(h.conversationId)).toHaveLength(0)
   })
 
-  it('send 校验：空内容、并发第二轮、对话不存在', async () => {
-    let release!: (r: { code: number; output: string }) => void
-    const h = makeHarness(() => ({
-      run: () =>
-        new Promise<{ code: number; output: string }>((resolve) => {
-          release = resolve
-        }),
-    }))
-
-    await expect(h.service.send(conversation.id, '   ')).rejects.toThrow('消息内容不能为空')
-    await expect(h.service.send('ghost', 'hi')).rejects.toThrow(/对话不存在/)
-    await expect(h.service.send('', 'hi')).rejects.toThrow(/对话不存在/)
-    expect(messages()).toEqual([])
-
-    const end = h.end()
-    await h.service.send(conversation.id, '第一轮')
-    expect(h.service.isRunning(conversation.id)).toBe(true)
-    await expect(h.service.send(conversation.id, '第二轮')).rejects.toThrow(/正在执行中/)
-    expect(messages().map((m) => m.content)).toEqual(['第一轮'])
-
-    release({ code: 0, output: 'ok' })
-    await end
+  it('对话不存在：报错', async () => {
+    const h = harness(vi.fn(async (_request: DshRunRequest) => outcome()))
+    await expect(h.service.send('ghost', '问')).rejects.toThrow(/对话不存在/)
   })
 
-  it('对话引用的智能体 / 运行时不存在时抛错', async () => {
-    const h = makeHarness(() => ({ run: async () => ({ code: 0, output: 'ok' }) }))
-
-    // 数据不一致：对话指向已不存在的智能体
-    db.exec('PRAGMA foreign_keys = OFF')
-    db.prepare("UPDATE chat_conversations SET agent_id='ghost' WHERE id=?").run(conversation.id)
-    db.exec('PRAGMA foreign_keys = ON')
-    await expect(h.service.send(conversation.id, 'hi')).rejects.toThrow(/智能体不存在/)
-
-    // 数据不一致：智能体指向已不存在的运行时
-    db.exec('PRAGMA foreign_keys = OFF')
-    db.prepare('UPDATE chat_conversations SET agent_id=? WHERE id=?').run(agent.id, conversation.id)
-    db.prepare("UPDATE agents SET runtime_id='ghost' WHERE id=?").run(agent.id)
-    db.exec('PRAGMA foreign_keys = ON')
-    await expect(h.service.send(conversation.id, 'hi')).rejects.toThrow(/运行时不存在/)
+  it('执行期间对话被删除：不抛错且仍发 end 事件', async () => {
+    let release: (() => void) | null = null
+    const execute = (() =>
+      new Promise<DshRunOutcome>((resolve) => {
+        release = () => resolve(outcome())
+      })) as unknown as RuntimeBackend['execute']
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '问')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    repo.chatConversationRemove(h.conversationId)
+    ;(release as unknown as () => void)()
+    await waitFor(() => h.events.some((e) => e.type === 'end'))
   })
 
-  it('执行中对话被删除：不抛且仍发 end', async () => {
-    let release!: (r: { code: number; output: string }) => void
-    const h = makeHarness(() => ({
-      run: ({ onOutput }) => {
-        onOutput('半截')
-        return new Promise<{ code: number; output: string }>((resolve) => {
-          release = resolve
-        })
-      },
-    }))
-    const end = h.end()
-    await h.service.send(conversation.id, '会被删')
-    repo.chatConversationRemove(conversation.id)
-
-    release({ code: 0, output: '半截' })
-    await end
-
-    expect(h.service.isRunning(conversation.id)).toBe(false)
-    expect(h.events.at(-1)).toEqual({ conversationId: conversation.id, type: 'end' })
-    expect(repo.chatMessagesList(conversation.id)).toEqual([])
-  })
-
-  it('缺省适配器可构造；无执行轮次时 cancel 静默；send 校验先于执行', async () => {
-    const service = new ChatService({ repo, emit: () => {} })
-    expect(service.isRunning(conversation.id)).toBe(false)
-    expect(() => service.cancel(conversation.id)).not.toThrow()
-    // 空内容在选适配器之前就失败，不会真的 spawn 进程
-    await expect(service.send(conversation.id, '   ')).rejects.toThrow(/不能为空/)
-  })
-
-  it('emit 抛错不影响执行与落库', async () => {
+  it('推送失败不影响收尾（emit 抛错被吞掉）', async () => {
+    const runtime = repo.runtimeCreate({ name: 'r2' })
+    const agent = repo.agentCreate({ name: 'a', runtimeId: runtime.id })
+    const conversation = repo.chatConversationCreate(agent.id)
     const service = new ChatService({
       repo,
       emit: () => {
-        throw new Error('窗口已销毁')
+        throw new Error('window gone')
       },
-      adapterFor: () => ({
-        run: async ({ onOutput }) => (onOutput('ok'), { code: 0, output: 'ok' }),
+      backendFor: () => ({
+        probe: vi.fn(),
+        models: vi.fn(),
+        execute: vi.fn(async (_request: DshRunRequest) => outcome()),
       }),
     })
-    await service.send(conversation.id, '你好')
-    await vi.waitFor(() => expect(service.isRunning(conversation.id)).toBe(false))
+    await service.send(conversation.id, '问')
+    await waitFor(() => repo.chatMessagesList(conversation.id).length === 2)
+    expect(repo.chatMessagesList(conversation.id)[1].content).toBe('回答')
+  })
 
-    const last = messages().at(-1)
-    expect(last?.role).toBe('assistant')
-    expect(last?.content).toBe('ok')
-    expect(last?.error).toBeNull()
+  it('首轮 systemPrompt 为空：prompt 直接从对话记录开始', async () => {
+    const h = harness(
+      vi.fn(async (_request: DshRunRequest) => outcome()),
+      { systemPrompt: '' },
+    )
+    await h.service.send(h.conversationId, '问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    const sent = h.execute.mock.calls[0][0]
+    expect(sent.prompt.startsWith('# 对话记录')).toBe(true)
+    expect(sent.prompt).not.toContain('undefined')
+  })
+
+  it('首条消息即长文本：会话标题按码点截断', async () => {
+    const h = harness(vi.fn(async (_request: DshRunRequest) => outcome()))
+    await h.service.send(h.conversationId, '字'.repeat(30))
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    const title = repo.chatConversationGet(h.conversationId).title
+    expect(title).toBe('字'.repeat(24) + '…')
+    expect(Array.from(title)).toHaveLength(25)
+  })
+
+  it('没有会话可续接时，失败后的下一轮仍走完整 prompt', async () => {
+    const execute = vi.fn(async (_request: DshRunRequest) =>
+      outcome({
+        status: 'failed',
+        output: '',
+        error: '退出码 1',
+        sessionId: null,
+        errorCode: 'exit_nonzero',
+      }),
+    )
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '第一问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    expect(repo.chatConversationGet(h.conversationId).sessionId).toBeNull()
+
+    execute.mockImplementation(async (_request: DshRunRequest) => outcome({ output: '二' }))
+    await h.service.send(h.conversationId, '第二问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 4)
+    const second = execute.mock.calls[1][0]
+    expect(second.resumeSessionId).toBeNull()
+    expect(second.prompt).toContain('# 对话记录')
+    expect(second.prompt).toContain('第一问')
+    expect(repo.chatMessagesList(h.conversationId)[3].content).toBe('二')
+  })
+
+  it('续接被拒且重试也失败：落一条失败消息，会话保持为空', async () => {
+    const execute = vi.fn(async (_request: DshRunRequest) =>
+      outcome({
+        status: 'failed',
+        output: '',
+        error: '会话失效',
+        sessionId: null,
+        resumeRejected: true,
+      }),
+    )
+    const h = harness(execute)
+    await h.service.send(h.conversationId, '问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect(repo.chatMessagesList(h.conversationId)[1].error).toBe('执行失败')
+    expect(repo.chatConversationGet(h.conversationId).sessionId).toBeNull()
+  })
+
+  it('取消空闲对话/未知对话是无害的', () => {
+    const h = harness(vi.fn(async (_request: DshRunRequest) => outcome()))
+    expect(h.service.isRunning(h.conversationId)).toBe(false)
+    expect(() => h.service.cancel(h.conversationId)).not.toThrow()
+    expect(() => h.service.cancel('ghost')).not.toThrow()
+    expect(h.service.isRunning('ghost')).toBe(false)
+  })
+
+  it('成功一轮只发一次 end，事件不落库为额外消息', async () => {
+    const h = harness(
+      vi.fn(async ({ onEvent }: DshRunRequest) => {
+        onEvent?.({ seq: 1, type: 'text', text: 'x' })
+        onEvent?.({ seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' })
+        return outcome({ output: 'x' })
+      }),
+    )
+    await h.service.send(h.conversationId, '问')
+    await waitFor(() => repo.chatMessagesList(h.conversationId).length === 2)
+    expect(h.events.filter((e) => e.type === 'end')).toHaveLength(1)
+    expect(h.events.filter((e) => e.type === 'event')).toHaveLength(2)
+    expect(h.events.at(-1)?.type).toBe('end')
+    expect(repo.chatMessagesList(h.conversationId)).toHaveLength(2)
+  })
+})
+
+describe('默认 requestId', () => {
+  it('不注入 requestId 时用 uuid', async () => {
+    const runtime = repo.runtimeCreate({ name: 'r-default' })
+    const agent = repo.agentCreate({ name: 'a', runtimeId: runtime.id })
+    const conversation = repo.chatConversationCreate(agent.id)
+    const execute = vi.fn(async (_request: DshRunRequest) => outcome())
+    const service = new ChatService({
+      repo,
+      emit: () => {},
+      backendFor: () => ({ probe: vi.fn(), models: vi.fn(), execute }),
+    })
+    await service.send(conversation.id, '问')
+    await waitFor(() => repo.chatMessagesList(conversation.id).length === 2)
+    const sent = execute.mock.calls[0][0] as unknown as { requestId: string }
+    expect(sent.requestId).toMatch(/[0-9a-f-]{36}/)
+    expect(repo.chatMessagesList(conversation.id)[1].content).toBe('回答')
+  })
+})
+describe('titleFromContent 边界', () => {
+  it('24 字不截断、25 字截断、\\r\\n 取首行', () => {
+    expect(titleFromContent('字'.repeat(24))).toBe('字'.repeat(24))
+    expect(titleFromContent('字'.repeat(25))).toBe('字'.repeat(24) + '…')
+    expect(titleFromContent('a\r\nb')).toBe('a')
+  })
+})
+
+describe('buildChatPrompt 顺序', () => {
+  it('按时间顺序拼接，结尾是回答提示', () => {
+    const prompt = buildChatPrompt(
+      { systemPrompt: 'S' } as never,
+      [
+        { role: 'user', content: 'u1' },
+        { role: 'assistant', content: 'a1' },
+        { role: 'user', content: 'u2' },
+      ] as never,
+    )
+    expect(prompt.indexOf('用户：u1')).toBeLessThan(prompt.indexOf('助手：a1'))
+    expect(prompt.indexOf('助手：a1')).toBeLessThan(prompt.indexOf('用户：u2'))
+    expect(prompt.endsWith('请回答最后一条用户消息。')).toBe(true)
+  })
+})
+
+describe('chat 失败兜底分支', () => {
+  function serviceWith(execute: RuntimeBackend['execute']): {
+    service: ChatService
+    conversationId: string
+  } {
+    const runtime = repo.runtimeCreate({ name: 'r-' + Math.random().toString(36).slice(2, 8) })
+    const agent = repo.agentCreate({ name: 'a', runtimeId: runtime.id })
+    const conversation = repo.chatConversationCreate(agent.id)
+    const service = new ChatService({
+      repo,
+      emit: () => {},
+      backendFor: () => ({ probe: vi.fn(), models: vi.fn(), execute }),
+    })
+    return { service, conversationId: conversation.id }
+  }
+
+  it('失败但有流式文本：助手消息用流式内容；error 为空时给兜底文案', async () => {
+    const execute = (async ({ onEvent }: DshRunRequest) => {
+      onEvent?.({ seq: 1, type: 'text', text: '流式片段' })
+      return outcome({ status: 'failed', output: '', error: null, errorCode: 'run_failed' })
+    }) as unknown as RuntimeBackend['execute']
+    const { service, conversationId } = serviceWith(execute)
+    await service.send(conversationId, '问')
+    await waitFor(() => repo.chatMessagesList(conversationId).length === 2)
+    const assistant = repo.chatMessagesList(conversationId)[1]
+    expect(assistant.content).toBe('流式片段')
+    expect(assistant.error).toBe('执行失败')
+  })
+
+  it('后端抛非 Error：错误文案转成字符串', async () => {
+    const execute = (() => Promise.reject('字符串错误')) as unknown as RuntimeBackend['execute']
+    const { service, conversationId } = serviceWith(execute)
+    await service.send(conversationId, '问')
+    await waitFor(() => repo.chatMessagesList(conversationId).length === 2)
+    expect(repo.chatMessagesList(conversationId)[1].error).toBe('字符串错误')
   })
 })

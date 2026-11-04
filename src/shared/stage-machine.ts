@@ -84,12 +84,13 @@ export function moveTask(
   switch (event.type) {
     case 'RUN_SUCCEEDED':
       return toNext()
-    case 'RUN_FAILED':
-      return enterStage(
-        { ...task, status: 'active' },
-        resolveRejectStage(current, workflow),
-        workflow,
-      )
+    case 'RUN_FAILED': {
+      const target = resolveRejectStage(current, workflow)
+      // 打回目标就是原地：保留任务与当前阶段，不再触发进入效果。
+      // 否则 agent 阶段失败会立刻重建 run，形成无限自动重试。
+      if (target.id === current.id) return { task, effects: [] }
+      return enterStage({ ...task, status: 'active' }, target, workflow)
+    }
   }
 }
 

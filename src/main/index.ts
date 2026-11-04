@@ -1,4 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron'
+import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
@@ -7,6 +8,8 @@ import { Repository } from './ai-workflow/repository'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
 import { ChatService } from './ai-workflow/chat'
 import { Runner } from './ai-workflow/runner'
+import { createRuntimeBackend, type RuntimeBackend } from './ai-workflow/runtime/registry'
+import type { RuntimeProtocolFamily } from '../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
 
 let quitting = false
@@ -56,10 +59,19 @@ app.whenReady().then(() => {
   const broadcastChanged = (): void => {
     for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
   }
-  const aiRepo = new Repository(openDb(path.join(app.getPath('userData'), 'ai-workflow.db')))
-  const runner = new Runner({ repo: aiRepo, notifyChanged: broadcastChanged })
+  const userData = app.getPath('userData')
+  const aiRepo = new Repository(openDb(path.join(userData, 'ai-workflow.db')))
+  // 协议后端：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
+  // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。
+  const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
+  mkdirSync(sessionsDir, { recursive: true })
+  const runtimeDeps = { sessionRoot: sessionsDir }
+  const backendFor = (family: RuntimeProtocolFamily): RuntimeBackend =>
+    createRuntimeBackend(family, runtimeDeps)
+  const runner = new Runner({ repo: aiRepo, notifyChanged: broadcastChanged, backendFor })
   const chat = new ChatService({
     repo: aiRepo,
+    backendFor,
     emit: (event) => {
       for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHAT, event)
     },
@@ -69,6 +81,7 @@ app.whenReady().then(() => {
     notifyChanged: broadcastChanged,
     onQueue: (runId) => runner.enqueue(runId),
     chat,
+    backendFor,
   })
   runner.resumeQueued()
 

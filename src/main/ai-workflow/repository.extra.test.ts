@@ -23,7 +23,13 @@ describe('repository 错误分支与补充路径', () => {
 
   it('创建校验：必填与阶段校验', () => {
     expect(() => repo.runtimeCreate({ name: '', command: 'x' })).toThrow(/名称/)
-    expect(() => repo.runtimeCreate({ name: 'n', command: '' })).toThrow(/命令/)
+    expect(() =>
+      repo.runtimeCreate({ name: 'n', command: 'x', protocolFamily: 'claude' as never }),
+    ).toThrow(/协议族/)
+    expect(() =>
+      repo.runtimeCreate({ name: 'n', command: 'x', permissionMode: 'root' as never }),
+    ).toThrow(/权限模式/)
+    expect(() => repo.runtimeCreate({ name: 'n', command: 'x', maxConcurrent: 0 })).toThrow(/并发/)
     expect(() => repo.agentCreate({ name: '', runtimeId: 'x' })).toThrow(/名称/)
     expect(() => repo.taskCreate({ title: '', workflowId: 'x' })).toThrow(/标题/)
     expect(() =>
@@ -33,6 +39,16 @@ describe('repository 错误分支与补充路径', () => {
     expect(() =>
       repo.workflowCreate({ name: 'w', stages: [{ name: '', entryMode: 'none' }] }),
     ).toThrow(/名称/)
+  })
+
+  it('update 校验：协议族/权限模式/并发/探测目标不存在', () => {
+    const rt = repo.runtimeCreate({ name: 'n', command: 'dsh' })
+    expect(() => repo.runtimeUpdate(rt.id, { protocolFamily: 'claude' as never })).toThrow(/协议族/)
+    expect(() => repo.runtimeUpdate(rt.id, { permissionMode: 'root' as never })).toThrow(/权限模式/)
+    expect(() => repo.runtimeUpdate(rt.id, { maxConcurrent: 0 })).toThrow(/并发/)
+    // 超过上限按 8 归一（不做无上限并发）
+    expect(repo.runtimeUpdate(rt.id, { maxConcurrent: 99 }).maxConcurrent).toBe(8)
+    expect(() => repo.runtimeSetProbe('ghost', { state: 'ready' } as never)).toThrow(/不存在/)
   })
 
   it('起始阶段必须属于该工作流', () => {
@@ -107,6 +123,7 @@ describe('repository 错误分支与补充路径', () => {
       taskId: t.id,
       stageId: null,
       agentId: null,
+      runtimeId: null,
       prompt: 'p',
       status: 'queued',
     })

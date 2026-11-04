@@ -14,7 +14,7 @@ beforeEach(() => {
 afterEach(() => db.close())
 
 function seedRuntime(name = 'ds') {
-  return repo.runtimeCreate({ name, command: 'dsh', args: ['-p', '{prompt}'] })
+  return repo.runtimeCreate({ name, command: 'dsh', profile: 'multica' })
 }
 function seedAgent(name = 'coder') {
   const rt = seedRuntime()
@@ -24,13 +24,58 @@ function seedAgent(name = 'coder') {
 describe('repository runtimes/agents', () => {
   it('CRUD 运行时，名称唯一', () => {
     const rt = seedRuntime('ds')
-    expect(rt.kind).toBe('deepseek-harness')
-    expect(rt.args).toEqual(['-p', '{prompt}'])
+    expect(rt.protocolFamily).toBe('dsh')
+    expect(rt.profile).toBe('multica')
+    expect(rt.permissionMode).toBe('workspace-write')
+    expect(rt.maxConcurrent).toBe(1)
+    expect(rt.enabled).toBe(true)
+    expect(rt.model).toBeNull()
+    expect(rt.lastProbe).toBeNull()
     expect(() => seedRuntime('ds')).toThrow()
     const updated = repo.runtimeUpdate(rt.id, { name: 'ds2' })
     expect(updated.name).toBe('ds2')
     repo.runtimeRemove(rt.id)
     expect(repo.runtimesList()).toHaveLength(0)
+  })
+
+  it('运行时配置字段可更新；探测结论可持久化', () => {
+    const rt = seedRuntime()
+    const updated = repo.runtimeUpdate(rt.id, {
+      protocolFamily: 'dsh',
+      command: 'dsh2',
+      profile: 'p2',
+      permissionMode: 'danger-full-access',
+      model: 'magpie/auto%2Fflash',
+      reasoningEffort: 'high',
+      workdir: 'C:/w',
+      maxConcurrent: 3,
+      enabled: false,
+    })
+    expect(updated).toMatchObject({
+      command: 'dsh2',
+      profile: 'p2',
+      permissionMode: 'danger-full-access',
+      model: 'magpie/auto%2Fflash',
+      reasoningEffort: 'high',
+      workdir: 'C:/w',
+      maxConcurrent: 3,
+      enabled: false,
+    })
+    const probe = {
+      state: 'ready' as const,
+      path: 'C:/bin/dsh.cmd',
+      cliVersion: '0.2.1',
+      protocolVersion: 1,
+      pluginVersion: '0.1.0',
+      error: null,
+      output: '',
+      elapsedMs: 5,
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    }
+    expect(repo.runtimeSetProbe(rt.id, probe).lastProbe).toEqual(probe)
+    // 默认值回填
+    const fresh = seedRuntime('fresh')
+    expect(repo.runtimeUpdate(fresh.id, {}).enabled).toBe(true)
   })
 
   it('智能体绑定运行时；被引用的运行时不可删除', () => {
@@ -123,6 +168,7 @@ describe('repository tasks/runs', () => {
       taskId: task.id,
       stageId: wf.stages[0].id,
       agentId: null,
+      runtimeId: null,
       prompt: 'p',
       status: 'queued',
     })
@@ -132,5 +178,80 @@ describe('repository tasks/runs', () => {
     repo.workflowRemove(wf.id)
     expect(repo.tasksList(wf.id)).toHaveLength(0)
     expect(() => repo.runGet(run.id)).toThrow()
+  })
+
+  it('run 的新增字段（runtime/session/usage/errorCode/events）可写可读', () => {
+    const rt = repo.runtimeCreate({ name: 'r', command: 'dsh' })
+    const wf = repo.workflowCreate({ name: 'w', stages: [{ name: 's', entryMode: 'none' }] })
+    const task = repo.taskCreate({ title: 't', workflowId: wf.id })
+    const run = repo.runCreate({
+      taskId: task.id,
+      stageId: wf.stages[0].id,
+      agentId: null,
+      runtimeId: rt.id,
+      prompt: 'p',
+      status: 'queued',
+    })
+    expect(run.runtimeId).toBe(rt.id)
+    const updated = repo.runUpdate(run.id, {
+      status: 'failed',
+      error: 'boom',
+      errorCode: 'run_failed',
+      exitCode: 2,
+      sessionId: 's1',
+      usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      durationMs: 12,
+      endedAt: 't2',
+    })
+    expect(updated).toMatchObject({
+      errorCode: 'run_failed',
+      exitCode: 2,
+      sessionId: 's1',
+      durationMs: 12,
+      usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    })
+    // null 清除 usage
+    expect(repo.runUpdate(run.id, { usage: null }).usage).toBeNull()
+
+    repo.runEventsAppend(run.id, [
+      { seq: 1, type: 'text', text: 'a' },
+      { seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' },
+      { seq: 3, type: 'status', status: 'running' },
+    ])
+    expect(repo.runEventsList(run.id)).toEqual([
+      { seq: 1, type: 'text', text: 'a' },
+      { seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' },
+      { seq: 3, type: 'status', status: 'running' },
+    ])
+    // 空事件数组是 no-op
+    expect(() => repo.runEventsAppend(run.id, [])).not.toThrow()
+    // 重复 seq 覆盖而不是新增
+    repo.runEventsAppend(run.id, [{ seq: 1, type: 'text', text: 'b' }])
+    expect(repo.runEventsList(run.id)[0]).toEqual({ seq: 1, type: 'text', text: 'b' })
+  })
+
+  it('runtimeWorkloads 只统计 queued/running', () => {
+    const rt = repo.runtimeCreate({ name: 'r', command: 'dsh' })
+    const wf = repo.workflowCreate({ name: 'w', stages: [{ name: 's', entryMode: 'none' }] })
+    const task = repo.taskCreate({ title: 't', workflowId: wf.id })
+    const make = (status: 'queued' | 'running' | 'succeeded') =>
+      repo.runCreate({
+        taskId: task.id,
+        stageId: null,
+        agentId: null,
+        runtimeId: rt.id,
+        prompt: 'p',
+        status,
+      })
+    make('queued')
+    make('queued')
+    const running = make('running')
+    make('succeeded')
+    repo.runUpdate(running.id, { status: 'running' })
+    expect(repo.runtimeWorkloads()).toEqual([{ runtimeId: rt.id, running: 1, queued: 2 }])
+    // activeRunForTask：只认 queued/running，取最新一条
+    expect(repo.activeRunForTask(task.id)?.status).toBe('running')
+    const other = repo.taskCreate({ title: 't2', workflowId: wf.id })
+    expect(repo.activeRunForTask(other.id)).toBeNull()
   })
 })

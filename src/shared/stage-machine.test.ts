@@ -150,9 +150,10 @@ describe('moveTask（自动流转）', () => {
     expect(r.task.status).toBe('active')
   })
 
-  it('RUN_FAILED 在首阶段 → 原地', () => {
+  it('RUN_FAILED 在首阶段 → 原地且不重触发进入效果（避免无限重试）', () => {
     const r = moveTask(task('s0'), { type: 'RUN_FAILED', runId: 'r' }, flow)
     expect(r.task.currentStageId).toBe('s0')
+    expect(r.effects).toEqual([])
   })
 
   it('进入下一阶段时若是 user 阶段 → 产生 waitUser 效果', () => {

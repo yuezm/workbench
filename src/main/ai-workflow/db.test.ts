@@ -2,6 +2,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { openDb } from './db'
+import { SCHEMA_SQL } from './schema'
 
 let db: DatabaseSync | null = null
 afterEach(() => {
@@ -17,12 +18,13 @@ function tableNames(d: DatabaseSync): string[] {
 }
 
 describe('openDb', () => {
-  it('创建全部 8 张表', () => {
+  it('创建全部 9 张表', () => {
     db = openDb(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
       'chat_conversations',
       'chat_messages',
+      'run_events',
       'runs',
       'runtimes',
       'tasks',
@@ -39,8 +41,7 @@ describe('openDb', () => {
 
   it('重复执行 schema 幂等', () => {
     db = openDb(':memory:')
-    // 第二次执行不应抛错（IF NOT EXISTS）
-    expect(() => db!.exec(SCHEMA_SQL_IDEMPOTENT_PROBE)).not.toThrow()
+    expect(() => db!.exec(SCHEMA_SQL)).not.toThrow()
   })
 
   it('外键违反被拒绝', () => {
@@ -52,16 +53,3 @@ describe('openDb', () => {
     ).toThrow()
   })
 })
-
-const SCHEMA_SQL_IDEMPOTENT_PROBE = `
-CREATE TABLE IF NOT EXISTS runtimes (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  kind TEXT NOT NULL DEFAULT 'deepseek-harness',
-  command TEXT NOT NULL,
-  args_template TEXT NOT NULL DEFAULT '[]',
-  prompt_mode TEXT NOT NULL DEFAULT 'arg',
-  workdir TEXT,
-  created_at TEXT NOT NULL
-);
-`

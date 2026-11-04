@@ -1,24 +1,55 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Agent, AiWorkflowApi, Runtime } from '../../../../../shared/ai-workflow-api'
+import type {
+  Agent,
+  AiWorkflowApi,
+  Runtime,
+  RuntimeProbe,
+  RuntimeProbeState,
+} from '../../../../../shared/ai-workflow-api'
 import { AgentManager } from './AgentManager'
 
 function setApi(api: unknown): void {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
 }
 
-const rt: Runtime = {
-  id: 'r1',
-  name: 'ds',
-  kind: 'deepseek-harness',
-  command: 'dsh',
-  args: [],
-  promptMode: 'arg',
-  workdir: null,
-  createdAt: 't',
+function probe(state: RuntimeProbeState, over: Partial<RuntimeProbe> = {}): RuntimeProbe {
+  return {
+    state,
+    path: 'C:/tools/dsh.exe',
+    cliVersion: '1.2.3',
+    protocolVersion: 1,
+    pluginVersion: null,
+    error: state === 'ready' ? null : '登录态失效',
+    output: '',
+    elapsedMs: 12,
+    checkedAt: 't',
+    ...over,
+  }
 }
-const rt2: Runtime = { ...rt, id: 'r2', name: 'claude' }
+
+function makeRuntime(over: Partial<Runtime> = {}): Runtime {
+  return {
+    id: 'r1',
+    name: 'ds',
+    protocolFamily: 'dsh',
+    command: 'dsh',
+    profile: 'multica',
+    permissionMode: 'workspace-write',
+    model: null,
+    reasoningEffort: null,
+    workdir: null,
+    maxConcurrent: 1,
+    enabled: true,
+    createdAt: 't',
+    lastProbe: probe('ready'),
+    ...over,
+  }
+}
+
+const rt = makeRuntime()
+const rt2 = makeRuntime({ id: 'r2', name: 'claude' })
 
 function agent(over: Partial<Agent> = {}): Agent {
   return {
@@ -32,19 +63,30 @@ function agent(over: Partial<Agent> = {}): Agent {
   }
 }
 
+function makeApi(agents: unknown[], runtimes: Runtime[]) {
+  const api = {
+    agents: {
+      list: vi.fn(async () => agents as Agent[]),
+      create: vi.fn(),
+      remove: vi.fn(),
+      update: vi.fn(),
+    },
+    runtimes: {
+      list: vi.fn(async () => runtimes),
+      create: vi.fn(),
+      remove: vi.fn(),
+      update: vi.fn(),
+    },
+  }
+  setApi(api as unknown as Partial<AiWorkflowApi>)
+  return api
+}
+
 beforeEach(() => vi.clearAllMocks())
 
 describe('AgentManager', () => {
   it('默认只显示清单，点击「新建智能体」才弹出表单', async () => {
-    setApi({
-      agents: {
-        list: vi.fn().mockResolvedValue([agent()]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-      },
-      runtimes: { list: vi.fn().mockResolvedValue([rt]) },
-    } as unknown as Partial<AiWorkflowApi>)
+    makeApi([agent()], [rt])
 
     const user = userEvent.setup()
     render(<AgentManager />)
@@ -58,21 +100,33 @@ describe('AgentManager', () => {
     expect(screen.queryByLabelText('智能体名称')).not.toBeInTheDocument()
   })
 
+  it('行内展示绑定运行时名与健康状态点', async () => {
+    makeApi(
+      [agent({ description: '写代码' }), agent({ id: 'a3', name: 'ghost', runtimeId: 'missing' })],
+      [
+        makeRuntime({ id: 'r1', name: 'ds', lastProbe: probe('unavailable') }),
+        makeRuntime({ id: 'r2', name: 'claude', lastProbe: probe('ready') }),
+      ],
+    )
+    render(<AgentManager />)
+
+    expect(await screen.findByText(/运行时：ds · 不可用/)).toBeInTheDocument()
+    expect(screen.getByText(/写代码/)).toBeInTheDocument()
+    expect(screen.getByText(/运行时：missing · 未检测/)).toBeInTheDocument()
+  })
+
   it('加载运行时后新建智能体（切换运行时、填描述与能力）并删除', async () => {
     let agents: Agent[] = [agent()]
-    const agentList = vi.fn(async () => agents)
-    const create = vi.fn(async (input: { name: string; runtimeId: string }) => {
+    const api = makeApi(agents, [rt, rt2])
+    api.agents.list.mockImplementation(async () => agents)
+    api.agents.create.mockImplementation(async (input: Agent & { name: string }) => {
       const n = agent({ id: 'a2', name: input.name, runtimeId: input.runtimeId })
       agents = [...agents, n]
       return n
     })
-    const remove = vi.fn(async (id: string) => {
+    api.agents.remove.mockImplementation(async (id: string) => {
       agents = agents.filter((x) => x.id !== id)
     })
-    setApi({
-      agents: { list: agentList, create, remove, update: vi.fn() },
-      runtimes: { list: vi.fn().mockResolvedValue([rt, rt2]) },
-    } as unknown as Partial<AiWorkflowApi>)
 
     render(<AgentManager />)
     expect(await screen.findByText('old')).toBeInTheDocument()
@@ -80,13 +134,13 @@ describe('AgentManager', () => {
     await user.click(screen.getByRole('button', { name: '新建智能体' }))
     await user.type(screen.getByLabelText('智能体名称'), 'coder')
     await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
-    await user.click(screen.getByRole('option', { name: 'claude' }))
+    await user.click(screen.getByRole('option', { name: 'claude · 可用' }))
     await user.type(screen.getByLabelText('智能体描述'), '写代码')
     await user.type(screen.getByLabelText('智能体能力'), 'you are coder')
     await user.click(screen.getByRole('button', { name: '添加智能体' }))
 
-    await waitFor(() => expect(create).toHaveBeenCalled())
-    expect(create.mock.calls[0][0]).toMatchObject({
+    await waitFor(() => expect(api.agents.create).toHaveBeenCalled())
+    expect(api.agents.create.mock.calls[0][0]).toMatchObject({
       name: 'coder',
       runtimeId: 'r2',
       description: '写代码',
@@ -94,28 +148,16 @@ describe('AgentManager', () => {
     })
     expect(await screen.findByText('coder')).toBeInTheDocument()
 
-    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
-    await waitFor(() => expect(remove).toHaveBeenCalledWith('a1'))
+    await user.click(screen.getAllByRole('button', { name: /删除智能体/ })[0])
+    await waitFor(() => expect(api.agents.remove).toHaveBeenCalledWith('a1'))
   })
 
   it('无运行时则禁用添加并提示；未知运行时的智能体显示原始 id 与描述', async () => {
-    setApi({
-      agents: {
-        list: vi
-          .fn()
-          .mockResolvedValue([
-            agent({ id: 'a1', name: 'x', runtimeId: 'ghost', description: '有描述' }),
-          ]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-      },
-      runtimes: { list: vi.fn().mockResolvedValue([]) },
-    } as unknown as Partial<AiWorkflowApi>)
+    makeApi([agent({ id: 'a1', name: 'x', runtimeId: 'ghost', description: '有描述' })], [])
 
     const user = userEvent.setup()
     render(<AgentManager />)
-    expect(await screen.findByText(/ghost/)).toBeInTheDocument()
+    expect(await screen.findByText(/运行时：ghost · 未检测/)).toBeInTheDocument()
     expect(screen.getByText(/有描述/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '新建智能体' }))
@@ -124,29 +166,16 @@ describe('AgentManager', () => {
   })
 
   it('加载失败展示错误（非 Error 也会字符串化）', async () => {
-    setApi({
-      agents: {
-        list: vi.fn().mockRejectedValue('boom'),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-      },
-      runtimes: { list: vi.fn().mockResolvedValue([]) },
-    } as unknown as Partial<AiWorkflowApi>)
+    const api = makeApi([], [])
+    api.agents.list.mockRejectedValue('boom')
     render(<AgentManager />)
     expect(await screen.findByText('boom')).toBeInTheDocument()
   })
 
   it('新建失败在弹窗内展示错误；删除失败展示错误', async () => {
-    setApi({
-      agents: {
-        list: vi.fn().mockResolvedValue([agent()]),
-        create: vi.fn().mockRejectedValue(new Error('create-fail')),
-        remove: vi.fn().mockRejectedValue(new Error('remove-fail')),
-        update: vi.fn(),
-      },
-      runtimes: { list: vi.fn().mockResolvedValue([rt]) },
-    } as unknown as Partial<AiWorkflowApi>)
+    const api = makeApi([agent()], [rt])
+    api.agents.create.mockRejectedValue(new Error('create-fail'))
+    api.agents.remove.mockRejectedValue(new Error('remove-fail'))
 
     render(<AgentManager />)
     expect(await screen.findByText('old')).toBeInTheDocument()
@@ -157,35 +186,23 @@ describe('AgentManager', () => {
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '取消' }))
-    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
+    await user.click(screen.getAllByRole('button', { name: /删除智能体/ })[0])
     expect(await screen.findByText('remove-fail')).toBeInTheDocument()
   })
 
   it('加载未完成即卸载不报错', async () => {
-    const slow = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve([]), 10)))
-    setApi({
-      agents: { list: slow, create: vi.fn(), remove: vi.fn(), update: vi.fn() },
-      runtimes: { list: vi.fn().mockResolvedValue([]) },
-    } as unknown as Partial<AiWorkflowApi>)
+    const api = makeApi([], [])
+    api.agents.list.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve([]), 10)),
+    )
     const { unmount } = render(<AgentManager />)
     unmount()
     await new Promise((r) => setTimeout(r, 20))
   })
 
   it('刷新列表失败展示错误', async () => {
-    const list = vi
-      .fn()
-      .mockResolvedValueOnce([agent()])
-      .mockRejectedValue(new Error('reload-boom'))
-    setApi({
-      agents: {
-        list,
-        create: vi.fn().mockResolvedValue(agent({ id: 'a2' })),
-        remove: vi.fn(),
-        update: vi.fn(),
-      },
-      runtimes: { list: vi.fn().mockResolvedValue([rt]) },
-    } as unknown as Partial<AiWorkflowApi>)
+    const api = makeApi([agent()], [rt])
+    api.agents.list.mockResolvedValueOnce([agent()]).mockRejectedValueOnce(new Error('reload-boom'))
 
     render(<AgentManager />)
     expect(await screen.findByText('old')).toBeInTheDocument()
@@ -227,7 +244,7 @@ describe('AgentManager', () => {
     changed?.()
     await waitFor(() => expect(screen.getByRole('button', { name: '添加智能体' })).toBeEnabled())
     expect(screen.getByLabelText('智能体运行时')).toHaveValue('r1')
-    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('ds')
+    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('ds · 可用')
 
     // 运行时被删光后，下拉回落到空
     runtimes = []

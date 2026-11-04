@@ -6,7 +6,9 @@ import type {
   DetectedRuntime,
   Runtime,
   RuntimeInput,
-  RuntimeTestResult,
+  RuntimeModelOption,
+  RuntimeProbe,
+  RuntimeStatus,
 } from '../../../../../shared/ai-workflow-api'
 import { RuntimeManager } from './RuntimeManager'
 
@@ -14,478 +16,496 @@ function setApi(api: unknown): void {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
 }
 
-const base: Runtime = {
-  id: 'r1',
-  name: 'ds',
-  kind: 'deepseek-harness',
-  command: 'dsh',
-  args: ['-p'],
-  promptMode: 'arg',
-  workdir: null,
-  createdAt: 't',
+function makeProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
+  return {
+    state: 'ready',
+    path: 'C:/tools/dsh.exe',
+    cliVersion: '1.2.3',
+    protocolVersion: 1,
+    pluginVersion: null,
+    error: null,
+    output: 'probe ok',
+    elapsedMs: 12,
+    checkedAt: 't',
+    ...over,
+  }
+}
+
+function makeRuntime(over: Partial<Runtime> = {}): Runtime {
+  return {
+    id: 'r1',
+    name: 'ds',
+    protocolFamily: 'dsh',
+    command: 'dsh',
+    profile: 'multica',
+    permissionMode: 'workspace-write',
+    model: null,
+    reasoningEffort: null,
+    workdir: null,
+    maxConcurrent: 2,
+    enabled: true,
+    createdAt: 't',
+    lastProbe: makeProbe(),
+    ...over,
+  }
+}
+
+function makeStatus(
+  runtimeId: string,
+  over: Partial<RuntimeStatus['workload']> = {},
+): RuntimeStatus {
+  return { runtimeId, workload: { running: 0, queued: 0, maxConcurrent: 2, ...over } }
+}
+
+function makeDetected(over: Partial<DetectedRuntime> = {}): DetectedRuntime {
+  return {
+    command: 'dsh',
+    label: 'DeepSeek Harness',
+    path: 'C:/tools/dsh.exe',
+    supported: true,
+    ...over,
+  }
+}
+
+/** 手动控制 resolve 的 promise，用于验证加载中 / 测试中的中间态 */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+function makeApi() {
+  const runtimes = {
+    list: vi.fn(async (): Promise<Runtime[]> => [makeRuntime()]),
+    statuses: vi.fn(async (): Promise<RuntimeStatus[]> => [makeStatus('r1')]),
+    detect: vi.fn(async (): Promise<DetectedRuntime[]> => []),
+    create: vi.fn(async (input: RuntimeInput): Promise<Runtime> =>
+      makeRuntime({ id: 'r2', ...input }),
+    ),
+    update: vi.fn(async (_id: string, patch: Partial<RuntimeInput>): Promise<Runtime> =>
+      makeRuntime({ ...patch }),
+    ),
+    remove: vi.fn(async (_id: string): Promise<void> => undefined),
+    probe: vi.fn(async (): Promise<RuntimeProbe> => makeProbe()),
+    models: vi.fn(async (): Promise<RuntimeModelOption[]> => []),
+  }
+  setApi({ runtimes } as unknown as Partial<AiWorkflowApi>)
+  return runtimes
 }
 
 beforeEach(() => vi.clearAllMocks())
 
 describe('RuntimeManager', () => {
-  it('默认只显示清单，点击「新建运行时」才弹出表单', async () => {
-    const user = userEvent.setup()
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-      },
-    } as unknown as Partial<AiWorkflowApi>)
+  it('清单展示名称/协议族/健康/CLI 版本/启动头/路径/负载', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([makeRuntime()])
+    runtimes.statuses.mockResolvedValue([makeStatus('r1', { running: 1, maxConcurrent: 2 })])
 
     render(<RuntimeManager />)
+
     expect(await screen.findByText('ds')).toBeInTheDocument()
-    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: '新建运行时' }))
-    expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
-
-    // 取消后表单关闭
-    await user.click(screen.getByRole('button', { name: '取消' }))
-    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
+    expect(screen.getByText('dsh')).toBeInTheDocument()
+    expect(screen.getByText('可用 · 12ms')).toBeInTheDocument()
+    expect(screen.getByText('CLI v1.2.3')).toBeInTheDocument()
+    expect(screen.getByText('dsh --profile multica --stdio')).toBeInTheDocument()
+    expect(screen.getByText('C:/tools/dsh.exe')).toBeInTheDocument()
+    expect(screen.getByText('负载 1/2')).toBeInTheDocument()
+    expect(screen.queryByText(/排队/)).not.toBeInTheDocument()
   })
 
-  it('加载列表、新建（含参数/prompt 模式/工作目录）并删除', async () => {
-    let store: Runtime[] = [base]
-    const list = vi.fn(async () => store)
-    const create = vi.fn(async (input: RuntimeInput) => {
-      const n: Runtime = {
-        ...base,
+  it('未检测 / 不可用 / 停用 / 排队都按契约展示', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([
+      makeRuntime({ id: 'r1', name: 'fresh', lastProbe: null, enabled: false }),
+      makeRuntime({
         id: 'r2',
-        name: input.name,
-        command: input.command,
-        args: input.args ?? [],
-        promptMode: input.promptMode ?? 'arg',
-        workdir: input.workdir ?? null,
-      }
-      store = [...store, n]
-      return n
-    })
-    const remove = vi.fn(async (id: string) => {
-      store = store.filter((x) => x.id !== id)
-    })
-    setApi({
-      runtimes: { list, create, remove, update: vi.fn() },
-    } as unknown as Partial<AiWorkflowApi>)
+        name: 'broken',
+        lastProbe: makeProbe({ state: 'unavailable', elapsedMs: 8, error: '登录态失效' }),
+      }),
+    ])
+    runtimes.statuses.mockResolvedValue([
+      makeStatus('r1'),
+      makeStatus('r2', { queued: 2, running: 0, maxConcurrent: 4 }),
+    ])
 
     render(<RuntimeManager />)
-    expect(await screen.findByText('ds')).toBeInTheDocument()
 
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '新建运行时' }))
-    await user.type(screen.getByLabelText('运行时名称'), 'claude')
-    await user.clear(screen.getByLabelText('运行时命令'))
-    await user.type(screen.getByLabelText('运行时命令'), 'claude-cli')
-    await user.type(screen.getByLabelText('运行时参数'), 'a b')
-    await user.click(screen.getByRole('combobox', { name: 'prompt 传递方式' }))
-    await user.click(screen.getByRole('option', { name: '标准输入' }))
-    await user.type(screen.getByLabelText('运行时工作目录'), 'D:/work')
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
-
-    await waitFor(() => expect(create).toHaveBeenCalled())
-    expect(create.mock.calls[0][0]).toMatchObject({
-      name: 'claude',
-      command: 'claude-cli',
-      args: ['a', 'b'],
-      promptMode: 'stdin',
-      workdir: 'D:/work',
-    })
-    expect(await screen.findByText('claude')).toBeInTheDocument()
-    // 保存成功后弹窗关闭
-    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
-
-    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
-    await waitFor(() => expect(remove).toHaveBeenCalledWith('r1'))
+    expect(await screen.findByText('fresh')).toBeInTheDocument()
+    expect(screen.getByText('未检测')).toBeInTheDocument()
+    expect(screen.getByText('未解析到可执行文件')).toBeInTheDocument()
+    expect(screen.getByText('已停用')).toBeInTheDocument()
+    expect(screen.getByText('不可用 · 8ms')).toBeInTheDocument()
+    expect(screen.getByText('负载 0/4')).toBeInTheDocument()
+    expect(screen.getByText('排队 2')).toBeInTheDocument()
   })
 
-  it('加载失败展示错误', async () => {
-    const list = vi.fn().mockRejectedValue('boom')
-    setApi({
-      runtimes: { list, create: vi.fn(), remove: vi.fn(), update: vi.fn() },
-    } as unknown as Partial<AiWorkflowApi>)
+  it('statuses 缺该运行时 use runtime.maxConcurrent 兜底', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([makeRuntime({ maxConcurrent: 3 })])
+    runtimes.statuses.mockResolvedValue([])
+
+    render(<RuntimeManager />)
+    expect(await screen.findByText('负载 0/3')).toBeInTheDocument()
+  })
+
+  it('清单加载失败展示错误', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockRejectedValue('boom')
+
     render(<RuntimeManager />)
     expect(await screen.findByText('boom')).toBeInTheDocument()
   })
 
-  it('新建失败在弹窗内展示错误并保持打开；删除失败展示错误', async () => {
-    const list = vi.fn().mockResolvedValue([base])
-    const create = vi.fn().mockRejectedValue(new Error('create-fail'))
-    const remove = vi.fn().mockRejectedValue(new Error('remove-fail'))
-    setApi({
-      runtimes: { list, create, remove, update: vi.fn() },
-    } as unknown as Partial<AiWorkflowApi>)
+  it('检测清单区分支持/不支持/已添加', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([makeRuntime({ command: 'dsh' })])
+    runtimes.detect.mockResolvedValue([
+      makeDetected({ command: 'dsh', label: 'DeepSeek Harness', supported: true }),
+      makeDetected({ command: 'codex', label: 'Codex CLI', supported: true }),
+      makeDetected({ command: 'claude', label: 'Claude Code', supported: false }),
+    ])
 
     render(<RuntimeManager />)
-    expect(await screen.findByText('ds')).toBeInTheDocument()
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '新建运行时' }))
-    await user.type(screen.getByLabelText('运行时名称'), 'x')
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
-    expect(await screen.findByText('create-fail')).toBeInTheDocument()
-    expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '取消' }))
-    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
-    expect(await screen.findByText('remove-fail')).toBeInTheDocument()
-  })
-
-  it('加载未完成即卸载不报错', async () => {
-    const slow = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve([]), 10)))
-    setApi({
-      runtimes: { list: slow, create: vi.fn(), remove: vi.fn(), update: vi.fn() },
-    } as unknown as Partial<AiWorkflowApi>)
-    const { unmount } = render(<RuntimeManager />)
-    unmount()
-    await new Promise((r) => setTimeout(r, 20))
-  })
-
-  it('刷新列表失败展示错误', async () => {
-    const list = vi.fn().mockResolvedValueOnce([base]).mockRejectedValue(new Error('reload-boom'))
-    setApi({
-      runtimes: {
-        list,
-        create: vi.fn().mockResolvedValue({ ...base, id: 'r2' }),
-        remove: vi.fn(),
-        update: vi.fn(),
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    expect(await screen.findByText('ds')).toBeInTheDocument()
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '新建运行时' }))
-    await user.type(screen.getByLabelText('运行时名称'), 'x')
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
-    expect(await screen.findByText('reload-boom')).toBeInTheDocument()
-  })
-
-  it('自动识别本机已安装的运行时并可一键预填表单', async () => {
-    const detected: DetectedRuntime[] = [
-      { command: 'codex', label: 'Codex CLI', path: 'C:/tools/codex.cmd' },
-    ]
-    const detect = vi.fn(async () => detected)
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect,
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    expect(await screen.findByText('Codex CLI')).toBeInTheDocument()
-    expect(screen.getByText('C:/tools/codex.cmd')).toBeInTheDocument()
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole('button', { name: '使用' }))
-    expect(screen.getByLabelText('运行时名称')).toHaveValue('Codex CLI')
-    expect(screen.getByLabelText('运行时命令')).toHaveValue('codex')
-  })
-
-  it('名称与既有运行时冲突时预填带命令后缀', async () => {
-    const detected: DetectedRuntime[] = [
-      { command: 'codex', label: 'Codex CLI', path: 'C:/tools/codex.cmd' },
-    ]
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([{ ...base, name: 'Codex CLI', command: 'codex-old' }]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn(async () => detected),
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: '使用' }))
-    expect(screen.getByLabelText('运行时名称')).toHaveValue('Codex CLI (codex)')
-  })
-
-  it('已添加过的命令显示「已添加」且不再提供预填按钮', async () => {
-    const detected: DetectedRuntime[] = [
-      { command: 'dsh', label: 'DeepSeek Harness', path: 'C:/tools/dsh.cmd' },
-    ]
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn(async () => detected),
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
     expect(await screen.findByText('已添加')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '使用' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '使用' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '暂不支持' })).toBeDisabled()
+    expect(screen.getByText('当前版本仅接入 DSH')).toBeInTheDocument()
   })
 
-  it('未检测到已安装运行时时给出提示', async () => {
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn(async () => []),
-      },
-    } as unknown as Partial<AiWorkflowApi>)
+  it('扫描中显示进行态，未检测到 CLI 时给出提示', async () => {
+    const runtimes = makeApi()
+    const slow = deferred<DetectedRuntime[]>()
+    runtimes.detect.mockReturnValue(slow.promise)
 
     render(<RuntimeManager />)
+
+    expect(await screen.findByText('正在扫描本机 PATH…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '扫描中…' })).toBeDisabled()
+
+    slow.resolve([])
     expect(await screen.findByText(/未检测到已安装的 CLI/)).toBeInTheDocument()
   })
 
-  it('检测失败展示错误', async () => {
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn().mockRejectedValue(new Error('detect-boom')),
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    expect(await screen.findByText('detect-boom')).toBeInTheDocument()
-  })
-
-  it('「重新扫描」重新拉取检测结果', async () => {
-    const detect = vi
-      .fn<() => Promise<DetectedRuntime[]>>()
+  it('重新扫描拉取到结果；扫描失败展示错误', async () => {
+    const runtimes = makeApi()
+    runtimes.detect
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ command: 'codex', label: 'Codex CLI', path: 'C:/tools/codex.cmd' }])
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect,
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
+      .mockResolvedValueOnce([
+        makeDetected({ command: 'codex', label: 'Codex CLI', path: 'C:/codex.exe' }),
+      ])
     const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText(/未检测到已安装的 CLI/)
+
     await user.click(screen.getByRole('button', { name: '重新扫描' }))
     expect(await screen.findByText('Codex CLI')).toBeInTheDocument()
-    expect(detect).toHaveBeenCalledTimes(2)
+    expect(runtimes.detect).toHaveBeenCalledTimes(2)
   })
 
-  it('点击「测试」以该运行时 id 调用；测试中禁用并显示「测试中…」，成功后显示连通与耗时', async () => {
-    let release: (result: RuntimeTestResult) => void = () => {}
-    const test = vi.fn(
-      () =>
-        new Promise<RuntimeTestResult>((resolve) => {
-          release = resolve
-        }),
-    )
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn(async () => []),
-        test,
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
-
-    expect(test).toHaveBeenCalledWith('r1')
-    const pending = screen.getByRole('button', { name: '测试运行时 ds' })
-    expect(pending).toBeDisabled()
-    expect(pending).toHaveTextContent('测试中…')
-    // 测试中不影响其它按钮
-    expect(screen.getByRole('button', { name: '新建运行时' })).toBeEnabled()
-
-    release({ ok: true, code: 0, elapsedMs: 12, output: 'OK', error: null })
-
-    const badge = await screen.findByText('连通 · 12ms')
-    expect(badge.className).toContain('text-emerald-300')
-    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toHaveTextContent('测试')
-  })
-
-  it('测试失败显示行内失败文案，title 携带输出尾部，且不进页面级 error', async () => {
-    const test = vi.fn().mockResolvedValue({
-      ok: false,
-      code: 3,
-      elapsedMs: 8,
-      output: 'stderr 尾部',
-      error: '退出码 3',
-    } satisfies RuntimeTestResult)
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn(async () => []),
-        test,
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
-
-    const badge = await screen.findByText('失败：退出码 3')
-    expect(badge.className).toContain('text-red-300')
-    expect(badge).toHaveAttribute('title', 'stderr 尾部')
-    // 连通性失败只是该行的行内结果：出现在运行时行内，且没有别处再渲染一份
-    expect(badge.closest('li')).not.toBeNull()
-    expect(screen.getAllByText('失败：退出码 3')).toHaveLength(1)
-  })
-
-  it('失败结果缺少原因时用兜底文案', async () => {
-    const test = vi.fn().mockResolvedValue({
-      ok: false,
-      code: null,
-      elapsedMs: 1,
-      output: '',
-      error: null,
-    } satisfies RuntimeTestResult)
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn(async () => []),
-        test,
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
-    expect(await screen.findByText('失败：未知错误')).toBeInTheDocument()
-  })
-
-  it('不同行的测试状态与结果互相独立', async () => {
-    const other: Runtime = { ...base, id: 'r2', name: 'claude', command: 'claude' }
-    let release: (result: RuntimeTestResult) => void = () => {}
-    const test = vi.fn(
-      (id: string) =>
-        new Promise<RuntimeTestResult>((resolve) => {
-          if (id === 'r1') release = resolve
-          else resolve({ ok: false, code: 1, elapsedMs: 3, output: 'c2', error: '退出码 1' })
-        }),
-    )
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base, other]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn(async () => []),
-        test,
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
-
-    // r1 测试中，r2 仍可点
-    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '测试运行时 claude' })).toBeEnabled()
-
-    release({ ok: true, code: 0, elapsedMs: 7, output: 'OK', error: null })
-    expect(await screen.findByText('连通 · 7ms')).toBeInTheDocument()
-    // r2 没有结果
-    expect(screen.queryByText('失败：退出码 1')).not.toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: '测试运行时 claude' }))
-    expect(await screen.findByText('失败：退出码 1')).toBeInTheDocument()
-    expect(screen.getByText('连通 · 7ms')).toBeInTheDocument()
-  })
-
-  it('旧桩没有 test 方法时点击后显示失败而不是崩溃', async () => {
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect: vi.fn(async () => []),
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
-    expect(await screen.findByText('失败：当前 preload 不支持连通性测试')).toBeInTheDocument()
-  })
-
-  it('「重新扫描」失败展示错误', async () => {
-    const detect = vi
-      .fn<() => Promise<DetectedRuntime[]>>()
-      .mockResolvedValueOnce([])
+  it('检测失败与重新扫描失败都展示错误', async () => {
+    const runtimes = makeApi()
+    runtimes.detect
+      .mockRejectedValueOnce(new Error('detect-boom'))
       .mockRejectedValueOnce(new Error('rescan-boom'))
-    setApi({
-      runtimes: {
-        list: vi.fn().mockResolvedValue([base]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-        detect,
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
     const user = userEvent.setup()
+    render(<RuntimeManager />)
+
+    expect(await screen.findByText('detect-boom')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '重新扫描' }))
     expect(await screen.findByText('rescan-boom')).toBeInTheDocument()
   })
 
-  it('结果按 id 记住：删除条目清掉其结论，重新扫描清空全部结论', async () => {
-    const other: Runtime = { ...base, id: 'r2', name: 'claude', command: 'claude' }
-    let store: Runtime[] = [base, other]
-    const list = vi.fn(async () => store)
-    const remove = vi.fn(async (id: string) => {
-      store = store.filter((x) => x.id !== id)
-    })
-    const test = vi
-      .fn()
-      .mockResolvedValue({ ok: true, code: 0, elapsedMs: 5, output: 'OK', error: null })
-    setApi({
-      runtimes: {
-        list,
-        create: vi.fn(),
-        remove,
-        update: vi.fn(),
-        detect: vi.fn(async () => []),
-        test,
-      },
-    } as unknown as Partial<AiWorkflowApi>)
-
-    render(<RuntimeManager />)
+  it('检测结果「使用」预填新建表单（名称不冲突）', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([makeRuntime({ name: 'ds' })])
+    runtimes.detect.mockResolvedValue([
+      makeDetected({ command: 'codex', label: 'Codex CLI', path: 'C:/codex.exe' }),
+    ])
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: '测试运行时 ds' }))
-    await user.click(screen.getByRole('button', { name: '测试运行时 claude' }))
-    await waitFor(() => expect(screen.getAllByText('连通 · 5ms')).toHaveLength(2))
+    render(<RuntimeManager />)
 
-    // 删除 ds 后只剩 claude 的结论
-    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
+    await user.click(await screen.findByRole('button', { name: '使用' }))
+
+    expect(screen.getByLabelText('运行时名称')).toHaveValue('Codex CLI')
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('codex')
+    expect(screen.getByLabelText('运行时 profile')).toHaveValue('multica')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
+  })
+
+  it('检测结果名称与既有运行时冲突时带命令后缀', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([makeRuntime({ name: 'Codex CLI', command: 'old' })])
+    runtimes.detect.mockResolvedValue([
+      makeDetected({ command: 'codex', label: 'Codex CLI', supported: true }),
+    ])
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+
+    await user.click(await screen.findByRole('button', { name: '使用' }))
+    expect(screen.getByLabelText('运行时名称')).toHaveValue('Codex CLI (codex)')
+  })
+
+  it('新建运行时：默认值提交、成功后关闭并刷新', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([makeRuntime()])
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '新建运行时' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('新建运行时')
+    await user.type(screen.getByLabelText('运行时名称'), '新的')
+    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+
+    await waitFor(() => expect(runtimes.create).toHaveBeenCalled())
+    expect(runtimes.create.mock.calls[0][0]).toMatchObject({
+      name: '新的',
+      command: 'dsh',
+      profile: 'multica',
+      permissionMode: 'workspace-write',
+      model: null,
+      reasoningEffort: null,
+      workdir: null,
+      maxConcurrent: 1,
+      enabled: true,
+    })
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: '添加运行时' })).not.toBeInTheDocument(),
+    )
+    expect(runtimes.list).toHaveBeenCalledTimes(2)
+  })
+
+  it('新建失败在弹窗内展示错误并保持打开', async () => {
+    const runtimes = makeApi()
+    runtimes.create.mockRejectedValue(new Error('create-fail'))
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '新建运行时' }))
+    await user.type(screen.getByLabelText('运行时名称'), 'x')
+    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+
+    expect(await screen.findByText('create-fail')).toBeInTheDocument()
+    expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
+  })
+
+  it('编辑运行时：预填、读取模型目录、提交 update 后关闭并刷新', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([
+      makeRuntime({ name: 'ds', maxConcurrent: 3, enabled: true, workdir: 'D:/work' }),
+    ])
+    runtimes.models.mockResolvedValue([
+      {
+        id: 'deepseek/chat',
+        label: 'DeepSeek Chat',
+        provider: 'deepseek',
+        default: true,
+        thinkingLevels: ['low', 'high'],
+        defaultThinkingLevel: 'low',
+      },
+    ])
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '编辑运行时 ds' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('编辑运行时')
+    expect(runtimes.models).toHaveBeenCalledWith('r1')
+    expect(screen.getByLabelText('运行时名称')).toHaveValue('ds')
+    expect(screen.getByLabelText('运行时工作目录')).toHaveValue('D:/work')
+    expect(screen.getByLabelText('运行时并发上限')).toHaveValue(3)
+
+    await user.clear(screen.getByLabelText('运行时名称'))
+    await user.type(screen.getByLabelText('运行时名称'), 'ds2')
+    await user.click(screen.getByRole('checkbox', { name: '启用运行时' }))
+    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+
+    await waitFor(() => expect(runtimes.update).toHaveBeenCalled())
+    expect(runtimes.update.mock.calls[0][0]).toBe('r1')
+    expect(runtimes.update.mock.calls[0][1]).toMatchObject({
+      name: 'ds2',
+      maxConcurrent: 3,
+      enabled: false,
+      workdir: 'D:/work',
+    })
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: '保存运行时' })).not.toBeInTheDocument(),
+    )
+    expect(runtimes.list).toHaveBeenCalledTimes(2)
+  })
+
+  it('编辑失败也在弹窗内展示错误', async () => {
+    const runtimes = makeApi()
+    runtimes.update.mockRejectedValue(new Error('update-fail'))
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '编辑运行时 ds' }))
+    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+    expect(await screen.findByText('update-fail')).toBeInTheDocument()
+    expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
+  })
+
+  it('测试成功：测试中禁用并展示新耗时，其他行状态独立', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([
+      makeRuntime({ id: 'r1', name: 'ds', lastProbe: null }),
+      makeRuntime({ id: 'r2', name: 'claude', command: 'claude', lastProbe: null }),
+    ])
+    runtimes.statuses.mockResolvedValue([makeStatus('r1'), makeStatus('r2')])
+    const slow = deferred<RuntimeProbe>()
+    runtimes.probe.mockReturnValue(slow.promise)
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '测试运行时 ds' }))
+    expect(runtimes.probe).toHaveBeenCalledWith('r1')
+    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeDisabled()
+    expect(screen.getByText('测试中…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '测试运行时 claude' })).toBeEnabled()
+
+    slow.resolve(makeProbe({ elapsedMs: 42 }))
+    expect(await screen.findByText('可用 · 42ms')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeEnabled()
+    expect(screen.getByText('未检测')).toBeInTheDocument()
+  })
+
+  it('测试失败（不可用）可点开详情查看原因与输出', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([makeRuntime({ lastProbe: null })])
+    runtimes.statuses.mockResolvedValue([makeStatus('r1')])
+    runtimes.probe.mockResolvedValue(
+      makeProbe({
+        state: 'unavailable',
+        elapsedMs: 8,
+        error: '登录态失效',
+        output: 'stderr 尾部',
+        cliVersion: null,
+        path: null,
+      }),
+    )
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '测试运行时 ds' }))
+    const badge = await screen.findByRole('button', { name: '不可用 · 8ms' })
+    expect(badge).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('登录态失效')).not.toBeInTheDocument()
+
+    await user.click(badge)
+    expect(badge).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('登录态失效')).toBeInTheDocument()
+    expect(screen.getByText('stderr 尾部')).toBeInTheDocument()
+    expect(screen.getByText('未解析到可执行文件')).toBeInTheDocument()
+
+    await user.click(badge)
+    expect(screen.queryByText('登录态失效')).not.toBeInTheDocument()
+  })
+
+  it('探测失败缺原因时详情用兜底文案', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([makeRuntime({ lastProbe: null })])
+    runtimes.statuses.mockResolvedValue([makeStatus('r1')])
+    runtimes.probe.mockResolvedValue(makeProbe({ state: 'unavailable', error: null, output: '' }))
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '测试运行时 ds' }))
+    await user.click(await screen.findByRole('button', { name: /不可用 ·/ }))
+    expect(screen.getByText('未知错误')).toBeInTheDocument()
+  })
+
+  it('探测调用抛错展示页面级错误', async () => {
+    const runtimes = makeApi()
+    runtimes.probe.mockRejectedValue(new Error('probe-boom'))
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '测试运行时 ds' }))
+    expect(await screen.findByText('probe-boom')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeEnabled()
+  })
+
+  it('删除运行时：成功刷新并清掉展开的探测详情', async () => {
+    const runtimes = makeApi()
+    let store: Runtime[] = [
+      makeRuntime({
+        lastProbe: makeProbe({ state: 'unavailable', error: '坏了', output: 'tail' }),
+      }),
+    ]
+    runtimes.list.mockImplementation(async () => store)
+    runtimes.statuses.mockResolvedValue([makeStatus('r1')])
+    runtimes.remove.mockImplementation(async () => {
+      store = []
+    })
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '不可用 · 12ms' }))
+    expect(screen.getByText('坏了')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '删除运行时 ds' }))
     await waitFor(() => expect(screen.queryByText('ds')).not.toBeInTheDocument())
-    expect(screen.getAllByText('连通 · 5ms')).toHaveLength(1)
+    expect(screen.queryByText('坏了')).not.toBeInTheDocument()
+  })
 
-    // 重新扫描清空结论
-    await user.click(screen.getByRole('button', { name: '重新扫描' }))
-    await waitFor(() => expect(screen.queryByText('连通 · 5ms')).not.toBeInTheDocument())
+  it('删除其它运行时不收起已展开的详情', async () => {
+    const runtimes = makeApi()
+    let store: Runtime[] = [
+      makeRuntime({
+        id: 'r1',
+        name: 'ds',
+        lastProbe: makeProbe({ state: 'unavailable', error: '坏了', output: '' }),
+      }),
+      makeRuntime({ id: 'r2', name: 'claude', command: 'claude' }),
+    ]
+    runtimes.list.mockImplementation(async () => store)
+    runtimes.statuses.mockResolvedValue([makeStatus('r1'), makeStatus('r2')])
+    runtimes.remove.mockImplementation(async (id: string) => {
+      store = store.filter((r) => r.id !== id)
+    })
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '不可用 · 12ms' }))
+    expect(screen.getByText('坏了')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '删除运行时 claude' }))
+    await waitFor(() => expect(screen.queryByText('claude')).not.toBeInTheDocument())
+    expect(screen.getByText('坏了')).toBeInTheDocument()
+  })
+
+  it('删除失败展示页面级错误', async () => {
+    const runtimes = makeApi()
+    runtimes.remove.mockRejectedValue(new Error('remove-fail'))
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '删除运行时 ds' }))
+    expect(await screen.findByText('remove-fail')).toBeInTheDocument()
+    expect(screen.getByText('ds')).toBeInTheDocument()
+  })
+
+  it('加载未完成即卸载不报错', async () => {
+    const slow = deferred<Runtime[]>()
+    const runtimes = makeApi()
+    runtimes.list.mockReturnValue(slow.promise)
+    const { unmount } = render(<RuntimeManager />)
+    unmount()
+    slow.resolve([makeRuntime()])
+    await new Promise((r) => setTimeout(r, 0))
   })
 })

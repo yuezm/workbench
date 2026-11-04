@@ -36,6 +36,7 @@ export function applyEffects(
       taskId: task.id,
       stageId: e.stageId,
       agentId: e.agentId,
+      runtimeId: agent.runtimeId,
       prompt,
       status: 'queued',
     })
@@ -83,7 +84,9 @@ function currentStageOf(repo: Repository, task: Task): WorkflowStage {
 
 /**
  * 看板拖拽：把任务放到目标阶段并落地该阶段的进入效果。
- * 执行中的阶段由 run 结果推进，不接受手动拖拽。
+ *
+ * 「执行中」由活跃 run 判定，而不是阶段配置：agent 阶段失败后没有 run 在跑，
+ * 用户仍可把卡片拖去重试或收尾，不会卡死在看板上。
  */
 export function moveTaskToStage(
   repo: Repository,
@@ -95,7 +98,7 @@ export function moveTaskToStage(
   const wf = repo.workflowGet(task.workflowId)
   const current = wf.stages.find((s) => s.id === task.currentStageId)
   if (!current) throw new Error('任务当前阶段无效')
-  if (current.entryMode === 'agent') throw new Error('执行中的阶段不能拖动')
+  if (repo.activeRunForTask(taskId)) throw new Error('执行中的阶段不能拖动')
   if (!wf.stages.some((s) => s.id === stageId)) throw new Error('目标阶段无效: ' + stageId)
   const { task: next, effects } = moveTaskToStageInState(task, stageId, wf)
   const saved = repo.taskUpdate(taskId, {
@@ -106,10 +109,10 @@ export function moveTaskToStage(
   return saved
 }
 
-/** 看板拖到「已完成」区：任务移出看板。 */
+/** 看板拖到「已完成」区：任务移出看板；有活跃 run 时不允许。 */
 export function completeTask(repo: Repository, taskId: string): Task {
   const task = repo.taskGet(taskId)
-  const stage = currentStageOf(repo, task)
-  if (stage.entryMode === 'agent') throw new Error('执行中的阶段不能完成')
+  currentStageOf(repo, task)
+  if (repo.activeRunForTask(taskId)) throw new Error('执行中的阶段不能完成')
   return repo.taskUpdate(taskId, { status: completeTaskInState(task).status })
 }

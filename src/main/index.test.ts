@@ -138,6 +138,11 @@ type IpcDeps = {
   notifyChanged: () => void
   onQueue: (runId: string) => void
   chat: unknown
+  backendFor: (family: 'dsh') => {
+    probe: unknown
+    models: unknown
+    execute: unknown
+  }
 }
 
 function ipcDeps(): IpcDeps {
@@ -172,6 +177,11 @@ describe('主进程入口装配', () => {
       }),
     )
     expect(runnerInstances[0].resumeQueued).toHaveBeenCalledTimes(1)
+    // 协议后端工厂接到 IPC，且能按协议族构造出真实后端
+    const backend = ipcDeps().backendFor('dsh')
+    expect(typeof backend.probe).toBe('function')
+    expect(typeof backend.models).toBe('function')
+    expect(typeof backend.execute).toBe('function')
   })
 
   it('开发服务器地址存在时加载 URL', async () => {

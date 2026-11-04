@@ -1,48 +1,152 @@
-import { useState, type ReactElement } from 'react'
-import type { PromptMode, RuntimeInput } from '../../../../../shared/ai-workflow-api'
+import { useEffect, useState, type ReactElement } from 'react'
+import type {
+  PermissionMode,
+  Runtime,
+  RuntimeInput,
+  RuntimeModelOption,
+} from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
-import { Field } from '../../../components/ui/field'
+import { Field, labelCls } from '../../../components/ui/field'
 import { Input } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
+import { wfApi } from '../api'
 
-interface RuntimeDialogProps {
-  /** 打开时的预填值（新建为空表单，检测结果「使用」带入名称与命令） */
-  initial: RuntimeInput
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+/** 模型下拉里代表「手动输入」的哨兵值（不会发给主进程） */
+const CUSTOM_MODEL = '__custom__'
+
+const PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
+  { value: 'read-only', label: '只读（read-only）' },
+  { value: 'workspace-write', label: '工作区可写（workspace-write）' },
+  { value: 'danger-full-access', label: '完全访问（danger-full-access）' },
+]
+
+const PERMISSION_HINT = 'stdio 传输没有审批往返，越界操作会直接失败。'
+
+export interface RuntimeDialogProps {
+  /** 编辑目标；不传 = 新建 */
+  runtime?: Runtime | null
+  /** 新建预填（检测清单「使用」带入名称与命令） */
+  initial?: RuntimeInput | null
   onSubmit: (input: RuntimeInput) => Promise<void>
   onCancel: () => void
 }
 
-function parseArgs(text: string): string[] {
-  const t = text.trim()
-  return t ? t.split(/\s+/) : []
-}
+/**
+ * 新建 / 编辑运行时共用的弹窗。
+ *
+ * 编辑时才有 id，才能读该运行时的模型目录（`runtimes.models`）：新建阶段不做探测，
+ * 模型与推理强度留到保存后再选，避免未落库就调用 CLI。提交失败的错误留在弹窗内。
+ */
+export function RuntimeDialog({
+  runtime = null,
+  initial = null,
+  onSubmit,
+  onCancel,
+}: RuntimeDialogProps): ReactElement {
+  const editing = runtime !== null
 
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-
-/** 新建运行时弹窗：点「新建运行时」或检测清单的「使用」后才出现 */
-export function RuntimeDialog({ initial, onSubmit, onCancel }: RuntimeDialogProps): ReactElement {
-  const [name, setName] = useState(initial.name)
-  const [command, setCommand] = useState(initial.command)
-  const [argsText, setArgsText] = useState((initial.args ?? []).join(' '))
-  const [promptMode, setPromptMode] = useState<PromptMode>(initial.promptMode ?? 'arg')
-  const [workdir, setWorkdir] = useState(initial.workdir ?? '')
+  const [name, setName] = useState(initial?.name ?? runtime?.name ?? '')
+  const [command, setCommand] = useState(initial?.command ?? runtime?.command ?? 'dsh')
+  const [profile, setProfile] = useState(initial?.profile ?? runtime?.profile ?? 'multica')
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(
+    initial?.permissionMode ?? runtime?.permissionMode ?? 'workspace-write',
+  )
+  const [modelChoice, setModelChoice] = useState<string>(
+    runtime?.model ? CUSTOM_MODEL : (initial?.model ?? ''),
+  )
+  const [customModel, setCustomModel] = useState(runtime?.model ?? initial?.model ?? '')
+  const [reasoningEffort, setReasoningEffort] = useState(runtime?.reasoningEffort ?? '')
+  const [workdir, setWorkdir] = useState(initial?.workdir ?? runtime?.workdir ?? '')
+  const [maxConcurrent, setMaxConcurrent] = useState(
+    String(runtime?.maxConcurrent ?? initial?.maxConcurrent ?? 1),
+  )
+  const [enabled, setEnabled] = useState(runtime?.enabled ?? true)
+  const [models, setModels] = useState<RuntimeModelOption[]>([])
+  const [modelsLoading, setModelsLoading] = useState(editing)
+  const [modelsError, setModelsError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 编辑时读取该运行时的模型目录；失败不阻塞手动填写模型 id
+  useEffect(() => {
+    const target = runtime
+    if (!target) return
+    const initialModel = target.model ?? ''
+    let alive = true
+    void wfApi()
+      .runtimes.models(target.id)
+      .then((list) => {
+        if (!alive) return
+        setModels(list)
+        // 初始按「手动输入」渲染的已有模型，命中目录后切回已知选项
+        setModelChoice((prev) =>
+          prev === CUSTOM_MODEL && list.some((m) => m.id === initialModel) ? initialModel : prev,
+        )
+      })
+      .catch((e: unknown) => {
+        if (alive) setModelsError(errMsg(e))
+      })
+      .finally(() => {
+        if (alive) setModelsLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [runtime])
+
+  const modelValue = modelChoice === CUSTOM_MODEL ? customModel.trim() : modelChoice
+  const selectedModel = models.find((m) => m.id === modelValue) ?? null
+  const thinkingLevels = selectedModel?.thinkingLevels ?? []
+
+  const effortOptions = [
+    { value: '', label: '默认（模型默认）' },
+    ...thinkingLevels.map((level) => ({ value: level, label: level })),
+  ]
+  // 已有值不在当前模型的能力清单里时仍要能显示（例如模型目录读取失败）
+  if (reasoningEffort !== '' && !thinkingLevels.includes(reasoningEffort)) {
+    effortOptions.push({ value: reasoningEffort, label: reasoningEffort })
+  }
+
+  const modelOptions = editing
+    ? [
+        { value: '', label: '默认（CLI 默认模型）' },
+        ...models.map((m) => ({ value: m.id, label: m.label })),
+        { value: CUSTOM_MODEL, label: '手动输入模型 id…' },
+      ]
+    : [{ value: '', label: '默认（创建后可选择）' }]
+
+  const changeModel = (value: string): void => {
+    setModelChoice(value)
+    setReasoningEffort('')
+  }
+
+  const changeCustomModel = (value: string): void => {
+    setCustomModel(value)
+    setReasoningEffort('')
+  }
 
   const submit = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
     setSaving(true)
     setError(null)
     try {
+      const concurrent = Math.floor(Number(maxConcurrent))
       await onSubmit({
-        name,
-        command,
-        args: parseArgs(argsText),
-        promptMode,
-        workdir: workdir.trim() || null,
+        name: name.trim(),
+        command: command.trim(),
+        profile: profile.trim(),
+        permissionMode,
+        model: modelValue === '' ? null : modelValue,
+        reasoningEffort: reasoningEffort === '' ? null : reasoningEffort,
+        workdir: workdir.trim() === '' ? null : workdir.trim(),
+        maxConcurrent: Number.isFinite(concurrent) && concurrent >= 1 ? concurrent : 1,
+        enabled,
       })
     } catch (e) {
+      // 新建会先探测，失败时弹窗保持打开并就地说明原因
       setError(errMsg(e))
     } finally {
       setSaving(false)
@@ -50,37 +154,45 @@ export function RuntimeDialog({ initial, onSubmit, onCancel }: RuntimeDialogProp
   }
 
   return (
-    <Dialog title="新建运行时" onClose={onCancel}>
-      <form className="flex flex-col gap-4" onSubmit={submit}>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <Dialog title={editing ? '编辑运行时' : '新建运行时'} onClose={onCancel}>
+      <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
+        <div className="grid grid-cols-2 gap-3">
           <Field label="名称">
             <Input aria-label="运行时名称" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
           <Field label="命令">
             <Input
               aria-label="运行时命令"
+              className="font-mono"
               value={command}
               onChange={(e) => setCommand(e.target.value)}
             />
           </Field>
-          <Field label="prompt 传递">
-            <Select
-              ariaLabel="prompt 传递方式"
-              value={promptMode}
-              onChange={(v) => setPromptMode(v === 'stdin' ? 'stdin' : 'arg')}
-              options={[
-                { value: 'arg', label: '参数' },
-                { value: 'stdin', label: '标准输入' },
-              ]}
+          <Field label="profile">
+            <Input
+              aria-label="运行时 profile"
+              className="font-mono"
+              value={profile}
+              onChange={(e) => setProfile(e.target.value)}
             />
           </Field>
-          <Field label={`参数（空格分隔，可用 {'{prompt}'}）`} className="sm:col-span-2">
+          <Field label="并发上限">
             <Input
-              aria-label="运行时参数"
-              className="font-mono"
-              value={argsText}
-              onChange={(e) => setArgsText(e.target.value)}
+              aria-label="运行时并发上限"
+              type="number"
+              min={1}
+              value={maxConcurrent}
+              onChange={(e) => setMaxConcurrent(e.target.value)}
             />
+          </Field>
+          <Field label="权限模式">
+            <Select
+              ariaLabel="运行时权限模式"
+              value={permissionMode}
+              onChange={(v) => setPermissionMode(v as PermissionMode)}
+              options={PERMISSION_OPTIONS}
+            />
+            <span className="text-[11px] leading-relaxed text-ink-faint">{PERMISSION_HINT}</span>
           </Field>
           <Field label="工作目录（可选）">
             <Input
@@ -90,7 +202,58 @@ export function RuntimeDialog({ initial, onSubmit, onCancel }: RuntimeDialogProp
               onChange={(e) => setWorkdir(e.target.value)}
             />
           </Field>
+          <Field label="模型">
+            <Select
+              ariaLabel="运行时模型"
+              value={modelChoice}
+              onChange={changeModel}
+              disabled={!editing || modelsLoading}
+              placeholder="默认（CLI 默认模型）"
+              options={modelOptions}
+            />
+            {modelsLoading && <span className="text-[11px] text-ink-faint">正在读取模型清单…</span>}
+            {modelsError && (
+              <span className="text-[11px] text-red-300">
+                模型清单加载失败：{modelsError}（可手动填写）
+              </span>
+            )}
+          </Field>
+          <Field label="推理强度">
+            <Select
+              ariaLabel="运行时推理强度"
+              value={reasoningEffort}
+              onChange={setReasoningEffort}
+              disabled={!editing || thinkingLevels.length === 0}
+              options={effortOptions}
+            />
+          </Field>
+          {editing && modelChoice === CUSTOM_MODEL && (
+            <Field label="模型 id（手动输入）" className="col-span-2">
+              <Input
+                aria-label="运行时模型手填"
+                className="font-mono"
+                value={customModel}
+                onChange={(e) => changeCustomModel(e.target.value)}
+              />
+            </Field>
+          )}
         </div>
+
+        {editing && (
+          <div className="flex flex-col gap-1.5">
+            <span className={labelCls}>启用</span>
+            <label className="flex items-center gap-2 text-sm text-ink-dim">
+              <input
+                type="checkbox"
+                aria-label="启用运行时"
+                className="size-4 accent-[var(--color-focus)]"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+              <span>启用后才会派发执行</span>
+            </label>
+          </div>
+        )}
 
         {error && (
           <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
@@ -103,7 +266,7 @@ export function RuntimeDialog({ initial, onSubmit, onCancel }: RuntimeDialogProp
             取消
           </Button>
           <Button type="submit" variant="primary" size="sm" disabled={saving}>
-            添加运行时
+            {editing ? '保存运行时' : '添加运行时'}
           </Button>
         </div>
       </form>

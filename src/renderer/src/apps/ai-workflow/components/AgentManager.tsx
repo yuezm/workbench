@@ -9,7 +9,14 @@ import { Button } from '../../../components/ui/button'
 import { Panel, badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
 import { wfApi } from '../api'
-import { AgentDialog } from './AgentDialog'
+import { AgentDialog, RUNTIME_HEALTH_LABEL, runtimeHealth, type RuntimeHealth } from './AgentDialog'
+
+/** 状态点配色：可用绿、不可用红、未检测灰 */
+const HEALTH_DOT: Record<RuntimeHealth, string> = {
+  ready: 'bg-emerald-400',
+  unavailable: 'bg-red-400',
+  unknown: 'bg-white/25',
+}
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -97,7 +104,8 @@ export function AgentManager(): ReactElement {
     }
   }
 
-  const runtimeName = (id: string): string => runtimes.find((r) => r.id === id)?.name ?? id
+  const runtimeOf = (id: string): Runtime | undefined => runtimes.find((r) => r.id === id)
+  const runtimeName = (id: string): string => runtimeOf(id)?.name ?? id
 
   return (
     <div className="flex flex-col gap-4">
@@ -137,32 +145,43 @@ export function AgentManager(): ReactElement {
               暂无智能体
             </li>
           )}
-          {agents.map((a) => (
-            <li
-              key={a.id}
-              className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
-            >
-              <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
-                <RobotIcon />
-              </span>
-              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="truncate text-sm font-medium text-ink">{a.name}</span>
-                <span className="truncate text-[11px] text-ink-faint">
-                  {runtimeName(a.runtimeId)}
-                  {a.description ? ` · ${a.description}` : ''}
-                </span>
-              </span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-red-400 hover:text-red-300"
-                onClick={() => void remove(a.id)}
+          {agents.map((a) => {
+            const runtime = runtimeOf(a.runtimeId)
+            const health: RuntimeHealth = runtime ? runtimeHealth(runtime) : 'unknown'
+            return (
+              <li
+                key={a.id}
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
               >
-                删除
-              </Button>
-            </li>
-          ))}
+                <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                  <RobotIcon />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="truncate text-sm font-medium text-ink">{a.name}</span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-ink-faint">
+                    <span
+                      aria-hidden="true"
+                      className={cn('size-1.5 shrink-0 rounded-full', HEALTH_DOT[health])}
+                    />
+                    <span className="truncate">
+                      运行时：{runtimeName(a.runtimeId)} · {RUNTIME_HEALTH_LABEL[health]}
+                      {a.description ? ` · ${a.description}` : ''}
+                    </span>
+                  </span>
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-red-400 hover:text-red-300"
+                  aria-label={`删除智能体 ${a.name}`}
+                  onClick={() => void remove(a.id)}
+                >
+                  删除
+                </Button>
+              </li>
+            )
+          })}
         </ul>
       </Panel>
 

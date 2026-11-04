@@ -1,7 +1,13 @@
-import { useState, type DragEvent, type ReactElement } from 'react'
-import type { Task, WorkflowWithStages } from '../../../../../shared/ai-workflow-api'
+import { useEffect, useState, type DragEvent, type ReactElement } from 'react'
+import type {
+  AiWorkflowApi,
+  Run,
+  Task,
+  WorkflowWithStages,
+} from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
 import { cn } from '../../../lib/cn'
+import { wfApi } from '../api'
 import { TaskCard } from './TaskCard'
 
 interface KanbanBoardProps {
@@ -19,6 +25,17 @@ const DOT_COLORS = ['bg-focus', 'bg-short', 'bg-long', 'bg-focus-deep'] as const
 
 /** 「已完成」落点：不是阶段，用哨兵值参与高亮判断 */
 const DONE_TARGET = '__done__'
+
+/** 活跃 run：queued/running 才算任务正在执行（失败/完成/取消都不再锁卡片） */
+function hasActiveRun(runs: Run[]): boolean {
+  return runs.some((run) => run.status === 'queued' || run.status === 'running')
+}
+
+/** 订阅 ai-workflow 变更事件；注入的 api 可能没有 onChanged（测试桩） */
+function subscribe(cb: () => void): () => void {
+  const onChanged = (wfApi() as Partial<AiWorkflowApi>).onChanged
+  return onChanged ? onChanged(cb) : () => {}
+}
 
 /** 看板图标：三列分栏 */
 function BoardIcon(): ReactElement {
@@ -52,6 +69,41 @@ export function KanbanBoard({
 
   const activeTasks = tasks.filter((t) => t.status === 'active')
   const completedCount = tasks.filter((t) => t.status === 'completed').length
+
+  /** 执行中 = 该任务存在 queued/running 的 run；失败后没有活跃 run 即可拖走重试 */
+  const [executingIds, setExecutingIds] = useState<ReadonlySet<string>>(new Set())
+  // 用 id 串做依赖：tasks 数组引用变化但任务集合没变时不重复请求
+  const activeIdsKey = activeTasks.map((t) => t.id).join('|')
+
+  useEffect(() => {
+    let alive = true
+
+    const load = async (): Promise<void> => {
+      const ids = activeIdsKey === '' ? [] : activeIdsKey.split('|')
+      try {
+        const rows = await Promise.all(
+          ids.map(async (id) => ({
+            id,
+            executing: hasActiveRun(await wfApi().runs.listByTask(id)),
+          })),
+        )
+        if (!alive) return
+        setExecutingIds(new Set(rows.filter((row) => row.executing).map((row) => row.id)))
+      } catch {
+        // 查询失败不锁卡片：主进程仍会拒绝真正执行中的拖拽并回传错误
+        if (alive) setExecutingIds(new Set())
+      }
+    }
+
+    void load()
+    const off = subscribe(() => {
+      if (alive) void load()
+    })
+    return () => {
+      alive = false
+      off()
+    }
+  }, [activeIdsKey])
 
   const stopDrag = (): void => {
     setDragging(null)
@@ -139,6 +191,7 @@ export function KanbanBoard({
                       key={task.id}
                       task={task}
                       stage={stage}
+                      executing={executingIds.has(task.id)}
                       dragging={dragging?.id === task.id}
                       onDragStart={setDragging}
                       onDragEnd={stopDrag}

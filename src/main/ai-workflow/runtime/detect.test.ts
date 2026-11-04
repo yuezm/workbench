@@ -70,6 +70,9 @@ describe('detectInstalledRuntimes', () => {
     expect(result[0].label).toBe('DeepSeek Harness')
     expect(result[1].label).toBe('Claude Code')
     expect(result[0].path).toBe(path.join(dir, 'dsh.cmd'))
+    // 只有 dsh 有协议后端
+    expect(result[0].supported).toBe(true)
+    expect(result[1].supported).toBe(false)
   })
 
   it('Windows：.exe / .bat / .ps1 任一即算已安装', () => {

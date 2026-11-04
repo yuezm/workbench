@@ -134,4 +134,14 @@ describe('repository 对话与消息', () => {
     repo.chatConversationCreate(agent.id)
     expect(() => repo.agentRemove(agent.id)).toThrow(/引用/)
   })
+
+  it('会话 id 可写入/清空（跨轮续接用）', () => {
+    const agent = seedAgent()
+    const conv = repo.chatConversationCreate(agent.id)
+    expect(conv.sessionId).toBeNull()
+    repo.chatConversationSetSession(conv.id, 'sess-1')
+    expect(repo.chatConversationGet(conv.id).sessionId).toBe('sess-1')
+    repo.chatConversationSetSession(conv.id, null)
+    expect(repo.chatConversationGet(conv.id).sessionId).toBeNull()
+  })
 })

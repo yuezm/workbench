@@ -6,6 +6,7 @@ import type {
   ChatConversation,
   ChatMessage,
   ChatStreamEvent,
+  RunEvent,
 } from '../../../../../shared/ai-workflow-api'
 import { useChat } from './useChat'
 
@@ -20,7 +21,7 @@ const agent: Agent = {
 const researcher: Agent = { ...agent, id: 'a2', name: '研究员' }
 
 function conv(id: string, title: string, agentId = 'a1'): ChatConversation {
-  return { id, title, agentId, createdAt: 't', updatedAt: 't' }
+  return { id, title, agentId, sessionId: null, createdAt: 't', updatedAt: 't' }
 }
 
 function msg(
@@ -88,6 +89,11 @@ function mount(chat: ChatMocks, agents: Agent[] = [agent, researcher]) {
     chat,
   } as unknown as Partial<AiWorkflowApi>
   return renderHook(() => useChat(agents))
+}
+
+/** 构造一条流事件（conversationId 缺省为当前会话 c1） */
+function streamEvent(event: RunEvent, conversationId = 'c1'): ChatStreamEvent {
+  return { conversationId, type: 'event', event }
 }
 
 beforeEach(() => {
@@ -195,7 +201,7 @@ describe('useChat', () => {
     expect(result.current.sending).toBe(false)
   })
 
-  it('chunk 追加到流式文本，end 后重拉消息并清掉流式与发送中', async () => {
+  it('text 事件流式追加；end 后重拉消息并清掉流式与发送中', async () => {
     let msgs: ChatMessage[] = [msg('m1', 'c1', 'user', '问一句')]
     const chat = makeChat({
       listConversations: vi.fn(async () => [c1]),
@@ -208,27 +214,88 @@ describe('useChat', () => {
       await result.current.sendMessage('讲个笑话')
     })
     expect(result.current.sending).toBe(true)
-    expect(result.current.streaming).toBe('')
+    expect(result.current.streaming).toEqual({ text: '', thinking: '', tools: [] })
 
     await act(async () => {
-      emit?.({ conversationId: 'c1', type: 'chunk', chunk: '你好' })
+      emit?.(streamEvent({ seq: 1, type: 'text', text: '你' }))
     })
-    expect(result.current.streaming).toBe('你好')
-
-    // 没有正文的 chunk 不改变已累积文本
     await act(async () => {
-      emit?.({ conversationId: 'c1', type: 'chunk' })
+      emit?.(streamEvent({ seq: 2, type: 'text', text: '好' }))
     })
-    expect(result.current.streaming).toBe('你好')
+    expect(result.current.streaming.text).toBe('你好')
+
+    // 没有正文的 text 事件不改变已累积文本
+    await act(async () => {
+      emit?.(streamEvent({ seq: 3, type: 'text' }))
+    })
+    expect(result.current.streaming.text).toBe('你好')
 
     msgs = [...msgs, msg('m2', 'c1', 'assistant', '你好', '退出码 1')]
     await act(async () => {
       emit?.({ conversationId: 'c1', type: 'end' })
     })
-    expect(result.current.streaming).toBe('')
+    expect(result.current.streaming).toEqual({ text: '', thinking: '', tools: [] })
     expect(result.current.sending).toBe(false)
     await waitFor(() => expect(result.current.messages[1]?.error).toBe('退出码 1'))
     expect(chat.listMessages).toHaveBeenCalledTimes(3)
+  })
+
+  it('thinking 事件累积到次要输出，status 事件与缺失 event 的事件被忽略', async () => {
+    const chat = makeChat({ listConversations: vi.fn(async () => [c1]) })
+    const { result } = mount(chat)
+    await waitFor(() => expect(result.current.activeId).toBe('c1'))
+
+    await act(async () => {
+      emit?.(streamEvent({ seq: 1, type: 'thinking', text: '想' }))
+    })
+    await act(async () => {
+      emit?.(streamEvent({ seq: 2, type: 'thinking', text: '一下' }))
+    })
+    expect(result.current.streaming.thinking).toBe('想一下')
+
+    await act(async () => {
+      emit?.(streamEvent({ seq: 3, type: 'status', status: 'running' }))
+      emit?.({ conversationId: 'c1', type: 'event' })
+    })
+    expect(result.current.streaming).toEqual({ text: '', thinking: '想一下', tools: [] })
+  })
+
+  it('tool_call / tool_result 事件进入工具区，缺字段有兜底', async () => {
+    const chat = makeChat({ listConversations: vi.fn(async () => [c1]) })
+    const { result } = mount(chat)
+    await waitFor(() => expect(result.current.activeId).toBe('c1'))
+
+    await act(async () => {
+      emit?.(streamEvent({ seq: 1, type: 'tool_call', tool: 'read', input: '{"p":1}' }))
+    })
+    await act(async () => {
+      emit?.(streamEvent({ seq: 2, type: 'tool_result', tool: 'read', output: 'ok' }))
+    })
+    await act(async () => {
+      emit?.(streamEvent({ seq: 3, type: 'tool_result', isError: true }))
+    })
+
+    expect(result.current.streaming.tools).toEqual([
+      { tool: 'read', content: '{"p":1}', isError: false },
+      { tool: 'read', content: 'ok', isError: false },
+      { tool: '未知工具', content: '', isError: true },
+    ])
+  })
+
+  it('tool_call 缺字段时用兜底工具名与空内容，thinking 缺文本不追加', async () => {
+    const chat = makeChat({ listConversations: vi.fn(async () => [c1]) })
+    const { result } = mount(chat)
+    await waitFor(() => expect(result.current.activeId).toBe('c1'))
+
+    await act(async () => {
+      emit?.(streamEvent({ seq: 1, type: 'thinking' }))
+      emit?.(streamEvent({ seq: 2, type: 'tool_call' }))
+    })
+
+    expect(result.current.streaming.thinking).toBe('')
+    expect(result.current.streaming.tools).toEqual([
+      { tool: '未知工具', content: '', isError: false },
+    ])
   })
 
   it('切换会话后忽略旧会话事件，过期请求不写入', async () => {
@@ -262,10 +329,10 @@ describe('useChat', () => {
     // 旧会话的增量与结束：不处理
     const calls = chat.listMessages.mock.calls.length
     await act(async () => {
-      emit?.({ conversationId: 'c1', type: 'chunk', chunk: '旧会话增量' })
+      emit?.(streamEvent({ seq: 1, type: 'text', text: '旧会话增量' }, 'c1'))
       emit?.({ conversationId: 'c1', type: 'end' })
     })
-    expect(result.current.streaming).toBe('')
+    expect(result.current.streaming.text).toBe('')
     expect(chat.listMessages).toHaveBeenCalledTimes(calls)
 
     // 切回 c1 再切走：迟到的失败也不写入 error

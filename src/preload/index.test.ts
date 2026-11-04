@@ -73,8 +73,10 @@ describe('preload 桥接契约', () => {
       'create',
       'detect',
       'list',
+      'models',
+      'probe',
       'remove',
-      'test',
+      'statuses',
       'update',
     ])
   })
@@ -93,6 +95,8 @@ describe('preload 桥接契约', () => {
 
     await aiWorkflow.runs.listByTask('t1')
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'runs.listByTask', ['t1'])
+    await aiWorkflow.runs.events('run1')
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'runs.events', ['run1'])
   })
 
   it('onChanged 订阅 CHANGED 事件并返回可退订函数', async () => {
@@ -114,9 +118,13 @@ describe('preload 桥接契约', () => {
     expect(ipcRenderer.on).toHaveBeenCalledWith(AI_WORKFLOW_CHAT, expect.any(Function))
     const listener = vi.mocked(ipcRenderer.on).mock.calls[0][1] as (
       e: unknown,
-      payload: { conversationId: string; type: 'chunk'; chunk: string },
+      payload: { conversationId: string; type: 'event'; event: unknown },
     ) => void
-    const payload = { conversationId: 'c1', type: 'chunk' as const, chunk: 'hi' }
+    const payload = {
+      conversationId: 'c1',
+      type: 'event' as const,
+      event: { seq: 1, type: 'text' },
+    }
     listener({}, payload)
     expect(cb).toHaveBeenCalledWith(payload)
     off()
@@ -130,7 +138,9 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.runtimes.update('r1', { name: 'x' })
     await aiWorkflow.runtimes.remove('r1')
     await aiWorkflow.runtimes.detect()
-    await aiWorkflow.runtimes.test('r1')
+    await aiWorkflow.runtimes.probe('r1')
+    await aiWorkflow.runtimes.statuses()
+    await aiWorkflow.runtimes.models('r1')
     await aiWorkflow.agents.list()
     await aiWorkflow.agents.create({ name: 'a', runtimeId: 'r1' })
     await aiWorkflow.agents.update('a1', { name: 'b' })
@@ -144,6 +154,8 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.tasks.moveToStage('t1', 's1')
     await aiWorkflow.tasks.complete('t1')
     await aiWorkflow.tasks.remove('t1')
+    await aiWorkflow.runs.listByTask('t1')
+    await aiWorkflow.runs.events('run1')
     await aiWorkflow.chat.listConversations()
     await aiWorkflow.chat.createConversation('a1')
     await aiWorkflow.chat.removeConversation('c1')
@@ -158,7 +170,11 @@ describe('preload 桥接契约', () => {
         'runtimes.update',
         'runtimes.remove',
         'runtimes.detect',
-        'runtimes.test',
+        'runtimes.probe',
+        'runtimes.statuses',
+        'runtimes.models',
+        'runs.listByTask',
+        'runs.events',
         'agents.list',
         'agents.create',
         'agents.update',

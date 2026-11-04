@@ -118,11 +118,20 @@ describe('engine', () => {
     expect(() => moveTaskToStage(repo, task.id, 'ghost', () => {})).toThrow(/目标阶段无效/)
   })
 
-  it('moveTaskToStage：执行中的阶段不能拖动', () => {
+  it('moveTaskToStage：有活跃 run 时不能拖动；失败后无活跃 run 可以拖走重试', () => {
     const { wf } = seed()
     const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
-    repo.taskUpdate(task.id, { currentStageId: wf.stages[1].id })
+    // 拖进 agent 阶段会入队一条 run
+    moveTaskToStage(repo, task.id, wf.stages[1].id, () => {})
     expect(() => moveTaskToStage(repo, task.id, wf.stages[0].id, () => {})).toThrow(/不能拖动/)
+
+    const run = repo.activeRunForTask(task.id)
+    expect(run).not.toBeNull()
+    repo.runUpdate(run!.id, { status: 'failed', error: '退出码 1' })
+    // 失败后不再「执行中」：允许拖到别的阶段
+    expect(moveTaskToStage(repo, task.id, wf.stages[0].id, () => {}).currentStageId).toBe(
+      wf.stages[0].id,
+    )
   })
 
   it('moveTaskToStage：当前阶段无效抛错', () => {
@@ -132,14 +141,24 @@ describe('engine', () => {
     expect(() => moveTaskToStage(repo, task.id, wf.stages[0].id, () => {})).toThrow(/无效/)
   })
 
-  it('completeTask：置为 completed；执行中不能完成', () => {
+  it('completeTask：置为 completed；有活跃 run 时不能完成', () => {
     const { wf } = seed()
     const task = repo.taskCreate({ title: 'T', workflowId: wf.id })
     expect(completeTask(repo, task.id).status).toBe('completed')
 
     const running = repo.taskCreate({ title: 'T2', workflowId: wf.id })
     repo.taskUpdate(running.id, { currentStageId: wf.stages[1].id })
+    const run = repo.runCreate({
+      taskId: running.id,
+      stageId: wf.stages[1].id,
+      agentId: null,
+      runtimeId: null,
+      prompt: 'p',
+      status: 'running',
+    })
     expect(() => completeTask(repo, running.id)).toThrow(/不能完成/)
+    repo.runUpdate(run.id, { status: 'failed' })
+    expect(completeTask(repo, running.id).status).toBe('completed')
   })
 
   it('completeTask：当前阶段无效抛错', () => {

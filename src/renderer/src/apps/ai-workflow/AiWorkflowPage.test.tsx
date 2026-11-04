@@ -5,6 +5,8 @@ import type {
   Agent,
   Run,
   Runtime,
+  RuntimeProbe,
+  RuntimeStatus,
   Task,
   WorkflowStage,
   WorkflowWithStages,
@@ -14,12 +16,28 @@ import { AiWorkflowPage } from './AiWorkflowPage'
 const runtime: Runtime = {
   id: 'r1',
   name: 'ds',
-  kind: 'deepseek-harness',
+  protocolFamily: 'dsh',
   command: 'dsh',
-  args: [],
-  promptMode: 'arg',
+  profile: 'multica',
+  permissionMode: 'workspace-write',
+  model: null,
+  reasoningEffort: null,
   workdir: null,
+  maxConcurrent: 1,
+  enabled: true,
   createdAt: 't',
+  lastProbe: null,
+}
+const probe: RuntimeProbe = {
+  state: 'ready',
+  path: 'C:/tools/dsh.exe',
+  cliVersion: '1.2.3',
+  protocolVersion: 1,
+  pluginVersion: null,
+  error: null,
+  output: '',
+  elapsedMs: 12,
+  checkedAt: 't',
 }
 const agent: Agent = {
   id: 'a1',
@@ -68,10 +86,16 @@ const run: Run = {
   taskId: 't1',
   stageId: 's0',
   agentId: 'a1',
+  runtimeId: 'r1',
   status: 'succeeded',
   prompt: 'p',
   output: 'hello',
   error: null,
+  errorCode: null,
+  exitCode: 0,
+  sessionId: null,
+  usage: null,
+  durationMs: null,
   startedAt: 't',
   endedAt: 't',
   createdAt: 't',
@@ -86,7 +110,11 @@ function makeApi() {
       update: vi.fn(),
       remove: vi.fn(),
       detect: vi.fn(async () => []),
-      test: vi.fn(async () => ({ ok: true, code: 0, elapsedMs: 1, output: 'OK', error: null })),
+      probe: vi.fn(async () => probe),
+      statuses: vi.fn(async (): Promise<RuntimeStatus[]> => [
+        { runtimeId: 'r1', workload: { running: 0, queued: 0, maxConcurrent: 1 } },
+      ]),
+      models: vi.fn(async () => []),
     },
     agents: {
       list: vi.fn(async () => state.agents),
@@ -115,7 +143,10 @@ function makeApi() {
       }),
       remove: vi.fn(),
     },
-    runs: { listByTask: vi.fn(async () => state.runs) },
+    runs: {
+      listByTask: vi.fn(async () => state.runs),
+      events: vi.fn(async () => []),
+    },
     chat: {
       listConversations: vi.fn(async () => []),
       createConversation: vi.fn(),
@@ -131,6 +162,18 @@ function makeApi() {
 
 function install(api: unknown): void {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
+}
+
+/** onChanged 可能有多个订阅者（页面自身 + 看板执行状态），测试里统一收集后一起触发 */
+function captureOnChanged(api: unknown): () => void {
+  const callbacks: (() => void)[] = []
+  ;(api as { onChanged: (cb: () => void) => () => void }).onChanged = (cb) => {
+    callbacks.push(cb)
+    return () => {}
+  }
+  return () => {
+    for (const cb of callbacks) cb()
+  }
 }
 
 /** 把任务卡拖到落点：cardLabel 为卡片 aria-label，targetLabel 为阶段列 / 已完成区 aria-label */
@@ -383,25 +426,21 @@ describe('AiWorkflowPage', () => {
 
   it('onChanged 触发重新加载', async () => {
     const api = makeApi()
-    let reloadCb: (() => void) | undefined
-    ;(api as unknown as { onChanged: (cb: () => void) => () => void }).onChanged = (cb) => {
-      reloadCb = cb
-      return () => {}
-    }
+    const triggerChanged = captureOnChanged(api)
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     const before = api.workflows.list.mock.calls.length
-    await reloadCb?.()
+    await triggerChanged()
     await waitFor(() => expect(api.workflows.list.mock.calls.length).toBeGreaterThan(before))
     // 回归：onChanged 回调必须用最新 activeId 拉任务（不能是初始 undefined）
     await waitFor(() => expect(api.tasks.list.mock.calls.at(-1)?.[0]).toBe('w1'))
 
     // 再次触发，但工作流列表为空：覆盖 activeId 回填分支
     api.workflows.list.mockResolvedValueOnce([])
-    await reloadCb?.()
+    await triggerChanged()
     await waitFor(() => expect(api.workflows.list.mock.calls.length).toBeGreaterThan(before + 1))
   })
 
@@ -419,29 +458,21 @@ describe('AiWorkflowPage', () => {
 
   it('onChanged 后刷新失败展示错误', async () => {
     const api = makeApi()
-    let reloadCb: (() => void) | undefined
-    ;(api as unknown as { onChanged: (cb: () => void) => () => void }).onChanged = (cb) => {
-      reloadCb = cb
-      return () => {}
-    }
+    const triggerChanged = captureOnChanged(api)
     api.workflows.list.mockResolvedValueOnce([wf]).mockRejectedValue(new Error('reload-boom'))
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await openTasks(user)
     await screen.findByText(/工作流「研发」/)
-    await reloadCb?.()
+    await triggerChanged()
     expect(await screen.findByText('reload-boom')).toBeInTheDocument()
   })
 
   it('没有工作流时可直接新建', async () => {
     const api = makeApi()
     api.workflows.list.mockResolvedValue([])
-    let reloadCb: (() => void) | undefined
-    ;(api as unknown as { onChanged: (cb: () => void) => () => void }).onChanged = (cb) => {
-      reloadCb = cb
-      return () => {}
-    }
+    const triggerChanged = captureOnChanged(api)
     install(api)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
@@ -453,7 +484,7 @@ describe('AiWorkflowPage', () => {
     await waitFor(() => expect(api.workflows.create).toHaveBeenCalled())
 
     // 空清单时刷新走 activeId 为空的分支
-    await reloadCb?.()
+    await triggerChanged()
     await waitFor(() => expect(api.workflows.list.mock.calls.length).toBeGreaterThan(1))
   })
 

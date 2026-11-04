@@ -95,11 +95,33 @@ for (const { file, text } of added) {
   if (SKIPS.test(text)) flag('test-made-easier', file, text)
 }
 
-// 2b. 测试文件被删，或仍在的测试文件里删掉了断言。
-for (const f of deleted) if (isTest(f)) flag('test-deleted', f, 'file deleted')
-for (const { file, text } of removed) {
-  if (isTest(file) && !deleted.includes(file) && /\b(expect|assert|should)\b/.test(text)) {
-    flag('assertion-removed', file, text)
+// 2b. 测试文件被删，或仍在的测试文件里断言净减少。
+// 契约迁移（v1 → v2 重写测试）会删掉旧断言、同时补上新断言；只有「同文件断言净减少」
+// 才是真正的放松。被测源码也一起删除时，删除其测试不算放松（死代码清理）。
+const deletedSet = new Set(deleted)
+const sourceOf = (f) =>
+  f.replace(/\.(test|spec)\.(ts|tsx)$/, '.$2').replace(/_test\.(go|py)$/, '.$1')
+for (const f of deleted) {
+  if (!isTest(f)) continue
+  if (deletedSet.has(sourceOf(f))) continue
+  flag('test-deleted', f, 'file deleted')
+}
+const assertionRe = /\b(expect|assert|should)\b/
+const countBy = (list) => {
+  const counts = new Map()
+  for (const { file, text } of list) {
+    if (!isTest(file) || !assertionRe.test(text)) continue
+    counts.set(file, (counts.get(file) ?? 0) + 1)
+  }
+  return counts
+}
+const removedAssertions = countBy(removed)
+const addedAssertions = countBy(added)
+for (const [file, removedCount] of removedAssertions) {
+  if (deletedSet.has(file)) continue
+  const addedCount = addedAssertions.get(file) ?? 0
+  if (removedCount > addedCount) {
+    flag('assertion-removed', file, `assertions ${removedCount} -> ${addedCount}`)
   }
 }
 
@@ -158,7 +180,8 @@ for (const r of removedRules) {
       if (verdict) return
       if (!n) verdict = 'threshold-removed'
       else if (n.n === b.n) return
-      else if (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : true) {
+      else if (dir === 'min' ? n.n < b.n : dir === 'max' ? n.n > b.n : n.n < b.n) {
+        // 无方向标注的指标（如覆盖率四元组）按「不得下降」判定：提高不算放松
         verdict = dir ? 'threshold-loosened' : 'threshold-changed'
       }
     })

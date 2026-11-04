@@ -6,10 +6,15 @@ import type {
   ChatConversation,
   ChatMessage,
   ChatRole,
+  PermissionMode,
   Run,
+  RunEvent,
   RunStatus,
+  RunUsage,
   Runtime,
   RuntimeInput,
+  RuntimeProbe,
+  RuntimeProtocolFamily,
   StageInput,
   Task,
   TaskInput,
@@ -23,11 +28,16 @@ import type {
 interface RuntimeRow {
   id: string
   name: string
-  kind: string
+  protocol_family: string
   command: string
-  args_template: string
-  prompt_mode: string
+  profile: string
+  permission_mode: string
+  model: string | null
+  reasoning_effort: string | null
   workdir: string | null
+  max_concurrent: number
+  enabled: number
+  last_probe_json: string | null
   created_at: string
 }
 interface AgentRow {
@@ -69,19 +79,31 @@ interface RunRow {
   task_id: string
   stage_id: string | null
   agent_id: string | null
+  runtime_id: string | null
   status: string
   prompt: string
   output: string
   error: string | null
+  error_code: string | null
+  exit_code: number | null
+  session_id: string | null
+  usage_json: string | null
+  duration_ms: number | null
   started_at: string | null
   ended_at: string | null
   created_at: string
 }
-
+interface RunEventRow {
+  run_id: string
+  seq: number
+  type: string
+  payload_json: string
+}
 interface ChatConversationRow {
   id: string
   title: string
   agent_id: string
+  session_id: string | null
   created_at: string
   updated_at: string
 }
@@ -96,15 +118,34 @@ interface ChatMessageRow {
 
 const now = (): string => new Date().toISOString()
 
+const PROTOCOL_FAMILIES: readonly RuntimeProtocolFamily[] = ['dsh']
+const PERMISSION_MODES: readonly PermissionMode[] = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+]
+
+/** 并发上限归一：至少 1，最多 8（本地单机没必要更多） */
+function normalizeConcurrency(value: number | undefined): number {
+  if (value === undefined) return 1
+  if (!Number.isInteger(value) || value < 1) throw new Error('并发上限必须是正整数')
+  return Math.min(value, 8)
+}
+
 const mapRuntime = (r: RuntimeRow): Runtime => ({
   id: r.id,
   name: r.name,
-  kind: r.kind as Runtime['kind'],
+  protocolFamily: r.protocol_family as RuntimeProtocolFamily,
   command: r.command,
-  args: JSON.parse(r.args_template) as string[],
-  promptMode: r.prompt_mode as Runtime['promptMode'],
+  profile: r.profile,
+  permissionMode: r.permission_mode as PermissionMode,
+  model: r.model,
+  reasoningEffort: r.reasoning_effort,
   workdir: r.workdir,
+  maxConcurrent: r.max_concurrent,
+  enabled: r.enabled === 1,
   createdAt: r.created_at,
+  lastProbe: r.last_probe_json ? (JSON.parse(r.last_probe_json) as RuntimeProbe) : null,
 })
 const mapAgent = (r: AgentRow): Agent => ({
   id: r.id,
@@ -139,10 +180,16 @@ const mapRun = (r: RunRow): Run => ({
   taskId: r.task_id,
   stageId: r.stage_id,
   agentId: r.agent_id,
+  runtimeId: r.runtime_id,
   status: r.status as RunStatus,
   prompt: r.prompt,
   output: r.output,
   error: r.error,
+  errorCode: r.error_code as Run['errorCode'],
+  exitCode: r.exit_code,
+  sessionId: r.session_id,
+  usage: r.usage_json ? (JSON.parse(r.usage_json) as RunUsage) : null,
+  durationMs: r.duration_ms,
   startedAt: r.started_at,
   endedAt: r.ended_at,
   createdAt: r.created_at,
@@ -151,6 +198,7 @@ const mapChatConversation = (r: ChatConversationRow): ChatConversation => ({
   id: r.id,
   title: r.title,
   agentId: r.agent_id,
+  sessionId: r.session_id,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 })
@@ -193,39 +241,72 @@ export class Repository {
   }
   runtimeCreate(input: RuntimeInput): Runtime {
     if (!input.name?.trim()) throw new Error('运行时名称必填')
-    if (!input.command?.trim()) throw new Error('运行时命令必填')
+    const protocolFamily = input.protocolFamily ?? 'dsh'
+    if (!PROTOCOL_FAMILIES.includes(protocolFamily))
+      throw new Error('不支持的协议族: ' + protocolFamily)
+    const permissionMode = input.permissionMode ?? 'workspace-write'
+    if (!PERMISSION_MODES.includes(permissionMode))
+      throw new Error('不支持的权限模式: ' + permissionMode)
     const id = randomUUID()
     this.db
       .prepare(
-        'INSERT INTO runtimes (id,name,kind,command,args_template,prompt_mode,workdir,created_at) VALUES (?,?,?,?,?,?,?,?)',
+        `INSERT INTO runtimes
+          (id,name,protocol_family,command,profile,permission_mode,model,reasoning_effort,
+           workdir,max_concurrent,enabled,last_probe_json,created_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL,?)`,
       )
       .run(
         id,
         input.name.trim(),
-        input.kind ?? 'deepseek-harness',
-        input.command.trim(),
-        JSON.stringify(input.args ?? []),
-        input.promptMode ?? 'arg',
+        protocolFamily,
+        input.command?.trim() || 'dsh',
+        input.profile?.trim() || 'multica',
+        permissionMode,
+        input.model ?? null,
+        input.reasoningEffort ?? null,
         input.workdir ?? null,
+        normalizeConcurrency(input.maxConcurrent),
+        input.enabled === false ? 0 : 1,
         now(),
       )
     return this.runtimeGet(id)
   }
   runtimeUpdate(id: string, patch: Partial<RuntimeInput>): Runtime {
     const cur = this.runtimeGet(id)
+    if (patch.protocolFamily !== undefined && !PROTOCOL_FAMILIES.includes(patch.protocolFamily))
+      throw new Error('不支持的协议族: ' + patch.protocolFamily)
+    if (patch.permissionMode !== undefined && !PERMISSION_MODES.includes(patch.permissionMode))
+      throw new Error('不支持的权限模式: ' + patch.permissionMode)
     this.db
       .prepare(
-        'UPDATE runtimes SET name=?, kind=?, command=?, args_template=?, prompt_mode=?, workdir=? WHERE id=?',
+        `UPDATE runtimes SET
+          name=?, protocol_family=?, command=?, profile=?, permission_mode=?,
+          model=?, reasoning_effort=?, workdir=?, max_concurrent=?, enabled=?
+         WHERE id=?`,
       )
       .run(
-        patch.name?.trim() ?? cur.name,
-        patch.kind ?? cur.kind,
-        patch.command?.trim() ?? cur.command,
-        JSON.stringify(patch.args ?? cur.args),
-        patch.promptMode ?? cur.promptMode,
+        patch.name?.trim() || cur.name,
+        patch.protocolFamily ?? cur.protocolFamily,
+        patch.command?.trim() || cur.command,
+        patch.profile?.trim() || cur.profile,
+        patch.permissionMode ?? cur.permissionMode,
+        patch.model !== undefined ? patch.model : cur.model,
+        patch.reasoningEffort !== undefined ? patch.reasoningEffort : cur.reasoningEffort,
         patch.workdir !== undefined ? patch.workdir : cur.workdir,
+        patch.maxConcurrent !== undefined
+          ? normalizeConcurrency(patch.maxConcurrent)
+          : cur.maxConcurrent,
+        patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : cur.enabled ? 1 : 0,
         id,
       )
+    return this.runtimeGet(id)
+  }
+  /** 写入最近一次探测结论（探测结果同时是 UI 的健康状态来源） */
+  runtimeSetProbe(id: string, probe: RuntimeProbe): Runtime {
+    this.runtimeGet(id)
+    this.db
+      .prepare('UPDATE runtimes SET last_probe_json=? WHERE id=?')
+      .run(JSON.stringify(probe), id)
     return this.runtimeGet(id)
   }
   runtimeRemove(id: string): void {
@@ -234,6 +315,24 @@ export class Repository {
     } catch {
       throw new Error('运行时被智能体引用，无法删除: ' + id)
     }
+  }
+  /** 各运行时的在跑/排队数（只统计 active run） */
+  runtimeWorkloads(): Array<{ runtimeId: string; running: number; queued: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT runtime_id, status, COUNT(*) AS n FROM runs
+         WHERE runtime_id IS NOT NULL AND status IN ('queued','running')
+         GROUP BY runtime_id, status`,
+      )
+      .all() as unknown as Array<{ runtime_id: string; status: string; n: number }>
+    const byId = new Map<string, { runtimeId: string; running: number; queued: number }>()
+    for (const row of rows) {
+      const entry = byId.get(row.runtime_id) ?? { runtimeId: row.runtime_id, running: 0, queued: 0 }
+      if (row.status === 'running') entry.running = row.n
+      else entry.queued = row.n
+      byId.set(row.runtime_id, entry)
+    }
+    return [...byId.values()]
   }
 
   // ---------- agents ----------
@@ -480,37 +579,110 @@ export class Repository {
         .all(status) as unknown as RunRow[]
     ).map(mapRun)
   }
+  /** 该任务是否有排队/执行中的 run（判断「执行中」用，而不是阶段配置） */
+  activeRunForTask(taskId: string): Run | null {
+    // created_at 只有毫秒精度：同毫秒时用 rowid 兜底，保证「最新一条」稳定
+    const row = this.db
+      .prepare(
+        "SELECT * FROM runs WHERE task_id=? AND status IN ('queued','running') ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      )
+      .get(taskId) as unknown as RunRow | undefined
+    return row ? mapRun(row) : null
+  }
   runCreate(input: {
     taskId: string
     stageId: string | null
     agentId: string | null
+    runtimeId: string | null
     prompt: string
     status: RunStatus
   }): Run {
     const id = randomUUID()
     this.db
       .prepare(
-        "INSERT INTO runs (id,task_id,stage_id,agent_id,status,prompt,output,error,started_at,ended_at,created_at) VALUES (?,?,?,?,?,?,'',NULL,NULL,NULL,?)",
+        "INSERT INTO runs (id,task_id,stage_id,agent_id,runtime_id,status,prompt,output,error,error_code,exit_code,session_id,usage_json,duration_ms,started_at,ended_at,created_at) VALUES (?,?,?,?,?,?,?,'',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,?)",
       )
-      .run(id, input.taskId, input.stageId, input.agentId, input.status, input.prompt, now())
+      .run(
+        id,
+        input.taskId,
+        input.stageId,
+        input.agentId,
+        input.runtimeId,
+        input.status,
+        input.prompt,
+        now(),
+      )
     return this.runGet(id)
   }
   runUpdate(
     id: string,
-    patch: Partial<Pick<Run, 'status' | 'output' | 'error' | 'startedAt' | 'endedAt'>>,
+    patch: Partial<
+      Pick<
+        Run,
+        | 'status'
+        | 'output'
+        | 'error'
+        | 'errorCode'
+        | 'exitCode'
+        | 'sessionId'
+        | 'usage'
+        | 'durationMs'
+        | 'startedAt'
+        | 'endedAt'
+      >
+    >,
   ): Run {
     const cur = this.runGet(id)
     this.db
-      .prepare('UPDATE runs SET status=?, output=?, error=?, started_at=?, ended_at=? WHERE id=?')
+      .prepare(
+        `UPDATE runs SET status=?, output=?, error=?, error_code=?, exit_code=?,
+          session_id=?, usage_json=?, duration_ms=?, started_at=?, ended_at=? WHERE id=?`,
+      )
       .run(
         patch.status ?? cur.status,
         patch.output ?? cur.output,
         patch.error !== undefined ? patch.error : cur.error,
+        patch.errorCode !== undefined ? patch.errorCode : cur.errorCode,
+        patch.exitCode !== undefined ? patch.exitCode : cur.exitCode,
+        patch.sessionId !== undefined ? patch.sessionId : cur.sessionId,
+        patch.usage !== undefined
+          ? patch.usage === null
+            ? null
+            : JSON.stringify(patch.usage)
+          : cur.usage
+            ? JSON.stringify(cur.usage)
+            : null,
+        patch.durationMs !== undefined ? patch.durationMs : cur.durationMs,
         patch.startedAt !== undefined ? patch.startedAt : cur.startedAt,
         patch.endedAt !== undefined ? patch.endedAt : cur.endedAt,
         id,
       )
     return this.runGet(id)
+  }
+  /** 追加运行事件（按 seq 幂等覆盖，便于重放） */
+  runEventsAppend(runId: string, events: RunEvent[]): void {
+    if (events.length === 0) return
+    const ins = this.db.prepare(
+      'INSERT OR REPLACE INTO run_events (run_id,seq,type,payload_json,created_at) VALUES (?,?,?,?,?)',
+    )
+    const ts = now()
+    for (const event of events) {
+      const payload: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(event)) {
+        if (key === 'seq' || key === 'type' || value === undefined) continue
+        payload[key] = value
+      }
+      ins.run(runId, event.seq, event.type, JSON.stringify(payload), ts)
+    }
+  }
+  runEventsList(runId: string): RunEvent[] {
+    const rows = this.db
+      .prepare('SELECT * FROM run_events WHERE run_id=? ORDER BY seq')
+      .all(runId) as unknown as RunEventRow[]
+    return rows.map((row) => {
+      const payload = JSON.parse(row.payload_json) as Omit<RunEvent, 'seq' | 'type'>
+      return { seq: row.seq, type: row.type as RunEvent['type'], ...payload }
+    })
   }
 
   // ---------- 对话 ----------
@@ -535,7 +707,7 @@ export class Repository {
     const ts = now()
     this.db
       .prepare(
-        'INSERT INTO chat_conversations (id,title,agent_id,created_at,updated_at) VALUES (?,?,?,?,?)',
+        'INSERT INTO chat_conversations (id,title,agent_id,session_id,created_at,updated_at) VALUES (?,?,?,NULL,?,?)',
       )
       .run(id, '新对话', agentId, ts, ts)
     return this.chatConversationGet(id)
@@ -551,6 +723,10 @@ export class Repository {
   }
   chatConversationTouch(id: string): void {
     this.db.prepare('UPDATE chat_conversations SET updated_at=? WHERE id=?').run(now(), id)
+  }
+  /** 记录（或清空）续接用的协议会话 id */
+  chatConversationSetSession(id: string, sessionId: string | null): void {
+    this.db.prepare('UPDATE chat_conversations SET session_id=? WHERE id=?').run(sessionId, id)
   }
   chatMessagesList(conversationId: string): ChatMessage[] {
     // created_at 只有毫秒精度：同毫秒时用 rowid 兜底，保证轮次顺序稳定

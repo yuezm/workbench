@@ -1,39 +1,34 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type {
-  AiWorkflowApi,
   DetectedRuntime,
   Runtime,
   RuntimeInput,
-  RuntimeTestResult,
+  RuntimeStatus,
 } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
 import { Panel, badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
 import { wfApi } from '../api'
 import { RuntimeDialog } from './RuntimeDialog'
+import { RuntimeStatusBadge } from './RuntimeStatusBadge'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-/** 检测接口可能不存在（测试桩 / 旧 preload）：缺失时返回空清单 */
-function detectRuntimes(): Promise<DetectedRuntime[]> {
-  const fn = (wfApi().runtimes as Partial<AiWorkflowApi['runtimes']>).detect
-  return fn ? fn() : Promise.resolve([])
+/** 打开弹窗时记录：编辑目标（null = 新建）与新建预填（仅在新建时有意义） */
+interface DialogState {
+  runtime: Runtime | null
+  initial: RuntimeInput | null
 }
 
-/** 连通性测试接口同理；缺失时显式失败，由行内结果展示 */
-async function testRuntime(id: string): Promise<RuntimeTestResult> {
-  const fn = (wfApi().runtimes as Partial<AiWorkflowApi['runtimes']>).test
-  if (!fn) throw new Error('当前 preload 不支持连通性测试')
-  return fn(id)
-}
-
-/** 只保留仍在清单里的运行时结果（删除条目后不残留旧结论） */
-function keepResults(
-  prev: Record<string, RuntimeTestResult>,
-  list: Runtime[],
-): Record<string, RuntimeTestResult> {
-  const ids = new Set(list.map((r) => r.id))
-  return Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)))
+/** 新建运行时的默认值：DSH 的默认 profile 是 multica，并发从 1 起 */
+function newRuntimeInput(): RuntimeInput {
+  return {
+    name: '',
+    command: 'dsh',
+    profile: 'multica',
+    permissionMode: 'workspace-write',
+    maxConcurrent: 1,
+  }
 }
 
 function TerminalIcon({ className }: { className?: string }): ReactElement {
@@ -96,24 +91,36 @@ function ScanIcon({ className }: { className?: string }): ReactElement {
   )
 }
 
-/** 运行时页：检测清单 + 已配置清单；新建走弹窗表单 */
+/**
+ * 运行时页：检测清单 + 已配置清单。
+ *
+ * 运行时 = 本机执行环境实例（协议族 + CLI 启动方式 + 执行策略）；清单同时展示
+ * 持久化的最近探测结论与实时负载，新建/编辑共用一个弹窗。
+ */
 export function RuntimeManager(): ReactElement {
   const [items, setItems] = useState<Runtime[]>([])
+  const [statuses, setStatuses] = useState<Record<string, RuntimeStatus>>({})
   const [detected, setDetected] = useState<DetectedRuntime[]>([])
-  const [detecting, setDetecting] = useState(false)
+  /** 首次进入即自动扫描，所以初始为扫描中 */
+  const [detecting, setDetecting] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  /** 非空 = 弹窗打开中，值为表单预填 */
-  const [draft, setDraft] = useState<RuntimeInput | null>(null)
-  /** 正在测试的运行时 id（各行的按钮状态互相独立） */
-  const [testingId, setTestingId] = useState<string | null>(null)
-  /** 各运行时最近一次连通性测试结果，按 id 记住 */
-  const [testResults, setTestResults] = useState<Record<string, RuntimeTestResult>>({})
+  /** 检测清单自己的错误：与清单/操作错误分开，避免并发加载互相覆盖 */
+  const [detectError, setDetectError] = useState<string | null>(null)
+  /** 非空 = 弹窗打开中 */
+  const [dialog, setDialog] = useState<DialogState | null>(null)
+  /** 正在探测的运行时 id（各行按钮状态互相独立） */
+  const [probingId, setProbingId] = useState<string | null>(null)
+  /** 展开失败详情的运行时 id */
+  const [expandedProbeId, setExpandedProbeId] = useState<string | null>(null)
 
-  const reload = useCallback(async (): Promise<void> => {
+  const load = useCallback(async (): Promise<void> => {
     try {
-      const list = await wfApi().runtimes.list()
+      const [list, workload] = await Promise.all([
+        wfApi().runtimes.list(),
+        wfApi().runtimes.statuses(),
+      ])
       setItems(list)
-      setTestResults((prev) => keepResults(prev, list))
+      setStatuses(Object.fromEntries(workload.map((status) => [status.runtimeId, status])))
       setError(null)
     } catch (e) {
       setError(errMsg(e))
@@ -121,97 +128,82 @@ export function RuntimeManager(): ReactElement {
   }, [])
 
   const scan = useCallback(async (): Promise<void> => {
-    setDetecting(true)
     try {
-      setDetected(await detectRuntimes())
-      // 重新扫描后旧的连通性结论可能已过期，统一清掉
-      setTestResults({})
-      setError(null)
+      setDetected(await wfApi().runtimes.detect())
+      setDetectError(null)
     } catch (e) {
-      setError(errMsg(e))
+      setDetectError(errMsg(e))
     } finally {
       setDetecting(false)
     }
   }, [])
 
+  // 进入该页即拉取清单/负载，并自动识别本机已安装的 CLI
+  // 放到下一个宏任务再发请求：让 effect 只负责触发，不在渲染阶段同步改状态
   useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const list = await wfApi().runtimes.list()
-        if (alive) setItems(list)
-      } catch (e) {
-        if (alive) setError(errMsg(e))
-      }
-    })()
-    return () => {
-      alive = false
-    }
-  }, [])
+    const timer = setTimeout(() => {
+      void load()
+      void scan()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [load, scan])
 
-  // 进入该页即自动识别本机已安装的 CLI
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const list = await detectRuntimes()
-        if (alive) setDetected(list)
-      } catch (e) {
-        if (alive) setError(errMsg(e))
-      }
-    })()
-    return () => {
-      alive = false
-    }
-  }, [])
+  /** 「重新扫描」：先进入扫描中再复用 scan 的收尾逻辑 */
+  const rescan = (): void => {
+    setDetecting(true)
+    void scan()
+  }
 
-  const create = async (input: RuntimeInput): Promise<void> => {
-    await wfApi().runtimes.create(input)
-    setDraft(null)
-    await reload()
+  const submit = async (input: RuntimeInput): Promise<void> => {
+    if (dialog?.runtime) await wfApi().runtimes.update(dialog.runtime.id, input)
+    else await wfApi().runtimes.create(input)
+    setDialog(null)
+    await load()
   }
 
   const remove = async (id: string): Promise<void> => {
     try {
       await wfApi().runtimes.remove(id)
-      await reload()
+      setExpandedProbeId((prev) => (prev === id ? null : prev))
+      await load()
     } catch (e) {
       setError(errMsg(e))
     }
   }
 
   /**
-   * 连通性测试：只影响该行的行内结果，不阻塞整页、不写页面级 error。
-   * 失败（含 preload 缺接口）同样落成该行的失败结论。
+   * 真实探测一次：结论已由主进程写回运行时，这里同步行内状态，
+   * 失败（运行时被删等）落成页面级错误。
    */
-  const runTest = async (id: string): Promise<void> => {
-    setTestingId(id)
+  const runProbe = async (id: string): Promise<void> => {
+    setProbingId(id)
     try {
-      const result = await testRuntime(id)
-      setTestResults((prev) => ({ ...prev, [id]: result }))
+      const probe = await wfApi().runtimes.probe(id)
+      setItems((prev) => prev.map((r) => (r.id === id ? { ...r, lastProbe: probe } : r)))
+      setError(null)
     } catch (e) {
-      setTestResults((prev) => ({
-        ...prev,
-        [id]: { ok: false, code: null, elapsedMs: 0, output: '', error: errMsg(e) },
-      }))
+      setError(errMsg(e))
     } finally {
-      setTestingId(null)
+      setProbingId(null)
     }
   }
 
-  /** 把检测到的 CLI 预填进弹窗表单；名称与既有运行时冲突时加命令后缀 */
+  /** 检测清单的「使用」：带入名称与命令（重名时加命令后缀），其余字段保持默认 */
   const prefill = (d: DetectedRuntime): void => {
     const taken = items.some((r) => r.name === d.label)
-    setDraft({
-      name: taken ? `${d.label} (${d.command})` : d.label,
-      command: d.command,
-      args: [],
-      promptMode: 'arg',
-      workdir: null,
+    setDialog({
+      runtime: null,
+      initial: {
+        ...newRuntimeInput(),
+        name: taken ? `${d.label} (${d.command})` : d.label,
+        command: d.command,
+      },
     })
   }
 
-  const addedCommands = new Set(items.map((r) => r.command))
+  const toggleProbeDetails = (id: string): void => {
+    setExpandedProbeId((prev) => (prev === id ? null : id))
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -221,13 +213,7 @@ export function RuntimeManager(): ReactElement {
           <ScanIcon className="text-focus" />
           <h3 className="text-[13px] font-medium tracking-wide text-ink">已安装的运行时</h3>
           <span className={cn(badgeCls, 'ml-auto')}>{detected.length}</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={detecting}
-            onClick={() => void scan()}
-          >
+          <Button type="button" variant="ghost" size="sm" disabled={detecting} onClick={rescan}>
             {detecting ? '扫描中…' : '重新扫描'}
           </Button>
         </div>
@@ -236,12 +222,12 @@ export function RuntimeManager(): ReactElement {
           <p className="rounded-xl border border-dashed border-line px-3 py-4 text-xs text-ink-faint">
             {detecting
               ? '正在扫描本机 PATH…'
-              : '未检测到已安装的 CLI（dsh / claude / codex / gemini / opencode 等），可在下方手动填写命令。'}
+              : '未检测到已安装的 CLI（dsh / claude / codex 等），可在下方手动新建运行时。'}
           </p>
         ) : (
           <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
             {detected.map((d) => {
-              const added = addedCommands.has(d.command)
+              const added = items.some((r) => r.command === d.command)
               return (
                 <li
                   key={d.command}
@@ -260,10 +246,23 @@ export function RuntimeManager(): ReactElement {
                     <span className="rounded-full bg-white/[0.07] px-2 py-1 text-[11px] text-ink-faint">
                       已添加
                     </span>
-                  ) : (
+                  ) : d.supported ? (
                     <Button type="button" variant="secondary" size="sm" onClick={() => prefill(d)}>
                       使用
                     </Button>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled
+                        title="当前版本只接入了 DSH 协议，暂时无法把该 CLI 作为运行时接入"
+                      >
+                        暂不支持
+                      </Button>
+                      <span className="text-[11px] text-ink-faint">当前版本仅接入 DSH</span>
+                    </span>
                   )}
                 </li>
               )
@@ -278,7 +277,13 @@ export function RuntimeManager(): ReactElement {
         </p>
       )}
 
-      {/* 已有运行时 */}
+      {detectError && (
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+          {detectError}
+        </p>
+      )}
+
+      {/* 已配置运行时 */}
       <Panel className="flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]">
         <div className="flex items-center gap-2">
           <ListIcon className="text-ink-dim" />
@@ -289,9 +294,7 @@ export function RuntimeManager(): ReactElement {
             variant="primary"
             size="sm"
             className="ml-auto"
-            onClick={() =>
-              setDraft({ name: '', command: 'dsh', args: [], promptMode: 'arg', workdir: null })
-            }
+            onClick={() => setDialog({ runtime: null, initial: newRuntimeInput() })}
           >
             新建运行时
           </Button>
@@ -304,65 +307,116 @@ export function RuntimeManager(): ReactElement {
             </li>
           )}
           {items.map((r) => {
-            const testing = testingId === r.id
-            const result = testResults[r.id]
+            const status = statuses[r.id]
+            const running = status?.workload.running ?? 0
+            const maxConcurrent = status?.workload.maxConcurrent ?? r.maxConcurrent
+            const queued = status?.workload.queued ?? 0
+            const probing = probingId === r.id
+            const probe = r.lastProbe
+            const showDetails = expandedProbeId === r.id && probe?.state === 'unavailable'
             return (
               <li
                 key={r.id}
-                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
+                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
               >
-                <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
                   <TerminalIcon />
                 </span>
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate text-sm font-medium text-ink">{r.name}</span>
-                  <span className="truncate font-mono text-[11px] text-ink-faint">
-                    {r.command} {r.args.join(' ')} · {r.promptMode}
-                  </span>
-                </span>
-                {result && !testing && (
-                  <span
-                    // 输出尾部放进 title，失败时便于直接排查 stderr
-                    title={result.output}
-                    className={cn(
-                      'max-w-56 shrink-0 truncate rounded-full px-2 py-1 text-[11px] tabular-nums',
-                      result.ok
-                        ? 'bg-emerald-400/10 text-emerald-300'
-                        : 'bg-red-400/10 text-red-300',
+
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-sm font-medium text-ink">{r.name}</span>
+                    <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] tracking-wide text-ink-faint">
+                      {r.protocolFamily}
+                    </span>
+                    <RuntimeStatusBadge
+                      probe={probe}
+                      testing={probing}
+                      expanded={expandedProbeId === r.id}
+                      onToggle={() => toggleProbeDetails(r.id)}
+                    />
+                    {probe?.cliVersion && (
+                      <span className="text-[11px] text-ink-faint">CLI v{probe.cliVersion}</span>
                     )}
-                  >
-                    {result.ok
-                      ? `连通 · ${result.elapsedMs}ms`
-                      : `失败：${result.error ?? '未知错误'}`}
+                    {!r.enabled && (
+                      <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+                        已停用
+                      </span>
+                    )}
+                  </div>
+
+                  <span className="truncate font-mono text-[11px] text-ink-dim">
+                    {r.command} --profile {r.profile} --stdio
                   </span>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  aria-label={`测试运行时 ${r.name}`}
-                  disabled={testing}
-                  onClick={() => void runTest(r.id)}
-                >
-                  {testing ? '测试中…' : '测试'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-400 hover:text-red-300"
-                  onClick={() => void remove(r.id)}
-                >
-                  删除
-                </Button>
+
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-faint">
+                    <span className="truncate font-mono" title={probe?.path ?? undefined}>
+                      {probe?.path ?? '未解析到可执行文件'}
+                    </span>
+                    <span className="tabular-nums">
+                      负载 {running}/{maxConcurrent}
+                    </span>
+                    {queued > 0 && (
+                      <span className="text-amber-300 tabular-nums">排队 {queued}</span>
+                    )}
+                  </span>
+
+                  {showDetails && (
+                    <div className="flex flex-col gap-1 rounded-lg border border-red-400/20 bg-red-400/[0.06] px-2.5 py-2">
+                      <p className="text-[11px] text-red-300">{probe?.error ?? '未知错误'}</p>
+                      {probe?.output && (
+                        <pre className="max-h-32 overflow-auto text-[11px] leading-relaxed whitespace-pre-wrap text-ink-faint">
+                          {probe.output}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`测试运行时 ${r.name}`}
+                    disabled={probing}
+                    onClick={() => void runProbe(r.id)}
+                  >
+                    测试
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`编辑运行时 ${r.name}`}
+                    onClick={() => setDialog({ runtime: r, initial: null })}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-400 hover:text-red-300"
+                    aria-label={`删除运行时 ${r.name}`}
+                    onClick={() => void remove(r.id)}
+                  >
+                    删除
+                  </Button>
+                </div>
               </li>
             )
           })}
         </ul>
       </Panel>
 
-      {draft !== null && (
-        <RuntimeDialog initial={draft} onSubmit={create} onCancel={() => setDraft(null)} />
+      {dialog !== null && (
+        <RuntimeDialog
+          runtime={dialog.runtime}
+          initial={dialog.initial}
+          onSubmit={submit}
+          onCancel={() => setDialog(null)}
+        />
       )}
     </div>
   )

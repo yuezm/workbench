@@ -3,17 +3,25 @@ import type { Agent, ChatConversation, ChatMessage } from '../../../../../shared
 import { Button } from '../../../components/ui/button'
 import { fieldCls } from '../../../components/ui/input'
 import { cn } from '../../../lib/cn'
+import type { ChatStreamState } from '../hooks/useChat'
 
 /** 错误条：任一操作失败都在输入区上方提示，下一次成功操作自动消失 */
 const ERROR_CLS = 'rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300'
+
+/** 流式工具事件内容的最大展示长度 */
+const STREAM_TOOL_MAX = 120
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text
+}
 
 export interface ChatPanelProps {
   /** 智能体清单：把会话绑定的 agentId 显示成名字 */
   agents: Agent[]
   conversation: ChatConversation | null
   messages: ChatMessage[]
-  /** 当前轮已收到的流式增量 */
-  streaming: string
+  /** 当前轮已收到的流式输出（正文 / 思考 / 工具事件） */
+  streaming: ChatStreamState
   sending: boolean
   error: string | null
   /** 发送一轮：resolve true 表示已发出，组件据此清空草稿 */
@@ -23,7 +31,9 @@ export interface ChatPanelProps {
 
 /**
  * 聊天栏目内容区：会话头部 + 消息流 + 输入区。
+ *
  * 会话状态由 useChat 持有（侧栏与内容区共用），这里只留输入草稿。
+ * 流式期间正文按增量追加，thinking / 工具事件以次要样式展示，本轮结束后丢弃。
  */
 export function ChatPanel({
   agents,
@@ -40,6 +50,8 @@ export function ChatPanel({
   const agentName = (id: string): string =>
     agents.find((item) => item.id === id)?.name ?? '未知智能体'
   const canSend = conversation !== null && draft.trim() !== ''
+  const streamEmpty =
+    streaming.text === '' && streaming.thinking === '' && streaming.tools.length === 0
 
   const send = async (): Promise<void> => {
     const text = draft.trim()
@@ -94,8 +106,31 @@ export function ChatPanel({
             })}
             {sending && (
               <div className="flex justify-start">
-                <div className="max-w-[80%] rounded-xl bg-white/[0.05] px-3 py-2 text-sm whitespace-pre-wrap text-ink">
-                  {streaming === '' ? '正在输出…' : streaming}
+                <div className="flex max-w-[80%] flex-col gap-1.5 rounded-xl bg-white/[0.05] px-3 py-2 text-sm text-ink">
+                  {streaming.thinking !== '' && (
+                    <p className="text-[11px] leading-relaxed whitespace-pre-wrap text-ink-faint italic">
+                      {streaming.thinking}
+                    </p>
+                  )}
+                  {streaming.tools.map((tool, index) => (
+                    <p
+                      key={`${tool.tool}-${index}`}
+                      className={cn(
+                        'rounded-md bg-black/20 px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-faint',
+                        tool.isError && 'text-red-300',
+                      )}
+                    >
+                      {[
+                        tool.tool,
+                        tool.content === '' ? '' : truncate(tool.content, STREAM_TOOL_MAX),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  ))}
+                  <span className="whitespace-pre-wrap">
+                    {streamEmpty ? '正在输出…' : streaming.text}
+                  </span>
                 </div>
               </div>
             )}

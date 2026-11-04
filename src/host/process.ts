@@ -73,6 +73,16 @@ export function killProcessTree(pid: number, signal: NodeJS.Signals = 'SIGKILL')
   }
 }
 
+/**
+ * 对账专用入口：按 pid 终止整棵进程树（固定 SIGKILL；Windows `taskkill /T /F`）。
+ *
+ * 与 `killProcessTree` 同一实现——区别只在语义：对账手里没有子进程句柄，只有
+ * `process_registry` 里记下的 pid，所以要「不管当前状态、直接按 pid 清树」。
+ */
+export function killPidTree(pid: number): boolean {
+  return killProcessTree(pid, 'SIGKILL')
+}
+
 /** 增量行读取器：把流式 chunk 切成行（跳过空行，容忍 \r\n） */
 export function createLineReader(onLine: (line: string) => void): {
   push(chunk: string): void

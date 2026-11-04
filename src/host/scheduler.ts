@@ -19,7 +19,8 @@
  */
 import type { RunErrorCode, RunEvent, RunEventRow, RunRow, Runtime } from '../protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
-import type { Fact, Id } from '../kernel/types'
+import type { Fact, Id, Iso } from '../kernel/types'
+import type { ProcessRegistry } from './process-registry'
 import type { DispatchResult } from './store/index'
 
 /** 调度器只需要的 store 能力：统一写入口（effects.dispatch）+ 读运行时配置。 */
@@ -61,6 +62,13 @@ export interface SchedulerDeps {
    * 缺省视为 0。装配根用仓储读 `run_events` 传入。
    */
   lastFrameSeq?: (runId: Id) => number
+  /**
+   * 运行进程登记表（M2 T13）：执行开始写占位、pid 到达回填、结束删除；
+   * 崩溃重启时由 `host/reconcile` 读取并清理。缺省不登记（测试 / 关闭对账的宿主）。
+   */
+  registry?: Pick<ProcessRegistry, 'begin' | 'attachPid' | 'remove'>
+  /** 当前时刻（写 `process_registry.started_at`）；默认系统时钟 */
+  now?: () => Iso
 }
 
 export interface Scheduler {
@@ -87,6 +95,13 @@ const systemTimer: SchedulerTimer = {
   clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
 }
 
+/** 缺省登记表：宿主没接对账时执行链照常跑，只少了崩溃恢复线索。 */
+const noopRegistry: Pick<ProcessRegistry, 'begin' | 'attachPid' | 'remove'> = {
+  begin: () => undefined,
+  attachPid: () => undefined,
+  remove: () => undefined,
+}
+
 /** 运行时配置的 `provider/model` → `Turn.model`；格式不对不传（后端会给出可读错误）。 */
 const modelOf = (runtime: Runtime): Turn['model'] => {
   const value = runtime.model?.trim() ?? ''
@@ -105,6 +120,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const timer = deps.timer ?? systemTimer
   const limits = deps.limits ?? DEFAULT_SCHEDULER_LIMITS
   const lastFrameSeq = deps.lastFrameSeq ?? (() => 0)
+  const registry = deps.registry ?? noopRegistry
+  const now = deps.now ?? (() => new Date().toISOString())
   /** 执行中的 run → 取消信号。 */
   const controllers = new Map<Id, AbortController>()
   /** 每个 run 已分配到的最大帧 seq（跨 batch / 跨轮持续递增）。 */
@@ -198,9 +215,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       session: (id) => {
         observedSession = id
       },
+      // 子进程 pid 到达：回填登记行，崩溃重启时按它终止残留进程树
+      process: (pid) => registry.attachPid(run.id, pid),
     }
+    // 执行开始即登记（spawn 之前）：进程还没起来也不能丢线索（pid 留空，对账只清理）
     const heartbeat = startHeartbeat(run)
     try {
+      registry.begin(run.id, now())
       const receipt = await deps.executors
         .forRuntime(runtime)
         .run(turnOf(run, runtime, controller.signal), io)
@@ -237,6 +258,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       }
     } finally {
       if (heartbeat !== null) timer.clearInterval(heartbeat)
+      // 终态事实已写：登记行没有保留价值（残留行只留给崩溃场景给对账用）
+      registry.remove(run.id)
     }
   }
 

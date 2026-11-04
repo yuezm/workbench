@@ -5,7 +5,7 @@
  * 定时器与当前时刻都用假时钟推进，不依赖真实时间。
  */
 import type { DatabaseSync } from 'node:sqlite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RunRow } from '../../src/protocol/entities'
 import { createClock, type ClockStore, type ClockTimer } from '../../src/host/clock'
 import { createStore, type Store } from '../../src/host/store'
@@ -97,6 +97,7 @@ let openDbs: DatabaseSync[] = []
 afterEach(() => {
   for (const db of openDbs) db.close()
   openDbs = []
+  vi.useRealTimers()
 })
 
 function memory(): DatabaseSync {
@@ -226,6 +227,46 @@ describe('host/clock 排期与唤醒', () => {
     timer.advance(3_600_000)
     expect(fake.dispatched).toEqual([])
     expect(ticks).toBe(0)
+  })
+
+  it('默认系统定时器：start 前 wake 只 tick 不排期；start 到点 tick；stop 取消', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(NOW))
+    const fake = fakeStore('2026-11-04T12:01:00.000Z')
+    let ticks = 0
+    // 不注入 timer：走默认 systemTimer（真实 setTimeout/clearTimeout，由 vi 假时钟接管）
+    const clock = createClock({
+      store: fake.store,
+      now: () => new Date().toISOString(),
+      onTick: () => {
+        ticks += 1
+      },
+    })
+
+    // start 前：wake 立即 tick，但不排期（schedule 的 !started 分支）
+    clock.wake()
+    expect(fake.dispatched).toHaveLength(1)
+    expect(clock.nextAt()).toBeNull()
+
+    clock.start()
+    expect(clock.nextAt()).toBe('2026-11-04T12:01:00.000Z')
+    // 定时器还挂着时 stop：走默认 clearTimeout 分支
+    clock.stop()
+    expect(clock.nextAt()).toBeNull()
+
+    clock.start()
+    vi.advanceTimersByTime(59_999)
+    expect(fake.dispatched).toHaveLength(1)
+
+    // 下一跳置空，避免到点后同一时刻反复排期
+    fake.setNext(null)
+    vi.advanceTimersByTime(1)
+    expect(fake.dispatched).toHaveLength(2)
+    expect(ticks).toBe(2)
+    expect(clock.nextAt()).toBeNull()
+
+    clock.stop()
+    expect(clock.nextAt()).toBeNull()
   })
 })
 

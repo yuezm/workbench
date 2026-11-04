@@ -1202,6 +1202,30 @@ describe('kernel/decide 任务', () => {
       facts: [],
     })
   })
+
+  it('task.remove：同 queueSeq / createdAt 的 run 按 id 排序删除（D13 事实序稳定）', () => {
+    const result = decide(
+      view({
+        tasks: [task({ id: 't-1' })],
+        runs: [
+          runRow({ id: 'run-b', queueSeq: 1, createdAt: CREATED }),
+          runRow({ id: 'run-a', queueSeq: 1, createdAt: CREATED }),
+        ],
+      }),
+      command({ type: 'task.remove', id: 't-1' }),
+      NOW,
+      env(),
+    )
+
+    expect(result.facts.map((fact) => fact.type)).toEqual([
+      'run.removed',
+      'run.removed',
+      'task.removed',
+    ])
+    expect(
+      result.facts.slice(0, 2).map((fact) => (fact.payload as { runId: string }).runId),
+    ).toEqual(['run-a', 'run-b'])
+  })
 })
 
 describe('kernel/decide 进入效果（run.queued）', () => {

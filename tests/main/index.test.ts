@@ -30,6 +30,10 @@ const {
   clockMock,
   createRuntimeExecutorsMock,
   executorsMock,
+  createProcessRegistryMock,
+  registryMock,
+  reconcileMock,
+  killPidTreeMock,
   defaultLimitsMock,
   startupOrder,
 } = vi.hoisted(() => {
@@ -69,6 +73,11 @@ const {
   const RepositoryMock = vi.fn()
   class RepositoryImpl {
     runEventsList = vi.fn(() => [])
+    // 启动对账读 run 状态：存在返回行，缺失抛错（main 的 runStatus 用 try/catch 归为 null）
+    runGet = vi.fn((id: string) => {
+      if (id === 'run-1') return { id, status: 'running' }
+      throw new Error('运行不存在: ' + id)
+    })
     constructor(...args: unknown[]) {
       RepositoryMock(...args)
     }
@@ -79,6 +88,7 @@ const {
     ensureProjection: vi.fn(() => ({ rebuilt: false })),
     query: vi.fn(() => []),
     nextWakeAt: vi.fn(() => null),
+    dispatch: vi.fn((_input: unknown) => ({ facts: [] })),
   }
   const createStoreMock = vi.fn((_options: unknown) => storeMock)
   const importLegacyMock = vi.fn(() => ({
@@ -114,6 +124,16 @@ const {
   const createClockMock = vi.fn((_deps: unknown) => clockMock)
   const executorsMock = { forRuntime: vi.fn() }
   const createRuntimeExecutorsMock = vi.fn((_deps: unknown) => executorsMock)
+  const registryMock = {
+    begin: vi.fn(),
+    attachPid: vi.fn(),
+    remove: vi.fn(),
+    list: vi.fn(() => []),
+    clear: vi.fn(),
+  }
+  const createProcessRegistryMock = vi.fn((_db: unknown) => registryMock)
+  const killPidTreeMock = vi.fn(() => true)
+  const reconcileMock = vi.fn((_deps: unknown) => ({ killed: 0, cleared: 0, facts: 0 }))
 
   /** 启动装配顺序：openDb → createStore → importLegacy → ensureProjection → Repository → … */
   const startupOrder: string[] = []
@@ -151,6 +171,10 @@ const {
     clockMock,
     createRuntimeExecutorsMock,
     executorsMock,
+    createProcessRegistryMock,
+    registryMock,
+    reconcileMock,
+    killPidTreeMock,
     defaultLimitsMock,
     startupOrder,
   }
@@ -180,6 +204,11 @@ vi.mock('../../src/host/store/import', () => ({ importLegacyIfNeeded: importLega
 vi.mock('../../src/host/scheduler', () => ({ createScheduler: createSchedulerMock }))
 vi.mock('../../src/host/effects', () => ({ createEffects: createEffectsMock }))
 vi.mock('../../src/host/clock', () => ({ createClock: createClockMock }))
+vi.mock('../../src/host/process', () => ({ killPidTree: killPidTreeMock }))
+vi.mock('../../src/host/process-registry', () => ({
+  createProcessRegistry: createProcessRegistryMock,
+}))
+vi.mock('../../src/host/reconcile', () => ({ reconcile: reconcileMock }))
 
 /** 入口是单例：每个用例重新加载一次，各自触发启动装配 */
 async function importEntry(): Promise<void> {
@@ -227,6 +256,18 @@ type SchedulerDeps = {
   executors: unknown
   limits: unknown
   lastFrameSeq: (runId: string) => number
+  registry: unknown
+}
+
+type ReconcileDeps = {
+  registry: unknown
+  dispatch: (input: unknown) => { facts: unknown[] }
+  runStatus: (runId: string) => string | null
+  killPid: (pid: number) => boolean
+}
+
+function reconcileDeps(): ReconcileDeps {
+  return reconcileMock.mock.calls[0][0] as ReconcileDeps
 }
 
 function schedulerDeps(): SchedulerDeps {
@@ -290,6 +331,25 @@ describe('主进程入口装配', () => {
     RepositoryMock.mockImplementation(() => {
       startupOrder.push('repository')
     })
+    createProcessRegistryMock.mockImplementation(() => {
+      startupOrder.push('registry')
+      return registryMock
+    })
+    reconcileMock.mockImplementation(() => {
+      startupOrder.push('reconcile')
+      return { killed: 0, cleared: 0, facts: 0 }
+    })
+    createSchedulerMock.mockImplementation(() => {
+      startupOrder.push('scheduler')
+      return schedulerMock
+    })
+    createClockMock.mockImplementation(() => {
+      startupOrder.push('clock')
+      return clockMock
+    })
+    registerAiWorkflowIpcMock.mockImplementation(() => {
+      startupOrder.push('ipc')
+    })
   })
 
   it('创建窗口与托盘，并把聊天服务接进 ai-workflow IPC', async () => {
@@ -323,7 +383,7 @@ describe('主进程入口装配', () => {
     expect(typeof backend.execute).toBe('function')
   })
 
-  it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储', async () => {
+  it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → scheduler → IPC → clock', async () => {
     await loadEntry()
 
     expect(startupOrder).toEqual([
@@ -332,6 +392,11 @@ describe('主进程入口装配', () => {
       'importLegacy',
       'ensureProjection',
       'repository',
+      'registry',
+      'reconcile',
+      'scheduler',
+      'ipc',
+      'clock',
     ])
     // store 拿到的是内核门面：decide / project / viewSpec / nextWakeAt 纯函数
     const options = createStoreMock.mock.calls[0][0] as {
@@ -382,6 +447,40 @@ describe('主进程入口装配', () => {
     expect(startupOrder).not.toContain('runner')
   })
 
+  it('启动对账：读 process_registry 清崩溃残留（registry → reconcile），再接 scheduler/clock', async () => {
+    await loadEntry()
+
+    expect(createProcessRegistryMock).toHaveBeenCalledTimes(1)
+    expect(reconcileMock).toHaveBeenCalledTimes(1)
+    const deps = reconcileDeps()
+    expect(deps.registry).toBe(registryMock)
+    expect(deps.killPid).toBe(killPidTreeMock)
+    // 启动期 scheduler 还没装配：对账直接写库；run 状态缺失归 null（只清登记行）
+    deps.dispatch({ type: 'clock.tick' })
+    expect(storeMock.dispatch).toHaveBeenCalledWith({ type: 'clock.tick' })
+    expect(deps.runStatus('run-1')).toBe('running')
+    expect(deps.runStatus('ghost')).toBeNull()
+    // 登记表与 scheduler 共用同一实例（执行期 begin/attachPid/remove 才接得上）
+    expect(schedulerDeps().registry).toBe(registryMock)
+    // 顺序：对账在 scheduler 装配、IPC 注册与定时器之前
+    expect(startupOrder.indexOf('reconcile')).toBeLessThan(startupOrder.indexOf('scheduler'))
+    expect(startupOrder.indexOf('reconcile')).toBeLessThan(startupOrder.indexOf('ipc'))
+    expect(startupOrder.indexOf('reconcile')).toBeLessThan(startupOrder.indexOf('clock'))
+  })
+  it('对账有回收结果：留一条 warn 诊断（不建 UI 通道）', async () => {
+    reconcileMock.mockReturnValueOnce({ killed: 2, cleared: 1, facts: 3 })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await loadEntry()
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]?.[0])).toContain('[reconcile]')
+      expect(String(warn.mock.calls[0]?.[0])).toContain('终止残留进程 2 个')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('拿到单实例锁：不退出，正常装配窗口与 IPC', async () => {
     await loadEntry()
 
@@ -407,6 +506,9 @@ describe('主进程入口装配', () => {
     expect(importLegacyMock).not.toHaveBeenCalled()
     expect(RepositoryMock).not.toHaveBeenCalled()
     expect(ChatServiceMock).not.toHaveBeenCalled()
+    expect(createProcessRegistryMock).not.toHaveBeenCalled()
+    expect(reconcileMock).not.toHaveBeenCalled()
+    expect(killPidTreeMock).not.toHaveBeenCalled()
     expect(createSchedulerMock).not.toHaveBeenCalled()
     expect(createEffectsMock).not.toHaveBeenCalled()
     expect(createClockMock).not.toHaveBeenCalled()

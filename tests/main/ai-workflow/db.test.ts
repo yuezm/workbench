@@ -21,7 +21,7 @@ function tableNames(d: DatabaseSync): string[] {
 }
 
 describe('openDb', () => {
-  it('创建全部 13 张表（九张投影 + 两张过渡期 legacy chat + 账本）', () => {
+  it('创建全部 14 张表（九张投影 + 两张过渡期 legacy chat + 账本 + 宿主私有 process_registry）', () => {
     db = openDb(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
@@ -30,6 +30,8 @@ describe('openDb', () => {
       'conversations',
       'facts',
       'messages',
+      // T13：崩溃对账用的宿主私有进程登记表（不进投影白名单 / 指纹）
+      'process_registry',
       'projection_meta',
       'run_events',
       'runs',

@@ -317,8 +317,10 @@
 ## 进度记录（开工后填）
 
 - 分支 / 起点 commit：`refactor/m2-lifecycle`，起点 `20c84b6`；计划文档 `966b850`、SPEC 修订 `b2ccd64`。
-- 检查点通过时间：A `2026-11-05 00:32` / B `____` / C `____` / D `____` / E `____`
+- 检查点通过时间：A `2026-11-05 00:32` / B `2026-11-05 00:52` / C `2026-11-05 01:45` / D `____` / E `____`
 - 检查点 A 证据：`pnpm check` 全绿（81 文件 / 846 用例；改动行 251/254 = 98.82%）；`typecheck`/`lint` 0 error；M1 真实库副本升级后 runs 15 / run_events 98 逐行保留，`importLegacyIfNeeded` 写入 7 张导入根，`rebuild()` 后逐表全等。
+- 检查点 B 证据：提交 `c7a25f5`；`tests/kernel` 9 文件 / 135 用例全绿（领取/租约/回执/终态/退避/超时/取消/host_settled/nextWakeAt）；执行器端口与进程层搬迁、`Receipt.error` 契约补齐；`pnpm check` 全绿。
+- 检查点 C 证据：提交 `961f404` + 覆盖率收口；`pnpm test` 87 文件 / 955 用例全绿；`pnpm check` exit 0；覆盖率 99.75/97.88/99.59/99.87、改动行 100%；scheduler 21 例等价覆盖旧 runner + 帧分包/seq 续接/取消竞态/心跳；旧 `runner.ts`/`task-effects.ts` 删除。
 
 ## 实现偏差（执行中确认后写）
 

@@ -141,6 +141,29 @@ describe('createExecutorPort：结果归一', () => {
     })
   })
 
+  it('失败但后端没给 errorCode：缺省归 run_failed', async () => {
+    const backend = fakeBackend([
+      outcome({
+        status: 'failed',
+        output: '',
+        error: '进程退出',
+        errorCode: null,
+        exitCode: 1,
+        sessionId: null,
+      }),
+    ])
+    const { io } = ioRecorder()
+
+    const receipt = await createExecutorPort(backend).run(turn(), io)
+
+    expect(receipt).toMatchObject({
+      status: 'failed',
+      errorCode: 'run_failed',
+      error: '进程退出',
+      exitCode: 1,
+    })
+  })
+
   it('取消：归为 cancelled，errorCode 缺省补 cancelled', async () => {
     const backend = fakeBackend([
       outcome({ status: 'cancelled', output: '', error: '已取消', errorCode: null }),

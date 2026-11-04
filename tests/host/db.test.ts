@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { openDatabase } from '../../src/host/db'
+import { openDatabase, needsRunsUpgrade } from '../../src/host/db'
 import { RUN_M2_ADDED_COLUMNS, SCHEMA_SQL, SCHEMA_VERSION, tableDdl } from '../../src/host/schema'
 
 /**
@@ -155,6 +155,7 @@ describe('openDatabase', () => {
       'conversations',
       'facts',
       'messages',
+      'process_registry',
       'projection_meta',
       'run_events',
       'runs',
@@ -164,6 +165,15 @@ describe('openDatabase', () => {
       'workflows',
     ])
     expect(userVersion(db)).toBe(SCHEMA_VERSION)
+  })
+
+  it('runs 表不存在（空列集合）：needsRunsUpgrade 返回 false，不触发升级', () => {
+    const empty = new DatabaseSync(':memory:')
+    try {
+      expect(needsRunsUpgrade(empty)).toBe(false)
+    } finally {
+      empty.close()
+    }
   })
 
   it('不动 foreign_keys：保持连接默认（node:sqlite 默认开启外键约束）', () => {
@@ -206,6 +216,7 @@ describe('openDatabase', () => {
         'conversations',
         'facts',
         'messages',
+        'process_registry',
         'projection_meta',
         'run_events',
         'runs',

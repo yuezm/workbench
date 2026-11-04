@@ -128,6 +128,8 @@ export interface DshRunRequest {
   signal: AbortSignal
   /** 事件回调（seq 由本模块递增） */
   onEvent?: (event: RunEvent) => void
+  /** 子进程 pid 回调（M2 T13）：spawn 成功后立即调一次，宿主写 `process_registry` */
+  onSpawn?: (pid: number) => void
 }
 
 interface Collected {
@@ -691,6 +693,8 @@ export async function executeDshRun(
     }
   }
   const child = launched.process
+  // pid 是崩溃对账的唯一线索：spawn 成功就立刻上报（拿不到 pid 的平台放弃登记）
+  if (child.pid !== undefined) request.onSpawn?.(child.pid)
   const state: DshRunState = {
     ready: false,
     sessionId: null,

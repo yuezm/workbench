@@ -60,6 +60,11 @@ export interface ExecutorIO {
   emit(event: RunEvent): void
   /** 协议会话 id 变化；回执缺 `sessionId` 时宿主用它兜底 */
   session?(id: string): void
+  /**
+   * 子进程 pid（M2 T13）：执行器 spawn 后回调一次，宿主写进 `process_registry`，
+   * 崩溃重启时靠它终止残留进程树。不能提供 pid 的执行器可以不调。
+   */
+  process?(pid: number): void
 }
 
 /**

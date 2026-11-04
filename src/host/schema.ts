@@ -139,6 +139,21 @@ CREATE TABLE IF NOT EXISTS ${name} (
   PRIMARY KEY (run_id, seq)
 );`
 
+/**
+ * 宿主私有运行进程登记表（M2 T13 / D11，**不进投影白名单 / 指纹**）。
+ *
+ * 记录「此刻本机为哪些 run 起了子进程」：调度器 spawn 前写占位行（pid 为空）、拿到 pid
+ * 后回填、执行结束删除。崩溃重启时 `host/reconcile` 靠它找出需要终止的残留进程树；
+ * 它不是业务事实，重建投影（`store.rebuild`）不该清它，因此不登记在
+ * `PROJECTION_TABLES` / `tableDdl` / 投影指纹里。
+ */
+const processRegistryTable = (name = 'process_registry'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  run_id TEXT PRIMARY KEY,
+  pid INTEGER,
+  started_at TEXT NOT NULL
+);`
+
 const conversationsTable = (name = 'conversations'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
@@ -214,6 +229,12 @@ export const SCHEMA_SQL = [
   legacyChatMessagesTable(),
   INDEX_SQL,
 ].join('\n')
+
+/**
+ * 宿主私有进程登记表 DDL：与 `FACTS_SQL` 一样单独执行（不进业务表清单，
+ * 也就不在 `SCHEMA_SQL` 的「九张投影 + 两张 legacy」断言范围内）。
+ */
+export const PROCESS_REGISTRY_SQL = processRegistryTable()
 
 /** 供迁移重建复用：生成指名字表的 DDL */
 export const tableDdl = {

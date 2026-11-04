@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   FACTS_SQL,
   INDEX_SQL,
+  PROCESS_REGISTRY_SQL,
   RUN_M2_ADDED_COLUMNS,
   SCHEMA_SQL,
   SCHEMA_VERSION,
@@ -53,8 +54,11 @@ const readForeignKeys = (db: DatabaseSync): boolean => {
  *
  * `CREATE TABLE IF NOT EXISTS runs` 只对新建库生效：M1/v2 旧库的旧 `runs` 表列不变，
  * 首次启动 `backfillRuns` 写新列会失败，所以必须在 open 阶段重建。
+ *
+ * 导出以便单测直接覆盖「表不存在（空列集合）→ 不升级」分支：`openDatabase` 的公共
+ * 路径总会先建表，这个分支经公共 API 不可达。
  */
-function needsRunsUpgrade(db: DatabaseSync): boolean {
+export function needsRunsUpgrade(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'runs')
   if (columns.size === 0) return false
   return RUN_M2_ADDED_COLUMNS.some((column) => !columns.has(column))
@@ -92,7 +96,7 @@ function upgradeLegacyRuns(db: DatabaseSync): boolean {
 /**
  * 打开（或创建）数据库文件并建好全库 schema：busy_timeout、打开时 integrity_check、
  * 文件库启用 WAL、九张投影表 + 两张过渡期 legacy 聊天表 + 账本表（全部 IF NOT EXISTS）、
- * 旧库 `runs` 结构升级（M2）、`PRAGMA user_version = SCHEMA_VERSION`。
+ * 宿主私有 `process_registry`（T13）、旧库 `runs` 结构升级（M2）、`PRAGMA user_version = SCHEMA_VERSION`。
  *
  * 手写 v1 → v2 迁移已删除：v2 存量数据由 `host/store/import.ts` 写成 `snapshot.imported`
  * 事实后重建投影，因此这里只保证「库结构与当前版本对齐」；唯一的例外是 `runs`
@@ -121,6 +125,8 @@ export function openDatabase(filePath: string): DatabaseSync {
       // 升级可能删掉旧 runs 上的索引，这里统一补齐（新建库同样幂等）。
       db.exec(INDEX_SQL)
       db.exec(FACTS_SQL)
+      // 宿主私有进程登记表（T13）：不进投影白名单，旧库打开时补齐即可。
+      db.exec(PROCESS_REGISTRY_SQL)
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     })
     return db

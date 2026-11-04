@@ -32,6 +32,8 @@ export interface ExecutorBackendRequest {
   signal: AbortSignal
   /** 增量事件：适配器原样转给 `io.emit` */
   onEvent: (event: RunEvent) => void
+  /** 子进程 pid（M2 T13）：适配器转给 `io.process`，宿主据此登记/对账 */
+  onSpawn?: (pid: number) => void
 }
 
 /**
@@ -122,6 +124,8 @@ export function createExecutorPort(
       timeoutMs: turn.timeoutMs,
       signal: turn.signal,
       onEvent: (event) => io.emit(event),
+      // 子进程 pid 是旁路信息：宿主写进 process_registry 供崩溃对账
+      onSpawn: (pid) => io.process?.(pid),
     })
     // 会话 id 是旁路信息：执行器可能只通过结果帧带回来，宿主据此续接下一轮。
     if (outcome.sessionId !== null) io.session?.(outcome.sessionId)

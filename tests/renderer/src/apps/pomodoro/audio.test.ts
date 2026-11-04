@@ -84,6 +84,27 @@ describe('createRingPlayer', () => {
     }
   })
 
+  it('未注入工厂：首次 play 用全局 AudioContext', () => {
+    const fake = fakeContext()
+    const original = globalThis.AudioContext
+    class FakeAudioContext {
+      currentTime = fake.ctx.currentTime
+      destination = fake.ctx.destination
+      resume = fake.ctx.resume
+      createOscillator = fake.ctx.createOscillator
+      createGain = fake.ctx.createGain
+    }
+    globalThis.AudioContext = FakeAudioContext as unknown as typeof AudioContext
+    try {
+      const player = createRingPlayer()
+      player.play()
+
+      expect(fake.oscillators).toHaveLength(3)
+    } finally {
+      globalThis.AudioContext = original
+    }
+  })
+
   it('重复 play 复用同一个 AudioContext', () => {
     const fake = fakeContext()
     const factory = vi.fn(() => fake.ctx)

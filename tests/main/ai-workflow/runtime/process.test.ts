@@ -6,7 +6,7 @@ const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
 
-const { createLineReader, defaultSpawn, killProcessTree, tail } =
+const { createLineReader, defaultSpawn, killPidTree, killProcessTree, tail } =
   await import('../../../../src/host/process')
 
 function fakeChild(): {
@@ -102,6 +102,23 @@ describe('defaultSpawn', () => {
     expect(onClose).toHaveBeenCalledWith(1, null)
     wrapped.kill('SIGKILL')
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+  })
+})
+
+describe('killPidTree', () => {
+  it('对账入口：按 pid 直接清树（固定 SIGKILL 语义，Windows 走 taskkill /T /F）', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    try {
+      spawnMock.mockReturnValue(fakeChild())
+      expect(killPidTree(42)).toBe(true)
+      expect(spawnMock).toHaveBeenCalledWith('taskkill', ['/pid', '42', '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+      })
+    } finally {
+      Object.defineProperty(process, 'platform', descriptor as PropertyDescriptor)
+    }
   })
 })
 

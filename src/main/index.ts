@@ -8,6 +8,9 @@ import { viewSpec } from '../kernel/view-spec'
 import type { KernelPort } from '../kernel/types'
 import { createClock } from '../host/clock'
 import { createEffects } from '../host/effects'
+import { killPidTree } from '../host/process'
+import { createProcessRegistry } from '../host/process-registry'
+import { reconcile } from '../host/reconcile'
 import { createScheduler, type Scheduler } from '../host/scheduler'
 import { createStore, DEFAULT_LIMITS } from '../host/store/index'
 import { importLegacyIfNeeded } from '../host/store/import'
@@ -101,6 +104,30 @@ if (app.requestSingleInstanceLock()) {
       createRuntimeBackend(family, runtimeDeps)
     // 执行器端口：调度器只认 `ExecutorPort`（host/executor），具体 dsh 实现在这里装配
     const executors = createRuntimeExecutors(runtimeDeps)
+    // 启动对账（T13）：先按 process_registry 的残留 pid 终止上次崩溃留下的进程树、清登记，
+    // 再 dispatch clock.tick 回收超租约（run.abandoned / executor_lost）与超时（timeout）的 run。
+    // 此刻 scheduler 还没装配：直接走 store.dispatch（启动期没有订阅者），随后的
+    // scheduler.wake() 会接住被重排回 queued 的 run。
+    const registry = createProcessRegistry(db)
+    const reconciled = reconcile({
+      registry,
+      dispatch: (input) => store.dispatch(input),
+      // 投影里的 run 状态；run 已随任务/工作流删除时视为缺失（只清登记行）
+      runStatus: (runId) => {
+        try {
+          return aiRepo.runGet(runId).status
+        } catch {
+          return null
+        }
+      },
+      killPid: killPidTree,
+    })
+    // 摘要只用于诊断：残留进程与回收数量非零时留一条 warn（不建 UI 通道）
+    if (reconciled.killed > 0 || reconciled.facts > 0) {
+      console.warn(
+        `[reconcile] 终止残留进程 ${reconciled.killed} 个、清理登记 ${reconciled.cleared} 行、回收事实 ${reconciled.facts} 条`,
+      )
+    }
     // 写入口与提交后分发：effects.dispatch 是 IPC / scheduler / clock 的唯一写路径；
     // effects 先建、scheduler 后建，靠闭包惰性取（getter 首次调用发生在装配完成之后）
     const effects = createEffects({
@@ -115,6 +142,7 @@ if (app.requestSingleInstanceLock()) {
       limits: DEFAULT_LIMITS,
       // 重启后重跑同一 run 时帧 seq 继续全局单调（T12 会把这里换成投影内的最大 seq）
       lastFrameSeq: (runId) => aiRepo.runEventsList(runId).at(-1)?.seq ?? 0,
+      registry,
     })
     const chat = new ChatService({
       repo: aiRepo,
@@ -130,7 +158,8 @@ if (app.requestSingleInstanceLock()) {
       chat,
       backendFor,
     })
-    // 启动：先领取遗留的 queued run，再挂唯一定时器（对账 T13 接在这之前）
+    // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，
+    // 再挂唯一定时器（周期回收走 nextWakeAt + clock.tick，不再单独轮询）
     scheduler.wake()
     const clock = createClock({
       store: {

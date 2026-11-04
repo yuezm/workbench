@@ -56,6 +56,8 @@ function bindBackend(runtime: Runtime, backend: RuntimeBackend): ExecutorBackend
         timeoutMs: request.timeoutMs,
         signal: request.signal,
         onEvent: request.onEvent,
+        // 子进程 pid 透传给宿主（T13：写 process_registry，崩溃重启按 pid 清树）
+        onSpawn: request.onSpawn,
       }),
   }
 }

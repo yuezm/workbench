@@ -249,6 +249,21 @@ describe('createScheduler：执行一轮', () => {
     expect(currentStage(seeded.task.id)).toBe(seeded.stages.second)
   })
 
+  it('未注入进程登记表：执行器回报 pid 时走 noop 登记，不影响终态', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        io.process?.(1234)
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({ status: 'succeeded' })
+  })
+
   it('帧：io.emit 的事件按宿主 seq 入 run_events，超出单批上限分包', async () => {
     const seeded = seed()
     const scheduler = makeScheduler(

@@ -195,7 +195,7 @@ describe('kernel 纯度', () => {
   it('不把注释与字符串里的禁用词当违规', () => {
     const clean = [
       "// 说明：这里不能写 Date.now()，也不能 import 'node:fs'",
-      "import type { Task } from '../protocol/types'",
+      "import type { Task } from '../protocol/entities'",
       "export const label = 'Date.now() 由宿主传入'",
       'export const ok = (task: Task | null): boolean => task !== null',
     ].join('\n')

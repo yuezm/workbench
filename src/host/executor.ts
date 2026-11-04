@@ -92,6 +92,8 @@ const toReceipt = (turn: Turn, outcome: ExecutorBackendOutcome): Receipt => {
   }
   if (outcome.sessionId !== null) receipt.sessionId = outcome.sessionId
   if (outcome.error !== null) receipt.error = outcome.error
+  // 聊天失败轮次没给错误文案时补「执行失败」（旧 ChatService 的文案，T14b 迁移不放松）
+  else if (turn.purpose === 'chat' && receipt.status === 'failed') receipt.error = '执行失败'
   const errorCode = errorCodeOf(outcome)
   if (errorCode !== null) receipt.errorCode = errorCode
   if (outcome.exitCode !== null) receipt.exitCode = outcome.exitCode
@@ -117,9 +119,10 @@ export function createExecutorPort(
     io: ExecutorIO,
     resumeSessionId: string | null,
     attemptNumber: number,
+    prompt: string = turn.prompt,
   ): Promise<ExecutorBackendOutcome> => {
     const outcome = await backend.execute({
-      turn: { ...turn, resumeSessionId },
+      turn: { ...turn, resumeSessionId, prompt },
       requestId: requestIdOf(turn, attemptNumber),
       timeoutMs: turn.timeoutMs,
       signal: turn.signal,
@@ -143,8 +146,9 @@ export function createExecutorPort(
         !turn.signal.aborted
       if (!shouldRetry) return toReceipt(turn, first)
 
-      // 续接已失效：换新会话重试一次（不再带 resumeSessionId）
-      const second = await attempt(turn, io, null, 2)
+      // 续接已失效：换新会话、带完整历史提示词重试一次（聊天续接轮只发新消息，
+      // 重试必须回退到整段历史的 prompt，否则 CLI 看不到前文——旧 ChatService 同口径）
+      const second = await attempt(turn, io, null, 2, turn.fallbackPrompt ?? turn.prompt)
       if (!second.resumeRejected) return toReceipt(turn, second)
       // 取消/超时优先于「续接仍被拒」：不把已取消的轮次改写成 failed
       if (second.status === 'cancelled' || second.status === 'timeout') {

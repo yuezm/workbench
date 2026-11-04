@@ -3,7 +3,6 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import type { Runtime, RuntimeProbe, WorkflowWithStages } from '../../../src/shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../../src/shared/ai-workflow-api'
-import type { ChatService } from '../../../src/main/ai-workflow/chat'
 import {
   createAiWorkflowHandler,
   registerAiWorkflowIpc,
@@ -61,7 +60,6 @@ function makeHandler(overrides: Partial<Parameters<typeof createAiWorkflowHandle
     store: world.store,
     repo: world.repo,
     dispatch,
-    notifyChanged: () => notify(),
     backendFor: () => backend,
     ...overrides,
   })
@@ -241,54 +239,104 @@ function createWorkflowHandlerWorkflow(): string {
 }
 
 describe('ai-workflow handler：聊天', () => {
-  interface FakeChat {
-    send: ReturnType<typeof vi.fn>
-    cancel: ReturnType<typeof vi.fn>
-  }
-  function withChat(): { h: AiWorkflowHandler; chat: FakeChat } {
-    const chat: FakeChat = { send: vi.fn(async () => {}), cancel: vi.fn() }
-    return {
-      h: makeHandler({ chat: chat as unknown as ChatService }),
-      chat,
-    }
-  }
-
   function seedAgent(h: AiWorkflowHandler): string {
     const rt = createRuntime(world, { name: 'ds' })
     return (h('agents.create', [{ name: 'coder', runtimeId: rt.id }]) as { id: string }).id
   }
 
-  it('会话与消息路由走仓库，写操作触发 changed', () => {
-    const { h } = withChat()
-    const agentId = seedAgent(h)
+  it('会话创建/列表/删除走事实与投影，写操作经 dispatch 通知', () => {
+    const agentId = seedAgent(handle)
     notify.mockClear()
-    const conv = h('chat.createConversation', [agentId]) as { id: string; title: string }
+
+    const conv = handle('chat.createConversation', [agentId]) as {
+      id: string
+      title: string
+      agentId: string
+    }
     expect(notify).toHaveBeenCalledTimes(1)
     expect(conv.title).toBe('新对话')
+    expect(conv.agentId).toBe(agentId)
 
-    expect((h('chat.listConversations', []) as unknown[]).length).toBe(1)
-    expect(h('chat.listMessages', [conv.id])).toEqual([])
+    expect((handle('chat.listConversations', []) as unknown[]).length).toBe(1)
+    expect(handle('chat.listMessages', [conv.id])).toEqual([])
 
-    h('chat.removeConversation', [conv.id])
+    handle('chat.removeConversation', [conv.id])
     expect(notify).toHaveBeenCalledTimes(2)
-    expect(h('chat.listConversations', [])).toEqual([])
+    expect(handle('chat.listConversations', [])).toEqual([])
   })
 
-  it('chat.send / chat.cancel 交给聊天服务；服务缺失时明确报错', () => {
-    const { h, chat } = withChat()
-    const agentId = seedAgent(h)
-    const conv = h('chat.createConversation', [agentId]) as { id: string }
-    h('chat.send', [conv.id, '你好'])
-    expect(chat.send).toHaveBeenCalledWith(conv.id, '你好')
-    h('chat.cancel', [conv.id])
-    expect(chat.cancel).toHaveBeenCalledWith(conv.id)
+  it('创建不存在的智能体：内核 reject 原样抛', () => {
+    expect(() => handle('chat.createConversation', ['ghost'])).toThrow(/智能体不存在/)
+    expect(world.store.query('conversations.all')).toEqual([])
+  })
 
-    const bare = makeHandler()
-    expect(() => bare('chat.send', [conv.id, 'hi'])).toThrow(/聊天服务未就绪/)
-    expect(() => bare('chat.cancel', [conv.id])).toThrow(/聊天服务未就绪/)
+  it('chat.send 落用户消息与 run.queued；并发/空内容/未知对话都 reject', () => {
+    const agentId = seedAgent(handle)
+    const conv = handle('chat.createConversation', [agentId]) as { id: string }
+
+    handle('chat.send', [conv.id, '  第一问  '])
+    const messages = handle('chat.listMessages', [conv.id]) as Array<{
+      role: string
+      content: string
+    }>
+    expect(messages).toEqual([expect.objectContaining({ role: 'user', content: '第一问' })])
+    // 首条消息给对话命名
+    expect((handle('chat.listConversations', []) as Array<{ title: string }>)[0]?.title).toBe(
+      '第一问',
+    )
+    // 同一对话只跑一轮：第二轮 reject，且不落用户消息
+    expect(() => handle('chat.send', [conv.id, '第二问'])).toThrow(/正在执行/)
+    expect(handle('chat.listMessages', [conv.id])).toHaveLength(1)
+    expect(() => handle('chat.send', [conv.id, '   '])).toThrow(/不能为空/)
+    expect(() => handle('chat.send', ['ghost', '问'])).toThrow(/对话不存在/)
+  })
+
+  it('chat.send：运行时停用不落用户消息', () => {
+    const agentId = seedAgent(handle)
+    const conv = handle('chat.createConversation', [agentId]) as { id: string }
+    const agent = world.store.query('agents.all').find((item) => item.id === agentId)
+    updateRuntime(world, String(agent?.runtimeId), { enabled: false })
+    expect(() => handle('chat.send', [conv.id, '问'])).toThrow(/已停用/)
+    expect(handle('chat.listMessages', [conv.id])).toEqual([])
+  })
+
+  it('chat.cancel：对活跃 chat run 发 run.cancel；空闲对话无害', () => {
+    const agentId = seedAgent(handle)
+    const conv = handle('chat.createConversation', [agentId]) as { id: string }
+    handle('chat.send', [conv.id, '问'])
+
+    handle('chat.cancel', [conv.id])
+    const types = (
+      world.db.prepare('SELECT type FROM facts ORDER BY seq').all() as unknown as Array<{
+        type: string
+      }>
+    ).map((row) => row.type)
+    expect(types).toContain('run.cancel_requested')
+
+    // 空闲对话：没有活跃 run 时什么也不做
+    const idle = handle('chat.createConversation', [agentId]) as { id: string }
+    expect(() => handle('chat.cancel', [idle.id])).not.toThrow()
+  })
+
+  it('删除对话：先取消活跃 chat run 再删对话（消息随事实级联删除）', () => {
+    const agentId = seedAgent(handle)
+    const conv = handle('chat.createConversation', [agentId]) as { id: string }
+    handle('chat.send', [conv.id, '问'])
+
+    handle('chat.removeConversation', [conv.id])
+
+    expect(handle('chat.listConversations', [])).toEqual([])
+    expect(handle('chat.listMessages', [conv.id])).toEqual([])
+    const types = (
+      world.db.prepare('SELECT type FROM facts ORDER BY seq').all() as unknown as Array<{
+        type: string
+      }>
+    ).map((row) => row.type)
+    expect(types.indexOf('run.cancel_requested')).toBeLessThan(
+      types.indexOf('conversation.removed'),
+    )
   })
 })
-
 interface Wf {
   id: string
   stages: Array<{ id: string }>

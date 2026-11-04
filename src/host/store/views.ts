@@ -155,7 +155,8 @@ interface MessageRow {
 
 interface ActiveRunRow {
   id: string
-  task_id: string
+  /** 聊天 run 不挂任务；阶段 run 才有 */
+  task_id: string | null
   stage_id: string | null
   status: string
 }
@@ -345,8 +346,9 @@ const readConversations = (db: DatabaseSync): Conversation[] =>
   (
     db
       .prepare(
+        // 会话清单按最近更新排序（与旧仓储 ORDER BY updated_at DESC 一致）
         `SELECT id, title, agent_id, session_id, created_at, updated_at
-         FROM conversations ORDER BY created_at, rowid`,
+         FROM conversations ORDER BY updated_at DESC, created_at DESC, rowid`,
       )
       .all() as unknown as ConversationRow[]
   ).map(mapConversation)
@@ -359,6 +361,16 @@ const readMessages = (db: DatabaseSync): Message[] =>
          FROM messages ORDER BY created_at, rowid`,
       )
       .all() as unknown as MessageRow[]
+  ).map(mapMessage)
+
+const readMessagesByConversation = (db: DatabaseSync, conversationId: string): Message[] =>
+  (
+    db
+      .prepare(
+        `SELECT id, conversation_id, role, content, error, created_at
+         FROM messages WHERE conversation_id = ? ORDER BY created_at, rowid`,
+      )
+      .all(conversationId) as unknown as MessageRow[]
   ).map(mapMessage)
 
 const toMap = <T extends { id: string }>(rows: readonly T[]): Map<string, T> =>
@@ -429,6 +441,13 @@ const readTask = (db: DatabaseSync, taskId: string): Task | null => {
   return row ? mapTask(row) : null
 }
 
+const mapActiveRun = (row: ActiveRunRow): ActiveRun => ({
+  id: row.id,
+  taskId: row.task_id,
+  stageId: row.stage_id,
+  status: row.status as ActiveRun['status'],
+})
+
 const readActiveRuns = (db: DatabaseSync, taskId: string): ActiveRun[] =>
   (
     db
@@ -439,12 +458,20 @@ const readActiveRuns = (db: DatabaseSync, taskId: string): ActiveRun[] =>
          ORDER BY created_at, rowid`,
       )
       .all(taskId) as unknown as ActiveRunRow[]
-  ).map((row) => ({
-    id: row.id,
-    taskId: row.task_id,
-    stageId: row.stage_id,
-    status: row.status as ActiveRun['status'],
-  }))
+  ).map(mapActiveRun)
+
+/** 对话下执行中的聊天 run（同一对话同时只跑一轮，用来看「正在执行」与取消目标）。 */
+const readActiveChatRuns = (db: DatabaseSync, conversationId: string): ActiveRun[] =>
+  (
+    db
+      .prepare(
+        `SELECT id, task_id, stage_id, status FROM runs
+         WHERE conversation_id = ? AND purpose = 'chat'
+           AND status IN ('queued','running','waiting')
+         ORDER BY created_at, rowid`,
+      )
+      .all(conversationId) as unknown as ActiveRunRow[]
+  ).map(mapActiveRun)
 
 const readStringParam = (params: unknown, key: string): string => {
   if (typeof params !== 'object' || params === null) {
@@ -475,5 +502,11 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readTask(db, readStringParam(params, 'taskId'))
     case 'runs.active-by-task':
       return readActiveRuns(db, readStringParam(params, 'taskId'))
+    case 'conversations.all':
+      return readConversations(db)
+    case 'messages.byConversation':
+      return readMessagesByConversation(db, readStringParam(params, 'conversationId'))
+    case 'runs.active-by-conversation':
+      return readActiveChatRuns(db, readStringParam(params, 'conversationId'))
   }
 }

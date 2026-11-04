@@ -52,13 +52,10 @@ describe('repository 错误分支与补充路径', () => {
     expect(() => repo.runtimeGet('x')).toThrow(/运行时不存在/)
     expect(() => repo.agentGet('x')).toThrow(/智能体不存在/)
     expect(() => repo.runGet('x')).toThrow(/运行记录不存在/)
-    expect(() => repo.chatConversationGet('x')).toThrow(/对话不存在/)
   })
 
   it('不存在的任务/对话：列表返回空数组而不是抛错', () => {
     expect(repo.runsListByTask('ghost')).toEqual([])
-    expect(repo.chatMessagesList('ghost')).toEqual([])
-    expect(repo.chatConversationsList()).toEqual([])
   })
 
   it('runsListByStatus 空集合 / 未匹配状态', () => {
@@ -103,84 +100,109 @@ describe('repository 错误分支与补充路径', () => {
     expect(repo.runUpdate(run.id, { usage: null }).usage).toBeNull()
   })
 
-  it('chatConversationCreate 智能体不存在（含空 id）时抛错', () => {
-    expect(() => repo.chatConversationCreate('ghost')).toThrow(/智能体不存在/)
-    expect(() => repo.chatConversationCreate('')).toThrow(/智能体不存在/)
+  // T14b：聊天 SQL 用例迁到事实/投影路径（旧 chat_* 表已删除，读写都走 store）
+  const createConversation = (agentId: string, title?: string): string => {
+    const facts = world.store.dispatch({
+      type: 'conversation.create',
+      agentId,
+      ...(title === undefined ? {} : { title }),
+    }).facts
+    return (facts[0]?.payload as { conversation: { id: string } }).conversation.id
+  }
+
+  it('聊天投影：建对话 / 发消息 / 删对话都走事实，旧 chat_* 表已不存在', () => {
+    const { agent } = seed()
+    const conversationId = createConversation(agent.id, '旧对话')
+
+    const conversations = world.store.query('conversations.all')
+    expect(conversations).toHaveLength(1)
+    expect(conversations[0]).toMatchObject({ id: conversationId, title: '旧对话', sessionId: null })
+    expect(world.store.query('messages.byConversation', { conversationId })).toEqual([])
+
+    world.store.dispatch({ type: 'conversation.send', conversationId, content: '你好' })
+    const messages = world.store.query('messages.byConversation', { conversationId })
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ role: 'user', content: '你好', error: null })
+    expect(world.store.query('runs.active-by-conversation', { conversationId })).toHaveLength(1)
+
+    const types = (
+      world.db.prepare('SELECT type FROM facts ORDER BY seq').all() as unknown as Array<{
+        type: string
+      }>
+    ).map((row) => row.type)
+    expect(types).toContain('conversation.created')
+    expect(types).toContain('message.appended')
+
+    world.store.dispatch({ type: 'conversation.remove', conversationId })
+    expect(world.store.query('conversations.all')).toEqual([])
+    expect(world.store.query('messages.byConversation', { conversationId })).toEqual([])
+
+    // 旧聊天表已从 schema 删除：存量数据只能靠事实重建
+    expect(() => world.db.prepare('SELECT 1 FROM chat_conversations').get()).toThrow(
+      /no such table/,
+    )
+    expect(() => world.db.prepare('SELECT 1 FROM chat_messages').get()).toThrow(/no such table/)
   })
 
-  it('chatMessageCreate 向不存在的对话写消息抛错（外键生效，不留孤立消息）', () => {
+  it('聊天校验：未知对话 / 空内容 / 未知智能体都 reject', () => {
+    const { agent } = seed()
+    const conversationId = createConversation(agent.id, '会话')
     expect(() =>
-      repo.chatMessageCreate({ conversationId: 'ghost', role: 'user', content: 'x' }),
-    ).toThrow()
+      world.store.dispatch({ type: 'conversation.send', conversationId: 'ghost', content: 'x' }),
+    ).toThrow(/对话不存在/)
+    expect(() =>
+      world.store.dispatch({ type: 'conversation.send', conversationId, content: '   ' }),
+    ).toThrow(/消息内容不能为空/)
+    expect(() => world.store.dispatch({ type: 'conversation.create', agentId: 'ghost' })).toThrow(
+      /智能体不存在/,
+    )
+    expect(world.store.query('messages.byConversation', { conversationId })).toEqual([])
   })
 
-  it('删除对话级联删除消息', () => {
-    const { agent } = seed()
-    const conv = repo.chatConversationCreate(agent.id)
-    repo.chatMessageCreate({ conversationId: conv.id, role: 'user', content: '你好' })
-    repo.chatMessageCreate({ conversationId: conv.id, role: 'assistant', content: '在' })
-    expect(repo.chatMessagesList(conv.id)).toHaveLength(2)
-    repo.chatConversationRemove(conv.id)
-    expect(() => repo.chatConversationGet(conv.id)).toThrow(/对话不存在/)
-    expect(repo.chatMessagesList(conv.id)).toEqual([])
-  })
-
-  it('rename / touch / setSession 都更新对应字段', () => {
+  it('会话列表按最近更新排序；终态回执写回 session 并补 assistant 消息', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
     const { agent } = seed()
-    const conv = repo.chatConversationCreate(agent.id)
-    expect(conv.sessionId).toBeNull()
-    repo.chatConversationSetSession(conv.id, 'sess-1')
-    expect(repo.chatConversationGet(conv.id).sessionId).toBe('sess-1')
-
-    vi.setSystemTime(new Date('2026-01-01T00:00:05.000Z'))
-    repo.chatConversationRename(conv.id, '改过的标题')
-    expect(repo.chatConversationGet(conv.id).title).toBe('改过的标题')
-    expect(repo.chatConversationGet(conv.id).updatedAt).toBe('2026-01-01T00:00:05.000Z')
-
-    vi.setSystemTime(new Date('2026-01-01T00:00:09.000Z'))
-    repo.chatConversationTouch(conv.id)
-    expect(repo.chatConversationGet(conv.id).updatedAt).toBe('2026-01-01T00:00:09.000Z')
-
-    repo.chatConversationSetSession(conv.id, null)
-    expect(repo.chatConversationGet(conv.id).sessionId).toBeNull()
-  })
-
-  it('对话列表按 updated_at 倒序', () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    const { agent } = seed()
-    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
-    const a = repo.chatConversationCreate(agent.id)
+    const first = createConversation(agent.id, '早')
     vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'))
-    const b = repo.chatConversationCreate(agent.id)
-    expect(repo.chatConversationsList().map((conv) => conv.id)).toEqual([b.id, a.id])
-  })
+    const second = createConversation(agent.id, '晚')
+    expect(world.store.query('conversations.all').map((item) => item.id)).toEqual([second, first])
 
-  it('消息按 created_at 排序，同毫秒按写入顺序', () => {
-    const { agent } = seed()
-    const conv = repo.chatConversationCreate(agent.id)
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-01-01T00:00:05.000Z'))
-    const late = repo.chatMessageCreate({ conversationId: conv.id, role: 'user', content: '晚' })
-    vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'))
-    const early = repo.chatMessageCreate({
-      conversationId: conv.id,
-      role: 'assistant',
-      content: '早',
+    vi.setSystemTime(new Date('2026-01-01T00:00:02.000Z'))
+    world.store.dispatch({ type: 'conversation.send', conversationId: first, content: '你好' })
+    const run = world.db
+      .prepare('SELECT * FROM runs WHERE conversation_id = ?')
+      .get(first) as unknown as Record<string, unknown>
+    world.store.dispatch({
+      type: 'run.claim',
+      runtimeId: String(run.runtime_id),
+      capacity: 1,
     })
-    const sameTime = repo.chatMessageCreate({
-      conversationId: conv.id,
-      role: 'user',
-      content: '同',
+    const claimed = world.db
+      .prepare('SELECT * FROM runs WHERE id = ?')
+      .get(String(run.id)) as unknown as Record<string, unknown>
+    world.store.dispatch({
+      type: 'run.receipt',
+      runId: String(run.id),
+      receipt: {
+        status: 'succeeded',
+        leaseId: String(claimed.lease_id),
+        turn: Number(claimed.turn),
+        output: '应答',
+        sessionId: 'sess-9',
+      },
     })
-    expect(repo.chatMessagesList(conv.id).map((m) => m.id)).toEqual([
-      early.id,
-      sameTime.id,
-      late.id,
+
+    const updated = world.store.query('conversations.all').find((item) => item.id === first)
+    expect(updated?.sessionId).toBe('sess-9')
+    expect(world.store.query('conversations.all')[0]?.id).toBe(first)
+    const messages = world.store.query('messages.byConversation', { conversationId: first })
+    expect(messages.map((message) => [message.role, message.content])).toEqual([
+      ['user', '你好'],
+      ['assistant', '应答'],
     ])
+    vi.useRealTimers()
   })
-
   it('runtimeWorkloads 空库返回空数组；activeRunForTask 未知任务返回 null', () => {
     expect(repo.runtimeWorkloads()).toEqual([])
     expect(repo.activeRunForTask('ghost')).toBeNull()

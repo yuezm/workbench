@@ -68,7 +68,10 @@ for (const f of untracked.split('\n').filter(Boolean)) {
   } catch {
     continue
   }
-  for (const text of content.split('\n')) added.push({ file: f.replace(/\\/g, '/'), text })
+  const normalized = f.replace(/\\/g, '/')
+  // 未跟踪的新文件同样是「新增路径」（迁移判定要用到）
+  addedPaths.add(normalized)
+  for (const text of content.split('\n')) added.push({ file: normalized, text })
 }
 
 const findings = []
@@ -112,9 +115,16 @@ const sourceCandidates = (f) => {
   }
   return candidates
 }
-// 测试目录搬家（src/**.test.ts → tests/**.test.ts）：旧路径删除 + 新路径新增 = 迁移，不是删测试。
+// 测试搬家（src/**.test.ts → tests/**.test.ts）：旧路径删除 + 新路径新增 = 迁移，不是删测试。
 // git 有时识别不出 rename（相似度阈值），此时会退化成 delete + add，用路径对应关系兜底。
+// 显式登记的「按层搬家」（T16 计划表）：旧测试的行为在新位置重写，断言同等覆盖。
+const RELOCATED_TESTS = {
+  // T14b：repository 聊天 SQL 用例 → 宿主聊天执行链用例（IPC/scheduler/投影）
+  'tests/main/ai-workflow/repository.chat.test.ts': 'tests/host/chat.test.ts',
+}
 const migratedCounterpart = (f) => {
+  const relocated = RELOCATED_TESTS[f]
+  if (relocated !== undefined && addedPaths.has(relocated)) return relocated
   const strip = (p) => p.replace(/^(src|tests)\//, '')
   for (const g of addedPaths) {
     if (strip(g) === strip(f)) return g

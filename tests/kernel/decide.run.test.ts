@@ -4,7 +4,14 @@
  * 切片（runs / runtimes / tasks / workflows / stages），其余投影表留空。
  */
 import { describe, expect, it } from 'vitest'
-import type { RunRow, Runtime, Task, Workflow, WorkflowStage } from '../../src/protocol/entities'
+import type {
+  Conversation,
+  RunRow,
+  Runtime,
+  Task,
+  Workflow,
+  WorkflowStage,
+} from '../../src/protocol/entities'
 import type {
   RunClaimedPayload,
   RunRemovedPayload,
@@ -97,6 +104,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
 })
 
 interface Seed {
+  conversations?: Conversation[]
   runs?: RunRow[]
   runtimes?: Runtime[]
   tasks?: Task[]
@@ -112,9 +120,19 @@ const view = (seed: Seed = {}): View => ({
   runtimes: new Map((seed.runtimes ?? []).map((row) => [row.id, row])),
   tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
-  conversations: new Map(),
+  conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
   messages: new Map(),
   activeTaskIds: new Set(),
+})
+
+const conversation = (over: Partial<Conversation> = {}): Conversation => ({
+  id: 'cv-1',
+  title: '对话',
+  agentId: 'ag-1',
+  sessionId: null,
+  createdAt: NOW,
+  updatedAt: NOW,
+  ...over,
 })
 
 const workflow = (over: Partial<Workflow> = {}): Workflow => ({
@@ -958,7 +976,7 @@ describe('kernel/decide run.receipt 回执', () => {
       leaseId: 'run-chat:1',
     })
     const decision = receive(
-      view({ runs: [chat] }),
+      view({ runs: [chat], conversations: [conversation()] }),
       'run-chat',
       receipt({ leaseId: 'run-chat:1', output: '你好' }),
     )
@@ -996,7 +1014,7 @@ describe('kernel/decide run.receipt 回执', () => {
       leaseId: 'run-chat:1',
     })
     const decision = receive(
-      view({ runs: [chat] }),
+      view({ runs: [chat], conversations: [conversation()] }),
       'run-chat',
       receipt({ leaseId: 'run-chat:1', status: 'failed', error: '进程崩溃' }),
     )

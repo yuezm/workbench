@@ -19,14 +19,27 @@ const resultsCover: Assert<Equal<keyof ViewResults, ViewId>> = true
 const workflowParams: Assert<Equal<ViewParams<'tasks.byWorkflow'>, { workflowId: string }>> = true
 const taskParams: Assert<Equal<ViewParams<'task.byId'>, { taskId: string }>> = true
 const noParams: Assert<Equal<ViewParams<'agents.all'>, undefined>> = true
+const messagesParams: Assert<
+  Equal<ViewParams<'messages.byConversation'>, { conversationId: string }>
+> = true
+const chatRunsParams: Assert<
+  Equal<ViewParams<'runs.active-by-conversation'>, { conversationId: string }>
+> = true
 /** 泛型取到的返回类型与映射一致。 */
 const resultByView: Assert<Equal<ViewResult<'task.byId'>, Task | null>> = true
 
+/** 阶段 run 挂任务；聊天 run 的 	askId 为 null（T14b）。 */
 const activeRun = {
   id: 'r1',
   taskId: 't1',
   stageId: null,
   status: 'queued',
+} satisfies ActiveRun
+const chatRun = {
+  id: 'r2',
+  taskId: null,
+  stageId: null,
+  status: 'running',
 } satisfies ActiveRun
 
 describe('protocol/views', () => {
@@ -38,6 +51,9 @@ describe('protocol/views', () => {
       'tasks.byWorkflow',
       'task.byId',
       'runs.active-by-task',
+      'conversations.all',
+      'messages.byConversation',
+      'runs.active-by-conversation',
     ])
   })
 
@@ -51,11 +67,14 @@ describe('protocol/views', () => {
     expect(workflowParams).toBe(true)
     expect(taskParams).toBe(true)
     expect(noParams).toBe(true)
+    expect(messagesParams).toBe(true)
+    expect(chatRunsParams).toBe(true)
     expect(resultByView).toBe(true)
   })
 
   it('活跃 run 只暴露内核判断所需字段', () => {
     expect(Object.keys(activeRun).sort()).toEqual(['id', 'stageId', 'status', 'taskId'])
     expect(activeRun.status).toBe('queued')
+    expect(chatRun.taskId).toBeNull()
   })
 })

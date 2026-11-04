@@ -2,9 +2,6 @@ import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   Agent,
-  ChatConversation,
-  ChatMessage,
-  ChatRole,
   PermissionMode,
   Run,
   RunEvent,
@@ -63,22 +60,6 @@ interface RunEventRow {
   type: string
   payload_json: string
 }
-interface ChatConversationRow {
-  id: string
-  title: string
-  agent_id: string
-  session_id: string | null
-  created_at: string
-  updated_at: string
-}
-interface ChatMessageRow {
-  id: string
-  conversation_id: string
-  role: string
-  content: string
-  error: string | null
-  created_at: string
-}
 
 const now = (): string => new Date().toISOString()
 
@@ -124,25 +105,9 @@ const mapRun = (r: RunRow): Run => ({
   endedAt: r.ended_at,
   createdAt: r.created_at,
 })
-const mapChatConversation = (r: ChatConversationRow): ChatConversation => ({
-  id: r.id,
-  title: r.title,
-  agentId: r.agent_id,
-  sessionId: r.session_id,
-  createdAt: r.created_at,
-  updatedAt: r.updated_at,
-})
-const mapChatMessage = (r: ChatMessageRow): ChatMessage => ({
-  id: r.id,
-  conversationId: r.conversation_id,
-  role: r.role as ChatRole,
-  content: r.content,
-  error: r.error,
-  createdAt: r.created_at,
-})
 
 /**
- * 数据访问层：只保留**运行侧**与聊天（M1 投影集之外、仍直接读写）的 SQL。
+ * 数据访问层：只保留**运行侧**的只读 SQL（写入全部收口到 host/store 的事实路径）。
  *
  * 五张投影表（tasks / workflows / workflow_stages / agents / runtimes）的写路径已收口到
  * `host/store`：这里不再有它们的 INSERT/UPDATE/DELETE，也不再承载配置/任务的 CRUD。
@@ -311,79 +276,18 @@ export class Repository {
     })
   }
 
-  // ---------- 对话 ----------
-  chatConversationsList(): ChatConversation[] {
+  // ---------- 启动对账用的投影查询 ----------
+  /**
+   * 崩溃重启时要落兜底终态的聊天 run：`purpose='chat'` 且仍在 `running`。
+   * 中断的聊天轮次由内核产错误 assistant 消息（T14b / D8），不走阶段 run 的退避。
+   */
+  staleChatRuns(): Array<{ id: string; leaseId: string | null; turn: number }> {
     return (
       this.db
-        .prepare('SELECT * FROM chat_conversations ORDER BY updated_at DESC, created_at DESC')
-        .all() as unknown as ChatConversationRow[]
-    ).map(mapChatConversation)
-  }
-  chatConversationGet(id: string): ChatConversation {
-    const row = this.db
-      .prepare('SELECT * FROM chat_conversations WHERE id=?')
-      .get(id) as unknown as ChatConversationRow | undefined
-    if (!row) throw new Error('对话不存在: ' + id)
-    return mapChatConversation(row)
-  }
-  chatConversationCreate(agentId: string): ChatConversation {
-    // 先确认智能体存在：外键报错不便于定位，这里给出可读文案
-    this.agentGet(agentId)
-    const id = randomUUID()
-    const ts = now()
-    this.db
-      .prepare(
-        'INSERT INTO chat_conversations (id,title,agent_id,session_id,created_at,updated_at) VALUES (?,?,?,NULL,?,?)',
-      )
-      .run(id, '新对话', agentId, ts, ts)
-    return this.chatConversationGet(id)
-  }
-  chatConversationRemove(id: string): void {
-    // 消息由外键 ON DELETE CASCADE 一并删除
-    this.db.prepare('DELETE FROM chat_conversations WHERE id=?').run(id)
-  }
-  chatConversationRename(id: string, title: string): void {
-    this.db
-      .prepare('UPDATE chat_conversations SET title=?, updated_at=? WHERE id=?')
-      .run(title, now(), id)
-  }
-  chatConversationTouch(id: string): void {
-    this.db.prepare('UPDATE chat_conversations SET updated_at=? WHERE id=?').run(now(), id)
-  }
-  /** 记录（或清空）续接用的协议会话 id */
-  chatConversationSetSession(id: string, sessionId: string | null): void {
-    this.db.prepare('UPDATE chat_conversations SET session_id=? WHERE id=?').run(sessionId, id)
-  }
-  chatMessagesList(conversationId: string): ChatMessage[] {
-    // created_at 只有毫秒精度：同毫秒时用 rowid 兜底，保证轮次顺序稳定
-    return (
-      this.db
-        .prepare('SELECT * FROM chat_messages WHERE conversation_id=? ORDER BY created_at, rowid')
-        .all(conversationId) as unknown as ChatMessageRow[]
-    ).map(mapChatMessage)
-  }
-  chatMessageCreate(input: {
-    conversationId: string
-    role: ChatRole
-    content: string
-    error?: string | null
-  }): ChatMessage {
-    const id = randomUUID()
-    const error = input.error ?? null
-    const createdAt = now()
-    // 对话不存在时外键直接报错，不留下孤立消息
-    this.db
-      .prepare(
-        'INSERT INTO chat_messages (id,conversation_id,role,content,error,created_at) VALUES (?,?,?,?,?,?)',
-      )
-      .run(id, input.conversationId, input.role, input.content, error, createdAt)
-    return {
-      id,
-      conversationId: input.conversationId,
-      role: input.role,
-      content: input.content,
-      error,
-      createdAt,
-    }
+        .prepare(
+          "SELECT id, lease_id, turn FROM runs WHERE purpose = 'chat' AND status = 'running' ORDER BY created_at, rowid",
+        )
+        .all() as unknown as Array<{ id: string; lease_id: string | null; turn: number }>
+    ).map((row) => ({ id: row.id, leaseId: row.lease_id, turn: row.turn }))
   }
 }

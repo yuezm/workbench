@@ -184,13 +184,11 @@ describe('五张投影表与改前 DDL 一致', () => {
     }
   })
 
-  it('SCHEMA_SQL 建 11 张表：九张投影 + 两张过渡期 legacy 聊天表', () => {
+  it('SCHEMA_SQL 建 9 张表：九张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
       'agents',
-      'chat_conversations',
-      'chat_messages',
       'conversations',
       'messages',
       'run_events',
@@ -202,7 +200,7 @@ describe('五张投影表与改前 DDL 一致', () => {
     ])
   })
 
-  it('legacy 聊天表不进投影白名单 / 指纹（T14 前旧写路径的过渡表）', () => {
+  it('旧聊天表名不进投影白名单 / 指纹（T14b 已删除旧表）', () => {
     expect(PROJECTION_TABLES).not.toContain('chat_conversations')
     expect(PROJECTION_TABLES).not.toContain('chat_messages')
     expect(PROJECTION_DDL).not.toContain('chat_conversations')

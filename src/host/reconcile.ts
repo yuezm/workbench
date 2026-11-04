@@ -30,6 +30,12 @@ export interface ReconcileDeps {
   dispatch: (input: unknown) => DispatchResult
   /** 读 run 当前状态（投影里没有该 run 时返回 null） */
   runStatus: (runId: string) => RunStatus | null
+  /**
+   * 崩溃时正在跑的聊天 run（`purpose='chat'` + `running`）：宿主兜底写
+   * `run.host_settled{failed, executor_lost}`，内核据此产一条错误 assistant 消息（T14b）。
+   * 阶段 run 不走这里——它们按租约/超时走 `clock.tick` 的 abandoned 退避（D3）。
+   */
+  staleChatRuns?: () => ReadonlyArray<{ id: string; leaseId: string | null; turn: number }>
   /** 进程树终止；默认 `killPidTree`（Windows taskkill /T /F、POSIX 进程组 SIGKILL） */
   killPid?: (pid: number) => boolean
 }
@@ -39,6 +45,8 @@ export interface ReconcileSummary {
   killed: number
   /** 清掉的残留登记行数量（含只清理不杀的） */
   cleared: number
+  /** 兜底落终态的中断聊天 run 数量 */
+  settledChats: number
   /** `clock.tick` 产出的事实数量（回收的 run 数） */
   facts: number
 }
@@ -57,6 +65,22 @@ export function reconcile(deps: ReconcileDeps): ReconcileSummary {
   }
   deps.registry.clear()
 
+  // 中断的聊天轮次：先落失败终态（内核会补一条错误 assistant 消息），
+  // 再让 clock.tick 只处理阶段 run 的租约/超时回收
+  let settledChats = 0
+  for (const run of deps.staleChatRuns?.() ?? []) {
+    const facts = deps.dispatch({
+      type: 'run.host_settled',
+      runId: run.id,
+      leaseId: run.leaseId ?? undefined,
+      turn: run.turn,
+      status: 'failed',
+      errorCode: 'executor_lost',
+      error: '应用中断，本轮已结束',
+    }).facts
+    if (facts.length > 0) settledChats += 1
+  }
+
   const facts = deps.dispatch({ type: 'clock.tick' }).facts
-  return { killed, cleared: rows.length, facts: facts.length }
+  return { killed, cleared: rows.length, settledChats, facts: facts.length }
 }

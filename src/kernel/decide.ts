@@ -342,14 +342,19 @@ function stageTransitionFacts(view: View, run: SettledRun, now: Iso): FactDraft[
   return []
 }
 
-/** 聊天 run 终态 → 一条 assistant 消息；用户消息由 `conversation.send` 产（T14）。 */
+/**
+ * 聊天 run 终态 → 一条 assistant 消息；用户消息由 `conversation.send` 产（T14）。
+ * 对话在执行期间被删除时不再落消息（旧 ChatService 同样容忍：消息无处可落，本轮照常结束）。
+ */
 function chatMessageFacts(
+  view: View,
   run: RunRow,
   settled: SettledRun,
   now: Iso,
   env: Environment,
 ): FactDraft[] {
   if (run.conversationId === null) return []
+  if (!view.conversations.has(run.conversationId)) return []
   return [
     hostDraft(
       'message.appended',
@@ -841,7 +846,7 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         }
       }
       if (run.purpose === 'chat') {
-        facts.push(...chatMessageFacts(run, settled, now, env))
+        facts.push(...chatMessageFacts(view, run, settled, now, env))
         // 续接会话 id 记到对话上：下一轮直接用它续接，避免整段历史重发（D8）
         const conversation =
           run.conversationId === null ? undefined : view.conversations.get(run.conversationId)
@@ -875,7 +880,17 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const run = view.runs.get(input.runId)
       if (!run) return reject('not_found', '运行不存在: ' + input.runId)
       const actor = input.status === 'cancelled' ? HOST_CANCEL : HOST_SCHEDULER
-      return done(hostSettledFacts(run, input, now, actor))
+      const facts: FactDraft[] = hostSettledFacts(run, input, now, actor)
+      // 聊天 run 由宿主兜底落终态时同样补一条 assistant 消息（中断/取消/超时都要可见），
+      // 阶段 run 的兜底不推进阶段（与旧 runner 的失败口径一致）。
+      if (run.purpose === 'chat') {
+        for (const fact of facts) {
+          if (fact.type !== 'run.failed' && fact.type !== 'run.cancelled') continue
+          const settled = (fact.payload as { run: RunRow }).run as SettledRun
+          facts.push(...chatMessageFacts(view, settled, settled, now, env))
+        }
+      }
+      return done(facts)
     }
 
     case 'clock.tick': {

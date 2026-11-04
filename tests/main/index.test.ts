@@ -14,8 +14,6 @@ const {
   createTrayMock,
   registerIpcHandlersMock,
   registerAiWorkflowIpcMock,
-  ChatServiceMock,
-  ChatServiceImpl,
   openDbMock,
   RepositoryMock,
   RepositoryImpl,
@@ -62,17 +60,10 @@ const {
   }
 
   // 构造调用记录：真实 class 承载实例方法，外层 vi.fn 记录构造参数
-  const ChatServiceMock = vi.fn()
-  class ChatServiceImpl {
-    send = vi.fn()
-    cancel = vi.fn()
-    constructor(deps: unknown) {
-      ChatServiceMock(deps)
-    }
-  }
   const RepositoryMock = vi.fn()
   class RepositoryImpl {
     runEventsList = vi.fn(() => [])
+    staleChatRuns = vi.fn(() => [])
     // 启动对账读 run 状态：存在返回行，缺失抛错（main 的 runStatus 用 try/catch 归为 null）
     runGet = vi.fn((id: string) => {
       if (id === 'run-1') return { id, status: 'running' }
@@ -156,8 +147,6 @@ const {
     createTrayMock: vi.fn(),
     registerIpcHandlersMock: vi.fn(),
     registerAiWorkflowIpcMock: vi.fn(),
-    ChatServiceMock,
-    ChatServiceImpl,
     openDbMock: vi.fn(() => ({})),
     RepositoryMock,
     RepositoryImpl,
@@ -191,7 +180,6 @@ vi.mock('../../src/main/ipc', () => ({ registerIpcHandlers: registerIpcHandlersM
 vi.mock('../../src/main/ai-workflow/ipc', () => ({
   registerAiWorkflowIpc: registerAiWorkflowIpcMock,
 }))
-vi.mock('../../src/main/ai-workflow/chat', () => ({ ChatService: ChatServiceImpl }))
 vi.mock('../../src/main/ai-workflow/db', () => ({ openDb: openDbMock }))
 vi.mock('../../src/main/ai-workflow/repository', () => ({ Repository: RepositoryImpl }))
 vi.mock('../../src/main/ai-workflow/executor-port', () => ({
@@ -258,12 +246,16 @@ type SchedulerDeps = {
   limits: unknown
   lastFrameSeq: (runId: string) => number
   registry: unknown
+  onChatStream?: (conversationId: string, event: unknown) => void
+  onChatStreamEnd?: (conversationId: string) => void
+  chatFallbackPrompt?: (run: unknown) => string | null
 }
 
 type ReconcileDeps = {
   registry: unknown
   dispatch: (input: unknown) => { facts: unknown[] }
   runStatus: (runId: string) => string | null
+  staleChatRuns?: () => ReadonlyArray<{ id: string; leaseId: string | null; turn: number }>
   killPid: (pid: number) => boolean
 }
 
@@ -353,7 +345,7 @@ describe('主进程入口装配', () => {
     })
   })
 
-  it('创建窗口与托盘，并把聊天服务接进 ai-workflow IPC', async () => {
+  it('创建窗口与托盘，并把执行链接进 ai-workflow IPC', async () => {
     await loadEntry()
 
     expect(registerIpcHandlersMock).toHaveBeenCalledTimes(1)
@@ -362,8 +354,6 @@ describe('主进程入口装配', () => {
     expect(windows[0].loadFile).toHaveBeenCalledTimes(1)
     expect(createTrayMock).toHaveBeenCalledTimes(1)
 
-    expect(ChatServiceMock).toHaveBeenCalledTimes(1)
-    expect(ipcDeps().chat).toBeDefined()
     // 仓库与执行器共享同一会话根目录（会话续接要落 userData）
     expect(RepositoryMock).toHaveBeenCalledTimes(1)
     expect(createRuntimeExecutorsMock).toHaveBeenCalledWith(
@@ -461,6 +451,8 @@ describe('主进程入口装配', () => {
     expect(storeMock.dispatch).toHaveBeenCalledWith({ type: 'clock.tick' })
     expect(deps.runStatus('run-1')).toBe('running')
     expect(deps.runStatus('ghost')).toBeNull()
+    // 崩溃时中断的聊天 run 由对账落兜底终态（查询来自仓储的投影读）
+    expect(deps.staleChatRuns?.()).toEqual([])
     // 登记表与 scheduler 共用同一实例（执行期 begin/attachPid/remove 才接得上）
     expect(schedulerDeps().registry).toBe(registryMock)
     // 顺序：对账在 scheduler 装配、IPC 注册与定时器之前
@@ -506,7 +498,6 @@ describe('主进程入口装配', () => {
     expect(storeMock.ensureProjection).not.toHaveBeenCalled()
     expect(importLegacyMock).not.toHaveBeenCalled()
     expect(RepositoryMock).not.toHaveBeenCalled()
-    expect(ChatServiceMock).not.toHaveBeenCalled()
     expect(createProcessRegistryMock).not.toHaveBeenCalled()
     expect(reconcileMock).not.toHaveBeenCalled()
     expect(killPidTreeMock).not.toHaveBeenCalled()
@@ -591,13 +582,20 @@ describe('主进程入口装配', () => {
     expect(windows).toHaveLength(1)
   })
 
-  it('聊天流事件广播到所有窗口的 webContents', async () => {
+  it('聊天流事件经 scheduler 旁路广播到所有窗口的 webContents', async () => {
     await loadEntry()
 
-    const ctorArg = ChatServiceMock.mock.calls[0][0] as {
-      emit: (event: { conversationId: string; type: 'end' }) => void
-    }
-    ctorArg.emit({ conversationId: 'c1', type: 'end' })
+    const deps = schedulerDeps()
+    expect(deps.onChatStream).toBeTypeOf('function')
+    expect(deps.onChatStreamEnd).toBeTypeOf('function')
+    ;(() => deps.onChatStream?.('c1', { seq: 1, type: 'text', text: '你好' }))()
+    ;(() => deps.onChatStreamEnd?.('c1'))()
+
+    expect(windows[0].webContents.send).toHaveBeenCalledWith(AI_WORKFLOW_CHAT, {
+      conversationId: 'c1',
+      type: 'event',
+      event: { seq: 1, type: 'text', text: '你好' },
+    })
     expect(windows[0].webContents.send).toHaveBeenCalledWith(AI_WORKFLOW_CHAT, {
       conversationId: 'c1',
       type: 'end',

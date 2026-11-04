@@ -109,7 +109,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'conversations',
   ],
   'run.frames': ['runs'],
-  'run.host_settled': ['runs'],
+  'run.host_settled': ['runs', 'conversations'],
   'run.cancel': ['runs'],
   'clock.tick': ['runs'],
   'conversation.create': ['agents'],

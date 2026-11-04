@@ -42,6 +42,11 @@ export interface Turn {
   effort?: string | null
   /** 上一轮的协议会话 id；首轮为 null */
   resumeSessionId?: string | null
+  /**
+   * 续接被拒后的重试提示词（聊天续接轮专用）：带完整历史的那一份。
+   * 续接轮 `prompt` 只含新消息；协议会话失效时执行器用它重发一次（旧 ChatService 同口径）。
+   */
+  fallbackPrompt?: string | null
   /** 单轮超时（宿主按 `runTimeoutMs` 传入） */
   timeoutMs: number
   /** 资料文件路径（不是指令，执行器只读） */

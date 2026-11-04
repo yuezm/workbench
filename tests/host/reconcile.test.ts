@@ -120,7 +120,10 @@ interface Harness {
   killedPids: number[]
 }
 
-function runReconcile(killPid: (pid: number) => boolean = () => true): Harness {
+function runReconcile(
+  killPid: (pid: number) => boolean = () => true,
+  staleChatRuns?: () => Array<{ id: string; leaseId: string | null; turn: number }>,
+): Harness {
   const events: string[] = []
   const killedPids: number[] = []
   const summary = reconcile({
@@ -130,6 +133,7 @@ function runReconcile(killPid: (pid: number) => boolean = () => true): Harness {
       return world.store.dispatch(input)
     },
     runStatus,
+    staleChatRuns,
     killPid: (pid) => {
       events.push('kill:' + pid)
       killedPids.push(pid)
@@ -151,7 +155,7 @@ describe('reconcile：先杀后记账', () => {
     // 顺序：kill → clear → tick（清表没有独立事件，用 registry 已空 + tick 在 kill 之后断言）
     expect(events).toEqual(['kill:123', 'dispatch:clock.tick'])
     expect(killedPids).toEqual([123])
-    expect(summary).toEqual({ killed: 1, cleared: 1, facts: 1 })
+    expect(summary).toEqual({ killed: 1, cleared: 1, settledChats: 0, facts: 1 })
     expect(registryPids()).toEqual([])
 
     // 超租约回收：attempts+1 后回 queued（未达 maxAttempts），并写入退避时刻
@@ -171,7 +175,7 @@ describe('reconcile：先杀后记账', () => {
     const { summary, events } = runReconcile()
 
     expect(events).toEqual(['kill:555', 'dispatch:clock.tick'])
-    expect(summary).toEqual({ killed: 1, cleared: 1, facts: 1 })
+    expect(summary).toEqual({ killed: 1, cleared: 1, settledChats: 0, facts: 1 })
     expect(runRow(runId)).toMatchObject({ status: 'failed', error_code: 'timeout' })
   })
 
@@ -210,7 +214,7 @@ describe('reconcile：只处理孤儿，不误杀', () => {
     const { summary, killedPids, events } = runReconcile()
 
     expect(killedPids).toEqual([])
-    expect(summary).toEqual({ killed: 0, cleared: 1, facts: 0 })
+    expect(summary).toEqual({ killed: 0, cleared: 1, settledChats: 0, facts: 0 })
     expect(events).toEqual(['dispatch:clock.tick'])
     expect(registryPids()).toEqual([])
     expect(runStatus(runId)).toBe('succeeded')
@@ -222,7 +226,7 @@ describe('reconcile：只处理孤儿，不误杀', () => {
     const { summary, killedPids } = runReconcile()
 
     expect(killedPids).toEqual([])
-    expect(summary).toEqual({ killed: 0, cleared: 1, facts: 0 })
+    expect(summary).toEqual({ killed: 0, cleared: 1, settledChats: 0, facts: 0 })
     expect(registryPids()).toEqual([])
   })
 
@@ -235,7 +239,7 @@ describe('reconcile：只处理孤儿，不误杀', () => {
     const { killedPids, summary } = runReconcile()
 
     expect(killedPids).toEqual([11])
-    expect(summary).toEqual({ killed: 1, cleared: 2, facts: 1 })
+    expect(summary).toEqual({ killed: 1, cleared: 2, settledChats: 0, facts: 1 })
     expect(registryPids()).toEqual([])
   })
 
@@ -248,7 +252,7 @@ describe('reconcile：只处理孤儿，不误杀', () => {
     const { summary, killedPids } = runReconcile()
 
     expect(killedPids).toEqual([33])
-    expect(summary).toEqual({ killed: 1, cleared: 1, facts: 0 })
+    expect(summary).toEqual({ killed: 1, cleared: 1, settledChats: 0, facts: 0 })
     expect(runStatus(runId)).toBe('waiting')
   })
 })
@@ -261,7 +265,7 @@ describe('reconcile：无残留', () => {
     const { summary, events, killedPids } = runReconcile()
 
     expect(events).toEqual(['dispatch:clock.tick'])
-    expect(summary).toEqual({ killed: 0, cleared: 0, facts: 0 })
+    expect(summary).toEqual({ killed: 0, cleared: 0, settledChats: 0, facts: 0 })
     expect(killedPids).toEqual([])
     expect(runStatus(runId)).toBe('running')
     expect(registryPids()).toEqual([])
@@ -275,7 +279,84 @@ describe('reconcile：无残留', () => {
     const { summary, killedPids } = runReconcile()
 
     expect(killedPids).toEqual([])
-    expect(summary).toEqual({ killed: 0, cleared: 1, facts: 1 })
+    expect(summary).toEqual({ killed: 0, cleared: 1, settledChats: 0, facts: 1 })
     expect(registryPids()).toEqual([])
+  })
+})
+
+describe('reconcile：中断的聊天轮次（T14b）', () => {
+  /** 建运行时 + 智能体 + 对话，发一条消息得到 queued 的聊天 run，再领取成 running。 */
+  function claimChatRun(): {
+    conversationId: string
+    runId: string
+    leaseId: string
+    turn: number
+  } {
+    const runtimeFacts = world.store.dispatch({
+      type: 'runtime.create',
+      commandId: nextCommandId(),
+      input: { name: 'rt-chat', maxConcurrent: 1 },
+    }).facts
+    const runtimeId = (
+      runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as {
+        runtime: { id: string }
+      }
+    ).runtime.id
+    const agentFacts = world.store.dispatch({
+      type: 'agent.create',
+      commandId: nextCommandId(),
+      input: { name: 'coder', runtimeId, systemPrompt: 'sys' },
+    }).facts
+    const agentId = (
+      agentFacts.find((fact) => fact.type === 'agent.created')?.payload as {
+        agent: { id: string }
+      }
+    ).agent.id
+
+    const convFacts = world.store.dispatch({
+      type: 'conversation.create',
+      agentId,
+    }).facts
+    const conversationId = (
+      convFacts.find((fact) => fact.type === 'conversation.created')?.payload as {
+        conversation: { id: string }
+      }
+    ).conversation.id
+    world.store.dispatch({ type: 'conversation.send', conversationId, content: '你好' })
+    world.store.dispatch({ type: 'run.claim', runtimeId, capacity: 1 })
+
+    const run = world.db
+      .prepare('SELECT id, lease_id, turn FROM runs WHERE conversation_id = ?')
+      .get(conversationId) as unknown as { id: string; lease_id: string; turn: number }
+    return { conversationId, runId: run.id, leaseId: run.lease_id, turn: run.turn }
+  }
+
+  it('running 的聊天 run 落 failed/executor_lost，内核补一条错误 assistant 消息', () => {
+    const chat = claimChatRun()
+    expect(runStatus(chat.runId)).toBe('running')
+
+    const { summary, events } = runReconcile(
+      () => true,
+      () => [{ id: chat.runId, leaseId: chat.leaseId, turn: chat.turn }],
+    )
+
+    expect(summary.settledChats).toBe(1)
+    expect(events).toEqual(['dispatch:run.host_settled', 'dispatch:clock.tick'])
+    expect(runRow(chat.runId)).toMatchObject({ status: 'failed', error_code: 'executor_lost' })
+
+    const messages = world.db
+      .prepare(
+        'SELECT role, content, error FROM messages WHERE conversation_id = ? ORDER BY created_at, rowid',
+      )
+      .all(chat.conversationId)
+    expect(messages).toEqual([
+      { role: 'user', content: '你好', error: null },
+      { role: 'assistant', content: '', error: '应用中断，本轮已结束' },
+    ])
+  })
+
+  it('没有中断聊天时 settledChats 为 0（阶段 run 仍走 clock.tick 回收）', () => {
+    const { summary } = runReconcile()
+    expect(summary.settledChats).toBe(0)
   })
 })

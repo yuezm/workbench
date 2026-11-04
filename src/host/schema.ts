@@ -5,8 +5,8 @@
  * 九张投影表（实体五表 + runs / run_events / conversations / messages）全部可由事实重建：
  * 实体五表的列名与约束保持 v2 原样；运行/聊天四表在 M2 变为投影（runs 补调度列、
  * `status` 加 `waiting`、`task_id` 可空；聊天投影从 `chat_*` 改名为 `conversations` / `messages`）。
- * 过渡期额外保留 legacy `chat_conversations` / `chat_messages`（T14 前旧聊天写路径仍是唯一真相，
- * 它们不进投影白名单/指纹，T14 一次性删除）。
+ * 过渡期 legacy `chat_conversations` / `chat_messages` 已由 T14b 迁成 `snapshot.imported`
+ * 事实并删除（`host/store/import` 读旧表 → 写导入根 → 删表），这里不再创建它们。
  * `facts` 只追加，`projection_meta` 记录投影指纹与已折叠的 seq。
  */
 import { createHash } from 'node:crypto'
@@ -174,33 +174,6 @@ CREATE TABLE IF NOT EXISTS ${name} (
   created_at TEXT NOT NULL
 );`
 
-/**
- * 过渡期 legacy 聊天表（**不进投影白名单 / 指纹**）。
- *
- * T3 已把聊天投影改名为 `conversations` / `messages`；但 T14 之前旧 ChatService
- * 仍以这两张表为唯一真相源，因此新旧并存、只由旧写路径写入旧表。
- * T14「聊天并入 `purpose='chat'`」时连同旧写路径一次性删除本段 DDL 与数据。
- */
-const legacyChatConversationsTable = (name = 'chat_conversations'): string => `
-CREATE TABLE IF NOT EXISTS ${name} (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL DEFAULT '',
-  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
-  session_id TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);`
-
-const legacyChatMessagesTable = (name = 'chat_messages'): string => `
-CREATE TABLE IF NOT EXISTS ${name} (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK (role IN ('user','assistant')),
-  content TEXT NOT NULL DEFAULT '',
-  error TEXT,
-  created_at TEXT NOT NULL
-);`
-
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, position);
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
@@ -210,11 +183,9 @@ CREATE INDEX IF NOT EXISTS idx_runs_runtime_status ON runs(runtime_id, status);
 CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_chat_conversations_updated ON chat_conversations(updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, created_at);
 `
 
-/** v2 全量 schema（新建库；含两张 T14 前过渡期 legacy 聊天表） */
+/** v2 全量 schema（新建库；九张投影表 + 索引） */
 export const SCHEMA_SQL = [
   runtimesTable(),
   agentsTable(),
@@ -225,14 +196,12 @@ export const SCHEMA_SQL = [
   runEventsTable(),
   conversationsTable(),
   messagesTable(),
-  legacyChatConversationsTable(),
-  legacyChatMessagesTable(),
   INDEX_SQL,
 ].join('\n')
 
 /**
  * 宿主私有进程登记表 DDL：与 `FACTS_SQL` 一样单独执行（不进业务表清单，
- * 也就不在 `SCHEMA_SQL` 的「九张投影 + 两张 legacy」断言范围内）。
+ * 也就不在 `SCHEMA_SQL` 的「九张投影表」断言范围内）。
  */
 export const PROCESS_REGISTRY_SQL = processRegistryTable()
 

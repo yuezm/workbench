@@ -266,7 +266,7 @@ describe('protocol/inputs', () => {
       'title必须是字符串',
     )
     expect(rejected(host('conversation.send', { content: 'x' }))).toBe('conversationId必填')
-    expect(rejected(host('conversation.send', { conversationId: 'cv-1' }))).toBe('content必填')
+    expect(rejected(host('conversation.send', { conversationId: 'cv-1' }))).toBe('消息内容不能为空')
     expect(
       rejected(host('conversation.send', { conversationId: 'cv-1', content: longText(20_001) })),
     ).toBe('content最长 20000 个字符')

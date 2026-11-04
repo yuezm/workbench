@@ -539,8 +539,9 @@ describe('importLegacyIfNeeded', () => {
     const facts = allFacts(db)
     expect(facts.map((fact) => fact.seq)).toEqual([1, 2, 3, 4, 5, 6, 7])
     expect(facts.map((fact) => fact.type)).toEqual(Array(7).fill('snapshot.imported'))
+    // 聊天两表在这个夹具里没有旧行：空表不产导入根（只写有行的表）
     expect(facts.map((fact) => (fact.payload as { table: string }).table)).toEqual([
-      ...IMPORT_ORDER,
+      ...IMPORT_ORDER.filter((table) => table !== 'conversations' && table !== 'messages'),
     ])
     expect(facts.every((fact) => fact.cause === undefined)).toBe(true)
     expect(
@@ -958,3 +959,134 @@ describe('importLegacyIfNeeded：M2 升级补迁移（facts 非空）', () => {
 function lastFactSeq(db: DatabaseSync): number {
   return allFacts(db).at(-1)?.seq ?? 0
 }
+
+// ---------- T14b：旧聊天表迁移（chat_conversations / chat_messages → 导入根 → 删表） ----------
+
+/** 按 T14b 之前的旧 DDL 建聊天两表并插一行对话 + 两条消息（schema 已不再创建它们）。 */
+function seedLegacyChat(db: DatabaseSync): { conversationId: string; messageIds: string[] } {
+  db.exec(`
+    CREATE TABLE chat_conversations (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL DEFAULT '',
+      agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+      session_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE chat_messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user','assistant')),
+      content TEXT NOT NULL DEFAULT '',
+      error TEXT,
+      created_at TEXT NOT NULL
+    );
+  `)
+  db.prepare(
+    `INSERT INTO chat_conversations (id,title,agent_id,session_id,created_at,updated_at)
+     VALUES (?,?,?,?,?,?)`,
+  ).run('cv-legacy', '旧对话', 'ag-1', 'sess-legacy', seedAt(10), seedAt(11))
+  const insertMessage = db.prepare(
+    `INSERT INTO chat_messages (id,conversation_id,role,content,error,created_at)
+     VALUES (?,?,?,?,?,?)`,
+  )
+  insertMessage.run('msg-1', 'cv-legacy', 'user', '你好', null, seedAt(12))
+  insertMessage.run('msg-2', 'cv-legacy', 'assistant', '在', '旧错误', seedAt(13))
+  return { conversationId: 'cv-legacy', messageIds: ['msg-1', 'msg-2'] }
+}
+
+/** 旧聊天两表是否还在（迁移成功后应该被删除）。 */
+function legacyChatTables(db: DatabaseSync): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT name FROM sqlite_master
+         WHERE type = 'table' AND name IN ('chat_conversations','chat_messages') ORDER BY name`,
+      )
+      .all() as unknown as Array<{ name: string }>
+  ).map((row) => row.name)
+}
+
+describe('importLegacyIfNeeded：旧聊天表迁移（T14b）', () => {
+  it('首次迁移：聊天两表写成导入根、落投影，并删除旧表', () => {
+    const db = memory()
+    seedEntities(db)
+    const seeded = seedLegacyChat(db)
+
+    const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+
+    expect(result.counts.conversations).toBe(1)
+    expect(result.counts.messages).toBe(2)
+    const tables = allFacts(db).map((fact) => (fact.payload as { table: string }).table)
+    expect(tables).toContain('conversations')
+    expect(tables).toContain('messages')
+
+    const projection = dumpProjection(db)
+    // dumpProjection 是投影表的原始行（列名为 snake_case）
+    expect(projection.conversations).toEqual([
+      {
+        id: seeded.conversationId,
+        title: '旧对话',
+        agent_id: 'ag-1',
+        session_id: 'sess-legacy',
+        created_at: seedAt(10),
+        updated_at: seedAt(11),
+      },
+    ])
+    expect(projection.messages).toEqual([
+      {
+        id: 'msg-1',
+        conversation_id: 'cv-legacy',
+        role: 'user',
+        content: '你好',
+        error: null,
+        created_at: seedAt(12),
+      },
+      {
+        id: 'msg-2',
+        conversation_id: 'cv-legacy',
+        role: 'assistant',
+        content: '在',
+        error: '旧错误',
+        created_at: seedAt(13),
+      },
+    ])
+    // 数据已成事实根：旧表删除，再导一次 no-op
+    expect(legacyChatTables(db)).toEqual([])
+    expect(importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT }).imported).toBe(false)
+  })
+
+  it('M1 存量补迁移：facts 非空时补聊天导入根，ensureProjection 重建后可查', () => {
+    const db = memory()
+    seedEntities(db)
+    importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+    seedLegacyChat(db)
+
+    const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+
+    expect(result.imported).toBe(true)
+    expect(result.counts).toMatchObject({ conversations: 1, messages: 2 })
+    expect(legacyChatTables(db)).toEqual([])
+    // 补迁移不落投影：随后的 ensureProjection 按新事实重建
+    expect(ensureProjection(db, realKernel)).toEqual({ rebuilt: true })
+    const projection = dumpProjection(db)
+    expect(projection.conversations).toHaveLength(1)
+    expect(projection.messages).toHaveLength(2)
+    // 再导一次幂等
+    expect(importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT }).imported).toBe(false)
+  })
+
+  it('旧聊天表不存在：跳过、不产事实、不抛错', () => {
+    const db = memory()
+    seedEntities(db)
+
+    const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+
+    expect(result.counts.conversations).toBe(0)
+    expect(result.counts.messages).toBe(0)
+    const tables = allFacts(db).map((fact) => (fact.payload as { table: string }).table)
+    expect(tables).not.toContain('conversations')
+    expect(tables).not.toContain('messages')
+    expect(legacyChatTables(db)).toEqual([])
+  })
+})

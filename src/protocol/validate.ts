@@ -95,6 +95,13 @@ const required = (value: unknown, label: string, max: number): Check => {
   return text(value, label, max)
 }
 
+/** 聊天内容：空内容沿用旧 ChatService 的文案「消息内容不能为空」（UI 直接展示）。 */
+const chatContent = (value: unknown): Check => {
+  if (typeof value !== 'string' || value.trim() === '') return '消息内容不能为空'
+  if (value.length > COMMAND_LIMITS.content) return `content最长 ${COMMAND_LIMITS.content} 个字符`
+  return null
+}
+
 const requiredId = (value: unknown, label: string): Check =>
   required(value, label, COMMAND_LIMITS.id)
 
@@ -476,10 +483,7 @@ const checkHostPayload = (type: HostInputName, input: Obj): Check => {
         optionalText(input.title, 'title', COMMAND_LIMITS.title)
       )
     case 'conversation.send':
-      return (
-        requiredId(input.conversationId, 'conversationId') ??
-        required(input.content, 'content', COMMAND_LIMITS.content)
-      )
+      return requiredId(input.conversationId, 'conversationId') ?? chatContent(input.content)
     case 'conversation.rename':
       return (
         requiredId(input.conversationId, 'conversationId') ??

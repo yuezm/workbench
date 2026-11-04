@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { ipcMain } from 'electron'
 import type {
   AgentInput,
+  ChatConversation,
   Runtime,
   RuntimeInput,
   RuntimeProbe,
@@ -12,7 +13,6 @@ import type {
 } from '../../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../shared/ai-workflow-api'
 import type { Store } from '../../host/store/index'
-import type { ChatService } from './chat'
 import { agentById, createdId, runtimeById, taskById, workflowById } from './projection-lookup'
 import type { Repository } from './repository'
 import { detectInstalledRuntimes } from './runtime/detect'
@@ -29,17 +29,12 @@ export interface AiWorkflowIpcDeps {
    * 任务进入阶段的 `run.queued` 由内核产出，这里不再补写任何执行记录。
    */
   dispatch: Store['dispatch']
-  /** 运行侧写路径已收口到事实，这里只保留聊天（T14 前仍是旧表）的读写 */
+  /** 运行侧只读入口：
+uns.listByTask / 
+uns.events 等历史查询（T16 收口到投影后删除） */
   repo: Repository
-  /** 聊天执行服务；缺省时 chat.* 明确报错，避免静默无输出 */
-  chat?: ChatService
   /** 协议后端（装配时注入；测试用假实现） */
   backendFor: (family: RuntimeProtocolFamily) => RuntimeBackend
-  /**
-   * 聊天写路径的变更通知：T14 前聊天仍直写旧表（不经事实），需要显式通知 UI；
-   * 其余写操作由 effects.dispatch 统一通知。
-   */
-  notifyChanged?: () => void
   /** 命令幂等键生成器（默认随机 UUID；测试可注入确定性值） */
   newCommandId?: () => string
 }
@@ -56,28 +51,31 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
   const { repo, store, dispatch, backendFor } = deps
   const nextCommandId = deps.newCommandId ?? (() => randomUUID())
 
-  const notify = (): void => deps.notifyChanged?.()
-
   /**
-   * 删除前先取消执行中的 run（T15）：先 `run.cancel`（内核记 `cancel_requested`，
-   * 宿主按「abort → 宽限 → 强杀 → 兜底终态」收尾），再删任务/工作流——否则投影里
-   * run 直接消失，执行器进程会成为孤儿，看板也会残留「执行中」。
+   * 取消一批执行中的 run（T15/T14b）：`run.cancel` 由内核记 `cancel_requested`，
+   * 宿主按「abort → 宽限 → 强杀 → 兜底终态」收尾。删除/取消入口都先走它，
+   * 避免投影删掉 run 后执行器进程成为孤儿。
    */
-  const cancelRunsOf = (taskIds: readonly string[]): void => {
-    for (const taskId of taskIds) {
-      for (const run of store.query('runs.active-by-task', { taskId })) {
-        try {
-          dispatch({ type: 'run.cancel', runId: run.id })
-        } catch {
-          // run 在查询与取消之间刚好结束：删除本身不因此失败（内核拒绝已终态的取消）
-        }
+  const cancelActiveRuns = (runs: ReadonlyArray<{ id: string }>): void => {
+    for (const run of runs) {
+      try {
+        dispatch({ type: 'run.cancel', runId: run.id })
+      } catch {
+        // run 在查询与取消之间刚好结束：删除/取消本身不因此失败（内核拒绝已终态的取消）
       }
     }
   }
 
-  const chat = (): ChatService => {
-    if (!deps.chat) throw new Error('聊天服务未就绪')
-    return deps.chat
+  /** 任务（可多个）上的活跃 run：删除任务/工作流前调用 */
+  const cancelRunsOf = (taskIds: readonly string[]): void => {
+    for (const taskId of taskIds) {
+      cancelActiveRuns(store.query('runs.active-by-task', { taskId }))
+    }
+  }
+
+  /** 对话上的活跃聊天 run：删除对话 / 中止本轮前调用 */
+  const cancelChatRunsOf = (conversationId: string): void => {
+    cancelActiveRuns(store.query('runs.active-by-conversation', { conversationId }))
   }
 
   /** 探测并把结论入账（探测错误不抛：落库成 unavailable 行） */
@@ -241,24 +239,35 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     'runs.listByTask': (a) => repo.runsListByTask(a[0] as string),
     'runs.events': (a) => repo.runEventsList(a[0] as string),
 
-    'chat.listConversations': () => repo.chatConversationsList(),
+    // 聊天全部走事实：读走投影视图，写走 dispatch（effects 统一通知 UI）
+    'chat.listConversations': () => store.query('conversations.all'),
     'chat.createConversation': (a) => {
-      const conversation = repo.chatConversationCreate(a[0] as string)
-      notify()
-      return conversation
+      const facts = dispatch({ type: 'conversation.create', agentId: a[0] as string }).facts
+      const fact = facts.find((item) => item.type === 'conversation.created')
+      if (!fact) throw new Error('缺少事实: conversation.created')
+      return (fact.payload as { conversation: ChatConversation }).conversation
     },
+    // 删除前先取消该对话进行中的一轮，再删对话（消息由 project 级联删除）
     'chat.removeConversation': (a) => {
-      repo.chatConversationRemove(a[0] as string)
-      notify()
+      const conversationId = a[0] as string
+      cancelChatRunsOf(conversationId)
+      dispatch({ type: 'conversation.remove', conversationId })
     },
-    'chat.listMessages': (a) => repo.chatMessagesList(a[0] as string),
-    // 发起一轮：用户消息已落库后返回，输出走 AI_WORKFLOW_CHAT 流事件（T14 前仍是旧路径）
+    'chat.listMessages': (a) =>
+      store.query('messages.byConversation', { conversationId: a[0] as string }),
+    // 发起一轮：内核校验内容/并发/运行时，reject（含 code）原样抛给 renderer；
+    // 输出经 scheduler 的 AI_WORKFLOW_CHAT 旁路推送（事实仍是数据源）
     'chat.send': (a) => {
-      const sending = chat().send(a[0] as string, a[1] as string)
-      notify()
-      return sending
+      dispatch({
+        type: 'conversation.send',
+        conversationId: a[0] as string,
+        content: a[1] as string,
+      })
     },
-    'chat.cancel': (a) => chat().cancel(a[0] as string),
+    // 中止该对话进行中的一轮：查活跃聊天 run 后逐条取消（无活跃 run 时无害）
+    'chat.cancel': (a) => {
+      cancelChatRunsOf(a[0] as string)
+    },
   }
 
   return (method, args) => {

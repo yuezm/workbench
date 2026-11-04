@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { decide } from '../kernel/decide'
+import { chatPrompt } from '../kernel/prompt'
 import { nextWakeAt } from '../kernel/next-wake'
 import { project } from '../kernel/project'
 import { viewSpec } from '../kernel/view-spec'
@@ -19,10 +20,9 @@ import { createTray } from './tray'
 import { openDb } from './ai-workflow/db'
 import { Repository } from './ai-workflow/repository'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
-import { ChatService } from './ai-workflow/chat'
 import { createRuntimeExecutors } from './ai-workflow/executor-port'
 import { createRuntimeBackend, type RuntimeBackend } from './ai-workflow/runtime/registry'
-import type { RuntimeProtocolFamily } from '../shared/ai-workflow-api'
+import type { ChatStreamEvent, RuntimeProtocolFamily } from '../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
 
 let quitting = false
@@ -113,6 +113,8 @@ if (app.requestSingleInstanceLock()) {
     const registry = createProcessRegistry(db)
     const reconciled = reconcile({
       registry,
+      // 崩溃时正在跑的聊天轮次：落 failed/executor_lost，内核补一条错误 assistant 消息
+      staleChatRuns: () => aiRepo.staleChatRuns(),
       dispatch: (input) => store.dispatch(input),
       // 投影里的 run 状态；run 已随任务/工作流删除时视为缺失（只清登记行）
       runStatus: (runId) => {
@@ -125,7 +127,7 @@ if (app.requestSingleInstanceLock()) {
       killPid: killPidTree,
     })
     // 摘要只用于诊断：残留进程与回收数量非零时留一条 warn（不建 UI 通道）
-    if (reconciled.killed > 0 || reconciled.facts > 0) {
+    if (reconciled.killed > 0 || reconciled.facts > 0 || reconciled.settledChats > 0) {
       console.warn(
         `[reconcile] 终止残留进程 ${reconciled.killed} 个、清理登记 ${reconciled.cleared} 行、回收事实 ${reconciled.facts} 条`,
       )
@@ -137,6 +139,16 @@ if (app.requestSingleInstanceLock()) {
       scheduler: () => scheduler,
       notifyChanged: broadcastChanged,
     })
+    /** 聊天流旁路：窗口已销毁时丢弃本次推送（不打断执行，事实才是数据源）。 */
+    const sendChatStream = (event: ChatStreamEvent): void => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        try {
+          w.webContents.send(AI_WORKFLOW_CHAT, event)
+        } catch {
+          // 窗口/渲染进程已失效：旁路只是实时显示，终态由事实补齐
+        }
+      }
+    }
     const scheduler: Scheduler = createScheduler({
       dispatch: (input) => effects.dispatch(input),
       runtimes: () => store.query('runtimes.all'),
@@ -145,21 +157,26 @@ if (app.requestSingleInstanceLock()) {
       // 重启后重跑同一 run 时帧 seq 继续全局单调（T12 会把这里换成投影内的最大 seq）
       lastFrameSeq: (runId) => aiRepo.runEventsList(runId).at(-1)?.seq ?? 0,
       registry,
+      // 聊天 run 的帧实时旁路（AI_WORKFLOW_CHAT）：渲染端显示，入账仍走 run.frames
+      onChatStream: (conversationId, event) =>
+        sendChatStream({ conversationId, type: 'event', event }),
+      onChatStreamEnd: (conversationId) => sendChatStream({ conversationId, type: 'end' }),
+      // 续接被拒重试用完整历史 prompt（续接轮只发新消息，回退必须带上整段对话）
+      chatFallbackPrompt: (run) => {
+        if (run.purpose !== 'chat' || run.conversationId === null) return null
+        const agent = store.query('agents.all').find((item) => item.id === run.agentId)
+        const messages = store.query('messages.byConversation', {
+          conversationId: run.conversationId,
+        })
+        return agent && messages.length > 0 ? chatPrompt(agent, messages) : null
+      },
     })
     // 退出流程据此取消活跃 run（before-quit 在模块作用域，拿不到这里的局部变量）
     activeScheduler = scheduler
-    const chat = new ChatService({
-      repo: aiRepo,
-      backendFor,
-      emit: (event) => {
-        for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHAT, event)
-      },
-    })
     registerAiWorkflowIpc({
       store,
       dispatch: (input) => effects.dispatch(input),
       repo: aiRepo,
-      chat,
       backendFor,
     })
     // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，

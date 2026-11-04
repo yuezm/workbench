@@ -90,6 +90,18 @@ export interface SchedulerDeps {
   now?: () => Iso
   /** 进程树终止（取消宽限到期强杀用）；默认 `killPidTree`，测试可注入假实现 */
   killPid?: (pid: number) => boolean
+  /**
+   * 聊天 run 的实时帧旁路（AI_WORKFLOW_CHAT 的 `event`）：执行器 `io.emit` 的帧在入账前
+   * 原样转给 renderer 实时显示；只对 `purpose='chat'` 的 run 触发。
+   */
+  onChatStream?: (conversationId: string, event: RunEvent) => void
+  /** 聊天 run 一轮结束（AI_WORKFLOW_CHAT 的 `end`）：终态事实写完后发一次 */
+  onChatStreamEnd?: (conversationId: string) => void
+  /**
+   * 聊天续接轮的「完整历史 prompt」：协议会话失效重试时用（`Turn.fallbackPrompt`）。
+   * 装配根按投影里的智能体 + 对话消息拼；缺省不提供（重试退回当前 prompt）。
+   */
+  chatFallbackPrompt?: (run: RunRow) => string | null
 }
 
 export interface Scheduler {
@@ -168,6 +180,22 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const killPid = deps.killPid ?? killPidTree
   const cancelGraceMs = limits.cancelGraceMs ?? 3_000
   const killAfterMs = limits.killAfterMs ?? 2_000
+
+  /** 聊天旁路：订阅端（窗口）已销毁时丢弃本次推送，不影响执行与落库。 */
+  const emitChat = (conversationId: string, event: RunEvent): void => {
+    try {
+      deps.onChatStream?.(conversationId, event)
+    } catch {
+      // 订阅端异常不能打断执行：旁路只是显示，事实才是数据源
+    }
+  }
+  const emitChatEnd = (conversationId: string): void => {
+    try {
+      deps.onChatStreamEnd?.(conversationId)
+    } catch {
+      // 同上：结束通知失败不影响终态
+    }
+  }
   /** 执行中的 run → 取消信号。 */
   const controllers = new Map<Id, AbortController>()
   /** 每个 run 已分配到的最大帧 seq（跨 batch / 跨轮持续递增）。 */
@@ -252,6 +280,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     model: modelOf(runtime),
     effort: runtime.reasoningEffort,
     resumeSessionId: run.resumeSessionId,
+    // 聊天续接轮的重试提示词（完整历史）：协议会话失效时执行器用它重发一次
+    fallbackPrompt: run.purpose === 'chat' ? (deps.chatFallbackPrompt?.(run) ?? null) : null,
     timeoutMs: limits.runTimeoutMs,
     contextFile: run.promptRef,
     signal,
@@ -298,6 +328,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       emit: (event) => {
         // 终态后执行器即便再回调也不写帧：事实只追加，不补历史（D6）。
         if (framesClosed) return
+        // 聊天 run：帧在入账前先走旁路（AI_WORKFLOW_CHAT），renderer 实时显示
+        if (run.purpose === 'chat' && run.conversationId !== null) {
+          emitChat(run.conversationId, event)
+        }
         frames.push(event)
         // 缓冲达到单批上限：立刻 flush，不等到时间窗（D7 分包由 flushFrames 负责）。
         if (frames.length >= limits.maxFramesPerBatch) {
@@ -341,6 +375,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       // 顺序反了会让 idle() 在下一轮启动前就提前返回。
       wake()
       releaseIdle()
+      // 聊天 run：终态事实已写完，通知 renderer 本轮结束（一轮只发一次；对话已删也发）
+      if (run.purpose === 'chat' && run.conversationId !== null) emitChatEnd(run.conversationId)
     }
 
     /** 宽限与强杀都到期仍无回执：宿主写兜底终态（帧先入账，不丢已产生的输出）。 */

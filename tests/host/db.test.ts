@@ -146,12 +146,10 @@ function userVersion(d: DatabaseSync): number {
 }
 
 describe('openDatabase', () => {
-  it(':memory: 建全 schema（九张投影 + 两张过渡期 legacy 聊天表 + facts / projection_meta）并写 user_version', () => {
+  it(':memory: 建全 schema（九张投影 + facts / projection_meta + 宿主私有 process_registry）并写 user_version', () => {
     db = openDatabase(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
-      'chat_conversations',
-      'chat_messages',
       'conversations',
       'facts',
       'messages',
@@ -211,8 +209,6 @@ describe('openDatabase', () => {
     try {
       expect(tableNames(local)).toEqual([
         'agents',
-        'chat_conversations',
-        'chat_messages',
         'conversations',
         'facts',
         'messages',

@@ -68,6 +68,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'conversations',
       ]
     case 'run.host_settled':
+      // 兜底终态；聊天 run 还要补一条 assistant 消息（读对话判断是否已删）
+      return ['runs', 'conversations']
     case 'run.cancel':
       return ['runs']
     case 'clock.tick':

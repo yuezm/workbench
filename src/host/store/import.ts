@@ -31,7 +31,10 @@
 import type { DatabaseSync } from 'node:sqlite'
 import type {
   Agent,
+  ChatRole,
+  Conversation,
   EntryMode,
+  Message,
   PermissionMode,
   RunErrorCode,
   RunEventRow,
@@ -81,9 +84,11 @@ export const IMPORT_ORDER = [
   'tasks',
   'runs',
   'run_events',
+  'conversations',
+  'messages',
 ] as const
 
-/** 可迁移的表（导入根 payload 的判别键子集；聊天两表留到 T14）。 */
+/** 可迁移的表（导入根 payload 的判别键子集；聊天两表在 T14b 迁入事实后删除旧表）。 */
 export type ImportTable = (typeof IMPORT_ORDER)[number]
 
 export interface ImportLegacyOptions {
@@ -184,6 +189,24 @@ interface LegacyRunEventRow {
   payload_json: string
 }
 
+interface LegacyChatConversationRow {
+  id: string
+  title: string
+  agent_id: string
+  session_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface LegacyChatMessageRow {
+  id: string
+  conversation_id: string
+  role: string
+  content: string
+  error: string | null
+  created_at: string
+}
+
 interface LegacyRows {
   runtimes: Runtime[]
   agents: Agent[]
@@ -192,6 +215,8 @@ interface LegacyRows {
   tasks: Task[]
   runs: RunRow[]
   run_events: RunEventRow[]
+  conversations: Conversation[]
+  messages: Message[]
 }
 
 /**
@@ -251,7 +276,9 @@ function toRunEventRow(row: LegacyRunEventRow): RunEventRow {
 }
 
 /** 实体五表读取：每张表逐列写死，列名变更必须在这里同步（与 `views.ts` / `projection-apply.ts` 对齐）。 */
-function readLegacyEntityRows(db: DatabaseSync): Omit<LegacyRows, 'runs' | 'run_events'> {
+function readLegacyEntityRows(
+  db: DatabaseSync,
+): Omit<LegacyRows, 'runs' | 'run_events' | 'conversations' | 'messages'> {
   const runtimes = (
     db
       .prepare(
@@ -370,7 +397,71 @@ function readLegacyRows(db: DatabaseSync): LegacyRows {
     ...readLegacyEntityRows(db),
     runs: readLegacyRunRows(db),
     run_events: readLegacyRunEventRows(db),
+    ...readLegacyChatRows(db),
   }
+}
+
+/** 旧聊天表是否存在（M2 之前的库有；新库/已清理的库没有）。 */
+export function legacyChatTablesExist(db: DatabaseSync): boolean {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM sqlite_master
+       WHERE type = 'table' AND name IN ('chat_conversations','chat_messages')`,
+    )
+    .get() as unknown as { n: number }
+  return row.n > 0
+}
+
+/**
+ * 旧聊天两表 → 投影行（T14b）：`chat_conversations` / `chat_messages` 是 M2 前
+ * 唯一真相源，迁成 `snapshot.imported` 事实根后由投影重建，旧表随后删除。
+ * 表不存在（新库 / 已迁移）返回空数组；两表列不一致时按显式列清单读，不猜列。
+ */
+function readLegacyChatRows(db: DatabaseSync): {
+  conversations: Conversation[]
+  messages: Message[]
+} {
+  if (!legacyChatTablesExist(db)) return { conversations: [], messages: [] }
+
+  const conversations = (
+    db
+      .prepare(
+        `SELECT id, title, agent_id, session_id, created_at, updated_at
+         FROM chat_conversations ORDER BY created_at, rowid`,
+      )
+      .all() as unknown as LegacyChatConversationRow[]
+  ).map((row): Conversation => ({
+    id: row.id,
+    title: row.title,
+    agentId: row.agent_id,
+    sessionId: row.session_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }))
+
+  const messages = (
+    db
+      .prepare(
+        `SELECT id, conversation_id, role, content, error, created_at
+         FROM chat_messages ORDER BY created_at, rowid`,
+      )
+      .all() as unknown as LegacyChatMessageRow[]
+  ).map((row): Message => ({
+    id: row.id,
+    conversationId: row.conversation_id,
+    role: row.role as ChatRole,
+    content: row.content,
+    error: row.error,
+    createdAt: row.created_at,
+  }))
+
+  return { conversations, messages }
+}
+
+/** 删除旧聊天两表（数据已成事实根）：先子表后父表；不存在时 no-op。 */
+function dropLegacyChatTables(db: DatabaseSync): void {
+  db.exec('DROP TABLE IF EXISTS chat_messages')
+  db.exec('DROP TABLE IF EXISTS chat_conversations')
 }
 
 const emptyCounts = (): Record<ProjectionTable, number> => ({
@@ -403,6 +494,10 @@ function buildDraft(table: ImportTable, rows: readonly ProjectionRow[], at: Iso)
         return { table, rows: rows as RunRow[], importedFrom: 'v2' }
       case 'run_events':
         return { table, rows: rows as RunEventRow[], importedFrom: 'v2' }
+      case 'conversations':
+        return { table, rows: rows as Conversation[], importedFrom: 'v2' }
+      case 'messages':
+        return { table, rows: rows as Message[], importedFrom: 'v2' }
     }
   })()
   return { type: 'snapshot.imported', actor: IMPORT_ACTOR, at, payload }
@@ -418,6 +513,23 @@ function verifyCounts(db: DatabaseSync, counts: Record<ProjectionTable, number>)
       )
     }
   }
+}
+
+/** 事实日志里是否已经有聊天历史（聊天事实或 conversations/messages 的导入根）——补迁移的跳过条件。 */
+function hasChatHistory(db: DatabaseSync): boolean {
+  const chatFact = db
+    .prepare(
+      "SELECT 1 AS hit FROM facts WHERE type IN ('conversation.created','conversation.updated','conversation.removed','message.appended') LIMIT 1",
+    )
+    .get()
+  if (chatFact !== undefined) return true
+  const roots = db
+    .prepare("SELECT payload FROM facts WHERE type = 'snapshot.imported'")
+    .all() as unknown as Array<{ payload: string }>
+  return roots.some((root) => {
+    const table = (JSON.parse(root.payload) as { table?: string }).table
+    return table === 'conversations' || table === 'messages'
+  })
 }
 
 /** 事实日志里是否已经有运行历史（运行事实或 runs/run_events 的导入根）——补迁移的跳过条件。 */
@@ -459,7 +571,11 @@ function importEmptyLedger(
 ): ImportLegacyResult {
   const legacy = readLegacyRows(db)
   const total = IMPORT_ORDER.reduce((sum, table) => sum + legacy[table].length, 0)
-  if (total === 0) return { imported: false, counts: emptyCounts() }
+  if (total === 0) {
+    // 旧聊天表可能存在但一行都没有：既然没有数据要保留，一并删掉完成清理
+    dropLegacyChatTables(db)
+    return { imported: false, counts: emptyCounts() }
+  }
 
   const at = options.at ?? new Date().toISOString()
   const counts = emptyCounts()
@@ -488,30 +604,46 @@ function importEmptyLedger(
     verifyCounts(db, counts)
     writeProjectionMeta(db, currentProjectionFormat(), lastSeq(db))
   })
+  // 旧聊天表的数据已成为导入根：删表完成 M2 清理（重建只依赖事实）
+  dropLegacyChatTables(db)
 
   return { imported: true, counts }
 }
 
 /**
- * M2 升级补迁移（`facts` 非空）：只补运行两表的事实根。
+ * M2 升级补迁移（`facts` 非空）：补运行两表与聊天两表的事实根。
  *
+ * 两条补迁移互相独立（M1 存量可能只有运行、也可能还有旧聊天数据）：
+ * 各自按「事实里没有任何历史」判断后追加导入根，随后删掉旧聊天表。
  * 不落投影、不写元信息：调用方紧随其后的 `ensureProjection` 会按新指纹重建，
  * 重建与「导入时直接落投影」走同一条 `project` 路径，所以结果等价。
  */
-function backfillRuns(db: DatabaseSync, options: ImportLegacyOptions): ImportLegacyResult {
+function backfillRuntimeData(db: DatabaseSync, options: ImportLegacyOptions): ImportLegacyResult {
   const counts = emptyCounts()
-  if (hasRunHistory(db)) return { imported: false, counts }
 
-  const runs = readLegacyRunRows(db)
-  if (runs.length === 0) return { imported: false, counts }
-  const events = readLegacyRunEventRows(db)
+  const runs = hasRunHistory(db) ? [] : readLegacyRunRows(db)
+  const chat = hasChatHistory(db) ? { conversations: [], messages: [] } : readLegacyChatRows(db)
+  if (runs.length === 0 && chat.conversations.length === 0 && chat.messages.length === 0) {
+    // 没有需要补迁的行：旧聊天表（若存在）已是空表，直接删掉完成清理
+    dropLegacyChatTables(db)
+    return { imported: false, counts }
+  }
 
   const at = options.at ?? new Date().toISOString()
   withTx(db, () => {
     db.exec('PRAGMA defer_foreign_keys = ON')
-    counts.runs = appendImportFacts(db, 'runs', runs, at)
-    counts.run_events = appendImportFacts(db, 'run_events', events, at)
+    if (runs.length > 0) {
+      counts.runs = appendImportFacts(db, 'runs', runs, at)
+      counts.run_events = appendImportFacts(db, 'run_events', readLegacyRunEventRows(db), at)
+    }
+    if (chat.conversations.length > 0) {
+      counts.conversations = appendImportFacts(db, 'conversations', chat.conversations, at)
+    }
+    if (chat.messages.length > 0) {
+      counts.messages = appendImportFacts(db, 'messages', chat.messages, at)
+    }
   })
+  dropLegacyChatTables(db)
 
   return { imported: true, counts }
 }
@@ -519,9 +651,10 @@ function backfillRuns(db: DatabaseSync, options: ImportLegacyOptions): ImportLeg
 /**
  * 需要时导入 v2 存量；幂等。
  *
- * - `facts` 为空 → 首次迁移：实体五表 + `runs` / `run_events`，同一事务落投影并写元信息。
- * - `facts` 非空 → 只补运行两表（M1 存量）：没有运行历史且 `runs` 表有行时才动作。
- *   这条路径**要求调用方随后调用 `ensureProjection()`**（启动顺序：导入 → 对账重建）。
+ * - `facts` 为空 → 首次迁移：实体五表 + 运行两表 + 聊天两表，同一事务落投影并写元信息。
+ * - `facts` 非空 → 只补运行 / 聊天两表的事实根（M1 存量）：没有对应历史时动作，
+ *   完成后删除旧聊天表。这条路径**要求调用方随后调用 `ensureProjection()`**
+ *   （启动顺序：导入 → 对账重建）。
  * - 没有可导入的行 → 不产事实、不写 `projection_meta`。
  *
  * @param db 已打开且建好 schema 的连接（`openDatabase`）
@@ -534,5 +667,5 @@ export function importLegacyIfNeeded(
   options: ImportLegacyOptions = {},
 ): ImportLegacyResult {
   if (factsCount(db) === 0) return importEmptyLedger(db, kernel, options)
-  return backfillRuns(db, options)
+  return backfillRuntimeData(db, options)
 }

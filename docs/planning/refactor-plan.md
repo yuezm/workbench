@@ -120,6 +120,13 @@
 - 回滚点：`%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db`；回滚需恢复该库并重建投影（`cards` 表为空，兼容层可再次导入）。
 - 下一步：M5 客户端插件（`AppPlugin` 契约、`kernelStore` + `subscribe`、IPC 三动词与 `commandId` 幂等）。
 
+## M5 开工记录（2026-11-05）
+
+- 分支 `refactor/m5-client`，起点 `master` @ `337667f`（M4 已 fast-forward 合入 `master`）；实施计划与任务清单见 [tasks/m5-plan.md](../../tasks/m5-plan.md)、[tasks/m5-todo.md](../../tasks/m5-todo.md)。
+- 范围口径：IPC 收敛为 `dispatch / query / subscribe` 三动词（`window.aiWorkflow` 与 `src/main/ai-workflow/ipc.ts` 删除）；`commands` 非投影表做 `commandId` 幂等（同事务按事实区间回放，reject 不缓存，编排命令由命令路由二次校验）；聊天动作从宿主输入升为 `chat.*` 命令并新增 `chat.cancel`；`app.event` 命令 + `src/shared/apps.ts` 白名单；`runtime.probe` 编排命令；新增视图 `tasks.executing` / `runtimes.statuses` / `kernel.seq` 与宿主视图 `runtimes.executors` / `runtimes.detected` / `runtimes.models`；`host/feed` 事实批次（≤500 条或 16 ms）与聊天流旁路；renderer `kernelStore`（先订阅后快照、按 seq 续传、失效重取、单订阅）+ `useKernelView` / `useKernelViewState`；`AppDefinition` 更名 `AppPlugin` 并支持 `events`；pomodoro 发 `pomodoro.completed`。
+- 评审口径（开工即定，见 m5-plan「评审口径」）：聊天命令命名 `chat.*`；宿主仅编排 `runtime.create/update/probe` 与删除前置取消；app 事件只入账不派活；`KERNEL_VERSION` 不递增（投影语义未变）；测试用假 transport / 假执行器。
+- 回滚点：沿用 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db`；M5 不改投影表与 `KERNEL_VERSION`，回滚只需切回 `master` 代码（`commands` 表可留，旧代码不读它）。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

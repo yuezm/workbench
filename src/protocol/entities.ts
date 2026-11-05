@@ -4,8 +4,8 @@
  * 以及命令/事实/视图共用的枚举常量。
  *
  * 契约层是 kernel 唯一允许依赖的模块（kernel 只 `import type`，运行期不依赖）；
- * `src/shared/ai-workflow-api.ts` 从这里 re-export 给 preload / renderer，
- * 因此字段名与仓库现有列映射必须逐字对应，IPC 形状不随本文件调整。
+ * M5 起 preload / renderer 直接从这里与 `protocol/{commands,views,ipc}.ts` 取类型
+ * （`shared/ai-workflow-api.ts` 已删除），因此字段名与仓库现有列映射必须逐字对应。
  */
 
 /**

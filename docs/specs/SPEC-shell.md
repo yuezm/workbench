@@ -10,7 +10,7 @@
 
 - 作为使用者，我打开工作台后能在顶部栏看到所有 app 标签，点击即切换，界面保持无整页刷新。
 - 作为使用者，我点击窗口关闭按钮（X）时窗口隐藏到系统托盘，程序继续在后台运行；从托盘菜单可重新显示窗口或真正退出。
-- 作为开发者（我自己），我新增一个 app 时只需要：新建 app 目录、实现 `AppDefinition`、在注册表加一行。
+- 作为开发者（我自己），我新增一个 app 时只需要：新建 app 目录、实现 `AppPlugin`、在注册表加一行。
 
 ## 界面结构（2026-11-03 调整：一层横置，app 内只留一列）
 
@@ -65,8 +65,9 @@ workbench/
 │           │   └── api.d.ts    # window.workbench 全局类型声明
 │           ├── shell/          # 【shell】渲染侧外壳
 │           │   ├── Workbench.tsx #   Workbench：布局 + 当前 app 状态
-│           │   ├── types.ts    #   AppDefinition 契约
-│           │   ├── registry.ts #   app 注册表（唯一的数据源）
+│           │   ├── types.ts    #   AppPlugin 契约
+│           │   ├── registry.ts #   app 注册表（唯一的数据源，导出 appPlugins）
+│           │   ├── kernelStore.ts #  内核视图 store（快照 + seq + 失效）
 │           │   ├── components/ #   TopBar（顶部 app 标签栏）
 │           │   └── styles/     #   全局深色主题变量（global.css）
 │           └── apps/
@@ -77,7 +78,7 @@ workbench/
 └── package.json
 ```
 
-## 核心契约：AppDefinition
+## 核心契约：AppPlugin
 
 shell 拥有并定义"一个 app 是什么"。注册表是 app 的唯一数据源：
 
@@ -91,7 +92,7 @@ export interface AppIconProps {
   size?: number
 }
 
-export interface AppDefinition {
+export interface AppPlugin {
   /** 唯一 id，kebab-case，如 'pomodoro' */
   id: string
   /** 顶部导航显示名 */
@@ -100,27 +101,39 @@ export interface AppDefinition {
   icon: ComponentType<AppIconProps>
   /** 内容区挂载的入口组件 */
   component: ComponentType
+  /** 可发事件类型（如 pomodoro.completed）；白名单同步 src/shared/apps.ts */
+  events?: readonly string[]
 }
 ```
 
 ```ts
 // renderer/shell/registry.ts
-import type { AppDefinition } from './types'
+import type { AppPlugin } from './types'
 import { pomodoroApp } from '../apps/pomodoro'
 
-export const apps: AppDefinition[] = [pomodoroApp]
+export const appPlugins: AppPlugin[] = [pomodoroApp]
 ```
 
 **跨进程 API（preload 暴露，契约定义在 `src/shared/workbench-api.ts`）：**
 
+M5 起 renderer 只拿三个动词 + 通知（`dispatch / query / subscribe / notify`，详见
+[SPEC-host](./SPEC-host.md)「IPC 契约」）：
+
 ```ts
-// renderer 通过 window.workbench 调用，禁止直接 import electron
 export interface WorkbenchApi {
+  dispatch<C extends Command>(command: C): Promise<CommandDispatchResult<C>>
+  query<T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>>
+  subscribe(handler: (event: KernelEvent) => void): () => void
   /** 发送一条系统通知 */
   notify(title: string, body?: string): void
 }
 export const NOTIFY_CHANNEL = 'workbench:notify'
 ```
+
+**内核视图（shell 持有，app 只消费）：** `shell/kernelStore.ts` 统一订阅与缓存，启动顺序
+subscribe → `kernel.seq` 快照 → 回放；app 用 `useKernelView(view, params)`（或
+`useKernelViewState` 取 `error`）读视图、用 `getKernelStore().dispatch(command)` 写命令。
+新增 app 不得自己起 IPC 订阅、不得轮询、不得在组件里推导业务状态。
 
 ## Code Style
 
@@ -160,14 +173,14 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 
 ## Boundaries
 
-- **Always：** renderer 访问 Electron 能力必须经 preload 暴露的 `window.workbench` API；新增 app 必须实现 `AppDefinition` 并通过注册表进入；提交前 `npm test` 与 `npm run build` 通过。
+- **Always：** renderer 访问 Electron 能力必须经 preload 暴露的 `window.workbench` API；新增 app 必须实现 `AppPlugin` 并通过注册表进入；提交前 `npm test` 与 `npm run build` 通过。
 - **Ask first：** 新增 npm 依赖；修改窗口默认尺寸/主题基座；引入路由或状态管理库。
 - **Never：** 在 renderer 进程直接 `require('electron')` 或访问 Node API；把具体 app 的业务逻辑写进 shell；让 shell 依赖任何 app 的内部实现。
 
 ## Success Criteria
 
 1. `npm run dev` 启动后出现桌面窗口：顶部栏显示"番茄时钟"标签且处于选中态，内容区挂载番茄钟界面；点另一个 app 标签即切换，无整页刷新。
-2. 新增一个 app 只需三步：新建 `src/renderer/apps/<id>/`、实现 `AppDefinition`、注册表加一行；外壳代码（TopBar/Workbench/主进程）零改动。（验收方式：以 pomodoro 的接入过程为证 + registry 类型约束。）
+2. 新增一个 app 只需三步：新建 `src/renderer/apps/<id>/`、实现 `AppPlugin`、注册表加一行；外壳代码（TopBar/Workbench/主进程）零改动。（验收方式：以 pomodoro 的接入过程为证 + registry 类型约束。）
 3. `apps` 注册表被类型与测试双重约束：id 重复或字段缺失会在编译期/测试期暴露。
 4. renderer 调用 `window.workbench.notify(...)` 能弹出系统通知（手动验收）。
 5. 点击窗口 X 后窗口隐藏、程序驻留系统托盘；托盘单击/菜单"显示工作台"可恢复窗口，菜单"退出"才真正退出进程（手动验收）。

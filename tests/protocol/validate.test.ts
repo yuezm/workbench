@@ -7,7 +7,7 @@ import type {
   TaskInput,
   WorkflowInput,
 } from '../../src/protocol/entities'
-import { validateCommand, type ValidateResult } from '../../src/protocol/validate'
+import { validateCommand, validateQuery, type ValidateResult } from '../../src/protocol/validate'
 
 const workflowInput: WorkflowInput = {
   name: '流程',
@@ -527,5 +527,76 @@ describe('protocol/validate', () => {
       ok: true,
       command: { commandId: 'x', type: 'card.resolve', cardId: 'card-1' },
     })
+  })
+})
+
+describe('validateQuery（M5：query 动词入口）', () => {
+  it('无参数视图：undefined / null 放行，带任意参数拒绝', () => {
+    expect(validateQuery('agents.all', undefined)).toEqual({
+      ok: true,
+      view: 'agents.all',
+      params: undefined,
+    })
+    expect(validateQuery('agents.all', null)).toEqual({
+      ok: true,
+      view: 'agents.all',
+      params: undefined,
+    })
+    expect(validateQuery('agents.all', {})).toEqual({
+      ok: true,
+      view: 'agents.all',
+      params: undefined,
+    })
+    expect(validateQuery('agents.all', { workflowId: 'wf-1' })).toEqual({
+      ok: false,
+      message: '该视图不接受参数',
+    })
+    expect(validateQuery('agents.all', 42)).toEqual({ ok: false, message: '该视图不接受参数' })
+  })
+
+  it('带参数视图：缺参数 / 空串 / 非字符串 / 超长一律拒绝', () => {
+    expect(validateQuery('tasks.byWorkflow', undefined)).toEqual({
+      ok: false,
+      message: '视图 tasks.byWorkflow 需要参数 workflowId',
+    })
+    expect(validateQuery('tasks.byWorkflow', { workflowId: '' })).toEqual({
+      ok: false,
+      message: 'workflowId必填',
+    })
+    expect(validateQuery('tasks.byWorkflow', { workflowId: 7 })).toEqual({
+      ok: false,
+      message: 'workflowId必须是字符串',
+    })
+    expect(validateQuery('tasks.byWorkflow', { workflowId: 'x'.repeat(201) })).toEqual({
+      ok: false,
+      message: 'workflowId最长 200 个字符',
+    })
+    expect(validateQuery('tasks.byWorkflow', { workflowId: 'wf-1' })).toEqual({
+      ok: true,
+      view: 'tasks.byWorkflow',
+      params: { workflowId: 'wf-1' },
+    })
+    expect(validateQuery('runtimes.models', { runtimeId: 'rt-1' })).toEqual({
+      ok: true,
+      view: 'runtimes.models',
+      params: { runtimeId: 'rt-1' },
+    })
+  })
+
+  it('未知视图 / 非字符串视图 id 拒绝', () => {
+    expect(validateQuery('unknown.view')).toEqual({ ok: false, message: '未知视图: unknown.view' })
+    expect(validateQuery(undefined)).toEqual({ ok: false, message: '未知视图: undefined' })
+  })
+
+  it('app.event 的 eventType 上限 100 字符', () => {
+    expect(
+      rejectedMessage(
+        cmd('app.event', {
+          appId: 'pomodoro',
+          eventType: 'pomodoro.' + 'a'.repeat(100),
+          subject: 'x',
+        }),
+      ),
+    ).toBe('eventType最长 100 个字符')
   })
 })

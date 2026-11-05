@@ -100,9 +100,9 @@ export interface SchedulerDeps {
    * 聊天 run 的实时帧旁路（AI_WORKFLOW_CHAT 的 `event`）：执行器 `io.emit` 的帧在入账前
    * 原样转给 renderer 实时显示；只对 `purpose='chat'` 的 run 触发。
    */
-  onChatStream?: (conversationId: string, event: RunEvent) => void
+  onChatStream?: (runId: string, conversationId: string, event: RunEvent) => void
   /** 聊天 run 一轮结束（AI_WORKFLOW_CHAT 的 `end`）：终态事实写完后发一次 */
-  onChatStreamEnd?: (conversationId: string) => void
+  onChatStreamEnd?: (runId: string, conversationId: string) => void
   /**
    * 聊天续接轮的「完整历史 prompt」：协议会话失效重试时用（`Turn.fallbackPrompt`）。
    * 装配根按投影里的智能体 + 对话消息拼；缺省不提供（重试退回当前 prompt）。
@@ -188,16 +188,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const killAfterMs = limits.killAfterMs ?? 2_000
 
   /** 聊天旁路：订阅端（窗口）已销毁时丢弃本次推送，不影响执行与落库。 */
-  const emitChat = (conversationId: string, event: RunEvent): void => {
+  const emitChat = (runId: string, conversationId: string, event: RunEvent): void => {
     try {
-      deps.onChatStream?.(conversationId, event)
+      deps.onChatStream?.(runId, conversationId, event)
     } catch {
       // 订阅端异常不能打断执行：旁路只是显示，事实才是数据源
     }
   }
-  const emitChatEnd = (conversationId: string): void => {
+  const emitChatEnd = (runId: string, conversationId: string): void => {
     try {
-      deps.onChatStreamEnd?.(conversationId)
+      deps.onChatStreamEnd?.(runId, conversationId)
     } catch {
       // 同上：结束通知失败不影响终态
     }
@@ -339,7 +339,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         if (framesClosed) return
         // 聊天 run：帧在入账前先走旁路（AI_WORKFLOW_CHAT），renderer 实时显示
         if (run.purpose === 'chat' && run.conversationId !== null) {
-          emitChat(run.conversationId, event)
+          emitChat(run.id, run.conversationId, event)
         }
         frames.push(event)
         // 缓冲达到单批上限：立刻 flush，不等到时间窗（D7 分包由 flushFrames 负责）。
@@ -387,7 +387,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       // 本轮终态改变了「下一次到期」（可能只剩退避中的 queued），重排唯一定时器
       deps.rearmClock?.()
       // 聊天 run：终态事实已写完，通知 renderer 本轮结束（一轮只发一次；对话已删也发）
-      if (run.purpose === 'chat' && run.conversationId !== null) emitChatEnd(run.conversationId)
+      if (run.purpose === 'chat' && run.conversationId !== null)
+        emitChatEnd(run.id, run.conversationId)
     }
 
     /** 宽限与强杀都到期仍无回执：宿主写兜底终态（帧先入账，不丢已产生的输出）。 */

@@ -23,7 +23,7 @@ import type {
 } from '../../kernel/types'
 import { validateInput } from '../../protocol/validate'
 import { withTx } from '../schema'
-import { lastSeq, appendFacts, factsCount, factsSince } from './facts'
+import { lastSeq, appendFacts, factsBetween, factsCount, factsSince } from './facts'
 import { createProjectionWriter, type ProjectionWrite } from './projection-apply'
 import {
   currentProjectionFormat,
@@ -88,6 +88,13 @@ export interface Store {
   factsSince(seq: Seq): Fact[]
   factsCount(): number
   /**
+   * 命令幂等回放（M5）：该 `commandId` 已提交过则返回原事实，否则 null。
+   * 编排类命令（需要宿主探测/前置取消）由命令路由用它做入口幂等。
+   */
+  commandFacts(commandId: string): Fact[] | null
+  /** 记录一条编排类命令的结果（幂等）；已存在则忽略（首次记录优先）。 */
+  rememberCommand(commandId: string, facts: readonly Fact[]): void
+  /**
    * 下一次内核唤醒时刻（宿主唯一定时器用）：按 `clock.tick` 的 viewSpec 装载视图，
    * 交给注入的 `kernel.nextWakeAt`；kernel 未提供该能力时返回 null（时钟不排期）。
    */
@@ -116,12 +123,44 @@ export function createStore(options: StoreOptions): Store {
     nextId: (_kind: IdKind) => newId(),
   })
 
+  /** 命令的幂等键；宿主内部输入没有 `commandId`（幂等由租约/回执哈希保证）。 */
+  const commandIdOf = (input: Input): string | null => {
+    const value = (input as { commandId?: unknown }).commandId
+    return typeof value === 'string' && value !== '' ? value : null
+  }
+
+  /** 已提交过的命令事实；区间不连续（编排命令混了多次提交）时按「零事实」回放。 */
+  const readCommandFacts = (commandId: string): Fact[] | null => {
+    const row = db
+      .prepare('SELECT first_seq, fact_count FROM commands WHERE command_id = ?')
+      .get(commandId) as unknown as { first_seq: number; fact_count: number } | undefined
+    return row === undefined ? null : factsBetween(db, row.first_seq, row.fact_count)
+  }
+
+  /**
+   * 记录命令结果（幂等）。区间连续才能按 seq 回放；不连续（编排命令）只记录
+   * 「命令已处理」，回放返回空事实——调用方要的值由命令路由另算。
+   * `INSERT OR IGNORE`：同一命令多次提交时首次记录优先。
+   */
+  const writeCommand = (commandId: string, facts: readonly Fact[], at: Iso): void => {
+    const first = facts[0]?.seq
+    const contiguous =
+      first !== undefined && facts.every((fact, index) => fact.seq === first + index)
+    db.prepare(
+      'INSERT OR IGNORE INTO commands (command_id, first_seq, fact_count, at) VALUES (?, ?, ?, ?)',
+    ).run(commandId, contiguous ? first : 0, contiguous ? facts.length : 0, at)
+  }
+
   /** 单次尝试：装载 → 决策 → 单事务写入；序号冲突抛 `SeqConflictError` 交给 dispatch 重试。 */
-  const attemptDispatch = (command: Input): DispatchResult => {
+  const attemptDispatch = (command: Input, commandId: string | null): DispatchResult => {
     const view = loadView(db, kernel.viewSpec(command))
     const decision = kernel.decide(view, command, now(), environment())
     if (decision.reject) throw new StoreError(decision.reject.code, decision.reject.message)
-    if (decision.facts.length === 0) return { facts: [] }
+    if (decision.facts.length === 0) {
+      // 零事实命令也要记幂等（重复提交仍返回空事实，不重复决策）
+      if (commandId !== null) withTx(db, () => writeCommand(commandId, [], now()))
+      return { facts: [] }
+    }
 
     const writer = createProjectionWriter(db)
     return withTx(db, () => {
@@ -137,6 +176,7 @@ export function createStore(options: StoreOptions): Store {
       }
       writer.applyAll(writes)
       writeProjectionMeta(db, currentProjectionFormat(), facts[facts.length - 1].seq)
+      if (commandId !== null) writeCommand(commandId, facts, facts[facts.length - 1].at)
       return { facts }
     })
   }
@@ -144,12 +184,17 @@ export function createStore(options: StoreOptions): Store {
   const dispatch = (input: unknown): DispatchResult => {
     const validated = validateInput(input)
     if (!validated.ok) throw new StoreError('invalid_input', validated.message)
+    const commandId = commandIdOf(validated.input)
+    if (commandId !== null) {
+      const replay = readCommandFacts(commandId)
+      if (replay !== null) return { facts: replay }
+    }
     try {
-      return attemptDispatch(validated.input)
+      return attemptDispatch(validated.input, commandId)
     } catch (error) {
       if (!(error instanceof SeqConflictError)) throw error
       try {
-        return attemptDispatch(validated.input)
+        return attemptDispatch(validated.input, commandId)
       } catch (retryError) {
         if (retryError instanceof SeqConflictError) {
           throw new StoreError('conflict', '事实日志序号冲突，请重试')
@@ -169,6 +214,10 @@ export function createStore(options: StoreOptions): Store {
     rebuild: () => rebuildProjection(db, kernel),
     factsSince: (seq) => factsSince(db, seq),
     factsCount: () => factsCount(db),
+    commandFacts: (commandId) => readCommandFacts(commandId),
+    rememberCommand: (commandId, facts) => {
+      withTx(db, () => writeCommand(commandId, facts, now()))
+    },
     nextWakeAt: (at) => {
       if (!kernel.nextWakeAt) return null
       const view = loadView(db, kernel.viewSpec({ type: 'clock.tick' }))

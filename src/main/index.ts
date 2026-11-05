@@ -9,7 +9,9 @@ import { viewSpec } from '../kernel/view-spec'
 import type { KernelPort } from '../kernel/types'
 import { createClock, type Clock } from '../host/clock'
 import { createChannels, type Channels } from '../host/channels'
+import { createCommandRouter, type HostViewResolver } from '../host/commands'
 import { createEffects } from '../host/effects'
+import { createFactFeed, type FactFeed } from '../host/feed'
 import { killPidTree } from '../host/process'
 import { createProcessRegistry } from '../host/process-registry'
 import { reconcile } from '../host/reconcile'
@@ -21,7 +23,6 @@ import { registerIpcHandlers } from './ipc'
 // 系统通知原件（M4）：宿主不 import electron，由装配根注入 sdk（`sdk.notify` 的门控在 sdk 层）
 import { notify } from './notify'
 import { createTray } from './tray'
-import { registerAiWorkflowIpc } from './ai-workflow/ipc'
 import { createSdkHost } from '../host/sdk-host'
 import { createExecutorRegistry } from '../host/executor-registry'
 import {
@@ -29,9 +30,8 @@ import {
   channels as pluginChannels,
   executors as pluginExecutors,
 } from '../plugins/registry'
-import type { RuntimeInput } from '../protocol/entities'
-import type { ChatStreamEvent, RuntimeExecutorChoice } from '../shared/ai-workflow-api'
-import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
+import type { RuntimeExecutorChoice, RuntimeInput } from '../protocol/entities'
+import { WORKBENCH_EVENT_CHANNEL } from '../protocol/ipc'
 
 let quitting = false
 let win: BrowserWindow | null = null
@@ -39,6 +39,8 @@ let win: BrowserWindow | null = null
 let activeScheduler: Scheduler | null = null
 /** 装配完成后的通道 hub：退出流程 abort + best-effort dispose（M4 D9）。 */
 let activeChannels: Channels | null = null
+/** 事实推送（M5）：批次 + 聊天流；退出时停表。 */
+let activeFeed: FactFeed | null = null
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -91,12 +93,19 @@ if (app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     // Windows 通知归属需要 AppUserModelId
     app.setAppUserModelId('com.workbench.desktop')
-    registerIpcHandlers()
 
-    // ai-workflow：打开本地 SQLite，注册 RPC 与运行队列；变更广播给所有窗口
-    const broadcastChanged = (): void => {
-      for (const w of BrowserWindow.getAllWindows()) w.webContents.send(AI_WORKFLOW_CHANGED)
-    }
+    // M5：事实推送（批次 ≤500 条 / 16 ms + 聊天流旁路）；IPC 只暴露 dispatch/query/subscribe。
+    const feed = createFactFeed()
+    activeFeed = feed
+    feed.subscribe((event) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        try {
+          w.webContents.send(WORKBENCH_EVENT_CHANNEL, event)
+        } catch {
+          // 窗口/渲染进程已失效：推送只是显示，事实才是数据源
+        }
+      }
+    })
     const userData = app.getPath('userData')
     const db = openDatabase(path.join(userData, 'ai-workflow.db'))
     // 内核门面：decide / project / viewSpec / nextWakeAt 是纯函数，store 与 clock 只依赖这个端口。
@@ -195,7 +204,7 @@ if (app.requestSingleInstanceLock()) {
         if (hub === null) throw new Error('通道 hub 尚未装配')
         return hub
       },
-      notifyChanged: broadcastChanged,
+      onFacts: (facts) => feed.publish(facts),
     })
     // 通道 hub（M4 D9）：effects 之后创建、scheduler 之前 startAll；
     // 启动时先补投 `delivery='pending'` 的 open 卡（重启只补未送达的版本）。
@@ -208,16 +217,6 @@ if (app.requestSingleInstanceLock()) {
     channelsHolder.current = channels
     await channels.startAll()
     activeChannels = channels
-    /** 聊天流旁路：窗口已销毁时丢弃本次推送（不打断执行，事实才是数据源）。 */
-    const sendChatStream = (event: ChatStreamEvent): void => {
-      for (const w of BrowserWindow.getAllWindows()) {
-        try {
-          w.webContents.send(AI_WORKFLOW_CHAT, event)
-        } catch {
-          // 窗口/渲染进程已失效：旁路只是实时显示，终态由事实补齐
-        }
-      }
-    }
     // 唯一时钟先建（调度器领取/收尾时通过 rearm 重新排期），start 在首次领取之后
     const clock: Clock = createClock({
       store: {
@@ -237,10 +236,11 @@ if (app.requestSingleInstanceLock()) {
       registry,
       // run 领取 / 收尾 / 取消后重排唯一定时器：启动之后才出现的租约与超时靠它纳入排期
       rearmClock: () => clock.rearm(),
-      // 聊天 run 的帧实时旁路（AI_WORKFLOW_CHAT）：渲染端显示，入账仍走 run.frames
-      onChatStream: (conversationId, event) =>
-        sendChatStream({ conversationId, type: 'event', event }),
-      onChatStreamEnd: (conversationId) => sendChatStream({ conversationId, type: 'end' }),
+      // 聊天 run 的帧实时旁路（subscribe 的 stream 事件）：渲染端显示，入账仍走 run.frames
+      onChatStream: (runId, conversationId, event) =>
+        feed.stream({ kind: 'stream', runId, conversationId, event }),
+      onChatStreamEnd: (runId, conversationId) =>
+        feed.stream({ kind: 'stream-end', runId, conversationId }),
       // 续接被拒重试用完整历史 prompt（续接轮只发新消息，回退必须带上整段对话）
       chatFallbackPrompt: (run) => {
         if (run.purpose !== 'chat' || run.conversationId === null) return null
@@ -253,14 +253,32 @@ if (app.requestSingleInstanceLock()) {
     })
     // 退出流程据此取消活跃 run（before-quit 在模块作用域，拿不到这里的局部变量）
     activeScheduler = scheduler
-    registerAiWorkflowIpc({
+    // 三动词的宿主实现：命令路由（校验/幂等/编排）+ 读视图（DB 视图走 store，
+    // 宿主视图走插件注册表 / CLI 探测 / 执行器模型目录；只读、不写库）
+    const hostView: HostViewResolver = (view, params) => {
+      switch (view) {
+        case 'runtimes.executors':
+          return executorChoices()
+        case 'runtimes.detected':
+          return detectAll(sdkHost)
+        case 'runtimes.models': {
+          const id = params?.runtimeId ?? ''
+          const runtime = store.query('runtimes.all').find((item) => item.id === id)
+          if (runtime === undefined) throw new Error('运行时不存在: ' + id)
+          const port = executors.forRuntime(runtime)
+          if (port?.models === undefined) return Promise.resolve([])
+          return port.models(runtime)
+        }
+      }
+    }
+    const router = createCommandRouter({
       store,
       dispatch: (input) => effects.dispatch(input),
       executors,
       executorDefaults,
-      executorChoices,
-      detect: () => detectAll(sdkHost),
+      hostView,
     })
+    registerIpcHandlers({ router })
     // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，
     // 再挂唯一定时器（周期回收走 nextWakeAt + clock.tick，不再单独轮询）
     scheduler.wake()
@@ -292,6 +310,8 @@ app.on('before-quit', () => {
   activeScheduler?.cancelAll()
   // 通道 abort + dispose 是异步的：进程退出不等待，但先发 abort 让插件停止投递
   void activeChannels?.stopAll()
+  // 推送停表：退出后不再排批次（已入账的事实仍然完整）
+  activeFeed?.stop()
 })
 
 app.on('window-all-closed', () => {

@@ -688,3 +688,59 @@ describe('queryView：卡片审批（cards.open / cards.byRun，M4）', () => {
     }
   })
 })
+
+describe('queryView：M5 客户端视图（tasks.executing / runtimes.statuses / kernel.seq）', () => {
+  it('tasks.executing：只取 stage run 的活跃任务，去重；chat run 与无任务 run 不计', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    const executing = queryView(db, 'tasks.executing') as string[]
+    expect([...executing].sort()).toEqual(['tk-1', 'tk-2'])
+  })
+
+  it('tasks.executing：无活跃 run 时为空数组', () => {
+    const db = memory()
+
+    expect(queryView(db, 'tasks.executing')).toEqual([])
+  })
+
+  it('runtimes.statuses：全部运行时 + 负载（running/queued 只数活跃 run，maxConcurrent 取自配置）', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    expect(queryView(db, 'runtimes.statuses')).toEqual([
+      { runtimeId: 'rt-2', workload: { running: 0, queued: 0, maxConcurrent: 1 } },
+      { runtimeId: 'rt-1', workload: { running: 2, queued: 3, maxConcurrent: 1 } },
+    ])
+  })
+
+  it('runtimes.statuses：空库为空数组', () => {
+    const db = memory()
+
+    expect(queryView(db, 'runtimes.statuses')).toEqual([])
+  })
+
+  it('kernel.seq：事实日志最大 seq，空日志为 0', () => {
+    const db = memory()
+    expect(queryView(db, 'kernel.seq')).toBe(0)
+
+    db.prepare(
+      "INSERT INTO facts (type, actor_json, at, cause, hops, payload) VALUES ('x', '{}', ?, NULL, NULL, '{}')",
+    ).run(SAMPLE_AT)
+    db.prepare(
+      "INSERT INTO facts (type, actor_json, at, cause, hops, payload) VALUES ('y', '{}', ?, NULL, NULL, '{}')",
+    ).run(SAMPLE_AT)
+    expect(queryView(db, 'kernel.seq')).toBe(2)
+  })
+
+  it('宿主视图不读投影：executors / detected / models 走装配根注入，DB 查询明确报错', () => {
+    const db = memory()
+    for (const view of ['runtimes.executors', 'runtimes.detected', 'runtimes.models'] as const) {
+      const error = captureError(() => queryView(db, view, { runtimeId: 'rt-1' }))
+      expect((error as StoreError).code).toBe('invalid_input')
+      expect((error as StoreError).message).toContain('宿主视图不读投影')
+    }
+  })
+})

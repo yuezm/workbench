@@ -72,6 +72,18 @@ export function factsSince(db: DatabaseSync, seq: Seq): Fact[] {
   return rows.map(toFact)
 }
 
+/**
+ * 一段连续事实（命令幂等回放）：从 `firstSeq` 起取 `count` 条。
+ * `count === 0`（零事实命令）直接返回空数组，不查库。
+ */
+export function factsBetween(db: DatabaseSync, firstSeq: Seq, count: number): Fact[] {
+  if (count <= 0) return []
+  const rows = db
+    .prepare(`${SELECT_COLUMNS} WHERE seq >= ? AND seq < ? ORDER BY seq`)
+    .all(firstSeq, firstSeq + count) as unknown as FactRow[]
+  return rows.map(toFact)
+}
+
 export function factsCount(db: DatabaseSync): number {
   const row = db.prepare('SELECT COUNT(*) AS n FROM facts').get() as unknown as { n: number }
   return row.n

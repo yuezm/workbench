@@ -36,6 +36,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'runtime.remove':
       // 被智能体引用时拒绝删除
       return ['runtimes', 'agents']
+    case 'runtime.probe':
+      // 编排命令：宿主探测后落 runtime.probed；探测前不读投影（保留切片便于直接 dispatch 时的校验）
+      return ['runtimes']
     case 'runtime.probed':
       return ['runtimes']
     case 'task.create':

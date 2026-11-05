@@ -15,21 +15,25 @@ import {
 import { chatPrompt, receiptBlockHint } from '../../src/kernel/prompt'
 import { createProcessRegistry } from '../../src/host/process-registry'
 import { createScheduler, type Scheduler } from '../../src/host/scheduler'
+import { createCommandRouter, type CommandRouter } from '../../src/host/commands'
 import { createStore, type Store } from '../../src/host/store/index'
 import { decide } from '../../src/kernel/decide'
 import { project } from '../../src/kernel/project'
 import { viewSpec } from '../../src/kernel/view-spec'
 import type { KernelPort } from '../../src/kernel/types'
-import { createAiWorkflowHandler, type AiWorkflowHandler } from '../../src/main/ai-workflow/ipc'
-import type { ChatConversation, ChatMessage, RunEvent } from '../../src/shared/ai-workflow-api'
+import type { Conversation, Message, RunEvent } from '../../src/protocol/entities'
 
 /**
- * T14b：聊天执行链（scheduler + effects + IPC）端到端用例。
+ * T14b：聊天执行链（scheduler + effects + 命令）端到端用例。
  *
  * 覆盖旧 `ChatService` 的 27 例行为（标题/首轮/续接/续接被拒/并发/取消/事件流/错误文案/
  * emit 失败吞掉）；纯函数 `titleFromContent` / `chatPrompt` 的用例已由
  * `tests/kernel/prompt.test.ts` 承接，dsh 的「输出为空时用流式文本」由
  * `tests/main/ai-workflow/runtime/dsh.test.ts` 承接（执行器负责，宿主不重复）。
+ *
+ * M5：入口从旧 RPC handler 改为命令（`chat.create` / `chat.send` / `chat.cancel` /
+ * `chat.remove`），写路径走统一入口 `effects.dispatch`（提交后分发：`run.queued` 唤醒调度器、
+ * `run.cancel_requested` 中止执行）。
  */
 
 const kernel: KernelPort = { decide, project, viewSpec }
@@ -61,7 +65,10 @@ interface World {
   db: DatabaseSync
   store: Store
   scheduler: Scheduler
-  handler: AiWorkflowHandler
+  /** 命令的统一写入口（effects.dispatch）：提交后分发是 run.queued / run.cancel_requested 的驱动 */
+  dispatch: Store['dispatch']
+  /** 生产路径的命令路由：`chat.remove` 删除前先取消活跃 run（与旧 rpc 入口语义一致） */
+  router: CommandRouter
   streams: StreamRecord[]
   /** 后端收到的每一轮请求（断言 prompt / resumeSessionId / requestId） */
   requests: TestBackendRequest[]
@@ -79,7 +86,7 @@ const nextCommandId = (): string => {
   return `cmd-${commandSeq}`
 }
 
-/** 建 world：store + effects + scheduler（真实适配器）+ IPC handler，全部接在内存库上。 */
+/** 建 world：store + effects + scheduler（真实适配器）+ 命令路由，全部接在内存库上。 */
 function makeWorld(backend: TestBackend): World {
   const db = openDatabase(':memory:')
   const store = createStore({ db, kernel })
@@ -116,30 +123,39 @@ function makeWorld(backend: TestBackend): World {
       })
       return agent && messages.length > 0 ? chatPrompt(agent, messages) : null
     },
-    onChatStream: (conversationId, event) => {
+    onChatStream: (_runId, conversationId, event) => {
       if (breakStream.value) throw new Error('窗口已销毁')
       streams.push({ conversationId, type: 'event', event })
     },
-    onChatStreamEnd: (conversationId) => {
+    onChatStreamEnd: (_runId, conversationId) => {
       streams.push({ conversationId, type: 'end' })
     },
   })
   holder.scheduler = scheduler
-  const handler = createAiWorkflowHandler({
+  // 命令路由是 IPC 的实际入口：删除类命令的「先取消活跃 run」在这里（旧 rpc 表同样逻辑）
+  const router = createCommandRouter({
     store,
     dispatch: (input) => effects.dispatch(input),
     executors: { forRuntime: () => null },
     executorDefaults: (key) => ({ executorKey: key ?? 'dsh', command: 'dsh', profile: 'multica' }),
-    detect: async () => [],
-    executorChoices: () => [],
-    newCommandId: nextCommandId,
+    hostView: () => null,
   })
   const clock = createClock({
     store: { dispatch: (input) => effects.dispatch(input), nextWakeAt: () => null },
     now: () => new Date().toISOString(),
     onTick: () => scheduler.wake(),
   })
-  return { db, store, scheduler, handler, streams, requests: [], breakStream, clock }
+  return {
+    db,
+    store,
+    scheduler,
+    dispatch: (input) => effects.dispatch(input),
+    router,
+    streams,
+    requests: [],
+    breakStream,
+    clock,
+  }
 }
 
 /** 后端按脚本返回：每次 execute 调一次 handler，同时记录请求。 */
@@ -183,19 +199,34 @@ function seedAgent(systemPrompt = '你是助手。'): { runtimeId: string; agent
   return { runtimeId, agentId }
 }
 
-const createConversation = (agentId: string): ChatConversation =>
-  world.handler('chat.createConversation', [agentId]) as ChatConversation
+/** `chat.create` 命令；返回内核落的对话行（命令结果里的实体值同源）。 */
+const createConversation = (agentId: string): Conversation => {
+  const facts = world.dispatch({ type: 'chat.create', commandId: nextCommandId(), agentId }).facts
+  const created = facts.find((fact) => fact.type === 'conversation.created')
+  if (created === undefined) throw new Error('缺少事实: conversation.created')
+  return (created.payload as { conversation: Conversation }).conversation
+}
 
-const send = (conversationId: string, content: string): unknown =>
-  world.handler('chat.send', [conversationId, content])
+/** `chat.send` 命令：先落用户消息再入队 purpose='chat' 的 run（被拒绝时不落消息）。 */
+const send = (conversationId: string, content: string): void => {
+  world.dispatch({ type: 'chat.send', commandId: nextCommandId(), conversationId, content })
+}
 
-const messagesOf = (conversationId: string): ChatMessage[] =>
-  world.handler('chat.listMessages', [conversationId]) as ChatMessage[]
+/** `chat.cancel` 命令：对活跃 run 产 run.cancel_requested，由调度器执行取消时序。 */
+const cancel = (conversationId: string): void => {
+  world.dispatch({ type: 'chat.cancel', commandId: nextCommandId(), conversationId })
+}
 
-const conversations = (): ChatConversation[] =>
-  world.handler('chat.listConversations', []) as ChatConversation[]
+/** `chat.remove` 命令走生产路由：先取消该对话活跃 run，再落 tombstone。 */
+const removeConversation = (conversationId: string): Promise<unknown> =>
+  world.router.dispatch({ type: 'chat.remove', commandId: nextCommandId(), conversationId })
 
-const conversationOf = (id: string): ChatConversation => {
+const messagesOf = (conversationId: string): Message[] =>
+  world.store.query('messages.byConversation', { conversationId })
+
+const conversations = (): Conversation[] => world.store.query('conversations.all')
+
+const conversationOf = (id: string): Conversation => {
   const found = conversations().find((item) => item.id === id)
   if (!found) throw new Error('对话不存在: ' + id)
   return found
@@ -511,7 +542,7 @@ describe('chat：并发、取消、运行时就绪检查', () => {
     expect(() => send(conv.id, '再问')).toThrow(/正在执行/)
     expect(messagesOf(conv.id)).toHaveLength(1)
 
-    world.handler('chat.cancel', [conv.id])
+    cancel(conv.id)
     await world.scheduler.idle()
     expect(messagesOf(conv.id)).toHaveLength(2)
   })
@@ -557,7 +588,7 @@ describe('chat：并发、取消、运行时就绪检查', () => {
       world.store.query('runs.active-by-conversation', { conversationId: conv.id }),
     ).toHaveLength(1)
 
-    world.handler('chat.cancel', [conv.id])
+    cancel(conv.id)
     await world.scheduler.idle()
 
     expect(messagesOf(conv.id)[1]?.error).toBe('已取消')
@@ -567,13 +598,15 @@ describe('chat：并发、取消、运行时就绪检查', () => {
     )
   })
 
-  it('取消空闲对话 / 未知对话是无害的', () => {
+  it('取消空闲对话是无害的；未知对话明确拒绝', () => {
     const script = scripted(() => outcome())
     start(script.backend)
     const { agentId } = seedAgent()
     const conv = createConversation(agentId)
-    expect(() => world.handler('chat.cancel', [conv.id])).not.toThrow()
-    expect(() => world.handler('chat.cancel', ['ghost'])).not.toThrow()
+    // 空闲对话：没有活跃 run，内核零事实
+    expect(() => cancel(conv.id)).not.toThrow()
+    // M5 命令契约：未知对话由内核明确拒绝（旧 RPC 入口静默跳过）
+    expect(() => cancel('ghost')).toThrow(/对话不存在/)
   })
 
   it('执行期间对话被删除：不抛错、仍发一次 end、不落孤立消息', async () => {
@@ -591,7 +624,8 @@ describe('chat：并发、取消、运行时就绪检查', () => {
 
     send(conv.id, '问')
     await Promise.resolve()
-    expect(() => world.handler('chat.removeConversation', [conv.id])).not.toThrow()
+    // 路由先取消活跃 run 再删对话（旧 rpc 入口的同一语义）
+    await expect(removeConversation(conv.id)).resolves.toBeDefined()
     await world.scheduler.idle()
 
     expect(conversations()).toEqual([])

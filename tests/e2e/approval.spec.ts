@@ -10,7 +10,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
-import type { AiWorkflowApi } from '../../src/shared/ai-workflow-api'
+import type { WorkbenchApi } from '../../src/shared/workbench-api'
 import { createTempUserDataDir, launchApp, type LaunchedApp } from './helpers/launch'
 import {
   APPROVAL_SESSION_ID,
@@ -59,8 +59,8 @@ test('审批等待期：租约已释放、无子进程、无 Token、回答续�
 
   // 2) 经桥读 open 卡与 run（IPC 形状与种子一致）
   const openCards = await page.evaluate(() => {
-    const bridge = (globalThis as unknown as { aiWorkflow: AiWorkflowApi }).aiWorkflow
-    return bridge.cards.open()
+    const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
+    return bridge.query('cards.open')
   })
   expect(openCards.map((card) => card.id)).toContain(seeded.cardId)
   expect(openCards.find((card) => card.id === seeded.cardId)).toMatchObject({
@@ -70,8 +70,8 @@ test('审批等待期：租约已释放、无子进程、无 Token、回答续�
   })
 
   const runs = await page.evaluate((taskId) => {
-    const bridge = (globalThis as unknown as { aiWorkflow: AiWorkflowApi }).aiWorkflow
-    return bridge.runs.listByTask(taskId)
+    const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
+    return bridge.query('runs.byTask', { taskId })
   }, seeded.taskId)
   expect(runs).toHaveLength(1)
   expect(runs[0]).toMatchObject({
@@ -82,9 +82,9 @@ test('审批等待期：租约已释放、无子进程、无 Token、回答续�
   })
 
   // 3) 经桥回答：卡变 answered，run 回到 queued 且续接同一会话、turn+1
-  const answered = await page.evaluate((cardId) => {
-    const bridge = (globalThis as unknown as { aiWorkflow: AiWorkflowApi }).aiWorkflow
-    return bridge.cards.answer(cardId, 0)
+  const answered = await page.evaluate(async (cardId) => {
+    const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
+    return (await bridge.dispatch({ type: 'card.answer', commandId: 'e2e-answer', cardId, optionIndex: 0, via: 'ui' })).value
   }, seeded.cardId)
   expect(answered).toMatchObject({ status: 'answered', optionIndex: 0, answeredBy: 'ui' })
 
@@ -109,17 +109,17 @@ test('审批等待期：租约已释放、无子进程、无 Token、回答续�
   })
 
   const resumed = await page.evaluate((taskId) => {
-    const bridge = (globalThis as unknown as { aiWorkflow: AiWorkflowApi }).aiWorkflow
-    return bridge.runs.listByTask(taskId)
+    const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
+    return bridge.query('runs.byTask', { taskId })
   }, seeded.taskId)
   expect(resumed[0]).toMatchObject({ status: 'queued', sessionId: APPROVAL_SESSION_ID })
 
   // 4) 重复回答：拒绝且不产生新 fact（card.answered / run.queued 计数不变）
   const before = readApprovalState(seeded.dbPath, seeded.runId, seeded.cardId)
   const second = await page.evaluate(async (cardId) => {
-    const bridge = (globalThis as unknown as { aiWorkflow: AiWorkflowApi }).aiWorkflow
+    const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
     try {
-      await bridge.cards.answer(cardId, 0)
+      await bridge.dispatch({ type: 'card.answer', commandId: 'e2e-answer-2', cardId, optionIndex: 0, via: 'ui' })
       return { rejected: false, message: '' }
     } catch (error) {
       return { rejected: true, message: error instanceof Error ? error.message : String(error) }

@@ -1,32 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type {
-  Agent as SharedAgent,
-  AgentInput as SharedAgentInput,
-  ChatConversation as SharedChatConversation,
-  ChatMessage as SharedChatMessage,
-  ChatRole as SharedChatRole,
-  EntryMode as SharedEntryMode,
-  PermissionMode as SharedPermissionMode,
-  Run as SharedRun,
-  RunErrorCode as SharedRunErrorCode,
-  RunEvent as SharedRunEvent,
-  RunEventType as SharedRunEventType,
-  RunPurpose as SharedRunPurpose,
-  RunStatus as SharedRunStatus,
-  RunUsage as SharedRunUsage,
-  Runtime as SharedRuntime,
-  RuntimeInput as SharedRuntimeInput,
-  RuntimeProbe as SharedRuntimeProbe,
-  RuntimeProbeState as SharedRuntimeProbeState,
-  StageInput as SharedStageInput,
-  Task as SharedTask,
-  TaskInput as SharedTaskInput,
-  TaskStatus as SharedTaskStatus,
-  Workflow as SharedWorkflow,
-  WorkflowInput as SharedWorkflowInput,
-  WorkflowStage as SharedWorkflowStage,
-  WorkflowWithStages as SharedWorkflowWithStages,
-} from '../../src/shared/ai-workflow-api'
+
 import {
   ACCESS_LEVELS,
   ARGV_PLACEHOLDERS,
@@ -45,6 +18,9 @@ import {
   type Access,
   type Agent,
   type AgentInput,
+  type Card,
+  type CardDelivery,
+  type CardStatus,
   type ChatRole,
   type Conversation,
   type EntryMode,
@@ -80,36 +56,36 @@ type Equal<A, B> =
 type Assert<T extends true> = T
 
 /**
- * 实体契约必须与 `shared/ai-workflow-api.ts` 暴露给 preload / renderer 的类型一致
- * （shared 现在只是 re-export，这里防止有人再次在 shared 里重复定义）。
+ * 实体契约锁（M5：`shared/ai-workflow-api.ts` 已删除，protocol/entities 是唯一真相）。
+ * 这里逐项锁定「实体字段与枚举/输入类型的对应关系」，防止字段类型被悄悄放宽。
  */
 const contractChecks: [
-  Assert<Equal<PermissionMode, SharedPermissionMode>>,
-  Assert<Equal<RuntimeProbeState, SharedRuntimeProbeState>>,
-  Assert<Equal<RuntimeProbe, SharedRuntimeProbe>>,
-  Assert<Equal<Runtime, SharedRuntime>>,
-  Assert<Equal<RuntimeInput, SharedRuntimeInput>>,
-  Assert<Equal<Agent, SharedAgent>>,
-  Assert<Equal<AgentInput, SharedAgentInput>>,
-  Assert<Equal<EntryMode, SharedEntryMode>>,
-  Assert<Equal<WorkflowStage, SharedWorkflowStage>>,
-  Assert<Equal<StageInput, SharedStageInput>>,
-  Assert<Equal<Workflow, SharedWorkflow>>,
-  Assert<Equal<WorkflowWithStages, SharedWorkflowWithStages>>,
-  Assert<Equal<WorkflowInput, SharedWorkflowInput>>,
-  Assert<Equal<TaskStatus, SharedTaskStatus>>,
-  Assert<Equal<Task, SharedTask>>,
-  Assert<Equal<TaskInput, SharedTaskInput>>,
-  Assert<Equal<RunStatus, SharedRunStatus>>,
-  Assert<Equal<RunErrorCode, SharedRunErrorCode>>,
-  Assert<Equal<RunEventType, SharedRunEventType>>,
-  Assert<Equal<RunEvent, SharedRunEvent>>,
-  Assert<Equal<RunUsage, SharedRunUsage>>,
-  Assert<Equal<Run, SharedRun>>,
-  Assert<Equal<RunPurpose, SharedRunPurpose>>,
-  Assert<Equal<ChatRole, SharedChatRole>>,
-  Assert<Equal<Conversation, SharedChatConversation>>,
-  Assert<Equal<Message, SharedChatMessage>>,
+  Assert<Equal<Runtime['permissionMode'], PermissionMode>>,
+  Assert<Equal<RuntimeProbe['state'], RuntimeProbeState>>,
+  Assert<Equal<Runtime['lastProbe'], RuntimeProbe | null>>,
+  Assert<Equal<RuntimeInput['executorKey'], string | undefined>>,
+  Assert<Equal<Agent['runtimeId'], string>>,
+  Assert<Equal<AgentInput['runtimeId'], string>>,
+  Assert<Equal<WorkflowStage['entryMode'], EntryMode>>,
+  Assert<Equal<StageInput['entryMode'], EntryMode>>,
+  Assert<Equal<WorkflowWithStages['stages'], WorkflowStage[]>>,
+  Assert<Equal<WorkflowInput['stages'], StageInput[]>>,
+  Assert<Equal<Workflow['id'], string>>,
+  Assert<Equal<Task['status'], TaskStatus>>,
+  Assert<Equal<TaskInput['workflowId'], string>>,
+  Assert<Equal<Run['status'], RunStatus>>,
+  Assert<Equal<NonNullable<Run['errorCode']>, RunErrorCode>>,
+  Assert<Equal<RunEvent['type'], RunEventType>>,
+  Assert<Equal<NonNullable<Run['usage']>, RunUsage>>,
+  Assert<Equal<RunPurpose, 'stage' | 'chat'>>,
+  Assert<Equal<TaskStatus, (typeof TASK_STATUSES)[number]>>,
+  Assert<Equal<Conversation['agentId'], string>>,
+  Assert<Equal<Message['role'], ChatRole>>,
+  Assert<Equal<RunRow['purpose'], RunPurpose>>,
+  Assert<Equal<RunRow['taskId'], string | null>>,
+  Assert<Equal<RunEventRow['type'], RunEventType>>,
+  Assert<Equal<Card['status'], CardStatus>>,
+  Assert<Equal<Card['delivery'], CardDelivery>>,
 ] = [
   true,
   true,
@@ -176,8 +152,8 @@ interface ExpectedIpcRunEvent {
 }
 
 const ipcShapeChecks: [
-  Assert<Equal<SharedRun, ExpectedIpcRun>>,
-  Assert<Equal<SharedRunEvent, ExpectedIpcRunEvent>>,
+  Assert<Equal<Run, ExpectedIpcRun>>,
+  Assert<Equal<RunEvent, ExpectedIpcRunEvent>>,
   // 投影行 = IPC 行 + 调度列；`taskId` 在投影里可空（聊天 run 不挂任务）
   Assert<Equal<RunRow['purpose'], RunPurpose>>,
   Assert<Equal<RunRow['taskId'], string | null>>,
@@ -420,7 +396,7 @@ describe('protocol/entities', () => {
     ])
   })
 
-  it('与 shared/ai-workflow-api 的实体类型逐一相等（类型级断言）', () => {
+  it('实体契约锁：字段与枚举/输入类型对应（类型级断言，M5 起 protocol 是唯一真相）', () => {
     expect(contractChecks).toHaveLength(26)
     expect(contractChecks.every(Boolean)).toBe(true)
   })

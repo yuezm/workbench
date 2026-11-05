@@ -73,15 +73,15 @@ Check:    pnpm check           # typecheck + lint + test:coverage（提交前必
 
 ````
 src/renderer/src/apps/ai-workflow/
-├── index.tsx                  # AppDefinition（aiWorkflowApp：id/name/icon/component）
+├── index.tsx                  # AppPlugin（aiWorkflowApp：id/name/icon/component）
 ├── AiWorkflowPage.tsx         # 布局：工作台 / 设置 双视图（见「界面结构」）
-├── api.ts                     # 对 window.aiWorkflow 的薄封装（类型安全）
+├── （无 api.ts）               # 读写统一经 shell/kernelStore（dispatch/query/subscribe）
 ├── model/
 │   ├── types.ts               # 领域实体类型（Runtime/Agent/Workflow/Stage/Task/Run）
 │   ├── stage-machine.ts       # 纯函数：阶段流转/默认目标解析（不依赖 React、不做 IO）
 │   └── stage-machine.test.ts
 ├── hooks/
-│   ├── useWorkflow.ts         # 拉取数据 + 订阅 onChanged 失效刷新
+│   ├── useWorkflow.ts         # 已删除（改用 kernelStore 视图订阅）
 │   └── useChat.ts             # 聊天状态机：会话增删选、消息拉取、流式事件、发送/中止
 └── components/
     ├── WorkspaceNav.tsx       # 工作台侧栏顶部：横向「聊天 / 任务」切换条 + 上下文列表槽
@@ -141,8 +141,8 @@ src/host/                      # 账本 + 投影 + 调度（M2；内核实现以
 src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用）
 ````
 
-- `src/preload/index.ts` 增加 `window.aiWorkflow` 暴露（从 `ai-workflow-api.ts` 取类型）；`src/renderer/src/shared/api.d.ts` 增加全局声明。
-- 注册：`src/renderer/src/shell/registry.ts` 加一行 `aiWorkflowApp`（外壳零改动）。
+- `src/preload/index.ts` 只暴露 `window.workbench`（三动词 + notify）；`api.d.ts` 只声明 `window.workbench`。
+- 注册：`src/renderer/src/shell/registry.ts` 的 `appPlugins` 加一行 `aiWorkflowApp`（外壳零改动）。
 
 ## 数据模型（SQLite）
 
@@ -346,82 +346,44 @@ export interface DetectedRuntime {
 - 回执 `notices` → 空选项信息卡（不阻塞 run）；`resolves` → 关闭同 run 的 open 卡（`reason='agent'`）。`events` → `event.received`（`hops=父+1`）或 `event.dropped`，M4 只入账、不派活。
 - 「执行中」仍 = 存在 `queued`/`running`/`waiting` run；`waiting` 不占并发位、不参与 `nextWave` 的领取。
 
-## IPC 契约（`window.aiWorkflow`）
+## IPC 契约（M5：三动词）
 
-契约定义在 `src/shared/ai-workflow-api.ts`，preload 原样透传，renderer 禁止直接 import electron/fs/child_process。
+契约定义在 `src/protocol`（命令/视图/推送）与 `src/shared/workbench-api.ts`，preload 只暴露
+`window.workbench`；renderer 禁止直接 import electron/fs/child_process。**旧 `window.aiWorkflow`
+命名空间与 `src/shared/ai-workflow-api.ts` 已删除**（AI 工作流 app 的读写在三动词上完成）。
 
-```ts
-export interface AiWorkflowApi {
-  runtimes: {
-    list(): Promise<Runtime[]>
-    /** 创建前先探测；探测失败抛错且不落库 */
-    create(input: RuntimeInput): Promise<Runtime>
-    /** 保存后重新探测并落库最新结论（不抛探测错误） */
-    update(id: string, patch: Partial<RuntimeInput>): Promise<Runtime>
-    remove(id: string): Promise<void>
-    /** 扫描本机已安装的 agent CLI（只读，不写库；走插件注册表汇总） */
-    detect(): Promise<DetectedRuntime[]>
-    /** 可选执行器清单（来自插件注册表）；运行时表单下拉，只读 */
-    executors(): Promise<RuntimeExecutorChoice[]>
-    /** 真实探测一次（--probe + --version），把结论写入运行时；不产生 run */
-    probe(id: string): Promise<RuntimeProbe>
-    /** 各运行时的实时负载（按 runs 现算，不落库） */
-    statuses(): Promise<RuntimeStatus[]>
-    /** 读取该运行时的模型目录（--list-models）；失败抛错 */
-    models(id: string): Promise<RuntimeModelOption[]>
-  }
-  agents: { list(): Promise<Agent[]>; create(...): ...; update(...): ...; remove(id): Promise<void> }
-  workflows: {
-    list(): Promise<WorkflowWithStages[]>      // 含有序 stages
-    create(input: WorkflowInput): Promise<WorkflowWithStages>
-    update(id: string, patch: WorkflowInput): Promise<WorkflowWithStages>  // 含阶段增删改
-    remove(id: string): Promise<void>
-  }
-  tasks: {
-    list(workflowId: string): Promise<Task[]>
-    create(input: TaskInput): Promise<Task>              // TaskInput.stageId 可指定起始阶段，缺省首阶段
-    /** 看板拖拽：直接进入目标阶段，并执行该阶段进入效果 */
-    moveToStage(id: string, stageId: string): Promise<Task>
-    /** 看板拖拽到「已完成」区 */
-    complete(id: string): Promise<Task>
-    remove(id: string): Promise<void>
-  }
-  runs: {
-    listByTask(taskId: string): Promise<Run[]>
-    /** 该 run 的事件流（运行中可轮询增量） */
-    events(runId: string): Promise<RunEvent[]>
-  }
-  /** M4 卡片（审批）：读 open 卡 + 回答；回答失败抛可读错误（重复/越界/已关闭） */
-  cards: {
-    /** 全部 open 卡，按 createdAt 升序（顶部待审批条） */
-    open(): Promise<Card[]>
-    /** 回答一张卡：宿主生成 commandId 发 card.answer；成功后 changed 推送 */
-    answer(cardId: string, optionIndex: number): Promise<void>
-  }
-  chat: {
-    listConversations(): Promise<ChatConversation[]>
-    createConversation(agentId: string): Promise<ChatConversation>
-    removeConversation(id: string): Promise<void>
-    listMessages(conversationId: string): Promise<ChatMessage[]>
-    /** 发起一轮：用户消息落库后返回，输出经 onEvent 流式推送 */
-    send(conversationId: string, content: string): Promise<void>
-    /** 中止该对话正在执行的一轮（无执行中轮次时静默返回） */
-    cancel(conversationId: string): Promise<void>
-    /** 订阅流事件：{type:'event', event:RunEvent} | {type:'end'}；返回取消订阅函数 */
-    onEvent(cb: (event: ChatStreamEvent) => void): () => void
-  }
-  /** 任意变更/运行进度后触发；返回取消订阅函数 */
-  onChanged(cb: () => void): () => void
-}
-```
+| 旧具名方法（M4 及以前）        | M5 走法                                                                                       |
+| ------------------------------ | --------------------------------------------------------------------------------------------- |
+| `runtimes.list()`              | `query('runtimes.all')`                                                                       |
+| `runtimes.statuses()`          | `query('runtimes.statuses')`                                                                  |
+| `runtimes.detect()`            | `query('runtimes.detected')`（宿主视图，只读）                                                |
+| `runtimes.executors()`         | `query('runtimes.executors')`（宿主视图，只读）                                               |
+| `runtimes.models(id)`          | `query('runtimes.models', { runtimeId })`（宿主视图）                                         |
+| `runtimes.create/update/remove`| `dispatch({ type:'runtime.create' \| 'runtime.update' \| 'runtime.remove', commandId, ... })`   |
+| `runtimes.probe(id)`           | `dispatch({ type:'runtime.probe', commandId, id })`（宿主探测 → 落 `runtime.probed`）         |
+| `agents.*`                     | `query('agents.all')` + `dispatch({type:'agent.create' \| 'agent.update' \| 'agent.remove'})`   |
+| `workflows.*`                  | `query('workflows.all')` + `dispatch(workflow.*)`                                             |
+| `tasks.list(workflowId)`       | `query('tasks.byWorkflow', { workflowId })`                                                   |
+| `tasks.create/moveToStage/complete/remove` | `dispatch({type:'task.create' \| 'task.move' \| 'task.complete' \| 'task.remove'})` |
+| `runs.listByTask(taskId)`      | `query('runs.byTask', { taskId })`                                                            |
+| `runs.events(runId)`           | `query('run.events', { runId })`                                                              |
+| `cards.open()`                 | `query('cards.open')`                                                                         |
+| `cards.answer(cardId, index)`  | `dispatch({type:'card.answer', commandId, cardId, optionIndex, via:'ui'})` → `value` 是回答后的卡 |
+| `chat.listConversations()`     | `query('conversations.all')`                                                                  |
+| `chat.listMessages(cid)`       | `query('messages.byConversation', { conversationId })`                                        |
+| `chat.createConversation`      | `dispatch({type:'chat.create', commandId, agentId})` → `value` 是新对话                       |
+| `chat.send(cid, content)`      | `dispatch({type:'chat.send', commandId, conversationId, content})`                            |
+| `chat.removeConversation`      | `dispatch({type:'chat.remove', commandId, conversationId})`（宿主先取消活跃 run）             |
+| `chat.cancel(cid)`             | `dispatch({type:'chat.cancel', commandId, conversationId})`                                   |
+| `chat.onEvent(cb)`             | `subscribe(handler)` 的 `{kind:'stream' \| 'stream-end'}`（过滤 `conversationId`）             |
+| `onChanged(cb)`                | `subscribe(handler)` 的 `{kind:'facts', seq, types}`（按类型失效、按需重取）                  |
 
-- `runtimes.create` 的 `RuntimeInput`：`name` 必填，其余可省略。`executorKey` / `command` / `profile` 的缺省值由 IPC 按所选执行器插件 manifest 补齐（未指定 key 取注册表首项，未知 key 给可读错误），`argsTemplate` 缺省为空串；创建前按补齐后的配置探测，失败不落库。
-- `RuntimeExecutorChoice = { key, label, command, profile }`（顺序即 `registry.executors` 顺序）；`DetectedRuntime` 形状见「检测（detect）」。
-- `runtimes.detect` / `runtimes.executors` 都是只读：不写库、不发 changed。
-- 主进程在每次写操作与 run 进度变化后发 `ai-workflow:changed`；renderer 收到后失效重取（对齐 Multica「事件失效缓存」的做法）。`runtimes.detect` 只读，不发 changed。
-- 聊天流走**单独通道** `ai-workflow:chat`：每条 `RunEvent` 以 `{type:'event', event}` 推送，一轮结束时推 `{type:'end'}`（此时结果已落库），renderer 收到 `end` 再重取消息与会话列表。聊天与阶段共用 `run` 生命周期（`purpose='chat'`，事件与终态照常入 `runs`/`run_events`，经同一 scheduler 与执行器端口）；旁路通道只做实时显示，事实才是数据源。
-- 运行事件流只来自协议帧：`RunEvent` 的 `text`/`thinking`/`tool_call`/`tool_result`/`status` 与协议帧一一对应，不从原始文本猜测；stderr 不作为模型输出。
-- 契约新增**不得**改动既有 `window.workbench.notify` 等 shell 契约；只新增 `window.aiWorkflow` 命名空间。
+- 所有写命令带 `commandId`；宿主 `commands` 表按事实区间回放，重复提交不重复产事实（reject 不缓存）。
+- `runtimes.create` 的 `RuntimeInput`：`name` 必填，其余可省略。`executorKey` / `command` / `profile` 的缺省值由宿主按所选执行器插件 manifest 补齐（未指定 key 取注册表首项，未知 key 给可读错误），`argsTemplate` 缺省为空串；创建前按补齐后的配置探测，失败不落库。
+- `RuntimeExecutorChoice = { key, label, command, profile }`（顺序即 `registry.executors` 顺序）；`DetectedRuntime` 形状见「检测（detect）」。宿主视图只读：不写库、不发失效。
+- renderer 侧统一经 `shell/kernelStore`（先订阅后 `kernel.seq` 快照、按 seq 续传、失效重取、单订阅）；
+  看板「执行中」读 `tasks.executing`，不再逐任务推导。聊天流旁路只做实时显示，事实才是数据源。
+- 契约新增**不得**改动 `WorkbenchApi` 的形状；新增能力走新命令 + 新视图，不恢复具名 RPC。
 
 ## Code Style
 
@@ -458,7 +420,7 @@ export function completeTask(task: Task): Task
 - **运行时探测：** 注入假进程/假流测 `--probe` 帧成功、非零退出、超时、spawn 失败、输出截断、`--version` 解析，并断言不产生 run；另一条用真实 `node -e` 覆盖默认 spawn 路径（不联网）。
 - **协议后端：** 逐帧解析（ready/session/text/thinking/tool_call/tool_result/usage/result/protocol_error）、`v`/`request_id` 校验、非 JSON 行忽略、usage 累加、终态归一（含 `run_failed`）；取消信号顺序（cancel 帧 → 3s → SIGTERM → 2s → SIGKILL，Windows `taskkill /T /F`）与进程树终止；`--list-models` 投影。
 - **聊天执行链（`tests/host/chat`）：** 假协议后端 + 真实内核/内存库测 `resume_session_id` 续接（只发新消息）、`resume_rejected` 自动重试一次、帧入账→终态→`message.appended` 顺序、非零退出/超时/取消失败落消息、并发第二次 `send` 拒绝、对话执行中被删仍正常收尾。
-- **IPC：** handler 层 mock store/后端，验证参数透传与返回；`onChanged` 订阅/退订；拖拽/完成的非法路径（有活跃 run、目标阶段无效）；`runtimes.probe` 写回 `lastProbe`、`detect` 只读不发 changed、`statuses`/`models` 路由与失败抛错；`chat.*` 路由与取消。
+- **IPC：** 三动词契约（命令形状 / 视图参数 / 推送事件）在 `tests/protocol`、`tests/host/commands`、`tests/main/ipc`、`tests/preload` 覆盖：命令校验拒绝非法载荷、`commandId` 幂等、拖拽/完成的非法路径（有活跃 run、目标阶段无效）、`runtime.probe` 编排、`detect`/`executors`/`models` 宿主视图只读、`chat.*` 路由与取消；renderer 用 kernelStore 替身覆盖订阅/失效/续传。
 - **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「已完成」区触发 `complete`；TaskCard 可拖拽（有活跃 run 时不可拖）并按进入方式显示提示；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉；RunLog 事件流（text/thinking/tool 折叠、运行中轮询、errorCode 文案、用量/退出码/耗时）；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示。
 - **聊天 hook（`useChat`）：** 新建/发送/`event` 流式回显/`end` 落库重载/中止/删除/各类错误分支、卸载退订、只处理当前会话的增量。
 - **页面：** 两栏布局下工作台默认落在「聊天」栏（侧栏顶部切换条 + 会话列表可见、设置栏目不可见），切「任务」显示看板与运行记录并隐藏输入区，侧栏底部「工作台/设置」分段控件切换视图，设置三栏目互不混排。
@@ -467,8 +429,8 @@ export function completeTask(task: Task): Task
 
 ## Boundaries
 
-- **Always：** 阶段流转/默认目标解析只写在 `stage-machine.ts`；SQLite 只在主进程读写，renderer 一律经 `window.aiWorkflow`；进程执行经执行器插件端口，事件只来自协议帧；新增运行时协议只写 `src/plugins/executors/<id>/` + registry 一行，不改内核/宿主/UI；提交前 `pnpm check` 通过。
-- **Ask first：** 新增 npm 依赖（尤其原生模块）；修改 shell 的 `AppDefinition` 或既有 `WorkbenchApi` 契约；改变数据库文件位置或引入迁移框架。
+- **Always：** 阶段流转/默认目标解析只写在 `stage-machine.ts`；SQLite 只在主进程读写，renderer 一律经 `window.workbench` 三动词；进程执行经执行器插件端口，事件只来自协议帧；新增运行时协议只写 `src/plugins/executors/<id>/` + registry 一行，不改内核/宿主/UI；提交前 `pnpm check` 通过。
+- **Ask first：** 新增 npm 依赖（尤其原生模块）；修改 shell 的 `AppPlugin` 或既有 `WorkbenchApi` 契约；改变数据库文件位置或引入迁移框架。
 - **Never：** 在 renderer 直接 `require('electron')`/用 `fs`/`child_process`；把业务规则写进组件；把凭据/token 明文写库；从原始文本猜测事件或把 stderr 当模型输出；删除失败测试或改测试预期来掩盖问题。
 
 ## Success Criteria

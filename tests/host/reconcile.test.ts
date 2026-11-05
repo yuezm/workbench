@@ -401,7 +401,8 @@ describe('reconcile：中断的聊天轮次（T14b）', () => {
     ).agent.id
 
     const convFacts = world.store.dispatch({
-      type: 'conversation.create',
+      type: 'chat.create',
+      commandId: nextCommandId(),
       agentId,
     }).facts
     const conversationId = (
@@ -409,7 +410,12 @@ describe('reconcile：中断的聊天轮次（T14b）', () => {
         conversation: { id: string }
       }
     ).conversation.id
-    world.store.dispatch({ type: 'conversation.send', conversationId, content: '你好' })
+    world.store.dispatch({
+      type: 'chat.send',
+      commandId: nextCommandId(),
+      conversationId,
+      content: '你好',
+    })
     world.store.dispatch({ type: 'run.claim', runtimeId, capacity: 1 })
 
     const run = world.db

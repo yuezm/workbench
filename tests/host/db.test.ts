@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { needsRunsUpgrade, needsRuntimesUpgrade, openDatabase } from '../../src/host/db'
 import {
+  PROJECTION_TABLES,
   RUN_M2_ADDED_COLUMNS,
   RUNTIMES_M3_ADDED_COLUMNS,
   SCHEMA_SQL,
@@ -174,11 +175,12 @@ function userVersion(d: DatabaseSync): number {
 }
 
 describe('openDatabase', () => {
-  it(':memory: 建全 schema（十张投影 + facts / projection_meta + 宿主私有 process_registry）并写 user_version', () => {
+  it(':memory: 建全 schema（十张投影 + facts / projection_meta + 宿主私有 process_registry、commands）并写 user_version', () => {
     db = openDatabase(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
       'cards',
+      'commands',
       'conversations',
       'facts',
       'messages',
@@ -191,6 +193,8 @@ describe('openDatabase', () => {
       'workflow_stages',
       'workflows',
     ])
+    // commands 是命令幂等表（M5）：与 process_registry 一样是宿主私有非投影表，不进投影白名单
+    expect(PROJECTION_TABLES).not.toContain('commands')
     expect(userVersion(db)).toBe(SCHEMA_VERSION)
   })
 
@@ -248,6 +252,7 @@ describe('openDatabase', () => {
       expect(tableNames(local)).toEqual([
         'agents',
         'cards',
+        'commands',
         'conversations',
         'facts',
         'messages',
@@ -263,6 +268,10 @@ describe('openDatabase', () => {
       expect(
         (local.prepare('SELECT COUNT(*) AS n FROM runtimes').get() as unknown as { n: number }).n,
       ).toBe(1)
+      // 非投影表补齐不动数据：commands 建出来且为空，事实与投影元信息不被触发重建
+      expect(countOf(local, 'commands')).toBe(0)
+      expect(countOf(local, 'facts')).toBe(0)
+      expect(countOf(local, 'projection_meta')).toBe(0)
       expect(userVersion(local)).toBe(SCHEMA_VERSION)
     } finally {
       local.close()

@@ -1,20 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
-import type {
-  Agent,
-  Run,
-  Task,
-  TaskInput,
-  WorkflowInput,
-  WorkflowWithStages,
-} from '../../../../shared/ai-workflow-api'
-import { Dialog } from '../../components/ui/dialog'
+import { useState, type ReactElement } from 'react'
+import type { TaskInput } from '../../../../protocol/entities'
 import { panelCls } from '../../components/ui/panel'
 import { Segmented } from '../../components/ui/segmented'
 import { Select } from '../../components/ui/select'
 import { cn } from '../../lib/cn'
-import { wfApi } from './api'
-import { AgentManager } from './components/AgentManager'
+import { getKernelStore } from '../../shell/kernelStore'
+import { useKernelView, useKernelViewState } from '../../shell/useKernelView'
 import { ApprovalBar } from './components/ApprovalBar'
+import { AgentManager } from './components/AgentManager'
 import { ChatPanel } from './components/ChatPanel'
 import { ConversationList } from './components/ConversationList'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -22,7 +15,6 @@ import { RunLog } from './components/RunLog'
 import { RuntimeManager } from './components/RuntimeManager'
 import { SettingsNav, type SettingsSection } from './components/SettingsNav'
 import { TaskDialog } from './components/TaskDialog'
-import { WorkflowEditor } from './components/WorkflowEditor'
 import { WorkflowManager } from './components/WorkflowManager'
 import { WorkflowSwitcher } from './components/WorkflowSwitcher'
 import { WorkspaceNav, type WorkspaceSection } from './components/WorkspaceNav'
@@ -43,16 +35,27 @@ function SectionHeader({ title, hint }: { title: string; hint: string }): ReactE
   )
 }
 
+/**
+ * ai-workflow 工作台（M5 视图化）。
+ *
+ * - 读：全部走 `useKernelView`（工作流 / 智能体 / 任务 / 运行记录 / 审批条 / 聊天），
+ *   未就绪按空态处理；事实到达后视图自动重取，没有 reload 链与变更订阅。
+ * - 写：全部走 `getKernelStore().dispatch`，失败沿用原有文案展示。
+ * - 选中项（当前工作流 / 运行记录的任务）仍是 UI 本地状态。
+ */
 export function AiWorkflowPage(): ReactElement {
-  const [workflows, setWorkflows] = useState<WorkflowWithStages[]>([])
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [activeId, setActiveId] = useState<string | undefined>()
+  const workflowsState = useKernelViewState('workflows.all')
+  const workflows = workflowsState.data ?? []
+  const agents = useKernelView('agents.all') ?? []
+  /** 用户选中的工作流：失效（被删/清空）时回落到首个，首个由视图数据派生，不需要 effect */
+  const [selectedId, setSelectedId] = useState<string | undefined>()
+  const activeId =
+    selectedId !== undefined && workflows.some((w) => w.id === selectedId)
+      ? selectedId
+      : workflows[0]?.id
   const [error, setError] = useState<string | null>(null)
-  const [editing, setEditing] = useState<WorkflowWithStages | null | undefined>(undefined)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
-  const [runs, setRuns] = useState<Run[]>([])
   const [view, setView] = useState<View>('workspace')
   /** 工作台侧栏栏目：聊天（主动对话）/ 任务（看板与运行记录） */
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('chat')
@@ -60,135 +63,24 @@ export function AiWorkflowPage(): ReactElement {
   /** 聊天状态机：侧栏（会话清单）与内容区（消息流）共用同一份 */
   const chat = useChat(agents)
 
-  const loadRunsFor = async (taskId: string | undefined): Promise<void> => {
-    if (!taskId) {
-      setRuns([])
-      return
-    }
-    try {
-      setRuns(await wfApi().runs.listByTask(taskId))
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }
-
-  const loadTasksFor = async (id: string): Promise<void> => {
-    try {
-      setTasks(await wfApi().tasks.list(id))
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }
-
-  const reload = useCallback(async (): Promise<void> => {
-    try {
-      const [w, a, t] = await Promise.all([
-        wfApi().workflows.list(),
-        wfApi().agents.list(),
-        wfApi().tasks.list(activeId ?? ''),
-      ])
-      setWorkflows(w)
-      setAgents(a)
-      setTasks(t)
-      setActiveId((prev) => (prev && w.some((x) => x.id === prev) ? prev : w[0]?.id))
-      setError(null)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [activeId])
-
-  // 用 ref 持有最新的 reload：onChanged 订阅只建立一次，但回调必须看到最新 activeId，
-  // 否则外部变更（如 run 完成）会用初始的 undefined 去拉任务，把看板清空。
-  const reloadRef = useRef(reload)
-  useEffect(() => {
-    reloadRef.current = reload
-  }, [reload])
-
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const [w, a] = await Promise.all([wfApi().workflows.list(), wfApi().agents.list()])
-        if (!alive) return
-        setWorkflows(w)
-        setAgents(a)
-        setActiveId(w[0]?.id)
-      } catch (e) {
-        if (alive) setError(errMsg(e))
-      }
-    })()
-    const off = wfApi().onChanged(() => void reloadRef.current())
-    return () => {
-      alive = false
-      off()
-    }
-  }, [])
-
-  useEffect(() => {
-    let alive = true
-    const run = async (): Promise<void> => {
-      if (!activeId) {
-        if (alive) setTasks([])
-        return
-      }
-      try {
-        const t = await wfApi().tasks.list(activeId)
-        if (alive) setTasks(t)
-      } catch (e) {
-        if (alive) setError(errMsg(e))
-      }
-    }
-    void run()
-    return () => {
-      alive = false
-    }
-  }, [activeId])
-
-  useEffect(() => {
-    let alive = true
-    const run = async (): Promise<void> => {
-      if (!selectedTaskId) {
-        if (alive) setRuns([])
-        return
-      }
-      try {
-        const r = await wfApi().runs.listByTask(selectedTaskId)
-        if (alive) setRuns(r)
-      } catch (e) {
-        if (alive) setError(errMsg(e))
-      }
-    }
-    void run()
-    return () => {
-      alive = false
-    }
-  }, [selectedTaskId])
-
-  const save = async (input: WorkflowInput): Promise<void> => {
-    try {
-      let targetId = editing ? editing.id : (activeId ?? '')
-      if (editing) {
-        await wfApi().workflows.update(editing.id, input)
-      } else {
-        const created = await wfApi().workflows.create(input)
-        targetId = created.id
-        setActiveId(created.id)
-      }
-      await reload()
-      await loadTasksFor(targetId)
-      await loadRunsFor(selectedTaskId)
-      setEditing(undefined)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }
+  const tasksState = useKernelViewState(
+    'tasks.byWorkflow',
+    activeId ? { workflowId: activeId } : null,
+  )
+  const tasks = tasksState.data ?? []
+  const runsState = useKernelViewState(
+    'runs.byTask',
+    selectedTaskId ? { taskId: selectedTaskId } : null,
+  )
+  const runs = runsState.data ?? []
+  /** 写命令失败优先；否则展示读视图的错误（视图查询失败时 store 会给出文案） */
+  const shownError = error ?? workflowsState.error ?? tasksState.error ?? runsState.error
 
   const moveToStage = (id: string, stageId: string): void => {
     void (async () => {
       try {
-        await wfApi().tasks.moveToStage(id, stageId)
-        await loadTasksFor(activeId ?? '')
-        await loadRunsFor(selectedTaskId)
+        await getKernelStore().dispatch({ type: 'task.move', commandId: '', id, stageId })
+        setError(null)
       } catch (e) {
         setError(errMsg(e))
       }
@@ -198,9 +90,8 @@ export function AiWorkflowPage(): ReactElement {
   const completeTask = (id: string): void => {
     void (async () => {
       try {
-        await wfApi().tasks.complete(id)
-        await loadTasksFor(activeId ?? '')
-        await loadRunsFor(selectedTaskId)
+        await getKernelStore().dispatch({ type: 'task.complete', commandId: '', id })
+        setError(null)
       } catch (e) {
         setError(errMsg(e))
       }
@@ -209,9 +100,8 @@ export function AiWorkflowPage(): ReactElement {
 
   const createTask = async (input: TaskInput): Promise<void> => {
     try {
-      await wfApi().tasks.create(input)
-      await loadTasksFor(activeId ?? '')
-      await loadRunsFor(selectedTaskId)
+      await getKernelStore().dispatch({ type: 'task.create', commandId: '', input })
+      setError(null)
       setDialogOpen(false)
     } catch (e) {
       setError(errMsg(e))
@@ -247,7 +137,7 @@ export function AiWorkflowPage(): ReactElement {
                 <WorkflowSwitcher
                   workflows={workflows}
                   activeId={activeId}
-                  onSelect={setActiveId}
+                  onSelect={setSelectedId}
                 />
               )}
             </WorkspaceNav>
@@ -272,12 +162,12 @@ export function AiWorkflowPage(): ReactElement {
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {/* 顶部待审批条：有 open 卡才渲染；回答成功跟随 changed 重拉 */}
+        {/* 顶部待审批条：有 open 卡才渲染；回答走 card.answer 命令 */}
         <ApprovalBar />
 
-        {error && editing === undefined && (
+        {shownError && (
           <p className="mx-4 mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">
-            {error}
+            {shownError}
           </p>
         )}
 
@@ -354,13 +244,7 @@ export function AiWorkflowPage(): ReactElement {
             {section === 'workflows' && (
               <>
                 <SectionHeader title="工作流" hint="阶段序列与流转规则" />
-                <WorkflowManager
-                  workflows={workflows}
-                  activeId={activeId}
-                  onSelect={setActiveId}
-                  onEdit={(w) => setEditing(w)}
-                  onNew={() => setEditing(null)}
-                />
+                <WorkflowManager />
               </>
             )}
           </div>
@@ -369,22 +253,6 @@ export function AiWorkflowPage(): ReactElement {
 
       {dialogOpen && active && (
         <TaskDialog workflow={active} onSave={createTask} onCancel={() => setDialogOpen(false)} />
-      )}
-
-      {editing !== undefined && (
-        <Dialog onClose={() => setEditing(undefined)} className="max-w-3xl">
-          {error && (
-            <p className="mb-3 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
-              {error}
-            </p>
-          )}
-          <WorkflowEditor
-            workflow={editing}
-            agents={agents}
-            onSave={save}
-            onCancel={() => setEditing(undefined)}
-          />
-        </Dialog>
       )}
     </div>
   )

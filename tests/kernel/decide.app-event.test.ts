@@ -109,3 +109,21 @@ describe('kernel/decide app.event', () => {
     expect(new Set(decision.facts.map((fact) => fact.type))).toEqual(new Set(['event.received']))
   })
 })
+
+describe('kernel/decide runtime.probe（M5 编排命令的防御分支）', () => {
+  it('直连 decide 明确拒绝：探测由宿主编排，内核不碰副作用', () => {
+    const decision = decide(
+      view(),
+      { commandId: 'c-probe', type: 'runtime.probe', id: 'rt-1' },
+      NOW,
+      env(),
+    )
+    expect(decision).toEqual({
+      facts: [],
+      reject: {
+        code: 'unsupported',
+        message: 'runtime.probe 由宿主编排（探测后落 runtime.probed）',
+      },
+    })
+  })
+})

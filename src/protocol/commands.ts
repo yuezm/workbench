@@ -32,6 +32,7 @@ export const COMMAND_NAMES = [
   'runtime.create',
   'runtime.update',
   'runtime.remove',
+  'runtime.probe',
   'runtime.probed',
   'task.create',
   'task.move',
@@ -105,6 +106,15 @@ export interface RuntimeUpdateCommand extends CommandBase {
 
 export interface RuntimeRemoveCommand extends CommandBase {
   type: 'runtime.remove'
+  id: string
+}
+
+/**
+ * 探测一次运行时（M5 D3 编排命令）：只传 id，宿主用执行器端口探测 → 落 `runtime.probed`
+ * 事实 → 返回探测结论。前端不再自己拼 `probe` 载荷（也不可信）。
+ */
+export interface RuntimeProbeCommand extends CommandBase {
+  type: 'runtime.probe'
   id: string
 }
 
@@ -225,6 +235,7 @@ export type Command =
   | RuntimeCreateCommand
   | RuntimeUpdateCommand
   | RuntimeRemoveCommand
+  | RuntimeProbeCommand
   | RuntimeProbedCommand
   | TaskCreateCommand
   | TaskMoveCommand

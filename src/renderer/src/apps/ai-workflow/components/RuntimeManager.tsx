@@ -5,11 +5,12 @@ import type {
   RuntimeExecutorChoice,
   RuntimeInput,
   RuntimeStatus,
-} from '../../../../../shared/ai-workflow-api'
+} from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Panel, badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
-import { wfApi } from '../api'
+import { getKernelStore } from '../../../shell/kernelStore'
+import { useKernelViewState } from '../../../shell/useKernelView'
 import { RuntimeDialog } from './RuntimeDialog'
 import { RuntimeStatusBadge } from './RuntimeStatusBadge'
 
@@ -21,7 +22,7 @@ interface DialogState {
   initial: RuntimeInput | null
 }
 
-/** 新建运行时的默认值：执行器与 command/profile 由弹窗从 executors() 清单首项 manifest 取 */
+/** 新建运行时的默认值：执行器与 command/profile 由弹窗从 executors 清单首项 manifest 取 */
 function newRuntimeInput(): RuntimeInput {
   return {
     name: '',
@@ -95,10 +96,17 @@ function ScanIcon({ className }: { className?: string }): ReactElement {
  *
  * 运行时 = 本机执行环境实例（协议族 + CLI 启动方式 + 执行策略）；清单同时展示
  * 持久化的最近探测结论与实时负载，新建/编辑共用一个弹窗。
+ *
+ * 清单/负载读内核视图（写操作成功后由事实失效自动重取）；探测清单与执行器清单
+ * 是宿主视图，按需 `query` 一次。
  */
 export function RuntimeManager(): ReactElement {
-  const [items, setItems] = useState<Runtime[]>([])
-  const [statuses, setStatuses] = useState<Record<string, RuntimeStatus>>({})
+  const runtimesState = useKernelViewState('runtimes.all')
+  const statusesState = useKernelViewState('runtimes.statuses')
+  const items = runtimesState.data ?? []
+  const statuses: Record<string, RuntimeStatus> = Object.fromEntries(
+    (statusesState.data ?? []).map((status) => [status.runtimeId, status]),
+  )
   /** 执行器清单（只读，注册表顺序）：用于把角标的 key 映射成展示名 */
   const [executors, setExecutors] = useState<RuntimeExecutorChoice[]>([])
   const [detected, setDetected] = useState<DetectedRuntime[]>([])
@@ -114,25 +122,10 @@ export function RuntimeManager(): ReactElement {
   /** 展开失败详情的运行时 id */
   const [expandedProbeId, setExpandedProbeId] = useState<string | null>(null)
 
-  const load = useCallback(async (): Promise<void> => {
-    try {
-      const [list, workload, choices] = await Promise.all([
-        wfApi().runtimes.list(),
-        wfApi().runtimes.statuses(),
-        wfApi().runtimes.executors(),
-      ])
-      setItems(list)
-      setStatuses(Object.fromEntries(workload.map((status) => [status.runtimeId, status])))
-      setExecutors(choices)
-      setError(null)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [])
-
   const scan = useCallback(async (): Promise<void> => {
     try {
-      setDetected(await wfApi().runtimes.detect())
+      const list = await getKernelStore().query('runtimes.detected')
+      setDetected(list ?? [])
       setDetectError(null)
     } catch (e) {
       setDetectError(errMsg(e))
@@ -141,15 +134,26 @@ export function RuntimeManager(): ReactElement {
     }
   }, [])
 
-  // 进入该页即拉取清单/负载，并自动识别本机已安装的 CLI
-  // 放到下一个宏任务再发请求：让 effect 只负责触发，不在渲染阶段同步改状态
+  // 进入该页即取执行器清单，并自动识别本机已安装的 CLI。
+  // 放到下一个宏任务再发请求：让 effect 只负责触发，不在渲染阶段同步改状态。
   useEffect(() => {
+    let alive = true
     const timer = setTimeout(() => {
-      void load()
+      void getKernelStore()
+        .query('runtimes.executors')
+        .then((list) => {
+          if (alive) setExecutors(list ?? [])
+        })
+        .catch((e: unknown) => {
+          if (alive) setError(errMsg(e))
+        })
       void scan()
     }, 0)
-    return () => clearTimeout(timer)
-  }, [load, scan])
+    return () => {
+      alive = false
+      clearTimeout(timer)
+    }
+  }, [scan])
 
   /** 「重新扫描」：先进入扫描中再复用 scan 的收尾逻辑 */
   const rescan = (): void => {
@@ -158,31 +162,38 @@ export function RuntimeManager(): ReactElement {
   }
 
   const submit = async (input: RuntimeInput): Promise<void> => {
-    if (dialog?.runtime) await wfApi().runtimes.update(dialog.runtime.id, input)
-    else await wfApi().runtimes.create(input)
+    const store = getKernelStore()
+    if (dialog?.runtime) {
+      await store.dispatch({
+        type: 'runtime.update',
+        commandId: '',
+        id: dialog.runtime.id,
+        patch: input,
+      })
+    } else {
+      await store.dispatch({ type: 'runtime.create', commandId: '', input })
+    }
     setDialog(null)
-    await load()
   }
 
   const remove = async (id: string): Promise<void> => {
     try {
-      await wfApi().runtimes.remove(id)
+      await getKernelStore().dispatch({ type: 'runtime.remove', commandId: '', id })
       setExpandedProbeId((prev) => (prev === id ? null : prev))
-      await load()
     } catch (e) {
       setError(errMsg(e))
     }
   }
 
   /**
-   * 真实探测一次：结论已由主进程写回运行时，这里同步行内状态，
-   * 失败（运行时被删等）落成页面级错误。
+   * 重新探测一次：`runtime.probe` 是宿主编排命令（M5 D3）——宿主用执行器端口探测、
+   * 落 `runtime.probed` 事实并返回结论；前端不再自己拼 probe 载荷。
+   * 列表由 `runtime.probed` 事实失效自动重取。
    */
   const runProbe = async (id: string): Promise<void> => {
     setProbingId(id)
     try {
-      const probe = await wfApi().runtimes.probe(id)
-      setItems((prev) => prev.map((r) => (r.id === id ? { ...r, lastProbe: probe } : r)))
+      await getKernelStore().dispatch({ type: 'runtime.probe', commandId: '', id })
       setError(null)
     } catch (e) {
       setError(errMsg(e))
@@ -204,7 +215,7 @@ export function RuntimeManager(): ReactElement {
         ...newRuntimeInput(),
         name: taken ? `${d.label} (${d.command})` : d.label,
         command: d.command,
-        // 未注册 CLI 的 executorKey 是空串：空串会被 IPC 当成未注册的 key 拒绝，这里不写
+        // 未注册 CLI 的 executorKey 是空串：空串会被宿主当成未注册的 key 拒绝，这里不写
         executorKey: d.executorKey || undefined,
       },
     })
@@ -213,6 +224,8 @@ export function RuntimeManager(): ReactElement {
   const toggleProbeDetails = (id: string): void => {
     setExpandedProbeId((prev) => (prev === id ? null : id))
   }
+
+  const pageError = error ?? runtimesState.error ?? statusesState.error
 
   return (
     <div className="flex flex-col gap-4">
@@ -280,9 +293,9 @@ export function RuntimeManager(): ReactElement {
         )}
       </Panel>
 
-      {error && (
+      {pageError && (
         <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
-          {error}
+          {pageError}
         </p>
       )}
 

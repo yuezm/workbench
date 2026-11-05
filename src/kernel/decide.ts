@@ -617,6 +617,11 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       return done([draft('runtime.updated', { runtime })])
     }
 
+    case 'runtime.probe':
+      // M5 编排命令：探测需要执行器端口，由宿主命令路由处理（内核不碰副作用）。
+      // 直接进 decide 说明绕过了路由，明确拒绝而不是静默零事实。
+      return reject('unsupported', 'runtime.probe 由宿主编排（探测后落 runtime.probed）')
+
     case 'runtime.probed': {
       const current = view.runtimes.get(input.id)
       if (!current) return reject('not_found', '运行时不存在: ' + input.id)

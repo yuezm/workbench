@@ -8,11 +8,11 @@ import type { KernelPort } from '../../src/kernel/types'
 import type { Agent, Runtime, Task } from '../../src/protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../../src/protocol/executor'
 import { createEffects } from '../../src/host/effects'
+import { createCommandRouter, type CommandRouter } from '../../src/host/commands'
 import { createProcessRegistry, type ProcessRegistry } from '../../src/host/process-registry'
 import { createScheduler, type Scheduler, type SchedulerTimer } from '../../src/host/scheduler'
 import { createStore, type Store } from '../../src/host/store/index'
 import { openDatabase } from '../../src/host/db'
-import { createAiWorkflowHandler } from '../../src/main/ai-workflow/ipc'
 
 const kernel: KernelPort = { decide, project, viewSpec }
 const AT = '2026-01-01T00:00:00.000Z'
@@ -428,8 +428,12 @@ describe('cancel：执行中 run 的取消时序', () => {
 })
 
 describe('cancel：删除任务 / 工作流前先取消', () => {
-  const makeHandler = (harness: Harness) =>
-    createAiWorkflowHandler({
+  /**
+   * 三动词的命令路由（生产入口）：删除类命令在 preflight 里先取消活跃 run 再落删除事实。
+   * 写路径仍走 effects.dispatch（run.cancel_requested → scheduler.cancel 走真实链路）。
+   */
+  function makeRouter(harness: Harness): CommandRouter {
+    return createCommandRouter({
       store: world.store,
       dispatch: harnessDispatch(harness),
       executors: { forRuntime: () => null },
@@ -438,10 +442,9 @@ describe('cancel：删除任务 / 工作流前先取消', () => {
         command: 'dsh',
         profile: 'multica',
       }),
-      detect: async () => [],
-      executorChoices: () => [],
-      newCommandId: nextCommandId,
+      hostView: () => null,
     })
+  }
 
   /** IPC 的写入口：effects.dispatch（run.cancel_requested → scheduler.cancel 走真实链路）。 */
   function harnessDispatch(harness: Harness) {
@@ -456,10 +459,13 @@ describe('cancel：删除任务 / 工作流前先取消', () => {
     const seeded = seedTask()
     const stuck = stuckPort()
     const harness = makeScheduler(stuck.port)
-    const handler = makeHandler(harness)
+    const router = makeRouter(harness)
     await startRun(harness, seeded)
 
-    expect(() => handler('tasks.remove', [seeded.taskId])).not.toThrow()
+    // 删除命令不抛错：路由先取消活跃 run，再落 task.removed
+    await expect(
+      router.dispatch({ commandId: nextCommandId(), type: 'task.remove', id: seeded.taskId }),
+    ).resolves.toBeDefined()
 
     const types = factTypes()
     expect(types).toContain('run.cancel_requested')
@@ -479,10 +485,14 @@ describe('cancel：删除任务 / 工作流前先取消', () => {
     const seeded = seedTask()
     const stuck = stuckPort()
     const harness = makeScheduler(stuck.port)
-    const handler = makeHandler(harness)
+    const router = makeRouter(harness)
     await startRun(harness, seeded)
 
-    handler('workflows.remove', [seeded.workflowId])
+    await router.dispatch({
+      commandId: nextCommandId(),
+      type: 'workflow.remove',
+      id: seeded.workflowId,
+    })
 
     const types = factTypes()
     expect(types.filter((type) => type === 'run.cancel_requested')).toHaveLength(1)

@@ -48,6 +48,7 @@ export interface CommandResults {
   'runtime.create': Runtime
   'runtime.update': Runtime
   'runtime.remove': null
+  'runtime.probe': RuntimeProbe
   'runtime.probed': RuntimeProbe
   'task.create': Task
   'task.move': Task
@@ -90,6 +91,15 @@ export interface StreamEndEvent {
 
 /** main → renderer 的推送（subscribe 动词的唯一载荷）。 */
 export type KernelEvent = FactsEvent | StreamEvent | StreamEndEvent
+
+/** IPC 错误（跨进程只传 code + message；renderer 按 message 展示，按 code 分支）。 */
+export interface IpcError {
+  code: string
+  message: string
+}
+
+/** IPC 应答信封：成功带 value，失败带可读错误（不让 Electron 序列化异常栈）。 */
+export type IpcResponse<T> = { ok: true; value: T } | { ok: false; error: IpcError }
 
 /** renderer → main 的 IPC 通道名（preload 与 main 共用，避免魔法字符串漂移）。 */
 export const WORKBENCH_DISPATCH_CHANNEL = 'workbench:dispatch'

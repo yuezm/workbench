@@ -68,6 +68,7 @@ const commandSamples: Command[] = [
     eventType: 'pomodoro.completed',
     subject: '番茄结束',
   },
+  { commandId: 'c22', type: 'runtime.probe', id: 'rt-1' },
 ]
 
 const hostSamples: Input[] = [
@@ -103,6 +104,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'runtime.create': ['runtimes'],
   'runtime.update': ['runtimes'],
   'runtime.remove': ['runtimes', 'agents'],
+  'runtime.probe': ['runtimes'],
   'runtime.probed': ['runtimes'],
   'task.create': ['workflows', 'workflow_stages', 'agents', 'runtimes'],
   'task.move': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
@@ -138,8 +140,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 21 条命令 + 9 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(21)
+  it('覆盖 22 条命令 + 9 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(22)
     expect(HOST_INPUT_NAMES.length).toBe(9)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)

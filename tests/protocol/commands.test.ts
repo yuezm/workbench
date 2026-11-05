@@ -19,6 +19,7 @@ const expected = [
   'runtime.create',
   'runtime.update',
   'runtime.remove',
+  'runtime.probe',
   'runtime.probed',
   'task.create',
   'task.move',

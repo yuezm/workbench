@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import {
+  COMMANDS_SQL,
   FACTS_SQL,
   INDEX_SQL,
   PROCESS_REGISTRY_SQL,
@@ -173,6 +174,8 @@ export function openDatabase(filePath: string): DatabaseSync {
       db.exec(FACTS_SQL)
       // 宿主私有进程登记表（T13）：不进投影白名单，旧库打开时补齐即可。
       db.exec(PROCESS_REGISTRY_SQL)
+      // 命令幂等表（M5）：非投影表，旧库打开时补齐
+      db.exec(COMMANDS_SQL)
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     })
     return db

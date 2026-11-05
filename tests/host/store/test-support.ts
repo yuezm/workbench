@@ -18,7 +18,7 @@ import type {
   Workflow,
   WorkflowStage,
 } from '../../../src/protocol/entities'
-import { FACTS_SQL, SCHEMA_SQL } from '../../../src/host/schema'
+import { COMMANDS_SQL, FACTS_SQL, SCHEMA_SQL } from '../../../src/host/schema'
 
 export const SAMPLE_AT = '2026-01-01T00:00:00.000Z'
 
@@ -27,6 +27,7 @@ export function createMemoryDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:')
   db.exec(SCHEMA_SQL)
   db.exec(FACTS_SQL)
+  db.exec(COMMANDS_SQL)
   return db
 }
 

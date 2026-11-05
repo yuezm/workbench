@@ -31,9 +31,9 @@ function memory(): DatabaseSync {
   return db
 }
 
-const workflowCreate = (name: string, stages = 2): Command => ({
+const workflowCreate = (name: string, stages = 2, commandId = `create-${name}`): Command => ({
   type: 'workflow.create',
-  commandId: `create-${name}`,
+  commandId,
   input: {
     name,
     stages: Array.from({ length: stages }, (_, index) => ({
@@ -385,9 +385,12 @@ describe('dispatch：序号冲突', () => {
         return `other-${otherId}`
       },
     })
+    let attempt = 0
     const kernel = createFakeKernel({
       decide: (view, input, at, env) => {
-        other.dispatch(workflowCreate('并发流程', 1))
+        // 每次重试都用新的 commandId：同一 commandId 现在会幂等回放，写者不再产新事实
+        attempt += 1
+        other.dispatch(workflowCreate('并发流程', 1, `foreign-${attempt}`))
         return defaultDecide(view, input, at, env)
       },
     })

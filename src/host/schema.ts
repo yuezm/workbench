@@ -236,6 +236,20 @@ export const SCHEMA_SQL = [
 ].join('\n')
 
 /**
+ * 命令幂等表（M5）：**非投影表**，不属于 `PROJECTION_TABLES`，重建不清空。
+ *
+ * `first_seq` / `fact_count` 指向该命令产生的事实区间（零事实命令为 0 / 0）；
+ * 命中即按区间回放原结果、不重复产事实。reject 不记录（允许重试）。
+ */
+export const COMMANDS_SQL = `
+CREATE TABLE IF NOT EXISTS commands (
+  command_id TEXT PRIMARY KEY,
+  first_seq INTEGER NOT NULL,
+  fact_count INTEGER NOT NULL,
+  at TEXT NOT NULL
+);`
+
+/**
  * 宿主私有进程登记表 DDL：与 `FACTS_SQL` 一样单独执行（不进业务表清单，
  * 也就不在 `SCHEMA_SQL` 的「十张投影表」断言范围内）。
  */

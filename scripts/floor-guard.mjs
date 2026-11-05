@@ -125,6 +125,8 @@ const RELOCATED_TESTS = {
   'tests/main/ai-workflow/ipc.test.ts': 'tests/host/ipc.test.ts',
   // repository 补充用例（runs / 负载 / 聊天投影）→ 投影视图与 IPC 用例
   'tests/main/ai-workflow/repository.extra.test.ts': 'tests/host/ipc.test.ts',
+  // M5：旧 ai-workflow RPC 表用例 → 三动词命令路由 / 幂等 / 宿主视图用例
+  'tests/host/ipc.test.ts': 'tests/host/commands.test.ts',
   'tests/main/index.test.ts': 'tests/host/boot.test.ts',
   // M3：执行器插件化后按层搬家（T5 登记，新位置行为等价覆盖）
   'tests/main/ai-workflow/runtime/dsh.test.ts': 'tests/plugins/executors/dsh/dsh.test.ts',

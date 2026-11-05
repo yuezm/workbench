@@ -347,6 +347,8 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
       return requiredId(command.id, 'id') ?? checkRuntimeInput(command.patch, true)
     case 'runtime.remove':
       return requiredId(command.id, 'id')
+    case 'runtime.probe':
+      return requiredId(command.id, 'id')
     case 'runtime.probed':
       return requiredId(command.id, 'id') ?? checkProbe(command.probe)
     case 'task.create':
@@ -628,7 +630,7 @@ export type ValidateQueryResult =
  * 校验 renderer 传来的视图 id 与参数：未知视图、参数缺失/类型不对/超长一律拒收。
  * 无参数视图容忍 `undefined` / `null`；带参数视图缺字段直接拒绝（不静默当空串）。
  */
-export function validateQuery(view: unknown, params: unknown): ValidateQueryResult {
+export function validateQuery(view: unknown, params?: unknown): ValidateQueryResult {
   if (typeof view !== 'string' || !(VIEW_IDS as readonly string[]).includes(view)) {
     return { ok: false, message: `未知视图: ${String(view)}` }
   }

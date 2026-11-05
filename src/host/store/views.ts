@@ -30,6 +30,7 @@ import type {
   RunUsage,
   Runtime,
   RuntimeProbe,
+  RuntimeStatus,
   Task,
   TaskStatus,
   Workflow,
@@ -755,5 +756,31 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readCardsByRun(db, readStringParam(params, 'runId'))
     case 'runs.waiting':
       return readWaitingRuns(db)
+    case 'tasks.executing':
+      // M5：看板「执行中」只认内核集合（与 loadView 的 activeTaskIds 同口径）
+      return [...readActiveTaskIds(db)]
+    case 'runtimes.statuses':
+      return readRuntimeStatuses(db)
+    case 'kernel.seq':
+      // M5：kernelStore 的快照水位（事实日志最大 seq）
+      return lastSeq(db)
+    case 'runtimes.executors':
+    case 'runtimes.detected':
+    case 'runtimes.models':
+      // 宿主视图（插件注册表 / CLI 探测 / 执行器模型目录）由装配根注入，不读投影
+      throw new StoreError('invalid_input', `宿主视图不读投影: ${view}`)
   }
+}
+
+/** M5：`runtimes.statuses` = 全部运行时 + 实时负载（与旧 IPC 方法逐行等价）。 */
+const readRuntimeStatuses = (db: DatabaseSync): RuntimeStatus[] => {
+  const workloads = new Map(readRuntimeWorkloads(db).map((item) => [item.runtimeId, item]))
+  return readRuntimes(db).map((runtime) => ({
+    runtimeId: runtime.id,
+    workload: {
+      running: workloads.get(runtime.id)?.running ?? 0,
+      queued: workloads.get(runtime.id)?.queued ?? 0,
+      maxConcurrent: runtime.maxConcurrent,
+    },
+  }))
 }

@@ -1,11 +1,12 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../../src/shared/ai-workflow-api'
 import { receiptBlockHint } from '../../src/kernel/prompt'
+import { WORKBENCH_EVENT_CHANNEL } from '../../src/protocol/ipc'
 
 /**
  * 主进程入口只做装配：mock 掉 electron 与各模块，验证窗口/托盘/退出流程，
- * 以及 ai-workflow 的接线（store → effects/scheduler/clock → IPC、聊天广播）。
+ * 以及 M5 三动词的接线（store → effects/scheduler/clock → 命令路由 → IPC、
+ * 事实批次与聊天流旁路经 feed 推给所有窗口）。
  */
 const {
   appMock,
@@ -14,10 +15,14 @@ const {
   BrowserWindowMock,
   createTrayMock,
   registerIpcHandlersMock,
-  registerAiWorkflowIpcMock,
+  createFactFeedMock,
+  feedMock,
+  createCommandRouterMock,
+  routerMock,
   openDatabaseMock,
   createStoreMock,
   storeMock,
+  storeQueryDefault,
   importLegacyMock,
   createSchedulerMock,
   schedulerMock,
@@ -65,23 +70,24 @@ const {
     }
   }
 
-  // store 门面：入口用到 ensureProjection / query / nextWakeAt；其余由 IPC 使用。
+  // store 门面：入口用到 ensureProjection / query / nextWakeAt；其余由命令路由使用。
+  const storeQueryDefault = (table: string, params?: unknown): unknown => {
+    if (table === 'run.last-event-seq') return 0
+    if (table === 'runs.waiting') {
+      return [
+        { runId: 'run-1', leaseId: null, turn: 1, hasOpenCard: true },
+        { runId: 'run-2', leaseId: null, turn: 2, hasOpenCard: false },
+      ]
+    }
+    if (table === 'run.byId') {
+      const runId = (params as { runId?: string } | undefined)?.runId
+      return runId === 'run-1' ? { id: 'run-1', status: 'running' } : null
+    }
+    return []
+  }
   const storeMock = {
     ensureProjection: vi.fn(() => ({ rebuilt: false })),
-    query: vi.fn((table: string, params?: unknown): unknown => {
-      if (table === 'run.last-event-seq') return 0
-      if (table === 'runs.waiting') {
-        return [
-          { runId: 'run-1', leaseId: null, turn: 1, hasOpenCard: true },
-          { runId: 'run-2', leaseId: null, turn: 2, hasOpenCard: false },
-        ]
-      }
-      if (table === 'run.byId') {
-        const runId = (params as { runId?: string } | undefined)?.runId
-        return runId === 'run-1' ? { id: 'run-1', status: 'running' } : null
-      }
-      return []
-    }),
+    query: vi.fn(storeQueryDefault),
     nextWakeAt: vi.fn(() => null),
     dispatch: vi.fn((_input: unknown) => ({ facts: [] })),
   }
@@ -188,6 +194,22 @@ const {
   /** 启动装配顺序：openDatabase → createStore → importLegacy → ensureProjection → 进程登记 → 对账 → … */
   const startupOrder: string[] = []
 
+  /** 事实推送（M5）：批次与聊天流旁路都经它；订阅回调由用例取出后模拟推送。 */
+  const feedMock = {
+    publish: vi.fn(),
+    stream: vi.fn(),
+    subscribe: vi.fn(),
+    flush: vi.fn(),
+    stop: vi.fn(),
+  }
+  const createFactFeedMock = vi.fn(() => feedMock)
+  /** 三动词的命令路由（宿主实现）：入口只把它交给 IPC，调用形态由 commands.test 覆盖。 */
+  const routerMock = {
+    dispatch: vi.fn(async (): Promise<unknown> => ({ facts: [], value: null })),
+    query: vi.fn(async (): Promise<unknown> => null),
+  }
+  const createCommandRouterMock = vi.fn((_deps: unknown) => routerMock)
+
   return {
     appMock: {
       whenReady: vi.fn(async () => undefined),
@@ -204,10 +226,14 @@ const {
     BrowserWindowMock,
     createTrayMock: vi.fn(),
     registerIpcHandlersMock: vi.fn(),
-    registerAiWorkflowIpcMock: vi.fn(),
+    createFactFeedMock,
+    feedMock,
+    createCommandRouterMock,
+    routerMock,
     openDatabaseMock: vi.fn(() => ({})),
     createStoreMock,
     storeMock,
+    storeQueryDefault,
     importLegacyMock,
     createSchedulerMock,
     schedulerMock,
@@ -240,9 +266,8 @@ vi.mock('electron', () => ({
 }))
 vi.mock('../../src/main/tray', () => ({ createTray: createTrayMock }))
 vi.mock('../../src/main/ipc', () => ({ registerIpcHandlers: registerIpcHandlersMock }))
-vi.mock('../../src/main/ai-workflow/ipc', () => ({
-  registerAiWorkflowIpc: registerAiWorkflowIpcMock,
-}))
+vi.mock('../../src/host/feed', () => ({ createFactFeed: createFactFeedMock }))
+vi.mock('../../src/host/commands', () => ({ createCommandRouter: createCommandRouterMock }))
 vi.mock('../../src/host/db', () => ({ openDatabase: openDatabaseMock }))
 vi.mock('../../src/plugins/registry', () => ({
   executors: pluginEntriesMock,
@@ -276,7 +301,7 @@ async function importEntry(): Promise<void> {
 
 async function loadEntry(): Promise<void> {
   await importEntry()
-  await vi.waitFor(() => expect(registerAiWorkflowIpcMock).toHaveBeenCalled())
+  await vi.waitFor(() => expect(registerIpcHandlersMock).toHaveBeenCalled())
 }
 
 /** 取窗口上注册的事件回调 */
@@ -293,17 +318,33 @@ function appHandler(name: string): () => void {
   return call?.[1] as () => void
 }
 
-type IpcDeps = {
+/** feed 的订阅回调（装配根在启动时订阅一次）：推送由它广播到所有窗口。 */
+function feedListener(): (event: unknown) => void {
+  const call = feedMock.subscribe.mock.calls[0]
+  expect(call, '启动装配应订阅事实推送').toBeDefined()
+  return call?.[0] as (event: unknown) => void
+}
+
+type RouterDeps = {
   store: unknown
   dispatch: (input: unknown) => { facts: unknown[] }
   executors: { forRuntime: (runtime: { executorKey: string }) => unknown }
   executorDefaults: (key?: string) => { executorKey: string; command: string; profile: string }
-  executorChoices: () => Array<{ key: string; label: string; command: string; profile: string }>
-  detect: () => Promise<unknown[]>
+  hostView: (view: string, params?: Record<string, string>) => unknown
 }
 
-function ipcDeps(): IpcDeps {
-  return registerAiWorkflowIpcMock.mock.calls[0][0] as IpcDeps
+function routerDeps(): RouterDeps {
+  return createCommandRouterMock.mock.calls[0][0] as RouterDeps
+}
+
+/** 装配根注入的宿主视图解析（插件注册表 / CLI 探测 / 执行器模型目录）。 */
+function hostView(view: string, params?: Record<string, string>): unknown {
+  return routerDeps().hostView(view, params)
+}
+
+/** IPC 只拿命令路由：三动词的宿主实现都在 router 背后。 */
+function ipcDeps(): { router: unknown } {
+  return registerIpcHandlersMock.mock.calls[0][0] as { router: unknown }
 }
 
 type SchedulerDeps = {
@@ -314,8 +355,8 @@ type SchedulerDeps = {
   lastFrameSeq: (runId: string) => number
   registry: unknown
   rearmClock?: () => void
-  onChatStream?: (conversationId: string, event: unknown) => void
-  onChatStreamEnd?: (conversationId: string) => void
+  onChatStream?: (runId: string, conversationId: string, event: unknown) => void
+  onChatStreamEnd?: (runId: string, conversationId: string) => void
   chatFallbackPrompt?: (run: unknown) => string | null
 }
 
@@ -345,7 +386,8 @@ type EffectsDeps = {
   store: unknown
   scheduler: () => unknown
   channels?: () => { dispatch: (facts: readonly unknown[]) => void }
-  notifyChanged: () => void
+  /** 提交后的事实观察钩子：装配根接成 feed.publish（批次推送） */
+  onFacts?: (facts: readonly unknown[]) => void
 }
 
 function effectsDeps(): EffectsDeps {
@@ -431,15 +473,28 @@ describe('主进程入口装配', () => {
       startupOrder.push('channels')
       return channelsMock
     })
-    registerAiWorkflowIpcMock.mockImplementation(() => {
+    createFactFeedMock.mockImplementation(() => {
+      startupOrder.push('feed')
+      return feedMock
+    })
+    createCommandRouterMock.mockImplementation(() => {
+      startupOrder.push('router')
+      return routerMock
+    })
+    registerIpcHandlersMock.mockImplementation(() => {
       startupOrder.push('ipc')
     })
+    // 每个用例重新装配：恢复默认查询与执行器工厂（上面的实现是跨用例保留的）
+    storeMock.query.mockImplementation(storeQueryDefault)
+    executorsMock.forRuntime.mockReset()
   })
 
-  it('创建窗口与托盘，并把执行链接进 ai-workflow IPC', async () => {
+  it('创建窗口与托盘，并把命令路由接进三动词 IPC', async () => {
     await loadEntry()
 
     expect(registerIpcHandlersMock).toHaveBeenCalledTimes(1)
+    // IPC 只注册三动词的宿主实现：拿到的是装配好的同一个命令路由
+    expect(ipcDeps()).toEqual({ router: routerMock })
     expect(appMock.setAppUserModelId).toHaveBeenCalledWith('com.workbench.desktop')
     expect(windows).toHaveLength(1)
     expect(windows[0].loadFile).toHaveBeenCalledTimes(1)
@@ -450,27 +505,54 @@ describe('主进程入口装配', () => {
       expect.objectContaining({ sessionRoot: expect.stringContaining('sessions') }),
     )
     expect(createExecutorRegistryMock).toHaveBeenCalledWith(pluginEntriesMock, sdkHostMock)
-    // IPC 拿到同一个 store（唯一读入口）与统一写入口（effects.dispatch）
-    expect(ipcDeps().store).toBe(storeMock)
-    ipcDeps().dispatch({ type: 'task.remove', commandId: 'c', id: 't' })
+
+    // 命令路由拿到同一个 store（唯一读入口）与统一写入口（effects.dispatch）
+    expect(routerDeps().store).toBe(storeMock)
+    routerDeps().dispatch({ type: 'task.remove', commandId: 'c', id: 't' })
     expect(effectsMock.dispatch).toHaveBeenCalledWith({
       type: 'task.remove',
       commandId: 'c',
       id: 't',
     })
-    // IPC 拿到的执行器工厂与调度器是同一份；默认值来自插件 manifest
-    expect(ipcDeps().executors.forRuntime).toBe(executorsMock.forRuntime)
-    expect(ipcDeps().executorDefaults()).toEqual({
+    // 路由拿到的执行器工厂与调度器是同一份；默认值来自插件 manifest
+    expect(routerDeps().executors.forRuntime).toBe(executorsMock.forRuntime)
+    expect(routerDeps().executorDefaults()).toEqual({
       executorKey: 'dsh',
       command: 'dsh',
       profile: 'multica',
     })
-    // 运行时表单下拉与 detect 汇总同样来自注册表；detect 由装配根注入 sdkHost
-    expect(ipcDeps().executorChoices()).toEqual([
+    // 宿主视图：运行时表单下拉与 detect 汇总同样来自注册表；detect 由装配根注入 sdkHost
+    expect(hostView('runtimes.executors')).toEqual([
       { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
     ])
-    await expect(ipcDeps().detect()).resolves.toEqual([])
+    await expect(Promise.resolve(hostView('runtimes.detected'))).resolves.toEqual([])
     expect(detectAllMock).toHaveBeenCalledWith(sdkHostMock)
+
+    // 事实推送先于开库装配，并订阅到窗口广播
+    expect(createFactFeedMock).toHaveBeenCalledTimes(1)
+    expect(feedMock.subscribe).toHaveBeenCalledTimes(1)
+  })
+
+  it('宿主视图 runtimes.models：走执行器端口，缺运行时给可读错误', async () => {
+    await loadEntry()
+    storeMock.query.mockImplementation((table: string) =>
+      table === 'runtimes.all' ? [{ id: 'rt-1', executorKey: 'dsh' }] : [],
+    )
+
+    executorsMock.forRuntime.mockReturnValue({})
+    await expect(
+      Promise.resolve(hostView('runtimes.models', { runtimeId: 'rt-1' })),
+    ).resolves.toEqual([])
+
+    executorsMock.forRuntime.mockReturnValue({ models: async () => [{ id: 'model-1' }] })
+    await expect(
+      Promise.resolve(hostView('runtimes.models', { runtimeId: 'rt-1' })),
+    ).resolves.toEqual([{ id: 'model-1' }])
+
+    // 运行时不存在：可读错误由 IPC 应答信封转给 renderer
+    expect(() => hostView('runtimes.models', { runtimeId: 'ghost' })).toThrow('运行时不存在: ghost')
+    // 缺参数同样给可读错误（空 runtimeId）
+    expect(() => hostView('runtimes.models', undefined)).toThrow('运行时不存在: ')
   })
 
   it('executorDefaults：manifest 缺字段 / 非字符串 default 回退空串，未知 key 抛可读错误', async () => {
@@ -499,7 +581,7 @@ describe('主进程入口装配', () => {
     pluginEntriesMock.push(plainEntry, partialEntry)
     try {
       await loadEntry()
-      const defaults = ipcDeps().executorDefaults
+      const defaults = routerDeps().executorDefaults
 
       expect(defaults()).toEqual({ executorKey: 'dsh', command: 'dsh', profile: 'multica' })
       // 指定已注册 key：走 find 分支，结果与缺省首项一致
@@ -517,10 +599,11 @@ describe('主进程入口装配', () => {
     }
   })
 
-  it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → 通道 → clock → scheduler → IPC', async () => {
+  it('启动顺序：事实推送 → 开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → 通道 → clock → scheduler → 命令路由 → IPC', async () => {
     await loadEntry()
 
     expect(startupOrder).toEqual([
+      'feed',
       'openDatabase',
       'createStore',
       'importLegacy',
@@ -531,8 +614,11 @@ describe('主进程入口装配', () => {
       'channels',
       'clock',
       'scheduler',
+      'router',
       'ipc',
     ])
+    // 事实推送（feed）先建：effects.onFacts / 聊天流旁路在装配期就接到它
+    expect(createFactFeedMock).toHaveBeenCalledTimes(1)
     // store 拿到的是内核门面：decide / project / viewSpec / nextWakeAt 纯函数
     const options = createStoreMock.mock.calls[0][0] as {
       db: unknown
@@ -563,10 +649,11 @@ describe('主进程入口装配', () => {
     // 帧 seq 从 run_events 投影的 MAX(seq) 视图读（不再走仓储 SQL）
     expect(storeMock.query).toHaveBeenCalledWith('run.last-event-seq', { runId: 'run-1' })
 
-    // effects：调度器惰性解析 + 变更广播接到窗口
+    // effects：调度器惰性解析 + 提交后的事实交给 feed 批次推送
     expect(effectsDeps().scheduler()).toBe(schedulerMock)
-    effectsDeps().notifyChanged()
-    expect(windows[0].webContents.send).toHaveBeenCalledWith(AI_WORKFLOW_CHANGED)
+    const committed = [{ seq: 1, type: 'task.created' }]
+    effectsDeps().onFacts?.(committed)
+    expect(feedMock.publish).toHaveBeenCalledWith(committed)
 
     // clock：dispatch 也走 effects；onTick 唤醒调度器；nextWakeAt 透传 store
     clockDeps().store.dispatch({ type: 'clock.tick' })
@@ -709,7 +796,8 @@ describe('主进程入口装配', () => {
     expect(appMock.whenReady).not.toHaveBeenCalled()
     expect(appMock.on).not.toHaveBeenCalledWith('second-instance', expect.any(Function))
     expect(registerIpcHandlersMock).not.toHaveBeenCalled()
-    expect(registerAiWorkflowIpcMock).not.toHaveBeenCalled()
+    expect(createFactFeedMock).not.toHaveBeenCalled()
+    expect(createCommandRouterMock).not.toHaveBeenCalled()
     expect(createTrayMock).not.toHaveBeenCalled()
     expect(openDatabaseMock).not.toHaveBeenCalled()
     expect(createStoreMock).not.toHaveBeenCalled()
@@ -767,7 +855,7 @@ describe('主进程入口装配', () => {
     expect(shellMock.openExternal).toHaveBeenCalledWith('https://example.com')
   })
 
-  it('before-quit：关窗不再拦截，并对活跃 run best-effort 取消、通道 stopAll', async () => {
+  it('before-quit：关窗不再拦截，活跃 run best-effort 取消、通道 stopAll、推送停表', async () => {
     await loadEntry()
 
     appHandler('before-quit')()
@@ -775,6 +863,8 @@ describe('主进程入口装配', () => {
     expect(schedulerMock.cancelAll).toHaveBeenCalledTimes(1)
     // 通道 abort + best-effort dispose（D9）：异步、不阻塞退出
     expect(channelsMock.stopAll).toHaveBeenCalledTimes(1)
+    // 推送停表：退出后不再排批次（已入账的事实仍完整）
+    expect(feedMock.stop).toHaveBeenCalledTimes(1)
     const event = { preventDefault: vi.fn() }
     windowHandler('close')(event)
     expect(event.preventDefault).not.toHaveBeenCalled()
@@ -802,24 +892,35 @@ describe('主进程入口装配', () => {
     expect(windows).toHaveLength(1)
   })
 
-  it('聊天流事件经 scheduler 旁路广播到所有窗口的 webContents', async () => {
+  it('聊天流经 scheduler 旁路交给 feed，再由订阅广播到所有窗口', async () => {
     await loadEntry()
 
     const deps = schedulerDeps()
     expect(deps.onChatStream).toBeTypeOf('function')
     expect(deps.onChatStreamEnd).toBeTypeOf('function')
-    ;(() => deps.onChatStream?.('c1', { seq: 1, type: 'text', text: '你好' }))()
-    ;(() => deps.onChatStreamEnd?.('c1'))()
+    const frame = { seq: 1, type: 'text', text: '你好' }
+    deps.onChatStream?.('run-1', 'c1', frame)
+    deps.onChatStreamEnd?.('run-1', 'c1')
 
-    expect(windows[0].webContents.send).toHaveBeenCalledWith(AI_WORKFLOW_CHAT, {
+    // scheduler → feed.stream：旁路事件带 kind 与 runId / conversationId
+    expect(feedMock.stream).toHaveBeenCalledWith({
+      kind: 'stream',
+      runId: 'run-1',
       conversationId: 'c1',
-      type: 'event',
-      event: { seq: 1, type: 'text', text: '你好' },
+      event: frame,
     })
-    expect(windows[0].webContents.send).toHaveBeenCalledWith(AI_WORKFLOW_CHAT, {
+    expect(feedMock.stream).toHaveBeenCalledWith({
+      kind: 'stream-end',
+      runId: 'run-1',
       conversationId: 'c1',
-      type: 'end',
     })
+
+    // feed 订阅者把同一事件推给所有窗口（新开的窗口也经订阅拿到）
+    const second = new BrowserWindowMock()
+    const event = { kind: 'stream-end', runId: 'run-1', conversationId: 'c1' }
+    feedListener()(event)
+    expect(windows[0].webContents.send).toHaveBeenCalledWith(WORKBENCH_EVENT_CHANNEL, event)
+    expect(second.webContents.send).toHaveBeenCalledWith(WORKBENCH_EVENT_CHANNEL, event)
   })
 
   it('window-all-closed 在非 macOS 退出应用', async () => {
@@ -867,17 +968,17 @@ describe('主进程入口装配', () => {
     expect(fallback(run)).toBeNull()
   })
 
-  it('聊天流旁路：窗口 webContents 已销毁时丢弃推送，不打断其它窗口', async () => {
+  it('事实推送：窗口 webContents 已销毁时丢弃该窗口，不打断其它窗口', async () => {
     await loadEntry()
 
-    const deps = schedulerDeps()
+    const event = { kind: 'stream', runId: 'run-1', conversationId: null, event: { seq: 1 } }
     windows[0].webContents.send.mockImplementationOnce(() => {
       throw new Error('webContents 已销毁')
     })
 
-    expect(() => deps.onChatStream?.('c1', { seq: 1, type: 'text', text: 'x' })).not.toThrow()
-    // 下一次推送不受影响
-    deps.onChatStream?.('c1', { seq: 2, type: 'text', text: 'y' })
+    expect(() => feedListener()(event)).not.toThrow()
+    // 下一次推送不受影响（隔离在单个窗口的 try/catch 内）
+    feedListener()(event)
     expect(windows[0].webContents.send).toHaveBeenCalledTimes(2)
   })
 

@@ -5,6 +5,7 @@
  * 全部经 `ctx.sdk` 注入；不 import `host/**`、node 内置或其它插件。
  */
 import type { ExecutorPlugin } from '../../../sdk/types'
+import { detectDsh } from './detect'
 import { listDshModels } from './models'
 import { probeDshRuntime } from './probe'
 import { executeDshRun } from './run'
@@ -12,6 +13,7 @@ import { executeDshRun } from './run'
 export { dshManifest } from './manifest'
 
 export const dshPlugin: ExecutorPlugin = {
+  detect: (ctx) => detectDsh(ctx),
   probe: (ctx) => probeDshRuntime(ctx),
   models: (ctx) => listDshModels(ctx),
   run: (ctx, turn, io) => executeDshRun(ctx, turn, io),

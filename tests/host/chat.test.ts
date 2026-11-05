@@ -130,6 +130,8 @@ function makeWorld(backend: TestBackend): World {
     dispatch: (input) => effects.dispatch(input),
     executors: { forRuntime: () => null },
     executorDefaults: (key) => ({ executorKey: key ?? 'dsh', command: 'dsh', profile: 'multica' }),
+    detect: async () => [],
+    executorChoices: () => [],
     newCommandId: nextCommandId,
   })
   const clock = createClock({

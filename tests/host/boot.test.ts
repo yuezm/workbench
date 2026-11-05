@@ -29,6 +29,7 @@ const {
   createSdkHostMock,
   createExecutorRegistryMock,
   executorsMock,
+  detectAllMock,
   createProcessRegistryMock,
   registryMock,
   reconcileMock,
@@ -142,6 +143,8 @@ const {
   }
   const createSdkHostMock = vi.fn((_options: unknown) => sdkHostMock)
   const createExecutorRegistryMock = vi.fn((_entries: unknown, _host: unknown) => executorsMock)
+  /** detect 汇总走注册表：IPC 只拿一个函数，装配根把 sdkHost 注入 */
+  const detectAllMock = vi.fn(async (_host: unknown): Promise<unknown[]> => [])
   const registryMock = {
     begin: vi.fn(),
     attachPid: vi.fn(),
@@ -188,6 +191,7 @@ const {
     createSdkHostMock,
     createExecutorRegistryMock,
     executorsMock,
+    detectAllMock,
     createProcessRegistryMock,
     registryMock,
     reconcileMock,
@@ -208,7 +212,10 @@ vi.mock('../../src/main/ai-workflow/ipc', () => ({
   registerAiWorkflowIpc: registerAiWorkflowIpcMock,
 }))
 vi.mock('../../src/host/db', () => ({ openDatabase: openDatabaseMock }))
-vi.mock('../../src/plugins/registry', () => ({ executors: pluginEntriesMock }))
+vi.mock('../../src/plugins/registry', () => ({
+  executors: pluginEntriesMock,
+  detectAll: detectAllMock,
+}))
 vi.mock('../../src/host/sdk-host', () => ({ createSdkHost: createSdkHostMock }))
 vi.mock('../../src/host/executor-registry', () => ({
   createExecutorRegistry: createExecutorRegistryMock,
@@ -257,6 +264,8 @@ type IpcDeps = {
   dispatch: (input: unknown) => { facts: unknown[] }
   executors: { forRuntime: (runtime: { executorKey: string }) => unknown }
   executorDefaults: (key?: string) => { executorKey: string; command: string; profile: string }
+  executorChoices: () => Array<{ key: string; label: string; command: string; profile: string }>
+  detect: () => Promise<unknown[]>
 }
 
 function ipcDeps(): IpcDeps {
@@ -400,6 +409,12 @@ describe('主进程入口装配', () => {
       command: 'dsh',
       profile: 'multica',
     })
+    // 运行时表单下拉与 detect 汇总同样来自注册表；detect 由装配根注入 sdkHost
+    expect(ipcDeps().executorChoices()).toEqual([
+      { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
+    ])
+    await expect(ipcDeps().detect()).resolves.toEqual([])
+    expect(detectAllMock).toHaveBeenCalledWith(sdkHostMock)
   })
 
   it('executorDefaults：manifest 缺字段 / 非字符串 default 回退空串，未知 key 抛可读错误', async () => {

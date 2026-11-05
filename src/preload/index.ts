@@ -26,6 +26,7 @@ const aiWorkflow: AiWorkflowApi = {
     update: (id, patch) => invoke('runtimes.update', id, patch),
     remove: (id) => invoke('runtimes.remove', id),
     detect: () => invoke('runtimes.detect'),
+    executors: () => invoke('runtimes.executors'),
     probe: (id) => invoke('runtimes.probe', id),
     statuses: () => invoke('runtimes.statuses'),
     models: (id) => invoke('runtimes.models', id),

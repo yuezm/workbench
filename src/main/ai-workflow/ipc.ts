@@ -4,6 +4,8 @@ import type { Agent, Runtime, Task, WorkflowWithStages } from '../../protocol/en
 import type {
   AgentInput,
   ChatConversation,
+  DetectedRuntime,
+  RuntimeExecutorChoice,
   RuntimeInput,
   RuntimeProbe,
   RuntimeStatus,
@@ -15,7 +17,6 @@ import type { Fact } from '../../kernel/types'
 import type { FactType } from '../../protocol/facts'
 import type { ExecutorPort } from '../../protocol/executor'
 import type { Store } from '../../host/store/index'
-import { detectInstalledRuntimes } from './runtime/detect'
 
 /** 纯分发器：方法名 + 参数 → 结果；不含 electron 依赖，便于单测。 */
 export type AiWorkflowHandler = (method: string, args: unknown[]) => unknown
@@ -39,6 +40,10 @@ export interface AiWorkflowIpcDeps {
   executors: { forRuntime(runtime: Runtime): ExecutorPort | null }
   /** 执行器默认值（key 缺省取注册表首项；未知 key 抛可读错误） */
   executorDefaults: (key: string | undefined) => ExecutorDefaults
+  /** 本机 CLI 探测（装配根传 `registry.detectAll`；测试注入固定清单） */
+  detect: () => Promise<DetectedRuntime[]>
+  /** 可选执行器清单（装配根传 registry 派生的只读清单） */
+  executorChoices: () => readonly RuntimeExecutorChoice[]
   /** 命令幂等键生成器（默认随机 UUID；测试可注入确定性值） */
   newCommandId?: () => string
 }
@@ -214,8 +219,10 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     'runtimes.remove': (a) => {
       dispatch({ type: 'runtime.remove', commandId: nextCommandId(), id: a[0] as string })
     },
-    // 只读探测：不 spawn、不写库
-    'runtimes.detect': () => detectInstalledRuntimes(),
+    // 只读探测：不 spawn、不写库；候选清单来自各执行器插件 detect() 的汇总（M3 T9）
+    'runtimes.detect': () => deps.detect(),
+    // 只读执行器清单：运行时表单的下拉选项来自插件注册表（D11）
+    'runtimes.executors': () => deps.executorChoices(),
     // 真实探测：入账结论（探测不调用模型、不建 run）
     'runtimes.probe': async (a) => probeAndSave(runtimeById(store, a[0] as string)),
     // 实时负载：在跑/排队数按运行时现算

@@ -8,9 +8,12 @@
  * `executors` 的数组顺序即 UI 下拉与 `detect()` 的输出顺序。
  */
 import type { PluginManifest } from '../protocol/manifest'
-import type { ExecutorPlugin } from '../sdk/types'
+import type { DetectedRuntime } from '../protocol/entities'
+import type { ExecutorPlugin, SdkHost } from '../sdk/types'
+import { createSdk } from '../sdk'
 import { dshPlugin } from './executors/dsh'
 import { dshManifest } from './executors/dsh/manifest'
+import { CLI_CANDIDATES } from './shared/cli-catalog'
 
 /** 一条执行器注册项（`host/executor-registry.ts` 的 `ExecutorPluginEntry` 结构兼容） */
 export interface ExecutorRegistryEntry {
@@ -32,4 +35,103 @@ export function executorById(key: string): ExecutorRegistryEntry {
   const found = executors.find((entry) => entry.key === key)
   if (found === undefined) throw new Error(`执行器插件未注册: ${key}`)
   return found
+}
+
+/** 单插件 detect 的超时（D8：单个插件失败/卡住不拖垮整体） */
+const DETECT_TIMEOUT_MS = 2_000
+
+export interface DetectOptions {
+  /** 单插件超时；测试注入更短的值，生产取 2 s */
+  timeoutMs?: number
+}
+
+const errMsg = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+/** 给一个 promise 加超时；`task` 未被选中时其后续拒绝由 race 内部处理器消化。 */
+function withTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expires = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`检测超时（>${timeoutMs}ms）`)), timeoutMs)
+  })
+  return Promise.race([task, expires]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer)
+  })
+}
+
+/**
+ * 汇总本机可接入的运行时（D8）：
+ *
+ * 1. 按 registry 顺序**串行**调用各插件 `detect()`；单插件 2 s 超时、抛错只跳过该插件
+ *    （记日志、整体不抛）；同一 `command` 被多个插件声明时按顺序先到先得并 warn。
+ * 2. 未注册插件的 CLI（`cli-catalog` 里装了但没插件认领）仍以 `supported:false` 出现，
+ *    保持 UI 三态（已添加 / 已接入 / 未注册）行为不变。
+ * 3. 输出按候选清单顺序稳定排列；不读业务数据、不写库、不发 changed。
+ */
+export async function detectAll(
+  sdkHost: SdkHost,
+  options: DetectOptions = {},
+): Promise<DetectedRuntime[]> {
+  return await detectAllWith(executors, sdkHost, options)
+}
+
+/**
+ * 同一汇总逻辑的可注入版本：装配根用内置 `executors`，测试用它验证空注册表 /
+ * 顺序 / 去重 / 失败隔离（不把测试夹具塞进内置清单）。
+ */
+export async function detectAllWith(
+  entries: readonly ExecutorRegistryEntry[],
+  sdkHost: SdkHost,
+  options: DetectOptions = {},
+): Promise<DetectedRuntime[]> {
+  // 没有执行器插件时没有「可接入」语义：直接返回空数组（caller 的 UI 走空态）。
+  if (entries.length === 0) return []
+
+  const timeoutMs = options.timeoutMs ?? DETECT_TIMEOUT_MS
+  const claimed = new Set<string>()
+  const collected: DetectedRuntime[] = []
+
+  for (const entry of entries) {
+    const detect = entry.plugin.detect
+    if (detect === undefined) continue
+    try {
+      const sdk = createSdk(sdkHost, entry.manifest)
+      const hits = await withTimeout(Promise.resolve(detect({ sdk })), timeoutMs)
+      for (const hit of hits) {
+        const command = hit.command.trim()
+        if (command.length === 0) continue
+        if (claimed.has(command)) {
+          sdkHost.log(
+            `[detect] 执行器 ${entry.key} 重复声明命令「${command}」，按注册表顺序先到先得，已跳过`,
+          )
+          continue
+        }
+        claimed.add(command)
+        collected.push({ ...hit, command, executorKey: entry.key, supported: true })
+      }
+    } catch (error) {
+      sdkHost.log(`[detect] 执行器插件 ${entry.key} 检测失败，已跳过：${errMsg(error)}`)
+    }
+  }
+
+  // 未注册插件的 CLI：仍扫描候选清单，让用户知道本机装了什么（不可接入 → supported:false）
+  const dirs = sdkHost.process.scanDirs()
+  for (const candidate of CLI_CANDIDATES) {
+    if (claimed.has(candidate.command)) continue
+    const path = sdkHost.process.findInDirs(candidate.command, dirs)
+    if (path === null) continue
+    collected.push({
+      command: candidate.command,
+      label: candidate.label,
+      path,
+      executorKey: '',
+      supported: false,
+    })
+  }
+
+  // 稳定顺序：候选清单顺序（未在清单里的插件命中排最后，保持相对顺序）
+  const order = new Map(CLI_CANDIDATES.map((candidate, index) => [candidate.command, index]))
+  const tail = CLI_CANDIDATES.length
+  return collected.sort(
+    (left, right) => (order.get(left.command) ?? tail) - (order.get(right.command) ?? tail),
+  )
 }

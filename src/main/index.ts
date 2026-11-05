@@ -21,9 +21,9 @@ import { createTray } from './tray'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
 import { createSdkHost } from '../host/sdk-host'
 import { createExecutorRegistry } from '../host/executor-registry'
-import { executors as pluginExecutors } from '../plugins/registry'
+import { detectAll, executors as pluginExecutors } from '../plugins/registry'
 import type { RuntimeInput } from '../protocol/entities'
-import type { ChatStreamEvent } from '../shared/ai-workflow-api'
+import type { ChatStreamEvent, RuntimeExecutorChoice } from '../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
 
 let quitting = false
@@ -109,27 +109,38 @@ if (app.requestSingleInstanceLock()) {
      * 运行时表单的默认值来自执行器插件 manifest（内核与宿主都不写产品名）。
      * 未指定 key 时取注册表首项；key 不存在直接抛可读错误（IPC 原样展示）。
      */
-    const executorDefaults = (
-      key: string | undefined,
-    ): Required<Pick<RuntimeInput, 'executorKey' | 'command' | 'profile'>> => {
+    const manifestDefault = (entry: (typeof pluginExecutors)[number], fieldKey: string): string => {
+      const field = (entry.manifest.config ?? []).find((candidate) => candidate.key === fieldKey)
+      if (field === undefined) return ''
+      const value = 'default' in field ? field.default : undefined
+      return typeof value === 'string' ? value : ''
+    }
+    const executorEntry = (key: string | undefined): (typeof pluginExecutors)[number] => {
       const entry =
         key === undefined
           ? pluginExecutors[0]
           : pluginExecutors.find((candidate) => candidate.key === key)
       if (entry === undefined) throw new Error('执行器插件未注册: ' + String(key))
-      const config = entry.manifest.config ?? []
-      const textDefault = (fieldKey: string): string => {
-        const field = config.find((candidate) => candidate.key === fieldKey)
-        if (field === undefined) return ''
-        const value = 'default' in field ? field.default : undefined
-        return typeof value === 'string' ? value : ''
-      }
+      return entry
+    }
+    const executorDefaults = (
+      key: string | undefined,
+    ): Required<Pick<RuntimeInput, 'executorKey' | 'command' | 'profile'>> => {
+      const entry = executorEntry(key)
       return {
         executorKey: entry.key,
-        command: textDefault('command'),
-        profile: textDefault('profile'),
+        command: manifestDefault(entry, 'command'),
+        profile: manifestDefault(entry, 'profile'),
       }
     }
+    /** 运行时表单下拉（D11）：只读，顺序即注册表顺序 */
+    const executorChoices = (): RuntimeExecutorChoice[] =>
+      pluginExecutors.map((entry) => ({
+        key: entry.key,
+        label: entry.label,
+        command: manifestDefault(entry, 'command'),
+        profile: manifestDefault(entry, 'profile'),
+      }))
     // 启动对账（T13）：先按 process_registry 的残留 pid 终止上次崩溃留下的进程树、清登记，
     // 再 dispatch clock.tick 回收超租约（run.abandoned / executor_lost）与超时（timeout）的 run。
     // 此刻 scheduler 还没装配：直接走 store.dispatch（启动期没有订阅者），随后的
@@ -207,6 +218,8 @@ if (app.requestSingleInstanceLock()) {
       dispatch: (input) => effects.dispatch(input),
       executors,
       executorDefaults,
+      executorChoices,
+      detect: () => detectAll(sdkHost),
     })
     // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，
     // 再挂唯一定时器（周期回收走 nextWakeAt + clock.tick，不再单独轮询）

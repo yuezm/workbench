@@ -63,6 +63,19 @@ export interface RuntimeStatus {
   }
 }
 
+/**
+ * 运行时表单可选的执行器（只读，来自插件注册表）。
+ *
+ * `command` / `profile` 是该插件 manifest 声明的表单默认值；新建运行时选执行器时
+ * 用它预填，用户仍可改。数组顺序即注册表顺序（UI 下拉顺序）。
+ */
+export interface RuntimeExecutorChoice {
+  key: string
+  label: string
+  command: string
+  profile: string
+}
+
 /** 本机已安装的 agent CLI 探测结果（用于表单预填，不自动创建运行时）。
  *  字段定义在 `protocol/entities`（执行器插件 detect 的返回类型），这里只再导出。 */
 
@@ -104,6 +117,8 @@ export interface AiWorkflowApi {
     remove(id: string): Promise<void>
     /** 探测本机已安装的 agent CLI，供表单预填；只读，不创建记录 */
     detect(): Promise<DetectedRuntime[]>
+    /** 可选执行器清单（来自插件注册表）；只读，供运行时表单下拉 */
+    executors(): Promise<RuntimeExecutorChoice[]>
     /** 真实探测一次（--probe + 版本），并把结论写入运行时；不产生 run */
     probe(id: string): Promise<RuntimeProbe>
     /** 各运行时的实时负载 */

@@ -72,6 +72,7 @@ describe('preload 桥接契约', () => {
     expect(Object.keys(aiWorkflow.runtimes).sort()).toEqual([
       'create',
       'detect',
+      'executors',
       'list',
       'models',
       'probe',
@@ -138,6 +139,7 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.runtimes.update('r1', { name: 'x' })
     await aiWorkflow.runtimes.remove('r1')
     await aiWorkflow.runtimes.detect()
+    await aiWorkflow.runtimes.executors()
     await aiWorkflow.runtimes.probe('r1')
     await aiWorkflow.runtimes.statuses()
     await aiWorkflow.runtimes.models('r1')
@@ -170,6 +172,7 @@ describe('preload 桥接契约', () => {
         'runtimes.update',
         'runtimes.remove',
         'runtimes.detect',
+        'runtimes.executors',
         'runtimes.probe',
         'runtimes.statuses',
         'runtimes.models',

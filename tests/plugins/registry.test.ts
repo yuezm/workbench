@@ -1,13 +1,23 @@
 // @vitest-environment node
 import { existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CAPABILITIES, PLUGIN_KINDS } from '../../src/protocol/manifest'
 import {
   CAPABILITIES as PLUGINS_CAPABILITIES,
   PLUGIN_KINDS as PLUGINS_KINDS,
 } from '../../src/plugins/manifest'
-import { executorById, executors } from '../../src/plugins/registry'
+import {
+  detectAll,
+  detectAllWith,
+  executorById,
+  executors,
+  type ExecutorRegistryEntry,
+} from '../../src/plugins/registry'
+import { CLI_CANDIDATES } from '../../src/plugins/shared/cli-catalog'
+import type { PluginManifest } from '../../src/protocol/manifest'
+import type { DetectedRuntime } from '../../src/protocol/entities'
+import type { ExecutorPlugin, SdkHost } from '../../src/sdk/types'
 
 /**
  * 执行器插件注册表契约（SPEC-plugins「Manifest / 测试 / 内置插件清单」）。
@@ -88,5 +98,164 @@ describe('执行器插件注册表', () => {
         expect(existsSync(join(EXECUTORS_ROOT, id, file)), `${id} 缺少 ${file}`).toBe(true)
       }
     }
+  })
+})
+
+/** detect 汇总的测试脚手架：假 manifest/插件/宿主能力面，不启动进程、不碰真实文件系统。 */
+const fakeManifest = (id: string): PluginManifest => ({
+  id,
+  kind: 'executor',
+  name: id,
+  version: '1.0.0',
+  capabilities: ['spawn'],
+})
+
+function fakeEntry(key: string, detect?: ExecutorPlugin['detect']): ExecutorRegistryEntry {
+  const plugin: ExecutorPlugin = {
+    run: async () => {
+      throw new Error('detect 测试不执行 run')
+    },
+  }
+  if (detect !== undefined) plugin.detect = detect
+  return { key, label: key, manifest: fakeManifest(key), plugin }
+}
+
+interface FakeHostOptions {
+  dirs?: string[]
+  found?: Record<string, string>
+  log?: (line: string) => void
+}
+
+function fakeSdkHost(options: FakeHostOptions = {}): SdkHost {
+  return {
+    log: options.log ?? (() => undefined),
+    now: () => 0,
+    paths: { sessionRoot: null },
+    config: <T = Record<string, unknown>>() => ({}) as T,
+    process: {
+      spawn: () => {
+        throw new Error('detect 不允许启动子进程')
+      },
+      resolve: (command) => ({ path: null, error: `detect 不解析命令：${command}` }),
+      killTree: () => false,
+      scanDirs: () => options.dirs ?? [],
+      findInDirs: (command) => options.found?.[command] ?? null,
+    },
+  }
+}
+
+const rawHit = (command: string): DetectedRuntime => ({
+  command,
+  label: command,
+  path: `/bin/${command}`,
+  executorKey: '',
+  supported: false,
+})
+
+describe('detect 汇总（D8）', () => {
+  it('按注册表顺序串行汇总、回填 executorKey/supported，输出按候选清单排序', async () => {
+    const entries = [
+      fakeEntry('beta', () => [rawHit('codex')]),
+      fakeEntry('alpha', () => [rawHit('dsh')]),
+    ]
+    const host = fakeSdkHost({ dirs: ['/bin'], found: { claude: '/bin/claude' } })
+
+    const result = await detectAllWith(entries, host)
+
+    // dsh（插件 alpha）→ claude（本机已装、无插件）→ codex（插件 beta）：按 cli-catalog 顺序
+    expect(result.map((item) => [item.command, item.executorKey, item.supported])).toEqual([
+      ['dsh', 'alpha', true],
+      ['claude', '', false],
+      ['codex', 'beta', true],
+    ])
+  })
+
+  it('内置注册表的 detectAll：dsh 插件认领 dsh，其余已装 CLI 保持 supported:false', async () => {
+    const host = fakeSdkHost({ dirs: ['/bin'], found: { dsh: '/bin/dsh', claude: '/bin/claude' } })
+
+    const result = await detectAll(host)
+
+    expect(
+      result.map((item) => [item.command, item.label, item.executorKey, item.supported]),
+    ).toEqual([
+      ['dsh', 'DeepSeek Harness', 'dsh', true],
+      ['claude', 'Claude Code', '', false],
+    ])
+    // 汇总是只读的：不 spawn、不写库、不发 changed
+    expect(() => host.process.spawn('x', [], { env: {} })).toThrow(/不允许启动子进程/)
+  })
+
+  it('同一 command 被多个插件声明：按注册表顺序先到先得并记一条 warn', async () => {
+    const log = vi.fn()
+    const entries = [
+      fakeEntry('first', () => [rawHit('dsh')]),
+      fakeEntry('second', () => [rawHit('dsh')]),
+    ]
+
+    const result = await detectAllWith(entries, fakeSdkHost({ log }))
+
+    expect(result.map((item) => [item.command, item.executorKey])).toEqual([['dsh', 'first']])
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('重复声明命令「dsh」'))
+  })
+
+  it('单个插件抛错只跳过该插件，不影响其它插件结果', async () => {
+    const log = vi.fn()
+    const entries = [
+      fakeEntry('broken', () => {
+        throw new Error('扫描炸了')
+      }),
+      fakeEntry('good', () => [rawHit('dsh')]),
+    ]
+
+    const result = await detectAllWith(entries, fakeSdkHost({ log }))
+
+    expect(result.map((item) => item.command)).toEqual(['dsh'])
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('检测失败'))
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('扫描炸了'))
+  })
+
+  it('单个插件超时被跳过并记录日志', async () => {
+    const log = vi.fn()
+    const hanging = (): Promise<DetectedRuntime[]> => new Promise(() => undefined)
+    const entries = [fakeEntry('slow', hanging), fakeEntry('good', () => [rawHit('dsh')])]
+
+    const result = await detectAllWith(entries, fakeSdkHost({ log }), { timeoutMs: 10 })
+
+    expect(result.map((item) => item.command)).toEqual(['dsh'])
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('检测失败'))
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('超时'))
+  })
+
+  it('空注册表返回空数组而不是抛错，也不扫描文件系统', async () => {
+    const log = vi.fn()
+    const findInDirs = vi.fn(() => '/bin/dsh')
+    const host = fakeSdkHost({ log })
+    host.process.findInDirs = findInDirs
+
+    await expect(detectAllWith([], host)).resolves.toEqual([])
+    expect(findInDirs).not.toHaveBeenCalled()
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it('输出稳定：同一环境重复汇总结果逐项相同', async () => {
+    const host = fakeSdkHost({ dirs: ['/bin'], found: { claude: '/bin/claude' } })
+    const first = await detectAllWith([fakeEntry('dsh-like', () => [rawHit('dsh')])], host)
+    const second = await detectAllWith([fakeEntry('dsh-like', () => [rawHit('dsh')])], host)
+    expect(second).toEqual(first)
+  })
+
+  it('cli-catalog 顺序即汇总输出顺序（顺序表与常量保持唯一来源）', () => {
+    expect(CLI_CANDIDATES.map((item) => item.command)).toEqual([
+      'dsh',
+      'claude',
+      'codex',
+      'gemini',
+      'opencode',
+      'aider',
+      'cursor-agent',
+      'qwen',
+      'goose',
+      'crush',
+    ])
   })
 })

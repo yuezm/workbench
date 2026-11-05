@@ -438,6 +438,8 @@ describe('cancel：删除任务 / 工作流前先取消', () => {
         command: 'dsh',
         profile: 'multica',
       }),
+      detect: async () => [],
+      executorChoices: () => [],
       newCommandId: nextCommandId,
     })
 

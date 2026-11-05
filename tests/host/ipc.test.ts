@@ -71,6 +71,10 @@ function makeHandler(overrides: Partial<Parameters<typeof createAiWorkflowHandle
       command: 'dsh',
       profile: 'multica',
     }),
+    detect: async () => [],
+    executorChoices: () => [
+      { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
+    ],
     ...overrides,
   })
 }
@@ -207,20 +211,38 @@ describe('ai-workflow handler：运行时', () => {
     expect(list[0].id).toBe('magpie/auto%2Fflash')
   })
 
-  it('detect 返回已安装 CLI 清单且不触发 changed', async () => {
-    const result = (await handle('runtimes.detect', [])) as Array<{
-      command: string
-      label: string
-      path: string
-      supported: boolean
-    }>
-    expect(Array.isArray(result)).toBe(true)
-    for (const item of result) {
-      expect(typeof item.command).toBe('string')
-      expect(typeof item.label).toBe('string')
-      expect(typeof item.supported).toBe('boolean')
-      expect(path.isAbsolute(item.path)).toBe(true)
-    }
+  it('detect 原样返回装配根汇总的清单且不触发 changed', async () => {
+    const detected = [
+      {
+        command: 'dsh',
+        label: 'DeepSeek Harness',
+        path: path.join('C:/bin', 'dsh.cmd'),
+        executorKey: 'dsh',
+        supported: true,
+      },
+      {
+        command: 'claude',
+        label: 'Claude Code',
+        path: path.join('C:/bin', 'claude.cmd'),
+        executorKey: '',
+        supported: false,
+      },
+    ]
+    const handler = makeHandler({ detect: async () => detected })
+    const result = (await handler('runtimes.detect', [])) as typeof detected
+    expect(result).toBe(detected)
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('executors 返回注册表派生的只读执行器清单且不触发 changed', async () => {
+    const handler = makeHandler({
+      executorChoices: () => [
+        { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
+        { key: 'command', label: '命令', command: '', profile: '' },
+      ],
+    })
+    const result = (await handler('runtimes.executors', [])) as Array<{ key: string }>
+    expect(result.map((item) => item.key)).toEqual(['dsh', 'command'])
     expect(notify).not.toHaveBeenCalled()
   })
 
@@ -624,6 +646,8 @@ describe('registerAiWorkflowIpc', () => {
         command: 'dsh',
         profile: 'multica',
       }),
+      detect: async () => [],
+      executorChoices: () => [],
     })
     expect(ipcMainMock.handle).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, expect.any(Function))
     const h = ipcMainMock.handle.mock.calls[0][1] as (

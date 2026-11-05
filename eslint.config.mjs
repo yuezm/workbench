@@ -193,6 +193,41 @@ export default tseslint.config(
       ],
     },
   },
+  // 执行器 detect 的搬家用例验证「插件经 sdk 能力面扫描真实文件系统」：Windows 后缀优先级、
+  // POSIX 可执行位这些语义只能在真实 fs 上断言。只放开 fs/os/path 与宿主可执行文件解析
+  // （host/executable），electron、子进程、网络、main/renderer/shared 仍然禁止。
+  {
+    files: ['tests/plugins/executors/**/detect.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [{ name: 'electron', message: '插件测试不得直接依赖 Electron。' }],
+          patterns: [
+            {
+              group: [
+                'node:child_process',
+                'child_process',
+                'node:crypto',
+                'crypto',
+                'node:net',
+                'net',
+                'node:http',
+                'node:https',
+                'http',
+                'https',
+              ],
+              message: '插件 detect 测试不得启动进程或发起网络请求。',
+            },
+            {
+              group: ['**/src/main/**', '**/main/**', '**/renderer/**', '**/src/shared/**'],
+              message: '插件 detect 测试只允许依赖插件、sdk、protocol 与宿主可执行文件解析能力。',
+            },
+          ],
+        },
+      ],
+    },
+  },
   // 架构边界（ARCHITECTURE「边界守则」）：sdk 是插件能力面，只依赖 protocol 的契约类型；
   // 能力原件（子进程、可执行文件解析、时钟）由宿主注入，所以 sdk 不直接碰 Node/Electron。
   // 与 kernel 段不同，这里不限制 Date.now：sdk 的时钟本来就是宿主注入的。

@@ -5,8 +5,8 @@ import { createSdk } from '../../src/sdk'
 import type { SdkHost, Spawned } from '../../src/sdk/types'
 
 /**
- * sdk 能力门控（M3 T4）：`createSdk` 只做「按 manifest 门控 + 原样转发」，
- * 因此这里全部用假宿主原件，不真的 spawn / 读盘 / 读时钟。
+ * sdk 能力门控（M3 T4 / M4 T6）：`createSdk` 只做「按 manifest 门控 + 原样转发」，
+ * 因此这里全部用假宿主原件，不真的 spawn / 读盘 / 读时钟 / 弹通知。
  */
 
 /** 最小子进程句柄：只验证 spawn 透传与返回值，不跑真实进程。 */
@@ -31,6 +31,7 @@ function hostOf(): SdkHost {
     now: () => 1_700_000_000_123,
     paths: { sessionRoot: 'C:/data/ai-workflow/sessions' },
     config: <T = Record<string, unknown>>(): T => ({ mode: 'dsh', timeoutMs: 60_000 }) as T,
+    notify: vi.fn(),
     process: {
       spawn: vi.fn(() => spawned),
       resolve: vi.fn(() => ({ path: 'C:/bin/dsh.cmd', error: null })),
@@ -84,6 +85,39 @@ describe('createSdk 能力门控', () => {
   })
 })
 
+describe('createSdk notify 能力门控（M4 T6）', () => {
+  it('未声明 notify：访问 sdk.notify 抛 capability_not_declared: notify', () => {
+    const sdk = createSdk(hostOf(), manifestOf([]))
+    expect(() => sdk.notify).toThrow(new Error('capability_not_declared: notify'))
+    // getter 不缓存拒绝结果：每次访问都抛
+    expect(() => sdk.notify).toThrow('capability_not_declared: notify')
+  })
+
+  it('未声明 notify 只影响 notify：process 等已声明能力照常可用', () => {
+    const host = hostOf()
+    const sdk = createSdk(host, manifestOf(['spawn']))
+    expect(() => sdk.notify).toThrow('capability_not_declared: notify')
+    expect(sdk.process).toBe(host.process)
+  })
+
+  it('声明 notify 后原样透传 title/body（只作参数，不加前缀不改写）', () => {
+    const host = hostOf()
+    const sdk = createSdk(host, manifestOf(['notify']))
+
+    sdk.notify('待审批', '任务已挂起，请选择选项')
+
+    expect(host.notify).toHaveBeenCalledTimes(1)
+    expect(host.notify).toHaveBeenCalledWith('待审批', '任务已挂起，请选择选项')
+  })
+
+  it('声明了 notify 但宿主没有原件：静默丢弃，不抛（通知失败不拖住投递）', () => {
+    const bare: SdkHost = { ...hostOf(), notify: undefined }
+    const sdk = createSdk(bare, manifestOf(['notify']))
+
+    expect(() => sdk.notify('待审批', '正文')).not.toThrow()
+  })
+})
+
 describe('createSdk 能力面', () => {
   it('log 加插件 id 前缀（前缀取自 manifest，不是写死的）', () => {
     const host = hostOf()
@@ -111,9 +145,9 @@ describe('createSdk 能力面', () => {
     expect(sdk.config<{ mode: string }>().mode).toBe('dsh')
   })
 
-  it('最小面：只有 log/now/paths/config/process，不提供 emit/fs/net', () => {
+  it('最小面：只有 log/now/paths/config/process/notify，不提供 emit/fs/net', () => {
     const sdk = createSdk(hostOf(), manifestOf(['spawn']))
-    expect(Object.keys(sdk).sort()).toEqual(['config', 'log', 'now', 'paths', 'process'])
+    expect(Object.keys(sdk).sort()).toEqual(['config', 'log', 'notify', 'now', 'paths', 'process'])
     expect('emit' in sdk).toBe(false)
     expect('fs' in sdk).toBe(false)
     expect('net' in sdk).toBe(false)

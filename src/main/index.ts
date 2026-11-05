@@ -17,6 +17,8 @@ import { openDatabase } from '../host/db'
 import { createStore, DEFAULT_LIMITS } from '../host/store/index'
 import { importLegacyIfNeeded } from '../host/store/import'
 import { registerIpcHandlers } from './ipc'
+// 系统通知原件（M4）：宿主不 import electron，由装配根注入 sdk（`sdk.notify` 的门控在 sdk 层）
+import { notify } from './notify'
 import { createTray } from './tray'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
 import { createSdkHost } from '../host/sdk-host'
@@ -102,7 +104,7 @@ if (app.requestSingleInstanceLock()) {
     const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
     mkdirSync(sessionsDir, { recursive: true })
     // 插件能力面（宿主注入）：spawn/解析/杀树/时钟/会话根；插件只经 sdk 拿副作用。
-    const sdkHost = createSdkHost({ sessionRoot: sessionsDir })
+    const sdkHost = createSdkHost({ sessionRoot: sessionsDir, notify })
     // 执行器注册表：按运行时配置的 executorKey 取插件端口；未知 key 由调度器兜底终态。
     const executors = createExecutorRegistry(pluginExecutors, sdkHost)
     /**

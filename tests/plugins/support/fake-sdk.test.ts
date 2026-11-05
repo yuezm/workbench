@@ -37,6 +37,19 @@ describe('fakeSdk：缺省能力面', () => {
     })
   })
 
+  it('notify：缺省记录调用（title/body 只作参数），注入实现可覆盖记录', () => {
+    const sdk = fakeSdk()
+    sdk.notify('待审批', '任务已挂起，请选择选项')
+    expect(sdk.notifyCalls).toEqual([{ title: '待审批', body: '任务已挂起，请选择选项' }])
+
+    const notify = vi.fn()
+    const injected = fakeSdk({ notify })
+    injected.notify('标题', '正文')
+    expect(notify).toHaveBeenCalledWith('标题', '正文')
+    // 注入实现后不走缺省记录，避免两套记录互相干扰
+    expect(injected.notifyCalls).toEqual([])
+  })
+
   it('注入项覆盖缺省：各能力都走注入实现', () => {
     const spawn = vi.fn(() => {
       throw new Error('夹具不该真的启动进程')

@@ -7,7 +7,8 @@
  *
  * M3 最小面：执行器只需要「跑一轮」所需的 log/now/paths/config/process，
  * 因此不提供 `fs.read/write`、`net`、`emit`（执行器只能经 `ExecutorIO` 回报）。
- * 能力面扩展随 M4/M6/M7 的 source/channel 插件另立任务。
+ * M4 增 `notify`（桌面通道用）：要求 manifest 声明 `capabilities: ['notify']`；
+ * fs/net 等仍随 M6/M7 的 source 插件另立任务。
  */
 import type {
   DetectedRuntime,
@@ -76,15 +77,30 @@ export interface Sdk {
   config<T = Record<string, unknown>>(): T
   /** 进程能力：未声明 `spawn` 时访问即抛 `capability_not_declared` */
   process: ProcessCapability
+  /**
+   * 系统通知：未声明 `notify` 时访问即抛 `capability_not_declared`。
+   * title/body 只作通知 API 参数（不拼命令行/HTML/脚本），也不落日志；
+   * 不可用或构造失败时静默丢弃，不影响调用方继续投递/回答。
+   */
+  notify(title: string, body: string): void
 }
 
-/** `createSdk` 的宿主原件（`host/sdk-host.ts` 的唯一实现；测试注入假实现） */
+/** 系统通知原件：装配根注入 Electron 实现，测试注入假实现。 */
+export type NotifyFn = (title: string, body: string) => void
+
+/**
+ * `createSdk` 的宿主原件（`host/sdk-host.ts` 的唯一实现；测试注入假实现）。
+ *
+ * `notify` 可选：没有桌面通知的宿主（测试/无头）可以不提供，`createSdk` 对声明了
+ * `notify` 的插件退化为静默丢弃——通知失败不是投递失败，更不影响内核。
+ */
 export interface SdkHost {
   log(line: string): void
   now(): number
   paths: SdkPaths
   config<T = Record<string, unknown>>(): T
   process: ProcessCapability
+  notify?: NotifyFn
 }
 
 /** 执行一轮时的上下文：运行时配置 + 能力面 */

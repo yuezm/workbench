@@ -197,9 +197,13 @@ const declaredCapabilitiesOf = (manifestSource: string): string[] => {
   return Array.from(array[1].matchAll(/['"]([^'"]+)['"]/g), (match) => match[1])
 }
 
-/** sdk 用法 → 需要的 capability：`sdk.process.*` 归 `spawn`，`sdk.fs.read/write` 各归其声明。 */
+/**
+ * sdk 用法 → 需要的 capability：`sdk.process.*` 归 `spawn`，`sdk.notify(...)` 归 `notify`，
+ * `sdk.fs.read/write` 各归其声明。规则同时匹配 `sdk.` 与 `ctx.sdk.` 这类命名空间访问。
+ */
 const capabilityUseRules: ReadonlyArray<{ capability: string; usage: RegExp }> = [
   { capability: 'spawn', usage: /sdk\s*\.\s*process\s*\./ },
+  { capability: 'notify', usage: /sdk\s*\.\s*notify\s*\(/ },
   { capability: 'fs.read', usage: /sdk\s*\.\s*fs\s*\.\s*read\s*\(/ },
   { capability: 'fs.write', usage: /sdk\s*\.\s*fs\s*\.\s*write\s*\(/ },
 ]
@@ -319,6 +323,29 @@ describe('插件边界护栏自检', () => {
     expect(capabilityViolationsOf('fake', files, ['spawn'])).toEqual([
       'fake: 源码用了 sdk 的「fs.read」能力，但 manifest.capabilities 未声明',
       'fake: manifest.capabilities 声明了「spawn」，但源码没有对应用法',
+    ])
+  })
+
+  it('notify 护栏：通道用 sdk.notify 必须声明 notify，声明了不用也报（M4 T6）', () => {
+    // 通道插件经 `ctx.sdk` 拿能力面，规则必须同时认命名空间访问
+    const usesNotify: PluginFile[] = [
+      {
+        path: 'channels/desktop/index.ts',
+        source:
+          "export const start = (ctx: ChannelContext): void => ctx.sdk.notify('待审批', '正文')",
+      },
+    ]
+    expect(capabilityViolationsOf('desktop', usesNotify, [])).toEqual([
+      'desktop: 源码用了 sdk 的「notify」能力，但 manifest.capabilities 未声明',
+    ])
+    expect(capabilityViolationsOf('desktop', usesNotify, ['notify'])).toEqual([])
+
+    // 反向：声明了 notify 但源码没调 → 也是违规（声明 = 授权面，实际未用）
+    const noUsage: PluginFile[] = [
+      { path: 'channels/desktop/index.ts', source: 'export const start = (): void => undefined' },
+    ]
+    expect(capabilityViolationsOf('desktop', noUsage, ['notify'])).toEqual([
+      'desktop: manifest.capabilities 声明了「notify」，但源码没有对应用法',
     ])
   })
 })

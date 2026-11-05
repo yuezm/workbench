@@ -8,10 +8,10 @@ import { defaultSpawn } from '../../src/host/process'
 import type { SpawnFn, Spawned } from '../../src/sdk/types'
 
 /**
- * 宿主能力原件（M3 T4）：`createSdkHost` 用 `host/process.ts` 与 `host/executable.ts`
+ * 宿主能力原件（M3 T4 / M4 T6）：`createSdkHost` 用 `host/process.ts` 与 `host/executable.ts`
  * 的现成实现组装 `SdkHost`，本用例只验证「原件接得对 + 缺省值 + 失败不抛」。
  * 命令解析/进程树终止的平台分支由 `tests/main/ai-workflow/runtime/{executable,process}.test.ts`
- * 覆盖，这里不重复；只补 sdk-host 自身的失败语义。
+ * 覆盖，这里不重复；只补 sdk-host 自身的失败语义（含 M4 的 notify 缺省/注入）。
  */
 
 /** 最小子进程句柄：注入假 spawn 时用，不跑真实进程。 */
@@ -83,6 +83,25 @@ describe('createSdkHost 缺省值', () => {
     const options = { env: { PATH: 'C:/bin' } }
     expect(host.process.spawn('dsh.cmd', ['--stdio'], options)).toBe(spawned)
     expect(spawn).toHaveBeenCalledWith('dsh.cmd', ['--stdio'], options)
+  })
+
+  it('notify 缺省静默丢弃：不抛、不落日志（通知文案不落日志）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const host = createSdkHost()
+
+    expect(host.notify).toBeTypeOf('function')
+    expect(() => host.notify?.('待审批', '任务已挂起')).not.toThrow()
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('notify 注入后原样转发 title/body（只作参数，不拼接）', () => {
+    const notify = vi.fn()
+    const host = createSdkHost({ notify })
+
+    host.notify?.('待审批', '任务已挂起\n1. 继续\n2. 终止')
+
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify).toHaveBeenCalledWith('待审批', '任务已挂起\n1. 继续\n2. 终止')
   })
 })
 

@@ -1039,8 +1039,8 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       return done(facts)
     }
 
-    // ---------- 对话（聊天并入 purpose='chat' 的统一执行路径，T14a） ----------
-    case 'conversation.create': {
+    // ---------- 对话（聊天并入 purpose='chat' 的统一执行路径，T14a；M5 命令化） ----------
+    case 'chat.create': {
       const agent = view.agents.get(input.agentId)
       if (!agent) return reject('not_found', '智能体不存在: ' + input.agentId)
       const conversation: Conversation = {
@@ -1054,7 +1054,7 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       return done([draft('conversation.created', { conversation })])
     }
 
-    case 'conversation.send': {
+    case 'chat.send': {
       const conversation = view.conversations.get(input.conversationId)
       if (!conversation) return reject('not_found', '对话不存在: ' + input.conversationId)
       const agent = view.agents.get(conversation.agentId)
@@ -1109,23 +1109,48 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       return done(facts)
     }
 
-    case 'conversation.rename': {
-      const conversation = view.conversations.get(input.conversationId)
-      if (!conversation) return reject('not_found', '对话不存在: ' + input.conversationId)
-      const title = input.title.trim()
-      if (!title) return reject('invalid_input', '对话标题必填')
-      return done([
-        draft('conversation.updated', {
-          conversation: { ...conversation, title, updatedAt: now },
-        }),
-      ])
-    }
-
-    case 'conversation.remove': {
+    case 'chat.remove': {
       const conversation = view.conversations.get(input.conversationId)
       if (!conversation) return done([])
       // tombstone：消息随对话一起删除由 project 级联；历史 run 保留 conversationId 作为引用
       return done([draft('conversation.removed', { conversation })])
+    }
+
+    case 'chat.cancel': {
+      // 中止该对话进行中的一轮：逐条产取消请求（与 run.cancel 同一收尾链路），
+      // 已请求过取消的跳过（重复取消幂等），无活跃 run 时零事实。
+      const conversation = view.conversations.get(input.conversationId)
+      if (!conversation) return reject('not_found', '对话不存在: ' + input.conversationId)
+      const facts: FactDraft[] = []
+      for (const run of view.runs.values()) {
+        if (run.conversationId !== conversation.id) continue
+        if (run.status !== 'queued' && run.status !== 'running' && run.status !== 'waiting')
+          continue
+        if (run.cancelRequested) continue
+        facts.push(
+          draft('run.cancel_requested', { run: { ...run, cancelRequested: true }, by: 'owner' }),
+        )
+      }
+      return done(facts)
+    }
+
+    case 'app.event': {
+      // app 插件事件（M5）：只入账、不派活；类型白名单由宿主入口先校验，这里只落事实。
+      // `hops=1`（无父 run）、`originRunId=null`（外部来源）、`detailRef=null`（不落资料文件）。
+      return done([
+        draft('event.received', {
+          eventId: env.nextId('event'),
+          source: 'app',
+          type: input.eventType,
+          subject: input.subject,
+          summary: truncateSummary(input.summary ?? ''),
+          detailRef: null,
+          link: input.link ?? null,
+          hops: 1,
+          originRunId: null,
+          dedupeKey: input.dedupeKey ?? null,
+        }),
+      ])
     }
   }
 }

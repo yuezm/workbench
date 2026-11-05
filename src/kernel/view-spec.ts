@@ -84,17 +84,21 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'clock.tick':
       // M2 只处理运行到期（租约 / 退避 / 超时）；cron 与卡片超时后续里程碑再补
       return ['runs']
-    case 'conversation.create':
-      // 对话绑定的智能体必须存在
+    case 'chat.create':
+      // 对话绑定的智能体必须存在（M5 命令化后沿用原 conversation.create 语义）
       return ['agents']
-    case 'conversation.send':
+    case 'chat.send':
       // 同一对话同时只跑一轮（runs）+ 智能体/运行时决定 execution 配置
       return ['conversations', 'messages', 'runs', 'agents', 'runtimes']
-    case 'conversation.rename':
-      return ['conversations']
-    case 'conversation.remove':
+    case 'chat.remove':
       // 消息随对话一并删除，删除前要能解释历史
       return ['conversations', 'messages']
+    case 'chat.cancel':
+      // 按对话取活跃 run 逐条产取消请求
+      return ['conversations', 'runs']
+    case 'app.event':
+      // app 事件只入账，不读任何投影
+      return []
     case 'card.delivered':
     case 'card.delivery_failed':
       // 投递回写只读卡片当前行（校验版本 / 幂等：迟到与重复投递零事实）

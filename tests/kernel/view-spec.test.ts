@@ -57,6 +57,17 @@ const commandSamples: Command[] = [
   { commandId: 'c14', type: 'task.remove', id: 't-1' },
   { commandId: 'c15', type: 'card.answer', cardId: 'card-1', optionIndex: 0, via: 'channel' },
   { commandId: 'c16', type: 'card.resolve', cardId: 'card-1' },
+  { commandId: 'c17', type: 'chat.create', agentId: 'ag-1' },
+  { commandId: 'c18', type: 'chat.send', conversationId: 'cv-1', content: '你好' },
+  { commandId: 'c19', type: 'chat.remove', conversationId: 'cv-1' },
+  { commandId: 'c20', type: 'chat.cancel', conversationId: 'cv-1' },
+  {
+    commandId: 'c21',
+    type: 'app.event',
+    appId: 'pomodoro',
+    eventType: 'pomodoro.completed',
+    subject: '番茄结束',
+  },
 ]
 
 const hostSamples: Input[] = [
@@ -76,10 +87,6 @@ const hostSamples: Input[] = [
   { type: 'run.host_settled', runId: 'run-1', status: 'cancelled', errorCode: 'cancelled' },
   { type: 'run.cancel', runId: 'run-1' },
   { type: 'clock.tick' },
-  { type: 'conversation.create', agentId: 'ag-1' },
-  { type: 'conversation.send', conversationId: 'cv-1', content: '你好' },
-  { type: 'conversation.rename', conversationId: 'cv-1', title: '新标题' },
-  { type: 'conversation.remove', conversationId: 'cv-1' },
   { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
   { type: 'card.delivery_failed', cardId: 'card-1', version: 1, error: '通道不可用' },
 ]
@@ -119,10 +126,11 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'run.host_settled': ['runs', 'conversations'],
   'run.cancel': ['runs'],
   'clock.tick': ['runs'],
-  'conversation.create': ['agents'],
-  'conversation.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
-  'conversation.rename': ['conversations'],
-  'conversation.remove': ['conversations', 'messages'],
+  'chat.create': ['agents'],
+  'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
+  'chat.remove': ['conversations', 'messages'],
+  'chat.cancel': ['conversations', 'runs'],
+  'app.event': [],
   'card.delivered': ['cards'],
   'card.delivery_failed': ['cards'],
 }
@@ -130,9 +138,9 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 16 条命令 + 13 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(16)
-    expect(HOST_INPUT_NAMES.length).toBe(13)
+  it('覆盖 21 条命令 + 9 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(21)
+    expect(HOST_INPUT_NAMES.length).toBe(9)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)
     expect(new Set(samples.map((input) => input.type)).size).toBe(
@@ -176,7 +184,7 @@ describe('kernel/view-spec', () => {
   it('运行/对话输入只声明自己需要的切片（领取要运行时配置、回执要阶段流转）', () => {
     expect(viewSpec(byType.get('run.claim') as Input)).toContain('runtimes')
     expect(viewSpec(byType.get('run.receipt') as Input)).toContain('workflow_stages')
-    expect(viewSpec(byType.get('conversation.send') as Input)).toContain('conversations')
+    expect(viewSpec(byType.get('chat.send') as Input)).toContain('conversations')
     expect(viewSpec(byType.get('clock.tick') as Input)).toEqual(['runs'])
   })
 })

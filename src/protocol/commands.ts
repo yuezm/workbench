@@ -15,7 +15,13 @@ import type {
   WorkflowInput,
 } from './entities'
 
-/** 命令名全集；决定面见 tasks/m1-plan.md「决策面」与 m4-plan「架构决议 D6」。 */
+/**
+ * 命令名全集；决定面见 tasks/m1-plan.md「决策面」、m4-plan「架构决议 D6」
+ * 与 m5-plan「架构决议 D5/D6」。
+ *
+ * M5：聊天四个动作从宿主输入升为命令（带 `commandId` 幂等），命名与 UI 一致；
+ * `app.event` 是 app 插件的事件出口（白名单在 `src/shared/apps.ts`）。
+ */
 export const COMMAND_NAMES = [
   'workflow.create',
   'workflow.update',
@@ -33,6 +39,11 @@ export const COMMAND_NAMES = [
   'task.remove',
   'card.answer',
   'card.resolve',
+  'chat.create',
+  'chat.send',
+  'chat.remove',
+  'chat.cancel',
+  'app.event',
 ] as const
 
 export type CommandName = (typeof COMMAND_NAMES)[number]
@@ -149,6 +160,60 @@ export interface CardResolveCommand extends CommandBase {
   cardId: string
 }
 
+// ---------- 聊天（M5：从宿主输入升为命令） ----------
+
+/** 新建一轮主动对话；`agentId` 必须存在（内核校验）。 */
+export interface ChatCreateCommand extends CommandBase {
+  type: 'chat.create'
+  agentId: string
+  /** 首条消息可顺带给标题；缺省用「新对话」 */
+  title?: string
+}
+
+/** 发一轮：先落用户消息再入队 `purpose='chat'` 的 run；被拒绝时不落消息。 */
+export interface ChatSendCommand extends CommandBase {
+  type: 'chat.send'
+  conversationId: string
+  content: string
+}
+
+/** 删除对话（消息级联删除；活跃 run 由宿主路由先行取消）。 */
+export interface ChatRemoveCommand extends CommandBase {
+  type: 'chat.remove'
+  conversationId: string
+}
+
+/** 中止该对话进行中的一轮：内核按活跃 run 逐条产 `run.cancel_requested`。 */
+export interface ChatCancelCommand extends CommandBase {
+  type: 'chat.cancel'
+  conversationId: string
+}
+
+// ---------- app 事件（M5） ----------
+
+/**
+ * app 插件发出的事件（如番茄结束）：宿主先按 `src/shared/apps.ts` 的
+ * `APP_EVENTS` 白名单校验 `appId` 与 `eventType`，内核产一条 `event.received`
+ * （`source='app'`、`hops=1`、`originRunId=null`）。M6 才消费事件建任务。
+ */
+export interface AppEventCommand extends CommandBase {
+  type: 'app.event'
+  /** app 插件 id（kebab-case），必须在白名单内 */
+  appId: string
+  /** 事件类型，如 pomodoro.completed；必须在白名单内 */
+  eventType: string
+  /** 事项标识（用于合并/去重） */
+  subject: string
+  /** 摘要（内核截断到 200 字） */
+  summary?: string
+  /** 全文（宿主只入账；不拼进提示词） */
+  detail?: string
+  /** 关联链接（只入库，不打开） */
+  link?: string
+  /** 稳定去重键（M6 规则用） */
+  dedupeKey?: string
+}
+
 /** 全部命令的判别联合（`type` 是命令名）。 */
 export type Command =
   | WorkflowCreateCommand
@@ -167,3 +232,8 @@ export type Command =
   | TaskRemoveCommand
   | CardAnswerCommand
   | CardResolveCommand
+  | ChatCreateCommand
+  | ChatSendCommand
+  | ChatRemoveCommand
+  | ChatCancelCommand
+  | AppEventCommand

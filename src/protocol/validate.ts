@@ -19,6 +19,7 @@ import {
   RUN_TERMINAL_STATUSES,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
+import { VIEW_IDS, VIEW_PARAM_FIELDS, type ViewId } from './views'
 
 /** 校验通过返回收窄后的命令；失败返回首条错误文案。 */
 export type ValidateResult = { ok: true; command: Command } | { ok: false; message: string }
@@ -315,6 +316,17 @@ const checkProbe = (value: unknown): Check => {
   )
 }
 
+/** app 事件类型：`<appId>.<event>` 形式的小写点分标识（如 pomodoro.completed）。 */
+const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/
+
+const checkEventType = (value: unknown): Check => {
+  if (typeof value !== 'string') return 'eventType必须是字符串'
+  if (value.length > COMMAND_LIMITS.name) return `eventType最长 ${COMMAND_LIMITS.name} 个字符`
+  return EVENT_TYPE_PATTERN.test(value)
+    ? null
+    : 'eventType 必须是小写点分标识（如 pomodoro.completed）'
+}
+
 const checkPayload = (type: CommandName, command: Obj): Check => {
   switch (type) {
     case 'workflow.create':
@@ -353,6 +365,28 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
       )
     case 'card.resolve':
       return requiredId(command.cardId, 'cardId')
+    case 'chat.create':
+      return (
+        requiredId(command.agentId, 'agentId') ??
+        optionalText(command.title, 'title', COMMAND_LIMITS.title)
+      )
+    case 'chat.send':
+      return requiredId(command.conversationId, 'conversationId') ?? chatContent(command.content)
+    case 'chat.remove':
+    case 'chat.cancel':
+      return requiredId(command.conversationId, 'conversationId')
+    case 'app.event':
+      // appId / eventType 属于白名单的语义由宿主入口按 `APP_EVENTS` 再判一次；
+      // 这里只做形状与长度校验（renderer 传的是不可信数据）。
+      return (
+        requiredId(command.appId, 'appId') ??
+        checkEventType(command.eventType) ??
+        required(command.subject, 'subject', COMMAND_LIMITS.title) ??
+        optionalText(command.summary, 'summary', COMMAND_LIMITS.summary) ??
+        optionalString(command.detail, 'detail') ??
+        optionalText(command.link, 'link', COMMAND_LIMITS.workdir) ??
+        optionalText(command.dedupeKey, 'dedupeKey', COMMAND_LIMITS.id)
+      )
   }
 }
 
@@ -543,20 +577,6 @@ const checkHostPayload = (type: HostInputName, input: Obj): Check => {
       return requiredId(input.runId, 'runId')
     case 'clock.tick':
       return null
-    case 'conversation.create':
-      return (
-        requiredId(input.agentId, 'agentId') ??
-        optionalText(input.title, 'title', COMMAND_LIMITS.title)
-      )
-    case 'conversation.send':
-      return requiredId(input.conversationId, 'conversationId') ?? chatContent(input.content)
-    case 'conversation.rename':
-      return (
-        requiredId(input.conversationId, 'conversationId') ??
-        required(input.title, 'title', COMMAND_LIMITS.title)
-      )
-    case 'conversation.remove':
-      return requiredId(input.conversationId, 'conversationId')
     case 'card.delivered':
       // 通道投递回写：版本 1 基正整数（与回执/轮次同档上界），ref 是通道键
       return (
@@ -595,4 +615,35 @@ export function validateInput(input: unknown): ValidateInputResult {
   if (error) return { ok: false, message: error }
 
   return { ok: true, input: record as unknown as Input }
+}
+
+// ---------- 视图查询（M5：query 动词入口） ----------
+
+/** `query` 的校验结果：视图 id 必须是登记过的，参数按 `VIEW_PARAM_FIELDS` 收窄。 */
+export type ValidateQueryResult =
+  | { ok: true; view: ViewId; params: Record<string, string> | undefined }
+  | { ok: false; message: string }
+
+/**
+ * 校验 renderer 传来的视图 id 与参数：未知视图、参数缺失/类型不对/超长一律拒收。
+ * 无参数视图容忍 `undefined` / `null`；带参数视图缺字段直接拒绝（不静默当空串）。
+ */
+export function validateQuery(view: unknown, params: unknown): ValidateQueryResult {
+  if (typeof view !== 'string' || !(VIEW_IDS as readonly string[]).includes(view)) {
+    return { ok: false, message: `未知视图: ${String(view)}` }
+  }
+  const field = VIEW_PARAM_FIELDS[view as ViewId]
+  if (field === undefined) {
+    if (params !== undefined && params !== null) {
+      const record = asRecord(params)
+      if (!record || Object.keys(record).length > 0)
+        return { ok: false, message: '该视图不接受参数' }
+    }
+    return { ok: true, view: view as ViewId, params: undefined }
+  }
+  const record = asRecord(params)
+  if (!record) return { ok: false, message: `视图 ${view} 需要参数 ${field}` }
+  const error = requiredId(record[field], field)
+  if (error) return { ok: false, message: error }
+  return { ok: true, view: view as ViewId, params: { [field]: record[field] as string } }
 }

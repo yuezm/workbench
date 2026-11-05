@@ -16,7 +16,7 @@ import type { Command } from './commands'
 import { COMMAND_NAMES } from './commands'
 import type { RunErrorCode, RunEventRow, RunTerminalStatus, RunUsage } from './entities'
 
-/** 宿主内部输入名全集：不经 IPC，只由宿主（scheduler / clock / reconcile / chat 入口 / 通道 hub）发。 */
+/** 宿主内部输入名全集：不经 IPC，只由宿主（scheduler / clock / reconcile / 通道 hub）发。 */
 export const HOST_INPUT_NAMES = [
   'run.claim',
   'run.heartbeat',
@@ -25,10 +25,6 @@ export const HOST_INPUT_NAMES = [
   'run.host_settled',
   'run.cancel',
   'clock.tick',
-  'conversation.create',
-  'conversation.send',
-  'conversation.rename',
-  'conversation.remove',
   'card.delivered',
   'card.delivery_failed',
 ] as const
@@ -166,33 +162,6 @@ export interface ClockTickInput {
   type: 'clock.tick'
 }
 
-// ---------- 对话 ----------
-
-export interface ConversationCreateInput {
-  type: 'conversation.create'
-  agentId: string
-  /** 首条消息可顺带给标题；缺省用「新对话」 */
-  title?: string
-}
-
-/** 发一轮：先落用户消息再入队 `purpose='chat'` 的 run；被拒绝时不落消息 */
-export interface ConversationSendInput {
-  type: 'conversation.send'
-  conversationId: string
-  content: string
-}
-
-export interface ConversationRenameInput {
-  type: 'conversation.rename'
-  conversationId: string
-  title: string
-}
-
-export interface ConversationRemoveInput {
-  type: 'conversation.remove'
-  conversationId: string
-}
-
 // ---------- 通道投递回写（M4） ----------
 
 /**
@@ -225,10 +194,6 @@ export type HostInput =
   | RunHostSettledInput
   | RunCancelInput
   | ClockTickInput
-  | ConversationCreateInput
-  | ConversationSendInput
-  | ConversationRenameInput
-  | ConversationRemoveInput
   | CardDeliveredInput
   | CardDeliveryFailedInput
 

@@ -167,7 +167,12 @@ const send = (
   environment = env(),
   conversationId = 'cv-1',
 ): ReturnType<typeof decide> =>
-  decide(target, { type: 'conversation.send', conversationId, content }, NOW, environment)
+  decide(
+    target,
+    { commandId: 'm5-chat', type: 'chat.send', conversationId, content },
+    NOW,
+    environment,
+  )
 
 const fullChatView = (over: Partial<Seed> = {}): View =>
   view({
@@ -181,7 +186,7 @@ describe('kernel/decide conversation.create', () => {
   it('缺省标题「新对话」；标题 trim 后落 conversation.created', () => {
     const decision = decide(
       view({ agents: [agent()] }),
-      { type: 'conversation.create', agentId: 'ag-1' },
+      { commandId: 'm5-chat', type: 'chat.create', agentId: 'ag-1' },
       NOW,
       env(),
     )
@@ -208,7 +213,7 @@ describe('kernel/decide conversation.create', () => {
 
     const titled = decide(
       view({ agents: [agent()] }),
-      { type: 'conversation.create', agentId: 'ag-1', title: '  我的对话  ' },
+      { commandId: 'm5-chat', type: 'chat.create', agentId: 'ag-1', title: '  我的对话  ' },
       NOW,
       env(),
     )
@@ -218,7 +223,9 @@ describe('kernel/decide conversation.create', () => {
   })
 
   it('智能体不存在：reject not_found', () => {
-    expect(decide(view(), { type: 'conversation.create', agentId: 'ag-404' }, NOW, env())).toEqual({
+    expect(
+      decide(view(), { commandId: 'm5-chat', type: 'chat.create', agentId: 'ag-404' }, NOW, env()),
+    ).toEqual({
       facts: [],
       reject: { code: 'not_found', message: '智能体不存在: ag-404' },
     })
@@ -435,54 +442,71 @@ describe('kernel/decide conversation.send', () => {
   })
 })
 
-describe('kernel/decide conversation.rename / remove', () => {
-  it('rename：产 conversation.updated（title + updatedAt）', () => {
+describe('kernel/decide chat.cancel / remove', () => {
+  it('cancel：对该对话的 queued/running/waiting run 逐条产 run.cancel_requested', () => {
+    const runs = [
+      chatRun({ id: 'run-1', status: 'queued' }),
+      chatRun({ id: 'run-2', status: 'running' }),
+      chatRun({ id: 'run-3', status: 'waiting' }),
+      chatRun({ id: 'run-4', status: 'succeeded' }),
+      chatRun({ id: 'run-5', conversationId: 'cv-404', status: 'running' }),
+    ]
+    const decision = decide(
+      view({ conversations: [conversation()], runs }),
+      { commandId: 'm5-chat', type: 'chat.cancel', conversationId: 'cv-1' },
+      NOW,
+      env(),
+    )
+    expect(decision.reject).toBeUndefined()
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'run.cancel_requested',
+      'run.cancel_requested',
+      'run.cancel_requested',
+    ])
+    expect(decision.facts.map((fact) => (fact.payload as { run: RunRow }).run.id)).toEqual([
+      'run-1',
+      'run-2',
+      'run-3',
+    ])
+    expect((decision.facts[0]?.payload as { run: RunRow }).run.cancelRequested).toBe(true)
+  })
+
+  it('cancel：已请求取消的跳过、无活跃 run 零事实', () => {
+    const requested = chatRun({ id: 'run-1', status: 'running', cancelRequested: true })
     expect(
       decide(
-        view({ conversations: [conversation()] }),
-        { type: 'conversation.rename', conversationId: 'cv-1', title: '  新标题  ' },
+        view({ conversations: [conversation()], runs: [requested] }),
+        { commandId: 'm5-chat', type: 'chat.cancel', conversationId: 'cv-1' },
         NOW,
         env(),
       ),
-    ).toEqual({
-      facts: [
-        {
-          type: 'conversation.updated',
-          actor: OWNER,
-          at: NOW,
-          payload: {
-            conversation: { ...conversation(), title: '新标题', updatedAt: NOW },
-          },
-        },
-      ],
-    })
+    ).toEqual({ facts: [] })
+    expect(
+      decide(
+        view({ conversations: [conversation()] }),
+        { commandId: 'm5-chat', type: 'chat.cancel', conversationId: 'cv-1' },
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [] })
   })
 
-  it('rename：对话不存在 / 标题为空 → reject', () => {
+  it('cancel：对话不存在 → reject', () => {
     expect(
       decide(
         view(),
-        { type: 'conversation.rename', conversationId: 'cv-404', title: '标题' },
+        { commandId: 'm5-chat', type: 'chat.cancel', conversationId: 'cv-404' },
         NOW,
         env(),
       ),
     ).toEqual({ facts: [], reject: { code: 'not_found', message: '对话不存在: cv-404' } })
-
-    expect(
-      decide(
-        view({ conversations: [conversation()] }),
-        { type: 'conversation.rename', conversationId: 'cv-1', title: '   ' },
-        NOW,
-        env(),
-      ),
-    ).toEqual({ facts: [], reject: { code: 'invalid_input', message: '对话标题必填' } })
   })
 
   it('remove：产 tombstone conversation.removed；不存在静默', () => {
     expect(
       decide(
         view({ conversations: [conversation()] }),
-        { type: 'conversation.remove', conversationId: 'cv-1' },
+        { commandId: 'm5-chat', type: 'chat.remove', conversationId: 'cv-1' },
         NOW,
         env(),
       ),
@@ -498,7 +522,12 @@ describe('kernel/decide conversation.rename / remove', () => {
     })
 
     expect(
-      decide(view(), { type: 'conversation.remove', conversationId: 'cv-404' }, NOW, env()),
+      decide(
+        view(),
+        { commandId: 'm5-chat', type: 'chat.remove', conversationId: 'cv-404' },
+        NOW,
+        env(),
+      ),
     ).toEqual({ facts: [] })
   })
 })

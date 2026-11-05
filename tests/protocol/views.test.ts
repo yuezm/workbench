@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Card, RunEvent, Task } from '../../src/protocol/entities'
 import {
+  HOST_VIEW_IDS,
   VIEW_IDS,
+  VIEW_PARAM_FIELDS,
   type ActiveRun,
   type RuntimeWorkload,
   type StaleChatRun,
@@ -46,7 +48,7 @@ const chatRun = {
 } satisfies ActiveRun
 
 describe('protocol/views', () => {
-  it('VIEW_IDS 是 M1 最小集合 + M4 卡片视图且顺序稳定', () => {
+  it('VIEW_IDS 是 M1 最小集合 + M4 卡片视图 + M5 客户端视图且顺序稳定', () => {
     expect([...VIEW_IDS]).toEqual([
       'workflows.all',
       'agents.all',
@@ -66,6 +68,12 @@ describe('protocol/views', () => {
       'cards.open',
       'cards.byRun',
       'runs.waiting',
+      'tasks.executing',
+      'runtimes.statuses',
+      'kernel.seq',
+      'runtimes.executors',
+      'runtimes.detected',
+      'runtimes.models',
     ])
   })
 
@@ -154,5 +162,41 @@ describe('protocol/views：M4 waiting run 视图', () => {
       hasOpenCard: false,
     }
     expect(Object.keys(waiting).sort()).toEqual(['hasOpenCard', 'leaseId', 'runId', 'turn'])
+  })
+})
+
+/** M5 客户端视图：执行中集合、负载汇总、内核水位；宿主视图走同一个 query 动词。 */
+const executingNoParams: Assert<Equal<ViewParams<'tasks.executing'>, undefined>> = true
+const statusesNoParams: Assert<Equal<ViewParams<'runtimes.statuses'>, undefined>> = true
+const seqNoParams: Assert<Equal<ViewParams<'kernel.seq'>, undefined>> = true
+const executorsNoParams: Assert<Equal<ViewParams<'runtimes.executors'>, undefined>> = true
+const detectedNoParams: Assert<Equal<ViewParams<'runtimes.detected'>, undefined>> = true
+const modelsParams: Assert<Equal<ViewParams<'runtimes.models'>, { runtimeId: string }>> = true
+const executingResult: Assert<Equal<ViewResult<'tasks.executing'>, string[]>> = true
+const seqResult: Assert<Equal<ViewResult<'kernel.seq'>, number>> = true
+const hostViewIdsCovered: Assert<
+  Equal<
+    (typeof HOST_VIEW_IDS)[number],
+    'runtimes.executors' | 'runtimes.detected' | 'runtimes.models'
+  >
+> = true
+
+describe('protocol/views：M5 客户端视图', () => {
+  it('参数与返回类型映射（类型级断言）', () => {
+    expect(executingNoParams).toBe(true)
+    expect(statusesNoParams).toBe(true)
+    expect(seqNoParams).toBe(true)
+    expect(executorsNoParams).toBe(true)
+    expect(detectedNoParams).toBe(true)
+    expect(modelsParams).toBe(true)
+    expect(executingResult).toBe(true)
+    expect(seqResult).toBe(true)
+    expect(hostViewIdsCovered).toBe(true)
+  })
+
+  it('宿主视图是 VIEW_IDS 的子集且不与 DB 视图混用参数', () => {
+    for (const id of HOST_VIEW_IDS) expect(VIEW_IDS).toContain(id)
+    expect(VIEW_PARAM_FIELDS['runtimes.executors']).toBeUndefined()
+    expect(VIEW_PARAM_FIELDS['runtimes.models']).toBe('runtimeId')
   })
 })

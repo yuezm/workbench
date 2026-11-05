@@ -132,6 +132,29 @@ export interface DetectedRuntime {
   supported: boolean
 }
 
+/** 运行时的动态负载（不落库，按 runs 现算；`runtimes.statuses` 视图与调度器同口径） */
+export interface RuntimeStatus {
+  runtimeId: string
+  workload: {
+    running: number
+    queued: number
+    maxConcurrent: number
+  }
+}
+
+/**
+ * 运行时表单可选的执行器（只读，来自插件注册表）。
+ *
+ * `command` / `profile` 是该插件 manifest 声明的表单默认值；新建运行时选执行器时
+ * 用它预填，用户仍可改。数组顺序即注册表顺序（UI 下拉顺序）。
+ */
+export interface RuntimeExecutorChoice {
+  key: string
+  label: string
+  command: string
+  profile: string
+}
+
 /** 执行器 `models()` 的模型目录项；字段与旧 `RuntimeModelOption` 一致 */
 export interface RuntimeModelOption {
   /** provider/model 形式的 id，可直接写入 Runtime.model */

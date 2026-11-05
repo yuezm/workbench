@@ -356,7 +356,7 @@ describe('loadView：按 viewSpec 装载切片', () => {
     expect(view.activeTaskIds).toEqual(new Set(['tk-1', 'tk-2']))
   })
 
-  it('viewSpec 裁剪：run.claim 只装 runs + runtimes，conversation.send 装 chat 相关切片', () => {
+  it('viewSpec 裁剪：run.claim 只装 runs + runtimes，chat.send 装 chat 相关切片', () => {
     const db = memory()
     seed(db)
     seedRunProjection(db)
@@ -371,7 +371,12 @@ describe('loadView：按 viewSpec 装载切片', () => {
 
     const chatView = loadView(
       db,
-      viewSpec({ type: 'conversation.send', conversationId: 'cv-1', content: '你好' }),
+      viewSpec({
+        commandId: 'm5-chat',
+        type: 'chat.send',
+        conversationId: 'cv-1',
+        content: '你好',
+      }),
     )
     expect(chatView.conversations.size).toBe(1)
     expect(chatView.messages.size).toBe(1)

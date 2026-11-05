@@ -1401,8 +1401,10 @@ describe('kernel/decide run.host_settled 宿主兜底', () => {
 })
 
 describe('kernel/decide 对话输入（T14a 已实现，不再 unsupported）', () => {
-  it('conversation.create 走已实现分支：缺智能体时 not_found', () => {
-    expect(decide(view(), { type: 'conversation.create', agentId: 'ag-404' }, NOW, env())).toEqual({
+  it('chat.create 走已实现分支：缺智能体时 not_found', () => {
+    expect(
+      decide(view(), { commandId: 'm5-chat', type: 'chat.create', agentId: 'ag-404' }, NOW, env()),
+    ).toEqual({
       facts: [],
       reject: { code: 'not_found', message: '智能体不存在: ag-404' },
     })

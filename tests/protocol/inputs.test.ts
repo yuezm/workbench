@@ -70,10 +70,6 @@ const validInputs: Input[] = [
   { type: 'run.host_settled', runId: 'run-1', leaseId: 'run-1:1', turn: 1, status: 'failed' },
   { type: 'run.cancel', runId: 'run-1' },
   { type: 'clock.tick' },
-  { type: 'conversation.create', agentId: 'ag-1', title: '新对话' },
-  { type: 'conversation.send', conversationId: 'cv-1', content: '你好' },
-  { type: 'conversation.rename', conversationId: 'cv-1', title: '标题' },
-  { type: 'conversation.remove', conversationId: 'cv-1' },
   { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
   { type: 'card.delivery_failed', cardId: 'card-1', version: 2, error: '通道不可用' },
 ]
@@ -102,10 +98,6 @@ describe('protocol/inputs', () => {
       'run.host_settled',
       'run.cancel',
       'clock.tick',
-      'conversation.create',
-      'conversation.send',
-      'conversation.rename',
-      'conversation.remove',
       'card.delivered',
       'card.delivery_failed',
     ])
@@ -264,19 +256,35 @@ describe('protocol/inputs', () => {
     })
   })
 
-  it('conversation.*：引用与正文/标题形状', () => {
-    expect(rejected(host('conversation.create', {}))).toBe('agentId必填')
-    expect(rejected(host('conversation.create', { agentId: 'ag-1', title: 7 }))).toBe(
+  it('chat.*：命令形态（commandId 必填）与引用/正文形状', () => {
+    expect(rejected(host('chat.create', {}))).toBe('commandId必填')
+    expect(rejected(host('chat.create', { commandId: 'c1' }))).toBe('agentId必填')
+    expect(rejected(host('chat.create', { commandId: 'c1', agentId: 'ag-1', title: 7 }))).toBe(
       'title必须是字符串',
     )
-    expect(rejected(host('conversation.send', { content: 'x' }))).toBe('conversationId必填')
-    expect(rejected(host('conversation.send', { conversationId: 'cv-1' }))).toBe('消息内容不能为空')
+    expect(rejected(host('chat.send', { commandId: 'c2', content: 'x' }))).toBe(
+      'conversationId必填',
+    )
+    expect(rejected(host('chat.send', { commandId: 'c2', conversationId: 'cv-1' }))).toBe(
+      '消息内容不能为空',
+    )
     expect(
-      rejected(host('conversation.send', { conversationId: 'cv-1', content: longText(20_001) })),
+      rejected(
+        host('chat.send', { commandId: 'c2', conversationId: 'cv-1', content: longText(20_001) }),
+      ),
     ).toBe('content最长 20000 个字符')
-    expect(rejected(host('conversation.rename', { conversationId: 'cv-1' }))).toBe('title必填')
-    expect(rejected(host('conversation.rename', { title: 't' }))).toBe('conversationId必填')
-    expect(rejected(host('conversation.remove', {}))).toBe('conversationId必填')
+    expect(rejected(host('chat.remove', { commandId: 'c3' }))).toBe('conversationId必填')
+    expect(rejected(host('chat.cancel', { commandId: 'c4' }))).toBe('conversationId必填')
+    expect(rejected(host('chat.send', { commandId: 'c2', conversationId: 'cv-1' }))).toBe(
+      '消息内容不能为空',
+    )
+    expect(rejected(host('app.event', { commandId: 'c5' }))).toBe('appId必填')
+    expect(rejected(host('app.event', { commandId: 'c5', appId: 'pomodoro' }))).toBe(
+      'eventType必须是字符串',
+    )
+    expect(
+      rejected(host('app.event', { commandId: 'c5', appId: 'pomodoro', eventType: 'Completed' })),
+    ).toBe('eventType 必须是小写点分标识（如 pomodoro.completed）')
   })
 
   it('card.delivered / card.delivery_failed：卡片 id、版本 1 基、ref/error 上限', () => {

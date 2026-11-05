@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { Agent, ChatConversation } from '../../../../../../src/shared/ai-workflow-api'
+import type { Agent, Conversation } from '../../../../../../src/protocol/entities'
 import {
   ConversationList,
   type ConversationListProps,
@@ -17,7 +17,7 @@ const agent: Agent = {
 }
 const researcher: Agent = { ...agent, id: 'a2', name: '研究员' }
 
-function conv(id: string, title: string, agentId = 'a1'): ChatConversation {
+function conv(id: string, title: string, agentId = 'a1'): Conversation {
   return { id, title, agentId, sessionId: null, createdAt: 't', updatedAt: 't' }
 }
 

@@ -20,12 +20,14 @@ import {
 import {
   configureKernel,
   createKernelStore,
+  getKernelStore,
   resetKernelForTest,
   viewKey,
   type KernelStore,
   type KernelTransport,
 } from '../../../../src/renderer/src/shell/kernelStore'
-import { useKernelView } from '../../../../src/renderer/src/shell/useKernelView'
+import { useKernelView, useKernelViewState } from '../../../../src/renderer/src/shell/useKernelView'
+import { installFakeKernel, stopFakeKernel } from '../../shell/fake-kernel'
 
 interface FakeTransport {
   transport: KernelTransport
@@ -306,5 +308,198 @@ describe('renderer/shell/useKernelView', () => {
     expect(viewKey('runs.byTask', { taskId: 't-1' })).toBe('runs.byTask|{"taskId":"t-1"}')
     expect(viewKey('agents.all')).toBe('agents.all')
     expect(VIEW_IDS.length).toBeGreaterThan(0)
+  })
+})
+
+/** 读错误：`useKernelViewState` 暴露 transport 的错误文案，恢复后回到数据。 */
+function StateProbe(): ReactElement {
+  const state = useKernelViewState('agents.all')
+  if (state.error !== null) return <div data-testid="state">{state.error}</div>
+  return (
+    <div data-testid="state">
+      {state.data === undefined ? 'loading' : String(state.data.length)}
+    </div>
+  )
+}
+
+describe('renderer/shell/useKernelViewState', () => {
+  it('查询失败展示错误；清除失败后按最新值恢复', async () => {
+    const kernel = installFakeKernel()
+    kernel.setView('agents.all', undefined, [])
+    render(<StateProbe />)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByTestId('state').textContent).toBe('0')
+
+    kernel.failView('agents.all', undefined, '视图查询失败')
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByTestId('state').textContent).toBe('视图查询失败')
+
+    kernel.clearFailure('agents.all', undefined)
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByTestId('state').textContent).toBe('0')
+    stopFakeKernel()
+  })
+})
+/** params=null：暂不订阅（id 未选），不发查询、返回空态。 */
+function DisabledProbe(): ReactElement {
+  const state = useKernelViewState('runs.byTask', null)
+  return (
+    <div data-testid="disabled">
+      {state.loading ? 'loading' : (state.error ?? 'ready')}:
+      {state.data === undefined ? 'none' : String(state.data)}
+    </div>
+  )
+}
+
+describe('renderer/shell/useKernelView：params=null 暂不订阅', () => {
+  it('不发查询、不返回 loading、无错误', async () => {
+    const fake = fakeTransport()
+    configureKernel(fake.transport)
+    render(<DisabledProbe />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(fake.queries.some((entry) => entry.view === 'runs.byTask')).toBe(false)
+    expect(screen.getByTestId('disabled').textContent).toBe('ready:none')
+    resetKernelForTest()
+  })
+})
+/** 手动控制查询返回的 transport（验证迟到响应 / 快照失败 / 流缓冲）。 */
+function manualTransport(): {
+  transport: KernelTransport
+  resolveQuery(view: ViewId, value: unknown): void
+  rejectQuery(view: ViewId, error: Error): void
+  pending(): ViewId[]
+} {
+  const pendingResolvers: Array<{
+    view: ViewId
+    resolve: (value: unknown) => void
+    reject: (error: Error) => void
+  }> = []
+  const transport: KernelTransport = {
+    dispatch: <C extends Command>(_command: C) => Promise.resolve({ facts: [], value: null }),
+    query: <T extends ViewId>(view: T): Promise<ViewResult<T>> =>
+      new Promise<ViewResult<T>>((resolve, reject) => {
+        pendingResolvers.push({
+          view,
+          resolve: (value) => resolve(value as ViewResult<T>),
+          reject,
+        })
+      }),
+    subscribe: () => () => {},
+  }
+  return {
+    transport,
+    resolveQuery: (view, value) => {
+      const index = pendingResolvers.findIndex((entry) => entry.view === view)
+      if (index < 0) throw new Error('没有待返回的查询: ' + view)
+      pendingResolvers.splice(index, 1)[0]!.resolve(value)
+    },
+    rejectQuery: (view, error) => {
+      const index = pendingResolvers.findIndex((entry) => entry.view === view)
+      if (index < 0) throw new Error('没有待返回的查询: ' + view)
+      pendingResolvers.splice(index, 1)[0]!.reject(error)
+    },
+    pending: () => pendingResolvers.map((entry) => entry.view),
+  }
+}
+
+describe('renderer/shell/kernelStore：边界路径', () => {
+  it('加载期间到达事实：迟到响应丢弃并重取一次', async () => {
+    const manual = manualTransport()
+    const store = createKernelStore(manual.transport)
+    void store.start()
+    manual.resolveQuery('kernel.seq', 0)
+    await store.start()
+
+    const values: unknown[] = []
+    const off = store.watch('agents.all', undefined, () => values.push(store.peek('agents.all')))
+    expect(manual.pending()).toEqual(['agents.all'])
+
+    // 第一次查询未返回时来了事实：标记 stale，等响应后重取
+    store.applyEvent({ kind: 'facts', seq: 1, types: ['agent.created'] })
+    manual.resolveQuery('agents.all', ['旧值'])
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(manual.pending()).toEqual(['agents.all'])
+
+    manual.resolveQuery('agents.all', ['新值'])
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.peek('agents.all')).toEqual(['新值'])
+    expect(values.length).toBeGreaterThan(0)
+    off()
+  })
+
+  it('快照查询失败：缓冲批次按到达顺序应用（不阻塞 UI）', async () => {
+    const manual = manualTransport()
+    const store = createKernelStore(manual.transport)
+    const started = store.start()
+    store.applyEvent({ kind: 'facts', seq: 7, types: ['agent.created'] })
+    manual.rejectQuery('kernel.seq', new Error('库忙'))
+    await started
+    expect(store.seq).toBe(7)
+  })
+
+  it('流事件即时送达，不参与快照缓冲', async () => {
+    const manual = manualTransport()
+    const store = createKernelStore(manual.transport)
+    void store.start()
+    const streamed: string[] = []
+    store.onStream((event) => streamed.push(event.kind))
+    store.applyEvent({ kind: 'stream-end', runId: 'run-1', conversationId: 'cv-1' })
+    expect(streamed).toEqual(['stream-end'])
+    manual.resolveQuery('kernel.seq', 0)
+    await store.start()
+    expect(streamed).toEqual(['stream-end'])
+  })
+
+  it('没有 WebCrypto 时补时间戳幂等键', async () => {
+    const fake = fakeTransport()
+    const store = createKernelStore(fake.transport)
+    await store.start()
+    vi.stubGlobal('crypto', {})
+    try {
+      await store.dispatch({ type: 'task.complete', id: 't-1' } as Command)
+      const command = fake.dispatchSpy.mock.calls[0][0] as Command
+      expect(command.commandId).toMatch(/^cmd-/)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('未装配时取 store 明确报错；reset 后再取仍报错', () => {
+    resetKernelForTest()
+    expect(() => getKernelStore()).toThrow('kernelStore 未装配（先调用 configureKernel）')
+  })
+})
+describe('renderer/shell/kernelStore：错误文案', () => {
+  it('查询失败为非 Error 值时转成字符串', async () => {
+    const fake = fakeTransport()
+    const original = fake.transport.query
+    fake.transport.query = <T extends ViewId>(view: T, params?: ViewParams<T>) => {
+      if (view === 'agents.all') return Promise.reject('桥接字符串错误')
+      return original(view, params)
+    }
+    const store = createKernelStore(fake.transport)
+    await store.start()
+    const off = store.watch('agents.all', undefined, () => {})
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(store.peekState('agents.all')).toMatchObject({
+      data: undefined,
+      error: '桥接字符串错误',
+      loading: false,
+    })
+    off()
   })
 })

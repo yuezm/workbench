@@ -5,7 +5,7 @@ import type {
   Runtime,
   RuntimeProbe,
   RuntimeProbeState,
-} from '../../../../../../src/shared/ai-workflow-api'
+} from '../../../../../../src/protocol/entities'
 import { AgentDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/AgentDialog'
 
 function probe(state: RuntimeProbeState, over: Partial<RuntimeProbe> = {}): RuntimeProbe {

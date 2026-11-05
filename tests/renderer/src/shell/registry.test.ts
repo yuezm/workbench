@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { appPlugins } from '../../../../src/renderer/src/shell/registry'
+import { APP_EVENTS } from '../../../../src/shared/apps'
 
 describe('app 注册表', () => {
   it('注册表非空', () => {
@@ -20,6 +21,22 @@ describe('app 注册表', () => {
       expect(app.name).toBeTruthy()
       expect(app.icon).toBeTypeOf('function')
       expect(app.component).toBeTypeOf('function')
+    }
+  })
+
+  it('每个 app 声明的事件都在 APP_EVENTS 的白名单内', () => {
+    for (const app of appPlugins) {
+      const declared = APP_EVENTS.find((entry) => entry.id === app.id)?.events ?? []
+      for (const eventType of app.events ?? []) {
+        expect(declared).toContain(eventType)
+      }
+    }
+  })
+
+  it('APP_EVENTS 的每个 id 都注册在 appPlugins 里', () => {
+    const ids = new Set(appPlugins.map((app) => app.id))
+    for (const entry of APP_EVENTS) {
+      expect(ids.has(entry.id)).toBe(true)
     }
   })
 })

@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { WorkflowWithStages } from '../../../../../shared/ai-workflow-api'
+import type { WorkflowWithStages } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Select } from '../../../components/ui/select'
 

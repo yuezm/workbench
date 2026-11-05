@@ -1,32 +1,77 @@
-import type { ReactElement } from 'react'
-import type { WorkflowWithStages } from '../../../../../shared/ai-workflow-api'
+import { useState, type ReactElement } from 'react'
+import type { WorkflowInput, WorkflowWithStages } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
+import { Dialog } from '../../../components/ui/dialog'
+import { getKernelStore } from '../../../shell/kernelStore'
+import { useKernelViewState } from '../../../shell/useKernelView'
+import { WorkflowEditor } from './WorkflowEditor'
 
-interface WorkflowManagerProps {
-  workflows: WorkflowWithStages[]
-  activeId: string | undefined
-  onSelect: (id: string) => void
-  onEdit: (workflow: WorkflowWithStages) => void
-  onNew: () => void
-}
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-/** 设置区的工作流清单：新建 / 选择 / 编辑工作流定义 */
-export function WorkflowManager({
-  workflows,
-  activeId,
-  onSelect,
-  onEdit,
-  onNew,
-}: WorkflowManagerProps): ReactElement {
+/**
+ * 设置区的工作流清单：新建 / 选择 / 编辑工作流定义。
+ *
+ * 自己订阅 `workflows.all` 并维护「当前」选中（首个工作流为默认；新建成功后用
+ * `dispatch` 返回的实体选中新建项）。新建/编辑共用一个弹窗，保存命令也在这里发，
+ * 页面不再传任何 props。
+ */
+export function WorkflowManager(): ReactElement {
+  const { data, error: readError } = useKernelViewState('workflows.all')
+  const workflows = data ?? []
+  /** 用户选中的工作流 id；失效（被删）时回落到首个 */
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  /** 非 undefined = 弹窗打开中（null = 新建，实体 = 编辑） */
+  const [editing, setEditing] = useState<WorkflowWithStages | null | undefined>(undefined)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const activeId =
+    selectedId !== null && workflows.some((w) => w.id === selectedId)
+      ? selectedId
+      : workflows[0]?.id
+
+  const openEditor = (workflow: WorkflowWithStages | null): void => {
+    setSaveError(null)
+    setEditing(workflow)
+  }
+
+  const save = async (input: WorkflowInput): Promise<void> => {
+    setSaveError(null)
+    try {
+      const store = getKernelStore()
+      if (editing) {
+        await store.dispatch({
+          type: 'workflow.update',
+          commandId: '',
+          id: editing.id,
+          input,
+        })
+      } else {
+        const result = await store.dispatch({ type: 'workflow.create', commandId: '', input })
+        // 保存后选中新建项：id 直接取命令返回的实体，不等视图刷新
+        if (result.value !== null) setSelectedId(result.value.id)
+      }
+      setEditing(undefined)
+    } catch (e) {
+      // 保存失败保持弹窗打开并就地说明原因
+      setSaveError(errMsg(e))
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3">
+      {readError && (
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+          {readError}
+        </p>
+      )}
+
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-ink-faint">
           {workflows.length > 0
             ? '工作流定义决定看板的阶段与流转规则。'
             : '还没有工作流，先新建一条。'}
         </p>
-        <Button variant="primary" size="sm" onClick={onNew}>
+        <Button variant="primary" size="sm" onClick={() => openEditor(null)}>
           新建工作流
         </Button>
       </div>
@@ -51,7 +96,7 @@ export function WorkflowManager({
                 <button
                   type="button"
                   className="flex min-w-0 flex-1 flex-col items-start text-left outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
-                  onClick={() => onSelect(w.id)}
+                  onClick={() => setSelectedId(w.id)}
                 >
                   <span className="flex items-center gap-2 text-sm font-medium text-ink">
                     {w.name}
@@ -66,13 +111,24 @@ export function WorkflowManager({
                     {w.description ? ` · ${w.description}` : ''}
                   </span>
                 </button>
-                <Button variant="ghost" size="sm" onClick={() => onEdit(w)}>
+                <Button variant="ghost" size="sm" onClick={() => openEditor(w)}>
                   编辑
                 </Button>
               </li>
             )
           })}
         </ul>
+      )}
+
+      {editing !== undefined && (
+        <Dialog onClose={() => setEditing(undefined)} className="max-w-3xl">
+          {saveError && (
+            <p className="mb-3 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+              {saveError}
+            </p>
+          )}
+          <WorkflowEditor workflow={editing} onSave={save} onCancel={() => setEditing(undefined)} />
+        </Dialog>
       )}
     </div>
   )

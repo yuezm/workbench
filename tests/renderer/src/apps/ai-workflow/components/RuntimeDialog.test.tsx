@@ -1,38 +1,21 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   Runtime,
   RuntimeExecutorChoice,
   RuntimeModelOption,
   RuntimeProbe,
-} from '../../../../../../src/shared/ai-workflow-api'
+} from '../../../../../../src/protocol/entities'
+import type { ViewId, ViewParams, ViewResult } from '../../../../../../src/protocol/views'
 import { RuntimeDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RuntimeDialog'
-
-function setApi(api: unknown): void {
-  ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
-}
+import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 /** 执行器清单：顺序即注册表顺序（dsh 首项），command 的 command 默认值可体现「切执行器预填」 */
 const EXECUTORS: RuntimeExecutorChoice[] = [
   { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
   { key: 'command', label: '通用命令', command: 'my-cli', profile: '' },
 ]
-
-/** 弹窗只用两个只读通道：models（仅编辑时）与 executors（挂载即取） */
-function baseApi(
-  over: {
-    models?: ReturnType<typeof vi.fn>
-    executors?: ReturnType<typeof vi.fn>
-  } = {},
-): unknown {
-  return {
-    runtimes: {
-      models: over.models ?? vi.fn(async () => []),
-      executors: over.executors ?? vi.fn(async () => EXECUTORS),
-    },
-  }
-}
 
 function makeProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
   return {
@@ -81,10 +64,65 @@ function makeModel(over: Partial<RuntimeModelOption> = {}): RuntimeModelOption {
   }
 }
 
-describe('RuntimeDialog', () => {
-  beforeEach(() => setApi(baseApi()))
+let kernel: FakeKernel
 
+beforeEach(() => {
+  kernel = installFakeKernel()
+})
+
+afterEach(() => {
+  stopFakeKernel()
+})
+
+/** 弹窗用两个宿主视图：executors（挂载即取）与 models（仅编辑时） */
+function setup(
+  options: { executors?: RuntimeExecutorChoice[]; models?: RuntimeModelOption[] } = {},
+): void {
+  kernel.setView('runtimes.executors', undefined, options.executors ?? EXECUTORS)
+  if (options.models !== undefined) {
+    kernel.setView('runtimes.models', { runtimeId: 'r1' }, options.models)
+  }
+}
+
+/** 记录窗口对 store.query 的调用（不经 useKernelView，宿主视图走它） */
+function recordQueries(): Array<{ view: ViewId; params?: unknown }> {
+  const calls: Array<{ view: ViewId; params?: unknown }> = []
+  const original = kernel.store.query
+  kernel.store.query = <T extends ViewId>(
+    view: T,
+    params?: ViewParams<T>,
+  ): Promise<ViewResult<T>> => {
+    calls.push({ view, params })
+    return original(view, params)
+  }
+  return calls
+}
+
+/** 让 `runtimes.models` 的查询悬起（验证读取中的禁用态）；返回手动 reject 的句柄 */
+function holdModelsQuery(): {
+  reject: (e: unknown) => void
+  resolve: (v: RuntimeModelOption[]) => void
+} {
+  let reject!: (e: unknown) => void
+  let resolve!: (v: RuntimeModelOption[]) => void
+  const pending = new Promise<RuntimeModelOption[]>((res, rej) => {
+    reject = rej
+    resolve = res
+  })
+  const original = kernel.store.query
+  kernel.store.query = <T extends ViewId>(
+    view: T,
+    params?: ViewParams<T>,
+  ): Promise<ViewResult<T>> => {
+    if (view === 'runtimes.models') return pending as Promise<ViewResult<T>>
+    return original(view, params)
+  }
+  return { reject, resolve }
+}
+
+describe('RuntimeDialog', () => {
   it('新建：默认值渲染，模型与推理强度在创建前不可选', async () => {
+    setup()
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(
@@ -131,6 +169,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('新建：权限模式、工作目录、并发上限与错误都在弹窗内处理', async () => {
+    setup()
     const onSubmit = vi.fn().mockRejectedValue(new Error('create-fail'))
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
@@ -151,10 +190,10 @@ describe('RuntimeDialog', () => {
     })
   })
 
-  it('编辑：预填、模型目录加载后切回已知选项、推理强度随模型能力可选', async () => {
+  it('编辑：预填、按运行时 id 读模型目录、推理强度随模型能力可选', async () => {
     const model = makeModel()
-    const models = vi.fn(async () => [model])
-    setApi(baseApi({ models }))
+    setup({ models: [model] })
+    const queries = recordQueries()
     const runtime = makeRuntime({
       model: model.id,
       reasoningEffort: 'high',
@@ -166,7 +205,7 @@ describe('RuntimeDialog', () => {
     render(<RuntimeDialog runtime={runtime} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
     expect(screen.getByRole('dialog')).toHaveTextContent('编辑运行时')
-    expect(models).toHaveBeenCalledWith('r1')
+    expect(queries).toContainEqual({ view: 'runtimes.models', params: { runtimeId: 'r1' } })
     await waitFor(() =>
       expect(screen.getByRole('combobox', { name: '运行时模型' })).toHaveTextContent(
         'DeepSeek Chat',
@@ -190,11 +229,8 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：模型目录读取中禁用下拉并提示；读取失败仍可手动填写模型 id', async () => {
-    let reject!: (e: unknown) => void
-    const pending = new Promise<RuntimeModelOption[]>((_res, rej) => {
-      reject = rej
-    })
-    setApi(baseApi({ models: vi.fn(() => pending) }))
+    setup()
+    const { reject } = holdModelsQuery()
     const runtime = makeRuntime({ model: 'custom/model' })
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
@@ -216,7 +252,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：模型下拉可切默认/手动输入，推理强度随模型清空', async () => {
-    setApi(baseApi({ models: vi.fn(async () => [makeModel()]) }))
+    setup({ models: [makeModel()] })
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(
@@ -253,7 +289,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：切回默认模型并保留/提交已有推理强度，启用开关可修改', async () => {
-    setApi(baseApi({ models: vi.fn(async () => [makeModel()]) }))
+    setup({ models: [makeModel()] })
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(
@@ -275,6 +311,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('新建：命令与 profile 可手填并 trim 后提交', async () => {
+    setup()
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
@@ -292,7 +329,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：已有模型不在目录里时保留手动输入，未知推理强度仍显示', async () => {
-    setApi(baseApi({ models: vi.fn(async () => []) }))
+    setup({ models: [] })
     render(
       <RuntimeDialog
         runtime={makeRuntime({ model: 'custom/model', reasoningEffort: 'max' })}
@@ -307,6 +344,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('提交失败为非 Error 时也字符串化展示', async () => {
+    setup()
     const onSubmit = vi.fn().mockRejectedValue('plain-fail')
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
@@ -316,17 +354,8 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑时模型目录未返回即卸载：不写状态也不报错', async () => {
-    let resolve!: (list: RuntimeModelOption[]) => void
-    setApi(
-      baseApi({
-        models: vi.fn(
-          () =>
-            new Promise<RuntimeModelOption[]>((res) => {
-              resolve = res
-            }),
-        ),
-      }),
-    )
+    setup()
+    const { resolve } = holdModelsQuery()
     const { unmount } = render(
       <RuntimeDialog runtime={makeRuntime()} onSubmit={vi.fn()} onCancel={vi.fn()} />,
     )
@@ -336,6 +365,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('取消与关闭按钮都回调 onCancel', async () => {
+    setup()
     const onCancel = vi.fn()
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: '' }} onSubmit={vi.fn()} onCancel={onCancel} />)
@@ -347,6 +377,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('无预填时回落到空名称与首项执行器默认值', async () => {
+    setup()
     render(<RuntimeDialog onSubmit={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByLabelText('运行时名称')).toHaveValue('')
     await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
@@ -359,6 +390,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('新建：切执行器按 manifest 预填 command/profile，手改后提交用户值', async () => {
+    setup()
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
@@ -387,6 +419,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：执行器与参数模板回填，保存提交携带 executorKey 与 argsTemplate', async () => {
+    setup()
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(
@@ -402,8 +435,8 @@ describe('RuntimeDialog', () => {
       />,
     )
 
-    expect(await screen.findByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
-      '通用命令',
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '运行时执行器' })).toHaveTextContent('通用命令'),
     )
     expect(screen.getByLabelText('运行时参数模板')).toHaveValue('["--print","{prompt}"]')
     expect(screen.getByLabelText('运行时命令')).toHaveValue('my-cli')
@@ -421,13 +454,8 @@ describe('RuntimeDialog', () => {
   })
 
   it('执行器清单加载失败：提示原因，仍可手填并提交（不带空串 key）', async () => {
-    setApi(
-      baseApi({
-        executors: vi.fn(async () => {
-          throw new Error('exec-down')
-        }),
-      }),
-    )
+    setup()
+    kernel.failView('runtimes.executors', undefined, 'exec-down')
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
@@ -448,7 +476,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('执行器清单为空：下拉禁用并提示无可用执行器', async () => {
-    setApi(baseApi({ executors: vi.fn(async () => []) }))
+    setup({ executors: [] })
     render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
 
     expect(await screen.findByText('无可用执行器')).toBeInTheDocument()
@@ -457,6 +485,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：切换执行器不覆盖已有 command/profile（只在新建时按 manifest 预填）', async () => {
+    setup()
     const user = userEvent.setup()
     render(
       <RuntimeDialog

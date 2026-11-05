@@ -1,57 +1,36 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import type { Card } from '../../../../../shared/ai-workflow-api'
+import { useState, type ReactElement } from 'react'
+import type { Card } from '../../../../../protocol/entities'
 import { cn } from '../../../lib/cn'
-import { wfApi } from '../api'
+import { getKernelStore } from '../../../shell/kernelStore'
+import { useKernelViewState } from '../../../shell/useKernelView'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /**
- * 顶部「待审批」条（M4 最小审批面）。
+ * 顶部「待审批」条（M4 最小审批面，M5 改内核视图 + 命令）。
  *
- * 读 `cards.open`（全部 open 卡，按 createdAt 升序），每条卡展示标题 / 正文摘要 / 选项按钮；
- * 点击即调 `cards.answer`（`via='ui'`）。成功由宿主 effects 推送 changed，本组件也顺带重拉一次；
+ * 读 `cards.open` 视图（全部 open 卡，按 createdAt 升序），每条卡展示标题 / 正文摘要 / 选项按钮；
+ * 点击即 dispatch `card.answer`（`via='ui'`）。成功后随 `card.*` 事实失效自动重取视图，
  * 失败（重复回答 / 越界 / 已关闭）只显示后端文案，卡片保留、不崩。无 open 卡时不渲染。
  */
 export function ApprovalBar(): ReactElement | null {
-  const [cards, setCards] = useState<Card[]>([])
+  const cardsState = useKernelViewState('cards.open')
+  const cards = cardsState.data ?? []
   const [error, setError] = useState<string | null>(null)
   const [answering, setAnswering] = useState<string | null>(null)
-
-  const reload = useCallback(async (): Promise<void> => {
-    try {
-      const open = await wfApi().cards.open()
-      setCards(open)
-      setError(null)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [])
-
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const open = await wfApi().cards.open()
-        if (alive) setCards(open)
-      } catch (e) {
-        if (alive) setError(errMsg(e))
-      }
-    })()
-    const off = wfApi().onChanged(() => {
-      void reload()
-    })
-    return () => {
-      alive = false
-      off()
-    }
-  }, [reload])
 
   const answer = (card: Card, optionIndex: number): void => {
     void (async () => {
       setAnswering(card.id)
       try {
-        await wfApi().cards.answer(card.id, optionIndex)
-        await reload()
+        await getKernelStore().dispatch({
+          type: 'card.answer',
+          commandId: '',
+          cardId: card.id,
+          optionIndex,
+          via: 'ui',
+        })
+        setError(null)
       } catch (e) {
         // 内核拒绝（重复回答 / 越界 / 已关闭）只改文案，卡片与列表保持原样
         setError(errMsg(e))
@@ -63,6 +42,8 @@ export function ApprovalBar(): ReactElement | null {
 
   // 无待审批卡：不占版面（错误只在有卡可答时才有展示语境）
   if (cards.length === 0) return null
+
+  const shownError = error ?? cardsState.error
 
   return (
     <section
@@ -109,9 +90,9 @@ export function ApprovalBar(): ReactElement | null {
         ))}
       </ul>
 
-      {error !== null && (
+      {shownError !== null && (
         <p role="alert" className="mt-1.5 text-[11px] text-red-300">
-          {error}
+          {shownError}
         </p>
       )}
     </section>

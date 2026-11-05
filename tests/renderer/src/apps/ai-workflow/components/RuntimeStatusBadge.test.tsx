@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { RuntimeProbe } from '../../../../../../src/shared/ai-workflow-api'
+import type { RuntimeProbe } from '../../../../../../src/protocol/entities'
 import { RuntimeStatusBadge } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RuntimeStatusBadge'
 
 function probe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {

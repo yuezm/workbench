@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type ReactElement } from 'react'
-import type { Agent, ChatConversation, ChatMessage } from '../../../../../shared/ai-workflow-api'
+import type { Agent, Conversation, Message } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { fieldCls } from '../../../components/ui/input'
 import { cn } from '../../../lib/cn'
@@ -18,8 +18,8 @@ function truncate(text: string, max: number): string {
 export interface ChatPanelProps {
   /** 智能体清单：把会话绑定的 agentId 显示成名字 */
   agents: Agent[]
-  conversation: ChatConversation | null
-  messages: ChatMessage[]
+  conversation: Conversation | null
+  messages: Message[]
   /** 当前轮已收到的流式输出（正文 / 思考 / 工具事件） */
   streaming: ChatStreamState
   sending: boolean

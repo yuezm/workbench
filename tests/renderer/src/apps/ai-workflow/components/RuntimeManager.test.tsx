@@ -1,21 +1,18 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Command } from '../../../../../../src/protocol/commands'
 import type {
-  AiWorkflowApi,
   DetectedRuntime,
   Runtime,
   RuntimeExecutorChoice,
-  RuntimeInput,
-  RuntimeModelOption,
   RuntimeProbe,
   RuntimeStatus,
-} from '../../../../../../src/shared/ai-workflow-api'
+} from '../../../../../../src/protocol/entities'
+import type { DispatchResult } from '../../../../../../src/protocol/ipc'
+import type { ViewId, ViewParams, ViewResult } from '../../../../../../src/protocol/views'
 import { RuntimeManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RuntimeManager'
-
-function setApi(api: unknown): void {
-  ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
-}
+import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 /** 执行器清单：与弹窗共用（顺序即注册表顺序，dsh 首项） */
 const EXECUTORS: RuntimeExecutorChoice[] = [
@@ -85,38 +82,62 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve }
 }
 
-function makeApi() {
-  const runtimes = {
-    list: vi.fn(async (): Promise<Runtime[]> => [makeRuntime()]),
-    statuses: vi.fn(async (): Promise<RuntimeStatus[]> => [makeStatus('r1')]),
-    detect: vi.fn(async (): Promise<DetectedRuntime[]> => []),
-    create: vi.fn(async (input: RuntimeInput): Promise<Runtime> =>
-      makeRuntime({ id: 'r2', ...input }),
-    ),
-    update: vi.fn(async (_id: string, patch: Partial<RuntimeInput>): Promise<Runtime> =>
-      makeRuntime({ ...patch }),
-    ),
-    remove: vi.fn(async (_id: string): Promise<void> => undefined),
-    probe: vi.fn(async (): Promise<RuntimeProbe> => makeProbe()),
-    models: vi.fn(async (): Promise<RuntimeModelOption[]> => []),
-    executors: vi.fn(async (): Promise<RuntimeExecutorChoice[]> => EXECUTORS),
-  }
-  setApi({ runtimes } as unknown as Partial<AiWorkflowApi>)
-  return runtimes
+let kernel: FakeKernel
+
+beforeEach(() => {
+  kernel = installFakeKernel()
+})
+
+afterEach(() => {
+  stopFakeKernel()
+})
+
+interface SetupOptions {
+  runtimes?: Runtime[]
+  statuses?: RuntimeStatus[]
+  detected?: DetectedRuntime[]
+  executors?: RuntimeExecutorChoice[]
 }
 
-beforeEach(() => vi.clearAllMocks())
+/** 预置视图：清单/负载走 useKernelViewState，探测与执行器清单是宿主视图 */
+function setup(options: SetupOptions = {}): void {
+  kernel.setView('runtimes.all', undefined, options.runtimes ?? [makeRuntime()])
+  kernel.setView('runtimes.statuses', undefined, options.statuses ?? [makeStatus('r1')])
+  kernel.setView('runtimes.executors', undefined, options.executors ?? EXECUTORS)
+  kernel.setView('runtimes.detected', undefined, options.detected ?? [])
+}
+
+/** dispatch 注入：绕过 onDispatch 的泛型签名，测试里按命令 type 分支 */
+function handleDispatch(
+  handler: (command: Command) => Promise<DispatchResult<unknown>> | DispatchResult<unknown>,
+): void {
+  kernel.onDispatch(handler as unknown as Parameters<FakeKernel['onDispatch']>[0])
+}
+
+/** 记录窗口对 store.query 的调用（宿主视图走它） */
+function recordQueries(): Array<{ view: ViewId; params?: unknown }> {
+  const calls: Array<{ view: ViewId; params?: unknown }> = []
+  const original = kernel.store.query
+  kernel.store.query = <T extends ViewId>(
+    view: T,
+    params?: ViewParams<T>,
+  ): Promise<ViewResult<T>> => {
+    calls.push({ view, params })
+    return original(view, params)
+  }
+  return calls
+}
 
 describe('RuntimeManager', () => {
   it('清单展示名称/执行器/健康/CLI 版本/启动头/路径/负载', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([makeRuntime()])
-    runtimes.statuses.mockResolvedValue([makeStatus('r1', { running: 1, maxConcurrent: 2 })])
+    setup({
+      statuses: [makeStatus('r1', { running: 1, maxConcurrent: 2 })],
+    })
 
     render(<RuntimeManager />)
 
     expect(await screen.findByText('ds')).toBeInTheDocument()
-    expect(screen.getByText('DeepSeek Harness')).toBeInTheDocument()
+    expect(await screen.findByText('DeepSeek Harness')).toBeInTheDocument()
     expect(screen.getByText('可用 · 12ms')).toBeInTheDocument()
     expect(screen.getByText('CLI v1.2.3')).toBeInTheDocument()
     expect(screen.getByText('dsh --profile multica --stdio')).toBeInTheDocument()
@@ -126,12 +147,13 @@ describe('RuntimeManager', () => {
   })
 
   it('执行器角标显示清单 label；清单映射不到时回退原始 key', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([
-      makeRuntime({ id: 'r1', name: 'ds', executorKey: 'dsh' }),
-      makeRuntime({ id: 'r2', name: 'legacy', executorKey: 'ghost' }),
-    ])
-    runtimes.statuses.mockResolvedValue([makeStatus('r1'), makeStatus('r2')])
+    setup({
+      runtimes: [
+        makeRuntime({ id: 'r1', name: 'ds', executorKey: 'dsh' }),
+        makeRuntime({ id: 'r2', name: 'legacy', executorKey: 'ghost' }),
+      ],
+      statuses: [makeStatus('r1'), makeStatus('r2')],
+    })
 
     render(<RuntimeManager />)
 
@@ -140,19 +162,17 @@ describe('RuntimeManager', () => {
   })
 
   it('未检测 / 不可用 / 停用 / 排队都按契约展示', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([
-      makeRuntime({ id: 'r1', name: 'fresh', lastProbe: null, enabled: false }),
-      makeRuntime({
-        id: 'r2',
-        name: 'broken',
-        lastProbe: makeProbe({ state: 'unavailable', elapsedMs: 8, error: '登录态失效' }),
-      }),
-    ])
-    runtimes.statuses.mockResolvedValue([
-      makeStatus('r1'),
-      makeStatus('r2', { queued: 2, running: 0, maxConcurrent: 4 }),
-    ])
+    setup({
+      runtimes: [
+        makeRuntime({ id: 'r1', name: 'fresh', lastProbe: null, enabled: false }),
+        makeRuntime({
+          id: 'r2',
+          name: 'broken',
+          lastProbe: makeProbe({ state: 'unavailable', elapsedMs: 8, error: '登录态失效' }),
+        }),
+      ],
+      statuses: [makeStatus('r1'), makeStatus('r2', { queued: 2, running: 0, maxConcurrent: 4 })],
+    })
 
     render(<RuntimeManager />)
 
@@ -166,30 +186,29 @@ describe('RuntimeManager', () => {
   })
 
   it('statuses 缺该运行时 use runtime.maxConcurrent 兜底', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([makeRuntime({ maxConcurrent: 3 })])
-    runtimes.statuses.mockResolvedValue([])
+    setup({ runtimes: [makeRuntime({ maxConcurrent: 3 })], statuses: [] })
 
     render(<RuntimeManager />)
     expect(await screen.findByText('负载 0/3')).toBeInTheDocument()
   })
 
-  it('清单加载失败展示错误', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockRejectedValue('boom')
+  it('清单读取失败展示错误', async () => {
+    setup()
+    kernel.failView('runtimes.all', undefined, 'boom')
 
     render(<RuntimeManager />)
     expect(await screen.findByText('boom')).toBeInTheDocument()
   })
 
   it('检测清单区分支持/不支持/已添加', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([makeRuntime({ command: 'dsh' })])
-    runtimes.detect.mockResolvedValue([
-      makeDetected({ command: 'dsh', label: 'DeepSeek Harness', supported: true }),
-      makeDetected({ command: 'codex', label: 'Codex CLI', supported: true }),
-      makeDetected({ command: 'claude', label: 'Claude Code', supported: false }),
-    ])
+    setup({
+      runtimes: [makeRuntime({ command: 'dsh' })],
+      detected: [
+        makeDetected({ command: 'dsh', label: 'DeepSeek Harness', supported: true }),
+        makeDetected({ command: 'codex', label: 'Codex CLI', supported: true }),
+        makeDetected({ command: 'claude', label: 'Claude Code', supported: false }),
+      ],
+    })
 
     render(<RuntimeManager />)
 
@@ -200,54 +219,89 @@ describe('RuntimeManager', () => {
   })
 
   it('扫描中显示进行态，未检测到 CLI 时给出提示', async () => {
-    const runtimes = makeApi()
-    const slow = deferred<DetectedRuntime[]>()
-    runtimes.detect.mockReturnValue(slow.promise)
+    setup()
+    const slow = deferred<unknown>()
+    const original = kernel.store.query
+    kernel.store.query = <T extends ViewId>(
+      view: T,
+      params?: ViewParams<T>,
+    ): Promise<ViewResult<T>> => {
+      if (view === 'runtimes.detected') return slow.promise as Promise<ViewResult<T>>
+      return original(view, params)
+    }
 
     render(<RuntimeManager />)
 
     expect(await screen.findByText('正在扫描本机 PATH…')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '扫描中…' })).toBeDisabled()
 
-    slow.resolve([])
+    await act(async () => {
+      slow.resolve([])
+    })
     expect(await screen.findByText(/未检测到已安装的 CLI/)).toBeInTheDocument()
   })
 
   it('重新扫描拉取到结果；扫描失败展示错误', async () => {
-    const runtimes = makeApi()
-    runtimes.detect
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        makeDetected({ command: 'codex', label: 'Codex CLI', path: 'C:/codex.exe' }),
-      ])
+    setup({ detected: [] })
+    const queries = recordQueries()
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText(/未检测到已安装的 CLI/)
 
+    kernel.setView('runtimes.detected', undefined, [
+      makeDetected({ command: 'codex', label: 'Codex CLI', path: 'C:/codex.exe' }),
+    ])
     await user.click(screen.getByRole('button', { name: '重新扫描' }))
     expect(await screen.findByText('Codex CLI')).toBeInTheDocument()
-    expect(runtimes.detect).toHaveBeenCalledTimes(2)
+    expect(queries.filter((entry) => entry.view === 'runtimes.detected')).toHaveLength(2)
   })
 
   it('检测失败与重新扫描失败都展示错误', async () => {
-    const runtimes = makeApi()
-    runtimes.detect
-      .mockRejectedValueOnce(new Error('detect-boom'))
-      .mockRejectedValueOnce(new Error('rescan-boom'))
+    setup({ detected: [] })
+    kernel.failView('runtimes.detected', undefined, 'detect-boom')
     const user = userEvent.setup()
     render(<RuntimeManager />)
 
     expect(await screen.findByText('detect-boom')).toBeInTheDocument()
+    kernel.failView('runtimes.detected', undefined, 'rescan-boom')
     await user.click(screen.getByRole('button', { name: '重新扫描' }))
     expect(await screen.findByText('rescan-boom')).toBeInTheDocument()
   })
 
+  it('执行器清单读取失败：页面级错误兼容非 Error 异常（字符串）', async () => {
+    setup({ detected: [] })
+    const original = kernel.store.query
+    kernel.store.query = <T extends ViewId>(view: T, params?: ViewParams<T>) => {
+      if (view === 'runtimes.executors') return Promise.reject('executors-down')
+      return original(view, params)
+    }
+    render(<RuntimeManager />)
+
+    expect(await screen.findByText('executors-down')).toBeInTheDocument()
+  })
+
+  it('检测结果缺执行器键：使用后按默认执行器预填', async () => {
+    setup({
+      detected: [
+        makeDetected({ command: 'weird', label: 'Weird CLI', executorKey: '', supported: true }),
+      ],
+    })
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+
+    await user.click(await screen.findByRole('button', { name: '使用' }))
+    expect(screen.getByLabelText('运行时名称')).toHaveValue('Weird CLI')
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('weird')
+    expect(screen.getByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
+      'DeepSeek Harness',
+    )
+  })
+
   it('检测结果「使用」预填新建表单（名称不冲突）', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([makeRuntime({ name: 'ds' })])
-    runtimes.detect.mockResolvedValue([
-      makeDetected({ command: 'codex', label: 'Codex CLI', path: 'C:/codex.exe' }),
-    ])
+    setup({
+      runtimes: [makeRuntime({ name: 'ds' })],
+      detected: [makeDetected({ command: 'codex', label: 'Codex CLI', path: 'C:/codex.exe' })],
+    })
     const user = userEvent.setup()
     render(<RuntimeManager />)
 
@@ -265,11 +319,10 @@ describe('RuntimeManager', () => {
   })
 
   it('检测结果「使用」带入 executorKey（支持项），提交时携带', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([])
-    runtimes.detect.mockResolvedValue([
-      makeDetected({ command: 'dsh', label: 'DeepSeek Harness', executorKey: 'dsh' }),
-    ])
+    setup({
+      runtimes: [],
+      detected: [makeDetected({ command: 'dsh', label: 'DeepSeek Harness', executorKey: 'dsh' })],
+    })
     const user = userEvent.setup()
     render(<RuntimeManager />)
 
@@ -280,21 +333,23 @@ describe('RuntimeManager', () => {
     await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
     await user.click(screen.getByRole('button', { name: '添加运行时' }))
 
-    await waitFor(() => expect(runtimes.create).toHaveBeenCalled())
-    expect(runtimes.create.mock.calls[0][0]).toMatchObject({
-      executorKey: 'dsh',
-      command: 'dsh',
-      profile: 'multica',
-      argsTemplate: '',
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({
+      type: 'runtime.create',
+      input: {
+        executorKey: 'dsh',
+        command: 'dsh',
+        profile: 'multica',
+        argsTemplate: '',
+      },
     })
   })
 
   it('检测结果名称与既有运行时冲突时带命令后缀', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([makeRuntime({ name: 'Codex CLI', command: 'old' })])
-    runtimes.detect.mockResolvedValue([
-      makeDetected({ command: 'codex', label: 'Codex CLI', supported: true }),
-    ])
+    setup({
+      runtimes: [makeRuntime({ name: 'Codex CLI', command: 'old' })],
+      detected: [makeDetected({ command: 'codex', label: 'Codex CLI', supported: true })],
+    })
     const user = userEvent.setup()
     render(<RuntimeManager />)
 
@@ -303,42 +358,59 @@ describe('RuntimeManager', () => {
   })
 
   it('新建运行时：默认值提交、成功后关闭并刷新', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([makeRuntime()])
+    setup({ runtimes: [makeRuntime()] })
+    handleDispatch((command) => {
+      if (command.type === 'runtime.create') {
+        kernel.setView('runtimes.all', undefined, [
+          makeRuntime(),
+          makeRuntime({ id: 'r2', name: command.input.name }),
+        ])
+        return { facts: [], value: makeRuntime({ id: 'r2', name: command.input.name }) }
+      }
+      return { facts: [], value: null }
+    })
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
 
     await user.click(screen.getByRole('button', { name: '新建运行时' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('新建运行时')
-    // 执行器与 command/profile 由弹窗从 executors() 清单首项预填
+    // 执行器与 command/profile 由弹窗从 executors 清单首项预填
     await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
     await user.type(screen.getByLabelText('运行时名称'), '新的')
     await user.click(screen.getByRole('button', { name: '添加运行时' }))
 
-    await waitFor(() => expect(runtimes.create).toHaveBeenCalled())
-    expect(runtimes.create.mock.calls[0][0]).toMatchObject({
-      name: '新的',
-      executorKey: 'dsh',
-      command: 'dsh',
-      profile: 'multica',
-      argsTemplate: '',
-      permissionMode: 'workspace-write',
-      model: null,
-      reasoningEffort: null,
-      workdir: null,
-      maxConcurrent: 1,
-      enabled: true,
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({
+      type: 'runtime.create',
+      input: {
+        name: '新的',
+        executorKey: 'dsh',
+        command: 'dsh',
+        profile: 'multica',
+        argsTemplate: '',
+        permissionMode: 'workspace-write',
+        model: null,
+        reasoningEffort: null,
+        workdir: null,
+        maxConcurrent: 1,
+        enabled: true,
+      },
     })
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: '添加运行时' })).not.toBeInTheDocument(),
     )
-    expect(runtimes.list).toHaveBeenCalledTimes(2)
+    // 视图随事实失效重取：新运行时出现在清单里
+    expect(await screen.findByText('新的')).toBeInTheDocument()
   })
 
   it('新建失败在弹窗内展示错误并保持打开', async () => {
-    const runtimes = makeApi()
-    runtimes.create.mockRejectedValue(new Error('create-fail'))
+    setup({ runtimes: [makeRuntime()] })
+    handleDispatch((command) =>
+      command.type === 'runtime.create'
+        ? Promise.reject(new Error('create-fail'))
+        : { facts: [], value: null },
+    )
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
@@ -352,11 +424,10 @@ describe('RuntimeManager', () => {
   })
 
   it('编辑运行时：预填、读取模型目录、提交 update 后关闭并刷新', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([
-      makeRuntime({ name: 'ds', maxConcurrent: 3, enabled: true, workdir: 'D:/work' }),
-    ])
-    runtimes.models.mockResolvedValue([
+    setup({
+      runtimes: [makeRuntime({ name: 'ds', maxConcurrent: 3, enabled: true, workdir: 'D:/work' })],
+    })
+    kernel.setView('runtimes.models', { runtimeId: 'r1' }, [
       {
         id: 'deepseek/chat',
         label: 'DeepSeek Chat',
@@ -366,13 +437,20 @@ describe('RuntimeManager', () => {
         defaultThinkingLevel: 'low',
       },
     ])
+    const queries = recordQueries()
+    handleDispatch((command) => {
+      if (command.type !== 'runtime.update') return { facts: [], value: null }
+      const updated = makeRuntime({ ...command.patch, name: command.patch.name ?? 'ds' })
+      kernel.setView('runtimes.all', undefined, [updated])
+      return { facts: [], value: updated }
+    })
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
 
     await user.click(screen.getByRole('button', { name: '编辑运行时 ds' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('编辑运行时')
-    expect(runtimes.models).toHaveBeenCalledWith('r1')
+    expect(queries).toContainEqual({ view: 'runtimes.models', params: { runtimeId: 'r1' } })
     expect(screen.getByLabelText('运行时名称')).toHaveValue('ds')
     expect(screen.getByLabelText('运行时工作目录')).toHaveValue('D:/work')
     expect(screen.getByLabelText('运行时并发上限')).toHaveValue(3)
@@ -382,25 +460,32 @@ describe('RuntimeManager', () => {
     await user.click(screen.getByRole('checkbox', { name: '启用运行时' }))
     await user.click(screen.getByRole('button', { name: '保存运行时' }))
 
-    await waitFor(() => expect(runtimes.update).toHaveBeenCalled())
-    expect(runtimes.update.mock.calls[0][0]).toBe('r1')
-    expect(runtimes.update.mock.calls[0][1]).toMatchObject({
-      name: 'ds2',
-      executorKey: 'dsh',
-      argsTemplate: '',
-      maxConcurrent: 3,
-      enabled: false,
-      workdir: 'D:/work',
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({ type: 'runtime.update', id: 'r1' })
+    expect(kernel.dispatched[0]).toMatchObject({
+      patch: {
+        name: 'ds2',
+        executorKey: 'dsh',
+        argsTemplate: '',
+        maxConcurrent: 3,
+        enabled: false,
+        workdir: 'D:/work',
+      },
     })
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: '保存运行时' })).not.toBeInTheDocument(),
     )
-    expect(runtimes.list).toHaveBeenCalledTimes(2)
+    // 视图随 runtime.updated 失效重取：清单显示新名称
+    expect(await screen.findByText('ds2')).toBeInTheDocument()
   })
 
   it('编辑失败也在弹窗内展示错误', async () => {
-    const runtimes = makeApi()
-    runtimes.update.mockRejectedValue(new Error('update-fail'))
+    setup()
+    handleDispatch((command) =>
+      command.type === 'runtime.update'
+        ? Promise.reject(new Error('update-fail'))
+        : { facts: [], value: null },
+    )
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
@@ -412,44 +497,57 @@ describe('RuntimeManager', () => {
   })
 
   it('测试成功：测试中禁用并展示新耗时，其他行状态独立', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([
-      makeRuntime({ id: 'r1', name: 'ds', lastProbe: null }),
-      makeRuntime({ id: 'r2', name: 'claude', command: 'claude', lastProbe: null }),
-    ])
-    runtimes.statuses.mockResolvedValue([makeStatus('r1'), makeStatus('r2')])
+    setup({
+      runtimes: [
+        makeRuntime({ id: 'r1', name: 'ds', lastProbe: null }),
+        makeRuntime({ id: 'r2', name: 'claude', command: 'claude', lastProbe: null }),
+      ],
+      statuses: [makeStatus('r1'), makeStatus('r2')],
+    })
     const slow = deferred<RuntimeProbe>()
-    runtimes.probe.mockReturnValue(slow.promise)
+    handleDispatch((command) => {
+      if (command.type !== 'runtime.probe') return { facts: [], value: null }
+      return slow.promise.then((probe) => {
+        kernel.setView('runtimes.all', undefined, [
+          makeRuntime({ id: 'r1', name: 'ds', lastProbe: probe }),
+          makeRuntime({ id: 'r2', name: 'claude', command: 'claude', lastProbe: null }),
+        ])
+        return { facts: [], value: probe }
+      })
+    })
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
 
     await user.click(screen.getByRole('button', { name: '测试运行时 ds' }))
-    expect(runtimes.probe).toHaveBeenCalledWith('r1')
+    expect(kernel.dispatched[0]).toMatchObject({ type: 'runtime.probe', id: 'r1' })
     expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeDisabled()
     expect(screen.getByText('测试中…')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '测试运行时 claude' })).toBeEnabled()
 
-    slow.resolve(makeProbe({ elapsedMs: 42 }))
+    await act(async () => {
+      slow.resolve(makeProbe({ elapsedMs: 42 }))
+    })
     expect(await screen.findByText('可用 · 42ms')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeEnabled()
     expect(screen.getByText('未检测')).toBeInTheDocument()
   })
 
   it('测试失败（不可用）可点开详情查看原因与输出', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([makeRuntime({ lastProbe: null })])
-    runtimes.statuses.mockResolvedValue([makeStatus('r1')])
-    runtimes.probe.mockResolvedValue(
-      makeProbe({
-        state: 'unavailable',
-        elapsedMs: 8,
-        error: '登录态失效',
-        output: 'stderr 尾部',
-        cliVersion: null,
-        path: null,
-      }),
-    )
+    setup({ runtimes: [makeRuntime({ lastProbe: null })], statuses: [makeStatus('r1')] })
+    const probe = makeProbe({
+      state: 'unavailable',
+      elapsedMs: 8,
+      error: '登录态失效',
+      output: 'stderr 尾部',
+      cliVersion: null,
+      path: null,
+    })
+    handleDispatch((command) => {
+      if (command.type !== 'runtime.probe') return { facts: [], value: null }
+      kernel.setView('runtimes.all', undefined, [makeRuntime({ lastProbe: probe })])
+      return { facts: [], value: probe }
+    })
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
@@ -470,10 +568,13 @@ describe('RuntimeManager', () => {
   })
 
   it('探测失败缺原因时详情用兜底文案', async () => {
-    const runtimes = makeApi()
-    runtimes.list.mockResolvedValue([makeRuntime({ lastProbe: null })])
-    runtimes.statuses.mockResolvedValue([makeStatus('r1')])
-    runtimes.probe.mockResolvedValue(makeProbe({ state: 'unavailable', error: null, output: '' }))
+    setup({ runtimes: [makeRuntime({ lastProbe: null })], statuses: [makeStatus('r1')] })
+    const probe = makeProbe({ state: 'unavailable', error: null, output: '' })
+    handleDispatch((command) => {
+      if (command.type !== 'runtime.probe') return { facts: [], value: null }
+      kernel.setView('runtimes.all', undefined, [makeRuntime({ lastProbe: probe })])
+      return { facts: [], value: probe }
+    })
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
@@ -484,8 +585,12 @@ describe('RuntimeManager', () => {
   })
 
   it('探测调用抛错展示页面级错误', async () => {
-    const runtimes = makeApi()
-    runtimes.probe.mockRejectedValue(new Error('probe-boom'))
+    setup()
+    handleDispatch((command) =>
+      command.type === 'runtime.probe'
+        ? Promise.reject(new Error('probe-boom'))
+        : { facts: [], value: null },
+    )
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
@@ -496,16 +601,17 @@ describe('RuntimeManager', () => {
   })
 
   it('删除运行时：成功刷新并清掉展开的探测详情', async () => {
-    const runtimes = makeApi()
     let store: Runtime[] = [
       makeRuntime({
         lastProbe: makeProbe({ state: 'unavailable', error: '坏了', output: 'tail' }),
       }),
     ]
-    runtimes.list.mockImplementation(async () => store)
-    runtimes.statuses.mockResolvedValue([makeStatus('r1')])
-    runtimes.remove.mockImplementation(async () => {
+    setup({ runtimes: store, statuses: [makeStatus('r1')] })
+    handleDispatch((command) => {
+      if (command.type !== 'runtime.remove') return { facts: [], value: null }
       store = []
+      kernel.setView('runtimes.all', undefined, store)
+      return { facts: [], value: null }
     })
     const user = userEvent.setup()
     render(<RuntimeManager />)
@@ -520,7 +626,6 @@ describe('RuntimeManager', () => {
   })
 
   it('删除其它运行时不收起已展开的详情', async () => {
-    const runtimes = makeApi()
     let store: Runtime[] = [
       makeRuntime({
         id: 'r1',
@@ -529,10 +634,12 @@ describe('RuntimeManager', () => {
       }),
       makeRuntime({ id: 'r2', name: 'claude', command: 'claude' }),
     ]
-    runtimes.list.mockImplementation(async () => store)
-    runtimes.statuses.mockResolvedValue([makeStatus('r1'), makeStatus('r2')])
-    runtimes.remove.mockImplementation(async (id: string) => {
-      store = store.filter((r) => r.id !== id)
+    setup({ runtimes: store, statuses: [makeStatus('r1'), makeStatus('r2')] })
+    handleDispatch((command) => {
+      if (command.type !== 'runtime.remove') return { facts: [], value: null }
+      store = store.filter((r) => r.id !== command.id)
+      kernel.setView('runtimes.all', undefined, store)
+      return { facts: [], value: null }
     })
     const user = userEvent.setup()
     render(<RuntimeManager />)
@@ -547,8 +654,12 @@ describe('RuntimeManager', () => {
   })
 
   it('删除失败展示页面级错误', async () => {
-    const runtimes = makeApi()
-    runtimes.remove.mockRejectedValue(new Error('remove-fail'))
+    setup()
+    handleDispatch((command) =>
+      command.type === 'runtime.remove'
+        ? Promise.reject(new Error('remove-fail'))
+        : { facts: [], value: null },
+    )
     const user = userEvent.setup()
     render(<RuntimeManager />)
     await screen.findByText('ds')
@@ -559,12 +670,20 @@ describe('RuntimeManager', () => {
   })
 
   it('加载未完成即卸载不报错', async () => {
-    const slow = deferred<Runtime[]>()
-    const runtimes = makeApi()
-    runtimes.list.mockReturnValue(slow.promise)
+    setup()
+    const slow = deferred<unknown>()
+    const original = kernel.store.query
+    kernel.store.query = <T extends ViewId>(
+      view: T,
+      params?: ViewParams<T>,
+    ): Promise<ViewResult<T>> => {
+      if (view === 'runtimes.executors') return slow.promise as Promise<ViewResult<T>>
+      return original(view, params)
+    }
     const { unmount } = render(<RuntimeManager />)
     unmount()
-    slow.resolve([makeRuntime()])
-    await new Promise((r) => setTimeout(r, 0))
+    await act(async () => {
+      slow.resolve(EXECUTORS)
+    })
   })
 })

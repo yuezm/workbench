@@ -1,20 +1,16 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import type { ReactElement } from 'react'
 import type {
   Run,
   RunErrorCode,
   RunEvent,
   RunStatus,
   RunUsage,
-} from '../../../../../shared/ai-workflow-api'
+} from '../../../../../protocol/entities'
 import { cn } from '../../../lib/cn'
-import { wfApi } from '../api'
+import { useKernelViewState } from '../../../shell/useKernelView'
 
-/** 运行中 run 的增量轮询间隔 */
-const POLL_MS = 1000
 /** 工具事件内容的展示截断长度 */
 const TOOL_TEXT_MAX = 120
-
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   queued: '排队中',
@@ -55,15 +51,6 @@ function formatDuration(ms: number): string {
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text
-}
-
-/** 合并两次拉取的事件：按 seq 去重并保持顺序 */
-function mergeEvents(prev: RunEvent[], incoming: RunEvent[]): RunEvent[] {
-  if (prev.length === 0) return incoming
-  const known = new Set(prev.map((event) => event.seq))
-  const added = incoming.filter((event) => !known.has(event.seq))
-  if (added.length === 0) return prev
-  return [...prev, ...added].sort((a, b) => a.seq - b.seq)
 }
 
 /** 事件流的一行：正文 / 思考次要样式 / 工具调用与结果的无交互次要行 */
@@ -113,6 +100,40 @@ function UsageLine({ usage }: { usage: RunUsage }): ReactElement {
   )
 }
 
+/**
+ * 单个 run 的事件流：一个子组件订阅一个 `run.events` 视图。
+ *
+ * 事件随事实失效自动重取（`run.` 前缀的失效表里有 `run.events`），不再轮询；
+ * 事件流为空时回落到 run.output（历史数据仍能看到最终文本）。
+ */
+function RunEvents({ run }: { run: Run }): ReactElement | null {
+  const state = useKernelViewState('run.events', { runId: run.id })
+  const events = state.data ?? []
+
+  if (state.error !== null) {
+    return (
+      <p className="mt-2 rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
+        事件流加载失败：{state.error}
+      </p>
+    )
+  }
+  if (events.length > 0) {
+    return (
+      <div className="mt-2 flex flex-col gap-1.5">
+        {events.map((event) => (
+          <RunEventLine key={event.seq} event={event} />
+        ))}
+      </div>
+    )
+  }
+  if (run.output === '') return null
+  return (
+    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-black/30 p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-ink-dim">
+      {run.output}
+    </pre>
+  )
+}
+
 export interface RunLogProps {
   runs: Run[]
 }
@@ -120,44 +141,10 @@ export interface RunLogProps {
 /**
  * 某任务的运行记录：状态 / 耗时 / 退出码 / 失败归类 / 用量 + 事件流。
  *
- * 先拉每个 run 的事件；运行中的 run 每 ~1s 轮询增量，卸载或 run 结束后停表。
- * 事件流为空时回落到 run.output（历史数据/事件接口失败时仍能看到最终文本）。
+ * 数据都来自内核视图：runs 由调用方传入（页面订阅 `runs.byTask`），
+ * 事件流由每个 run 的子组件订阅 `run.events`，事实到达后自动刷新。
  */
 export function RunLog({ runs }: RunLogProps): ReactElement {
-  const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({})
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    const timers: ReturnType<typeof setInterval>[] = []
-
-    const load = async (runId: string): Promise<void> => {
-      try {
-        const incoming = await wfApi().runs.events(runId)
-        if (!alive) return
-        setEventsByRun((prev) => {
-          const merged = mergeEvents(prev[runId] ?? [], incoming)
-          return merged === prev[runId] ? prev : { ...prev, [runId]: merged }
-        })
-        setError(null)
-      } catch (e) {
-        if (alive) setError(errMsg(e))
-      }
-    }
-
-    for (const run of runs) {
-      void load(run.id)
-      if (run.status === 'running') {
-        timers.push(setInterval(() => void load(run.id), POLL_MS))
-      }
-    }
-
-    return () => {
-      alive = false
-      for (const timer of timers) clearInterval(timer)
-    }
-  }, [runs])
-
   if (runs.length === 0) {
     return (
       <div className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
@@ -168,60 +155,35 @@ export function RunLog({ runs }: RunLogProps): ReactElement {
 
   return (
     <div className="flex flex-col gap-2">
-      {error !== null && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
-          事件流加载失败：{error}
-        </p>
-      )}
       <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
-        {runs.map((run) => {
-          const events = eventsByRun[run.id] ?? []
-          return (
-            <li key={run.id} className="px-4 py-3 transition-colors hover:bg-white/[0.03]">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
-                <span
-                  className={cn(
-                    'rounded-full bg-white/[0.06] px-2 py-0.5',
-                    STATUS_TONE[run.status],
-                  )}
-                >
-                  {STATUS_LABEL[run.status]}
-                </span>
-                <span className="tabular-nums">{run.startedAt ?? run.createdAt}</span>
-                {run.durationMs !== null && (
-                  <span className="tabular-nums">耗时 {formatDuration(run.durationMs)}</span>
-                )}
-                {run.exitCode !== null && (
-                  <span className="tabular-nums">退出码 {run.exitCode}</span>
-                )}
-                {run.errorCode !== null && (
-                  <span className="text-red-300">{ERROR_CODE_LABEL[run.errorCode]}</span>
-                )}
-                {run.usage !== null && <UsageLine usage={run.usage} />}
-              </div>
-
-              {run.error !== null && (
-                <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">
-                  {run.error}
-                </p>
+        {runs.map((run) => (
+          <li key={run.id} className="px-4 py-3 transition-colors hover:bg-white/[0.03]">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
+              <span
+                className={cn('rounded-full bg-white/[0.06] px-2 py-0.5', STATUS_TONE[run.status])}
+              >
+                {STATUS_LABEL[run.status]}
+              </span>
+              <span className="tabular-nums">{run.startedAt ?? run.createdAt}</span>
+              {run.durationMs !== null && (
+                <span className="tabular-nums">耗时 {formatDuration(run.durationMs)}</span>
               )}
-
-              {events.length > 0 ? (
-                <div className="mt-2 flex flex-col gap-1.5">
-                  {events.map((event) => (
-                    <RunEventLine key={event.seq} event={event} />
-                  ))}
-                </div>
-              ) : (
-                run.output !== '' && (
-                  <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-black/30 p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-ink-dim">
-                    {run.output}
-                  </pre>
-                )
+              {run.exitCode !== null && <span className="tabular-nums">退出码 {run.exitCode}</span>}
+              {run.errorCode !== null && (
+                <span className="text-red-300">{ERROR_CODE_LABEL[run.errorCode]}</span>
               )}
-            </li>
-          )
-        })}
+              {run.usage !== null && <UsageLine usage={run.usage} />}
+            </div>
+
+            {run.error !== null && (
+              <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">
+                {run.error}
+              </p>
+            )}
+
+            <RunEvents run={run} />
+          </li>
+        ))}
       </ul>
     </div>
   )

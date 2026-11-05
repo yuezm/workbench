@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { RuntimeProbe } from '../../../../../shared/ai-workflow-api'
+import type { RuntimeProbe } from '../../../../../protocol/entities'
 import { cn } from '../../../lib/cn'
 
 /** 健康 pill 的统一基座：小圆角、等宽数字（耗时对齐不跳动） */

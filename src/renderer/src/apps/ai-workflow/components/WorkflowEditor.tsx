@@ -1,19 +1,18 @@
 import { useState, type ReactElement } from 'react'
 import type {
-  Agent,
   EntryMode,
   StageInput,
   WorkflowInput,
   WorkflowWithStages,
-} from '../../../../../shared/ai-workflow-api'
+} from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Field } from '../../../components/ui/field'
 import { Input } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
+import { useKernelView } from '../../../shell/useKernelView'
 
 interface WorkflowEditorProps {
   workflow: WorkflowWithStages | null
-  agents: Agent[]
   onSave: (input: WorkflowInput) => Promise<void>
   onCancel: () => void
 }
@@ -71,14 +70,11 @@ function WorkflowIcon({ className }: { className?: string }): ReactElement {
   )
 }
 
-export function WorkflowEditor({
-  workflow,
-  agents,
-  onSave,
-  onCancel,
-}: WorkflowEditorProps): ReactElement {
+export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorProps): ReactElement {
   const [draft, setDraft] = useState<WorkflowInput>(() => toDraft(workflow))
   const [saving, setSaving] = useState(false)
+  // 阶段绑定的智能体清单：自己订阅视图，不再由页面传入
+  const agents = useKernelView('agents.all') ?? []
 
   const patchStage = (i: number, patch: Partial<StageInput>): void =>
     setDraft((d) => ({ ...d, stages: d.stages.map((s, k) => (k === i ? { ...s, ...patch } : s)) }))

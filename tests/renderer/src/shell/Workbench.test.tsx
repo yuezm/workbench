@@ -28,3 +28,11 @@ describe('Workbench 外壳', () => {
     expect(screen.queryByText('内容A')).not.toBeInTheDocument()
   })
 })
+
+describe('Workbench 空清单', () => {
+  it('没有注册 app：仍渲染外壳（无标签、内容区空）', () => {
+    render(<Workbench apps={[]} />)
+    expect(screen.queryAllByRole('button')).toHaveLength(0)
+    expect(screen.getByText('Workbench')).toBeInTheDocument()
+  })
+})

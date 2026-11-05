@@ -21,6 +21,10 @@ export interface FakeKernel {
   store: KernelStore
   /** 更新一个视图值并广播一次「未知事实」批次（全量失效，测试里最省心） */
   setView<T extends ViewId>(view: T, params: ViewParams<T> | undefined, value: ViewResult<T>): void
+  /** 让某个视图查询失败（错误文案透传到 useKernelViewState().error） */
+  failView(view: ViewId, params: ViewParams<ViewId> | undefined, message: string): void
+  /** 恢复正常查询（清除失败注入并按最新值重取） */
+  clearFailure(view: ViewId, params: ViewParams<ViewId> | undefined): void
   /** 直接推一个事实批次（按 types 走失效表） */
   pushFacts(types: FactType[]): void
   /** 推一条聊天流事件 */
@@ -37,9 +41,9 @@ export interface FakeKernel {
 
 export function installFakeKernel(): FakeKernel {
   const viewValues = new Map<string, unknown>()
+  const failures = new Map<string, string>()
   const dispatched: Command[] = []
   let seq = 0
-  let handler: ((event: KernelEvent) => void) | null = null
   let dispatchHandler:
     | (<C extends Command>(
         command: C,
@@ -58,17 +62,13 @@ export function installFakeKernel(): FakeKernel {
       return Promise.resolve(result) as Promise<CommandDispatchResult<C>>
     },
     query: <T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>> => {
+      const key = viewKey(view, params as ViewParams<ViewId> | undefined)
+      const failure = failures.get(key)
+      if (failure !== undefined) return Promise.reject(new Error(failure))
       if (view === 'kernel.seq') return Promise.resolve(seq as ViewResult<T>)
-      return Promise.resolve(
-        viewValues.get(viewKey(view, params as ViewParams<ViewId>)) as ViewResult<T>,
-      )
+      return Promise.resolve(viewValues.get(key) as ViewResult<T>)
     },
-    subscribe: (cb) => {
-      handler = cb
-      return () => {
-        handler = null
-      }
-    },
+    subscribe: () => () => {},
   }
 
   const store = configureKernel(transport)
@@ -76,7 +76,7 @@ export function installFakeKernel(): FakeKernel {
   const emitFacts = (types: FactType[]): void => {
     seq += 1
     const event: KernelEvent = { kind: 'facts', seq, types }
-    handler?.(event)
+    // store.applyEvent 就是 transport 订阅回调本身：只投递一次，避免事实/流被重复应用
     store.applyEvent(event)
   }
 
@@ -86,9 +86,16 @@ export function installFakeKernel(): FakeKernel {
       viewValues.set(viewKey(view, params as ViewParams<ViewId> | undefined), value)
       emitFacts(['snapshot.imported'])
     },
+    failView: (view, params, message) => {
+      failures.set(viewKey(view, params), message)
+      emitFacts(['snapshot.imported'])
+    },
+    clearFailure: (view, params) => {
+      failures.delete(viewKey(view, params))
+      emitFacts(['snapshot.imported'])
+    },
     pushFacts: emitFacts,
     pushStream: (event) => {
-      handler?.(event)
       store.applyEvent(event)
     },
     onDispatch: (next) => {

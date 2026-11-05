@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { Agent, ChatConversation } from '../../../../../shared/ai-workflow-api'
+import type { Agent, Conversation } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
@@ -9,7 +9,7 @@ export interface ConversationListProps {
   /** null 表示跟随第一个智能体 */
   agentId: string | null
   onAgentChange: (agentId: string) => void
-  conversations: ChatConversation[]
+  conversations: Conversation[]
   activeId: string | null
   onSelect: (id: string) => void
   onCreate: () => void

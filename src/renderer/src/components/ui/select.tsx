@@ -148,9 +148,9 @@ export function Select({
 
   /** 浮层渲染后按实际高度贴合触发器：下方放不下就上翻 */
   const reposition = useCallback((): void => {
-    const trigger = triggerRef.current
-    const popup = popupRef.current
-    if (!trigger || !popup) return
+    // 只在浮层打开时调用（调用方保证）：refs 此时一定已挂载
+    const trigger = triggerRef.current as HTMLButtonElement
+    const popup = popupRef.current as HTMLDivElement
     const rect = trigger.getBoundingClientRect()
     const gap = 8
     const spaceBelow = window.innerHeight - rect.bottom - gap

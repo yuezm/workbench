@@ -1,5 +1,5 @@
 import type { Command } from '../../../protocol/commands'
-import type { CommandDispatchResult, KernelEvent } from '../../../protocol/ipc'
+import type { CommandDispatchResult, FactsEvent, KernelEvent } from '../../../protocol/ipc'
 import type { ViewId, ViewParams, ViewResult } from '../../../protocol/views'
 
 /**
@@ -22,16 +22,27 @@ export function viewKey(view: ViewId, params?: ViewParams<ViewId>): string {
   return params === undefined || params === null ? view : `${view}|${JSON.stringify(params)}`
 }
 
+/** 视图订阅状态：`data` 未就绪为 undefined；`error` 为最近一次查询失败文案。 */
+export interface KernelViewState<T extends ViewId> {
+  data: ViewResult<T> | undefined
+  error: string | null
+  loading: boolean
+}
+
 interface ViewEntry {
   view: ViewId
   params: ViewParams<ViewId> | undefined
   value: unknown
   ready: boolean
   stale: boolean
-  request: number
   loading: boolean
+  error: string | null
+  state: KernelViewState<ViewId>
   listeners: Set<() => void>
 }
+
+const errorText = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error)
 
 export interface KernelStore {
   /** 最近一次已知的事实水位（启动快照 + 收到的事实批次）。 */
@@ -44,6 +55,8 @@ export interface KernelStore {
   query<T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>>
   /** 已缓存且已就绪的视图值；未就绪返回 undefined（供 useSyncExternalStore 取快照）。 */
   peek<T extends ViewId>(view: T, params?: ViewParams<T>): ViewResult<T> | undefined
+  /** 订阅状态（数据 + 错误 + 加载中）；供需要展示读错误的组件用，返回对象引用稳定。 */
+  peekState<T extends ViewId>(view: T, params?: ViewParams<T>): KernelViewState<T> | undefined
   /** 订阅一个视图：首次订阅触发加载，事实失效后自动重取；返回退订函数。 */
   watch(view: ViewId, params: ViewParams<ViewId> | undefined, listener: () => void): () => void
   /** 聊天流旁路（实时显示用；事实仍是数据源）。 */
@@ -108,7 +121,7 @@ export function createKernelStore(transport: KernelTransport): KernelStore {
   let seq = 0
   let started: Promise<void> | null = null
   let unsubscribeTransport: (() => void) | null = null
-  const buffered: KernelEvent[] = []
+  const buffered: FactsEvent[] = []
   let snapshotReady = false
 
   const entryFor = (view: ViewId, params: ViewParams<ViewId> | undefined): ViewEntry => {
@@ -121,15 +134,21 @@ export function createKernelStore(transport: KernelTransport): KernelStore {
       value: undefined,
       ready: false,
       stale: false,
-      request: 0,
       loading: false,
+      error: null,
+      state: { data: undefined, error: null, loading: false },
       listeners: new Set(),
     }
     entries.set(key, created)
     return created
   }
 
-  const notify = (entry: ViewEntry): void => {
+  const publish = (entry: ViewEntry): void => {
+    entry.state = {
+      data: entry.ready ? (entry.value as ViewResult<ViewId>) : undefined,
+      error: entry.error,
+      loading: entry.loading,
+    }
     for (const listener of entry.listeners) listener()
   }
 
@@ -137,23 +156,23 @@ export function createKernelStore(transport: KernelTransport): KernelStore {
     if (entry.loading) return
     entry.loading = true
     entry.stale = false
-    entry.request += 1
-    const request = entry.request
+    publish(entry)
     transport
       .query(entry.view, entry.params)
       .then((value) => {
-        if (request !== entry.request) return
         entry.value = value
         entry.ready = true
+        entry.error = null
         entry.loading = false
-        notify(entry)
+        publish(entry)
         // 请求期间到达了相关事实：再取一次，避免把旧值当最新
         if (entry.stale) fetchEntry(entry)
       })
-      .catch(() => {
-        if (request !== entry.request) return
+      .catch((error: unknown) => {
         entry.loading = false
-        // 查询失败保留旧值（若有）；下次失效或订阅会再试
+        // 查询失败保留旧值（若有），错误交给订阅者展示；下次失效或订阅会再试
+        entry.error = errorText(error)
+        publish(entry)
       })
   }
 
@@ -188,14 +207,10 @@ export function createKernelStore(transport: KernelTransport): KernelStore {
         seq = value
         snapshotReady = true
         for (const event of buffered) {
-          if (event.kind === 'facts') {
-            if (event.seq > seq) {
-              seq = event.seq
-              invalidate(invalidatedViews(event.types))
-            }
-            continue
+          if (event.seq > seq) {
+            seq = event.seq
+            invalidate(invalidatedViews(event.types))
           }
-          for (const listener of streamListeners) listener(event)
         }
         buffered.length = 0
       })
@@ -225,6 +240,13 @@ export function createKernelStore(transport: KernelTransport): KernelStore {
     peek: <T extends ViewId>(view: T, params?: ViewParams<T>): ViewResult<T> | undefined => {
       const entry = entries.get(viewKey(view, params as ViewParams<ViewId> | undefined))
       return entry?.ready === true ? (entry.value as ViewResult<T>) : undefined
+    },
+    peekState: <T extends ViewId>(
+      view: T,
+      params?: ViewParams<T>,
+    ): KernelViewState<T> | undefined => {
+      const entry = entries.get(viewKey(view, params as ViewParams<ViewId> | undefined))
+      return entry?.state as KernelViewState<T> | undefined
     },
     watch: (view, params, listener) => {
       const entry = entryFor(view, params)

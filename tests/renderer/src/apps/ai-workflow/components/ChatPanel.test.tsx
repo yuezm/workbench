@@ -1,11 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  Agent,
-  ChatConversation,
-  ChatMessage,
-} from '../../../../../../src/shared/ai-workflow-api'
+import type { Agent, Conversation, Message } from '../../../../../../src/protocol/entities'
 import type { ChatStreamState } from '../../../../../../src/renderer/src/apps/ai-workflow/hooks/useChat'
 import {
   ChatPanel,
@@ -21,17 +17,17 @@ const agent: Agent = {
   createdAt: 't',
 }
 
-function conv(id: string, title: string, agentId = 'a1'): ChatConversation {
+function conv(id: string, title: string, agentId = 'a1'): Conversation {
   return { id, title, agentId, sessionId: null, createdAt: 't', updatedAt: 't' }
 }
 
 function msg(
   id: string,
   conversationId: string,
-  role: ChatMessage['role'],
+  role: Message['role'],
   content: string,
   error: string | null = null,
-): ChatMessage {
+): Message {
   return { id, conversationId, role, content, error, createdAt: 't' }
 }
 

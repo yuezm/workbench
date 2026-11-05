@@ -9,6 +9,7 @@
  * 应用启动后走与生产完全相同的对账 / 调度路径。
  */
 import { expect, test, type Page } from '@playwright/test'
+import type { WorkbenchApi } from '../../src/shared/workbench-api'
 import path from 'node:path'
 import { createTempUserDataDir, launchApp, type LaunchedApp } from './helpers/launch'
 import { isPidAlive, readRecoveryState, seedCrashState, type CrashSeed } from './helpers/seed-crash'
@@ -45,22 +46,17 @@ test('崩溃恢复：对账强杀残留进程、回收租约、任务可拖动�
     .poll(() => readRecoveryState(seeded.dbPath, seeded.runId), { timeout: 15_000 })
     .toMatchObject({ runStatus: 'failed', runningRuns: 0, registryRows: 0 })
 
-  // 任务不再被判「执行中」：渲染层拖动到另一阶段应成功（走真实 window.aiWorkflow 桥）
+  // 任务不再被判「执行中」：经三动词桥 dispatch task.move 应成功
   const moved = await page.evaluate(
     async ({ taskId, stageId }) => {
-      const bridge = (
-        globalThis as unknown as {
-          aiWorkflow: {
-            tasks: {
-              moveToStage: (
-                id: string,
-                target: string,
-              ) => Promise<{ id: string; currentStageId: string }>
-            }
-          }
-        }
-      ).aiWorkflow
-      return bridge.tasks.moveToStage(taskId, stageId)
+      const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
+      const result = await bridge.dispatch({
+        type: 'task.move',
+        commandId: 'e2e-move',
+        id: taskId,
+        stageId,
+      })
+      return result.value as { id: string; currentStageId: string }
     },
     { taskId: seeded.taskId, stageId: seeded.targetStageId },
   )

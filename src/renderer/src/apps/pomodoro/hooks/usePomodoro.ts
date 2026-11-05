@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react'
+import { getKernelStore } from '../../../shell/kernelStore'
 import type { RingPlayer } from '../audio'
 import { createRingPlayer } from '../audio'
 import { createInitialState, phaseDurationMs, reduce } from '../timer/machine'
@@ -46,6 +47,19 @@ export function usePomodoro(deps?: UsePomodoroDeps): PomodoroController {
     const label = PHASE_LABELS[state.phase]
     const minutes = Math.round(phaseDurationMs(state.config, state.phase) / MIN)
     window.workbench.notify('番茄时钟', `已进入${label}（${minutes} 分钟），准备好后点击开始`)
+    // 计时完成（专注/短休息/长休息自然到 0）发一条 app 事件；事件类型必须与
+    // `src/shared/apps.ts` 的白名单一致，M6 起由规则消费。
+    void getKernelStore()
+      .dispatch({
+        type: 'app.event',
+        commandId: '',
+        appId: 'pomodoro',
+        eventType: 'pomodoro.completed',
+        subject: '番茄完成',
+      })
+      .catch(() => {
+        // 事件入账失败不影响本地的响铃与通知；下一次完成仍会再发
+      })
   }, [state])
 
   useEffect(() => {

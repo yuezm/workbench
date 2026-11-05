@@ -1,14 +1,10 @@
-import { useCallback, useEffect, useState, type ReactElement } from 'react'
-import type {
-  Agent,
-  AgentInput,
-  AiWorkflowApi,
-  Runtime,
-} from '../../../../../shared/ai-workflow-api'
+import { useState, type ReactElement } from 'react'
+import type { AgentInput, Runtime } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Panel, badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
-import { wfApi } from '../api'
+import { getKernelStore } from '../../../shell/kernelStore'
+import { useKernelViewState } from '../../../shell/useKernelView'
 import { AgentDialog, RUNTIME_HEALTH_LABEL, runtimeHealth, type RuntimeHealth } from './AgentDialog'
 
 /** 状态点配色：可用绿、不可用红、未检测灰 */
@@ -19,12 +15,6 @@ const HEALTH_DOT: Record<RuntimeHealth, string> = {
 }
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-
-/** 订阅 ai-workflow 变更事件；注入的 api 可能没有 onChanged（测试桩） */
-function subscribe(cb: () => void): () => void {
-  const onChanged = (wfApi() as Partial<AiWorkflowApi>).onChanged
-  return onChanged ? onChanged(cb) : () => {}
-}
 
 function RobotIcon({ className }: { className?: string }): ReactElement {
   return (
@@ -50,57 +40,29 @@ function RobotIcon({ className }: { className?: string }): ReactElement {
 
 /** 智能体页：智能体清单；新建走弹窗表单 */
 export function AgentManager(): ReactElement {
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [runtimes, setRuntimes] = useState<Runtime[]>([])
-  const [error, setError] = useState<string | null>(null)
+  // 智能体与运行时都来自内核视图：CRUD 成功后由事实批次失效重取，无需手动 refresh
+  const agentsState = useKernelViewState('agents.all')
+  const runtimesState = useKernelViewState('runtimes.all')
+  const agents = agentsState.data ?? []
+  const runtimes = runtimesState.data ?? []
+  /** 写操作失败（读错误单独展示在动作错误之前） */
+  const [actionError, setActionError] = useState<string | null>(null)
   /** 非空 = 弹窗打开中，值为表单预填 */
   const [draft, setDraft] = useState<AgentInput | null>(null)
 
-  const refresh = useCallback(async (): Promise<void> => {
-    try {
-      const [a, r] = await Promise.all([wfApi().agents.list(), wfApi().runtimes.list()])
-      setAgents(a)
-      setRuntimes(r)
-      setError(null)
-    } catch (e) {
-      setError(errMsg(e))
-    }
-  }, [])
-
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const [a, r] = await Promise.all([wfApi().agents.list(), wfApi().runtimes.list()])
-        if (!alive) return
-        setAgents(a)
-        setRuntimes(r)
-      } catch (e) {
-        if (alive) setError(errMsg(e))
-      }
-    })()
-    // 运行时是本表单的上游：新增/删除运行时后要同步「绑定运行时」下拉
-    const off = subscribe(() => {
-      if (alive) void refresh()
-    })
-    return () => {
-      alive = false
-      off()
-    }
-  }, [refresh])
+  const readError = agentsState.error ?? runtimesState.error
+  const error = actionError ?? readError
 
   const create = async (input: AgentInput): Promise<void> => {
-    await wfApi().agents.create(input)
+    await getKernelStore().dispatch({ type: 'agent.create', commandId: '', input })
     setDraft(null)
-    await refresh()
   }
 
   const remove = async (id: string): Promise<void> => {
     try {
-      await wfApi().agents.remove(id)
-      await refresh()
+      await getKernelStore().dispatch({ type: 'agent.remove', commandId: '', id })
     } catch (e) {
-      setError(errMsg(e))
+      setActionError(errMsg(e))
     }
   }
 

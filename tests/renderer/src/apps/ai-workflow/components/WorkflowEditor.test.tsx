@@ -1,8 +1,9 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
-import type { Agent, WorkflowWithStages } from '../../../../../../src/shared/ai-workflow-api'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Agent, WorkflowWithStages } from '../../../../../../src/protocol/entities'
 import { WorkflowEditor } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowEditor'
+import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const agent: Agent = {
   id: 'ag1',
@@ -13,20 +14,39 @@ const agent: Agent = {
   createdAt: 't',
 }
 
+let kernel: FakeKernel
+
+beforeEach(() => {
+  kernel = installFakeKernel()
+})
+
+afterEach(() => {
+  stopFakeKernel()
+})
+
 describe('WorkflowEditor', () => {
   it('新建：填名称、改阶段、加/删阶段、设目标并保存', async () => {
+    kernel.setView('agents.all', undefined, [agent])
     const onSave = vi.fn().mockResolvedValue(undefined)
     const onCancel = vi.fn()
     const user = userEvent.setup()
-    render(<WorkflowEditor workflow={null} agents={[agent]} onSave={onSave} onCancel={onCancel} />)
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={onCancel} />)
+
+    // 智能体清单来自内核视图：等它就绪后再选阶段智能体
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '阶段1进入方式' })).toBeInTheDocument(),
+    )
+    await user.click(screen.getByRole('combobox', { name: '阶段1进入方式' }))
+    await user.click(screen.getByRole('option', { name: '交给智能体' }))
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '阶段1智能体' })).toBeInTheDocument(),
+    )
 
     await user.type(screen.getByLabelText('工作流名称'), '研发')
     await user.type(screen.getByLabelText('工作流描述'), 'desc')
     await user.clear(screen.getByLabelText('阶段1名称'))
     await user.type(screen.getByLabelText('阶段1名称'), '待办')
 
-    await user.click(screen.getByRole('combobox', { name: '阶段1进入方式' }))
-    await user.click(screen.getByRole('option', { name: '交给智能体' }))
     await user.click(screen.getByRole('combobox', { name: '阶段1智能体' }))
     await user.click(screen.getByRole('option', { name: '（选择）' }))
     await user.click(screen.getByRole('combobox', { name: '阶段1智能体' }))
@@ -91,7 +111,7 @@ describe('WorkflowEditor', () => {
         },
       ],
     }
-    render(<WorkflowEditor workflow={existing} agents={[]} onSave={vi.fn()} onCancel={vi.fn()} />)
+    render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByLabelText('工作流名称')).toHaveValue('旧流')
     expect(screen.getByLabelText('阶段1完成后进入')).toHaveValue('1')
     expect(screen.getByRole('combobox', { name: '阶段1完成后进入' })).toHaveTextContent('进行中')
@@ -107,7 +127,7 @@ describe('WorkflowEditor', () => {
       createdAt: 't',
       stages: [],
     }
-    render(<WorkflowEditor workflow={existing} agents={[]} onSave={vi.fn()} onCancel={vi.fn()} />)
+    render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByLabelText('工作流描述')).toHaveValue('')
   })
 })

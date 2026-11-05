@@ -1,18 +1,16 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { Command } from '../../../../../../src/protocol/commands'
 import type {
   Agent,
-  AiWorkflowApi,
   Runtime,
   RuntimeProbe,
   RuntimeProbeState,
-} from '../../../../../../src/shared/ai-workflow-api'
+} from '../../../../../../src/protocol/entities'
+import type { DispatchResult } from '../../../../../../src/protocol/ipc'
 import { AgentManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/AgentManager'
-
-function setApi(api: unknown): void {
-  ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
-}
+import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function probe(state: RuntimeProbeState, over: Partial<RuntimeProbe> = {}): RuntimeProbe {
   return {
@@ -64,30 +62,32 @@ function agent(over: Partial<Agent> = {}): Agent {
   }
 }
 
-function makeApi(agents: unknown[], runtimes: Runtime[]) {
-  const api = {
-    agents: {
-      list: vi.fn(async () => agents as Agent[]),
-      create: vi.fn(),
-      remove: vi.fn(),
-      update: vi.fn(),
-    },
-    runtimes: {
-      list: vi.fn(async () => runtimes),
-      create: vi.fn(),
-      remove: vi.fn(),
-      update: vi.fn(),
-    },
-  }
-  setApi(api as unknown as Partial<AiWorkflowApi>)
-  return api
+let kernel: FakeKernel
+
+beforeEach(() => {
+  kernel = installFakeKernel()
+})
+
+afterEach(() => {
+  stopFakeKernel()
+})
+
+/** 预置两个视图：智能体清单与绑定运行时下拉的上游 */
+function setup(agents: Agent[], runtimes: Runtime[]): void {
+  kernel.setView('agents.all', undefined, agents)
+  kernel.setView('runtimes.all', undefined, runtimes)
 }
 
-beforeEach(() => vi.clearAllMocks())
+/** dispatch 注入：绕过 onDispatch 的泛型签名，测试里按命令 type 分支 */
+function handleDispatch(
+  handler: (command: Command) => Promise<DispatchResult<unknown>> | DispatchResult<unknown>,
+): void {
+  kernel.onDispatch(handler as unknown as Parameters<FakeKernel['onDispatch']>[0])
+}
 
 describe('AgentManager', () => {
   it('默认只显示清单，点击「新建智能体」才弹出表单', async () => {
-    makeApi([agent()], [rt])
+    setup([agent()], [rt])
 
     const user = userEvent.setup()
     render(<AgentManager />)
@@ -102,7 +102,7 @@ describe('AgentManager', () => {
   })
 
   it('行内展示绑定运行时名与健康状态点', async () => {
-    makeApi(
+    setup(
       [agent({ description: '写代码' }), agent({ id: 'a3', name: 'ghost', runtimeId: 'missing' })],
       [
         makeRuntime({ id: 'r1', name: 'ds', lastProbe: probe('unavailable') }),
@@ -116,17 +116,28 @@ describe('AgentManager', () => {
     expect(screen.getByText(/运行时：missing · 未检测/)).toBeInTheDocument()
   })
 
-  it('加载运行时后新建智能体（切换运行时、填描述与能力）并删除', async () => {
+  it('新建智能体（切换运行时、填描述与能力）后删除：都走 dispatch 且视图刷新', async () => {
     let agents: Agent[] = [agent()]
-    const api = makeApi(agents, [rt, rt2])
-    api.agents.list.mockImplementation(async () => agents)
-    api.agents.create.mockImplementation(async (input: Agent & { name: string }) => {
-      const n = agent({ id: 'a2', name: input.name, runtimeId: input.runtimeId })
-      agents = [...agents, n]
-      return n
-    })
-    api.agents.remove.mockImplementation(async (id: string) => {
-      agents = agents.filter((x) => x.id !== id)
+    setup(agents, [rt, rt2])
+    handleDispatch((command) => {
+      if (command.type === 'agent.create') {
+        const created = agent({
+          id: 'a2',
+          name: command.input.name,
+          runtimeId: command.input.runtimeId,
+          description: command.input.description ?? '',
+          systemPrompt: command.input.systemPrompt ?? '',
+        })
+        agents = [...agents, created]
+        kernel.setView('agents.all', undefined, agents)
+        return { facts: [], value: created }
+      }
+      if (command.type === 'agent.remove') {
+        agents = agents.filter((item) => item.id !== command.id)
+        kernel.setView('agents.all', undefined, agents)
+        return { facts: [], value: null }
+      }
+      return { facts: [], value: null }
     })
 
     render(<AgentManager />)
@@ -140,21 +151,25 @@ describe('AgentManager', () => {
     await user.type(screen.getByLabelText('智能体能力'), 'you are coder')
     await user.click(screen.getByRole('button', { name: '添加智能体' }))
 
-    await waitFor(() => expect(api.agents.create).toHaveBeenCalled())
-    expect(api.agents.create.mock.calls[0][0]).toMatchObject({
-      name: 'coder',
-      runtimeId: 'r2',
-      description: '写代码',
-      systemPrompt: 'you are coder',
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({
+      type: 'agent.create',
+      input: {
+        name: 'coder',
+        runtimeId: 'r2',
+        description: '写代码',
+        systemPrompt: 'you are coder',
+      },
     })
     expect(await screen.findByText('coder')).toBeInTheDocument()
 
     await user.click(screen.getAllByRole('button', { name: /删除智能体/ })[0])
-    await waitFor(() => expect(api.agents.remove).toHaveBeenCalledWith('a1'))
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(2))
+    expect(kernel.dispatched[1]).toMatchObject({ type: 'agent.remove', id: 'a1' })
   })
 
   it('无运行时则禁用添加并提示；未知运行时的智能体显示原始 id 与描述', async () => {
-    makeApi([agent({ id: 'a1', name: 'x', runtimeId: 'ghost', description: '有描述' })], [])
+    setup([agent({ id: 'a1', name: 'x', runtimeId: 'ghost', description: '有描述' })], [])
 
     const user = userEvent.setup()
     render(<AgentManager />)
@@ -166,17 +181,20 @@ describe('AgentManager', () => {
     expect(screen.getByText(/请先在上方添加一个运行时/)).toBeInTheDocument()
   })
 
-  it('加载失败展示错误（非 Error 也会字符串化）', async () => {
-    const api = makeApi([], [])
-    api.agents.list.mockRejectedValue('boom')
+  it('智能体清单读取失败展示错误（非 Error 也会字符串化）', async () => {
+    kernel.failView('agents.all', undefined, 'boom')
+    kernel.setView('runtimes.all', undefined, [])
     render(<AgentManager />)
     expect(await screen.findByText('boom')).toBeInTheDocument()
   })
 
   it('新建失败在弹窗内展示错误；删除失败展示错误', async () => {
-    const api = makeApi([agent()], [rt])
-    api.agents.create.mockRejectedValue(new Error('create-fail'))
-    api.agents.remove.mockRejectedValue(new Error('remove-fail'))
+    setup([agent()], [rt])
+    handleDispatch((command) => {
+      if (command.type === 'agent.create') return Promise.reject(new Error('create-fail'))
+      if (command.type === 'agent.remove') return Promise.reject(new Error('remove-fail'))
+      return { facts: [], value: null }
+    })
 
     render(<AgentManager />)
     expect(await screen.findByText('old')).toBeInTheDocument()
@@ -191,19 +209,16 @@ describe('AgentManager', () => {
     expect(await screen.findByText('remove-fail')).toBeInTheDocument()
   })
 
-  it('加载未完成即卸载不报错', async () => {
-    const api = makeApi([], [])
-    api.agents.list.mockImplementation(
-      () => new Promise((resolve) => setTimeout(() => resolve([]), 10)),
-    )
-    const { unmount } = render(<AgentManager />)
-    unmount()
-    await new Promise((r) => setTimeout(r, 20))
-  })
-
-  it('刷新列表失败展示错误', async () => {
-    const api = makeApi([agent()], [rt])
-    api.agents.list.mockResolvedValueOnce([agent()]).mockRejectedValueOnce(new Error('reload-boom'))
+  it('写入后清单重取失败也展示错误', async () => {
+    setup([agent()], [rt])
+    handleDispatch((command) => {
+      if (command.type === 'agent.create') {
+        // 命令成功落事实，但紧随其后的视图重取失败
+        kernel.failView('agents.all', undefined, 'reload-boom')
+        return { facts: [], value: agent({ id: 'a2', name: 'x' }) }
+      }
+      return { facts: [], value: null }
+    })
 
     render(<AgentManager />)
     expect(await screen.findByText('old')).toBeInTheDocument()
@@ -214,42 +229,21 @@ describe('AgentManager', () => {
     expect(await screen.findByText('reload-boom')).toBeInTheDocument()
   })
 
-  it('新增运行时后经变更事件同步绑定下拉', async () => {
-    let runtimes: Runtime[] = []
-    let changed: (() => void) | undefined
-    setApi({
-      agents: {
-        list: vi.fn().mockResolvedValue([]),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-      },
-      runtimes: {
-        list: vi.fn(async () => runtimes),
-        create: vi.fn(),
-        remove: vi.fn(),
-        update: vi.fn(),
-      },
-      onChanged: vi.fn((cb: () => void) => {
-        changed = cb
-        return () => {}
-      }),
-    } as unknown as Partial<AiWorkflowApi>)
+  it('新增运行时后经内核视图同步绑定下拉', async () => {
+    setup([], [])
 
     const user = userEvent.setup()
     render(<AgentManager />)
     await user.click(screen.getByRole('button', { name: '新建智能体' }))
     expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
 
-    runtimes = [rt]
-    changed?.()
+    kernel.setView('runtimes.all', undefined, [rt])
     await waitFor(() => expect(screen.getByRole('button', { name: '添加智能体' })).toBeEnabled())
     expect(screen.getByLabelText('智能体运行时')).toHaveValue('r1')
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('ds · 可用')
 
     // 运行时被删光后，下拉回落到空
-    runtimes = []
-    changed?.()
+    kernel.setView('runtimes.all', undefined, [])
     await waitFor(() => expect(screen.getByLabelText('智能体运行时')).toHaveValue(''))
     await waitFor(() =>
       expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('（无）'),

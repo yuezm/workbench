@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import type { AgentInput, Runtime } from '../../../../../shared/ai-workflow-api'
+import type { AgentInput, Runtime } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'

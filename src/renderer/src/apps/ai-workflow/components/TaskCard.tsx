@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { Task, WorkflowStage } from '../../../../../shared/ai-workflow-api'
+import type { Task, WorkflowStage } from '../../../../../protocol/entities'
 import { cn } from '../../../lib/cn'
 
 interface TaskCardProps {

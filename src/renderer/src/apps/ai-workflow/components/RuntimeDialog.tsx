@@ -5,14 +5,14 @@ import type {
   RuntimeExecutorChoice,
   RuntimeInput,
   RuntimeModelOption,
-} from '../../../../../shared/ai-workflow-api'
+} from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field, labelCls } from '../../../components/ui/field'
 import { Input, fieldCls } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
-import { wfApi } from '../api'
+import { getKernelStore } from '../../../shell/kernelStore'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -84,16 +84,16 @@ export function RuntimeDialog({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 执行器清单来自只读通道 runtimes.executors()（注册表顺序）；表单不写死任何执行器名。
+  // 执行器清单来自宿主视图 `runtimes.executors`（注册表顺序）；表单不写死任何执行器名。
   // 新建时用首项 manifest 的 command/profile 预填，编辑时保留运行时现有值不覆盖。
   useEffect(() => {
     let alive = true
-    void wfApi()
-      .runtimes.executors()
+    void getKernelStore()
+      .query('runtimes.executors')
       .then((list) => {
         if (!alive) return
-        setExecutors(list)
-        const first = list[0]
+        setExecutors(list ?? [])
+        const first = (list ?? [])[0]
         if (first === undefined) return
         setExecutorKey((prev) => (prev === '' ? first.key : prev))
         if (editing) return
@@ -118,14 +118,16 @@ export function RuntimeDialog({
     if (!target) return
     const initialModel = target.model ?? ''
     let alive = true
-    void wfApi()
-      .runtimes.models(target.id)
+    void getKernelStore()
+      .query('runtimes.models', { runtimeId: target.id })
       .then((list) => {
         if (!alive) return
-        setModels(list)
+        setModels(list ?? [])
         // 初始按「手动输入」渲染的已有模型，命中目录后切回已知选项
         setModelChoice((prev) =>
-          prev === CUSTOM_MODEL && list.some((m) => m.id === initialModel) ? initialModel : prev,
+          prev === CUSTOM_MODEL && (list ?? []).some((m) => m.id === initialModel)
+            ? initialModel
+            : prev,
         )
       })
       .catch((e: unknown) => {
@@ -164,8 +166,8 @@ export function RuntimeDialog({
     setExecutorKey(key)
     // 新建时切执行器才预填该执行器 manifest 的默认命令/profile；编辑时不动用户的现有配置
     if (editing) return
-    const choice = executors.find((item) => item.key === key)
-    if (choice === undefined) return
+    // Select 的选项来自 executors：能选到的 key 一定在清单里（找不到说明 UI 状态不一致）
+    const choice = executors.find((item) => item.key === key) as RuntimeExecutorChoice
     setCommand(choice.command)
     setProfile(choice.profile)
   }

@@ -23,7 +23,8 @@ import { createTempUserData, describeDir, type TempUserData } from './helpers/te
  *    证明主进程侧读写往返正常（不只是 App 启动时恰好写成功）。
  */
 
-const repoRoot = path.resolve(__dirname, '..')
+// 测试在 tests/e2e-packaged/ 下，仓库根要上溯两级（此前少一级，门禁一直找不到产物）
+const repoRoot = path.resolve(__dirname, '..', '..')
 const packagedExe = path.join(repoRoot, 'dist', 'win-unpacked', 'Workbench.exe')
 const DB_WAIT_TIMEOUT_MS = 20_000
 

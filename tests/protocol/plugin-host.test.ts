@@ -267,6 +267,11 @@ describe('parsePluginFrame（M7 stdio JSONL 帧）', () => {
     expect(parsePluginFrame(frame({ type: 'event', event: { ...event, detail: 1 } }))).toBeNull()
     expect(parsePluginFrame(frame({ type: 'event', event: { ...event, link: 1 } }))).toBeNull()
     expect(parsePluginFrame(frame({ type: 'event', event: { ...event, dedupeKey: 1 } }))).toBeNull()
+    expect(
+      parsePluginFrame(
+        frame({ type: 'event', event: { ...event, summary: 'ok', detail: 'x', link: 'u' } }),
+      ),
+    ).toMatchObject({ type: 'event' })
   })
 
   it('delivered / answer 帧：合法与非法', () => {

@@ -474,3 +474,34 @@ describe('kernel/handoff 阶段保存校验', () => {
     )
   })
 })
+
+describe('交接任务标题（M7 覆盖补充）', () => {
+  it('超长标题按 200 码点截断', () => {
+    const facts = handoffFacts(
+      baseView(),
+      task('t-long', { title: 'x'.repeat(250) }),
+      'st-a0',
+      NOW,
+      env(),
+      OWNER,
+    )
+    const created = facts.find((fact) => fact.type === 'task.created')
+    expect(created).toBeDefined()
+    const payload = created?.payload as { task: Task }
+    expect(payload.task.title).toHaveLength(200)
+  })
+
+  it('纯空白标题保留原值兜底（不回落到空串）', () => {
+    const facts = handoffFacts(
+      baseView(),
+      task('t-blank', { title: '   ' }),
+      'st-a0',
+      NOW,
+      env(),
+      OWNER,
+    )
+    const created = facts.find((fact) => fact.type === 'task.created')
+    const payload = created?.payload as { task: Task }
+    expect(payload.task.title).toBe('   ')
+  })
+})

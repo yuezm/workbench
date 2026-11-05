@@ -752,3 +752,29 @@ describe('createChannels：M7 插件启停与按通道配置', () => {
     expect(configs).toEqual({ on: { url: 'http://x' } })
   })
 })
+
+describe('createChannels：M7 无 configOf 时的配置兜底', () => {
+  it('未注入 configOf：sdk.config() 返回空对象（不抛错）', async () => {
+    const configs: Record<string, unknown> = {}
+    const entry: ChannelRegistryEntry = {
+      key: 'plain',
+      label: 'plain',
+      manifest: MANIFEST('plain'),
+      plugin: {
+        async start(ctx) {
+          configs.plain = ctx.sdk.config()
+          return () => undefined
+        },
+      },
+    }
+    const hub = createChannels({
+      store: { query: vi.fn(() => []) } as unknown as ChannelsStore,
+      effects: { dispatch: vi.fn(() => ({ facts: [] })) } as unknown as ChannelsEffects,
+      entries: [entry],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 10,
+    })
+    await hub.startAll()
+    expect(configs).toEqual({ plain: {} })
+  })
+})

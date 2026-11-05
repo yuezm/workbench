@@ -1324,6 +1324,81 @@ describe('主进程入口装配', () => {
     expect(() => plugins?.writeSecrets('dsh', { secret: 'v' })).toThrow(
       '无法保存插件 secret：secret_cipher_unavailable',
     )
+    // 非 Error 抛出：文案用 String 兜底
+    pluginSecretsMock.setSecret.mockImplementationOnce(() => {
+      throw 'boom'
+    })
+    expect(() => plugins?.writeSecrets('dsh', { secret: 'v' })).toThrow('无法保存插件 secret：boom')
+  })
+
+  it('M7 内置通道/来源仍走注册表（无用户覆盖）且拒绝项路径为空时有兜底名称', async () => {
+    const builtinChannel = {
+      key: 'webhook-channel',
+      label: 'Webhook 通道',
+      manifest: {
+        id: 'webhook-channel',
+        kind: 'channel',
+        name: 'Webhook 通道',
+        version: '1.0.0',
+        capabilities: ['net'],
+      },
+      plugin: { start: vi.fn() },
+    }
+    const builtinSource = {
+      key: 'webhook',
+      label: 'Webhook 来源',
+      manifest: {
+        id: 'webhook',
+        kind: 'source',
+        name: 'Webhook 来源',
+        version: '1.0.0',
+        capabilities: ['net'],
+      },
+      plugin: { start: vi.fn() },
+    }
+    channelsEntriesMock.push(builtinChannel)
+    sourcesEntriesMock.push(builtinSource)
+    discoverExternalPluginsMock.mockResolvedValueOnce({
+      entries: [],
+      rejections: [
+        { path: '', kind: 'channel', id: null, reason: 'entry_missing', detail: '缺入口' },
+      ],
+      missingRoot: false,
+    })
+    try {
+      await loadEntry()
+
+      const channelDeps = channelsDeps()
+      const channelEntries = channelDeps.entries as Array<{ key: string }>
+      expect(channelEntries).toEqual([builtinChannel])
+      // 已知通道：找到目录项；未知通道：兜底空配置 / 默认启用
+      expect(channelDeps.configOf?.({ key: 'webhook-channel' } as never)).toEqual({})
+      expect(channelDeps.isEnabled?.({ key: 'webhook-channel' } as never)).toBe(true)
+      expect(channelDeps.configOf?.({ key: 'missing' } as never)).toEqual({})
+      expect(channelDeps.isEnabled?.({ key: 'missing' } as never)).toBe(true)
+
+      const sourceDeps = createSourcesMock.mock.calls[0][0] as {
+        entries: Array<{ key: string }>
+        configOf: (entry: { key: string }) => Record<string, unknown>
+        isEnabled: (entry: { key: string }) => boolean
+      }
+      expect(sourceDeps.entries).toEqual([builtinSource])
+      expect(sourceDeps.configOf({ key: 'webhook' })).toEqual({})
+      expect(sourceDeps.isEnabled({ key: 'webhook' })).toBe(true)
+      expect(sourceDeps.configOf({ key: 'missing' })).toEqual({})
+      expect(sourceDeps.isEnabled({ key: 'missing' })).toBe(true)
+
+      // 拒绝项 path 为空 → 名称兜底「插件目录」，id 空时用 path（空串）作 id
+      const views = hostView('plugins.all') as Array<Record<string, unknown>>
+      expect(views.find((view) => view.status === 'manifest_error')).toMatchObject({
+        id: '',
+        name: '插件目录',
+        kind: 'channel',
+      })
+    } finally {
+      channelsEntriesMock.pop()
+      sourcesEntriesMock.pop()
+    }
   })
 
   it('before-quit：关窗不再拦截，活跃 run best-effort 取消、通道 stopAll、推送停表', async () => {

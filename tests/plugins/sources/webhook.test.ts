@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { NetRequest } from '../../../src/sdk/types'
 import {
   DEFAULT_EVENT_SOURCE,
+  createWebhookHandler,
   parseRawEvent,
   readWebhookConfig,
   webhookManifest,
@@ -472,5 +473,51 @@ describe('parseRawEvent', () => {
     expect(parseRawEvent({ type: 'issues.opened', subject: 's', detail: 1 }).ok).toBe(false)
     expect(parseRawEvent({ type: 'issues.opened', subject: 's', link: 1 }).ok).toBe(false)
     expect(parseRawEvent({ type: 'issues.opened', subject: 's', dedupeKey: 1 }).ok).toBe(false)
+  })
+})
+
+describe('M7 覆盖补充：未配置/非 Error/头大小写', () => {
+  it('sdk.config 返回 null：按未配置处理，不监听', async () => {
+    const harness = sourceHarness({ config: null as never, net: fakeNet(), now: () => AT })
+    const dispose = await webhookSource.start(harness.ctx)
+    expect(harness.net.listeners).toEqual([])
+    expect(harness.logs.join('\n')).toContain('不监听')
+    dispose()
+    dispose()
+  })
+
+  it('handler 内非 Error 抛出：日志用 String 兜底、回 500 且零事件', async () => {
+    const logs: string[] = []
+    const emitted: unknown[] = []
+    const net = fakeNet({
+      verify: () => {
+        throw 'boom'
+      },
+    })
+    const handler = createWebhookHandler({
+      config: { secret: SECRET, port: 47615, path: '/webhook', toleranceSeconds: 300 },
+      net,
+      now: () => AT,
+      emit: (event) => emitted.push(event),
+      log: (line) => logs.push(line),
+    })
+    const reply = await handler(
+      postRequest(JSON.stringify({ type: 'issues.opened', subject: 's' })),
+    )
+    expect(reply.status).toBe(500)
+    expect(emitted).toEqual([])
+    expect(logs.join('\n')).toContain('boom')
+  })
+
+  it('头名大小写不敏感且忽略无关头', async () => {
+    const body = JSON.stringify({ type: 'issues.opened', subject: 's' })
+    const headers = {
+      'x-unrelated': '1',
+      ...headersFor(body),
+    }
+    const h = await start()
+    const reply = await h.net.handler!({ method: 'POST', path: '/webhook', headers, body })
+    expect(reply.status).toBe(200)
+    expect(h.emitted).toHaveLength(1)
   })
 })

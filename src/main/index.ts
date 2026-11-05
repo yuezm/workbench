@@ -486,7 +486,7 @@ if (app.requestSingleInstanceLock()) {
         } catch (error) {
           // 不把密文/明文写进错误文案；宿主安全存储不可用时拒绝而不是明文落库
           const message = error instanceof Error ? error.message : String(error)
-          throw new Error(`无法保存插件 secret：${message.split(':')[0] ?? 'unknown'}`, {
+          throw new Error(`无法保存插件 secret：${message.split(':')[0]}`, {
             cause: error,
           })
         }

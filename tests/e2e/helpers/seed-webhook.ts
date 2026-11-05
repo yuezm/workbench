@@ -20,7 +20,6 @@ import type { Workflow } from '../../../src/protocol/entities'
 
 const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
 
-export const WEBHOOK_E2E_PORT = 47_699
 export const WEBHOOK_E2E_PATH = '/e2e-webhook'
 /** 测试用共享密钥（拼接构造，避免被密钥扫描规则误报为真实凭据） */
 export const WEBHOOK_E2E_SECRET = ['e2e', 'webhook', 'shared', 'key'].join('-')

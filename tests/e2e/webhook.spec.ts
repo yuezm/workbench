@@ -9,8 +9,12 @@
  * 4. 带 `sha256=<hex(HMAC-SHA256(secret, `${timestamp}.${body}`))>` 的 POST → 200；
  *    坏签名 → 401 且不产事件；
  * 5. 断言库里 `event.received` 事实与规则任务（origin='rule'）。
+ *
+ * 端口用系统分配的空闲端口（先 bind 0 取端口再关闭）：固定端口可能落在 Windows
+ * 排除端口段或被残留进程占用，会让用例不稳定。
  */
 import { createHmac } from 'node:crypto'
+import { createServer } from 'node:net'
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
 import type { PluginView } from '../../src/protocol/plugins'
@@ -20,7 +24,6 @@ import {
   readWebhookState,
   seedWebhookBase,
   WEBHOOK_E2E_PATH,
-  WEBHOOK_E2E_PORT,
   WEBHOOK_E2E_SECRET,
   type WebhookSeed,
 } from './helpers/seed-webhook'
@@ -35,7 +38,21 @@ test.afterEach(async () => {
   seed = undefined
 })
 
-const endpoint = `http://127.0.0.1:${WEBHOOK_E2E_PORT}${WEBHOOK_E2E_PATH}`
+/** 取一个当前空闲的本机端口（bind 0 → 读端口 → 立即关闭）。 */
+async function freeLoopbackPort(): Promise<number> {
+  return await new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address !== null ? address.port : 0
+      server.close(() => {
+        if (port > 0) resolve(port)
+        else reject(new Error('未能分配空闲端口'))
+      })
+    })
+  })
+}
 
 /** 按 webhook 来源的签名口径构造请求头（时间戳 epoch 秒 + `${timestamp}.${body}`）。 */
 function signedHeaders(body: string, secret = WEBHOOK_E2E_SECRET): Record<string, string> {
@@ -54,24 +71,29 @@ test('webhook 来源：应用内配置 + 重启生效 → 合法 POST 产事件�
   const userDataDir = createTempUserDataDir()
   seed = await seedWebhookBase(path.join(userDataDir, 'ai-workflow.db'))
   const seeded = seed
+  const port = await freeLoopbackPort()
+  const endpoint = `http://127.0.0.1:${port}${WEBHOOK_E2E_PATH}`
 
   // 1) 首次启动：经桥写插件设置（启用 + 授权 net + 端口/路径 + secret）
   launched = await launchApp({ userDataDir })
   page = launched.page
   await expect(page).toHaveTitle('Workbench')
-  const saved = (await page.evaluate(async () => {
-    const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
-    const result = await bridge.dispatch({
-      type: 'plugin.set',
-      commandId: 'e2e-webhook-configure',
-      pluginId: 'webhook',
-      enabled: true,
-      granted: ['net'],
-      config: { port: 47_699, path: '/e2e-webhook', toleranceSeconds: 300 },
-      secrets: { secret: 'e2e-webhook-secret' },
-    })
-    return result.value as PluginView | null
-  })) as PluginView | null
+  const saved = (await page.evaluate(
+    async ({ port, secret }) => {
+      const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
+      const result = await bridge.dispatch({
+        type: 'plugin.set',
+        commandId: 'e2e-webhook-configure',
+        pluginId: 'webhook',
+        enabled: true,
+        granted: ['net'],
+        config: { port, path: '/e2e-webhook', toleranceSeconds: 300 },
+        secrets: { secret },
+      })
+      return result.value as PluginView | null
+    },
+    { port, secret: WEBHOOK_E2E_SECRET },
+  )) as PluginView | null
   expect(saved).toMatchObject({
     id: 'webhook',
     enabled: true,

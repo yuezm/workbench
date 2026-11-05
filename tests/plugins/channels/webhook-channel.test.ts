@@ -365,3 +365,39 @@ describe('cardPayload / readWebhookChannelConfig', () => {
     ])
   })
 })
+
+describe('M7 覆盖补充：未配置 / 非 Error', () => {
+  it('sdk.config 返回 null：按未配置处理，不投递', async () => {
+    const logs: string[] = []
+    const sdk = fakeSdk({
+      config: <T = Record<string, unknown>>() => null as unknown as T,
+      log: (line) => logs.push(line),
+      net: fakeNet(),
+    })
+    const harness = channelHarness({ sdk })
+    const dispose = await webhookChannel.start(harness.ctx)
+    expect(harness.handlers).toHaveLength(0)
+    expect(logs.join('\n')).toContain('不投递')
+    dispose()
+    dispose()
+  })
+
+  it('net.fetch 抛非 Error：只记日志（String 兜底），不 delivered', async () => {
+    const logs: string[] = []
+    const net = fakeNet({
+      fetch: async () => {
+        throw 'boom'
+      },
+    })
+    const sdk = fakeSdk({
+      config: <T = Record<string, unknown>>() => ({ url: URL_CONFIG }) as T,
+      log: (line) => logs.push(line),
+      net,
+    })
+    const harness = channelHarness({ sdk })
+    await webhookChannel.start(harness.ctx)
+    harness.deliver(cardOf())
+    await vi.waitFor(() => expect(logs.join('\n')).toContain('boom'))
+    expect(harness.delivered).toEqual([])
+  })
+})

@@ -394,3 +394,8 @@ export interface AppPlugin {
 - **通道：** 假通知/假平台，不发真消息；断言卡片文字与通知标题/正文只作为参数传递；补投只针对 `pending`、同一版本不重复投递。
 - **注册表：** id 唯一、`key === manifest.id`、kind 合法、capabilities 在枚举内、必填字段齐全；`executors/*`、`channels/*` 目录与清单双向一致。
 - **detect 汇总：** 按注册表顺序串行且顺序稳定、`executorKey`/`supported` 由汇总回填、输出按候选清单排序、同 `command` 先到先得、单插件抛错或超时被隔离、空注册表返回空数组且不扫盘。
+- **外部插件装载（M7）：** 用户目录扫描按 `source`/`channel` 分目录；manifest 非法 / 入口缺失 / 未知类别 / 跨 kind 撞 id 全部拒绝并带原因；同 kind+id 用户覆盖内置且只保留一份；根目录/类别目录不可读降级不抛；`kind_unsupported` 只对合法的 `executor`/`app` 声明。
+- **外部插件运行（M7）：** 假 spawn 覆盖 `hello` 前退出、hello 超时、非 JSON/超长行丢弃、重复 hello、帧解析失败、`start` 重入与停止中拒绝、崩溃重拉次数上限、`stop` 幂等与并发、`killTree` 抛错/无 pid；环境白名单不含 `process.env` 其它键、secret 不进环境与命令行。
+- **能力面（M7）：** `net.fetch` 的头合并/超时/响应超限/非 2xx、`listen` 只绑回环且端口占用/关闭幂等/请求体超限/客户端中断、`verifyHmacSha256` 的格式/长度/常数时间比较；`fake-net` 与真实宿主实现同契约。
+- **webhook（M7）：** 来源的路径/方法/时间戳窗口/签名/请求体上限矩阵，失败 4xx 且零事件、未配置不监听且 dispose 幂等；通道 2xx → `delivered`、非 2xx/超时/网络错误只记日志、`Authorization: Bearer` 只含 secret、无 secret 不带头。
+- **设置与 secret（M7）：** `plugins.replace` 整批校验（id/kind/enabled/granted/config 标量）与版本 +1、`plugin.set` 合并与授权 ⊆ 声明能力、secret 键 ⊆ 声明的 secret 字段、幂等回放返回最新快照；投影/重建逐表等价且重建不清 `plugin_secrets`；真实库路径校验列名与「写入→读回明文、库里只有密文」；`safeStorage` 不可用时写入口拒绝（不落明文）。

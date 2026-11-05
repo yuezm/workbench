@@ -100,20 +100,29 @@
 | TC-AIW-054 | 派生任务（M6.5）：回执派生事件按 `originRunId` 归父线程与 `parentTaskId`、永远新建子任务                                                                                                                 | 单元 | `kernel/rules.test.ts` + `kernel/decide.thread.test.ts`                                                                                                     |
 | TC-AIW-055 | 线程投影与旧库（M6.5）：`threads` 整行读写、`tasks` 补 `thread_id/parent_task_id`（ALTER）、`thread.byId`（含 sessions）、重建逐表等价、v2 默认值                                                        | 单元 | `host/schema.test.ts` + `host/db.test.ts` + `host/store/{projection-apply,views,rebuild,import}.test.ts`                                                    |
 | TC-AIW-056 | 线程 UI（M6.5）：TaskCard 父子徽标与线程入口、ThreadPanel 任务树/笔记/绑定/归档/错误与禁用、kernelStore `thread.`/`event.` 失效                                                                          | 单元 | `renderer/src/apps/ai-workflow/components/{TaskCard,ThreadPanel,KanbanBoard}.test.tsx` + `AiWorkflowPage.test.tsx` + `shell/kernelStore.test.tsx`           |
+| TC-AIW-057 | 插件设置契约（M7）：`PluginSetting`/`PluginSettingsRow`/`PluginView` 形状、`plugins.replaced` 事实、`plugins.replace`/`plugin.set` 命令、`plugins.settings`/`plugins.all` 视图、manifest 与帧解析        | 契约 | `protocol/plugin-host.test.ts` + `protocol/validate.plugins.test.ts` + `protocol/{facts,commands,views}.test.ts`                                            |
+| TC-AIW-058 | 外部插件装载与运行（M7）：用户目录发现/manifest 拒绝/同 kind+id 覆盖、子进程 JSONL 帧与 hello 超时/崩溃重拉/停止、环境白名单、secret 加解密与 config 合并、帧 → source/channel 适配                      | 单元 | `host/plugins/{discover,process,env,settings,adapters}.test.ts` + `host/net.test.ts`                                                                        |
+| TC-AIW-059 | 插件设置与编排（M7）：`plugin.set` 合并与授权 ⊆ 声明能力、secret 键 ⊆ 声明字段、幂等回放；投影/重建等价；`plugin_secrets` 不被重建清空；来源 hub 启停与 `event.received` 入口                            | 单元 | `host/plugins-settings.test.ts` + `host/sources.test.ts` + `host/store/rebuild.test.ts`                                                                     |
+| TC-AIW-060 | webhook（M7）：来源 POST/路径/时间戳窗口/HMAC 验签/4xx 零事件/未配置 no-op；通道 2xx → delivered、非 2xx 只记日志、Bearer 口径；只绑回环                                                                 | 单元 | `plugins/sources/webhook.test.ts` + `plugins/channels/webhook-channel.test.ts` + `host/net.test.ts`                                                         |
+| TC-AIW-061 | 跨工作流交接（M7）：成功流转/直接完成/向前拖拽触发、打回与拖回不触发、去重、链深 ≤8、目标失效零事实、保存时自指/从属校验、新线程 `source='handoff'` 与入口 run                                           | 单元 | `kernel/handoff.test.ts` + `kernel/decide.handoff.test.ts` + `kernel/workflow/stage-machine.test.ts` + `host/db.test.ts`                                    |
+| TC-AIW-062 | 插件设置页与交接 UI（M7）：插件列表/启停/授权/config/secret 只写、错误展示；阶段交接选择与 `stage.id` 回传；任务卡交接徽标；`plugins.replaced` 失效                                                      | 单元 | `renderer/src/apps/ai-workflow/components/{PluginsManager,WorkflowEditor,TaskCard}.test.tsx` + `SettingsNav.test.tsx` + `shell/kernelStore.test.tsx`        |
+| TC-AIW-063 | 远端 Worker 架构位（M7）：`WorkerFrame` 解析/编码、内存传输 execute/cancel/事件、无传输回 `runtime_missing`、有传输透传回执与异常归一                                                                    | 单元 | `protocol/worker.test.ts` + `host/worker-transport.test.ts` + `plugins/executors/remote.test.ts`                                                            |
 
 ## E2E（构建产物 + 真实 Electron）
 
-| 用例       | 验证点                                                                                                                          | 测试位置                     |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| TC-E2E-001 | 启动冒烟：窗口标题 Workbench、顶部栏「番茄时钟」标签且高亮                                                                      | `e2e/smoke.spec.ts`          |
-| TC-E2E-002 | 默认挂载第一个注册 app：idle 25:00、阶段「专注」                                                                                | `e2e/smoke.spec.ts`          |
-| TC-E2E-003 | 关键路径：开始 → 递减 → 暂停冻结 → 重置回 25:00，控制区状态切换                                                                 | `e2e/pomodoro.spec.ts`       |
-| TC-E2E-004 | 设置端到端：非法专注时长 999 被钳制为 120，大字显示 120:00                                                                      | `e2e/pomodoro.spec.ts`       |
-| TC-E2E-005 | 崩溃恢复：强杀后重启回收 claimed、残留子进程被终止、任务可拖动                                                                  | `e2e/crash-recovery.spec.ts` |
-| TC-E2E-006 | 审批等待期：租约/超时/用量为空、无子进程、`cards.open` 可读；回答后续接同会话、重复回答被拒                                     | `e2e/approval.spec.ts`       |
-| TC-E2E-007 | 卡片投递：`pending → delivered`，in-app 优先且等待期不触发桌面通知                                                              | `e2e/approval.spec.ts`       |
-| TC-E2E-008 | 规则闭环（M6）：设置页新建事件规则并保存 → `rules.all` v1 → 注入 app 事件 → 看板出现规则任务；同 subject 再发不重复建           | `e2e/rules.spec.ts`          |
-| TC-E2E-009 | 线程闭环（M6.5）：手工任务隐式线程 → 面板打开 → 补笔记 → 绑定入口 → 归档；库内 `threads`/`thread.*` 事实与任务 `thread_id` 一致 | `e2e/thread.spec.ts`         |
+| 用例       | 验证点                                                                                                                                            | 测试位置                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| TC-E2E-001 | 启动冒烟：窗口标题 Workbench、顶部栏「番茄时钟」标签且高亮                                                                                        | `e2e/smoke.spec.ts`          |
+| TC-E2E-002 | 默认挂载第一个注册 app：idle 25:00、阶段「专注」                                                                                                  | `e2e/smoke.spec.ts`          |
+| TC-E2E-003 | 关键路径：开始 → 递减 → 暂停冻结 → 重置回 25:00，控制区状态切换                                                                                   | `e2e/pomodoro.spec.ts`       |
+| TC-E2E-004 | 设置端到端：非法专注时长 999 被钳制为 120，大字显示 120:00                                                                                        | `e2e/pomodoro.spec.ts`       |
+| TC-E2E-005 | 崩溃恢复：强杀后重启回收 claimed、残留子进程被终止、任务可拖动                                                                                    | `e2e/crash-recovery.spec.ts` |
+| TC-E2E-006 | 审批等待期：租约/超时/用量为空、无子进程、`cards.open` 可读；回答后续接同会话、重复回答被拒                                                       | `e2e/approval.spec.ts`       |
+| TC-E2E-007 | 卡片投递：`pending → delivered`，in-app 优先且等待期不触发桌面通知                                                                                | `e2e/approval.spec.ts`       |
+| TC-E2E-008 | 规则闭环（M6）：设置页新建事件规则并保存 → `rules.all` v1 → 注入 app 事件 → 看板出现规则任务；同 subject 再发不重复建                             | `e2e/rules.spec.ts`          |
+| TC-E2E-009 | 线程闭环（M6.5）：手工任务隐式线程 → 面板打开 → 补笔记 → 绑定入口 → 归档；库内 `threads`/`thread.*` 事实与任务 `thread_id` 一致                   | `e2e/thread.spec.ts`         |
+| TC-E2E-010 | webhook 闭环（M7）：应用内 `plugin.set` 配置回环端口/路径/secret → 重启 → 带 HMAC 的 POST 产 `event.received` 并命中规则建任务；坏签名 401 零事件 | `e2e/webhook.spec.ts`        |
+| TC-E2E-011 | 交接闭环（M7）：源工作流完成任务 → 目标工作流出现 `origin='handoff'` 任务（来源两列/新线程），重复完成不重复建                                    | `e2e/handoff.spec.ts`        |
 
 ## 手动验收清单（感官/系统行为，无法自动化）
 
@@ -141,4 +150,4 @@
 | `git push`   | `pnpm check`（含覆盖率阈值）+ `pnpm e2e` | 覆盖率回退、契约破坏、关键路径回归 |
 | 随时         | `pnpm test:watch`、`pnpm e2e -- --ui`    | 开发期快速反馈                     |
 
-覆盖率阈值（2026-10-30 基线 99.3/95.5/97.9/99.2）：statements **98** / branches **93** / functions **95** / lines **98**。当前实测基线（M6.5，2026-11-05）：99.91 / 98.34 / 100 / 100，改动行 433/433 = 100%，`pnpm e2e` 10/10。
+覆盖率阈值（2026-10-30 基线 99.3/95.5/97.9/99.2）：statements **98** / branches **93** / functions **95** / lines **98**。当前实测基线（M7，2026-11-05）：99.93 / 98.46 / 100 / 100，改动行 1565/1565 = 100%，`pnpm e2e` 12/12。

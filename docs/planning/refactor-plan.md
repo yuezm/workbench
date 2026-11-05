@@ -188,6 +188,20 @@
 - 评审口径（开工即定）：外部插件 M7 只开放 `source` / `channel`（`executor` 需要 probe/models/领取往返，另立协议面）；能力授权是信任门不是 OS 沙箱，宿主只按授权决定是否启动与下发 config/secret；外部插件子进程环境走白名单，不继承 `process.env`；插件 secret 走非投影表 + `safeStorage`（不进事实/视图/日志）；`plugin_settings` 为第 14 张投影表（整批替换、`KERNEL_VERSION=m7.0.0`）；交接只建目标工作流关联任务、不回写来源任务，链深上限 8；`tasks.origin` 扩 `handoff` 需物理重建 `tasks`（照 M2 `runs` / M3 `runtimes` 临时表法）。
 - 回滚点：M7 改投影表、`tasks` 结构与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建；`plugin_secrets` 为非投影宿主表，回滚后由用户重新授权/填 secret。
 
+## M7 退出记录（2026-11-05）
+
+- 提交链：`72055c9`（外部插件运行时 / SDK net / webhook 来源与通道 / 跨工作流交接 / 远端 Worker 架构位 / 插件设置页与交接 UI / e2e）→ 覆盖率与文档收尾提交（本记录）。
+- 门禁：`pnpm check` exit 0；**138 文件 / 1929 用例**；覆盖率 **99.93 / 98.46 / 100 / 100**（不低于 M6.5 基线 99.91 / 98.34 / 100 / 100）；`check:diffcov` **1565/1565 = 100%**；`pnpm e2e` **12/12**（新增 `e2e/webhook.spec.ts`、`e2e/handoff.spec.ts`）；`check:floor` / `check:secrets` clean；`pnpm audit` 生产依赖 0 漏洞。
+- 插件治理表面（M7）：`plugin_settings` 成为第 14 张投影表（单行 `id='current'`、整批替换、`plugins.replaced` 版本 +1）+ 命令 `plugins.replace` / `plugin.set` + DB 视图 `plugins.settings` + 宿主视图 `plugins.all`；非密钥设置进事实日志，secret 走宿主私有表 `plugin_secrets`（`safeStorage` 加密、不进事实/视图/日志/快照；不可用时写入口拒绝）；`KERNEL_VERSION=m7.0.0`。
+- 外部插件（source / channel）：用户目录 `userData/plugins/<kind>/<id>/{manifest.json,plugin.mjs}` 启动扫描、`manifest_invalid` / `kind_unsupported` / `entry_missing` / `duplicate_id` 拒绝并展示；同 kind+id 用户覆盖内置（跨 kind 撞 id 拒绝）；独立子进程 stdio JSONL（`PLUGIN_HOST_PROTOCOL_VERSION=1`，`hello/welcome/log/event/card/delivered/answer/shutdown`）、hello 超时 5 s、帧上限 64 KiB、崩溃最多重拉 3 次、`shutdown → SIGTERM → killTree`；环境白名单（不继承 `process.env`）；**能力授权是信任门不是 OS 沙箱**，缺一能力即 `unauthorized` 不启动；`executor` 类外部插件 M7 不开放（probe/models/领取往返另立协议面）。
+- SDK 与 webhook：`Sdk.net`（`fetch` / 仅绑 `127.0.0.1` 的 `listen` / `verifyHmacSha256`，crypto 只在 `host/net.ts`）；source hub（`ctx.emit` → 唯一事件入口 `event.received`，单条失败隔离、`statuses()` 供设置页）；内置 `webhook` 来源（POST + 路径 + 时间戳窗口 + HMAC-SHA256；未配置不监听、失败 4xx 零事件）；内置 `webhook-channel`（卡片 POST 八个字段、2xx → delivered、secret 只作 `Authorization: Bearer`、单向不回收答案）。
+- 跨工作流交接：`workflow_stages` 补 `handoff_workflow_id` / `handoff_stage_id`（`ALTER TABLE`），`tasks` 补 `handoff_from_task_id` / `handoff_from_stage_id` 且 `origin` 扩为 `manual|rule|handoff`（旧库**一次性物理重建 `tasks`**，照 M2 `runs` / M3 `runtimes` 临时表法）；成功流转 / 向前拖拽 / 直接完成三处触发，打回与删阶段重挂不触发；同一 `(来源任务, 阶段)` 只建一次、链深上限 8、目标失效零事实；产物 = 目标工作流 `origin='handoff'` 任务 + 新隐式线程（`source='handoff'`）+ 目标 agent 阶段入口 run；保存时校验自指与目标阶段从属；**不回写来源任务**。
+- 远端 Worker 架构位：`protocol/worker.ts`（`WORKER_PROTOCOL_VERSION=1`、hello/claim/heartbeat/event/receipt/cancel 帧）+ `RemoteTransport` 端口 + 进程内内存假传输 + `remote` 执行器（无传输回执 `runtime_missing`，有传输透传事件/回执并遵守 abort）；**不监听端口、不建 daemon**。
+- UI：设置页第五栏「插件」（`plugins.all`：启停 / 逐项授权 / config 表单 / secret 只写与「已设置」/ 错误与状态）；阶段编辑器「交接目标工作流 + 阶段」并回传 `stage.id`；任务卡「交接」徽标；kernelStore `plugins.replaced` 失效。
+- 已知识边界与偏差：外部 `executor` 插件不开放；插件运行期配置（端口/地址/secret）在启动时装配，改完需重启应用生效；webhook 来源只绑回环、无公网地址与鉴权体系；交接不回写来源任务、也不反查「目标工作流后被删掉阶段」的悬空引用（运行期零事实）；`plugin.secrets` 依赖 `safeStorage`，不可用时拒绝写入；`SourcePlugin` / `SourceContext` 放在 `src/sdk/types.ts`（`protocol` 不反向 import sdk），未单列 `protocol/sources.ts`；webhook 通道按裁决用 `Authorization: Bearer` 而非 HMAC 签名；M2 兼容层不删（实库仍 v2）；electron-builder 打包冒烟仍未恢复（M2 已知问题）；`scheduler` 竞态防御分支与既有 UI 不可达分支仍未覆盖（与 M4/M5/M6/M6.5 同口径）。
+- 回滚点：M7 改投影表、`tasks` 结构与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建；`plugin_secrets` 重建不清空，但 `safeStorage` 换机后旧密文解密失败按「该键不可用」降级，用户需重填。
+- 下一步：外部 `executor` 插件协议面（probe/models/领取往返）、插件热重载/安装向导、webhook 双向通道（平台回调回收答案）、跨工作流交接的完成回写与子工作流语义、远端 Worker 真实传输（拉模式 daemon + 鉴权）；均不阻塞主线。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

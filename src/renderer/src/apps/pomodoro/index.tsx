@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { AppDefinition, AppIconProps } from '../../shell/types'
+import type { AppPlugin, AppIconProps } from '../../shell/types'
 import { PomodoroPage } from './PomodoroPage'
 
 function PomodoroIcon({ size = 18 }: AppIconProps): ReactElement {
@@ -24,9 +24,11 @@ function PomodoroIcon({ size = 18 }: AppIconProps): ReactElement {
   )
 }
 
-export const pomodoroApp: AppDefinition = {
+export const pomodoroApp: AppPlugin = {
   id: 'pomodoro',
   name: '番茄时钟',
   icon: PomodoroIcon,
   component: PomodoroPage,
+  // 计时结束发一条 app 事件（白名单在 src/shared/apps.ts，M6 规则消费）
+  events: ['pomodoro.completed'],
 }

@@ -1,14 +1,14 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import type { AppDefinition } from '../../../../src/renderer/src/shell/types'
+import type { AppPlugin } from '../../../../src/renderer/src/shell/types'
 import { Workbench } from '../../../../src/renderer/src/shell/Workbench'
 
 function FakeIcon(): null {
   return null
 }
 
-function makeApp(id: string, name: string, content: string): AppDefinition {
+function makeApp(id: string, name: string, content: string): AppPlugin {
   return { id, name, icon: FakeIcon, component: () => <div>{content}</div> }
 }
 

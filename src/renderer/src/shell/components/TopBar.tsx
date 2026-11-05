@@ -1,9 +1,9 @@
 import type { ReactElement } from 'react'
-import type { AppDefinition } from '../types'
+import type { AppPlugin } from '../types'
 import { cn } from '../../lib/cn'
 
 interface TopBarProps {
-  apps: AppDefinition[]
+  apps: AppPlugin[]
   activeId: string
   onSelect: (id: string) => void
 }

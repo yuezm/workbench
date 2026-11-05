@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react'
-import type { AppDefinition, AppIconProps } from '../../shell/types'
+import type { AppPlugin, AppIconProps } from '../../shell/types'
 import { AiWorkflowPage } from './AiWorkflowPage'
 
 function AiWorkflowIcon({ size = 18 }: AppIconProps): ReactElement {
@@ -21,7 +21,7 @@ function AiWorkflowIcon({ size = 18 }: AppIconProps): ReactElement {
   )
 }
 
-export const aiWorkflowApp: AppDefinition = {
+export const aiWorkflowApp: AppPlugin = {
   id: 'ai-workflow',
   name: 'AI 工作流',
   icon: AiWorkflowIcon,

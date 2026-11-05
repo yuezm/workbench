@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import type { ReactElement } from 'react'
-import type { AppDefinition } from './types'
-import { apps as registeredApps } from './registry'
+import type { AppPlugin } from './types'
+import { appPlugins as registeredApps } from './registry'
 import { TopBar } from './components/TopBar'
 
 interface WorkbenchProps {
-  /** 缺省时使用全局注册表；测试可注入 */
-  apps?: AppDefinition[]
+  /** 缺省时使用全局插件清单；测试可注入 */
+  apps?: AppPlugin[]
 }
 
 export function Workbench({ apps = registeredApps }: WorkbenchProps): ReactElement {

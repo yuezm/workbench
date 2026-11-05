@@ -7,10 +7,11 @@ export interface AppIconProps {
 }
 
 /**
- * 工作台 app 契约：每个 app 以此注册进外壳。
- * 新增 app 三步走：新建 src/renderer/src/apps/<id>/、实现 AppDefinition、在 registry.ts 加一行。
+ * 工作台 app 插件契约（M5）：每个 app 以此注册进外壳。
+ * 新增 app 三步走：新建 src/renderer/src/apps/<id>/、实现 AppPlugin、在 registry.ts 加一行；
+ * 可发事件的 app 在 `events` 声明前缀，并同步 `src/shared/apps.ts` 的白名单。
  */
-export interface AppDefinition {
+export interface AppPlugin {
   /** 唯一 id，kebab-case */
   id: string
   /** 顶部导航显示名 */
@@ -19,4 +20,6 @@ export interface AppDefinition {
   icon: ComponentType<AppIconProps>
   /** 内容区挂载的入口组件 */
   component: ComponentType
+  /** 可发事件类型（如 pomodoro.completed）；未声明则不能发 `app.event` */
+  events?: readonly string[]
 }

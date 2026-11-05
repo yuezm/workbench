@@ -69,6 +69,7 @@
 - 写路径：生产代码 `INSERT/UPDATE/DELETE runs|run_events` 只在 `src/host/store/projection-apply.ts`；`repository.ts`、`runner.ts`、`ChatService`、`shared/stage-machine.ts` 已删除；聊天与阶段共用 scheduler/执行器端口。
 - 已知边界：`run.waiting` 只落事实与投影，卡片投递/回答闭环在 M4；`commandId` 幂等留 M5；`resume_rejected` 重试在 M2 执行器适配层（M3 搬 dsh 插件）；旧库一次性升级/聊天迁移为兼容层，M3 首启后再删；`scheduler` 少量防御性早退分支未覆盖（公共路径不可达）。
 - 评审修复（2026-11-05，合并前）：补 `task.remove` / `workflow.remove` 的 `runs` 视图切片——此前 `run.removed` 只写契约、生产路径永不产出，删除任务后 `rebuild` 会复活 orphan run（违背 D13）；调度器在领取 / 收尾 / 取消后 `clock.rearm()`——此前定时器只在启动时排一次，启动后才出现的租约与超时永不触发回收；`run.cancelRequested` 的运行在租约过期时直接落 `run.cancelled`，不再重排执行；打包冒烟断言改为 M2 schema（旧断言要求已被删除的 `chat_*` 表）；`SPEC-ai-workflow` / `SPEC-kernel` 同步聊天执行路径、数据模型与提示词拼装口径。修复后 `pnpm check` exit 0、`pnpm e2e` 6/6、覆盖率 99.74/97.78/100/100（改动行 1035/1042 = 99.33%）。
+- 打包门禁复核（2026-11-05）：`tests/e2e-packaged` 的仓库根路径少一级、表清单仍断言旧 `chat_*` 表，两处已修；但 electron-builder 产出的 `Workbench.exe` 在本机启动即崩（`--version` 同样 0x80000003，dev Electron 45.1.0 正常），与 M2 代码无关，待工具链（electron-builder / asar 完整性）排查后再恢复该门禁。
 - 任务级证据与偏差见 [tasks/m2-todo.md](../../tasks/m2-todo.md) 与 [tasks/m2-plan.md](../../tasks/m2-plan.md)。
 
 ## 文件去向

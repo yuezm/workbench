@@ -140,6 +140,13 @@
 - 回滚点：无投影表/`KERNEL_VERSION` 变化，回滚 = 切回 `master` 代码；`commands` 表可保留（旧代码不读），需要彻底回退时删表即可。
 - 下一步：M6 自动化规则（规则事实 + 设置页编辑、`app`/`manual` 事件源 + cron、Issue 进研发与每日早报模板）。
 
+## M6 开工记录（2026-11-05）
+
+- 分支 `refactor/m6-rules`，起点 `master` @ `2f06970`（M5 已 fast-forward 合入）；实施计划与任务清单见 [tasks/m6-plan.md](../../tasks/m6-plan.md)、[tasks/m6-todo.md](../../tasks/m6-todo.md)。
+- 范围口径：`rule_sets` / `rule_fires` 两张新投影表（单行规则集 + 触发记录），`rules.replaced` / `rule.fired` 两条事实；`rules.replace` 整批替换（版本 +1，非法整批拒绝）与 `rule.trigger` 手动运行命令；宿主输入 `event.received` 作为 source 插件的统一入口，`app.event` 与回执派生事件走同一匹配路径；`tasks` 加 `origin/ruleId/externalRef/labels`（旧库补列、老事实归一）；`kernel/cron.ts` 纯函数 + `clock.tick` 到点建任务、`nextWakeAt` 纳入 cron；设置页新增「规则」栏与两个模板；`KERNEL_VERSION=m6.0.0`。
+- 评审口径（开工即定）：规则只建任务、不直接派活；同 `(ruleId, externalRef)` 不重复建任务（事件合并与线程上下文留 M6.5）；`to.thread` / `parallel` / `merge` 字段 M6 只校验与存储、不改变执行（M6.5 线程落地时生效）；M6 不落 source 插件进程（manual 源 = `rule.trigger`，app 源 = `app.event`，`plugins/sources/**` 留 M7 webhook 首个消费者）。
+- 回滚点：M6 改投影表与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建（M5/M6 的可重建投影会从事实回放）。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

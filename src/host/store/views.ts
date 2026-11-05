@@ -12,6 +12,10 @@ import type { DatabaseSync } from 'node:sqlite'
 import type {
   Access,
   Agent,
+  Card,
+  CardAnswerVia,
+  CardDelivery,
+  CardStatus,
   ChatRole,
   Conversation,
   EntryMode,
@@ -155,6 +159,27 @@ interface MessageRow {
   created_at: string
 }
 
+/** `cards` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
+interface CardDbRow {
+  id: string
+  run_id: string
+  task_id: string | null
+  conversation_id: string | null
+  title: string
+  text: string
+  options_json: string
+  key: string | null
+  version: number
+  status: string
+  delivery: string
+  delivery_ref: string | null
+  option_index: number | null
+  answered_by: string | null
+  answered_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 interface ActiveRunRow {
   id: string
   /** 聊天 run 不挂任务；阶段 run 才有 */
@@ -279,6 +304,27 @@ const mapMessage = (row: MessageRow): Message => ({
   content: row.content,
   error: row.error,
   createdAt: row.created_at,
+})
+
+/** `cards` 行 → `Card`：`options_json` 还原为 `string[]`，枚举列按契约收窄。 */
+const mapCard = (row: CardDbRow): Card => ({
+  id: row.id,
+  runId: row.run_id,
+  taskId: row.task_id,
+  conversationId: row.conversation_id,
+  title: row.title,
+  text: row.text,
+  options: JSON.parse(row.options_json) as string[],
+  key: row.key,
+  version: row.version,
+  status: row.status as CardStatus,
+  delivery: row.delivery as CardDelivery,
+  deliveryRef: row.delivery_ref,
+  optionIndex: row.option_index,
+  answeredBy: row.answered_by as CardAnswerVia | null,
+  answeredAt: row.answered_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
 })
 
 const readWorkflows = (db: DatabaseSync): Workflow[] =>
@@ -473,6 +519,42 @@ const readMessages = (db: DatabaseSync): Message[] =>
       .all() as unknown as MessageRow[]
   ).map(mapMessage)
 
+/** `cards` 投影的列清单（逐列写死，不用 `SELECT *`）。 */
+const CARD_COLUMNS = `id, run_id, task_id, conversation_id, title, text, options_json, key,
+        version, status, delivery, delivery_ref, option_index, answered_by, answered_at,
+        created_at, updated_at`
+
+const readCards = (db: DatabaseSync): Card[] =>
+  (
+    db
+      .prepare(`SELECT ${CARD_COLUMNS} FROM cards ORDER BY created_at, rowid`)
+      .all() as unknown as CardDbRow[]
+  ).map(mapCard)
+
+/** 全部 open 卡（顶部待审批条）：只按状态过滤，按创建时间升序。 */
+const readOpenCards = (db: DatabaseSync): Card[] =>
+  (
+    db
+      .prepare(
+        `SELECT ${CARD_COLUMNS} FROM cards
+         WHERE status = 'open'
+         ORDER BY created_at, rowid`,
+      )
+      .all() as unknown as CardDbRow[]
+  ).map(mapCard)
+
+/** 某个 run 的卡片（含已答 / 已关闭，回答续接与审计用），按创建时间升序。 */
+const readCardsByRun = (db: DatabaseSync, runId: string): Card[] =>
+  (
+    db
+      .prepare(
+        `SELECT ${CARD_COLUMNS} FROM cards
+         WHERE run_id = ?
+         ORDER BY created_at, rowid`,
+      )
+      .all(runId) as unknown as CardDbRow[]
+  ).map(mapCard)
+
 const readMessagesByConversation = (db: DatabaseSync, conversationId: string): Message[] =>
   (
     db
@@ -514,6 +596,7 @@ export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): 
     runs: slice.has('runs') ? toMap(readRuns(db)) : new Map(),
     conversations: slice.has('conversations') ? toMap(readConversations(db)) : new Map(),
     messages: slice.has('messages') ? toMap(readMessages(db)) : new Map(),
+    cards: slice.has('cards') ? toMap(readCards(db)) : new Map(),
     activeTaskIds: readActiveTaskIds(db),
   }
 }
@@ -630,5 +713,9 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readRuntimeWorkloads(db)
     case 'runs.stale-chat':
       return readStaleChatRuns(db)
+    case 'cards.open':
+      return readOpenCards(db)
+    case 'cards.byRun':
+      return readCardsByRun(db, readStringParam(params, 'runId'))
   }
 }

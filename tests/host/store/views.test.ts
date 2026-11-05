@@ -130,6 +130,53 @@ const runNoRuntime = sample.run({
 const conversation = sample.conversation({ id: 'cv-1', title: '排查问题' })
 const message = sample.message({ id: 'ms-1', conversationId: 'cv-1', content: '你好' })
 
+// ---------- cards 样例行（读路径：按状态 / 按 run 过滤与排序） ----------
+
+const CARD_AT_2 = '2025-12-02T00:00:00.000Z'
+const CARD_AT_3 = '2025-12-03T00:00:00.000Z'
+const CARD_AT_4 = '2025-12-04T00:00:00.000Z'
+
+const card = sample.card({
+  id: 'card-1',
+  runId: 'run-queued',
+  createdAt: OLDER_AT,
+  updatedAt: OLDER_AT,
+})
+/** 已答卡：不进 `cards.open`，但属于该 run 的历史。 */
+const cardAnswered = sample.card({
+  id: 'card-answered',
+  runId: 'run-queued',
+  title: '已答',
+  status: 'answered',
+  optionIndex: 1,
+  answeredBy: 'ui',
+  answeredAt: CARD_AT_2,
+  createdAt: CARD_AT_2,
+  updatedAt: CARD_AT_2,
+})
+/** 已关闭卡：不进 `cards.open`，按 run 查时仍可见。 */
+const cardResolved = sample.card({
+  id: 'card-resolved',
+  runId: 'run-running',
+  title: '已关闭',
+  status: 'resolved',
+  createdAt: CARD_AT_3,
+  updatedAt: CARD_AT_3,
+})
+const cardWaiting = sample.card({
+  id: 'card-waiting',
+  runId: 'run-waiting',
+  title: '等待回答',
+  createdAt: CARD_AT_4,
+  updatedAt: CARD_AT_4,
+})
+const cardOpenRunning = sample.card({
+  id: 'card-open-running',
+  runId: 'run-running',
+  title: '运行中卡',
+  createdAt: SAMPLE_AT,
+})
+
 let openDbs: DatabaseSync[] = []
 
 afterEach(() => {
@@ -187,6 +234,11 @@ function seedRunProjection(db: DatabaseSync): void {
     { table: 'runs', key: runNoRuntime.id, row: runNoRuntime },
     { table: 'conversations', key: conversation.id, row: conversation },
     { table: 'messages', key: message.id, row: message },
+    { table: 'cards', key: card.id, row: card },
+    { table: 'cards', key: cardAnswered.id, row: cardAnswered },
+    { table: 'cards', key: cardResolved.id, row: cardResolved },
+    { table: 'cards', key: cardWaiting.id, row: cardWaiting },
+    { table: 'cards', key: cardOpenRunning.id, row: cardOpenRunning },
   ]
   for (const change of changes) writer.apply(change, SAMPLE_AT)
 }
@@ -316,6 +368,24 @@ describe('loadView：按 viewSpec 装载切片', () => {
     expect(chatView.agents.size).toBe(1)
     expect(chatView.runtimes.size).toBe(2)
     expect(chatView.tasks.size).toBe(0)
+  })
+
+  it('cards 切片：装载完整 Card 行并还原 options_json；未声明时不装载', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    const view = loadView(db, ['cards'])
+    expect([...view.cards.keys()]).toEqual([
+      'card-1',
+      'card-answered',
+      'card-resolved',
+      'card-waiting',
+      'card-open-running',
+    ])
+    expect(view.cards.get('card-1')).toEqual(card)
+    expect(view.cards.get('card-answered')).toEqual(cardAnswered)
+    expect(loadView(db, []).cards.size).toBe(0)
   })
 })
 
@@ -540,6 +610,46 @@ describe('queryView：运行历史与负载（T16 读路径收口）', () => {
     for (const view of ['runs.byTask', 'run.byId', 'run.events', 'run.last-event-seq'] as const) {
       const error = captureError(() => queryView(db, view, {}))
       expect((error as StoreError).code).toBe('invalid_input')
+    }
+  })
+})
+
+describe('queryView：卡片审批（cards.open / cards.byRun，M4）', () => {
+  it('cards.open：只含 status=open，按 createdAt 升序；已答 / 已关闭不出现', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    expect(queryView(db, 'cards.open')).toEqual([card, cardWaiting, cardOpenRunning])
+  })
+
+  it('cards.byRun：按 run 过滤（含已答 / 已关闭），按 createdAt 升序', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    expect(queryView(db, 'cards.byRun', { runId: 'run-queued' })).toEqual([card, cardAnswered])
+    expect(queryView(db, 'cards.byRun', { runId: 'run-running' })).toEqual([
+      cardResolved,
+      cardOpenRunning,
+    ])
+    expect(queryView(db, 'cards.byRun', { runId: 'run-waiting' })).toEqual([cardWaiting])
+    expect(queryView(db, 'cards.byRun', { runId: 'run-missing' })).toEqual([])
+  })
+
+  it('空库：两个视图都返回空数组', () => {
+    const db = memory()
+
+    expect(queryView(db, 'cards.open')).toEqual([])
+    expect(queryView(db, 'cards.byRun', { runId: 'run-1' })).toEqual([])
+  })
+
+  it('cards.byRun 缺参数 / 非法参数：StoreError(invalid_input)', () => {
+    const db = memory()
+    for (const params of [undefined, null, 42, {}, { runId: '' }, { runId: 7 }]) {
+      const error = captureError(() => queryView(db, 'cards.byRun', params))
+      expect((error as StoreError).code).toBe('invalid_input')
+      expect((error as StoreError).message).toContain('runId')
     }
   })
 })

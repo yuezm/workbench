@@ -492,6 +492,37 @@ function seedRich(db: DatabaseSync): LegacySeed {
   return { ...entities, runs: expectedRuns() }
 }
 
+/**
+ * 造一条「投影里遗留的卡片行」：v2 没有卡片事实，这里只验证导入语义会把它清掉
+ * （首次迁移清表 / 补迁移后重建）。`run-1` 是 `seedRuns` 已写入的存量 run（外键成立）。
+ */
+function seedStrayCard(db: DatabaseSync): void {
+  db.prepare(
+    `INSERT INTO cards
+       (id, run_id, task_id, conversation_id, title, text, options_json, key, version, status,
+        delivery, delivery_ref, option_index, answered_by, answered_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    'card-legacy',
+    'run-1',
+    'tk-1',
+    null,
+    '旧卡',
+    '',
+    '[]',
+    null,
+    1,
+    'open',
+    'pending',
+    null,
+    null,
+    null,
+    null,
+    seedAt(31),
+    seedAt(31),
+  )
+}
+
 /** 只造实体五表并完成首次迁移（得到「facts 非空」的库，模拟 M1 之后的库）。 */
 function seedMigratedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
   const entities = seedEntities(db)
@@ -516,6 +547,7 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   run_events: 0,
   conversations: 0,
   messages: 0,
+  cards: 0,
 })
 
 describe('importLegacyIfNeeded', () => {
@@ -537,6 +569,7 @@ describe('importLegacyIfNeeded', () => {
       run_events: 5,
       conversations: 0,
       messages: 0,
+      cards: 0,
     })
 
     const facts = allFacts(db)
@@ -705,6 +738,19 @@ describe('importLegacyIfNeeded', () => {
     expect(readProjectionMeta(db)).toEqual({ format: projectionFormat(KERNEL_VERSION), seq: 2 })
   })
 
+  it('旧库遗留 cards 行：首次迁移按导入语义清空，不写卡片事实', () => {
+    const db = memory()
+    seedRich(db)
+    seedStrayCard(db)
+    expect(dumpProjection(db).cards).toHaveLength(1)
+
+    const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+
+    expect(result.counts.cards).toBe(0)
+    expect(allFacts(db).some((fact) => fact.type.startsWith('card.'))).toBe(false)
+    expect(dumpProjection(db).cards).toEqual([])
+  })
+
   it('空库：不产事实、不写投影元信息', () => {
     const db = memory()
     const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
@@ -722,6 +768,7 @@ describe('importLegacyIfNeeded', () => {
       run_events: [],
       conversations: [],
       messages: [],
+      cards: [],
     })
   })
 
@@ -874,6 +921,18 @@ describe('importLegacyIfNeeded：M2 升级补迁移（facts 非空）', () => {
       run_events: previousEvents.map((row) => ({ ...row, created_at: IMPORT_AT })),
     })
     expect(readProjectionMeta(db)).toEqual({ format: projectionFormat(KERNEL_VERSION), seq: 7 })
+  })
+
+  it('旧库遗留 cards 行：补迁移不落投影，ensureProjection 重建后清空', () => {
+    const db = migratedDb()
+    seedStrayCard(db)
+    expect(dumpProjection(db).cards).toHaveLength(1)
+
+    const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+
+    expect(result.counts.cards).toBe(0)
+    expect(ensureProjection(db, realKernel)).toEqual({ rebuilt: true })
+    expect(dumpProjection(db).cards).toEqual([])
   })
 
   it('补迁移幂等：已导入根 / 没有运行事实时都不重复导入', () => {

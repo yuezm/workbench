@@ -30,6 +30,9 @@
  * 随后删除旧表；表不存在（新库 / 已迁移）跳过。
  *
  * 本文件是 **M2 兼容层**：只为「M1 / v2 旧库升级到账本」服务，新库没有任何旧表可读。
+ * M4 的 `cards` 不参与 v2 导入（v2 没有卡片数据，`emptyCounts().cards` 恒 0）：首次迁移的
+ * `writer.clear()` 顺带清掉旧库里可能残留的 `cards` 行，并在导入后断言它为空；补迁移路径
+ * 不落投影，由随后的 `ensureProjection()` 按事实重建把 `cards` 归零。
  * 迁移窗口关闭后整体删除，**M3 再删**（连同 `host/db.ts` 的旧 `runs` 一次性升级）。
  */
 import type { DatabaseSync } from 'node:sqlite'
@@ -479,6 +482,7 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   run_events: 0,
   conversations: 0,
   messages: 0,
+  cards: 0,
 })
 
 /** 一组行 + 表名 → `snapshot.imported` 草稿（payload 按表收窄成判别联合）。 */
@@ -607,6 +611,12 @@ function importEmptyLedger(
     }
 
     verifyCounts(db, counts)
+    // M4：v2 无卡片数据，`cards` 只能由 `card.*` 事实投影。首次迁移清表后它必须为空——
+    // 旧库遗留行属于「导入前的投影残留」，按导入语义清掉，失败则整体回滚。
+    const cards = db.prepare('SELECT COUNT(*) AS n FROM cards').get() as unknown as { n: number }
+    if (cards.n !== 0) {
+      throw new Error(`存量导入校验失败（cards）：v2 无卡片数据，导入后应为空，实际 ${cards.n} 行`)
+    }
     writeProjectionMeta(db, currentProjectionFormat(), lastSeq(db))
   })
   // 旧聊天表的数据已成为导入根：删表完成 M2 清理（重建只依赖事实）

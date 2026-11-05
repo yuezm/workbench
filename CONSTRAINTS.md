@@ -37,7 +37,7 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 
 | 指标                      | 当前                                            | 方向                     |
 | ------------------------- | ----------------------------------------------- | ------------------------ |
-| 项目覆盖率（st/br/fn/ln） | 99.81 / 97.92 / 100 / 100                       | 不得下降                 |
+| 项目覆盖率（st/br/fn/ln） | 99.89 / 98.18 / 100 / 100                       | 不得下降                 |
 | 开发依赖 high 漏洞数      | 3（electron-builder → semver 链等；生产依赖 0） | 不得增加                 |
 | SAST（semgrep）           | 未安装                                          | 接入 CI 后启用，本地不跑 |
 | 打包产物大小              | 待测                                            | 后续补基线               |
@@ -68,3 +68,5 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 - M2 复核：2026-11-05。运行生命周期入账后覆盖率为 99.73 / 97.78 / 100 / 100（改动行 1024/1031 = 99.32%）；`main/ai-workflow/{repository,runner,chat}.ts` 与 `shared/stage-machine.ts` 删除，运行时读路径改投影视图，检测见 [refactor-plan](docs/planning/refactor-plan.md) M2 退出记录。
 - 改本文件的**规则行**时，保留原行、另起一行补充，不要就地改写措辞：`floor-guard` 按行文本匹配规则，措辞改写会被判成 `rule-removed`（收紧也会误报）。
 - M3 复核：2026-11-05。执行器插件化收尾（detect 归插件、`runtimes.executors`、`command` 插件与 `argsTemplate`）后覆盖率为 99.81 / 97.92 / 100 / 100（改动行 693/695 = 99.71%），阈值与门禁强度不变；`pnpm e2e` 6/6。证据与已知边界见 [refactor-plan](docs/planning/refactor-plan.md) M3 退出记录。
+- M4 复核：2026-11-05。审批与通道落地后覆盖率为 99.85 / 98.12 / 100 / 100（改动行 496/496 = 100%），`pnpm e2e` 8/8；证据见 [refactor-plan](docs/planning/refactor-plan.md) M4 退出记录。
+- M5 复核：2026-11-05。三动词 IPC + kernelStore + AppPlugin 落地后覆盖率为 99.89 / 98.18 / 100 / 100（改动行 565/565 = 100%）；证据见 [refactor-plan](docs/planning/refactor-plan.md) M5 退出记录。

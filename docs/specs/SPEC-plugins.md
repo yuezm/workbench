@@ -308,16 +308,25 @@ export interface ChannelSdk {
 ### app
 
 ```ts
+// src/renderer/src/shell/types.ts（M5 定稿）
 export interface AppPlugin {
   id: string
   name: string
   icon: ComponentType<AppIconProps>
   component: ComponentType
-  events?: string[] // 可发事件前缀，如 pomodoro.*
+  /** 可发事件类型（如 pomodoro.completed）；必须同步 src/shared/apps.ts 的白名单 */
+  events?: readonly string[]
 }
 ```
 
-`AppDefinition` 是它的子集，现有两个 app 先按旧契约注册（只多可选 `events`），M5 再统一改名。
+- 注册表在 `renderer/src/shell/registry.ts` 导出 `appPlugins`；`Workbench` 只按清单渲染，外壳零改动。
+- app 只消费内核视图、只发命令：读用 `useKernelView(view, params)` / `useKernelViewState`，
+  写用 `getKernelStore().dispatch(command)`；不得自己起 IPC 订阅、不得轮询、不得在组件里算「执行中」。
+- **app 事件（M5）**：`events` 只是可发类型声明；宿主在 `app.event` 命令入口按
+  `src/shared/apps.ts` 的 `APP_EVENTS` 校验 `appId + eventType`，不在清单里的一律拒绝。
+  命令载荷 `{ appId, eventType, subject, summary?, detail?, link?, dedupeKey? }`，内核产一条
+  `event.received`（`source='app'`、`hops=1`、`originRunId=null`）；M6 才消费事件建任务。
+  当前内置：`pomodoro` → `pomodoro.completed`（计时结束发一条）。
 
 ## 内置插件清单
 

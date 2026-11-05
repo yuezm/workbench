@@ -127,6 +127,19 @@
 - 评审口径（开工即定，见 m5-plan「评审口径」）：聊天命令命名 `chat.*`；宿主仅编排 `runtime.create/update/probe` 与删除前置取消；app 事件只入账不派活；`KERNEL_VERSION` 不递增（投影语义未变）；测试用假 transport / 假执行器。
 - 回滚点：沿用 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db`；M5 不改投影表与 `KERNEL_VERSION`，回滚只需切回 `master` 代码（`commands` 表可留，旧代码不读它）。
 
+## M5 退出记录（2026-11-05）
+
+- 提交链：`3ae3635`（计划/任务清单）→ `eeefced`（三动词契约、聊天命令化、app 事件与内核分支）→ `6fad6a4`（kernelStore 快照续传、AppPlugin 契约、shell 测试替身）→ `f19da18`（命令路由/幂等/宿主视图、事实批次 feed、main/preload 接线、宿主测试迁移）→ `5ef7936`（看板/聊天/设置/番茄迁移、e2e 适配）→ 本记录提交。
+- 门禁：`pnpm check` exit 0；105 文件 / 1330 用例；覆盖率 **99.89 / 98.18 / 100 / 100**（基线 99.85 / 98.12 / 100 / 100）；`check:diffcov` **565/565 = 100%**；`pnpm e2e` **8/8**；`check:floor` / `check:secrets` clean；`pnpm audit` 生产依赖 0 漏洞。
+- IPC 表面：`window.workbench` 只剩 `dispatch / query / subscribe / notify`；`window.aiWorkflow`、`AI_WORKFLOW_*`、`src/shared/ai-workflow-api.ts`、`src/main/ai-workflow/ipc.ts`、`apps/ai-workflow/api.ts` 全部删除。应答走 `{ok,value|error}` 信封，preload 解包失败抛可读 Error。
+- 幂等：`commands` 非投影表（`command_id / first_seq / fact_count / at`）在 `store.dispatch` 同一事务内记录；命中按事实区间回放、零新事实；reject 不缓存；零事实命令也记录；重建不清表。编排命令（`runtime.create/update/probe`）由 `host/commands` 先探测再落事实，同 `commandId` 命中不重复探测。
+- 读路径：DB 视图新增 `tasks.executing`（看板「执行中」只读它）、`runtimes.statuses`、`kernel.seq`；宿主视图 `runtimes.executors / runtimes.detected / runtimes.models` 走同一 `query` 动词（装配根注入，只读、不写库、不发失效）。
+- 推送与客户端：`host/feed` 按 ≤500 条或 16 ms 合并事实批次（`{kind:'facts',seq,types}`），聊天流 `stream / stream-end` 即时旁路；`kernelStore` 启动先 subscribe 缓冲 → `kernel.seq` 快照 → 回放 `seq >` 快照；按事实类型失效、视图按需重取、整窗单订阅；`useKernelView` / `useKernelViewState`（`params=null` 表示暂不订阅）；`AppPlugin` 带 `events`，pomodoro 完成发 `pomodoro.completed`（宿主按 `APP_EVENTS` 白名单校验，产 `event.received`）。
+- 性能/行为：看板不再逐任务拉 `runs.listByTask` 现算执行中；RunLog 删除 1 s 轮询（`run.events` 视图随失效刷新）；聊天流按 `conversationId` 过滤，`end` 后由消息视图失效收尾。
+- 已知边界与偏差：编排命令回放只回放「首次落库的内核事实」（探测事实不回放，`value` 仍取当前投影行，避免重复探测）；`chat.cancel` 对未知对话由内核 `reject not_found`（旧 RPC 入口静默，renderer 只对现存会话调用）；宿主视图不发失效推送（只按需 query，不进 kernelStore 缓存）；`select` 定位与 `WorkflowManager` 关闭弹窗两处防御分支改为「调用方保证」；`scheduler` 5 处竞态防御分支仍未覆盖（公共路径不可达）；`api.d.ts` 只声明 `window.workbench`；M2 兼容层不删（实库仍 v2）；electron-builder 打包冒烟仍未恢复（M2 已知问题）。
+- 回滚点：无投影表/`KERNEL_VERSION` 变化，回滚 = 切回 `master` 代码；`commands` 表可保留（旧代码不读），需要彻底回退时删表即可。
+- 下一步：M6 自动化规则（规则事实 + 设置页编辑、`app`/`manual` 事件源 + cron、Issue 进研发与每日早报模板）。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

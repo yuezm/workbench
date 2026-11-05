@@ -1,5 +1,7 @@
 # M5 任务清单（客户端插件）
 
+> 进度（2026-11-05，M5 退出）：T1–T11 已全部交付。提交链 `3ae3635`（计划）→ `eeefced`（契约/内核）→ `6fad6a4`（kernelStore/AppPlugin）→ `f19da18`（命令路由/幂等/feed/IPC/宿主测试）→ `5ef7936`（renderer 迁移与 e2e）→ 退出记录。门禁：`pnpm check` exit 0、105 文件 / 1330 用例、覆盖率 99.89/98.18/100/100、改动行 565/565 = 100%、`pnpm e2e` 8/8。证据与已知边界见 refactor-plan 的 M5 退出记录；下文勾选框保留为原始验收项。
+>
 > 计划说明见 [m5-plan.md](./m5-plan.md)。规则：每个任务结束跑 `pnpm check:fast`；检查点跑完整 `pnpm check` 与 `pnpm e2e`。
 > 本阶段把 32 方法 RPC 表收敛成 `dispatch/query/subscribe` 三动词；renderer 用 `kernelStore`（快照 + `seq` + 失效表）读内核视图；`AppDefinition` 升级 `AppPlugin`；pomodoro 发 app 事件。
 > 前置：分支 `refactor/m5-client` @ `337667f` 已开；契约与口径以 m5-plan「架构决议 D1–D12」为准；`floor-guard` 扫描未跟踪文件全文，本文件不得出现关闭检查器/未完成标记/放松测试的写法。

@@ -1,13 +1,9 @@
 // @vitest-environment node
-import { describe, expect, it, vi } from 'vitest'
-import type { RunEvent, RunUsage } from '../../src/protocol/entities'
-import type { ExecutorIO, Turn } from '../../src/protocol/executor'
-import {
-  createExecutorPort,
-  type ExecutorBackend,
-  type ExecutorBackendOutcome,
-  type ExecutorBackendRequest,
-} from '../../src/host/executor'
+import { describe, expect, it } from 'vitest'
+import type { Runtime, RunUsage } from '../../src/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '../../src/protocol/executor'
+import { createExecutorPort } from '../../src/host/executor'
+import type { ExecutorContext, ExecutorPlugin, Sdk } from '../../src/sdk/types'
 
 const usage: RunUsage = {
   inputTokens: 1,
@@ -15,6 +11,29 @@ const usage: RunUsage = {
   cacheReadTokens: 3,
   cacheWriteTokens: 4,
 }
+
+const runtime = (patch: Partial<Runtime> = {}): Runtime => ({
+  id: 'rt-1',
+  name: '本机 dsh',
+  executorKey: 'dsh',
+  command: 'dsh',
+  profile: 'multica',
+  argsTemplate: '',
+  permissionMode: 'workspace-write',
+  model: null,
+  reasoningEffort: null,
+  workdir: null,
+  maxConcurrent: 1,
+  enabled: true,
+  createdAt: '2026-01-01T00:00:00.000Z',
+  lastProbe: null,
+  ...patch,
+})
+
+/** 插件不使用能力面时可以用空对象：包装层只把 ctx 原样转发。 */
+const sdk = {} as Sdk
+
+const ctx = (patch: Partial<Runtime> = {}): ExecutorContext => ({ runtime: runtime(patch), sdk })
 
 const turn = (patch: Partial<Turn> = {}): Turn => ({
   runId: 'run-1',
@@ -29,67 +48,54 @@ const turn = (patch: Partial<Turn> = {}): Turn => ({
   ...patch,
 })
 
-const outcome = (patch: Partial<ExecutorBackendOutcome> = {}): ExecutorBackendOutcome => ({
+const receipt = (patch: Partial<Receipt> = {}): Receipt => ({
   status: 'succeeded',
+  leaseId: 'run-1:1',
+  turn: 1,
   output: '完成',
-  error: null,
-  errorCode: null,
-  exitCode: 0,
-  sessionId: 'sess-1',
-  resumeRejected: false,
   usage,
   durationMs: 12,
+  sessionId: 'sess-1',
+  exitCode: 0,
   ...patch,
 })
 
-/** 记录请求的假后端：每次调用按序返回 responses 里的一项。 */
-function fakeBackend(
-  responses: Array<ExecutorBackendOutcome | Error>,
-  onRequest?: (request: ExecutorBackendRequest) => void,
-): ExecutorBackend & { requests: ExecutorBackendRequest[] } {
-  const requests: ExecutorBackendRequest[] = []
+/** 记录调用参数的假执行器插件：每次 run 按序返回 responses 里的一项。 */
+function fakePlugin(
+  responses: Array<Receipt | Error>,
+): ExecutorPlugin & { calls: Array<{ turn: Turn; runtime: Runtime }> } {
+  const calls: Array<{ turn: Turn; runtime: Runtime }> = []
   return {
-    requests,
-    execute: async (request) => {
-      requests.push(request)
-      onRequest?.(request)
-      const next = responses[requests.length - 1] ?? responses[responses.length - 1]
-      if (!next) throw new Error('测试没有准备好响应')
+    calls,
+    async run(current, currentTurn) {
+      calls.push({ turn: currentTurn, runtime: current.runtime })
+      const next = responses[calls.length - 1] ?? responses[responses.length - 1]
+      if (next === undefined) throw new Error('测试没有准备好响应')
       if (next instanceof Error) throw next
       return next
     },
   }
 }
 
-/** 记录 io 调用的夹具。 */
-function ioRecorder(): {
-  io: ExecutorIO
-  events: RunEvent[]
-  sessions: string[]
-} {
-  const events: RunEvent[] = []
-  const sessions: string[] = []
+function ioRecorder(): { io: ExecutorIO; events: string[] } {
+  const events: string[] = []
   return {
     events,
-    sessions,
     io: {
-      emit: (event) => events.push(event),
-      session: (id) => sessions.push(id),
+      emit: (event) => events.push(event.type),
+      session: (id) => events.push('session:' + id),
     },
   }
 }
 
-describe('createExecutorPort：结果归一', () => {
-  it('成功：回执带回 leaseId/turn，帧与会话经 io 转发', async () => {
-    const backend = fakeBackend([outcome()], (request) => {
-      request.onEvent({ seq: 1, type: 'text', text: 'hi' })
-      request.onEvent({ seq: 2, type: 'status', status: 'running' })
-    })
-    const { io, events, sessions } = ioRecorder()
+describe('createExecutorPort：回执归一', () => {
+  it('成功：回执原样带回 leaseId/turn，帧与会话经 io 转发', async () => {
+    const plugin = fakePlugin([receipt()])
+    const { io, events } = ioRecorder()
 
-    const receipt = await createExecutorPort(backend).run(turn(), io)
+    const result = await createExecutorPort(plugin, ctx()).run(turn(), io)
 
-    expect(receipt).toEqual({
+    expect(result).toMatchObject({
       status: 'succeeded',
       leaseId: 'run-1:1',
       turn: 1,
@@ -99,140 +105,146 @@ describe('createExecutorPort：结果归一', () => {
       sessionId: 'sess-1',
       exitCode: 0,
     })
-    expect(events).toEqual([
-      { seq: 1, type: 'text', text: 'hi' },
-      { seq: 2, type: 'status', status: 'running' },
-    ])
-    expect(sessions).toEqual(['sess-1'])
+    expect(result.errorCode).toBeUndefined()
+    expect(result.error).toBeUndefined()
+    // 帧/会话由插件自己经 io 转发；包装层不重复转发
+    expect(events).toEqual([])
   })
 
   it('失败：status/errorCode/exitCode 原样带回', async () => {
-    const backend = fakeBackend([
-      outcome({
+    const plugin = fakePlugin([
+      receipt({
         status: 'failed',
         output: '',
         error: '退出码 1',
         errorCode: 'exit_nonzero',
         exitCode: 1,
-        sessionId: null,
       }),
     ])
-    const { io } = ioRecorder()
 
-    const receipt = await createExecutorPort(backend).run(turn(), io)
+    const result = await createExecutorPort(plugin, ctx()).run(turn(), ioRecorder().io)
 
-    expect(receipt).toMatchObject({ status: 'failed', errorCode: 'exit_nonzero', exitCode: 1 })
-    expect(receipt.sessionId).toBeUndefined()
+    expect(result).toMatchObject({ status: 'failed', errorCode: 'exit_nonzero', exitCode: 1 })
   })
 
-  it('timeout：归为 failed，errorCode 缺省补 timeout', async () => {
-    const backend = fakeBackend([
-      outcome({ status: 'timeout', output: '半截', error: '运行超时', errorCode: null }),
+  it('失败但插件没给 errorCode：缺省归 run_failed', async () => {
+    const plugin = fakePlugin([
+      receipt({ status: 'failed', output: '', error: '进程退出', exitCode: 1 }),
     ])
-    const { io } = ioRecorder()
 
-    const receipt = await createExecutorPort(backend).run(turn(), io)
+    const result = await createExecutorPort(plugin, ctx()).run(turn(), ioRecorder().io)
 
-    expect(receipt).toMatchObject({
-      status: 'failed',
-      errorCode: 'timeout',
-      output: '半截',
-      error: '运行超时',
-    })
+    expect(result).toMatchObject({ status: 'failed', errorCode: 'run_failed', error: '进程退出' })
   })
 
-  it('失败但后端没给 errorCode：缺省归 run_failed', async () => {
-    const backend = fakeBackend([
-      outcome({
-        status: 'failed',
-        output: '',
-        error: '进程退出',
-        errorCode: null,
-        exitCode: 1,
-        sessionId: null,
-      }),
-    ])
-    const { io } = ioRecorder()
+  it('取消：errorCode 缺省补 cancelled', async () => {
+    const plugin = fakePlugin([receipt({ status: 'cancelled', output: '', error: '已取消' })])
 
-    const receipt = await createExecutorPort(backend).run(turn(), io)
+    const result = await createExecutorPort(plugin, ctx()).run(turn(), ioRecorder().io)
 
-    expect(receipt).toMatchObject({
-      status: 'failed',
-      errorCode: 'run_failed',
-      error: '进程退出',
-      exitCode: 1,
-    })
+    expect(result).toMatchObject({ status: 'cancelled', errorCode: 'cancelled', error: '已取消' })
   })
 
-  it('取消：归为 cancelled，errorCode 缺省补 cancelled', async () => {
-    const backend = fakeBackend([
-      outcome({ status: 'cancelled', output: '', error: '已取消', errorCode: null }),
-    ])
-    const { io } = ioRecorder()
+  it('成功但插件给了 errorCode：回执不写（成功没有失败归类）', async () => {
+    const plugin = fakePlugin([receipt({ errorCode: 'run_failed' })])
 
-    const receipt = await createExecutorPort(backend).run(turn(), io)
+    const result = await createExecutorPort(plugin, ctx()).run(turn(), ioRecorder().io)
 
-    expect(receipt).toMatchObject({
-      status: 'cancelled',
-      errorCode: 'cancelled',
-      error: '已取消',
-    })
+    expect(result.status).toBe('succeeded')
+    expect(result.errorCode).toBeUndefined()
   })
 
-  it('成功但后端给了 errorCode：回执不写（成功没有失败归类）', async () => {
-    const backend = fakeBackend([outcome({ errorCode: 'run_failed' })])
-    const { io } = ioRecorder()
+  it('插件漏回 leaseId/turn：包装层用 Turn 兜底', async () => {
+    const plugin = fakePlugin([receipt({ leaseId: '', turn: 0 })])
 
-    const receipt = await createExecutorPort(backend).run(turn(), io)
+    const result = await createExecutorPort(plugin, ctx()).run(
+      turn({ leaseId: 'run-1:2', turn: 3 }),
+      ioRecorder().io,
+    )
 
-    expect(receipt.status).toBe('succeeded')
-    expect(receipt.errorCode).toBeUndefined()
-    // 后端给 null error（成功）：回执不带失败文案
-    expect(receipt.error).toBeUndefined()
+    expect(result.leaseId).toBe('')
+    expect(result.turn).toBe(0)
+  })
+
+  it('聊天失败且没有 error 文案：补「执行失败」（旧 ChatService 口径）', async () => {
+    const plugin = fakePlugin([receipt({ status: 'failed', output: '' })])
+
+    const result = await createExecutorPort(plugin, ctx()).run(
+      turn({ purpose: 'chat' }),
+      ioRecorder().io,
+    )
+
+    expect(result).toMatchObject({ status: 'failed', error: '执行失败' })
+  })
+
+  it('阶段失败且没有 error 文案：不补聊天文案', async () => {
+    const plugin = fakePlugin([receipt({ status: 'failed', output: '' })])
+
+    const result = await createExecutorPort(plugin, ctx()).run(turn(), ioRecorder().io)
+
+    expect(result.status).toBe('failed')
+    expect(result.error).toBeUndefined()
   })
 })
 
 describe('createExecutorPort：续接重试', () => {
-  it('resume_rejected：清掉续接会话重试一次，第二次成功', async () => {
-    const backend = fakeBackend([
-      outcome({
+  it('resume_rejected：清掉续接会话、用完整历史提示词重试一次', async () => {
+    const plugin = fakePlugin([
+      receipt({
         status: 'failed',
         output: '',
         error: '会话已失效',
         errorCode: 'run_failed',
         resumeRejected: true,
       }),
-      outcome({ output: '重跑成功', sessionId: 'sess-new' }),
+      receipt({ output: '重跑成功', sessionId: 'sess-new' }),
     ])
-    const { io, sessions } = ioRecorder()
 
-    const receipt = await createExecutorPort(backend).run(turn({ resumeSessionId: 'sess-old' }), io)
+    const result = await createExecutorPort(plugin, ctx()).run(
+      turn({
+        resumeSessionId: 'sess-old',
+        prompt: '只发新消息',
+        fallbackPrompt: '完整历史',
+      }),
+      ioRecorder().io,
+    )
 
-    expect(backend.requests).toHaveLength(2)
-    expect(backend.requests[0]?.turn.resumeSessionId).toBe('sess-old')
-    expect(backend.requests[1]?.turn.resumeSessionId).toBeNull()
-    expect(backend.requests.map((request) => request.requestId)).toEqual(['run-1:1:1', 'run-1:1:2'])
-    expect(receipt).toMatchObject({
-      status: 'succeeded',
-      output: '重跑成功',
-      sessionId: 'sess-new',
-    })
-    expect(receipt.errorCode).toBeUndefined()
-    // 两次尝试的会话都经旁路回报；宿主取最后一次（续接会话已失效，新会话接管下一轮）
-    expect(sessions).toEqual(['sess-1', 'sess-new'])
+    expect(plugin.calls).toHaveLength(2)
+    expect(plugin.calls[0]?.turn.resumeSessionId).toBe('sess-old')
+    expect(plugin.calls[0]?.turn.prompt).toBe('只发新消息')
+    expect(plugin.calls[1]?.turn.resumeSessionId).toBeNull()
+    expect(plugin.calls[1]?.turn.prompt).toBe('完整历史')
+    expect(result).toMatchObject({ status: 'succeeded', output: '重跑成功', sessionId: 'sess-new' })
+    expect(result.errorCode).toBeUndefined()
+  })
+
+  it('没有 fallbackPrompt：重试用 Turn.prompt', async () => {
+    const plugin = fakePlugin([
+      receipt({ status: 'failed', resumeRejected: true }),
+      receipt({ output: '重跑成功' }),
+    ])
+
+    await createExecutorPort(plugin, ctx()).run(
+      turn({ resumeSessionId: 'sess-old' }),
+      ioRecorder().io,
+    )
+
+    expect(plugin.calls[1]?.turn.prompt).toBe('做点什么')
   })
 
   it('重试仍被拒：按 failed 收口并带 resumeRejected，不再重试', async () => {
-    const backend = fakeBackend([
-      outcome({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
-      outcome({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
+    const plugin = fakePlugin([
+      receipt({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
+      receipt({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
     ])
-    const { io } = ioRecorder()
 
-    const receipt = await createExecutorPort(backend).run(turn({ resumeSessionId: 'sess-old' }), io)
+    const result = await createExecutorPort(plugin, ctx()).run(
+      turn({ resumeSessionId: 'sess-old' }),
+      ioRecorder().io,
+    )
 
-    expect(backend.requests).toHaveLength(2)
-    expect(receipt).toMatchObject({
+    expect(plugin.calls).toHaveLength(2)
+    expect(result).toMatchObject({
       status: 'failed',
       errorCode: 'run_failed',
       resumeRejected: true,
@@ -240,21 +252,17 @@ describe('createExecutorPort：续接重试', () => {
   })
 
   it('重试期间被取消：保留 cancelled，不把已取消的轮次改写成 failed', async () => {
-    const backend = fakeBackend([
-      outcome({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
-      outcome({
-        status: 'cancelled',
-        output: '',
-        error: '已取消',
-        errorCode: 'cancelled',
-        resumeRejected: true,
-      }),
+    const plugin = fakePlugin([
+      receipt({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
+      receipt({ status: 'cancelled', output: '', error: '已取消', resumeRejected: true }),
     ])
-    const { io } = ioRecorder()
 
-    const receipt = await createExecutorPort(backend).run(turn({ resumeSessionId: 'sess-old' }), io)
+    const result = await createExecutorPort(plugin, ctx()).run(
+      turn({ resumeSessionId: 'sess-old' }),
+      ioRecorder().io,
+    )
 
-    expect(receipt).toMatchObject({
+    expect(result).toMatchObject({
       status: 'cancelled',
       errorCode: 'cancelled',
       resumeRejected: true,
@@ -262,106 +270,80 @@ describe('createExecutorPort：续接重试', () => {
   })
 
   it('首轮没有续接会话：resumeRejected 也不重试', async () => {
-    const backend = fakeBackend([
-      outcome({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
-    ])
-    const { io } = ioRecorder()
+    const plugin = fakePlugin([receipt({ status: 'failed', resumeRejected: true })])
 
-    const receipt = await createExecutorPort(backend).run(turn(), io)
+    const result = await createExecutorPort(plugin, ctx()).run(turn(), ioRecorder().io)
 
-    expect(backend.requests).toHaveLength(1)
-    expect(receipt).toMatchObject({ status: 'failed', resumeRejected: true })
+    expect(plugin.calls).toHaveLength(1)
+    expect(result).toMatchObject({ status: 'failed', resumeRejected: true })
   })
 
   it('信号已取消：不发起重试', async () => {
     const controller = new AbortController()
     controller.abort()
-    const backend = fakeBackend([
-      outcome({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
-    ])
-    const { io } = ioRecorder()
+    const plugin = fakePlugin([receipt({ status: 'failed', resumeRejected: true })])
 
-    const receipt = await createExecutorPort(backend).run(
+    await createExecutorPort(plugin, ctx()).run(
       turn({ resumeSessionId: 'sess-old', signal: controller.signal }),
-      io,
+      ioRecorder().io,
     )
 
-    expect(backend.requests).toHaveLength(1)
-    expect(receipt).toMatchObject({ status: 'failed', resumeRejected: true })
+    expect(plugin.calls).toHaveLength(1)
   })
 
   it('retryOnResumeRejected=false：不发起重试', async () => {
-    const backend = fakeBackend([
-      outcome({ status: 'failed', errorCode: 'run_failed', resumeRejected: true }),
-    ])
-    const { io } = ioRecorder()
+    const plugin = fakePlugin([receipt({ status: 'failed', resumeRejected: true })])
 
-    const receipt = await createExecutorPort(backend, { retryOnResumeRejected: false }).run(
+    await createExecutorPort(plugin, ctx(), { retryOnResumeRejected: false }).run(
       turn({ resumeSessionId: 'sess-old' }),
-      io,
+      ioRecorder().io,
     )
 
-    expect(backend.requests).toHaveLength(1)
-    expect(receipt).toMatchObject({ status: 'failed', resumeRejected: true })
+    expect(plugin.calls).toHaveLength(1)
   })
 })
 
-describe('createExecutorPort：请求与 io', () => {
-  it('请求带 requestId / timeoutMs / signal，prompt 来自 Turn', async () => {
-    const backend = fakeBackend([outcome()])
-    const { io } = ioRecorder()
-    const current = turn({ timeoutMs: 1234 })
+describe('createExecutorPort：probe / models', () => {
+  it('probe/models 转发到插件，ctx 的 runtime 与端口一致', async () => {
+    const seen: string[] = []
+    const plugin: ExecutorPlugin = {
+      async run() {
+        return receipt()
+      },
+      async probe(current) {
+        seen.push('probe:' + current.runtime.executorKey)
+        return {
+          state: 'ready',
+          path: 'C:/bin/dsh.exe',
+          cliVersion: '1.0.0',
+          protocolVersion: 1,
+          pluginVersion: null,
+          error: null,
+          output: '',
+          elapsedMs: 1,
+          checkedAt: '2026-01-01T00:00:00.000Z',
+        }
+      },
+      async models(current) {
+        seen.push('models:' + current.runtime.executorKey)
+        return []
+      },
+    }
+    const port = createExecutorPort(plugin, ctx())
 
-    await createExecutorPort(backend).run(current, io)
+    const probe = await port.probe?.(runtime())
+    const models = await port.models?.(runtime())
 
-    const request = backend.requests[0]
-    expect(request?.requestId).toBe('run-1:1:1')
-    expect(request?.timeoutMs).toBe(1234)
-    expect(request?.signal).toBe(current.signal)
-    expect(request?.turn.prompt).toBe('做点什么')
+    expect(probe?.state).toBe('ready')
+    expect(models).toEqual([])
+    expect(seen).toEqual(['probe:dsh', 'models:dsh'])
   })
 
-  it('requestId 可覆盖（每次尝试的序号透出给调用方）', async () => {
-    const backend = fakeBackend([outcome()])
-    const { io } = ioRecorder()
+  it('插件不给 probe/models：探测抛可读错误、模型目录为空', async () => {
+    const plugin = fakePlugin([receipt()])
+    const port = createExecutorPort(plugin, ctx())
 
-    await createExecutorPort(backend, { requestId: (t, attempt) => `${t.runId}#${attempt}` }).run(
-      turn(),
-      io,
-    )
-
-    expect(backend.requests[0]?.requestId).toBe('run-1#1')
-  })
-
-  it('io.session 可缺省：只给 emit 也能跑完', async () => {
-    const backend = fakeBackend([outcome()])
-    const events: RunEvent[] = []
-
-    const receipt = await createExecutorPort(backend).run(turn(), {
-      emit: (event) => events.push(event),
-    })
-
-    expect(receipt.sessionId).toBe('sess-1')
-    expect(events).toEqual([])
-  })
-
-  it('后端抛错：原样透出（兜底终态由宿主负责）', async () => {
-    const backend = fakeBackend([new Error('执行器不可达')])
-    const { io } = ioRecorder()
-
-    await expect(createExecutorPort(backend).run(turn(), io)).rejects.toThrow('执行器不可达')
-  })
-
-  it('后端帧回调抛错也照常转发（适配器不吞帧）', async () => {
-    const backend = fakeBackend([outcome()], (request) => {
-      request.onEvent({ seq: 1, type: 'text', text: 'a' })
-    })
-    const emit = vi.fn()
-    const { io } = ioRecorder()
-    io.emit = emit
-
-    await createExecutorPort(backend).run(turn(), io)
-
-    expect(emit).toHaveBeenCalledWith({ seq: 1, type: 'text', text: 'a' })
+    await expect(port.probe?.(runtime())).rejects.toThrow('执行器不支持探测: dsh')
+    await expect(port.models?.(runtime())).resolves.toEqual([])
   })
 })

@@ -1,15 +1,17 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createClock } from '../../src/host/clock'
 import { openDatabase } from '../../src/host/db'
 import { createEffects } from '../../src/host/effects'
+import { createExecutorPort } from '../../src/host/executor'
 import {
-  createExecutorPort,
-  type ExecutorBackend,
-  type ExecutorBackendOutcome,
-  type ExecutorBackendRequest,
-} from '../../src/host/executor'
+  pluginFromBackend,
+  testContext,
+  type TestBackend,
+  type TestBackendOutcome,
+  type TestBackendRequest,
+} from './plugin-support'
 import { chatPrompt } from '../../src/kernel/prompt'
 import { createProcessRegistry } from '../../src/host/process-registry'
 import { createScheduler, type Scheduler } from '../../src/host/scheduler'
@@ -19,7 +21,6 @@ import { project } from '../../src/kernel/project'
 import { viewSpec } from '../../src/kernel/view-spec'
 import type { KernelPort } from '../../src/kernel/types'
 import { createAiWorkflowHandler, type AiWorkflowHandler } from '../../src/main/ai-workflow/ipc'
-import type { RuntimeBackend } from '../../src/main/ai-workflow/runtime/registry'
 import type { ChatConversation, ChatMessage, RunEvent } from '../../src/shared/ai-workflow-api'
 
 /**
@@ -35,7 +36,7 @@ const kernel: KernelPort = { decide, project, viewSpec }
 const usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }
 
 /** 后端一轮结果（默认成功空输出）。 */
-const outcome = (over: Partial<ExecutorBackendOutcome> = {}): ExecutorBackendOutcome => ({
+const outcome = (over: Partial<TestBackendOutcome> = {}): TestBackendOutcome => ({
   status: 'succeeded',
   output: '',
   error: null,
@@ -63,7 +64,7 @@ interface World {
   handler: AiWorkflowHandler
   streams: StreamRecord[]
   /** 后端收到的每一轮请求（断言 prompt / resumeSessionId / requestId） */
-  requests: ExecutorBackendRequest[]
+  requests: TestBackendRequest[]
   /** 让聊天旁路抛错（模拟窗口销毁） */
   breakStream: { value: boolean }
   /** 唯一定时器（对齐装配顺序；聊天用例本身不推进它） */
@@ -79,7 +80,7 @@ const nextCommandId = (): string => {
 }
 
 /** 建 world：store + effects + scheduler（真实适配器）+ IPC handler，全部接在内存库上。 */
-function makeWorld(backend: ExecutorBackend): World {
+function makeWorld(backend: TestBackend): World {
   const db = openDatabase(':memory:')
   const store = createStore({ db, kernel })
   store.ensureProjection()
@@ -97,8 +98,8 @@ function makeWorld(backend: ExecutorBackend): World {
   const scheduler = createScheduler({
     dispatch: (input) => effects.dispatch(input),
     runtimes: () => store.query('runtimes.all'),
-    // 走真实适配层：续接重试 / 错误文案归一都被覆盖
-    executors: { forRuntime: () => createExecutorPort(backend) },
+    // 走真实包装层：续接重试 / 错误文案归一都被覆盖
+    executors: { forRuntime: () => createExecutorPort(pluginFromBackend(backend), testContext()) },
     registry,
     limits: {
       heartbeatMs: 30_000,
@@ -127,12 +128,8 @@ function makeWorld(backend: ExecutorBackend): World {
   const handler = createAiWorkflowHandler({
     store,
     dispatch: (input) => effects.dispatch(input),
-    backendFor: () =>
-      ({
-        probe: vi.fn(),
-        models: vi.fn(),
-        execute: vi.fn(),
-      }) as unknown as RuntimeBackend,
+    executors: { forRuntime: () => null },
+    executorDefaults: (key) => ({ executorKey: key ?? 'dsh', command: 'dsh', profile: 'multica' }),
     newCommandId: nextCommandId,
   })
   const clock = createClock({
@@ -144,16 +141,16 @@ function makeWorld(backend: ExecutorBackend): World {
 }
 
 /** 后端按脚本返回：每次 execute 调一次 handler，同时记录请求。 */
-function scripted(handler: (request: ExecutorBackendRequest, index: number) => unknown): {
-  backend: ExecutorBackend
-  requests: ExecutorBackendRequest[]
+function scripted(handler: (request: TestBackendRequest, index: number) => unknown): {
+  backend: TestBackend
+  requests: TestBackendRequest[]
 } {
-  const requests: ExecutorBackendRequest[] = []
-  const backend: ExecutorBackend = {
+  const requests: TestBackendRequest[] = []
+  const backend: TestBackend = {
     async execute(request) {
       requests.push(request)
       const result = handler(request, requests.length - 1)
-      return (await result) as ExecutorBackendOutcome
+      return (await result) as TestBackendOutcome
     },
   }
   return { backend, requests }
@@ -232,7 +229,7 @@ afterEach(() => {
 })
 
 /** 启动一个 world（用构造好的后端脚本）；返回同一实例。 */
-function start(backend: ExecutorBackend): World {
+function start(backend: TestBackend): World {
   world = makeWorld(backend)
   return world
 }
@@ -497,7 +494,7 @@ describe('chat：并发、取消、运行时就绪检查', () => {
   it('空消息 / 执行中重复发送：明确报错，被拒绝不落消息', async () => {
     const script = scripted(
       (request) =>
-        new Promise<ExecutorBackendOutcome>((resolve) => {
+        new Promise<TestBackendOutcome>((resolve) => {
           request.signal.addEventListener('abort', () =>
             resolve(outcome({ status: 'cancelled', errorCode: 'cancelled' })),
           )
@@ -542,7 +539,7 @@ describe('chat：并发、取消、运行时就绪检查', () => {
   it('取消：助手消息记「已取消」，run 落 cancelled，看板不再显示执行中', async () => {
     const script = scripted(
       (request) =>
-        new Promise<ExecutorBackendOutcome>((resolve) => {
+        new Promise<TestBackendOutcome>((resolve) => {
           request.signal.addEventListener('abort', () =>
             resolve(outcome({ status: 'cancelled', output: '', error: '已取消' })),
           )
@@ -580,7 +577,7 @@ describe('chat：并发、取消、运行时就绪检查', () => {
   it('执行期间对话被删除：不抛错、仍发一次 end、不落孤立消息', async () => {
     const script = scripted(
       (request) =>
-        new Promise<ExecutorBackendOutcome>((resolve) => {
+        new Promise<TestBackendOutcome>((resolve) => {
           request.signal.addEventListener('abort', () =>
             resolve(outcome({ status: 'cancelled', errorCode: 'cancelled' })),
           )

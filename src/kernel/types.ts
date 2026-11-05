@@ -28,8 +28,8 @@ export type Seq = number
 export type Id = string
 export type Iso = string
 
-/** 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。 */
-export const KERNEL_VERSION = 'm2.0.0'
+/** 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。M3：执行器键取代协议族。 */
+export const KERNEL_VERSION = 'm3.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

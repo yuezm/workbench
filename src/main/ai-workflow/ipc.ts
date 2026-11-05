@@ -13,12 +13,19 @@ import type {
 import { AI_WORKFLOW_CHANNEL } from '../../shared/ai-workflow-api'
 import type { Fact } from '../../kernel/types'
 import type { FactType } from '../../protocol/facts'
+import type { ExecutorPort } from '../../protocol/executor'
 import type { Store } from '../../host/store/index'
 import { detectInstalledRuntimes } from './runtime/detect'
-import type { RuntimeBackend } from './runtime/registry'
 
 /** 纯分发器：方法名 + 参数 → 结果；不含 electron 依赖，便于单测。 */
 export type AiWorkflowHandler = (method: string, args: unknown[]) => unknown
+
+/** 运行时配置的默认值（来自执行器插件 manifest；内核不写产品名） */
+export interface ExecutorDefaults {
+  executorKey: string
+  command: string
+  profile: string
+}
 
 export interface AiWorkflowIpcDeps {
   /** 唯一读入口：配置/任务/运行/聊天都读投影视图 */
@@ -28,8 +35,10 @@ export interface AiWorkflowIpcDeps {
    * 任务进入阶段的 `run.queued` 由内核产出，这里不再补写任何执行记录。
    */
   dispatch: Store['dispatch']
-  /** 协议后端（装配时注入；测试用假实现） */
-  backendFor: (executorKey: string) => RuntimeBackend
+  /** 执行器端口工厂（装配根注入；未知 executorKey 返回 null） */
+  executors: { forRuntime(runtime: Runtime): ExecutorPort | null }
+  /** 执行器默认值（key 缺省取注册表首项；未知 key 抛可读错误） */
+  executorDefaults: (key: string | undefined) => ExecutorDefaults
   /** 命令幂等键生成器（默认随机 UUID；测试可注入确定性值） */
   newCommandId?: () => string
 }
@@ -80,17 +89,34 @@ export function taskById(store: Store, id: string): Task {
   return task
 }
 
-/** 运行时配置里参与启动的部分（探测/模型目录只关心命令与 profile） */
-function targetOf(runtime: Pick<Runtime, 'command' | 'profile'>): {
-  command: string
-  profile: string
-} {
-  return { command: runtime.command, profile: runtime.profile }
-}
-
 export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHandler {
-  const { store, dispatch, backendFor } = deps
+  const { store, dispatch } = deps
   const nextCommandId = deps.newCommandId ?? (() => randomUUID())
+
+  /** 运行时对应的执行器端口；配置引用了未注册的 key 时给可读错误（不静默降级）。 */
+  const runtimePort = (runtime: Runtime): ExecutorPort => {
+    const port = deps.executors.forRuntime(runtime)
+    if (port === null) throw new Error('执行器插件未注册: ' + runtime.executorKey)
+    return port
+  }
+
+  /** 按 manifest 默认值补全运行时草稿（创建前探测用；不落库）。 */
+  const draftRuntime = (input: RuntimeInput, defaults: ExecutorDefaults): Runtime => ({
+    id: 'draft',
+    name: input.name.trim(),
+    executorKey: input.executorKey ?? defaults.executorKey,
+    command: input.command?.trim() || defaults.command,
+    profile: input.profile?.trim() || defaults.profile,
+    argsTemplate: input.argsTemplate ?? '',
+    permissionMode: input.permissionMode ?? 'workspace-write',
+    model: input.model ?? null,
+    reasoningEffort: input.reasoningEffort ?? null,
+    workdir: input.workdir ?? null,
+    maxConcurrent: input.maxConcurrent ?? 1,
+    enabled: input.enabled !== false,
+    createdAt: '',
+    lastProbe: null,
+  })
 
   /**
    * 取消一批执行中的 run（T15/T14b）：`run.cancel` 由内核记 `cancel_requested`，
@@ -121,7 +147,11 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
 
   /** 探测并把结论入账（探测错误不抛：落库成 unavailable 行） */
   const probeAndSave = async (runtime: Runtime): Promise<RuntimeProbe> => {
-    const probe = await backendFor(runtime.executorKey).probe(targetOf(runtime))
+    const port = runtimePort(runtime)
+    if (port.probe === undefined) {
+      throw new Error('执行器不支持探测: ' + runtime.executorKey)
+    }
+    const probe = await port.probe(runtime)
     dispatch({
       type: 'runtime.probed',
       commandId: nextCommandId(),
@@ -134,21 +164,25 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
   const table: Record<string, (a: unknown[]) => unknown> = {
     'runtimes.list': () => store.query('runtimes.all'),
     // 创建前先探测：命令/profile 不通就不落库，避免留下不可用的记录。
-    // 执行器键与默认命令/profile 来自执行器插件 manifest（M3 过渡：T7 换成 registry 注入）。
+    // 执行器键与默认命令/profile 来自执行器插件 manifest（M3）。
     'runtimes.create': async (a) => {
       const input = a[0] as RuntimeInput
-      const form: RuntimeInput = {
-        ...input,
-        executorKey: input.executorKey ?? 'dsh',
-        command: input.command?.trim() || 'dsh',
-        profile: input.profile?.trim() || 'multica',
+      const defaults = deps.executorDefaults(input.executorKey)
+      const draft = draftRuntime(input, defaults)
+      const port = runtimePort(draft)
+      if (port.probe === undefined) {
+        throw new Error('执行器不支持探测: ' + draft.executorKey)
       }
-      const probe = await backendFor(form.executorKey as string).probe({
-        command: form.command as string,
-        profile: form.profile as string,
-      })
+      const probe = await port.probe(draft)
       if (probe.state !== 'ready') {
         throw new Error(`探测失败：${probe.error ?? '未知错误'}`)
+      }
+      const form: RuntimeInput = {
+        ...input,
+        executorKey: draft.executorKey,
+        command: draft.command,
+        profile: draft.profile,
+        argsTemplate: draft.argsTemplate,
       }
       const facts = dispatch({
         type: 'runtime.create',
@@ -200,7 +234,8 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     },
     'runtimes.models': (a) => {
       const runtime = runtimeById(store, a[0] as string)
-      return backendFor(runtime.executorKey).models(targetOf(runtime))
+      const port = runtimePort(runtime)
+      return port.models === undefined ? Promise.resolve([]) : port.models(runtime)
     },
 
     'agents.list': () => store.query('agents.all'),

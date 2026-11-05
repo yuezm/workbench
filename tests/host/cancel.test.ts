@@ -13,7 +13,6 @@ import { createScheduler, type Scheduler, type SchedulerTimer } from '../../src/
 import { createStore, type Store } from '../../src/host/store/index'
 import { openDatabase } from '../../src/host/db'
 import { createAiWorkflowHandler } from '../../src/main/ai-workflow/ipc'
-import type { RuntimeBackend } from '../../src/main/ai-workflow/runtime/registry'
 
 const kernel: KernelPort = { decide, project, viewSpec }
 const AT = '2026-01-01T00:00:00.000Z'
@@ -433,8 +432,12 @@ describe('cancel：删除任务 / 工作流前先取消', () => {
     createAiWorkflowHandler({
       store: world.store,
       dispatch: harnessDispatch(harness),
-      backendFor: () =>
-        ({ probe: vi.fn(), models: vi.fn(), execute: vi.fn() }) as unknown as RuntimeBackend,
+      executors: { forRuntime: () => null },
+      executorDefaults: (key) => ({
+        executorKey: key ?? 'dsh',
+        command: 'dsh',
+        profile: 'multica',
+      }),
       newCommandId: nextCommandId,
     })
 

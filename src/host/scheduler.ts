@@ -32,9 +32,9 @@ export interface SchedulerStore {
   dispatch(input: unknown): DispatchResult
 }
 
-/** 执行器工厂：按运行时配置取端口（main 的 `RuntimeExecutors` 结构上满足）。 */
+/** 执行器工厂：按运行时配置的执行器键取端口；未注册返回 null（M3） */
 export interface SchedulerExecutors {
-  forRuntime(runtime: Runtime): ExecutorPort
+  forRuntime(runtime: Runtime): ExecutorPort | null
 }
 
 /** 调度相关限制：与 `kernel/types` 的 `Limits` 同值，装配根传 `DEFAULT_LIMITS`。 */
@@ -304,6 +304,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     run: RunRow,
     runtime: Runtime,
     controller: AbortController,
+    port: ExecutorPort,
   ): Promise<void> => {
     /** 本次执行的帧缓冲；`framesClosed` 之后（终态已定）不再接受新帧。 */
     let frames: RunEvent[] = []
@@ -436,9 +437,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
     try {
       registry.begin(run.id, now())
-      const receipt = await deps.executors
-        .forRuntime(runtime)
-        .run(turnOf(run, runtime, controller.signal), io)
+      const receipt = await port.run(turnOf(run, runtime, controller.signal), io)
       // 兜底取消已落终态：迟到的回执不再写事实（清理统一走 finally）
       if (finished) return
       // 终态前先关缓冲再 flush：保证 receipt 之前所有帧都已入账（后续帧被拒绝）。
@@ -493,11 +492,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       settleFailed(run, 'runtime_disabled', '运行时已停用')
       return
     }
+    // 执行器插件缺失：配置引用了未注册的 executorKey（M3 D7）。用既有 errorCode
+    // `runtime_missing` 收口，不新增协议取值；文案带 key 便于定位。
+    const port = deps.executors.forRuntime(runtime)
+    if (port === null) {
+      settleFailed(run, 'runtime_missing', '执行器插件未注册: ' + runtime.executorKey)
+      return
+    }
     const controller = new AbortController()
     controllers.set(run.id, controller)
     // 收尾（删控制器 / 唤醒 / 置空闲）统一在 execute 的 finally 里做：取消兜底路径
     // 也要能提前释放执行位，不能在两条路径上各写一份。
-    void execute(run, runtime, controller)
+    void execute(run, runtime, controller, port)
   }
 
   const pump = (): void => {

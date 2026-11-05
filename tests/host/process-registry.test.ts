@@ -8,7 +8,8 @@ import type { KernelPort } from '../../src/kernel/types'
 import type { Agent, RunRow, Runtime, Task } from '../../src/protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../../src/protocol/executor'
 import { openDatabase } from '../../src/host/db'
-import { createExecutorPort, type ExecutorBackend } from '../../src/host/executor'
+import { createExecutorPort } from '../../src/host/executor'
+import { pluginFromBackend, testContext, type TestBackend } from './plugin-support'
 import { createProcessRegistry, type ProcessRegistry } from '../../src/host/process-registry'
 import { createScheduler, type Scheduler, type SchedulerTimer } from '../../src/host/scheduler'
 import { createStore, type Store } from '../../src/host/store/index'
@@ -250,7 +251,7 @@ describe('process_registry × scheduler', () => {
 // ---------- 适配层：pid 回调透传 ----------
 
 describe('createExecutorPort × pid 回调', () => {
-  const backend = (): ExecutorBackend => ({
+  const backend = (): TestBackend => ({
     async execute(request) {
       request.onSpawn?.(777)
       return {
@@ -281,7 +282,7 @@ describe('createExecutorPort × pid 回调', () => {
 
   it('后端 spawn 回调 → io.process（宿主登记 pid）', async () => {
     const received: number[] = []
-    const port = createExecutorPort(backend())
+    const port = createExecutorPort(pluginFromBackend(backend()), testContext())
     const io: ExecutorIO = { emit: () => undefined, process: (pid) => received.push(pid) }
 
     await port.run(turnOf(), io)
@@ -289,7 +290,7 @@ describe('createExecutorPort × pid 回调', () => {
   })
 
   it('io 没提供 process 时回调可空（执行器不崩溃）', async () => {
-    const port = createExecutorPort(backend())
+    const port = createExecutorPort(pluginFromBackend(backend()), testContext())
     const io: ExecutorIO = { emit: () => undefined }
 
     await expect(port.run(turnOf(), io)).resolves.toMatchObject({ status: 'succeeded' })

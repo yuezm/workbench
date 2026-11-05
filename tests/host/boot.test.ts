@@ -24,7 +24,10 @@ const {
   effectsMock,
   createClockMock,
   clockMock,
-  createRuntimeExecutorsMock,
+  pluginEntriesMock,
+  sdkHostMock,
+  createSdkHostMock,
+  createExecutorRegistryMock,
   executorsMock,
   createProcessRegistryMock,
   registryMock,
@@ -111,7 +114,34 @@ const {
   }
   const createClockMock = vi.fn((_deps: unknown) => clockMock)
   const executorsMock = { forRuntime: vi.fn() }
-  const createRuntimeExecutorsMock = vi.fn((_deps: unknown) => executorsMock)
+  /** 注册表项形状：manifest 的 config 默认值就是运行时表单默认值来源 */
+  const pluginEntriesMock = [
+    {
+      key: 'dsh',
+      label: 'DeepSeek Harness',
+      manifest: {
+        id: 'dsh',
+        kind: 'executor',
+        name: 'DeepSeek Harness',
+        version: '1.0.0',
+        capabilities: ['spawn'],
+        config: [
+          { key: 'command', label: '命令', type: 'text', default: 'dsh' },
+          { key: 'profile', label: 'Profile', type: 'text', default: 'multica' },
+        ],
+      },
+      plugin: { run: vi.fn() },
+    },
+  ]
+  const sdkHostMock = {
+    log: vi.fn(),
+    now: vi.fn(() => 0),
+    paths: { sessionRoot: '/tmp/workbench-entry-test/sessions' },
+    config: vi.fn(() => ({})),
+    process: {},
+  }
+  const createSdkHostMock = vi.fn((_options: unknown) => sdkHostMock)
+  const createExecutorRegistryMock = vi.fn((_entries: unknown, _host: unknown) => executorsMock)
   const registryMock = {
     begin: vi.fn(),
     attachPid: vi.fn(),
@@ -153,7 +183,10 @@ const {
     effectsMock,
     createClockMock,
     clockMock,
-    createRuntimeExecutorsMock,
+    pluginEntriesMock,
+    sdkHostMock,
+    createSdkHostMock,
+    createExecutorRegistryMock,
     executorsMock,
     createProcessRegistryMock,
     registryMock,
@@ -175,8 +208,10 @@ vi.mock('../../src/main/ai-workflow/ipc', () => ({
   registerAiWorkflowIpc: registerAiWorkflowIpcMock,
 }))
 vi.mock('../../src/host/db', () => ({ openDatabase: openDatabaseMock }))
-vi.mock('../../src/main/ai-workflow/executor-port', () => ({
-  createRuntimeExecutors: createRuntimeExecutorsMock,
+vi.mock('../../src/plugins/registry', () => ({ executors: pluginEntriesMock }))
+vi.mock('../../src/host/sdk-host', () => ({ createSdkHost: createSdkHostMock }))
+vi.mock('../../src/host/executor-registry', () => ({
+  createExecutorRegistry: createExecutorRegistryMock,
 }))
 vi.mock('../../src/host/store/index', () => ({
   createStore: createStoreMock,
@@ -220,11 +255,8 @@ function appHandler(name: string): () => void {
 type IpcDeps = {
   store: unknown
   dispatch: (input: unknown) => { facts: unknown[] }
-  backendFor: (family: 'dsh') => {
-    probe: unknown
-    models: unknown
-    execute: unknown
-  }
+  executors: { forRuntime: (runtime: { executorKey: string }) => unknown }
+  executorDefaults: (key?: string) => { executorKey: string; command: string; profile: string }
 }
 
 function ipcDeps(): IpcDeps {
@@ -297,6 +329,10 @@ describe('主进程入口装配', () => {
       startupOrder.push('ensureProjection')
       return { rebuilt: false }
     })
+    createExecutorRegistryMock.mockImplementation(() => {
+      startupOrder.push('executors')
+      return executorsMock
+    })
     importLegacyMock.mockImplementation(() => {
       startupOrder.push('importLegacy')
       return {
@@ -344,10 +380,11 @@ describe('主进程入口装配', () => {
     expect(windows[0].loadFile).toHaveBeenCalledTimes(1)
     expect(createTrayMock).toHaveBeenCalledTimes(1)
 
-    // 仓库与执行器共享同一会话根目录（会话续接要落 userData）
-    expect(createRuntimeExecutorsMock).toHaveBeenCalledWith(
+    // 执行器装配：会话根注入 sdk，注册表把清单接成端口工厂
+    expect(createSdkHostMock).toHaveBeenCalledWith(
       expect.objectContaining({ sessionRoot: expect.stringContaining('sessions') }),
     )
+    expect(createExecutorRegistryMock).toHaveBeenCalledWith(pluginEntriesMock, sdkHostMock)
     // IPC 拿到同一个 store（唯一读入口）与统一写入口（effects.dispatch）
     expect(ipcDeps().store).toBe(storeMock)
     ipcDeps().dispatch({ type: 'task.remove', commandId: 'c', id: 't' })
@@ -356,11 +393,13 @@ describe('主进程入口装配', () => {
       commandId: 'c',
       id: 't',
     })
-    // 协议后端工厂接到 IPC，且能按协议族构造出真实后端
-    const backend = ipcDeps().backendFor('dsh')
-    expect(typeof backend.probe).toBe('function')
-    expect(typeof backend.models).toBe('function')
-    expect(typeof backend.execute).toBe('function')
+    // IPC 拿到的执行器工厂与调度器是同一份；默认值来自插件 manifest
+    expect(ipcDeps().executors.forRuntime).toBe(executorsMock.forRuntime)
+    expect(ipcDeps().executorDefaults()).toEqual({
+      executorKey: 'dsh',
+      command: 'dsh',
+      profile: 'multica',
+    })
   })
 
   it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → clock → scheduler → IPC', async () => {
@@ -371,6 +410,7 @@ describe('主进程入口装配', () => {
       'createStore',
       'importLegacy',
       'ensureProjection',
+      'executors',
       'registry',
       'reconcile',
       'clock',
@@ -500,7 +540,7 @@ describe('主进程入口装配', () => {
     expect(createSchedulerMock).not.toHaveBeenCalled()
     expect(createEffectsMock).not.toHaveBeenCalled()
     expect(createClockMock).not.toHaveBeenCalled()
-    expect(createRuntimeExecutorsMock).not.toHaveBeenCalled()
+    expect(createExecutorRegistryMock).not.toHaveBeenCalled()
     expect(windows).toHaveLength(0)
   })
 

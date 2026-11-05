@@ -1,14 +1,14 @@
 // @vitest-environment node
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import type { Runtime, RuntimeProbe } from '../../src/shared/ai-workflow-api'
+import type { Runtime, RuntimeModelOption, RuntimeProbe } from '../../src/shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../src/shared/ai-workflow-api'
 import {
   createAiWorkflowHandler,
   registerAiWorkflowIpc,
   type AiWorkflowHandler,
 } from '../../src/main/ai-workflow/ipc'
-import type { RuntimeBackend } from '../../src/main/ai-workflow/runtime/registry'
+import type { ExecutorPort } from '../../src/protocol/executor'
 import {
   agentById,
   createAgent,
@@ -34,7 +34,7 @@ let notify: Mock<() => void>
 let handle: AiWorkflowHandler
 let probe: ReturnType<typeof vi.fn>
 let models: ReturnType<typeof vi.fn>
-let backend: RuntimeBackend
+let port: ExecutorPort
 
 function readyProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
   return {
@@ -65,7 +65,12 @@ function makeHandler(overrides: Partial<Parameters<typeof createAiWorkflowHandle
   return createAiWorkflowHandler({
     store: world.store,
     dispatch,
-    backendFor: () => backend,
+    executors: { forRuntime: () => port },
+    executorDefaults: (key) => ({
+      executorKey: key ?? 'dsh',
+      command: 'dsh',
+      profile: 'multica',
+    }),
     ...overrides,
   })
 }
@@ -91,10 +96,12 @@ beforeEach(() => {
       defaultThinkingLevel: 'low',
     },
   ])
-  backend = {
-    probe: probe as unknown as RuntimeBackend['probe'],
-    models: models as unknown as RuntimeBackend['models'],
-    execute: vi.fn(),
+  port = {
+    probe: async (runtime) =>
+      (probe as unknown as (target: unknown) => Promise<RuntimeProbe>)(runtime),
+    models: async (runtime) =>
+      (models as unknown as (target: unknown) => Promise<RuntimeModelOption[]>)(runtime),
+    run: vi.fn(),
   }
   handle = makeHandler()
 })
@@ -105,7 +112,9 @@ describe('ai-workflow handler：运行时', () => {
     const runtime = (await handle('runtimes.create', [
       { name: 'ds', command: 'dsh', profile: 'multica' },
     ])) as Runtime
-    expect(probe).toHaveBeenCalledWith({ command: 'dsh', profile: 'multica' })
+    expect(probe).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'dsh', profile: 'multica' }),
+    )
     expect(runtime.lastProbe).toEqual(readyProbe())
     const list = (await handle('runtimes.list', [])) as Array<{ name: string }>
     expect(list.map((r) => r.name)).toEqual(['ds'])
@@ -118,7 +127,9 @@ describe('ai-workflow handler：运行时', () => {
 
   it('create 缺省命令/profile 时用 dsh + multica 探测', async () => {
     await handle('runtimes.create', [{ name: 'ds2' }])
-    expect(probe).toHaveBeenCalledWith({ command: 'dsh', profile: 'multica' })
+    expect(probe).toHaveBeenCalledWith(
+      expect.objectContaining({ command: 'dsh', profile: 'multica' }),
+    )
   })
 
   it('create 探测失败且没有 error 文案：给出「未知错误」', async () => {
@@ -148,7 +159,7 @@ describe('ai-workflow handler：运行时', () => {
       runtime.id,
       { command: 'dsh2', profile: 'p2' },
     ])) as Runtime
-    expect(probe).toHaveBeenCalledWith({ command: 'dsh2', profile: 'p2' })
+    expect(probe).toHaveBeenCalledWith(expect.objectContaining({ command: 'dsh2', profile: 'p2' }))
     expect(updated.command).toBe('dsh2')
     expect(updated.lastProbe?.cliVersion).toBe('9.9.9')
     // 配置事实 + 探测事实两次提交
@@ -192,7 +203,7 @@ describe('ai-workflow handler：运行时', () => {
   it('models 读该运行时的模型目录', async () => {
     const runtime = createRuntime(world, { name: 'ds', command: 'dsh3', profile: 'p3' })
     const list = (await handle('runtimes.models', [runtime.id])) as Array<{ id: string }>
-    expect(models).toHaveBeenCalledWith({ command: 'dsh3', profile: 'p3' })
+    expect(models).toHaveBeenCalledWith(expect.objectContaining({ command: 'dsh3', profile: 'p3' }))
     expect(list[0].id).toBe('magpie/auto%2Fflash')
   })
 
@@ -565,7 +576,12 @@ describe('registerAiWorkflowIpc', () => {
     registerAiWorkflowIpc({
       store: world.store,
       dispatch,
-      backendFor: () => backend,
+      executors: { forRuntime: () => port },
+      executorDefaults: (key) => ({
+        executorKey: key ?? 'dsh',
+        command: 'dsh',
+        profile: 'multica',
+      }),
     })
     expect(ipcMainMock.handle).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, expect.any(Function))
     const h = ipcMainMock.handle.mock.calls[0][1] as (

@@ -19,8 +19,10 @@ import { importLegacyIfNeeded } from '../host/store/import'
 import { registerIpcHandlers } from './ipc'
 import { createTray } from './tray'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
-import { createRuntimeExecutors } from './ai-workflow/executor-port'
-import { createRuntimeBackend, type RuntimeBackend } from './ai-workflow/runtime/registry'
+import { createSdkHost } from '../host/sdk-host'
+import { createExecutorRegistry } from '../host/executor-registry'
+import { executors as pluginExecutors } from '../plugins/registry'
+import type { RuntimeInput } from '../protocol/entities'
 import type { ChatStreamEvent } from '../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
 
@@ -95,14 +97,39 @@ if (app.requestSingleInstanceLock()) {
     // 先导入更安全：空事实 + 存量投影时不会因为指纹失配把存量当投影清掉。
     importLegacyIfNeeded(db, kernel)
     store.ensureProjection()
-    // 协议后端：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
+    // 执行器插件：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
     // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。
     const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
     mkdirSync(sessionsDir, { recursive: true })
-    const runtimeDeps = { sessionRoot: sessionsDir }
-    const backendFor = (key: string): RuntimeBackend => createRuntimeBackend(key, runtimeDeps)
-    // 执行器端口：调度器只认 `ExecutorPort`（host/executor），具体 dsh 实现在这里装配
-    const executors = createRuntimeExecutors(runtimeDeps)
+    // 插件能力面（宿主注入）：spawn/解析/杀树/时钟/会话根；插件只经 sdk 拿副作用。
+    const sdkHost = createSdkHost({ sessionRoot: sessionsDir })
+    // 执行器注册表：按运行时配置的 executorKey 取插件端口；未知 key 由调度器兜底终态。
+    const executors = createExecutorRegistry(pluginExecutors, sdkHost)
+    /**
+     * 运行时表单的默认值来自执行器插件 manifest（内核与宿主都不写产品名）。
+     * 未指定 key 时取注册表首项；key 不存在直接抛可读错误（IPC 原样展示）。
+     */
+    const executorDefaults = (
+      key: string | undefined,
+    ): Required<Pick<RuntimeInput, 'executorKey' | 'command' | 'profile'>> => {
+      const entry =
+        key === undefined
+          ? pluginExecutors[0]
+          : pluginExecutors.find((candidate) => candidate.key === key)
+      if (entry === undefined) throw new Error('执行器插件未注册: ' + String(key))
+      const config = entry.manifest.config ?? []
+      const textDefault = (fieldKey: string): string => {
+        const field = config.find((candidate) => candidate.key === fieldKey)
+        if (field === undefined) return ''
+        const value = 'default' in field ? field.default : undefined
+        return typeof value === 'string' ? value : ''
+      }
+      return {
+        executorKey: entry.key,
+        command: textDefault('command'),
+        profile: textDefault('profile'),
+      }
+    }
     // 启动对账（T13）：先按 process_registry 的残留 pid 终止上次崩溃留下的进程树、清登记，
     // 再 dispatch clock.tick 回收超租约（run.abandoned / executor_lost）与超时（timeout）的 run。
     // 此刻 scheduler 还没装配：直接走 store.dispatch（启动期没有订阅者），随后的
@@ -178,7 +205,8 @@ if (app.requestSingleInstanceLock()) {
     registerAiWorkflowIpc({
       store,
       dispatch: (input) => effects.dispatch(input),
-      backendFor,
+      executors,
+      executorDefaults,
     })
     // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，
     // 再挂唯一定时器（周期回收走 nextWakeAt + clock.tick，不再单独轮询）

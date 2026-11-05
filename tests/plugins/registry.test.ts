@@ -13,6 +13,8 @@ import {
   detectAll,
   detectAllWith,
   executorById,
+  sourceById,
+  sources,
   executors,
   type ExecutorRegistryEntry,
 } from '../../src/plugins/registry'
@@ -130,11 +132,12 @@ describe('通道插件注册表（M4）', () => {
     expect(() => channelById('')).toThrow(/通道插件未注册/)
   })
 
-  it('内置通道顺序固定：in-app 在前、desktop 在后（数组顺序即投递顺序）', () => {
-    expect(channels.map((entry) => entry.key)).toEqual(['in-app', 'desktop'])
-    // in-app 不需要副作用能力（投影即送达）；desktop 只声明 notify
+  it('内置通道顺序固定：in-app 在前、desktop 其次、webhook-channel 最后（数组顺序即投递顺序）', () => {
+    expect(channels.map((entry) => entry.key)).toEqual(['in-app', 'desktop', 'webhook-channel'])
+    // in-app 不需要副作用能力（投影即送达）；desktop 只声明 notify；webhook 通道声明 net
     expect(channelById('in-app').manifest.capabilities).toEqual([])
     expect(channelById('desktop').manifest.capabilities).toEqual(['notify'])
+    expect(channelById('webhook-channel').manifest.capabilities).toEqual(['net'])
   })
 
   it('src/plugins/channels/* 目录与注册表清单双向一致', () => {
@@ -346,5 +349,44 @@ describe('detect 汇总（D8）', () => {
       'goose',
       'crush',
     ])
+  })
+})
+
+describe('来源插件注册表（M7）', () => {
+  const SOURCES_ROOT = resolve(import.meta.dirname, '../../src/plugins/sources')
+
+  it('内置来源清单非空且 key 等于 manifest.id、kind 合法', () => {
+    expect(sources.length).toBeGreaterThan(0)
+    for (const entry of sources) {
+      expect(entry.key).toBe(entry.manifest.id)
+      expect(entry.manifest.kind).toBe('source')
+      expect(
+        entry.manifest.capabilities.every((capability) => CAPABILITIES.includes(capability)),
+      ).toBe(true)
+    }
+  })
+
+  it('webhook 来源声明 net 能力（监听 + 验签都经 sdk.net）', () => {
+    const webhook = sourceById('webhook')
+    expect(webhook.manifest.capabilities).toEqual(['net'])
+    expect(webhook.plugin.start).toBeTypeOf('function')
+  })
+
+  it('未知来源 key 给可读错误（不猜、不降级）', () => {
+    expect(() => sourceById('nope')).toThrow(/来源插件未注册: nope/)
+    expect(() => sourceById('')).toThrow(/来源插件未注册/)
+  })
+
+  it('src/plugins/sources/* 目录与注册表清单双向一致', () => {
+    if (!existsSync(SOURCES_ROOT)) {
+      expect(sources).toEqual([])
+      return
+    }
+    const dirIds = readdirSync(SOURCES_ROOT, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+    const registryIds = sources.map((entry) => entry.key).sort()
+    expect(registryIds).toEqual(dirIds)
   })
 })

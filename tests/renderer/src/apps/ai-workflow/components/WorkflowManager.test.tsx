@@ -22,6 +22,8 @@ function wf(id: string, name: string, stages = 0, description = ''): WorkflowWit
       agentId: null,
       onCompleteStageId: null,
       onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
     })),
   }
 }

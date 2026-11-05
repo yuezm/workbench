@@ -152,6 +152,8 @@ export interface SourcePlugin {
 
 export interface SourceContext {
   sdk: Sdk
+  /** 外部事件入口（M7）：宿主转 `event.received{hops:1}` → 内核产事实并匹配规则 */
+  emit(event: RawEvent): void
   signal: AbortSignal
 }
 
@@ -168,7 +170,7 @@ export interface RawEvent {
 
 定时（cron）不需要 source 插件：规则里的 `cron` 由内核 `clock.tick` 派生事实（见 SPEC-kernel「规则」）。
 
-**M6 / M6.5 边界**：M6 **不落地** source 插件进程——外部事件入口是宿主输入 `event.received`（source 插件与测试注入共用），manual 源 = `rule.trigger` 命令，app 源 = `app.event` 命令；M6.5 事件按线程归并后仍走同一入口（`thread.*` 只是内核事实，不引入第二套事件源）；`SourcePlugin` / `SourceContext` 接口与 `src/plugins/sources/**` 留给 M7 webhook 的首个消费者，避免为没有传输层的来源引入第二套事件入口。
+**M7 落地（`src/plugins/sources/**` + `src/host/sources.ts`）**：内置 `webhook` 来源是真消费者——`start(ctx)` 用 `ctx.sdk.net.listen` 绑 `127.0.0.1`（宿主强制，插件不指定地址），POST + 路径 + 时间戳窗口 + HMAC-SHA256 验签（`ctx.sdk.net.verifyHmacSha256`，`node:crypto` 只在宿主 `host/net.ts`）通过后 `ctx.emit`；失败回 4xx 且零事件；未配置 secret/端口时不监听（no-op dispose + 日志）。来源 hub 按清单启停、单条失败隔离、`statuses()` 供设置页展示；**事件入口仍是唯一的 `event.received` 宿主输入**，manual 源 = `rule.trigger`、app 源 = `app.event` 不变。外部 source 插件经子进程帧 `event` → 适配器 → 同一 `ctx.emit`。
 
 ### executor
 
@@ -298,6 +300,10 @@ export interface ChannelSdk {
   log(line: string): void
   now(): number
   notify(title: string, body: string): void // 需要 manifest 声明 capabilities: ['notify']
+  /** 插件自有配置（M7：manifest 默认值 + 用户设置合并；宿主按通道分别注入） */
+  config<T = Record<string, unknown>>(): T
+  /** 出站 HTTP（M7）：需要 manifest 声明 capabilities: ['net']；宿主未注入时不可用 */
+  net?: ChannelNet
 }
 ```
 
@@ -338,23 +344,32 @@ export interface AppPlugin {
 | -------- | ------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | executor | `dsh`              | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                 | `src/plugins/executors/dsh/`（含 `detect.ts`）                   |
 | executor | `command`          | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`** | `src/plugins/executors/command/`                                 |
+| executor | `remote`           | 远端 Worker 架构位（M7）：无传输时回执 `runtime_missing`，有传输时透传事件/回执；不监听端口              | `src/plugins/executors/remote/`（M7）                            |
 | executor | `claude` / `codex` | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                         | 后续                                                             |
 | source   | `app`              | app 插件发来的事件（经 `app.event` 命令，按 `APP_EVENTS` 白名单校验）                                    | M5 起（事件消费 M6）                                             |
 | source   | `manual`           | 设置里手动触发一条自动化规则（`rule.trigger` 命令，不是独立插件进程）                                    | M6                                                               |
-| source   | `webhook`          | 本机 HTTP + HMAC 验签                                                                                    | M7                                                               |
+| source   | `webhook`          | 本机回环 HTTP（只绑 `127.0.0.1`）+ HMAC-SHA256 验签；通过后 `ctx.emit` → `event.received`                | `src/plugins/sources/webhook/`（M7）                             |
 | source   | `fs`               | 目录变化去抖                                                                                             | 可选                                                             |
 | channel  | `in-app`           | 默认通道：投影即送达，`start` 内把 `pending` 卡片 ack 为 `delivered{ref:'in-app'}`；UI 直接批            | `src/plugins/channels/in-app/`（M4）                             |
 | channel  | `desktop`          | Electron 系统通知：`sdk.notify(title, body)`，标题/正文只作参数；失败落 `card.delivery_failed`           | `src/plugins/channels/desktop/`（M4；原件 `src/main/notify.ts`） |
-| channel  | `webhook`          | 飞书/钉钉/Slack 等（需可达地址）                                                                         | M7                                                               |
+| channel  | `webhook-channel`  | 出站 webhook（M7）：把卡片 POST 到配置地址（单向，不回收答案）；未配置不投递                             | `src/plugins/channels/webhook-channel/`（M7）                    |
 | app      | `pomodoro`         | 计时；可发 `pomodoro.completed` 事件                                                                     | `src/renderer/src/apps/pomodoro`                                 |
 | app      | `ai-workflow`      | 看板/聊天/设置三视图                                                                                     | `src/renderer/src/apps/ai-workflow`                              |
 
-## 外部插件（v2）
+## 外部插件（M7）
 
-- 安装：`userData/plugins/<kind>/<id>/`（`manifest.json` + `plugin.mjs`），设置页「安装插件」只做复制与校验，不执行安装脚本、不装依赖。
-- 运行：**独立子进程**，stdio JSONL，帧 `{ v: 1, type: 'hello' | 'claim' | 'heartbeat' | 'receipt' | 'event' | 'card' | 'answer' }`；宿主按 `capabilities` 过滤环境与接口。
-- 加载顺序：用户目录优先于内置（同名覆盖），manifest 不合法直接拒绝并提示，不静默降级。
-- v1 只开放内置插件；外部插件开关默认关闭。
+- 目录：`userData/plugins/<kind>/<id>/`（`manifest.json` + `plugin.mjs`，固定入口名）。宿主启动时扫描（`host/plugins/discover`），**不做安装向导、不执行安装脚本、不装依赖**——用户放入目录即被发现。
+- 开放范围：**M7 只开放 `source` / `channel` 两类**；`executor` 外部插件需要 probe/models/领取往返，manifest 合法但以 `kind_unsupported` 拒绝并展示原因；`app` 类外部插件同样不开放。
+- 加载顺序：用户目录与内置同 `(kind, id)` 时用户优先（覆盖内置）；插件 id 全局唯一（跨 kind 撞 id 或用户目录内重复 → `duplicate_id` 拒绝）；manifest 非法 / 入口缺失 → 不装载、记日志、设置页「插件」里以 `manifest_error` + 具体原因展示，**不静默降级**。
+- 运行：**独立子进程**（`process.execPath` + `ELECTRON_RUN_AS_NODE=1`，cwd = 插件目录），stdio JSONL 帧 v1（`PLUGIN_HOST_PROTOCOL_VERSION=1`）：
+  - host → plugin：`welcome{pluginId,granted,config}`（收到合法 `hello` 后自动下发，config 含授权后的 secret）、`card`、`shutdown`；
+  - plugin → host：`hello{id,kind,version,capabilities}`、`log`、`event`（source）、`delivered` / `answer`（channel）。
+    单帧 ≤64 KiB（超长行整行丢弃不涨内存）、`hello` 超时 5 s、非 0 退出/崩溃最多重拉 3 次（1 s），之后状态 `error`；`stop` 先 `shutdown` 再 SIGTERM 再 killTree。
+- 环境：子进程环境走**白名单**（`PATH` / `SystemRoot` / `SystemDrive` / `COMSPEC` / `PATHEXT` / `TEMP` / `TMP` / `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` / `HOME` / `SHELL` / `LANG` / `LC_*` / `ELECTRON_RUN_AS_NODE`），**不继承 `process.env` 其他键**；secret 只经 `welcome` 下发，不进命令行/日志/环境。
+- 授权：外部插件默认未启用；manifest 声明的能力须**全部**被授权且 `enabled=true` 才启动，缺一即 `unauthorized`（不启动）。授权是**信任门不是 OS 沙箱**：子进程仍受操作系统权限约束，宿主只控制「启不启动 / 下发哪些 config 与 secret」。
+- 设置与 secret：非密钥设置走第 14 张投影表 `plugin_settings`（`plugins.replaced` 整批替换、版本 +1）；secret 写宿主私有表 `plugin_secrets`（`safeStorage` 加密，不进事实/视图/快照），视图只回 `secretKeys`；`safeStorage` 不可用时写入口拒绝（`unsupported`），不落明文。
+- 设置生效时机：端口 / 地址 / secret 等运行期配置在**应用启动时**装配，修改后需重启应用生效（不引入热重启状态机）。
+- 设置页「插件」：宿主视图 `plugins.all`（磁盘目录 + 设置 + 运行状态）；启停、逐项授权、config 表单（secret 只写）、错误展示；授权勾选只能选 manifest 声明的能力。
 
 ## 插件边界与审查要点
 

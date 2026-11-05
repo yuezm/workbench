@@ -255,6 +255,39 @@ describe('renderer/shell/kernelStore', () => {
     offAgents()
   })
 
+  it('插件设置事实只失效 plugins.all / plugins.settings，不触发全量失效', async () => {
+    const fake = fakeTransport({
+      'plugins.all': [],
+      'plugins.settings': { version: 0, replacedAt: null, settings: [] },
+      'agents.all': [],
+    })
+    const store = createKernelStore(fake.transport)
+    await started(store)
+    const offAll = store.watch('plugins.all', undefined, () => {})
+    const offSettings = store.watch('plugins.settings', undefined, () => {})
+    const offAgents = store.watch('agents.all', undefined, () => {})
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const countOf = (view: ViewId): number =>
+      fake.queries.filter((entry) => entry.view === view).length
+    const allBefore = countOf('plugins.all')
+    const settingsBefore = countOf('plugins.settings')
+    const agentsBefore = countOf('agents.all')
+
+    fake.emit({ kind: 'facts', seq: 2, types: ['plugins.replaced'] })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(countOf('plugins.all')).toBe(allBefore + 1)
+    expect(countOf('plugins.settings')).toBe(settingsBefore + 1)
+    // 未登记会走未知事实全量失效；这里 agents.all 必须不重取
+    expect(countOf('agents.all')).toBe(agentsBefore)
+
+    offAll()
+    offSettings()
+    offAgents()
+  })
+
   it('线程事实与外部事件只失效 thread.byId，不触发其它视图重取', async () => {
     const fake = fakeTransport({ 'thread.byId': null, 'agents.all': [] })
     const store = createKernelStore(fake.transport)

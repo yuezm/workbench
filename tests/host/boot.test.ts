@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { receiptBlockHint } from '../../src/kernel/prompt'
 import { WORKBENCH_EVENT_CHANNEL } from '../../src/protocol/ipc'
+import type { ExternalPluginEntry, ExternalPluginRejection } from '../../src/host/plugins/discover'
 
 /**
  * 主进程入口只做装配：mock 掉 electron 与各模块，验证窗口/托盘/退出流程，
@@ -31,9 +32,12 @@ const {
   createChannelsMock,
   channelsMock,
   channelsEntriesMock,
+  createSourcesMock,
+  sourcesMock,
   createClockMock,
   clockMock,
   pluginEntriesMock,
+  sourcesEntriesMock,
   sdkHostMock,
   createSdkHostMock,
   createExecutorRegistryMock,
@@ -45,6 +49,15 @@ const {
   killPidTreeMock,
   defaultLimitsMock,
   startupOrder,
+  createNetCapabilityMock,
+  netMock,
+  discoverExternalPluginsMock,
+  createPluginSecretsMock,
+  pluginSecretsMock,
+  resolvePluginConfigMock,
+  createExternalChannelPluginMock,
+  createExternalSourcePluginMock,
+  safeStorageMock,
 } = vi.hoisted(() => {
   interface WindowMock {
     webContents: { send: ReturnType<typeof vi.fn>; setWindowOpenHandler: ReturnType<typeof vi.fn> }
@@ -72,6 +85,7 @@ const {
 
   // store 门面：入口用到 ensureProjection / query / nextWakeAt；其余由命令路由使用。
   const storeQueryDefault = (table: string, params?: unknown): unknown => {
+    if (table === 'plugins.settings') return { version: 0, replacedAt: null, settings: [] }
     if (table === 'run.last-event-seq') return 0
     if (table === 'runs.waiting') {
       return [
@@ -131,6 +145,50 @@ const {
   const createChannelsMock = vi.fn((_deps: unknown) => channelsMock)
   /** 内置通道清单（T8 前为空；装配根原样注入 hub） */
   const channelsEntriesMock: unknown[] = []
+  /** 内置来源清单（M7 前为空；装配根原样注入 source hub） */
+  const sourcesEntriesMock: unknown[] = []
+  const sourcesMock = {
+    startAll: vi.fn(async () => undefined),
+    stopAll: vi.fn(async () => undefined),
+    statuses: vi.fn((): unknown[] => []),
+  }
+  const createSourcesMock = vi.fn((_deps: unknown) => sourcesMock)
+  /** M7 能力面 / 外部插件 / secret 的装配根注入（本用例只验证接线，不验实现） */
+  const netMock = { fetch: vi.fn(), listen: vi.fn(), verifyHmacSha256: vi.fn(() => true) }
+  const createNetCapabilityMock = vi.fn((_options?: unknown) => netMock)
+  const discoverExternalPluginsMock = vi.fn(
+    async (
+      _options: unknown,
+    ): Promise<{
+      entries: ExternalPluginEntry[]
+      rejections: ExternalPluginRejection[]
+      missingRoot: boolean
+    }> => ({
+      entries: [],
+      rejections: [],
+      missingRoot: true,
+    }),
+  )
+  const pluginSecretsMock = {
+    listSecretKeys: vi.fn((): string[] => []),
+    hasSecret: vi.fn(() => false),
+    readSecrets: vi.fn((): Record<string, string> => ({})),
+    setSecret: vi.fn(),
+    removeSecret: vi.fn(),
+  }
+  const createPluginSecretsMock = vi.fn((_options: unknown) => pluginSecretsMock)
+  const resolvePluginConfigMock = vi.fn((_manifest: unknown) => ({}) as Record<string, unknown>)
+  const createExternalChannelPluginMock = vi.fn((_entry: unknown, _options: unknown) => ({
+    start: vi.fn(),
+  }))
+  const createExternalSourcePluginMock = vi.fn((_entry: unknown, _options: unknown) => ({
+    start: vi.fn(),
+  }))
+  const safeStorageMock = {
+    isEncryptionAvailable: vi.fn(() => true),
+    encryptString: vi.fn(() => Buffer.from('cipher')),
+    decryptString: vi.fn(() => 'plain'),
+  }
   const clockMock = {
     start: vi.fn(),
     stop: vi.fn(),
@@ -242,9 +300,12 @@ const {
     createChannelsMock,
     channelsMock,
     channelsEntriesMock,
+    createSourcesMock,
+    sourcesMock,
     createClockMock,
     clockMock,
     pluginEntriesMock,
+    sourcesEntriesMock,
     sdkHostMock,
     createSdkHostMock,
     createExecutorRegistryMock,
@@ -256,6 +317,15 @@ const {
     killPidTreeMock,
     defaultLimitsMock,
     startupOrder,
+    createNetCapabilityMock,
+    netMock,
+    discoverExternalPluginsMock,
+    createPluginSecretsMock,
+    pluginSecretsMock,
+    resolvePluginConfigMock,
+    createExternalChannelPluginMock,
+    createExternalSourcePluginMock,
+    safeStorageMock,
   }
 })
 
@@ -263,6 +333,7 @@ vi.mock('electron', () => ({
   app: appMock,
   BrowserWindow: BrowserWindowMock,
   shell: shellMock,
+  safeStorage: safeStorageMock,
 }))
 vi.mock('../../src/main/tray', () => ({ createTray: createTrayMock }))
 vi.mock('../../src/main/ipc', () => ({ registerIpcHandlers: registerIpcHandlersMock }))
@@ -272,8 +343,24 @@ vi.mock('../../src/host/db', () => ({ openDatabase: openDatabaseMock }))
 vi.mock('../../src/plugins/registry', () => ({
   executors: pluginEntriesMock,
   channels: channelsEntriesMock,
+  sources: sourcesEntriesMock,
+  channelById: vi.fn(() => channelsEntriesMock[0]),
+  sourceById: vi.fn(() => sourcesEntriesMock[0]),
   detectAll: detectAllMock,
 }))
+vi.mock('../../src/host/net', () => ({ createNetCapability: createNetCapabilityMock }))
+vi.mock('../../src/host/plugins/discover', () => ({
+  discoverExternalPlugins: discoverExternalPluginsMock,
+}))
+vi.mock('../../src/host/plugins/settings', () => ({
+  createPluginSecrets: createPluginSecretsMock,
+  resolvePluginConfig: resolvePluginConfigMock,
+}))
+vi.mock('../../src/host/plugins/adapters', () => ({
+  createExternalChannelPlugin: createExternalChannelPluginMock,
+  createExternalSourcePlugin: createExternalSourcePluginMock,
+}))
+vi.mock('../../src/host/sources', () => ({ createSources: createSourcesMock }))
 vi.mock('../../src/host/sdk-host', () => ({ createSdkHost: createSdkHostMock }))
 vi.mock('../../src/host/executor-registry', () => ({
   createExecutorRegistry: createExecutorRegistryMock,
@@ -287,7 +374,10 @@ vi.mock('../../src/host/scheduler', () => ({ createScheduler: createSchedulerMoc
 vi.mock('../../src/host/effects', () => ({ createEffects: createEffectsMock }))
 vi.mock('../../src/host/channels', () => ({ createChannels: createChannelsMock }))
 vi.mock('../../src/host/clock', () => ({ createClock: createClockMock }))
-vi.mock('../../src/host/process', () => ({ killPidTree: killPidTreeMock }))
+vi.mock('../../src/host/process', () => ({
+  killPidTree: killPidTreeMock,
+  defaultSpawn: vi.fn(),
+}))
 vi.mock('../../src/host/process-registry', () => ({
   createProcessRegistry: createProcessRegistryMock,
 }))
@@ -331,6 +421,12 @@ type RouterDeps = {
   executors: { forRuntime: (runtime: { executorKey: string }) => unknown }
   executorDefaults: (key?: string) => { executorKey: string; command: string; profile: string }
   hostView: (view: string, params?: Record<string, string>) => unknown
+  /** M7：插件设置编排依赖（entry / view / writeSecrets） */
+  plugins?: {
+    entry: (id: string) => unknown
+    view: (id: string) => unknown
+    writeSecrets: (id: string, patch: Record<string, string | null>) => void
+  }
 }
 
 function routerDeps(): RouterDeps {
@@ -397,8 +493,10 @@ function effectsDeps(): EffectsDeps {
 type ChannelsDeps = {
   store: unknown
   effects: unknown
-  entries: unknown
   sdkHost: unknown
+  entries?: unknown[]
+  configOf?: (entry: unknown) => Record<string, unknown>
+  isEnabled?: (entry: unknown) => boolean
 }
 
 function channelsDeps(): ChannelsDeps {
@@ -683,8 +781,12 @@ describe('主进程入口装配', () => {
     const deps = channelsDeps()
     expect(deps.store).toBe(storeMock)
     expect(deps.effects).toBe(effectsMock)
-    expect(deps.entries).toBe(channelsEntriesMock)
+    // M7：装配根把内置 + 用户目录（此处为空）合并后的清单传进来；空清单语义等价于空数组
+    expect(deps.entries).toEqual([])
     expect(deps.sdkHost).toBe(sdkHostMock)
+    // M7：通道按插件设置决定启停与配置（回调由装配根注入，hub 不读库）
+    expect(typeof deps.configOf).toBe('function')
+    expect(typeof deps.isEnabled).toBe('function')
 
     // 启动即 startAll（补投 pending 卡片）；顺序在 effects 之后、clock/scheduler 之前
     expect(channelsMock.startAll).toHaveBeenCalledTimes(1)
@@ -695,6 +797,59 @@ describe('主进程入口装配', () => {
 
     // effects 的通道 getter 惰性解析到同一个 hub
     expect(effectsDeps().channels?.()).toBe(channelsMock)
+  })
+
+  it('M7 装配：net / 用户插件目录 / secret 存储 / 来源 hub / 插件命令依赖接线', async () => {
+    await loadEntry()
+
+    // 能力面：net 原件注入 sdkHost（插件按 manifest 声明门控）
+    expect(createNetCapabilityMock).toHaveBeenCalledTimes(1)
+    expect(createSdkHostMock.mock.calls[0][0]).toMatchObject({ net: netMock })
+
+    // 用户目录扫描：根 = <userData>/plugins，内置清单来自注册表（executors/channels/sources）
+    expect(discoverExternalPluginsMock).toHaveBeenCalledTimes(1)
+    const discoverOptions = discoverExternalPluginsMock.mock.calls[0][0] as {
+      pluginsRoot: string
+      builtins: Array<{ kind: string; id: string }>
+    }
+    expect(discoverOptions.pluginsRoot.endsWith('plugins')).toBe(true)
+    expect(discoverOptions.builtins).toEqual([{ kind: 'executor', id: 'dsh' }])
+
+    // secret 存储：cipher 由装配根注入（safeStorage 适配），启动不写任何 secret
+    expect(createPluginSecretsMock).toHaveBeenCalledTimes(1)
+    expect(pluginSecretsMock.setSecret).not.toHaveBeenCalled()
+
+    // 来源 hub：通道之后启动；退出先停来源再停通道（见 before-quit 用例）
+    expect(createSourcesMock).toHaveBeenCalledTimes(1)
+    const sourcesDeps = createSourcesMock.mock.calls[0][0] as {
+      entries: unknown[]
+      effects: unknown
+      sdkHost: unknown
+      configOf: (entry: unknown) => Record<string, unknown>
+      isEnabled: (entry: unknown) => boolean
+      log: (line: string) => void
+    }
+    expect(sourcesDeps.entries).toEqual([])
+    expect(sourcesDeps.effects).toBe(effectsMock)
+    expect(sourcesDeps.sdkHost).toBe(sdkHostMock)
+    expect(typeof sourcesDeps.configOf).toBe('function')
+    expect(typeof sourcesDeps.isEnabled).toBe('function')
+    // 来源日志汇到宿主日志通道
+    sourcesDeps.log('来源诊断')
+    expect(sdkHostMock.log).toHaveBeenCalledWith('来源诊断')
+    expect(sourcesMock.startAll).toHaveBeenCalledTimes(1)
+    expect(sourcesMock.startAll.mock.invocationCallOrder[0]).toBeGreaterThan(
+      channelsMock.startAll.mock.invocationCallOrder[0] as number,
+    )
+
+    // 命令路由拿到插件编排依赖：磁盘条目 / 视图行 / secret 写入
+    const plugins = routerDeps().plugins
+    expect(plugins).toBeDefined()
+    expect(plugins?.entry('dsh')).toEqual({
+      manifest: pluginEntriesMock[0].manifest,
+      builtin: true,
+    })
+    expect(plugins?.entry('missing')).toBeNull()
   })
 
   it('hub 尚未挂上时取 effects 的通道 getter：给可读错误而不是 undefined', async () => {
@@ -855,6 +1010,322 @@ describe('主进程入口装配', () => {
     expect(shellMock.openExternal).toHaveBeenCalledWith('https://example.com')
   })
 
+  it('M7 插件目录合并：用户覆盖内置 / 跨 kind 撞 id 拒绝 / 内置通道与来源走注册表', async () => {
+    const builtinChannel = {
+      key: 'webhook-channel',
+      label: 'Webhook 通道',
+      manifest: {
+        id: 'webhook-channel',
+        kind: 'channel',
+        name: 'Webhook 通道',
+        version: '1.0.0',
+        capabilities: ['net'],
+      },
+      plugin: { start: vi.fn() },
+    }
+    const builtinSource = {
+      key: 'webhook',
+      label: 'Webhook 来源',
+      manifest: {
+        id: 'webhook',
+        kind: 'source',
+        name: 'Webhook 来源',
+        version: '1.0.0',
+        capabilities: ['net'],
+      },
+      plugin: { start: vi.fn() },
+    }
+    channelsEntriesMock.push(builtinChannel)
+    sourcesEntriesMock.push(builtinSource)
+    const overrideEntry: ExternalPluginEntry = {
+      kind: 'channel',
+      id: 'webhook-channel',
+      manifest: {
+        id: 'webhook-channel',
+        kind: 'channel',
+        name: '覆盖版 Webhook 通道',
+        version: '2.0.0',
+        capabilities: ['net'],
+      },
+      dir: '/plugins/channel/webhook-channel',
+      entry: '/plugins/channel/webhook-channel/plugin.mjs',
+      overridesBuiltin: true,
+    }
+    const duplicateEntry: ExternalPluginEntry = {
+      kind: 'source',
+      id: 'dsh',
+      manifest: {
+        id: 'dsh',
+        kind: 'source',
+        name: '撞 id 的来源',
+        version: '1.0.0',
+        capabilities: [],
+      },
+      dir: '/plugins/source/dsh',
+      entry: '/plugins/source/dsh/plugin.mjs',
+      overridesBuiltin: false,
+    }
+    discoverExternalPluginsMock.mockResolvedValueOnce({
+      entries: [overrideEntry, duplicateEntry],
+      rejections: [],
+      missingRoot: false,
+    })
+    try {
+      await loadEntry()
+
+      // 用户目录同 kind+id 覆盖内置：内置通道不被启动，改由外部适配器提供
+      expect(createExternalChannelPluginMock).toHaveBeenCalledWith(
+        overrideEntry,
+        expect.objectContaining({ execPath: expect.any(String) }),
+      )
+      const channelEntries = channelsDeps().entries as Array<{ key: string }>
+      expect(channelEntries).toHaveLength(1)
+      expect(channelEntries[0]?.key).toBe('webhook-channel')
+
+      // 内置来源走 registry（不经适配器）
+      const sourceEntries = createSourcesMock.mock.calls[0][0] as {
+        entries: Array<{ key: string }>
+      }
+      expect(sourceEntries.entries.map((entry) => entry.key)).toEqual(['webhook'])
+
+      // 跨 kind 撞 id：保留内置 executor，外部 source 以 manifest_error 出现
+      const views = hostView('plugins.all') as Array<Record<string, unknown>>
+      expect(views.filter((view) => view.id === 'dsh')).toHaveLength(2)
+      expect(
+        views.find((view) => view.id === 'dsh' && view.status === 'manifest_error'),
+      ).toMatchObject({
+        error: '插件 id 已被占用: dsh',
+      })
+      expect(views.find((view) => view.id === 'webhook-channel')).toMatchObject({
+        builtin: false,
+        version: '2.0.0',
+      })
+    } finally {
+      channelsEntriesMock.pop()
+      sourcesEntriesMock.pop()
+    }
+  })
+
+  it('M7 插件设置页分支：停用/未授权/拒绝项 kind 兜底；cipher 与适配器日志走宿主原件', async () => {
+    const externalChannel: ExternalPluginEntry = {
+      kind: 'channel',
+      id: 'ext-channel',
+      manifest: {
+        id: 'ext-channel',
+        kind: 'channel',
+        name: '外部通道',
+        version: '1.0.0',
+        capabilities: ['net'],
+      },
+      dir: '/plugins/channel/ext-channel',
+      entry: '/plugins/channel/ext-channel/plugin.mjs',
+      overridesBuiltin: false,
+    }
+    const externalSource: ExternalPluginEntry = {
+      kind: 'source',
+      id: 'ext-source',
+      manifest: {
+        id: 'ext-source',
+        kind: 'source',
+        name: '外部来源',
+        version: '1.0.0',
+        capabilities: ['net'],
+      },
+      dir: '/plugins/source/ext-source',
+      entry: '/plugins/source/ext-source/plugin.mjs',
+      overridesBuiltin: false,
+    }
+    discoverExternalPluginsMock.mockResolvedValueOnce({
+      entries: [externalChannel, externalSource],
+      rejections: [
+        {
+          path: 'unknown-dir',
+          kind: null,
+          id: null,
+          reason: 'manifest_invalid',
+          detail: '未知目录',
+        },
+      ],
+      missingRoot: false,
+    })
+    // 停用但已授权 → disabled；来源运行中 → ready
+    sourcesMock.statuses.mockReturnValue([{ key: 'ext-source', state: 'running', error: null }])
+    storeMock.query.mockImplementation((view: string) => {
+      if (view === 'plugins.settings') {
+        return {
+          version: 1,
+          replacedAt: '2026-11-05T00:00:00.000Z',
+          settings: [
+            { id: 'ext-channel', kind: 'channel', enabled: false, granted: ['net'], config: {} },
+            { id: 'ext-source', kind: 'source', enabled: true, granted: ['net'], config: {} },
+          ],
+        }
+      }
+      return storeQueryDefault(view)
+    })
+    await loadEntry()
+
+    const views = hostView('plugins.all') as Array<Record<string, unknown>>
+    expect(views.find((view) => view.id === 'ext-channel')?.status).toBe('disabled')
+    expect(views.find((view) => view.id === 'ext-source')?.status).toBe('ready')
+    // kind 缺失的拒绝项按 source 兜底展示
+    expect(views.find((view) => view.id === 'unknown-dir')).toMatchObject({
+      kind: 'source',
+      status: 'manifest_error',
+    })
+
+    // cipher 适配包住 safeStorage；适配器的 log 汇到 sdkHost
+    const secretsOptions = createPluginSecretsMock.mock.calls[0][0] as {
+      cipher: {
+        available(): boolean
+        encrypt(plain: string): string
+        decrypt(value: string): string
+      }
+      log: (line: string) => void
+    }
+    expect(secretsOptions.cipher.available()).toBe(true)
+    expect(secretsOptions.cipher.encrypt('x')).toBe(Buffer.from('cipher').toString('base64'))
+    expect(secretsOptions.cipher.decrypt('Y2lwaGVy')).toBe('plain')
+    secretsOptions.log('诊断')
+    expect(sdkHostMock.log).toHaveBeenCalledWith('诊断')
+    const adapterOptions = createExternalChannelPluginMock.mock.calls[0][1] as {
+      log: (line: string) => void
+    }
+    adapterOptions.log('适配器日志')
+    expect(sdkHostMock.log).toHaveBeenCalledWith('适配器日志')
+  })
+
+  it('M7 插件视图：内置 + 外部插件 + manifest 拒绝项 + 来源错误状态', async () => {
+    const externalChannel: ExternalPluginEntry = {
+      kind: 'channel',
+      id: 'ext-channel',
+      manifest: {
+        id: 'ext-channel',
+        kind: 'channel',
+        name: '外部通道',
+        version: '1.0.0',
+        capabilities: ['net'],
+      },
+      dir: '/plugins/channel/ext-channel',
+      entry: '/plugins/channel/ext-channel/plugin.mjs',
+      overridesBuiltin: false,
+    }
+    const externalSource: ExternalPluginEntry = {
+      kind: 'source',
+      id: 'ext-source',
+      manifest: {
+        id: 'ext-source',
+        kind: 'source',
+        name: '外部来源',
+        version: '1.0.0',
+        capabilities: ['net'],
+      },
+      dir: '/plugins/source/ext-source',
+      entry: '/plugins/source/ext-source/plugin.mjs',
+      overridesBuiltin: false,
+    }
+    discoverExternalPluginsMock.mockResolvedValueOnce({
+      entries: [externalChannel, externalSource],
+      rejections: [
+        {
+          path: 'source/bad',
+          kind: 'source',
+          id: 'bad',
+          reason: 'manifest_invalid',
+          detail: '坏清单',
+        },
+      ],
+      missingRoot: false,
+    })
+    sourcesMock.statuses.mockReturnValue([{ key: 'ext-source', state: 'error', error: '端口占用' }])
+    // 外部来源已启用且授权：覆盖 pluginEnabled/pluginAuthorized 的 true 分支
+    storeMock.query.mockImplementation((view: string) => {
+      if (view === 'plugins.settings') {
+        return {
+          version: 1,
+          replacedAt: '2026-11-05T00:00:00.000Z',
+          settings: [
+            {
+              id: 'ext-source',
+              kind: 'source',
+              enabled: true,
+              granted: ['net'],
+              config: { port: 1 },
+            },
+          ],
+        }
+      }
+      return storeQueryDefault(view)
+    })
+    await loadEntry()
+
+    // 外部插件适配器按合并后的清单组装（granted / config 由设置与授权决定）
+    expect(createExternalChannelPluginMock).toHaveBeenCalledWith(
+      externalChannel,
+      expect.objectContaining({ granted: [], config: {} }),
+    )
+    expect(createExternalSourcePluginMock).toHaveBeenCalledWith(
+      externalSource,
+      expect.objectContaining({ granted: ['net'], config: {} }),
+    )
+    const channelEntries = channelsDeps().entries as Array<{ key: string }>
+    const sourceEntries = createSourcesMock.mock.calls[0][0] as {
+      entries: Array<{ key: string }>
+    }
+    expect(channelEntries.map((entry) => entry.key)).toContain('ext-channel')
+    expect(sourceEntries.entries.map((entry) => entry.key)).toContain('ext-source')
+
+    // 宿主视图：内置 ready / 外部未授权 / 已启用来源 error（带原因）/ 清单拒绝项
+    const views = hostView('plugins.all') as Array<Record<string, unknown>>
+    expect(views.find((view) => view.id === 'dsh')).toMatchObject({
+      builtin: true,
+      status: 'ready',
+    })
+    expect(views.find((view) => view.id === 'ext-channel')).toMatchObject({
+      builtin: false,
+      status: 'unauthorized',
+    })
+    expect(views.find((view) => view.id === 'ext-source')).toMatchObject({
+      status: 'error',
+      error: '端口占用',
+      granted: ['net'],
+    })
+    expect(views.find((view) => view.id === 'bad')).toMatchObject({
+      status: 'manifest_error',
+      error: '坏清单',
+    })
+
+    // 通道 / 来源的启停与配置回调按插件 id 查目录（未知 id 有兜底）
+    const channelDeps = channelsDeps()
+    expect(channelDeps.configOf?.({ key: 'unknown' } as never)).toEqual({})
+    expect(channelDeps.isEnabled?.({ key: 'unknown' } as never)).toBe(true)
+    const sourceDeps = createSourcesMock.mock.calls[0][0] as {
+      configOf: (entry: { key: string }) => Record<string, unknown>
+      isEnabled: (entry: { key: string }) => boolean
+    }
+    expect(sourceDeps.configOf({ key: 'unknown' })).toEqual({})
+    expect(sourceDeps.isEnabled({ key: 'unknown' })).toBe(true)
+  })
+
+  it('M7 插件命令依赖：entry / view / writeSecrets（含安全存储不可用拒绝）', async () => {
+    await loadEntry()
+    const plugins = routerDeps().plugins
+    expect(plugins).toBeDefined()
+    expect(plugins?.view('dsh')).toMatchObject({ id: 'dsh', builtin: true })
+    expect(plugins?.view('missing')).toBeNull()
+
+    plugins?.writeSecrets('dsh', { secret: 'v', other: null })
+    expect(pluginSecretsMock.setSecret).toHaveBeenCalledWith('dsh', 'secret', 'v')
+    expect(pluginSecretsMock.removeSecret).toHaveBeenCalledWith('dsh', 'other')
+
+    pluginSecretsMock.setSecret.mockImplementationOnce(() => {
+      throw new Error('secret_cipher_unavailable: 宿主未提供安全存储')
+    })
+    expect(() => plugins?.writeSecrets('dsh', { secret: 'v' })).toThrow(
+      '无法保存插件 secret：secret_cipher_unavailable',
+    )
+  })
+
   it('before-quit：关窗不再拦截，活跃 run best-effort 取消、通道 stopAll、推送停表', async () => {
     await loadEntry()
 
@@ -863,6 +1334,8 @@ describe('主进程入口装配', () => {
     expect(schedulerMock.cancelAll).toHaveBeenCalledTimes(1)
     // 通道 abort + best-effort dispose（D9）：异步、不阻塞退出
     expect(channelsMock.stopAll).toHaveBeenCalledTimes(1)
+    // M7：来源先停（不再接收外部事件），再停通道
+    expect(sourcesMock.stopAll).toHaveBeenCalledTimes(1)
     // 推送停表：退出后不再排批次（已入账的事实仍完整）
     expect(feedMock.stop).toHaveBeenCalledTimes(1)
     const event = { preventDefault: vi.fn() }

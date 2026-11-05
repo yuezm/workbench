@@ -8,7 +8,7 @@ type Assert<T extends true> = T
 /** 判别联合的 `type` 必须恰好覆盖 COMMAND_NAMES（多一个或少一个都编译失败）。 */
 const unionCoversNames: Assert<Equal<Command['type'], CommandName>> = true
 
-/** 每条命令都带 commandId（幂等键）；M1 配置三组 + 任务四动作，M4 卡片两条，M5 聊天与 app 事件。 */
+/** 每条命令都带 commandId（幂等键）；M1 配置三组 + 任务四动作，M4 卡片两条，M5 聊天与 app 事件，M7 插件设置两条。 */
 const expected = [
   'workflow.create',
   'workflow.update',
@@ -34,6 +34,8 @@ const expected = [
   'app.event',
   'rules.replace',
   'rule.trigger',
+  'plugins.replace',
+  'plugin.set',
   'thread.note',
   'thread.close',
   'thread.bind',

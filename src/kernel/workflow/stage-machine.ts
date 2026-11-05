@@ -8,6 +8,31 @@ export type StageEffect =
 export type StageEvent =
   { type: 'RUN_SUCCEEDED'; runId: string } | { type: 'RUN_FAILED'; runId: string }
 
+/** 阶段退出的描述：`to=null` = 任务完成（移出看板）。 */
+export interface StageExit {
+  /** 离开的阶段 */
+  from: WorkflowStage
+  /** 落地阶段；null = 完成（无下一阶段） */
+  to: WorkflowStage | null
+  /**
+   * 是否由「成功」产生：run 成功流转 / 人工完成 / 向前拖拽为 true；
+   * 打回（run 失败）与删阶段重挂为 false。
+   */
+  succeeded: boolean
+}
+
+/**
+ * 纯函数（M7）：这次离开当前阶段是否算「向前完成」——跨工作流交接的唯一触发判定。
+ *
+ * - 成功流转到更后阶段 / 任务完成 → true；
+ * - 打回（含 `onReject` 配到更后阶段的特例）→ false；
+ * - 拖到更前阶段 / 原地 → false。
+ */
+export function exitsForward(exit: StageExit): boolean {
+  if (!exit.succeeded) return false
+  return exit.to === null || exit.to.position > exit.from.position
+}
+
 /** 读取某阶段「进入时」应产生的效果。 */
 export function entryEffects(stage: WorkflowStage): StageEffect[] {
   switch (stage.entryMode) {

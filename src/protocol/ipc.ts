@@ -21,6 +21,7 @@ import type {
 } from './entities'
 import type { FactType } from './facts'
 import type { RuleSetView } from './rules'
+import type { PluginSettingsView, PluginView } from './plugins'
 
 /** 提交后回给 renderer 的事实摘要（不带 payload；顺序即 seq 顺序）。 */
 export interface FactSummary {
@@ -66,6 +67,10 @@ export interface CommandResults {
   'rules.replace': RuleSetView
   /** M6：立即运行一条规则后新建的任务 */
   'rule.trigger': Task
+  /** M7：整批替换后的插件设置快照 */
+  'plugins.replace': PluginSettingsView
+  /** M7：改一条插件设置后该插件的视图行（含状态与 config；secret 只回键名） */
+  'plugin.set': PluginView
   /** M6.5：线程命令只改线程行，返回值由 UI 重取视图 */
   'thread.note': null
   'thread.close': null

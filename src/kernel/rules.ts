@@ -127,6 +127,8 @@ function buildTask(
     labels: [...(rule.to.task?.labels ?? [])],
     threadId,
     parentTaskId,
+    handoffFromTaskId: null,
+    handoffFromStageId: null,
     createdAt: now,
     updatedAt: now,
   }

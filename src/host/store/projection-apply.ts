@@ -47,6 +47,7 @@ import type {
 } from '../../protocol/entities'
 import type { Change, Iso, ProjectionRow, ProjectionTable } from '../../kernel/types'
 import type { RuleFireRow, RuleSetRow } from '../../protocol/rules'
+import type { PluginSettingsRow } from '../../protocol/plugins'
 import type { ThreadRow } from '../../protocol/thread'
 import { StoreError } from './errors'
 
@@ -205,6 +206,18 @@ const normalizeTask = (row: Task): Task => {
     labels: legacy.labels ?? [],
     threadId: legacy.threadId ?? null,
     parentTaskId: legacy.parentTaskId ?? null,
+    handoffFromTaskId: legacy.handoffFromTaskId ?? null,
+    handoffFromStageId: legacy.handoffFromStageId ?? null,
+  }
+}
+
+/** 规整阶段行的缺省值（M7）：M7 前的 `stage.*` 事实没有交接两列，重建时补 null。 */
+const normalizeStage = (row: WorkflowStage): WorkflowStage => {
+  const legacy = row as Partial<WorkflowStage>
+  return {
+    ...row,
+    handoffWorkflowId: legacy.handoffWorkflowId ?? null,
+    handoffStageId: legacy.handoffStageId ?? null,
   }
 }
 
@@ -286,8 +299,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     tasks: db.prepare(
       `INSERT INTO tasks
          (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
-          external_ref, labels_json, thread_id, parent_task_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          external_ref, labels_json, thread_id, parent_task_id, handoff_from_task_id,
+          handoff_from_stage_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
@@ -300,6 +314,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          labels_json = excluded.labels_json,
          thread_id = excluded.thread_id,
          parent_task_id = excluded.parent_task_id,
+         handoff_from_task_id = excluded.handoff_from_task_id,
+         handoff_from_stage_id = excluded.handoff_from_stage_id,
          created_at = excluded.created_at,
          updated_at = excluded.updated_at`,
     ),
@@ -313,8 +329,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
@@ -322,7 +338,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          entry_mode = excluded.entry_mode,
          agent_id = excluded.agent_id,
          on_complete_stage_id = excluded.on_complete_stage_id,
-         on_reject_stage_id = excluded.on_reject_stage_id`,
+         on_reject_stage_id = excluded.on_reject_stage_id,
+         handoff_workflow_id = excluded.handoff_workflow_id,
+         handoff_stage_id = excluded.handoff_stage_id`,
     ),
     agents: db.prepare(
       `INSERT INTO agents (id, name, description, runtime_id, system_prompt, created_at)
@@ -383,6 +401,15 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          replaced_at = excluded.replaced_at,
          rules_json = excluded.rules_json`,
     ),
+    /** 插件设置单行（id='current'）整行替换：版本与非密钥设置同属一行。 */
+    plugin_settings: db.prepare(
+      `INSERT INTO plugin_settings (id, version, replaced_at, settings_json)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         version = excluded.version,
+         replaced_at = excluded.replaced_at,
+         settings_json = excluded.settings_json`,
+    ),
   }
 
   const runColumns = RUN_FIELDS.map(([, column]) => column).join(', ')
@@ -439,10 +466,11 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     conversations: db.prepare('DELETE FROM conversations WHERE id = ?'),
     messages: db.prepare('DELETE FROM messages WHERE conversation_id = ?'),
     cards: db.prepare('DELETE FROM cards WHERE id = ?'),
-    /** 规则两表与线程表都没有删除事实，语句只为满足 `ProjectionTable` 全集。 */
+    /** 规则两表、线程表与插件设置表都没有删除事实，语句只为满足 `ProjectionTable` 全集。 */
     rule_sets: db.prepare('DELETE FROM rule_sets WHERE id = ?'),
     rule_fires: db.prepare('DELETE FROM rule_fires WHERE id = ?'),
     threads: db.prepare('DELETE FROM threads WHERE id = ?'),
+    plugin_settings: db.prepare('DELETE FROM plugin_settings WHERE id = ?'),
   }
 
   const clearAll = {
@@ -459,6 +487,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     rule_fires: db.prepare('DELETE FROM rule_fires'),
     rule_sets: db.prepare('DELETE FROM rule_sets'),
     threads: db.prepare('DELETE FROM threads'),
+    plugin_settings: db.prepare('DELETE FROM plugin_settings'),
   }
 
   const stageOccupant = db.prepare(
@@ -486,6 +515,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         JSON.stringify(task.labels),
         task.threadId,
         task.parentTaskId,
+        task.handoffFromTaskId,
+        task.handoffFromStageId,
         task.createdAt,
         task.updatedAt,
       )
@@ -495,7 +526,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       upserts.workflows.run(workflow.id, workflow.name, workflow.description, workflow.createdAt)
     },
     workflow_stages: (row, at) => {
-      const stage = row as WorkflowStage
+      const stage = normalizeStage(row as WorkflowStage)
       upserts.workflow_stages.run(
         stage.id,
         stage.workflowId,
@@ -505,6 +536,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.agentId,
         stage.onCompleteStageId,
         stage.onRejectStageId,
+        stage.handoffWorkflowId,
+        stage.handoffStageId,
         at,
       )
     },
@@ -592,6 +625,15 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         fire.taskId,
       )
     },
+    plugin_settings: (row) => {
+      const settings = row as PluginSettingsRow
+      upserts.plugin_settings.run(
+        settings.id,
+        settings.version,
+        settings.replacedAt,
+        JSON.stringify(settings.settings),
+      )
+    },
     threads: (row) => {
       const thread = row as ThreadRow
       insertThread.run(...THREAD_FIELDS.map(([field]) => threadValue(field, thread)))
@@ -651,6 +693,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     clearAll.rule_fires.run()
     clearAll.rule_sets.run()
     clearAll.threads.run()
+    clearAll.plugin_settings.run()
   }
 
   return { apply, applyAll, clear }

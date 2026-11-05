@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { Capability, PluginManifest } from '../../src/protocol/manifest'
 import { createSdk } from '../../src/sdk'
-import type { SdkHost, Spawned } from '../../src/sdk/types'
+import type { NetCapability, SdkHost, Spawned } from '../../src/sdk/types'
 
 /**
  * sdk 能力门控（M3 T4 / M4 T6）：`createSdk` 只做「按 manifest 门控 + 原样转发」，
@@ -24,6 +24,15 @@ function manifestOf(capabilities: readonly Capability[], id = 'dsh'): PluginMani
   return { id, kind: 'executor', name: 'dsh', version: '1.0.0', capabilities }
 }
 
+/** 假网络原件（M7）：三个方法都是 spy，断言只关心是否原样转发。 */
+function netOf(): NetCapability {
+  return {
+    fetch: vi.fn(async () => ({ status: 200, headers: {}, body: 'ok' })),
+    listen: vi.fn(async () => ({ port: 47_615, close: async () => undefined })),
+    verifyHmacSha256: vi.fn(() => true),
+  }
+}
+
 /** 假宿主原件：每个能力都是 spy，断言只关心 createSdk 是否原样转发。 */
 function hostOf(): SdkHost {
   return {
@@ -32,6 +41,7 @@ function hostOf(): SdkHost {
     paths: { sessionRoot: 'C:/data/ai-workflow/sessions' },
     config: <T = Record<string, unknown>>(): T => ({ mode: 'dsh', timeoutMs: 60_000 }) as T,
     notify: vi.fn(),
+    net: netOf(),
     process: {
       spawn: vi.fn(() => spawned),
       resolve: vi.fn(() => ({ path: 'C:/bin/dsh.cmd', error: null })),
@@ -118,6 +128,49 @@ describe('createSdk notify 能力门控（M4 T6）', () => {
   })
 })
 
+describe('createSdk net 能力门控（M7）', () => {
+  it('未声明 net：访问 sdk.net 抛 capability_not_declared: net', () => {
+    const sdk = createSdk(hostOf(), manifestOf([]))
+    expect(() => sdk.net).toThrow(new Error('capability_not_declared: net'))
+    // getter 不缓存拒绝结果：每次访问都抛
+    expect(() => sdk.net).toThrow('capability_not_declared: net')
+  })
+
+  it('未声明 net 只影响 net：process/notify 等已声明能力照常可用', () => {
+    const host = hostOf()
+    const sdk = createSdk(host, manifestOf(['spawn', 'notify']))
+    expect(() => sdk.net).toThrow('capability_not_declared: net')
+    expect(sdk.process).toBe(host.process)
+    expect(sdk.notify).toBe(host.notify)
+  })
+
+  it('声明 net 后原样透传 fetch/listen/verifyHmacSha256', async () => {
+    const host = hostOf()
+    const sdk = createSdk(host, manifestOf(['net']))
+    expect(sdk.net).toBe(host.net)
+
+    await expect(sdk.net.fetch('http://127.0.0.1:1/x', { timeoutMs: 5 })).resolves.toEqual({
+      status: 200,
+      headers: {},
+      body: 'ok',
+    })
+    expect(host.net?.fetch).toHaveBeenCalledWith('http://127.0.0.1:1/x', { timeoutMs: 5 })
+    expect(sdk.net.verifyHmacSha256('s', 'm', '0'.repeat(64))).toBe(true)
+  })
+
+  it('声明 net 但宿主没有原件：调用即 capability_unavailable（声明 ≠ 宿主支持）', () => {
+    const bare: SdkHost = { ...hostOf(), net: undefined }
+    const sdk = createSdk(bare, manifestOf(['net']))
+    expect(() => sdk.net.fetch('http://127.0.0.1:1/x')).toThrow('capability_unavailable: net')
+    expect(() => sdk.net.listen(0, async () => ({ status: 200 }))).toThrow(
+      'capability_unavailable: net',
+    )
+    expect(() => sdk.net.verifyHmacSha256('s', 'm', '0'.repeat(64))).toThrow(
+      'capability_unavailable: net',
+    )
+  })
+})
+
 describe('createSdk 能力面', () => {
   it('log 加插件 id 前缀（前缀取自 manifest，不是写死的）', () => {
     const host = hostOf()
@@ -145,11 +198,18 @@ describe('createSdk 能力面', () => {
     expect(sdk.config<{ mode: string }>().mode).toBe('dsh')
   })
 
-  it('最小面：只有 log/now/paths/config/process/notify，不提供 emit/fs/net', () => {
-    const sdk = createSdk(hostOf(), manifestOf(['spawn']))
-    expect(Object.keys(sdk).sort()).toEqual(['config', 'log', 'notify', 'now', 'paths', 'process'])
+  it('能力面：log/now/paths/config/process/net/notify，不提供 emit/fs', () => {
+    const sdk = createSdk(hostOf(), manifestOf(['spawn', 'net']))
+    expect(Object.keys(sdk).sort()).toEqual([
+      'config',
+      'log',
+      'net',
+      'notify',
+      'now',
+      'paths',
+      'process',
+    ])
     expect('emit' in sdk).toBe(false)
     expect('fs' in sdk).toBe(false)
-    expect('net' in sdk).toBe(false)
   })
 })

@@ -92,6 +92,8 @@ const commandSamples: Command[] = [
     source: 'github',
     externalRef: 'issue-1',
   },
+  { commandId: 'c28', type: 'plugins.replace', settings: [] },
+  { commandId: 'c29', type: 'plugin.set', pluginId: 'webhook', enabled: true },
 ]
 
 const hostSamples: Input[] = [
@@ -122,7 +124,7 @@ const hostSamples: Input[] = [
 const samples: Input[] = [...commandSamples, ...hostSamples]
 
 const expected: Record<Input['type'], ProjectionTable[]> = {
-  'workflow.create': ['agents'],
+  'workflow.create': ['agents', 'workflows', 'workflow_stages'],
   'workflow.update': ['workflows', 'workflow_stages', 'agents', 'tasks'],
   'workflow.remove': ['workflows', 'workflow_stages', 'tasks', 'runs'],
   'agent.create': ['runtimes'],
@@ -204,6 +206,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   ],
   'rules.replace': ['rule_sets', 'workflows', 'workflow_stages'],
   'rule.trigger': ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'plugins.replace': ['plugin_settings'],
+  'plugin.set': ['plugin_settings'],
   'thread.note': ['threads'],
   'thread.close': ['threads'],
   'thread.bind': ['threads'],
@@ -214,8 +218,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 27 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(27)
+  it('覆盖 29 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(29)
     expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)

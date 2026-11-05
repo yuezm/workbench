@@ -47,6 +47,8 @@ const view = (seed: Seed = {}): View => ({
   rulesVersion: 0,
   ruleSetReplacedAt: null,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 /** 确定性 id 生成器：每类实体独立计数，测试可断言具体 id。 */

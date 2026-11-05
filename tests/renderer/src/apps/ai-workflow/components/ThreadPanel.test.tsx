@@ -22,6 +22,8 @@ const parentTask: Task = {
   labels: [],
   threadId: 'th1',
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: 't',
   updatedAt: 't',
 }
@@ -39,6 +41,8 @@ const doneTask: Task = {
   id: 'p2',
   title: '已完成的根任务',
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   status: 'completed',
 }
 

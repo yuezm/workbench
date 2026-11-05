@@ -47,6 +47,10 @@ export interface ChannelsOptions {
   now?: () => Iso
   /** 单通道单次投递的超时（毫秒）；默认 2 s，测试可注入更短值 */
   timeoutMs?: number
+  /** 按通道合并后的配置（M7：manifest 默认值 + 用户设置；缺省返回空对象） */
+  configOf?: (entry: ChannelRegistryEntry) => Record<string, unknown>
+  /** 是否启用该通道（M7：用户关闭的通道不启动；缺省全部启用） */
+  isEnabled?: (entry: ChannelRegistryEntry) => boolean
 }
 
 export interface Channels {
@@ -225,6 +229,8 @@ export function createChannels(options: ChannelsOptions): Channels {
     if (started || stopping) return
     started = true
     for (const entry of entries) {
+      // M7：用户停用的通道不启动（保持 registry 顺序，不影响其它通道）
+      if (options.isEnabled !== undefined && !options.isEnabled(entry)) continue
       const runtime: ChannelRuntime = {
         key: entry.key,
         abort: new AbortController(),
@@ -233,8 +239,13 @@ export function createChannels(options: ChannelsOptions): Channels {
         started: false,
       }
       runtimes.set(entry.key, runtime)
+      const channelHost: SdkHost = {
+        ...sdkHost,
+        // 每条通道只拿到自己的配置（不读别人的 config，也拿不到 secret 明文以外的设置）
+        config: <T = Record<string, unknown>>() => (options.configOf?.(entry) ?? {}) as T,
+      }
       const context: ChannelContext = {
-        sdk: createSdk(sdkHost, entry.manifest),
+        sdk: createSdk(channelHost, entry.manifest),
         onCard: (handler) => {
           runtime.handlers.add(handler)
           return () => {

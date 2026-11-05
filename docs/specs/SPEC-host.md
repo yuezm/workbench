@@ -38,19 +38,20 @@ src/
 
 ## 宿主职责
 
-| 模块                | 职责                                                                                                                                                                                                                                                                                                |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `boot`              | 单实例锁、开库、校验指纹并重建、装配插件、启动 sources/channels、挂单定时器、建窗口与托盘（M6 无 source 插件进程，事件入口为宿主输入）                                                                                                                                                              |
-| `store`             | 每个输入：按 `viewSpec` 装载切片 → `decide` → 事务内追加事实 + 应用 `project` 变更 → 更新 `projection_meta`                                                                                                                                                                                         |
-| `clock`             | 只挂一个定时器：`nextWakeAt` 到点发 `clock.tick`；M6 起 `nextWakeAt` 纳入 cron 规则下一次到点，tick 内到点建任务并记 `rule.fired`；窗口不可见时不降频（托盘常驻）                                                                                                                                   |
-| `effects`           | 提交后分发：新 `run.queued` 唤醒调度器；`card.opened/updated` 交给通道 hub（fire-and-forget、异常隔离）；事实增量批量推 renderer                                                                                                                                                                    |
-| `channels`          | 通道 hub（M4）：按 `plugins/registry.ts` 的 `channels` 顺序启停；分发 `card.opened/updated`、启动补投 `delivery='pending'` 的 open 卡、承接 `delivered` / `answer` 回调；首个成功回 `card.delivered{ref}`，全失败回 `card.delivery_failed`；投递不阻塞写路径                                        |
-| `scheduler`         | 按运行时（`maxConcurrent`）向内核 `run.claim`，领取后按 `runtime.executorKey` 调执行器插件 `run(turn)`；回执转交内核；不自己判断派给谁；线程串行由内核保证                                                                                                                                          |
-| `executor-registry` | 按 `runtime.executorKey` 从装配根注入的插件清单取执行器端口；未知 key 返回 `null`（不猜、不降级），由调度器落兜底终态                                                                                                                                                                               |
-| `thread-context`    | **由内核纯函数 `kernel/thread-context.ts` 派生**（宿主不另写一份）：拼提示词前按事实派生「线程上下文」：元信息、任务树、最近 3 条终态运行摘要、未决卡片、最近 10 条笔记、资料清单；同事实必得同文本，≤6000 码点，超出按时间倒序截断并标注。宿主只按 `viewSpec` 装载 `threads/tasks/runs/cards` 切片 |
-| `reconcile`         | 启动与定时对账：`claimed` 超租约 → 先终止残留子进程再 `run.abandoned`；`waiting` 保留卡片；`waiting` 且无 open 卡的历史 run 补 `run.host_settled{cancelled}`（D13）；中断的聊天轮次落错误消息                                                                                                       |
-| `artifacts`         | 事件资料、大输出尾部；路径 `userData/artifacts/<eventId>.md`，保留 30 天                                                                                                                                                                                                                            |
-| `plugins`           | 注册表装载、配置读写、能力授权、失败隔离（插件异常不拖垮宿主）                                                                                                                                                                                                                                      |
+| 模块                | 职责                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `boot`              | 单实例锁、开库、校验指纹并重建、装配插件（内置 + 用户目录）、启动 sources/channels、挂单定时器、建窗口与托盘（M7 起 source 插件进程真实启用）                                                                                                                                                                                                                   |
+| `store`             | 每个输入：按 `viewSpec` 装载切片 → `decide` → 事务内追加事实 + 应用 `project` 变更 → 更新 `projection_meta`                                                                                                                                                                                                                                                     |
+| `clock`             | 只挂一个定时器：`nextWakeAt` 到点发 `clock.tick`；M6 起 `nextWakeAt` 纳入 cron 规则下一次到点，tick 内到点建任务并记 `rule.fired`；窗口不可见时不降频（托盘常驻）                                                                                                                                                                                               |
+| `effects`           | 提交后分发：新 `run.queued` 唤醒调度器；`card.opened/updated` 交给通道 hub（fire-and-forget、异常隔离）；事实增量批量推 renderer                                                                                                                                                                                                                                |
+| `channels`          | 通道 hub（M4/M7）：按注入清单顺序启停（用户停用/未授权的通道不启动）；分发 `card.opened/updated`、启动补投 `delivery='pending'` 的 open 卡、承接 `delivered` / `answer` 回调；首个成功回 `card.delivered{ref}`，全失败回 `card.delivery_failed`；每条通道只拿到自己的 config                                                                                    |
+| `sources`           | 来源 hub（M7）：按注入清单启停；`ctx.emit(event)` → `event.received{hops:1,originRunId:null}`（唯一事件入口不变）；单条来源启动失败只隔离并记状态；`statuses()` 供 `plugins.all` 展示；退出先停来源再停通道                                                                                                                                                     |
+| `scheduler`         | 按运行时（`maxConcurrent`）向内核 `run.claim`，领取后按 `runtime.executorKey` 调执行器插件 `run(turn)`；回执转交内核；不自己判断派给谁；线程串行由内核保证                                                                                                                                                                                                      |
+| `executor-registry` | 按 `runtime.executorKey` 从装配根注入的插件清单取执行器端口；未知 key 返回 `null`（不猜、不降级），由调度器落兜底终态                                                                                                                                                                                                                                           |
+| `thread-context`    | **由内核纯函数 `kernel/thread-context.ts` 派生**（宿主不另写一份）：拼提示词前按事实派生「线程上下文」：元信息、任务树、最近 3 条终态运行摘要、未决卡片、最近 10 条笔记、资料清单；同事实必得同文本，≤6000 码点，超出按时间倒序截断并标注。宿主只按 `viewSpec` 装载 `threads/tasks/runs/cards` 切片                                                             |
+| `reconcile`         | 启动与定时对账：`claimed` 超租约 → 先终止残留子进程再 `run.abandoned`；`waiting` 保留卡片；`waiting` 且无 open 卡的历史 run 补 `run.host_settled{cancelled}`（D13）；中断的聊天轮次落错误消息                                                                                                                                                                   |
+| `artifacts`         | 事件资料、大输出尾部；路径 `userData/artifacts/<eventId>.md`，保留 30 天                                                                                                                                                                                                                                                                                        |
+| `plugins`           | 插件装载与治理（M7）：用户目录发现与 manifest 校验（`host/plugins/discover`）、能力授权与启停（`plugins.settings` 投影）、secret 加密存储（`plugin_secrets` + `safeStorage`）、外部插件子进程与 stdio 帧（`host/plugins/process`）、帧 → `SourcePlugin`/`ChannelPlugin` 适配（`host/plugins/adapters`）、宿主视图 `plugins.all`；失败隔离（插件异常不拖垮宿主） |
 
 - **未知执行器**：运行时配置的 `executorKey` 在插件注册表里找不到时，调度器不 spawn、不改配置，直接 `run.host_settled` 落 `failed` + `runtime_missing`（文案带 key 便于定位）；不新增 `errorCode`，取值仍是 10 个。
 - **执行器清单来源**：宿主不 import 具体插件实现；装配根（`src/main`）把 `src/plugins/registry.ts` 的静态清单注入 `executor-registry` 与 IPC，测试可注入假插件。
@@ -64,6 +65,8 @@ src/
 - **M3 结构升级**：`runtimes` 从旧列 `protocol_family`（旧字段，仅迁移归一用）改成 `executor_key` + `args_template`；旧列被 CHECK 引用、不能 `DROP COLUMN`，因此与 M2 的 `runs` 同法做一次性物理重建（外键 OFF → 临时表 → 拷贝旧行并回填 → 删旧 → 改名）；升级在 `openDatabase` 内完成。
 - **M6 结构升级**：`tasks` 追加来源四列（`origin` / `rule_id` / `external_ref` / `labels_json`），旧库用 `ALTER TABLE ADD COLUMN` 一次性补齐（**不重建表**，避免 SQLite 重写 `runs.task_id` 的外键引用）；老事实 payload 缺字段由 `kernel/project` 与投影 writer 的 `normalizeTask` 双层归一。新增投影表 `rule_sets`（单行 `id='current'`）与 `rule_fires`（append-only），`KERNEL_VERSION=m6.0.0` 触发全量重建。
 - **M6.5 结构升级**：`tasks` 再补 `thread_id` / `parent_task_id` 两列（同样 `ALTER TABLE ADD COLUMN`，不重建表；老 payload 由双层 `normalizeTask` 补 null）；新增第 13 张投影表 `threads`（线程行整行由 `thread.*` 事实携带，`notes_json/events_json/task_ids_json/root_task_ids_json` 存 JSON），`KERNEL_VERSION=m6.5.0` 触发全量重建。
+- **M7 结构升级**：`workflow_stages` 补 `handoff_workflow_id` / `handoff_stage_id`（`ALTER TABLE ADD COLUMN`，不重建）；`tasks` 补 `handoff_from_task_id` / `handoff_from_stage_id`，同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff')`——SQLite 不能改既有 CHECK，因此旧库对 `tasks` 做**一次性物理重建**（外键 OFF → 临时表 → 按旧列差集拷贝并补默认值 → 删旧 → 改名，照 M2 `runs` / M3 `runtimes` 的临时表法）；新增第 14 张投影表 `plugin_settings`（单行 `id='current'`，非密钥设置整批替换）与宿主私有表 `plugin_secrets`（密文，不进投影白名单），`KERNEL_VERSION=m7.0.0` 触发全量重建。
+- **M7 插件表边界**：`plugin_secrets` 与 `commands` / `process_registry` 同属宿主私有表——不进 `PROJECTION_TABLES` / `PROJECTION_DDL` / 导入计数，重建不清空；`plugin_settings` 是投影表，可由 `plugins.replaced` 重建。
 - **启动顺序固定**：「结构升级（`openDatabase`）→ 存量导入（`importLegacyIfNeeded`）→ 指纹重建（`store.ensureProjection`）」。重建 fold 的是历史事实 payload，所以老 payload 的归一函数（`normalizeRuntime`）必须先于指纹/DDL 变化落地，否则老库升级失败。
 - 备份：`userData/workbench.db` 与 `userData/artifacts/` 直接复制即完整备份（事实日志自足）；设置页提供「导出全部事实为 JSON」。
 
@@ -122,9 +125,11 @@ export type KernelEvent =
 
 ## 启动与关闭
 
-启动：单实例锁 → 开库与 PRAGMA（含旧库 `runs` / `runtimes` 一次性结构升级）→ 存量导入（v2 老库第一次启动）→ 校验 `projection_meta`（不匹配或 `seq` 落后则从事实重建）→ 构造插件能力面与执行器注册表（静态清单，注入 IPC 与调度器）→ 对账 → 构造 effects（`onFacts` 接事实批次 feed）→ **启动通道（M4：`startAll`，补投 `pending` 卡片）** → 启动调度器 → 构造命令路由 + 注册三动词 IPC → 挂定时器 → 建窗口/托盘。
+启动：单实例锁 → 开库与 PRAGMA（含旧库 `runs` / `runtimes` 一次性结构升级、`tasks` 一次性物理重建、`stages` 补列）→ 存量导入（v2 老库第一次启动）→ 校验 `projection_meta`（不匹配或 `seq` 落后则从事实重建）→ 构造插件能力面（`sdkHost` 含 `net`）与 secret 存储（`safeStorage`）→ 扫描用户插件目录并与内置清单合并 → 构造执行器注册表（内置清单，注入 IPC 与调度器）→ 对账 → 构造 effects（`onFacts` 接事实批次 feed）→ **启动通道（M4/M7：`startAll`，补投 `pending` 卡片，用户停用/未授权的通道不启动）** → **启动来源（M7：`startAll`，webhook 来源在此绑定回环端口）** → 启动调度器 → 构造命令路由（含 `plugin.set` 编排依赖）+ 注册三动词 IPC → 挂定时器 → 建窗口/托盘。
 
-关闭：停 channels（abort + best-effort dispose）→ 停事实推送（feed.stop）→ 终止在跑子进程（cancel → SIGTERM → SIGKILL）→ 关闭 DB → 退出。窗口关闭只隐藏到托盘，不触发关闭流程。
+关闭：先停 sources（abort + best-effort dispose，不再接收外部事件）→ 停 channels（abort + best-effort dispose）→ 停事实推送（feed.stop）→ 终止在跑子进程（cancel → SIGTERM → SIGKILL）→ 关闭 DB → 退出。窗口关闭只隐藏到托盘，不触发关闭流程。
+
+**插件设置变更的生效时机（M7 边界）**：`plugin.set` 只写设置事实与 secret（`plugins.replaced`），通道/来源 hub 在启动时按设置装配；**修改端口 / 地址 / secret 等运行期配置后需重启应用生效**（UI 提示「重启后生效」），不引入热重启状态机。
 
 ## 错误与诊断
 
@@ -138,7 +143,9 @@ export type KernelEvent =
 
 - 窗口：`contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`；preload 只暴露三个动词。
 - 路径：renderer 不能传任意 `cwd`；执行目录只能来自运行时配置、规则或项目配置。
-- 密钥：只存主进程（`plugin_config` 的 secret 字段，`safeStorage` 加密），不进快照、不进日志、不进子进程环境白名单之外。
+- 密钥：只存主进程的宿主私有表 `plugin_secrets`（`plugin_id` / `key` / `value_cipher` / `updated_at`，`safeStorage` 加密，不可用时写入口拒绝而不是明文落库），不进快照、不进事实日志、不进日志、不进视图（视图只回 `secretKeys`）；外部插件拿到 secret 的唯一路径是启动时 `welcome` 帧（仅授权后下发），不进命令行与子进程环境。
+- 外部插件子进程：环境变量走白名单（`PATH` / `SystemRoot` / `COMSPEC` / `TEMP` / `USERPROFILE` / `APPDATA` 等 + `LC_*` + `ELECTRON_RUN_AS_NODE=1`），**不继承 `process.env` 其他键**；能力授权是信任门不是 OS 沙箱（SPEC-plugins 已写明）。
+- 本机监听：只有 `webhook` 来源使用，且**只绑 `127.0.0.1`**、端口/路径/签名密钥必须显式配置、未配置不监听；没有对外地址与登录。
 - 外部链接：`shell.openExternal` 只接受 `http(s)` 且域名白名单。
 
 ## 测试

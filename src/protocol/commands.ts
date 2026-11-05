@@ -15,6 +15,7 @@ import type {
   WorkflowInput,
 } from './entities'
 import type { AutomationRule } from './rules'
+import type { PluginSetCommandPayload, PluginSetting } from './plugins'
 
 /**
  * 命令名全集；决定面见 tasks/m1-plan.md「决策面」、m4-plan「架构决议 D6」
@@ -48,6 +49,8 @@ export const COMMAND_NAMES = [
   'app.event',
   'rules.replace',
   'rule.trigger',
+  'plugins.replace',
+  'plugin.set',
   'thread.note',
   'thread.close',
   'thread.bind',
@@ -256,6 +259,8 @@ export type Command =
   | AppEventCommand
   | RulesReplaceCommand
   | RuleTriggerCommand
+  | PluginsReplaceCommand
+  | PluginSetCommand
   | ThreadNoteCommand
   | ThreadCloseCommand
   | ThreadBindCommand
@@ -280,6 +285,27 @@ export interface RulesReplaceCommand extends CommandBase {
 export interface RuleTriggerCommand extends CommandBase {
   type: 'rule.trigger'
   ruleId: string
+}
+
+// ---------- 插件设置（M7） ----------
+
+/**
+ * 整批替换插件设置：`settings` 是替换后的完整快照，版本由内核 +1（前端不传版本）。
+ * 任一条非法 → 整批 reject，旧版继续生效；合法则产一条 `plugins.replaced`。
+ * secret 不在本命令里：`plugin.set` 的 `secrets` 由宿主写非投影表，不进事实。
+ */
+export interface PluginsReplaceCommand extends CommandBase {
+  type: 'plugins.replace'
+  settings: PluginSetting[]
+}
+
+/**
+ * 改一条插件设置（设置页唯一入口）：宿主命令路由读当前快照、合并 patch 后转
+ * `plugins.replace`（沿用本命令的 `commandId`），并把 `secrets` 写宿主 secret 表。
+ * 插件是否存在于磁盘不在这里判断（内核不认识插件目录）；未知 id 由宿主视图过滤展示。
+ */
+export interface PluginSetCommand extends CommandBase, PluginSetCommandPayload {
+  type: 'plugin.set'
 }
 
 // ---------- 线程（M6.5） ----------

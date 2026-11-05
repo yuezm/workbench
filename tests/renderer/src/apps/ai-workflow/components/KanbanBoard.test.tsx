@@ -24,6 +24,8 @@ function stage(
     agentId: null,
     onCompleteStageId: null,
     onRejectStageId: null,
+    handoffWorkflowId: null,
+    handoffStageId: null,
   }
 }
 
@@ -54,6 +56,8 @@ const task: Task = {
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: 't',
   updatedAt: 't',
 }

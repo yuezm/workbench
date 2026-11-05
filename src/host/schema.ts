@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS ${name} (
   agent_id TEXT REFERENCES agents(id) ON DELETE RESTRICT,
   on_complete_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
   on_reject_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
+  -- M7 跨工作流交接：目标工作流 / 目标阶段（可空；弱引用，不设外键，删除目标后由内核判缺失）
+  handoff_workflow_id TEXT,
+  handoff_stage_id TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (workflow_id, position)
 );`
@@ -74,11 +77,12 @@ CREATE TABLE IF NOT EXISTS ${name} (
  * `tasks` 投影：M6 追加来源四列（旧库由 `host/db.ts` 用 `ALTER TABLE ADD COLUMN` 补齐），
  * M6.5 追加线程两列（同一机制）。
  *
- * - `origin` = 人手建（`manual`）/ 规则命中（`rule`）；存量与手工任务默认 `manual`。
+ * - `origin` = 人手建（`manual`）/ 规则命中（`rule`）/ 交接产物（`handoff`）；存量与手工任务默认 `manual`。
  * - `rule_id` / `external_ref` 记录命中的规则与入口键（同规则去重）；手工任务为 null。
  * - `labels_json` 存 `string[]` 的 JSON（规则声明的标签，展示用，不参与派活）。
  * - `thread_id` = 所属线程（M6.5，手工任务挂隐式线程）；`parent_task_id` = 派生它的父任务。
  *   两者都是弱引用（不设外键），旧行与老事实按 null 归一。
+ * - `handoff_from_task_id` / `handoff_from_stage_id` = M7 交接来源任务与阶段（弱引用）。
  */
 const tasksTable = (name = 'tasks'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
@@ -88,12 +92,14 @@ CREATE TABLE IF NOT EXISTS ${name} (
   workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
   current_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
-  origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','rule')),
+  origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','rule','handoff')),
   rule_id TEXT,
   external_ref TEXT,
   labels_json TEXT NOT NULL DEFAULT '[]',
   thread_id TEXT,
   parent_task_id TEXT,
+  handoff_from_task_id TEXT,
+  handoff_from_stage_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -286,6 +292,21 @@ CREATE TABLE IF NOT EXISTS ${name} (
   created_at TEXT NOT NULL
 );`
 
+/**
+ * `plugin_settings` 投影（M7，第 14 张表）：单行 `id='current'`，整批替换语义。
+ *
+ * - `version` 随 `plugins.replaced` +1；`replaced_at` 是该版本生效时刻。
+ * - `settings_json` 存 `PluginSetting[]` 的 JSON（非密钥设置；secret 在宿主私有表）。
+ * - 单行约束用 `CHECK (id = 'current')` 收口：设置删空后仍保留一行，避免「空集丢版本」。
+ */
+const pluginSettingsTable = (name = 'plugin_settings'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY CHECK (id = 'current'),
+  version INTEGER NOT NULL,
+  replaced_at TEXT NOT NULL,
+  settings_json TEXT NOT NULL DEFAULT '[]'
+);`
+
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, position);
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
@@ -302,7 +323,7 @@ CREATE INDEX IF NOT EXISTS idx_rule_fires_rule ON rule_fires(rule_id, scheduled_
 CREATE INDEX IF NOT EXISTS idx_threads_key ON threads(source, external_ref);
 `
 
-/** v2 全量 schema（新建库；十三张投影表 + 索引） */
+/** v2 全量 schema（新建库；十四张投影表 + 索引） */
 export const SCHEMA_SQL = [
   runtimesTable(),
   agentsTable(),
@@ -317,6 +338,7 @@ export const SCHEMA_SQL = [
   ruleSetsTable(),
   ruleFiresTable(),
   threadsTable(),
+  pluginSettingsTable(),
   INDEX_SQL,
 ].join('\n')
 
@@ -336,9 +358,25 @@ CREATE TABLE IF NOT EXISTS commands (
 
 /**
  * 宿主私有进程登记表 DDL：与 `FACTS_SQL` 一样单独执行（不进业务表清单，
- * 也就不在 `SCHEMA_SQL` 的「十三张投影表」断言范围内）。
+ * 也就不在 `SCHEMA_SQL` 的「十四张投影表」断言范围内）。
  */
 export const PROCESS_REGISTRY_SQL = processRegistryTable()
+
+/**
+ * 插件 secret 表（M7）：**宿主私有表**，不属于 `PROJECTION_TABLES`，重建不清空。
+ *
+ * - 只存密文（`value_cipher` 由装配根注入的 `safeStorage` 实现加密）；
+ * - 不进事实日志、不进视图（视图只回键名）、不进快照与导出（`db:export` 只导投影表）；
+ * - 主键 `(plugin_id, key)`；写入/删除由宿主命令路由完成（不经内核 decide）。
+ */
+export const PLUGIN_SECRETS_SQL = `
+CREATE TABLE IF NOT EXISTS plugin_secrets (
+  plugin_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value_cipher TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (plugin_id, key)
+);`
 
 /** 供迁移重建复用：生成指名字表的 DDL */
 export const tableDdl = {
@@ -355,6 +393,7 @@ export const tableDdl = {
   ruleSets: ruleSetsTable,
   ruleFires: ruleFiresTable,
   threads: threadsTable,
+  pluginSettings: pluginSettingsTable,
 } as const
 
 /**
@@ -474,6 +513,63 @@ export const TASKS_M65_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
+ * M7 给 `workflow_stages` 新增的列（跨工作流交接目标）。
+ *
+ * 两列都可空、无默认值；`ALTER TABLE ADD COLUMN` 只增不改，不影响既有行。
+ * 清单与 `stagesTable()` 的 DDL 保持同步（新增列必须同时改这里）。
+ */
+export const STAGES_M7_ADDED_COLUMNS = ['handoff_workflow_id', 'handoff_stage_id'] as const
+
+/** `workflow_stages` M7 补列语句（可空、无 DEFAULT）。 */
+export const STAGES_M7_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M7_ADDED_COLUMNS)[number], string>
+> = {
+  handoff_workflow_id: 'ALTER TABLE workflow_stages ADD COLUMN handoff_workflow_id TEXT',
+  handoff_stage_id: 'ALTER TABLE workflow_stages ADD COLUMN handoff_stage_id TEXT',
+}
+
+/**
+ * M7 给 `tasks` 新增的列（交接来源）。
+ *
+ * 注意：M7 同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff')`，而 SQLite 不能
+ * `ALTER TABLE` 改 CHECK —— 因此旧库首启时 `tasks` 与 M2 `runs` / M3 `runtimes` 同法做
+ * 一次性物理重建（见 `host/db.ts`）。新库直接由 `tasksTable()` 建出完整结构。
+ */
+export const TASKS_M7_ADDED_COLUMNS = ['handoff_from_task_id', 'handoff_from_stage_id'] as const
+
+/** `tasks` M7 补列语句：只用于「列已齐全但 CHECK 已是新口径」的异常状态兜底。 */
+export const TASKS_M7_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M7_ADDED_COLUMNS)[number], string>
+> = {
+  handoff_from_task_id: 'ALTER TABLE tasks ADD COLUMN handoff_from_task_id TEXT',
+  handoff_from_stage_id: 'ALTER TABLE tasks ADD COLUMN handoff_from_stage_id TEXT',
+}
+
+/**
+ * 旧 `tasks` 行 → 新 `tasks` 行（指名字表）的拷贝 SQL（M7 `tasks` 物理重建用）。
+ *
+ * 旧库可能缺 M6 / M6.5 / M7 的任一列：按 `columns` 逐列决定「取旧值」还是「补字面量」，
+ * 因此同一函数能覆盖 v1/v2 老库到 M6.5 库的全部状态。列清单与新 `tasksTable()` 一致。
+ */
+export function legacyTasksCopySql(targetTable: string, columns: ReadonlySet<string>): string {
+  const pick = (column: string, fallback: string): string =>
+    columns.has(column) ? column : fallback
+  return `INSERT INTO ${targetTable} (
+    id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
+    external_ref, labels_json, thread_id, parent_task_id, handoff_from_task_id,
+    handoff_from_stage_id, created_at, updated_at
+  )
+  SELECT
+    id, title, description, workflow_id, current_stage_id, status,
+    ${pick('origin', "'manual'")}, ${pick('rule_id', 'NULL')},
+    ${pick('external_ref', 'NULL')}, ${pick('labels_json', "'[]'")},
+    ${pick('thread_id', 'NULL')}, ${pick('parent_task_id', 'NULL')},
+    ${pick('handoff_from_task_id', 'NULL')}, ${pick('handoff_from_stage_id', 'NULL')},
+    created_at, updated_at
+  FROM tasks`
+}
+
+/**
  * 账本基础设施的 DDL：事实日志（只追加）与投影元信息。
  *
  * `facts.payload` / `facts.actor_json` 以 JSON 文本存放；`seq` 由 SQLite 自增分配，
@@ -498,7 +594,7 @@ CREATE TABLE IF NOT EXISTS projection_meta (
 );
 `
 
-/** 投影集白名单：重建清空并重放的就是这十三张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
+/** 投影集白名单：重建清空并重放的就是这十四张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
 export const PROJECTION_TABLES = [
   'tasks',
   'workflows',
@@ -513,6 +609,7 @@ export const PROJECTION_TABLES = [
   'rule_sets',
   'rule_fires',
   'threads',
+  'plugin_settings',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -531,9 +628,10 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   rule_sets: tableDdl.ruleSets(),
   rule_fires: tableDdl.ruleFires(),
   threads: tableDdl.threads(),
+  plugin_settings: tableDdl.pluginSettings(),
 }
 
-/** 十三张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 十四张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */

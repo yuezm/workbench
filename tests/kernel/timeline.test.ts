@@ -33,6 +33,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
   ...over,
 })
 
@@ -77,6 +79,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -511,6 +515,10 @@ describe('kernel/timeline', () => {
           firedAt: AT,
           taskId: null,
         },
+      }),
+      // M7：插件设置快照同样没有实体 scope
+      fact(3, 'plugins.replaced', {
+        pluginSettings: { id: 'current', version: 1, replacedAt: AT, settings: [] },
       }),
     ]
     expect(timeline(facts, 'task', 'tk-1')).toEqual([])

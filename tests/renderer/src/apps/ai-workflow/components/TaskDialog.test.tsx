@@ -14,6 +14,8 @@ function stage(id: string, name: string, position: number): WorkflowStage {
     agentId: null,
     onCompleteStageId: null,
     onRejectStageId: null,
+    handoffWorkflowId: null,
+    handoffStageId: null,
   }
 }
 

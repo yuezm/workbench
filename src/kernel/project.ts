@@ -59,6 +59,8 @@ export function normalizeTask(row: Task): Task {
     labels: legacy.labels ?? [],
     threadId: legacy.threadId ?? null,
     parentTaskId: legacy.parentTaskId ?? null,
+    handoffFromTaskId: legacy.handoffFromTaskId ?? null,
+    handoffFromStageId: legacy.handoffFromStageId ?? null,
   }
 }
 
@@ -170,6 +172,9 @@ function changesOf(fact: AnyFact): Change[] {
     case 'rule.fired':
       // M6：cron 触发记录，append-only（重复 id 由投影层主键报错）
       return [put('rule_fires', fact.payload.fire)]
+    case 'plugins.replaced':
+      // M7：插件设置整批替换，一行事实 → 单行投影（key='current'）
+      return [put('plugin_settings', fact.payload.pluginSettings)]
     case 'conversation.created':
     case 'conversation.updated':
       return [put('conversations', fact.payload.conversation)]

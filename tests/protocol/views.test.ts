@@ -75,6 +75,8 @@ describe('protocol/views', () => {
       'runtimes.detected',
       'runtimes.models',
       'rules.all',
+      'plugins.settings',
+      'plugins.all',
       'thread.byId',
     ])
   })
@@ -179,7 +181,7 @@ const seqResult: Assert<Equal<ViewResult<'kernel.seq'>, number>> = true
 const hostViewIdsCovered: Assert<
   Equal<
     (typeof HOST_VIEW_IDS)[number],
-    'runtimes.executors' | 'runtimes.detected' | 'runtimes.models'
+    'runtimes.executors' | 'runtimes.detected' | 'runtimes.models' | 'plugins.all'
   >
 > = true
 

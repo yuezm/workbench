@@ -95,6 +95,8 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
   // 规则集是整批投影：两条事实都只影响 rules.all；任务类事实由既有 `task.` 前缀处理
   { prefix: 'rules.replaced', views: ['rules.all'] },
   { prefix: 'rule.fired', views: ['rules.all'] },
+  // 插件设置整批替换（M7）：设置快照 + 磁盘目录视图（状态由宿主按设置现算）一起失效
+  { prefix: 'plugins.replaced', views: ['plugins.all', 'plugins.settings'] },
   // 线程行随 `thread.*` 事实整行更新；外部事件会决定「归入哪个线程 / 是否重开」，
   // 因此 `event.` 同样失效线程视图（即使该事件没有命中任何线程也无害：多取一次）。
   { prefix: 'thread.', views: ['thread.byId'] },

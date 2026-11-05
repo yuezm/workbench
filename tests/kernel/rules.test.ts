@@ -69,6 +69,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: 'ag-1',
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
   ...over,
 })
 
@@ -113,6 +115,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -202,6 +206,8 @@ const view = (seed: Seed = {}): View => ({
   rulesVersion: seed.rulesVersion ?? 1,
   ruleSetReplacedAt: seed.replacedAt === undefined ? CREATED : seed.replacedAt,
   ruleFiredAt: new Map(seed.firedAt ?? []),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 const thread = (over: Partial<ThreadRow> = {}): ThreadRow => ({

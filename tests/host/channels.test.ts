@@ -721,3 +721,34 @@ describe('createChannels：隔离与边界分支', () => {
     )
   })
 })
+
+describe('createChannels：M7 插件启停与按通道配置', () => {
+  it('停用的通道不启动；每条通道的 sdk.config 拿到自己的配置', async () => {
+    const started: string[] = []
+    const configs: Record<string, unknown> = {}
+    const entryOf = (key: string): ChannelRegistryEntry => ({
+      key,
+      label: key,
+      manifest: MANIFEST(key),
+      plugin: {
+        async start(ctx) {
+          started.push(key)
+          configs[key] = ctx.sdk.config()
+          return () => undefined
+        },
+      },
+    })
+    const hub = createChannels({
+      store: { query: vi.fn(() => []) } as unknown as ChannelsStore,
+      effects: { dispatch: vi.fn(() => ({ facts: [] })) } as unknown as ChannelsEffects,
+      entries: [entryOf('off'), entryOf('on')],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 10,
+      isEnabled: (entry) => entry.key !== 'off',
+      configOf: (entry) => (entry.key === 'on' ? { url: 'http://x' } : {}),
+    })
+    await hub.startAll()
+    expect(started).toEqual(['on'])
+    expect(configs).toEqual({ on: { url: 'http://x' } })
+  })
+})

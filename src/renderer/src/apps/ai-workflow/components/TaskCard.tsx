@@ -28,6 +28,7 @@ const HINTS: Record<WorkflowStage['entryMode'], string> = {
  * 看板任务卡（M6.5 增加任务树线索与线程入口）：
  *
  * - `parentTaskId` 非空 = 派生任务，显示「子任务」徽标（父任务在看板里时带上标题）；
+ * - `origin='handoff'`（或 `handoffFromTaskId` 非空）= 跨工作流交接产出，显示「交接」徽标；
  * - `threadId` 非空 = 挂在线程上，提供打开线程面板的按钮，回调由上层传；
  * - 卡片本身只读任务行 + 阶段，不推导线程 / 派活规则。
  */
@@ -42,6 +43,8 @@ export function TaskCard({
   onOpenThread,
 }: TaskCardProps): ReactElement {
   const isSubtask = task.parentTaskId !== null
+  /** 交接任务（M7）：由其它工作流的阶段完成时创建；origin 与来源任务两列任一即可判 */
+  const isHandoff = task.origin === 'handoff' || task.handoffFromTaskId !== null
 
   return (
     <article
@@ -69,6 +72,14 @@ export function TaskCard({
             title={task.parentTaskId ?? undefined}
           >
             {parentTitle === undefined || parentTitle === '' ? '子任务' : `子任务 · ${parentTitle}`}
+          </span>
+        )}
+        {isHandoff && (
+          <span
+            className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-faint"
+            title="由其它工作流的阶段完成时自动创建"
+          >
+            交接
           </span>
         )}
         {executing && (

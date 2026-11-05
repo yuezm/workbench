@@ -13,6 +13,8 @@ function stage(entryMode: WorkflowStage['entryMode']): WorkflowStage {
     agentId: null,
     onCompleteStageId: null,
     onRejectStageId: null,
+    handoffWorkflowId: null,
+    handoffStageId: null,
   }
 }
 const task: Task = {
@@ -28,6 +30,8 @@ const task: Task = {
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: 'x',
   updatedAt: 'x',
 }
@@ -230,5 +234,45 @@ describe('TaskCard', () => {
       />,
     )
     expect(screen.queryByRole('button', { name: '打开线程：写代码' })).not.toBeInTheDocument()
+  })
+
+  it('交接任务显示交接徽标并说明由其它工作流的阶段产出', () => {
+    const { rerender } = render(
+      <TaskCard
+        task={{ ...task, origin: 'handoff', handoffFromTaskId: 't0', handoffFromStageId: 's0' }}
+        stage={stage('none')}
+        executing={false}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    const badge = screen.getByTitle('由其它工作流的阶段完成时自动创建')
+    expect(badge).toHaveTextContent('交接')
+    // 交接任务不再显示子任务徽标（parentTaskId 为 null）
+    expect(screen.queryByText(/子任务/)).not.toBeInTheDocument()
+
+    // origin 仍是 manual 但带了交接来源列：按交接展示（防御旧数据 / 导入）
+    rerender(
+      <TaskCard
+        task={{ ...task, origin: 'manual', handoffFromTaskId: 't0', handoffFromStageId: 's0' }}
+        stage={stage('none')}
+        executing={false}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.getByTitle('由其它工作流的阶段完成时自动创建')).toHaveTextContent('交接')
+
+    // 普通任务没有徽标
+    rerender(
+      <TaskCard
+        task={task}
+        stage={stage('none')}
+        executing={false}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.queryByText('交接')).not.toBeInTheDocument()
   })
 })

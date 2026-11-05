@@ -202,6 +202,13 @@ export interface WorkflowStage {
   agentId: string | null
   onCompleteStageId: string | null
   onRejectStageId: string | null
+  /**
+   * 跨工作流交接（M7，可空）：任务**离开本阶段**（成功向前流转 / 向前拖拽 / 直接完成）时，
+   * 在目标工作流建一条关联任务。目标工作流不能是自身；打回与删阶段重挂不触发。
+   */
+  handoffWorkflowId: string | null
+  /** 交接目标阶段（必须属于 `handoffWorkflowId`）；null = 目标工作流首阶段 */
+  handoffStageId: string | null
 }
 
 export interface StageInput {
@@ -214,6 +221,10 @@ export interface StageInput {
   onCompleteIndex?: number | null
   /** 打回时退回到：目标阶段下标；null/undefined = 默认（上一阶段 / 原地） */
   onRejectIndex?: number | null
+  /** 交接目标工作流 id（M7，可空）；语义校验用视图判断存在性与自指 */
+  handoffWorkflowId?: string | null
+  /** 交接目标阶段 id（M7，可空 = 目标工作流首阶段） */
+  handoffStageId?: string | null
 }
 
 export interface Workflow {
@@ -241,10 +252,11 @@ export const TASK_STATUSES = ['active', 'completed'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
 /**
- * 任务来源（M6）：`manual` = 人手建；`rule` = 自动化规则命中（含 cron / 手动触发）。
- * 规则任务记录 `ruleId` 与 `externalRef`，同一规则 + 同一入口键只建一次任务。
+ * 任务来源（M6/M7）：`manual` = 人手建；`rule` = 自动化规则命中（含 cron / 手动触发）；
+ * `handoff` = 跨工作流交接产物（来源任务的某阶段完成时在目标工作流建的任务）。
+ * 规则任务记录 `ruleId` 与 `externalRef`；交接任务记录 `handoffFromTaskId` / `handoffFromStageId`。
  */
-export const TASK_ORIGINS = ['manual', 'rule'] as const
+export const TASK_ORIGINS = ['manual', 'rule', 'handoff'] as const
 
 export type TaskOrigin = (typeof TASK_ORIGINS)[number]
 
@@ -267,6 +279,10 @@ export interface Task {
   threadId: string | null
   /** 父任务（回执派生事件建的任务；无派生为 null）；看板据此展示任务树 */
   parentTaskId: string | null
+  /** 交接来源任务（M7，`origin='handoff'` 时非 null）：本任务由哪个任务的阶段完成产出 */
+  handoffFromTaskId: string | null
+  /** 交接来源阶段（M7，`origin='handoff'` 时非 null）：触发交接的阶段 id */
+  handoffFromStageId: string | null
   createdAt: string
   updatedAt: string
 }

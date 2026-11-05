@@ -82,13 +82,13 @@ CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
 `
 
 /**
- * 静态三表：DDL 自 M1 起未变（`runtimes` 在 M3 换成 `executor_key`；`tasks` 在 M6 追加来源四列，
- * 两者都单独断言）。
+ * 静态两表：DDL 自 M1 起未变（`runtimes` 在 M3 换成 `executor_key`；`tasks` 在 M6 / M7 追加列；
+ * `workflow_stages` 在 M7 追加交接两列；三者都单独断言）。
  */
-const STATIC_TABLES = ['workflows', 'workflow_stages', 'agents']
+const STATIC_TABLES = ['workflows', 'agents']
 
-/** M6.5 tasks 列（顺序与 DDL 一致）：来源四列之后是线程两列，时间列仍在末尾。 */
-const TASKS_M65_COLUMNS = [
+/** M7 tasks 列（顺序与 DDL 一致）：来源四列 + 线程两列 + 交接两列，时间列仍在末尾。 */
+const TASKS_M7_COLUMNS = [
   'id',
   'title',
   'description',
@@ -101,8 +101,25 @@ const TASKS_M65_COLUMNS = [
   'labels_json',
   'thread_id',
   'parent_task_id',
+  'handoff_from_task_id',
+  'handoff_from_stage_id',
   'created_at',
   'updated_at',
+]
+
+/** M7 workflow_stages 列（顺序与 DDL 一致）：交接两列插在 on_reject_stage_id 与时间列之间。 */
+const STAGES_M7_COLUMNS = [
+  'id',
+  'workflow_id',
+  'name',
+  'position',
+  'entry_mode',
+  'agent_id',
+  'on_complete_stage_id',
+  'on_reject_stage_id',
+  'handoff_workflow_id',
+  'handoff_stage_id',
+  'created_at',
 ]
 
 /** M3 runtimes 列（顺序与 DDL 一致）：`protocol_family` 被 `executor_key` + `args_template` 取代。 */
@@ -196,7 +213,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     expect(columnShape(db, 'runtimes').join('\n')).not.toContain('protocol_family')
   })
 
-  it('tasks 按 M6.5 结构：来源四列 + 线程两列插在 status 与时间列之间，旧 8 列逐列不变', () => {
+  it('tasks 按 M7 结构：来源四列 + 线程两列 + 交接两列插在 status 与时间列之间，旧 8 列逐列不变', () => {
     const legacy = memoryDb()
     legacy.exec(PRE_M1_FIVE_TABLE_DDL)
 
@@ -204,7 +221,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     current.exec(SCHEMA_SQL)
 
     expect(columnShape(current, 'tasks').map((column) => column.split('|')[0])).toEqual(
-      TASKS_M65_COLUMNS,
+      TASKS_M7_COLUMNS,
     )
     // 旧 v2 的 8 列（名 / 类型 / NOT NULL / 默认值 / 主键）逐列原样保留
     const byName = new Map(
@@ -216,7 +233,32 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('tasks 新列默认值 / CHECK：旧行与手工任务 origin=manual、线程两列为 null，非法来源被拒', () => {
+  it('workflow_stages 按 M7 结构：交接两列插在 on_reject_stage_id 与时间列之间，M1 列逐列不变', () => {
+    const legacy = memoryDb()
+    legacy.exec(PRE_M1_FIVE_TABLE_DDL)
+    legacy.exec(PRE_M1_FIVE_TABLE_INDEXES)
+
+    const current = memoryDb()
+    current.exec(SCHEMA_SQL)
+
+    expect(columnShape(current, 'workflow_stages').map((column) => column.split('|')[0])).toEqual(
+      STAGES_M7_COLUMNS,
+    )
+    const byName = new Map(
+      columnShape(current, 'workflow_stages').map((shape) => [shape.split('|')[0], shape] as const),
+    )
+    for (const shape of columnShape(legacy, 'workflow_stages')) {
+      const name = shape.split('|')[0]
+      expect(byName.get(name), name).toBe(shape)
+    }
+    // 交接两列是弱引用：不改变既有外键与唯一约束
+    expect(foreignKeyShape(current, 'workflow_stages')).toEqual(
+      foreignKeyShape(legacy, 'workflow_stages'),
+    )
+    expect(indexShape(current, 'workflow_stages')).toEqual(indexShape(legacy, 'workflow_stages'))
+  })
+
+  it('tasks 新列默认值 / CHECK：旧行与手工任务 origin=manual、线程与交接列为 null，非法来源被拒', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     db.exec(
@@ -229,7 +271,8 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     expect(
       db
         .prepare(
-          `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id
+          `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id,
+                  handoff_from_task_id, handoff_from_stage_id
            FROM tasks WHERE id = ?`,
         )
         .get('tk-manual'),
@@ -240,6 +283,8 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       labels_json: '[]',
       thread_id: null,
       parent_task_id: null,
+      handoff_from_task_id: null,
+      handoff_from_stage_id: null,
     })
 
     db.prepare(
@@ -250,7 +295,8 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     expect(
       db
         .prepare(
-          `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id
+          `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id,
+                  handoff_from_task_id, handoff_from_stage_id
            FROM tasks WHERE id = ?`,
         )
         .get('tk-rule'),
@@ -261,6 +307,8 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       labels_json: '["bug"]',
       thread_id: 'th-1',
       parent_task_id: 'tk-parent',
+      handoff_from_task_id: null,
+      handoff_from_stage_id: null,
     })
 
     expect(() =>
@@ -308,7 +356,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('SCHEMA_SQL 建 13 张表：十三张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
+  it('SCHEMA_SQL 建 14 张表：十四张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
@@ -316,6 +364,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       'cards',
       'conversations',
       'messages',
+      'plugin_settings',
       'rule_fires',
       'rule_sets',
       'run_events',
@@ -430,7 +479,7 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为十三张投影表（实体五表 + 运行/聊天四表 + cards + 规则两表 + threads）', () => {
+  it('白名单固定为十四张投影表（实体五表 + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
@@ -445,6 +494,7 @@ describe('投影白名单与指纹', () => {
       'rule_sets',
       'rule_fires',
       'threads',
+      'plugin_settings',
     ])
   })
 
@@ -452,7 +502,7 @@ describe('投影白名单与指纹', () => {
     expect(PROJECTION_TABLES).toEqual(KERNEL_PROJECTION_TABLES)
   })
 
-  it('PROJECTION_DDL 覆盖十三表、取自 tableDdl、不含账本表', () => {
+  it('PROJECTION_DDL 覆盖十四表、取自 tableDdl、不含账本表', () => {
     for (const table of PROJECTION_TABLES) {
       expect(PROJECTION_DDL).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`)
     }
@@ -462,10 +512,11 @@ describe('投影白名单与指纹', () => {
     expect(PROJECTION_DDL).toContain(tableDdl.ruleSets())
     expect(PROJECTION_DDL).toContain(tableDdl.ruleFires())
     expect(PROJECTION_DDL).toContain(tableDdl.threads())
+    expect(PROJECTION_DDL).toContain(tableDdl.pluginSettings())
     expect(PROJECTION_DDL).not.toContain('facts')
   })
 
-  it('指纹 = sha256(十三表 DDL + 内核版本)', () => {
+  it('指纹 = sha256(十四表 DDL + 内核版本)', () => {
     const expected = createHash('sha256').update(`${PROJECTION_DDL}\nkernel-1`).digest('hex')
     expect(projectionFormat('kernel-1')).toBe(expected)
     expect(projectionFormat('kernel-1')).toMatch(/^[0-9a-f]{64}$/)
@@ -684,6 +735,26 @@ describe('线程投影（M6.5）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(foreignKeyShape(db, 'threads')).toEqual([])
+  })
+})
+
+describe('插件设置投影（M7）', () => {
+  it('plugin_settings 单行：列固定，id 只能是 current', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(columnShape(db, 'plugin_settings').map((column) => column.split('|')[0])).toEqual([
+      'id',
+      'version',
+      'replaced_at',
+      'settings_json',
+    ])
+    const insert = db.prepare(
+      `INSERT INTO plugin_settings (id, version, replaced_at, settings_json)
+       VALUES (?, ?, ?, ?)`,
+    )
+    insert.run('current', 1, SAMPLE_AT, '[]')
+    expect(() => insert.run('current', 2, SAMPLE_AT, '[]')).toThrow()
+    expect(() => insert.run('other', 1, SAMPLE_AT, '[]')).toThrow()
   })
 })
 

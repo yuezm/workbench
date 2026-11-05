@@ -3,6 +3,7 @@ import type {
   EntryMode,
   StageInput,
   WorkflowInput,
+  WorkflowStage,
   WorkflowWithStages,
 } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
@@ -27,7 +28,16 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
     return {
       name: '',
       description: '',
-      stages: [{ name: '待办', entryMode: 'none', onCompleteIndex: null, onRejectIndex: null }],
+      stages: [
+        {
+          name: '待办',
+          entryMode: 'none',
+          onCompleteIndex: null,
+          onRejectIndex: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+        },
+      ],
     }
   }
   return {
@@ -37,11 +47,15 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       const oc = indexOfId(workflow, s.onCompleteStageId)
       const rj = indexOfId(workflow, s.onRejectStageId)
       return {
+        // 回传既有阶段 id：更新时保留历史（否则每次保存都会重建阶段）
+        id: s.id,
         name: s.name,
         entryMode: s.entryMode,
         agentId: s.agentId,
         onCompleteIndex: oc >= 0 ? oc : null,
         onRejectIndex: rj >= 0 ? rj : null,
+        handoffWorkflowId: s.handoffWorkflowId,
+        handoffStageId: s.handoffStageId,
       }
     }),
   }
@@ -75,6 +89,12 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
   const [saving, setSaving] = useState(false)
   // 阶段绑定的智能体清单：自己订阅视图，不再由页面传入
   const agents = useKernelView('agents.all') ?? []
+  // 交接目标候选：全部工作流里排除当前工作流（内核保存时还会再校验一次）
+  const workflows = useKernelView('workflows.all') ?? []
+  const handoffWorkflows = workflows.filter((item) => item.id !== workflow?.id)
+  /** 交接目标阶段的候选：只取目标工作流自己的阶段 */
+  const stagesOfWorkflow = (workflowId: string): WorkflowStage[] =>
+    workflows.find((item) => item.id === workflowId)?.stages ?? []
 
   const patchStage = (i: number, patch: Partial<StageInput>): void =>
     setDraft((d) => ({ ...d, stages: d.stages.map((s, k) => (k === i ? { ...s, ...patch } : s)) }))
@@ -89,6 +109,8 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
           entryMode: 'none',
           onCompleteIndex: null,
           onRejectIndex: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
         },
       ],
     }))
@@ -208,6 +230,44 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                   ]}
                 />
               </Field>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
+              <Field label="交接目标工作流" className="min-w-0 flex-1">
+                <Select
+                  ariaLabel={`阶段${i + 1}交接目标工作流`}
+                  value={s.handoffWorkflowId ?? ''}
+                  onChange={(v) =>
+                    patchStage(i, {
+                      handoffWorkflowId: v === '' ? null : v,
+                      handoffStageId: null,
+                    })
+                  }
+                  options={[
+                    { value: '', label: '（不交接）' },
+                    ...handoffWorkflows.map((item) => ({ value: item.id, label: item.name })),
+                  ]}
+                />
+              </Field>
+              {s.handoffWorkflowId != null && (
+                <Field label="交接目标阶段" className="min-w-0 flex-1">
+                  <Select
+                    ariaLabel={`阶段${i + 1}交接目标阶段`}
+                    value={s.handoffStageId ?? ''}
+                    onChange={(v) => patchStage(i, { handoffStageId: v === '' ? null : v })}
+                    options={[
+                      { value: '', label: '目标工作流首阶段' },
+                      ...stagesOfWorkflow(s.handoffWorkflowId).map((stage) => ({
+                        value: stage.id,
+                        label: stage.name,
+                      })),
+                    ]}
+                  />
+                </Field>
+              )}
+              <p className="w-full text-[11px] text-ink-faint">
+                完成本阶段后在目标工作流建一条关联任务；打回不触发交接。
+              </p>
             </div>
           </div>
         ))}

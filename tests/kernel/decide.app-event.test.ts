@@ -58,6 +58,8 @@ const view = (): View => ({
   rulesVersion: 0,
   ruleSetReplacedAt: null,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 const command = (over: Record<string, unknown> = {}): Parameters<typeof decide>[1] =>

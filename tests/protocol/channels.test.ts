@@ -46,6 +46,7 @@ function fakeHub(signal: AbortSignal): {
     log: () => undefined,
     now: () => 0,
     notify: () => undefined,
+    config: <T = Record<string, unknown>>() => ({}) as T,
   }
   return {
     listeners,

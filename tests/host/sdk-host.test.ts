@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createSdkHost } from '../../src/host/sdk-host'
 import { defaultSpawn } from '../../src/host/process'
-import type { SpawnFn, Spawned } from '../../src/sdk/types'
+import type { NetCapability, SpawnFn, Spawned } from '../../src/sdk/types'
 
 /**
  * 宿主能力原件（M3 T4 / M4 T6）：`createSdkHost` 用 `host/process.ts` 与 `host/executable.ts`
@@ -102,6 +102,17 @@ describe('createSdkHost 缺省值', () => {
 
     expect(notify).toHaveBeenCalledTimes(1)
     expect(notify).toHaveBeenCalledWith('待审批', '任务已挂起\n1. 继续\n2. 终止')
+  })
+
+  it('net 缺省不注入（声明 net 的插件调用即 capability_unavailable），注入后原样保留', () => {
+    expect(createSdkHost().net).toBeUndefined()
+
+    const net: NetCapability = {
+      fetch: vi.fn(async () => ({ status: 200, headers: {}, body: '' })),
+      listen: vi.fn(async () => ({ port: 47_615, close: async () => undefined })),
+      verifyHmacSha256: vi.fn(() => true),
+    }
+    expect(createSdkHost({ net }).net).toBe(net)
   })
 })
 

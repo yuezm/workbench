@@ -151,6 +151,8 @@ const view = (seed: Seed = {}): View => ({
   rulesVersion: 0,
   ruleSetReplacedAt: null,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 const env = (): Environment => {

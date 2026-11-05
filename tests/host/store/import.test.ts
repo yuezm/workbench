@@ -304,6 +304,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       agentId: null,
       onCompleteStageId: 'st-2',
       onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
     },
     {
       id: 'st-2',
@@ -314,6 +316,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       agentId: 'ag-1',
       onCompleteStageId: null,
       onRejectStageId: 'st-1',
+      handoffWorkflowId: null,
+      handoffStageId: null,
     },
   ]
   const tasks: Task[] = [
@@ -332,6 +336,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       // M6.5：v2 没有线程概念
       threadId: null,
       parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
       createdAt: seedAt(6),
       updatedAt: seedAt(7),
     },
@@ -348,6 +354,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       labels: [],
       threadId: null,
       parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
       createdAt: seedAt(8),
       updatedAt: seedAt(9),
     },
@@ -566,6 +574,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   rule_fires: 0,
   // M6.5：v2 没有线程数据；键要补齐以匹配 `ProjectionTable` 全集
   threads: 0,
+  // M7：v2 没有插件设置；键要补齐以匹配 `ProjectionTable` 全集
+  plugin_settings: 0,
 })
 
 describe('importLegacyIfNeeded', () => {
@@ -591,6 +601,7 @@ describe('importLegacyIfNeeded', () => {
       rule_sets: 0,
       rule_fires: 0,
       threads: 0,
+      plugin_settings: 0,
     })
 
     const facts = allFacts(db)
@@ -805,6 +816,7 @@ describe('importLegacyIfNeeded', () => {
       rule_sets: [],
       rule_fires: [],
       threads: [],
+      plugin_settings: [],
     })
   })
 

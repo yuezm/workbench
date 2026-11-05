@@ -165,6 +165,8 @@ const view = (seed: Seed = {}): View => ({
   rulesVersion: 0,
   ruleSetReplacedAt: null,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 /** 确定性 id 生成器：卡片 / 事件都按类型计数。 */

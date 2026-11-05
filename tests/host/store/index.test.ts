@@ -86,6 +86,8 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             agentId: null,
             onCompleteStageId: null,
             onRejectStageId: null,
+            handoffWorkflowId: null,
+            handoffStageId: null,
           },
           {
             id: 'st-2',
@@ -96,6 +98,8 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             agentId: null,
             onCompleteStageId: null,
             onRejectStageId: null,
+            handoffWorkflowId: null,
+            handoffStageId: null,
           },
         ],
       },

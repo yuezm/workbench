@@ -14,8 +14,9 @@ import type { ProjectionTable } from './types'
 export function viewSpec(input: Input): ProjectionTable[] {
   switch (input.type) {
     case 'workflow.create':
-      // 阶段绑定的智能体必须存在（旧实现靠外键，M1 由内核校验）
-      return ['agents']
+      // 阶段绑定的智能体必须存在（旧实现靠外键，M1 由内核校验）；
+      // M7：阶段的交接目标工作流 / 目标阶段也要校验存在与从属
+      return ['agents', 'workflows', 'workflow_stages']
     case 'workflow.update':
       // 改阶段：既有阶段做差量、任务的当前阶段可能因删阶段而重挂、活跃 run 守卫
       return ['workflows', 'workflow_stages', 'agents', 'tasks']
@@ -148,6 +149,10 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'rules.replace':
       // 整批校验：当前版本（+1）、规则引用的工作流与阶段必须存在且从属
       return ['rule_sets', 'workflows', 'workflow_stages']
+    case 'plugins.replace':
+    case 'plugin.set':
+      // 插件设置整批替换：当前版本（+1）与整批形状；授权与声明能力的匹配由宿主视图判
+      return ['plugin_settings']
     case 'rule.trigger':
       // 手动运行：读规则集与目标工作流/阶段/智能体/运行时，并做 externalRef 去重（tasks）；
       // M6.5：给规则任务建隐式线程（本地构造，不读 threads）

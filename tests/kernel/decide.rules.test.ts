@@ -46,6 +46,8 @@ const stage: WorkflowStage = {
   agentId: 'ag-1',
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
 }
 const agent: Agent = {
   id: 'ag-1',
@@ -106,6 +108,8 @@ const view = (seed: Seed = {}): View => ({
   rulesVersion: seed.rulesVersion ?? 0,
   ruleSetReplacedAt: seed.replacedAt === undefined ? CREATED : seed.replacedAt,
   ruleFiredAt: new Map(seed.firedAt ?? []),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 const types = (facts: Array<{ type: string }>): string[] => facts.map((fact) => fact.type)

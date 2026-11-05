@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, safeStorage, shell } from 'electron'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { decide } from '../kernel/decide'
@@ -9,14 +9,35 @@ import { viewSpec } from '../kernel/view-spec'
 import type { KernelPort } from '../kernel/types'
 import { createClock, type Clock } from '../host/clock'
 import { createChannels, type Channels } from '../host/channels'
-import { createCommandRouter, type HostViewResolver } from '../host/commands'
+import {
+  createCommandRouter,
+  type HostViewResolver,
+  type PluginCommandDeps,
+} from '../host/commands'
 import { createEffects } from '../host/effects'
 import { createFactFeed, type FactFeed } from '../host/feed'
-import { killPidTree } from '../host/process'
+import { defaultSpawn, killPidTree } from '../host/process'
 import { createProcessRegistry } from '../host/process-registry'
 import { reconcile } from '../host/reconcile'
 import { createScheduler, type Scheduler } from '../host/scheduler'
 import { openDatabase } from '../host/db'
+import { createNetCapability } from '../host/net'
+import {
+  createExternalChannelPlugin,
+  createExternalSourcePlugin,
+  type ExternalAdapterOptions,
+} from '../host/plugins/adapters'
+import {
+  discoverExternalPlugins,
+  type ExternalPluginEntry,
+  type ExternalPluginRejection,
+} from '../host/plugins/discover'
+import {
+  createPluginSecrets,
+  resolvePluginConfig,
+  type SecretCipher,
+} from '../host/plugins/settings'
+import { createSources, type Sources, type SourceRegistryEntry } from '../host/sources'
 import { createStore, DEFAULT_LIMITS } from '../host/store/index'
 import { importLegacyIfNeeded } from '../host/store/import'
 import { registerIpcHandlers } from './ipc'
@@ -26,11 +47,21 @@ import { createTray } from './tray'
 import { createSdkHost } from '../host/sdk-host'
 import { createExecutorRegistry } from '../host/executor-registry'
 import {
-  detectAll,
+  channelById,
   channels as pluginChannels,
+  detectAll,
   executors as pluginExecutors,
+  sourceById,
+  sources as pluginSources,
+} from '../plugins/registry'
+import type {
+  ChannelRegistryEntry,
+  SourceRegistryEntry as BuiltinSourceEntry,
 } from '../plugins/registry'
 import type { RuntimeExecutorChoice, RuntimeInput } from '../protocol/entities'
+import type { PluginManifest, PluginKind } from '../protocol/manifest'
+import { PLUGIN_KINDS } from '../protocol/manifest'
+import type { PluginSetting, PluginView, PluginStatus } from '../protocol/plugins'
 import { WORKBENCH_EVENT_CHANNEL } from '../protocol/ipc'
 
 let quitting = false
@@ -39,8 +70,20 @@ let win: BrowserWindow | null = null
 let activeScheduler: Scheduler | null = null
 /** 装配完成后的通道 hub：退出流程 abort + best-effort dispose（M4 D9）。 */
 let activeChannels: Channels | null = null
+/** 装配完成后的来源 hub（M7）：退出流程先停 sources 再停 channels。 */
+let activeSources: Sources | null = null
 /** 事实推送（M5）：批次 + 聊天流；退出时停表。 */
 let activeFeed: FactFeed | null = null
+
+/** M7：磁盘插件目录（内置 + 用户目录）合并后的一条。 */
+interface CatalogEntry {
+  id: string
+  kind: PluginKind
+  builtin: boolean
+  manifest: PluginManifest
+  /** 用户目录插件（内置为 null） */
+  external: ExternalPluginEntry | null
+}
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -119,10 +162,129 @@ if (app.requestSingleInstanceLock()) {
     // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。
     const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
     mkdirSync(sessionsDir, { recursive: true })
-    // 插件能力面（宿主注入）：spawn/解析/杀树/时钟/会话根；插件只经 sdk 拿副作用。
-    const sdkHost = createSdkHost({ sessionRoot: sessionsDir, notify })
+    // 插件能力面（宿主注入）：spawn/解析/杀树/时钟/会话根/网络；插件只经 sdk 拿副作用。
+    const net = createNetCapability()
+    const sdkHost = createSdkHost({ sessionRoot: sessionsDir, notify, net })
     // 执行器注册表：按运行时配置的 executorKey 取插件端口；未知 key 由调度器兜底终态。
     const executors = createExecutorRegistry(pluginExecutors, sdkHost)
+    // M7：插件 secret 只存密文（safeStorage）；不可用时写入口拒绝，不落明文。
+    const pluginCipher: SecretCipher = {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+      decrypt: (cipherText) => safeStorage.decryptString(Buffer.from(cipherText, 'base64')),
+    }
+    const pluginSecrets = createPluginSecrets({
+      db,
+      cipher: pluginCipher,
+      log: (line) => sdkHost.log(line),
+    })
+    // 用户目录插件：只发现/校验，不执行安装脚本；同名（kind+id）覆盖内置。
+    const discovered = await discoverExternalPlugins({
+      pluginsRoot: path.join(userData, 'plugins'),
+      builtins: [...pluginExecutors, ...pluginChannels, ...pluginSources].map((entry) => ({
+        kind: entry.manifest.kind,
+        id: entry.key,
+      })),
+    })
+    const pluginRejections: ExternalPluginRejection[] = [...discovered.rejections]
+    const catalog: CatalogEntry[] = []
+    for (const entry of [...pluginExecutors, ...pluginChannels, ...pluginSources]) {
+      catalog.push({
+        id: entry.key,
+        kind: entry.manifest.kind,
+        builtin: true,
+        manifest: entry.manifest,
+        external: null,
+      })
+    }
+    for (const external of discovered.entries) {
+      const sameKind = catalog.findIndex(
+        (candidate) => candidate.id === external.id && candidate.kind === external.kind,
+      )
+      const next: CatalogEntry = {
+        id: external.id,
+        kind: external.kind,
+        builtin: false,
+        manifest: external.manifest,
+        external,
+      }
+      if (sameKind >= 0 && catalog[sameKind]?.builtin === true) {
+        catalog[sameKind] = next
+        continue
+      }
+      // 插件 id 全局唯一：与其它 kind 的内置/外部插件撞 id 时拒绝（不静默并存）
+      if (catalog.some((candidate) => candidate.id === external.id)) {
+        pluginRejections.push({
+          path: `${external.kind}/${external.id}`,
+          kind: external.kind,
+          id: external.id,
+          reason: 'duplicate_id',
+          detail: `插件 id 已被占用: ${external.id}`,
+        })
+        continue
+      }
+      catalog.push(next)
+    }
+    const pluginSettingsOf = () => store.query('plugins.settings')
+    const pluginSettingOf = (id: string): PluginSetting | null =>
+      pluginSettingsOf().settings.find((row) => row.id === id) ?? null
+    const declaredOf = (entry: CatalogEntry) => [...entry.manifest.capabilities]
+    const grantedOf = (entry: CatalogEntry) =>
+      entry.builtin ? declaredOf(entry) : (pluginSettingOf(entry.id)?.granted ?? [])
+    const pluginAuthorized = (entry: CatalogEntry) =>
+      declaredOf(entry).every((capability) => grantedOf(entry).includes(capability))
+    const pluginEnabled = (entry: CatalogEntry): boolean => {
+      const setting = pluginSettingOf(entry.id)
+      if (entry.builtin) return setting?.enabled !== false
+      return setting?.enabled === true && pluginAuthorized(entry)
+    }
+    const pluginConfigOf = (entry: CatalogEntry) =>
+      resolvePluginConfig(
+        entry.manifest,
+        pluginSettingOf(entry.id),
+        pluginSecrets.readSecrets(entry.id),
+        entry.builtin,
+      )
+    const adapterOptions = (entry: CatalogEntry): ExternalAdapterOptions | null => {
+      if (entry.external === null) return null
+      return {
+        execPath: process.execPath,
+        spawn: defaultSpawn,
+        granted: grantedOf(entry),
+        config: pluginConfigOf(entry),
+        log: (line) => sdkHost.log(line),
+      }
+    }
+    const channelEntries: ChannelRegistryEntry[] = catalog
+      .filter((entry) => entry.kind === 'channel')
+      .map((entry) => {
+        const options = adapterOptions(entry)
+        const external = entry.external
+        if (external !== null && options !== null) {
+          return {
+            key: entry.id,
+            label: entry.manifest.name,
+            manifest: entry.manifest,
+            plugin: createExternalChannelPlugin(external, options),
+          }
+        }
+        return channelById(entry.id)
+      })
+    const sourceEntries: SourceRegistryEntry[] = catalog
+      .filter((entry) => entry.kind === 'source')
+      .map((entry) => {
+        const options = adapterOptions(entry)
+        const external = entry.external
+        if (external !== null && options !== null) {
+          return {
+            key: entry.id,
+            label: entry.manifest.name,
+            manifest: entry.manifest,
+            plugin: createExternalSourcePlugin(external, options),
+          }
+        }
+        return sourceById(entry.id) as BuiltinSourceEntry
+      })
     /**
      * 运行时表单的默认值来自执行器插件 manifest（内核与宿主都不写产品名）。
      * 未指定 key 时取注册表首项；key 不存在直接抛可读错误（IPC 原样展示）。
@@ -208,15 +370,128 @@ if (app.requestSingleInstanceLock()) {
     })
     // 通道 hub（M4 D9）：effects 之后创建、scheduler 之前 startAll；
     // 启动时先补投 `delivery='pending'` 的 open 卡（重启只补未送达的版本）。
+    // M7：用户停用/未授权的通道不启动；每条通道只拿到自己的 config（含按授权解密的 secret）。
+    const catalogEntryOf = (kind: PluginKind, key: string): CatalogEntry | undefined =>
+      catalog.find((entry) => entry.kind === kind && entry.id === key)
+    const channelConfigOf = (entry: ChannelRegistryEntry): Record<string, unknown> => {
+      const found = catalogEntryOf('channel', entry.key)
+      return found === undefined ? {} : pluginConfigOf(found)
+    }
+    const channelEnabledOf = (entry: ChannelRegistryEntry): boolean => {
+      const found = catalogEntryOf('channel', entry.key)
+      return found === undefined ? true : pluginEnabled(found)
+    }
     const channels = createChannels({
       store,
       effects,
-      entries: pluginChannels,
+      entries: channelEntries,
       sdkHost,
+      configOf: channelConfigOf,
+      isEnabled: channelEnabledOf,
     })
     channelsHolder.current = channels
     await channels.startAll()
     activeChannels = channels
+    // 来源 hub（M7 D8）：通道之后启动、scheduler 之前 startAll；退出先停 sources 再停 channels。
+    const sources = createSources({
+      entries: sourceEntries,
+      sdkHost,
+      effects,
+      configOf: (entry) => {
+        const found = catalogEntryOf('source', entry.key)
+        return found === undefined ? {} : pluginConfigOf(found)
+      },
+      isEnabled: (entry) => {
+        const found = catalogEntryOf('source', entry.key)
+        return found === undefined ? true : pluginEnabled(found)
+      },
+      log: (line) => sdkHost.log(line),
+    })
+    await sources.startAll()
+    activeSources = sources
+
+    /**
+     * M7 宿主视图 `plugins.all`：磁盘发现的插件目录 + 当前设置 + 运行状态。
+     * secret 只回键名；`manifest_error` 行来自用户目录扫描的拒绝项。
+     */
+    const pluginViews = (): PluginView[] => {
+      const views: PluginView[] = catalog.map((entry) => {
+        const setting = pluginSettingOf(entry.id)
+        const declared = declaredOf(entry)
+        const granted = grantedOf(entry)
+        const enabled = pluginEnabled(entry)
+        let status: PluginStatus = 'disabled'
+        let error: string | null = null
+        if (enabled) status = 'ready'
+        else if (!entry.builtin && !pluginAuthorized(entry)) status = 'unauthorized'
+        if (entry.kind === 'source' && enabled) {
+          const runtimeStatus = sources.statuses().find((item) => item.key === entry.id)
+          if (runtimeStatus?.state === 'error') {
+            status = 'error'
+            error = runtimeStatus.error
+          }
+        }
+        return {
+          id: entry.id,
+          kind: entry.kind,
+          name: entry.manifest.name,
+          version: entry.manifest.version,
+          description: entry.manifest.description ?? '',
+          builtin: entry.builtin,
+          enabled,
+          declared,
+          granted,
+          configFields: [...(entry.manifest.config ?? [])],
+          config: setting?.config ?? {},
+          secretKeys: pluginSecrets.listSecretKeys(entry.id),
+          status,
+          error,
+        }
+      })
+      for (const rejection of pluginRejections) {
+        views.push({
+          id: rejection.id ?? rejection.path,
+          kind: (PLUGIN_KINDS as readonly string[]).includes(rejection.kind ?? '')
+            ? (rejection.kind as PluginKind)
+            : 'source',
+          name: rejection.path || '插件目录',
+          version: '',
+          description: '',
+          builtin: false,
+          enabled: false,
+          declared: [],
+          granted: [],
+          configFields: [],
+          config: {},
+          secretKeys: [],
+          status: 'manifest_error',
+          error: rejection.detail,
+        })
+      }
+      return views
+    }
+    /** 命令路由的插件编排依赖（M7）：磁盘条目 / 视图行 / secret 写入。 */
+    const pluginDeps: PluginCommandDeps = {
+      entry: (id) => {
+        const found = catalog.find((item) => item.id === id)
+        return found === undefined ? null : { manifest: found.manifest, builtin: found.builtin }
+      },
+      view: (id) => pluginViews().find((item) => item.id === id) ?? null,
+      writeSecrets: (id, patch) => {
+        try {
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === null) pluginSecrets.removeSecret(id, key)
+            else pluginSecrets.setSecret(id, key, value)
+          }
+        } catch (error) {
+          // 不把密文/明文写进错误文案；宿主安全存储不可用时拒绝而不是明文落库
+          const message = error instanceof Error ? error.message : String(error)
+          throw new Error(`无法保存插件 secret：${message.split(':')[0] ?? 'unknown'}`, {
+            cause: error,
+          })
+        }
+      },
+    }
     // 唯一时钟先建（调度器领取/收尾时通过 rearm 重新排期），start 在首次领取之后
     const clock: Clock = createClock({
       store: {
@@ -269,6 +544,9 @@ if (app.requestSingleInstanceLock()) {
           if (port?.models === undefined) return Promise.resolve([])
           return port.models(runtime)
         }
+        case 'plugins.all':
+          // M7：插件设置页的只读视图（磁盘目录 + 设置 + 运行状态；secret 只回键名）
+          return pluginViews()
       }
     }
     const router = createCommandRouter({
@@ -277,6 +555,7 @@ if (app.requestSingleInstanceLock()) {
       executors,
       executorDefaults,
       hostView,
+      plugins: pluginDeps,
     })
     registerIpcHandlers({ router })
     // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，
@@ -308,7 +587,8 @@ app.on('before-quit', () => {
   quitting = true
   // 退出前 best-effort 取消活跃 run：立即杀进程树并写取消终态，不等待回执（不阻塞退出）
   activeScheduler?.cancelAll()
-  // 通道 abort + dispose 是异步的：进程退出不等待，但先发 abort 让插件停止投递
+  // M7 顺序：先停来源（不再接收外部事件）再停通道（abort + dispose 异步，进程退出不等待）
+  void activeSources?.stopAll()
   void activeChannels?.stopAll()
   // 推送停表：退出后不再排批次（已入账的事实仍然完整）
   activeFeed?.stop()

@@ -80,6 +80,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   labels: [],
   threadId: 'th-1',
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -146,6 +148,8 @@ const emptyView = (over: Partial<View> = {}): View => ({
   rulesVersion: 0,
   ruleSetReplacedAt: null,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
   ...over,
 })
 

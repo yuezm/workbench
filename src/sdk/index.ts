@@ -31,10 +31,16 @@ function requireCapability(manifest: PluginManifest, capability: Capability): vo
 /** 宿主没有通知原件时的兜底：静默丢弃（文案不落日志）。 */
 const silentNotify = (): void => undefined
 
+/** 宿主没有网络原件时的兜底：只有真正调用才失败（声明 ≠ 宿主支持）。 */
+const unavailableNet = (): never => {
+  throw new Error('capability_unavailable: net')
+}
+
 /**
  * 按 manifest 能力声明组装插件能力面。
  *
  * `log/now/paths/config` 无能力要求、始终可用；`process` 需要声明 `spawn`，
+ * `net` 需要声明 `net`（宿主未注入原件时调用即 `capability_unavailable`），
  * `notify` 需要声明 `notify`。
  */
 export function createSdk(host: SdkHost, manifest: PluginManifest): Sdk {
@@ -46,6 +52,17 @@ export function createSdk(host: SdkHost, manifest: PluginManifest): Sdk {
     get process() {
       requireCapability(manifest, 'spawn')
       return host.process
+    },
+    get net() {
+      requireCapability(manifest, 'net')
+      return (
+        host.net ??
+        ({
+          fetch: unavailableNet,
+          listen: unavailableNet,
+          verifyHmacSha256: unavailableNet,
+        } as never)
+      )
     },
     get notify() {
       requireCapability(manifest, 'notify')

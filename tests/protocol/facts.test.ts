@@ -113,6 +113,7 @@ const expected = [
   'thread.bound',
   'rules.replaced',
   'rule.fired',
+  'plugins.replaced',
   'conversation.created',
   'conversation.updated',
   'conversation.removed',
@@ -121,7 +122,7 @@ const expected = [
 ]
 
 describe('protocol/facts', () => {
-  it('FACT_TYPES 覆盖 M1 + M2 + M4 事实目录且顺序稳定', () => {
+  it('FACT_TYPES 覆盖 M1 + M2 + M4 + M7 事实目录且顺序稳定', () => {
     expect([...FACT_TYPES]).toEqual(expected)
   })
 
@@ -139,6 +140,7 @@ describe('protocol/facts', () => {
       'thread',
       'rules',
       'rule',
+      'plugins',
       'conversation',
       'message',
       'snapshot',

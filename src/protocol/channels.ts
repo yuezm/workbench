@@ -18,6 +18,22 @@ type Id = string
 /** 通道端口版本：上下文形状变化时递增（M4 = 1）；外部通道（M7）按它做兼容判断。 */
 export const CHANNEL_PORT_VERSION = 1
 
+/**
+ * 通道可用的网络子集（M7）：只暴露出站请求（回环监听只给 source）。
+ * 与 `src/sdk/types` 的 `NetCapability` 结构兼容（宿主按 manifest 的 `net` 声明注入）。
+ */
+export interface ChannelNet {
+  fetch(
+    url: string,
+    options?: {
+      method?: string
+      headers?: Record<string, string>
+      body?: string
+      timeoutMs?: number
+    },
+  ): Promise<{ status: number; headers: Record<string, string>; body: string }>
+}
+
 /** 通道插件用到的能力子集（`src/sdk` 的 `Sdk` 结构上覆盖它）。 */
 export interface ChannelSdk {
   /** 结构化日志（宿主加插件 id 前缀）；不记卡片全文。 */
@@ -26,6 +42,10 @@ export interface ChannelSdk {
   now(): number
   /** 系统通知：需要 manifest 声明 `capabilities: ['notify']`。 */
   notify(title: string, body: string): void
+  /** 插件自有配置（M7：manifest 默认值 + 用户设置合并；宿主按通道分别注入）。 */
+  config<T = Record<string, unknown>>(): T
+  /** 出站 HTTP（M7）：需要 manifest 声明 `capabilities: ['net']`；宿主未注入时缺省不可用。 */
+  net?: ChannelNet
 }
 
 /** 投递回调：通道把「已送达至少一个通道」的事实回报给宿主（写 `card.delivered`）。 */

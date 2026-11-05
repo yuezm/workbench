@@ -3,17 +3,23 @@ import {
   COMMANDS_SQL,
   FACTS_SQL,
   INDEX_SQL,
+  PLUGIN_SECRETS_SQL,
   PROCESS_REGISTRY_SQL,
   RUN_M2_ADDED_COLUMNS,
   RUNTIMES_M3_ADDED_COLUMNS,
   SCHEMA_SQL,
   SCHEMA_VERSION,
+  STAGES_M7_ADDED_COLUMNS,
+  STAGES_M7_ADD_COLUMN_SQL,
   TASKS_M6_ADDED_COLUMNS,
   TASKS_M6_ADD_COLUMN_SQL,
   TASKS_M65_ADDED_COLUMNS,
   TASKS_M65_ADD_COLUMN_SQL,
+  TASKS_M7_ADDED_COLUMNS,
+  TASKS_M7_ADD_COLUMN_SQL,
   legacyRunsCopySql,
   legacyRuntimesCopySql,
+  legacyTasksCopySql,
   tableDdl,
   withTx,
 } from './schema'
@@ -26,6 +32,9 @@ const RUN_UPGRADE_TEMP = 'runs_m2_upgrade'
 
 /** 旧 `runtimes` 升级时的临时表名（M3 同法）。 */
 const RUNTIMES_UPGRADE_TEMP = 'runtimes_m3_upgrade'
+
+/** 旧 `tasks` 升级时的临时表名（M7：`origin` CHECK 扩展必须物理重建）。 */
+const TASKS_UPGRADE_TEMP = 'tasks_m7_upgrade'
 
 /**
  * 打开时校验数据库完整性。正常只返回一行 `ok`；
@@ -139,22 +148,27 @@ function upgradeLegacyRuntimes(db: DatabaseSync): boolean {
 }
 
 /**
- * `tasks` 的补列清单与语句：M6（来源四列）+ M6.5（线程两列）同一机制。
+ * `tasks` 的补列清单与语句：M6（来源四列）+ M6.5（线程两列）+ M7（交接两列）。
  *
- * 打开旧库时按 `PRAGMA table_info(tasks)` 做差集检测；缺任一列即用 `ALTER TABLE ADD COLUMN`
- * 补齐，**不重建表**（原因见 `TASKS_M6_ADDED_COLUMNS` 的说明）。
+ * 打开旧库时按 `PRAGMA table_info(tasks)` 做差集检测；缺 M7 交接列时走物理重建
+ * （`origin` 的 CHECK 需要扩展），其余情况用 `ALTER TABLE ADD COLUMN` 补齐。
  */
-const TASKS_ADDED_COLUMNS = [...TASKS_M6_ADDED_COLUMNS, ...TASKS_M65_ADDED_COLUMNS] as const
+const TASKS_ADDED_COLUMNS = [
+  ...TASKS_M6_ADDED_COLUMNS,
+  ...TASKS_M65_ADDED_COLUMNS,
+  ...TASKS_M7_ADDED_COLUMNS,
+] as const
 
 type TaskAddedColumn = (typeof TASKS_ADDED_COLUMNS)[number]
 
 const TASKS_ADD_COLUMN_SQL: Readonly<Record<TaskAddedColumn, string>> = {
   ...TASKS_M6_ADD_COLUMN_SQL,
   ...TASKS_M65_ADD_COLUMN_SQL,
+  ...TASKS_M7_ADD_COLUMN_SQL,
 }
 
 /**
- * 旧库 `tasks` 缺 M6 / M6.5 新列 → 需要一次性补列（导出原因同 `needsRunsUpgrade`）。
+ * 旧库 `tasks` 缺 M6 / M6.5 / M7 新列 → 需要一次性升级（导出的原因同 `needsRunsUpgrade`）。
  */
 export function needsTasksUpgrade(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'tasks')
@@ -163,12 +177,49 @@ export function needsTasksUpgrade(db: DatabaseSync): boolean {
 }
 
 /**
- * 旧 `tasks` 一次性补列（M6 / M6.5）：只对缺失列 `ALTER TABLE ADD COLUMN`，**不重建表**。
+ * 旧库 `tasks` 是否需要**物理重建**（M7）：缺交接两列说明库停在 M6.5 或更早，
+ * 此时 `origin` 的 CHECK 仍是 `('manual','rule')`，无法写入 `'handoff'`；SQLite 不能
+ * 修改既有 CHECK，只能建新表拷贝。列齐全的库不需要重建（补列路径即可）。
+ */
+export function needsTasksRebuild(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'tasks')
+  if (columns.size === 0) return false
+  return TASKS_M7_ADDED_COLUMNS.some((column) => !columns.has(column))
+}
+
+/**
+ * 旧 `tasks` 一次性物理重建（M7）：建新结构临时表 → 按旧列差集拷贝并补默认值 → 删旧表 → 改名。
  *
- * `runs.task_id` 引用 `tasks(id)`，建临时表 + 改名会让 SQLite 把其它表里的外键引用
- * 改写成临时表名，删旧表后引用悬空（见 `upgradeLegacyRuns` 的注释）。补列只增不改：
- * 旧行按默认值得到 `origin='manual'`、空 `rule_id` / `external_ref`、空 `labels_json`，
- * 以及 `thread_id` / `parent_task_id` 为 null。事务内任一条失败整体回滚，旧结构原样保留。
+ * 与 M2 `runs` / M3 `runtimes` 同法（`PRAGMA foreign_keys = OFF` 必须在事务外设置）；
+ * 拷贝 SQL 按旧列是否存在选择取值或字面量，因此 v1 / v2 / M6 / M6.5 库都能升上来。
+ * 失败时 `withTx` 回滚、旧表与数据原样保留。
+ *
+ * @returns 本次是否真的做了重建
+ */
+function rebuildLegacyTasks(db: DatabaseSync): boolean {
+  if (!needsTasksRebuild(db)) return false
+  const columns = tableColumns(db, 'tasks')
+  const foreignKeys = readForeignKeys(db)
+  if (foreignKeys) db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    withTx(db, () => {
+      db.exec(`DROP TABLE IF EXISTS ${TASKS_UPGRADE_TEMP}`)
+      db.exec(tableDdl.tasks(TASKS_UPGRADE_TEMP))
+      db.exec(legacyTasksCopySql(TASKS_UPGRADE_TEMP, columns))
+      db.exec('DROP TABLE tasks')
+      db.exec(`ALTER TABLE ${TASKS_UPGRADE_TEMP} RENAME TO tasks`)
+    })
+  } finally {
+    if (foreignKeys) db.exec('PRAGMA foreign_keys = ON')
+  }
+  return true
+}
+
+/**
+ * 旧 `tasks` 一次性补列（M6 / M6.5 / M7 异常状态兜底）：只对缺失列 `ALTER TABLE ADD COLUMN`。
+ *
+ * 正常路径由 `rebuildLegacyTasks` 处理（M7 需要改 CHECK）；本函数只在「列缺但 CHECK 已是新口径」
+ * 的异常状态（例如手工改库）下补齐，保证后续写入不会因缺列失败。
  *
  * @returns 本次是否真的做了补列
  */
@@ -178,6 +229,26 @@ function upgradeLegacyTasks(db: DatabaseSync): boolean {
   if (missing.length === 0) return false
   withTx(db, () => {
     for (const column of missing) db.exec(TASKS_ADD_COLUMN_SQL[column])
+  })
+  return true
+}
+
+/** 旧库 `workflow_stages` 缺 M7 交接两列 → 需要一次性补列（不重建表）。 */
+export function needsStagesUpgrade(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'workflow_stages')
+  if (columns.size === 0) return false
+  return STAGES_M7_ADDED_COLUMNS.some((column) => !columns.has(column))
+}
+
+/**
+ * 旧 `workflow_stages` 一次性补列（M7）：两列都可空、无默认值。
+ */
+function upgradeLegacyStages(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'workflow_stages')
+  const missing = STAGES_M7_ADDED_COLUMNS.filter((column) => !columns.has(column))
+  if (missing.length === 0) return false
+  withTx(db, () => {
+    for (const column of missing) db.exec(STAGES_M7_ADD_COLUMN_SQL[column])
   })
   return true
 }
@@ -216,16 +287,21 @@ export function openDatabase(filePath: string): DatabaseSync {
     })
     upgradeLegacyRuns(db)
     upgradeLegacyRuntimes(db)
-    // M6 / M6.5：tasks 只补列、不重建（外键引用 tasks 的表不能被改名波及）；必须在导入/写入之前完成。
+    // M7：阶段补交接两列（只增不改）
+    upgradeLegacyStages(db)
+    // M6 / M6.5 / M7：tasks 需要时物理重建（M7 扩展 origin CHECK），否则只补缺列；必须在导入/写入之前完成。
+    rebuildLegacyTasks(db)
     upgradeLegacyTasks(db)
     withTx(db, () => {
-      // 升级可能删掉旧 runs 上的索引，这里统一补齐（新建库同样幂等）。
+      // 升级可能删掉旧 runs / tasks 上的索引，这里统一补齐（新建库同样幂等）。
       db.exec(INDEX_SQL)
       db.exec(FACTS_SQL)
       // 宿主私有进程登记表（T13）：不进投影白名单，旧库打开时补齐即可。
       db.exec(PROCESS_REGISTRY_SQL)
       // 命令幂等表（M5）：非投影表，旧库打开时补齐
       db.exec(COMMANDS_SQL)
+      // 插件 secret 表（M7）：非投影表，重建不清空；只存密文
+      db.exec(PLUGIN_SECRETS_SQL)
       db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
     })
     return db

@@ -12,14 +12,18 @@
 import type { PluginManifest } from '../protocol/manifest'
 import type { ChannelPlugin } from '../protocol/channels'
 import type { DetectedRuntime } from '../protocol/entities'
-import type { ExecutorPlugin, SdkHost } from '../sdk/types'
+import type { ExecutorPlugin, SdkHost, SourcePlugin } from '../sdk/types'
 import { createSdk } from '../sdk'
 import { desktopChannel, desktopManifest } from './channels/desktop'
 import { inAppChannel, inAppManifest } from './channels/in-app'
+import { webhookChannel, webhookChannelManifest } from './channels/webhook-channel'
 import { commandPlugin } from './executors/command'
 import { commandManifest } from './executors/command/manifest'
 import { dshPlugin } from './executors/dsh'
 import { dshManifest } from './executors/dsh/manifest'
+import { createRemoteExecutor } from './executors/remote'
+import { remoteManifest } from './executors/remote/manifest'
+import { webhookManifest, webhookSource } from './sources/webhook'
 import { CLI_CANDIDATES } from './shared/cli-catalog'
 
 /** 一条执行器注册项（`host/executor-registry.ts` 的 `ExecutorPluginEntry` 结构兼容） */
@@ -40,6 +44,13 @@ export const executors: ReadonlyArray<ExecutorRegistryEntry> = [
     label: commandManifest.name,
     manifest: commandManifest,
     plugin: commandPlugin,
+  },
+  {
+    // M7 架构位：无传输时回执 runtime_missing（不 spawn、不连网）
+    key: remoteManifest.id,
+    label: remoteManifest.name,
+    manifest: remoteManifest,
+    plugin: createRemoteExecutor(null),
   },
 ]
 
@@ -75,12 +86,47 @@ export const channels: ReadonlyArray<ChannelRegistryEntry> = [
     manifest: desktopManifest,
     plugin: desktopChannel,
   },
+  {
+    // M7：出站 webhook（未配置 url 时插件自己 no-op，不投递）
+    key: webhookChannelManifest.id,
+    label: webhookChannelManifest.name,
+    manifest: webhookChannelManifest,
+    plugin: webhookChannel,
+  },
 ]
 
 /** 按 key 取通道注册项；未知 key 抛可读错误（装配根据此不启动未知通道）。 */
 export function channelById(key: string): ChannelRegistryEntry {
   const found = channels.find((entry) => entry.key === key)
   if (found === undefined) throw new Error(`通道插件未注册: ${key}`)
+  return found
+}
+
+/** 一条来源注册项（SPEC-plugins「source」）：key = manifest.id。 */
+export interface SourceRegistryEntry {
+  key: string
+  label: string
+  manifest: PluginManifest
+  plugin: SourcePlugin
+}
+
+/**
+ * 内置来源清单（M7）：数组顺序即启动顺序。宿主只经本清单启停，
+ * 不直接 import 具体来源插件。
+ */
+export const sources: ReadonlyArray<SourceRegistryEntry> = [
+  {
+    key: webhookManifest.id,
+    label: webhookManifest.name,
+    manifest: webhookManifest,
+    plugin: webhookSource,
+  },
+]
+
+/** 按 key 取来源注册项；未知 key 抛可读错误。 */
+export function sourceById(key: string): SourceRegistryEntry {
+  const found = sources.find((entry) => entry.key === key)
+  if (found === undefined) throw new Error(`来源插件未注册: ${key}`)
   return found
 }
 

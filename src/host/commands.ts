@@ -15,10 +15,13 @@ import type { Fact } from '../kernel/types'
 import type { Runtime } from '../protocol/entities'
 import type { Card } from '../protocol/entities'
 import type { Command } from '../protocol/commands'
+import type { Capability, PluginManifest } from '../protocol/manifest'
+import type { PluginSetting, PluginSettingsView, PluginView } from '../protocol/plugins'
 import type { DispatchResult as IpcDispatchResult, FactSummary } from '../protocol/ipc'
 import type { ExecutorPort } from '../protocol/executor'
 import { HOST_VIEW_IDS, type HostViewId, type ViewId, type ViewParams } from '../protocol/views'
 import { validateCommand, validateQuery } from '../protocol/validate'
+import { mergePluginSetting, type PluginSettingSeed } from '../kernel/plugins'
 import { StoreError } from './store/errors'
 import { isDeclaredAppEvent } from '../shared/apps'
 
@@ -29,11 +32,24 @@ export interface ExecutorDefaults {
   profile: string
 }
 
-/** 只读宿主视图：由装配根注入（插件注册表 / CLI 探测 / 执行器模型目录）。 */
+/** 只读宿主视图：由装配根注入（插件注册表 / CLI 探测 / 执行器模型目录 / 磁盘插件目录）。 */
 export type HostViewResolver = (
   view: HostViewId,
   params: Record<string, string> | undefined,
 ) => unknown
+
+/**
+ * 插件命令的宿主依赖（M7）：磁盘目录（kind / 声明的能力 / config 默认值）、
+ * 当前视图行、secret 读写。内核不认识插件目录，因此这些判断只能由宿主做。
+ */
+export interface PluginCommandDeps {
+  /** 按 id 取磁盘上的插件条目；不存在返回 null */
+  entry(id: string): { manifest: PluginManifest; builtin: boolean } | null
+  /** 按 id 取 `plugins.all` 的视图行（设置改完后回给 UI）；不存在返回 null */
+  view(id: string): PluginView | null
+  /** 写 secret：`null` 表示删除；失败抛错（不落日志） */
+  writeSecrets(pluginId: string, secrets: Record<string, string | null>): void
+}
 
 export interface CommandRouterDeps {
   store: Store
@@ -45,6 +61,8 @@ export interface CommandRouterDeps {
   executorDefaults: (key: string | undefined) => ExecutorDefaults
   /** 宿主视图解析（只读，不写库、不发失效） */
   hostView: HostViewResolver
+  /** 插件命令依赖（M7）；未注入时 `plugin.set` 返回 unsupported */
+  plugins?: PluginCommandDeps
   /** 幂等键生成器（默认随机 UUID；测试可注入确定性值） */
   newCommandId?: () => string
 }
@@ -220,6 +238,12 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
         const id = entityIdOf(facts, 'task.created')
         return id === null ? null : taskById(id)
       }
+      case 'plugins.replace':
+        // 整批保存后立刻返回新快照（IPC 可直接刷新，不必再发一次 plugins.settings）
+        return store.query('plugins.settings')
+      case 'plugin.set':
+        // 编排命令：返回值在 `setPlugin` 里按 views 现算
+        return null
       default:
         return null
     }
@@ -291,6 +315,67 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
     return { facts: summarize(facts), value: probe }
   }
 
+  /** manifest 的非 secret 默认值（新插件还没有设置行时用它当 seed）。 */
+  const defaultPluginConfig = (manifest: PluginManifest): PluginSetting['config'] => {
+    const config: PluginSetting['config'] = {}
+    for (const field of manifest.config ?? []) {
+      if (field.type === 'secret') continue
+      if (field.default !== undefined) config[field.key] = field.default
+    }
+    return config
+  }
+
+  /**
+   * 编排：改一条插件设置（M7）。
+   *
+   * 步骤：磁盘条目 → 当前快照 → seed（新插件按 manifest 默认值）→ 合并 patch →
+   * 宿主侧语义校验（授权 ⊆ 声明能力、secret 键 ⊆ 声明的 secret 字段）→
+   * `plugins.replace` 整批落事实 → 写非投影 secret 表 → 返回该插件视图行。
+   */
+  const setPlugin = (
+    command: Extract<Command, { type: 'plugin.set' }>,
+  ): IpcDispatchResult<unknown> => {
+    const pluginDeps = deps.plugins
+    if (pluginDeps === undefined) throw new StoreError('unsupported', '插件设置未装配')
+    const entry = pluginDeps.entry(command.pluginId)
+    if (entry === null) throw new StoreError('not_found', '插件不存在: ' + command.pluginId)
+    const current: PluginSettingsView = store.query('plugins.settings')
+    const existing = current.settings.find((setting) => setting.id === command.pluginId)
+    const seed: PluginSettingSeed = existing ?? {
+      id: command.pluginId,
+      kind: entry.manifest.kind,
+      enabled: entry.builtin,
+      granted: entry.builtin ? [...entry.manifest.capabilities] : [],
+      config: defaultPluginConfig(entry.manifest),
+    }
+    const merged = mergePluginSetting(seed, command)
+    const declared = entry.manifest.capabilities
+    const undeclared = merged.granted.find(
+      (capability: Capability) => !declared.includes(capability),
+    )
+    if (undeclared !== undefined) {
+      throw new StoreError('invalid_input', '插件未声明该能力: ' + undeclared)
+    }
+    if (command.secrets !== undefined) {
+      const allowed = new Set(
+        (entry.manifest.config ?? [])
+          .filter((field) => field.type === 'secret')
+          .map((field) => field.key),
+      )
+      const unknown = Object.keys(command.secrets).find((key) => !allowed.has(key))
+      if (unknown !== undefined) {
+        throw new StoreError('invalid_input', '插件未声明该 secret 字段: ' + unknown)
+      }
+    }
+    const settings = [...current.settings.filter((setting) => setting.id !== merged.id), merged]
+    deps.dispatch({ type: 'plugins.replace', commandId: command.commandId, settings })
+    if (command.secrets !== undefined) pluginDeps.writeSecrets(command.pluginId, command.secrets)
+    return {
+      facts: summarize(store.commandFacts(command.commandId) ?? []),
+      value: pluginDeps.view(command.pluginId),
+    }
+  }
+
   return {
     dispatch: async (command) => {
       const validated = validateCommand(command)
@@ -306,6 +391,7 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       if (parsed.type === 'runtime.create') return createRuntime(parsed)
       if (parsed.type === 'runtime.update') return updateRuntime(parsed)
       if (parsed.type === 'runtime.probe') return probeOnly(parsed)
+      if (parsed.type === 'plugin.set') return setPlugin(parsed)
 
       const facts = executePlain(parsed)
       return { facts: summarize(facts), value: valueOf(parsed, facts) }

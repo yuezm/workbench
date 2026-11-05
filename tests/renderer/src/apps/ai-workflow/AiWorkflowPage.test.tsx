@@ -59,6 +59,8 @@ function stage(
     agentId: null,
     onCompleteStageId: null,
     onRejectStageId: null,
+    handoffWorkflowId: null,
+    handoffStageId: null,
   }
 }
 
@@ -83,6 +85,8 @@ const task: Task = {
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: 't',
   updatedAt: 't',
 }
@@ -181,6 +185,7 @@ function seedBase(): void {
   kernel.setView('runtimes.detected', undefined, [])
   kernel.setView('conversations.all', undefined, [])
   kernel.setView('rules.all', undefined, { version: 0, rules: [] })
+  kernel.setView('plugins.all', undefined, [])
 }
 
 /** dispatch 注入：默认零事实成功；覆盖时按命令返回实体/更新视图 */
@@ -298,6 +303,11 @@ describe('AiWorkflowPage', () => {
     expect(screen.getByRole('button', { name: '新建规则' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Issue 进研发' })).toBeEnabled()
     expect(screen.queryByRole('heading', { name: '工作流' })).not.toBeInTheDocument()
+
+    await openSection(user, '插件')
+    expect(await screen.findByRole('heading', { name: '插件' })).toBeInTheDocument()
+    expect(await screen.findByText('未发现插件')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '规则' })).not.toBeInTheDocument()
   })
 
   it('配置页默认不显示新增表单，点击新建才弹出', async () => {

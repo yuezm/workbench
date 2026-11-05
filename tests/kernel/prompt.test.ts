@@ -147,6 +147,8 @@ describe('kernel/prompt 回执块说明', () => {
       labels: [],
       threadId: null,
       parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -223,6 +225,8 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       labels: [],
       threadId: 'th-1',
       parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }

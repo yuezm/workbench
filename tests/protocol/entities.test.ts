@@ -199,6 +199,8 @@ const sampleStage = {
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
 } satisfies WorkflowStage
 
 const sampleWorkflow = {
@@ -222,6 +224,8 @@ const sampleTask = {
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 } satisfies Task
@@ -360,6 +364,8 @@ describe('protocol/entities', () => {
       'currentStageId',
       'description',
       'externalRef',
+      'handoffFromStageId',
+      'handoffFromTaskId',
       'id',
       'labels',
       'origin',
@@ -375,6 +381,8 @@ describe('protocol/entities', () => {
     expect(keysOf(sampleStage)).toEqual([
       'agentId',
       'entryMode',
+      'handoffStageId',
+      'handoffWorkflowId',
       'id',
       'name',
       'onCompleteStageId',

@@ -42,6 +42,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
   ...over,
 })
 
@@ -98,6 +100,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -182,6 +186,8 @@ const view = (seed: Seed = {}): View => ({
   rulesVersion: 0,
   ruleSetReplacedAt: null,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 /** 与 `host/store/index` 的 `DEFAULT_LIMITS` 同值；内核单测不 import 宿主实现。 */

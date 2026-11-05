@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '../../../src/kernel/types'
 import type { RunRow, Task } from '../../../src/protocol/entities'
+import type { PluginSettingsRow } from '../../../src/protocol/plugins'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '../../../src/protocol/rules'
 import { withTx } from '../../../src/host/schema'
 import { StoreError } from '../../../src/host/store/errors'
@@ -551,7 +552,7 @@ describe('createProjectionWriter：显式行映射', () => {
     })
   })
 
-  it('clear 清空十三张投影表（重建事务关外键）', () => {
+  it('clear 清空十四张投影表（重建事务关外键）', () => {
     const db = memory()
     const writer = createProjectionWriter(db)
     const runtime = sample.runtime()
@@ -564,6 +565,12 @@ describe('createProjectionWriter：显式行映射', () => {
     const message = sample.message()
     const card = sample.card()
     const thread = sample.thread()
+    const settings: PluginSettingsRow = {
+      id: 'current',
+      version: 1,
+      replacedAt: SAMPLE_AT,
+      settings: [],
+    }
     const ruleSet: RuleSetRow = {
       id: 'current',
       version: 1,
@@ -592,6 +599,7 @@ describe('createProjectionWriter：显式行映射', () => {
       { table: 'rule_sets', key: ruleSet.id, row: ruleSet },
       { table: 'rule_fires', key: fire.id, row: fire },
       { table: 'threads', key: thread.id, row: thread },
+      { table: 'plugin_settings', key: settings.id, row: settings },
     ] as Change[]) {
       writer.apply(change, SAMPLE_AT)
     }
@@ -600,6 +608,7 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(countRows(db, 'rule_sets')).toBe(1)
     expect(countRows(db, 'rule_fires')).toBe(1)
     expect(countRows(db, 'threads')).toBe(1)
+    expect(countRows(db, 'plugin_settings')).toBe(1)
 
     db.exec('PRAGMA foreign_keys = OFF')
     try {
@@ -622,6 +631,7 @@ describe('createProjectionWriter：显式行映射', () => {
       'rule_sets',
       'rule_fires',
       'threads',
+      'plugin_settings',
     ]) {
       expect(countRows(db, table)).toBe(0)
     }

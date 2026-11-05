@@ -16,6 +16,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: 'ag-1',
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
   ...over,
 })
 
@@ -32,6 +34,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   labels: [],
   threadId: 'th-1',
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -154,6 +158,8 @@ const view = (over: Partial<View> = {}): View => ({
   rulesVersion: 0,
   ruleSetReplacedAt: null,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
   ...over,
 })
 

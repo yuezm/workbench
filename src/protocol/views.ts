@@ -23,6 +23,7 @@ import type {
   WorkflowWithStages,
 } from './entities'
 import type { RuleSetView } from './rules'
+import type { PluginSettingsView, PluginView } from './plugins'
 import type { ThreadRow } from './thread'
 
 /**
@@ -56,14 +57,21 @@ export const VIEW_IDS = [
   'runtimes.detected',
   'runtimes.models',
   'rules.all',
+  'plugins.settings',
+  'plugins.all',
   'thread.byId',
 ] as const
 
 /**
- * 宿主视图：由装配根注入的只读函数提供（插件注册表 / CLI 探测 / 执行器模型目录），
- * 不读投影、不写库、不发失效；与 DB 视图共用同一个 `query` 动词（M5 D4）。
+ * 宿主视图：由装配根注入的只读函数提供（插件注册表 / CLI 探测 / 执行器模型目录 /
+ * 磁盘插件目录），不读投影、不写库、不发失效；与 DB 视图共用同一个 `query` 动词（M5 D4）。
  */
-export const HOST_VIEW_IDS = ['runtimes.executors', 'runtimes.detected', 'runtimes.models'] as const
+export const HOST_VIEW_IDS = [
+  'runtimes.executors',
+  'runtimes.detected',
+  'runtimes.models',
+  'plugins.all',
+] as const
 
 export type HostViewId = (typeof HOST_VIEW_IDS)[number]
 
@@ -189,6 +197,10 @@ export interface ViewResults {
   'runtimes.models': RuntimeModelOption[]
   /** 当前规则集（M6）：版本 + 规则清单；无规则时为 `{version:0, rules:[]}` */
   'rules.all': RuleSetView
+  /** 插件设置快照（M7）：版本 + 设置清单；无快照时为 `{version:0, replacedAt:null, settings:[]}` */
+  'plugins.settings': PluginSettingsView
+  /** 磁盘插件目录 + 设置 + 运行状态（M7 宿主视图；secret 只回键名） */
+  'plugins.all': PluginView[]
   /** 线程详情（M6.5）：线程行 + 任务树来源 + 各智能体最近会话 id；不存在时为 null */
   'thread.byId': ThreadDetail | null
 }

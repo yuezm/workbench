@@ -39,6 +39,7 @@ import type {
   WorkflowWithStages,
 } from '../../protocol/entities'
 import type { RuleSetRow, RuleSetView } from '../../protocol/rules'
+import type { PluginSettingsRow, PluginSettingsView } from '../../protocol/plugins'
 import type { ThreadRow } from '../../protocol/thread'
 import type {
   ActiveRun,
@@ -69,6 +70,8 @@ interface StageRow {
   agent_id: string | null
   on_complete_stage_id: string | null
   on_reject_stage_id: string | null
+  handoff_workflow_id: string | null
+  handoff_stage_id: string | null
 }
 
 interface AgentRow {
@@ -110,6 +113,8 @@ interface TaskRow {
   labels_json: string
   thread_id: string | null
   parent_task_id: string | null
+  handoff_from_task_id: string | null
+  handoff_from_stage_id: string | null
   created_at: string
   updated_at: string
 }
@@ -137,6 +142,14 @@ interface RuleSetDbRow {
   version: number
   replaced_at: string
   rules_json: string
+}
+
+/** `plugin_settings` 单行投影（列与 `host/schema` 的 DDL 一一对应）。 */
+interface PluginSettingsDbRow {
+  id: string
+  version: number
+  replaced_at: string
+  settings_json: string
 }
 
 /** `runs` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
@@ -246,6 +259,8 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   agentId: row.agent_id,
   onCompleteStageId: row.on_complete_stage_id,
   onRejectStageId: row.on_reject_stage_id,
+  handoffWorkflowId: row.handoff_workflow_id,
+  handoffStageId: row.handoff_stage_id,
 })
 
 const mapAgent = (row: AgentRow): Agent => ({
@@ -288,6 +303,8 @@ const mapTask = (row: TaskRow): Task => ({
   labels: JSON.parse(row.labels_json) as string[],
   threadId: row.thread_id,
   parentTaskId: row.parent_task_id,
+  handoffFromTaskId: row.handoff_from_task_id,
+  handoffFromStageId: row.handoff_from_stage_id,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -405,7 +422,7 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
     db
       .prepare(
         `SELECT id, workflow_id, name, position, entry_mode, agent_id,
-                on_complete_stage_id, on_reject_stage_id
+                on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id
          FROM workflow_stages ORDER BY workflow_id, position`,
       )
       .all() as unknown as StageRow[]
@@ -433,7 +450,8 @@ const readRuntimes = (db: DatabaseSync): Runtime[] =>
 
 /** `tasks` 投影的列清单（逐列写死，不用 `SELECT *`；三处读路径共用）。 */
 const TASK_COLUMNS = `id, title, description, workflow_id, current_stage_id, status, origin,
-        rule_id, external_ref, labels_json, thread_id, parent_task_id, created_at, updated_at`
+        rule_id, external_ref, labels_json, thread_id, parent_task_id,
+        handoff_from_task_id, handoff_from_stage_id, created_at, updated_at`
 
 const readTasks = (db: DatabaseSync): Task[] =>
   (
@@ -728,11 +746,39 @@ const readRuleSetView = (db: DatabaseSync): RuleSetView => {
     : { version: ruleSet.version, rules: ruleSet.rules }
 }
 
+/**
+ * 当前插件设置快照（`plugin_settings` 单行 `id='current'`）：没有 `plugins.replaced` 事实时为 null。
+ * 装载视图与 `plugins.settings` 查询共用，避免两处各读一次、口径分叉。
+ */
+const readPluginSettings = (db: DatabaseSync): PluginSettingsRow | null => {
+  const row = db
+    .prepare(
+      "SELECT id, version, replaced_at, settings_json FROM plugin_settings WHERE id = 'current'",
+    )
+    .get() as unknown as PluginSettingsDbRow | undefined
+  if (row === undefined) return null
+  return {
+    id: 'current',
+    version: row.version,
+    replacedAt: row.replaced_at,
+    settings: JSON.parse(row.settings_json) as PluginSettingsRow['settings'],
+  }
+}
+
+/** `plugins.settings` 视图：无快照时 `{ version: 0, replacedAt: null, settings: [] }`。 */
+const readPluginSettingsView = (db: DatabaseSync): PluginSettingsView => {
+  const settings = readPluginSettings(db)
+  return settings === null
+    ? { version: 0, replacedAt: null, settings: [] }
+    : { version: settings.version, replacedAt: settings.replacedAt, settings: settings.settings }
+}
+
 /** 按输入声明的切片装载视图：未声明的表不查，`activeTaskIds` 总是装载。 */
 export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): View {
   const slice = new Set<ProjectionTable>(tables)
-  // 规则集是单行切片：未声明时按「无规则集」装载（version 0 / 空清单 / null 基线）。
+  // 规则集与插件设置是单行切片：未声明时按「无快照」装载（version 0 / 空清单）。
   const ruleSet = slice.has('rule_sets') ? readRuleSet(db) : null
+  const pluginSettings = slice.has('plugin_settings') ? readPluginSettings(db) : null
   return {
     seq: lastSeq(db),
     workflows: slice.has('workflows') ? toMap(readWorkflows(db)) : new Map(),
@@ -750,6 +796,8 @@ export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): 
     rulesVersion: ruleSet?.version ?? 0,
     ruleSetReplacedAt: ruleSet?.replacedAt ?? null,
     ruleFiredAt: slice.has('rule_fires') ? readRuleFiredAt(db) : new Map(),
+    pluginSettings: pluginSettings?.settings ?? [],
+    pluginSettingsVersion: pluginSettings?.version ?? 0,
   }
 }
 
@@ -936,10 +984,14 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'rules.all':
       // M6：规则页只读视图（版本 + 当前规则清单）；无规则集时返回空版本
       return readRuleSetView(db)
+    case 'plugins.settings':
+      // M7：插件设置快照读视图（版本 + 非密钥设置清单）；无快照时返回空版本
+      return readPluginSettingsView(db)
     case 'runtimes.executors':
     case 'runtimes.detected':
     case 'runtimes.models':
-      // 宿主视图（插件注册表 / CLI 探测 / 执行器模型目录）由装配根注入，不读投影
+    case 'plugins.all':
+      // 宿主视图（插件注册表 / CLI 探测 / 执行器模型目录 / 磁盘插件目录）由装配根注入，不读投影
       throw new StoreError('invalid_input', `宿主视图不读投影: ${view}`)
   }
 }

@@ -1,5 +1,5 @@
 /**
- * store 测试夹具：内存 SQLite（v2 全量 schema + 账本表）、十三张投影表的样例行、投影快照。
+ * store 测试夹具：内存 SQLite（v2 全量 schema + 账本表）、十四张投影表的样例行、投影快照。
  *
  * 只被 `src/host/store/*.test.ts` import，不参与运行时装配；测试注入确定性 now / newId，
  * 因此断言可以逐列全等，不依赖时钟与随机数。
@@ -114,6 +114,8 @@ export const sample = {
       agentId: null,
       onCompleteStageId: null,
       onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
       ...overrides,
     }
   },
@@ -131,6 +133,8 @@ export const sample = {
       labels: [],
       threadId: null,
       parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
       createdAt: SAMPLE_AT,
       updatedAt: SAMPLE_AT,
       ...overrides,
@@ -254,7 +258,7 @@ export const sample = {
   },
 }
 
-/** 十三表列清单（与 `projection-apply` 的写列一一对应）与快照排序键；快照只取这些列。 */
+/** 十四表列清单（与 `projection-apply` 的写列一一对应）与快照排序键；快照只取这些列。 */
 const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: string }> = {
   tasks: {
     columns: [
@@ -418,9 +422,13 @@ const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: 
     ],
     orderBy: 'id',
   },
+  plugin_settings: {
+    columns: ['id', 'version', 'replaced_at', 'settings_json'],
+    orderBy: 'id',
+  },
 }
 
-/** 十三表逐行快照（列固定、按表内排序键），用于「增量 vs 重建」逐表全等比较。 */
+/** 十四表逐行快照（列固定、按表内排序键），用于「增量 vs 重建」逐表全等比较。 */
 export function dumpProjection(db: DatabaseSync): Record<string, unknown[]> {
   const snapshot: Record<string, unknown[]> = {}
   for (const [table, spec] of Object.entries(PROJECTION_COLUMNS)) {

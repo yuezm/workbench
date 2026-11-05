@@ -37,6 +37,7 @@ import { chatPrompt, laterPrompt, titleFromContent } from './prompt'
 import { answerFacts, cardsFromReceipt, resolveFacts, resumedRun } from './cards'
 import { entryRunFacts, ACCESS_BY_PERMISSION } from './task-effects'
 import { cronTaskFacts, eventThreadFacts, manualTriggerFacts, validateRuleBatch } from './rules'
+import { replacedPluginSettings, validatePluginSettings } from './plugins'
 import {
   boundFacts,
   closeIfAllDone,
@@ -70,6 +71,7 @@ import {
   waitingFacts,
   waitingRun,
 } from './run'
+import { handoffOnExit, validateStageHandoffs } from './handoff'
 import type { StageEvent } from './workflow/stage-machine'
 import { completeTask, moveTask, moveTaskToStage } from './workflow/stage-machine'
 import { validateStageSet } from './workflow/stage-validation'
@@ -202,6 +204,9 @@ function stageRow(workflowId: Id, ids: Id[], stage: StageInput, position: number
     agentId: stage.agentId ?? null,
     onCompleteStageId: indexTarget(ids, stage.onCompleteIndex),
     onRejectStageId: indexTarget(ids, stage.onRejectIndex),
+    // M7：交接目标按 id 直存（跨工作流，不能用本批下标表达）
+    handoffWorkflowId: stage.handoffWorkflowId ?? null,
+    handoffStageId: stage.handoffStageId ?? null,
   }
 }
 
@@ -220,7 +225,10 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     a.entryMode === b.entryMode &&
     a.agentId === b.agentId &&
     a.onCompleteStageId === b.onCompleteStageId &&
-    a.onRejectStageId === b.onRejectStageId
+    a.onRejectStageId === b.onRejectStageId &&
+    // M7：交接两列一变就要落 stage.updated，否则更新被静默吞掉
+    a.handoffWorkflowId === b.handoffWorkflowId &&
+    a.handoffStageId === b.handoffStageId
   )
 }
 
@@ -368,25 +376,42 @@ const hostDraft = <T extends FactType>(
  * 阶段 run 终态 → 阶段流转事实：成功进下一阶段（无下一阶段则完成），失败按
  * `on_reject` 打回；打回原地 / 任务已完成 / 阶段无效 / 任务已删时零事实，取消不推进。
  * 目标阶段的进入效果（建下一条 run）由 `run.receipt` 分支在拿到 `task.moved` 后补。
+ *
+ * M7：成功且向前离开阶段时，在 `task.moved` / `task.completed` **之前**追加交接事实
+ * （目标工作流建任务），保证同一批重建顺序稳定。
  */
-function stageTransitionFacts(view: View, run: SettledRun, now: Iso): FactDraft[] {
+function stageTransitionFacts(
+  view: View,
+  run: SettledRun,
+  now: Iso,
+  env: Environment,
+): FactDraft[] {
   if (run.status === 'cancelled' || run.taskId === null) return []
   const task = view.tasks.get(run.taskId)
   if (!task || task.status === 'completed') return []
   const workflow = view.workflows.get(task.workflowId)
   if (!workflow) return []
   const flow = workflowWithStages(view, workflow)
-  if (!flow.stages.some((stage) => stage.id === task.currentStageId)) return []
-  const event: StageEvent =
-    run.status === 'succeeded'
-      ? { type: 'RUN_SUCCEEDED', runId: run.id }
-      : { type: 'RUN_FAILED', runId: run.id }
+  const current = flow.stages.find((stage) => stage.id === task.currentStageId)
+  if (!current) return []
+  const succeeded = run.status === 'succeeded'
+  const event: StageEvent = succeeded
+    ? { type: 'RUN_SUCCEEDED', runId: run.id }
+    : { type: 'RUN_FAILED', runId: run.id }
   const next = moveTask(task, event, flow).task
   if (next.status === 'completed') {
-    return [hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now)]
+    return [
+      ...handoffOnExit(view, task, current, null, succeeded, now, env, HOST_SCHEDULER),
+      hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now),
+    ]
   }
   if (next.currentStageId !== null && next.currentStageId !== task.currentStageId) {
+    const target = flow.stages.find((stage) => stage.id === next.currentStageId)
     return [
+      // 目标阶段找不到属于脏投影：不当作「完成」，宁可不交接
+      ...(target === undefined
+        ? []
+        : handoffOnExit(view, task, current, target, succeeded, now, env, HOST_SCHEDULER)),
       hostDraft(
         'task.moved',
         {
@@ -690,6 +715,9 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const missingAgent = missingAgentId(view, form.stages)
       if (missingAgent) return reject('not_found', '智能体不存在: ' + missingAgent)
       const workflowId = env.nextId('workflow')
+      // M7：交接目标必须存在且 ≠ 自身、目标阶段属于目标工作流（保存时校验，读时再防御）
+      const handoffError = validateStageHandoffs(view, workflowId, form.stages)
+      if (handoffError) return reject('invalid_input', handoffError)
       const stageIds = form.stages.map(() => env.nextId('stage'))
       const workflow: Workflow = {
         id: workflowId,
@@ -719,6 +747,9 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       }
       const missingAgent = missingAgentId(view, form.stages)
       if (missingAgent) return reject('not_found', '智能体不存在: ' + missingAgent)
+      // M7：交接目标工作流 / 阶段的存在与从属（自指在保存时就拒绝）
+      const handoffError = validateStageHandoffs(view, current.id, form.stages)
+      if (handoffError) return reject('invalid_input', handoffError)
 
       // 阶段 id 差量：回传的 id 保留，缺省 id 拿新 id，未出现在提交集合里的旧阶段 tombstone。
       const existing = stagesOf(view, current.id)
@@ -827,6 +858,8 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         labels: [],
         threadId: thread.id,
         parentTaskId: null,
+        handoffFromTaskId: null,
+        handoffFromStageId: null,
         createdAt: now,
         updatedAt: now,
       }
@@ -849,9 +882,8 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const workflow = view.workflows.get(task.workflowId)
       if (!workflow) return reject('not_found', '工作流不存在: ' + task.workflowId)
       const flow = workflowWithStages(view, workflow)
-      if (!flow.stages.some((stage) => stage.id === task.currentStageId)) {
-        return reject('conflict', '任务当前阶段无效')
-      }
+      const fromStage = flow.stages.find((stage) => stage.id === task.currentStageId)
+      if (!fromStage) return reject('conflict', '任务当前阶段无效')
       if (view.activeTaskIds.has(task.id)) return reject('conflict', '执行中的阶段不能拖动')
       const target = flow.stages.find((stage) => stage.id === input.stageId)
       if (!target) return reject('not_found', '目标阶段无效: ' + input.stageId)
@@ -864,6 +896,8 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       if (moved.currentStageId !== task.currentStageId) {
         facts.push(...entryRunFacts(view, moved, now, env, OWNER))
       }
+      // M7：拖到更后阶段 = 向前离开，触发交接；拖回更前阶段不触发
+      facts.push(...handoffOnExit(view, task, fromStage, target, true, now, env, OWNER))
       return done(facts)
     }
 
@@ -872,12 +906,17 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       if (!task) return reject('not_found', '任务不存在: ' + input.id)
       const workflow = view.workflows.get(task.workflowId)
       if (!workflow) return reject('not_found', '工作流不存在: ' + task.workflowId)
-      if (!stagesOf(view, workflow.id).some((stage) => stage.id === task.currentStageId)) {
-        return reject('conflict', '任务当前阶段无效')
-      }
+      const fromStage = stagesOf(view, workflow.id).find(
+        (stage) => stage.id === task.currentStageId,
+      )
+      if (!fromStage) return reject('conflict', '任务当前阶段无效')
       if (view.activeTaskIds.has(task.id)) return reject('conflict', '执行中的阶段不能完成')
       const completed: Task = { ...completeTask(task), updatedAt: now }
-      const facts: FactDraft[] = [draft('task.completed', { task: completed })]
+      // M7：完成前先产交接事实（完成 = 离开当前阶段且向前）
+      const facts: FactDraft[] = [
+        ...handoffOnExit(view, task, fromStage, null, true, now, env, OWNER),
+        draft('task.completed', { task: completed }),
+      ]
       // M6.5：线程内任务全部完成 → 归档线程
       facts.push(
         ...closeIfAllDone(
@@ -1034,7 +1073,7 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const settled = settledRun(run, input.receipt, now)
       facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
       if (run.purpose === 'stage') {
-        const transition = stageTransitionFacts(view, settled, now)
+        const transition = stageTransitionFacts(view, settled, now, env)
         facts.push(...transition)
         // 进入效果：流转到目标阶段后若目标阶段是 agent 入口，立刻入队下一轮（形成链条）
         for (const fact of transition) {
@@ -1286,6 +1325,27 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       // 规则页「立即运行」：直接按规则建任务，不依赖事件、不写 rule.fired
       return manualTriggerFacts(view, input.ruleId, now, env)
     }
+
+    case 'plugins.replace': {
+      // 整批替换：任一条非法 → 整批 reject（零事实），旧版继续生效；版本由内核 +1。
+      // secret 不在这条命令里（宿主写到非投影表），因此本事实可以整行重建。
+      const result = validatePluginSettings(input.settings)
+      if ('error' in result) return reject('invalid_input', result.error)
+      return done([
+        draft('plugins.replaced', {
+          pluginSettings: replacedPluginSettings(
+            result.settings,
+            view.pluginSettingsVersion + 1,
+            now,
+          ),
+        }),
+      ])
+    }
+
+    case 'plugin.set':
+      // 编排命令：宿主读当前快照 + 磁盘 manifest 后合并，再转 `plugins.replace`。
+      // 直接进 decide 说明绕过了路由，明确拒绝而不是静默零事实。
+      return reject('unsupported', 'plugin.set 由宿主编排（合并后落 plugins.replaced）')
 
     // ---------- 线程（M6.5） ----------
     case 'thread.note': {

@@ -11,6 +11,7 @@ import { AgentManager } from './components/AgentManager'
 import { ChatPanel } from './components/ChatPanel'
 import { ConversationList } from './components/ConversationList'
 import { KanbanBoard } from './components/KanbanBoard'
+import { PluginsManager } from './components/PluginsManager'
 import { RunLog } from './components/RunLog'
 import { RulesManager } from './components/RulesManager'
 import { RuntimeManager } from './components/RuntimeManager'
@@ -262,6 +263,13 @@ export function AiWorkflowPage(): ReactElement {
               <>
                 <SectionHeader title="规则" hint="事件或定时条件自动建任务" />
                 <RulesManager />
+              </>
+            )}
+
+            {section === 'plugins' && (
+              <>
+                <SectionHeader title="插件" hint="外部能力与授权（信任门，不是系统沙箱）" />
+                <PluginsManager />
               </>
             )}
           </div>

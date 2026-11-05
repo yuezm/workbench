@@ -11,9 +11,11 @@
  * 缺省值：`spawn = defaultSpawn`、`now = Date.now`（毫秒）、`log = console.warn`
  * （M3 没有日志面板，先落主进程终端，ESLint 只允许 warn/error）、`config` 返回空对象、
  * `sessionRoot` 未配置为 null（执行器据此跳过跨轮续接）、`notify` 静默丢弃（M4：装配根
- * 注入 `src/main/notify.ts` 的 Electron 实现；host 自身不 import electron）。
+ * 注入 `src/main/notify.ts` 的 Electron 实现；host 自身不 import electron）、`net` 缺省
+ * 不注入（M7：装配根注入 `host/net.ts` 的原件；没有原件时声明了 `net` 的插件调用即
+ * `capability_unavailable`，不影响其它能力）。
  */
-import type { NotifyFn, SdkHost, SdkPaths, SpawnFn } from '../sdk/types'
+import type { NetCapability, NotifyFn, SdkHost, SdkPaths, SpawnFn } from '../sdk/types'
 import { defaultScanDirs, findInDirs, resolveExecutable } from './executable'
 import { defaultSpawn, killProcessTree } from './process'
 
@@ -31,6 +33,8 @@ export interface SdkHostOptions {
   config?: <T = Record<string, unknown>>() => T
   /** 系统通知（M4）：装配根注入 `src/main/notify.ts`；缺省静默丢弃，测试注入假实现 */
   notify?: NotifyFn
+  /** 网络原件（M7）：装配根注入 `host/net.ts` 的 `createNetCapability()`；缺省不注入 */
+  net?: NetCapability
 }
 
 /** 缺省日志：M3 没有日志面板，插件日志先落主进程终端。 */
@@ -55,6 +59,9 @@ export function createSdkHost(options: SdkHostOptions = {}): SdkHost {
     paths,
     config: options.config ?? defaultConfig,
     notify: options.notify ?? defaultNotify,
+    // 网络原件按需注入：没有注入时 `SdkHost.net` 为 undefined，`createSdk` 退化为
+    // `capability_unavailable`（声明了 net 但宿主没有实现，调用才失败）
+    ...(options.net === undefined ? {} : { net: options.net }),
     process: {
       spawn,
       // 命令解析 / 目录扫描 / 进程树终止都直接用宿主现成实现，不在 sdk 层复刻平台分支

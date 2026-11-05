@@ -4,6 +4,7 @@ import {
   completeTask,
   enterStage,
   entryEffects,
+  exitsForward,
   moveTask,
   moveTaskToStage,
   resolveNextStage,
@@ -20,6 +21,8 @@ const stage = (id: string, over: Partial<WorkflowStage> = {}): WorkflowStage => 
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
   ...over,
 })
 
@@ -44,6 +47,8 @@ const task = (currentStageId: string | null): Task => ({
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 })
@@ -124,6 +129,8 @@ function sStage(partial: Partial<WorkflowStage> & { id: string; position: number
     agentId: null,
     onCompleteStageId: null,
     onRejectStageId: null,
+    handoffWorkflowId: null,
+    handoffStageId: null,
     ...partial,
   }
 }
@@ -146,6 +153,8 @@ function sTask(currentStageId: string | null, status: Task['status'] = 'active')
     labels: [],
     threadId: null,
     parentTaskId: null,
+    handoffFromTaskId: null,
+    handoffFromStageId: null,
     createdAt: 't',
     updatedAt: 't',
   }
@@ -324,5 +333,22 @@ describe('stage-machine（shared 用例并入）completeTask', () => {
   it('标记为 completed，其余字段不变', () => {
     const t = sTask('s1')
     expect(completeTask(t)).toEqual({ ...t, status: 'completed' })
+  })
+})
+
+describe('stage-machine exitsForward（M7 交接触发判定）', () => {
+  it('成功流转到更后阶段 / 任务完成 → 向前', () => {
+    expect(exitsForward({ from: s0, to: s2, succeeded: true })).toBe(true)
+    expect(exitsForward({ from: s2, to: null, succeeded: true })).toBe(true)
+  })
+
+  it('原地 / 拖回更前阶段 → 不向前', () => {
+    expect(exitsForward({ from: s1, to: s1, succeeded: true })).toBe(false)
+    expect(exitsForward({ from: s2, to: s0, succeeded: true })).toBe(false)
+  })
+
+  it('打回（成功标记为 false）→ 不向前，即使 onReject 配到更后阶段', () => {
+    expect(exitsForward({ from: s1, to: s0, succeeded: false })).toBe(false)
+    expect(exitsForward({ from: s0, to: s2, succeeded: false })).toBe(false)
   })
 })

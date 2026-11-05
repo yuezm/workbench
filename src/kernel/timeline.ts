@@ -144,6 +144,9 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'rule.fired':
       // 规则事实归到规则集（没有独立 scope）；规则任务由 task.created 的 cause/ruleId 追溯。
       return []
+    case 'plugins.replaced':
+      // 插件设置快照没有独立 scope：设置变更只影响插件装载与授权，不挂业务实体。
+      return []
     case 'conversation.created':
     case 'conversation.updated':
     case 'conversation.removed':

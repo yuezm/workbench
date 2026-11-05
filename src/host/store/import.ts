@@ -356,6 +356,9 @@ function readLegacyEntityRows(
     agentId: row.agent_id,
     onCompleteStageId: row.on_complete_stage_id,
     onRejectStageId: row.on_reject_stage_id,
+    // M7：v2 存量没有跨工作流交付概念——两个交接目标一律为空。
+    handoffWorkflowId: null,
+    handoffStageId: null,
   }))
 
   const tasks = (
@@ -380,6 +383,9 @@ function readLegacyEntityRows(
     // M6.5：v2 存量没有线程概念——不属于任何线程、不是派生任务。
     threadId: null,
     parentTaskId: null,
+    // M7：v2 存量没有交接概念——来源任务与阶段一律为空。
+    handoffFromTaskId: null,
+    handoffFromStageId: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))
@@ -495,6 +501,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   rule_fires: 0,
   // M6.5：v2 没有线程数据，导入不产 threads 行；键必须补齐以匹配 `ProjectionTable` 全集。
   threads: 0,
+  // M7：v2 没有插件设置；导入不产 plugin_settings 行。
+  plugin_settings: 0,
 })
 
 /** 一组行 + 表名 → `snapshot.imported` 草稿（payload 按表收窄成判别联合）。 */

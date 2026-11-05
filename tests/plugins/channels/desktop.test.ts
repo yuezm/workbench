@@ -20,7 +20,7 @@ describe('desktop 通道 manifest 与注册', () => {
   })
 
   it('注册表按投递顺序收录 desktop，key 等于 manifest.id', () => {
-    expect(channels.map((entry) => entry.key)).toEqual(['in-app', 'desktop'])
+    expect(channels.map((entry) => entry.key)).toEqual(['in-app', 'desktop', 'webhook-channel'])
     expect(channelById('desktop')).toMatchObject({ key: 'desktop', plugin: desktopChannel })
     expect(channels[1].manifest).toBe(desktopManifest)
   })

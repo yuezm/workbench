@@ -130,6 +130,8 @@ const view = (seed: Seed = {}): View => ({
   rulesVersion: 0,
   ruleSetReplacedAt: null,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
@@ -159,6 +161,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: 'ag-1',
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
   ...over,
 })
 
@@ -175,6 +179,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,

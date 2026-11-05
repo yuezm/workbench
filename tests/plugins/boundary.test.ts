@@ -204,6 +204,7 @@ const declaredCapabilitiesOf = (manifestSource: string): string[] => {
 const capabilityUseRules: ReadonlyArray<{ capability: string; usage: RegExp }> = [
   { capability: 'spawn', usage: /sdk\s*\.\s*process\s*\./ },
   { capability: 'notify', usage: /sdk\s*\.\s*notify\s*\(/ },
+  { capability: 'net', usage: /sdk\s*\.\s*net\s*\./ },
   { capability: 'fs.read', usage: /sdk\s*\.\s*fs\s*\.\s*read\s*\(/ },
   { capability: 'fs.write', usage: /sdk\s*\.\s*fs\s*\.\s*write\s*\(/ },
 ]
@@ -300,6 +301,29 @@ describe('插件边界', () => {
       `通道的 capabilities 是授权声明，必须与源码用法一致（含跨插件 import 扫描）：\n${findings.join('\n')}\n（扫描 ${channelDirs.length} 个通道插件）`,
     ).toEqual([])
   })
+
+  it('来源插件的 capabilities 声明与 sdk 用法双向一致（M7 T4）', () => {
+    const sourcesRoot = join(PLUGINS_ROOT, 'sources')
+    if (!existsSync(sourcesRoot)) return
+
+    const sourceDirs = readdirSync(sourcesRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+
+    const findings: string[] = []
+    for (const id of sourceDirs) {
+      const dir = join(sourcesRoot, id)
+      const manifestPath = join(dir, 'manifest.ts')
+      expect(existsSync(manifestPath), `来源插件 ${id} 缺少 manifest.ts`).toBe(true)
+      const declared = declaredCapabilitiesOf(readFileSync(manifestPath, 'utf8'))
+      findings.push(...capabilityViolationsOf(id, readPluginFiles(dir), declared))
+    }
+
+    expect(
+      findings,
+      `来源的 capabilities 是授权声明，必须与源码用法一致（含跨插件 import 扫描）：\n${findings.join('\n')}\n（扫描 ${sourceDirs.length} 个来源插件）`,
+    ).toEqual([])
+  })
 })
 
 describe('插件边界护栏自检', () => {
@@ -369,6 +393,27 @@ describe('插件边界护栏自检', () => {
     ]
     expect(capabilityViolationsOf('desktop', noUsage, ['notify'])).toEqual([
       'desktop: manifest.capabilities 声明了「notify」，但源码没有对应用法',
+    ])
+  })
+
+  it('net 护栏：来源用 sdk.net 必须声明 net，声明了不用也报（M7 T3）', () => {
+    const usesNet: PluginFile[] = [
+      {
+        path: 'sources/webhook/index.ts',
+        source:
+          'export const start = (ctx: SourceContext): void => { void ctx.sdk.net.listen(0, async () => ({ status: 200 })) }',
+      },
+    ]
+    expect(capabilityViolationsOf('webhook', usesNet, [])).toEqual([
+      'webhook: 源码用了 sdk 的「net」能力，但 manifest.capabilities 未声明',
+    ])
+    expect(capabilityViolationsOf('webhook', usesNet, ['net'])).toEqual([])
+
+    const noUsage: PluginFile[] = [
+      { path: 'sources/webhook/index.ts', source: 'export const start = (): void => undefined' },
+    ]
+    expect(capabilityViolationsOf('webhook', noUsage, ['net'])).toEqual([
+      'webhook: manifest.capabilities 声明了「net」，但源码没有对应用法',
     ])
   })
 })

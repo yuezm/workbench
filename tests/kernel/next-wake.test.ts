@@ -89,6 +89,8 @@ const view = (runs: RunRow[], rules: AutomationRule[] = []): View => ({
   rulesVersion: rules.length === 0 ? 0 : 1,
   ruleSetReplacedAt: rules.length === 0 ? null : CREATED,
   ruleFiredAt: new Map(),
+  pluginSettings: [],
+  pluginSettingsVersion: 0,
 })
 
 const env = (): Environment => ({

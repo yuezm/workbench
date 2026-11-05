@@ -36,6 +36,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
+  handoffWorkflowId: null,
+  handoffStageId: null,
   ...over,
 })
 
@@ -92,6 +94,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   labels: [],
   threadId: null,
   parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -228,6 +232,7 @@ const emptyTables = (): Tables => ({
   rule_sets: new Map(),
   rule_fires: new Map(),
   threads: new Map(),
+  plugin_settings: new Map(),
 })
 
 /** 按 seq 顺序 fold 事实：投影应用器的最小等价实现（重建与实时写入共用路径）。 */
@@ -764,6 +769,8 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
           labels: [],
           threadId: null,
           parentTaskId: null,
+          handoffFromTaskId: null,
+          handoffFromStageId: null,
         },
       },
     ])

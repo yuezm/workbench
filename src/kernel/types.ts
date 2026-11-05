@@ -25,6 +25,7 @@ import type {
 import type { FactPayload, FactType } from '../protocol/facts'
 import type { Input } from '../protocol/inputs'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '../protocol/rules'
+import type { PluginSettingsRow } from '../protocol/plugins'
 import type { ThreadRow } from '../protocol/thread'
 
 export type Seq = number
@@ -33,9 +34,10 @@ export type Iso = string
 
 /**
  * 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。
- * M4：卡片与派生事件入账；M6：规则集与 cron 触发投影；M6.5：线程实体与事件合并。
+ * M4：卡片与派生事件入账；M6：规则集与 cron 触发投影；M6.5：线程实体与事件合并；
+ * M7：插件设置投影、跨工作流交接、外部插件与 webhook 端口。
  */
-export const KERNEL_VERSION = 'm6.5.0'
+export const KERNEL_VERSION = 'm7.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
@@ -52,7 +54,8 @@ export type Actor =
 /**
  * 投影表全集：只有这些表可由事实重建（`host` 的清空白名单与指纹必须与之一致）。
  * M2 在实体五表之后追加运行生命周期相关的四张表；M4 追加卡片表（第 10 张）；
- * M6 追加规则集与规则触发记录（第 11、12 张）；M6.5 追加线程（第 13 张）。
+ * M6 追加规则集与规则触发记录（第 11、12 张）；M6.5 追加线程（第 13 张）；
+ * M7 追加插件设置（第 14 张）。
  */
 export const PROJECTION_TABLES = [
   'tasks',
@@ -68,6 +71,7 @@ export const PROJECTION_TABLES = [
   'rule_sets',
   'rule_fires',
   'threads',
+  'plugin_settings',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -86,6 +90,7 @@ export type ProjectionRow =
   | RuleSetRow
   | RuleFireRow
   | ThreadRow
+  | PluginSettingsRow
 
 export interface FactDraft<T extends FactType = FactType> {
   type: T
@@ -133,6 +138,10 @@ export interface View {
   ruleSetReplacedAt: Iso | null
   /** M6：规则 id → 最近一次 cron 触发的计划时刻（去重与「只补最近一次」） */
   ruleFiredAt: Map<Id, Iso>
+  /** M7：插件设置快照（整批替换；空快照为空数组） */
+  pluginSettings: PluginSettingsRow['settings']
+  /** M7：插件设置版本（随 `plugins.replaced` 递增；无快照为 0） */
+  pluginSettingsVersion: number
 }
 
 /**

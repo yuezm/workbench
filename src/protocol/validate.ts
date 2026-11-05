@@ -19,6 +19,9 @@ import {
   RUN_TERMINAL_STATUSES,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
+import { CAPABILITIES, PLUGIN_KINDS } from './manifest'
+import { PLUGIN_ID_PATTERN } from './plugin-host'
+import { PLUGIN_SETTING_LIMITS } from './plugins'
 import {
   RULE_LIMITS,
   RULE_MERGE,
@@ -226,7 +229,15 @@ const checkStage = (value: unknown, label: string): Check => {
       0,
       COMMAND_LIMITS.stages - 1,
     ) ??
-    optionalIntegerIn(stage.onRejectIndex, `${label}.onRejectIndex`, 0, COMMAND_LIMITS.stages - 1)
+    optionalIntegerIn(
+      stage.onRejectIndex,
+      `${label}.onRejectIndex`,
+      0,
+      COMMAND_LIMITS.stages - 1,
+    ) ??
+    // M7 交接：目标工作流 / 目标阶段存在性由内核按视图判（这里只校验 id 形状）
+    optionalId(stage.handoffWorkflowId, `${label}.handoffWorkflowId`) ??
+    optionalId(stage.handoffStageId, `${label}.handoffStageId`)
   )
 }
 
@@ -440,6 +451,86 @@ const checkRule = (value: unknown, label: string): Check => {
   )
 }
 
+// ---------- 插件设置（M7） ----------
+
+/** 能力列表：枚举内、不重复、条数不超过能力全集。 */
+const checkCapabilityList = (value: unknown, label: string): Check => {
+  if (!Array.isArray(value)) return `${label} 必须是数组`
+  if (value.length > CAPABILITIES.length) return `${label} 最多 ${CAPABILITIES.length} 项`
+  const seen = new Set<string>()
+  for (const [index, capability] of value.entries()) {
+    if (
+      typeof capability !== 'string' ||
+      !(CAPABILITIES as readonly string[]).includes(capability)
+    ) {
+      return `${label}[${index}] 不是已声明的能力`
+    }
+    if (seen.has(capability)) return `${label}[${index}] 重复`
+    seen.add(capability)
+  }
+  return null
+}
+
+const CONFIG_KEY_PATTERN = /^[a-z][A-Za-z0-9_-]{0,63}$/
+
+/** 非 secret 配置值：只收标量；结构由 manifest 的 ConfigField 描述（内核不读 manifest）。 */
+const checkPluginConfig = (value: unknown, label: string): Check => {
+  if (value === undefined) return null
+  const config = asRecord(value)
+  if (!config) return `${label} 必须是对象`
+  const keys = Object.keys(config)
+  if (keys.length > PLUGIN_SETTING_LIMITS.configEntries) {
+    return `${label} 最多 ${PLUGIN_SETTING_LIMITS.configEntries} 项`
+  }
+  for (const key of keys) {
+    if (!CONFIG_KEY_PATTERN.test(key)) return `${label}.${key} 键名非法`
+    const item = config[key]
+    if (typeof item === 'boolean') continue
+    if (typeof item === 'number') {
+      if (!Number.isFinite(item)) return `${label}.${key} 必须是有限数字`
+      continue
+    }
+    if (typeof item === 'string' && item.length <= PLUGIN_SETTING_LIMITS.configValue) continue
+    return `${label}.${key} 必须是字符串 / 数字 / 布尔`
+  }
+  return null
+}
+
+/** secret 补丁：键名同 config 规则；值必须是字符串（≤上限）或 null（删除）。 */
+const checkPluginSecrets = (value: unknown, label: string): Check => {
+  if (value === undefined) return null
+  const secrets = asRecord(value)
+  if (!secrets) return `${label} 必须是对象`
+  const keys = Object.keys(secrets)
+  if (keys.length > PLUGIN_SETTING_LIMITS.configEntries) {
+    return `${label} 最多 ${PLUGIN_SETTING_LIMITS.configEntries} 项`
+  }
+  for (const key of keys) {
+    if (!CONFIG_KEY_PATTERN.test(key)) return `${label}.${key} 键名非法`
+    const item = secrets[key]
+    if (item === null) continue
+    if (typeof item !== 'string') return `${label}.${key} 必须是字符串或 null`
+    if (item.length > PLUGIN_SETTING_LIMITS.configValue) {
+      return `${label}.${key} 最长 ${PLUGIN_SETTING_LIMITS.configValue} 个字符`
+    }
+  }
+  return null
+}
+
+const checkPluginSetting = (value: unknown, label: string): Check => {
+  const setting = asRecord(value)
+  if (!setting) return `${label} 必须是对象`
+  if (typeof setting.id !== 'string' || !PLUGIN_ID_PATTERN.test(setting.id)) {
+    return `${label}.id 必须是小写 slug`
+  }
+  if (typeof setting.enabled !== 'boolean') return `${label}.enabled 必须是布尔值`
+  return (
+    requiredEnum(setting.kind, `${label}.kind`, PLUGIN_KINDS) ??
+    checkCapabilityList(setting.granted, `${label}.granted`) ??
+    checkPluginConfig(setting.config, `${label}.config`)
+  )
+}
+
 const checkPayload = (type: CommandName, command: Obj): Check => {
   switch (type) {
     case 'workflow.create':
@@ -508,6 +599,23 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
       return checkList(command.rules, 'rules', RULE_LIMITS.rules, checkRule)
     case 'rule.trigger':
       return requiredId(command.ruleId, 'ruleId')
+    case 'plugins.replace':
+      // 整批替换：逐条只校验形状；id 唯一 / 授权 ⊆ 声明能力由内核与宿主视图分别判
+      if (!Array.isArray(command.settings)) return 'settings 必须是数组'
+      return checkList(
+        command.settings,
+        'settings',
+        PLUGIN_SETTING_LIMITS.settings,
+        checkPluginSetting,
+      )
+    case 'plugin.set':
+      return (
+        requiredId(command.pluginId, 'pluginId') ??
+        optionalBoolean(command.enabled, 'enabled') ??
+        (command.granted === undefined ? null : checkCapabilityList(command.granted, 'granted')) ??
+        checkPluginConfig(command.config, 'config') ??
+        checkPluginSecrets(command.secrets, 'secrets')
+      )
     case 'thread.note':
       // 笔记正文只作资料；上限与回执 notes[] 同值
       return (

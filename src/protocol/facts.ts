@@ -29,9 +29,10 @@ import type {
   WorkflowStage,
 } from './entities'
 import type { RuleFireRow, RuleSetRow } from './rules'
+import type { PluginSettingsRow } from './plugins'
 import type { ThreadCloseReason, ThreadNote, ThreadRow } from './thread'
 
-/** 事实名全集。M4 加卡片与派生事件；M6 加规则；M6.5 加线程与事件合并。 */
+/** 事实名全集。M4 加卡片与派生事件；M6 加规则；M6.5 加线程与事件合并；M7 加插件设置。 */
 export const FACT_TYPES = [
   'workflow.created',
   'workflow.updated',
@@ -81,6 +82,7 @@ export const FACT_TYPES = [
   'thread.bound',
   'rules.replaced',
   'rule.fired',
+  'plugins.replaced',
   'conversation.created',
   'conversation.updated',
   'conversation.removed',
@@ -400,6 +402,16 @@ export interface RuleFiredPayload {
   fire: RuleFireRow
 }
 
+// ---------- 插件设置（M7） ----------
+
+/**
+ * 插件设置整批替换（M7）：payload 携带完整 `PluginSettingsRow`（单行投影，含版本），
+ * 一次事实 → 一行投影，重建无需回查。secret 值不进这里（见 `protocol/plugins`）。
+ */
+export interface PluginsReplacedPayload {
+  pluginSettings: PluginSettingsRow
+}
+
 // ---------- 对话 ----------
 
 export interface ConversationCreatedPayload {
@@ -490,6 +502,7 @@ export interface FactPayloads {
   'thread.bound': ThreadBoundPayload
   'rules.replaced': RulesReplacedPayload
   'rule.fired': RuleFiredPayload
+  'plugins.replaced': PluginsReplacedPayload
   'conversation.created': ConversationCreatedPayload
   'conversation.updated': ConversationUpdatedPayload
   'conversation.removed': ConversationRemovedPayload

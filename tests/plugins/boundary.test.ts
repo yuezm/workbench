@@ -277,6 +277,29 @@ describe('插件边界', () => {
       `capabilities 是授权声明，必须与 sdk 用法一致：\n${findings.join('\n')}\n（扫描 ${executorDirs.length} 个执行器插件）`,
     ).toEqual([])
   })
+
+  it('通道插件的 capabilities 声明与 sdk 用法双向一致（M4 T8）', () => {
+    const channelsRoot = join(PLUGINS_ROOT, 'channels')
+    if (!existsSync(channelsRoot)) return
+
+    const channelDirs = readdirSync(channelsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+
+    const findings: string[] = []
+    for (const id of channelDirs) {
+      const dir = join(channelsRoot, id)
+      const manifestPath = join(dir, 'manifest.ts')
+      expect(existsSync(manifestPath), `通道插件 ${id} 缺少 manifest.ts`).toBe(true)
+      const declared = declaredCapabilitiesOf(readFileSync(manifestPath, 'utf8'))
+      findings.push(...capabilityViolationsOf(id, readPluginFiles(dir), declared))
+    }
+
+    expect(
+      findings,
+      `通道的 capabilities 是授权声明，必须与源码用法一致（含跨插件 import 扫描）：\n${findings.join('\n')}\n（扫描 ${channelDirs.length} 个通道插件）`,
+    ).toEqual([])
+  })
 })
 
 describe('插件边界护栏自检', () => {

@@ -130,8 +130,15 @@ describe('通道插件注册表（M4）', () => {
     expect(() => channelById('')).toThrow(/通道插件未注册/)
   })
 
+  it('内置通道顺序固定：in-app 在前、desktop 在后（数组顺序即投递顺序）', () => {
+    expect(channels.map((entry) => entry.key)).toEqual(['in-app', 'desktop'])
+    // in-app 不需要副作用能力（投影即送达）；desktop 只声明 notify
+    expect(channelById('in-app').manifest.capabilities).toEqual([])
+    expect(channelById('desktop').manifest.capabilities).toEqual(['notify'])
+  })
+
   it('src/plugins/channels/* 目录与注册表清单双向一致', () => {
-    // T8 之前通道目录可能还不存在：不存在时与空清单等价（跳过目录扫描）
+    // 防御空转：通道目录不存在时清单必须为空
     if (!existsSync(CHANNELS_ROOT)) {
       expect(channels).toEqual([])
       return

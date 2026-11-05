@@ -168,6 +168,8 @@ export interface RawEvent {
 
 定时（cron）不需要 source 插件：规则里的 `cron` 由内核 `clock.tick` 派生事实（见 SPEC-kernel「规则」）。
 
+**M6 边界**：M6 **不落地** source 插件进程——外部事件入口是宿主输入 `event.received`（source 插件与测试注入共用），manual 源 = `rule.trigger` 命令，app 源 = `app.event` 命令；`SourcePlugin` / `SourceContext` 接口与 `src/plugins/sources/**` 留给 M7 webhook 的首个消费者，避免为没有传输层的来源引入第二套事件入口。
+
 ### executor
 
 ```ts
@@ -322,10 +324,11 @@ export interface AppPlugin {
 - 注册表在 `renderer/src/shell/registry.ts` 导出 `appPlugins`；`Workbench` 只按清单渲染，外壳零改动。
 - app 只消费内核视图、只发命令：读用 `useKernelView(view, params)` / `useKernelViewState`，
   写用 `getKernelStore().dispatch(command)`；不得自己起 IPC 订阅、不得轮询、不得在组件里算「执行中」。
-- **app 事件（M5）**：`events` 只是可发类型声明；宿主在 `app.event` 命令入口按
+- **app 事件（M5/M6）**：`events` 只是可发类型声明；宿主在 `app.event` 命令入口按
   `src/shared/apps.ts` 的 `APP_EVENTS` 校验 `appId + eventType`，不在清单里的一律拒绝。
   命令载荷 `{ appId, eventType, subject, summary?, detail?, link?, dedupeKey? }`，内核产一条
-  `event.received`（`source='app'`、`hops=1`、`originRunId=null`）；M6 才消费事件建任务。
+  `event.received`（`source='app'`、`hops=1`、`originRunId=null`）；M6 起与外部事件走同一匹配路径，
+  命中规则即建任务（同一规则 + 同一入口键只建一次）。
   当前内置：`pomodoro` → `pomodoro.completed`（计时结束发一条）。
 
 ## 内置插件清单
@@ -335,9 +338,9 @@ export interface AppPlugin {
 | executor | `dsh`              | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                 | `src/plugins/executors/dsh/`（含 `detect.ts`）                   |
 | executor | `command`          | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`** | `src/plugins/executors/command/`                                 |
 | executor | `claude` / `codex` | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                         | 后续                                                             |
-| source   | `app`              | app 插件发来的事件（如番茄结束）                                                                         | 新增                                                             |
-| source   | `manual`           | 设置里手动触发一条自动化规则                                                                             | 新增                                                             |
-| source   | `webhook`          | 本机 HTTP + HMAC 验签                                                                                    | M6                                                               |
+| source   | `app`              | app 插件发来的事件（经 `app.event` 命令，按 `APP_EVENTS` 白名单校验）                                    | M5 起（事件消费 M6）                                             |
+| source   | `manual`           | 设置里手动触发一条自动化规则（`rule.trigger` 命令，不是独立插件进程）                                    | M6                                                               |
+| source   | `webhook`          | 本机 HTTP + HMAC 验签                                                                                    | M7                                                               |
 | source   | `fs`               | 目录变化去抖                                                                                             | 可选                                                             |
 | channel  | `in-app`           | 默认通道：投影即送达，`start` 内把 `pending` 卡片 ack 为 `delivered{ref:'in-app'}`；UI 直接批            | `src/plugins/channels/in-app/`（M4）                             |
 | channel  | `desktop`          | Electron 系统通知：`sdk.notify(title, body)`，标题/正文只作参数；失败落 `card.delivery_failed`           | `src/plugins/channels/desktop/`（M4；原件 `src/main/notify.ts`） |

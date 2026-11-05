@@ -147,6 +147,19 @@
 - 评审口径（开工即定）：规则只建任务、不直接派活；同 `(ruleId, externalRef)` 不重复建任务（事件合并与线程上下文留 M6.5）；`to.thread` / `parallel` / `merge` 字段 M6 只校验与存储、不改变执行（M6.5 线程落地时生效）；M6 不落 source 插件进程（manual 源 = `rule.trigger`，app 源 = `app.event`，`plugins/sources/**` 留 M7 webhook 首个消费者）。
 - 回滚点：M6 改投影表与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建（M5/M6 的可重建投影会从事实回放）。
 
+## M6 退出记录（2026-11-05）
+
+- 提交链：`db55de0`（计划/任务清单）→ `2d84cb7`（规则契约、内核匹配/cron、宿主投影与视图、规则页与模板、e2e 与全部测试）→ 本记录提交。
+- 门禁：`pnpm check` exit 0；111 文件 / 1452 用例；覆盖率 **99.91 / 98.34 / 100 / 100**（基线 99.89 / 98.18 / 100 / 100）；`check:diffcov` **523/523 = 100%**；`pnpm e2e` **9/9**（新增 `e2e/rules.spec.ts`）；`check:floor` / `check:secrets` clean；`pnpm audit` 生产依赖 0 漏洞。
+- 规则表面：`rule_sets`（单行 `id='current'`：version/replacedAt/rules）与 `rule_fires`（append-only）成为第 11、12 张投影表；`rules.replaced` / `rule.fired` 两条事实。命令 `rules.replace`（整批替换、版本 +1、任一条非法整批 reject 且旧版继续生效）与 `rule.trigger`（立即运行，建任务、不写 `rule.fired`）。宿主输入 `event.received` 统一外部事件入口；`app.event` 与回执派生事件走同一匹配路径。
+- 建任务：source 精确/`*`、type 精确/`*`/前缀 `x.*`；同一事件命中多条规则全部建任务；入口键 = `to.thread.keyFrom`（缺省 subject），同规则 + 同键已有 active 任务不重复建（事件仍入账，完成后新事件可再建）。任务 `origin='rule'` + `ruleId`/`externalRef`/`labels`（`tasks` 追加来源四列），首轮 run 记 `ruleId`/`rulesVersion`/`eventIds`/`hops` 并把规则 `prompt` 追加到提示词末尾。
+- cron：`kernel/cron.ts` 纯函数（5 字段、`*`/数字/区间/步长/列表、dom/dow OR、IANA 时区墙钟）；`clock.tick` 以「上次 `rule_fired.scheduled_for`（无则本版 `replacedAt`）→ now」区间内的最近一次到点触发一次，产 `task.created` + 入口 run + `rule.fired`；跨月/跨年、春调缺口跳过、秋调重复墙钟只触发一次、停机错过只补最近一次；`nextWakeAt` 纳入 cron 下一次到点。目标工作流/阶段已删时只记 `rule.fired(taskId=null)`，避免每 tick 重试。
+- 读与 UI：`rules.all` 返回 `{ version, rules }`；设置页第四栏「规则」含列表/新建/编辑/删除/启停/立即运行与「Issue 进研发」「每日早报」模板；写一律整批 `rules.replace`、进行中行内动作禁用；kernelStore 失效表登记 `rules.replaced` / `rule.fired` → `rules.all`。
+- 旧库与重建：`tasks` 用 `ALTER TABLE ADD COLUMN` 补 `origin/rule_id/external_ref/labels_json`（不重建表，避免 SQLite 改写 `runs.task_id` 外键引用）；老事实 replay 由 `kernel/project` 与 writer `normalizeTask` 双层归一；v2 存量导入默认 `manual/null/null/[]`；`KERNEL_VERSION=m6.0.0` 触发全量重建；`tests/host/rules-projection.test.ts` 用真库验证「rules.replace / event.received / clock.tick → 重建逐表全等」。
+- 已知边界与偏差：`to.thread` / `parallel` / `merge` 在 M6 只校验与存储、不改变执行（线程归并与同规则并行留 M6.5）；`event.merged`（事件合并到既有任务 queued run）与派生事件的线程/父任务归并留 M6.5；M6 不落 source 插件进程（manual 源 = `rule.trigger`，app 源 = `app.event`，`SourcePlugin`/`plugins/sources/**` 留 M7 webhook 首个消费者）；去重只对 active 任务生效（完成后同入口键的新事件会再建任务，线程复用语义留 M6.5）；cron 无秒级/年字段与 `@reboot`，无匹配时刻返回 null（如 2 月 31 日）；回执块重写仍按 M4 边界留待后续；`scheduler` 竞态防御分支与既有 UI 不可达分支仍未覆盖（与 M4/M5 同口径）。
+- 回滚点：M6 改投影表与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建；`rule_sets` / `rule_fires` 的写入只影响新代码。
+- 下一步：M6.5 Thread（线程实体 + 上下文派生 + 按线程续接/并发 + 事件合并与 `thread.bind`）。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

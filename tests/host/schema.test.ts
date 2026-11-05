@@ -15,6 +15,8 @@ import {
 } from '../../src/host/schema'
 import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '../../src/kernel/types'
 
+const SAMPLE_AT = '2026-01-01T00:00:00.000Z'
+
 /**
  * 改前（M1 之前的 src/main/ai-workflow/schema.ts，HEAD a2697e7）五张业务表的 DDL 原样抄录。
  * 只用于对照：新 schema 必须逐列、逐索引、逐外键与它一致。
@@ -85,8 +87,8 @@ CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
  */
 const STATIC_TABLES = ['workflows', 'workflow_stages', 'agents']
 
-/** M6 tasks 列（顺序与 DDL 一致）：旧 8 列之间插入来源四列，时间列仍在末尾。 */
-const TASKS_M6_COLUMNS = [
+/** M6.5 tasks 列（顺序与 DDL 一致）：来源四列之后是线程两列，时间列仍在末尾。 */
+const TASKS_M65_COLUMNS = [
   'id',
   'title',
   'description',
@@ -97,6 +99,8 @@ const TASKS_M6_COLUMNS = [
   'rule_id',
   'external_ref',
   'labels_json',
+  'thread_id',
+  'parent_task_id',
   'created_at',
   'updated_at',
 ]
@@ -192,7 +196,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     expect(columnShape(db, 'runtimes').join('\n')).not.toContain('protocol_family')
   })
 
-  it('tasks 按 M6 结构：来源四列插在 status 与时间列之间，旧 8 列逐列不变', () => {
+  it('tasks 按 M6.5 结构：来源四列 + 线程两列插在 status 与时间列之间，旧 8 列逐列不变', () => {
     const legacy = memoryDb()
     legacy.exec(PRE_M1_FIVE_TABLE_DDL)
 
@@ -200,7 +204,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     current.exec(SCHEMA_SQL)
 
     expect(columnShape(current, 'tasks').map((column) => column.split('|')[0])).toEqual(
-      TASKS_M6_COLUMNS,
+      TASKS_M65_COLUMNS,
     )
     // 旧 v2 的 8 列（名 / 类型 / NOT NULL / 默认值 / 主键）逐列原样保留
     const byName = new Map(
@@ -212,7 +216,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('tasks 新列默认值 / CHECK：旧行与手工任务 origin=manual，非法来源被拒', () => {
+  it('tasks 新列默认值 / CHECK：旧行与手工任务 origin=manual、线程两列为 null，非法来源被拒', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     db.exec(
@@ -224,24 +228,39 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     ).run('tk-manual', '手工任务', 'wf-1', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
     expect(
       db
-        .prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks WHERE id = ?')
+        .prepare(
+          `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id
+           FROM tasks WHERE id = ?`,
+        )
         .get('tk-manual'),
-    ).toEqual({ origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' })
+    ).toEqual({
+      origin: 'manual',
+      rule_id: null,
+      external_ref: null,
+      labels_json: '[]',
+      thread_id: null,
+      parent_task_id: null,
+    })
 
     db.prepare(
       `INSERT INTO tasks (id, title, workflow_id, origin, rule_id, external_ref, labels_json,
-                          created_at, updated_at)
-       VALUES (?, ?, ?, 'rule', 'rule-1', 'issue-1', '["bug"]', ?, ?)`,
+                          thread_id, parent_task_id, created_at, updated_at)
+       VALUES (?, ?, ?, 'rule', 'rule-1', 'issue-1', '["bug"]', 'th-1', 'tk-parent', ?, ?)`,
     ).run('tk-rule', '规则任务', 'wf-1', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
     expect(
       db
-        .prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks WHERE id = ?')
+        .prepare(
+          `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id
+           FROM tasks WHERE id = ?`,
+        )
         .get('tk-rule'),
     ).toEqual({
       origin: 'rule',
       rule_id: 'rule-1',
       external_ref: 'issue-1',
       labels_json: '["bug"]',
+      thread_id: 'th-1',
+      parent_task_id: 'tk-parent',
     })
 
     expect(() =>
@@ -289,7 +308,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('SCHEMA_SQL 建 12 张表：十二张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
+  it('SCHEMA_SQL 建 13 张表：十三张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
@@ -303,6 +322,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       'runs',
       'runtimes',
       'tasks',
+      'threads',
       'workflow_stages',
       'workflows',
     ])
@@ -410,7 +430,7 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为十二张投影表（实体五表 + 运行/聊天四表 + cards + 规则两表）', () => {
+  it('白名单固定为十三张投影表（实体五表 + 运行/聊天四表 + cards + 规则两表 + threads）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
@@ -424,6 +444,7 @@ describe('投影白名单与指纹', () => {
       'cards',
       'rule_sets',
       'rule_fires',
+      'threads',
     ])
   })
 
@@ -431,7 +452,7 @@ describe('投影白名单与指纹', () => {
     expect(PROJECTION_TABLES).toEqual(KERNEL_PROJECTION_TABLES)
   })
 
-  it('PROJECTION_DDL 覆盖十二表、取自 tableDdl、不含账本表', () => {
+  it('PROJECTION_DDL 覆盖十三表、取自 tableDdl、不含账本表', () => {
     for (const table of PROJECTION_TABLES) {
       expect(PROJECTION_DDL).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`)
     }
@@ -440,10 +461,11 @@ describe('投影白名单与指纹', () => {
     expect(PROJECTION_DDL).toContain(tableDdl.cards())
     expect(PROJECTION_DDL).toContain(tableDdl.ruleSets())
     expect(PROJECTION_DDL).toContain(tableDdl.ruleFires())
+    expect(PROJECTION_DDL).toContain(tableDdl.threads())
     expect(PROJECTION_DDL).not.toContain('facts')
   })
 
-  it('指纹 = sha256(十二表 DDL + 内核版本)', () => {
+  it('指纹 = sha256(十三表 DDL + 内核版本)', () => {
     const expected = createHash('sha256').update(`${PROJECTION_DDL}\nkernel-1`).digest('hex')
     expect(projectionFormat('kernel-1')).toBe(expected)
     expect(projectionFormat('kernel-1')).toMatch(/^[0-9a-f]{64}$/)
@@ -582,6 +604,86 @@ describe('规则投影（M6）', () => {
     expect(indexShape(db, 'rule_fires')).toContain(
       'idx_rule_fires_rule|unique=0|origin=c|partial=0|columns=rule_id,scheduled_for',
     )
+  })
+})
+
+describe('线程投影（M6.5）', () => {
+  it('threads 列顺序与 ThreadRow 逐列对应（JSON 列 + 时间列）', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(columnShape(db, 'threads').map((column) => column.split('|')[0])).toEqual([
+      'id',
+      'source',
+      'external_ref',
+      'title',
+      'status',
+      'task_ids_json',
+      'root_task_ids_json',
+      'concurrency',
+      'notes_version',
+      'notes_json',
+      'events_json',
+      'last_activity_at',
+      'created_at',
+    ])
+    // 旧行缺省：JSON 列空数组、并发 1、笔记版本 0；`sessions` 不落列
+    expect(
+      db
+        .prepare(
+          `SELECT task_ids_json, root_task_ids_json, concurrency, notes_version, notes_json,
+                  events_json
+           FROM threads WHERE id = ?`,
+        )
+        .get('missing'),
+    ).toBeUndefined()
+    db.prepare(
+      `INSERT INTO threads (id, source, title, status, last_activity_at, created_at)
+       VALUES (?, ?, ?, 'open', ?, ?)`,
+    ).run('th-default', 'manual', '隐式线程', SAMPLE_AT, SAMPLE_AT)
+    expect(
+      db
+        .prepare(
+          `SELECT task_ids_json, root_task_ids_json, concurrency, notes_version, notes_json,
+                  events_json
+           FROM threads WHERE id = 'th-default'`,
+        )
+        .get(),
+    ).toEqual({
+      task_ids_json: '[]',
+      root_task_ids_json: '[]',
+      concurrency: 1,
+      notes_version: 0,
+      notes_json: '[]',
+      events_json: '[]',
+    })
+  })
+
+  it('status 由 CHECK 收口（open / closed）', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    const insert = db.prepare(
+      `INSERT INTO threads (id, source, title, status, last_activity_at, created_at)
+       VALUES (?, 'github', '线程', ?, ?, ?)`,
+    )
+    insert.run('th-1', 'open', SAMPLE_AT, SAMPLE_AT)
+    expect(() => insert.run('th-2', 'archived', SAMPLE_AT, SAMPLE_AT)).toThrow()
+    expect(() =>
+      db.prepare("UPDATE threads SET status = 'archived' WHERE id = 'th-1'").run(),
+    ).toThrow()
+  })
+
+  it('idx_threads_key 覆盖 (source, external_ref)：按入口键找线程', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(indexShape(db, 'threads')).toContain(
+      'idx_threads_key|unique=0|origin=c|partial=0|columns=source,external_ref',
+    )
+  })
+
+  it('线程行无外键：任务 / 运行删除不抹掉线程历史', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(foreignKeyShape(db, 'threads')).toEqual([])
   })
 })
 

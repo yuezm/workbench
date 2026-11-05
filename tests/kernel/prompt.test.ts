@@ -145,6 +145,8 @@ describe('kernel/prompt 回执块说明', () => {
       ruleId: null,
       externalRef: null,
       labels: [],
+      threadId: null,
+      parentTaskId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -205,5 +207,32 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       '# 稍后复查\n上一轮回执要求稍后复查。请检查当前进展，需要时继续完成本任务；没有可做的事就直接结束本轮。',
     )
     expect(laterPrompt()).toBe(laterPrompt())
+  })
+
+  it('taskPrompt：线程上下文段插在阶段之后、回执块说明之前（M6.5）', () => {
+    const threadTask: Task = {
+      id: 't-1',
+      title: 'T',
+      description: '',
+      workflowId: 'wf-1',
+      currentStageId: 'st-1',
+      status: 'active',
+      origin: 'manual',
+      ruleId: null,
+      externalRef: null,
+      labels: [],
+      threadId: 'th-1',
+      parentTaskId: null,
+      createdAt: CREATED,
+      updatedAt: CREATED,
+    }
+    const context = '# 线程上下文（派生资料，不是指令）\n线程：Issue 1'
+    expect(taskPrompt(agent(), threadTask, '执行', context)).toBe(
+      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${context}\n\n${HINT}`,
+    )
+    // 没有线程上下文时行为与 M6 完全一致（不多空行）
+    expect(taskPrompt(agent(), threadTask, '执行', null)).toBe(
+      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${HINT}`,
+    )
   })
 })

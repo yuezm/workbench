@@ -1,11 +1,14 @@
 /**
- * 投影变更落库：`Change.row` ↔ 十二张投影表的 snake_case 列，逐列显式映射
+ * 投影变更落库：`Change.row` ↔ 十三张投影表的 snake_case 列，逐列显式映射
  * （不 `SELECT *`、不猜列名）。
  *
- * - 实体五表 / runs / conversations / messages / cards / rule_sets 的整行：主键 `id`，`row === null` 删除。
+ * - 实体五表 / runs / conversations / messages / cards / rule_sets / threads 的整行：主键 `id`，`row === null` 删除。
  * - `run_events`：主键 `(run_id, seq)`，`Change.key = '<runId>:<seq>'`；**纯追加**，
  *   重复键直接撞唯一约束报错（禁止 `INSERT OR REPLACE` 覆盖历史）。
  * - `rule_fires`（M6）：主键 `id`；**纯追加**，重复触发事实撞主键报错（与 `run_events` 同口径）。
+ * - `threads`（M6.5）：整行 upsert；每条 `thread.*` 事实都携带完整 `ThreadRow`，
+ *   `taskIds` / `rootTaskIds` / `notes` / `events` 存 JSON 列。`event.merged` 不在这里特判
+ *   ——它由 `kernel/project` 产 `runs` 的整行变更（`run.eventIds` 已追加）。
  *
  * 级联删除由父键显式完成（事实只携带父 id）：删除 `runs` 行先按 `run_id` 删 `run_events` 与
  * `cards`；删除 `conversations` 行先按 `conversation_id` 删 `messages`。`cards.run_id` 虽然
@@ -44,6 +47,7 @@ import type {
 } from '../../protocol/entities'
 import type { Change, Iso, ProjectionRow, ProjectionTable } from '../../kernel/types'
 import type { RuleFireRow, RuleSetRow } from '../../protocol/rules'
+import type { ThreadRow } from '../../protocol/thread'
 import { StoreError } from './errors'
 
 /** 一条投影变更 + 它所属事实的时间（阶段行首次插入的 created_at 兜底）。 */
@@ -57,13 +61,13 @@ export interface ProjectionWriter {
   /** 整批应用（一次 dispatch / 一次重建的全部变更）：跨行换序在批内合法。 */
   applyAll(writes: readonly ProjectionWrite[]): void
   /**
-   * 清空白名单十二表。
+   * 清空白名单十三表。
    *
    * 只能在 `PRAGMA foreign_keys = OFF` 的重建事务里调用：`runs.task_id` 是
    * `ON DELETE CASCADE`，外键开启时清 `tasks` 会连带删掉运行记录与 `run_events`。
    * 顺序按外键依赖倒序（run_events → cards → runs → messages → conversations → tasks → …），
    * 外键关掉时只是让意图可读；`cards` 先于 `runs` 删，即使外键意外开着也不会依赖级联。
-   * 规则两表没有外键，放最后清即可。
+   * 规则两表与 `threads` 没有外键，放最后清即可（`threads` 在全部业务行之后清）。
    */
   clear(): void
 }
@@ -187,9 +191,9 @@ const runValue = (field: keyof RunRow, run: RunRow): SQLInputValue => {
 }
 
 /**
- * 规整任务行的缺省值（M6）：M6 前的 `task.created` / `snapshot.imported` 行没有来源四列。
- * `kernel/project` 已归一；这里是投影边界的第二道防线（与 `normalizeRun` 同一模式），
- * 保证任何路径写入的 `Change` 都能绑参、且增量与重建折出同一行。
+ * 规整任务行的缺省值（M6 / M6.5）：M6 前的 `task.created` / `snapshot.imported` 行没有来源四列，
+ * M6.5 前的历史行没有线程两列。`kernel/project` 已归一；这里是投影边界的第二道防线
+ * （与 `normalizeRun` 同一模式），保证任何路径写入的 `Change` 都能绑参、且增量与重建折出同一行。
  */
 const normalizeTask = (row: Task): Task => {
   const legacy = row as Partial<Task>
@@ -199,6 +203,8 @@ const normalizeTask = (row: Task): Task => {
     ruleId: legacy.ruleId ?? null,
     externalRef: legacy.externalRef ?? null,
     labels: legacy.labels ?? [],
+    threadId: legacy.threadId ?? null,
+    parentTaskId: legacy.parentTaskId ?? null,
   }
 }
 
@@ -228,6 +234,41 @@ const cardValue = (field: keyof Card, card: Card): SQLInputValue =>
   field === 'options' ? JSON.stringify(card.options) : (card[field] as SQLInputValue)
 
 /**
+ * `ThreadRow` 字段 → `threads` 列（顺序与 schema DDL 一致；整行 upsert 共用）。
+ *
+ * `taskIds` / `rootTaskIds` / `notes` / `events` 存 JSON 列；`sessions` 不在行里（由 runs 现算），
+ * 因此这里没有对应列。
+ */
+const THREAD_FIELDS: ReadonlyArray<readonly [keyof ThreadRow, string]> = [
+  ['id', 'id'],
+  ['source', 'source'],
+  ['externalRef', 'external_ref'],
+  ['title', 'title'],
+  ['status', 'status'],
+  ['taskIds', 'task_ids_json'],
+  ['rootTaskIds', 'root_task_ids_json'],
+  ['concurrency', 'concurrency'],
+  ['notesVersion', 'notes_version'],
+  ['notes', 'notes_json'],
+  ['events', 'events_json'],
+  ['lastActivityAt', 'last_activity_at'],
+  ['createdAt', 'created_at'],
+]
+
+/** 行内值 → SQLite 可绑定的值（`taskIds` / `rootTaskIds` / `notes` / `events` 存 JSON）。 */
+const threadValue = (field: keyof ThreadRow, thread: ThreadRow): SQLInputValue => {
+  switch (field) {
+    case 'taskIds':
+    case 'rootTaskIds':
+    case 'notes':
+    case 'events':
+      return JSON.stringify(thread[field])
+    default:
+      return thread[field] as SQLInputValue
+  }
+}
+
+/**
  * `run_events.payload_json` 沿用 v2 的存放口径：事件里除 `runId/seq/type`
  * 之外的字段组成 JSON 对象（旧的 `repository.runEventsList` 按同一口径还原）。
  */
@@ -245,8 +286,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     tasks: db.prepare(
       `INSERT INTO tasks
          (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
-          external_ref, labels_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          external_ref, labels_json, thread_id, parent_task_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
@@ -257,6 +298,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          rule_id = excluded.rule_id,
          external_ref = excluded.external_ref,
          labels_json = excluded.labels_json,
+         thread_id = excluded.thread_id,
+         parent_task_id = excluded.parent_task_id,
          created_at = excluded.created_at,
          updated_at = excluded.updated_at`,
     ),
@@ -371,6 +414,18 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
      VALUES (?, ?, ?, ?, ?, ?)`,
   )
 
+  // 线程同样是整行 upsert（M6.5）：`thread.*` 事实携带完整行，按 (source, external_ref) 找线程
+  // 是内核在视图里做的，这里只搬运行。
+  const threadColumns = THREAD_FIELDS.map(([, column]) => column).join(', ')
+  const threadPlaceholders = THREAD_FIELDS.map(() => '?').join(', ')
+  const threadUpdates = THREAD_FIELDS.filter(([field]) => field !== 'id')
+    .map(([, column]) => `${column} = excluded.${column}`)
+    .join(', ')
+  const insertThread = db.prepare(
+    `INSERT INTO threads (${threadColumns}) VALUES (${threadPlaceholders})
+     ON CONFLICT(id) DO UPDATE SET ${threadUpdates}`,
+  )
+
   const deletes = {
     tasks: db.prepare('DELETE FROM tasks WHERE id = ?'),
     workflows: db.prepare('DELETE FROM workflows WHERE id = ?'),
@@ -384,9 +439,10 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     conversations: db.prepare('DELETE FROM conversations WHERE id = ?'),
     messages: db.prepare('DELETE FROM messages WHERE conversation_id = ?'),
     cards: db.prepare('DELETE FROM cards WHERE id = ?'),
-    /** 规则两表没有删除事实（M6 只整批替换/追加），语句只为满足 `ProjectionTable` 全集。 */
+    /** 规则两表与线程表都没有删除事实，语句只为满足 `ProjectionTable` 全集。 */
     rule_sets: db.prepare('DELETE FROM rule_sets WHERE id = ?'),
     rule_fires: db.prepare('DELETE FROM rule_fires WHERE id = ?'),
+    threads: db.prepare('DELETE FROM threads WHERE id = ?'),
   }
 
   const clearAll = {
@@ -402,6 +458,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     runtimes: db.prepare('DELETE FROM runtimes'),
     rule_fires: db.prepare('DELETE FROM rule_fires'),
     rule_sets: db.prepare('DELETE FROM rule_sets'),
+    threads: db.prepare('DELETE FROM threads'),
   }
 
   const stageOccupant = db.prepare(
@@ -427,6 +484,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         task.ruleId,
         task.externalRef,
         JSON.stringify(task.labels),
+        task.threadId,
+        task.parentTaskId,
         task.createdAt,
         task.updatedAt,
       )
@@ -533,6 +592,10 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         fire.taskId,
       )
     },
+    threads: (row) => {
+      const thread = row as ThreadRow
+      insertThread.run(...THREAD_FIELDS.map(([field]) => threadValue(field, thread)))
+    },
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */
@@ -587,6 +650,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     clearAll.runtimes.run()
     clearAll.rule_fires.run()
     clearAll.rule_sets.run()
+    clearAll.threads.run()
   }
 
   return { apply, applyAll, clear }

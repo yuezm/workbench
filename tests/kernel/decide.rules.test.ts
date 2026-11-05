@@ -101,6 +101,7 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(),
+  threads: new Map(),
   rules: seed.rules ?? [],
   rulesVersion: seed.rulesVersion ?? 0,
   ruleSetReplacedAt: seed.replacedAt === undefined ? CREATED : seed.replacedAt,
@@ -160,7 +161,14 @@ describe('decide 事件入口建任务', () => {
       env(),
     )
     expect(decision.reject).toBeUndefined()
-    expect(types(decision.facts)).toEqual(['event.received', 'task.created', 'run.queued'])
+    expect(types(decision.facts)).toEqual([
+      'event.received',
+      'thread.opened',
+      'thread.event_attached',
+      'task.created',
+      'thread.task_attached',
+      'run.queued',
+    ])
     expect(decision.facts[0]?.payload).toMatchObject({
       source: 'github',
       type: 'issues.opened',
@@ -169,7 +177,7 @@ describe('decide 事件入口建任务', () => {
       originRunId: null,
     })
     const run = (
-      decision.facts[2]?.payload as {
+      decision.facts[5]?.payload as {
         run: { ruleId: string; rulesVersion: number; eventIds: string[] }
       }
     ).run
@@ -208,7 +216,14 @@ describe('decide 事件入口建任务', () => {
       NOW,
       env(),
     )
-    expect(types(decision.facts)).toEqual(['event.received', 'task.created', 'run.queued'])
+    expect(types(decision.facts)).toEqual([
+      'event.received',
+      'thread.opened',
+      'thread.event_attached',
+      'task.created',
+      'thread.task_attached',
+      'run.queued',
+    ])
   })
 
   it('无规则命中：只入账', () => {
@@ -237,8 +252,14 @@ describe('decide clock.tick cron', () => {
       NOW,
       env(),
     )
-    expect(types(decision.facts)).toEqual(['task.created', 'run.queued', 'rule.fired'])
-    expect(decision.facts[2]?.payload).toMatchObject({
+    expect(types(decision.facts)).toEqual([
+      'thread.opened',
+      'thread.task_attached',
+      'task.created',
+      'run.queued',
+      'rule.fired',
+    ])
+    expect(decision.facts[4]?.payload).toMatchObject({
       fire: {
         ruleId: 'rule-1',
         version: 4,
@@ -289,8 +310,13 @@ describe('decide rule.trigger', () => {
       env(),
     )
     expect(decision.reject).toBeUndefined()
-    expect(types(decision.facts)).toEqual(['task.created', 'run.queued'])
-    expect((decision.facts[0]?.payload as { task: Task }).task).toMatchObject({
+    expect(types(decision.facts)).toEqual([
+      'thread.opened',
+      'thread.task_attached',
+      'task.created',
+      'run.queued',
+    ])
+    expect((decision.facts[2]?.payload as { task: Task }).task).toMatchObject({
       title: 'Issue 进研发',
       origin: 'rule',
       externalRef: null,

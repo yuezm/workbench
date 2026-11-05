@@ -130,7 +130,7 @@ describe('createProjectionWriter：显式行映射', () => {
       db
         .prepare(
           `SELECT id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
-                  external_ref, labels_json, created_at, updated_at
+                  external_ref, labels_json, thread_id, parent_task_id, created_at, updated_at
            FROM tasks`,
         )
         .get(),
@@ -145,6 +145,8 @@ describe('createProjectionWriter：显式行映射', () => {
       rule_id: null,
       external_ref: null,
       labels_json: '[]',
+      thread_id: null,
+      parent_task_id: null,
       created_at: SAMPLE_AT,
       updated_at: SAMPLE_AT,
     })
@@ -213,6 +215,111 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(
       db.prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks').get(),
     ).toEqual({ origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' })
+    // M6.5：老行同样没有线程两列 → 归一为 null（投影边界第二道防线）
+    expect(db.prepare('SELECT thread_id, parent_task_id FROM tasks').get()).toEqual({
+      thread_id: null,
+      parent_task_id: null,
+    })
+  })
+
+  it('tasks 新列（M6.5）：thread_id / parent_task_id 整行 upsert，再次写入时随行覆盖', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    writer.apply({ table: 'workflows', key: 'wf-1', row: sample.workflow() }, SAMPLE_AT)
+    writer.apply({ table: 'workflow_stages', key: 'st-1', row: sample.stage() }, SAMPLE_AT)
+
+    const childTask = sample.task({ threadId: 'th-1', parentTaskId: 'tk-parent' })
+    writer.apply({ table: 'tasks', key: childTask.id, row: childTask }, SAMPLE_AT)
+    expect(
+      db.prepare('SELECT thread_id, parent_task_id FROM tasks WHERE id = ?').get('tk-1'),
+    ).toEqual({ thread_id: 'th-1', parent_task_id: 'tk-parent' })
+
+    // 整行 upsert：同 id 再写入时两列随行覆盖（解绑回 null 也不保留旧值）
+    writer.apply(
+      {
+        table: 'tasks',
+        key: childTask.id,
+        row: sample.task({ threadId: null, parentTaskId: null }),
+      },
+      LATER_AT,
+    )
+    expect(
+      db.prepare('SELECT thread_id, parent_task_id FROM tasks WHERE id = ?').get('tk-1'),
+    ).toEqual({ thread_id: null, parent_task_id: null })
+  })
+
+  it('threads 整行 upsert：四个 JSON 列序列化，重复写入覆盖状态 / 笔记 / 事件', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const note = { id: 'note-1', author: 'agent' as const, text: '实现完成', at: SAMPLE_AT }
+    const event = {
+      eventId: 'ev-1',
+      type: 'issues.opened',
+      subject: '#1',
+      summary: '新 Issue',
+      link: 'https://example.com/1',
+      detailRef: null,
+      at: SAMPLE_AT,
+    }
+    const thread = sample.thread({
+      taskIds: ['tk-1', 'tk-2'],
+      rootTaskIds: ['tk-1'],
+      notesVersion: 1,
+      notes: [note],
+      events: [event],
+    })
+    writer.apply({ table: 'threads', key: thread.id, row: thread }, SAMPLE_AT)
+    expect(
+      db
+        .prepare(
+          `SELECT source, external_ref, title, status, task_ids_json, root_task_ids_json,
+                  concurrency, notes_version, notes_json, events_json, last_activity_at, created_at
+           FROM threads WHERE id = ?`,
+        )
+        .get(thread.id),
+    ).toEqual({
+      source: 'github',
+      external_ref: 'issue-1',
+      title: 'Issue 一号',
+      status: 'open',
+      task_ids_json: '["tk-1","tk-2"]',
+      root_task_ids_json: '["tk-1"]',
+      concurrency: 1,
+      notes_version: 1,
+      notes_json: JSON.stringify([note]),
+      events_json: JSON.stringify([event]),
+      last_activity_at: SAMPLE_AT,
+      created_at: SAMPLE_AT,
+    })
+
+    // `thread.*` 事实携带完整行：状态 / 笔记 / 事件整批覆盖（不做字段合并）
+    const closed = sample.thread({
+      status: 'closed',
+      taskIds: ['tk-1', 'tk-2'],
+      rootTaskIds: ['tk-1'],
+      notesVersion: 2,
+      notes: [note, { ...note, id: 'note-2', text: '已关闭', at: LATER_AT }],
+      events: [event],
+      lastActivityAt: LATER_AT,
+    })
+    writer.apply({ table: 'threads', key: closed.id, row: closed }, LATER_AT)
+    expect(
+      db
+        .prepare(
+          `SELECT status, notes_version, notes_json, last_activity_at FROM threads WHERE id = ?`,
+        )
+        .get(closed.id),
+    ).toEqual({
+      status: 'closed',
+      notes_version: 2,
+      notes_json: JSON.stringify(closed.notes),
+      last_activity_at: LATER_AT,
+    })
+    expect(countRows(db, 'threads')).toBe(1)
+
+    // 删除：row = null 只删目标行
+    writer.apply({ table: 'threads', key: closed.id, row: null }, LATER_AT)
+    expect(countRows(db, 'threads')).toBe(0)
   })
 
   it('rule_sets 单行整行替换：版本与规则清单一起换，不合并旧规则', () => {
@@ -444,7 +551,7 @@ describe('createProjectionWriter：显式行映射', () => {
     })
   })
 
-  it('clear 清空十二张投影表（重建事务关外键）', () => {
+  it('clear 清空十三张投影表（重建事务关外键）', () => {
     const db = memory()
     const writer = createProjectionWriter(db)
     const runtime = sample.runtime()
@@ -456,6 +563,7 @@ describe('createProjectionWriter：显式行映射', () => {
     const conversation = sample.conversation()
     const message = sample.message()
     const card = sample.card()
+    const thread = sample.thread()
     const ruleSet: RuleSetRow = {
       id: 'current',
       version: 1,
@@ -483,6 +591,7 @@ describe('createProjectionWriter：显式行映射', () => {
       { table: 'cards', key: card.id, row: card },
       { table: 'rule_sets', key: ruleSet.id, row: ruleSet },
       { table: 'rule_fires', key: fire.id, row: fire },
+      { table: 'threads', key: thread.id, row: thread },
     ] as Change[]) {
       writer.apply(change, SAMPLE_AT)
     }
@@ -490,6 +599,7 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(countRows(db, 'cards')).toBe(1)
     expect(countRows(db, 'rule_sets')).toBe(1)
     expect(countRows(db, 'rule_fires')).toBe(1)
+    expect(countRows(db, 'threads')).toBe(1)
 
     db.exec('PRAGMA foreign_keys = OFF')
     try {
@@ -511,6 +621,7 @@ describe('createProjectionWriter：显式行映射', () => {
       'cards',
       'rule_sets',
       'rule_fires',
+      'threads',
     ]) {
       expect(countRows(db, table)).toBe(0)
     }

@@ -7,7 +7,12 @@ import type {
   TaskInput,
   WorkflowInput,
 } from '../../src/protocol/entities'
-import { validateCommand, validateQuery, type ValidateResult } from '../../src/protocol/validate'
+import {
+  validateCommand,
+  validateInput,
+  validateQuery,
+  type ValidateResult,
+} from '../../src/protocol/validate'
 
 const workflowInput: WorkflowInput = {
   name: '流程',
@@ -97,6 +102,15 @@ const validCommands: Command[] = [
     ],
   },
   { commandId: 'c19', type: 'rule.trigger', ruleId: 'rule-1' },
+  { commandId: 'c20', type: 'thread.note', threadId: 'th-1', text: '备注' },
+  { commandId: 'c21', type: 'thread.close', threadId: 'th-1' },
+  {
+    commandId: 'c22',
+    type: 'thread.bind',
+    threadId: 'th-1',
+    source: 'github',
+    externalRef: 'issue-1',
+  },
 ]
 
 /** 只取失败文案；先用断言固定 `ok=false`，避免分支未覆盖。 */
@@ -737,5 +751,47 @@ describe('validateQuery（M5：query 动词入口）', () => {
   it('rule.trigger：ruleId 必填', () => {
     expect(rejectedMessage(cmd('rule.trigger', {}))).toBe('ruleId必填')
     expect(validateCommand(cmd('rule.trigger', { ruleId: 'rule-1' })).ok).toBe(true)
+  })
+
+  it('thread.note / thread.close / thread.bind：字段必填与长度上限（M6.5）', () => {
+    expect(rejectedMessage(cmd('thread.note', {}))).toBe('threadId必填')
+    expect(rejectedMessage(cmd('thread.note', { threadId: 'th-1', text: '   ' }))).toBe('text必填')
+    expect(rejectedMessage(cmd('thread.note', { threadId: 'th-1', text: longText(2001) }))).toBe(
+      'text最长 2000 个字符',
+    )
+    expect(validateCommand(cmd('thread.note', { threadId: 'th-1', text: '备注' })).ok).toBe(true)
+
+    expect(rejectedMessage(cmd('thread.close', {}))).toBe('threadId必填')
+
+    expect(rejectedMessage(cmd('thread.bind', { threadId: 'th-1' }))).toBe('source必须是字符串')
+    expect(
+      rejectedMessage(
+        cmd('thread.bind', { threadId: 'th-1', source: longText(65), externalRef: 'x' }),
+      ),
+    ).toBe('source最长 64 个字符')
+    expect(
+      rejectedMessage(cmd('thread.bind', { threadId: 'th-1', source: 'GitHub', externalRef: 'x' })),
+    ).toBe('source 必须是小写标识（如 github / mail / app:pomodoro）')
+    expect(rejectedMessage(cmd('thread.bind', { threadId: 'th-1', source: 'github' }))).toBe(
+      'externalRef必填',
+    )
+    expect(
+      rejectedMessage(
+        cmd('thread.bind', { threadId: 'th-1', source: 'github', externalRef: longText(201) }),
+      ),
+    ).toBe('externalRef最长 200 个字符')
+  })
+
+  it('receipt.notes：逐条 ≤2000 字、≤100 条（M6.5）', () => {
+    const receipt = (notes: unknown): unknown => ({
+      type: 'run.receipt',
+      runId: 'run-1',
+      receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, notes },
+    })
+    const valid = validateInput(receipt(['先跑测试']))
+    expect(valid.ok).toBe(true)
+    expect(validateInput(receipt([42])).ok).toBe(false)
+    expect(validateInput(receipt([longText(2001)])).ok).toBe(false)
+    expect(validateInput(receipt(Array.from({ length: 101 }, () => 'x'))).ok).toBe(false)
   })
 })

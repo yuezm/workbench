@@ -75,6 +75,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   ruleId: null,
   externalRef: null,
   labels: [],
+  threadId: null,
+  parentTaskId: null,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -513,5 +515,42 @@ describe('kernel/timeline', () => {
     ]
     expect(timeline(facts, 'task', 'tk-1')).toEqual([])
     expect(timeline(facts, 'run', 'run-1')).toEqual([])
+  })
+
+  it('线程事实归入 thread scope；event.merged 归入被合并的 run', () => {
+    const threadRow = {
+      id: 'th-1',
+      source: 'github',
+      externalRef: 'issue-1',
+      title: 'Issue 1',
+      status: 'open' as const,
+      taskIds: ['t-1'],
+      rootTaskIds: ['t-1'],
+      concurrency: 1,
+      notesVersion: 0,
+      notes: [],
+      events: [],
+      lastActivityAt: AT,
+      createdAt: AT,
+    }
+    const facts = [
+      fact(1, 'thread.opened', { thread: threadRow }),
+      fact(2, 'thread.note_appended', {
+        thread: { ...threadRow, notesVersion: 1 },
+        note: { id: 'n-1', author: 'agent' as const, text: '备注', at: AT },
+      }),
+      fact(3, 'thread.closed', {
+        thread: { ...threadRow, status: 'closed' as const },
+        reason: 'manual' as const,
+      }),
+      fact(4, 'event.merged', { run: run({ eventIds: ['ev-1'] }), eventId: 'ev-1' }),
+    ]
+    expect(kinds(timeline(facts, 'thread', 'th-1'))).toEqual([
+      '1:thread.opened',
+      '2:thread.note_appended',
+      '3:thread.closed',
+    ])
+    expect(kinds(timeline(facts, 'task', 't-1'))).toEqual([])
+    expect(kinds(timeline(facts, 'run', 'run-1'))).toEqual(['4:event.merged'])
   })
 })

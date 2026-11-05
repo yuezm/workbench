@@ -17,17 +17,20 @@
  */
 import type { Ask, RawEvent, Receipt } from '../../protocol/inputs'
 import { COMMAND_LIMITS } from '../../protocol/validate'
+import { THREAD_LIMITS } from '../../protocol/thread'
 
-/** 回执块可携带的五个字段；解析结果只含这些键。 */
+/** 回执块可携带的六个字段；解析结果只含这些键。 */
 export interface ReceiptBlock {
   ask?: Ask[]
   notices?: string[]
   resolves?: string[]
   later?: string
   events?: RawEvent[]
+  /** 线程笔记（M6.5）：每条 ≤2000 字，只作资料 */
+  notes?: string[]
 }
 
-const RECEIPT_BLOCK_KEYS = ['ask', 'notices', 'resolves', 'later', 'events'] as const
+const RECEIPT_BLOCK_KEYS = ['ask', 'notices', 'resolves', 'later', 'events', 'notes'] as const
 
 /** 开围栏：```json（标签大小写不敏感）单独成行 */
 const FENCE_OPEN_RE = /^```json\s*$/i
@@ -127,6 +130,14 @@ const parseEvents = (value: unknown): RawEvent[] | null => {
   return value as RawEvent[]
 }
 
+const parseNotes = (value: unknown): string[] | null => {
+  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.receiptItems) return null
+  for (const note of value) {
+    if (!isText(note, THREAD_LIMITS.noteText)) return null
+  }
+  return value as string[]
+}
+
 const parseLater = (value: unknown): string | null => {
   if (!isText(value, COMMAND_LIMITS.iso)) return null
   // 内核会把 later 直接当 notBefore：非 ISO 时间整块忽略，不让无效时刻进调度
@@ -202,6 +213,15 @@ export function parseReceiptBlock(output: string): ReceiptBlock | null {
         }
         break
       }
+      case 'notes': {
+        const notes = parseNotes(value)
+        if (!notes) return null
+        if (notes.length > 0) {
+          block.notes = notes
+          fields += 1
+        }
+        break
+      }
     }
   }
 
@@ -221,4 +241,5 @@ export function applyReceiptBlock(receipt: Receipt, output: string): void {
   if (block.resolves !== undefined) receipt.resolves = block.resolves
   if (block.later !== undefined) receipt.later = block.later
   if (block.events !== undefined) receipt.events = block.events
+  if (block.notes !== undefined) receipt.notes = block.notes
 }

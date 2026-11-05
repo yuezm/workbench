@@ -26,6 +26,8 @@ const task: Task = {
   ruleId: null,
   externalRef: null,
   labels: [],
+  threadId: null,
+  parentTaskId: null,
   createdAt: 'x',
   updatedAt: 'x',
 }
@@ -130,5 +132,103 @@ describe('TaskCard', () => {
     expect(screen.getByText('执行中…')).toBeInTheDocument()
     expect(screen.queryByText('等待你处理')).not.toBeInTheDocument()
     expect(screen.getByLabelText('任务：写代码')).toHaveAttribute('draggable', 'false')
+  })
+
+  it('派生任务显示子任务徽标；父任务在看板里时带上父任务标题', () => {
+    const { rerender } = render(
+      <TaskCard
+        task={{ ...task, parentTaskId: 't0' }}
+        stage={stage('none')}
+        executing={false}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('子任务')).toBeInTheDocument()
+
+    rerender(
+      <TaskCard
+        task={{ ...task, parentTaskId: 't0' }}
+        stage={stage('none')}
+        executing={false}
+        parentTitle="父任务"
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('子任务 · 父任务')).toBeInTheDocument()
+    expect(screen.queryByText('子任务')).not.toBeInTheDocument()
+
+    // 父任务标题为空串时退化为纯「子任务」徽标
+    rerender(
+      <TaskCard
+        task={{ ...task, parentTaskId: 't0' }}
+        stage={stage('none')}
+        executing={false}
+        parentTitle=""
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('子任务')).toBeInTheDocument()
+  })
+
+  it('无父任务时不显示子任务徽标', () => {
+    render(
+      <TaskCard
+        task={task}
+        stage={stage('none')}
+        executing={false}
+        parentTitle="忽略"
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.queryByText(/子任务/)).not.toBeInTheDocument()
+  })
+
+  it('有 threadId 且传了回调时提供线程入口，点击把任务交给上层', () => {
+    const onOpenThread = vi.fn()
+    render(
+      <TaskCard
+        task={{ ...task, threadId: 'th1' }}
+        stage={stage('none')}
+        executing={false}
+        onOpenThread={onOpenThread}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    const entry = screen.getByRole('button', { name: '打开线程：写代码' })
+    expect(entry).toHaveTextContent('线程')
+    fireEvent.click(entry)
+    expect(onOpenThread).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 't1', threadId: 'th1' }),
+    )
+  })
+
+  it('没有 threadId 或没有回调时不渲染线程入口', () => {
+    const { rerender } = render(
+      <TaskCard
+        task={task}
+        stage={stage('none')}
+        executing={false}
+        onOpenThread={vi.fn()}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: '打开线程：写代码' })).not.toBeInTheDocument()
+
+    rerender(
+      <TaskCard
+        task={{ ...task, threadId: 'th1' }}
+        stage={stage('none')}
+        executing={false}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: '打开线程：写代码' })).not.toBeInTheDocument()
   })
 })

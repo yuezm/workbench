@@ -2,13 +2,14 @@
  * 宿主层 SQLite schema：全库 DDL 的唯一来源（M1 起从 main/ai-workflow 迁入）。
  *
  * 以字符串内嵌（而非 .sql 资源文件），保证 electron-vite 打包后主进程运行时也能拿到。
- * 十二张投影表（实体五表 + runs / run_events / conversations / messages / cards +
- * rule_sets / rule_fires）全部可由事实重建：
- * 实体五表的列名与约束保持 v2 原样（M6 只给 `tasks` 追加来源列，不重建表）；
+ * 十三张投影表（实体五表 + runs / run_events / conversations / messages / cards +
+ * rule_sets / rule_fires + threads）全部可由事实重建：
+ * 实体五表的列名与约束保持 v2 原样（M6 给 `tasks` 追加来源列、M6.5 追加线程两列，都不重建表）；
  * 运行/聊天四表在 M2 变为投影（runs 补调度列、`status` 加 `waiting`、`task_id` 可空；
  * 聊天投影从 `chat_*` 改名为 `conversations` / `messages`）；
  * M4 追加 `cards`（卡片行按 `(id, version)` 演进，投递状态单列）；
- * M6 追加 `rule_sets`（单行 id='current'：版本 + 整批规则）与 `rule_fires`（cron 触发记录，纯追加）。
+ * M6 追加 `rule_sets`（单行 id='current'：版本 + 整批规则）与 `rule_fires`（cron 触发记录，纯追加）；
+ * M6.5 追加 `threads`（线程行整行由 `thread.*` 事实携带，`(source, external_ref)` 建索引）。
  * 过渡期 legacy `chat_conversations` / `chat_messages` 已由 T14b 迁成 `snapshot.imported`
  * 事实并删除（`host/store/import` 读旧表 → 写导入根 → 删表），这里不再创建它们。
  * `facts` 只追加，`projection_meta` 记录投影指纹与已折叠的 seq。
@@ -70,11 +71,14 @@ CREATE TABLE IF NOT EXISTS ${name} (
 );`
 
 /**
- * `tasks` 投影：M6 追加来源四列（旧库由 `host/db.ts` 用 `ALTER TABLE ADD COLUMN` 补齐）。
+ * `tasks` 投影：M6 追加来源四列（旧库由 `host/db.ts` 用 `ALTER TABLE ADD COLUMN` 补齐），
+ * M6.5 追加线程两列（同一机制）。
  *
  * - `origin` = 人手建（`manual`）/ 规则命中（`rule`）；存量与手工任务默认 `manual`。
  * - `rule_id` / `external_ref` 记录命中的规则与入口键（同规则去重）；手工任务为 null。
  * - `labels_json` 存 `string[]` 的 JSON（规则声明的标签，展示用，不参与派活）。
+ * - `thread_id` = 所属线程（M6.5，手工任务挂隐式线程）；`parent_task_id` = 派生它的父任务。
+ *   两者都是弱引用（不设外键），旧行与老事实按 null 归一。
  */
 const tasksTable = (name = 'tasks'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
@@ -88,6 +92,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   rule_id TEXT,
   external_ref TEXT,
   labels_json TEXT NOT NULL DEFAULT '[]',
+  thread_id TEXT,
+  parent_task_id TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -253,6 +259,33 @@ CREATE TABLE IF NOT EXISTS ${name} (
   task_id TEXT
 );`
 
+/**
+ * `threads` 投影（M6.5，第 13 张表）：与 `ThreadRow` 逐列对应，整行由 `thread.*` 事实携带。
+ *
+ * - 身份 `(source, external_ref)`：`external_ref` 可为 null（手工任务的隐式线程），
+ *   因此索引不是唯一索引；绑定目标键唯一性由内核在决策时校验。
+ * - `task_ids_json` / `root_task_ids_json` 存 `string[]`；`notes_json` 存 `ThreadNote[]`、
+ *   `events_json` 存 `ThreadEventRef[]`（各自有上限、保最新）。
+ * - **`sessions` 不落列**：由 `runs` 现算（`thread.byId` 视图），避免每轮回执再写线程事实。
+ * - `status` 只有 `open` / `closed`（关闭原因只进事实，不进投影）。
+ */
+const threadsTable = (name = 'threads'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  external_ref TEXT,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('open','closed')),
+  task_ids_json TEXT NOT NULL DEFAULT '[]',
+  root_task_ids_json TEXT NOT NULL DEFAULT '[]',
+  concurrency INTEGER NOT NULL DEFAULT 1,
+  notes_version INTEGER NOT NULL DEFAULT 0,
+  notes_json TEXT NOT NULL DEFAULT '[]',
+  events_json TEXT NOT NULL DEFAULT '[]',
+  last_activity_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);`
+
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, position);
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
@@ -266,9 +299,10 @@ CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_cards_run ON cards(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_cards_delivery ON cards(delivery);
 CREATE INDEX IF NOT EXISTS idx_rule_fires_rule ON rule_fires(rule_id, scheduled_for);
+CREATE INDEX IF NOT EXISTS idx_threads_key ON threads(source, external_ref);
 `
 
-/** v2 全量 schema（新建库；十二张投影表 + 索引） */
+/** v2 全量 schema（新建库；十三张投影表 + 索引） */
 export const SCHEMA_SQL = [
   runtimesTable(),
   agentsTable(),
@@ -282,6 +316,7 @@ export const SCHEMA_SQL = [
   cardsTable(),
   ruleSetsTable(),
   ruleFiresTable(),
+  threadsTable(),
   INDEX_SQL,
 ].join('\n')
 
@@ -301,7 +336,7 @@ CREATE TABLE IF NOT EXISTS commands (
 
 /**
  * 宿主私有进程登记表 DDL：与 `FACTS_SQL` 一样单独执行（不进业务表清单，
- * 也就不在 `SCHEMA_SQL` 的「十二张投影表」断言范围内）。
+ * 也就不在 `SCHEMA_SQL` 的「十三张投影表」断言范围内）。
  */
 export const PROCESS_REGISTRY_SQL = processRegistryTable()
 
@@ -319,6 +354,7 @@ export const tableDdl = {
   cards: cardsTable,
   ruleSets: ruleSetsTable,
   ruleFires: ruleFiresTable,
+  threads: threadsTable,
 } as const
 
 /**
@@ -422,6 +458,22 @@ export const TASKS_M6_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
+ * M6.5 给 `tasks` 新增的列（线程与父任务）：与 M6 同一机制（`ALTER TABLE ADD COLUMN`，不重建表）。
+ *
+ * 两列都可空、无默认值：旧行与 v2 存量导入后按 null 归一（「不属于任何线程」/「不是派生任务」）。
+ * 清单与 `tasksTable()` 的 DDL 保持同步（新增列必须同时改这里）。
+ */
+export const TASKS_M65_ADDED_COLUMNS = ['thread_id', 'parent_task_id'] as const
+
+/** `tasks` M6.5 补列语句（默认值与 DDL 一致：可空、无 DEFAULT）。 */
+export const TASKS_M65_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M65_ADDED_COLUMNS)[number], string>
+> = {
+  thread_id: 'ALTER TABLE tasks ADD COLUMN thread_id TEXT',
+  parent_task_id: 'ALTER TABLE tasks ADD COLUMN parent_task_id TEXT',
+}
+
+/**
  * 账本基础设施的 DDL：事实日志（只追加）与投影元信息。
  *
  * `facts.payload` / `facts.actor_json` 以 JSON 文本存放；`seq` 由 SQLite 自增分配，
@@ -446,7 +498,7 @@ CREATE TABLE IF NOT EXISTS projection_meta (
 );
 `
 
-/** 投影集白名单：重建清空并重放的就是这十二张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
+/** 投影集白名单：重建清空并重放的就是这十三张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
 export const PROJECTION_TABLES = [
   'tasks',
   'workflows',
@@ -460,6 +512,7 @@ export const PROJECTION_TABLES = [
   'cards',
   'rule_sets',
   'rule_fires',
+  'threads',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -477,9 +530,10 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   cards: tableDdl.cards(),
   rule_sets: tableDdl.ruleSets(),
   rule_fires: tableDdl.ruleFires(),
+  threads: tableDdl.threads(),
 }
 
-/** 十二张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 十三张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */
@@ -487,7 +541,7 @@ export function formatOfProjection(ddl: string, kernelVersion: string): string {
   return createHash('sha256').update(`${ddl}\n${kernelVersion}`).digest('hex')
 }
 
-/** 投影格式指纹 = sha256(十二表投影 DDL + 内核版本)；任一变化即触发重建。 */
+/** 投影格式指纹 = sha256(十三表投影 DDL + 内核版本)；任一变化即触发重建。 */
 export function projectionFormat(kernelVersion: string): string {
   return formatOfProjection(PROJECTION_DDL, kernelVersion)
 }

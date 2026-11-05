@@ -48,6 +48,9 @@ export const COMMAND_NAMES = [
   'app.event',
   'rules.replace',
   'rule.trigger',
+  'thread.note',
+  'thread.close',
+  'thread.bind',
 ] as const
 
 export type CommandName = (typeof COMMAND_NAMES)[number]
@@ -253,6 +256,9 @@ export type Command =
   | AppEventCommand
   | RulesReplaceCommand
   | RuleTriggerCommand
+  | ThreadNoteCommand
+  | ThreadCloseCommand
+  | ThreadBindCommand
 
 // ---------- 自动化规则（M6） ----------
 
@@ -274,4 +280,31 @@ export interface RulesReplaceCommand extends CommandBase {
 export interface RuleTriggerCommand extends CommandBase {
   type: 'rule.trigger'
   ruleId: string
+}
+
+// ---------- 线程（M6.5） ----------
+
+/** 给线程追加一条笔记（owner 补录；agent 笔记只能经回执 `notes[]`）。 */
+export interface ThreadNoteCommand extends CommandBase {
+  type: 'thread.note'
+  threadId: string
+  /** ≤2000 字；正文只作资料，不进指令段 */
+  text: string
+}
+
+/** 人工归档线程（只改 `status`，不影响任务/运行；新事件到达会自动重开）。 */
+export interface ThreadCloseCommand extends CommandBase {
+  type: 'thread.close'
+  threadId: string
+}
+
+/**
+ * 把隐式线程绑定到外部入口 `(source, externalRef)`：之后同入口的事件续进该线程。
+ * 目标键已被别的线程占用时 reject（身份唯一）。
+ */
+export interface ThreadBindCommand extends CommandBase {
+  type: 'thread.bind'
+  threadId: string
+  source: string
+  externalRef: string
 }

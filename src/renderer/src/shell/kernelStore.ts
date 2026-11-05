@@ -95,7 +95,10 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
   // 规则集是整批投影：两条事实都只影响 rules.all；任务类事实由既有 `task.` 前缀处理
   { prefix: 'rules.replaced', views: ['rules.all'] },
   { prefix: 'rule.fired', views: ['rules.all'] },
-  { prefix: 'event.', views: [] },
+  // 线程行随 `thread.*` 事实整行更新；外部事件会决定「归入哪个线程 / 是否重开」，
+  // 因此 `event.` 同样失效线程视图（即使该事件没有命中任何线程也无害：多取一次）。
+  { prefix: 'thread.', views: ['thread.byId'] },
+  { prefix: 'event.', views: ['thread.byId'] },
 ]
 
 /** 一次事实批次要失效的视图 id 集合；有未知类型时返回 null（调用方全量失效）。 */

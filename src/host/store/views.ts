@@ -39,10 +39,12 @@ import type {
   WorkflowWithStages,
 } from '../../protocol/entities'
 import type { RuleSetRow, RuleSetView } from '../../protocol/rules'
+import type { ThreadRow } from '../../protocol/thread'
 import type {
   ActiveRun,
   RuntimeWorkload,
   StaleChatRun,
+  ThreadDetail,
   ViewId,
   WaitingRun,
 } from '../../protocol/views'
@@ -106,8 +108,27 @@ interface TaskRow {
   rule_id: string | null
   external_ref: string | null
   labels_json: string
+  thread_id: string | null
+  parent_task_id: string | null
   created_at: string
   updated_at: string
+}
+
+/** `threads` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
+interface ThreadDbRow {
+  id: string
+  source: string
+  external_ref: string | null
+  title: string
+  status: string
+  task_ids_json: string
+  root_task_ids_json: string
+  concurrency: number
+  notes_version: number
+  notes_json: string
+  events_json: string
+  last_activity_at: string
+  created_at: string
 }
 
 /** `rule_sets` 单行投影（列与 `host/schema` 的 DDL 一一对应）。 */
@@ -265,8 +286,27 @@ const mapTask = (row: TaskRow): Task => ({
   ruleId: row.rule_id,
   externalRef: row.external_ref,
   labels: JSON.parse(row.labels_json) as string[],
+  threadId: row.thread_id,
+  parentTaskId: row.parent_task_id,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+})
+
+/** `threads` 行 → `ThreadRow`：四个 JSON 列还原，其余逐列直取（`sessions` 不落行）。 */
+const mapThread = (row: ThreadDbRow): ThreadRow => ({
+  id: row.id,
+  source: row.source,
+  externalRef: row.external_ref,
+  title: row.title,
+  status: row.status as ThreadRow['status'],
+  taskIds: JSON.parse(row.task_ids_json) as string[],
+  rootTaskIds: JSON.parse(row.root_task_ids_json) as string[],
+  concurrency: row.concurrency,
+  notesVersion: row.notes_version,
+  notes: JSON.parse(row.notes_json) as ThreadRow['notes'],
+  events: JSON.parse(row.events_json) as ThreadRow['events'],
+  lastActivityAt: row.last_activity_at,
+  createdAt: row.created_at,
 })
 
 /** `runs` 行 → `RunRow`：JSON 列还原、布尔列从 0/1 还原，其余逐列直取。 */
@@ -393,7 +433,7 @@ const readRuntimes = (db: DatabaseSync): Runtime[] =>
 
 /** `tasks` 投影的列清单（逐列写死，不用 `SELECT *`；三处读路径共用）。 */
 const TASK_COLUMNS = `id, title, description, workflow_id, current_stage_id, status, origin,
-        rule_id, external_ref, labels_json, created_at, updated_at`
+        rule_id, external_ref, labels_json, thread_id, parent_task_id, created_at, updated_at`
 
 const readTasks = (db: DatabaseSync): Task[] =>
   (
@@ -401,6 +441,18 @@ const readTasks = (db: DatabaseSync): Task[] =>
       .prepare(`SELECT ${TASK_COLUMNS} FROM tasks ORDER BY created_at, rowid`)
       .all() as unknown as TaskRow[]
   ).map(mapTask)
+
+/** `threads` 投影的列清单（逐列写死，不用 `SELECT *`；装载与 `thread.byId` 共用）。 */
+const THREAD_COLUMNS = `id, source, external_ref, title, status, task_ids_json,
+        root_task_ids_json, concurrency, notes_version, notes_json, events_json,
+        last_activity_at, created_at`
+
+const readThreads = (db: DatabaseSync): ThreadRow[] =>
+  (
+    db
+      .prepare(`SELECT ${THREAD_COLUMNS} FROM threads ORDER BY created_at, rowid`)
+      .all() as unknown as ThreadDbRow[]
+  ).map(mapThread)
 
 /** `runs` 投影的列清单（逐列写死，不用 `SELECT *`）。 */
 const RUN_COLUMNS = `id, purpose, task_id, stage_id, agent_id, runtime_id, conversation_id, rule_id,
@@ -692,6 +744,7 @@ export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): 
     conversations: slice.has('conversations') ? toMap(readConversations(db)) : new Map(),
     messages: slice.has('messages') ? toMap(readMessages(db)) : new Map(),
     cards: slice.has('cards') ? toMap(readCards(db)) : new Map(),
+    threads: slice.has('threads') ? toMap(readThreads(db)) : new Map(),
     activeTaskIds: readActiveTaskIds(db),
     rules: ruleSet?.rules ?? [],
     rulesVersion: ruleSet?.version ?? 0,
@@ -725,6 +778,63 @@ const readTask = (db: DatabaseSync, taskId: string): Task | null => {
     .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`)
     .get(taskId) as unknown as TaskRow | undefined
   return row ? mapTask(row) : null
+}
+
+const readThread = (db: DatabaseSync, threadId: string): ThreadRow | null => {
+  const row = db
+    .prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE id = ?`)
+    .get(threadId) as unknown as ThreadDbRow | undefined
+  return row ? mapThread(row) : null
+}
+
+/**
+ * 线程内任务：按 `thread.taskIds` 取（已删任务自然跳过），按 `created_at` 排序
+ * ——与 `thread.byId` 的契约一致，任务树结构由 `rootTaskIds` / `parentTaskId` 决定。
+ */
+const readThreadTasks = (db: DatabaseSync, taskIds: readonly string[]): Task[] => {
+  if (taskIds.length === 0) return []
+  const placeholders = taskIds.map(() => '?').join(', ')
+  return (
+    db
+      .prepare(
+        `SELECT ${TASK_COLUMNS} FROM tasks
+         WHERE id IN (${placeholders})
+         ORDER BY created_at, rowid`,
+      )
+      .all(...taskIds) as unknown as TaskRow[]
+  ).map(mapTask)
+}
+
+/**
+ * 线程会话：每个 `agentId` 最近一次终态 run 的 `sessionId`（不落线程行，按 runs 现算）。
+ *
+ * 口径与 `kernel/threads` 的 `threadSessions` 一致：只算 `succeeded` / `failed` / `cancelled`
+ * 且带 `session_id` 的 run，按 `COALESCE(ended_at, created_at)` → `created_at` → `id` 排序，
+ * 后写覆盖先写（最近一次胜出）。
+ */
+const readThreadSessions = (db: DatabaseSync, threadId: string): Record<string, string> => {
+  const rows = db
+    .prepare(
+      `SELECT agent_id, session_id FROM runs
+       WHERE thread_id = ? AND agent_id IS NOT NULL AND session_id IS NOT NULL
+         AND status IN ('succeeded','failed','cancelled')
+       ORDER BY COALESCE(ended_at, created_at), created_at, id`,
+    )
+    .all(threadId) as unknown as Array<{ agent_id: string; session_id: string }>
+  const sessions: Record<string, string> = {}
+  for (const row of rows) sessions[row.agent_id] = row.session_id
+  return sessions
+}
+
+/** `thread.byId`：线程不存在返回 null；任务与会话都由当前投影现算（不落线程行）。 */
+const readThreadDetail = (db: DatabaseSync, threadId: string): ThreadDetail | null => {
+  const thread = readThread(db, threadId)
+  if (thread === null) return null
+  return {
+    thread,
+    tasks: readThreadTasks(db, thread.taskIds),
+    sessions: readThreadSessions(db, threadId),
+  }
 }
 
 const mapActiveRun = (row: ActiveRunRow): ActiveRun => ({
@@ -786,6 +896,9 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readTasksByWorkflow(db, readStringParam(params, 'workflowId'))
     case 'task.byId':
       return readTask(db, readStringParam(params, 'taskId'))
+    case 'thread.byId':
+      // M6.5：线程详情 = 线程行 + 线程任务（按创建顺序）+ 各智能体最近会话 id
+      return readThreadDetail(db, readStringParam(params, 'threadId'))
     case 'runs.active-by-task':
       return readActiveRuns(db, readStringParam(params, 'taskId'))
     case 'conversations.all':

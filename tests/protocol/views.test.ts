@@ -75,6 +75,7 @@ describe('protocol/views', () => {
       'runtimes.detected',
       'runtimes.models',
       'rules.all',
+      'thread.byId',
     ])
   })
 

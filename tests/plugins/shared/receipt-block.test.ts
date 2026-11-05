@@ -273,4 +273,28 @@ describe('applyReceiptBlock：执行器接线口径', () => {
       error: '原始错误',
     })
   })
+
+  it('notes（M6.5）：合法笔记解析并写进回执；单独 notes 也算回执块', () => {
+    const text = blockOf({ notes: ['先跑测试', '注意工作树'] })
+    expect(parseReceiptBlock(text)).toEqual({ notes: ['先跑测试', '注意工作树'] })
+    const receipt = receiptOf({ output: text })
+    applyReceiptBlock(receipt, text)
+    expect(receipt.notes).toEqual(['先跑测试', '注意工作树'])
+    expect(receipt.ask).toBeUndefined()
+  })
+
+  it('notes 非法：空文本 / 超长 / 超条数 → 整块忽略', () => {
+    expect(parseReceiptBlock(blockOf({ notes: ['  '] }))).toBeNull()
+    expect(parseReceiptBlock(blockOf({ notes: ['x'.repeat(2001)] }))).toBeNull()
+    expect(parseReceiptBlock(blockOf({ notes: Array.from({ length: 101 }, () => 'x') }))).toBeNull()
+  })
+
+  it('notes 为空数组：不算回执块（其余键也没有时返回 null）', () => {
+    expect(parseReceiptBlock(blockOf({ notes: [] }))).toBeNull()
+  })
+
+  it('notes 与另一键同时出现时都解析（六键口径）', () => {
+    const text = blockOf({ notices: ['完成'], notes: ['资料'] })
+    expect(parseReceiptBlock(text)).toEqual({ notices: ['完成'], notes: ['资料'] })
+  })
 })

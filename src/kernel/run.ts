@@ -64,11 +64,32 @@ export function claimCandidates(view: View, runtimeId: Id, now: Iso): RunRow[] {
 /**
  * 本次实际领取的 run：窗口 = `maxConcurrent − running 数`，最多
  * `min(window, capacity)`（capacity 已由 decide 校验为 1–8）。
+ *
+ * M6.5 线程闸门：同一线程同时 `running` 数 ≥ `thread.concurrency`（缺省 1）时跳过它的
+ * 候选；跨线程互不影响。`waiting` 不占位（已释放租约与并发位），`queued` 尚未占位。
  */
 export function pickClaims(view: View, runtime: Runtime, capacity: number, now: Iso): RunRow[] {
   const window = runtime.maxConcurrent - occupiedSlots(view, runtime.id)
   if (window <= 0) return []
-  return claimCandidates(view, runtime.id, now).slice(0, Math.min(window, capacity))
+  const runningByThread = new Map<Id, number>()
+  for (const run of view.runs.values()) {
+    if (run.status !== 'running' || run.threadId === null) continue
+    runningByThread.set(run.threadId, (runningByThread.get(run.threadId) ?? 0) + 1)
+  }
+  const picked: RunRow[] = []
+  const limit = Math.min(window, capacity)
+  for (const run of claimCandidates(view, runtime.id, now)) {
+    if (picked.length >= limit) break
+    if (run.threadId !== null) {
+      const thread = view.threads.get(run.threadId)
+      const concurrency = thread?.concurrency ?? 1
+      const used = runningByThread.get(run.threadId) ?? 0
+      if (used >= concurrency) continue
+      runningByThread.set(run.threadId, used + 1)
+    }
+    picked.push(run)
+  }
+  return picked
 }
 
 /**

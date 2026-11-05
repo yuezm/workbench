@@ -27,6 +27,7 @@ import {
   RULE_TITLE_FROM,
 } from './rules'
 import { VIEW_IDS, VIEW_PARAM_FIELDS, type ViewId } from './views'
+import { THREAD_LIMITS } from './thread'
 
 /** 校验通过返回收窄后的命令；失败返回首条错误文案。 */
 export type ValidateResult = { ok: true; command: Command } | { ok: false; message: string }
@@ -342,6 +343,19 @@ const RULE_SOURCE_PATTERN = /^(\*|[a-z][a-z0-9:_-]*)$/
 /** 规则 type 匹配模式：精确、`*`、前缀 `x.*`。 */
 const RULE_TYPE_PATTERN = /^(\*|[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*(\.\*)?)$/
 
+/** 线程来源：小写标识（`app:<id>` 形式允许冒号），不允许 `*`。 */
+const THREAD_SOURCE_PATTERN = /^[a-z][a-z0-9:_-]*$/
+
+const checkThreadSource = (value: unknown): Check => {
+  if (typeof value !== 'string') return 'source必须是字符串'
+  if (value.length > THREAD_LIMITS.source) {
+    return `source最长 ${THREAD_LIMITS.source} 个字符`
+  }
+  return THREAD_SOURCE_PATTERN.test(value)
+    ? null
+    : 'source 必须是小写标识（如 github / mail / app:pomodoro）'
+}
+
 const checkRuleWhen = (value: unknown, label: string): Check => {
   const when = asRecord(value)
   if (!when) return `${label} 必须是对象`
@@ -494,6 +508,20 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
       return checkList(command.rules, 'rules', RULE_LIMITS.rules, checkRule)
     case 'rule.trigger':
       return requiredId(command.ruleId, 'ruleId')
+    case 'thread.note':
+      // 笔记正文只作资料；上限与回执 notes[] 同值
+      return (
+        requiredId(command.threadId, 'threadId') ??
+        text(command.text, 'text', THREAD_LIMITS.noteText)
+      )
+    case 'thread.close':
+      return requiredId(command.threadId, 'threadId')
+    case 'thread.bind':
+      return (
+        requiredId(command.threadId, 'threadId') ??
+        checkThreadSource(command.source) ??
+        required(command.externalRef, 'externalRef', THREAD_LIMITS.externalRef)
+      )
   }
 }
 
@@ -636,6 +664,9 @@ const checkReceipt = (value: unknown): Check => {
     ) ??
     optionalText(receipt.later, 'receipt.later', COMMAND_LIMITS.iso) ??
     checkList(receipt.events, 'receipt.events', COMMAND_LIMITS.receiptItems, checkRawEvent) ??
+    checkList(receipt.notes, 'receipt.notes', THREAD_LIMITS.notesPerReceipt, (note, at) =>
+      text(note, at, THREAD_LIMITS.noteText),
+    ) ??
     optionalEnum(receipt.errorCode, 'receipt.errorCode', RUN_ERROR_CODES) ??
     optionalText(receipt.error, 'receipt.error', COMMAND_LIMITS.description) ??
     optionalIntegerIn(receipt.exitCode, 'receipt.exitCode', -1_000_000, 1_000_000) ??

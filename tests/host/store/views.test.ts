@@ -878,3 +878,252 @@ describe('loadView / queryView：规则投影（M6）', () => {
     expect(queryView(db, 'rules.all')).toEqual({ version: 4, rules: [ruleCron] })
   })
 })
+
+// ---------- M6.5 线程 ----------
+
+const THREAD_AT = '2026-06-01T00:00:00.000Z'
+const THREAD_AT_2 = '2026-06-02T00:00:00.000Z'
+const THREAD_AT_3 = '2026-06-03T00:00:00.000Z'
+
+const threadNote = {
+  id: 'tn-1',
+  author: 'owner' as const,
+  text: '先看日志再动手',
+  at: THREAD_AT,
+}
+const threadEvent = {
+  eventId: 'ev-1',
+  type: 'issues.opened',
+  subject: '#7',
+  summary: '新 Issue',
+  link: 'https://example.com/7',
+  detailRef: null,
+  at: THREAD_AT,
+}
+
+const threadTaskRoot = sample.task({
+  id: 'tk-1',
+  title: '任务一',
+  workflowId: 'wf-1',
+  currentStageId: 'st-1',
+  threadId: 'th-1',
+  createdAt: OLDER_AT,
+  updatedAt: OLDER_AT,
+})
+const threadTaskChild = sample.task({
+  id: 'tk-2',
+  title: '任务二',
+  workflowId: 'wf-1',
+  currentStageId: 'st-1',
+  threadId: 'th-1',
+  parentTaskId: 'tk-1',
+  createdAt: SAMPLE_AT,
+})
+/** 有 threadId 但不在 `thread.taskIds` 里：`thread.byId` 只按行的 `taskIds` 取任务。 */
+const threadTaskDetached = sample.task({
+  id: 'tk-3',
+  title: '别的工作流任务',
+  workflowId: 'wf-2',
+  currentStageId: null,
+  threadId: 'th-1',
+  createdAt: SAMPLE_AT,
+})
+
+const openThread = sample.thread({
+  id: 'th-1',
+  source: 'github',
+  externalRef: 'issue-7',
+  title: 'Issue 七',
+  status: 'open',
+  // taskIds 故意倒序：`thread.byId` 的 tasks 按 created_at 排序，不跟 row 里的顺序
+  taskIds: ['tk-2', 'tk-1'],
+  rootTaskIds: ['tk-1'],
+  notesVersion: 1,
+  notes: [threadNote],
+  events: [threadEvent],
+  lastActivityAt: THREAD_AT_2,
+  createdAt: THREAD_AT,
+})
+const closedThread = sample.thread({
+  id: 'th-2',
+  source: 'manual',
+  externalRef: null,
+  title: '隐式线程',
+  status: 'closed',
+  taskIds: [],
+  rootTaskIds: [],
+  lastActivityAt: THREAD_AT_3,
+  createdAt: THREAD_AT_3,
+})
+
+/** 线程内每个 agent 最近一次终态 run 的会话；顺序 / 终态 / 空会话 / 跨线程都在这里钉住。 */
+const threadRuns = [
+  sample.run({
+    id: 'run-th-old',
+    taskId: 'tk-1',
+    stageId: 'st-1',
+    agentId: 'ag-1',
+    threadId: 'th-1',
+    status: 'succeeded',
+    sessionId: 'sess-old',
+    createdAt: THREAD_AT,
+    endedAt: THREAD_AT,
+  }),
+  sample.run({
+    id: 'run-th-new',
+    taskId: 'tk-1',
+    stageId: 'st-1',
+    agentId: 'ag-1',
+    threadId: 'th-1',
+    status: 'failed',
+    sessionId: 'sess-new',
+    createdAt: THREAD_AT_2,
+    endedAt: THREAD_AT_2,
+  }),
+  // 更晚的终态但没会话：按「取最后一条有 session_id 的」回落到 sess-new
+  sample.run({
+    id: 'run-th-no-session',
+    taskId: 'tk-2',
+    stageId: 'st-1',
+    agentId: 'ag-1',
+    threadId: 'th-1',
+    status: 'cancelled',
+    sessionId: null,
+    createdAt: THREAD_AT_3,
+    endedAt: THREAD_AT_3,
+  }),
+  // 非终态：不参与会话续接
+  sample.run({
+    id: 'run-th-running',
+    taskId: 'tk-2',
+    stageId: 'st-1',
+    agentId: 'ag-1',
+    threadId: 'th-1',
+    status: 'running',
+    sessionId: 'sess-running',
+    createdAt: THREAD_AT_3,
+  }),
+  sample.run({
+    id: 'run-th-agent-2',
+    taskId: 'tk-2',
+    stageId: 'st-1',
+    agentId: 'ag-2',
+    threadId: 'th-1',
+    status: 'succeeded',
+    sessionId: 'sess-ag2',
+    createdAt: THREAD_AT,
+    endedAt: THREAD_AT,
+  }),
+  // 别的线程：即便同一 agent 也不能串会话（th-3 没有线程行，只为验证按 thread_id 过滤）
+  sample.run({
+    id: 'run-other-thread',
+    taskId: 'tk-1',
+    stageId: 'st-1',
+    agentId: 'ag-1',
+    threadId: 'th-3',
+    status: 'succeeded',
+    sessionId: 'sess-other-thread',
+    createdAt: THREAD_AT_2,
+    endedAt: THREAD_AT_2,
+  }),
+]
+
+/** 种线程读路径的数据：实体五表 + 线程任务 + 线程行 + 线程内 run。 */
+function seedThreads(db: DatabaseSync): void {
+  seed(db)
+  const writer = createProjectionWriter(db)
+  const changes: Change[] = [
+    // 第二个智能体：验证 sessions 按 agentId 各记各的
+    { table: 'agents', key: 'ag-2', row: sample.agent({ id: 'ag-2', name: '审查者' }) },
+    { table: 'tasks', key: threadTaskRoot.id, row: threadTaskRoot },
+    { table: 'tasks', key: threadTaskChild.id, row: threadTaskChild },
+    { table: 'tasks', key: threadTaskDetached.id, row: threadTaskDetached },
+    { table: 'threads', key: openThread.id, row: openThread },
+    { table: 'threads', key: closedThread.id, row: closedThread },
+    ...threadRuns.map((run): Change => ({ table: 'runs', key: run.id, row: run })),
+  ]
+  for (const change of changes) writer.apply(change, THREAD_AT)
+}
+
+describe('loadView / queryView：线程（M6.5）', () => {
+  it('threads 切片：整行映射（JSON 列还原）；未声明时不装载', () => {
+    const db = memory()
+    seedThreads(db)
+
+    const view = loadView(db, ['threads'])
+    expect([...view.threads.keys()]).toEqual(['th-1', 'th-2'])
+    expect(view.threads.get('th-1')).toEqual(openThread)
+    expect(view.threads.get('th-2')).toEqual(closedThread)
+    expect(loadView(db, []).threads.size).toBe(0)
+    // 线程切片不影响其它表
+    expect(view.tasks.size).toBe(0)
+    expect(view.runs.size).toBe(0)
+  })
+
+  it('viewSpec：run.claim / event.received 都声明 threads 切片', () => {
+    const db = memory()
+    seedThreads(db)
+
+    const claimView = loadView(db, viewSpec({ type: 'run.claim', runtimeId: 'rt-1', capacity: 1 }))
+    expect(claimView.threads.size).toBe(2)
+  })
+
+  it('tasks 切片带 threadId / parentTaskId（task.byId 同口径）', () => {
+    const db = memory()
+    seedThreads(db)
+
+    const view = loadView(db, ['tasks'])
+    expect(view.tasks.get('tk-2')).toEqual(threadTaskChild)
+    expect(queryView(db, 'task.byId', { taskId: 'tk-2' })).toEqual(threadTaskChild)
+  })
+
+  it('thread.byId：线程不存在返回 null（空库同样）', () => {
+    const db = memory()
+    seedThreads(db)
+
+    expect(queryView(db, 'thread.byId', { threadId: 'th-missing' })).toBeNull()
+    expect(queryView(db, 'thread.byId', { threadId: 'th-1' })).not.toBeNull()
+    expect(queryView(memory(), 'thread.byId', { threadId: 'th-1' })).toBeNull()
+  })
+
+  it('thread.byId：taskIds 对应的任务按 created_at 排序，未列入的不取（已删任务自然跳过）', () => {
+    const db = memory()
+    seedThreads(db)
+
+    const detail = queryView(db, 'thread.byId', { threadId: 'th-1' })
+    expect(detail).toEqual({
+      thread: openThread,
+      tasks: [threadTaskRoot, threadTaskChild],
+      sessions: { 'ag-1': 'sess-new', 'ag-2': 'sess-ag2' },
+    })
+  })
+
+  it('thread.byId：sessions 只取线程内终态且带会话的 run，按 ended_at/created_at 取最后一条', () => {
+    const db = memory()
+    seedThreads(db)
+
+    const detail = queryView(db, 'thread.byId', { threadId: 'th-1' }) as {
+      sessions: Record<string, string>
+    }
+    // ag-1：run-th-new（sess-new）晚于 run-th-old；更晚的 cancelled 没会话、running 非终态都不覆盖
+    expect(detail.sessions['ag-1']).toBe('sess-new')
+    expect(detail.sessions['ag-1']).not.toBe('sess-running')
+    expect(detail.sessions['ag-1']).not.toBe('sess-other-thread')
+    expect(detail.sessions['ag-2']).toBe('sess-ag2')
+    // th-2 自己没有 run：会话为空对象（不串 th-1 的 run）
+    expect(queryView(db, 'thread.byId', { threadId: 'th-2' })).toEqual({
+      thread: closedThread,
+      tasks: [],
+      sessions: {},
+    })
+  })
+
+  it('thread.byId：缺参数 / 非法参数：StoreError(invalid_input)', () => {
+    const db = memory()
+    for (const params of [undefined, null, 42, {}, { threadId: '' }, { threadId: 7 }]) {
+      const error = captureError(() => queryView(db, 'thread.byId', params))
+      expect((error as StoreError).code).toBe('invalid_input')
+      expect((error as StoreError).message).toContain('threadId')
+    }
+  })
+})

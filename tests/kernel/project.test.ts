@@ -90,6 +90,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   ruleId: null,
   externalRef: null,
   labels: [],
+  threadId: null,
+  parentTaskId: null,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -225,6 +227,7 @@ const emptyTables = (): Tables => ({
   cards: new Map(),
   rule_sets: new Map(),
   rule_fires: new Map(),
+  threads: new Map(),
 })
 
 /** 按 seq 顺序 fold 事实：投影应用器的最小等价实现（重建与实时写入共用路径）。 */
@@ -759,8 +762,49 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
           ruleId: null,
           externalRef: null,
           labels: [],
+          threadId: null,
+          parentTaskId: null,
         },
       },
+    ])
+  })
+
+  it('M6.5 线程事实：整行 upsert；event.merged 更新 runs 行', () => {
+    const threadRow = {
+      id: 'th-1',
+      source: 'github',
+      externalRef: 'issue-1',
+      title: 'Issue 1',
+      status: 'open' as const,
+      taskIds: ['t-1'],
+      rootTaskIds: ['t-1'],
+      concurrency: 1,
+      notesVersion: 1,
+      notes: [{ id: 'n-1', author: 'agent' as const, text: '备注', at: AT }],
+      events: [],
+      lastActivityAt: AT,
+      createdAt: AT,
+    }
+    expect(project(fact(200, 'thread.opened', { thread: threadRow }))).toEqual([
+      put('threads', threadRow),
+    ])
+    const noted = { ...threadRow, notesVersion: 2 }
+    expect(
+      project(
+        fact(201, 'thread.note_appended', {
+          thread: noted,
+          note: { id: 'n-2', author: 'owner' as const, text: '补一条', at: AT },
+        }),
+      ),
+    ).toEqual([put('threads', noted)])
+    const closed = { ...threadRow, status: 'closed' as const }
+    expect(
+      project(fact(202, 'thread.closed', { thread: closed, reason: 'manual' as const })),
+    ).toEqual([put('threads', closed)])
+
+    const merged = run({ eventIds: ['ev-1'] })
+    expect(project(fact(203, 'event.merged', { run: merged, eventId: 'ev-1' }))).toEqual([
+      put('runs', merged),
     ])
   })
 

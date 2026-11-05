@@ -13,6 +13,8 @@ interface KanbanBoardProps {
   /** 卡片拖到「已完成」区 */
   onCompleteTask: (taskId: string) => void
   onNewTask: () => void
+  /** 打开卡片所属线程的面板（任务有 threadId 时才渲染入口） */
+  onOpenThread?: (task: Task) => void
 }
 
 /** 列头圆点按列序循环取四色点缀 */
@@ -46,6 +48,7 @@ export function KanbanBoard({
   onMoveToStage,
   onCompleteTask,
   onNewTask,
+  onOpenThread,
 }: KanbanBoardProps): ReactElement {
   /** 当前被拖动的任务（同一看板内拖拽，状态足够，不依赖 dataTransfer） */
   const [dragging, setDragging] = useState<Task | null>(null)
@@ -56,6 +59,8 @@ export function KanbanBoard({
 
   // 「执行中」由内核判定（queued/running/waiting 的任务 id 集合），看板不自己现算
   const executingIds = new Set(useKernelView('tasks.executing') ?? [])
+  // 任务树线索只按当前看板的任务列表查父任务标题，不另发视图查询
+  const titleById = new Map(tasks.map((task) => [task.id, task.title]))
 
   const stopDrag = (): void => {
     setDragging(null)
@@ -145,6 +150,10 @@ export function KanbanBoard({
                       stage={stage}
                       executing={executingIds.has(task.id)}
                       dragging={dragging?.id === task.id}
+                      parentTitle={
+                        task.parentTaskId === null ? undefined : titleById.get(task.parentTaskId)
+                      }
+                      onOpenThread={onOpenThread}
                       onDragStart={setDragging}
                       onDragEnd={stopDrag}
                     />

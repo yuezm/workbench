@@ -29,8 +29,9 @@ import type {
   WorkflowStage,
 } from './entities'
 import type { RuleFireRow, RuleSetRow } from './rules'
+import type { ThreadCloseReason, ThreadNote, ThreadRow } from './thread'
 
-/** 事实名全集；`thread.*` 等后续里程碑再补。M4 加卡片与派生事件。 */
+/** 事实名全集。M4 加卡片与派生事件；M6 加规则；M6.5 加线程与事件合并。 */
 export const FACT_TYPES = [
   'workflow.created',
   'workflow.updated',
@@ -70,6 +71,14 @@ export const FACT_TYPES = [
   'card.resolved',
   'event.received',
   'event.dropped',
+  'event.merged',
+  'thread.opened',
+  'thread.event_attached',
+  'thread.task_attached',
+  'thread.note_appended',
+  'thread.closed',
+  'thread.reopened',
+  'thread.bound',
   'rules.replaced',
   'rule.fired',
   'conversation.created',
@@ -317,6 +326,65 @@ export interface EventDroppedPayload {
   reason: string
 }
 
+// ---------- 线程（M6.5） ----------
+
+/**
+ * 线程事实（M6.5）沿用「一行事实 → 一行投影」：payload 携带**完整 `thread: ThreadRow` 行**，
+ * `project` 只做整行 upsert，重建不回查。其它字段只作审计（哪个事件、哪条任务、哪条笔记、
+ * 关闭原因、绑定键），行里已经包含同样的信息。
+ */
+export interface ThreadOpenedPayload {
+  thread: ThreadRow
+}
+
+/** 事件归入既有线程：行里的 `events` 已追加该事件。 */
+export interface ThreadEventAttachedPayload {
+  thread: ThreadRow
+  eventId: string
+  summary?: string
+}
+
+/** 任务挂进线程：行里的 `taskIds` / `rootTaskIds` 已更新。 */
+export interface ThreadTaskAttachedPayload {
+  thread: ThreadRow
+  taskId: string
+  ruleId?: string | null
+}
+
+/** 追加笔记：行里的 `notes` 已追加该条。 */
+export interface ThreadNoteAppendedPayload {
+  thread: ThreadRow
+  note: ThreadNote
+}
+
+/** 关闭线程（人工 / 任务全部完成 / 14 天无活动）。 */
+export interface ThreadClosedPayload {
+  thread: ThreadRow
+  reason: ThreadCloseReason
+}
+
+/** 关闭后新事件到达：自动重开；`eventId=null` 表示非事件路径的重开（保留形状）。 */
+export interface ThreadReopenedPayload {
+  thread: ThreadRow
+  eventId: string | null
+}
+
+/** 把隐式线程绑定到外部入口 `(source, externalRef)`。 */
+export interface ThreadBoundPayload {
+  thread: ThreadRow
+  source: string
+  externalRef: string
+}
+
+/**
+ * 事件合并到 queued run（M6.5）：`payload.run` 是追加 `eventId` 后的整行，
+ * `project` 据此更新 `runs.eventIds`（与运行类事实同口径，重建不回查）。
+ */
+export interface EventMergedPayload {
+  run: RunRow
+  eventId: string
+}
+
 // ---------- 自动化规则（M6） ----------
 
 /**
@@ -412,6 +480,14 @@ export interface FactPayloads {
   'card.resolved': CardResolvedPayload
   'event.received': EventReceivedPayload
   'event.dropped': EventDroppedPayload
+  'event.merged': EventMergedPayload
+  'thread.opened': ThreadOpenedPayload
+  'thread.event_attached': ThreadEventAttachedPayload
+  'thread.task_attached': ThreadTaskAttachedPayload
+  'thread.note_appended': ThreadNoteAppendedPayload
+  'thread.closed': ThreadClosedPayload
+  'thread.reopened': ThreadReopenedPayload
+  'thread.bound': ThreadBoundPayload
   'rules.replaced': RulesReplacedPayload
   'rule.fired': RuleFiredPayload
   'conversation.created': ConversationCreatedPayload

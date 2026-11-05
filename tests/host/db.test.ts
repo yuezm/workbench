@@ -17,6 +17,7 @@ import {
   SCHEMA_SQL,
   SCHEMA_VERSION,
   TASKS_M6_ADDED_COLUMNS,
+  TASKS_M65_ADDED_COLUMNS,
   tableDdl,
 } from '../../src/host/schema'
 
@@ -194,7 +195,7 @@ function userVersion(d: DatabaseSync): number {
 }
 
 describe('openDatabase', () => {
-  it(':memory: 建全 schema（十二张投影 + facts / projection_meta + 宿主私有 process_registry、commands）并写 user_version', () => {
+  it(':memory: 建全 schema（十三张投影 + facts / projection_meta + 宿主私有 process_registry、commands）并写 user_version', () => {
     db = openDatabase(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
@@ -211,6 +212,7 @@ describe('openDatabase', () => {
       'runs',
       'runtimes',
       'tasks',
+      'threads',
       'workflow_stages',
       'workflows',
     ])
@@ -294,6 +296,7 @@ describe('openDatabase', () => {
         'runs',
         'runtimes',
         'tasks',
+        'threads',
         'workflow_stages',
         'workflows',
       ])
@@ -690,8 +693,8 @@ describe('openDatabase：旧库 runtimes 结构升级（M3 一次性物理迁移
   })
 })
 
-describe('openDatabase：旧库 tasks 结构补列（M6 一次性 ALTER，不重建表）', () => {
-  it('缺 M6 列：补列后旧行 origin=manual，列结构与新库逐列一致，且新行可写', () => {
+describe('openDatabase：旧库 tasks 结构补列（M6 / M6.5 一次性 ALTER，不重建表）', () => {
+  it('缺 M6/M6.5 列：补列后旧行 origin=manual、线程两列为 null，列结构与新库逐列一致，且新行可写', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'hostdb-tasks-upgrade-'))
     const file = path.join(root, 'ai-workflow.db')
     try {
@@ -700,7 +703,7 @@ describe('openDatabase：旧库 tasks 结构补列（M6 一次性 ALTER，不重
       const before = new DatabaseSync(file)
       try {
         expect(needsTasksUpgrade(before)).toBe(true)
-        for (const column of TASKS_M6_ADDED_COLUMNS) {
+        for (const column of [...TASKS_M6_ADDED_COLUMNS, ...TASKS_M65_ADDED_COLUMNS]) {
           expect(columnNames(before, 'tasks').has(column), column).toBe(false)
         }
       } finally {
@@ -711,7 +714,7 @@ describe('openDatabase：旧库 tasks 结构补列（M6 一次性 ALTER，不重
       try {
         expect(needsTasksUpgrade(db)).toBe(false)
         const columns = columnNames(db, 'tasks')
-        for (const column of TASKS_M6_ADDED_COLUMNS) {
+        for (const column of [...TASKS_M6_ADDED_COLUMNS, ...TASKS_M65_ADDED_COLUMNS]) {
           expect(columns, column).toContain(column)
         }
 
@@ -736,12 +739,22 @@ describe('openDatabase：旧库 tasks 结构补列（M6 一次性 ALTER，不重
             updated_at: SEED_AT,
           },
         ])
-        // 旧行按默认值补来源列
+        // 旧行按默认值补来源列与线程两列
         expect(
           db
-            .prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks WHERE id = ?')
+            .prepare(
+              `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id
+               FROM tasks WHERE id = ?`,
+            )
             .get('tk-1'),
-        ).toEqual({ origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' })
+        ).toEqual({
+          origin: 'manual',
+          rule_id: null,
+          external_ref: null,
+          labels_json: '[]',
+          thread_id: null,
+          parent_task_id: null,
+        })
 
         // ALTER 补出的列结构与新建库 DDL 逐列一致（SQLite 把新列追加在末尾，列顺序不同，
         // 但名 / 类型 / NOT NULL / 默认值 / 主键完全相同；代码全部按列名读写，不依赖顺序）
@@ -750,31 +763,36 @@ describe('openDatabase：旧库 tasks 结构补列（M6 一次性 ALTER，不重
           fresh.exec(SCHEMA_SQL)
           const sorted = (shapes: string[]): string[] => [...shapes].sort()
           expect(sorted(columnShape(db, 'tasks'))).toEqual(sorted(columnShape(fresh, 'tasks')))
-          // 追加位置可观测：补列一定在表尾（不重排既有列）
+          // 追加位置可观测：补列一定在表尾（先 M6 四列，再 M6.5 两列；不重排既有列）
           expect(
             columnShape(db, 'tasks')
-              .slice(-4)
+              .slice(-6)
               .map((shape) => shape.split('|')[0]),
-          ).toEqual([...TASKS_M6_ADDED_COLUMNS])
+          ).toEqual([...TASKS_M6_ADDED_COLUMNS, ...TASKS_M65_ADDED_COLUMNS])
         } finally {
           fresh.close()
         }
 
-        // 新结构可写：规则任务四列落库，非法来源被 CHECK 拒绝
+        // 新结构可写：来源四列与线程两列落库，非法来源被 CHECK 拒绝
         db.prepare(
           `INSERT INTO tasks (id, title, workflow_id, origin, rule_id, external_ref, labels_json,
-                              created_at, updated_at)
-           VALUES (?, ?, ?, 'rule', 'rule-1', 'issue-1', '["bug"]', ?, ?)`,
+                              thread_id, parent_task_id, created_at, updated_at)
+           VALUES (?, ?, ?, 'rule', 'rule-1', 'issue-1', '["bug"]', 'th-1', 'tk-parent', ?, ?)`,
         ).run('tk-rule', '规则任务', 'wf-1', SEED_AT, SEED_AT)
         expect(
           db
-            .prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks WHERE id = ?')
+            .prepare(
+              `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id
+               FROM tasks WHERE id = ?`,
+            )
             .get('tk-rule'),
         ).toEqual({
           origin: 'rule',
           rule_id: 'rule-1',
           external_ref: 'issue-1',
           labels_json: '["bug"]',
+          thread_id: 'th-1',
+          parent_task_id: 'tk-parent',
         })
         expect(() =>
           db!.prepare("UPDATE tasks SET origin = 'agent' WHERE id = 'tk-1'").run(),
@@ -791,8 +809,66 @@ describe('openDatabase：旧库 tasks 结构补列（M6 一次性 ALTER，不重
         expect(needsTasksUpgrade(again)).toBe(false)
         expect(countOf(again, 'tasks')).toBe(2)
         expect(columnNames(again, 'tasks').has('labels_json')).toBe(true)
+        expect(columnNames(again, 'tasks').has('thread_id')).toBe(true)
       } finally {
         again.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('只缺 M6.5 线程两列：只补这两列，M6 来源列与既有数据原样保留', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-tasks-m65-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      seedLegacyTasksDatabase(file)
+      // 模拟 M6 已升级过的库：来源四列已存在、线程两列缺失。
+      const raw = new DatabaseSync(file)
+      try {
+        raw.exec("ALTER TABLE tasks ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'")
+        raw.exec('ALTER TABLE tasks ADD COLUMN rule_id TEXT')
+        raw.exec('ALTER TABLE tasks ADD COLUMN external_ref TEXT')
+        raw.exec("ALTER TABLE tasks ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'")
+        raw.prepare("UPDATE tasks SET labels_json = '[\"legacy\"]' WHERE id = 'tk-1'").run()
+      } finally {
+        raw.close()
+      }
+
+      const inspect = new DatabaseSync(file)
+      try {
+        expect(needsTasksUpgrade(inspect)).toBe(true)
+        expect(columnNames(inspect, 'tasks').has('thread_id')).toBe(false)
+        expect(columnNames(inspect, 'tasks').has('origin')).toBe(true)
+      } finally {
+        inspect.close()
+      }
+
+      db = openDatabase(file)
+      try {
+        expect(needsTasksUpgrade(db)).toBe(false)
+        expect(
+          db
+            .prepare(
+              `SELECT origin, labels_json, thread_id, parent_task_id FROM tasks WHERE id = 'tk-1'`,
+            )
+            .get(),
+        ).toEqual({
+          origin: 'manual',
+          labels_json: '["legacy"]',
+          thread_id: null,
+          parent_task_id: null,
+        })
+        // 只追加两列：补列前已有的来源四列不被重写
+        expect(
+          columnShape(db, 'tasks')
+            .slice(-2)
+            .map((shape) => shape.split('|')[0]),
+        ).toEqual([...TASKS_M65_ADDED_COLUMNS])
+        expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+      } finally {
+        db.close()
+        db = null
       }
     } finally {
       rmSync(root, { recursive: true, force: true })
@@ -822,12 +898,16 @@ describe('openDatabase：旧库 tasks 结构补列（M6 一次性 ALTER，不重
       try {
         expect(needsTasksUpgrade(db)).toBe(false)
         const columns = columnNames(db, 'tasks')
-        for (const column of TASKS_M6_ADDED_COLUMNS) {
+        for (const column of [...TASKS_M6_ADDED_COLUMNS, ...TASKS_M65_ADDED_COLUMNS]) {
           expect(columns, column).toContain(column)
         }
         expect(
-          db.prepare('SELECT origin, labels_json FROM tasks WHERE id = ?').get('tk-1'),
-        ).toEqual({ origin: 'manual', labels_json: '[]' })
+          db
+            .prepare(
+              'SELECT origin, labels_json, thread_id, parent_task_id FROM tasks WHERE id = ?',
+            )
+            .get('tk-1'),
+        ).toEqual({ origin: 'manual', labels_json: '[]', thread_id: null, parent_task_id: null })
       } finally {
         db.close()
         db = null

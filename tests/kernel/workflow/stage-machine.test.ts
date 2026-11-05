@@ -42,6 +42,8 @@ const task = (currentStageId: string | null): Task => ({
   ruleId: null,
   externalRef: null,
   labels: [],
+  threadId: null,
+  parentTaskId: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 })
@@ -142,6 +144,8 @@ function sTask(currentStageId: string | null, status: Task['status'] = 'active')
     ruleId: null,
     externalRef: null,
     labels: [],
+    threadId: null,
+    parentTaskId: null,
     createdAt: 't',
     updatedAt: 't',
   }

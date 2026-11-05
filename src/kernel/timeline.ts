@@ -13,7 +13,16 @@ import type { Fact, Id, Seq } from './types'
 
 /** 可追溯的实体范围（投影十表中的可展示实体）。 */
 export type TimelineScope =
-  'task' | 'workflow' | 'stage' | 'agent' | 'runtime' | 'run' | 'conversation' | 'message' | 'card'
+  | 'task'
+  | 'workflow'
+  | 'stage'
+  | 'agent'
+  | 'runtime'
+  | 'run'
+  | 'conversation'
+  | 'message'
+  | 'card'
+  | 'thread'
 
 /** 导入根在时间线上的标注文案。 */
 export const IMPORT_ROOT_LABEL = '迁移导入'
@@ -120,6 +129,17 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'event.dropped':
       // 熔断审计事实只带 eventId：不归入任何实体，只在 cause 链上出现。
       return []
+    case 'event.merged':
+      // 合并事件归到被合并的 run 的时间线
+      return [{ scope: 'run', id: fact.payload.run.id }]
+    case 'thread.opened':
+    case 'thread.event_attached':
+    case 'thread.task_attached':
+    case 'thread.note_appended':
+    case 'thread.closed':
+    case 'thread.reopened':
+    case 'thread.bound':
+      return [{ scope: 'thread', id: fact.payload.thread.id }]
     case 'rules.replaced':
     case 'rule.fired':
       // 规则事实归到规则集（没有独立 scope）；规则任务由 task.created 的 cause/ruleId 追溯。

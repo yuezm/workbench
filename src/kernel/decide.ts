@@ -36,7 +36,24 @@ import type { SettledRun } from './run'
 import { chatPrompt, laterPrompt, titleFromContent } from './prompt'
 import { answerFacts, cardsFromReceipt, resolveFacts, resumedRun } from './cards'
 import { entryRunFacts, ACCESS_BY_PERMISSION } from './task-effects'
-import { cronTaskFacts, eventTaskFacts, manualTriggerFacts, validateRuleBatch } from './rules'
+import { cronTaskFacts, eventThreadFacts, manualTriggerFacts, validateRuleBatch } from './rules'
+import {
+  boundFacts,
+  closeIfAllDone,
+  closedFacts,
+  findThreadByKey,
+  inactivityFacts,
+  makeNote,
+  noteFacts,
+  openThreadRow,
+  openedFacts,
+  taskAttachedFacts,
+  threadOfTask,
+  withBinding,
+  withNote,
+  withStatus,
+  withTask,
+} from './threads'
 import {
   abandonedFacts,
   claimFacts,
@@ -507,7 +524,7 @@ function receivedEventFacts(
   }
   return [
     { type: 'event.received', actor, at: now, payload },
-    ...eventTaskFacts(view, payload, view.rulesVersion, now, env),
+    ...eventThreadFacts(view, payload, view.rulesVersion, now, env),
   ]
 }
 
@@ -790,6 +807,13 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       if (requested !== null && !stages.some((stage) => stage.id === requested)) {
         return reject('not_found', '起始阶段不属于该工作流: ' + requested)
       }
+      // M6.5：手工任务自动挂隐式线程（source='manual'），之后可用 thread.bind 绑定入口
+      const thread = openThreadRow(env, {
+        source: 'manual',
+        externalRef: null,
+        title,
+        now,
+      })
       const task: Task = {
         id: env.nextId('task'),
         title,
@@ -801,12 +825,21 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         ruleId: null,
         externalRef: null,
         labels: [],
+        threadId: thread.id,
+        parentTaskId: null,
         createdAt: now,
         updatedAt: now,
       }
-      const facts: FactDraft[] = [draft('task.created', { task })]
+      const attached = withTask(thread, task, now)
+      const facts: FactDraft[] = [
+        ...openedFacts(thread, OWNER, now),
+        ...taskAttachedFacts(attached, task, null, OWNER, now),
+        draft('task.created', { task }),
+      ]
       // 进入效果：首阶段是 agent 时立刻入队一条 run（与旧宿主 applyStageEffects 同口径）
-      facts.push(...entryRunFacts(view, task, now, env, OWNER))
+      facts.push(
+        ...entryRunFacts(view, task, now, env, OWNER, undefined, { thread: attached, turn: 1 }),
+      )
       return done(facts)
     }
 
@@ -844,7 +877,18 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       }
       if (view.activeTaskIds.has(task.id)) return reject('conflict', '执行中的阶段不能完成')
       const completed: Task = { ...completeTask(task), updatedAt: now }
-      return done([draft('task.completed', { task: completed })])
+      const facts: FactDraft[] = [draft('task.completed', { task: completed })]
+      // M6.5：线程内任务全部完成 → 归档线程
+      facts.push(
+        ...closeIfAllDone(
+          view,
+          threadOfTask(view, task),
+          now,
+          OWNER,
+          new Map([[task.id, 'completed']]),
+        ),
+      )
+      return done(facts)
     }
 
     case 'task.remove': {
@@ -855,6 +899,16 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         draft('run.removed', { runId: run.id }),
       )
       facts.push(draft('task.removed', { task }))
+      // M6.5：删除后剩余任务都已完成 → 归档线程（已删任务视为完成）
+      facts.push(
+        ...closeIfAllDone(
+          view,
+          threadOfTask(view, task),
+          now,
+          OWNER,
+          new Map([[task.id, 'completed']]),
+        ),
+      )
       return done(facts)
     }
 
@@ -929,11 +983,11 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const receiptCards = cardsFromReceipt(view, run, input.receipt, now, env)
       const derivedEvents = eventFacts(run, input.receipt, now, env)
       const facts: FactDraft[] = [...receiptCards.facts, ...derivedEvents]
-      // M6：回执派生的 event.received 同样命中规则建任务（线程 / 父任务归并留 M6.5）
+      // M6：回执派生的 event.received 同样命中规则；M6.5：按父 run 归线程/父任务
       for (const derived of derivedEvents) {
         if (derived.type !== 'event.received') continue
         facts.push(
-          ...eventTaskFacts(
+          ...eventThreadFacts(
             view,
             derived.payload as EventReceivedPayload,
             view.rulesVersion,
@@ -941,6 +995,19 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
             env,
           ),
         )
+      }
+      // M6.5：回执 notes[] → 线程笔记（run 没挂线程 / 线程不存在时忽略；笔记只作资料、不阻塞）
+      const receiptNotes = input.receipt.notes
+      if (run.threadId !== null && receiptNotes !== undefined && receiptNotes.length > 0) {
+        const thread = view.threads.get(run.threadId)
+        if (thread !== undefined) {
+          let current = thread
+          for (const text of receiptNotes) {
+            const note = makeNote(env, 'agent', text, now)
+            current = withNote(current, note, now)
+            facts.push(...noteFacts(current, note, HOST_SCHEDULER, now))
+          }
+        }
       }
       // 回执带 ask：先建卡再挂起等回答，释放租约与并发位，不落终态（D5/D12）
       if ((input.receipt.ask?.length ?? 0) > 0) {
@@ -971,9 +1038,24 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         facts.push(...transition)
         // 进入效果：流转到目标阶段后若目标阶段是 agent 入口，立刻入队下一轮（形成链条）
         for (const fact of transition) {
-          if (fact.type !== 'task.moved') continue
-          const movedTask = (fact.payload as { task: Task }).task
-          facts.push(...entryRunFacts(view, movedTask, now, env, HOST_SCHEDULER))
+          if (fact.type === 'task.moved') {
+            const movedTask = (fact.payload as { task: Task }).task
+            facts.push(...entryRunFacts(view, movedTask, now, env, HOST_SCHEDULER))
+          }
+          // M6.5：阶段流转把任务完成时，若线程内任务已全部完成 → 归档线程
+          if (fact.type === 'task.completed') {
+            const done = (fact.payload as { task: Task }).task
+            const thread = done.threadId === null ? undefined : view.threads.get(done.threadId)
+            facts.push(
+              ...closeIfAllDone(
+                view,
+                thread,
+                now,
+                HOST_SCHEDULER,
+                new Map([[done.id, 'completed']]),
+              ),
+            )
+          }
         }
       }
       if (run.purpose === 'chat') {
@@ -1036,6 +1118,8 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       }
       // M6：cron 规则到点建任务（同刻只触发一次；停机错过只补最近一次）
       facts.push(...cronTaskFacts(view, now, env, env.timezone))
+      // M6.5：14 天无活动的 open 线程归档（只影响 UI 检索，不改任务/运行）
+      facts.push(...inactivityFacts(view, now, HOST_TIMER))
       return done(facts)
     }
 
@@ -1201,6 +1285,37 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
     case 'rule.trigger': {
       // 规则页「立即运行」：直接按规则建任务，不依赖事件、不写 rule.fired
       return manualTriggerFacts(view, input.ruleId, now, env)
+    }
+
+    // ---------- 线程（M6.5） ----------
+    case 'thread.note': {
+      const thread = view.threads.get(input.threadId)
+      if (!thread) return reject('not_found', '线程不存在: ' + input.threadId)
+      const note = makeNote(env, 'owner', input.text.trim(), now)
+      const next = withNote(thread, note, now)
+      return done(noteFacts(next, note, OWNER, now))
+    }
+
+    case 'thread.close': {
+      // 人工归档：幂等（已关闭零事实）；新事件到达会自动重开
+      const thread = view.threads.get(input.threadId)
+      if (!thread) return reject('not_found', '线程不存在: ' + input.threadId)
+      if (thread.status === 'closed') return done([])
+      return done(closedFacts(withStatus(thread, 'closed', now), 'manual', OWNER, now))
+    }
+
+    case 'thread.bind': {
+      // 把隐式线程绑定到外部入口：目标键不能被别的线程占用（身份唯一）
+      const thread = view.threads.get(input.threadId)
+      if (!thread) return reject('not_found', '线程不存在: ' + input.threadId)
+      const source = input.source.trim()
+      const externalRef = input.externalRef.trim()
+      const existing = findThreadByKey(view, source, externalRef)
+      if (existing !== undefined && existing.id !== thread.id) {
+        return reject('conflict', '入口已被线程占用: ' + source + '/' + externalRef)
+      }
+      const bound = withBinding(thread, source, externalRef, now)
+      return done(boundFacts(bound, source, externalRef, OWNER, now))
     }
   }
 }

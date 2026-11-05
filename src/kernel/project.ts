@@ -45,8 +45,9 @@ const remove = (table: ProjectionTable, key: Id): Change => ({ table, key, row: 
 const runEventKey = (runId: Id, seq: number): Id => `${runId}:${seq}`
 
 /**
- * 老事实 replay 的任务行归一（M6）：`task.created` 等历史 payload 没有
- * `origin/ruleId/externalRef/labels`，重建时按默认值补齐，避免投影列写入 undefined。
+ * 老事实 replay 的任务行归一（M6/M6.5）：`task.created` 等历史 payload 没有
+ * `origin/ruleId/externalRef/labels`，M6.5 前的 payload 没有 `threadId/parentTaskId`；
+ * 重建时按默认值补齐，避免投影列写入 undefined。
  */
 export function normalizeTask(row: Task): Task {
   const legacy = row as Partial<Task>
@@ -56,6 +57,8 @@ export function normalizeTask(row: Task): Task {
     ruleId: legacy.ruleId ?? null,
     externalRef: legacy.externalRef ?? null,
     labels: legacy.labels ?? [],
+    threadId: legacy.threadId ?? null,
+    parentTaskId: legacy.parentTaskId ?? null,
   }
 }
 
@@ -149,6 +152,18 @@ function changesOf(fact: AnyFact): Change[] {
     case 'event.dropped':
       // M4 只入账、不投影；M6 起命中规则建任务由 decide 直接产 task.created，不回收这些事实。
       return []
+    case 'event.merged':
+      // M6.5：事件合并进 queued run 的 eventIds（payload 带整行 run，重建不回查）
+      return [put('runs', fact.payload.run)]
+    case 'thread.opened':
+    case 'thread.event_attached':
+    case 'thread.task_attached':
+    case 'thread.note_appended':
+    case 'thread.closed':
+    case 'thread.reopened':
+    case 'thread.bound':
+      // M6.5：线程事实一律携带完整 ThreadRow，整行 upsert
+      return [put('threads', fact.payload.thread)]
     case 'rules.replaced':
       // M6：规则集整批替换，一行事实 → 单行投影（key='current'）
       return [put('rule_sets', fact.payload.ruleSet)]

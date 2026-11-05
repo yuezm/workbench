@@ -170,7 +170,11 @@ describe('规则投影：rules.replace / event.received / clock.tick', () => {
     const first = store.dispatch(eventInput('issue-1'))
     expect(first.facts.map((fact) => fact.type)).toEqual([
       'event.received',
+      // M6.5：事件归入新线程（opened + 事件引用），任务建好后挂进同一线程
+      'thread.opened',
+      'thread.event_attached',
       'task.created',
+      'thread.task_attached',
       'run.queued',
     ])
     const eventId = (first.facts[0]?.payload as { eventId: string }).eventId
@@ -205,9 +209,22 @@ describe('规则投影：rules.replace / event.received / clock.tick', () => {
       hops: 1,
     })
 
-    // 同 rule + 同 subject：事件照常入账，不再建任务 / 不再产 run
+    // 同 rule + 同 subject：事件照常入账；线程已存在 → 只挂事件引用，不新建任务，
+    // 已有 queued run → event.merged 把事件并入该 run（D5）
     const second = store.dispatch(eventInput('issue-1'))
-    expect(second.facts.map((fact) => fact.type)).toEqual(['event.received'])
+    expect(second.facts.map((fact) => fact.type)).toEqual([
+      'event.received',
+      'thread.event_attached',
+      'event.merged',
+    ])
+    const secondEventId = (second.facts[0]?.payload as { eventId: string }).eventId
+    const mergedRun = (
+      second.facts.find((fact) => fact.type === 'event.merged')?.payload as {
+        run: { id: string; eventIds: string[] }
+      }
+    ).run
+    expect(mergedRun.id).toBe(active.id)
+    expect(mergedRun.eventIds).toEqual([eventId, secondEventId])
     expect(
       store
         .query('tasks.byWorkflow', { workflowId })
@@ -224,6 +241,9 @@ describe('规则投影：rules.replace / event.received / clock.tick', () => {
     setNow(CRON_AT)
     const tick = store.dispatch({ type: 'clock.tick' })
     expect(tick.facts.map((fact) => fact.type)).toEqual([
+      // M6.5：cron 任务同样建隐式线程并挂进去
+      'thread.opened',
+      'thread.task_attached',
       'task.created',
       'run.queued',
       'rule.fired',

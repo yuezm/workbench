@@ -91,6 +91,8 @@ export interface Receipt {
   /** 约时间复查（ISO） */
   later?: string
   events?: RawEvent[]
+  /** 线程笔记（M6.5）：每条 ≤2000 字；run 挂在线程上时由内核记 `thread.note_appended` */
+  notes?: string[]
   errorCode?: RunErrorCode
   exitCode?: number
   durationMs?: number

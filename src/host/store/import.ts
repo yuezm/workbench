@@ -5,7 +5,7 @@
  *
  * 1. **首次迁移**（`facts` 为空）：把实体五表 + `runs` / `run_events` 按 FK 安全顺序
  *    （runtimes → agents → workflows → workflow_stages → tasks → runs → run_events）
- *    读出、每批 ≤500 行写一条导入根；同一事务里先清空九张投影表再按导入根回填，
+ *    读出、每批 ≤500 行写一条导入根；同一事务里先清空全部投影表再按导入根回填，
  *    最后写 `projection_meta`，之后 `ensureProjection` 直接放行。清空是必须的：
  *    `run_events` 纯追加（重复 `(run_id,seq)` 撞主键），不清就无法与旧行共存；
  *    先清后填也让「首次迁移的结果」与「按事实重建的结果」严格是同一个 fold。
@@ -377,6 +377,9 @@ function readLegacyEntityRows(
     ruleId: null,
     externalRef: null,
     labels: [],
+    // M6.5：v2 存量没有线程概念——不属于任何线程、不是派生任务。
+    threadId: null,
+    parentTaskId: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))
@@ -490,6 +493,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   cards: 0,
   rule_sets: 0,
   rule_fires: 0,
+  // M6.5：v2 没有线程数据，导入不产 threads 行；键必须补齐以匹配 `ProjectionTable` 全集。
+  threads: 0,
 })
 
 /** 一组行 + 表名 → `snapshot.imported` 草稿（payload 按表收窄成判别联合）。 */

@@ -52,6 +52,8 @@ const task: Task = {
   ruleId: null,
   externalRef: null,
   labels: [],
+  threadId: null,
+  parentTaskId: null,
   createdAt: 't',
   updatedAt: 't',
 }
@@ -252,5 +254,41 @@ describe('KanbanBoard', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('任务：卡片任务')).toHaveAttribute('draggable', 'true'),
     )
+  })
+
+  it('任务有 threadId 时卡片带线程入口，点击把任务交给上层', async () => {
+    const onOpenThread = vi.fn()
+    render(
+      <KanbanBoard
+        workflow={wf}
+        tasks={[{ ...task, threadId: 'th1' }]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+        onOpenThread={onOpenThread}
+      />,
+    )
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '打开线程：卡片任务' }))
+    expect(onOpenThread).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 't1', threadId: 'th1' }),
+    )
+  })
+
+  it('派生任务按当前看板任务列表找到父任务标题', async () => {
+    const parent: Task = { ...task, id: 'p1', title: '父任务', currentStageId: 's0' }
+    const child: Task = { ...task, id: 'c1', title: '子任务卡', parentTaskId: 'p1' }
+    render(
+      <KanbanBoard
+        workflow={wf}
+        tasks={[parent, child]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+      />,
+    )
+    expect(await screen.findByText('子任务 · 父任务')).toBeInTheDocument()
+    // 父任务自己不是派生任务
+    expect(screen.getAllByText(/子任务 ·/)).toHaveLength(1)
   })
 })

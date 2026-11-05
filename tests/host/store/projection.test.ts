@@ -178,6 +178,8 @@ describe('rebuild：增量应用与重建等价', () => {
         ruleId: null,
         externalRef: null,
         labels: [],
+        threadId: null,
+        parentTaskId: null,
         createdAt: SAMPLE_AT,
         updatedAt: SAMPLE_AT,
       },

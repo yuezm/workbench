@@ -1,5 +1,5 @@
 /**
- * store 测试夹具：内存 SQLite（v2 全量 schema + 账本表）、十张投影表的样例行、投影快照。
+ * store 测试夹具：内存 SQLite（v2 全量 schema + 账本表）、十三张投影表的样例行、投影快照。
  *
  * 只被 `src/host/store/*.test.ts` import，不参与运行时装配；测试注入确定性 now / newId，
  * 因此断言可以逐列全等，不依赖时钟与随机数。
@@ -18,6 +18,7 @@ import type {
   Workflow,
   WorkflowStage,
 } from '../../../src/protocol/entities'
+import type { ThreadRow } from '../../../src/protocol/thread'
 import { COMMANDS_SQL, FACTS_SQL, SCHEMA_SQL } from '../../../src/host/schema'
 
 export const SAMPLE_AT = '2026-01-01T00:00:00.000Z'
@@ -128,6 +129,8 @@ export const sample = {
       ruleId: null,
       externalRef: null,
       labels: [],
+      threadId: null,
+      parentTaskId: null,
       createdAt: SAMPLE_AT,
       updatedAt: SAMPLE_AT,
       ...overrides,
@@ -231,9 +234,27 @@ export const sample = {
       ...overrides,
     }
   },
+  thread(overrides: Partial<ThreadRow> = {}): ThreadRow {
+    return {
+      id: 'th-1',
+      source: 'github',
+      externalRef: 'issue-1',
+      title: 'Issue 一号',
+      status: 'open',
+      taskIds: [],
+      rootTaskIds: [],
+      concurrency: 1,
+      notesVersion: 0,
+      notes: [],
+      events: [],
+      lastActivityAt: SAMPLE_AT,
+      createdAt: SAMPLE_AT,
+      ...overrides,
+    }
+  },
 }
 
-/** 十表列清单（与 `projection-apply` 的写列一一对应）与快照排序键；快照只取这些列。 */
+/** 十三表列清单（与 `projection-apply` 的写列一一对应）与快照排序键；快照只取这些列。 */
 const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: string }> = {
   tasks: {
     columns: [
@@ -247,6 +268,8 @@ const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: 
       'rule_id',
       'external_ref',
       'labels_json',
+      'thread_id',
+      'parent_task_id',
       'created_at',
       'updated_at',
     ],
@@ -377,9 +400,27 @@ const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: 
     columns: ['id', 'rule_id', 'version', 'scheduled_for', 'fired_at', 'task_id'],
     orderBy: 'id',
   },
+  threads: {
+    columns: [
+      'id',
+      'source',
+      'external_ref',
+      'title',
+      'status',
+      'task_ids_json',
+      'root_task_ids_json',
+      'concurrency',
+      'notes_version',
+      'notes_json',
+      'events_json',
+      'last_activity_at',
+      'created_at',
+    ],
+    orderBy: 'id',
+  },
 }
 
-/** 十表逐行快照（列固定、按表内排序键），用于「增量 vs 重建」逐表全等比较。 */
+/** 十三表逐行快照（列固定、按表内排序键），用于「增量 vs 重建」逐表全等比较。 */
 export function dumpProjection(db: DatabaseSync): Record<string, unknown[]> {
   const snapshot: Record<string, unknown[]> = {}
   for (const [table, spec] of Object.entries(PROJECTION_COLUMNS)) {

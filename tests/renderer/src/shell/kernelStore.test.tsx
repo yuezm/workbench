@@ -255,6 +255,40 @@ describe('renderer/shell/kernelStore', () => {
     offAgents()
   })
 
+  it('线程事实与外部事件只失效 thread.byId，不触发其它视图重取', async () => {
+    const fake = fakeTransport({ 'thread.byId': null, 'agents.all': [] })
+    const store = createKernelStore(fake.transport)
+    await started(store)
+    const offThread = store.watch('thread.byId', { threadId: 'th-1' }, () => {})
+    const offAgents = store.watch('agents.all', undefined, () => {})
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const threadQueries = (): number =>
+      fake.queries.filter((entry) => entry.view === 'thread.byId').length
+    const agentQueries = (): number =>
+      fake.queries.filter((entry) => entry.view === 'agents.all').length
+    const threadsBefore = threadQueries()
+    const agentsBefore = agentQueries()
+
+    // 线程行随 thread.* 事实整行更新
+    fake.emit({ kind: 'facts', seq: 2, types: ['thread.note_appended'] })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(threadQueries()).toBe(threadsBefore + 1)
+    expect(agentQueries()).toBe(agentsBefore)
+
+    // 外部事件可能归入 / 重开线程：同样只失效线程视图（未知前缀会全量失效，这里不能发生）
+    fake.emit({ kind: 'facts', seq: 3, types: ['event.received'] })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(threadQueries()).toBe(threadsBefore + 2)
+    expect(agentQueries()).toBe(agentsBefore)
+
+    offThread()
+    offAgents()
+  })
+
   it('缓存键包含参数：不同 taskId 各自缓存，重复订阅同一键不再查询', async () => {
     const fake = fakeTransport()
     const store = createKernelStore(fake.transport)

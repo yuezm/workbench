@@ -83,6 +83,15 @@ const commandSamples: Command[] = [
     ],
   },
   { commandId: 'c24', type: 'rule.trigger', ruleId: 'rule-1' },
+  { commandId: 'c25', type: 'thread.note', threadId: 'th-1', text: '备注' },
+  { commandId: 'c26', type: 'thread.close', threadId: 'th-1' },
+  {
+    commandId: 'c27',
+    type: 'thread.bind',
+    threadId: 'th-1',
+    source: 'github',
+    externalRef: 'issue-1',
+  },
 ]
 
 const hostSamples: Input[] = [
@@ -125,12 +134,21 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'runtime.probe': ['runtimes'],
   'runtime.probed': ['runtimes'],
   'task.create': ['workflows', 'workflow_stages', 'agents', 'runtimes'],
-  'task.move': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
-  'task.complete': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
-  'task.remove': ['tasks', 'runs'],
+  'task.move': [
+    'tasks',
+    'workflows',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+    'threads',
+    'runs',
+    'cards',
+  ],
+  'task.complete': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes', 'threads'],
+  'task.remove': ['tasks', 'runs', 'threads'],
   'card.answer': ['runs', 'cards'],
   'card.resolve': ['cards'],
-  'run.claim': ['runs', 'runtimes'],
+  'run.claim': ['runs', 'runtimes', 'threads'],
   'run.heartbeat': ['runs'],
   'run.receipt': [
     'runs',
@@ -142,6 +160,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'conversations',
     'cards',
     'rule_sets',
+    'threads',
   ],
   'run.frames': ['runs'],
   'run.host_settled': ['runs', 'conversations'],
@@ -155,15 +174,39 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'workflow_stages',
     'agents',
     'runtimes',
+    'threads',
   ],
   'chat.create': ['agents'],
   'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
   'chat.remove': ['conversations', 'messages'],
   'chat.cancel': ['conversations', 'runs'],
-  'app.event': ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
-  'event.received': ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'app.event': [
+    'rule_sets',
+    'tasks',
+    'workflows',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+    'threads',
+    'runs',
+    'cards',
+  ],
+  'event.received': [
+    'rule_sets',
+    'tasks',
+    'workflows',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+    'threads',
+    'runs',
+    'cards',
+  ],
   'rules.replace': ['rule_sets', 'workflows', 'workflow_stages'],
   'rule.trigger': ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'thread.note': ['threads'],
+  'thread.close': ['threads'],
+  'thread.bind': ['threads'],
   'card.delivered': ['cards'],
   'card.delivery_failed': ['cards'],
 }
@@ -171,8 +214,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 24 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(24)
+  it('覆盖 27 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(27)
     expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)
@@ -210,7 +253,7 @@ describe('kernel/view-spec', () => {
   it('删除命令要装载 runs（run.removed 事实替代 SQL 级联，D13）', () => {
     expect(viewSpec(byType.get('task.move') as Input)).toContain('tasks')
     expect(viewSpec(byType.get('task.complete') as Input)).toContain('tasks')
-    expect(viewSpec(byType.get('task.remove') as Input)).toEqual(['tasks', 'runs'])
+    expect(viewSpec(byType.get('task.remove') as Input)).toEqual(['tasks', 'runs', 'threads'])
     expect(viewSpec(byType.get('workflow.remove') as Input)).toContain('runs')
   })
 

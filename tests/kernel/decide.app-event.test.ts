@@ -53,6 +53,7 @@ const view = (): View => ({
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(),
+  threads: new Map(),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

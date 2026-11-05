@@ -308,7 +308,12 @@ describe('host/commands：命令路由（M5）', () => {
     const command: Command = { commandId: 'c-trigger', type: 'rule.trigger', ruleId: 'rule-1' }
 
     const fired = await router.dispatch(command)
-    expect(fired.facts.map((fact) => fact.type)).toEqual(['task.created'])
+    expect(fired.facts.map((fact) => fact.type)).toEqual([
+      // M6.5：手动触发同样建隐式线程并挂任务（D11）
+      'thread.opened',
+      'thread.task_attached',
+      'task.created',
+    ])
     const task = fired.value as Task
     expect(task).toMatchObject({
       title: 'Issue 进研发',
@@ -317,12 +322,14 @@ describe('host/commands：命令路由（M5）', () => {
       ruleId: 'rule-1',
       externalRef: null,
     })
+    expect(task.threadId).not.toBeNull()
+    expect(task.parentTaskId).toBeNull()
     expect(store.query('task.byId', { taskId: task.id })).toEqual(task)
 
     const replay = await router.dispatch(command)
     expect(replay.facts).toEqual(fired.facts)
     expect(replay.value).toEqual(fired.value)
-    expect(store.factsCount()).toBe(5) // workflow(3) + rules.replaced + task.created
+    expect(store.factsCount()).toBe(7) // workflow(3) + rules.replaced + thread 两行 + task.created
   })
 
   it('event.received 是宿主输入：不能经命令路由（renderer）提交', async () => {

@@ -34,6 +34,9 @@ const expected = [
   'app.event',
   'rules.replace',
   'rule.trigger',
+  'thread.note',
+  'thread.close',
+  'thread.bind',
 ]
 
 describe('protocol/commands', () => {

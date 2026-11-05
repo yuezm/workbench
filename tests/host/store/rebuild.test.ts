@@ -425,6 +425,8 @@ describe('强杀重启：事实已提交、投影落后', () => {
           ruleId: null,
           externalRef: null,
           labels: [],
+          threadId: null,
+          parentTaskId: null,
           createdAt: AT,
           updatedAt: AT,
         }
@@ -499,8 +501,8 @@ describe('强杀重启：事实已提交、投影落后', () => {
   })
 })
 
-describe('重建边界：运行/聊天四表与规则两表纳入白名单', () => {
-  it('runs / run_events / conversations / messages / rule_sets / rule_fires 没有事实支撑的行重建后清空', () => {
+describe('重建边界：运行/聊天四表、规则两表与线程表纳入白名单', () => {
+  it('runs / run_events / conversations / messages / rule_sets / rule_fires / threads 没有事实支撑的行重建后清空', () => {
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
@@ -554,6 +556,12 @@ describe('重建边界：运行/聊天四表与规则两表纳入白名单', () 
       `INSERT INTO rule_fires (id, rule_id, version, scheduled_for, fired_at, task_id)
        VALUES ('fire-1', 'rule-1', 1, ?, ?, NULL)`,
     ).run(AT, AT)
+    // M6.5：线程行同样只能由 `thread.*` 事实写；直接落库的残留行重建后清空
+    // （任务命令会通过真实内核产隐式线程事实，所以只有凭空造的 th-stray 应当消失）
+    db.prepare(
+      `INSERT INTO threads (id, source, title, status, last_activity_at, created_at)
+       VALUES ('th-stray', 'github', '残留线程', 'open', ?, ?)`,
+    ).run(AT, AT)
 
     store.rebuild()
 
@@ -565,6 +573,9 @@ describe('重建边界：运行/聊天四表与规则两表纳入白名单', () 
     expect(rebuilt.messages).toEqual([])
     expect(countRows(db, 'rule_sets')).toBe(0)
     expect(countRows(db, 'rule_fires')).toBe(0)
+    expect((rebuilt.threads as Array<{ id: string }>).map((row) => row.id)).not.toContain(
+      'th-stray',
+    )
   })
 })
 

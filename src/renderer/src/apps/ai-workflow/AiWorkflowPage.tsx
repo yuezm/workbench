@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import type { TaskInput } from '../../../../protocol/entities'
+import type { Task, TaskInput } from '../../../../protocol/entities'
 import { panelCls } from '../../components/ui/panel'
 import { Segmented } from '../../components/ui/segmented'
 import { Select } from '../../components/ui/select'
@@ -16,6 +16,7 @@ import { RulesManager } from './components/RulesManager'
 import { RuntimeManager } from './components/RuntimeManager'
 import { SettingsNav, type SettingsSection } from './components/SettingsNav'
 import { TaskDialog } from './components/TaskDialog'
+import { ThreadPanel } from './components/ThreadPanel'
 import { WorkflowManager } from './components/WorkflowManager'
 import { WorkflowSwitcher } from './components/WorkflowSwitcher'
 import { WorkspaceNav, type WorkspaceSection } from './components/WorkspaceNav'
@@ -57,6 +58,8 @@ export function AiWorkflowPage(): ReactElement {
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
+  /** 线程面板：看板上点任务卡的线程入口打开，Esc / 关闭按钮收起 */
+  const [threadId, setThreadId] = useState<string | undefined>()
   const [view, setView] = useState<View>('workspace')
   /** 工作台侧栏栏目：聊天（主动对话）/ 任务（看板与运行记录） */
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('chat')
@@ -97,6 +100,11 @@ export function AiWorkflowPage(): ReactElement {
         setError(errMsg(e))
       }
     })()
+  }
+
+  /** 打开任务卡所属线程的面板（线程 id 由任务行给，面板自己读 thread.byId） */
+  const openThread = (task: Task): void => {
+    if (task.threadId !== null) setThreadId(task.threadId)
   }
 
   const createTask = async (input: TaskInput): Promise<void> => {
@@ -195,6 +203,7 @@ export function AiWorkflowPage(): ReactElement {
                   onMoveToStage={moveToStage}
                   onCompleteTask={completeTask}
                   onNewTask={() => setDialogOpen(true)}
+                  onOpenThread={openThread}
                 />
               ) : (
                 <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
@@ -261,6 +270,10 @@ export function AiWorkflowPage(): ReactElement {
 
       {dialogOpen && active && (
         <TaskDialog workflow={active} onSave={createTask} onCancel={() => setDialogOpen(false)} />
+      )}
+
+      {threadId !== undefined && (
+        <ThreadPanel threadId={threadId} onClose={() => setThreadId(undefined)} />
       )}
     </div>
   )

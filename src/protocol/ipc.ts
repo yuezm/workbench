@@ -66,6 +66,10 @@ export interface CommandResults {
   'rules.replace': RuleSetView
   /** M6：立即运行一条规则后新建的任务 */
   'rule.trigger': Task
+  /** M6.5：线程命令只改线程行，返回值由 UI 重取视图 */
+  'thread.note': null
+  'thread.close': null
+  'thread.bind': null
 }
 
 export type CommandValue<T extends Command['type']> = CommandResults[T]

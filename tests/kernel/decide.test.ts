@@ -12,6 +12,7 @@ import type {
   WorkflowStage,
 } from '../../src/protocol/entities'
 import type { FactPayload, FactType } from '../../src/protocol/facts'
+import type { ThreadRow } from '../../src/protocol/thread'
 import type { HostInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
 import { receiptBlockHint, taskPrompt } from '../../src/kernel/prompt'
@@ -95,6 +96,8 @@ const task = (over: Partial<Task> = {}): Task => ({
   ruleId: null,
   externalRef: null,
   labels: [],
+  threadId: null,
+  parentTaskId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -174,6 +177,7 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
+  threads: new Map(),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,
@@ -940,101 +944,84 @@ describe('kernel/decide 工作流', () => {
 })
 
 describe('kernel/decide 任务', () => {
+  /** 手工建任务现在自带隐式线程：三条事实的固定前缀。 */
+  const IMPLICIT_THREAD_FACTS = ['thread.opened', 'thread.task_attached', 'task.created']
+
+  const createdTaskOf = (decision: { facts: FactDraft[] }) => {
+    const fact = decision.facts.find((item) => item.type === 'task.created')
+    expect(fact, '应产 task.created').toBeDefined()
+    return (fact?.payload as { task: Task }).task
+  }
+  const openedThreadOf = (decision: { facts: FactDraft[] }) => {
+    const fact = decision.facts.find((item) => item.type === 'thread.opened')
+    expect(fact, '应产 thread.opened').toBeDefined()
+    return (fact?.payload as { thread: ThreadRow }).thread
+  }
+
   it('task.create：默认进首阶段（按 position），空 stageId 走缺省', () => {
     const seeded = view({
       workflows: [workflow()],
       stages: [stage({ id: 'st-2', position: 1 }), stage({ id: 'st-1', position: 0 })],
     })
 
-    expect(
-      decide(
-        seeded,
-        command({ type: 'task.create', input: { title: ' 写计划 ', workflowId: 'wf-1' } }),
-        NOW,
-        env(),
-      ),
-    ).toEqual({
-      facts: [
-        at('task.created', {
-          task: task({
-            id: 'task-new-1',
-            title: '写计划',
-            currentStageId: 'st-1',
-            createdAt: NOW,
-            updatedAt: NOW,
-          }),
-        }),
-      ],
+    const first = decide(
+      seeded,
+      command({ type: 'task.create', input: { title: ' 写计划 ', workflowId: 'wf-1' } }),
+      NOW,
+      env(),
+    )
+    expect(first.facts.map((fact) => fact.type)).toEqual(IMPLICIT_THREAD_FACTS)
+    expect(createdTaskOf(first)).toMatchObject({
+      id: 'task-new-1',
+      title: '写计划',
+      currentStageId: 'st-1',
+      threadId: 'thread-new-1',
+      parentTaskId: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+    expect(openedThreadOf(first)).toMatchObject({
+      id: 'thread-new-1',
+      source: 'manual',
+      externalRef: null,
+      title: '写计划',
+      status: 'open',
+      taskIds: [],
+      rootTaskIds: [],
     })
 
-    expect(
-      decide(
-        seeded,
-        command({
-          type: 'task.create',
-          input: { title: 't', workflowId: 'wf-1', stageId: 'st-2' },
-        }),
-        NOW,
-        env(),
-      ),
-    ).toEqual({
-      facts: [
-        at('task.created', {
-          task: task({
-            id: 'task-new-1',
-            title: 't',
-            description: '',
-            currentStageId: 'st-2',
-            createdAt: NOW,
-            updatedAt: NOW,
-          }),
-        }),
-      ],
+    const second = decide(
+      seeded,
+      command({
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1', stageId: 'st-2' },
+      }),
+      NOW,
+      env(),
+    )
+    expect(createdTaskOf(second)).toMatchObject({
+      currentStageId: 'st-2',
+      threadId: 'thread-new-1',
     })
 
-    expect(
-      decide(
-        seeded,
-        command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', stageId: '' } }),
-        NOW,
-        env(),
-      ),
-    ).toEqual({
-      facts: [
-        at('task.created', {
-          task: task({
-            id: 'task-new-1',
-            title: 't',
-            currentStageId: 'st-1',
-            createdAt: NOW,
-            updatedAt: NOW,
-          }),
-        }),
-      ],
-    })
+    const blank = decide(
+      seeded,
+      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', stageId: '' } }),
+      NOW,
+      env(),
+    )
+    expect(createdTaskOf(blank)).toMatchObject({ currentStageId: 'st-1' })
   })
 
   it('task.create：工作流没有任何阶段时 currentStageId 落 null', () => {
-    expect(
-      decide(
-        view({ workflows: [workflow()] }),
-        command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } }),
-        NOW,
-        env(),
-      ),
-    ).toEqual({
-      facts: [
-        at('task.created', {
-          task: task({
-            id: 'task-new-1',
-            title: 't',
-            currentStageId: null,
-            createdAt: NOW,
-            updatedAt: NOW,
-          }),
-        }),
-      ],
-    })
+    const decision = decide(
+      view({ workflows: [workflow()] }),
+      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } }),
+      NOW,
+      env(),
+    )
+    expect(decision.facts.map((fact) => fact.type)).toEqual(IMPLICIT_THREAD_FACTS)
+    expect(createdTaskOf(decision)).toMatchObject({ currentStageId: null })
   })
 
   it('task.create：标题必填、工作流必须存在、起始阶段必须属于该工作流', () => {
@@ -1284,69 +1271,60 @@ describe('kernel/decide 进入效果（run.queued）', () => {
   }
 
   it('task.create 进 agent 阶段：同批产 run.queued，行字段与提示词逐字正确', () => {
-    expect(
-      decide(
-        agentView(),
-        command({ type: 'task.create', input: { title: '写计划', workflowId: 'wf-1' } }),
-        NOW,
-        env(),
-      ),
-    ).toEqual({
-      facts: [
-        at('task.created', {
-          task: task({
-            id: 'task-new-1',
-            title: '写计划',
-            currentStageId: 'st-1',
-            createdAt: NOW,
-            updatedAt: NOW,
-          }),
-        }),
-        at('run.queued', {
-          run: {
-            id: 'run-new-1',
-            purpose: 'stage',
-            taskId: 'task-new-1',
-            conversationId: null,
-            stageId: 'st-1',
-            agentId: 'ag-1',
-            runtimeId: 'rt-1',
-            ruleId: null,
-            rulesVersion: 0,
-            executorKey: 'dsh',
-            threadId: null,
-            cwd: 'C:/work',
-            access: 'edit',
-            skill: null,
-            promptRef: null,
-            eventIds: [],
-            hops: 0,
-            turn: 1,
-            resumeSessionId: null,
-            threadContextRef: null,
-            queueSeq: 0,
-            status: 'queued',
-            prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${HINT}`,
-            output: '',
-            error: null,
-            errorCode: null,
-            exitCode: null,
-            sessionId: null,
-            usage: null,
-            durationMs: null,
-            leaseId: null,
-            attempt: 0,
-            attempts: 0,
-            leaseUntil: null,
-            notBefore: null,
-            deadlineAt: null,
-            cancelRequested: false,
-            startedAt: null,
-            endedAt: null,
-            createdAt: NOW,
-          },
-        }),
-      ],
+    const decision = decide(
+      agentView(),
+      command({ type: 'task.create', input: { title: '写计划', workflowId: 'wf-1' } }),
+      NOW,
+      env(),
+    )
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'thread.opened',
+      'thread.task_attached',
+      'task.created',
+      'run.queued',
+    ])
+    const run = entryRun(decision.facts)
+    expect(run).toEqual({
+      id: 'run-new-1',
+      purpose: 'stage',
+      taskId: 'task-new-1',
+      conversationId: null,
+      stageId: 'st-1',
+      agentId: 'ag-1',
+      runtimeId: 'rt-1',
+      ruleId: null,
+      rulesVersion: 0,
+      executorKey: 'dsh',
+      threadId: 'thread-new-1',
+      cwd: 'C:/work',
+      access: 'edit',
+      skill: null,
+      promptRef: null,
+      eventIds: [],
+      hops: 0,
+      turn: 1,
+      resumeSessionId: null,
+      threadContextRef: null,
+      queueSeq: 0,
+      status: 'queued',
+      prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${HINT}`,
+      output: '',
+      error: null,
+      errorCode: null,
+      exitCode: null,
+      sessionId: null,
+      usage: null,
+      durationMs: null,
+      leaseId: null,
+      attempt: 0,
+      attempts: 0,
+      leaseUntil: null,
+      notBefore: null,
+      deadlineAt: null,
+      cancelRequested: false,
+      startedAt: null,
+      endedAt: null,
+      createdAt: NOW,
     })
   })
 
@@ -1358,7 +1336,11 @@ describe('kernel/decide 进入效果（run.queued）', () => {
         NOW,
         env(),
       )
-      expect(decision.facts.map((fact) => fact.type)).toEqual(['task.created'])
+      expect(decision.facts.map((fact) => fact.type)).toEqual([
+        'thread.opened',
+        'thread.task_attached',
+        'task.created',
+      ])
     }
   })
 
@@ -1369,7 +1351,11 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       NOW,
       env(),
     )
-    expect(missingAgent.facts.map((fact) => fact.type)).toEqual(['task.created'])
+    expect(missingAgent.facts.map((fact) => fact.type)).toEqual([
+      'thread.opened',
+      'thread.task_attached',
+      'task.created',
+    ])
 
     const missingRuntime = decide(
       agentView({ runtimes: [] }),
@@ -1377,7 +1363,11 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       NOW,
       env(),
     )
-    expect(missingRuntime.facts.map((fact) => fact.type)).toEqual(['task.created'])
+    expect(missingRuntime.facts.map((fact) => fact.type)).toEqual([
+      'thread.opened',
+      'thread.task_attached',
+      'task.created',
+    ])
 
     const noAgentBound = decide(
       agentView({ stages: [stage({ id: 'st-1', entryMode: 'agent', agentId: null })] }),
@@ -1385,7 +1375,11 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       NOW,
       env(),
     )
-    expect(noAgentBound.facts.map((fact) => fact.type)).toEqual(['task.created'])
+    expect(noAgentBound.facts.map((fact) => fact.type)).toEqual([
+      'thread.opened',
+      'thread.task_attached',
+      'task.created',
+    ])
   })
 
   it('权限模式映射到 access：read-only→read、workspace-write→edit、danger-full-access→full', () => {

@@ -84,6 +84,7 @@ const view = (runs: RunRow[], rules: AutomationRule[] = []): View => ({
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(),
+  threads: new Map(),
   rules,
   rulesVersion: rules.length === 0 ? 0 : 1,
   ruleSetReplacedAt: rules.length === 0 ? null : CREATED,

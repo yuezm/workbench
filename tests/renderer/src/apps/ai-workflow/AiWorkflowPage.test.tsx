@@ -14,6 +14,7 @@ import type {
   WorkflowWithStages,
 } from '../../../../../src/protocol/entities'
 import type { CommandDispatchResult } from '../../../../../src/protocol/ipc'
+import type { ThreadRow } from '../../../../../src/protocol/thread'
 import { AiWorkflowPage } from '../../../../../src/renderer/src/apps/ai-workflow/AiWorkflowPage'
 import { installFakeKernel, type FakeKernel } from '../../../shell/fake-kernel'
 
@@ -80,6 +81,8 @@ const task: Task = {
   ruleId: null,
   externalRef: null,
   labels: [],
+  threadId: null,
+  parentTaskId: null,
   createdAt: 't',
   updatedAt: 't',
 }
@@ -140,6 +143,22 @@ const card: Card = {
   answeredAt: null,
   createdAt: 't',
   updatedAt: 't',
+}
+
+const thread: ThreadRow = {
+  id: 'th1',
+  source: 'manual',
+  externalRef: null,
+  title: '任务A 的线程',
+  status: 'open',
+  taskIds: ['t1'],
+  rootTaskIds: ['t1'],
+  concurrency: 1,
+  notesVersion: 0,
+  notes: [],
+  events: [],
+  lastActivityAt: 't',
+  createdAt: 't',
 }
 
 let kernel: FakeKernel
@@ -660,5 +679,32 @@ describe('AiWorkflowPage', () => {
     await waitFor(() =>
       expectDispatched({ type: 'card.answer', cardId: 'card-1', optionIndex: 0, via: 'ui' }),
     )
+  })
+
+  it('任务卡线程入口打开 ThreadPanel，Esc 收起', async () => {
+    seedBase()
+    const threadedTask: Task = { ...task, threadId: 'th1' }
+    kernel.setView('tasks.byWorkflow', { workflowId: 'w1' }, [threadedTask])
+    kernel.setView(
+      'thread.byId',
+      { threadId: 'th1' },
+      {
+        thread,
+        tasks: [threadedTask],
+        sessions: {},
+      },
+    )
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+    await screen.findByText(/工作流「研发」/)
+
+    await user.click(screen.getByRole('button', { name: '打开线程：任务A' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '线程 · 任务A 的线程' })).toBeInTheDocument()
+    expect(screen.getByText('manual')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })

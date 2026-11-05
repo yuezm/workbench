@@ -329,6 +329,9 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       ruleId: null,
       externalRef: null,
       labels: [],
+      // M6.5：v2 没有线程概念
+      threadId: null,
+      parentTaskId: null,
       createdAt: seedAt(6),
       updatedAt: seedAt(7),
     },
@@ -343,6 +346,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       ruleId: null,
       externalRef: null,
       labels: [],
+      threadId: null,
+      parentTaskId: null,
       createdAt: seedAt(8),
       updatedAt: seedAt(9),
     },
@@ -559,6 +564,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   cards: 0,
   rule_sets: 0,
   rule_fires: 0,
+  // M6.5：v2 没有线程数据；键要补齐以匹配 `ProjectionTable` 全集
+  threads: 0,
 })
 
 describe('importLegacyIfNeeded', () => {
@@ -583,6 +590,7 @@ describe('importLegacyIfNeeded', () => {
       cards: 0,
       rule_sets: 0,
       rule_fires: 0,
+      threads: 0,
     })
 
     const facts = allFacts(db)
@@ -624,6 +632,11 @@ describe('importLegacyIfNeeded', () => {
     ).toEqual([
       { origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' },
       { origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' },
+    ])
+    // M6.5：v2 存量没有线程概念——线程两列按 null 落库（不属于线程、不是派生任务）
+    expect(db.prepare('SELECT thread_id, parent_task_id FROM tasks ORDER BY id').all()).toEqual([
+      { thread_id: null, parent_task_id: null },
+      { thread_id: null, parent_task_id: null },
     ])
     expect(readProjectionMeta(db)).toEqual({
       format: projectionFormat(KERNEL_VERSION),
@@ -791,6 +804,7 @@ describe('importLegacyIfNeeded', () => {
       cards: [],
       rule_sets: [],
       rule_fires: [],
+      threads: [],
     })
   })
 

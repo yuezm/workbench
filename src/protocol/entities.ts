@@ -263,6 +263,10 @@ export interface Task {
   externalRef: string | null
   /** 规则声明并落到任务上的标签（看板只读展示，不参与派活） */
   labels: string[]
+  /** 所属线程（M6.5）：事件任务挂外部入口线程，手工任务挂隐式线程；旧行按 null 归一 */
+  threadId: string | null
+  /** 父任务（回执派生事件建的任务；无派生为 null）；看板据此展示任务树 */
+  parentTaskId: string | null
   createdAt: string
   updatedAt: string
 }

@@ -42,14 +42,28 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'runtime.probed':
       return ['runtimes']
     case 'task.create':
-      // 进入效果要判定落点是否 agent 入口并拼提示词 → 需要智能体与运行时配置
+      // 进入效果要判定落点是否 agent 入口并拼提示词 → 需要智能体与运行时配置；
+      // M6.5：隐式线程在决策里本地构造（不读 threads），首轮无续接、无线程上下文历史
       return ['workflows', 'workflow_stages', 'agents', 'runtimes']
     case 'task.move':
+      // 进入效果（每次进入都重新建 run）要拼线程上下文与按线程续接会话
+      return [
+        'tasks',
+        'workflows',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+        'threads',
+        'runs',
+        'cards',
+      ]
     case 'task.complete':
-      return ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
+      // 完成后若线程内无 active 任务 → thread.closed{all-tasks-done}
+      return ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes', 'threads']
     case 'task.remove':
-      // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价
-      return ['tasks', 'runs']
+      // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价；
+      // M6.5：删除后同样判定线程是否可归档
+      return ['tasks', 'runs', 'threads']
     case 'card.answer':
       // 校验卡片 open / 下标合法（cards）、run 仍 waiting（runs）；续接读同 run 的其余 open 卡（cards）
       return ['runs', 'cards']
@@ -57,8 +71,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 只改卡片状态；run 状态不动
       return ['cards']
     case 'run.claim':
-      // 候选 run 来自 runs 投影；运行时配置（启用 / 并发上限）来自 runtimes
-      return ['runs', 'runtimes']
+      // 候选 run 来自 runs 投影；运行时配置（启用 / 并发上限）来自 runtimes；
+      // M6.5：同一线程的并发闸门要读 threads（concurrency 默认 1）
+      return ['runs', 'runtimes', 'threads']
     case 'run.heartbeat':
       // 只校验租约是否匹配，不改其它表
       return ['runs']
@@ -80,6 +95,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'cards',
         // M6：回执 events[] 派生的 event.received 也要命中规则建任务
         'rule_sets',
+        // M6.5：派生事件按父 run 归线程/父任务；回执 notes[] 写线程；完成后归档线程
+        'threads',
       ]
     case 'run.host_settled':
       // 兜底终态；聊天 run 还要补一条 assistant 消息（读对话判断是否已删）
@@ -88,7 +105,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
       return ['runs']
     case 'clock.tick':
       // M6：除运行到期外，还要为 cron 规则到点建任务（读规则集与触发基线，
-      // 建任务要工作流/阶段/智能体/运行时与既有任务做 externalRef 去重）
+      // 建任务要工作流/阶段/智能体/运行时与既有任务做 externalRef 去重）；
+      // M6.5：14 天无活动的 open 线程归档（读 threads）
       return [
         'runs',
         'rule_sets',
@@ -98,6 +116,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'workflow_stages',
         'agents',
         'runtimes',
+        'threads',
       ]
     case 'chat.create':
       // 对话绑定的智能体必须存在（M5 命令化后沿用原 conversation.create 语义）
@@ -112,17 +131,32 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 按对话取活跃 run 逐条产取消请求
       return ['conversations', 'runs']
     case 'app.event':
-      // M6：app 事件不再只入账——命中规则要建任务，与外部事件同一匹配路径
-      return ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
     case 'event.received':
-      // source 插件 / 宿主注入的外部事件：命中规则建任务（同 app.event 切片）
-      return ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
+      // M6：事件命中规则建任务；M6.5：归并到 (source, externalRef) 线程、复用任务、
+      // 合并 queued run，并为新 run 拼线程上下文（读 threads / runs / cards）
+      return [
+        'rule_sets',
+        'tasks',
+        'workflows',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+        'threads',
+        'runs',
+        'cards',
+      ]
     case 'rules.replace':
       // 整批校验：当前版本（+1）、规则引用的工作流与阶段必须存在且从属
       return ['rule_sets', 'workflows', 'workflow_stages']
     case 'rule.trigger':
-      // 手动运行：读规则集与目标工作流/阶段/智能体/运行时，并做 externalRef 去重（tasks）
+      // 手动运行：读规则集与目标工作流/阶段/智能体/运行时，并做 externalRef 去重（tasks）；
+      // M6.5：给规则任务建隐式线程（本地构造，不读 threads）
       return ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
+    case 'thread.note':
+    case 'thread.close':
+    case 'thread.bind':
+      // 线程命令只读线程行（bind 还要校验目标键唯一）
+      return ['threads']
     case 'card.delivered':
     case 'card.delivery_failed':
       // 投递回写只读卡片当前行（校验版本 / 幂等：迟到与重复投递零事实）

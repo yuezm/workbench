@@ -23,6 +23,7 @@ import type {
   WorkflowWithStages,
 } from './entities'
 import type { RuleSetView } from './rules'
+import type { ThreadRow } from './thread'
 
 /**
  * 视图 id 全集；新增视图必须先登记在这里，命令/宿主不得传任意字符串。
@@ -55,6 +56,7 @@ export const VIEW_IDS = [
   'runtimes.detected',
   'runtimes.models',
   'rules.all',
+  'thread.byId',
 ] as const
 
 /**
@@ -117,6 +119,18 @@ export interface ViewArgs {
   'run.last-event-seq': { runId: string }
   'cards.byRun': { runId: string }
   'runtimes.models': { runtimeId: string }
+  'thread.byId': { threadId: string }
+}
+
+/**
+ * 线程详情（`thread.byId`）：线程行 + 线程内任务（按创建顺序）+ 每个智能体最近的会话 id。
+ *
+ * `sessions` 由 `runs` 现算（不落线程行）：同一智能体在线程内最近一次终态 run 的会话 id。
+ */
+export interface ThreadDetail {
+  thread: ThreadRow
+  tasks: Task[]
+  sessions: Record<string, string>
 }
 
 /**
@@ -135,6 +149,7 @@ export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'run.last-event-seq': 'runId',
   'cards.byRun': 'runId',
   'runtimes.models': 'runtimeId',
+  'thread.byId': 'threadId',
 }
 
 /** 视图 id → 返回类型。 */
@@ -174,6 +189,8 @@ export interface ViewResults {
   'runtimes.models': RuntimeModelOption[]
   /** 当前规则集（M6）：版本 + 规则清单；无规则时为 `{version:0, rules:[]}` */
   'rules.all': RuleSetView
+  /** 线程详情（M6.5）：线程行 + 任务树来源 + 各智能体最近会话 id；不存在时为 null */
+  'thread.byId': ThreadDetail | null
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

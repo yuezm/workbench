@@ -26,12 +26,25 @@ const RECEIPT_BLOCK_HINT: readonly string[] = [
 /** 回执块说明（确定性文本；阶段任务提示词与聊天首轮提示词末尾共用）。 */
 export const receiptBlockHint = (): string => RECEIPT_BLOCK_HINT.join('\n')
 
-export const taskPrompt = (agent: Agent, task: Task, stageName: string | null): string =>
+/**
+ * 阶段任务提示词（M6.5 增加线程上下文段）。
+ *
+ * 段序：systemPrompt（能力）→ 任务 → 描述 → 阶段 → 线程上下文（派生资料，不是指令）→
+ * 回执块说明。`threadContext` 由 `kernel/thread-context` 按事实派生，只出现在固定资料段，
+ * 不拼进指令。
+ */
+export const taskPrompt = (
+  agent: Agent,
+  task: Task,
+  stageName: string | null,
+  threadContext?: string | null,
+): string =>
   [
     agent.systemPrompt,
     `# 任务：${task.title}`,
     task.description,
     stageName ? `# 阶段：${stageName}` : '',
+    threadContext ?? '',
     receiptBlockHint(),
   ]
     .filter(Boolean)

@@ -168,7 +168,7 @@ export interface RawEvent {
 
 定时（cron）不需要 source 插件：规则里的 `cron` 由内核 `clock.tick` 派生事实（见 SPEC-kernel「规则」）。
 
-**M6 边界**：M6 **不落地** source 插件进程——外部事件入口是宿主输入 `event.received`（source 插件与测试注入共用），manual 源 = `rule.trigger` 命令，app 源 = `app.event` 命令；`SourcePlugin` / `SourceContext` 接口与 `src/plugins/sources/**` 留给 M7 webhook 的首个消费者，避免为没有传输层的来源引入第二套事件入口。
+**M6 / M6.5 边界**：M6 **不落地** source 插件进程——外部事件入口是宿主输入 `event.received`（source 插件与测试注入共用），manual 源 = `rule.trigger` 命令，app 源 = `app.event` 命令；M6.5 事件按线程归并后仍走同一入口（`thread.*` 只是内核事实，不引入第二套事件源）；`SourcePlugin` / `SourceContext` 接口与 `src/plugins/sources/**` 留给 M7 webhook 的首个消费者，避免为没有传输层的来源引入第二套事件入口。
 
 ### executor
 
@@ -261,7 +261,8 @@ export interface Receipt {
     "later": "2026-11-06T09:00:00.000Z",
     "events": [
       { "source": "agent", "type": "issues.opened", "subject": "issue-1", "summary": "发现新问题" }
-    ]
+    ],
+    "notes": ["先跑测试再提交"]
   }
   ```
 

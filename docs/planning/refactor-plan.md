@@ -160,6 +160,27 @@
 - 回滚点：M6 改投影表与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建；`rule_sets` / `rule_fires` 的写入只影响新代码。
 - 下一步：M6.5 Thread（线程实体 + 上下文派生 + 按线程续接/并发 + 事件合并与 `thread.bind`）。
 
+## M6.5 开工记录（2026-11-05）
+
+- 分支 `refactor/m65-thread`，起点 `master` @ `2009ca1`（M6 已 fast-forward 合入）；实施计划与任务清单见 [tasks/m65-plan.md](../../tasks/m65-plan.md)、[tasks/m65-todo.md](../../tasks/m65-todo.md)。
+- 范围口径：新增第 13 张投影表 `threads`（线程行整行由 `thread.*` 事实携带）与 7 条 `thread.*` 事实、`event.merged`；`tasks` 补 `thread_id` / `parent_task_id`（旧库 ALTER 补列）；命令 `thread.note/close/bind` 与回执第六键 `notes`；事件按 `(source, externalRef)` 归并（`reuse-task` 复用 / `new-task` / queued run 合并）、线程上下文派生（≤6000 码点确定性截断）、按 (thread, agent) 会话续接、`run.claim` 线程并发闸门、手工/cron 任务隐式线程、派生任务 `parentTaskId`、线程生命周期（完成/删除/14 天无活动归档、新事件重开）、`thread.byId` 视图与看板线程面板；`KERNEL_VERSION=m6.5.0`。
+- 评审口径（开工即定）：线程身份只看 `(source, externalRef)`，同一事件命中多条规则各归各的线程、各建任务；`claimed`/`waiting` 期间的事件只进线程时间线、不自动补跑（避免隐式状态机）；`sessions` 不落线程行、由 runs 现算；上下文派生放内核纯函数 `kernel/thread-context.ts`（提示词由内核拼装，宿主只提供视图切片——与 SPEC-host 原「host/thread-context」文字不同，已在 SPEC-host 更正）；`thread.concurrency` M6.5 固定 1、无 UI 编辑入口。
+- 回滚点：M6.5 改投影表与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建（`threads` / `tasks` 新列只影响新代码；老事实 replay 由 `normalizeTask` 补 null）。
+
+## M6.5 退出记录（2026-11-05）
+
+- 提交链：`98b2dda`（线程契约、事实、投影、归并/上下文/并发、宿主与线程面板、测试与 e2e）→ 本记录提交。
+- 门禁：`pnpm check` exit 0；115 文件 / 1550 用例；覆盖率 **99.91 / 98.34 / 100 / 100**（= M6 基线）；`check:diffcov` **430/430 = 100%**；`pnpm e2e` **10/10**（新增 `e2e/thread.spec.ts`）；`check:floor` / `check:secrets` clean；`pnpm audit` 生产依赖 0 漏洞。
+- 线程表面：`threads` 成为第 13 张投影表（整行由 `thread.*` 事实携带：`task_ids_json/root_task_ids_json/notes_json/events_json`）；7 条事实 `thread.opened/event_attached/task_attached/note_appended/closed/reopened/bound` + `event.merged`；命令 `thread.note/close/bind` 与回执第六键 `notes`；`thread.byId` 视图返回 `{ thread, tasks, sessions }`。
+- 事件归并：身份 = `(source, externalRef)`（`keyFrom` 缺省 subject、`externalRef` 取 `dedupeKey ?? subject`）；已关闭线程先 `reopened` 再 attach；`reuse-task` 在既有 active 任务当前阶段追加一轮（阶段非 agent 只 attach）、`new-task` 总新建、线程有 queued run 时产 `event.merged`；同一事件命中多条规则各归各的线程、各建任务。
+- 上下文与续接：`kernel/thread-context.ts` 纯函数派生六段（元信息 / 任务树 / 最近 3 条终态 run / 未决卡片 / 最近 10 条笔记 / 资料清单），≤6000 码点按时间倒序截断并标注，同事实同文本；提示词按「能力 → 任务 → 阶段 → 线程上下文 → 回执块」拼接。`sessions` 不落线程行，由线程内各 agent 最近一次终态 run 现算；`turn = 该任务 run 数 + 1`。
+- 并发与生命周期：`run.claim` 按线程 `concurrency`（默认 1）跳过已占满线程的候选，跨线程不受影响；任务完成/删除后线程无 active 任务 → `thread.closed{all-tasks-done}`；`clock.tick` 14 天无活动 → `inactivity`；新事件自动重开；`thread.close` 人工归档幂等。手工/cron/`rule.trigger` 任务自动建隐式线程（`source='manual'`），`thread.bind` 绑定外部入口（目标键被占用 reject）；回执派生事件按 `originRunId` 继承线程并记 `parentTaskId`。
+- 旧库与重建：`tasks` 只 `ALTER TABLE ADD COLUMN` 补 `thread_id/parent_task_id`（不重建表）；老 payload 由 `kernel/project` 与投影 writer 双层 `normalizeTask` 补 null；`KERNEL_VERSION=m6.5.0` 触发全量重建；真库用例验证 `threads` 与增量逐表等价。
+- UI：看板任务卡显示「子任务」徽标与线程入口；`ThreadPanel` 展示元信息/任务树/笔记（`thread.note`）/绑定（`thread.bind`）/归档（`thread.close`），按 `thread.byId` 视图刷新（kernelStore 失效 `thread.` / `event.`）。
+- 已知边界与偏差：`parallel`（同规则并行）与 `merge` 的完整语义仍只校验/存储——M6.5 只实现 queued run 的事件合并；`claimed`/`waiting` 期间到达的事件只进线程时间线、不自动补跑（避免隐式状态机）；`sessions`、`eventRef` 由现算/行内数组承载而不落独立事实与 blob（`ThreadRow` 增加 `notes/events/createdAt`；SPEC-kernel 已同步）；线程上下文派生放内核纯函数而非 `host/thread-context.ts`（提示词由内核拼装，SPEC-host 已更正）；`thread.concurrency` 固定 1、无 UI 编辑入口；任务删除后线程 `taskIds` 保留历史 id（上下文按现存在任务渲染）；线程标题空 subject/summary 回落到 source；M2 兼容层不删（实库仍 v2）；electron-builder 打包冒烟仍未恢复（M2 已知问题）；`scheduler` 竞态防御分支与既有 UI 不可达分支仍未覆盖（与 M4/M5/M6 同口径）。
+- 回滚点：M6.5 改投影表与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建；`threads` / `tasks` 新列只影响新代码。
+- 下一步：M7（可选）——外部插件子进程 + 能力授权、`webhook` 来源/通道、跨工作流交接、远端 Worker 架构位；**只在明确要做时启动，不阻塞主线**。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

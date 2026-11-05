@@ -20,7 +20,6 @@ src/
 │   ├── executor.ts  # 执行器插件 → ExecutorPort 包装（终态归一、续接重试）
 │   ├── executor-registry.ts # 按 runtime.executorKey 取插件端口，组装 SchedulerExecutors
 │   ├── sdk-host.ts  # 插件能力面原件（spawn/解析/杀树/扫描目录/时钟/日志/会话根/notify）
-│   ├── thread-context.ts # 从事实派生线程上下文（≤6000 字，确定性截断）
 │   ├── reconcile.ts # 启动对账：租约过期、残留 running、未完成对话轮次
 │   ├── process.ts   # spawn、行读取、进程树终止（沿用现有实现）
 │   ├── artifacts.ts # 事件资料落盘 artifacts/<eventId>.md
@@ -39,19 +38,19 @@ src/
 
 ## 宿主职责
 
-| 模块                | 职责                                                                                                                                                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `boot`              | 单实例锁、开库、校验指纹并重建、装配插件、启动 sources/channels、挂单定时器、建窗口与托盘（M6 无 source 插件进程，事件入口为宿主输入）                                                                                                                        |
-| `store`             | 每个输入：按 `viewSpec` 装载切片 → `decide` → 事务内追加事实 + 应用 `project` 变更 → 更新 `projection_meta`                                                                                                                                                  |
-| `clock`             | 只挂一个定时器：`nextWakeAt` 到点发 `clock.tick`；M6 起 `nextWakeAt` 纳入 cron 规则下一次到点，tick 内到点建任务并记 `rule.fired`；窗口不可见时不降频（托盘常驻）                                                                                             |
-| `effects`           | 提交后分发：新 `run.queued` 唤醒调度器；`card.opened/updated` 交给通道 hub（fire-and-forget、异常隔离）；事实增量批量推 renderer                                                                                                                             |
-| `channels`          | 通道 hub（M4）：按 `plugins/registry.ts` 的 `channels` 顺序启停；分发 `card.opened/updated`、启动补投 `delivery='pending'` 的 open 卡、承接 `delivered` / `answer` 回调；首个成功回 `card.delivered{ref}`，全失败回 `card.delivery_failed`；投递不阻塞写路径 |
-| `scheduler`         | 按运行时（`maxConcurrent`）向内核 `run.claim`，领取后按 `runtime.executorKey` 调执行器插件 `run(turn)`；回执转交内核；不自己判断派给谁；线程串行由内核保证                                                                                                   |
-| `executor-registry` | 按 `runtime.executorKey` 从装配根注入的插件清单取执行器端口；未知 key 返回 `null`（不猜、不降级），由调度器落兜底终态                                                                                                                                        |
-| `thread-context`    | 拼提示词前按事实派生「线程上下文」：元信息、任务、最近 3 条运行摘要、未决卡片、最近 10 条笔记、资料清单；同事实必得同文本，≤6000 字                                                                                                                          |
-| `reconcile`         | 启动与定时对账：`claimed` 超租约 → 先终止残留子进程再 `run.abandoned`；`waiting` 保留卡片；`waiting` 且无 open 卡的历史 run 补 `run.host_settled{cancelled}`（D13）；中断的聊天轮次落错误消息                                                                |
-| `artifacts`         | 事件资料、大输出尾部；路径 `userData/artifacts/<eventId>.md`，保留 30 天                                                                                                                                                                                     |
-| `plugins`           | 注册表装载、配置读写、能力授权、失败隔离（插件异常不拖垮宿主）                                                                                                                                                                                               |
+| 模块                | 职责                                                                                                                                                                                                                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `boot`              | 单实例锁、开库、校验指纹并重建、装配插件、启动 sources/channels、挂单定时器、建窗口与托盘（M6 无 source 插件进程，事件入口为宿主输入）                                                                                                                                                              |
+| `store`             | 每个输入：按 `viewSpec` 装载切片 → `decide` → 事务内追加事实 + 应用 `project` 变更 → 更新 `projection_meta`                                                                                                                                                                                         |
+| `clock`             | 只挂一个定时器：`nextWakeAt` 到点发 `clock.tick`；M6 起 `nextWakeAt` 纳入 cron 规则下一次到点，tick 内到点建任务并记 `rule.fired`；窗口不可见时不降频（托盘常驻）                                                                                                                                   |
+| `effects`           | 提交后分发：新 `run.queued` 唤醒调度器；`card.opened/updated` 交给通道 hub（fire-and-forget、异常隔离）；事实增量批量推 renderer                                                                                                                                                                    |
+| `channels`          | 通道 hub（M4）：按 `plugins/registry.ts` 的 `channels` 顺序启停；分发 `card.opened/updated`、启动补投 `delivery='pending'` 的 open 卡、承接 `delivered` / `answer` 回调；首个成功回 `card.delivered{ref}`，全失败回 `card.delivery_failed`；投递不阻塞写路径                                        |
+| `scheduler`         | 按运行时（`maxConcurrent`）向内核 `run.claim`，领取后按 `runtime.executorKey` 调执行器插件 `run(turn)`；回执转交内核；不自己判断派给谁；线程串行由内核保证                                                                                                                                          |
+| `executor-registry` | 按 `runtime.executorKey` 从装配根注入的插件清单取执行器端口；未知 key 返回 `null`（不猜、不降级），由调度器落兜底终态                                                                                                                                                                               |
+| `thread-context`    | **由内核纯函数 `kernel/thread-context.ts` 派生**（宿主不另写一份）：拼提示词前按事实派生「线程上下文」：元信息、任务树、最近 3 条终态运行摘要、未决卡片、最近 10 条笔记、资料清单；同事实必得同文本，≤6000 码点，超出按时间倒序截断并标注。宿主只按 `viewSpec` 装载 `threads/tasks/runs/cards` 切片 |
+| `reconcile`         | 启动与定时对账：`claimed` 超租约 → 先终止残留子进程再 `run.abandoned`；`waiting` 保留卡片；`waiting` 且无 open 卡的历史 run 补 `run.host_settled{cancelled}`（D13）；中断的聊天轮次落错误消息                                                                                                       |
+| `artifacts`         | 事件资料、大输出尾部；路径 `userData/artifacts/<eventId>.md`，保留 30 天                                                                                                                                                                                                                            |
+| `plugins`           | 注册表装载、配置读写、能力授权、失败隔离（插件异常不拖垮宿主）                                                                                                                                                                                                                                      |
 
 - **未知执行器**：运行时配置的 `executorKey` 在插件注册表里找不到时，调度器不 spawn、不改配置，直接 `run.host_settled` 落 `failed` + `runtime_missing`（文案带 key 便于定位）；不新增 `errorCode`，取值仍是 10 个。
 - **执行器清单来源**：宿主不 import 具体插件实现；装配根（`src/main`）把 `src/plugins/registry.ts` 的静态清单注入 `executor-registry` 与 IPC，测试可注入假插件。
@@ -64,6 +63,7 @@ src/
 - 宿主兜底写入：执行器不可达、超时或取消无回执时，宿主以 `run.host_settled` 输入写终态（`run.failed` 的 `timeout`/`executor_lost`，或 `run.cancelled` 的 `cancelled`；见 SPEC-kernel「输入目录」），不让 run 悬空。
 - **M3 结构升级**：`runtimes` 从旧列 `protocol_family`（旧字段，仅迁移归一用）改成 `executor_key` + `args_template`；旧列被 CHECK 引用、不能 `DROP COLUMN`，因此与 M2 的 `runs` 同法做一次性物理重建（外键 OFF → 临时表 → 拷贝旧行并回填 → 删旧 → 改名）；升级在 `openDatabase` 内完成。
 - **M6 结构升级**：`tasks` 追加来源四列（`origin` / `rule_id` / `external_ref` / `labels_json`），旧库用 `ALTER TABLE ADD COLUMN` 一次性补齐（**不重建表**，避免 SQLite 重写 `runs.task_id` 的外键引用）；老事实 payload 缺字段由 `kernel/project` 与投影 writer 的 `normalizeTask` 双层归一。新增投影表 `rule_sets`（单行 `id='current'`）与 `rule_fires`（append-only），`KERNEL_VERSION=m6.0.0` 触发全量重建。
+- **M6.5 结构升级**：`tasks` 再补 `thread_id` / `parent_task_id` 两列（同样 `ALTER TABLE ADD COLUMN`，不重建表；老 payload 由双层 `normalizeTask` 补 null）；新增第 13 张投影表 `threads`（线程行整行由 `thread.*` 事实携带，`notes_json/events_json/task_ids_json/root_task_ids_json` 存 JSON），`KERNEL_VERSION=m6.5.0` 触发全量重建。
 - **启动顺序固定**：「结构升级（`openDatabase`）→ 存量导入（`importLegacyIfNeeded`）→ 指纹重建（`store.ensureProjection`）」。重建 fold 的是历史事实 payload，所以老 payload 的归一函数（`normalizeRuntime`）必须先于指纹/DDL 变化落地，否则老库升级失败。
 - 备份：`userData/workbench.db` 与 `userData/artifacts/` 直接复制即完整备份（事实日志自足）；设置页提供「导出全部事实为 JSON」。
 
@@ -98,7 +98,8 @@ export type KernelEvent =
   `runtimes.workloads`、`tasks.byWorkflow`、`task.byId`、`runs.active-by-task`、`runs.active-by-conversation`、
   `runs.byTask`、`run.byId`、`run.events`、`run.last-event-seq`、`runs.stale-chat`、`conversations.all`、
   `messages.byConversation`、`cards.open`、`cards.byRun`、`runs.waiting`、**M5 新增** `tasks.executing`、
-  `runtimes.statuses`、`kernel.seq`、`runtimes.executors`、`runtimes.detected`、`runtimes.models`。
+  `runtimes.statuses`、`kernel.seq`、`runtimes.executors`、`runtimes.detected`、`runtimes.models`、
+  **M6 新增** `rules.all`、**M6.5 新增** `thread.byId`（线程行 + 任务树 + 各智能体最近会话）。
   其中后三个是**宿主视图**：由装配根注入只读函数（插件注册表 / CLI 探测 / 执行器
   模型目录 / 运行时负载拼装），与 DB 视图共用同一个 `query` 动词，不写库、不发失效。
 - `tasks.executing`：存在 `queued/running/waiting` run 的任务 id 去重集合；看板「执行中」只读它。

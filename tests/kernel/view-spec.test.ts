@@ -85,7 +85,7 @@ const samples: Input[] = [...commandSamples, ...hostSamples]
 const expected: Record<Input['type'], ProjectionTable[]> = {
   'workflow.create': ['agents'],
   'workflow.update': ['workflows', 'workflow_stages', 'agents', 'tasks'],
-  'workflow.remove': ['workflows', 'workflow_stages', 'tasks'],
+  'workflow.remove': ['workflows', 'workflow_stages', 'tasks', 'runs'],
   'agent.create': ['runtimes'],
   'agent.update': ['agents', 'runtimes'],
   'agent.remove': ['agents', 'workflow_stages'],
@@ -96,7 +96,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'task.create': ['workflows', 'workflow_stages', 'agents', 'runtimes'],
   'task.move': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
   'task.complete': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
-  'task.remove': ['tasks'],
+  'task.remove': ['tasks', 'runs'],
   'run.claim': ['runs', 'runtimes'],
   'run.heartbeat': ['runs'],
   'run.receipt': [
@@ -157,10 +157,11 @@ describe('kernel/view-spec', () => {
     for (const table of ENTITY_TABLES) expect(projection.has(table), table).toBe(true)
   })
 
-  it('任务拖拽/完成要判断「执行中」，必须装载 tasks（宿主同时装 activeTaskIds）', () => {
+  it('删除命令要装载 runs（run.removed 事实替代 SQL 级联，D13）', () => {
     expect(viewSpec(byType.get('task.move') as Input)).toContain('tasks')
     expect(viewSpec(byType.get('task.complete') as Input)).toContain('tasks')
-    expect(viewSpec(byType.get('task.remove') as Input)).toEqual(['tasks'])
+    expect(viewSpec(byType.get('task.remove') as Input)).toEqual(['tasks', 'runs'])
+    expect(viewSpec(byType.get('workflow.remove') as Input)).toContain('runs')
   })
 
   it('运行/对话输入只声明自己需要的切片（领取要运行时配置、回执要阶段流转）', () => {

@@ -20,8 +20,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 改阶段：既有阶段做差量、任务的当前阶段可能因删阶段而重挂、活跃 run 守卫
       return ['workflows', 'workflow_stages', 'agents', 'tasks']
     case 'workflow.remove':
-      // 级联删阶段与任务，tombstone 要逐个回查
-      return ['workflows', 'workflow_stages', 'tasks']
+      // 级联删阶段、任务与运行；run 要先逐条产 run.removed（D13），不能靠 SQL 级联
+      return ['workflows', 'workflow_stages', 'tasks', 'runs']
     case 'agent.create':
       return ['runtimes']
     case 'agent.update':
@@ -45,7 +45,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'task.complete':
       return ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
     case 'task.remove':
-      return ['tasks']
+      // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价
+      return ['tasks', 'runs']
     case 'run.claim':
       // 候选 run 来自 runs 投影；运行时配置（启用 / 并发上限）来自 runtimes
       return ['runs', 'runtimes']

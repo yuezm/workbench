@@ -259,6 +259,71 @@ describe('重建等价：≥200 条混合命令', () => {
   })
 })
 
+describe('重建等价：删除带 run 的任务 / 工作流（D13 run.removed）', () => {
+  it('run 随任务删除产 run.removed；增量与 rebuild 都不复活 orphan run', () => {
+    const db = memory()
+    const store = createStore({ db, kernel: realKernel })
+    store.ensureProjection()
+    store.dispatch({ type: 'runtime.create', commandId: 'rr-1', input: { name: '运行时' } })
+    const runtime = findRuntime(store, '运行时')
+    store.dispatch({
+      type: 'agent.create',
+      commandId: 'ra-1',
+      input: { name: '智能体', runtimeId: runtime.id },
+    })
+    const agent = findAgent(store, '智能体')
+    const agentStage = { name: '执行', entryMode: 'agent' as const, agentId: agent.id }
+
+    store.dispatch({
+      type: 'workflow.create',
+      commandId: 'rw-1',
+      input: { name: '流程', stages: [agentStage] },
+    })
+    const workflow = findWorkflow(store, '流程')
+    store.dispatch({
+      type: 'task.create',
+      commandId: 'rt-1',
+      input: { title: '任务', workflowId: workflow.id },
+    })
+    const task = findTask(store, workflow.id, '任务')
+    const runId = must(store.query('runs.byTask', { taskId: task.id })[0], '任务 run').id
+    expect(dumpProjection(db).runs).toHaveLength(1)
+
+    // 任务删除：run 由 run.removed 事实显式删除（不能靠 SQL 级联，重建会复活）
+    store.dispatch({ type: 'task.remove', commandId: 'rd-1', id: task.id })
+    expect(store.factsSince(0).map((fact) => fact.type)).toContain('run.removed')
+    expect(store.query('run.byId', { runId })).toBeNull()
+    const afterTask = dumpProjection(db)
+    expect(afterTask.runs).toEqual([])
+    store.rebuild()
+    expect(dumpProjection(db)).toEqual(afterTask)
+
+    // 工作流删除：同一口径（先删 run，再删任务/阶段）
+    store.dispatch({
+      type: 'workflow.create',
+      commandId: 'rw-2',
+      input: { name: '流程 2', stages: [agentStage] },
+    })
+    const second = findWorkflow(store, '流程 2')
+    store.dispatch({
+      type: 'task.create',
+      commandId: 'rt-2',
+      input: { title: '任务 2', workflowId: second.id },
+    })
+    const secondTask = findTask(store, second.id, '任务 2')
+    const secondRunId = must(
+      store.query('runs.byTask', { taskId: secondTask.id })[0],
+      '任务 2 的 run',
+    ).id
+    store.dispatch({ type: 'workflow.remove', commandId: 'rwd-2', id: second.id })
+    expect(store.query('run.byId', { runId: secondRunId })).toBeNull()
+    const afterWorkflow = dumpProjection(db)
+    expect(afterWorkflow.runs).toEqual([])
+    store.rebuild()
+    expect(dumpProjection(db)).toEqual(afterWorkflow)
+  })
+})
+
 describe('强杀重启：事实已提交、投影落后', () => {
   it('重开后 ensureProjection 追平，投影与全量应用逐表全等', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'aiwf-rebuild-'))

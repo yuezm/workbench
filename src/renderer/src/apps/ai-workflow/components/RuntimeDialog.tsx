@@ -2,20 +2,27 @@ import { useEffect, useState, type ReactElement } from 'react'
 import type {
   PermissionMode,
   Runtime,
+  RuntimeExecutorChoice,
   RuntimeInput,
   RuntimeModelOption,
 } from '../../../../../shared/ai-workflow-api'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field, labelCls } from '../../../components/ui/field'
-import { Input } from '../../../components/ui/input'
+import { Input, fieldCls } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
+import { cn } from '../../../lib/cn'
 import { wfApi } from '../api'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** 模型下拉里代表「手动输入」的哨兵值（不会发给主进程） */
 const CUSTOM_MODEL = '__custom__'
+
+const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2 font-mono leading-relaxed')
+
+const ARGS_TEMPLATE_HINT =
+  'JSON 数组，如 ["--print","{prompt}"]；占位符 {model}/{effort}/{cwd}/{context}/{prompt}；仅 command 执行器使用'
 
 const PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
   { value: 'read-only', label: '只读（read-only）' },
@@ -49,8 +56,12 @@ export function RuntimeDialog({
   const editing = runtime !== null
 
   const [name, setName] = useState(initial?.name ?? runtime?.name ?? '')
-  const [command, setCommand] = useState(initial?.command ?? runtime?.command ?? 'dsh')
-  const [profile, setProfile] = useState(initial?.profile ?? runtime?.profile ?? 'multica')
+  const [executorKey, setExecutorKey] = useState(initial?.executorKey ?? runtime?.executorKey ?? '')
+  const [command, setCommand] = useState(initial?.command ?? runtime?.command ?? '')
+  const [profile, setProfile] = useState(initial?.profile ?? runtime?.profile ?? '')
+  const [argsTemplate, setArgsTemplate] = useState(
+    initial?.argsTemplate ?? runtime?.argsTemplate ?? '',
+  )
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(
     initial?.permissionMode ?? runtime?.permissionMode ?? 'workspace-write',
   )
@@ -64,11 +75,42 @@ export function RuntimeDialog({
     String(runtime?.maxConcurrent ?? initial?.maxConcurrent ?? 1),
   )
   const [enabled, setEnabled] = useState(runtime?.enabled ?? true)
+  const [executors, setExecutors] = useState<RuntimeExecutorChoice[]>([])
+  const [executorsLoading, setExecutorsLoading] = useState(true)
+  const [executorsError, setExecutorsError] = useState<string | null>(null)
   const [models, setModels] = useState<RuntimeModelOption[]>([])
   const [modelsLoading, setModelsLoading] = useState(editing)
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 执行器清单来自只读通道 runtimes.executors()（注册表顺序）；表单不写死任何执行器名。
+  // 新建时用首项 manifest 的 command/profile 预填，编辑时保留运行时现有值不覆盖。
+  useEffect(() => {
+    let alive = true
+    void wfApi()
+      .runtimes.executors()
+      .then((list) => {
+        if (!alive) return
+        setExecutors(list)
+        const first = list[0]
+        if (first === undefined) return
+        setExecutorKey((prev) => (prev === '' ? first.key : prev))
+        if (editing) return
+        // 只在字段仍为空时预填：检测清单「使用」带入的用户值优先，用户已输入的值也不覆盖
+        setCommand((prev) => (prev.trim() === '' ? first.command : prev))
+        setProfile((prev) => (prev.trim() === '' ? first.profile : prev))
+      })
+      .catch((e: unknown) => {
+        if (alive) setExecutorsError(errMsg(e))
+      })
+      .finally(() => {
+        if (alive) setExecutorsLoading(false)
+      })
+    return () => {
+      alive = false
+    }
+  }, [editing])
 
   // 编辑时读取该运行时的模型目录；失败不阻塞手动填写模型 id
   useEffect(() => {
@@ -118,6 +160,16 @@ export function RuntimeDialog({
       ]
     : [{ value: '', label: '默认（创建后可选择）' }]
 
+  const changeExecutor = (key: string): void => {
+    setExecutorKey(key)
+    // 新建时切执行器才预填该执行器 manifest 的默认命令/profile；编辑时不动用户的现有配置
+    if (editing) return
+    const choice = executors.find((item) => item.key === key)
+    if (choice === undefined) return
+    setCommand(choice.command)
+    setProfile(choice.profile)
+  }
+
   const changeModel = (value: string): void => {
     setModelChoice(value)
     setReasoningEffort('')
@@ -134,17 +186,21 @@ export function RuntimeDialog({
     setError(null)
     try {
       const concurrent = Math.floor(Number(maxConcurrent))
-      await onSubmit({
+      const input: RuntimeInput = {
         name: name.trim(),
         command: command.trim(),
         profile: profile.trim(),
+        argsTemplate: argsTemplate.trim(),
         permissionMode,
         model: modelValue === '' ? null : modelValue,
         reasoningEffort: reasoningEffort === '' ? null : reasoningEffort,
         workdir: workdir.trim() === '' ? null : workdir.trim(),
         maxConcurrent: Number.isFinite(concurrent) && concurrent >= 1 ? concurrent : 1,
         enabled,
-      })
+      }
+      // 清单加载失败时没有可选执行器：不写空串 key（IPC 会把空串当成未注册的 key 拒绝）
+      if (executorKey !== '') input.executorKey = executorKey
+      await onSubmit(input)
     } catch (e) {
       // 新建会先探测，失败时弹窗保持打开并就地说明原因
       setError(errMsg(e))
@@ -159,6 +215,19 @@ export function RuntimeDialog({
         <div className="grid grid-cols-2 gap-3">
           <Field label="名称">
             <Input aria-label="运行时名称" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="执行器">
+            <Select
+              ariaLabel="运行时执行器"
+              value={executorKey}
+              onChange={changeExecutor}
+              disabled={executors.length === 0}
+              placeholder={executorsLoading ? '正在读取执行器…' : '无可用执行器'}
+              options={executors.map((item) => ({ value: item.key, label: item.label }))}
+            />
+            {executorsError && (
+              <span className="text-[11px] text-red-300">执行器清单加载失败：{executorsError}</span>
+            )}
           </Field>
           <Field label="命令">
             <Input
@@ -175,6 +244,16 @@ export function RuntimeDialog({
               value={profile}
               onChange={(e) => setProfile(e.target.value)}
             />
+          </Field>
+          <Field label="参数模板（可选）" className="col-span-2">
+            <textarea
+              aria-label="运行时参数模板"
+              className={textareaCls}
+              placeholder='["--print","{prompt}"]'
+              value={argsTemplate}
+              onChange={(e) => setArgsTemplate(e.target.value)}
+            />
+            <span className="text-[11px] leading-relaxed text-ink-faint">{ARGS_TEMPLATE_HINT}</span>
           </Field>
           <Field label="并发上限">
             <Input

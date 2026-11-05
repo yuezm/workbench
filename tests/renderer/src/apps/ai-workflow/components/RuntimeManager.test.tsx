@@ -5,6 +5,7 @@ import type {
   AiWorkflowApi,
   DetectedRuntime,
   Runtime,
+  RuntimeExecutorChoice,
   RuntimeInput,
   RuntimeModelOption,
   RuntimeProbe,
@@ -15,6 +16,12 @@ import { RuntimeManager } from '../../../../../../src/renderer/src/apps/ai-workf
 function setApi(api: unknown): void {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
 }
+
+/** 执行器清单：与弹窗共用（顺序即注册表顺序，dsh 首项） */
+const EXECUTORS: RuntimeExecutorChoice[] = [
+  { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
+  { key: 'command', label: '通用命令', command: 'my-cli', profile: '' },
+]
 
 function makeProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
   return {
@@ -92,6 +99,7 @@ function makeApi() {
     remove: vi.fn(async (_id: string): Promise<void> => undefined),
     probe: vi.fn(async (): Promise<RuntimeProbe> => makeProbe()),
     models: vi.fn(async (): Promise<RuntimeModelOption[]> => []),
+    executors: vi.fn(async (): Promise<RuntimeExecutorChoice[]> => EXECUTORS),
   }
   setApi({ runtimes } as unknown as Partial<AiWorkflowApi>)
   return runtimes
@@ -100,7 +108,7 @@ function makeApi() {
 beforeEach(() => vi.clearAllMocks())
 
 describe('RuntimeManager', () => {
-  it('清单展示名称/协议族/健康/CLI 版本/启动头/路径/负载', async () => {
+  it('清单展示名称/执行器/健康/CLI 版本/启动头/路径/负载', async () => {
     const runtimes = makeApi()
     runtimes.list.mockResolvedValue([makeRuntime()])
     runtimes.statuses.mockResolvedValue([makeStatus('r1', { running: 1, maxConcurrent: 2 })])
@@ -108,13 +116,27 @@ describe('RuntimeManager', () => {
     render(<RuntimeManager />)
 
     expect(await screen.findByText('ds')).toBeInTheDocument()
-    expect(screen.getByText('dsh')).toBeInTheDocument()
+    expect(screen.getByText('DeepSeek Harness')).toBeInTheDocument()
     expect(screen.getByText('可用 · 12ms')).toBeInTheDocument()
     expect(screen.getByText('CLI v1.2.3')).toBeInTheDocument()
     expect(screen.getByText('dsh --profile multica --stdio')).toBeInTheDocument()
     expect(screen.getByText('C:/tools/dsh.exe')).toBeInTheDocument()
     expect(screen.getByText('负载 1/2')).toBeInTheDocument()
     expect(screen.queryByText(/排队/)).not.toBeInTheDocument()
+  })
+
+  it('执行器角标显示清单 label；清单映射不到时回退原始 key', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([
+      makeRuntime({ id: 'r1', name: 'ds', executorKey: 'dsh' }),
+      makeRuntime({ id: 'r2', name: 'legacy', executorKey: 'ghost' }),
+    ])
+    runtimes.statuses.mockResolvedValue([makeStatus('r1'), makeStatus('r2')])
+
+    render(<RuntimeManager />)
+
+    expect(await screen.findByText('DeepSeek Harness')).toBeInTheDocument()
+    expect(screen.getByText('ghost')).toBeInTheDocument()
   })
 
   it('未检测 / 不可用 / 停用 / 排队都按契约展示', async () => {
@@ -233,9 +255,38 @@ describe('RuntimeManager', () => {
 
     expect(screen.getByLabelText('运行时名称')).toHaveValue('Codex CLI')
     expect(screen.getByLabelText('运行时命令')).toHaveValue('codex')
-    expect(screen.getByLabelText('运行时 profile')).toHaveValue('multica')
+    // profile 由弹窗从执行器清单首项的 manifest 默认值预填（不再写死在 newRuntimeInput）
+    await waitFor(() => expect(screen.getByLabelText('运行时 profile')).toHaveValue('multica'))
+    expect(screen.getByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
+      'DeepSeek Harness',
+    )
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
+  })
+
+  it('检测结果「使用」带入 executorKey（支持项），提交时携带', async () => {
+    const runtimes = makeApi()
+    runtimes.list.mockResolvedValue([])
+    runtimes.detect.mockResolvedValue([
+      makeDetected({ command: 'dsh', label: 'DeepSeek Harness', executorKey: 'dsh' }),
+    ])
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+
+    await user.click(await screen.findByRole('button', { name: '使用' }))
+    expect(await screen.findByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
+      'DeepSeek Harness',
+    )
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
+    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+
+    await waitFor(() => expect(runtimes.create).toHaveBeenCalled())
+    expect(runtimes.create.mock.calls[0][0]).toMatchObject({
+      executorKey: 'dsh',
+      command: 'dsh',
+      profile: 'multica',
+      argsTemplate: '',
+    })
   })
 
   it('检测结果名称与既有运行时冲突时带命令后缀', async () => {
@@ -260,14 +311,18 @@ describe('RuntimeManager', () => {
 
     await user.click(screen.getByRole('button', { name: '新建运行时' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('新建运行时')
+    // 执行器与 command/profile 由弹窗从 executors() 清单首项预填
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
     await user.type(screen.getByLabelText('运行时名称'), '新的')
     await user.click(screen.getByRole('button', { name: '添加运行时' }))
 
     await waitFor(() => expect(runtimes.create).toHaveBeenCalled())
     expect(runtimes.create.mock.calls[0][0]).toMatchObject({
       name: '新的',
+      executorKey: 'dsh',
       command: 'dsh',
       profile: 'multica',
+      argsTemplate: '',
       permissionMode: 'workspace-write',
       model: null,
       reasoningEffort: null,
@@ -331,6 +386,8 @@ describe('RuntimeManager', () => {
     expect(runtimes.update.mock.calls[0][0]).toBe('r1')
     expect(runtimes.update.mock.calls[0][1]).toMatchObject({
       name: 'ds2',
+      executorKey: 'dsh',
+      argsTemplate: '',
       maxConcurrent: 3,
       enabled: false,
       workdir: 'D:/work',

@@ -6,6 +6,7 @@ import type {
   ChatConversation,
   Run,
   Runtime,
+  RuntimeExecutorChoice,
   RuntimeProbe,
   RuntimeStatus,
   Task,
@@ -117,6 +118,9 @@ function makeApi() {
         { runtimeId: 'r1', workload: { running: 0, queued: 0, maxConcurrent: 1 } },
       ]),
       models: vi.fn(async () => []),
+      executors: vi.fn(async (): Promise<RuntimeExecutorChoice[]> => [
+        { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
+      ]),
     },
     agents: {
       list: vi.fn(async () => state.agents),

@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   Runtime,
+  RuntimeExecutorChoice,
   RuntimeModelOption,
   RuntimeProbe,
 } from '../../../../../../src/shared/ai-workflow-api'
@@ -10,6 +11,27 @@ import { RuntimeDialog } from '../../../../../../src/renderer/src/apps/ai-workfl
 
 function setApi(api: unknown): void {
   ;(window as unknown as { aiWorkflow: unknown }).aiWorkflow = api
+}
+
+/** 执行器清单：顺序即注册表顺序（dsh 首项），command 的 command 默认值可体现「切执行器预填」 */
+const EXECUTORS: RuntimeExecutorChoice[] = [
+  { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
+  { key: 'command', label: '通用命令', command: 'my-cli', profile: '' },
+]
+
+/** 弹窗只用两个只读通道：models（仅编辑时）与 executors（挂载即取） */
+function baseApi(
+  over: {
+    models?: ReturnType<typeof vi.fn>
+    executors?: ReturnType<typeof vi.fn>
+  } = {},
+): unknown {
+  return {
+    runtimes: {
+      models: over.models ?? vi.fn(async () => []),
+      executors: over.executors ?? vi.fn(async () => EXECUTORS),
+    },
+  }
 }
 
 function makeProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
@@ -60,6 +82,8 @@ function makeModel(over: Partial<RuntimeModelOption> = {}): RuntimeModelOption {
 }
 
 describe('RuntimeDialog', () => {
+  beforeEach(() => setApi(baseApi()))
+
   it('新建：默认值渲染，模型与推理强度在创建前不可选', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
@@ -74,12 +98,16 @@ describe('RuntimeDialog', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('新建运行时')
     expect(screen.getByLabelText('运行时名称')).toHaveValue('Codex CLI')
     expect(screen.getByLabelText('运行时命令')).toHaveValue('codex')
-    expect(screen.getByLabelText('运行时 profile')).toHaveValue('multica')
+    await waitFor(() => expect(screen.getByLabelText('运行时 profile')).toHaveValue('multica'))
+    expect(screen.getByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
+      'DeepSeek Harness',
+    )
     expect(screen.getByLabelText('运行时并发上限')).toHaveValue(1)
     expect(screen.getByRole('combobox', { name: '运行时权限模式' })).toHaveTextContent(
       '工作区可写（workspace-write）',
     )
     expect(screen.getByText(/stdio 传输没有审批往返/)).toBeInTheDocument()
+    expect(screen.getByText(/占位符 \{model\}/)).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeDisabled()
     expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeDisabled()
     expect(screen.queryByRole('checkbox', { name: '启用运行时' })).not.toBeInTheDocument()
@@ -89,8 +117,10 @@ describe('RuntimeDialog', () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toEqual({
       name: 'Codex CLI',
+      executorKey: 'dsh',
       command: 'codex',
       profile: 'multica',
+      argsTemplate: '',
       permissionMode: 'workspace-write',
       model: null,
       reasoningEffort: null,
@@ -124,7 +154,7 @@ describe('RuntimeDialog', () => {
   it('编辑：预填、模型目录加载后切回已知选项、推理强度随模型能力可选', async () => {
     const model = makeModel()
     const models = vi.fn(async () => [model])
-    setApi({ runtimes: { models } })
+    setApi(baseApi({ models }))
     const runtime = makeRuntime({
       model: model.id,
       reasoningEffort: 'high',
@@ -164,7 +194,7 @@ describe('RuntimeDialog', () => {
     const pending = new Promise<RuntimeModelOption[]>((_res, rej) => {
       reject = rej
     })
-    setApi({ runtimes: { models: vi.fn(() => pending) } })
+    setApi(baseApi({ models: vi.fn(() => pending) }))
     const runtime = makeRuntime({ model: 'custom/model' })
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
@@ -186,7 +216,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：模型下拉可切默认/手动输入，推理强度随模型清空', async () => {
-    setApi({ runtimes: { models: vi.fn(async () => [makeModel()]) } })
+    setApi(baseApi({ models: vi.fn(async () => [makeModel()]) }))
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(
@@ -223,7 +253,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：切回默认模型并保留/提交已有推理强度，启用开关可修改', async () => {
-    setApi({ runtimes: { models: vi.fn(async () => [makeModel()]) } })
+    setApi(baseApi({ models: vi.fn(async () => [makeModel()]) }))
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(
@@ -248,6 +278,8 @@ describe('RuntimeDialog', () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
+    // 等首项执行器的 manifest 默认值预填完成，再验证用户手填不被覆盖
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
 
     await user.clear(screen.getByLabelText('运行时命令'))
     await user.type(screen.getByLabelText('运行时命令'), ' /opt/dsh ')
@@ -260,7 +292,7 @@ describe('RuntimeDialog', () => {
   })
 
   it('编辑：已有模型不在目录里时保留手动输入，未知推理强度仍显示', async () => {
-    setApi({ runtimes: { models: vi.fn(async () => []) } })
+    setApi(baseApi({ models: vi.fn(async () => []) }))
     render(
       <RuntimeDialog
         runtime={makeRuntime({ model: 'custom/model', reasoningEffort: 'max' })}
@@ -285,16 +317,16 @@ describe('RuntimeDialog', () => {
 
   it('编辑时模型目录未返回即卸载：不写状态也不报错', async () => {
     let resolve!: (list: RuntimeModelOption[]) => void
-    setApi({
-      runtimes: {
+    setApi(
+      baseApi({
         models: vi.fn(
           () =>
             new Promise<RuntimeModelOption[]>((res) => {
               resolve = res
             }),
         ),
-      },
-    })
+      }),
+    )
     const { unmount } = render(
       <RuntimeDialog runtime={makeRuntime()} onSubmit={vi.fn()} onCancel={vi.fn()} />,
     )
@@ -314,10 +346,113 @@ describe('RuntimeDialog', () => {
     expect(onCancel).toHaveBeenCalledTimes(2)
   })
 
-  it('无预填时回落到空名称与默认值', () => {
+  it('无预填时回落到空名称与首项执行器默认值', async () => {
     render(<RuntimeDialog onSubmit={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByLabelText('运行时名称')).toHaveValue('')
-    expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh')
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
+    await waitFor(() => expect(screen.getByLabelText('运行时 profile')).toHaveValue('multica'))
+    expect(screen.getByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
+      'DeepSeek Harness',
+    )
+    expect(screen.getByLabelText('运行时参数模板')).toHaveValue('')
     expect(screen.getByLabelText('运行时并发上限')).toHaveValue(1)
+  })
+
+  it('新建：切执行器按 manifest 预填 command/profile，手改后提交用户值', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
+
+    await user.click(screen.getByRole('combobox', { name: '运行时执行器' }))
+    await user.click(screen.getByRole('option', { name: '通用命令' }))
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('my-cli')
+    expect(screen.getByLabelText('运行时 profile')).toHaveValue('')
+
+    await user.clear(screen.getByLabelText('运行时命令'))
+    await user.type(screen.getByLabelText('运行时命令'), ' /opt/my-cli ')
+    // 参数模板含 [] 与 {}：userEvent.type 会把它们当键位描述，改用 change 直接赋值
+    fireEvent.change(screen.getByLabelText('运行时参数模板'), {
+      target: { value: '["--print","{prompt}"]' },
+    })
+    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      executorKey: 'command',
+      command: '/opt/my-cli',
+      profile: '',
+      argsTemplate: '["--print","{prompt}"]',
+    })
+  })
+
+  it('编辑：执行器与参数模板回填，保存提交携带 executorKey 与 argsTemplate', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <RuntimeDialog
+        runtime={makeRuntime({
+          executorKey: 'command',
+          command: 'my-cli',
+          profile: '',
+          argsTemplate: '["--print","{prompt}"]',
+        })}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
+      '通用命令',
+    )
+    expect(screen.getByLabelText('运行时参数模板')).toHaveValue('["--print","{prompt}"]')
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('my-cli')
+
+    fireEvent.change(screen.getByLabelText('运行时参数模板'), {
+      target: { value: ' ["{context}"] ' },
+    })
+    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      executorKey: 'command',
+      argsTemplate: '["{context}"]',
+    })
+  })
+
+  it('执行器清单加载失败：提示原因，仍可手填并提交（不带空串 key）', async () => {
+    setApi(
+      baseApi({
+        executors: vi.fn(async () => {
+          throw new Error('exec-down')
+        }),
+      }),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
+
+    expect(await screen.findByText(/执行器清单加载失败：exec-down/)).toBeInTheDocument()
+    const executor = screen.getByRole('combobox', { name: '运行时执行器' })
+    expect(executor).toBeDisabled()
+    expect(executor).toHaveTextContent('无可用执行器')
+
+    await user.type(screen.getByLabelText('运行时命令'), 'dsh')
+    await user.type(screen.getByLabelText('运行时 profile'), 'multica')
+    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    const input = onSubmit.mock.calls[0][0] as { executorKey?: string }
+    expect(input.executorKey).toBeUndefined()
+    expect(input).toMatchObject({ command: 'dsh', profile: 'multica', argsTemplate: '' })
+  })
+
+  it('执行器清单为空：下拉禁用并提示无可用执行器', async () => {
+    setApi(baseApi({ executors: vi.fn(async () => []) }))
+    render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
+
+    expect(await screen.findByText('无可用执行器')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '运行时执行器' })).toBeDisabled()
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('')
   })
 })

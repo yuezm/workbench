@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react'
 import type {
   DetectedRuntime,
   Runtime,
+  RuntimeExecutorChoice,
   RuntimeInput,
   RuntimeStatus,
 } from '../../../../../shared/ai-workflow-api'
@@ -20,12 +21,10 @@ interface DialogState {
   initial: RuntimeInput | null
 }
 
-/** 新建运行时的默认值：DSH 的默认 profile 是 multica，并发从 1 起 */
+/** 新建运行时的默认值：执行器与 command/profile 由弹窗从 executors() 清单首项 manifest 取 */
 function newRuntimeInput(): RuntimeInput {
   return {
     name: '',
-    command: 'dsh',
-    profile: 'multica',
     permissionMode: 'workspace-write',
     maxConcurrent: 1,
   }
@@ -100,6 +99,8 @@ function ScanIcon({ className }: { className?: string }): ReactElement {
 export function RuntimeManager(): ReactElement {
   const [items, setItems] = useState<Runtime[]>([])
   const [statuses, setStatuses] = useState<Record<string, RuntimeStatus>>({})
+  /** 执行器清单（只读，注册表顺序）：用于把角标的 key 映射成展示名 */
+  const [executors, setExecutors] = useState<RuntimeExecutorChoice[]>([])
   const [detected, setDetected] = useState<DetectedRuntime[]>([])
   /** 首次进入即自动扫描，所以初始为扫描中 */
   const [detecting, setDetecting] = useState(true)
@@ -115,12 +116,14 @@ export function RuntimeManager(): ReactElement {
 
   const load = useCallback(async (): Promise<void> => {
     try {
-      const [list, workload] = await Promise.all([
+      const [list, workload, choices] = await Promise.all([
         wfApi().runtimes.list(),
         wfApi().runtimes.statuses(),
+        wfApi().runtimes.executors(),
       ])
       setItems(list)
       setStatuses(Object.fromEntries(workload.map((status) => [status.runtimeId, status])))
+      setExecutors(choices)
       setError(null)
     } catch (e) {
       setError(errMsg(e))
@@ -188,7 +191,11 @@ export function RuntimeManager(): ReactElement {
     }
   }
 
-  /** 检测清单的「使用」：带入名称与命令（重名时加命令后缀），其余字段保持默认 */
+  /** 执行器键 → 展示名；清单里没有（插件被移除等）就显示原始 key */
+  const executorLabel = (key: string): string =>
+    executors.find((choice) => choice.key === key)?.label ?? key
+
+  /** 检测清单的「使用」：带入名称、命令与执行器（重名时加命令后缀），其余字段保持默认 */
   const prefill = (d: DetectedRuntime): void => {
     const taken = items.some((r) => r.name === d.label)
     setDialog({
@@ -197,6 +204,8 @@ export function RuntimeManager(): ReactElement {
         ...newRuntimeInput(),
         name: taken ? `${d.label} (${d.command})` : d.label,
         command: d.command,
+        // 未注册 CLI 的 executorKey 是空串：空串会被 IPC 当成未注册的 key 拒绝，这里不写
+        executorKey: d.executorKey || undefined,
       },
     })
   }
@@ -327,7 +336,7 @@ export function RuntimeManager(): ReactElement {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-medium text-ink">{r.name}</span>
                     <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] tracking-wide text-ink-faint">
-                      {r.executorKey}
+                      {executorLabel(r.executorKey)}
                     </span>
                     <RuntimeStatusBadge
                       probe={probe}

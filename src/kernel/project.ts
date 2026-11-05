@@ -1,9 +1,10 @@
 /**
- * 事实 → 投影变更（实体五表 + runs / run_events / conversations / messages）。
+ * 事实 → 投影变更（实体五表 + runs / run_events / conversations / messages / cards）。
  *
  * 纯函数、无 IO。实体类事实一行映射一行（payload 行即完整行，删除类事实的行是
  * tombstone，投影写 `row: null`）；`snapshot.imported` 是批量例外，按 `payload.table`
- * 批量 upsert。
+ * 批量 upsert。M4 的 `card.*` 同样是整行 upsert；`event.received` / `event.dropped`
+ * 只入账不投影，因此返回空变更。
  *
  * 运行类事实与实体事实同口径：**每条状态事实携带完整的 `run: RunRow`**，`project`
  * 只做「事实 → 行」的搬运（`run.queued` 额外用事实的 `seq` 回填 `queueSeq`，供领取 FIFO
@@ -119,6 +120,18 @@ function changesOf(fact: AnyFact): Change[] {
     case 'run.removed':
       // 只删 runs：`run_events` 由宿主按 run_id 联删（事实只携带 runId）。
       return [remove('runs', fact.payload.runId)]
+    case 'card.opened':
+    case 'card.updated':
+    case 'card.delivered':
+    case 'card.delivery_failed':
+    case 'card.answered':
+    case 'card.resolved':
+      // M4：卡片事实一律携带完整 `Card` 行，整行 upsert（投递/回答/关闭都不需要合并旧行）。
+      return [put('cards', fact.payload.card)]
+    case 'event.received':
+    case 'event.dropped':
+      // M4 只入账、不投影：派生事件命中规则建任务留 M6，重建时这两类事实产出空变更。
+      return []
     case 'conversation.created':
     case 'conversation.updated':
       return [put('conversations', fact.payload.conversation)]

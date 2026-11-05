@@ -15,6 +15,9 @@
  */
 import type {
   Agent,
+  Card,
+  CardAnswerVia,
+  CardResolveReason,
   ChatRole,
   Conversation,
   Message,
@@ -26,7 +29,7 @@ import type {
   WorkflowStage,
 } from './entities'
 
-/** 事实名全集；`event.*` / `card.*` / `thread.*` 等后续里程碑再补。 */
+/** 事实名全集；`thread.*` 等后续里程碑再补。M4 加卡片与派生事件。 */
 export const FACT_TYPES = [
   'workflow.created',
   'workflow.updated',
@@ -58,6 +61,14 @@ export const FACT_TYPES = [
   'run.cancel_requested',
   'run.receipt_rejected',
   'run.removed',
+  'card.opened',
+  'card.updated',
+  'card.delivered',
+  'card.delivery_failed',
+  'card.answered',
+  'card.resolved',
+  'event.received',
+  'event.dropped',
   'conversation.created',
   'conversation.updated',
   'conversation.removed',
@@ -231,6 +242,78 @@ export interface RunRemovedPayload {
   runId: string
 }
 
+// ---------- 卡片（M4） ----------
+
+/**
+ * 卡片事实（M4）沿用「一行事实 → 一行投影」：**每条 `card.*` payload 携带完整 `Card` 行**，
+ * `project` 只做整行 upsert，重建不回查；各行另带少量审计字段（通道 ref / 错误 / 来源），
+ * 供 `timeline` 解释「谁在什么时候把卡片推到了哪一步」。
+ */
+export interface CardOpenedPayload {
+  card: Card
+}
+
+/** 同 run 同 `key` 的 open 卡再次出现：`version+1`、投递重置 `pending`；`changes` 记变更字段。 */
+export interface CardUpdatedPayload {
+  card: Card
+  changes?: string[]
+}
+
+/** 至少一个通道已送达；`ref` 是通道键（`in-app` / `desktop` / …）。 */
+export interface CardDeliveredPayload {
+  card: Card
+  ref: string
+}
+
+/** 本轮所有通道投递失败；卡片状态不变，重启按 `pending` 补投。 */
+export interface CardDeliveryFailedPayload {
+  card: Card
+  error: string
+}
+
+/** 回答：`by` 是来源（`ui` / `channel`），与行里的 `answeredBy` 一致。 */
+export interface CardAnsweredPayload {
+  card: Card
+  by: CardAnswerVia
+}
+
+/** 关闭：`agent`（回执 `resolves`）/ `manual`（`card.resolve`）/ `cancelled`（run 取消）。 */
+export interface CardResolvedPayload {
+  card: Card
+  reason: CardResolveReason
+}
+
+// ---------- 派生事件（M4） ----------
+
+/**
+ * 回执 `events[]` 派生的事件入账（D8）：只记账、不派活（规则建任务留 M6）。
+ *
+ * `hops = 父 run.hops + 1`；`summary` ≤200 字；`detail` 由宿主落
+ * `artifacts/<eventId>.md` 并把路径放 `detailRef`；`originRunId` 是派生出它的 run，
+ * 供 M6 按线程/父任务归并；`dedupeKey` 原样保留。
+ */
+export interface EventReceivedPayload {
+  eventId: string
+  source: string
+  type: string
+  subject: string
+  summary: string
+  /** 资料文件路径（不是指令）；宿主未落盘时为 null */
+  detailRef: string | null
+  link: string | null
+  hops: number
+  /** 派生出该事件的 run；外部来源的事件为 null */
+  originRunId: string | null
+  dedupeKey: string | null
+}
+
+/** 跳数熔断：`hops > maxHops` 只写这条，不派活、不建卡。 */
+export interface EventDroppedPayload {
+  eventId: string
+  hops: number
+  reason: string
+}
+
 // ---------- 对话 ----------
 
 export interface ConversationCreatedPayload {
@@ -303,6 +386,14 @@ export interface FactPayloads {
   'run.cancel_requested': RunCancelRequestedPayload
   'run.receipt_rejected': RunReceiptRejectedPayload
   'run.removed': RunRemovedPayload
+  'card.opened': CardOpenedPayload
+  'card.updated': CardUpdatedPayload
+  'card.delivered': CardDeliveredPayload
+  'card.delivery_failed': CardDeliveryFailedPayload
+  'card.answered': CardAnsweredPayload
+  'card.resolved': CardResolvedPayload
+  'event.received': EventReceivedPayload
+  'event.dropped': EventDroppedPayload
   'conversation.created': ConversationCreatedPayload
   'conversation.updated': ConversationUpdatedPayload
   'conversation.removed': ConversationRemovedPayload

@@ -2,11 +2,13 @@
  * 视图契约：宿主按 `viewSpec` 装载投影切片交给内核，`query(view, params)` 供 IPC / 装配根读取。
  *
  * 读视图只覆盖「前端与装配根当前需要的形状」：实体读路径、运行历史（`runs.byTask` /
- * `run.events` / `run.last-event-seq`）、运行时负载与启动对账（`runs.stale-chat`）。
- * M5 的完整视图清单（threads / cards / timeline 等）届时在此扩展。
+ * `run.events` / `run.last-event-seq`）、运行时负载与启动对账（`runs.stale-chat`）、
+ * 卡片审批（`cards.open` / `cards.byRun`，M4）。
+ * M5 的完整视图清单（threads / timeline 等）届时在此扩展。
  */
 import type {
   Agent,
+  Card,
   Conversation,
   Message,
   Run,
@@ -34,6 +36,8 @@ export const VIEW_IDS = [
   'run.last-event-seq',
   'runtimes.workloads',
   'runs.stale-chat',
+  'cards.open',
+  'cards.byRun',
 ] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
@@ -75,6 +79,7 @@ export interface ViewArgs {
   'run.byId': { runId: string }
   'run.events': { runId: string }
   'run.last-event-seq': { runId: string }
+  'cards.byRun': { runId: string }
 }
 
 /** 视图 id → 返回类型。 */
@@ -94,6 +99,10 @@ export interface ViewResults {
   'run.last-event-seq': number
   'runtimes.workloads': RuntimeWorkload[]
   'runs.stale-chat': StaleChatRun[]
+  /** 全部 open 卡，按 `createdAt` 升序（M4 顶部待审批条） */
+  'cards.open': Card[]
+  /** 某个 run 的卡片（含已答/已关闭），按 `createdAt` 升序 */
+  'cards.byRun': Card[]
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

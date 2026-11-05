@@ -11,9 +11,9 @@
 import type { FactType, SnapshotImportedPayload } from '../protocol/facts'
 import type { Fact, Id, Seq } from './types'
 
-/** 可追溯的实体范围（投影九表中的可展示实体）。 */
+/** 可追溯的实体范围（投影十表中的可展示实体）。 */
 export type TimelineScope =
-  'task' | 'workflow' | 'stage' | 'agent' | 'runtime' | 'run' | 'conversation' | 'message'
+  'task' | 'workflow' | 'stage' | 'agent' | 'runtime' | 'run' | 'conversation' | 'message' | 'card'
 
 /** 导入根在时间线上的标注文案。 */
 export const IMPORT_ROOT_LABEL = '迁移导入'
@@ -101,6 +101,25 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'run.receipt_rejected':
     case 'run.removed':
       return [{ scope: 'run', id: fact.payload.runId }]
+    case 'card.opened':
+    case 'card.updated':
+    case 'card.delivered':
+    case 'card.delivery_failed':
+    case 'card.answered':
+    case 'card.resolved':
+      // 卡片事实同时归到卡片与它所属的 run：运行时间线能看到该轮产生的卡与回答。
+      return [
+        { scope: 'run', id: fact.payload.card.runId },
+        { scope: 'card', id: fact.payload.card.id },
+      ]
+    case 'event.received':
+      // 派生事件挂在父 run 的时间线上；事件自身没有投影表，不单独成一条 scope。
+      return fact.payload.originRunId === null
+        ? []
+        : [{ scope: 'run', id: fact.payload.originRunId }]
+    case 'event.dropped':
+      // 熔断审计事实只带 eventId：不归入任何实体，只在 cause 链上出现。
+      return []
     case 'conversation.created':
     case 'conversation.updated':
     case 'conversation.removed':

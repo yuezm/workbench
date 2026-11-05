@@ -81,6 +81,7 @@ const view = (runs: RunRow[]): View => ({
   runs: new Map(runs.map((row) => [row.id, row])),
   conversations: new Map(),
   messages: new Map(),
+  cards: new Map(),
   activeTaskIds: new Set(),
 })
 

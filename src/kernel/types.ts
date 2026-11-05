@@ -6,12 +6,13 @@
  *
  * M2 起投影集扩到「实体五表 + runs / run_events / conversations / messages」：
  * `ProjectionTable` 是投影全集，`View` 只装 decide 需要的那几片（`run_events`
- * 不进 View，事件只在写入 / 重建时经 `project` 落库）。
+ * 不进 View，事件只在写入 / 重建时经 `project` 落库）。M4 追加第 10 张 `cards`。
  * 事实 payload 里的实体行是完整行（含 lastProbe），这样 `project(fact)` 是纯函数：
  * 一行事实 → 一行投影，重建与实时写入走同一条路径。凭据类字段仍不进事实。
  */
 import type {
   Agent,
+  Card,
   Conversation,
   Message,
   RunEventRow,
@@ -28,8 +29,8 @@ export type Seq = number
 export type Id = string
 export type Iso = string
 
-/** 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。M3：执行器键取代协议族。 */
-export const KERNEL_VERSION = 'm3.0.0'
+/** 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。M4：卡片与派生事件入账。 */
+export const KERNEL_VERSION = 'm4.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
@@ -38,7 +39,7 @@ export type Actor =
 
 /**
  * 投影表全集：只有这些表可由事实重建（`host` 的清空白名单与指纹必须与之一致）。
- * M2 在实体五表之后追加运行生命周期相关的四张表。
+ * M2 在实体五表之后追加运行生命周期相关的四张表；M4 追加卡片表（第 10 张）。
  */
 export const PROJECTION_TABLES = [
   'tasks',
@@ -50,12 +51,22 @@ export const PROJECTION_TABLES = [
   'run_events',
   'conversations',
   'messages',
+  'cards',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
 
 export type ProjectionRow =
-  Task | Workflow | WorkflowStage | Agent | Runtime | RunRow | RunEventRow | Conversation | Message
+  | Task
+  | Workflow
+  | WorkflowStage
+  | Agent
+  | Runtime
+  | RunRow
+  | RunEventRow
+  | Conversation
+  | Message
+  | Card
 
 export interface FactDraft<T extends FactType = FactType> {
   type: T
@@ -87,6 +98,8 @@ export interface View {
   tasks: Map<Id, Task>
   /** M2：运行投影（领取 / 租约 / 终态判定都只读它，不查非投影表） */
   runs: Map<Id, RunRow>
+  /** M4：卡片投影（回答校验、同 key 去重、续接提示词都只读它） */
+  cards: Map<Id, Card>
   conversations: Map<Id, Conversation>
   messages: Map<Id, Message>
   /** 存在 queued/running/waiting run 的任务；「执行中」只认它，不由 UI 推导。 */
@@ -128,7 +141,17 @@ export interface Limits {
 }
 
 export type IdKind =
-  'workflow' | 'stage' | 'agent' | 'runtime' | 'task' | 'run' | 'message' | 'conversation'
+  | 'workflow'
+  | 'stage'
+  | 'agent'
+  | 'runtime'
+  | 'task'
+  | 'run'
+  | 'message'
+  | 'conversation'
+  | 'card'
+  /** 回执 `events[]` 派生的入账事件 id（M4 只记账，M6 规则用） */
+  | 'event'
 
 /** 宿主在边界注入：时区、限制、id 生成器（内核不取随机数）。 */
 export interface Environment {

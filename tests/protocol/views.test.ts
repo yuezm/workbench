@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RunEvent, Task } from '../../src/protocol/entities'
+import type { Card, RunEvent, Task } from '../../src/protocol/entities'
 import {
   VIEW_IDS,
   type ActiveRun,
@@ -45,7 +45,7 @@ const chatRun = {
 } satisfies ActiveRun
 
 describe('protocol/views', () => {
-  it('VIEW_IDS 是 M1 最小集合且顺序稳定', () => {
+  it('VIEW_IDS 是 M1 最小集合 + M4 卡片视图且顺序稳定', () => {
     expect([...VIEW_IDS]).toEqual([
       'workflows.all',
       'agents.all',
@@ -62,6 +62,8 @@ describe('protocol/views', () => {
       'run.last-event-seq',
       'runtimes.workloads',
       'runs.stale-chat',
+      'cards.open',
+      'cards.byRun',
     ])
   })
 
@@ -114,5 +116,20 @@ describe('protocol/views：T16 新增读视图', () => {
     const stale: StaleChatRun = { id: 'run-1', leaseId: 'run-1:1', turn: 2 }
     expect(Object.keys(workload).sort()).toEqual(['queued', 'running', 'runtimeId'])
     expect(Object.keys(stale).sort()).toEqual(['id', 'leaseId', 'turn'])
+  })
+})
+
+/** M4 卡片视图：`cards.open` 无参数、`cards.byRun` 按 run 取；两者都返回完整 Card 行。 */
+const cardsOpenNoParams: Assert<Equal<ViewParams<'cards.open'>, undefined>> = true
+const cardsByRunParams: Assert<Equal<ViewParams<'cards.byRun'>, { runId: string }>> = true
+const cardsOpenResult: Assert<Equal<ViewResult<'cards.open'>, Card[]>> = true
+const cardsByRunResult: Assert<Equal<ViewResult<'cards.byRun'>, Card[]>> = true
+
+describe('protocol/views：M4 卡片视图', () => {
+  it('参数与返回类型映射（类型级断言）', () => {
+    expect(cardsOpenNoParams).toBe(true)
+    expect(cardsByRunParams).toBe(true)
+    expect(cardsOpenResult).toBe(true)
+    expect(cardsByRunResult).toBe(true)
   })
 })

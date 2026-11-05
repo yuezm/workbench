@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type {
   Agent,
+  Card,
   Conversation,
   Message,
   RunEventRow,
@@ -162,6 +163,27 @@ const message = (over: Partial<Message> = {}): Message => ({
   ...over,
 })
 
+const card = (over: Partial<Card> = {}): Card => ({
+  id: 'card-1',
+  runId: 'run-1',
+  taskId: 't-1',
+  conversationId: null,
+  title: '选一个',
+  text: '做哪个？',
+  options: ['甲', '乙'],
+  key: 'pick',
+  version: 1,
+  status: 'open',
+  delivery: 'pending',
+  deliveryRef: null,
+  optionIndex: null,
+  answeredBy: null,
+  answeredAt: null,
+  createdAt: AT,
+  updatedAt: AT,
+  ...over,
+})
+
 const fact = <T extends FactType>(
   seq: number,
   type: T,
@@ -196,6 +218,7 @@ const emptyTables = (): Tables => ({
   run_events: new Map(),
   conversations: new Map(),
   messages: new Map(),
+  cards: new Map(),
 })
 
 /** 按 seq 顺序 fold 事实：投影应用器的最小等价实现（重建与实时写入共用路径）。 */
@@ -590,5 +613,93 @@ describe('kernel/project：四张新表的 snapshot.imported', () => {
       put('messages', message()),
       put('messages', message({ id: 'ms-2', role: 'assistant' })),
     ])
+  })
+})
+
+describe('kernel/project：卡片与派生事件（M4）', () => {
+  it('card.* 六条事实一律整行 upsert 到 cards', () => {
+    expect(project(fact(70, 'card.opened', { card: card() }))).toEqual([put('cards', card())])
+
+    const updated = card({ version: 2, title: '再选一个', updatedAt: AT })
+    expect(
+      project(fact(71, 'card.updated', { card: updated, changes: ['title', 'version'] })),
+    ).toEqual([put('cards', updated)])
+
+    const delivered = card({ delivery: 'delivered', deliveryRef: 'in-app' })
+    expect(project(fact(72, 'card.delivered', { card: delivered, ref: 'in-app' }))).toEqual([
+      put('cards', delivered),
+    ])
+
+    const failed = card({ delivery: 'failed' })
+    expect(project(fact(73, 'card.delivery_failed', { card: failed, error: '通知失败' }))).toEqual([
+      put('cards', failed),
+    ])
+
+    const answered = card({
+      status: 'answered',
+      optionIndex: 1,
+      answeredBy: 'channel',
+      answeredAt: AT,
+    })
+    expect(project(fact(74, 'card.answered', { card: answered, by: 'channel' }))).toEqual([
+      put('cards', answered),
+    ])
+
+    const resolved = card({ status: 'resolved' })
+    expect(project(fact(75, 'card.resolved', { card: resolved, reason: 'agent' }))).toEqual([
+      put('cards', resolved),
+    ])
+  })
+
+  it('event.received / event.dropped 无投影：返回空变更', () => {
+    expect(
+      project(
+        fact(80, 'event.received', {
+          eventId: 'ev-1',
+          source: 'agent',
+          type: 'issues.opened',
+          subject: 'issue-1',
+          summary: '新 issue',
+          detailRef: 'artifacts/ev-1.md',
+          link: null,
+          hops: 1,
+          originRunId: 'run-1',
+          dedupeKey: 'issue-1',
+        }),
+      ),
+    ).toEqual([])
+    expect(
+      project(fact(81, 'event.dropped', { eventId: 'ev-2', hops: 9, reason: 'max_hops' })),
+    ).toEqual([])
+  })
+
+  it('重建 fold 卡片事实后 cards 表与最后一行全等', () => {
+    const facts: Fact[] = [
+      fact(90, 'card.opened', { card: card() }),
+      fact(91, 'card.delivered', { card: card({ delivery: 'delivered' }), ref: 'in-app' }),
+      fact(92, 'card.answered', {
+        card: card({
+          delivery: 'delivered',
+          status: 'answered',
+          optionIndex: 0,
+          answeredBy: 'ui',
+          answeredAt: AT,
+        }),
+        by: 'ui',
+      }),
+    ]
+
+    const tables = fold(facts)
+
+    expect(tables.cards.size).toBe(1)
+    expect(tables.cards.get('card-1')).toEqual(
+      card({
+        status: 'answered',
+        optionIndex: 0,
+        answeredBy: 'ui',
+        answeredAt: AT,
+        delivery: 'delivered',
+      }),
+    )
   })
 })

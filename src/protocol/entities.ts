@@ -1,6 +1,6 @@
 /**
  * 投影表（tasks / workflows / workflow_stages / agents / runtimes，M2 起加
- * runs / run_events / conversations / messages）的行类型与输入类型，
+ * runs / run_events / conversations / messages，M4 加 cards）的行类型与输入类型，
  * 以及命令/事实/视图共用的枚举常量。
  *
  * 契约层是 kernel 唯一允许依赖的模块（kernel 只 `import type`，运行期不依赖）；
@@ -406,6 +406,71 @@ export interface RunRow extends Omit<Run, 'taskId'> {
 export const ACCESS_LEVELS = ['read', 'edit', 'full'] as const
 
 export type Access = (typeof ACCESS_LEVELS)[number]
+
+// ---------- 卡片（审批） ----------
+
+/**
+ * 卡片状态：`open` = 等人回答（run 处于 `waiting`）；`answered` = 已选过选项；
+ * `resolved` = 被关闭（智能体回执 `resolves` / 人工 `card.resolve` / run 取消）。
+ * 取值顺序即展示顺序。
+ */
+export const CARD_STATUSES = ['open', 'answered', 'resolved'] as const
+
+export type CardStatus = (typeof CARD_STATUSES)[number]
+
+/**
+ * 投递状态（单列，不按通道拆表）：`pending` = 尚未送达任何通道；`delivered` = 至少一个
+ * 通道已 ack；`failed` = 本轮所有通道都失败。`cards.deliveryRef` 记最后一个成功通道。
+ */
+export const CARD_DELIVERIES = ['pending', 'delivered', 'failed'] as const
+
+export type CardDelivery = (typeof CARD_DELIVERIES)[number]
+
+/** 回答来源：`ui` = in-app 界面，`channel` = 通道插件回传（记 `card.answered.by`）。 */
+export const CARD_ANSWER_VIA = ['ui', 'channel'] as const
+
+export type CardAnswerVia = (typeof CARD_ANSWER_VIA)[number]
+
+/** 关闭原因：`agent` = 回执 `resolves`，`manual` = `card.resolve`，`cancelled` = run 取消。 */
+export const CARD_RESOLVE_REASONS = ['agent', 'manual', 'cancelled'] as const
+
+export type CardResolveReason = (typeof CARD_RESOLVE_REASONS)[number]
+
+/**
+ * `cards` 投影行（第 10 张投影表，M4）：带完整行由事实携带，`project` 只做
+ * 「一行事实 → 一行投影」，重建无需回查。
+ *
+ * 卡片正文是智能体产出的文字：只能作为平台/通知 API 的参数，不得拼进命令行、
+ * 脚本或 HTML（SPEC-plugins「channel」）。投递按 `(id, version)` 去重：同一版本只投一次，
+ * 更新（`version+1`）重新进 `pending`。
+ */
+export interface Card {
+  id: string
+  runId: string
+  /** 阶段 run 挂的任务；聊天 run 为 null */
+  taskId: string | null
+  /** 聊天 run 挂的对话；阶段 run 为 null */
+  conversationId: string | null
+  title: string
+  text: string
+  /** 可选项文案；回答时回传下标。信息卡（`notices`）为空数组 */
+  options: string[]
+  /** 稳定键：同一 run 内同 key 的 open 卡再次出现时产 `card.updated` */
+  key: string | null
+  /** 卡片版本（1 基；更新 +1，投递按版本去重） */
+  version: number
+  status: CardStatus
+  delivery: CardDelivery
+  /** 最后一个成功投递的通道 ref（如 `in-app` / `desktop`）；从未投递为 null */
+  deliveryRef: string | null
+  /** 选中的选项下标（`answered` 后）；信息卡与未回答为 null */
+  optionIndex: number | null
+  /** 回答来源（`answered` 后）；未回答为 null */
+  answeredBy: CardAnswerVia | null
+  answeredAt: string | null
+  createdAt: string
+  updatedAt: string
+}
 
 // ---------- 对话 / 消息 ----------
 

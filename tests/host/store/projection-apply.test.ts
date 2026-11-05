@@ -249,7 +249,7 @@ describe('createProjectionWriter：显式行映射', () => {
 
     const unknownRow = captureError(() =>
       writer.apply(
-        { table: 'cards', key: 'x', row: sample.task() } as unknown as Change,
+        { table: 'plugin_config', key: 'x', row: sample.task() } as unknown as Change,
         SAMPLE_AT,
       ),
     )
@@ -305,7 +305,7 @@ describe('createProjectionWriter：显式行映射', () => {
     })
   })
 
-  it('clear 清空九张投影表（重建事务关外键）', () => {
+  it('clear 清空十张投影表（重建事务关外键）', () => {
     const db = memory()
     const writer = createProjectionWriter(db)
     const runtime = sample.runtime()
@@ -316,6 +316,7 @@ describe('createProjectionWriter：显式行映射', () => {
     const run = sample.run({ status: 'running' })
     const conversation = sample.conversation()
     const message = sample.message()
+    const card = sample.card()
     for (const change of [
       { table: 'runtimes', key: runtime.id, row: runtime },
       { table: 'agents', key: agent.id, row: agent },
@@ -326,10 +327,12 @@ describe('createProjectionWriter：显式行映射', () => {
       { table: 'run_events', key: 'run-1:1', row: sample.runEvent() },
       { table: 'conversations', key: conversation.id, row: conversation },
       { table: 'messages', key: message.id, row: message },
+      { table: 'cards', key: card.id, row: card },
     ] as Change[]) {
       writer.apply(change, SAMPLE_AT)
     }
     expect(countRows(db, 'run_events')).toBe(1)
+    expect(countRows(db, 'cards')).toBe(1)
 
     db.exec('PRAGMA foreign_keys = OFF')
     try {
@@ -348,6 +351,7 @@ describe('createProjectionWriter：显式行映射', () => {
       'run_events',
       'conversations',
       'messages',
+      'cards',
     ]) {
       expect(countRows(db, table)).toBe(0)
     }

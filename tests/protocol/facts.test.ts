@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { Conversation, Message, RunRow, Runtime } from '../../src/protocol/entities'
+import type { Card, Conversation, Message, RunRow, Runtime } from '../../src/protocol/entities'
 import {
   FACT_TYPES,
+  type CardAnsweredPayload,
+  type CardOpenedPayload,
+  type CardUpdatedPayload,
+  type EventDroppedPayload,
+  type EventReceivedPayload,
   type FactPayloads,
   type FactType,
   type SnapshotImportedPayload,
@@ -41,6 +46,24 @@ const runChatPayloads: [
   Assert<Equal<FactPayload<'message.appended'>, MessageAppendedPayload>>,
 ] = [true, true]
 
+/** M4：每条 `card.*` 事实都携带完整 `Card` 行（整行口径，project 只做搬运）。 */
+const cardPayloads: [
+  Assert<Equal<FactPayload<'card.opened'>, CardOpenedPayload>>,
+  Assert<Equal<FactPayload<'card.updated'>, CardUpdatedPayload>>,
+  Assert<Equal<FactPayload<'card.delivered'>, { card: Card; ref: string }>>,
+  Assert<Equal<FactPayload<'card.delivery_failed'>, { card: Card; error: string }>>,
+  Assert<Equal<FactPayload<'card.answered'>, CardAnsweredPayload>>,
+  Assert<
+    Equal<FactPayload<'card.resolved'>, { card: Card; reason: 'agent' | 'manual' | 'cancelled' }>
+  >,
+] = [true, true, true, true, true, true]
+
+/** 派生事件只入账、无投影（D8）。 */
+const eventPayloads: [
+  Assert<Equal<FactPayload<'event.received'>, EventReceivedPayload>>,
+  Assert<Equal<FactPayload<'event.dropped'>, EventDroppedPayload>>,
+] = [true, true]
+
 const expected = [
   'workflow.created',
   'workflow.updated',
@@ -72,6 +95,14 @@ const expected = [
   'run.cancel_requested',
   'run.receipt_rejected',
   'run.removed',
+  'card.opened',
+  'card.updated',
+  'card.delivered',
+  'card.delivery_failed',
+  'card.answered',
+  'card.resolved',
+  'event.received',
+  'event.dropped',
   'conversation.created',
   'conversation.updated',
   'conversation.removed',
@@ -80,7 +111,7 @@ const expected = [
 ]
 
 describe('protocol/facts', () => {
-  it('FACT_TYPES 覆盖 M1 + M2 事实目录且顺序稳定', () => {
+  it('FACT_TYPES 覆盖 M1 + M2 + M4 事实目录且顺序稳定', () => {
     expect([...FACT_TYPES]).toEqual(expected)
   })
 
@@ -93,6 +124,8 @@ describe('protocol/facts', () => {
       'runtime',
       'task',
       'run',
+      'card',
+      'event',
       'conversation',
       'message',
       'snapshot',
@@ -109,6 +142,8 @@ describe('protocol/facts', () => {
     expect(runtimePayloads).toEqual([true, true, true, true])
     expect(settledPayloads).toEqual([true, true, true])
     expect(runChatPayloads).toEqual([true, true])
+    expect(cardPayloads).toEqual([true, true, true, true, true, true])
+    expect(eventPayloads).toEqual([true, true])
   })
 
   it('snapshot.imported 用 table 判别行类型，实体五表 + 运行/对话四表都能导入', () => {
@@ -163,5 +198,48 @@ describe('protocol/facts', () => {
     expect(payload.runId).toBeUndefined()
     expect(payload.error).toBeUndefined()
     expect({ ...payload, runId: 'run-1', error: null }.runId).toBe('run-1')
+  })
+
+  it('card.payload 是完整 Card 行；审计字段与行内状态一致', () => {
+    const card: Card = {
+      id: 'card-1',
+      runId: 'run-1',
+      taskId: 't-1',
+      conversationId: null,
+      title: '选一个',
+      text: '做哪个？',
+      options: ['甲', '乙'],
+      key: 'pick',
+      version: 1,
+      status: 'answered',
+      delivery: 'delivered',
+      deliveryRef: 'in-app',
+      optionIndex: 1,
+      answeredBy: 'channel',
+      answeredAt: '2026-11-05T12:00:00.000Z',
+      createdAt: '2026-11-05T11:59:00.000Z',
+      updatedAt: '2026-11-05T12:00:00.000Z',
+    }
+    const answered: CardAnsweredPayload = { card, by: 'channel' }
+    expect(answered.by).toBe(answered.card.answeredBy)
+    expect(answered.card.options[answered.card.optionIndex as number]).toBe('乙')
+  })
+
+  it('event.received 保留 hops / originRunId / dedupeKey；event.dropped 只带熔断审计字段', () => {
+    const received: EventReceivedPayload = {
+      eventId: 'ev-1',
+      source: 'agent',
+      type: 'issues.opened',
+      subject: 'issue-1',
+      summary: '新 issue',
+      detailRef: 'artifacts/ev-1.md',
+      link: null,
+      hops: 5,
+      originRunId: 'run-1',
+      dedupeKey: 'issue-1',
+    }
+    const dropped: EventDroppedPayload = { eventId: 'ev-2', hops: 9, reason: 'max_hops' }
+    expect(received.hops).toBe(5)
+    expect(Object.keys(dropped).sort()).toEqual(['eventId', 'hops', 'reason'])
   })
 })

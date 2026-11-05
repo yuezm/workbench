@@ -40,7 +40,10 @@ export type InputName = (typeof INPUT_NAMES)[number]
 
 // ---------- 执行器回执 ----------
 
-/** 要拍板的事项（卡片雏形）；M4 接通道时补版本与投递字段。 */
+/**
+ * 要拍板的事项（回执输入）：M4 起仍只是回执字段，不是投影行——内核为每条 `ask`
+ * 产一条带完整 `Card` 行的 `card.opened`（版本 / 投递状态由 `Card` 承载）。
+ */
 export interface Ask {
   title: string
   /** 正文（可空） */

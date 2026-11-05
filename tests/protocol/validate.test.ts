@@ -73,6 +73,9 @@ const validCommands: Command[] = [
   { commandId: 'c12', type: 'task.move', id: 't1', stageId: 'st1' },
   { commandId: 'c13', type: 'task.complete', id: 't1' },
   { commandId: 'c14', type: 'task.remove', id: 't1' },
+  { commandId: 'c15', type: 'card.answer', cardId: 'card-1', optionIndex: 0 },
+  { commandId: 'c16', type: 'card.answer', cardId: 'card-1', optionIndex: 2, via: 'channel' },
+  { commandId: 'c17', type: 'card.resolve', cardId: 'card-1' },
 ]
 
 /** 只取失败文案；先用断言固定 `ok=false`，避免分支未覆盖。 */
@@ -497,5 +500,32 @@ describe('protocol/validate', () => {
     expect(rejectedMessage(cmd('task.move', { id: 't1', stageId: '  ' }))).toBe('stageId必填')
     expect(rejectedMessage(cmd('task.complete'))).toBe('id必填')
     expect(rejectedMessage(cmd('task.remove'))).toBe('id必填')
+  })
+
+  it('card.answer：cardId 必填、下标在范围内、via 只接受 ui / channel', () => {
+    expect(rejectedMessage(cmd('card.answer', { optionIndex: 0 }))).toBe('cardId必填')
+    expect(rejectedMessage(cmd('card.answer', { cardId: '  ', optionIndex: 0 }))).toBe('cardId必填')
+    expect(rejectedMessage(cmd('card.answer', { cardId: 'card-1' }))).toBe('optionIndex必须是整数')
+    expect(rejectedMessage(cmd('card.answer', { cardId: 'card-1', optionIndex: 1.5 }))).toBe(
+      'optionIndex必须是整数',
+    )
+    expect(rejectedMessage(cmd('card.answer', { cardId: 'card-1', optionIndex: -1 }))).toBe(
+      'optionIndex必须在 0 到 19 之间',
+    )
+    expect(rejectedMessage(cmd('card.answer', { cardId: 'card-1', optionIndex: 20 }))).toBe(
+      'optionIndex必须在 0 到 19 之间',
+    )
+    expect(
+      rejectedMessage(cmd('card.answer', { cardId: 'card-1', optionIndex: 0, via: 'sms' })),
+    ).toBe('via取值必须是 ui / channel')
+  })
+
+  it('card.resolve：cardId 必填', () => {
+    expect(rejectedMessage(cmd('card.resolve'))).toBe('cardId必填')
+    expect(rejectedMessage(cmd('card.resolve', { cardId: '  ' }))).toBe('cardId必填')
+    expect(validateCommand({ commandId: 'x', type: 'card.resolve', cardId: 'card-1' })).toEqual({
+      ok: true,
+      command: { commandId: 'x', type: 'card.resolve', cardId: 'card-1' },
+    })
   })
 })

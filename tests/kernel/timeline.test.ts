@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type {
   Agent,
+  Card,
   Conversation,
   RunRow,
   Runtime,
@@ -124,6 +125,27 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   title: '新对话',
   agentId: 'ag-1',
   sessionId: null,
+  createdAt: AT,
+  updatedAt: AT,
+  ...over,
+})
+
+const card = (over: Partial<Card> = {}): Card => ({
+  id: 'card-1',
+  runId: 'run-1',
+  taskId: 't-1',
+  conversationId: null,
+  title: '选一个',
+  text: '做哪个？',
+  options: ['甲', '乙'],
+  key: null,
+  version: 1,
+  status: 'open',
+  delivery: 'pending',
+  deliveryRef: null,
+  optionIndex: null,
+  answeredBy: null,
+  answeredAt: null,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -401,5 +423,35 @@ describe('kernel/timeline', () => {
     ])
     expect(kinds(timeline(facts, 'message', 'ms-1'))).toEqual(['4:snapshot.imported'])
     expect(timeline(facts, 'run', 'run-404')).toEqual([])
+  })
+
+  it('卡片时间线：card.* 按 payload.card.id 命中，同时归到所属 run', () => {
+    const facts: Fact[] = [
+      fact(1, 'card.opened', { card: card() }),
+      fact(2, 'card.answered', {
+        card: card({ status: 'answered', optionIndex: 0, answeredBy: 'ui', answeredAt: AT }),
+        by: 'ui',
+      }),
+      fact(3, 'event.received', {
+        eventId: 'ev-1',
+        source: 'agent',
+        type: 'issues.opened',
+        subject: 'issue-1',
+        summary: '新 issue',
+        detailRef: null,
+        link: null,
+        hops: 1,
+        originRunId: 'run-1',
+        dedupeKey: null,
+      }),
+    ]
+
+    expect(kinds(timeline(facts, 'card', 'card-1'))).toEqual(['1:card.opened', '2:card.answered'])
+    expect(kinds(timeline(facts, 'run', 'run-1'))).toEqual([
+      '1:card.opened',
+      '2:card.answered',
+      '3:event.received',
+    ])
+    expect(timeline(facts, 'card', 'card-404')).toEqual([])
   })
 })

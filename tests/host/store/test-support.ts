@@ -1,5 +1,5 @@
 /**
- * store 测试夹具：内存 SQLite（v2 全量 schema + 账本表）、九张投影表的样例行、投影快照。
+ * store 测试夹具：内存 SQLite（v2 全量 schema + 账本表）、十张投影表的样例行、投影快照。
  *
  * 只被 `src/host/store/*.test.ts` import，不参与运行时装配；测试注入确定性 now / newId，
  * 因此断言可以逐列全等，不依赖时钟与随机数。
@@ -7,6 +7,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import type {
   Agent,
+  Card,
   Conversation,
   Message,
   RunEventRow,
@@ -203,9 +204,31 @@ export const sample = {
       ...overrides,
     }
   },
+  card(overrides: Partial<Card> = {}): Card {
+    return {
+      id: 'card-1',
+      runId: 'run-1',
+      taskId: 'tk-1',
+      conversationId: null,
+      title: '选一个',
+      text: '做哪个？',
+      options: ['甲', '乙'],
+      key: null,
+      version: 1,
+      status: 'open',
+      delivery: 'pending',
+      deliveryRef: null,
+      optionIndex: null,
+      answeredBy: null,
+      answeredAt: null,
+      createdAt: SAMPLE_AT,
+      updatedAt: SAMPLE_AT,
+      ...overrides,
+    }
+  },
 }
 
-/** 九表列清单（与 `projection-apply` 的写列一一对应）与快照排序键；快照只取这些列。 */
+/** 十表列清单（与 `projection-apply` 的写列一一对应）与快照排序键；快照只取这些列。 */
 const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: string }> = {
   tasks: {
     columns: [
@@ -315,9 +338,31 @@ const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: 
     columns: ['id', 'conversation_id', 'role', 'content', 'error', 'created_at'],
     orderBy: 'id',
   },
+  cards: {
+    columns: [
+      'id',
+      'run_id',
+      'task_id',
+      'conversation_id',
+      'title',
+      'text',
+      'options_json',
+      'key',
+      'version',
+      'status',
+      'delivery',
+      'delivery_ref',
+      'option_index',
+      'answered_by',
+      'answered_at',
+      'created_at',
+      'updated_at',
+    ],
+    orderBy: 'id',
+  },
 }
 
-/** 九表逐行快照（列固定、按表内排序键），用于「增量 vs 重建」逐表全等比较。 */
+/** 十表逐行快照（列固定、按表内排序键），用于「增量 vs 重建」逐表全等比较。 */
 export function dumpProjection(db: DatabaseSync): Record<string, unknown[]> {
   const snapshot: Record<string, unknown[]> = {}
   for (const [table, spec] of Object.entries(PROJECTION_COLUMNS)) {

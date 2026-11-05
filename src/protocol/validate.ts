@@ -9,6 +9,7 @@
 import { COMMAND_NAMES, type Command, type CommandName } from './commands'
 import {
   ARGV_PLACEHOLDERS,
+  CARD_ANSWER_VIA,
   ENTRY_MODES,
   EXECUTOR_KEY_PATTERN,
   PERMISSION_MODES,
@@ -343,6 +344,15 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'task.complete':
     case 'task.remove':
       return requiredId(command.id, 'id')
+    case 'card.answer':
+      // 下标上限与回执 `options` 的条数上限一致；越界值在此拒收（不查卡片，卡片存在性由 decide 判）。
+      return (
+        requiredId(command.cardId, 'cardId') ??
+        integerIn(command.optionIndex, 'optionIndex', 0, COMMAND_LIMITS.askOptions - 1) ??
+        optionalEnum(command.via, 'via', CARD_ANSWER_VIA)
+      )
+    case 'card.resolve':
+      return requiredId(command.cardId, 'cardId')
   }
 }
 

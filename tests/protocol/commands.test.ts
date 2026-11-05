@@ -8,7 +8,7 @@ type Assert<T extends true> = T
 /** 判别联合的 `type` 必须恰好覆盖 COMMAND_NAMES（多一个或少一个都编译失败）。 */
 const unionCoversNames: Assert<Equal<Command['type'], CommandName>> = true
 
-/** 每条命令都带 commandId（幂等键）；M1 只覆盖配置三组 + 任务四动作。 */
+/** 每条命令都带 commandId（幂等键）；M1 覆盖配置三组 + 任务四动作，M4 追加卡片两条。 */
 const expected = [
   'workflow.create',
   'workflow.update',
@@ -24,10 +24,12 @@ const expected = [
   'task.move',
   'task.complete',
   'task.remove',
+  'card.answer',
+  'card.resolve',
 ]
 
 describe('protocol/commands', () => {
-  it('COMMAND_NAMES 覆盖 M1 决策面且顺序稳定', () => {
+  it('COMMAND_NAMES 覆盖 M1 决策面 + M4 卡片命令且顺序稳定', () => {
     expect([...COMMAND_NAMES]).toEqual(expected)
   })
 

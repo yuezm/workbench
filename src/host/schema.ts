@@ -2,9 +2,10 @@
  * 宿主层 SQLite schema：全库 DDL 的唯一来源（M1 起从 main/ai-workflow 迁入）。
  *
  * 以字符串内嵌（而非 .sql 资源文件），保证 electron-vite 打包后主进程运行时也能拿到。
- * 九张投影表（实体五表 + runs / run_events / conversations / messages）全部可由事实重建：
+ * 十张投影表（实体五表 + runs / run_events / conversations / messages / cards）全部可由事实重建：
  * 实体五表的列名与约束保持 v2 原样；运行/聊天四表在 M2 变为投影（runs 补调度列、
- * `status` 加 `waiting`、`task_id` 可空；聊天投影从 `chat_*` 改名为 `conversations` / `messages`）。
+ * `status` 加 `waiting`、`task_id` 可空；聊天投影从 `chat_*` 改名为 `conversations` / `messages`）；
+ * M4 追加 `cards`（卡片行按 `(id, version)` 演进，投递状态单列）。
  * 过渡期 legacy `chat_conversations` / `chat_messages` 已由 T14b 迁成 `snapshot.imported`
  * 事实并删除（`host/store/import` 读旧表 → 写导入根 → 删表），这里不再创建它们。
  * `facts` 只追加，`projection_meta` 记录投影指纹与已折叠的 seq。
@@ -175,6 +176,36 @@ CREATE TABLE IF NOT EXISTS ${name} (
   created_at TEXT NOT NULL
 );`
 
+/**
+ * `cards` 投影（M4，第 10 张表）：与 `Card` 行逐列对应，整行由 `card.*` 事实携带。
+ *
+ * - `run_id` 是卡片归属；run 删除时按外键联删（宿主 `run.removed` 事实同时清卡片）。
+ * - `task_id` / `conversation_id` 是展示用的弱引用：阶段 run 挂任务、聊天 run 挂对话，
+ *   历史卡片不因任务/对话删除而抹掉归属（不设外键）。
+ * - `delivery` 单列 =「已送达至少一个通道」；`delivery_ref` 记最后一个成功通道。
+ * - `options_json` 存 `string[]` 的 JSON；`version` 是投递去重键的一部分。
+ */
+const cardsTable = (name = 'cards'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  task_id TEXT,
+  conversation_id TEXT,
+  title TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  options_json TEXT NOT NULL DEFAULT '[]',
+  key TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL CHECK (status IN ('open','answered','resolved')),
+  delivery TEXT NOT NULL CHECK (delivery IN ('pending','delivered','failed')),
+  delivery_ref TEXT,
+  option_index INTEGER,
+  answered_by TEXT CHECK (answered_by IN ('ui','channel')),
+  answered_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);`
+
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, position);
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
@@ -184,9 +215,12 @@ CREATE INDEX IF NOT EXISTS idx_runs_runtime_status ON runs(runtime_id, status);
 CREATE INDEX IF NOT EXISTS idx_run_events_run ON run_events(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_cards_run ON cards(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_cards_delivery ON cards(delivery);
 `
 
-/** v2 全量 schema（新建库；九张投影表 + 索引） */
+/** v2 全量 schema（新建库；十张投影表 + 索引） */
 export const SCHEMA_SQL = [
   runtimesTable(),
   agentsTable(),
@@ -197,12 +231,13 @@ export const SCHEMA_SQL = [
   runEventsTable(),
   conversationsTable(),
   messagesTable(),
+  cardsTable(),
   INDEX_SQL,
 ].join('\n')
 
 /**
  * 宿主私有进程登记表 DDL：与 `FACTS_SQL` 一样单独执行（不进业务表清单，
- * 也就不在 `SCHEMA_SQL` 的「九张投影表」断言范围内）。
+ * 也就不在 `SCHEMA_SQL` 的「十张投影表」断言范围内）。
  */
 export const PROCESS_REGISTRY_SQL = processRegistryTable()
 
@@ -217,6 +252,7 @@ export const tableDdl = {
   runEvents: runEventsTable,
   conversations: conversationsTable,
   messages: messagesTable,
+  cards: cardsTable,
 } as const
 
 /**
@@ -323,7 +359,7 @@ CREATE TABLE IF NOT EXISTS projection_meta (
 );
 `
 
-/** 投影集白名单：重建清空并重放的就是这九张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
+/** 投影集白名单：重建清空并重放的就是这十张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
 export const PROJECTION_TABLES = [
   'tasks',
   'workflows',
@@ -334,6 +370,7 @@ export const PROJECTION_TABLES = [
   'run_events',
   'conversations',
   'messages',
+  'cards',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -348,9 +385,10 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   run_events: tableDdl.runEvents(),
   conversations: tableDdl.conversations(),
   messages: tableDdl.messages(),
+  cards: tableDdl.cards(),
 }
 
-/** 九张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 十张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */
@@ -358,7 +396,7 @@ export function formatOfProjection(ddl: string, kernelVersion: string): string {
   return createHash('sha256').update(`${ddl}\n${kernelVersion}`).digest('hex')
 }
 
-/** 投影格式指纹 = sha256(九表投影 DDL + 内核版本)；任一变化即触发重建。 */
+/** 投影格式指纹 = sha256(十表投影 DDL + 内核版本)；任一变化即触发重建。 */
 export function projectionFormat(kernelVersion: string): string {
   return formatOfProjection(PROJECTION_DDL, kernelVersion)
 }

@@ -212,11 +212,12 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('SCHEMA_SQL 建 9 张表：九张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
+  it('SCHEMA_SQL 建 10 张表：十张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
       'agents',
+      'cards',
       'conversations',
       'messages',
       'run_events',
@@ -330,7 +331,7 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为九张投影表（实体五表 + 运行/聊天四表）', () => {
+  it('白名单固定为十张投影表（实体五表 + 运行/聊天四表 + cards）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
@@ -341,19 +342,21 @@ describe('投影白名单与指纹', () => {
       'run_events',
       'conversations',
       'messages',
+      'cards',
     ])
   })
 
-  it('PROJECTION_DDL 覆盖五表、取自 tableDdl、不含账本表', () => {
+  it('PROJECTION_DDL 覆盖十表、取自 tableDdl、不含账本表', () => {
     for (const table of PROJECTION_TABLES) {
       expect(PROJECTION_DDL).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`)
     }
     expect(PROJECTION_DDL).toContain(tableDdl.tasks())
     expect(PROJECTION_DDL).toContain(tableDdl.stages())
+    expect(PROJECTION_DDL).toContain(tableDdl.cards())
     expect(PROJECTION_DDL).not.toContain('facts')
   })
 
-  it('指纹 = sha256(九表 DDL + 内核版本)', () => {
+  it('指纹 = sha256(十表 DDL + 内核版本)', () => {
     const expected = createHash('sha256').update(`${PROJECTION_DDL}\nkernel-1`).digest('hex')
     expect(projectionFormat('kernel-1')).toBe(expected)
     expect(projectionFormat('kernel-1')).toMatch(/^[0-9a-f]{64}$/)
@@ -368,6 +371,62 @@ describe('投影白名单与指纹', () => {
     )
     expect(mutated).not.toBe(PROJECTION_DDL)
     expect(formatOfProjection(mutated, 'kernel-1')).not.toBe(projectionFormat('kernel-1'))
+  })
+})
+
+describe('cards 投影（M4）', () => {
+  it('列顺序与 Card 行逐列对应', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(columnShape(db, 'cards').map((column) => column.split('|')[0])).toEqual([
+      'id',
+      'run_id',
+      'task_id',
+      'conversation_id',
+      'title',
+      'text',
+      'options_json',
+      'key',
+      'version',
+      'status',
+      'delivery',
+      'delivery_ref',
+      'option_index',
+      'answered_by',
+      'answered_at',
+      'created_at',
+      'updated_at',
+    ])
+  })
+
+  it('索引覆盖 status / run_id / delivery', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    const indexes = indexShape(db, 'cards')
+    expect(indexes).toContain(
+      'idx_cards_status|unique=0|origin=c|partial=0|columns=status,created_at',
+    )
+    expect(indexes).toContain('idx_cards_run|unique=0|origin=c|partial=0|columns=run_id,created_at')
+    expect(indexes).toContain('idx_cards_delivery|unique=0|origin=c|partial=0|columns=delivery')
+  })
+
+  it('status / delivery / answered_by 由 CHECK 收口', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    db.exec(
+      "INSERT INTO runs (id, status, executor_key, created_at) VALUES ('run-1', 'queued', 'dsh', '2026-01-01T00:00:00.000Z')",
+    )
+    db.exec(
+      `INSERT INTO cards (id, run_id, title, status, delivery, created_at, updated_at)
+       VALUES ('card-1', 'run-1', 't', 'open', 'pending', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+    )
+    expect(() => db.prepare("UPDATE cards SET status = 'done' WHERE id = 'card-1'").run()).toThrow()
+    expect(() =>
+      db.prepare("UPDATE cards SET delivery = 'sent' WHERE id = 'card-1'").run(),
+    ).toThrow()
+    expect(() =>
+      db.prepare("UPDATE cards SET answered_by = 'agent' WHERE id = 'card-1'").run(),
+    ).toThrow()
   })
 })
 

@@ -47,6 +47,12 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'task.remove':
       // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价
       return ['tasks', 'runs']
+    case 'card.answer':
+      // 校验卡片 open / 下标合法（cards）、run 仍 waiting（runs）；续接读同 run 的其余 open 卡（cards）
+      return ['runs', 'cards']
+    case 'card.resolve':
+      // 只改卡片状态；run 状态不动
+      return ['cards']
     case 'run.claim':
       // 候选 run 来自 runs 投影；运行时配置（启用 / 并发上限）来自 runtimes
       return ['runs', 'runtimes']
@@ -57,7 +63,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 帧入账要确认 run 仍在执行且轮次匹配；帧本身只写 run_events
       return ['runs']
     case 'run.receipt':
-      // 终态写 runs；阶段 run 还要判定阶段流转与下一轮进入效果（任务 / 阶段 / 智能体 / 运行时）；
+      // 终态写 runs；回执带 ask/notices/resolves 时要按 cards 现算建卡/更新/关闭；
+      // 阶段 run 还要判定阶段流转与下一轮进入效果（任务 / 阶段 / 智能体 / 运行时）；
       // 聊天 run 终态要把续接会话 id 落回对话
       return [
         'runs',
@@ -67,6 +74,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'agents',
         'runtimes',
         'conversations',
+        'cards',
       ]
     case 'run.host_settled':
       // 兜底终态；聊天 run 还要补一条 assistant 消息（读对话判断是否已删）

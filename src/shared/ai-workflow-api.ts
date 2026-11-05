@@ -33,6 +33,11 @@ import type {
 export type {
   Agent,
   AgentInput,
+  Card,
+  CardAnswerVia,
+  CardDelivery,
+  CardResolveReason,
+  CardStatus,
   DetectedRuntime,
   EntryMode,
   PermissionMode,

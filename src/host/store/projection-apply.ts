@@ -1,14 +1,16 @@
 /**
- * 投影变更落库：`Change.row` ↔ 九张投影表的 snake_case 列，逐列显式映射
+ * 投影变更落库：`Change.row` ↔ 十张投影表的 snake_case 列，逐列显式映射
  * （不 `SELECT *`、不猜列名）。
  *
- * - 实体五表 / runs / conversations / messages 的整行：主键 `id`，`row === null` 删除。
+ * - 实体五表 / runs / conversations / messages / cards 的整行：主键 `id`，`row === null` 删除。
  * - `run_events`：主键 `(run_id, seq)`，`Change.key = '<runId>:<seq>'`；**纯追加**，
  *   重复键直接撞唯一约束报错（禁止 `INSERT OR REPLACE` 覆盖历史）。
  *
- * 级联删除由父键显式完成（事实只携带父 id）：删除 `runs` 行先按 `run_id` 删 `run_events`；
- * 删除 `conversations` 行先按 `conversation_id` 删 `messages`。重建时同样走这条路径，
- * 所以「删任务 → `run.removed` → 重建」与旧 SQL 级联的可见结果一致（D13）。
+ * 级联删除由父键显式完成（事实只携带父 id）：删除 `runs` 行先按 `run_id` 删 `run_events` 与
+ * `cards`；删除 `conversations` 行先按 `conversation_id` 删 `messages`。`cards.run_id` 虽然
+ * 也声明了 `ON DELETE CASCADE`，但重建事务会临时关闭外键（见 `projection.ts`），只靠外键
+ * 会让「增量删 run」与「重建 fold」得到不同的卡片表；显式删卡片保证两条路径等价。
+ * 重建时同样走这条路径，所以「删任务 → `run.removed` → 重建」与旧 SQL 级联的可见结果一致（D13）。
  *
  * 运行类事实携带完整 `RunRow`（`kernel/project` 只回填 `queueSeq`）：这里整行 upsert；
  * `snapshot.imported` 的存量行可能缺 M2 新列，由 `normalizeRun` 补默认值。
@@ -28,6 +30,7 @@
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
 import type {
   Agent,
+  Card,
   Conversation,
   Message,
   RunEventRow,
@@ -51,12 +54,12 @@ export interface ProjectionWriter {
   /** 整批应用（一次 dispatch / 一次重建的全部变更）：跨行换序在批内合法。 */
   applyAll(writes: readonly ProjectionWrite[]): void
   /**
-   * 清空白名单九表。
+   * 清空白名单十表。
    *
    * 只能在 `PRAGMA foreign_keys = OFF` 的重建事务里调用：`runs.task_id` 是
    * `ON DELETE CASCADE`，外键开启时清 `tasks` 会连带删掉运行记录与 `run_events`。
-   * 顺序按外键依赖倒序（run_events → runs → messages → conversations → tasks → …），
-   * 外键关掉时只是让意图可读。
+   * 顺序按外键依赖倒序（run_events → cards → runs → messages → conversations → tasks → …），
+   * 外键关掉时只是让意图可读；`cards` 先于 `runs` 删，即使外键意外开着也不会依赖级联。
    */
   clear(): void
 }
@@ -179,6 +182,31 @@ const runValue = (field: keyof RunRow, run: RunRow): SQLInputValue => {
   }
 }
 
+/** `Card` 字段 → `cards` 列（顺序与 schema DDL 一致；整行 upsert 与快照列清单共用）。 */
+const CARD_FIELDS: ReadonlyArray<readonly [keyof Card, string]> = [
+  ['id', 'id'],
+  ['runId', 'run_id'],
+  ['taskId', 'task_id'],
+  ['conversationId', 'conversation_id'],
+  ['title', 'title'],
+  ['text', 'text'],
+  ['options', 'options_json'],
+  ['key', 'key'],
+  ['version', 'version'],
+  ['status', 'status'],
+  ['delivery', 'delivery'],
+  ['deliveryRef', 'delivery_ref'],
+  ['optionIndex', 'option_index'],
+  ['answeredBy', 'answered_by'],
+  ['answeredAt', 'answered_at'],
+  ['createdAt', 'created_at'],
+  ['updatedAt', 'updated_at'],
+]
+
+/** 行内值 → SQLite 可绑定的值（`options` 存 JSON）。 */
+const cardValue = (field: keyof Card, card: Card): SQLInputValue =>
+  field === 'options' ? JSON.stringify(card.options) : (card[field] as SQLInputValue)
+
 /**
  * `run_events.payload_json` 沿用 v2 的存放口径：事件里除 `runId/seq/type`
  * 之外的字段组成 JSON 对象（旧的 `repository.runEventsList` 按同一口径还原）。
@@ -287,6 +315,15 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
      ON CONFLICT(id) DO UPDATE SET ${runUpdates}`,
   )
 
+  // 卡片同样是整行 upsert：`card.*` 事实携带完整行，投递/回答/关闭都不需要合并旧行。
+  const cardColumns = CARD_FIELDS.map(([, column]) => column).join(', ')
+  const cardPlaceholders = CARD_FIELDS.map(() => '?').join(', ')
+  const cardUpdates = CARD_FIELDS.map(([, column]) => `${column} = excluded.${column}`).join(', ')
+  const insertCard = db.prepare(
+    `INSERT INTO cards (${cardColumns}) VALUES (${cardPlaceholders})
+     ON CONFLICT(id) DO UPDATE SET ${cardUpdates}`,
+  )
+
   /** 运行事件纯追加：重复 `(run_id, seq)` 撞主键报错，不覆盖。 */
   const insertRunEvent = db.prepare(
     `INSERT INTO run_events (run_id, seq, type, payload_json, created_at)
@@ -301,8 +338,11 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     runtimes: db.prepare('DELETE FROM runtimes WHERE id = ?'),
     runs: db.prepare('DELETE FROM runs WHERE id = ?'),
     run_events: db.prepare('DELETE FROM run_events WHERE run_id = ?'),
+    /** 卡片随 run 显式联删（重建事务关外键，不能只靠 `cards.run_id` 的级联）。 */
+    cardsByRun: db.prepare('DELETE FROM cards WHERE run_id = ?'),
     conversations: db.prepare('DELETE FROM conversations WHERE id = ?'),
     messages: db.prepare('DELETE FROM messages WHERE conversation_id = ?'),
+    cards: db.prepare('DELETE FROM cards WHERE id = ?'),
   }
 
   const clearAll = {
@@ -310,6 +350,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     runs: db.prepare('DELETE FROM runs'),
     messages: db.prepare('DELETE FROM messages'),
     conversations: db.prepare('DELETE FROM conversations'),
+    cards: db.prepare('DELETE FROM cards'),
     tasks: db.prepare('DELETE FROM tasks'),
     workflow_stages: db.prepare('DELETE FROM workflow_stages'),
     workflows: db.prepare('DELETE FROM workflows'),
@@ -418,6 +459,10 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         message.createdAt,
       )
     },
+    cards: (row) => {
+      const card = row as Card
+      insertCard.run(...CARD_FIELDS.map(([field]) => cardValue(field, card)))
+    },
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */
@@ -434,8 +479,11 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       throw new StoreError('invalid_input', `未知投影表: ${String(change.table)}`)
     }
     if (change.row === null) {
-      // 级联删除由父键显式完成（事实只携带父 id）：run → run_events；conversation → messages。
-      if (change.table === 'runs') deletes.run_events.run(change.key)
+      // 级联删除由父键显式完成（事实只携带父 id）：run → run_events + cards；conversation → messages。
+      if (change.table === 'runs') {
+        deletes.run_events.run(change.key)
+        deletes.cardsByRun.run(change.key)
+      }
       if (change.table === 'conversations') deletes.messages.run(change.key)
       deletes[change.table].run(change.key)
       return
@@ -458,6 +506,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
 
   const clear = (): void => {
     clearAll.run_events.run()
+    clearAll.cards.run()
     clearAll.runs.run()
     clearAll.messages.run()
     clearAll.conversations.run()

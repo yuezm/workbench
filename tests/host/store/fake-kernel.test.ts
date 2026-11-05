@@ -40,6 +40,7 @@ const view = (seed: Seed = {}): View => ({
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
   messages: new Map((seed.messages ?? []).map((row) => [row.id, row])),
+  cards: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
 })
 

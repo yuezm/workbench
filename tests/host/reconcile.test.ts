@@ -6,10 +6,12 @@ import { project } from '../../src/kernel/project'
 import { viewSpec } from '../../src/kernel/view-spec'
 import type { KernelPort } from '../../src/kernel/types'
 import type { Agent, Runtime, Task } from '../../src/protocol/entities'
-import { reconcile, type ReconcileDeps } from '../../src/host/reconcile'
+import { reconcile, type ReconcileDeps, type WaitingRunState } from '../../src/host/reconcile'
 import { openDatabase } from '../../src/host/db'
 import { createProcessRegistry, type ProcessRegistry } from '../../src/host/process-registry'
+import { createProjectionWriter } from '../../src/host/store/projection-apply'
 import { createStore, type Store } from '../../src/host/store/index'
+import { sample } from './store/test-support'
 
 const kernel: KernelPort = { decide, project, viewSpec }
 const AT = '2026-01-01T00:00:00.000Z'
@@ -108,6 +110,41 @@ const staleLease = (runId: string, patch: { leaseUntil?: string; deadlineAt?: st
   }
 }
 
+/** 夹具：把 run 改成等待回答（清租约 / 超时，与内核 `run.waiting` 同口径）。 */
+const markWaiting = (runId: string): void => {
+  world.db
+    .prepare(
+      "UPDATE runs SET status = 'waiting', lease_id = NULL, lease_until = NULL, deadline_at = NULL WHERE id = ?",
+    )
+    .run(runId)
+}
+
+/**
+ * 模拟装配根的读路径：`waiting` run + 「是否有 open 卡」（按 `run_id` join `cards`）。
+ * M4 D13 的兜底放在 reconcile，过滤条件由调用方读路径给出（宿主不查库）。
+ */
+const waitingStates =
+  (runIds: readonly string[]): (() => WaitingRunState[]) =>
+  () => {
+    const run = world.db.prepare('SELECT lease_id, turn FROM runs WHERE id = ?')
+    const openCards = world.db.prepare(
+      "SELECT COUNT(*) AS n FROM cards WHERE run_id = ? AND status = 'open'",
+    )
+    return runIds.map((runId) => {
+      const row = run.get(runId) as unknown as { lease_id: string | null; turn: number }
+      const cards = openCards.get(runId) as unknown as { n: number }
+      return { id: runId, leaseId: row.lease_id, turn: row.turn, hasOpenCard: cards.n > 0 }
+    })
+  }
+
+/** 给 run 种一张 open 卡（走投影 writer，与真实写入路径同一套列映射）。 */
+const seedOpenCard = (runId: string, cardId: string): void => {
+  createProjectionWriter(world.db).apply(
+    { table: 'cards', key: cardId, row: sample.card({ id: cardId, runId, taskId: null }) },
+    AT,
+  )
+}
+
 /** 登记残留行（崩溃时 scheduler 已 begin/attachPid，未走到 finally 的 remove）。 */
 const residue = (runId: string, pid: number | null): void => {
   world.registry.begin(runId, AT)
@@ -123,6 +160,7 @@ interface Harness {
 function runReconcile(
   killPid: (pid: number) => boolean = () => true,
   staleChatRuns?: () => Array<{ id: string; leaseId: string | null; turn: number }>,
+  waitingRuns?: () => Array<WaitingRunState>,
 ): Harness {
   const events: string[] = []
   const killedPids: number[] = []
@@ -134,6 +172,7 @@ function runReconcile(
     },
     runStatus,
     staleChatRuns,
+    waitingRuns,
     killPid: (pid) => {
       events.push('kill:' + pid)
       killedPids.push(pid)
@@ -155,7 +194,13 @@ describe('reconcile：先杀后记账', () => {
     // 顺序：kill → clear → tick（清表没有独立事件，用 registry 已空 + tick 在 kill 之后断言）
     expect(events).toEqual(['kill:123', 'dispatch:clock.tick'])
     expect(killedPids).toEqual([123])
-    expect(summary).toEqual({ killed: 1, cleared: 1, settledChats: 0, facts: 1 })
+    expect(summary).toEqual({
+      killed: 1,
+      cleared: 1,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 1,
+    })
     expect(registryPids()).toEqual([])
 
     // 超租约回收：attempts+1 后回 queued（未达 maxAttempts），并写入退避时刻
@@ -175,7 +220,13 @@ describe('reconcile：先杀后记账', () => {
     const { summary, events } = runReconcile()
 
     expect(events).toEqual(['kill:555', 'dispatch:clock.tick'])
-    expect(summary).toEqual({ killed: 1, cleared: 1, settledChats: 0, facts: 1 })
+    expect(summary).toEqual({
+      killed: 1,
+      cleared: 1,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 1,
+    })
     expect(runRow(runId)).toMatchObject({ status: 'failed', error_code: 'timeout' })
   })
 
@@ -214,7 +265,13 @@ describe('reconcile：只处理孤儿，不误杀', () => {
     const { summary, killedPids, events } = runReconcile()
 
     expect(killedPids).toEqual([])
-    expect(summary).toEqual({ killed: 0, cleared: 1, settledChats: 0, facts: 0 })
+    expect(summary).toEqual({
+      killed: 0,
+      cleared: 1,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 0,
+    })
     expect(events).toEqual(['dispatch:clock.tick'])
     expect(registryPids()).toEqual([])
     expect(runStatus(runId)).toBe('succeeded')
@@ -226,7 +283,13 @@ describe('reconcile：只处理孤儿，不误杀', () => {
     const { summary, killedPids } = runReconcile()
 
     expect(killedPids).toEqual([])
-    expect(summary).toEqual({ killed: 0, cleared: 1, settledChats: 0, facts: 0 })
+    expect(summary).toEqual({
+      killed: 0,
+      cleared: 1,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 0,
+    })
     expect(registryPids()).toEqual([])
   })
 
@@ -239,11 +302,17 @@ describe('reconcile：只处理孤儿，不误杀', () => {
     const { killedPids, summary } = runReconcile()
 
     expect(killedPids).toEqual([11])
-    expect(summary).toEqual({ killed: 1, cleared: 2, settledChats: 0, facts: 1 })
+    expect(summary).toEqual({
+      killed: 1,
+      cleared: 2,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 1,
+    })
     expect(registryPids()).toEqual([])
   })
 
-  it('waiting（等人回答）的 run 保留状态，但残留进程仍终止', () => {
+  it('未接线 waiting 兜底时：waiting（等人回答）的 run 保留状态，但残留进程仍终止', () => {
     const { runId } = claimRun()
     // 只有 running 会超时/超租约；waiting 是内核保留的挂起态（D12）
     world.db.prepare("UPDATE runs SET status = 'waiting', lease_id = NULL WHERE id = ?").run(runId)
@@ -252,7 +321,13 @@ describe('reconcile：只处理孤儿，不误杀', () => {
     const { summary, killedPids } = runReconcile()
 
     expect(killedPids).toEqual([33])
-    expect(summary).toEqual({ killed: 1, cleared: 1, settledChats: 0, facts: 0 })
+    expect(summary).toEqual({
+      killed: 1,
+      cleared: 1,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 0,
+    })
     expect(runStatus(runId)).toBe('waiting')
   })
 })
@@ -265,7 +340,13 @@ describe('reconcile：无残留', () => {
     const { summary, events, killedPids } = runReconcile()
 
     expect(events).toEqual(['dispatch:clock.tick'])
-    expect(summary).toEqual({ killed: 0, cleared: 0, settledChats: 0, facts: 0 })
+    expect(summary).toEqual({
+      killed: 0,
+      cleared: 0,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 0,
+    })
     expect(killedPids).toEqual([])
     expect(runStatus(runId)).toBe('running')
     expect(registryPids()).toEqual([])
@@ -279,7 +360,13 @@ describe('reconcile：无残留', () => {
     const { summary, killedPids } = runReconcile()
 
     expect(killedPids).toEqual([])
-    expect(summary).toEqual({ killed: 0, cleared: 1, settledChats: 0, facts: 1 })
+    expect(summary).toEqual({
+      killed: 0,
+      cleared: 1,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 1,
+    })
     expect(registryPids()).toEqual([])
   })
 })
@@ -358,5 +445,74 @@ describe('reconcile：中断的聊天轮次（T14b）', () => {
   it('没有中断聊天时 settledChats 为 0（阶段 run 仍走 clock.tick 回收）', () => {
     const { summary } = runReconcile()
     expect(summary.settledChats).toBe(0)
+  })
+})
+
+describe('reconcile：无卡 waiting 兜底取消（M4 D13）', () => {
+  it('waiting 且无 open 卡：先落 run.host_settled{cancelled}，再 clock.tick', () => {
+    const { runId } = claimRun()
+    markWaiting(runId)
+
+    const { summary, events, killedPids } = runReconcile(
+      () => true,
+      undefined,
+      waitingStates([runId]),
+    )
+
+    expect(events).toEqual(['dispatch:run.host_settled', 'dispatch:clock.tick'])
+    expect(killedPids).toEqual([])
+    expect(summary).toEqual({
+      killed: 0,
+      cleared: 0,
+      settledChats: 0,
+      settledWaitings: 1,
+      facts: 0,
+    })
+    expect(runRow(runId)).toMatchObject({ status: 'cancelled', error_code: 'cancelled' })
+    expect(String(runRow(runId)?.error)).toContain('卡片缺失')
+  })
+
+  it('有 open 卡的 waiting 不动：run 保持 waiting，零兜底事实', () => {
+    const { runId } = claimRun()
+    markWaiting(runId)
+    seedOpenCard(runId, 'card-open')
+
+    const { summary, events } = runReconcile(() => true, undefined, waitingStates([runId]))
+
+    expect(events).toEqual(['dispatch:clock.tick'])
+    expect(summary.settledWaitings).toBe(0)
+    expect(summary.facts).toBe(0)
+    expect(runStatus(runId)).toBe('waiting')
+    expect(runRow(runId)?.error).toBeNull()
+  })
+
+  it('混合：只取消无卡的 waiting，有卡的保留', () => {
+    const withCard = claimRun()
+    const withoutCard = claimRun()
+    markWaiting(withCard.runId)
+    markWaiting(withoutCard.runId)
+    seedOpenCard(withCard.runId, 'card-open')
+
+    const { summary } = runReconcile(
+      () => true,
+      undefined,
+      waitingStates([withCard.runId, withoutCard.runId]),
+    )
+
+    expect(summary.settledWaitings).toBe(1)
+    expect(runStatus(withCard.runId)).toBe('waiting')
+    expect(runStatus(withoutCard.runId)).toBe('cancelled')
+  })
+
+  it('重复对账幂等：已取消的 run 再兜底也零事实', () => {
+    const { runId } = claimRun()
+    markWaiting(runId)
+
+    runReconcile(() => true, undefined, waitingStates([runId]))
+    expect(runStatus(runId)).toBe('cancelled')
+
+    const { summary } = runReconcile(() => true, undefined, waitingStates([runId]))
+    expect(summary.settledWaitings).toBe(0)
+    expect(runStatus(runId)).toBe('cancelled')
   })
 })

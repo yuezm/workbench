@@ -1,8 +1,4 @@
-import type {
-  RuntimeModelOption,
-  RuntimeProbe,
-  RuntimeProtocolFamily,
-} from '../../../shared/ai-workflow-api'
+import type { RuntimeModelOption, RuntimeProbe } from '../../../shared/ai-workflow-api'
 import {
   executeDshRun,
   listDshModels,
@@ -28,11 +24,8 @@ export interface RuntimeBackend {
   execute(request: DshRunRequest): Promise<DshRunOutcome>
 }
 
-/** 按协议族构造后端；依赖统一注入（spawn/killTree/now/env/sessionRoot） */
-export function createRuntimeBackend(
-  family: RuntimeProtocolFamily,
-  deps: DshDeps = {},
-): RuntimeBackend {
+/** 按执行器键构造后端（M3 过渡：删于 T7，届时代码搬 `src/plugins/executors/dsh/`） */
+export function createRuntimeBackend(family: string, deps: DshDeps = {}): RuntimeBackend {
   switch (family) {
     case 'dsh':
       return {
@@ -41,7 +34,7 @@ export function createRuntimeBackend(
         execute: (request) => executeDshRun(request, deps),
       }
     default:
-      // 协议族由 DB CHECK 与契约限制，走到这里说明数据被绕过写入了
-      throw new Error('不支持的协议族: ' + String(family))
+      // 执行器键由注册表校验，走到这里说明数据被绕过写入了
+      throw new Error('不支持的执行器: ' + String(family))
   }
 }

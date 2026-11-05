@@ -57,7 +57,7 @@ function claimRun(): { runtime: Runtime; runId: string; taskId: string } {
   const runtimeFacts = world.store.dispatch({
     type: 'runtime.create',
     commandId: nextCommandId(),
-    input: { name: 'rt-' + commandSeq, maxConcurrent: 1 },
+    input: { name: 'rt-' + commandSeq, executorKey: 'dsh', command: 'dsh', maxConcurrent: 1 },
   }).facts
   const runtimeId = (
     runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as { runtime: Runtime }
@@ -295,7 +295,7 @@ describe('reconcile：中断的聊天轮次（T14b）', () => {
     const runtimeFacts = world.store.dispatch({
       type: 'runtime.create',
       commandId: nextCommandId(),
-      input: { name: 'rt-chat', maxConcurrent: 1 },
+      input: { name: 'rt-chat', executorKey: 'dsh', command: 'dsh', maxConcurrent: 1 },
     }).facts
     const runtimeId = (
       runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as {

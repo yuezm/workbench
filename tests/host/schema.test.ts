@@ -78,7 +78,26 @@ CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, p
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
 `
 
-const FIVE_TABLES = ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
+/** 静态四表：DDL 自 M1 起未变（runtimes 在 M3 换成 `executor_key`，单独断言）。 */
+const STATIC_TABLES = ['tasks', 'workflows', 'workflow_stages', 'agents']
+
+/** M3 runtimes 列（顺序与 DDL 一致）：`protocol_family` 被 `executor_key` + `args_template` 取代。 */
+const RUNTIMES_M3_COLUMNS = [
+  'id',
+  'name',
+  'executor_key',
+  'command',
+  'profile',
+  'args_template',
+  'permission_mode',
+  'model',
+  'reasoning_effort',
+  'workdir',
+  'max_concurrent',
+  'enabled',
+  'last_probe_json',
+  'created_at',
+]
 
 let dbs: DatabaseSync[] = []
 
@@ -143,7 +162,16 @@ function tableNames(db: DatabaseSync): string[] {
   return rows.map((row) => row.name).sort()
 }
 
-describe('五张投影表与改前 DDL 一致', () => {
+describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
+  it('runtimes 按 M3 结构：executor_key + args_template，无 protocol_family', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(columnShape(db, 'runtimes').map((column) => column.split('|')[0])).toEqual(
+      RUNTIMES_M3_COLUMNS,
+    )
+    expect(columnShape(db, 'runtimes').join('\n')).not.toContain('protocol_family')
+  })
+
   it('逐列一致（列名 / 类型 / NOT NULL / 默认值 / 主键）', () => {
     const legacy = memoryDb()
     legacy.exec(PRE_M1_FIVE_TABLE_DDL)
@@ -153,7 +181,7 @@ describe('五张投影表与改前 DDL 一致', () => {
     current.exec(SCHEMA_SQL)
 
     expect(SCHEMA_VERSION).toBe(2)
-    for (const table of FIVE_TABLES) {
+    for (const table of STATIC_TABLES) {
       expect(columnShape(current, table), table).toEqual(columnShape(legacy, table))
     }
   })
@@ -166,7 +194,7 @@ describe('五张投影表与改前 DDL 一致', () => {
     const current = memoryDb()
     current.exec(SCHEMA_SQL)
 
-    for (const table of FIVE_TABLES) {
+    for (const table of STATIC_TABLES) {
       expect(indexShape(current, table), table).toEqual(indexShape(legacy, table))
     }
   })
@@ -179,7 +207,7 @@ describe('五张投影表与改前 DDL 一致', () => {
     const current = memoryDb()
     current.exec(SCHEMA_SQL)
 
-    for (const table of FIVE_TABLES) {
+    for (const table of STATIC_TABLES) {
       expect(foreignKeyShape(current, table), table).toEqual(foreignKeyShape(legacy, table))
     }
   })

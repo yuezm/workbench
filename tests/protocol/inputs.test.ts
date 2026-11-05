@@ -276,7 +276,7 @@ describe('protocol/inputs', () => {
   })
 
   it('执行器端口版本常量随契约暴露（M3 兼容判断用）', () => {
-    expect(EXECUTOR_PORT_VERSION).toBe(1)
+    expect(EXECUTOR_PORT_VERSION).toBe(2)
   })
 })
 

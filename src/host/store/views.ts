@@ -26,7 +26,6 @@ import type {
   RunUsage,
   Runtime,
   RuntimeProbe,
-  RuntimeProtocolFamily,
   Task,
   TaskStatus,
   Workflow,
@@ -69,9 +68,10 @@ interface AgentRow {
 interface RuntimeRow {
   id: string
   name: string
-  protocol_family: string
+  executor_key: string
   command: string
   profile: string
+  args_template: string
   permission_mode: string
   model: string | null
   reasoning_effort: string | null
@@ -193,9 +193,10 @@ const mapAgent = (row: AgentRow): Agent => ({
 const mapRuntime = (row: RuntimeRow): Runtime => ({
   id: row.id,
   name: row.name,
-  protocolFamily: row.protocol_family as RuntimeProtocolFamily,
+  executorKey: row.executor_key,
   command: row.command,
   profile: row.profile,
+  argsTemplate: row.args_template,
   permissionMode: row.permission_mode as PermissionMode,
   model: row.model,
   reasoningEffort: row.reasoning_effort,
@@ -312,7 +313,7 @@ const readRuntimes = (db: DatabaseSync): Runtime[] =>
   (
     db
       .prepare(
-        `SELECT id, name, protocol_family, command, profile, permission_mode, model,
+        `SELECT id, name, executor_key, command, profile, args_template, permission_mode, model,
                 reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
          FROM runtimes ORDER BY created_at, rowid`,
       )

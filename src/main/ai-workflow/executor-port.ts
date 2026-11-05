@@ -9,7 +9,7 @@
  * 这里是 main 侧唯一直接依赖具体执行器实现的地方（`main/ai-workflow/runtime/**`）；
  * `host/**` 只依赖 `protocol/**`（ESLint 强制）。
  */
-import type { Runtime, RuntimeProtocolFamily } from '../../protocol/entities'
+import type { Runtime } from '../../protocol/entities'
 import type { ExecutorPort } from '../../protocol/executor'
 import {
   createExecutorPort,
@@ -69,18 +69,18 @@ function bindBackend(runtime: Runtime, backend: RuntimeBackend): ExecutorBackend
  */
 export function createRuntimeExecutors(options: RuntimeExecutorOptions = {}): RuntimeExecutors {
   const { retryOnResumeRejected, requestId, ...deps } = options
-  const backends = new Map<RuntimeProtocolFamily, RuntimeBackend>()
-  const backendFor = (family: RuntimeProtocolFamily): RuntimeBackend => {
-    const cached = backends.get(family)
+  const backends = new Map<string, RuntimeBackend>()
+  const backendFor = (key: string): RuntimeBackend => {
+    const cached = backends.get(key)
     if (cached) return cached
-    const backend = createRuntimeBackend(family, deps)
-    backends.set(family, backend)
+    const backend = createRuntimeBackend(key, deps)
+    backends.set(key, backend)
     return backend
   }
 
   return {
     forRuntime(runtime: Runtime): ExecutorPort {
-      const backend = backendFor(runtime.protocolFamily)
+      const backend = backendFor(runtime.executorKey)
       const port = createExecutorPort(bindBackend(runtime, backend), {
         retryOnResumeRejected,
         requestId,

@@ -24,10 +24,20 @@ export type EntityTable = (typeof ENTITY_TABLES)[number]
 
 // ---------- 运行时 ----------
 
-/** 执行协议族；新增协议 = 新增后端实现，不改 UI 契约 */
-export const PROTOCOL_FAMILIES = ['dsh'] as const
+/**
+ * 执行器键（M3）：运行时配置指向 `src/plugins/registry.ts` 里的执行器插件。
+ * 只校验形状（slug），**不校验取值**——取值合法性由宿主入口按注册表判断，
+ * 内核因此不认识任何产品名（SPEC-kernel「派活单位」）。
+ */
+export const EXECUTOR_KEY_PATTERN = /^[a-z][a-z0-9-]{0,63}$/
 
-export type RuntimeProtocolFamily = (typeof PROTOCOL_FAMILIES)[number]
+/**
+ * 参数模板占位符白名单（`command` 执行器的 `argsTemplate`）。
+ * 提示词只能替换成独立 argv 元素或走 stdin，**不得拼进命令行字符串**。
+ */
+export const ARGV_PLACEHOLDERS = ['model', 'effort', 'cwd', 'context', 'prompt'] as const
+
+export type ArgvPlaceholder = (typeof ARGV_PLACEHOLDERS)[number]
 
 /** 非交互权限：stdio 传输没有审批往返，越界操作直接失败 */
 export const PERMISSION_MODES = ['read-only', 'workspace-write', 'danger-full-access'] as const
@@ -64,11 +74,14 @@ export interface RuntimeProbe {
 export interface Runtime {
   id: string
   name: string
-  protocolFamily: RuntimeProtocolFamily
-  /** 启动命令：命令名或绝对路径（默认 dsh） */
+  /** 执行器插件键（M3）：决定「怎么调起一轮」，不决定派给谁 */
+  executorKey: string
+  /** 启动命令：命令名或绝对路径（默认值由执行器插件 manifest 提供） */
   command: string
-  /** 协议 profile（默认 multica，由该 profile 提供 --stdio/--probe） */
+  /** 启动 profile（dsh 用它选 --stdio/--probe；其它执行器可为空串） */
   profile: string
+  /** `command` 的参数模板（JSON 数组文本，`command` 执行器用；空串 = 无参数） */
+  argsTemplate: string
   permissionMode: PermissionMode
   /** 模型 id（provider/model 形式）；null = 用 CLI 默认模型 */
   model: string | null
@@ -87,15 +100,49 @@ export interface Runtime {
 
 export interface RuntimeInput {
   name: string
-  protocolFamily?: RuntimeProtocolFamily
+  executorKey?: string
   command?: string
   profile?: string
+  /** `command` 执行器的参数模板（JSON 数组文本） */
+  argsTemplate?: string
   permissionMode?: PermissionMode
   model?: string | null
   reasoningEffort?: string | null
   workdir?: string | null
   maxConcurrent?: number
   enabled?: boolean
+}
+
+/**
+ * 本机已安装的 agent CLI 探测结果（用于表单预填，不自动创建运行时）。
+ *
+ * M3 起由执行器插件各自的 `detect()` 汇总：`executorKey` 由注册表填，
+ * `supported` = 注册表里是否存在该执行器（保留三态 UI 行为）。
+ */
+export interface DetectedRuntime {
+  /** CLI 命令名，如 dsh / claude */
+  command: string
+  /** 展示名，如 "DeepSeek Harness" */
+  label: string
+  /** 可执行文件绝对路径 */
+  path: string
+  /** 对应的执行器插件键；本机已装但无插件时为 '' */
+  executorKey: string
+  /** 是否已有执行器插件可接入（registry 里存在该 key） */
+  supported: boolean
+}
+
+/** 执行器 `models()` 的模型目录项；字段与旧 `RuntimeModelOption` 一致 */
+export interface RuntimeModelOption {
+  /** provider/model 形式的 id，可直接写入 Runtime.model */
+  id: string
+  label: string
+  provider: string
+  /** 是否为 CLI 默认模型 */
+  default: boolean
+  /** 支持的推理强度（thinking level） */
+  thinkingLevels: string[]
+  defaultThinkingLevel: string | null
 }
 
 // ---------- 智能体 ----------
@@ -322,7 +369,7 @@ export interface RunRow extends Omit<Run, 'taskId'> {
   /** 命中/触发来源（阶段 run 记规则版本；手工任务为 null/0） */
   ruleId: string | null
   rulesVersion: number
-  /** 执行器键（M2 仍按协议族推导；M3 换成运行时配置的 executorKey） */
+  /** 执行器键：取自运行时配置的 `executorKey`（M3），决定「怎么调起」 */
   executorKey: string
   threadId: string | null
   /** 执行目录与权限（来自运行时/阶段配置，不由事件携带） */

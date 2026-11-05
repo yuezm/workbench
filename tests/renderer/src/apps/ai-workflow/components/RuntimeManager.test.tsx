@@ -35,7 +35,8 @@ function makeRuntime(over: Partial<Runtime> = {}): Runtime {
   return {
     id: 'r1',
     name: 'ds',
-    protocolFamily: 'dsh',
+    executorKey: 'dsh',
+    argsTemplate: '',
     command: 'dsh',
     profile: 'multica',
     permissionMode: 'workspace-write',
@@ -62,6 +63,7 @@ function makeDetected(over: Partial<DetectedRuntime> = {}): DetectedRuntime {
     command: 'dsh',
     label: 'DeepSeek Harness',
     path: 'C:/tools/dsh.exe',
+    executorKey: 'dsh',
     supported: true,
     ...over,
   }

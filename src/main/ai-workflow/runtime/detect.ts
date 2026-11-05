@@ -44,6 +44,7 @@ export function detectInstalledRuntimes(
         command,
         label,
         path: hit,
+        executorKey: SUPPORTED_COMMANDS.has(command) ? command : '',
         supported: SUPPORTED_COMMANDS.has(command),
       })
   }

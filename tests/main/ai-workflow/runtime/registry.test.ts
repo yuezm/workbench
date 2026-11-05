@@ -1,7 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
 import { createRuntimeBackend } from '../../../../src/main/ai-workflow/runtime/registry'
-import type { RuntimeProtocolFamily } from '../../../../src/shared/ai-workflow-api'
 
 describe('createRuntimeBackend', () => {
   it('dsh 协议族：探测/模型/执行都委托给 dsh 后端，并透传依赖', async () => {
@@ -33,7 +32,7 @@ describe('createRuntimeBackend', () => {
     expect(spawn).toHaveBeenCalled()
   })
 
-  it('未知协议族：明确报错（数据被绕过写入时的兜底）', () => {
-    expect(() => createRuntimeBackend('claude' as RuntimeProtocolFamily)).toThrow(/不支持的协议族/)
+  it('未知执行器：明确报错（数据被绕过写入时的兜底）', () => {
+    expect(() => createRuntimeBackend('claude')).toThrow(/不支持的执行器/)
   })
 })

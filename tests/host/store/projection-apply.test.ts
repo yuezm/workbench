@@ -58,7 +58,7 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(
       db
         .prepare(
-          `SELECT id, name, protocol_family, command, profile, permission_mode, model,
+          `SELECT id, name, executor_key, command, profile, args_template, permission_mode, model,
                   reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
            FROM runtimes`,
         )
@@ -66,9 +66,10 @@ describe('createProjectionWriter：显式行映射', () => {
     ).toEqual({
       id: 'rt-1',
       name: '本机 dsh',
-      protocol_family: 'dsh',
+      executor_key: 'dsh',
       command: 'dsh',
       profile: 'multica',
+      args_template: '',
       permission_mode: 'workspace-write',
       model: 'dsh/模型',
       reasoning_effort: 'high',

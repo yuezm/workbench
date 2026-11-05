@@ -63,7 +63,8 @@ const probe: RuntimeProbe = {
 const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   id: 'rt-1',
   name: '本机 dsh',
-  protocolFamily: 'dsh',
+  executorKey: 'dsh',
+  argsTemplate: '',
   command: 'dsh',
   profile: 'multica',
   permissionMode: 'workspace-write',

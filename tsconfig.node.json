@@ -28,11 +28,15 @@
     "tests/main/**/*",
     "tests/preload/**/*",
     "tests/shared/**/*",
+    "tests/sdk/**/*",
+    "tests/plugins/**/*",
     "src/main/**/*",
     "src/host/**/*",
     "src/preload/**/*",
     "src/kernel/**/*",
     "src/protocol/**/*",
+    "src/sdk/**/*",
+    "src/plugins/**/*",
     "src/shared/**/*"
   ]
 }

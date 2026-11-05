@@ -146,7 +146,7 @@ function createRuntime(input: Partial<RuntimeInput> & { name: string }): Runtime
   const facts = world.store.dispatch({
     type: 'runtime.create',
     commandId: nextCommandId(),
-    input,
+    input: { executorKey: 'dsh', command: 'dsh', ...input },
   }).facts
   const id = (
     facts.find((fact) => fact.type === 'runtime.created')?.payload as { runtime: Runtime }

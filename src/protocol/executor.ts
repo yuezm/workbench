@@ -10,16 +10,23 @@
  * 内核据此拒绝迟到尝试。`Receipt` 定义在 `protocol/inputs.ts`（它同时是
  * `run.receipt` 输入的载荷），这里 re-export 保持单一真相。
  */
-import type { Access, RunEvent, RunPurpose, Runtime, RuntimeProbe } from './entities'
+import type {
+  Access,
+  RunEvent,
+  RunPurpose,
+  Runtime,
+  RuntimeModelOption,
+  RuntimeProbe,
+} from './entities'
 import type { Receipt } from './inputs'
 
 export type { Receipt } from './inputs'
 
 /**
  * 执行器端口版本：M3 的插件 manifest 与运行时能力探测按它做兼容判断；
- * 端口形状变化时递增（当前 M2 = 1）。
+ * 端口形状变化时递增（M2 = 1；M3 起执行器由插件实现，宿主只做包装）。
  */
-export const EXECUTOR_PORT_VERSION = 1
+export const EXECUTOR_PORT_VERSION = 2
 
 /**
  * 一轮执行的入参：宿主已把「派给谁、在哪跑、什么权限、多久超时」定好，
@@ -73,20 +80,10 @@ export interface ExecutorIO {
 }
 
 /**
- * 模型目录项（M2 过渡：字段与 `shared/ai-workflow-api` 的 `RuntimeModelOption` 一致；
- * M3 迁到 sdk 后统一成一份）。
+ * 模型目录项：与 `protocol/entities` 的 `RuntimeModelOption` 同一份（M3 起唯一真相）。
+ * 保留别名是因为宿主端口 (`ExecutorPort.models`) 的历史命名。
  */
-export interface ExecutorModelOption {
-  /** provider/model 形式的 id */
-  id: string
-  label: string
-  provider: string
-  /** 是否为 CLI 默认模型 */
-  default: boolean
-  /** 支持的推理强度（thinking level） */
-  thinkingLevels: string[]
-  defaultThinkingLevel: string | null
-}
+export type ExecutorModelOption = RuntimeModelOption
 
 /**
  * 执行器端口：一个运行时协议族一个实现。

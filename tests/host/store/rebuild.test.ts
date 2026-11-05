@@ -116,7 +116,10 @@ describe('重建等价：≥200 条混合命令', () => {
     }
 
     // 运行时：创建 → 更新 → 探测；另建一个临时运行时删除（tombstone）
-    send({ type: 'runtime.create', input: { name: '运行时 A' } })
+    send({
+      type: 'runtime.create',
+      input: { name: '运行时 A', executorKey: 'dsh', command: 'dsh' },
+    })
     const runtime = findRuntime(store, '运行时 A')
     send({
       type: 'runtime.update',
@@ -124,7 +127,10 @@ describe('重建等价：≥200 条混合命令', () => {
       patch: { model: 'deepseek/v4', reasoningEffort: 'high', maxConcurrent: 3 },
     })
     send({ type: 'runtime.probed', id: runtime.id, probe })
-    send({ type: 'runtime.create', input: { name: '临时运行时' } })
+    send({
+      type: 'runtime.create',
+      input: { name: '临时运行时', executorKey: 'dsh', command: 'dsh' },
+    })
     send({ type: 'runtime.remove', id: findRuntime(store, '临时运行时').id })
 
     // 智能体：三个常驻 + 一个创建后删除；改名走 agent.update
@@ -264,7 +270,11 @@ describe('重建等价：删除带 run 的任务 / 工作流（D13 run.removed�
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
-    store.dispatch({ type: 'runtime.create', commandId: 'rr-1', input: { name: '运行时' } })
+    store.dispatch({
+      type: 'runtime.create',
+      commandId: 'rr-1',
+      input: { name: '运行时', executorKey: 'dsh', command: 'dsh' },
+    })
     const runtime = findRuntime(store, '运行时')
     store.dispatch({
       type: 'agent.create',
@@ -345,7 +355,7 @@ describe('强杀重启：事实已提交、投影落后', () => {
         store.dispatch({
           type: 'runtime.create',
           commandId: 'kill-runtime',
-          input: { name: '运行时 A' },
+          input: { name: '运行时 A', executorKey: 'dsh', command: 'dsh' },
         })
         store.dispatch({
           type: 'workflow.create',
@@ -375,7 +385,8 @@ describe('强杀重启：事实已提交、投影落后', () => {
         const aheadRuntime: Runtime = {
           id: 'rt-ahead',
           name: '崩溃前新增运行时',
-          protocolFamily: 'dsh',
+          executorKey: 'dsh',
+          argsTemplate: '',
           command: 'dsh',
           profile: 'multica',
           permissionMode: 'workspace-write',
@@ -492,7 +503,7 @@ describe('重建边界：运行/聊天四表纳入白名单', () => {
     store.dispatch({
       type: 'runtime.create',
       commandId: 'wl-runtime',
-      input: { name: '运行时' },
+      input: { name: '运行时', executorKey: 'dsh', command: 'dsh' },
     })
     const runtime = findRuntime(store, '运行时')
     store.dispatch({
@@ -590,7 +601,7 @@ describe('why 时间线：kernel/timeline', () => {
   it('导入根标「迁移导入」，并与后续 task.moved 组成链', () => {
     const db = memory()
     db.exec(`
-      INSERT INTO runtimes (id, name, created_at) VALUES ('rt-legacy', '旧运行时', '${IMPORT_AT}');
+      INSERT INTO runtimes (id, name, executor_key, created_at) VALUES ('rt-legacy', '旧运行时', 'dsh', '${IMPORT_AT}');
       INSERT INTO agents (id, name, runtime_id, created_at)
         VALUES ('ag-legacy', '旧智能体', 'rt-legacy', '${IMPORT_AT}');
       INSERT INTO workflows (id, name, created_at) VALUES ('wf-legacy', '旧流程', '${IMPORT_AT}');

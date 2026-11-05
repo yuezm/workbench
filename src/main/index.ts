@@ -21,7 +21,7 @@ import { createTray } from './tray'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
 import { createRuntimeExecutors } from './ai-workflow/executor-port'
 import { createRuntimeBackend, type RuntimeBackend } from './ai-workflow/runtime/registry'
-import type { ChatStreamEvent, RuntimeProtocolFamily } from '../shared/ai-workflow-api'
+import type { ChatStreamEvent } from '../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
 
 let quitting = false
@@ -100,8 +100,7 @@ if (app.requestSingleInstanceLock()) {
     const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
     mkdirSync(sessionsDir, { recursive: true })
     const runtimeDeps = { sessionRoot: sessionsDir }
-    const backendFor = (family: RuntimeProtocolFamily): RuntimeBackend =>
-      createRuntimeBackend(family, runtimeDeps)
+    const backendFor = (key: string): RuntimeBackend => createRuntimeBackend(key, runtimeDeps)
     // 执行器端口：调度器只认 `ExecutorPort`（host/executor），具体 dsh 实现在这里装配
     const executors = createRuntimeExecutors(runtimeDeps)
     // 启动对账（T13）：先按 process_registry 的残留 pid 终止上次崩溃留下的进程树、清登记，

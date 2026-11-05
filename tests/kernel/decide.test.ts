@@ -67,7 +67,8 @@ const probe: RuntimeProbe = {
 const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   id: 'rt-1',
   name: '本机 dsh',
-  protocolFamily: 'dsh',
+  executorKey: 'dsh',
+  argsTemplate: '',
   command: 'dsh',
   profile: 'multica',
   permissionMode: 'workspace-write',
@@ -206,13 +207,26 @@ const command = (base: CommandDraft): Command => ({ commandId: 'cmd-1', ...base 
 const host = (input: HostInput): Input => input
 
 describe('kernel/decide 运行时', () => {
-  it('runtime.create：默认值回填，事实携带完整行（含 lastProbe: null）', () => {
+  it('runtime.create：契约要求执行器键与命令已确定，事实携带完整行（含 lastProbe: null）', () => {
     expect(
-      decide(view(), command({ type: 'runtime.create', input: { name: ' 本机 ' } }), NOW, env()),
+      decide(
+        view(),
+        command({
+          type: 'runtime.create',
+          input: { name: ' 本机 ', executorKey: 'dsh', command: ' dsh ' },
+        }),
+        NOW,
+        env(),
+      ),
     ).toEqual({
       facts: [
         at('runtime.created', {
-          runtime: runtime({ id: 'runtime-new-1', name: '本机', createdAt: NOW }),
+          runtime: runtime({
+            id: 'runtime-new-1',
+            name: '本机',
+            profile: '',
+            createdAt: NOW,
+          }),
         }),
       ],
     })
@@ -225,8 +239,10 @@ describe('kernel/decide 运行时', () => {
         type: 'runtime.create',
         input: {
           name: 'fast',
+          executorKey: 'dsh',
           command: ' dsh2 ',
           profile: ' p2 ',
+          argsTemplate: '["--print"]',
           permissionMode: 'danger-full-access',
           model: 'm',
           reasoningEffort: 'high',
@@ -245,6 +261,7 @@ describe('kernel/decide 运行时', () => {
           runtime: runtime({
             id: 'runtime-new-1',
             name: 'fast',
+            argsTemplate: '["--print"]',
             command: 'dsh2',
             profile: 'p2',
             permissionMode: 'danger-full-access',
@@ -264,7 +281,10 @@ describe('kernel/decide 运行时', () => {
     const run = (input: Record<string, unknown>): unknown =>
       decide(
         view({ runtimes: [runtime()] }),
-        command({ type: 'runtime.create', input: input as { name: string } }),
+        command({
+          type: 'runtime.create',
+          input: { executorKey: 'dsh', command: 'dsh', ...input } as unknown as { name: string },
+        }),
         NOW,
         env(),
       )
@@ -273,9 +293,13 @@ describe('kernel/decide 运行时', () => {
       facts: [],
       reject: { code: 'invalid_input', message: '运行时名称必填' },
     })
-    expect(run({ name: 'x', protocolFamily: 'claude' })).toEqual({
+    expect(run({ name: 'x', executorKey: '  ' })).toEqual({
       facts: [],
-      reject: { code: 'invalid_input', message: '不支持的协议族: claude' },
+      reject: { code: 'invalid_input', message: '运行时缺少执行器键（executorKey）' },
+    })
+    expect(run({ name: 'x', command: '  ' })).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '运行时缺少启动命令（command）' },
     })
     expect(run({ name: 'x', permissionMode: 'root' })).toEqual({
       facts: [],
@@ -303,7 +327,8 @@ describe('kernel/decide 运行时', () => {
         id: 'rt-1',
         patch: {
           name: ' 改名 ',
-          protocolFamily: 'dsh',
+          executorKey: 'dsh',
+          argsTemplate: '',
           permissionMode: 'read-only',
           command: ' dsh2 ',
           maxConcurrent: 3,
@@ -371,9 +396,9 @@ describe('kernel/decide 运行时', () => {
       facts: [],
       reject: { code: 'not_found', message: '运行时不存在: rt-404' },
     })
-    expect(run({ protocolFamily: 'claude' })).toEqual({
+    expect(run({ executorKey: '  ' })).toEqual({
       facts: [],
-      reject: { code: 'invalid_input', message: '不支持的协议族: claude' },
+      reject: { code: 'invalid_input', message: '运行时缺少执行器键（executorKey）' },
     })
     expect(run({ permissionMode: 'root' })).toEqual({
       facts: [],

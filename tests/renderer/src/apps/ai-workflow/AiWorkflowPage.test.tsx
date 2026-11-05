@@ -17,7 +17,8 @@ import { AiWorkflowPage } from '../../../../../src/renderer/src/apps/ai-workflow
 const runtime: Runtime = {
   id: 'r1',
   name: 'ds',
-  protocolFamily: 'dsh',
+  executorKey: 'dsh',
+  argsTemplate: '',
   command: 'dsh',
   profile: 'multica',
   permissionMode: 'workspace-write',

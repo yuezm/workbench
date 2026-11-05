@@ -105,6 +105,20 @@ const RUN_FIELDS: ReadonlyArray<readonly [keyof RunRow, string]> = [
 ]
 
 /**
+ * M2 及以前的事实 payload 只有 `protocolFamily`（协议族），M3 起换成 `executorKey`。
+ * 重建 fold 的是历史 payload，因此这里必须归一：缺 `executorKey` 时按旧协议族映射
+ * （当前只有 `dsh` 一个取值），并补 `argsTemplate` 的空串缺省。
+ * 这不是兼容字段：`Runtime` 契约里没有 `protocolFamily`，映射只存在于投影边界。
+ */
+type LegacyRuntime = Runtime & { protocolFamily?: string }
+
+const normalizeRuntime = (runtime: LegacyRuntime): Runtime => ({
+  ...runtime,
+  executorKey: runtime.executorKey ?? runtime.protocolFamily ?? '',
+  argsTemplate: runtime.argsTemplate ?? '',
+})
+
+/**
  * 规整 run 行的缺省值：`snapshot.imported` 的存量行可能缺 M2 新列（T2 迁移），
  * 补默认值后与实时写入得到同一行；`queueSeq` 默认 0 表示「早期导入、无稳定入队序」。
  */
@@ -225,14 +239,15 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     runtimes: db.prepare(
       `INSERT INTO runtimes
-         (id, name, protocol_family, command, profile, permission_mode, model, reasoning_effort,
-          workdir, max_concurrent, enabled, last_probe_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, name, executor_key, command, profile, args_template, permission_mode, model,
+          reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
-         protocol_family = excluded.protocol_family,
+         executor_key = excluded.executor_key,
          command = excluded.command,
          profile = excluded.profile,
+         args_template = excluded.args_template,
          permission_mode = excluded.permission_mode,
          model = excluded.model,
          reasoning_effort = excluded.reasoning_effort,
@@ -355,13 +370,14 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       )
     },
     runtimes: (row) => {
-      const runtime = row as Runtime
+      const runtime = normalizeRuntime(row as LegacyRuntime)
       upserts.runtimes.run(
         runtime.id,
         runtime.name,
-        runtime.protocolFamily,
+        runtime.executorKey,
         runtime.command,
         runtime.profile,
+        runtime.argsTemplate,
         runtime.permissionMode,
         runtime.model,
         runtime.reasoningEffort,

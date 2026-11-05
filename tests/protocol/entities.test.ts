@@ -18,7 +18,6 @@ import type {
   RuntimeInput as SharedRuntimeInput,
   RuntimeProbe as SharedRuntimeProbe,
   RuntimeProbeState as SharedRuntimeProbeState,
-  RuntimeProtocolFamily as SharedRuntimeProtocolFamily,
   StageInput as SharedStageInput,
   Task as SharedTask,
   TaskInput as SharedTaskInput,
@@ -30,12 +29,13 @@ import type {
 } from '../../src/shared/ai-workflow-api'
 import {
   ACCESS_LEVELS,
+  ARGV_PLACEHOLDERS,
   CHAT_ROLES,
   ENTRY_MODES,
   ENTITY_TABLES,
+  EXECUTOR_KEY_PATTERN,
   PERMISSION_MODES,
   PROBE_STATES,
-  PROTOCOL_FAMILIES,
   RUN_ERROR_CODES,
   RUN_EVENT_TYPES,
   RUN_PURPOSES,
@@ -64,7 +64,6 @@ import {
   type RuntimeInput,
   type RuntimeProbe,
   type RuntimeProbeState,
-  type RuntimeProtocolFamily,
   type StageInput,
   type Task,
   type TaskInput,
@@ -85,7 +84,6 @@ type Assert<T extends true> = T
  * （shared 现在只是 re-export，这里防止有人再次在 shared 里重复定义）。
  */
 const contractChecks: [
-  Assert<Equal<RuntimeProtocolFamily, SharedRuntimeProtocolFamily>>,
   Assert<Equal<PermissionMode, SharedPermissionMode>>,
   Assert<Equal<RuntimeProbeState, SharedRuntimeProbeState>>,
   Assert<Equal<RuntimeProbe, SharedRuntimeProbe>>,
@@ -113,7 +111,6 @@ const contractChecks: [
   Assert<Equal<Conversation, SharedChatConversation>>,
   Assert<Equal<Message, SharedChatMessage>>,
 ] = [
-  true,
   true,
   true,
   true,
@@ -194,9 +191,10 @@ const runShapeChecks: [
 const sampleRuntime = {
   id: 'rt1',
   name: '本机 dsh',
-  protocolFamily: 'dsh',
+  executorKey: 'dsh',
   command: 'dsh',
   profile: 'multica',
+  argsTemplate: '',
   permissionMode: 'workspace-write',
   model: null,
   reasoningEffort: null,
@@ -333,7 +331,11 @@ describe('protocol/entities', () => {
   })
 
   it('枚举常量是校验与代理共用的唯一取值来源', () => {
-    expect([...PROTOCOL_FAMILIES]).toEqual(['dsh'])
+    expect(EXECUTOR_KEY_PATTERN.test('dsh')).toBe(true)
+    expect(EXECUTOR_KEY_PATTERN.test('command')).toBe(true)
+    expect(EXECUTOR_KEY_PATTERN.test('Dsh')).toBe(false)
+    expect(EXECUTOR_KEY_PATTERN.test('a'.repeat(65))).toBe(false)
+    expect([...ARGV_PLACEHOLDERS]).toEqual(['model', 'effort', 'cwd', 'context', 'prompt'])
     expect([...PERMISSION_MODES]).toEqual(['read-only', 'workspace-write', 'danger-full-access'])
     expect([...PROBE_STATES]).toEqual(['ready', 'unavailable'])
     expect([...ENTRY_MODES]).toEqual(['none', 'agent', 'user'])
@@ -401,9 +403,11 @@ describe('protocol/entities', () => {
       'systemPrompt',
     ])
     expect(keysOf(sampleRuntime)).toEqual([
+      'argsTemplate',
       'command',
       'createdAt',
       'enabled',
+      'executorKey',
       'id',
       'lastProbe',
       'maxConcurrent',
@@ -411,14 +415,13 @@ describe('protocol/entities', () => {
       'name',
       'permissionMode',
       'profile',
-      'protocolFamily',
       'reasoningEffort',
       'workdir',
     ])
   })
 
   it('与 shared/ai-workflow-api 的实体类型逐一相等（类型级断言）', () => {
-    expect(contractChecks).toHaveLength(27)
+    expect(contractChecks).toHaveLength(26)
     expect(contractChecks.every(Boolean)).toBe(true)
   })
 

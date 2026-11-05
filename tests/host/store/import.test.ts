@@ -243,7 +243,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
     {
       id: 'rt-1',
       name: '本机 dsh',
-      protocolFamily: 'dsh',
+      executorKey: 'dsh',
+      argsTemplate: '',
       command: 'dsh',
       profile: 'multica',
       permissionMode: 'workspace-write',
@@ -258,7 +259,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
     {
       id: 'rt-2',
       name: '备用 dsh',
-      protocolFamily: 'dsh',
+      executorKey: 'dsh',
+      argsTemplate: '',
       command: 'dsh',
       profile: 'multica',
       permissionMode: 'read-only',
@@ -339,17 +341,18 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
 
   const insertRuntime = db.prepare(
     `INSERT INTO runtimes
-       (id, name, protocol_family, command, profile, permission_mode, model, reasoning_effort,
-        workdir, max_concurrent, enabled, last_probe_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, name, executor_key, command, profile, args_template, permission_mode, model,
+        reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   for (const runtime of runtimes) {
     insertRuntime.run(
       runtime.id,
       runtime.name,
-      runtime.protocolFamily,
+      runtime.executorKey,
       runtime.command,
       runtime.profile,
+      runtime.argsTemplate,
       runtime.permissionMode,
       runtime.model,
       runtime.reasoningEffort,
@@ -683,10 +686,12 @@ describe('importLegacyIfNeeded', () => {
 
   it('超过 500 行按批次写多条事实', () => {
     const db = memory()
-    const insert = db.prepare('INSERT INTO runtimes (id, name, created_at) VALUES (?, ?, ?)')
+    const insert = db.prepare(
+      'INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)',
+    )
     const total = IMPORT_BATCH_SIZE + 1
     for (let index = 0; index < total; index++) {
-      insert.run(`rt-${String(index).padStart(3, '0')}`, `运行时 ${index}`, seedAt(1))
+      insert.run(`rt-${String(index).padStart(3, '0')}`, `运行时 ${index}`, 'dsh', seedAt(1))
     }
 
     const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })

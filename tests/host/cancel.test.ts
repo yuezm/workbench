@@ -137,7 +137,7 @@ function seedTask(entryMode: 'agent' | 'none' = 'agent'): Seeded {
   const runtimeFacts = world.store.dispatch({
     type: 'runtime.create',
     commandId: nextCommandId(),
-    input: { name: 'rt-' + commandSeq, maxConcurrent: 2 },
+    input: { name: 'rt-' + commandSeq, executorKey: 'dsh', command: 'dsh', maxConcurrent: 2 },
   }).facts
   const runtimeId = (
     runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as { runtime: Runtime }

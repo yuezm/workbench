@@ -4,9 +4,11 @@ import {
   INDEX_SQL,
   PROCESS_REGISTRY_SQL,
   RUN_M2_ADDED_COLUMNS,
+  RUNTIMES_M3_ADDED_COLUMNS,
   SCHEMA_SQL,
   SCHEMA_VERSION,
   legacyRunsCopySql,
+  legacyRuntimesCopySql,
   tableDdl,
   withTx,
 } from './schema'
@@ -16,6 +18,9 @@ const BUSY_TIMEOUT_MS = 5000
 
 /** 旧 `runs` 升级时的临时表名（事务内建 → 拷 → 删旧 → 改名；失败整体回滚）。 */
 const RUN_UPGRADE_TEMP = 'runs_m2_upgrade'
+
+/** 旧 `runtimes` 升级时的临时表名（M3 同法）。 */
+const RUNTIMES_UPGRADE_TEMP = 'runtimes_m3_upgrade'
 
 /**
  * 打开时校验数据库完整性。正常只返回一行 `ok`；
@@ -94,16 +99,53 @@ function upgradeLegacyRuns(db: DatabaseSync): boolean {
 }
 
 /**
+ * 旧库 `runtimes` 缺 M3 新列 → 需要一次性物理升级（导出原因同 `needsRunsUpgrade`）。
+ */
+export function needsRuntimesUpgrade(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'runtimes')
+  if (columns.size === 0) return false
+  return RUNTIMES_M3_ADDED_COLUMNS.some((column) => !columns.has(column))
+}
+
+/**
+ * 旧 `runtimes` 一次性物理升级（M3）：结构从 `protocol_family`（带 CHECK）换成
+ * `executor_key` + `args_template`。旧列被 CHECK 引用，SQLite 不能 `DROP COLUMN`，
+ * 因此与 `runs` 同法：建临时表 → 拷贝旧行（协议族映射成执行器键）→ 删旧表 → 改名。
+ *
+ * @returns 本次是否真的做了升级
+ */
+function upgradeLegacyRuntimes(db: DatabaseSync): boolean {
+  if (!needsRuntimesUpgrade(db)) return false
+
+  const foreignKeys = readForeignKeys(db)
+  if (foreignKeys) db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    withTx(db, () => {
+      db.exec(`DROP TABLE IF EXISTS ${RUNTIMES_UPGRADE_TEMP}`)
+      db.exec(tableDdl.runtimes(RUNTIMES_UPGRADE_TEMP))
+      db.exec(legacyRuntimesCopySql(RUNTIMES_UPGRADE_TEMP))
+      db.exec('DROP TABLE runtimes')
+      db.exec(`ALTER TABLE ${RUNTIMES_UPGRADE_TEMP} RENAME TO runtimes`)
+    })
+  } finally {
+    if (foreignKeys) db.exec('PRAGMA foreign_keys = ON')
+  }
+  return true
+}
+
+/**
  * 打开（或创建）数据库文件并建好全库 schema：busy_timeout、打开时 integrity_check、
  * 文件库启用 WAL、九张投影表 + 账本表（全部 IF NOT EXISTS）、
- * 宿主私有 `process_registry`（T13）、旧库 `runs` 结构升级（M2）、`PRAGMA user_version = SCHEMA_VERSION`。
+ * 宿主私有 `process_registry`（T13）、旧库 `runs`（M2）/`runtimes`（M3）结构升级、
+ * `PRAGMA user_version = SCHEMA_VERSION`。
  *
  * 手写 v1 → v2 迁移已删除：v2 存量数据由 `host/store/import.ts` 写成 `snapshot.imported`
- * 事实后重建投影，因此这里只保证「库结构与当前版本对齐」；唯一的例外是 `runs`
- * 的列升级——它在导入事实之前完成，导入/backfill 才能写新列。
+ * 事实后重建投影，因此这里只保证「库结构与当前版本对齐」；结构升级必须在导入事实之前完成，
+ * 导入/回填才能写新列。
  *
- * 旧库一次性升级（`upgradeLegacyRuns`）与 v2 存量迁移（`host/store/import.ts` 的导入根 /
- * 旧聊天表）是 M2 兼容层，只在旧库首次打开时触发，**M3 再删**（迁移窗口关闭后不再需要）。
+ * 旧库一次性升级（`upgradeLegacyRuns` / `upgradeLegacyRuntimes`）与 v2 存量迁移
+ * （`host/store/import.ts` 的导入根 / 旧聊天表）是 M2/M3 兼容层，只在旧库首次打开时触发；
+ * 删除前提是「真实库已完成一次首启、facts 非空」（见 M3 退出记录，M3 不删）。
  *
  * 不设置 foreign_keys：保持连接默认（node:sqlite 默认开启），组合方需要时自行切换；
  * `runs` 升级内部临时关外键并在 `finally` 恢复。
@@ -124,6 +166,7 @@ export function openDatabase(filePath: string): DatabaseSync {
       db.exec(SCHEMA_SQL)
     })
     upgradeLegacyRuns(db)
+    upgradeLegacyRuntimes(db)
     withTx(db, () => {
       // 升级可能删掉旧 runs 上的索引，这里统一补齐（新建库同样幂等）。
       db.exec(INDEX_SQL)

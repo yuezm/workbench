@@ -9,7 +9,8 @@ import type { Turn } from '../../../../src/protocol/executor'
 const runtime = (patch: Partial<Runtime> = {}): Runtime => ({
   id: 'rt-1',
   name: '本机 dsh',
-  protocolFamily: 'dsh',
+  executorKey: 'dsh',
+  argsTemplate: '',
   command: process.execPath,
   profile: 'multica',
   permissionMode: 'workspace-write',

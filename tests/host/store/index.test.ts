@@ -115,7 +115,11 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
       newId: sequenceIds('rt-1'),
     })
 
-    store.dispatch({ type: 'runtime.create', commandId: 'rt', input: { name: '本机 dsh' } })
+    store.dispatch({
+      type: 'runtime.create',
+      commandId: 'rt',
+      input: { name: '本机 dsh', executorKey: 'dsh', command: 'dsh' },
+    })
     store.dispatch({ type: 'runtime.probed', commandId: 'probe', id: 'rt-1', probe: sampleProbe })
 
     expect(store.query('runtimes.all')).toEqual([sample.runtime({ lastProbe: sampleProbe })])
@@ -444,9 +448,10 @@ describe('dispatch：序号冲突', () => {
 describe('dispatch：视图装载切片', () => {
   it('只装载 viewSpec 声明的表，活跃 run 的任务集合总是装载', () => {
     const db = memory()
-    db.prepare('INSERT INTO runtimes (id, name, created_at) VALUES (?, ?, ?)').run(
+    db.prepare('INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)').run(
       'rt-1',
       '运行时',
+      'dsh',
       SAMPLE_AT,
     )
     db.prepare('INSERT INTO workflows (id, name, created_at) VALUES (?, ?, ?)').run(

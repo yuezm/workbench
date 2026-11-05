@@ -8,10 +8,11 @@
  */
 import { COMMAND_NAMES, type Command, type CommandName } from './commands'
 import {
+  ARGV_PLACEHOLDERS,
   ENTRY_MODES,
+  EXECUTOR_KEY_PATTERN,
   PERMISSION_MODES,
   PROBE_STATES,
-  PROTOCOL_FAMILIES,
   RUN_ERROR_CODES,
   RUN_EVENT_TYPES,
   RUN_TERMINAL_STATUSES,
@@ -36,6 +37,14 @@ export const COMMAND_LIMITS = {
   systemPrompt: 20_000,
   command: 500,
   profile: 100,
+  /** 执行器键（小写 slug，≤64） */
+  executorKey: 64,
+  /** 参数模板 JSON 文本上限 */
+  argsTemplate: 4000,
+  /** 参数模板最多项数 */
+  argsTemplateItems: 20,
+  /** 单个 argv 元素长度上限 */
+  argsItem: 500,
   model: 200,
   workdir: 1000,
   probeOutput: 40_000,
@@ -143,6 +152,52 @@ const optionalEnum = <T extends string>(
   allowed: readonly T[],
 ): Check => (value === undefined || value === null ? null : enumOf(value, label, allowed))
 
+/** 占位符匹配：`{model}` 这类只允许小写字母（大小写不符按未知占位符拒收）。 */
+const ARGV_PLACEHOLDER_RE = /\{([a-z]+)\}/g
+
+/**
+ * 执行器键：可选；给了就必须是小写 slug。
+ * 取值是否存在对应插件由宿主入口按注册表判断（内核不认识产品名）。
+ */
+const optionalExecutorKey = (value: unknown): Check => {
+  const error = optionalText(value, 'input.executorKey', COMMAND_LIMITS.executorKey)
+  if (error) return error
+  if (value === undefined || value === null) return null
+  return EXECUTOR_KEY_PATTERN.test(value as string)
+    ? null
+    : 'input.executorKey 必须是小写 slug（字母开头，可含数字与连字符）'
+}
+
+/** 参数模板：JSON 数组文本；项数/单项长度受限，占位符必须在白名单内。 */
+const optionalArgsTemplate = (value: unknown): Check => {
+  const error = optionalText(value, 'input.argsTemplate', COMMAND_LIMITS.argsTemplate)
+  if (error) return error
+  if (value === undefined || value === null || value === '') return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value as string)
+  } catch {
+    return 'input.argsTemplate 必须是 JSON 数组文本'
+  }
+  if (!Array.isArray(parsed)) return 'input.argsTemplate 必须是 JSON 数组文本'
+  if (parsed.length > COMMAND_LIMITS.argsTemplateItems) {
+    return `input.argsTemplate 最多 ${COMMAND_LIMITS.argsTemplateItems} 项`
+  }
+  for (const [index, item] of parsed.entries()) {
+    if (typeof item !== 'string') return `input.argsTemplate[${index}] 必须是字符串`
+    if (item.length > COMMAND_LIMITS.argsItem) {
+      return `input.argsTemplate[${index}] 最长 ${COMMAND_LIMITS.argsItem} 个字符`
+    }
+    for (const match of item.matchAll(ARGV_PLACEHOLDER_RE)) {
+      const name = match[1] as string
+      if (!(ARGV_PLACEHOLDERS as readonly string[]).includes(name)) {
+        return `input.argsTemplate[${index}] 含未知占位符 {${name}}`
+      }
+    }
+  }
+  return null
+}
+
 // ---------- 各命令的载荷 ----------
 
 const checkStage = (value: unknown, label: string): Check => {
@@ -209,9 +264,10 @@ const checkRuntimeInput = (value: unknown, partial: boolean): Check => {
     : required(input.name, 'input.name', COMMAND_LIMITS.name)
   return (
     name ??
-    optionalEnum(input.protocolFamily, 'input.protocolFamily', PROTOCOL_FAMILIES) ??
+    optionalExecutorKey(input.executorKey) ??
     optionalText(input.command, 'input.command', COMMAND_LIMITS.command) ??
     optionalText(input.profile, 'input.profile', COMMAND_LIMITS.profile) ??
+    optionalArgsTemplate(input.argsTemplate) ??
     optionalEnum(input.permissionMode, 'input.permissionMode', PERMISSION_MODES) ??
     optionalText(input.model, 'input.model', COMMAND_LIMITS.model) ??
     optionalText(input.reasoningEffort, 'input.reasoningEffort', COMMAND_LIMITS.model) ??

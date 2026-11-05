@@ -61,7 +61,7 @@ export function createRuntime(world: TestWorld, input: RuntimeInput): Runtime {
   const facts = world.store.dispatch({
     type: 'runtime.create',
     commandId: nextCommandId(),
-    input,
+    input: { executorKey: 'dsh', command: 'dsh', ...input },
   }).facts
   return runtimeById(world.store, createdId(facts, 'runtime.created'))
 }
@@ -70,7 +70,7 @@ export function createAgent(world: TestWorld, input: AgentInput): Agent {
   const facts = world.store.dispatch({
     type: 'agent.create',
     commandId: nextCommandId(),
-    input,
+    input: { executorKey: 'dsh', command: 'dsh', ...input },
   }).facts
   return agentById(world.store, createdId(facts, 'agent.created'))
 }
@@ -79,7 +79,7 @@ export function createWorkflow(world: TestWorld, input: WorkflowInput): Workflow
   const facts = world.store.dispatch({
     type: 'workflow.create',
     commandId: nextCommandId(),
-    input,
+    input: { executorKey: 'dsh', command: 'dsh', ...input },
   }).facts
   return workflowById(world.store, createdId(facts, 'workflow.created'))
 }
@@ -88,7 +88,7 @@ export function createTask(world: TestWorld, input: TaskInput): Task {
   const facts = world.store.dispatch({
     type: 'task.create',
     commandId: nextCommandId(),
-    input,
+    input: { executorKey: 'dsh', command: 'dsh', ...input },
   }).facts
   return taskById(world.store, createdId(facts, 'task.created'))
 }

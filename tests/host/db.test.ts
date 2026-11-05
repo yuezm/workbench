@@ -4,8 +4,36 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { openDatabase, needsRunsUpgrade } from '../../src/host/db'
-import { RUN_M2_ADDED_COLUMNS, SCHEMA_SQL, SCHEMA_VERSION, tableDdl } from '../../src/host/schema'
+import { needsRunsUpgrade, needsRuntimesUpgrade, openDatabase } from '../../src/host/db'
+import {
+  RUN_M2_ADDED_COLUMNS,
+  RUNTIMES_M3_ADDED_COLUMNS,
+  SCHEMA_SQL,
+  SCHEMA_VERSION,
+  tableDdl,
+} from '../../src/host/schema'
+
+/**
+ * M1/v2 旧库的 `runtimes` DDL 原样：协议族列 + CHECK（M3 换成 `executor_key` + `args_template`）。
+ * 用来造真实旧库，验证 open 阶段的一次性物理升级。
+ */
+const LEGACY_RUNTIMES_DDL = `
+CREATE TABLE runtimes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  protocol_family TEXT NOT NULL DEFAULT 'dsh' CHECK (protocol_family IN ('dsh')),
+  command TEXT NOT NULL DEFAULT 'dsh',
+  profile TEXT NOT NULL DEFAULT 'multica',
+  permission_mode TEXT NOT NULL DEFAULT 'workspace-write'
+    CHECK (permission_mode IN ('read-only','workspace-write','danger-full-access')),
+  model TEXT,
+  reasoning_effort TEXT,
+  workdir TEXT,
+  max_concurrent INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_probe_json TEXT,
+  created_at TEXT NOT NULL
+);`
 
 /**
  * M1/v2 旧库的 `runs` DDL 原样：没有 M2 调度列、`task_id` NOT NULL、status 五值。
@@ -49,7 +77,7 @@ const LEGACY_EVENT_COUNT = 30
 function seedLegacyDatabase(file: string, runsDdl = LEGACY_RUNS_DDL): void {
   const seeded = new DatabaseSync(file)
   try {
-    seeded.exec(tableDdl.runtimes())
+    seeded.exec(LEGACY_RUNTIMES_DDL)
     seeded.exec(tableDdl.agents())
     seeded.exec(tableDdl.workflows())
     seeded.exec(tableDdl.stages())
@@ -199,8 +227,8 @@ describe('openDatabase', () => {
       seeded.exec(SCHEMA_SQL)
       seeded.exec('PRAGMA user_version = 2')
       seeded
-        .prepare('INSERT INTO runtimes (id, name, created_at) VALUES (?, ?, ?)')
-        .run('rt1', '旧运行时', '2026-01-01T00:00:00.000Z')
+        .prepare('INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)')
+        .run('rt1', '旧运行时', 'dsh', '2026-01-01T00:00:00.000Z')
     } finally {
       seeded.close()
     }
@@ -239,8 +267,8 @@ describe('openDatabase', () => {
       seeded.exec(SCHEMA_SQL)
       seeded.exec('PRAGMA user_version = 0')
       seeded
-        .prepare('INSERT INTO runtimes (id, name, created_at) VALUES (?, ?, ?)')
-        .run('rt1', '旧运行时', '2026-01-01T00:00:00.000Z')
+        .prepare('INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)')
+        .run('rt1', '旧运行时', 'dsh', '2026-01-01T00:00:00.000Z')
     } finally {
       seeded.close()
     }
@@ -506,6 +534,64 @@ describe('openDatabase：旧库 runs 结构升级（M2 一次性物理迁移）'
         expect(tableNames(inspect)).not.toContain('runs_m2_upgrade')
       } finally {
         inspect.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('openDatabase：旧库 runtimes 结构升级（M3 一次性物理迁移）', () => {
+  it('缺 M3 列：重建 runtimes，协议族回填执行器键、args_template 空串、智能体外键保留', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-runtimes-upgrade-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      const seeded = new DatabaseSync(file)
+      try {
+        seeded.exec(LEGACY_RUNTIMES_DDL)
+        seeded.exec(tableDdl.agents())
+        seeded
+          .prepare('INSERT INTO runtimes (id, name, created_at) VALUES (?, ?, ?)')
+          .run('rt-1', '旧运行时', SEED_AT)
+        seeded
+          .prepare('INSERT INTO agents (id, name, runtime_id, created_at) VALUES (?, ?, ?, ?)')
+          .run('ag-1', '旧智能体', 'rt-1', SEED_AT)
+      } finally {
+        seeded.close()
+      }
+
+      const inspect = new DatabaseSync(file)
+      try {
+        expect(needsRuntimesUpgrade(inspect)).toBe(true)
+        for (const column of RUNTIMES_M3_ADDED_COLUMNS) {
+          expect(columnNames(inspect, 'runtimes').has(column), column).toBe(false)
+        }
+      } finally {
+        inspect.close()
+      }
+
+      db = openDatabase(file)
+      try {
+        expect(needsRuntimesUpgrade(db)).toBe(false)
+        expect(
+          db.prepare('SELECT executor_key, args_template FROM runtimes WHERE id = ?').get('rt-1'),
+        ).toEqual({ executor_key: 'dsh', args_template: '' })
+        expect(db.prepare('SELECT runtime_id FROM agents WHERE id = ?').get('ag-1')).toEqual({
+          runtime_id: 'rt-1',
+        })
+        expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+        expect(tableNames(db)).not.toContain('runtimes_m3_upgrade')
+      } finally {
+        db.close()
+        db = null
+      }
+
+      const again = openDatabase(file)
+      try {
+        expect(countOf(again, 'runtimes')).toBe(1)
+        expect(tableNames(again)).not.toContain('runtimes_m3_upgrade')
+      } finally {
+        again.close()
       }
     } finally {
       rmSync(root, { recursive: true, force: true })

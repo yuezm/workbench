@@ -599,7 +599,7 @@ describe('ipc：投影查询助手（原 projection-lookup）', () => {
     const runtimeFacts = world.store.dispatch({
       type: 'runtime.create',
       commandId: nextCommandId(),
-      input: { name: 'ds2' },
+      input: { name: 'ds2', executorKey: 'dsh', command: 'dsh' },
     }).facts
 
     expect(runtimeById(world.store, createdId(runtimeFacts, 'runtime.created')).name).toBe('ds2')

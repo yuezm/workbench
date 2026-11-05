@@ -66,7 +66,8 @@ export const sample = {
     return {
       id: 'rt-1',
       name: '本机 dsh',
-      protocolFamily: 'dsh',
+      executorKey: 'dsh',
+      argsTemplate: '',
       command: 'dsh',
       profile: 'multica',
       permissionMode: 'workspace-write',
@@ -242,9 +243,10 @@ const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: 
     columns: [
       'id',
       'name',
-      'protocol_family',
+      'executor_key',
       'command',
       'profile',
+      'args_template',
       'permission_mode',
       'model',
       'reasoning_effort',

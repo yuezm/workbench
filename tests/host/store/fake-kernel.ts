@@ -146,7 +146,8 @@ const createRuntime = (input: RuntimeCreateCommand, at: Iso, env: Environment): 
   const runtime = sample.runtime({
     id: env.nextId('runtime'),
     name: input.input.name,
-    protocolFamily: input.input.protocolFamily ?? 'dsh',
+    executorKey: input.input.executorKey ?? 'dsh',
+    argsTemplate: input.input.argsTemplate ?? '',
     command: input.input.command ?? 'dsh',
     profile: input.input.profile ?? 'multica',
     permissionMode: input.input.permissionMode ?? 'workspace-write',

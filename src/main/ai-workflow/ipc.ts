@@ -6,7 +6,6 @@ import type {
   ChatConversation,
   RuntimeInput,
   RuntimeProbe,
-  RuntimeProtocolFamily,
   RuntimeStatus,
   TaskInput,
   WorkflowInput,
@@ -30,7 +29,7 @@ export interface AiWorkflowIpcDeps {
    */
   dispatch: Store['dispatch']
   /** 协议后端（装配时注入；测试用假实现） */
-  backendFor: (family: RuntimeProtocolFamily) => RuntimeBackend
+  backendFor: (executorKey: string) => RuntimeBackend
   /** 命令幂等键生成器（默认随机 UUID；测试可注入确定性值） */
   newCommandId?: () => string
 }
@@ -122,7 +121,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
 
   /** 探测并把结论入账（探测错误不抛：落库成 unavailable 行） */
   const probeAndSave = async (runtime: Runtime): Promise<RuntimeProbe> => {
-    const probe = await backendFor(runtime.protocolFamily).probe(targetOf(runtime))
+    const probe = await backendFor(runtime.executorKey).probe(targetOf(runtime))
     dispatch({
       type: 'runtime.probed',
       commandId: nextCommandId(),
@@ -134,12 +133,19 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
 
   const table: Record<string, (a: unknown[]) => unknown> = {
     'runtimes.list': () => store.query('runtimes.all'),
-    // 创建前先探测：命令/profile 不通就不落库，避免留下不可用的记录
+    // 创建前先探测：命令/profile 不通就不落库，避免留下不可用的记录。
+    // 执行器键与默认命令/profile 来自执行器插件 manifest（M3 过渡：T7 换成 registry 注入）。
     'runtimes.create': async (a) => {
       const input = a[0] as RuntimeInput
-      const probe = await backendFor(input.protocolFamily ?? 'dsh').probe({
+      const form: RuntimeInput = {
+        ...input,
+        executorKey: input.executorKey ?? 'dsh',
         command: input.command?.trim() || 'dsh',
         profile: input.profile?.trim() || 'multica',
+      }
+      const probe = await backendFor(form.executorKey as string).probe({
+        command: form.command as string,
+        profile: form.profile as string,
       })
       if (probe.state !== 'ready') {
         throw new Error(`探测失败：${probe.error ?? '未知错误'}`)
@@ -147,7 +153,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
       const facts = dispatch({
         type: 'runtime.create',
         commandId: nextCommandId(),
-        input,
+        input: form,
       }).facts
       const runtimeId = createdId(facts, 'runtime.created')
       dispatch({
@@ -194,7 +200,7 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     },
     'runtimes.models': (a) => {
       const runtime = runtimeById(store, a[0] as string)
-      return backendFor(runtime.protocolFamily).models(targetOf(runtime))
+      return backendFor(runtime.executorKey).models(targetOf(runtime))
     },
 
     'agents.list': () => store.query('agents.all'),

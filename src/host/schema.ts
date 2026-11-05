@@ -18,9 +18,10 @@ const runtimesTable = (name = 'runtimes'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  protocol_family TEXT NOT NULL DEFAULT 'dsh' CHECK (protocol_family IN ('dsh')),
+  executor_key TEXT NOT NULL,
   command TEXT NOT NULL DEFAULT 'dsh',
   profile TEXT NOT NULL DEFAULT 'multica',
+  args_template TEXT NOT NULL DEFAULT '',
   permission_mode TEXT NOT NULL DEFAULT 'workspace-write'
     CHECK (permission_mode IN ('read-only','workspace-write','danger-full-access')),
   model TEXT,
@@ -271,6 +272,30 @@ export function legacyRunsCopySql(targetTable: string): string {
     exit_code, session_id, usage_json, duration_ms, NULL, 1, 0, NULL,
     NULL, NULL, 0, started_at, ended_at, created_at
   FROM runs`
+}
+
+/**
+ * M3 给 `runtimes` 新增的列（旧库 `CREATE TABLE IF NOT EXISTS` 不会补列，且
+ * `protocol_family` 被 CHECK 引用不能 `DROP COLUMN`）：缺任一列即触发一次性物理升级。
+ * 清单与 `runtimesTable()` 的 DDL 保持同步（新增列必须同时改这里）。
+ */
+export const RUNTIMES_M3_ADDED_COLUMNS = ['executor_key', 'args_template'] as const
+
+/**
+ * 旧 `runtimes` 行 → 新 `runtimes` 行（指名字表）的拷贝 SQL。
+ *
+ * M3 口径：旧库只有协议族 `protocol_family`（当前取值仅 `dsh`），它按「旧协议族 = 执行器键」
+ * 的映射回填；`args_template` 补空串。旧库的表名固定是 `runtimes`。
+ */
+export function legacyRuntimesCopySql(targetTable: string): string {
+  return `INSERT INTO ${targetTable} (
+    id, name, executor_key, command, profile, args_template, permission_mode, model,
+    reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
+  )
+  SELECT
+    id, name, protocol_family, command, profile, '', permission_mode, model,
+    reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
+  FROM runtimes`
 }
 
 /**

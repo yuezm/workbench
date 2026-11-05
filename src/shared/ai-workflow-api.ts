@@ -13,11 +13,13 @@ import type {
   Agent,
   AgentInput,
   Conversation as ChatConversation,
+  DetectedRuntime,
   Message as ChatMessage,
   Run,
   RunEvent,
   Runtime,
   RuntimeInput,
+  RuntimeModelOption,
   RuntimeProbe,
   Task,
   TaskInput,
@@ -31,13 +33,14 @@ import type {
 export type {
   Agent,
   AgentInput,
+  DetectedRuntime,
   EntryMode,
   PermissionMode,
   Runtime,
   RuntimeInput,
+  RuntimeModelOption,
   RuntimeProbe,
   RuntimeProbeState,
-  RuntimeProtocolFamily,
   StageInput,
   Task,
   TaskInput,
@@ -60,30 +63,8 @@ export interface RuntimeStatus {
   }
 }
 
-/** 本机已安装的 agent CLI 探测结果（用于表单预填，不自动创建运行时） */
-export interface DetectedRuntime {
-  /** CLI 命令名，如 dsh / claude */
-  command: string
-  /** 展示名，如 "DeepSeek Harness" */
-  label: string
-  /** 可执行文件绝对路径 */
-  path: string
-  /** 当前版本是否可作为运行时接入（协议后端已实现） */
-  supported: boolean
-}
-
-/** --list-models 投影出的模型选项 */
-export interface RuntimeModelOption {
-  /** provider/model 形式的 id，可直接写入 Runtime.model */
-  id: string
-  label: string
-  provider: string
-  /** 是否为 CLI 默认模型 */
-  default: boolean
-  /** 支持的推理强度（thinking level） */
-  thinkingLevels: string[]
-  defaultThinkingLevel: string | null
-}
+/** 本机已安装的 agent CLI 探测结果（用于表单预填，不自动创建运行时）。
+ *  字段定义在 `protocol/entities`（执行器插件 detect 的返回类型），这里只再导出。 */
 
 // ---------- 运行 / 对话 ----------
 // 契约搬到了 protocol/entities（kernel 与本层共用一份）：这里只 re-export，

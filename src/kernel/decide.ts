@@ -54,10 +54,11 @@ import { completeTask, moveTask, moveTaskToStage } from './workflow/stage-machin
 import { validateStageSet } from './workflow/stage-validation'
 
 /**
- * 协议族 / 权限模式白名单：`src/protocol/entities.ts` 里的常量是唯一真相源，
+ * 权限模式白名单：`src/protocol/entities.ts` 里的常量是唯一真相源，
  * 内核只允许依赖协议层的类型（不引运行期值），所以这里按同一份取值做运行期校验。
+ * 执行器键不在这里校验取值：内核不认识任何执行器（也不认识产品名），
+ * 合法性由宿主入口按插件注册表判断（M3 D2）。
  */
-const PROTOCOL_FAMILIES: readonly Runtime['protocolFamily'][] = ['dsh']
 const PERMISSION_MODES: readonly Runtime['permissionMode'][] = [
   'read-only',
   'workspace-write',
@@ -188,12 +189,6 @@ function stageUsingAgent(view: View, agentId: Id): WorkflowStage | undefined {
   return undefined
 }
 
-function protocolFamilyOf(value: string): Runtime['protocolFamily'] | null {
-  return (PROTOCOL_FAMILIES as readonly string[]).includes(value)
-    ? (value as Runtime['protocolFamily'])
-    : null
-}
-
 function permissionModeOf(value: string): Runtime['permissionMode'] | null {
   return (PERMISSION_MODES as readonly string[]).includes(value)
     ? (value as Runtime['permissionMode'])
@@ -264,7 +259,7 @@ function chatRunRow(
     runtimeId: runtime.id,
     ruleId: null,
     rulesVersion: 0,
-    executorKey: runtime.protocolFamily,
+    executorKey: runtime.executorKey,
     threadId: null,
     cwd: runtime.workdir ?? '',
     access: ACCESS_BY_PERMISSION[runtime.permissionMode],
@@ -412,7 +407,7 @@ function entryRunFacts(
     runtimeId: runtime.id,
     ruleId: null,
     rulesVersion: 0,
-    executorKey: runtime.protocolFamily,
+    executorKey: runtime.executorKey,
     threadId: null,
     cwd: runtime.workdir ?? '',
     access: ACCESS_BY_PERMISSION[runtime.permissionMode],
@@ -461,10 +456,12 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const form = input.input
       const name = form.name?.trim()
       if (!name) return reject('invalid_input', '运行时名称必填')
-      const protocolFamily = protocolFamilyOf(form.protocolFamily ?? 'dsh')
-      if (!protocolFamily) {
-        return reject('invalid_input', '不支持的协议族: ' + String(form.protocolFamily))
-      }
+      // 执行器键与启动命令的缺省值来自执行器插件 manifest（宿主入口补齐），
+      // 内核只要求「已确定」，不认识具体产品（M3 D2）。
+      const executorKey = form.executorKey?.trim() ?? ''
+      if (!executorKey) return reject('invalid_input', '运行时缺少执行器键（executorKey）')
+      const command = form.command?.trim() ?? ''
+      if (!command) return reject('invalid_input', '运行时缺少启动命令（command）')
       const permissionMode = permissionModeOf(form.permissionMode ?? 'workspace-write')
       if (!permissionMode) {
         return reject('invalid_input', '不支持的权限模式: ' + String(form.permissionMode))
@@ -475,9 +472,10 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const runtime: Runtime = {
         id: env.nextId('runtime'),
         name,
-        protocolFamily,
-        command: form.command?.trim() || 'dsh',
-        profile: form.profile?.trim() || 'multica',
+        executorKey,
+        command,
+        profile: form.profile?.trim() ?? '',
+        argsTemplate: form.argsTemplate ?? '',
         permissionMode,
         model: form.model ?? null,
         reasoningEffort: form.reasoningEffort ?? null,
@@ -494,13 +492,9 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const current = view.runtimes.get(input.id)
       if (!current) return reject('not_found', '运行时不存在: ' + input.id)
       const patch = input.patch
-      const protocolFamily =
-        patch.protocolFamily === undefined
-          ? current.protocolFamily
-          : protocolFamilyOf(patch.protocolFamily)
-      if (!protocolFamily) {
-        return reject('invalid_input', '不支持的协议族: ' + String(patch.protocolFamily))
-      }
+      const executorKey =
+        patch.executorKey === undefined ? current.executorKey : patch.executorKey.trim()
+      if (!executorKey) return reject('invalid_input', '运行时缺少执行器键（executorKey）')
       const permissionMode =
         patch.permissionMode === undefined
           ? current.permissionMode
@@ -517,10 +511,11 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       const runtime: Runtime = {
         ...current,
         name,
-        protocolFamily,
+        executorKey,
         permissionMode,
         command: patch.command?.trim() || current.command,
-        profile: patch.profile?.trim() || current.profile,
+        profile: patch.profile !== undefined ? patch.profile.trim() : current.profile,
+        argsTemplate: patch.argsTemplate !== undefined ? patch.argsTemplate : current.argsTemplate,
         model: patch.model !== undefined ? patch.model : current.model,
         reasoningEffort:
           patch.reasoningEffort !== undefined ? patch.reasoningEffort : current.reasoningEffort,

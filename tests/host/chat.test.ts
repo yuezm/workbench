@@ -164,7 +164,7 @@ function seedAgent(systemPrompt = '你是助手。'): { runtimeId: string; agent
   const runtimeFacts = world.store.dispatch({
     type: 'runtime.create',
     commandId: nextCommandId(),
-    input: { name: 'rt', command: 'dsh' },
+    input: { name: 'rt', executorKey: 'dsh', command: 'dsh' },
   }).facts
   const runtimeId = (
     runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as {

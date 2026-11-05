@@ -327,7 +327,7 @@ export function RuntimeManager(): ReactElement {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-medium text-ink">{r.name}</span>
                     <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] tracking-wide text-ink-faint">
-                      {r.protocolFamily}
+                      {r.executorKey}
                     </span>
                     <RuntimeStatusBadge
                       probe={probe}

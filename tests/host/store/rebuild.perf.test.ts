@@ -42,7 +42,7 @@ describe('rebuild 性能基准', () => {
     store.dispatch({
       type: 'runtime.create',
       commandId: 'perf-0',
-      input: { name: '性能运行时' },
+      input: { name: '性能运行时', executorKey: 'dsh', command: 'dsh' },
     })
 
     // 批量生成剩余事实，并按 store 的同一条路径增量落投影

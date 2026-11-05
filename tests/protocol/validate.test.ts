@@ -27,9 +27,10 @@ const agentInput: AgentInput = {
 
 const runtimeInput: RuntimeInput = {
   name: '本机 dsh',
-  protocolFamily: 'dsh',
+  executorKey: 'dsh',
   command: 'dsh',
   profile: 'multica',
+  argsTemplate: '',
   permissionMode: 'workspace-write',
   model: null,
   reasoningEffort: null,
@@ -298,12 +299,20 @@ describe('protocol/validate', () => {
     expect(rejectedMessage(cmd('agent.remove'))).toBe('id必填')
   })
 
-  it('runtime.create：枚举、长度上限与数值范围', () => {
+  it('runtime.create：执行器键、参数模板、长度上限与数值范围', () => {
     expect(rejectedMessage(cmd('runtime.create'))).toBe('input 必须是对象')
     expect(rejectedMessage(cmd('runtime.create', { input: {} }))).toBe('input.name必填')
     expect(
-      rejectedMessage(cmd('runtime.create', { input: { name: 'r', protocolFamily: 'claude' } })),
-    ).toBe('input.protocolFamily取值必须是 dsh')
+      rejectedMessage(cmd('runtime.create', { input: { name: 'r', executorKey: 'Dsh' } })),
+    ).toBe('input.executorKey 必须是小写 slug（字母开头，可含数字与连字符）')
+    expect(
+      rejectedMessage(cmd('runtime.create', { input: { name: 'r', argsTemplate: 'not-json' } })),
+    ).toBe('input.argsTemplate 必须是 JSON 数组文本')
+    expect(
+      rejectedMessage(
+        cmd('runtime.create', { input: { name: 'r', argsTemplate: '["--print","{nope}"]' } }),
+      ),
+    ).toBe('input.argsTemplate[1] 含未知占位符 {nope}')
     expect(rejectedMessage(cmd('runtime.create', { input: { name: 'r', command: 7 } }))).toBe(
       'input.command必须是字符串',
     )

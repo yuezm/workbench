@@ -48,6 +48,10 @@ const task: Task = {
   workflowId: 'w',
   currentStageId: 's1',
   status: 'active',
+  origin: 'manual',
+  ruleId: null,
+  externalRef: null,
+  labels: [],
   createdAt: 't',
   updatedAt: 't',
 }

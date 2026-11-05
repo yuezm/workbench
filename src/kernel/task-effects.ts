@@ -1,0 +1,111 @@
+/**
+ * 任务进入阶段的效果（纯函数，M6 从 `decide.ts` 抽出）。
+ *
+ * 进入阶段：落点 `entryMode='agent'` 且智能体 / 运行时都在时，产一条 `run.queued`
+ * （完整 `RunRow`，宿主直接领取执行）。人工拖拽、建任务、回执流转、规则建任务
+ * 共用这一条路径——「规则只建任务，进入阶段后与手工任务同一个引擎」。
+ *
+ * 规则触发的首轮可带 `RunTrigger`：`ruleId/rulesVersion/eventIds/hops` 写进 run 行，
+ * 规则 `prompt` 追加到提示词末尾（固定段，不拼外部事件正文）。
+ */
+import type { Runtime, Task } from '../protocol/entities'
+import type { Actor, Environment, FactDraft, View } from './types'
+import { taskPrompt } from './prompt'
+
+/** 权限模式 → 协议帧的 access 级别（SPEC-plugins「Turn」）。 */
+export const ACCESS_BY_PERMISSION: Record<Runtime['permissionMode'], 'read' | 'edit' | 'full'> = {
+  'read-only': 'read',
+  'workspace-write': 'edit',
+  'danger-full-access': 'full',
+}
+
+/** 规则触发的首轮元信息（规则建任务时传给 `entryRunFacts`）。 */
+export interface RunTrigger {
+  ruleId: string
+  rulesVersion: number
+  eventIds: string[]
+  hops: number
+  /** 规则附加说明（固定文本，不拼外部事件正文） */
+  promptExtra?: string
+}
+
+/**
+ * 进入阶段的效果：落点阶段 `entryMode='agent'` 且智能体 / 运行时都在时，产一条
+ * `run.queued`。
+ *
+ * 每次进入都触发（人工拖拽、建任务、回执流转、规则建任务都重新建 run）；以下零事实：
+ * - 阶段是 `user` / `none`（等人或仅停留）；
+ * - 任务已完成 / 无当前阶段；
+ * - 阶段没有绑定智能体，或智能体 / 运行时已不存在（旧 `applyStageEffects` 同口径）。
+ */
+export function entryRunFacts(
+  view: View,
+  task: Task,
+  now: string,
+  env: Environment,
+  actor: Actor,
+  trigger?: RunTrigger,
+): FactDraft<'run.queued'>[] {
+  if (task.status !== 'active' || task.currentStageId === null) return []
+  const stage = view.stages.get(task.currentStageId)
+  if (!stage || stage.entryMode !== 'agent') return []
+  const agent = stage.agentId === null ? undefined : view.agents.get(stage.agentId)
+  if (!agent) return []
+  const runtime = view.runtimes.get(agent.runtimeId)
+  if (!runtime) return []
+
+  const prompt = [taskPrompt(agent, task, stage.name), trigger?.promptExtra ?? '']
+    .filter(Boolean)
+    .join('\n\n')
+  return [
+    {
+      type: 'run.queued',
+      actor,
+      at: now,
+      payload: {
+        run: {
+          id: env.nextId('run'),
+          purpose: 'stage',
+          taskId: task.id,
+          conversationId: null,
+          stageId: stage.id,
+          agentId: agent.id,
+          runtimeId: runtime.id,
+          ruleId: trigger?.ruleId ?? null,
+          rulesVersion: trigger?.rulesVersion ?? 0,
+          executorKey: runtime.executorKey,
+          threadId: null,
+          cwd: runtime.workdir ?? '',
+          access: ACCESS_BY_PERMISSION[runtime.permissionMode],
+          skill: null,
+          promptRef: null,
+          eventIds: trigger?.eventIds ?? [],
+          hops: trigger?.hops ?? 0,
+          turn: 1,
+          resumeSessionId: null,
+          threadContextRef: null,
+          queueSeq: 0,
+          status: 'queued',
+          prompt,
+          output: '',
+          error: null,
+          errorCode: null,
+          exitCode: null,
+          sessionId: null,
+          usage: null,
+          durationMs: null,
+          leaseId: null,
+          attempt: 0,
+          attempts: 0,
+          leaseUntil: null,
+          notBefore: null,
+          deadlineAt: null,
+          cancelRequested: false,
+          startedAt: null,
+          endedAt: null,
+          createdAt: now,
+        },
+      },
+    },
+  ]
+}

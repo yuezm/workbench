@@ -141,6 +141,10 @@ describe('kernel/prompt 回执块说明', () => {
       workflowId: 'wf-1',
       currentStageId: 'st-1',
       status: 'active',
+      origin: 'manual',
+      ruleId: null,
+      externalRef: null,
+      labels: [],
       createdAt: CREATED,
       updatedAt: CREATED,
     }

@@ -22,6 +22,7 @@ import type {
   Task,
   WorkflowWithStages,
 } from './entities'
+import type { RuleSetView } from './rules'
 
 /**
  * 视图 id 全集；新增视图必须先登记在这里，命令/宿主不得传任意字符串。
@@ -53,6 +54,7 @@ export const VIEW_IDS = [
   'runtimes.executors',
   'runtimes.detected',
   'runtimes.models',
+  'rules.all',
 ] as const
 
 /**
@@ -170,6 +172,8 @@ export interface ViewResults {
   'runtimes.detected': DetectedRuntime[]
   /** 某运行时的模型目录（宿主视图：执行器只读调用） */
   'runtimes.models': RuntimeModelOption[]
+  /** 当前规则集（M6）：版本 + 规则清单；无规则时为 `{version:0, rules:[]}` */
+  'rules.all': RuleSetView
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

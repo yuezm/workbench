@@ -1,10 +1,11 @@
 /**
- * 投影变更落库：`Change.row` ↔ 十张投影表的 snake_case 列，逐列显式映射
+ * 投影变更落库：`Change.row` ↔ 十二张投影表的 snake_case 列，逐列显式映射
  * （不 `SELECT *`、不猜列名）。
  *
- * - 实体五表 / runs / conversations / messages / cards 的整行：主键 `id`，`row === null` 删除。
+ * - 实体五表 / runs / conversations / messages / cards / rule_sets 的整行：主键 `id`，`row === null` 删除。
  * - `run_events`：主键 `(run_id, seq)`，`Change.key = '<runId>:<seq>'`；**纯追加**，
  *   重复键直接撞唯一约束报错（禁止 `INSERT OR REPLACE` 覆盖历史）。
+ * - `rule_fires`（M6）：主键 `id`；**纯追加**，重复触发事实撞主键报错（与 `run_events` 同口径）。
  *
  * 级联删除由父键显式完成（事实只携带父 id）：删除 `runs` 行先按 `run_id` 删 `run_events` 与
  * `cards`；删除 `conversations` 行先按 `conversation_id` 删 `messages`。`cards.run_id` 虽然
@@ -13,7 +14,8 @@
  * 重建时同样走这条路径，所以「删任务 → `run.removed` → 重建」与旧 SQL 级联的可见结果一致（D13）。
  *
  * 运行类事实携带完整 `RunRow`（`kernel/project` 只回填 `queueSeq`）：这里整行 upsert；
- * `snapshot.imported` 的存量行可能缺 M2 新列，由 `normalizeRun` 补默认值。
+ * `snapshot.imported` 的存量行可能缺 M2 新列，由 `normalizeRun` 补默认值。任务同理：
+ * M6 前的历史行缺来源四列，由 `normalizeTask` 兜底（`kernel/project` 已归一，这里是投影边界的第二道防线）。
  *
  * `workflow_stages.created_at` 不在 `WorkflowStage` 行类型里（契约不含该字段），
  * 首次插入时用事实的 `at` 顶上，更新时保留原值——重建与增量因此得到相同的行。
@@ -41,6 +43,7 @@ import type {
   WorkflowStage,
 } from '../../protocol/entities'
 import type { Change, Iso, ProjectionRow, ProjectionTable } from '../../kernel/types'
+import type { RuleFireRow, RuleSetRow } from '../../protocol/rules'
 import { StoreError } from './errors'
 
 /** 一条投影变更 + 它所属事实的时间（阶段行首次插入的 created_at 兜底）。 */
@@ -54,12 +57,13 @@ export interface ProjectionWriter {
   /** 整批应用（一次 dispatch / 一次重建的全部变更）：跨行换序在批内合法。 */
   applyAll(writes: readonly ProjectionWrite[]): void
   /**
-   * 清空白名单十表。
+   * 清空白名单十二表。
    *
    * 只能在 `PRAGMA foreign_keys = OFF` 的重建事务里调用：`runs.task_id` 是
    * `ON DELETE CASCADE`，外键开启时清 `tasks` 会连带删掉运行记录与 `run_events`。
    * 顺序按外键依赖倒序（run_events → cards → runs → messages → conversations → tasks → …），
    * 外键关掉时只是让意图可读；`cards` 先于 `runs` 删，即使外键意外开着也不会依赖级联。
+   * 规则两表没有外键，放最后清即可。
    */
   clear(): void
 }
@@ -182,6 +186,22 @@ const runValue = (field: keyof RunRow, run: RunRow): SQLInputValue => {
   }
 }
 
+/**
+ * 规整任务行的缺省值（M6）：M6 前的 `task.created` / `snapshot.imported` 行没有来源四列。
+ * `kernel/project` 已归一；这里是投影边界的第二道防线（与 `normalizeRun` 同一模式），
+ * 保证任何路径写入的 `Change` 都能绑参、且增量与重建折出同一行。
+ */
+const normalizeTask = (row: Task): Task => {
+  const legacy = row as Partial<Task>
+  return {
+    ...row,
+    origin: legacy.origin ?? 'manual',
+    ruleId: legacy.ruleId ?? null,
+    externalRef: legacy.externalRef ?? null,
+    labels: legacy.labels ?? [],
+  }
+}
+
 /** `Card` 字段 → `cards` 列（顺序与 schema DDL 一致；整行 upsert 与快照列清单共用）。 */
 const CARD_FIELDS: ReadonlyArray<readonly [keyof Card, string]> = [
   ['id', 'id'],
@@ -223,14 +243,20 @@ const runEventPayload = (event: RunEventRow): string => {
 export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
   const upserts = {
     tasks: db.prepare(
-      `INSERT INTO tasks (id, title, description, workflow_id, current_stage_id, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO tasks
+         (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
+          external_ref, labels_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
          workflow_id = excluded.workflow_id,
          current_stage_id = excluded.current_stage_id,
          status = excluded.status,
+         origin = excluded.origin,
+         rule_id = excluded.rule_id,
+         external_ref = excluded.external_ref,
+         labels_json = excluded.labels_json,
          created_at = excluded.created_at,
          updated_at = excluded.updated_at`,
     ),
@@ -305,6 +331,15 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          error = excluded.error,
          created_at = excluded.created_at`,
     ),
+    /** 规则集单行（id='current'）整行替换：版本与规则同属一行，不做合并。 */
+    rule_sets: db.prepare(
+      `INSERT INTO rule_sets (id, version, replaced_at, rules_json)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         version = excluded.version,
+         replaced_at = excluded.replaced_at,
+         rules_json = excluded.rules_json`,
+    ),
   }
 
   const runColumns = RUN_FIELDS.map(([, column]) => column).join(', ')
@@ -330,6 +365,12 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
      VALUES (?, ?, ?, ?, ?)`,
   )
 
+  /** 规则触发纯追加（M6）：重复 `id` 撞主键报错，不覆盖历史触发记录。 */
+  const insertRuleFire = db.prepare(
+    `INSERT INTO rule_fires (id, rule_id, version, scheduled_for, fired_at, task_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  )
+
   const deletes = {
     tasks: db.prepare('DELETE FROM tasks WHERE id = ?'),
     workflows: db.prepare('DELETE FROM workflows WHERE id = ?'),
@@ -343,6 +384,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     conversations: db.prepare('DELETE FROM conversations WHERE id = ?'),
     messages: db.prepare('DELETE FROM messages WHERE conversation_id = ?'),
     cards: db.prepare('DELETE FROM cards WHERE id = ?'),
+    /** 规则两表没有删除事实（M6 只整批替换/追加），语句只为满足 `ProjectionTable` 全集。 */
+    rule_sets: db.prepare('DELETE FROM rule_sets WHERE id = ?'),
+    rule_fires: db.prepare('DELETE FROM rule_fires WHERE id = ?'),
   }
 
   const clearAll = {
@@ -356,6 +400,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     workflows: db.prepare('DELETE FROM workflows'),
     agents: db.prepare('DELETE FROM agents'),
     runtimes: db.prepare('DELETE FROM runtimes'),
+    rule_fires: db.prepare('DELETE FROM rule_fires'),
+    rule_sets: db.prepare('DELETE FROM rule_sets'),
   }
 
   const stageOccupant = db.prepare(
@@ -369,7 +415,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
   /** 一行变更 → 一条 upsert；`at` 只给没有 created_at 字段的阶段行兜底。 */
   const writes: Record<ProjectionTable, (row: ProjectionRow, at: Iso) => void> = {
     tasks: (row) => {
-      const task = row as Task
+      const task = normalizeTask(row as Task)
       upserts.tasks.run(
         task.id,
         task.title,
@@ -377,6 +423,10 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         task.workflowId,
         task.currentStageId,
         task.status,
+        task.origin,
+        task.ruleId,
+        task.externalRef,
+        JSON.stringify(task.labels),
         task.createdAt,
         task.updatedAt,
       )
@@ -463,6 +513,26 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       const card = row as Card
       insertCard.run(...CARD_FIELDS.map(([field]) => cardValue(field, card)))
     },
+    rule_sets: (row) => {
+      const ruleSet = row as RuleSetRow
+      upserts.rule_sets.run(
+        ruleSet.id,
+        ruleSet.version,
+        ruleSet.replacedAt,
+        JSON.stringify(ruleSet.rules),
+      )
+    },
+    rule_fires: (row) => {
+      const fire = row as RuleFireRow
+      insertRuleFire.run(
+        fire.id,
+        fire.ruleId,
+        fire.version,
+        fire.scheduledFor,
+        fire.firedAt,
+        fire.taskId,
+      )
+    },
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */
@@ -515,6 +585,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     clearAll.workflows.run()
     clearAll.agents.run()
     clearAll.runtimes.run()
+    clearAll.rule_fires.run()
+    clearAll.rule_sets.run()
   }
 
   return { apply, applyAll, clear }

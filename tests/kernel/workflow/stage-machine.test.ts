@@ -38,6 +38,10 @@ const task = (currentStageId: string | null): Task => ({
   workflowId: 'wf',
   currentStageId,
   status: 'active',
+  origin: 'manual',
+  ruleId: null,
+  externalRef: null,
+  labels: [],
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 })
@@ -134,6 +138,10 @@ function sTask(currentStageId: string | null, status: Task['status'] = 'active')
     workflowId: 'w1',
     currentStageId,
     status,
+    origin: 'manual',
+    ruleId: null,
+    externalRef: null,
+    labels: [],
     createdAt: 't',
     updatedAt: 't',
   }

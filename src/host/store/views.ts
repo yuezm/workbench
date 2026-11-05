@@ -32,11 +32,13 @@ import type {
   RuntimeProbe,
   RuntimeStatus,
   Task,
+  TaskOrigin,
   TaskStatus,
   Workflow,
   WorkflowStage,
   WorkflowWithStages,
 } from '../../protocol/entities'
+import type { RuleSetRow, RuleSetView } from '../../protocol/rules'
 import type {
   ActiveRun,
   RuntimeWorkload,
@@ -45,7 +47,7 @@ import type {
   WaitingRun,
 } from '../../protocol/views'
 import { VIEW_IDS } from '../../protocol/views'
-import type { ProjectionTable, View } from '../../kernel/types'
+import type { Id, Iso, ProjectionTable, View } from '../../kernel/types'
 import { lastSeq } from './facts'
 import { StoreError } from './errors'
 
@@ -100,8 +102,20 @@ interface TaskRow {
   workflow_id: string
   current_stage_id: string | null
   status: string
+  origin: string
+  rule_id: string | null
+  external_ref: string | null
+  labels_json: string
   created_at: string
   updated_at: string
+}
+
+/** `rule_sets` 单行投影（列与 `host/schema` 的 DDL 一一对应）。 */
+interface RuleSetDbRow {
+  id: string
+  version: number
+  replaced_at: string
+  rules_json: string
 }
 
 /** `runs` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
@@ -247,6 +261,10 @@ const mapTask = (row: TaskRow): Task => ({
   workflowId: row.workflow_id,
   currentStageId: row.current_stage_id,
   status: row.status as TaskStatus,
+  origin: row.origin as TaskOrigin,
+  ruleId: row.rule_id,
+  externalRef: row.external_ref,
+  labels: JSON.parse(row.labels_json) as string[],
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -373,13 +391,14 @@ const readRuntimes = (db: DatabaseSync): Runtime[] =>
       .all() as unknown as RuntimeRow[]
   ).map(mapRuntime)
 
+/** `tasks` 投影的列清单（逐列写死，不用 `SELECT *`；三处读路径共用）。 */
+const TASK_COLUMNS = `id, title, description, workflow_id, current_stage_id, status, origin,
+        rule_id, external_ref, labels_json, created_at, updated_at`
+
 const readTasks = (db: DatabaseSync): Task[] =>
   (
     db
-      .prepare(
-        `SELECT id, title, description, workflow_id, current_stage_id, status, created_at, updated_at
-         FROM tasks ORDER BY created_at, rowid`,
-      )
+      .prepare(`SELECT ${TASK_COLUMNS} FROM tasks ORDER BY created_at, rowid`)
       .all() as unknown as TaskRow[]
   ).map(mapTask)
 
@@ -620,9 +639,48 @@ const readActiveTaskIds = (db: DatabaseSync): Set<string> => {
   return new Set(rows.map((row) => row.task_id))
 }
 
+/**
+ * 当前规则集（`rule_sets` 单行 `id='current'`）：没有 `rules.replaced` 事实时为 null。
+ * 装载视图与 `rules.all` 查询共用，避免两处各读一次、口径分叉。
+ */
+const readRuleSet = (db: DatabaseSync): RuleSetRow | null => {
+  const row = db
+    .prepare("SELECT id, version, replaced_at, rules_json FROM rule_sets WHERE id = 'current'")
+    .get() as unknown as RuleSetDbRow | undefined
+  if (row === undefined) return null
+  return {
+    id: 'current',
+    version: row.version,
+    replacedAt: row.replaced_at,
+    rules: JSON.parse(row.rules_json) as RuleSetRow['rules'],
+  }
+}
+
+/**
+ * 每条规则最近一次 cron 触发的**计划时刻**（`scheduled_for`，不是 `fired_at`）：
+ * 内核拿它做 cron 基线（同一到点时刻只触发一次、停机错过只补最近一次）。
+ * ISO 字符串字典序即时间序，`MAX` 可直接用；没有触发记录的规则不出现在 Map 里。
+ */
+const readRuleFiredAt = (db: DatabaseSync): Map<Id, Iso> => {
+  const rows = db
+    .prepare('SELECT rule_id, MAX(scheduled_for) AS scheduled_for FROM rule_fires GROUP BY rule_id')
+    .all() as unknown as Array<{ rule_id: string; scheduled_for: string }>
+  return new Map(rows.map((row) => [row.rule_id, row.scheduled_for]))
+}
+
+/** `rules.all` 视图：无规则集时 `{ version: 0, rules: [] }`（与内核「版本从 0 起」同口径）。 */
+const readRuleSetView = (db: DatabaseSync): RuleSetView => {
+  const ruleSet = readRuleSet(db)
+  return ruleSet === null
+    ? { version: 0, rules: [] }
+    : { version: ruleSet.version, rules: ruleSet.rules }
+}
+
 /** 按输入声明的切片装载视图：未声明的表不查，`activeTaskIds` 总是装载。 */
 export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): View {
   const slice = new Set<ProjectionTable>(tables)
+  // 规则集是单行切片：未声明时按「无规则集」装载（version 0 / 空清单 / null 基线）。
+  const ruleSet = slice.has('rule_sets') ? readRuleSet(db) : null
   return {
     seq: lastSeq(db),
     workflows: slice.has('workflows') ? toMap(readWorkflows(db)) : new Map(),
@@ -635,6 +693,10 @@ export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): 
     messages: slice.has('messages') ? toMap(readMessages(db)) : new Map(),
     cards: slice.has('cards') ? toMap(readCards(db)) : new Map(),
     activeTaskIds: readActiveTaskIds(db),
+    rules: ruleSet?.rules ?? [],
+    rulesVersion: ruleSet?.version ?? 0,
+    ruleSetReplacedAt: ruleSet?.replacedAt ?? null,
+    ruleFiredAt: slice.has('rule_fires') ? readRuleFiredAt(db) : new Map(),
   }
 }
 
@@ -654,19 +716,13 @@ const readWorkflowsWithStages = (db: DatabaseSync): WorkflowWithStages[] => {
 const readTasksByWorkflow = (db: DatabaseSync, workflowId: string): Task[] =>
   (
     db
-      .prepare(
-        `SELECT id, title, description, workflow_id, current_stage_id, status, created_at, updated_at
-         FROM tasks WHERE workflow_id = ? ORDER BY created_at, rowid`,
-      )
+      .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE workflow_id = ? ORDER BY created_at, rowid`)
       .all(workflowId) as unknown as TaskRow[]
   ).map(mapTask)
 
 const readTask = (db: DatabaseSync, taskId: string): Task | null => {
   const row = db
-    .prepare(
-      `SELECT id, title, description, workflow_id, current_stage_id, status, created_at, updated_at
-       FROM tasks WHERE id = ?`,
-    )
+    .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`)
     .get(taskId) as unknown as TaskRow | undefined
   return row ? mapTask(row) : null
 }
@@ -764,6 +820,9 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'kernel.seq':
       // M5：kernelStore 的快照水位（事实日志最大 seq）
       return lastSeq(db)
+    case 'rules.all':
+      // M6：规则页只读视图（版本 + 当前规则清单）；无规则集时返回空版本
+      return readRuleSetView(db)
     case 'runtimes.executors':
     case 'runtimes.detected':
     case 'runtimes.models':

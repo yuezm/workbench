@@ -32,6 +32,8 @@ const expected = [
   'chat.remove',
   'chat.cancel',
   'app.event',
+  'rules.replace',
+  'rule.trigger',
 ]
 
 describe('protocol/commands', () => {

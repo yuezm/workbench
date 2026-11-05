@@ -19,6 +19,13 @@ import {
   RUN_TERMINAL_STATUSES,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
+import {
+  RULE_LIMITS,
+  RULE_MERGE,
+  RULE_ON_EXISTING,
+  RULE_THREAD_KEY_FROM,
+  RULE_TITLE_FROM,
+} from './rules'
 import { VIEW_IDS, VIEW_PARAM_FIELDS, type ViewId } from './views'
 
 /** 校验通过返回收窄后的命令；失败返回首条错误文案。 */
@@ -77,6 +84,8 @@ export const COMMAND_LIMITS = {
   frames: 500,
   /** 帧 seq 上限（宿主按 run 全局单调分配，防御性上界） */
   frameSeq: 1_000_000_000,
+  /** 事件跳数上限（与 `Limits.maxHops` 同值；超限由内核写 `event.dropped`） */
+  maxHops: 8,
 } as const
 
 type Obj = Record<string, unknown>
@@ -327,6 +336,96 @@ const checkEventType = (value: unknown): Check => {
     : 'eventType 必须是小写点分标识（如 pomodoro.completed）'
 }
 
+/** 规则来源：`*` 或小写标识（`:` 允许 app 来源写法，如 `app:pomodoro`）。 */
+const RULE_SOURCE_PATTERN = /^(\*|[a-z][a-z0-9:_-]*)$/
+
+/** 规则 type 匹配模式：精确、`*`、前缀 `x.*`。 */
+const RULE_TYPE_PATTERN = /^(\*|[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*(\.\*)?)$/
+
+const checkRuleWhen = (value: unknown, label: string): Check => {
+  const when = asRecord(value)
+  if (!when) return `${label} 必须是对象`
+  const hasCron = when.cron !== undefined && when.cron !== null
+  const hasEvent = when.source !== undefined || when.types !== undefined
+  if (hasCron && hasEvent) return `${label} 只能二选一：cron 或 source+types`
+  if (hasCron) return required(when.cron, `${label}.cron`, RULE_LIMITS.cron)
+  if (!hasEvent) return `${label} 必须提供 cron 或 source+types`
+
+  if (typeof when.source !== 'string') return `${label}.source 必须是字符串`
+  if (when.source.length > RULE_LIMITS.source)
+    return `${label}.source 最长 ${RULE_LIMITS.source} 个字符`
+  if (!RULE_SOURCE_PATTERN.test(when.source)) {
+    return `${label}.source 必须是小写标识或 *（如 github / app:pomodoro）`
+  }
+  if (!Array.isArray(when.types)) return `${label}.types 必须是数组`
+  if (when.types.length === 0) return `${label}.types 至少 1 项`
+  if (when.types.length > RULE_LIMITS.types) return `${label}.types 最多 ${RULE_LIMITS.types} 项`
+  for (let i = 0; i < when.types.length; i += 1) {
+    const pattern = when.types[i]
+    if (typeof pattern !== 'string') return `${label}.types[${i}] 必须是字符串`
+    if (pattern.length > RULE_LIMITS.typePattern) {
+      return `${label}.types[${i}] 最长 ${RULE_LIMITS.typePattern} 个字符`
+    }
+    if (!RULE_TYPE_PATTERN.test(pattern)) {
+      return `${label}.types[${i}] 必须是精确类型、* 或前缀 x.*`
+    }
+  }
+  return null
+}
+
+const checkRuleTarget = (value: unknown, label: string): Check => {
+  const to = asRecord(value)
+  if (!to) return `${label} 必须是对象`
+  const workflowError = requiredId(to.workflowId, `${label}.workflowId`)
+  if (workflowError) return workflowError
+  const stageError = optionalId(to.stageId, `${label}.stageId`)
+  if (stageError) return stageError
+
+  if (to.task !== undefined && to.task !== null) {
+    const task = asRecord(to.task)
+    if (!task) return `${label}.task 必须是对象`
+    const titleError = optionalEnum(task.titleFrom, `${label}.task.titleFrom`, RULE_TITLE_FROM)
+    if (titleError) return titleError
+    const labelsError = checkList(
+      task.labels,
+      `${label}.task.labels`,
+      RULE_LIMITS.labels,
+      (entry, at) => text(entry, at, RULE_LIMITS.label),
+    )
+    if (labelsError) return labelsError
+  }
+
+  if (to.thread !== undefined && to.thread !== null) {
+    const thread = asRecord(to.thread)
+    if (!thread) return `${label}.thread 必须是对象`
+    const keyError = requiredEnum(thread.keyFrom, `${label}.thread.keyFrom`, RULE_THREAD_KEY_FROM)
+    if (keyError) return keyError
+    const onExistingError = optionalEnum(
+      thread.onExisting,
+      `${label}.thread.onExisting`,
+      RULE_ON_EXISTING,
+    )
+    if (onExistingError) return onExistingError
+  }
+  return null
+}
+
+/** 单条规则形状校验（引用是否存在、cron 是否合法等语义由内核 `decide` 判）。 */
+const checkRule = (value: unknown, label: string): Check => {
+  const rule = asRecord(value)
+  if (!rule) return `${label} 必须是对象`
+  return (
+    requiredId(rule.id, `${label}.id`) ??
+    required(rule.name, `${label}.name`, RULE_LIMITS.name) ??
+    checkRuleWhen(rule.when, `${label}.when`) ??
+    checkRuleTarget(rule.to, `${label}.to`) ??
+    optionalText(rule.prompt, `${label}.prompt`, RULE_LIMITS.prompt) ??
+    optionalIntegerIn(rule.parallel, `${label}.parallel`, 1, RULE_LIMITS.parallel) ??
+    optionalEnum(rule.merge, `${label}.merge`, RULE_MERGE) ??
+    (typeof rule.enabled === 'boolean' ? null : `${label}.enabled 必须是布尔值`)
+  )
+}
+
 const checkPayload = (type: CommandName, command: Obj): Check => {
   switch (type) {
     case 'workflow.create':
@@ -389,6 +488,12 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
         optionalText(command.link, 'link', COMMAND_LIMITS.workdir) ??
         optionalText(command.dedupeKey, 'dedupeKey', COMMAND_LIMITS.id)
       )
+    case 'rules.replace':
+      // 整批替换：逐条只校验形状；引用存在性 / cron 合法性 / id 唯一由内核判（整批拒绝）
+      if (!Array.isArray(command.rules)) return 'rules 必须是数组'
+      return checkList(command.rules, 'rules', RULE_LIMITS.rules, checkRule)
+    case 'rule.trigger':
+      return requiredId(command.ruleId, 'ruleId')
   }
 }
 
@@ -591,6 +696,14 @@ const checkHostPayload = (type: HostInputName, input: Obj): Check => {
         requiredId(input.cardId, 'cardId') ??
         integerIn(input.version, 'version', 1, COMMAND_LIMITS.turn) ??
         required(input.error, 'error', COMMAND_LIMITS.description)
+      )
+    case 'event.received':
+      // 外部事件入口：形状与回执 events[] 的 RawEvent 同口径；语义（命中哪条规则）由内核判
+      return (
+        checkRawEvent(input.event, 'event') ??
+        optionalIntegerIn(input.hops, 'hops', 0, COMMAND_LIMITS.maxHops) ??
+        optionalId(input.originRunId, 'originRunId') ??
+        optionalText(input.detailRef, 'detailRef', COMMAND_LIMITS.workdir)
       )
   }
 }

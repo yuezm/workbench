@@ -1,7 +1,8 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Card, RunRow, Runtime, RuntimeProbe } from '../../src/protocol/entities'
+import type { Card, RunRow, Runtime, RuntimeProbe, Task } from '../../src/protocol/entities'
+import type { AutomationRule } from '../../src/protocol/rules'
 import type { Command } from '../../src/protocol/commands'
 import type { ExecutorPort } from '../../src/protocol/executor'
 import { decide } from '../../src/kernel/decide'
@@ -241,6 +242,95 @@ describe('host/commands：命令路由（M5）', () => {
         appId: 'unknown',
         eventType: 'pomodoro.completed',
         subject: 'x',
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_input' })
+  })
+
+  it('rules.replace：整批保存返回新版本与规则清单；重复 commandId 不重复产事实', async () => {
+    const { store, router } = setup()
+    const workflow = (await router.dispatch(workflowCommand())).value as { id: string }
+    const rule: AutomationRule = {
+      id: 'rule-1',
+      name: 'Issue 进研发',
+      when: { source: 'github', types: ['issues.opened'] },
+      to: { workflowId: workflow.id },
+      enabled: true,
+    }
+    const command: Command = { commandId: 'c-rules', type: 'rules.replace', rules: [rule] }
+
+    const saved = await router.dispatch(command)
+    expect(saved.facts.map((fact) => fact.type)).toEqual(['rules.replaced'])
+    expect(saved.value).toEqual({ version: 1, rules: [rule] })
+    expect(store.query('rules.all')).toEqual({ version: 1, rules: [rule] })
+
+    // 幂等回放：不重复产事实，返回值与首次一致（读的是当前投影）
+    const replay = await router.dispatch(command)
+    expect(replay.facts).toEqual(saved.facts)
+    expect(replay.value).toEqual(saved.value)
+    expect(store.factsCount()).toBe(4) // workflow.created + 2 stage.created + rules.replaced
+  })
+
+  it('rules.replace：非法整批 reject，旧规则继续生效', async () => {
+    const { store, router } = setup()
+    const workflow = (await router.dispatch(workflowCommand())).value as { id: string }
+    const rule: AutomationRule = {
+      id: 'rule-1',
+      name: 'Issue 进研发',
+      when: { source: 'github', types: ['issues.opened'] },
+      to: { workflowId: workflow.id },
+      enabled: true,
+    }
+    await router.dispatch({ commandId: 'c-rules', type: 'rules.replace', rules: [rule] })
+
+    // 空名在 validateCommand 就拒收：零事实、旧版继续生效
+    await expect(
+      router.dispatch({
+        commandId: 'c-rules-bad',
+        type: 'rules.replace',
+        rules: [{ ...rule, name: '' }],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_input' })
+    expect(store.query('rules.all')).toEqual({ version: 1, rules: [rule] })
+    expect(store.factsCount()).toBe(4) // 非法整批零事实：仍是 workflow(3) + rules.replaced
+  })
+
+  it('rule.trigger：手动运行建一条规则任务并返回任务值；重复 commandId 幂等', async () => {
+    const { store, router } = setup()
+    const workflow = (await router.dispatch(workflowCommand())).value as { id: string }
+    const rule: AutomationRule = {
+      id: 'rule-1',
+      name: 'Issue 进研发',
+      when: { source: 'github', types: ['issues.opened'] },
+      to: { workflowId: workflow.id },
+      enabled: true,
+    }
+    await router.dispatch({ commandId: 'c-rules', type: 'rules.replace', rules: [rule] })
+    const command: Command = { commandId: 'c-trigger', type: 'rule.trigger', ruleId: 'rule-1' }
+
+    const fired = await router.dispatch(command)
+    expect(fired.facts.map((fact) => fact.type)).toEqual(['task.created'])
+    const task = fired.value as Task
+    expect(task).toMatchObject({
+      title: 'Issue 进研发',
+      workflowId: workflow.id,
+      origin: 'rule',
+      ruleId: 'rule-1',
+      externalRef: null,
+    })
+    expect(store.query('task.byId', { taskId: task.id })).toEqual(task)
+
+    const replay = await router.dispatch(command)
+    expect(replay.facts).toEqual(fired.facts)
+    expect(replay.value).toEqual(fired.value)
+    expect(store.factsCount()).toBe(5) // workflow(3) + rules.replaced + task.created
+  })
+
+  it('event.received 是宿主输入：不能经命令路由（renderer）提交', async () => {
+    const { router } = setup()
+    await expect(
+      router.dispatch({
+        type: 'event.received',
+        event: { source: 'github', type: 'issues.opened', subject: 'x' },
       }),
     ).rejects.toMatchObject({ code: 'invalid_input' })
   })

@@ -24,13 +24,17 @@ import type {
 } from '../protocol/entities'
 import type { FactPayload, FactType } from '../protocol/facts'
 import type { Input } from '../protocol/inputs'
+import type { AutomationRule, RuleFireRow, RuleSetRow } from '../protocol/rules'
 
 export type Seq = number
 export type Id = string
 export type Iso = string
 
-/** 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。M4：卡片与派生事件入账。 */
-export const KERNEL_VERSION = 'm4.0.0'
+/**
+ * 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。
+ * M4：卡片与派生事件入账；M6：规则集与 cron 触发投影。
+ */
+export const KERNEL_VERSION = 'm6.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
@@ -46,7 +50,8 @@ export type Actor =
 
 /**
  * 投影表全集：只有这些表可由事实重建（`host` 的清空白名单与指纹必须与之一致）。
- * M2 在实体五表之后追加运行生命周期相关的四张表；M4 追加卡片表（第 10 张）。
+ * M2 在实体五表之后追加运行生命周期相关的四张表；M4 追加卡片表（第 10 张）；
+ * M6 追加规则集与规则触发记录（第 11、12 张）。
  */
 export const PROJECTION_TABLES = [
   'tasks',
@@ -59,6 +64,8 @@ export const PROJECTION_TABLES = [
   'conversations',
   'messages',
   'cards',
+  'rule_sets',
+  'rule_fires',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -74,6 +81,8 @@ export type ProjectionRow =
   | Conversation
   | Message
   | Card
+  | RuleSetRow
+  | RuleFireRow
 
 export interface FactDraft<T extends FactType = FactType> {
   type: T
@@ -111,6 +120,14 @@ export interface View {
   messages: Map<Id, Message>
   /** 存在 queued/running/waiting run 的任务；「执行中」只认它，不由 UI 推导。 */
   activeTaskIds: Set<Id>
+  /** M6：当前规则集（整批替换；空集为 `[]`） */
+  rules: AutomationRule[]
+  /** M6：规则版本（随 `rules.replaced` 递增；无规则集为 0） */
+  rulesVersion: number
+  /** M6：本版规则集的替换时刻（cron 规则首次触发的基线）；无规则集为 null */
+  ruleSetReplacedAt: Iso | null
+  /** M6：规则 id → 最近一次 cron 触发的计划时刻（去重与「只补最近一次」） */
+  ruleFiredAt: Map<Id, Iso>
 }
 
 /**
@@ -159,6 +176,8 @@ export type IdKind =
   | 'card'
   /** 回执 `events[]` 派生的入账事件 id（M4 只记账，M6 规则用） */
   | 'event'
+  /** M6：cron 触发记录 id（`rule_fires` 投影行） */
+  | 'rule-fire'
 
 /** 宿主在边界注入：时区、限制、id 生成器（内核不取随机数）。 */
 export interface Environment {

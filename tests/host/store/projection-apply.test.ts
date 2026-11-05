@@ -2,7 +2,8 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '../../../src/kernel/types'
-import type { RunRow } from '../../../src/protocol/entities'
+import type { RunRow, Task } from '../../../src/protocol/entities'
+import type { AutomationRule, RuleFireRow, RuleSetRow } from '../../../src/protocol/rules'
 import { withTx } from '../../../src/host/schema'
 import { StoreError } from '../../../src/host/store/errors'
 import { createProjectionWriter } from '../../../src/host/store/projection-apply'
@@ -16,6 +17,15 @@ import {
 } from './test-support'
 
 const LATER_AT = '2026-01-02T00:00:00.000Z'
+
+/** 规则样例（`rule_sets.rules_json` 的逐字对比用）。 */
+const ruleOne: AutomationRule = {
+  id: 'rule-1',
+  name: 'Issue 进研发',
+  when: { source: 'github', types: ['issues.opened'] },
+  to: { workflowId: 'wf-1' },
+  enabled: true,
+}
 
 let openDbs: DatabaseSync[] = []
 
@@ -119,7 +129,8 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(
       db
         .prepare(
-          `SELECT id, title, description, workflow_id, current_stage_id, status, created_at, updated_at
+          `SELECT id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
+                  external_ref, labels_json, created_at, updated_at
            FROM tasks`,
         )
         .get(),
@@ -130,9 +141,137 @@ describe('createProjectionWriter：显式行映射', () => {
       workflow_id: 'wf-1',
       current_stage_id: 'st-1',
       status: 'completed',
+      origin: 'manual',
+      rule_id: null,
+      external_ref: null,
+      labels_json: '[]',
       created_at: SAMPLE_AT,
       updated_at: SAMPLE_AT,
     })
+  })
+
+  it('tasks 新列（M6）：规则来源四列整行 upsert，再次写入覆盖来源列', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    const stage = sample.stage()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+    const ruleTask = sample.task({
+      origin: 'rule',
+      ruleId: 'rule-1',
+      externalRef: 'issue-1',
+      labels: ['bug', 'ui'],
+    })
+    writer.apply({ table: 'tasks', key: ruleTask.id, row: ruleTask }, SAMPLE_AT)
+    expect(
+      db.prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks').get(),
+    ).toEqual({
+      origin: 'rule',
+      rule_id: 'rule-1',
+      external_ref: 'issue-1',
+      labels_json: '["bug","ui"]',
+    })
+
+    // 整行 upsert：同一 id 再写入时来源列随行覆盖（不做字段合并）
+    writer.apply(
+      {
+        table: 'tasks',
+        key: ruleTask.id,
+        row: sample.task({ title: '改回手工', origin: 'manual', ruleId: null, labels: [] }),
+      },
+      LATER_AT,
+    )
+    expect(
+      db.prepare('SELECT title, origin, rule_id, external_ref, labels_json FROM tasks').get(),
+    ).toEqual({
+      title: '改回手工',
+      origin: 'manual',
+      rule_id: null,
+      external_ref: null,
+      labels_json: '[]',
+    })
+    expect(countRows(db, 'tasks')).toBe(1)
+  })
+
+  it('老任务行缺来源四列：写入时归一为 manual / null / []（老事实 replay 兼容）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    const stage = sample.stage()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+    // M6 前的 Task 行没有这四个字段（历史事实 / 直接构造的变更）
+    const legacyRow = {
+      ...sample.task(),
+      origin: undefined,
+      ruleId: undefined,
+      externalRef: undefined,
+      labels: undefined,
+    } as unknown as Task
+    writer.apply({ table: 'tasks', key: legacyRow.id, row: legacyRow }, SAMPLE_AT)
+    expect(
+      db.prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks').get(),
+    ).toEqual({ origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' })
+  })
+
+  it('rule_sets 单行整行替换：版本与规则清单一起换，不合并旧规则', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const first: RuleSetRow = { id: 'current', version: 1, replacedAt: SAMPLE_AT, rules: [ruleOne] }
+    writer.apply({ table: 'rule_sets', key: 'current', row: first }, SAMPLE_AT)
+    expect(db.prepare('SELECT id, version, replaced_at, rules_json FROM rule_sets').get()).toEqual({
+      id: 'current',
+      version: 1,
+      replaced_at: SAMPLE_AT,
+      rules_json: JSON.stringify([ruleOne]),
+    })
+
+    const second: RuleSetRow = { id: 'current', version: 2, replacedAt: LATER_AT, rules: [] }
+    writer.apply({ table: 'rule_sets', key: 'current', row: second }, LATER_AT)
+    expect(db.prepare('SELECT version, replaced_at, rules_json FROM rule_sets').get()).toEqual({
+      version: 2,
+      replaced_at: LATER_AT,
+      rules_json: '[]',
+    })
+    expect(countRows(db, 'rule_sets')).toBe(1)
+  })
+
+  it('rule_fires 纯追加：重复 id 撞主键报错，不覆盖历史触发', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const fire: RuleFireRow = {
+      id: 'fire-1',
+      ruleId: 'rule-1',
+      version: 1,
+      scheduledFor: SAMPLE_AT,
+      firedAt: SAMPLE_AT,
+      taskId: 'tk-1',
+    }
+    writer.apply({ table: 'rule_fires', key: fire.id, row: fire }, SAMPLE_AT)
+    expect(
+      db
+        .prepare('SELECT id, rule_id, version, scheduled_for, fired_at, task_id FROM rule_fires')
+        .get(),
+    ).toEqual({
+      id: 'fire-1',
+      rule_id: 'rule-1',
+      version: 1,
+      scheduled_for: SAMPLE_AT,
+      fired_at: SAMPLE_AT,
+      task_id: 'tk-1',
+    })
+    expect(() =>
+      writer.apply(
+        {
+          table: 'rule_fires',
+          key: 'fire-1',
+          row: { ...fire, scheduledFor: LATER_AT, firedAt: LATER_AT },
+        },
+        LATER_AT,
+      ),
+    ).toThrow()
+    expect(countRows(db, 'rule_fires')).toBe(1)
   })
 
   it('upsert 更新已有行；阶段更新保留首次 created_at', () => {
@@ -305,7 +444,7 @@ describe('createProjectionWriter：显式行映射', () => {
     })
   })
 
-  it('clear 清空十张投影表（重建事务关外键）', () => {
+  it('clear 清空十二张投影表（重建事务关外键）', () => {
     const db = memory()
     const writer = createProjectionWriter(db)
     const runtime = sample.runtime()
@@ -317,6 +456,20 @@ describe('createProjectionWriter：显式行映射', () => {
     const conversation = sample.conversation()
     const message = sample.message()
     const card = sample.card()
+    const ruleSet: RuleSetRow = {
+      id: 'current',
+      version: 1,
+      replacedAt: SAMPLE_AT,
+      rules: [ruleOne],
+    }
+    const fire: RuleFireRow = {
+      id: 'fire-1',
+      ruleId: 'rule-1',
+      version: 1,
+      scheduledFor: SAMPLE_AT,
+      firedAt: SAMPLE_AT,
+      taskId: null,
+    }
     for (const change of [
       { table: 'runtimes', key: runtime.id, row: runtime },
       { table: 'agents', key: agent.id, row: agent },
@@ -328,11 +481,15 @@ describe('createProjectionWriter：显式行映射', () => {
       { table: 'conversations', key: conversation.id, row: conversation },
       { table: 'messages', key: message.id, row: message },
       { table: 'cards', key: card.id, row: card },
+      { table: 'rule_sets', key: ruleSet.id, row: ruleSet },
+      { table: 'rule_fires', key: fire.id, row: fire },
     ] as Change[]) {
       writer.apply(change, SAMPLE_AT)
     }
     expect(countRows(db, 'run_events')).toBe(1)
     expect(countRows(db, 'cards')).toBe(1)
+    expect(countRows(db, 'rule_sets')).toBe(1)
+    expect(countRows(db, 'rule_fires')).toBe(1)
 
     db.exec('PRAGMA foreign_keys = OFF')
     try {
@@ -352,6 +509,8 @@ describe('createProjectionWriter：显式行映射', () => {
       'conversations',
       'messages',
       'cards',
+      'rule_sets',
+      'rule_fires',
     ]) {
       expect(countRows(db, table)).toBe(0)
     }

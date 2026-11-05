@@ -222,6 +222,39 @@ describe('renderer/shell/kernelStore', () => {
     offEvents()
   })
 
+  it('规则事实只失效 rules.all：rules.replaced / rule.fired 都不触发全量失效', async () => {
+    const fake = fakeTransport({ 'rules.all': { version: 1, rules: [] }, 'agents.all': [] })
+    const store = createKernelStore(fake.transport)
+    await started(store)
+    const offRules = store.watch('rules.all', undefined, () => {})
+    const offAgents = store.watch('agents.all', undefined, () => {})
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const ruleQueries = (): number =>
+      fake.queries.filter((entry) => entry.view === 'rules.all').length
+    const agentQueries = (): number =>
+      fake.queries.filter((entry) => entry.view === 'agents.all').length
+    const rulesBefore = ruleQueries()
+    const agentsBefore = agentQueries()
+
+    fake.emit({ kind: 'facts', seq: 2, types: ['rules.replaced'] })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(ruleQueries()).toBe(rulesBefore + 1)
+    // 未登记会走未知事实全量失效；这里必须保持 0 次额外查询
+    expect(agentQueries()).toBe(agentsBefore)
+
+    fake.emit({ kind: 'facts', seq: 3, types: ['rule.fired'] })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(ruleQueries()).toBe(rulesBefore + 2)
+    expect(agentQueries()).toBe(agentsBefore)
+
+    offRules()
+    offAgents()
+  })
+
   it('缓存键包含参数：不同 taskId 各自缓存，重复订阅同一键不再查询', async () => {
     const fake = fakeTransport()
     const store = createKernelStore(fake.transport)

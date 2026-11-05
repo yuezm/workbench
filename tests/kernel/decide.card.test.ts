@@ -160,6 +160,10 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map(),
   cards: new Map((seed.cards ?? []).map((row) => [row.id, row])),
   activeTaskIds: new Set(),
+  rules: [],
+  rulesVersion: 0,
+  ruleSetReplacedAt: null,
+  ruleFiredAt: new Map(),
 })
 
 /** 确定性 id 生成器：卡片 / 事件都按类型计数。 */

@@ -120,6 +120,10 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'event.dropped':
       // 熔断审计事实只带 eventId：不归入任何实体，只在 cause 链上出现。
       return []
+    case 'rules.replaced':
+    case 'rule.fired':
+      // 规则事实归到规则集（没有独立 scope）；规则任务由 task.created 的 cause/ruleId 追溯。
+      return []
     case 'conversation.created':
     case 'conversation.updated':
     case 'conversation.removed':

@@ -72,6 +72,11 @@ const validInputs: Input[] = [
   { type: 'clock.tick' },
   { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
   { type: 'card.delivery_failed', cardId: 'card-1', version: 2, error: '通道不可用' },
+  {
+    type: 'event.received',
+    event: { source: 'github', type: 'issues.opened', subject: 'issue-1', summary: '摘要' },
+    hops: 1,
+  },
 ]
 
 /** 只取失败文案；先用断言固定 `ok=false`，避免分支未覆盖。 */
@@ -100,6 +105,7 @@ describe('protocol/inputs', () => {
       'clock.tick',
       'card.delivered',
       'card.delivery_failed',
+      'event.received',
     ])
     expect([...INPUT_NAMES]).toEqual([...COMMAND_NAMES, ...HOST_INPUT_NAMES])
     expect(new Set(INPUT_NAMES).size).toBe(INPUT_NAMES.length)
@@ -408,5 +414,43 @@ describe('protocol/inputs 其余边界', () => {
       durationMs: 10,
     }
     expect(validateInput(input)).toEqual({ ok: true, input })
+  })
+})
+
+describe('protocol/inputs event.received（M6）', () => {
+  const event = { source: 'github', type: 'issues.opened', subject: 'issue-1' }
+
+  it('事件字段沿用 RawEvent 校验，hops 0–8，detailRef/originRunId 可选', () => {
+    expect(
+      validateInput({
+        type: 'event.received',
+        event,
+        hops: 0,
+        originRunId: null,
+        detailRef: 'artifacts/e-1.md',
+      }).ok,
+    ).toBe(true)
+    expect(validateInput({ type: 'event.received', event }).ok).toBe(true)
+  })
+
+  it('拒绝缺失/超长/越界字段', () => {
+    expect(rejected({ type: 'event.received' })).toBe('event 必须是对象')
+    expect(rejected({ type: 'event.received', event: { ...event, source: '' } })).toBe(
+      'event.source必填',
+    )
+    expect(rejected({ type: 'event.received', event: { ...event, type: '' } })).toBe(
+      'event.type必填',
+    )
+    expect(rejected({ type: 'event.received', event: { ...event, subject: '' } })).toBe(
+      'event.subject必填',
+    )
+    expect(rejected({ type: 'event.received', event: { ...event, summary: longText(201) } })).toBe(
+      'event.summary最长 200 个字符',
+    )
+    expect(rejected({ type: 'event.received', event, hops: 9 })).toBe('hops必须在 0 到 8 之间')
+    expect(rejected({ type: 'event.received', event, hops: 1.5 })).toBe('hops必须是整数')
+    expect(rejected({ type: 'event.received', event, detailRef: longText(1001) })).toBe(
+      'detailRef最长 1000 个字符',
+    )
   })
 })

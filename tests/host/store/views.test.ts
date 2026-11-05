@@ -2,6 +2,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Runtime } from '../../../src/protocol/entities'
+import type { AutomationRule } from '../../../src/protocol/rules'
 import type { ViewId } from '../../../src/protocol/views'
 import type { Change } from '../../../src/kernel/types'
 import { viewSpec } from '../../../src/kernel/view-spec'
@@ -742,5 +743,138 @@ describe('queryView：M5 客户端视图（tasks.executing / runtimes.statuses /
       expect((error as StoreError).code).toBe('invalid_input')
       expect((error as StoreError).message).toContain('宿主视图不读投影')
     }
+  })
+})
+
+// ---------- M6 规则投影 ----------
+
+const RULE_SET_AT = '2026-05-01T08:00:00.000Z'
+
+const ruleEvent: AutomationRule = {
+  id: 'rule-event',
+  name: 'Issue 进研发',
+  when: { source: 'github', types: ['issues.opened'] },
+  to: { workflowId: 'wf-1' },
+  enabled: true,
+}
+
+const ruleCron: AutomationRule = {
+  id: 'rule-cron',
+  name: '每日早报',
+  when: { cron: '0 9 * * *' },
+  to: { workflowId: 'wf-1' },
+  enabled: true,
+}
+
+function seedRuleSet(
+  db: DatabaseSync,
+  version: number,
+  replacedAt: string,
+  rules: readonly AutomationRule[],
+): void {
+  db.prepare(
+    'INSERT INTO rule_sets (id, version, replaced_at, rules_json) VALUES (?, ?, ?, ?)',
+  ).run('current', version, replacedAt, JSON.stringify(rules))
+}
+
+function seedRuleFire(
+  db: DatabaseSync,
+  fire: {
+    id: string
+    ruleId: string
+    version: number
+    scheduledFor: string
+    firedAt: string
+    taskId: string | null
+  },
+): void {
+  db.prepare(
+    `INSERT INTO rule_fires (id, rule_id, version, scheduled_for, fired_at, task_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(fire.id, fire.ruleId, fire.version, fire.scheduledFor, fire.firedAt, fire.taskId)
+}
+
+describe('loadView / queryView：规则投影（M6）', () => {
+  it('未声明规则切片：rules 空、版本 0、无替换时刻、无触发基线', () => {
+    const db = memory()
+    seedRuleSet(db, 3, RULE_SET_AT, [ruleEvent])
+    seedRuleFire(db, {
+      id: 'fire-1',
+      ruleId: 'rule-cron',
+      version: 3,
+      scheduledFor: RULE_SET_AT,
+      firedAt: RULE_SET_AT,
+      taskId: null,
+    })
+
+    const view = loadView(db, ['tasks'])
+    expect(view.rules).toEqual([])
+    expect(view.rulesVersion).toBe(0)
+    expect(view.ruleSetReplacedAt).toBeNull()
+    expect(view.ruleFiredAt.size).toBe(0)
+  })
+
+  it('rule_sets 切片：装载当前规则集、版本与替换时刻', () => {
+    const db = memory()
+    seedRuleSet(db, 3, RULE_SET_AT, [ruleEvent, ruleCron])
+
+    const view = loadView(db, ['rule_sets'])
+    expect(view.rules).toEqual([ruleEvent, ruleCron])
+    expect(view.rulesVersion).toBe(3)
+    expect(view.ruleSetReplacedAt).toBe(RULE_SET_AT)
+    // 未声明 rule_fires：不读触发基线
+    expect(view.ruleFiredAt.size).toBe(0)
+  })
+
+  it('rule_fires 切片：ruleFiredAt 取每条规则最近一次 scheduled_for（不是 fired_at）', () => {
+    const db = memory()
+    seedRuleFire(db, {
+      id: 'fire-1',
+      ruleId: 'rule-cron',
+      version: 1,
+      scheduledFor: '2026-05-01T09:00:00.000Z',
+      firedAt: '2026-05-01T09:00:03.000Z',
+      taskId: 'tk-1',
+    })
+    // 更晚的计划时刻 + 更晚的实际触发：基线取 scheduled_for 的最大值
+    seedRuleFire(db, {
+      id: 'fire-2',
+      ruleId: 'rule-cron',
+      version: 1,
+      scheduledFor: '2026-05-02T09:00:00.000Z',
+      firedAt: '2026-05-02T09:00:01.000Z',
+      taskId: null,
+    })
+    // 另一条规则：只补最近一次
+    seedRuleFire(db, {
+      id: 'fire-3',
+      ruleId: 'rule-other',
+      version: 2,
+      scheduledFor: '2026-05-01T10:00:00.000Z',
+      firedAt: '2026-05-01T10:00:00.000Z',
+      taskId: null,
+    })
+
+    const view = loadView(db, ['rule_fires'])
+    expect([...view.ruleFiredAt.entries()]).toEqual([
+      ['rule-cron', '2026-05-02T09:00:00.000Z'],
+      ['rule-other', '2026-05-01T10:00:00.000Z'],
+    ])
+    // 未声明 rule_sets：规则清单与版本仍按空集装载
+    expect(view.rules).toEqual([])
+    expect(view.rulesVersion).toBe(0)
+  })
+
+  it('rules.all：无规则集返回 { version: 0, rules: [] }', () => {
+    const db = memory()
+
+    expect(queryView(db, 'rules.all')).toEqual({ version: 0, rules: [] })
+  })
+
+  it('rules.all：返回当前版本与规则清单（整批替换后的新版本）', () => {
+    const db = memory()
+    seedRuleSet(db, 4, RULE_SET_AT, [ruleCron])
+
+    expect(queryView(db, 'rules.all')).toEqual({ version: 4, rules: [ruleCron] })
   })
 })

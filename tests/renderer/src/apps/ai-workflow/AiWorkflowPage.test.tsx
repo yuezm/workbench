@@ -76,6 +76,10 @@ const task: Task = {
   workflowId: 'w1',
   currentStageId: 's0',
   status: 'active',
+  origin: 'manual',
+  ruleId: null,
+  externalRef: null,
+  labels: [],
   createdAt: 't',
   updatedAt: 't',
 }
@@ -157,6 +161,7 @@ function seedBase(): void {
   ])
   kernel.setView('runtimes.detected', undefined, [])
   kernel.setView('conversations.all', undefined, [])
+  kernel.setView('rules.all', undefined, { version: 0, rules: [] })
 }
 
 /** dispatch 注入：默认零事实成功；覆盖时按命令返回实体/更新视图 */
@@ -268,6 +273,12 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByRole('heading', { name: '工作流' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建工作流' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '智能体' })).not.toBeInTheDocument()
+
+    await openSection(user, '规则配置')
+    expect(await screen.findByRole('heading', { name: '规则' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建规则' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Issue 进研发' })).toBeEnabled()
+    expect(screen.queryByRole('heading', { name: '工作流' })).not.toBeInTheDocument()
   })
 
   it('配置页默认不显示新增表单，点击新建才弹出', async () => {
@@ -292,6 +303,12 @@ describe('AiWorkflowPage', () => {
     await openSection(user, '工作流配置')
     await user.click(await screen.findByRole('button', { name: '新建工作流' }))
     expect(await screen.findByLabelText('工作流名称')).toBeInTheDocument()
+
+    await openSection(user, '规则配置')
+    await user.click(await screen.findByRole('button', { name: '新建规则' }))
+    expect(await screen.findByLabelText('规则名称')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByLabelText('规则名称')).not.toBeInTheDocument()
   })
 
   it('工作流视图加载失败展示错误', async () => {

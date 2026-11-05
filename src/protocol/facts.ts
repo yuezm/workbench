@@ -28,6 +28,7 @@ import type {
   Workflow,
   WorkflowStage,
 } from './entities'
+import type { RuleFireRow, RuleSetRow } from './rules'
 
 /** 事实名全集；`thread.*` 等后续里程碑再补。M4 加卡片与派生事件。 */
 export const FACT_TYPES = [
@@ -69,6 +70,8 @@ export const FACT_TYPES = [
   'card.resolved',
   'event.received',
   'event.dropped',
+  'rules.replaced',
+  'rule.fired',
   'conversation.created',
   'conversation.updated',
   'conversation.removed',
@@ -314,6 +317,21 @@ export interface EventDroppedPayload {
   reason: string
 }
 
+// ---------- 自动化规则（M6） ----------
+
+/**
+ * 规则集整批替换：payload 携带完整 `RuleSetRow`（单行投影），版本由内核 +1。
+ * 一次事实 → 一行投影，重建无需回查。
+ */
+export interface RulesReplacedPayload {
+  ruleSet: RuleSetRow
+}
+
+/** cron 到点触发：payload 携带完整 `RuleFireRow`（append-only 投影）。 */
+export interface RuleFiredPayload {
+  fire: RuleFireRow
+}
+
 // ---------- 对话 ----------
 
 export interface ConversationCreatedPayload {
@@ -394,6 +412,8 @@ export interface FactPayloads {
   'card.resolved': CardResolvedPayload
   'event.received': EventReceivedPayload
   'event.dropped': EventDroppedPayload
+  'rules.replaced': RulesReplacedPayload
+  'rule.fired': RuleFiredPayload
   'conversation.created': ConversationCreatedPayload
   'conversation.updated': ConversationUpdatedPayload
   'conversation.removed': ConversationRemovedPayload

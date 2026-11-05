@@ -91,6 +91,10 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   currentStageId: 'st-1',
   status: 'active',
+  origin: 'manual',
+  ruleId: null,
+  externalRef: null,
+  labels: [],
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -170,6 +174,10 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
+  rules: [],
+  rulesVersion: 0,
+  ruleSetReplacedAt: null,
+  ruleFiredAt: new Map(),
 })
 
 /** 与 `host/store/index` 的 `DEFAULT_LIMITS` 同值；内核单测不 import 宿主实现。 */

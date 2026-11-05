@@ -74,6 +74,7 @@ describe('protocol/views', () => {
       'runtimes.executors',
       'runtimes.detected',
       'runtimes.models',
+      'rules.all',
     ])
   })
 

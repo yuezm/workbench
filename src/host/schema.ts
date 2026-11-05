@@ -2,10 +2,13 @@
  * 宿主层 SQLite schema：全库 DDL 的唯一来源（M1 起从 main/ai-workflow 迁入）。
  *
  * 以字符串内嵌（而非 .sql 资源文件），保证 electron-vite 打包后主进程运行时也能拿到。
- * 十张投影表（实体五表 + runs / run_events / conversations / messages / cards）全部可由事实重建：
- * 实体五表的列名与约束保持 v2 原样；运行/聊天四表在 M2 变为投影（runs 补调度列、
- * `status` 加 `waiting`、`task_id` 可空；聊天投影从 `chat_*` 改名为 `conversations` / `messages`）；
- * M4 追加 `cards`（卡片行按 `(id, version)` 演进，投递状态单列）。
+ * 十二张投影表（实体五表 + runs / run_events / conversations / messages / cards +
+ * rule_sets / rule_fires）全部可由事实重建：
+ * 实体五表的列名与约束保持 v2 原样（M6 只给 `tasks` 追加来源列，不重建表）；
+ * 运行/聊天四表在 M2 变为投影（runs 补调度列、`status` 加 `waiting`、`task_id` 可空；
+ * 聊天投影从 `chat_*` 改名为 `conversations` / `messages`）；
+ * M4 追加 `cards`（卡片行按 `(id, version)` 演进，投递状态单列）；
+ * M6 追加 `rule_sets`（单行 id='current'：版本 + 整批规则）与 `rule_fires`（cron 触发记录，纯追加）。
  * 过渡期 legacy `chat_conversations` / `chat_messages` 已由 T14b 迁成 `snapshot.imported`
  * 事实并删除（`host/store/import` 读旧表 → 写导入根 → 删表），这里不再创建它们。
  * `facts` 只追加，`projection_meta` 记录投影指纹与已折叠的 seq。
@@ -66,6 +69,13 @@ CREATE TABLE IF NOT EXISTS ${name} (
   UNIQUE (workflow_id, position)
 );`
 
+/**
+ * `tasks` 投影：M6 追加来源四列（旧库由 `host/db.ts` 用 `ALTER TABLE ADD COLUMN` 补齐）。
+ *
+ * - `origin` = 人手建（`manual`）/ 规则命中（`rule`）；存量与手工任务默认 `manual`。
+ * - `rule_id` / `external_ref` 记录命中的规则与入口键（同规则去重）；手工任务为 null。
+ * - `labels_json` 存 `string[]` 的 JSON（规则声明的标签，展示用，不参与派活）。
+ */
 const tasksTable = (name = 'tasks'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
@@ -74,6 +84,10 @@ CREATE TABLE IF NOT EXISTS ${name} (
   workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
   current_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
+  origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','rule')),
+  rule_id TEXT,
+  external_ref TEXT,
+  labels_json TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -206,6 +220,39 @@ CREATE TABLE IF NOT EXISTS ${name} (
   updated_at TEXT NOT NULL
 );`
 
+/**
+ * `rule_sets` 投影（M6，第 11 张表）：单行 `id='current'`，整批替换语义。
+ *
+ * - `version` 随 `rules.replaced` +1；`replaced_at` 是该版本生效时刻（cron 规则首次触发的基线）。
+ * - `rules_json` 存 `AutomationRule[]` 的 JSON（校验在上游，投影只搬运）。
+ * - 单行约束用 `CHECK (id = 'current')` 收口：版本与规则删空后仍保留一行，避免「空集丢版本」。
+ */
+const ruleSetsTable = (name = 'rule_sets'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY CHECK (id = 'current'),
+  version INTEGER NOT NULL,
+  replaced_at TEXT NOT NULL,
+  rules_json TEXT NOT NULL DEFAULT '[]'
+);`
+
+/**
+ * `rule_fires` 投影（M6，第 12 张表）：cron 到点触发记录，**纯追加**。
+ *
+ * - 主键 `id` 由内核生成；重复触发事实撞主键即报错（与 `run_events` 同口径，不覆盖历史）。
+ * - `scheduled_for` 是计划时刻（去重与「只补最近一次」的基线），`fired_at` 是实际入账时刻。
+ * - `task_id` 是弱引用：目标工作流/阶段已不存在时只记账（null），任务删除后也保留审计；
+ *   不设外键（与 `cards.task_id` 同口径）。
+ */
+const ruleFiresTable = (name = 'rule_fires'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  rule_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  scheduled_for TEXT NOT NULL,
+  fired_at TEXT NOT NULL,
+  task_id TEXT
+);`
+
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, position);
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
@@ -218,9 +265,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id
 CREATE INDEX IF NOT EXISTS idx_cards_status ON cards(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_cards_run ON cards(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_cards_delivery ON cards(delivery);
+CREATE INDEX IF NOT EXISTS idx_rule_fires_rule ON rule_fires(rule_id, scheduled_for);
 `
 
-/** v2 全量 schema（新建库；十张投影表 + 索引） */
+/** v2 全量 schema（新建库；十二张投影表 + 索引） */
 export const SCHEMA_SQL = [
   runtimesTable(),
   agentsTable(),
@@ -232,6 +280,8 @@ export const SCHEMA_SQL = [
   conversationsTable(),
   messagesTable(),
   cardsTable(),
+  ruleSetsTable(),
+  ruleFiresTable(),
   INDEX_SQL,
 ].join('\n')
 
@@ -251,7 +301,7 @@ CREATE TABLE IF NOT EXISTS commands (
 
 /**
  * 宿主私有进程登记表 DDL：与 `FACTS_SQL` 一样单独执行（不进业务表清单，
- * 也就不在 `SCHEMA_SQL` 的「十张投影表」断言范围内）。
+ * 也就不在 `SCHEMA_SQL` 的「十二张投影表」断言范围内）。
  */
 export const PROCESS_REGISTRY_SQL = processRegistryTable()
 
@@ -267,6 +317,8 @@ export const tableDdl = {
   conversations: conversationsTable,
   messages: messagesTable,
   cards: cardsTable,
+  ruleSets: ruleSetsTable,
+  ruleFires: ruleFiresTable,
 } as const
 
 /**
@@ -349,6 +401,27 @@ export function legacyRuntimesCopySql(targetTable: string): string {
 }
 
 /**
+ * M6 给 `tasks` 新增的列（旧库 `CREATE TABLE IF NOT EXISTS` 不会补列）。
+ *
+ * 这里只补列、**不重建表**：`runs.task_id` 有 `REFERENCES tasks(id) ON DELETE CASCADE`，
+ * 建临时表 + 改名会让 SQLite 重写其它表里的外键引用（`host/db.ts` 的 M2 注释记录了该坑）。
+ * `ALTER TABLE ADD COLUMN` 不会改动既有行，旧行按默认值得 `origin='manual'` / 空引用 / 空标签。
+ * 清单与 `tasksTable()` 的 DDL 保持同步（新增列必须同时改这里）。
+ */
+export const TASKS_M6_ADDED_COLUMNS = ['origin', 'rule_id', 'external_ref', 'labels_json'] as const
+
+/** `tasks` 补列语句（逐列 `ALTER TABLE`，SQLite 一次只能加一列；默认值与 DDL 一致）。 */
+export const TASKS_M6_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M6_ADDED_COLUMNS)[number], string>
+> = {
+  origin:
+    "ALTER TABLE tasks ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','rule'))",
+  rule_id: 'ALTER TABLE tasks ADD COLUMN rule_id TEXT',
+  external_ref: 'ALTER TABLE tasks ADD COLUMN external_ref TEXT',
+  labels_json: "ALTER TABLE tasks ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'",
+}
+
+/**
  * 账本基础设施的 DDL：事实日志（只追加）与投影元信息。
  *
  * `facts.payload` / `facts.actor_json` 以 JSON 文本存放；`seq` 由 SQLite 自增分配，
@@ -373,7 +446,7 @@ CREATE TABLE IF NOT EXISTS projection_meta (
 );
 `
 
-/** 投影集白名单：重建清空并重放的就是这十张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
+/** 投影集白名单：重建清空并重放的就是这十二张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
 export const PROJECTION_TABLES = [
   'tasks',
   'workflows',
@@ -385,6 +458,8 @@ export const PROJECTION_TABLES = [
   'conversations',
   'messages',
   'cards',
+  'rule_sets',
+  'rule_fires',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -400,9 +475,11 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   conversations: tableDdl.conversations(),
   messages: tableDdl.messages(),
   cards: tableDdl.cards(),
+  rule_sets: tableDdl.ruleSets(),
+  rule_fires: tableDdl.ruleFires(),
 }
 
-/** 十张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 十二张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */
@@ -410,7 +487,7 @@ export function formatOfProjection(ddl: string, kernelVersion: string): string {
   return createHash('sha256').update(`${ddl}\n${kernelVersion}`).digest('hex')
 }
 
-/** 投影格式指纹 = sha256(十表投影 DDL + 内核版本)；任一变化即触发重建。 */
+/** 投影格式指纹 = sha256(十二表投影 DDL + 内核版本)；任一变化即触发重建。 */
 export function projectionFormat(kernelVersion: string): string {
   return formatOfProjection(PROJECTION_DDL, kernelVersion)
 }

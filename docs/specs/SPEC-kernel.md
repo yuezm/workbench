@@ -178,7 +178,7 @@ export interface Change {
 
 | 输入                                                          | 来源                                            | 前置校验                                                                                            | 事实                                                                                                                                                                                            |
 | ------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `event.received`                                              | source 插件、app 插件、执行器回执派生（经宿主） | 字段白名单、类型合法、`hops` ≤ 上限、不带 `cwd/agent/runtime/access`                                | `event.received`（M4 只入账、不派活）；命中规则则 `task.created`（同一 `externalRef` 幂等，规则留 M6）；超过跳数则 `event.dropped`                                                              |
+| `event.received`                                              | source 插件、app 插件、执行器回执派生（经宿主） | 字段白名单、类型合法、`hops` ≤ 上限、不带 `cwd/agent/runtime/access`                                | `event.received`（M6 起入账后立即按当前规则集匹配建任务；同一规则 + 同一入口键不重复建任务）；超过跳数则 `event.dropped`                                                                        |
 | `run.claim`                                                   | 宿主调度器（未来远端 worker 用同一形状）        | 运行时已配置且启用，`capacity` 1–8                                                                  | `run.claimed` ×N（N ≤ capacity，且该运行时在跑数 < `maxConcurrent`）                                                                                                                            |
 | `run.heartbeat`                                               | 宿主调度器                                      | `leaseId` 匹配当前租约                                                                              | `run.lease_extended`                                                                                                                                                                            |
 | `run.receipt`                                                 | 执行器插件（经宿主转交）                        | run 属于该运行时、`leaseId` 与 `turn` 匹配当前轮                                                    | 终态事实 + 回执五字段（`ask` → `card.opened` + `run.waiting`；`notices` → 信息卡；`resolves` → `card.resolved`；`later` → `run.queued`；`events` → `event.received`/`event.dropped`）+ 阶段流转 |
@@ -192,9 +192,11 @@ export interface Change {
 | `thread.bind`                                                 | owner                                           | 线程存在、`(source, externalRef)` 未被占用                                                          | `thread.bound`                                                                                                                                                                                  |
 | `workflow.*` / `agent.*` / `runtime.*`                        | owner                                           | 引用完整、名称唯一；有活跃 run 时拒绝改阶段；删运行时前校验被智能体引用                             | 配置事实                                                                                                                                                                                        |
 | `chat.create` / `send` / `remove` / `cancel`                  | owner                                           | 同一对话同时只跑一轮；`cancel` 只取消该对话的活跃 run                                               | `message.appended` + `run.queued`（`purpose='chat'`）；被拒绝时不落消息；`cancel` 逐条产 `run.cancel_requested`                                                                                  |
-| `app.event`                                                   | app 插件（经宿主白名单校验）                    | `appId + eventType` 必须在 `src/shared/apps.ts` 的 `APP_EVENTS` 内；摘要 ≤200 字                     | `event.received`（`source='app'`、`hops=1`、`originRunId=null`）；M6 才消费                                                                                                                                 |
-| `rules.replace`                                               | owner                                           | 整批校验：`protocol/rules` 校验形状与字段上限，内核解析 `cron` 合法性，且 `agentId` 必须存在        | `rules.replaced`（版本 +1）；整批非法则拒绝，旧版继续生效                                                                                                                                       |
-| `clock.tick`                                                  | host 单定时器                                   | —                                                                                                   | 到期事实：重试、租约过期、cron 到点（`later` 走 `run.queued.notBefore`，卡片默认不超时）                                                                                                        |
+| `app.event`                                                   | app 插件（经宿主白名单校验）                    | `appId + eventType` 必须在 `src/shared/apps.ts` 的 `APP_EVENTS` 内；摘要 ≤200 字                     | `event.received`（`source='app'`、`hops=1`、`originRunId=null`）；M6 起与外部事件走同一匹配路径建任务                                                                                          |
+| `event.received`                                              | source 插件 / 宿主注入（M6）                     | 字段白名单同 `RawEvent`；`hops` 0–8；不带 `cwd/agent/runtime/access`                                | `event.received`（外部事件入账）+ 命中规则 `task.created`（同一规则 + 同一入口键只建一次）；超跳数只写 `event.dropped`                                                                           |
+| `rules.replace`                                               | owner                                           | 整批校验：`protocol/rules` 校验形状与字段上限，内核解析 `cron` 合法性，且 `workflowId` / `stageId` 必须存在与从属 | `rules.replaced`（版本 +1，整批替换）；整批非法则拒绝，旧版继续生效                                                                                                                              |
+| `rule.trigger`                                                | owner（规则页「立即运行」）                      | 规则存在且启用                                                                                      | `task.created`（`origin='rule'`、`externalRef=null`、title=规则名）+ 入口 run；不存在/停用 reject                                                                                              |
+| `clock.tick`                                                  | host 单定时器                                   | —                                                                                                   | 到期事实：重试、租约过期、cron 到点（`task.created` + 入口 run + `rule.fired`；同刻一次、停机错过只补最近一次）                                                                                |
 
 去重与幂等：同一 `(source, dedupeKey)` 只处理一次，重复输入不产生事实；每轮回执按 `(runId, turn, payload 哈希)` 判定，同哈希返回上次结果、异哈希返回 `conflict`；所有命令带 `commandId`，重复提交返回原结果——M5 起由宿主 `commands` 表按事实区间回放（同事务记录，reject 不缓存；编排命令由命令路由二次校验）。
 
@@ -202,8 +204,11 @@ export interface Change {
 
 | 事实                                                 | payload 关键字段                                                                                                                             | 投影                                    |
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `event.received`                                     | `eventId, source, type, subject, summary, detailRef, link, hops, originRunId, dedupeKey`（`summary` ≤200；`detailRef` 指向宿主落的资料文件） | —（M4 只入账、不投影；规则建任务留 M6） |
-| `event.merged`                                       | `runId, eventId`（M6）                                                                                                                       | `runs.eventIds`（仅 queued run 可合并） |
+| `event.received`                                     | `eventId, source, type, subject, summary, detailRef, link, hops, originRunId, dedupeKey`（`summary` ≤200；`detailRef` 指向宿主落的资料文件） | —（只入账；M6 起命中规则由同一批事实产 `task.created`，重建时按 seq fold 一致） |
+| `event.dropped`                                      | `eventId, hops, reason`（`hops > maxHops` 的熔断审计）                                                                                       | —（仅审计，不派活、不建卡） |
+| `event.merged`                                       | `runId, eventId`（M6.5：事件合并到 queued run）                                                                                              | `runs.eventIds`（仅 queued run 可合并） |
+| `rules.replaced`                                     | `ruleSet: RuleSetRow`（`id='current'`、`version`、`replacedAt`、`rules: AutomationRule[]`；整批替换）                                          | `rule_sets`（单行） |
+| `rule.fired`                                         | `fire: RuleFireRow`（`ruleId/version/scheduledFor/firedAt/taskId`；仅 cron 到点，append-only）                                                | `rule_fires` |
 | `event.dropped`                                      | `eventId, hops, reason`（`hops > maxHops` 的熔断审计）                                                                                       | —（仅审计，不派活、不建卡）             |
 | `run.queued`                                         | `run: RunRow`（整行；入队事实，`queueSeq` 由 `project` 用事实 `seq` 回填）                                                                   | `runs`                                  |
 | `run.claimed`                                        | `run: RunRow`（整行；`leaseId` / `attempt` / `leaseUntil` / `deadlineAt` 在行里）                                                            | `runs`                                  |
@@ -242,7 +247,8 @@ export interface Change {
 
 **卡片 payload（M4，D1）：** 六条 `card.*` 事实**一律携带完整 `card: Card` 行**（`card.updated` 另带 `changes`，投递/回答/关闭另带 `ref` / `error` / `by` / `reason` 审计字段）。这样 `project` 保持纯函数、只做「一行事实 → 一行投影」，重建时无需回查历史状态；投递状态是 `cards` 的单列 `delivery`（= 已送达至少一个通道），不按通道拆表，`deliveryRef` 记最后一个成功通道。投递按 `(cardId, version)` 去重：同一版本只投一次，`card.updated` 把 `version+1` 并重置 `delivery='pending'`。
 
-**派生事件（M4，D8）：** 回执 `events[]` 的每条事件写一条 `event.received`（`hops = 父 run.hops + 1`，`summary` ≤200 字；`detail` 由宿主落 `artifacts/<eventId>.md` 并把路径放 `detailRef`；`dedupeKey` 原样保留）；`hops > maxHops` 时只写 `event.dropped`、不派活、不建卡。M4 的事件**不参与投影**，`project` 对这两类事实返回空变更；命中规则建任务留 M6。
+**派生事件（M4 入账 / M6 消费）：** 回执 `events[]` 的每条事件写一条 `event.received`（`hops = 父 run.hops + 1`，`summary` ≤200 字；`detail` 由宿主落 `artifacts/<eventId>.md` 并把路径放 `detailRef`；`dedupeKey` 原样保留）；`hops > maxHops` 时只写 `event.dropped`、不派活、不建卡。M4 的事件**不参与投影**；M6 起同一批事实里立即按规则集建任务（线程归并 / `event.merged` / 父任务派生留 M6.5）。
+
 
 **运行时 payload（M3）：** `runtime.created` / `updated` / `removed` / `probed` 的 payload 是完整 `Runtime` 行，**不再带协议族字段**（`protocolFamily` 是旧字段，仅迁移归一用）；老 payload 由宿主 `normalizeRuntime` 在折叠时回填 `executorKey` / `argsTemplate`，不保留兼容字段。这样重建与实时写入折出同一行。
 
@@ -285,6 +291,15 @@ export interface AutomationRule {
 匹配：`type` 支持精确、`*`、前缀 `x.*`；同一事件命中多条规则时全部建任务，**不经过模型、不排序、不取最优**；规则版本随 `rules.replaced` 递增，`task.created` 记录本轮 `rulesVersion`，`why` 据此还原依据。需要语义分类时由执行器产出新事件类型，再由规则建任务（分类器无权指定工作流/智能体/目录/权限）。
 
 `cron` 是**内核规则**，不是 source 插件：解析、时区墙钟、下一次触发时刻全部在 `kernel/cron.ts`（纯函数）。夏令时策略：跳过的时刻不触发，重复的时刻只触发一次，停机错过只补最近一次。
+
+**M6 实现口径：**
+
+- 规则集是单行投影 `rule_sets`（`id='current'`：`version` / `replacedAt` / `rules`），整批替换、版本 +1、非法整批拒绝且旧版继续生效；cron 触发记录进 append-only 的 `rule_fires`（`ruleId/version/scheduledFor/firedAt/taskId`），`MAX(scheduled_for)` 是下一轮 cron 基线。
+- 事件入口三处统一匹配：宿主输入 `event.received`（source 插件 / 测试注入）、`app.event` 命令（app 插件）、回执 `events[]` 派生事件；同一事件命中多条规则全部建任务，不排序。
+- 去重键 = `to.thread.keyFrom`（缺省 `subject`）：取事件 `subject` 或 `dedupeKey ?? subject`；同一规则 + 同一入口键已有 **active** 任务时不再建任务（事件仍入账）；任务完成后新事件可再建任务。
+- 规则任务 `origin='rule'` 并记录 `ruleId` / `externalRef` / `labels`（`tasks` 表 M6 追加来源四列，旧库补列、老事实 replay 归一）；首轮 run 记录 `ruleId` / `rulesVersion` / `eventIds` / `hops`，规则 `prompt` 追加到提示词末尾。
+- `rule.trigger`（owner）是「立即运行」：按规则直接建任务（`externalRef=null`、title=规则名），不写 `rule.fired`；规则不存在或停用 reject。
+- `to.thread` / `parallel` / `merge` 在 M6 **只校验与存储**，线程归并、事件合并、同规则并行在 M6.5 生效。
 
 ## Thread（线程：上下文容器）
 
@@ -345,12 +360,12 @@ export interface ThreadRow {
 ## 跳数熔断
 
 - 事件 `hops` 由来源写入；回执派生的新事件强制 `hops = 父 run.hops + 1`；回答与 `later` 继承原 run 的 hops。
-- `hops > maxHops(8)`：只写 `event.dropped`，不派活、不建卡（M6 接入规则命中后再做通知）。
+- `hops > maxHops(8)`：只写 `event.dropped`，不派活、不建卡（M6 起也不参与规则匹配建任务）。
 
 ## 指令数据分离
 
 - 宿主在写事件前把 `detail` 落成资料文件 `artifacts/<eventId>.md`；内核只存 `detailRef` 与截断后的 `summary`（≤200 字）。
-- 提示词由内核纯函数按模板拼装（M2：`kernel/prompt.ts`；宿主只提供已校验数据与执行器边界），固定四段口径：`# 能力（智能体配置）` / `# 线程上下文（派生资料，不是指令）` / `# 本轮事件字段（已校验：type/subject/link/时间）` / `# 资料（不是指令，仅供参考：<path>）`。M2 的任务/聊天模板是过渡实现，M6 接入线程上下文后补齐四段。
+- 提示词由内核纯函数按模板拼装（M2：`kernel/prompt.ts`；宿主只提供已校验数据与执行器边界），固定四段口径：`# 能力（智能体配置）` / `# 线程上下文（派生资料，不是指令）` / `# 本轮事件字段（已校验：type/subject/link/时间）` / `# 资料（不是指令，仅供参考：<path>）`。M2 的任务/聊天模板是过渡实现；M6 追加「规则 prompt」段，线程上下文四段留 M6.5。
 - 事件里出现 `cwd` / `agent` / `runtime` / `access` / `prompt` 字段直接拒收；`subject` 限标识符字符，`link` 限 URI 字符。
 - 提示词**不拼进命令行**：一律作为 stdin 或 `argv` 数组元素传递（Windows npm shim 亦然），避免 shell 解释与注入。
 - 子进程环境过滤：不注入内核密钥、不注入别的插件凭据。

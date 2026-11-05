@@ -17,6 +17,7 @@
  * 实时写入与重建共用这一条路径，所以同一事实序列按 seq fold 两次结果必然相同。
  */
 import type { FactType, SnapshotImportedPayload } from '../protocol/facts'
+import type { Task } from '../protocol/entities'
 import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from './types'
 
 /**
@@ -43,10 +44,25 @@ const remove = (table: ProjectionTable, key: Id): Change => ({ table, key, row: 
 
 const runEventKey = (runId: Id, seq: number): Id => `${runId}:${seq}`
 
+/**
+ * 老事实 replay 的任务行归一（M6）：`task.created` 等历史 payload 没有
+ * `origin/ruleId/externalRef/labels`，重建时按默认值补齐，避免投影列写入 undefined。
+ */
+export function normalizeTask(row: Task): Task {
+  const legacy = row as Partial<Task>
+  return {
+    ...row,
+    origin: legacy.origin ?? 'manual',
+    ruleId: legacy.ruleId ?? null,
+    externalRef: legacy.externalRef ?? null,
+    labels: legacy.labels ?? [],
+  }
+}
+
 function importChanges(payload: SnapshotImportedPayload): Change[] {
   switch (payload.table) {
     case 'tasks':
-      return payload.rows.map((row) => put('tasks', row))
+      return payload.rows.map((row) => put('tasks', normalizeTask(row)))
     case 'workflows':
       return payload.rows.map((row) => put('workflows', row))
     case 'workflow_stages':
@@ -93,7 +109,8 @@ function changesOf(fact: AnyFact): Change[] {
     case 'task.created':
     case 'task.moved':
     case 'task.completed':
-      return [put('tasks', fact.payload.task)]
+      // M6：规则任务带 origin/ruleId/externalRef/labels；老事实缺字段由归一补齐。
+      return [put('tasks', normalizeTask(fact.payload.task))]
     case 'task.removed':
       return [remove('tasks', fact.payload.task.id)]
     case 'run.queued':
@@ -130,8 +147,14 @@ function changesOf(fact: AnyFact): Change[] {
       return [put('cards', fact.payload.card)]
     case 'event.received':
     case 'event.dropped':
-      // M4 只入账、不投影：派生事件命中规则建任务留 M6，重建时这两类事实产出空变更。
+      // M4 只入账、不投影；M6 起命中规则建任务由 decide 直接产 task.created，不回收这些事实。
       return []
+    case 'rules.replaced':
+      // M6：规则集整批替换，一行事实 → 单行投影（key='current'）
+      return [put('rule_sets', fact.payload.ruleSet)]
+    case 'rule.fired':
+      // M6：cron 触发记录，append-only（重复 id 由投影层主键报错）
+      return [put('rule_fires', fact.payload.fire)]
     case 'conversation.created':
     case 'conversation.updated':
       return [put('conversations', fact.payload.conversation)]

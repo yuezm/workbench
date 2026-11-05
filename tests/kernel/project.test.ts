@@ -86,6 +86,10 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   currentStageId: 'st-1',
   status: 'active',
+  origin: 'manual',
+  ruleId: null,
+  externalRef: null,
+  labels: [],
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -219,6 +223,8 @@ const emptyTables = (): Tables => ({
   conversations: new Map(),
   messages: new Map(),
   cards: new Map(),
+  rule_sets: new Map(),
+  rule_fires: new Map(),
 })
 
 /** 按 seq 顺序 fold 事实：投影应用器的最小等价实现（重建与实时写入共用路径）。 */
@@ -701,5 +707,83 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
         delivery: 'delivered',
       }),
     )
+  })
+
+  it('规则事实：rules.replaced 整行 upsert，rule.fired 追加 rule_fires', () => {
+    const ruleSet = {
+      id: 'current' as const,
+      version: 2,
+      replacedAt: AT,
+      rules: [
+        {
+          id: 'rule-1',
+          name: '每日早报',
+          when: { cron: '0 9 * * *' as const },
+          to: { workflowId: 'wf-1' },
+          enabled: true,
+        },
+      ],
+    }
+    expect(project(fact(100, 'rules.replaced', { ruleSet }))).toEqual([put('rule_sets', ruleSet)])
+
+    const fire = {
+      id: 'fire-1',
+      ruleId: 'rule-1',
+      version: 2,
+      scheduledFor: AT,
+      firedAt: AT,
+      taskId: null,
+    }
+    expect(project(fact(101, 'rule.fired', { fire }))).toEqual([put('rule_fires', fire)])
+  })
+
+  it('M6 老事实 replay：任务行缺 origin/ruleId/externalRef/labels 时补默认值', () => {
+    const legacy = {
+      id: 't-1',
+      title: '老任务',
+      description: '',
+      workflowId: 'wf-1',
+      currentStageId: 'st-1',
+      status: 'active',
+      createdAt: AT,
+      updatedAt: AT,
+    } as unknown as Task
+    const changes = project(fact(102, 'task.created', { task: legacy }))
+    expect(changes).toEqual([
+      {
+        table: 'tasks',
+        key: 't-1',
+        row: {
+          ...legacy,
+          origin: 'manual',
+          ruleId: null,
+          externalRef: null,
+          labels: [],
+        },
+      },
+    ])
+  })
+
+  it('M6 存量导入：snapshot.imported 的 tasks 行同样归一', () => {
+    const legacy = {
+      id: 't-2',
+      title: '导入任务',
+      description: '',
+      workflowId: 'wf-1',
+      currentStageId: null,
+      status: 'completed',
+      createdAt: AT,
+      updatedAt: AT,
+    } as unknown as Task
+    const changes = project(
+      fact(103, 'snapshot.imported', { table: 'tasks', rows: [legacy], importedFrom: 'v2' }),
+    )
+    expect(changes).toHaveLength(1)
+    expect(changes[0]?.row).toMatchObject({
+      origin: 'manual',
+      ruleId: null,
+      externalRef: null,
+      labels: [],
+    })
   })
 })

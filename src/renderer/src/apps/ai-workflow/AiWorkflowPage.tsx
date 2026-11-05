@@ -12,6 +12,7 @@ import { ChatPanel } from './components/ChatPanel'
 import { ConversationList } from './components/ConversationList'
 import { KanbanBoard } from './components/KanbanBoard'
 import { RunLog } from './components/RunLog'
+import { RulesManager } from './components/RulesManager'
 import { RuntimeManager } from './components/RuntimeManager'
 import { SettingsNav, type SettingsSection } from './components/SettingsNav'
 import { TaskDialog } from './components/TaskDialog'
@@ -245,6 +246,13 @@ export function AiWorkflowPage(): ReactElement {
               <>
                 <SectionHeader title="工作流" hint="阶段序列与流转规则" />
                 <WorkflowManager />
+              </>
+            )}
+
+            {section === 'rules' && (
+              <>
+                <SectionHeader title="规则" hint="事件或定时条件自动建任务" />
+                <RulesManager />
               </>
             )}
           </div>

@@ -8,6 +8,8 @@ import {
   RUNTIMES_M3_ADDED_COLUMNS,
   SCHEMA_SQL,
   SCHEMA_VERSION,
+  TASKS_M6_ADDED_COLUMNS,
+  TASKS_M6_ADD_COLUMN_SQL,
   legacyRunsCopySql,
   legacyRuntimesCopySql,
   tableDdl,
@@ -135,10 +137,39 @@ function upgradeLegacyRuntimes(db: DatabaseSync): boolean {
 }
 
 /**
+ * 旧库 `tasks` 缺 M6 新列 → 需要一次性补列（导出原因同 `needsRunsUpgrade`）。
+ */
+export function needsTasksUpgrade(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'tasks')
+  if (columns.size === 0) return false
+  return TASKS_M6_ADDED_COLUMNS.some((column) => !columns.has(column))
+}
+
+/**
+ * 旧 `tasks` 一次性补列（M6）：只对缺失列 `ALTER TABLE ADD COLUMN`，**不重建表**。
+ *
+ * `runs.task_id` 引用 `tasks(id)`，建临时表 + 改名会让 SQLite 把其它表里的外键引用
+ * 改写成临时表名，删旧表后引用悬空（见 `upgradeLegacyRuns` 的注释）。补列只增不改：
+ * 旧行按默认值得到 `origin='manual'`、空 `rule_id` / `external_ref`、空 `labels_json`。
+ * 事务内任一条失败整体回滚，旧结构原样保留。
+ *
+ * @returns 本次是否真的做了补列
+ */
+function upgradeLegacyTasks(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'tasks')
+  const missing = TASKS_M6_ADDED_COLUMNS.filter((column) => !columns.has(column))
+  if (missing.length === 0) return false
+  withTx(db, () => {
+    for (const column of missing) db.exec(TASKS_M6_ADD_COLUMN_SQL[column])
+  })
+  return true
+}
+
+/**
  * 打开（或创建）数据库文件并建好全库 schema：busy_timeout、打开时 integrity_check、
- * 文件库启用 WAL、九张投影表 + 账本表（全部 IF NOT EXISTS）、
- * 宿主私有 `process_registry`（T13）、旧库 `runs`（M2）/`runtimes`（M3）结构升级、
- * `PRAGMA user_version = SCHEMA_VERSION`。
+ * 文件库启用 WAL、十二张投影表 + 账本表（全部 IF NOT EXISTS）、
+ * 宿主私有 `process_registry`（T13）、旧库 `runs`（M2）/`runtimes`（M3）结构升级与
+ * `tasks`（M6）补列、`PRAGMA user_version = SCHEMA_VERSION`。
  *
  * 手写 v1 → v2 迁移已删除：v2 存量数据由 `host/store/import.ts` 写成 `snapshot.imported`
  * 事实后重建投影，因此这里只保证「库结构与当前版本对齐」；结构升级必须在导入事实之前完成，
@@ -168,6 +199,8 @@ export function openDatabase(filePath: string): DatabaseSync {
     })
     upgradeLegacyRuns(db)
     upgradeLegacyRuntimes(db)
+    // M6：tasks 只补列、不重建（外键引用 tasks 的表不能被改名波及）；必须在导入/写入之前完成。
+    upgradeLegacyTasks(db)
     withTx(db, () => {
       // 升级可能删掉旧 runs 上的索引，这里统一补齐（新建库同样幂等）。
       db.exec(INDEX_SQL)

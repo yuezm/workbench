@@ -71,6 +71,10 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   currentStageId: 'st-1',
   status: 'active',
+  origin: 'manual',
+  ruleId: null,
+  externalRef: null,
+  labels: [],
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -489,5 +493,25 @@ describe('kernel/timeline', () => {
     expect(kinds(timeline(facts, 'run', 'run-1'))).toEqual(['1:event.received'])
     // 没有父 run 的事件不产生 scope：按任意 run 查都查不到它
     expect(kinds(timeline(facts, 'run', 'run-2'))).toEqual([])
+  })
+
+  it('规则事实不归入任何实体 scope（只随 cause 链出现）', () => {
+    const facts = [
+      fact(1, 'rules.replaced', {
+        ruleSet: { id: 'current', version: 1, replacedAt: AT, rules: [] },
+      }),
+      fact(2, 'rule.fired', {
+        fire: {
+          id: 'fire-1',
+          ruleId: 'rule-1',
+          version: 1,
+          scheduledFor: AT,
+          firedAt: AT,
+          taskId: null,
+        },
+      }),
+    ]
+    expect(timeline(facts, 'task', 'tk-1')).toEqual([])
+    expect(timeline(facts, 'run', 'run-1')).toEqual([])
   })
 })

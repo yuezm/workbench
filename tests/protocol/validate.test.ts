@@ -76,6 +76,27 @@ const validCommands: Command[] = [
   { commandId: 'c15', type: 'card.answer', cardId: 'card-1', optionIndex: 0 },
   { commandId: 'c16', type: 'card.answer', cardId: 'card-1', optionIndex: 2, via: 'channel' },
   { commandId: 'c17', type: 'card.resolve', cardId: 'card-1' },
+  {
+    commandId: 'c18',
+    type: 'rules.replace',
+    rules: [
+      {
+        id: 'rule-1',
+        name: '每日早报',
+        when: { cron: '0 9 * * *' },
+        to: {
+          workflowId: 'wf1',
+          task: { titleFrom: 'subject', labels: ['日报'] },
+          thread: { keyFrom: 'subject', onExisting: 'reuse-task' },
+        },
+        prompt: '汇总昨日进展',
+        parallel: 2,
+        merge: 'subject',
+        enabled: true,
+      },
+    ],
+  },
+  { commandId: 'c19', type: 'rule.trigger', ruleId: 'rule-1' },
 ]
 
 /** 只取失败文案；先用断言固定 `ok=false`，避免分支未覆盖。 */
@@ -598,5 +619,123 @@ describe('validateQuery（M5：query 动词入口）', () => {
         }),
       ),
     ).toBe('eventType最长 100 个字符')
+  })
+
+  describe('M6 规则命令', () => {
+    const rule = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+      id: 'rule-1',
+      name: '每日早报',
+      when: { cron: '0 9 * * *' },
+      to: { workflowId: 'wf1' },
+      enabled: true,
+      ...over,
+    })
+    const replace = (rules: unknown): string => rejectedMessage(cmd('rules.replace', { rules }))
+
+    it('空批次与合法批次通过', () => {
+      expect(validateCommand(cmd('rules.replace', { rules: [] })).ok).toBe(true)
+      expect(validateCommand(cmd('rules.replace', { rules: [rule()] })).ok).toBe(true)
+    })
+
+    it('rules 必须是数组、最多 100 条', () => {
+      expect(replace(undefined)).toBe('rules 必须是数组')
+      expect(replace(Array.from({ length: 101 }, () => rule()))).toBe('rules 最多 100 项')
+    })
+
+    it('单条规则形状：id / name / when / enabled', () => {
+      expect(replace([rule({ id: '' })])).toBe('rules[0].id必填')
+      expect(replace([rule({ name: '' })])).toBe('rules[0].name必填')
+      expect(replace([rule({ enabled: 'yes' })])).toBe('rules[0].enabled 必须是布尔值')
+      expect(replace(['nope'])).toBe('rules[0] 必须是对象')
+      expect(replace([rule({ name: longText(81) })])).toBe('rules[0].name最长 80 个字符')
+    })
+
+    it('when 只能二选一：cron 或 source+types', () => {
+      expect(replace([rule({ when: {} })])).toBe('rules[0].when 必须提供 cron 或 source+types')
+      expect(replace([rule({ when: { cron: '0 9 * * *', source: 'github', types: ['*'] } })])).toBe(
+        'rules[0].when 只能二选一：cron 或 source+types',
+      )
+      expect(replace([rule({ when: { cron: 9 } })])).toBe('rules[0].when.cron必须是字符串')
+      expect(replace([rule({ when: { source: 'GitHub', types: ['*'] } })])).toBe(
+        'rules[0].when.source 必须是小写标识或 *（如 github / app:pomodoro）',
+      )
+      expect(replace([rule({ when: { source: 'github', types: [] } })])).toBe(
+        'rules[0].when.types 至少 1 项',
+      )
+      expect(replace([rule({ when: { source: 'github', types: ['issues/opened'] } })])).toBe(
+        'rules[0].when.types[0] 必须是精确类型、* 或前缀 x.*',
+      )
+      expect(
+        validateCommand(
+          cmd('rules.replace', {
+            rules: [rule({ when: { source: 'github', types: ['issues.*'] } })],
+          }),
+        ).ok,
+      ).toBe(true)
+    })
+
+    it('to：workflowId 必填、stageId 与 task / thread 形状', () => {
+      expect(replace([rule({ to: {} })])).toBe('rules[0].to.workflowId必填')
+      expect(replace([rule({ to: { workflowId: 'wf1', task: { titleFrom: 'x' } } })])).toBe(
+        'rules[0].to.task.titleFrom取值必须是 subject / summary',
+      )
+      expect(replace([rule({ to: { workflowId: 'wf1', task: { labels: [longText(33)] } } })])).toBe(
+        'rules[0].to.task.labels[0]最长 32 个字符',
+      )
+      expect(replace([rule({ to: { workflowId: 'wf1', thread: {} } })])).toBe(
+        'rules[0].to.thread.keyFrom必填',
+      )
+      expect(
+        validateCommand(
+          cmd('rules.replace', {
+            rules: [rule({ to: { workflowId: 'wf1', thread: { keyFrom: 'subject' } } })],
+          }),
+        ).ok,
+      ).toBe(true)
+    })
+
+    it('when / to 的其余形状分支逐项拒绝', () => {
+      expect(replace([rule({ when: null })])).toBe('rules[0].when 必须是对象')
+      expect(replace([rule({ when: { source: 42, types: ['*'] } })])).toBe(
+        'rules[0].when.source 必须是字符串',
+      )
+      expect(replace([rule({ when: { source: longText(65), types: ['*'] } })])).toBe(
+        'rules[0].when.source 最长 64 个字符',
+      )
+      expect(replace([rule({ when: { source: 'github', types: 'issues.opened' } })])).toBe(
+        'rules[0].when.types 必须是数组',
+      )
+      expect(
+        replace([
+          rule({ when: { source: 'github', types: Array.from({ length: 21 }, () => 'issues.*') } }),
+        ]),
+      ).toBe('rules[0].when.types 最多 20 项')
+      expect(replace([rule({ when: { source: 'github', types: [42] } })])).toBe(
+        'rules[0].when.types[0] 必须是字符串',
+      )
+      expect(replace([rule({ when: { source: 'github', types: [longText(101)] } })])).toBe(
+        'rules[0].when.types[0] 最长 100 个字符',
+      )
+      expect(replace([rule({ to: 'wf1' })])).toBe('rules[0].to 必须是对象')
+      expect(replace([rule({ to: { workflowId: 'wf1', stageId: 42 } })])).toBe(
+        'rules[0].to.stageId必须是字符串',
+      )
+      expect(replace([rule({ to: { workflowId: 'wf1', task: 'x' } })])).toBe(
+        'rules[0].to.task 必须是对象',
+      )
+      expect(replace([rule({ to: { workflowId: 'wf1', thread: 'x' } })])).toBe(
+        'rules[0].to.thread 必须是对象',
+      )
+      expect(
+        replace([
+          rule({ to: { workflowId: 'wf1', thread: { keyFrom: 'subject', onExisting: 'x' } } }),
+        ]),
+      ).toBe('rules[0].to.thread.onExisting取值必须是 reuse-task / new-task')
+    })
+  })
+
+  it('rule.trigger：ruleId 必填', () => {
+    expect(rejectedMessage(cmd('rule.trigger', {}))).toBe('ruleId必填')
+    expect(validateCommand(cmd('rule.trigger', { ruleId: 'rule-1' })).ok).toBe(true)
   })
 })

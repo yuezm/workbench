@@ -14,6 +14,7 @@ import type {
   TaskInput,
   WorkflowInput,
 } from './entities'
+import type { AutomationRule } from './rules'
 
 /**
  * 命令名全集；决定面见 tasks/m1-plan.md「决策面」、m4-plan「架构决议 D6」
@@ -45,6 +46,8 @@ export const COMMAND_NAMES = [
   'chat.remove',
   'chat.cancel',
   'app.event',
+  'rules.replace',
+  'rule.trigger',
 ] as const
 
 export type CommandName = (typeof COMMAND_NAMES)[number]
@@ -248,3 +251,27 @@ export type Command =
   | ChatRemoveCommand
   | ChatCancelCommand
   | AppEventCommand
+  | RulesReplaceCommand
+  | RuleTriggerCommand
+
+// ---------- 自动化规则（M6） ----------
+
+/**
+ * 整批替换规则集：`rules` 是替换后的完整清单，版本由内核 +1（前端不传版本）。
+ * 任一条非法 → 整批 reject，旧版继续生效；合法则产一条 `rules.replaced`。
+ */
+export interface RulesReplaceCommand extends CommandBase {
+  type: 'rules.replace'
+  rules: AutomationRule[]
+}
+
+/**
+ * 手动立即运行一条规则（规则页「立即运行」）：直接按规则建一条任务
+ * （不依赖事件、`externalRef=null`、title=规则名），不产 `rule.fired`
+ * （那是 cron 到点记录；手工触发由 `task.created.ruleId` 追溯）。
+ * 规则不存在 / 停用 → reject。
+ */
+export interface RuleTriggerCommand extends CommandBase {
+  type: 'rule.trigger'
+  ruleId: string
+}

@@ -69,6 +69,20 @@ const commandSamples: Command[] = [
     subject: '番茄结束',
   },
   { commandId: 'c22', type: 'runtime.probe', id: 'rt-1' },
+  {
+    commandId: 'c23',
+    type: 'rules.replace',
+    rules: [
+      {
+        id: 'rule-1',
+        name: '每日早报',
+        when: { cron: '0 9 * * *' },
+        to: { workflowId: 'wf-1' },
+        enabled: true,
+      },
+    ],
+  },
+  { commandId: 'c24', type: 'rule.trigger', ruleId: 'rule-1' },
 ]
 
 const hostSamples: Input[] = [
@@ -90,6 +104,10 @@ const hostSamples: Input[] = [
   { type: 'clock.tick' },
   { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
   { type: 'card.delivery_failed', cardId: 'card-1', version: 1, error: '通道不可用' },
+  {
+    type: 'event.received',
+    event: { source: 'github', type: 'issues.opened', subject: 'issue-1' },
+  },
 ]
 
 const samples: Input[] = [...commandSamples, ...hostSamples]
@@ -123,16 +141,29 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'runtimes',
     'conversations',
     'cards',
+    'rule_sets',
   ],
   'run.frames': ['runs'],
   'run.host_settled': ['runs', 'conversations'],
   'run.cancel': ['runs'],
-  'clock.tick': ['runs'],
+  'clock.tick': [
+    'runs',
+    'rule_sets',
+    'rule_fires',
+    'tasks',
+    'workflows',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+  ],
   'chat.create': ['agents'],
   'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
   'chat.remove': ['conversations', 'messages'],
   'chat.cancel': ['conversations', 'runs'],
-  'app.event': [],
+  'app.event': ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'event.received': ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'rules.replace': ['rule_sets', 'workflows', 'workflow_stages'],
+  'rule.trigger': ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
   'card.delivered': ['cards'],
   'card.delivery_failed': ['cards'],
 }
@@ -140,9 +171,9 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 22 条命令 + 9 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(22)
-    expect(HOST_INPUT_NAMES.length).toBe(9)
+  it('覆盖 24 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(24)
+    expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)
     expect(new Set(samples.map((input) => input.type)).size).toBe(
@@ -187,6 +218,7 @@ describe('kernel/view-spec', () => {
     expect(viewSpec(byType.get('run.claim') as Input)).toContain('runtimes')
     expect(viewSpec(byType.get('run.receipt') as Input)).toContain('workflow_stages')
     expect(viewSpec(byType.get('chat.send') as Input)).toContain('conversations')
-    expect(viewSpec(byType.get('clock.tick') as Input)).toEqual(['runs'])
+    expect(viewSpec(byType.get('clock.tick') as Input)).toContain('runs')
+    expect(viewSpec(byType.get('clock.tick') as Input)).toContain('rule_sets')
   })
 })

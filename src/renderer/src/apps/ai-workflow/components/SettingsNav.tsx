@@ -1,8 +1,8 @@
 import type { ReactElement } from 'react'
 import { cn } from '../../../lib/cn'
 
-/** 设置页的三个二级栏目 */
-export type SettingsSection = 'runtimes' | 'agents' | 'workflows'
+/** 设置页的四个二级栏目 */
+export type SettingsSection = 'runtimes' | 'agents' | 'workflows' | 'rules'
 
 interface SettingsNavProps {
   value: SettingsSection
@@ -24,9 +24,10 @@ const ITEMS: NavItem[] = [
     path: 'M12 3a4 4 0 0 1 4 4v1a4 4 0 0 1-4 4 4 4 0 0 1-4-4V7a4 4 0 0 1 4-4ZM5 21a7 7 0 0 1 14 0z',
   },
   { value: 'workflows', label: '工作流配置', path: 'M4 6h6v5H4zM14 6h6v5h-6zM4 13h16v5H4z' },
+  { value: 'rules', label: '规则配置', path: 'M13 3 5 13h5l-1 8 8-11h-5z' },
 ]
 
-/** 设置页左侧的二级栏目：运行时 / 智能体 / 工作流（外壳由父级侧栏提供） */
+/** 设置页左侧的二级栏目：运行时 / 智能体 / 工作流 / 规则（外壳由父级侧栏提供） */
 export function SettingsNav({ value, onChange }: SettingsNavProps): ReactElement {
   return (
     <nav aria-label="设置栏目" className="flex flex-col gap-1">

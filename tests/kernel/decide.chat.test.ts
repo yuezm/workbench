@@ -146,6 +146,10 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map((seed.messages ?? []).map((row) => [row.id, row])),
   cards: new Map(),
   activeTaskIds: new Set(),
+  rules: [],
+  rulesVersion: 0,
+  ruleSetReplacedAt: null,
+  ruleFiredAt: new Map(),
 })
 
 const env = (): Environment => {

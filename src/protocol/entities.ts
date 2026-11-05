@@ -240,6 +240,14 @@ export const TASK_STATUSES = ['active', 'completed'] as const
 
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
+/**
+ * 任务来源（M6）：`manual` = 人手建；`rule` = 自动化规则命中（含 cron / 手动触发）。
+ * 规则任务记录 `ruleId` 与 `externalRef`，同一规则 + 同一入口键只建一次任务。
+ */
+export const TASK_ORIGINS = ['manual', 'rule'] as const
+
+export type TaskOrigin = (typeof TASK_ORIGINS)[number]
+
 export interface Task {
   id: string
   title: string
@@ -247,6 +255,14 @@ export interface Task {
   workflowId: string
   currentStageId: string | null
   status: TaskStatus
+  /** 来源；v2 存量与手工任务为 `manual` */
+  origin: TaskOrigin
+  /** 命中/触发的规则；手工任务为 null */
+  ruleId: string | null
+  /** 规则入口键（同规则去重）；手工任务与无键规则触发为 null */
+  externalRef: string | null
+  /** 规则声明并落到任务上的标签（看板只读展示，不参与派活） */
+  labels: string[]
   createdAt: string
   updatedAt: string
 }

@@ -13,6 +13,7 @@ import {
   tableDdl,
   withTx,
 } from '../../src/host/schema'
+import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '../../src/kernel/types'
 
 /**
  * 改前（M1 之前的 src/main/ai-workflow/schema.ts，HEAD a2697e7）五张业务表的 DDL 原样抄录。
@@ -78,8 +79,27 @@ CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, p
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
 `
 
-/** 静态四表：DDL 自 M1 起未变（runtimes 在 M3 换成 `executor_key`，单独断言）。 */
-const STATIC_TABLES = ['tasks', 'workflows', 'workflow_stages', 'agents']
+/**
+ * 静态三表：DDL 自 M1 起未变（`runtimes` 在 M3 换成 `executor_key`；`tasks` 在 M6 追加来源四列，
+ * 两者都单独断言）。
+ */
+const STATIC_TABLES = ['workflows', 'workflow_stages', 'agents']
+
+/** M6 tasks 列（顺序与 DDL 一致）：旧 8 列之间插入来源四列，时间列仍在末尾。 */
+const TASKS_M6_COLUMNS = [
+  'id',
+  'title',
+  'description',
+  'workflow_id',
+  'current_stage_id',
+  'status',
+  'origin',
+  'rule_id',
+  'external_ref',
+  'labels_json',
+  'created_at',
+  'updated_at',
+]
 
 /** M3 runtimes 列（顺序与 DDL 一致）：`protocol_family` 被 `executor_key` + `args_template` 取代。 */
 const RUNTIMES_M3_COLUMNS = [
@@ -172,6 +192,63 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     expect(columnShape(db, 'runtimes').join('\n')).not.toContain('protocol_family')
   })
 
+  it('tasks 按 M6 结构：来源四列插在 status 与时间列之间，旧 8 列逐列不变', () => {
+    const legacy = memoryDb()
+    legacy.exec(PRE_M1_FIVE_TABLE_DDL)
+
+    const current = memoryDb()
+    current.exec(SCHEMA_SQL)
+
+    expect(columnShape(current, 'tasks').map((column) => column.split('|')[0])).toEqual(
+      TASKS_M6_COLUMNS,
+    )
+    // 旧 v2 的 8 列（名 / 类型 / NOT NULL / 默认值 / 主键）逐列原样保留
+    const byName = new Map(
+      columnShape(current, 'tasks').map((shape) => [shape.split('|')[0], shape] as const),
+    )
+    for (const shape of columnShape(legacy, 'tasks')) {
+      const name = shape.split('|')[0]
+      expect(byName.get(name), name).toBe(shape)
+    }
+  })
+
+  it('tasks 新列默认值 / CHECK：旧行与手工任务 origin=manual，非法来源被拒', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    db.exec(
+      "INSERT INTO workflows (id, name, created_at) VALUES ('wf-1', '流程', '2026-01-01T00:00:00.000Z')",
+    )
+    db.prepare(
+      `INSERT INTO tasks (id, title, workflow_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('tk-manual', '手工任务', 'wf-1', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+    expect(
+      db
+        .prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks WHERE id = ?')
+        .get('tk-manual'),
+    ).toEqual({ origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' })
+
+    db.prepare(
+      `INSERT INTO tasks (id, title, workflow_id, origin, rule_id, external_ref, labels_json,
+                          created_at, updated_at)
+       VALUES (?, ?, ?, 'rule', 'rule-1', 'issue-1', '["bug"]', ?, ?)`,
+    ).run('tk-rule', '规则任务', 'wf-1', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+    expect(
+      db
+        .prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks WHERE id = ?')
+        .get('tk-rule'),
+    ).toEqual({
+      origin: 'rule',
+      rule_id: 'rule-1',
+      external_ref: 'issue-1',
+      labels_json: '["bug"]',
+    })
+
+    expect(() =>
+      db.prepare("UPDATE tasks SET origin = 'agent' WHERE id = 'tk-manual'").run(),
+    ).toThrow()
+  })
+
   it('逐列一致（列名 / 类型 / NOT NULL / 默认值 / 主键）', () => {
     const legacy = memoryDb()
     legacy.exec(PRE_M1_FIVE_TABLE_DDL)
@@ -212,7 +289,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('SCHEMA_SQL 建 10 张表：十张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
+  it('SCHEMA_SQL 建 12 张表：十二张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
@@ -220,6 +297,8 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       'cards',
       'conversations',
       'messages',
+      'rule_fires',
+      'rule_sets',
       'run_events',
       'runs',
       'runtimes',
@@ -331,7 +410,7 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为十张投影表（实体五表 + 运行/聊天四表 + cards）', () => {
+  it('白名单固定为十二张投影表（实体五表 + 运行/聊天四表 + cards + 规则两表）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
@@ -343,20 +422,28 @@ describe('投影白名单与指纹', () => {
       'conversations',
       'messages',
       'cards',
+      'rule_sets',
+      'rule_fires',
     ])
   })
 
-  it('PROJECTION_DDL 覆盖十表、取自 tableDdl、不含账本表', () => {
+  it('host 与 kernel 两份投影表清单一致（顺序也一致，指纹/重建才能同源）', () => {
+    expect(PROJECTION_TABLES).toEqual(KERNEL_PROJECTION_TABLES)
+  })
+
+  it('PROJECTION_DDL 覆盖十二表、取自 tableDdl、不含账本表', () => {
     for (const table of PROJECTION_TABLES) {
       expect(PROJECTION_DDL).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`)
     }
     expect(PROJECTION_DDL).toContain(tableDdl.tasks())
     expect(PROJECTION_DDL).toContain(tableDdl.stages())
     expect(PROJECTION_DDL).toContain(tableDdl.cards())
+    expect(PROJECTION_DDL).toContain(tableDdl.ruleSets())
+    expect(PROJECTION_DDL).toContain(tableDdl.ruleFires())
     expect(PROJECTION_DDL).not.toContain('facts')
   })
 
-  it('指纹 = sha256(十表 DDL + 内核版本)', () => {
+  it('指纹 = sha256(十二表 DDL + 内核版本)', () => {
     const expected = createHash('sha256').update(`${PROJECTION_DDL}\nkernel-1`).digest('hex')
     expect(projectionFormat('kernel-1')).toBe(expected)
     expect(projectionFormat('kernel-1')).toMatch(/^[0-9a-f]{64}$/)
@@ -427,6 +514,74 @@ describe('cards 投影（M4）', () => {
     expect(() =>
       db.prepare("UPDATE cards SET answered_by = 'agent' WHERE id = 'card-1'").run(),
     ).toThrow()
+  })
+})
+
+describe('规则投影（M6）', () => {
+  it('rule_sets 单行：列固定，id 只能是 current', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(columnShape(db, 'rule_sets').map((column) => column.split('|')[0])).toEqual([
+      'id',
+      'version',
+      'replaced_at',
+      'rules_json',
+    ])
+    db.prepare(
+      "INSERT INTO rule_sets (id, version, replaced_at, rules_json) VALUES ('current', 1, ?, '[]')",
+    ).run('2026-01-01T00:00:00.000Z')
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO rule_sets (id, version, replaced_at, rules_json) VALUES ('current', 2, ?, '[]')",
+        )
+        .run('2026-01-01T00:00:01.000Z'),
+    ).toThrow()
+    expect(() =>
+      db
+        .prepare(
+          "INSERT INTO rule_sets (id, version, replaced_at, rules_json) VALUES ('other', 1, ?, '[]')",
+        )
+        .run('2026-01-01T00:00:00.000Z'),
+    ).toThrow()
+  })
+
+  it('rule_fires 纯追加：列固定、重复主键撞约束、无外键', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(columnShape(db, 'rule_fires').map((column) => column.split('|')[0])).toEqual([
+      'id',
+      'rule_id',
+      'version',
+      'scheduled_for',
+      'fired_at',
+      'task_id',
+    ])
+    const insert = db.prepare(
+      `INSERT INTO rule_fires (id, rule_id, version, scheduled_for, fired_at, task_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    insert.run('fire-1', 'rule-1', 1, '2026-01-01T09:00:00.000Z', '2026-01-01T09:00:01.000Z', null)
+    expect(() =>
+      insert.run(
+        'fire-1',
+        'rule-1',
+        1,
+        '2026-01-01T10:00:00.000Z',
+        '2026-01-01T10:00:01.000Z',
+        'tk-1',
+      ),
+    ).toThrow()
+    // 触发记录不因任务删除而消失：task_id 是弱引用，不设外键
+    expect(foreignKeyShape(db, 'rule_fires')).toEqual([])
+  })
+
+  it('rule_fires 索引覆盖 (rule_id, scheduled_for)：cron 基线按计划时刻聚合', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(indexShape(db, 'rule_fires')).toContain(
+      'idx_rule_fires_rule|unique=0|origin=c|partial=0|columns=rule_id,scheduled_for',
+    )
   })
 })
 

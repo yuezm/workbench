@@ -41,9 +41,9 @@ src/
 
 | 模块                | 职责                                                                                                                                                                                                                                                         |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `boot`              | 单实例锁、开库、校验指纹并重建、装配插件、启动 sources/channels、挂单定时器、建窗口与托盘                                                                                                                                                                    |
+| `boot`              | 单实例锁、开库、校验指纹并重建、装配插件、启动 sources/channels、挂单定时器、建窗口与托盘（M6 无 source 插件进程，事件入口为宿主输入）                                                                                                                        |
 | `store`             | 每个输入：按 `viewSpec` 装载切片 → `decide` → 事务内追加事实 + 应用 `project` 变更 → 更新 `projection_meta`                                                                                                                                                  |
-| `clock`             | 只挂一个定时器：`nextWakeAt` 到点发 `clock.tick`；窗口不可见时不降频（托盘常驻）                                                                                                                                                                             |
+| `clock`             | 只挂一个定时器：`nextWakeAt` 到点发 `clock.tick`；M6 起 `nextWakeAt` 纳入 cron 规则下一次到点，tick 内到点建任务并记 `rule.fired`；窗口不可见时不降频（托盘常驻）                                                                                             |
 | `effects`           | 提交后分发：新 `run.queued` 唤醒调度器；`card.opened/updated` 交给通道 hub（fire-and-forget、异常隔离）；事实增量批量推 renderer                                                                                                                             |
 | `channels`          | 通道 hub（M4）：按 `plugins/registry.ts` 的 `channels` 顺序启停；分发 `card.opened/updated`、启动补投 `delivery='pending'` 的 open 卡、承接 `delivered` / `answer` 回调；首个成功回 `card.delivered{ref}`，全失败回 `card.delivery_failed`；投递不阻塞写路径 |
 | `scheduler`         | 按运行时（`maxConcurrent`）向内核 `run.claim`，领取后按 `runtime.executorKey` 调执行器插件 `run(turn)`；回执转交内核；不自己判断派给谁；线程串行由内核保证                                                                                                   |
@@ -63,6 +63,7 @@ src/
 - 事务：追加事实 + 应用投影 + 更新 `projection_meta.seq` 在同一事务内完成；提交成功才向调用方应答。
 - 宿主兜底写入：执行器不可达、超时或取消无回执时，宿主以 `run.host_settled` 输入写终态（`run.failed` 的 `timeout`/`executor_lost`，或 `run.cancelled` 的 `cancelled`；见 SPEC-kernel「输入目录」），不让 run 悬空。
 - **M3 结构升级**：`runtimes` 从旧列 `protocol_family`（旧字段，仅迁移归一用）改成 `executor_key` + `args_template`；旧列被 CHECK 引用、不能 `DROP COLUMN`，因此与 M2 的 `runs` 同法做一次性物理重建（外键 OFF → 临时表 → 拷贝旧行并回填 → 删旧 → 改名）；升级在 `openDatabase` 内完成。
+- **M6 结构升级**：`tasks` 追加来源四列（`origin` / `rule_id` / `external_ref` / `labels_json`），旧库用 `ALTER TABLE ADD COLUMN` 一次性补齐（**不重建表**，避免 SQLite 重写 `runs.task_id` 的外键引用）；老事实 payload 缺字段由 `kernel/project` 与投影 writer 的 `normalizeTask` 双层归一。新增投影表 `rule_sets`（单行 `id='current'`）与 `rule_fires`（append-only），`KERNEL_VERSION=m6.0.0` 触发全量重建。
 - **启动顺序固定**：「结构升级（`openDatabase`）→ 存量导入（`importLegacyIfNeeded`）→ 指纹重建（`store.ensureProjection`）」。重建 fold 的是历史事实 payload，所以老 payload 的归一函数（`normalizeRuntime`）必须先于指纹/DDL 变化落地，否则老库升级失败。
 - 备份：`userData/workbench.db` 与 `userData/artifacts/` 直接复制即完整备份（事实日志自足）；设置页提供「导出全部事实为 JSON」。
 

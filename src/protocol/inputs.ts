@@ -27,6 +27,7 @@ export const HOST_INPUT_NAMES = [
   'clock.tick',
   'card.delivered',
   'card.delivery_failed',
+  'event.received',
 ] as const
 
 export type HostInputName = (typeof HOST_INPUT_NAMES)[number]
@@ -196,6 +197,28 @@ export type HostInput =
   | ClockTickInput
   | CardDeliveredInput
   | CardDeliveryFailedInput
+  | EventReceivedInput
+
+// ---------- 事件入口（M6） ----------
+
+/**
+ * 外部事件入口（source 插件 / 宿主 / 测试注入）：产一条 `event.received` 事实，
+ * 并立即按当前规则集匹配建任务（M6）。
+ *
+ * `hops` 缺省 1（外部来源）；执行器回执派生的事件仍走 `run.receipt` 的 `events[]`
+ * （`hops = 父 run.hops + 1`），不经过这里。`detail` 由宿主落资料文件后把路径放进
+ * `detailRef`；内核只入账引用，不拼进提示词。
+ */
+export interface EventReceivedInput {
+  type: 'event.received'
+  event: RawEvent
+  /** 跳数（缺省 1；宿主 / 测试可显式给） */
+  hops?: number
+  /** 派生出该事件的 run（外部来源为 null） */
+  originRunId?: string | null
+  /** 资料文件路径（不是指令） */
+  detailRef?: string | null
+}
 
 /** 内核唯一决策入口的入参（命令是它的子集）。 */
 export type Input = Command | HostInput

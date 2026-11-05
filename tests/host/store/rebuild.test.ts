@@ -31,7 +31,7 @@ import { allFacts, appendFacts, lastSeq } from '../../../src/host/store/facts'
 import { createStore, type Store } from '../../../src/host/store/index'
 import { importLegacyIfNeeded } from '../../../src/host/store/import'
 import { readProjectionMeta, rebuildProjection } from '../../../src/host/store/projection'
-import { createMemoryDb, dumpProjection } from './test-support'
+import { countRows, createMemoryDb, dumpProjection } from './test-support'
 
 const AT = '2026-03-03T03:03:03.000Z'
 const IMPORT_AT = '2026-02-02T02:02:02.000Z'
@@ -421,6 +421,10 @@ describe('强杀重启：事实已提交、投影落后', () => {
           workflowId: aheadWorkflow.id,
           currentStageId: aheadStage.id,
           status: 'active',
+          origin: 'manual',
+          ruleId: null,
+          externalRef: null,
+          labels: [],
           createdAt: AT,
           updatedAt: AT,
         }
@@ -495,8 +499,8 @@ describe('强杀重启：事实已提交、投影落后', () => {
   })
 })
 
-describe('重建边界：运行/聊天四表纳入白名单', () => {
-  it('runs / run_events / conversations / messages 没有事实支撑的行重建后清空', () => {
+describe('重建边界：运行/聊天四表与规则两表纳入白名单', () => {
+  it('runs / run_events / conversations / messages / rule_sets / rule_fires 没有事实支撑的行重建后清空', () => {
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
@@ -542,6 +546,14 @@ describe('重建边界：运行/聊天四表纳入白名单', () => {
     db.prepare(
       'INSERT INTO messages (id, conversation_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)',
     ).run('ms-1', 'cv-1', 'user', '你好', AT)
+    // M6：规则两表同样只有事实能写；直接落库的残留行重建后清空
+    db.prepare(
+      "INSERT INTO rule_sets (id, version, replaced_at, rules_json) VALUES ('current', 1, ?, '[]')",
+    ).run(AT)
+    db.prepare(
+      `INSERT INTO rule_fires (id, rule_id, version, scheduled_for, fired_at, task_id)
+       VALUES ('fire-1', 'rule-1', 1, ?, ?, NULL)`,
+    ).run(AT, AT)
 
     store.rebuild()
 
@@ -551,6 +563,8 @@ describe('重建边界：运行/聊天四表纳入白名单', () => {
     expect(rebuilt.run_events).toEqual([])
     expect(rebuilt.conversations).toEqual([])
     expect(rebuilt.messages).toEqual([])
+    expect(countRows(db, 'rule_sets')).toBe(0)
+    expect(countRows(db, 'rule_fires')).toBe(0)
   })
 })
 

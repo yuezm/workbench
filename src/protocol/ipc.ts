@@ -20,6 +20,7 @@ import type {
   WorkflowWithStages,
 } from './entities'
 import type { FactType } from './facts'
+import type { RuleSetView } from './rules'
 
 /** 提交后回给 renderer 的事实摘要（不带 payload；顺序即 seq 顺序）。 */
 export interface FactSummary {
@@ -61,6 +62,10 @@ export interface CommandResults {
   'chat.remove': null
   'chat.cancel': null
   'app.event': null
+  /** M6：整批替换后的规则集（版本 + 规则清单） */
+  'rules.replace': RuleSetView
+  /** M6：立即运行一条规则后新建的任务 */
+  'rule.trigger': Task
 }
 
 export type CommandValue<T extends Command['type']> = CommandResults[T]

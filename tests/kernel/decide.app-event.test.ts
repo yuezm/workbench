@@ -53,6 +53,10 @@ const view = (): View => ({
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(),
+  rules: [],
+  rulesVersion: 0,
+  ruleSetReplacedAt: null,
+  ruleFiredAt: new Map(),
 })
 
 const command = (over: Record<string, unknown> = {}): Parameters<typeof decide>[1] =>

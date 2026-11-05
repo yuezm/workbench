@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { RunRow } from '../../src/protocol/entities'
+import type { AutomationRule } from '../../src/protocol/rules'
 import { nextWakeAt } from '../../src/kernel/next-wake'
 import type { Environment, IdKind, Limits, View } from '../../src/kernel/types'
 
@@ -71,7 +72,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
   ...over,
 })
 
-const view = (runs: RunRow[]): View => ({
+const view = (runs: RunRow[], rules: AutomationRule[] = []): View => ({
   seq: 0,
   workflows: new Map(),
   stages: new Map(),
@@ -83,6 +84,10 @@ const view = (runs: RunRow[]): View => ({
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(),
+  rules,
+  rulesVersion: rules.length === 0 ? 0 : 1,
+  ruleSetReplacedAt: rules.length === 0 ? null : CREATED,
+  ruleFiredAt: new Map(),
 })
 
 const env = (): Environment => ({
@@ -160,5 +165,45 @@ describe('kernel/next-wake', () => {
     ])
 
     expect(nextWakeAt(target, NOW, env())).toBeNull()
+  })
+
+  it('cron 规则参与最早时刻（Asia/Shanghai 09:00 = 01:00Z）', () => {
+    const cronRule: AutomationRule = {
+      id: 'rule-1',
+      name: '每日早报',
+      when: { cron: '0 9 * * *' },
+      to: { workflowId: 'wf-1' },
+      enabled: true,
+    }
+    // NOW = 2026-11-04T20:00 Shanghai；下一次 2026-11-05 09:00 本地 = 01:00Z
+    expect(nextWakeAt(view([], [cronRule]), NOW, env())).toBe('2026-11-05T01:00:00.000Z')
+  })
+
+  it('停用 / 非法 cron 不参与；cron 与 run 到期取更早者', () => {
+    const disabled: AutomationRule = {
+      id: 'rule-1',
+      name: '停用',
+      when: { cron: '0 9 * * *' },
+      to: { workflowId: 'wf-1' },
+      enabled: false,
+    }
+    const invalid: AutomationRule = {
+      id: 'rule-2',
+      name: '非法',
+      when: { cron: 'bad' },
+      to: { workflowId: 'wf-1' },
+      enabled: true,
+    }
+    expect(nextWakeAt(view([], [disabled, invalid]), NOW, env())).toBeNull()
+
+    const early = run({ leaseUntil: '2026-11-04T12:05:00.000Z' })
+    const cronRule: AutomationRule = {
+      id: 'rule-1',
+      name: '每日早报',
+      when: { cron: '0 9 * * *' },
+      to: { workflowId: 'wf-1' },
+      enabled: true,
+    }
+    expect(nextWakeAt(view([early], [cronRule]), NOW, env())).toBe('2026-11-04T12:05:00.000Z')
   })
 })

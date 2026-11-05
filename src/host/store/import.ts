@@ -372,6 +372,11 @@ function readLegacyEntityRows(
     workflowId: row.workflow_id,
     currentStageId: row.current_stage_id,
     status: row.status as TaskStatus,
+    // M6：v2 存量没有来源概念——导入后一律视为手工任务，规则列留空。
+    origin: 'manual',
+    ruleId: null,
+    externalRef: null,
+    labels: [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))
@@ -483,6 +488,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   conversations: 0,
   messages: 0,
   cards: 0,
+  rule_sets: 0,
+  rule_fires: 0,
 })
 
 /** 一组行 + 表名 → `snapshot.imported` 草稿（payload 按表收窄成判别联合）。 */

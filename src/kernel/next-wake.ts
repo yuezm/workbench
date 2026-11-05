@@ -9,8 +9,10 @@
  * 宿主再用本函数重新计算下一跳，避免定时器空转。
  */
 import type { Environment, Iso, View } from './types'
+import { isCronRule } from '../protocol/rules'
+import { nextCronTime, parseCron } from './cron'
 
-export function nextWakeAt(view: View, now: Iso, _env: Environment): Iso | null {
+export function nextWakeAt(view: View, now: Iso, env: Environment): Iso | null {
   let earliest: Iso | null = null
   const consider = (at: Iso | null): void => {
     if (at === null || at <= now) return
@@ -24,6 +26,14 @@ export function nextWakeAt(view: View, now: Iso, _env: Environment): Iso | null 
     } else if (run.status === 'queued') {
       consider(run.notBefore)
     }
+  }
+
+  // M6：cron 规则的下一次到点（墙钟 + 时区由 kernel/cron 纯函数求）
+  for (const rule of view.rules) {
+    if (!rule.enabled || !isCronRule(rule)) continue
+    const spec = parseCron(rule.when.cron)
+    if (spec === null) continue
+    consider(nextCronTime(spec, now, env.timezone))
   }
 
   return earliest

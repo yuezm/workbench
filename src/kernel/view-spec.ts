@@ -78,6 +78,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'runtimes',
         'conversations',
         'cards',
+        // M6：回执 events[] 派生的 event.received 也要命中规则建任务
+        'rule_sets',
       ]
     case 'run.host_settled':
       // 兜底终态；聊天 run 还要补一条 assistant 消息（读对话判断是否已删）
@@ -85,8 +87,18 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'run.cancel':
       return ['runs']
     case 'clock.tick':
-      // M2 只处理运行到期（租约 / 退避 / 超时）；cron 与卡片超时后续里程碑再补
-      return ['runs']
+      // M6：除运行到期外，还要为 cron 规则到点建任务（读规则集与触发基线，
+      // 建任务要工作流/阶段/智能体/运行时与既有任务做 externalRef 去重）
+      return [
+        'runs',
+        'rule_sets',
+        'rule_fires',
+        'tasks',
+        'workflows',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+      ]
     case 'chat.create':
       // 对话绑定的智能体必须存在（M5 命令化后沿用原 conversation.create 语义）
       return ['agents']
@@ -100,8 +112,17 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 按对话取活跃 run 逐条产取消请求
       return ['conversations', 'runs']
     case 'app.event':
-      // app 事件只入账，不读任何投影
-      return []
+      // M6：app 事件不再只入账——命中规则要建任务，与外部事件同一匹配路径
+      return ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
+    case 'event.received':
+      // source 插件 / 宿主注入的外部事件：命中规则建任务（同 app.event 切片）
+      return ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
+    case 'rules.replace':
+      // 整批校验：当前版本（+1）、规则引用的工作流与阶段必须存在且从属
+      return ['rule_sets', 'workflows', 'workflow_stages']
+    case 'rule.trigger':
+      // 手动运行：读规则集与目标工作流/阶段/智能体/运行时，并做 externalRef 去重（tasks）
+      return ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
     case 'card.delivered':
     case 'card.delivery_failed':
       // 投递回写只读卡片当前行（校验版本 / 幂等：迟到与重复投递零事实）

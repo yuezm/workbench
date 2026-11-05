@@ -212,6 +212,14 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
           ? null
           : (store.query('conversations.all').find((item) => item.id === id) ?? null)
       }
+      case 'rules.replace':
+        // 整批保存后立刻返回新版本与规则清单（IPC 可直接刷新，不必再发一次 rules.all）
+        return store.query('rules.all')
+      case 'rule.trigger': {
+        // 手动运行：内核产 `task.created`（origin='rule'），返回值与 task.create 同口径
+        const id = entityIdOf(facts, 'task.created')
+        return id === null ? null : taskById(id)
+      }
       default:
         return null
     }

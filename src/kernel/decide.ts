@@ -29,12 +29,14 @@ import type {
   WorkflowStage,
   WorkflowWithStages,
 } from '../protocol/entities'
-import type { FactPayload, FactType } from '../protocol/facts'
+import type { EventReceivedPayload, FactPayload, FactType } from '../protocol/facts'
 import type { Input, Receipt } from '../protocol/inputs'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, Reason, View } from './types'
 import type { SettledRun } from './run'
-import { chatPrompt, laterPrompt, taskPrompt, titleFromContent } from './prompt'
+import { chatPrompt, laterPrompt, titleFromContent } from './prompt'
 import { answerFacts, cardsFromReceipt, resolveFacts, resumedRun } from './cards'
+import { entryRunFacts, ACCESS_BY_PERMISSION } from './task-effects'
+import { cronTaskFacts, eventTaskFacts, manualTriggerFacts, validateRuleBatch } from './rules'
 import {
   abandonedFacts,
   claimFacts,
@@ -411,82 +413,6 @@ function chatMessageFacts(
   ]
 }
 
-/** 权限模式 → 协议帧的 access 级别（SPEC-plugins「Turn」）。 */
-const ACCESS_BY_PERMISSION: Record<Runtime['permissionMode'], RunRow['access']> = {
-  'read-only': 'read',
-  'workspace-write': 'edit',
-  'danger-full-access': 'full',
-}
-
-/**
- * 进入阶段的效果：落点阶段 `entryMode='agent'` 且智能体 / 运行时都在时，产一条
- * `run.queued`（完整 RunRow，宿主直接领取执行）。
- *
- * 每次进入都触发（人工拖拽、建任务、回执流转到目标阶段都重新建 run）；以下零事实：
- * - 阶段是 `user` / `none`（等人或仅停留）；
- * - 任务已完成 / 无当前阶段；
- * - 阶段没有绑定智能体，或智能体 / 运行时已不存在（旧 `applyStageEffects` 同口径：
- *   缺配置时只建任务，不建 run）。
- */
-function entryRunFacts(
-  view: View,
-  task: Task,
-  now: Iso,
-  env: Environment,
-  actor: Actor,
-): FactDraft<'run.queued'>[] {
-  if (task.status !== 'active' || task.currentStageId === null) return []
-  const stage = view.stages.get(task.currentStageId)
-  if (!stage || stage.entryMode !== 'agent') return []
-  const agent = stage.agentId === null ? undefined : view.agents.get(stage.agentId)
-  if (!agent) return []
-  const runtime = view.runtimes.get(agent.runtimeId)
-  if (!runtime) return []
-  const run: RunRow = {
-    id: env.nextId('run'),
-    purpose: 'stage',
-    taskId: task.id,
-    conversationId: null,
-    stageId: stage.id,
-    agentId: agent.id,
-    runtimeId: runtime.id,
-    ruleId: null,
-    rulesVersion: 0,
-    executorKey: runtime.executorKey,
-    threadId: null,
-    cwd: runtime.workdir ?? '',
-    access: ACCESS_BY_PERMISSION[runtime.permissionMode],
-    skill: null,
-    promptRef: null,
-    eventIds: [],
-    hops: 0,
-    turn: 1,
-    resumeSessionId: null,
-    threadContextRef: null,
-    queueSeq: 0,
-    status: 'queued',
-    prompt: taskPrompt(agent, task, stage.name),
-    output: '',
-    error: null,
-    errorCode: null,
-    exitCode: null,
-    sessionId: null,
-    usage: null,
-    durationMs: null,
-    leaseId: null,
-    attempt: 0,
-    attempts: 0,
-    leaseUntil: null,
-    notBefore: null,
-    deadlineAt: null,
-    cancelRequested: false,
-    startedAt: null,
-    endedAt: null,
-    createdAt: now,
-  }
-  return [{ type: 'run.queued', actor, at: now, payload: { run } }]
-}
-
 /** 摘要截断：按码点取前 200 字（与 `protocol/validate` 的 `summary` 上限一致）。 */
 function truncateSummary(summary: string): string {
   const chars = Array.from(summary)
@@ -531,6 +457,58 @@ function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): 
       },
     }
   })
+}
+
+/**
+ * 外部事件入账 + 规则匹配（M6）：产一条 `event.received`，超过跳数上限只产
+ * `event.dropped`（熔断，不建任务）；否则立即按当前规则集建任务。
+ *
+ * 入账与建任务在同一批事实里，重建按 seq 顺序 fold 结果一致。
+ */
+function receivedEventFacts(
+  view: View,
+  event: {
+    source: string
+    type: string
+    subject: string
+    summary?: string | null
+    detailRef: string | null
+    link: string | null
+    hops: number
+    originRunId: string | null
+    dedupeKey: string | null
+  },
+  now: Iso,
+  env: Environment,
+  actor: Actor,
+): FactDraft[] {
+  const eventId = env.nextId('event')
+  if (event.hops > env.limits.maxHops) {
+    return [
+      {
+        type: 'event.dropped',
+        actor,
+        at: now,
+        payload: { eventId, hops: event.hops, reason: 'max_hops' },
+      },
+    ]
+  }
+  const payload = {
+    eventId,
+    source: event.source,
+    type: event.type,
+    subject: event.subject,
+    summary: truncateSummary(event.summary ?? ''),
+    detailRef: event.detailRef,
+    link: event.link,
+    hops: event.hops,
+    originRunId: event.originRunId,
+    dedupeKey: event.dedupeKey,
+  }
+  return [
+    { type: 'event.received', actor, at: now, payload },
+    ...eventTaskFacts(view, payload, view.rulesVersion, now, env),
+  ]
 }
 
 export function decide(view: View, input: Input, now: Iso, env: Environment): Decision {
@@ -819,6 +797,10 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         workflowId: workflow.id,
         currentStageId: requested ?? stages[0]?.id ?? null,
         status: 'active',
+        origin: 'manual',
+        ruleId: null,
+        externalRef: null,
+        labels: [],
         createdAt: now,
         updatedAt: now,
       }
@@ -945,10 +927,21 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       // 先产卡片事实（ask → opened/updated、notices → 信息卡、resolves → resolved），
       // 再产派生事件；卡片事实排在 run.waiting / 终态事实之前，重建顺序稳定（D5/D8）。
       const receiptCards = cardsFromReceipt(view, run, input.receipt, now, env)
-      const facts: FactDraft[] = [
-        ...receiptCards.facts,
-        ...eventFacts(run, input.receipt, now, env),
-      ]
+      const derivedEvents = eventFacts(run, input.receipt, now, env)
+      const facts: FactDraft[] = [...receiptCards.facts, ...derivedEvents]
+      // M6：回执派生的 event.received 同样命中规则建任务（线程 / 父任务归并留 M6.5）
+      for (const derived of derivedEvents) {
+        if (derived.type !== 'event.received') continue
+        facts.push(
+          ...eventTaskFacts(
+            view,
+            derived.payload as EventReceivedPayload,
+            view.rulesVersion,
+            now,
+            env,
+          ),
+        )
+      }
       // 回执带 ask：先建卡再挂起等回答，释放租约与并发位，不落终态（D5/D12）
       if ((input.receipt.ask?.length ?? 0) > 0) {
         facts.push(
@@ -1032,7 +1025,7 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
     }
 
     case 'clock.tick': {
-      // 唯一定时器到点：先判整体超时（终态），再看租约过期（放弃 / 重试）
+      // 唯一定时器到点：先判整体超时（终态），再看租约过期（放弃 / 重试），最后 cron 规则。
       const facts: FactDraft[] = []
       for (const run of view.runs.values()) {
         if (deadlineReached(run, now)) {
@@ -1041,6 +1034,8 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
           facts.push(...abandonedFacts(run, now, env.limits, HOST_TIMER))
         }
       }
+      // M6：cron 规则到点建任务（同刻只触发一次；停机错过只补最近一次）
+      facts.push(...cronTaskFacts(view, now, env, env.timezone))
       return done(facts)
     }
 
@@ -1140,22 +1135,72 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
     }
 
     case 'app.event': {
-      // app 插件事件（M5）：只入账、不派活；类型白名单由宿主入口先校验，这里只落事实。
+      // app 插件事件（M5 只入账，M6 起命中规则建任务）：类型白名单由宿主入口先校验。
       // `hops=1`（无父 run）、`originRunId=null`（外部来源）、`detailRef=null`（不落资料文件）。
+      return done(
+        receivedEventFacts(
+          view,
+          {
+            source: 'app',
+            type: input.eventType,
+            subject: input.subject,
+            summary: input.summary,
+            detailRef: null,
+            link: input.link ?? null,
+            hops: 1,
+            originRunId: null,
+            dedupeKey: input.dedupeKey ?? null,
+          },
+          now,
+          env,
+          OWNER,
+        ),
+      )
+    }
+
+    case 'event.received': {
+      // source 插件 / 宿主注入的外部事件（M6）：入账后立即匹配规则建任务。
+      return done(
+        receivedEventFacts(
+          view,
+          {
+            source: input.event.source,
+            type: input.event.type,
+            subject: input.event.subject,
+            summary: input.event.summary,
+            detailRef: input.detailRef ?? null,
+            link: input.event.link ?? null,
+            hops: input.hops ?? 1,
+            originRunId: input.originRunId ?? null,
+            dedupeKey: input.event.dedupeKey ?? null,
+          },
+          now,
+          env,
+          HOST_SCHEDULER,
+        ),
+      )
+    }
+
+    // ---------- 自动化规则（M6） ----------
+    case 'rules.replace': {
+      // 整批替换：任一条非法 → 整批 reject（零事实），旧版继续生效；版本由内核 +1。
+      const result = validateRuleBatch(view, input.rules)
+      if ('error' in result) return reject('invalid_input', result.error)
       return done([
-        draft('event.received', {
-          eventId: env.nextId('event'),
-          source: 'app',
-          type: input.eventType,
-          subject: input.subject,
-          summary: truncateSummary(input.summary ?? ''),
-          detailRef: null,
-          link: input.link ?? null,
-          hops: 1,
-          originRunId: null,
-          dedupeKey: input.dedupeKey ?? null,
+        draft('rules.replaced', {
+          ruleSet: {
+            id: 'current',
+            version: result.version,
+            replacedAt: now,
+            rules: result.rules,
+          },
         }),
       ])
+    }
+
+    case 'rule.trigger': {
+      // 规则页「立即运行」：直接按规则建任务，不依赖事件、不写 rule.fired
+      return manualTriggerFacts(view, input.ruleId, now, env)
     }
   }
 }

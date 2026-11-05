@@ -324,6 +324,11 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       workflowId: 'wf-1',
       currentStageId: 'st-2',
       status: 'active',
+      // M6：v2 存量导入后一律是手工任务
+      origin: 'manual',
+      ruleId: null,
+      externalRef: null,
+      labels: [],
       createdAt: seedAt(6),
       updatedAt: seedAt(7),
     },
@@ -334,6 +339,10 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       workflowId: 'wf-1',
       currentStageId: null,
       status: 'completed',
+      origin: 'manual',
+      ruleId: null,
+      externalRef: null,
+      labels: [],
       createdAt: seedAt(8),
       updatedAt: seedAt(9),
     },
@@ -548,6 +557,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   conversations: 0,
   messages: 0,
   cards: 0,
+  rule_sets: 0,
+  rule_fires: 0,
 })
 
 describe('importLegacyIfNeeded', () => {
@@ -570,6 +581,8 @@ describe('importLegacyIfNeeded', () => {
       conversations: 0,
       messages: 0,
       cards: 0,
+      rule_sets: 0,
+      rule_fires: 0,
     })
 
     const facts = allFacts(db)
@@ -605,6 +618,13 @@ describe('importLegacyIfNeeded', () => {
       run_events: previousEvents.map((row) => ({ ...row, created_at: IMPORT_AT })),
     }
     expect(dumpProjection(db)).toEqual(expectedProjection)
+    // M6：v2 存量任务没有来源概念，导入后一律按手工任务落库
+    expect(
+      db.prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks ORDER BY id').all(),
+    ).toEqual([
+      { origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' },
+      { origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' },
+    ])
     expect(readProjectionMeta(db)).toEqual({
       format: projectionFormat(KERNEL_VERSION),
       seq: 7,
@@ -769,6 +789,8 @@ describe('importLegacyIfNeeded', () => {
       conversations: [],
       messages: [],
       cards: [],
+      rule_sets: [],
+      rule_fires: [],
     })
   })
 

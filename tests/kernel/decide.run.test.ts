@@ -125,6 +125,10 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(),
+  rules: [],
+  rulesVersion: 0,
+  ruleSetReplacedAt: null,
+  ruleFiredAt: new Map(),
 })
 
 const conversation = (over: Partial<Conversation> = {}): Conversation => ({
@@ -164,6 +168,10 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   currentStageId: 'st-1',
   status: 'active',
+  origin: 'manual',
+  ruleId: null,
+  externalRef: null,
+  labels: [],
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,

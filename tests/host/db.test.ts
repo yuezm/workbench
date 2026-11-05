@@ -4,13 +4,19 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { needsRunsUpgrade, needsRuntimesUpgrade, openDatabase } from '../../src/host/db'
+import {
+  needsRunsUpgrade,
+  needsRuntimesUpgrade,
+  needsTasksUpgrade,
+  openDatabase,
+} from '../../src/host/db'
 import {
   PROJECTION_TABLES,
   RUN_M2_ADDED_COLUMNS,
   RUNTIMES_M3_ADDED_COLUMNS,
   SCHEMA_SQL,
   SCHEMA_VERSION,
+  TASKS_M6_ADDED_COLUMNS,
   tableDdl,
 } from '../../src/host/schema'
 
@@ -66,6 +72,19 @@ const LEGACY_RUNS_DDL_NO_CHECK = LEGACY_RUNS_DDL.replace(
   "  status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','cancelled')),",
   '  status TEXT NOT NULL,',
 )
+
+/** M1/v2 旧库的 `tasks` DDL 原样：M6 之前的 8 列（无 origin / rule_id / external_ref / labels_json）。 */
+const LEGACY_TASKS_DDL = `
+CREATE TABLE tasks (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  current_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);`
 
 const SEED_AT = '2026-01-01T00:00:00.000Z'
 const LEGACY_RUN_COUNT = 15
@@ -175,7 +194,7 @@ function userVersion(d: DatabaseSync): number {
 }
 
 describe('openDatabase', () => {
-  it(':memory: 建全 schema（十张投影 + facts / projection_meta + 宿主私有 process_registry、commands）并写 user_version', () => {
+  it(':memory: 建全 schema（十二张投影 + facts / projection_meta + 宿主私有 process_registry、commands）并写 user_version', () => {
     db = openDatabase(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
@@ -186,6 +205,8 @@ describe('openDatabase', () => {
       'messages',
       'process_registry',
       'projection_meta',
+      'rule_fires',
+      'rule_sets',
       'run_events',
       'runs',
       'runtimes',
@@ -211,6 +232,15 @@ describe('openDatabase', () => {
     const empty = new DatabaseSync(':memory:')
     try {
       expect(needsRuntimesUpgrade(empty)).toBe(false)
+    } finally {
+      empty.close()
+    }
+  })
+
+  it('tasks 表不存在（空列集合）：needsTasksUpgrade 返回 false，不触发补列', () => {
+    const empty = new DatabaseSync(':memory:')
+    try {
+      expect(needsTasksUpgrade(empty)).toBe(false)
     } finally {
       empty.close()
     }
@@ -258,6 +288,8 @@ describe('openDatabase', () => {
         'messages',
         'process_registry',
         'projection_meta',
+        'rule_fires',
+        'rule_sets',
         'run_events',
         'runs',
         'runtimes',
@@ -406,6 +438,45 @@ const columnNames = (connection: DatabaseSync, table: string): Set<string> =>
 
 const countOf = (connection: DatabaseSync, table: string): number =>
   (connection.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as unknown as { n: number }).n
+
+/** 列结构指纹（名 / 类型 / NOT NULL / 默认值 / 主键）：升级后必须与新库 DDL 逐列一致。 */
+const columnShape = (connection: DatabaseSync, table: string): string[] =>
+  (
+    connection.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<
+      Record<string, unknown>
+    >
+  ).map((row) => [row.name, row.type, row.notnull, row.dflt_value, row.pk].map(String).join('|'))
+
+/** 造一个 M6 之前的文件库：旧 `tasks`（8 列）+ 它引用的 workflows / workflow_stages。 */
+function seedLegacyTasksDatabase(file: string): void {
+  const seeded = new DatabaseSync(file)
+  try {
+    // 阶段的外键链：workflow_stages.agent_id → agents → runtimes
+    seeded.exec(tableDdl.runtimes())
+    seeded.exec(tableDdl.agents())
+    seeded.exec(tableDdl.workflows())
+    seeded.exec(tableDdl.stages())
+    seeded.exec(LEGACY_TASKS_DDL)
+    seeded
+      .prepare('INSERT INTO workflows (id, name, created_at) VALUES (?, ?, ?)')
+      .run('wf-1', '旧流程', SEED_AT)
+    seeded
+      .prepare(
+        `INSERT INTO workflow_stages (id, workflow_id, name, position, entry_mode, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run('st-1', 'wf-1', '待办', 0, 'none', SEED_AT)
+    seeded
+      .prepare(
+        `INSERT INTO tasks (id, title, description, workflow_id, current_stage_id, status,
+                            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run('tk-1', '旧任务', '旧描述', 'wf-1', 'st-1', 'active', SEED_AT, SEED_AT)
+  } finally {
+    seeded.close()
+  }
+}
 
 describe('openDatabase：旧库 runs 结构升级（M2 一次性物理迁移）', () => {
   it('缺 M2 列：重建 runs，15 行数据与 run_events 原样保留，新结构可写新行', () => {
@@ -612,6 +683,189 @@ describe('openDatabase：旧库 runtimes 结构升级（M3 一次性物理迁移
         expect(tableNames(again)).not.toContain('runtimes_m3_upgrade')
       } finally {
         again.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('openDatabase：旧库 tasks 结构补列（M6 一次性 ALTER，不重建表）', () => {
+  it('缺 M6 列：补列后旧行 origin=manual，列结构与新库逐列一致，且新行可写', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-tasks-upgrade-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      seedLegacyTasksDatabase(file)
+
+      const before = new DatabaseSync(file)
+      try {
+        expect(needsTasksUpgrade(before)).toBe(true)
+        for (const column of TASKS_M6_ADDED_COLUMNS) {
+          expect(columnNames(before, 'tasks').has(column), column).toBe(false)
+        }
+      } finally {
+        before.close()
+      }
+
+      db = openDatabase(file)
+      try {
+        expect(needsTasksUpgrade(db)).toBe(false)
+        const columns = columnNames(db, 'tasks')
+        for (const column of TASKS_M6_ADDED_COLUMNS) {
+          expect(columns, column).toContain(column)
+        }
+
+        // 旧业务列逐列保留
+        expect(
+          db
+            .prepare(
+              `SELECT id, title, description, workflow_id, current_stage_id, status,
+                      created_at, updated_at
+               FROM tasks ORDER BY id`,
+            )
+            .all(),
+        ).toEqual([
+          {
+            id: 'tk-1',
+            title: '旧任务',
+            description: '旧描述',
+            workflow_id: 'wf-1',
+            current_stage_id: 'st-1',
+            status: 'active',
+            created_at: SEED_AT,
+            updated_at: SEED_AT,
+          },
+        ])
+        // 旧行按默认值补来源列
+        expect(
+          db
+            .prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks WHERE id = ?')
+            .get('tk-1'),
+        ).toEqual({ origin: 'manual', rule_id: null, external_ref: null, labels_json: '[]' })
+
+        // ALTER 补出的列结构与新建库 DDL 逐列一致（SQLite 把新列追加在末尾，列顺序不同，
+        // 但名 / 类型 / NOT NULL / 默认值 / 主键完全相同；代码全部按列名读写，不依赖顺序）
+        const fresh = new DatabaseSync(':memory:')
+        try {
+          fresh.exec(SCHEMA_SQL)
+          const sorted = (shapes: string[]): string[] => [...shapes].sort()
+          expect(sorted(columnShape(db, 'tasks'))).toEqual(sorted(columnShape(fresh, 'tasks')))
+          // 追加位置可观测：补列一定在表尾（不重排既有列）
+          expect(
+            columnShape(db, 'tasks')
+              .slice(-4)
+              .map((shape) => shape.split('|')[0]),
+          ).toEqual([...TASKS_M6_ADDED_COLUMNS])
+        } finally {
+          fresh.close()
+        }
+
+        // 新结构可写：规则任务四列落库，非法来源被 CHECK 拒绝
+        db.prepare(
+          `INSERT INTO tasks (id, title, workflow_id, origin, rule_id, external_ref, labels_json,
+                              created_at, updated_at)
+           VALUES (?, ?, ?, 'rule', 'rule-1', 'issue-1', '["bug"]', ?, ?)`,
+        ).run('tk-rule', '规则任务', 'wf-1', SEED_AT, SEED_AT)
+        expect(
+          db
+            .prepare('SELECT origin, rule_id, external_ref, labels_json FROM tasks WHERE id = ?')
+            .get('tk-rule'),
+        ).toEqual({
+          origin: 'rule',
+          rule_id: 'rule-1',
+          external_ref: 'issue-1',
+          labels_json: '["bug"]',
+        })
+        expect(() =>
+          db!.prepare("UPDATE tasks SET origin = 'agent' WHERE id = 'tk-1'").run(),
+        ).toThrow()
+        expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
+      } finally {
+        db.close()
+        db = null
+      }
+
+      // 幂等：已补齐的库再次打开 no-op，行数与列不变
+      const again = openDatabase(file)
+      try {
+        expect(needsTasksUpgrade(again)).toBe(false)
+        expect(countOf(again, 'tasks')).toBe(2)
+        expect(columnNames(again, 'tasks').has('labels_json')).toBe(true)
+      } finally {
+        again.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('部分列已存在：只补缺失列，不重复 ALTER', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-tasks-partial-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      seedLegacyTasksDatabase(file)
+      const raw = new DatabaseSync(file)
+      try {
+        raw.exec("ALTER TABLE tasks ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]'")
+      } finally {
+        raw.close()
+      }
+
+      const inspect = new DatabaseSync(file)
+      try {
+        expect(needsTasksUpgrade(inspect)).toBe(true)
+      } finally {
+        inspect.close()
+      }
+
+      db = openDatabase(file)
+      try {
+        expect(needsTasksUpgrade(db)).toBe(false)
+        const columns = columnNames(db, 'tasks')
+        for (const column of TASKS_M6_ADDED_COLUMNS) {
+          expect(columns, column).toContain(column)
+        }
+        expect(
+          db.prepare('SELECT origin, labels_json FROM tasks WHERE id = ?').get('tk-1'),
+        ).toEqual({ origin: 'manual', labels_json: '[]' })
+      } finally {
+        db.close()
+        db = null
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('补列中途失败：整体回滚，旧结构与数据原样保留', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-tasks-rollback-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      seedLegacyTasksDatabase(file)
+      // 大小写同名残留列：SQLite 列名大小写不敏感，补 `labels_json` 时会撞 duplicate column，
+      // 用来验证「后一条 ALTER 失败 → 前面已成功的补列一起回滚」。
+      const raw = new DatabaseSync(file)
+      try {
+        raw.exec("ALTER TABLE tasks ADD COLUMN LABELS_JSON TEXT NOT NULL DEFAULT '[]'")
+      } finally {
+        raw.close()
+      }
+
+      expect(() => openDatabase(file)).toThrow(/duplicate column name/i)
+
+      const inspect = new DatabaseSync(file)
+      try {
+        const columns = columnNames(inspect, 'tasks')
+        expect(columns.has('origin')).toBe(false)
+        expect(columns.has('rule_id')).toBe(false)
+        expect(columns.has('external_ref')).toBe(false)
+        expect(columns.has('LABELS_JSON')).toBe(true)
+        expect(countOf(inspect, 'tasks')).toBe(1)
+        expect(inspect.prepare('SELECT title FROM tasks WHERE id = ?').get('tk-1')).toEqual({
+          title: '旧任务',
+        })
+      } finally {
+        inspect.close()
       }
     } finally {
       rmSync(root, { recursive: true, force: true })

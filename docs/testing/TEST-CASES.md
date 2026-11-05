@@ -82,32 +82,40 @@
 | TC-AIW-036 | 崩溃恢复（M2）：启动先杀残留进程树再记账、超租约 claimed 回收、中断聊天落错误消息、任务可拖动                                                                                              | 单元 | `host/reconcile.test.ts` + `host/process-registry.test.ts`                                                                                  |
 | TC-AIW-037 | 投影等价（M2）：`runs`/`run_events` 实时投影与重建逐表全等、`(run_id,seq)` 冲突不覆盖、任务删除 → `run.removed` 级联                                                                       | 单元 | `host/store/runs-projection.test.ts` + `kernel/project.test.ts`                                                                             |
 | TC-AIW-038 | 旧库一次性升级：`runs` 新列补齐、数据保留、外键回滚、旧聊天表迁移后删除、重复启动幂等                                                                                                      | 单元 | `host/db.test.ts` + `host/store/import.test.ts`                                                                                             |
+| TC-AIW-039 | 卡片契约与投影（M4）：`Card` 行字段、六条 `card.*` 事实整行折叠、run 删除联删卡片、重建等价、`cards.open`/`cards.byRun` 排序与过滤                                                         | 单元 | `host/cards-projection.test.ts` + `host/store/views.test.ts`                                                                                |
+| TC-AIW-040 | 回执解析与建卡（M4）：最后一个 ```json 围栏块；ask/notices/resolves/later/events；同 key 升版本；信息卡不阻塞；事件入账与跳数熔断                                                          | 单元 | `kernel/decide.card.test.ts` + `plugins/shared/receipt-block.test.ts`                                                                       |
+| TC-AIW-041 | 回答与续接（M4）：open/下标/waiting 校验、重复回答拒绝、多卡全部答完才 `run.queued`（同 run、`turn+1`、`resumeSessionId`）                                                                 | 单元 | `kernel/decide.card.test.ts` + `host/ipc.test.ts`                                                                                           |
+| TC-AIW-042 | 通道投递（M4）：所有已启动通道都收卡、首个 ack 只记一次 delivered、全失败记 failed、只补 pending、慢/抛错通道隔离                                                                          | 单元 | `host/channels.test.ts` + `plugins/channels/*.test.ts`                                                                                      |
+| TC-AIW-043 | 无卡 waiting 对账兜底；`card.delivered`/`card.delivery_failed` 宿主输入的幂等、版本不匹配丢弃、failed→delivered 覆盖                                                                       | 单元 | `host/reconcile.test.ts` + `kernel/decide.card.test.ts`                                                                                     |
 
 ## E2E（构建产物 + 真实 Electron）
 
-| 用例       | 验证点                                                          | 测试位置                     |
-| ---------- | --------------------------------------------------------------- | ---------------------------- |
-| TC-E2E-001 | 启动冒烟：窗口标题 Workbench、顶部栏「番茄时钟」标签且高亮      | `e2e/smoke.spec.ts`          |
-| TC-E2E-002 | 默认挂载第一个注册 app：idle 25:00、阶段「专注」                | `e2e/smoke.spec.ts`          |
-| TC-E2E-003 | 关键路径：开始 → 递减 → 暂停冻结 → 重置回 25:00，控制区状态切换 | `e2e/pomodoro.spec.ts`       |
-| TC-E2E-004 | 设置端到端：非法专注时长 999 被钳制为 120，大字显示 120:00      | `e2e/pomodoro.spec.ts`       |
-| TC-E2E-005 | 崩溃恢复：强杀后重启回收 claimed、残留子进程被终止、任务可拖动  | `e2e/crash-recovery.spec.ts` |
+| 用例       | 验证点                                                                                      | 测试位置                     |
+| ---------- | ------------------------------------------------------------------------------------------- | ---------------------------- |
+| TC-E2E-001 | 启动冒烟：窗口标题 Workbench、顶部栏「番茄时钟」标签且高亮                                  | `e2e/smoke.spec.ts`          |
+| TC-E2E-002 | 默认挂载第一个注册 app：idle 25:00、阶段「专注」                                            | `e2e/smoke.spec.ts`          |
+| TC-E2E-003 | 关键路径：开始 → 递减 → 暂停冻结 → 重置回 25:00，控制区状态切换                             | `e2e/pomodoro.spec.ts`       |
+| TC-E2E-004 | 设置端到端：非法专注时长 999 被钳制为 120，大字显示 120:00                                  | `e2e/pomodoro.spec.ts`       |
+| TC-E2E-005 | 崩溃恢复：强杀后重启回收 claimed、残留子进程被终止、任务可拖动                              | `e2e/crash-recovery.spec.ts` |
+| TC-E2E-006 | 审批等待期：租约/超时/用量为空、无子进程、`cards.open` 可读；回答后续接同会话、重复回答被拒 | `e2e/approval.spec.ts`       |
+| TC-E2E-007 | 卡片投递：`pending → delivered`，in-app 优先且等待期不触发桌面通知                          | `e2e/approval.spec.ts`       |
 
 ## 手动验收清单（感官/系统行为，无法自动化）
 
-| 用例       | 验证点                                                                                       | 来源                             |
-| ---------- | -------------------------------------------------------------------------------------------- | -------------------------------- |
-| TC-MAN-001 | 阶段自然结束时铃声可闻                                                                       | SPEC-pomodoro Success Criteria 4 |
-| TC-MAN-002 | 系统通知在 Windows 通知中心弹出（AppUserModelId 生效，归属正确）                             | 同上                             |
-| TC-MAN-003 | 窗口失焦、系统休眠恢复后倒计时仍准确                                                         | SPEC-pomodoro Success Criteria 5 |
-| TC-MAN-004 | 各段时长设为秒级，手走完整 4 轮流程：正确进长休、休息后回专注                                | SPEC-pomodoro Success Criteria 2 |
-| TC-MAN-005 | 打包版（`pnpm build` 产物）中通知与铃声正常                                                  | SPEC-shell Success Criteria 4    |
-| TC-MAN-006 | 添加 DSH 运行时（创建前探测可用）→ 建智能体 → agent 阶段真跑（stdio 协议）并回写事件流与输出 | SPEC-ai-workflow Success 3       |
-| TC-MAN-007 | 重启工作台后运行时/智能体/工作流/任务/运行记录仍在（SQLite 落盘）                            | SPEC-ai-workflow Success 1       |
-| TC-MAN-008 | 看板拖拽换阶段与拖到「已完成」的手感与落点高亮（执行中卡片不可拖）                           | SPEC-ai-workflow Success 4       |
-| TC-MAN-009 | 对真实 DSH 运行时点「测试」得到健康结论（CLI/协议版本、耗时）；改错命令后显示不可用与原因    | SPEC-ai-workflow Success 7       |
-| TC-MAN-010 | 工作台聊天：选智能体开新对话、流式输出正常、可停止；重启后对话与消息仍在                     | SPEC-ai-workflow Success 8、9    |
-| TC-MAN-011 | 同一对话连发两轮：第二轮只发新消息并续接会话；手动清空会话后仍能正常重试                     | SPEC-ai-workflow Success 9       |
+| 用例       | 验证点                                                                                       | 来源                              |
+| ---------- | -------------------------------------------------------------------------------------------- | --------------------------------- |
+| TC-MAN-001 | 阶段自然结束时铃声可闻                                                                       | SPEC-pomodoro Success Criteria 4  |
+| TC-MAN-002 | 系统通知在 Windows 通知中心弹出（AppUserModelId 生效，归属正确）                             | 同上                              |
+| TC-MAN-003 | 窗口失焦、系统休眠恢复后倒计时仍准确                                                         | SPEC-pomodoro Success Criteria 5  |
+| TC-MAN-004 | 各段时长设为秒级，手走完整 4 轮流程：正确进长休、休息后回专注                                | SPEC-pomodoro Success Criteria 2  |
+| TC-MAN-005 | 打包版（`pnpm build` 产物）中通知与铃声正常                                                  | SPEC-shell Success Criteria 4     |
+| TC-MAN-006 | 添加 DSH 运行时（创建前探测可用）→ 建智能体 → agent 阶段真跑（stdio 协议）并回写事件流与输出 | SPEC-ai-workflow Success 3        |
+| TC-MAN-007 | 重启工作台后运行时/智能体/工作流/任务/运行记录仍在（SQLite 落盘）                            | SPEC-ai-workflow Success 1        |
+| TC-MAN-008 | 看板拖拽换阶段与拖到「已完成」的手感与落点高亮（执行中卡片不可拖）                           | SPEC-ai-workflow Success 4        |
+| TC-MAN-009 | 对真实 DSH 运行时点「测试」得到健康结论（CLI/协议版本、耗时）；改错命令后显示不可用与原因    | SPEC-ai-workflow Success 7        |
+| TC-MAN-010 | 工作台聊天：选智能体开新对话、流式输出正常、可停止；重启后对话与消息仍在                     | SPEC-ai-workflow Success 8、9     |
+| TC-MAN-011 | 同一对话连发两轮：第二轮只发新消息并续接会话；手动清空会话后仍能正常重试                     | SPEC-ai-workflow Success 9        |
+| TC-MAN-012 | 真 DSH 阶段执行触发回执块 `ask` → 顶部待审批条 → 回答 → 同会话续接成功；等待期无子进程       | SPEC-kernel「审批（挂起零消耗）」 |
 
 ## 质量门禁摘要
 
@@ -117,4 +125,4 @@
 | `git push`   | `pnpm check`（含覆盖率阈值）+ `pnpm e2e` | 覆盖率回退、契约破坏、关键路径回归 |
 | 随时         | `pnpm test:watch`、`pnpm e2e -- --ui`    | 开发期快速反馈                     |
 
-覆盖率阈值（2026-10-30 基线 99.3/95.5/97.9/99.2）：statements **98** / branches **93** / functions **95** / lines **98**。
+覆盖率阈值（2026-10-30 基线 99.3/95.5/97.9/99.2）：statements **98** / branches **93** / functions **95** / lines **98**。当前实测基线（M4，2026-11-05）：99.85 / 98.12 / 100 / 100，改动行 496/496 = 100%。

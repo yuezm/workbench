@@ -101,6 +101,25 @@
 - 回滚点：`%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1055-pre-m3.db`（+ JSON）；回滚需恢复该库并重建投影。
 - 下一步：M4 卡片投递与回答闭环（`card.*` + 通道）；之后 M5 IPC 三动词与 `kernelStore`。
 
+## M4 开工记录（2026-11-05）
+
+- 分支 `refactor/m4-cards`，起点 `master` @ `3d0c40d`；实施计划与任务清单见 [tasks/m4-plan.md](../../tasks/m4-plan.md)、[tasks/m4-todo.md](../../tasks/m4-todo.md)，测绘证据见 `tasks/recon/m4-{kernel,host,gates}.md`。
+- 范围口径：`cards` 成为第 10 张投影表；6 条 `card.*` 事实（整行 `card: Card` payload）；`card.answer` / `card.resolve` 命令与 `card.delivered` / `card.delivery_failed` 两条宿主输入；`cards.open` / `cards.byRun` / `runs.waiting` 视图；`event.received` / `event.dropped` 只入账（规则建任务留 M6）；`in-app` / `desktop` 通道与 `sdk.notify`；无卡 waiting 的启动对账兜底；`KERNEL_VERSION=m4.0.0`。
+- 评审结论（5 条）：回执块 = 输出里最后一个 ```json 围栏块（含 `ask/notices/resolves/later/events` 任一键）；多项 `ask` **全部答完才续接**；`cards.delivery` 单列 = 已送达至少一个通道；最小 UI = 顶部待审批条；E2E 用夹具执行器 + 真 CLI 手工一轮。
+- 回滚点：`%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db`（sha256 `8791DDDA…9AA48F8D` 与源库一致、`integrity_check=ok`、`user_version=2`、9 表 125 行；未另生成 JSON 导出）。**实库仍是 M1 之前的 v2 格式**，首启走 `host/store/import.ts` 兼容层；兼容层本轮仍不删（删除条件沿用 M3 记录）。
+
+## M4 退出记录（2026-11-05）
+
+- 提交链：`8945e92`（计划/测绘/SPEC）→ `9463282`（卡片契约与投影骨架）→ `c0ae5e6`（内核卡片闭环）→ `54d37d9`（cards 读写与无卡 waiting 对账）→ `4561567`（回执块解析）→ `b1a465e`（sdk notify）→ `a3253af`（通道宿主 + in-app/desktop 插件）→ `fda7b91`（IPC + 待审批条）→ `cf8affe`（通道契约测试）→ `36855ea`（审批 E2E）→ `e68340d`（覆盖率）→ 本记录提交。
+- 门禁：`pnpm check` exit 0；101 文件 / 1283 用例；覆盖率 **99.85 / 98.12 / 100 / 100**（基线 99.81/97.92/100/100）；`check:diffcov` **496/496 = 100%**；`pnpm e2e` **8/8**；`check:floor` / `check:secrets` clean；`pnpm audit` 生产依赖 0 漏洞。
+- 卡片闭环 E2E（`tests/e2e/approval.spec.ts`）：种子 waiting run + open card，启动后 `lease_id` / `lease_until` / `deadline_at` / `usage_json` 全空、`process_registry` 0 行、`run_events` 0；`cards.open` 可读；回答后 `turn=2`、同 `session_id`、`status='queued'`；重复回答被拒且事实不增；投递 `pending → delivered(ref='in-app')` 不改等待态。
+- 真 CLI 验收（dsh 0.2.1-rc.5 / profile `multica`，实库副本 + 临时 workdir）：阶段执行 `running` → `waiting`（回执块 `ask` 建卡并 delivered）→ 经桥回答 → `running` → `succeeded`；两轮同一 `sessionId`（续接）、`turn=2`、usage 232/180，等待期无子进程。
+- 老库副本冒烟：实库副本首启导入 9 条 `snapshot.imported`；`facts=9`、`runs=15`、`run_events=98`、1 对话 + 4 消息、1 任务逐项保留；`runtimes.executor_key='dsh'`、`lastProbe` 保留；`cards=0`、`integrity_check=ok`、`projection_meta` 写入 m4 指纹。
+- 写路径：`cards` 的 INSERT/UPDATE/DELETE 只在 `host/store/projection-apply.ts`；投递与回答只经事实（`card.delivered` / `card.delivery_failed` 是宿主输入）；run 删除时显式联删 cards（重建事务 FK OFF 下增量与重建逐表等价）。
+- 已知边界与偏差：回执块「解析失败只重写最后一条回复、上限 2 次」留 M6（需要额外 execute 帧与模型调用；M4 只保证非法块不生效）；`cards.delivery` 是单列语义（首个成功通道写 `deliveryRef`，in-app 通常先 ack）；`Sdk.notify` 返回 void，平台层失败只日志、desktop 通道以抛错表达失败；`event.received` / `event.dropped` 无投影，规则建任务留 M6；`answerPrompt` 取该 run 全部已答卡（Card 无批次字段，单 waiting 批次等价）；`notices` 信息卡不阻塞续接；`src/main/notify.ts` 取代原计划的 `host/notify.ts`（host 不 import electron）；M2 兼容层不删（实库仍 v2）；electron-builder 打包冒烟仍未恢复（M2 已知问题）；`scheduler` 5 处竞态防御分支与 `RuntimeDialog` / `select` 两处 UI 不可达分支未覆盖。
+- 回滚点：`%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db`；回滚需恢复该库并重建投影（`cards` 表为空，兼容层可再次导入）。
+- 下一步：M5 客户端插件（`AppPlugin` 契约、`kernelStore` + `subscribe`、IPC 三动词与 `commandId` 幂等）。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

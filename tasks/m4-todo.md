@@ -1,5 +1,7 @@
 # M4 任务清单（审批与通道）
 
+> 进度（2026-11-05，M4 退出）：T1–T12 已全部交付。提交链 `8945e92`（计划/测绘/SPEC）→ `9463282`（卡片契约与投影骨架）→ `c0ae5e6`（内核卡片闭环）→ `54d37d9`（cards 读写与无卡 waiting 对账）→ `4561567`（回执块解析）→ `b1a465e`（sdk notify）→ `a3253af`（通道宿主 + in-app/desktop 插件）→ `fda7b91`（IPC + 待审批条）→ `cf8affe`（通道契约测试）→ `36855ea`（审批 E2E）→ `e68340d`（覆盖率）→ 退出记录。门禁：`pnpm check` exit 0、`pnpm e2e` 8/8、覆盖率 99.85/98.12/100/100、改动行 496/496 = 100%。真 CLI 与老库副本证据见 refactor-plan 的 M4 退出记录；下文勾选框保留为原始验收项。
+
 > 计划说明见 [m4-plan.md](./m4-plan.md)。规则：每个任务结束跑 `pnpm check:fast`；检查点跑完整 `pnpm check` 与 `pnpm e2e`。
 > 本阶段把回执里的拍板事项变成 `card.*` 事实与 `cards` 投影，回答走 `card.answer` 命令续接同一会话；新增 `in-app` / `desktop` 通道与 `sdk.notify`；通道投递只补 `pending`。
 > 前置：分支 `refactor/m4-cards` @ `3d0c40d` 已开；契约与卡片口径以 m4-plan「架构决议 D1–D15」为准；`floor-guard` 扫描未跟踪文件全文，本文件不得出现关闭检查器/未完成标记/放松测试的写法。

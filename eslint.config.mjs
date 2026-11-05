@@ -65,9 +65,10 @@ export default tseslint.config(
       ],
     },
   },
-  // 架构边界（ARCHITECTURE「边界守则」/ SPEC-host「目录」）：host 是宿主层，只允许依赖
-  // protocol（与 kernel 类型）；具体执行器实现、窗口、托盘、IPC 都在 main，host 不反向 import。
-  // M2 起这条边界由 ESLint 强制（此前只靠约定）。
+  // 架构边界（ARCHITECTURE「边界守则」/ SPEC-host「目录」）：host 是宿主层，允许依赖
+  // protocol / kernel 类型 / sdk（能力面）与 plugins/registry（只经注册表取插件）；
+  // 具体插件实现（executors/sources/channels/apps）由装配根 main 组装，host 不得直接 import。
+  // 窗口、托盘、IPC 同样在 main，host 不反向 import。
   {
     files: ['src/host/**/*.{ts,tsx}'],
     rules: {
@@ -82,10 +83,153 @@ export default tseslint.config(
           ],
           patterns: [
             {
+              group: [
+                '**/src/plugins/executors/**',
+                '**/plugins/executors/**',
+                '**/src/plugins/sources/**',
+                '**/src/plugins/channels/**',
+              ],
+              message:
+                'host 只通过插件注册表取插件，不直接 import 具体插件实现（依赖方向 host → 注册表）。',
+            },
+            {
               group: ['**/src/main/**', '**/main/**'],
               message: 'host 不得 import 主进程装配层（依赖方向 main → host 单向）。',
             },
             { group: ['**/renderer/**'], message: 'host 不得 import renderer。' },
+          ],
+        },
+      ],
+    },
+  },
+  // 架构边界（ARCHITECTURE「边界守则」/ SPEC-plugins「目录与注册」）：插件只依赖 sdk 与 protocol，
+  // 副作用一律经 sdk 注入；不得碰 Electron/Node 内置、宿主内部实现、装配层、渲染层与派生契约类型。
+  // 插件之间禁止互相 import 用相对路径表达不了（specifier 里没有 plugins 段），由
+  // tests/plugins/boundary.test.ts 的源码扫描兜住；tests/ 与 src/ 同构，强度一致。
+  {
+    files: ['src/plugins/**/*.{ts,tsx}', 'tests/plugins/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'electron',
+              message: '插件禁止直接 import electron，副作用只能来自 sdk 注入。',
+            },
+          ],
+          patterns: [
+            {
+              group: [
+                'node:*',
+                'fs',
+                'fs/*',
+                'path',
+                'os',
+                'child_process',
+                'crypto',
+                'net',
+                'dns',
+                'http',
+                'https',
+              ],
+              message: '插件禁用 Node 内置能力：副作用一律经 sdk 注入。',
+            },
+            {
+              group: [
+                '**/src/host/**',
+                '**/host/**',
+                '**/src/main/**',
+                '**/main/**',
+                '**/renderer/**',
+                '**/src/shared/**',
+              ],
+              message:
+                '插件只允许依赖 src/sdk 与 src/protocol（依赖方向 plugins → sdk + protocol）。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // 边界/注册表用例必须读盘扫描插件源码（与 tests/kernel/purity.test.ts 同款）：只放开读盘用的
+  // Node 内置（fs/path），其余门禁照旧——electron、子进程、网络、跨层 import 仍然禁止。
+  {
+    files: ['tests/plugins/boundary.test.ts', 'tests/plugins/registry.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [{ name: 'electron', message: '插件测试不得直接依赖 Electron。' }],
+          patterns: [
+            {
+              group: [
+                'node:child_process',
+                'node:crypto',
+                'node:net',
+                'node:http',
+                'node:https',
+                'child_process',
+                'crypto',
+                'net',
+                'http',
+                'https',
+              ],
+              message: '插件测试只允许读盘扫描（fs/path），其余副作用仍走 sdk。',
+            },
+            {
+              group: [
+                '**/src/host/**',
+                '**/host/**',
+                '**/src/main/**',
+                '**/main/**',
+                '**/renderer/**',
+                '**/src/shared/**',
+              ],
+              message: '插件测试只允许依赖 src/plugins、src/sdk 与 src/protocol。',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // 架构边界（ARCHITECTURE「边界守则」）：sdk 是插件能力面，只依赖 protocol 的契约类型；
+  // 能力原件（子进程、可执行文件解析、时钟）由宿主注入，所以 sdk 不直接碰 Node/Electron。
+  // 与 kernel 段不同，这里不限制 Date.now：sdk 的时钟本来就是宿主注入的。
+  {
+    files: ['src/sdk/**/*.{ts,tsx}', 'tests/sdk/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                'electron',
+                'node:*',
+                'fs',
+                'fs/*',
+                'path',
+                'os',
+                'child_process',
+                'crypto',
+                'net',
+                'dns',
+                'http',
+                'https',
+              ],
+              message: 'sdk 不直接使用 Node/Electron 能力：原件由宿主注入。',
+            },
+            {
+              group: [
+                '**/host/**',
+                '**/plugins/**',
+                '**/main/**',
+                '**/renderer/**',
+                '**/shared/**',
+              ],
+              message: 'sdk 只允许依赖 src/protocol（依赖方向 sdk → protocol）。',
+            },
           ],
         },
       ],

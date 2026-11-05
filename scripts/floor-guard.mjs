@@ -126,6 +126,14 @@ const RELOCATED_TESTS = {
   // repository 补充用例（runs / 负载 / 聊天投影）→ 投影视图与 IPC 用例
   'tests/main/ai-workflow/repository.extra.test.ts': 'tests/host/ipc.test.ts',
   'tests/main/index.test.ts': 'tests/host/boot.test.ts',
+  // M3：执行器插件化后按层搬家（T5 登记，新位置行为等价覆盖）
+  'tests/main/ai-workflow/runtime/dsh.test.ts': 'tests/plugins/executors/dsh/dsh.test.ts',
+  'tests/main/ai-workflow/runtime/detect.test.ts': 'tests/plugins/executors/dsh/detect.test.ts',
+  'tests/main/ai-workflow/runtime/registry.test.ts': 'tests/plugins/registry.test.ts',
+  'tests/main/ai-workflow/runtime/executor-port.test.ts':
+    'tests/plugins/executors/dsh/port.test.ts',
+  'tests/main/ai-workflow/runtime/process.test.ts': 'tests/host/process.test.ts',
+  'tests/main/ai-workflow/runtime/executable.test.ts': 'tests/host/executable.test.ts',
 }
 const migratedCounterpart = (f) => {
   const relocated = RELOCATED_TESTS[f]

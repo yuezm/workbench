@@ -9,6 +9,7 @@ import {
   type ViewParams,
   type ViewResult,
   type ViewResults,
+  type WaitingRun,
 } from '../../src/protocol/views'
 
 type Equal<A, B> =
@@ -64,6 +65,7 @@ describe('protocol/views', () => {
       'runs.stale-chat',
       'cards.open',
       'cards.byRun',
+      'runs.waiting',
     ])
   })
 
@@ -131,5 +133,26 @@ describe('protocol/views：M4 卡片视图', () => {
     expect(cardsByRunParams).toBe(true)
     expect(cardsOpenResult).toBe(true)
     expect(cardsByRunResult).toBe(true)
+  })
+})
+
+/** M4 D13：启动对账要检查的 waiting run（无参数；`hasOpenCard` 由宿主 join 得出）。 */
+const waitingRunNoParams: Assert<Equal<ViewParams<'runs.waiting'>, undefined>> = true
+const waitingRunResult: Assert<Equal<ViewResult<'runs.waiting'>, WaitingRun[]>> = true
+
+describe('protocol/views：M4 waiting run 视图', () => {
+  it('参数与返回类型映射（类型级断言）', () => {
+    expect(waitingRunNoParams).toBe(true)
+    expect(waitingRunResult).toBe(true)
+  })
+
+  it('形状最小化：只有对账需要的四个字段', () => {
+    const waiting: WaitingRun = {
+      runId: 'run-1',
+      leaseId: null,
+      turn: 1,
+      hasOpenCard: false,
+    }
+    expect(Object.keys(waiting).sort()).toEqual(['hasOpenCard', 'leaseId', 'runId', 'turn'])
   })
 })

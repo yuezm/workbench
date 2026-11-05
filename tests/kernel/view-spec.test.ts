@@ -80,6 +80,8 @@ const hostSamples: Input[] = [
   { type: 'conversation.send', conversationId: 'cv-1', content: '你好' },
   { type: 'conversation.rename', conversationId: 'cv-1', title: '新标题' },
   { type: 'conversation.remove', conversationId: 'cv-1' },
+  { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
+  { type: 'card.delivery_failed', cardId: 'card-1', version: 1, error: '通道不可用' },
 ]
 
 const samples: Input[] = [...commandSamples, ...hostSamples]
@@ -121,14 +123,16 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'conversation.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
   'conversation.rename': ['conversations'],
   'conversation.remove': ['conversations', 'messages'],
+  'card.delivered': ['cards'],
+  'card.delivery_failed': ['cards'],
 }
 
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 16 条命令 + 11 条宿主内部输入，并返回各自的投影切片', () => {
+  it('覆盖 16 条命令 + 13 条宿主内部输入，并返回各自的投影切片', () => {
     expect(COMMAND_NAMES.length).toBe(16)
-    expect(HOST_INPUT_NAMES.length).toBe(11)
+    expect(HOST_INPUT_NAMES.length).toBe(13)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)
     expect(new Set(samples.map((input) => input.type)).size).toBe(

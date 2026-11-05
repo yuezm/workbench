@@ -557,6 +557,19 @@ const checkHostPayload = (type: HostInputName, input: Obj): Check => {
       )
     case 'conversation.remove':
       return requiredId(input.conversationId, 'conversationId')
+    case 'card.delivered':
+      // 通道投递回写：版本 1 基正整数（与回执/轮次同档上界），ref 是通道键
+      return (
+        requiredId(input.cardId, 'cardId') ??
+        integerIn(input.version, 'version', 1, COMMAND_LIMITS.turn) ??
+        required(input.ref, 'ref', COMMAND_LIMITS.description)
+      )
+    case 'card.delivery_failed':
+      return (
+        requiredId(input.cardId, 'cardId') ??
+        integerIn(input.version, 'version', 1, COMMAND_LIMITS.turn) ??
+        required(input.error, 'error', COMMAND_LIMITS.description)
+      )
   }
 }
 

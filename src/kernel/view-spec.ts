@@ -95,5 +95,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'conversation.remove':
       // 消息随对话一并删除，删除前要能解释历史
       return ['conversations', 'messages']
+    case 'card.delivered':
+    case 'card.delivery_failed':
+      // 投递回写只读卡片当前行（校验版本 / 幂等：迟到与重复投递零事实）
+      return ['cards']
   }
 }

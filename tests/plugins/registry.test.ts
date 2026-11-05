@@ -8,6 +8,8 @@ import {
   PLUGIN_KINDS as PLUGINS_KINDS,
 } from '../../src/plugins/manifest'
 import {
+  channelById,
+  channels,
   detectAll,
   detectAllWith,
   executorById,
@@ -28,6 +30,7 @@ import type { ExecutorPlugin, SdkHost } from '../../src/sdk/types'
  */
 
 const EXECUTORS_ROOT = resolve(import.meta.dirname, '../../src/plugins/executors')
+const CHANNELS_ROOT = resolve(import.meta.dirname, '../../src/plugins/channels')
 
 const KEBAB_CASE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -98,6 +101,63 @@ describe('执行器插件注册表', () => {
         expect(existsSync(join(EXECUTORS_ROOT, id, file)), `${id} 缺少 ${file}`).toBe(true)
       }
     }
+  })
+})
+
+describe('通道插件注册表（M4）', () => {
+  it('每条注册项的 key 唯一、等于 manifest.id、kebab-case 且 kind=channel', () => {
+    const keys = channels.map((entry) => entry.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    for (const entry of channels) {
+      expect(entry.key).toMatch(KEBAB_CASE)
+      expect(entry.key).toBe(entry.manifest.id)
+      expect(entry.manifest.kind).toBe('channel')
+      expect(entry.label, `${entry.key} 的展示名为空`).toBeTruthy()
+      expect(entry.manifest.version, `${entry.key} 的 manifest.version 为空`).toBeTruthy()
+      expect(new Set(entry.manifest.capabilities).size).toBe(entry.manifest.capabilities.length)
+      for (const capability of entry.manifest.capabilities) {
+        expect(CAPABILITIES, `${entry.key} 声明了枚举外的能力「${capability}」`).toContain(
+          capability,
+        )
+      }
+      expect(entry.plugin.start, `${entry.key} 缺少 start`).toBeTypeOf('function')
+    }
+  })
+
+  it('channelById 命中同一条注册项，未知 key 抛可读错误', () => {
+    for (const entry of channels) expect(channelById(entry.key)).toBe(entry)
+    expect(() => channelById('nope')).toThrow(/通道插件未注册: nope/)
+    expect(() => channelById('')).toThrow(/通道插件未注册/)
+  })
+
+  it('src/plugins/channels/* 目录与注册表清单双向一致', () => {
+    // T8 之前通道目录可能还不存在：不存在时与空清单等价（跳过目录扫描）
+    if (!existsSync(CHANNELS_ROOT)) {
+      expect(channels).toEqual([])
+      return
+    }
+
+    const dirIds = readdirSync(CHANNELS_ROOT, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+    const registeredIds = channels.map((entry) => entry.key).sort()
+
+    expect(
+      registeredIds,
+      `通道目录与注册表不一致：多出/缺少注册项（目录 [${dirIds.join(', ')}]，清单 [${registeredIds.join(', ')}]）`,
+    ).toEqual(dirIds)
+
+    for (const id of dirIds) {
+      for (const file of ['manifest.ts', 'index.ts']) {
+        expect(existsSync(join(CHANNELS_ROOT, id, file)), `${id} 缺少 ${file}`).toBe(true)
+      }
+    }
+  })
+
+  it('通道清单与执行器清单是两份独立注册表', () => {
+    const executorKeys = new Set(executors.map((entry) => entry.key))
+    for (const entry of channels) expect(executorKeys.has(entry.key)).toBe(false)
   })
 })
 

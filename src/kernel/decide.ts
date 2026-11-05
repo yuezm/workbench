@@ -18,6 +18,7 @@
  */
 import type {
   Agent,
+  Card,
   Conversation,
   Message,
   RunRow,
@@ -84,6 +85,49 @@ const HOST_TIMEOUT: Actor = { kind: 'host', via: 'timeout' }
 
 /** 宿主兜底取消：`run.host_settled{status:'cancelled'}`。 */
 const HOST_CANCEL: Actor = { kind: 'host', via: 'cancel' }
+
+/** 通道投递回写：通道 hub 回报 `card.delivered` / `card.delivery_failed`（D9）。 */
+const HOST_CHANNEL: Actor = { kind: 'host', via: 'channel' }
+
+/**
+ * 通道投递回写（D2/D9）：只对「当前仍存在的卡片 + 版本一致」生效。
+ *
+ * - 版本不一致（卡片已更新到新版本）/ 卡片已删除：迟到投递，零事实；
+ * - delivered 幂等：同一版本已 delivered 再报 → 零事实；failed 可被后续 delivered 覆盖；
+ * - 已 delivered 的版本不再降级为 failed（已送达至少一个通道），同版本重复 failed 也幂等；
+ * - 整行事实：只改 `delivery` / `deliveryRef` / `updatedAt`，其余字段原样，重建不回查。
+ */
+function deliveryFacts(
+  view: View,
+  input: { cardId: Id; version: number },
+  patch: { kind: 'delivered'; ref: string } | { kind: 'failed'; error: string },
+  now: Iso,
+): FactDraft[] {
+  const card = view.cards.get(input.cardId)
+  if (!card || card.version !== input.version) return []
+  if (patch.kind === 'delivered') {
+    if (card.delivery === 'delivered') return []
+    const next: Card = { ...card, delivery: 'delivered', deliveryRef: patch.ref, updatedAt: now }
+    return [
+      {
+        type: 'card.delivered',
+        actor: HOST_CHANNEL,
+        at: now,
+        payload: { card: next, ref: patch.ref },
+      },
+    ]
+  }
+  if (card.delivery === 'delivered' || card.delivery === 'failed') return []
+  const next: Card = { ...card, delivery: 'failed', deliveryRef: null, updatedAt: now }
+  return [
+    {
+      type: 'card.delivery_failed',
+      actor: HOST_CHANNEL,
+      at: now,
+      payload: { card: next, error: patch.error },
+    },
+  ]
+}
 
 const done = (facts: FactDraft[]): Decision => ({ facts })
 
@@ -836,6 +880,17 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
     case 'card.resolve': {
       // 手动关闭悬空卡；非 open 幂等零事实，不改变 run 状态
       return done(resolveFacts(view, input.cardId, 'manual', now))
+    }
+
+    // ---------- 通道投递回写（M4 D9） ----------
+    case 'card.delivered': {
+      // 通道回报「已送达至少一个通道」：版本一致才落投影，迟到 / 重复投递零事实
+      return done(deliveryFacts(view, input, { kind: 'delivered', ref: input.ref }, now))
+    }
+
+    case 'card.delivery_failed': {
+      // 本轮所有通道失败：只置 delivery='failed'，卡片状态不动，重启按 pending 补投
+      return done(deliveryFacts(view, input, { kind: 'failed', error: input.error }, now))
     }
 
     // ---------- 运行（宿主内部输入） ----------

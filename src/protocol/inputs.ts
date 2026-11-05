@@ -16,7 +16,7 @@ import type { Command } from './commands'
 import { COMMAND_NAMES } from './commands'
 import type { RunErrorCode, RunEventRow, RunTerminalStatus, RunUsage } from './entities'
 
-/** 宿主内部输入名全集：不经 IPC，只由宿主（scheduler / clock / reconcile / chat 入口）发。 */
+/** 宿主内部输入名全集：不经 IPC，只由宿主（scheduler / clock / reconcile / chat 入口 / 通道 hub）发。 */
 export const HOST_INPUT_NAMES = [
   'run.claim',
   'run.heartbeat',
@@ -29,6 +29,8 @@ export const HOST_INPUT_NAMES = [
   'conversation.send',
   'conversation.rename',
   'conversation.remove',
+  'card.delivered',
+  'card.delivery_failed',
 ] as const
 
 export type HostInputName = (typeof HOST_INPUT_NAMES)[number]
@@ -191,6 +193,29 @@ export interface ConversationRemoveInput {
   conversationId: string
 }
 
+// ---------- 通道投递回写（M4） ----------
+
+/**
+ * 通道回报「已送达至少一个通道」（D9）：宿主 hub 在通道回调 `delivered` 后发。
+ * 版本与卡片当前 `version` 不一致（迟到投递）或该版本已 delivered → 内核零事实。
+ */
+export interface CardDeliveredInput {
+  type: 'card.delivered'
+  cardId: string
+  /** 卡片版本（1 基）；只有「被投递的那一版」才算数 */
+  version: number
+  /** 通道键（in-app / desktop / …），写进 `cards.deliveryRef` 与事实审计字段 */
+  ref: string
+}
+
+/** 本轮所有通道投递失败（D9）：只把 `delivery` 置 failed，不改卡片状态，重启按 pending 补投。 */
+export interface CardDeliveryFailedInput {
+  type: 'card.delivery_failed'
+  cardId: string
+  version: number
+  error: string
+}
+
 /** 宿主内部输入（判别联合，`type` 是输入名）。 */
 export type HostInput =
   | RunClaimInput
@@ -204,6 +229,8 @@ export type HostInput =
   | ConversationSendInput
   | ConversationRenameInput
   | ConversationRemoveInput
+  | CardDeliveredInput
+  | CardDeliveryFailedInput
 
 /** 内核唯一决策入口的入参（命令是它的子集）。 */
 export type Input = Command | HostInput

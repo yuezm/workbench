@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest'
 import type { Card, Conversation, RunRow } from '../../src/protocol/entities'
 import type {
   CardAnsweredPayload,
+  CardDeliveredPayload,
+  CardDeliveryFailedPayload,
   CardOpenedPayload,
   CardResolvedPayload,
   CardUpdatedPayload,
@@ -717,5 +719,90 @@ describe('kernel/decide 卡片决策的纯函数性质', () => {
 
     expect(first).toEqual(second)
     expect(waitingPayload(first).cardIds).toEqual(waitingPayload(second).cardIds)
+  })
+})
+
+const deliver = (
+  target: View,
+  cardId = 'card-1',
+  version = 1,
+  ref = 'in-app',
+): ReturnType<typeof decide> =>
+  decide(target, { type: 'card.delivered', cardId, version, ref }, NOW, env())
+
+const deliveryFail = (
+  target: View,
+  cardId = 'card-1',
+  version = 1,
+  error = '通道不可用',
+): ReturnType<typeof decide> =>
+  decide(target, { type: 'card.delivery_failed', cardId, version, error }, NOW, env())
+
+const deliveredCard = (decision: ReturnType<typeof decide>, index = 0): Card =>
+  (decision.facts[index]?.payload as CardDeliveredPayload).card
+
+const failedCard = (decision: ReturnType<typeof decide>, index = 0): Card =>
+  (decision.facts[index]?.payload as CardDeliveryFailedPayload).card
+
+describe('kernel/decide 通道投递回写（D9）', () => {
+  it('delivered：整行事实只改 delivery / deliveryRef / updatedAt，actor=host via channel', () => {
+    const pending = card()
+    const decision = deliver(view({ cards: [pending] }), 'card-1', 1, 'desktop')
+
+    expect(types(decision)).toEqual(['card.delivered'])
+    expect(decision.facts[0]?.actor).toEqual({ kind: 'host', via: 'channel' })
+    expect((decision.facts[0]?.payload as CardDeliveredPayload).ref).toBe('desktop')
+    expect(deliveredCard(decision)).toEqual({
+      ...pending,
+      delivery: 'delivered',
+      deliveryRef: 'desktop',
+      updatedAt: NOW,
+    })
+  })
+
+  it('同版本重复 delivered：幂等零事实（不覆盖已有投递）', () => {
+    const already = card({ delivery: 'delivered', deliveryRef: 'in-app' })
+
+    expect(deliver(view({ cards: [already] }), 'card-1', 1, 'desktop').facts).toEqual([])
+  })
+
+  it('failed：置 delivery=failed / deliveryRef=null；同版本可被后续 delivered 覆盖', () => {
+    const pending = card()
+    const failed = deliveryFail(view({ cards: [pending] }))
+
+    expect(types(failed)).toEqual(['card.delivery_failed'])
+    expect(failedCard(failed)).toEqual({
+      ...pending,
+      delivery: 'failed',
+      deliveryRef: null,
+      updatedAt: NOW,
+    })
+    expect((failed.facts[0]?.payload as CardDeliveryFailedPayload).error).toBe('通道不可用')
+
+    // failed → delivered：允许（通道重试成功），事实照常落
+    const failedRow = failedCard(failed)
+    const retried = deliver(view({ cards: [failedRow] }))
+    expect(types(retried)).toEqual(['card.delivered'])
+    expect(deliveredCard(retried)).toMatchObject({
+      delivery: 'delivered',
+      deliveryRef: 'in-app',
+    })
+  })
+
+  it('版本不匹配（迟到投递）/ 卡片不存在：零事实，不新造卡片行', () => {
+    const newer = card({ version: 2 })
+
+    expect(deliver(view({ cards: [newer] }), 'card-1', 1).facts).toEqual([])
+    expect(deliveryFail(view({ cards: [newer] }), 'card-1', 1).facts).toEqual([])
+    expect(deliver(view({ cards: [] })).facts).toEqual([])
+    expect(deliveryFail(view({ cards: [] })).facts).toEqual([])
+  })
+
+  it('已 delivered 的版本不再降级为 failed；同版本重复 failed 也幂等', () => {
+    const delivered = card({ delivery: 'delivered', deliveryRef: 'in-app' })
+    expect(deliveryFail(view({ cards: [delivered] })).facts).toEqual([])
+
+    const failed = card({ delivery: 'failed' })
+    expect(deliveryFail(view({ cards: [failed] })).facts).toEqual([])
   })
 })

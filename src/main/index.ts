@@ -8,6 +8,7 @@ import { project } from '../kernel/project'
 import { viewSpec } from '../kernel/view-spec'
 import type { KernelPort } from '../kernel/types'
 import { createClock, type Clock } from '../host/clock'
+import { createChannels, type Channels } from '../host/channels'
 import { createEffects } from '../host/effects'
 import { killPidTree } from '../host/process'
 import { createProcessRegistry } from '../host/process-registry'
@@ -23,7 +24,11 @@ import { createTray } from './tray'
 import { registerAiWorkflowIpc } from './ai-workflow/ipc'
 import { createSdkHost } from '../host/sdk-host'
 import { createExecutorRegistry } from '../host/executor-registry'
-import { detectAll, executors as pluginExecutors } from '../plugins/registry'
+import {
+  detectAll,
+  channels as pluginChannels,
+  executors as pluginExecutors,
+} from '../plugins/registry'
 import type { RuntimeInput } from '../protocol/entities'
 import type { ChatStreamEvent, RuntimeExecutorChoice } from '../shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../shared/ai-workflow-api'
@@ -32,6 +37,8 @@ let quitting = false
 let win: BrowserWindow | null = null
 /** 装配完成后的调度器句柄：退出流程要 best-effort 取消活跃 run（T15）。 */
 let activeScheduler: Scheduler | null = null
+/** 装配完成后的通道 hub：退出流程 abort + best-effort dispose（M4 D9）。 */
+let activeChannels: Channels | null = null
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -81,7 +88,7 @@ if (app.requestSingleInstanceLock()) {
     win?.focus()
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     // Windows 通知归属需要 AppUserModelId
     app.setAppUserModelId('com.workbench.desktop')
     registerIpcHandlers()
@@ -155,21 +162,52 @@ if (app.requestSingleInstanceLock()) {
       dispatch: (input) => store.dispatch(input),
       // 投影里的 run 状态；run 已随任务/工作流删除时视为缺失（只清登记行）
       runStatus: (runId) => store.query('run.byId', { runId })?.status ?? null,
+      // M4 D13：waiting 且无 open 卡的 run 没有可答对象（重建后无 card.* 事实）→ 兜底取消；
+      // 有 open 卡的保持等待（有人可答）。过滤由读路径 join，reconcile 不查库。
+      waitingRuns: () =>
+        store.query('runs.waiting').map((run) => ({
+          id: run.runId,
+          leaseId: run.leaseId,
+          turn: run.turn,
+          hasOpenCard: run.hasOpenCard,
+        })),
       killPid: killPidTree,
     })
     // 摘要只用于诊断：残留进程与回收数量非零时留一条 warn（不建 UI 通道）
-    if (reconciled.killed > 0 || reconciled.facts > 0 || reconciled.settledChats > 0) {
+    if (
+      reconciled.killed > 0 ||
+      reconciled.facts > 0 ||
+      reconciled.settledChats > 0 ||
+      reconciled.settledWaitings > 0
+    ) {
       console.warn(
         `[reconcile] 终止残留进程 ${reconciled.killed} 个、清理登记 ${reconciled.cleared} 行、回收事实 ${reconciled.facts} 条`,
       )
     }
-    // 写入口与提交后分发：effects.dispatch 是 IPC / scheduler / clock 的唯一写路径；
-    // effects 先建、scheduler 后建，靠闭包惰性取（getter 首次调用发生在装配完成之后）
+    // 写入口与提交后分发：effects.dispatch 是 IPC / scheduler / clock / 通道的唯一写路径；
+    // effects / channels / scheduler 按构造顺序互相惰性取（getter 首次调用发生在装配完成后）
+    const channelsHolder: { current: Channels | null } = { current: null }
     const effects = createEffects({
       store,
       scheduler: () => scheduler,
+      channels: () => {
+        const hub = channelsHolder.current
+        if (hub === null) throw new Error('通道 hub 尚未装配')
+        return hub
+      },
       notifyChanged: broadcastChanged,
     })
+    // 通道 hub（M4 D9）：effects 之后创建、scheduler 之前 startAll；
+    // 启动时先补投 `delivery='pending'` 的 open 卡（重启只补未送达的版本）。
+    const channels = createChannels({
+      store,
+      effects,
+      entries: pluginChannels,
+      sdkHost,
+    })
+    channelsHolder.current = channels
+    await channels.startAll()
+    activeChannels = channels
     /** 聊天流旁路：窗口已销毁时丢弃本次推送（不打断执行，事实才是数据源）。 */
     const sendChatStream = (event: ChatStreamEvent): void => {
       for (const w of BrowserWindow.getAllWindows()) {
@@ -252,6 +290,8 @@ app.on('before-quit', () => {
   quitting = true
   // 退出前 best-effort 取消活跃 run：立即杀进程树并写取消终态，不等待回执（不阻塞退出）
   activeScheduler?.cancelAll()
+  // 通道 abort + dispose 是异步的：进程退出不等待，但先发 abort 让插件停止投递
+  void activeChannels?.stopAll()
 })
 
 app.on('window-all-closed', () => {

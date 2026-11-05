@@ -23,6 +23,9 @@ const {
   schedulerMock,
   createEffectsMock,
   effectsMock,
+  createChannelsMock,
+  channelsMock,
+  channelsEntriesMock,
   createClockMock,
   clockMock,
   pluginEntriesMock,
@@ -67,6 +70,12 @@ const {
     ensureProjection: vi.fn(() => ({ rebuilt: false })),
     query: vi.fn((table: string, params?: unknown): unknown => {
       if (table === 'run.last-event-seq') return 0
+      if (table === 'runs.waiting') {
+        return [
+          { runId: 'run-1', leaseId: null, turn: 1, hasOpenCard: true },
+          { runId: 'run-2', leaseId: null, turn: 2, hasOpenCard: false },
+        ]
+      }
       if (table === 'run.byId') {
         const runId = (params as { runId?: string } | undefined)?.runId
         return runId === 'run-1' ? { id: 'run-1', status: 'running' } : null
@@ -107,6 +116,15 @@ const {
     afterCommit: vi.fn(),
   }
   const createEffectsMock = vi.fn((_deps: unknown) => effectsMock)
+  const channelsMock = {
+    startAll: vi.fn(async () => undefined),
+    stopAll: vi.fn(async () => undefined),
+    dispatch: vi.fn(),
+    answer: vi.fn(async () => undefined),
+  }
+  const createChannelsMock = vi.fn((_deps: unknown) => channelsMock)
+  /** 内置通道清单（T8 前为空；装配根原样注入 hub） */
+  const channelsEntriesMock: unknown[] = []
   const clockMock = {
     start: vi.fn(),
     stop: vi.fn(),
@@ -155,7 +173,17 @@ const {
   }
   const createProcessRegistryMock = vi.fn((_db: unknown) => registryMock)
   const killPidTreeMock = vi.fn(() => true)
-  const reconcileMock = vi.fn((_deps: unknown) => ({ killed: 0, cleared: 0, facts: 0 }))
+  const reconcileMock = vi.fn(
+    (
+      _deps: unknown,
+    ): {
+      killed: number
+      cleared: number
+      facts: number
+      settledChats?: number
+      settledWaitings?: number
+    } => ({ killed: 0, cleared: 0, facts: 0 }),
+  )
 
   /** 启动装配顺序：openDatabase → createStore → importLegacy → ensureProjection → 进程登记 → 对账 → … */
   const startupOrder: string[] = []
@@ -185,6 +213,9 @@ const {
     schedulerMock,
     createEffectsMock,
     effectsMock,
+    createChannelsMock,
+    channelsMock,
+    channelsEntriesMock,
     createClockMock,
     clockMock,
     pluginEntriesMock,
@@ -215,6 +246,7 @@ vi.mock('../../src/main/ai-workflow/ipc', () => ({
 vi.mock('../../src/host/db', () => ({ openDatabase: openDatabaseMock }))
 vi.mock('../../src/plugins/registry', () => ({
   executors: pluginEntriesMock,
+  channels: channelsEntriesMock,
   detectAll: detectAllMock,
 }))
 vi.mock('../../src/host/sdk-host', () => ({ createSdkHost: createSdkHostMock }))
@@ -228,6 +260,7 @@ vi.mock('../../src/host/store/index', () => ({
 vi.mock('../../src/host/store/import', () => ({ importLegacyIfNeeded: importLegacyMock }))
 vi.mock('../../src/host/scheduler', () => ({ createScheduler: createSchedulerMock }))
 vi.mock('../../src/host/effects', () => ({ createEffects: createEffectsMock }))
+vi.mock('../../src/host/channels', () => ({ createChannels: createChannelsMock }))
 vi.mock('../../src/host/clock', () => ({ createClock: createClockMock }))
 vi.mock('../../src/host/process', () => ({ killPidTree: killPidTreeMock }))
 vi.mock('../../src/host/process-registry', () => ({
@@ -291,6 +324,12 @@ type ReconcileDeps = {
   dispatch: (input: unknown) => { facts: unknown[] }
   runStatus: (runId: string) => string | null
   staleChatRuns?: () => ReadonlyArray<{ id: string; leaseId: string | null; turn: number }>
+  waitingRuns?: () => ReadonlyArray<{
+    id: string
+    leaseId: string | null
+    turn: number
+    hasOpenCard: boolean
+  }>
   killPid: (pid: number) => boolean
 }
 
@@ -305,11 +344,23 @@ function schedulerDeps(): SchedulerDeps {
 type EffectsDeps = {
   store: unknown
   scheduler: () => unknown
+  channels?: () => { dispatch: (facts: readonly unknown[]) => void }
   notifyChanged: () => void
 }
 
 function effectsDeps(): EffectsDeps {
   return createEffectsMock.mock.calls[0][0] as EffectsDeps
+}
+
+type ChannelsDeps = {
+  store: unknown
+  effects: unknown
+  entries: unknown
+  sdkHost: unknown
+}
+
+function channelsDeps(): ChannelsDeps {
+  return createChannelsMock.mock.calls[0][0] as ChannelsDeps
 }
 
 type ClockDeps = {
@@ -375,6 +426,10 @@ describe('主进程入口装配', () => {
     createClockMock.mockImplementation(() => {
       startupOrder.push('clock')
       return clockMock
+    })
+    createChannelsMock.mockImplementation(() => {
+      startupOrder.push('channels')
+      return channelsMock
     })
     registerAiWorkflowIpcMock.mockImplementation(() => {
       startupOrder.push('ipc')
@@ -462,7 +517,7 @@ describe('主进程入口装配', () => {
     }
   })
 
-  it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → clock → scheduler → IPC', async () => {
+  it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → 通道 → clock → scheduler → IPC', async () => {
     await loadEntry()
 
     expect(startupOrder).toEqual([
@@ -473,6 +528,7 @@ describe('主进程入口装配', () => {
       'executors',
       'registry',
       'reconcile',
+      'channels',
       'clock',
       'scheduler',
       'ipc',
@@ -532,6 +588,28 @@ describe('主进程入口装配', () => {
     expect(clockMock.rearm).toHaveBeenCalledTimes(1)
   })
 
+  it('通道装配：effects 之后 startAll、再起 clock/scheduler；effects 惰性拿到同一个 hub', async () => {
+    await loadEntry()
+
+    // hub 拿到同一个 store / effects / 注册表清单 / sdkHost（通道只能经 effects 写库）
+    expect(createChannelsMock).toHaveBeenCalledTimes(1)
+    const deps = channelsDeps()
+    expect(deps.store).toBe(storeMock)
+    expect(deps.effects).toBe(effectsMock)
+    expect(deps.entries).toBe(channelsEntriesMock)
+    expect(deps.sdkHost).toBe(sdkHostMock)
+
+    // 启动即 startAll（补投 pending 卡片）；顺序在 effects 之后、clock/scheduler 之前
+    expect(channelsMock.startAll).toHaveBeenCalledTimes(1)
+    expect(startupOrder.indexOf('reconcile')).toBeLessThan(startupOrder.indexOf('channels'))
+    expect(startupOrder.indexOf('channels')).toBeLessThan(startupOrder.indexOf('clock'))
+    expect(startupOrder.indexOf('channels')).toBeLessThan(startupOrder.indexOf('scheduler'))
+    expect(startupOrder.indexOf('channels')).toBeLessThan(startupOrder.indexOf('ipc'))
+
+    // effects 的通道 getter 惰性解析到同一个 hub
+    expect(effectsDeps().channels?.()).toBe(channelsMock)
+  })
+
   it('启动对账：读 process_registry 清崩溃残留（registry → reconcile），再接 scheduler/clock', async () => {
     await loadEntry()
 
@@ -548,6 +626,12 @@ describe('主进程入口装配', () => {
     // 崩溃时中断的聊天 run 由对账落兜底终态（查询来自仓储的投影读）
     expect(deps.staleChatRuns?.()).toEqual([])
     expect(storeMock.query).toHaveBeenCalledWith('runs.stale-chat')
+    // M4 D13：waiting run + 是否有 open 卡由 runs.waiting 视图给出（宿主读路径 join）
+    expect(deps.waitingRuns?.()).toEqual([
+      { id: 'run-1', leaseId: null, turn: 1, hasOpenCard: true },
+      { id: 'run-2', leaseId: null, turn: 2, hasOpenCard: false },
+    ])
+    expect(storeMock.query).toHaveBeenCalledWith('runs.waiting')
     // run 状态读投影（run.byId），缺失即 null
     expect(storeMock.query).toHaveBeenCalledWith('run.byId', { runId: 'ghost' })
     // 登记表与 scheduler 共用同一实例（执行期 begin/attachPid/remove 才接得上）
@@ -566,6 +650,25 @@ describe('主进程入口装配', () => {
       expect(warn).toHaveBeenCalledTimes(1)
       expect(String(warn.mock.calls[0]?.[0])).toContain('[reconcile]')
       expect(String(warn.mock.calls[0]?.[0])).toContain('终止残留进程 2 个')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('对账兜底了无卡 waiting：同样留一条 warn 诊断', async () => {
+    reconcileMock.mockReturnValueOnce({
+      killed: 0,
+      cleared: 0,
+      settledChats: 0,
+      settledWaitings: 1,
+      facts: 0,
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      await loadEntry()
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0]?.[0])).toContain('[reconcile]')
     } finally {
       warn.mockRestore()
     }
@@ -599,6 +702,7 @@ describe('主进程入口装配', () => {
     expect(killPidTreeMock).not.toHaveBeenCalled()
     expect(createSchedulerMock).not.toHaveBeenCalled()
     expect(createEffectsMock).not.toHaveBeenCalled()
+    expect(createChannelsMock).not.toHaveBeenCalled()
     expect(createClockMock).not.toHaveBeenCalled()
     expect(createExecutorRegistryMock).not.toHaveBeenCalled()
     expect(windows).toHaveLength(0)
@@ -645,12 +749,14 @@ describe('主进程入口装配', () => {
     expect(shellMock.openExternal).toHaveBeenCalledWith('https://example.com')
   })
 
-  it('before-quit：关窗不再拦截，并对活跃 run best-effort 取消', async () => {
+  it('before-quit：关窗不再拦截，并对活跃 run best-effort 取消、通道 stopAll', async () => {
     await loadEntry()
 
     appHandler('before-quit')()
     // 退出前取消活跃 run（T15）：不等待回执，直接 cancelAll
     expect(schedulerMock.cancelAll).toHaveBeenCalledTimes(1)
+    // 通道 abort + best-effort dispose（D9）：异步、不阻塞退出
+    expect(channelsMock.stopAll).toHaveBeenCalledTimes(1)
     const event = { preventDefault: vi.fn() }
     windowHandler('close')(event)
     expect(event.preventDefault).not.toHaveBeenCalled()

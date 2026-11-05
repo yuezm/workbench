@@ -16,6 +16,12 @@ const cancelRequested = (runId: string, seq = 1): Fact =>
 const taskCreated = (taskId: string, seq = 1): Fact =>
   factOf('task.created', { task: { id: taskId } }, seq)
 
+const cardOpened = (cardId: string, version = 1, seq = 1): Fact =>
+  factOf('card.opened', { card: { id: cardId, version, status: 'open', delivery: 'pending' } }, seq)
+
+const cardAnswered = (cardId: string, seq = 1): Fact =>
+  factOf('card.answered', { card: { id: cardId, version: 1, status: 'answered' }, by: 'ui' }, seq)
+
 function fakeScheduler(): EffectsScheduler & {
   wake: ReturnType<typeof vi.fn<() => void>>
   cancel: ReturnType<typeof vi.fn<(runId: string) => void>>
@@ -151,6 +157,86 @@ describe('createEffects：事实分发', () => {
     box.current = late
     effects.afterCommit([queued('run-2', 2)])
     expect(late.wake).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('createEffects：卡片投递交给通道 hub（M4）', () => {
+  it('card.opened / card.updated → 调 channels().dispatch（整批事实），不再另外拆分', () => {
+    const scheduler = fakeScheduler()
+    const channelDispatch = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => scheduler,
+      channels: () => ({ dispatch: channelDispatch }),
+    })
+    const facts = [cardOpened('card-1', 1, 1), cardOpened('card-2', 1, 2)]
+
+    effects.afterCommit(facts)
+
+    expect(channelDispatch).toHaveBeenCalledTimes(1)
+    expect(channelDispatch).toHaveBeenCalledWith(facts)
+    expect(scheduler.wake).not.toHaveBeenCalled()
+  })
+
+  it('非卡片事实 / 零事实都不调通道 hub', () => {
+    const channelDispatch = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+      channels: () => ({ dispatch: channelDispatch }),
+    })
+
+    effects.afterCommit([taskCreated('t-1'), cardAnswered('card-1', 2)])
+    effects.afterCommit([])
+
+    expect(channelDispatch).not.toHaveBeenCalled()
+  })
+
+  it('通道 hub 未装配 / 分发抛错：异常隔离，写路径与其它分发不受影响', () => {
+    const notifyChanged = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+      channels: () => {
+        throw new Error('hub 尚未装配')
+      },
+      notifyChanged,
+    })
+
+    expect(() => effects.afterCommit([cardOpened('card-1')])).not.toThrow()
+    expect(notifyChanged).toHaveBeenCalledTimes(1)
+
+    const throwing = vi.fn(() => {
+      throw new Error('通道分发炸了')
+    })
+    const second = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+      channels: () => ({ dispatch: throwing }),
+      notifyChanged,
+    })
+    expect(() => second.afterCommit([cardOpened('card-1')])).not.toThrow()
+    expect(notifyChanged).toHaveBeenCalledTimes(2)
+  })
+
+  it('通道 hub 惰性解析：effects 先建、hub 后装配也能分发', () => {
+    const box: { current?: { dispatch: (facts: readonly Fact[]) => void } } = {}
+    const channelDispatch = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+      channels: () => {
+        if (!box.current) throw new Error('hub 尚未装配')
+        return box.current
+      },
+    })
+
+    // 装配前：getter 抛错被隔离
+    expect(() => effects.afterCommit([cardOpened('card-1')])).not.toThrow()
+
+    box.current = { dispatch: channelDispatch }
+    effects.afterCommit([cardOpened('card-2', 1, 2)])
+    expect(channelDispatch).toHaveBeenCalledTimes(1)
   })
 })
 

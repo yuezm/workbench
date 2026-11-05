@@ -74,6 +74,8 @@ const validInputs: Input[] = [
   { type: 'conversation.send', conversationId: 'cv-1', content: '你好' },
   { type: 'conversation.rename', conversationId: 'cv-1', title: '标题' },
   { type: 'conversation.remove', conversationId: 'cv-1' },
+  { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
+  { type: 'card.delivery_failed', cardId: 'card-1', version: 2, error: '通道不可用' },
 ]
 
 /** 只取失败文案；先用断言固定 `ok=false`，避免分支未覆盖。 */
@@ -104,6 +106,8 @@ describe('protocol/inputs', () => {
       'conversation.send',
       'conversation.rename',
       'conversation.remove',
+      'card.delivered',
+      'card.delivery_failed',
     ])
     expect([...INPUT_NAMES]).toEqual([...COMMAND_NAMES, ...HOST_INPUT_NAMES])
     expect(new Set(INPUT_NAMES).size).toBe(INPUT_NAMES.length)
@@ -273,6 +277,31 @@ describe('protocol/inputs', () => {
     expect(rejected(host('conversation.rename', { conversationId: 'cv-1' }))).toBe('title必填')
     expect(rejected(host('conversation.rename', { title: 't' }))).toBe('conversationId必填')
     expect(rejected(host('conversation.remove', {}))).toBe('conversationId必填')
+  })
+
+  it('card.delivered / card.delivery_failed：卡片 id、版本 1 基、ref/error 上限', () => {
+    expect(rejected(host('card.delivered', { version: 1, ref: 'in-app' }))).toBe('cardId必填')
+    expect(rejected(host('card.delivered', { cardId: 'card-1', ref: 'in-app' }))).toBe(
+      'version必须是整数',
+    )
+    expect(
+      rejected(host('card.delivered', { cardId: 'card-1', version: 1.5, ref: 'in-app' })),
+    ).toBe('version必须是整数')
+    expect(rejected(host('card.delivered', { cardId: 'card-1', version: 0, ref: 'in-app' }))).toBe(
+      'version必须在 1 到 1000000 之间',
+    )
+    expect(rejected(host('card.delivered', { cardId: 'card-1', version: 1 }))).toBe('ref必填')
+    expect(
+      rejected(host('card.delivered', { cardId: 'card-1', version: 1, ref: longText(2001) })),
+    ).toBe('ref最长 2000 个字符')
+    expect(rejected(host('card.delivery_failed', { cardId: 'card-1', version: 1 }))).toBe(
+      'error必填',
+    )
+    expect(
+      rejected(
+        host('card.delivery_failed', { cardId: 'card-1', version: 1, error: longText(2001) }),
+      ),
+    ).toBe('error最长 2000 个字符')
   })
 
   it('执行器端口版本常量随契约暴露（M3 兼容判断用）', () => {

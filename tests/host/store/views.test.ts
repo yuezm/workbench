@@ -127,6 +127,15 @@ const runNoRuntime = sample.run({
   status: 'running',
   queueSeq: 8,
 })
+/** 无卡的 waiting run（历史挂起态）：`runs.waiting` 应报 hasOpenCard=false。 */
+const runWaitingBare = sample.run({
+  id: 'run-waiting-bare',
+  taskId: null,
+  stageId: null,
+  status: 'waiting',
+  turn: 2,
+  queueSeq: 9,
+})
 const conversation = sample.conversation({ id: 'cv-1', title: '排查问题' })
 const message = sample.message({ id: 'ms-1', conversationId: 'cv-1', content: '你好' })
 
@@ -232,6 +241,7 @@ function seedRunProjection(db: DatabaseSync): void {
     { table: 'runs', key: runDone.id, row: runDone },
     { table: 'runs', key: runStaleChat.id, row: runStaleChat },
     { table: 'runs', key: runNoRuntime.id, row: runNoRuntime },
+    { table: 'runs', key: runWaitingBare.id, row: runWaitingBare },
     { table: 'conversations', key: conversation.id, row: conversation },
     { table: 'messages', key: message.id, row: message },
     { table: 'cards', key: card.id, row: card },
@@ -304,6 +314,7 @@ describe('loadView：按 viewSpec 装载切片', () => {
       'run-done',
       'run-stale-chat',
       'run-no-runtime',
+      'run-waiting-bare',
     ])
     expect(view.runs.get('run-running')).toEqual(runRunning)
     expect(view.runs.get('run-waiting')).toEqual(runWaiting)
@@ -351,7 +362,7 @@ describe('loadView：按 viewSpec 装载切片', () => {
     seedRunProjection(db)
 
     const claimView = loadView(db, viewSpec({ type: 'run.claim', runtimeId: 'rt-1', capacity: 1 }))
-    expect(claimView.runs.size).toBe(8)
+    expect(claimView.runs.size).toBe(9)
     expect(claimView.runtimes.size).toBe(2)
     expect(claimView.tasks.size).toBe(0)
     expect(claimView.agents.size).toBe(0)
@@ -364,7 +375,7 @@ describe('loadView：按 viewSpec 装载切片', () => {
     )
     expect(chatView.conversations.size).toBe(1)
     expect(chatView.messages.size).toBe(1)
-    expect(chatView.runs.size).toBe(8)
+    expect(chatView.runs.size).toBe(9)
     expect(chatView.agents.size).toBe(1)
     expect(chatView.runtimes.size).toBe(2)
     expect(chatView.tasks.size).toBe(0)
@@ -592,6 +603,25 @@ describe('queryView：运行历史与负载（T16 读路径收口）', () => {
     expect(queryView(db, 'runs.stale-chat')).toEqual([
       { id: 'run-stale-chat', leaseId: 'run-stale-chat:1', turn: 2 },
     ])
+  })
+
+  it('runs.waiting：只取 waiting，hasOpenCard 按 cards join，按创建顺序', () => {
+    const db = memory()
+    seed(db)
+    seedRunProjection(db)
+
+    expect(queryView(db, 'runs.waiting')).toEqual([
+      { runId: 'run-waiting', leaseId: null, turn: 1, hasOpenCard: true },
+      { runId: 'run-waiting-bare', leaseId: null, turn: 2, hasOpenCard: false },
+    ])
+  })
+
+  it('runs.waiting：没有 waiting run 时为空数组', () => {
+    const db = memory()
+    seed(db)
+    seedRuns(db)
+
+    expect(queryView(db, 'runs.waiting')).toEqual([])
   })
 
   it('空库：新视图返回空集合 / null / 0', () => {

@@ -38,6 +38,7 @@ export const VIEW_IDS = [
   'runs.stale-chat',
   'cards.open',
   'cards.byRun',
+  'runs.waiting',
 ] as const
 
 export type ViewId = (typeof VIEW_IDS)[number]
@@ -66,6 +67,17 @@ export interface StaleChatRun {
   id: string
   leaseId: string | null
   turn: number
+}
+
+/**
+ * 启动对账要检查的 waiting run（M4 D13）：`hasOpenCard` 由宿主按 `cards.run_id` join 得出。
+ * 有 open 卡的 waiting 不能兜底取消（有人可答）；无卡的由对账补 `run.host_settled{cancelled}`。
+ */
+export interface WaitingRun {
+  runId: string
+  leaseId: string | null
+  turn: number
+  hasOpenCard: boolean
 }
 
 /** 需要参数的视图 → 参数形状；无参数视图不出现在这里。 */
@@ -103,6 +115,8 @@ export interface ViewResults {
   'cards.open': Card[]
   /** 某个 run 的卡片（含已答/已关闭），按 `createdAt` 升序 */
   'cards.byRun': Card[]
+  /** 全部 waiting run 及其是否有 open 卡（启动对账 D13 用；无参数） */
+  'runs.waiting': WaitingRun[]
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

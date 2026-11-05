@@ -36,7 +36,13 @@ import type {
   WorkflowStage,
   WorkflowWithStages,
 } from '../../protocol/entities'
-import type { ActiveRun, RuntimeWorkload, StaleChatRun, ViewId } from '../../protocol/views'
+import type {
+  ActiveRun,
+  RuntimeWorkload,
+  StaleChatRun,
+  ViewId,
+  WaitingRun,
+} from '../../protocol/views'
 import { VIEW_IDS } from '../../protocol/views'
 import type { ProjectionTable, View } from '../../kernel/types'
 import { lastSeq } from './facts'
@@ -498,6 +504,36 @@ const readStaleChatRuns = (db: DatabaseSync): StaleChatRun[] =>
       .all() as unknown as Array<{ id: string; lease_id: string | null; turn: number }>
   ).map((row) => ({ id: row.id, leaseId: row.lease_id, turn: row.turn }))
 
+/**
+ * 启动对账要检查的 waiting run（M4 D13）：逐列 SELECT，`hasOpenCard` 用 `EXISTS` 子查询
+ * 按 `cards.run_id + status='open'` 得出——有 open 卡说明有人可答，对账不能兜底取消。
+ */
+const readWaitingRuns = (db: DatabaseSync): WaitingRun[] =>
+  (
+    db
+      .prepare(
+        `SELECT r.id AS run_id, r.lease_id, r.turn,
+                EXISTS(
+                  SELECT 1 FROM cards c
+                  WHERE c.run_id = r.id AND c.status = 'open'
+                ) AS has_open_card
+         FROM runs r
+         WHERE r.status = 'waiting'
+         ORDER BY r.created_at, r.rowid`,
+      )
+      .all() as unknown as Array<{
+      run_id: string
+      lease_id: string | null
+      turn: number
+      has_open_card: number
+    }>
+  ).map((row) => ({
+    runId: row.run_id,
+    leaseId: row.lease_id,
+    turn: row.turn,
+    hasOpenCard: row.has_open_card === 1,
+  }))
+
 const readConversations = (db: DatabaseSync): Conversation[] =>
   (
     db
@@ -717,5 +753,7 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readOpenCards(db)
     case 'cards.byRun':
       return readCardsByRun(db, readStringParam(params, 'runId'))
+    case 'runs.waiting':
+      return readWaitingRuns(db)
   }
 }

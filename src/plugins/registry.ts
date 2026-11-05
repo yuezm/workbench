@@ -1,16 +1,21 @@
 /**
- * 内置插件注册表（M3）：唯一的静态导入点，按固定顺序列出内置执行器。
+ * 内置插件注册表（M3/M4）：唯一的静态导入点，按固定顺序列出内置执行器与通道。
  *
  * 依赖方向：`registry → 具体插件 + sdk/protocol 类型`；宿主只经本文件取插件，
- * 不直接 import `executors/**`（ESLint 强制）。新增执行器协议 =
- * 新增 `src/plugins/executors/<id>/` + 本文件 `executors` 一行。
+ * 不直接 import `executors/**` / `channels/**`（ESLint 强制）。新增执行器协议 =
+ * 新增 `src/plugins/executors/<id>/` + 本文件 `executors` 一行；新增通道 =
+ * 新增 `src/plugins/channels/<id>/` + 本文件 `channels` 一行。
  *
- * `executors` 的数组顺序即 UI 下拉与 `detect()` 的输出顺序。
+ * `executors` 的数组顺序即 UI 下拉与 `detect()` 的输出顺序；
+ * `channels` 的数组顺序即卡片投递顺序（in-app 在前、desktop 在后）。
  */
 import type { PluginManifest } from '../protocol/manifest'
+import type { ChannelPlugin } from '../protocol/channels'
 import type { DetectedRuntime } from '../protocol/entities'
 import type { ExecutorPlugin, SdkHost } from '../sdk/types'
 import { createSdk } from '../sdk'
+import { desktopChannel, desktopManifest } from './channels/desktop'
+import { inAppChannel, inAppManifest } from './channels/in-app'
 import { commandPlugin } from './executors/command'
 import { commandManifest } from './executors/command/manifest'
 import { dshPlugin } from './executors/dsh'
@@ -42,6 +47,40 @@ export const executors: ReadonlyArray<ExecutorRegistryEntry> = [
 export function executorById(key: string): ExecutorRegistryEntry {
   const found = executors.find((entry) => entry.key === key)
   if (found === undefined) throw new Error(`执行器插件未注册: ${key}`)
+  return found
+}
+
+/** 一条通道注册项（SPEC-plugins「channel」）：key = manifest.id，写进 `card.delivered.ref`。 */
+export interface ChannelRegistryEntry {
+  key: string
+  label: string
+  manifest: PluginManifest
+  plugin: ChannelPlugin
+}
+
+/**
+ * 内置通道清单（M4）：数组顺序即投递顺序（in-app 在前、desktop 在后）。
+ * 宿主只经本清单启停，不直接 import 具体通道插件。
+ */
+export const channels: ReadonlyArray<ChannelRegistryEntry> = [
+  {
+    key: inAppManifest.id,
+    label: inAppManifest.name,
+    manifest: inAppManifest,
+    plugin: inAppChannel,
+  },
+  {
+    key: desktopManifest.id,
+    label: desktopManifest.name,
+    manifest: desktopManifest,
+    plugin: desktopChannel,
+  },
+]
+
+/** 按 key 取通道注册项；未知 key 抛可读错误（装配根据此不启动未知通道）。 */
+export function channelById(key: string): ChannelRegistryEntry {
+  const found = channels.find((entry) => entry.key === key)
+  if (found === undefined) throw new Error(`通道插件未注册: ${key}`)
   return found
 }
 

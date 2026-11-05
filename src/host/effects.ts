@@ -3,9 +3,11 @@
  *
  * - `run.queued` → 唤醒调度器（领取与执行只由 scheduler 发起）；
  * - `run.cancel_requested` → 中止执行中的 run（终止时序由执行器负责）；
+ * - `card.opened` / `card.updated` → 交给通道 hub（fire-and-forget：hub 自己异步投递、
+ *   自捕获异常与超时，不拖住写路径）；
  * - 其余事实 → 只做变更通知。
  *
- * **所有写入口统一走 `effects.dispatch`**（IPC、scheduler、clock）：先提交事实，
+ * **所有写入口统一走 `effects.dispatch`**（IPC、scheduler、clock、通道）：先提交事实，
  * 再分发；订阅者之间异常互相隔离——一个通道抛错不影响其它分发，也不影响调用方拿到
  * 提交结果。变更通知按「一次提交」合并成一次推送（同一批事实不重复通知 UI）。
  */
@@ -23,10 +25,17 @@ export interface EffectsScheduler {
   cancel(runId: string): void
 }
 
+/** 分发只需要的通道 hub 能力：hub 自己过滤 `card.opened/updated` 并异步投递。 */
+export interface EffectsChannels {
+  dispatch(facts: readonly Fact[]): void
+}
+
 export interface EffectsOptions {
   store: EffectsStore
   /** 调度器：惰性取，装配根可以先建 effects 再建 scheduler */
   scheduler: () => EffectsScheduler
+  /** 通道 hub：惰性取，装配根在 effects 之后、scheduler 之前 startAll */
+  channels?: () => EffectsChannels
   /** 变更广播（窗口）：一次提交推一次；异常隔离 */
   notifyChanged?: () => void
   /** 事实观察钩子（诊断 / 测试）；异常同样隔离 */
@@ -64,6 +73,10 @@ export function createEffects(options: EffectsOptions): Effects {
       }
     }
     if (facts.length === 0) return
+    // 卡片投递：hub 的 dispatch 只做「选集 + 异步投递」，立即返回；异常/超时在 hub 内隔离
+    if (facts.some((fact) => fact.type === 'card.opened' || fact.type === 'card.updated')) {
+      safely(() => options.channels?.().dispatch(facts))
+    }
     safely(() => options.onFacts?.(facts))
     safely(() => options.notifyChanged?.())
   }

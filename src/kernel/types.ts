@@ -34,7 +34,14 @@ export const KERNEL_VERSION = 'm4.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
-  | { kind: 'host'; via: 'timer' | 'scheduler' | 'reconcile' | 'timeout' | 'cancel' }
+  | {
+      kind: 'host'
+      /**
+       * `channel`：通道 hub 回写投递状态（`card.delivered` / `card.delivery_failed`）——
+       * 这是通道回报，不是调度器的决策，所以不复用 `scheduler` 语义（M4 D9）。
+       */
+      via: 'timer' | 'scheduler' | 'reconcile' | 'timeout' | 'cancel' | 'channel'
+    }
   | { kind: 'kernel' }
 
 /**

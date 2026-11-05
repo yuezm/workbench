@@ -434,3 +434,290 @@ describe('createChannels：answer 入口', () => {
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ commandId: 'card:card-1:0' }))
   })
 })
+
+describe('createChannels：隔离与边界分支', () => {
+  it('通道没有任何 onCard 订阅者：视为未送达，落 delivery_failed', async () => {
+    const listenerless: ChannelRegistryEntry = {
+      key: 'listenerless',
+      label: 'listenerless',
+      manifest: MANIFEST('listenerless'),
+      plugin: { start: async () => () => undefined },
+    }
+    const { hub, dispatch } = harness({ entries: [listenerless], timeoutMs: 10 })
+    await hub.startAll()
+
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1 }))])
+
+    await vi.waitFor(() =>
+      expect(dispatchInputs(dispatch)).toContainEqual({
+        type: 'card.delivery_failed',
+        cardId: 'card-1',
+        version: 1,
+        error: '所有通道投递失败或超时',
+      }),
+    )
+  })
+
+  it('通道同步 ack 后又抛错：settle 只认第一次，不重复 resolve、不写 failed', async () => {
+    const race = fakeEntry('race', (ctx, card) => {
+      void ctx.delivered(card.id, card.version, 'race')
+      throw new Error('ack 之后才炸')
+    })
+    const { hub, dispatch } = harness({ entries: [race], timeoutMs: 10 })
+    await hub.startAll()
+
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1 }))])
+
+    await vi.waitFor(() =>
+      expect(dispatchInputs(dispatch)).toContainEqual({
+        type: 'card.delivered',
+        cardId: 'card-1',
+        version: 1,
+        ref: 'race',
+      }),
+    )
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(dispatchInputs(dispatch).some((input) => input['type'] === 'card.delivery_failed')).toBe(
+      false,
+    )
+  })
+
+  it('非卡片事实不触发投递', async () => {
+    const ack = ackEntry('ack')
+    const { hub, dispatch } = harness({ entries: [ack] })
+    await hub.startAll()
+
+    hub.dispatch([
+      {
+        type: 'run.queued',
+        actor: { kind: 'host', via: 'scheduler' },
+        at: AT,
+        seq: 1,
+        payload: {},
+      } as unknown as Fact,
+    ])
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(ack.received).toEqual([])
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it('超时之后才到的 ack：按事实回写一次；同一版本重复 ack 静默丢弃', async () => {
+    let captured: ChannelContext | null = null
+    const received: Card[] = []
+    const lateEntry: ChannelRegistryEntry = {
+      key: 'late',
+      label: 'late',
+      manifest: MANIFEST('late'),
+      plugin: {
+        async start(ctx) {
+          captured = ctx
+          ctx.onCard((card) => {
+            received.push(card)
+          })
+          return () => undefined
+        },
+      },
+    }
+    const { hub, dispatch } = harness({ entries: [lateEntry], timeoutMs: 10 })
+    await hub.startAll()
+
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1 }))])
+    await vi.waitFor(() => expect(received).toHaveLength(1))
+
+    // 等超时：先记投递失败
+    await vi.waitFor(() =>
+      expect(dispatchInputs(dispatch)).toContainEqual({
+        type: 'card.delivery_failed',
+        cardId: 'card-1',
+        version: 1,
+        error: '所有通道投递失败或超时',
+      }),
+    )
+
+    // 没有等待者时 ack：按事实回写 delivered
+    await captured!.delivered('card-1', 1, 'late')
+    expect(dispatchInputs(dispatch).filter((input) => input['type'] === 'card.delivered')).toEqual([
+      { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'late' },
+    ])
+
+    // 同一 (cardId, version) 再 ack：已记录 delivered，静默丢弃
+    await captured!.delivered('card-1', 1, 'late')
+    expect(
+      dispatchInputs(dispatch).filter((input) => input['type'] === 'card.delivered'),
+    ).toHaveLength(1)
+  })
+
+  it('startAll 重复调用：第二次直接返回，不重复启动通道', async () => {
+    const start = vi.fn(async () => () => undefined)
+    const entry: ChannelRegistryEntry = {
+      key: 'once',
+      label: 'once',
+      manifest: MANIFEST('once'),
+      plugin: { start },
+    }
+    const { hub } = harness({ entries: [entry] })
+
+    await hub.startAll()
+    await hub.startAll()
+
+    expect(start).toHaveBeenCalledTimes(1)
+  })
+
+  it('onCard 返回的退订函数生效：退订后不再收到卡片', async () => {
+    let unsubscribe: (() => void) | null = null
+    const received: Card[] = []
+    const entry: ChannelRegistryEntry = {
+      key: 'sub',
+      label: 'sub',
+      manifest: MANIFEST('sub'),
+      plugin: {
+        async start(ctx) {
+          unsubscribe = ctx.onCard((card) => {
+            received.push(card)
+          })
+          return () => undefined
+        },
+      },
+    }
+    const { hub } = harness({ entries: [entry], timeoutMs: 10 })
+    await hub.startAll()
+
+    unsubscribe!()
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1 }))])
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(received).toEqual([])
+  })
+
+  it('通道经 context.answer 回写 card.answer（via=channel）', async () => {
+    let captured: ChannelContext | null = null
+    const entry: ChannelRegistryEntry = {
+      key: 'answering',
+      label: 'answering',
+      manifest: MANIFEST('answering'),
+      plugin: {
+        async start(ctx) {
+          captured = ctx
+          return () => undefined
+        },
+      },
+    }
+    const { hub, dispatch } = harness({ entries: [entry] })
+    await hub.startAll()
+
+    await captured!.answer('card-1', 2)
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'card.answer',
+      commandId: 'card:card-1:0',
+      cardId: 'card-1',
+      optionIndex: 2,
+      via: 'channel',
+    })
+  })
+
+  it('stopAll：没有 dispose 的通道跳过，dispose 抛错只记日志、不阻塞退出', async () => {
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const noDispose: ChannelRegistryEntry = {
+      key: 'no-dispose',
+      label: 'no-dispose',
+      manifest: MANIFEST('no-dispose'),
+      plugin: { start: async () => null as unknown as () => void },
+    }
+    const badDispose: ChannelRegistryEntry = {
+      key: 'bad-dispose',
+      label: 'bad-dispose',
+      manifest: MANIFEST('bad-dispose'),
+      plugin: {
+        start: async () => () => {
+          throw new Error('dispose 失败')
+        },
+      },
+    }
+    const { hub } = harness({ entries: [noDispose, badDispose] })
+    await hub.startAll()
+
+    await expect(hub.stopAll()).resolves.toBeUndefined()
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('bad-dispose dispose 失败'))
+  })
+
+  it('投递回写抛错：只记日志，不向外抛（fire-and-forget 隔离）', async () => {
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const ack = ackEntry('ack')
+    const { hub, dispatch } = harness({ entries: [ack] })
+    dispatch.mockImplementation(() => {
+      throw new Error('写库失败')
+    })
+    await hub.startAll()
+
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1 }))])
+
+    await vi.waitFor(() =>
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('投递回写失败')),
+    )
+  })
+
+  it('启动补投查询失败：只记日志，不阻塞启动', async () => {
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const store = {
+      query: vi.fn(() => {
+        throw new Error('查询失败')
+      }),
+    } as unknown as ChannelsStore
+    const dispatch = vi.fn(() => ({ facts: [] }))
+    const hub = createChannels({
+      store,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [ackEntry('ack')],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 10,
+    })
+
+    await expect(hub.startAll()).resolves.toBeUndefined()
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('补投查询失败'))
+  })
+
+  it('未注入 timeoutMs 时用默认超时：快通道照常回写 delivered', async () => {
+    const ack = ackEntry('ack')
+    const store = { query: vi.fn(() => []) } as unknown as ChannelsStore
+    const dispatch = vi.fn(() => ({ facts: [] }))
+    const hub = createChannels({
+      store,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [ack],
+      sdkHost: fakeSdkHost,
+    })
+    await hub.startAll()
+
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1 }))])
+
+    await vi.waitFor(() =>
+      expect(dispatchInputs(dispatch)).toContainEqual({
+        type: 'card.delivered',
+        cardId: 'card-1',
+        version: 1,
+        ref: 'ack',
+      }),
+    )
+  })
+
+  it('通道抛出非 Error 值：文案用 String 兜底，仍被隔离', async () => {
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const weird = fakeEntry('weird', () => {
+      throw '炸了'
+    })
+    const { hub } = harness({ entries: [weird], timeoutMs: 10 })
+    await hub.startAll()
+
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1 }))])
+
+    await vi.waitFor(() =>
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('通道 weird 分发失败：炸了')),
+    )
+  })
+})

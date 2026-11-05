@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Card } from '../../../../../../src/shared/ai-workflow-api'
 import { ApprovalBar } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ApprovalBar'
@@ -127,6 +127,54 @@ describe('ApprovalBar', () => {
     const { container } = render(<ApprovalBar />)
 
     await waitFor(() => expect(api.cards.open).toHaveBeenCalled())
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('重拉失败（changed 触发的刷新）：保留卡片并展示后端文案', async () => {
+    const api = install({ open: async () => [card], answer: async () => card })
+    render(<ApprovalBar />)
+    expect(await screen.findByText('继续吗')).toBeInTheDocument()
+
+    // 非 Error 值也要有文案（errMsg 走 String 兜底）
+    api.cards.open.mockRejectedValueOnce('重拉失败')
+    act(() => {
+      ;(api.onChanged.mock.calls[0][0] as () => void)()
+    })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('重拉失败')
+    expect(screen.getByText('继续吗')).toBeInTheDocument()
+  })
+
+  it('初次加载失败：不渲染、不崩（错误只在有卡可答时才有展示语境）', async () => {
+    const api = install({
+      open: async () => {
+        throw new Error('读取待审批失败')
+      },
+      answer: async () => card,
+    })
+    const { container } = render(<ApprovalBar />)
+
+    await waitFor(() => expect(api.cards.open).toHaveBeenCalledTimes(1))
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('卸载后才返回的失败：不更新已卸载组件', async () => {
+    let rejectOpen: (reason: unknown) => void = () => {}
+    const api = install({
+      open: () =>
+        new Promise<Card[]>((_resolve, reject) => {
+          rejectOpen = reject
+        }),
+      answer: async () => card,
+    })
+    const { container, unmount } = render(<ApprovalBar />)
+    await waitFor(() => expect(api.cards.open).toHaveBeenCalledTimes(1))
+
+    unmount()
+    rejectOpen(new Error('晚到的失败'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    // 组件已卸载：没有状态更新、没有报错边界触发
     expect(container).toBeEmptyDOMElement()
   })
 })

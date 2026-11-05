@@ -33,7 +33,7 @@ import {
   readProjectionMeta,
   rebuildProjection,
 } from '../../../src/host/store/projection'
-import { dumpProjection } from './test-support'
+import { dumpProjection, sample } from './test-support'
 
 /** 导入事实的统一时间：阶段 created_at 与事件 created_at 都对齐到它。 */
 const IMPORT_AT = '2026-02-02T02:02:02.000Z'
@@ -869,6 +869,32 @@ describe('importLegacyIfNeeded', () => {
 
     expect(() => importLegacyIfNeeded(db, noisyKernel, { at: IMPORT_AT })).toThrow(
       /存量导入校验失败/,
+    )
+    expect(factsCount(db)).toBe(0)
+    expect(readProjectionMeta(db)).toBeNull()
+    expect(dumpProjection(db)).toEqual(before)
+  })
+
+  it('导入后 cards 非空：卡片校验失败整体回滚（v2 无卡片数据的防御断言）', () => {
+    const db = memory()
+    seedEntities(db)
+    const ghostCard = sample.card({ id: 'card-ghost' })
+    const noisyKernel = createFakeKernel({
+      project: (fact) => {
+        const changes = project(fact)
+        if (
+          fact.type === 'snapshot.imported' &&
+          (fact.payload as { table?: string }).table === 'runtimes'
+        ) {
+          changes.push({ table: 'cards', key: ghostCard.id, row: ghostCard })
+        }
+        return changes
+      },
+    })
+    const before = dumpProjection(db)
+
+    expect(() => importLegacyIfNeeded(db, noisyKernel, { at: IMPORT_AT })).toThrow(
+      /存量导入校验失败（cards）/,
     )
     expect(factsCount(db)).toBe(0)
     expect(readProjectionMeta(db)).toBeNull()

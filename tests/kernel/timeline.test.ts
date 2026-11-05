@@ -454,4 +454,40 @@ describe('kernel/timeline', () => {
     ])
     expect(timeline(facts, 'card', 'card-404')).toEqual([])
   })
+
+  it('派生事件归属：event.received 挂父 run；外部事件与 event.dropped 不归入任何实体', () => {
+    const facts: Fact[] = [
+      fact(1, 'event.received', {
+        eventId: 'ev-1',
+        source: 'agent',
+        type: 'issues.opened',
+        subject: 'issue-1',
+        summary: '派生事件',
+        detailRef: null,
+        link: null,
+        hops: 2,
+        originRunId: 'run-1',
+        dedupeKey: null,
+      }),
+      // 外部来源的事件没有父 run：不归入任何 run 时间线
+      fact(2, 'event.received', {
+        eventId: 'ev-2',
+        source: 'external',
+        type: 'issues.opened',
+        subject: 'issue-2',
+        summary: '外部事件',
+        detailRef: null,
+        link: null,
+        hops: 1,
+        originRunId: null,
+        dedupeKey: null,
+      }),
+      // 熔断审计事实只带 eventId：不归入任何实体，只在 cause 链上出现
+      fact(3, 'event.dropped', { eventId: 'ev-3', hops: 9, reason: '超过最大跳数' }),
+    ]
+
+    expect(kinds(timeline(facts, 'run', 'run-1'))).toEqual(['1:event.received'])
+    // 没有父 run 的事件不产生 scope：按任意 run 查都查不到它
+    expect(kinds(timeline(facts, 'run', 'run-2'))).toEqual([])
+  })
 })

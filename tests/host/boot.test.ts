@@ -610,6 +610,24 @@ describe('主进程入口装配', () => {
     expect(effectsDeps().channels?.()).toBe(channelsMock)
   })
 
+  it('hub 尚未挂上时取 effects 的通道 getter：给可读错误而不是 undefined', async () => {
+    let caught: unknown = null
+    // 在 createChannels 构造过程中（holder 还没赋值）访问 getter
+    createChannelsMock.mockImplementationOnce(() => {
+      try {
+        effectsDeps().channels?.()
+      } catch (error) {
+        caught = error
+      }
+      startupOrder.push('channels')
+      return channelsMock
+    })
+
+    await loadEntry()
+
+    expect((caught as Error).message).toBe('通道 hub 尚未装配')
+  })
+
   it('启动对账：读 process_registry 清崩溃残留（registry → reconcile），再接 scheduler/clock', async () => {
     await loadEntry()
 

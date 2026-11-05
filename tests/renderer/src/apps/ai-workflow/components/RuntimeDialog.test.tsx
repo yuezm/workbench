@@ -455,4 +455,23 @@ describe('RuntimeDialog', () => {
     expect(screen.getByRole('combobox', { name: '运行时执行器' })).toBeDisabled()
     expect(screen.getByLabelText('运行时命令')).toHaveValue('')
   })
+
+  it('编辑：切换执行器不覆盖已有 command/profile（只在新建时按 manifest 预填）', async () => {
+    const user = userEvent.setup()
+    render(
+      <RuntimeDialog
+        runtime={makeRuntime({ executorKey: 'dsh', command: 'dsh', profile: 'multica' })}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
+    await user.click(screen.getByRole('combobox', { name: '运行时执行器' }))
+    await user.click(screen.getByRole('option', { name: '通用命令' }))
+
+    // 编辑态不预填：用户已有配置优先
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh')
+    expect(screen.getByLabelText('运行时 profile')).toHaveValue('multica')
+  })
 })

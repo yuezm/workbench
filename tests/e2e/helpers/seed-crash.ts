@@ -80,6 +80,7 @@ export async function seedCrashState(dbPath: string): Promise<CrashSeed> {
       commandId: 'e2e-seed-runtime',
       input: {
         name: 'e2e 运行时',
+        executorKey: 'dsh',
         command: process.execPath,
         profile: 'multica',
         permissionMode: 'workspace-write',

@@ -2,7 +2,11 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { CAPABILITIES } from '../../src/protocol/manifest'
+import { CAPABILITIES, PLUGIN_KINDS } from '../../src/protocol/manifest'
+import {
+  CAPABILITIES as PLUGINS_CAPABILITIES,
+  PLUGIN_KINDS as PLUGINS_KINDS,
+} from '../../src/plugins/manifest'
 import { executorById, executors } from '../../src/plugins/registry'
 
 /**
@@ -20,6 +24,11 @@ const KEBAB_CASE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 describe('执行器插件注册表', () => {
   it('注册表非空', () => {
     expect(executors.length).toBeGreaterThan(0)
+  })
+
+  it('plugins/manifest 只是协议层契约的再导出（同一份取值）', () => {
+    expect(PLUGINS_CAPABILITIES).toBe(CAPABILITIES)
+    expect(PLUGINS_KINDS).toBe(PLUGIN_KINDS)
   })
 
   it('每条注册项的 key 唯一、等于 manifest.id 且为 kebab-case', () => {

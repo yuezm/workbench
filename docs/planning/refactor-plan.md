@@ -77,7 +77,16 @@
 - 分支 `refactor/m3-executors`，起点 `master` @ `831f2dd`；实施计划与任务清单见 [tasks/m3-plan.md](../../tasks/m3-plan.md)、[tasks/m3-todo.md](../../tasks/m3-todo.md)，测绘证据见 `tasks/recon/m3-{dsh,runtime-config,gates}.md`。
 - 范围口径：`executorKey` 取代 `protocolFamily`（`runtimes` 表 12-step 升级 + `normalizeRuntime` + `KERNEL_VERSION=m3.0.0` 首启重建）；新增 `src/sdk` 最小能力面（log/now/paths/config/process.spawn+resolve+killTree+scanDirs）；新增 `src/plugins/{manifest,registry,shared,executors/dsh,executors/command}`；`detect` 归插件；`ExecutorBackend` 适配层删除、`resume_rejected` 重试留宿主；未知执行器落 `runtime_missing` 终态，不新增 errorCode。`card.*`/通道留 M4，IPC 三动词与 `kernelStore` 留 M5，`command` 插件归 M3b 可后置。
 - 回滚点：开工前已复制 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1055-pre-m3.db`（sha256 与源库一致、`integrity_check=ok`、9 表 125 行）并导出同目录 JSON。**该实库仍是 M1 之前的 v2 格式（无 `facts` 表）**，M3 首启会走 `host/store/import.ts` 兼容层，因此本阶段不删 M2 兼容层（删除条件写入 M3 退出记录）。
-- 待评审口径：m3-plan「架构决议 D1–D14」与「开放问题」5 条（`executorKey` 取代方案、`supported` 语义、`command` 插件范围、兼容层去留、新 RPC 通道）。
+- 待评审口径：m3-plan「架构决议 D1–D14」与「开放问题」5 条（`executorKey` 取代方案、`supported` 语义、`command` 插件范围、兼容层去留、新 RPC 通道）。评审结论：方案 A、先做 M3a、`command` 插件归 M3b、兼容层本轮不删。
+
+## M3 进展记录：M3a 完成（2026-11-05）
+
+- 提交链：`d8ca5fe`（executorKey 取代 protocolFamily + runtimes 结构升级/归一）→ `8d135f3`（sdk 能力面与宿主注入）→ `8c75e6c`（插件注册表 + dsh 执行器插件搬迁）→ `1a1666f`（插件边界 ESLint/floor-guard/注册表测试）→ `97ecd6e`（调度器按 executorKey 取端口、删除旧执行链）→ `1859883`（包装用例补断言）→ `ca7644f`（假协议端到端验收）→ `68ce59c`（覆盖率收口）。
+- 证据：`pnpm check:fast` 绿；`npx vitest run --coverage` 89 文件 / 1044 例全绿，覆盖率 **99.85 / 98.11 / 100 / 100**（基线 99.73/97.78/100/100）；`node scripts/floor-guard.mjs` clean；改动行覆盖率待 T13 用 `check:diffcov` 复核。
+- 行为等价：dsh 59 例断言逐例保留（只换 import 与 fakeSdk 夹具），`timeout` 折成 `failed + errorCode='timeout'`；`resume_rejected` 重试与聊天失败文案留在 `host/executor.ts` 包装层；取消时序、probe 三判据、pid 上报、stderr 截尾不变。
+- 结构：`src/main/ai-workflow/runtime/**` 与 `executor-port.ts` 删除，`src/main` 只剩 `ipc.ts`；新增 `src/sdk/{types,index}.ts`、`src/host/{sdk-host,executor-registry}.ts`、`src/plugins/{manifest,registry,shared,executors/dsh}`；`runtimes` 表 12-step 升级 + `normalizeRuntime`，`KERNEL_VERSION=m3.0.0`。
+- 关键口径落地：未注册 `executorKey` → 调度器兜底 `runtime_missing`（不新增 errorCode）；`DetectedRuntime` 保留 `supported`（语义=registry 是否有该执行器）；dsh manifest capabilities 由 SPEC 草案的 `['spawn','fs.read']` 收窄为 `['spawn']`（sdk 无 fs 面，boundary 门禁要求声明↔用法一致）；假协议验收用例放 `tests/host/acceptance.test.ts`（避免给 `tests/plugins` 放宽 ESLint 豁免）。
+- 未做（M3b/M3c）：detect 归插件（T9）、运行时表单执行器选择与 `runtimes.executors`（T10）、`command` 插件与 `argsTemplate`（T11）、`check:diffcov`/真 CLI/SPEC 修订与退出记录（T12/T13）。M2 兼容层按评审结论保留，删除条件待真实库首启验证后另行登记。
 
 ## 文件去向
 

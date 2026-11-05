@@ -1,5 +1,7 @@
 # M3 任务清单（运行时与执行器插件）
 
+> 进度（2026-11-05，M3a 完成）：T1–T8 已交付（提交 `d8ca5fe`/`8d135f3`/`8c75e6c`/`1a1666f`/`97ecd6e`/`1859883`/`ca7644f`/`68ce59c`/`68ce59c` 之后的收口提交）。证据：`pnpm check:fast` 绿；`npx vitest run --coverage` 89 文件 / 1045 例全绿，覆盖率 99.85/98.11/100/100（≥ 基线）；`pnpm check:diffcov` 484/484 = 100%；`pnpm e2e` 6/6；真实 v2 库副本启动后 9 条 `snapshot.imported`、`runtimes.executor_key='dsh'`、runs 15 / run_events 98 / 聊天 1+4 逐行保留、旧 `chat_*` 表已删除、`integrity_check=ok`。T9–T13（detect 归插件、运行时表单执行器选择、`command` 插件、SPEC 修订与退出记录）待 M3b/M3c；下文勾选框保留为原始验收项。
+
 > 计划说明见 [m3-plan.md](./m3-plan.md)。规则：每个任务结束跑 `pnpm check:fast`；检查点跑完整 `pnpm check` 与 `pnpm e2e`。
 > 本阶段把执行器从 `src/main/ai-workflow/runtime/**` 搬到 `src/plugins/executors/**`，新增 `src/sdk` 与 `src/plugins/registry.ts`，运行时改用 `executorKey` 选插件。契约与迁移口径以 m3-plan「架构决议 D1–D14」为准。
 > 前置约束：先开分支（已开 `refactor/m3-executors`）；`tsconfig.node.json`、`eslint.config.mjs` 与 `pnpm check` 的门禁接线必须早于新目录落地；`floor-guard` 扫描 `.md`，本文件不得出现三类字样。

@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AI_WORKFLOW_CHANGED, AI_WORKFLOW_CHAT } from '../../src/shared/ai-workflow-api'
+import { receiptBlockHint } from '../../src/kernel/prompt'
 
 /**
  * 主进程入口只做装配：mock 掉 electron 与各模块，验证窗口/托盘/退出流程，
@@ -726,7 +727,7 @@ describe('主进程入口装配', () => {
       table === 'agents.all' ? [agent] : messages,
     )
     expect(fallback(run)).toBe(
-      '你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n\n请回答最后一条用户消息。',
+      `你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n\n请回答最后一条用户消息。\n\n${receiptBlockHint()}`,
     )
 
     // 非聊天 run / 没有对话：回退不适用

@@ -7,12 +7,15 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, Conversation, Message, RunRow, Runtime } from '../../src/protocol/entities'
 import { decide } from '../../src/kernel/decide'
+import { receiptBlockHint } from '../../src/kernel/prompt'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
 const CREATED = '2026-01-01T00:00:00.000Z'
 const LATER = '2026-01-02T00:00:00.000Z'
 const OWNER = { kind: 'owner', via: 'ui' } as const
+/** 聊天首轮提示词末尾固定追加的回执块说明（M4 D4）。 */
+const HINT = receiptBlockHint()
 
 const limits = (over: Partial<Limits> = {}): Limits => ({
   maxStagesPerWorkflow: 50,
@@ -141,6 +144,7 @@ const view = (seed: Seed = {}): View => ({
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
   messages: new Map((seed.messages ?? []).map((row) => [row.id, row])),
+  cards: new Map(),
   activeTaskIds: new Set(),
 })
 
@@ -267,7 +271,7 @@ describe('kernel/decide conversation.send', () => {
       threadContextRef: null,
       queueSeq: 0,
       status: 'queued',
-      prompt: '你是助手。\n\n# 对话记录\n\n用户：帮我看看\n第二行\n\n请回答最后一条用户消息。',
+      prompt: `你是助手。\n\n# 对话记录\n\n用户：帮我看看\n第二行\n\n请回答最后一条用户消息。\n\n${HINT}`,
       output: '',
       error: null,
       errorCode: null,
@@ -300,7 +304,7 @@ describe('kernel/decide conversation.send', () => {
     )
 
     expect((decision.facts[1]?.payload as { run: RunRow }).run.prompt).toBe(
-      '你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n用户：继续\n\n请回答最后一条用户消息。',
+      `你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n用户：继续\n\n请回答最后一条用户消息。\n\n${HINT}`,
     )
   })
 

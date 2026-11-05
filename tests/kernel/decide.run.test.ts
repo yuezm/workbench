@@ -123,6 +123,7 @@ const view = (seed: Seed = {}): View => ({
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
   messages: new Map(),
+  cards: new Map(),
   activeTaskIds: new Set(),
 })
 
@@ -757,7 +758,7 @@ describe('kernel/decide run.receipt 回执', () => {
     })
   })
 
-  it('回执带 ask：run.waiting 释放租约/超时，且不占并发位', () => {
+  it('回执带 ask：先建卡再 run.waiting（释放租约/超时，且不占并发位）', () => {
     const active = running({ sessionId: 'sess-old' })
     const decision = receive(
       view({ runs: [active] }),
@@ -771,6 +772,32 @@ describe('kernel/decide run.receipt 回执', () => {
 
     expect(decision.facts).toEqual([
       {
+        type: 'card.opened',
+        actor: HOST,
+        at: NOW,
+        payload: {
+          card: {
+            id: 'card-new-1',
+            runId: 'run-1',
+            taskId: 't-1',
+            conversationId: null,
+            title: '确认',
+            text: '',
+            options: ['好'],
+            key: null,
+            version: 1,
+            status: 'open',
+            delivery: 'pending',
+            deliveryRef: null,
+            optionIndex: null,
+            answeredBy: null,
+            answeredAt: null,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        },
+      },
+      {
         type: 'run.waiting',
         actor: HOST,
         at: NOW,
@@ -783,13 +810,13 @@ describe('kernel/decide run.receipt 回执', () => {
             leaseUntil: null,
             deadlineAt: null,
           },
-          cardIds: [],
+          cardIds: ['card-new-1'],
         },
       },
     ])
 
     // 用同一视图再领取：waiting 不占位，下一条 queued 可以被领取
-    const waiting = (decision.facts[0]?.payload as RunWaitingPayload).run
+    const waiting = (decision.facts[1]?.payload as RunWaitingPayload).run
     const nextClaim = claim(
       view({
         runtimes: [runtime({ maxConcurrent: 1 })],
@@ -807,7 +834,8 @@ describe('kernel/decide run.receipt 回执', () => {
       receipt({ ask: [{ title: '确认', options: ['好'] }] }),
     )
 
-    expect((decision.facts[0]?.payload as RunWaitingPayload).run.sessionId).toBe('sess-old')
+    const waiting = (decision.facts[1]?.payload as RunWaitingPayload).run
+    expect(waiting.sessionId).toBe('sess-old')
   })
 
   it('成功且还有下一阶段：产 task.moved 到下一阶段（updatedAt=now）', () => {

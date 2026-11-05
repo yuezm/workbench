@@ -4,10 +4,27 @@
  * - `taskPrompt`：阶段任务提示词，与迁移前 `host/task-effects.buildTaskPrompt` 逐字一致；
  * - `chatPrompt`：对话首轮提示词，与迁移前 `main/ai-workflow/chat.ts` 的 `buildChatPrompt`
  *   逐字一致；`titleFromContent` 也沿用旧实现的文案（首行、24 码点截断加省略号）。
+ * - M4 起两处提示词末尾都追加固定的「回执块」说明（`receiptBlockHint`）；续接轮由
+ *   `answerPrompt`（回答）/ `laterPrompt()`（约时间复查）生成。
  *
- * 提示词只由内核/宿主按模板拼装，事件与消息正文只作为资料段，不进指令段。
+ * 提示词只由内核/宿主按模板拼装，事件与消息正文只作为资料段，不进指令段；
+ * 回执块说明是固定文案，同事实同文本（不含任何外部事件文字）。
  */
-import type { Agent, ChatRole, Message, Task } from '../protocol/entities'
+import type { Agent, Card, ChatRole, Message, Task } from '../protocol/entities'
+
+/**
+ * 回执块说明（D4）：固定文案，告诉智能体可以在最终回复末尾附带一个 ```json 围栏块，
+ * 由执行器解析成回执字段。字段与上限与 `protocol/validate` 的 receipt 校验保持一致。
+ */
+const RECEIPT_BLOCK_HINT: readonly string[] = [
+  '## 回执块（可选）',
+  '需要人拍板、留下不阻塞的通知、关闭旧卡片、约时间复查或派生事件时，在最终回复末尾输出最后一个 ```json 围栏代码块；对象含 ask/notices/resolves/later/events 任一键即按回执块处理，非法块整块忽略、不影响本轮结果。',
+  '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}]}',
+  '上限：每个键最多 100 项、每张卡 options 最多 20 项；title ≤200 字、text ≤2000 字、summary ≤200 字。ask 出现即挂起等回答（全部阻塞卡答完才续接），later 仅在无 ask/notices 时生效。',
+]
+
+/** 回执块说明（确定性文本；阶段任务提示词与聊天首轮提示词末尾共用）。 */
+export const receiptBlockHint = (): string => RECEIPT_BLOCK_HINT.join('\n')
 
 export const taskPrompt = (agent: Agent, task: Task, stageName: string | null): string =>
   [
@@ -15,6 +32,7 @@ export const taskPrompt = (agent: Agent, task: Task, stageName: string | null): 
     `# 任务：${task.title}`,
     task.description,
     stageName ? `# 阶段：${stageName}` : '',
+    receiptBlockHint(),
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -38,7 +56,7 @@ export function titleFromContent(content: string): string {
 
 /**
  * 首轮 prompt：不依赖会话续接时，把 systemPrompt 与完整历史一起带上。
- * 结构：systemPrompt（非空才有） → # 对话记录 → 结尾提示。
+ * 结构：systemPrompt（非空才有） → # 对话记录 → 结尾提示 → 回执块说明。
  * 续接轮不走这里（只发新消息），由 `conversation.send` 决定。
  */
 export function chatPrompt(agent: Agent, messages: readonly Message[]): string {
@@ -50,5 +68,28 @@ export function chatPrompt(agent: Agent, messages: readonly Message[]): string {
     messages.map((message) => `${ROLE_LABEL[message.role]}：${message.content}`).join('\n'),
   )
   parts.push(ANSWER_HINT)
+  parts.push(receiptBlockHint())
   return parts.join('\n\n')
 }
+
+/**
+ * 回答续接提示词（D6）：把本轮已答卡片的问答对按 `createdAt`（同毫秒按 id）升序拼成
+ * 固定文本；同事实同文本，重建 / 重放结果一致。
+ */
+export function answerPrompt(cards: readonly Card[]): string {
+  const sorted = [...cards].sort(
+    (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  )
+  const pairs = sorted.map((card) => {
+    const option = card.optionIndex === null ? undefined : card.options[card.optionIndex]
+    return `- ${card.title}：${option ?? '（未回答）'}`
+  })
+  return ['# 卡片确认结果', '请基于以下人为你选定的答案继续本轮任务：', ...pairs].join('\n')
+}
+
+/** `later` 复查提示词（D7）：固定文案；到点后 run 重新领取执行，不需要重发历史。 */
+export const laterPrompt = (): string =>
+  [
+    '# 稍后复查',
+    '上一轮回执要求稍后复查。请检查当前进展，需要时继续完成本任务；没有可做的事就直接结束本轮。',
+  ].join('\n')

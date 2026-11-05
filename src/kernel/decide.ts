@@ -29,10 +29,11 @@ import type {
   WorkflowWithStages,
 } from '../protocol/entities'
 import type { FactPayload, FactType } from '../protocol/facts'
-import type { Input } from '../protocol/inputs'
+import type { Input, Receipt } from '../protocol/inputs'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, Reason, View } from './types'
 import type { SettledRun } from './run'
-import { chatPrompt, taskPrompt, titleFromContent } from './prompt'
+import { chatPrompt, laterPrompt, taskPrompt, titleFromContent } from './prompt'
+import { answerFacts, cardsFromReceipt, resolveFacts, resumedRun } from './cards'
 import {
   abandonedFacts,
   claimFacts,
@@ -442,6 +443,52 @@ function entryRunFacts(
   return [{ type: 'run.queued', actor, at: now, payload: { run } }]
 }
 
+/** 摘要截断：按码点取前 200 字（与 `protocol/validate` 的 `summary` 上限一致）。 */
+function truncateSummary(summary: string): string {
+  const chars = Array.from(summary)
+  return chars.length > 200 ? chars.slice(0, 200).join('') : summary
+}
+
+/**
+ * 回执派生事件（D8）：M4 只入账、不派活。每条事件一个 `event.received`，
+ * `hops = 父 run.hops + 1`、`originRunId` 是派生出它的 run、`summary` ≤200 字；
+ * `detail` 全文由宿主落资料文件，这里的 `detailRef` 先留 null。
+ * `hops > maxHops` 时只写一条 `event.dropped`（熔断，不派活、不建卡）。
+ */
+function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): FactDraft[] {
+  const events = receipt.events ?? []
+  if (events.length === 0) return []
+  const hops = run.hops + 1
+  return events.map((event) => {
+    const eventId = env.nextId('event')
+    if (hops > env.limits.maxHops) {
+      return {
+        type: 'event.dropped',
+        actor: HOST_SCHEDULER,
+        at: now,
+        payload: { eventId, hops, reason: 'max_hops' },
+      }
+    }
+    return {
+      type: 'event.received',
+      actor: HOST_SCHEDULER,
+      at: now,
+      payload: {
+        eventId,
+        source: event.source,
+        type: event.type,
+        subject: event.subject,
+        summary: truncateSummary(event.summary ?? ''),
+        detailRef: null,
+        link: event.link ?? null,
+        hops,
+        originRunId: run.id,
+        dedupeKey: event.dedupeKey ?? null,
+      },
+    }
+  })
+}
+
 export function decide(view: View, input: Input, now: Iso, env: Environment): Decision {
   const draft = <T extends FactType>(type: T, payload: FactPayload<T>): FactDraft<T> => ({
     type,
@@ -780,6 +827,17 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       return done(facts)
     }
 
+    // ---------- 卡片（M4 审批） ----------
+    case 'card.answer': {
+      // 校验卡片存在 / open / 选项下标 / run waiting，产 card.answered；全部阻塞卡答完才续接
+      return answerFacts(view, input, now, env)
+    }
+
+    case 'card.resolve': {
+      // 手动关闭悬空卡；非 open 幂等零事实，不改变 run 状态
+      return done(resolveFacts(view, input.cardId, 'manual', now))
+    }
+
     // ---------- 运行（宿主内部输入） ----------
     case 'run.claim': {
       const runtime = view.runtimes.get(input.runtimeId)
@@ -824,12 +882,37 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       if (rejection !== null) {
         return done(rejectedReceiptFacts(run, input.receipt, rejection, now, HOST_SCHEDULER))
       }
-      // 回执带 ask：挂起等回答，释放租约与并发位，不落终态（D12）
+      // 先产卡片事实（ask → opened/updated、notices → 信息卡、resolves → resolved），
+      // 再产派生事件；卡片事实排在 run.waiting / 终态事实之前，重建顺序稳定（D5/D8）。
+      const receiptCards = cardsFromReceipt(view, run, input.receipt, now, env)
+      const facts: FactDraft[] = [
+        ...receiptCards.facts,
+        ...eventFacts(run, input.receipt, now, env),
+      ]
+      // 回执带 ask：先建卡再挂起等回答，释放租约与并发位，不落终态（D5/D12）
       if ((input.receipt.ask?.length ?? 0) > 0) {
-        return done(waitingFacts(waitingRun(run, input.receipt), now, HOST_SCHEDULER))
+        facts.push(
+          ...waitingFacts(
+            waitingRun(run, input.receipt),
+            receiptCards.cardIds,
+            now,
+            HOST_SCHEDULER,
+          ),
+        )
+        return done(facts)
+      }
+      // 只有 later（无 ask/notices）时不落终态：回 queued 到点复查，不重建会话（D7）
+      if (input.receipt.later && (input.receipt.notices?.length ?? 0) === 0) {
+        facts.push({
+          type: 'run.queued',
+          actor: HOST_SCHEDULER,
+          at: now,
+          payload: { run: resumedRun(run, laterPrompt(), input.receipt.later) },
+        })
+        return done(facts)
       }
       const settled = settledRun(run, input.receipt, now)
-      const facts: FactDraft[] = [...settlementFacts(settled, now, HOST_SCHEDULER)]
+      facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
       if (run.purpose === 'stage') {
         const transition = stageTransitionFacts(view, settled, now)
         facts.push(...transition)

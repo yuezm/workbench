@@ -14,13 +14,15 @@ import type {
 import type { FactPayload, FactType } from '../../src/protocol/facts'
 import type { HostInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
-import { taskPrompt } from '../../src/kernel/prompt'
+import { receiptBlockHint, taskPrompt } from '../../src/kernel/prompt'
 import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
 const LATER = '2026-01-02T00:00:00.000Z'
 const NOW = '2026-11-04T12:00:00.000Z'
 const ACTOR = { kind: 'owner', via: 'ui' } as const
+/** 阶段任务提示词末尾固定追加的回执块说明（M4 D4）。 */
+const HINT = receiptBlockHint()
 
 const workflow = (over: Partial<Workflow> = {}): Workflow => ({
   id: 'wf-1',
@@ -166,6 +168,7 @@ const view = (seed: Seed = {}): View => ({
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map(),
   messages: new Map(),
+  cards: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
 })
 
@@ -1315,7 +1318,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
             threadContextRef: null,
             queueSeq: 0,
             status: 'queued',
-            prompt: 'sys\n\n# 任务：写计划\n\n# 阶段：待办',
+            prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${HINT}`,
             output: '',
             error: null,
             errorCode: null,
@@ -1425,7 +1428,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       attempt: 0,
       queueSeq: 0,
     })
-    expect(run.prompt).toBe('sys\n\n# 任务：任务\n\n# 阶段：实现')
+    expect(run.prompt).toBe(`sys\n\n# 任务：任务\n\n# 阶段：实现\n\n${HINT}`)
   })
 
   it('task.move 原地（from===to）或已完成任务：不产 run.queued', () => {
@@ -1532,7 +1535,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     expect(moved).toMatchObject({ from: 'st-1', to: 'st-2' })
     const queued = entryRun(decision.facts)
     expect(queued).toMatchObject({ taskId: 't-1', stageId: 'st-2', status: 'queued' })
-    expect(queued.prompt).toBe('sys\n\n# 任务：任务\n\n# 阶段：实现')
+    expect(queued.prompt).toBe(`sys\n\n# 任务：任务\n\n# 阶段：实现\n\n${HINT}`)
     // 进入效果由宿主调度器发起（actor 标明来源）
     expect(decision.facts[2]?.actor).toEqual({ kind: 'host', via: 'scheduler' })
   })
@@ -1690,7 +1693,7 @@ describe('kernel/prompt taskPrompt', () => {
     )
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
-    expect(run.prompt).toBe('# 任务：T\n\n# 阶段：执行')
+    expect(run.prompt).toBe(`# 任务：T\n\n# 阶段：执行\n\n${HINT}`)
   })
 
   it('描述非空时按「智能体 → 任务 → 描述 → 阶段」顺序、两两空行分隔', () => {
@@ -1711,7 +1714,7 @@ describe('kernel/prompt taskPrompt', () => {
     )
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
-    expect(run.prompt).toBe('sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行')
+    expect(run.prompt).toBe(`sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${HINT}`)
   })
 })
 
@@ -1719,7 +1722,7 @@ describe('kernel/prompt taskPrompt（无阶段名）', () => {
   it('stageName 为 null 时不拼阶段段', () => {
     expect(
       taskPrompt(agent({ systemPrompt: 'sys' }), task({ title: 'T', description: 'd' }), null),
-    ).toBe('sys\n\n# 任务：T\n\nd')
+    ).toBe(`sys\n\n# 任务：T\n\nd\n\n${HINT}`)
   })
 })
 

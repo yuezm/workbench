@@ -206,8 +206,8 @@ export function settlementFacts(
 
 /**
  * 回执带 `ask[]`：挂起等回答（D12）。释放租约与超时时刻（并发位由 `occupiedSlots`
- * 只数 `running` 自然让出）；会话 id 记在 run 上供续接。`cardIds` 在 M2 恒为空，
- * 卡片由 M4 投递后补。
+ * 只数 `running` 自然让出）；会话 id 记在 run 上供续接。`cardIds` 是本次 `ask` 产生的
+ * 卡片 id（M4 由 `kernel/cards.ts` 生成后传入），信息卡不进这里。
  */
 export function waitingRun(run: RunRow, receipt: Receipt): RunRow & { status: 'waiting' } {
   return {
@@ -222,10 +222,11 @@ export function waitingRun(run: RunRow, receipt: Receipt): RunRow & { status: 'w
 
 export function waitingFacts(
   run: RunRow & { status: 'waiting' },
+  cardIds: readonly Id[],
   now: Iso,
   actor: Actor,
 ): FactDraft<'run.waiting'>[] {
-  return [{ type: 'run.waiting', actor, at: now, payload: { run, cardIds: [] } }]
+  return [{ type: 'run.waiting', actor, at: now, payload: { run, cardIds: [...cardIds] } }]
 }
 
 // ---------- 时间与宿主兜底 ----------

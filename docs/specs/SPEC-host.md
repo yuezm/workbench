@@ -15,18 +15,21 @@ src/
 │   ├── store/       # 事实追加 + 投影读写 + 重建 + 视图装载（按 viewSpec 切片）
 │   ├── clock.ts     # 唯一 setInterval/setTimeout：按 nextWakeAt 唤醒
 │   ├── effects.ts   # afterCommit：把事实分发给调度器/通道/窗口
+│   ├── channels.ts  # 通道 hub：注册/启停/分发/补投（卡片投递）
 │   ├── scheduler.ts # 按运行时领取可跑的 run → 调用执行器插件 → 转交回执
 │   ├── executor.ts  # 执行器插件 → ExecutorPort 包装（终态归一、续接重试）
 │   ├── executor-registry.ts # 按 runtime.executorKey 取插件端口，组装 SchedulerExecutors
-│   ├── sdk-host.ts  # 插件能力面原件（spawn/解析/杀树/扫描目录/时钟/日志/会话根）
+│   ├── sdk-host.ts  # 插件能力面原件（spawn/解析/杀树/扫描目录/时钟/日志/会话根/notify）
 │   ├── thread-context.ts # 从事实派生线程上下文（≤6000 字，确定性截断）
 │   ├── reconcile.ts # 启动对账：租约过期、残留 running、未完成对话轮次
 │   ├── process.ts   # spawn、行读取、进程树终止（沿用现有实现）
 │   ├── artifacts.ts # 事件资料落盘 artifacts/<eventId>.md
-│   ├── notify.ts    # Electron Notification（channel:desktop 复用）
 │   ├── plugins/     # 插件加载、配置、能力授权
 │   ├── ipc.ts       # dispatch / query / subscribe 三个入口
 │   └── tray.ts, window.ts
+├── main/
+│   ├── index.ts     # 装配根：单实例、开库、插件清单注入、通道启停、窗口、IPC
+│   └── notify.ts    # Electron Notification（sdk.notify 原件；host 不 import electron）
 ├── preload/index.ts # contextBridge：三个动词
 ├── shared/          # IPC 契约类型（由 kernel/protocol 派生）
 └── renderer/src/
@@ -36,18 +39,19 @@ src/
 
 ## 宿主职责
 
-| 模块                | 职责                                                                                                                                                       |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `boot`              | 单实例锁、开库、校验指纹并重建、装配插件、启动 sources/channels、挂单定时器、建窗口与托盘                                                                  |
-| `store`             | 每个输入：按 `viewSpec` 装载切片 → `decide` → 事务内追加事实 + 应用 `project` 变更 → 更新 `projection_meta`                                                |
-| `clock`             | 只挂一个定时器：`nextWakeAt` 到点发 `clock.tick`；窗口不可见时不降频（托盘常驻）                                                                           |
-| `effects`           | 提交后分发：新 `run.queued` 唤醒调度器；新/更新卡片通知通道；事实增量批量推 renderer                                                                       |
-| `scheduler`         | 按运行时（`maxConcurrent`）向内核 `run.claim`，领取后按 `runtime.executorKey` 调执行器插件 `run(turn)`；回执转交内核；不自己判断派给谁；线程串行由内核保证 |
-| `executor-registry` | 按 `runtime.executorKey` 从装配根注入的插件清单取执行器端口；未知 key 返回 `null`（不猜、不降级），由调度器落兜底终态                                      |
-| `thread-context`    | 拼提示词前按事实派生「线程上下文」：元信息、任务、最近 3 条运行摘要、未决卡片、最近 10 条笔记、资料清单；同事实必得同文本，≤6000 字                        |
-| `reconcile`         | 启动与定时对账：`claimed` 超租约 → 先终止残留子进程再 `run.abandoned`；`waiting` 保留卡片；中断的聊天轮次落错误消息                                        |
-| `artifacts`         | 事件资料、大输出尾部；路径 `userData/artifacts/<eventId>.md`，保留 30 天                                                                                   |
-| `plugins`           | 注册表装载、配置读写、能力授权、失败隔离（插件异常不拖垮宿主）                                                                                             |
+| 模块                | 职责                                                                                                                                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `boot`              | 单实例锁、开库、校验指纹并重建、装配插件、启动 sources/channels、挂单定时器、建窗口与托盘                                                                                                                                                                    |
+| `store`             | 每个输入：按 `viewSpec` 装载切片 → `decide` → 事务内追加事实 + 应用 `project` 变更 → 更新 `projection_meta`                                                                                                                                                  |
+| `clock`             | 只挂一个定时器：`nextWakeAt` 到点发 `clock.tick`；窗口不可见时不降频（托盘常驻）                                                                                                                                                                             |
+| `effects`           | 提交后分发：新 `run.queued` 唤醒调度器；`card.opened/updated` 交给通道 hub（fire-and-forget、异常隔离）；事实增量批量推 renderer                                                                                                                             |
+| `channels`          | 通道 hub（M4）：按 `plugins/registry.ts` 的 `channels` 顺序启停；分发 `card.opened/updated`、启动补投 `delivery='pending'` 的 open 卡、承接 `delivered` / `answer` 回调；首个成功回 `card.delivered{ref}`，全失败回 `card.delivery_failed`；投递不阻塞写路径 |
+| `scheduler`         | 按运行时（`maxConcurrent`）向内核 `run.claim`，领取后按 `runtime.executorKey` 调执行器插件 `run(turn)`；回执转交内核；不自己判断派给谁；线程串行由内核保证                                                                                                   |
+| `executor-registry` | 按 `runtime.executorKey` 从装配根注入的插件清单取执行器端口；未知 key 返回 `null`（不猜、不降级），由调度器落兜底终态                                                                                                                                        |
+| `thread-context`    | 拼提示词前按事实派生「线程上下文」：元信息、任务、最近 3 条运行摘要、未决卡片、最近 10 条笔记、资料清单；同事实必得同文本，≤6000 字                                                                                                                          |
+| `reconcile`         | 启动与定时对账：`claimed` 超租约 → 先终止残留子进程再 `run.abandoned`；`waiting` 保留卡片；`waiting` 且无 open 卡的历史 run 补 `run.host_settled{cancelled}`（D13）；中断的聊天轮次落错误消息                                                                |
+| `artifacts`         | 事件资料、大输出尾部；路径 `userData/artifacts/<eventId>.md`，保留 30 天                                                                                                                                                                                     |
+| `plugins`           | 注册表装载、配置读写、能力授权、失败隔离（插件异常不拖垮宿主）                                                                                                                                                                                               |
 
 - **未知执行器**：运行时配置的 `executorKey` 在插件注册表里找不到时，调度器不 spawn、不改配置，直接 `run.host_settled` 落 `failed` + `runtime_missing`（文案带 key 便于定位）；不新增 `errorCode`，取值仍是 10 个。
 - **执行器清单来源**：宿主不 import 具体插件实现；装配根（`src/main`）把 `src/plugins/registry.ts` 的静态清单注入 `executor-registry` 与 IPC，测试可注入假插件。
@@ -70,7 +74,7 @@ export interface WorkbenchApi {
   dispatch(command: Command): Promise<CommandResult>
   query<T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>>
   subscribe(handler: (event: KernelEvent) => void): () => void
-  /** 兼容旧契约，M5 后由 channel:desktop 接管 */
+  /** shell 的通用通知（pomodoro 等 app 用）；ai-workflow 卡片通知走 channel:desktop 的 sdk.notify */
   notify(title: string, body?: string): void
 }
 
@@ -81,8 +85,9 @@ export type KernelEvent =
 ```
 
 - 三个动词之外不新增 RPC 方法；app 插件的命令统一走 `dispatch`，命名 `app.<id>.<action>`。**M3 已登记的例外**：ai-workflow 命名空间新增只读方法 `runtimes.executors()`，返回 `[{ key, label, command, profile }]`（来自插件注册表，顺序即注册表顺序），只读、不写库；具名方法的收敛留 M5。
+- **M4 已登记的例外（ai-workflow 命名空间）**：`cards.open()` 读取 `cards.open` 视图（全部 `status='open'` 的卡，按 `createdAt` 升序；顶部待审批条用）与 `cards.answer(cardId, optionIndex)`（宿主生成 `commandId` 发 `card.answer`；重复回答 / 越界 / 已关闭由内核 `reject`，桥接返回可读错误文案）。`preload/index.ts` 与 `src/shared/ai-workflow-api.ts` 同步方法；M5 迁 `kernelStore` 时替换该读路径。
 - 每个命令在宿主入口用 `protocol/validate` 校验，renderer 传入的是不可信数据；命令带 `commandId`，重复提交返回原结果。
-- 视图 id 固定清单（`src/protocol/views.ts`）：`workflows.all`、`agents.all`、`runtimes.all`、`runtimes.workloads`、`tasks.byWorkflow`、`task.byId`、`runs.active-by-task`、`runs.active-by-conversation`、`runs.byTask`、`run.byId`、`run.events`、`run.last-event-seq`、`runs.stale-chat`、`conversations.all`、`messages.byConversation`。**`runtimes.detect` 不是视图**，是只读方法（走插件注册表汇总，不写库、不发 changed）；其余待迁移视图随 M5 扩展。
+- 视图 id 固定清单（`src/protocol/views.ts`）：`workflows.all`、`agents.all`、`runtimes.all`、`runtimes.workloads`、`tasks.byWorkflow`、`task.byId`、`runs.active-by-task`、`runs.active-by-conversation`、`runs.byTask`、`run.byId`、`run.events`、`run.last-event-seq`、`runs.stale-chat`、`conversations.all`、`messages.byConversation`、`cards.open`、`cards.byRun`。**`runtimes.detect` 不是视图**，是只读方法（走插件注册表汇总，不写库、不发 changed）；其余待迁移视图随 M5 扩展。
 - 续传顺序：窗口加载时**先 `subscribe` 并缓冲**，再取快照，最后回放缓冲中 `seq > 快照 seq` 的批次；批次上限 500 条或 16 ms，取先到者。
 
 ## renderer
@@ -95,9 +100,9 @@ export type KernelEvent =
 
 ## 启动与关闭
 
-启动：单实例锁 → 开库与 PRAGMA（含旧库 `runs` / `runtimes` 一次性结构升级）→ 存量导入（v2 老库第一次启动）→ 校验 `projection_meta`（不匹配或 `seq` 落后则从事实重建）→ 构造插件能力面与执行器注册表（静态清单，注入 IPC 与调度器）→ 对账 → 启动 sources/channels 与调度器 → 挂定时器 → 建窗口/托盘 → 注册 IPC → 通知 renderer 取快照。
+启动：单实例锁 → 开库与 PRAGMA（含旧库 `runs` / `runtimes` 一次性结构升级）→ 存量导入（v2 老库第一次启动）→ 校验 `projection_meta`（不匹配或 `seq` 落后则从事实重建）→ 构造插件能力面与执行器注册表（静态清单，注入 IPC 与调度器）→ 对账 → 构造 effects → **启动通道（M4：`startAll`，补投 `pending` 卡片）** → 启动 sources 与调度器 → 挂定时器 → 建窗口/托盘 → 注册 IPC → 通知 renderer 取快照。
 
-关闭：停 sources/channels → 终止在跑子进程（cancel → SIGTERM → SIGKILL）→ 关闭 DB → 退出。窗口关闭只隐藏到托盘，不触发关闭流程。
+关闭：停 sources/channels（abort + best-effort dispose）→ 终止在跑子进程（cancel → SIGTERM → SIGKILL）→ 关闭 DB → 退出。窗口关闭只隐藏到托盘，不触发关闭流程。
 
 ## 错误与诊断
 
@@ -116,9 +121,10 @@ export type KernelEvent =
 ## 测试
 
 - **store：** 内存 SQLite 测「决策 → 事实 → 投影」原子性、并发冲突重试、按 `viewSpec` 装载切片、重建等价。
-- **effects：** 提交后分发的订阅者隔离（一个通道抛错不影响其它）。
-- **reconcile：** 假时钟测租约过期回收、残留子进程终止、attempts 递增、退避、超限开卡片。
-- **IPC：** 命令校验拒绝非法载荷；`commandId` 幂等；订阅先缓冲后回放；视图参数越权拒绝；`runtimes.executors` 只读返回注册表清单，未知 `executorKey` 给可读错误。
+- **effects：** 提交后分发的订阅者隔离（一个通道抛错不影响其它）；`card.opened/updated` 后通道 hub 被调用，且写路径不被慢通道拖住。
+- **channels：** 假通道覆盖「按 registry 顺序分发、首个成功回 `card.delivered`、全失败回 `card.delivery_failed`、只补投 `pending`、通道超时/抛错隔离、`answer` 发 `card.answer{via:'channel'}`」。
+- **reconcile：** 假时钟测租约过期回收、残留子进程终止、attempts 递增、退避；`waiting` 有卡保留、无卡补取消（D13）。
+- **IPC：** 命令校验拒绝非法载荷；`commandId` 幂等；订阅先缓冲后回放；视图参数越权拒绝；`runtimes.executors` 只读返回注册表清单，未知 `executorKey` 给可读错误；`cards.open` / `cards.answer` 的桥接与拒绝文案。
 - **renderer：** kernelStore 失效与重取、插件槽按清单渲染、聊天流合并与结束。
 - **thread-context：** 同一事实集重复派生文本全等；超长按时间倒序截断且标注；笔记/事件正文只作资料段出现，不混进指令段。
 - **E2E：** 现有 Playwright 关键路径 + 一条「审批挂起 → 回答 → 续接跑完」。

@@ -71,7 +71,7 @@ Check:    pnpm check           # typecheck + lint + test:coverage（提交前必
 
 ## Project Structure
 
-```
+````
 src/renderer/src/apps/ai-workflow/
 ├── index.tsx                  # AppDefinition（aiWorkflowApp：id/name/icon/component）
 ├── AiWorkflowPage.tsx         # 布局：工作台 / 设置 双视图（见「界面结构」）
@@ -99,37 +99,47 @@ src/renderer/src/apps/ai-workflow/
     ├── RuntimeDialog.tsx      # 新建/编辑运行时：执行器选择/命令/profile/参数模板/权限模式/模型/推理强度/工作目录/并发/启用
     ├── AgentManager.tsx       # 智能体配置页：已配置清单
     ├── AgentDialog.tsx        # 新建智能体（居中模态）
+    ├── ApprovalBar.tsx        # 顶部「待审批」条：open 卡标题/选项，点击即回答（M4）
     └── RunLog.tsx             # 运行记录：状态/耗时/退出码/errorCode/用量 + 事件流（运行中轮询增量）
 
 src/main/ai-workflow/
-└── ipc.ts                     # 注册 ai-workflow IPC handlers（读投影 / 写走 effects.dispatch；执行器 key 与默认值按插件 manifest 补齐）
+└── ipc.ts                     # 注册 ai-workflow IPC handlers（读投影 / 写走 effects.dispatch；执行器 key 与默认值按插件 manifest 补齐；M4 卡片读写）
 
-src/plugins/                   # M3：执行器插件（新增协议 = 新目录 + registry 一行）
-├── registry.ts                # 内置执行器静态清单（executors，顺序即 UI/detect 顺序）+ detectAll 汇总
+src/main/
+├── index.ts                   # 装配根：通道启停、退出 dispose
+└── notify.ts                  # Electron Notification（sdk.notify 原件）
+
+src/plugins/                   # M3：执行器插件（新增协议 = 新目录 + registry 一行）；M4：通道插件
+├── registry.ts                # 内置插件静态清单（executors / channels）+ detectAll 汇总
 ├── shared/cli-catalog.ts      # 本机 agent CLI 候选清单（纯数据，顺序即输出顺序）
 ├── shared/argv.ts             # 参数模板解析与占位符展开（纯函数）
-└── executors/
-    ├── dsh/                   # dsh stdio 协议：帧解析、探测、模型目录、执行与终止、detect
-    └── command/               # 通用命令 + argsTemplate（不给 detect/probe）
+├── shared/receipt-block.ts    # 回执块解析（最后一个 ```json 围栏块；纯函数）
+├── executors/
+│   ├── dsh/                   # dsh stdio 协议：帧解析、探测、模型目录、执行与终止、detect
+│   └── command/               # 通用命令 + argsTemplate（不给 detect/probe）
+└── channels/
+    ├── in-app/                # 默认通道：投影即送达（pending → delivered{ref:'in-app'}）
+    └── desktop/               # 系统通知：sdk.notify(title, body)
 
-src/sdk/                       # M3：插件能力面（log / now / paths / config / process）
+src/sdk/                       # 插件能力面（log / now / paths / config / process / notify）
 
 src/host/                      # 账本 + 投影 + 调度（M2；内核实现以外的宿主层）
 ├── db.ts                      # node:sqlite 打开、PRAGMA、旧库 runs / runtimes 一次性升级
-├── schema.ts                  # 九张投影表 + facts / projection_meta / process_registry
-├── sdk-host.ts                # 插件能力面原件（spawn / 解析 / 杀树 / 扫描目录 / 时钟 / 日志 / 会话根）
+├── schema.ts                  # 十张投影表 + facts / projection_meta / process_registry
+├── sdk-host.ts                # 插件能力面原件（spawn / 解析 / 杀树 / 扫描目录 / 时钟 / 日志 / 会话根 / notify）
 ├── executor-registry.ts       # 按 runtime.executorKey 取插件端口（未知 key 返回 null）
 ├── store/                     # 事实追加、投影应用与重建、视图装载与查询、存量导入
 ├── scheduler.ts               # 按运行时领取 → 执行器端口 → 帧批量入账 / 回执 / 取消时序
 ├── clock.ts                   # 唯一 setTimeout：nextWakeAt 到点 tick；run 状态变化后 rearm
-├── effects.ts                 # 提交后分发：run.queued 唤醒调度器、变更广播
+├── effects.ts                 # 提交后分发：run.queued 唤醒调度器、card.* 交给通道 hub、变更广播
+├── channels.ts                # 通道 hub：注册/启停/分发/补投（M4）
 ├── executor.ts                # 执行器插件 → ExecutorPort 包装：状态归一、续接被拒重试
 ├── process.ts                 # 进程树终止 / 行读取 / 输出尾部
 ├── process-registry.ts        # 宿主私有进程登记（崩溃对账用）
-└── reconcile.ts               # 启动对账：杀残留进程树、回收超租约、补聊天错误消息
+└── reconcile.ts               # 启动对账：杀残留进程树、回收超租约、补聊天错误消息、无卡 waiting 兜底
 
 src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用）
-```
+````
 
 - `src/preload/index.ts` 增加 `window.aiWorkflow` 暴露（从 `ai-workflow-api.ts` 取类型）；`src/renderer/src/shared/api.d.ts` 增加全局声明。
 - 注册：`src/renderer/src/shell/registry.ts` 加一行 `aiWorkflowApp`（外壳零改动）。
@@ -149,14 +159,17 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `run_events`      | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                                                                                                                  | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段；纯追加                                                                                                                                                                            |
 | `conversations`   | id, title, agent_id → agents(RESTRICT), session_id, created_at, updated_at                                                                                                                                                                                                                                                   | 一段独立对话：绑定智能体；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                                                                                                                |
 | `messages`        | id, conversation_id → conversations(CASCADE), role, content, error, created_at                                                                                                                                                                                                                                               | `role` = `user`\|`assistant`；助手消息的 `error` 记录失败原因（非零退出/超时/取消）                                                                                                                                                                               |
+| `cards`           | id, run_id → runs(CASCADE), task_id?, conversation_id?, title, text, options_json, key, version, status, delivery, delivery_ref, option_index, answered_by, answered_at, created_at, updated_at                                                                                                                              | M4 卡片投影：`status` = `open`\|`answered`\|`resolved`；`delivery` = `pending`\|`delivered`\|`failed`（单列 = 已送达至少一个通道）；投递按 `(id, version)` 去重；正文只作通知/平台 API 参数                                                                       |
 
-> M2 起九张业务表全部是**事实投影**（另有 `facts` 事实日志、`projection_meta` 指纹/seq、宿主私有 `process_registry`）：写路径只有「追加事实 + 应用投影」，`INSERT/UPDATE/DELETE` 集中在 `src/host/store/projection-apply.ts`；读路径走投影视图（`store.query`）。旧 `chat_conversations` / `chat_messages` 在首次启动时迁成导入事实后删除。
+> M2 起十张业务表全部是**事实投影**（另有 `facts` 事实日志、`projection_meta` 指纹/seq、宿主私有 `process_registry`）：写路径只有「追加事实 + 应用投影」，`INSERT/UPDATE/DELETE` 集中在 `src/host/store/projection-apply.ts`；读路径走投影视图（`store.query`）。旧 `chat_conversations` / `chat_messages` 在首次启动时迁成导入事实后删除。
 
 外键约束开启（`PRAGMA foreign_keys = ON`）。删除工作流/任务由内核显式产 `run.removed` / `stage.deleted` / `task.removed` 事实（不依赖 SQL 级联，重建才等价）；删除被引用的运行时/智能体前先校验或拒绝（见 Boundaries）；运行时被删后 `runs.runtime_id` 置空、历史 run 保留。
 
 **迁移（v1 → v2，`user_version` 1 → 2）：** 按 SQLite 12-step 重建 `runtimes` / `runs` / `chat_conversations`（v2 删掉了 v1 的 `kind` / `args_template` / `prompt_mode`，且新列带 CHECK），新增 `run_events`，最后写 `PRAGMA user_version = 2`。**已有数据保留**：旧运行时按 v2 默认值补齐（`protocol_family=dsh`、`profile=multica`、`permission_mode=workspace-write`、`max_concurrent=1`；其中 `protocol_family` 是旧字段，仅迁移归一用，M3 起由 `executor_key` 取代），旧 run 的 `runtime_id`/`session_id`/`usage_json`/`duration_ms` 为 NULL、`error` 非空的失败 run 归 `exit_nonzero`，旧对话 `session_id` 为 NULL。迁移期间临时关闭外键，失败回滚。不做 v1 兼容读取。**M2 升级：** 旧 `runs` 表缺调度列时首启一次性物理重建；v2 存量（含旧聊天表）由 `src/host/store/import.ts` 写成 `snapshot.imported` 导入根后重建投影。该兼容层 M3 **不删**（真实库仍是 v2 格式，首启必须靠它导入），删除条件与顺序作为 M3 之后的独立清理任务。
 
 **M3 升级（格式指纹换新，`user_version` 仍为 2）：** `runtimes` 去掉 `protocol_family`（旧字段，仅迁移归一用；该列被 CHECK 引用，SQLite 不能 `DROP COLUMN`）、加 `executor_key`（NOT NULL，无 DEFAULT）与 `args_template`（DEFAULT `''`；语义从 v1 的空格分隔参数串改为 JSON 数组文本），按 12-step 物理重建：外键 OFF → 建临时表 → 拷贝旧行（旧协议族按「旧值 = 执行器键」回填、`args_template` 补空串）→ 删旧表 → 改名。`KERNEL_VERSION` 升到 `m3.0.0`，与 DDL 变化双触发 → **首启全量重建投影**；重建 fold 的是历史事实 payload，老 `runtime.*` payload 缺 `executorKey`，由 `normalizeRuntime` 归一（缺 `executorKey` → 取旧 `protocolFamily`，当前仅 `dsh`；`argsTemplate` 补空串）。回滚只能恢复升级前的 DB 备份。
+
+**M4 升级（格式指纹换新，`user_version` 仍为 2）：** 新增 `cards` 投影表（DDL 进投影指纹）并把 `KERNEL_VERSION` 升到 `m4.0.0` → 首启全量重建投影，重建后 `cards` 为空（v2 / M3 存量没有卡片数据，不导入）。历史 `waiting` run 没有对应 `card.*` 事实，重建后无卡可答：启动对账对「`waiting` 且无 open 卡」的 run 补 `run.host_settled{cancelled}`（reason 写明卡片缺失），避免永久「执行中」；有 open 卡的保持等待。
 
 ## 阶段状态机（核心规则）
 
@@ -324,6 +337,15 @@ export interface DetectedRuntime {
 - 运行时不存在 / 已停用时不派发，run 直接 `failed` 并记 `runtime_missing` / `runtime_disabled`；配置引用了未注册的 `executorKey` 同样落 `runtime_missing`（文案 `执行器插件未注册: <key>`），不新增 `errorCode`。
 - `src/host/scheduler.ts` 负责：领取（内核按 `notBefore`/`queueSeq` 决定顺序与并发窗口）、调执行器端口跑一轮、帧批量入账、回执转交内核、取消时序（abort → 宽限 → 强杀 → 兜底终态）；租约/超时/退避由唯一 `clock.tick` 驱动。终态后由内核产 `RUN_SUCCEEDED`/`RUN_FAILED` 的阶段流转事实；取消的 run 不推进阶段。
 
+### 审批与等待（M4）
+
+- 执行器回执带 `ask[]` 时，内核为每条产 `card.opened`（`version=1`、`delivery='pending'`），run 进 `waiting` 并释放租约与并发位：**等待期无子进程、不耗 Token**，会话 id 留在 run 上。
+- 通道投递后回报 `card.delivered`（单列 `delivery`）；重启只补投 `pending` 的卡；失败只落 `card.delivery_failed`，卡片仍 `open`。
+- 回答走 `card.answer` 命令（`commandId` 幂等）：内核校验卡片 `open`、下标在 `options` 内、run 为 `waiting`，产 `card.answered`；**同一 run 的全部 open 卡都答完**才回 `queued`（同 run、`turn+1`、`resumeSessionId = 上一轮 sessionId`、`notBefore=null`），续接同一会话。未答完保持 `waiting`，悬空卡可 `card.resolve` 关闭。
+- 回执 `later`（无 `ask`/`notices`）→ run 回 `queued` 且 `notBefore=later`，由现有 `next-wake` 到点复查；`ask` 优先于 `later`。
+- 回执 `notices` → 空选项信息卡（不阻塞 run）；`resolves` → 关闭同 run 的 open 卡（`reason='agent'`）。`events` → `event.received`（`hops=父+1`）或 `event.dropped`，M4 只入账、不派活。
+- 「执行中」仍 = 存在 `queued`/`running`/`waiting` run；`waiting` 不占并发位、不参与 `nextWave` 的领取。
+
 ## IPC 契约（`window.aiWorkflow`）
 
 契约定义在 `src/shared/ai-workflow-api.ts`，preload 原样透传，renderer 禁止直接 import electron/fs/child_process。
@@ -368,6 +390,13 @@ export interface AiWorkflowApi {
     listByTask(taskId: string): Promise<Run[]>
     /** 该 run 的事件流（运行中可轮询增量） */
     events(runId: string): Promise<RunEvent[]>
+  }
+  /** M4 卡片（审批）：读 open 卡 + 回答；回答失败抛可读错误（重复/越界/已关闭） */
+  cards: {
+    /** 全部 open 卡，按 createdAt 升序（顶部待审批条） */
+    open(): Promise<Card[]>
+    /** 回答一张卡：宿主生成 commandId 发 card.answer；成功后 changed 推送 */
+    answer(cardId: string, optionIndex: number): Promise<void>
   }
   chat: {
     listConversations(): Promise<ChatConversation[]>

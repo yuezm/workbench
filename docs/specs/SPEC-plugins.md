@@ -48,9 +48,22 @@ export const executors: ReadonlyArray<ExecutorRegistryEntry>
 
 /** 按 key 取注册项；未知 key 抛可读错误（调度器把「未注册」落成兜底终态） */
 export function executorById(key: string): ExecutorRegistryEntry
+
+/** 通道清单（M4）：数组顺序即投递顺序（in-app 在前、desktop 在后） */
+export interface ChannelRegistryEntry {
+  key: string // 通道键 = manifest.id；写进 card.delivered.ref / cards.deliveryRef
+  label: string
+  manifest: PluginManifest
+  plugin: ChannelPlugin
+}
+
+export const channels: ReadonlyArray<ChannelRegistryEntry>
+
+/** 按 key 取通道；未知 key 抛可读错误（装配时不启动未知通道） */
+export function channelById(key: string): ChannelRegistryEntry
 ```
 
-- **顺序即契约**：`executors` 的数组顺序决定运行时表单的下拉顺序、`runtimes.executors()` 的返回顺序与 detect 的汇总顺序；不按字母、不按装载顺序重排。
+- **顺序即契约**：`executors` 的数组顺序决定运行时表单的下拉顺序、`runtimes.executors()` 的返回顺序与 detect 的汇总顺序；`channels` 的数组顺序决定 `card.opened/updated` 的分发与补投顺序。不按字母、不按装载顺序重排。
 - **只有装配根 import 本文件**：`src/main` 把 `executors` 清单注入 `host/executor-registry.ts`（按 key 建执行器端口）与 IPC；`host` 只接收清单，不 import 具体插件实现。
 - 内置插件编译期进入 `registry.ts`；新增插件 = 新增目录 + registry 一行，内核与宿主零改动。
 - 目录内固定文件名：`manifest.ts`（元数据）、`index.ts`（实现）；一个有副作用的插件只暴露 `start` 或 `run`。
@@ -58,15 +71,17 @@ export function executorById(key: string): ExecutorRegistryEntry
 
 ## SDK 与能力
 
-插件不能 import 宿主内部实现；它需要的副作用全部由 `sdk` 注入。M3 落地的是**执行器所需的最小面**（`src/sdk/types.ts` 定义、`src/host/sdk-host.ts` 提供原件、`src/sdk/index.ts` 的 `createSdk` 按 manifest 做能力门控）：
+插件不能 import 宿主内部实现；它需要的副作用全部由 `sdk` 注入。M3 落地执行器所需的最小面，M4 增加通道所需的 `notify`（`src/sdk/types.ts` 定义、`src/host/sdk-host.ts` 提供原件、`src/sdk/index.ts` 的 `createSdk` 按 manifest 做能力门控）：
 
 ```ts
-// src/sdk/types.ts —— 宿主注入给插件的全部能力（M3）
+// src/sdk/types.ts —— 宿主注入给插件的全部能力（M4）
 export interface Sdk {
   log(line: string): void // 宿主加插件 id 前缀；不记 prompt 全文
   now(): number // 毫秒；ISO 由回执/事实载体决定
   paths: { sessionRoot: string | null } // 协议会话持久化目录
   config<T>(): T // 插件自有配置（M3 无消费者，返回默认值/空对象）
+  /** 系统通知：只有 manifest 声明 capabilities: ['notify'] 才拿到，否则访问即抛 capability_not_declared */
+  notify(title: string, body: string): void
   process: {
     // 只有 manifest 声明 capabilities: ['spawn'] 才拿到，否则访问即抛 capability_not_declared
     spawn(command: string, args: string[], options: SpawnOptions): Spawned
@@ -79,7 +94,9 @@ export interface Sdk {
 ```
 
 - `capabilities` 是**授权声明**：v1 内置插件全部可信，按声明做静态检查（ESLint 边界 + 源码扫描 + `createSdk` 运行期门控）；外部插件在 M7 按声明逐次授权。
-- M3 **不提供** `fs.read` / `fs.write` / `net` / `emit`：执行器只能经 `ExecutorIO` 回报；能力面随 M4（source/channel）与 M7（外部插件）另立任务扩展，SPEC 不提前承诺。
+- `notify` 的宿主原件是 `src/main/notify.ts`（Electron `Notification`），经 `createSdkHost` 注入；`src/host/**` 不 import electron，`host/notify.ts` 这个文件名不存在（refactor-plan 的旧口径已更正）。
+- `notify(title, body)` 的标题与正文**只作参数**：不拼进命令行、脚本、HTML 或模板字符串；卡片正文同理（见「channel」）。
+- M4 **不提供** `fs.read` / `fs.write` / `net` / `emit`：执行器只能经 `ExecutorIO` 回报、通道只能经 `ChannelContext` 回报；能力面随 M7（外部插件）另立任务扩展，SPEC 不提前承诺。
 - 子进程环境由宿主构造完整基线交给 `process.spawn`，插件拿不到 `process.env` 本身；白名单收紧随外部插件（M7）另立任务。
 
 ## Manifest
@@ -232,29 +249,61 @@ export interface Receipt {
 **回执与执行约定**：
 
 - 回执必须原样回传 `Turn` 里的 `leaseId` 与 `turn`；内核据此拒绝迟到尝试的写入（见 SPEC-kernel「调度」）。
-- 回执的 `ask / notices / resolves / later / events` 与 autoloop 的回执块语义一致；解析失败时**只重写最后一条回复**，不重做业务，重写上限 2 次。
+- **回执块格式（M4 唯一口径）**：执行器取自己最终输出里**最后一个 ```json 围栏块**；该块解析成 JSON 对象后，**只要含 `ask / notices / resolves / later / events` 任一键**才算回执块，未知键忽略。示例：
+
+  ```json
+  {
+    "ask": [{ "title": "选一个", "text": "用哪个方案？", "options": ["A", "B"], "key": "plan" }],
+    "notices": ["已完成依赖安装"],
+    "resolves": ["card-0"],
+    "later": "2026-11-06T09:00:00.000Z",
+    "events": [
+      { "source": "agent", "type": "issues.opened", "subject": "issue-1", "summary": "发现新问题" }
+    ]
+  }
+  ```
+
+- **解析位置**：解析器是纯函数 `src/plugins/shared/receipt-block.ts`；`dsh` 执行器从 `result` 帧的 `output` 解析，`command` 执行器从 stdout 解析。解析结果只填 `Receipt` 的五个字段，**不改 `output` 原文、不改终态、不抛错**。
+- **解析失败不生效**：非法 JSON、非对象、五键全无、字段校验不过（`ask` 标题/选项超限、`later` 非 ISO、`events` 形状非法等）→ 整个块忽略，不产这些字段；终态与其他字段照常落库。SPEC 原「解析失败只重写最后一条回复、上限 2 次」需要额外 execute 帧与模型调用，**重写机制留 M6**（D15 已知边界），M4 不做。
+- 回执的 `ask / notices / resolves / later / events` 到内核事实的映射见 SPEC-kernel「审批」与「事实目录」。
 - **提示词不拼命令行**：`command` 执行器把 `runtime.argsTemplate`（JSON 数组文本，≤20 项、单项 ≤500 字符）逐项展开成 argv，占位符白名单 `{model}` / `{effort}` / `{cwd}` / `{context}` / `{prompt}`；模板含 `{prompt}` 时提示词替换成独立 argv 元素、不再写 stdin，否则只经 stdin 传入。Windows 下 `.cmd`/`.bat` 固定包装成 `cmd.exe /c <脚本> <参数...>`、`shell:false`，不做 shell 字符串拼接。
 - 终态归一、`errorCode` 取值、取消时序沿用 `SPEC-ai-workflow.md`，不变。
 
 ### channel
 
 ```ts
+// src/protocol/channels.ts
 export interface ChannelPlugin {
   start(ctx: ChannelContext): Promise<() => void>
 }
 
 export interface ChannelContext {
-  sdk: Sdk
-  onCard(handler: (card: CardView) => void): () => void
+  /** 通道所需的能力子集（log / now / notify）；`src/sdk` 的 `Sdk` 结构上满足它。
+   *  protocol 不反向 import sdk（依赖方向 plugins → sdk → protocol）。 */
+  sdk: ChannelSdk
+  /** 订阅卡片投递（宿主按 registry 顺序分发 card.opened / card.updated）；返回退订函数 */
+  onCard(handler: (card: Card) => void): () => void
+  /** 回报「已送达至少一个通道」；ref 写进 cards.deliveryRef 与 card.delivered 的审计字段 */
   delivered(cardId: Id, version: number, ref: string): Promise<void>
-  answer(cardId: Id, optionIndex: number, by: Actor): Promise<void>
+  /** 通道侧回答：经宿主发 card.answer（via='channel'）；被内核拒绝时 Promise reject */
+  answer(cardId: Id, optionIndex: number): Promise<void>
+  /** 宿主停用通道或退出时 abort */
   signal: AbortSignal
+}
+
+export interface ChannelSdk {
+  log(line: string): void
+  now(): number
+  notify(title: string, body: string): void // 需要 manifest 声明 capabilities: ['notify']
 }
 ```
 
-- 卡片正文是**别人写的文字**：只能作为参数传进平台 API，绝不能拼进脚本/模板/HTML（桌面通知沿用 autoloop 的 `--` 分隔做法）。
-- 投递状态在 `cards.delivery`：`pending → delivered | failed`；重启后只补投 `pending`，已投递的同一版本不重复打扰；卡片更新（`version+1`）重新进 `pending`。
-- 通道崩溃或不可达不影响内核：卡片仍是 `open`，恢复后按上面的规则补投。
+- 端口版本：`CHANNEL_PORT_VERSION = 1`（`src/protocol/channels.ts`）；上下文形状变化时递增，外部通道（M7）按它做兼容判断。
+- 卡片正文是**别人写的文字**：只能作为参数传进平台/通知 API，绝不能拼进脚本/模板/HTML；`notify(title, body)` 的两个参数同样只作参数。
+- 投递状态是 `cards` 的**单列** `delivery`（`pending → delivered | failed`，= 已送达至少一个通道，不按通道拆表）：重启后只补投 `pending`，已投递的同一版本不重复打扰；卡片更新（`version+1`）重新进 `pending`。`deliveryRef` 记最后一个成功通道。
+- 通道崩溃、抛错或超时不影响内核：卡片仍是 `open`，投递由宿主 fire-and-forget 隔离并在恢复后按上面的规则补投；失败只落 `card.delivery_failed`。
+- 通道只读卡片、只回报投递与回答；**不改卡片内容、不改派活**。
+- 宿主 hub（`src/host/channels.ts`）负责注册/启停/分发/补投，通道启停排在 effects 之后、scheduler 之前；退出时 abort + best-effort dispose。
 
 ### app
 
@@ -272,20 +321,20 @@ export interface AppPlugin {
 
 ## 内置插件清单
 
-| 类型     | id                 | 说明（运行时协议）                                                                                       | 现状来源                                       |
-| -------- | ------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| executor | `dsh`              | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                 | `src/plugins/executors/dsh/`（含 `detect.ts`） |
-| executor | `command`          | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`** | `src/plugins/executors/command/`               |
-| executor | `claude` / `codex` | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                         | 后续                                           |
-| source   | `app`              | app 插件发来的事件（如番茄结束）                                                                         | 新增                                           |
-| source   | `manual`           | 设置里手动触发一条自动化规则                                                                             | 新增                                           |
-| source   | `webhook`          | 本机 HTTP + HMAC 验签                                                                                    | M6                                             |
-| source   | `fs`               | 目录变化去抖                                                                                             | 可选                                           |
-| channel  | `in-app`           | 默认通道：卡片落投影，UI 直接批                                                                          | 新增                                           |
-| channel  | `desktop`          | Electron 系统通知                                                                                        | `main/tray.ts`、`workbench:notify` 改造        |
-| channel  | `webhook`          | 飞书/钉钉/Slack 等（需可达地址）                                                                         | M7                                             |
-| app      | `pomodoro`         | 计时；可发 `pomodoro.completed` 事件                                                                     | `src/renderer/src/apps/pomodoro`               |
-| app      | `ai-workflow`      | 看板/聊天/设置三视图                                                                                     | `src/renderer/src/apps/ai-workflow`            |
+| 类型     | id                 | 说明（运行时协议）                                                                                       | 现状来源                                                         |
+| -------- | ------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| executor | `dsh`              | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                 | `src/plugins/executors/dsh/`（含 `detect.ts`）                   |
+| executor | `command`          | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`** | `src/plugins/executors/command/`                                 |
+| executor | `claude` / `codex` | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                         | 后续                                                             |
+| source   | `app`              | app 插件发来的事件（如番茄结束）                                                                         | 新增                                                             |
+| source   | `manual`           | 设置里手动触发一条自动化规则                                                                             | 新增                                                             |
+| source   | `webhook`          | 本机 HTTP + HMAC 验签                                                                                    | M6                                                               |
+| source   | `fs`               | 目录变化去抖                                                                                             | 可选                                                             |
+| channel  | `in-app`           | 默认通道：投影即送达，`start` 内把 `pending` 卡片 ack 为 `delivered{ref:'in-app'}`；UI 直接批            | `src/plugins/channels/in-app/`（M4）                             |
+| channel  | `desktop`          | Electron 系统通知：`sdk.notify(title, body)`，标题/正文只作参数；失败落 `card.delivery_failed`           | `src/plugins/channels/desktop/`（M4；原件 `src/main/notify.ts`） |
+| channel  | `webhook`          | 飞书/钉钉/Slack 等（需可达地址）                                                                         | M7                                                               |
+| app      | `pomodoro`         | 计时；可发 `pomodoro.completed` 事件                                                                     | `src/renderer/src/apps/pomodoro`                                 |
+| app      | `ai-workflow`      | 看板/聊天/设置三视图                                                                                     | `src/renderer/src/apps/ai-workflow`                              |
 
 ## 外部插件（v2）
 
@@ -310,9 +359,10 @@ export interface AppPlugin {
 
 ## 测试
 
-- **契约测试：** 每类插件用假实现跑通「manifest 校验 → 注册 → 启动 → 收到事件/卡片 → 回报」。
-- **边界测试：** 扫描插件源码，禁止 import 清单（host/其它插件/DB）；未声明能力被调用时拒绝。
+- **契约测试：** 每类插件用假实现跑通「manifest 校验 → 注册 → 启动 → 收到事件/卡片 → 回报」；通道契约覆盖「启动 → `onCard` 收到卡片 → `delivered` / `answer` 回报 → dispose 可重复调用」。
+- **边界测试：** 扫描插件源码，禁止 import 清单（host/其它插件/DB）；未声明能力被调用时拒绝（含 `notify` 的「声明 ↔ 用法」一致性）。
 - **执行器：** 假进程/假流覆盖帧解析、终态归一、取消时序、迟到回执；`detect` 零副作用；`command` 插件的模板展开（项数与单项长度上限、未知占位符拒绝）、`{prompt}` 存在与否决定 argv/stdin、Windows `.cmd` 固定包装、提示词不出现在 argv 拼接字符串里。
-- **通道：** 本地假 HTTP/假通知命令，不发真消息；断言卡片文字只作为参数传递；补投只针对 `pending`。
-- **注册表：** id 唯一、`key === manifest.id`、kind 合法、capabilities 在枚举内、必填字段齐全；`executors/*` 目录与清单双向一致。
+- **回执块：** 多块取最后一块、块内无五键视为无回执、非法 JSON/非对象忽略、`ask` 选项为空/超限/标题超限整块忽略、解析不修改 `output` 与终态；dsh 从 `result` 帧、`command` 从 stdout 各一条成功与失败用例。
+- **通道：** 假通知/假平台，不发真消息；断言卡片文字与通知标题/正文只作为参数传递；补投只针对 `pending`、同一版本不重复投递。
+- **注册表：** id 唯一、`key === manifest.id`、kind 合法、capabilities 在枚举内、必填字段齐全；`executors/*`、`channels/*` 目录与清单双向一致。
 - **detect 汇总：** 按注册表顺序串行且顺序稳定、`executorKey`/`supported` 由汇总回填、输出按候选清单排序、同 `command` 先到先得、单插件抛错或超时被隔离、空注册表返回空数组且不扫盘。

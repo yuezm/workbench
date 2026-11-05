@@ -27,11 +27,14 @@ const repoRoot = path.resolve(__dirname, '..')
 const packagedExe = path.join(repoRoot, 'dist', 'win-unpacked', 'Workbench.exe')
 const DB_WAIT_TIMEOUT_MS = 20_000
 
-/** v2 schema 必须存在的表（见 src/host/schema.ts）。 */
+/** M2 schema 必须存在的表：九张投影 + 账本（facts / projection_meta）+ 宿主私有登记表。 */
 const EXPECTED_TABLES = [
   'agents',
-  'chat_conversations',
-  'chat_messages',
+  'conversations',
+  'facts',
+  'messages',
+  'process_registry',
+  'projection_meta',
   'run_events',
   'runs',
   'runtimes',

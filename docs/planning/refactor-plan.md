@@ -181,6 +181,13 @@
 - 回滚点：M6.5 改投影表与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建；`threads` / `tasks` 新列只影响新代码。
 - 下一步：M7（可选）——外部插件子进程 + 能力授权、`webhook` 来源/通道、跨工作流交接、远端 Worker 架构位；**只在明确要做时启动，不阻塞主线**。
 
+## M7 开工记录（2026-11-05）
+
+- 分支 `refactor/m7-ext`，起点 `master` @ `1796a5b`（M6.5 退出，已 fast-forward 合入）；实施计划与任务清单见 [tasks/m7-plan.md](../../tasks/m7-plan.md)、[tasks/m7-todo.md](../../tasks/m7-todo.md)。
+- 范围口径（用户拍板）：四项全做；远端 Worker 只落架构位（协议形状 + 传输端口 + 假传输测试，**不监听端口、不建 daemon**）；webhook 来源允许本机监听，但**只绑 `127.0.0.1` + HMAC 验签、默认关闭、需显式配置**。
+- 评审口径（开工即定）：外部插件 M7 只开放 `source` / `channel`（`executor` 需要 probe/models/领取往返，另立协议面）；能力授权是信任门不是 OS 沙箱，宿主只按授权决定是否启动与下发 config/secret；外部插件子进程环境走白名单，不继承 `process.env`；插件 secret 走非投影表 + `safeStorage`（不进事实/视图/日志）；`plugin_settings` 为第 14 张投影表（整批替换、`KERNEL_VERSION=m7.0.0`）；交接只建目标工作流关联任务、不回写来源任务，链深上限 8；`tasks.origin` 扩 `handoff` 需物理重建 `tasks`（照 M2 `runs` / M3 `runtimes` 临时表法）。
+- 回滚点：M7 改投影表、`tasks` 结构与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建；`plugin_secrets` 为非投影宿主表，回滚后由用户重新授权/填 secret。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

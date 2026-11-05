@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { ipcMain } from 'electron'
-import type { Agent, Runtime, Task, WorkflowWithStages } from '../../protocol/entities'
+import type { Agent, Card, Runtime, Task, WorkflowWithStages } from '../../protocol/entities'
 import type {
   AgentInput,
   ChatConversation,
@@ -331,6 +331,21 @@ export function createAiWorkflowHandler(deps: AiWorkflowIpcDeps): AiWorkflowHand
     // 运行历史读投影：任务下的阶段 run 与事件流（聊天 run 不挂任务，不进 runs.byTask）
     'runs.listByTask': (a) => store.query('runs.byTask', { taskId: a[0] as string }),
     'runs.events': (a) => store.query('run.events', { runId: a[0] as string }),
+
+    // 审批卡片（M4）：读走 cards.open 投影；回答走 card.answer 命令（owner/ui）。
+    // 内核负责「卡片 open / 下标合法 / run waiting」校验，reject 文案原样抛给 renderer。
+    'cards.open': () => store.query('cards.open'),
+    'cards.answer': (a) => {
+      const result = dispatch({
+        type: 'card.answer',
+        commandId: nextCommandId(),
+        cardId: a[0] as string,
+        optionIndex: a[1] as number,
+        via: 'ui',
+      })
+      const answered = result.facts.find((fact) => fact.type === 'card.answered')
+      return answered ? (answered.payload as { card: Card }).card : undefined
+    },
 
     // 聊天全部走事实：读走投影视图，写走 dispatch（effects 统一通知 UI）
     'chat.listConversations': () => store.query('conversations.all'),

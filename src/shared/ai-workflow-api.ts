@@ -12,6 +12,7 @@
 import type {
   Agent,
   AgentInput,
+  Card,
   Conversation as ChatConversation,
   DetectedRuntime,
   Message as ChatMessage,
@@ -156,6 +157,16 @@ export interface AiWorkflowApi {
     listByTask(taskId: string): Promise<Run[]>
     /** 该 run 的事件流（运行中可轮询增量） */
     events(runId: string): Promise<RunEvent[]>
+  }
+  /** 审批卡片（M4）：顶部待审批条读 open 卡、按钮回答 */
+  cards: {
+    /** 全部 open 卡，按 createdAt 升序 */
+    open(): Promise<Card[]>
+    /**
+     * 回答一张卡（`via='ui'`，`commandId` 由宿主生成）。
+     * 成功返回回答后的卡片行；重复回答 / 已关闭 / 选项越界由内核 reject，抛可读错误文案。
+     */
+    answer(cardId: string, optionIndex: number): Promise<Card | void>
   }
   /** 主动对话：独立于工作流与任务，选中智能体直接聊 */
   chat: {

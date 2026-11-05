@@ -54,6 +54,10 @@ const aiWorkflow: AiWorkflowApi = {
     listByTask: (taskId) => invoke('runs.listByTask', taskId),
     events: (runId) => invoke('runs.events', runId),
   },
+  cards: {
+    open: () => invoke('cards.open'),
+    answer: (cardId, optionIndex) => invoke('cards.answer', cardId, optionIndex),
+  },
   chat: {
     listConversations: () => invoke('chat.listConversations'),
     createConversation: (agentId) => invoke('chat.createConversation', agentId),

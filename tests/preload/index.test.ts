@@ -58,10 +58,11 @@ describe('preload 桥接契约', () => {
     })
   })
 
-  it('window.aiWorkflow 形状：六组方法 + onChanged', async () => {
+  it('window.aiWorkflow 形状：七组方法 + onChanged', async () => {
     const { aiWorkflow } = await loadExposed()
     expect(Object.keys(aiWorkflow).sort()).toEqual([
       'agents',
+      'cards',
       'chat',
       'onChanged',
       'runs',
@@ -98,6 +99,14 @@ describe('preload 桥接契约', () => {
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'runs.listByTask', ['t1'])
     await aiWorkflow.runs.events('run1')
     expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'runs.events', ['run1'])
+
+    await aiWorkflow.cards.open()
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'cards.open', [])
+    await aiWorkflow.cards.answer('card1', 1)
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(AI_WORKFLOW_CHANNEL, 'cards.answer', [
+      'card1',
+      1,
+    ])
   })
 
   it('onChanged 订阅 CHANGED 事件并返回可退订函数', async () => {
@@ -158,6 +167,8 @@ describe('preload 桥接契约', () => {
     await aiWorkflow.tasks.remove('t1')
     await aiWorkflow.runs.listByTask('t1')
     await aiWorkflow.runs.events('run1')
+    await aiWorkflow.cards.open()
+    await aiWorkflow.cards.answer('card1', 0)
     await aiWorkflow.chat.listConversations()
     await aiWorkflow.chat.createConversation('a1')
     await aiWorkflow.chat.removeConversation('c1')
@@ -178,6 +189,8 @@ describe('preload 桥接契约', () => {
         'runtimes.models',
         'runs.listByTask',
         'runs.events',
+        'cards.open',
+        'cards.answer',
         'agents.list',
         'agents.create',
         'agents.update',

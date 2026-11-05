@@ -1,7 +1,12 @@
 // @vitest-environment node
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import type { Runtime, RuntimeModelOption, RuntimeProbe } from '../../src/shared/ai-workflow-api'
+import type {
+  Card,
+  Runtime,
+  RuntimeModelOption,
+  RuntimeProbe,
+} from '../../src/shared/ai-workflow-api'
 import { AI_WORKFLOW_CHANNEL } from '../../src/shared/ai-workflow-api'
 import {
   createAiWorkflowHandler,
@@ -793,5 +798,73 @@ describe('ipc：运行历史读投影（原 repository runs 段）', () => {
       { seq: 1, type: 'text', text: 'a' },
       { seq: 2, type: 'tool_call', tool: 'read', callId: 'c1', input: '{}' },
     ])
+  })
+})
+
+describe('ipc：审批卡片（M4 T9）', () => {
+  /** 造一个 waiting run + 一张 open 卡：运行时/智能体/agent 单阶段工作流/任务 → 领取 → 回执带 ask。 */
+  function seedWaitingCard(): { cardId: string; runId: string } {
+    const runtime = createRuntime(world, { name: 'cards-rt' })
+    const agent = createAgent(world, { name: 'cards-ag', runtimeId: runtime.id })
+    const workflow = createWorkflow(world, {
+      name: 'cards-wf',
+      stages: [{ name: '执行', entryMode: 'agent', agentId: agent.id }],
+    })
+    const task = createTask(world, { title: 'cards-task', workflowId: workflow.id })
+    const run = world.store.query('runs.byTask', { taskId: task.id })[0]
+    if (!run) throw new Error('缺少 run')
+    dispatch({ type: 'run.claim', runtimeId: runtime.id, capacity: 1 })
+    const claimed = world.store.query('run.byId', { runId: run.id })
+    if (!claimed || claimed.leaseId === null) throw new Error('缺少租约')
+    dispatch({
+      type: 'run.receipt',
+      runId: run.id,
+      receipt: {
+        status: 'succeeded',
+        leaseId: claimed.leaseId,
+        turn: claimed.turn,
+        ask: [{ title: '继续吗', text: '选一个', options: ['继续', '停止'], key: 'k' }],
+      },
+    })
+    const card = world.store.query('cards.open')[0]
+    if (!card) throw new Error('缺少 open 卡')
+    return { cardId: card.id, runId: run.id }
+  }
+
+  it('cards.open 返回 open 卡；cards.answer 产 card.answered、触发 changed 并返回更新行', () => {
+    const { cardId, runId } = seedWaitingCard()
+    notify.mockClear()
+
+    const open = handle('cards.open', []) as Card[]
+    expect(open).toHaveLength(1)
+    expect(open[0]).toMatchObject({
+      id: cardId,
+      runId,
+      status: 'open',
+      options: ['继续', '停止'],
+    })
+
+    const answered = handle('cards.answer', [cardId, 1]) as Card
+    expect(answered).toMatchObject({
+      id: cardId,
+      status: 'answered',
+      optionIndex: 1,
+      answeredBy: 'ui',
+    })
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(handle('cards.open', [])).toEqual([])
+    // 唯一的阻塞卡答完 → run 续接回 queued（同 run，turn+1）
+    expect(world.store.query('run.byId', { runId })).toMatchObject({ status: 'queued' })
+  })
+
+  it('重复回答：内核 conflict 文案原样抛给 renderer，不覆盖已有回答', () => {
+    const { cardId } = seedWaitingCard()
+    handle('cards.answer', [cardId, 0])
+    expect(() => handle('cards.answer', [cardId, 1])).toThrow(/已回答或已关闭/)
+  })
+
+  it('选项越界：invalid_input 文案抛给 renderer', () => {
+    const { cardId } = seedWaitingCard()
+    expect(() => handle('cards.answer', [cardId, 5])).toThrow(/选项下标越界/)
   })
 })

@@ -14,6 +14,7 @@ import { Select } from '../../components/ui/select'
 import { cn } from '../../lib/cn'
 import { wfApi } from './api'
 import { AgentManager } from './components/AgentManager'
+import { ApprovalBar } from './components/ApprovalBar'
 import { ChatPanel } from './components/ChatPanel'
 import { ConversationList } from './components/ConversationList'
 import { KanbanBoard } from './components/KanbanBoard'
@@ -271,6 +272,9 @@ export function AiWorkflowPage(): ReactElement {
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {/* 顶部待审批条：有 open 卡才渲染；回答成功跟随 changed 重拉 */}
+        <ApprovalBar />
+
         {error && editing === undefined && (
           <p className="mx-4 mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">
             {error}

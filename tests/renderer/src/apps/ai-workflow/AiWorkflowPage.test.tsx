@@ -153,6 +153,10 @@ function makeApi() {
       listByTask: vi.fn(async () => state.runs),
       events: vi.fn(async () => []),
     },
+    cards: {
+      open: vi.fn(async () => []),
+      answer: vi.fn(async () => {}),
+    },
     chat: {
       listConversations: vi.fn(async (): Promise<ChatConversation[]> => []),
       createConversation: vi.fn(),

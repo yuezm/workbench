@@ -107,6 +107,9 @@ describe('createExecutorPort：回执归一', () => {
     })
     expect(result.errorCode).toBeUndefined()
     expect(result.error).toBeUndefined()
+    // 插件按运行时上下文被调用一次；会话/帧转发由插件自己经 io 完成
+    expect(plugin.calls).toHaveLength(1)
+    expect(plugin.calls[0]?.runtime.executorKey).toBe('dsh')
     // 帧/会话由插件自己经 io 转发；包装层不重复转发
     expect(events).toEqual([])
   })
@@ -143,6 +146,7 @@ describe('createExecutorPort：回执归一', () => {
     const result = await createExecutorPort(plugin, ctx()).run(turn(), ioRecorder().io)
 
     expect(result).toMatchObject({ status: 'cancelled', errorCode: 'cancelled', error: '已取消' })
+    expect(result.output).toBe('')
   })
 
   it('成功但插件给了 errorCode：回执不写（成功没有失败归类）', async () => {
@@ -216,6 +220,7 @@ describe('createExecutorPort：续接重试', () => {
     expect(plugin.calls[1]?.turn.prompt).toBe('完整历史')
     expect(result).toMatchObject({ status: 'succeeded', output: '重跑成功', sessionId: 'sess-new' })
     expect(result.errorCode).toBeUndefined()
+    expect(plugin.calls[1]?.turn.turn).toBe(1)
   })
 
   it('没有 fallbackPrompt：重试用 Turn.prompt', async () => {

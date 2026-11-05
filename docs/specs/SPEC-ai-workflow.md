@@ -30,9 +30,9 @@
 app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区」两栏，吃满 shell 顶部栏以下的高度。侧栏顶部用次级标题（`h2`，不占用一级标题——一级标题语义留给 shell 顶部栏）标识当前 app，其下是**栏目切换 + 当前栏目的上下文列表**，底部固定分段控件（`components/ui/segmented.tsx`，role=tab）在互斥视图间切换：**工作台 / 设置**。同一时刻只渲染一个视图、一个栏目。
 
 - **工作台**（默认视图，默认栏目 = 聊天）：侧栏顶部是横向切换条（`components/WorkspaceNav.tsx`，聊天 / 任务），切换条下方紧接当前栏目的上下文列表：
-  - **聊天**（默认）：上下文列表 = 会话清单（`components/ConversationList.tsx`：智能体选择 / 新建对话 / 会话清单）；内容区 = 消息流 + 输入区（`components/ChatPanel.tsx`），助手输出流式回显，可中止当前轮。聊天**独立于**工作流与任务——选中智能体即可开聊，不产生 run、不推进阶段。同一时刻只处理当前选中会话的事件流。
+  - **聊天**（默认）：上下文列表 = 会话清单（`components/ConversationList.tsx`：智能体选择 / 新建对话 / 会话清单）；内容区 = 消息流 + 输入区（`components/ChatPanel.tsx`），助手输出流式回显，可中止当前轮。聊天**独立于**工作流与任务——选中智能体即可开聊，不挂任务、不推进阶段；每轮由内核产一条 `purpose='chat'` 的 run，走与阶段相同的调度 / 执行器链路（M2 起）。同一时刻只处理当前选中会话的事件流。
   - **任务**：上下文列表 = 工作流切换器（`components/WorkflowSwitcher.tsx`，只在任务栏目显示）；内容区 = 看板（列 = 当前工作流的阶段 + 末尾「已完成」落点）+ 右侧运行记录面板（按任务查看 run）。
-- **看板交互**：新建任务时弹窗内选**起始阶段**；卡片**拖拽**到其它阶段列即进入该阶段，拖到「已完成」区即完成任务。看板不提供「通过 / 打回 / 推进」这类执行按钮。「执行中」由**是否有活跃 run**（`queued`/`running`）派生：只有此时卡片不可拖动/完成；`agent` 阶段失败后没有活跃 run，卡片可拖走重试或完成，由 run 结果自动推进的路径不变。
+- **看板交互**：新建任务时弹窗内选**起始阶段**；卡片**拖拽**到其它阶段列即进入该阶段，拖到「已完成」区即完成任务。看板不提供「通过 / 打回 / 推进」这类执行按钮。「执行中」由**是否有活跃 run**（`queued`/`running`/`waiting`）派生：只有此时卡片不可拖动/完成；`agent` 阶段失败后没有活跃 run，卡片可拖走重试或完成，由 run 结果自动推进的路径不变。
 - **设置**：侧栏换成设置栏目（`components/SettingsNav.tsx`：运行时配置 / 智能体配置 / 工作流配置），内容区是当前栏目的内容；同一时刻只渲染一个栏目。
 - app 间切换归 shell 顶部栏，app 侧栏里**不出现**其它 app 的入口。
 
@@ -102,20 +102,25 @@ src/renderer/src/apps/ai-workflow/
     └── RunLog.tsx             # 运行记录：状态/耗时/退出码/errorCode/用量 + 事件流（运行中轮询增量）
 
 src/main/ai-workflow/
-├── db.ts                      # 打开 node:sqlite + 执行 schema/migration
-├── schema.ts                  # v2 建表语句 + SCHEMA_VERSION（见「数据模型」）
-├── migrate.ts                 # v1 → v2 迁移（12-step 重建 + user_version）
-├── repository.ts              # CRUD（纯 SQL，无业务规则）
-├── engine.ts                  # 阶段进入/流转效果（建 run、入队）
-├── runner.ts                  # 调度：按运行时并发限流 → 执行 run → 写终态 → 触发阶段流转
-├── chat.ts                    # ChatService：聊天轮次 + 会话续接 + 流事件（不写 runs）
-├── runtime/
-│   ├── registry.ts            # 协议族 → 后端（探测 / 模型目录 / 执行）
-│   ├── dsh.ts                 # dsh stdio 协议：帧解析、探测、模型目录、执行与终止
-│   ├── process.ts             # spawn 注入、行读取、进程树终止、输出尾部
-│   ├── executable.ts          # 命令解析与 PATH 扫描
-│   └── detect.ts              # 扫描本机已安装的 agent CLI（只读）
-└── ipc.ts                     # 注册 ai-workflow IPC handlers
+├── ipc.ts                     # 注册 ai-workflow IPC handlers（读投影 / 写走 effects.dispatch）
+├── executor-port.ts           # 执行器端口装配：runtime → ExecutorPort（续接被拒重试一次）
+└── runtime/
+    ├── registry.ts            # 协议族 → 后端（探测 / 模型目录 / 执行）
+    ├── dsh.ts                 # dsh stdio 协议：帧解析、探测、模型目录、执行与终止
+    ├── executable.ts          # 命令解析与 PATH 扫描
+    └── detect.ts              # 扫描本机已安装的 agent CLI（只读）
+
+src/host/                      # 账本 + 投影 + 调度（M2；内核实现以外的宿主层）
+├── db.ts                      # node:sqlite 打开、PRAGMA、旧库 runs 一次性升级
+├── schema.ts                  # 九张投影表 + facts / projection_meta / process_registry
+├── store/                     # 事实追加、投影应用与重建、视图装载与查询、存量导入
+├── scheduler.ts               # 按运行时领取 → 执行器端口 → 帧批量入账 / 回执 / 取消时序
+├── clock.ts                   # 唯一 setTimeout：nextWakeAt 到点 tick；run 状态变化后 rearm
+├── effects.ts                 # 提交后分发：run.queued 唤醒调度器、变更广播
+├── executor.ts                # 执行器端口适配：状态归一、续接被拒重试
+├── process.ts                 # 进程树终止 / 行读取 / 输出尾部
+├── process-registry.ts        # 宿主私有进程登记（崩溃对账用）
+└── reconcile.ts               # 启动对账：杀残留进程树、回收超租约、补聊天错误消息
 
 src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用）
 ```
@@ -127,25 +132,27 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 > 单一数据库文件：`app.getPath('userData')/ai-workflow.db`。时间戳用 ISO 字符串；id 用 `crypto.randomUUID()`。schema 版本记在 `PRAGMA user_version`。
 
-| 表                   | 关键字段                                                                                                                                                                                                                         | 说明                                                                                            |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `runtimes`           | id, name(uniq), protocol_family, command, profile, permission_mode, model, reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at                                                                       | 运行时 = 本机执行环境实例；`last_probe_json` 存最近一次探测结论（从未探测为 NULL）              |
-| `agents`             | id, name, description, runtime_id → runtimes, system_prompt, created_at                                                                                                                                                          | 智能体 = 运行时 + 能力（System Prompt）                                                         |
-| `workflows`          | id, name, description, created_at                                                                                                                                                                                                | 工作流                                                                                          |
-| `workflow_stages`    | id, workflow_id → workflows, name, position, entry_mode, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, created_at                                                          | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一     |
-| `tasks`              | id, title, description, workflow_id → workflows, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                              | `status` = `active`\|`completed`                                                                |
-| `runs`               | id, task_id → tasks, stage_id → workflow_stages, agent_id → agents, runtime_id → runtimes(SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, started_at, ended_at, created_at | `status` = `queued`\|`running`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」 |
-| `run_events`         | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                      | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段                  |
-| `chat_conversations` | id, title, agent_id → agents(RESTRICT), session_id, created_at, updated_at                                                                                                                                                       | 一段独立对话：绑定智能体；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序              |
-| `chat_messages`      | id, conversation_id → chat_conversations(CASCADE), role, content, error, created_at                                                                                                                                              | `role` = `user`\|`assistant`；助手消息的 `error` 记录失败原因（非零退出/超时/取消）             |
+| 表                | 关键字段                                                                                                                                                                                                                                                                                                                     | 说明                                                                                                                                                                             |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtimes`        | id, name(uniq), protocol_family, command, profile, permission_mode, model, reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at                                                                                                                                                                   | 运行时 = 本机执行环境实例；`last_probe_json` 存最近一次探测结论（从未探测为 NULL）                                                                                               |
+| `agents`          | id, name, description, runtime_id → runtimes, system_prompt, created_at                                                                                                                                                                                                                                                      | 智能体 = 运行时 + 能力（System Prompt）                                                                                                                                          |
+| `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                           |
+| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, created_at                                                                                                                                                      | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一                                                                                      |
+| `tasks`           | id, title, description, workflow_id → workflows, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                                          | `status` = `active`\|`completed`                                                                                                                                                 |
+| `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进） |
+| `run_events`      | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                                                                                                                  | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段；纯追加                                                                                           |
+| `conversations`   | id, title, agent_id → agents(RESTRICT), session_id, created_at, updated_at                                                                                                                                                                                                                                                   | 一段独立对话：绑定智能体；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                               |
+| `messages`        | id, conversation_id → conversations(CASCADE), role, content, error, created_at                                                                                                                                                                                                                                               | `role` = `user`\|`assistant`；助手消息的 `error` 记录失败原因（非零退出/超时/取消）                                                                                              |
 
-外键约束开启（`PRAGMA foreign_keys = ON`）。删除工作流级联删除其阶段/任务/运行；删除被引用的运行时/智能体前先校验或拒绝（见 Boundaries）；运行时被删后 `runs.runtime_id` 置空、历史 run 保留。
+> M2 起九张业务表全部是**事实投影**（另有 `facts` 事实日志、`projection_meta` 指纹/seq、宿主私有 `process_registry`）：写路径只有「追加事实 + 应用投影」，`INSERT/UPDATE/DELETE` 集中在 `src/host/store/projection-apply.ts`；读路径走投影视图（`store.query`）。旧 `chat_conversations` / `chat_messages` 在首次启动时迁成导入事实后删除。
 
-**迁移（v1 → v2，`user_version` 1 → 2）：** 按 SQLite 12-step 重建 `runtimes` / `runs` / `chat_conversations`（v2 删掉了 v1 的 `kind` / `args_template` / `prompt_mode`，且新列带 CHECK），新增 `run_events`，最后写 `PRAGMA user_version = 2`。**已有数据保留**：旧运行时按 v2 默认值补齐（`protocol_family=dsh`、`profile=multica`、`permission_mode=workspace-write`、`max_concurrent=1`），旧 run 的 `runtime_id`/`session_id`/`usage_json`/`duration_ms` 为 NULL、`error` 非空的失败 run 归 `exit_nonzero`，旧对话 `session_id` 为 NULL。迁移期间临时关闭外键，失败回滚。不做 v1 兼容读取。
+外键约束开启（`PRAGMA foreign_keys = ON`）。删除工作流/任务由内核显式产 `run.removed` / `stage.deleted` / `task.removed` 事实（不依赖 SQL 级联，重建才等价）；删除被引用的运行时/智能体前先校验或拒绝（见 Boundaries）；运行时被删后 `runs.runtime_id` 置空、历史 run 保留。
+
+**迁移（v1 → v2，`user_version` 1 → 2）：** 按 SQLite 12-step 重建 `runtimes` / `runs` / `chat_conversations`（v2 删掉了 v1 的 `kind` / `args_template` / `prompt_mode`，且新列带 CHECK），新增 `run_events`，最后写 `PRAGMA user_version = 2`。**已有数据保留**：旧运行时按 v2 默认值补齐（`protocol_family=dsh`、`profile=multica`、`permission_mode=workspace-write`、`max_concurrent=1`），旧 run 的 `runtime_id`/`session_id`/`usage_json`/`duration_ms` 为 NULL、`error` 非空的失败 run 归 `exit_nonzero`，旧对话 `session_id` 为 NULL。迁移期间临时关闭外键，失败回滚。不做 v1 兼容读取。**M2 升级：** 旧 `runs` 表缺调度列时首启一次性物理重建；v2 存量（含旧聊天表）由 `src/host/store/import.ts` 写成 `snapshot.imported` 导入根后重建投影。该兼容层 M3 删除。
 
 ## 阶段状态机（核心规则）
 
-阶段流转是**纯逻辑**，集中在 `src/shared/stage-machine.ts`（主进程与 renderer 共用，不依赖 React、不做 IO），UI 与主进程只提交事件、执行效果（创建 run、写库、spawn 进程）。风格对齐 pomodoro 的 reducer：规则一条都不写在组件里。
+阶段流转是**纯逻辑**，集中在 `src/kernel/workflow/stage-machine.ts`（内核纯函数，不依赖 React、不做 IO；renderer 只读视图、只发命令）。UI 与宿主只提交输入，进入效果（建 `run.queued`）由内核在同一决策里产出。
 
 **任务状态：** `active`（在看板中）| `completed`（已走完终端阶段，移出看板）。
 
@@ -170,7 +177,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 **打回原地不重试：** `RUN_FAILED` 时若 `on_reject` 解析结果就是当前阶段（首阶段未配置打回目标，或显式配置为自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成（见下）。
 
-**执行中 = 有活跃 run：** `queued`/`running` run 才算执行中，由 `runs` 现算（不落库、不看阶段配置）；`tasks.moveToStage`/`tasks.complete` 只在存在活跃 run 时拒绝。任务的阶段在其 run 结束前不变。
+**执行中 = 有活跃 run：** `queued`/`running`/`waiting` run 才算执行中，由 `runs` 现算（不落库、不看阶段配置）；`tasks.moveToStage`/`tasks.complete` 只在存在活跃 run 时拒绝。任务的阶段在其 run 结束前不变。
 
 **并发：** 同一运行时按 `maxConcurrent` 限流，超出上限的 run 保持 `queued` 按创建顺序执行；不同运行时并行。
 
@@ -299,7 +306,7 @@ export interface DetectedRuntime {
 
 - 同一运行时按 `maxConcurrent` 限流：超出上限的 run 保持 `queued`，队列全局 FIFO；不同运行时并行。
 - 运行时不存在 / 已停用时不派发，run 直接 `failed` 并记 `runtime_missing` / `runtime_disabled`。
-- `runner.ts` 负责：入队、取 `queued` run、写 `running`/`ended_at`、累积事件与输出、按终态触发 `RUN_SUCCEEDED`/`RUN_FAILED`，并 `webContents.send('ai-workflow:changed')`。取消的 run 不推进阶段。
+- `src/host/scheduler.ts` 负责：领取（内核按 `notBefore`/`queueSeq` 决定顺序与并发窗口）、调执行器端口跑一轮、帧批量入账、回执转交内核、取消时序（abort → 宽限 → 强杀 → 兜底终态）；租约/超时/退避由唯一 `clock.tick` 驱动。终态后由内核产 `RUN_SUCCEEDED`/`RUN_FAILED` 的阶段流转事实；取消的 run 不推进阶段。
 
 ## IPC 契约（`window.aiWorkflow`）
 
@@ -394,14 +401,14 @@ export function completeTask(task: Task): Task
 
 ## Testing Strategy
 
-- 框架：Vitest + @testing-library/react，测试统一放 `tests/`，与 `src/` 同构镜像（`src/main/ai-workflow/db.ts` ↔ `tests/main/ai-workflow/db.test.ts`，文件名后缀 `*.test.ts(x)`）。
-- **阶段状态机（重点，要求分支全覆盖）：** `stage-machine.ts` 纯函数单测——三种 `entry_mode` 的进入效果、`on_complete`/`on_reject` 显式配置与默认解析（下一阶段 / 上一阶段 / 终端 completed / 首阶段原地）、多阶段串联、终端完成、`RUN_FAILED` 打回原地时无 effects（不重试）；以及 `moveTaskToStage`（跨阶段落点、目标不存在、落在当前阶段、已完成不参与）与 `completeTask`。
-- **repository：** 用临时 SQLite 文件（或 `:memory:`）测 CRUD 与外键/唯一约束、级联删除、被引用拒绝、起始阶段校验；聊天表另测会话顺序（`updated_at`）、消息顺序（同毫秒按 rowid）、删对话级联删消息、智能体被对话引用时拒绝删除。
-- **runner：** 注入假协议后端（不启真进程）测同运行时 `maxConcurrent` 限流、多运行时并行、成功/失败/取消/超时 → 终态与 `errorCode` → 触发流转 → `changed` 事件；运行时缺失/停用路径。
+- 框架：Vitest + @testing-library/react，测试统一放 `tests/`，与 `src/` 同构镜像（`src/kernel/decide.ts` ↔ `tests/kernel/decide.test.ts`，文件名后缀 `*.test.ts(x)`）。
+- **阶段状态机（重点，要求分支全覆盖）：** `kernel/workflow/stage-machine.ts` 纯函数单测——三种 `entry_mode` 的进入效果、`on_complete`/`on_reject` 显式配置与默认解析（下一阶段 / 上一阶段 / 终端 completed / 首阶段原地）、多阶段串联、终端完成、`RUN_FAILED` 打回原地时无 effects（不重试）；以及 `moveTaskToStage`（跨阶段落点、目标不存在、落在当前阶段、已完成不参与）与 `completeTask`。
+- **账本与投影（`tests/host/store`）：** 临时 SQLite 文件/`:memory:` 测导入幂等与分批、实时投影与 `rebuild` 逐表全等（含 `run.removed` 等删除事实）、`(run_id, seq)` 纯追加、视图查询；外键/唯一约束、被引用拒绝、起始阶段校验在导入与 schema 用例覆盖。
+- **调度与执行链（`tests/host/scheduler|cancel|reconcile|executor|effects|clock`）：** 注入假执行器端口（不启真进程）测同运行时 `maxConcurrent` 限流、多运行时并行、成功/失败/取消/超时 → 终态与 `errorCode` → 阶段流转；租约/心跳/退避/超时/取消宽限与强杀、启动对账、唯一 `clock` 排期与 `rearm`。
 - **运行时探测：** 注入假进程/假流测 `--probe` 帧成功、非零退出、超时、spawn 失败、输出截断、`--version` 解析，并断言不产生 run；另一条用真实 `node -e` 覆盖默认 spawn 路径（不联网）。
 - **协议后端：** 逐帧解析（ready/session/text/thinking/tool_call/tool_result/usage/result/protocol_error）、`v`/`request_id` 校验、非 JSON 行忽略、usage 累加、终态归一（含 `run_failed`）；取消信号顺序（cancel 帧 → 3s → SIGTERM → 2s → SIGKILL，Windows `taskkill /T /F`）与进程树终止；`--list-models` 投影。
-- **聊天服务：** 假协议后端 + 内存库测 `resume_session_id` 续接（只发新消息）、`resume_rejected` 自动重试一次、事件→落库→end 顺序、非零退出/超时/取消失败落库、并发第二次 `send` 拒绝、对话执行中被删仍正常收尾。
-- **IPC：** handler 层 mock 依赖，验证参数透传与返回；`onChanged` 订阅/退订；拖拽/完成的非法路径（有活跃 run、目标阶段无效）；`runtimes.probe` 写回 `lastProbe`、`detect` 只读不发 changed、`statuses`/`models` 路由与失败抛错；`chat.*` 路由与「聊天服务未就绪」。
+- **聊天执行链（`tests/host/chat`）：** 假协议后端 + 真实内核/内存库测 `resume_session_id` 续接（只发新消息）、`resume_rejected` 自动重试一次、帧入账→终态→`message.appended` 顺序、非零退出/超时/取消失败落消息、并发第二次 `send` 拒绝、对话执行中被删仍正常收尾。
+- **IPC：** handler 层 mock store/后端，验证参数透传与返回；`onChanged` 订阅/退订；拖拽/完成的非法路径（有活跃 run、目标阶段无效）；`runtimes.probe` 写回 `lastProbe`、`detect` 只读不发 changed、`statuses`/`models` 路由与失败抛错；`chat.*` 路由与取消。
 - **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「已完成」区触发 `complete`；TaskCard 可拖拽（有活跃 run 时不可拖）并按进入方式显示提示；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉；RunLog 事件流（text/thinking/tool 折叠、运行中轮询、errorCode 文案、用量/退出码/耗时）；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示。
 - **聊天 hook（`useChat`）：** 新建/发送/`event` 流式回显/`end` 落库重载/中止/删除/各类错误分支、卸载退订、只处理当前会话的增量。
 - **页面：** 两栏布局下工作台默认落在「聊天」栏（侧栏顶部切换条 + 会话列表可见、设置栏目不可见），切「任务」显示看板与运行记录并隐藏输入区，侧栏底部「工作台/设置」分段控件切换视图，设置三栏目互不混排。

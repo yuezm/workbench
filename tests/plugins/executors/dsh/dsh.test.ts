@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunEvent, Runtime } from '../../../../src/protocol/entities'
 import type { ExecutorIO, Receipt, Turn } from '../../../../src/protocol/executor'
 import type { ExecutorContext, SpawnFn, SpawnOptions, Spawned } from '../../../../src/sdk/types'
@@ -8,6 +8,7 @@ import {
   DSH_PROTOCOL_VERSION,
   KILL_GRACE_MS,
   MODELS_TIMEOUT_MS,
+  OUTPUT_TAIL_LIMIT,
   PROBE_TIMEOUT_MS,
   RUN_TIMEOUT_MS,
 } from '../../../../src/plugins/executors/dsh/constants'
@@ -1109,6 +1110,168 @@ describe('缺省与异常帧（补充分支）', () => {
     expect(models[0].provider).toBe('')
     expect(models[0].label).toBe('nomodel')
     expect(models[1].label).toBe('a/b')
+  })
+})
+
+describe('诊断输出与脏帧边界（补充分支）', () => {
+  it('stderr 超长：诊断只保留尾部并加省略号', async () => {
+    const h = harness((_args, child) => {
+      child.emitStderr('x'.repeat(OUTPUT_TAIL_LIMIT + 10))
+      child.close(1)
+    })
+
+    const probe = await probeDshRuntime(ctxOf(h))
+
+    expect(probe.state).toBe('unavailable')
+    expect(String(probe.error)).toContain('…')
+    expect(String(probe.error).endsWith('x'.repeat(10))).toBe(true)
+  })
+
+  it('空行与纯空白行不是帧：被忽略', async () => {
+    const h = harness()
+    const { running, events } = startRun(h)
+    const child = h.children[0]
+    child.emitStdout('\n\r\n   \n')
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
+    child.close(0)
+
+    const receipt = await running
+
+    expect(receipt.status).toBe('succeeded')
+    expect(events).toEqual([])
+  })
+
+  it('thinking 兼容脏数据：非字符串/非对象项忽略，空 default_level 归 null', async () => {
+    const h = harness((_args, child) => {
+      child.emitStdout(
+        frame({
+          v: 1,
+          type: 'models',
+          models: [
+            {
+              id: 'solo',
+              thinking: {
+                supported_levels: [null, 7, 'low', { value: '  ' }, { value: 'high' }],
+                default_level: '  ',
+              },
+            },
+          ],
+        }),
+      )
+      child.close(0)
+    })
+
+    const models = await listDshModels(ctxOf(h))
+
+    expect(models).toEqual([
+      {
+        id: 'solo',
+        label: 'solo',
+        provider: '',
+        default: false,
+        thinkingLevels: ['low', 'high'],
+        defaultThinkingLevel: null,
+      },
+    ])
+  })
+
+  it('turn.timeoutMs 非正数：回退到 options.timeouts.run 的超时', async () => {
+    const h = harness()
+    const { running } = startRun(h, {
+      turn: { timeoutMs: 0 },
+      options: { timeouts: { run: 5 } },
+    })
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    await new Promise((resolve) => setTimeout(resolve, 12))
+
+    expect(child.frames().at(-1)).toMatchObject({ type: 'cancel' })
+    child.close(null)
+    const receipt = await running
+    expect(receipt.errorCode).toBe('timeout')
+    expect(receipt.error).toContain('5ms')
+  })
+
+  it('spawn 抛非 Error：错误文案按 String 归一', async () => {
+    const spawn: SpawnFn = () => {
+      throw 'EPERM-literal'
+    }
+    const h = harness()
+
+    const { running } = startRun(h, { sdk: { spawn } })
+
+    const receipt = await running
+    expect(receipt.errorCode).toBe('spawn_failed')
+    expect(receipt.error).toContain('EPERM-literal')
+  })
+
+  it('解析不到命令且没有 error 文案：run / probe / models 都用「找不到可执行文件」兜底', async () => {
+    const resolve = (): { path: null; error: null } => ({ path: null, error: null })
+    const h = harness()
+
+    const { running } = startRun(h, { sdk: { resolve } })
+    const receipt = await running
+    expect(receipt.errorCode).toBe('spawn_failed')
+    expect(receipt.error).toContain('找不到可执行文件：' + NODE)
+
+    const probe = await probeDshRuntime(ctxOf(h, {}, { resolve }))
+    expect(probe.state).toBe('unavailable')
+    expect(probe.error).toContain('找不到可执行文件：')
+
+    await expect(listDshModels(ctxOf(h, {}, { resolve }))).rejects.toThrow('找不到可执行文件：')
+  })
+})
+
+describe('取消/超时终止的定时器收尾（假定时器）', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('超时与取消各挂一条宽限链：进程已关闭后孤儿宽限定时器不再杀进程树', async () => {
+    const h = harness()
+    const controller = new AbortController()
+    const { running } = startRun(h, {
+      turn: { signal: controller.signal, timeoutMs: 10 },
+    })
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    // 超时先终止一次（宽限 1）；取消再终止一次（宽限 2 覆盖句柄，宽限 1 成为孤儿定时器）
+    vi.advanceTimersByTime(10)
+    controller.abort()
+    child.close(0)
+    const receipt = await running
+
+    expect(receipt.errorCode).toBe('timeout')
+    // 进程已关闭：孤儿宽限到点直接返回，不杀进程树
+    vi.advanceTimersByTime(CANCEL_GRACE_MS)
+    expect(h.killedTrees).toEqual([])
+  })
+
+  it('两条宽限链的强杀等待：进程已关闭后孤儿强杀定时器不再 SIGKILL', async () => {
+    const h = harness()
+    const controller = new AbortController()
+    const { running } = startRun(h, {
+      turn: { signal: controller.signal, timeoutMs: 10 },
+    })
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    vi.advanceTimersByTime(10)
+    controller.abort()
+    // 两条宽限都到点：各发一次 SIGTERM；后一条覆盖强杀句柄，前一条成为孤儿
+    vi.advanceTimersByTime(CANCEL_GRACE_MS)
+    expect(h.killedTrees).toEqual([
+      { pid: 4242, signal: 'SIGTERM' },
+      { pid: 4242, signal: 'SIGTERM' },
+    ])
+    child.close(0)
+    const receipt = await running
+    expect(receipt.errorCode).toBe('timeout')
+    // 收尾只清掉最新强杀句柄；孤儿强杀定时器到点时进程已关闭，不再 SIGKILL
+    vi.advanceTimersByTime(KILL_GRACE_MS)
+    expect(h.killedTrees).toEqual([
+      { pid: 4242, signal: 'SIGTERM' },
+      { pid: 4242, signal: 'SIGTERM' },
+    ])
   })
 })
 

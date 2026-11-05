@@ -402,6 +402,50 @@ describe('主进程入口装配', () => {
     })
   })
 
+  it('executorDefaults：manifest 缺字段 / 非字符串 default 回退空串，未知 key 抛可读错误', async () => {
+    type Entry = (typeof pluginEntriesMock)[number]
+    const baseManifest = pluginEntriesMock[0].manifest
+    // 一个没有 config 清单、一个有 config 但缺 default / default 不是字符串
+    const plainEntry = {
+      key: 'plain',
+      label: 'Plain',
+      manifest: { ...baseManifest, id: 'plain', config: undefined },
+      plugin: { run: vi.fn() },
+    } as unknown as Entry
+    const partialEntry = {
+      key: 'partial',
+      label: 'Partial',
+      manifest: {
+        ...baseManifest,
+        id: 'partial',
+        config: [
+          { key: 'command', label: '命令', type: 'text' },
+          { key: 'profile', label: 'Profile', type: 'text', default: 7 },
+        ],
+      },
+      plugin: { run: vi.fn() },
+    } as unknown as Entry
+    pluginEntriesMock.push(plainEntry, partialEntry)
+    try {
+      await loadEntry()
+      const defaults = ipcDeps().executorDefaults
+
+      expect(defaults()).toEqual({ executorKey: 'dsh', command: 'dsh', profile: 'multica' })
+      // 指定已注册 key：走 find 分支，结果与缺省首项一致
+      expect(defaults('dsh')).toEqual({
+        executorKey: 'dsh',
+        command: 'dsh',
+        profile: 'multica',
+      })
+      // manifest 没有 config / 缺 default / default 不是字符串：都回退空串
+      expect(defaults('plain')).toEqual({ executorKey: 'plain', command: '', profile: '' })
+      expect(defaults('partial')).toEqual({ executorKey: 'partial', command: '', profile: '' })
+      expect(() => defaults('nope')).toThrow('执行器插件未注册: nope')
+    } finally {
+      pluginEntriesMock.splice(1)
+    }
+  })
+
   it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → clock → scheduler → IPC', async () => {
     await loadEntry()
 

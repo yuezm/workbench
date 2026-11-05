@@ -170,6 +170,23 @@ describe('createExecutorPort：回执归一', () => {
     expect(result.turn).toBe(0)
   })
 
+  it('插件漏回 leaseId/turn（运行时缺字段）：包装层用 Turn 兜底', async () => {
+    const plugin = fakePlugin([
+      receipt({
+        leaseId: undefined as unknown as string,
+        turn: undefined as unknown as number,
+      }),
+    ])
+
+    const result = await createExecutorPort(plugin, ctx()).run(
+      turn({ leaseId: 'run-1:2', turn: 3 }),
+      ioRecorder().io,
+    )
+
+    expect(result.leaseId).toBe('run-1:2')
+    expect(result.turn).toBe(3)
+  })
+
   it('聊天失败且没有 error 文案：补「执行失败」（旧 ChatService 口径）', async () => {
     const plugin = fakePlugin([receipt({ status: 'failed', output: '' })])
 

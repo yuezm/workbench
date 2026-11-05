@@ -202,6 +202,15 @@ describe('openDatabase', () => {
     }
   })
 
+  it('runtimes 表不存在（空列集合）：needsRuntimesUpgrade 返回 false，不触发升级', () => {
+    const empty = new DatabaseSync(':memory:')
+    try {
+      expect(needsRuntimesUpgrade(empty)).toBe(false)
+    } finally {
+      empty.close()
+    }
+  })
+
   it('不动 foreign_keys：保持连接默认（node:sqlite 默认开启外键约束）', () => {
     db = openDatabase(':memory:')
     const rows = db.prepare('PRAGMA foreign_keys').all() as unknown as Array<{

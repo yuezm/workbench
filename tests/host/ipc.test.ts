@@ -236,6 +236,48 @@ describe('ai-workflow handler：运行时', () => {
   it('未知方法抛错', () => {
     expect(() => handle('nope.nope', [])).toThrow(/未知方法/)
   })
+
+  it('create：执行器插件未注册（forRuntime 返回 null）→ 可读错误且不落库', async () => {
+    const handler = makeHandler({ executors: { forRuntime: () => null } })
+
+    await expect(
+      handler('runtimes.create', [{ name: 'ghost', executorKey: 'nope' }]),
+    ).rejects.toThrow('执行器插件未注册: nope')
+    expect(world.store.query('runtimes.all')).toHaveLength(0)
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('create：插件不支持探测（port.probe 缺省）→ 可读错误且不落库', async () => {
+    const noProbe = { models: async () => [], run: vi.fn() } as unknown as ExecutorPort
+    const handler = makeHandler({ executors: { forRuntime: () => noProbe } })
+
+    await expect(handler('runtimes.create', [{ name: 'no-probe' }])).rejects.toThrow(
+      '执行器不支持探测: dsh',
+    )
+    expect(world.store.query('runtimes.all')).toHaveLength(0)
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('probe：插件不支持探测（port.probe 缺省）→ 可读错误且不写探测结论', async () => {
+    const runtime = createRuntime(world, { name: 'ds' })
+    const noProbe = { models: async () => [], run: vi.fn() } as unknown as ExecutorPort
+    const handler = makeHandler({ executors: { forRuntime: () => noProbe } })
+
+    await expect(handler('runtimes.probe', [runtime.id])).rejects.toThrow('执行器不支持探测: dsh')
+    expect(notify).not.toHaveBeenCalled()
+    expect(runtimeById(world.store, runtime.id).lastProbe).toBeNull()
+  })
+
+  it('models：插件没有模型目录能力时返回空数组', async () => {
+    const runtime = createRuntime(world, { name: 'ds' })
+    const probeOnly = {
+      probe: async () => readyProbe(),
+      run: vi.fn(),
+    } as unknown as ExecutorPort
+    const handler = makeHandler({ executors: { forRuntime: () => probeOnly } })
+
+    await expect(handler('runtimes.models', [runtime.id])).resolves.toEqual([])
+  })
 })
 
 describe('ai-workflow handler：聊天', () => {

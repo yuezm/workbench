@@ -518,4 +518,23 @@ describe('cancel：退出（cancelAll）', () => {
     expect(runById(queued.runId)?.status).toBe('queued')
     await harness.scheduler.idle()
   })
+
+  it('cancelAll：执行器未上报 pid 时跳过杀树，仍写兜底终态并释放 active', async () => {
+    const running = seedTask()
+    const stuck = stuckPort()
+    const harness = makeScheduler(stuck.port)
+    await startRun(harness, running)
+    // 等价于执行器没有回调 io.process：登记行在，但没有 pid 可杀
+    world.db.prepare('UPDATE process_registry SET pid = NULL WHERE run_id = ?').run(running.runId)
+
+    harness.scheduler.cancelAll()
+
+    expect(harness.killPid).not.toHaveBeenCalled()
+    expect(runById(running.runId)).toMatchObject({
+      status: 'cancelled',
+      error_code: 'cancelled',
+    })
+    expect(harness.scheduler.active()).toEqual([])
+    expect(harness.registry.list()).toEqual([])
+  })
 })

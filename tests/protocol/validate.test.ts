@@ -353,6 +353,46 @@ describe('protocol/validate', () => {
     )
   })
 
+  it('runtime.create：argsTemplate 的结构、项数与单项长度上限', () => {
+    expect(rejectedMessage(cmd('runtime.create', { input: { name: 'r', executorKey: 7 } }))).toBe(
+      'input.executorKey必须是字符串',
+    )
+    expect(rejectedMessage(cmd('runtime.create', { input: { name: 'r', argsTemplate: 7 } }))).toBe(
+      'input.argsTemplate必须是字符串',
+    )
+    // 是合法 JSON 但不是数组
+    expect(
+      rejectedMessage(cmd('runtime.create', { input: { name: 'r', argsTemplate: '{"args":[]}' } })),
+    ).toBe('input.argsTemplate 必须是 JSON 数组文本')
+    expect(
+      rejectedMessage(
+        cmd('runtime.create', { input: { name: 'r', argsTemplate: JSON.stringify(['a', 7]) } }),
+      ),
+    ).toBe('input.argsTemplate[1] 必须是字符串')
+    expect(
+      rejectedMessage(
+        cmd('runtime.create', {
+          input: { name: 'r', argsTemplate: JSON.stringify([longText(501)]) },
+        }),
+      ),
+    ).toBe('input.argsTemplate[0] 最长 500 个字符')
+    expect(
+      rejectedMessage(
+        cmd('runtime.create', {
+          input: { name: 'r', argsTemplate: JSON.stringify(Array.from({ length: 21 }, () => '')) },
+        }),
+      ),
+    ).toBe('input.argsTemplate 最多 20 项')
+    // 占位符白名单（{model}/{effort}/{cwd}/{context}/{prompt}）内的模板通过
+    expect(
+      validateCommand(
+        cmd('runtime.create', {
+          input: { name: 'r', argsTemplate: '["--model","{model}","--prompt","{prompt}"]' },
+        }),
+      ),
+    ).toMatchObject({ ok: true })
+  })
+
   it('runtime.update / remove：id 与 patch 形状', () => {
     expect(rejectedMessage(cmd('runtime.update', { patch: {} }))).toBe('id必填')
     expect(rejectedMessage(cmd('runtime.update', { id: 'rt1' }))).toBe('input 必须是对象')

@@ -1194,3 +1194,127 @@ describe('createScheduler：默认定时器与帧窗口收尾（T12b）', () => 
     gate.resolve()
   })
 })
+
+describe('createScheduler：执行器插件缺失与取消收尾的空窗（M3）', () => {
+  it('运行时 executorKey 未注册：forRuntime 返回 null → failed/runtime_missing，执行器不调用', async () => {
+    const seeded = seed()
+    const execute = vi.fn((turn: Turn) => receiptOf(turn))
+    const rearm = vi.fn()
+    const scheduler = makeScheduler(portOf(execute), {
+      executors: { forRuntime: () => null },
+      rearmClock: rearm,
+    })
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'failed',
+      error_code: 'runtime_missing',
+    })
+    // 文案带未注册的 key，便于用户定位配置
+    expect(String(runById(seeded.runId)?.error)).toContain('dsh')
+    expect(rearm).toHaveBeenCalled()
+  })
+
+  it('注入 timer 缺 setTimeout：帧窗口回退系统 setTimeout，帧不丢', async () => {
+    vi.useFakeTimers()
+    const seeded = seed()
+    const gate = deferred()
+    const timer: SchedulerTimer = {
+      setInterval: () => 0,
+      clearInterval: () => undefined,
+      clearTimeout: () => undefined,
+    }
+    const scheduler = makeScheduler(
+      portOf(async (turn, io) => {
+        io.emit({ seq: 1, type: 'text', text: 'a' })
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer },
+    )
+
+    scheduler.wake()
+    await vi.advanceTimersByTimeAsync(0)
+    // 窗口未到：帧只在缓冲里（回退的系统 setTimeout 由假时钟接管）
+    expect(eventRows(seeded.runId)).toHaveLength(0)
+
+    await vi.advanceTimersByTimeAsync(16)
+    expect(eventRows(seeded.runId).map((row) => row.seq)).toEqual([1])
+
+    gate.resolve()
+    await scheduler.idle()
+    expect(runById(seeded.runId)?.status).toBe('succeeded')
+  })
+
+  it('timer 缺 clearTimeout：收尾后宽限定时器才触发，看到已收尾就停手', async () => {
+    const seeded = seed()
+    const base = fakeTimer()
+    // 注入 timer 没有 clearTimeout：收尾清理回退系统 clearTimeout（对假句柄是 no-op）
+    const timer: SchedulerTimer = {
+      setInterval: base.setInterval,
+      clearInterval: base.clearInterval,
+      setTimeout: base.setTimeout,
+    }
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        await gate.promise
+        return receiptOf(turn, { status: 'cancelled', errorCode: 'cancelled' })
+      }),
+      { timer },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    scheduler.cancel(seeded.runId)
+    // 宽限内执行器自己交回执：收尾把 cancelTimers 置空，但假定时器没被真正清掉
+    gate.resolve()
+    await scheduler.idle()
+    expect(runById(seeded.runId)).toMatchObject({ status: 'cancelled' })
+
+    const factsBefore = factTypes().length
+    base.fireTimeouts()
+    // 已收尾：宽限回调直接返回，不杀进程、不写第二个终态
+    expect(factTypes()).toHaveLength(factsBefore)
+    expect(runById(seeded.runId)).toMatchObject({ status: 'cancelled' })
+  })
+
+  it('timer 缺 clearTimeout：强杀等待中收到回执，kill 定时器触发时看到已收尾就停手', async () => {
+    const seeded = seed()
+    const base = fakeTimer()
+    const timer: SchedulerTimer = {
+      setInterval: base.setInterval,
+      clearInterval: base.clearInterval,
+      setTimeout: base.setTimeout,
+    }
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        await gate.promise
+        return receiptOf(turn, { status: 'cancelled', errorCode: 'cancelled' })
+      }),
+      { timer, killPid: vi.fn(() => true) },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    scheduler.cancel(seeded.runId)
+    // 宽限到期：挂上强杀等待定时器（缺省登记表 pid 为 null，不杀进程）
+    base.fireTimeouts()
+    expect(runById(seeded.runId)?.status).toBe('running')
+
+    // 强杀等待期间执行器交回执：终态先落，cancelTimers 置空
+    gate.resolve()
+    await scheduler.idle()
+    expect(runById(seeded.runId)).toMatchObject({ status: 'cancelled' })
+
+    const factsBefore = factTypes().length
+    base.fireTimeouts()
+    // 已收尾：强杀等待回调直接返回，不写第二个终态
+    expect(factTypes()).toHaveLength(factsBefore)
+    expect(runById(seeded.runId)).toMatchObject({ status: 'cancelled' })
+  })
+})

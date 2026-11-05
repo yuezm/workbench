@@ -4,6 +4,8 @@
  * - `start()`：按 `store.nextWakeAt(now)` 排下一跳；到点 `dispatch({type:'clock.tick'})`
  *   后重新排期。
  * - `wake()`：effects / 调度器可提前唤醒：立即跑一次 tick 再重排。
+ * - `rearm()`：不 tick、只按最新视图重排——调度器在 run 领取 / 收尾 / 取消后调用，
+ *   把新出现的租约与超时纳入唯一定时器。
  * - `stop()`：取消定时器（退出 / 测试）。
  * - `nextAt()`：诊断用，返回当前已排期的目标时刻（未排期 null）。
  *
@@ -39,6 +41,12 @@ export interface Clock {
   start(): void
   stop(): void
   wake(): void
+  /**
+   * 只按当前视图重排下一跳，不立即 tick：run 领取 / 收尾 / 取消后由调度器调用，
+   * 把新出现的 `leaseUntil` / `deadlineAt` / `notBefore` 纳入定时器；否则启动之后
+   * 才出现的 run 永远等不到租约回收与超时。
+   */
+  rearm(): void
   nextAt(): Iso | null
 }
 
@@ -110,6 +118,10 @@ export function createClock(options: ClockOptions): Clock {
       } finally {
         schedule()
       }
+    },
+    rearm: () => {
+      if (!started) return
+      schedule()
     },
     nextAt: () => scheduledAt,
   }

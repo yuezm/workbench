@@ -102,7 +102,13 @@ const {
     afterCommit: vi.fn(),
   }
   const createEffectsMock = vi.fn((_deps: unknown) => effectsMock)
-  const clockMock = { start: vi.fn(), stop: vi.fn(), wake: vi.fn(), nextAt: vi.fn(() => null) }
+  const clockMock = {
+    start: vi.fn(),
+    stop: vi.fn(),
+    wake: vi.fn(),
+    rearm: vi.fn(),
+    nextAt: vi.fn(() => null),
+  }
   const createClockMock = vi.fn((_deps: unknown) => clockMock)
   const executorsMock = { forRuntime: vi.fn() }
   const createRuntimeExecutorsMock = vi.fn((_deps: unknown) => executorsMock)
@@ -232,6 +238,7 @@ type SchedulerDeps = {
   limits: unknown
   lastFrameSeq: (runId: string) => number
   registry: unknown
+  rearmClock?: () => void
   onChatStream?: (conversationId: string, event: unknown) => void
   onChatStreamEnd?: (conversationId: string) => void
   chatFallbackPrompt?: (run: unknown) => string | null
@@ -356,7 +363,7 @@ describe('主进程入口装配', () => {
     expect(typeof backend.execute).toBe('function')
   })
 
-  it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → scheduler → IPC → clock', async () => {
+  it('启动顺序：开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → clock → scheduler → IPC', async () => {
     await loadEntry()
 
     expect(startupOrder).toEqual([
@@ -366,9 +373,9 @@ describe('主进程入口装配', () => {
       'ensureProjection',
       'registry',
       'reconcile',
+      'clock',
       'scheduler',
       'ipc',
-      'clock',
     ])
     // store 拿到的是内核门面：decide / project / viewSpec / nextWakeAt 纯函数
     const options = createStoreMock.mock.calls[0][0] as {
@@ -419,6 +426,10 @@ describe('主进程入口装配', () => {
     expect(schedulerMock.wake).toHaveBeenCalled()
     expect(clockMock.start).toHaveBeenCalledTimes(1)
     expect(startupOrder).not.toContain('runner')
+
+    // 调度器领取 / 收尾后重排时钟：启动之后才出现的租约与超时靠这条接线排期
+    schedulerDeps().rearmClock?.()
+    expect(clockMock.rearm).toHaveBeenCalledTimes(1)
   })
 
   it('启动对账：读 process_registry 清崩溃残留（registry → reconcile），再接 scheduler/clock', async () => {

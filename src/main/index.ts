@@ -7,7 +7,7 @@ import { nextWakeAt } from '../kernel/next-wake'
 import { project } from '../kernel/project'
 import { viewSpec } from '../kernel/view-spec'
 import type { KernelPort } from '../kernel/types'
-import { createClock } from '../host/clock'
+import { createClock, type Clock } from '../host/clock'
 import { createEffects } from '../host/effects'
 import { killPidTree } from '../host/process'
 import { createProcessRegistry } from '../host/process-registry'
@@ -141,6 +141,15 @@ if (app.requestSingleInstanceLock()) {
         }
       }
     }
+    // 唯一时钟先建（调度器领取/收尾时通过 rearm 重新排期），start 在首次领取之后
+    const clock: Clock = createClock({
+      store: {
+        dispatch: (input) => effects.dispatch(input),
+        nextWakeAt: (at) => store.nextWakeAt(at),
+      },
+      now: () => new Date().toISOString(),
+      onTick: () => scheduler.wake(),
+    })
     const scheduler: Scheduler = createScheduler({
       dispatch: (input) => effects.dispatch(input),
       runtimes: () => store.query('runtimes.all'),
@@ -149,6 +158,8 @@ if (app.requestSingleInstanceLock()) {
       // 重启后重跑同一 run 时帧 seq 继续全局单调（读 run_events 投影的 MAX(seq)）
       lastFrameSeq: (runId) => store.query('run.last-event-seq', { runId }),
       registry,
+      // run 领取 / 收尾 / 取消后重排唯一定时器：启动之后才出现的租约与超时靠它纳入排期
+      rearmClock: () => clock.rearm(),
       // 聊天 run 的帧实时旁路（AI_WORKFLOW_CHAT）：渲染端显示，入账仍走 run.frames
       onChatStream: (conversationId, event) =>
         sendChatStream({ conversationId, type: 'event', event }),
@@ -173,14 +184,6 @@ if (app.requestSingleInstanceLock()) {
     // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，
     // 再挂唯一定时器（周期回收走 nextWakeAt + clock.tick，不再单独轮询）
     scheduler.wake()
-    const clock = createClock({
-      store: {
-        dispatch: (input) => effects.dispatch(input),
-        nextWakeAt: (at) => store.nextWakeAt(at),
-      },
-      now: () => new Date().toISOString(),
-      onTick: () => scheduler.wake(),
-    })
     clock.start()
 
     createWindow()

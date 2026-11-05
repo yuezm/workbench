@@ -1196,6 +1196,31 @@ describe('kernel/decide clock.tick 时间到期', () => {
     ])
   })
 
+  it('取消后崩溃：租约过期直接落 run.cancelled，不再重排执行', () => {
+    const active = running({ cancelRequested: true, leaseUntil: NOW, deadlineAt: FUTURE })
+    const decision = tick(view({ runs: [active] }))
+
+    expect(decision.facts).toEqual([
+      {
+        type: 'run.cancelled',
+        actor: { kind: 'host', via: 'timer' },
+        at: NOW,
+        payload: {
+          run: {
+            ...active,
+            status: 'cancelled',
+            error: '已取消',
+            errorCode: 'cancelled',
+            endedAt: NOW,
+            leaseId: null,
+            leaseUntil: null,
+            deadlineAt: null,
+          },
+        },
+      },
+    ])
+  })
+
   it('deadlineAt 到期：优先落 run.failed{timeout}（即使租约也过期）', () => {
     const active = running({ leaseUntil: NOW, deadlineAt: NOW })
     const decision = tick(view({ runs: [active] }))

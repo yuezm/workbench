@@ -77,6 +77,12 @@ export interface SchedulerDeps {
   /** 帧批量窗口（毫秒）；默认 `DEFAULT_FRAME_FLUSH_MS`（16ms），测试可注入假 timer 手动推进 */
   frameFlushMs?: number
   /**
+   * 重排唯一定时器（装配根传 `() => clock.rearm()`）：run 领取 / 收尾 / 取消后调用。
+   * 缺省不重排（单测 / 不挂定时器的宿主）；生产环境必须接上，否则运行期才出现的
+   * `leaseUntil` / `deadlineAt` 不会被定时器看到（超时与租约回收失效）。
+   */
+  rearmClock?: () => void
+  /**
    * 该 run 已有的最大帧 seq（重启后重跑同一 run 时保证 `(run_id,seq)` 全局单调）；
    * 缺省视为 0。装配根用仓储读 `run_events` 传入。
    */
@@ -242,6 +248,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       errorCode,
       error,
     })
+    // 终态改变了下一跳（该 run 不再占租约/超时），重排定时器
+    deps.rearmClock?.()
   }
 
   /** 帧缓冲 → `run.frames` 事实：按批分包，seq 从「已有最大 seq」继续全局单调。 */
@@ -375,6 +383,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       // 顺序反了会让 idle() 在下一轮启动前就提前返回。
       wake()
       releaseIdle()
+      // 本轮终态改变了「下一次到期」（可能只剩退避中的 queued），重排唯一定时器
+      deps.rearmClock?.()
       // 聊天 run：终态事实已写完，通知 renderer 本轮结束（一轮只发一次；对话已删也发）
       if (run.purpose === 'chat' && run.conversationId !== null) emitChatEnd(run.conversationId)
     }
@@ -419,6 +429,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       },
       { once: true },
     )
+
+    // 领取已入投影（status=running + leaseUntil/deadlineAt）：把本轮到期时刻纳入
+    // 唯一定时器。启动之后才出现的 run 只能靠这里排期，否则租约回收/超时永不触发。
+    deps.rearmClock?.()
 
     try {
       registry.begin(run.id, now())
@@ -526,6 +540,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       if (controller === undefined) {
         // 排队中 / 已结束：没有执行器可等，直接写兜底终态（内核侧重复取消幂等）
         settleCancelled(runId)
+        // 该 run 退出活跃集合，下一跳可能随之后移
+        deps.rearmClock?.()
         return
       }
       controller.abort()

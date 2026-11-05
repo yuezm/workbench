@@ -172,6 +172,36 @@ describe('host/clock 排期与唤醒', () => {
     expect(ticks).toBe(0)
   })
 
+  it('rearm 只重排不 tick：启动后新出现的到期时刻能挂上定时器', () => {
+    const timer = new FakeTimer(NOW)
+    const fake = fakeStore(null)
+    let ticks = 0
+    const clock = createClock({
+      store: fake.store,
+      now: () => timer.nowIso(),
+      onTick: () => {
+        ticks += 1
+      },
+      timer,
+    })
+
+    clock.start()
+    expect(clock.nextAt()).toBeNull()
+
+    fake.setNext('2026-11-04T12:05:00.000Z')
+    clock.rearm()
+    expect(clock.nextAt()).toBe('2026-11-04T12:05:00.000Z')
+    expect(timer.pending()).toEqual([Date.parse('2026-11-04T12:05:00.000Z')])
+    expect(fake.dispatched).toEqual([])
+    expect(ticks).toBe(0)
+
+    // stop 之后 rearm 不再排期
+    clock.stop()
+    clock.rearm()
+    expect(clock.nextAt()).toBeNull()
+    expect(timer.pending()).toEqual([])
+  })
+
   it('wake 提前触发一次 tick 并取消旧排期、按最新视图重排', () => {
     const timer = new FakeTimer(NOW)
     const fake = fakeStore('2026-11-04T12:01:00.000Z')

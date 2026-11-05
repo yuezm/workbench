@@ -266,7 +266,25 @@ export function abandonedFacts(
   now: Iso,
   limits: Limits,
   actor: Actor,
-): FactDraft<'run.abandoned' | 'run.failed'>[] {
+): FactDraft<'run.abandoned' | 'run.failed' | 'run.cancelled'>[] {
+  // 已请求取消但宿主没来得及落终态（取消后崩溃 / 强杀）：不再重排执行，
+  // 直接补取消终态，否则重新领取后 `run.cancel` 幂等返回零事实，run 会不可取消地执行完。
+  if (run.cancelRequested) {
+    return [
+      {
+        type: 'run.cancelled',
+        actor,
+        at: now,
+        payload: {
+          run: terminalRow(run, now, {
+            status: 'cancelled',
+            error: '已取消',
+            errorCode: 'cancelled',
+          }),
+        },
+      },
+    ]
+  }
   const attempts = run.attempts + 1
   if (attempts >= limits.maxAttempts) {
     const failed = terminalRow(run, now, {

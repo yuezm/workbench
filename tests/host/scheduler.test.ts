@@ -348,6 +348,22 @@ describe('createScheduler：执行一轮', () => {
     expect(currentStage(seeded.task.id)).toBe(seeded.stages.second)
   })
 
+  it('rearmClock：领取与收尾后重排唯一定时器（租约/超时/退避靠它排期）', async () => {
+    const seeded = seed()
+    const rearmClock = vi.fn()
+    const scheduler = makeScheduler(
+      portOf((turn) => receiptOf(turn)),
+      { rearmClock },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    // 至少两次：execute 开始（把 leaseUntil/deadlineAt 纳入排期）+ finishOnce（下一跳后移）
+    expect(rearmClock.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(runById(seeded.runId)).toMatchObject({ status: 'succeeded' })
+  })
+
   it('未注入进程登记表：执行器回报 pid 时走 noop 登记，不影响终态', async () => {
     const seeded = seed()
     const scheduler = makeScheduler(

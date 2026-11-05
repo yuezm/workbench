@@ -244,6 +244,28 @@ describe('detect 汇总（D8）', () => {
     expect(second).toEqual(first)
   })
 
+  it('空命令被跳过、清单外命令排最后；非 Error 抛错同样按失败隔离', async () => {
+    const log = vi.fn()
+    const entries = [
+      fakeEntry('mixed', () => [rawHit(''), rawHit('my-cli')]),
+      fakeEntry('string-throw', () => {
+        throw '扫描炸了'
+      }),
+    ]
+
+    const result = await detectAllWith(
+      entries,
+      fakeSdkHost({ dirs: ['/bin'], found: { dsh: '/bin/dsh' }, log }),
+    )
+
+    // 空命令不进结果；my-cli 不在候选清单里，排在清单内命令之后
+    expect(result.map((item) => [item.command, item.executorKey, item.supported])).toEqual([
+      ['dsh', '', false],
+      ['my-cli', 'mixed', true],
+    ])
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('扫描炸了'))
+  })
+
   it('cli-catalog 顺序即汇总输出顺序（顺序表与常量保持唯一来源）', () => {
     expect(CLI_CANDIDATES.map((item) => item.command)).toEqual([
       'dsh',

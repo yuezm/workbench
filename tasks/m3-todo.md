@@ -1,6 +1,6 @@
 # M3 任务清单（运行时与执行器插件）
 
-> 进度（2026-11-05，M3a 完成）：T1–T8 已交付（提交 `d8ca5fe`/`8d135f3`/`8c75e6c`/`1a1666f`/`97ecd6e`/`1859883`/`ca7644f`/`68ce59c`/`68ce59c` 之后的收口提交）。证据：`pnpm check:fast` 绿；`npx vitest run --coverage` 89 文件 / 1045 例全绿，覆盖率 99.85/98.11/100/100（≥ 基线）；`pnpm check:diffcov` 484/484 = 100%；`pnpm e2e` 6/6；真实 v2 库副本启动后 9 条 `snapshot.imported`、`runtimes.executor_key='dsh'`、runs 15 / run_events 98 / 聊天 1+4 逐行保留、旧 `chat_*` 表已删除、`integrity_check=ok`。T9–T13（detect 归插件、运行时表单执行器选择、`command` 插件、SPEC 修订与退出记录）待 M3b/M3c；下文勾选框保留为原始验收项。
+> 进度（2026-11-05，M3 退出）：T1–T13 已全部交付。M3a 证据见 `68ce59c` 与上文；M3b/M3c 提交链 `c45b3ff`（detect 归插件 + 只读执行器清单）→ `be0bba6`（`command` 插件与 `argsTemplate`）→ `1da37c4`（运行时表单执行器选择 + 参数模板）→ `8413248`（detect 汇总分支用例）→ `e84bb5b`（SPEC/架构修订）。门禁：`pnpm check` exit 0、`pnpm e2e` 6/6、覆盖率 99.81/97.92/100/100、改动行 693/695 = 99.71%；真 CLI 阶段/聊天/取消三轮回执见文末「M3 退出记录」。下文勾选框保留为原始验收项。
 
 > 计划说明见 [m3-plan.md](./m3-plan.md)。规则：每个任务结束跑 `pnpm check:fast`；检查点跑完整 `pnpm check` 与 `pnpm e2e`。
 > 本阶段把执行器从 `src/main/ai-workflow/runtime/**` 搬到 `src/plugins/executors/**`，新增 `src/sdk` 与 `src/plugins/registry.ts`，运行时改用 `executorKey` 选插件。契约与迁移口径以 m3-plan「架构决议 D1–D14」为准。
@@ -270,3 +270,16 @@
 - 每任务 `pnpm check:fast`；检查点 A–C 跑完整 `pnpm check`；退出前跑 `pnpm e2e`。
 - `floor-guard` / `diffcov` 必须用 `CONSTRAINTS_BASE=831f2dd` 或固定分支基准，避免 master 上假绿；门禁脚本在非受限终端执行。
 - 任何新 `src/**` 文件都要被测试加载；纯类型入口命名 `types.ts`。
+
+## M3 退出记录（2026-11-05）
+
+- 提交链：M3a `d8ca5fe` → `8d135f3` → `8c75e6c` → `1a1666f` → `97ecd6e` → `1859883` → `ca7644f` → `68ce59c`；M3b/M3c `c45b3ff`（detect 归插件 + 只读执行器清单 + IPC/preload/shared 接线 + detect 测试搬家）→ `be0bba6`（`command` 插件与 `argsTemplate` 展开；同批带入 `SPEC-plugins.md` 的部分在途文档改动）→ `1da37c4`（运行时表单执行器选择 + 参数模板 + 角标 label）→ `8413248`（detect 汇总分支用例收口）→ `e84bb5b`（SPEC / ARCHITECTURE / CAPABILITY-MAP 修订）→ 本记录提交。
+- 门禁证据：`pnpm check` exit 0（typecheck / lint / floor / secrets / 覆盖率 / 改动行 / audit 全绿）；`pnpm test` 91 文件 / 1097 用例；覆盖率 **99.81 / 97.92 / 100 / 100**（基线 99.73 / 97.78 / 100 / 100）；`check:diffcov` **693/695 = 99.71%**（门槛 90%）；`pnpm e2e` **6/6**；`check:floor`、`check:secrets` clean；`pnpm audit` 生产依赖 0 漏洞。
+- 真 CLI 验收（dsh 0.2.1-rc.5 / profile `multica`，v2 真库副本、未写真实数据）：阶段执行 `succeeded` / 输出 `PONG` / **4.0 s**（复跑 7.0 s，首轮含进程冷启动）；聊天一轮 `succeeded` / `PONG` / **5.5 s**（复跑 4.0 s）；执行中取消 → `cancelled` / `errorCode=cancelled`，取消请求到终态 **2.0 s**（cancel 帧后进程退出，未触发 SIGKILL 兜底）。
+- 老库两份副本：① v2 真库副本升级后 `facts=9`、`runs=15`、`run_events=98`、旧聊天 1 对话 + 4 消息逐行保留、`runtimes.executor_key='dsh'`、`last_probe_json` 原样、`integrity_check=ok`；② M2 格式副本（用 M2 代码把同一 v2 副本导入/重建生成）由 M3 打开：`import=false`、`rebuild=true`（`KERNEL_VERSION=m3.0.0`）、`executor_key='dsh'`、`lastProbe` 保留、facts / runs / run_events 不变、旧 `chat_*` 表 0 张。
+- 结构：`src/main/ai-workflow/runtime/**` 与 `tests/main/ai-workflow/runtime/**` 删除；detect 用例搬 `tests/plugins/executors/dsh/detect.test.ts`（14 例，原 14 例语义逐条保留）；新增 `src/plugins/shared/cli-catalog.ts`、`src/plugins/executors/command/**`、`src/plugins/shared/argv.ts`；IPC 新增只读 `runtimes.executors`；运行时表单新增执行器下拉与 `argsTemplate` 文本域。
+- 兼容层（D9）：M3 **不删** M2 的 `host/store/import.ts`（实库仍是 v2，首启必须靠它导入）。删除条件：真实库（非副本）首启一次、`facts` 非空、删后复测重建等价；作为 M3 之后独立清理任务登记。
+- 已知边界与偏差：`card.*` 投递与回答闭环在 M4；`commandId` 幂等与 IPC 三动词在 M5；`command` 插件只有单测，真 CLI 验收只覆盖 dsh；`supported:false` 的提示文案仍是「当前版本仅接入 DSH」（三态行为不变，文案随 M4 通道统一调整）；打包冒烟沿用 M2 已知问题（electron-builder 产物启动崩溃，工具链排查中，未纳入本轮门禁）；`SPEC-plugins.md` 部分改动随功能提交 `be0bba6` 而非独立文档提交；M2 格式库由 M2 代码生成（历史备份只有 v2 格式，没有 M2 快照）。
+- 实现偏差：`command` 插件按「resolve 返回路径是 Windows 形态（盘符/UNC）+ `.cmd/.bat` 后缀」判定固定包装，不读 `process.platform`（插件拿不到 Node 全局）；`detect` 汇总拆成 `detectAllWith(entries, sdkHost, options)` 以便测空注册表 / 顺序 / 去重，`detectAll` 只是内置清单的薄封装；`DetectedRuntime` 保留 `supported`，语义改为「注册表里存在该执行器」（D8 选项 2）。
+- 回滚点：`%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1055-pre-m3.db`（sha256 与源库一致、`integrity_check=ok`、9 表 125 行）+ 同目录 JSON；回滚需恢复该库并重建投影。
+- 下一步：M4 卡片投递与回答闭环（`card.*` + 通道）；之后 M5 IPC 三动词与 `kernelStore`。

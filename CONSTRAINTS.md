@@ -37,7 +37,7 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 
 | 指标                      | 当前                                            | 方向                     |
 | ------------------------- | ----------------------------------------------- | ------------------------ |
-| 项目覆盖率（st/br/fn/ln） | 99.73 / 97.78 / 100 / 100                       | 不得下降                 |
+| 项目覆盖率（st/br/fn/ln） | 99.81 / 97.92 / 100 / 100                       | 不得下降                 |
 | 开发依赖 high 漏洞数      | 3（electron-builder → semver 链等；生产依赖 0） | 不得增加                 |
 | SAST（semgrep）           | 未安装                                          | 接入 CI 后启用，本地不跑 |
 | 打包产物大小              | 待测                                            | 后续补基线               |
@@ -67,3 +67,4 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 - 测试目录重组复核：2026-11-04。测试与夹具搬到 `tests/`（与 `src/` 同构镜像）后覆盖率仍为 99.71 / 97.59 / 99.52 / 99.85，基线不变。
 - M2 复核：2026-11-05。运行生命周期入账后覆盖率为 99.73 / 97.78 / 100 / 100（改动行 1024/1031 = 99.32%）；`main/ai-workflow/{repository,runner,chat}.ts` 与 `shared/stage-machine.ts` 删除，运行时读路径改投影视图，检测见 [refactor-plan](docs/planning/refactor-plan.md) M2 退出记录。
 - 改本文件的**规则行**时，保留原行、另起一行补充，不要就地改写措辞：`floor-guard` 按行文本匹配规则，措辞改写会被判成 `rule-removed`（收紧也会误报）。
+- M3 复核：2026-11-05。执行器插件化收尾（detect 归插件、`runtimes.executors`、`command` 插件与 `argsTemplate`）后覆盖率为 99.81 / 97.92 / 100 / 100（改动行 693/695 = 99.71%），阈值与门禁强度不变；`pnpm e2e` 6/6。证据与已知边界见 [refactor-plan](docs/planning/refactor-plan.md) M3 退出记录。

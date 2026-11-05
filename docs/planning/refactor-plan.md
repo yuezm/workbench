@@ -86,7 +86,20 @@
 - 行为等价：dsh 59 例断言逐例保留（只换 import 与 fakeSdk 夹具），`timeout` 折成 `failed + errorCode='timeout'`；`resume_rejected` 重试与聊天失败文案留在 `host/executor.ts` 包装层；取消时序、probe 三判据、pid 上报、stderr 截尾不变。
 - 结构：`src/main/ai-workflow/runtime/**` 与 `executor-port.ts` 删除，`src/main` 只剩 `ipc.ts`；新增 `src/sdk/{types,index}.ts`、`src/host/{sdk-host,executor-registry}.ts`、`src/plugins/{manifest,registry,shared,executors/dsh}`；`runtimes` 表 12-step 升级 + `normalizeRuntime`，`KERNEL_VERSION=m3.0.0`。
 - 关键口径落地：未注册 `executorKey` → 调度器兜底 `runtime_missing`（不新增 errorCode）；`DetectedRuntime` 保留 `supported`（语义=registry 是否有该执行器）；dsh manifest capabilities 由 SPEC 草案的 `['spawn','fs.read']` 收窄为 `['spawn']`（sdk 无 fs 面，boundary 门禁要求声明↔用法一致）；假协议验收用例放 `tests/host/acceptance.test.ts`（避免给 `tests/plugins` 放宽 ESLint 豁免）。
-- 未做（M3b/M3c）：detect 归插件（T9）、运行时表单执行器选择与 `runtimes.executors`（T10）、`command` 插件与 `argsTemplate`（T11）、`check:diffcov`/真 CLI/SPEC 修订与退出记录（T12/T13）。M2 兼容层按评审结论保留，删除条件待真实库首启验证后另行登记。
+- 交接：M3b/M3c（detect 归插件、运行时表单执行器选择与 `runtimes.executors`、`command` 插件与 `argsTemplate`、`check:diffcov`/真 CLI/SPEC 修订）已完成，见下节 M3 退出记录。M2 兼容层按评审结论保留，删除条件写入退出记录。
+
+## M3 退出记录（2026-11-05）
+
+- 提交链：M3a 见上节；M3b/M3c `c45b3ff`（detect 归插件 + 只读执行器清单 + IPC/preload/shared 接线 + detect 测试搬家）→ `be0bba6`（`command` 插件与 `argsTemplate` 展开；同批带入 `SPEC-plugins.md` 的部分在途文档改动）→ `1da37c4`（运行时表单执行器选择 + 参数模板 + 角标 label）→ `8413248`（detect 汇总分支用例收口）→ `e84bb5b`（SPEC / ARCHITECTURE / CAPABILITY-MAP 修订）→ 本记录提交。
+- 门禁证据：`pnpm check` exit 0；`pnpm test` 91 文件 / 1097 用例；覆盖率 **99.81 / 97.92 / 100 / 100**（基线 99.73 / 97.78 / 100 / 100）；`check:diffcov` **693/695 = 99.71%**（门槛 90%）；`pnpm e2e` **6/6**；`check:floor` / `check:secrets` clean；`pnpm audit` 生产依赖 0 漏洞。
+- 真 CLI 验收（dsh 0.2.1-rc.5 / profile `multica`，v2 真库副本、未写真实数据）：阶段执行 `succeeded` / `PONG` / 4.0 s（复跑 7.0 s）；聊天一轮 `succeeded` / `PONG` / 5.5 s（复跑 4.0 s）；执行中取消 → `cancelled` / `errorCode=cancelled` / 取消到终态 2.0 s（cancel 帧后进程自行退出，未触发 SIGKILL 兜底）。
+- 老库两份副本：① v2 真库副本升级后 `facts=9`、`runs=15`、`run_events=98`、旧聊天 1 对话 + 4 消息逐行保留、`runtimes.executor_key='dsh'`、`last_probe_json` 原样、`integrity_check=ok`；② M2 格式副本（M2 代码把同一 v2 副本导入/重建生成）由 M3 打开：`import=false`、`rebuild=true`、`executor_key='dsh'`、`lastProbe` 保留、facts / runs / run_events 不变、旧聊天表 0 张。
+- 新增能力：`detect` 归插件（`src/plugins/shared/cli-catalog.ts` + 各插件 `detect()`；`registry.detectAll` 串行、单插件 2 s 超时、失败隔离、同 command 先到先得、未注册插件 CLI 以 `supported:false` 列出）；只读 IPC `runtimes.executors()`；运行时表单执行器下拉 + `argsTemplate` 文本域；`command` 插件（`{prompt}` 只作独立 argv 元素或走 stdin、Windows `.cmd/.bat` 固定 `cmd.exe /c` 包装、`shell:false`）。
+- 边界与写作用域：执行器协议新增仍只改 `src/plugins/executors/<id>/` + registry 一行（`tests/host/acceptance.test.ts` 假协议端到端为证）；`src/main/ai-workflow/runtime/**` 删除。
+- 兼容层（D9）：M3 不删 `host/store/import.ts`（实库仍是 v2）。删除条件：真实库首启一次、`facts` 非空、删后复测重建等价；列为 M3 之后独立清理任务。
+- 已知边界与偏差：`card.*` / 通道在 M4；IPC 三动词与 `commandId` 幂等留 M5；`command` 插件只有单测、真 CLI 只覆盖 dsh；`supported:false` 提示文案未改（三态行为不变）；打包冒烟沿用 M2 已知问题（electron-builder 产物启动崩溃）；`SPEC-plugins.md` 部分改动随 `be0bba6` 提交而非独立文档提交；M2 格式库由 M2 代码生成（历史备份只有 v2 格式）；`command` 的 Windows 判定不读 `process.platform`（按 resolve 路径形态 + 后缀，插件无 Node 全局）。
+- 回滚点：`%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1055-pre-m3.db`（+ JSON）；回滚需恢复该库并重建投影。
+- 下一步：M4 卡片投递与回答闭环（`card.*` + 通道）；之后 M5 IPC 三动词与 `kernelStore`。
 
 ## 文件去向
 

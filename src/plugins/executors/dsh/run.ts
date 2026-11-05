@@ -13,6 +13,7 @@ import type { ExecutorIO, Receipt, Turn } from '../../../protocol/executor'
 import type { ExecutorContext } from '../../../sdk/types'
 import { createLineReader, parseFrame } from '../../shared/jsonl'
 import { parseModelId } from '../../shared/model-id'
+import { applyReceiptBlock } from '../../shared/receipt-block'
 import { mapResultStatus, type NormalizedRunStatus } from '../../shared/status'
 import { tail, withStderr } from '../../shared/text'
 import {
@@ -64,6 +65,8 @@ function toReceipt(turn: Turn, outcome: DshRunOutcome): Receipt {
   if (outcome.errorCode !== null) receipt.errorCode = outcome.errorCode
   if (outcome.exitCode !== null) receipt.exitCode = outcome.exitCode
   if (outcome.resumeRejected) receipt.resumeRejected = true
+  // 回执块：dsh 从 result 帧的最终 output 解析，失败不改终态与 output
+  applyReceiptBlock(receipt, outcome.output)
   return receipt
 }
 

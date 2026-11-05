@@ -13,6 +13,7 @@ import type { RunErrorCode, RunEvent, RunUsage } from '../../../protocol/entitie
 import type { ExecutorIO, Receipt, Turn } from '../../../protocol/executor'
 import type { ExecutorContext, Spawned } from '../../../sdk/types'
 import { expandArgs, parseArgsTemplate, type ArgvVars } from '../../shared/argv'
+import { applyReceiptBlock } from '../../shared/receipt-block'
 import { tail, withStderr } from '../../shared/text'
 
 /** 运行默认超时（`turn.timeoutMs <= 0` 时兜底，与 dsh 执行器同口径） */
@@ -68,6 +69,8 @@ function toReceipt(turn: Turn, outcome: CommandOutcome, durationMs: number): Rec
   if (outcome.error !== undefined) receipt.error = outcome.error
   if (outcome.errorCode !== undefined) receipt.errorCode = outcome.errorCode
   if (typeof outcome.exitCode === 'number') receipt.exitCode = outcome.exitCode
+  // 回执块：command 从 stdout（最终 output）解析，失败不改终态与 output
+  applyReceiptBlock(receipt, outcome.output)
   return receipt
 }
 

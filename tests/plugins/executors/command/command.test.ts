@@ -613,3 +613,56 @@ describe('取消/超时终止的定时器收尾（假定时器）', () => {
     expect((await running).errorCode).toBe('timeout')
   })
 })
+
+describe('回执块解析（M4）', () => {
+  const outputWith = (value: unknown): string =>
+    ['执行完成。', '```json', JSON.stringify(value), '```'].join('\n')
+
+  /** 五字段齐全的合法回执块 */
+  const fullBlock = {
+    ask: [{ title: '选一个', text: '用哪个方案？', options: ['A', 'B'], key: 'plan' }],
+    notices: ['已完成依赖安装'],
+    resolves: ['card-0'],
+    later: '2026-11-06T09:00:00.000Z',
+    events: [{ source: 'agent', type: 'issues.opened', subject: 'issue-1', summary: '发现新问题' }],
+  }
+
+  it('stdout 里的回执块：Receipt 五字段齐全，output 原文不变', async () => {
+    const h = harness()
+    const { running } = startRun(h)
+    const child = h.children[0]
+    const output = outputWith(fullBlock)
+    child.emitStdout(output)
+    child.close(0)
+
+    const receipt = await running
+    expect(receipt.status).toBe('succeeded')
+    expect(receipt.output).toBe(output)
+    expect(receipt.ask).toEqual(fullBlock.ask)
+    expect(receipt.notices).toEqual(fullBlock.notices)
+    expect(receipt.resolves).toEqual(fullBlock.resolves)
+    expect(receipt.later).toBe(fullBlock.later)
+    expect(receipt.events).toEqual(fullBlock.events)
+  })
+
+  it('回执块解析失败：五字段缺失，终态 / 错误 / output 不变', async () => {
+    const h = harness()
+    const { running } = startRun(h)
+    const child = h.children[0]
+    const output = outputWith({ notices: 'not-array' })
+    child.emitStdout(output)
+    child.emitStderr('warn: something\n')
+    child.close(3)
+
+    const receipt = await running
+    expect(receipt.status).toBe('failed')
+    expect(receipt.errorCode).toBe('exit_nonzero')
+    expect(receipt.error).toContain('退出码 3')
+    expect(receipt.output).toBe(output)
+    expect(receipt.ask).toBeUndefined()
+    expect(receipt.notices).toBeUndefined()
+    expect(receipt.resolves).toBeUndefined()
+    expect(receipt.later).toBeUndefined()
+    expect(receipt.events).toBeUndefined()
+  })
+})

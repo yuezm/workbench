@@ -1296,3 +1296,65 @@ describe('D10：工作目录优先级', () => {
     expect((await second.running).status).toBe('succeeded')
   })
 })
+
+describe('回执块解析（M4）', () => {
+  const outputWith = (value: unknown): string =>
+    ['执行完成。', '```json', JSON.stringify(value), '```'].join('\n')
+
+  /** 五字段齐全的合法回执块 */
+  const fullBlock = {
+    ask: [{ title: '选一个', text: '用哪个方案？', options: ['A', 'B'], key: 'plan' }],
+    notices: ['已完成依赖安装'],
+    resolves: ['card-0'],
+    later: '2026-11-06T09:00:00.000Z',
+    events: [{ source: 'agent', type: 'issues.opened', subject: 'issue-1', summary: '发现新问题' }],
+  }
+
+  it('result 帧 output 里的回执块：Receipt 五字段齐全，output 原文不变', async () => {
+    const h = harness()
+    const { running } = startRun(h)
+    const child = h.children[0]
+    const output = outputWith(fullBlock)
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output }))
+    child.close(0)
+
+    const receipt = await running
+    expect(receipt.status).toBe('succeeded')
+    expect(receipt.output).toBe(output)
+    expect(receipt.ask).toEqual(fullBlock.ask)
+    expect(receipt.notices).toEqual(fullBlock.notices)
+    expect(receipt.resolves).toEqual(fullBlock.resolves)
+    expect(receipt.later).toBe(fullBlock.later)
+    expect(receipt.events).toEqual(fullBlock.events)
+  })
+
+  it('回执块解析失败：五字段缺失，终态 / 错误 / output 不变', async () => {
+    const h = harness()
+    const { running } = startRun(h)
+    const child = h.children[0]
+    const output = outputWith({ ask: 1 })
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(
+      frame({
+        v: 1,
+        type: 'result',
+        status: 'failed',
+        output,
+        error: { code: 'model_error', message: '额度不足' },
+      }),
+    )
+    child.close(0)
+
+    const receipt = await running
+    expect(receipt.status).toBe('failed')
+    expect(receipt.errorCode).toBe('run_failed')
+    expect(receipt.error).toBe('model_error: 额度不足')
+    expect(receipt.output).toBe(output)
+    expect(receipt.ask).toBeUndefined()
+    expect(receipt.notices).toBeUndefined()
+    expect(receipt.resolves).toBeUndefined()
+    expect(receipt.later).toBeUndefined()
+    expect(receipt.events).toBeUndefined()
+  })
+})

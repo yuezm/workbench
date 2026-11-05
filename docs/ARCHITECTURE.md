@@ -48,7 +48,7 @@ flowchart TB
 
 ```
 kernel   ──▶ protocol（仅类型）；不 import electron / node:fs / node:child_process / 网络
-sdk      ──▶ kernel 类型 + protocol（仅类型）
+sdk      ──▶ protocol（仅类型）
 plugins  ──▶ sdk + protocol；不 import host 内部实现，不 import 其它插件
 host     ──▶ kernel + protocol + sdk + 插件注册表；不 import renderer
 renderer ──▶ shared 类型 + preload 桥接；不 import electron / Node 内置
@@ -134,16 +134,17 @@ Agent 没有选择权：只能在回执里 `ask`（拍板）、`events`（再触
 
 四类，目录与 manifest 统一：
 
-| 类型       | 负责                                                     | 内置                                                                      | 关键接口                                  |
-| ---------- | -------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------- |
-| `source`   | 把世界变成事件                                           | manual（UI 手动）、app 事件、Webhook、文件变化                            | `start(ctx) → stop`                       |
-| `executor` | 怎么调起并读回一轮（协议适配，无状态；**不是派活目标**） | `dsh`（DeepSeek Harness stdio）、`command`（通用 CLI）、`claude`、`codex` | `probe / detect / models / run(turn, io)` |
-| `channel`  | 把卡片送到人面前并接回答案                               | 应用内卡片（默认）、桌面通知、Webhook（飞书等，M7 后）                    | `start(ctx)` + `onCard`                   |
-| `app`      | 界面插件                                                 | `pomodoro`、`ai-workflow`                                                 | `AppPlugin`（见 `SPEC-plugins.md`）       |
+| 类型       | 负责                                                     | 内置                                                                           | 关键接口                                            |
+| ---------- | -------------------------------------------------------- | ------------------------------------------------------------------------------ | --------------------------------------------------- |
+| `source`   | 把世界变成事件                                           | manual（UI 手动）、app 事件、Webhook、文件变化                                 | `start(ctx) → stop`                                 |
+| `executor` | 怎么调起并读回一轮（协议适配，无状态；**不是派活目标**） | `dsh`（DeepSeek Harness stdio）、`command`（通用 CLI）；`claude`、`codex` 后续 | `probe / models / detect(ctx) / run(ctx, turn, io)` |
+| `channel`  | 把卡片送到人面前并接回答案                               | 应用内卡片（默认）、桌面通知、Webhook（飞书等，M7 后）                         | `start(ctx)` + `onCard`                             |
+| `app`      | 界面插件                                                 | `pomodoro`、`ai-workflow`                                                      | `AppPlugin`（见 `SPEC-plugins.md`）                 |
 
 - 交付流水线**不是新插件类型**：它是「自动化规则 + 智能体 + 项目配置」的组合（照抄 autoloop 结论）。
 - **定时（cron）不是 source 插件**：规则里的 cron 由内核 `clock.tick` 派生事实，解析与下一次触发时刻都在纯内核里。
-- 插件之间禁止互相 import；副作用只能经 `sdk` 暴露的能力（日志、配置、事件、spawn、fs）并受 `capabilities` 约束。
+- 插件之间禁止互相 import；副作用只能经 `sdk` 暴露的能力（M3：日志、毫秒时钟、路径、配置、受 `capabilities` 约束的 process）并受 `capabilities` 约束。
+- **注册表是唯一静态注册点**：`src/plugins/registry.ts` 导出 `executors: ReadonlyArray<{ key, label, manifest, plugin }>`，数组顺序即 UI 下拉与 detect 输出顺序。`main` 是唯一 import 它的装配根；`host/executor-registry.ts` 只按 `runtime.executorKey` 从注入的清单里取端口，未知 key 返回 `null`，由调度器落 `runtime_missing` 兜底终态——宿主不 import 任何具体插件实现。
 - 内置插件编译期注册；第三方插件从 `userData/plugins/<kind>/<id>/` 加载，v1 不开放执行，M7 后以**子进程 + stdio JSONL** 接入。
 
 ### 对象分层（什么算插件）
@@ -223,7 +224,7 @@ sequenceDiagram
 1. `src/kernel/**` 不得出现 `electron`、`node:fs`、`node:child_process`、`fetch`、`node:http`、`Date.now()`、`Math.random()`、`randomUUID()`。
 2. `src/renderer/**` 不得 import `electron` / Node 内置（沿用现有 ESLint 规则）。
 3. 只有 `host` 能写库、能 spawn、能发通知；`kernel` 只接收 `view`、只返回 `facts`。
-4. 插件不得 import `src/host/**` 内部实现、不得 import 其它插件、不得直连数据库；副作用只经 `sdk` 且必须声明 `capabilities`；跨插件纯函数只放 `src/plugins/shared/`。
+4. 插件不得 import `src/host/**` 内部实现、不得 import 其它插件、不得直连数据库；副作用只经 `sdk` 且必须声明 `capabilities`；跨插件纯函数只放 `src/plugins/shared/`。宿主不得 import 具体插件实现，只接收装配根注入的注册表清单。
 5. `viewSpec(input)` 必须声明投影切片，禁止全表装载；性能预算按「装载 + 决策」一起算。
 6. 事件里的文字只能进资料文件与 `summary` 字段；`cwd/executor/access` 出现在事件里直接拒收；提示词不进命令行拼接。
 7. 阶段语义（`SPEC-ai-workflow.md` 的 15 条硬约束）一条不改；阶段 id 稳定、删除用 tombstone。
@@ -245,15 +246,15 @@ sequenceDiagram
 
 ## 验收与度量
 
-| 项       | 目标                                                                             |
-| -------- | -------------------------------------------------------------------------------- |
-| 内核规模 | `src/kernel/` ≤ 2000 行（含注释），零第三方依赖                                  |
-| 决策性能 | 「装载 + `decide`」p99 < 8 ms（10 万事实、1 万任务规模），按 `viewSpec` 切片计量 |
-| 可靠性   | 单实例锁 + WAL；强杀重启后投影与事实一致，无残留 `running`                       |
-| 重建     | 10 万事实 < 5 s；启动增量 < 100 ms                                               |
-| 可追溯   | 任一 run 能用一条查询还原触发事件、规则版本、智能体、运行时、回执与流转          |
-| 质量门   | `pnpm check` 全绿；覆盖率不降；阶段状态机分支 100%                               |
-| 插件独立 | 新增一个运行时协议：只加执行器插件 + registry 一行，配置里选它即可               |
+| 项       | 目标                                                                                                                                           |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 内核规模 | `src/kernel/` ≤ 2000 行（含注释），零第三方依赖                                                                                                |
+| 决策性能 | 「装载 + `decide`」p99 < 8 ms（10 万事实、1 万任务规模），按 `viewSpec` 切片计量                                                               |
+| 可靠性   | 单实例锁 + WAL；强杀重启后投影与事实一致，无残留 `running`                                                                                     |
+| 重建     | 10 万事实 < 5 s；启动增量 < 100 ms                                                                                                             |
+| 可追溯   | 任一 run 能用一条查询还原触发事件、规则版本、智能体、运行时、回执与流转                                                                        |
+| 质量门   | `pnpm check` 全绿；覆盖率不降；阶段状态机分支 100%                                                                                             |
+| 插件独立 | 新增一个运行时协议：只加执行器插件 + registry 一行，`runtimes.executors()` 与 detect 自动纳入，配置里选它即可；kernel / host / renderer 零改动 |
 
 ## 术语
 

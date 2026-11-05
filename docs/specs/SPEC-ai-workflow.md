@@ -6,13 +6,13 @@
 >
 > 本 Spec 为 MVP：**本地单机最小闭环**。远端 Worker 仅留架构位、不实现（见 Open Questions / Out of scope）。设计参考 Multica 的「本地 UI/状态 + 本机 CLI 执行」边界。
 >
-> 2026-11-03 运行时重做为 v2：运行时 = 协议族后端 + 探测健康 + 事件流（见「运行时」）；旧 `command + 空格分隔 args + prompt_mode + 通用 spawn` 与「探测真跑一次 prompt」已删除，不做兼容字段。
+> 2026-11-03 运行时重做为 v2：运行时 = 执行环境实例 + 探测健康 + 事件流（见「运行时」）；旧 `command + 空格分隔 args + prompt_mode + 通用 spawn` 与「探测真跑一次 prompt」已删除，不做兼容字段。2026-11-05（M3）：执行器改为插件，运行时用 `executorKey` 选插件。
 
 ## Objective
 
 在工作台内新增 `ai-workflow` app：把「运行时 → 智能体 → 自定义多阶段工作流 → 看板任务」串成一个能在本地跑起来的最小闭环。
 
-- 配置**运行时**：运行时 = 本机执行环境实例（协议族 + 启动命令 + profile + 权限模式 + 模型/推理强度 + 工作目录 + 并发上限 + 启用开关）；MVP 只实现 `dsh` 协议族，其余运行时（claude code / codex 等）后续按同一「协议族后端」接口接入。
+- 配置**运行时**：运行时 = 本机执行环境实例（执行器插件 + 启动命令 + profile + 权限模式 + 模型/推理强度 + 工作目录 + 并发上限 + 启用开关）；内置执行器插件 `dsh` 与 `command`，其余（claude code / codex 等）后续按「插件目录 + registry 一行」接入，不改内核与宿主。
 - **识别**已安装的运行时：运行时配置页扫描本机 PATH，自动列出已安装的 agent CLI，点「使用」打开新建表单并把名称与命令预填进去（不自动建记录，profile/权限模式等仍由用户确认）。
 - 配置**智能体**：名称、描述、执行配置（绑定某个运行时）、能力（System Prompt）。
 - 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【进入时】【完成后进入】【打回时退回到】。
@@ -53,7 +53,7 @@ app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区�
 - 与 shell 相同：Electron 45 + electron-vite 6 + React 19 + TypeScript 6（strict）。
 - 样式：Tailwind 4 + `components/ui/`（shadcn 风格），复用 `src/renderer/src/lib/cn.ts`。
 - 存储：**SQLite，使用 Node 内置 `node:sqlite`**（不引原生模块、不引 better-sqlite3）；数据库文件在**主进程**打开与读写。
-- 进程执行：主进程 `child_process.spawn` 本机 CLI，经 `--stdio` 版本化 JSONL 协议通信；协议族后端可注入（测试用假进程/假流，不启真进程）。
+- 进程执行：主进程 `child_process.spawn` 本机 CLI，经执行器插件端口与版本化 JSONL 协议通信；执行器插件可注入（测试用假进程/假流，不启真进程）。
 - 测试：Vitest + @testing-library/react。
 
 ## Commands
@@ -96,28 +96,34 @@ src/renderer/src/apps/ai-workflow/
     ├── WorkflowEditor.tsx     # 阶段增删改：进入时/完成后进入/打回退回到（模态内表单）
     ├── RuntimeManager.tsx     # 运行时配置页：检测清单 + 已配置清单（健康/负载/路径）+ 探测/编辑/删除
     ├── RuntimeStatusBadge.tsx # 运行时健康 pill（可用 / 不可用 / 未检测）
-    ├── RuntimeDialog.tsx      # 新建/编辑运行时：命令/profile/权限模式/模型/推理强度/工作目录/并发/启用
+    ├── RuntimeDialog.tsx      # 新建/编辑运行时：执行器选择/命令/profile/参数模板/权限模式/模型/推理强度/工作目录/并发/启用
     ├── AgentManager.tsx       # 智能体配置页：已配置清单
     ├── AgentDialog.tsx        # 新建智能体（居中模态）
     └── RunLog.tsx             # 运行记录：状态/耗时/退出码/errorCode/用量 + 事件流（运行中轮询增量）
 
 src/main/ai-workflow/
-├── ipc.ts                     # 注册 ai-workflow IPC handlers（读投影 / 写走 effects.dispatch）
-├── executor-port.ts           # 执行器端口装配：runtime → ExecutorPort（续接被拒重试一次）
-└── runtime/
-    ├── registry.ts            # 协议族 → 后端（探测 / 模型目录 / 执行）
-    ├── dsh.ts                 # dsh stdio 协议：帧解析、探测、模型目录、执行与终止
-    ├── executable.ts          # 命令解析与 PATH 扫描
-    └── detect.ts              # 扫描本机已安装的 agent CLI（只读）
+└── ipc.ts                     # 注册 ai-workflow IPC handlers（读投影 / 写走 effects.dispatch；执行器 key 与默认值按插件 manifest 补齐）
+
+src/plugins/                   # M3：执行器插件（新增协议 = 新目录 + registry 一行）
+├── registry.ts                # 内置执行器静态清单（executors，顺序即 UI/detect 顺序）+ detectAll 汇总
+├── shared/cli-catalog.ts      # 本机 agent CLI 候选清单（纯数据，顺序即输出顺序）
+├── shared/argv.ts             # 参数模板解析与占位符展开（纯函数）
+└── executors/
+    ├── dsh/                   # dsh stdio 协议：帧解析、探测、模型目录、执行与终止、detect
+    └── command/               # 通用命令 + argsTemplate（不给 detect/probe）
+
+src/sdk/                       # M3：插件能力面（log / now / paths / config / process）
 
 src/host/                      # 账本 + 投影 + 调度（M2；内核实现以外的宿主层）
-├── db.ts                      # node:sqlite 打开、PRAGMA、旧库 runs 一次性升级
+├── db.ts                      # node:sqlite 打开、PRAGMA、旧库 runs / runtimes 一次性升级
 ├── schema.ts                  # 九张投影表 + facts / projection_meta / process_registry
+├── sdk-host.ts                # 插件能力面原件（spawn / 解析 / 杀树 / 扫描目录 / 时钟 / 日志 / 会话根）
+├── executor-registry.ts       # 按 runtime.executorKey 取插件端口（未知 key 返回 null）
 ├── store/                     # 事实追加、投影应用与重建、视图装载与查询、存量导入
 ├── scheduler.ts               # 按运行时领取 → 执行器端口 → 帧批量入账 / 回执 / 取消时序
 ├── clock.ts                   # 唯一 setTimeout：nextWakeAt 到点 tick；run 状态变化后 rearm
 ├── effects.ts                 # 提交后分发：run.queued 唤醒调度器、变更广播
-├── executor.ts                # 执行器端口适配：状态归一、续接被拒重试
+├── executor.ts                # 执行器插件 → ExecutorPort 包装：状态归一、续接被拒重试
 ├── process.ts                 # 进程树终止 / 行读取 / 输出尾部
 ├── process-registry.ts        # 宿主私有进程登记（崩溃对账用）
 └── reconcile.ts               # 启动对账：杀残留进程树、回收超租约、补聊天错误消息
@@ -132,23 +138,25 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 > 单一数据库文件：`app.getPath('userData')/ai-workflow.db`。时间戳用 ISO 字符串；id 用 `crypto.randomUUID()`。schema 版本记在 `PRAGMA user_version`。
 
-| 表                | 关键字段                                                                                                                                                                                                                                                                                                                     | 说明                                                                                                                                                                             |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runtimes`        | id, name(uniq), protocol_family, command, profile, permission_mode, model, reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at                                                                                                                                                                   | 运行时 = 本机执行环境实例；`last_probe_json` 存最近一次探测结论（从未探测为 NULL）                                                                                               |
-| `agents`          | id, name, description, runtime_id → runtimes, system_prompt, created_at                                                                                                                                                                                                                                                      | 智能体 = 运行时 + 能力（System Prompt）                                                                                                                                          |
-| `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                           |
-| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, created_at                                                                                                                                                      | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一                                                                                      |
-| `tasks`           | id, title, description, workflow_id → workflows, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                                          | `status` = `active`\|`completed`                                                                                                                                                 |
-| `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进） |
-| `run_events`      | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                                                                                                                  | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段；纯追加                                                                                           |
-| `conversations`   | id, title, agent_id → agents(RESTRICT), session_id, created_at, updated_at                                                                                                                                                                                                                                                   | 一段独立对话：绑定智能体；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                               |
-| `messages`        | id, conversation_id → conversations(CASCADE), role, content, error, created_at                                                                                                                                                                                                                                               | `role` = `user`\|`assistant`；助手消息的 `error` 记录失败原因（非零退出/超时/取消）                                                                                              |
+| 表                | 关键字段                                                                                                                                                                                                                                                                                                                     | 说明                                                                                                                                                                                                                                                              |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtimes`        | id, name(uniq), executor_key, command, profile, args_template, permission_mode, model, reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at                                                                                                                                                       | 运行时 = 本机执行环境实例；`executor_key` 指向执行器插件（**无 CHECK**：取值合法性由宿主入口按插件注册表校验，避免加插件就改 DDL 触发全库重建；列本身 NOT NULL 无 DEFAULT，必须由 IPC 按 manifest 补齐）；`last_probe_json` 存最近一次探测结论（从未探测为 NULL） |
+| `agents`          | id, name, description, runtime_id → runtimes, system_prompt, created_at                                                                                                                                                                                                                                                      | 智能体 = 运行时 + 能力（System Prompt）                                                                                                                                                                                                                           |
+| `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                                                                                                            |
+| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, created_at                                                                                                                                                      | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一                                                                                                                                                                       |
+| `tasks`           | id, title, description, workflow_id → workflows, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                                          | `status` = `active`\|`completed`                                                                                                                                                                                                                                  |
+| `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进）                                                                                  |
+| `run_events`      | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                                                                                                                  | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段；纯追加                                                                                                                                                                            |
+| `conversations`   | id, title, agent_id → agents(RESTRICT), session_id, created_at, updated_at                                                                                                                                                                                                                                                   | 一段独立对话：绑定智能体；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                                                                                                                |
+| `messages`        | id, conversation_id → conversations(CASCADE), role, content, error, created_at                                                                                                                                                                                                                                               | `role` = `user`\|`assistant`；助手消息的 `error` 记录失败原因（非零退出/超时/取消）                                                                                                                                                                               |
 
 > M2 起九张业务表全部是**事实投影**（另有 `facts` 事实日志、`projection_meta` 指纹/seq、宿主私有 `process_registry`）：写路径只有「追加事实 + 应用投影」，`INSERT/UPDATE/DELETE` 集中在 `src/host/store/projection-apply.ts`；读路径走投影视图（`store.query`）。旧 `chat_conversations` / `chat_messages` 在首次启动时迁成导入事实后删除。
 
 外键约束开启（`PRAGMA foreign_keys = ON`）。删除工作流/任务由内核显式产 `run.removed` / `stage.deleted` / `task.removed` 事实（不依赖 SQL 级联，重建才等价）；删除被引用的运行时/智能体前先校验或拒绝（见 Boundaries）；运行时被删后 `runs.runtime_id` 置空、历史 run 保留。
 
-**迁移（v1 → v2，`user_version` 1 → 2）：** 按 SQLite 12-step 重建 `runtimes` / `runs` / `chat_conversations`（v2 删掉了 v1 的 `kind` / `args_template` / `prompt_mode`，且新列带 CHECK），新增 `run_events`，最后写 `PRAGMA user_version = 2`。**已有数据保留**：旧运行时按 v2 默认值补齐（`protocol_family=dsh`、`profile=multica`、`permission_mode=workspace-write`、`max_concurrent=1`），旧 run 的 `runtime_id`/`session_id`/`usage_json`/`duration_ms` 为 NULL、`error` 非空的失败 run 归 `exit_nonzero`，旧对话 `session_id` 为 NULL。迁移期间临时关闭外键，失败回滚。不做 v1 兼容读取。**M2 升级：** 旧 `runs` 表缺调度列时首启一次性物理重建；v2 存量（含旧聊天表）由 `src/host/store/import.ts` 写成 `snapshot.imported` 导入根后重建投影。该兼容层 M3 删除。
+**迁移（v1 → v2，`user_version` 1 → 2）：** 按 SQLite 12-step 重建 `runtimes` / `runs` / `chat_conversations`（v2 删掉了 v1 的 `kind` / `args_template` / `prompt_mode`，且新列带 CHECK），新增 `run_events`，最后写 `PRAGMA user_version = 2`。**已有数据保留**：旧运行时按 v2 默认值补齐（`protocol_family=dsh`、`profile=multica`、`permission_mode=workspace-write`、`max_concurrent=1`；其中 `protocol_family` 是旧字段，仅迁移归一用，M3 起由 `executor_key` 取代），旧 run 的 `runtime_id`/`session_id`/`usage_json`/`duration_ms` 为 NULL、`error` 非空的失败 run 归 `exit_nonzero`，旧对话 `session_id` 为 NULL。迁移期间临时关闭外键，失败回滚。不做 v1 兼容读取。**M2 升级：** 旧 `runs` 表缺调度列时首启一次性物理重建；v2 存量（含旧聊天表）由 `src/host/store/import.ts` 写成 `snapshot.imported` 导入根后重建投影。该兼容层 M3 **不删**（真实库仍是 v2 格式，首启必须靠它导入），删除条件与顺序作为 M3 之后的独立清理任务。
+
+**M3 升级（格式指纹换新，`user_version` 仍为 2）：** `runtimes` 去掉 `protocol_family`（旧字段，仅迁移归一用；该列被 CHECK 引用，SQLite 不能 `DROP COLUMN`）、加 `executor_key`（NOT NULL，无 DEFAULT）与 `args_template`（DEFAULT `''`；语义从 v1 的空格分隔参数串改为 JSON 数组文本），按 12-step 物理重建：外键 OFF → 建临时表 → 拷贝旧行（旧协议族按「旧值 = 执行器键」回填、`args_template` 补空串）→ 删旧表 → 改名。`KERNEL_VERSION` 升到 `m3.0.0`，与 DDL 变化双触发 → **首启全量重建投影**；重建 fold 的是历史事实 payload，老 `runtime.*` payload 缺 `executorKey`，由 `normalizeRuntime` 归一（缺 `executorKey` → 取旧 `protocolFamily`，当前仅 `dsh`；`argsTemplate` 补空串）。回滚只能恢复升级前的 DB 备份。
 
 ## 阶段状态机（核心规则）
 
@@ -183,32 +191,35 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 ## 运行时（v2，2026-11-03 重做）
 
-> 对齐 Multica：运行时 = 本机执行环境实例 = 协议族后端 + 启动方式 + 执行策略；进程间用版本化 JSONL 协议通信，健康由 `--probe` 帧给出。旧实现（`command` + 空格分隔 `args` + `promptMode` + 通用 spawn + 探测真跑一次 prompt）已删除，不保留兼容字段。
+> 对齐 Multica：运行时 = 本机执行环境实例 = 执行器插件（`executorKey`）+ 启动方式 + 执行策略；进程间用版本化 JSONL 协议通信，健康由插件探测给出。M3 起执行器全部是插件（`src/plugins/executors/`），新增协议只改插件目录 + registry 一行。旧实现（`command` + 空格分隔 `args` + `promptMode` + 探测真跑一次 prompt）已删除，不保留兼容字段。
 
 ### 运行时模型
 
-| 字段              | 说明                                                                                                                                      |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `protocolFamily`  | 协议族；当前仅 `dsh`。新增协议 = 新增后端实现，不改 UI 契约                                                                               |
-| `command`         | 启动命令：命令名或绝对路径（默认 `dsh`）                                                                                                  |
-| `profile`         | 协议 profile（默认 `multica`）；由该 profile 提供 `--stdio` / `--probe` / `--list-models`                                                 |
-| `permissionMode`  | `read-only` / `workspace-write` / `danger-full-access`；经 `DSH_PERMISSION_MODE` 传入子进程。stdio 传输**没有审批往返**，越界操作直接失败 |
-| `model`           | provider/model 形式 id；`null` = CLI 默认模型                                                                                             |
-| `reasoningEffort` | 推理强度；`null` = 模型默认                                                                                                               |
-| `workdir`         | 执行工作目录；`null` = 主进程当前目录                                                                                                     |
-| `maxConcurrent`   | 同一运行时同时执行的 run 上限，超出排队                                                                                                   |
-| `enabled`         | 停用后不再派发执行                                                                                                                        |
-| `lastProbe`       | 最近一次探测结论（见下）；从未探测为 `null`                                                                                               |
+| 字段              | 说明                                                                                                                                                 |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `executorKey`     | 执行器插件键：决定「怎么调起一轮」，不决定派给谁；取值必须是插件注册表里的已注册 key，缺省取注册表首项                                               |
+| `command`         | 启动命令：命令名或绝对路径；缺省由所选执行器插件 manifest 提供（dsh 默认 `dsh`，command 默认为空待填）                                               |
+| `profile`         | 启动 profile；dsh 用它选 `--stdio` / `--probe`，其它执行器可为空串；缺省同样来自 manifest                                                            |
+| `argsTemplate`    | `command` 执行器的参数模板（JSON 数组文本，≤20 项、单项 ≤500 字符；空串 = 无参数）；占位符白名单 `{model}`/`{effort}`/`{cwd}`/`{context}`/`{prompt}` |
+| `permissionMode`  | `read-only` / `workspace-write` / `danger-full-access`；经 `DSH_PERMISSION_MODE` 传入子进程。stdio 传输**没有审批往返**，越界操作直接失败            |
+| `model`           | provider/model 形式 id；`null` = CLI 默认模型                                                                                                        |
+| `reasoningEffort` | 推理强度；`null` = 模型默认                                                                                                                          |
+| `workdir`         | 执行工作目录；`null` = 主进程当前目录                                                                                                                |
+| `maxConcurrent`   | 同一运行时同时执行的 run 上限，超出排队                                                                                                              |
+| `enabled`         | 停用后不再派发执行                                                                                                                                   |
+| `lastProbe`       | 最近一次探测结论（见下）；从未探测为 `null`                                                                                                          |
 
-- 契约中 `RuntimeInput` 除 `name` 外均可省略，省略时取默认值：`protocolFamily=dsh`、`command=dsh`、`profile=multica`、`permissionMode=workspace-write`、`maxConcurrent=1`（取值 1–8，超出按 8 归一）、`enabled=true`、`model/reasoningEffort/workdir=null`。
-- 命令解析：命令名扫 PATH + 常见全局目录；带路径分隔符的按路径处理，找不到即失败（不做模糊回退）。Windows 下 `.cmd`/`.bat` 经 shell 启动。
+- 契约中 `RuntimeInput` 除 `name` 外均可省略。`executorKey` / `command` / `profile` 由 IPC 入口按所选执行器插件 manifest 补齐（未指定 key 取注册表首项）；其余默认 `argsTemplate=''`、`permissionMode=workspace-write`、`maxConcurrent=1`（取值 1–8，超出按 8 归一）、`enabled=true`、`model/reasoningEffort/workdir=null`。**内核不写任何产品默认值**。
+- 新增运行时协议不改内核、宿主或 UI：写一个执行器插件（`src/plugins/executors/<id>/`）并在 `src/plugins/registry.ts` 加一行，即可被 `runtimes.executors()` 列出、被 detect 汇总、被配置选中并跑通一轮。
+- 命令解析：命令名扫 PATH + 常见全局目录；带路径分隔符的按路径处理，找不到即失败（不做模糊回退）。Windows 下 `.cmd`/`.bat` 经 `cmd.exe /c <脚本> <参数...>` 固定包装、`shell:false`。
 - 凭据：沿用本机 CLI 已有的登录态，**不把任何 token 存进数据库**。
 
 ### 探测与健康
 
-- `dsh --profile <p> --probe` 输出**一帧** `{ v: 1, type: 'probe', runtime: 'dsh', protocol_version, plugin_version }`；配合 `dsh --version` 解析 CLI 版本（读取超时 15s）。
+- `dsh` 插件内部：`dsh --profile <p> --probe` 输出**一帧** `{ v: 1, type: 'probe', runtime: 'dsh', protocol_version, plugin_version }`；配合 `dsh --version` 解析 CLI 版本（读取超时 15s）。
 - 结论 = `RuntimeProbe` 并持久化到运行时行（`lastProbe`）：`state`（`ready` / `unavailable`）、`path`（可执行文件绝对路径，解析失败为 null）、`cliVersion`、`protocolVersion`、`pluginVersion`、`error`、`output`（诊断输出尾部，最多 4000 字符）、`elapsedMs`、`checkedAt`。
-- `state=ready` 仅当 probe 帧合法、`v=1`、`protocol_version=1` 且 `runtime='dsh'`；否则 `unavailable` 并记 `error`：找不到可执行文件 / 启动失败 / 探测超时（60s）/ 无 probe 帧（含非零退出）/ 协议版本不兼容。
+- `state=ready` 仅当 probe 帧合法、`v=1`、`protocol_version=1` 且 `runtime='dsh'`；否则 `unavailable` 并记 `error`：找不到可执行文件 / 启动失败 / 探测超时（60s）/ 无 probe 帧（含非零退出）/ 协议版本不兼容。**帧结构、版本判定与 `runtime='dsh'` 校验全部归 `dsh` 插件内部**，宿主与内核只消费 `RuntimeProbe`，不认识产品名。
+- 探测后端由运行时的 `executorKey` 选；`probe` 是插件可选能力，未提供时 `runtimes.create` / `runtimes.probe` 抛「执行器不支持探测」（`command` 插件即如此，它不提供 `detect` / `probe`）。
 - **不产生 run、不调用模型**；`runtimes.detect` 只读（不写库），`runtimes.probe` 把结论写回 `lastProbe`。
 - `runtimes.create`：先探测，失败抛错且**不落库**；`runtimes.update`：保存后重新探测并落库最新结论（探测失败不抛错）。
 - 负载不落库：`runtimes.statuses()` 按 `runs` 现算 `running` / `queued` / `maxConcurrent`（无活跃 run 记 0）。
@@ -216,24 +227,29 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 ### 检测（detect）
 
-`runtimes.detect` 扫描本机已安装的 agent CLI，返回 `DetectedRuntime[]`：
+`runtimes.detect` 扫描本机已安装的 agent CLI，返回 `DetectedRuntime[]`。M3 起候选清单与扫描都在插件侧汇总，宿主不再维护白名单：
 
 ```ts
 export interface DetectedRuntime {
   command: string // CLI 命令名，如 dsh / claude
   label: string // 展示名，如 "DeepSeek Harness"
   path: string // 可执行文件绝对路径
-  supported: boolean // 当前版本是否可作为运行时接入（协议后端已实现）
+  executorKey: string // 对应执行器插件键；本机已装但无插件认领时为 ''
+  supported: boolean // 插件注册表里是否存在该执行器（有插件即可接入）
 }
 ```
 
-- **扫描目录**：`process.env.PATH` 全部条目 + 常见全局安装目录（Windows：`%APPDATA%/npm`、`~/.local/bin`、`~/.claude/local`、`%ProgramFiles%/nodejs`；POSIX：`~/.local/bin`、`~/.npm-global/bin`、`~/.bun/bin`、`~/.claude/local`、`/usr/local/bin`、`/opt/homebrew/bin`）；不存在的目录跳过。
-- **候选清单**（固定顺序）：`dsh`、`claude`、`codex`、`gemini`、`opencode`、`aider`、`cursor-agent`、`qwen`、`goose`、`crush`。`supported` 仅 `dsh` 为 true（其余只展示，暂不可接入）。
+- **来源**：各执行器插件的 `detect(ctx)`（`src/plugins/executors/*/detect.ts`）只报自己能接入的命中；`executorKey` 与 `supported` 由 `src/plugins/registry.ts` 的 `detectAll` 汇总时回填，插件不自报。
+- **汇总规则**：按 registry 的 `executors` 数组顺序**串行**调用；单插件超时 2 s、抛错只跳过该插件并记日志（整体不抛）；同一 `command` 被多个插件声明时先到先得并记一条 warn；输出按 `src/plugins/shared/cli-catalog.ts` 的候选顺序稳定排列。
+- **扫描目录**（`sdk.process.scanDirs()`）：`process.env.PATH` 全部条目 + 常见全局安装目录（Windows：`%APPDATA%/npm`、`~/.local/bin`、`~/.claude/local`、`%ProgramFiles%/nodejs`；POSIX：`~/.local/bin`、`~/.npm-global/bin`、`~/.bun/bin`、`~/.claude/local`、`/usr/local/bin`、`/opt/homebrew/bin`）；不存在的目录跳过。
+- **候选清单**（`cli-catalog.ts`，顺序即输出顺序）：`dsh`、`claude`、`codex`、`gemini`、`opencode`、`aider`、`cursor-agent`、`qwen`、`goose`、`crush`。没有插件认领的 CLI 仍列出（`supported:false`，`executorKey=''`）。
 - **命中判定**：Windows 命中 `<cmd>.exe|.cmd|.bat|.ps1` 任一（npm 全局装的是 shim）；POSIX 命中同名且有可执行位（`mode & 0o111`）。同一命令多处命中取 PATH 中靠前者。
-- **零副作用**：不 spawn 任何进程、不读版本号，只读文件系统。
-- **UI 行为**：运行时配置页顶部列出检测结果与路径；`supported=true` 显示「使用」打开新建表单并预填 `label`/`command`（名称与现有运行时重名时改为 `label (command)`），`supported=false` 显示「暂不支持」并禁用；已添加过的命令显示「已添加」并禁用按钮。检测只影响表单预填，不新建运行时记录。
+- **零副作用**：不 spawn 任何进程、不读版本号，只读文件系统；`runtimes.detect` 不写库、不发 changed。
+- **UI 三态**：已添加过的命令显示「已添加」并禁用；`supported=true` 显示「使用」打开新建表单并预填 `label`/`command`/`executorKey`（名称与现有运行时重名时改为 `label (command)`）；`supported=false`（本机已装但无插件认领）显示「暂不支持」并禁用。检测只影响表单预填，不新建运行时记录。
 
-### 执行协议（`dsh --profile <p> --stdio`，JSONL v1）
+### 执行协议（`dsh` 插件：`dsh --profile <p> --stdio`，JSONL v1）
+
+以下帧全部由 `dsh` 执行器插件解析，宿主只经 `ExecutorIO` / `Receipt` 收数据。
 
 - 每个 run 启动一个子进程：`dsh --profile <p> --stdio`；stdin / stdout 逐行 JSON，stderr 只保留尾部用于诊断。
 - stdin 帧：
@@ -305,7 +321,7 @@ export interface DetectedRuntime {
 ### 调度
 
 - 同一运行时按 `maxConcurrent` 限流：超出上限的 run 保持 `queued`，队列全局 FIFO；不同运行时并行。
-- 运行时不存在 / 已停用时不派发，run 直接 `failed` 并记 `runtime_missing` / `runtime_disabled`。
+- 运行时不存在 / 已停用时不派发，run 直接 `failed` 并记 `runtime_missing` / `runtime_disabled`；配置引用了未注册的 `executorKey` 同样落 `runtime_missing`（文案 `执行器插件未注册: <key>`），不新增 `errorCode`。
 - `src/host/scheduler.ts` 负责：领取（内核按 `notBefore`/`queueSeq` 决定顺序与并发窗口）、调执行器端口跑一轮、帧批量入账、回执转交内核、取消时序（abort → 宽限 → 强杀 → 兜底终态）；租约/超时/退避由唯一 `clock.tick` 驱动。终态后由内核产 `RUN_SUCCEEDED`/`RUN_FAILED` 的阶段流转事实；取消的 run 不推进阶段。
 
 ## IPC 契约（`window.aiWorkflow`）
@@ -321,8 +337,10 @@ export interface AiWorkflowApi {
     /** 保存后重新探测并落库最新结论（不抛探测错误） */
     update(id: string, patch: Partial<RuntimeInput>): Promise<Runtime>
     remove(id: string): Promise<void>
-    /** 扫描本机已安装的 agent CLI（只读，不写库） */
+    /** 扫描本机已安装的 agent CLI（只读，不写库；走插件注册表汇总） */
     detect(): Promise<DetectedRuntime[]>
+    /** 可选执行器清单（来自插件注册表）；运行时表单下拉，只读 */
+    executors(): Promise<RuntimeExecutorChoice[]>
     /** 真实探测一次（--probe + --version），把结论写入运行时；不产生 run */
     probe(id: string): Promise<RuntimeProbe>
     /** 各运行时的实时负载（按 runs 现算，不落库） */
@@ -368,8 +386,11 @@ export interface AiWorkflowApi {
 }
 ```
 
+- `runtimes.create` 的 `RuntimeInput`：`name` 必填，其余可省略。`executorKey` / `command` / `profile` 的缺省值由 IPC 按所选执行器插件 manifest 补齐（未指定 key 取注册表首项，未知 key 给可读错误），`argsTemplate` 缺省为空串；创建前按补齐后的配置探测，失败不落库。
+- `RuntimeExecutorChoice = { key, label, command, profile }`（顺序即 `registry.executors` 顺序）；`DetectedRuntime` 形状见「检测（detect）」。
+- `runtimes.detect` / `runtimes.executors` 都是只读：不写库、不发 changed。
 - 主进程在每次写操作与 run 进度变化后发 `ai-workflow:changed`；renderer 收到后失效重取（对齐 Multica「事件失效缓存」的做法）。`runtimes.detect` 只读，不发 changed。
-- 聊天流走**单独通道** `ai-workflow:chat`：每条 `RunEvent` 以 `{type:'event', event}` 推送，一轮结束时推 `{type:'end'}`（此时结果已落库），renderer 收到 `end` 再重取消息与会话列表。聊天不写 `runs`/`run_events`，也不进入 runner 队列。
+- 聊天流走**单独通道** `ai-workflow:chat`：每条 `RunEvent` 以 `{type:'event', event}` 推送，一轮结束时推 `{type:'end'}`（此时结果已落库），renderer 收到 `end` 再重取消息与会话列表。聊天与阶段共用 `run` 生命周期（`purpose='chat'`，事件与终态照常入 `runs`/`run_events`，经同一 scheduler 与执行器端口）；旁路通道只做实时显示，事实才是数据源。
 - 运行事件流只来自协议帧：`RunEvent` 的 `text`/`thinking`/`tool_call`/`tool_result`/`status` 与协议帧一一对应，不从原始文本猜测；stderr 不作为模型输出。
 - 契约新增**不得**改动既有 `window.workbench.notify` 等 shell 契约；只新增 `window.aiWorkflow` 命名空间。
 
@@ -381,7 +402,7 @@ export interface AiWorkflowApi {
 export type StageEffect =
   { type: 'createRun'; stageId: string; agentId: string } | { type: 'waitUser' } | { type: 'none' }
 
-/** 纯函数：不读写库、不 spawn；由 runner/UI 执行返回的 effects */
+/** 纯函数：不读写库、不 spawn；由宿主执行返回的 effects */
 export function moveTask(
   task: Task,
   event: StageEvent, // RUN_SUCCEEDED | RUN_FAILED（自动流转）
@@ -412,12 +433,13 @@ export function completeTask(task: Task): Task
 - **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「已完成」区触发 `complete`；TaskCard 可拖拽（有活跃 run 时不可拖）并按进入方式显示提示；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉；RunLog 事件流（text/thinking/tool 折叠、运行中轮询、errorCode 文案、用量/退出码/耗时）；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示。
 - **聊天 hook（`useChat`）：** 新建/发送/`event` 流式回显/`end` 落库重载/中止/删除/各类错误分支、卸载退订、只处理当前会话的增量。
 - **页面：** 两栏布局下工作台默认落在「聊天」栏（侧栏顶部切换条 + 会话列表可见、设置栏目不可见），切「任务」显示看板与运行记录并隐藏输入区，侧栏底部「工作台/设置」分段控件切换视图，设置三栏目互不混排。
+- **执行器插件（`tests/plugins`）：** registry 汇总（顺序稳定、`executorKey`/`supported` 回填、同 command 先到先得、单插件抛错或超时隔离、空注册表）、`command` 插件的参数模板展开与 `{prompt}` 二选一（argv 元素 / stdin）、Windows `.cmd` 固定包装、假协议端到端验收（真 registry + 真 scheduler + 内存库）。
 - 覆盖率：`stage-machine.ts` 分支覆盖 100%；其余按 `pnpm check` 阈值。
 
 ## Boundaries
 
-- **Always：** 阶段流转/默认目标解析只写在 `stage-machine.ts`；SQLite 只在主进程读写，renderer 一律经 `window.aiWorkflow`；进程执行经可注入的协议后端，事件只来自协议帧；提交前 `pnpm check` 通过。
-- **Ask first：** 新增 npm 依赖（尤其原生模块）；修改 shell 的 `AppDefinition` 或既有 `WorkbenchApi` 契约；改变数据库文件位置或引入迁移框架；新增协议族（`protocolFamily` 当前仅 `dsh`）。
+- **Always：** 阶段流转/默认目标解析只写在 `stage-machine.ts`；SQLite 只在主进程读写，renderer 一律经 `window.aiWorkflow`；进程执行经执行器插件端口，事件只来自协议帧；新增运行时协议只写 `src/plugins/executors/<id>/` + registry 一行，不改内核/宿主/UI；提交前 `pnpm check` 通过。
+- **Ask first：** 新增 npm 依赖（尤其原生模块）；修改 shell 的 `AppDefinition` 或既有 `WorkbenchApi` 契约；改变数据库文件位置或引入迁移框架。
 - **Never：** 在 renderer 直接 `require('electron')`/用 `fs`/`child_process`；把业务规则写进组件；把凭据/token 明文写库；从原始文本猜测事件或把 stderr 当模型输出；删除失败测试或改测试预期来掩盖问题。
 
 ## Success Criteria
@@ -433,13 +455,13 @@ export function completeTask(task: Task): Task
 9. 聊天记录落 SQLite（含会话 `session_id`）：新建对话、消息、标题在重启后仍在；删除对话级联删除其消息；同一对话第二轮续接会话，`resume_rejected` 时自动重试一次。
 10. 阶段状态机分支覆盖 100%；`pnpm check` 全绿。
 11. 顶部栏出现"AI 工作流"标签并可切换（由 shell 承载，app 无需感知）。
+12. 新增一个假运行时协议只写 `src/plugins/executors/<id>/` + registry 一行，即可被 `runtimes.detect` 汇总到、在运行时表单里选中并跑通一轮；`git diff` 证明 kernel / host / renderer 未因新增协议改动。
 
 ## Out of scope（本 MVP 不做）
 
 - 远端 Worker / 多设备执行 / 登录与多用户（仅留架构位）。
 - Postgres / Redis 等外部服务；除 SQLite 外无其它存储。
 - 多审批人、超时提醒、打回的多级语义、审批意见流。
-- 其它协议族的后端实现（claude code / codex 等）：`protocolFamily` 当前仅 `dsh`。
 - stdio 审批往返：权限越界直接失败，不弹审批。
 - MCP server 注入：协议字段 `mcp_servers` 固定空数组（仅预留）。
 - 统计分析、成本/token 看板、任务依赖图（`usage` 已记录，不做统计视图）。

@@ -85,7 +85,7 @@ export interface Sdk {
 ## Manifest
 
 ```ts
-// src/plugins/manifest.ts
+// src/protocol/manifest.ts（src/plugins/manifest.ts 只做再导出）
 export type PluginKind = 'source' | 'executor' | 'channel' | 'app'
 export type Capability = 'net' | 'fs.read' | 'fs.write' | 'spawn' | 'notify'
 
@@ -197,7 +197,6 @@ export interface ExecutorIO {
   process?(pid: number): void // spawn 成功即上报，崩溃对账用
 }
 
-
 export interface Receipt {
   status: 'succeeded' | 'failed' | 'cancelled'
   /** 原样回传 Turn.leaseId（内核据此拒绝迟到尝试，见 SPEC-kernel「调度」） */
@@ -229,6 +228,8 @@ export interface Receipt {
 - **失败隔离**：单个插件抛错或超时（默认 2 s/插件）只跳过该插件并记日志，不影响其它插件与 UI；整体永不抛。
 - **同名去重**：同一 `command` 被多个插件声明时，按注册表顺序先到先得，冲突记一条 warn、不抛。
 - **未注册也列出**：本机装了但无插件认领的 CLI 仍以 `supported:false` 出现，UI 三态（已添加 / 使用 / 暂不支持）不变。
+
+**回执与执行约定**：
 
 - 回执必须原样回传 `Turn` 里的 `leaseId` 与 `turn`；内核据此拒绝迟到尝试的写入（见 SPEC-kernel「调度」）。
 - 回执的 `ask / notices / resolves / later / events` 与 autoloop 的回执块语义一致；解析失败时**只重写最后一条回复**，不重做业务，重写上限 2 次。
@@ -271,20 +272,20 @@ export interface AppPlugin {
 
 ## 内置插件清单
 
-| 类型     | id                 | 说明（运行时协议）                                                                                       | 现状来源                                                         |
-| -------- | ------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| executor | `dsh`              | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                  | `src/plugins/executors/dsh/`（含 `detect.ts`）                   |
-| executor | `command`          | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`** | `src/plugins/executors/command/`                                 |
-| executor | `claude` / `codex` | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                         | 后续                                                             |
-| source   | `app`              | app 插件发来的事件（如番茄结束）                           | 新增                                              |
-| source   | `manual`           | 设置里手动触发一条自动化规则                               | 新增                                              |
-| source   | `webhook`          | 本机 HTTP + HMAC 验签                                      | M6                                                |
-| source   | `fs`               | 目录变化去抖                                               | 可选                                              |
-| channel  | `in-app`           | 默认通道：卡片落投影，UI 直接批                            | 新增                                              |
-| channel  | `desktop`          | Electron 系统通知                                          | `main/tray.ts`、`workbench:notify` 改造           |
-| channel  | `webhook`          | 飞书/钉钉/Slack 等（需可达地址）                           | M7                                                |
-| app      | `pomodoro`         | 计时；可发 `pomodoro.completed` 事件                       | `src/renderer/src/apps/pomodoro`                  |
-| app      | `ai-workflow`      | 看板/聊天/设置三视图                                       | `src/renderer/src/apps/ai-workflow`               |
+| 类型     | id                 | 说明（运行时协议）                                                                                       | 现状来源                                       |
+| -------- | ------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| executor | `dsh`              | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                 | `src/plugins/executors/dsh/`（含 `detect.ts`） |
+| executor | `command`          | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`** | `src/plugins/executors/command/`               |
+| executor | `claude` / `codex` | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                         | 后续                                           |
+| source   | `app`              | app 插件发来的事件（如番茄结束）                                                                         | 新增                                           |
+| source   | `manual`           | 设置里手动触发一条自动化规则                                                                             | 新增                                           |
+| source   | `webhook`          | 本机 HTTP + HMAC 验签                                                                                    | M6                                             |
+| source   | `fs`               | 目录变化去抖                                                                                             | 可选                                           |
+| channel  | `in-app`           | 默认通道：卡片落投影，UI 直接批                                                                          | 新增                                           |
+| channel  | `desktop`          | Electron 系统通知                                                                                        | `main/tray.ts`、`workbench:notify` 改造        |
+| channel  | `webhook`          | 飞书/钉钉/Slack 等（需可达地址）                                                                         | M7                                             |
+| app      | `pomodoro`         | 计时；可发 `pomodoro.completed` 事件                                                                     | `src/renderer/src/apps/pomodoro`               |
+| app      | `ai-workflow`      | 看板/聊天/设置三视图                                                                                     | `src/renderer/src/apps/ai-workflow`            |
 
 ## 外部插件（v2）
 

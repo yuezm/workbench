@@ -19,6 +19,8 @@
 
 派活链固定为：**规则 → 任务（工作流 + 阶段）→ 阶段绑定的智能体 `agentId` → 该智能体的运行时 `runtimeId` → 运行时的 `executorKey` 选择执行器插件**。规则只建任务，不直接派 run。内核只透传 `executorKey` 字符串，不知道 dsh、claude 是什么。执行器插件不是派活目标，也不能自己挑活。
 
+内核只校验 `executorKey` 的形状（非空 slug，`^[a-z][a-z0-9-]{0,63}$`），**不校验取值**；取值合法性由宿主入口按执行器插件注册表判断。`command` / `profile` / `executorKey` 的缺省值由 IPC 入口按执行器插件 manifest 补齐后再 `dispatch`，内核只见完整输入、零产品名。
+
 ## 类型契约
 
 ```ts
@@ -63,6 +65,27 @@ export interface View {
   conversations: Map<Id, ConversationRow>
   messages: Map<Id, MessageRow>
   eventKeys: Set<string> // (source, dedupeKey) 去重
+}
+
+/**
+ * `View.runtimes` 的元素（`runtimes` 投影行）：字段与 `src/protocol/entities.ts` 的
+ * `Runtime` 逐列对应。M3 起用 `executorKey` 表达「用哪个执行器插件」，无协议族字段。
+ */
+export interface RuntimeRow {
+  id: Id
+  name: string
+  executorKey: string // 执行器插件键（slug；取值合法性由宿主入口按注册表判断）
+  command: string // 启动命令（缺省值来自执行器插件 manifest）
+  profile: string // 启动 profile（dsh 用它选 --stdio/--probe；其它执行器可为空串）
+  argsTemplate: string // 参数模板（JSON 数组文本；空串 = 无参数）
+  permissionMode: PermissionMode
+  model: string | null
+  reasoningEffort: string | null
+  workdir: string | null
+  maxConcurrent: number
+  enabled: boolean
+  createdAt: Iso
+  lastProbe: RuntimeProbe | null
 }
 
 export interface Environment {
@@ -189,6 +212,8 @@ export interface Change {
 | `rules.replaced`                                     | `version, rules`                                                                                                                                                                                                               | `rules`                                   |
 | `snapshot.imported`                                  | `table, rows[], importedFrom`（按表分批；M1 迁移专用，只写一次）                                                                                                                                                               | 对应投影                                  |
 
+**运行时 payload（M3）：** `runtime.created` / `updated` / `removed` / `probed` 的 payload 是完整 `Runtime` 行，**不再带协议族字段**（`protocolFamily` 是旧字段，仅迁移归一用）；老 payload 由宿主 `normalizeRuntime` 在折叠时回填 `executorKey` / `argsTemplate`，不保留兼容字段。这样重建与实时写入折出同一行。
+
 **导入根：** `snapshot.imported` 是没有 `cause` 的基线，`timeline` 对它返回「迁移导入」而不是伪造因果链。导入之后的事实才具备完整 `why`。
 
 ## 阶段语义（不变）
@@ -305,6 +330,7 @@ export interface ThreadRow {
 - 宿主记录 `projection_meta { format, seq }`；`format` 由「投影 DDL 哈希 + 内核版本」算出。
 - 启动时 `format` 不匹配或 `seq < max(facts.seq)` → 同一事务内清空投影，按 `seq` 顺序 fold `project()` 重建，最后写回 `projection_meta`。
 - 升级不再写数据迁移脚本；格式变化只改 DDL 与 `project`，历史行为由事实日志保留。
+- **契约删除字段必须先加归一函数**：投影 DDL 改一个字符就换指纹、首启即重建，而重建 fold 的是历史 payload（老 `runtime.*` payload 没有 `executorKey`）。顺序是「先加 `normalizeRuntime` → 再改 DDL/契约」；颠倒会让老库升级直接失败。
 - 事实 payload 演化需写一次性转换（读取时兼容→重写），属于宿主责任，规范在此承认。
 - 事实日志只追加；保留策略：投影可裁剪 180 天前的已完成 run（事实不删），裁剪后视图仍能从日志补齐单条。
 

@@ -72,6 +72,13 @@
 - 打包门禁复核（2026-11-05）：`tests/e2e-packaged` 的仓库根路径少一级、表清单仍断言旧 `chat_*` 表，两处已修；但 electron-builder 产出的 `Workbench.exe` 在本机启动即崩（`--version` 同样 0x80000003，dev Electron 45.1.0 正常），与 M2 代码无关，待工具链（electron-builder / asar 完整性）排查后再恢复该门禁。
 - 任务级证据与偏差见 [tasks/m2-todo.md](../../tasks/m2-todo.md) 与 [tasks/m2-plan.md](../../tasks/m2-plan.md)。
 
+## M3 开工记录（2026-11-05）
+
+- 分支 `refactor/m3-executors`，起点 `master` @ `831f2dd`；实施计划与任务清单见 [tasks/m3-plan.md](../../tasks/m3-plan.md)、[tasks/m3-todo.md](../../tasks/m3-todo.md)，测绘证据见 `tasks/recon/m3-{dsh,runtime-config,gates}.md`。
+- 范围口径：`executorKey` 取代 `protocolFamily`（`runtimes` 表 12-step 升级 + `normalizeRuntime` + `KERNEL_VERSION=m3.0.0` 首启重建）；新增 `src/sdk` 最小能力面（log/now/paths/config/process.spawn+resolve+killTree+scanDirs）；新增 `src/plugins/{manifest,registry,shared,executors/dsh,executors/command}`；`detect` 归插件；`ExecutorBackend` 适配层删除、`resume_rejected` 重试留宿主；未知执行器落 `runtime_missing` 终态，不新增 errorCode。`card.*`/通道留 M4，IPC 三动词与 `kernelStore` 留 M5，`command` 插件归 M3b 可后置。
+- 回滚点：开工前已复制 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1055-pre-m3.db`（sha256 与源库一致、`integrity_check=ok`、9 表 125 行）并导出同目录 JSON。**该实库仍是 M1 之前的 v2 格式（无 `facts` 表）**，M3 首启会走 `host/store/import.ts` 兼容层，因此本阶段不删 M2 兼容层（删除条件写入 M3 退出记录）。
+- 待评审口径：m3-plan「架构决议 D1–D14」与「开放问题」5 条（`executorKey` 取代方案、`supported` 语义、`command` 插件范围、兼容层去留、新 RPC 通道）。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

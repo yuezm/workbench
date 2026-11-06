@@ -208,7 +208,7 @@ export function AiWorkflowPage(): ReactElement {
                 />
               ) : (
                 <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
-                  尚无工作流。到「设置」里的「工作流配置」新建一条，再回来建任务并拖拽推进。
+                  尚无工作流，到「设置 → 工作流」新建。
                 </div>
               )}
             </section>
@@ -225,7 +225,7 @@ export function AiWorkflowPage(): ReactElement {
                 value={selectedTaskId ?? ''}
                 onChange={(v) => setSelectedTaskId(v || undefined)}
                 options={[
-                  { value: '', label: '（选择任务）' },
+                  { value: '', label: '选择任务' },
                   ...tasks.map((t) => ({ value: t.id, label: t.title })),
                 ]}
               />
@@ -240,35 +240,35 @@ export function AiWorkflowPage(): ReactElement {
           <div className="flex min-h-0 flex-1 flex-col overflow-auto p-6">
             {section === 'runtimes' && (
               <>
-                <SectionHeader title="运行时" hint="本机执行的 CLI，智能体绑定到运行时" />
+                <SectionHeader title="运行时" hint="本机 CLI" />
                 <RuntimeManager />
               </>
             )}
 
             {section === 'agents' && (
               <>
-                <SectionHeader title="智能体" hint="运行时 + 能力（System Prompt）" />
+                <SectionHeader title="智能体" hint="运行时 + 提示词" />
                 <AgentManager />
               </>
             )}
 
             {section === 'workflows' && (
               <>
-                <SectionHeader title="工作流" hint="阶段序列与流转规则" />
+                <SectionHeader title="工作流" hint="阶段与流转" />
                 <WorkflowManager />
               </>
             )}
 
             {section === 'rules' && (
               <>
-                <SectionHeader title="规则" hint="事件或定时条件自动建任务" />
+                <SectionHeader title="规则" hint="条件自动建任务" />
                 <RulesManager />
               </>
             )}
 
             {section === 'plugins' && (
               <>
-                <SectionHeader title="插件" hint="外部能力与授权（信任门，不是系统沙箱）" />
+                <SectionHeader title="插件" hint="外部能力与授权" />
                 <PluginsManager />
               </>
             )}

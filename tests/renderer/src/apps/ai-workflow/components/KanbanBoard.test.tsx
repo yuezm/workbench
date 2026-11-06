@@ -113,7 +113,7 @@ describe('KanbanBoard', () => {
       />,
     )
     expect(screen.getByText('工作流「研发」')).toBeInTheDocument()
-    expect(screen.getByText('拖拽卡片切换阶段')).toBeInTheDocument()
+    expect(screen.getByText('拖拽换阶段')).toBeInTheDocument()
     expect(screen.getByText('待办')).toBeInTheDocument()
     expect(screen.getByText('审核')).toBeInTheDocument()
     expect(screen.getByText('卡片任务')).toBeInTheDocument()
@@ -180,7 +180,7 @@ describe('KanbanBoard', () => {
     const card = screen.getByLabelText('任务：卡片任务')
     expect(card).toHaveAttribute('draggable', 'false')
     expect(card.className).toContain('cursor-default')
-    expect(screen.queryByText('上次执行未完成，可拖走重试')).not.toBeInTheDocument()
+    expect(screen.queryByText('可拖走重试')).not.toBeInTheDocument()
   })
 
   it('queued/waiting 也算执行中；失败/取消/成功都不锁卡片', async () => {
@@ -194,14 +194,14 @@ describe('KanbanBoard', () => {
     // t2 无活跃 run：可拖，且文案按进入方式提示
     expect(screen.getByLabelText('任务：待办任务')).toHaveAttribute('draggable', 'true')
     expect(screen.getByLabelText('任务：待办任务').className).toContain('cursor-grab')
-    expect(screen.getByText('拖到其它阶段推进')).toBeInTheDocument()
+    expect(screen.getByText('拖动推进')).toBeInTheDocument()
   })
 
   it('agent 阶段失败后无活跃 run：显示可拖走重试文案', async () => {
     kernel.setView('tasks.executing', undefined, [])
     setup([task], agentWf)
 
-    expect(await screen.findByText('上次执行未完成，可拖走重试')).toBeInTheDocument()
+    expect(await screen.findByText('可拖走重试')).toBeInTheDocument()
     const card = screen.getByLabelText('任务：卡片任务')
     expect(card).toHaveAttribute('draggable', 'true')
     expect(card.className).toContain('cursor-grab')

@@ -34,24 +34,24 @@ test('AI 工作流：顶部标签可进入，单列侧栏切换栏目，设置�
   await expect(page.getByRole('navigation', { name: '设置栏目' })).toBeVisible()
 
   // 运行时配置
-  await expect(page.getByText('运行时', { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '运行时', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: '新建运行时' })).toBeVisible()
   await expect(page.getByLabel('运行时名称')).toBeHidden()
 
   // 点「新建运行时」才弹出表单
   await page.getByRole('button', { name: '新建运行时' }).click()
   await expect(page.getByLabel('运行时名称')).toBeVisible()
-  await expect(page.getByRole('button', { name: '添加运行时' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '添加' })).toBeVisible()
   await page.getByRole('button', { name: '取消' }).click()
   await expect(page.getByLabel('运行时名称')).toBeHidden()
 
   // 智能体配置
-  await page.getByRole('button', { name: '智能体配置' }).click()
-  await expect(page.getByText('智能体', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '智能体', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '智能体', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '运行时' })).toBeHidden()
 
   // 工作流配置
-  await page.getByRole('button', { name: '工作流配置' }).click()
+  await page.getByRole('button', { name: '工作流', exact: true }).click()
   // exact：栏目标题「工作流」与其它含「工作流」的文案区分开
   await expect(page.getByRole('heading', { name: '工作流', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '智能体' })).toBeHidden()

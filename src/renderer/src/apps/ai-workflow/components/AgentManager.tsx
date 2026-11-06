@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import type { AgentInput, Runtime } from '../../../../../protocol/entities'
+import type { Agent, AgentInput, Runtime } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Panel, badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
@@ -38,7 +38,13 @@ function RobotIcon({ className }: { className?: string }): ReactElement {
   )
 }
 
-/** 智能体页：智能体清单；新建走弹窗表单 */
+/** 打开弹窗时记录：编辑目标（null = 新建）与预填值 */
+interface DialogState {
+  agent: Agent | null
+  initial: AgentInput
+}
+
+/** 智能体页：智能体清单；新建 / 编辑走同一个弹窗表单 */
 export function AgentManager(): ReactElement {
   // 智能体与运行时都来自内核视图：CRUD 成功后由事实批次失效重取，无需手动 refresh
   const agentsState = useKernelViewState('agents.all')
@@ -47,15 +53,25 @@ export function AgentManager(): ReactElement {
   const runtimes = runtimesState.data ?? []
   /** 写操作失败（读错误单独展示在动作错误之前） */
   const [actionError, setActionError] = useState<string | null>(null)
-  /** 非空 = 弹窗打开中，值为表单预填 */
-  const [draft, setDraft] = useState<AgentInput | null>(null)
+  /** 非 null = 弹窗打开中 */
+  const [dialog, setDialog] = useState<DialogState | null>(null)
 
   const readError = agentsState.error ?? runtimesState.error
   const error = actionError ?? readError
 
-  const create = async (input: AgentInput): Promise<void> => {
-    await getKernelStore().dispatch({ type: 'agent.create', commandId: '', input })
-    setDraft(null)
+  const submit = async (input: AgentInput): Promise<void> => {
+    const store = getKernelStore()
+    if (dialog?.agent) {
+      await store.dispatch({
+        type: 'agent.update',
+        commandId: '',
+        id: dialog.agent.id,
+        patch: input,
+      })
+    } else {
+      await store.dispatch({ type: 'agent.create', commandId: '', input })
+    }
+    setDialog(null)
   }
 
   const remove = async (id: string): Promise<void> => {
@@ -89,11 +105,14 @@ export function AgentManager(): ReactElement {
             size="sm"
             className="ml-auto"
             onClick={() =>
-              setDraft({
-                name: '',
-                description: '',
-                runtimeId: runtimes[0]?.id ?? '',
-                systemPrompt: '',
+              setDialog({
+                agent: null,
+                initial: {
+                  name: '',
+                  description: '',
+                  runtimeId: runtimes[0]?.id ?? '',
+                  systemPrompt: '',
+                },
               })
             }
           >
@@ -135,6 +154,25 @@ export function AgentManager(): ReactElement {
                   type="button"
                   variant="ghost"
                   size="sm"
+                  aria-label={`编辑智能体 ${a.name}`}
+                  onClick={() =>
+                    setDialog({
+                      agent: a,
+                      initial: {
+                        name: a.name,
+                        description: a.description,
+                        runtimeId: a.runtimeId,
+                        systemPrompt: a.systemPrompt,
+                      },
+                    })
+                  }
+                >
+                  编辑
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
                   className="text-red-400 hover:text-red-300"
                   aria-label={`删除智能体 ${a.name}`}
                   onClick={() => void remove(a.id)}
@@ -147,12 +185,13 @@ export function AgentManager(): ReactElement {
         </ul>
       </Panel>
 
-      {draft !== null && (
+      {dialog !== null && (
         <AgentDialog
           runtimes={runtimes}
-          initial={draft}
-          onSubmit={create}
-          onCancel={() => setDraft(null)}
+          initial={dialog.initial}
+          mode={dialog.agent ? 'edit' : 'create'}
+          onSubmit={submit}
+          onCancel={() => setDialog(null)}
         />
       )}
     </div>

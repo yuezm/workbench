@@ -37,7 +37,7 @@ describe('TaskDialog', () => {
 
     await user.type(screen.getByLabelText('任务标题'), '做点事')
     await user.type(screen.getByLabelText('任务描述'), '描述')
-    await user.click(screen.getByRole('button', { name: '创建任务' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     expect(onSave.mock.calls[0][0]).toMatchObject({
       title: '做点事',
@@ -56,7 +56,7 @@ describe('TaskDialog', () => {
     await user.type(screen.getByLabelText('任务标题'), '从进行中开始')
     await user.click(screen.getByRole('combobox', { name: '起始阶段' }))
     await user.click(await screen.findByRole('option', { name: '进行中' }))
-    await user.click(screen.getByRole('button', { name: '创建任务' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     expect(onSave.mock.calls[0][0]).toMatchObject({ stageId: 's1' })
   })
@@ -65,7 +65,7 @@ describe('TaskDialog', () => {
     const onSave = vi.fn()
     const user = userEvent.setup()
     render(<TaskDialog workflow={wf} onSave={onSave} onCancel={vi.fn()} />)
-    await user.click(screen.getByRole('button', { name: '创建任务' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
     expect(onSave).not.toHaveBeenCalled()
   })
 

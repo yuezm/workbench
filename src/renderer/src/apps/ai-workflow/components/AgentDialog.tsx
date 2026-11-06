@@ -28,19 +28,23 @@ export interface AgentDialogProps {
   runtimes: Runtime[]
   /** 打开时的预填值 */
   initial: AgentInput
+  /** 新建或编辑：影响标题/按钮文案，编辑时保留原绑定（含不可用运行时）不被清空 */
+  mode?: 'create' | 'edit'
   onSubmit: (input: AgentInput) => Promise<void>
   onCancel: () => void
 }
 
 /**
- * 新建智能体弹窗。
+ * 新建 / 编辑智能体弹窗。
  *
  * 运行时下拉直接带出健康状态；不可用的运行时禁用并汇总提示，
  * 默认选中第一个可用（未检测可选中）运行时，避免把智能体绑到已知失效的运行时。
+ * 编辑模式下保留当前绑定，即使该运行时已不可用，也不替换成其它运行时。
  */
 export function AgentDialog({
   runtimes,
   initial,
+  mode = 'create',
   onSubmit,
   onCancel,
 }: AgentDialogProps): ReactElement {
@@ -52,7 +56,10 @@ export function AgentDialog({
   const [error, setError] = useState<string | null>(null)
 
   const usable = runtimes.filter((r) => runtimeHealth(r) !== 'unavailable')
-  const kept = runtimes.find((r) => r.id === selected && runtimeHealth(r) !== 'unavailable')
+  // 编辑时允许保留已不可用的原运行时：否则保存会把它悄悄改绑到别的运行时
+  const kept = runtimes.find(
+    (r) => r.id === selected && (mode === 'edit' || runtimeHealth(r) !== 'unavailable'),
+  )
   const runtimeId = kept?.id ?? usable[0]?.id ?? ''
   const unavailable = runtimes.filter((r) => runtimeHealth(r) === 'unavailable')
 
@@ -70,18 +77,17 @@ export function AgentDialog({
   }
 
   return (
-    <Dialog title="新建智能体" onClose={onCancel}>
+    <Dialog title={mode === 'edit' ? '编辑智能体' : '新建智能体'} onClose={onCancel}>
       <form className="flex flex-col gap-4" onSubmit={submit}>
         {runtimes.length === 0 && (
           <div className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
-            <p>请先在上方添加一个运行时。</p>
-            <p className="mt-1 text-ink-dim">（切到顶部的「运行时配置」页新建）</p>
+            先添加运行时。
           </div>
         )}
 
         {runtimes.length > 0 && usable.length === 0 && (
           <p className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
-            没有可用运行时：请先到「运行时配置」测试通过，再创建智能体。
+            没有可用运行时，先到「运行时」测试通过。
           </p>
         )}
 
@@ -96,7 +102,7 @@ export function AgentDialog({
               onChange={setSelected}
               options={
                 runtimes.length === 0
-                  ? [{ value: '', label: '（无）' }]
+                  ? [{ value: '', label: '无' }]
                   : runtimes.map((r) => ({
                       value: r.id,
                       label: `${r.name} · ${RUNTIME_HEALTH_LABEL[runtimeHealth(r)]}`,
@@ -108,8 +114,7 @@ export function AgentDialog({
 
           {unavailable.length > 0 && (
             <p className="col-span-2 rounded-lg border border-red-400/20 bg-red-400/[0.06] px-2.5 py-1.5 text-[11px] text-red-300">
-              已禁用不可用运行时：
-              {unavailable.map((r) => r.name).join('、')}。到「运行时配置」测试通过后即可选择。
+              不可用：{unavailable.map((r) => r.name).join('、')}
             </p>
           )}
 
@@ -120,7 +125,7 @@ export function AgentDialog({
               onChange={(e) => setDescription(e.target.value)}
             />
           </Field>
-          <Field label="能力（System Prompt）" className="col-span-2">
+          <Field label="System Prompt" className="col-span-2">
             <Input
               aria-label="智能体能力"
               className="font-mono"
@@ -141,7 +146,7 @@ export function AgentDialog({
             取消
           </Button>
           <Button type="submit" variant="primary" size="sm" disabled={saving || !runtimeId}>
-            添加智能体
+            {mode === 'edit' ? '保存' : '添加'}
           </Button>
         </div>
       </form>

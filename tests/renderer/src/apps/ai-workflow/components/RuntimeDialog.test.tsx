@@ -141,17 +141,15 @@ describe('RuntimeDialog', () => {
       'DeepSeek Harness',
     )
     expect(screen.getByLabelText('运行时并发上限')).toHaveValue(1)
-    expect(screen.getByRole('combobox', { name: '运行时权限模式' })).toHaveTextContent(
-      '工作区可写（workspace-write）',
-    )
-    expect(screen.getByText(/stdio 传输没有审批往返/)).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '运行时权限模式' })).toHaveTextContent('可写')
+    expect(screen.getByText(/越界操作直接失败/)).toBeInTheDocument()
     expect(screen.getByText(/占位符 \{model\}/)).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeDisabled()
     expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeDisabled()
     expect(screen.queryByRole('checkbox', { name: '启用运行时' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('运行时模型手填')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toEqual({
       name: 'Codex CLI',
@@ -175,11 +173,11 @@ describe('RuntimeDialog', () => {
     render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
     await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
-    await user.click(screen.getByRole('option', { name: '只读（read-only）' }))
+    await user.click(screen.getByRole('option', { name: '只读' }))
     await user.type(screen.getByLabelText('运行时工作目录'), ' D:/work ')
     await user.clear(screen.getByLabelText('运行时并发上限'))
     await user.type(screen.getByLabelText('运行时并发上限'), '0')
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
     expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
@@ -218,7 +216,7 @@ describe('RuntimeDialog', () => {
     expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toHaveTextContent('high')
     expect(screen.getByRole('checkbox', { name: '启用运行时' })).not.toBeChecked()
 
-    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       model: 'deepseek/chat',
@@ -236,17 +234,17 @@ describe('RuntimeDialog', () => {
     const user = userEvent.setup()
     render(<RuntimeDialog runtime={runtime} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
-    expect(screen.getByText('正在读取模型清单…')).toBeInTheDocument()
+    expect(screen.getByText('读取模型中…')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeDisabled()
 
     reject(new Error('models-down'))
-    expect(await screen.findByText(/模型清单加载失败：models-down/)).toBeInTheDocument()
+    expect(await screen.findByText(/模型加载失败：models-down/)).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeEnabled()
     expect(screen.getByLabelText('运行时模型手填')).toHaveValue('custom/model')
 
     await user.clear(screen.getByLabelText('运行时模型手填'))
     await user.type(screen.getByLabelText('运行时模型手填'), ' manual/model ')
-    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ model: 'manual/model' })
   })
@@ -271,19 +269,17 @@ describe('RuntimeDialog', () => {
     await user.click(screen.getByRole('combobox', { name: '运行时模型' }))
     await user.click(screen.getByRole('option', { name: 'DeepSeek Chat' }))
     expect(screen.getByRole('combobox', { name: '运行时模型' })).toHaveTextContent('DeepSeek Chat')
-    expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toHaveTextContent(
-      '默认（模型默认）',
-    )
+    expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toHaveTextContent('默认')
 
     await user.click(screen.getByRole('combobox', { name: '运行时推理强度' }))
     await user.click(screen.getByRole('option', { name: 'high' }))
 
     await user.click(screen.getByRole('combobox', { name: '运行时模型' }))
-    await user.click(screen.getByRole('option', { name: '手动输入模型 id…' }))
+    await user.click(screen.getByRole('option', { name: '手动输入…' }))
     expect(screen.getByLabelText('运行时模型手填')).toHaveValue('')
     expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeDisabled()
 
-    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ model: null, reasoningEffort: null })
   })
@@ -301,7 +297,7 @@ describe('RuntimeDialog', () => {
     )
 
     await user.click(screen.getByRole('checkbox', { name: '启用运行时' }))
-    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       model: 'deepseek/chat',
@@ -322,7 +318,7 @@ describe('RuntimeDialog', () => {
     await user.type(screen.getByLabelText('运行时命令'), ' /opt/dsh ')
     await user.clear(screen.getByLabelText('运行时 profile'))
     await user.type(screen.getByLabelText('运行时 profile'), 'dev')
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ command: '/opt/dsh', profile: 'dev' })
@@ -349,7 +345,7 @@ describe('RuntimeDialog', () => {
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
     expect(await screen.findByText('plain-fail')).toBeInTheDocument()
   })
 
@@ -407,7 +403,7 @@ describe('RuntimeDialog', () => {
     fireEvent.change(screen.getByLabelText('运行时参数模板'), {
       target: { value: '["--print","{prompt}"]' },
     })
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
@@ -444,7 +440,7 @@ describe('RuntimeDialog', () => {
     fireEvent.change(screen.getByLabelText('运行时参数模板'), {
       target: { value: ' ["{context}"] ' },
     })
-    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
@@ -460,14 +456,14 @@ describe('RuntimeDialog', () => {
     const user = userEvent.setup()
     render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
-    expect(await screen.findByText(/执行器清单加载失败：exec-down/)).toBeInTheDocument()
+    expect(await screen.findByText(/执行器加载失败：exec-down/)).toBeInTheDocument()
     const executor = screen.getByRole('combobox', { name: '运行时执行器' })
     expect(executor).toBeDisabled()
     expect(executor).toHaveTextContent('无可用执行器')
 
     await user.type(screen.getByLabelText('运行时命令'), 'dsh')
     await user.type(screen.getByLabelText('运行时 profile'), 'multica')
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     const input = onSubmit.mock.calls[0][0] as { executorKey?: string }
@@ -575,7 +571,7 @@ describe('RuntimeDialog', () => {
       await Promise.resolve()
     })
 
-    expect(screen.queryByText(/执行器清单加载失败/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/执行器加载失败/)).not.toBeInTheDocument()
   })
 
   it('模型目录查询在切换运行时后迟到的失败：不写进当前弹窗', async () => {
@@ -611,6 +607,6 @@ describe('RuntimeDialog', () => {
       await Promise.resolve()
     })
 
-    expect(screen.queryByText(/模型清单加载失败/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/模型加载失败/)).not.toBeInTheDocument()
   })
 })

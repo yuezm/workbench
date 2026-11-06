@@ -96,7 +96,7 @@ export function KanbanBoard({
             <BoardIcon />
           </span>
           工作流「{workflow.name}」
-          <span className="text-[11px] font-normal text-ink-faint">拖拽卡片切换阶段</span>
+          <span className="text-[11px] font-normal text-ink-faint">拖拽换阶段</span>
         </h2>
         <Button type="button" variant="primary" size="sm" onClick={onNewTask}>
           新建任务
@@ -187,7 +187,7 @@ export function KanbanBoard({
             </span>
           </div>
           <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-[11px] leading-relaxed text-ink-faint">
-            拖到这里完成任务
+            拖到这里完成
           </p>
         </div>
       </div>

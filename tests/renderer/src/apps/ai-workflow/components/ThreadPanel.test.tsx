@@ -124,7 +124,7 @@ describe('ThreadPanel', () => {
 
   it('线程内没有任务时展示空态', async () => {
     setup(detailOf({ ...thread, taskIds: [], rootTaskIds: [] }, []))
-    expect(await screen.findByText('线程内暂无任务')).toBeInTheDocument()
+    expect(await screen.findByText('暂无任务')).toBeInTheDocument()
   })
 
   it('父任务不在任务列表里的悬挂子任务作为根展示', async () => {
@@ -161,7 +161,7 @@ describe('ThreadPanel', () => {
     const user = userEvent.setup()
     setup(detailOf(current))
 
-    await screen.findByText('还没有笔记')
+    await screen.findByText('暂无笔记')
     await user.type(screen.getByLabelText('线程笔记'), '  新笔记  ')
     await user.click(screen.getByRole('button', { name: '添加笔记' }))
 
@@ -180,7 +180,7 @@ describe('ThreadPanel', () => {
     await screen.findByText('上一轮笔记')
 
     await user.click(screen.getByRole('button', { name: '添加笔记' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('笔记内容不能为空')
+    expect(await screen.findByRole('alert')).toHaveTextContent('笔记不能为空')
     expect(kernel.dispatched).toHaveLength(0)
   })
 
@@ -218,7 +218,7 @@ describe('ThreadPanel', () => {
     expect(screen.getByRole('button', { name: '绑定' })).toBeDisabled()
     expect(screen.getByLabelText('入口来源')).toBeDisabled()
     expect(screen.getByLabelText('外部入口键')).toBeDisabled()
-    expect(screen.getByRole('button', { name: '关闭线程' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '归档' })).toBeDisabled()
   })
 
   it('未绑定线程提供绑定表单，提交 dispatch thread.bind 后显示已绑定', async () => {
@@ -273,7 +273,7 @@ describe('ThreadPanel', () => {
 
     await user.type(screen.getByLabelText('入口来源'), 'mail')
     await user.click(screen.getByRole('button', { name: '绑定' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('外部入口键必填')
+    expect(await screen.findByRole('alert')).toHaveTextContent('入口键必填')
     expect(kernel.dispatched).toHaveLength(0)
   })
 
@@ -309,21 +309,21 @@ describe('ThreadPanel', () => {
     setup(detailOf(thread))
     await screen.findByText('上一轮笔记')
 
-    await user.click(screen.getByRole('button', { name: '关闭线程' }))
+    await user.click(screen.getByRole('button', { name: '归档' }))
     await waitFor(() =>
       expect(kernel.dispatched).toContainEqual(
         expect.objectContaining({ type: 'thread.close', threadId: 'th1' }),
       ),
     )
     expect(await screen.findByText('已归档')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '关闭线程' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '归档' })).not.toBeInTheDocument()
     expect(screen.getByText('线程已归档。')).toBeInTheDocument()
   })
 
   it('已归档线程直接展示归档态且不提供关闭按钮', async () => {
     setup(detailOf({ ...thread, status: 'closed' }))
     expect(await screen.findByText('已归档')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '关闭线程' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '归档' })).not.toBeInTheDocument()
   })
 
   it('关闭失败就地展示后端文案，面板保持可操作', async () => {
@@ -336,9 +336,9 @@ describe('ThreadPanel', () => {
     setup(detailOf(thread))
     await screen.findByText('上一轮笔记')
 
-    await user.click(screen.getByRole('button', { name: '关闭线程' }))
+    await user.click(screen.getByRole('button', { name: '归档' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('线程不存在')
-    expect(screen.getByRole('button', { name: '关闭线程' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '归档' })).toBeEnabled()
   })
 
   it('线程不存在时展示空态', async () => {

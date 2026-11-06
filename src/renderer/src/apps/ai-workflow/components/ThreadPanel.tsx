@@ -130,11 +130,11 @@ function NotesSection({
       <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
         笔记
         <span className={badgeCls}>{thread.notes.length}</span>
-        <span className="text-[11px] font-normal text-ink-faint">资料，不是指令</span>
+        <span className="text-[11px] font-normal text-ink-faint">仅资料</span>
       </h3>
       {thread.notes.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
-          还没有笔记
+          暂无笔记
         </p>
       ) : (
         <ul className="max-h-40 divide-y divide-line overflow-auto rounded-xl border border-line">
@@ -157,7 +157,7 @@ function NotesSection({
           aria-label="线程笔记"
           className={textareaCls}
           maxLength={THREAD_LIMITS.noteText}
-          placeholder="补充这条线程的背景（只作为资料，不会变成指令）"
+          placeholder="补充背景，仅作资料"
           value={text}
           disabled={busy}
           onChange={(e) => onChange(e.target.value)}
@@ -226,7 +226,7 @@ function BindSection({
           </div>
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] leading-relaxed text-ink-faint">
-              绑定后，同一外部入口的新事件会续进本线程。
+              同一入口的新事件续进本线程。
             </p>
             <Button type="submit" variant="secondary" size="sm" disabled={busy}>
               绑定
@@ -272,7 +272,7 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
     event.preventDefault()
     const text = noteText.trim()
     if (text === '') {
-      setActionError('笔记内容不能为空')
+      setActionError('笔记不能为空')
       return
     }
     runAction('note', async () => {
@@ -295,7 +295,7 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
       return
     }
     if (externalRef === '') {
-      setActionError('外部入口键必填')
+      setActionError('入口键必填')
       return
     }
     runAction('bind', async () => {
@@ -356,7 +356,7 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
         </h3>
         {roots.length === 0 ? (
           <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
-            线程内暂无任务
+            暂无任务
           </p>
         ) : (
           <ul className="rounded-xl border border-line bg-white/[0.02] px-2 py-1">
@@ -387,7 +387,7 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
 
       <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
         <p className="text-[11px] leading-relaxed text-ink-faint">
-          {closed ? '线程已归档。' : '归档只影响界面，不改变任务与运行。'}
+          {closed ? '线程已归档。' : '归档只影响界面。'}
         </p>
         {!closed && (
           <Button
@@ -397,7 +397,7 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
             disabled={busyNow}
             onClick={closeThread}
           >
-            关闭线程
+            归档
           </Button>
         )}
       </div>
@@ -430,7 +430,7 @@ export function ThreadPanel({ threadId, onClose }: ThreadPanelProps): ReactEleme
           state.error === null && <p className="text-xs text-ink-faint">正在读取线程…</p>
         ) : detail === null ? (
           <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
-            线程不存在（可能已被删除或尚未同步）。
+            线程不存在
           </p>
         ) : (
           <ThreadContent thread={detail.thread} tasks={detail.tasks} />

@@ -180,11 +180,7 @@ export function RulesManager(): ReactElement {
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-ink-faint">
-          {rules.length > 0
-            ? '规则命中后到目标工作流建任务，派活仍由阶段配置决定。'
-            : '还没有规则，可用模板或新建一条。'}
-        </p>
+        <p className="text-xs text-ink-faint">命中后建任务</p>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -220,7 +216,7 @@ export function RulesManager(): ReactElement {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {rules.length} 条</span>
-        <span className="text-[11px] text-ink-faint">规则集 v{version}</span>
+        <span className="text-[11px] text-ink-faint">v{version}</span>
         {noWorkflows && <span className="text-[11px] text-amber-200">先建工作流</span>}
       </div>
 

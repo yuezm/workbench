@@ -178,7 +178,7 @@ describe('RuntimeManager', () => {
 
     expect(await screen.findByText('fresh')).toBeInTheDocument()
     expect(screen.getByText('未检测')).toBeInTheDocument()
-    expect(screen.getByText('未解析到可执行文件')).toBeInTheDocument()
+    expect(screen.getByText('未找到可执行文件')).toBeInTheDocument()
     expect(screen.getByText('已停用')).toBeInTheDocument()
     expect(screen.getByText('不可用 · 8ms')).toBeInTheDocument()
     expect(screen.getByText('负载 0/4')).toBeInTheDocument()
@@ -214,8 +214,11 @@ describe('RuntimeManager', () => {
 
     expect(await screen.findByText('已添加')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '使用' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '暂不支持' })).toBeDisabled()
-    expect(screen.getByText('当前版本仅接入 DSH')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '不支持' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '不支持' })).toHaveAttribute(
+      'title',
+      expect.stringContaining('DSH'),
+    )
   })
 
   it('扫描中显示进行态，未检测到 CLI 时给出提示', async () => {
@@ -238,7 +241,7 @@ describe('RuntimeManager', () => {
     await act(async () => {
       slow.resolve([])
     })
-    expect(await screen.findByText(/未检测到已安装的 CLI/)).toBeInTheDocument()
+    expect(await screen.findByText(/未检测到 CLI/)).toBeInTheDocument()
   })
 
   it('重新扫描拉取到结果；扫描失败展示错误', async () => {
@@ -246,7 +249,7 @@ describe('RuntimeManager', () => {
     const queries = recordQueries()
     const user = userEvent.setup()
     render(<RuntimeManager />)
-    await screen.findByText(/未检测到已安装的 CLI/)
+    await screen.findByText(/未检测到 CLI/)
 
     kernel.setView('runtimes.detected', undefined, [
       makeDetected({ command: 'codex', label: 'Codex CLI', path: 'C:/codex.exe' }),
@@ -331,7 +334,7 @@ describe('RuntimeManager', () => {
       'DeepSeek Harness',
     )
     await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({
@@ -378,7 +381,7 @@ describe('RuntimeManager', () => {
     // 执行器与 command/profile 由弹窗从 executors 清单首项预填
     await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
     await user.type(screen.getByLabelText('运行时名称'), '新的')
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({
@@ -398,7 +401,7 @@ describe('RuntimeManager', () => {
       },
     })
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: '添加运行时' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('button', { name: '添加' })).not.toBeInTheDocument(),
     )
     // 视图随事实失效重取：新运行时出现在清单里
     expect(await screen.findByText('新的')).toBeInTheDocument()
@@ -417,7 +420,7 @@ describe('RuntimeManager', () => {
 
     await user.click(screen.getByRole('button', { name: '新建运行时' }))
     await user.type(screen.getByLabelText('运行时名称'), 'x')
-    await user.click(screen.getByRole('button', { name: '添加运行时' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
     expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
@@ -458,7 +461,7 @@ describe('RuntimeManager', () => {
     await user.clear(screen.getByLabelText('运行时名称'))
     await user.type(screen.getByLabelText('运行时名称'), 'ds2')
     await user.click(screen.getByRole('checkbox', { name: '启用运行时' }))
-    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({ type: 'runtime.update', id: 'r1' })
@@ -473,7 +476,7 @@ describe('RuntimeManager', () => {
       },
     })
     await waitFor(() =>
-      expect(screen.queryByRole('button', { name: '保存运行时' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument(),
     )
     // 视图随 runtime.updated 失效重取：清单显示新名称
     expect(await screen.findByText('ds2')).toBeInTheDocument()
@@ -491,7 +494,7 @@ describe('RuntimeManager', () => {
     await screen.findByText('ds')
 
     await user.click(screen.getByRole('button', { name: '编辑运行时 ds' }))
-    await user.click(screen.getByRole('button', { name: '保存运行时' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('update-fail')).toBeInTheDocument()
     expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
   })
@@ -561,7 +564,7 @@ describe('RuntimeManager', () => {
     expect(badge).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('登录态失效')).toBeInTheDocument()
     expect(screen.getByText('stderr 尾部')).toBeInTheDocument()
-    expect(screen.getByText('未解析到可执行文件')).toBeInTheDocument()
+    expect(screen.getByText('未找到可执行文件')).toBeInTheDocument()
 
     await user.click(badge)
     expect(screen.queryByText('登录态失效')).not.toBeInTheDocument()

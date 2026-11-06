@@ -47,7 +47,7 @@ export function WorkflowSwitcher({
           value={activeId ?? ''}
           onChange={onSelect}
           options={[
-            { value: '', label: '（未选择）' },
+            { value: '', label: '未选择' },
             ...workflows.map((w) => ({ value: w.id, label: w.name })),
           ]}
           className="h-8 w-auto max-w-56 border-0 bg-transparent px-1 hover:border-0 focus:bg-transparent"

@@ -23,6 +23,8 @@ export function WorkflowManager(): ReactElement {
   /** 非 undefined = 弹窗打开中（null = 新建，实体 = 编辑） */
   const [editing, setEditing] = useState<WorkflowWithStages | null | undefined>(undefined)
   const [saveError, setSaveError] = useState<string | null>(null)
+  /** 删除失败（与保存错误分开，避免同屏互相覆盖） */
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const activeId =
     selectedId !== null && workflows.some((w) => w.id === selectedId)
@@ -32,6 +34,17 @@ export function WorkflowManager(): ReactElement {
   const openEditor = (workflow: WorkflowWithStages | null): void => {
     setSaveError(null)
     setEditing(workflow)
+  }
+
+  /** 删除工作流：内核级联删阶段 / 任务 / run；有活跃任务的 run 由宿主先取消 */
+  const remove = async (id: string): Promise<void> => {
+    setActionError(null)
+    try {
+      await getKernelStore().dispatch({ type: 'workflow.remove', commandId: '', id })
+      setEditing((prev) => (prev && prev.id === id ? undefined : prev))
+    } catch (e) {
+      setActionError(errMsg(e))
+    }
   }
 
   const save = async (input: WorkflowInput): Promise<void> => {
@@ -59,18 +72,14 @@ export function WorkflowManager(): ReactElement {
 
   return (
     <div className="flex flex-col gap-3">
-      {readError && (
+      {(actionError ?? readError) && (
         <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
-          {readError}
+          {actionError ?? readError}
         </p>
       )}
 
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-ink-faint">
-          {workflows.length > 0
-            ? '工作流定义决定看板的阶段与流转规则。'
-            : '还没有工作流，先新建一条。'}
-        </p>
+        <p className="text-xs text-ink-faint">阶段序列与流转</p>
         <Button variant="primary" size="sm" onClick={() => openEditor(null)}>
           新建工作流
         </Button>
@@ -95,6 +104,7 @@ export function WorkflowManager(): ReactElement {
               >
                 <button
                   type="button"
+                  aria-label={`选择工作流 ${w.name}`}
                   className="flex min-w-0 flex-1 flex-col items-start text-left outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
                   onClick={() => setSelectedId(w.id)}
                 >
@@ -111,9 +121,20 @@ export function WorkflowManager(): ReactElement {
                     {w.description ? ` · ${w.description}` : ''}
                   </span>
                 </button>
-                <Button variant="ghost" size="sm" onClick={() => openEditor(w)}>
-                  编辑
-                </Button>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => openEditor(w)}>
+                    编辑
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-400 hover:text-red-300"
+                    aria-label={`删除工作流 ${w.name}`}
+                    onClick={() => void remove(w.id)}
+                  >
+                    删除
+                  </Button>
+                </div>
               </li>
             )
           })}

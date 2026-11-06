@@ -39,7 +39,7 @@ export function TaskDialog({ workflow, onSave, onCancel }: TaskDialogProps): Rea
         <Field label="任务标题">
           <Input
             aria-label="任务标题"
-            placeholder="给任务起个名字"
+            placeholder="起个名字"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
@@ -48,7 +48,7 @@ export function TaskDialog({ workflow, onSave, onCancel }: TaskDialogProps): Rea
           <textarea
             aria-label="任务描述"
             className={textareaCls}
-            placeholder="补充背景、验收标准或上下文"
+            placeholder="背景、验收标准"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
@@ -62,7 +62,7 @@ export function TaskDialog({ workflow, onSave, onCancel }: TaskDialogProps): Rea
           />
         </Field>
         <p className="text-[11px] leading-relaxed text-ink-faint">
-          进入「交给智能体」的阶段会立刻执行；建好后可在看板上拖拽卡片换阶段。
+          「交给智能体」的阶段会立即执行。
         </p>
 
         <div className="mt-2 flex items-center justify-end gap-2">
@@ -76,7 +76,7 @@ export function TaskDialog({ workflow, onSave, onCancel }: TaskDialogProps): Rea
             disabled={saving}
             className="disabled:opacity-40"
           >
-            创建任务
+            创建
           </Button>
         </div>
       </form>

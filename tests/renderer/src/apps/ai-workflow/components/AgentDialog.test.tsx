@@ -51,10 +51,10 @@ describe('AgentDialog', () => {
     const user = userEvent.setup()
     render(<AgentDialog runtimes={[]} initial={empty} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
-    expect(screen.getByText(/请先在上方添加一个运行时/)).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('（无）')
-    expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    expect(screen.getByText(/先添加运行时/)).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('无')
+    expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '添加' }))
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
@@ -80,7 +80,7 @@ describe('AgentDialog', () => {
     expect(screen.getByRole('option', { name: 'ds · 未检测' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'claude · 可用' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ runtimeId: 'r1' })
   })
@@ -119,7 +119,7 @@ describe('AgentDialog', () => {
       />,
     )
 
-    expect(screen.getByText(/已禁用不可用运行时：挂了/)).toBeInTheDocument()
+    expect(screen.getByText(/不可用：挂了/)).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r2')
 
     await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
@@ -130,7 +130,7 @@ describe('AgentDialog', () => {
     await user.click(screen.getByRole('option', { name: '挂了 · 不可用' }))
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r2')
 
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ runtimeId: 'r2' })
   })
@@ -145,7 +145,7 @@ describe('AgentDialog', () => {
       />,
     )
     expect(screen.getByText(/没有可用运行时/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
   })
 
   it('填写名称/描述/能力后提交（含切换运行时）', async () => {
@@ -168,7 +168,7 @@ describe('AgentDialog', () => {
     await user.type(screen.getByLabelText('智能体能力'), 'you are coder')
     await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
     await user.click(screen.getByRole('option', { name: 'claude · 可用' }))
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toEqual({
@@ -193,7 +193,7 @@ describe('AgentDialog', () => {
 
     expect(screen.getByLabelText('智能体描述')).toHaveValue('')
     expect(screen.getByLabelText('智能体能力')).toHaveValue('')
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ description: '', systemPrompt: '' })
   })
@@ -210,7 +210,7 @@ describe('AgentDialog', () => {
       />,
     )
 
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
   })
 })

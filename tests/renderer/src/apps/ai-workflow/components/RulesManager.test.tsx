@@ -100,7 +100,7 @@ describe('RulesManager', () => {
     expect(screen.getByText('定时 · 0 9 * * *')).toBeInTheDocument()
     expect(screen.getByText('→ 研发 / 待办')).toBeInTheDocument()
     expect(screen.getByText('→ 研发 · 含提示词')).toBeInTheDocument()
-    expect(screen.getByText(/规则集 v3/)).toBeInTheDocument()
+    expect(screen.getByText('v3')).toBeInTheDocument()
     expect(screen.getByText('共 2 条')).toBeInTheDocument()
     // 停用标记 + 立即运行禁用
     expect(screen.getByText('已停用')).toBeInTheDocument()
@@ -190,7 +190,7 @@ describe('RulesManager', () => {
     await user.click(screen.getByRole('button', { name: '新建规则' }))
     await user.type(await screen.findByLabelText('规则名称'), '新规则')
     await choose(user, '规则目标工作流', '研发')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({
@@ -218,7 +218,7 @@ describe('RulesManager', () => {
     expect(nameInput).toHaveValue('Issue 进研发')
     await user.clear(nameInput)
     await user.type(nameInput, 'Issue 进研发 v2')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({
@@ -241,12 +241,10 @@ describe('RulesManager', () => {
     expect(await screen.findByLabelText('规则名称')).toHaveValue('Issue 进研发')
     expect(screen.getByLabelText('规则事件来源')).toHaveValue('github')
     expect(screen.getByLabelText('规则事件类型')).toHaveValue('issues.opened')
-    expect(screen.getByRole('combobox', { name: '规则目标工作流' })).toHaveTextContent(
-      '（选择工作流）',
-    )
+    expect(screen.getByRole('combobox', { name: '规则目标工作流' })).toHaveTextContent('选择工作流')
 
     await choose(user, '规则目标工作流', '研发')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({
       type: 'rules.replace',
@@ -273,7 +271,7 @@ describe('RulesManager', () => {
     expect(screen.getByLabelText('规则提示词')).toHaveValue('汇总昨日进展并给出今日计划')
 
     await choose(user, '规则目标工作流', '研发')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({
       type: 'rules.replace',
@@ -303,7 +301,7 @@ describe('RulesManager', () => {
     await user.click(screen.getByRole('button', { name: '新建规则' }))
     await user.type(await screen.findByLabelText('规则名称'), 'x')
     await choose(user, '规则目标工作流', '研发')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(await screen.findByText('cron 非法')).toBeInTheDocument()
     expect(screen.getByLabelText('规则名称')).toBeInTheDocument()
@@ -374,7 +372,7 @@ describe('RulesManager', () => {
     vi.unstubAllGlobals()
     await user.type(await screen.findByLabelText('规则名称'), '回退 id')
     await choose(user, '规则目标工作流', '研发')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({

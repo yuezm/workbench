@@ -17,14 +17,14 @@ interface NavItem {
 }
 
 const ITEMS: NavItem[] = [
-  { value: 'runtimes', label: '运行时配置', path: 'M4 6.5 9 11l-5 4.5M12.5 16.5H20' },
+  { value: 'runtimes', label: '运行时', path: 'M4 6.5 9 11l-5 4.5M12.5 16.5H20' },
   {
     value: 'agents',
-    label: '智能体配置',
+    label: '智能体',
     path: 'M12 3a4 4 0 0 1 4 4v1a4 4 0 0 1-4 4 4 4 0 0 1-4-4V7a4 4 0 0 1 4-4ZM5 21a7 7 0 0 1 14 0z',
   },
-  { value: 'workflows', label: '工作流配置', path: 'M4 6h6v5H4zM14 6h6v5h-6zM4 13h16v5H4z' },
-  { value: 'rules', label: '规则配置', path: 'M13 3 5 13h5l-1 8 8-11h-5z' },
+  { value: 'workflows', label: '工作流', path: 'M4 6h6v5H4zM14 6h6v5h-6zM4 13h16v5H4z' },
+  { value: 'rules', label: '规则', path: 'M13 3 5 13h5l-1 8 8-11h-5z' },
   {
     value: 'plugins',
     label: '插件',

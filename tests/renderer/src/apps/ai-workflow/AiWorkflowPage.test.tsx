@@ -257,7 +257,7 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('待办')
     await user.type(screen.getByLabelText('任务标题'), '新任务')
-    await user.click(screen.getByRole('button', { name: '创建任务' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
     await waitFor(() =>
       expectDispatched({
         type: 'task.create',
@@ -282,23 +282,23 @@ describe('AiWorkflowPage', () => {
     // 工作台里没有设置栏目
     expect(screen.queryByRole('navigation', { name: '设置栏目' })).not.toBeInTheDocument()
 
-    await openSection(user, '运行时配置')
+    await openSection(user, '运行时')
     expect(await screen.findByRole('heading', { name: '运行时' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建运行时' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '智能体' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '工作流' })).not.toBeInTheDocument()
 
-    await openSection(user, '智能体配置')
+    await openSection(user, '智能体')
     expect(await screen.findByRole('heading', { name: '智能体' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建智能体' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '运行时' })).not.toBeInTheDocument()
 
-    await openSection(user, '工作流配置')
+    await openSection(user, '工作流')
     expect(await screen.findByRole('heading', { name: '工作流' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建工作流' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '智能体' })).not.toBeInTheDocument()
 
-    await openSection(user, '规则配置')
+    await openSection(user, '规则')
     expect(await screen.findByRole('heading', { name: '规则' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建规则' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Issue 进研发' })).toBeEnabled()
@@ -315,7 +315,7 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    await openSection(user, '运行时配置')
+    await openSection(user, '运行时')
     expect(await screen.findByRole('button', { name: '新建运行时' })).toBeInTheDocument()
     expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '新建运行时' }))
@@ -323,17 +323,17 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByLabelText('运行时名称')).not.toBeInTheDocument()
 
-    await openSection(user, '智能体配置')
+    await openSection(user, '智能体')
     await user.click(await screen.findByRole('button', { name: '新建智能体' }))
     expect(await screen.findByLabelText('智能体名称')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByLabelText('智能体名称')).not.toBeInTheDocument()
 
-    await openSection(user, '工作流配置')
+    await openSection(user, '工作流')
     await user.click(await screen.findByRole('button', { name: '新建工作流' }))
     expect(await screen.findByLabelText('工作流名称')).toBeInTheDocument()
 
-    await openSection(user, '规则配置')
+    await openSection(user, '规则')
     await user.click(await screen.findByRole('button', { name: '新建规则' }))
     expect(await screen.findByLabelText('规则名称')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '取消' }))
@@ -411,7 +411,7 @@ describe('AiWorkflowPage', () => {
     await screen.findByText(/工作流「研发」/)
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.type(screen.getByLabelText('任务标题'), 'x')
-    await user.click(screen.getByRole('button', { name: '创建任务' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
     expect(await screen.findByText('cboom')).toBeInTheDocument()
   })
 
@@ -440,10 +440,8 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
     await user.click(screen.getByRole('option', { name: '任务A' }))
     await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
-    await user.click(screen.getByRole('option', { name: '（选择任务）' }))
-    expect(screen.getByRole('combobox', { name: '选择任务查看运行' })).toHaveTextContent(
-      '（选择任务）',
-    )
+    await user.click(screen.getByRole('option', { name: '选择任务' }))
+    expect(screen.getByRole('combobox', { name: '选择任务查看运行' })).toHaveTextContent('选择任务')
 
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '取消' }))
@@ -500,10 +498,10 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText(/尚无工作流/)).toBeInTheDocument()
     expect(screen.queryByText(/必填/)).toBeNull()
 
-    await openSection(user, '工作流配置')
+    await openSection(user, '工作流')
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
     await user.type(screen.getByLabelText('工作流名称'), '第一条')
-    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() =>
       expectDispatched({
         type: 'workflow.create',
@@ -577,7 +575,7 @@ describe('AiWorkflowPage', () => {
     expect(screen.queryByText(/工作流「研发」/)).not.toBeInTheDocument()
 
     // 设置视图不显示工作台栏目
-    await openSection(user, '运行时配置')
+    await openSection(user, '运行时')
     expect(screen.queryByRole('navigation', { name: '工作台栏目' })).not.toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '设置栏目' })).toBeInTheDocument()
   })

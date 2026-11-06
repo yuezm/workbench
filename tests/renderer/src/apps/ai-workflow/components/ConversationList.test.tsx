@@ -40,7 +40,7 @@ describe('ConversationList', () => {
   it('无智能体时提示配置，且「新对话」不可用', () => {
     render(<ConversationList {...makeProps({ agents: [], conversations: [] })} />)
 
-    expect(screen.getByText('先到设置里配置智能体')).toBeInTheDocument()
+    expect(screen.getByText('先配置智能体')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '选择智能体' })).toBeNull()
     expect(screen.getByRole('button', { name: '新对话' })).toBeDisabled()
   })

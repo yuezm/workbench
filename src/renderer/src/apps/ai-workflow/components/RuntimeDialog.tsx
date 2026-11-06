@@ -21,16 +21,15 @@ const CUSTOM_MODEL = '__custom__'
 
 const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2 font-mono leading-relaxed')
 
-const ARGS_TEMPLATE_HINT =
-  'JSON 数组，如 ["--print","{prompt}"]；占位符 {model}/{effort}/{cwd}/{context}/{prompt}；仅 command 执行器使用'
+const ARGS_TEMPLATE_HINT = 'JSON 数组，占位符 {model}/{effort}/{cwd}/{context}/{prompt}'
 
 const PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
-  { value: 'read-only', label: '只读（read-only）' },
-  { value: 'workspace-write', label: '工作区可写（workspace-write）' },
-  { value: 'danger-full-access', label: '完全访问（danger-full-access）' },
+  { value: 'read-only', label: '只读' },
+  { value: 'workspace-write', label: '可写' },
+  { value: 'danger-full-access', label: '完全访问' },
 ]
 
-const PERMISSION_HINT = 'stdio 传输没有审批往返，越界操作会直接失败。'
+const PERMISSION_HINT = '越界操作直接失败。'
 
 export interface RuntimeDialogProps {
   /** 编辑目标；不传 = 新建 */
@@ -146,7 +145,7 @@ export function RuntimeDialog({
   const thinkingLevels = selectedModel?.thinkingLevels ?? []
 
   const effortOptions = [
-    { value: '', label: '默认（模型默认）' },
+    { value: '', label: '默认' },
     ...thinkingLevels.map((level) => ({ value: level, label: level })),
   ]
   // 已有值不在当前模型的能力清单里时仍要能显示（例如模型目录读取失败）
@@ -156,11 +155,11 @@ export function RuntimeDialog({
 
   const modelOptions = editing
     ? [
-        { value: '', label: '默认（CLI 默认模型）' },
+        { value: '', label: '默认' },
         ...models.map((m) => ({ value: m.id, label: m.label })),
-        { value: CUSTOM_MODEL, label: '手动输入模型 id…' },
+        { value: CUSTOM_MODEL, label: '手动输入…' },
       ]
-    : [{ value: '', label: '默认（创建后可选择）' }]
+    : [{ value: '', label: '默认' }]
 
   const changeExecutor = (key: string): void => {
     setExecutorKey(key)
@@ -228,7 +227,7 @@ export function RuntimeDialog({
               options={executors.map((item) => ({ value: item.key, label: item.label }))}
             />
             {executorsError && (
-              <span className="text-[11px] text-red-300">执行器清单加载失败：{executorsError}</span>
+              <span className="text-[11px] text-red-300">执行器加载失败：{executorsError}</span>
             )}
           </Field>
           <Field label="命令">
@@ -247,7 +246,7 @@ export function RuntimeDialog({
               onChange={(e) => setProfile(e.target.value)}
             />
           </Field>
-          <Field label="参数模板（可选）" className="col-span-2">
+          <Field label="参数模板" className="col-span-2">
             <textarea
               aria-label="运行时参数模板"
               className={textareaCls}
@@ -275,7 +274,7 @@ export function RuntimeDialog({
             />
             <span className="text-[11px] leading-relaxed text-ink-faint">{PERMISSION_HINT}</span>
           </Field>
-          <Field label="工作目录（可选）">
+          <Field label="工作目录">
             <Input
               aria-label="运行时工作目录"
               className="font-mono"
@@ -289,13 +288,13 @@ export function RuntimeDialog({
               value={modelChoice}
               onChange={changeModel}
               disabled={!editing || modelsLoading}
-              placeholder="默认（CLI 默认模型）"
+              placeholder="默认"
               options={modelOptions}
             />
-            {modelsLoading && <span className="text-[11px] text-ink-faint">正在读取模型清单…</span>}
+            {modelsLoading && <span className="text-[11px] text-ink-faint">读取模型中…</span>}
             {modelsError && (
               <span className="text-[11px] text-red-300">
-                模型清单加载失败：{modelsError}（可手动填写）
+                模型加载失败：{modelsError}（可手填）
               </span>
             )}
           </Field>
@@ -309,7 +308,7 @@ export function RuntimeDialog({
             />
           </Field>
           {editing && modelChoice === CUSTOM_MODEL && (
-            <Field label="模型 id（手动输入）" className="col-span-2">
+            <Field label="模型 id" className="col-span-2">
               <Input
                 aria-label="运行时模型手填"
                 className="font-mono"
@@ -331,7 +330,7 @@ export function RuntimeDialog({
                 checked={enabled}
                 onChange={(e) => setEnabled(e.target.checked)}
               />
-              <span>启用后才会派发执行</span>
+              <span>启用后派发</span>
             </label>
           </div>
         )}
@@ -347,7 +346,7 @@ export function RuntimeDialog({
             取消
           </Button>
           <Button type="submit" variant="primary" size="sm" disabled={saving}>
-            {editing ? '保存运行时' : '添加运行时'}
+            {editing ? '保存' : '添加'}
           </Button>
         </div>
       </form>

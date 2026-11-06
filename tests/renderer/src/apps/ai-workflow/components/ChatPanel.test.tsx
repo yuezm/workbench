@@ -64,7 +64,7 @@ describe('ChatPanel', () => {
     const user = userEvent.setup()
     render(<ChatPanel {...makeProps({ conversation: null })} />)
 
-    expect(screen.getByText('还没有对话，点左侧「新对话」开始')).toBeInTheDocument()
+    expect(screen.getByText('点左侧「新对话」开始')).toBeInTheDocument()
     expect(screen.getByLabelText('消息')).toBeInTheDocument()
 
     await user.type(screen.getByLabelText('消息输入'), '有人吗')

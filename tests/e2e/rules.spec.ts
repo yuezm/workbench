@@ -39,7 +39,7 @@ test('规则页：UI 保存规则 → app 事件建任务，同 subject 不重�
   // 1) 设置 → 规则配置 → 新建规则（事件来源 app / pomodoro.completed）
   await page.getByRole('button', { name: 'AI 工作流' }).click()
   await page.getByRole('tab', { name: '设置' }).click()
-  await page.getByRole('button', { name: '规则配置' }).click()
+  await page.getByRole('button', { name: '规则', exact: true }).click()
   await page.getByRole('button', { name: '新建规则' }).click()
 
   await expect(page.getByRole('dialog')).toBeVisible()
@@ -48,7 +48,7 @@ test('规则页：UI 保存规则 → app 事件建任务，同 subject 不重�
   await page.getByLabel('规则事件类型').fill('pomodoro.completed')
   await page.getByRole('combobox', { name: '规则目标工作流' }).click()
   await page.getByRole('option', { name: seeded.workflowName }).click()
-  await page.getByRole('button', { name: '保存规则' }).click()
+  await page.getByRole('button', { name: '保存' }).click()
   await expect(page.getByLabel('规则名称')).toBeHidden()
 
   // 2) rules.all：版本 1，且保存的是本条规则（证明走 rules.replace 落事实/投影）

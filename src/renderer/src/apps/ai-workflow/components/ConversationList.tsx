@@ -47,7 +47,7 @@ export function ConversationList({
           onChange={onAgentChange}
         />
       ) : (
-        <p className="text-xs text-ink-faint">先到设置里配置智能体</p>
+        <p className="text-xs text-ink-faint">先配置智能体</p>
       )}
 
       <Button

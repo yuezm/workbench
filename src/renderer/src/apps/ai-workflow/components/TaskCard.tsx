@@ -19,9 +19,9 @@ interface TaskCardProps {
 
 /** 卡片底部状态文案：按进入方式提示下一步怎么走 */
 const HINTS: Record<WorkflowStage['entryMode'], string> = {
-  none: '拖到其它阶段推进',
+  none: '拖动推进',
   user: '等待你处理',
-  agent: '上次执行未完成，可拖走重试',
+  agent: '可拖走重试',
 }
 
 /**

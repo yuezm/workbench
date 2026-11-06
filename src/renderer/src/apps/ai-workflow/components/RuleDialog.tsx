@@ -98,7 +98,7 @@ export function RuleDialog({
 
   const workflow = workflows.find((item) => item.id === workflowId)
   const stageOptions = [
-    { value: '', label: '首阶段（默认）' },
+    { value: '', label: '首阶段' },
     ...(workflow?.stages ?? []).map((stage) => ({ value: stage.id, label: stage.name })),
   ]
   const noWorkflow = workflows.length === 0
@@ -115,7 +115,7 @@ export function RuleDialog({
     if (name.trim() === '') return '规则名称不能为空'
     if (workflowId === '') return '请选择目标工作流'
     if (kind === 'cron' && cron.trim().split(/\s+/).filter(Boolean).length !== 5) {
-      return 'cron 需为 5 段（分 时 日 月 周）'
+      return 'cron 需 5 段'
     }
     return null
   }
@@ -177,13 +177,13 @@ export function RuleDialog({
             <h3 className="text-[13px] font-medium tracking-wide text-ink">
               {isNew ? '新建规则' : '编辑规则'}
             </h3>
-            <p className="text-xs text-ink-faint">条件命中只建任务，派活仍由工作流阶段决定</p>
+            <p className="text-xs text-ink-faint">命中后建任务，派活由阶段决定</p>
           </div>
         </div>
 
         {noWorkflow && (
           <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
-            先建工作流：规则需要指定建任务的目标工作流，请到「工作流配置」新建一条。
+            先建工作流：规则需要目标工作流。
           </p>
         )}
 
@@ -220,7 +220,7 @@ export function RuleDialog({
                 onChange={(e) => setSource(e.target.value)}
               />
             </Field>
-            <Field label="事件类型（逗号分隔）">
+            <Field label="事件类型">
               <Input
                 aria-label="规则事件类型"
                 placeholder="issues.opened, issues.closed"
@@ -231,7 +231,7 @@ export function RuleDialog({
           </div>
         ) : (
           <div className="flex flex-col gap-1.5">
-            <Field label="cron 表达式（5 段）">
+            <Field label="cron">
               <Input
                 aria-label="cron 表达式"
                 className="font-mono"
@@ -241,9 +241,7 @@ export function RuleDialog({
                 onChange={(e) => setCron(e.target.value)}
               />
             </Field>
-            <span className="text-[11px] text-ink-faint">
-              分 时 日 月 周，按本机时区；合法性由内核校验，非法整批拒绝。
-            </span>
+            <span className="text-[11px] text-ink-faint">分 时 日 月 周</span>
           </div>
         )}
 
@@ -254,7 +252,7 @@ export function RuleDialog({
               value={workflowId}
               onChange={changeWorkflow}
               options={[
-                { value: '', label: '（选择工作流）' },
+                { value: '', label: '选择工作流' },
                 ...workflows.map((item) => ({ value: item.id, label: item.name })),
               ]}
             />
@@ -269,19 +267,19 @@ export function RuleDialog({
             />
           </Field>
           {kind === 'event' && (
-            <Field label="任务标题取字">
+            <Field label="标题取自">
               <Select
                 ariaLabel="任务标题取字"
                 value={titleFrom}
                 onChange={(value) => setTitleFrom(value as RuleTitleFrom)}
                 options={[
-                  { value: 'subject', label: '事件 subject' },
-                  { value: 'summary', label: '事件 summary' },
+                  { value: 'subject', label: 'subject' },
+                  { value: 'summary', label: 'summary' },
                 ]}
               />
             </Field>
           )}
-          <Field label="任务标签（逗号分隔）">
+          <Field label="标签">
             <Input
               aria-label="任务标签"
               placeholder="bug, p1"
@@ -296,14 +294,14 @@ export function RuleDialog({
             aria-label="规则提示词"
             className={textareaCls}
             maxLength={RULE_LIMITS.prompt}
-            placeholder="固定文本，会追加到本轮提示词（不拼外部事件正文）"
+            placeholder="追加到本轮提示词"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
         </Field>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Field label="同规则并行数">
+          <Field label="并行数">
             <Input
               aria-label="并行数"
               type="number"
@@ -324,7 +322,7 @@ export function RuleDialog({
               ]}
             />
           </Field>
-          <Field label="线程归并键">
+          <Field label="归并键">
             <Select
               ariaLabel="线程归并键"
               value={keyFrom}
@@ -335,7 +333,7 @@ export function RuleDialog({
               ]}
             />
           </Field>
-          <Field label="线程已有任务时">
+          <Field label="已有任务时">
             <Select
               ariaLabel="线程已有任务时"
               value={onExisting}
@@ -356,7 +354,7 @@ export function RuleDialog({
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />
-          <span>保存后立即生效（停用的规则不参与事件匹配与定时触发）</span>
+          <span>启用</span>
         </label>
 
         {error && (
@@ -370,7 +368,7 @@ export function RuleDialog({
             取消
           </Button>
           <Button type="submit" variant="primary" size="sm" disabled={saving || noWorkflow}>
-            保存规则
+            保存
           </Button>
         </div>
       </form>

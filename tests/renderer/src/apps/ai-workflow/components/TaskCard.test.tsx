@@ -51,7 +51,7 @@ describe('TaskCard', () => {
     )
     expect(screen.getByText('写代码')).toBeInTheDocument()
     expect(screen.getByText('细节')).toBeInTheDocument()
-    expect(screen.getByText('拖到其它阶段推进')).toBeInTheDocument()
+    expect(screen.getByText('拖动推进')).toBeInTheDocument()
 
     const card = screen.getByLabelText('任务：写代码')
     expect(card).toHaveAttribute('draggable', 'true')
@@ -118,7 +118,7 @@ describe('TaskCard', () => {
         onDragEnd={vi.fn()}
       />,
     )
-    expect(screen.getByText('上次执行未完成，可拖走重试')).toBeInTheDocument()
+    expect(screen.getByText('可拖走重试')).toBeInTheDocument()
     expect(screen.queryByText('执行中…')).not.toBeInTheDocument()
     expect(screen.getByLabelText('任务：写代码')).toHaveAttribute('draggable', 'true')
   })

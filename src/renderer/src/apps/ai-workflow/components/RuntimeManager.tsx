@@ -242,9 +242,7 @@ export function RuntimeManager(): ReactElement {
 
         {detected.length === 0 ? (
           <p className="rounded-xl border border-dashed border-line px-3 py-4 text-xs text-ink-faint">
-            {detecting
-              ? '正在扫描本机 PATH…'
-              : '未检测到已安装的 CLI（dsh / claude / codex 等），可在下方手动新建运行时。'}
+            {detecting ? '正在扫描本机 PATH…' : '未检测到 CLI，可在下方手动新建。'}
           </p>
         ) : (
           <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
@@ -281,9 +279,8 @@ export function RuntimeManager(): ReactElement {
                         disabled
                         title="当前版本只接入了 DSH 协议，暂时无法把该 CLI 作为运行时接入"
                       >
-                        暂不支持
+                        不支持
                       </Button>
-                      <span className="text-[11px] text-ink-faint">当前版本仅接入 DSH</span>
                     </span>
                   )}
                 </li>
@@ -373,7 +370,7 @@ export function RuntimeManager(): ReactElement {
 
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-faint">
                     <span className="truncate font-mono" title={probe?.path ?? undefined}>
-                      {probe?.path ?? '未解析到可执行文件'}
+                      {probe?.path ?? '未找到可执行文件'}
                     </span>
                     <span className="tabular-nums">
                       负载 {running}/{maxConcurrent}

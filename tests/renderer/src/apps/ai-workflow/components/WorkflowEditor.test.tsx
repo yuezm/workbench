@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Agent, WorkflowWithStages } from '../../../../../../src/protocol/entities'
+import type {
+  Agent,
+  WorkflowInput,
+  WorkflowStage,
+  WorkflowWithStages,
+} from '../../../../../../src/protocol/entities'
 import { WorkflowEditor } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowEditor'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
@@ -58,7 +63,7 @@ describe('WorkflowEditor', () => {
     await user.type(screen.getByLabelText('阶段1名称'), '待办')
 
     await user.click(screen.getByRole('combobox', { name: '阶段1智能体' }))
-    await user.click(screen.getByRole('option', { name: '（选择）' }))
+    await user.click(screen.getByRole('option', { name: '选择' }))
     await user.click(screen.getByRole('combobox', { name: '阶段1智能体' }))
     await user.click(screen.getByRole('option', { name: 'coder' }))
 
@@ -66,21 +71,21 @@ describe('WorkflowEditor', () => {
     await user.click(screen.getByRole('combobox', { name: '阶段2完成后进入' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2完成后进入' }))
-    await user.click(screen.getByRole('option', { name: '下一阶段/结束' }))
+    await user.click(screen.getByRole('option', { name: '下一阶段' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2完成后进入' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2打回退回到' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2打回退回到' }))
-    await user.click(screen.getByRole('option', { name: '上一阶段/原地' }))
+    await user.click(screen.getByRole('option', { name: '不指定' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2打回退回到' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
 
     // 再加一个阶段后删除，覆盖删除分支
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
-    await user.click(screen.getAllByRole('button', { name: '删除阶段' })[2])
+    await user.click(screen.getAllByRole('button', { name: '删除' })[2])
 
-    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0]
     expect(draft.name).toBe('研发')
@@ -145,6 +150,66 @@ describe('WorkflowEditor', () => {
     expect(screen.getByLabelText('工作流描述')).toHaveValue('')
   })
 
+  it('阶段上/下移：交换位置并同步重映射流转目标下标', async () => {
+    const stageOf = (
+      id: string,
+      name: string,
+      position: number,
+      extra: Partial<WorkflowStage> = {},
+    ): WorkflowStage => ({
+      id,
+      workflowId: 'w',
+      name,
+      position,
+      entryMode: 'none',
+      agentId: null,
+      onCompleteStageId: null,
+      onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+      ...extra,
+    })
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '三段',
+      description: '',
+      createdAt: 't',
+      stages: [
+        stageOf('s0', 'A', 0),
+        stageOf('s1', 'B', 1, { onCompleteStageId: 's2' }),
+        stageOf('s2', 'C', 2, { onRejectStageId: 's0' }),
+      ],
+    }
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 上移第三个阶段（C）：顺序变为 A、C、B
+    await user.click(screen.getByRole('button', { name: '阶段3上移' }))
+    expect(screen.getByLabelText('阶段1名称')).toHaveValue('A')
+    expect(screen.getByLabelText('阶段2名称')).toHaveValue('C')
+    expect(screen.getByLabelText('阶段3名称')).toHaveValue('B')
+    // 首阶段的上移、末阶段的下移禁用
+    expect(screen.getByRole('button', { name: '阶段1上移' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '阶段3下移' })).toBeDisabled()
+
+    // 再下移一次回到原位：A、B、C
+    await user.click(screen.getByRole('button', { name: '阶段2下移' }))
+    expect(screen.getByLabelText('阶段2名称')).toHaveValue('B')
+
+    // 再次上移后保存，验证目标下标随重排重映射
+    await user.click(screen.getByRole('button', { name: '阶段3上移' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    const bStage = draft.stages.find((s) => s.name === 'B')
+    const cStage = draft.stages.find((s) => s.name === 'C')
+    // B 的「完成后进入」指向 C：C 从下标 2 移到 1
+    expect(bStage?.onCompleteIndex).toBe(1)
+    // C 的「打回退回到」指向 A：A 仍在下标 0
+    expect(cStage?.onRejectIndex).toBe(0)
+  })
+
   it('新建工作流：交接目标候选为全部工作流，保存回传目标工作流与目标阶段', async () => {
     const other: WorkflowWithStages = {
       id: 'w2',
@@ -190,7 +255,7 @@ describe('WorkflowEditor', () => {
     expect(await screen.findByRole('option', { name: '草稿' })).toBeInTheDocument()
     await user.click(screen.getByRole('option', { name: '发布' }))
 
-    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0]
     expect(draft.stages[0]).toMatchObject({ handoffWorkflowId: 'w2', handoffStageId: 'b1' })
@@ -280,20 +345,18 @@ describe('WorkflowEditor', () => {
     // 当前工作流不在候选里；选「不交接」清空后目标阶段选择消失
     await user.click(screen.getByRole('combobox', { name: '阶段1交接目标工作流' }))
     expect(screen.queryByRole('option', { name: '旧流' })).not.toBeInTheDocument()
-    await user.click(screen.getByRole('option', { name: '（不交接）' }))
+    await user.click(screen.getByRole('option', { name: '不交接' }))
     expect(screen.queryByRole('combobox', { name: '阶段1交接目标阶段' })).not.toBeInTheDocument()
 
     // 换目标工作流后目标阶段重置为「首阶段」；选阶段后可再选回首阶段（可空）
     await user.click(screen.getByRole('combobox', { name: '阶段1交接目标工作流' }))
     await user.click(await screen.findByRole('option', { name: '写作' }))
-    expect(screen.getByRole('combobox', { name: '阶段1交接目标阶段' })).toHaveTextContent(
-      '目标工作流首阶段',
-    )
+    expect(screen.getByRole('combobox', { name: '阶段1交接目标阶段' })).toHaveTextContent('首阶段')
     await choose(user, '阶段1交接目标阶段', '发布')
-    await choose(user, '阶段1交接目标阶段', '目标工作流首阶段')
+    await choose(user, '阶段1交接目标阶段', '首阶段')
     await choose(user, '阶段1交接目标阶段', '发布')
 
-    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0]
     expect(draft.stages[0]).toMatchObject({

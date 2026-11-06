@@ -178,7 +178,7 @@ function PluginRow({ plugin }: { plugin: PluginView }): ReactElement {
             ariaLabel={name}
             value={config.text[field.key]}
             options={[
-              { value: '', label: '（未设置）' },
+              { value: '', label: '未设置' },
               ...(field.options ?? []).map((option) => ({ value: option, label: option })),
             ]}
             onChange={(next) => setText(field.key, next)}
@@ -309,9 +309,7 @@ function PluginRow({ plugin }: { plugin: PluginView }): ReactElement {
       )}
 
       <div className="flex items-center gap-2">
-        <p className="text-[11px] text-ink-faint">
-          授权只是信任门，不改变系统权限；secret 只写入本机、不回显。
-        </p>
+        <p className="text-[11px] text-ink-faint">授权只是信任门；secret 不回显。</p>
         <Button
           type="button"
           variant="secondary"
@@ -366,13 +364,10 @@ export function PluginsManager(): ReactElement {
         </p>
       )}
 
-      <p className="text-xs text-ink-faint">
-        外部插件放在用户目录后会被扫描；启用与授权由这里决定，未授权的插件不会启动。
-      </p>
+      <p className="text-xs text-ink-faint">未授权的插件不会启动。</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {plugins.length} 个</span>
-        <span className="text-[11px] text-ink-faint">内置插件默认可用；外部插件默认未授权</span>
       </div>
 
       {loading ? (

@@ -84,6 +84,24 @@ function WorkflowIcon({ className }: { className?: string }): ReactElement {
   )
 }
 
+function MoveIcon({ dir }: { dir: 'up' | 'down' }): ReactElement {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {dir === 'up' ? <path d="m6 15 6-6 6 6" /> : <path d="m6 9 6 6 6-6" />}
+    </svg>
+  )
+}
+
 export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorProps): ReactElement {
   const [draft, setDraft] = useState<WorkflowInput>(() => toDraft(workflow))
   const [saving, setSaving] = useState(false)
@@ -118,6 +136,27 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
   const removeStage = (i: number): void =>
     setDraft((d) => ({ ...d, stages: d.stages.filter((_, k) => k !== i) }))
 
+  /** 上/下移一个阶段；目标下标存在 stages 里，重排时要同步重映射，否则流转目标会指错阶段。 */
+  const moveStage = (i: number, dir: -1 | 1): void =>
+    setDraft((d) => {
+      const j = i + dir
+      if (j < 0 || j >= d.stages.length) return d
+      const remap = (idx: number | null | undefined): number | null => {
+        if (idx == null) return null
+        if (idx === i) return j
+        if (dir === -1) return idx >= j && idx < i ? idx + 1 : idx
+        return idx > i && idx <= j ? idx - 1 : idx
+      }
+      const stages = d.stages.map((s) => ({
+        ...s,
+        onCompleteIndex: remap(s.onCompleteIndex),
+        onRejectIndex: remap(s.onRejectIndex),
+      }))
+      const [moved] = stages.splice(i, 1)
+      stages.splice(j, 0, moved)
+      return { ...d, stages }
+    })
+
   const save = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
     setSaving(true)
@@ -136,12 +175,11 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
         <WorkflowIcon className="text-focus" />
         <div className="flex flex-col">
           <h3 className="text-[13px] font-medium tracking-wide text-ink">工作流定义</h3>
-          <p className="text-xs text-ink-faint">配置阶段流转与智能体分工</p>
         </div>
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="工作流名称" className="w-56">
+        <Field label="名称" className="w-56">
           <Input
             aria-label="工作流名称"
             value={draft.name}
@@ -164,13 +202,39 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
               <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-[11px] font-medium text-focus">
                 {i + 1}
               </span>
-              <Field label="阶段名" className="min-w-0 flex-1">
+              <Field label="名称" className="min-w-0 flex-1">
                 <Input
                   aria-label={`阶段${i + 1}名称`}
                   value={s.name}
                   onChange={(e) => patchStage(i, { name: e.target.value })}
                 />
               </Field>
+              <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line p-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="size-7 px-0"
+                  aria-label={`阶段${i + 1}上移`}
+                  title="上移"
+                  disabled={i === 0}
+                  onClick={() => moveStage(i, -1)}
+                >
+                  <MoveIcon dir="up" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="size-7 px-0"
+                  aria-label={`阶段${i + 1}下移`}
+                  title="下移"
+                  disabled={i === draft.stages.length - 1}
+                  onClick={() => moveStage(i, 1)}
+                >
+                  <MoveIcon dir="down" />
+                </Button>
+              </div>
               <Button
                 type="button"
                 variant="ghost"
@@ -178,7 +242,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                 className="text-red-400 hover:text-red-300"
                 onClick={() => removeStage(i)}
               >
-                删除阶段
+                删除
               </Button>
             </div>
 
@@ -202,7 +266,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                     value={s.agentId ?? ''}
                     onChange={(v) => patchStage(i, { agentId: v || null })}
                     options={[
-                      { value: '', label: '（选择）' },
+                      { value: '', label: '选择' },
                       ...agents.map((a) => ({ value: a.id, label: a.name })),
                     ]}
                   />
@@ -214,7 +278,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                   value={s.onCompleteIndex == null ? '' : String(s.onCompleteIndex)}
                   onChange={(v) => patchStage(i, { onCompleteIndex: v === '' ? null : Number(v) })}
                   options={[
-                    { value: '', label: '下一阶段/结束' },
+                    { value: '', label: '下一阶段' },
                     ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
                   ]}
                 />
@@ -225,15 +289,17 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                   value={s.onRejectIndex == null ? '' : String(s.onRejectIndex)}
                   onChange={(v) => patchStage(i, { onRejectIndex: v === '' ? null : Number(v) })}
                   options={[
-                    { value: '', label: '上一阶段/原地' },
+                    { value: '', label: '不指定' },
                     ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
                   ]}
                 />
               </Field>
             </div>
 
+            <p className="mt-2 text-[11px] text-ink-faint">末阶段完成后任务结束。</p>
+
             <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
-              <Field label="交接目标工作流" className="min-w-0 flex-1">
+              <Field label="目标工作流" className="min-w-0 flex-1">
                 <Select
                   ariaLabel={`阶段${i + 1}交接目标工作流`}
                   value={s.handoffWorkflowId ?? ''}
@@ -244,19 +310,19 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                     })
                   }
                   options={[
-                    { value: '', label: '（不交接）' },
+                    { value: '', label: '不交接' },
                     ...handoffWorkflows.map((item) => ({ value: item.id, label: item.name })),
                   ]}
                 />
               </Field>
               {s.handoffWorkflowId != null && (
-                <Field label="交接目标阶段" className="min-w-0 flex-1">
+                <Field label="目标阶段" className="min-w-0 flex-1">
                   <Select
                     ariaLabel={`阶段${i + 1}交接目标阶段`}
                     value={s.handoffStageId ?? ''}
                     onChange={(v) => patchStage(i, { handoffStageId: v === '' ? null : v })}
                     options={[
-                      { value: '', label: '目标工作流首阶段' },
+                      { value: '', label: '首阶段' },
                       ...stagesOfWorkflow(s.handoffWorkflowId).map((stage) => ({
                         value: stage.id,
                         label: stage.name,
@@ -265,9 +331,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                   />
                 </Field>
               )}
-              <p className="w-full text-[11px] text-ink-faint">
-                完成本阶段后在目标工作流建一条关联任务；打回不触发交接。
-              </p>
+              <p className="w-full text-[11px] text-ink-faint">完成后在目标工作流建关联任务。</p>
             </div>
           </div>
         ))}
@@ -278,7 +342,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
           添加阶段
         </Button>
         <Button type="submit" variant="primary" size="sm" disabled={saving} className="ml-auto">
-          保存工作流
+          保存
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           取消

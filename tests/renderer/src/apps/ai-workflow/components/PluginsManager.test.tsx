@@ -236,7 +236,7 @@ describe('PluginsManager', () => {
 
     expect(screen.getByLabelText('legacy 后缀')).toHaveValue('')
     expect(screen.getByLabelText('legacy 重试')).toHaveValue(3)
-    expect(screen.getByRole('combobox', { name: 'legacy 变体' })).toHaveTextContent('（未设置）')
+    expect(screen.getByRole('combobox', { name: 'legacy 变体' })).toHaveTextContent('未设置')
     expect(screen.getByLabelText('legacy 开关')).not.toBeChecked()
     expect(screen.getByLabelText('legacy 令牌')).toHaveAttribute('placeholder', '未设置')
 

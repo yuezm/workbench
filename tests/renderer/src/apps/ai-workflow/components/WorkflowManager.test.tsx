@@ -52,14 +52,16 @@ describe('WorkflowManager', () => {
     render(<WorkflowManager />)
 
     expect(await screen.findByText('3 阶段 · 日常研发')).toBeInTheDocument()
-    const first = screen.getByRole('button', { name: /研发/ })
+    const first = screen.getByRole('button', { name: '选择工作流 研发' })
     expect(within(first).getByText('当前')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /写作/ }))
+    await user.click(screen.getByRole('button', { name: '选择工作流 写作' }))
     expect(
-      within(screen.getByRole('button', { name: /写作/ })).getByText('当前'),
+      within(screen.getByRole('button', { name: '选择工作流 写作' })).getByText('当前'),
     ).toBeInTheDocument()
-    expect(within(screen.getByRole('button', { name: /研发/ })).queryByText('当前')).toBeNull()
+    expect(
+      within(screen.getByRole('button', { name: '选择工作流 研发' })).queryByText('当前'),
+    ).toBeNull()
 
     await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
     expect(screen.getByRole('dialog')).toHaveTextContent('工作流定义')
@@ -95,7 +97,7 @@ describe('WorkflowManager', () => {
 
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
     await user.type(screen.getByLabelText('工作流名称'), '新建流')
-    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({
@@ -103,7 +105,7 @@ describe('WorkflowManager', () => {
       input: { name: '新建流' },
     })
     // 保存后选中新建项：新行带「当前」
-    const createdRow = await screen.findByRole('button', { name: /新建流/ })
+    const createdRow = await screen.findByRole('button', { name: '选择工作流 新建流' })
     expect(within(createdRow).getByText('当前')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
@@ -118,7 +120,7 @@ describe('WorkflowManager', () => {
     await user.click(screen.getByRole('button', { name: '编辑' }))
     await user.clear(screen.getByLabelText('工作流名称'))
     await user.type(screen.getByLabelText('工作流名称'), '研发2')
-    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(await screen.findByText('update-fail')).toBeInTheDocument()
     expect(kernel.dispatched[0]).toMatchObject({ type: 'workflow.update', id: 'w1' })
@@ -133,7 +135,7 @@ describe('WorkflowManager', () => {
     await screen.findByText('研发')
 
     await user.click(screen.getByRole('button', { name: '编辑' }))
-    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(await screen.findByText('保存纯文本失败')).toBeInTheDocument()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
@@ -156,5 +158,42 @@ describe('WorkflowManager', () => {
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(kernel.dispatched).toHaveLength(0)
+  })
+
+  it('删除工作流：dispatch workflow.remove，成功后该行消失', async () => {
+    let list = [wf('w1', '研发'), wf('w2', '写作')]
+    kernel.setView('workflows.all', undefined, list)
+    handleDispatch((command) => {
+      if (command.type === 'workflow.remove') {
+        list = list.filter((item) => item.id !== command.id)
+        kernel.setView('workflows.all', undefined, list)
+        return { facts: [], value: null }
+      }
+      return { facts: [], value: null }
+    })
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    expect(await screen.findByText('写作')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '删除工作流 写作' }))
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({ type: 'workflow.remove', id: 'w2' })
+    await waitFor(() => expect(screen.queryByText('写作')).not.toBeInTheDocument())
+    // 删掉当前选中项后，剩余首个自动成为当前
+    expect(
+      within(screen.getByRole('button', { name: '选择工作流 研发' })).getByText('当前'),
+    ).toBeInTheDocument()
+  })
+
+  it('删除失败展示错误，行保留', async () => {
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发')])
+    handleDispatch(() => Promise.reject(new Error('remove-fail')))
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('研发')
+
+    await user.click(screen.getByRole('button', { name: '删除工作流 研发' }))
+    expect(await screen.findByText('remove-fail')).toBeInTheDocument()
+    expect(screen.getByText('研发')).toBeInTheDocument()
   })
 })

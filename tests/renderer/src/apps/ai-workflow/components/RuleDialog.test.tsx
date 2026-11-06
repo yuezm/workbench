@@ -79,7 +79,7 @@ describe('RuleDialog', () => {
     )
 
     expect(screen.getByText('新建规则')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('规则名称不能为空')).toBeInTheDocument()
     expect(onSubmit).not.toHaveBeenCalled()
 
@@ -101,7 +101,7 @@ describe('RuleDialog', () => {
     )
 
     await user.type(screen.getByLabelText('规则名称'), 'Issue 规则')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('请选择目标工作流')).toBeInTheDocument()
     expect(onSubmit).not.toHaveBeenCalled()
   })
@@ -128,7 +128,7 @@ describe('RuleDialog', () => {
     await user.type(screen.getByLabelText('规则提示词'), '按 Issue 描述推进')
     await user.clear(screen.getByLabelText('并行数'))
     await user.type(screen.getByLabelText('并行数'), '2')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
@@ -162,12 +162,12 @@ describe('RuleDialog', () => {
 
     await user.type(screen.getByLabelText('规则名称'), '高级规则')
     await choose(user, '规则目标工作流', '研发')
-    await choose(user, '任务标题取字', '事件 summary')
+    await choose(user, '任务标题取字', 'summary')
     await choose(user, '合并策略', '按 subject')
     await choose(user, '线程归并键', 'externalRef')
     await choose(user, '线程已有任务时', '新建任务')
     await user.click(screen.getByLabelText('启用规则'))
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
@@ -199,14 +199,14 @@ describe('RuleDialog', () => {
     await choose(user, '规则触发方式', '定时')
     await user.type(screen.getByLabelText('cron 表达式'), '0 9 * *')
     await choose(user, '规则目标工作流', '研发')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
-    expect(await screen.findByText('cron 需为 5 段（分 时 日 月 周）')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('cron 需 5 段')).toBeInTheDocument()
     expect(onSubmit).not.toHaveBeenCalled()
 
     await user.clear(screen.getByLabelText('cron 表达式'))
     await user.type(screen.getByLabelText('cron 表达式'), '0 9 * * *')
     await user.type(screen.getByLabelText('规则提示词'), '汇总昨日进展并给出今日计划')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(onSubmit).toHaveBeenCalledTimes(1)
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
@@ -238,7 +238,7 @@ describe('RuleDialog', () => {
     await user.type(screen.getByLabelText('规则名称'), 'x')
     await choose(user, '规则目标工作流', '研发')
     await user.type(screen.getByLabelText('并行数'), '9')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('并行数需为 1–8 的整数')).toBeInTheDocument()
     expect(onSubmit).not.toHaveBeenCalled()
   })
@@ -260,9 +260,7 @@ describe('RuleDialog', () => {
     expect(screen.getByRole('combobox', { name: '规则起始阶段' })).toHaveTextContent('审核')
 
     await choose(user, '规则目标工作流', '写作')
-    expect(screen.getByRole('combobox', { name: '规则起始阶段' })).toHaveTextContent(
-      '首阶段（默认）',
-    )
+    expect(screen.getByRole('combobox', { name: '规则起始阶段' })).toHaveTextContent('首阶段')
   })
 
   it('重选当前工作流不清掉已选的起始阶段', async () => {
@@ -328,11 +326,11 @@ describe('RuleDialog', () => {
 
     await user.type(screen.getByLabelText('规则名称'), 'x')
     await choose(user, '规则目标工作流', '研发')
-    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(await screen.findByText('cron 解析失败')).toBeInTheDocument()
     expect(onCancel).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: '保存规则' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
   })
 
   it('没有工作流：提示先建工作流，保存禁用', () => {
@@ -347,7 +345,7 @@ describe('RuleDialog', () => {
     )
 
     expect(screen.getByText(/先建工作流/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存规则' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })
 
   it('编辑回填并行数；非 Error 的保存失败按字符串展示', async () => {
@@ -363,7 +361,7 @@ describe('RuleDialog', () => {
     )
 
     expect(screen.getByLabelText('并行数')).toHaveValue(2)
-    await userEvent.click(screen.getByRole('button', { name: '保存规则' }))
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('后端不可用')).toBeInTheDocument()
   })
 })

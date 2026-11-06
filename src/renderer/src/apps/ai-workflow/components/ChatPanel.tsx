@@ -79,7 +79,7 @@ export function ChatPanel({
       <div className="flex-1 overflow-auto p-5" aria-label="消息">
         {conversation === null ? (
           <div className="grid h-full place-items-center text-sm text-ink-faint">
-            还没有对话，点左侧「新对话」开始
+            点左侧「新对话」开始
           </div>
         ) : (
           <div className="flex flex-col gap-3">

@@ -374,7 +374,7 @@ export interface AppPlugin {
 - 授权：外部插件默认未启用；manifest 声明的能力须**全部**被授权且 `enabled=true` 才启动，缺一即 `unauthorized`（不启动）。授权是**信任门不是 OS 沙箱**：子进程仍受操作系统权限约束，宿主只控制「启不启动 / 下发哪些 config 与 secret」。
 - 设置与 secret：非密钥设置走第 14 张投影表 `plugin_settings`（`plugins.replaced` 整批替换、版本 +1）；secret 写宿主私有表 `plugin_secrets`（`safeStorage` 加密，不进事实/视图/快照），视图只回 `secretKeys`；`safeStorage` 不可用时写入口拒绝（`unsupported`），不落明文。
 - 设置生效时机：端口 / 地址 / secret 等运行期配置在**应用启动时**装配，修改后需重启应用生效（不引入热重启状态机）。
-- 设置页「插件」：宿主视图 `plugins.all`（磁盘目录 + 设置 + 运行状态）；启停、逐项授权、config 表单（secret 只写）、错误展示；授权勾选只能选 manifest 声明的能力。
+- 设置页「插件」：宿主视图 `plugins.all`（磁盘目录 + 设置 + 运行状态）；两级展示——列表只给概览（名称、可用性、启停开关、种类 · 版本、内置/外部、一行描述），点进「插件详情」才有逐项授权、config 表单（secret 只写）、错误原因与保存；授权勾选只能选 manifest 声明的能力。
 
 ## 插件边界与审查要点
 

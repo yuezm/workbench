@@ -203,6 +203,14 @@
 - 回滚点：M7 改投影表、`tasks` 结构与 `KERNEL_VERSION`，回滚 = 切回 `master` 代码 + 恢复 M4 备份 `%APPDATA%\workbench\backups\ai-workflow-2026-11-05T1720-pre-m4.db` 并重建；`plugin_secrets` 重建不清空，但 `safeStorage` 换机后旧密文解密失败按「该键不可用」降级，用户需重填。
 - 下一步：外部 `executor` 插件协议面（probe/models/领取往返）、插件热重载/安装向导、webhook 双向通道（平台回调回收答案）、跨工作流交接的完成回写与子工作流语义、远端 Worker 真实传输（拉模式 daemon + 鉴权）；均不阻塞主线。
 
+## M10 记录（2026-11-07，项目维度）
+
+- 背景：任务原先只挂工作流，执行目录来自运行时 `workdir`；用户要求「任务下增加项目维度：从本地添加文件夹作为项目（工作目录），只有在项目下才能创建任务」。
+- 契约：新增 `Project`（`id/name/path/description/createdAt/updatedAt`）与 `project.create|update|remove` 命令、`project.created|updated|removed` 事实（整行 upsert / tombstone）、第 16 张投影表 `projects`；`tasks` 补 `project_id`（`ALTER TABLE`，旧行按 null 归一）。
+- 内核：`task.create` 必须带存在的项目（子任务必须与父任务同项目）；`RunRow.cwd` 优先取项目 `path`，其次运行时 `workdir`；spawn / handoff 任务继承来源任务的项目；规则可声明 `to.projectId`（保存时校验存在），老规则产出的任务按「未归属」展示。
+- 宿主 / 客户端：视图 `projects.all` / `tasks.byProject` / `tasks.unassigned`；`window.workbench.pickFolder()`（原生目录选择器，取消返回 null）；项目弹窗与「未归属」入口在任务栏；`KERNEL_VERSION=M10.0.0`。
+- 已知边界：项目文件夹只做形状校验，目录是否存在 / 可写由宿主选择器与执行器负责；项目下还有任务（含已完成）时拒绝删项目；v2 存量与老规则任务不迁移归属，统一落在「未归属」。
+
 ## 文件去向
 
 | 现状                                      | 行数                  | 去向                                                                                                               |

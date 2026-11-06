@@ -64,6 +64,15 @@ export function KanbanBoard({
   const executingIds = new Set(useKernelView('tasks.executing') ?? [])
   // 任务树线索只按当前看板的任务列表查父任务标题，不另发视图查询
   const titleById = new Map(tasks.map((task) => [task.id, task.title]))
+  // 子任务进度（M8）：同工作流的子任务也在 tasks 里，直接按 parentTaskId 汇总
+  const childStats = new Map<string, { done: number; total: number }>()
+  for (const task of tasks) {
+    if (task.parentTaskId === null) continue
+    const stats = childStats.get(task.parentTaskId) ?? { done: 0, total: 0 }
+    stats.total += 1
+    if (task.status === 'completed') stats.done += 1
+    childStats.set(task.parentTaskId, stats)
+  }
 
   const stopDrag = (): void => {
     setDragging(null)
@@ -156,6 +165,7 @@ export function KanbanBoard({
                       parentTitle={
                         task.parentTaskId === null ? undefined : titleById.get(task.parentTaskId)
                       }
+                      childProgress={childStats.get(task.id)}
                       onOpenTask={onOpenTask}
                       onOpenThread={onOpenThread}
                       onDragStart={setDragging}

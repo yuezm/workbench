@@ -1,6 +1,8 @@
 import { useState, type ReactElement } from 'react'
 import type {
   EntryMode,
+  OnChildrenSettled,
+  SpawnPolicy,
   StageInput,
   WorkflowInput,
   WorkflowStage,
@@ -36,6 +38,9 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
           onRejectIndex: null,
           handoffWorkflowId: null,
           handoffStageId: null,
+          subtaskStageId: null,
+          onChildrenSettled: null,
+          spawnPolicy: null,
         },
       ],
     }
@@ -56,6 +61,9 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
         onRejectIndex: rj >= 0 ? rj : null,
         handoffWorkflowId: s.handoffWorkflowId,
         handoffStageId: s.handoffStageId,
+        subtaskStageId: s.subtaskStageId ?? null,
+        onChildrenSettled: s.onChildrenSettled ?? null,
+        spawnPolicy: s.spawnPolicy ?? null,
       }
     }),
   }
@@ -129,6 +137,9 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
           onRejectIndex: null,
           handoffWorkflowId: null,
           handoffStageId: null,
+          subtaskStageId: null,
+          onChildrenSettled: null,
+          spawnPolicy: null,
         },
       ],
     }))
@@ -332,6 +343,51 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                 </Field>
               )}
               <p className="w-full text-[11px] text-ink-faint">完成后在目标工作流建关联任务。</p>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
+              <Field label="子任务落点阶段" className="min-w-0 flex-1">
+                <Select
+                  ariaLabel={`阶段${i + 1}子任务落点阶段`}
+                  value={s.subtaskStageId ?? ''}
+                  onChange={(v) => patchStage(i, { subtaskStageId: v === '' ? null : v })}
+                  options={[
+                    { value: '', label: '跟随当前阶段' },
+                    ...(workflow?.stages ?? []).map((stage) => ({
+                      value: stage.id,
+                      label: stage.name,
+                    })),
+                  ]}
+                />
+              </Field>
+              <Field label="子任务完成后" className="min-w-0 flex-1">
+                <Select
+                  ariaLabel={`阶段${i + 1}子任务完成后`}
+                  value={s.onChildrenSettled ?? ''}
+                  onChange={(v) =>
+                    patchStage(i, { onChildrenSettled: v === '' ? null : (v as OnChildrenSettled) })
+                  }
+                  options={[
+                    { value: '', label: '按阶段推断' },
+                    { value: 'wake', label: '唤醒父 Agent' },
+                    { value: 'notify', label: '仅通知' },
+                    { value: 'complete', label: '完成父任务' },
+                  ]}
+                />
+              </Field>
+              <Field label="允许拆子任务" className="min-w-0 flex-1">
+                <Select
+                  ariaLabel={`阶段${i + 1}允许拆子任务`}
+                  value={s.spawnPolicy ?? ''}
+                  onChange={(v) =>
+                    patchStage(i, { spawnPolicy: v === '' ? null : (v as SpawnPolicy) })
+                  }
+                  options={[
+                    { value: '', label: '允许' },
+                    { value: 'off', label: '禁止' },
+                  ]}
+                />
+              </Field>
             </div>
           </div>
         ))}

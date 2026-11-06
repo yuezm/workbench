@@ -102,6 +102,9 @@ function refsOf(fact: AnyFact): EntityRef[] {
             fact.type === 'task.comment_added' ? fact.payload.comment.taskId : fact.payload.task.id,
         },
       ]
+    case 'task.children_settled':
+      // M8：子任务全部结束的审计事实归到父任务时间线。
+      return [{ scope: 'task', id: fact.payload.parentTaskId }]
     case 'run.queued':
     case 'run.claimed':
     case 'run.lease_extended':

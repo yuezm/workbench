@@ -69,6 +69,10 @@ CREATE TABLE IF NOT EXISTS ${name} (
   -- M7 跨工作流交接：目标工作流 / 目标阶段（可空；弱引用，不设外键，删除目标后由内核判缺失）
   handoff_workflow_id TEXT,
   handoff_stage_id TEXT,
+  -- M8 子任务：默认落点阶段 / 子任务全部结束时的父任务处理 / 是否允许派生子任务
+  subtask_stage_id TEXT,
+  on_children_settled TEXT CHECK (on_children_settled IN ('wake','notify','complete')),
+  spawn_policy TEXT CHECK (spawn_policy IN ('off','agent')),
   created_at TEXT NOT NULL,
   UNIQUE (workflow_id, position)
 );`
@@ -92,12 +96,15 @@ CREATE TABLE IF NOT EXISTS ${name} (
   workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
   current_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
-  origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','rule','handoff')),
+  origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','rule','handoff','spawn')),
   rule_id TEXT,
   external_ref TEXT,
   labels_json TEXT NOT NULL DEFAULT '[]',
   thread_id TEXT,
   parent_task_id TEXT,
+  spawned_by_run_id TEXT,
+  batch_no INTEGER,
+  spawn_key TEXT,
   handoff_from_task_id TEXT,
   handoff_from_stage_id TEXT,
   created_at TEXT NOT NULL,
@@ -566,6 +573,44 @@ export const TASKS_M7_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
+ * M8 给 `workflow_stages` 新增的列（子任务落点 / rollup / 派发策略）。
+ * 三列都可空、无默认值；`ALTER TABLE ADD COLUMN` 只增不改。清单与 `stagesTable()` 同步。
+ */
+export const STAGES_M8_ADDED_COLUMNS = [
+  'subtask_stage_id',
+  'on_children_settled',
+  'spawn_policy',
+] as const
+
+/** `workflow_stages` M8 补列语句（可空、无 DEFAULT）。 */
+export const STAGES_M8_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M8_ADDED_COLUMNS)[number], string>
+> = {
+  subtask_stage_id: 'ALTER TABLE workflow_stages ADD COLUMN subtask_stage_id TEXT',
+  on_children_settled:
+    "ALTER TABLE workflow_stages ADD COLUMN on_children_settled TEXT CHECK (on_children_settled IN ('wake','notify','complete'))",
+  spawn_policy:
+    "ALTER TABLE workflow_stages ADD COLUMN spawn_policy TEXT CHECK (spawn_policy IN ('off','agent'))",
+}
+
+/**
+ * M8 给 `tasks` 新增的列（spawn 来源 / 批次 / 幂等键）。
+ *
+ * 注意：M8 同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff','spawn')`，SQLite 不能
+ * `ALTER TABLE` 改 CHECK —— 旧库首启时与 M7 同法物理重建 `tasks`（见 `host/db.ts`）。
+ */
+export const TASKS_M8_ADDED_COLUMNS = ['spawned_by_run_id', 'batch_no', 'spawn_key'] as const
+
+/** `tasks` M8 补列语句：只用于「列缺但 CHECK 已是新口径」的异常状态兜底。 */
+export const TASKS_M8_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M8_ADDED_COLUMNS)[number], string>
+> = {
+  spawned_by_run_id: 'ALTER TABLE tasks ADD COLUMN spawned_by_run_id TEXT',
+  batch_no: 'ALTER TABLE tasks ADD COLUMN batch_no INTEGER',
+  spawn_key: 'ALTER TABLE tasks ADD COLUMN spawn_key TEXT',
+}
+
+/**
  * 旧 `tasks` 行 → 新 `tasks` 行（指名字表）的拷贝 SQL（M7 `tasks` 物理重建用）。
  *
  * 旧库可能缺 M6 / M6.5 / M7 的任一列：按 `columns` 逐列决定「取旧值」还是「补字面量」，
@@ -576,14 +621,16 @@ export function legacyTasksCopySql(targetTable: string, columns: ReadonlySet<str
     columns.has(column) ? column : fallback
   return `INSERT INTO ${targetTable} (
     id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
-    external_ref, labels_json, thread_id, parent_task_id, handoff_from_task_id,
-    handoff_from_stage_id, created_at, updated_at
+    external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
+    spawn_key, handoff_from_task_id, handoff_from_stage_id, created_at, updated_at
   )
   SELECT
     id, title, description, workflow_id, current_stage_id, status,
     ${pick('origin', "'manual'")}, ${pick('rule_id', 'NULL')},
     ${pick('external_ref', 'NULL')}, ${pick('labels_json', "'[]'")},
     ${pick('thread_id', 'NULL')}, ${pick('parent_task_id', 'NULL')},
+    ${pick('spawned_by_run_id', 'NULL')}, ${pick('batch_no', 'NULL')},
+    ${pick('spawn_key', 'NULL')},
     ${pick('handoff_from_task_id', 'NULL')}, ${pick('handoff_from_stage_id', 'NULL')},
     created_at, updated_at
   FROM tasks`

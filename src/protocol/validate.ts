@@ -12,11 +12,13 @@ import {
   CARD_ANSWER_VIA,
   ENTRY_MODES,
   EXECUTOR_KEY_PATTERN,
+  ON_CHILDREN_SETTLED,
   PERMISSION_MODES,
   PROBE_STATES,
   RUN_ERROR_CODES,
   RUN_EVENT_TYPES,
   RUN_TERMINAL_STATUSES,
+  SPAWN_POLICIES,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
 import { CAPABILITIES, PLUGIN_KINDS } from './manifest'
@@ -91,6 +93,10 @@ export const COMMAND_LIMITS = {
   frameSeq: 1_000_000_000,
   /** 事件跳数上限（与 `Limits.maxHops` 同值；超限由内核写 `event.dropped`） */
   maxHops: 8,
+  /** 单条回执 `spawn[]` 上限（M8；超出整块忽略） */
+  spawnItems: 32,
+  /** 子任务批次号上限（M8） */
+  spawnBatchMax: 999,
 } as const
 
 type Obj = Record<string, unknown>
@@ -238,7 +244,11 @@ const checkStage = (value: unknown, label: string): Check => {
     ) ??
     // M7 交接：目标工作流 / 目标阶段存在性由内核按视图判（这里只校验 id 形状）
     optionalId(stage.handoffWorkflowId, `${label}.handoffWorkflowId`) ??
-    optionalId(stage.handoffStageId, `${label}.handoffStageId`)
+    optionalId(stage.handoffStageId, `${label}.handoffStageId`) ??
+    // M8 子任务：落点阶段存在性 / 从属由内核按视图判
+    optionalId(stage.subtaskStageId, `${label}.subtaskStageId`) ??
+    optionalEnum(stage.onChildrenSettled, `${label}.onChildrenSettled`, ON_CHILDREN_SETTLED) ??
+    optionalEnum(stage.spawnPolicy, `${label}.spawnPolicy`, SPAWN_POLICIES)
   )
 }
 
@@ -313,7 +323,9 @@ const checkTaskInput = (value: unknown): Check => {
     required(input.title, 'input.title', COMMAND_LIMITS.title) ??
     optionalText(input.description, 'input.description', COMMAND_LIMITS.description) ??
     requiredId(input.workflowId, 'input.workflowId') ??
-    optionalId(input.stageId, 'input.stageId')
+    optionalId(input.stageId, 'input.stageId') ??
+    // M8：人工挂子任务的父任务 id（存在性 / 同工作流 / active 由内核判）
+    optionalId(input.parentTaskId, 'input.parentTaskId')
   )
 }
 
@@ -725,6 +737,23 @@ const checkRawEvent = (value: unknown, label: string): Check => {
   )
 }
 
+/**
+ * 回执 `spawn[]` 的单项（M8）：白名单式校验，只读取
+ * `subject/summary/stageId/batch/key`；Agent 若塞 `parentTaskId` / `agentId` 等
+ * 越权字段，一律不读取（内核按 run.taskId 推导父任务，派活目标由阶段决定）。
+ */
+const checkSpawnTask = (value: unknown, label: string): Check => {
+  const item = asRecord(value)
+  if (!item) return `${label} 必须是对象`
+  return (
+    required(item.subject, `${label}.subject`, COMMAND_LIMITS.title) ??
+    optionalText(item.summary, `${label}.summary`, COMMAND_LIMITS.description) ??
+    optionalId(item.stageId, `${label}.stageId`) ??
+    optionalIntegerIn(item.batch, `${label}.batch`, 1, COMMAND_LIMITS.spawnBatchMax) ??
+    optionalId(item.key, `${label}.key`)
+  )
+}
+
 /** 运行帧（`run.frames` 的单帧）：`seq` 由宿主分配，`type` 是事件类型枚举，其余为可选负载。 */
 const checkFrame = (value: unknown, label: string): Check => {
   const frame = asRecord(value)
@@ -780,6 +809,7 @@ const checkReceipt = (value: unknown): Check => {
     ) ??
     optionalText(receipt.later, 'receipt.later', COMMAND_LIMITS.iso) ??
     checkList(receipt.events, 'receipt.events', COMMAND_LIMITS.receiptItems, checkRawEvent) ??
+    checkList(receipt.spawn, 'receipt.spawn', COMMAND_LIMITS.spawnItems, checkSpawnTask) ??
     checkList(receipt.notes, 'receipt.notes', THREAD_LIMITS.notesPerReceipt, (note, at) =>
       text(note, at, THREAD_LIMITS.noteText),
     ) ??

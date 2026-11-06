@@ -55,6 +55,7 @@ describe('protocol/views', () => {
       'agents.all',
       'runtimes.all',
       'tasks.byWorkflow',
+      'tasks.byParent',
       'task.byId',
       'runs.active-by-task',
       'conversations.all',

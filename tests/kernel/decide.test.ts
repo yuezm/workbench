@@ -1801,3 +1801,315 @@ describe('kernel/decide 引用扫描', () => {
     })
   })
 })
+
+describe('kernel/decide M8：任务派生', () => {
+  const threadRow = (over: Partial<ThreadRow> = {}): ThreadRow => ({
+    id: 'th-1',
+    source: 'manual',
+    externalRef: null,
+    title: '父任务',
+    status: 'open',
+    taskIds: ['t-1'],
+    rootTaskIds: ['t-1'],
+    concurrency: 1,
+    notesVersion: 0,
+    notes: [],
+    events: [],
+    lastActivityAt: NOW,
+    createdAt: CREATED,
+    ...over,
+  })
+
+  const agentStage = stage({ entryMode: 'agent', agentId: 'ag-1' })
+
+  const seededView = (over: Partial<Seed> = {}): View => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [agentStage],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [task({ threadId: 'th-1' })],
+      runs: [runRow()],
+      ...over,
+    })
+    seeded.threads.set('th-1', threadRow())
+    return seeded
+  }
+
+  it('run.receipt spawn：建子任务并挂父任务 / 继承线程（Agent 自报 parentTaskId 被忽略）', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [agentStage],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [task({ threadId: 'th-1' })],
+      runs: [runRow()],
+    })
+    seeded.threads.set('th-1', threadRow())
+    const decision = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: {
+          status: 'succeeded',
+          leaseId: 'run-1:1',
+          turn: 1,
+          spawn: [
+            { subject: '实现登录页', key: 'a', parentTaskId: '伪造' } as never,
+            { subject: '实现鉴权接口' },
+          ],
+        },
+      }),
+      NOW,
+      env(),
+    )
+    const created = decision.facts
+      .filter((fact) => fact.type === 'task.created')
+      .map((fact) => (fact.payload as { task: Task }).task)
+    expect(created).toHaveLength(2)
+    expect(created[0]).toMatchObject({
+      parentTaskId: 't-1',
+      threadId: 'th-1',
+      origin: 'spawn',
+      spawnedByRunId: 'run-1',
+      spawnKey: 'a',
+      currentStageId: 'st-1',
+    })
+    // 子任务进入 agent 阶段 → 各自有 queued run
+    expect(decision.facts.filter((fact) => fact.type === 'run.queued')).toHaveLength(2)
+    // 回执终态照常落库
+    expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
+  })
+
+  it('spawnPolicy=off 的阶段：回执 spawn 全部丢弃', () => {
+    const seeded = seededView({
+      stages: [stage({ entryMode: 'agent', agentId: 'ag-1', spawnPolicy: 'off' })],
+    })
+    const decision = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: {
+          status: 'succeeded',
+          leaseId: 'run-1:1',
+          turn: 1,
+          spawn: [{ subject: '不应创建' }],
+        },
+      }),
+      NOW,
+      env(),
+    )
+    expect(decision.facts.some((fact) => fact.type === 'task.created')).toBe(false)
+  })
+
+  it('task.create 带 parentTaskId：子任务继承父线程、parentTaskId 指父；父不存在/跨工作流/已完成被拒', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage()],
+      tasks: [task({ threadId: 'th-1' })],
+    })
+    seeded.threads.set('th-1', threadRow())
+    const ok = decide(
+      seeded,
+      command({
+        type: 'task.create',
+        input: { title: '子任务', workflowId: 'wf-1', parentTaskId: 't-1' },
+      }),
+      NOW,
+      env(),
+    )
+    const created = ok.facts.find((fact) => fact.type === 'task.created')
+    expect((created?.payload as { task: Task }).task).toMatchObject({
+      parentTaskId: 't-1',
+      threadId: 'th-1',
+    })
+    expect(ok.facts.some((fact) => fact.type === 'thread.opened')).toBe(false)
+
+    expect(
+      decide(
+        seeded,
+        command({
+          type: 'task.create',
+          input: { title: '子任务', workflowId: 'wf-1', parentTaskId: 'ghost' },
+        }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [], reject: { code: 'not_found', message: '父任务不存在: ghost' } })
+
+    const doneParent = view({
+      workflows: [workflow()],
+      stages: [stage()],
+      tasks: [task({ status: 'completed' })],
+    })
+    expect(
+      decide(
+        doneParent,
+        command({
+          type: 'task.create',
+          input: { title: '子任务', workflowId: 'wf-1', parentTaskId: 't-1' },
+        }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({
+      facts: [],
+      reject: { code: 'conflict', message: '父任务已完成，不能挂子任务: t-1' },
+    })
+  })
+
+  it('子任务完成 → 父任务 rollup：全部子任务结束才产 children_settled + 唤醒父 Agent', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [agentStage],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [
+        task({ id: 't-1', threadId: 'th-1' }),
+        task({ id: 't-2', parentTaskId: 't-1', threadId: 'th-1', origin: 'spawn' }),
+      ],
+    })
+    seeded.threads.set('th-1', threadRow({ taskIds: ['t-1', 't-2'] }))
+    const decision = decide(seeded, command({ type: 'task.complete', id: 't-2' }), NOW, env())
+    expect(decision.facts.some((fact) => fact.type === 'task.children_settled')).toBe(true)
+    const wake = decision.facts.find((fact) => fact.type === 'run.queued')
+    expect((wake?.payload as { run: { taskId: string } }).run.taskId).toBe('t-1')
+  })
+
+  it('删掉子任务同样触发 rollup；父任务已有活跃 run 时不重复触发', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [agentStage],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [
+        task({ id: 't-1', threadId: 'th-1' }),
+        task({ id: 't-2', parentTaskId: 't-1', threadId: 'th-1', origin: 'spawn' }),
+      ],
+      runs: [runRow({ id: 'run-parent', taskId: 't-1', status: 'running' })],
+      active: ['t-1'],
+    })
+    seeded.threads.set('th-1', threadRow({ taskIds: ['t-1', 't-2'] }))
+    const decision = decide(seeded, command({ type: 'task.remove', id: 't-2' }), NOW, env())
+    expect(decision.facts.some((fact) => fact.type === 'task.removed')).toBe(true)
+    // 父任务已有活跃 run → rollup 幂等跳过
+    expect(decision.facts.some((fact) => fact.type === 'task.children_settled')).toBe(false)
+  })
+
+  it('task.create：父任务跨工作流被拒', () => {
+    const seeded = view({
+      workflows: [workflow(), workflow({ id: 'wf-2', name: '另一个流程' })],
+      stages: [stage()],
+      tasks: [task({ workflowId: 'wf-2' })],
+    })
+    expect(
+      decide(
+        seeded,
+        command({
+          type: 'task.create',
+          input: { title: '子任务', workflowId: 'wf-1', parentTaskId: 't-1' },
+        }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '父任务不属于该工作流: t-1' },
+    })
+  })
+
+  it('run.receipt 把子任务跑完 → 自动 rollup 父任务（级联）', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage({ entryMode: 'agent', agentId: 'ag-1' })],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [
+        task({ id: 't-1', threadId: 'th-1' }),
+        task({ id: 't-2', parentTaskId: 't-1', threadId: 'th-1', origin: 'spawn' }),
+      ],
+      runs: [runRow({ id: 'run-1', taskId: 't-2' })],
+    })
+    seeded.threads.set('th-1', threadRow({ taskIds: ['t-1', 't-2'] }))
+    const decision = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1 },
+      }),
+      NOW,
+      env(),
+    )
+    expect(
+      decision.facts.some(
+        (fact) =>
+          fact.type === 'task.completed' && (fact.payload as { task: Task }).task.id === 't-2',
+      ),
+    ).toBe(true)
+    expect(decision.facts.some((fact) => fact.type === 'task.children_settled')).toBe(true)
+    const wakeTaskIds = decision.facts
+      .filter((fact) => fact.type === 'run.queued')
+      .map((fact) => (fact.payload as { run: { taskId: string } }).run.taskId)
+    expect(wakeTaskIds).toContain('t-1')
+  })
+
+  it('rollup 沿链级联：子任务完成 → 父完成任务 → 祖父完成任务', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage({ entryMode: 'agent', agentId: 'ag-1', onChildrenSettled: 'complete' })],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [
+        task({ id: 'g' }),
+        task({ id: 'p', parentTaskId: 'g', threadId: 'th-1' }),
+        task({ id: 'c', parentTaskId: 'p', threadId: 'th-1', origin: 'spawn' }),
+      ],
+      runs: [runRow({ id: 'run-1', taskId: 'c' })],
+    })
+    seeded.threads.set('th-1', threadRow({ taskIds: ['g', 'p', 'c'] }))
+    const decision = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1 },
+      }),
+      NOW,
+      env(),
+    )
+    const completedIds = decision.facts
+      .filter((fact) => fact.type === 'task.completed')
+      .map((fact) => (fact.payload as { task: Task }).task.id)
+    expect(completedIds).toEqual(expect.arrayContaining(['c', 'p', 'g']))
+  })
+
+  it('还有兄弟子任务未终态：本次不 rollup（循环里跳过）', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage({ entryMode: 'agent', agentId: 'ag-1' })],
+      agents: [agent()],
+      runtimes: [runtime()],
+      tasks: [
+        task({ id: 't-1' }),
+        task({ id: 't-2', parentTaskId: 't-1', threadId: 'th-1', origin: 'spawn' }),
+        task({ id: 't-3', parentTaskId: 't-1', threadId: 'th-1', origin: 'spawn' }),
+      ],
+      runs: [runRow({ id: 'run-1', taskId: 't-2' })],
+    })
+    seeded.threads.set('th-1', threadRow({ taskIds: ['t-1', 't-2', 't-3'] }))
+    const decision = decide(
+      seeded,
+      host({
+        type: 'run.receipt',
+        runId: 'run-1',
+        receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1 },
+      }),
+      NOW,
+      env(),
+    )
+    expect(decision.facts.some((fact) => fact.type === 'task.children_settled')).toBe(false)
+  })
+})

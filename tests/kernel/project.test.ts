@@ -38,6 +38,9 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   onRejectStageId: null,
   handoffWorkflowId: null,
   handoffStageId: null,
+  subtaskStageId: null,
+  onChildrenSettled: null,
+  spawnPolicy: null,
   ...over,
 })
 
@@ -94,6 +97,9 @@ const task = (over: Partial<Task> = {}): Task => ({
   labels: [],
   threadId: null,
   parentTaskId: null,
+  spawnedByRunId: null,
+  batchNo: null,
+  spawnKey: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
   createdAt: AT,
@@ -311,6 +317,17 @@ describe('kernel/project', () => {
         createdAt: '2026-11-05T00:00:00.000Z',
       }),
     ])
+    // M8：子任务全部结束是审计事实，不写投影
+    expect(
+      project(
+        fact(19, 'task.children_settled', {
+          parentTaskId: 'task-1',
+          childIds: ['task-2'],
+          batchNo: null,
+          action: 'wake',
+        }),
+      ),
+    ).toEqual([])
   })
 
   it('删除类事实的 payload 行就是 tombstone，投影写 row:null', () => {
@@ -792,6 +809,9 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
           labels: [],
           threadId: null,
           parentTaskId: null,
+          spawnedByRunId: null,
+          batchNo: null,
+          spawnKey: null,
           handoffFromTaskId: null,
           handoffFromStageId: null,
         },

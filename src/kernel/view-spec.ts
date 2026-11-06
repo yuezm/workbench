@@ -46,7 +46,16 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 进入效果要判定落点是否 agent 入口并拼提示词 → 需要智能体与运行时配置；
       // M6.5：隐式线程在决策里本地构造（不读 threads），首轮无续接、无线程上下文历史
       // M7.5：提示词要带任务上下文 / 反馈（新任务还没有评论，仍按切片装载）
-      return ['workflows', 'workflow_stages', 'agents', 'runtimes', 'task_comments']
+      // M8：人工挂子任务要读父任务与父线程（parentTaskId 校验 / 继承线程）
+      return [
+        'workflows',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+        'task_comments',
+        'tasks',
+        'threads',
+      ]
     case 'task.move':
       // 进入效果（每次进入都重新建 run）要拼线程上下文与按线程续接会话
       return [
@@ -63,6 +72,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'task.complete':
       // 完成后若线程内无 active 任务 → thread.closed{all-tasks-done}；交接产出的新任务
       // 首轮提示词要带上下文（新任务没有评论，按切片装载）
+      // M8：父任务 rollup 要读父任务是否有活跃 run / open 的 children-settled 卡
       return [
         'tasks',
         'workflows',
@@ -71,11 +81,14 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'runtimes',
         'threads',
         'task_comments',
+        'runs',
+        'cards',
       ]
     case 'task.remove':
       // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价；
       // M6.5：删除后同样判定线程是否可归档（任务上下文由投影层按 task_id 联删）
-      return ['tasks', 'runs', 'threads']
+      // M8：删除子任务后父任务 rollup 要读卡片（幂等）
+      return ['tasks', 'runs', 'threads', 'cards']
     case 'task.comment':
       // M7.5：追加一条上下文 / 反馈；rerun 时复用进入阶段效果（拼反馈段 + 线程上下文、
       // 按线程续接会话、判定是否已有活跃 run）

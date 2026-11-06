@@ -13,6 +13,8 @@ interface TaskCardProps {
   onDragEnd: () => void
   /** 父任务标题（父任务也在当前看板里时由上层按任务列表查得，不另发视图查询） */
   parentTitle?: string
+  /** 子任务进度（M8）：本卡是父任务且有子任务时显示 `done/total` */
+  childProgress?: { done: number; total: number }
   /** 单击卡片进入任务详情页（页面跳转，由上层路由处理） */
   onOpenTask?: (task: Task) => void
   /** 打开线程详情页：不传或任务没有 threadId 时不渲染线程入口 */
@@ -43,6 +45,7 @@ export function TaskCard({
   onDragStart,
   onDragEnd,
   parentTitle,
+  childProgress,
   onOpenTask,
   onOpenThread,
 }: TaskCardProps): ReactElement {
@@ -86,6 +89,14 @@ export function TaskCard({
         <p className="line-clamp-3 text-xs leading-relaxed text-ink-faint">{task.description}</p>
       )}
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
+        {childProgress !== undefined && childProgress.total > 0 && (
+          <span
+            className="rounded-full bg-focus/15 px-1.5 py-0.5 text-[10px] text-focus"
+            title="子任务完成进度"
+          >
+            子任务 {childProgress.done}/{childProgress.total}
+          </span>
+        )}
         {parentId !== null && (
           <span
             className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-faint"

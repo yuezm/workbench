@@ -25,7 +25,7 @@ export const ACCESS_BY_PERMISSION: Record<Runtime['permissionMode'], 'read' | 'e
 
 /** 规则触发的首轮元信息（规则建任务时传给 `entryRunFacts`）。 */
 export interface RunTrigger {
-  ruleId: string
+  ruleId: string | null
   rulesVersion: number
   eventIds: string[]
   hops: number

@@ -11,12 +11,16 @@ import {
   SCHEMA_VERSION,
   STAGES_M7_ADDED_COLUMNS,
   STAGES_M7_ADD_COLUMN_SQL,
+  STAGES_M8_ADDED_COLUMNS,
+  STAGES_M8_ADD_COLUMN_SQL,
   TASKS_M6_ADDED_COLUMNS,
   TASKS_M6_ADD_COLUMN_SQL,
   TASKS_M65_ADDED_COLUMNS,
   TASKS_M65_ADD_COLUMN_SQL,
   TASKS_M7_ADDED_COLUMNS,
   TASKS_M7_ADD_COLUMN_SQL,
+  TASKS_M8_ADDED_COLUMNS,
+  TASKS_M8_ADD_COLUMN_SQL,
   legacyRunsCopySql,
   legacyRuntimesCopySql,
   legacyTasksCopySql,
@@ -157,6 +161,7 @@ const TASKS_ADDED_COLUMNS = [
   ...TASKS_M6_ADDED_COLUMNS,
   ...TASKS_M65_ADDED_COLUMNS,
   ...TASKS_M7_ADDED_COLUMNS,
+  ...TASKS_M8_ADDED_COLUMNS,
 ] as const
 
 type TaskAddedColumn = (typeof TASKS_ADDED_COLUMNS)[number]
@@ -165,6 +170,7 @@ const TASKS_ADD_COLUMN_SQL: Readonly<Record<TaskAddedColumn, string>> = {
   ...TASKS_M6_ADD_COLUMN_SQL,
   ...TASKS_M65_ADD_COLUMN_SQL,
   ...TASKS_M7_ADD_COLUMN_SQL,
+  ...TASKS_M8_ADD_COLUMN_SQL,
 }
 
 /**
@@ -184,7 +190,9 @@ export function needsTasksUpgrade(db: DatabaseSync): boolean {
 export function needsTasksRebuild(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'tasks')
   if (columns.size === 0) return false
-  return TASKS_M7_ADDED_COLUMNS.some((column) => !columns.has(column))
+  return [...TASKS_M7_ADDED_COLUMNS, ...TASKS_M8_ADDED_COLUMNS].some(
+    (column) => !columns.has(column),
+  )
 }
 
 /**
@@ -233,22 +241,30 @@ function upgradeLegacyTasks(db: DatabaseSync): boolean {
   return true
 }
 
-/** 旧库 `workflow_stages` 缺 M7 交接两列 → 需要一次性补列（不重建表）。 */
+/** 旧库 `workflow_stages` 缺 M7 / M8 列 → 需要一次性补列（不重建表）。 */
 export function needsStagesUpgrade(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'workflow_stages')
   if (columns.size === 0) return false
-  return STAGES_M7_ADDED_COLUMNS.some((column) => !columns.has(column))
+  return [...STAGES_M7_ADDED_COLUMNS, ...STAGES_M8_ADDED_COLUMNS].some(
+    (column) => !columns.has(column),
+  )
 }
 
 /**
- * 旧 `workflow_stages` 一次性补列（M7）：两列都可空、无默认值。
+ * 旧 `workflow_stages` 一次性补列（M7 / M8）：列都可空、无默认值。
  */
 function upgradeLegacyStages(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'workflow_stages')
-  const missing = STAGES_M7_ADDED_COLUMNS.filter((column) => !columns.has(column))
+  const stageColumnSql: Readonly<Record<string, string>> = {
+    ...STAGES_M7_ADD_COLUMN_SQL,
+    ...STAGES_M8_ADD_COLUMN_SQL,
+  }
+  const missing = [...STAGES_M7_ADDED_COLUMNS, ...STAGES_M8_ADDED_COLUMNS].filter(
+    (column) => !columns.has(column),
+  )
   if (missing.length === 0) return false
   withTx(db, () => {
-    for (const column of missing) db.exec(STAGES_M7_ADD_COLUMN_SQL[column])
+    for (const column of missing) db.exec(stageColumnSql[column])
   })
   return true
 }

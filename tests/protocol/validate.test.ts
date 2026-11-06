@@ -8,6 +8,7 @@ import type {
   WorkflowInput,
 } from '../../src/protocol/entities'
 import {
+  COMMAND_LIMITS,
   validateCommand,
   validateInput,
   validateQuery,
@@ -793,6 +794,61 @@ describe('validateQuery（M5：query 动词入口）', () => {
     expect(validateInput(receipt([42])).ok).toBe(false)
     expect(validateInput(receipt([longText(2001)])).ok).toBe(false)
     expect(validateInput(receipt(Array.from({ length: 101 }, () => 'x'))).ok).toBe(false)
+  })
+
+  it('receipt.spawn：subject 必填、batch 1..999、≤32 条（M8）；越权字段被忽略', () => {
+    const receipt = (spawn: unknown): unknown => ({
+      type: 'run.receipt',
+      runId: 'run-1',
+      receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, spawn },
+    })
+    expect(
+      validateInput(
+        receipt([
+          {
+            subject: '实现登录页',
+            summary: '含表单与校验',
+            stageId: 'st-1',
+            batch: 1,
+            key: 'login',
+            parentTaskId: '伪造父任务',
+            agentId: '伪造智能体',
+          },
+        ]),
+      ).ok,
+    ).toBe(true)
+    expect(validateInput(receipt([{ subject: '   ' }])).ok).toBe(false)
+    expect(validateInput(receipt([42])).ok).toBe(false)
+    expect(validateInput(receipt([{ subject: 'x', batch: 0 }])).ok).toBe(false)
+    expect(
+      validateInput(receipt([{ subject: 'x', batch: COMMAND_LIMITS.spawnBatchMax + 1 }])).ok,
+    ).toBe(false)
+    expect(
+      validateInput(
+        receipt(
+          Array.from({ length: COMMAND_LIMITS.spawnItems + 1 }, (_, i) => ({
+            subject: `子任务${i}`,
+          })),
+        ),
+      ).ok,
+    ).toBe(false)
+  })
+
+  it('task.create：parentTaskId 可选，只有形状校验（M8）', () => {
+    expect(
+      validateCommand({
+        commandId: 'c-1',
+        type: 'task.create',
+        input: { title: '子任务', workflowId: 'wf-1', parentTaskId: 'tk-1' },
+      }).ok,
+    ).toBe(true)
+    expect(
+      validateCommand({
+        commandId: 'c-2',
+        type: 'task.create',
+        input: { title: '子任务', workflowId: 'wf-1', parentTaskId: '   ' },
+      }).ok,
+    ).toBe(false)
   })
 
   it('task.comment：taskId / 正文必填、≤2000 字，rerun 只接受布尔（M7.5）', () => {

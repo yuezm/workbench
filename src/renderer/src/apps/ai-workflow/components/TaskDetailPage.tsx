@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactElement } from 'react'
-import type { WorkflowWithStages } from '../../../../../protocol/entities'
+import type { Task, WorkflowWithStages } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { badgeCls } from '../../../components/ui/panel'
 import { getKernelStore } from '../../../shell/kernelStore'
@@ -18,6 +18,8 @@ export interface TaskDetailPageProps {
   onBack: () => void
   /** 打开任务所属线程的详情页（任务没有 threadId 时不提供入口） */
   onOpenThread: (threadId: string) => void
+  /** 打开子任务详情（M8；没有子任务时不渲染区块） */
+  onOpenTask?: (taskId: string) => void
 }
 
 /**
@@ -32,13 +34,16 @@ export function TaskDetailPage({
   workflows,
   onBack,
   onOpenThread,
+  onOpenTask,
 }: TaskDetailPageProps): ReactElement {
   const state = useKernelViewState('task.byId', { taskId })
   const runsState = useKernelViewState('runs.byTask', { taskId })
   const commentsState = useKernelViewState('comments.byTask', { taskId })
+  const childrenState = useKernelViewState('tasks.byParent', { taskId })
   const task = state.data ?? null
   const runs = runsState.data ?? []
   const comments = commentsState.data ?? []
+  const children: Task[] = childrenState.data ?? []
   const threadId = task?.threadId ?? null
   /** 反馈输入（提交成功后清空；失败保留待重试） */
   const [draft, setDraft] = useState('')
@@ -50,6 +55,8 @@ export function TaskDetailPage({
   const stage =
     task === null ? undefined : workflow?.stages.find((item) => item.id === task.currentStageId)
   const stageName = stage?.name
+  const stageNameOf = (child: Task): string =>
+    workflow?.stages.find((item) => item.id === child.currentStageId)?.name ?? '未知阶段'
   const hint =
     task === null ? '读取任务中' : `${workflow?.name ?? '未知工作流'} · ${stageName ?? '未知阶段'}`
   /** 勾选「接着做」只在「交给智能体」的阶段有意义（是否真跑仍由内核判定） */
@@ -119,6 +126,44 @@ export function TaskDetailPage({
         ) : (
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
             <TaskInfoPanel task={task} stageName={stageName} />
+
+            {children.length > 0 && (
+              <section aria-label="子任务" className="flex flex-col gap-2">
+                <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
+                  子任务
+                  <span className={badgeCls}>
+                    {children.filter((child) => child.status === 'completed').length}/
+                    {children.length}
+                  </span>
+                </h3>
+                <ul className="flex flex-col gap-1.5">
+                  {children.map((child) => (
+                    <li key={child.id}>
+                      <button
+                        type="button"
+                        disabled={onOpenTask === undefined}
+                        onClick={() => onOpenTask?.(child.id)}
+                        className="flex w-full items-center gap-2 rounded-xl border border-line bg-white/[0.02] px-3 py-2 text-left text-xs text-ink transition-colors hover:bg-white/[0.05] disabled:cursor-default"
+                      >
+                        <span className="min-w-0 flex-1 truncate">{child.title}</span>
+                        <span className="shrink-0 text-[11px] text-ink-faint">
+                          {stageNameOf(child)}
+                        </span>
+                        <span
+                          className={
+                            child.status === 'completed'
+                              ? 'shrink-0 rounded-full bg-short/15 px-1.5 py-0.5 text-[10px] text-short'
+                              : 'shrink-0 rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-dim'
+                          }
+                        >
+                          {child.status === 'completed' ? '已完成' : '进行中'}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <section aria-label="上下文" className="flex flex-col gap-3">
               <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">

@@ -21,6 +21,7 @@ import type {
   ChatRole,
   Conversation,
   Message,
+  OnChildrenSettled,
   RunEventRow,
   RunRow,
   Runtime,
@@ -53,6 +54,7 @@ export const FACT_TYPES = [
   'task.completed',
   'task.removed',
   'task.comment_added',
+  'task.children_settled',
   'run.queued',
   'run.claimed',
   'run.lease_extended',
@@ -187,6 +189,18 @@ export interface TaskRemovedPayload {
  */
 export interface TaskCommentAddedPayload {
   comment: TaskComment
+}
+
+/**
+ * 子任务全部结束（M8）：审计事实，`project` 不写表；真正的效果由同时产出的
+ * `run.queued`（唤醒父 Agent）/ `card.opened`（通知）/ `task.completed`（父完成）表达。
+ * `childIds` 是本次判定为终态的子任务 id；`batchNo` 为 null 表示未分批（v1 恒 null）。
+ */
+export interface TaskChildrenSettledPayload {
+  parentTaskId: string
+  childIds: string[]
+  batchNo: number | null
+  action: OnChildrenSettled
 }
 
 // ---------- 运行 ----------
@@ -482,6 +496,7 @@ export interface FactPayloads {
   'task.completed': TaskCompletedPayload
   'task.removed': TaskRemovedPayload
   'task.comment_added': TaskCommentAddedPayload
+  'task.children_settled': TaskChildrenSettledPayload
   'run.queued': RunQueuedPayload
   'run.claimed': RunClaimedPayload
   'run.lease_extended': RunLeaseExtendedPayload

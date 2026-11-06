@@ -338,4 +338,30 @@ describe('TaskCard', () => {
     )
     expect(screen.queryByText('交接')).not.toBeInTheDocument()
   })
+
+  it('父任务显示子任务完成进度（M8）', () => {
+    const { rerender } = render(
+      <TaskCard
+        task={task}
+        stage={stage('agent')}
+        executing={false}
+        childProgress={{ done: 2, total: 3 }}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('子任务 2/3')).toBeInTheDocument()
+
+    rerender(
+      <TaskCard
+        task={task}
+        stage={stage('agent')}
+        executing={false}
+        childProgress={{ done: 0, total: 0 }}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(screen.queryByText(/子任务 \d/)).not.toBeInTheDocument()
+  })
 })

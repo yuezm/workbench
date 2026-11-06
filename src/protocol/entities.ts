@@ -193,6 +193,19 @@ export const ENTRY_MODES = ['none', 'agent', 'user'] as const
 
 export type EntryMode = (typeof ENTRY_MODES)[number]
 
+/**
+ * 子任务全部结束时父任务的处理（M8）：
+ * `wake` = 唤醒父 Agent 续接决定；`notify` = 只开信息卡等人；`complete` = 父任务直接完成。
+ */
+export const ON_CHILDREN_SETTLED = ['wake', 'notify', 'complete'] as const
+
+export type OnChildrenSettled = (typeof ON_CHILDREN_SETTLED)[number]
+
+/** 阶段是否允许 Agent 派生子任务（M8）：`off` = 一律丢弃；`agent` = 由 Agent 自决。 */
+export const SPAWN_POLICIES = ['off', 'agent'] as const
+
+export type SpawnPolicy = (typeof SPAWN_POLICIES)[number]
+
 export interface WorkflowStage {
   id: string
   workflowId: string
@@ -209,6 +222,12 @@ export interface WorkflowStage {
   handoffWorkflowId: string | null
   /** 交接目标阶段（必须属于 `handoffWorkflowId`）；null = 目标工作流首阶段 */
   handoffStageId: string | null
+  /** M8：本阶段派生的子任务默认落点阶段；null = 父任务当前阶段 */
+  subtaskStageId?: string | null
+  /** M8：子任务全部结束时父任务处理；null = 按 entryMode 推断（agent→wake，否则 notify） */
+  onChildrenSettled?: OnChildrenSettled | null
+  /** M8：本阶段是否允许 Agent 派生子任务；null = 按 `agent` 处理 */
+  spawnPolicy?: SpawnPolicy | null
 }
 
 export interface StageInput {
@@ -225,6 +244,12 @@ export interface StageInput {
   handoffWorkflowId?: string | null
   /** 交接目标阶段 id（M7，可空 = 目标工作流首阶段） */
   handoffStageId?: string | null
+  /** 子任务默认落点阶段 id（M8，可空 = 父任务当前阶段；须属于本工作流） */
+  subtaskStageId?: string | null
+  /** 子任务全部结束时的父任务处理（M8，可空 = 按 entryMode 推断） */
+  onChildrenSettled?: OnChildrenSettled | null
+  /** 是否允许 Agent 派生子任务（M8，可空 = agent） */
+  spawnPolicy?: SpawnPolicy | null
 }
 
 export interface Workflow {
@@ -252,11 +277,13 @@ export const TASK_STATUSES = ['active', 'completed'] as const
 export type TaskStatus = (typeof TASK_STATUSES)[number]
 
 /**
- * 任务来源（M6/M7）：`manual` = 人手建；`rule` = 自动化规则命中（含 cron / 手动触发）；
- * `handoff` = 跨工作流交接产物（来源任务的某阶段完成时在目标工作流建的任务）。
- * 规则任务记录 `ruleId` 与 `externalRef`；交接任务记录 `handoffFromTaskId` / `handoffFromStageId`。
+ * 任务来源（M6/M7/M8）：`manual` = 人手建；`rule` = 自动化规则命中（含 cron / 手动触发）；
+ * `handoff` = 跨工作流交接产物（来源任务的某阶段完成时在目标工作流建的任务）；
+ * `spawn` = Agent 回执 `spawn[]` 派生出的子任务。
+ * 规则任务记录 `ruleId` 与 `externalRef`；交接任务记录 `handoffFromTaskId` / `handoffFromStageId`；
+ * spawn 任务记录 `spawnedByRunId` / `batchNo` / `spawnKey`，并以 `parentTaskId` 挂父任务。
  */
-export const TASK_ORIGINS = ['manual', 'rule', 'handoff'] as const
+export const TASK_ORIGINS = ['manual', 'rule', 'handoff', 'spawn'] as const
 
 export type TaskOrigin = (typeof TASK_ORIGINS)[number]
 
@@ -277,8 +304,14 @@ export interface Task {
   labels: string[]
   /** 所属线程（M6.5）：事件任务挂外部入口线程，手工任务挂隐式线程；旧行按 null 归一 */
   threadId: string | null
-  /** 父任务（回执派生事件建的任务；无派生为 null）；看板据此展示任务树 */
+  /** 父任务（派生 / spawn 建的任务必填；无派生为 null）；看板据此展示任务树 */
   parentTaskId: string | null
+  /** M8：派生出本任务的 run（`origin='spawn'` 时非 null；内核从 run.taskId 推导） */
+  spawnedByRunId?: string | null
+  /** M8：子任务批次（≥1；未分批为 null；v1 不区分批次） */
+  batchNo?: number | null
+  /** M8：spawn 幂等键（同一父任务下唯一；非 spawn 为 null） */
+  spawnKey?: string | null
   /** 交接来源任务（M7，`origin='handoff'` 时非 null）：本任务由哪个任务的阶段完成产出 */
   handoffFromTaskId: string | null
   /** 交接来源阶段（M7，`origin='handoff'` 时非 null）：触发交接的阶段 id */
@@ -293,6 +326,8 @@ export interface TaskInput {
   workflowId: string
   /** 起始阶段；缺省为首阶段 */
   stageId?: string
+  /** M8：人工挂子任务时的父任务 id（校验父存在、同工作流、active） */
+  parentTaskId?: string
 }
 
 // ---------- 运行 ----------

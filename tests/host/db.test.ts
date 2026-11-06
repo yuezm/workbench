@@ -995,7 +995,7 @@ describe('openDatabase：旧库 tasks 结构升级（M6 / M6.5 / M7 一次性物
     const file = path.join(root, 'ai-workflow.db')
     try {
       seedLegacyTasksDatabase(file)
-      // 异常状态：M6.5 / M7 列已在（`needsTasksRebuild` 为 false，走 ALTER 补列路径），
+      // 异常状态：M6.5 / M7 / M8 列已在（`needsTasksRebuild` 为 false，走 ALTER 补列路径），
       // 但 M6 的 `labels_json` 缺；同时造一个大小写同名残留列 `LABELS_JSON`。
       // SQLite 列名大小写不敏感，补 `labels_json` 时会撞 duplicate column，
       // 用来验证「后一条 ALTER 失败 → 前面已成功的补列一起回滚」。
@@ -1005,6 +1005,9 @@ describe('openDatabase：旧库 tasks 结构升级（M6 / M6.5 / M7 一次性物
         raw.exec('ALTER TABLE tasks ADD COLUMN parent_task_id TEXT')
         raw.exec('ALTER TABLE tasks ADD COLUMN handoff_from_task_id TEXT')
         raw.exec('ALTER TABLE tasks ADD COLUMN handoff_from_stage_id TEXT')
+        raw.exec('ALTER TABLE tasks ADD COLUMN spawned_by_run_id TEXT')
+        raw.exec('ALTER TABLE tasks ADD COLUMN batch_no INTEGER')
+        raw.exec('ALTER TABLE tasks ADD COLUMN spawn_key TEXT')
         raw.exec("ALTER TABLE tasks ADD COLUMN LABELS_JSON TEXT NOT NULL DEFAULT '[]'")
       } finally {
         raw.close()

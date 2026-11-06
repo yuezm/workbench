@@ -101,6 +101,9 @@ const TASKS_M7_COLUMNS = [
   'labels_json',
   'thread_id',
   'parent_task_id',
+  'spawned_by_run_id',
+  'batch_no',
+  'spawn_key',
   'handoff_from_task_id',
   'handoff_from_stage_id',
   'created_at',
@@ -119,6 +122,9 @@ const STAGES_M7_COLUMNS = [
   'on_reject_stage_id',
   'handoff_workflow_id',
   'handoff_stage_id',
+  'subtask_stage_id',
+  'on_children_settled',
+  'spawn_policy',
   'created_at',
 ]
 
@@ -213,7 +219,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     expect(columnShape(db, 'runtimes').join('\n')).not.toContain('protocol_family')
   })
 
-  it('tasks 按 M7 结构：来源四列 + 线程两列 + 交接两列插在 status 与时间列之间，旧 8 列逐列不变', () => {
+  it('tasks 按 M7/M8 结构：来源四列 + 线程两列 + spawn 三列 + 交接两列插在 status 与时间列之间，旧 8 列逐列不变', () => {
     const legacy = memoryDb()
     legacy.exec(PRE_M1_FIVE_TABLE_DDL)
 
@@ -233,7 +239,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('workflow_stages 按 M7 结构：交接两列插在 on_reject_stage_id 与时间列之间，M1 列逐列不变', () => {
+  it('workflow_stages 按 M7/M8 结构：交接两列 + 子任务三列插在 on_reject_stage_id 与时间列之间，M1 列逐列不变', () => {
     const legacy = memoryDb()
     legacy.exec(PRE_M1_FIVE_TABLE_DDL)
     legacy.exec(PRE_M1_FIVE_TABLE_INDEXES)
@@ -272,6 +278,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       db
         .prepare(
           `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id,
+                  spawned_by_run_id, batch_no, spawn_key,
                   handoff_from_task_id, handoff_from_stage_id
            FROM tasks WHERE id = ?`,
         )
@@ -283,6 +290,9 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       labels_json: '[]',
       thread_id: null,
       parent_task_id: null,
+      spawned_by_run_id: null,
+      batch_no: null,
+      spawn_key: null,
       handoff_from_task_id: null,
       handoff_from_stage_id: null,
     })
@@ -296,6 +306,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       db
         .prepare(
           `SELECT origin, rule_id, external_ref, labels_json, thread_id, parent_task_id,
+                  spawned_by_run_id, batch_no, spawn_key,
                   handoff_from_task_id, handoff_from_stage_id
            FROM tasks WHERE id = ?`,
         )
@@ -307,6 +318,9 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       labels_json: '["bug"]',
       thread_id: 'th-1',
       parent_task_id: 'tk-parent',
+      spawned_by_run_id: null,
+      batch_no: null,
+      spawn_key: null,
       handoff_from_task_id: null,
       handoff_from_stage_id: null,
     })

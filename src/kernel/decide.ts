@@ -37,6 +37,7 @@ import type { SettledRun } from './run'
 import { chatPrompt, laterPrompt, titleFromContent } from './prompt'
 import { answerFacts, cardsFromReceipt, resolveFacts, resumedRun } from './cards'
 import { entryRunFacts, ACCESS_BY_PERMISSION } from './task-effects'
+import { childrenSettledFacts, spawnFacts } from './spawn'
 import { cronTaskFacts, eventThreadFacts, manualTriggerFacts, validateRuleBatch } from './rules'
 import { replacedPluginSettings, validatePluginSettings } from './plugins'
 import {
@@ -839,26 +840,45 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       if (requested !== null && !stages.some((stage) => stage.id === requested)) {
         return reject('not_found', '起始阶段不属于该工作流: ' + requested)
       }
-      // M6.5：手工任务自动挂隐式线程（source='manual'），之后可用 thread.bind 绑定入口
-      const thread = openThreadRow(env, {
-        source: 'manual',
-        externalRef: null,
-        title,
-        now,
-      })
+      // M8：人工挂子任务——父任务必须存在、同工作流、active（父任务 id 才挂得上）
+      const parentId = form.parentTaskId ?? null
+      let parent: Task | undefined
+      if (parentId !== null) {
+        parent = view.tasks.get(parentId)
+        if (!parent) return reject('not_found', '父任务不存在: ' + parentId)
+        if (parent.workflowId !== workflow.id) {
+          return reject('invalid_input', '父任务不属于该工作流: ' + parentId)
+        }
+        if (parent.status !== 'active') {
+          return reject('conflict', '父任务已完成，不能挂子任务: ' + parentId)
+        }
+      }
+      // 子任务继承父任务线程；没有父线程（或父任务无线程）时新建隐式线程
+      const parentThread = parent?.threadId == null ? undefined : view.threads.get(parent.threadId)
+      const thread =
+        parentThread ??
+        openThreadRow(env, {
+          source: 'manual',
+          externalRef: null,
+          title,
+          now,
+        })
       const task: Task = {
         id: env.nextId('task'),
         title,
         description: form.description ?? '',
         workflowId: workflow.id,
-        currentStageId: requested ?? stages[0]?.id ?? null,
+        currentStageId: requested ?? parent?.currentStageId ?? stages[0]?.id ?? null,
         status: 'active',
         origin: 'manual',
         ruleId: null,
         externalRef: null,
         labels: [],
         threadId: thread.id,
-        parentTaskId: null,
+        parentTaskId: parent?.id ?? null,
+        spawnedByRunId: null,
+        batchNo: null,
+        spawnKey: null,
         handoffFromTaskId: null,
         handoffFromStageId: null,
         createdAt: now,
@@ -866,7 +886,7 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       }
       const attached = withTask(thread, task, now)
       const facts: FactDraft[] = [
-        ...openedFacts(thread, OWNER, now),
+        ...(parentThread === undefined ? openedFacts(thread, OWNER, now) : []),
         ...taskAttachedFacts(attached, task, null, OWNER, now),
         draft('task.created', { task }),
       ]
@@ -928,6 +948,19 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
           new Map([[task.id, 'completed']]),
         ),
       )
+      // M8：子任务完成 → 父任务 rollup（全部子任务结束才触发）
+      if (task.parentTaskId !== null) {
+        facts.push(
+          ...childrenSettledFacts(
+            view,
+            task.parentTaskId,
+            now,
+            env,
+            OWNER,
+            new Map([[task.id, 'completed']]),
+          ),
+        )
+      }
       return done(facts)
     }
 
@@ -949,6 +982,19 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
           new Map([[task.id, 'completed']]),
         ),
       )
+      // M8：删掉子任务 → 父任务 rollup（删除视为放弃，不阻塞）
+      if (task.parentTaskId !== null) {
+        facts.push(
+          ...childrenSettledFacts(
+            view,
+            task.parentTaskId,
+            now,
+            env,
+            OWNER,
+            new Map([[task.id, 'completed']]),
+          ),
+        )
+      }
       return done(facts)
     }
 
@@ -1061,6 +1107,10 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
           ),
         )
       }
+      // M8：回执 spawn[] → 子任务（父任务 id 由内核从 run.taskId 推导，Agent 自报忽略）
+      if (input.receipt.spawn !== undefined && input.receipt.spawn.length > 0) {
+        facts.push(...spawnFacts(view, run, input.receipt.spawn, now, env, HOST_SCHEDULER))
+      }
       // M6.5：回执 notes[] → 线程笔记（run 没挂线程 / 线程不存在时忽略；笔记只作资料、不阻塞）
       const receiptNotes = input.receipt.notes
       if (run.threadId !== null && receiptNotes !== undefined && receiptNotes.length > 0) {
@@ -1121,6 +1171,40 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
               ),
             )
           }
+        }
+        // M8：任务完成 → 父任务 rollup（全部子任务结束才触发；批内去重 + 沿链级联）
+        const settledOverrides = new Map<Id, 'completed'>()
+        for (const fact of facts) {
+          if (fact.type === 'task.completed') {
+            settledOverrides.set((fact.payload as { task: Task }).task.id, 'completed')
+          }
+        }
+        const rolledUp = new Set<Id>()
+        for (let round = 0; round < 8; round += 1) {
+          let changed = false
+          for (const fact of [...facts]) {
+            if (fact.type !== 'task.completed') continue
+            const done = (fact.payload as { task: Task }).task
+            if (done.parentTaskId === null || rolledUp.has(done.parentTaskId)) continue
+            const extra = childrenSettledFacts(
+              view,
+              done.parentTaskId,
+              now,
+              env,
+              HOST_SCHEDULER,
+              settledOverrides,
+            )
+            if (extra.length === 0) continue
+            rolledUp.add(done.parentTaskId)
+            facts.push(...extra)
+            for (const item of extra) {
+              if (item.type === 'task.completed') {
+                settledOverrides.set((item.payload as { task: Task }).task.id, 'completed')
+              }
+            }
+            changed = true
+          }
+          if (!changed) break
         }
       }
       if (run.purpose === 'chat') {

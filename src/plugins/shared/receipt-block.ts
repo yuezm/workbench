@@ -15,7 +15,7 @@
  * 两层判据并不相同（宿主层放行的空选项 ask / 非 ISO later 到不了内核），
  * 上限常量共用 `COMMAND_LIMITS`，本文件不另定义一份。
  */
-import type { Ask, RawEvent, Receipt } from '../../protocol/inputs'
+import type { Ask, RawEvent, Receipt, SpawnTask } from '../../protocol/inputs'
 import { COMMAND_LIMITS } from '../../protocol/validate'
 import { THREAD_LIMITS } from '../../protocol/thread'
 
@@ -26,11 +26,21 @@ export interface ReceiptBlock {
   resolves?: string[]
   later?: string
   events?: RawEvent[]
+  /** 派生子任务（M8）：每条 ≤2000 字描述；只作声明，落地由内核决定 */
+  spawn?: SpawnTask[]
   /** 线程笔记（M6.5）：每条 ≤2000 字，只作资料 */
   notes?: string[]
 }
 
-const RECEIPT_BLOCK_KEYS = ['ask', 'notices', 'resolves', 'later', 'events', 'notes'] as const
+const RECEIPT_BLOCK_KEYS = [
+  'ask',
+  'notices',
+  'resolves',
+  'later',
+  'events',
+  'spawn',
+  'notes',
+] as const
 
 /** 开围栏：```json（标签大小写不敏感）单独成行 */
 const FENCE_OPEN_RE = /^```json\s*$/i
@@ -138,6 +148,29 @@ const parseNotes = (value: unknown): string[] | null => {
   return value as string[]
 }
 
+const parseSpawnList = (value: unknown): SpawnTask[] | null => {
+  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.spawnItems) return null
+  for (const entry of value) {
+    if (!isRecord(entry)) return null
+    if (!isText(entry.subject, COMMAND_LIMITS.title)) return null
+    if (!isOptionalText(entry.summary, COMMAND_LIMITS.description)) return null
+    if (!isOptionalText(entry.stageId, COMMAND_LIMITS.id)) return null
+    const batch = entry.batch
+    if (batch !== undefined && batch !== null) {
+      if (
+        typeof batch !== 'number' ||
+        !Number.isInteger(batch) ||
+        batch < 1 ||
+        batch > COMMAND_LIMITS.spawnBatchMax
+      ) {
+        return null
+      }
+    }
+    if (!isOptionalText(entry.key, COMMAND_LIMITS.id)) return null
+  }
+  return value as SpawnTask[]
+}
+
 const parseLater = (value: unknown): string | null => {
   if (!isText(value, COMMAND_LIMITS.iso)) return null
   // 内核会把 later 直接当 notBefore：非 ISO 时间整块忽略，不让无效时刻进调度
@@ -213,6 +246,15 @@ export function parseReceiptBlock(output: string): ReceiptBlock | null {
         }
         break
       }
+      case 'spawn': {
+        const spawn = parseSpawnList(value)
+        if (!spawn) return null
+        if (spawn.length > 0) {
+          block.spawn = spawn
+          fields += 1
+        }
+        break
+      }
       case 'notes': {
         const notes = parseNotes(value)
         if (!notes) return null
@@ -241,5 +283,6 @@ export function applyReceiptBlock(receipt: Receipt, output: string): void {
   if (block.resolves !== undefined) receipt.resolves = block.resolves
   if (block.later !== undefined) receipt.later = block.later
   if (block.events !== undefined) receipt.events = block.events
+  if (block.spawn !== undefined) receipt.spawn = block.spawn
   if (block.notes !== undefined) receipt.notes = block.notes
 }

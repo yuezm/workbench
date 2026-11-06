@@ -37,6 +37,7 @@ export const VIEW_IDS = [
   'agents.all',
   'runtimes.all',
   'tasks.byWorkflow',
+  'tasks.byParent',
   'task.byId',
   'runs.active-by-task',
   'conversations.all',
@@ -147,6 +148,7 @@ export interface RunApproval {
 /** 需要参数的视图 → 参数形状；无参数视图不出现在这里。 */
 export interface ViewArgs {
   'tasks.byWorkflow': { workflowId: string }
+  'tasks.byParent': { taskId: string }
   'task.byId': { taskId: string }
   'runs.active-by-task': { taskId: string }
   'messages.byConversation': { conversationId: string }
@@ -179,6 +181,7 @@ export interface ThreadDetail {
  */
 export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'tasks.byWorkflow': 'workflowId',
+  'tasks.byParent': 'taskId',
   'task.byId': 'taskId',
   'runs.active-by-task': 'taskId',
   'messages.byConversation': 'conversationId',
@@ -200,6 +203,7 @@ export interface ViewResults {
   'agents.all': Agent[]
   'runtimes.all': Runtime[]
   'tasks.byWorkflow': Task[]
+  'tasks.byParent': Task[]
   'task.byId': Task | null
   'runs.active-by-task': ActiveRun[]
   'conversations.all': Conversation[]

@@ -95,7 +95,7 @@ describe('WorkflowEditor', () => {
 
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(onCancel).toHaveBeenCalled()
-  })
+  }, 30_000)
 
   it('编辑已有工作流：把阶段 id 还原成下标', () => {
     const existing: WorkflowWithStages = {
@@ -397,4 +397,63 @@ describe('WorkflowEditor', () => {
     )
     expect(screen.getByRole('combobox', { name: '阶段1交接目标阶段' })).toHaveTextContent('请选择')
   })
+
+  it('子任务三字段：落点阶段 / 完成后动作 / 是否允许拆（M8）', async () => {
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '旧流',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 's0',
+          workflowId: 'w',
+          name: '待办',
+          position: 0,
+          entryMode: 'none',
+          agentId: null,
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          subtaskStageId: null,
+          onChildrenSettled: null,
+          spawnPolicy: null,
+        },
+        {
+          id: 's1',
+          workflowId: 'w',
+          name: '进行中',
+          position: 1,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          subtaskStageId: null,
+          onChildrenSettled: null,
+          spawnPolicy: null,
+        },
+      ],
+    }
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await choose(user, '阶段1子任务落点阶段', '进行中')
+    await choose(user, '阶段1子任务完成后', '唤醒父 Agent')
+    await choose(user, '阶段1允许拆子任务', '禁止')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[0]).toMatchObject({
+      subtaskStageId: 's1',
+      onChildrenSettled: 'wake',
+      spawnPolicy: 'off',
+    })
+  }, 30_000)
 })

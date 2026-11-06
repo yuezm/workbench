@@ -11,6 +11,7 @@ const ORIGIN_LABEL: Record<Task['origin'], string> = {
   manual: '手工创建',
   rule: '规则创建',
   handoff: '跨工作流交接',
+  spawn: 'Agent 派生',
 }
 
 /** 一个字段：标签 + 值（长 id 截断显示，完整值留在 title） */

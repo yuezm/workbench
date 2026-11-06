@@ -39,7 +39,7 @@ export type Iso = string
  * M7：插件设置投影、跨工作流交接、外部插件与 webhook 端口；
  * M7.5：任务上下文 / 反馈（`task_comments` 投影 + 提示词反馈段）。
  */
-export const KERNEL_VERSION = 'M7.5.0.0'
+export const KERNEL_VERSION = 'M8.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
@@ -182,6 +182,10 @@ export interface Limits {
   killAfterMs: number
   /** 单条 `run.frames` 事实的帧数上限，超出分包（不丢弃） */
   maxFramesPerBatch: number
+  /** 单条回执 `spawn[]` 上限（M8；可选，缺省取 32） */
+  maxSpawnItems?: number
+  /** 派生子任务深度上限（M8；可选，缺省取 8） */
+  maxSpawnDepth?: number
 }
 
 export type IdKind =

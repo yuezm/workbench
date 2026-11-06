@@ -383,6 +383,10 @@ function readLegacyEntityRows(
     // M6.5：v2 存量没有线程概念——不属于任何线程、不是派生任务。
     threadId: null,
     parentTaskId: null,
+    // M8：v2 存量没有 spawn 概念。
+    spawnedByRunId: null,
+    batchNo: null,
+    spawnKey: null,
     // M7：v2 存量没有交接概念——来源任务与阶段一律为空。
     handoffFromTaskId: null,
     handoffFromStageId: null,

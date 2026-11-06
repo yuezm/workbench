@@ -368,4 +368,41 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByText('未知工作流 · 未知阶段')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: '同时让智能体接着做' })).toBeDisabled()
   })
+
+  it('有子任务时渲染子任务区（进度 + 点进详情）', async () => {
+    const childDone: Task = {
+      ...task,
+      id: 't2',
+      title: '子任务A',
+      parentTaskId: 't1',
+      status: 'completed',
+      currentStageId: 's1',
+    }
+    const childOpen: Task = {
+      ...task,
+      id: 't3',
+      title: '子任务B',
+      parentTaskId: 't1',
+      currentStageId: 's0',
+    }
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    kernel.setView('tasks.byParent', { taskId: 't1' }, [childDone, childOpen])
+    const onOpenTask = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <TaskDetailPage
+        taskId="t1"
+        workflows={[workflow]}
+        onBack={vi.fn()}
+        onOpenThread={vi.fn()}
+        onOpenTask={onOpenTask}
+      />,
+    )
+    const section = await screen.findByRole('region', { name: '子任务' })
+    expect(section).toHaveTextContent('1/2')
+    await user.click(within(section).getByRole('button', { name: /子任务A/ }))
+    expect(onOpenTask).toHaveBeenCalledWith('t2')
+  })
 })

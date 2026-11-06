@@ -136,7 +136,15 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'runtime.remove': ['runtimes', 'agents'],
   'runtime.probe': ['runtimes'],
   'runtime.probed': ['runtimes'],
-  'task.create': ['workflows', 'workflow_stages', 'agents', 'runtimes', 'task_comments'],
+  'task.create': [
+    'workflows',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+    'task_comments',
+    'tasks',
+    'threads',
+  ],
   'task.move': [
     'tasks',
     'workflows',
@@ -156,8 +164,10 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'runtimes',
     'threads',
     'task_comments',
+    'runs',
+    'cards',
   ],
-  'task.remove': ['tasks', 'runs', 'threads'],
+  'task.remove': ['tasks', 'runs', 'threads', 'cards'],
   'task.comment': [
     'tasks',
     'workflows',
@@ -290,7 +300,12 @@ describe('kernel/view-spec', () => {
   it('删除命令要装载 runs（run.removed 事实替代 SQL 级联，D13）', () => {
     expect(viewSpec(byType.get('task.move') as Input)).toContain('tasks')
     expect(viewSpec(byType.get('task.complete') as Input)).toContain('tasks')
-    expect(viewSpec(byType.get('task.remove') as Input)).toEqual(['tasks', 'runs', 'threads'])
+    expect(viewSpec(byType.get('task.remove') as Input)).toEqual([
+      'tasks',
+      'runs',
+      'threads',
+      'cards',
+    ])
     expect(viewSpec(byType.get('workflow.remove') as Input)).toContain('runs')
   })
 

@@ -342,6 +342,7 @@ export interface ThreadRow {
 - **串行/并发**：`thread.concurrency` 默认 1——同一线程同时只允许一个 `claimed` run，派生任务默认排队，避免多个 Agent 同时改同一个工作树/分支；调到 N 时须确认各任务目录互不重叠。跨线程并行。M6.5 无 UI 编辑入口。
 - **手工任务也挂线程**：`task.create` 自动建隐式线程（`source='manual'`、`externalRef=null`）；cron / `rule.trigger` 建的任务同样拿隐式线程。之后可用「绑定入口」（`thread.bind`，目标键被占用则 reject）挂上 Issue/邮件键，后续外部事件续进同一线程。
 - **派生任务**：`task.created` 带 `threadId` / `parentTaskId`，派生任务默认继承父任务线程。Agent 回执派生的新事件经规则建任务时，内核按该事件的 `originRunId` 自动填线程与父任务（Agent 不能自己指定）。看板显示父子关系，线程面板呈现任务树；一任务可派生多个子任务，子任务还可再派生。
+- **M8 任务派生（spawn）**：回执 `spawn[]` 由内核直接建 `origin='spawn'` 子任务（不经规则）；`parentTaskId` 由内核从 `run.taskId` 推导（Agent 自报忽略），`spawnDepth ≤ 8`、单回执 ≤ 32、`(parentTaskId, spawnKey)` 幂等、父非 active / 阶段 `spawnPolicy='off'` 丢弃。子任务全部终态时按父阶段 `onChildrenSettled`（`wake` 唤醒父 Agent / `notify` 追加任务评论 / `complete` 完成父任务）rollup，父已有活跃 run 即视为已触发；多层派生沿 parentTaskId 链级联。`task.create` 可带 `parentTaskId` 人工挂子任务。
 - **生命周期**：线程内所有任务（含派生）完成或删除 → `thread.closed(all-tasks-done)`；`clock.tick` 对超过 14 天无活动的 open 线程记 `inactivity`；新事件到达自动 `thread.reopened`；`thread.close` 是人工归档（幂等）。关闭只影响 UI 归档与检索，不影响事实。
 - **跳数**：线程不重置 `hops`，回执派生事件仍按父 run +1 累计。
 

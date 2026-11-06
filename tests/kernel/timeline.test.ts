@@ -581,4 +581,17 @@ describe('kernel/timeline', () => {
     expect(kinds(timeline(facts, 'task', 't-1'))).toEqual([])
     expect(kinds(timeline(facts, 'run', 'run-1'))).toEqual(['4:event.merged'])
   })
+
+  it('M8：task.children_settled 归父任务时间线', () => {
+    const facts: Fact[] = [
+      fact(1, 'task.children_settled', {
+        parentTaskId: 't-1',
+        childIds: ['t-2'],
+        batchNo: null,
+        action: 'wake',
+      }),
+    ]
+    expect(kinds(timeline(facts, 'task', 't-1'))).toEqual(['1:task.children_settled'])
+    expect(kinds(timeline(facts, 'task', 't-2'))).toEqual([])
+  })
 })

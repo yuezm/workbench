@@ -108,6 +108,40 @@ describe('parseReceiptBlock：键与字段', () => {
     expect(parseReceiptBlock(blockOf({}))).toBeNull()
   })
 
+  it('spawn：合法子任务原样返回；空标题 / 批次越界 / 条数超限整块忽略', () => {
+    const spawn = [
+      {
+        subject: '实现登录页',
+        summary: '含表单与校验',
+        stageId: 'st-1',
+        batch: 1,
+        key: 'login',
+      },
+    ]
+    expect(parseReceiptBlock(blockOf({ spawn }))).toEqual({ spawn })
+    expect(parseReceiptBlock(blockOf({ spawn: [], notices: ['x'] }))).toEqual({ notices: ['x'] })
+    expect(parseReceiptBlock(blockOf({ spawn: null, notices: ['x'] }))).toEqual({
+      notices: ['x'],
+    })
+    for (const bad of [
+      [{ subject: '   ' }],
+      [{ subject: 'x', batch: 0 }],
+      [{ subject: 'x', batch: COMMAND_LIMITS.spawnBatchMax + 1 }],
+      [{ subject: 'x', batch: 1.5 }],
+      [{ subject: 'x', summary: 'y'.repeat(COMMAND_LIMITS.description + 1) }],
+      [{ subject: 'x', key: 'k'.repeat(COMMAND_LIMITS.id + 1) }],
+      [{ subject: 'x', stageId: 's'.repeat(COMMAND_LIMITS.id + 1) }],
+      ['not-object'],
+    ]) {
+      expect(parseReceiptBlock(blockOf({ spawn: bad, notices: ['同块也不能生效'] }))).toBeNull()
+    }
+    expect(parseReceiptBlock(blockOf({ spawn: 'not-array' }))).toBeNull()
+    const tooMany = Array.from({ length: COMMAND_LIMITS.spawnItems + 1 }, (_, i) => ({
+      subject: `子任务${i}`,
+    }))
+    expect(parseReceiptBlock(blockOf({ spawn: tooMany }))).toBeNull()
+  })
+
   it('null / 空数组视为未提供；只剩空字段时无回执', () => {
     expect(parseReceiptBlock(blockOf({ ask: null, notices: ['x'] }))).toEqual({ notices: ['x'] })
     expect(parseReceiptBlock(blockOf({ resolves: [], notices: ['x'] }))).toEqual({
@@ -216,13 +250,14 @@ describe('parseReceiptBlock：键与字段', () => {
 })
 
 describe('applyReceiptBlock：执行器接线口径', () => {
-  it('解析成功：只补五个字段，output 原文不动', () => {
+  it('解析成功：只补六个字段，output 原文不动', () => {
     const text = blockOf({
       ask: [askOf()],
       notices: ['n'],
       resolves: ['card-0'],
       later: '2026-11-06T09:00:00.000Z',
       events: [eventOf()],
+      spawn: [{ subject: '子任务', key: 'k' }],
     })
     const receipt = receiptOf({ output: text })
     applyReceiptBlock(receipt, text)
@@ -234,6 +269,7 @@ describe('applyReceiptBlock：执行器接线口径', () => {
     expect(receipt.resolves).toEqual(['card-0'])
     expect(receipt.later).toBe('2026-11-06T09:00:00.000Z')
     expect(receipt.events).toEqual([eventOf()])
+    expect(receipt.spawn).toEqual([{ subject: '子任务', key: 'k' }])
   })
 
   it('只带部分字段：只补出现的字段，其余保持未提供', () => {
@@ -246,6 +282,7 @@ describe('applyReceiptBlock：执行器接线口径', () => {
     expect(receipt.resolves).toBeUndefined()
     expect(receipt.later).toBeUndefined()
     expect(receipt.events).toBeUndefined()
+    expect(receipt.spawn).toBeUndefined()
   })
 
   it('只带 later 时其它四个字段保持未提供', () => {
@@ -258,6 +295,7 @@ describe('applyReceiptBlock：执行器接线口径', () => {
     expect(receipt.notices).toBeUndefined()
     expect(receipt.resolves).toBeUndefined()
     expect(receipt.events).toBeUndefined()
+    expect(receipt.spawn).toBeUndefined()
   })
 
   it('解析失败：不写任何字段，终态与 output 保持原样', () => {

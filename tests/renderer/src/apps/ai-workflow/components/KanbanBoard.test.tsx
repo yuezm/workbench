@@ -310,4 +310,31 @@ describe('KanbanBoard', () => {
     // 父任务自己不是派生任务
     expect(screen.getAllByText(/子任务 ·/)).toHaveLength(1)
   })
+
+  it('父任务卡显示子任务完成进度（M8）', () => {
+    const childOpen: Task = {
+      ...task,
+      id: 't2',
+      title: '子任务一',
+      parentTaskId: 't1',
+      currentStageId: 's0',
+    }
+    const childDone: Task = {
+      ...task,
+      id: 't3',
+      title: '子任务二',
+      parentTaskId: 't1',
+      status: 'completed',
+    }
+    render(
+      <KanbanBoard
+        workflow={wf}
+        tasks={[task, childOpen, childDone]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('子任务 1/2')).toBeInTheDocument()
+  })
 })

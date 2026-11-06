@@ -249,6 +249,7 @@ export function AiWorkflowPage(): ReactElement {
               workflows={workflows}
               onBack={back}
               onOpenThread={openThread}
+              onOpenTask={openTask}
             />
           ) : (
             <ThreadDetailPage threadId={route.threadId} onBack={back} onOpenTask={openTask} />

@@ -437,6 +437,23 @@ describe('queryView：各视图', () => {
     expect(queryView(db, 'tasks.byWorkflow', { workflowId: 'wf-missing' })).toEqual([])
   })
 
+  it('tasks.byParent：只取某任务的直接子任务（M8）', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+    const child = sample.task({
+      id: 'tk-child',
+      parentTaskId: 'tk-1',
+      spawnKey: 'k1',
+      origin: 'spawn',
+      workflowId: 'wf-1',
+      currentStageId: 'st-1',
+    })
+    writer.apply({ table: 'tasks', key: child.id, row: child }, SAMPLE_AT)
+    expect(queryView(db, 'tasks.byParent', { taskId: 'tk-1' })).toEqual([child])
+    expect(queryView(db, 'tasks.byParent', { taskId: 'tk-missing' })).toEqual([])
+  })
+
   it('task.byId：命中返回行，未命中返回 null', () => {
     const db = memory()
     seed(db)

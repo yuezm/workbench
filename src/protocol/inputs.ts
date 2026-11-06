@@ -69,9 +69,26 @@ export interface RawEvent {
 }
 
 /**
+ * Agent 派生的一项子任务（M8，回执 `spawn[]`）：
+ * 只声明「拆成哪件事」，**不指定派活目标 / 权限 / 目录 / 父任务 id**——
+ * `parentTaskId`、`origin`、`threadId` 由内核从当前 run 推导。
+ */
+export interface SpawnTask {
+  /** 子任务标题（必填，≤200） */
+  subject: string
+  /** 描述 / 验收（≤2000；作资料，不拼指令） */
+  summary?: string
+  /** 落点阶段（可选；须属父任务工作流；缺省按阶段 `subtaskStageId` 或父任务当前阶段） */
+  stageId?: string
+  /** 批次号（可选，1..999；v1 不区分批次，仅入账） */
+  batch?: number
+  /** 幂等键（可选；同一父任务下相同 key 只建一次） */
+  key?: string
+}
+
+/**
  * 一轮执行的回执：执行器 → 宿主 → `run.receipt` 输入 → 内核。
- * `later / events / notices / resolves` 留到 M4/M6 处理：M2 适配层不产出，
- * 内核校验时接受但忽略（D15）。
+ * `later / events / notices / resolves / spawn` 留到 M4/M6/M8 处理。
  */
 export interface Receipt {
   status: RunTerminalStatus
@@ -91,6 +108,8 @@ export interface Receipt {
   /** 约时间复查（ISO） */
   later?: string
   events?: RawEvent[]
+  /** 派生子任务（M8）：内核直接建 `origin='spawn'` 子任务，不依赖规则 */
+  spawn?: SpawnTask[]
   /** 线程笔记（M6.5）：每条 ≤2000 字；run 挂在线程上时由内核记 `thread.note_appended` */
   notes?: string[]
   errorCode?: RunErrorCode

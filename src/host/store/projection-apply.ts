@@ -208,18 +208,24 @@ const normalizeTask = (row: Task): Task => {
     labels: legacy.labels ?? [],
     threadId: legacy.threadId ?? null,
     parentTaskId: legacy.parentTaskId ?? null,
+    spawnedByRunId: legacy.spawnedByRunId ?? null,
+    batchNo: legacy.batchNo ?? null,
+    spawnKey: legacy.spawnKey ?? null,
     handoffFromTaskId: legacy.handoffFromTaskId ?? null,
     handoffFromStageId: legacy.handoffFromStageId ?? null,
   }
 }
 
-/** 规整阶段行的缺省值（M7）：M7 前的 `stage.*` 事实没有交接两列，重建时补 null。 */
+/** 规整阶段行的缺省值（M7 / M8）：缺交接 / 子任务字段时补 null。 */
 const normalizeStage = (row: WorkflowStage): WorkflowStage => {
   const legacy = row as Partial<WorkflowStage>
   return {
     ...row,
     handoffWorkflowId: legacy.handoffWorkflowId ?? null,
     handoffStageId: legacy.handoffStageId ?? null,
+    subtaskStageId: legacy.subtaskStageId ?? null,
+    onChildrenSettled: legacy.onChildrenSettled ?? null,
+    spawnPolicy: legacy.spawnPolicy ?? null,
   }
 }
 
@@ -301,9 +307,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     tasks: db.prepare(
       `INSERT INTO tasks
          (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
-          external_ref, labels_json, thread_id, parent_task_id, handoff_from_task_id,
-          handoff_from_stage_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
+          spawn_key, handoff_from_task_id, handoff_from_stage_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
@@ -316,6 +322,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          labels_json = excluded.labels_json,
          thread_id = excluded.thread_id,
          parent_task_id = excluded.parent_task_id,
+         spawned_by_run_id = excluded.spawned_by_run_id,
+         batch_no = excluded.batch_no,
+         spawn_key = excluded.spawn_key,
          handoff_from_task_id = excluded.handoff_from_task_id,
          handoff_from_stage_id = excluded.handoff_from_stage_id,
          created_at = excluded.created_at,
@@ -331,8 +340,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
@@ -342,7 +351,10 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          on_complete_stage_id = excluded.on_complete_stage_id,
          on_reject_stage_id = excluded.on_reject_stage_id,
          handoff_workflow_id = excluded.handoff_workflow_id,
-         handoff_stage_id = excluded.handoff_stage_id`,
+         handoff_stage_id = excluded.handoff_stage_id,
+         subtask_stage_id = excluded.subtask_stage_id,
+         on_children_settled = excluded.on_children_settled,
+         spawn_policy = excluded.spawn_policy`,
     ),
     agents: db.prepare(
       `INSERT INTO agents (id, name, description, runtime_id, system_prompt, created_at)
@@ -526,6 +538,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         JSON.stringify(task.labels),
         task.threadId,
         task.parentTaskId,
+        task.spawnedByRunId ?? null,
+        task.batchNo ?? null,
+        task.spawnKey ?? null,
         task.handoffFromTaskId,
         task.handoffFromStageId,
         task.createdAt,
@@ -549,6 +564,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.onRejectStageId,
         stage.handoffWorkflowId,
         stage.handoffStageId,
+        stage.subtaskStageId ?? null,
+        stage.onChildrenSettled ?? null,
+        stage.spawnPolicy ?? null,
         at,
       )
     },

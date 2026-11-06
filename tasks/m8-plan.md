@@ -105,3 +105,13 @@ src/renderer/src/shell/kernelStore.ts # 失效表（任务/线程已有，确认
 
 - 模块并入 `SPEC-kernel` 作 M8 章节，还是独立 `SPEC-task-fanout` 长期保留（本计划按独立文件推进，T8 再决定是否合并）。
 - 「专用 planner 智能体 + 规划阶段」是否作为 M9 单独做（本 M8 不做）。
+
+## 实施记录（2026-11-06）
+
+- **KERNEL_VERSION** 升至 M8.0.0； asks 加 spawned_by_run_id/atch_no/spawn_key 并把 origin CHECK 扩到 spawn，workflow_stages 加 subtask_stage_id/on_children_settled/spawn_policy；旧库走物理重建 + 补列。
+- **协议**：Receipt.spawn[]、checkSpawnTask（白名单，不读 parentTaskId/agent）、回执块 spawn 解析、 ask.children_settled 审计事实、 asks.byParent 视图。
+- **内核**：新增 src/kernel/spawn.ts（spawnFacts / spawnDepth / resolveSubtaskStage / childrenSettledFacts / resolveRollupAction / childrenSettledPrompt）；
+  un.receipt 接 spawn， ask.complete / ask.remove / 回执流转三处接 rollup 并沿 parentTaskId 链级联； ask.create 支持 parentTaskId（父存在/同工作流/active，继承父线程）。
+- **UI**：看板父卡「子任务 x/y」、任务详情页子任务区（可点进）、工作流编辑器三个阶段字段。
+- **与 Spec 的偏差**：onChildrenSettled='notify' 用 uthor='agent' 的任务评论承载，不开卡——cards.run_id 是非空外键，父任务此时没有 run；Spec 已同步。
+- **门禁**：pnpm check exit 0；覆盖率 99.86 / 99.2 / 99.83 / 99.94（阈值 98/93/95/98 不变，基线微降见 CONSTRAINTS EX-001）；改动行 170/186 = 91.4%；pnpm e2e 含新增 spawn.spec.ts 通过。

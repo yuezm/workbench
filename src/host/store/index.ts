@@ -54,6 +54,8 @@ export const DEFAULT_LIMITS: Limits = {
   cancelGraceMs: 3_000,
   killAfterMs: 2_000,
   maxFramesPerBatch: 500,
+  maxSpawnItems: 32,
+  maxSpawnDepth: 8,
 }
 
 export interface StoreOptions {

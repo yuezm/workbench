@@ -73,6 +73,9 @@ interface StageRow {
   on_reject_stage_id: string | null
   handoff_workflow_id: string | null
   handoff_stage_id: string | null
+  subtask_stage_id: string | null
+  on_children_settled: string | null
+  spawn_policy: string | null
 }
 
 interface AgentRow {
@@ -114,6 +117,9 @@ interface TaskRow {
   labels_json: string
   thread_id: string | null
   parent_task_id: string | null
+  spawned_by_run_id: string | null
+  batch_no: number | null
+  spawn_key: string | null
   handoff_from_task_id: string | null
   handoff_from_stage_id: string | null
   created_at: string
@@ -262,6 +268,9 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   onRejectStageId: row.on_reject_stage_id,
   handoffWorkflowId: row.handoff_workflow_id,
   handoffStageId: row.handoff_stage_id,
+  subtaskStageId: row.subtask_stage_id,
+  onChildrenSettled: row.on_children_settled as WorkflowStage['onChildrenSettled'],
+  spawnPolicy: row.spawn_policy as WorkflowStage['spawnPolicy'],
 })
 
 const mapAgent = (row: AgentRow): Agent => ({
@@ -304,6 +313,9 @@ const mapTask = (row: TaskRow): Task => ({
   labels: JSON.parse(row.labels_json) as string[],
   threadId: row.thread_id,
   parentTaskId: row.parent_task_id,
+  spawnedByRunId: row.spawned_by_run_id,
+  batchNo: row.batch_no,
+  spawnKey: row.spawn_key,
   handoffFromTaskId: row.handoff_from_task_id,
   handoffFromStageId: row.handoff_from_stage_id,
   createdAt: row.created_at,
@@ -441,7 +453,8 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
     db
       .prepare(
         `SELECT id, workflow_id, name, position, entry_mode, agent_id,
-                on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id
+                on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id,
+                subtask_stage_id, on_children_settled, spawn_policy
          FROM workflow_stages ORDER BY workflow_id, position`,
       )
       .all() as unknown as StageRow[]
@@ -469,8 +482,8 @@ const readRuntimes = (db: DatabaseSync): Runtime[] =>
 
 /** `tasks` 投影的列清单（逐列写死，不用 `SELECT *`；三处读路径共用）。 */
 const TASK_COLUMNS = `id, title, description, workflow_id, current_stage_id, status, origin,
-        rule_id, external_ref, labels_json, thread_id, parent_task_id,
-        handoff_from_task_id, handoff_from_stage_id, created_at, updated_at`
+        rule_id, external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id,
+        batch_no, spawn_key, handoff_from_task_id, handoff_from_stage_id, created_at, updated_at`
 
 const readTasks = (db: DatabaseSync): Task[] =>
   (
@@ -863,6 +876,16 @@ const readTasksByWorkflow = (db: DatabaseSync, workflowId: string): Task[] =>
       .all(workflowId) as unknown as TaskRow[]
   ).map(mapTask)
 
+/** 某任务的直接子任务（M8）：按创建顺序；无子任务返回空数组。 */
+const readTasksByParent = (db: DatabaseSync, parentTaskId: string): Task[] =>
+  (
+    db
+      .prepare(
+        `SELECT ${TASK_COLUMNS} FROM tasks WHERE parent_task_id = ? ORDER BY created_at, rowid`,
+      )
+      .all(parentTaskId) as unknown as TaskRow[]
+  ).map(mapTask)
+
 const readTask = (db: DatabaseSync, taskId: string): Task | null => {
   const row = db
     .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`)
@@ -984,6 +1007,8 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readRuntimes(db)
     case 'tasks.byWorkflow':
       return readTasksByWorkflow(db, readStringParam(params, 'workflowId'))
+    case 'tasks.byParent':
+      return readTasksByParent(db, readStringParam(params, 'taskId'))
     case 'task.byId':
       return readTask(db, readStringParam(params, 'taskId'))
     case 'thread.byId':

@@ -33,7 +33,7 @@ app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区�
   - **聊天**（默认）：上下文列表 = 会话清单（`components/ConversationList.tsx`：智能体选择 / 新建对话 / 会话清单）；内容区 = 消息流 + 输入区（`components/ChatPanel.tsx`），助手输出流式回显，可中止当前轮。聊天**独立于**工作流与任务——选中智能体即可开聊，不挂任务、不推进阶段；每轮由内核产一条 `purpose='chat'` 的 run，走与阶段相同的调度 / 执行器链路（M2 起）。同一时刻只处理当前选中会话的事件流。
   - **任务**：上下文列表 = 工作流切换器（`components/WorkflowSwitcher.tsx`，只在任务栏目显示）；内容区 = 看板（列 = 当前工作流的阶段 + 末尾「已完成」落点）。**单击任务卡进入任务详情页**（页面，不是侧栏 / 弹窗）。
 - **任务栏的二级页面**（`components/DetailHeader.tsx` + 页面组件）：栈式路由「看板 → 任务详情 → 线程详情 → 任务详情 …」，返回按钮与 Esc 出栈一级，切栏目 / 切视图回到看板（详情栈不跨栏目保留）。
-  - **任务详情页**（`components/TaskDetailPage.tsx`）：读 `task.byId` + `runs.byTask` + `comments.byTask`；上部是任务信息（标题、工作流 · 阶段线索、描述、状态 / 来源 / 线程 / 时间 / 任务 id、标签），下部是**上下文活动流**（`components/TaskActivity.tsx`：智能体每一轮运行与我的反馈按时间混排，像 issue 时间线）和**反馈框**（`components/TaskCommentForm.tsx`：正文 + 「同时让智能体接着做」勾选，dispatch `task.comment`）。反馈写进第 15 张投影表 `task_comments`，并作为下一次运行的「反馈记录（资料，不是指令）」段；任务挂在线程上时右上给「打开线程」入口。
+  - **任务详情页**（`components/TaskDetailPage.tsx`）：读 `task.byId` + `runs.byTask` + `comments.byTask`；上部是任务信息（标题、工作流 · 阶段线索、描述、状态 / 来源 / 线程 / 时间 / 任务 id、标签），下部是**上下文活动流**（`components/TaskActivity.tsx`：智能体每一轮运行与我的反馈按时间混排，像 issue 时间线）和**反馈框**（`components/TaskCommentForm.tsx`：正文 + 「同时让智能体接着做」勾选，dispatch `task.comment`）。每个运行卡片还会展示该轮**沙箱提权记录**（`run.approvals` 宿主视图，只读 dsh 会话日志里的 `approval/asked` / `approval/decided`）——提权回答是自动的，只有这条记录能让人事后复核。反馈写进第 15 张投影表 `task_comments`，并作为下一次运行的「反馈记录（资料，不是指令）」段；任务挂在线程上时右上给「打开线程」入口。
   - **线程详情页**（`components/ThreadDetailPage.tsx`）：读 `thread.byId`；依次是线程元信息、**任务列表**（根任务 + 派生子任务缩进，每行可点进任务详情页）、笔记、绑定入口、归档。
 - **看板交互**：新建任务时弹窗内选**起始阶段**；卡片**拖拽**到其它阶段列即进入该阶段，拖到「已完成」区即完成任务。看板不提供「通过 / 打回 / 推进」这类执行按钮。「执行中」由**是否有活跃 run**（`queued`/`running`/`waiting`）派生：只有此时卡片不可拖动/完成；`agent` 阶段失败后没有活跃 run，卡片可拖走重试或完成，由 run 结果自动推进的路径不变。
 - **设置**：侧栏换成设置栏目（`components/SettingsNav.tsx`：运行时配置 / 智能体配置 / 工作流配置），内容区是当前栏目的内容；同一时刻只渲染一个栏目。
@@ -97,7 +97,7 @@ src/renderer/src/apps/ai-workflow/
     ├── TaskCard.tsx           # 标题/描述/进入方式提示（可拖拽卡片 + 详情入口）
     ├── TaskDetailPage.tsx     # 任务详情页：任务信息 + 上下文活动流 + 反馈框
     ├── TaskInfoPanel.tsx      # 任务信息：描述 / 状态 / 阶段 / 来源 / 线程 / 时间 / id / 标签
-    ├── TaskActivity.tsx       # 上下文活动流：运行与反馈按时间混排（事件流按 run 订阅）
+    ├── TaskActivity.tsx       # 上下文活动流：运行与反馈按时间混排（事件流按 run 订阅；运行卡片含提权记录）
     ├── TaskCommentForm.tsx    # 反馈输入：正文 + 「同时让智能体接着做」勾选
     ├── ThreadDetailPage.tsx   # 线程详情页：元信息 / 任务列表 / 笔记 / 绑定 / 归档
     ├── DetailHeader.tsx       # 二级页面返回条：返回 + 标题线索 + 操作槽
@@ -222,10 +222,10 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `command`         | 启动命令：命令名或绝对路径；缺省由所选执行器插件 manifest 提供（dsh 默认 `dsh`，command 默认为空待填）                                               |
 | `profile`         | 启动 profile；dsh 用它选 `--stdio` / `--probe`，其它执行器可为空串；缺省同样来自 manifest                                                            |
 | `argsTemplate`    | `command` 执行器的参数模板（JSON 数组文本，≤20 项、单项 ≤500 字符；空串 = 无参数）；占位符白名单 `{model}`/`{effort}`/`{cwd}`/`{context}`/`{prompt}` |
-| `permissionMode`  | `read-only` / `workspace-write` / `danger-full-access`；经 `DSH_PERMISSION_MODE` 传入子进程。stdio 传输**没有审批往返**，越界操作直接失败            |
+| `permissionMode`  | `read-only` / `workspace-write` / `danger-full-access`；经 `DSH_PERMISSION_MODE` 传给子进程。沙箱只管文件写入：越界修改先被拒，工具随后可申请提权；stdio 传输**没有人工审批往返**，提权请求由桥接层自动回 `allowed-once`。任务详情用 `run.approvals` 把会话日志里的提权记录读出来供事后复核，界面不再声称「越界直接失败」 |
 | `model`           | provider/model 形式 id；`null` = CLI 默认模型                                                                                                        |
 | `reasoningEffort` | 推理强度；`null` = 模型默认                                                                                                                          |
-| `workdir`         | 执行工作目录；`null` = 主进程当前目录                                                                                                                |
+| `workdir`         | 执行工作目录；`null` = 宿主默认目录：`WORKBENCH_WORKDIR` 环境变量 > `~/.workbench`（启动时确保存在，解析结果见宿主视图 `runtimes.default-workdir`）                                                                                                                |
 | `maxConcurrent`   | 同一运行时同时执行的 run 上限，超出排队                                                                                                              |
 | `enabled`         | 停用后不再派发执行                                                                                                                                   |
 | `lastProbe`       | 最近一次探测结论（见下）；从未探测为 `null`                                                                                                          |
@@ -367,6 +367,7 @@ export interface DetectedRuntime {
 | `runtimes.detect()`                        | `query('runtimes.detected')`（宿主视图，只读）                                                    |
 | `runtimes.executors()`                     | `query('runtimes.executors')`（宿主视图，只读）                                                   |
 | `runtimes.models(id)`                      | `query('runtimes.models', { runtimeId })`（宿主视图）                                             |
+| `runtimes.default-workdir`                  | `query('runtimes.default-workdir')`（宿主视图，无参数；`workdir` 留空时执行器实际用的绝对路径）      |
 | `runtimes.create/update/remove`            | `dispatch({ type:'runtime.create' \| 'runtime.update' \| 'runtime.remove', commandId, ... })`     |
 | `runtimes.probe(id)`                       | `dispatch({ type:'runtime.probe', commandId, id })`（宿主探测 → 落 `runtime.probed`）             |
 | `agents.*`                                 | `query('agents.all')` + `dispatch({type:'agent.create' \| 'agent.update' \| 'agent.remove'})`     |
@@ -429,7 +430,7 @@ export function completeTask(task: Task): Task
 - **协议后端：** 逐帧解析（ready/session/text/thinking/tool_call/tool_result/usage/result/protocol_error）、`v`/`request_id` 校验、非 JSON 行忽略、usage 累加、终态归一（含 `run_failed`）；取消信号顺序（cancel 帧 → 3s → SIGTERM → 2s → SIGKILL，Windows `taskkill /T /F`）与进程树终止；`--list-models` 投影。
 - **聊天执行链（`tests/host/chat`）：** 假协议后端 + 真实内核/内存库测 `resume_session_id` 续接（只发新消息）、`resume_rejected` 自动重试一次、帧入账→终态→`message.appended` 顺序、非零退出/超时/取消失败落消息、并发第二次 `send` 拒绝、对话执行中被删仍正常收尾。
 - **IPC：** 三动词契约（命令形状 / 视图参数 / 推送事件）在 `tests/protocol`、`tests/host/commands`、`tests/main/ipc`、`tests/preload` 覆盖：命令校验拒绝非法载荷、`commandId` 幂等、拖拽/完成的非法路径（有活跃 run、目标阶段无效）、`runtime.probe` 编排、`detect`/`executors`/`models` 宿主视图只读、`chat.*` 路由与取消；renderer 用 kernelStore 替身覆盖订阅/失效/续传。
-- **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「已完成」区触发 `complete`，单击卡片把任务交给上层；TaskCard 可拖拽（有活跃 run 时不可拖）、按进入方式显示提示、点击 / Enter / Space 进详情且线程入口不冒泡；TaskInfoPanel 任务信息（状态 / 阶段 / 来源 / 线程 / 时间 / 标签）；TaskActivity 上下文活动流（运行与反馈混排、text/thinking/tool 折叠、errorCode 文案、用量/退出码/耗时、空态与事件流失败）；TaskCommentForm 反馈提交（空文本禁用、勾选接着做、提交中禁用、失败保留输入）；TaskDetailPage 三个视图的加载 / 空态 / 读失败与 `task.comment` 提交；ThreadDetailPage 任务列表与笔记 / 绑定 / 归档；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示。
+- **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「已完成」区触发 `complete`，单击卡片把任务交给上层；TaskCard 可拖拽（有活跃 run 时不可拖）、按进入方式显示提示、点击 / Enter / Space 进详情且线程入口不冒泡；TaskInfoPanel 任务信息（状态 / 阶段 / 来源 / 线程 / 时间 / 标签）；TaskActivity 上下文活动流（运行与反馈混排、text/thinking/tool 折叠、**提权记录**（`run.approvals`：工具 / 理由 / 结果，未知结果原样显示，无记录不占版面）、errorCode 文案、用量/退出码/耗时、空态与事件流失败）；TaskCommentForm 反馈提交（空文本禁用、勾选接着做、提交中禁用、失败保留输入）；TaskDetailPage 三个视图的加载 / 空态 / 读失败与 `task.comment` 提交；ThreadDetailPage 任务列表与笔记 / 绑定 / 归档；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉、**完全访问风险确认**（选中 `danger-full-access` 必须勾选才可保存，换模式即撤销）；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示。
 - **聊天 hook（`useChat`）：** 新建/发送/`event` 流式回显/`end` 落库重载/中止/删除/各类错误分支、卸载退订、只处理当前会话的增量。
 - **页面：** 两栏布局下工作台默认落在「聊天」栏（侧栏顶部切换条 + 会话列表可见、设置栏目不可见），切「任务」显示看板并隐藏输入区；单击任务卡进入任务详情页、`返回`/Esc 逐级回栈，线程详情页的任务列表可点进任务详情；侧栏底部「工作台/设置」分段控件切换视图，设置三栏目互不混排。
 - **执行器插件（`tests/plugins`）：** registry 汇总（顺序稳定、`executorKey`/`supported` 回填、同 command 先到先得、单插件抛错或超时隔离、空注册表）、`command` 插件的参数模板展开与 `{prompt}` 二选一（argv 元素 / stdin）、Windows `.cmd` 固定包装、假协议端到端验收（真 registry + 真 scheduler + 内存库）。
@@ -471,4 +472,4 @@ export function completeTask(task: Task): Task
 1. **打回默认目标**：未配置【打回时退回到】时默认「不指定」，即打回后原地不动、不做任何流转（已按此实现）。
 2. **`none` / `user` 阶段的推进方式**：看板上把卡片拖到目标阶段（已按此实现，不再有「推进 / 通过 / 打回」按钮）。
 3. **终端阶段**：最后阶段完成后任务置 `completed` 并移出看板；看板末尾的「已完成」区只是拖拽落点（显示已完成数量），不是可反向拖出的虚拟列。
-4. **运行时工作目录**：`workdir` 为 `null` 时用主进程当前目录（契约已定）；若希望按任务/项目指定，另行设计。
+4. **运行时工作目录**：`workdir` 为 `null` 时用宿主默认目录——`WORKBENCH_WORKDIR` 环境变量 > `~/.workbench`（启动时创建，`runtimes.default-workdir` 可查）；运行时可单独覆盖，按任务/项目切换仍需另行设计。

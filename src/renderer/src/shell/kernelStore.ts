@@ -90,6 +90,7 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
       'run.last-event-seq',
       'runs.active-by-task',
       'runs.active-by-conversation',
+      'run.approvals',
     ],
   },
   { prefix: 'card.', views: ['cards.open', 'cards.byRun'] },

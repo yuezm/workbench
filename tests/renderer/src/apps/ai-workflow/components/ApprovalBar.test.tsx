@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Card } from '../../../../../../src/protocol/entities'
 import { ApprovalBar } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ApprovalBar'
@@ -84,12 +84,59 @@ describe('ApprovalBar', () => {
     expect(screen.getByText('继续吗')).toBeInTheDocument()
   })
 
-  it('信息卡（options 为空 / 无正文）：只展示标题，不渲染选项按钮', async () => {
+  it('信息卡（options 为空）进「通知」栏：只给「知道了」，不当待审批', async () => {
     kernel.setView('cards.open', undefined, [{ ...card, options: [], text: '' }])
     render(<ApprovalBar />)
 
-    expect(await screen.findByText('继续吗')).toBeInTheDocument()
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '通知' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '待审批' })).toBeNull()
+    expect(screen.getByText('继续吗')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '继续' })).toBeNull()
+    expect(screen.getByRole('button', { name: '知道了' })).toBeInTheDocument()
+  })
+
+  it('两栏并存：阻塞卡出选项、信息卡出「知道了」', async () => {
+    kernel.setView('cards.open', undefined, [
+      card,
+      { ...card, id: 'card-2', title: '顺带说一句', options: [], text: '版本不一致' },
+    ])
+    render(<ApprovalBar />)
+
+    const pending = await screen.findByRole('region', { name: '待审批' })
+    const notices = screen.getByRole('region', { name: '通知' })
+    expect(pending).toHaveTextContent('1')
+    expect(notices).toHaveTextContent('1')
+    expect(within(pending).getByText('继续吗')).toBeInTheDocument()
+    expect(within(notices).getByText('顺带说一句')).toBeInTheDocument()
+    expect(within(notices).getByText('版本不一致')).toBeInTheDocument()
+    expect(within(notices).getByRole('button', { name: '知道了' })).toBeInTheDocument()
+  })
+
+  it('点「知道了」：dispatch card.resolve，卡片随视图刷新消失', async () => {
+    kernel.setView('cards.open', undefined, [{ ...card, options: [] }])
+    kernel.onDispatch((command) => {
+      if (command.type === 'card.resolve') kernel.setView('cards.open', undefined, [])
+      return { facts: [], value: null }
+    })
+    render(<ApprovalBar />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '知道了' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'card.resolve', cardId: 'card-1' }),
+      ),
+    )
+    await waitFor(() => expect(screen.queryByText('继续吗')).not.toBeInTheDocument())
+  })
+
+  it('关闭失败：显示后端文案，通知仍在', async () => {
+    kernel.setView('cards.open', undefined, [{ ...card, options: [] }])
+    kernel.onDispatch(() => Promise.reject(new Error('卡片不存在: card-1')))
+    render(<ApprovalBar />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '知道了' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('卡片不存在: card-1')
+    expect(screen.getByText('继续吗')).toBeInTheDocument()
   })
 
   it('回答进行中：选项按钮禁用，避免重复点击', async () => {

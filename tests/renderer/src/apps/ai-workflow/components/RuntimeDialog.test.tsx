@@ -76,9 +76,16 @@ afterEach(() => {
 
 /** 弹窗用两个宿主视图：executors（挂载即取）与 models（仅编辑时） */
 function setup(
-  options: { executors?: RuntimeExecutorChoice[]; models?: RuntimeModelOption[] } = {},
+  options: {
+    executors?: RuntimeExecutorChoice[]
+    models?: RuntimeModelOption[]
+    defaultWorkdir?: string
+  } = {},
 ): void {
   kernel.setView('runtimes.executors', undefined, options.executors ?? EXECUTORS)
+  if (options.defaultWorkdir !== undefined) {
+    kernel.setView('runtimes.default-workdir', undefined, options.defaultWorkdir)
+  }
   if (options.models !== undefined) {
     kernel.setView('runtimes.models', { runtimeId: 'r1' }, options.models)
   }
@@ -142,7 +149,7 @@ describe('RuntimeDialog', () => {
     )
     expect(screen.getByLabelText('运行时并发上限')).toHaveValue(1)
     expect(screen.getByRole('combobox', { name: '运行时权限模式' })).toHaveTextContent('可写')
-    expect(screen.getByText(/越界操作直接失败/)).toBeInTheDocument()
+    expect(screen.getByText(/提权请求由运行时自动放行/)).toBeInTheDocument()
     expect(screen.getByText(/占位符 \{model\}/)).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeDisabled()
     expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeDisabled()
@@ -186,6 +193,63 @@ describe('RuntimeDialog', () => {
       workdir: 'D:/work',
       maxConcurrent: 1,
     })
+  })
+
+  it('工作目录：留空时占位提示宿主默认目录，并说明用 WORKBENCH_WORKDIR 覆盖', async () => {
+    setup({ defaultWorkdir: 'C:/Users/me/.workbench' })
+    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('运行时工作目录')).toHaveAttribute(
+        'placeholder',
+        'C:/Users/me/.workbench',
+      ),
+    )
+    expect(screen.getByText(/WORKBENCH_WORKDIR/)).toBeInTheDocument()
+  })
+
+  it('完全访问：必须勾选风险确认才可保存，勾选后提交带上 danger-full-access', async () => {
+    setup()
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
+    await user.click(screen.getByRole('option', { name: '完全访问' }))
+
+    const save = screen.getByRole('button', { name: '添加' })
+    expect(screen.getByText(/完全访问没有沙箱/)).toBeInTheDocument()
+    expect(save).toBeDisabled()
+
+    await user.click(screen.getByLabelText('已确认完全访问风险'))
+    expect(save).toBeEnabled()
+    await user.click(save)
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      permissionMode: 'danger-full-access',
+    })))
+  })
+
+  it('完全访问确认只对当前选择有效：换模式即撤销，再选回要重新勾', async () => {
+    setup()
+    const user = userEvent.setup()
+    render(
+      <RuntimeDialog initial={{ name: 'x' }} onSubmit={vi.fn()} onCancel={vi.fn()} />,
+    )
+    const save = screen.getByRole('button', { name: '添加' })
+
+    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
+    await user.click(screen.getByRole('option', { name: '完全访问' }))
+    await user.click(screen.getByLabelText('已确认完全访问风险'))
+    expect(save).toBeEnabled()
+
+    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
+    await user.click(screen.getByRole('option', { name: '可写' }))
+    expect(screen.queryByText(/完全访问没有沙箱/)).toBeNull()
+    expect(save).toBeEnabled()
+
+    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
+    await user.click(screen.getByRole('option', { name: '完全访问' }))
+    expect(save).toBeDisabled()
   })
 
   it('编辑：预填、按运行时 id 读模型目录、推理强度随模型能力可选', async () => {

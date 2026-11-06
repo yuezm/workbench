@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Run, RunEvent } from '../../../../../../src/protocol/entities'
 import type { TaskComment } from '../../../../../../src/protocol/task-comment'
@@ -104,7 +104,7 @@ describe('TaskActivity', () => {
     expect(await screen.findByText('执行失败')).toBeInTheDocument()
   })
 
-  it('事件流按类型渲染：正文 / 思考 / 工具调用与结果（含截断与错误态）', async () => {
+  it('事件流：正文直接展示，思考与工具过程默认折进「过程」行', async () => {
     const longInput = `{"path":"${'a'.repeat(200)}"}`
     kernel.setView('run.events', { runId: 'run1' }, [
       text(1, '正文内容'),
@@ -118,17 +118,48 @@ describe('TaskActivity', () => {
     ])
     render(<TaskActivity runs={[makeRun({ output: '不应出现的 output' })]} comments={[]} />)
 
-    expect(await screen.findByText('正文内容')).toBeInTheDocument()
-    expect(screen.getByText('思考内容').className).toContain('italic')
+    expect(await screen.findByText('正文内容')).toBeVisible()
     expect(screen.queryByText('不应出现的 output')).not.toBeInTheDocument()
-    expect(screen.getByText(/工具调用：read · \{"path":"a+…$/)).toBeInTheDocument()
-    expect(screen.getByText('工具调用：未知工具')).toBeInTheDocument()
-    expect(screen.getByText('工具结果：read · 读取结果')).toBeInTheDocument()
+
+    // 默认收起：过程内容在 DOM 里但不可见，只剩一行摘要
+    const summary = screen.getByText(/过程 · 6 条/)
+    const fold = summary.closest('details')
+    expect(fold).not.toBeNull()
+    expect(fold).not.toHaveAttribute('open')
+    expect(screen.getByText('思考内容')).not.toBeVisible()
+    expect(screen.getByText('工具结果：read · 读取结果')).not.toBeVisible()
+
+    // 展开后才看得到思考 / 调用 / 结果（含截断与错误态）
+    fireEvent.click(summary)
+    expect(fold).toHaveAttribute('open')
+    expect(screen.getByText('思考内容')).toBeVisible()
+    expect(screen.getByText('思考内容').className).toContain('italic')
+    expect(screen.getByText(/工具调用：read · \{"path":"a+…$/)).toBeVisible()
+    expect(screen.getByText('工具调用：未知工具')).toBeVisible()
+    expect(screen.getByText('工具结果：read · 读取结果')).toBeVisible()
     expect(screen.getByText('工具结果：write').className).toContain('text-red-300')
-    expect(screen.getByText('工具结果：未知工具')).toBeInTheDocument()
-    // status 事件不进事件流
+    expect(screen.getByText('工具结果：未知工具')).toBeVisible()
+    // status 事件既不是正文也不是过程
     expect(screen.queryByText('running')).not.toBeInTheDocument()
     expect(screen.getAllByText('正文内容')).toHaveLength(1)
+  })
+
+  it('只有正文事件：不渲染「过程」折叠行', async () => {
+    kernel.setView('run.events', { runId: 'run1' }, [text(1, '只有正文')])
+    render(<TaskActivity runs={[makeRun()]} comments={[]} />)
+
+    expect(await screen.findByText('只有正文')).toBeVisible()
+    expect(screen.queryByText(/过程 ·/)).not.toBeInTheDocument()
+  })
+
+  it('只有过程事件：正文为空，仍给出可展开的「过程」行', async () => {
+    kernel.setView('run.events', { runId: 'run1' }, [
+      { seq: 1, type: 'thinking', text: '只在思考' },
+    ])
+    render(<TaskActivity runs={[makeRun()]} comments={[]} />)
+
+    expect(await screen.findByText(/过程 · 1 条/)).toBeInTheDocument()
+    expect(screen.getByText('只在思考')).not.toBeVisible()
   })
 
   it('未完成的事件请求在卸载后返回/失败都不写状态', async () => {
@@ -224,6 +255,48 @@ describe('TaskActivity', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('提权记录：展示工具 / 结果 / 理由，未知结果原样显示', async () => {
+    kernel.setView('run.events', { runId: 'run1' }, [])
+    kernel.setView('run.approvals', { runId: 'run1' }, [
+      {
+        id: 'a1',
+        at: '2026-11-04T01:29:18.000Z',
+        tool: 'pwsh',
+        callId: 'c1',
+        reason: '修 ACL',
+        outcome: 'allowed-once',
+      },
+      { id: 'a2', at: '2026-11-04T01:30:00.000Z', tool: '', callId: null, reason: '', outcome: null },
+      {
+        id: 'a3',
+        at: '2026-11-04T01:31:00.000Z',
+        tool: 'bash',
+        callId: null,
+        reason: '',
+        outcome: 'weird',
+      },
+    ])
+    render(<TaskActivity runs={[makeRun()]} comments={[]} />)
+
+    const list = await screen.findByRole('list', { name: '提权记录' })
+    expect(within(list).getByText(/提权 · pwsh/)).toBeInTheDocument()
+    expect(within(list).getByText('已自动放行')).toBeInTheDocument()
+    expect(within(list).getByText('修 ACL')).toBeInTheDocument()
+    expect(within(list).getByText(/提权 · 未知工具/)).toBeInTheDocument()
+    expect(within(list).getByText('未落定')).toBeInTheDocument()
+    expect(within(list).getByText(/提权 · bash/)).toBeInTheDocument()
+    expect(within(list).getByText('weird')).toBeInTheDocument()
+  })
+
+  it('没有提权记录：不渲染提权列表', async () => {
+    kernel.setView('run.events', { runId: 'run1' }, [])
+    kernel.setView('run.approvals', { runId: 'run1' }, [])
+    render(<TaskActivity runs={[makeRun()]} comments={[]} />)
+
+    expect(await screen.findByRole('list', { name: '上下文' })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '提权记录' })).toBeNull()
   })
 
   it('反馈渲染作者与正文：owner 显示「我」，agent 显示「智能体」', () => {

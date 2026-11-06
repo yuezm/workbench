@@ -29,7 +29,12 @@ const PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
   { value: 'danger-full-access', label: '完全访问' },
 ]
 
-const PERMISSION_HINT = '越界操作直接失败。'
+const PERMISSION_HINT =
+  '沙箱基线：越界修改先被拒绝；工具可随后申请提权，而提权请求由运行时自动放行（不会询问你）。'
+
+/** 完全访问的风险声明：选中后必须显式勾选才能保存（Multica 式「缩小暴露面」的最小落地） */
+const DANGER_NOTICE =
+  '完全访问没有沙箱：agent 可读写本机任意文件、网络不受限制，所有提权请求自动放行。'
 
 export interface RuntimeDialogProps {
   /** 编辑目标；不传 = 新建 */
@@ -64,12 +69,16 @@ export function RuntimeDialog({
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(
     initial?.permissionMode ?? runtime?.permissionMode ?? 'workspace-write',
   )
+  /** 完全访问的显式确认：每次保存都要重新勾（不给「顺手点过」留默认值） */
+  const [dangerAck, setDangerAck] = useState(false)
   const [modelChoice, setModelChoice] = useState<string>(
     runtime?.model ? CUSTOM_MODEL : (initial?.model ?? ''),
   )
   const [customModel, setCustomModel] = useState(runtime?.model ?? initial?.model ?? '')
   const [reasoningEffort, setReasoningEffort] = useState(runtime?.reasoningEffort ?? '')
   const [workdir, setWorkdir] = useState(initial?.workdir ?? runtime?.workdir ?? '')
+  /** 宿主解析出的默认工作目录（表单留空时实际用的路径），只用于展示 */
+  const [defaultWorkdir, setDefaultWorkdir] = useState('')
   const [maxConcurrent, setMaxConcurrent] = useState(
     String(runtime?.maxConcurrent ?? initial?.maxConcurrent ?? 1),
   )
@@ -110,6 +119,23 @@ export function RuntimeDialog({
       alive = false
     }
   }, [editing])
+
+  // 默认工作目录：宿主视图只读一次，用作「工作目录」留空时的占位提示
+  useEffect(() => {
+    let alive = true
+    void getKernelStore()
+      .query('runtimes.default-workdir')
+      .then((value) => {
+        if (alive) setDefaultWorkdir(value ?? '')
+      })
+      .catch(() => {
+        // 读不到只影响占位文案：留空仍然会走宿主默认目录
+        if (alive) setDefaultWorkdir('')
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // 编辑时读取该运行时的模型目录；失败不阻塞手动填写模型 id
   useEffect(() => {
@@ -269,7 +295,11 @@ export function RuntimeDialog({
             <Select
               ariaLabel="运行时权限模式"
               value={permissionMode}
-              onChange={(v) => setPermissionMode(v as PermissionMode)}
+              onChange={(v) => {
+                setPermissionMode(v as PermissionMode)
+                // 换了模式就撤销上一次的确认：确认只对当前选择有效
+                setDangerAck(false)
+              }}
               options={PERMISSION_OPTIONS}
             />
             <span className="text-[11px] leading-relaxed text-ink-faint">{PERMISSION_HINT}</span>
@@ -279,8 +309,12 @@ export function RuntimeDialog({
               aria-label="运行时工作目录"
               className="font-mono"
               value={workdir}
+              placeholder={defaultWorkdir === '' ? '留空用默认目录' : defaultWorkdir}
               onChange={(e) => setWorkdir(e.target.value)}
             />
+            <span className="text-[11px] leading-relaxed text-ink-faint">
+              留空 = 默认目录（改默认值设 WORKBENCH_WORKDIR，缺省 ~/.workbench）
+            </span>
           </Field>
           <Field label="模型">
             <Select
@@ -319,6 +353,22 @@ export function RuntimeDialog({
           )}
         </div>
 
+        {permissionMode === 'danger-full-access' && (
+          <div className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2">
+            <p className="text-[11px] leading-relaxed text-red-200">{DANGER_NOTICE}</p>
+            <label className="mt-1.5 flex items-center gap-2 text-xs text-ink-dim">
+              <input
+                type="checkbox"
+                aria-label="已确认完全访问风险"
+                className="size-4 accent-[var(--color-focus)]"
+                checked={dangerAck}
+                onChange={(e) => setDangerAck(e.target.checked)}
+              />
+              <span>我明白风险，仍要选完全访问</span>
+            </label>
+          </div>
+        )}
+
         {editing && (
           <div className="flex flex-col gap-1.5">
             <span className={labelCls}>启用</span>
@@ -345,7 +395,12 @@ export function RuntimeDialog({
           <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
             取消
           </Button>
-          <Button type="submit" variant="primary" size="sm" disabled={saving}>
+          <Button
+            type="submit"
+            variant="primary"
+            size="sm"
+            disabled={saving || (permissionMode === 'danger-full-access' && !dangerAck)}
+          >
             {editing ? '保存' : '添加'}
           </Button>
         </div>

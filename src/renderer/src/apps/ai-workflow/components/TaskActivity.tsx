@@ -101,10 +101,15 @@ function UsageLine({ usage }: { usage: RunUsage }): ReactElement {
   )
 }
 
+/** 过程类事件（思考 / 工具调用 / 工具结果）：默认折起来，只留正文 */
+const isProcessEvent = (event: RunEvent): boolean =>
+  event.type === 'thinking' || event.type === 'tool_call' || event.type === 'tool_result'
+
 /**
  * 单个 run 的事件流：一个子组件订阅一个 `run.events` 视图。
  *
  * 事件随事实失效自动重取（`run.` 前缀的失效表里有 `run.events`），不再轮询；
+ * 正文（`text`）直接展示，思考与工具过程折进可展开的「过程」行，避免冲掉结论；
  * 事件流为空时回落到 run.output（历史数据仍能看到最终文本）。
  */
 function RunEvents({ run }: { run: Run }): ReactElement | null {
@@ -119,11 +124,25 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
     )
   }
   if (events.length > 0) {
+    const body = events.filter((event) => !isProcessEvent(event))
+    const process = events.filter(isProcessEvent)
     return (
       <div className="mt-2 flex flex-col gap-1.5">
-        {events.map((event) => (
+        {body.map((event) => (
           <RunEventLine key={event.seq} event={event} />
         ))}
+        {process.length > 0 && (
+          <details className="rounded-md bg-white/[0.02] px-2 py-1">
+            <summary className="cursor-pointer text-[11px] text-ink-faint select-none">
+              过程 · {process.length} 条（思考 / 工具调用与结果）
+            </summary>
+            <div className="mt-1.5 flex flex-col gap-1.5">
+              {process.map((event) => (
+                <RunEventLine key={event.seq} event={event} />
+              ))}
+            </div>
+          </details>
+        )}
       </div>
     )
   }
@@ -132,6 +151,44 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
     <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-black/30 p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-ink-dim">
       {run.output}
     </pre>
+  )
+}
+
+/** 提权结果 → 中文标签；未知值原样显示（会话日志是外部数据，不锁词表） */
+const APPROVAL_LABEL: Record<string, string> = {
+  'allowed-once': '已自动放行',
+  rejected: '已拒绝',
+  cancelled: '已取消',
+  unavailable: '无人应答',
+}
+
+/**
+ * 沙箱提权记录（`run.approvals`，宿主视图）：只读该 run 的 dsh 会话日志。
+ *
+ * 运行时对提权请求的回答是自动的（恒为 `allowed-once`），界面上原本没有任何痕迹；
+ * 这里至少把「哪个工具、什么理由、结果如何」摆在运行卡片里，让自动放行可复核。
+ * 无记录时不占版面；读取失败按空处理（审计缺失不拖垮任务详情）。
+ */
+function RunApprovals({ runId }: { runId: string }): ReactElement | null {
+  const state = useKernelViewState('run.approvals', { runId })
+  const approvals = state.data ?? []
+  if (approvals.length === 0) return null
+
+  return (
+    <ul aria-label="提权记录" className="mt-2 flex flex-col gap-1">
+      {approvals.map((item) => (
+        <li
+          key={item.id}
+          className="rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-2 py-1 text-[11px] leading-relaxed text-amber-100/90"
+        >
+          <span className="font-medium">提权 · {item.tool === '' ? '未知工具' : item.tool}</span>
+          <span className="ml-1.5 text-ink-faint">
+            {item.outcome === null ? '未落定' : (APPROVAL_LABEL[item.outcome] ?? item.outcome)}
+          </span>
+          {item.reason !== '' && <span className="mt-0.5 block text-ink-faint">{item.reason}</span>}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -159,6 +216,8 @@ function RunBlock({ run }: { run: Run }): ReactElement {
           {run.error}
         </p>
       )}
+
+      <RunApprovals runId={run.id} />
 
       <RunEvents run={run} />
     </div>

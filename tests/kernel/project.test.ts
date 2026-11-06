@@ -41,6 +41,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   subtaskStageId: null,
   onChildrenSettled: null,
   spawnPolicy: null,
+  instructions: '',
   ...over,
 })
 
@@ -89,6 +90,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   title: '任务',
   description: '',
   workflowId: 'wf-1',
+  projectId: null,
   currentStageId: 'st-1',
   status: 'active',
   origin: 'manual',
@@ -164,6 +166,7 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   title: '新对话',
   agentId: 'ag-1',
   sessionId: null,
+  archivedAt: null,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -230,6 +233,7 @@ const emptyTables = (): Tables => ({
   workflow_stages: new Map(),
   agents: new Map(),
   runtimes: new Map(),
+  projects: new Map(),
   runs: new Map(),
   run_events: new Map(),
   conversations: new Map(),
@@ -807,6 +811,7 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
           ruleId: null,
           externalRef: null,
           labels: [],
+          projectId: null,
           threadId: null,
           parentTaskId: null,
           spawnedByRunId: null,
@@ -879,5 +884,33 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
       externalRef: null,
       labels: [],
     })
+  })
+})
+
+describe('kernel/project：项目（M10）', () => {
+  const row = {
+    id: 'pj-1',
+    name: '工作台',
+    path: 'D:/work',
+    description: '',
+    createdAt: AT,
+    updatedAt: AT,
+  }
+
+  it('project.created / project.updated 整行 upsert，project.removed 删除行', () => {
+    expect(project(fact(1, 'project.created', { project: row }))).toEqual([put('projects', row)])
+    expect(project(fact(2, 'project.updated', { project: { ...row, name: '改名' } }))).toEqual([
+      put('projects', { ...row, name: '改名' }),
+    ])
+    expect(project(fact(3, 'project.removed', { project: row }))).toEqual([
+      unset('projects', 'pj-1'),
+    ])
+  })
+
+  it('老任务事实缺 projectId：按 null 归一（界面归入未归属）', () => {
+    const legacy = { ...task() } as Record<string, unknown>
+    delete legacy.projectId
+    const changes = project(fact(4, 'task.created', { task: legacy as unknown as Task }))
+    expect((changes[0]?.row as Task).projectId).toBeNull()
   })
 })

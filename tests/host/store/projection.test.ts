@@ -120,13 +120,13 @@ describe('rebuild：增量应用与重建等价', () => {
     store.dispatch({
       type: 'task.create',
       commandId: 'task-1',
-      input: { title: '任务一', workflowId: 'wf-a', stageId: 'st-a1' },
+      input: { title: '任务一', workflowId: 'wf-a', projectId: 'pj-1', stageId: 'st-a1' },
     })
     store.dispatch({ type: 'task.move', commandId: 'move-1', id: 'tk-1', stageId: 'st-a2' })
     store.dispatch({
       type: 'task.create',
       commandId: 'task-2',
-      input: { title: '任务二', workflowId: 'wf-b' },
+      input: { title: '任务二', workflowId: 'wf-b', projectId: 'pj-1' },
     })
     store.dispatch({ type: 'task.remove', commandId: 'remove-task', id: 'tk-2' })
     store.dispatch({ type: 'workflow.remove', commandId: 'remove-wf', id: 'wf-b' })
@@ -156,7 +156,7 @@ describe('rebuild：增量应用与重建等价', () => {
             handoffStageId: null,
             subtaskStageId: null,
             onChildrenSettled: null,
-            spawnPolicy: null,
+            spawnPolicy: null,            instructions: '',
           },
           {
             id: 'st-a2',
@@ -171,7 +171,7 @@ describe('rebuild：增量应用与重建等价', () => {
             handoffStageId: null,
             subtaskStageId: null,
             onChildrenSettled: null,
-            spawnPolicy: null,
+            spawnPolicy: null,            instructions: '',
           },
         ],
       },
@@ -182,6 +182,7 @@ describe('rebuild：增量应用与重建等价', () => {
         title: '任务一',
         description: '',
         workflowId: 'wf-a',
+        projectId: 'pj-1',
         currentStageId: 'st-a2',
         status: 'active',
         origin: 'manual',
@@ -230,7 +231,7 @@ describe('rebuild：增量应用与重建等价', () => {
     store.dispatch({
       type: 'task.create',
       commandId: 'task',
-      input: { title: '任务', workflowId: 'wf-1' },
+      input: { title: '任务', workflowId: 'wf-1', projectId: 'pj-1' },
     })
 
     // 旧写路径（T16 前仍存在）直接落库的运行/聊天行：重建后必须消失。
@@ -277,7 +278,7 @@ describe('rebuild：增量应用与重建等价', () => {
     store.dispatch({
       type: 'task.create',
       commandId: 'task',
-      input: { title: '任务', workflowId: 'wf-1' },
+      input: { title: '任务', workflowId: 'wf-1', projectId: 'pj-1' },
     })
 
     store.rebuild()
@@ -305,7 +306,7 @@ describe('rebuild：增量应用与重建等价', () => {
     store.dispatch({
       type: 'task.create',
       commandId: 'task',
-      input: { title: '任务', workflowId: 'wf-1' },
+      input: { title: '任务', workflowId: 'wf-1', projectId: 'pj-1' },
     })
 
     // 组合方在调用重建前自己关了外键：重建不应把它的开关改回去

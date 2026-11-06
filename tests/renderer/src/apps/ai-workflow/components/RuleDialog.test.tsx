@@ -1,7 +1,11 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { WorkflowStage, WorkflowWithStages } from '../../../../../../src/protocol/entities'
+import type {
+  Project,
+  WorkflowStage,
+  WorkflowWithStages,
+} from '../../../../../../src/protocol/entities'
 import type { AutomationRule } from '../../../../../../src/protocol/rules'
 import { RuleDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RuleDialog'
 
@@ -31,6 +35,12 @@ function wf(id: string, name: string, stageNames: string[]): WorkflowWithStages 
 }
 
 const workflows = [wf('w1', '研发', ['待办', '审核']), wf('w2', '写作', ['草稿'])]
+
+function project(id: string, name: string, path: string): Project {
+  return { id, name, path, description: '', createdAt: 't', updatedAt: 't' }
+}
+
+const projects = [project('p1', '工作台', 'D:\\Codes\\workbench'), project('p2', '笔记', 'D:\\Notes')]
 
 function blankRule(): AutomationRule {
   return {
@@ -73,6 +83,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={onCancel}
       />,
@@ -95,6 +106,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={() => {}}
       />,
@@ -114,6 +126,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={() => {}}
       />,
@@ -155,6 +168,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={() => {}}
       />,
@@ -190,6 +204,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={() => {}}
       />,
@@ -230,6 +245,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={() => {}}
       />,
@@ -250,6 +266,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={() => Promise.resolve()}
         onCancel={() => {}}
       />,
@@ -270,6 +287,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={() => Promise.resolve()}
         onCancel={() => {}}
       />,
@@ -284,6 +302,74 @@ describe('RuleDialog', () => {
     expect(screen.getByRole('combobox', { name: '规则起始阶段' })).toHaveTextContent('审核')
   })
 
+  it('新建规则默认选第一个项目，保存写入 to.projectId', async () => {
+    const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={blankRule()}
+        isNew
+        workflows={workflows}
+        projects={projects}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    )
+
+    // 新规则默认落在第一个项目：避免一建规则就批量产出没有工作目录的未归属任务
+    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('工作台')
+    await user.type(screen.getByLabelText('规则名称'), 'Issue 规则')
+    await choose(user, '规则目标工作流', '研发')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSubmit.mock.calls[0][0].to).toMatchObject({ workflowId: 'w1', projectId: 'p1' })
+
+    // 仍可改选其它项目
+    await choose(user, '规则目标项目', '笔记')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSubmit.mock.calls[1][0].to).toMatchObject({ projectId: 'p2' })
+  })
+
+  it('编辑老规则保持未归属，不强行改写归属', async () => {
+    const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={dailyRule()}
+        isNew={false}
+        workflows={workflows}
+        projects={projects}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    )
+
+    // 老规则没有 to.projectId：显示未归属，保存后仍不带该字段
+    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('未归属')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSubmit.mock.calls[0][0].to.projectId).toBeUndefined()
+  })
+
+  it('一个项目都没有时新建规则显示未归属，保存不带 projectId', async () => {
+    const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={blankRule()}
+        isNew
+        workflows={workflows}
+        projects={[]}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    )
+
+    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('未归属')
+    await user.type(screen.getByLabelText('规则名称'), 'Issue 规则')
+    await choose(user, '规则目标工作流', '研发')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSubmit.mock.calls[0][0].to.projectId).toBeUndefined()
+  })
+
   it('编辑回填：现有字段与启用状态还原，取消不改动', async () => {
     const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
     const onCancel = vi.fn()
@@ -293,6 +379,7 @@ describe('RuleDialog', () => {
         initial={dailyRule()}
         isNew={false}
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={onCancel}
       />,
@@ -319,6 +406,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={onCancel}
       />,
@@ -339,6 +427,7 @@ describe('RuleDialog', () => {
         initial={blankRule()}
         isNew
         workflows={[]}
+        projects={projects}
         onSubmit={() => Promise.resolve()}
         onCancel={() => {}}
       />,
@@ -355,6 +444,7 @@ describe('RuleDialog', () => {
         initial={{ ...dailyRule(), parallel: 2 }}
         isNew={false}
         workflows={workflows}
+        projects={projects}
         onSubmit={onSubmit}
         onCancel={() => {}}
       />,

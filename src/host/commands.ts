@@ -211,6 +211,15 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
         const fact = facts.find((item) => item.type === 'runtime.probed')
         return fact === undefined ? null : (fact.payload as { runtime: Runtime }).runtime.lastProbe
       }
+      case 'project.create':
+      case 'project.update': {
+        // M10：返回整行（UI 用它选中新建 / 改过的项目）
+        const id =
+          command.type === 'project.update' ? command.id : entityIdOf(facts, 'project.created')
+        return id === null
+          ? null
+          : (store.query('projects.all').find((item) => item.id === id) ?? null)
+      }
       case 'task.create':
       case 'task.move':
       case 'task.complete': {

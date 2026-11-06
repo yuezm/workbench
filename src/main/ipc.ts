@@ -1,8 +1,9 @@
-import { ipcMain, Notification } from 'electron'
+import { BrowserWindow, dialog, ipcMain, Notification } from 'electron'
 import type { NotifyPayload } from '../shared/workbench-api'
 import { NOTIFY_CHANNEL } from '../shared/workbench-api'
 import {
   WORKBENCH_DISPATCH_CHANNEL,
+  WORKBENCH_PICK_FOLDER_CHANNEL,
   WORKBENCH_QUERY_CHANNEL,
   type IpcResponse,
 } from '../protocol/ipc'
@@ -26,7 +27,7 @@ async function wrap<T>(run: () => Promise<T> | T): Promise<IpcResponse<T>> {
 }
 
 /**
- * 注册 IPC：系统通知 + 三动词（dispatch / query / subscribe）。
+ * 注册 IPC：系统通知 + 三动词（dispatch / query / subscribe）+ 文件夹选择器。
  * subscribe 是 main → renderer 的单向推送，不需要 handler；通道名见 `protocol/ipc`。
  */
 export function registerIpcHandlers(deps: KernelIpcDeps): void {
@@ -38,5 +39,24 @@ export function registerIpcHandlers(deps: KernelIpcDeps): void {
   )
   ipcMain.handle(WORKBENCH_QUERY_CHANNEL, (_event, view: unknown, params?: unknown) =>
     wrap(() => deps.router.query(view, params)),
+  )
+  // M10：项目 = 本地文件夹，目录只能由宿主弹原生对话框选；取消返回 null（不是错误）。
+  ipcMain.handle(WORKBENCH_PICK_FOLDER_CHANNEL, (event) =>
+    wrap(async () => {
+      const parent = BrowserWindow.fromWebContents(event.sender)
+      const options = {
+        title: '选择项目文件夹',
+        buttonLabel: '选这个文件夹',
+        properties: ['openDirectory', 'createDirectory'] as const,
+      }
+      const result =
+        parent === null
+          ? await dialog.showOpenDialog({ ...options, properties: [...options.properties] })
+          : await dialog.showOpenDialog(parent, {
+              ...options,
+              properties: [...options.properties],
+            })
+      return result.canceled ? null : (result.filePaths[0] ?? null)
+    }),
   )
 }

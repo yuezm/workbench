@@ -97,6 +97,7 @@ const view = (seed: Seed = {}): View => ({
   stages: new Map([[stage.id, stage]]),
   agents: new Map([[agent.id, agent]]),
   runtimes: new Map([[runtime.id, runtime]]),
+  projects: new Map(),
   tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
   runs: new Map(),
   conversations: new Map(),

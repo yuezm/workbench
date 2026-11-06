@@ -23,6 +23,7 @@ import type { KernelPort } from '../../../src/kernel/types'
 import { viewSpec } from '../../../src/kernel/view-spec'
 import type {
   Agent,
+  Project,
   RunRow,
   Runtime,
   Task,
@@ -126,10 +127,22 @@ export async function seedCrashState(dbPath: string): Promise<CrashSeed> {
       .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
       .sort((left, right) => left.position - right.position)
 
+    // M10：任务必须挂在项目下（项目文件夹就是本轮工作目录）。
+    const projectFacts = store.dispatch({
+      type: 'project.create',
+      commandId: 'e2e-seed-project',
+      input: { name: '崩溃恢复项目', path: dbPath },
+    }).facts
+    const project = (
+      projectFacts.find((fact) => fact.type === 'project.created')?.payload as {
+        project: Project
+      }
+    ).project
+
     const taskFacts = store.dispatch({
       type: 'task.create',
       commandId: 'e2e-seed-task',
-      input: { title: '崩溃恢复任务', workflowId: workflow.id },
+      input: { title: '崩溃恢复任务', workflowId: workflow.id, projectId: project.id },
     }).facts
     const task = (
       taskFacts.find((fact) => fact.type === 'task.created')?.payload as {

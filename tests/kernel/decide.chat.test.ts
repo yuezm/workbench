@@ -140,6 +140,7 @@ const view = (seed: Seed = {}): View => ({
   stages: new Map(),
   agents: new Map((seed.agents ?? []).map((row) => [row.id, row])),
   runtimes: new Map((seed.runtimes ?? []).map((row) => [row.id, row])),
+  projects: new Map(),
   tasks: new Map(),
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
@@ -537,6 +538,62 @@ describe('kernel/decide chat.cancel / remove', () => {
         env(),
       ),
     ).toEqual({ facts: [] })
+  })
+})
+
+describe('kernel/decide conversation.archive', () => {
+  const archive = (
+    target: View,
+    conversationId = 'cv-1',
+    archived?: boolean,
+  ): ReturnType<typeof decide> =>
+    decide(
+      target,
+      {
+        commandId: 'm9-archive',
+        type: 'chat.archive',
+        conversationId,
+        ...(archived === undefined ? {} : { archived }),
+      },
+      NOW,
+      env(),
+    )
+
+  it('归档：只改 archivedAt / updatedAt，不产消息事实', () => {
+    expect(archive(fullChatView())).toEqual({
+      facts: [
+        {
+          type: 'conversation.updated',
+          actor: OWNER,
+          at: NOW,
+          payload: { conversation: { ...conversation(), archivedAt: NOW, updatedAt: NOW } },
+        },
+      ],
+    })
+  })
+
+  it('恢复：archived=false 清空 archivedAt', () => {
+    const decision = archive(fullChatView({ conversations: [conversation({ archivedAt: LATER })] }), 'cv-1', false)
+    expect(decision.facts).toHaveLength(1)
+    expect((decision.facts[0]?.payload as { conversation: Conversation }).conversation).toEqual({
+      ...conversation(),
+      archivedAt: null,
+      updatedAt: NOW,
+    })
+  })
+
+  it('幂等：状态已经一致时零事实', () => {
+    expect(
+      archive(fullChatView({ conversations: [conversation({ archivedAt: LATER })] })).facts,
+    ).toEqual([])
+    expect(archive(fullChatView(), 'cv-1', false).facts).toEqual([])
+  })
+
+  it('对话不存在 → reject not_found', () => {
+    expect(archive(fullChatView({ conversations: [] }), 'cv-404')).toEqual({
+      facts: [],
+      reject: { code: 'not_found', message: '对话不存在: cv-404' },
+    })
   })
 })
 

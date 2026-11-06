@@ -359,6 +359,8 @@ function readLegacyEntityRows(
     // M7：v2 存量没有跨工作流交付概念——两个交接目标一律为空。
     handoffWorkflowId: null,
     handoffStageId: null,
+    // M9：v2 存量没有阶段说明——按空串归一（与投影层 `normalizeStage` 一致）。
+    instructions: '',
   }))
 
   const tasks = (
@@ -373,6 +375,8 @@ function readLegacyEntityRows(
     title: row.title,
     description: row.description,
     workflowId: row.workflow_id,
+    // M10：v2 存量没有项目概念——按「未归属」归一（与投影层 `normalizeTask` 一致）。
+    projectId: null,
     currentStageId: row.current_stage_id,
     status: row.status as TaskStatus,
     // M6：v2 存量没有来源概念——导入后一律视为手工任务，规则列留空。
@@ -461,6 +465,8 @@ function readLegacyChatRows(db: DatabaseSync): {
     title: row.title,
     agentId: row.agent_id,
     sessionId: row.session_id,
+    // M9：旧聊天表没有归档概念——一律未归档
+    archivedAt: null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))
@@ -496,6 +502,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   workflow_stages: 0,
   agents: 0,
   runtimes: 0,
+  // M10：v2 没有项目数据，导入不产 projects 行。
+  projects: 0,
   runs: 0,
   run_events: 0,
   conversations: 0,

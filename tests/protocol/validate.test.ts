@@ -49,6 +49,7 @@ const taskInput: TaskInput = {
   title: '写计划',
   description: '',
   workflowId: 'wf1',
+  projectId: 'pj1',
   stageId: 'st1',
 }
 
@@ -145,7 +146,7 @@ describe('protocol/validate', () => {
     const minimalTask: Command = {
       commandId: 'c21',
       type: 'task.create',
-      input: { title: '任务', workflowId: 'wf1' },
+      input: { title: '任务', workflowId: 'wf1', projectId: 'pj1' },
     }
     const minimalAgentPatch: Command = {
       commandId: 'c22',
@@ -287,6 +288,42 @@ describe('protocol/validate', () => {
         }),
       ),
     ).toBe('input.stages[0].onRejectIndex必须在 0 到 49 之间')
+    // M9：阶段要干什么只收字符串，超长整条拒收（不截断）
+    expect(
+      rejectedMessage(
+        cmd('workflow.create', {
+          input: {
+            name: 'p',
+            stages: [{ name: 's', entryMode: 'none', instructions: 7 }],
+          },
+        }),
+      ),
+    ).toBe('input.stages[0].instructions必须是字符串')
+    expect(
+      rejectedMessage(
+        cmd('workflow.create', {
+          input: {
+            name: 'p',
+            stages: [{ name: 's', entryMode: 'none', instructions: 'x'.repeat(20_001) }],
+          },
+        }),
+      ),
+    ).toBe('input.stages[0].instructions最长 20000 个字符')
+    // 缺省 / null / 空串都合法（空串 = 清空）
+    expect(
+      validateCommand(
+        cmd('workflow.create', {
+          input: {
+            name: 'p',
+            stages: [
+              { name: 's', entryMode: 'none', instructions: '' },
+              { name: 't', entryMode: 'none', instructions: null },
+              { name: 'u', entryMode: 'none' },
+            ],
+          },
+        }),
+      ).ok,
+    ).toBe(true)
   })
 
   it('workflow.update / remove：id 必填', () => {
@@ -513,7 +550,7 @@ describe('protocol/validate', () => {
     ).toBe('probe.checkedAt必填')
   })
 
-  it('task.create：title / workflowId / stageId 形状', () => {
+  it('task.create：title / workflowId / projectId / stageId 形状', () => {
     expect(rejectedMessage(cmd('task.create'))).toBe('input 必须是对象')
     expect(rejectedMessage(cmd('task.create', { input: {} }))).toBe('input.title必填')
     expect(rejectedMessage(cmd('task.create', { input: { title: longText(201) } }))).toBe(
@@ -525,8 +562,15 @@ describe('protocol/validate', () => {
     expect(rejectedMessage(cmd('task.create', { input: { title: 't' } }))).toBe(
       'input.workflowId必填',
     )
+    expect(rejectedMessage(cmd('task.create', { input: { title: 't', workflowId: 'wf1' } }))).toBe(
+      'input.projectId必填',
+    )
     expect(
-      rejectedMessage(cmd('task.create', { input: { title: 't', workflowId: 'wf1', stageId: 7 } })),
+      rejectedMessage(
+        cmd('task.create', {
+          input: { title: 't', workflowId: 'wf1', projectId: 'pj1', stageId: 7 },
+        }),
+      ),
     ).toBe('input.stageId必须是字符串')
   })
 
@@ -839,14 +883,14 @@ describe('validateQuery（M5：query 动词入口）', () => {
       validateCommand({
         commandId: 'c-1',
         type: 'task.create',
-        input: { title: '子任务', workflowId: 'wf-1', parentTaskId: 'tk-1' },
+        input: { title: '子任务', workflowId: 'wf-1', projectId: 'pj-1', parentTaskId: 'tk-1' },
       }).ok,
     ).toBe(true)
     expect(
       validateCommand({
         commandId: 'c-2',
         type: 'task.create',
-        input: { title: '子任务', workflowId: 'wf-1', parentTaskId: '   ' },
+        input: { title: '子任务', workflowId: 'wf-1', projectId: 'pj-1', parentTaskId: '   ' },
       }).ok,
     ).toBe(false)
   })
@@ -869,5 +913,77 @@ describe('validateQuery（M5：query 动词入口）', () => {
     )
     // rerun 缺省：只校验形状，缺省由内核按 false 处理
     expect(validateCommand(cmd('task.comment', { taskId: 't-1', text: '只记录' })).ok).toBe(true)
+  })
+})
+
+describe('validateCommand：项目（M10）', () => {
+  it('project.create：input 必须是对象，名称与文件夹必填、超长拒收', () => {
+    expect(rejectedMessage(cmd('project.create'))).toBe('input 必须是对象')
+    expect(rejectedMessage(cmd('project.create', { input: {} }))).toBe('input.name必填')
+    expect(
+      rejectedMessage(cmd('project.create', { input: { name: 'x'.repeat(101), path: 'D:/w' } })),
+    ).toBe('input.name最长 100 个字符')
+    expect(rejectedMessage(cmd('project.create', { input: { name: '工作台' } }))).toBe(
+      'input.path必填',
+    )
+    expect(
+      rejectedMessage(cmd('project.create', { input: { name: '工作台', path: 'x'.repeat(1001) } })),
+    ).toBe('input.path最长 1000 个字符')
+    expect(
+      rejectedMessage(
+        cmd('project.create', { input: { name: '工作台', path: 'D:/w', description: 7 } }),
+      ),
+    ).toBe('input.description必须是字符串')
+    expect(
+      validateCommand(
+        cmd('project.create', { input: { name: '工作台', path: 'D:/w', description: '说明' } }),
+      ).ok,
+    ).toBe(true)
+  })
+
+  it('project.update：id 必填，patch 只校验给出的字段；project.remove：id 必填', () => {
+    expect(rejectedMessage(cmd('project.update', { patch: {} }))).toBe('id必填')
+    expect(rejectedMessage(cmd('project.update', { id: 'pj-1', patch: { name: '  ' } }))).toBe(
+      'input.name必填',
+    )
+    expect(rejectedMessage(cmd('project.update', { id: 'pj-1', patch: { path: 7 } }))).toBe(
+      'input.path必须是字符串',
+    )
+    expect(validateCommand(cmd('project.update', { id: 'pj-1', patch: { name: '改名' } })).ok).toBe(
+      true,
+    )
+    expect(rejectedMessage(cmd('project.remove'))).toBe('id必填')
+    expect(validateCommand(cmd('project.remove', { id: 'pj-1' })).ok).toBe(true)
+  })
+})
+
+describe('validateCommand：规则目标项目（M10）', () => {
+  const rule = (to: Record<string, unknown>): Record<string, unknown> => ({
+    id: 'r-1',
+    name: '早报',
+    when: { cron: '0 9 * * *' },
+    to,
+    enabled: true,
+  })
+
+  it('to.projectId 可选；给了就必须是合法 id 字符串', () => {
+    expect(
+      validateCommand(cmd('rules.replace', { rules: [rule({ workflowId: 'wf-1' })] })).ok,
+    ).toBe(true)
+    expect(
+      validateCommand(
+        cmd('rules.replace', { rules: [rule({ workflowId: 'wf-1', projectId: 'pj-1' })] }),
+      ).ok,
+    ).toBe(true)
+    expect(
+      rejectedMessage(
+        cmd('rules.replace', { rules: [rule({ workflowId: 'wf-1', projectId: 7 })] }),
+      ),
+    ).toBe('rules[0].to.projectId必须是字符串')
+    expect(
+      rejectedMessage(
+        cmd('rules.replace', { rules: [rule({ workflowId: 'wf-1', projectId: '' })] }),
+      ),
+    ).toBe('rules[0].to.projectId必填')
   })
 })

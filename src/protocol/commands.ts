@@ -9,6 +9,7 @@
 import type {
   AgentInput,
   CardAnswerVia,
+  ProjectInput,
   RuntimeInput,
   RuntimeProbe,
   TaskInput,
@@ -36,6 +37,9 @@ export const COMMAND_NAMES = [
   'runtime.remove',
   'runtime.probe',
   'runtime.probed',
+  'project.create',
+  'project.update',
+  'project.remove',
   'task.create',
   'task.move',
   'task.complete',
@@ -47,6 +51,7 @@ export const COMMAND_NAMES = [
   'chat.send',
   'chat.remove',
   'chat.cancel',
+  'chat.archive',
   'app.event',
   'rules.replace',
   'rule.trigger',
@@ -133,6 +138,34 @@ export interface RuntimeProbedCommand extends CommandBase {
   type: 'runtime.probed'
   id: string
   probe: RuntimeProbe
+}
+
+// ---------- 项目（M10） ----------
+
+/**
+ * 新建项目（本地文件夹 = 该项目任务的执行工作目录）。
+ *
+ * 名称与文件夹路径都必填：名称在同一工作台内唯一，路径也不允许重复（同一文件夹只当一个项目）。
+ * 目录是否存在由宿主（文件夹选择器）保证；内核只做形状与唯一性校验。
+ */
+export interface ProjectCreateCommand extends CommandBase {
+  type: 'project.create'
+  input: ProjectInput
+}
+
+export interface ProjectUpdateCommand extends CommandBase {
+  type: 'project.update'
+  id: string
+  patch: Partial<ProjectInput>
+}
+
+/**
+ * 删除项目：项目下还有任务（含已完成的）时拒绝，避免任务失去工作目录。
+ * 不存在的项目按幂等删除处理（零事实）。
+ */
+export interface ProjectRemoveCommand extends CommandBase {
+  type: 'project.remove'
+  id: string
 }
 
 // ---------- 任务 ----------
@@ -225,6 +258,17 @@ export interface ChatCancelCommand extends CommandBase {
   conversationId: string
 }
 
+/**
+ * 归档 / 取消归档对话（M9）：只改 `archivedAt`，不删消息、不动 run。
+ * `archived` 缺省为 true；重复归档 / 重复恢复幂等（状态已一致时产零事实）。
+ */
+export interface ChatArchiveCommand extends CommandBase {
+  type: 'chat.archive'
+  conversationId: string
+  /** true = 归档（缺省）；false = 恢复 */
+  archived?: boolean
+}
+
 // ---------- app 事件（M5） ----------
 
 /**
@@ -263,6 +307,9 @@ export type Command =
   | RuntimeRemoveCommand
   | RuntimeProbeCommand
   | RuntimeProbedCommand
+  | ProjectCreateCommand
+  | ProjectUpdateCommand
+  | ProjectRemoveCommand
   | TaskCreateCommand
   | TaskMoveCommand
   | TaskCompleteCommand
@@ -274,6 +321,7 @@ export type Command =
   | ChatSendCommand
   | ChatRemoveCommand
   | ChatCancelCommand
+  | ChatArchiveCommand
   | AppEventCommand
   | RulesReplaceCommand
   | RuleTriggerCommand

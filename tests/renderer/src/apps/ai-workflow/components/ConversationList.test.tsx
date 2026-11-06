@@ -27,10 +27,12 @@ function makeProps(overrides: Partial<ConversationListProps> = {}): Conversation
     agentId: null,
     onAgentChange: vi.fn(),
     conversations: [conv('c1', '第一段对话'), conv('c2', '第二段对话', 'ghost')],
+    archived: [],
     activeId: 'c1',
     onSelect: vi.fn(),
     onCreate: vi.fn(),
     onRemove: vi.fn(),
+    onArchive: vi.fn(),
     creating: false,
     ...overrides,
   }
@@ -89,14 +91,67 @@ describe('ConversationList', () => {
     expect(onSelect).toHaveBeenCalledWith('c2')
   })
 
-  it('删除按钮带标题化 aria-label，点击回调对应会话 id', async () => {
+  it('三点菜单：删除走菜单项，行内不再常驻删除图标', async () => {
     const onRemove = vi.fn()
     const user = userEvent.setup()
     render(<ConversationList {...makeProps({ onRemove })} />)
 
-    const remove = screen.getByRole('button', { name: '删除对话 第二段对话' })
-    await user.click(remove)
+    // 删除收进菜单：点开之前没有可用的删除项
+    expect(screen.queryByRole('menuitem', { name: '删除' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: '会话 第二段对话 更多操作' }))
+    await user.click(screen.getByRole('menuitem', { name: '删除' }))
     expect(onRemove).toHaveBeenCalledWith('c2')
+    // 点过之后菜单收起
+    expect(screen.queryByRole('menuitem', { name: '删除' })).toBeNull()
+  })
+
+  it('三点菜单：归档走菜单项，Esc 收起菜单', async () => {
+    const onArchive = vi.fn()
+    const user = userEvent.setup()
+    render(<ConversationList {...makeProps({ onArchive })} />)
+
+    await user.click(screen.getByRole('button', { name: '会话 第一段对话 更多操作' }))
+    expect(screen.getByRole('menu')).toHaveAttribute('aria-label', '会话 第一段对话 操作')
+    await user.click(screen.getByRole('menuitem', { name: '归档' }))
+    expect(onArchive).toHaveBeenCalledWith('c1', true)
+
+    // Esc 收起菜单（不触发任何回调）
+    await user.click(screen.getByRole('button', { name: '会话 第一段对话 更多操作' }))
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    // 再点一次三点入口也能收起
+    await user.click(screen.getByRole('button', { name: '会话 第一段对话 更多操作' }))
+    await user.click(screen.getByRole('button', { name: '会话 第一段对话 更多操作' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    // 点页面别处收起
+    await user.click(screen.getByRole('button', { name: '会话 第一段对话 更多操作' }))
+    await user.click(screen.getByRole('button', { name: '新对话' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('已归档分组：默认收起，展开后可恢复或删除', async () => {
+    const onArchive = vi.fn()
+    const onRemove = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ConversationList
+        {...makeProps({ onArchive, onRemove, archived: [conv('c9', '旧对话')] })}
+      />,
+    )
+
+    const toggle = screen.getByRole('button', { name: /已归档/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: '恢复会话 旧对话' })).toBeNull()
+
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await user.click(screen.getByRole('button', { name: '恢复会话 旧对话' }))
+    expect(onArchive).toHaveBeenCalledWith('c9', false)
+
+    await user.click(screen.getByRole('button', { name: '删除会话 旧对话' }))
+    expect(onRemove).toHaveBeenCalledWith('c9')
   })
 
   it('没有会话时列表为空，仍显示智能体选择与新建入口', () => {

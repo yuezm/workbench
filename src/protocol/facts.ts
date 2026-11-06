@@ -22,6 +22,7 @@ import type {
   Conversation,
   Message,
   OnChildrenSettled,
+  Project,
   RunEventRow,
   RunRow,
   Runtime,
@@ -49,6 +50,9 @@ export const FACT_TYPES = [
   'runtime.updated',
   'runtime.removed',
   'runtime.probed',
+  'project.created',
+  'project.updated',
+  'project.removed',
   'task.created',
   'task.moved',
   'task.completed',
@@ -158,6 +162,22 @@ export interface RuntimeRemovedPayload {
 /** 探测事实携带更新后的完整行：`lastProbe` 是行的一部分，投影直接 upsert。 */
 export interface RuntimeProbedPayload {
   runtime: Runtime
+}
+
+// ---------- 项目（M10） ----------
+
+/** 项目事实携带完整行（含 `updatedAt`），`project` 只做整行 upsert，重建不回查。 */
+export interface ProjectCreatedPayload {
+  project: Project
+}
+
+export interface ProjectUpdatedPayload {
+  project: Project
+}
+
+/** tombstone：删除前的末态行（历史任务的 `projectId` 仍可解释） */
+export interface ProjectRemovedPayload {
+  project: Project
 }
 
 // ---------- 任务 ----------
@@ -491,6 +511,9 @@ export interface FactPayloads {
   'runtime.updated': RuntimeUpdatedPayload
   'runtime.removed': RuntimeRemovedPayload
   'runtime.probed': RuntimeProbedPayload
+  'project.created': ProjectCreatedPayload
+  'project.updated': ProjectUpdatedPayload
+  'project.removed': ProjectRemovedPayload
   'task.created': TaskCreatedPayload
   'task.moved': TaskMovedPayload
   'task.completed': TaskCompletedPayload

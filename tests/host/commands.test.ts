@@ -106,10 +106,21 @@ const workflowCommand = (commandId = 'c-workflow'): Command => ({
   },
 })
 
-const taskCommand = (workflowId: string, commandId = 'c-task'): Command => ({
+/** M10：项目（任务的容器与执行工作目录），建任务前必须先有项目。 */
+const projectCommand = (commandId = 'c-project'): Command => ({
+  commandId,
+  type: 'project.create',
+  input: { name: '工作台', path: 'D:/work' },
+})
+
+const taskCommand = (
+  workflowId: string,
+  projectId = 'pj-1',
+  commandId = 'c-task',
+): Command => ({
   commandId,
   type: 'task.create',
-  input: { title: '任务', workflowId },
+  input: { title: '任务', workflowId, projectId },
 })
 
 const runtimeInput = { name: '本机 dsh', executorKey: 'dsh' }
@@ -346,7 +357,8 @@ describe('host/commands：命令路由（M5）', () => {
     const { db, store, router, dispatched } = setup()
     const workflow = await router.dispatch(workflowCommand())
     const workflowRow = workflow.value as { id: string; stages: Array<{ id: string }> }
-    const task = await router.dispatch(taskCommand(workflowRow.id))
+    const project = (await router.dispatch(projectCommand())).value as { id: string }
+    const task = await router.dispatch(taskCommand(workflowRow.id, project.id))
     const taskRow = task.value as { id: string; currentStageId: string }
     createProjectionWriter(db).apply(
       {
@@ -524,7 +536,8 @@ describe('host/commands：命令路由（M5）', () => {
     const { db, store, router, dispatched } = setup()
     const workflow = await router.dispatch(workflowCommand())
     const workflowRow = workflow.value as { id: string; stages: Array<{ id: string }> }
-    const task = await router.dispatch(taskCommand(workflowRow.id))
+    const project = (await router.dispatch(projectCommand())).value as { id: string }
+    const task = await router.dispatch(taskCommand(workflowRow.id, project.id))
     const taskRow = task.value as { id: string; currentStageId: string }
     createProjectionWriter(db).apply(
       {
@@ -599,7 +612,8 @@ describe('host/commands：命令路由（M5）', () => {
     const { db, store, router } = setup()
     const workflow = await router.dispatch(workflowCommand())
     const workflowRow = workflow.value as { id: string; stages: Array<{ id: string }> }
-    const task = await router.dispatch(taskCommand(workflowRow.id))
+    const project = (await router.dispatch(projectCommand())).value as { id: string }
+    const task = await router.dispatch(taskCommand(workflowRow.id, project.id))
     const taskRow = task.value as { id: string; currentStageId: string }
     const moveCommand: Command = {
       commandId: 'c-move',
@@ -792,7 +806,7 @@ describe('host/commands：防御分支与默认值', () => {
       { commandId: 'e3', type: 'runtime.create', input: runtimeInput },
       { commandId: 'e4', type: 'runtime.update', id: 'rt-1', patch: { enabled: false } },
       { commandId: 'e5', type: 'runtime.probe', id: 'rt-1' },
-      { commandId: 'e6', type: 'task.create', input: { title: 't', workflowId: 'wf-1' } },
+      { commandId: 'e6', type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } },
       { commandId: 'e7', type: 'task.move', id: 't-1', stageId: 's-1' },
       { commandId: 'e8', type: 'card.answer', cardId: 'card-1', optionIndex: 0 },
       { commandId: 'e9', type: 'card.resolve', cardId: 'card-1' },
@@ -902,7 +916,10 @@ describe('host/commands：跨类型事实区间回放', () => {
   it('task.comment：返回值是追加的评论行（重放同一 commandId 不重复产事实）', async () => {
     const { router, store } = setup()
     const workflow = (await router.dispatch(workflowCommand())).value as { id: string }
-    const task = (await router.dispatch(taskCommand(workflow.id))).value as { id: string }
+    const project = (await router.dispatch(projectCommand())).value as { id: string }
+    const task = (await router.dispatch(taskCommand(workflow.id, project.id))).value as {
+      id: string
+    }
 
     const first = await router.dispatch({
       commandId: 'c-comment',

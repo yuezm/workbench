@@ -6,6 +6,7 @@ import type { CommandDispatchResult, IpcResponse, KernelEvent } from '../protoco
 import {
   WORKBENCH_DISPATCH_CHANNEL,
   WORKBENCH_EVENT_CHANNEL,
+  WORKBENCH_PICK_FOLDER_CHANNEL,
   WORKBENCH_QUERY_CHANNEL,
 } from '../protocol/ipc'
 import type { ViewId, ViewParams, ViewResult } from '../protocol/views'
@@ -35,6 +36,8 @@ const workbench: WorkbenchApi = {
       ipcRenderer.off(WORKBENCH_EVENT_CHANNEL, listener)
     }
   },
+  pickFolder: (): Promise<string | null> =>
+    unwrap(ipcRenderer.invoke(WORKBENCH_PICK_FOLDER_CHANNEL)) as Promise<string | null>,
   notify: (title, body) => {
     const payload: NotifyPayload = { title, body }
     void ipcRenderer.invoke(NOTIFY_CHANNEL, payload)

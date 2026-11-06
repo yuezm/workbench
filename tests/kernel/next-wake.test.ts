@@ -78,6 +78,7 @@ const view = (runs: RunRow[], rules: AutomationRule[] = []): View => ({
   stages: new Map(),
   agents: new Map(),
   runtimes: new Map(),
+  projects: new Map(),
   tasks: new Map(),
   runs: new Map(runs.map((row) => [row.id, row])),
   conversations: new Map(),

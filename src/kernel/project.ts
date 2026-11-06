@@ -58,6 +58,7 @@ export function normalizeTask(row: Task): Task {
     ruleId: legacy.ruleId ?? null,
     externalRef: legacy.externalRef ?? null,
     labels: legacy.labels ?? [],
+    projectId: legacy.projectId ?? null,
     threadId: legacy.threadId ?? null,
     parentTaskId: legacy.parentTaskId ?? null,
     spawnedByRunId: legacy.spawnedByRunId ?? null,
@@ -68,7 +69,7 @@ export function normalizeTask(row: Task): Task {
   }
 }
 
-/** 老事实 replay 的阶段行归一（M7/M8）：缺交接 / 子任务字段时补 null。 */
+/** 老事实 replay 的阶段行归一（M7/M8/M9）：缺交接 / 子任务 / 阶段说明字段时补默认值。 */
 function normalizeStage(row: WorkflowStage): WorkflowStage {
   const legacy = row as Partial<WorkflowStage>
   return {
@@ -78,6 +79,7 @@ function normalizeStage(row: WorkflowStage): WorkflowStage {
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,
+    instructions: legacy.instructions ?? '',
   }
 }
 
@@ -128,6 +130,12 @@ function changesOf(fact: AnyFact): Change[] {
       return [put('runtimes', fact.payload.runtime)]
     case 'runtime.removed':
       return [remove('runtimes', fact.payload.runtime.id)]
+    case 'project.created':
+    case 'project.updated':
+      // M10：项目事实携带完整行（含 updatedAt），整行 upsert；重建不回查
+      return [put('projects', fact.payload.project)]
+    case 'project.removed':
+      return [remove('projects', fact.payload.project.id)]
     case 'task.created':
     case 'task.moved':
     case 'task.completed':
@@ -200,7 +208,13 @@ function changesOf(fact: AnyFact): Change[] {
       return [put('plugin_settings', fact.payload.pluginSettings)]
     case 'conversation.created':
     case 'conversation.updated':
-      return [put('conversations', fact.payload.conversation)]
+      // M9：老事实没有 `archivedAt`，按 null 归一，重建与增量折出同一行
+      return [
+        put('conversations', {
+          ...fact.payload.conversation,
+          archivedAt: fact.payload.conversation.archivedAt ?? null,
+        }),
+      ]
     case 'conversation.removed':
       // 只删 conversations：`messages` 由宿主按 conversation_id 联删。
       return [remove('conversations', fact.payload.conversation.id)]

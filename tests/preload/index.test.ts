@@ -5,6 +5,7 @@ import { NOTIFY_CHANNEL, type WorkbenchApi } from '../../src/shared/workbench-ap
 import {
   WORKBENCH_DISPATCH_CHANNEL,
   WORKBENCH_EVENT_CHANNEL,
+  WORKBENCH_PICK_FOLDER_CHANNEL,
   WORKBENCH_QUERY_CHANNEL,
 } from '../../src/protocol/ipc'
 
@@ -44,7 +45,13 @@ describe('preload 桥接契约（M5 三动词）', () => {
 
   it('workbench 形状 = dispatch / query / subscribe / notify', async () => {
     const { workbench } = await loadExposed()
-    expect(Object.keys(workbench).sort()).toEqual(['dispatch', 'notify', 'query', 'subscribe'])
+    expect(Object.keys(workbench).sort()).toEqual([
+      'dispatch',
+      'notify',
+      'pickFolder',
+      'query',
+      'subscribe',
+    ])
   })
 
   it('dispatch：走固定通道并解包成功信封', async () => {
@@ -154,5 +161,23 @@ describe('preload 桥接契约（M5 三动词）', () => {
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toBe('未知视图: x')
     expect((error as { code?: string }).code).toBeUndefined()
+  })
+  it('pickFolder：走文件夹选择通道，解包成功信封（取消为 null）', async () => {
+    const { workbench } = await loadExposed()
+    ipcRendererMock.invoke.mockResolvedValueOnce({ ok: true, value: null })
+    await expect(workbench.pickFolder()).resolves.toBeNull()
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(WORKBENCH_PICK_FOLDER_CHANNEL)
+
+    ipcRendererMock.invoke.mockResolvedValueOnce({ ok: true, value: 'D:/work' })
+    await expect(workbench.pickFolder()).resolves.toBe('D:/work')
+  })
+
+  it('pickFolder：失败信封同样抛带文案的 Error', async () => {
+    const { workbench } = await loadExposed()
+    ipcRendererMock.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'internal', message: '对话框不可用' },
+    })
+    await expect(workbench.pickFolder()).rejects.toThrow('对话框不可用')
   })
 })

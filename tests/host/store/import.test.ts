@@ -306,6 +306,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       onRejectStageId: null,
       handoffWorkflowId: null,
       handoffStageId: null,
+      instructions: '',
     },
     {
       id: 'st-2',
@@ -318,6 +319,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       onRejectStageId: 'st-1',
       handoffWorkflowId: null,
       handoffStageId: null,
+      instructions: '',
     },
   ]
   const tasks: Task[] = [
@@ -326,6 +328,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       title: '做点什么',
       description: '',
       workflowId: 'wf-1',
+      projectId: null,
       currentStageId: 'st-2',
       status: 'active',
       // M6：v2 存量导入后一律是手工任务
@@ -349,6 +352,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       title: '完成的事',
       description: '已归档',
       workflowId: 'wf-1',
+      projectId: null,
       currentStageId: null,
       status: 'completed',
       origin: 'manual',
@@ -571,6 +575,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   workflow_stages: 0,
   agents: 0,
   runtimes: 0,
+  // M10：v2 没有项目数据；键要补齐以匹配 `ProjectionTable` 全集
+  projects: 0,
   runs: 0,
   run_events: 0,
   conversations: 0,
@@ -600,6 +606,7 @@ describe('importLegacyIfNeeded', () => {
       agents: 2,
       workflows: 1,
       workflow_stages: 2,
+      projects: 0,
       tasks: 2,
       runs: 2,
       run_events: 5,
@@ -817,6 +824,7 @@ describe('importLegacyIfNeeded', () => {
       workflow_stages: [],
       agents: [],
       runtimes: [],
+      projects: [],
       runs: [],
       run_events: [],
       conversations: [],

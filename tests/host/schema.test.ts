@@ -106,6 +106,7 @@ const TASKS_M7_COLUMNS = [
   'spawn_key',
   'handoff_from_task_id',
   'handoff_from_stage_id',
+  'project_id',
   'created_at',
   'updated_at',
 ]
@@ -125,6 +126,8 @@ const STAGES_M7_COLUMNS = [
   'subtask_stage_id',
   'on_children_settled',
   'spawn_policy',
+  // M9：阶段要干什么
+  'instructions',
   'created_at',
 ]
 
@@ -370,7 +373,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('SCHEMA_SQL 建 15 张表：十五张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
+  it('SCHEMA_SQL 建 16 张表：十六张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
@@ -379,6 +382,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       'conversations',
       'messages',
       'plugin_settings',
+      'projects',
       'rule_fires',
       'rule_sets',
       'run_events',
@@ -494,13 +498,14 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为十五张投影表（实体五表 + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings + task_comments）', () => {
+  it('白名单固定为十六张投影表（实体五表 + projects + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings + task_comments）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
       'workflow_stages',
       'agents',
       'runtimes',
+      'projects',
       'runs',
       'run_events',
       'conversations',

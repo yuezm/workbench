@@ -14,6 +14,7 @@ const parentTask: Task = {
   title: '父任务',
   description: '',
   workflowId: 'w1',
+  projectId: 'p1',
   currentStageId: 's0',
   status: 'active',
   origin: 'rule',

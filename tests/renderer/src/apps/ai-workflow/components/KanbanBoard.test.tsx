@@ -48,6 +48,7 @@ const task: Task = {
   title: '卡片任务',
   description: '',
   workflowId: 'w',
+  projectId: 'p1',
   currentStageId: 's1',
   status: 'active',
   origin: 'manual',
@@ -119,12 +120,37 @@ describe('KanbanBoard', () => {
     expect(screen.getByText('卡片任务')).toBeInTheDocument()
     expect(screen.queryByText('已完成的活')).not.toBeInTheDocument()
 
-    const done = screen.getByRole('group', { name: '已完成区' })
+    const done = screen.getByRole('group', { name: '归档区' })
     expect(within(done).getByText('1')).toBeInTheDocument()
     expect(screen.queryByText('执行中…')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     expect(onNewTask).toHaveBeenCalled()
+  })
+
+  it('混入其它工作流的任务时不显示（tasks 是项目下全部任务）', () => {
+    // M10：视图给的是项目下全部任务，看板只认本工作流的
+    const foreign: Task = {
+      ...task,
+      id: 't9',
+      title: '别家的任务',
+      workflowId: 'w-other',
+      currentStageId: 's1',
+      status: 'completed',
+    }
+    render(
+      <KanbanBoard
+        workflow={wf}
+        tasks={[task, foreign]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('卡片任务')).toBeInTheDocument()
+    expect(screen.queryByText('别家的任务')).not.toBeInTheDocument()
+    // 已完成数也只算本工作流的：别家那条 completed 不计入
+    expect(within(screen.getByRole('group', { name: '归档区' })).getByText('0')).toBeInTheDocument()
   })
 
   it('拖到其它阶段列触发 moveToStage，拖拽中空列提示落点', () => {
@@ -150,9 +176,9 @@ describe('KanbanBoard', () => {
     expect(onMoveToStage).not.toHaveBeenCalled()
   })
 
-  it('拖到「已完成」区触发 completeTask', () => {
+  it('拖到「归档」区触发 completeTask', () => {
     const { onCompleteTask } = setup()
-    const done = screen.getByRole('group', { name: '已完成区' })
+    const done = screen.getByRole('group', { name: '归档区' })
     fireEvent.dragStart(screen.getByLabelText('任务：卡片任务'))
     fireEvent.dragOver(done)
     fireEvent.dragLeave(done)
@@ -166,8 +192,8 @@ describe('KanbanBoard', () => {
     const target = screen.getByRole('group', { name: '阶段：待办' })
     fireEvent.dragOver(target)
     fireEvent.drop(target)
-    fireEvent.dragOver(screen.getByRole('group', { name: '已完成区' }))
-    fireEvent.drop(screen.getByRole('group', { name: '已完成区' }))
+    fireEvent.dragOver(screen.getByRole('group', { name: '归档区' }))
+    fireEvent.drop(screen.getByRole('group', { name: '归档区' }))
     expect(onMoveToStage).not.toHaveBeenCalled()
     expect(onCompleteTask).not.toHaveBeenCalled()
   })

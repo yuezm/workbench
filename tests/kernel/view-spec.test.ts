@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { COMMAND_NAMES, type Command } from '../../src/protocol/commands'
 import type {
   AgentInput,
+  ProjectInput,
   RuntimeInput,
   TaskInput,
   WorkflowInput,
@@ -23,7 +24,9 @@ const agentInput: AgentInput = { name: '实现者', runtimeId: 'rt-1' }
 
 const runtimeInput: RuntimeInput = { name: '本机 dsh' }
 
-const taskInput: TaskInput = { title: '任务', workflowId: 'wf-1' }
+const projectInput: ProjectInput = { name: '工作台', path: 'D:/work' }
+
+const taskInput: TaskInput = { title: '任务', workflowId: 'wf-1', projectId: 'pj-1' }
 
 const commandSamples: Command[] = [
   { commandId: 'c1', type: 'workflow.create', input: workflowInput },
@@ -61,6 +64,7 @@ const commandSamples: Command[] = [
   { commandId: 'c18', type: 'chat.send', conversationId: 'cv-1', content: '你好' },
   { commandId: 'c19', type: 'chat.remove', conversationId: 'cv-1' },
   { commandId: 'c20', type: 'chat.cancel', conversationId: 'cv-1' },
+  { commandId: 'c21', type: 'chat.archive', conversationId: 'cv-1', archived: true },
   {
     commandId: 'c21',
     type: 'app.event',
@@ -95,6 +99,9 @@ const commandSamples: Command[] = [
   { commandId: 'c28', type: 'plugins.replace', settings: [] },
   { commandId: 'c29', type: 'plugin.set', pluginId: 'webhook', enabled: true },
   { commandId: 'c30', type: 'task.comment', taskId: 't-1', text: '按钮改成粉色', rerun: true },
+  { commandId: 'c31', type: 'project.create', input: projectInput },
+  { commandId: 'c32', type: 'project.update', id: 'pj-1', patch: { name: '新名字' } },
+  { commandId: 'c33', type: 'project.remove', id: 'pj-1' },
 ]
 
 const hostSamples: Input[] = [
@@ -136,11 +143,15 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'runtime.remove': ['runtimes', 'agents'],
   'runtime.probe': ['runtimes'],
   'runtime.probed': ['runtimes'],
+  'project.create': ['projects'],
+  'project.update': ['projects'],
+  'project.remove': ['projects', 'tasks'],
   'task.create': [
     'workflows',
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'task_comments',
     'tasks',
     'threads',
@@ -151,6 +162,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'threads',
     'runs',
     'cards',
@@ -162,18 +174,20 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'threads',
     'task_comments',
     'runs',
     'cards',
   ],
-  'task.remove': ['tasks', 'runs', 'threads', 'cards'],
+  'task.remove': ['tasks', 'runs', 'threads', 'cards', 'projects'],
   'task.comment': [
     'tasks',
     'workflows',
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'threads',
     'runs',
     'cards',
@@ -190,6 +204,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'conversations',
     'cards',
     'rule_sets',
@@ -208,6 +223,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'threads',
     'task_comments',
   ],
@@ -215,6 +231,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
   'chat.remove': ['conversations', 'messages'],
   'chat.cancel': ['conversations', 'runs'],
+  'chat.archive': ['conversations'],
   'app.event': [
     'rule_sets',
     'tasks',
@@ -222,6 +239,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'threads',
     'runs',
     'cards',
@@ -234,12 +252,13 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'threads',
     'runs',
     'cards',
     'task_comments',
   ],
-  'rules.replace': ['rule_sets', 'workflows', 'workflow_stages'],
+  'rules.replace': ['rule_sets', 'workflows', 'workflow_stages', 'projects'],
   'rule.trigger': [
     'rule_sets',
     'tasks',
@@ -247,6 +266,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'workflow_stages',
     'agents',
     'runtimes',
+    'projects',
     'task_comments',
   ],
   'plugins.replace': ['plugin_settings'],
@@ -261,8 +281,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 30 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(30)
+  it('覆盖 34 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(34)
     expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)
@@ -305,6 +325,7 @@ describe('kernel/view-spec', () => {
       'runs',
       'threads',
       'cards',
+      'projects',
     ])
     expect(viewSpec(byType.get('workflow.remove') as Input)).toContain('runs')
   })

@@ -21,6 +21,7 @@ import type {
   EntryMode,
   Message,
   PermissionMode,
+  Project,
   Run,
   RunErrorCode,
   RunEvent,
@@ -76,6 +77,7 @@ interface StageRow {
   subtask_stage_id: string | null
   on_children_settled: string | null
   spawn_policy: string | null
+  instructions: string
 }
 
 interface AgentRow {
@@ -109,6 +111,7 @@ interface TaskRow {
   title: string
   description: string
   workflow_id: string
+  project_id: string | null
   current_stage_id: string | null
   status: string
   origin: string
@@ -122,6 +125,16 @@ interface TaskRow {
   spawn_key: string | null
   handoff_from_task_id: string | null
   handoff_from_stage_id: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** `projects` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
+interface ProjectRow {
+  id: string
+  name: string
+  path: string
+  description: string
   created_at: string
   updated_at: string
 }
@@ -208,6 +221,7 @@ interface ConversationRow {
   title: string
   agent_id: string
   session_id: string | null
+  archived_at: string | null
   created_at: string
   updated_at: string
 }
@@ -271,6 +285,7 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   subtaskStageId: row.subtask_stage_id,
   onChildrenSettled: row.on_children_settled as WorkflowStage['onChildrenSettled'],
   spawnPolicy: row.spawn_policy as WorkflowStage['spawnPolicy'],
+  instructions: row.instructions,
 })
 
 const mapAgent = (row: AgentRow): Agent => ({
@@ -305,6 +320,7 @@ const mapTask = (row: TaskRow): Task => ({
   title: row.title,
   description: row.description,
   workflowId: row.workflow_id,
+  projectId: row.project_id,
   currentStageId: row.current_stage_id,
   status: row.status as TaskStatus,
   origin: row.origin as TaskOrigin,
@@ -318,6 +334,16 @@ const mapTask = (row: TaskRow): Task => ({
   spawnKey: row.spawn_key,
   handoffFromTaskId: row.handoff_from_task_id,
   handoffFromStageId: row.handoff_from_stage_id,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+})
+
+/** `projects` 行 → `Project`：逐列直取（无 JSON 列）。 */
+const mapProject = (row: ProjectRow): Project => ({
+  id: row.id,
+  name: row.name,
+  path: row.path,
+  description: row.description,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -406,6 +432,7 @@ const mapConversation = (row: ConversationRow): Conversation => ({
   title: row.title,
   agentId: row.agent_id,
   sessionId: row.session_id,
+  archivedAt: row.archived_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -454,7 +481,7 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
       .prepare(
         `SELECT id, workflow_id, name, position, entry_mode, agent_id,
                 on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id,
-                subtask_stage_id, on_children_settled, spawn_policy
+                subtask_stage_id, on_children_settled, spawn_policy, instructions
          FROM workflow_stages ORDER BY workflow_id, position`,
       )
       .all() as unknown as StageRow[]
@@ -480,8 +507,18 @@ const readRuntimes = (db: DatabaseSync): Runtime[] =>
       .all() as unknown as RuntimeRow[]
   ).map(mapRuntime)
 
+/** `projects` 投影的列清单（逐列写死，装载与 `projects.all` 共用）。 */
+const PROJECT_COLUMNS = 'id, name, path, description, created_at, updated_at'
+
+const readProjects = (db: DatabaseSync): Project[] =>
+  (
+    db
+      .prepare(`SELECT ${PROJECT_COLUMNS} FROM projects ORDER BY created_at, rowid`)
+      .all() as unknown as ProjectRow[]
+  ).map(mapProject)
+
 /** `tasks` 投影的列清单（逐列写死，不用 `SELECT *`；三处读路径共用）。 */
-const TASK_COLUMNS = `id, title, description, workflow_id, current_stage_id, status, origin,
+const TASK_COLUMNS = `id, title, description, workflow_id, project_id, current_stage_id, status, origin,
         rule_id, external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id,
         batch_no, spawn_key, handoff_from_task_id, handoff_from_stage_id, created_at, updated_at`
 
@@ -683,7 +720,7 @@ const readConversations = (db: DatabaseSync): Conversation[] =>
     db
       .prepare(
         // 会话清单按最近更新排序（与旧仓储 ORDER BY updated_at DESC 一致）
-        `SELECT id, title, agent_id, session_id, created_at, updated_at
+        `SELECT id, title, agent_id, session_id, archived_at, created_at, updated_at
          FROM conversations ORDER BY updated_at DESC, created_at DESC, rowid`,
       )
       .all() as unknown as ConversationRow[]
@@ -839,6 +876,7 @@ export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): 
     stages: slice.has('workflow_stages') ? toMap(readStages(db)) : new Map(),
     agents: slice.has('agents') ? toMap(readAgents(db)) : new Map(),
     runtimes: slice.has('runtimes') ? toMap(readRuntimes(db)) : new Map(),
+    projects: slice.has('projects') ? toMap(readProjects(db)) : new Map(),
     tasks: slice.has('tasks') ? toMap(readTasks(db)) : new Map(),
     runs: slice.has('runs') ? toMap(readRuns(db)) : new Map(),
     conversations: slice.has('conversations') ? toMap(readConversations(db)) : new Map(),
@@ -874,6 +912,22 @@ const readTasksByWorkflow = (db: DatabaseSync, workflowId: string): Task[] =>
     db
       .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE workflow_id = ? ORDER BY created_at, rowid`)
       .all(workflowId) as unknown as TaskRow[]
+  ).map(mapTask)
+
+/** 某项目下的任务（M10）：按创建顺序；看板再按工作流过滤。 */
+const readTasksByProject = (db: DatabaseSync, projectId: string): Task[] =>
+  (
+    db
+      .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE project_id = ? ORDER BY created_at, rowid`)
+      .all(projectId) as unknown as TaskRow[]
+  ).map(mapTask)
+
+/** 没有项目的任务（M10）：v2 存量与老规则建的任务，界面归入「未归属」。 */
+const readTasksUnassigned = (db: DatabaseSync): Task[] =>
+  (
+    db
+      .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE project_id IS NULL ORDER BY created_at, rowid`)
+      .all() as unknown as TaskRow[]
   ).map(mapTask)
 
 /** 某任务的直接子任务（M8）：按创建顺序；无子任务返回空数组。 */
@@ -1005,6 +1059,12 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readAgents(db)
     case 'runtimes.all':
       return readRuntimes(db)
+    case 'projects.all':
+      return readProjects(db)
+    case 'tasks.byProject':
+      return readTasksByProject(db, readStringParam(params, 'projectId'))
+    case 'tasks.unassigned':
+      return readTasksUnassigned(db)
     case 'tasks.byWorkflow':
       return readTasksByWorkflow(db, readStringParam(params, 'workflowId'))
     case 'tasks.byParent':

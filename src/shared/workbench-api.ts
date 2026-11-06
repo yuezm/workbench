@@ -15,6 +15,11 @@ export interface WorkbenchApi {
   query<T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>>
   /** 订阅事实批次与聊天流；返回取消订阅函数。同一窗口只订阅一次 */
   subscribe(handler: (event: KernelEvent) => void): () => void
+  /**
+   * 弹系统文件夹选择器（M10）：项目 = 本地文件夹，目录只能由宿主选。
+   * 返回绝对路径；用户取消返回 null。
+   */
+  pickFolder(): Promise<string | null>
   /** shell 的通用系统通知（pomodoro 等 app 用） */
   notify(title: string, body?: string): void
 }

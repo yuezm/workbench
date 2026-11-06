@@ -71,6 +71,11 @@ export interface RuleCronWhen {
 export interface RuleTarget {
   workflowId: string
   stageId?: string
+  /**
+   * 任务所属项目（M10）：规则建的任务落在该项目下（运行工作目录取项目文件夹）。
+   * 缺省（老规则）时任务 `projectId=null`，界面归入「未归属」。
+   */
+  projectId?: string
   task?: {
     titleFrom?: RuleTitleFrom
     labels?: string[]

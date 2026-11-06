@@ -37,7 +37,7 @@ test('任务派生：人工挂子任务继承父线程，子任务完成后父�
 
   // 1) 人工挂子任务
   await page.evaluate(
-    ({ workflowId, parentTaskId }) => {
+    ({ workflowId, parentTaskId, projectId }) => {
       const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
       return bridge.dispatch({
         type: 'task.create',
@@ -45,11 +45,16 @@ test('任务派生：人工挂子任务继承父线程，子任务完成后父�
         input: {
           title: 'e2e 子任务',
           workflowId,
+          projectId,
           parentTaskId,
         },
       })
     },
-    { workflowId: seeded.workflowId, parentTaskId: seeded.parentTaskId },
+    {
+      workflowId: seeded.workflowId,
+      parentTaskId: seeded.parentTaskId,
+      projectId: seeded.projectId,
+    },
   )
 
   await expect

@@ -83,6 +83,13 @@ export async function seedRulesBase(dbPath: string): Promise<RulesSeed> {
       '工作流',
     ).workflow
 
+    // M10：任务必须挂在项目下。种一个项目，规则表单默认选中它，看板才看得到规则任务。
+    store.dispatch({
+      type: 'project.create',
+      commandId: 'e2e-rules-project',
+      input: { name: 'e2e 规则项目', path: dbPath },
+    })
+
     // 停用运行时：规则任务产出的 run.queued 留在队列里，e2e 可稳定断言且不起子进程。
     store.dispatch({
       type: 'runtime.update',

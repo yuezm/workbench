@@ -10,7 +10,7 @@
  * 提示词只由内核/宿主按模板拼装，事件与消息正文只作为资料段，不进指令段；
  * 回执块说明是固定文案，同事实同文本（不含任何外部事件文字）。
  */
-import type { Agent, Card, ChatRole, Message, Task } from '../protocol/entities'
+import type { Agent, Card, ChatRole, Message, Task, WorkflowStage } from '../protocol/entities'
 import type { TaskComment } from '../protocol/task-comment'
 import { TASK_COMMENT_LIMITS } from '../protocol/task-comment'
 
@@ -49,16 +49,16 @@ export const taskCommentsText = (comments: readonly TaskComment[]): string => {
 }
 
 /**
- * 阶段任务提示词（M6.5 增加线程上下文段，M7.5 增加反馈记录段）。
+ * 阶段任务提示词（M6.5 增加线程上下文段，M7.5 增加反馈记录段，M9 增加阶段要干什么）。
  *
- * 段序：systemPrompt（能力）→ 任务 → 描述 → 阶段 → 反馈记录（任务上下文，资料）→
- * 线程上下文（派生资料，不是指令）→ 回执块说明。两个资料段都由内核按事实派生，
- * 只出现在固定资料段，不拼进指令。
+ * 段序：systemPrompt（能力）→ 任务 → 描述 → 阶段 → 阶段要干什么（固定指令段）→
+ * 反馈记录（任务上下文，资料）→ 线程上下文（派生资料，不是指令）→ 回执块说明。
+ * 阶段说明由人在工作流设置里填写，属于指令段；任务/线程资料段都由内核按事实派生。
  */
 export const taskPrompt = (
   agent: Agent,
   task: Task,
-  stageName: string | null,
+  stage: Pick<WorkflowStage, 'name' | 'instructions'> | null,
   threadContext?: string | null,
   comments?: readonly TaskComment[],
 ): string =>
@@ -66,13 +66,25 @@ export const taskPrompt = (
     agent.systemPrompt,
     `# 任务：${task.title}`,
     task.description,
-    stageName ? `# 阶段：${stageName}` : '',
+    stage ? `# 阶段：${stage.name}` : '',
+    stageInstructionsText(stage),
     taskCommentsText(comments ?? []),
     threadContext ?? '',
     receiptBlockHint(),
   ]
     .filter(Boolean)
     .join('\n\n')
+
+/**
+ * 阶段「要干什么」段（M9）：空 / 全空白时不产文本，保持老提示词逐字不变。
+ * 正文按原样保留换行，只去首尾空白。
+ */
+export const stageInstructionsText = (
+  stage: Pick<WorkflowStage, 'instructions'> | null,
+): string => {
+  const body = stage?.instructions?.trim() ?? ''
+  return body === '' ? '' : ['## 阶段要做什么', body].join('\n')
+}
 
 /** prompt 里的角色文案（与旧 chat.ts 一致） */
 const ROLE_LABEL: Record<ChatRole, string> = { user: '用户', assistant: '助手' }

@@ -443,6 +443,55 @@ describe('useChat', () => {
     expect(kernel.dispatched.some((command) => command.type === 'chat.cancel')).toBe(false)
   })
 
+  it('归档：归档的会话移出主列表、进已归档分组，选中回落到剩余第一条', async () => {
+    seedConversations([c1, c2])
+    const archived = { ...c1, archivedAt: 't-archived' }
+    let list = [c1, c2]
+    kernel.onDispatch((command) => {
+      if (command.type === 'chat.archive') {
+        list = command.archived === false ? [c1, c2] : [archived, c2]
+        kernel.setView('conversations.all', undefined, list)
+      }
+      return { facts: [], value: null }
+    })
+    const { result } = mount()
+    await waitFor(() => expect(result.current.activeId).toBe('c1'))
+    expect(result.current.archivedConversations).toEqual([])
+
+    await act(async () => {
+      await result.current.archiveConversation('c1', true)
+    })
+    expect(kernel.dispatched.find((command) => command.type === 'chat.archive')).toMatchObject({
+      conversationId: 'c1',
+      archived: true,
+    })
+    await waitFor(() => expect(result.current.conversations.map((item) => item.id)).toEqual(['c2']))
+    expect(result.current.archivedConversations.map((item) => item.id)).toEqual(['c1'])
+    expect(result.current.activeId).toBe('c2')
+
+    // 恢复：回到主列表
+    await act(async () => {
+      await result.current.archiveConversation('c1', false)
+    })
+    await waitFor(() =>
+      expect(result.current.conversations.map((item) => item.id)).toEqual(['c1', 'c2']),
+    )
+    expect(result.current.archivedConversations).toEqual([])
+  })
+
+  it('归档失败写入 error，列表归属不变', async () => {
+    seedConversations([c1])
+    kernel.onDispatch(() => Promise.reject(new Error('归档失败')))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.activeId).toBe('c1'))
+
+    await act(async () => {
+      await result.current.archiveConversation('c1', true)
+    })
+    expect(result.current.error).toBe('归档失败')
+    expect(result.current.conversations.map((item) => item.id)).toEqual(['c1'])
+  })
+
   it('卸载时调用流订阅返回的退订函数', async () => {
     seedConversations([c1])
     const off = vi.fn()

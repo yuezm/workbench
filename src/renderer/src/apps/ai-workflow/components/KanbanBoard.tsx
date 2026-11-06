@@ -7,12 +7,18 @@ import { TaskCard } from './TaskCard'
 
 interface KanbanBoardProps {
   workflow: WorkflowWithStages
+  /** 项目下全部任务（M10 的 `tasks.byProject`）：组件内部按 `workflowId` 过滤成本工作流的 */
   tasks: Task[]
   /** 卡片拖到某个阶段列 */
   onMoveToStage: (taskId: string, stageId: string) => void
-  /** 卡片拖到「已完成」区 */
+  /** 卡片拖到「归档」区（完成任务并移出看板） */
   onCompleteTask: (taskId: string) => void
   onNewTask: () => void
+  /**
+   * 是否允许在本看板新建任务（默认 true）。看「未归属」时传 false：
+   * 那批任务没有项目，新建的任务没有项目可挂，入口会直接被内核拒绝。
+   */
+  canCreate?: boolean
   /** 单击任务卡进入任务详情页（页面跳转，回调由上层路由处理） */
   onOpenTask?: (task: Task) => void
   /** 打开卡片所属线程的详情页（任务有 threadId 时才渲染入口） */
@@ -22,7 +28,7 @@ interface KanbanBoardProps {
 /** 列头圆点按列序循环取四色点缀 */
 const DOT_COLORS = ['bg-focus', 'bg-short', 'bg-long', 'bg-focus-deep'] as const
 
-/** 「已完成」落点：不是阶段，用哨兵值参与高亮判断 */
+/** 「归档」落点：不是阶段（不叫「已完成」，免得和同名阶段混淆），用哨兵值参与高亮判断 */
 const DONE_TARGET = '__done__'
 
 /** 看板图标：三列分栏 */
@@ -50,6 +56,7 @@ export function KanbanBoard({
   onMoveToStage,
   onCompleteTask,
   onNewTask,
+  canCreate = true,
   onOpenTask,
   onOpenThread,
 }: KanbanBoardProps): ReactElement {
@@ -57,16 +64,23 @@ export function KanbanBoard({
   const [dragging, setDragging] = useState<Task | null>(null)
   const [overTarget, setOverTarget] = useState<string | null>(null)
 
-  const activeTasks = tasks.filter((t) => t.status === 'active')
-  const completedCount = tasks.filter((t) => t.status === 'completed').length
+  /**
+   * 传进来的是 `tasks.byProject`（项目下全部任务，可能混着别的工作流）：
+   * 看板只认当前工作流的任务，列、已完成数、子任务统计、父任务标题都按这份算，
+   * 否则别的卡片会被算进本工作流的阶段列。
+   */
+  const boardTasks = tasks.filter((t) => t.workflowId === workflow.id)
+
+  const activeTasks = boardTasks.filter((t) => t.status === 'active')
+  const completedCount = boardTasks.filter((t) => t.status === 'completed').length
 
   // 「执行中」由内核判定（queued/running/waiting 的任务 id 集合），看板不自己现算
   const executingIds = new Set(useKernelView('tasks.executing') ?? [])
   // 任务树线索只按当前看板的任务列表查父任务标题，不另发视图查询
-  const titleById = new Map(tasks.map((task) => [task.id, task.title]))
+  const titleById = new Map(boardTasks.map((task) => [task.id, task.title]))
   // 子任务进度（M8）：同工作流的子任务也在 tasks 里，直接按 parentTaskId 汇总
   const childStats = new Map<string, { done: number; total: number }>()
-  for (const task of tasks) {
+  for (const task of boardTasks) {
     if (task.parentTaskId === null) continue
     const stats = childStats.get(task.parentTaskId) ?? { done: 0, total: 0 }
     stats.total += 1
@@ -104,15 +118,22 @@ export function KanbanBoard({
     <section className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
-          <span className="text-focus">
+          <span className="text-focus-soft">
             <BoardIcon />
           </span>
           工作流「{workflow.name}」
           <span className="text-[11px] font-normal text-ink-faint">拖拽换阶段</span>
         </h2>
-        <Button type="button" variant="primary" size="sm" onClick={onNewTask}>
-          新建任务
-        </Button>
+        {/* 未归属任务没有项目可挂：不给新建入口，改为说明为什么没有 */}
+        {canCreate ? (
+          <Button type="button" variant="primary" size="sm" onClick={onNewTask}>
+            新建任务
+          </Button>
+        ) : (
+          <span className="text-[11px] text-ink-faint">
+            未归属任务没有项目，先添加项目再建新任务
+          </span>
+        )}
       </div>
       <div className="flex min-h-0 flex-1 gap-3">
         <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto pb-2">
@@ -128,11 +149,11 @@ export function KanbanBoard({
                 onDragLeave={() => setOverTarget(null)}
                 onDrop={(e) => dropOnStage(stage.id, e)}
                 className={cn(
-                  'flex min-w-[150px] flex-1 flex-col gap-2.5 rounded-2xl border p-2.5',
+                  'flex min-w-[150px] flex-1 flex-col gap-2.5 rounded-xl border p-2.5',
                   'animate-rise transition-colors duration-150',
                   isOver
                     ? 'border-focus/60 bg-focus/[0.07]'
-                    : 'border-line bg-white/[0.02] hover:border-line-strong',
+                    : 'border-line bg-surface hover:border-line-strong',
                 )}
                 style={{ animationDelay: `${index * 60}ms` }}
               >
@@ -146,7 +167,7 @@ export function KanbanBoard({
                       {stage.name}
                     </span>
                   </div>
-                  <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+                  <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
                     {cards.length}
                   </span>
                 </div>
@@ -179,29 +200,29 @@ export function KanbanBoard({
           })}
         </div>
 
-        {/* 终端落点：固定在右侧不随阶段列滚动，拖到这里 = 任务走完、移出看板 */}
+        {/* 终端落点：固定在右侧不随阶段列滚动，拖到这里 = 任务走完、归档出看板 */}
         <div
           role="group"
-          aria-label="已完成区"
+          aria-label="归档区"
           onDragOver={(e) => allowDrop(DONE_TARGET, e)}
           onDragLeave={() => setOverTarget(null)}
           onDrop={dropOnDone}
           className={cn(
-            'flex w-28 shrink-0 flex-col gap-2.5 self-stretch rounded-2xl border border-dashed p-2',
+            'flex w-28 shrink-0 flex-col gap-2.5 self-stretch rounded-xl border border-dashed p-2',
             'transition-colors duration-150',
             overTarget === DONE_TARGET
               ? 'border-short/60 bg-short/[0.07]'
-              : 'border-line bg-white/[0.01]',
+              : 'border-line/70 bg-transparent',
           )}
         >
           <div className="flex items-center justify-between px-1.5 pt-0.5 pb-1">
-            <span className="text-[13px] font-medium tracking-wide text-ink-dim">已完成</span>
-            <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+            <span className="text-[13px] font-medium tracking-wide text-ink-dim">归档</span>
+            <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
               {completedCount}
             </span>
           </div>
           <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-[11px] leading-relaxed text-ink-faint">
-            拖到这里完成
+            拖到这里归档
           </p>
         </div>
       </div>

@@ -36,6 +36,7 @@ const view = (seed: Seed = {}): View => ({
   stages: new Map((seed.stages ?? []).map((row) => [row.id, row])),
   agents: new Map((seed.agents ?? []).map((row) => [row.id, row])),
   runtimes: new Map((seed.runtimes ?? []).map((row) => [row.id, row])),
+  projects: new Map(),
   tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
@@ -182,7 +183,7 @@ describe('defaultDecide：任务', () => {
     expect(
       defaultDecide(
         view(),
-        command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1' } }),
+        command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' } }),
         SAMPLE_AT,
         env(),
       ),
@@ -193,7 +194,7 @@ describe('defaultDecide：任务', () => {
         view({ workflows: [workflow], stages: [first] }),
         command({
           type: 'task.create',
-          input: { title: 'T', workflowId: 'wf-1', stageId: 'st-404' },
+          input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1', stageId: 'st-404' },
         }),
         SAMPLE_AT,
         env(),
@@ -204,7 +205,7 @@ describe('defaultDecide：任务', () => {
   it('task.create：缺省落首阶段；没有阶段时 currentStageId 为 null', () => {
     const withStages = defaultDecide(
       view({ workflows: [workflow], stages: [first, second] }),
-      command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1' } }),
+      command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' } }),
       SAMPLE_AT,
       env(),
     )
@@ -214,6 +215,7 @@ describe('defaultDecide：任务', () => {
         id: 'task-1',
         title: 'T',
         description: '',
+        projectId: 'pj-1',
         createdAt: SAMPLE_AT,
         updatedAt: SAMPLE_AT,
       }),
@@ -221,7 +223,7 @@ describe('defaultDecide：任务', () => {
 
     const noStages = defaultDecide(
       view({ workflows: [workflow] }),
-      command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1' } }),
+      command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' } }),
       SAMPLE_AT,
       env(),
     )

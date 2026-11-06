@@ -95,6 +95,19 @@ function findTask(store: Store, workflowId: string, title: string): Task {
   )
 }
 
+/**
+ * M10：任务必须挂在项目下。每个用例先建一个项目（文件夹路径只作数据，不真建目录），
+ * 返回项目 id 供 task.create 使用。
+ */
+function seedProject(store: Store): string {
+  store.dispatch({
+    type: 'project.create',
+    commandId: 'seed-project',
+    input: { name: '工作台', path: 'D:/work' },
+  })
+  return must(store.query('projects.all')[0], '项目').id
+}
+
 type CommandInput = Command extends infer C
   ? C extends Command
     ? Omit<C, 'commandId'>
@@ -106,6 +119,7 @@ describe('重建等价：≥200 条混合命令', () => {
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
+    const project = seedProject(store)
 
     let commands = 0
     let commandSeq = 0
@@ -161,7 +175,7 @@ describe('重建等价：≥200 条混合命令', () => {
     })
     const main = findWorkflow(store, '主流程')
     for (let index = 0; index < 4; index += 1) {
-      send({ type: 'task.create', input: { title: `主任务 ${index}`, workflowId: main.id } })
+      send({ type: 'task.create', input: { title: `主任务 ${index}`, workflowId: main.id, projectId: project } })
     }
     const mainTasks = store.query('tasks.byWorkflow', { workflowId: main.id })
     const firstTaskId = must(mainTasks[0], '主任务 0').id
@@ -201,7 +215,7 @@ describe('重建等价：≥200 条混合命令', () => {
       input: { name: '临时流程', stages: [{ name: '唯一阶段', entryMode: 'none' }] },
     })
     const tempWorkflow = findWorkflow(store, '临时流程')
-    send({ type: 'task.create', input: { title: '临时任务', workflowId: tempWorkflow.id } })
+    send({ type: 'task.create', input: { title: '临时任务', workflowId: tempWorkflow.id, projectId: project } })
     send({ type: 'workflow.remove', id: tempWorkflow.id })
 
     // 循环混合操作把命令数推过 200：每轮建流程/建任务/移动/完成/删除任务/删流程
@@ -222,11 +236,11 @@ describe('重建等价：≥200 条混合命令', () => {
       const loopWorkflow = findWorkflow(store, name)
       send({
         type: 'task.create',
-        input: { title: `${name} 任务 1`, workflowId: loopWorkflow.id },
+        input: { title: `${name} 任务 1`, workflowId: loopWorkflow.id, projectId: project },
       })
       send({
         type: 'task.create',
-        input: { title: `${name} 任务 2`, workflowId: loopWorkflow.id },
+        input: { title: `${name} 任务 2`, workflowId: loopWorkflow.id, projectId: project },
       })
       const loopTasks = store.query('tasks.byWorkflow', { workflowId: loopWorkflow.id })
       send({
@@ -270,6 +284,7 @@ describe('重建等价：删除带 run 的任务 / 工作流（D13 run.removed�
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
+    const project = seedProject(store)
     store.dispatch({
       type: 'runtime.create',
       commandId: 'rr-1',
@@ -293,7 +308,7 @@ describe('重建等价：删除带 run 的任务 / 工作流（D13 run.removed�
     store.dispatch({
       type: 'task.create',
       commandId: 'rt-1',
-      input: { title: '任务', workflowId: workflow.id },
+      input: { title: '任务', workflowId: workflow.id, projectId: project },
     })
     const task = findTask(store, workflow.id, '任务')
     const runId = must(store.query('runs.byTask', { taskId: task.id })[0], '任务 run').id
@@ -318,7 +333,7 @@ describe('重建等价：删除带 run 的任务 / 工作流（D13 run.removed�
     store.dispatch({
       type: 'task.create',
       commandId: 'rt-2',
-      input: { title: '任务 2', workflowId: second.id },
+      input: { title: '任务 2', workflowId: second.id, projectId: project },
     })
     const secondTask = findTask(store, second.id, '任务 2')
     const secondRunId = must(
@@ -350,6 +365,7 @@ describe('强杀重启：事实已提交、投影落后', () => {
       try {
         const store = createStore({ db, kernel: realKernel })
         store.ensureProjection()
+    const project = seedProject(store)
 
         // 强杀前已经提交并落了投影的命令
         store.dispatch({
@@ -372,7 +388,7 @@ describe('强杀重启：事实已提交、投影落后', () => {
         store.dispatch({
           type: 'task.create',
           commandId: 'kill-task',
-          input: { title: '既有任务', workflowId: workflow.id },
+          input: { title: '既有任务', workflowId: workflow.id, projectId: project },
         })
         const existingTask = findTask(store, workflow.id, '既有任务')
         existingTaskId = existingTask.id
@@ -421,6 +437,7 @@ describe('强杀重启：事实已提交、投影落后', () => {
           title: '崩溃前新增任务',
           description: '',
           workflowId: aheadWorkflow.id,
+          projectId: null,
           currentStageId: aheadStage.id,
           status: 'active',
           origin: 'manual',
@@ -510,6 +527,7 @@ describe('重建边界：运行/聊天四表、规则两表与线程表纳入白
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
+    const project = seedProject(store)
     store.dispatch({
       type: 'runtime.create',
       commandId: 'wl-runtime',
@@ -531,7 +549,7 @@ describe('重建边界：运行/聊天四表、规则两表与线程表纳入白
     store.dispatch({
       type: 'task.create',
       commandId: 'wl-task',
-      input: { title: '任务', workflowId: workflow.id },
+      input: { title: '任务', workflowId: workflow.id, projectId: project },
     })
     const task = findTask(store, workflow.id, '任务')
     const entitiesBefore = dumpProjection(db)
@@ -588,6 +606,7 @@ describe('why 时间线：kernel/timeline', () => {
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
+    const project = seedProject(store)
     store.dispatch({
       type: 'workflow.create',
       commandId: 'tl-workflow',
@@ -603,7 +622,7 @@ describe('why 时间线：kernel/timeline', () => {
     store.dispatch({
       type: 'task.create',
       commandId: 'tl-task',
-      input: { title: '任务', workflowId: workflow.id },
+      input: { title: '任务', workflowId: workflow.id, projectId: project },
     })
     const task = findTask(store, workflow.id, '任务')
     store.dispatch({

@@ -42,16 +42,26 @@ export function viewSpec(input: Input): ProjectionTable[] {
       return ['runtimes']
     case 'runtime.probed':
       return ['runtimes']
+    case 'project.create':
+      // 名称与文件夹路径的唯一性只在项目集内比较
+      return ['projects']
+    case 'project.update':
+      return ['projects']
+    case 'project.remove':
+      // 项目下还有任务时拒绝删除
+      return ['projects', 'tasks']
     case 'task.create':
       // 进入效果要判定落点是否 agent 入口并拼提示词 → 需要智能体与运行时配置；
       // M6.5：隐式线程在决策里本地构造（不读 threads），首轮无续接、无线程上下文历史
       // M7.5：提示词要带任务上下文 / 反馈（新任务还没有评论，仍按切片装载）
       // M8：人工挂子任务要读父任务与父线程（parentTaskId 校验 / 继承线程）
+      // M10：项目必须存在，且它的文件夹是本轮运行的工作目录
       return [
         'workflows',
         'workflow_stages',
         'agents',
         'runtimes',
+        'projects',
         'task_comments',
         'tasks',
         'threads',
@@ -64,6 +74,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'workflow_stages',
         'agents',
         'runtimes',
+        'projects',
         'threads',
         'runs',
         'cards',
@@ -79,6 +90,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'workflow_stages',
         'agents',
         'runtimes',
+        'projects',
         'threads',
         'task_comments',
         'runs',
@@ -88,7 +100,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价；
       // M6.5：删除后同样判定线程是否可归档（任务上下文由投影层按 task_id 联删）
       // M8：删除子任务后父任务 rollup 要读卡片（幂等）
-      return ['tasks', 'runs', 'threads', 'cards']
+      // M10：rollup 唤醒父 Agent 时要按父任务的项目取工作目录
+      return ['tasks', 'runs', 'threads', 'cards', 'projects']
     case 'task.comment':
       // M7.5：追加一条上下文 / 反馈；rerun 时复用进入阶段效果（拼反馈段 + 线程上下文、
       // 按线程续接会话、判定是否已有活跃 run）
@@ -98,6 +111,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'workflow_stages',
         'agents',
         'runtimes',
+        'projects',
         'threads',
         'runs',
         'cards',
@@ -130,6 +144,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'workflow_stages',
         'agents',
         'runtimes',
+        // M10：流转到下一阶段的 run 要按任务所属项目取工作目录
+        'projects',
         'conversations',
         'cards',
         // M6：回执 events[] 派生的 event.received 也要命中规则建任务
@@ -157,6 +173,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'workflow_stages',
         'agents',
         'runtimes',
+        'projects',
         'threads',
         // M7.5：cron 规则建的任务首轮提示词要带上下文（新任务没有评论，按切片装载）
         'task_comments',
@@ -173,6 +190,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'chat.cancel':
       // 按对话取活跃 run 逐条产取消请求
       return ['conversations', 'runs']
+    case 'chat.archive':
+      // 归档 / 恢复只改对话行的 archivedAt（不碰消息与 run）
+      return ['conversations']
     case 'app.event':
     case 'event.received':
       // M6：事件命中规则建任务；M6.5：归并到 (source, externalRef) 线程、复用任务、
@@ -184,6 +204,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'workflow_stages',
         'agents',
         'runtimes',
+        'projects',
         'threads',
         'runs',
         'cards',
@@ -191,8 +212,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'task_comments',
       ]
     case 'rules.replace':
-      // 整批校验：当前版本（+1）、规则引用的工作流与阶段必须存在且从属
-      return ['rule_sets', 'workflows', 'workflow_stages']
+      // 整批校验：当前版本（+1）、规则引用的工作流与阶段必须存在且从属、项目必须存在
+      return ['rule_sets', 'workflows', 'workflow_stages', 'projects']
     case 'plugins.replace':
     case 'plugin.set':
       // 插件设置整批替换：当前版本（+1）与整批形状；授权与声明能力的匹配由宿主视图判
@@ -207,6 +228,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'workflow_stages',
         'agents',
         'runtimes',
+        // M10：规则任务要按项目取工作目录
+        'projects',
         'task_comments',
       ]
     case 'thread.note':

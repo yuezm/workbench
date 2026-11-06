@@ -162,10 +162,24 @@ function seedTask(world: World, executorKey: string): Seeded {
     }
   ).workflow.id
 
+  // M10：任务必须挂在项目下（项目文件夹就是本轮工作目录）。
+  // 同一个库里可能 seed 多次：名称与路径都要唯一（内核按项目集判重）。
+  const projectLabel = nextCommandId()
+  const projectFacts = world.effects.dispatch({
+    type: 'project.create',
+    commandId: `pj-${projectLabel}`,
+    input: { name: `项目 ${projectLabel}`, path: `D:/work/${projectLabel}` },
+  }).facts
+  const projectId = (
+    projectFacts.find((fact) => fact.type === 'project.created')?.payload as {
+      project: { id: string }
+    }
+  ).project.id
+
   const taskFacts = world.effects.dispatch({
     type: 'task.create',
     commandId: nextCommandId(),
-    input: { title: 'T', description: 'd', workflowId },
+    input: { title: 'T', description: 'd', workflowId, projectId },
   }).facts
   const task = (taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task })
     .task

@@ -39,6 +39,7 @@ import type {
   Card,
   Conversation,
   Message,
+  Project,
   RunEventRow,
   RunRow,
   Runtime,
@@ -206,6 +207,7 @@ const normalizeTask = (row: Task): Task => {
     ruleId: legacy.ruleId ?? null,
     externalRef: legacy.externalRef ?? null,
     labels: legacy.labels ?? [],
+    projectId: legacy.projectId ?? null,
     threadId: legacy.threadId ?? null,
     parentTaskId: legacy.parentTaskId ?? null,
     spawnedByRunId: legacy.spawnedByRunId ?? null,
@@ -308,8 +310,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       `INSERT INTO tasks
          (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
           external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
-          spawn_key, handoff_from_task_id, handoff_from_stage_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          spawn_key, handoff_from_task_id, handoff_from_stage_id, project_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
@@ -327,6 +329,17 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          spawn_key = excluded.spawn_key,
          handoff_from_task_id = excluded.handoff_from_task_id,
          handoff_from_stage_id = excluded.handoff_from_stage_id,
+         project_id = excluded.project_id,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at`,
+    ),
+    projects: db.prepare(
+      `INSERT INTO projects (id, name, path, description, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         name = excluded.name,
+         path = excluded.path,
+         description = excluded.description,
          created_at = excluded.created_at,
          updated_at = excluded.updated_at`,
     ),
@@ -340,8 +353,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, instructions, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
@@ -354,7 +367,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          handoff_stage_id = excluded.handoff_stage_id,
          subtask_stage_id = excluded.subtask_stage_id,
          on_children_settled = excluded.on_children_settled,
-         spawn_policy = excluded.spawn_policy`,
+         spawn_policy = excluded.spawn_policy,
+         instructions = excluded.instructions`,
     ),
     agents: db.prepare(
       `INSERT INTO agents (id, name, description, runtime_id, system_prompt, created_at)
@@ -387,12 +401,13 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          created_at = excluded.created_at`,
     ),
     conversations: db.prepare(
-      `INSERT INTO conversations (id, title, agent_id, session_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO conversations (id, title, agent_id, session_id, archived_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          agent_id = excluded.agent_id,
          session_id = excluded.session_id,
+         archived_at = excluded.archived_at,
          created_at = excluded.created_at,
          updated_at = excluded.updated_at`,
     ),
@@ -478,6 +493,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     workflow_stages: db.prepare('DELETE FROM workflow_stages WHERE id = ?'),
     agents: db.prepare('DELETE FROM agents WHERE id = ?'),
     runtimes: db.prepare('DELETE FROM runtimes WHERE id = ?'),
+    projects: db.prepare('DELETE FROM projects WHERE id = ?'),
     runs: db.prepare('DELETE FROM runs WHERE id = ?'),
     run_events: db.prepare('DELETE FROM run_events WHERE run_id = ?'),
     /** 卡片随 run 显式联删（重建事务关外键，不能只靠 `cards.run_id` 的级联）。 */
@@ -506,6 +522,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     workflows: db.prepare('DELETE FROM workflows'),
     agents: db.prepare('DELETE FROM agents'),
     runtimes: db.prepare('DELETE FROM runtimes'),
+    projects: db.prepare('DELETE FROM projects'),
     rule_fires: db.prepare('DELETE FROM rule_fires'),
     rule_sets: db.prepare('DELETE FROM rule_sets'),
     threads: db.prepare('DELETE FROM threads'),
@@ -543,8 +560,20 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         task.spawnKey ?? null,
         task.handoffFromTaskId,
         task.handoffFromStageId,
+        task.projectId ?? null,
         task.createdAt,
         task.updatedAt,
+      )
+    },
+    projects: (row) => {
+      const project = row as Project
+      upserts.projects.run(
+        project.id,
+        project.name,
+        project.path,
+        project.description,
+        project.createdAt,
+        project.updatedAt,
       )
     },
     workflows: (row) => {
@@ -567,6 +596,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.subtaskStageId ?? null,
         stage.onChildrenSettled ?? null,
         stage.spawnPolicy ?? null,
+        stage.instructions ?? '',
         at,
       )
     },
@@ -615,6 +645,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         conversation.title,
         conversation.agentId,
         conversation.sessionId,
+        conversation.archivedAt ?? null,
         conversation.createdAt,
         conversation.updatedAt,
       )
@@ -732,6 +763,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     clearAll.workflows.run()
     clearAll.agents.run()
     clearAll.runtimes.run()
+    clearAll.projects.run()
     clearAll.rule_fires.run()
     clearAll.rule_sets.run()
     clearAll.threads.run()

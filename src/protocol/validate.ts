@@ -51,6 +51,8 @@ export const COMMAND_LIMITS = {
   title: 200,
   description: 2000,
   systemPrompt: 20_000,
+  /** 阶段「要干什么」正文上限（与系统提示词同量级） */
+  stageInstructions: 20_000,
   command: 500,
   profile: 100,
   /** 执行器键（小写 slug，≤64） */
@@ -248,7 +250,9 @@ const checkStage = (value: unknown, label: string): Check => {
     // M8 子任务：落点阶段存在性 / 从属由内核按视图判
     optionalId(stage.subtaskStageId, `${label}.subtaskStageId`) ??
     optionalEnum(stage.onChildrenSettled, `${label}.onChildrenSettled`, ON_CHILDREN_SETTLED) ??
-    optionalEnum(stage.spawnPolicy, `${label}.spawnPolicy`, SPAWN_POLICIES)
+    optionalEnum(stage.spawnPolicy, `${label}.spawnPolicy`, SPAWN_POLICIES) ??
+    // M9 阶段要干什么：纯文本资料段，空串表示清空
+    optionalText(stage.instructions, `${label}.instructions`, COMMAND_LIMITS.stageInstructions)
   )
 }
 
@@ -323,9 +327,26 @@ const checkTaskInput = (value: unknown): Check => {
     required(input.title, 'input.title', COMMAND_LIMITS.title) ??
     optionalText(input.description, 'input.description', COMMAND_LIMITS.description) ??
     requiredId(input.workflowId, 'input.workflowId') ??
+    // M10：任务必须挂在项目下（项目存在性由内核按视图判；这里只挡缺失与形状）
+    requiredId(input.projectId, 'input.projectId') ??
     optionalId(input.stageId, 'input.stageId') ??
     // M8：人工挂子任务的父任务 id（存在性 / 同工作流 / active 由内核判）
     optionalId(input.parentTaskId, 'input.parentTaskId')
+  )
+}
+
+/** 项目输入：名称与文件夹路径都必填；patch 里可只改其中一项（空串由内核拒）。 */
+const checkProjectInput = (value: unknown, partial: boolean): Check => {
+  const input = asRecord(value)
+  if (!input) return 'input 必须是对象'
+  const name = partial
+    ? optionalName(input.name, 'input.name')
+    : required(input.name, 'input.name', COMMAND_LIMITS.name)
+  const path = partial
+    ? optionalText(input.path, 'input.path', COMMAND_LIMITS.workdir)
+    : required(input.path, 'input.path', COMMAND_LIMITS.workdir)
+  return (
+    name ?? path ?? optionalText(input.description, 'input.description', COMMAND_LIMITS.description)
   )
 }
 
@@ -416,6 +437,9 @@ const checkRuleTarget = (value: unknown, label: string): Check => {
   if (!to) return `${label} 必须是对象`
   const workflowError = requiredId(to.workflowId, `${label}.workflowId`)
   if (workflowError) return workflowError
+  // M10：任务落在哪个项目（存在性由内核按视图判）
+  const projectError = optionalId(to.projectId, `${label}.projectId`)
+  if (projectError) return projectError
   const stageError = optionalId(to.stageId, `${label}.stageId`)
   if (stageError) return stageError
 
@@ -568,6 +592,12 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
       return requiredId(command.id, 'id')
     case 'runtime.probed':
       return requiredId(command.id, 'id') ?? checkProbe(command.probe)
+    case 'project.create':
+      return checkProjectInput(command.input, false)
+    case 'project.update':
+      return requiredId(command.id, 'id') ?? checkProjectInput(command.patch, true)
+    case 'project.remove':
+      return requiredId(command.id, 'id')
     case 'task.create':
       return checkTaskInput(command.input)
     case 'task.move':
@@ -601,6 +631,11 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'chat.remove':
     case 'chat.cancel':
       return requiredId(command.conversationId, 'conversationId')
+    case 'chat.archive':
+      return (
+        requiredId(command.conversationId, 'conversationId') ??
+        optionalBoolean(command.archived, 'archived')
+      )
     case 'app.event':
       // appId / eventType 属于白名单的语义由宿主入口按 `APP_EVENTS` 再判一次；
       // 这里只做形状与长度校验（renderer 传的是不可信数据）。

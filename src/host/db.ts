@@ -1,6 +1,8 @@
 import { DatabaseSync } from 'node:sqlite'
 import {
   COMMANDS_SQL,
+  CONVERSATIONS_M9_ADD_COLUMN_SQL,
+  CONVERSATIONS_M9_ADDED_COLUMNS,
   FACTS_SQL,
   INDEX_SQL,
   PLUGIN_SECRETS_SQL,
@@ -13,6 +15,8 @@ import {
   STAGES_M7_ADD_COLUMN_SQL,
   STAGES_M8_ADDED_COLUMNS,
   STAGES_M8_ADD_COLUMN_SQL,
+  STAGES_M9_ADDED_COLUMNS,
+  STAGES_M9_ADD_COLUMN_SQL,
   TASKS_M6_ADDED_COLUMNS,
   TASKS_M6_ADD_COLUMN_SQL,
   TASKS_M65_ADDED_COLUMNS,
@@ -21,6 +25,8 @@ import {
   TASKS_M7_ADD_COLUMN_SQL,
   TASKS_M8_ADDED_COLUMNS,
   TASKS_M8_ADD_COLUMN_SQL,
+  TASKS_M10_ADDED_COLUMNS,
+  TASKS_M10_ADD_COLUMN_SQL,
   legacyRunsCopySql,
   legacyRuntimesCopySql,
   legacyTasksCopySql,
@@ -162,6 +168,7 @@ const TASKS_ADDED_COLUMNS = [
   ...TASKS_M65_ADDED_COLUMNS,
   ...TASKS_M7_ADDED_COLUMNS,
   ...TASKS_M8_ADDED_COLUMNS,
+  ...TASKS_M10_ADDED_COLUMNS,
 ] as const
 
 type TaskAddedColumn = (typeof TASKS_ADDED_COLUMNS)[number]
@@ -171,6 +178,7 @@ const TASKS_ADD_COLUMN_SQL: Readonly<Record<TaskAddedColumn, string>> = {
   ...TASKS_M65_ADD_COLUMN_SQL,
   ...TASKS_M7_ADD_COLUMN_SQL,
   ...TASKS_M8_ADD_COLUMN_SQL,
+  ...TASKS_M10_ADD_COLUMN_SQL,
 }
 
 /**
@@ -251,20 +259,38 @@ export function needsStagesUpgrade(db: DatabaseSync): boolean {
 }
 
 /**
- * 旧 `workflow_stages` 一次性补列（M7 / M8）：列都可空、无默认值。
+ * 旧 `workflow_stages` 一次性补列（M7 / M8 / M9）：M7/M8 列可空无默认，M9 的
+ * `instructions` 带 DEFAULT ''。
  */
 function upgradeLegacyStages(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'workflow_stages')
   const stageColumnSql: Readonly<Record<string, string>> = {
     ...STAGES_M7_ADD_COLUMN_SQL,
     ...STAGES_M8_ADD_COLUMN_SQL,
+    ...STAGES_M9_ADD_COLUMN_SQL,
   }
-  const missing = [...STAGES_M7_ADDED_COLUMNS, ...STAGES_M8_ADDED_COLUMNS].filter(
-    (column) => !columns.has(column),
-  )
+  const missing = [
+    ...STAGES_M7_ADDED_COLUMNS,
+    ...STAGES_M8_ADDED_COLUMNS,
+    ...STAGES_M9_ADDED_COLUMNS,
+  ].filter((column) => !columns.has(column))
   if (missing.length === 0) return false
   withTx(db, () => {
     for (const column of missing) db.exec(stageColumnSql[column])
+  })
+  return true
+}
+
+/**
+ * 旧 `conversations` 一次性补列（M9 归档）：`archived_at` 可空、无默认，
+ * 老对话按「未归档」归一。
+ */
+function upgradeLegacyConversations(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'conversations')
+  const missing = CONVERSATIONS_M9_ADDED_COLUMNS.filter((column) => !columns.has(column))
+  if (missing.length === 0) return false
+  withTx(db, () => {
+    for (const column of missing) db.exec(CONVERSATIONS_M9_ADD_COLUMN_SQL[column])
   })
   return true
 }
@@ -303,8 +329,10 @@ export function openDatabase(filePath: string): DatabaseSync {
     })
     upgradeLegacyRuns(db)
     upgradeLegacyRuntimes(db)
-    // M7：阶段补交接两列（只增不改）
+    // M7：阶段补交接两列（只增不改）；M8 / M9 同法补子任务与阶段说明
     upgradeLegacyStages(db)
+    // M9：对话补归档时间（只增不改）
+    upgradeLegacyConversations(db)
     // M6 / M6.5 / M7：tasks 需要时物理重建（M7 扩展 origin CHECK），否则只补缺列；必须在导入/写入之前完成。
     rebuildLegacyTasks(db)
     upgradeLegacyTasks(db)

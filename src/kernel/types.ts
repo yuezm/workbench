@@ -15,6 +15,7 @@ import type {
   Card,
   Conversation,
   Message,
+  Project,
   RunEventRow,
   RunRow,
   Runtime,
@@ -37,9 +38,10 @@ export type Iso = string
  * 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。
  * M4：卡片与派生事件入账；M6：规则集与 cron 触发投影；M6.5：线程实体与事件合并；
  * M7：插件设置投影、跨工作流交接、外部插件与 webhook 端口；
- * M7.5：任务上下文 / 反馈（`task_comments` 投影 + 提示词反馈段）。
+ * M7.5：任务上下文 / 反馈（`task_comments` 投影 + 提示词反馈段）；
+ * M10：项目（`projects` 第 16 张投影表 + 任务必须挂在项目下 + 运行工作目录取项目文件夹）。
  */
-export const KERNEL_VERSION = 'M8.0.0'
+export const KERNEL_VERSION = 'M10.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
@@ -57,7 +59,8 @@ export type Actor =
  * 投影表全集：只有这些表可由事实重建（`host` 的清空白名单与指纹必须与之一致）。
  * M2 在实体五表之后追加运行生命周期相关的四张表；M4 追加卡片表（第 10 张）；
  * M6 追加规则集与规则触发记录（第 11、12 张）；M6.5 追加线程（第 13 张）；
- * M7 追加插件设置（第 14 张）；M7.5 追加任务上下文 / 反馈（第 15 张）。
+ * M7 追加插件设置（第 14 张）；M7.5 追加任务上下文 / 反馈（第 15 张）；
+ * M10 追加项目（第 16 张）。
  */
 export const PROJECTION_TABLES = [
   'tasks',
@@ -65,6 +68,7 @@ export const PROJECTION_TABLES = [
   'workflow_stages',
   'agents',
   'runtimes',
+  'projects',
   'runs',
   'run_events',
   'conversations',
@@ -85,6 +89,7 @@ export type ProjectionRow =
   | WorkflowStage
   | Agent
   | Runtime
+  | Project
   | RunRow
   | RunEventRow
   | Conversation
@@ -123,6 +128,8 @@ export interface View {
   stages: Map<Id, WorkflowStage>
   agents: Map<Id, Agent>
   runtimes: Map<Id, Runtime>
+  /** M10：项目投影（任务归属校验与运行工作目录都只读它） */
+  projects: Map<Id, Project>
   tasks: Map<Id, Task>
   /** M2：运行投影（领取 / 租约 / 终态判定都只读它，不查非投影表） */
   runs: Map<Id, RunRow>
@@ -193,6 +200,8 @@ export type IdKind =
   | 'stage'
   | 'agent'
   | 'runtime'
+  /** M10：项目 id（`projects` 投影行） */
+  | 'project'
   | 'task'
   | 'run'
   | 'message'

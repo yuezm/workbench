@@ -168,6 +168,33 @@ export interface RuntimeModelOption {
   defaultThinkingLevel: string | null
 }
 
+// ---------- 项目 ----------
+
+/**
+ * 项目（M10）：本地一个文件夹 + 名字，是任务的容器与执行工作目录。
+ *
+ * - 任务必须挂在项目下（`Task.projectId`）：人建任务时内核要求项目存在；
+ *   派生 / 交接任务继承来源任务的项目；v2 存量与旧事实没有项目，按 null 归一（「未归属」）。
+ * - `path` 是绝对路径，也是该项目任务的运行工作目录（`RunRow.cwd`）：内核只做形状校验，
+ *   目录是否存在 / 可写由宿主（文件夹选择器）与执行器负责。
+ * - `updatedAt` 只在改名 / 换目录 / 改备注时更新（`project.updated` 携带完整行）。
+ */
+export interface Project {
+  id: string
+  name: string
+  /** 本地文件夹绝对路径（工作目录） */
+  path: string
+  description: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProjectInput {
+  name: string
+  path: string
+  description?: string
+}
+
 // ---------- 智能体 ----------
 
 export interface Agent {
@@ -228,6 +255,11 @@ export interface WorkflowStage {
   onChildrenSettled?: OnChildrenSettled | null
   /** M8：本阶段是否允许 Agent 派生子任务；null = 按 `agent` 处理 */
   spawnPolicy?: SpawnPolicy | null
+  /**
+   * 阶段要干什么（M9）：这个阶段的具体事项，纯文本、按原样拼进阶段任务提示词。
+   * 老事实 / 存量导入缺该字段时按空串归一。
+   */
+  instructions?: string
 }
 
 export interface StageInput {
@@ -250,6 +282,8 @@ export interface StageInput {
   onChildrenSettled?: OnChildrenSettled | null
   /** 是否允许 Agent 派生子任务（M8，可空 = agent） */
   spawnPolicy?: SpawnPolicy | null
+  /** 阶段要干什么（M9，可空 = 空串）：本阶段具体事项，会拼进阶段任务提示词交给智能体 */
+  instructions?: string
 }
 
 export interface Workflow {
@@ -292,6 +326,11 @@ export interface Task {
   title: string
   description: string
   workflowId: string
+  /**
+   * 所属项目（M10）：人建任务时必须给定（内核校验项目存在），派生 / 交接任务继承来源任务，
+   * v2 存量与旧事实按 null 归一（界面上归入「未归属」）。
+   */
+  projectId: string | null
   currentStageId: string | null
   status: TaskStatus
   /** 来源；v2 存量与手工任务为 `manual` */
@@ -324,6 +363,8 @@ export interface TaskInput {
   title: string
   description?: string
   workflowId: string
+  /** 所属项目（M10，必填）：项目必须存在；任务的运行工作目录取该项目的文件夹 */
+  projectId: string
   /** 起始阶段；缺省为首阶段 */
   stageId?: string
   /** M8：人工挂子任务时的父任务 id（校验父存在、同工作流、active） */
@@ -580,6 +621,11 @@ export interface Conversation {
   agentId: string
   /** 上一轮的协议会话 id；下一轮用它续接，避免整段历史重发 */
   sessionId: string | null
+  /**
+   * 归档时间（M9）：非 null 表示已归档，聊天清单默认不展示；
+   * 老事实 / 存量行缺该字段时按 null 归一。
+   */
+  archivedAt?: string | null
   createdAt: string
   updatedAt: string
 }

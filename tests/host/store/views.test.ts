@@ -1,7 +1,7 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Runtime } from '../../../src/protocol/entities'
+import type { Conversation, Runtime, WorkflowWithStages } from '../../../src/protocol/entities'
 import type { AutomationRule } from '../../../src/protocol/rules'
 import type { ViewId } from '../../../src/protocol/views'
 import type { Change } from '../../../src/kernel/types'
@@ -1067,6 +1067,36 @@ function seedThreads(db: DatabaseSync): void {
   for (const change of changes) writer.apply(change, THREAD_AT)
 }
 
+describe('loadView / queryView：阶段说明与对话归档（M9）', () => {
+  it('阶段 instructions 与对话 archivedAt 经投影列往返（含换行原样保留）', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+
+    const staged = sample.stage({
+      id: 'st-3',
+      workflowId: 'wf-1',
+      name: '第三步',
+      position: 2,
+      instructions: '读需求\n列出改动文件',
+    })
+    writer.apply({ table: 'workflow_stages', key: staged.id, row: staged }, SAMPLE_AT)
+    const workflows = queryView(db, 'workflows.all') as WorkflowWithStages[]
+    const workflow = workflows.find((item) => item.id === 'wf-1')
+    expect(workflow?.stages.map((item) => item.id)).toEqual(['st-1', 'st-2', 'st-3'])
+    expect(workflow?.stages.find((item) => item.id === 'st-3')).toEqual(staged)
+
+    const archived = sample.conversation({ id: 'cv-9', title: '旧对话', archivedAt: SAMPLE_AT })
+    writer.apply({ table: 'conversations', key: archived.id, row: archived }, SAMPLE_AT)
+    const plain = sample.conversation({ id: 'cv-2', title: '未归档对话' })
+    writer.apply({ table: 'conversations', key: plain.id, row: plain }, SAMPLE_AT)
+    const list = queryView(db, 'conversations.all') as Conversation[]
+    expect(list.find((item) => item.id === 'cv-9')).toEqual(archived)
+    // 未归档的老对话按 null 读回（而不是 undefined）
+    expect(list.find((item) => item.id === 'cv-2')?.archivedAt).toBeNull()
+  })
+})
+
 describe('loadView / queryView：线程（M6.5）', () => {
   it('threads 切片：整行映射（JSON 列还原）；未声明时不装载', () => {
     const db = memory()
@@ -1225,5 +1255,82 @@ describe('loadView / queryView：任务上下文 / 反馈（M7.5）', () => {
     )
     expect(view.taskComments.size).toBe(3)
     expect(view.tasks.has('tk-a')).toBe(true)
+  })
+})
+
+describe('项目视图（M10）', () => {
+  const seedProjects = (db: DatabaseSync): void => {
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow({ id: 'wf-1' })
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    const stage = sample.stage({ id: 'st-1', workflowId: workflow.id })
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+    const older = sample.project({
+      id: 'pj-2',
+      name: '较早项目',
+      path: 'D:/older',
+      createdAt: OLDER_AT,
+      updatedAt: OLDER_AT,
+    })
+    const newer = sample.project({ id: 'pj-1', name: '较新项目', path: 'D:/newer' })
+    writer.apply({ table: 'projects', key: older.id, row: older }, SAMPLE_AT)
+    writer.apply({ table: 'projects', key: newer.id, row: newer }, SAMPLE_AT)
+    writer.apply(
+      {
+        table: 'tasks',
+        key: 'tk-a',
+        row: sample.task({ id: 'tk-a', title: '有项目', projectId: 'pj-1', createdAt: OLDER_AT }),
+      },
+      SAMPLE_AT,
+    )
+    writer.apply(
+      {
+        table: 'tasks',
+        key: 'tk-b',
+        row: sample.task({ id: 'tk-b', title: '未归属', projectId: null }),
+      },
+      SAMPLE_AT,
+    )
+  }
+
+  it('projects.all：按创建时间升序返回整行', () => {
+    const db = memory()
+    seedProjects(db)
+
+    expect(queryView(db, 'projects.all')).toEqual([
+      sample.project({
+        id: 'pj-2',
+        name: '较早项目',
+        path: 'D:/older',
+        createdAt: OLDER_AT,
+        updatedAt: OLDER_AT,
+      }),
+      sample.project({ id: 'pj-1', name: '较新项目', path: 'D:/newer' }),
+    ])
+  })
+
+  it('tasks.byProject / tasks.unassigned：按项目过滤，未归属单列', () => {
+    const db = memory()
+    seedProjects(db)
+
+    expect(queryView(db, 'tasks.byProject', { projectId: 'pj-1' })).toEqual([
+      sample.task({ id: 'tk-a', title: '有项目', projectId: 'pj-1', createdAt: OLDER_AT }),
+    ])
+    expect(queryView(db, 'tasks.byProject', { projectId: 'pj-missing' })).toEqual([])
+    expect(queryView(db, 'tasks.unassigned')).toEqual([
+      sample.task({ id: 'tk-b', title: '未归属', projectId: null }),
+    ])
+    const error = captureError(() => queryView(db, 'tasks.byProject', {}))
+    expect((error as StoreError).code).toBe('invalid_input')
+  })
+
+  it('loadView：声明 projects 切片才装载，行映射为 Project', () => {
+    const db = memory()
+    seedProjects(db)
+
+    const view = loadView(db, ['projects'])
+    expect([...view.projects.keys()]).toEqual(['pj-2', 'pj-1'])
+    expect(view.projects.get('pj-1')?.path).toBe('D:/newer')
+    expect(loadView(db, []).projects.size).toBe(0)
   })
 })

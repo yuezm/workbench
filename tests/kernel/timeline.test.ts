@@ -71,6 +71,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   title: '任务',
   description: '',
   workflowId: 'wf-1',
+  projectId: null,
   currentStageId: 'st-1',
   status: 'active',
   origin: 'manual',

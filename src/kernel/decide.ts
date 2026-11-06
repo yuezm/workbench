@@ -21,6 +21,7 @@ import type {
   Card,
   Conversation,
   Message,
+  Project,
   RunRow,
   Runtime,
   StageInput,
@@ -209,6 +210,12 @@ function stageRow(workflowId: Id, ids: Id[], stage: StageInput, position: number
     // M7：交接目标按 id 直存（跨工作流，不能用本批下标表达）
     handoffWorkflowId: stage.handoffWorkflowId ?? null,
     handoffStageId: stage.handoffStageId ?? null,
+    // M8：子任务落点 / rollup / 派发策略原样落行（null = 按默认推断）
+    subtaskStageId: stage.subtaskStageId ?? null,
+    onChildrenSettled: stage.onChildrenSettled ?? null,
+    spawnPolicy: stage.spawnPolicy ?? null,
+    // M9：阶段要干什么，去首尾空白后存；空串表示没写
+    instructions: stage.instructions?.trim() ?? '',
   }
 }
 
@@ -230,7 +237,13 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     a.onRejectStageId === b.onRejectStageId &&
     // M7：交接两列一变就要落 stage.updated，否则更新被静默吞掉
     a.handoffWorkflowId === b.handoffWorkflowId &&
-    a.handoffStageId === b.handoffStageId
+    a.handoffStageId === b.handoffStageId &&
+    // M8：子任务三列同理（缺省与 null 视为同值）
+    (a.subtaskStageId ?? null) === (b.subtaskStageId ?? null) &&
+    (a.onChildrenSettled ?? null) === (b.onChildrenSettled ?? null) &&
+    (a.spawnPolicy ?? null) === (b.spawnPolicy ?? null) &&
+    // M9：阶段要干什么（缺省与空串视为同值）
+    (a.instructions ?? '') === (b.instructions ?? '')
   )
 }
 
@@ -247,6 +260,30 @@ function runtimeNamed(view: View, name: string, exceptId: Id): Runtime | undefin
     if (runtime.name === name && runtime.id !== exceptId) return runtime
   }
   return undefined
+}
+
+/** 同名项目（创建 / 改名时唯一性校验）。 */
+function projectNamed(view: View, name: string, exceptId: Id): Project | undefined {
+  for (const project of view.projects.values()) {
+    if (project.name === name && project.id !== exceptId) return project
+  }
+  return undefined
+}
+
+/** 同一文件夹只能当一个项目（创建 / 换目录时校验）。 */
+function projectAtPath(view: View, path: string, exceptId: Id): Project | undefined {
+  for (const project of view.projects.values()) {
+    if (project.path === path && project.id !== exceptId) return project
+  }
+  return undefined
+}
+
+/** 项目下是否还有任务（含已完成的）：有就不允许删项目，避免任务失去工作目录。 */
+function projectHasTasks(view: View, projectId: Id): boolean {
+  for (const task of view.tasks.values()) {
+    if (task.projectId === projectId) return true
+  }
+  return false
 }
 
 function agentUsingRuntime(view: View, runtimeId: Id): Agent | undefined {
@@ -661,6 +698,59 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
       return done([draft('runtime.removed', { runtime: current })])
     }
 
+    // ---------- 项目（M10） ----------
+    case 'project.create': {
+      const form = input.input
+      const name = form.name?.trim()
+      if (!name) return reject('invalid_input', '项目名称必填')
+      const path = form.path?.trim()
+      if (!path) return reject('invalid_input', '项目文件夹必填')
+      if (projectNamed(view, name, '')) return reject('conflict', '项目名称已存在: ' + name)
+      if (projectAtPath(view, path, '')) return reject('conflict', '该文件夹已作为项目添加: ' + path)
+      const project: Project = {
+        id: env.nextId('project'),
+        name,
+        path,
+        description: form.description ?? '',
+        createdAt: now,
+        updatedAt: now,
+      }
+      return done([draft('project.created', { project })])
+    }
+
+    case 'project.update': {
+      const current = view.projects.get(input.id)
+      if (!current) return reject('not_found', '项目不存在: ' + input.id)
+      const patch = input.patch
+      const name = patch.name?.trim() || current.name
+      const path = patch.path === undefined ? current.path : patch.path.trim()
+      if (!path) return reject('invalid_input', '项目文件夹必填')
+      if (name !== current.name && projectNamed(view, name, current.id)) {
+        return reject('conflict', '项目名称已存在: ' + name)
+      }
+      if (path !== current.path && projectAtPath(view, path, current.id)) {
+        return reject('conflict', '该文件夹已作为项目添加: ' + path)
+      }
+      const project: Project = {
+        ...current,
+        name,
+        path,
+        description: patch.description !== undefined ? patch.description : current.description,
+        updatedAt: now,
+      }
+      return done([draft('project.updated', { project })])
+    }
+
+    case 'project.remove': {
+      const current = view.projects.get(input.id)
+      // 删除不存在的项目按幂等处理（与 runtime.remove 同口径）
+      if (!current) return done([])
+      if (projectHasTasks(view, current.id)) {
+        return reject('conflict', '项目下还有任务，无法删除: ' + current.name)
+      }
+      return done([draft('project.removed', { project: current })])
+    }
+
     // ---------- 智能体 ----------
     case 'agent.create': {
       const form = input.input
@@ -853,6 +943,21 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
           return reject('conflict', '父任务已完成，不能挂子任务: ' + parentId)
         }
       }
+      // M10：任务必须挂在项目下（项目 = 本地文件夹 = 运行工作目录）。
+      // 子任务继承父任务的项目；父任务有项目时不允许挂到别的项目。
+      const requestedProjectId = form.projectId?.trim() ?? ''
+      if (!requestedProjectId) return reject('invalid_input', '任务必须属于一个项目')
+      if (!view.projects.has(requestedProjectId)) {
+        return reject('not_found', '项目不存在: ' + requestedProjectId)
+      }
+      if (
+        parent !== undefined &&
+        parent.projectId !== null &&
+        parent.projectId !== requestedProjectId
+      ) {
+        return reject('invalid_input', '子任务必须属于父任务的项目: ' + parent.projectId)
+      }
+      const projectId = parent?.projectId ?? requestedProjectId
       // 子任务继承父任务线程；没有父线程（或父任务无线程）时新建隐式线程
       const parentThread = parent?.threadId == null ? undefined : view.threads.get(parent.threadId)
       const thread =
@@ -868,6 +973,7 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         title,
         description: form.description ?? '',
         workflowId: workflow.id,
+        projectId,
         currentStageId: requested ?? parent?.currentStageId ?? stages[0]?.id ?? null,
         status: 'active',
         origin: 'manual',
@@ -1365,6 +1471,20 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
         )
       }
       return done(facts)
+    }
+
+    case 'chat.archive': {
+      const conversation = view.conversations.get(input.conversationId)
+      if (!conversation) return reject('not_found', '对话不存在: ' + input.conversationId)
+      const archived = input.archived ?? true
+      // 幂等：状态已经一致时不产事实，重复点不会把归档时间刷新成新的
+      const isArchived = (conversation.archivedAt ?? null) !== null
+      if (isArchived === archived) return done([])
+      return done([
+        draft('conversation.updated', {
+          conversation: { ...conversation, archivedAt: archived ? now : null, updatedAt: now },
+        }),
+      ])
     }
 
     case 'app.event': {

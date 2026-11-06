@@ -78,7 +78,7 @@ export function entryRunFacts(
     ...(options?.pendingComment === undefined ? [] : [options.pendingComment]),
   ]
   const prompt = [
-    taskPrompt(agent, task, stage.name, context, comments),
+    taskPrompt(agent, task, stage, context, comments),
     trigger?.promptExtra ?? '',
   ]
     .filter(Boolean)
@@ -86,6 +86,8 @@ export function entryRunFacts(
   const resumeSessionId =
     thread === undefined ? null : (threadSessions(view, thread.id)[agent.id] ?? null)
   const turn = options?.turn ?? runCountOfTask(view, task.id) + 1
+  // M10：项目文件夹就是本轮的工作目录；任务没有项目（存量 / 未归属）时退回运行时配置。
+  const project = task.projectId === null ? undefined : view.projects.get(task.projectId)
   return [
     {
       type: 'run.queued',
@@ -104,7 +106,7 @@ export function entryRunFacts(
           rulesVersion: trigger?.rulesVersion ?? 0,
           executorKey: runtime.executorKey,
           threadId: thread?.id ?? task.threadId,
-          cwd: runtime.workdir ?? '',
+          cwd: project?.path ?? runtime.workdir ?? '',
           access: ACCESS_BY_PERMISSION[runtime.permissionMode],
           skill: null,
           promptRef: null,

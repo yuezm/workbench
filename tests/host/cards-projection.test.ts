@@ -113,10 +113,20 @@ function seedClaimedRun(store: Store, label: string): ClaimedRun {
     store.query('workflows.all').find((item) => item.name === `流程 ${label}`),
     `流程 ${label}`,
   )
+  // M10：任务必须挂在项目下
+  store.dispatch({
+    type: 'project.create',
+    commandId: `s-pj-${label}`,
+    input: { name: `项目 ${label}`, path: `D:/work/${label}` },
+  })
+  const project = must(
+    store.query('projects.all').find((item) => item.name === `项目 ${label}`),
+    `项目 ${label}`,
+  )
   store.dispatch({
     type: 'task.create',
     commandId: `s-tk-${label}`,
-    input: { title: `任务 ${label}`, workflowId: workflow.id },
+    input: { title: `任务 ${label}`, workflowId: workflow.id, projectId: project.id },
   })
   const task = must(
     store

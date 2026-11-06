@@ -32,7 +32,10 @@ export interface UseChatResult {
   setAgentId: (id: string | null) => void
   /** 新建对话时实际使用的智能体：未显式选择则取第一个 */
   selectedAgentId: string
+  /** 未归档的会话（聊天清单主体） */
   conversations: Conversation[]
+  /** 已归档的会话（清单底部的「已归档」分组） */
+  archivedConversations: Conversation[]
   activeId: string | null
   active: Conversation | null
   messages: Message[]
@@ -45,6 +48,8 @@ export interface UseChatResult {
   selectConversation: (id: string) => void
   createConversation: () => Promise<void>
   removeConversation: (id: string) => Promise<void>
+  /** 归档 / 恢复（archived=false）：只改列表归属，不删消息 */
+  archiveConversation: (id: string, archived: boolean) => Promise<void>
   /** 发送一轮；成功发出返回 true（调用方据此清空输入草稿） */
   sendMessage: (text: string) => Promise<boolean>
   cancelRun: () => Promise<void>
@@ -74,8 +79,11 @@ export function useChat(agents: Agent[]): UseChatResult {
   const [writeError, setWriteError] = useState<string | null>(null)
 
   const conversationsState = useKernelViewState('conversations.all')
-  const conversations = conversationsState.data ?? []
-  /** 选中项由视图数据兜底：选中的会话被删/清空后自动落到第一条，不需要 effect 回填 */
+  const allConversations = conversationsState.data ?? []
+  /** 归档只影响清单归属：归档的不进主列表，留在底部「已归档」分组里 */
+  const conversations = allConversations.filter((item) => (item.archivedAt ?? null) === null)
+  const archivedConversations = allConversations.filter((item) => (item.archivedAt ?? null) !== null)
+  /** 选中项由视图数据兜底：选中的会话被删/归档后自动落到第一条未归档，不需要 effect 回填 */
   const activeId =
     selectedId !== null && conversations.some((item) => item.id === selectedId)
       ? selectedId
@@ -185,6 +193,21 @@ export function useChat(agents: Agent[]): UseChatResult {
     }
   }
 
+  /** 归档 / 恢复：归档后当前选中的会话会从主列表消失，选中自然回落到第一条未归档 */
+  const archiveConversation = async (id: string, archived: boolean): Promise<void> => {
+    try {
+      await getKernelStore().dispatch({
+        type: 'chat.archive',
+        commandId: '',
+        conversationId: id,
+        archived,
+      })
+      setWriteError(null)
+    } catch (e) {
+      setWriteError(errMsg(e))
+    }
+  }
+
   const sendMessage = async (text: string): Promise<boolean> => {
     const content = text.trim()
     if (!content || !activeId) return false
@@ -225,6 +248,7 @@ export function useChat(agents: Agent[]): UseChatResult {
     setAgentId,
     selectedAgentId,
     conversations,
+    archivedConversations,
     activeId,
     active,
     messages,
@@ -235,6 +259,7 @@ export function useChat(agents: Agent[]): UseChatResult {
     selectConversation,
     createConversation,
     removeConversation,
+    archiveConversation,
     sendMessage,
     cancelRun,
   }

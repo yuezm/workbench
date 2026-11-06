@@ -62,14 +62,152 @@ function initialConfig(plugin: PluginView): ConfigDraft {
   return draft
 }
 
+function PluginIcon(): ReactElement {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0zM12 16v5" />
+    </svg>
+  )
+}
+
+function ChevronIcon(): ReactElement {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="shrink-0 text-ink-faint"
+    >
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  )
+}
+
+/** 启停开关：列表与详情共用（纯展示 + 回调，忙态由调用方给） */
+function PluginSwitch({
+  plugin,
+  disabled,
+  onToggle,
+}: {
+  plugin: PluginView
+  disabled: boolean
+  onToggle: () => void
+}): ReactElement {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={plugin.enabled}
+      aria-label={`启用插件 ${plugin.name}`}
+      disabled={disabled}
+      onClick={onToggle}
+      className={cn(
+        'relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors duration-200 outline-none',
+        'focus-visible:ring-2 focus-visible:ring-focus/60 disabled:cursor-not-allowed disabled:opacity-40',
+        plugin.enabled ? 'bg-focus' : 'bg-white/10',
+      )}
+    >
+      <span
+        className={cn(
+          'absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform duration-200',
+          plugin.enabled && 'translate-x-4',
+        )}
+      />
+    </button>
+  )
+}
+
+/** 名称 + 状态 + 内置/外部 + 种类 · 版本：列表与详情题头共用的一行概览 */
+function PluginMeta({ plugin }: { plugin: PluginView }): ReactElement {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="truncate text-sm font-medium text-ink">{plugin.name}</span>
+      <span className={cn('rounded-sm px-1.5 py-0.5 text-[10px]', STATUS_TONES[plugin.status])}>
+        {STATUS_LABELS[plugin.status]}
+      </span>
+      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+        {plugin.builtin ? '内置' : '外部'}
+      </span>
+      <span className="text-[11px] text-ink-faint">
+        {KIND_LABELS[plugin.kind]} · v{plugin.version}
+      </span>
+    </div>
+  )
+}
+
 /**
- * 一行插件：只读视图字段 + 本地编辑草稿。
+ * 列表行：只放概览——图标、名称、可用性、种类 / 版本、一行描述 + 启停开关。
  *
- * - 启停直接发 `plugin.set{enabled}`（不乐观更新，等事实失效后的视图回显）；
- * - 授权 / config / secret 先在本地编辑，保存时一次 `plugin.set` 合并提交；
+ * 授权勾选、config 表单、secret、错误详情都收进详情页，列表因此能一眼扫完；
+ * 点行内主区进入详情，开关在本行直接发 `plugin.set{enabled}`（不乐观更新）。
+ */
+function PluginSummaryRow({
+  plugin,
+  busy,
+  onToggle,
+  onOpen,
+}: {
+  plugin: PluginView
+  busy: boolean
+  onToggle: () => void
+  onOpen: () => void
+}): ReactElement {
+  return (
+    <li className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.02]">
+      <span className="grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
+        <PluginIcon />
+      </span>
+
+      <button
+        type="button"
+        aria-label={`插件 ${plugin.name} 详情`}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
+        onClick={onOpen}
+      >
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <PluginMeta plugin={plugin} />
+          {plugin.description !== '' && (
+            <span className="truncate text-[11px] text-ink-faint">{plugin.description}</span>
+          )}
+        </span>
+        <ChevronIcon />
+      </button>
+
+      <PluginSwitch plugin={plugin} disabled={busy} onToggle={onToggle} />
+    </li>
+  )
+}
+
+/**
+ * 插件详情：授权 / config / secret / 错误原因都在这里，保存一次 `plugin.set` 合并提交。
+ *
+ * - 启停直接发 `plugin.set{enabled}`（等事实失效后的视图回显，不乐观更新）；
+ * - 授权 / config / secret 先在本地编辑，保存时统一提交；
  * - secret 只写不回显：输入框始终从空开始，已写入的键由视图 `secretKeys` 标记「已设置」。
  */
-function PluginRow({ plugin }: { plugin: PluginView }): ReactElement {
+function PluginDetail({
+  plugin,
+  onBack,
+}: {
+  plugin: PluginView
+  onBack: () => void
+}): ReactElement {
   const [granted, setGranted] = useState<string[]>(() => [...plugin.granted])
   const [config, setConfig] = useState<ConfigDraft>(() => initialConfig(plugin))
   const [secrets, setSecrets] = useState<Record<string, string>>({})
@@ -156,7 +294,7 @@ function PluginRow({ plugin }: { plugin: PluginView }): ReactElement {
     if (field.type === 'boolean') {
       return (
         <Field key={field.key} label={field.label} className="min-w-0">
-          <div className="flex h-9 items-center gap-2 rounded-lg border border-line bg-black/25 px-3 text-sm text-ink">
+          <div className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 text-sm text-ink">
             <input
               type="checkbox"
               aria-label={name}
@@ -223,144 +361,143 @@ function PluginRow({ plugin }: { plugin: PluginView }): ReactElement {
   }
 
   return (
-    <li className="flex flex-col gap-3 px-4 py-3 transition-colors hover:bg-white/[0.02]">
-      <div className="flex items-start gap-3">
-        <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
-          <PluginIcon />
-        </span>
-
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-sm font-medium text-ink">{plugin.name}</span>
-            <span
-              className={cn('rounded-full px-1.5 py-0.5 text-[10px]', STATUS_TONES[plugin.status])}
-            >
-              {STATUS_LABELS[plugin.status]}
-            </span>
-            <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
-              {plugin.builtin ? '内置' : '外部'}
-            </span>
-            <span className="text-[11px] text-ink-faint">
-              {KIND_LABELS[plugin.kind]} · v{plugin.version}
-            </span>
-          </div>
-          {plugin.description !== '' && (
-            <p className="truncate text-[11px] text-ink-faint">{plugin.description}</p>
-          )}
-          {plugin.error !== null && <p className="text-[11px] text-red-300">{plugin.error}</p>}
-        </div>
-
-        <button
-          type="button"
-          role="switch"
-          aria-checked={plugin.enabled}
-          aria-label={`启用插件 ${plugin.name}`}
-          disabled={busy}
-          onClick={toggleEnabled}
-          className={cn(
-            'relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors duration-200 outline-none',
-            'focus-visible:ring-2 focus-visible:ring-focus/60 disabled:cursor-not-allowed disabled:opacity-40',
-            plugin.enabled ? 'bg-focus' : 'bg-white/10',
-          )}
-        >
-          <span
-            className={cn(
-              'absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform duration-200',
-              plugin.enabled && 'translate-x-4',
-            )}
-          />
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <span className="text-[11px] text-ink-faint">声明能力</span>
-        {declared.length === 0 ? (
-          <span className="text-[11px] text-ink-faint">无</span>
-        ) : (
-          declared.map((capability) => (
-            <label
-              key={capability}
-              className="flex items-center gap-1.5 rounded-md bg-white/[0.04] px-2 py-1 text-[11px] text-ink-dim"
-            >
-              <input
-                type="checkbox"
-                aria-label={`${plugin.name} 授权 ${capability}`}
-                className="size-3.5 accent-[var(--color-focus)]"
-                checked={grantedSet.has(capability)}
-                disabled={busy}
-                onChange={(e) => toggleGranted(capability, e.target.checked)}
-              />
-              <span className="font-mono">{capability}</span>
-            </label>
-          ))
-        )}
-      </div>
-
-      {plugin.configFields.length > 0 && (
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-          {plugin.configFields.map(renderControl)}
-        </div>
-      )}
-
-      {actionError !== null && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
-          {actionError}
-        </p>
-      )}
-
+    <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <p className="text-[11px] text-ink-faint">授权只是信任门；secret 不回显。</p>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          aria-label={`保存插件 ${plugin.name}`}
-          disabled={busy}
-          className="ml-auto"
-          onClick={save}
-        >
-          保存
+        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+          返回插件列表
         </Button>
+        <span className="text-[11px] text-ink-faint">插件详情</span>
       </div>
-    </li>
-  )
-}
 
-function PluginIcon(): ReactElement {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0zM12 16v5" />
-    </svg>
+      <section className={cn(panelCls, 'flex flex-col gap-3 p-4')}>
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
+            <PluginIcon />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <PluginMeta plugin={plugin} />
+            {plugin.description !== '' && (
+              <p className="text-[11px] text-ink-faint">{plugin.description}</p>
+            )}
+          </div>
+          <PluginSwitch plugin={plugin} disabled={busy} onToggle={toggleEnabled} />
+        </div>
+
+        {plugin.error !== null && (
+          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
+            {plugin.error}
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <span className="text-[11px] text-ink-faint">声明能力</span>
+          {declared.length === 0 ? (
+            <span className="text-[11px] text-ink-faint">无</span>
+          ) : (
+            declared.map((capability) => (
+              <label
+                key={capability}
+                className="flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1 text-[11px] text-ink-dim"
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`${plugin.name} 授权 ${capability}`}
+                  className="size-3.5 accent-[var(--color-focus)]"
+                  checked={grantedSet.has(capability)}
+                  disabled={busy}
+                  onChange={(e) => toggleGranted(capability, e.target.checked)}
+                />
+                <span className="font-mono">{capability}</span>
+              </label>
+            ))
+          )}
+        </div>
+
+        {plugin.configFields.length > 0 && (
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+            {plugin.configFields.map(renderControl)}
+          </div>
+        )}
+
+        {actionError !== null && (
+          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
+            {actionError}
+          </p>
+        )}
+
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] text-ink-faint">授权只是信任门；secret 不回显。</p>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            aria-label={`保存插件 ${plugin.name}`}
+            disabled={busy}
+            className="ml-auto"
+            onClick={save}
+          >
+            保存
+          </Button>
+        </div>
+      </section>
+    </div>
   )
 }
 
 /**
  * 设置区「插件」页（M7）：读宿主视图 `plugins.all`，写一律 `plugin.set`。
  *
- * UI 只做「展示视图 + 收集用户输入」：插件该不该启动、是否授权足够、secret 写没写成功
- * 都由宿主按视图与命令结果表达，组件不推导装载规则、不轮询、不新增通道。
+ * 两级：列表只给概览（名称 / 可用性 / 开关 / 种类版本 / 一行描述），
+ * 授权、config、secret 与错误原因都在插件详情里。
+ * 插件该不该启动、是否授权足够、secret 写没写成功都由宿主按视图与命令结果表达，
+ * 组件不推导装载规则、不轮询、不新增通道。
  */
 export function PluginsManager(): ReactElement {
   const pluginsState = useKernelViewState('plugins.all')
   const plugins = pluginsState.data ?? EMPTY_PLUGINS
   const error = pluginsState.error
   const loading = pluginsState.data === undefined && error === null
+  /** 详情页当前插件 id；插件被移除时自动回落到列表 */
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  /** 列表级启停失败（详情页有自己的错误槽） */
+  const [toggleError, setToggleError] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+
+  const selected = plugins.find((plugin) => plugin.id === selectedId) ?? null
+
+  const toggle = (plugin: PluginView): void => {
+    setBusyId(plugin.id)
+    setToggleError(null)
+    void (async () => {
+      try {
+        await getKernelStore().dispatch({
+          type: 'plugin.set',
+          commandId: '',
+          pluginId: plugin.id,
+          enabled: !plugin.enabled,
+        })
+      } catch (e) {
+        setToggleError(errMsg(e))
+      } finally {
+        setBusyId(null)
+      }
+    })()
+  }
+
+  if (selected !== null) {
+    return <PluginDetail plugin={selected} onBack={() => setSelectedId(null)} />
+  }
 
   return (
     <div className="flex flex-col gap-3">
       {error !== null && (
         <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
           {error}
+        </p>
+      )}
+      {toggleError !== null && (
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+          {toggleError}
         </p>
       )}
 
@@ -381,7 +518,13 @@ export function PluginsManager(): ReactElement {
       ) : (
         <ul className={cn(panelCls, 'divide-y divide-line overflow-hidden')}>
           {plugins.map((plugin) => (
-            <PluginRow key={plugin.id} plugin={plugin} />
+            <PluginSummaryRow
+              key={plugin.id}
+              plugin={plugin}
+              busy={busyId === plugin.id}
+              onToggle={() => toggle(plugin)}
+              onOpen={() => setSelectedId(plugin.id)}
+            />
           ))}
         </ul>
       )}

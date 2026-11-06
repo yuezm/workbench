@@ -47,6 +47,7 @@ const view = (): View => ({
   stages: new Map(),
   agents: new Map(),
   runtimes: new Map(),
+  projects: new Map(),
   tasks: new Map(),
   runs: new Map(),
   conversations: new Map(),

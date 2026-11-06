@@ -91,6 +91,8 @@ function conditionLabel(rule: AutomationRule): string {
 export function RulesManager(): ReactElement {
   const rulesState = useKernelViewState('rules.all')
   const workflows = useKernelView('workflows.all') ?? []
+  /** 项目的候选只用于规则任务的落点（M10）：项目存在与否由内核在触发时再校验 */
+  const projects = useKernelView('projects.all') ?? []
   const rules = rulesState.data?.rules ?? EMPTY_RULES
   const version = rulesState.data?.version ?? 0
   const [actionError, setActionError] = useState<string | null>(null)
@@ -233,14 +235,14 @@ export function RulesManager(): ReactElement {
                 key={rule.id}
                 className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
               >
-                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
                   <RuleIcon />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium text-ink">{rule.name}</span>
                     {!rule.enabled && (
-                      <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+                      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
                         已停用
                       </span>
                     )}
@@ -309,6 +311,7 @@ export function RulesManager(): ReactElement {
           initial={editing}
           isNew={isNew}
           workflows={workflows}
+          projects={projects}
           onSubmit={save}
           onCancel={() => setEditing(null)}
         />

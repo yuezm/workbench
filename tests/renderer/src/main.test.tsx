@@ -22,6 +22,8 @@ function fakeBridge(): WorkbenchApi {
     dispatch: vi.fn(async () => ({ facts: [], value: null })) as WorkbenchApi['dispatch'],
     query: queryMock as unknown as WorkbenchApi['query'],
     subscribe: vi.fn(() => () => {}),
+    // M10：项目文件夹选择器（这里只保证桥接形状完整，不实际弹框）
+    pickFolder: vi.fn(async () => null),
     notify: vi.fn(),
   }
 }

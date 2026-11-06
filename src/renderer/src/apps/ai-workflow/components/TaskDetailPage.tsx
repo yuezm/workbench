@@ -152,8 +152,8 @@ export function TaskDetailPage({
                         <span
                           className={
                             child.status === 'completed'
-                              ? 'shrink-0 rounded-full bg-short/15 px-1.5 py-0.5 text-[10px] text-short'
-                              : 'shrink-0 rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-dim'
+                              ? 'shrink-0 rounded-sm bg-short/15 px-1.5 py-0.5 text-[10px] text-short'
+                              : 'shrink-0 rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-dim'
                           }
                         >
                           {child.status === 'completed' ? '已完成' : '进行中'}

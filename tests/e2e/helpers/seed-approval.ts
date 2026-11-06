@@ -19,7 +19,15 @@ import { nextWakeAt } from '../../../src/kernel/next-wake'
 import { project } from '../../../src/kernel/project'
 import type { Fact, KernelPort } from '../../../src/kernel/types'
 import { viewSpec } from '../../../src/kernel/view-spec'
-import type { Agent, Card, RunRow, Runtime, Task, Workflow } from '../../../src/protocol/entities'
+import type {
+  Agent,
+  Card,
+  Project,
+  RunRow,
+  Runtime,
+  Task,
+  Workflow,
+} from '../../../src/protocol/entities'
 
 const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
 
@@ -115,10 +123,18 @@ export async function seedApprovalState(dbPath: string): Promise<ApprovalSeed> {
       '工作流',
     ).workflow
 
+    // M10：任务必须挂在项目下（项目文件夹就是本轮工作目录）。
+    const projectFacts = store.dispatch({
+      type: 'project.create',
+      commandId: 'e2e-approval-project',
+      input: { name: '审批项目', path: dbPath },
+    }).facts
+    const project = payloadOf<{ project: Project }>(projectFacts, 'project.created', '项目').project
+
     const taskFacts = store.dispatch({
       type: 'task.create',
       commandId: 'e2e-approval-task',
-      input: { title: '审批任务', workflowId: workflow.id },
+      input: { title: '审批任务', workflowId: workflow.id, projectId: project.id },
     }).facts
     const task = payloadOf<{ task: Task }>(taskFacts, 'task.created', '任务').task
 

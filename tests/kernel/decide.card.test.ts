@@ -154,6 +154,7 @@ const view = (seed: Seed = {}): View => ({
   stages: new Map(),
   agents: new Map(),
   runtimes: new Map(),
+  projects: new Map(),
   tasks: new Map(),
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),

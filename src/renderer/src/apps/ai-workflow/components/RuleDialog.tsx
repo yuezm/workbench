@@ -1,5 +1,5 @@
 import { useState, type ReactElement } from 'react'
-import type { WorkflowWithStages } from '../../../../../protocol/entities'
+import type { Project, WorkflowWithStages } from '../../../../../protocol/entities'
 import {
   RULE_LIMITS,
   type AutomationRule,
@@ -25,6 +25,8 @@ export interface RuleDialogProps {
   isNew: boolean
   /** 目标工作流候选；为空时禁用保存并提示先建工作流 */
   workflows: WorkflowWithStages[]
+  /** 任务落点项目候选（M10，可空 = 未归属）：规则建的任务按它定运行工作目录 */
+  projects: Project[]
   /** 保存成功由父级关闭弹窗；失败抛错，文案就地展示 */
   onSubmit: (rule: AutomationRule) => Promise<void>
   onCancel: () => void
@@ -69,6 +71,7 @@ export function RuleDialog({
   initial,
   isNew,
   workflows,
+  projects,
   onSubmit,
   onCancel,
 }: RuleDialogProps): ReactElement {
@@ -81,6 +84,14 @@ export function RuleDialog({
   const [cron, setCron] = useState('cron' in initial.when ? initial.when.cron : '')
   const [workflowId, setWorkflowId] = useState(initial.to.workflowId)
   const [stageId, setStageId] = useState(initial.to.stageId ?? '')
+  /**
+   * 项目可空（M10）：老规则没有该字段，空值 = 未归属，提交时不写这个字段。
+   * 新建规则默认带上第一个项目——否则新规则会批量产出「未归属」任务（没有工作目录）；
+   * 编辑老规则保持原样，不替用户改写归属。
+   */
+  const [projectId, setProjectId] = useState(
+    initial.to.projectId ?? (isNew ? (projects[0]?.id ?? '') : ''),
+  )
   const [titleFrom, setTitleFrom] = useState<RuleTitleFrom>(initial.to.task?.titleFrom ?? 'subject')
   const [labels, setLabels] = useState((initial.to.task?.labels ?? []).join(', '))
   const [prompt, setPrompt] = useState(initial.prompt ?? '')
@@ -145,6 +156,8 @@ export function RuleDialog({
 
     const target: RuleTarget = { workflowId }
     if (stageId !== '') target.stageId = stageId
+    // 空值不写：老规则继续「未归属」，否则每次保存都等于给老规则钉一个空项目
+    if (projectId !== '') target.projectId = projectId
     const task: NonNullable<RuleTarget['task']> = {}
     if (kind === 'event' || initial.to.task?.titleFrom !== undefined) task.titleFrom = titleFrom
     const labelList = splitList(labels)
@@ -172,7 +185,7 @@ export function RuleDialog({
     <Dialog onClose={onCancel} className="max-w-2xl">
       <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
         <div className="flex items-center gap-2">
-          <RuleIcon className="text-focus" />
+          <RuleIcon className="text-focus-soft" />
           <div className="flex flex-col">
             <h3 className="text-[13px] font-medium tracking-wide text-ink">
               {isNew ? '新建规则' : '编辑规则'}
@@ -264,6 +277,17 @@ export function RuleDialog({
               onChange={setStageId}
               disabled={workflow === undefined}
               options={stageOptions}
+            />
+          </Field>
+          <Field label="项目（可选）">
+            <Select
+              ariaLabel="规则目标项目"
+              value={projectId}
+              onChange={setProjectId}
+              options={[
+                { value: '', label: '未归属' },
+                ...projects.map((item) => ({ value: item.id, label: item.name })),
+              ]}
             />
           </Field>
           {kind === 'event' && (

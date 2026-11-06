@@ -22,6 +22,7 @@ const task: Task = {
   title: '写代码',
   description: '细节',
   workflowId: 'w',
+  projectId: 'p1',
   currentStageId: 's',
   status: 'active',
   origin: 'manual',

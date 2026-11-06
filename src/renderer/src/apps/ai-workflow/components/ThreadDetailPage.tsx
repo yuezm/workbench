@@ -110,14 +110,14 @@ function TaskTreeItem({
         </span>
         <span
           className={cn(
-            'shrink-0 rounded-full px-1.5 py-0.5 text-[10px]',
-            completed ? 'bg-white/[0.06] text-ink-faint' : 'bg-focus/15 text-focus',
+            'shrink-0 rounded-sm px-1.5 py-0.5 text-[10px]',
+            completed ? 'bg-white/[0.06] text-ink-faint' : 'bg-focus/15 text-focus-soft',
           )}
         >
           {completed ? '已完成' : '进行中'}
         </span>
         {depth > 0 && (
-          <span className="shrink-0 rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+          <span className="shrink-0 rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
             子任务
           </span>
         )}
@@ -227,7 +227,7 @@ function BindSection({
     <section aria-label="绑定入口" className="flex flex-col gap-1.5">
       <h3 className="text-[13px] font-medium tracking-wide text-ink">绑定入口</h3>
       {thread.externalRef !== null ? (
-        <p className="rounded-lg border border-line bg-white/[0.02] px-3 py-2 text-[11px] text-ink-faint">
+        <p className="rounded-lg border border-line bg-surface px-3 py-2 text-[11px] text-ink-dim">
           已绑定：
           <span className="font-mono text-ink-dim">{thread.source}</span>
           {' / '}
@@ -363,7 +363,7 @@ function ThreadContent({
 
   return (
     <>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line bg-white/[0.02] px-4 py-3 text-[11px] sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-[11px] sm:grid-cols-4">
         <div className="flex min-w-0 flex-col gap-0.5">
           <dt className="text-[10px] tracking-wide text-ink-faint">来源</dt>
           <dd className="truncate font-mono text-ink-dim">{thread.source}</dd>
@@ -402,7 +402,7 @@ function ThreadContent({
             暂无任务
           </p>
         ) : (
-          <ul className="rounded-xl border border-line bg-white/[0.02] px-2 py-1">
+          <ul className="rounded-xl border border-line bg-surface px-2 py-1">
             {roots.map((node) => (
               <TaskTreeItem key={node.task.id} node={node} depth={0} onOpenTask={onOpenTask} />
             ))}

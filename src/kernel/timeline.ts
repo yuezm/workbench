@@ -18,6 +18,7 @@ export type TimelineScope =
   | 'stage'
   | 'agent'
   | 'runtime'
+  | 'project'
   | 'run'
   | 'conversation'
   | 'message'
@@ -89,6 +90,11 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'runtime.removed':
     case 'runtime.probed':
       return [{ scope: 'runtime', id: fact.payload.runtime.id }]
+    case 'project.created':
+    case 'project.updated':
+    case 'project.removed':
+      // M10：项目事实归到项目时间线（任务由 task.created 的 projectId 关联，不在这里串）
+      return [{ scope: 'project', id: fact.payload.project.id }]
     case 'task.created':
     case 'task.moved':
     case 'task.completed':

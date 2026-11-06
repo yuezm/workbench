@@ -16,7 +16,7 @@ import { nextWakeAt } from '../../../src/kernel/next-wake'
 import { project } from '../../../src/kernel/project'
 import type { Fact, KernelPort } from '../../../src/kernel/types'
 import { viewSpec } from '../../../src/kernel/view-spec'
-import type { Task, Workflow } from '../../../src/protocol/entities'
+import type { Project, Task, Workflow } from '../../../src/protocol/entities'
 
 const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
 
@@ -85,12 +85,21 @@ export async function seedHandoffBase(dbPath: string): Promise<HandoffSeed> {
     const sourceStage = sourceView?.stages[0]
     if (sourceStage === undefined) throw new Error('交接种子缺少源阶段')
 
+    // M10：任务必须挂在项目下（交接产物沿用来源任务的项目）。
+    const projectFacts = store.dispatch({
+      type: 'project.create',
+      commandId: 'e2e-handoff-project',
+      input: { name: '交接项目', path: dbPath },
+    }).facts
+    const project = payloadOf<{ project: Project }>(projectFacts, 'project.created', '项目').project
+
     const taskFacts = store.dispatch({
       type: 'task.create',
       commandId: 'e2e-handoff-source-task',
       input: {
         title: sourceTitle,
         workflowId: sourceWorkflow.id,
+        projectId: project.id,
         stageId: sourceStage.id,
       },
     }).facts

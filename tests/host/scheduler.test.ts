@@ -28,6 +28,25 @@ interface World {
 let world: World
 let commandSeq = 0
 
+/**
+ * M10：任务必须挂在项目下。这里每次建一个项目并返回 id（文件夹路径只作数据，
+ * 不真建目录；执行器测试不读目录）。
+ */
+function createProject(): string {
+  // 同一库可能多次 seed：名称与路径都要唯一（内核按项目集判重）
+  const label = nextCommandId()
+  const facts = world.store.dispatch({
+    type: 'project.create',
+    commandId: `pj-${label}`,
+    input: { name: `工作台 ${label}`, path: `D:/work/${label}` },
+  }).facts
+  return (
+    facts.find((fact) => fact.type === 'project.created')?.payload as {
+      project: { id: string }
+    }
+  ).project.id
+}
+
 const nextCommandId = (): string => {
   commandSeq += 1
   return `cmd-${commandSeq}`
@@ -170,6 +189,8 @@ interface Seeded {
   agent: Agent
   task: Task
   workflowId: string
+  /** M10：任务所属项目（运行工作目录取它的 path） */
+  projectId: string
   stages: { first: string; second: string }
   runId: string
 }
@@ -202,10 +223,11 @@ function seed(maxConcurrent = 1, runtimePatch: Partial<RuntimeInput> = {}): Seed
     .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
     .sort((left, right) => left.position - right.position)
     .map((stage) => stage.id)
+  const projectId = createProject()
   const taskFacts = world.store.dispatch({
     type: 'task.create',
     commandId: nextCommandId(),
-    input: { title: 'T', description: 'd', workflowId },
+    input: { title: 'T', description: 'd', workflowId, projectId },
   }).facts
   const task = (taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task })
     .task
@@ -215,6 +237,7 @@ function seed(maxConcurrent = 1, runtimePatch: Partial<RuntimeInput> = {}): Seed
     agent,
     task,
     workflowId,
+    projectId,
     stages: { first: stageIds[0], second: stageIds[1] },
     runId: String(run.id),
   }
@@ -562,7 +585,7 @@ describe('createScheduler：领取与并发', () => {
     const secondFacts = world.store.dispatch({
       type: 'task.create',
       commandId: nextCommandId(),
-      input: { title: 'T2', workflowId: seeded.workflowId, stageId: seeded.stages.first },
+      input: { title: 'T2', workflowId: seeded.workflowId, projectId: seeded.projectId, stageId: seeded.stages.first },
     }).facts
     const secondTaskId = (
       secondFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task }
@@ -740,10 +763,11 @@ describe('createScheduler：阶段链', () => {
         workflow: { id: string }
       }
     ).workflow.id
+    const projectId = createProject()
     const taskFacts = world.store.dispatch({
       type: 'task.create',
       commandId: nextCommandId(),
-      input: { title: 'T', workflowId },
+      input: { title: 'T', workflowId, projectId },
     }).facts
     const taskId = (
       taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task }
@@ -801,7 +825,12 @@ describe('createScheduler：Turn 与旁路会话', () => {
     const turn = captured as unknown as Turn
     expect(turn.model).toEqual({ provider: 'provider', id: 'x' })
     expect(turn.effort).toBe('high')
-    expect(turn.cwd).toBe('C:/work')
+    // M10：任务挂在项目下，工作目录取项目文件夹（优先于运行时 workdir）
+    const projectPath = world.store
+      .query('projects.all')
+      .find((item) => item.id === seeded.projectId)?.path
+    expect(projectPath).toBeDefined()
+    expect(turn.cwd).toBe(projectPath)
     expect(turn.timeoutMs).toBe(10_000)
     expect(turn.runId).toBe(seeded.runId)
     expect(runById(seeded.runId)?.session_id).toBe('sess-observed')

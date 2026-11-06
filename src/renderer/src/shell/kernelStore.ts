@@ -75,9 +75,18 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
   { prefix: 'stage.', views: ['workflows.all', 'tasks.byWorkflow'] },
   { prefix: 'agent.', views: ['agents.all', 'workflows.all'] },
   { prefix: 'runtime.', views: ['runtimes.all', 'runtimes.statuses'] },
+  // M10：项目行变化只影响项目清单（任务归属不随项目改名变），但看板标题要重取
+  { prefix: 'project.', views: ['projects.all', 'tasks.byProject', 'tasks.unassigned'] },
   {
     prefix: 'task.',
-    views: ['tasks.byWorkflow', 'task.byId', 'tasks.executing', 'comments.byTask'],
+    views: [
+      'tasks.byWorkflow',
+      'tasks.byProject',
+      'tasks.unassigned',
+      'task.byId',
+      'tasks.executing',
+      'comments.byTask',
+    ],
   },
   {
     prefix: 'run.',

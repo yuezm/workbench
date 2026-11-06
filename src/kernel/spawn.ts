@@ -130,6 +130,8 @@ export function spawnFacts(
       title: truncate(item.subject.trim(), 200),
       description: truncate(item.summary ?? '', 2_000),
       workflowId: parent.workflowId,
+      // M10：子任务继承父任务的项目（Agent 不能指定项目）
+      projectId: parent.projectId,
       currentStageId: stageId,
       status: 'active',
       origin: 'spawn',

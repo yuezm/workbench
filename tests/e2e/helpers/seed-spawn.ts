@@ -14,7 +14,7 @@ import { nextWakeAt } from '../../../src/kernel/next-wake'
 import { project } from '../../../src/kernel/project'
 import type { Fact, KernelPort } from '../../../src/kernel/types'
 import { viewSpec } from '../../../src/kernel/view-spec'
-import type { Task, Workflow } from '../../../src/protocol/entities'
+import type { Project, Task, Workflow } from '../../../src/protocol/entities'
 
 const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
 
@@ -22,6 +22,8 @@ export interface SpawnSeed {
   dbPath: string
   workflowId: string
   stageId: string
+  /** M10：项目（子任务必须与父任务同项目） */
+  projectId: string
   parentTaskId: string
   parentThreadId: string
 }
@@ -57,10 +59,23 @@ export async function seedSpawnBase(dbPath: string): Promise<SpawnSeed> {
     const stage = view?.stages[0]
     if (stage === undefined) throw new Error('派生种子缺少阶段')
 
+    // M10：任务必须挂在项目下（子任务继承父任务的项目）。
+    const projectFacts = store.dispatch({
+      type: 'project.create',
+      commandId: 'e2e-spawn-project',
+      input: { name: '派生项目', path: dbPath },
+    }).facts
+    const project = payloadOf<{ project: Project }>(projectFacts, 'project.created', '项目').project
+
     const taskFacts = store.dispatch({
       type: 'task.create',
       commandId: 'e2e-spawn-parent',
-      input: { title: 'e2e 父任务', workflowId: workflow.id, stageId: stage.id },
+      input: {
+        title: 'e2e 父任务',
+        workflowId: workflow.id,
+        projectId: project.id,
+        stageId: stage.id,
+      },
     }).facts
     const parent = payloadOf<{ task: Task }>(taskFacts, 'task.created', '父任务').task
     if (parent.threadId === null) throw new Error('派生种子：父任务没有线程')
@@ -69,6 +84,7 @@ export async function seedSpawnBase(dbPath: string): Promise<SpawnSeed> {
       dbPath,
       workflowId: workflow.id,
       stageId: stage.id,
+      projectId: project.id,
       parentTaskId: parent.id,
       parentThreadId: parent.threadId,
     }

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -68,6 +68,8 @@ describe('WorkflowEditor', () => {
     await user.click(screen.getByRole('option', { name: 'coder' }))
 
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
+    // 左侧点阶段 2，右侧才展开它的详情
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2完成后进入' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2完成后进入' }))
@@ -81,9 +83,9 @@ describe('WorkflowEditor', () => {
     await user.click(screen.getByRole('combobox', { name: '阶段2打回退回到' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
 
-    // 再加一个阶段后删除，覆盖删除分支
+    // 再加一个阶段后删除，覆盖删除分支（新建阶段会自动展开，删除的就是它）
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
-    await user.click(screen.getAllByRole('button', { name: '删除' })[2])
+    await user.click(screen.getByRole('button', { name: '删除' }))
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
@@ -134,6 +136,8 @@ describe('WorkflowEditor', () => {
     expect(screen.getByLabelText('工作流名称')).toHaveValue('旧流')
     expect(screen.getByLabelText('阶段1完成后进入')).toHaveValue('1')
     expect(screen.getByRole('combobox', { name: '阶段1完成后进入' })).toHaveTextContent('进行中')
+    // 第二段详情要点左侧才展开
+    fireEvent.click(screen.getByRole('button', { name: '阶段2' }))
     expect(screen.getByLabelText('阶段2打回退回到')).toHaveValue('0')
     expect(screen.getByRole('combobox', { name: '阶段2打回退回到' })).toHaveTextContent('待办')
   })
@@ -184,18 +188,24 @@ describe('WorkflowEditor', () => {
     const user = userEvent.setup()
     render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
 
-    // 上移第三个阶段（C）：顺序变为 A、C、B
+    // 左侧列表：序号 + 名称，用来断言重排结果
+    const order = (): (string | null)[] =>
+      ['阶段1', '阶段2', '阶段3'].map(
+        (name) => screen.getByRole('button', { name }).textContent ?? null,
+      )
+
+    // 选中第三个阶段（C）再上移：顺序变为 A、C、B，选中跟着 C 走
+    await user.click(screen.getByRole('button', { name: '阶段3' }))
     await user.click(screen.getByRole('button', { name: '阶段3上移' }))
-    expect(screen.getByLabelText('阶段1名称')).toHaveValue('A')
+    expect(order()).toEqual(['1A', '2C', '3B'])
     expect(screen.getByLabelText('阶段2名称')).toHaveValue('C')
-    expect(screen.getByLabelText('阶段3名称')).toHaveValue('B')
-    // 首阶段的上移、末阶段的下移禁用
+    // 上移 / 下移就在左侧列表行尾：首阶段的上移、末阶段的下移禁用
     expect(screen.getByRole('button', { name: '阶段1上移' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '阶段3下移' })).toBeDisabled()
 
     // 再下移一次回到原位：A、B、C
     await user.click(screen.getByRole('button', { name: '阶段2下移' }))
-    expect(screen.getByLabelText('阶段2名称')).toHaveValue('B')
+    expect(order()).toEqual(['1A', '2B', '3C'])
 
     // 再次上移后保存，验证目标下标随重排重映射
     await user.click(screen.getByRole('button', { name: '阶段3上移' }))
@@ -456,4 +466,111 @@ describe('WorkflowEditor', () => {
       spawnPolicy: 'off',
     })
   }, 30_000)
+
+  it('阶段「要干什么」：按阶段独立编辑，切换阶段不丢（M9）', async () => {
+    const stageOf = (id: string, name: string, position: number): WorkflowStage => ({
+      id,
+      workflowId: 'w',
+      name,
+      position,
+      entryMode: 'none',
+      agentId: null,
+      onCompleteStageId: null,
+      onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+    })
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '两段',
+      description: '',
+      createdAt: 't',
+      stages: [
+        { ...stageOf('s0', '方案', 0), instructions: '读需求，出方案' },
+        stageOf('s1', '实现', 1),
+      ],
+    }
+    kernel.setView('agents.all', undefined, [])
+    kernel.setView('workflows.all', undefined, [])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 已有说明回显；没有说明的阶段是空串
+    expect(screen.getByLabelText('阶段1要干什么')).toHaveValue('读需求，出方案')
+    await user.clear(screen.getByLabelText('阶段1要干什么'))
+    await user.type(screen.getByLabelText('阶段1要干什么'), '读需求，列改动文件')
+
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    expect(screen.getByLabelText('阶段2要干什么')).toHaveValue('')
+    await user.type(screen.getByLabelText('阶段2要干什么'), '按方案实现并自测')
+
+    // 回到阶段 1：草稿仍在
+    await user.click(screen.getByRole('button', { name: '阶段1' }))
+    expect(screen.getByLabelText('阶段1要干什么')).toHaveValue('读需求，列改动文件')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[0]).toMatchObject({ id: 's0', instructions: '读需求，列改动文件' })
+    expect(draft.stages[1]).toMatchObject({ id: 's1', instructions: '按方案实现并自测' })
+  })
+
+  it('移动别的阶段：展开项不跳，被换位时才跟着换（左侧行内上移 / 下移）', async () => {
+    const stageOf = (id: string, name: string, position: number): WorkflowStage => ({
+      id,
+      workflowId: 'w',
+      name,
+      position,
+      entryMode: 'none',
+      agentId: null,
+      onCompleteStageId: null,
+      onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+    })
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '三段',
+      description: '',
+      createdAt: 't',
+      stages: [stageOf('s0', 'A', 0), stageOf('s1', 'B', 1), stageOf('s2', 'C', 2)],
+    }
+    kernel.setView('agents.all', undefined, [])
+    kernel.setView('workflows.all', undefined, [])
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    const order = (): (string | null)[] =>
+      ['阶段1', '阶段2', '阶段3'].map(
+        (name) => screen.getByRole('button', { name }).textContent ?? null,
+      )
+
+    // 展开 A，把 C 上移：A 仍在展开，C 进到第 2 行
+    await user.click(screen.getByRole('button', { name: '阶段1' }))
+    await user.click(screen.getByRole('button', { name: '阶段3上移' }))
+    expect(order()).toEqual(['1A', '2C', '3B'])
+    expect(screen.getByLabelText('阶段1名称')).toHaveValue('A')
+
+    // 展开 B（现在第 3 行），把 C 下移回去：B 被换到第 2 行，展开项跟着走
+    await user.click(screen.getByRole('button', { name: '阶段3' }))
+    expect(screen.getByLabelText('阶段3名称')).toHaveValue('B')
+    await user.click(screen.getByRole('button', { name: '阶段2下移' }))
+    expect(order()).toEqual(['1A', '2B', '3C'])
+    expect(screen.getByLabelText('阶段2名称')).toHaveValue('B')
+  })
+
+  it('删掉唯一阶段后右侧显示空态，仍可再添加阶段', async () => {
+    const user = userEvent.setup()
+    kernel.setView('agents.all', undefined, [])
+    kernel.setView('workflows.all', undefined, [])
+    render(<WorkflowEditor workflow={null} onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    expect(screen.getByText('还没有阶段，先「添加阶段」')).toBeInTheDocument()
+    expect(screen.queryByLabelText('阶段1要干什么')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '添加阶段' }))
+    expect(screen.getByLabelText('阶段1要干什么')).toBeInTheDocument()
+  })
 })

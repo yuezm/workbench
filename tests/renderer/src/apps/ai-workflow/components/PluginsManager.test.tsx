@@ -54,8 +54,16 @@ async function choose(
   await user.click(await screen.findByRole('option', { name: option }))
 }
 
+/** 从列表进入某个插件的详情页 */
+async function openDetail(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+): Promise<void> {
+  await user.click(screen.getByRole('button', { name: `插件 ${name} 详情` }))
+}
+
 describe('PluginsManager', () => {
-  it('列表展示名称/种类/版本/内置标记/状态中文与错误；只列声明能力', async () => {
+  it('列表只展示概览：名称/状态/种类版本/内置标记/一行描述；能力与错误进详情', async () => {
     kernel.setView('plugins.all', undefined, [
       makePlugin(),
       makePlugin({
@@ -112,6 +120,7 @@ describe('PluginsManager', () => {
         description: '',
       }),
     ])
+    const user = userEvent.setup()
     render(<PluginsManager />)
 
     expect(await screen.findByText('webhook')).toBeInTheDocument()
@@ -123,20 +132,33 @@ describe('PluginsManager', () => {
     expect(screen.getByText('执行器 · v0.2.0')).toBeInTheDocument()
     expect(screen.getByText('通道 · v1.0.0')).toBeInTheDocument()
     expect(screen.getByText('清单不合法')).toBeInTheDocument()
-    expect(screen.getByText('清单缺少入口文件')).toBeInTheDocument()
     expect(screen.getAllByText('应用 · v1.0.0')).toHaveLength(2)
     expect(screen.getAllByText('内置').length).toBeGreaterThan(0)
     expect(screen.getAllByText('可用').length).toBeGreaterThan(0)
     expect(screen.getByText('异常')).toBeInTheDocument()
-    expect(screen.getByText('子进程崩溃')).toBeInTheDocument()
-    // 声明能力只列 declared（net），未声明的能力不出现
-    expect(screen.getAllByRole('checkbox', { name: /授权 net/ })).toHaveLength(3)
-    expect(screen.queryByRole('checkbox', { name: /授权 notify/ })).not.toBeInTheDocument()
-    expect(screen.getAllByText('无').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('接收本机 POST 事件').length).toBeGreaterThan(0)
     expect(screen.getByText('共 6 个')).toBeInTheDocument()
+
+    // 列表不出现详情内容：错误原因、授权勾选、config 表单、保存按钮
+    expect(screen.queryByText('清单缺少入口文件')).toBeNull()
+    expect(screen.queryByText('子进程崩溃')).toBeNull()
+    expect(screen.queryByRole('checkbox')).toBeNull()
+    expect(screen.queryByRole('button', { name: /^保存插件/ })).toBeNull()
+
+    // 详情里才有错误原因与声明能力；返回后回到概览列表
+    await openDetail(user, 'notify')
+    expect(screen.getByText('清单缺少入口文件')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '返回插件列表' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '返回插件列表' }))
+    expect(screen.getByText('共 6 个')).toBeInTheDocument()
+
+    await openDetail(user, 'webhook')
+    expect(screen.getByRole('checkbox', { name: 'webhook 授权 net' })).toBeInTheDocument()
+    expect(screen.getByLabelText('webhook 端口')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存插件 webhook' })).toBeInTheDocument()
   })
 
-  it('启停开关 dispatch plugin.set；失败展示 IPC 错误', async () => {
+  it('启停开关 dispatch plugin.set；失败在列表上方展示 IPC 错误', async () => {
     kernel.setView('plugins.all', undefined, [makePlugin()])
     const user = userEvent.setup()
     render(<PluginsManager />)
@@ -153,7 +175,7 @@ describe('PluginsManager', () => {
     })
   })
 
-  it('启停失败：错误留在行内，开关保持视图值', async () => {
+  it('启停失败：错误留在页面上，开关保持视图值', async () => {
     kernel.onDispatch(() => Promise.reject(new Error('插件不存在: webhook')))
     kernel.setView('plugins.all', undefined, [makePlugin()])
     const user = userEvent.setup()
@@ -168,6 +190,32 @@ describe('PluginsManager', () => {
     )
   })
 
+  it('详情里同样能启停，失败留在详情内；插件从视图消失时回到列表', async () => {
+    kernel.setView('plugins.all', undefined, [makePlugin()])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await screen.findByText('webhook')
+    await openDetail(user, 'webhook')
+
+    await user.click(screen.getByRole('switch', { name: '启用插件 webhook' }))
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({ type: 'plugin.set', enabled: false })
+
+    // 详情里的启停失败：错误就地展示（不回列表）
+    kernel.onDispatch(() => Promise.reject(new Error('启停失败')))
+    await user.click(screen.getByRole('switch', { name: '启用插件 webhook' }))
+    expect(await screen.findByText('启停失败')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存插件 webhook' })).toBeInTheDocument()
+
+    // 插件被移除（视图里没了）：详情自动回落到列表
+    kernel.setView('plugins.all', undefined, [
+      makePlugin({ id: 'other', name: 'other', description: '' }),
+    ])
+    expect(await screen.findByText('other')).toBeInTheDocument()
+    expect(screen.getByText('共 1 个')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '返回插件列表' })).toBeNull()
+  })
+
   it('保存：一次 dispatch 合并授权 / config / secret，secret 只写不回显', async () => {
     kernel.setView('plugins.all', undefined, [
       makePlugin({ declared: ['net', 'fs.read'], granted: ['fs.read'] }),
@@ -175,6 +223,7 @@ describe('PluginsManager', () => {
     const user = userEvent.setup()
     render(<PluginsManager />)
     await screen.findByText('webhook')
+    await openDetail(user, 'webhook')
 
     // 授权：取消未声明的旧授权、勾选 net（只提交 declared 范围内的能力）
     await user.click(screen.getByRole('checkbox', { name: 'webhook 授权 fs.read' }))
@@ -233,6 +282,7 @@ describe('PluginsManager', () => {
     const user = userEvent.setup()
     render(<PluginsManager />)
     await screen.findByText('legacy')
+    await openDetail(user, 'legacy')
 
     expect(screen.getByLabelText('legacy 后缀')).toHaveValue('')
     expect(screen.getByLabelText('legacy 重试')).toHaveValue(3)
@@ -256,6 +306,7 @@ describe('PluginsManager', () => {
     const user = userEvent.setup()
     render(<PluginsManager />)
     await screen.findByText('webhook')
+    await openDetail(user, 'webhook')
 
     expect(screen.getByText('已设置')).toBeInTheDocument()
     expect(screen.getByLabelText('webhook 密钥')).toHaveAttribute(
@@ -276,6 +327,7 @@ describe('PluginsManager', () => {
     const user = userEvent.setup()
     render(<PluginsManager />)
     await screen.findByText('webhook')
+    await openDetail(user, 'webhook')
 
     await user.click(screen.getByRole('button', { name: '保存插件 webhook' }))
     expect(await screen.findByText('secret 存储不可用')).toBeInTheDocument()
@@ -287,6 +339,7 @@ describe('PluginsManager', () => {
     const user = userEvent.setup()
     render(<PluginsManager />)
     await screen.findByText('webhook')
+    await openDetail(user, 'webhook')
 
     await user.click(screen.getByRole('button', { name: '保存插件 webhook' }))
     expect(await screen.findByRole('switch', { name: '启用插件 webhook' })).toBeDisabled()
@@ -328,6 +381,7 @@ describe('PluginsManager', () => {
     const user = userEvent.setup()
     render(<PluginsManager />)
     await screen.findByText('ticker')
+    await openDetail(user, 'ticker')
 
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '保存插件 ticker' }))

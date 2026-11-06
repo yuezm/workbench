@@ -119,6 +119,8 @@ function buildTask(
     title: truncate(title.trim() || rule.name, 200),
     description: truncate(description, 2_000),
     workflowId: target.workflowId,
+    // M10：规则声明的项目（老规则没有 → null，界面归入「未归属」）
+    projectId: rule.to.projectId ?? null,
     currentStageId: target.stageId,
     status: 'active',
     origin: 'rule',
@@ -443,6 +445,10 @@ export function validateRuleBatch(
       if (!stage || stage.workflowId !== rule.to.workflowId) {
         return { error: `规则「${name}」: 起始阶段不属于该工作流: ${rule.to.stageId}` }
       }
+    }
+    // M10：规则任务的所属项目必须存在（老规则缺省 → 不校验，任务落在「未归属」）
+    if (rule.to.projectId !== undefined && !view.projects.has(rule.to.projectId)) {
+      return { error: `规则「${name}」: 项目不存在: ${rule.to.projectId}` }
     }
     normalized.push({ ...rule, id, name })
   }

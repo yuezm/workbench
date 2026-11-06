@@ -114,6 +114,8 @@ const createTask = (view: View, input: TaskCreateCommand, at: Iso, env: Environm
     title: input.input.title,
     description: input.input.description ?? '',
     workflowId: workflow.id,
+    // M10：假内核不校验项目存在性，原样落到行上（真内核在 decide 里校验）
+    projectId: input.input.projectId,
     currentStageId: stageId,
     createdAt: at,
     updatedAt: at,

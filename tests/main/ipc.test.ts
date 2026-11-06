@@ -2,21 +2,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NotifyPayload } from '../../src/shared/workbench-api'
 import { NOTIFY_CHANNEL } from '../../src/shared/workbench-api'
-import { WORKBENCH_DISPATCH_CHANNEL, WORKBENCH_QUERY_CHANNEL } from '../../src/protocol/ipc'
+import {
+  WORKBENCH_DISPATCH_CHANNEL,
+  WORKBENCH_PICK_FOLDER_CHANNEL,
+  WORKBENCH_QUERY_CHANNEL,
+} from '../../src/protocol/ipc'
 import { StoreError } from '../../src/host/store/index'
 
-const { ipcMainMock, notificationMock, showMock } = vi.hoisted(() => {
+const { ipcMainMock, notificationMock, showMock, dialogMock, windowMock } = vi.hoisted(() => {
   const showMock = vi.fn()
   // 需可被 new：用普通函数而非箭头函数
   const notificationMock = vi.fn(function mockNotification() {
     return { show: showMock }
   })
-  return { ipcMainMock: { handle: vi.fn() }, notificationMock, showMock }
+  const dialogMock = { showOpenDialog: vi.fn() }
+  // 测试里没有真实窗口：fromWebContents 返回 null，走无父窗口的分支
+  const windowMock = { fromWebContents: vi.fn((_sender: unknown): unknown => null) }
+  return { ipcMainMock: { handle: vi.fn() }, notificationMock, showMock, dialogMock, windowMock }
 })
 
 vi.mock('electron', () => ({
   ipcMain: ipcMainMock,
   Notification: notificationMock,
+  dialog: dialogMock,
+  BrowserWindow: windowMock,
 }))
 
 import { ipcMain } from 'electron'
@@ -48,7 +57,7 @@ describe('main 进程 IPC（M5 三动词 + 通知）', () => {
       .mock.calls.map(([name]) => name)
       .sort()
     expect(channels).toEqual(
-      [NOTIFY_CHANNEL, WORKBENCH_DISPATCH_CHANNEL, WORKBENCH_QUERY_CHANNEL].sort(),
+      [NOTIFY_CHANNEL, WORKBENCH_DISPATCH_CHANNEL, WORKBENCH_QUERY_CHANNEL, WORKBENCH_PICK_FOLDER_CHANNEL].sort(),
     )
   })
 
@@ -127,6 +136,45 @@ describe('main 进程 IPC（M5 三动词 + 通知）', () => {
     expect(await handlerFor(WORKBENCH_QUERY_CHANNEL)({}, 'x')).toEqual({
       ok: false,
       error: { code: 'invalid_input', message: '未知视图: x' },
+    })
+  })
+  it('pickFolder：系统文件夹选择器；取消返回 null，选中返回绝对路径', async () => {
+    const handler = handlerFor(WORKBENCH_PICK_FOLDER_CHANNEL)
+
+    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: true, filePaths: [] })
+    expect(await handler({ sender: {} })).toEqual({ ok: true, value: null })
+
+    dialogMock.showOpenDialog.mockResolvedValueOnce({
+      canceled: false,
+      filePaths: ['D:/codes/workbench'],
+    })
+    expect(await handler({ sender: {} })).toEqual({ ok: true, value: 'D:/codes/workbench' })
+    // 没有父窗口时按 options 调用（不传父窗口）
+    expect(dialogMock.showOpenDialog).toHaveBeenLastCalledWith(
+      expect.objectContaining({ properties: ['openDirectory', 'createDirectory'] }),
+    )
+  })
+
+  it('pickFolder：有父窗口时挂在窗口上弹框（模态）', async () => {
+    const parent = { id: 'win-1' }
+    windowMock.fromWebContents.mockReturnValueOnce(parent)
+    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ['D:/x'] })
+
+    expect(await handlerFor(WORKBENCH_PICK_FOLDER_CHANNEL)({ sender: {} })).toEqual({
+      ok: true,
+      value: 'D:/x',
+    })
+    expect(dialogMock.showOpenDialog).toHaveBeenLastCalledWith(
+      parent,
+      expect.objectContaining({ properties: ['openDirectory', 'createDirectory'] }),
+    )
+  })
+
+  it('pickFolder：对话框抛错包成 internal 错误信封', async () => {
+    dialogMock.showOpenDialog.mockRejectedValueOnce(new Error('对话框不可用'))
+    expect(await handlerFor(WORKBENCH_PICK_FOLDER_CHANNEL)({ sender: {} })).toEqual({
+      ok: false,
+      error: { code: 'internal', message: '对话框不可用' },
     })
   })
 })

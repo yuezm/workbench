@@ -10,8 +10,9 @@ import type {
 } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Field } from '../../../components/ui/field'
-import { Input } from '../../../components/ui/input'
+import { Input, fieldCls } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
+import { cn } from '../../../lib/cn'
 import { useKernelView } from '../../../shell/useKernelView'
 
 interface WorkflowEditorProps {
@@ -25,24 +26,28 @@ function indexOfId(workflow: WorkflowWithStages, id: string | null): number {
   return workflow.stages.findIndex((s) => s.id === id)
 }
 
+/** 新阶段的默认值（新建工作流 / 添加阶段共用） */
+function emptyStage(name: string): StageInput {
+  return {
+    name,
+    entryMode: 'none',
+    onCompleteIndex: null,
+    onRejectIndex: null,
+    handoffWorkflowId: null,
+    handoffStageId: null,
+    subtaskStageId: null,
+    onChildrenSettled: null,
+    spawnPolicy: null,
+    instructions: '',
+  }
+}
+
 function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
   if (!workflow) {
     return {
       name: '',
       description: '',
-      stages: [
-        {
-          name: '待办',
-          entryMode: 'none',
-          onCompleteIndex: null,
-          onRejectIndex: null,
-          handoffWorkflowId: null,
-          handoffStageId: null,
-          subtaskStageId: null,
-          onChildrenSettled: null,
-          spawnPolicy: null,
-        },
-      ],
+      stages: [emptyStage('待办')],
     }
   }
   return {
@@ -64,6 +69,7 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
         subtaskStageId: s.subtaskStageId ?? null,
         onChildrenSettled: s.onChildrenSettled ?? null,
         spawnPolicy: s.spawnPolicy ?? null,
+        instructions: s.instructions ?? '',
       }
     }),
   }
@@ -110,9 +116,18 @@ function MoveIcon({ dir }: { dir: 'up' | 'down' }): ReactElement {
   )
 }
 
+/**
+ * 工作流编辑器：左侧阶段序列，右侧只展开**当前选中的那一个阶段**。
+ *
+ * 阶段多的时候一屏铺满所有详情既读不下也改不动，所以详情按选中收敛；
+ * 上移 / 下移 / 删除作用在选中阶段上，保存仍提交整份定义（阶段 id 稳定）。
+ * 每个阶段都能写「要干什么」：这段文字会拼进进入该阶段的任务提示词交给智能体。
+ */
 export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorProps): ReactElement {
   const [draft, setDraft] = useState<WorkflowInput>(() => toDraft(workflow))
   const [saving, setSaving] = useState(false)
+  /** 右侧展开的阶段下标；删除 / 新增后由对应 handler 修正 */
+  const [selected, setSelected] = useState(0)
   // 阶段绑定的智能体清单：自己订阅视图，不再由页面传入
   const agents = useKernelView('agents.all') ?? []
   // 交接目标候选：全部工作流里排除当前工作流（内核保存时还会再校验一次）
@@ -125,33 +140,30 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
   const patchStage = (i: number, patch: Partial<StageInput>): void =>
     setDraft((d) => ({ ...d, stages: d.stages.map((s, k) => (k === i ? { ...s, ...patch } : s)) }))
 
-  const addStage = (): void =>
-    setDraft((d) => ({
-      ...d,
-      stages: [
-        ...d.stages,
-        {
-          name: `阶段${d.stages.length + 1}`,
-          entryMode: 'none',
-          onCompleteIndex: null,
-          onRejectIndex: null,
-          handoffWorkflowId: null,
-          handoffStageId: null,
-          subtaskStageId: null,
-          onChildrenSettled: null,
-          spawnPolicy: null,
-        },
-      ],
-    }))
+  const addStage = (): void => {
+    // 新阶段追加到末尾并直接展开它（`draft` 是本次渲染的快照，长度即新下标）
+    setDraft((d) => ({ ...d, stages: [...d.stages, emptyStage(`阶段${d.stages.length + 1}`)] }))
+    setSelected(draft.stages.length)
+  }
 
   const removeStage = (i: number): void =>
     setDraft((d) => ({ ...d, stages: d.stages.filter((_, k) => k !== i) }))
 
-  /** 上/下移一个阶段；目标下标存在 stages 里，重排时要同步重映射，否则流转目标会指错阶段。 */
-  const moveStage = (i: number, dir: -1 | 1): void =>
+  /** 删除当前选中阶段：删完把选中落到相邻的一个（没有阶段时归零） */
+  const removeSelected = (): void => {
+    const i = Math.min(selected, draft.stages.length - 1)
+    removeStage(i)
+    setSelected(Math.max(0, Math.min(i, draft.stages.length - 2)))
+  }
+
+  /**
+   * 上/下移一个阶段：目标下标存在 stages 里，重排时要同步重映射，否则流转目标会指错阶段。
+   * 选中跟随被移动的那一项；被换位的相邻项若正展开，选中也换到它新的下标。
+   */
+  const moveStage = (i: number, dir: -1 | 1): void => {
+    const j = i + dir
+    if (j < 0 || j >= draft.stages.length) return
     setDraft((d) => {
-      const j = i + dir
-      if (j < 0 || j >= d.stages.length) return d
       const remap = (idx: number | null | undefined): number | null => {
         if (idx == null) return null
         if (idx === i) return j
@@ -167,6 +179,8 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
       stages.splice(j, 0, moved)
       return { ...d, stages }
     })
+    setSelected((current) => (current === i ? j : current === j ? i : current))
+  }
 
   const save = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
@@ -179,11 +193,15 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
   }
 
   const targetOptions = draft.stages.map((s, i) => ({ i, name: s.name || `阶段${i + 1}` }))
+  const index = Math.min(selected, draft.stages.length - 1)
+  const stage = draft.stages[index]
+  /** 当前展开阶段的序号文案（aria-label 用，与阶段列表一致是 1 基） */
+  const n = index + 1
 
   return (
     <form className="flex flex-col gap-5" onSubmit={save}>
       <div className="flex items-center gap-2">
-        <WorkflowIcon className="text-focus" />
+        <WorkflowIcon className="text-focus-soft" />
         <div className="flex flex-col">
           <h3 className="text-[13px] font-medium tracking-wide text-ink">工作流定义</h3>
         </div>
@@ -206,63 +224,112 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
         </Field>
       </div>
 
-      <div className="flex flex-col gap-3">
-        {draft.stages.map((s, i) => (
-          <div key={i} className="rounded-xl border border-line bg-white/[0.02] p-3">
+      <div className="grid gap-4 md:grid-cols-[200px_minmax(0,1fr)]">
+        {/* 左：阶段序列（序号 + 名字，点一条换右侧详情；上移 / 下移就在行尾） */}
+        <div className="flex min-w-0 flex-col gap-2">
+          <span className="text-[11px] font-medium tracking-wide text-ink-faint">阶段</span>
+          <ul className="flex flex-col gap-1" aria-label="阶段列表">
+            {draft.stages.map((s, i) => {
+              const isActive = i === index
+              return (
+                <li key={i} className="group flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label={`阶段${i + 1}`}
+                    aria-current={isActive ? 'true' : undefined}
+                    className={cn(
+                      'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 outline-none',
+                      'focus-visible:ring-2 focus-visible:ring-focus/60',
+                      isActive
+                        ? 'bg-focus/15 text-ink'
+                        : 'text-ink-dim hover:bg-white/[0.04] hover:text-ink',
+                    )}
+                    onClick={() => setSelected(i)}
+                  >
+                    <span
+                      className={cn(
+                        'grid size-5 shrink-0 place-items-center rounded-md text-[10px] font-medium',
+                        isActive ? 'bg-focus/25 text-focus-soft' : 'bg-white/[0.05] text-ink-faint',
+                      )}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="truncate">{s.name || `阶段${i + 1}`}</span>
+                  </button>
+
+                  {/* 排序按钮：hover / 键盘聚焦 / 当前阶段时显形，免得窄列里一直挂着图标 */}
+                  <div
+                    className={cn(
+                      'flex shrink-0 items-center transition-opacity duration-150',
+                      'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+                      isActive && 'opacity-100',
+                    )}
+                  >
+                    <button
+                      type="button"
+                      aria-label={`阶段${i + 1}上移`}
+                      title="上移"
+                      disabled={i === 0}
+                      className="grid size-5 place-items-center rounded text-ink-faint outline-none transition-colors duration-150 hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60 disabled:pointer-events-none disabled:opacity-25"
+                      onClick={() => moveStage(i, -1)}
+                    >
+                      <MoveIcon dir="up" />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`阶段${i + 1}下移`}
+                      title="下移"
+                      disabled={i === draft.stages.length - 1}
+                      className="grid size-5 place-items-center rounded text-ink-faint outline-none transition-colors duration-150 hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60 disabled:pointer-events-none disabled:opacity-25"
+                      onClick={() => moveStage(i, 1)}
+                    >
+                      <MoveIcon dir="down" />
+                    </button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+          <Button type="button" variant="secondary" size="sm" onClick={addStage}>
+            添加阶段
+          </Button>
+        </div>
+
+        {/* 右：只展示选中的那个阶段 */}
+        {stage === undefined ? (
+          <p className="grid place-items-center rounded-xl border border-dashed border-line p-6 text-xs text-ink-faint">
+            还没有阶段，先「添加阶段」
+          </p>
+        ) : (
+          <div className="rounded-xl border border-line bg-surface p-3">
             <div className="flex items-end gap-3">
-              <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-[11px] font-medium text-focus">
-                {i + 1}
+              <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-[11px] font-medium text-focus-soft">
+                {n}
               </span>
               <Field label="名称" className="min-w-0 flex-1">
                 <Input
-                  aria-label={`阶段${i + 1}名称`}
-                  value={s.name}
-                  onChange={(e) => patchStage(i, { name: e.target.value })}
+                  aria-label={`阶段${n}名称`}
+                  value={stage.name}
+                  onChange={(e) => patchStage(index, { name: e.target.value })}
                 />
               </Field>
-              <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-line p-0.5">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="size-7 px-0"
-                  aria-label={`阶段${i + 1}上移`}
-                  title="上移"
-                  disabled={i === 0}
-                  onClick={() => moveStage(i, -1)}
-                >
-                  <MoveIcon dir="up" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="size-7 px-0"
-                  aria-label={`阶段${i + 1}下移`}
-                  title="下移"
-                  disabled={i === draft.stages.length - 1}
-                  onClick={() => moveStage(i, 1)}
-                >
-                  <MoveIcon dir="down" />
-                </Button>
-              </div>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 className="text-red-400 hover:text-red-300"
-                onClick={() => removeStage(i)}
+                onClick={removeSelected}
               >
                 删除
               </Button>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-              <Field label="进入时">
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <Field label="进入时" className="w-36">
                 <Select
-                  ariaLabel={`阶段${i + 1}进入方式`}
-                  value={s.entryMode}
-                  onChange={(v) => patchStage(i, { entryMode: v as EntryMode })}
+                  ariaLabel={`阶段${n}进入方式`}
+                  value={stage.entryMode}
+                  onChange={(v) => patchStage(index, { entryMode: v as EntryMode })}
                   options={[
                     { value: 'none', label: '不交接' },
                     { value: 'agent', label: '交给智能体' },
@@ -270,12 +337,12 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                   ]}
                 />
               </Field>
-              {s.entryMode === 'agent' && (
-                <Field label="智能体">
+              {stage.entryMode === 'agent' && (
+                <Field label="智能体" className="min-w-0 flex-1">
                   <Select
-                    ariaLabel={`阶段${i + 1}智能体`}
-                    value={s.agentId ?? ''}
-                    onChange={(v) => patchStage(i, { agentId: v || null })}
+                    ariaLabel={`阶段${n}智能体`}
+                    value={stage.agentId ?? ''}
+                    onChange={(v) => patchStage(index, { agentId: v || null })}
                     options={[
                       { value: '', label: '选择' },
                       ...agents.map((a) => ({ value: a.id, label: a.name })),
@@ -283,11 +350,17 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                   />
                 </Field>
               )}
+            </div>
+
+            {/* 完成后 / 打回并排一行，与「进入时」分开：目标阶段名再长也不用和智能体抢宽度 */}
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <Field label="完成后进入">
                 <Select
-                  ariaLabel={`阶段${i + 1}完成后进入`}
-                  value={s.onCompleteIndex == null ? '' : String(s.onCompleteIndex)}
-                  onChange={(v) => patchStage(i, { onCompleteIndex: v === '' ? null : Number(v) })}
+                  ariaLabel={`阶段${n}完成后进入`}
+                  value={stage.onCompleteIndex == null ? '' : String(stage.onCompleteIndex)}
+                  onChange={(v) =>
+                    patchStage(index, { onCompleteIndex: v === '' ? null : Number(v) })
+                  }
                   options={[
                     { value: '', label: '下一阶段' },
                     ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
@@ -296,9 +369,9 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
               </Field>
               <Field label="打回退回到">
                 <Select
-                  ariaLabel={`阶段${i + 1}打回退回到`}
-                  value={s.onRejectIndex == null ? '' : String(s.onRejectIndex)}
-                  onChange={(v) => patchStage(i, { onRejectIndex: v === '' ? null : Number(v) })}
+                  ariaLabel={`阶段${n}打回退回到`}
+                  value={stage.onRejectIndex == null ? '' : String(stage.onRejectIndex)}
+                  onChange={(v) => patchStage(index, { onRejectIndex: v === '' ? null : Number(v) })}
                   options={[
                     { value: '', label: '不指定' },
                     ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
@@ -306,16 +379,26 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                 />
               </Field>
             </div>
+            <p className="mt-1 text-[11px] text-ink-faint">末阶段完成后任务结束。</p>
 
-            <p className="mt-2 text-[11px] text-ink-faint">末阶段完成后任务结束。</p>
+            {/* 阶段要干什么：这段文字会作为提示词的固定指令段交给智能体 */}
+            <Field label="要干什么" className="mt-3">
+              <textarea
+                aria-label={`阶段${n}要干什么`}
+                className={cn(fieldCls, 'min-h-24 resize-y py-2 leading-relaxed')}
+                placeholder="写清这个阶段具体要做什么，例如：读需求、出实现方案、列出改动文件；进到本阶段的任务会带上这段说明交给智能体。"
+                value={stage.instructions ?? ''}
+                onChange={(e) => patchStage(index, { instructions: e.target.value })}
+              />
+            </Field>
 
             <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
               <Field label="目标工作流" className="min-w-0 flex-1">
                 <Select
-                  ariaLabel={`阶段${i + 1}交接目标工作流`}
-                  value={s.handoffWorkflowId ?? ''}
+                  ariaLabel={`阶段${n}交接目标工作流`}
+                  value={stage.handoffWorkflowId ?? ''}
                   onChange={(v) =>
-                    patchStage(i, {
+                    patchStage(index, {
                       handoffWorkflowId: v === '' ? null : v,
                       handoffStageId: null,
                     })
@@ -326,17 +409,17 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                   ]}
                 />
               </Field>
-              {s.handoffWorkflowId != null && (
+              {stage.handoffWorkflowId != null && (
                 <Field label="目标阶段" className="min-w-0 flex-1">
                   <Select
-                    ariaLabel={`阶段${i + 1}交接目标阶段`}
-                    value={s.handoffStageId ?? ''}
-                    onChange={(v) => patchStage(i, { handoffStageId: v === '' ? null : v })}
+                    ariaLabel={`阶段${n}交接目标阶段`}
+                    value={stage.handoffStageId ?? ''}
+                    onChange={(v) => patchStage(index, { handoffStageId: v === '' ? null : v })}
                     options={[
                       { value: '', label: '首阶段' },
-                      ...stagesOfWorkflow(s.handoffWorkflowId).map((stage) => ({
-                        value: stage.id,
-                        label: stage.name,
+                      ...stagesOfWorkflow(stage.handoffWorkflowId).map((item) => ({
+                        value: item.id,
+                        label: item.name,
                       })),
                     ]}
                   />
@@ -348,24 +431,26 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
             <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
               <Field label="子任务落点阶段" className="min-w-0 flex-1">
                 <Select
-                  ariaLabel={`阶段${i + 1}子任务落点阶段`}
-                  value={s.subtaskStageId ?? ''}
-                  onChange={(v) => patchStage(i, { subtaskStageId: v === '' ? null : v })}
+                  ariaLabel={`阶段${n}子任务落点阶段`}
+                  value={stage.subtaskStageId ?? ''}
+                  onChange={(v) => patchStage(index, { subtaskStageId: v === '' ? null : v })}
                   options={[
                     { value: '', label: '跟随当前阶段' },
-                    ...(workflow?.stages ?? []).map((stage) => ({
-                      value: stage.id,
-                      label: stage.name,
+                    ...(workflow?.stages ?? []).map((item) => ({
+                      value: item.id,
+                      label: item.name,
                     })),
                   ]}
                 />
               </Field>
               <Field label="子任务完成后" className="min-w-0 flex-1">
                 <Select
-                  ariaLabel={`阶段${i + 1}子任务完成后`}
-                  value={s.onChildrenSettled ?? ''}
+                  ariaLabel={`阶段${n}子任务完成后`}
+                  value={stage.onChildrenSettled ?? ''}
                   onChange={(v) =>
-                    patchStage(i, { onChildrenSettled: v === '' ? null : (v as OnChildrenSettled) })
+                    patchStage(index, {
+                      onChildrenSettled: v === '' ? null : (v as OnChildrenSettled),
+                    })
                   }
                   options={[
                     { value: '', label: '按阶段推断' },
@@ -377,10 +462,10 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
               </Field>
               <Field label="允许拆子任务" className="min-w-0 flex-1">
                 <Select
-                  ariaLabel={`阶段${i + 1}允许拆子任务`}
-                  value={s.spawnPolicy ?? ''}
+                  ariaLabel={`阶段${n}允许拆子任务`}
+                  value={stage.spawnPolicy ?? ''}
                   onChange={(v) =>
-                    patchStage(i, { spawnPolicy: v === '' ? null : (v as SpawnPolicy) })
+                    patchStage(index, { spawnPolicy: v === '' ? null : (v as SpawnPolicy) })
                   }
                   options={[
                     { value: '', label: '允许' },
@@ -390,13 +475,10 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
               </Field>
             </div>
           </div>
-        ))}
+        )}
       </div>
 
       <div className="flex items-center gap-2 border-t border-line pt-4">
-        <Button type="button" variant="secondary" size="sm" onClick={addStage}>
-          添加阶段
-        </Button>
         <Button type="submit" variant="primary" size="sm" disabled={saving} className="ml-auto">
           保存
         </Button>

@@ -134,7 +134,7 @@ export function moveTaskToStage(
   return enterStage(task, target, workflow)
 }
 
-/** 纯函数：看板拖到「已完成」区 —— 任务移出看板。 */
+/** 纯函数：看板拖到「归档」区 —— 任务移出看板。 */
 export function completeTask(task: Task): Task {
   return { ...task, status: 'completed' }
 }

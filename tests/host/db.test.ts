@@ -198,7 +198,7 @@ function userVersion(d: DatabaseSync): number {
 }
 
 describe('openDatabase', () => {
-  it(':memory: 建全 schema（十五张投影 + facts / projection_meta + 宿主私有 process_registry、commands、plugin_secrets）并写 user_version', () => {
+  it(':memory: 建全 schema（十六张投影 + facts / projection_meta + 宿主私有 process_registry、commands、plugin_secrets）并写 user_version', () => {
     db = openDatabase(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
@@ -211,6 +211,7 @@ describe('openDatabase', () => {
       'plugin_settings',
       'process_registry',
       'projection_meta',
+      'projects',
       'rule_fires',
       'rule_sets',
       'run_events',
@@ -310,6 +311,63 @@ describe('openDatabase', () => {
     }
   })
 
+  it('M9：旧库缺阶段说明 / 对话归档列 → open 时 ALTER 补齐，老行取默认值', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-m9-'))
+    const file = path.join(root, 'ai-workflow.db')
+    const seeded = new DatabaseSync(file)
+    try {
+      seeded.exec(SCHEMA_SQL)
+      seeded
+        .prepare(`INSERT INTO workflows (id, name, description, created_at) VALUES (?, ?, '', ?)`)
+        .run('wf-1', '旧流程', SEED_AT)
+      seeded
+        .prepare(
+          `INSERT INTO workflow_stages (id, workflow_id, name, position, entry_mode, created_at)
+           VALUES (?, ?, ?, 0, 'none', ?)`,
+        )
+        .run('st-1', 'wf-1', '旧阶段', SEED_AT)
+      seeded
+        .prepare(
+          `INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)`,
+        )
+        .run('rt-1', '本机', 'dsh', SEED_AT)
+      seeded
+        .prepare(
+          `INSERT INTO agents (id, name, runtime_id, created_at) VALUES (?, ?, ?, ?)`,
+        )
+        .run('ag-1', '助手', 'rt-1', SEED_AT)
+      seeded
+        .prepare(
+          `INSERT INTO conversations (id, title, agent_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run('cv-1', '旧对话', 'ag-1', SEED_AT, SEED_AT)
+      // 回到 M9 之前的表结构（数据行保留）
+      seeded.exec('ALTER TABLE workflow_stages DROP COLUMN instructions')
+      seeded.exec('ALTER TABLE conversations DROP COLUMN archived_at')
+      expect(columnNames(seeded, 'workflow_stages').has('instructions')).toBe(false)
+      expect(columnNames(seeded, 'conversations').has('archived_at')).toBe(false)
+    } finally {
+      seeded.close()
+    }
+
+    const local = openDatabase(file)
+    try {
+      expect(columnNames(local, 'workflow_stages').has('instructions')).toBe(true)
+      expect(columnNames(local, 'conversations').has('archived_at')).toBe(true)
+      // 老行按默认值归一：说明是空串，归档时间为 null
+      expect(
+        local.prepare('SELECT name, instructions FROM workflow_stages WHERE id = ?').get('st-1'),
+      ).toEqual({ name: '旧阶段', instructions: '' })
+      expect(
+        local.prepare('SELECT title, archived_at FROM conversations WHERE id = ?').get('cv-1'),
+      ).toEqual({ title: '旧对话', archived_at: null })
+    } finally {
+      local.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('不动 foreign_keys：保持连接默认（node:sqlite 默认开启外键约束）', () => {
     db = openDatabase(':memory:')
     const rows = db.prepare('PRAGMA foreign_keys').all() as unknown as Array<{
@@ -354,6 +412,7 @@ describe('openDatabase', () => {
         'plugin_settings',
         'process_registry',
         'projection_meta',
+        'projects',
         'rule_fires',
         'rule_sets',
         'run_events',

@@ -46,7 +46,8 @@ const workflowCreate = (name: string, stages = 2, commandId = `create-${name}`):
 const taskCreate = (title: string, workflowId: string, stageId?: string): Command => ({
   type: 'task.create',
   commandId: `task-${title}`,
-  input: { title, workflowId, ...(stageId === undefined ? {} : { stageId }) },
+  // M10：假内核不校验项目存在性；这里只保证命令形状合法
+  input: { title, workflowId, projectId: 'pj-1', ...(stageId === undefined ? {} : { stageId }) },
 })
 
 describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
@@ -90,7 +91,7 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             handoffStageId: null,
             subtaskStageId: null,
             onChildrenSettled: null,
-            spawnPolicy: null,
+            spawnPolicy: null,            instructions: '',
           },
           {
             id: 'st-2',
@@ -105,7 +106,7 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             handoffStageId: null,
             subtaskStageId: null,
             onChildrenSettled: null,
-            spawnPolicy: null,
+            spawnPolicy: null,            instructions: '',
           },
         ],
       },

@@ -13,6 +13,7 @@ import type {
   Agent,
   Card,
   Conversation,
+  Project,
   RunEvent,
   Runtime,
   RuntimeProbe,
@@ -53,6 +54,10 @@ export interface CommandResults {
   'runtime.remove': null
   'runtime.probe': RuntimeProbe
   'runtime.probed': RuntimeProbe
+  /** M10：新建 / 更新项目后返回整行（UI 用来选中新项目） */
+  'project.create': Project
+  'project.update': Project
+  'project.remove': null
   'task.create': Task
   'task.move': Task
   'task.complete': Task
@@ -65,6 +70,7 @@ export interface CommandResults {
   'chat.send': null
   'chat.remove': null
   'chat.cancel': null
+  'chat.archive': null
   'app.event': null
   /** M6：整批替换后的规则集（版本 + 规则清单） */
   'rules.replace': RuleSetView
@@ -121,5 +127,10 @@ export type IpcResponse<T> = { ok: true; value: T } | { ok: false; error: IpcErr
 /** renderer → main 的 IPC 通道名（preload 与 main 共用，避免魔法字符串漂移）。 */
 export const WORKBENCH_DISPATCH_CHANNEL = 'workbench:dispatch'
 export const WORKBENCH_QUERY_CHANNEL = 'workbench:query'
+/**
+ * 系统文件夹选择器（M10）：项目 = 本地文件夹，只能由宿主弹原生对话框选目录。
+ * 返回值是绝对路径；用户取消时为 null（不当作错误）。
+ */
+export const WORKBENCH_PICK_FOLDER_CHANNEL = 'workbench:pick-folder'
 /** main → renderer：`KernelEvent` 推送 */
 export const WORKBENCH_EVENT_CHANNEL = 'workbench:kernel-event'

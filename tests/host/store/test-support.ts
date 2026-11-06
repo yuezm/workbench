@@ -10,6 +10,7 @@ import type {
   Card,
   Conversation,
   Message,
+  Project,
   RunEventRow,
   RunRow,
   Runtime,
@@ -104,6 +105,18 @@ export const sample = {
       ...overrides,
     }
   },
+  /** M10：项目样例行（任务的容器与执行工作目录） */
+  project(overrides: Partial<Project> = {}): Project {
+    return {
+      id: 'pj-1',
+      name: '工作台',
+      path: 'D:/work',
+      description: '',
+      createdAt: SAMPLE_AT,
+      updatedAt: SAMPLE_AT,
+      ...overrides,
+    }
+  },
   stage(overrides: Partial<WorkflowStage> = {}): WorkflowStage {
     return {
       id: 'st-1',
@@ -119,6 +132,7 @@ export const sample = {
       subtaskStageId: null,
       onChildrenSettled: null,
       spawnPolicy: null,
+      instructions: '',
       ...overrides,
     }
   },
@@ -128,6 +142,7 @@ export const sample = {
       title: '任务',
       description: '',
       workflowId: 'wf-1',
+      projectId: null,
       currentStageId: 'st-1',
       status: 'active',
       origin: 'manual',
@@ -206,6 +221,7 @@ export const sample = {
       title: '新对话',
       agentId: 'ag-1',
       sessionId: null,
+      archivedAt: null,
       createdAt: SAMPLE_AT,
       updatedAt: SAMPLE_AT,
       ...overrides,
@@ -280,9 +296,14 @@ const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: 
       'labels_json',
       'thread_id',
       'parent_task_id',
+      'project_id',
       'created_at',
       'updated_at',
     ],
+    orderBy: 'id',
+  },
+  projects: {
+    columns: ['id', 'name', 'path', 'description', 'created_at', 'updated_at'],
     orderBy: 'id',
   },
   workflows: { columns: ['id', 'name', 'description', 'created_at'], orderBy: 'id' },

@@ -281,6 +281,11 @@ describe('protocol/inputs', () => {
     ).toBe('content最长 20000 个字符')
     expect(rejected(host('chat.remove', { commandId: 'c3' }))).toBe('conversationId必填')
     expect(rejected(host('chat.cancel', { commandId: 'c4' }))).toBe('conversationId必填')
+    // M9 归档：conversationId 必填，archived 只收布尔
+    expect(rejected(host('chat.archive', { commandId: 'c6' }))).toBe('conversationId必填')
+    expect(
+      rejected(host('chat.archive', { commandId: 'c6', conversationId: 'cv-1', archived: 'yes' })),
+    ).toBe('archived必须是布尔值')
     expect(rejected(host('chat.send', { commandId: 'c2', conversationId: 'cv-1' }))).toBe(
       '消息内容不能为空',
     )

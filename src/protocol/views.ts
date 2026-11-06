@@ -12,6 +12,7 @@ import type {
   Conversation,
   DetectedRuntime,
   Message,
+  Project,
   Run,
   RunEvent,
   RunRow,
@@ -36,6 +37,9 @@ export const VIEW_IDS = [
   'workflows.all',
   'agents.all',
   'runtimes.all',
+  'projects.all',
+  'tasks.byProject',
+  'tasks.unassigned',
   'tasks.byWorkflow',
   'tasks.byParent',
   'task.byId',
@@ -147,6 +151,7 @@ export interface RunApproval {
 
 /** 需要参数的视图 → 参数形状；无参数视图不出现在这里。 */
 export interface ViewArgs {
+  'tasks.byProject': { projectId: string }
   'tasks.byWorkflow': { workflowId: string }
   'tasks.byParent': { taskId: string }
   'task.byId': { taskId: string }
@@ -180,6 +185,7 @@ export interface ThreadDetail {
  * 字段必填、字符串、长度上限与 id 一致；renderer 传的是不可信数据）。
  */
 export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
+  'tasks.byProject': 'projectId',
   'tasks.byWorkflow': 'workflowId',
   'tasks.byParent': 'taskId',
   'task.byId': 'taskId',
@@ -202,6 +208,15 @@ export interface ViewResults {
   'workflows.all': WorkflowWithStages[]
   'agents.all': Agent[]
   'runtimes.all': Runtime[]
+  /** 全部项目（M10），按创建时间升序；项目是任务的容器与执行工作目录 */
+  'projects.all': Project[]
+  /** 某项目下的任务（M10），按创建时间升序；看板再按工作流过滤 */
+  'tasks.byProject': Task[]
+  /**
+   * 没有项目的任务（M10）：v2 存量、老规则建的任务。界面归入「未归属」，
+   * 不随项目删除而消失（项目删除要求项目下没有任务）。
+   */
+  'tasks.unassigned': Task[]
   'tasks.byWorkflow': Task[]
   'tasks.byParent': Task[]
   'task.byId': Task | null

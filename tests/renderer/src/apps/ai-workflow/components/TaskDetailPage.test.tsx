@@ -46,6 +46,7 @@ const task: Task = {
   title: '任务A',
   description: '把接口改完',
   workflowId: 'w1',
+  projectId: 'p1',
   currentStageId: 's1',
   status: 'active',
   origin: 'rule',

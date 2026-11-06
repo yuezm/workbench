@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   subtask_stage_id TEXT,
   on_children_settled TEXT CHECK (on_children_settled IN ('wake','notify','complete')),
   spawn_policy TEXT CHECK (spawn_policy IN ('off','agent')),
+  -- M9 阶段要干什么：进入本阶段的任务提示词里带的固定指令段（空串 = 没写）
+  instructions TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   UNIQUE (workflow_id, position)
 );`
@@ -87,6 +89,7 @@ CREATE TABLE IF NOT EXISTS ${name} (
  * - `thread_id` = 所属线程（M6.5，手工任务挂隐式线程）；`parent_task_id` = 派生它的父任务。
  *   两者都是弱引用（不设外键），旧行与老事实按 null 归一。
  * - `handoff_from_task_id` / `handoff_from_stage_id` = M7 交接来源任务与阶段（弱引用）。
+ * - `project_id` = 所属项目（M10，弱引用；旧行 / 老事实按 null 归一为「未归属」）。
  */
 const tasksTable = (name = 'tasks'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
@@ -107,6 +110,24 @@ CREATE TABLE IF NOT EXISTS ${name} (
   spawn_key TEXT,
   handoff_from_task_id TEXT,
   handoff_from_stage_id TEXT,
+  project_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);`
+
+/**
+ * `projects` 投影（M10，第 16 张表）：与 `Project` 逐列对应，整行由 `project.*` 事实携带。
+ *
+ * - `name` / `path` 唯一性由内核在决策时校验（视图里比，不靠 SQL 约束）；
+ * - `path` 是绝对路径，也是该项目任务的运行工作目录；目录是否存在由宿主与执行器负责；
+ * - 不设外键：任务用弱引用指向项目，删项目由内核按「项目下没有任务」把关。
+ */
+const projectsTable = (name = 'projects'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  path TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -195,6 +216,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   title TEXT NOT NULL DEFAULT '',
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
   session_id TEXT,
+  -- M9 归档：非 NULL = 已归档（聊天清单默认不展示；只影响列表，不删消息/run）
+  archived_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -334,6 +357,7 @@ CREATE TABLE IF NOT EXISTS ${name} (
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, position);
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_projects_name ON projects(name);
 CREATE INDEX IF NOT EXISTS idx_runs_task ON runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_runtime_status ON runs(runtime_id, status);
@@ -348,13 +372,14 @@ CREATE INDEX IF NOT EXISTS idx_threads_key ON threads(source, external_ref);
 CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id, created_at);
 `
 
-/** v2 全量 schema（新建库；十四张投影表 + 索引） */
+/** v2 全量 schema（新建库；十六张投影表 + 索引） */
 export const SCHEMA_SQL = [
   runtimesTable(),
   agentsTable(),
   workflowsTable(),
   stagesTable(),
   tasksTable(),
+  projectsTable(),
   runsTable(),
   runEventsTable(),
   conversationsTable(),
@@ -411,6 +436,7 @@ export const tableDdl = {
   workflows: workflowsTable,
   stages: stagesTable,
   tasks: tasksTable,
+  projects: projectsTable,
   runs: runsTable,
   runEvents: runEventsTable,
   conversations: conversationsTable,
@@ -594,8 +620,35 @@ export const STAGES_M8_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
- * M8 给 `tasks` 新增的列（spawn 来源 / 批次 / 幂等键）。
+ * M9 给 `workflow_stages` 新增的列（阶段要干什么）。
  *
+ * 有 DEFAULT ''（老阶段按「没写」归一，与内核 `normalizeStage` 一致）；`ALTER TABLE ADD COLUMN`
+ * 只增不改。清单与 `stagesTable()` 的 DDL 保持同步（新增列必须同时改这里）。
+ */
+export const STAGES_M9_ADDED_COLUMNS = ['instructions'] as const
+
+/** `workflow_stages` M9 补列语句（默认值与 DDL 一致）。 */
+export const STAGES_M9_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M9_ADDED_COLUMNS)[number], string>
+> = {
+  instructions: "ALTER TABLE workflow_stages ADD COLUMN instructions TEXT NOT NULL DEFAULT ''",
+}
+
+/**
+ * M9 给 `conversations` 新增的列（归档时间）：可空、无 DEFAULT —— 老对话按「未归档」归一。
+ * 清单与 `conversationsTable()` 的 DDL 保持同步。
+ */
+export const CONVERSATIONS_M9_ADDED_COLUMNS = ['archived_at'] as const
+
+/** `conversations` M9 补列语句（可空、无 DEFAULT）。 */
+export const CONVERSATIONS_M9_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof CONVERSATIONS_M9_ADDED_COLUMNS)[number], string>
+> = {
+  archived_at: 'ALTER TABLE conversations ADD COLUMN archived_at TEXT',
+}
+
+/**
+ * M8 给 `tasks` 新增的列（spawn 来源 / 批次 / 幂等键）。
  * 注意：M8 同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff','spawn')`，SQLite 不能
  * `ALTER TABLE` 改 CHECK —— 旧库首启时与 M7 同法物理重建 `tasks`（见 `host/db.ts`）。
  */
@@ -611,6 +664,19 @@ export const TASKS_M8_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
+ * M10 给 `tasks` 新增的列（所属项目）：可空、无 DEFAULT —— 旧行按「未归属」归一。
+ * 清单与 `tasksTable()` 的 DDL 保持同步。
+ */
+export const TASKS_M10_ADDED_COLUMNS = ['project_id'] as const
+
+/** `tasks` M10 补列语句（可空、无 DEFAULT）。 */
+export const TASKS_M10_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M10_ADDED_COLUMNS)[number], string>
+> = {
+  project_id: 'ALTER TABLE tasks ADD COLUMN project_id TEXT',
+}
+
+/**
  * 旧 `tasks` 行 → 新 `tasks` 行（指名字表）的拷贝 SQL（M7 `tasks` 物理重建用）。
  *
  * 旧库可能缺 M6 / M6.5 / M7 的任一列：按 `columns` 逐列决定「取旧值」还是「补字面量」，
@@ -622,7 +688,7 @@ export function legacyTasksCopySql(targetTable: string, columns: ReadonlySet<str
   return `INSERT INTO ${targetTable} (
     id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
     external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
-    spawn_key, handoff_from_task_id, handoff_from_stage_id, created_at, updated_at
+    spawn_key, handoff_from_task_id, handoff_from_stage_id, project_id, created_at, updated_at
   )
   SELECT
     id, title, description, workflow_id, current_stage_id, status,
@@ -632,6 +698,7 @@ export function legacyTasksCopySql(targetTable: string, columns: ReadonlySet<str
     ${pick('spawned_by_run_id', 'NULL')}, ${pick('batch_no', 'NULL')},
     ${pick('spawn_key', 'NULL')},
     ${pick('handoff_from_task_id', 'NULL')}, ${pick('handoff_from_stage_id', 'NULL')},
+    ${pick('project_id', 'NULL')},
     created_at, updated_at
   FROM tasks`
 }
@@ -661,13 +728,14 @@ CREATE TABLE IF NOT EXISTS projection_meta (
 );
 `
 
-/** 投影集白名单：重建清空并重放的就是这十五张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
+/** 投影集白名单：重建清空并重放的就是这十六张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
 export const PROJECTION_TABLES = [
   'tasks',
   'workflows',
   'workflow_stages',
   'agents',
   'runtimes',
+  'projects',
   'runs',
   'run_events',
   'conversations',
@@ -688,6 +756,7 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   workflow_stages: tableDdl.stages(),
   agents: tableDdl.agents(),
   runtimes: tableDdl.runtimes(),
+  projects: tableDdl.projects(),
   runs: tableDdl.runs(),
   run_events: tableDdl.runEvents(),
   conversations: tableDdl.conversations(),
@@ -700,7 +769,7 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   task_comments: tableDdl.taskComments(),
 }
 
-/** 十五张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 十六张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */

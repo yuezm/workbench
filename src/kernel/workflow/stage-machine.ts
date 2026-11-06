@@ -61,7 +61,7 @@ export function resolveNextStage(
   return idx >= 0 ? (workflow.stages[idx + 1] ?? null) : null
 }
 
-/** 打回退回到的目标阶段；未配置且已是首阶段则留在原地。 */
+/** 打回退回到的目标阶段；未配置（不指定）则留在原地、不产生流转。 */
 export function resolveRejectStage(
   stage: WorkflowStage,
   workflow: WorkflowWithStages,
@@ -70,8 +70,7 @@ export function resolveRejectStage(
     const target = workflow.stages.find((s) => s.id === stage.onRejectStageId)
     if (target) return target
   }
-  const idx = indexOfStage(workflow, stage)
-  return idx > 0 ? workflow.stages[idx - 1] : stage
+  return stage
 }
 
 /** 进入阶段：产出新任务态与效果。 */

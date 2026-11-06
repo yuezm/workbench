@@ -180,7 +180,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 **目标解析（默认值，仅用于 run 结果自动流转）：**
 
 - `on_complete` 目标：显式配置 → 该阶段；未配置 → **下一顺序阶段**；已无下一阶段 → 任务 `completed`。
-- `on_reject` 目标：显式配置 → 该阶段；未配置 → **上一顺序阶段**；已是首阶段 → 留在原地。
+- `on_reject` 目标：显式配置 → 该阶段；未配置（不指定）→ **留在原地、不做任何流转**。
 
 手动拖拽**不套用**上面两个目标：落点即目标阶段（可跨阶段前跳/后退）。
 
@@ -190,13 +190,13 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | ENTER(stage)       | 新建任务 / 流转到某阶段      | 按该阶段 `entry_mode`：`none` 停留等待手动操作；`agent` 创建一条 `queued` run（交给 `agent_id`，视为执行中）；`user` 置为"等待你处理" |
 | RUN_SUCCEEDED(run) | agent run 正常结束           | 进入 `on_complete` 目标；到终端则 `completed`                                                                                         |
-| RUN_FAILED(run)    | agent run 非零退出/超时/异常 | 进入 `on_reject` 目标；若目标就是当前阶段（首阶段未配置打回目标，或显式配置为自身）则保持原阶段、**不触发进入效果**（不自动重建 run） |
+| RUN_FAILED(run)    | agent run 非零退出/超时/异常 | 进入 `on_reject` 目标；若未配置打回目标（不指定）或目标就是当前阶段则保持原阶段、**不触发进入效果**（不自动重建 run）                 |
 | MOVE_TO(stage)     | 用户把卡片拖到某个阶段列     | 直接进入该阶段（不套用 `on_complete`/`on_reject`）；该任务有活跃 run 时拒绝拖动                                                       |
 | COMPLETE           | 用户把卡片拖到「已完成」区   | 任务 `completed`，移出看板；该任务有活跃 run 时拒绝完成                                                                               |
 
 **流转即触发进入：** 每次进入新阶段都重新按 `entry_mode` 产生对应效果（可能再次创建 run），即"SOP 串联"。
 
-**打回原地不重试：** `RUN_FAILED` 时若 `on_reject` 解析结果就是当前阶段（首阶段未配置打回目标，或显式配置为自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成（见下）。
+**打回原地不重试：** `RUN_FAILED` 时若 `on_reject` 未配置（不指定）或解析结果就是当前阶段（显式配置为自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成（见下）。
 
 **执行中 = 有活跃 run：** `queued`/`running`/`waiting` run 才算执行中，由 `runs` 现算（不落库、不看阶段配置）；`tasks.moveToStage`/`tasks.complete` 只在存在活跃 run 时拒绝。任务的阶段在其 run 结束前不变。
 
@@ -258,7 +258,7 @@ export interface DetectedRuntime {
 - **候选清单**（`cli-catalog.ts`，顺序即输出顺序）：`dsh`、`claude`、`codex`、`gemini`、`opencode`、`aider`、`cursor-agent`、`qwen`、`goose`、`crush`。没有插件认领的 CLI 仍列出（`supported:false`，`executorKey=''`）。
 - **命中判定**：Windows 命中 `<cmd>.exe|.cmd|.bat|.ps1` 任一（npm 全局装的是 shim）；POSIX 命中同名且有可执行位（`mode & 0o111`）。同一命令多处命中取 PATH 中靠前者。
 - **零副作用**：不 spawn 任何进程、不读版本号，只读文件系统；`runtimes.detect` 不写库、不发 changed。
-- **UI 三态**：已添加过的命令显示「已添加」并禁用；`supported=true` 显示「使用」打开新建表单并预填 `label`/`command`/`executorKey`（名称与现有运行时重名时改为 `label (command)`）；`supported=false`（本机已装但无插件认领）显示「暂不支持」并禁用。检测只影响表单预填，不新建运行时记录。
+- **UI 三态**：已添加过的命令显示「已添加」并禁用；`supported=true` 显示「使用」打开新建表单并预填 `label`/`command`/`executorKey`（名称与现有运行时重名时改为 `label (command)`）；`supported=false`（本机已装但无插件认领）显示「不支持」并禁用，原因放按钮 title。检测只影响表单预填，不新建运行时记录。
 
 ### 执行协议（`dsh` 插件：`dsh --profile <p> --stdio`，JSONL v1）
 
@@ -352,31 +352,31 @@ export interface DetectedRuntime {
 `window.workbench`；renderer 禁止直接 import electron/fs/child_process。**旧 `window.aiWorkflow`
 命名空间与 `src/shared/ai-workflow-api.ts` 已删除**（AI 工作流 app 的读写在三动词上完成）。
 
-| 旧具名方法（M4 及以前）        | M5 走法                                                                                       |
-| ------------------------------ | --------------------------------------------------------------------------------------------- |
-| `runtimes.list()`              | `query('runtimes.all')`                                                                       |
-| `runtimes.statuses()`          | `query('runtimes.statuses')`                                                                  |
-| `runtimes.detect()`            | `query('runtimes.detected')`（宿主视图，只读）                                                |
-| `runtimes.executors()`         | `query('runtimes.executors')`（宿主视图，只读）                                               |
-| `runtimes.models(id)`          | `query('runtimes.models', { runtimeId })`（宿主视图）                                         |
-| `runtimes.create/update/remove`| `dispatch({ type:'runtime.create' \| 'runtime.update' \| 'runtime.remove', commandId, ... })`   |
-| `runtimes.probe(id)`           | `dispatch({ type:'runtime.probe', commandId, id })`（宿主探测 → 落 `runtime.probed`）         |
-| `agents.*`                     | `query('agents.all')` + `dispatch({type:'agent.create' \| 'agent.update' \| 'agent.remove'})`   |
-| `workflows.*`                  | `query('workflows.all')` + `dispatch(workflow.*)`                                             |
-| `tasks.list(workflowId)`       | `query('tasks.byWorkflow', { workflowId })`                                                   |
-| `tasks.create/moveToStage/complete/remove` | `dispatch({type:'task.create' \| 'task.move' \| 'task.complete' \| 'task.remove'})` |
-| `runs.listByTask(taskId)`      | `query('runs.byTask', { taskId })`                                                            |
-| `runs.events(runId)`           | `query('run.events', { runId })`                                                              |
-| `cards.open()`                 | `query('cards.open')`                                                                         |
-| `cards.answer(cardId, index)`  | `dispatch({type:'card.answer', commandId, cardId, optionIndex, via:'ui'})` → `value` 是回答后的卡 |
-| `chat.listConversations()`     | `query('conversations.all')`                                                                  |
-| `chat.listMessages(cid)`       | `query('messages.byConversation', { conversationId })`                                        |
-| `chat.createConversation`      | `dispatch({type:'chat.create', commandId, agentId})` → `value` 是新对话                       |
-| `chat.send(cid, content)`      | `dispatch({type:'chat.send', commandId, conversationId, content})`                            |
-| `chat.removeConversation`      | `dispatch({type:'chat.remove', commandId, conversationId})`（宿主先取消活跃 run）             |
-| `chat.cancel(cid)`             | `dispatch({type:'chat.cancel', commandId, conversationId})`                                   |
-| `chat.onEvent(cb)`             | `subscribe(handler)` 的 `{kind:'stream' \| 'stream-end'}`（过滤 `conversationId`）             |
-| `onChanged(cb)`                | `subscribe(handler)` 的 `{kind:'facts', seq, types}`（按类型失效、按需重取）                  |
+| 旧具名方法（M4 及以前）                    | M5 走法                                                                                           |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `runtimes.list()`                          | `query('runtimes.all')`                                                                           |
+| `runtimes.statuses()`                      | `query('runtimes.statuses')`                                                                      |
+| `runtimes.detect()`                        | `query('runtimes.detected')`（宿主视图，只读）                                                    |
+| `runtimes.executors()`                     | `query('runtimes.executors')`（宿主视图，只读）                                                   |
+| `runtimes.models(id)`                      | `query('runtimes.models', { runtimeId })`（宿主视图）                                             |
+| `runtimes.create/update/remove`            | `dispatch({ type:'runtime.create' \| 'runtime.update' \| 'runtime.remove', commandId, ... })`     |
+| `runtimes.probe(id)`                       | `dispatch({ type:'runtime.probe', commandId, id })`（宿主探测 → 落 `runtime.probed`）             |
+| `agents.*`                                 | `query('agents.all')` + `dispatch({type:'agent.create' \| 'agent.update' \| 'agent.remove'})`     |
+| `workflows.*`                              | `query('workflows.all')` + `dispatch(workflow.*)`                                                 |
+| `tasks.list(workflowId)`                   | `query('tasks.byWorkflow', { workflowId })`                                                       |
+| `tasks.create/moveToStage/complete/remove` | `dispatch({type:'task.create' \| 'task.move' \| 'task.complete' \| 'task.remove'})`               |
+| `runs.listByTask(taskId)`                  | `query('runs.byTask', { taskId })`                                                                |
+| `runs.events(runId)`                       | `query('run.events', { runId })`                                                                  |
+| `cards.open()`                             | `query('cards.open')`                                                                             |
+| `cards.answer(cardId, index)`              | `dispatch({type:'card.answer', commandId, cardId, optionIndex, via:'ui'})` → `value` 是回答后的卡 |
+| `chat.listConversations()`                 | `query('conversations.all')`                                                                      |
+| `chat.listMessages(cid)`                   | `query('messages.byConversation', { conversationId })`                                            |
+| `chat.createConversation`                  | `dispatch({type:'chat.create', commandId, agentId})` → `value` 是新对话                           |
+| `chat.send(cid, content)`                  | `dispatch({type:'chat.send', commandId, conversationId, content})`                                |
+| `chat.removeConversation`                  | `dispatch({type:'chat.remove', commandId, conversationId})`（宿主先取消活跃 run）                 |
+| `chat.cancel(cid)`                         | `dispatch({type:'chat.cancel', commandId, conversationId})`                                       |
+| `chat.onEvent(cb)`                         | `subscribe(handler)` 的 `{kind:'stream' \| 'stream-end'}`（过滤 `conversationId`）                |
+| `onChanged(cb)`                            | `subscribe(handler)` 的 `{kind:'facts', seq, types}`（按类型失效、按需重取）                      |
 
 - 所有写命令带 `commandId`；宿主 `commands` 表按事实区间回放，重复提交不重复产事实（reject 不缓存）。
 - `runtimes.create` 的 `RuntimeInput`：`name` 必填，其余可省略。`executorKey` / `command` / `profile` 的缺省值由宿主按所选执行器插件 manifest 补齐（未指定 key 取注册表首项，未知 key 给可读错误），`argsTemplate` 缺省为空串；创建前按补齐后的配置探测，失败不落库。
@@ -460,7 +460,7 @@ export function completeTask(task: Task): Task
 
 ## Open Questions
 
-1. **打回默认目标**：未配置【打回时退回到】时，按"退回上一阶段（首阶段原地）"执行；如需默认原地或其它，请指出。
+1. **打回默认目标**：未配置【打回时退回到】时默认「不指定」，即打回后原地不动、不做任何流转（已按此实现）。
 2. **`none` / `user` 阶段的推进方式**：看板上把卡片拖到目标阶段（已按此实现，不再有「推进 / 通过 / 打回」按钮）。
 3. **终端阶段**：最后阶段完成后任务置 `completed` 并移出看板；看板末尾的「已完成」区只是拖拽落点（显示已完成数量），不是可反向拖出的虚拟列。
 4. **运行时工作目录**：`workdir` 为 `null` 时用主进程当前目录（契约已定）；若希望按任务/项目指定，另行设计。

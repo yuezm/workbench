@@ -219,7 +219,7 @@ export interface StageInput {
   agentId?: string | null
   /** 完成后进入：目标阶段在 stages 数组中的下标；null/undefined = 默认（下一阶段 / 终端） */
   onCompleteIndex?: number | null
-  /** 打回时退回到：目标阶段下标；null/undefined = 默认（上一阶段 / 原地） */
+  /** 打回时退回到：目标阶段下标；null/undefined = 不指定（打回后原地不动、不流转） */
   onRejectIndex?: number | null
   /** 交接目标工作流 id（M7，可空）；语义校验用视图判断存在性与自指 */
   handoffWorkflowId?: string | null

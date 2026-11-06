@@ -210,12 +210,12 @@ describe('stage-machine（shared 用例并入）resolveRejectStage', () => {
     const a = sStage({ id: 'a', position: 2, onRejectStageId: 's0' })
     expect(resolveRejectStage(a, sWf([s0, s1, a])).id).toBe('s0')
   })
-  it('显式配置但目标不存在 → 回落到上一顺序阶段', () => {
+  it('显式配置但目标不存在 → 回落到原地（不指定）', () => {
     const a = sStage({ id: 'a', position: 2, onRejectStageId: 'ghost' })
-    expect(resolveRejectStage(a, sWf([s0, s1, a])).id).toBe('s1')
+    expect(resolveRejectStage(a, sWf([s0, s1, a])).id).toBe('a')
   })
-  it('未配置 → 上一顺序阶段', () => {
-    expect(resolveRejectStage(s2, sWf([s0, s1, s2])).id).toBe('s1')
+  it('未配置（不指定）→ 原地', () => {
+    expect(resolveRejectStage(s2, sWf([s0, s1, s2])).id).toBe('s2')
   })
   it('未配置且已是首阶段 → 原地', () => {
     expect(resolveRejectStage(s0, sWf([s0, s1])).id).toBe('s0')
@@ -264,10 +264,11 @@ describe('stage-machine（shared 用例并入）moveTask（自动流转）', () 
     expect(r.effects).toEqual([])
   })
 
-  it('RUN_FAILED 退回上一阶段', () => {
+  it('RUN_FAILED 未配置打回目标 → 原地不动', () => {
     const r = moveTask(sTask('s2'), { type: 'RUN_FAILED', runId: 'r' }, flow)
-    expect(r.task.currentStageId).toBe('s1')
+    expect(r.task.currentStageId).toBe('s2')
     expect(r.task.status).toBe('active')
+    expect(r.effects).toEqual([])
   })
 
   it('RUN_FAILED 在首阶段 → 原地且不重触发进入效果（避免无限重试）', () => {

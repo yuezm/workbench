@@ -149,7 +149,7 @@ describe('AgentManager', () => {
     await user.click(screen.getByRole('option', { name: 'claude · 可用' }))
     await user.type(screen.getByLabelText('智能体描述'), '写代码')
     await user.type(screen.getByLabelText('智能体能力'), 'you are coder')
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
     expect(kernel.dispatched[0]).toMatchObject({
@@ -177,8 +177,8 @@ describe('AgentManager', () => {
     expect(screen.getByText(/有描述/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '新建智能体' }))
-    expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
-    expect(screen.getByText(/请先在上方添加一个运行时/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
+    expect(screen.getByText(/先添加运行时/)).toBeInTheDocument()
   })
 
   it('智能体清单读取失败展示错误（非 Error 也会字符串化）', async () => {
@@ -201,7 +201,7 @@ describe('AgentManager', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '新建智能体' }))
     await user.type(screen.getByLabelText('智能体名称'), 'x')
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '取消' }))
@@ -240,7 +240,7 @@ describe('AgentManager', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '新建智能体' }))
     await user.type(screen.getByLabelText('智能体名称'), 'x')
-    await user.click(screen.getByRole('button', { name: '添加智能体' }))
+    await user.click(screen.getByRole('button', { name: '添加' }))
     expect(await screen.findByText('reload-boom')).toBeInTheDocument()
   })
 
@@ -250,10 +250,10 @@ describe('AgentManager', () => {
     const user = userEvent.setup()
     render(<AgentManager />)
     await user.click(screen.getByRole('button', { name: '新建智能体' }))
-    expect(screen.getByRole('button', { name: '添加智能体' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
 
     kernel.setView('runtimes.all', undefined, [rt])
-    await waitFor(() => expect(screen.getByRole('button', { name: '添加智能体' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加' })).toBeEnabled())
     expect(screen.getByLabelText('智能体运行时')).toHaveValue('r1')
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('ds · 可用')
 
@@ -261,7 +261,73 @@ describe('AgentManager', () => {
     kernel.setView('runtimes.all', undefined, [])
     await waitFor(() => expect(screen.getByLabelText('智能体运行时')).toHaveValue(''))
     await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('（无）'),
+      expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('无'),
     )
+  })
+
+  it('点击「编辑」预填表单并提交 agent.update（patch 覆盖）', async () => {
+    let agents: Agent[] = [agent({ name: 'old', description: '旧描述' })]
+    setup(agents, [rt])
+    handleDispatch((command) => {
+      if (command.type === 'agent.update') {
+        agents = agents.map((item) =>
+          item.id === command.id ? { ...item, ...command.patch } : item,
+        )
+        kernel.setView('agents.all', undefined, agents)
+        return { facts: [], value: agents.find((item) => item.id === command.id) ?? null }
+      }
+      return { facts: [], value: null }
+    })
+
+    render(<AgentManager />)
+    expect(await screen.findByText('old')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '编辑智能体 old' }))
+
+    expect(screen.getByRole('dialog')).toHaveTextContent('编辑智能体')
+    expect(screen.getByLabelText('智能体名称')).toHaveValue('old')
+    expect(screen.getByLabelText('智能体描述')).toHaveValue('旧描述')
+
+    await user.clear(screen.getByLabelText('智能体名称'))
+    await user.type(screen.getByLabelText('智能体名称'), 'new-name')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({
+      type: 'agent.update',
+      id: 'a1',
+      patch: { name: 'new-name', runtimeId: 'r1', description: '旧描述', systemPrompt: '' },
+    })
+    expect(await screen.findByText('new-name')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('编辑时保留已不可用的原绑定运行时，不被替换成其它运行时', async () => {
+    setup(
+      [agent({ runtimeId: 'r1' })],
+      [makeRuntime({ id: 'r1', name: 'ds', lastProbe: probe('unavailable') }), rt2],
+    )
+    const user = userEvent.setup()
+    render(<AgentManager />)
+    expect(await screen.findByText('old')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '编辑智能体 old' }))
+    expect(screen.getByLabelText('智能体运行时')).toHaveValue('r1')
+  })
+
+  it('更新失败在弹窗内展示错误并保持打开', async () => {
+    setup([agent()], [rt])
+    handleDispatch((command) =>
+      command.type === 'agent.update' ? Promise.reject(new Error('update-fail')) : { facts: [], value: null },
+    )
+
+    render(<AgentManager />)
+    expect(await screen.findByText('old')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: '编辑智能体 old' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('update-fail')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 })

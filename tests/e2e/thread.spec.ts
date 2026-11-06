@@ -85,7 +85,7 @@ test('线程面板：手工任务隐式线程 → 笔记 → 绑定入口 → �
   await page.getByRole('button', { name: '任务' }).click()
   await page.getByRole('button', { name: '新建任务' }).click()
   await page.getByLabel('任务标题').fill('e2e 线程任务')
-  await page.getByRole('button', { name: '创建任务' }).click()
+  await page.getByRole('button', { name: '创建' }).click()
   await expect(page.getByText('e2e 线程任务', { exact: true })).toBeVisible()
 
   expect.soft(readThreadState(seed.dbPath)).toMatchObject({
@@ -116,7 +116,7 @@ test('线程面板：手工任务隐式线程 → 笔记 → 绑定入口 → �
   await expect(dialog.getByText('已绑定：')).toBeVisible()
 
   // 5) 归档（thread.close）
-  await dialog.getByRole('button', { name: '关闭线程' }).click()
+  await dialog.getByRole('button', { name: '归档' }).click()
   await expect(dialog.getByText('已归档', { exact: true })).toBeVisible()
 
   await expect

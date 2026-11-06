@@ -927,13 +927,33 @@ describe('kernel/decide run.receipt 回执', () => {
     expect(decision.facts[0]?.type).toBe('run.failed')
   })
 
-  it('失败且上一阶段存在：产 task.moved 打回上一阶段', () => {
+  it('失败且未配置打回目标（不指定）：原地不动，只落 run.failed', () => {
     const current = task({ currentStageId: 'st-2' })
     const decision = receive(
       view({
         runs: [running()],
         workflows: [workflow()],
         stages: [stage({ id: 'st-1', position: 0 }), stage({ id: 'st-2', position: 1 })],
+        tasks: [current],
+      }),
+      'run-1',
+      receipt({ status: 'failed' }),
+    )
+
+    expect(decision.facts).toHaveLength(1)
+    expect(decision.facts[0]?.type).toBe('run.failed')
+  })
+
+  it('失败且显式配置打回目标：产 task.moved 到该阶段', () => {
+    const current = task({ currentStageId: 'st-2' })
+    const decision = receive(
+      view({
+        runs: [running()],
+        workflows: [workflow()],
+        stages: [
+          stage({ id: 'st-1', position: 0 }),
+          stage({ id: 'st-2', position: 1, onRejectStageId: 'st-1' }),
+        ],
         tasks: [current],
       }),
       'run-1',

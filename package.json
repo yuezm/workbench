@@ -6,8 +6,8 @@
   "author": "Workbench",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "start": "electron-vite preview",
+    "dev": "node scripts/electron-vite.mjs dev",
+    "start": "node scripts/electron-vite.mjs preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",

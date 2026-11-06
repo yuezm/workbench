@@ -351,6 +351,19 @@ describe('useChat', () => {
     expect(result.current.creating).toBe(false)
   })
 
+  it('删除失败为非 Error 时按字符串展示，选中不变', async () => {
+    seedConversations([c1])
+    kernel.onDispatch(() => Promise.reject('删除纯文本失败'))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.activeId).toBe('c1'))
+
+    await act(async () => {
+      await result.current.removeConversation('c1')
+    })
+    expect(result.current.error).toBe('删除纯文本失败')
+    expect(result.current.activeId).toBe('c1')
+  })
+
   it('会话列表加载失败写入 error，且没有选中会话', async () => {
     kernel.failView('conversations.all', undefined, '会话列表不可用')
     const { result } = mount()

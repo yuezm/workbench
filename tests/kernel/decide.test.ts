@@ -340,6 +340,28 @@ describe('kernel/decide 运行时', () => {
     })
   })
 
+  it('runtime.create：宿主未补齐 executorKey / command（字段缺省）时内核拒收', () => {
+    // `RuntimeInput.executorKey/command` 是可选字段：缺省值由宿主按执行器 manifest 补齐，
+    // 内核只认「已确定」，所以字段缺省必须与空串同样拒绝（不静默落一行无效配置）。
+    expect(
+      decide(view(), command({ type: 'runtime.create', input: { name: 'x' } }), NOW, env()),
+    ).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '运行时缺少执行器键（executorKey）' },
+    })
+    expect(
+      decide(
+        view(),
+        command({ type: 'runtime.create', input: { name: 'x', executorKey: 'dsh' } }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '运行时缺少启动命令（command）' },
+    })
+  })
+
   it('runtime.update：保留 createdAt 与 lastProbe，按 patch 覆盖', () => {
     const decision = decide(
       view({ runtimes: [runtime({ lastProbe: probe })] }),
@@ -405,6 +427,17 @@ describe('kernel/decide 运行时', () => {
         env(),
       ),
     ).toEqual({ facts: [], reject: { code: 'conflict', message: '运行时名称已存在: 另一个' } })
+  })
+
+  it('runtime.update：patch.profile 显式给出时裁剪并覆盖', () => {
+    expect(
+      decide(
+        view({ runtimes: [runtime({ profile: 'old' })] }),
+        command({ type: 'runtime.update', id: 'rt-1', patch: { profile: '  p2  ' } }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [at('runtime.updated', { runtime: runtime({ profile: 'p2' }) })] })
   })
 
   it('runtime.update：目标不存在与枚举/并发非法都 reject', () => {

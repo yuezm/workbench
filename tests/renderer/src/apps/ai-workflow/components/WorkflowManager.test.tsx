@@ -125,6 +125,20 @@ describe('WorkflowManager', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
+  it('保存失败为非 Error 时按字符串展示，弹窗保持打开', async () => {
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发')])
+    handleDispatch(() => Promise.reject('保存纯文本失败'))
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('研发')
+
+    await user.click(screen.getByRole('button', { name: '编辑' }))
+    await user.click(screen.getByRole('button', { name: '保存工作流' }))
+
+    expect(await screen.findByText('保存纯文本失败')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
   it('工作流视图读取失败展示错误', async () => {
     kernel.failView('workflows.all', undefined, 'wf-down')
     render(<WorkflowManager />)

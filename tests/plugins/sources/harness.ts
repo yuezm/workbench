@@ -31,7 +31,10 @@ export interface NetSdkOptions {
 export function sdkWithNet(options: NetSdkOptions = {}): NetSdk {
   const net = options.net ?? fakeNet()
   const base = fakeSdk({
-    config: <T = Record<string, unknown>>() => (options.config ?? {}) as T,
+    // null 是插件契约里的「未配置」：按原样透传（只有 undefined 才补空对象），
+    // 否则「宿主未合并默认值」的分支在测试里永远不会被触发。
+    config: <T = Record<string, unknown>>() =>
+      (options.config === undefined ? {} : options.config) as T,
     log: options.log ?? (() => undefined),
     net,
     ...(options.now !== undefined ? { now: options.now } : {}),

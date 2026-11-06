@@ -1068,6 +1068,26 @@ describe('importLegacyIfNeeded：M2 升级补迁移（facts 非空）', () => {
     expect(allFacts(db)).toEqual(before)
   })
 
+  it('补迁移不传 at：导入根时间取当前时刻（未指定选项）', () => {
+    const db = migratedDb()
+    const before = Date.now()
+    const result = importLegacyIfNeeded(db, realKernel)
+    const after = Date.now()
+
+    expect(result.counts).toEqual({ ...emptyCounts(), runs: 2, run_events: 5 })
+    // 前 5 条是实体五表的首次迁移根，后 2 条是本次补迁移的运行两表
+    const backfilled = allFacts(db).slice(5)
+    expect(backfilled.map((fact) => (fact.payload as { table: string }).table)).toEqual([
+      'runs',
+      'run_events',
+    ])
+    for (const fact of backfilled) {
+      const at = Date.parse(fact.at)
+      expect(at).toBeGreaterThanOrEqual(before)
+      expect(at).toBeLessThanOrEqual(after)
+    }
+  })
+
   it('补迁移超过 500 行按批次写多条事实', () => {
     const db = memory()
     seedMigratedEntities(db)

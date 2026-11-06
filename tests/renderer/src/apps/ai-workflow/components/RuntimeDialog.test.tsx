@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -502,5 +502,115 @@ describe('RuntimeDialog', () => {
     // 编辑态不预填：用户已有配置优先
     expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh')
     expect(screen.getByLabelText('运行时 profile')).toHaveValue('multica')
+  })
+
+  it('执行器清单查询无数据：按空清单处理并禁用下拉', async () => {
+    // 不预置 runtimes.executors：查询返回 undefined，弹窗按空清单处理
+    render(<RuntimeDialog initial={{ name: 'n' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
+
+    expect(await screen.findByText('无可用执行器')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '运行时执行器' })).toBeDisabled()
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('')
+  })
+
+  it('新建：显式预填的 profile 不被执行器 manifest 默认值覆盖', async () => {
+    setup()
+    render(
+      <RuntimeDialog
+        initial={{ name: 'n', profile: 'from-detect' }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    // command 仍按 manifest 首项预填，profile 保留调用方带入的值
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
+    expect(screen.getByLabelText('运行时 profile')).toHaveValue('from-detect')
+  })
+
+  it('编辑：模型目录查询无数据时保留手动输入的模型 id', async () => {
+    setup()
+    render(
+      <RuntimeDialog
+        runtime={makeRuntime({ model: 'custom/model' })}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByLabelText('运行时模型手填')).toHaveValue('custom/model')
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeEnabled())
+  })
+
+  it('执行器清单查询在切换编辑态后迟到的失败：不写进当前弹窗', async () => {
+    setup()
+    const original = kernel.store.query
+    let first = true
+    let rejectLate!: (error: unknown) => void
+    kernel.store.query = <T extends ViewId>(
+      view: T,
+      params?: ViewParams<T>,
+    ): Promise<ViewResult<T>> => {
+      if (view === 'runtimes.executors' && first) {
+        first = false
+        return new Promise<RuntimeExecutorChoice[]>((_resolve, reject) => {
+          rejectLate = reject
+        }) as Promise<ViewResult<T>>
+      }
+      return original(view, params)
+    }
+
+    const { rerender } = render(
+      <RuntimeDialog initial={{ name: 'n' }} onSubmit={vi.fn()} onCancel={vi.fn()} />,
+    )
+    // editing 变化会重建 effect：上一轮查询被弃用，迟到的失败不得写进仍在显示的弹窗
+    rerender(<RuntimeDialog runtime={makeRuntime()} onSubmit={vi.fn()} onCancel={vi.fn()} />)
+    // 第二轮执行器清单已返回（下拉可用）说明新 effect 已接管
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '运行时执行器' })).toBeEnabled(),
+    )
+
+    await act(async () => {
+      rejectLate(new Error('stale-executors'))
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByText(/执行器清单加载失败/)).not.toBeInTheDocument()
+  })
+
+  it('模型目录查询在切换运行时后迟到的失败：不写进当前弹窗', async () => {
+    setup()
+    const original = kernel.store.query
+    let first = true
+    let rejectLate!: (error: unknown) => void
+    kernel.store.query = <T extends ViewId>(
+      view: T,
+      params?: ViewParams<T>,
+    ): Promise<ViewResult<T>> => {
+      if (view === 'runtimes.models' && first) {
+        first = false
+        return new Promise<RuntimeModelOption[]>((_resolve, reject) => {
+          rejectLate = reject
+        }) as Promise<ViewResult<T>>
+      }
+      return original(view, params)
+    }
+
+    const { rerender } = render(
+      <RuntimeDialog runtime={makeRuntime()} onSubmit={vi.fn()} onCancel={vi.fn()} />,
+    )
+    // runtime 变化会重建 effect：旧运行时的模型查询被弃用，迟到的失败不写入
+    rerender(
+      <RuntimeDialog runtime={makeRuntime({ id: 'r2' })} onSubmit={vi.fn()} onCancel={vi.fn()} />,
+    )
+    // 新运行时的模型清单已返回（下拉可用）说明新 effect 已接管
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeEnabled())
+
+    await act(async () => {
+      rejectLate(new Error('stale-models'))
+      await Promise.resolve()
+    })
+
+    expect(screen.queryByText(/模型清单加载失败/)).not.toBeInTheDocument()
   })
 })

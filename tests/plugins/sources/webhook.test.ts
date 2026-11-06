@@ -481,6 +481,7 @@ describe('M7 覆盖补充：未配置/非 Error/头大小写', () => {
     const harness = sourceHarness({ config: null as never, net: fakeNet(), now: () => AT })
     const dispose = await webhookSource.start(harness.ctx)
     expect(harness.net.listeners).toEqual([])
+    expect(harness.logs.join('\n')).toContain('未配置 secret')
     expect(harness.logs.join('\n')).toContain('不监听')
     dispose()
     dispose()

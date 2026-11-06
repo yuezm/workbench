@@ -335,6 +335,34 @@ describe('Select', () => {
     spy.mockRestore()
   })
 
+  it('浮层有实际高度时按测量高度决定上翻位置与最大高度', async () => {
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      top: 700,
+      bottom: 740,
+      left: 40,
+      right: 240,
+      width: 200,
+      height: 40,
+      x: 40,
+      y: 700,
+      toJSON: () => ({}),
+    } as DOMRect)
+    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(200)
+    const user = userEvent.setup()
+    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
+
+    await user.click(screen.getByRole('combobox', { name: '选择器' }))
+    // 下方仅 20px（768 - 740 - 8）、上方 692px：测量高度 200 > 下方空间 → 上翻 200px
+    expect(screen.getByRole('listbox')).toHaveStyle({
+      top: '492px',
+      maxHeight: '320px',
+      left: '40px',
+      width: '200px',
+    })
+    rectSpy.mockRestore()
+    heightSpy.mockRestore()
+  })
+
   it('浮层最小宽度不小于 180px，避免窄触发器截断选项文字', async () => {
     const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
       top: 100,

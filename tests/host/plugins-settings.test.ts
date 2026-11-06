@@ -63,8 +63,15 @@ interface World {
   secrets: Map<string, Record<string, string>>
 }
 
+/** 额外可识别的插件（manifest 缺省 / 内置插件等边界用）；默认只有 webhook。 */
+interface WorldOptions {
+  manifests?: PluginManifest[]
+  /** 其中哪些算内置插件（seed 默认启用并授权全部声明能力） */
+  builtin?: readonly string[]
+}
+
 /** 每个用例一个真实 SQLite 临时文件库（走 `openDatabase` 的完整建库路径）。 */
-function world(): World {
+function world(options: WorldOptions = {}): World {
   const root = mkdtempSync(path.join(tmpdir(), 'aiwf-plugins-'))
   roots.push(root)
   const db = openDatabase(path.join(root, 'ai-workflow.db'))
@@ -72,26 +79,31 @@ function world(): World {
   const store = createStore({ db, kernel, now: () => AT, timezone: TZ })
   store.ensureProjection()
   const secrets = new Map<string, Record<string, string>>()
-  const manifestById = new Map<string, PluginManifest>([[webhookManifest.id, webhookManifest]])
+  const builtinIds = new Set(options.builtin ?? [])
+  const manifestById = new Map<string, PluginManifest>([
+    [webhookManifest.id, webhookManifest],
+    ...(options.manifests ?? []).map((manifest) => [manifest.id, manifest] as const),
+  ])
   const pluginDeps: PluginCommandDeps = {
     entry: (id) => {
       const manifest = manifestById.get(id)
-      return manifest === undefined ? null : { manifest, builtin: false }
+      return manifest === undefined ? null : { manifest, builtin: builtinIds.has(id) }
     },
     view: (id): PluginView | null => {
-      if (!manifestById.has(id)) return null
+      const manifest = manifestById.get(id)
+      if (manifest === undefined) return null
       const settings = store.query('plugins.settings').settings.find((row) => row.id === id)
       return {
         id,
-        kind: 'source',
-        name: webhookManifest.name,
-        version: webhookManifest.version,
+        kind: manifest.kind,
+        name: manifest.name,
+        version: manifest.version,
         description: '',
-        builtin: false,
+        builtin: builtinIds.has(id),
         enabled: settings?.enabled ?? false,
-        declared: ['net'],
+        declared: [...manifest.capabilities],
         granted: settings?.granted ?? [],
-        configFields: [...(webhookManifest.config ?? [])],
+        configFields: [...(manifest.config ?? [])],
         config: settings?.config ?? {},
         secretKeys: Object.keys(secrets.get(id) ?? {}),
         status: settings?.enabled === true ? 'ready' : 'disabled',
@@ -217,6 +229,70 @@ describe('plugin.set 编排（M7）', () => {
       enabled: true,
     })
     expect(settingsOf(store).version).toBe(1)
+  })
+})
+
+const builtinManifest: PluginManifest = {
+  id: 'builtin-source',
+  kind: 'source',
+  name: '内置来源',
+  version: '1.0.0',
+  capabilities: ['net'],
+}
+
+/** manifest 声明了一个非 secret 字段但没有默认值（seed 不应写入该键）。 */
+const noDefaultManifest: PluginManifest = {
+  id: 'plain-source',
+  kind: 'source',
+  name: '无默认来源',
+  version: '1.0.0',
+  capabilities: [],
+  config: [{ key: 'label', label: '名称', type: 'text' }],
+}
+
+describe('plugin.set 编排：manifest 缺省与内置插件（M7）', () => {
+  it('内置插件：新行默认启用并授权全部声明能力（manifest 无 config 时配置为空对象）', async () => {
+    const { store, router } = world({ manifests: [builtinManifest], builtin: ['builtin-source'] })
+
+    const result = await router.dispatch({
+      type: 'plugin.set',
+      commandId: 'b-1',
+      pluginId: 'builtin-source',
+    })
+
+    expect(settingsOf(store).settings).toEqual([
+      { id: 'builtin-source', kind: 'source', enabled: true, granted: ['net'], config: {} },
+    ])
+    expect(result.value).toMatchObject({ builtin: true, enabled: true, granted: ['net'] })
+  })
+
+  it('manifest 非 secret 字段没有默认值：seed 不写该键（等用户配置）', async () => {
+    const { store, router } = world({ manifests: [noDefaultManifest] })
+
+    await router.dispatch({
+      type: 'plugin.set',
+      commandId: 'p-1',
+      pluginId: 'plain-source',
+      enabled: true,
+    })
+
+    expect(settingsOf(store).settings).toEqual([
+      { id: 'plain-source', kind: 'source', enabled: true, granted: [], config: {} },
+    ])
+  })
+
+  it('manifest 没有声明 config：空 secret patch 仍合法并落到宿主 secret 表', async () => {
+    const { router, secrets } = world({ manifests: [builtinManifest] })
+
+    const saved = await router.dispatch({
+      type: 'plugin.set',
+      commandId: 's-1',
+      pluginId: 'builtin-source',
+      secrets: {},
+    })
+
+    expect(secrets.get('builtin-source')).toEqual({})
+    expect(saved.value).toMatchObject({ secretKeys: [] })
   })
 })
 

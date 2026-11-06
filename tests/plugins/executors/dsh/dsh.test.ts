@@ -465,6 +465,14 @@ describe('listDshModels', () => {
     const h = harness()
     await expect(listDshModels(ctxOf(h, { command: 'missing-cmd-xyz' }))).rejects.toThrow(/PATH/)
   })
+
+  it('被信号杀掉（退出码 null）且无模型帧：错误文案显示退出码 null', async () => {
+    const h = harness((_args, child) => {
+      child.close(null)
+    })
+
+    await expect(listDshModels(ctxOf(h))).rejects.toThrow('读取模型目录退出码 null')
+  })
 })
 
 describe('executeDshRun', () => {
@@ -1272,6 +1280,21 @@ describe('取消/超时终止的定时器收尾（假定时器）', () => {
       { pid: 4242, signal: 'SIGTERM' },
       { pid: 4242, signal: 'SIGTERM' },
     ])
+  })
+
+  it('turn.timeoutMs 非正数且未注入 options.timeouts：回退到 RUN_TIMEOUT_MS 超时', async () => {
+    const h = harness()
+    const { running } = startRun(h, { turn: { timeoutMs: 0 } })
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+
+    vi.advanceTimersByTime(RUN_TIMEOUT_MS)
+
+    expect(child.frames().at(-1)).toMatchObject({ type: 'cancel' })
+    child.close(null)
+    const receipt = await running
+    expect(receipt.errorCode).toBe('timeout')
+    expect(receipt.error).toContain(`${RUN_TIMEOUT_MS}ms`)
   })
 })
 

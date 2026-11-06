@@ -6,7 +6,7 @@ import type { Command } from '../../../src/protocol/commands'
 import { projectionFormat } from '../../../src/host/schema'
 import { createStore } from '../../../src/host/store/index'
 import { createFakeKernel } from './fake-kernel'
-import { readProjectionMeta } from '../../../src/host/store/projection'
+import { readProjectionMeta, rebuildProjection } from '../../../src/host/store/projection'
 import {
   SAMPLE_AT,
   countRows,
@@ -281,5 +281,32 @@ describe('rebuild：增量应用与重建等价', () => {
         .prepare('INSERT INTO runs (id, task_id, status, created_at) VALUES (?, ?, ?, ?)')
         .run('run-2', 'tk-missing', 'queued', SAMPLE_AT),
     ).toThrow()
+  })
+
+  it('调用方已关外键：重建不强行打开（保持组合方的连接状态）', () => {
+    const db = memory()
+    const kernel = createFakeKernel()
+    const store = createStore({
+      db,
+      kernel,
+      now: () => SAMPLE_AT,
+      newId: sequenceIds('wf-1', 'st-1', 'tk-1'),
+    })
+    store.dispatch(workflowCreate('流程', 1))
+    store.dispatch({
+      type: 'task.create',
+      commandId: 'task',
+      input: { title: '任务', workflowId: 'wf-1' },
+    })
+
+    // 组合方在调用重建前自己关了外键：重建不应把它的开关改回去
+    db.exec('PRAGMA foreign_keys = OFF')
+    rebuildProjection(db, kernel)
+
+    expect(
+      (db.prepare('PRAGMA foreign_keys').get() as unknown as { foreign_keys: number }).foreign_keys,
+    ).toBe(0)
+    expect(countRows(db, 'workflow_stages')).toBe(1)
+    expect(countRows(db, 'tasks')).toBe(1)
   })
 })

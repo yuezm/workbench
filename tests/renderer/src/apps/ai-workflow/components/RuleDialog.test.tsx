@@ -265,6 +265,27 @@ describe('RuleDialog', () => {
     )
   })
 
+  it('重选当前工作流不清掉已选的起始阶段', async () => {
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={blankRule()}
+        isNew
+        workflows={workflows}
+        onSubmit={() => Promise.resolve()}
+        onCancel={() => {}}
+      />,
+    )
+
+    await choose(user, '规则目标工作流', '研发')
+    await choose(user, '规则起始阶段', '审核')
+    expect(screen.getByRole('combobox', { name: '规则起始阶段' })).toHaveTextContent('审核')
+
+    // 再次点同一工作流：阶段仍属于它，不应被清空
+    await choose(user, '规则目标工作流', '研发')
+    expect(screen.getByRole('combobox', { name: '规则起始阶段' })).toHaveTextContent('审核')
+  })
+
   it('编辑回填：现有字段与启用状态还原，取消不改动', async () => {
     const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
     const onCancel = vi.fn()

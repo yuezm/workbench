@@ -103,6 +103,14 @@ describe('defaultSpawn', () => {
     wrapped.kill('SIGKILL')
     expect(child.kill).toHaveBeenCalledWith('SIGKILL')
   })
+
+  it('未指定 shell：默认 false（只有 Windows 的 .cmd/.bat 才经 shell 启动）', () => {
+    spawnMock.mockReturnValue(fakeChild())
+
+    defaultSpawn('dsh', [], { env: {} })
+
+    expect(spawnMock).toHaveBeenCalledWith('dsh', [], expect.objectContaining({ shell: false }))
+  })
 })
 
 describe('killPidTree', () => {

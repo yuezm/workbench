@@ -336,6 +336,20 @@ describe('detect 汇总（D8）', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('扫描炸了'))
   })
 
+  it('清单外命令排在前面时同样稳定排序（比较器另一向的清单外兜底）', async () => {
+    const entries = [
+      fakeEntry('dsh-like', () => [rawHit('dsh')]),
+      fakeEntry('extra', () => [rawHit('my-cli')]),
+    ]
+
+    const result = await detectAllWith(entries, fakeSdkHost({ dirs: ['/bin'] }))
+
+    expect(result.map((item) => [item.command, item.executorKey, item.supported])).toEqual([
+      ['dsh', 'dsh-like', true],
+      ['my-cli', 'extra', true],
+    ])
+  })
+
   it('cli-catalog 顺序即汇总输出顺序（顺序表与常量保持唯一来源）', () => {
     expect(CLI_CANDIDATES.map((item) => item.command)).toEqual([
       'dsh',

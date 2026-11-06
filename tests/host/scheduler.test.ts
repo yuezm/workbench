@@ -883,6 +883,129 @@ describe('createScheduler：防御性分支', () => {
   })
 })
 
+/** 异常数据：租约为空的 run 行（id / turn 与投影行一致，只是没有租约）。 */
+const leaseLessRow = (seeded: Seeded, overrides: Partial<RunRow> = {}): RunRow =>
+  ({
+    id: seeded.runId,
+    runtimeId: seeded.runtime.id,
+    leaseId: null,
+    turn: 1,
+    status: 'queued',
+    ...overrides,
+  }) as unknown as RunRow
+
+describe('createScheduler：无租约 run 的兜底终态', () => {
+  it('运行时不存在：兜底 failed/runtime_missing（租约缺省不拦终态写入）', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(portOf((turn) => receiptOf(turn)))
+
+    scheduler.start({ ...leaseLessRow(seeded), runtimeId: 'rt-missing' })
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'failed',
+      error_code: 'runtime_missing',
+    })
+    expect(scheduler.active()).toEqual([])
+  })
+
+  it('聊天 run 拿不到完整历史：Turn.fallbackPrompt 为 null（不伪造提示词）', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const captured: Turn[] = []
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        captured.push(turn)
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { chatFallbackPrompt: () => null },
+    )
+
+    scheduler.start(leaseLessRow(seeded, { purpose: 'chat', conversationId: 'cv-1' }))
+    await Promise.resolve()
+
+    expect(captured[0]?.purpose).toBe('chat')
+    expect(captured[0]?.fallbackPrompt).toBeNull()
+
+    gate.resolve()
+    await scheduler.idle()
+  })
+
+  it('取消无租约 run：宽限与强杀等待都到期后写兜底 cancelled', async () => {
+    const seeded = seed()
+    const timer = fakeTimer()
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer },
+    )
+
+    scheduler.start(leaseLessRow(seeded))
+    await Promise.resolve()
+    scheduler.cancel(seeded.runId)
+
+    // 宽限到期：没有登记 pid，不杀进程，挂强杀等待
+    timer.fireTimeouts()
+    expect(runById(seeded.runId)?.status).toBe('queued')
+
+    // 强杀等待到期：宿主写兜底 cancelled（租约为空所以不带 leaseId）
+    timer.fireTimeouts()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'cancelled',
+      error_code: 'cancelled',
+      error: '已取消',
+    })
+    gate.resolve()
+  })
+
+  it('取消时执行器抛空消息错误：错误文案回退「已取消」', async () => {
+    const seeded = seed()
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async () => {
+        await gate.promise
+        throw new Error('')
+      }),
+    )
+
+    scheduler.start(leaseLessRow(seeded))
+    await Promise.resolve()
+    scheduler.cancel(seeded.runId)
+    gate.resolve()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'cancelled',
+      error_code: 'cancelled',
+      error: '已取消',
+    })
+  })
+
+  it('未取消时执行器抛错（无租约 run）：兜底 failed/executor_lost 并带原始错误', async () => {
+    const seeded = seed()
+    const scheduler = makeScheduler(
+      portOf(() => {
+        throw new Error('boom')
+      }),
+    )
+
+    scheduler.start(leaseLessRow(seeded))
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'failed',
+      error_code: 'executor_lost',
+      error: 'boom',
+    })
+  })
+})
+
 describe('createScheduler：帧批量入账（T12）', () => {
   it('运行中按时间窗 flush：16ms 到点写 run.frames，不必等终态', async () => {
     const seeded = seed()

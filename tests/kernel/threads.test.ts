@@ -331,6 +331,34 @@ describe('kernel/threads 读视图', () => {
     expect(threadSessions(view, 'th-1')).toEqual({ 'ag-1': 'sess-2', 'ag-2': 'sess-b' })
   })
 
+  it('threadSessions：终态 run 缺 endedAt 时按 createdAt 兜底，与插入顺序无关', () => {
+    // 历史 / 脏投影里终态 run 可能没有 endedAt：取 `createdAt` 参与排序，
+    // 后写覆盖先写，因此两种插入顺序都必须落到同一条最新会话。
+    const ended = run({ id: 'run-new', endedAt: '2026-11-02T00:00:00.000Z', sessionId: 'sess-new' })
+    const noEnd = run({
+      id: 'run-old',
+      endedAt: null,
+      createdAt: '2026-11-01T00:00:00.000Z',
+      sessionId: 'sess-old',
+    })
+
+    const endedFirst = emptyView({
+      runs: new Map([
+        [ended.id, ended],
+        [noEnd.id, noEnd],
+      ]),
+    })
+    expect(threadSessions(endedFirst, 'th-1')).toEqual({ 'ag-1': 'sess-new' })
+
+    const noEndFirst = emptyView({
+      runs: new Map([
+        [noEnd.id, noEnd],
+        [ended.id, ended],
+      ]),
+    })
+    expect(threadSessions(noEndFirst, 'th-1')).toEqual({ 'ag-1': 'sess-new' })
+  })
+
   it('runCountOfTask / queuedRunOfTask', () => {
     const runs = [
       run({ id: 'run-1', status: 'succeeded' }),

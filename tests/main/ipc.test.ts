@@ -105,6 +105,14 @@ describe('main 进程 IPC（M5 三动词 + 通知）', () => {
     })
   })
 
+  it('dispatch：非 Error 拒绝按 String 归一 message（不丢原因、不抛）', async () => {
+    vi.mocked(router.dispatch).mockRejectedValueOnce('执行器插件未注册: x')
+    expect(await handlerFor(WORKBENCH_DISPATCH_CHANNEL)({}, {})).toEqual({
+      ok: false,
+      error: { code: 'internal', message: '执行器插件未注册: x' },
+    })
+  })
+
   it('query：view 与 params 原样传给路由，成功同样包信封', async () => {
     vi.mocked(router.query).mockResolvedValueOnce([{ id: 'wf-1' }])
     const response = await handlerFor(WORKBENCH_QUERY_CHANNEL)({}, 'tasks.byWorkflow', {

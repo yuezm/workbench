@@ -10,6 +10,7 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 ## 质量约束
 
 - 写代码前先读 [CONSTRAINTS.md](CONSTRAINTS.md)，**不得为了过关而放松它**；改代码前后跑 `pnpm check`。
+- 一次性运行日志（`check-run-*.log`、`e2e-run-*.log` 等）与临时产物放 `.scratch/`（已 git 忽略），不要放项目根目录。
 
 ## 设计原则
 

@@ -369,6 +369,27 @@ describe('reconcile：无残留', () => {
     })
     expect(registryPids()).toEqual([])
   })
+
+  it('未注入 killPid：走默认进程树终止入口，没有残留行时零终止', () => {
+    const { runId } = claimRun()
+    staleLease(runId, { leaseUntil: '2099-01-01T00:00:00.000Z' })
+
+    // 不传 killPid：reconcile 用默认 killPidTree；登记表为空所以不会真的终止任何进程
+    const summary = reconcile({
+      registry: world.registry,
+      dispatch: (input) => world.store.dispatch(input),
+      runStatus,
+    })
+
+    expect(summary).toEqual({
+      killed: 0,
+      cleared: 0,
+      settledChats: 0,
+      settledWaitings: 0,
+      facts: 0,
+    })
+    expect(runStatus(runId)).toBe('running')
+  })
 })
 
 describe('reconcile：中断的聊天轮次（T14b）', () => {
@@ -451,6 +472,27 @@ describe('reconcile：中断的聊天轮次（T14b）', () => {
   it('没有中断聊天时 settledChats 为 0（阶段 run 仍走 clock.tick 回收）', () => {
     const { summary } = runReconcile()
     expect(summary.settledChats).toBe(0)
+  })
+
+  it('聊天 run 的租约已清空：按无租约口径兜底落终态', () => {
+    const chat = claimChatRun()
+    // 崩溃恢复读到的行可能没有 leaseId（历史行 / 手工清过）：不拿未定义租约去对账
+    const { summary } = runReconcile(
+      () => true,
+      () => [{ id: chat.runId, leaseId: null, turn: chat.turn }],
+    )
+
+    expect(summary.settledChats).toBe(1)
+    expect(runRow(chat.runId)).toMatchObject({ status: 'failed', error_code: 'executor_lost' })
+  })
+
+  it('重复对账：已终态的聊天 run 不再产事实（settledChats 归零）', () => {
+    const chat = claimChatRun()
+    const stale = () => [{ id: chat.runId, leaseId: chat.leaseId, turn: chat.turn }]
+
+    expect(runReconcile(() => true, stale).summary.settledChats).toBe(1)
+    expect(runReconcile(() => true, stale).summary.settledChats).toBe(0)
+    expect(runRow(chat.runId)).toMatchObject({ status: 'failed', error_code: 'executor_lost' })
   })
 })
 

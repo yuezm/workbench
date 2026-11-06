@@ -169,6 +169,21 @@ describe('parseExternalManifest（M7 外部插件清单）', () => {
     ).toContain('仅 select 可用')
   })
 
+  it('number / boolean 字段可带 help、可不带 default', () => {
+    const parsed = okManifest(
+      manifest({
+        config: [
+          { key: 'count', label: '数量', type: 'number', help: '1–10 的整数' },
+          { key: 'enabled', label: '开关', type: 'boolean' },
+        ],
+      }),
+    )
+    expect(parsed.config).toEqual([
+      { key: 'count', label: '数量', type: 'number', help: '1–10 的整数' },
+      { key: 'enabled', label: '开关', type: 'boolean' },
+    ])
+  })
+
   it('config 键重复拒绝', () => {
     const config = [
       { key: 'k', label: 'l', type: 'text' },

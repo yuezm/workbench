@@ -380,6 +380,17 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText('mboom')).toBeInTheDocument()
   })
 
+  it('写命令失败为非 Error 时按字符串展示', async () => {
+    seedBase()
+    dispatchWith(() => Promise.reject('纯文本失败'))
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+    await screen.findByText(/工作流「研发」/)
+    dragTo('任务：任务A', '阶段：审核')
+    expect(await screen.findByText('纯文本失败')).toBeInTheDocument()
+  })
+
   it('拖到已完成失败展示错误', async () => {
     seedBase()
     dispatchWith(() => Promise.reject(new Error('dboom')))

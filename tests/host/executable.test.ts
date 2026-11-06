@@ -108,6 +108,13 @@ describe('resolveExecutable', () => {
     expect(resolved.path).toBe(path.join(dir, 'dsh.cmd'))
   })
 
+  it('POSIX 下带分隔符的路径不补 Windows 后缀：找不到直接报错', () => {
+    const missing = path.join(root, 'nope', 'dsh')
+    const resolved = resolveExecutable(missing, { platform: 'linux' })
+    expect(resolved.path).toBeNull()
+    expect(resolved.error).toBe(`找不到可执行文件：${path.resolve(missing)}`)
+  })
+
   it('命令名在注入目录中命中', () => {
     const dir = dirWith({ 'dsh.cmd': 'x' })
     expect(resolveExecutable('dsh', { dirs: [dir], platform: 'win32' }).path).toBe(

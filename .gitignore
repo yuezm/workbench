@@ -18,7 +18,8 @@ blob-report/
 .eslintcache
 .husky/_/
 
-# ---- 日志 ----
+# ---- 日志 / 一次性运行产物 ----
+.scratch/
 *.log
 npm-debug.log*
 yarn-debug.log*

@@ -170,6 +170,24 @@ describe('source hub：启动与事件转发', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('来源 off 未启用'))
   })
 
+  it('未注入 log：日志回退到 sdkHost.log（来源停用也留痕迹）', async () => {
+    const write = fakeSdkHost.log as unknown as ReturnType<typeof vi.fn>
+    write.mockClear()
+    const hub = createSources({
+      entries: [fakeEntry('hook')],
+      sdkHost: fakeSdkHost,
+      effects: { dispatch: vi.fn(() => ({ facts: [] })) } as unknown as SourcesEffects,
+      configOf: () => ({}),
+      isEnabled: () => false,
+    })
+
+    await hub.startAll()
+
+    expect(write).toHaveBeenCalledWith('[sources] 来源 hook 未启用，已跳过')
+    expect(hub.statuses()).toEqual([{ key: 'hook', state: 'disabled', error: null }])
+    await hub.stopAll()
+  })
+
   it('startAll 重复调用只启动一次；启动前状态为 idle', async () => {
     const start = vi.fn(async () => () => undefined)
     const entry: SourceRegistryEntry = {

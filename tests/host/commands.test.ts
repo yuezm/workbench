@@ -695,6 +695,35 @@ describe('host/commands：命令路由（M5）', () => {
     expect(result.facts).toEqual([])
     expect(result.value).toBeNull()
   })
+
+  it('回放 chat.create：对话已被删除时实体值为 null（不伪造行）', async () => {
+    const { db, store, router } = setup()
+    db.prepare(
+      `INSERT INTO facts (type, actor_json, at, cause, hops, payload) VALUES
+       ('conversation.created', '{"kind":"owner","via":"ui"}', ?, NULL, NULL,
+        '{"conversation":{"id":"cv-gone"}}')`,
+    ).run(NOW)
+    const seq = (db.prepare('SELECT MAX(seq) AS n FROM facts').get() as unknown as { n: number }).n
+    store.rememberCommand('c-chat-gone', [
+      {
+        seq,
+        type: 'conversation.created',
+        actor: { kind: 'owner', via: 'ui' },
+        at: NOW,
+        payload: { conversation: { id: 'cv-gone' } },
+      } as never,
+    ])
+
+    const result = await router.dispatch({
+      commandId: 'c-chat-gone',
+      type: 'chat.create',
+      agentId: 'ag-1',
+    })
+
+    expect(result.facts).toHaveLength(1)
+    expect(result.facts[0]?.type).toBe('conversation.created')
+    expect(result.value).toBeNull()
+  })
 })
 
 describe('host/commands：防御分支与默认值', () => {
@@ -768,6 +797,14 @@ describe('host/commands：防御分支与默认值', () => {
       { commandId: 'e8', type: 'card.answer', cardId: 'card-1', optionIndex: 0 },
       { commandId: 'e9', type: 'card.resolve', cardId: 'card-1' },
       { commandId: 'e10', type: 'chat.create', agentId: 'ag-1' },
+      {
+        commandId: 'e11',
+        type: 'workflow.update',
+        id: 'wf-missing',
+        input: { name: 'x', stages: [{ name: '待办', entryMode: 'none' }] },
+      },
+      { commandId: 'e12', type: 'agent.update', id: 'ag-missing', patch: { name: 'x' } },
+      { commandId: 'e13', type: 'rule.trigger', ruleId: 'rule-missing' },
     ]
     for (const command of cases) store.rememberCommand(command.commandId, [])
     for (const command of cases) {

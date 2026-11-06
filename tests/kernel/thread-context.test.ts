@@ -412,4 +412,55 @@ describe('kernel/thread-context', () => {
     expect(text).toContain('099-')
     expect(text).not.toContain('000-')
   })
+
+  it('运行缺 endedAt：按 createdAt 兜底参与排序（两侧比较都走兜底）', () => {
+    // 终态 run 的 endedAt 缺失属于脏投影兜底：排序键回落到 createdAt，
+    // 缺 endedAt 的一方排在后面，作为比较左操作数进入兜底。
+    const ended = run({
+      id: 'run-ended',
+      endedAt: '2026-11-02T00:00:00.000Z',
+      output: '有结束时间',
+    })
+    const noEnd = run({
+      id: 'run-no-end',
+      endedAt: null,
+      createdAt: '2026-11-01T00:00:00.000Z',
+      output: '无结束时间',
+    })
+    const seeded = view({
+      runs: new Map([
+        [ended.id, ended],
+        [noEnd.id, noEnd],
+      ]),
+    })
+    const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
+    const runPart = text.slice(text.indexOf('## 最近运行'), text.indexOf('## 未决卡片'))
+    expect(runPart.indexOf('无结束时间')).toBeLessThan(runPart.indexOf('有结束时间'))
+  })
+
+  it('截断排序：同刻同文的笔记按原始顺序稳定取舍（不越限、不丢新任务）', () => {
+    // 两条 at / 正文完全相同的笔记在「按时间倒序丢弃」时 byTime 相等，
+    // 必须回落到原始下标决定取舍；无论丢哪条，可观察文本都一致。
+    const tasks = new Map<string, Task>()
+    const taskIds: string[] = []
+    for (let index = 0; index < 100; index += 1) {
+      const id = `task-${index}`
+      taskIds.push(id)
+      tasks.set(id, task({ id, title: `${String(index).padStart(3, '0')}-${'x'.repeat(90)}` }))
+    }
+    const repeatedA = note({ id: 'note-a', text: '重复笔记' })
+    const repeatedB = note({ id: 'note-b', text: '重复笔记' })
+    const seeded = thread({
+      taskIds,
+      rootTaskIds: taskIds,
+      notes: [repeatedA, repeatedB],
+      events: [],
+    })
+    const text = threadContextText(view({ tasks, threads: new Map([['th-1', seeded]]) }), seeded)
+    expect(Array.from(text).length).toBeLessThanOrEqual(THREAD_LIMITS.contextChars)
+    expect(text).toContain('已截断')
+    expect(text).toContain('099-')
+    expect(text).not.toContain('000-')
+    expect(text).not.toContain('重复笔记')
+  })
 })

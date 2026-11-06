@@ -377,6 +377,19 @@ describe('renderer/shell/kernelStore', () => {
     expect(streamed.map((event) => event.kind)).toEqual(['stream-end'])
     off()
   })
+
+  it('落后于已知水位的事实批次不推进 seq', async () => {
+    const fake = fakeTransport()
+    const store = createKernelStore(fake.transport)
+    await started(store)
+
+    fake.emit({ kind: 'facts', seq: 7, types: ['agent.created'] })
+    expect(store.seq).toBe(7)
+
+    // 重连 / 乱序补发的旧批次：不把水位拉回去
+    fake.emit({ kind: 'facts', seq: 3, types: ['agent.created'] })
+    expect(store.seq).toBe(7)
+  })
 })
 
 /** useKernelView：视图值变化驱动重渲染（不轮询、不重复订阅）。 */
@@ -459,6 +472,28 @@ function DisabledProbe(): ReactElement {
     </div>
   )
 }
+
+/** params=null：暂不订阅（id 未选），不发查询、返回 undefined。 */
+function DisabledViewProbe(): ReactElement {
+  const value = useKernelView('agents.all', null)
+  return (
+    <div data-testid="view-disabled">{value === undefined ? 'none' : String(value.length)}</div>
+  )
+}
+
+describe('renderer/shell/useKernelView：params=null 返回 undefined（不订阅）', () => {
+  it('不发查询、返回 undefined', async () => {
+    const fake = fakeTransport({ 'agents.all': [] })
+    configureKernel(fake.transport)
+    render(<DisabledViewProbe />)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(fake.queries.some((entry) => entry.view === 'agents.all')).toBe(false)
+    expect(screen.getByTestId('view-disabled').textContent).toBe('none')
+    resetKernelForTest()
+  })
+})
 
 describe('renderer/shell/useKernelView：params=null 暂不订阅', () => {
   it('不发查询、不返回 loading、无错误', async () => {

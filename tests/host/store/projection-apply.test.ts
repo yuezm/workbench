@@ -2,7 +2,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '../../../src/kernel/types'
-import type { RunRow, Task } from '../../../src/protocol/entities'
+import type { RunRow, Runtime, Task } from '../../../src/protocol/entities'
 import type { PluginSettingsRow } from '../../../src/protocol/plugins'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '../../../src/protocol/rules'
 import { withTx } from '../../../src/host/schema'
@@ -549,6 +549,56 @@ describe('createProjectionWriter：显式行映射', () => {
       turn: 1,
       queue_seq: 0,
       cancel_requested: 0,
+    })
+  })
+
+  it('存量 runtime 行缺 M3 新列：executor_key 按旧协议族映射，args_template 补空串', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    // M1/v2 行没有 executorKey / argsTemplate：一个带旧 protocolFamily，一个两样都缺。
+    const withFamily = {
+      ...sample.runtime({ id: 'rt-legacy', name: '旧运行时' }),
+      executorKey: undefined,
+      argsTemplate: undefined,
+      protocolFamily: 'dsh',
+    } as unknown as Runtime
+    const bare = {
+      ...sample.runtime({ id: 'rt-bare', name: '无键运行时' }),
+      executorKey: undefined,
+      argsTemplate: undefined,
+    } as unknown as Runtime
+
+    writer.apply({ table: 'runtimes', key: withFamily.id, row: withFamily }, SAMPLE_AT)
+    writer.apply({ table: 'runtimes', key: bare.id, row: bare }, SAMPLE_AT)
+
+    expect(
+      db.prepare('SELECT id, executor_key, args_template FROM runtimes ORDER BY id').all(),
+    ).toEqual([
+      { id: 'rt-bare', executor_key: '', args_template: '' },
+      { id: 'rt-legacy', executor_key: 'dsh', args_template: '' },
+    ])
+  })
+
+  it('存量 run 行缺 prompt / output：写入时补空串（不留 null）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const legacy = {
+      ...sample.run({
+        id: 'run-no-text',
+        taskId: null,
+        stageId: null,
+        agentId: null,
+        runtimeId: null,
+      }),
+      prompt: undefined,
+      output: undefined,
+    } as unknown as RunRow
+
+    writer.apply({ table: 'runs', key: legacy.id, row: legacy }, SAMPLE_AT)
+
+    expect(db.prepare("SELECT prompt, output FROM runs WHERE id = 'run-no-text'").get()).toEqual({
+      prompt: '',
+      output: '',
     })
   })
 

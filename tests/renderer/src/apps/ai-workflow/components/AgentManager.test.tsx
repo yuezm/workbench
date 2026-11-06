@@ -209,6 +209,21 @@ describe('AgentManager', () => {
     expect(await screen.findByText('remove-fail')).toBeInTheDocument()
   })
 
+  it('删除失败为非 Error 时按字符串展示', async () => {
+    setup([agent()], [rt])
+    handleDispatch((command) =>
+      command.type === 'agent.remove'
+        ? Promise.reject('删除纯文本失败')
+        : { facts: [], value: null },
+    )
+
+    render(<AgentManager />)
+    expect(await screen.findByText('old')).toBeInTheDocument()
+    const user = userEvent.setup()
+    await user.click(screen.getAllByRole('button', { name: /删除智能体/ })[0])
+    expect(await screen.findByText('删除纯文本失败')).toBeInTheDocument()
+  })
+
   it('写入后清单重取失败也展示错误', async () => {
     setup([agent()], [rt])
     handleDispatch((command) => {

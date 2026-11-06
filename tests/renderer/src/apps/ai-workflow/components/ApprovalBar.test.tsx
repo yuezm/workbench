@@ -74,6 +74,16 @@ describe('ApprovalBar', () => {
     expect(screen.getByText('继续吗')).toBeInTheDocument()
   })
 
+  it('回答失败为非 Error 时按字符串展示', async () => {
+    kernel.setView('cards.open', undefined, [card])
+    kernel.onDispatch(() => Promise.reject('回答纯文本失败'))
+    render(<ApprovalBar />)
+
+    fireEvent.click(await screen.findByRole('button', { name: '继续' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('回答纯文本失败')
+    expect(screen.getByText('继续吗')).toBeInTheDocument()
+  })
+
   it('信息卡（options 为空 / 无正文）：只展示标题，不渲染选项按钮', async () => {
     kernel.setView('cards.open', undefined, [{ ...card, options: [], text: '' }])
     render(<ApprovalBar />)

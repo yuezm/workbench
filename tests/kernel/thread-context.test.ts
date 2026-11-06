@@ -154,6 +154,7 @@ const view = (over: Partial<View> = {}): View => ({
   cards: new Map([['card-1', card()]]),
   activeTaskIds: new Set(),
   threads: new Map([['th-1', thread()]]),
+  taskComments: new Map(),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

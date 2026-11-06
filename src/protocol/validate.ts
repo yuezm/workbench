@@ -31,6 +31,7 @@ import {
 } from './rules'
 import { VIEW_IDS, VIEW_PARAM_FIELDS, type ViewId } from './views'
 import { THREAD_LIMITS } from './thread'
+import { TASK_COMMENT_LIMITS } from './task-comment'
 
 /** 校验通过返回收窄后的命令；失败返回首条错误文案。 */
 export type ValidateResult = { ok: true; command: Command } | { ok: false; message: string }
@@ -562,6 +563,13 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'task.complete':
     case 'task.remove':
       return requiredId(command.id, 'id')
+    case 'task.comment':
+      // 反馈正文只作资料（资料段）；`rerun` 只表示「顺带再跑一轮」的意图，能否跑由内核判
+      return (
+        requiredId(command.taskId, 'taskId') ??
+        text(command.text, 'text', TASK_COMMENT_LIMITS.text) ??
+        optionalBoolean(command.rerun, 'rerun')
+      )
     case 'card.answer':
       // 下标上限与回执 `options` 的条数上限一致；越界值在此拒收（不查卡片，卡片存在性由 decide 判）。
       return (

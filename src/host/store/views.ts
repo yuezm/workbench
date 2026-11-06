@@ -41,6 +41,7 @@ import type {
 import type { RuleSetRow, RuleSetView } from '../../protocol/rules'
 import type { PluginSettingsRow, PluginSettingsView } from '../../protocol/plugins'
 import type { ThreadRow } from '../../protocol/thread'
+import type { TaskComment } from '../../protocol/task-comment'
 import type {
   ActiveRun,
   RuntimeWorkload,
@@ -326,6 +327,24 @@ const mapThread = (row: ThreadDbRow): ThreadRow => ({
   createdAt: row.created_at,
 })
 
+/** `task_comments` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
+interface TaskCommentDbRow {
+  id: string
+  task_id: string
+  author: string
+  text: string
+  created_at: string
+}
+
+/** `task_comments` 行 → `TaskComment`：逐列直取（无 JSON 列）。 */
+const mapTaskComment = (row: TaskCommentDbRow): TaskComment => ({
+  id: row.id,
+  taskId: row.task_id,
+  author: row.author as TaskComment['author'],
+  text: row.text,
+  createdAt: row.created_at,
+})
+
 /** `runs` 行 → `RunRow`：JSON 列还原、布尔列从 0/1 还原，其余逐列直取。 */
 const mapRun = (row: RunDbRow): RunRow => ({
   id: row.id,
@@ -471,6 +490,28 @@ const readThreads = (db: DatabaseSync): ThreadRow[] =>
       .prepare(`SELECT ${THREAD_COLUMNS} FROM threads ORDER BY created_at, rowid`)
       .all() as unknown as ThreadDbRow[]
   ).map(mapThread)
+
+/** `task_comments` 的列清单（逐列写死，装载与 `comments.byTask` 共用）。 */
+const TASK_COMMENT_COLUMNS = 'id, task_id, author, text, created_at'
+
+const readTaskComments = (db: DatabaseSync): TaskComment[] =>
+  (
+    db
+      .prepare(`SELECT ${TASK_COMMENT_COLUMNS} FROM task_comments ORDER BY created_at, rowid`)
+      .all() as unknown as TaskCommentDbRow[]
+  ).map(mapTaskComment)
+
+/** 某任务的上下文 / 反馈：按追加顺序（`createdAt` 升序，同毫秒按 rowid）。 */
+const readTaskCommentsByTask = (db: DatabaseSync, taskId: string): TaskComment[] =>
+  (
+    db
+      .prepare(
+        `SELECT ${TASK_COMMENT_COLUMNS} FROM task_comments
+         WHERE task_id = ?
+         ORDER BY created_at, rowid`,
+      )
+      .all(taskId) as unknown as TaskCommentDbRow[]
+  ).map(mapTaskComment)
 
 /** `runs` 投影的列清单（逐列写死，不用 `SELECT *`）。 */
 const RUN_COLUMNS = `id, purpose, task_id, stage_id, agent_id, runtime_id, conversation_id, rule_id,
@@ -791,6 +832,7 @@ export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): 
     messages: slice.has('messages') ? toMap(readMessages(db)) : new Map(),
     cards: slice.has('cards') ? toMap(readCards(db)) : new Map(),
     threads: slice.has('threads') ? toMap(readThreads(db)) : new Map(),
+    taskComments: slice.has('task_comments') ? toMap(readTaskComments(db)) : new Map(),
     activeTaskIds: readActiveTaskIds(db),
     rules: ruleSet?.rules ?? [],
     rulesVersion: ruleSet?.version ?? 0,
@@ -947,6 +989,9 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'thread.byId':
       // M6.5：线程详情 = 线程行 + 线程任务（按创建顺序）+ 各智能体最近会话 id
       return readThreadDetail(db, readStringParam(params, 'threadId'))
+    case 'comments.byTask':
+      // M7.5：任务上下文 / 反馈（按追加顺序）
+      return readTaskCommentsByTask(db, readStringParam(params, 'taskId'))
     case 'runs.active-by-task':
       return readActiveRuns(db, readStringParam(params, 'taskId'))
     case 'conversations.all':

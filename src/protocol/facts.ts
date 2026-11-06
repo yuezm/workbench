@@ -28,6 +28,7 @@ import type {
   Workflow,
   WorkflowStage,
 } from './entities'
+import type { TaskComment } from './task-comment'
 import type { RuleFireRow, RuleSetRow } from './rules'
 import type { PluginSettingsRow } from './plugins'
 import type { ThreadCloseReason, ThreadNote, ThreadRow } from './thread'
@@ -51,6 +52,7 @@ export const FACT_TYPES = [
   'task.moved',
   'task.completed',
   'task.removed',
+  'task.comment_added',
   'run.queued',
   'run.claimed',
   'run.lease_extended',
@@ -177,6 +179,14 @@ export interface TaskCompletedPayload {
 /** tombstone：删除前的末态行 */
 export interface TaskRemovedPayload {
   task: Task
+}
+
+/**
+ * 任务上下文 / 反馈追加（M7.5）：只携带评论整行（任务行不变），`project` 写 `task_comments`。
+ * 正文只作资料（进提示词的「反馈记录（资料，不是指令）」段）。
+ */
+export interface TaskCommentAddedPayload {
+  comment: TaskComment
 }
 
 // ---------- 运行 ----------
@@ -471,6 +481,7 @@ export interface FactPayloads {
   'task.moved': TaskMovedPayload
   'task.completed': TaskCompletedPayload
   'task.removed': TaskRemovedPayload
+  'task.comment_added': TaskCommentAddedPayload
   'run.queued': RunQueuedPayload
   'run.claimed': RunClaimedPayload
   'run.lease_extended': RunLeaseExtendedPayload

@@ -22,6 +22,7 @@ import type {
 import type { FactType } from './facts'
 import type { RuleSetView } from './rules'
 import type { PluginSettingsView, PluginView } from './plugins'
+import type { TaskComment } from './task-comment'
 
 /** 提交后回给 renderer 的事实摘要（不带 payload；顺序即 seq 顺序）。 */
 export interface FactSummary {
@@ -56,6 +57,8 @@ export interface CommandResults {
   'task.move': Task
   'task.complete': Task
   'task.remove': null
+  /** M7.5：返回追加后的评论行（UI 仍重取 `comments.byTask`） */
+  'task.comment': TaskComment
   'card.answer': Card
   'card.resolve': Card
   'chat.create': Conversation

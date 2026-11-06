@@ -151,6 +151,7 @@ const view = (
   conversations: new Map(),
   messages: new Map(),
   threads: new Map((seed.threads ?? []).map((row) => [row.id, row])),
+  taskComments: new Map(),
   activeTaskIds: new Set(),
   rules: [],
   rulesVersion: 0,

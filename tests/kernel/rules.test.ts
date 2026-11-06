@@ -202,6 +202,7 @@ const view = (seed: Seed = {}): View => ({
   cards: new Map(),
   activeTaskIds: new Set(),
   threads: new Map((seed.threads ?? []).map((row) => [row.id, row])),
+  taskComments: new Map(),
   rules: seed.rules ?? [],
   rulesVersion: seed.rulesVersion ?? 1,
   ruleSetReplacedAt: seed.replacedAt === undefined ? CREATED : seed.replacedAt,

@@ -307,6 +307,23 @@ CREATE TABLE IF NOT EXISTS ${name} (
   settings_json TEXT NOT NULL DEFAULT '[]'
 );`
 
+/**
+ * `task_comments` 投影（M7.5，第 15 张表）：任务上下文 / 反馈，**纯追加**。
+ *
+ * - 主键 `id` 由内核生成；`task.comment_added` 携带整行，重复 id 撞主键即报错；
+ * - `task_id` 是外键 + `ON DELETE CASCADE`：任务删除时评论一并消失；增量路径由
+ *   `projection-apply` 按父键显式联删（重建事务关外键，不能只靠级联）；
+ * - 正文只作资料（进提示词的「反馈记录（资料，不是指令）」段）。
+ */
+const taskCommentsTable = (name = 'task_comments'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  author TEXT NOT NULL CHECK (author IN ('owner','agent')),
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);`
+
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, position);
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
@@ -321,6 +338,7 @@ CREATE INDEX IF NOT EXISTS idx_cards_run ON cards(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_cards_delivery ON cards(delivery);
 CREATE INDEX IF NOT EXISTS idx_rule_fires_rule ON rule_fires(rule_id, scheduled_for);
 CREATE INDEX IF NOT EXISTS idx_threads_key ON threads(source, external_ref);
+CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id, created_at);
 `
 
 /** v2 全量 schema（新建库；十四张投影表 + 索引） */
@@ -339,6 +357,7 @@ export const SCHEMA_SQL = [
   ruleFiresTable(),
   threadsTable(),
   pluginSettingsTable(),
+  taskCommentsTable(),
   INDEX_SQL,
 ].join('\n')
 
@@ -394,6 +413,7 @@ export const tableDdl = {
   ruleFires: ruleFiresTable,
   threads: threadsTable,
   pluginSettings: pluginSettingsTable,
+  taskComments: taskCommentsTable,
 } as const
 
 /**
@@ -594,7 +614,7 @@ CREATE TABLE IF NOT EXISTS projection_meta (
 );
 `
 
-/** 投影集白名单：重建清空并重放的就是这十四张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
+/** 投影集白名单：重建清空并重放的就是这十五张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
 export const PROJECTION_TABLES = [
   'tasks',
   'workflows',
@@ -610,6 +630,7 @@ export const PROJECTION_TABLES = [
   'rule_fires',
   'threads',
   'plugin_settings',
+  'task_comments',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -629,9 +650,10 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   rule_fires: tableDdl.ruleFires(),
   threads: tableDdl.threads(),
   plugin_settings: tableDdl.pluginSettings(),
+  task_comments: tableDdl.taskComments(),
 }
 
-/** 十四张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 十五张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */

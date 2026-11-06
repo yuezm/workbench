@@ -356,7 +356,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('SCHEMA_SQL 建 14 张表：十四张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
+  it('SCHEMA_SQL 建 15 张表：十五张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
@@ -370,6 +370,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       'run_events',
       'runs',
       'runtimes',
+      'task_comments',
       'tasks',
       'threads',
       'workflow_stages',
@@ -479,7 +480,7 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为十四张投影表（实体五表 + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings）', () => {
+  it('白名单固定为十五张投影表（实体五表 + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings + task_comments）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
@@ -495,6 +496,7 @@ describe('投影白名单与指纹', () => {
       'rule_fires',
       'threads',
       'plugin_settings',
+      'task_comments',
     ])
   })
 
@@ -502,7 +504,7 @@ describe('投影白名单与指纹', () => {
     expect(PROJECTION_TABLES).toEqual(KERNEL_PROJECTION_TABLES)
   })
 
-  it('PROJECTION_DDL 覆盖十四表、取自 tableDdl、不含账本表', () => {
+  it('PROJECTION_DDL 覆盖十五表、取自 tableDdl、不含账本表', () => {
     for (const table of PROJECTION_TABLES) {
       expect(PROJECTION_DDL).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`)
     }
@@ -513,10 +515,11 @@ describe('投影白名单与指纹', () => {
     expect(PROJECTION_DDL).toContain(tableDdl.ruleFires())
     expect(PROJECTION_DDL).toContain(tableDdl.threads())
     expect(PROJECTION_DDL).toContain(tableDdl.pluginSettings())
+    expect(PROJECTION_DDL).toContain(tableDdl.taskComments())
     expect(PROJECTION_DDL).not.toContain('facts')
   })
 
-  it('指纹 = sha256(十四表 DDL + 内核版本)', () => {
+  it('指纹 = sha256(十五表 DDL + 内核版本)', () => {
     const expected = createHash('sha256').update(`${PROJECTION_DDL}\nkernel-1`).digest('hex')
     expect(projectionFormat('kernel-1')).toBe(expected)
     expect(projectionFormat('kernel-1')).toMatch(/^[0-9a-f]{64}$/)

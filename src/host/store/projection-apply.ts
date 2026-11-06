@@ -9,6 +9,7 @@
  * - `threads`（M6.5）：整行 upsert；每条 `thread.*` 事实都携带完整 `ThreadRow`，
  *   `taskIds` / `rootTaskIds` / `notes` / `events` 存 JSON 列。`event.merged` 不在这里特判
  *   ——它由 `kernel/project` 产 `runs` 的整行变更（`run.eventIds` 已追加）。
+ * - `task_comments`（M7.5）：纯追加；任务删除时按 `task_id` 联删（与 `run_events` 同口径）。
  *
  * 级联删除由父键显式完成（事实只携带父 id）：删除 `runs` 行先按 `run_id` 删 `run_events` 与
  * `cards`；删除 `conversations` 行先按 `conversation_id` 删 `messages`。`cards.run_id` 虽然
@@ -49,6 +50,7 @@ import type { Change, Iso, ProjectionRow, ProjectionTable } from '../../kernel/t
 import type { RuleFireRow, RuleSetRow } from '../../protocol/rules'
 import type { PluginSettingsRow } from '../../protocol/plugins'
 import type { ThreadRow } from '../../protocol/thread'
+import type { TaskComment } from '../../protocol/task-comment'
 import { StoreError } from './errors'
 
 /** 一条投影变更 + 它所属事实的时间（阶段行首次插入的 created_at 兜底）。 */
@@ -436,9 +438,14 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
   )
 
   /** 规则触发纯追加（M6）：重复 `id` 撞主键报错，不覆盖历史触发记录。 */
-  const insertRuleFire = db.prepare(
-    `INSERT INTO rule_fires (id, rule_id, version, scheduled_for, fired_at, task_id)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+  const insertRuleFire =
+    db.prepare(`INSERT INTO rule_fires (id, rule_id, version, scheduled_for, fired_at, task_id)
+     VALUES (?, ?, ?, ?, ?, ?)`)
+
+  /** 任务上下文 / 反馈纯追加（M7.5）：一条事实一行评论，重复 id 撞主键报错。 */
+  const insertTaskComment = db.prepare(
+    `INSERT INTO task_comments (id, task_id, author, text, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
   )
 
   // 线程同样是整行 upsert（M6.5）：`thread.*` 事实携带完整行，按 (source, external_ref) 找线程
@@ -471,6 +478,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     rule_fires: db.prepare('DELETE FROM rule_fires WHERE id = ?'),
     threads: db.prepare('DELETE FROM threads WHERE id = ?'),
     plugin_settings: db.prepare('DELETE FROM plugin_settings WHERE id = ?'),
+    /** 任务上下文没有删除事实：按 id 与按父任务联删（任务删除时）两条路径。 */
+    task_comments: db.prepare('DELETE FROM task_comments WHERE id = ?'),
+    taskCommentsByTask: db.prepare('DELETE FROM task_comments WHERE task_id = ?'),
   }
 
   const clearAll = {
@@ -488,6 +498,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     rule_sets: db.prepare('DELETE FROM rule_sets'),
     threads: db.prepare('DELETE FROM threads'),
     plugin_settings: db.prepare('DELETE FROM plugin_settings'),
+    task_comments: db.prepare('DELETE FROM task_comments'),
   }
 
   const stageOccupant = db.prepare(
@@ -638,6 +649,16 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       const thread = row as ThreadRow
       insertThread.run(...THREAD_FIELDS.map(([field]) => threadValue(field, thread)))
     },
+    task_comments: (row) => {
+      const comment = row as TaskComment
+      insertTaskComment.run(
+        comment.id,
+        comment.taskId,
+        comment.author,
+        comment.text,
+        comment.createdAt,
+      )
+    },
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */
@@ -660,6 +681,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         deletes.cardsByRun.run(change.key)
       }
       if (change.table === 'conversations') deletes.messages.run(change.key)
+      // M7.5：任务删除联删其上下文 / 反馈（重建事务关外键，不能只靠级联）
+      if (change.table === 'tasks') deletes.taskCommentsByTask.run(change.key)
       deletes[change.table].run(change.key)
       return
     }
@@ -685,6 +708,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     clearAll.runs.run()
     clearAll.messages.run()
     clearAll.conversations.run()
+    clearAll.task_comments.run()
     clearAll.tasks.run()
     clearAll.workflow_stages.run()
     clearAll.workflows.run()

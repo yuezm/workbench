@@ -323,6 +323,45 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(countRows(db, 'threads')).toBe(0)
   })
 
+  it('task_comments 纯追加：逐列写入；重复 id 撞主键报错；任务删除按父键联删（M7.5）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    writer.apply({ table: 'workflows', key: 'wf-1', row: sample.workflow() }, SAMPLE_AT)
+    writer.apply({ table: 'workflow_stages', key: 'st-1', row: sample.stage() }, SAMPLE_AT)
+    const task = sample.task()
+    writer.apply({ table: 'tasks', key: task.id, row: task }, SAMPLE_AT)
+
+    const comment = {
+      id: 'tc-1',
+      taskId: task.id,
+      author: 'owner' as const,
+      text: '按钮改成粉色',
+      createdAt: SAMPLE_AT,
+    }
+    writer.apply({ table: 'task_comments', key: comment.id, row: comment }, SAMPLE_AT)
+    expect(
+      db
+        .prepare('SELECT task_id, author, text, created_at FROM task_comments WHERE id = ?')
+        .get(comment.id),
+    ).toEqual({
+      task_id: task.id,
+      author: 'owner',
+      text: '按钮改成粉色',
+      created_at: SAMPLE_AT,
+    })
+
+    // 追加语义：同一个 id 不能被覆盖
+    expect(() =>
+      writer.apply({ table: 'task_comments', key: comment.id, row: comment }, LATER_AT),
+    ).toThrow()
+    expect(countRows(db, 'task_comments')).toBe(1)
+
+    // 任务删除：评论随父键一起消失（重建事务关外键，走显式联删）
+    writer.apply({ table: 'tasks', key: task.id, row: null }, LATER_AT)
+    expect(countRows(db, 'tasks')).toBe(0)
+    expect(countRows(db, 'task_comments')).toBe(0)
+  })
+
   it('rule_sets 单行整行替换：版本与规则清单一起换，不合并旧规则', () => {
     const db = memory()
     const writer = createProjectionWriter(db)

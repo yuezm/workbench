@@ -12,7 +12,8 @@
  *
  * `run_events` 是纯追加：`Change.key = '<runId>:<seq>'`，冲突即报错（禁止覆盖历史）。
  * 级联删除由宿主按父键完成：`run.removed` 只产 `runs` 删除，`projection-apply` 删行时
- * 按 `run_id` 联删 `run_events`；`conversation.removed` 同理联删 `messages`。
+ * 按 `run_id` 联删 `run_events`；`conversation.removed` 同理联删 `messages`；任务删除联删
+ * `task_comments`（M7.5）。
  *
  * 实时写入与重建共用这一条路径，所以同一事实序列按 seq fold 两次结果必然相同。
  */
@@ -118,6 +119,9 @@ function changesOf(fact: AnyFact): Change[] {
       return [put('tasks', normalizeTask(fact.payload.task))]
     case 'task.removed':
       return [remove('tasks', fact.payload.task.id)]
+    case 'task.comment_added':
+      // M7.5：任务上下文 / 反馈是纯追加行；任务删除时由投影层按 task_id 联删（事实只带评论行）
+      return [put('task_comments', fact.payload.comment)]
     case 'run.queued':
       // 入队事实是唯一需要回填字段的 run 事实：queueSeq 取事实 seq（领取 FIFO 稳定序号）。
       return [put('runs', { ...fact.payload.run, queueSeq: fact.seq })]

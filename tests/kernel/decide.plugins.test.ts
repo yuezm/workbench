@@ -56,6 +56,7 @@ const view = (seed: { settings?: PluginSetting[]; version?: number } = {}): View
   messages: new Map(),
   cards: new Map(),
   threads: new Map(),
+  taskComments: new Map(),
   activeTaskIds: new Set(),
   rules: [],
   rulesVersion: 0,

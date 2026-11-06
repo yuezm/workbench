@@ -42,6 +42,7 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map((seed.messages ?? []).map((row) => [row.id, row])),
   cards: new Map(),
   threads: new Map(),
+  taskComments: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
   rules: [],
   rulesVersion: 0,

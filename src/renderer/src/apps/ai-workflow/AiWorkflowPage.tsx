@@ -1,9 +1,6 @@
-import { useState, type ReactElement } from 'react'
-import type { Task, TaskInput } from '../../../../protocol/entities'
-import { panelCls } from '../../components/ui/panel'
+import { useEffect, useState, type ReactElement } from 'react'
+import type { TaskInput } from '../../../../protocol/entities'
 import { Segmented } from '../../components/ui/segmented'
-import { Select } from '../../components/ui/select'
-import { cn } from '../../lib/cn'
 import { getKernelStore } from '../../shell/kernelStore'
 import { useKernelView, useKernelViewState } from '../../shell/useKernelView'
 import { ApprovalBar } from './components/ApprovalBar'
@@ -12,12 +9,12 @@ import { ChatPanel } from './components/ChatPanel'
 import { ConversationList } from './components/ConversationList'
 import { KanbanBoard } from './components/KanbanBoard'
 import { PluginsManager } from './components/PluginsManager'
-import { RunLog } from './components/RunLog'
 import { RulesManager } from './components/RulesManager'
 import { RuntimeManager } from './components/RuntimeManager'
 import { SettingsNav, type SettingsSection } from './components/SettingsNav'
+import { TaskDetailPage } from './components/TaskDetailPage'
 import { TaskDialog } from './components/TaskDialog'
-import { ThreadPanel } from './components/ThreadPanel'
+import { ThreadDetailPage } from './components/ThreadDetailPage'
 import { WorkflowManager } from './components/WorkflowManager'
 import { WorkflowSwitcher } from './components/WorkflowSwitcher'
 import { WorkspaceNav, type WorkspaceSection } from './components/WorkspaceNav'
@@ -27,6 +24,12 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 
 /** 两个互斥视图：工作台与设置 */
 type View = 'workspace' | 'settings'
+
+/**
+ * 任务栏的二级页面：栈式路由（看板 → 任务详情 → 线程详情 → 任务详情 …）。
+ * 详情是页面不是弹窗：内容区整块让给详情，返回即出栈；栈空即看板。
+ */
+type TaskRoute = { kind: 'task'; taskId: string } | { kind: 'thread'; threadId: string }
 
 /** 设置区页头：标题 + 一句话说明 */
 function SectionHeader({ title, hint }: { title: string; hint: string }): ReactElement {
@@ -44,7 +47,7 @@ function SectionHeader({ title, hint }: { title: string; hint: string }): ReactE
  * - 读：全部走 `useKernelView`（工作流 / 智能体 / 任务 / 运行记录 / 审批条 / 聊天），
  *   未就绪按空态处理；事实到达后视图自动重取，没有 reload 链与变更订阅。
  * - 写：全部走 `getKernelStore().dispatch`，失败沿用原有文案展示。
- * - 选中项（当前工作流 / 运行记录的任务）仍是 UI 本地状态。
+ * - 选中项（当前工作流 / 任务栏的详情路由）仍是 UI 本地状态。
  */
 export function AiWorkflowPage(): ReactElement {
   const workflowsState = useKernelViewState('workflows.all')
@@ -58,11 +61,10 @@ export function AiWorkflowPage(): ReactElement {
       : workflows[0]?.id
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>()
-  /** 线程面板：看板上点任务卡的线程入口打开，Esc / 关闭按钮收起 */
-  const [threadId, setThreadId] = useState<string | undefined>()
+  /** 任务栏的详情路由栈：栈顶是当前页面，`[]` = 看板 */
+  const [trail, setTrail] = useState<TaskRoute[]>([])
   const [view, setView] = useState<View>('workspace')
-  /** 工作台侧栏栏目：聊天（主动对话）/ 任务（看板与运行记录） */
+  /** 工作台侧栏栏目：聊天（主动对话）/ 任务（看板与任务详情） */
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('chat')
   const [section, setSection] = useState<SettingsSection>('runtimes')
   /** 聊天状态机：侧栏（会话清单）与内容区（消息流）共用同一份 */
@@ -73,13 +75,43 @@ export function AiWorkflowPage(): ReactElement {
     activeId ? { workflowId: activeId } : null,
   )
   const tasks = tasksState.data ?? []
-  const runsState = useKernelViewState(
-    'runs.byTask',
-    selectedTaskId ? { taskId: selectedTaskId } : null,
-  )
-  const runs = runsState.data ?? []
   /** 写命令失败优先；否则展示读视图的错误（视图查询失败时 store 会给出文案） */
-  const shownError = error ?? workflowsState.error ?? tasksState.error ?? runsState.error
+  const shownError = error ?? workflowsState.error ?? tasksState.error
+
+  const route = trail.length > 0 ? trail[trail.length - 1] : undefined
+
+  const openTask = (taskId: string): void => {
+    setTrail((current) => [...current, { kind: 'task', taskId }])
+  }
+
+  const openThread = (threadId: string): void => {
+    setTrail((current) => [...current, { kind: 'thread', threadId }])
+  }
+
+  const back = (): void => {
+    setTrail((current) => current.slice(0, -1))
+  }
+
+  /** 切换栏目 / 视图都回到看板：详情栈不跨栏目保留，避免回来时停在别人家的页面 */
+  const changeWorkspaceSection = (next: WorkspaceSection): void => {
+    if (next !== 'tasks') setTrail([])
+    setWorkspaceSection(next)
+  }
+
+  const changeView = (next: View): void => {
+    if (next !== 'workspace') setTrail([])
+    setView(next)
+  }
+
+  /** Esc 返回上一级：只在详情页生效，新建任务弹窗自己处理 Esc */
+  useEffect(() => {
+    if (route === undefined || dialogOpen) return
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setTrail((current) => current.slice(0, -1))
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [route, dialogOpen])
 
   const moveToStage = (id: string, stageId: string): void => {
     void (async () => {
@@ -101,11 +133,6 @@ export function AiWorkflowPage(): ReactElement {
         setError(errMsg(e))
       }
     })()
-  }
-
-  /** 打开任务卡所属线程的面板（线程 id 由任务行给，面板自己读 thread.byId） */
-  const openThread = (task: Task): void => {
-    if (task.threadId !== null) setThreadId(task.threadId)
   }
 
   const createTask = async (input: TaskInput): Promise<void> => {
@@ -130,7 +157,7 @@ export function AiWorkflowPage(): ReactElement {
         </h2>
         {view === 'workspace' ? (
           <div className="flex min-h-0 flex-1 flex-col p-3">
-            <WorkspaceNav value={workspaceSection} onChange={setWorkspaceSection}>
+            <WorkspaceNav value={workspaceSection} onChange={changeWorkspaceSection}>
               {workspaceSection === 'chat' ? (
                 <ConversationList
                   agents={agents}
@@ -161,7 +188,7 @@ export function AiWorkflowPage(): ReactElement {
         <div className="border-t border-line p-3">
           <Segmented
             value={view}
-            onChange={setView}
+            onChange={changeView}
             ariaLabel="视图切换"
             options={[
               { value: 'workspace', label: '工作台' },
@@ -194,47 +221,38 @@ export function AiWorkflowPage(): ReactElement {
           />
         )}
 
-        {view === 'workspace' && workspaceSection === 'tasks' && (
-          <div className="flex min-h-0 flex-1 gap-4 p-6">
-            <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-              {active ? (
-                <KanbanBoard
-                  workflow={active}
-                  tasks={tasks}
-                  onMoveToStage={moveToStage}
-                  onCompleteTask={completeTask}
-                  onNewTask={() => setDialogOpen(true)}
-                  onOpenThread={openThread}
-                />
-              ) : (
-                <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
-                  尚无工作流，到「设置 → 工作流」新建。
-                </div>
-              )}
-            </section>
-
-            <aside
-              className={cn(
-                panelCls,
-                'flex w-80 shrink-0 flex-col gap-3 overflow-hidden bg-white/[0.02] p-4',
-              )}
-            >
-              <h2 className="text-[13px] font-medium tracking-wide text-ink">运行记录</h2>
-              <Select
-                ariaLabel="选择任务查看运行"
-                value={selectedTaskId ?? ''}
-                onChange={(v) => setSelectedTaskId(v || undefined)}
-                options={[
-                  { value: '', label: '选择任务' },
-                  ...tasks.map((t) => ({ value: t.id, label: t.title })),
-                ]}
-              />
-              <div className="min-h-0 flex-1 overflow-auto pr-1">
-                <RunLog runs={runs} />
-              </div>
-            </aside>
-          </div>
-        )}
+        {view === 'workspace' &&
+          workspaceSection === 'tasks' &&
+          (route === undefined ? (
+            <div className="flex min-h-0 flex-1 p-6">
+              <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+                {active ? (
+                  <KanbanBoard
+                    workflow={active}
+                    tasks={tasks}
+                    onMoveToStage={moveToStage}
+                    onCompleteTask={completeTask}
+                    onNewTask={() => setDialogOpen(true)}
+                    onOpenTask={(task) => openTask(task.id)}
+                    onOpenThread={openThread}
+                  />
+                ) : (
+                  <div className="grid flex-1 place-items-center rounded-2xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
+                    尚无工作流，到「设置 → 工作流」新建。
+                  </div>
+                )}
+              </section>
+            </div>
+          ) : route.kind === 'task' ? (
+            <TaskDetailPage
+              taskId={route.taskId}
+              workflows={workflows}
+              onBack={back}
+              onOpenThread={openThread}
+            />
+          ) : (
+            <ThreadDetailPage threadId={route.threadId} onBack={back} onOpenTask={openTask} />
+          ))}
 
         {view === 'settings' && (
           <div className="flex min-h-0 flex-1 flex-col overflow-auto p-6">
@@ -278,10 +296,6 @@ export function AiWorkflowPage(): ReactElement {
 
       {dialogOpen && active && (
         <TaskDialog workflow={active} onSave={createTask} onCancel={() => setDialogOpen(false)} />
-      )}
-
-      {threadId !== undefined && (
-        <ThreadPanel threadId={threadId} onClose={() => setThreadId(undefined)} />
       )}
     </div>
   )

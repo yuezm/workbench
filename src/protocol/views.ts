@@ -25,6 +25,7 @@ import type {
 import type { RuleSetView } from './rules'
 import type { PluginSettingsView, PluginView } from './plugins'
 import type { ThreadRow } from './thread'
+import type { TaskComment } from './task-comment'
 
 /**
  * 视图 id 全集；新增视图必须先登记在这里，命令/宿主不得传任意字符串。
@@ -60,6 +61,7 @@ export const VIEW_IDS = [
   'plugins.settings',
   'plugins.all',
   'thread.byId',
+  'comments.byTask',
 ] as const
 
 /**
@@ -128,6 +130,7 @@ export interface ViewArgs {
   'cards.byRun': { runId: string }
   'runtimes.models': { runtimeId: string }
   'thread.byId': { threadId: string }
+  'comments.byTask': { taskId: string }
 }
 
 /**
@@ -158,6 +161,7 @@ export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'cards.byRun': 'runId',
   'runtimes.models': 'runtimeId',
   'thread.byId': 'threadId',
+  'comments.byTask': 'taskId',
 }
 
 /** 视图 id → 返回类型。 */
@@ -203,6 +207,8 @@ export interface ViewResults {
   'plugins.all': PluginView[]
   /** 线程详情（M6.5）：线程行 + 任务树来源 + 各智能体最近会话 id；不存在时为 null */
   'thread.byId': ThreadDetail | null
+  /** 任务上下文 / 反馈（M7.5）：按追加顺序（`createdAt` 升序） */
+  'comments.byTask': TaskComment[]
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

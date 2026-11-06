@@ -1,7 +1,8 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Run, RunEvent } from '../../../../../../src/protocol/entities'
-import { RunLog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RunLog'
+import type { TaskComment } from '../../../../../../src/protocol/task-comment'
+import { TaskActivity } from '../../../../../../src/renderer/src/apps/ai-workflow/components/TaskActivity'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function makeRun(over: Partial<Run> = {}): Run {
@@ -27,6 +28,17 @@ function makeRun(over: Partial<Run> = {}): Run {
   }
 }
 
+function makeComment(over: Partial<TaskComment> = {}): TaskComment {
+  return {
+    id: 'c1',
+    taskId: 't1',
+    author: 'owner',
+    text: '按钮改成粉色',
+    createdAt: '2026-11-03T00:05:00Z',
+    ...over,
+  }
+}
+
 const text = (seq: number, value: string): RunEvent => ({ seq, type: 'text', text: value })
 
 let kernel: FakeKernel
@@ -35,10 +47,10 @@ beforeEach(() => {
   kernel = installFakeKernel()
 })
 
-describe('RunLog', () => {
-  it('无运行记录时提示，且不订阅事件流视图', () => {
-    render(<RunLog runs={[]} />)
-    expect(screen.getByText('暂无运行记录')).toBeInTheDocument()
+describe('TaskActivity', () => {
+  it('既没有运行也没有反馈时提示，且不订阅事件流视图', () => {
+    render(<TaskActivity runs={[]} comments={[]} />)
+    expect(screen.getByText('还没有运行记录或反馈')).toBeInTheDocument()
     expect(kernel.store.peek('run.events', { runId: 'run1' })).toBeUndefined()
     expect(kernel.store.peekState('run.events', { runId: 'run1' })).toBeUndefined()
   })
@@ -51,14 +63,15 @@ describe('RunLog', () => {
       usage: { inputTokens: 12, outputTokens: 34, cacheReadTokens: 0, cacheWriteTokens: 0 },
     })
     kernel.setView('run.events', { runId: run.id }, [])
-    render(<RunLog runs={[run]} />)
+    render(<TaskActivity runs={[run]} comments={[]} />)
 
-    expect(await screen.findByText('最终输出')).toBeInTheDocument()
-    expect(screen.getByText('成功')).toBeInTheDocument()
-    expect(screen.getByText('2026-11-03T00:00:00Z')).toBeInTheDocument()
-    expect(screen.getByText('耗时 1.5s')).toBeInTheDocument()
-    expect(screen.getByText('退出码 0')).toBeInTheDocument()
-    expect(screen.getByText('输入 12 / 输出 34 tokens')).toBeInTheDocument()
+    const list = screen.getByRole('list', { name: '上下文' })
+    expect(await within(list).findByText('最终输出')).toBeInTheDocument()
+    expect(list).toHaveTextContent('成功')
+    expect(list).toHaveTextContent('2026-11-03T00:00:00Z')
+    expect(list).toHaveTextContent('耗时 1.5s')
+    expect(list).toHaveTextContent('退出码 0')
+    expect(list).toHaveTextContent('输入 12 / 输出 34 tokens')
     expect(screen.queryByText(/事件流加载失败/)).not.toBeInTheDocument()
   })
 
@@ -72,21 +85,22 @@ describe('RunLog', () => {
       usage: null,
     })
     kernel.setView('run.events', { runId: run.id }, [])
-    render(<RunLog runs={[run]} />)
+    render(<TaskActivity runs={[run]} comments={[]} />)
 
-    expect(await screen.findByText('失败')).toBeInTheDocument()
-    expect(screen.getByText('非零退出')).toBeInTheDocument()
-    expect(screen.getByText('进程非零退出')).toBeInTheDocument()
-    expect(screen.getByText('耗时 350ms')).toBeInTheDocument()
-    expect(screen.getByText('退出码 3')).toBeInTheDocument()
-    expect(screen.queryByText(/tokens/)).not.toBeInTheDocument()
-    expect(screen.queryByText('成功')).not.toBeInTheDocument()
+    const list = screen.getByRole('list', { name: '上下文' })
+    expect(await within(list).findByText('失败')).toBeInTheDocument()
+    expect(list).toHaveTextContent('非零退出')
+    expect(list).toHaveTextContent('进程非零退出')
+    expect(list).toHaveTextContent('耗时 350ms')
+    expect(list).toHaveTextContent('退出码 3')
+    expect(list).not.toHaveTextContent('tokens')
+    expect(list).not.toHaveTextContent('成功')
   })
 
   it('协议 result 帧失败归类为「执行失败」', async () => {
     const run = makeRun({ id: 'run2', status: 'failed', errorCode: 'run_failed' })
     kernel.setView('run.events', { runId: run.id }, [])
-    render(<RunLog runs={[run]} />)
+    render(<TaskActivity runs={[run]} comments={[]} />)
     expect(await screen.findByText('执行失败')).toBeInTheDocument()
   })
 
@@ -102,7 +116,7 @@ describe('RunLog', () => {
       { seq: 7, type: 'tool_result' },
       { seq: 8, type: 'status', status: 'running' },
     ])
-    render(<RunLog runs={[makeRun({ output: '不应出现的 output' })]} />)
+    render(<TaskActivity runs={[makeRun({ output: '不应出现的 output' })]} comments={[]} />)
 
     expect(await screen.findByText('正文内容')).toBeInTheDocument()
     expect(screen.getByText('思考内容').className).toContain('italic')
@@ -118,14 +132,14 @@ describe('RunLog', () => {
   })
 
   it('未完成的事件请求在卸载后返回/失败都不写状态', async () => {
-    const first = render(<RunLog runs={[makeRun()]} />)
+    const first = render(<TaskActivity runs={[makeRun()]} comments={[]} />)
     first.unmount()
     await act(async () => {
       await Promise.resolve()
     })
 
     kernel.failView('run.events', { runId: 'run1' }, 'late')
-    const second = render(<RunLog runs={[makeRun()]} />)
+    const second = render(<TaskActivity runs={[makeRun()]} comments={[]} />)
     second.unmount()
     await act(async () => {
       await Promise.resolve()
@@ -141,31 +155,26 @@ describe('RunLog', () => {
       output: '',
     })
     kernel.setView('run.events', { runId: run.id }, [])
-    render(<RunLog runs={[run]} />)
+    render(<TaskActivity runs={[run]} comments={[]} />)
 
-    expect(await screen.findByText('2026-01-01')).toBeInTheDocument()
-    expect(screen.queryByText('暂无运行记录')).not.toBeInTheDocument()
-    expect(screen.queryByText(/退出码/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/耗时/)).not.toBeInTheDocument()
+    const list = screen.getByRole('list', { name: '上下文' })
+    expect(await within(list).findByText('2026-01-01')).toBeInTheDocument()
+    expect(list).not.toHaveTextContent('还没有运行记录或反馈')
+    expect(list).not.toHaveTextContent('退出码')
+    expect(list).not.toHaveTextContent('耗时')
   })
 
-  it('非 Error 的加载失败也字符串化展示', async () => {
+  it('事件流加载失败展示错误（非 Error 也字符串化）', async () => {
     kernel.failView('run.events', { runId: 'run1' }, 'events-down')
-    render(<RunLog runs={[makeRun()]} />)
+    render(<TaskActivity runs={[makeRun()]} comments={[]} />)
     expect(await screen.findByText(/事件流加载失败：events-down/)).toBeInTheDocument()
-  })
-
-  it('事件流加载失败展示错误', async () => {
-    kernel.failView('run.events', { runId: 'run1' }, 'events-boom')
-    render(<RunLog runs={[makeRun()]} />)
-    expect(await screen.findByText(/事件流加载失败：events-boom/)).toBeInTheDocument()
   })
 
   it('运行中的事件随 run.* 事实失效重取，不轮询', async () => {
     vi.useFakeTimers()
     try {
       kernel.setView('run.events', { runId: 'run1' }, [text(1, '第一段')])
-      render(<RunLog runs={[makeRun({ status: 'running' })]} />)
+      render(<TaskActivity runs={[makeRun({ status: 'running' })]} comments={[]} />)
       await act(async () => {
         await Promise.resolve()
       })
@@ -193,14 +202,16 @@ describe('RunLog', () => {
     vi.useFakeTimers()
     try {
       kernel.setView('run.events', { runId: 'run1' }, [text(1, '完成前')])
-      const { rerender } = render(<RunLog runs={[makeRun({ status: 'running' })]} />)
+      const { rerender } = render(
+        <TaskActivity runs={[makeRun({ status: 'running' })]} comments={[]} />,
+      )
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
       expect(screen.getByText('完成前')).toBeInTheDocument()
 
       kernel.setView('run.events', { runId: 'run1' }, [text(1, '完成前'), text(2, '完成后')])
-      rerender(<RunLog runs={[makeRun({ status: 'succeeded' })]} />)
+      rerender(<TaskActivity runs={[makeRun({ status: 'succeeded' })]} comments={[]} />)
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
@@ -213,5 +224,34 @@ describe('RunLog', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('反馈渲染作者与正文：owner 显示「我」，agent 显示「智能体」', () => {
+    render(
+      <TaskActivity
+        runs={[]}
+        comments={[makeComment(), makeComment({ id: 'c2', author: 'agent', text: '我改好了' })]}
+      />,
+    )
+    const items = screen.getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent('我')
+    expect(items[0]).toHaveTextContent('按钮改成粉色')
+    expect(items[1]).toHaveTextContent('智能体')
+    expect(items[1]).toHaveTextContent('我改好了')
+  })
+
+  it('运行与反馈按 createdAt 混排（同毫秒按 id），空的日期字段不参与排序', () => {
+    const early = makeRun({ id: 'r1', createdAt: '2026-11-03T00:00:00Z' })
+    const late = makeRun({ id: 'r2', createdAt: '2026-11-03T00:20:00Z', status: 'failed' })
+    render(
+      <TaskActivity
+        runs={[late, early]}
+        comments={[makeComment({ id: 'c1', createdAt: '2026-11-03T00:10:00Z' })]}
+      />,
+    )
+    const items = screen.getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent('成功')
+    expect(items[1]).toHaveTextContent('按钮改成粉色')
+    expect(items[2]).toHaveTextContent('失败')
   })
 })

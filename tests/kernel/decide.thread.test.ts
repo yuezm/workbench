@@ -206,6 +206,7 @@ const view = (
   cards: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
   threads: new Map((seed.threads ?? []).map((row) => [row.id, row])),
+  taskComments: new Map(),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

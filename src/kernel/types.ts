@@ -27,6 +27,7 @@ import type { Input } from '../protocol/inputs'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '../protocol/rules'
 import type { PluginSettingsRow } from '../protocol/plugins'
 import type { ThreadRow } from '../protocol/thread'
+import type { TaskComment } from '../protocol/task-comment'
 
 export type Seq = number
 export type Id = string
@@ -35,9 +36,10 @@ export type Iso = string
 /**
  * 内核版本；参与投影指纹，行为变化时递增，启动即触发重建。
  * M4：卡片与派生事件入账；M6：规则集与 cron 触发投影；M6.5：线程实体与事件合并；
- * M7：插件设置投影、跨工作流交接、外部插件与 webhook 端口。
+ * M7：插件设置投影、跨工作流交接、外部插件与 webhook 端口；
+ * M7.5：任务上下文 / 反馈（`task_comments` 投影 + 提示词反馈段）。
  */
-export const KERNEL_VERSION = 'm7.0.0'
+export const KERNEL_VERSION = 'M7.5.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
@@ -55,7 +57,7 @@ export type Actor =
  * 投影表全集：只有这些表可由事实重建（`host` 的清空白名单与指纹必须与之一致）。
  * M2 在实体五表之后追加运行生命周期相关的四张表；M4 追加卡片表（第 10 张）；
  * M6 追加规则集与规则触发记录（第 11、12 张）；M6.5 追加线程（第 13 张）；
- * M7 追加插件设置（第 14 张）。
+ * M7 追加插件设置（第 14 张）；M7.5 追加任务上下文 / 反馈（第 15 张）。
  */
 export const PROJECTION_TABLES = [
   'tasks',
@@ -72,6 +74,7 @@ export const PROJECTION_TABLES = [
   'rule_fires',
   'threads',
   'plugin_settings',
+  'task_comments',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -91,6 +94,7 @@ export type ProjectionRow =
   | RuleFireRow
   | ThreadRow
   | PluginSettingsRow
+  | TaskComment
 
 export interface FactDraft<T extends FactType = FactType> {
   type: T
@@ -128,6 +132,8 @@ export interface View {
   messages: Map<Id, Message>
   /** M6.5：线程投影（事件归并、复用任务、并发闸门、上下文派生都只读它） */
   threads: Map<Id, ThreadRow>
+  /** M7.5：任务上下文 / 反馈（拼提示词时按 taskId 取；待落库的新评论经 options 传） */
+  taskComments: Map<Id, TaskComment>
   /** 存在 queued/running/waiting run 的任务；「执行中」只认它，不由 UI 推导。 */
   activeTaskIds: Set<Id>
   /** M6：当前规则集（整批替换；空集为 `[]`） */
@@ -195,6 +201,8 @@ export type IdKind =
   /** M6.5：线程 id 与线程笔记 id（`threads` 投影行 / 笔记） */
   | 'thread'
   | 'thread-note'
+  /** M7.5：任务上下文 / 反馈 id（`task_comments` 投影行） */
+  | 'task-comment'
 
 /** 宿主在边界注入：时区、限制、id 生成器（内核不取随机数）。 */
 export interface Environment {

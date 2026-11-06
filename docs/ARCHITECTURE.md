@@ -196,7 +196,7 @@ sequenceDiagram
 
 ## 数据
 
-- 单一 `workbench.db`：`facts`（只追加）+ 投影表（`tasks`/`runs`/`run_events`/`cards`/`workflows`/`stages`/`agents`/`runtimes`/`threads`/`conversations`/`messages`/`rules`/`plugin_config`/`projection_meta`）。
+- 单一 `workbench.db`：`facts`（只追加）+ 投影表（`tasks`/`task_comments`/`runs`/`run_events`/`cards`/`workflows`/`stages`/`agents`/`runtimes`/`threads`/`conversations`/`messages`/`rules`/`plugin_config`/`projection_meta`）。
 - `project(fact) → Change[]` 是纯函数；实时写入与重建走**同一条**投影路径。
 - 启动时 `projection_meta.format` 不匹配或 `seq` 落后 → 同一事务内从 `facts` 重建；不再手写 12-step 迁移。
 - v2 存量数据在 M1 按表分批写成 `snapshot.imported` 事实（无 `cause` 的导入根，`timeline` 标明「迁移导入」，不伪造因果）；此后日志即唯一权威。

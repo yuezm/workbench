@@ -274,9 +274,24 @@ describe('KanbanBoard', () => {
     )
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: '打开线程：卡片任务' }))
-    expect(onOpenThread).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 't1', threadId: 'th1' }),
+    expect(onOpenThread).toHaveBeenCalledWith('th1')
+  })
+
+  it('单击任务卡把任务交给上层进入详情页', async () => {
+    const onOpenTask = vi.fn()
+    render(
+      <KanbanBoard
+        workflow={wf}
+        tasks={[task]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+        onOpenTask={onOpenTask}
+      />,
     )
+    const user = userEvent.setup()
+    await user.click(screen.getByLabelText('任务：卡片任务'))
+    expect(onOpenTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }))
   })
 
   it('派生任务按当前看板任务列表找到父任务标题', async () => {

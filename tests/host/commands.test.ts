@@ -898,4 +898,30 @@ describe('host/commands：跨类型事实区间回放', () => {
     })
     expect((result.value as { id: string }).id).toBe('wf-mixed')
   })
+
+  it('task.comment：返回值是追加的评论行（重放同一 commandId 不重复产事实）', async () => {
+    const { router, store } = setup()
+    const workflow = (await router.dispatch(workflowCommand())).value as { id: string }
+    const task = (await router.dispatch(taskCommand(workflow.id))).value as { id: string }
+
+    const first = await router.dispatch({
+      commandId: 'c-comment',
+      type: 'task.comment',
+      taskId: task.id,
+      text: '按钮改成粉色',
+    })
+    expect(first.value).toEqual(
+      expect.objectContaining({ taskId: task.id, author: 'owner', text: '按钮改成粉色' }),
+    )
+    expect(store.query('comments.byTask', { taskId: task.id })).toEqual([first.value])
+
+    const replay = await router.dispatch({
+      commandId: 'c-comment',
+      type: 'task.comment',
+      taskId: task.id,
+      text: '按钮改成粉色',
+    })
+    expect(replay.value).toEqual(first.value)
+    expect(store.query('comments.byTask', { taskId: task.id })).toHaveLength(1)
+  })
 })

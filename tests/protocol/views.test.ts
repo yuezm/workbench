@@ -78,6 +78,7 @@ describe('protocol/views', () => {
       'plugins.settings',
       'plugins.all',
       'thread.byId',
+      'comments.byTask',
     ])
   })
 

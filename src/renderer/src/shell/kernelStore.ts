@@ -75,7 +75,10 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
   { prefix: 'stage.', views: ['workflows.all', 'tasks.byWorkflow'] },
   { prefix: 'agent.', views: ['agents.all', 'workflows.all'] },
   { prefix: 'runtime.', views: ['runtimes.all', 'runtimes.statuses'] },
-  { prefix: 'task.', views: ['tasks.byWorkflow', 'task.byId', 'tasks.executing'] },
+  {
+    prefix: 'task.',
+    views: ['tasks.byWorkflow', 'task.byId', 'tasks.executing', 'comments.byTask'],
+  },
   {
     prefix: 'run.',
     views: [

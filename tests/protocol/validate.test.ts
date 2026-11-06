@@ -794,4 +794,24 @@ describe('validateQuery（M5：query 动词入口）', () => {
     expect(validateInput(receipt([longText(2001)])).ok).toBe(false)
     expect(validateInput(receipt(Array.from({ length: 101 }, () => 'x'))).ok).toBe(false)
   })
+
+  it('task.comment：taskId / 正文必填、≤2000 字，rerun 只接受布尔（M7.5）', () => {
+    expect(rejectedMessage(cmd('task.comment', {}))).toBe('taskId必填')
+    expect(rejectedMessage(cmd('task.comment', { taskId: 't-1' }))).toBe('text必须是字符串')
+    expect(rejectedMessage(cmd('task.comment', { taskId: 't-1', text: '   ' }))).toBe('text必填')
+    expect(rejectedMessage(cmd('task.comment', { taskId: 't-1', text: longText(2001) }))).toBe(
+      'text最长 2000 个字符',
+    )
+    expect(
+      rejectedMessage(cmd('task.comment', { taskId: 't-1', text: '改一下', rerun: 'yes' })),
+    ).toBe('rerun必须是布尔值')
+
+    const ok = validateCommand(cmd('task.comment', { taskId: 't-1', text: '改一下', rerun: true }))
+    expect(ok.ok).toBe(true)
+    expect(ok.ok && ok.command).toEqual(
+      expect.objectContaining({ type: 'task.comment', taskId: 't-1', text: '改一下', rerun: true }),
+    )
+    // rerun 缺省：只校验形状，缺省由内核按 false 处理
+    expect(validateCommand(cmd('task.comment', { taskId: 't-1', text: '只记录' })).ok).toBe(true)
+  })
 })

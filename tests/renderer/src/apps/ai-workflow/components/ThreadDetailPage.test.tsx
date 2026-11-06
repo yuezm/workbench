@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Command } from '../../../../../../src/protocol/commands'
@@ -6,7 +6,7 @@ import type { Task } from '../../../../../../src/protocol/entities'
 import type { CommandDispatchResult } from '../../../../../../src/protocol/ipc'
 import type { ThreadRow } from '../../../../../../src/protocol/thread'
 import type { ThreadDetail } from '../../../../../../src/protocol/views'
-import { ThreadPanel } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ThreadPanel'
+import { ThreadDetailPage } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ThreadDetailPage'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const parentTask: Task = {
@@ -82,10 +82,15 @@ beforeEach(() => {
   kernel = installFakeKernel()
 })
 
-function setup(detail: ThreadDetail | null, onClose = vi.fn()): ReturnType<typeof vi.fn> {
+function setup(detail: ThreadDetail | null): {
+  onBack: ReturnType<typeof vi.fn>
+  onOpenTask: ReturnType<typeof vi.fn>
+} {
+  const onBack = vi.fn()
+  const onOpenTask = vi.fn()
   kernel.setView('thread.byId', { threadId: 'th1' }, detail)
-  render(<ThreadPanel threadId="th1" onClose={onClose} />)
-  return onClose
+  render(<ThreadDetailPage threadId="th1" onBack={onBack} onOpenTask={onOpenTask} />)
+  return { onBack, onOpenTask }
 }
 
 function dispatchWith(
@@ -96,8 +101,8 @@ function dispatchWith(
   kernel.onDispatch(handler)
 }
 
-describe('ThreadPanel', () => {
-  it('渲染线程元信息、任务树（根任务 + 子任务缩进与状态）与笔记', async () => {
+describe('ThreadDetailPage', () => {
+  it('渲染线程元信息、任务列表（根任务 + 子任务缩进与状态）与笔记', async () => {
     setup(detailOf(thread))
 
     expect(await screen.findByRole('heading', { name: '线程 · Issue 1' })).toBeInTheDocument()
@@ -107,19 +112,47 @@ describe('ThreadPanel', () => {
     expect(meta).toHaveTextContent('进行中')
     expect(meta).toHaveTextContent('并发')
 
-    const tree = screen.getByRole('region', { name: '任务树' })
-    expect(tree).toHaveTextContent('父任务')
-    expect(tree).toHaveTextContent('子任务任务')
-    expect(tree).toHaveTextContent('已完成的根任务')
-    expect(tree).toHaveTextContent('已完成')
+    const list = screen.getByRole('region', { name: '任务列表' })
+    expect(list).toHaveTextContent('父任务')
+    expect(list).toHaveTextContent('子任务任务')
+    expect(list).toHaveTextContent('已完成的根任务')
+    expect(list).toHaveTextContent('已完成')
     // 子任务缩进一层，并带「子任务」标记
-    const childRow = screen.getByText('子任务任务').closest('div') as HTMLDivElement
+    const childRow = screen.getByRole('button', { name: '打开任务：子任务任务' })
     expect(childRow).toHaveStyle({ paddingLeft: '14px' })
+    expect(childRow).toHaveAttribute('title', '子任务任务')
 
     const notes = screen.getByRole('region', { name: '笔记' })
     expect(notes).toHaveTextContent('上一轮笔记')
     expect(notes).toHaveTextContent('智能体')
     expect(notes).toHaveTextContent('2026-11-05T10:00:00.000Z')
+  })
+
+  it('任务列表是详情入口：点任务把 taskId 交给上层', async () => {
+    const user = userEvent.setup()
+    const { onOpenTask } = setup(detailOf(thread))
+    await screen.findByText('上一轮笔记')
+
+    await user.click(screen.getByRole('button', { name: '打开任务：子任务任务' }))
+    expect(onOpenTask).toHaveBeenCalledWith('c1')
+  })
+
+  it('整行都可点：状态徽标上也进任务详情', async () => {
+    const user = userEvent.setup()
+    const { onOpenTask } = setup(detailOf(thread))
+    const row = await screen.findByRole('button', { name: '打开任务：父任务' })
+
+    await user.click(within(row).getByText('进行中'))
+    expect(onOpenTask).toHaveBeenCalledWith('p1')
+  })
+
+  it('返回按钮调用 onBack', async () => {
+    const user = userEvent.setup()
+    const { onBack } = setup(detailOf(thread))
+    await screen.findByText('上一轮笔记')
+
+    await user.click(screen.getByRole('button', { name: '返回' }))
+    expect(onBack).toHaveBeenCalledTimes(1)
   })
 
   it('线程内没有任务时展示空态', async () => {
@@ -129,8 +162,7 @@ describe('ThreadPanel', () => {
 
   it('父任务不在任务列表里的悬挂子任务作为根展示', async () => {
     setup(detailOf({ ...thread, taskIds: ['c1'], rootTaskIds: [] }, [childTask]))
-    const title = await screen.findByText('子任务任务')
-    const row = title.closest('div') as HTMLDivElement
+    const row = await screen.findByRole('button', { name: '打开任务：子任务任务' })
     expect(row).toHaveStyle({ paddingLeft: '0px' })
   })
 
@@ -141,7 +173,7 @@ describe('ThreadPanel', () => {
 
     expect(await screen.findByText('环A')).toBeInTheDocument()
     expect(screen.getByText('环B')).toBeInTheDocument()
-    const childRow = screen.getByText('环B').closest('div') as HTMLDivElement
+    const childRow = screen.getByRole('button', { name: '打开任务：环B' })
     expect(childRow).toHaveStyle({ paddingLeft: '14px' })
   })
 
@@ -201,7 +233,7 @@ describe('ThreadPanel', () => {
     expect(screen.getByLabelText('线程笔记')).toHaveValue('重试文本')
   })
 
-  it('写入进行中禁用全部动作（笔记 / 绑定 / 关闭）', async () => {
+  it('写入进行中禁用全部动作（笔记 / 绑定 / 归档）', async () => {
     dispatchWith(
       <C extends Command>(): Promise<CommandDispatchResult<C>> =>
         new Promise<CommandDispatchResult<C>>(() => {}),
@@ -294,7 +326,7 @@ describe('ThreadPanel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('外部入口已被占用')
   })
 
-  it('关闭线程：dispatch thread.close，归档后隐藏关闭按钮并展示归档态', async () => {
+  it('归档线程：dispatch thread.close，归档后隐藏归档按钮并展示归档态', async () => {
     dispatchWith(<C extends Command>(command: C): CommandDispatchResult<C> => {
       if (command.type === 'thread.close') {
         kernel.setView(
@@ -320,13 +352,13 @@ describe('ThreadPanel', () => {
     expect(screen.getByText('线程已归档。')).toBeInTheDocument()
   })
 
-  it('已归档线程直接展示归档态且不提供关闭按钮', async () => {
+  it('已归档线程直接展示归档态且不提供归档按钮', async () => {
     setup(detailOf({ ...thread, status: 'closed' }))
     expect(await screen.findByText('已归档')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '归档' })).not.toBeInTheDocument()
   })
 
-  it('关闭失败就地展示后端文案，面板保持可操作', async () => {
+  it('归档失败就地展示后端文案，页面保持可操作', async () => {
     dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
       command.type === 'thread.close'
         ? Promise.reject(new Error('线程不存在'))
@@ -348,21 +380,9 @@ describe('ThreadPanel', () => {
 
   it('读取失败展示错误且不渲染空态正文', async () => {
     kernel.failView('thread.byId', { threadId: 'th1' }, '线程读取失败')
-    render(<ThreadPanel threadId="th1" onClose={vi.fn()} />)
+    render(<ThreadDetailPage threadId="th1" onBack={vi.fn()} onOpenTask={vi.fn()} />)
     expect(await screen.findByRole('alert')).toHaveTextContent('线程读取失败')
     expect(screen.queryByText(/正在读取线程/)).not.toBeInTheDocument()
     expect(screen.queryByText(/线程不存在/)).not.toBeInTheDocument()
-  })
-
-  it('关闭按钮与 Esc 都调用 onClose', async () => {
-    const user = userEvent.setup()
-    const onClose = setup(detailOf(thread))
-    await screen.findByText('上一轮笔记')
-
-    await user.click(screen.getByRole('button', { name: '关闭' }))
-    expect(onClose).toHaveBeenCalledTimes(1)
-
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(onClose).toHaveBeenCalledTimes(2)
   })
 })

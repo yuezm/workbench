@@ -233,6 +233,7 @@ const emptyTables = (): Tables => ({
   rule_fires: new Map(),
   threads: new Map(),
   plugin_settings: new Map(),
+  task_comments: new Map(),
 })
 
 /** 按 seq 顺序 fold 事实：投影应用器的最小等价实现（重建与实时写入共用路径）。 */
@@ -287,6 +288,28 @@ describe('kernel/project', () => {
     ).toEqual([put('tasks', task({ currentStageId: 'st-2' }))])
     expect(project(fact(12, 'task.completed', { task: task({ status: 'completed' }) }))).toEqual([
       put('tasks', task({ status: 'completed' })),
+    ])
+    // M7.5：任务上下文 / 反馈是独立投影行（纯追加），任务行不动
+    expect(
+      project(
+        fact(18, 'task.comment_added', {
+          comment: {
+            id: 'tc-1',
+            taskId: 'task-1',
+            author: 'owner',
+            text: '按钮改成粉色',
+            createdAt: '2026-11-05T00:00:00.000Z',
+          },
+        }),
+      ),
+    ).toEqual([
+      put('task_comments', {
+        id: 'tc-1',
+        taskId: 'task-1',
+        author: 'owner',
+        text: '按钮改成粉色',
+        createdAt: '2026-11-05T00:00:00.000Z',
+      }),
     ])
   })
 

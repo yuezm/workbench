@@ -144,6 +144,7 @@ const emptyView = (over: Partial<View> = {}): View => ({
   cards: new Map(),
   activeTaskIds: new Set(),
   threads: new Map(),
+  taskComments: new Map(),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

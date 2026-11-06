@@ -25,6 +25,7 @@ const expected = [
   'task.move',
   'task.complete',
   'task.remove',
+  'task.comment',
   'card.answer',
   'card.resolve',
   'chat.create',

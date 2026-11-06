@@ -6,6 +6,7 @@ import type {
   RunStatus,
   RunUsage,
 } from '../../../../../protocol/entities'
+import type { TaskComment } from '../../../../../protocol/task-comment'
 import { cn } from '../../../lib/cn'
 import { useKernelViewState } from '../../../shell/useKernelView'
 
@@ -134,57 +135,103 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
   )
 }
 
-export interface RunLogProps {
+/** 一轮运行的卡片：状态 / 时间 / 耗时 / 退出码 / 失败归类 / 用量 + 事件流 */
+function RunBlock({ run }: { run: Run }): ReactElement {
+  return (
+    <div className="rounded-xl border border-line bg-white/[0.02] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
+        <span className={cn('rounded-full bg-white/[0.06] px-2 py-0.5', STATUS_TONE[run.status])}>
+          {STATUS_LABEL[run.status]}
+        </span>
+        <span className="tabular-nums">{run.startedAt ?? run.createdAt}</span>
+        {run.durationMs !== null && (
+          <span className="tabular-nums">耗时 {formatDuration(run.durationMs)}</span>
+        )}
+        {run.exitCode !== null && <span className="tabular-nums">退出码 {run.exitCode}</span>}
+        {run.errorCode !== null && (
+          <span className="text-red-300">{ERROR_CODE_LABEL[run.errorCode]}</span>
+        )}
+        {run.usage !== null && <UsageLine usage={run.usage} />}
+      </div>
+
+      {run.error !== null && (
+        <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">
+          {run.error}
+        </p>
+      )}
+
+      <RunEvents run={run} />
+    </div>
+  )
+}
+
+/** 一条任务上下文 / 反馈：作者 + 时间 + 正文（只作资料） */
+function CommentBlock({ comment }: { comment: TaskComment }): ReactElement {
+  return (
+    <div className="rounded-xl border border-line bg-white/[0.03] px-4 py-2.5">
+      <div className="flex items-center gap-2 text-[10px] text-ink-faint">
+        <span className="rounded-full bg-focus/15 px-1.5 py-0.5 text-focus">
+          {comment.author === 'owner' ? '我' : '智能体'}
+        </span>
+        <span className="tabular-nums">{comment.createdAt}</span>
+      </div>
+      <p className="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-ink-dim">
+        {comment.text}
+      </p>
+    </div>
+  )
+}
+
+/** 活动流条目：运行与反馈按时间同序排列（同毫秒按 id，稳定可测） */
+type ActivityItem =
+  | { kind: 'run'; at: string; id: string; run: Run }
+  | { kind: 'comment'; at: string; id: string; comment: TaskComment }
+
+function mergeActivity(runs: readonly Run[], comments: readonly TaskComment[]): ActivityItem[] {
+  const items: ActivityItem[] = [
+    ...runs.map((run): ActivityItem => ({ kind: 'run', at: run.createdAt, id: run.id, run })),
+    ...comments.map((comment): ActivityItem => ({
+      kind: 'comment',
+      at: comment.createdAt,
+      id: comment.id,
+      comment,
+    })),
+  ]
+  return items.sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id))
+}
+
+export interface TaskActivityProps {
   runs: Run[]
+  comments: TaskComment[]
 }
 
 /**
- * 某任务的运行记录：状态 / 耗时 / 退出码 / 失败归类 / 用量 + 事件流。
+ * 任务上下文活动流（像 issue 的时间线）：智能体每一轮运行与我的反馈按时间混排。
  *
- * 数据都来自内核视图：runs 由调用方传入（页面订阅 `runs.byTask`），
+ * 数据都来自内核视图：`runs` 是 `runs.byTask`，`comments` 是 `comments.byTask`；
  * 事件流由每个 run 的子组件订阅 `run.events`，事实到达后自动刷新。
  */
-export function RunLog({ runs }: RunLogProps): ReactElement {
-  if (runs.length === 0) {
+export function TaskActivity({ runs, comments }: TaskActivityProps): ReactElement {
+  const items = mergeActivity(runs, comments)
+  if (items.length === 0) {
     return (
       <div className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
-        暂无运行记录
+        还没有运行记录或反馈
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
-        {runs.map((run) => (
-          <li key={run.id} className="px-4 py-3 transition-colors hover:bg-white/[0.03]">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
-              <span
-                className={cn('rounded-full bg-white/[0.06] px-2 py-0.5', STATUS_TONE[run.status])}
-              >
-                {STATUS_LABEL[run.status]}
-              </span>
-              <span className="tabular-nums">{run.startedAt ?? run.createdAt}</span>
-              {run.durationMs !== null && (
-                <span className="tabular-nums">耗时 {formatDuration(run.durationMs)}</span>
-              )}
-              {run.exitCode !== null && <span className="tabular-nums">退出码 {run.exitCode}</span>}
-              {run.errorCode !== null && (
-                <span className="text-red-300">{ERROR_CODE_LABEL[run.errorCode]}</span>
-              )}
-              {run.usage !== null && <UsageLine usage={run.usage} />}
-            </div>
-
-            {run.error !== null && (
-              <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">
-                {run.error}
-              </p>
-            )}
-
-            <RunEvents run={run} />
-          </li>
-        ))}
-      </ul>
-    </div>
+    <ol aria-label="上下文" className="flex flex-col gap-2.5">
+      {items.map((item) => (
+        <li key={`${item.kind}:${item.id}`}>
+          {item.kind === 'run' ? (
+            <RunBlock run={item.run} />
+          ) : (
+            <CommentBlock comment={item.comment} />
+          )}
+        </li>
+      ))}
+    </ol>
   )
 }

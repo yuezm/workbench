@@ -13,8 +13,10 @@ interface TaskCardProps {
   onDragEnd: () => void
   /** 父任务标题（父任务也在当前看板里时由上层按任务列表查得，不另发视图查询） */
   parentTitle?: string
-  /** 打开线程面板：不传或任务没有 threadId 时不渲染线程入口 */
-  onOpenThread?: (task: Task) => void
+  /** 单击卡片进入任务详情页（页面跳转，由上层路由处理） */
+  onOpenTask?: (task: Task) => void
+  /** 打开线程详情页：不传或任务没有 threadId 时不渲染线程入口 */
+  onOpenThread?: (threadId: string) => void
 }
 
 /** 卡片底部状态文案：按进入方式提示下一步怎么走 */
@@ -29,7 +31,8 @@ const HINTS: Record<WorkflowStage['entryMode'], string> = {
  *
  * - `parentTaskId` 非空 = 派生任务，显示「子任务」徽标（父任务在看板里时带上标题）；
  * - `origin='handoff'`（或 `handoffFromTaskId` 非空）= 跨工作流交接产出，显示「交接」徽标；
- * - `threadId` 非空 = 挂在线程上，提供打开线程面板的按钮，回调由上层传；
+ * - `threadId` 非空 = 挂在线程上，提供打开线程详情页的按钮，回调由上层传；
+ * - 单击卡片（或聚焦后 Enter / Space）= 进入任务详情页；拖拽照旧，点击不影响拖拽；
  * - 卡片本身只读任务行 + 阶段，不推导线程 / 派活规则。
  */
 export function TaskCard({
@@ -40,21 +43,38 @@ export function TaskCard({
   onDragStart,
   onDragEnd,
   parentTitle,
+  onOpenTask,
   onOpenThread,
 }: TaskCardProps): ReactElement {
-  const isSubtask = task.parentTaskId !== null
+  const parentId = task.parentTaskId
   /** 交接任务（M7）：由其它工作流的阶段完成时创建；origin 与来源任务两列任一即可判 */
   const isHandoff = task.origin === 'handoff' || task.handoffFromTaskId !== null
+  const threadId = task.threadId
+
+  /** 卡片既是拖拽源也是详情入口：键盘走 Enter / Space，鼠标点卡片任意空白处即可 */
+  const openTask = (): void => onOpenTask?.(task)
 
   return (
     <article
       draggable={!executing}
+      role="button"
+      tabIndex={0}
       aria-label={`任务：${task.title}`}
+      onClick={openTask}
+      onKeyDown={(e) => {
+        // 只处理卡片本体上的按键：卡片内的「线程」按钮自己处理
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          openTask()
+        }
+      }}
       onDragStart={() => onDragStart(task)}
       onDragEnd={onDragEnd}
       className={cn(
         'flex flex-col gap-2 rounded-xl border border-line bg-white/[0.04] p-3',
         'shadow-[0_1px_0_rgb(255_255_255/4%)_inset] transition-all duration-200',
+        'focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:outline-none',
         executing
           ? 'cursor-default'
           : 'cursor-grab hover:border-line-strong hover:bg-white/[0.06] active:cursor-grabbing',
@@ -66,10 +86,10 @@ export function TaskCard({
         <p className="line-clamp-3 text-xs leading-relaxed text-ink-faint">{task.description}</p>
       )}
       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
-        {isSubtask && (
+        {parentId !== null && (
           <span
             className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-faint"
-            title={task.parentTaskId ?? undefined}
+            title={parentId}
           >
             {parentTitle === undefined || parentTitle === '' ? '子任务' : `子任务 · ${parentTitle}`}
           </span>
@@ -86,11 +106,15 @@ export function TaskCard({
           <span className="size-1.5 animate-pulse rounded-full bg-focus" aria-hidden="true" />
         )}
         {executing ? '执行中…' : HINTS[stage.entryMode]}
-        {task.threadId !== null && onOpenThread !== undefined && (
+        {threadId !== null && onOpenThread !== undefined && (
           <button
             type="button"
             aria-label={`打开线程：${task.title}`}
-            onClick={() => onOpenThread(task)}
+            onClick={(e) => {
+              // 线程入口不触发卡片的详情跳转
+              e.stopPropagation()
+              onOpenThread(threadId)
+            }}
             className={cn(
               'ml-auto rounded-md px-1.5 py-0.5 text-[11px] text-focus',
               'transition-colors duration-200 hover:bg-white/[0.06] hover:text-ink',

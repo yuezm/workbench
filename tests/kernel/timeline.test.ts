@@ -195,6 +195,26 @@ describe('kernel/timeline', () => {
     expect(entries.every((entry) => entry.label === null)).toBe(true)
   })
 
+  it('任务上下文 / 反馈归到任务时间线（M7.5）', () => {
+    const comment = {
+      id: 'tc-1',
+      taskId: 't-1',
+      author: 'owner' as const,
+      text: '按钮改成粉色',
+      createdAt: '2026-11-05T00:00:00.000Z',
+    }
+    const facts: Fact[] = [
+      fact(1, 'task.created', { task: task() }),
+      fact(2, 'task.comment_added', { comment }),
+      fact(3, 'task.comment_added', { comment: { ...comment, id: 'tc-2', taskId: 't-2' } }),
+    ]
+
+    expect(kinds(timeline(facts, 'task', 't-1'))).toEqual([
+      '1:task.created',
+      '2:task.comment_added',
+    ])
+  })
+
   it('沿 cause 链补齐不直接引用该实体的前置事实', () => {
     const facts: Fact[] = [
       fact(1, 'workflow.created', { workflow: workflow() }),

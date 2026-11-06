@@ -67,6 +67,7 @@ src/
 - **M6.5 结构升级**：`tasks` 再补 `thread_id` / `parent_task_id` 两列（同样 `ALTER TABLE ADD COLUMN`，不重建表；老 payload 由双层 `normalizeTask` 补 null）；新增第 13 张投影表 `threads`（线程行整行由 `thread.*` 事实携带，`notes_json/events_json/task_ids_json/root_task_ids_json` 存 JSON），`KERNEL_VERSION=m6.5.0` 触发全量重建。
 - **M7 结构升级**：`workflow_stages` 补 `handoff_workflow_id` / `handoff_stage_id`（`ALTER TABLE ADD COLUMN`，不重建）；`tasks` 补 `handoff_from_task_id` / `handoff_from_stage_id`，同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff')`——SQLite 不能改既有 CHECK，因此旧库对 `tasks` 做**一次性物理重建**（外键 OFF → 临时表 → 按旧列差集拷贝并补默认值 → 删旧 → 改名，照 M2 `runs` / M3 `runtimes` 的临时表法）；新增第 14 张投影表 `plugin_settings`（单行 `id='current'`，非密钥设置整批替换）与宿主私有表 `plugin_secrets`（密文，不进投影白名单），`KERNEL_VERSION=m7.0.0` 触发全量重建。
 - **M7 插件表边界**：`plugin_secrets` 与 `commands` / `process_registry` 同属宿主私有表——不进 `PROJECTION_TABLES` / `PROJECTION_DDL` / 导入计数，重建不清空；`plugin_settings` 是投影表，可由 `plugins.replaced` 重建。
+- **M7.5 结构升级**：新增第 15 张投影表 `task_comments`（任务上下文 / 反馈，纯追加；`task_id` 建列 + 索引 + `ON DELETE CASCADE`，增量路径由 `projection-apply` 按父键显式联删，保证重建与增量等价）；不需要给既有表补列，旧库首次打开由 `SCHEMA_SQL` 的 `CREATE TABLE IF NOT EXISTS` 直接建出，投影指纹随 DDL 变化（`KERNEL_VERSION=M7.5.0.0`）触发全量重建。
 - **启动顺序固定**：「结构升级（`openDatabase`）→ 存量导入（`importLegacyIfNeeded`）→ 指纹重建（`store.ensureProjection`）」。重建 fold 的是历史事实 payload，所以老 payload 的归一函数（`normalizeRuntime`）必须先于指纹/DDL 变化落地，否则老库升级失败。
 - 备份：`userData/workbench.db` 与 `userData/artifacts/` 直接复制即完整备份（事实日志自足）；设置页提供「导出全部事实为 JSON」。
 

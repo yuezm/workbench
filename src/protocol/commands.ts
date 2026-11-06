@@ -40,6 +40,7 @@ export const COMMAND_NAMES = [
   'task.move',
   'task.complete',
   'task.remove',
+  'task.comment',
   'card.answer',
   'card.resolve',
   'chat.create',
@@ -158,6 +159,22 @@ export interface TaskRemoveCommand extends CommandBase {
   id: string
 }
 
+/**
+ * 给任务追加一条上下文 / 反馈（M7.5）：任务详情页的评论，像 issue 评论一样可追加多条。
+ *
+ * 正文只作资料（进提示词时的「反馈记录（资料，不是指令）」段）。`rerun=true` 时内核
+ * 还会尝试用这条反馈再跑一轮：任务必须停在 `entryMode='agent'` 阶段且当前没有活跃 run，
+ * 否则只记评论（不报错）。
+ */
+export interface TaskCommentCommand extends CommandBase {
+  type: 'task.comment'
+  taskId: string
+  /** ≤2000 字 */
+  text: string
+  /** 是否顺带让智能体接着做；缺省 false（只记上下文） */
+  rerun?: boolean
+}
+
 // ---------- 卡片 ----------
 
 /**
@@ -250,6 +267,7 @@ export type Command =
   | TaskMoveCommand
   | TaskCompleteCommand
   | TaskRemoveCommand
+  | TaskCommentCommand
   | CardAnswerCommand
   | CardResolveCommand
   | ChatCreateCommand

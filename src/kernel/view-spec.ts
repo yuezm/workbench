@@ -45,7 +45,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'task.create':
       // 进入效果要判定落点是否 agent 入口并拼提示词 → 需要智能体与运行时配置；
       // M6.5：隐式线程在决策里本地构造（不读 threads），首轮无续接、无线程上下文历史
-      return ['workflows', 'workflow_stages', 'agents', 'runtimes']
+      // M7.5：提示词要带任务上下文 / 反馈（新任务还没有评论，仍按切片装载）
+      return ['workflows', 'workflow_stages', 'agents', 'runtimes', 'task_comments']
     case 'task.move':
       // 进入效果（每次进入都重新建 run）要拼线程上下文与按线程续接会话
       return [
@@ -57,14 +58,38 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'threads',
         'runs',
         'cards',
+        'task_comments',
       ]
     case 'task.complete':
-      // 完成后若线程内无 active 任务 → thread.closed{all-tasks-done}
-      return ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes', 'threads']
+      // 完成后若线程内无 active 任务 → thread.closed{all-tasks-done}；交接产出的新任务
+      // 首轮提示词要带上下文（新任务没有评论，按切片装载）
+      return [
+        'tasks',
+        'workflows',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+        'threads',
+        'task_comments',
+      ]
     case 'task.remove':
       // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价；
-      // M6.5：删除后同样判定线程是否可归档
+      // M6.5：删除后同样判定线程是否可归档（任务上下文由投影层按 task_id 联删）
       return ['tasks', 'runs', 'threads']
+    case 'task.comment':
+      // M7.5：追加一条上下文 / 反馈；rerun 时复用进入阶段效果（拼反馈段 + 线程上下文、
+      // 按线程续接会话、判定是否已有活跃 run）
+      return [
+        'tasks',
+        'workflows',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+        'threads',
+        'runs',
+        'cards',
+        'task_comments',
+      ]
     case 'card.answer':
       // 校验卡片 open / 下标合法（cards）、run 仍 waiting（runs）；续接读同 run 的其余 open 卡（cards）
       return ['runs', 'cards']
@@ -98,6 +123,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'rule_sets',
         // M6.5：派生事件按父 run 归线程/父任务；回执 notes[] 写线程；完成后归档线程
         'threads',
+        // M7.5：流转到下一阶段时提示词带任务上下文 / 反馈
+        'task_comments',
       ]
     case 'run.host_settled':
       // 兜底终态；聊天 run 还要补一条 assistant 消息（读对话判断是否已删）
@@ -118,6 +145,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'agents',
         'runtimes',
         'threads',
+        // M7.5：cron 规则建的任务首轮提示词要带上下文（新任务没有评论，按切片装载）
+        'task_comments',
       ]
     case 'chat.create':
       // 对话绑定的智能体必须存在（M5 命令化后沿用原 conversation.create 语义）
@@ -145,6 +174,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'threads',
         'runs',
         'cards',
+        // M7.5：复用任务追加一轮时提示词带任务上下文 / 反馈
+        'task_comments',
       ]
     case 'rules.replace':
       // 整批校验：当前版本（+1）、规则引用的工作流与阶段必须存在且从属
@@ -155,8 +186,16 @@ export function viewSpec(input: Input): ProjectionTable[] {
       return ['plugin_settings']
     case 'rule.trigger':
       // 手动运行：读规则集与目标工作流/阶段/智能体/运行时，并做 externalRef 去重（tasks）；
-      // M6.5：给规则任务建隐式线程（本地构造，不读 threads）
-      return ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes']
+      // M6.5：给规则任务建隐式线程（本地构造，不读 threads）；M7.5：首轮提示词带上下文
+      return [
+        'rule_sets',
+        'tasks',
+        'workflows',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+        'task_comments',
+      ]
     case 'thread.note':
     case 'thread.close':
     case 'thread.bind':

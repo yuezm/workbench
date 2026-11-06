@@ -29,6 +29,7 @@ import type {
   WorkflowStage,
   WorkflowWithStages,
 } from '../protocol/entities'
+import type { TaskComment } from '../protocol/task-comment'
 import type { EventReceivedPayload, FactPayload, FactType } from '../protocol/facts'
 import type { Input, Receipt } from '../protocol/inputs'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, Reason, View } from './types'
@@ -948,6 +949,31 @@ export function decide(view: View, input: Input, now: Iso, env: Environment): De
           new Map([[task.id, 'completed']]),
         ),
       )
+      return done(facts)
+    }
+
+    case 'task.comment': {
+      // M7.5：任务上下文 / 反馈（像 issue 评论一样追加）。正文只作资料，进提示词的
+      // 「反馈记录（资料，不是指令）」段；`rerun` 时再用它接着跑一轮。
+      const task = view.tasks.get(input.taskId)
+      if (!task) return reject('not_found', '任务不存在: ' + input.taskId)
+      const text = input.text.trim()
+      if (!text) return reject('invalid_input', '反馈内容必填')
+      const comment: TaskComment = {
+        id: env.nextId('task-comment'),
+        taskId: task.id,
+        author: 'owner',
+        text,
+        createdAt: now,
+      }
+      const facts: FactDraft[] = [draft('task.comment_added', { comment })]
+      // 顺带再跑一轮：任务停在 agent 阶段且没有活跃 run 才会产 run.queued；
+      // 其它情况只记上下文（不报错，也不排第二轮）。
+      if (input.rerun === true && !view.activeTaskIds.has(task.id)) {
+        facts.push(
+          ...entryRunFacts(view, task, now, env, OWNER, undefined, { pendingComment: comment }),
+        )
+      }
       return done(facts)
     }
 

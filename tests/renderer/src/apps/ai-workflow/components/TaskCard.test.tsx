@@ -191,6 +191,71 @@ describe('TaskCard', () => {
     expect(screen.queryByText(/子任务/)).not.toBeInTheDocument()
   })
 
+  it('单击卡片进入任务详情页；键盘 Enter / Space 同样生效', () => {
+    const onOpenTask = vi.fn()
+    render(
+      <TaskCard
+        task={task}
+        stage={stage('none')}
+        executing={false}
+        onOpenTask={onOpenTask}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    const card = screen.getByLabelText('任务：写代码')
+    expect(card).toHaveAttribute('role', 'button')
+
+    fireEvent.click(card)
+    expect(onOpenTask).toHaveBeenCalledTimes(1)
+    expect(onOpenTask).toHaveBeenCalledWith(task)
+
+    fireEvent.keyDown(card, { key: 'Enter' })
+    fireEvent.keyDown(card, { key: ' ' })
+    expect(onOpenTask).toHaveBeenCalledTimes(3)
+
+    // 其它按键不触发跳转
+    fireEvent.keyDown(card, { key: 'a' })
+    expect(onOpenTask).toHaveBeenCalledTimes(3)
+  })
+
+  it('卡片内的线程入口不触发任务详情跳转', () => {
+    const onOpenTask = vi.fn()
+    const onOpenThread = vi.fn()
+    render(
+      <TaskCard
+        task={{ ...task, threadId: 'th1' }}
+        stage={stage('none')}
+        executing={false}
+        onOpenTask={onOpenTask}
+        onOpenThread={onOpenThread}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    const entry = screen.getByRole('button', { name: '打开线程：写代码' })
+    fireEvent.click(entry)
+    expect(onOpenThread).toHaveBeenCalledWith('th1')
+    expect(onOpenTask).not.toHaveBeenCalled()
+
+    // 线程按钮上的按键会冒泡到卡片，但不应被当成打开任务详情
+    fireEvent.keyDown(entry, { key: 'Enter' })
+    expect(onOpenTask).not.toHaveBeenCalled()
+  })
+
+  it('没有 onOpenTask 时点击卡片不报错', () => {
+    render(
+      <TaskCard
+        task={task}
+        stage={stage('none')}
+        executing={false}
+        onDragStart={vi.fn()}
+        onDragEnd={vi.fn()}
+      />,
+    )
+    expect(() => fireEvent.click(screen.getByLabelText('任务：写代码'))).not.toThrow()
+  })
+
   it('有 threadId 且传了回调时提供线程入口，点击把任务交给上层', () => {
     const onOpenThread = vi.fn()
     render(
@@ -206,9 +271,7 @@ describe('TaskCard', () => {
     const entry = screen.getByRole('button', { name: '打开线程：写代码' })
     expect(entry).toHaveTextContent('线程')
     fireEvent.click(entry)
-    expect(onOpenThread).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 't1', threadId: 'th1' }),
-    )
+    expect(onOpenThread).toHaveBeenCalledWith('th1')
   })
 
   it('没有 threadId 或没有回调时不渲染线程入口', () => {

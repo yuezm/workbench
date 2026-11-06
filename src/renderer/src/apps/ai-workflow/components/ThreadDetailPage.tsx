@@ -2,25 +2,27 @@ import { useState, type FormEvent, type ReactElement } from 'react'
 import type { Task } from '../../../../../protocol/entities'
 import { THREAD_LIMITS, type ThreadRow } from '../../../../../protocol/thread'
 import { Button } from '../../../components/ui/button'
-import { Dialog } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
 import { Input, fieldCls } from '../../../components/ui/input'
 import { badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelViewState } from '../../../shell/useKernelView'
+import { DetailHeader } from './DetailHeader'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 const textareaCls = cn(fieldCls, 'min-h-16 resize-y py-2 leading-relaxed')
 
-/** 面板内一次写操作：进行中禁用全部动作，避免并发提交互相覆盖 */
+/** 页面内一次写操作：进行中禁用全部动作，避免并发提交互相覆盖 */
 type BusyAction = 'note' | 'bind' | 'close'
 
-export interface ThreadPanelProps {
+export interface ThreadDetailPageProps {
   threadId: string
-  /** Esc / 右上角关闭按钮 / 面板关闭回调 */
-  onClose: () => void
+  /** 返回上一级（看板 / 任务详情） */
+  onBack: () => void
+  /** 从线程的任务列表进入任务详情页 */
+  onOpenTask: (taskId: string) => void
 }
 
 /** 任务树节点：`children` 按 `parentTaskId` 归到父任务下 */
@@ -73,17 +75,37 @@ function taskTree(tasks: Task[], rootTaskIds: string[]): TaskNode[] {
   return roots
 }
 
-function TaskTreeItem({ node, depth }: { node: TaskNode; depth: number }): ReactElement {
+function TaskTreeItem({
+  node,
+  depth,
+  onOpenTask,
+}: {
+  node: TaskNode
+  depth: number
+  onOpenTask: (taskId: string) => void
+}): ReactElement {
   const completed = node.task.status === 'completed'
   return (
     <li>
-      <div className="flex items-center gap-2 py-1" style={{ paddingLeft: depth * 14 }}>
+      {/* 整行都是详情入口：点标题、状态徽标或行内空白都进任务详情 */}
+      <button
+        type="button"
+        aria-label={`打开任务：${node.task.title}`}
+        title={node.task.title}
+        onClick={() => onOpenTask(node.task.id)}
+        style={{ paddingLeft: depth * 14 }}
+        className={cn(
+          'group flex w-full items-center gap-2 rounded-lg py-1 pr-1 text-left',
+          'transition-colors duration-200 hover:bg-white/[0.06]',
+          'focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:outline-none',
+        )}
+      >
         {depth > 0 && (
           <span aria-hidden="true" className="text-[10px] text-ink-faint">
             ↳
           </span>
         )}
-        <span className="min-w-0 truncate text-xs text-ink-dim" title={node.task.title}>
+        <span className="min-w-0 flex-1 truncate text-xs text-ink-dim transition-colors group-hover:text-ink">
           {node.task.title}
         </span>
         <span
@@ -99,11 +121,22 @@ function TaskTreeItem({ node, depth }: { node: TaskNode; depth: number }): React
             子任务
           </span>
         )}
-      </div>
+        <span
+          aria-hidden="true"
+          className="shrink-0 text-[11px] text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
+        >
+          ›
+        </span>
+      </button>
       {node.children.length > 0 && (
         <ul>
           {node.children.map((child) => (
-            <TaskTreeItem key={child.task.id} node={child} depth={depth + 1} />
+            <TaskTreeItem
+              key={child.task.id}
+              node={child}
+              depth={depth + 1}
+              onOpenTask={onOpenTask}
+            />
           ))}
         </ul>
       )}
@@ -137,7 +170,7 @@ function NotesSection({
           暂无笔记
         </p>
       ) : (
-        <ul className="max-h-40 divide-y divide-line overflow-auto rounded-xl border border-line">
+        <ul className="max-h-56 divide-y divide-line overflow-auto rounded-xl border border-line">
           {thread.notes.map((note) => (
             <li key={note.id} className="px-3 py-2">
               <div className="flex items-center gap-2 text-[10px] text-ink-faint">
@@ -239,12 +272,21 @@ function BindSection({
 }
 
 /**
- * 线程内容（线程行已就绪时渲染）：元信息 / 任务树 / 笔记 / 绑定入口 / 关闭线程。
+ * 线程内容（线程行已就绪时渲染）：元信息 / 任务列表 / 笔记 / 绑定入口 / 归档。
  *
  * 只读视图、只发命令：绑定与关闭的合法性（入口键是否被占用等）一律由内核判，
  * 失败文案就地展示；一次只允许一个写操作，进行中禁用全部动作。
+ * 任务行是页面跳转入口：任务详情在内容区展开，不再弹窗。
  */
-function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }): ReactElement {
+function ThreadContent({
+  thread,
+  tasks,
+  onOpenTask,
+}: {
+  thread: ThreadRow
+  tasks: Task[]
+  onOpenTask: (taskId: string) => void
+}): ReactElement {
   const [busy, setBusy] = useState<BusyAction | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
@@ -321,21 +363,21 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
 
   return (
     <>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-xl border border-line bg-white/[0.02] px-3 py-2 text-[11px]">
-        <div className="flex items-center gap-1.5">
-          <dt className="shrink-0 text-ink-faint">来源</dt>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line bg-white/[0.02] px-4 py-3 text-[11px] sm:grid-cols-4">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className="text-[10px] tracking-wide text-ink-faint">来源</dt>
           <dd className="truncate font-mono text-ink-dim">{thread.source}</dd>
         </div>
-        <div className="flex items-center gap-1.5">
-          <dt className="shrink-0 text-ink-faint">外部入口</dt>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className="text-[10px] tracking-wide text-ink-faint">外部入口</dt>
           <dd className="truncate font-mono text-ink-dim">{thread.externalRef ?? '未绑定'}</dd>
         </div>
-        <div className="flex items-center gap-1.5">
-          <dt className="shrink-0 text-ink-faint">状态</dt>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className="text-[10px] tracking-wide text-ink-faint">状态</dt>
           <dd className="text-ink-dim">{closed ? '已归档' : '进行中'}</dd>
         </div>
-        <div className="flex items-center gap-1.5">
-          <dt className="shrink-0 text-ink-faint">并发</dt>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <dt className="text-[10px] tracking-wide text-ink-faint">并发</dt>
           <dd className="text-ink-dim tabular-nums">{thread.concurrency}</dd>
         </div>
       </dl>
@@ -349,10 +391,11 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
         </p>
       )}
 
-      <section aria-label="任务树" className="flex flex-col gap-1.5">
+      <section aria-label="任务列表" className="flex flex-col gap-1.5">
         <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
-          任务树
+          任务列表
           <span className={badgeCls}>{thread.taskIds.length}</span>
+          <span className="text-[11px] font-normal text-ink-faint">点任务看详情</span>
         </h3>
         {roots.length === 0 ? (
           <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
@@ -361,7 +404,7 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
         ) : (
           <ul className="rounded-xl border border-line bg-white/[0.02] px-2 py-1">
             {roots.map((node) => (
-              <TaskTreeItem key={node.task.id} node={node} depth={0} />
+              <TaskTreeItem key={node.task.id} node={node} depth={0} onOpenTask={onOpenTask} />
             ))}
           </ul>
         )}
@@ -406,17 +449,27 @@ function ThreadContent({ thread, tasks }: { thread: ThreadRow; tasks: Task[] }):
 }
 
 /**
- * 线程面板（M6.5）：读 `thread.byId`，把线程行与任务树交给 `ThreadContent`；
- * 读失败 / 线程不存在在这里收口，写错误在内容区就地展示。
+ * 线程详情页（M6.5 起是页面，不再是弹窗）：读 `thread.byId`，把线程行与任务列表交给
+ * `ThreadContent`；读失败 / 线程不存在在这里收口，写错误在内容区就地展示。
  */
-export function ThreadPanel({ threadId, onClose }: ThreadPanelProps): ReactElement {
+export function ThreadDetailPage({
+  threadId,
+  onBack,
+  onOpenTask,
+}: ThreadDetailPageProps): ReactElement {
   const state = useKernelViewState('thread.byId', { threadId })
   const detail = state.data
   const title = detail === undefined || detail === null ? '线程' : `线程 · ${detail.thread.title}`
+  const hint =
+    detail === undefined || detail === null
+      ? '读取线程中'
+      : `${detail.thread.source} · ${detail.thread.taskIds.length} 个任务`
 
   return (
-    <Dialog title={title} onClose={onClose} className="max-w-2xl">
-      <div className="flex flex-col gap-4">
+    <section aria-label="线程详情" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <DetailHeader title={title} hint={hint} onBack={onBack} />
+
+      <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {state.error !== null && (
           <p
             role="alert"
@@ -433,9 +486,11 @@ export function ThreadPanel({ threadId, onClose }: ThreadPanelProps): ReactEleme
             线程不存在
           </p>
         ) : (
-          <ThreadContent thread={detail.thread} tasks={detail.tasks} />
+          <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
+            <ThreadContent thread={detail.thread} tasks={detail.tasks} onOpenTask={onOpenTask} />
+          </div>
         )}
       </div>
-    </Dialog>
+    </section>
   )
 }

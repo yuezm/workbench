@@ -10,6 +10,7 @@
  */
 import type { Runtime, Task } from '../protocol/entities'
 import type { ThreadRow } from '../protocol/thread'
+import type { TaskComment } from '../protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from './types'
 import { taskPrompt } from './prompt'
 import { runCountOfTask, threadSessions } from './threads'
@@ -44,6 +45,9 @@ export interface RunTrigger {
  * M6.5：任务挂线程时，run 写 `threadId`、拼线程上下文、按「同线程同智能体最近的会话」
  * 续接；`options.thread` 用于本批刚打开的新线程（视图里还没有），`options.turn` 用于
  * 复用任务追加一轮（视图里的 run 数没有算上本批新 run）。
+ *
+ * M7.5：任务的上下文 / 反馈拼成固定资料段（`taskCommentsText`）；`options.pendingComment`
+ * 是本批刚追加、视图里还没有的那条（反馈顺带再跑一轮时用）。
  */
 export function entryRunFacts(
   view: View,
@@ -52,7 +56,7 @@ export function entryRunFacts(
   env: Environment,
   actor: Actor,
   trigger?: RunTrigger,
-  options?: { thread?: ThreadRow; turn?: number },
+  options?: { thread?: ThreadRow; turn?: number; pendingComment?: TaskComment },
 ): FactDraft<'run.queued'>[] {
   if (task.status !== 'active' || task.currentStageId === null) return []
   const stage = view.stages.get(task.currentStageId)
@@ -69,7 +73,14 @@ export function entryRunFacts(
     thread !== undefined &&
     (thread.events.length > 0 || thread.notes.length > 0 || thread.taskIds.length > 1)
   const context = thread !== undefined && hasHistory ? threadContextText(view, thread) : null
-  const prompt = [taskPrompt(agent, task, stage.name, context), trigger?.promptExtra ?? '']
+  const comments = [
+    ...[...view.taskComments.values()].filter((comment) => comment.taskId === task.id),
+    ...(options?.pendingComment === undefined ? [] : [options.pendingComment]),
+  ]
+  const prompt = [
+    taskPrompt(agent, task, stage.name, context, comments),
+    trigger?.promptExtra ?? '',
+  ]
     .filter(Boolean)
     .join('\n\n')
   const resumeSessionId =

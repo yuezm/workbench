@@ -1127,3 +1127,81 @@ describe('loadView / queryView：线程（M6.5）', () => {
     }
   })
 })
+
+describe('loadView / queryView：任务上下文 / 反馈（M7.5）', () => {
+  const taskA = sample.task({ id: 'tk-a', title: '有反馈', createdAt: '2026-11-01T00:00:00.000Z' })
+  const taskB = sample.task({ id: 'tk-b', title: '没反馈', createdAt: '2026-11-02T00:00:00.000Z' })
+  const first = {
+    id: 'tc-1',
+    taskId: 'tk-a',
+    author: 'owner' as const,
+    text: '先改按钮',
+    createdAt: '2026-11-03T01:00:00.000Z',
+  }
+  const second = {
+    id: 'tc-2',
+    taskId: 'tk-a',
+    author: 'owner' as const,
+    text: '再补文案',
+    createdAt: '2026-11-03T02:00:00.000Z',
+  }
+  const other = {
+    id: 'tc-3',
+    taskId: 'tk-b',
+    author: 'agent' as const,
+    text: '别的任务的反馈',
+    createdAt: '2026-11-03T03:00:00.000Z',
+  }
+
+  function seedComments(db: DatabaseSync): void {
+    seed(db)
+    const writer = createProjectionWriter(db)
+    for (const change of [
+      { table: 'tasks', key: taskA.id, row: taskA },
+      { table: 'tasks', key: taskB.id, row: taskB },
+    ] as Change[]) {
+      writer.apply(change, SAMPLE_AT)
+    }
+    for (const row of [second, first, other]) {
+      writer.apply({ table: 'task_comments', key: row.id, row }, SAMPLE_AT)
+    }
+  }
+
+  it('task_comments 切片：整行映射；未声明时不装载', () => {
+    const db = memory()
+    seedComments(db)
+
+    const view = loadView(db, ['task_comments'])
+    expect([...view.taskComments.keys()]).toEqual(['tc-1', 'tc-2', 'tc-3'])
+    expect(view.taskComments.get('tc-2')).toEqual(second)
+    expect(loadView(db, []).taskComments.size).toBe(0)
+    expect(view.tasks.size).toBe(0)
+  })
+
+  it('comments.byTask：按 createdAt 升序（同毫秒按 rowid）只取该任务，缺参数报错', () => {
+    const db = memory()
+    seedComments(db)
+
+    expect(queryView(db, 'comments.byTask', { taskId: 'tk-a' })).toEqual([first, second])
+    expect(queryView(db, 'comments.byTask', { taskId: 'tk-b' })).toEqual([other])
+    expect(queryView(db, 'comments.byTask', { taskId: 'tk-missing' })).toEqual([])
+
+    for (const params of [undefined, null, 42, {}, { taskId: '' }, { taskId: 7 }]) {
+      const error = captureError(() => queryView(db, 'comments.byTask', params))
+      expect((error as StoreError).code).toBe('invalid_input')
+      expect((error as StoreError).message).toContain('taskId')
+    }
+  })
+
+  it('viewSpec：task.comment 声明 task_comments 切片', () => {
+    const db = memory()
+    seedComments(db)
+
+    const view = loadView(
+      db,
+      viewSpec({ commandId: 'c1', type: 'task.comment', taskId: 'tk-a', text: '改一下' }),
+    )
+    expect(view.taskComments.size).toBe(3)
+    expect(view.tasks.has('tk-a')).toBe(true)
+  })
+})

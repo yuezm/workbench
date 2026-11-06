@@ -161,6 +161,7 @@ const view = (seed: Seed = {}): View => ({
   cards: new Map((seed.cards ?? []).map((row) => [row.id, row])),
   activeTaskIds: new Set(),
   threads: new Map(),
+  taskComments: new Map(),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

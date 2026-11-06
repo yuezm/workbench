@@ -93,7 +93,15 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'task.moved':
     case 'task.completed':
     case 'task.removed':
-      return [{ scope: 'task', id: fact.payload.task.id }]
+    case 'task.comment_added':
+      // M7.5：上下文 / 反馈归到任务的时间线（评论行自带 taskId）
+      return [
+        {
+          scope: 'task',
+          id:
+            fact.type === 'task.comment_added' ? fact.payload.comment.taskId : fact.payload.task.id,
+        },
+      ]
     case 'run.queued':
     case 'run.claimed':
     case 'run.lease_extended':

@@ -176,6 +176,7 @@ function seedBase(): void {
   kernel.setView('workflows.all', undefined, [wf])
   kernel.setView('agents.all', undefined, [agent])
   kernel.setView('tasks.byWorkflow', { workflowId: 'w1' }, [task])
+  kernel.setView('task.byId', { taskId: 't1' }, task)
   kernel.setView('runs.byTask', { taskId: 't1' }, [run])
   kernel.setView('runtimes.all', undefined, [runtime])
   kernel.setView('runtimes.statuses', undefined, [])
@@ -227,7 +228,7 @@ function expectDispatched(match: Record<string, unknown>): void {
 }
 
 describe('AiWorkflowPage', () => {
-  it('看板/运行记录/拖拽/新建任务/拖到已完成全流程', async () => {
+  it('看板/任务详情页/拖拽/新建任务/拖到已完成全流程', async () => {
     seedBase()
     dispatchWith(<C extends Command>(command: C): CommandDispatchResult<C> => {
       if (command.type === 'task.create') {
@@ -242,12 +243,18 @@ describe('AiWorkflowPage', () => {
     await openTasks(user)
 
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
-    await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
-    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
 
-    // 运行记录来自 runs.byTask 视图；事件视图未就绪时回落 output
-    await user.click(screen.getByRole('option', { name: '任务A' }))
+    // 单击任务卡进入任务详情页（页面，不是弹窗）：运行记录来自 runs.byTask 视图；
+    // 事件视图未就绪时回落 output
+    await user.click(screen.getByLabelText('任务：任务A'))
+    expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(await screen.findByText('hello')).toBeInTheDocument()
+
+    // 返回回到看板
+    await user.click(screen.getByRole('button', { name: '返回' }))
+    expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
+    expect(screen.getByText(/工作流「研发」/)).toBeInTheDocument()
 
     // 拖到另一阶段：发 task.move 命令
     dragTo('任务：任务A', '阶段：审核')
@@ -354,18 +361,13 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText('tboom')).toBeInTheDocument()
   })
 
-  it('运行记录加载失败展示错误', async () => {
+  it('运行记录加载失败在任务详情页展示错误', async () => {
     seedBase()
     kernel.failView('runs.byTask', { taskId: 't1' }, 'rboom')
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await openTasks(user)
-    await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
-    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(2))
-    await user.click(screen.getByRole('option', { name: '任务A' }))
-    expect(await screen.findByText('rboom')).toBeInTheDocument()
-    // 拖拽后错误仍在：视图查询依旧失败
-    dragTo('任务：任务A', '阶段：审核')
+    await user.click(await screen.findByLabelText('任务：任务A'))
     expect(await screen.findByText('rboom')).toBeInTheDocument()
   })
 
@@ -427,7 +429,7 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText(/工作流「研发v2」/)).toBeInTheDocument()
   })
 
-  it('未选任务时拖拽仍发命令；清空运行选择；取消任务弹窗', async () => {
+  it('拖拽仍发命令；任务详情页可返回；取消新建弹窗', async () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
@@ -437,11 +439,15 @@ describe('AiWorkflowPage', () => {
     dragTo('任务：任务A', '阶段：审核')
     await waitFor(() => expectDispatched({ type: 'task.move', id: 't1', stageId: 's1' }))
 
-    await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
-    await user.click(screen.getByRole('option', { name: '任务A' }))
-    await user.click(screen.getByRole('combobox', { name: '选择任务查看运行' }))
-    await user.click(screen.getByRole('option', { name: '选择任务' }))
-    expect(screen.getByRole('combobox', { name: '选择任务查看运行' })).toHaveTextContent('选择任务')
+    await user.click(screen.getByLabelText('任务：任务A'))
+    expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+    // 其它按键不影响详情路由
+    await user.keyboard('a')
+    expect(screen.getByRole('region', { name: '任务详情' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument(),
+    )
 
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '取消' }))
@@ -544,7 +550,7 @@ describe('AiWorkflowPage', () => {
     unmount()
   })
 
-  it('工作台默认落在聊天栏；任务栏显示看板与运行记录；切回聊天隐藏看板', async () => {
+  it('工作台默认落在聊天栏；任务栏显示看板；切回聊天隐藏看板', async () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
@@ -557,14 +563,13 @@ describe('AiWorkflowPage', () => {
     expect(screen.getByRole('button', { name: '新对话' })).toBeInTheDocument()
     expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
     expect(screen.queryByText(/工作流「研发」/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: '选择任务查看运行' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
     // 工作流切换器只在任务栏目显示
     expect(screen.queryByRole('combobox', { name: '选择工作流' })).not.toBeInTheDocument()
 
-    // 切到任务：看板与运行记录就位，侧栏换成工作流切换器
+    // 切到任务：看板就位，侧栏换成工作流切换器
     await openTasks(user)
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '选择任务查看运行' })).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '选择工作流' })).toBeInTheDocument()
     expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新对话' })).not.toBeInTheDocument()
@@ -700,10 +705,11 @@ describe('AiWorkflowPage', () => {
     )
   })
 
-  it('任务卡线程入口打开 ThreadPanel，Esc 收起', async () => {
+  it('任务卡线程入口打开线程详情页；线程内点任务进详情；Esc 逐级返回看板', async () => {
     seedBase()
     const threadedTask: Task = { ...task, threadId: 'th1' }
     kernel.setView('tasks.byWorkflow', { workflowId: 'w1' }, [threadedTask])
+    kernel.setView('task.byId', { taskId: 't1' }, threadedTask)
     kernel.setView(
       'thread.byId',
       { threadId: 'th1' },
@@ -719,11 +725,48 @@ describe('AiWorkflowPage', () => {
     await screen.findByText(/工作流「研发」/)
 
     await user.click(screen.getByRole('button', { name: '打开线程：任务A' }))
-    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '线程详情' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '线程 · 任务A 的线程' })).toBeInTheDocument()
     expect(screen.getByText('manual')).toBeInTheDocument()
 
+    // 线程的任务列表进任务详情页
+    await user.click(screen.getByRole('button', { name: '打开任务：任务A' }))
+    expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+
+    // 返回回到线程详情
+    await user.click(screen.getByRole('button', { name: '返回' }))
+    expect(await screen.findByRole('region', { name: '线程详情' })).toBeInTheDocument()
+
+    // Esc 逐级回退：回到看板
     await user.keyboard('{Escape}')
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: '线程详情' })).not.toBeInTheDocument(),
+    )
+    expect(screen.getByText(/工作流「研发」/)).toBeInTheDocument()
+  })
+
+  it('详情页在切换栏目 / 视图后回到看板，不残留上一页', async () => {
+    seedBase()
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByLabelText('任务：任务A'))
+    expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '聊天' }))
+    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
+    await openTasks(user)
+    expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+
+    // 设置视图同样清空详情栈
+    await user.click(screen.getByLabelText('任务：任务A'))
+    expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+    await openSection(user, '运行时')
+    await user.click(screen.getByRole('tab', { name: '工作台' }))
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
   })
 })

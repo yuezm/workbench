@@ -94,6 +94,7 @@ const commandSamples: Command[] = [
   },
   { commandId: 'c28', type: 'plugins.replace', settings: [] },
   { commandId: 'c29', type: 'plugin.set', pluginId: 'webhook', enabled: true },
+  { commandId: 'c30', type: 'task.comment', taskId: 't-1', text: '按钮改成粉色', rerun: true },
 ]
 
 const hostSamples: Input[] = [
@@ -135,7 +136,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'runtime.remove': ['runtimes', 'agents'],
   'runtime.probe': ['runtimes'],
   'runtime.probed': ['runtimes'],
-  'task.create': ['workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'task.create': ['workflows', 'workflow_stages', 'agents', 'runtimes', 'task_comments'],
   'task.move': [
     'tasks',
     'workflows',
@@ -145,9 +146,29 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'threads',
     'runs',
     'cards',
+    'task_comments',
   ],
-  'task.complete': ['tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes', 'threads'],
+  'task.complete': [
+    'tasks',
+    'workflows',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+    'threads',
+    'task_comments',
+  ],
   'task.remove': ['tasks', 'runs', 'threads'],
+  'task.comment': [
+    'tasks',
+    'workflows',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+    'threads',
+    'runs',
+    'cards',
+    'task_comments',
+  ],
   'card.answer': ['runs', 'cards'],
   'card.resolve': ['cards'],
   'run.claim': ['runs', 'runtimes', 'threads'],
@@ -163,6 +184,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'cards',
     'rule_sets',
     'threads',
+    'task_comments',
   ],
   'run.frames': ['runs'],
   'run.host_settled': ['runs', 'conversations'],
@@ -177,6 +199,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'agents',
     'runtimes',
     'threads',
+    'task_comments',
   ],
   'chat.create': ['agents'],
   'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
@@ -192,6 +215,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'threads',
     'runs',
     'cards',
+    'task_comments',
   ],
   'event.received': [
     'rule_sets',
@@ -203,9 +227,18 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'threads',
     'runs',
     'cards',
+    'task_comments',
   ],
   'rules.replace': ['rule_sets', 'workflows', 'workflow_stages'],
-  'rule.trigger': ['rule_sets', 'tasks', 'workflows', 'workflow_stages', 'agents', 'runtimes'],
+  'rule.trigger': [
+    'rule_sets',
+    'tasks',
+    'workflows',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+    'task_comments',
+  ],
   'plugins.replace': ['plugin_settings'],
   'plugin.set': ['plugin_settings'],
   'thread.note': ['threads'],
@@ -218,8 +251,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 29 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(29)
+  it('覆盖 30 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(30)
     expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)

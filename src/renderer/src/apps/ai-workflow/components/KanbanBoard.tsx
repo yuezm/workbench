@@ -13,8 +13,10 @@ interface KanbanBoardProps {
   /** 卡片拖到「已完成」区 */
   onCompleteTask: (taskId: string) => void
   onNewTask: () => void
-  /** 打开卡片所属线程的面板（任务有 threadId 时才渲染入口） */
-  onOpenThread?: (task: Task) => void
+  /** 单击任务卡进入任务详情页（页面跳转，回调由上层路由处理） */
+  onOpenTask?: (task: Task) => void
+  /** 打开卡片所属线程的详情页（任务有 threadId 时才渲染入口） */
+  onOpenThread?: (threadId: string) => void
 }
 
 /** 列头圆点按列序循环取四色点缀 */
@@ -48,6 +50,7 @@ export function KanbanBoard({
   onMoveToStage,
   onCompleteTask,
   onNewTask,
+  onOpenTask,
   onOpenThread,
 }: KanbanBoardProps): ReactElement {
   /** 当前被拖动的任务（同一看板内拖拽，状态足够，不依赖 dataTransfer） */
@@ -153,6 +156,7 @@ export function KanbanBoard({
                       parentTitle={
                         task.parentTaskId === null ? undefined : titleById.get(task.parentTaskId)
                       }
+                      onOpenTask={onOpenTask}
                       onOpenThread={onOpenThread}
                       onDragStart={setDragging}
                       onDragEnd={stopDrag}

@@ -14,6 +14,7 @@ import type { DispatchResult } from './store/index'
 import type { Fact } from '../kernel/types'
 import type { Runtime } from '../protocol/entities'
 import type { Card } from '../protocol/entities'
+import type { TaskComment } from '../protocol/task-comment'
 import type { Command } from '../protocol/commands'
 import type { Capability, PluginManifest } from '../protocol/manifest'
 import type { PluginSetting, PluginSettingsView, PluginView } from '../protocol/plugins'
@@ -237,6 +238,11 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
         // 手动运行：内核产 `task.created`（origin='rule'），返回值与 task.create 同口径
         const id = entityIdOf(facts, 'task.created')
         return id === null ? null : taskById(id)
+      }
+      case 'task.comment': {
+        // M7.5：返回追加的评论行（UI 仍以 `comments.byTask` 为准，这里只保证契约有值）
+        const fact = facts.find((item) => item.type === 'task.comment_added')
+        return fact === undefined ? null : (fact.payload as { comment: TaskComment }).comment
       }
       case 'plugins.replace':
         // 整批保存后立刻返回新快照（IPC 可直接刷新，不必再发一次 plugins.settings）

@@ -25,6 +25,8 @@ export interface FakeSdkOverrides {
   findInDirs?: (command: string, dirs: string[]) => string | null
   now?: () => number
   sessionRoot?: string | null
+  /** 主进程当前目录（workdir 留空时的执行目录兜底）；未注入时用 `process.cwd()` */
+  cwd?: string
   log?: (line: string) => void
   config?: <T = Record<string, unknown>>() => T
   /** 系统通知；未注入时记进返回值的 `notifyCalls`（title/body 原样保存） */
@@ -76,7 +78,10 @@ export function fakeSdk(overrides: FakeSdkOverrides = {}): FakeSdk {
     scanDirs: overrides.scanDirs ?? (() => []),
     findInDirs: overrides.findInDirs ?? (() => null),
   }
-  const paths: SdkPaths = { sessionRoot: overrides.sessionRoot ?? null }
+  const paths: SdkPaths = {
+    sessionRoot: overrides.sessionRoot ?? null,
+    cwd: overrides.cwd ?? process.cwd(),
+  }
   const notifyCalls: FakeSdk['notifyCalls'] = []
   return {
     log: overrides.log ?? (() => undefined),

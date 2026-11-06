@@ -5,6 +5,7 @@ import {
   VIEW_IDS,
   VIEW_PARAM_FIELDS,
   type ActiveRun,
+  type RunApproval,
   type RuntimeWorkload,
   type StaleChatRun,
   type ViewId,
@@ -79,6 +80,8 @@ describe('protocol/views', () => {
       'plugins.all',
       'thread.byId',
       'comments.byTask',
+      'run.approvals',
+      'runtimes.default-workdir',
     ])
   })
 
@@ -177,12 +180,19 @@ const seqNoParams: Assert<Equal<ViewParams<'kernel.seq'>, undefined>> = true
 const executorsNoParams: Assert<Equal<ViewParams<'runtimes.executors'>, undefined>> = true
 const detectedNoParams: Assert<Equal<ViewParams<'runtimes.detected'>, undefined>> = true
 const modelsParams: Assert<Equal<ViewParams<'runtimes.models'>, { runtimeId: string }>> = true
+const approvalsParams: Assert<Equal<ViewParams<'run.approvals'>, { runId: string }>> = true
+const approvalsResult: Assert<Equal<ViewResult<'run.approvals'>, RunApproval[]>> = true
 const executingResult: Assert<Equal<ViewResult<'tasks.executing'>, string[]>> = true
 const seqResult: Assert<Equal<ViewResult<'kernel.seq'>, number>> = true
 const hostViewIdsCovered: Assert<
   Equal<
     (typeof HOST_VIEW_IDS)[number],
-    'runtimes.executors' | 'runtimes.detected' | 'runtimes.models' | 'plugins.all'
+    | 'runtimes.executors'
+    | 'runtimes.detected'
+    | 'runtimes.models'
+    | 'plugins.all'
+    | 'run.approvals'
+    | 'runtimes.default-workdir'
   >
 > = true
 
@@ -194,6 +204,8 @@ describe('protocol/views：M5 客户端视图', () => {
     expect(executorsNoParams).toBe(true)
     expect(detectedNoParams).toBe(true)
     expect(modelsParams).toBe(true)
+    expect(approvalsParams).toBe(true)
+    expect(approvalsResult).toBe(true)
     expect(executingResult).toBe(true)
     expect(seqResult).toBe(true)
     expect(hostViewIdsCovered).toBe(true)
@@ -203,5 +215,7 @@ describe('protocol/views：M5 客户端视图', () => {
     for (const id of HOST_VIEW_IDS) expect(VIEW_IDS).toContain(id)
     expect(VIEW_PARAM_FIELDS['runtimes.executors']).toBeUndefined()
     expect(VIEW_PARAM_FIELDS['runtimes.models']).toBe('runtimeId')
+    expect(VIEW_PARAM_FIELDS['run.approvals']).toBe('runId')
+    expect(VIEW_PARAM_FIELDS['runtimes.default-workdir']).toBeUndefined()
   })
 })

@@ -23,6 +23,8 @@ import { defaultSpawn, killProcessTree } from './process'
 export interface SdkHostOptions {
   /** 协议会话持久化目录（执行器跨轮续接用）；装配根按 userData 注入，缺省 null */
   sessionRoot?: string | null
+  /** 主进程当前目录（绝对路径）；运行时 workdir 留空时执行器用它，缺省 `process.cwd()` */
+  cwd?: string
   /** 当前时刻（毫秒）；测试注入假时钟 */
   now?: () => number
   /** 日志落点（装配根可换成自己的通道）；缺省 `console.warn` */
@@ -51,7 +53,10 @@ const defaultNotify: NotifyFn = (): void => undefined
 /** 组装宿主原件：所有缺省值集中在这里，插件侧不感知来源。 */
 export function createSdkHost(options: SdkHostOptions = {}): SdkHost {
   const spawn: SpawnFn = options.spawn ?? defaultSpawn
-  const paths: SdkPaths = { sessionRoot: options.sessionRoot ?? null }
+  const paths: SdkPaths = {
+    sessionRoot: options.sessionRoot ?? null,
+    cwd: options.cwd ?? process.cwd(),
+  }
 
   return {
     log: options.log ?? defaultLog,

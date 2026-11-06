@@ -1036,7 +1036,10 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'runtimes.detected':
     case 'runtimes.models':
     case 'plugins.all':
-      // 宿主视图（插件注册表 / CLI 探测 / 执行器模型目录 / 磁盘插件目录）由装配根注入，不读投影
+    case 'run.approvals':
+    case 'runtimes.default-workdir':
+      // 宿主视图（插件注册表 / CLI 探测 / 执行器模型目录 / 磁盘插件目录 / 会话日志提权记录 /
+      // 默认工作目录）由装配根注入，不读投影
       throw new StoreError('invalid_input', `宿主视图不读投影: ${view}`)
   }
 }

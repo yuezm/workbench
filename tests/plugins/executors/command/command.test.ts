@@ -302,15 +302,16 @@ describe('executeCommandRun 成功路径', () => {
     expect((await running).status).toBe('succeeded')
   })
 
-  it('变量缺失折成空串；turn.cwd 为空串时不传给 spawn', async () => {
+  it('变量缺失折成空串；turn.cwd 为空串时回落到宿主默认目录', async () => {
     const h = harness()
     const { running } = startRun(h, {
       runtime: { argsTemplate: template(['{model}', '{effort}', '{cwd}', '{context}']) },
       turn: { cwd: '' },
+      sdk: { cwd: 'D:/default' },
     })
 
-    expect(h.calls[0].args).toEqual(['', '', '', ''])
-    expect(h.calls[0].options.cwd).toBeUndefined()
+    expect(h.calls[0].args).toEqual(['', '', 'D:/default', ''])
+    expect(h.calls[0].options.cwd).toBe('D:/default')
 
     h.children[0].close(0)
     expect((await running).status).toBe('succeeded')

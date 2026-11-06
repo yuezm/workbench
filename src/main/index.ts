@@ -22,6 +22,8 @@ import { reconcile } from '../host/reconcile'
 import { createScheduler, type Scheduler } from '../host/scheduler'
 import { openDatabase } from '../host/db'
 import { createNetCapability } from '../host/net'
+import { readRunApprovals } from './run-approvals'
+import { resolveWorkdir } from './workdir'
 import {
   createExternalChannelPlugin,
   createExternalSourcePlugin,
@@ -163,8 +165,20 @@ if (app.requestSingleInstanceLock()) {
     const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')
     mkdirSync(sessionsDir, { recursive: true })
     // 插件能力面（宿主注入）：spawn/解析/杀树/时钟/会话根/网络；插件只经 sdk 拿副作用。
+    // 默认工作目录（运行时 workdir 留空时执行器用它）：WORKBENCH_WORKDIR > ~/.workbench，启动时确保存在。
+    const defaultWorkdir = resolveWorkdir(
+      { env: process.env, home: app.getPath('home'), fallback: process.cwd() },
+      (line) => {
+        console.warn(line)
+      },
+    )
     const net = createNetCapability()
-    const sdkHost = createSdkHost({ sessionRoot: sessionsDir, notify, net })
+    const sdkHost = createSdkHost({
+      sessionRoot: sessionsDir,
+      cwd: defaultWorkdir,
+      notify,
+      net,
+    })
     // 执行器注册表：按运行时配置的 executorKey 取插件端口；未知 key 由调度器兜底终态。
     const executors = createExecutorRegistry(pluginExecutors, sdkHost)
     // M7：插件 secret 只存密文（safeStorage）；不可用时写入口拒绝，不落明文。
@@ -547,6 +561,16 @@ if (app.requestSingleInstanceLock()) {
         case 'plugins.all':
           // M7：插件设置页的只读视图（磁盘目录 + 设置 + 运行状态；secret 只回键名）
           return pluginViews()
+        case 'run.approvals': {
+          // 沙箱提权记录：只读 dsh 会话日志（自动放行的提权在别处没有痕迹）
+          const id = params?.runId ?? ''
+          const run = store.query('run.byId', { runId: id })
+          if (run === null) throw new Error('运行不存在: ' + id)
+          return readRunApprovals(sessionsDir, run.sessionId)
+        }
+        case 'runtimes.default-workdir':
+          // 运行时表单里「留空」时实际会用的目录（环境变量 / 缺省目录都在这里定）
+          return defaultWorkdir
       }
     }
     const router = createCommandRouter({

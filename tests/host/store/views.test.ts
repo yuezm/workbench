@@ -736,13 +736,18 @@ describe('queryView：M5 客户端视图（tasks.executing / runtimes.statuses /
     expect(queryView(db, 'kernel.seq')).toBe(2)
   })
 
-  it('宿主视图不读投影：executors / detected / models 走装配根注入，DB 查询明确报错', () => {
+  it('宿主视图不读投影：executors / detected / models / approvals 走装配根注入，DB 查询明确报错', () => {
     const db = memory()
     for (const view of ['runtimes.executors', 'runtimes.detected', 'runtimes.models'] as const) {
       const error = captureError(() => queryView(db, view, { runtimeId: 'rt-1' }))
       expect((error as StoreError).code).toBe('invalid_input')
       expect((error as StoreError).message).toContain('宿主视图不读投影')
     }
+    const approvals = captureError(() => queryView(db, 'run.approvals', { runId: 'run-1' }))
+    expect((approvals as StoreError).code).toBe('invalid_input')
+    expect((approvals as StoreError).message).toContain('宿主视图不读投影')
+    const workdir = captureError(() => queryView(db, 'runtimes.default-workdir'))
+    expect((workdir as StoreError).code).toBe('invalid_input')
   })
 })
 

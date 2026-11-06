@@ -131,8 +131,10 @@ export async function executeDshRun(
     })
   }
 
-  // D10：运行时 workdir 优先；turn.cwd 可能为空串，空串不传给 spawn（否则 ENOENT）
-  const cwd = runtime.workdir ?? (turn.cwd || undefined)
+  // D10：运行时 workdir 优先；turn.cwd 可能为空串（workdir 为 null 时内核记 ''）。
+  // dsh 协议要求 execute.cwd 必须是非空绝对路径，不能省略，所以最后回落到宿主默认目录
+  // （main 启动时解析 `WORKBENCH_WORKDIR` / `~/.workbench` 并注入 `sdk.paths.cwd`）。
+  const cwd = runtime.workdir ?? (turn.cwd || sdk.paths.cwd)
   const launched = startProcess(
     sdk,
     runtime.command,

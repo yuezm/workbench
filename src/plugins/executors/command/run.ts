@@ -115,8 +115,8 @@ export async function executeCommandRun(
     })
   }
 
-  // D10：运行时 workdir 优先；turn.cwd 为空串时不传给 spawn（否则 ENOENT）
-  const cwd = runtime.workdir ?? (turn.cwd || undefined)
+  // D10：运行时 workdir 优先；turn.cwd 为空串时回落到宿主默认目录（不把空串传给 spawn，避免 ENOENT）
+  const cwd = runtime.workdir ?? (turn.cwd || sdk.paths.cwd)
   const vars: ArgvVars = {
     model: runtime.model ?? '',
     effort: runtime.reasoningEffort ?? '',

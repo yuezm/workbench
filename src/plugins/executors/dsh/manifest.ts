@@ -28,6 +28,11 @@ export const dshManifest: PluginManifest = {
     },
     { key: 'model', label: '模型', type: 'text', help: 'provider/model 形式；留空用 CLI 默认模型' },
     { key: 'reasoningEffort', label: '推理强度', type: 'text', help: '留空用模型默认强度' },
-    { key: 'workdir', label: '工作目录', type: 'text', help: '留空用进程当前目录' },
+    {
+      key: 'workdir',
+      label: '工作目录',
+      type: 'text',
+      help: '留空用宿主默认目录（WORKBENCH_WORKDIR，缺省 ~/.workbench）',
+    },
   ],
 }

@@ -1299,16 +1299,36 @@ describe('取消/超时终止的定时器收尾（假定时器）', () => {
 })
 
 describe('D10：工作目录优先级', () => {
-  it('runtime.workdir 优先；turn.cwd 为空串时不传给 spawn 且 execute 帧省略 cwd', async () => {
+  it('workdir 优先；workdir 为空用 turn.cwd；两者都空回落到主进程当前目录（execute.cwd 不省略）', async () => {
+    // workdir=null、turn.cwd=''：回落到 sdk.paths.cwd，spawn 与 execute 帧都用它
     const h = harness()
-    const first = startRun(h, { runtime: { workdir: null }, turn: { cwd: '' } })
-    expect(h.calls[0].options.cwd).toBeUndefined()
-    expect(h.children[0].frames()[0]).not.toHaveProperty('cwd')
+    const first = startRun(h, {
+      runtime: { workdir: null },
+      turn: { cwd: '' },
+      sdk: { cwd: 'D:/main-cwd' },
+    })
+    expect(h.calls[0].options.cwd).toBe('D:/main-cwd')
+    expect(h.children[0].frames()[0].cwd).toBe('D:/main-cwd')
     h.children[0].emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
     h.children[0].emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
     h.children[0].close(0)
     expect((await first.running).status).toBe('succeeded')
 
+    // workdir=null、turn.cwd 有值：turn.cwd 赢
+    const hMid = harness()
+    const mid = startRun(hMid, {
+      runtime: { workdir: null },
+      turn: { cwd: 'C:/work' },
+      sdk: { cwd: 'D:/main-cwd' },
+    })
+    expect(hMid.calls[0].options.cwd).toBe('C:/work')
+    expect(hMid.children[0].frames()[0].cwd).toBe('C:/work')
+    hMid.children[0].emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    hMid.children[0].emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
+    hMid.children[0].close(0)
+    expect((await mid.running).status).toBe('succeeded')
+
+    // runtime.workdir 优先于 turn.cwd
     const h2 = harness()
     const second = startRun(h2, { runtime: { workdir: 'D:/repo' }, turn: { cwd: 'C:/work' } })
     expect(h2.calls[0].options.cwd).toBe('D:/repo')

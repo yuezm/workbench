@@ -48,10 +48,12 @@ afterEach(() => {
 })
 
 describe('createSdkHost 缺省值', () => {
-  it('sessionRoot 未配置为 null，注入后原样保留', () => {
+  it('sessionRoot 未配置为 null，注入后原样保留；cwd 缺省为主进程当前目录', () => {
     expect(createSdkHost().paths.sessionRoot).toBeNull()
     const sessions = 'C:/data/ai-workflow/sessions'
     expect(createSdkHost({ sessionRoot: sessions }).paths.sessionRoot).toBe(sessions)
+    expect(createSdkHost().paths.cwd).toBe(process.cwd())
+    expect(createSdkHost({ cwd: 'D:/work' }).paths.cwd).toBe('D:/work')
   })
 
   it('now 缺省用系统时钟（毫秒），可注入假时钟', () => {

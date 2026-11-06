@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { receiptBlockHint } from '../../src/kernel/prompt'
 import { WORKBENCH_EVENT_CHANNEL } from '../../src/protocol/ipc'
@@ -272,7 +274,7 @@ const {
     appMock: {
       whenReady: vi.fn(async () => undefined),
       setAppUserModelId: vi.fn(),
-      getPath: vi.fn(() => '/tmp/workbench-entry-test'),
+      getPath: vi.fn(() => path.join(tmpdir(), 'workbench-entry-test')),
       requestSingleInstanceLock: vi.fn(() => true),
       on: vi.fn(),
       quit: vi.fn(),
@@ -600,7 +602,11 @@ describe('主进程入口装配', () => {
 
     // 执行器装配：会话根注入 sdk，注册表把清单接成端口工厂
     expect(createSdkHostMock).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionRoot: expect.stringContaining('sessions') }),
+      expect.objectContaining({
+        sessionRoot: expect.stringContaining('sessions'),
+        // 默认工作目录：未配置 WORKBENCH_WORKDIR 时落在 <home>/.workbench
+        cwd: expect.stringContaining('.workbench'),
+      }),
     )
     expect(createExecutorRegistryMock).toHaveBeenCalledWith(pluginEntriesMock, sdkHostMock)
 
@@ -651,6 +657,27 @@ describe('主进程入口装配', () => {
     expect(() => hostView('runtimes.models', { runtimeId: 'ghost' })).toThrow('运行时不存在: ghost')
     // 缺参数同样给可读错误（空 runtimeId）
     expect(() => hostView('runtimes.models', undefined)).toThrow('运行时不存在: ')
+  })
+
+  it('宿主视图 run.approvals：按 run 的会话 id 读日志，缺运行时给可读错误', async () => {
+    await loadEntry()
+    storeMock.query.mockImplementation((view: string) =>
+      view === 'run.byId' ? { id: 'run-1', sessionId: 'sess-1' } : [],
+    )
+    // 会话根下没有该会话的日志：降级为空数组，不把任务详情拖垮
+    await expect(Promise.resolve(hostView('run.approvals', { runId: 'run-1' }))).resolves.toEqual(
+      [],
+    )
+
+    storeMock.query.mockImplementation(() => null)
+    expect(() => hostView('run.approvals', { runId: 'ghost' })).toThrow('运行不存在: ghost')
+  })
+
+  it('宿主视图 runtimes.default-workdir：返回解析后的默认工作目录', async () => {
+    await loadEntry()
+    const value = hostView('runtimes.default-workdir')
+    expect(typeof value).toBe('string')
+    expect(value).toContain('.workbench')
   })
 
   it('executorDefaults：manifest 缺字段 / 非字符串 default 回退空串，未知 key 抛可读错误', async () => {

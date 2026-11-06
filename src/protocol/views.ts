@@ -62,17 +62,22 @@ export const VIEW_IDS = [
   'plugins.all',
   'thread.byId',
   'comments.byTask',
+  'run.approvals',
+  'runtimes.default-workdir',
 ] as const
 
 /**
  * 宿主视图：由装配根注入的只读函数提供（插件注册表 / CLI 探测 / 执行器模型目录 /
- * 磁盘插件目录），不读投影、不写库、不发失效；与 DB 视图共用同一个 `query` 动词（M5 D4）。
+ * 磁盘插件目录 / 会话日志里的提权记录），不读投影、不写库、不发失效；
+ * 与 DB 视图共用同一个 `query` 动词（M5 D4）。
  */
 export const HOST_VIEW_IDS = [
   'runtimes.executors',
   'runtimes.detected',
   'runtimes.models',
   'plugins.all',
+  'run.approvals',
+  'runtimes.default-workdir',
 ] as const
 
 export type HostViewId = (typeof HOST_VIEW_IDS)[number]
@@ -116,6 +121,29 @@ export interface WaitingRun {
   hasOpenCard: boolean
 }
 
+/**
+ * 一次沙箱提权请求（`run.approvals`）：来自该 run 的 dsh 会话日志
+ * 里的 `approval/asked` / `approval/decided` 事件，只读解析、不入库、不进事件流。
+ *
+ * 为什么要有它：运行时对提权请求的回答是自动的（dsh 桥接层恒回 `allowed-once`），
+ * 界面上原本没有任何痕迹。这里把「谁在什么时候要求了什么权限、理由是什么、结果如何」
+ * 摆到任务详情里，让自动放行至少可复核。
+ */
+export interface RunApproval {
+  /** 授权请求 id（`approval/asked` 的 `data.id`） */
+  id: string
+  /** 请求时刻（ISO；取自会话日志 `time`） */
+  at: string
+  /** 发起提权的工具名（如 `pwsh` / `bash`） */
+  tool: string
+  /** 工具调用 id（与事件流对齐用；日志缺省时 null） */
+  callId: string | null
+  /** 模型给出的理由（自由文本，可能为空） */
+  reason: string
+  /** 结果：`allowed-once` / `rejected` / `cancelled` / `unavailable`；尚未落定时 null */
+  outcome: string | null
+}
+
 /** 需要参数的视图 → 参数形状；无参数视图不出现在这里。 */
 export interface ViewArgs {
   'tasks.byWorkflow': { workflowId: string }
@@ -131,6 +159,7 @@ export interface ViewArgs {
   'runtimes.models': { runtimeId: string }
   'thread.byId': { threadId: string }
   'comments.byTask': { taskId: string }
+  'run.approvals': { runId: string }
 }
 
 /**
@@ -162,6 +191,7 @@ export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'runtimes.models': 'runtimeId',
   'thread.byId': 'threadId',
   'comments.byTask': 'taskId',
+  'run.approvals': 'runId',
 }
 
 /** 视图 id → 返回类型。 */
@@ -209,6 +239,16 @@ export interface ViewResults {
   'thread.byId': ThreadDetail | null
   /** 任务上下文 / 反馈（M7.5）：按追加顺序（`createdAt` 升序） */
   'comments.byTask': TaskComment[]
+  /**
+   * 该 run 的沙箱提权记录（宿主视图，只读会话日志）：
+   * 按请求时刻升序，最多 50 条；没有记录 / 会话日志缺席时为空数组。
+   */
+  'run.approvals': RunApproval[]
+  /**
+   * 默认工作目录（宿主视图，无参数）：运行时 `workdir` 留空时执行器用的绝对路径。
+   * 解析口径 = `WORKBENCH_WORKDIR` 环境变量 > `~/.workbench`，启动时确保目录存在。
+   */
+  'runtimes.default-workdir': string
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

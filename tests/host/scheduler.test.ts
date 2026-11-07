@@ -585,7 +585,12 @@ describe('createScheduler：领取与并发', () => {
     const secondFacts = world.store.dispatch({
       type: 'task.create',
       commandId: nextCommandId(),
-      input: { title: 'T2', workflowId: seeded.workflowId, projectId: seeded.projectId, stageId: seeded.stages.first },
+      input: {
+        title: 'T2',
+        workflowId: seeded.workflowId,
+        projectId: seeded.projectId,
+        stageId: seeded.stages.first,
+      },
     }).facts
     const secondTaskId = (
       secondFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task }
@@ -909,6 +914,25 @@ describe('createScheduler：防御性分支', () => {
 
     expect(execute).toHaveBeenCalledTimes(1)
     expect(timer.handlers).toHaveLength(0)
+  })
+
+  it('pump：run.claim 返回非 run.claimed 事实时跳过启动（不派发执行器）', async () => {
+    const seeded = seed()
+    const execute = vi.fn()
+    const scheduler = makeScheduler(portOf(execute), {
+      dispatch: (input) => {
+        if ((input as { type?: string }).type === 'run.claim') {
+          return { facts: [{ type: 'run.skipped' }] } as never
+        }
+        return world.store.dispatch(input)
+      },
+    })
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(runById(seeded.runId)).toMatchObject({ status: 'queued' })
   })
 })
 

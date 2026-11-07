@@ -61,6 +61,7 @@ interface World {
   store: Store
   router: CommandRouter
   secrets: Map<string, Record<string, string>>
+  pluginDeps: PluginCommandDeps
 }
 
 /** 额外可识别的插件（manifest 缺省 / 内置插件等边界用）；默认只有 webhook。 */
@@ -132,7 +133,7 @@ function world(options: WorldOptions = {}): World {
     plugins: pluginDeps,
     newCommandId: () => 'generated-id',
   })
-  return { db, store, router, secrets }
+  return { db, store, router, secrets, pluginDeps }
 }
 
 const settingsOf = (store: Store) => store.query('plugins.settings')
@@ -389,5 +390,30 @@ describe('plugin.set 边界（M7）', () => {
     expect(second.facts).toEqual(first.facts)
     expect(second.value).toMatchObject({ version: 1 })
     expect(settingsOf(store).version).toBe(1)
+  })
+
+  it('plugin.set：deps.dispatch 未落事实时 commandFacts 为 null，facts 回退空数组', async () => {
+    const { store, pluginDeps } = world()
+    const router = createCommandRouter({
+      store,
+      dispatch: () => ({ facts: [] }) as never,
+      executors: { forRuntime: () => null },
+      executorDefaults: (key) => ({
+        executorKey: key ?? 'dsh',
+        command: 'dsh',
+        profile: 'multica',
+      }),
+      hostView: () => null,
+      plugins: pluginDeps,
+      newCommandId: () => 'generated-id',
+    })
+    const result = await router.dispatch({
+      type: 'plugin.set',
+      commandId: 'c-nofacts',
+      pluginId: 'webhook',
+      enabled: true,
+    })
+    expect(result.facts).toEqual([])
+    expect(result.value).toMatchObject({ id: 'webhook' })
   })
 })

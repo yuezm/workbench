@@ -2,7 +2,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '../../../src/kernel/types'
-import type { RunRow, Runtime, Task } from '../../../src/protocol/entities'
+import type { RunRow, Runtime, Task, WorkflowStage } from '../../../src/protocol/entities'
 import type { PluginSettingsRow } from '../../../src/protocol/plugins'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '../../../src/protocol/rules'
 import { withTx } from '../../../src/host/schema'
@@ -724,5 +724,20 @@ describe('createProjectionWriter：显式行映射', () => {
     ]) {
       expect(countRows(db, table)).toBe(0)
     }
+  })
+})
+
+describe('createProjectionWriter：列默认值兜底', () => {
+  it('workflow_stages：阶段行缺 instructions 时按空串落库', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    // 兼容旧快照：阶段负载可能不带 instructions，投影按空串归一
+    const stage = { ...sample.stage(), instructions: undefined } as unknown as WorkflowStage
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+    expect(
+      db.prepare('SELECT instructions FROM workflow_stages WHERE id = ?').get(stage.id),
+    ).toEqual({ instructions: '' })
   })
 })

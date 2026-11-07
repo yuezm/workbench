@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Command } from '../../src/protocol/commands'
-import type { Agent, Project, Runtime, Task, Workflow, WorkflowStage } from '../../src/protocol/entities'
+import type {
+  Agent,
+  Project,
+  Runtime,
+  Task,
+  Workflow,
+  WorkflowStage,
+} from '../../src/protocol/entities'
 import { decide } from '../../src/kernel/decide'
 import type { Environment, IdKind, Limits, View } from '../../src/kernel/types'
 import type { AutomationRule } from '../../src/protocol/rules'
@@ -289,12 +296,8 @@ describe('kernel/decide 项目（M10）', () => {
     ).toEqual([])
 
     expect(
-      decide(
-        view({ tasks: [task()] }),
-        command({ type: 'project.remove', id: 'pj-1' }),
-        NOW,
-        env(),
-      ).reject,
+      decide(view({ tasks: [task()] }), command({ type: 'project.remove', id: 'pj-1' }), NOW, env())
+        .reject,
     ).toEqual({ code: 'conflict', message: '项目下还有任务，无法删除: 工作台' })
 
     const ok = decide(view(), command({ type: 'project.remove', id: 'pj-1' }), NOW, env())
@@ -303,7 +306,11 @@ describe('kernel/decide 项目（M10）', () => {
   })
 
   it('task.create：缺项目 / 项目不存在被拒；行上落 projectId，运行目录取项目文件夹', () => {
-    const base = view({ stages: [stage({ entryMode: 'agent', agentId: 'ag-1' })], agents: [agent()], runtimes: [runtime()] })
+    const base = view({
+      stages: [stage({ entryMode: 'agent', agentId: 'ag-1' })],
+      agents: [agent()],
+      runtimes: [runtime()],
+    })
     const missing = decide(
       base,
       command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } as never }),
@@ -315,7 +322,10 @@ describe('kernel/decide 项目（M10）', () => {
     expect(
       decide(
         view({ projects: [], stages: [stage()] }),
-        command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-9' } }),
+        command({
+          type: 'task.create',
+          input: { title: 't', workflowId: 'wf-1', projectId: 'pj-9' },
+        }),
         NOW,
         env(),
       ).reject,
@@ -323,7 +333,10 @@ describe('kernel/decide 项目（M10）', () => {
 
     const ok = decide(
       base,
-      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       NOW,
       env(),
     )
@@ -384,13 +397,34 @@ describe('kernel/decide 项目（M10）', () => {
       ).reject,
     ).toEqual({ code: 'invalid_input', message: '规则「早报」: 项目不存在: pj-9' })
 
+    const ok = decide(view(), command({ type: 'rules.replace', rules: [rule('pj-1')] }), NOW, env())
+    expect(ok.reject).toBeUndefined()
+    expect(ok.facts.map((fact) => fact.type)).toEqual(['rules.replaced'])
+  })
+
+  it('project.update：patch 未带 description 时沿用原说明', () => {
     const ok = decide(
-      view(),
-      command({ type: 'rules.replace', rules: [rule('pj-1')] }),
+      view({ projects: [project({ description: '原说明' })] }),
+      command({ type: 'project.update', id: 'pj-1', patch: { name: '改名' } }),
       NOW,
       env(),
     )
     expect(ok.reject).toBeUndefined()
-    expect(ok.facts.map((fact) => fact.type)).toEqual(['rules.replaced'])
+    expect((ok.facts[0]?.payload as { project: Project }).project).toEqual({
+      ...project({ description: '原说明' }),
+      name: '改名',
+      updatedAt: NOW,
+    })
+  })
+
+  it('project.remove：任务属于别的项目时不算「项目下有任务」，可删除', () => {
+    const ok = decide(
+      view({ projects: [project()], tasks: [task({ projectId: 'pj-2' })] }),
+      command({ type: 'project.remove', id: 'pj-1' }),
+      NOW,
+      env(),
+    )
+    expect(ok.reject).toBeUndefined()
+    expect(ok.facts.map((fact) => fact.type)).toEqual(['project.removed'])
   })
 })

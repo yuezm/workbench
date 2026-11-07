@@ -103,7 +103,7 @@ export function needsRunsUpgrade(db: DatabaseSync): boolean {
  *
  * @returns 本次是否真的做了升级
  */
-function upgradeLegacyRuns(db: DatabaseSync): boolean {
+export function upgradeLegacyRuns(db: DatabaseSync): boolean {
   if (!needsRunsUpgrade(db)) return false
 
   const foreignKeys = readForeignKeys(db)
@@ -138,7 +138,7 @@ export function needsRuntimesUpgrade(db: DatabaseSync): boolean {
  *
  * @returns 本次是否真的做了升级
  */
-function upgradeLegacyRuntimes(db: DatabaseSync): boolean {
+export function upgradeLegacyRuntimes(db: DatabaseSync): boolean {
   if (!needsRuntimesUpgrade(db)) return false
 
   const foreignKeys = readForeignKeys(db)
@@ -212,7 +212,7 @@ export function needsTasksRebuild(db: DatabaseSync): boolean {
  *
  * @returns 本次是否真的做了重建
  */
-function rebuildLegacyTasks(db: DatabaseSync): boolean {
+export function rebuildLegacyTasks(db: DatabaseSync): boolean {
   if (!needsTasksRebuild(db)) return false
   const columns = tableColumns(db, 'tasks')
   const foreignKeys = readForeignKeys(db)

@@ -251,6 +251,12 @@ describe('kernel/spawn：spawnFacts', () => {
     expect(resolveSubtaskStage(view, parent, 'unknown')).toBe('st-2')
     expect(resolveSubtaskStage(view, task({ currentStageId: 'st-1' }), undefined)).toBe('st-2')
   })
+
+  it('父阶段 subtaskStageId 指向不存在的阶段：回退到父任务当前阶段', () => {
+    const configured = stage({ id: 'st-1', name: '进行中', subtaskStageId: 'st-ghost' })
+    const view = makeView({ stages: new Map([['st-1', configured]]) })
+    expect(resolveSubtaskStage(view, task(), undefined)).toBe('st-1')
+  })
 })
 
 describe('kernel/spawn：childrenSettledFacts', () => {

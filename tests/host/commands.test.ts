@@ -113,11 +113,7 @@ const projectCommand = (commandId = 'c-project'): Command => ({
   input: { name: '工作台', path: 'D:/work' },
 })
 
-const taskCommand = (
-  workflowId: string,
-  projectId = 'pj-1',
-  commandId = 'c-task',
-): Command => ({
+const taskCommand = (workflowId: string, projectId = 'pj-1', commandId = 'c-task'): Command => ({
   commandId,
   type: 'task.create',
   input: { title: '任务', workflowId, projectId },
@@ -806,7 +802,11 @@ describe('host/commands：防御分支与默认值', () => {
       { commandId: 'e3', type: 'runtime.create', input: runtimeInput },
       { commandId: 'e4', type: 'runtime.update', id: 'rt-1', patch: { enabled: false } },
       { commandId: 'e5', type: 'runtime.probe', id: 'rt-1' },
-      { commandId: 'e6', type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } },
+      {
+        commandId: 'e6',
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+      },
       { commandId: 'e7', type: 'task.move', id: 't-1', stageId: 's-1' },
       { commandId: 'e8', type: 'card.answer', cardId: 'card-1', optionIndex: 0 },
       { commandId: 'e9', type: 'card.resolve', cardId: 'card-1' },
@@ -940,5 +940,57 @@ describe('host/commands：跨类型事实区间回放', () => {
     })
     expect(replay.value).toEqual(first.value)
     expect(store.query('comments.byTask', { taskId: task.id })).toHaveLength(1)
+  })
+})
+
+describe('host/commands：valueOf 空事实兜底', () => {
+  /** 写入不落事实的路由：用于验证 valueOf 在「事实/投影缺失」时的兜底值。 */
+  function emptyFactRouter(): CommandRouter {
+    const { store } = setup()
+    store.ensureProjection()
+    return createCommandRouter({
+      store,
+      dispatch: () => ({ facts: [] }) as never,
+      executors: { forRuntime: () => null },
+      executorDefaults: (key) => ({
+        executorKey: key ?? 'dsh',
+        command: 'dsh',
+        profile: 'multica',
+      }),
+      hostView: () => null,
+    })
+  }
+
+  it('project.update：实体查不到时 value 为 null（command.id 分支 + 查找 null 兜底）', async () => {
+    const router = emptyFactRouter()
+    const result = await router.dispatch({
+      commandId: 'c-pu',
+      type: 'project.update',
+      id: 'pj-x',
+      patch: { name: '改名' },
+    })
+    expect(result.facts).toEqual([])
+    expect(result.value).toBeNull()
+  })
+
+  it('project.create：无 project.created 事实时 value 为 null（id===null 兜底）', async () => {
+    const router = emptyFactRouter()
+    const result = await router.dispatch({
+      commandId: 'c-pc',
+      type: 'project.create',
+      input: { name: '新项目', path: 'D:/new' },
+    })
+    expect(result.value).toBeNull()
+  })
+
+  it('task.comment：无 comment_added 事实时 value 为 null（fact undefined 兜底）', async () => {
+    const router = emptyFactRouter()
+    const result = await router.dispatch({
+      commandId: 'c-tc',
+      type: 'task.comment',
+      taskId: 't-x',
+      text: '反馈',
+    })
+    expect(result.value).toBeNull()
   })
 })

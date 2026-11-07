@@ -11,6 +11,9 @@ import {
   needsTasksRebuild,
   needsTasksUpgrade,
   openDatabase,
+  rebuildLegacyTasks,
+  upgradeLegacyRuns,
+  upgradeLegacyRuntimes,
 } from '../../src/host/db'
 import {
   PROJECTION_TABLES,
@@ -327,14 +330,10 @@ describe('openDatabase', () => {
         )
         .run('st-1', 'wf-1', '旧阶段', SEED_AT)
       seeded
-        .prepare(
-          `INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)`,
-        )
+        .prepare(`INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)`)
         .run('rt-1', '本机', 'dsh', SEED_AT)
       seeded
-        .prepare(
-          `INSERT INTO agents (id, name, runtime_id, created_at) VALUES (?, ?, ?, ?)`,
-        )
+        .prepare(`INSERT INTO agents (id, name, runtime_id, created_at) VALUES (?, ?, ?, ?)`)
         .run('ag-1', '助手', 'rt-1', SEED_AT)
       seeded
         .prepare(
@@ -1097,6 +1096,77 @@ describe('openDatabase：旧库 tasks 结构升级（M6 / M6.5 / M7 一次性物
         })
       } finally {
         inspect.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('openDatabase：旧库升级遇外键已关（foreignKeys=false）', () => {
+  it('upgradeLegacyRuns：外键已关时不切换、仍完成重建，并保持外键关闭', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-fk-runs-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      seedLegacyDatabase(file)
+      const raw = new DatabaseSync(file)
+      try {
+        raw.exec('PRAGMA foreign_keys = OFF')
+        expect(upgradeLegacyRuns(raw)).toBe(true)
+        expect(
+          (raw.prepare('PRAGMA foreign_keys').get() as unknown as { foreign_keys: number })
+            .foreign_keys,
+        ).toBe(0)
+        expect(columnNames(raw, 'runs').has('purpose')).toBe(true)
+        expect(countOf(raw, 'runs')).toBe(LEGACY_RUN_COUNT)
+      } finally {
+        raw.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('upgradeLegacyRuntimes：外键已关时仍完成重建并保持外键关闭', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-fk-runtimes-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      seedLegacyDatabase(file)
+      const raw = new DatabaseSync(file)
+      try {
+        raw.exec('PRAGMA foreign_keys = OFF')
+        expect(upgradeLegacyRuntimes(raw)).toBe(true)
+        expect(
+          (raw.prepare('PRAGMA foreign_keys').get() as unknown as { foreign_keys: number })
+            .foreign_keys,
+        ).toBe(0)
+        expect(columnNames(raw, 'runtimes').has('executor_key')).toBe(true)
+        expect(countOf(raw, 'runtimes')).toBe(1)
+      } finally {
+        raw.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rebuildLegacyTasks：外键已关时仍完成物理重建并保持外键关闭', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-fk-tasks-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      seedLegacyTasksDatabase(file)
+      const raw = new DatabaseSync(file)
+      try {
+        raw.exec('PRAGMA foreign_keys = OFF')
+        expect(rebuildLegacyTasks(raw)).toBe(true)
+        expect(
+          (raw.prepare('PRAGMA foreign_keys').get() as unknown as { foreign_keys: number })
+            .foreign_keys,
+        ).toBe(0)
+        expect(columnNames(raw, 'tasks').has('handoff_from_task_id')).toBe(true)
+        expect(countOf(raw, 'tasks')).toBe(1)
+      } finally {
+        raw.close()
       }
     } finally {
       rmSync(root, { recursive: true, force: true })

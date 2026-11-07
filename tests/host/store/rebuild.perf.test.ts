@@ -71,7 +71,9 @@ describe('rebuild 性能基准', () => {
     const startedAt = performance.now()
     store.rebuild()
     const elapsedMs = performance.now() - startedAt
-    console.log(`[rebuild.perf] ${FACTS_TARGET} 条事实重建耗时：${elapsedMs.toFixed(1)} ms`)
+    process.stdout.write(
+      `[rebuild.perf] ${FACTS_TARGET} 条事实重建耗时：${elapsedMs.toFixed(1)} ms\n`,
+    )
 
     expect(elapsedMs).toBeLessThan(REBUILD_BUDGET_MS)
     // 防空跑：事实全在、投影与增量快照逐表一致、末条事实的效果已体现

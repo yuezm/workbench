@@ -1,0 +1,379 @@
+/**
+ * 运行命令（R2 从 `decide.ts` 拆出，行为不变）。
+ */
+import type { RunRow, Task } from '../../protocol/entities'
+import type { EventReceivedPayload } from '../../protocol/facts'
+import type { Input, Receipt } from '../../protocol/inputs'
+import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
+import type { SettledRun } from '../run'
+import { cardsFromReceipt, resumedRun } from '../cards'
+import { handoffOnExit } from '../handoff'
+import { laterPrompt } from '../prompt'
+import {
+  abandonedFacts,
+  claimFacts,
+  deadlineReached,
+  heartbeatFacts,
+  hostSettledFacts,
+  leaseExpired,
+  pickClaims,
+  receiptRejection,
+  rejectedReceiptFacts,
+  settledRun,
+  settlementFacts,
+  timeoutFacts,
+  waitingFacts,
+  waitingRun,
+} from '../run'
+import { cronTaskFacts, eventThreadFacts } from '../rules'
+import { childrenSettledFacts, spawnFacts } from '../spawn'
+import { entryRunFacts } from '../task-effects'
+import { closeIfAllDone, inactivityFacts, makeNote, noteFacts, withNote } from '../threads'
+import { moveTask } from '../workflow/stage-machine'
+import {
+  chatMessageFacts,
+  CONCURRENCY_CAP,
+  CONCURRENCY_FLOOR,
+  done,
+  HOST_CANCEL,
+  HOST_SCHEDULER,
+  HOST_TIMER,
+  HOST_TIMEOUT,
+  hostDraft,
+  ownerDraft,
+  reject,
+  truncateSummary,
+  workflowWithStages,
+} from './common'
+
+/** 回执派生事件（D8）：每条事件一个 `event.received`，`hops = 父 run.hops + 1`。 */
+function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): FactDraft[] {
+  const events = receipt.events ?? []
+  if (events.length === 0) return []
+  const hops = run.hops + 1
+  return events.map((event) => {
+    const eventId = env.nextId('event')
+    if (hops > env.limits.maxHops) {
+      return {
+        type: 'event.dropped',
+        actor: HOST_SCHEDULER,
+        at: now,
+        payload: { eventId, hops, reason: 'max_hops' },
+      }
+    }
+    return {
+      type: 'event.received',
+      actor: HOST_SCHEDULER,
+      at: now,
+      payload: {
+        eventId,
+        source: event.source,
+        type: event.type,
+        subject: event.subject,
+        summary: truncateSummary(event.summary ?? ''),
+        detailRef: null,
+        link: event.link ?? null,
+        hops,
+        originRunId: run.id,
+        dedupeKey: event.dedupeKey ?? null,
+      },
+    }
+  })
+}
+
+/**
+ * 阶段 run 终态 → 阶段流转事实：成功进下一阶段（无下一阶段则完成），失败按
+ * `on_reject` 打回；打回原地 / 任务已完成 / 阶段无效 / 任务已删时零事实，取消不推进。
+ */
+function stageTransitionFacts(
+  view: View,
+  run: SettledRun,
+  now: Iso,
+  env: Environment,
+): FactDraft[] {
+  if (run.status === 'cancelled' || run.taskId === null) return []
+  const task = view.tasks.get(run.taskId)
+  if (!task || task.status === 'completed') return []
+  const workflow = view.workflows.get(task.workflowId)
+  if (!workflow) return []
+  const flow = workflowWithStages(view, workflow)
+  const current = flow.stages.find((stage) => stage.id === task.currentStageId)
+  if (!current) return []
+  const succeeded = run.status === 'succeeded'
+  const event = succeeded
+    ? ({ type: 'RUN_SUCCEEDED', runId: run.id } as const)
+    : ({ type: 'RUN_FAILED', runId: run.id } as const)
+  const next = moveTask(task, event, flow).task
+  if (next.status === 'completed') {
+    return [
+      ...handoffOnExit(view, task, current, null, succeeded, now, env, HOST_SCHEDULER),
+      hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now),
+    ]
+  }
+  if (next.currentStageId !== null && next.currentStageId !== task.currentStageId) {
+    const target = flow.stages.find((stage) => stage.id === next.currentStageId)
+    return [
+      // 目标阶段找不到属于脏投影：不当作「完成」，宁可不交接
+      ...(target === undefined
+        ? []
+        : handoffOnExit(view, task, current, target, succeeded, now, env, HOST_SCHEDULER)),
+      hostDraft(
+        'task.moved',
+        {
+          task: { ...next, updatedAt: now },
+          from: task.currentStageId,
+          to: next.currentStageId,
+        },
+        now,
+      ),
+    ]
+  }
+  return []
+}
+
+export function claimRun(
+  view: View,
+  input: Extract<Input, { type: 'run.claim' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  const runtime = view.runtimes.get(input.runtimeId)
+  if (!runtime) return reject('not_found', '运行时不存在: ' + input.runtimeId)
+  if (!runtime.enabled) return reject('conflict', '运行时未启用: ' + input.runtimeId)
+  if (
+    !Number.isInteger(input.capacity) ||
+    input.capacity < CONCURRENCY_FLOOR ||
+    input.capacity > CONCURRENCY_CAP
+  ) {
+    return reject('invalid_input', '领取数量必须是 1–8 的整数')
+  }
+  const claimed = pickClaims(view, runtime, input.capacity, now)
+  return done(claimFacts(claimed, now, env.limits, HOST_SCHEDULER))
+}
+
+export function heartbeatRun(
+  view: View,
+  input: Extract<Input, { type: 'run.heartbeat' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  // 租约不匹配只静默丢弃：心跳由调度器定时发，产 reject 只会变成噪音（D1）
+  return done(heartbeatFacts(view, input.runId, input.leaseId, now, env.limits, HOST_SCHEDULER))
+}
+
+export function recordRunFrames(
+  view: View,
+  input: Extract<Input, { type: 'run.frames' }>,
+  now: Iso,
+): Decision {
+  const run = view.runs.get(input.runId)
+  // run 已终态 / 已删 / 轮次变了：帧无处可写，静默丢弃
+  if (!run || run.status !== 'running' || run.turn !== input.turn) return done([])
+  return done([
+    {
+      type: 'run.frames',
+      actor: HOST_SCHEDULER,
+      at: now,
+      payload: { runId: input.runId, turn: input.turn, frames: input.frames },
+    },
+  ])
+}
+
+export function receiveRun(
+  view: View,
+  input: Extract<Input, { type: 'run.receipt' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  const run = view.runs.get(input.runId)
+  if (!run) return reject('not_found', '运行不存在: ' + input.runId)
+  const rejection = receiptRejection(run, input.receipt)
+  if (rejection !== null) {
+    return done(rejectedReceiptFacts(run, input.receipt, rejection, now, HOST_SCHEDULER))
+  }
+  const receiptCards = cardsFromReceipt(view, run, input.receipt, now, env)
+  const derivedEvents = eventFacts(run, input.receipt, now, env)
+  const facts: FactDraft[] = [...receiptCards.facts, ...derivedEvents]
+  // M6：回执派生的 event.received 同样命中规则；M6.5：按父 run 归线程/父任务
+  for (const derived of derivedEvents) {
+    if (derived.type !== 'event.received') continue
+    facts.push(
+      ...eventThreadFacts(
+        view,
+        derived.payload as EventReceivedPayload,
+        view.rulesVersion,
+        now,
+        env,
+      ),
+    )
+  }
+  // M8：回执 spawn[] → 子任务（父任务 id 由内核从 run.taskId 推导，Agent 自报忽略）
+  if (input.receipt.spawn !== undefined && input.receipt.spawn.length > 0) {
+    facts.push(...spawnFacts(view, run, input.receipt.spawn, now, env, HOST_SCHEDULER))
+  }
+  // M6.5：回执 notes[] → 线程笔记（run 没挂线程 / 线程不存在时忽略）
+  const receiptNotes = input.receipt.notes
+  if (run.threadId !== null && receiptNotes !== undefined && receiptNotes.length > 0) {
+    const thread = view.threads.get(run.threadId)
+    if (thread !== undefined) {
+      let current = thread
+      for (const text of receiptNotes) {
+        const note = makeNote(env, 'agent', text, now)
+        current = withNote(current, note, now)
+        facts.push(...noteFacts(current, note, HOST_SCHEDULER, now))
+      }
+    }
+  }
+  // 回执带 ask：先建卡再挂起等回答，释放租约与并发位，不落终态（D5/D12）
+  if ((input.receipt.ask?.length ?? 0) > 0) {
+    facts.push(
+      ...waitingFacts(waitingRun(run, input.receipt), receiptCards.cardIds, now, HOST_SCHEDULER),
+    )
+    return done(facts)
+  }
+  // 只有 later（无 ask/notices）时不落终态：回 queued 到点复查，不重建会话（D7）
+  if (input.receipt.later && (input.receipt.notices?.length ?? 0) === 0) {
+    facts.push(
+      hostDraft('run.queued', { run: resumedRun(run, laterPrompt(), input.receipt.later) }, now),
+    )
+    return done(facts)
+  }
+  const settled = settledRun(run, input.receipt, now)
+  facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
+  if (run.purpose === 'stage') {
+    const transition = stageTransitionFacts(view, settled, now, env)
+    facts.push(...transition)
+    // 进入效果：流转到目标阶段后若目标阶段是 agent 入口，立刻入队下一轮（形成链条）
+    for (const fact of transition) {
+      if (fact.type === 'task.moved') {
+        const movedTask = (fact.payload as { task: Task }).task
+        facts.push(...entryRunFacts(view, movedTask, now, env, HOST_SCHEDULER))
+      }
+      // M6.5：阶段流转把任务完成时，若线程内任务已全部完成 → 归档线程
+      if (fact.type === 'task.completed') {
+        const completedTask = (fact.payload as { task: Task }).task
+        const thread =
+          completedTask.threadId === null ? undefined : view.threads.get(completedTask.threadId)
+        facts.push(
+          ...closeIfAllDone(
+            view,
+            thread,
+            now,
+            HOST_SCHEDULER,
+            new Map([[completedTask.id, 'completed']]),
+          ),
+        )
+      }
+    }
+    // M8：任务完成 → 父任务 rollup（全部子任务结束才触发；批内去重 + 沿链级联）
+    const settledOverrides = new Map<Id, 'completed'>()
+    for (const fact of facts) {
+      if (fact.type === 'task.completed') {
+        settledOverrides.set((fact.payload as { task: Task }).task.id, 'completed')
+      }
+    }
+    const rolledUp = new Set<Id>()
+    for (let round = 0; round < 8; round += 1) {
+      let changed = false
+      for (const fact of [...facts]) {
+        if (fact.type !== 'task.completed') continue
+        const completedTask = (fact.payload as { task: Task }).task
+        if (completedTask.parentTaskId === null || rolledUp.has(completedTask.parentTaskId))
+          continue
+        const extra = childrenSettledFacts(
+          view,
+          completedTask.parentTaskId,
+          now,
+          env,
+          HOST_SCHEDULER,
+          settledOverrides,
+        )
+        if (extra.length === 0) continue
+        rolledUp.add(completedTask.parentTaskId)
+        facts.push(...extra)
+        for (const item of extra) {
+          if (item.type === 'task.completed') {
+            settledOverrides.set((item.payload as { task: Task }).task.id, 'completed')
+          }
+        }
+        changed = true
+      }
+      if (!changed) break
+    }
+  }
+  if (run.purpose === 'chat') {
+    facts.push(...chatMessageFacts(view, run, settled, now, env))
+    // 续接会话 id 记到对话上：下一轮直接用它续接，避免整段历史重发（D8）
+    const conversation =
+      run.conversationId === null ? undefined : view.conversations.get(run.conversationId)
+    if (conversation && settled.sessionId !== null) {
+      facts.push(
+        hostDraft(
+          'conversation.updated',
+          { conversation: { ...conversation, sessionId: settled.sessionId, updatedAt: now } },
+          now,
+        ),
+      )
+    }
+  }
+  return done(facts)
+}
+
+export function cancelRun(
+  view: View,
+  input: Extract<Input, { type: 'run.cancel' }>,
+  now: Iso,
+): Decision {
+  const run = view.runs.get(input.runId)
+  if (!run) return reject('not_found', '运行不存在: ' + input.runId)
+  if (run.status !== 'queued' && run.status !== 'running' && run.status !== 'waiting') {
+    return reject('conflict', '运行已结束，无法取消: ' + input.runId)
+  }
+  // 重复取消幂等：已请求过就零事实，等宿主按取消时序落终态
+  if (run.cancelRequested) return done([])
+  return done([
+    ownerDraft(
+      'run.cancel_requested',
+      { run: { ...run, cancelRequested: true }, by: 'owner' },
+      now,
+    ),
+  ])
+}
+
+export function settleRunByHost(
+  view: View,
+  input: Extract<Input, { type: 'run.host_settled' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  const run = view.runs.get(input.runId)
+  if (!run) return reject('not_found', '运行不存在: ' + input.runId)
+  const actor = input.status === 'cancelled' ? HOST_CANCEL : HOST_SCHEDULER
+  const facts: FactDraft[] = hostSettledFacts(run, input, now, actor)
+  // 聊天 run 由宿主兜底落终态时同样补一条 assistant 消息（中断/取消/超时都要可见）
+  if (run.purpose === 'chat') {
+    for (const fact of facts) {
+      if (fact.type !== 'run.failed' && fact.type !== 'run.cancelled') continue
+      const settled = (fact.payload as { run: RunRow }).run as SettledRun
+      facts.push(...chatMessageFacts(view, settled, settled, now, env))
+    }
+  }
+  return done(facts)
+}
+
+export function tickClock(view: View, now: Iso, env: Environment): Decision {
+  // 唯一定时器到点：先判整体超时（终态），再看租约过期（放弃 / 重试），最后 cron 规则。
+  const facts: FactDraft[] = []
+  for (const run of view.runs.values()) {
+    if (deadlineReached(run, now)) {
+      facts.push(...timeoutFacts(run, now, HOST_TIMEOUT))
+    } else if (leaseExpired(run, now)) {
+      facts.push(...abandonedFacts(run, now, env.limits, HOST_TIMER))
+    }
+  }
+  // M6：cron 规则到点建任务（同刻只触发一次；停机错过只补最近一次）
+  facts.push(...cronTaskFacts(view, now, env, env.timezone))
+  // M6.5：14 天无活动的 open 线程归档（只影响 UI 检索，不改任务/运行）
+  facts.push(...inactivityFacts(view, now, HOST_TIMER))
+  return done(facts)
+}

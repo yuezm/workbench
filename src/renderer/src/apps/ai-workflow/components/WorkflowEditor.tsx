@@ -232,7 +232,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
             {draft.stages.map((s, i) => {
               const isActive = i === index
               return (
-                <li key={i} className="group flex items-center gap-1">
+                <li key={s.id ?? `new-${i}`} className="group flex items-center gap-1">
                   <button
                     type="button"
                     aria-label={`阶段${i + 1}`}
@@ -261,7 +261,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                   <div
                     className={cn(
                       'flex shrink-0 items-center transition-opacity duration-150',
-                      'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+                      'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100',
                       isActive && 'opacity-100',
                     )}
                   >
@@ -270,7 +270,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                       aria-label={`阶段${i + 1}上移`}
                       title="上移"
                       disabled={i === 0}
-                      className="grid size-5 place-items-center rounded text-ink-faint outline-none transition-colors duration-150 hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60 disabled:pointer-events-none disabled:opacity-25"
+                      className="grid size-5 place-items-center rounded text-ink-faint transition-colors duration-150 outline-none hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60 disabled:pointer-events-none disabled:opacity-25"
                       onClick={() => moveStage(i, -1)}
                     >
                       <MoveIcon dir="up" />
@@ -280,7 +280,7 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                       aria-label={`阶段${i + 1}下移`}
                       title="下移"
                       disabled={i === draft.stages.length - 1}
-                      className="grid size-5 place-items-center rounded text-ink-faint outline-none transition-colors duration-150 hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60 disabled:pointer-events-none disabled:opacity-25"
+                      className="grid size-5 place-items-center rounded text-ink-faint transition-colors duration-150 outline-none hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60 disabled:pointer-events-none disabled:opacity-25"
                       onClick={() => moveStage(i, 1)}
                     >
                       <MoveIcon dir="down" />
@@ -371,7 +371,9 @@ export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorPro
                 <Select
                   ariaLabel={`阶段${n}打回退回到`}
                   value={stage.onRejectIndex == null ? '' : String(stage.onRejectIndex)}
-                  onChange={(v) => patchStage(index, { onRejectIndex: v === '' ? null : Number(v) })}
+                  onChange={(v) =>
+                    patchStage(index, { onRejectIndex: v === '' ? null : Number(v) })
+                  }
                   options={[
                     { value: '', label: '不指定' },
                     ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),

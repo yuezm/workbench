@@ -140,10 +140,31 @@ describe('RuntimeManager', () => {
     expect(await screen.findByText('DeepSeek Harness')).toBeInTheDocument()
     expect(screen.getByText('可用 · 12ms')).toBeInTheDocument()
     expect(screen.getByText('CLI v1.2.3')).toBeInTheDocument()
-    expect(screen.getByText('dsh --profile multica --stdio')).toBeInTheDocument()
+    expect(screen.getByText('dsh --profile multica')).toBeInTheDocument()
     expect(screen.getByText('C:/tools/dsh.exe')).toBeInTheDocument()
     expect(screen.getByText('负载 1/2')).toBeInTheDocument()
     expect(screen.queryByText(/排队/)).not.toBeInTheDocument()
+  })
+
+  it('启动头只显示命令本身：profile 为空（claude / hermes 等）时不拼 --profile', async () => {
+    setup({
+      runtimes: [
+        makeRuntime({
+          id: 'r1',
+          name: 'claude',
+          executorKey: 'claude',
+          command: 'claude',
+          profile: '',
+        }),
+      ],
+      statuses: [makeStatus('r1')],
+    })
+
+    render(<RuntimeManager />)
+
+    expect((await screen.findAllByText('claude')).length).toBeGreaterThan(0)
+    // 启动头只显示命令本身：没有 profile 就不该出现 --profile
+    expect(screen.queryByText(/--profile/)).not.toBeInTheDocument()
   })
 
   it('执行器角标显示清单 label；清单映射不到时回退原始 key', async () => {

@@ -364,8 +364,11 @@ export function RuntimeManager(): ReactElement {
                     )}
                   </div>
 
+                  {/* 启动头只展示运行时真正配置的部分：profile 是 dsh 的形态，
+                      其它执行器留空，不要再拼 `--stdio` 这类插件内部参数 */}
                   <span className="truncate font-mono text-[11px] text-ink-dim">
-                    {r.command} --profile {r.profile} --stdio
+                    {r.command}
+                    {r.profile ? ` --profile ${r.profile}` : ''}
                   </span>
 
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-faint">

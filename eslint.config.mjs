@@ -5,7 +5,17 @@ import prettier from 'eslint-config-prettier'
 
 export default tseslint.config(
   {
-    ignores: ['node_modules/**', 'out/**', 'dist/**', 'release/**', 'coverage/**', 'scripts/**'],
+    // `.scratch/` 是一次性运行日志与临时脚本（AGENTS「一次性运行日志放 .scratch」）：
+    // 里面的 .mjs 是排查用的冒烟脚本，不是产品代码，不参与 lint 门禁。
+    ignores: [
+      'node_modules/**',
+      'out/**',
+      'dist/**',
+      'release/**',
+      'coverage/**',
+      'scripts/**',
+      '.scratch/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

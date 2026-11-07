@@ -14,7 +14,7 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 
 ## 设计原则
 
-- UI 采用 macOS 风格：克制配色、圆角卡片、细腻留白、原生控件质感；样式用 Tailwind，组件放 `components/ui/`
+- UI 采用 macOS 风格：克制配色、小圆角（控件 6px / 容器 10px / 徽标 4px）、细腻留白、原生控件质感；样式用 Tailwind，组件放 `components/ui/`。硬规则（配色 token、前景对比度、圆角刻度、禁止玻璃与渐变）见 [SPEC-ui](docs/specs/SPEC-ui.md)，改样式前先读，改完跑 `pnpm check:ui`
 
 ## 架构原则
 
@@ -31,7 +31,7 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 
 - [ARCHITECTURE](docs/ARCHITECTURE.md)：内核 + 插件总纲（架构问题先读这个）
 - [CAPABILITY-MAP](docs/CAPABILITY-MAP.md)：模块索引、边界决定、构建顺序
-- [docs/specs/](docs/specs/)：kernel / plugins / host / shell / pomodoro / ai-workflow（ai-workflow 为迁移期行为基线）
+- [docs/specs/](docs/specs/)：kernel / plugins / host / shell / ui / pomodoro / ai-workflow（ai-workflow 为迁移期行为基线）
 - [docs/testing/](docs/testing/)：测试策略（TESTING）与用例目录（TEST-CASES）；改代码前后跑 `pnpm check`
 - [docs/planning/](docs/planning/)：计划与任务；重构分阶段与文件去向见 [refactor-plan](docs/planning/refactor-plan.md)
 

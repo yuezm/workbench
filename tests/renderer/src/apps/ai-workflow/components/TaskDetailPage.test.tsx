@@ -406,4 +406,27 @@ describe('TaskDetailPage', () => {
     await user.click(within(section).getByRole('button', { name: /子任务A/ }))
     expect(onOpenTask).toHaveBeenCalledWith('t2')
   })
+
+  it('子任务的阶段不在工作流阶段表里时，阶段名退化为「未知阶段」', async () => {
+    const staleChild: Task = {
+      ...task,
+      id: 't4',
+      title: '子任务C',
+      parentTaskId: 't1',
+      // 阶段被删掉 / 子任务属于别的工作流的遗留数据：查不到阶段也不能抛错
+      currentStageId: 'gone',
+    }
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    kernel.setView('tasks.byParent', { taskId: 't1' }, [staleChild])
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+
+    const section = await screen.findByRole('region', { name: '子任务' })
+    expect(within(section).getByRole('button', { name: /子任务C/ })).toHaveTextContent('未知阶段')
+    // 当前任务的阶段仍按工作流解析：退化只影响那一个子任务
+    expect(screen.getByText('研发 · 执行')).toBeInTheDocument()
+  })
 })

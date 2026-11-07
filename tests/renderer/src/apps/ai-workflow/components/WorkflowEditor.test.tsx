@@ -573,4 +573,157 @@ describe('WorkflowEditor', () => {
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
     expect(screen.getByLabelText('阶段1要干什么')).toBeInTheDocument()
   })
+
+  it('上移阶段：目标指向正被让位的相邻阶段时，目标下标 +1（重映射上移方向）', async () => {
+    const stageOf = (
+      id: string,
+      name: string,
+      position: number,
+      extra: Partial<WorkflowStage> = {},
+    ): WorkflowStage => ({
+      id,
+      workflowId: 'w',
+      name,
+      position,
+      entryMode: 'none',
+      agentId: null,
+      onCompleteStageId: null,
+      onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+      ...extra,
+    })
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '三段',
+      description: '',
+      createdAt: 't',
+      stages: [
+        // A 的「完成后进入」指向 B（下标 1）
+        stageOf('s0', 'A', 0, { onCompleteStageId: 's1' }),
+        stageOf('s1', 'B', 1),
+        stageOf('s2', 'C', 2),
+      ],
+    }
+    kernel.setView('agents.all', undefined, [])
+    kernel.setView('workflows.all', undefined, [])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // C 上移越过 B：B 从下标 1 被挤到 2，A 指向 B 的下标要同步 +1
+    await user.click(screen.getByRole('button', { name: '阶段3上移' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages.map((s) => s.name)).toEqual(['A', 'C', 'B'])
+    expect(draft.stages[0]).toMatchObject({ name: 'A', onCompleteIndex: 2 })
+  })
+
+  it('下移阶段：目标指向正被让位的相邻阶段时，目标下标 -1（重映射下移方向）', async () => {
+    const stageOf = (
+      id: string,
+      name: string,
+      position: number,
+      extra: Partial<WorkflowStage> = {},
+    ): WorkflowStage => ({
+      id,
+      workflowId: 'w',
+      name,
+      position,
+      entryMode: 'none',
+      agentId: null,
+      onCompleteStageId: null,
+      onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+      ...extra,
+    })
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '三段',
+      description: '',
+      createdAt: 't',
+      stages: [
+        stageOf('s0', 'A', 0),
+        stageOf('s1', 'B', 1),
+        // C 的「完成后进入」指向 B（下标 1）
+        stageOf('s2', 'C', 2, { onCompleteStageId: 's1' }),
+      ],
+    }
+    kernel.setView('agents.all', undefined, [])
+    kernel.setView('workflows.all', undefined, [])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // A 下移越过 B：B 从下标 1 被挤到 0，C 指向 B 的下标要同步 -1
+    await user.click(screen.getByRole('button', { name: '阶段1下移' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages.map((s) => s.name)).toEqual(['B', 'A', 'C'])
+    const cStage = draft.stages.find((s) => s.name === 'C')
+    expect(cStage).toMatchObject({ name: 'C', onCompleteIndex: 0 })
+  })
+
+  it('子任务三字段可清空回默认：选空项落 null', async () => {
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '两段',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 's0',
+          workflowId: 'w',
+          name: '待办',
+          position: 0,
+          entryMode: 'none',
+          agentId: null,
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          subtaskStageId: null,
+          onChildrenSettled: null,
+          spawnPolicy: null,
+        },
+        {
+          id: 's1',
+          workflowId: 'w',
+          name: '进行中',
+          position: 1,
+          entryMode: 'none',
+          agentId: null,
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+        },
+      ],
+    }
+    kernel.setView('agents.all', undefined, [])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 先设为非空再清空：每次选空项都应落回 null（清空即回默认）
+    await choose(user, '阶段1子任务落点阶段', '进行中')
+    await choose(user, '阶段1子任务落点阶段', '跟随当前阶段')
+    await choose(user, '阶段1子任务完成后', '仅通知')
+    await choose(user, '阶段1子任务完成后', '按阶段推断')
+    await choose(user, '阶段1允许拆子任务', '禁止')
+    await choose(user, '阶段1允许拆子任务', '允许')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[0]).toMatchObject({
+      subtaskStageId: null,
+      onChildrenSettled: null,
+      spawnPolicy: null,
+    })
+  }, 30_000)
 })

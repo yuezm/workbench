@@ -689,4 +689,68 @@ describe('RuntimeManager', () => {
       slow.resolve(EXECUTORS)
     })
   })
+
+  /**
+   * 首屏的定时器是「下一个宏任务才发请求」：先让它真的跑起来（查询已挂起），
+   * 再卸载，之后才结算——这才走到 effect 里的 alive 守卫。
+   */
+  it('执行器清单在卸载后才返回：迟到的成功被丢弃，不写状态', async () => {
+    setup()
+    let queried = false
+    let resolveLate!: (value: RuntimeExecutorChoice[]) => void
+    const original = kernel.store.query
+    kernel.store.query = <T extends ViewId>(
+      view: T,
+      params?: ViewParams<T>,
+    ): Promise<ViewResult<T>> => {
+      if (view === 'runtimes.executors') {
+        queried = true
+        return new Promise<RuntimeExecutorChoice[]>((resolve) => {
+          resolveLate = resolve
+        }) as Promise<ViewResult<T>>
+      }
+      return original(view, params)
+    }
+    const { container, unmount } = render(<RuntimeManager />)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    unmount()
+    await act(async () => {
+      resolveLate(EXECUTORS)
+      await Promise.resolve()
+    })
+    expect(queried).toBe(true)
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('执行器清单在卸载后才失败：迟到的失败被丢弃，不报错', async () => {
+    setup()
+    let queried = false
+    let rejectLate!: (error: unknown) => void
+    const original = kernel.store.query
+    kernel.store.query = <T extends ViewId>(
+      view: T,
+      params?: ViewParams<T>,
+    ): Promise<ViewResult<T>> => {
+      if (view === 'runtimes.executors') {
+        queried = true
+        return new Promise<RuntimeExecutorChoice[]>((_resolve, reject) => {
+          rejectLate = reject
+        }) as Promise<ViewResult<T>>
+      }
+      return original(view, params)
+    }
+    const { container, unmount } = render(<RuntimeManager />)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    unmount()
+    await act(async () => {
+      rejectLate(new Error('late-executors'))
+      await Promise.resolve()
+    })
+    expect(queried).toBe(true)
+    expect(container).toBeEmptyDOMElement()
+  })
 })

@@ -161,4 +161,20 @@ describe('ConversationList', () => {
     expect(screen.getByRole('button', { name: '新对话' })).toBeEnabled()
     expect(screen.queryByRole('button', { current: 'page' })).toBeNull()
   })
+
+  it('菜单打开时按非 Esc 键不收菜单（只有 Esc 关）', async () => {
+    const user = userEvent.setup()
+    render(<ConversationList {...makeProps()} />)
+
+    await user.click(screen.getByRole('button', { name: '会话 第一段对话 更多操作' }))
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+
+    // 普通按键不关菜单：否则打字 / 快捷键都会把菜单弄没
+    await user.keyboard('a')
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
 })

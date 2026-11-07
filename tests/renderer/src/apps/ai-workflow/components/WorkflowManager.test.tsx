@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Command } from '../../../../../../src/protocol/commands'
@@ -195,5 +195,32 @@ describe('WorkflowManager', () => {
     await user.click(screen.getByRole('button', { name: '删除工作流 研发' }))
     expect(await screen.findByText('remove-fail')).toBeInTheDocument()
     expect(screen.getByText('研发')).toBeInTheDocument()
+  })
+
+  it('删除正在编辑的工作流：编辑态跟随失效，弹窗关闭', async () => {
+    let list = [wf('w1', '研发')]
+    kernel.setView('workflows.all', undefined, list)
+    handleDispatch((command) => {
+      if (command.type === 'workflow.remove') {
+        list = list.filter((item) => item.id !== command.id)
+        kernel.setView('workflows.all', undefined, list)
+        return { facts: [], value: null }
+      }
+      return { facts: [], value: null }
+    })
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('研发')
+
+    await user.click(screen.getByRole('button', { name: '编辑' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    // 弹窗仍开着时删掉同一条工作流（列表在遮罩之后，直接派发点击）：
+    // 编辑态若正指向被删项，应回落到 undefined 关掉弹窗
+    fireEvent.click(screen.getByRole('button', { name: '删除工作流 研发' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(kernel.dispatched[0]).toMatchObject({ type: 'workflow.remove', id: 'w1' })
+    expect(await screen.findByText('暂无工作流')).toBeInTheDocument()
   })
 })

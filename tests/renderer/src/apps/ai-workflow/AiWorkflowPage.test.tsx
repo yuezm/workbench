@@ -953,4 +953,142 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
   })
+
+  it('项目弹窗：编辑并保存 dispatch project.update，成功后关闭弹窗且侧栏跟随刷新', async () => {
+    seedBase()
+    dispatchWith(<C extends Command>(command: C): CommandDispatchResult<C> => {
+      if (command.type === 'project.update') {
+        kernel.setView('projects.all', undefined, [{ ...project, name: command.patch.name ?? '' }])
+      }
+      return { facts: [], value: null } as CommandDispatchResult<C>
+    })
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
+    await user.clear(screen.getByLabelText('项目名称'))
+    await user.type(screen.getByLabelText('项目名称'), '工作台v2')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() =>
+      expectDispatched({
+        type: 'project.update',
+        id: 'p1',
+        patch: expect.objectContaining({ name: '工作台v2' }),
+      }),
+    )
+    // 成功即关弹窗（不再走 project.create 分支，也不会顺手切换选中项）
+    await waitFor(() => expect(screen.queryByLabelText('项目名称')).not.toBeInTheDocument())
+    expect(await screen.findByRole('button', { name: '项目：工作台v2' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  it('项目弹窗：新建返回空值时照常关闭弹窗，选中项不动', async () => {
+    seedBase()
+    // 默认 dispatch 返回 { value: null }：没有可用的新项目实体
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '+ 添加' }))
+    await user.type(screen.getByLabelText('项目名称'), '无返回值')
+    await user.type(screen.getByLabelText('文件夹路径'), 'D:\\Codes\\nowhere')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expectDispatched({ type: 'project.create' }))
+    await waitFor(() => expect(screen.queryByLabelText('项目名称')).not.toBeInTheDocument())
+    // 没有新 id 可选中：保持原有项目，不因为空值把选中项清掉
+    expect(screen.getByRole('button', { name: '项目：工作台' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  it('项目弹窗：保存失败时文案同时挂到页面顶部错误条，弹窗保持可编辑', async () => {
+    seedBase()
+    dispatchWith(() => Promise.reject(new Error('项目改名失败')))
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
+    await user.clear(screen.getByLabelText('项目名称'))
+    await user.type(screen.getByLabelText('项目名称'), '改不动')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(async () => expect((await screen.findAllByText('项目改名失败')).length).toBe(2))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByLabelText('项目名称')).toHaveValue('改不动')
+  })
+
+  it('项目弹窗：保存失败为非 Error 时按字符串展示（顶部与弹窗各一份）', async () => {
+    seedBase()
+    dispatchWith(() => Promise.reject('纯文本保存失败'))
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(async () => expect((await screen.findAllByText('纯文本保存失败')).length).toBe(2))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('项目弹窗：删除项目成功后关闭弹窗，项目从侧栏消失', async () => {
+    seedBase()
+    dispatchWith(<C extends Command>(command: C): CommandDispatchResult<C> => {
+      if (command.type === 'project.remove') {
+        kernel.setView('projects.all', undefined, [])
+      }
+      return { facts: [], value: null } as CommandDispatchResult<C>
+    })
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
+    await user.click(screen.getByRole('button', { name: '删除项目' }))
+
+    await waitFor(() => expectDispatched({ type: 'project.remove', id: 'p1' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await screen.findByText('还没有项目')).toBeInTheDocument()
+    // 项目没了：看板回到「先添加项目」空态，而不是空看板
+    expect(screen.getByText('先添加项目（本地文件夹），任务只能建在项目下')).toBeInTheDocument()
+  })
+
+  it('项目弹窗：删除失败为非 Error 时按字符串展示，弹窗不关', async () => {
+    seedBase()
+    dispatchWith(() => Promise.reject('纯文本删除失败'))
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
+    await user.click(screen.getByRole('button', { name: '删除项目' }))
+
+    await waitFor(async () => expect((await screen.findAllByText('纯文本删除失败')).length).toBe(2))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '项目：工作台' })).toBeInTheDocument()
+  })
+
+  it('项目弹窗：取消关闭弹窗且不发任何项目命令', async () => {
+    seedBase()
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '+ 添加' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByLabelText('项目名称')).not.toBeInTheDocument()
+    expect(kernel.dispatched.filter((command) => command.type.startsWith('project.'))).toHaveLength(
+      0,
+    )
+  })
 })

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Command } from '../../../../../../src/protocol/commands'
@@ -129,5 +129,75 @@ describe('ProjectDialog', () => {
     render(<ProjectDialog onSave={vi.fn()} onCancel={onCancel} />)
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(onCancel).toHaveBeenCalled()
+  })
+
+  it('名称已手填时选文件夹只改路径，不用目录名覆盖用户输入', async () => {
+    stubBridge(() => Promise.resolve('D:\\Codes\\workbench'))
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('项目名称'), '我起的名字')
+    await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('文件夹路径')).toHaveValue('D:\\Codes\\workbench'),
+    )
+    expect(screen.getByLabelText('项目名称')).toHaveValue('我起的名字')
+  })
+
+  it('选中文件系统根目录时名称回退为路径本身（末段为空不填空白名）', async () => {
+    stubBridge(() => Promise.resolve('/'))
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+
+    await waitFor(() => expect(screen.getByLabelText('文件夹路径')).toHaveValue('/'))
+    expect(screen.getByLabelText('项目名称')).toHaveValue('/')
+  })
+
+  it('选择文件夹失败（非 Error）就地展示原因，字段不变', async () => {
+    stubBridge(() => Promise.reject('picker-down'))
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+
+    expect(await screen.findByText('picker-down')).toBeInTheDocument()
+    expect(screen.getByLabelText('文件夹路径')).toHaveValue('')
+    // 失败不算致命：仍可手填后保存
+    await user.type(screen.getByLabelText('文件夹路径'), 'D:\\tmp')
+    await user.type(screen.getByLabelText('项目名称'), '临时')
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+  })
+
+  it('字段不全时提交表单不调用 onSave（保存按钮外还有 Enter / 程序化 submit）', async () => {
+    const onSave = vi.fn()
+    const user = userEvent.setup()
+    const { container } = render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('文件夹路径'), 'D:\\Codes\\workbench')
+    // 名称留空：保存按钮禁用，但表单提交事件本身会到达 submit 处理器
+    await user.click(screen.getByLabelText('项目名称'))
+    await user.keyboard('{Enter}')
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText('新建项目')).toBeInTheDocument()
+  })
+
+  it('保存失败就地展示错误、弹窗不关且按钮恢复可点', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('路径不可写'))
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('文件夹路径'), 'D:\\bad')
+    await user.type(screen.getByLabelText('项目名称'), '坏目录')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('路径不可写')).toBeInTheDocument()
+    expect(screen.getByText('新建项目')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+    expect(screen.getByLabelText('项目名称')).toHaveValue('坏目录')
   })
 })

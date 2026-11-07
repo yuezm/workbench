@@ -5,6 +5,7 @@ import type { Command } from '../../../../../../src/protocol/commands'
 import type { WorkflowWithStages } from '../../../../../../src/protocol/entities'
 import type { DispatchResult } from '../../../../../../src/protocol/ipc'
 import { WorkflowManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowManager'
+import { SOP_TEMPLATES } from '../../../../../../src/renderer/src/apps/ai-workflow/model/sop-templates'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function wf(id: string, name: string, stages = 0, description = ''): WorkflowWithStages {
@@ -108,6 +109,25 @@ describe('WorkflowManager', () => {
     const createdRow = await screen.findByRole('button', { name: '选择工作流 新建流' })
     expect(within(createdRow).getByText('当前')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('新建返回空值：弹窗照常关闭，选中项不变', async () => {
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发')])
+    handleDispatch(() => ({ facts: [], value: null }))
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('研发')
+
+    await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    await user.type(screen.getByLabelText('工作流名称'), '没有返回值的流')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(kernel.dispatched).toHaveLength(1)
+    // 命令没回实体：不切换选中，仍是原来那条
+    expect(
+      within(screen.getByRole('button', { name: '选择工作流 研发' })).getByText('当前'),
+    ).toBeInTheDocument()
   })
 
   it('编辑保存：dispatch workflow.update；失败保持弹窗并展示错误', async () => {
@@ -222,5 +242,94 @@ describe('WorkflowManager', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(kernel.dispatched[0]).toMatchObject({ type: 'workflow.remove', id: 'w1' })
     expect(await screen.findByText('暂无工作流')).toBeInTheDocument()
+  })
+
+  it('SOP 模板：列出开箱模板，选中后预填到编辑器（模板弹窗关闭）', async () => {
+    const release = SOP_TEMPLATES.find((template) => template.id === 'release-ops')
+    if (!release) throw new Error('缺少发版模板')
+    kernel.setView('workflows.all', undefined, [])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('暂无工作流')
+
+    await user.click(screen.getByRole('button', { name: 'SOP 模板' }))
+    const picker = screen.getByRole('dialog')
+    expect(picker).toHaveTextContent('从 SOP 模板新建')
+    for (const template of SOP_TEMPLATES) {
+      expect(within(picker).getByText(template.description)).toBeInTheDocument()
+    }
+
+    await user.click(screen.getByRole('button', { name: `使用模板 ${release.name}` }))
+
+    // 模板弹窗关闭，编辑器带着模板的阶段与「要干什么」打开
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(screen.getByRole('dialog')).toHaveTextContent('工作流定义')
+    expect(screen.getByLabelText('工作流名称')).toHaveValue(release.name)
+    expect(screen.getByLabelText('阶段1名称')).toHaveValue(release.stages[0].name)
+    expect(screen.getByLabelText('阶段1要干什么')).toHaveValue(release.stages[0].instructions)
+  })
+
+  it('SOP 模板：模板弹窗可取消，取消后不打开编辑器、不 dispatch', async () => {
+    kernel.setView('workflows.all', undefined, [])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('暂无工作流')
+
+    await user.click(screen.getByRole('button', { name: 'SOP 模板' }))
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(kernel.dispatched).toHaveLength(0)
+  })
+
+  it('SOP 模板弹窗按 Esc 关闭：走 Dialog onClose，不打开编辑器', async () => {
+    kernel.setView('workflows.all', undefined, [])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('暂无工作流')
+
+    await user.click(screen.getByRole('button', { name: 'SOP 模板' }))
+    expect(screen.getByRole('dialog')).toHaveTextContent('从 SOP 模板新建')
+    await user.keyboard('{Escape}')
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByLabelText('工作流名称')).not.toBeInTheDocument()
+    expect(kernel.dispatched).toHaveLength(0)
+  })
+
+  it('SOP 模板新建保存：workflow.create 带上模板阶段、说明与流转下标', async () => {
+    const release = SOP_TEMPLATES.find((template) => template.id === 'release-ops')
+    if (!release) throw new Error('缺少发版模板')
+    kernel.setView('workflows.all', undefined, [])
+    const created = wf('w9', release.name, release.stages.length)
+    handleDispatch((command) => {
+      if (command.type === 'workflow.create') {
+        kernel.setView('workflows.all', undefined, [created])
+        return { facts: [], value: created }
+      }
+      return { facts: [], value: null }
+    })
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('暂无工作流')
+
+    await user.click(screen.getByRole('button', { name: 'SOP 模板' }))
+    await user.click(screen.getByRole('button', { name: `使用模板 ${release.name}` }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    const command = kernel.dispatched[0]
+    expect(command).toMatchObject({ type: 'workflow.create', input: { name: release.name } })
+    if (command.type !== 'workflow.create') throw new Error('命令类型不对')
+    expect(command.input.stages.map((stage) => stage.name)).toEqual(
+      release.stages.map((stage) => stage.name),
+    )
+    // 「要干什么」原样落库（会拼进阶段提示词）
+    expect(command.input.stages[0].instructions).toBe(release.stages[0].instructions)
+    // 阶段名在下标里解析：灰度阶段的打回目标指向「发布准备」而不是自己
+    const canaryIndex = release.stages.findIndex((stage) => stage.name === '灰度发布')
+    const prepareIndex = release.stages.findIndex((stage) => stage.name === '发布准备')
+    expect(command.input.stages[canaryIndex].onRejectIndex).toBe(prepareIndex)
+    expect(canaryIndex).toBeGreaterThan(-1)
   })
 })

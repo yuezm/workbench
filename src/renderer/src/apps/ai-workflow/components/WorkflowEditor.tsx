@@ -17,6 +17,8 @@ import { useKernelView } from '../../../shell/useKernelView'
 
 interface WorkflowEditorProps {
   workflow: WorkflowWithStages | null
+  /** 预填草稿（从 SOP 模板新建时用）；给了就以它为准，忽略 `workflow` 的推导 */
+  initial?: WorkflowInput | null
   onSave: (input: WorkflowInput) => Promise<void>
   onCancel: () => void
 }
@@ -123,8 +125,13 @@ function MoveIcon({ dir }: { dir: 'up' | 'down' }): ReactElement {
  * 上移 / 下移 / 删除作用在选中阶段上，保存仍提交整份定义（阶段 id 稳定）。
  * 每个阶段都能写「要干什么」：这段文字会拼进进入该阶段的任务提示词交给智能体。
  */
-export function WorkflowEditor({ workflow, onSave, onCancel }: WorkflowEditorProps): ReactElement {
-  const [draft, setDraft] = useState<WorkflowInput>(() => toDraft(workflow))
+export function WorkflowEditor({
+  workflow,
+  initial,
+  onSave,
+  onCancel,
+}: WorkflowEditorProps): ReactElement {
+  const [draft, setDraft] = useState<WorkflowInput>(() => initial ?? toDraft(workflow))
   const [saving, setSaving] = useState(false)
   /** 右侧展开的阶段下标；删除 / 新增后由对应 handler 修正 */
   const [selected, setSelected] = useState(0)

@@ -10,6 +10,18 @@
 3. **SOP 串联是三者里最便宜、最快能交付的一块**，且不需要新基础设施，建议作为下一版第一项。
 4. **真正的难点不是传输，是权限/审批往返与事件语义归一**。协议帧各家长得都不一样，能复用的只有会话、取消、进程树这几件事。
 
+## 落地进展（2026-11-08）
+
+调研里的前两项已用**插件**（而非新的 `protocolFamily` 枚举）落地，原「第 6 节需要拍板」的 2、4 两项因此按插件路线解决：
+
+| 项                  | 落地方式                                                                                                                                                                                                                                                                                                              | 证据                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Claude Code 协议族  | `src/plugins/executors/claude/`：`--print --output-format stream-json --verbose`，提示词走 stdin；`--permission-mode plan\|acceptEdits\|bypassPermissions` + 恒定 `--permission-prompts none`（print 模式没有审批往返，越界即失败）；续接用 `--resume`，stderr 命中会话失效则回执 `resumeRejected` 由宿主换新会话重试 | 本机 `claude 2.1.318` 实测跑通一轮（回执含 output/usage/sessionId） |
+| Hermes / ACP        | `src/plugins/executors/hermes/`：`hermes acp` + 最小 JSON-RPC 2.0 客户端；`initialize → session/new\|load → session/set_mode\|set_model → session/prompt`；**审批往返已实现**（`session/request_permission` 自动选 allow 选项回帧，认不出的方法回 `-32601`）；取消走 `session/cancel` → SIGTERM → SIGKILL             | 本机 `Hermes Agent v0.22.5` 实测 initialize/session/new 握手        |
+| SOP 串联（第 1 项） | 不是「子工作流引用」，而是先给**开箱 SOP 模板**：设置 → 工作流配置 → 「SOP 模板」，6 条阶段机（产品发现 / 研发交付 / 测试质量 / 发版运维 / 事故复盘 / 迭代回顾）预填进编辑器                                                                                                                                          | `src/renderer/src/apps/ai-workflow/model/sop-templates.ts`          |
+
+仍未做：远端 Worker（第 3 项）、`codex` 等其余协议族、SOP 串 SOP（跨工作流交接已存在，但阶段级子工作流引用未做）。
+
 ## 1. 参照产品：Multica
 
 定位：源码公开的团队工作区，把任务派给 AI 编码智能体，智能体在本机跑、边跑边评论、跑完把任务挪到「审核中」等人验收。
@@ -75,8 +87,45 @@ daemon 只做三件事：注册（本机标识 + 能力）、拉任务、回事�
 
 ## 参考
 
+### 运行时协议
+
 - [Multica README（中文）](https://github.com/multica-ai/multica/blob/main/README.zh.md)
 - [Hermes Agent · Programmatic Integration（ACP / TUI gateway / API server 三协议）](https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration)
 - [Claude Code · Run Claude Code programmatically](https://code.claude.com/docs/en/headless)
 - [Agent Client Protocol](https://agentclientprotocol.com/get-started/introduction)
 - [aiteam：单二进制消息中枢 + 多机多客户端](https://github.com/carlaau/aiteam)
+
+### SOP 模板的方法论来源（`model/sop-templates.ts` 逐条对应）
+
+产品发现：
+
+- [Amazon Working Backwards — PR/FAQ Mastery](https://workingbackwards.com/pr-faq-mastery/)
+- [SVPG — Dual-Track Agile（Discovery & Delivery）](https://www.svpg.com/dual-track-agile/)
+- [Product Talk — Opportunity Solution Trees](https://www.producttalk.org/opportunity-solution-trees/)
+- [Intercom — RICE Prioritization](https://www.intercom.com/blog/rice-simple-prioritization-for-product-managers/)
+- [Basecamp — Shape Up](https://basecamp.com/shapeup/0.3-chapter-01)
+
+研发交付：
+
+- [Trunk Based Development](https://trunkbaseddevelopment.com/)
+- [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow) / [GitLab Flow](https://docs.gitlab.com/ee/topics/gitlab_flow.html)
+- [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) / [Semantic Versioning 2.0.0（中文）](https://semver.org/lang/zh-CN/)
+- [Google eng-practices — Code Review](https://google.github.io/eng-practices/review/)
+- [Architecture Decision Records](https://adr.github.io/)
+- [Martin Fowler — Feature Toggles](https://martinfowler.com/articles/feature-toggles.html)
+
+测试质量：
+
+- [ISO/IEC/IEEE 29119-2:2021（测试过程）](https://webstore.iec.ch/en/publication/71833) / [ISTQB](https://istqb.org/certifications/)
+- [Martin Fowler — The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html) / [Kent C. Dodds — Testing Trophy](https://kentcdodds.com/blog/the-testing-trophy-and-testing-classifications)
+- [Google Testing Blog — Test Sizes](https://testing.googleblog.com/2010/12/test-sizes.html)
+- [James Bach — Session-Based Test Management](http://satisfice.us/sbtm/index.shtml)
+
+发版运维与复盘：
+
+- [DORA — Accelerate State of DevOps Report 2024](https://dora.dev/research/2024/dora-report/)
+- [Martin Fowler — Canary Release](https://martinfowler.com/bliki/CanaryRelease.html)
+- [Google SRE Workbook — Error Budget Policy](https://sre.google/workbook/error-budget-policy/)
+- [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
+- [Google SRE Book — Postmortem Culture](https://sre.google/sre-book/postmortem-culture/)
+- [Atlassian — WIP limits for Kanban](https://www.atlassian.com/agile/kanban/wip-limits)

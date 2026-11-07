@@ -4,7 +4,7 @@
 >
 > 复核方式：`pnpm test:coverage` 后解析 `coverage/coverage-final.json`，把 `s`（语句）与 `b`（分支）里计数为 0 的项对照本表；本表之外出现未覆盖项即为**新增缺口**，要补测试或补登记。
 >
-> 最后复核：2026-11-07（TDD 覆盖率补口，150 测试文件 / 2192 用例，99.91 / 99.69 / 100 / 100）。
+> 最后复核：2026-11-08（多协议运行时与 SOP 模板落地后，155 测试文件 / 2371 用例，99.92 / 99.70 / 100 / 100）。
 
 ## 判定口径
 
@@ -16,7 +16,7 @@
 
 只满足"测试写起来麻烦"的，一律不算不可达。
 
-## 当前登记（22 项 / 7 个文件）
+## 当前登记（23 项 / 9 个文件）
 
 ### src/host/scheduler.ts（10 项）
 
@@ -28,20 +28,28 @@
 | 424:37 语句 / 424:10 分支 | 杀进程树之后再判 `cancelTimers === null`                  | 宽限回调是同步执行的一段：取 pid → kill → 判空，中间没有 await 与外部回调，`cancelTimers` 不可能在此期间被置空。                                |
 | 560:38 语句 / 560:8 分支  | `cancelAll` 里 `controller === undefined` 的 continue     | 遍历的是同一个 `Map` 的 `keys()` 快照，键一定存在。                                                                                             |
 
-### src/kernel/decide.ts（4 项）
+### src/kernel/commands/workflow.ts（3 项）
 
-| 位置                 | 内容                                         | 为什么到达不了                                                                          |
-| -------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- |
-| 225:23 分支          | `indexTarget` 的 `ids[index] ?? null` 兜底   | `validateStageSet` 已保证下标落在 `0..ids.length-1`。                                   |
-| 246:23 / 246:50 分支 | `sameStage` 的 `instructions ?? ''` 两侧兜底 | 投影归一时 `instructions` 恒为字符串（空串表示未填），`null`/`undefined` 进不到比较器。 |
-| 452:10 分支          | `moveTask` 里 `target` 的取值分支            | `target` 必取自 `flow.stages`，非脏投影构造不出未命中。                                 |
+> 2026-11-08 复核：`kernel/decide.ts` 按命令域拆分（commit `cf26a8c`）后，原先登记在该文件的 4 条随代码搬到这里与 `commands/run.ts`，位置已更新。
+
+| 位置    | 内容                                               | 为什么到达不了                                                                    |
+| ------- | -------------------------------------------------- | --------------------------------------------------------------------------------- |
+| 36 分支 | `indexTarget` 的 `ids[index] ?? null` 兜底         | `validateStageSet` 已保证下标落在 `0..ids.length-1`。                             |
+| 57 分支 | `sameStage` 的 `instructions ?? ''` 左臂（`a` 侧） | 投影归一时 `instructions` 恒为字符串（空串表示未填），`null`/`undefined` 进不来。 |
+| 57 分支 | `sameStage` 的 `instructions ?? ''` 右臂（`b` 侧） | 同上，两侧都来自 `toStageRow` 的 `stage.instructions?.trim() ?? ''`。             |
+
+### src/kernel/commands/run.ts（1 项）
+
+| 位置     | 内容                                          | 为什么到达不了                                          |
+| -------- | --------------------------------------------- | ------------------------------------------------------- |
+| 118 分支 | `moveTask` 交接里 `target === undefined ? []` | `target` 必取自 `flow.stages`，非脏投影构造不出未命中。 |
 
 ### src/renderer/src/apps/ai-workflow/components/WorkflowEditor.tsx（3 项）
 
 | 位置                     | 内容                                   | 为什么到达不了                                                                                                                       |
 | ------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 165:43 语句 / 165:4 分支 | `moveStage` 的越界早退                 | 唯一调用点是阶段行的上移/下移按钮：首行上移、末行下移都是 `disabled`，React 不派发 `onClick`，任何实际调用都满足 `0 <= j < length`。 |
-| 390:45 分支              | 渲染 `stage.instructions ?? ''` 的兜底 | draft 里每个阶段的 `instructions` 都由 `emptyStage('')` 与 `toDraft(...)` 归一成字符串。                                             |
+| 172:43 语句 / 172:4 分支 | `moveStage` 的越界早退                 | 唯一调用点是阶段行的上移/下移按钮：首行上移、末行下移都是 `disabled`，React 不派发 `onClick`，任何实际调用都满足 `0 <= j < length`。 |
+| 399:45 分支              | 渲染 `stage.instructions ?? ''` 的兜底 | draft 里每个阶段的 `instructions` 都由 `emptyStage('')` 与 `toDraft(...)` 归一成字符串。                                             |
 
 ### src/renderer/src/apps/ai-workflow/components/ProjectDialog.tsx（2 项）
 
@@ -53,7 +61,7 @@
 
 | 位置     | 内容                                                         | 为什么到达不了                                                                    |
 | -------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| 150 分支 | `if (timer !== undefined) clearTimeout(timer)` 的 false 分支 | `timer` 由 `Promise` 执行器同步赋值，`Promise.race` 的 `finally` 执行时必已定义。 |
+| 168 分支 | `if (timer !== undefined) clearTimeout(timer)` 的 false 分支 | `timer` 由 `Promise` 执行器同步赋值，`Promise.race` 的 `finally` 执行时必已定义。 |
 
 ### src/plugins/executors/dsh/models.ts（1 项）
 
@@ -67,7 +75,14 @@
 | -------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | 214 分支 | `clearTimers` 的 `timers.timeout !== undefined` 的 false 分支 | `clearTimers` 只在 `finish()` 里调用，而 `finish()` 的所有触发点（关流、错误、写帧失败）都在 `timers.timeout = setTimeout(...)` 之后。 |
 
+### src/plugins/executors/claude/frames.ts（1 项）
+
+| 位置    | 内容                                                | 为什么到达不了                                                                                                                                                                                                                                                                                  |
+| ------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 88 分支 | `jsonText` 里 `JSON.stringify(value) ?? ''` 的 `''` | 工具入参只来自 `parseFrame`（`JSON.parse`）的产物：`JSON.stringify` 对 JSON 值恒返回字符串，只有 `undefined`/函数/`Symbol` 才返回 `undefined`，而 `undefined` 已被同函数的三元挡掉，函数与 `Symbol` 进不了 JSON 帧。要触发只能直接调 `handleFrame` 注入非 JSON 值——那是伪造帧，不属于模块契约。 |
+
 ## 变化记录
 
 - 2026-11-07：TDD 补口后从 90 项降到 22 项；本轮新增 47 个用例，全部为既有行为护栏（首跑即绿），除 `src/host/db.ts` 为覆盖「外键已关」分支补了 3 个 `export`（无行为变化）。
+- 2026-11-08：新增 `claude`（Claude Code stream-json）与 `hermes`（ACP over stdio）两个执行器插件，登记项 22 → 23：新增 `claude/frames.ts:88`（1 条），`kernel/decide.ts` 的 4 条随 `cf26a8c` 的按命令域拆分迁到 `kernel/commands/{workflow,run}.ts`（位置更新、条数不变），`registry.ts` / `WorkflowEditor.tsx` 因插行更新了行号。两个新插件目录里只有这 1 条未覆盖分支，其余全部 100%（含 `hermes` 的 `wire.ts` 收尾链路：用 `connect()` 造 link、`exited` 永不 resolve，断言 SIGTERM → SIGKILL）。
 - 本表只登记，不驱动实现。删守卫来换覆盖率数字属于降低门槛，按 `CONSTRAINTS.md` 的 Floor 处理。

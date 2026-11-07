@@ -12,7 +12,7 @@
 
 在工作台内新增 `ai-workflow` app：把「运行时 → 智能体 → 自定义多阶段工作流 → 看板任务」串成一个能在本地跑起来的最小闭环。
 
-- 配置**运行时**：运行时 = 本机执行环境实例（执行器插件 + 启动命令 + profile + 权限模式 + 模型/推理强度 + 工作目录 + 并发上限 + 启用开关）；内置执行器插件 `dsh` 与 `command`，其余（claude code / codex 等）后续按「插件目录 + registry 一行」接入，不改内核与宿主。
+- 配置**运行时**：运行时 = 本机执行环境实例（执行器插件 + 启动命令 + profile + 权限模式 + 模型/推理强度 + 工作目录 + 并发上限 + 启用开关）；内置执行器插件 `dsh`、`claude`（Claude Code）、`hermes`（Hermes Agent / ACP）与 `command`，其余（codex 等）后续按「插件目录 + registry 一行」接入，不改内核与宿主。
 - **识别**已安装的运行时：运行时配置页扫描本机 PATH，自动列出已安装的 agent CLI，点「使用」打开新建表单并把名称与命令预填进去（不自动建记录，profile/权限模式等仍由用户确认）。
 - 配置**智能体**：名称、描述、执行配置（绑定某个运行时）、能力（System Prompt）。
 - 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【进入时】【完成后进入】【打回时退回到】。
@@ -44,7 +44,7 @@ app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区�
 
 - **运行时配置**：已配置运行时清单（健康状态、CLI 版本、启动头、负载、路径）；上方是「已安装的运行时」检测清单（自动扫描本机 CLI，点「使用」打开并预填新建表单）。每条已配置运行时提供「测试」做探测（见「运行时探测与健康」），可编辑（含删除）。
 - **智能体配置**：已配置智能体清单（名称、绑定运行时、描述、能力）。
-- **工作流配置**：工作流定义清单（新建 / 选择 / 编辑）。
+- **工作流配置**：工作流定义清单（新建 / 选择 / 编辑）；顶部另有「SOP 模板」入口，列出开箱 SOP（产品发现 / 研发交付 / 测试质量 / 发版运维 / 事故复盘 / 迭代回顾），选中即把阶段序列与每阶段「要干什么」预填进同一个编辑器，**保存前不落库**；模板不替用户绑定智能体（阶段 `entryMode='agent'` 仍需用户选 agent 才能通过内核校验）。
 
 规则：
 
@@ -166,7 +166,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                                                                                                            |
 | `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, created_at                                                                                                                                                      | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一                                                                                                                                                                       |
 | `tasks`           | id, title, description, workflow_id → workflows, project_id, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                              | `status` = `active`\|`completed`；`project_id` 是弱引用（M10，旧行 NULL = 未归属），任务的运行工作目录取项目 `path`                                                                                                                                               |
-| `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                         | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下还有任务时拒绝删除                                                                                                                                     |
+| `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                          | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下还有任务时拒绝删除                                                                                                                                   |
 | `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进）                                                                                  |
 | `run_events`      | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                                                                                                                  | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段；纯追加                                                                                                                                                                            |
 | `conversations`   | id, title, agent_id → agents(RESTRICT), session_id, created_at, updated_at                                                                                                                                                                                                                                                   | 一段独立对话：绑定智能体；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                                                                                                                |
@@ -204,7 +204,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | RUN_SUCCEEDED(run) | agent run 正常结束           | 进入 `on_complete` 目标；到终端则 `completed`                                                                                         |
 | RUN_FAILED(run)    | agent run 非零退出/超时/异常 | 进入 `on_reject` 目标；若未配置打回目标（不指定）或目标就是当前阶段则保持原阶段、**不触发进入效果**（不自动重建 run）                 |
 | MOVE_TO(stage)     | 用户把卡片拖到某个阶段列     | 直接进入该阶段（不套用 `on_complete`/`on_reject`）；该任务有活跃 run 时拒绝拖动                                                       |
-| COMPLETE           | 用户把卡片拖到「归档」区   | 任务 `completed`，移出看板；该任务有活跃 run 时拒绝完成                                                                               |
+| COMPLETE           | 用户把卡片拖到「归档」区     | 任务 `completed`，移出看板；该任务有活跃 run 时拒绝完成                                                                               |
 
 **流转即触发进入：** 每次进入新阶段都重新按 `entry_mode` 产生对应效果（可能再次创建 run），即"SOP 串联"。
 
@@ -220,19 +220,19 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 ### 运行时模型
 
-| 字段              | 说明                                                                                                                                                 |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `executorKey`     | 执行器插件键：决定「怎么调起一轮」，不决定派给谁；取值必须是插件注册表里的已注册 key，缺省取注册表首项                                               |
-| `command`         | 启动命令：命令名或绝对路径；缺省由所选执行器插件 manifest 提供（dsh 默认 `dsh`，command 默认为空待填）                                               |
-| `profile`         | 启动 profile；dsh 用它选 `--stdio` / `--probe`，其它执行器可为空串；缺省同样来自 manifest                                                            |
-| `argsTemplate`    | `command` 执行器的参数模板（JSON 数组文本，≤20 项、单项 ≤500 字符；空串 = 无参数）；占位符白名单 `{model}`/`{effort}`/`{cwd}`/`{context}`/`{prompt}` |
+| 字段              | 说明                                                                                                                                                                                                                                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `executorKey`     | 执行器插件键：决定「怎么调起一轮」，不决定派给谁；取值必须是插件注册表里的已注册 key，缺省取注册表首项                                                                                                                                                                                                                    |
+| `command`         | 启动命令：命令名或绝对路径；缺省由所选执行器插件 manifest 提供（dsh 默认 `dsh`，command 默认为空待填）                                                                                                                                                                                                                    |
+| `profile`         | 启动 profile；dsh 用它选 `--stdio` / `--probe`，其它执行器可为空串；缺省同样来自 manifest                                                                                                                                                                                                                                 |
+| `argsTemplate`    | `command` 执行器的参数模板（JSON 数组文本，≤20 项、单项 ≤500 字符；空串 = 无参数）；占位符白名单 `{model}`/`{effort}`/`{cwd}`/`{context}`/`{prompt}`                                                                                                                                                                      |
 | `permissionMode`  | `read-only` / `workspace-write` / `danger-full-access`；经 `DSH_PERMISSION_MODE` 传给子进程。沙箱只管文件写入：越界修改先被拒，工具随后可申请提权；stdio 传输**没有人工审批往返**，提权请求由桥接层自动回 `allowed-once`。任务详情用 `run.approvals` 把会话日志里的提权记录读出来供事后复核，界面不再声称「越界直接失败」 |
-| `model`           | provider/model 形式 id；`null` = CLI 默认模型                                                                                                        |
-| `reasoningEffort` | 推理强度；`null` = 模型默认                                                                                                                          |
-| `workdir`         | 执行工作目录；`null` = 宿主默认目录：`WORKBENCH_WORKDIR` 环境变量 > `~/.workbench`（启动时确保存在，解析结果见宿主视图 `runtimes.default-workdir`）                                                                                                                |
-| `maxConcurrent`   | 同一运行时同时执行的 run 上限，超出排队                                                                                                              |
-| `enabled`         | 停用后不再派发执行                                                                                                                                   |
-| `lastProbe`       | 最近一次探测结论（见下）；从未探测为 `null`                                                                                                          |
+| `model`           | provider/model 形式 id；`null` = CLI 默认模型                                                                                                                                                                                                                                                                             |
+| `reasoningEffort` | 推理强度；`null` = 模型默认                                                                                                                                                                                                                                                                                               |
+| `workdir`         | 执行工作目录；`null` = 宿主默认目录：`WORKBENCH_WORKDIR` 环境变量 > `~/.workbench`（启动时确保存在，解析结果见宿主视图 `runtimes.default-workdir`）                                                                                                                                                                       |
+| `maxConcurrent`   | 同一运行时同时执行的 run 上限，超出排队                                                                                                                                                                                                                                                                                   |
+| `enabled`         | 停用后不再派发执行                                                                                                                                                                                                                                                                                                        |
+| `lastProbe`       | 最近一次探测结论（见下）；从未探测为 `null`                                                                                                                                                                                                                                                                               |
 
 - 契约中 `RuntimeInput` 除 `name` 外均可省略。`executorKey` / `command` / `profile` 由 IPC 入口按所选执行器插件 manifest 补齐（未指定 key 取注册表首项）；其余默认 `argsTemplate=''`、`permissionMode=workspace-write`、`maxConcurrent=1`（取值 1–8，超出按 8 归一）、`enabled=true`、`model/reasoningEffort/workdir=null`。**内核不写任何产品默认值**。
 - 新增运行时协议不改内核、宿主或 UI：写一个执行器插件（`src/plugins/executors/<id>/`）并在 `src/plugins/registry.ts` 加一行，即可被 `runtimes.executors()` 列出、被 detect 汇总、被配置选中并跑通一轮。
@@ -267,7 +267,7 @@ export interface DetectedRuntime {
 - **来源**：各执行器插件的 `detect(ctx)`（`src/plugins/executors/*/detect.ts`）只报自己能接入的命中；`executorKey` 与 `supported` 由 `src/plugins/registry.ts` 的 `detectAll` 汇总时回填，插件不自报。
 - **汇总规则**：按 registry 的 `executors` 数组顺序**串行**调用；单插件超时 2 s、抛错只跳过该插件并记日志（整体不抛）；同一 `command` 被多个插件声明时先到先得并记一条 warn；输出按 `src/plugins/shared/cli-catalog.ts` 的候选顺序稳定排列。
 - **扫描目录**（`sdk.process.scanDirs()`）：`process.env.PATH` 全部条目 + 常见全局安装目录（Windows：`%APPDATA%/npm`、`~/.local/bin`、`~/.claude/local`、`%ProgramFiles%/nodejs`；POSIX：`~/.local/bin`、`~/.npm-global/bin`、`~/.bun/bin`、`~/.claude/local`、`/usr/local/bin`、`/opt/homebrew/bin`）；不存在的目录跳过。
-- **候选清单**（`cli-catalog.ts`，顺序即输出顺序）：`dsh`、`claude`、`codex`、`gemini`、`opencode`、`aider`、`cursor-agent`、`qwen`、`goose`、`crush`。没有插件认领的 CLI 仍列出（`supported:false`，`executorKey=''`）。
+- **候选清单**（`cli-catalog.ts`，顺序即输出顺序）：`dsh`、`claude`、`hermes`、`codex`、`gemini`、`opencode`、`aider`、`cursor-agent`、`qwen`、`goose`、`crush`。没有插件认领的 CLI 仍列出（`supported:false`，`executorKey=''`）。
 - **命中判定**：Windows 命中 `<cmd>.exe|.cmd|.bat|.ps1` 任一（npm 全局装的是 shim）；POSIX 命中同名且有可执行位（`mode & 0o111`）。同一命令多处命中取 PATH 中靠前者。
 - **零副作用**：不 spawn 任何进程、不读版本号，只读文件系统；`runtimes.detect` 不写库、不发 changed。
 - **UI 三态**：已添加过的命令显示「已添加」并禁用；`supported=true` 显示「使用」打开新建表单并预填 `label`/`command`/`executorKey`（名称与现有运行时重名时改为 `label (command)`）；`supported=false`（本机已装但无插件认领）显示「不支持」并禁用，原因放按钮 title。检测只影响表单预填，不新建运行时记录。
@@ -364,37 +364,37 @@ export interface DetectedRuntime {
 `window.workbench`；renderer 禁止直接 import electron/fs/child_process。**旧 `window.aiWorkflow`
 命名空间与 `src/shared/ai-workflow-api.ts` 已删除**（AI 工作流 app 的读写在三动词上完成）。
 
-| 旧具名方法（M4 及以前）                    | M5 走法                                                                                           |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `runtimes.list()`                          | `query('runtimes.all')`                                                                           |
-| `runtimes.statuses()`                      | `query('runtimes.statuses')`                                                                      |
-| `runtimes.detect()`                        | `query('runtimes.detected')`（宿主视图，只读）                                                    |
-| `runtimes.executors()`                     | `query('runtimes.executors')`（宿主视图，只读）                                                   |
-| `runtimes.models(id)`                      | `query('runtimes.models', { runtimeId })`（宿主视图）                                             |
-| `runtimes.default-workdir`                  | `query('runtimes.default-workdir')`（宿主视图，无参数；`workdir` 留空时执行器实际用的绝对路径）      |
-| `runtimes.create/update/remove`            | `dispatch({ type:'runtime.create' \| 'runtime.update' \| 'runtime.remove', commandId, ... })`     |
-| `runtimes.probe(id)`                       | `dispatch({ type:'runtime.probe', commandId, id })`（宿主探测 → 落 `runtime.probed`）             |
-| `agents.*`                                 | `query('agents.all')` + `dispatch({type:'agent.create' \| 'agent.update' \| 'agent.remove'})`     |
-| `workflows.*`                              | `query('workflows.all')` + `dispatch(workflow.*)`                                                 |
-| `tasks.list(workflowId)`                   | `query('tasks.byWorkflow', { workflowId })`                                                       |
+| 旧具名方法（M4 及以前）                    | M5 走法                                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `runtimes.list()`                          | `query('runtimes.all')`                                                                                                        |
+| `runtimes.statuses()`                      | `query('runtimes.statuses')`                                                                                                   |
+| `runtimes.detect()`                        | `query('runtimes.detected')`（宿主视图，只读）                                                                                 |
+| `runtimes.executors()`                     | `query('runtimes.executors')`（宿主视图，只读）                                                                                |
+| `runtimes.models(id)`                      | `query('runtimes.models', { runtimeId })`（宿主视图）                                                                          |
+| `runtimes.default-workdir`                 | `query('runtimes.default-workdir')`（宿主视图，无参数；`workdir` 留空时执行器实际用的绝对路径）                                |
+| `runtimes.create/update/remove`            | `dispatch({ type:'runtime.create' \| 'runtime.update' \| 'runtime.remove', commandId, ... })`                                  |
+| `runtimes.probe(id)`                       | `dispatch({ type:'runtime.probe', commandId, id })`（宿主探测 → 落 `runtime.probed`）                                          |
+| `agents.*`                                 | `query('agents.all')` + `dispatch({type:'agent.create' \| 'agent.update' \| 'agent.remove'})`                                  |
+| `workflows.*`                              | `query('workflows.all')` + `dispatch(workflow.*)`                                                                              |
+| `tasks.list(workflowId)`                   | `query('tasks.byWorkflow', { workflowId })`                                                                                    |
 | `tasks.create/moveToStage/complete/remove` | `dispatch({type:'task.create' \| 'task.move' \| 'task.complete' \| 'task.remove'})`（`task.create.input.projectId` 必填，M10） |
-| `projects.list()`                          | `query('projects.all')`                                                                           |
-| `tasks.listByProject(projectId)`           | `query('tasks.byProject', { projectId })`；没有项目的任务走 `query('tasks.unassigned')`（M10）      |
-| `projects.create/update/remove`            | `dispatch({type:'project.create' \| 'project.update' \| 'project.remove', commandId, ...})`       |
-| `pickFolder()`                             | `window.workbench.pickFolder()`（宿主原生目录选择器；取消返回 `null`）                            |
-| `runs.listByTask(taskId)`                  | `query('runs.byTask', { taskId })`                                                                |
-| `runs.events(runId)`                       | `query('run.events', { runId })`                                                                  |
-| `cards.open()`                             | `query('cards.open')`                                                                             |
-| `cards.answer(cardId, index)`              | `dispatch({type:'card.answer', commandId, cardId, optionIndex, via:'ui'})` → `value` 是回答后的卡 |
-| `chat.listConversations()`                 | `query('conversations.all')`                                                                      |
-| `chat.listMessages(cid)`                   | `query('messages.byConversation', { conversationId })`                                            |
-| `chat.createConversation`                  | `dispatch({type:'chat.create', commandId, agentId})` → `value` 是新对话                           |
-| `chat.send(cid, content)`                  | `dispatch({type:'chat.send', commandId, conversationId, content})`                                |
-| `chat.removeConversation`                  | `dispatch({type:'chat.remove', commandId, conversationId})`（宿主先取消活跃 run）                 |
-| `chat.cancel(cid)`                         | `dispatch({type:'chat.cancel', commandId, conversationId})`                                       |
-| `chat.archiveConversation(cid, archived)`  | `dispatch({type:'chat.archive', commandId, conversationId, archived})`（缺省归档；不删消息/run）  |
-| `chat.onEvent(cb)`                         | `subscribe(handler)` 的 `{kind:'stream' \| 'stream-end'}`（过滤 `conversationId`）                |
-| `onChanged(cb)`                            | `subscribe(handler)` 的 `{kind:'facts', seq, types}`（按类型失效、按需重取）                      |
+| `projects.list()`                          | `query('projects.all')`                                                                                                        |
+| `tasks.listByProject(projectId)`           | `query('tasks.byProject', { projectId })`；没有项目的任务走 `query('tasks.unassigned')`（M10）                                 |
+| `projects.create/update/remove`            | `dispatch({type:'project.create' \| 'project.update' \| 'project.remove', commandId, ...})`                                    |
+| `pickFolder()`                             | `window.workbench.pickFolder()`（宿主原生目录选择器；取消返回 `null`）                                                         |
+| `runs.listByTask(taskId)`                  | `query('runs.byTask', { taskId })`                                                                                             |
+| `runs.events(runId)`                       | `query('run.events', { runId })`                                                                                               |
+| `cards.open()`                             | `query('cards.open')`                                                                                                          |
+| `cards.answer(cardId, index)`              | `dispatch({type:'card.answer', commandId, cardId, optionIndex, via:'ui'})` → `value` 是回答后的卡                              |
+| `chat.listConversations()`                 | `query('conversations.all')`                                                                                                   |
+| `chat.listMessages(cid)`                   | `query('messages.byConversation', { conversationId })`                                                                         |
+| `chat.createConversation`                  | `dispatch({type:'chat.create', commandId, agentId})` → `value` 是新对话                                                        |
+| `chat.send(cid, content)`                  | `dispatch({type:'chat.send', commandId, conversationId, content})`                                                             |
+| `chat.removeConversation`                  | `dispatch({type:'chat.remove', commandId, conversationId})`（宿主先取消活跃 run）                                              |
+| `chat.cancel(cid)`                         | `dispatch({type:'chat.cancel', commandId, conversationId})`                                                                    |
+| `chat.archiveConversation(cid, archived)`  | `dispatch({type:'chat.archive', commandId, conversationId, archived})`（缺省归档；不删消息/run）                               |
+| `chat.onEvent(cb)`                         | `subscribe(handler)` 的 `{kind:'stream' \| 'stream-end'}`（过滤 `conversationId`）                                             |
+| `onChanged(cb)`                            | `subscribe(handler)` 的 `{kind:'facts', seq, types}`（按类型失效、按需重取）                                                   |
 
 - 所有写命令带 `commandId`；宿主 `commands` 表按事实区间回放，重复提交不重复产事实（reject 不缓存）。
 - `runtimes.create` 的 `RuntimeInput`：`name` 必填，其余可省略。`executorKey` / `command` / `profile` 的缺省值由宿主按所选执行器插件 manifest 补齐（未指定 key 取注册表首项，未知 key 给可读错误），`argsTemplate` 缺省为空串；创建前按补齐后的配置探测，失败不落库。

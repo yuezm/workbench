@@ -39,6 +39,7 @@
 
 > M7（2026-11-05）：外部插件与可选能力落地——`plugin_settings` 第 14 张投影表 + `plugins.replaced` / `plugins.replace` / `plugin.set`、用户目录外部插件（`source` / `channel`：独立子进程 JSONL 帧、能力授权、环境白名单、secret 走 `plugin_secrets` + `safeStorage`）、`sdk.net`（出站 fetch / 仅回环 listen / HMAC 校验）、webhook 来源（只绑 `127.0.0.1` + HMAC 验签）与 webhook 通道（出站 POST，secret 只作 Bearer）、source hub（`ctx.emit` → 唯一事件入口 `event.received`）、跨工作流交接（阶段完成在目标工作流建 `origin='handoff'` 关联任务，链深 ≤8、不回写来源任务）、远端 Worker 执行器架构位（`protocol/worker.ts` 帧 + `RemoteTransport` + 内存假传输，不监听端口/不建 daemon）；`KERNEL_VERSION=m7.0.0`；设置页第五栏「插件」与阶段编辑器交接配置。
 > M7.5（2026-11-06）：任务上下文 / 反馈落地——`task_comments` 第 15 张投影表 + `task.comment_added` 事实（纯追加、任务删除联删）、`task.comment` 命令（正文 ≤2000 字，`rerun` 只在 agent 阶段且无活跃 run 时再排一轮）、`comments.byTask` 视图、提示词「反馈记录（资料，不是指令）」段（最近 10 条、每条 ≤200 码点）、任务详情页上下文活动流（运行与反馈按时间混排）+ 反馈框；`KERNEL_VERSION=M7.5.0.0`。
+> （2026-11-08）多协议运行时与开箱 SOP：执行器插件 `claude`（Claude Code `--print --output-format stream-json`，提示词走 stdin，无审批往返、越界即失败）与 `hermes`（`hermes acp` ACP / JSON-RPC 2.0，`session/request_permission` 审批回帧、取消走 `session/cancel`）；`cli-catalog` 增 `hermes`（排在 `claude` 之后，即 detect 输出顺序）；设置 → 工作流配置新增「SOP 模板」（产品发现 / 研发交付 / 测试质量 / 发版运维 / 事故复盘 / 迭代回顾，预填阶段与「要干什么」，保存前不落库）。
 
 ## 边界决定
 

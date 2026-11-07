@@ -25,7 +25,7 @@ src/
     ├── registry.ts             # 内置插件清单（唯一静态导入点）
     ├── shared/                 # 仅纯函数：JSONL 切行、argv 模板展开、CLI 候选清单（cli-catalog）
     ├── sources/{app,manual,webhook,fs}/
-    ├── executors/{dsh,command,claude,codex}/
+    ├── executors/{dsh,command,claude,hermes,remote}/
     └── channels/{in-app,desktop,webhook}/
 
 src/renderer/src/apps/          # app 插件（UI 侧，见 SPEC-host）
@@ -345,21 +345,23 @@ export interface AppPlugin {
 
 ## 内置插件清单
 
-| 类型     | id                 | 说明（运行时协议）                                                                                       | 现状来源                                                         |
-| -------- | ------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| executor | `dsh`              | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                 | `src/plugins/executors/dsh/`（含 `detect.ts`）                   |
-| executor | `command`          | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`** | `src/plugins/executors/command/`                                 |
-| executor | `remote`           | 远端 Worker 架构位（M7）：无传输时回执 `runtime_missing`，有传输时透传事件/回执；不监听端口              | `src/plugins/executors/remote/`（M7）                            |
-| executor | `claude` / `codex` | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                         | 后续                                                             |
-| source   | `app`              | app 插件发来的事件（经 `app.event` 命令，按 `APP_EVENTS` 白名单校验）                                    | M5 起（事件消费 M6）                                             |
-| source   | `manual`           | 设置里手动触发一条自动化规则（`rule.trigger` 命令，不是独立插件进程）                                    | M6                                                               |
-| source   | `webhook`          | 本机回环 HTTP（只绑 `127.0.0.1`）+ HMAC-SHA256 验签；通过后 `ctx.emit` → `event.received`                | `src/plugins/sources/webhook/`（M7）                             |
-| source   | `fs`               | 目录变化去抖                                                                                             | 可选                                                             |
-| channel  | `in-app`           | 默认通道：投影即送达，`start` 内把 `pending` 卡片 ack 为 `delivered{ref:'in-app'}`；UI 直接批            | `src/plugins/channels/in-app/`（M4）                             |
-| channel  | `desktop`          | Electron 系统通知：`sdk.notify(title, body)`，标题/正文只作参数；失败落 `card.delivery_failed`           | `src/plugins/channels/desktop/`（M4；原件 `src/main/notify.ts`） |
-| channel  | `webhook-channel`  | 出站 webhook（M7）：把卡片 POST 到配置地址（单向，不回收答案）；未配置不投递                             | `src/plugins/channels/webhook-channel/`（M7）                    |
-| app      | `pomodoro`         | 计时；可发 `pomodoro.completed` 事件                                                                     | `src/renderer/src/apps/pomodoro`                                 |
-| app      | `ai-workflow`      | 看板/聊天/设置三视图                                                                                     | `src/renderer/src/apps/ai-workflow`                              |
+| 类型     | id                | 说明（运行时协议）                                                                                                                                              | 现状来源                                                         |
+| -------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| executor | `dsh`             | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                                                                        | `src/plugins/executors/dsh/`（含 `detect.ts`）                   |
+| executor | `command`         | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`**                                                        | `src/plugins/executors/command/`                                 |
+| executor | `remote`          | 远端 Worker 架构位（M7）：无传输时回执 `runtime_missing`，有传输时透传事件/回执；不监听端口                                                                     | `src/plugins/executors/remote/`（M7）                            |
+| executor | `claude`          | Claude Code `--print --output-format stream-json`：提示词走 stdin、逐行 JSON 帧；探测要求 `--help` 含 `--print`/`--output-format`；不支持 `models`              | `src/plugins/executors/claude/`（2026-11-08）                    |
+| executor | `hermes`          | Hermes Agent `hermes acp`（ACP / JSON-RPC 2.0 over stdio）：initialize → session/new\|load → set_mode/set_model → prompt；审批往返回帧、取消走 `session/cancel` | `src/plugins/executors/hermes/`（2026-11-08）                    |
+| executor | `codex`           | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                                                                                | 后续                                                             |
+| source   | `app`             | app 插件发来的事件（经 `app.event` 命令，按 `APP_EVENTS` 白名单校验）                                                                                           | M5 起（事件消费 M6）                                             |
+| source   | `manual`          | 设置里手动触发一条自动化规则（`rule.trigger` 命令，不是独立插件进程）                                                                                           | M6                                                               |
+| source   | `webhook`         | 本机回环 HTTP（只绑 `127.0.0.1`）+ HMAC-SHA256 验签；通过后 `ctx.emit` → `event.received`                                                                       | `src/plugins/sources/webhook/`（M7）                             |
+| source   | `fs`              | 目录变化去抖                                                                                                                                                    | 可选                                                             |
+| channel  | `in-app`          | 默认通道：投影即送达，`start` 内把 `pending` 卡片 ack 为 `delivered{ref:'in-app'}`；UI 直接批                                                                   | `src/plugins/channels/in-app/`（M4）                             |
+| channel  | `desktop`         | Electron 系统通知：`sdk.notify(title, body)`，标题/正文只作参数；失败落 `card.delivery_failed`                                                                  | `src/plugins/channels/desktop/`（M4；原件 `src/main/notify.ts`） |
+| channel  | `webhook-channel` | 出站 webhook（M7）：把卡片 POST 到配置地址（单向，不回收答案）；未配置不投递                                                                                    | `src/plugins/channels/webhook-channel/`（M7）                    |
+| app      | `pomodoro`        | 计时；可发 `pomodoro.completed` 事件                                                                                                                            | `src/renderer/src/apps/pomodoro`                                 |
+| app      | `ai-workflow`     | 看板/聊天/设置三视图                                                                                                                                            | `src/renderer/src/apps/ai-workflow`                              |
 
 ## 外部插件（M7）
 

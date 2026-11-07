@@ -1,13 +1,13 @@
 import type { HTMLAttributes, ReactElement } from 'react'
 import { cn } from '../../lib/cn'
 
-/** 玻璃面板样式（圆角 + 描边 + 背景 + 阴影） */
+/** 面板样式（容器圆角 10px + 描边 + 实心面板底 + 一层低调投影，不做玻璃模糊） */
 export const panelCls =
-  'rounded-2xl border border-line bg-white/[0.03] backdrop-blur-xl shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_20px_50px_-30px_rgb(0_0_0/70%)]'
+  'rounded-xl border border-line bg-surface shadow-[0_1px_0_rgb(255_255_255/5%)_inset,0_18px_40px_-28px_rgb(0_0_0/80%)]'
 
-/** 面板内的小徽标（计数等） */
+/** 面板内的小徽标（计数等）：徽标圆角 4px */
 export const badgeCls =
-  'rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] tabular-nums text-ink-dim'
+  'rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] tabular-nums text-ink-dim'
 
 export type PanelProps = HTMLAttributes<HTMLDivElement>
 

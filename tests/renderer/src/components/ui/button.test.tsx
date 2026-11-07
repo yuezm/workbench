@@ -6,12 +6,12 @@ describe('Button（UI 基元契约）', () => {
   it('缺省为 secondary / md', () => {
     render(<Button>确定</Button>)
     const btn = screen.getByRole('button', { name: '确定' })
-    expect(btn).toHaveClass('bg-white/[0.04]', 'h-10')
+    expect(btn).toHaveClass('bg-surface-2', 'h-9')
   })
 
   it.each([
-    ['primary', 'bg-gradient-to-b'],
-    ['secondary', 'bg-white/[0.04]'],
+    ['primary', 'bg-focus-deep'],
+    ['secondary', 'bg-surface-2'],
     ['ghost', 'text-ink-dim'],
   ] as const)('variant=%s 应用对应主题', (variant, cls) => {
     render(<Button variant={variant}>{variant}</Button>)
@@ -20,8 +20,8 @@ describe('Button（UI 基元契约）', () => {
 
   it.each([
     ['sm', 'h-8'],
-    ['md', 'h-10'],
-    ['lg', 'h-11'],
+    ['md', 'h-9'],
+    ['lg', 'h-10'],
   ] as const)('size=%s 应用对应尺寸', (size, cls) => {
     render(<Button size={size}>{size}</Button>)
     expect(screen.getByRole('button')).toHaveClass(cls)
@@ -30,7 +30,7 @@ describe('Button（UI 基元契约）', () => {
   it('统一基座：圆角、焦点环与禁用语义始终存在', () => {
     render(<Button>基座</Button>)
     expect(screen.getByRole('button')).toHaveClass(
-      'rounded-xl',
+      'rounded-md',
       'focus-visible:ring-2',
       'disabled:pointer-events-none',
       'disabled:opacity-40',

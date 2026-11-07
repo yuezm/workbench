@@ -3,36 +3,30 @@ import type { ButtonHTMLAttributes, ReactElement } from 'react'
 import { cn } from '../../lib/cn'
 
 const buttonVariants = cva(
-  // 基座：统一的圆角、过渡、焦点环与禁用态
+  // 基座：控件圆角（6px）、过渡、焦点环与禁用态
   cn(
-    'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl',
+    'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md',
     'text-sm font-medium tracking-wide select-none',
-    'transition-all duration-200 ease-out outline-none',
-    'focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:ring-offset-2 focus-visible:ring-offset-abyss',
-    'active:scale-[0.97]',
+    'transition-colors duration-150 ease-out outline-none',
+    'focus-visible:ring-2 focus-visible:ring-focus/50 focus-visible:ring-offset-2 focus-visible:ring-offset-abyss',
     'disabled:pointer-events-none disabled:opacity-40',
   ),
   {
     variants: {
       variant: {
-        /** 主操作：极光渐变 + 同色辉光 */
-        primary: cn(
-          'bg-gradient-to-b from-focus to-focus-deep text-white',
-          'shadow-[0_0_0_1px_rgb(255_255_255/12%)_inset,0_8px_24px_-8px_var(--color-focus)]',
-          'hover:brightness-110 hover:shadow-[0_0_0_1px_rgb(255_255_255/18%)_inset,0_10px_32px_-6px_var(--color-focus)]',
-        ),
-        /** 次操作：玻璃面板 */
-        secondary: cn(
-          'bg-white/[0.04] text-ink ring-1 ring-line backdrop-blur-sm',
-          'hover:bg-white/[0.08] hover:ring-line-strong',
-        ),
+        /** 主操作：实心靛蓝（白字 6.3:1），不再用渐变与辉光 */
+        primary:
+          'bg-focus-deep text-white shadow-[0_1px_2px_rgb(0_0_0/45%)] hover:bg-focus active:bg-focus-deep',
+        /** 次操作：中性面板 */
+        secondary:
+          'bg-surface-2 text-ink ring-1 ring-line hover:bg-surface-3 hover:ring-line-strong',
         /** 弱操作：仅悬停显形 */
         ghost: 'text-ink-dim hover:bg-white/[0.06] hover:text-ink',
       },
       size: {
         sm: 'h-8 px-3',
-        md: 'h-10 min-w-24 px-5',
-        lg: 'h-11 min-w-28 px-7 text-[15px]',
+        md: 'h-9 px-4',
+        lg: 'h-10 px-5 text-[15px]',
       },
     },
     defaultVariants: {

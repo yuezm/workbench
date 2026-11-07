@@ -46,7 +46,7 @@ export function Dialog({ title, onClose, children, className }: DialogProps): Re
         aria-modal="true"
         className={cn(
           panelCls,
-          'max-h-[85vh] w-full max-w-lg overflow-auto bg-surface/95 p-5',
+          'max-h-[85vh] w-full max-w-lg overflow-auto p-5',
           'shadow-[0_30px_80px_-30px_rgb(0_0_0/85%)]',
           className,
         )}
@@ -57,7 +57,7 @@ export function Dialog({ title, onClose, children, className }: DialogProps): Re
             <button
               type="button"
               aria-label="关闭"
-              className="grid size-7 place-items-center rounded-lg text-ink-faint transition-colors duration-200 hover:bg-white/[0.06] hover:text-ink"
+              className="grid size-7 place-items-center rounded-md text-ink-dim transition-colors duration-150 hover:bg-white/[0.06] hover:text-ink"
               onClick={onClose}
             >
               <CloseIcon />

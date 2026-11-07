@@ -11,7 +11,7 @@ describe('Field', () => {
     )
     const label = screen.getByText('名称')
     expect(label.tagName).toBe('SPAN')
-    expect(label).toHaveClass('text-[11px]', 'text-ink-faint')
+    expect(label).toHaveClass('text-[11px]', 'text-ink-dim')
     expect(label.closest('label')).toContainElement(screen.getByLabelText('名称输入'))
   })
 

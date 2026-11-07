@@ -10,7 +10,7 @@ describe('Input', () => {
     expect(input.type).toBe('text')
     expect(input).toHaveAttribute('placeholder', '请输入')
     expect(input).toHaveValue('x')
-    expect(input).toHaveClass('h-9', 'rounded-lg', 'border-line', 'bg-black/25')
+    expect(input).toHaveClass('h-9', 'rounded-md', 'border-line', 'bg-surface-2')
   })
 
   it('输入触发 onChange', async () => {

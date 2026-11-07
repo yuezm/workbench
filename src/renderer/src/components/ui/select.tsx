@@ -97,7 +97,7 @@ function CheckIcon(): ReactElement {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      className="shrink-0 text-focus"
+      className="shrink-0 text-focus-soft"
     >
       <path d="m5 13 4 4 10-10" />
     </svg>
@@ -299,7 +299,7 @@ export function Select({
               width: position.width,
               maxHeight: position.maxHeight,
             }}
-            className="z-50 animate-rise overflow-y-auto rounded-xl border border-line-strong/50 bg-surface/95 p-1 shadow-[0_24px_60px_-24px_rgb(0_0_0/85%)] backdrop-blur-xl"
+            className="z-50 animate-rise overflow-y-auto rounded-lg border border-line-strong/60 bg-surface p-1 shadow-[0_24px_60px_-24px_rgb(0_0_0/90%)]"
           >
             {options.map((option, index) => {
               const selected = option.value === value
@@ -315,9 +315,9 @@ export function Select({
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => choose(option)}
                   className={cn(
-                    'flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-sm transition-colors duration-150',
+                    'flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors duration-150',
                     option.disabled
-                      ? 'cursor-not-allowed text-ink-faint opacity-50'
+                      ? 'cursor-not-allowed text-ink-faint opacity-60'
                       : cn(
                           'cursor-pointer text-ink-dim hover:bg-white/[0.06] hover:text-ink',
                           active && 'bg-white/[0.06] text-ink',
@@ -358,8 +358,8 @@ export function Select({
         }}
         onKeyDown={handleKeyDown}
         className={cn(
-          'flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-line bg-black/25 px-3 text-left text-sm text-ink',
-          'transition-colors duration-200 outline-none hover:border-line-strong focus:border-focus/70 focus:bg-black/35',
+          'flex h-9 w-full items-center justify-between gap-2 rounded-md border border-line bg-surface-2 px-3 text-left text-sm text-ink',
+          'transition-colors duration-150 outline-none hover:border-line-strong focus:border-focus focus:ring-2 focus:ring-focus/25',
           'disabled:cursor-not-allowed disabled:opacity-40',
           className,
         )}

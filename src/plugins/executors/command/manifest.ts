@@ -35,7 +35,7 @@ export const commandManifest: PluginManifest = {
       label: '参数模板',
       type: 'text',
       default: '',
-      help: 'JSON 数组文本，每项一个 argv 元素，如 ["--print","{prompt}"]；可用占位符 {model}/{effort}/{cwd}/{context}/{prompt}；不含 {prompt} 时提示词走 stdin',
+      help: 'JSON 数组文本，每项一个 argv 元素，如 ["--print","{prompt}"]；可用占位符 {model}/{effort}/{cwd}/{context}/{prompt}；不含 {prompt} 时提示词走 stdin；Windows .cmd/.bat 不支持 {prompt}（命令行会被 cmd.exe 重新解析），提示词只能走 stdin',
     },
   ],
 }

@@ -4,8 +4,9 @@
  * 安全约定：
  * - 提示词只能作为**独立 argv 元素**（模板含 `{prompt}` 时）或走 stdin；
  *   绝不拼进任何命令字符串，也不经过 shell。
- * - Windows 的 `.cmd/.bat` 固定包装成 `cmd.exe /c <脚本> <参数...>`，`shell:false`，
- *   参数不会被 shell 二次解释。
+ * - Windows 的 `.cmd/.bat` 固定包装成 `cmd.exe /c <脚本> <参数...>`，`shell:false`；
+ *   `cmd.exe` 会重新解析命令行，因此批处理脚本**禁止**用 `{prompt}` 传提示词
+ *   （BatBadBut / CVE-2024-27980 类别），提示词只能走 stdin。
  * - 不抛异常：模板非法、解析不到可执行文件、spawn 抛错、非零退出、超时、取消
  *   都归一成回执。
  */
@@ -22,6 +23,12 @@ const DEFAULT_TIMEOUT_MS = 30 * 60_000
 const STDERR_TAIL_LIMIT = 4_000
 /** Windows 命令脚本后缀：需要固定包装（大小写不敏感） */
 const CMD_SCRIPT_RE = /\.(cmd|bat)$/i
+/**
+ * 批处理脚本不接受 `{prompt}`：`cmd.exe` 不遵循 MSVCRT 引号规则，会重新解析命令行，
+ * 提示词里的 `& | > ^ " %VAR%` 可能被二次解释（BatBadBut / CVE-2024-27980 类别）。
+ */
+const BATCH_PROMPT_UNSUPPORTED =
+  'Windows .cmd/.bat 不能用 {prompt} 传提示词（cmd.exe 会重新解析参数）；请从参数模板移除 {prompt}，提示词将经 stdin 传入'
 /**
  * Windows 路径判据：盘符路径或 UNC。
  * 插件拿不到 `process.platform`，只用 resolve 返回的绝对路径判断平台形态即可。
@@ -126,11 +133,20 @@ export async function executeCommandRun(
   }
   const { args, promptInArgs } = expandArgs(template, vars)
   const command = resolved.path
+  // 安全：批处理脚本经 cmd.exe 执行时，argv 仍会被 cmd.exe 重新解析；提示词只允许走 stdin。
+  if (isWindowsCommandScript(command) && promptInArgs) {
+    return report({
+      status: 'failed',
+      output: '',
+      error: BATCH_PROMPT_UNSUPPORTED,
+      errorCode: 'run_failed',
+    })
+  }
 
   let child: Spawned
   try {
     child = isWindowsCommandScript(command)
-      ? // 固定包装：脚本路径与参数都作为 cmd.exe 的独立参数，不让 shell 重新解释
+      ? // 固定包装：脚本路径与参数都作为 cmd.exe 的独立参数（此时 argv 内不得有提示词）
         sdk.process.spawn('cmd.exe', ['/c', command, ...args], { cwd, env: {}, shell: false })
       : sdk.process.spawn(command, args, { cwd, env: {}, shell: false })
   } catch (error) {

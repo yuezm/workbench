@@ -62,7 +62,11 @@ const {
   safeStorageMock,
 } = vi.hoisted(() => {
   interface WindowMock {
-    webContents: { send: ReturnType<typeof vi.fn>; setWindowOpenHandler: ReturnType<typeof vi.fn> }
+    webContents: {
+      send: ReturnType<typeof vi.fn>
+      on: ReturnType<typeof vi.fn>
+      setWindowOpenHandler: ReturnType<typeof vi.fn>
+    }
     on: ReturnType<typeof vi.fn>
     show: ReturnType<typeof vi.fn>
     hide: ReturnType<typeof vi.fn>
@@ -73,7 +77,7 @@ const {
   const windows: WindowMock[] = []
   class BrowserWindowMock {
     static getAllWindows = vi.fn((): WindowMock[] => windows)
-    webContents = { send: vi.fn(), setWindowOpenHandler: vi.fn() }
+    webContents = { send: vi.fn(), on: vi.fn(), setWindowOpenHandler: vi.fn() }
     on = vi.fn()
     show = vi.fn()
     hide = vi.fn()

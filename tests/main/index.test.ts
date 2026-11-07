@@ -13,7 +13,20 @@ const mocks = vi.hoisted(() => {
   const windows: unknown[] = []
   class BrowserWindowMock {
     static getAllWindows = (): unknown[] => windows
-    webContents = { send: (): void => undefined, setWindowOpenHandler: (): void => undefined }
+    navigationHandlers: Array<(event: { preventDefault(): void }, url: string) => void> = []
+    windowOpenHandler: ((details: { url: string }) => { action: string }) | null = null
+    webContents = {
+      send: (): void => undefined,
+      on: (
+        event: string,
+        handler: (event: { preventDefault(): void }, url: string) => void,
+      ): void => {
+        if (event === 'will-navigate') this.navigationHandlers.push(handler)
+      },
+      setWindowOpenHandler: (handler: (details: { url: string }) => { action: string }): void => {
+        this.windowOpenHandler = handler
+      },
+    }
     on = (): void => undefined
     show = (): void => undefined
     hide = (): void => undefined
@@ -125,7 +138,7 @@ const mocks = vi.hoisted(() => {
       encryptString: (): Buffer => Buffer.from('cipher'),
       decryptString: (): string => 'plain',
     },
-    shellMock: { openExternal: (): void => undefined },
+    shellMock: { openExternal: vi.fn() },
     createFactFeedMock: vi.fn(() => feedMock),
     createCommandRouterMock: vi.fn((_deps: unknown) => routerMock),
     createChannelsMock: vi.fn(() => channelsMock),
@@ -283,5 +296,50 @@ describe('主进程入口装配补测', () => {
 
     expect(() => deps.hostView('run.approvals')).toThrow('运行不存在: ')
     expect(mocks.storeMock.query).toHaveBeenCalledWith('run.byId', { runId: '' })
+  })
+
+  it('窗口安全：导航只留在应用自身，外部链接仅 http/https 交给系统', async () => {
+    await loadEntry()
+    const win = mocks.windows[0] as {
+      navigationHandlers: Array<(event: { preventDefault(): void }, url: string) => void>
+      windowOpenHandler: ((details: { url: string }) => { action: string }) | null
+    }
+    expect(win.navigationHandlers).toHaveLength(1)
+    const navigate = win.navigationHandlers[0]
+
+    const allowed = { preventDefault: vi.fn() }
+    navigate(allowed, 'file:///app/renderer/index.html')
+    expect(allowed.preventDefault).not.toHaveBeenCalled()
+
+    const blocked = { preventDefault: vi.fn() }
+    navigate(blocked, 'https://evil.example/x')
+    expect(blocked.preventDefault).toHaveBeenCalledTimes(1)
+
+    const open = win.windowOpenHandler
+    expect(open).not.toBeNull()
+    expect(open?.({ url: 'https://example.com/doc' })).toEqual({ action: 'deny' })
+    expect(mocks.shellMock.openExternal).toHaveBeenCalledWith('https://example.com/doc')
+    expect(open?.({ url: 'javascript:alert(1)' })).toEqual({ action: 'deny' })
+    expect(open?.({ url: 'not a url' })).toEqual({ action: 'deny' })
+    expect(mocks.shellMock.openExternal).toHaveBeenCalledTimes(1)
+  })
+
+  it('dev 模式导航只放行 ELECTRON_RENDERER_URL', async () => {
+    process.env['ELECTRON_RENDERER_URL'] = 'http://127.0.0.1:5173'
+    try {
+      await loadEntry()
+      const win = mocks.windows[0] as {
+        navigationHandlers: Array<(event: { preventDefault(): void }, url: string) => void>
+      }
+      const allowed = { preventDefault: vi.fn() }
+      win.navigationHandlers[0](allowed, 'http://127.0.0.1:5173/#/x')
+      expect(allowed.preventDefault).not.toHaveBeenCalled()
+
+      const blocked = { preventDefault: vi.fn() }
+      win.navigationHandlers[0](blocked, 'https://evil.example')
+      expect(blocked.preventDefault).toHaveBeenCalledTimes(1)
+    } finally {
+      delete process.env['ELECTRON_RENDERER_URL']
+    }
   })
 })

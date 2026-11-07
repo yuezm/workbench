@@ -317,25 +317,39 @@ describe('executeCommandRun 成功路径', () => {
     expect((await running).status).toBe('succeeded')
   })
 
-  it('Windows .cmd（大小写不敏感）经 cmd.exe /c 固定包装，参数不被 shell 解释', async () => {
+  it('Windows .cmd（大小写不敏感）经 cmd.exe /c 固定包装，提示词走 stdin', async () => {
     const h = harness('C:\\Program Files\\nodejs\\agent-tool.CMD')
-    const prompt = 'hi; rm -rf / && echo x'
     const { running } = startRun(h, {
-      runtime: { argsTemplate: template(['run', '{prompt}']) },
-      turn: { prompt },
+      runtime: { argsTemplate: template(['run']) },
+      turn: { prompt: '只回复 OK' },
     })
 
     expect(h.calls[0].command).toBe('cmd.exe')
-    expect(h.calls[0].args).toEqual([
-      '/c',
-      'C:\\Program Files\\nodejs\\agent-tool.CMD',
-      'run',
-      prompt,
-    ])
+    expect(h.calls[0].args).toEqual(['/c', 'C:\\Program Files\\nodejs\\agent-tool.CMD', 'run'])
     expect(h.calls[0].options).toEqual({ cwd: 'C:/work', env: {}, shell: false })
+    expect(h.children[0].writes).toEqual(['只回复 OK'])
 
     h.children[0].close(0)
     expect((await running).status).toBe('succeeded')
+  })
+
+  it('Windows .cmd/.bat 禁止 {prompt}：直接失败且不 spawn（BatBadBut 防护）', async () => {
+    for (const resolvedPath of [
+      'C:\\Program Files\\nodejs\\agent-tool.CMD',
+      'C:\\tools\\agent.bat',
+    ]) {
+      const h = harness(resolvedPath)
+      const { running } = startRun(h, {
+        runtime: { argsTemplate: template(['--print', '{prompt}']) },
+        turn: { prompt: 'hi & calc' },
+      })
+
+      const receipt = await running
+      expect(receipt.status).toBe('failed')
+      expect(receipt.errorCode).toBe('run_failed')
+      expect(receipt.error).toContain('.cmd/.bat')
+      expect(h.calls).toEqual([])
+    }
   })
 
   it('非 Windows 路径的 .cmd 不包装（直接 spawn 解析结果）', async () => {

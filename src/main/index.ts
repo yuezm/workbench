@@ -87,6 +87,21 @@ interface CatalogEntry {
   external: ExternalPluginEntry | null
 }
 
+/** 只放行 http/https 的外部链接（`file:`、`javascript:` 等一律不交给系统浏览器）。 */
+function isExternalHttpUrl(url: string): boolean {
+  try {
+    const protocol = new URL(url).protocol
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/** 页面内导航只允许留在应用自身：dev 走 `ELECTRON_RENDERER_URL`，打包后走 `file://`。 */
+function isAllowedNavigation(url: string, devUrl: string | undefined): boolean {
+  return devUrl !== undefined && devUrl !== '' ? url.startsWith(devUrl) : url.startsWith('file://')
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1100,
@@ -96,7 +111,10 @@ function createWindow(): void {
     backgroundColor: '#16161e',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      // 渲染进程只经 preload 的三个动词访问内核：显式关掉 Node 集成，开启隔离与沙箱。
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
     },
   })
 
@@ -110,8 +128,13 @@ function createWindow(): void {
     }
   })
 
+  // 拦截页面跳转：只允许应用自身地址，避免被注入内容把窗口导航到外部页面。
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!isAllowedNavigation(url, process.env['ELECTRON_RENDERER_URL'])) event.preventDefault()
+  })
+
   win.webContents.setWindowOpenHandler((details) => {
-    void shell.openExternal(details.url)
+    if (isExternalHttpUrl(details.url)) void shell.openExternal(details.url)
     return { action: 'deny' }
   })
 

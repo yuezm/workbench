@@ -24,8 +24,8 @@ const STATUS_LABEL: Record<RunStatus, string> = {
 
 /** 运行状态配色：成功绿、失败红、进行中紫、取消灰 */
 const STATUS_TONE: Record<RunStatus, string> = {
-  queued: 'text-focus',
-  running: 'text-focus',
+  queued: 'text-focus-soft',
+  running: 'text-focus-soft',
   waiting: 'text-long',
   succeeded: 'text-short',
   failed: 'text-red-400',
@@ -69,7 +69,7 @@ function RunEventLine({ event }: { event: RunEvent }): ReactElement | null {
       )
     case 'tool_call':
       return (
-        <p className="rounded-md bg-white/[0.04] px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-faint">
+        <p className="rounded-md bg-surface-2 px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-dim">
           {['工具调用：' + (event.tool ?? '未知工具'), truncate(event.input ?? '', TOOL_TEXT_MAX)]
             .filter(Boolean)
             .join(' · ')}
@@ -79,7 +79,7 @@ function RunEventLine({ event }: { event: RunEvent }): ReactElement | null {
       return (
         <p
           className={cn(
-            'rounded-md bg-white/[0.04] px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-faint',
+            'rounded-md bg-surface-2 px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-dim',
             event.isError === true && 'text-red-300',
           )}
         >
@@ -132,7 +132,7 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
           <RunEventLine key={event.seq} event={event} />
         ))}
         {process.length > 0 && (
-          <details className="rounded-md bg-white/[0.02] px-2 py-1">
+          <details className="rounded-md bg-surface-2 px-2 py-1">
             <summary className="cursor-pointer text-[11px] text-ink-faint select-none">
               过程 · {process.length} 条（思考 / 工具调用与结果）
             </summary>
@@ -148,7 +148,7 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
   }
   if (run.output === '') return null
   return (
-    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-black/30 p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-ink-dim">
+    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-surface-2 p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-ink-dim">
       {run.output}
     </pre>
   )
@@ -195,9 +195,9 @@ function RunApprovals({ runId }: { runId: string }): ReactElement | null {
 /** 一轮运行的卡片：状态 / 时间 / 耗时 / 退出码 / 失败归类 / 用量 + 事件流 */
 function RunBlock({ run }: { run: Run }): ReactElement {
   return (
-    <div className="rounded-xl border border-line bg-white/[0.02] px-4 py-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
-        <span className={cn('rounded-full bg-white/[0.06] px-2 py-0.5', STATUS_TONE[run.status])}>
+    <div className="rounded-xl border border-line bg-surface px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-dim">
+        <span className={cn('rounded-sm bg-white/[0.06] px-2 py-0.5', STATUS_TONE[run.status])}>
           {STATUS_LABEL[run.status]}
         </span>
         <span className="tabular-nums">{run.startedAt ?? run.createdAt}</span>
@@ -227,9 +227,9 @@ function RunBlock({ run }: { run: Run }): ReactElement {
 /** 一条任务上下文 / 反馈：作者 + 时间 + 正文（只作资料） */
 function CommentBlock({ comment }: { comment: TaskComment }): ReactElement {
   return (
-    <div className="rounded-xl border border-line bg-white/[0.03] px-4 py-2.5">
-      <div className="flex items-center gap-2 text-[10px] text-ink-faint">
-        <span className="rounded-full bg-focus/15 px-1.5 py-0.5 text-focus">
+    <div className="rounded-xl border border-line bg-surface-2 px-4 py-2.5">
+      <div className="flex items-center gap-2 text-[11px] text-ink-faint">
+        <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-focus-soft">
           {comment.author === 'owner' ? '我' : '智能体'}
         </span>
         <span className="tabular-nums">{comment.createdAt}</span>

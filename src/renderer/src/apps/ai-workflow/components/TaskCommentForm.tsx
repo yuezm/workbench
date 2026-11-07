@@ -40,7 +40,7 @@ export function TaskCommentForm({
   return (
     <form
       aria-label="添加反馈"
-      className="flex flex-col gap-2 rounded-xl border border-line bg-white/[0.02] p-3"
+      className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3"
       onSubmit={onSubmit}
     >
       <textarea
@@ -84,7 +84,7 @@ export function TaskCommentForm({
         </Button>
       </div>
 
-      <p className="text-[11px] leading-relaxed text-ink-faint">
+      <p className="text-[11px] leading-relaxed text-ink-dim">
         {canRerun
           ? '反馈会作为提示词的「反馈记录」资料段；勾选后若当前没有运行中的轮次，会立刻再跑一轮。'
           : '当前阶段不交给智能体：反馈只记上下文，任务下次进入智能体阶段时带上。'}

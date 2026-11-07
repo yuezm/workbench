@@ -36,7 +36,7 @@ function NumberField({
         onChange={handle}
         inputMode="numeric"
         className={cn(
-          'h-10 rounded-xl border border-line bg-black/20 px-3 text-sm text-ink tabular-nums',
+          'h-10 rounded-xl border border-line bg-surface-2 px-3 text-sm text-ink tabular-nums',
           'transition-all duration-200 outline-none',
           'hover:border-line-strong',
           'focus:border-focus/60 focus:ring-2 focus:ring-focus/25',
@@ -52,8 +52,8 @@ export function SettingsPanel({ config, running, onChange }: SettingsPanelProps)
     <details className="group w-full max-w-md animate-rise [animation-delay:160ms]">
       <summary
         className={cn(
-          'flex cursor-pointer list-none items-center justify-between rounded-2xl',
-          'border border-line bg-white/[0.03] px-5 py-3 backdrop-blur-md',
+          'flex cursor-pointer list-none items-center justify-between rounded-xl',
+          'border border-line bg-surface px-5 py-3',
           'text-sm text-ink-dim transition-colors duration-200',
           'hover:bg-white/[0.05] hover:text-ink [&::-webkit-details-marker]:hidden',
         )}
@@ -91,7 +91,7 @@ export function SettingsPanel({ config, running, onChange }: SettingsPanelProps)
         </svg>
       </summary>
 
-      <div className="mt-3 rounded-2xl border border-line bg-white/[0.03] p-5 shadow-[0_16px_48px_-24px_rgb(0_0_0/60%)] backdrop-blur-md">
+      <div className="mt-3 rounded-xl border border-line bg-surface p-5 shadow-[0_16px_48px_-24px_rgb(0_0_0/60%)]">
         <div className="grid grid-cols-2 gap-4">
           <NumberField
             label={`专注（分钟）`}

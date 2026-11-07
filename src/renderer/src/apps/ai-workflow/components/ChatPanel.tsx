@@ -70,7 +70,7 @@ export function ChatPanel({
       {conversation !== null && (
         <header className="flex shrink-0 items-center gap-2 border-b border-line px-5 py-3">
           <h2 className="truncate text-sm font-medium text-ink">{conversation.title}</h2>
-          <span className="shrink-0 rounded-md bg-focus/15 px-1.5 py-0.5 text-xs text-focus">
+          <span className="shrink-0 rounded-md bg-focus/15 px-1.5 py-0.5 text-xs text-focus-soft">
             {agentName(conversation.agentId)}
           </span>
         </header>
@@ -93,7 +93,7 @@ export function ChatPanel({
                   <div
                     className={cn(
                       'max-w-[80%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap text-ink',
-                      mine ? 'bg-focus/15' : 'bg-white/[0.05]',
+                      mine ? 'bg-focus/15' : 'bg-surface-2',
                     )}
                   >
                     {message.content}
@@ -106,7 +106,7 @@ export function ChatPanel({
             })}
             {sending && (
               <div className="flex justify-start">
-                <div className="flex max-w-[80%] flex-col gap-1.5 rounded-xl bg-white/[0.05] px-3 py-2 text-sm text-ink">
+                <div className="flex max-w-[80%] flex-col gap-1.5 rounded-xl bg-surface-2 px-3 py-2 text-sm text-ink">
                   {streaming.thinking !== '' && (
                     <p className="text-[11px] leading-relaxed whitespace-pre-wrap text-ink-faint italic">
                       {streaming.thinking}
@@ -116,7 +116,7 @@ export function ChatPanel({
                     <p
                       key={`${tool.tool}-${index}`}
                       className={cn(
-                        'rounded-md bg-black/20 px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-faint',
+                        'rounded-md bg-surface-2 px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-faint',
                         tool.isError && 'text-red-300',
                       )}
                     >

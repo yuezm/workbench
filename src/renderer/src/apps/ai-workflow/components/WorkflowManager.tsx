@@ -111,7 +111,7 @@ export function WorkflowManager(): ReactElement {
                   <span className="flex items-center gap-2 text-sm font-medium text-ink">
                     {w.name}
                     {active && (
-                      <span className="rounded-full bg-focus/15 px-1.5 py-0.5 text-[11px] text-focus">
+                      <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-[11px] text-focus-soft">
                         当前
                       </span>
                     )}

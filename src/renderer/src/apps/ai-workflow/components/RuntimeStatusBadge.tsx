@@ -3,7 +3,7 @@ import type { RuntimeProbe } from '../../../../../protocol/entities'
 import { cn } from '../../../lib/cn'
 
 /** 健康 pill 的统一基座：小圆角、等宽数字（耗时对齐不跳动） */
-const pillCls = 'rounded-full px-2 py-0.5 text-[11px] tabular-nums'
+const pillCls = 'rounded-sm px-2 py-0.5 text-[11px] tabular-nums'
 
 export interface RuntimeStatusBadgeProps {
   /** 最近一次探测结论；null = 从未探测 */
@@ -29,7 +29,7 @@ export function RuntimeStatusBadge({
   onToggle,
 }: RuntimeStatusBadgeProps): ReactElement {
   if (testing) {
-    return <span className={cn(pillCls, 'bg-focus/15 text-focus')}>测试中…</span>
+    return <span className={cn(pillCls, 'bg-focus/15 text-focus-soft')}>测试中…</span>
   }
 
   if (probe === null) {

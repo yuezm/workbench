@@ -232,7 +232,7 @@ export function RuntimeManager(): ReactElement {
       {/* 自动识别本机已安装的运行时 */}
       <Panel className="flex animate-rise flex-col gap-3 p-5">
         <div className="flex items-center gap-2">
-          <ScanIcon className="text-focus" />
+          <ScanIcon className="text-focus-soft" />
           <h3 className="text-[13px] font-medium tracking-wide text-ink">已安装的运行时</h3>
           <span className={cn(badgeCls, 'ml-auto')}>{detected.length}</span>
           <Button type="button" variant="ghost" size="sm" disabled={detecting} onClick={rescan}>
@@ -253,7 +253,7 @@ export function RuntimeManager(): ReactElement {
                   key={d.command}
                   className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
                 >
-                  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
                     <TerminalIcon />
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -263,7 +263,7 @@ export function RuntimeManager(): ReactElement {
                     </span>
                   </span>
                   {added ? (
-                    <span className="rounded-full bg-white/[0.07] px-2 py-1 text-[11px] text-ink-faint">
+                    <span className="rounded-sm bg-white/[0.07] px-2 py-1 text-[11px] text-ink-faint">
                       已添加
                     </span>
                   ) : d.supported ? (
@@ -338,14 +338,14 @@ export function RuntimeManager(): ReactElement {
                 key={r.id}
                 className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
               >
-                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
                   <TerminalIcon />
                 </span>
 
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-medium text-ink">{r.name}</span>
-                    <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] tracking-wide text-ink-faint">
+                    <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] tracking-wide text-ink-faint">
                       {executorLabel(r.executorKey)}
                     </span>
                     <RuntimeStatusBadge
@@ -358,7 +358,7 @@ export function RuntimeManager(): ReactElement {
                       <span className="text-[11px] text-ink-faint">CLI v{probe.cliVersion}</span>
                     )}
                     {!r.enabled && (
-                      <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+                      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
                         已停用
                       </span>
                     )}

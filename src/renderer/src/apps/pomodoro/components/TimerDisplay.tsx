@@ -14,10 +14,30 @@ export function formatRemaining(remainingMs: number): string {
 
 /** 各阶段的视觉主题：色点 / 渐变端色 */
 const PHASE_THEME: Record<Phase, { text: string; dot: string; from: string; to: string }> = {
-  idle: { text: 'text-focus', dot: 'bg-focus', from: '#8b7cf7', to: '#6d5ce8' },
-  focus: { text: 'text-focus', dot: 'bg-focus', from: '#8b7cf7', to: '#6d5ce8' },
-  shortBreak: { text: 'text-short', dot: 'bg-short', from: '#2dd4a8', to: '#14b8a6' },
-  longBreak: { text: 'text-long', dot: 'bg-long', from: '#4aa8f7', to: '#3b82f6' },
+  idle: {
+    text: 'text-focus-soft',
+    dot: 'bg-focus',
+    from: 'var(--color-focus-soft)',
+    to: 'var(--color-focus)',
+  },
+  focus: {
+    text: 'text-focus-soft',
+    dot: 'bg-focus',
+    from: 'var(--color-focus-soft)',
+    to: 'var(--color-focus)',
+  },
+  shortBreak: {
+    text: 'text-short',
+    dot: 'bg-short',
+    from: 'var(--color-short)',
+    to: 'var(--color-short-deep)',
+  },
+  longBreak: {
+    text: 'text-long',
+    dot: 'bg-long',
+    from: 'var(--color-long)',
+    to: 'var(--color-long-deep)',
+  },
 }
 
 const RING_SIZE = 296
@@ -90,8 +110,8 @@ export function TimerDisplay({
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
         <span
           className={cn(
-            'inline-flex items-center gap-2 rounded-full border border-line bg-white/[0.03] px-4 py-1.5',
-            'text-xs tracking-[0.3em] text-ink-dim backdrop-blur-sm',
+            'inline-flex items-center gap-2 rounded-md border border-line bg-surface-2 px-4 py-1.5',
+            'text-xs tracking-[0.3em] text-ink-dim',
           )}
         >
           <i className={cn('size-1.5 rounded-full', theme.dot)} aria-hidden="true" />

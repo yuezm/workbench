@@ -173,7 +173,7 @@ function NotesSection({
         <ul className="max-h-56 divide-y divide-line overflow-auto rounded-xl border border-line">
           {thread.notes.map((note) => (
             <li key={note.id} className="px-3 py-2">
-              <div className="flex items-center gap-2 text-[10px] text-ink-faint">
+              <div className="flex items-center gap-2 text-[11px] text-ink-faint">
                 <span>{note.author === 'owner' ? '我' : '智能体'}</span>
                 <span className="tabular-nums">{note.at}</span>
               </div>
@@ -365,19 +365,19 @@ function ThreadContent({
     <>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-[11px] sm:grid-cols-4">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-[10px] tracking-wide text-ink-faint">来源</dt>
+          <dt className="text-[11px] tracking-wide text-ink-dim">来源</dt>
           <dd className="truncate font-mono text-ink-dim">{thread.source}</dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-[10px] tracking-wide text-ink-faint">外部入口</dt>
+          <dt className="text-[11px] tracking-wide text-ink-dim">外部入口</dt>
           <dd className="truncate font-mono text-ink-dim">{thread.externalRef ?? '未绑定'}</dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-[10px] tracking-wide text-ink-faint">状态</dt>
+          <dt className="text-[11px] tracking-wide text-ink-dim">状态</dt>
           <dd className="text-ink-dim">{closed ? '已归档' : '进行中'}</dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-[10px] tracking-wide text-ink-faint">并发</dt>
+          <dt className="text-[11px] tracking-wide text-ink-dim">并发</dt>
           <dd className="text-ink-dim tabular-nums">{thread.concurrency}</dd>
         </div>
       </dl>

@@ -107,10 +107,7 @@ export function ApprovalBar(): ReactElement | null {
       )}
 
       {notices.length > 0 && (
-        <section
-          aria-label="通知"
-          className="rounded-xl border border-line bg-white/[0.03] px-3 py-2"
-        >
+        <section aria-label="通知" className="rounded-xl border border-line bg-surface px-3 py-2">
           <SectionHead label="通知" count={notices.length} tone="text-ink-faint" />
           <ul className="mt-1.5 flex flex-col gap-2">
             {notices.map((card) => (
@@ -162,7 +159,7 @@ function SectionHead({
   return (
     <div className="flex items-center gap-2">
       <span className={cn('text-[11px] font-medium tracking-wide', tone)}>{label}</span>
-      <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+      <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
         {count}
       </span>
     </div>

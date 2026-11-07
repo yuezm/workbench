@@ -96,7 +96,7 @@ export function AgentManager(): ReactElement {
       {/* 已配置智能体 */}
       <Panel className="flex animate-rise flex-col gap-3 p-5">
         <div className="flex items-center gap-2">
-          <RobotIcon className="text-focus" />
+          <RobotIcon className="text-focus-soft" />
           <h3 className="text-[13px] font-medium tracking-wide text-ink">已配置智能体</h3>
           <span className={cn(badgeCls)}>{agents.length}</span>
           <Button
@@ -134,7 +134,7 @@ export function AgentManager(): ReactElement {
                 key={a.id}
                 className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
               >
-                <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-white/[0.06] text-ink-dim">
+                <span className="grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
                   <RobotIcon />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">

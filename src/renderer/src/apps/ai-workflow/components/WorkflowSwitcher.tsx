@@ -24,7 +24,7 @@ export function WorkflowSwitcher({
   const active = workflows.find((w) => w.id === activeId)
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center gap-2 rounded-xl border border-line bg-black/25 py-1 pr-1.5 pl-3 backdrop-blur-sm transition-colors duration-200 hover:border-line-strong">
+      <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 py-1 pr-1.5 pl-3 transition-colors duration-150 hover:border-line-strong">
         <svg
           width="14"
           height="14"
@@ -53,7 +53,7 @@ export function WorkflowSwitcher({
           className="h-8 w-auto max-w-56 border-0 bg-transparent px-1 hover:border-0 focus:bg-transparent"
         />
         {active && (
-          <span className="rounded-full bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+          <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
             {active.stages.length} 阶段
           </span>
         )}

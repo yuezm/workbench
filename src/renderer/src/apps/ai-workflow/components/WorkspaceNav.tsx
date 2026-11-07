@@ -30,7 +30,7 @@ const ITEMS: NavItem[] = [
 export function WorkspaceNav({ value, onChange, children }: WorkspaceNavProps): ReactElement {
   return (
     <nav aria-label="工作台栏目" className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="grid shrink-0 grid-cols-2 gap-1 rounded-xl bg-white/[0.04] p-1">
+      <div className="grid shrink-0 grid-cols-2 gap-1 rounded-lg bg-surface-2 p-1">
         {ITEMS.map((item) => {
           const active = item.value === value
           return (
@@ -39,11 +39,11 @@ export function WorkspaceNav({ value, onChange, children }: WorkspaceNavProps): 
               type="button"
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-[13px] font-medium',
-                'transition-colors duration-200 outline-none',
+                'flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] font-medium',
+                'transition-colors duration-150 outline-none',
                 'focus-visible:ring-2 focus-visible:ring-focus/60',
                 active
-                  ? 'bg-white/[0.07] text-ink shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'
+                  ? 'bg-surface-3 text-ink shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'
                   : 'text-ink-dim hover:bg-white/[0.04] hover:text-ink',
               )}
               onClick={() => onChange(item.value)}
@@ -52,7 +52,7 @@ export function WorkspaceNav({ value, onChange, children }: WorkspaceNavProps): 
                 aria-hidden="true"
                 className={cn(
                   'transition-colors duration-200',
-                  active ? 'text-focus' : 'text-ink-faint',
+                  active ? 'text-focus-soft' : 'text-ink-faint',
                 )}
               >
                 <svg

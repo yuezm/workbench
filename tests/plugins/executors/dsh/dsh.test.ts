@@ -1401,3 +1401,38 @@ describe('回执块解析（M4）', () => {
     expect(receipt.events).toBeUndefined()
   })
 })
+
+describe('启动失败的兜底文案（spawn 返回空）', () => {
+  it('sdk.process.spawn 返回空子进程、无 error 文案：回执走 spawn_failed + 「启动失败」', async () => {
+    // 宿主缺陷：resolve 命中但 spawn 没给进程对象；startProcess 返回 { process: undefined }
+    const spawn: SpawnFn = () => undefined as unknown as Spawned
+    const h = harness()
+    const { running, events } = startRun(h, { sdk: { spawn } })
+
+    const receipt = await running
+
+    expect(receipt.status).toBe('failed')
+    expect(receipt.errorCode).toBe('spawn_failed')
+    expect(receipt.error).toBe('启动失败')
+    expect(events).toEqual([])
+  })
+
+  it('宿主未提供默认 cwd 且 turn.cwd 为空：execute 帧省略 cwd（不写入 undefined 字段）', async () => {
+    const h = harness()
+    const base = fakeSdk({ spawn: h.spawn, killTree: h.killTree })
+    const ctx: ExecutorContext = {
+      runtime: runtime({ workdir: null }),
+      sdk: { ...base, paths: { sessionRoot: null, cwd: undefined as unknown as string } },
+    }
+
+    const running = executeDshRun(ctx, turnOf({ cwd: '' }), { emit: () => undefined })
+    const child = h.children[0]
+
+    expect(child.frames()[0]).not.toHaveProperty('cwd')
+
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
+    child.close(0)
+    expect((await running).status).toBe('succeeded')
+  })
+})

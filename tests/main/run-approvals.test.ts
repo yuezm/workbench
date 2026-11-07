@@ -113,6 +113,22 @@ describe('main/run-approvals', () => {
       expect(parseApprovals(text).map((item) => item.id)).toEqual(['good'])
     })
 
+    it('含 approval/ 前缀但 JSON 非法的行：解析失败被跳过（不炸）', () => {
+      const text = ['{"type":"approval/asked", broken', ASKED('good')].join('\n')
+      expect(parseApprovals(text).map((item) => item.id)).toEqual(['good'])
+    })
+
+    it('approval/ 前缀下的未知子类型（非 asked/decided）：不计入记录', () => {
+      const text = ['{"type":"approval/other","data":{"id":"x"}}', ASKED('good')].join('\n')
+      expect(parseApprovals(text).map((item) => item.id)).toEqual(['good'])
+    })
+
+    it('decided 的 outcome 为空串：归一到 null（不是空字符串）', () => {
+      const items = parseApprovals([ASKED('a1'), DECIDED('a1', '')].join('\n'))
+      expect(items).toHaveLength(1)
+      expect(items[0]?.outcome).toBeNull()
+    })
+
     it('按时间升序，并且最多返回 MAX_APPROVALS 条', () => {
       const lines: string[] = []
       for (let i = 0; i < MAX_APPROVALS + 5; i += 1) {

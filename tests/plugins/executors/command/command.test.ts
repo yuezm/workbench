@@ -667,3 +667,22 @@ describe('回执块解析（M4）', () => {
     expect(receipt.events).toBeUndefined()
   })
 })
+
+describe('cwd 兜底（宿主未提供默认目录）', () => {
+  it('sdk.paths.cwd 缺失且 turn.cwd 为空：cwd 按空串兜底，不把 undefined 拼进模板', async () => {
+    const h = harness()
+    const base = fakeSdk({ spawn: h.spawn, killTree: h.killTree, resolve: h.resolve })
+    const ctx: ExecutorContext = {
+      runtime: runtime({ argsTemplate: template(['{cwd}']) }),
+      sdk: { ...base, paths: { sessionRoot: null, cwd: undefined as unknown as string } },
+    }
+
+    const running = executeCommandRun(ctx, turnOf({ cwd: '' }), { emit: () => undefined })
+
+    expect(h.calls[0].args).toEqual([''])
+    expect(h.calls[0].options.cwd).toBeUndefined()
+
+    h.children[0].close(0)
+    expect((await running).status).toBe('succeeded')
+  })
+})

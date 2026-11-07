@@ -521,4 +521,18 @@ describe('M7 覆盖补充：未配置/非 Error/头大小写', () => {
     expect(reply.status).toBe(200)
     expect(h.emitted).toHaveLength(1)
   })
+
+  it('头名匹配但值为 undefined：headerOf 按缺失处理（null 兜底）→ 401 且零事件', async () => {
+    const { net, emitted } = await start()
+    const rawBody = eventBody()
+    const headers = {
+      'X-Webhook-Timestamp': undefined as unknown as string,
+      'x-webhook-signature': fakeSignatureHeader(SECRET, TIMESTAMP, rawBody),
+    }
+
+    const reply = await net.request(postRequest(rawBody, headers))
+
+    expect(reply.status).toBe(401)
+    expect(emitted).toEqual([])
+  })
 })

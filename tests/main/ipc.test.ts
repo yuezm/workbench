@@ -57,7 +57,12 @@ describe('main 进程 IPC（M5 三动词 + 通知）', () => {
       .mock.calls.map(([name]) => name)
       .sort()
     expect(channels).toEqual(
-      [NOTIFY_CHANNEL, WORKBENCH_DISPATCH_CHANNEL, WORKBENCH_QUERY_CHANNEL, WORKBENCH_PICK_FOLDER_CHANNEL].sort(),
+      [
+        NOTIFY_CHANNEL,
+        WORKBENCH_DISPATCH_CHANNEL,
+        WORKBENCH_QUERY_CHANNEL,
+        WORKBENCH_PICK_FOLDER_CHANNEL,
+      ].sort(),
     )
   })
 
@@ -153,6 +158,14 @@ describe('main 进程 IPC（M5 三动词 + 通知）', () => {
     expect(dialogMock.showOpenDialog).toHaveBeenLastCalledWith(
       expect.objectContaining({ properties: ['openDirectory', 'createDirectory'] }),
     )
+  })
+
+  it('pickFolder：未取消但没有选中路径时返回 null', async () => {
+    dialogMock.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [] })
+    expect(await handlerFor(WORKBENCH_PICK_FOLDER_CHANNEL)({ sender: {} })).toEqual({
+      ok: true,
+      value: null,
+    })
   })
 
   it('pickFolder：有父窗口时挂在窗口上弹框（模态）', async () => {

@@ -240,7 +240,7 @@ describe('detect 汇总（D8）', () => {
     ])
   })
 
-  it('内置注册表的 detectAll：dsh 插件认领 dsh，其余已装 CLI 保持 supported:false', async () => {
+  it('内置注册表的 detectAll：dsh / claude 插件各自认领，其余已装 CLI 保持 supported:false', async () => {
     const host = fakeSdkHost({ dirs: ['/bin'], found: { dsh: '/bin/dsh', claude: '/bin/claude' } })
 
     const result = await detectAll(host)
@@ -249,10 +249,20 @@ describe('detect 汇总（D8）', () => {
       result.map((item) => [item.command, item.label, item.executorKey, item.supported]),
     ).toEqual([
       ['dsh', 'DeepSeek Harness', 'dsh', true],
-      ['claude', 'Claude Code', '', false],
+      ['claude', 'Claude Code', 'claude', true],
     ])
     // 汇总是只读的：不 spawn、不写库、不发 changed
     expect(() => host.process.spawn('x', [], { env: {} })).toThrow(/不允许启动子进程/)
+  })
+
+  it('本机装了但没有插件认领的 CLI 以 supported:false 出现（executorKey 为空）', async () => {
+    const host = fakeSdkHost({ dirs: ['/bin'], found: { codex: '/bin/codex' } })
+
+    const result = await detectAll(host)
+
+    expect(result.map((item) => [item.command, item.executorKey, item.supported])).toEqual([
+      ['codex', '', false],
+    ])
   })
 
   it('同一 command 被多个插件声明：按注册表顺序先到先得并记一条 warn', async () => {
@@ -354,6 +364,7 @@ describe('detect 汇总（D8）', () => {
     expect(CLI_CANDIDATES.map((item) => item.command)).toEqual([
       'dsh',
       'claude',
+      'hermes',
       'codex',
       'gemini',
       'opencode',

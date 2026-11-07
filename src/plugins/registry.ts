@@ -17,10 +17,14 @@ import { createSdk } from '../sdk'
 import { desktopChannel, desktopManifest } from './channels/desktop'
 import { inAppChannel, inAppManifest } from './channels/in-app'
 import { webhookChannel, webhookChannelManifest } from './channels/webhook-channel'
+import { claudePlugin } from './executors/claude'
+import { claudeManifest } from './executors/claude/manifest'
 import { commandPlugin } from './executors/command'
 import { commandManifest } from './executors/command/manifest'
 import { dshPlugin } from './executors/dsh'
 import { dshManifest } from './executors/dsh/manifest'
+import { hermesPlugin } from './executors/hermes'
+import { hermesManifest } from './executors/hermes/manifest'
 import { createRemoteExecutor } from './executors/remote'
 import { remoteManifest } from './executors/remote/manifest'
 import { webhookManifest, webhookSource } from './sources/webhook'
@@ -39,6 +43,20 @@ export interface ExecutorRegistryEntry {
 /** 内置执行器清单：顺序即 UI 与 detect 顺序 */
 export const executors: ReadonlyArray<ExecutorRegistryEntry> = [
   { key: dshManifest.id, label: dshManifest.name, manifest: dshManifest, plugin: dshPlugin },
+  {
+    // Claude Code：`--print --output-format stream-json` 逐行 JSON；提示词走 stdin
+    key: claudeManifest.id,
+    label: claudeManifest.name,
+    manifest: claudeManifest,
+    plugin: claudePlugin,
+  },
+  {
+    // Hermes Agent：`hermes acp`（ACP / JSON-RPC 2.0 over stdio），有审批往返
+    key: hermesManifest.id,
+    label: hermesManifest.name,
+    manifest: hermesManifest,
+    plugin: hermesPlugin,
+  },
   {
     key: commandManifest.id,
     label: commandManifest.name,

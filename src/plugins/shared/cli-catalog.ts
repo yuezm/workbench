@@ -19,6 +19,7 @@ export interface CliCandidate {
 export const CLI_CANDIDATES: ReadonlyArray<CliCandidate> = [
   { command: 'dsh', label: 'DeepSeek Harness' },
   { command: 'claude', label: 'Claude Code' },
+  { command: 'hermes', label: 'Hermes Agent' },
   { command: 'codex', label: 'Codex CLI' },
   { command: 'gemini', label: 'Gemini CLI' },
   { command: 'opencode', label: 'OpenCode' },

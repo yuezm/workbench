@@ -70,6 +70,18 @@ describe('ProjectDialog', () => {
     ])
   })
 
+  it('路径输入框与「选择文件夹」在同一行，且都不在 <label> 里（曾经按整块底边对齐而错位）', () => {
+    render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
+    const input = screen.getByLabelText('文件夹路径')
+    const button = screen.getByRole('button', { name: '选择文件夹' })
+
+    // 同一行容器：按钮曾经是 Field 的兄弟、跟「说明文字」的底边对齐，掉到输入框下面
+    expect(button.parentElement).toBe(input.parentElement)
+    // 按钮属于交互内容，不能嵌在 label 里（点它会连带触发标签行为）
+    expect(input.closest('label')).toBeNull()
+    expect(button.closest('label')).toBeNull()
+  })
+
   it('取消选择文件夹时不改动任何字段', async () => {
     stubBridge(() => Promise.resolve(null))
     const user = userEvent.setup()

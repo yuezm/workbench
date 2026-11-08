@@ -2,7 +2,7 @@ import { useState, type ReactElement } from 'react'
 import type { Project, ProjectInput } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
-import { Field } from '../../../components/ui/field'
+import { Field, labelCls } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
 import { Input, fieldCls } from '../../../components/ui/input'
 import { cn } from '../../../lib/cn'
@@ -153,30 +153,35 @@ export function ProjectDialog({
           />
         </Field>
 
+        {/*
+          路径这一格不用 `Field`：标签占第一行，输入框与「选择文件夹」同占第二行。
+          用 `Field` + `items-end` 时按钮的底边对齐的是「说明文字」的底边（Field 是整块
+          列布局），于是按钮掉到输入框下面、还比 h-9 的输入框矮 4px——看上去就是错位。
+        */}
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-end gap-2">
-            <Field
-              label="文件夹路径"
-              required
-              hint="项目的运行工作目录：从选择器挑，或粘贴绝对路径"
-              error={fieldErrors.path ?? null}
-              className="min-w-0 flex-1"
-            >
-              <Input
-                aria-label="文件夹路径"
-                className="font-mono text-body"
-                placeholder="D:\\Codes\\workbench"
-                value={path}
-                onChange={(e) => {
-                  setPath(e.target.value)
-                  clearError('path')
-                }}
-              />
-            </Field>
+          <label htmlFor="project-path" className={cn('flex items-center gap-1', labelCls)}>
+            文件夹路径
+            <span aria-hidden="true" className="text-danger">
+              *
+            </span>
+            <span className="sr-only">必填</span>
+          </label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="project-path"
+              aria-label="文件夹路径"
+              className="min-w-0 flex-1 font-mono text-body"
+              placeholder="D:\\Codes\\workbench"
+              value={path}
+              onChange={(e) => {
+                setPath(e.target.value)
+                clearError('path')
+              }}
+            />
+            {/* 默认 `md`（h-9）与输入框同高；`shrink-0` 让它不被长路径挤窄 */}
             <Button
               type="button"
               variant="secondary"
-              size="sm"
               className="shrink-0"
               disabled={busy}
               onClick={chooseFolder}
@@ -184,6 +189,14 @@ export function ProjectDialog({
               选择文件夹
             </Button>
           </div>
+          <span className="text-meta text-ink-faint">
+            项目的运行工作目录：从选择器挑，或粘贴绝对路径
+          </span>
+          {fieldErrors.path !== undefined && fieldErrors.path !== '' && (
+            <span role="alert" className="text-meta text-danger">
+              {fieldErrors.path}
+            </span>
+          )}
           <FormError message={pickerError} onDismiss={() => setPickerError(null)} />
         </div>
 

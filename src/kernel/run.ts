@@ -9,7 +9,7 @@
  * 是入队事实的 seq（由 `project` 在 `run.queued` 时回填），M1 存量导入的行没有
  * 各自的入队 seq，回退到 `createdAt` + `id` 保持稳定顺序。
  */
-import type { RunRow, RunTerminalStatus, Runtime } from '../protocol/entities'
+import type { GateVerdict, RunRow, RunTerminalStatus, Runtime } from '../protocol/entities'
 import type { Receipt, RunHostSettledInput } from '../protocol/inputs'
 import type { Actor, FactDraft, Id, Iso, Limits, View } from './types'
 
@@ -140,8 +140,13 @@ export function heartbeatFacts(
 
 // ---------- 回执 ----------
 
-/** 终态 run 行：`status` 已归一，后续按事实名分派。 */
-export type SettledRun = RunRow & { status: RunTerminalStatus }
+/**
+ * 终态 run 行：`status` 已归一，后续按事实名分派。
+ *
+ * `verdict` 是回执里的闸门判定（M11），只活在内存与 `run.*` 事实里，不进 runs 投影
+ * （投影列由 `RUN_FIELDS` 白名单决定）——它属于「这一轮的结论」，不是调度状态。
+ */
+export type SettledRun = RunRow & { status: RunTerminalStatus; verdict?: GateVerdict }
 
 /** 回执被拒原因（写进 `run.receipt_rejected.reason`，供 why 链审计）。 */
 export type ReceiptRejectionReason = 'terminal' | 'lease_mismatch' | 'turn_mismatch'
@@ -206,6 +211,7 @@ export function settledRun(run: RunRow, receipt: Receipt, now: Iso): SettledRun 
     leaseId: null,
     leaseUntil: null,
     deadlineAt: null,
+    ...(receipt.verdict === undefined ? {} : { verdict: receipt.verdict }),
   }
 }
 

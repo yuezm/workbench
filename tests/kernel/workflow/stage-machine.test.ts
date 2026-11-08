@@ -355,3 +355,144 @@ describe('stage-machine exitsForward（M7 交接触发判定）', () => {
     expect(exitsForward({ from: s0, to: s2, succeeded: false })).toBe(false)
   })
 })
+
+describe('stage-machine 闸门（M11）', () => {
+  /** 执行 → 自测（闸门，失败退回执行）→ 结束 */
+  const gateFlow = (over: Partial<WorkflowStage> = {}): WorkflowWithStages =>
+    sWf([
+      sStage({ id: 'exec', position: 0 }),
+      sStage({
+        id: 'test',
+        position: 1,
+        entryMode: 'agent',
+        agentId: 'ag1',
+        gate: { maxFails: 3, onPassStageId: 'done', onFailStageId: 'exec' },
+        ...over,
+      }),
+      sStage({ id: 'done', position: 2 }),
+    ])
+
+  it('通过 → 走 onPassStageId，预算清零', () => {
+    const r = moveTask(
+      { ...sTask('test'), gateFails: 2 },
+      { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'pass' },
+      gateFlow(),
+    )
+    expect(r.task.currentStageId).toBe('done')
+    expect(r.task.gateFails).toBe(0)
+    expect(r.gateExhausted).toBeUndefined()
+  })
+
+  it('通过且未配 onPass → 按默认下一阶段', () => {
+    const f = sWf([
+      sStage({ id: 'exec', position: 0 }),
+      sStage({
+        id: 'test',
+        position: 1,
+        entryMode: 'agent',
+        agentId: 'ag1',
+        gate: { maxFails: 2, onPassStageId: null, onFailStageId: 'exec' },
+      }),
+      sStage({ id: 'done', position: 2 }),
+    ])
+    const r = moveTask(sTask('test'), { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'pass' }, f)
+    expect(r.task.currentStageId).toBe('done')
+  })
+
+  it('未通过且未达上限 → 走 onFailStageId 并累计次数', () => {
+    const r = moveTask(
+      { ...sTask('test'), gateFails: 0 },
+      { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' },
+      gateFlow(),
+    )
+    expect(r.task.currentStageId).toBe('exec')
+    expect(r.task.gateFails).toBe(1)
+    expect(r.gateExhausted).toBeUndefined()
+  })
+
+  it('第 maxFails 次未通过 → 放行走通过分支，预算清零并标记 gateExhausted', () => {
+    const r = moveTask(
+      { ...sTask('test'), gateFails: 2 },
+      { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' },
+      gateFlow(),
+    )
+    expect(r.task.currentStageId).toBe('done')
+    expect(r.task.gateFails).toBe(0)
+    expect(r.gateExhausted).toBe(true)
+  })
+
+  it('未通过且未配失败去向 → 原地累计次数、不重建 run', () => {
+    const f = sWf([
+      sStage({ id: 'exec', position: 0 }),
+      sStage({
+        id: 'test',
+        position: 1,
+        entryMode: 'agent',
+        agentId: 'ag1',
+        gate: { maxFails: 3, onPassStageId: 'done', onFailStageId: null },
+      }),
+      sStage({ id: 'done', position: 2 }),
+    ])
+    const r = moveTask(sTask('test'), { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' }, f)
+    expect(r.task.currentStageId).toBe('test')
+    expect(r.task.gateFails).toBe(1)
+    expect(r.effects).toEqual([])
+  })
+
+  it('没给 verdict → 原地停住，不消耗预算也不放行', () => {
+    const before = { ...sTask('test'), gateFails: 1 }
+    const r = moveTask(before, { type: 'RUN_SUCCEEDED', runId: 'r' }, gateFlow())
+    expect(r.task).toEqual(before)
+    expect(r.effects).toEqual([])
+    expect(r.gateExhausted).toBeUndefined()
+  })
+
+  it('执行出错（RUN_FAILED）不消耗闸门预算，仍按 onReject 走', () => {
+    const f = sWf([
+      sStage({ id: 'exec', position: 0 }),
+      sStage({
+        id: 'test',
+        position: 1,
+        entryMode: 'agent',
+        agentId: 'ag1',
+        onRejectStageId: 'exec',
+        gate: { maxFails: 3, onPassStageId: 'done', onFailStageId: 'exec' },
+      }),
+      sStage({ id: 'done', position: 2 }),
+    ])
+    const r = moveTask({ ...sTask('test'), gateFails: 2 }, { type: 'RUN_FAILED', runId: 'r' }, f)
+    expect(r.task.currentStageId).toBe('exec')
+    expect(r.task.gateFails).toBe(2)
+  })
+
+  it('非闸门阶段带 verdict 也按普通成功流转', () => {
+    const r = moveTask(
+      sTask('exec'),
+      { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' },
+      gateFlow(),
+    )
+    expect(r.task.currentStageId).toBe('test')
+    expect(r.task.gateFails).toBe(0)
+  })
+
+  it('闸门阶段到达终点：放行后任务完成，预算清零', () => {
+    const f = sWf([
+      sStage({
+        id: 'test',
+        position: 0,
+        entryMode: 'agent',
+        agentId: 'ag1',
+        gate: { maxFails: 1, onPassStageId: null, onFailStageId: null },
+      }),
+    ])
+    const r = moveTask({ ...sTask('test'), gateFails: 0 }, { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' }, f)
+    expect(r.task.status).toBe('completed')
+    expect(r.task.gateFails).toBe(0)
+    expect(r.gateExhausted).toBe(true)
+  })
+
+  it('人工拖拽落位视为重新开始：预算清零', () => {
+    const r = moveTaskToStage({ ...sTask('exec'), gateFails: 3 }, 'test', gateFlow())
+    expect(r.task.gateFails).toBe(0)
+  })
+})

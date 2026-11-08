@@ -20,8 +20,8 @@ import { TASK_COMMENT_LIMITS } from '../protocol/task-comment'
  */
 const RECEIPT_BLOCK_HINT: readonly string[] = [
   '## 回执块（可选）',
-  '需要人拍板、留下不阻塞的通知、关闭旧卡片、约时间复查或派生事件时，在最终回复末尾输出最后一个 ```json 围栏代码块；对象含 ask/notices/resolves/later/events 任一键即按回执块处理，非法块整块忽略、不影响本轮结果。',
-  '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}]}',
+  '需要人拍板、留下不阻塞的通知、关闭旧卡片、约时间复查、派生事件或给出闸门判定时，在最终回复末尾输出最后一个 ```json 围栏代码块；对象含 ask/notices/resolves/later/events/verdict/checks 任一键即按回执块处理，非法块整块忽略、不影响本轮结果。',
+  '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}],"verdict":"pass|fail","checks":[{"cmd":"pnpm check","exitCode":0}]}',
   '上限：每个键最多 100 项、每张卡 options 最多 20 项；title ≤200 字、text ≤2000 字、summary ≤200 字。ask 出现即挂起等回答（全部阻塞卡答完才续接），later 仅在无 ask/notices 时生效。',
 ]
 
@@ -58,7 +58,7 @@ export const taskCommentsText = (comments: readonly TaskComment[]): string => {
 export const taskPrompt = (
   agent: Agent,
   task: Task,
-  stage: Pick<WorkflowStage, 'name' | 'instructions'> | null,
+  stage: Pick<WorkflowStage, 'name' | 'instructions' | 'gate'> | null,
   threadContext?: string | null,
   comments?: readonly TaskComment[],
 ): string =>
@@ -68,6 +68,7 @@ export const taskPrompt = (
     task.description,
     stage ? `# 阶段：${stage.name}` : '',
     stageInstructionsText(stage),
+    gateInstructionsText(stage),
     taskCommentsText(comments ?? []),
     threadContext ?? '',
     receiptBlockHint(),
@@ -84,6 +85,23 @@ export const stageInstructionsText = (
 ): string => {
   const body = stage?.instructions?.trim() ?? ''
   return body === '' ? '' : ['## 阶段要做什么', body].join('\n')
+}
+
+/**
+ * 闸门判定段（M11）：固定文案，只对闸门阶段出现。这段是**指令**，不能由人改写——
+ * 判定格式一旦走样，内核会把「没给结论」当成停住等人，任务会卡在闸门上。
+ */
+export const gateInstructionsText = (stage: Pick<WorkflowStage, 'gate'> | null): string => {
+  const gate = stage?.gate ?? null
+  if (gate === null) return ''
+  return [
+    '## 闸门判定（必须）',
+    '本阶段是闸门：做完之后必须对「过没过」下结论，在最终回复末尾的回执块里写 `verdict` 与 `checks`。',
+    '- `verdict`: "pass" = 确实达成；"fail" = 没达成（在正文里写清哪一条没过）',
+    '- `checks`: 实际执行的命令与退出码，至少一条；`verdict` 为 pass 时每条 `exitCode` 必须是 0',
+    `- 未通过会退回修复，最多允许 ${gate.maxFails} 次；不要为了让流程前进而填 pass`,
+    '- 缺少 verdict 或拿不出证据时，任务会停在闸门等人处理',
+  ].join('\n')
 }
 
 /** prompt 里的角色文案（与旧 chat.ts 一致） */

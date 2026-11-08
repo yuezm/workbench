@@ -49,6 +49,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   onChildrenSettled: null,
   spawnPolicy: null,
   instructions: '',
+  gate: null,
   ...over,
 })
 
@@ -119,6 +120,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   parentTaskId: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
+  gateFails: 0,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -810,6 +812,97 @@ describe('kernel/decide 工作流', () => {
       env(),
     )
     expect(unchanged.facts.some((fact) => fact.type === 'stage.updated')).toBe(false)
+  })
+
+  it('闸门：新增 / 改次数产 stage.updated，配置未变不产（M11）', () => {
+    const update = (gate: StageInput['gate']): ReturnType<typeof decide> =>
+      decide(
+        view({
+          agents: [agent()],
+          workflows: [workflow()],
+          stages: [stage({ id: 'st-1', entryMode: 'agent', agentId: 'ag-1' })],
+        }),
+        command({
+          type: 'workflow.update',
+          id: 'wf-1',
+          input: {
+            name: '研发',
+            stages: [
+              { id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', gate },
+            ],
+          },
+        }),
+        NOW,
+        env(),
+      )
+
+    // 从「不是闸门」变成闸门 → 落 stage.updated
+    const added = update({ maxFails: 3 })
+    const addedFacts = added.facts.filter((fact) => fact.type === 'stage.updated')
+    expect(addedFacts).toHaveLength(1)
+    expect((addedFacts[0]?.payload as { stage: WorkflowStage }).stage.gate).toEqual({
+      maxFails: 3,
+      onPassStageId: null,
+      onFailStageId: null,
+    })
+
+    // 次数从 3 改 5 → 同样落 stage.updated
+    const changed = decide(
+      view({
+        agents: [agent()],
+        workflows: [workflow()],
+        stages: [
+          stage({
+            id: 'st-1',
+            entryMode: 'agent',
+            agentId: 'ag-1',
+            gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+          }),
+        ],
+      }),
+      command({
+        type: 'workflow.update',
+        id: 'wf-1',
+        input: {
+          name: '研发',
+          stages: [
+            { id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', gate: { maxFails: 5 } },
+          ],
+        },
+      }),
+      NOW,
+      env(),
+    )
+    expect(changed.facts.some((fact) => fact.type === 'stage.updated')).toBe(true)
+
+    // 配置逐字段相同 → 不产 stage.updated
+    const same = decide(
+      view({
+        agents: [agent()],
+        workflows: [workflow()],
+        stages: [
+          stage({
+            id: 'st-1',
+            entryMode: 'agent',
+            agentId: 'ag-1',
+            gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+          }),
+        ],
+      }),
+      command({
+        type: 'workflow.update',
+        id: 'wf-1',
+        input: {
+          name: '研发',
+          stages: [
+            { id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', gate: { maxFails: 3 } },
+          ],
+        },
+      }),
+      NOW,
+      env(),
+    )
+    expect(same.facts.some((fact) => fact.type === 'stage.updated')).toBe(false)
   })
 
   it('workflow.update：按 id 差量——保留 id 更新、新阶段新 id、缺失旧阶段 tombstone、任务按 position 重挂', () => {

@@ -1,9 +1,10 @@
 /**
  * 运行命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
-import type { RunRow, Task } from '../../protocol/entities'
+import type { GateVerdict, RunRow, Task } from '../../protocol/entities'
 import type { EventReceivedPayload } from '../../protocol/facts'
 import type { Input, Receipt } from '../../protocol/inputs'
+import type { TaskComment } from '../../protocol/task-comment'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
 import type { SettledRun } from '../run'
 import { cardsFromReceipt, resumedRun } from '../cards'
@@ -82,12 +83,34 @@ function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): 
 }
 
 /**
+ * 闸门判定归一（M11）：`pass` 必须带齐证据（至少一条 `checks` 且退出码全为 0），
+ * 否则视为**没给结论**。不信任模型的自述——说通过却拿不出证据时任务原地停住等人，
+ * 既不放行也不消耗预算。`fail` 不需要证据（失败本身就是要修）。
+ */
+function gateVerdictOf(receipt: Receipt): GateVerdict | undefined {
+  const verdict = receipt.verdict
+  if (verdict === undefined) return undefined
+  if (verdict === 'fail') return 'fail'
+  const checks = receipt.checks ?? []
+  return checks.length > 0 && checks.every((check) => check.exitCode === 0) ? 'pass' : undefined
+}
+
+/** 闸门放行标记（M11）：预算耗尽后走通过分支时打在任务上的标签，看板可据此筛选。 */
+export const GATE_DEGRADED_LABEL = 'gate:degraded'
+
+function withLabel(labels: readonly string[], label: string): string[] {
+  return labels.includes(label) ? [...labels] : [...labels, label]
+}
+
+/**
  * 阶段 run 终态 → 阶段流转事实：成功进下一阶段（无下一阶段则完成），失败按
- * `on_reject` 打回；打回原地 / 任务已完成 / 阶段无效 / 任务已删时零事实，取消不推进。
+ * `onReject` 打回；闸门阶段（M11）按 `verdict` 分流，预算耗尽后放行并留痕。
+ * 打回原地 / 任务已完成 / 阶段无效 / 任务已删时零事实，取消不推进。
  */
 function stageTransitionFacts(
   view: View,
   run: SettledRun,
+  verdict: GateVerdict | undefined,
   now: Iso,
   env: Environment,
 ): FactDraft[] {
@@ -101,13 +124,32 @@ function stageTransitionFacts(
   if (!current) return []
   const succeeded = run.status === 'succeeded'
   const event = succeeded
-    ? ({ type: 'RUN_SUCCEEDED', runId: run.id } as const)
+    ? ({ type: 'RUN_SUCCEEDED', runId: run.id, verdict } as const)
     : ({ type: 'RUN_FAILED', runId: run.id } as const)
-  const next = moveTask(task, event, flow).task
+  const moved = moveTask(task, event, flow)
+  // 闸门未通过而离开本阶段不算「向前完成」：不触发跨工作流交接（放行才算）
+  const gateFailed = current.gate !== null && current.gate !== undefined && verdict === 'fail'
+  const forwarded = succeeded && !(gateFailed && moved.gateExhausted !== true)
+  const next = moved.gateExhausted
+    ? { ...moved.task, labels: withLabel(moved.task.labels, GATE_DEGRADED_LABEL) }
+    : moved.task
+  /** 预算耗尽放行时的留痕：任务评论（详情页可见，不改状态） */
+  const degradedFacts = (): FactDraft[] => {
+    if (moved.gateExhausted !== true) return []
+    const comment: TaskComment = {
+      id: env.nextId('task-comment'),
+      taskId: task.id,
+      author: 'agent',
+      text: `闸门「${current.name}」已连续 ${current.gate?.maxFails ?? 0} 次未通过，按配置放行（任务已打 ${GATE_DEGRADED_LABEL} 标签）。`,
+      createdAt: now,
+    }
+    return [hostDraft('task.comment_added', { comment }, now)]
+  }
   if (next.status === 'completed') {
     return [
-      ...handoffOnExit(view, task, current, null, succeeded, now, env, HOST_SCHEDULER),
+      ...handoffOnExit(view, task, current, null, forwarded, now, env, HOST_SCHEDULER),
       hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now),
+      ...degradedFacts(),
     ]
   }
   if (next.currentStageId !== null && next.currentStageId !== task.currentStageId) {
@@ -116,7 +158,7 @@ function stageTransitionFacts(
       // 目标阶段找不到属于脏投影：不当作「完成」，宁可不交接
       ...(target === undefined
         ? []
-        : handoffOnExit(view, task, current, target, succeeded, now, env, HOST_SCHEDULER)),
+        : handoffOnExit(view, task, current, target, forwarded, now, env, HOST_SCHEDULER)),
       hostDraft(
         'task.moved',
         {
@@ -126,9 +168,10 @@ function stageTransitionFacts(
         },
         now,
       ),
+      ...degradedFacts(),
     ]
   }
-  return []
+  return degradedFacts()
 }
 
 export function claimRun(
@@ -241,7 +284,7 @@ export function receiveRun(
   const settled = settledRun(run, input.receipt, now)
   facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
   if (run.purpose === 'stage') {
-    const transition = stageTransitionFacts(view, settled, now, env)
+    const transition = stageTransitionFacts(view, settled, gateVerdictOf(input.receipt), now, env)
     facts.push(...transition)
     // 进入效果：流转到目标阶段后若目标阶段是 agent 入口，立刻入队下一轮（形成链条）
     for (const fact of transition) {

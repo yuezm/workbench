@@ -9,6 +9,7 @@ import type { TaskComment } from '../../src/protocol/task-comment'
 import {
   answerPrompt,
   chatPrompt,
+  gateInstructionsText,
   laterPrompt,
   receiptBlockHint,
   stageInstructionsText,
@@ -133,13 +134,16 @@ describe('kernel/prompt chatPrompt', () => {
 })
 
 describe('kernel/prompt 回执块说明', () => {
-  it('固定文本：五键与上限齐全，重复调用同文本', () => {
+  it('固定文本：七键与上限齐全，重复调用同文本', () => {
     const hint = receiptBlockHint()
     expect(hint).toBe(HINT)
-    expect(hint).toContain('ask/notices/resolves/later/events')
+    expect(hint).toContain('ask/notices/resolves/later/events/verdict/checks')
     expect(hint).toContain('100')
     expect(hint).toContain('options 最多 20 项')
     expect(hint).toContain('summary ≤200')
+    // M11：闸门判定键与证据示例都在文案里（缺了模型输出会被整块忽略）
+    expect(hint).toContain('"verdict":"pass|fail"')
+    expect(hint).toContain('"checks":[{"cmd":"pnpm check","exitCode":0}]')
     // 固定文案不随调用变化（同输入同文本）
     expect(receiptBlockHint()).toBe(hint)
     // 短文案：含标题与 JSON 示例在内不超过 6 行
@@ -384,5 +388,58 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     expect(stageInstructionsText({ instructions: '第一条\n第二条' })).toBe(
       '## 阶段要做什么\n第一条\n第二条',
     )
+  })
+})
+
+describe('kernel/prompt 闸门判定段（M11）', () => {
+  const gateTask: Task = {
+    id: 't-1',
+    title: 'T',
+    description: 'd',
+    workflowId: 'wf-1',
+    projectId: null,
+    currentStageId: 'st-1',
+    status: 'active',
+    origin: 'manual',
+    ruleId: null,
+    externalRef: null,
+    labels: [],
+    threadId: null,
+    parentTaskId: null,
+    handoffFromTaskId: null,
+    handoffFromStageId: null,
+    gateFails: 0,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  }
+
+  it('非闸门阶段不产段', () => {
+    expect(gateInstructionsText(null)).toBe('')
+    expect(gateInstructionsText({ gate: null })).toBe('')
+    expect(gateInstructionsText({})).toBe('')
+  })
+
+  it('闸门阶段产固定指令段：判定键、证据要求与次数预算', () => {
+    const text = gateInstructionsText({
+      gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+    })
+    expect(text.split('\n')[0]).toBe('## 闸门判定（必须）')
+    expect(text).toContain('verdict')
+    expect(text).toContain('checks')
+    expect(text).toContain('最多允许 3 次')
+  })
+
+  it('taskPrompt：闸门段紧跟阶段说明，位于资料段与回执块之前', () => {
+    const text = taskPrompt(agent(), gateTask, {
+      name: '自测',
+      instructions: '跑测试',
+      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+    })
+    const stageIndex = text.indexOf('## 阶段要做什么')
+    const gateIndex = text.indexOf('## 闸门判定（必须）')
+    expect(stageIndex).toBeGreaterThan(0)
+    expect(gateIndex).toBeGreaterThan(stageIndex)
+    expect(text.indexOf('## 回执块（可选）')).toBeGreaterThan(gateIndex)
+    expect(text).toContain('最多允许 2 次')
   })
 })

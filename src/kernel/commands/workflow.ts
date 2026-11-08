@@ -1,7 +1,7 @@
 /**
  * 工作流命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
-import type { StageInput, Workflow, WorkflowStage } from '../../protocol/entities'
+import type { GateConfig, StageInput, Workflow, WorkflowStage } from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
 import { validateStageHandoffs } from '../handoff'
@@ -27,6 +27,14 @@ function stageRow(workflowId: Id, ids: Id[], stage: StageInput, position: number
     spawnPolicy: stage.spawnPolicy ?? null,
     // M9：阶段要干什么，去首尾空白后存；空串表示没写
     instructions: stage.instructions?.trim() ?? '',
+    // M11：闸门按 id 直存（下标已由 `validateStageSet` 保证在范围内）
+    gate: stage.gate
+      ? {
+          maxFails: stage.gate.maxFails,
+          onPassStageId: indexTarget(ids, stage.gate.onPassIndex),
+          onFailStageId: indexTarget(ids, stage.gate.onFailIndex),
+        }
+      : null,
   }
 }
 
@@ -34,6 +42,18 @@ function stageRow(workflowId: Id, ids: Id[], stage: StageInput, position: number
 function indexTarget(ids: Id[], index: number | null | undefined): Id | null {
   if (index === null || index === undefined) return null
   return ids[index] ?? null
+}
+
+/** 闸门深比较（M11）：漏比较会让「改了闸门配置保存无效」。缺省与 null 视为同值。 */
+function sameGate(a: GateConfig | null | undefined, b: GateConfig | null | undefined): boolean {
+  const left = a ?? null
+  const right = b ?? null
+  if (left === null || right === null) return left === right
+  return (
+    left.maxFails === right.maxFails &&
+    left.onPassStageId === right.onPassStageId &&
+    left.onFailStageId === right.onFailStageId
+  )
 }
 
 function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
@@ -54,7 +74,9 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     (a.onChildrenSettled ?? null) === (b.onChildrenSettled ?? null) &&
     (a.spawnPolicy ?? null) === (b.spawnPolicy ?? null) &&
     // M9：阶段要干什么（缺省与空串视为同值）
-    (a.instructions ?? '') === (b.instructions ?? '')
+    (a.instructions ?? '') === (b.instructions ?? '') &&
+    // M11：闸门三列一变就要落 stage.updated
+    sameGate(a.gate, b.gate)
   )
 }
 

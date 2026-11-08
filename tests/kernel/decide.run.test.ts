@@ -884,7 +884,7 @@ describe('kernel/decide run.receipt 回执', () => {
         actor: HOST,
         at: NOW,
         payload: {
-          task: { ...current, currentStageId: 'st-2', updatedAt: NOW },
+          task: { ...current, currentStageId: 'st-2', updatedAt: NOW, gateFails: 0 },
           from: 'st-1',
           to: 'st-2',
         },
@@ -910,7 +910,7 @@ describe('kernel/decide run.receipt 回执', () => {
       type: 'task.completed',
       actor: HOST,
       at: NOW,
-      payload: { task: { ...current, status: 'completed', updatedAt: NOW } },
+      payload: { task: { ...current, status: 'completed', updatedAt: NOW, gateFails: 0 } },
     })
   })
 
@@ -968,7 +968,7 @@ describe('kernel/decide run.receipt 回执', () => {
       actor: HOST,
       at: NOW,
       payload: {
-        task: { ...current, currentStageId: 'st-1', updatedAt: NOW },
+        task: { ...current, currentStageId: 'st-1', updatedAt: NOW, gateFails: 0 },
         from: 'st-2',
         to: 'st-1',
       },
@@ -1447,6 +1447,71 @@ describe('kernel/decide 对话输入（T14a 已实现，不再 unsupported）', 
     ).toEqual({
       facts: [],
       reject: { code: 'not_found', message: '智能体不存在: ag-404' },
+    })
+  })
+})
+
+describe('kernel/decide 闸门流转（M11）', () => {
+  const gateStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({
+      id: 'st-2',
+      position: 1,
+      name: '自测',
+      gate: { maxFails: 2, onPassStageId: 'st-3', onFailStageId: 'st-1' },
+      ...over,
+    })
+
+  const gateView = (taskOver: Partial<Task> = {}): View =>
+    view({
+      runs: [running()],
+      workflows: [{ id: 'wf-1', name: '研发', description: '', createdAt: CREATED }],
+      stages: [stage({ id: 'st-1', position: 0 }), gateStage(), stage({ id: 'st-3', position: 2 })],
+      tasks: [task({ currentStageId: 'st-2', ...taskOver })],
+    })
+
+  it('pass 且证据齐全 → 走通过分支', () => {
+    const decision = receive(
+      gateView(),
+      'run-1',
+      receipt({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0 }] }),
+    )
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
+  })
+
+  it('说 pass 但证据里有非 0 退出码 → 视为没结论，原地不动', () => {
+    const decision = receive(
+      gateView(),
+      'run-1',
+      receipt({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 1 }] }),
+    )
+    expect(
+      decision.facts.some((fact) => fact.type === 'task.moved' || fact.type === 'task.completed'),
+    ).toBe(false)
+  })
+
+  it('说 pass 但拿不出证据 → 视为没结论', () => {
+    const decision = receive(gateView(), 'run-1', receipt({ verdict: 'pass' }))
+    expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
+  })
+
+  it('fail 未达上限 → 走未通过分支并累计次数', () => {
+    const decision = receive(gateView(), 'run-1', receipt({ verdict: 'fail' }))
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-1' })
+    expect((moved?.payload as { task: Task }).task.gateFails).toBe(1)
+  })
+
+  it('fail 达上限 → 放行、打 gate:degraded 标签、记一条反馈', () => {
+    const decision = receive(gateView({ gateFails: 1 }), 'run-1', receipt({ verdict: 'fail' }))
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    const movedTask = (moved?.payload as { task: Task }).task
+    expect(movedTask.currentStageId).toBe('st-3')
+    expect(movedTask.labels).toContain('gate:degraded')
+    expect(movedTask.gateFails).toBe(0)
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect(comment?.payload).toMatchObject({
+      comment: { taskId: 't-1', author: 'agent' },
     })
   })
 })

@@ -69,13 +69,14 @@ describe('WorkflowManager', () => {
     expect(screen.getByLabelText('工作流名称')).toHaveValue('研发')
   })
 
-  it('空清单显示空态；新建工作流打开空表单', async () => {
+  it('空清单显示空态；新建工作流下拉里选「从空白创建」打开空表单', async () => {
     kernel.setView('workflows.all', undefined, [])
     const user = userEvent.setup()
     render(<WorkflowManager />)
 
     expect(await screen.findByText('暂无工作流')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    await user.click(screen.getByRole('menuitem', { name: '从空白创建工作流' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('工作流定义')
     expect(screen.getByLabelText('工作流名称')).toHaveValue('')
     await user.click(screen.getByRole('button', { name: '取消' }))
@@ -97,6 +98,7 @@ describe('WorkflowManager', () => {
     await screen.findByText('研发')
 
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    await user.click(screen.getByRole('menuitem', { name: '从空白创建工作流' }))
     await user.type(screen.getByLabelText('工作流名称'), '新建流')
     await user.click(screen.getByRole('button', { name: '保存' }))
 
@@ -119,6 +121,7 @@ describe('WorkflowManager', () => {
     await screen.findByText('研发')
 
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    await user.click(screen.getByRole('menuitem', { name: '从空白创建工作流' }))
     await user.type(screen.getByLabelText('工作流名称'), '没有返回值的流')
     await user.click(screen.getByRole('button', { name: '保存' }))
 
@@ -244,7 +247,27 @@ describe('WorkflowManager', () => {
     expect(await screen.findByText('暂无工作流')).toBeInTheDocument()
   })
 
-  it('SOP 模板：列出开箱模板，选中后预填到编辑器（模板弹窗关闭）', async () => {
+  it('新建工作流下拉：列出「从空白创建」与全部开箱模板（说明 + 阶段数）', async () => {
+    kernel.setView('workflows.all', undefined, [])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('暂无工作流')
+
+    await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    const menu = screen.getByRole('menu', { name: '新建工作流' })
+    expect(menu).toHaveTextContent('SOP 模板')
+    expect(screen.getByRole('menuitem', { name: '从空白创建工作流' })).toBeInTheDocument()
+    for (const template of SOP_TEMPLATES) {
+      const item = screen.getByRole('menuitem', { name: `使用模板 ${template.name}` })
+      expect(item).toHaveTextContent(template.description)
+      expect(item).toHaveTextContent(`${template.stages.length} 阶段`)
+    }
+    // 只是选建法，还没落库也没开编辑器
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(kernel.dispatched).toHaveLength(0)
+  })
+
+  it('下拉选中模板后预填到编辑器（下拉关闭）', async () => {
     const release = SOP_TEMPLATES.find((template) => template.id === 'release-ops')
     if (!release) throw new Error('缺少发版模板')
     kernel.setView('workflows.all', undefined, [])
@@ -252,16 +275,11 @@ describe('WorkflowManager', () => {
     render(<WorkflowManager />)
     await screen.findByText('暂无工作流')
 
-    await user.click(screen.getByRole('button', { name: 'SOP 模板' }))
-    const picker = screen.getByRole('dialog')
-    expect(picker).toHaveTextContent('从 SOP 模板新建')
-    for (const template of SOP_TEMPLATES) {
-      expect(within(picker).getByText(template.description)).toBeInTheDocument()
-    }
+    await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    await user.click(screen.getByRole('menuitem', { name: `使用模板 ${release.name}` }))
 
-    await user.click(screen.getByRole('button', { name: `使用模板 ${release.name}` }))
-
-    // 模板弹窗关闭，编辑器带着模板的阶段与「要干什么」打开
+    // 下拉关闭，编辑器带着模板的阶段与「要干什么」打开
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(screen.getByRole('dialog')).toHaveTextContent('工作流定义')
     expect(screen.getByLabelText('工作流名称')).toHaveValue(release.name)
@@ -269,35 +287,22 @@ describe('WorkflowManager', () => {
     expect(screen.getByLabelText('阶段1要干什么')).toHaveValue(release.stages[0].instructions)
   })
 
-  it('SOP 模板：模板弹窗可取消，取消后不打开编辑器、不 dispatch', async () => {
+  it('下拉可按 Esc 关闭：不打开编辑器、不 dispatch', async () => {
     kernel.setView('workflows.all', undefined, [])
     const user = userEvent.setup()
     render(<WorkflowManager />)
     await screen.findByText('暂无工作流')
 
-    await user.click(screen.getByRole('button', { name: 'SOP 模板' }))
-    await user.click(screen.getByRole('button', { name: '取消' }))
+    await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
 
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(kernel.dispatched).toHaveLength(0)
   })
 
-  it('SOP 模板弹窗按 Esc 关闭：走 Dialog onClose，不打开编辑器', async () => {
-    kernel.setView('workflows.all', undefined, [])
-    const user = userEvent.setup()
-    render(<WorkflowManager />)
-    await screen.findByText('暂无工作流')
-
-    await user.click(screen.getByRole('button', { name: 'SOP 模板' }))
-    expect(screen.getByRole('dialog')).toHaveTextContent('从 SOP 模板新建')
-    await user.keyboard('{Escape}')
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(screen.queryByLabelText('工作流名称')).not.toBeInTheDocument()
-    expect(kernel.dispatched).toHaveLength(0)
-  })
-
-  it('SOP 模板新建保存：workflow.create 带上模板阶段、说明与流转下标', async () => {
+  it('模板新建保存：workflow.create 带上模板阶段、说明与流转下标', async () => {
     const release = SOP_TEMPLATES.find((template) => template.id === 'release-ops')
     if (!release) throw new Error('缺少发版模板')
     kernel.setView('workflows.all', undefined, [])
@@ -313,8 +318,8 @@ describe('WorkflowManager', () => {
     render(<WorkflowManager />)
     await screen.findByText('暂无工作流')
 
-    await user.click(screen.getByRole('button', { name: 'SOP 模板' }))
-    await user.click(screen.getByRole('button', { name: `使用模板 ${release.name}` }))
+    await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    await user.click(screen.getByRole('menuitem', { name: `使用模板 ${release.name}` }))
     await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))

@@ -49,9 +49,9 @@ describe('WorkflowEditor', () => {
 
     // 智能体清单来自内核视图：等它就绪后再选阶段智能体
     await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: '阶段1进入方式' })).toBeInTheDocument(),
+      expect(screen.getByRole('combobox', { name: '阶段1类型' })).toBeInTheDocument(),
     )
-    await user.click(screen.getByRole('combobox', { name: '阶段1进入方式' }))
+    await user.click(screen.getByRole('combobox', { name: '阶段1类型' }))
     await user.click(screen.getByRole('option', { name: '交给智能体' }))
     await waitFor(() =>
       expect(screen.getByRole('combobox', { name: '阶段1智能体' })).toBeInTheDocument(),
@@ -70,17 +70,20 @@ describe('WorkflowEditor', () => {
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
     // 左侧点阶段 2，右侧才展开它的详情
     await user.click(screen.getByRole('button', { name: '阶段2' }))
+    // 新阶段默认「不交接」，只有名称与类型；流转目标要先选成会干活的类型才出现
+    await choose(user, '阶段2类型', '交给智能体')
+    await choose(user, '阶段2智能体', 'coder')
     await user.click(screen.getByRole('combobox', { name: '阶段2完成后进入' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2完成后进入' }))
     await user.click(screen.getByRole('option', { name: '下一阶段' }))
     await user.click(screen.getByRole('combobox', { name: '阶段2完成后进入' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
-    await user.click(screen.getByRole('combobox', { name: '阶段2打回退回到' }))
+    await user.click(screen.getByRole('combobox', { name: '阶段2出错时进入' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
-    await user.click(screen.getByRole('combobox', { name: '阶段2打回退回到' }))
+    await user.click(screen.getByRole('combobox', { name: '阶段2出错时进入' }))
     await user.click(screen.getByRole('option', { name: '不指定' }))
-    await user.click(screen.getByRole('combobox', { name: '阶段2打回退回到' }))
+    await user.click(screen.getByRole('combobox', { name: '阶段2出错时进入' }))
     await user.click(screen.getByRole('option', { name: '待办' }))
 
     // 再加一个阶段后删除，覆盖删除分支（新建阶段会自动展开，删除的就是它）
@@ -111,8 +114,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w',
           name: '待办',
           position: 0,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: 's1',
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -123,8 +126,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w',
           name: '进行中',
           position: 1,
-          entryMode: 'user',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: 's0',
           handoffWorkflowId: null,
@@ -138,8 +141,8 @@ describe('WorkflowEditor', () => {
     expect(screen.getByRole('combobox', { name: '阶段1完成后进入' })).toHaveTextContent('进行中')
     // 第二段详情要点左侧才展开
     fireEvent.click(screen.getByRole('button', { name: '阶段2' }))
-    expect(screen.getByLabelText('阶段2打回退回到')).toHaveValue('0')
-    expect(screen.getByRole('combobox', { name: '阶段2打回退回到' })).toHaveTextContent('待办')
+    expect(screen.getByLabelText('阶段2出错时进入')).toHaveValue('0')
+    expect(screen.getByRole('combobox', { name: '阶段2出错时进入' })).toHaveTextContent('待办')
   })
 
   it('工作流没有描述时描述输入框留空', () => {
@@ -165,8 +168,8 @@ describe('WorkflowEditor', () => {
       workflowId: 'w',
       name,
       position,
-      entryMode: 'none',
-      agentId: null,
+      entryMode: 'agent',
+      agentId: 'ag1',
       onCompleteStageId: null,
       onRejectStageId: null,
       handoffWorkflowId: null,
@@ -232,8 +235,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w2',
           name: '草稿',
           position: 0,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -244,8 +247,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w2',
           name: '发布',
           position: 1,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -259,6 +262,8 @@ describe('WorkflowEditor', () => {
     const user = userEvent.setup()
     render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
 
+    // 新建阶段的默认类型是「不交接」，交接入口要先选成会干活的类型
+    await choose(user, '阶段1类型', '交给智能体')
     await user.click(screen.getByRole('combobox', { name: '阶段1交接目标工作流' }))
     await user.click(await screen.findByRole('option', { name: '写作' }))
     await user.click(screen.getByRole('combobox', { name: '阶段1交接目标阶段' }))
@@ -283,8 +288,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w1',
           name: '待办',
           position: 0,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: 'w2',
@@ -295,8 +300,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w1',
           name: '进行中',
           position: 1,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -315,8 +320,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w2',
           name: '草稿',
           position: 0,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -327,8 +332,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w2',
           name: '发布',
           position: 1,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -389,8 +394,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w',
           name: '待办',
           position: 0,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: 'gone',
@@ -420,8 +425,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w',
           name: '待办',
           position: 0,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -473,8 +478,8 @@ describe('WorkflowEditor', () => {
       workflowId: 'w',
       name,
       position,
-      entryMode: 'none',
-      agentId: null,
+      entryMode: 'agent',
+      agentId: 'ag1',
       onCompleteStageId: null,
       onRejectStageId: null,
       handoffWorkflowId: null,
@@ -522,8 +527,8 @@ describe('WorkflowEditor', () => {
       workflowId: 'w',
       name,
       position,
-      entryMode: 'none',
-      agentId: null,
+      entryMode: 'agent',
+      agentId: 'ag1',
       onCompleteStageId: null,
       onRejectStageId: null,
       handoffWorkflowId: null,
@@ -571,6 +576,11 @@ describe('WorkflowEditor', () => {
     expect(screen.queryByLabelText('阶段1要干什么')).toBeNull()
 
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
+    // 新阶段默认「不交接」：只有名称与类型，要干什么同样不展示
+    expect(screen.getByLabelText('阶段1名称')).toBeInTheDocument()
+    expect(screen.queryByLabelText('阶段1要干什么')).toBeNull()
+
+    await choose(user, '阶段1类型', '交给智能体')
     expect(screen.getByLabelText('阶段1要干什么')).toBeInTheDocument()
   })
 
@@ -585,8 +595,8 @@ describe('WorkflowEditor', () => {
       workflowId: 'w',
       name,
       position,
-      entryMode: 'none',
-      agentId: null,
+      entryMode: 'agent',
+      agentId: 'ag1',
       onCompleteStageId: null,
       onRejectStageId: null,
       handoffWorkflowId: null,
@@ -631,8 +641,8 @@ describe('WorkflowEditor', () => {
       workflowId: 'w',
       name,
       position,
-      entryMode: 'none',
-      agentId: null,
+      entryMode: 'agent',
+      agentId: 'ag1',
       onCompleteStageId: null,
       onRejectStageId: null,
       handoffWorkflowId: null,
@@ -679,8 +689,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w',
           name: '待办',
           position: 0,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -694,8 +704,8 @@ describe('WorkflowEditor', () => {
           workflowId: 'w',
           name: '进行中',
           position: 1,
-          entryMode: 'none',
-          agentId: null,
+          entryMode: 'agent',
+          agentId: 'ag1',
           onCompleteStageId: null,
           onRejectStageId: null,
           handoffWorkflowId: null,
@@ -721,6 +731,369 @@ describe('WorkflowEditor', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0] as WorkflowInput
     expect(draft.stages[0]).toMatchObject({
+      subtaskStageId: null,
+      onChildrenSettled: null,
+      spawnPolicy: null,
+    })
+  }, 30_000)
+
+  it('闸门：切到闸门自动交给智能体，次数与两个去向可编辑（M11）', async () => {
+    const stage = (id: string, name: string, position: number): WorkflowStage => ({
+      id,
+      workflowId: 'w',
+      name,
+      position,
+      entryMode: 'agent',
+      agentId: 'ag1',
+      onCompleteStageId: null,
+      onRejectStageId: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+    })
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '研发',
+      description: '',
+      createdAt: 't',
+      stages: [stage('s0', '执行', 0), stage('s1', '自测', 1), stage('s2', '结束', 2)],
+    }
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    await choose(user, '阶段2类型', '闸门（判定）')
+
+    // 切到闸门即自动交给智能体，并给出默认 3 次
+    expect(screen.getByRole('combobox', { name: '阶段2智能体' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '阶段2闸门次数' })).toHaveTextContent('3 次')
+
+    await choose(user, '阶段2闸门次数', '5 次')
+    await choose(user, '阶段2智能体', 'coder')
+    await choose(user, '阶段2闸门通过时进入', '结束')
+    await choose(user, '阶段2闸门未通过时进入', '执行')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[1]).toMatchObject({
+      entryMode: 'agent',
+      agentId: 'ag1',
+      gate: { maxFails: 5, onPassIndex: 2, onFailIndex: 0 },
+    })
+  }, 30_000)
+
+  it('闸门：已有配置还原成下标，切回普通类型清掉闸门（M11）', async () => {
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '研发',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 's0',
+          workflowId: 'w',
+          name: '执行',
+          position: 0,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+        },
+        {
+          id: 's1',
+          workflowId: 'w',
+          name: '自测',
+          position: 1,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          gate: { maxFails: 2, onPassStageId: 's2', onFailStageId: 's0' },
+        },
+        {
+          id: 's2',
+          workflowId: 'w',
+          name: '结束',
+          position: 2,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+        },
+      ],
+    }
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    // 还原：类型显示为闸门，两个去向按下标回填
+    expect(screen.getByRole('combobox', { name: '阶段2类型' })).toHaveTextContent('闸门（判定）')
+    expect(screen.getByRole('combobox', { name: '阶段2闸门次数' })).toHaveTextContent('2 次')
+    expect(screen.getByRole('combobox', { name: '阶段2闸门通过时进入' })).toHaveTextContent('结束')
+    expect(screen.getByRole('combobox', { name: '阶段2闸门未通过时进入' })).toHaveTextContent(
+      '执行',
+    )
+
+    // 切回普通类型：闸门字段消失，配置落 null
+    await choose(user, '阶段2类型', '交给智能体')
+    expect(
+      screen.queryByRole('combobox', { name: '阶段2闸门次数' }),
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[1]).toMatchObject({ entryMode: 'agent', gate: null })
+  }, 30_000)
+
+  it('不交接：同样只留名称与类型，保存时把看不见的字段归一', async () => {
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '研发',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 's0',
+          workflowId: 'w',
+          name: '实现',
+          position: 0,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: 's1',
+          onRejectStageId: 's1',
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          subtaskStageId: 's1',
+          onChildrenSettled: 'notify',
+          spawnPolicy: 'off',
+          instructions: '按方案实现',
+        },
+        {
+          id: 's1',
+          workflowId: 'w',
+          name: '收尾',
+          position: 1,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+        },
+      ],
+    }
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await choose(user, '阶段1类型', '不交接')
+
+    for (const label of [
+      '阶段1智能体',
+      '阶段1完成后进入',
+      '阶段1出错时进入',
+      '阶段1闸门次数',
+      '阶段1交接目标工作流',
+      '阶段1子任务落点阶段',
+      '阶段1子任务完成后',
+      '阶段1允许拆子任务',
+    ]) {
+      expect(screen.queryByRole('combobox', { name: label })).not.toBeInTheDocument()
+    }
+    expect(screen.queryByLabelText('阶段1要干什么')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[0]).toEqual({
+      id: 's0',
+      name: '实现',
+      entryMode: 'none',
+      agentId: null,
+      onCompleteIndex: null,
+      onRejectIndex: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+      subtaskStageId: null,
+      onChildrenSettled: null,
+      spawnPolicy: null,
+      instructions: '按方案实现',
+      gate: null,
+    })
+  }, 30_000)
+
+  it('交给用户：只留名称与类型，保存时把看不见的字段归一', async () => {
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '研发',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 's0',
+          workflowId: 'w',
+          name: '实现',
+          position: 0,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: 's1',
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          subtaskStageId: 's1',
+          onChildrenSettled: 'wake',
+          spawnPolicy: 'off',
+          instructions: '按方案实现',
+        },
+        {
+          id: 's1',
+          workflowId: 'w',
+          name: '收尾',
+          position: 1,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+        },
+      ],
+    }
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await choose(user, '阶段1类型', '交给用户')
+
+    // 除名称与类型外一律不展示
+    expect(screen.getByLabelText('阶段1名称')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '阶段1类型' })).toHaveTextContent('交给用户')
+    for (const label of [
+      '阶段1智能体',
+      '阶段1完成后进入',
+      '阶段1出错时进入',
+      '阶段1闸门次数',
+      '阶段1交接目标工作流',
+      '阶段1子任务落点阶段',
+      '阶段1子任务完成后',
+      '阶段1允许拆子任务',
+    ]) {
+      expect(screen.queryByRole('combobox', { name: label })).not.toBeInTheDocument()
+    }
+    expect(screen.queryByLabelText('阶段1要干什么')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[0]).toEqual({
+      id: 's0',
+      name: '实现',
+      entryMode: 'user',
+      agentId: null,
+      onCompleteIndex: null,
+      onRejectIndex: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+      subtaskStageId: null,
+      onChildrenSettled: null,
+      spawnPolicy: null,
+      // 提示词资料段没有副作用，原文保留，切回智能体还能用
+      instructions: '按方案实现',
+      gate: null,
+    })
+  }, 30_000)
+
+  it('闸门：不展示交接与子任务，保存时把这些看不见的字段归一', async () => {
+    const existing: WorkflowWithStages = {
+      id: 'w',
+      name: '研发',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 's0',
+          workflowId: 'w',
+          name: '实现',
+          position: 0,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: 's1',
+          onRejectStageId: 's1',
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          subtaskStageId: 's1',
+          onChildrenSettled: 'wake',
+          spawnPolicy: 'off',
+          instructions: '跑一遍验收命令',
+          gate: { maxFails: 3, onPassStageId: 's1', onFailStageId: 's0' },
+        },
+        {
+          id: 's1',
+          workflowId: 'w',
+          name: '收尾',
+          position: 1,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteStageId: null,
+          onRejectStageId: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+        },
+      ],
+    }
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 闸门只判定：次数与两个去向在，交接与子任务不在
+    expect(screen.getByRole('combobox', { name: '阶段1闸门次数' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '阶段1闸门通过时进入' })).toBeInTheDocument()
+    expect(screen.getByLabelText('阶段1要干什么')).toHaveValue('跑一遍验收命令')
+    for (const label of [
+      '阶段1交接目标工作流',
+      '阶段1子任务落点阶段',
+      '阶段1子任务完成后',
+      '阶段1允许拆子任务',
+      '阶段1完成后进入',
+      '阶段1出错时进入',
+    ]) {
+      expect(screen.queryByRole('combobox', { name: label })).not.toBeInTheDocument()
+    }
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[0]).toMatchObject({
+      entryMode: 'agent',
+      agentId: 'ag1',
+      gate: { maxFails: 3, onPassIndex: 1, onFailIndex: 0 },
+      instructions: '跑一遍验收命令',
+    })
+    // 闸门不做交接、不拆子任务；「完成 / 出错」两个去向也不在面板上，留着会改掉默认通过落点
+    expect(draft.stages[0]).toMatchObject({
+      onCompleteIndex: null,
+      onRejectIndex: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
       subtaskStageId: null,
       onChildrenSettled: null,
       spawnPolicy: null,

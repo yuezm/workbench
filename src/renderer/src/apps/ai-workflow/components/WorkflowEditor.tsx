@@ -41,6 +41,69 @@ function emptyStage(name: string): StageInput {
     onChildrenSettled: null,
     spawnPolicy: null,
     instructions: '',
+    gate: null,
+  }
+}
+
+/**
+ * 阶段在编辑器里的「类型」：闸门不是独立 `entryMode`，而是 agent 阶段上的一个开关
+ * （M11）。UI 上把它单列一项，是为了让人一眼看出这是一道判定关卡。
+ */
+type StageKind = EntryMode | 'gate'
+
+function stageKindOf(stage: StageInput): StageKind {
+  return stage.gate ? 'gate' : stage.entryMode
+}
+
+/**
+ * 会派活 / 会判定的阶段（交给智能体、闸门）才展示流转目标与「要干什么」；
+ * 不交接与交给用户只留名称与类型：前者没人执行、后者等人处理，这些字段都没有消费者。
+ */
+function hasFlowDetail(stage: StageInput): boolean {
+  const kind = stageKindOf(stage)
+  return kind === 'agent' || kind === 'gate'
+}
+
+/** 交接与拆子任务只属于真干活的智能体阶段：闸门只判定过没过，不交接、不拆子任务。 */
+function hasRelayDetail(stage: StageInput): boolean {
+  return stageKindOf(stage) === 'agent'
+}
+
+/**
+ * 界面上不展示的字段，保存前一概归一——这些字段仍有消费者（交接在任务离开阶段时建关联任务、
+ * 子任务落点是派活落点、`agentId` 会参与智能体存在性校验、`onComplete` 会改闸门的默认通过去向），
+ * 留着就是看不见的配置。「要干什么」只对派活有意义、且没有副作用，原文保留，切回智能体时还能用。
+ */
+function pruneStage(stage: StageInput): StageInput {
+  const kind = stageKindOf(stage)
+  if (kind === 'agent') return stage
+  if (kind === 'gate') {
+    return {
+      ...stage,
+      // 闸门面板里没有「完成 / 出错」两个去向：留着会偷偷改掉「通过时进入」显示为默认时的真实落点
+      onCompleteIndex: null,
+      onRejectIndex: null,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+      subtaskStageId: null,
+      onChildrenSettled: null,
+      spawnPolicy: null,
+    }
+  }
+  return {
+    id: stage.id,
+    name: stage.name,
+    entryMode: stage.entryMode,
+    agentId: null,
+    onCompleteIndex: null,
+    onRejectIndex: null,
+    handoffWorkflowId: null,
+    handoffStageId: null,
+    subtaskStageId: null,
+    onChildrenSettled: null,
+    spawnPolicy: null,
+    instructions: stage.instructions,
+    gate: null,
   }
 }
 
@@ -58,6 +121,9 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
     stages: workflow.stages.map((s) => {
       const oc = indexOfId(workflow, s.onCompleteStageId)
       const rj = indexOfId(workflow, s.onRejectStageId)
+      // M11：闸门去向按 id 还原成下标；找不到按 null（默认语义）
+      const gp = s.gate ? indexOfId(workflow, s.gate.onPassStageId) : -1
+      const gf = s.gate ? indexOfId(workflow, s.gate.onFailStageId) : -1
       return {
         // 回传既有阶段 id：更新时保留历史（否则每次保存都会重建阶段）
         id: s.id,
@@ -72,6 +138,13 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
         onChildrenSettled: s.onChildrenSettled ?? null,
         spawnPolicy: s.spawnPolicy ?? null,
         instructions: s.instructions ?? '',
+        gate: s.gate
+          ? {
+              maxFails: s.gate.maxFails,
+              onPassIndex: gp >= 0 ? gp : null,
+              onFailIndex: gf >= 0 ? gf : null,
+            }
+          : null,
       }
     }),
   }
@@ -181,6 +254,14 @@ export function WorkflowEditor({
         ...s,
         onCompleteIndex: remap(s.onCompleteIndex),
         onRejectIndex: remap(s.onRejectIndex),
+        // M11：闸门去向也是下标，重排必须同步重映射，否则判定会把任务送错阶段
+        gate: s.gate
+          ? {
+              ...s.gate,
+              onPassIndex: remap(s.gate.onPassIndex),
+              onFailIndex: remap(s.gate.onFailIndex),
+            }
+          : null,
       }))
       const [moved] = stages.splice(i, 1)
       stages.splice(j, 0, moved)
@@ -193,7 +274,7 @@ export function WorkflowEditor({
     ev.preventDefault()
     setSaving(true)
     try {
-      await onSave(draft)
+      await onSave({ ...draft, stages: draft.stages.map(pruneStage) })
     } finally {
       setSaving(false)
     }
@@ -332,14 +413,25 @@ export function WorkflowEditor({
             </div>
 
             <div className="mt-3 flex flex-wrap items-end gap-2">
-              <Field label="进入时" className="w-36">
+              <Field label="类型" className="w-36">
                 <Select
-                  ariaLabel={`阶段${n}进入方式`}
-                  value={stage.entryMode}
-                  onChange={(v) => patchStage(index, { entryMode: v as EntryMode })}
+                  ariaLabel={`阶段${n}类型`}
+                  value={stageKindOf(stage)}
+                  onChange={(v) => {
+                    // 切到闸门：自动交给智能体并给出默认次数；切走则清掉闸门配置
+                    if (v === 'gate') {
+                      patchStage(index, {
+                        entryMode: 'agent',
+                        gate: { maxFails: 3, onPassIndex: null, onFailIndex: null },
+                      })
+                      return
+                    }
+                    patchStage(index, { entryMode: v as EntryMode, gate: null })
+                  }}
                   options={[
                     { value: 'none', label: '不交接' },
                     { value: 'agent', label: '交给智能体' },
+                    { value: 'gate', label: '闸门（判定）' },
                     { value: 'user', label: '交给用户' },
                   ]}
                 />
@@ -359,130 +451,220 @@ export function WorkflowEditor({
               )}
             </div>
 
-            {/* 完成后 / 打回并排一行，与「进入时」分开：目标阶段名再长也不用和智能体抢宽度 */}
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <Field label="完成后进入">
-                <Select
-                  ariaLabel={`阶段${n}完成后进入`}
-                  value={stage.onCompleteIndex == null ? '' : String(stage.onCompleteIndex)}
-                  onChange={(v) =>
-                    patchStage(index, { onCompleteIndex: v === '' ? null : Number(v) })
-                  }
-                  options={[
-                    { value: '', label: '下一阶段' },
-                    ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
-                  ]}
-                />
-              </Field>
-              <Field label="打回退回到">
-                <Select
-                  ariaLabel={`阶段${n}打回退回到`}
-                  value={stage.onRejectIndex == null ? '' : String(stage.onRejectIndex)}
-                  onChange={(v) =>
-                    patchStage(index, { onRejectIndex: v === '' ? null : Number(v) })
-                  }
-                  options={[
-                    { value: '', label: '不指定' },
-                    ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
-                  ]}
-                />
-              </Field>
-            </div>
-            <p className="mt-1 text-[11px] text-ink-faint">末阶段完成后任务结束。</p>
+            {!hasFlowDetail(stage) ? (
+              <p className="mt-3 text-[11px] text-ink-faint">
+                {stage.entryMode === 'user'
+                  ? '交给用户：任务进到这个阶段就停下来等人处理，不需要智能体、流转目标、交接或子任务。'
+                  : '不交接：任务进到这个阶段不派活，由你在看板上拖到下一阶段；不需要智能体、流转目标、交接或子任务。'}
+              </p>
+            ) : stage.gate ? (
+              <>
+                {/* 闸门：先定次数预算，再定「过 / 没过」两个去向 */}
+                <div className="mt-3 flex flex-wrap items-end gap-2">
+                  <Field label="允许未通过" className="w-36">
+                    <Select
+                      ariaLabel={`阶段${n}闸门次数`}
+                      value={String(stage.gate.maxFails)}
+                      onChange={(v) =>
+                        patchStage(index, { gate: { ...stage.gate!, maxFails: Number(v) } })
+                      }
+                      options={[1, 2, 3, 4, 5, 10].map((times) => ({
+                        value: String(times),
+                        label: `${times} 次`,
+                      }))}
+                    />
+                  </Field>
+                  <p className="pb-2 text-[11px] text-ink-faint">
+                    第 {stage.gate.maxFails} 次仍未通过后放行
+                  </p>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <Field label="通过时进入">
+                    <Select
+                      ariaLabel={`阶段${n}闸门通过时进入`}
+                      value={stage.gate.onPassIndex == null ? '' : String(stage.gate.onPassIndex)}
+                      onChange={(v) =>
+                        patchStage(index, {
+                          gate: {
+                            ...stage.gate!,
+                            onPassIndex: v === '' ? null : Number(v),
+                          },
+                        })
+                      }
+                      options={[
+                        { value: '', label: '下一阶段' },
+                        ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
+                      ]}
+                    />
+                  </Field>
+                  <Field label="未通过时进入">
+                    <Select
+                      ariaLabel={`阶段${n}闸门未通过时进入`}
+                      value={stage.gate.onFailIndex == null ? '' : String(stage.gate.onFailIndex)}
+                      onChange={(v) =>
+                        patchStage(index, {
+                          gate: {
+                            ...stage.gate!,
+                            onFailIndex: v === '' ? null : Number(v),
+                          },
+                        })
+                      }
+                      options={[
+                        { value: '', label: '原地不动' },
+                        ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
+                      ]}
+                    />
+                  </Field>
+                </div>
+                <p className="mt-1 text-[11px] text-ink-faint">
+                  智能体跑完要给出「通过 /
+                  未通过」的判定；拿不出证据时任务停在闸门等人。闸门只判定，不交接、不拆子任务。
+                </p>
+              </>
+            ) : (
+              <>
+                {/* 完成后 / 出错并排一行，与「类型」分开：目标阶段名再长也不用和智能体抢宽度 */}
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <Field label="完成后进入">
+                    <Select
+                      ariaLabel={`阶段${n}完成后进入`}
+                      value={stage.onCompleteIndex == null ? '' : String(stage.onCompleteIndex)}
+                      onChange={(v) =>
+                        patchStage(index, { onCompleteIndex: v === '' ? null : Number(v) })
+                      }
+                      options={[
+                        { value: '', label: '下一阶段' },
+                        ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
+                      ]}
+                    />
+                  </Field>
+                  <Field label="出错时进入">
+                    <Select
+                      ariaLabel={`阶段${n}出错时进入`}
+                      value={stage.onRejectIndex == null ? '' : String(stage.onRejectIndex)}
+                      onChange={(v) =>
+                        patchStage(index, { onRejectIndex: v === '' ? null : Number(v) })
+                      }
+                      options={[
+                        { value: '', label: '不指定' },
+                        ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
+                      ]}
+                    />
+                  </Field>
+                </div>
+                <p className="mt-1 text-[11px] text-ink-faint">
+                  末阶段完成后任务结束；「出错」指执行器崩溃或超时。
+                </p>
+              </>
+            )}
 
-            {/* 阶段要干什么：这段文字会作为提示词的固定指令段交给智能体 */}
-            <Field label="要干什么" className="mt-3">
-              <textarea
-                aria-label={`阶段${n}要干什么`}
-                className={cn(fieldCls, 'min-h-24 resize-y py-2 leading-relaxed')}
-                placeholder="写清这个阶段具体要做什么，例如：读需求、出实现方案、列出改动文件；进到本阶段的任务会带上这段说明交给智能体。"
-                value={stage.instructions ?? ''}
-                onChange={(e) => patchStage(index, { instructions: e.target.value })}
-              />
-            </Field>
-
-            <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
-              <Field label="目标工作流" className="min-w-0 flex-1">
-                <Select
-                  ariaLabel={`阶段${n}交接目标工作流`}
-                  value={stage.handoffWorkflowId ?? ''}
-                  onChange={(v) =>
-                    patchStage(index, {
-                      handoffWorkflowId: v === '' ? null : v,
-                      handoffStageId: null,
-                    })
-                  }
-                  options={[
-                    { value: '', label: '不交接' },
-                    ...handoffWorkflows.map((item) => ({ value: item.id, label: item.name })),
-                  ]}
-                />
-              </Field>
-              {stage.handoffWorkflowId != null && (
-                <Field label="目标阶段" className="min-w-0 flex-1">
-                  <Select
-                    ariaLabel={`阶段${n}交接目标阶段`}
-                    value={stage.handoffStageId ?? ''}
-                    onChange={(v) => patchStage(index, { handoffStageId: v === '' ? null : v })}
-                    options={[
-                      { value: '', label: '首阶段' },
-                      ...stagesOfWorkflow(stage.handoffWorkflowId).map((item) => ({
-                        value: item.id,
-                        label: item.name,
-                      })),
-                    ]}
+            {/* 要干什么只对会派活 / 会判定的阶段有意义：不交接、交给用户时不展示 */}
+            {hasFlowDetail(stage) && (
+              <>
+                {/* 阶段要干什么：这段文字会作为提示词的固定指令段交给智能体 */}
+                <Field label="要干什么" className="mt-3">
+                  <textarea
+                    aria-label={`阶段${n}要干什么`}
+                    className={cn(fieldCls, 'min-h-24 resize-y py-2 leading-relaxed')}
+                    placeholder="写清这个阶段具体要做什么，例如：读需求、出实现方案、列出改动文件；进到本阶段的任务会带上这段说明交给智能体。"
+                    value={stage.instructions ?? ''}
+                    onChange={(e) => patchStage(index, { instructions: e.target.value })}
                   />
                 </Field>
-              )}
-              <p className="w-full text-[11px] text-ink-faint">完成后在目标工作流建关联任务。</p>
-            </div>
+              </>
+            )}
 
-            <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
-              <Field label="子任务落点阶段" className="min-w-0 flex-1">
-                <Select
-                  ariaLabel={`阶段${n}子任务落点阶段`}
-                  value={stage.subtaskStageId ?? ''}
-                  onChange={(v) => patchStage(index, { subtaskStageId: v === '' ? null : v })}
-                  options={[
-                    { value: '', label: '跟随当前阶段' },
-                    ...(workflow?.stages ?? []).map((item) => ({
-                      value: item.id,
-                      label: item.name,
-                    })),
-                  ]}
-                />
-              </Field>
-              <Field label="子任务完成后" className="min-w-0 flex-1">
-                <Select
-                  ariaLabel={`阶段${n}子任务完成后`}
-                  value={stage.onChildrenSettled ?? ''}
-                  onChange={(v) =>
-                    patchStage(index, {
-                      onChildrenSettled: v === '' ? null : (v as OnChildrenSettled),
-                    })
-                  }
-                  options={[
-                    { value: '', label: '按阶段推断' },
-                    { value: 'wake', label: '唤醒父 Agent' },
-                    { value: 'notify', label: '仅通知' },
-                    { value: 'complete', label: '完成父任务' },
-                  ]}
-                />
-              </Field>
-              <Field label="允许拆子任务" className="min-w-0 flex-1">
-                <Select
-                  ariaLabel={`阶段${n}允许拆子任务`}
-                  value={stage.spawnPolicy ?? ''}
-                  onChange={(v) =>
-                    patchStage(index, { spawnPolicy: v === '' ? null : (v as SpawnPolicy) })
-                  }
-                  options={[
-                    { value: '', label: '允许' },
-                    { value: 'off', label: '禁止' },
-                  ]}
-                />
-              </Field>
-            </div>
+            {/* 交接与子任务只属于真干活的智能体阶段：闸门只判定，不交接、不拆子任务 */}
+            {hasRelayDetail(stage) && (
+              <>
+                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
+                  <Field label="目标工作流" className="min-w-0 flex-1">
+                    <Select
+                      ariaLabel={`阶段${n}交接目标工作流`}
+                      value={stage.handoffWorkflowId ?? ''}
+                      onChange={(v) =>
+                        patchStage(index, {
+                          handoffWorkflowId: v === '' ? null : v,
+                          handoffStageId: null,
+                        })
+                      }
+                      options={[
+                        { value: '', label: '不交接' },
+                        ...handoffWorkflows.map((item) => ({ value: item.id, label: item.name })),
+                      ]}
+                    />
+                  </Field>
+                  {stage.handoffWorkflowId != null && (
+                    <Field label="目标阶段" className="min-w-0 flex-1">
+                      <Select
+                        ariaLabel={`阶段${n}交接目标阶段`}
+                        value={stage.handoffStageId ?? ''}
+                        onChange={(v) => patchStage(index, { handoffStageId: v === '' ? null : v })}
+                        options={[
+                          { value: '', label: '首阶段' },
+                          ...stagesOfWorkflow(stage.handoffWorkflowId).map((item) => ({
+                            value: item.id,
+                            label: item.name,
+                          })),
+                        ]}
+                      />
+                    </Field>
+                  )}
+                  <p className="w-full text-[11px] text-ink-faint">
+                    完成后在目标工作流建关联任务。
+                  </p>
+                </div>
+
+                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
+                  <Field label="子任务落点阶段" className="min-w-0 flex-1">
+                    <Select
+                      ariaLabel={`阶段${n}子任务落点阶段`}
+                      value={stage.subtaskStageId ?? ''}
+                      onChange={(v) => patchStage(index, { subtaskStageId: v === '' ? null : v })}
+                      options={[
+                        { value: '', label: '跟随当前阶段' },
+                        // 候选跟着草稿走：改过的阶段名立刻反映，不用等保存后再打开
+                        ...draft.stages.flatMap((item, i) =>
+                          item.id === undefined
+                            ? []
+                            : [{ value: item.id, label: item.name || `阶段${i + 1}` }],
+                        ),
+                      ]}
+                    />
+                  </Field>
+                  <Field label="子任务完成后" className="min-w-0 flex-1">
+                    <Select
+                      ariaLabel={`阶段${n}子任务完成后`}
+                      value={stage.onChildrenSettled ?? ''}
+                      onChange={(v) =>
+                        patchStage(index, {
+                          onChildrenSettled: v === '' ? null : (v as OnChildrenSettled),
+                        })
+                      }
+                      options={[
+                        { value: '', label: '按阶段推断' },
+                        { value: 'wake', label: '唤醒父 Agent' },
+                        { value: 'notify', label: '仅通知' },
+                        { value: 'complete', label: '完成父任务' },
+                      ]}
+                    />
+                  </Field>
+                  <Field label="允许拆子任务" className="min-w-0 flex-1">
+                    <Select
+                      ariaLabel={`阶段${n}允许拆子任务`}
+                      value={stage.spawnPolicy ?? ''}
+                      onChange={(v) =>
+                        patchStage(index, { spawnPolicy: v === '' ? null : (v as SpawnPolicy) })
+                      }
+                      options={[
+                        { value: '', label: '允许' },
+                        { value: 'off', label: '禁止' },
+                      ]}
+                    />
+                  </Field>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

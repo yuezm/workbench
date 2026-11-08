@@ -78,6 +78,10 @@ interface StageRow {
   on_children_settled: string | null
   spawn_policy: string | null
   instructions: string
+  /** M11 闸门三列：全空 = 不是闸门 */
+  gate_max_fails: number | null
+  gate_on_pass_stage_id: string | null
+  gate_on_fail_stage_id: string | null
 }
 
 interface AgentRow {
@@ -125,6 +129,8 @@ interface TaskRow {
   spawn_key: string | null
   handoff_from_task_id: string | null
   handoff_from_stage_id: string | null
+  /** M11 闸门预算：当前阶段连续未通过次数 */
+  gate_fails: number
   created_at: string
   updated_at: string
 }
@@ -286,6 +292,15 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   onChildrenSettled: row.on_children_settled as WorkflowStage['onChildrenSettled'],
   spawnPolicy: row.spawn_policy as WorkflowStage['spawnPolicy'],
   instructions: row.instructions,
+  // M11：三列全空表示不是闸门（`max_fails` 缺省 / null 都按「不是闸门」归一）
+  gate:
+    row.gate_max_fails === null || row.gate_max_fails === undefined
+      ? null
+      : {
+          maxFails: row.gate_max_fails,
+          onPassStageId: row.gate_on_pass_stage_id ?? null,
+          onFailStageId: row.gate_on_fail_stage_id ?? null,
+        },
 })
 
 const mapAgent = (row: AgentRow): Agent => ({
@@ -334,6 +349,7 @@ const mapTask = (row: TaskRow): Task => ({
   spawnKey: row.spawn_key,
   handoffFromTaskId: row.handoff_from_task_id,
   handoffFromStageId: row.handoff_from_stage_id,
+  gateFails: row.gate_fails,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
@@ -481,7 +497,8 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
       .prepare(
         `SELECT id, workflow_id, name, position, entry_mode, agent_id,
                 on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id,
-                subtask_stage_id, on_children_settled, spawn_policy, instructions
+                subtask_stage_id, on_children_settled, spawn_policy, instructions,
+                gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id
          FROM workflow_stages ORDER BY workflow_id, position`,
       )
       .all() as unknown as StageRow[]

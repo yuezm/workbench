@@ -17,6 +17,8 @@ import {
   STAGES_M8_ADD_COLUMN_SQL,
   STAGES_M9_ADDED_COLUMNS,
   STAGES_M9_ADD_COLUMN_SQL,
+  STAGES_M11_ADDED_COLUMNS,
+  STAGES_M11_ADD_COLUMN_SQL,
   TASKS_M6_ADDED_COLUMNS,
   TASKS_M6_ADD_COLUMN_SQL,
   TASKS_M65_ADDED_COLUMNS,
@@ -27,6 +29,8 @@ import {
   TASKS_M8_ADD_COLUMN_SQL,
   TASKS_M10_ADDED_COLUMNS,
   TASKS_M10_ADD_COLUMN_SQL,
+  TASKS_M11_ADDED_COLUMNS,
+  TASKS_M11_ADD_COLUMN_SQL,
   legacyRunsCopySql,
   legacyRuntimesCopySql,
   legacyTasksCopySql,
@@ -169,6 +173,7 @@ const TASKS_ADDED_COLUMNS = [
   ...TASKS_M7_ADDED_COLUMNS,
   ...TASKS_M8_ADDED_COLUMNS,
   ...TASKS_M10_ADDED_COLUMNS,
+  ...TASKS_M11_ADDED_COLUMNS,
 ] as const
 
 type TaskAddedColumn = (typeof TASKS_ADDED_COLUMNS)[number]
@@ -179,6 +184,7 @@ const TASKS_ADD_COLUMN_SQL: Readonly<Record<TaskAddedColumn, string>> = {
   ...TASKS_M7_ADD_COLUMN_SQL,
   ...TASKS_M8_ADD_COLUMN_SQL,
   ...TASKS_M10_ADD_COLUMN_SQL,
+  ...TASKS_M11_ADD_COLUMN_SQL,
 }
 
 /**
@@ -253,9 +259,12 @@ function upgradeLegacyTasks(db: DatabaseSync): boolean {
 export function needsStagesUpgrade(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'workflow_stages')
   if (columns.size === 0) return false
-  return [...STAGES_M7_ADDED_COLUMNS, ...STAGES_M8_ADDED_COLUMNS].some(
-    (column) => !columns.has(column),
-  )
+  return [
+    ...STAGES_M7_ADDED_COLUMNS,
+    ...STAGES_M8_ADDED_COLUMNS,
+    ...STAGES_M9_ADDED_COLUMNS,
+    ...STAGES_M11_ADDED_COLUMNS,
+  ].some((column) => !columns.has(column))
 }
 
 /**
@@ -268,11 +277,13 @@ function upgradeLegacyStages(db: DatabaseSync): boolean {
     ...STAGES_M7_ADD_COLUMN_SQL,
     ...STAGES_M8_ADD_COLUMN_SQL,
     ...STAGES_M9_ADD_COLUMN_SQL,
+    ...STAGES_M11_ADD_COLUMN_SQL,
   }
   const missing = [
     ...STAGES_M7_ADDED_COLUMNS,
     ...STAGES_M8_ADDED_COLUMNS,
     ...STAGES_M9_ADDED_COLUMNS,
+    ...STAGES_M11_ADDED_COLUMNS,
   ].filter((column) => !columns.has(column))
   if (missing.length === 0) return false
   withTx(db, () => {

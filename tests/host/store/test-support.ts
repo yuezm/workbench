@@ -133,6 +133,7 @@ export const sample = {
       onChildrenSettled: null,
       spawnPolicy: null,
       instructions: '',
+      gate: null,
       ...overrides,
     }
   },

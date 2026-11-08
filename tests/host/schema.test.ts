@@ -107,6 +107,8 @@ const TASKS_M7_COLUMNS = [
   'handoff_from_task_id',
   'handoff_from_stage_id',
   'project_id',
+  // M11：闸门预算
+  'gate_fails',
   'created_at',
   'updated_at',
 ]
@@ -128,6 +130,10 @@ const STAGES_M7_COLUMNS = [
   'spawn_policy',
   // M9：阶段要干什么
   'instructions',
+  // M11：闸门三列
+  'gate_max_fails',
+  'gate_on_pass_stage_id',
+  'gate_on_fail_stage_id',
   'created_at',
 ]
 

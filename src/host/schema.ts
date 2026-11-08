@@ -75,6 +75,10 @@ CREATE TABLE IF NOT EXISTS ${name} (
   spawn_policy TEXT CHECK (spawn_policy IN ('off','agent')),
   -- M9 阶段要干什么：进入本阶段的任务提示词里带的固定指令段（空串 = 没写）
   instructions TEXT NOT NULL DEFAULT '',
+  -- M11 闸门：允许未通过次数 / 通过去向 / 未通过去向（三列全空 = 不是闸门；弱引用不设外键）
+  gate_max_fails INTEGER,
+  gate_on_pass_stage_id TEXT,
+  gate_on_fail_stage_id TEXT,
   created_at TEXT NOT NULL,
   UNIQUE (workflow_id, position)
 );`
@@ -111,6 +115,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   handoff_from_task_id TEXT,
   handoff_from_stage_id TEXT,
   project_id TEXT,
+  -- M11 闸门预算：当前阶段连续未通过次数（0 = 没失败过；旧行默认 0）
+  gate_fails INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -677,6 +683,39 @@ export const TASKS_M10_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
+ * M11 给 `workflow_stages` 新增的列（闸门）：三列都可空，三列全空表示「不是闸门」。
+ * 去向两列是弱引用（删阶段后由内核判缺失，与 M7 交接同口径）。
+ * 清单与 `stagesTable()` 的 DDL 保持同步。
+ */
+export const STAGES_M11_ADDED_COLUMNS = [
+  'gate_max_fails',
+  'gate_on_pass_stage_id',
+  'gate_on_fail_stage_id',
+] as const
+
+/** `workflow_stages` M11 补列语句（可空、无 DEFAULT）。 */
+export const STAGES_M11_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M11_ADDED_COLUMNS)[number], string>
+> = {
+  gate_max_fails: 'ALTER TABLE workflow_stages ADD COLUMN gate_max_fails INTEGER',
+  gate_on_pass_stage_id: 'ALTER TABLE workflow_stages ADD COLUMN gate_on_pass_stage_id TEXT',
+  gate_on_fail_stage_id: 'ALTER TABLE workflow_stages ADD COLUMN gate_on_fail_stage_id TEXT',
+}
+
+/**
+ * M11 给 `tasks` 新增的列（闸门预算）：有 DEFAULT 0 —— 旧行按「没失败过」归一，
+ * 与内核 `normalizeTask` 一致。清单与 `tasksTable()` 的 DDL 保持同步。
+ */
+export const TASKS_M11_ADDED_COLUMNS = ['gate_fails'] as const
+
+/** `tasks` M11 补列语句（默认值与 DDL 一致）。 */
+export const TASKS_M11_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M11_ADDED_COLUMNS)[number], string>
+> = {
+  gate_fails: 'ALTER TABLE tasks ADD COLUMN gate_fails INTEGER NOT NULL DEFAULT 0',
+}
+
+/**
  * 旧 `tasks` 行 → 新 `tasks` 行（指名字表）的拷贝 SQL（M7 `tasks` 物理重建用）。
  *
  * 旧库可能缺 M6 / M6.5 / M7 的任一列：按 `columns` 逐列决定「取旧值」还是「补字面量」，
@@ -688,7 +727,8 @@ export function legacyTasksCopySql(targetTable: string, columns: ReadonlySet<str
   return `INSERT INTO ${targetTable} (
     id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
     external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
-    spawn_key, handoff_from_task_id, handoff_from_stage_id, project_id, created_at, updated_at
+    spawn_key, handoff_from_task_id, handoff_from_stage_id, project_id, gate_fails,
+    created_at, updated_at
   )
   SELECT
     id, title, description, workflow_id, current_stage_id, status,
@@ -698,7 +738,7 @@ export function legacyTasksCopySql(targetTable: string, columns: ReadonlySet<str
     ${pick('spawned_by_run_id', 'NULL')}, ${pick('batch_no', 'NULL')},
     ${pick('spawn_key', 'NULL')},
     ${pick('handoff_from_task_id', 'NULL')}, ${pick('handoff_from_stage_id', 'NULL')},
-    ${pick('project_id', 'NULL')},
+    ${pick('project_id', 'NULL')}, ${pick('gate_fails', '0')},
     created_at, updated_at
   FROM tasks`
 }

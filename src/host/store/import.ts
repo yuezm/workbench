@@ -361,6 +361,8 @@ function readLegacyEntityRows(
     handoffStageId: null,
     // M9：v2 存量没有阶段说明——按空串归一（与投影层 `normalizeStage` 一致）。
     instructions: '',
+    // M11：v2 存量没有闸门概念——按「不是闸门」归一。
+    gate: null,
   }))
 
   const tasks = (
@@ -394,6 +396,8 @@ function readLegacyEntityRows(
     // M7：v2 存量没有交接概念——来源任务与阶段一律为空。
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    // M11：v2 存量没有闸门概念——预算按 0 归一（与投影层 `normalizeTask` 一致）。
+    gateFails: 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))

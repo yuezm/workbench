@@ -215,10 +215,12 @@ const normalizeTask = (row: Task): Task => {
     spawnKey: legacy.spawnKey ?? null,
     handoffFromTaskId: legacy.handoffFromTaskId ?? null,
     handoffFromStageId: legacy.handoffFromStageId ?? null,
+    // M11：闸门预算缺省 0（没失败过）
+    gateFails: legacy.gateFails ?? 0,
   }
 }
 
-/** 规整阶段行的缺省值（M7 / M8）：缺交接 / 子任务字段时补 null。 */
+/** 规整阶段行的缺省值（M7 / M8 / M11）：缺交接 / 子任务 / 闸门字段时补 null。 */
 const normalizeStage = (row: WorkflowStage): WorkflowStage => {
   const legacy = row as Partial<WorkflowStage>
   return {
@@ -228,6 +230,7 @@ const normalizeStage = (row: WorkflowStage): WorkflowStage => {
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,
+    gate: legacy.gate ?? null,
   }
 }
 
@@ -310,8 +313,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       `INSERT INTO tasks
          (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
           external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
-          spawn_key, handoff_from_task_id, handoff_from_stage_id, project_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          spawn_key, handoff_from_task_id, handoff_from_stage_id, project_id, gate_fails,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
@@ -330,6 +334,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          handoff_from_task_id = excluded.handoff_from_task_id,
          handoff_from_stage_id = excluded.handoff_from_stage_id,
          project_id = excluded.project_id,
+         gate_fails = excluded.gate_fails,
          created_at = excluded.created_at,
          updated_at = excluded.updated_at`,
     ),
@@ -353,8 +358,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, instructions, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, instructions, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
@@ -368,7 +373,10 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          subtask_stage_id = excluded.subtask_stage_id,
          on_children_settled = excluded.on_children_settled,
          spawn_policy = excluded.spawn_policy,
-         instructions = excluded.instructions`,
+         instructions = excluded.instructions,
+         gate_max_fails = excluded.gate_max_fails,
+         gate_on_pass_stage_id = excluded.gate_on_pass_stage_id,
+         gate_on_fail_stage_id = excluded.gate_on_fail_stage_id`,
     ),
     agents: db.prepare(
       `INSERT INTO agents (id, name, description, runtime_id, system_prompt, created_at)
@@ -561,6 +569,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         task.handoffFromTaskId,
         task.handoffFromStageId,
         task.projectId ?? null,
+        task.gateFails ?? 0,
         task.createdAt,
         task.updatedAt,
       )
@@ -597,6 +606,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.onChildrenSettled ?? null,
         stage.spawnPolicy ?? null,
         stage.instructions ?? '',
+        stage.gate?.maxFails ?? null,
+        stage.gate?.onPassStageId ?? null,
+        stage.gate?.onFailStageId ?? null,
         at,
       )
     },

@@ -307,6 +307,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       handoffWorkflowId: null,
       handoffStageId: null,
       instructions: '',
+      gate: null,
     },
     {
       id: 'st-2',
@@ -320,6 +321,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       handoffWorkflowId: null,
       handoffStageId: null,
       instructions: '',
+      gate: null,
     },
   ]
   const tasks: Task[] = [
@@ -344,6 +346,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       spawnKey: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      gateFails: 0,
       createdAt: seedAt(6),
       updatedAt: seedAt(7),
     },
@@ -366,6 +369,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       spawnKey: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      gateFails: 0,
       createdAt: seedAt(8),
       updatedAt: seedAt(9),
     },

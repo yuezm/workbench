@@ -417,6 +417,31 @@ describe('queryView：各视图', () => {
     ])
   })
 
+  // 回归：`readStages` 的列清单曾漏掉闸门三列，读写不对称 → 闸门存进去、读回来变 null，
+  // 编辑器重开就退回「交给智能体」，再保存还会把闸门配置抹掉。
+  it('workflows.all：闸门配置经投影写入后能原样读回', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+    const gateStage = sample.stage({
+      id: 'st-gate',
+      workflowId: 'wf-1',
+      name: '验收',
+      position: 2,
+      entryMode: 'agent',
+      agentId: agent.id,
+      gate: { maxFails: 3, onPassStageId: 'st-1', onFailStageId: 'st-2' },
+    })
+    writer.apply({ table: 'workflow_stages', key: gateStage.id, row: gateStage }, SAMPLE_AT)
+
+    const stages = (queryView(db, 'workflows.all') as WorkflowWithStages[]).find(
+      (item) => item.id === 'wf-1',
+    )?.stages
+    expect(stages?.find((item) => item.id === 'st-gate')).toEqual(gateStage)
+    // 三列全空的阶段仍归一成「不是闸门」
+    expect(stages?.find((item) => item.id === 'st-1')?.gate).toBeNull()
+  })
+
   it('agents.all / runtimes.all：按创建时间排序并映射 lastProbe', () => {
     const db = memory()
     seed(db)

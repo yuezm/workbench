@@ -112,7 +112,7 @@ describe('ProjectDialog', () => {
   })
 
   it('编辑态「删除项目」调用 onRemove(id)；失败就地展示且弹窗不关', async () => {
-    const onRemove = vi.fn().mockRejectedValue(new Error('项目下还有任务'))
+    const onRemove = vi.fn().mockRejectedValue(new Error('项目下有执行中的任务'))
     const user = userEvent.setup()
     render(
       <ProjectDialog project={project} onSave={vi.fn()} onRemove={onRemove} onCancel={vi.fn()} />,
@@ -120,12 +120,12 @@ describe('ProjectDialog', () => {
 
     await user.click(screen.getByRole('button', { name: '删除项目' }))
     expect(onRemove).toHaveBeenCalledWith('p1')
-    expect(await screen.findByText('项目下还有任务')).toBeInTheDocument()
+    expect(await screen.findByText('项目下有执行中的任务')).toBeInTheDocument()
     expect(screen.getByText('编辑项目')).toBeInTheDocument()
 
     // 删除失败的文案贴在删除按钮上方，可单独关掉，不影响表单里的输入
     await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
-    expect(screen.queryByText('项目下还有任务')).not.toBeInTheDocument()
+    expect(screen.queryByText('项目下有执行中的任务')).not.toBeInTheDocument()
     expect(screen.getByLabelText('项目名称')).toHaveValue('工作台')
   })
 

@@ -120,6 +120,8 @@ interface Seed {
   runtimes?: Runtime[]
   projects?: Project[]
   tasks?: Task[]
+  /** 「执行中」的任务 id（宿主按 runs 现算，内核只认这份集合） */
+  activeTasks?: string[]
   conversations?: Conversation[]
   rules?: AutomationRule[]
   rulesVersion?: number
@@ -137,7 +139,7 @@ const view = (seed: Seed = {}): View => ({
   conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
   messages: new Map(),
   cards: new Map(),
-  activeTaskIds: new Set(),
+  activeTaskIds: new Set(seed.activeTasks ?? []),
   threads: new Map(),
   taskComments: new Map(),
   rules: seed.rules ?? [],
@@ -304,19 +306,36 @@ describe('kernel/decide 项目（M10）', () => {
     })
   })
 
-  it('project.remove：不存在幂等、项目下有任务拒绝、空项目删除产 tombstone', () => {
+  it('project.remove：不存在幂等、执行中任务拒绝、其余任务归默认目录后删 tombstone', () => {
     expect(
       decide(view(), command({ type: 'project.remove', id: 'pj-missing' }), NOW, env()).facts,
     ).toEqual([])
 
+    // 只有「执行中」（activeTaskIds：queued / running / waiting）拦删除
     expect(
-      decide(view({ tasks: [task()] }), command({ type: 'project.remove', id: 'pj-1' }), NOW, env())
-        .reject,
-    ).toEqual({ code: 'conflict', message: '项目下还有任务，无法删除: 工作台' })
+      decide(
+        view({ tasks: [task()], activeTasks: ['t-1'] }),
+        command({ type: 'project.remove', id: 'pj-1' }),
+        NOW,
+        env(),
+      ).reject,
+    ).toEqual({ code: 'conflict', message: '项目下有执行中的任务，无法删除: 工作台' })
 
-    const ok = decide(view(), command({ type: 'project.remove', id: 'pj-1' }), NOW, env())
-    expect(ok.facts.map((fact) => fact.type)).toEqual(['project.removed'])
-    expect((ok.facts[0]?.payload as { project: Project }).project.id).toBe('pj-1')
+    // 没在跑的任务（含已完成）不拦：归默认目录，`projectId` 不悬空
+    const ok = decide(
+      view({
+        tasks: [task({ status: 'completed' }), task({ id: 't-2', projectId: 'pj-2' })],
+      }),
+      command({ type: 'project.remove', id: 'pj-1' }),
+      NOW,
+      env(),
+    )
+    expect(ok.reject).toBeUndefined()
+    expect(ok.facts.map((fact) => fact.type)).toEqual(['task.updated', 'project.removed'])
+    expect(ok.facts[0]?.payload).toEqual({
+      task: { ...task({ status: 'completed' }), projectId: null, updatedAt: NOW },
+    })
+    expect((ok.facts[1]?.payload as { project: Project }).project.id).toBe('pj-1')
   })
 
   it('project.remove：项目下的会话归默认目录（先逐条 conversation.updated，再 project.removed）', () => {
@@ -515,9 +534,9 @@ describe('kernel/decide 项目（M10）', () => {
     })
   })
 
-  it('project.remove：任务属于别的项目时不算「项目下有任务」，可删除', () => {
+  it('project.remove：任务属于别的项目时不算「项目下有任务」，也不改它的归属', () => {
     const ok = decide(
-      view({ projects: [project()], tasks: [task({ projectId: 'pj-2' })] }),
+      view({ projects: [project()], tasks: [task({ projectId: 'pj-2' })], activeTasks: ['t-1'] }),
       command({ type: 'project.remove', id: 'pj-1' }),
       NOW,
       env(),

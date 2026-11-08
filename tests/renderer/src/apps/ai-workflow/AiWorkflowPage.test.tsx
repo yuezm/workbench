@@ -848,7 +848,7 @@ describe('AiWorkflowPage', () => {
 
   it('项目弹窗：删除失败时文案同时挂到页面顶部错误条，弹窗不关', async () => {
     seedBase()
-    dispatchWith(() => Promise.reject(new Error('项目下还有任务')))
+    dispatchWith(() => Promise.reject(new Error('项目下有执行中的任务')))
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await openTasks(user)
@@ -858,7 +858,7 @@ describe('AiWorkflowPage', () => {
 
     // 页面顶部错误条 + 弹窗内就地提示各一份
     await waitFor(async () =>
-      expect((await screen.findAllByText('项目下还有任务')).length).toBeGreaterThan(0),
+      expect((await screen.findAllByText('项目下有执行中的任务')).length).toBeGreaterThan(0),
     )
     expectDispatched({ type: 'project.remove', id: 'p1' })
     expect(screen.getByRole('dialog')).toBeInTheDocument()

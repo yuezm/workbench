@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { Card, Conversation, Message, RunRow, Runtime } from '../../src/protocol/entities'
+import type {
+  Card,
+  Conversation,
+  Message,
+  RunRow,
+  Runtime,
+  Task,
+} from '../../src/protocol/entities'
 import {
   FACT_TYPES,
   type CardAnsweredPayload,
@@ -25,6 +32,8 @@ type Assert<T extends true> = T
 const payloadKeysCover: Assert<Equal<keyof FactPayloads, FactType>> = true
 /** 泛型取出的 payload 类型与具名类型一致。 */
 const payloadIndexing: Assert<Equal<FactPayload<'task.moved'>, TaskMovedPayload>> = true
+/** M10：任务行整行更新（动归属不动阶段），与 `conversation.updated` 同一口径。 */
+const taskUpdatedPayload: Assert<Equal<FactPayload<'task.updated'>, { task: Task }>> = true
 /** runtime 事实一律携带完整行（含 lastProbe），`project` 不做特判。 */
 const runtimePayloads: [
   Assert<Equal<FactPayload<'runtime.created'>, { runtime: Runtime }>>,
@@ -82,6 +91,7 @@ const expected = [
   'project.updated',
   'project.removed',
   'task.created',
+  'task.updated',
   'task.moved',
   'task.completed',
   'task.removed',
@@ -160,6 +170,7 @@ describe('protocol/facts', () => {
   it('事实名到 payload 的映射完整（类型级断言）', () => {
     expect(payloadKeysCover).toBe(true)
     expect(payloadIndexing).toBe(true)
+    expect(taskUpdatedPayload).toBe(true)
     expect(runtimePayloads).toEqual([true, true, true, true])
     expect(settledPayloads).toEqual([true, true, true])
     expect(runChatPayloads).toEqual([true, true])

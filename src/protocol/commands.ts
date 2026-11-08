@@ -160,7 +160,8 @@ export interface ProjectUpdateCommand extends CommandBase {
 }
 
 /**
- * 删除项目：项目下还有任务（含已完成的）时拒绝，避免任务失去工作目录。
+ * 删除项目：项目下有执行中的任务（queued / running / waiting）时拒绝，避免任务失去工作目录；
+ * 其余任务不跟着消失，归到默认目录（`Task.projectId = null`）。
  * 不存在的项目按幂等删除处理（零事实）。
  */
 export interface ProjectRemoveCommand extends CommandBase {

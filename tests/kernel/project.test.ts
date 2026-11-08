@@ -301,6 +301,10 @@ describe('kernel/project', () => {
     expect(project(fact(12, 'task.completed', { task: task({ status: 'completed' }) }))).toEqual([
       put('tasks', task({ status: 'completed' })),
     ])
+    // M10：删项目时遗留任务归默认目录 —— 整行更新，阶段不动
+    expect(project(fact(20, 'task.updated', { task: task({ projectId: null }) }))).toEqual([
+      put('tasks', task({ projectId: null })),
+    ])
     // M7.5：任务上下文 / 反馈是独立投影行（纯追加），任务行不动
     expect(
       project(

@@ -96,6 +96,7 @@ function refsOf(fact: AnyFact): EntityRef[] {
       // M10：项目事实归到项目时间线（任务由 task.created 的 projectId 关联，不在这里串）
       return [{ scope: 'project', id: fact.payload.project.id }]
     case 'task.created':
+    case 'task.updated':
     case 'task.moved':
     case 'task.completed':
     case 'task.removed':

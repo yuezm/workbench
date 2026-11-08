@@ -147,6 +147,7 @@ function changesOf(fact: AnyFact): Change[] {
     case 'project.removed':
       return [remove('projects', fact.payload.project.id)]
     case 'task.created':
+    case 'task.updated':
     case 'task.moved':
     case 'task.completed':
       // M6：规则任务带 origin/ruleId/externalRef/labels；老事实缺字段由归一补齐。

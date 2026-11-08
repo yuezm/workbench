@@ -48,8 +48,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'project.update':
       return ['projects']
     case 'project.remove':
-      // 项目下还有任务时拒绝删除；M11：删项目要把该项目下的会话归到默认目录
-      // （逐条产 conversation.updated），因此还要读会话
+      // 项目下有执行中的任务时拒绝删除（读 tasks + activeTaskIds）；
+      // 删项目要把该项目下的任务与会话归到默认目录（M10/M11，逐条产 task.updated /
+      // conversation.updated），因此还要读会话
       return ['projects', 'tasks', 'conversations']
     case 'task.create':
       // 进入效果要判定落点是否 agent 入口并拼提示词 → 需要智能体与运行时配置；

@@ -11,7 +11,7 @@ export interface ProjectDialogProps {
   /** 编辑态传入现有项目；新建时省略 */
   project?: Project
   onSave: (input: ProjectInput, id?: string) => Promise<void>
-  /** 编辑态才给：删除项目（项目下还有任务时内核会拒绝，错误就地展示） */
+  /** 编辑态才给：删除项目（项目下有执行中的任务时内核会拒绝，错误就地展示） */
   onRemove?: (id: string) => Promise<void>
   onCancel: () => void
 }
@@ -203,6 +203,12 @@ export function ProjectDialog({
 
         <div className="mt-2 flex flex-col gap-2">
           <FormError message={removeError} onDismiss={() => setRemoveError(null)} />
+          {project !== undefined && onRemove !== undefined && (
+            // 删除会改任务与会话的归属：先写清后果；执行中的任务由内核拦下
+            <p className="text-meta text-ink-faint">
+              删除后，项目里的任务与会话归到默认目录（执行中的任务要先停掉）。
+            </p>
+          )}
           <div className="flex items-center justify-between gap-2">
             {/* 删除只在编辑态出现，放左边：与右侧的「取消 / 保存」隔开，避免误点 */}
             <div>

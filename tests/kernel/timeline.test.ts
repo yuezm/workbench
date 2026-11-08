@@ -189,11 +189,18 @@ describe('kernel/timeline', () => {
       fact(1, 'task.created', { task: task() }),
       fact(2, 'task.moved', { task: task({ currentStageId: 'st-2' }), from: 'st-1', to: 'st-2' }),
       fact(4, 'task.created', { task: task({ id: 't-2' }) }),
+      // M10：归默认目录的整行更新同样归任务时间线
+      fact(5, 'task.updated', { task: task({ projectId: null }) }),
     ]
 
     const entries = timeline(facts, 'task', 't-1')
 
-    expect(kinds(entries)).toEqual(['1:task.created', '2:task.moved', '3:task.completed'])
+    expect(kinds(entries)).toEqual([
+      '1:task.created',
+      '2:task.moved',
+      '3:task.completed',
+      '5:task.updated',
+    ])
     expect(entries.every((entry) => entry.imported === false)).toBe(true)
     expect(entries.every((entry) => entry.label === null)).toBe(true)
   })

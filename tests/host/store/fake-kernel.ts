@@ -245,6 +245,7 @@ export const defaultProject: KernelPort['project'] = (fact) => {
     case 'runtime.removed':
       return removeRow('runtimes', (fact.payload as { runtime: Runtime }).runtime.id)
     case 'task.created':
+    case 'task.updated':
     case 'task.moved':
     case 'task.completed':
       return upsert('tasks', (fact.payload as { task: Task }).task)

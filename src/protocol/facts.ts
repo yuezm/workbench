@@ -54,6 +54,7 @@ export const FACT_TYPES = [
   'project.updated',
   'project.removed',
   'task.created',
+  'task.updated',
   'task.moved',
   'task.completed',
   'task.removed',
@@ -183,6 +184,14 @@ export interface ProjectRemovedPayload {
 // ---------- 任务 ----------
 
 export interface TaskCreatedPayload {
+  task: Task
+}
+
+/**
+ * 任务行整行更新（不动阶段、不算完成）：M10 删项目时把遗留任务归到默认目录用，
+ * 与 `conversation.updated` 同一口径，避免任务 `projectId` 指向已删项目。
+ */
+export interface TaskUpdatedPayload {
   task: Task
 }
 
@@ -515,6 +524,7 @@ export interface FactPayloads {
   'project.updated': ProjectUpdatedPayload
   'project.removed': ProjectRemovedPayload
   'task.created': TaskCreatedPayload
+  'task.updated': TaskUpdatedPayload
   'task.moved': TaskMovedPayload
   'task.completed': TaskCompletedPayload
   'task.removed': TaskRemovedPayload

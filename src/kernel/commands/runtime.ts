@@ -1,7 +1,7 @@
 /**
  * 运行时 / 项目命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
-import type { Agent, Project, Runtime } from '../../protocol/entities'
+import type { Agent, Project, Runtime, Task } from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
 import { done, ownerDraft, reject, CONCURRENCY_CAP, CONCURRENCY_FLOOR } from './common'
@@ -47,12 +47,13 @@ function projectAtPath(view: View, path: string, exceptId: Id): Project | undefi
   return undefined
 }
 
-/** 项目下是否还有任务（含已完成的）：有就不允许删项目。 */
-function projectHasTasks(view: View, projectId: Id): boolean {
+/** 项目下正在跑的任务（有 queued / running / waiting 的 run）：「执行中」只认 `activeTaskIds`。 */
+function projectActiveTasks(view: View, projectId: Id): Task[] {
+  const active: Task[] = []
   for (const task of view.tasks.values()) {
-    if (task.projectId === projectId) return true
+    if (task.projectId === projectId && view.activeTaskIds.has(task.id)) active.push(task)
   }
-  return false
+  return active
 }
 
 function agentUsingRuntime(view: View, runtimeId: Id): Agent | undefined {
@@ -232,12 +233,21 @@ export function removeProject(
   const current = view.projects.get(input.id)
   // 删除不存在的项目按幂等处理（与 runtime.remove 同口径）
   if (!current) return done([])
-  if (projectHasTasks(view, current.id)) {
-    return reject('conflict', '项目下还有任务，无法删除: ' + current.name)
+  // 只有「执行中」拦删除：跑着的任务失去项目就没了工作目录，先停再删由人来决定
+  if (projectActiveTasks(view, current.id).length > 0) {
+    return reject('conflict', '项目下有执行中的任务，无法删除: ' + current.name)
+  }
+  const facts: FactDraft[] = []
+  // 已完成 / 未开始的任务不随项目消失：同 M11 的会话口径，归到默认目录（`projectId: null`），
+  // 逐条产 `task.updated`，避免任务行留下指向已删项目的悬空弱引用
+  for (const task of view.tasks.values()) {
+    if (task.projectId !== current.id) continue
+    facts.push(
+      ownerDraft('task.updated', { task: { ...task, projectId: null, updatedAt: now } }, now),
+    )
   }
   // M11：项目下的会话不随项目消失，归到默认目录（`projectId: null`）；
   // 逐条产 `conversation.updated` 再删项目，重建与增量折出同一行
-  const facts: FactDraft[] = []
   for (const conversation of view.conversations.values()) {
     if (conversation.projectId !== current.id) continue
     facts.push(

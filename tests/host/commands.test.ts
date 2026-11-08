@@ -385,6 +385,72 @@ describe('host/commands：命令路由（M5）', () => {
     expect(store.query('task.byId', { taskId: taskRow.id })).toBeNull()
   })
 
+  it('project.remove：执行中的任务拦删除；其余任务归默认目录（task.updated + 重建等价）', async () => {
+    const { db, store, router } = setup()
+    const workflowRow = (await router.dispatch(workflowCommand())).value as {
+      id: string
+      stages: Array<{ id: string }>
+    }
+    const project = (await router.dispatch(projectCommand())).value as { id: string }
+    const taskRow = (await router.dispatch(taskCommand(workflowRow.id, project.id))).value as {
+      id: string
+      currentStageId: string
+    }
+    const runId = 'run-active'
+    createProjectionWriter(db).apply(
+      {
+        table: 'runs',
+        key: runId,
+        row: sample.run({
+          id: runId,
+          taskId: taskRow.id,
+          stageId: taskRow.currentStageId,
+          agentId: null,
+          runtimeId: null,
+          status: 'running',
+        }),
+      },
+      NOW,
+    )
+
+    // 有活跃 run → 拒绝；项目与任务都不动
+    await expect(
+      router.dispatch({ commandId: 'c-project-blocked', type: 'project.remove', id: project.id }),
+    ).rejects.toMatchObject({ code: 'conflict' })
+    expect(store.query('projects.all')).toHaveLength(1)
+
+    // 跑完（run 落终态）后可以删：任务不跟着消失，归默认目录
+    createProjectionWriter(db).apply(
+      {
+        table: 'runs',
+        key: runId,
+        row: sample.run({
+          id: runId,
+          taskId: taskRow.id,
+          stageId: taskRow.currentStageId,
+          agentId: null,
+          runtimeId: null,
+          status: 'succeeded',
+        }),
+      },
+      NOW,
+    )
+    const removed = await router.dispatch({
+      commandId: 'c-project-remove',
+      type: 'project.remove',
+      id: project.id,
+    })
+    expect(removed.facts.map((fact) => fact.type)).toEqual(['task.updated', 'project.removed'])
+    expect(store.query('projects.all')).toEqual([])
+
+    const unassigned = store.query('tasks.unassigned')
+    expect(unassigned.map((row) => [row.id, row.projectId])).toEqual([[taskRow.id, null]])
+
+    // 事实只追加：重建投影后同一批任务仍归默认目录
+    store.rebuild()
+    expect(store.query('tasks.unassigned')).toEqual(unassigned)
+  })
+
   it('chat.remove：先取消该对话活跃聊天 run，再删对话', async () => {
     const { db, store, router, dispatched } = setup()
     const created = router.dispatch({

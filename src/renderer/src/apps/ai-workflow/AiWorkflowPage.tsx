@@ -272,7 +272,7 @@ export function AiWorkflowPage(): ReactElement {
     }
   }
 
-  /** 删除项目：项目下还有任务时内核拒绝，文案同样走页面顶部错误条 */
+  /** 删除项目：项目下有执行中的任务时内核拒绝，文案同样走页面顶部错误条 */
   const removeProject = async (id: string): Promise<void> => {
     try {
       await getKernelStore().dispatch({ type: 'project.remove', commandId: '', id })

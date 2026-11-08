@@ -129,14 +129,17 @@
 | `Menu`             | 触发器同 `Button` + 折叠箭头；浮层同 `Select`，条目 `rounded-md`，标题行尾徽标 `rounded-sm`，说明 `text-meta text-ink-dim` |
 | `Panel` / `Dialog` | `rounded-xl bg-surface border-line`；弹窗遮罩 `bg-black/55 backdrop-blur-sm`                                               |
 | `Segmented`        | 容器 `rounded-lg bg-surface-2`，选项 `rounded-md`，当前项 `bg-surface-3`                                                   |
-| `Field`            | 小标签 `text-meta text-ink-dim`                                                                                            |
+| `Field`            | 小标签 `text-meta text-ink-dim`；`required` 给红 `*` + 读屏「必填」；`error` 用 `text-danger`                              |
+| `FormError`        | `rounded-lg border-danger/30 bg-danger/10 text-body text-danger`，恒带 `role="alert"`，`onDismiss` 才出现关闭按钮          |
 | 徽标               | `badgeCls`：`rounded-sm bg-white/[0.07] text-badge text-ink-dim`                                                           |
 
 ## 9. 检查方式
 
 ```
-pnpm check:ui   # 圆角越界 / rounded-full 误用 / 重玻璃 / 调色板外色值 / 圆角刻度上限 / 前景对比度 / 字阶越界
+pnpm check:ui   # 圆角越界 / rounded-full 误用 / 重玻璃 / 调色板外色值（#hex 与内置色类名）/ 圆角刻度上限 / 前景对比度 / 字阶越界 / 静默校验守卫
 ```
+
+2026-11-08 起新增两条机械规则（对应 §11）：`off-palette-utility`（`text-red-300`、`bg-amber-400/10` 这类 Tailwind 内置色一律拦下，只认 token）与 `silent-validation-guard`（`if (!x.trim()) return` —— 点了没反应的静默校验）。
 
 `check:ui` 已并入 `pnpm check:fast` 与 pre-commit。它只拦机械可判定的部分；下面这些靠 review：
 
@@ -155,3 +158,24 @@ pnpm check:ui   # 圆角越界 / rounded-full 误用 / 重玻璃 / 调色板外�
 - 面板 `bg-white/[0.02] backdrop-blur-xl shadow-[...]` 三层叠加。
 - 顶部栏 / 页面背景放大面积渐变或模糊光斑。
 - 在组件里写 `#8b7cf7` 这类调色板外颜色。
+
+## 11. 表单校验与错误反馈
+
+2026-11-08 起为硬规则。由来：新建任务弹窗不填标题点「创建」毫无反应（`if (!title.trim()) return`），
+既没有必填标识也没有报错，用户只能猜。**「点了没反应」是缺陷，不是简洁。**
+
+| 场景             | 必须怎么做                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| 必填字段         | `Field required`（红 `*` + 读屏「必填」）；不靠「按钮灰着不响」表达必填                                |
+| 空值提交         | `role="alert"` 的就地文案 + 焦点移回出错字段（`aria-invalid`）；禁止 `if (!x) return` 静默返回         |
+| 字段级错误       | `Field error={...}`                                                                                    |
+| 表单 / 命令错误  | `<FormError message={...} />`；按钮被拒、宿主探测失败等都在弹窗就地展示，弹窗不关、输入不丢            |
+| 页面级错误条     | 只放整体状态：视图读失败（不可关）、跨组件写失败（可关）；不放用户能在字段里改的错误                   |
+| 同一错误的播报   | 一条错误只挂一处。`cards.open` 这类视图错误由页面级错误条播报，通知条自身不重复                        |
+| 文本字段         | 提交前 `trim()`                                                                                        |
+| 数字 / JSON 字段 | 非法给文案，不静默回落成默认值（`Number(x) \|\| 1` 是静默改写用户输入）                                |
+| 禁用按钮         | 必须伴随可见原因：空态提示行、前置条件说明，或已写明的必填错误                                         |
+| 颜色             | 只用语义 token（`text-danger` / `border-danger/30` / `bg-danger/10`），不写 `red-400` 一类调色板外色值 |
+
+写测试时，「空值提交」用例要断言两件事：**没有发命令** + **出现了可见提示**。
+只断言「没提交」等于把静默失败固化成期望行为。

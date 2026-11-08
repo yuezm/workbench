@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, Notification } from 'electron'
+import { BrowserWindow, dialog, ipcMain } from 'electron'
 import type { NotifyPayload } from '../shared/workbench-api'
 import { NOTIFY_CHANNEL } from '../shared/workbench-api'
 import {
@@ -9,6 +9,7 @@ import {
 } from '../protocol/ipc'
 import type { CommandRouter } from '../host/commands'
 import { StoreError } from '../host/store/index'
+import { notify } from './notify'
 
 export interface KernelIpcDeps {
   /** 三动词的宿主实现（命令路由 / 读视图） */
@@ -32,7 +33,9 @@ async function wrap<T>(run: () => Promise<T> | T): Promise<IpcResponse<T>> {
  */
 export function registerIpcHandlers(deps: KernelIpcDeps): void {
   ipcMain.handle(NOTIFY_CHANNEL, (_event, payload: NotifyPayload) => {
-    new Notification({ title: payload.title, body: payload.body }).show()
+    // 与插件通道共用同一个原件（`main/notify.ts`）：平台不支持 / 构造失败返回 false 而不抛，
+    // 避免「窗口里的番茄钟通知在无通知服务的机器上把 IPC 打崩」。
+    notify(payload.title, payload.body ?? '')
   })
   ipcMain.handle(WORKBENCH_DISPATCH_CHANNEL, (_event, command: unknown) =>
     wrap(() => deps.router.dispatch(command)),

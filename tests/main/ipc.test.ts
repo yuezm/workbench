@@ -9,17 +9,29 @@ import {
 } from '../../src/protocol/ipc'
 import { StoreError } from '../../src/host/store/index'
 
-const { ipcMainMock, notificationMock, showMock, dialogMock, windowMock } = vi.hoisted(() => {
-  const showMock = vi.fn()
-  // 需可被 new：用普通函数而非箭头函数
-  const notificationMock = vi.fn(function mockNotification() {
-    return { show: showMock }
+const { ipcMainMock, notificationMock, showMock, isSupportedMock, dialogMock, windowMock } =
+  vi.hoisted(() => {
+    const showMock = vi.fn()
+    // 需可被 new：用普通函数而非箭头函数
+    const notificationMock = vi.fn(function mockNotification() {
+      return { show: showMock }
+    })
+    const isSupportedMock = vi.fn(() => true)
+    // 与 `main/notify.ts` 同一套原件：notify 先问 isSupported
+    ;(notificationMock as unknown as { isSupported: typeof isSupportedMock }).isSupported =
+      isSupportedMock
+    const dialogMock = { showOpenDialog: vi.fn() }
+    // 测试里没有真实窗口：fromWebContents 返回 null，走无父窗口的分支
+    const windowMock = { fromWebContents: vi.fn((_sender: unknown): unknown => null) }
+    return {
+      ipcMainMock: { handle: vi.fn() },
+      notificationMock,
+      showMock,
+      isSupportedMock,
+      dialogMock,
+      windowMock,
+    }
   })
-  const dialogMock = { showOpenDialog: vi.fn() }
-  // 测试里没有真实窗口：fromWebContents 返回 null，走无父窗口的分支
-  const windowMock = { fromWebContents: vi.fn((_sender: unknown): unknown => null) }
-  return { ipcMainMock: { handle: vi.fn() }, notificationMock, showMock, dialogMock, windowMock }
-})
 
 vi.mock('electron', () => ({
   ipcMain: ipcMainMock,
@@ -76,7 +88,22 @@ describe('main 进程 IPC（M5 三动词 + 通知）', () => {
     expect(showMock).toHaveBeenCalledTimes(1)
 
     expect(() => handler({}, { title: '仅标题' } satisfies NotifyPayload)).not.toThrow()
-    expect(notificationMock).toHaveBeenCalledWith({ title: '仅标题', body: undefined })
+    // 正文缺省补空串：`notify(title, body: string)` 的契约不收 undefined
+    expect(notificationMock).toHaveBeenCalledWith({ title: '仅标题', body: '' })
+  })
+
+  it('notify：平台不支持 / 通知构造失败时不抛（渲染侧已发出去的调用不能炸主进程）', () => {
+    const handler = handlerFor(NOTIFY_CHANNEL)
+
+    isSupportedMock.mockReturnValueOnce(false)
+    expect(() => handler({}, { title: '仅标题' } satisfies NotifyPayload)).not.toThrow()
+    expect(showMock).not.toHaveBeenCalled()
+
+    notificationMock.mockImplementationOnce(function throwingNotification() {
+      throw new Error('通知构造失败')
+    })
+    expect(() => handler({}, { title: '会炸' } satisfies NotifyPayload)).not.toThrow()
+    expect(showMock).not.toHaveBeenCalled()
   })
 
   it('dispatch：成功包成 {ok:true,value}；命令原样交给路由', async () => {

@@ -5,6 +5,7 @@
  * - `run.cancel_requested` → 中止执行中的 run（终止时序由执行器负责）；
  * - `card.opened` / `card.updated` → 交给通道 hub（fire-and-forget：hub 自己异步投递、
  *   自捕获异常与超时，不拖住写路径）；
+ * - 结局通知（M12）→ `announce`：`task.completed` / `run.failed` 由装配根翻成系统通知；
  * - 其余事实 → 只做变更通知。
  *
  * **所有写入口统一走 `effects.dispatch`**（IPC、scheduler、clock、通道）：先提交事实，
@@ -38,6 +39,11 @@ export interface EffectsOptions {
   channels?: () => EffectsChannels
   /** 变更广播（窗口）：一次提交推一次；异常隔离 */
   notifyChanged?: () => void
+  /**
+   * 结局通知（M12）：把「任务完成 / 运行失败」翻成系统通知，由装配根接到 `sdkHost.notify`
+   * （宿主不 import Electron）。只在**实时提交**路径调用，重建 / 存量导入不产生打扰。
+   */
+  announce?: (facts: readonly Fact[]) => void
   /** 事实观察钩子（诊断 / 测试）；异常同样隔离 */
   onFacts?: (facts: readonly Fact[]) => void
 }
@@ -78,6 +84,8 @@ export function createEffects(options: EffectsOptions): Effects {
       safely(() => options.channels?.().dispatch(facts))
     }
     safely(() => options.onFacts?.(facts))
+    // 结局通知：卡片之外的打扰（任务完成 / 运行失败），与卡片投递互不影响
+    safely(() => options.announce?.(facts))
     safely(() => options.notifyChanged?.())
   }
 

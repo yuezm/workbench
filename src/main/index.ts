@@ -16,6 +16,7 @@ import {
 } from '../host/commands'
 import { createEffects } from '../host/effects'
 import { createFactFeed, type FactFeed } from '../host/feed'
+import { noticesFromFacts } from '../host/notices'
 import { defaultSpawn, killPidTree } from '../host/process'
 import { createProcessRegistry } from '../host/process-registry'
 import { reconcile } from '../host/reconcile'
@@ -404,6 +405,10 @@ if (app.requestSingleInstanceLock()) {
         return hub
       },
       onFacts: (facts) => feed.publish(facts),
+      // M12：卡片之外的两类打扰（任务完成 / 运行失败）；复用托盘/系统通知原件，异常由 effects 隔离
+      announce: (facts) => {
+        for (const request of noticesFromFacts(facts)) notify(request.title, request.body)
+      },
     })
     // 通道 hub（M4 D9）：effects 之后创建、scheduler 之前 startAll；
     // 启动时先补投 `delivery='pending'` 的 open 卡（重启只补未送达的版本）。

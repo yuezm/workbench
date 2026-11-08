@@ -240,6 +240,93 @@ describe('createEffects：卡片投递交给通道 hub（M4）', () => {
   })
 })
 
+describe('createEffects：结局通知（M12）', () => {
+  it('每批事实交给 announce 一次；零事实不调用', () => {
+    const announce = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+      announce,
+    })
+
+    const facts = [taskCreated('t-1'), cardOpened('card-1', 1, 2)]
+    effects.afterCommit(facts)
+    effects.afterCommit([])
+
+    expect(announce).toHaveBeenCalledTimes(1)
+    expect(announce).toHaveBeenCalledWith(facts)
+  })
+
+  it('announce 抛错被隔离：变更广播与写路径照常', () => {
+    const notifyChanged = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: () => ({ facts: [taskCreated('t-1')] }) },
+      scheduler: () => fakeScheduler(),
+      announce: () => {
+        throw new Error('通知服务不可用')
+      },
+      notifyChanged,
+    })
+
+    expect(() => effects.dispatch({ type: 'task.create' })).not.toThrow()
+    expect(notifyChanged).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('createEffects：结局通知（M12）', () => {
+  it('announce 收到整批事实（完成 / 失败由装配根翻译成系统通知）', () => {
+    const announce = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+      announce,
+    })
+    const facts = [taskCreated('t-1', 1)]
+
+    effects.afterCommit(facts)
+
+    expect(announce).toHaveBeenCalledTimes(1)
+    expect(announce).toHaveBeenCalledWith(facts)
+  })
+
+  it('announce 未装配：提交照常，不抛', () => {
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+    })
+    expect(() => effects.afterCommit([taskCreated('t-1')])).not.toThrow()
+  })
+
+  it('announce 抛错：异常被隔离，卡片投递与变更广播照常执行', () => {
+    const channelDispatch = vi.fn()
+    const notifyChanged = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+      channels: () => ({ dispatch: channelDispatch }),
+      announce: () => {
+        throw new Error('通知服务不可用')
+      },
+      notifyChanged,
+    })
+
+    expect(() => effects.afterCommit([cardOpened('card-1')])).not.toThrow()
+    expect(channelDispatch).toHaveBeenCalledTimes(1)
+    expect(notifyChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it('零事实：不调 announce（没有要播报的事）', () => {
+    const announce = vi.fn()
+    const effects = createEffects({
+      store: { dispatch: vi.fn() },
+      scheduler: () => fakeScheduler(),
+      announce,
+    })
+    effects.afterCommit([])
+    expect(announce).not.toHaveBeenCalled()
+  })
+})
+
 describe('createEffects：统一写入口', () => {
   it('dispatch：写库成功后 afterCommit，返回原结果', () => {
     const scheduler = fakeScheduler()

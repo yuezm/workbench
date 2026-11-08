@@ -41,21 +41,14 @@ export interface TaskInfoPanelProps {
 }
 
 /**
- * 任务详情页上部的任务信息：描述 + 字段表 + 标签。
+ * 任务详情页上部的任务信息：字段表 + 标签。
  *
  * 只读任务行与阶段名，不推导任何业务规则；状态 / 来源的中文文案属于展示映射。
+ * 任务说明（初始输入）不在这里：它单独成卡，见 `TaskBrief`。
  */
 export function TaskInfoPanel({ task, stageName }: TaskInfoPanelProps): ReactElement {
   return (
     <section aria-label="任务信息" className="flex flex-col gap-3">
-      <p
-        className={cn(
-          'text-body whitespace-pre-wrap',
-          task.description === '' ? 'text-ink-faint' : 'text-ink-dim',
-        )}
-      >
-        {task.description === '' ? '没有描述' : task.description}
-      </p>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-2.5 rounded-xl border border-line bg-surface px-4 py-3 sm:grid-cols-3">
         <Meta label="状态" value={STATUS_LABEL[task.status]} />
         <Meta label="阶段" value={stageName ?? '未知阶段'} />

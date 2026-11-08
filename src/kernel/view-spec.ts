@@ -82,6 +82,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'cards',
         'task_comments',
       ]
+    case 'task.stop':
+      // 按任务取活跃 run 逐条产取消请求（与 chat.cancel 同口径，不动任务行）
+      return ['tasks', 'runs']
     case 'task.complete':
       // 完成后若线程内无 active 任务 → thread.closed{all-tasks-done}；交接产出的新任务
       // 首轮提示词要带上下文（新任务没有评论，按切片装载）

@@ -8,6 +8,7 @@ import { useKernelViewState } from '../../../shell/useKernelView'
 import { ApprovalCards } from './ApprovalCards'
 import { DetailHeader } from './DetailHeader'
 import { TaskActivity } from './TaskActivity'
+import { TaskBrief } from './TaskBrief'
 import { TaskCommentForm } from './TaskCommentForm'
 import { TaskInfoPanel } from './TaskInfoPanel'
 
@@ -50,12 +51,18 @@ export function TaskDetailPage({
   const cardsState = useKernelViewState('cards.open')
   const openCards = cardsState.data ?? []
   const cards = openCards.filter((card) => card.taskId === taskId)
+  /** 执行中（存在 queued/running/waiting run）：由内核给，UI 只读 */
+  const executingState = useKernelViewState('tasks.executing')
+  const executing = (executingState.data ?? []).includes(taskId)
   const threadId = task?.threadId ?? null
   /** 反馈输入（提交成功后清空；失败保留待重试） */
   const [draft, setDraft] = useState('')
   const [rerun, setRerun] = useState(true)
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
+  /** 顶部结束动作（停止执行 / 完成任务）的进行中与失败文案 */
+  const [action, setAction] = useState<'stop' | 'complete' | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const workflow = task === null ? undefined : workflows.find((w) => w.id === task.workflowId)
   const stage =
@@ -95,6 +102,29 @@ export function TaskDetailPage({
     })
   }
 
+  /**
+   * 停止执行：把本任务的活跃 run 逐条请求取消（`task.stop`），任务本身保持进行中。
+   * 取消是异步收尾（宿主按取消时序落终态），按钮在 `tasks.executing` 更新前先自行置忙。
+   */
+  const stopInteraction = (): void => {
+    setAction('stop')
+    setActionError(null)
+    void getKernelStore()
+      .dispatch({ type: 'task.stop', commandId: '', id: taskId })
+      .catch((e: unknown) => setActionError(errMsg(e)))
+      .finally(() => setAction(null))
+  }
+
+  /** 完成任务：终态动作；执行中会被内核拒绝，所以按钮先禁用（title 说明原因）。 */
+  const finishTask = (): void => {
+    setAction('complete')
+    setActionError(null)
+    void getKernelStore()
+      .dispatch({ type: 'task.complete', commandId: '', id: taskId })
+      .catch((e: unknown) => setActionError(errMsg(e)))
+      .finally(() => setAction(null))
+  }
+
   return (
     <section aria-label="任务详情" className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <DetailHeader
@@ -102,16 +132,45 @@ export function TaskDetailPage({
         hint={hint}
         onBack={onBack}
         actions={
-          threadId === null ? undefined : (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => onOpenThread(threadId)}
-            >
-              打开线程
-            </Button>
-          )
+          <div className="flex shrink-0 items-center gap-1.5">
+            {threadId !== null && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => onOpenThread(threadId)}
+              >
+                打开线程
+              </Button>
+            )}
+            {task !== null && task.status === 'active' && executing && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="text-warn"
+                disabled={action !== null}
+                onClick={stopInteraction}
+              >
+                {action === 'stop' ? '正在停止…' : '停止执行'}
+              </Button>
+            )}
+            {task !== null && task.status === 'active' && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={executing || action !== null}
+                title={executing ? '执行中：先停止执行' : undefined}
+                onClick={finishTask}
+              >
+                {action === 'complete' ? '正在完成…' : '完成任务'}
+              </Button>
+            )}
+            {task !== null && task.status === 'completed' && (
+              <span className="text-meta text-ink-faint">已完成</span>
+            )}
+          </div>
         }
       />
 
@@ -126,12 +185,16 @@ export function TaskDetailPage({
           </p>
         ) : (
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+            <FormError message={actionError} />
             <TaskInfoPanel task={task} stageName={stageName} />
 
             {/* 待审批：智能体在这一任务上等你回答（正文与选项都在这里，选完即续接） */}
             {/* 卡片视图读失败时卡片会「凭空少一块」，run 却停在 waiting：把原因就地写出来 */}
             <FormError message={cardsState.error} />
             <ApprovalCards cards={cards} />
+
+            {/* 任务说明（初始输入）：审批之后、上下文之前，先看要求再看过程 */}
+            <TaskBrief task={task} />
 
             {/* 子任务读失败同理：空列表和「读不到」是两件事 */}
             <FormError message={childrenState.error} />

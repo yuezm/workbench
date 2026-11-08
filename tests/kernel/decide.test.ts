@@ -1437,6 +1437,54 @@ describe('kernel/decide 任务', () => {
     ).toEqual({ facts: [], reject: { code: 'not_found', message: '工作流不存在: wf-404' } })
   })
 
+  it('task.stop：活跃 run 逐条请求取消，终态与已请求的跳过；任务行不动', () => {
+    const seeded = view({
+      tasks: [task({ id: 't-1' })],
+      runs: [
+        runRow({ id: 'run-q', status: 'queued', queueSeq: 1 }),
+        runRow({ id: 'run-r', status: 'running', queueSeq: 2 }),
+        runRow({ id: 'run-w', status: 'waiting', queueSeq: 3 }),
+        runRow({ id: 'run-done', status: 'succeeded', queueSeq: 4 }),
+        runRow({ id: 'run-c', status: 'running', queueSeq: 5, cancelRequested: true }),
+      ],
+    })
+
+    expect(decide(seeded, command({ type: 'task.stop', id: 't-1' }), NOW, env())).toEqual({
+      facts: [
+        at('run.cancel_requested', {
+          run: runRow({ id: 'run-q', status: 'queued', queueSeq: 1, cancelRequested: true }),
+          by: 'owner',
+        }),
+        at('run.cancel_requested', {
+          run: runRow({ id: 'run-r', status: 'running', queueSeq: 2, cancelRequested: true }),
+          by: 'owner',
+        }),
+        at('run.cancel_requested', {
+          run: runRow({ id: 'run-w', status: 'waiting', queueSeq: 3, cancelRequested: true }),
+          by: 'owner',
+        }),
+      ],
+    })
+  })
+
+  it('task.stop：任务不存在 reject；没有活跃 run 零事实（重复点幂等）', () => {
+    expect(decide(view(), command({ type: 'task.stop', id: 't-404' }), NOW, env())).toEqual({
+      facts: [],
+      reject: { code: 'not_found', message: '任务不存在: t-404' },
+    })
+    expect(
+      decide(
+        view({
+          tasks: [task({ id: 't-1' })],
+          runs: [runRow({ id: 'run-done', status: 'failed' })],
+        }),
+        command({ type: 'task.stop', id: 't-1' }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [] })
+  })
+
   it('task.complete：任务名下还 open 的卡随任务一起收起（reason=cancelled，别的任务/已答的卡不动）', () => {
     const seeded = view({
       workflows: [workflow()],

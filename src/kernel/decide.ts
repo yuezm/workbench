@@ -73,6 +73,8 @@ function dispatch(view: View, input: Input, now: Iso, env: Environment): Decisio
       return task.moveTaskCommand(view, input, now, env)
     case 'task.complete':
       return task.completeTaskCommand(view, input, now, env)
+    case 'task.stop':
+      return task.stopTask(view, input, now)
     case 'task.remove':
       return task.removeTask(view, input, now, env)
     case 'task.comment':

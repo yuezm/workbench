@@ -572,4 +572,95 @@ describe('TaskDetailPage', () => {
     // 当前任务的阶段仍按工作流解析：退化只影响那一个子任务
     expect(screen.getByText('研发 · 执行')).toBeInTheDocument()
   })
+
+  it('任务说明单独成卡：带「初始输入」徽标，位置在上下文之前', async () => {
+    setup()
+
+    const brief = await screen.findByRole('region', { name: '任务说明' })
+    expect(brief).toHaveTextContent('把接口改完')
+    expect(within(brief).getByText('初始输入')).toBeInTheDocument()
+
+    const context = screen.getByRole('region', { name: '上下文' })
+    // 先读要求（任务说明）再看过程（上下文）
+    expect(brief.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('任务说明空描述：卡片仍在，给占位文案', async () => {
+    setup({ ...task, description: '' })
+
+    const brief = await screen.findByRole('region', { name: '任务说明' })
+    expect(within(brief).getByText('没有描述')).toBeInTheDocument()
+  })
+
+  it('执行中：出现「停止执行」，点击 dispatch task.stop；「完成任务」禁用', async () => {
+    kernel.setView('tasks.executing', undefined, ['t1'])
+    const user = userEvent.setup()
+    setup()
+
+    await screen.findByRole('heading', { name: '任务A' })
+    const complete = screen.getByRole('button', { name: '完成任务' })
+    expect(complete).toBeDisabled()
+    expect(complete).toHaveAttribute('title', '执行中：先停止执行')
+
+    await user.click(screen.getByRole('button', { name: '停止执行' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'task.stop', id: 't1' }),
+      ),
+    )
+  })
+
+  it('不在执行中：没有「停止执行」，「完成任务」可点并 dispatch task.complete', async () => {
+    const user = userEvent.setup()
+    setup()
+
+    await screen.findByRole('heading', { name: '任务A' })
+    expect(screen.queryByRole('button', { name: '停止执行' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '完成任务' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'task.complete', id: 't1' }),
+      ),
+    )
+  })
+
+  it('已完成的任务：右上角只写「已完成」，不再给结束动作', async () => {
+    setup({ ...task, status: 'completed' })
+
+    await screen.findByRole('heading', { name: '任务A' })
+    // 信息面板的状态字段与右上角的收尾标记都会写「已完成」
+    expect(screen.getAllByText('已完成').length).toBeGreaterThan(0)
+    expect(screen.queryByRole('button', { name: '完成任务' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '停止执行' })).toBeNull()
+  })
+
+  it('停止执行失败：亮后端文案，页面不崩', async () => {
+    kernel.setView('tasks.executing', undefined, ['t1'])
+    dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
+      command.type === 'task.stop'
+        ? Promise.reject(new Error('运行已结束，无法取消'))
+        : Promise.resolve({ facts: [], value: null } as CommandDispatchResult<C>),
+    )
+    const user = userEvent.setup()
+    setup()
+
+    await screen.findByRole('heading', { name: '任务A' })
+    await user.click(screen.getByRole('button', { name: '停止执行' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('运行已结束，无法取消')
+  })
+
+  it('结束动作失败：亮后端文案，页面不崩', async () => {
+    dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
+      command.type === 'task.complete'
+        ? Promise.reject(new Error('执行中的阶段不能完成'))
+        : Promise.resolve({ facts: [], value: null } as CommandDispatchResult<C>),
+    )
+    const user = userEvent.setup()
+    setup()
+
+    await screen.findByRole('heading', { name: '任务A' })
+    await user.click(screen.getByRole('button', { name: '完成任务' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('执行中的阶段不能完成')
+  })
 })

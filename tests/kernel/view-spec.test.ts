@@ -57,6 +57,7 @@ const commandSamples: Command[] = [
   { commandId: 'c11', type: 'task.create', input: taskInput },
   { commandId: 'c12', type: 'task.move', id: 't-1', stageId: 'st-2' },
   { commandId: 'c13', type: 'task.complete', id: 't-1' },
+  { commandId: 'c13b', type: 'task.stop', id: 't-1' },
   { commandId: 'c14', type: 'task.remove', id: 't-1' },
   { commandId: 'c15', type: 'card.answer', cardId: 'card-1', optionIndex: 0, via: 'channel' },
   { commandId: 'c16', type: 'card.resolve', cardId: 'card-1' },
@@ -180,6 +181,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'runs',
     'cards',
   ],
+  'task.stop': ['tasks', 'runs'],
   'task.remove': ['tasks', 'runs', 'threads', 'cards', 'projects'],
   'task.comment': [
     'tasks',
@@ -282,8 +284,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 34 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(34)
+  it('覆盖 35 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(35)
     expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)

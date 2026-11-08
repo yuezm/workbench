@@ -43,6 +43,7 @@ export const COMMAND_NAMES = [
   'task.create',
   'task.move',
   'task.complete',
+  'task.stop',
   'task.remove',
   'task.comment',
   'card.answer',
@@ -188,6 +189,19 @@ export interface TaskCompleteCommand extends CommandBase {
   id: string
 }
 
+/**
+ * 中止这个任务与智能体的当前交互（M12 补口）：把该任务所有活跃 run（queued / running /
+ * waiting）逐条置为「请求取消」，与 `chat.cancel` 走同一收尾链路（宿主按取消时序落终态）。
+ *
+ * 为什么要单独一条命令：`task.complete` 在任务执行中会被内核拒绝（不能一边跑一边归档），
+ * 而 `run.cancel` 是宿主内部输入、不暴露给渲染层；任务详情页需要「先停下这一轮」，
+ * 再决定是继续改还是完成任务。任务状态不动，只停交互。
+ */
+export interface TaskStopCommand extends CommandBase {
+  type: 'task.stop'
+  id: string
+}
+
 export interface TaskRemoveCommand extends CommandBase {
   type: 'task.remove'
   id: string
@@ -319,6 +333,7 @@ export type Command =
   | TaskCreateCommand
   | TaskMoveCommand
   | TaskCompleteCommand
+  | TaskStopCommand
   | TaskRemoveCommand
   | TaskCommentCommand
   | CardAnswerCommand

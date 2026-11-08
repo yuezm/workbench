@@ -61,6 +61,7 @@ export interface CommandResults {
   'task.create': Task
   'task.move': Task
   'task.complete': Task
+  'task.stop': null
   'task.remove': null
   /** M7.5：返回追加后的评论行（UI 仍重取 `comments.byTask`） */
   'task.comment': TaskComment

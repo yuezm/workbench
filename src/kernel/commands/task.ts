@@ -190,6 +190,35 @@ export function completeTaskCommand(
   return done(facts)
 }
 
+/**
+ * 停止与智能体的当前交互（`task.stop`）：把该任务的活跃 run 逐条置为「请求取消」。
+ *
+ * 与 `chat.cancel` 同一收尾链路——只产 `run.cancel_requested`，终态由宿主按取消时序落
+ * `run.cancelled`；任务本身不改状态（想收尾再走 `task.complete`）。
+ * 幂等：已请求过的跳过；没有活跃 run 时零事实（重复点不会报错）。
+ */
+export function stopTask(
+  view: View,
+  input: Extract<Input, { type: 'task.stop' }>,
+  now: Iso,
+): Decision {
+  const task = view.tasks.get(input.id)
+  if (!task) return reject('not_found', '任务不存在: ' + input.id)
+  const facts: FactDraft[] = []
+  for (const run of runsOfTask(view, task.id)) {
+    if (run.status !== 'queued' && run.status !== 'running' && run.status !== 'waiting') continue
+    if (run.cancelRequested) continue
+    facts.push(
+      ownerDraft(
+        'run.cancel_requested',
+        { run: { ...run, cancelRequested: true }, by: 'owner' },
+        now,
+      ),
+    )
+  }
+  return done(facts)
+}
+
 export function removeTask(
   view: View,
   input: Extract<Input, { type: 'task.remove' }>,

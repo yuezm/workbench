@@ -624,6 +624,7 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'task.move':
       return requiredId(command.id, 'id') ?? requiredId(command.stageId, 'stageId')
     case 'task.complete':
+    case 'task.stop':
     case 'task.remove':
       return requiredId(command.id, 'id')
     case 'task.comment':

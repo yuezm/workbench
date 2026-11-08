@@ -14,7 +14,14 @@
  */
 import type { Command } from './commands'
 import { COMMAND_NAMES } from './commands'
-import type { RunErrorCode, RunEventRow, RunTerminalStatus, RunUsage } from './entities'
+import type {
+  GateCheck,
+  GateVerdict,
+  RunErrorCode,
+  RunEventRow,
+  RunTerminalStatus,
+  RunUsage,
+} from './entities'
 
 /** 宿主内部输入名全集：不经 IPC，只由宿主（scheduler / clock / reconcile / 通道 hub）发。 */
 export const HOST_INPUT_NAMES = [
@@ -117,6 +124,13 @@ export interface Receipt {
   durationMs?: number
   /** 续接失败：执行器已按新会话重试过一次仍被拒 */
   resumeRejected?: boolean
+  /**
+   * 闸门判定（M11）：只对闸门阶段有意义。`pass` 走通过分支，`fail` 消耗一次预算。
+   * 缺省 = 没给结论，任务原地停住等人（既不白过也不烧预算）。
+   */
+  verdict?: GateVerdict
+  /** 判定证据（M11）：闸门阶段应随 `verdict` 一起给，内核用退出码交叉校验结论 */
+  checks?: GateCheck[]
 }
 
 // ---------- 运行 ----------

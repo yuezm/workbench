@@ -233,6 +233,47 @@ export const SPAWN_POLICIES = ['off', 'agent'] as const
 
 export type SpawnPolicy = (typeof SPAWN_POLICIES)[number]
 
+/**
+ * 闸门判定（M11）：阶段 run 正常结束后，由智能体对「这一阶段做成了没有」下结论。
+ * 与 `run.status` 正交——`succeeded` 只说明执行器跑完了，`fail` 才是业务上没过。
+ */
+export const GATE_VERDICTS = ['pass', 'fail'] as const
+
+export type GateVerdict = (typeof GATE_VERDICTS)[number]
+
+/** 判定证据：模型自报跑了什么、退出码是多少；内核用它交叉校验 `verdict`。 */
+export interface GateCheck {
+  /** 实际执行的命令（如 `pnpm check`） */
+  cmd: string
+  exitCode: number
+}
+
+/**
+ * 闸门配置（M11）：挂在**被看守阶段自己**身上，不是独立节点。
+ *
+ * 判定发生在该阶段 run 正常结束之后：
+ * - `pass` → 走 `onPassStageId`（缺省 = 默认下一阶段）；
+ * - `fail` 且未达 `maxFails` → 走 `onFailStageId`（缺省 = 原地不动）；
+ * - `fail` 且已达 `maxFails` → **放行**（走通过分支），由内核打 `gate:degraded` 标签留痕。
+ *
+ * 执行出错（`run.status='failed'`）不消耗预算，仍按原「错误时进入」语义处理。
+ */
+export interface GateConfig {
+  /** 允许未通过的次数（≥1）；第 `maxFails` 次未通过之后仍未通过则放行 */
+  maxFails: number
+  /** 通过时进入；null = 默认下一阶段 */
+  onPassStageId: string | null
+  /** 未通过时进入；null = 原地不动 */
+  onFailStageId: string | null
+}
+
+/** 闸门配置的保存形态（`onPassIndex` / `onFailIndex` 是 `stages` 数组下标）。 */
+export interface GateInput {
+  maxFails: number
+  onPassIndex?: number | null
+  onFailIndex?: number | null
+}
+
 export interface WorkflowStage {
   id: string
   workflowId: string
@@ -260,6 +301,11 @@ export interface WorkflowStage {
    * 老事实 / 存量导入缺该字段时按空串归一。
    */
   instructions?: string
+  /**
+   * 闸门（M11）：非 null 时本阶段是判定关卡，run 正常结束后读 `receipt.verdict` 决定去向。
+   * 老事实 / 存量导入缺该字段时按 null 归一（不是闸门）。
+   */
+  gate?: GateConfig | null
 }
 
 export interface StageInput {
@@ -284,6 +330,8 @@ export interface StageInput {
   spawnPolicy?: SpawnPolicy | null
   /** 阶段要干什么（M9，可空 = 空串）：本阶段具体事项，会拼进阶段任务提示词交给智能体 */
   instructions?: string
+  /** 闸门（M11，可空 = 不是闸门）：非空时本阶段按判定结果流转，并受 `maxFails` 预算约束 */
+  gate?: GateInput | null
 }
 
 export interface Workflow {
@@ -333,6 +381,11 @@ export interface Task {
   projectId: string | null
   currentStageId: string | null
   status: TaskStatus
+  /**
+   * 闸门预算（M11）：**当前阶段**连续未通过次数。进入阶段时清零（失败回环保留累计值），
+   * 闸门判定 `pass` 或预算耗尽放行时清零。老事实 / 存量导入缺该字段时按 0 归一。
+   */
+  gateFails?: number
   /** 来源；v2 存量与手工任务为 `manual` */
   origin: TaskOrigin
   /** 命中/触发的规则；手工任务为 null */

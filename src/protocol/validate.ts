@@ -12,6 +12,7 @@ import {
   CARD_ANSWER_VIA,
   ENTRY_MODES,
   EXECUTOR_KEY_PATTERN,
+  GATE_VERDICTS,
   ON_CHILDREN_SETTLED,
   PERMISSION_MODES,
   PROBE_STATES,
@@ -99,6 +100,12 @@ export const COMMAND_LIMITS = {
   spawnItems: 32,
   /** 子任务批次号上限（M8） */
   spawnBatchMax: 999,
+  /** 回执 `checks[]` 条数上限（M11；闸门证据，够覆盖常用命令即可） */
+  gateChecks: 32,
+  /** 单条闸门证据命令的文本上限（M11） */
+  gateCmd: 500,
+  /** 闸门允许未通过次数上限（M11；防御性上界，正常配 1–10） */
+  gateMaxFails: 100,
 } as const
 
 type Obj = Record<string, unknown>
@@ -224,6 +231,16 @@ const optionalArgsTemplate = (value: unknown): Check => {
 
 // ---------- 各命令的载荷 ----------
 
+const checkGate = (value: unknown, label: string): Check => {
+  const gate = asRecord(value)
+  if (!gate) return `${label} 必须是对象`
+  return (
+    integerIn(gate.maxFails, `${label}.maxFails`, 1, COMMAND_LIMITS.gateMaxFails) ??
+    optionalIntegerIn(gate.onPassIndex, `${label}.onPassIndex`, 0, COMMAND_LIMITS.stages - 1) ??
+    optionalIntegerIn(gate.onFailIndex, `${label}.onFailIndex`, 0, COMMAND_LIMITS.stages - 1)
+  )
+}
+
 const checkStage = (value: unknown, label: string): Check => {
   const stage = asRecord(value)
   if (!stage) return `${label} 必须是对象`
@@ -252,7 +269,11 @@ const checkStage = (value: unknown, label: string): Check => {
     optionalEnum(stage.onChildrenSettled, `${label}.onChildrenSettled`, ON_CHILDREN_SETTLED) ??
     optionalEnum(stage.spawnPolicy, `${label}.spawnPolicy`, SPAWN_POLICIES) ??
     // M9 阶段要干什么：纯文本资料段，空串表示清空
-    optionalText(stage.instructions, `${label}.instructions`, COMMAND_LIMITS.stageInstructions)
+    optionalText(stage.instructions, `${label}.instructions`, COMMAND_LIMITS.stageInstructions) ??
+    // M11 闸门：次数范围与目标下标在此校验；是否指向自己 / 是否 agent 阶段由内核判
+    (stage.gate === undefined || stage.gate === null
+      ? null
+      : checkGate(stage.gate, `${label}.gate`))
   )
 }
 
@@ -822,6 +843,16 @@ const checkFrames = (value: unknown, runId: unknown): Check => {
   return null
 }
 
+/** 闸门证据（M11）：`{ cmd, exitCode }`，命令非空、退出码在合理区间。 */
+const checkGateCheck = (value: unknown, at: string): Check => {
+  const check = asRecord(value)
+  if (!check) return `${at} 必须是对象`
+  return (
+    required(check.cmd, `${at}.cmd`, COMMAND_LIMITS.gateCmd) ??
+    integerIn(check.exitCode, `${at}.exitCode`, -1_000_000, 1_000_000)
+  )
+}
+
 /** 执行器回执：`leaseId` / `turn` 必填（D15），其余按 SPEC-plugins 逐项校验。 */
 const checkReceipt = (value: unknown): Check => {
   const receipt = asRecord(value)
@@ -852,7 +883,9 @@ const checkReceipt = (value: unknown): Check => {
     optionalText(receipt.error, 'receipt.error', COMMAND_LIMITS.description) ??
     optionalIntegerIn(receipt.exitCode, 'receipt.exitCode', -1_000_000, 1_000_000) ??
     optionalIntegerIn(receipt.durationMs, 'receipt.durationMs', 0, COMMAND_LIMITS.elapsedMs) ??
-    optionalBoolean(receipt.resumeRejected, 'receipt.resumeRejected')
+    optionalBoolean(receipt.resumeRejected, 'receipt.resumeRejected') ??
+    optionalEnum(receipt.verdict, 'receipt.verdict', GATE_VERDICTS) ??
+    checkList(receipt.checks, 'receipt.checks', COMMAND_LIMITS.gateChecks, checkGateCheck)
   )
 }
 

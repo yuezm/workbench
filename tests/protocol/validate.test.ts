@@ -326,6 +326,29 @@ describe('protocol/validate', () => {
     ).toBe(true)
   })
 
+  it('workflow.create：闸门形状（M11）', () => {
+    const create = (gate: unknown): unknown =>
+      cmd('workflow.create', {
+        input: {
+          name: 'p',
+          stages: [{ name: 's', entryMode: 'agent', agentId: 'ag1', gate }],
+        },
+      })
+    expect(validateCommand(create({ maxFails: 3, onPassIndex: 0, onFailIndex: 0 })).ok).toBe(true)
+    expect(validateCommand(create({ maxFails: 3 })).ok).toBe(true)
+    // 缺省 / null 都合法（不是闸门）
+    expect(validateCommand(create(null)).ok).toBe(true)
+    expect(validateCommand(create(undefined)).ok).toBe(true)
+    // maxFails 必填且 1..100 的整数
+    expect(validateCommand(create({})).ok).toBe(false)
+    expect(validateCommand(create({ maxFails: 0 })).ok).toBe(false)
+    expect(validateCommand(create({ maxFails: 1.5 })).ok).toBe(false)
+    expect(validateCommand(create({ maxFails: COMMAND_LIMITS.gateMaxFails + 1 })).ok).toBe(false)
+    // 不是对象 / 去向下标越界
+    expect(validateCommand(create('gate')).ok).toBe(false)
+    expect(validateCommand(create({ maxFails: 3, onPassIndex: 99 })).ok).toBe(false)
+  })
+
   it('workflow.update / remove：id 必填', () => {
     expect(rejectedMessage(cmd('workflow.update', { input: workflowInput }))).toBe('id必填')
     expect(
@@ -874,6 +897,33 @@ describe('validateQuery（M5：query 动词入口）', () => {
             subject: `子任务${i}`,
           })),
         ),
+      ).ok,
+    ).toBe(false)
+  })
+
+  it('receipt.verdict / checks：判定枚举与证据形状（M11）', () => {
+    const receipt = (extra: Record<string, unknown>): unknown => ({
+      type: 'run.receipt',
+      runId: 'run-1',
+      receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, ...extra },
+    })
+    expect(
+      validateInput(receipt({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0 }] })).ok,
+    ).toBe(true)
+    expect(validateInput(receipt({ verdict: 'fail' })).ok).toBe(true)
+    expect(validateInput(receipt({ verdict: 'ok' })).ok).toBe(false)
+    expect(validateInput(receipt({ checks: [{ cmd: 'x', exitCode: 0 }] })).ok).toBe(true)
+    expect(validateInput(receipt({ checks: [42] })).ok).toBe(false)
+    expect(validateInput(receipt({ checks: [{ cmd: '   ', exitCode: 0 }] })).ok).toBe(false)
+    expect(validateInput(receipt({ checks: [{ cmd: 'x', exitCode: 1.5 }] })).ok).toBe(false)
+    expect(
+      validateInput(
+        receipt({
+          checks: Array.from({ length: COMMAND_LIMITS.gateChecks + 1 }, () => ({
+            cmd: 'x',
+            exitCode: 0,
+          })),
+        }),
       ).ok,
     ).toBe(false)
   })

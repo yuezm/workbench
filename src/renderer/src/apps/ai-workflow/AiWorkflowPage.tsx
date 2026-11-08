@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type { Card, Project, ProjectInput, TaskInput } from '../../../../protocol/entities'
+import { FormError } from '../../components/ui/form-error'
 import { Segmented } from '../../components/ui/segmented'
 import { getKernelStore } from '../../shell/kernelStore'
-import { useKernelView, useKernelViewState } from '../../shell/useKernelView'
+import { useKernelViewState } from '../../shell/useKernelView'
 import { ApprovalBar } from './components/ApprovalBar'
 import { AgentManager } from './components/AgentManager'
 import { ChatPanel } from './components/ChatPanel'
@@ -46,7 +47,7 @@ function SectionHeader({ title, hint }: { title: string; hint: string }): ReactE
 /**
  * ai-workflow 工作台（M5 视图化）。
  *
- * - 读：全部走 `useKernelView`（项目 / 工作流 / 智能体 / 任务 / 运行记录 / 审批条 / 聊天），
+ * - 读：全部走 `useKernelViewState`（项目 / 工作流 / 智能体 / 任务 / 运行记录 / 审批条 / 聊天），
  *   未就绪按空态处理；事实到达后视图自动重取，没有 reload 链与变更订阅。
  * - 写：全部走 `getKernelStore().dispatch`，失败沿用原有文案展示。
  * - 选中项（当前项目 / 当前工作流 / 任务栏的详情路由）仍是 UI 本地状态。
@@ -58,13 +59,22 @@ function SectionHeader({ title, hint }: { title: string; hint: string }): ReactE
 export function AiWorkflowPage(): ReactElement {
   const workflowsState = useKernelViewState('workflows.all')
   const workflows = workflowsState.data ?? []
-  const agents = useKernelView('agents.all') ?? []
+  /**
+   * 页面依赖的清单一律走 `useKernelViewState`（而不是只看 `.data` 的 `useKernelView`）：
+   * 读失败时 `.data` 只是 `undefined`，界面会退化成「还没有项目 / 尚无工作流」这类空态，
+   * 骗用户去重建一遍。错误必须进页面级错误条，见下面的 `readError`。
+   */
+  const agentsState = useKernelViewState('agents.all')
+  const agents = agentsState.data ?? []
   /** 项目（M10）：聊天与任务共用的顶层上下文 */
-  const projects = useKernelView('projects.all') ?? []
+  const projectsState = useKernelViewState('projects.all')
+  const projects = projectsState.data ?? []
   /** 默认目录任务（`projectId = null`）：老数据、老规则建的任务与「默认目录」下的新任务 */
-  const unassigned = useKernelView('tasks.unassigned') ?? []
+  const unassignedState = useKernelViewState('tasks.unassigned')
+  const unassigned = unassignedState.data ?? []
   /** 默认目录的绝对路径（宿主视图）：切换器与新建任务弹窗都要交代「落在哪个文件夹」 */
-  const defaultPath = useKernelView('runtimes.default-workdir') ?? ''
+  const defaultPathState = useKernelViewState('runtimes.default-workdir')
+  const defaultPath = defaultPathState.data ?? ''
   /**
    * 选中的目标：项目 id / `DEFAULT_PROJECT_ID` / undefined（还没选）。
    * 失效（被删 / 还没选）时回落：第一个项目，其次是默认目录，回落值都由视图派生。
@@ -115,9 +125,25 @@ export function AiWorkflowPage(): ReactElement {
    * 全部会话（跨项目）：卡片只带 `conversationId`，点通知条时靠它找到会话所属项目，
    * 否则切到聊天栏目后会落到当前项目的清单里、看不到那张卡。
    */
-  const allConversations = useKernelView('conversations.all') ?? []
-  /** 写命令失败优先；否则展示读视图的错误（视图查询失败时 store 会给出文案） */
-  const shownError = error ?? workflowsState.error ?? tasksState.error
+  const conversationsState = useKernelViewState('conversations.all')
+  const allConversations = conversationsState.data ?? []
+  /**
+   * 写命令失败优先；否则展示读视图的错误（视图查询失败时 store 会给出文案）。
+   *
+   * 用 `find` 而不是一长串 `??`：链条里少写一个视图就少一处静默失败，而这里每个视图都登记在册。
+   */
+  const readError =
+    [
+      workflowsState.error,
+      tasksState.error,
+      cardsState.error,
+      agentsState.error,
+      projectsState.error,
+      unassignedState.error,
+      defaultPathState.error,
+      conversationsState.error,
+    ].find((message) => message !== null) ?? null
+  const shownError = error ?? readError
 
   const route = trail.length > 0 ? trail[trail.length - 1] : undefined
 
@@ -206,6 +232,10 @@ export function AiWorkflowPage(): ReactElement {
     })()
   }
 
+  /**
+   * 新建任务：失败时既要挂页面顶部错误条，也要把错误抛回弹窗（`TaskDialog` 就地展示）。
+   * 只 `setError` 不抛的话，弹窗里看不到任何原因，用户只会觉得「点了没反应」。
+   */
   const createTask = async (input: TaskInput): Promise<void> => {
     try {
       await getKernelStore().dispatch({ type: 'task.create', commandId: '', input })
@@ -213,6 +243,7 @@ export function AiWorkflowPage(): ReactElement {
       setDialogOpen(false)
     } catch (e) {
       setError(errMsg(e))
+      throw e instanceof Error ? e : new Error(String(e))
     }
   }
 
@@ -318,13 +349,14 @@ export function AiWorkflowPage(): ReactElement {
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* 顶部通知条：只列 open 卡标题，点击进任务详情 / 会话处理 */}
-        <ApprovalBar cards={openCards} error={cardsState.error} onOpen={openCard} />
+        <ApprovalBar cards={openCards} onOpen={openCard} />
 
-        {shownError && (
-          <p className="mx-4 mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-body text-red-300">
-            {shownError}
-          </p>
-        )}
+        {/* 页面级错误条：写命令失败可关掉；读视图错误说明数据没取到，不给关 */}
+        <FormError
+          message={shownError}
+          className="mx-4 mt-3"
+          onDismiss={error === null ? undefined : () => setError(null)}
+        />
 
         {view === 'workspace' && workspaceSection === 'chat' && (
           <ChatPanel

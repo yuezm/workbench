@@ -10,6 +10,7 @@ const card: Card = {
   conversationId: null,
   title: '包名怎么定',
   text: '事实：裸名已被他人发布过 0.2.0；同一作者的同题材插件仍在发。选哪个？',
+  kind: 'ask',
   options: ['裸名', '带前缀'],
   key: 'k',
   version: 1,
@@ -25,7 +26,7 @@ const card: Card = {
 
 describe('ApprovalBar', () => {
   it('只列标题：不展示卡片正文与选项按钮（正文与选择留到任务内部）', () => {
-    render(<ApprovalBar cards={[card]} error={null} onOpen={vi.fn()} />)
+    render(<ApprovalBar cards={[card]} onOpen={vi.fn()} />)
 
     const pending = screen.getByRole('region', { name: '待审批' })
     expect(within(pending).getByText('包名怎么定')).toBeInTheDocument()
@@ -39,16 +40,16 @@ describe('ApprovalBar', () => {
 
   it('点条目：把卡片交给上层，由上层进任务详情', () => {
     const onOpen = vi.fn()
-    render(<ApprovalBar cards={[card]} error={null} onOpen={onOpen} />)
+    render(<ApprovalBar cards={[card]} onOpen={onOpen} />)
 
     fireEvent.click(screen.getByRole('button', { name: /包名怎么定/ }))
     expect(onOpen).toHaveBeenCalledWith(card)
   })
 
   it('信息卡进「通知」栏：也给入口，但通知条里不出现「知道了」', () => {
-    const notice: Card = { ...card, id: 'card-2', options: [], title: '顺带说一句' }
+    const notice: Card = { ...card, id: 'card-2', options: [], kind: 'notice', title: '顺带说一句' }
     const onOpen = vi.fn()
-    render(<ApprovalBar cards={[notice]} error={null} onOpen={onOpen} />)
+    render(<ApprovalBar cards={[notice]} onOpen={onOpen} />)
 
     const notices = screen.getByRole('region', { name: '通知' })
     expect(screen.queryByRole('region', { name: '待审批' })).toBeNull()
@@ -60,8 +61,8 @@ describe('ApprovalBar', () => {
   })
 
   it('两栏并存：各自计数，互不串栏', () => {
-    const notice: Card = { ...card, id: 'card-2', options: [], title: '版本不一致' }
-    render(<ApprovalBar cards={[card, notice]} error={null} onOpen={vi.fn()} />)
+    const notice: Card = { ...card, id: 'card-2', options: [], kind: 'notice', title: '版本不一致' }
+    render(<ApprovalBar cards={[card, notice]} onOpen={vi.fn()} />)
 
     const pending = screen.getByRole('region', { name: '待审批' })
     const notices = screen.getByRole('region', { name: '通知' })
@@ -74,7 +75,7 @@ describe('ApprovalBar', () => {
   it('聊天卡落点写「对话」，并能把卡片交给上层切会话', () => {
     const chatCard: Card = { ...card, id: 'card-3', taskId: null, conversationId: 'c-1' }
     const onOpen = vi.fn()
-    render(<ApprovalBar cards={[chatCard]} error={null} onOpen={onOpen} />)
+    render(<ApprovalBar cards={[chatCard]} onOpen={onOpen} />)
 
     const pending = screen.getByRole('region', { name: '待审批' })
     expect(within(pending).getByText('对话')).toBeInTheDocument()
@@ -86,7 +87,7 @@ describe('ApprovalBar', () => {
   it('没有落点的卡（既无任务也无会话）：行禁用，点了不跳转', () => {
     const orphan: Card = { ...card, id: 'card-4', taskId: null, conversationId: null }
     const onOpen = vi.fn()
-    render(<ApprovalBar cards={[orphan]} error={null} onOpen={onOpen} />)
+    render(<ApprovalBar cards={[orphan]} onOpen={onOpen} />)
 
     const row = screen.getByRole('button', { name: /包名怎么定/ })
     expect(row).toBeDisabled()
@@ -96,7 +97,7 @@ describe('ApprovalBar', () => {
 
   it('多张卡按视图顺序列出，计数徽标等于条数', () => {
     const second: Card = { ...card, id: 'card-1b', title: '发布分支用哪个' }
-    render(<ApprovalBar cards={[card, second]} error={null} onOpen={vi.fn()} />)
+    render(<ApprovalBar cards={[card, second]} onOpen={vi.fn()} />)
 
     const pending = screen.getByRole('region', { name: '待审批' })
     const rows = within(pending).getAllByRole('button')
@@ -107,7 +108,7 @@ describe('ApprovalBar', () => {
   })
 
   it('标题单行截断：容器带 truncate，正文不进入通知条', () => {
-    render(<ApprovalBar cards={[card]} error={null} onOpen={vi.fn()} />)
+    render(<ApprovalBar cards={[card]} onOpen={vi.fn()} />)
 
     const title = screen.getByText('包名怎么定')
     expect(title.className).toContain('truncate')
@@ -116,7 +117,7 @@ describe('ApprovalBar', () => {
   })
 
   it('只有一项选项时徽标写「1 项待选」', () => {
-    render(<ApprovalBar cards={[{ ...card, options: ['采纳'] }]} error={null} onOpen={vi.fn()} />)
+    render(<ApprovalBar cards={[{ ...card, options: ['采纳'] }]} onOpen={vi.fn()} />)
 
     expect(screen.getByText('1 项待选')).toBeInTheDocument()
     expect(screen.queryByText('2 项待选')).toBeNull()
@@ -124,7 +125,7 @@ describe('ApprovalBar', () => {
 
   it('点一次条目只回调一次（整行是一个按钮，不重复触发）', () => {
     const onOpen = vi.fn()
-    render(<ApprovalBar cards={[card]} error={null} onOpen={onOpen} />)
+    render(<ApprovalBar cards={[card]} onOpen={onOpen} />)
 
     fireEvent.click(screen.getByRole('button', { name: /包名怎么定/ }))
     expect(onOpen).toHaveBeenCalledTimes(1)
@@ -133,38 +134,50 @@ describe('ApprovalBar', () => {
 
   it('任务卡不写「对话」，聊天卡不写「任务」：落点标签互斥', () => {
     const chatCard: Card = { ...card, id: 'card-3', taskId: null, conversationId: 'c-1' }
-    const { unmount } = render(<ApprovalBar cards={[card]} error={null} onOpen={vi.fn()} />)
+    const { unmount } = render(<ApprovalBar cards={[card]} onOpen={vi.fn()} />)
     expect(screen.queryByText('对话')).toBeNull()
     unmount()
 
-    render(<ApprovalBar cards={[chatCard]} error={null} onOpen={vi.fn()} />)
+    render(<ApprovalBar cards={[chatCard]} onOpen={vi.fn()} />)
     expect(screen.queryByText('任务')).toBeNull()
     expect(screen.getByText('对话')).toBeInTheDocument()
   })
 
-  it('错误文案与卡片同时存在时两者都展示，错误不吞掉列表', () => {
-    render(<ApprovalBar cards={[card]} error="后端拒绝" onOpen={vi.fn()} />)
-
-    expect(screen.getByRole('alert')).toHaveTextContent('后端拒绝')
-    expect(screen.getAllByRole('button')).toHaveLength(1)
-    expect(screen.getByText('2 项待选')).toBeInTheDocument()
-  })
-
   it('无 open 卡：整块不渲染', () => {
-    const { container } = render(<ApprovalBar cards={[]} error={null} onOpen={vi.fn()} />)
+    const { container } = render(<ApprovalBar cards={[]} onOpen={vi.fn()} />)
     expect(container).toBeEmptyDOMElement()
   })
 
-  it('读视图失败：有卡时展示后端文案，卡还在', () => {
-    render(<ApprovalBar cards={[card]} error="读取待审批失败" onOpen={vi.fn()} />)
+  it('kind 是唯一判据：options 为空但 kind="ask" 的卡仍进「待审批」', () => {
+    const askWithoutOptions: Card = { ...card, id: 'card-5', kind: 'ask', options: [] }
+    render(<ApprovalBar cards={[askWithoutOptions]} onOpen={vi.fn()} />)
 
-    expect(screen.getByRole('alert')).toHaveTextContent('读取待审批失败')
-    expect(screen.getByText('包名怎么定')).toBeInTheDocument()
+    const pending = screen.getByRole('region', { name: '待审批' })
+    expect(within(pending).getByText('包名怎么定')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '通知' })).toBeNull()
+    // 没有选项就不写「N 项待选」
+    expect(within(pending).queryByText(/项待选/)).toBeNull()
   })
 
-  it('无卡时不展示错误（错误只在有卡可处理时才有语境）', () => {
-    const { container } = render(<ApprovalBar cards={[]} error="读取待审批失败" onOpen={vi.fn()} />)
-    expect(container).toBeEmptyDOMElement()
-    expect(screen.queryByRole('alert')).toBeNull()
+  it('kind="notice" 但 options 非空：以 kind 为准进「通知」栏，不渲染待选徽标', () => {
+    const notice: Card = { ...card, id: 'card-6', kind: 'notice', options: ['知道了'] }
+    render(<ApprovalBar cards={[notice]} onOpen={vi.fn()} />)
+
+    const notices = screen.getByRole('region', { name: '通知' })
+    expect(within(notices).getByText('包名怎么定')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '待审批' })).toBeNull()
+    expect(within(notices).queryByText('知道了')).toBeNull()
+  })
+
+  it('两类卡并存：分栏按 kind 切分，互不串栏', () => {
+    const notice: Card = { ...card, id: 'card-7', kind: 'notice', options: [], title: '知会一条' }
+    render(<ApprovalBar cards={[card, notice]} onOpen={vi.fn()} />)
+
+    const pending = screen.getByRole('region', { name: '待审批' })
+    const notices = screen.getByRole('region', { name: '通知' })
+    expect(within(pending).getByText('包名怎么定')).toBeInTheDocument()
+    expect(within(notices).getByText('知会一条')).toBeInTheDocument()
+    expect(within(pending).queryByText('知会一条')).toBeNull()
+    expect(within(notices).queryByText('包名怎么定')).toBeNull()
   })
 })

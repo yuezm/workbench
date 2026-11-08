@@ -152,6 +152,7 @@ const card: Card = {
   conversationId: null,
   title: '继续吗',
   text: '选一个',
+  kind: 'ask',
   options: ['继续', '停止'],
   key: 'k',
   version: 1,
@@ -428,7 +429,7 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText('dboom')).toBeInTheDocument()
   })
 
-  it('创建任务失败展示错误', async () => {
+  it('创建任务失败：弹窗就地提示 + 页面顶部错误条各一份，弹窗不关', async () => {
     seedBase()
     dispatchWith(() => Promise.reject(new Error('cboom')))
     const user = userEvent.setup()
@@ -438,7 +439,78 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.type(screen.getByLabelText('任务标题'), 'x')
     await user.click(screen.getByRole('button', { name: '创建' }))
-    expect(await screen.findByText('cboom')).toBeInTheDocument()
+
+    await waitFor(async () => expect((await screen.findAllByText('cboom')).length).toBe(2))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByLabelText('任务标题')).toHaveValue('x')
+  })
+
+  it('创建任务失败为非 Error 时按字符串展示', async () => {
+    seedBase()
+    dispatchWith(() => Promise.reject('纯文本创建失败'))
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+    await screen.findByText(/工作流「研发」/)
+    await user.click(screen.getByRole('button', { name: '新建任务' }))
+    await user.type(screen.getByLabelText('任务标题'), 'x')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(async () => expect((await screen.findAllByText('纯文本创建失败')).length).toBe(2))
+  })
+
+  it('标题为空时不发命令，弹窗里给出必填错误', async () => {
+    seedBase()
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+    await user.click(await screen.findByRole('button', { name: '新建任务' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('任务标题必填')
+    expect(kernel.dispatched.filter((command) => command.type === 'task.create')).toHaveLength(0)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('页面级错误条可关闭：顶部条关掉后只剩弹窗内的就地提示', async () => {
+    seedBase()
+    dispatchWith(() => Promise.reject(new Error('可关闭的错误')))
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+    await user.click(await screen.findByRole('button', { name: '新建任务' }))
+    await user.type(screen.getByLabelText('任务标题'), 'x')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(screen.getAllByText('可关闭的错误')).toHaveLength(2))
+
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.getAllByText('可关闭的错误')).toHaveLength(1)
+
+    // 弹窗关掉后错误不再残留
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByText('可关闭的错误')).not.toBeInTheDocument()
+  })
+
+  it('通知条的卡片视图读失败也在页面级错误条里暴露', async () => {
+    seedBase()
+    kernel.failView('cards.open', undefined, 'cards-boom')
+    render(<AiWorkflowPage />)
+    expect(await screen.findByText('cards-boom')).toBeInTheDocument()
+  })
+
+  it('项目视图读失败：页面级错误条播报，不静默退化成空态', async () => {
+    seedBase()
+    kernel.failView('projects.all', undefined, 'projects-boom')
+    render(<AiWorkflowPage />)
+    expect(await screen.findByText('projects-boom')).toBeInTheDocument()
+  })
+
+  it('智能体视图读失败：同样进页面级错误条（否则「没智能体」看起来像没配置）', async () => {
+    seedBase()
+    kernel.failView('agents.all', undefined, 'agents-boom')
+    render(<AiWorkflowPage />)
+    expect(await screen.findByText('agents-boom')).toBeInTheDocument()
   })
 
   it('工作流视图失效后看板跟随刷新', async () => {

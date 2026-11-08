@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Card } from '../../../../../../src/protocol/entities'
 import { ApprovalCards } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ApprovalCards'
@@ -11,6 +11,7 @@ const card: Card = {
   conversationId: null,
   title: '继续吗',
   text: '选一个',
+  kind: 'ask',
   options: ['继续', '停止'],
   key: 'k',
   version: 1,
@@ -51,6 +52,27 @@ describe('ApprovalCards', () => {
     expect(body.className).toContain('whitespace-pre-wrap')
   })
 
+  it('选项一行一个：每个选项独占列表项、整行可点、序号只做视觉锚点', () => {
+    render(
+      <ApprovalCards
+        cards={[{ ...card, options: ['裸名', '换成带前缀的 scope', '先用私有 registry'] }]}
+      />,
+    )
+
+    const options = screen.getByRole('list', { name: '可选项' })
+    const rows = within(options).getAllByRole('listitem')
+    expect(rows).toHaveLength(3)
+    // 每一行只有一个按钮，且铺满整行（竖排，不并排挤在一起）
+    for (const row of rows) {
+      const button = within(row).getByRole('button')
+      expect(button.className).toContain('w-full')
+    }
+    // 序号是装饰：可访问名仍是纯选项文案，不做「1 裸名」
+    expect(within(options).getByRole('button', { name: '裸名' })).toBeInTheDocument()
+    // 提交即生效的提醒写在选项上方
+    expect(screen.getByText('点一行即提交，不能撤回')).toBeInTheDocument()
+  })
+
   it('点选项：dispatch card.answer(cardId, index, via=ui)', async () => {
     render(<ApprovalCards cards={[card]} />)
 
@@ -85,7 +107,7 @@ describe('ApprovalCards', () => {
   })
 
   it('信息卡（options 为空）进「通知」栏：只给「知道了」，不当待审批', () => {
-    render(<ApprovalCards cards={[{ ...card, options: [] }]} />)
+    render(<ApprovalCards cards={[{ ...card, options: [], kind: 'notice' }]} />)
 
     expect(screen.getByRole('heading', { name: /通知/ })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: /待审批/ })).toBeNull()
@@ -97,7 +119,17 @@ describe('ApprovalCards', () => {
   it('两栏并存：阻塞卡出选项、信息卡出「知道了」', () => {
     render(
       <ApprovalCards
-        cards={[card, { ...card, id: 'card-2', title: '顺带说一句', options: [], text: '版本不一致' }]}
+        cards={[
+          card,
+          {
+            ...card,
+            id: 'card-2',
+            title: '顺带说一句',
+            options: [],
+            kind: 'notice',
+            text: '版本不一致',
+          },
+        ]}
       />,
     )
 
@@ -108,7 +140,7 @@ describe('ApprovalCards', () => {
   })
 
   it('点「知道了」：dispatch card.resolve', async () => {
-    render(<ApprovalCards cards={[{ ...card, options: [] }]} />)
+    render(<ApprovalCards cards={[{ ...card, options: [], kind: 'notice' }]} />)
 
     fireEvent.click(screen.getByRole('button', { name: '知道了' }))
     await waitFor(() =>
@@ -120,7 +152,7 @@ describe('ApprovalCards', () => {
 
   it('关闭失败：显示后端文案，通知仍在', async () => {
     kernel.onDispatch(() => Promise.reject(new Error('卡片不存在: card-1')))
-    render(<ApprovalCards cards={[{ ...card, options: [] }]} />)
+    render(<ApprovalCards cards={[{ ...card, options: [], kind: 'notice' }]} />)
 
     fireEvent.click(screen.getByRole('button', { name: '知道了' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('卡片不存在: card-1')

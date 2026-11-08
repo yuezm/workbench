@@ -3,8 +3,8 @@ import type { Card } from '../../../../../protocol/entities'
 import { badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
 
-/** 信息卡（`options` 为空）只是一条通知：点进详情后给「知道了」，不要求选择。 */
-const isNotice = (card: Card): boolean => card.options.length === 0
+/** 信息卡（`kind: 'notice'`）只是一条知会：点进详情后给「知道了」，不要求选择。 */
+const isNotice = (card: Card): boolean => card.kind === 'notice'
 
 /** 卡片的落点：挂任务的卡进任务详情，聊天卡进对应会话 */
 const targetOf = (card: Card): 'task' | 'conversation' | null =>
@@ -18,8 +18,6 @@ const TARGET_LABEL: Record<'task' | 'conversation', string> = {
 export interface ApprovalBarProps {
   /** 全部 open 卡（`cards.open` 视图），由页面读取后下传 */
   cards: Card[]
-  /** 视图读失败文案；无卡不展示 */
-  error: string | null
   /** 点条目 → 跳到该卡的落点（任务详情 / 会话），处理动作在落点内做 */
   onOpen: (card: Card) => void
 }
@@ -31,9 +29,10 @@ export interface ApprovalBarProps {
  * 而回答又需要上下文。所以这里只做「有人在等你」的信标：一行标题 + 落点与选项数，
  * 点进任务详情（或会话）后再看正文、再选（见 `ApprovalCards`）。
  *
- * 无 open 卡时整块不渲染；读失败只在有卡可处理时展示文案。
+ * 无 open 卡时整块不渲染。`cards.open` 读失败的文案不在这里展示：条子在没有卡时整块消失，
+ * 把错误挂在条子里等于「有错误但没有地方显示」，那条错误统一由页面级错误条播报。
  */
-export function ApprovalBar({ cards, error, onOpen }: ApprovalBarProps): ReactElement | null {
+export function ApprovalBar({ cards, onOpen }: ApprovalBarProps): ReactElement | null {
   if (cards.length === 0) return null
 
   const pending = cards.filter((card) => !isNotice(card))
@@ -56,12 +55,6 @@ export function ApprovalBar({ cards, error, onOpen }: ApprovalBarProps): ReactEl
           <SectionHead label="通知" count={notices.length} tone="text-ink-faint" />
           <CardList cards={notices} onOpen={onOpen} />
         </section>
-      )}
-
-      {error !== null && (
-        <p role="alert" className="px-1 text-body text-danger">
-          {error}
-        </p>
       )}
     </div>
   )

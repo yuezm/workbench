@@ -81,8 +81,20 @@
       sans-serif;
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
-    user-select: none;
+    /* 正文默认可选：日志、提示词、智能体回复都要能选中复制 */
+    user-select: text;
     overflow: hidden;
+  }
+
+  /* 只让控件外壳不参与选中：点按钮、拖菜单时不留高亮，正文不受影响 */
+  button,
+  label,
+  summary,
+  [role='button'],
+  [role='tab'],
+  [role='menuitem'],
+  [role='option'] {
+    user-select: none;
   }
 
   h1,

@@ -83,6 +83,9 @@ const project: Project = {
   updatedAt: 't',
 }
 
+/** 宿主默认目录（M11）：没有项目时的落点，由 `runtimes.default-workdir` 视图给出 */
+const DEFAULT_PATH = 'C:\\Users\\me\\.workbench'
+
 const task: Task = {
   id: 't1',
   title: '任务A',
@@ -127,6 +130,7 @@ const conversation: Conversation = {
   id: 'c1',
   title: '第一段对话',
   agentId: 'a1',
+  projectId: 'p1',
   sessionId: null,
   createdAt: 't',
   updatedAt: 't',
@@ -197,7 +201,7 @@ function seedBase(): void {
     { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
   ])
   kernel.setView('runtimes.detected', undefined, [])
-  kernel.setView('conversations.all', undefined, [])
+  kernel.setView('conversations.byProject', { projectId: 'p1' }, [])
   kernel.setView('rules.all', undefined, { version: 0, rules: [] })
   kernel.setView('plugins.all', undefined, [])
 }
@@ -663,25 +667,48 @@ describe('AiWorkflowPage', () => {
     expect(screen.queryByText('任务A')).not.toBeInTheDocument()
   })
 
-  it('没有项目时看板显示项目空态，且没有新建任务入口', async () => {
+  it('没有项目时落在默认目录：看板照常可用，新建入口仍在', async () => {
     kernel.setView('projects.all', undefined, [])
     kernel.setView('workflows.all', undefined, [wf])
     kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.default-workdir', undefined, DEFAULT_PATH)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
     await openTasks(user)
 
-    // 任务只能建在项目下：没有项目就给一句能照做的空态，而不是空看板
-    expect(
-      await screen.findByText('先添加项目（本地文件夹），任务只能建在项目下'),
-    ).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '新建任务' })).not.toBeInTheDocument()
-    // 侧栏项目列表空态 + 添加入口
-    expect(screen.getByText('还没有项目')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '+ 添加' })).toBeInTheDocument()
-    // 没有项目不订阅任务视图：不出现「必填」类参数错误
+    // 项目列表空态 + 默认目录行（当前选中）
+    expect(await screen.findByText('还没有项目，可先落到默认目录')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText(DEFAULT_PATH)).toBeInTheDocument()
+    // 任务可以落默认目录：看板与新建入口都在
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新建任务' })).toBeInTheDocument()
+    // 没有项目不订阅项目任务视图：不出现「必填」类参数错误
     expect(screen.queryByText(/必填/)).toBeNull()
     expect(kernel.store.peek('tasks.byProject', { projectId: 'p1' })).toBeUndefined()
+  })
+
+  it('默认目录下新建任务：只读展示默认目录，命令 projectId 为 null', async () => {
+    seedBase()
+    kernel.setView('runtimes.default-workdir', undefined, DEFAULT_PATH)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '默认目录' }))
+    await user.click(await screen.findByRole('button', { name: '新建任务' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('默认目录')).toBeInTheDocument()
+    expect(within(dialog).getByText(DEFAULT_PATH)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('任务标题'), '落在默认目录')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() =>
+      expectDispatched({
+        type: 'task.create',
+        input: expect.objectContaining({ title: '落在默认目录', projectId: null }),
+      }),
+    )
   })
 
   it('有项目时新建任务：只读展示所属项目，命令带 projectId', async () => {
@@ -765,7 +792,7 @@ describe('AiWorkflowPage', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('未归属任务：出现入口，选中后看板照常展示但没有新建任务入口', async () => {
+  it('默认目录：入口常驻，选中后看板展示没有项目的任务，新建入口仍在', async () => {
     seedBase()
     // 老数据 / 老规则建的任务没有项目：它不能因为没有项目而从界面上消失
     kernel.setView('tasks.unassigned', undefined, [
@@ -775,26 +802,22 @@ describe('AiWorkflowPage', () => {
     render(<AiWorkflowPage />)
     await openTasks(user)
 
-    const entry = await screen.findByRole('button', { name: '未归属' })
-    expect(screen.getByText('没有项目的任务')).toBeInTheDocument()
-    expect(within(entry).getByText('1')).toBeInTheDocument()
-
+    const entry = await screen.findByRole('button', { name: '默认目录' })
     await user.click(entry)
     expect(await screen.findByText('老任务')).toBeInTheDocument()
-    // 看板只展示未归属那批：项目里的任务不混进来
+    // 看板只展示默认目录那批：项目里的任务不混进来
     expect(screen.queryByText('任务A')).not.toBeInTheDocument()
     expect(entry).toHaveAttribute('aria-current', 'page')
-    // 没有项目可挂：不给新建入口，改为一句说明
-    expect(screen.queryByRole('button', { name: '新建任务' })).not.toBeInTheDocument()
-    expect(screen.getByText('未归属任务没有项目，先添加项目再建新任务')).toBeInTheDocument()
+    // 默认目录也能建任务：入口不消失
+    expect(screen.getByRole('button', { name: '新建任务' })).toBeInTheDocument()
 
-    // 切回项目：新建入口回来
+    // 切回项目：看板换回项目任务
     await user.click(screen.getByRole('button', { name: '项目：工作台' }))
     expect(await screen.findByText('任务A')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建任务' })).toBeInTheDocument()
   })
 
-  it('一个项目都没有但有未归属任务：默认落在未归属，不显示项目空态', async () => {
+  it('一个项目都没有：默认落在默认目录', async () => {
     kernel.setView('projects.all', undefined, [])
     kernel.setView('workflows.all', undefined, [wf])
     kernel.setView('agents.all', undefined, [agent])
@@ -806,21 +829,39 @@ describe('AiWorkflowPage', () => {
     await openTasks(user)
 
     expect(await screen.findByText('老任务')).toBeInTheDocument()
-    expect(
-      screen.queryByText('先添加项目（本地文件夹），任务只能建在项目下'),
-    ).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '未归属' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.queryByRole('button', { name: '新建任务' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '新建任务' })).toBeInTheDocument()
+  })
+
+  it('项目切换同时换聊天上下文：会话清单按项目取，头部显示项目名', async () => {
+    seedBase()
+    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
+    kernel.setView('conversations.unassigned', undefined, [
+      { ...conversation, id: 'c-default', title: '默认目录会话', projectId: null },
+    ])
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    // 默认落在第一个项目：清单是该项目的会话，头部交代项目名
+    expect(await screen.findByRole('button', { name: /^第一段对话/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('所属项目')).toHaveTextContent('工作台')
+
+    // 切到默认目录：清单换成没有项目的会话
+    await user.click(screen.getByRole('button', { name: '默认目录' }))
+    expect(await screen.findByRole('button', { name: /^默认目录会话/ })).toBeInTheDocument()
+    expect(screen.queryByText('第一段对话')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('所属项目')).toHaveTextContent('默认目录')
   })
 
   it('聊天栏：新对话 dispatch chat.create、删除对话 dispatch chat.remove、归档 dispatch chat.archive', async () => {
     seedBase()
-    kernel.setView('conversations.all', undefined, [conversation])
+    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
     await user.click(await screen.findByRole('button', { name: '新对话' }))
-    await waitFor(() => expectDispatched({ type: 'chat.create', agentId: 'a1' }))
+    // 聊天与任务同口径落项目：新对话带当前项目 id
+    await waitFor(() => expectDispatched({ type: 'chat.create', agentId: 'a1', projectId: 'p1' }))
 
     // 删除收在 hover 才出现的三点菜单里
     await user.click(await screen.findByRole('button', { name: '会话 第一段对话 更多操作' }))
@@ -836,7 +877,7 @@ describe('AiWorkflowPage', () => {
 
   it('聊天栏：发送中「停止」dispatch chat.cancel', async () => {
     seedBase()
-    kernel.setView('conversations.all', undefined, [conversation])
+    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
     dispatchWith(
       <C extends Command>(
         command: C,
@@ -858,7 +899,7 @@ describe('AiWorkflowPage', () => {
 
   it('聊天：消息来自当前会话的消息视图', async () => {
     seedBase()
-    kernel.setView('conversations.all', undefined, [conversation])
+    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
     kernel.setView('messages.byConversation', { conversationId: 'c1' }, [chatMessage])
     render(<AiWorkflowPage />)
 
@@ -900,9 +941,36 @@ describe('AiWorkflowPage', () => {
     )
   })
 
+  it('聊天卡跨项目：点通知条先切到会话所属项目（默认目录）再选中会话', async () => {
+    seedBase()
+    // 卡片挂的会话属于默认目录，而当前上下文是项目 p1：点通知条必须连项目一起切
+    const defaultConversation = {
+      ...conversation,
+      id: 'c-default',
+      title: '默认目录会话',
+      projectId: null,
+    }
+    kernel.setView('conversations.all', undefined, [conversation, defaultConversation])
+    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
+    kernel.setView('conversations.unassigned', undefined, [defaultConversation])
+    kernel.setView('cards.open', undefined, [
+      { ...card, id: 'card-c', taskId: null, conversationId: 'c-default', title: '要继续吗' },
+    ])
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    expect(await screen.findByLabelText('所属项目')).toHaveTextContent('工作台')
+    const bar = await screen.findByRole('region', { name: '待审批' })
+    await user.click(within(bar).getByRole('button', { name: /要继续吗/ }))
+
+    expect(await screen.findByRole('heading', { name: '默认目录会话' })).toBeInTheDocument()
+    expect(screen.getByLabelText('所属项目')).toHaveTextContent('默认目录')
+    expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute('aria-current', 'page')
+  })
+
   it('聊天卡：点通知条切到对应会话，在会话内作答', async () => {
     seedBase()
-    kernel.setView('conversations.all', undefined, [
+    kernel.setView('conversations.byProject', { projectId: 'p1' }, [
       conversation,
       { ...conversation, id: 'c2', title: '第二段对话' },
     ])
@@ -1090,9 +1158,10 @@ describe('AiWorkflowPage', () => {
 
     await waitFor(() => expectDispatched({ type: 'project.remove', id: 'p1' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(await screen.findByText('还没有项目')).toBeInTheDocument()
-    // 项目没了：看板回到「先添加项目」空态，而不是空看板
-    expect(screen.getByText('先添加项目（本地文件夹），任务只能建在项目下')).toBeInTheDocument()
+    // 项目没了：回落默认目录（聊天与任务都还能用，不是空看板）
+    expect(await screen.findByText('还没有项目，可先落到默认目录')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '新建任务' })).toBeInTheDocument()
   })
 
   it('项目弹窗：删除失败为非 Error 时按字符串展示，弹窗不关', async () => {

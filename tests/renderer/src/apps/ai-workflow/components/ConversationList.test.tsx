@@ -18,7 +18,15 @@ const agent: Agent = {
 const researcher: Agent = { ...agent, id: 'a2', name: '研究员' }
 
 function conv(id: string, title: string, agentId = 'a1'): Conversation {
-  return { id, title, agentId, sessionId: null, createdAt: 't', updatedAt: 't' }
+  return {
+    id,
+    title,
+    agentId,
+    projectId: null,
+    sessionId: null,
+    createdAt: 't',
+    updatedAt: 't',
+  }
 }
 
 function makeProps(overrides: Partial<ConversationListProps> = {}): ConversationListProps {

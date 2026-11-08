@@ -10,7 +10,7 @@ import { ConversationList } from './components/ConversationList'
 import { KanbanBoard } from './components/KanbanBoard'
 import { PluginsManager } from './components/PluginsManager'
 import { ProjectDialog } from './components/ProjectDialog'
-import { ProjectSwitcher, UNASSIGNED_PROJECT_ID } from './components/ProjectSwitcher'
+import { DEFAULT_PROJECT_ID, ProjectSwitcher } from './components/ProjectSwitcher'
 import { RulesManager } from './components/RulesManager'
 import { RuntimeManager } from './components/RuntimeManager'
 import { SettingsNav, type SettingsSection } from './components/SettingsNav'
@@ -37,8 +37,8 @@ type TaskRoute = { kind: 'task'; taskId: string } | { kind: 'thread'; threadId: 
 function SectionHeader({ title, hint }: { title: string; hint: string }): ReactElement {
   return (
     <header className="mb-4 flex flex-col gap-0.5">
-      <h2 className="text-[15px] font-semibold tracking-wide text-ink">{title}</h2>
-      <span className="text-xs text-ink-faint">{hint}</span>
+      <h2 className="text-page font-semibold text-ink">{title}</h2>
+      <span className="text-meta text-ink-faint">{hint}</span>
     </header>
   )
 }
@@ -50,28 +50,33 @@ function SectionHeader({ title, hint }: { title: string; hint: string }): ReactE
  *   未就绪按空态处理；事实到达后视图自动重取，没有 reload 链与变更订阅。
  * - 写：全部走 `getKernelStore().dispatch`，失败沿用原有文案展示。
  * - 选中项（当前项目 / 当前工作流 / 任务栏的详情路由）仍是 UI 本地状态。
+ *
+ * M11：项目提到工作台顶层——聊天与任务都落在项目上，侧栏顶部常驻项目切换器；
+ * 没有项目时落「默认目录」（宿主的 `~/.workbench` / `WORKBENCH_WORKDIR`，数据侧
+ * `projectId = null`）。切换项目会同时换掉会话清单与看板，因此详情栈不跨项目保留。
  */
 export function AiWorkflowPage(): ReactElement {
   const workflowsState = useKernelViewState('workflows.all')
   const workflows = workflowsState.data ?? []
   const agents = useKernelView('agents.all') ?? []
-  /** 项目（M10）：任务的容器，也是该项目任务的运行工作目录 */
+  /** 项目（M10）：聊天与任务共用的顶层上下文 */
   const projects = useKernelView('projects.all') ?? []
-  /** 未归属任务（老数据 / 老规则建的任务）：`projectId = null`，不能因为没有项目就消失 */
+  /** 默认目录任务（`projectId = null`）：老数据、老规则建的任务与「默认目录」下的新任务 */
   const unassigned = useKernelView('tasks.unassigned') ?? []
+  /** 默认目录的绝对路径（宿主视图）：切换器与新建任务弹窗都要交代「落在哪个文件夹」 */
+  const defaultPath = useKernelView('runtimes.default-workdir') ?? ''
   /**
-   * 选中的目标：项目 id / `UNASSIGNED_PROJECT_ID` / undefined（还没选）。
-   * 失效（被删 / 还没选）时回落：第一个项目，其次是未归属，回落值都由视图派生，不需要 effect。
+   * 选中的目标：项目 id / `DEFAULT_PROJECT_ID` / undefined（还没选）。
+   * 失效（被删 / 还没选）时回落：第一个项目，其次是默认目录，回落值都由视图派生。
    */
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>()
-  const unassignedSelected = selectedProjectId === UNASSIGNED_PROJECT_ID
-  const selectedProject = unassignedSelected
+  /** 选了「默认目录」= 没有项目文件夹，任务与聊天都按 `projectId = null` 落库 */
+  const defaultSelected = selectedProjectId === DEFAULT_PROJECT_ID
+  const activeProject = defaultSelected
     ? undefined
     : (projects.find((project) => project.id === selectedProjectId) ?? projects[0])
-  /** 没有可用项目但还有未归属任务时落到未归属：否则老任务会连同看板一起空掉 */
-  const showUnassigned =
-    unassignedSelected || (selectedProject === undefined && unassigned.length > 0)
-  const activeProject = showUnassigned ? undefined : selectedProject
+  /** 头部与弹窗里交代当前落点 */
+  const activeProjectName = activeProject?.name ?? '默认目录'
   /** 用户选中的工作流：失效（被删/清空）时回落到首个，首个由视图数据派生，不需要 effect */
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const activeId =
@@ -88,13 +93,15 @@ export function AiWorkflowPage(): ReactElement {
   /** 工作台侧栏栏目：聊天（主动对话）/ 任务（看板与任务详情） */
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('chat')
   const [section, setSection] = useState<SettingsSection>('runtimes')
-  /** 聊天状态机：侧栏（会话清单）与内容区（消息流）共用同一份 */
-  const chat = useChat(agents)
+  /**
+   * 聊天状态机：侧栏（会话清单）与内容区（消息流）共用同一份。
+   * 项目是聊天的顶层上下文（M11）：`null` = 默认目录，会话清单按它取。
+   */
+  const chat = useChat(agents, activeProject?.id ?? null)
 
   /**
    * 任务视图按项目取（M10）：`tasks.byProject` 是项目下全部工作流的任务，
-   * 看板自己再按工作流过滤。看未归归属时不订阅项目视图（未归属任务走 `tasks.unassigned`）；
-   * 没有任何项目可看时也不订阅——任务只能建在项目下。
+   * 看板自己再按工作流过滤。默认目录不订阅项目视图（那批任务走 `tasks.unassigned`）。
    */
   const tasksState = useKernelViewState(
     'tasks.byProject',
@@ -104,6 +111,11 @@ export function AiWorkflowPage(): ReactElement {
   /** 全部 open 卡：顶部通知条只列标题，卡片本体在任务详情 / 会话里处理 */
   const cardsState = useKernelViewState('cards.open')
   const openCards = cardsState.data ?? []
+  /**
+   * 全部会话（跨项目）：卡片只带 `conversationId`，点通知条时靠它找到会话所属项目，
+   * 否则切到聊天栏目后会落到当前项目的清单里、看不到那张卡。
+   */
+  const allConversations = useKernelView('conversations.all') ?? []
   /** 写命令失败优先；否则展示读视图的错误（视图查询失败时 store 会给出文案） */
   const shownError = error ?? workflowsState.error ?? tasksState.error
 
@@ -119,8 +131,8 @@ export function AiWorkflowPage(): ReactElement {
 
   /**
    * 点顶部通知条：把人送到卡片所在的地方去处理。
-   * 任务卡进任务详情（正文与选项在页面里），聊天卡切到聊天栏目并选中那个会话。
-   * 没有落点（卡既没任务也没会话）时通知条整行禁用，走不到这里。
+   * 任务卡进任务详情（正文与选项在页面里）；聊天卡切到聊天栏目、把项目切到会话所属项目，
+   * 再选中那个会话。没有落点（卡既没任务也没会话）时通知条整行禁用，走不到这里。
    */
   const openCard = (card: Card): void => {
     setView('workspace')
@@ -130,6 +142,12 @@ export function AiWorkflowPage(): ReactElement {
       return
     }
     if (card.conversationId !== null) {
+      // 会话清单按项目取（M11）：跨项目的卡要先换项目，否则选中项会被过滤掉
+      const target = allConversations.find((item) => item.id === card.conversationId)
+      if (target !== undefined) {
+        setSelectedProjectId(target.projectId ?? DEFAULT_PROJECT_ID)
+        setTrail([])
+      }
       setWorkspaceSection('chat')
       chat.selectConversation(card.conversationId)
     }
@@ -150,7 +168,7 @@ export function AiWorkflowPage(): ReactElement {
     setView(next)
   }
 
-  /** 换项目 = 换一批任务：详情栈不跨项目保留（同切换栏目的理由） */
+  /** 换项目 = 换一批任务与会话：详情栈不跨项目保留（同切换栏目的理由） */
   const selectProject = (id: string): void => {
     setSelectedProjectId(id)
     setTrail([])
@@ -242,11 +260,18 @@ export function AiWorkflowPage(): ReactElement {
     <div className="flex h-full min-h-0">
       <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-surface/60">
         {/* 应用标识：顶部栏只显示 app 标签，进到 app 内用次级标题交代当前所在 */}
-        <h2 className="shrink-0 px-4 pt-3.5 pb-1 text-[13px] font-semibold tracking-wide text-ink">
-          AI 工作流
-        </h2>
+        <h2 className="shrink-0 px-4 pt-3.5 pb-1 text-title font-medium text-ink">AI 工作流</h2>
         {view === 'workspace' ? (
-          <div className="flex min-h-0 flex-1 flex-col p-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
+            {/* 项目在最顶层：聊天与任务都落在项目上，切栏目不换项目 */}
+            <ProjectSwitcher
+              projects={projects}
+              activeId={activeProject?.id ?? DEFAULT_PROJECT_ID}
+              defaultPath={defaultPath}
+              onSelect={selectProject}
+              onCreate={() => setProjectDialog({})}
+              onEdit={(project) => setProjectDialog({ project })}
+            />
             <WorkspaceNav value={workspaceSection} onChange={changeWorkspaceSection}>
               {workspaceSection === 'chat' ? (
                 <ConversationList
@@ -263,22 +288,12 @@ export function AiWorkflowPage(): ReactElement {
                   creating={chat.creating}
                 />
               ) : (
-                // 项目在上、工作流在下：先定「在哪个文件夹干活」，再定「按哪套流程」
-                <div className="flex min-h-0 flex-1 flex-col gap-3">
-                  <ProjectSwitcher
-                    projects={projects}
-                    activeId={showUnassigned ? UNASSIGNED_PROJECT_ID : activeProject?.id}
-                    unassignedCount={unassigned.length}
-                    onSelect={selectProject}
-                    onCreate={() => setProjectDialog({})}
-                    onEdit={(project) => setProjectDialog({ project })}
-                  />
-                  <WorkflowSwitcher
-                    workflows={workflows}
-                    activeId={activeId}
-                    onSelect={setSelectedId}
-                  />
-                </div>
+                // 工作流在项目下面：先定「在哪个文件夹干活」，再定「按哪套流程」
+                <WorkflowSwitcher
+                  workflows={workflows}
+                  activeId={activeId}
+                  onSelect={setSelectedId}
+                />
               )}
             </WorkspaceNav>
           </div>
@@ -306,7 +321,7 @@ export function AiWorkflowPage(): ReactElement {
         <ApprovalBar cards={openCards} error={cardsState.error} onOpen={openCard} />
 
         {shownError && (
-          <p className="mx-4 mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          <p className="mx-4 mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-body text-red-300">
             {shownError}
           </p>
         )}
@@ -315,6 +330,7 @@ export function AiWorkflowPage(): ReactElement {
           <ChatPanel
             agents={agents}
             conversation={chat.active}
+            projectName={activeProjectName}
             messages={chat.messages}
             cards={openCards.filter(
               (card) => chat.activeId !== null && card.conversationId === chat.activeId,
@@ -332,17 +348,11 @@ export function AiWorkflowPage(): ReactElement {
           (route === undefined ? (
             <div className="flex min-h-0 flex-1 p-6">
               <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-                {activeProject === undefined && !showUnassigned ? (
-                  // 既没有项目也没有未归属任务：任务只能建在项目下，先给一句能照做的空态
-                  <div className="grid flex-1 place-items-center rounded-xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
-                    先添加项目（本地文件夹），任务只能建在项目下
-                  </div>
-                ) : active ? (
+                {active ? (
+                  // 任务可以建在当前项目，也可以落在默认目录：新建入口始终在
                   <KanbanBoard
                     workflow={active}
                     tasks={tasks}
-                    // 看的是未归属任务：这批任务没有项目，不给新建入口
-                    canCreate={!showUnassigned}
                     onMoveToStage={moveToStage}
                     onCompleteTask={completeTask}
                     onNewTask={() => setDialogOpen(true)}
@@ -350,7 +360,7 @@ export function AiWorkflowPage(): ReactElement {
                     onOpenThread={openThread}
                   />
                 ) : (
-                  <div className="grid flex-1 place-items-center rounded-xl border border-dashed border-line px-6 py-10 text-center text-sm text-ink-faint">
+                  <div className="grid flex-1 place-items-center rounded-xl border border-dashed border-line px-6 py-10 text-center text-body text-ink-faint">
                     尚无工作流，到「设置 → 工作流」新建。
                   </div>
                 )}
@@ -408,10 +418,12 @@ export function AiWorkflowPage(): ReactElement {
         )}
       </main>
 
-      {dialogOpen && active && activeProject && (
+      {dialogOpen && active && (
         <TaskDialog
           workflow={active}
+          // 默认目录不传 project：弹窗只读展示落点路径
           project={activeProject}
+          defaultPath={defaultPath}
           onSave={createTask}
           onCancel={() => setDialogOpen(false)}
         />

@@ -19,7 +19,7 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 /** 模型下拉里代表「手动输入」的哨兵值（不会发给主进程） */
 const CUSTOM_MODEL = '__custom__'
 
-const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2 font-mono leading-relaxed')
+const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2 font-mono')
 
 const ARGS_TEMPLATE_HINT = 'JSON 数组，占位符 {model}/{effort}/{cwd}/{context}/{prompt}'
 
@@ -253,7 +253,7 @@ export function RuntimeDialog({
               options={executors.map((item) => ({ value: item.key, label: item.label }))}
             />
             {executorsError && (
-              <span className="text-[11px] text-red-300">执行器加载失败：{executorsError}</span>
+              <span className="text-body text-red-300">执行器加载失败：{executorsError}</span>
             )}
           </Field>
           <Field label="命令">
@@ -280,7 +280,7 @@ export function RuntimeDialog({
               value={argsTemplate}
               onChange={(e) => setArgsTemplate(e.target.value)}
             />
-            <span className="text-[11px] leading-relaxed text-ink-faint">{ARGS_TEMPLATE_HINT}</span>
+            <span className="text-meta text-ink-faint">{ARGS_TEMPLATE_HINT}</span>
           </Field>
           <Field label="并发上限">
             <Input
@@ -302,7 +302,7 @@ export function RuntimeDialog({
               }}
               options={PERMISSION_OPTIONS}
             />
-            <span className="text-[11px] leading-relaxed text-ink-faint">{PERMISSION_HINT}</span>
+            <span className="text-meta text-ink-faint">{PERMISSION_HINT}</span>
           </Field>
           <Field label="工作目录">
             <Input
@@ -312,7 +312,7 @@ export function RuntimeDialog({
               placeholder={defaultWorkdir === '' ? '留空用默认目录' : defaultWorkdir}
               onChange={(e) => setWorkdir(e.target.value)}
             />
-            <span className="text-[11px] leading-relaxed text-ink-faint">
+            <span className="text-meta text-ink-faint">
               留空 = 默认目录（改默认值设 WORKBENCH_WORKDIR，缺省 ~/.workbench）
             </span>
           </Field>
@@ -325,11 +325,9 @@ export function RuntimeDialog({
               placeholder="默认"
               options={modelOptions}
             />
-            {modelsLoading && <span className="text-[11px] text-ink-faint">读取模型中…</span>}
+            {modelsLoading && <span className="text-meta text-ink-faint">读取模型中…</span>}
             {modelsError && (
-              <span className="text-[11px] text-red-300">
-                模型加载失败：{modelsError}（可手填）
-              </span>
+              <span className="text-body text-red-300">模型加载失败：{modelsError}（可手填）</span>
             )}
           </Field>
           <Field label="推理强度">
@@ -355,8 +353,8 @@ export function RuntimeDialog({
 
         {permissionMode === 'danger-full-access' && (
           <div className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2">
-            <p className="text-[11px] leading-relaxed text-red-200">{DANGER_NOTICE}</p>
-            <label className="mt-1.5 flex items-center gap-2 text-xs text-ink-dim">
+            <p className="text-meta text-red-200">{DANGER_NOTICE}</p>
+            <label className="mt-1.5 flex items-center gap-2 text-meta text-ink-dim">
               <input
                 type="checkbox"
                 aria-label="已确认完全访问风险"
@@ -372,7 +370,7 @@ export function RuntimeDialog({
         {editing && (
           <div className="flex flex-col gap-1.5">
             <span className={labelCls}>启用</span>
-            <label className="flex items-center gap-2 text-sm text-ink-dim">
+            <label className="flex items-center gap-2 text-action text-ink-dim">
               <input
                 type="checkbox"
                 aria-label="启用运行时"
@@ -386,7 +384,7 @@ export function RuntimeDialog({
         )}
 
         {error && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
             {error}
           </p>
         )}

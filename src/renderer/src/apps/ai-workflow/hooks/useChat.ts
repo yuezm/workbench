@@ -32,9 +32,9 @@ export interface UseChatResult {
   setAgentId: (id: string | null) => void
   /** 新建对话时实际使用的智能体：未显式选择则取第一个 */
   selectedAgentId: string
-  /** 未归档的会话（聊天清单主体） */
+  /** 当前项目的会话（未归档）：聊天清单主体 */
   conversations: Conversation[]
-  /** 已归档的会话（清单底部的「已归档」分组） */
+  /** 当前项目已归档的会话（清单底部的「已归档」分组） */
   archivedConversations: Conversation[]
   activeId: string | null
   active: Conversation | null
@@ -61,16 +61,20 @@ export interface UseChatResult {
  * 状态从 ChatPanel 抽出，供侧栏（会话清单）与内容区（消息流）共用同一份：
  * 两侧各建一份实例会各订阅一次事件、各拉一次消息，选中项也对不上。
  *
- * 视图：`conversations.all`（会话清单）、`messages.byConversation`（当前会话消息）。
- * 流：`stream` 增量追加到本轮的 UI 态，`stream-end` 收尾；消息落库后
- * `message.*` 事实会让消息视图自动重取，结束时不再手动拉列表。
+ * M11：项目是聊天与任务共用的顶层上下文，`projectId` 由页面传入（`null` = 默认目录）。
+ * 会话清单按项目取：有项目订阅 `conversations.byProject`，默认目录订阅
+ * `conversations.unassigned`——两者互斥，未命中的那个传 `null` 关掉订阅。
+ *
+ * 视图：`conversations.byProject` / `conversations.unassigned`（会话清单）、
+ * `messages.byConversation`（当前会话消息）。流：`stream` 增量追加到本轮的 UI 态，
+ * `stream-end` 收尾；消息落库后 `message.*` 事实会让消息视图自动重取。
  */
 /** subscribe 只推流旁路；facts 走视图失效，不进聊天流。 */
- type ChatStreamKernelEvent = Extract<KernelEvent, { kind: 'stream' | 'stream-end' }>
+type ChatStreamKernelEvent = Extract<KernelEvent, { kind: 'stream' | 'stream-end' }>
 
-export function useChat(agents: Agent[]): UseChatResult {
+export function useChat(agents: Agent[], projectId: string | null): UseChatResult {
   const [agentId, setAgentId] = useState<string | null>(null)
-  /** 用户选中的会话：缺失（被删/清空）时回落到清单第一条，由视图数据派生 */
+  /** 用户选中的会话：缺失（被删/清空/换项目）时回落到清单第一条，由视图数据派生 */
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [streaming, setStreaming] = useState<ChatStreamState>(EMPTY_STREAM)
   const [sending, setSending] = useState(false)
@@ -78,12 +82,23 @@ export function useChat(agents: Agent[]): UseChatResult {
   /** 写操作的错误（命令被拒）；展示时优先于视图读错误 */
   const [writeError, setWriteError] = useState<string | null>(null)
 
-  const conversationsState = useKernelViewState('conversations.all')
-  const allConversations = conversationsState.data ?? []
+  /** 默认目录（`projectId === null`）与按项目二选一订阅；未命中的一侧传 null 关掉 */
+  const byProjectState = useKernelViewState(
+    'conversations.byProject',
+    projectId === null ? null : { projectId },
+  )
+  const unassignedState = useKernelViewState(
+    'conversations.unassigned',
+    projectId === null ? undefined : null,
+  )
+  const allConversations =
+    projectId === null ? (unassignedState.data ?? []) : (byProjectState.data ?? [])
   /** 归档只影响清单归属：归档的不进主列表，留在底部「已归档」分组里 */
   const conversations = allConversations.filter((item) => (item.archivedAt ?? null) === null)
-  const archivedConversations = allConversations.filter((item) => (item.archivedAt ?? null) !== null)
-  /** 选中项由视图数据兜底：选中的会话被删/归档后自动落到第一条未归档，不需要 effect 回填 */
+  const archivedConversations = allConversations.filter(
+    (item) => (item.archivedAt ?? null) !== null,
+  )
+  /** 选中项由视图数据兜底：选中的会话被删/归档/换项目后自动落到第一条未归档，不需要 effect 回填 */
   const activeId =
     selectedId !== null && conversations.some((item) => item.id === selectedId)
       ? selectedId
@@ -93,7 +108,8 @@ export function useChat(agents: Agent[]): UseChatResult {
     activeId ? { conversationId: activeId } : null,
   )
   const messages = messagesState.data ?? []
-  const error = writeError ?? conversationsState.error ?? messagesState.error
+  const listError = projectId === null ? unassignedState.error : byProjectState.error
+  const error = writeError ?? listError ?? messagesState.error
   const active = conversations.find((item) => item.id === activeId) ?? null
   const selectedAgentId = agentId ?? agents[0]?.id ?? ''
 
@@ -149,7 +165,10 @@ export function useChat(agents: Agent[]): UseChatResult {
   }, [])
 
   // 挂载：订阅流事件旁路（卸载时退订）
-  useEffect(() => getKernelStore().onStream((event) => handleEvent(event as ChatStreamKernelEvent)), [handleEvent])
+  useEffect(
+    () => getKernelStore().onStream((event) => handleEvent(event as ChatStreamKernelEvent)),
+    [handleEvent],
+  )
 
   /** 切换当前会话：清掉上一段的残留流式输出（消息随视图参数切换自动重取） */
   const selectConversation = (id: string): void => {
@@ -165,6 +184,8 @@ export function useChat(agents: Agent[]): UseChatResult {
         type: 'chat.create',
         commandId: '',
         agentId: selectedAgentId,
+        // 聊天与任务同口径落项目：当前选中的项目，默认目录传 null
+        projectId,
       })
       const created = result.value
       if (created !== null) {

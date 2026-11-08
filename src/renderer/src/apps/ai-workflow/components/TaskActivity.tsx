@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import { useState, type ReactElement } from 'react'
 import type {
   Run,
   RunErrorCode,
@@ -7,11 +7,18 @@ import type {
   RunUsage,
 } from '../../../../../protocol/entities'
 import type { TaskComment } from '../../../../../protocol/task-comment'
+import { Button } from '../../../components/ui/button'
 import { cn } from '../../../lib/cn'
 import { useKernelViewState } from '../../../shell/useKernelView'
 
 /** 工具事件内容的展示截断长度 */
 const TOOL_TEXT_MAX = 120
+
+/** 正文缩略上限：最多 6 行（多阶段任务每阶段一轮 run，全文会把整页冲垮） */
+export const SUMMARY_MAX_LINES = 6
+
+/** 正文缩略上限：最多 400 字符（长段不换行的正文按字数截） */
+export const SUMMARY_MAX_CHARS = 400
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   queued: '排队中',
@@ -58,18 +65,12 @@ function truncate(text: string, max: number): string {
 function RunEventLine({ event }: { event: RunEvent }): ReactElement | null {
   switch (event.type) {
     case 'text':
-      return (
-        <p className="text-xs leading-relaxed whitespace-pre-wrap text-ink-dim">{event.text}</p>
-      )
+      return <p className="text-body whitespace-pre-wrap text-ink-dim">{event.text}</p>
     case 'thinking':
-      return (
-        <p className="text-[11px] leading-relaxed whitespace-pre-wrap text-ink-faint italic">
-          {event.text}
-        </p>
-      )
+      return <p className="text-body whitespace-pre-wrap text-ink-faint italic">{event.text}</p>
     case 'tool_call':
       return (
-        <p className="rounded-md bg-surface-2 px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-dim">
+        <p className="rounded-md bg-surface-2 px-2 py-1 font-mono text-body text-ink-dim">
           {['工具调用：' + (event.tool ?? '未知工具'), truncate(event.input ?? '', TOOL_TEXT_MAX)]
             .filter(Boolean)
             .join(' · ')}
@@ -79,7 +80,7 @@ function RunEventLine({ event }: { event: RunEvent }): ReactElement | null {
       return (
         <p
           className={cn(
-            'rounded-md bg-surface-2 px-2 py-1 font-mono text-[11px] leading-relaxed text-ink-dim',
+            'rounded-md bg-surface-2 px-2 py-1 font-mono text-body text-ink-dim',
             event.isError === true && 'text-red-300',
           )}
         >
@@ -105,20 +106,45 @@ function UsageLine({ usage }: { usage: RunUsage }): ReactElement {
 const isProcessEvent = (event: RunEvent): boolean =>
   event.type === 'thinking' || event.type === 'tool_call' || event.type === 'tool_result'
 
+/** 正文缩略：先按行截到 6 行，再按字数截到 400（两个上限都要，长段不换行时按字算） */
+function summarizeBody(text: string): string {
+  const head = text.split('\n').slice(0, SUMMARY_MAX_LINES).join('\n')
+  return head.length > SUMMARY_MAX_CHARS ? head.slice(0, SUMMARY_MAX_CHARS) : head
+}
+
+/** 过程折叠行：思考 / 工具调用与结果，默认收起，展开后逐条看 */
+function ProcessFold({ process }: { process: RunEvent[] }): ReactElement {
+  return (
+    <details className="rounded-md bg-surface-2 px-2 py-1">
+      <summary className="cursor-pointer text-action text-ink-faint select-none">
+        过程 · {process.length} 条（思考 / 工具调用与结果）
+      </summary>
+      <div className="mt-1.5 flex flex-col gap-1.5">
+        {process.map((event) => (
+          <RunEventLine key={event.seq} event={event} />
+        ))}
+      </div>
+    </details>
+  )
+}
+
 /**
  * 单个 run 的事件流：一个子组件订阅一个 `run.events` 视图。
  *
  * 事件随事实失效自动重取（`run.` 前缀的失效表里有 `run.events`），不再轮询；
- * 正文（`text`）直接展示，思考与工具过程折进可展开的「过程」行，避免冲掉结论；
+ * 正文（`text`）默认只给缩略版（≤6 行且 ≤400 字），「展开全部」后才是完整正文事件流，
+ * 思考与工具过程折进可展开的「过程」行，避免冲掉结论；
+ * 折叠状态是这个 run 自己的本地状态（默认收起，切换任务/重跑不影响别的 run）。
  * 事件流为空时回落到 run.output（历史数据仍能看到最终文本）。
  */
 function RunEvents({ run }: { run: Run }): ReactElement | null {
   const state = useKernelViewState('run.events', { runId: run.id })
+  const [expanded, setExpanded] = useState(false)
   const events = state.data ?? []
 
   if (state.error !== null) {
     return (
-      <p className="mt-2 rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
+      <p className="mt-2 rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-body text-red-300">
         事件流加载失败：{state.error}
       </p>
     )
@@ -126,29 +152,64 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
   if (events.length > 0) {
     const body = events.filter((event) => !isProcessEvent(event))
     const process = events.filter(isProcessEvent)
+    const bodyText = body
+      .filter((event) => event.type === 'text')
+      .map((event) => event.text ?? '')
+      .join('\n')
+
+    // 没有正文（只有思考 / 工具过程）：没有可缩略的东西，直接把过程折叠行摆出来
+    if (bodyText === '') {
+      return process.length === 0 ? null : (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <ProcessFold process={process} />
+        </div>
+      )
+    }
+
+    const summary = summarizeBody(bodyText)
+    /** 还有没露出来的东西才有必要给「展开全部」（正文被截断，或过程行被挡住） */
+    const hidden = summary.length < bodyText.length || process.length > 0
+
+    if (!expanded) {
+      return (
+        <div className="mt-2 flex flex-col gap-1.5">
+          <p className="text-body whitespace-pre-wrap text-ink-dim">{summary}</p>
+          {hidden && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="self-start"
+              onClick={() => setExpanded(true)}
+            >
+              展开全部（约 {bodyText.length} 字）
+            </Button>
+          )}
+        </div>
+      )
+    }
+
     return (
       <div className="mt-2 flex flex-col gap-1.5">
         {body.map((event) => (
           <RunEventLine key={event.seq} event={event} />
         ))}
-        {process.length > 0 && (
-          <details className="rounded-md bg-surface-2 px-2 py-1">
-            <summary className="cursor-pointer text-[11px] text-ink-faint select-none">
-              过程 · {process.length} 条（思考 / 工具调用与结果）
-            </summary>
-            <div className="mt-1.5 flex flex-col gap-1.5">
-              {process.map((event) => (
-                <RunEventLine key={event.seq} event={event} />
-              ))}
-            </div>
-          </details>
-        )}
+        {process.length > 0 && <ProcessFold process={process} />}
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="self-start"
+          onClick={() => setExpanded(false)}
+        >
+          收起
+        </Button>
       </div>
     )
   }
   if (run.output === '') return null
   return (
-    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-surface-2 p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap text-ink-dim">
+    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-surface-2 p-2.5 text-body whitespace-pre-wrap text-ink-dim">
       {run.output}
     </pre>
   )
@@ -179,7 +240,7 @@ function RunApprovals({ runId }: { runId: string }): ReactElement | null {
       {approvals.map((item) => (
         <li
           key={item.id}
-          className="rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-2 py-1 text-[11px] leading-relaxed text-amber-100/90"
+          className="rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-2 py-1 text-body text-amber-100/90"
         >
           <span className="font-medium">提权 · {item.tool === '' ? '未知工具' : item.tool}</span>
           <span className="ml-1.5 text-ink-faint">
@@ -192,11 +253,33 @@ function RunApprovals({ runId }: { runId: string }): ReactElement | null {
   )
 }
 
-/** 一轮运行的卡片：状态 / 时间 / 耗时 / 退出码 / 失败归类 / 用量 + 事件流 */
-function RunBlock({ run }: { run: Run }): ReactElement {
+/** 阶段引用（页面传进来的当前工作流阶段，只需要 id + 名字） */
+export type StageRef = { id: string; name: string }
+
+/** 阶段徽标文案：阶段被删 / run 属于别的工作流时退化为「未知阶段」 */
+function stageLabelOf(stages: ReadonlyArray<StageRef>, stageId: string | null): string {
+  if (stageId === null) return '未知阶段'
+  return stages.find((item) => item.id === stageId)?.name ?? '未知阶段'
+}
+
+/** 一轮运行的卡片：阶段 + 轮次 + 状态 / 时间 / 耗时 / 退出码 / 失败归类 / 用量 + 事件流 */
+function RunBlock({
+  run,
+  turn,
+  stages,
+}: {
+  run: Run
+  /** 同任务内 run 的序号（1 基，按 createdAt；IPC Run 没有 turn 字段，轮次由活动流算） */
+  turn: number
+  stages: ReadonlyArray<StageRef>
+}): ReactElement {
   return (
     <div className="rounded-xl border border-line bg-surface px-4 py-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-dim">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ink-dim">
+        <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-focus-soft">
+          {stageLabelOf(stages, run.stageId)}
+        </span>
+        <span className="text-ink-faint tabular-nums">第 {turn} 轮</span>
         <span className={cn('rounded-sm bg-white/[0.06] px-2 py-0.5', STATUS_TONE[run.status])}>
           {STATUS_LABEL[run.status]}
         </span>
@@ -212,7 +295,7 @@ function RunBlock({ run }: { run: Run }): ReactElement {
       </div>
 
       {run.error !== null && (
-        <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">
+        <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-body text-red-300">
           {run.error}
         </p>
       )}
@@ -228,27 +311,38 @@ function RunBlock({ run }: { run: Run }): ReactElement {
 function CommentBlock({ comment }: { comment: TaskComment }): ReactElement {
   return (
     <div className="rounded-xl border border-line bg-surface-2 px-4 py-2.5">
-      <div className="flex items-center gap-2 text-[11px] text-ink-faint">
+      <div className="flex items-center gap-2 text-meta text-ink-faint">
         <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-focus-soft">
           {comment.author === 'owner' ? '我' : '智能体'}
         </span>
         <span className="tabular-nums">{comment.createdAt}</span>
       </div>
-      <p className="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-ink-dim">
-        {comment.text}
-      </p>
+      <p className="mt-1 text-body whitespace-pre-wrap text-ink-dim">{comment.text}</p>
     </div>
   )
 }
 
 /** 活动流条目：运行与反馈按时间同序排列（同毫秒按 id，稳定可测） */
 type ActivityItem =
-  | { kind: 'run'; at: string; id: string; run: Run }
+  | { kind: 'run'; at: string; id: string; run: Run; turn: number }
   | { kind: 'comment'; at: string; id: string; comment: TaskComment }
+
+/** 同任务内 run 的轮次（1 基）：按 createdAt、同毫秒按 id 排，与活动流顺序一致 */
+function sortRuns(runs: readonly Run[]): Run[] {
+  return [...runs].sort(
+    (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  )
+}
 
 function mergeActivity(runs: readonly Run[], comments: readonly TaskComment[]): ActivityItem[] {
   const items: ActivityItem[] = [
-    ...runs.map((run): ActivityItem => ({ kind: 'run', at: run.createdAt, id: run.id, run })),
+    ...sortRuns(runs).map((run, index): ActivityItem => ({
+      kind: 'run',
+      at: run.createdAt,
+      id: run.id,
+      run,
+      turn: index + 1,
+    })),
     ...comments.map((comment): ActivityItem => ({
       kind: 'comment',
       at: comment.createdAt,
@@ -262,6 +356,8 @@ function mergeActivity(runs: readonly Run[], comments: readonly TaskComment[]): 
 export interface TaskActivityProps {
   runs: Run[]
   comments: TaskComment[]
+  /** 当前工作流的阶段（阶段名从这里查；缺数据时运行卡片显示「未知阶段」） */
+  stages: ReadonlyArray<StageRef>
 }
 
 /**
@@ -269,12 +365,14 @@ export interface TaskActivityProps {
  *
  * 数据都来自内核视图：`runs` 是 `runs.byTask`，`comments` 是 `comments.byTask`；
  * 事件流由每个 run 的子组件订阅 `run.events`，事实到达后自动刷新。
+ * 多阶段任务每阶段一轮 run：卡片头部标出阶段名与「第 N 轮」，正文默认只给缩略，
+ * 由使用者按需展开（详见 `RunEvents`）。
  */
-export function TaskActivity({ runs, comments }: TaskActivityProps): ReactElement {
+export function TaskActivity({ runs, comments, stages }: TaskActivityProps): ReactElement {
   const items = mergeActivity(runs, comments)
   if (items.length === 0) {
     return (
-      <div className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
+      <div className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
         还没有运行记录或反馈
       </div>
     )
@@ -285,7 +383,7 @@ export function TaskActivity({ runs, comments }: TaskActivityProps): ReactElemen
       {items.map((item) => (
         <li key={`${item.kind}:${item.id}`}>
           {item.kind === 'run' ? (
-            <RunBlock run={item.run} />
+            <RunBlock run={item.run} turn={item.turn} stages={stages} />
           ) : (
             <CommentBlock comment={item.comment} />
           )}

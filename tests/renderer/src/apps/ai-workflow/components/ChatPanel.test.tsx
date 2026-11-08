@@ -19,7 +19,15 @@ const agent: Agent = {
 }
 
 function conv(id: string, title: string, agentId = 'a1'): Conversation {
-  return { id, title, agentId, sessionId: null, createdAt: 't', updatedAt: 't' }
+  return {
+    id,
+    title,
+    agentId,
+    projectId: null,
+    sessionId: null,
+    createdAt: 't',
+    updatedAt: 't',
+  }
 }
 
 function msg(
@@ -59,6 +67,19 @@ describe('ChatPanel', () => {
 
     rerender(<ChatPanel {...makeProps({ conversation: conv('c2', '无主会话', 'ghost') })} />)
     expect(screen.getByText('未知智能体')).toBeInTheDocument()
+  })
+
+  it('头部交代所属项目（聊天与任务共用顶层上下文）', () => {
+    const { rerender } = render(<ChatPanel {...makeProps({ projectName: '工作台' })} />)
+    expect(screen.getByLabelText('所属项目')).toHaveTextContent('工作台')
+
+    rerender(<ChatPanel {...makeProps({ projectName: '默认目录' })} />)
+    expect(screen.getByLabelText('所属项目')).toHaveTextContent('默认目录')
+  })
+
+  it('未传项目名时不渲染项目徽标', () => {
+    render(<ChatPanel {...makeProps()} />)
+    expect(screen.queryByLabelText('所属项目')).not.toBeInTheDocument()
   })
 
   it('没有会话时显示空状态，输入框存在但发送禁用', async () => {

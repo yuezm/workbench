@@ -9,16 +9,27 @@ import { cn } from '../../../lib/cn'
 
 interface TaskDialogProps {
   workflow: WorkflowWithStages
-  /** 任务只能建在项目下（M10）：由调用方保证存在，弹窗里只读展示 */
-  project: Project
+  /**
+   * 当前项目（M11）：`undefined` = 默认目录（类别与聊天同口径，`projectId` 传 null）。
+   * 弹窗只读展示「建在哪个目录」，选择由侧栏顶层的项目切换器负责。
+   */
+  project?: Project
+  /** 默认目录的绝对路径（宿主视图）；未知时为空串 */
+  defaultPath: string
   onSave: (input: TaskInput) => Promise<void>
   onCancel: () => void
 }
 
-const textareaCls = cn(fieldCls, 'min-h-24 resize-y py-2 leading-relaxed')
+const textareaCls = cn(fieldCls, 'min-h-24 resize-y py-2')
 
 /** 新建任务弹窗：可指定从哪个阶段开始（默认首阶段） */
-export function TaskDialog({ workflow, project, onSave, onCancel }: TaskDialogProps): ReactElement {
+export function TaskDialog({
+  workflow,
+  project,
+  defaultPath,
+  onSave,
+  onCancel,
+}: TaskDialogProps): ReactElement {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [stageId, setStageId] = useState(workflow.stages[0]?.id ?? '')
@@ -29,7 +40,13 @@ export function TaskDialog({ workflow, project, onSave, onCancel }: TaskDialogPr
     if (!title.trim()) return
     setSaving(true)
     try {
-      await onSave({ title, description, workflowId: workflow.id, stageId, projectId: project.id })
+      await onSave({
+        title,
+        description,
+        workflowId: workflow.id,
+        stageId,
+        projectId: project?.id ?? null,
+      })
     } finally {
       setSaving(false)
     }
@@ -39,13 +56,15 @@ export function TaskDialog({ workflow, project, onSave, onCancel }: TaskDialogPr
     <Dialog title="新建任务" onClose={onCancel}>
       <form className="flex flex-col gap-3" onSubmit={submit}>
         <Field label="所属项目">
-          {/* 只读行：项目在任务栏选好了，弹窗里再放开选择只会让「建在哪个目录」变得含糊 */}
+          {/* 只读行：项目在侧栏顶层选好了，弹窗里再放开选择只会让「建在哪个目录」变得含糊 */}
           <div
             aria-label="所属项目"
             className="flex flex-col gap-0.5 rounded-lg border border-line bg-white/[0.04] px-3 py-2"
           >
-            <span className="truncate text-sm text-ink">{project.name}</span>
-            <span className="truncate text-[11px] text-ink-faint">{project.path}</span>
+            <span className="truncate text-body text-ink">{project?.name ?? '默认目录'}</span>
+            <span className="truncate text-meta text-ink-faint">
+              {project?.path ?? (defaultPath === '' ? '未配置项目时的工作目录' : defaultPath)}
+            </span>
           </div>
         </Field>
         <Field label="任务标题">
@@ -73,9 +92,7 @@ export function TaskDialog({ workflow, project, onSave, onCancel }: TaskDialogPr
             options={workflow.stages.map((s) => ({ value: s.id, label: s.name }))}
           />
         </Field>
-        <p className="text-[11px] leading-relaxed text-ink-faint">
-          「交给智能体」的阶段会立即执行。
-        </p>
+        <p className="text-meta text-ink-faint">「交给智能体」的阶段会立即执行。</p>
 
         <div className="mt-2 flex items-center justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onCancel}>

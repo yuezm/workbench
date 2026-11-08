@@ -117,14 +117,14 @@ export function TaskDetailPage({
         {state.error !== null ? (
           <p
             role="alert"
-            className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300"
+            className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
           >
             {state.error}
           </p>
         ) : state.data === undefined ? (
-          <p className="text-xs text-ink-faint">正在读取任务…</p>
+          <p className="text-meta text-ink-faint">正在读取任务…</p>
         ) : task === null ? (
-          <p className="rounded-xl border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
+          <p className="rounded-xl border border-dashed border-line px-3 py-2 text-body text-ink-faint">
             任务不存在
           </p>
         ) : (
@@ -136,7 +136,7 @@ export function TaskDetailPage({
 
             {children.length > 0 && (
               <section aria-label="子任务" className="flex flex-col gap-2">
-                <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
+                <h3 className="flex items-center gap-2 text-title font-medium text-ink">
                   子任务
                   <span className={badgeCls}>
                     {children.filter((child) => child.status === 'completed').length}/
@@ -150,17 +150,17 @@ export function TaskDetailPage({
                         type="button"
                         disabled={onOpenTask === undefined}
                         onClick={() => onOpenTask?.(child.id)}
-                        className="flex w-full items-center gap-2 rounded-xl border border-line bg-white/[0.02] px-3 py-2 text-left text-xs text-ink transition-colors hover:bg-white/[0.05] disabled:cursor-default"
+                        className="flex w-full items-center gap-2 rounded-xl border border-line bg-white/[0.02] px-3 py-2 text-left text-action text-ink transition-colors hover:bg-white/[0.05] disabled:cursor-default"
                       >
                         <span className="min-w-0 flex-1 truncate">{child.title}</span>
-                        <span className="shrink-0 text-[11px] text-ink-faint">
+                        <span className="shrink-0 text-meta text-ink-faint">
                           {stageNameOf(child)}
                         </span>
                         <span
                           className={
                             child.status === 'completed'
-                              ? 'shrink-0 rounded-sm bg-short/15 px-1.5 py-0.5 text-[10px] text-short'
-                              : 'shrink-0 rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-dim'
+                              ? 'shrink-0 rounded-sm bg-short/15 px-1.5 py-0.5 text-badge text-short'
+                              : 'shrink-0 rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim'
                           }
                         >
                           {child.status === 'completed' ? '已完成' : '进行中'}
@@ -173,7 +173,7 @@ export function TaskDetailPage({
             )}
 
             <section aria-label="上下文" className="flex flex-col gap-3">
-              <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
+              <h3 className="flex items-center gap-2 text-title font-medium text-ink">
                 上下文
                 <span className={badgeCls}>运行 {runs.length}</span>
                 <span className={badgeCls}>反馈 {comments.length}</span>
@@ -181,7 +181,7 @@ export function TaskDetailPage({
               {runsState.error !== null && (
                 <p
                   role="alert"
-                  className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300"
+                  className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
                 >
                   {runsState.error}
                 </p>
@@ -189,12 +189,12 @@ export function TaskDetailPage({
               {commentsState.error !== null && (
                 <p
                   role="alert"
-                  className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300"
+                  className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
                 >
                   {commentsState.error}
                 </p>
               )}
-              <TaskActivity runs={runs} comments={comments} />
+              <TaskActivity runs={runs} comments={comments} stages={workflow?.stages ?? []} />
               <TaskCommentForm
                 value={draft}
                 onChange={setDraft}

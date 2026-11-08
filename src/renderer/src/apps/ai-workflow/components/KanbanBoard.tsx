@@ -14,11 +14,6 @@ interface KanbanBoardProps {
   /** 卡片拖到「归档」区（完成任务并移出看板） */
   onCompleteTask: (taskId: string) => void
   onNewTask: () => void
-  /**
-   * 是否允许在本看板新建任务（默认 true）。看「未归属」时传 false：
-   * 那批任务没有项目，新建的任务没有项目可挂，入口会直接被内核拒绝。
-   */
-  canCreate?: boolean
   /** 单击任务卡进入任务详情页（页面跳转，回调由上层路由处理） */
   onOpenTask?: (task: Task) => void
   /** 打开卡片所属线程的详情页（任务有 threadId 时才渲染入口） */
@@ -56,7 +51,6 @@ export function KanbanBoard({
   onMoveToStage,
   onCompleteTask,
   onNewTask,
-  canCreate = true,
   onOpenTask,
   onOpenThread,
 }: KanbanBoardProps): ReactElement {
@@ -117,23 +111,17 @@ export function KanbanBoard({
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
+        <h2 className="flex items-center gap-2 text-title font-medium text-ink">
           <span className="text-focus-soft">
             <BoardIcon />
           </span>
           工作流「{workflow.name}」
-          <span className="text-[11px] font-normal text-ink-faint">拖拽换阶段</span>
+          <span className="text-meta font-normal text-ink-faint">拖拽换阶段</span>
         </h2>
-        {/* 未归属任务没有项目可挂：不给新建入口，改为说明为什么没有 */}
-        {canCreate ? (
-          <Button type="button" variant="primary" size="sm" onClick={onNewTask}>
-            新建任务
-          </Button>
-        ) : (
-          <span className="text-[11px] text-ink-faint">
-            未归属任务没有项目，先添加项目再建新任务
-          </span>
-        )}
+        {/* 任务可以建在当前项目，也可以落在默认目录（M11）：入口始终可用 */}
+        <Button type="button" variant="primary" size="sm" onClick={onNewTask}>
+          新建任务
+        </Button>
       </div>
       <div className="flex min-h-0 flex-1 gap-3">
         <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto pb-2">
@@ -163,16 +151,14 @@ export function KanbanBoard({
                       className={`size-1.5 shrink-0 rounded-full ${DOT_COLORS[index % DOT_COLORS.length]}`}
                       aria-hidden="true"
                     />
-                    <span className="text-[13px] font-medium tracking-wide text-ink">
-                      {stage.name}
-                    </span>
+                    <span className="text-title font-medium text-ink">{stage.name}</span>
                   </div>
-                  <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+                  <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim tabular-nums">
                     {cards.length}
                   </span>
                 </div>
                 {cards.length === 0 ? (
-                  <p className="grid place-items-center py-4 text-xs text-ink-faint">
+                  <p className="grid place-items-center py-4 text-body text-ink-faint">
                     {dragging ? '拖到这里' : '空'}
                   </p>
                 ) : (
@@ -216,12 +202,12 @@ export function KanbanBoard({
           )}
         >
           <div className="flex items-center justify-between px-1.5 pt-0.5 pb-1">
-            <span className="text-[13px] font-medium tracking-wide text-ink-dim">归档</span>
-            <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+            <span className="text-title font-medium text-ink-dim">归档</span>
+            <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim tabular-nums">
               {completedCount}
             </span>
           </div>
-          <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-[11px] leading-relaxed text-ink-faint">
+          <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-body text-ink-faint">
             拖到这里归档
           </p>
         </div>

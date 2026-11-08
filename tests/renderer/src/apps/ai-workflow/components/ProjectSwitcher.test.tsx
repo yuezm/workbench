@@ -3,8 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Project } from '../../../../../../src/protocol/entities'
 import {
+  DEFAULT_PROJECT_ID,
   ProjectSwitcher,
-  UNASSIGNED_PROJECT_ID,
 } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ProjectSwitcher'
 
 function project(id: string, name: string, path: string): Project {
@@ -16,6 +16,8 @@ const projects = [
   project('p2', '笔记', 'D:\\Notes\\long-folder-name-for-truncation'),
 ]
 
+const DEFAULT_PATH = 'C:\\Users\\me\\.workbench'
+
 describe('ProjectSwitcher', () => {
   it('列出项目：标题行 + 每个项目名与文件夹路径；点击回调 onSelect', async () => {
     const onSelect = vi.fn()
@@ -24,7 +26,7 @@ describe('ProjectSwitcher', () => {
       <ProjectSwitcher
         projects={projects}
         activeId="p1"
-        unassignedCount={0}
+        defaultPath={DEFAULT_PATH}
         onSelect={onSelect}
         onCreate={vi.fn()}
         onEdit={vi.fn()}
@@ -33,6 +35,7 @@ describe('ProjectSwitcher', () => {
 
     expect(screen.getByText('项目')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '项目：工作台' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '默认目录' })).toBeInTheDocument()
     expect(screen.getByText('D:\\Codes\\workbench')).toBeInTheDocument()
     // 路径可能很长：只截断展示，不换行
     expect(screen.getByText('D:\\Notes\\long-folder-name-for-truncation').className).toContain(
@@ -50,7 +53,7 @@ describe('ProjectSwitcher', () => {
       <ProjectSwitcher
         projects={projects}
         activeId="p1"
-        unassignedCount={0}
+        defaultPath={DEFAULT_PATH}
         onSelect={vi.fn()}
         onCreate={onCreate}
         onEdit={vi.fn()}
@@ -67,7 +70,7 @@ describe('ProjectSwitcher', () => {
       <ProjectSwitcher
         projects={projects}
         activeId="p2"
-        unassignedCount={0}
+        defaultPath={DEFAULT_PATH}
         onSelect={vi.fn()}
         onCreate={vi.fn()}
         onEdit={onEdit}
@@ -85,74 +88,75 @@ describe('ProjectSwitcher', () => {
     expect(onEdit).toHaveBeenCalledWith(projects[1])
   })
 
-  it('没有项目且没有未归属任务时给空态与引导文案', () => {
+  it('没有项目时给空态与引导文案，默认目录行仍然可用', () => {
     render(
       <ProjectSwitcher
         projects={[]}
         activeId={undefined}
-        unassignedCount={0}
+        defaultPath={DEFAULT_PATH}
         onSelect={vi.fn()}
         onCreate={vi.fn()}
         onEdit={vi.fn()}
       />,
     )
-    expect(screen.getByText('还没有项目')).toBeInTheDocument()
-    expect(screen.getByText('添加本地文件夹作为项目')).toBeInTheDocument()
+    expect(screen.getByText('还没有项目，可先落到默认目录')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '默认目录' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ 添加' })).toBeInTheDocument()
   })
 
-  it('有未归属任务时在末尾渲染「未归属」行：副标题 + 数量，可选中且没有编辑入口', async () => {
+  it('「默认目录」行常驻：副标题是宿主默认目录路径，可选中且没有编辑入口', async () => {
     const onSelect = vi.fn()
     const user = userEvent.setup()
     render(
       <ProjectSwitcher
         projects={projects}
-        activeId={UNASSIGNED_PROJECT_ID}
-        unassignedCount={3}
+        activeId={DEFAULT_PROJECT_ID}
+        defaultPath={DEFAULT_PATH}
         onSelect={onSelect}
         onCreate={vi.fn()}
         onEdit={vi.fn()}
       />,
     )
 
-    const row = screen.getByRole('button', { name: '未归属' })
+    const row = screen.getByRole('button', { name: '默认目录' })
     expect(row).toHaveAttribute('aria-current', 'page')
     expect(row.className).toContain('bg-surface-3')
-    expect(screen.getByText('没有项目的任务')).toBeInTheDocument()
-    expect(screen.getByText('3')).toBeInTheDocument()
-    // 伪项目没有文件夹也没有编辑入口
-    expect(screen.queryByRole('button', { name: '编辑项目 未归属' })).not.toBeInTheDocument()
+    expect(screen.getByText(DEFAULT_PATH)).toBeInTheDocument()
+    // 默认目录不对应项目行：没有文件夹选择器也没有编辑入口
+    expect(screen.queryByRole('button', { name: '编辑项目 默认目录' })).not.toBeInTheDocument()
 
     await user.click(row)
-    expect(onSelect).toHaveBeenCalledWith(UNASSIGNED_PROJECT_ID)
+    expect(onSelect).toHaveBeenCalledWith(DEFAULT_PROJECT_ID)
   })
 
-  it('没有未归属任务时不渲染「未归属」行', () => {
+  it('默认目录路径未知时给兜底文案', () => {
     render(
       <ProjectSwitcher
         projects={projects}
-        activeId={undefined}
-        unassignedCount={0}
+        activeId="p1"
+        defaultPath=""
         onSelect={vi.fn()}
         onCreate={vi.fn()}
         onEdit={vi.fn()}
       />,
     )
-    expect(screen.queryByRole('button', { name: '未归属' })).not.toBeInTheDocument()
-    expect(screen.queryByText('没有项目的任务')).not.toBeInTheDocument()
+    expect(screen.getByText('未配置项目时的工作目录')).toBeInTheDocument()
   })
 
-  it('一个项目都没有但有未归属任务：不显示空态，只显示未归属行', () => {
+  it('有项目时默认目录行也在（不依赖未归属数量），未选中不高亮', () => {
     render(
       <ProjectSwitcher
-        projects={[]}
-        activeId={UNASSIGNED_PROJECT_ID}
-        unassignedCount={2}
+        projects={projects}
+        activeId="p1"
+        defaultPath={DEFAULT_PATH}
         onSelect={vi.fn()}
         onCreate={vi.fn()}
         onEdit={vi.fn()}
       />,
     )
-    expect(screen.queryByText('还没有项目')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '未归属' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '默认目录' })).not.toHaveAttribute('aria-current')
+    expect(screen.queryByText('还没有项目，可先落到默认目录')).not.toBeInTheDocument()
+    // 默认目录行只占一行，不带数量徽标（它不是伪项目聚合）
+    expect(screen.queryByText('没有项目的任务')).not.toBeInTheDocument()
   })
 })

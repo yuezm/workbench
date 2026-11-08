@@ -230,6 +230,42 @@ describe('TaskDetailPage', () => {
     expect(items[1]).toHaveTextContent('按钮颜色不对，改成粉色')
   })
 
+  it('活动流的运行卡片带上当前工作流的阶段名与「第 N 轮」', async () => {
+    const secondRun: Run = {
+      ...run,
+      id: 'run2',
+      stageId: 's0',
+      createdAt: '2026-11-06T09:30:00.000Z',
+      output: '第二轮产出',
+    }
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [run, secondRun])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+
+    const context = await screen.findByRole('region', { name: '上下文' })
+    const items = within(context).getAllByRole('listitem')
+    expect(items).toHaveLength(2)
+    expect(items[0]).toHaveTextContent('执行')
+    expect(items[0]).toHaveTextContent('第 1 轮')
+    expect(items[1]).toHaveTextContent('待办')
+    expect(items[1]).toHaveTextContent('第 2 轮')
+  })
+
+  it('工作流阶段表缺失时，活动流里的运行卡片显示「未知阶段」', async () => {
+    kernel.setView('task.byId', { taskId: 't1' }, { ...task, workflowId: 'gone' })
+    kernel.setView('runs.byTask', { taskId: 't1' }, [run])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+
+    const context = await screen.findByRole('region', { name: '上下文' })
+    expect(within(context).getAllByRole('listitem')[0]).toHaveTextContent('未知阶段')
+  })
+
   it('既没有运行也没有反馈时展示空态', async () => {
     setup(task, [], [])
     expect(await screen.findByText('还没有运行记录或反馈')).toBeInTheDocument()

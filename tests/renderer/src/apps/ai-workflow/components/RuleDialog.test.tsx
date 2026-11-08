@@ -40,7 +40,10 @@ function project(id: string, name: string, path: string): Project {
   return { id, name, path, description: '', createdAt: 't', updatedAt: 't' }
 }
 
-const projects = [project('p1', '工作台', 'D:\\Codes\\workbench'), project('p2', '笔记', 'D:\\Notes')]
+const projects = [
+  project('p1', '工作台', 'D:\\Codes\\workbench'),
+  project('p2', '笔记', 'D:\\Notes'),
+]
 
 function blankRule(): AutomationRule {
   return {
@@ -316,7 +319,7 @@ describe('RuleDialog', () => {
       />,
     )
 
-    // 新规则默认落在第一个项目：避免一建规则就批量产出没有工作目录的未归属任务
+    // 新规则默认落在第一个项目：避免一建规则就批量产出没有工作目录的默认目录任务
     expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('工作台')
     await user.type(screen.getByLabelText('规则名称'), 'Issue 规则')
     await choose(user, '规则目标工作流', '研发')
@@ -329,7 +332,7 @@ describe('RuleDialog', () => {
     expect(onSubmit.mock.calls[1][0].to).toMatchObject({ projectId: 'p2' })
   })
 
-  it('编辑老规则保持未归属，不强行改写归属', async () => {
+  it('编辑老规则保持默认目录，不强行改写归属', async () => {
     const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
     const user = userEvent.setup()
     render(
@@ -343,13 +346,13 @@ describe('RuleDialog', () => {
       />,
     )
 
-    // 老规则没有 to.projectId：显示未归属，保存后仍不带该字段
-    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('未归属')
+    // 老规则没有 to.projectId：显示默认目录，保存后仍不带该字段
+    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('默认目录')
     await user.click(screen.getByRole('button', { name: '保存' }))
     expect(onSubmit.mock.calls[0][0].to.projectId).toBeUndefined()
   })
 
-  it('一个项目都没有时新建规则显示未归属，保存不带 projectId', async () => {
+  it('一个项目都没有时新建规则显示默认目录，保存不带 projectId', async () => {
     const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
     const user = userEvent.setup()
     render(
@@ -363,7 +366,7 @@ describe('RuleDialog', () => {
       />,
     )
 
-    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('未归属')
+    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('默认目录')
     await user.type(screen.getByLabelText('规则名称'), 'Issue 规则')
     await choose(user, '规则目标工作流', '研发')
     await user.click(screen.getByRole('button', { name: '保存' }))

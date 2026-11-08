@@ -40,12 +40,22 @@ const project: Project = {
   updatedAt: 't',
 }
 
+const DEFAULT_PATH = 'C:\\Users\\me\\.workbench'
+
 describe('TaskDialog', () => {
   it('填写标题/描述后创建，默认从首阶段开始，并带上所属项目；取消回调', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     const onCancel = vi.fn()
     const user = userEvent.setup()
-    render(<TaskDialog workflow={wf} project={project} onSave={onSave} onCancel={onCancel} />)
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={onCancel}
+      />,
+    )
     expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('待办')
 
     await user.type(screen.getByLabelText('任务标题'), '做点事')
@@ -64,17 +74,54 @@ describe('TaskDialog', () => {
   })
 
   it('所属项目是只读展示：项目名 + 文件夹路径', () => {
-    render(<TaskDialog workflow={wf} project={project} onSave={vi.fn()} onCancel={vi.fn()} />)
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
     expect(screen.getByText('工作台')).toBeInTheDocument()
     expect(screen.getByText('D:\\Codes\\workbench')).toBeInTheDocument()
-    // 项目在任务栏选好了，弹窗里没有可改项目的控件
+    // 项目在工作台顶层选好了，弹窗里没有可改项目的控件
     expect(screen.queryByRole('combobox', { name: '所属项目' })).not.toBeInTheDocument()
+  })
+
+  it('默认目录：展示默认目录与宿主路径，创建时 projectId 传 null', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <TaskDialog workflow={wf} defaultPath={DEFAULT_PATH} onSave={onSave} onCancel={vi.fn()} />,
+    )
+    const row = screen.getByLabelText('所属项目')
+    expect(row).toHaveTextContent('默认目录')
+    expect(row).toHaveTextContent(DEFAULT_PATH)
+
+    await user.type(screen.getByLabelText('任务标题'), '落在默认目录')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).toMatchObject({ projectId: null })
+  })
+
+  it('默认目录路径未知时给兜底文案', () => {
+    render(<TaskDialog workflow={wf} defaultPath="" onSave={vi.fn()} onCancel={vi.fn()} />)
+    expect(screen.getByLabelText('所属项目')).toHaveTextContent('未配置项目时的工作目录')
   })
 
   it('可以指定从其它阶段开始', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
-    render(<TaskDialog workflow={wf} project={project} onSave={onSave} onCancel={vi.fn()} />)
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
     await user.type(screen.getByLabelText('任务标题'), '从进行中开始')
     await user.click(screen.getByRole('combobox', { name: '起始阶段' }))
     await user.click(await screen.findByRole('option', { name: '进行中' }))
@@ -86,7 +133,15 @@ describe('TaskDialog', () => {
   it('标题为空不提交', async () => {
     const onSave = vi.fn()
     const user = userEvent.setup()
-    render(<TaskDialog workflow={wf} project={project} onSave={onSave} onCancel={vi.fn()} />)
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
     await user.click(screen.getByRole('button', { name: '创建' }))
     expect(onSave).not.toHaveBeenCalled()
   })
@@ -96,6 +151,7 @@ describe('TaskDialog', () => {
       <TaskDialog
         workflow={{ ...wf, stages: [] }}
         project={project}
+        defaultPath={DEFAULT_PATH}
         onSave={vi.fn()}
         onCancel={vi.fn()}
       />,
@@ -106,7 +162,15 @@ describe('TaskDialog', () => {
   it('Esc 关闭弹窗', async () => {
     const onCancel = vi.fn()
     const user = userEvent.setup()
-    render(<TaskDialog workflow={wf} project={project} onSave={vi.fn()} onCancel={onCancel} />)
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={vi.fn()}
+        onCancel={onCancel}
+      />,
+    )
     await user.keyboard('{Escape}')
     expect(onCancel).toHaveBeenCalled()
   })
@@ -114,7 +178,15 @@ describe('TaskDialog', () => {
   it('右上角关闭按钮回调取消', async () => {
     const onCancel = vi.fn()
     const user = userEvent.setup()
-    render(<TaskDialog workflow={wf} project={project} onSave={vi.fn()} onCancel={onCancel} />)
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={vi.fn()}
+        onCancel={onCancel}
+      />,
+    )
     await user.click(screen.getByRole('button', { name: '关闭' }))
     expect(onCancel).toHaveBeenCalled()
   })

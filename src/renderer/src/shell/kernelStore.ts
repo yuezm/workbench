@@ -103,8 +103,25 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
     ],
   },
   { prefix: 'card.', views: ['cards.open', 'cards.byRun'] },
-  { prefix: 'conversation.', views: ['conversations.all', 'messages.byConversation'] },
-  { prefix: 'message.', views: ['messages.byConversation', 'conversations.all'] },
+  {
+    prefix: 'conversation.',
+    // M11：会话清单按项目取（`byProject` / `unassigned`），归档、改名、换项目都要重取
+    views: [
+      'conversations.all',
+      'conversations.byProject',
+      'conversations.unassigned',
+      'messages.byConversation',
+    ],
+  },
+  {
+    prefix: 'message.',
+    views: [
+      'messages.byConversation',
+      'conversations.all',
+      'conversations.byProject',
+      'conversations.unassigned',
+    ],
+  },
   // 规则集是整批投影：两条事实都只影响 rules.all；任务类事实由既有 `task.` 前缀处理
   { prefix: 'rules.replaced', views: ['rules.all'] },
   { prefix: 'rule.fired', views: ['rules.all'] },

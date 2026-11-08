@@ -22,7 +22,15 @@ const agent: Agent = {
 const researcher: Agent = { ...agent, id: 'a2', name: '研究员' }
 
 function conv(id: string, title: string, agentId = 'a1'): Conversation {
-  return { id, title, agentId, sessionId: null, createdAt: 't', updatedAt: 't' }
+  return {
+    id,
+    title,
+    agentId,
+    projectId: null,
+    sessionId: null,
+    createdAt: 't',
+    updatedAt: 't',
+  }
 }
 
 function msg(
@@ -45,16 +53,26 @@ beforeEach(() => {
   kernel = installFakeKernel()
 })
 
-function seedConversations(list: Conversation[]): void {
-  kernel.setView('conversations.all', undefined, list)
+/**
+ * 会话清单按项目取（M11）：默认目录用 `conversations.unassigned`，项目用
+ * `conversations.byProject`。默认目录是缺省上下文（`projectId = null`）。
+ */
+function seedConversations(list: Conversation[], projectId: string | null = null): void {
+  setConversations(list, projectId)
+}
+
+/** dispatch 回填用：与当前上下文同口径更新会话清单视图 */
+function setConversations(list: Conversation[], projectId: string | null = null): void {
+  if (projectId === null) kernel.setView('conversations.unassigned', undefined, list)
+  else kernel.setView('conversations.byProject', { projectId }, list)
 }
 
 function seedMessages(conversationId: string, list: Message[]): void {
   kernel.setView('messages.byConversation', { conversationId }, list)
 }
 
-function mount(agents: Agent[] = [agent, researcher]) {
-  return renderHook(() => useChat(agents))
+function mount(agents: Agent[] = [agent, researcher], projectId: string | null = null) {
+  return renderHook(() => useChat(agents, projectId))
 }
 
 /** 构造一条聊天流事件（conversationId 缺省为当前会话 c1） */
@@ -85,7 +103,7 @@ describe('useChat', () => {
     const created = conv('c9', '新会话')
     kernel.onDispatch(<C extends Command>(command: C): CommandDispatchResult<C> => {
       if (command.type === 'chat.create') {
-        kernel.setView('conversations.all', undefined, [created, c1])
+        setConversations([created, c1])
         return { facts: [], value: created } as unknown as CommandDispatchResult<C>
       }
       return { facts: [], value: null } as CommandDispatchResult<C>
@@ -306,7 +324,7 @@ describe('useChat', () => {
     kernel.onDispatch((command) => {
       if (command.type === 'chat.remove') {
         list = list.filter((item) => item.id !== command.conversationId)
-        kernel.setView('conversations.all', undefined, list)
+        setConversations(list)
       }
       return { facts: [], value: null }
     })
@@ -365,11 +383,59 @@ describe('useChat', () => {
   })
 
   it('会话列表加载失败写入 error，且没有选中会话', async () => {
-    kernel.failView('conversations.all', undefined, '会话列表不可用')
+    kernel.failView('conversations.unassigned', undefined, '会话列表不可用')
     const { result } = mount()
 
     await waitFor(() => expect(result.current.error).toBe('会话列表不可用'))
     expect(result.current.activeId).toBeNull()
+    expect(result.current.conversations).toEqual([])
+  })
+
+  it('项目上下文：订阅 conversations.byProject，新建对话带上 projectId', async () => {
+    const projectConv = { ...conv('p-c1', '项目里的会话'), projectId: 'p1' }
+    seedConversations([projectConv], 'p1')
+    const created = { ...conv('p-c2', '新会话'), projectId: 'p1' }
+    kernel.onDispatch(<C extends Command>(command: C): CommandDispatchResult<C> => {
+      if (command.type === 'chat.create') {
+        setConversations([created, projectConv], 'p1')
+        return { facts: [], value: created } as unknown as CommandDispatchResult<C>
+      }
+      return { facts: [], value: null } as CommandDispatchResult<C>
+    })
+    const { result } = mount([agent], 'p1')
+
+    await waitFor(() => expect(result.current.activeId).toBe('p-c1'))
+    // 默认目录视图不订阅：项目会话不会混进默认目录清单
+    expect(result.current.conversations.map((item) => item.id)).toEqual(['p-c1'])
+
+    await act(async () => {
+      await result.current.createConversation()
+    })
+    expect(kernel.dispatched.find((command) => command.type === 'chat.create')).toMatchObject({
+      agentId: 'a1',
+      projectId: 'p1',
+    })
+    await waitFor(() => expect(result.current.activeId).toBe('p-c2'))
+    expect(result.current.conversations).toHaveLength(2)
+  })
+
+  it('默认目录：新建对话的 projectId 为 null', async () => {
+    seedConversations([])
+    const { result } = mount()
+
+    await act(async () => {
+      await result.current.createConversation()
+    })
+    expect(kernel.dispatched.find((command) => command.type === 'chat.create')).toMatchObject({
+      projectId: null,
+    })
+  })
+
+  it('项目会话列表加载失败也写入 error', async () => {
+    kernel.failView('conversations.byProject', { projectId: 'p1' }, '项目会话不可用')
+    const { result } = mount([agent], 'p1')
+
+    await waitFor(() => expect(result.current.error).toBe('项目会话不可用'))
     expect(result.current.conversations).toEqual([])
   })
 
@@ -450,7 +516,7 @@ describe('useChat', () => {
     kernel.onDispatch((command) => {
       if (command.type === 'chat.archive') {
         list = command.archived === false ? [c1, c2] : [archived, c2]
-        kernel.setView('conversations.all', undefined, list)
+        setConversations(list)
       }
       return { facts: [], value: null }
     })

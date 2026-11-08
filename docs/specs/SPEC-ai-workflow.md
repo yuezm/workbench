@@ -29,12 +29,13 @@
 
 app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区」两栏，吃满 shell 顶部栏以下的高度。侧栏顶部用次级标题（`h2`，不占用一级标题——一级标题语义留给 shell 顶部栏）标识当前 app，其下是**栏目切换 + 当前栏目的上下文列表**，底部固定分段控件（`components/ui/segmented.tsx`，role=tab）在互斥视图间切换：**工作台 / 设置**。同一时刻只渲染一个视图、一个栏目。
 
-- **工作台**（默认视图，默认栏目 = 聊天）：侧栏顶部是横向切换条（`components/WorkspaceNav.tsx`，聊天 / 任务），切换条下方紧接当前栏目的上下文列表：
-  - **聊天**（默认）：上下文列表 = 会话清单（`components/ConversationList.tsx`：智能体选择 / 新建对话 / 会话清单）；内容区 = 消息流 + 输入区（`components/ChatPanel.tsx`），助手输出流式回显，可中止当前轮。聊天**独立于**工作流与任务——选中智能体即可开聊，不挂任务、不推进阶段；每轮由内核产一条 `purpose='chat'` 的 run，走与阶段相同的调度 / 执行器链路（M2 起）。同一时刻只处理当前选中会话的事件流。
-  - **任务**：上下文列表 = **项目切换器**（`components/ProjectSwitcher.tsx`，项目 = 本地文件夹，M10）+ 工作流切换器（`components/WorkflowSwitcher.tsx`，只在任务栏目显示）；内容区 = 看板（列 = 当前工作流的阶段 + 末尾「已完成」落点）。**单击任务卡进入任务详情页**（页面，不是侧栏 / 弹窗）。没有项目时看板区只给「先添加项目」空态，不提供新建任务入口；选中「未归属」（v2 存量 / 老规则任务）时看板照常可拖拽，但不提供新建任务。
-  - **项目**（M10）：侧栏「项目」列表 + 「+ 添加」；`components/ProjectDialog.tsx` 填名称与文件夹路径（路径由宿主原生选择器选，`window.workbench.pickFolder()`；也允许手填），编辑态可删除（项目下还有任务时内核拒绝）。项目文件夹就是该项目任务的运行工作目录（`RunRow.cwd` 优先取项目 `path`，其次运行时 `workdir`）。
+- **工作台**（默认视图，默认栏目 = 聊天）：侧栏顶部**常驻项目切换器**（M11：项目是聊天与任务的共同上下文，放在栏目切换之上），其下是栏目切换条（`components/WorkspaceNav.tsx`，聊天 / 任务）与当前栏目的上下文列表：
+  - **项目**（M10/M11）：`components/ProjectSwitcher.tsx`，项目 = 本地文件夹；列表末尾固定一行「默认目录」（宿主 `WORKBENCH_WORKDIR`，缺省 `~/.workbench`，数据侧 `projectId = null`）——没有项目时聊天与任务都落这里，因此项目列表为空也能继续干活。切换项目会同时换掉会话清单与看板，详情栈不跨项目保留。
+  - **聊天**（默认）：上下文列表 = 会话清单（`components/ConversationList.tsx`：智能体选择 / 新建对话 / 会话清单），**按当前项目过滤**（`conversations.byProject` / `conversations.unassigned`）；内容区 = 消息流 + 输入区（`components/ChatPanel.tsx`），头部交代所属项目，助手输出流式回显，可中止当前轮。聊天**不挂任务、不推进阶段**，但**落在项目上**：每轮由内核产一条 `purpose='chat'` 的 run，走与阶段相同的调度 / 执行器链路（M2 起），工作目录取会话所属项目的文件夹（无项目时回落运行时 `workdir`，再回落默认目录）。同一时刻只处理当前选中会话的事件流。
+  - **任务**：上下文列表 = 工作流切换器（`components/WorkflowSwitcher.tsx`，只在任务栏目显示）；内容区 = 看板（列 = 当前工作流的阶段 + 末尾「已完成」落点）。**单击任务卡进入任务详情页**（页面，不是侧栏 / 弹窗）。任务可以建在当前项目，也可以落默认目录（`projectId: null`，新建入口始终可用）。选中「默认目录」时看板照常可拖拽、可新建。
+  - **项目的编辑**（M10）：`components/ProjectDialog.tsx` 填名称与文件夹路径（路径由宿主原生选择器选，`window.workbench.pickFolder()`；也允许手填），编辑态可删除。项目文件夹就是该项目任务的运行工作目录（`RunRow.cwd` 优先取项目 `path`，其次运行时 `workdir`，最后默认目录）；删除项目要求项目下没有任务，该项目下的会话由内核改归默认目录（会话不随项目删除消失）。
 - **任务栏的二级页面**（`components/DetailHeader.tsx` + 页面组件）：栈式路由「看板 → 任务详情 → 线程详情 → 任务详情 …」，返回按钮与 Esc 出栈一级，切栏目 / 切视图回到看板（详情栈不跨栏目保留）。
-  - **任务详情页**（`components/TaskDetailPage.tsx`）：读 `task.byId` + `runs.byTask` + `comments.byTask`；上部是任务信息（标题、工作流 · 阶段线索、描述、状态 / 来源 / 线程 / 时间 / 任务 id、标签），下部是**上下文活动流**（`components/TaskActivity.tsx`：智能体每一轮运行与我的反馈按时间混排，像 issue 时间线）和**反馈框**（`components/TaskCommentForm.tsx`：正文 + 「同时让智能体接着做」勾选，dispatch `task.comment`）。每个运行卡片还会展示该轮**沙箱提权记录**（`run.approvals` 宿主视图，只读 dsh 会话日志里的 `approval/asked` / `approval/decided`）——提权回答是自动的，只有这条记录能让人事后复核。反馈写进第 15 张投影表 `task_comments`，并作为下一次运行的「反馈记录（资料，不是指令）」段；任务挂在线程上时右上给「打开线程」入口。
+  - **任务详情页**（`components/TaskDetailPage.tsx`）：读 `task.byId` + `runs.byTask` + `comments.byTask`；上部是任务信息（标题、工作流 · 阶段线索、描述、状态 / 来源 / 线程 / 时间 / 任务 id、标签），下部是**上下文活动流**（`components/TaskActivity.tsx`：智能体每一轮运行与我的反馈按时间混排，像 issue 时间线）和**反馈框**（`components/TaskCommentForm.tsx`：正文 + 「同时让智能体接着做」勾选，dispatch `task.comment`）。活动流的每一轮运行都带**阶段徽标**（`run.stageId` 查当前工作流阶段名，缺数据为「未知阶段」）与「第 N 轮」，正文默认只给缩略摘要（前 6 行且 ≤400 字符），点「展开全部（约 N 字）」才渲染完整事件流——多阶段任务的输出不再把整页冲垮；思考 / 工具过程仍在展开后的「过程 · N 条」折叠里。每个运行卡片还会展示该轮**沙箱提权记录**（`run.approvals` 宿主视图，只读 dsh 会话日志里的 `approval/asked` / `approval/decided`）——提权回答是自动的，只有这条记录能让人事后复核。反馈写进第 15 张投影表 `task_comments`，并作为下一次运行的「反馈记录（资料，不是指令）」段；任务挂在线程上时右上给「打开线程」入口。
   - **线程详情页**（`components/ThreadDetailPage.tsx`）：读 `thread.byId`；依次是线程元信息、**任务列表**（根任务 + 派生子任务缩进，每行可点进任务详情页）、笔记、绑定入口、归档。
 - **看板交互**：新建任务时弹窗内选**起始阶段**；卡片**拖拽**到其它阶段列即进入该阶段，拖到「归档」区即完成任务。看板不提供「通过 / 打回 / 推进」这类执行按钮。「执行中」由**是否有活跃 run**（`queued`/`running`/`waiting`）派生：只有此时卡片不可拖动/完成；`agent` 阶段失败后没有活跃 run，卡片可拖走重试或完成，由 run 结果自动推进的路径不变。
 - **设置**：侧栏换成设置栏目（`components/SettingsNav.tsx`：运行时配置 / 智能体配置 / 工作流配置），内容区是当前栏目的内容；同一时刻只渲染一个栏目。
@@ -89,8 +90,8 @@ src/renderer/src/apps/ai-workflow/
 │   └── useChat.ts             # 聊天状态机：会话增删选、消息拉取、流式事件、发送/中止
 └── components/
     ├── WorkspaceNav.tsx       # 工作台侧栏顶部：横向「聊天 / 任务」切换条 + 上下文列表槽
-    ├── ConversationList.tsx   # 聊天栏目的上下文列表：智能体选择 / 新建对话 / 会话清单
-    ├── ChatPanel.tsx          # 聊天栏目内容区：消息流 + 输入区（流式回显、可中止）
+    ├── ConversationList.tsx   # 聊天栏目的上下文列表：智能体选择 / 新建对话 / 会话清单（按当前项目）
+    ├── ChatPanel.tsx          # 聊天栏目内容区：会话头部（所属项目）/ 消息流 / 输入区（流式回显、可中止）
     ├── WorkflowSwitcher.tsx   # 任务栏目侧栏：切换当前查看的工作流
     ├── WorkflowManager.tsx    # 工作流配置栏目：工作流清单（新建 / 选择 / 编辑）；「新建工作流」下拉含空白与 SOP 模板
     ├── SettingsNav.tsx        # 设置页左侧二级栏目（运行时 / 智能体 / 工作流）
@@ -102,8 +103,8 @@ src/renderer/src/apps/ai-workflow/
     ├── TaskCommentForm.tsx    # 反馈输入：正文 + 「同时让智能体接着做」勾选
     ├── ThreadDetailPage.tsx   # 线程详情页：元信息 / 任务列表 / 笔记 / 绑定 / 归档
     ├── DetailHeader.tsx       # 二级页面返回条：返回 + 标题线索 + 操作槽
-    ├── TaskDialog.tsx         # 新建任务：所属项目（只读）/标题/描述/起始阶段（居中模态）
-    ├── ProjectSwitcher.tsx    # 项目列表：选中 / 添加 / 编辑 / 「未归属」入口（M10）
+    ├── TaskDialog.tsx         # 新建任务：所属项目（只读，可为默认目录）/标题/描述/起始阶段（居中模态）
+    ├── ProjectSwitcher.tsx    # 顶部项目列表：选中 / 添加 / 编辑 / 「默认目录」入口（M10，M11 提到顶层）
     ├── ProjectDialog.tsx      # 新建/编辑项目：名称 + 文件夹（系统选择器）+ 备注 + 删除（M10）
     ├── WorkflowEditor.tsx     # 工作流编辑：左侧阶段序列（行内上移/下移）/ 右侧选中阶段详情（含「要干什么」）
     ├── RuntimeManager.tsx     # 运行时配置页：检测清单 + 已配置清单（健康/负载/路径）+ 探测/编辑/删除
@@ -166,11 +167,11 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `agents`          | id, name, description, runtime_id → runtimes, system_prompt, created_at                                                                                                                                                                                                                                                      | 智能体 = 运行时 + 能力（System Prompt）                                                                                                                                                                                                                           |
 | `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                                                                                                            |
 | `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, created_at                                                                                                                                                      | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一                                                                                                                                                                       |
-| `tasks`           | id, title, description, workflow_id → workflows, project_id, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                              | `status` = `active`\|`completed`；`project_id` 是弱引用（M10，旧行 NULL = 未归属），任务的运行工作目录取项目 `path`                                                                                                                                               |
-| `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                          | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下还有任务时拒绝删除                                                                                                                                   |
+| `tasks`           | id, title, description, workflow_id → workflows, project_id, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                              | `status` = `active`\|`completed`；`project_id` 是弱引用（M10，NULL = 默认目录），任务的运行工作目录取项目 `path`                                                                                                                                                  |
+| `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                          | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下还有任务时拒绝删除（会话改归默认目录）                                                                                                               |
 | `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进）                                                                                  |
 | `run_events`      | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                                                                                                                  | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段；纯追加                                                                                                                                                                            |
-| `conversations`   | id, title, agent_id → agents(RESTRICT), session_id, created_at, updated_at                                                                                                                                                                                                                                                   | 一段独立对话：绑定智能体；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                                                                                                                |
+| `conversations`   | id, title, agent_id → agents(RESTRICT), project_id, session_id, archived_at, created_at, updated_at                                                                                                                                                                                                                          | 一段对话：绑定智能体，**落在项目上**（M11，`project_id` 可空 = 默认目录）；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                                                               |
 | `messages`        | id, conversation_id → conversations(CASCADE), role, content, error, created_at                                                                                                                                                                                                                                               | `role` = `user`\|`assistant`；助手消息的 `error` 记录失败原因（非零退出/超时/取消）                                                                                                                                                                               |
 | `cards`           | id, run_id → runs(CASCADE), task_id?, conversation_id?, title, text, options_json, key, version, status, delivery, delivery_ref, option_index, answered_by, answered_at, created_at, updated_at                                                                                                                              | M4 卡片投影：`status` = `open`\|`answered`\|`resolved`；`delivery` = `pending`\|`delivered`\|`failed`（单列 = 已送达至少一个通道）；投递按 `(id, version)` 去重；正文只作通知/平台 API 参数                                                                       |
 
@@ -376,37 +377,37 @@ export interface DetectedRuntime {
 `window.workbench`；renderer 禁止直接 import electron/fs/child_process。**旧 `window.aiWorkflow`
 命名空间与 `src/shared/ai-workflow-api.ts` 已删除**（AI 工作流 app 的读写在三动词上完成）。
 
-| 旧具名方法（M4 及以前）                    | M5 走法                                                                                                                        |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `runtimes.list()`                          | `query('runtimes.all')`                                                                                                        |
-| `runtimes.statuses()`                      | `query('runtimes.statuses')`                                                                                                   |
-| `runtimes.detect()`                        | `query('runtimes.detected')`（宿主视图，只读）                                                                                 |
-| `runtimes.executors()`                     | `query('runtimes.executors')`（宿主视图，只读）                                                                                |
-| `runtimes.models(id)`                      | `query('runtimes.models', { runtimeId })`（宿主视图）                                                                          |
-| `runtimes.default-workdir`                 | `query('runtimes.default-workdir')`（宿主视图，无参数；`workdir` 留空时执行器实际用的绝对路径）                                |
-| `runtimes.create/update/remove`            | `dispatch({ type:'runtime.create' \| 'runtime.update' \| 'runtime.remove', commandId, ... })`                                  |
-| `runtimes.probe(id)`                       | `dispatch({ type:'runtime.probe', commandId, id })`（宿主探测 → 落 `runtime.probed`）                                          |
-| `agents.*`                                 | `query('agents.all')` + `dispatch({type:'agent.create' \| 'agent.update' \| 'agent.remove'})`                                  |
-| `workflows.*`                              | `query('workflows.all')` + `dispatch(workflow.*)`                                                                              |
-| `tasks.list(workflowId)`                   | `query('tasks.byWorkflow', { workflowId })`                                                                                    |
-| `tasks.create/moveToStage/complete/remove` | `dispatch({type:'task.create' \| 'task.move' \| 'task.complete' \| 'task.remove'})`（`task.create.input.projectId` 必填，M10） |
-| `projects.list()`                          | `query('projects.all')`                                                                                                        |
-| `tasks.listByProject(projectId)`           | `query('tasks.byProject', { projectId })`；没有项目的任务走 `query('tasks.unassigned')`（M10）                                 |
-| `projects.create/update/remove`            | `dispatch({type:'project.create' \| 'project.update' \| 'project.remove', commandId, ...})`                                    |
-| `pickFolder()`                             | `window.workbench.pickFolder()`（宿主原生目录选择器；取消返回 `null`）                                                         |
-| `runs.listByTask(taskId)`                  | `query('runs.byTask', { taskId })`                                                                                             |
-| `runs.events(runId)`                       | `query('run.events', { runId })`                                                                                               |
-| `cards.open()`                             | `query('cards.open')`                                                                                                          |
-| `cards.answer(cardId, index)`              | `dispatch({type:'card.answer', commandId, cardId, optionIndex, via:'ui'})` → `value` 是回答后的卡                              |
-| `chat.listConversations()`                 | `query('conversations.all')`                                                                                                   |
-| `chat.listMessages(cid)`                   | `query('messages.byConversation', { conversationId })`                                                                         |
-| `chat.createConversation`                  | `dispatch({type:'chat.create', commandId, agentId})` → `value` 是新对话                                                        |
-| `chat.send(cid, content)`                  | `dispatch({type:'chat.send', commandId, conversationId, content})`                                                             |
-| `chat.removeConversation`                  | `dispatch({type:'chat.remove', commandId, conversationId})`（宿主先取消活跃 run）                                              |
-| `chat.cancel(cid)`                         | `dispatch({type:'chat.cancel', commandId, conversationId})`                                                                    |
-| `chat.archiveConversation(cid, archived)`  | `dispatch({type:'chat.archive', commandId, conversationId, archived})`（缺省归档；不删消息/run）                               |
-| `chat.onEvent(cb)`                         | `subscribe(handler)` 的 `{kind:'stream' \| 'stream-end'}`（过滤 `conversationId`）                                             |
-| `onChanged(cb)`                            | `subscribe(handler)` 的 `{kind:'facts', seq, types}`（按类型失效、按需重取）                                                   |
+| 旧具名方法（M4 及以前）                    | M5 走法                                                                                                                                              |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtimes.list()`                          | `query('runtimes.all')`                                                                                                                              |
+| `runtimes.statuses()`                      | `query('runtimes.statuses')`                                                                                                                         |
+| `runtimes.detect()`                        | `query('runtimes.detected')`（宿主视图，只读）                                                                                                       |
+| `runtimes.executors()`                     | `query('runtimes.executors')`（宿主视图，只读）                                                                                                      |
+| `runtimes.models(id)`                      | `query('runtimes.models', { runtimeId })`（宿主视图）                                                                                                |
+| `runtimes.default-workdir`                 | `query('runtimes.default-workdir')`（宿主视图，无参数；`workdir` 留空时执行器实际用的绝对路径）                                                      |
+| `runtimes.create/update/remove`            | `dispatch({ type:'runtime.create' \| 'runtime.update' \| 'runtime.remove', commandId, ... })`                                                        |
+| `runtimes.probe(id)`                       | `dispatch({ type:'runtime.probe', commandId, id })`（宿主探测 → 落 `runtime.probed`）                                                                |
+| `agents.*`                                 | `query('agents.all')` + `dispatch({type:'agent.create' \| 'agent.update' \| 'agent.remove'})`                                                        |
+| `workflows.*`                              | `query('workflows.all')` + `dispatch(workflow.*)`                                                                                                    |
+| `tasks.list(workflowId)`                   | `query('tasks.byWorkflow', { workflowId })`                                                                                                          |
+| `tasks.create/moveToStage/complete/remove` | `dispatch({type:'task.create' \| 'task.move' \| 'task.complete' \| 'task.remove'})`（`task.create.input.projectId` 必填，M10）                       |
+| `projects.list()`                          | `query('projects.all')`                                                                                                                              |
+| `tasks.listByProject(projectId)`           | `query('tasks.byProject', { projectId })`；没有项目的任务走 `query('tasks.unassigned')`（M10）                                                       |
+| `projects.create/update/remove`            | `dispatch({type:'project.create' \| 'project.update' \| 'project.remove', commandId, ...})`                                                          |
+| `pickFolder()`                             | `window.workbench.pickFolder()`（宿主原生目录选择器；取消返回 `null`）                                                                               |
+| `runs.listByTask(taskId)`                  | `query('runs.byTask', { taskId })`                                                                                                                   |
+| `runs.events(runId)`                       | `query('run.events', { runId })`                                                                                                                     |
+| `cards.open()`                             | `query('cards.open')`                                                                                                                                |
+| `cards.answer(cardId, index)`              | `dispatch({type:'card.answer', commandId, cardId, optionIndex, via:'ui'})` → `value` 是回答后的卡                                                    |
+| `chat.listConversations()`                 | `query('conversations.byProject', { projectId })` / `query('conversations.unassigned')`（M11：按当前项目取；`conversations.all` 仍在，供跨项目解析） |
+| `chat.listMessages(cid)`                   | `query('messages.byConversation', { conversationId })`                                                                                               |
+| `chat.createConversation`                  | `dispatch({type:'chat.create', commandId, agentId, projectId})` → `value` 是新对话（`projectId` 省/null = 默认目录）                                 |
+| `chat.send(cid, content)`                  | `dispatch({type:'chat.send', commandId, conversationId, content})`                                                                                   |
+| `chat.removeConversation`                  | `dispatch({type:'chat.remove', commandId, conversationId})`（宿主先取消活跃 run）                                                                    |
+| `chat.cancel(cid)`                         | `dispatch({type:'chat.cancel', commandId, conversationId})`                                                                                          |
+| `chat.archiveConversation(cid, archived)`  | `dispatch({type:'chat.archive', commandId, conversationId, archived})`（缺省归档；不删消息/run）                                                     |
+| `chat.onEvent(cb)`                         | `subscribe(handler)` 的 `{kind:'stream' \| 'stream-end'}`（过滤 `conversationId`）                                                                   |
+| `onChanged(cb)`                            | `subscribe(handler)` 的 `{kind:'facts', seq, types}`（按类型失效、按需重取）                                                                         |
 
 - 所有写命令带 `commandId`；宿主 `commands` 表按事实区间回放，重复提交不重复产事实（reject 不缓存）。
 - `runtimes.create` 的 `RuntimeInput`：`name` 必填，其余可省略。`executorKey` / `command` / `profile` 的缺省值由宿主按所选执行器插件 manifest 补齐（未指定 key 取注册表首项，未知 key 给可读错误），`argsTemplate` 缺省为空串；创建前按补齐后的配置探测，失败不落库。

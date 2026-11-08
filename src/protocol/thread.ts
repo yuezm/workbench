@@ -98,8 +98,10 @@ export const THREAD_LIMITS = {
   /** 线程行里保留的笔记 / 事件条数（保最新） */
   notes: 50,
   events: 50,
-  /** 上下文派生进入提示词的码点上限 */
+  /** 上下文派生进入提示词的码点上限（不含「最近一轮产出」段） */
   contextChars: 6_000,
+  /** 「最近一轮产出」段的码点上限（独立预算，不挤占 `contextChars`） */
+  precedingChars: 2_000,
   /** 每次回执 `notes[]` 与命令的条数上限 */
   notesPerReceipt: 100,
 } as const

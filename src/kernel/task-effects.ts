@@ -14,7 +14,7 @@ import type { TaskComment } from '../protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from './types'
 import { taskPrompt } from './prompt'
 import { runCountOfTask, threadSessions } from './threads'
-import { threadContextText } from './thread-context'
+import { threadContextText, hasThreadHistory } from './thread-context'
 
 /** 权限模式 → 协议帧的 access 级别（SPEC-plugins「Turn」）。 */
 export const ACCESS_BY_PERMISSION: Record<Runtime['permissionMode'], 'read' | 'edit' | 'full'> = {
@@ -68,19 +68,15 @@ export function entryRunFacts(
 
   const thread =
     options?.thread ?? (task.threadId === null ? undefined : view.threads.get(task.threadId))
-  // 新开的隐式线程没有历史（无事件 / 笔记 / 兄弟任务）：不拼上下文段，避免提示词噪音。
-  const hasHistory =
-    thread !== undefined &&
-    (thread.events.length > 0 || thread.notes.length > 0 || thread.taskIds.length > 1)
-  const context = thread !== undefined && hasHistory ? threadContextText(view, thread) : null
+  // 新开的隐式线程没有历史（无事件 / 笔记 / 兄弟任务 / 已终态 run）：不拼上下文段，避免提示词噪音。
+  // 判据收在 `hasThreadHistory`：同一任务重跑、打回重做时线程只有它自己，但仍要看到上一轮产出。
+  const context =
+    thread !== undefined && hasThreadHistory(view, thread) ? threadContextText(view, thread) : null
   const comments = [
     ...[...view.taskComments.values()].filter((comment) => comment.taskId === task.id),
     ...(options?.pendingComment === undefined ? [] : [options.pendingComment]),
   ]
-  const prompt = [
-    taskPrompt(agent, task, stage, context, comments),
-    trigger?.promptExtra ?? '',
-  ]
+  const prompt = [taskPrompt(agent, task, stage, context, comments), trigger?.promptExtra ?? '']
     .filter(Boolean)
     .join('\n\n')
   const resumeSessionId =

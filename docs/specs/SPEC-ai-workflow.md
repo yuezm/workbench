@@ -35,7 +35,7 @@ app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区�
   - **任务**：上下文列表 = 工作流切换器（`components/WorkflowSwitcher.tsx`，只在任务栏目显示）；内容区 = 看板（列 = 当前工作流的阶段 + 末尾「已完成」落点）。**单击任务卡进入任务详情页**（页面，不是侧栏 / 弹窗）。任务可以建在当前项目，也可以落默认目录（`projectId: null`，新建入口始终可用）。选中「默认目录」时看板照常可拖拽、可新建。
   - **项目的编辑**（M10）：`components/ProjectDialog.tsx` 填名称与文件夹路径（路径由宿主原生选择器选，`window.workbench.pickFolder()`；也允许手填），编辑态可删除。项目文件夹就是该项目任务的运行工作目录（`RunRow.cwd` 优先取项目 `path`，其次运行时 `workdir`，最后默认目录）；删除项目要求项目下没有任务，该项目下的会话由内核改归默认目录（会话不随项目删除消失）。
 - **任务栏的二级页面**（`components/DetailHeader.tsx` + 页面组件）：栈式路由「看板 → 任务详情 → 线程详情 → 任务详情 …」，返回按钮与 Esc 出栈一级，切栏目 / 切视图回到看板（详情栈不跨栏目保留）。
-  - **任务详情页**（`components/TaskDetailPage.tsx`）：读 `task.byId` + `runs.byTask` + `comments.byTask`；上部是任务信息（标题、工作流 · 阶段线索、描述、状态 / 来源 / 线程 / 时间 / 任务 id、标签），下部是**上下文活动流**（`components/TaskActivity.tsx`：智能体每一轮运行与我的反馈按时间混排，像 issue 时间线）和**反馈框**（`components/TaskCommentForm.tsx`：正文 + 「同时让智能体接着做」勾选，dispatch `task.comment`）。活动流的每一轮运行都带**阶段徽标**（`run.stageId` 查当前工作流阶段名，缺数据为「未知阶段」）与「第 N 轮」，正文默认只给缩略摘要（前 6 行且 ≤400 字符），点「展开全部（约 N 字）」才渲染完整事件流——多阶段任务的输出不再把整页冲垮；思考 / 工具过程仍在展开后的「过程 · N 条」折叠里。每个运行卡片还会展示该轮**沙箱提权记录**（`run.approvals` 宿主视图，只读 dsh 会话日志里的 `approval/asked` / `approval/decided`）——提权回答是自动的，只有这条记录能让人事后复核。反馈写进第 15 张投影表 `task_comments`，并作为下一次运行的「反馈记录（资料，不是指令）」段；任务挂在线程上时右上给「打开线程」入口。
+  - **任务详情页**（`components/TaskDetailPage.tsx`）：读 `task.byId` + `runs.byTask` + `comments.byTask`；上部是任务信息（标题、工作流 · 阶段线索、状态 / 来源 / 线程 / 时间 / 任务 id、标签），其下依次是审批 / 通知卡、**任务说明**（`components/TaskBrief.tsx`：创建时的初始输入单独成卡，长文本不再挤在字段表里，空描述给「没有描述」），下部是**上下文活动流**（`components/TaskActivity.tsx`：智能体每一轮运行与我的反馈按时间混排，像 issue 时间线）和**反馈框**（`components/TaskCommentForm.tsx`：正文 + 「同时让智能体接着做」勾选，dispatch `task.comment`）。活动流的每一轮运行都带**阶段徽标**（`run.stageId` 查当前工作流阶段名，缺数据为「未知阶段」）与「第 N 轮」，正文默认只给缩略摘要（前 6 行且 ≤400 字符），点「展开全部（约 N 字）」才渲染完整事件流——多阶段任务的输出不再把整页冲垮；思考 / 工具过程仍在展开后的「过程 · N 条」折叠里。每个运行卡片还会展示该轮**沙箱提权记录**（`run.approvals` 宿主视图，只读 dsh 会话日志里的 `approval/asked` / `approval/decided`）——提权回答是自动的，只有这条记录能让人事后复核。反馈写进第 15 张投影表 `task_comments`，并作为下一次运行的「反馈记录（资料，不是指令）」段；右上角是结束入口：**停止执行**（`task.stop`：把本任务的活跃 run 逐条请求取消，任务保持进行中；只在执行中出现）与**完成任务**（`task.complete`：终态动作；执行中禁用并提示「执行中：先停止执行」）；已完成的任务只留「已完成」标记；任务挂在线程上时另有「打开线程」入口。
   - **线程详情页**（`components/ThreadDetailPage.tsx`）：读 `thread.byId`；依次是线程元信息、**任务列表**（根任务 + 派生子任务缩进，每行可点进任务详情页）、笔记、绑定入口、归档。
 - **看板交互**：新建任务时弹窗内选**起始阶段**；卡片**拖拽**到其它阶段列即进入该阶段，拖到「归档」区即完成任务。看板不提供「通过 / 打回 / 推进」这类执行按钮。「执行中」由**是否有活跃 run**（`queued`/`running`/`waiting`）派生：只有此时卡片不可拖动/完成；`agent` 阶段失败后没有活跃 run，卡片可拖走重试或完成，由 run 结果自动推进的路径不变。
 - **设置**：侧栏换成设置栏目（`components/SettingsNav.tsx`：运行时配置 / 智能体配置 / 工作流配置），内容区是当前栏目的内容；同一时刻只渲染一个栏目。
@@ -97,8 +97,9 @@ src/renderer/src/apps/ai-workflow/
     ├── SettingsNav.tsx        # 设置页左侧二级栏目（运行时 / 智能体 / 工作流）
     ├── KanbanBoard.tsx        # 列 = 阶段；卡片拖拽跨列 + 「已完成」落点；单击卡片进任务详情
     ├── TaskCard.tsx           # 标题/描述/进入方式提示（可拖拽卡片 + 详情入口）
-    ├── TaskDetailPage.tsx     # 任务详情页：任务信息 + 上下文活动流 + 反馈框
-    ├── TaskInfoPanel.tsx      # 任务信息：描述 / 状态 / 阶段 / 来源 / 线程 / 时间 / id / 标签
+    ├── TaskDetailPage.tsx     # 任务详情页：任务信息 + 任务说明 + 审批卡 + 上下文活动流 + 反馈框；右上结束动作
+    ├── TaskBrief.tsx          # 任务说明：初始输入单独成卡（审批之后、上下文之前）
+    ├── TaskInfoPanel.tsx      # 任务信息：状态 / 阶段 / 来源 / 线程 / 时间 / id / 标签
     ├── TaskActivity.tsx       # 上下文活动流：运行与反馈按时间混排（事件流按 run 订阅；运行卡片含提权记录）
     ├── TaskCommentForm.tsx    # 反馈输入：正文 + 「同时让智能体接着做」勾选
     ├── ThreadDetailPage.tsx   # 线程详情页：元信息 / 任务列表 / 笔记 / 绑定 / 归档
@@ -113,7 +114,7 @@ src/renderer/src/apps/ai-workflow/
     ├── AgentManager.tsx       # 智能体配置页：已配置清单
     ├── AgentDialog.tsx        # 新建智能体（居中模态）
     ├── ApprovalBar.tsx        # 顶部通知条：只列 open 卡标题 + 落点，点击进任务详情 / 会话（M4；本轮收紧为信标）
-    └── ApprovalCards.tsx      # 卡片处理区：正文 + 选项 + 「知道了」，内嵌在任务详情与聊天面板
+    └── ApprovalCards.tsx      # 卡片处理区：正文 + 选项 + 通知的 × 关闭，内嵌在任务详情与聊天面板
 
 src/main/ai-workflow/
 └── ipc.ts                     # 注册 ai-workflow IPC handlers（读投影 / 写走 effects.dispatch；执行器 key 与默认值按插件 manifest 补齐；M4 卡片读写）
@@ -168,7 +169,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                                                                                                            |
 | `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, created_at                                                                                                                                                      | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一                                                                                                                                                                       |
 | `tasks`           | id, title, description, workflow_id → workflows, project_id, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                              | `status` = `active`\|`completed`；`project_id` 是弱引用（M10，NULL = 默认目录），任务的运行工作目录取项目 `path`                                                                                                                                                  |
-| `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                          | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下还有任务时拒绝删除（会话改归默认目录）                                                                                                               |
+| `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                          | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下有执行中的任务时拒绝删除；删除时其余任务与会话改归默认目录（`projectId=null`）                                                                       |
 | `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进）                                                                                  |
 | `run_events`      | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                                                                                                                  | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段；纯追加                                                                                                                                                                            |
 | `conversations`   | id, title, agent_id → agents(RESTRICT), project_id, session_id, archived_at, created_at, updated_at                                                                                                                                                                                                                          | 一段对话：绑定智能体，**落在项目上**（M11，`project_id` 可空 = 默认目录）；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                                                               |
@@ -369,29 +370,31 @@ export interface DetectedRuntime {
 - 回执 `later`（无 `ask`/`notices`）→ run 回 `queued` 且 `notBefore=later`，由现有 `next-wake` 到点复查；`ask` 优先于 `later`。
 - 回执 `notices` → 空选项信息卡（不阻塞 run）；`resolves` → 关闭同 run 的 open 卡（`reason='agent'`）。`events` → `event.received`（`hops=父+1`）或 `event.dropped`，M4 只入账、不派活。
 - 「执行中」仍 = 存在 `queued`/`running`/`waiting` run；`waiting` 不占并发位、不参与 `nextWave` 的领取。
-- **界面分层（通知 vs 处理）：** 顶部 `ApprovalBar` 只是信标——一行一张卡，只给标题、待选项数与落点（任务 / 对话），**不渲染正文、选项与关闭按钮**；点条目把人送到卡片的落点：挂任务的进任务详情，聊天卡切到对应会话。正文、选项、「知道了」全部由 `ApprovalCards` 在落点内呈现（任务详情信息区之后、会话消息流上方）。选项**一行一个**（全宽行、`min-h-10`、行间距 8px、左侧序号只做视觉锚点且 `aria-hidden`，读屏念纯文案）——横排按钮挨在一起、长文案被挤成多列时最容易点错，而 `card.answer` 不可撤回；列表上方固定一句「点一行即提交，不能撤回」。系统通知（desktop 通道）同理只给标题 + 固定一句指引，卡片正文不进系统通知。
+- **界面分层（通知 vs 处理）：** 顶部 `ApprovalBar` 只是信标——一行一张卡，只给标题、待选项数与落点（任务 / 对话），**不渲染正文、选项与关闭按钮**；点条目把人送到卡片的落点：挂任务的进任务详情，聊天卡切到对应会话。正文、选项、通知的 `×` 全部由 `ApprovalCards` 在落点内呈现（任务详情信息区之后、会话消息流上方）。选项**一行一个**（全宽行、`min-h-10`、行间距 8px、左侧序号只做视觉锚点且 `aria-hidden`，读屏念纯文案）——横排按钮挨在一起、长文案被挤成多列时最容易点错，而 `card.answer` 不可撤回；列表上方固定一句「点一行即提交，不能撤回」。系统通知（desktop 通道）同理只给标题 + 固定一句指引，卡片正文不进系统通知。落点内的两类卡长得不一样：`ask` 警告色描底 + 左侧色条、选项竖排；`notice` 中性面板、标题降一档字阶，同文案合并成一行（`×N`）并给 `×` 与「知道了」两个关闭入口。
 
 ### 通知分层（M12：打扰口径）
 
 判据是「**不处理会不会耽误事**」，不是「智能体说了什么」。卡片带显式 `kind`（`CARD_KINDS`）：
 
-| 事件                                             | 类型                                     | 打扰级别                                             | 出口                                                     |
-| ------------------------------------------------ | ---------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------- |
-| 回执 `ask` → 卡片                                | `kind='ask'`（`options` 非空，阻塞续接） | 打断（系统通知）                                     | desktop 通道 `sdk.notify`；点进去在 `ApprovalCards` 作答 |
-| 回执 `notices` → 卡片                            | `kind='notice'`（`options` 空，不阻塞）  | 只知会（**不发系统通知**）                           | `ApprovalBar` 的「通知」栏 + 落点内的「知道了」          |
-| `task.completed`（宿主/智能体推进）              | 事实                                     | 查看级（一条结局通知）                               | `host/notices` → `sdkHost.notify`                        |
-| `run.failed`（终态失败，`taskId` 非空）          | 事实                                     | 查看级（一条结局通知，多个任务失败合并成一条带数量） | 同上                                                     |
-| 人在 UI 里自己点的完成（`actor.kind==='owner'`） | 事实                                     | 不通知                                               | 只写事实与活动流                                         |
-| 聊天轮次失败（`run.failed` 且 `taskId===null`）  | 事实                                     | 不通知                                               | 错误消息就在会话里                                       |
-| 过程、假设、未核验清单、前置条件                 | 正文文字                                 | 不通知                                               | 回复正文 / 任务活动流                                    |
+| 事件                                             | 类型                                     | 打扰级别                                       | 出口                                                     |
+| ------------------------------------------------ | ---------------------------------------- | ---------------------------------------------- | -------------------------------------------------------- |
+| 回执 `ask` → 卡片                                | `kind='ask'`（`options` 非空，阻塞续接） | 打断（系统通知，**一张卡一次，不合并**）       | desktop 通道 `sdk.notify`；点进去在 `ApprovalCards` 作答 |
+| 回执 `notices` → 卡片                            | `kind='notice'`（`options` 空，不阻塞）  | 只知会（**不发系统通知**，应用内同文案合并）   | `ApprovalBar` 的「通知」栏 + 落点内 `×` 整组关闭         |
+| `task.completed`（宿主/智能体推进）              | 事实                                     | 查看级（一条结局通知）                         | `host/notices` → `sdkHost.notify`                        |
+| `run.failed`（终态失败，`taskId` 非空）          | 事实                                     | 查看级（一条结局通知，多个任务失败合并带数量） | 同上                                                     |
+| 人在 UI 里自己点的完成（`actor.kind==='owner'`） | 事实                                     | 不通知                                         | 只写事实与活动流                                         |
+| 聊天轮次失败（`run.failed` 且 `taskId===null`）  | 事实                                     | 不通知                                         | 错误消息就在会话里                                       |
+| 过程、假设、未核验清单、前置条件                 | 正文文字                                 | 不通知                                         | 回复正文 / 任务活动流                                    |
 
 打扰收敛的三条机制：
 
-1. **窗口合并**：desktop 通道对同一 `run` 在 `NOTIFICATION_WINDOW_MS`（30 s）内只弹第一条，后续卡照常 ack `delivered`（投影即送达，跳过通知不算投递失败）。
-2. **回执口径约束**：提示词要求「同一轮只发一张 `ask` 卡承载同一决策的全部待定项」，`notices` 只写会改变人判断的一句话——噪音在上游就被砍掉。
-3. **结局通知不重复**：一批事实里同一任务只产一条；失败按任务去重后聚合，标题带数量。
+1. **卡片级去重，不按 run 合并**：desktop 通道对「同一张卡的同一个 `version`」只弹一次（重启补投、通道重放不再打扰），卡片原地更新（`version + 1`，问题变了）照弹——`ask` 是一个个独立的决定，两张卡就是两次打扰；`notice` 从不弹系统通知。被跳过的卡照常 ack `delivered`（投影即送达，跳过通知不算投递失败）。
+2. **应用内合并只给通知**：`ApprovalCards` / `ApprovalBar` 把「同落点 + 同标题 + 同正文」的 `notice` 合并成一行（`×N`，一个 `×` 整组关闭）；`ask` 永远一张一条，不合并。
+3. **回执口径约束**：提示词要求「同一轮只发一张 `ask` 卡承载同一决策的全部待定项」，`notices` 只写会改变人判断的一句话——噪音在上游就被砍掉。
+4. **结局通知不重复**：一批事实里同一任务只产一条；失败按任务去重后聚合，标题带数量。
+5. **卡随结束收起**：run 落终态（成功 / 失败 / 取消）或任务完成后，内核在决策出口把它名下还 `open` 的卡统一 `card.resolved{reason:'cancelled'}`——信息卡不阻塞，任务一结束就不该再出现在「待审批 / 通知」里（`kernel/cards.closeCardsOnFinish`）。
 
-`kind` 的判据由内核建卡时写明（`kernel/cards.ts`），老事实（M4–M11 无 `kind`）重建时按「`options` 是否为空」归一（`kernel/project.normalizeCard`）。
+`kind` 的判据由内核建卡时写明（`kernel/cards.ts`）。M12 改了 `cards` 的投影列，`KERNEL_VERSION` 随之递增到 `M12.0.0`——不递增就不会重建，`ALTER TABLE ... DEFAULT 'ask'` 会把 M12 之前的**信息卡全部写成 ask**，界面上表现为「通知混进待审批、没有关闭按钮」。老事实重建时按「`options` 是否为空」归一（`kernel/project.normalizeCard`）；渲染层另有一层同口径兜底（`apps/ai-workflow/model/cards.ts`），宿主没升级时也不会把通知塞进待审批。
 
 ## IPC 契约（M5：三动词）
 
@@ -474,7 +477,7 @@ export function completeTask(task: Task): Task
 - **协议后端：** 逐帧解析（ready/session/text/thinking/tool_call/tool_result/usage/result/protocol_error）、`v`/`request_id` 校验、非 JSON 行忽略、usage 累加、终态归一（含 `run_failed`）；取消信号顺序（cancel 帧 → 3s → SIGTERM → 2s → SIGKILL，Windows `taskkill /T /F`）与进程树终止；`--list-models` 投影。
 - **聊天执行链（`tests/host/chat`）：** 假协议后端 + 真实内核/内存库测 `resume_session_id` 续接（只发新消息）、`resume_rejected` 自动重试一次、帧入账→终态→`message.appended` 顺序、非零退出/超时/取消失败落消息、并发第二次 `send` 拒绝、对话执行中被删仍正常收尾。
 - **IPC：** 三动词契约（命令形状 / 视图参数 / 推送事件）在 `tests/protocol`、`tests/host/commands`、`tests/main/ipc`、`tests/preload` 覆盖：命令校验拒绝非法载荷、`commandId` 幂等、拖拽/完成的非法路径（有活跃 run、目标阶段无效）、`runtime.probe` 编排、`detect`/`executors`/`models` 宿主视图只读、`chat.*` 路由与取消；renderer 用 kernelStore 替身覆盖订阅/失效/续传。
-- **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「归档」区触发 `complete`，单击卡片把任务交给上层；TaskCard 可拖拽（有活跃 run 时不可拖）、按进入方式显示提示、点击 / Enter / Space 进详情且线程入口不冒泡；TaskInfoPanel 任务信息（状态 / 阶段 / 来源 / 线程 / 时间 / 标签）；TaskActivity 上下文活动流（运行与反馈混排、text/thinking/tool 折叠、**提权记录**（`run.approvals`：工具 / 理由 / 结果，未知结果原样显示，无记录不占版面）、errorCode 文案、用量/退出码/耗时、空态与事件流失败）；TaskCommentForm 反馈提交（空文本禁用、勾选接着做、提交中禁用、失败保留输入）；TaskDetailPage 三个视图的加载 / 空态 / 读失败与 `task.comment` 提交；ThreadDetailPage 任务列表与笔记 / 绑定 / 归档；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉、**完全访问风险确认**（选中 `danger-full-access` 必须勾选才可保存，换模式即撤销）；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示、**会话内待处理卡**（正文与选项在消息流上方就地作答）；ApprovalBar 只列标题与落点（正文与选项不渲染、无落点的卡禁用、两栏计数互不串栏、读失败只在有卡时提示），ApprovalCards 的正文换行原样展示、选项作答 / 「知道了」关闭 / 重复回答与关闭失败文案 / 作答中禁用、任务详情只收本任务的卡。
+- **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「归档」区触发 `complete`，单击卡片把任务交给上层；TaskCard 可拖拽（有活跃 run 时不可拖）、按进入方式显示提示、点击 / Enter / Space 进详情且线程入口不冒泡；TaskInfoPanel 任务信息（状态 / 阶段 / 来源 / 线程 / 时间 / 标签）；TaskBrief 任务说明（初始输入单独成卡、空态「没有描述」）；TaskDetailPage 右上结束动作（执行中给「停止执行」→ `task.stop`；「完成任务」执行中禁用并带 title；已完成只留标记；动作失败展示后端文案）；TaskActivity 上下文活动流（运行与反馈混排、text/thinking/tool 折叠、**提权记录**（`run.approvals`：工具 / 理由 / 结果，未知结果原样显示，无记录不占版面）、errorCode 文案、用量/退出码/耗时、空态与事件流失败）；TaskCommentForm 反馈提交（空文本禁用、勾选接着做、提交中禁用、失败保留输入）；TaskDetailPage 三个视图的加载 / 空态 / 读失败与 `task.comment` 提交；ThreadDetailPage 任务列表与笔记 / 绑定 / 归档；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉、**完全访问风险确认**（选中 `danger-full-access` 必须勾选才可保存，换模式即撤销）；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示、**会话内待处理卡**（正文与选项在消息流上方就地作答）；ApprovalBar 只列标题与落点（正文与选项不渲染、无落点的卡禁用、两栏计数互不串栏、读失败只在有卡时提示），ApprovalCards 的正文换行原样展示、选项作答 / 通知只留一个 `×` 关闭（不再有「知道了」）/ 重复回答与关闭失败文案 / 作答中禁用、任务详情只收本任务的卡。
 - **聊天 hook（`useChat`）：** 新建/发送/`event` 流式回显/`end` 落库重载/中止/删除/各类错误分支、卸载退订、只处理当前会话的增量。
 - **页面：** 两栏布局下工作台默认落在「聊天」栏（侧栏顶部切换条 + 会话列表可见、设置栏目不可见），切「任务」显示看板并隐藏输入区；单击任务卡进入任务详情页、`返回`/Esc 逐级回栈，线程详情页的任务列表可点进任务详情；侧栏底部「工作台/设置」分段控件切换视图，设置三栏目互不混排。
 - **执行器插件（`tests/plugins`）：** registry 汇总（顺序稳定、`executorKey`/`supported` 回填、同 command 先到先得、单插件抛错或超时隔离、空注册表）、`command` 插件的参数模板展开与 `{prompt}` 二选一（argv 元素 / stdin）、Windows `.cmd` 固定包装、假协议端到端验收（真 registry + 真 scheduler + 内存库）。

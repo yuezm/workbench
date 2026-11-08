@@ -209,7 +209,7 @@
 - 契约：新增 `Project`（`id/name/path/description/createdAt/updatedAt`）与 `project.create|update|remove` 命令、`project.created|updated|removed` 事实（整行 upsert / tombstone）、第 16 张投影表 `projects`；`tasks` 补 `project_id`（`ALTER TABLE`，旧行按 null 归一）。
 - 内核：`task.create` 必须带存在的项目（子任务必须与父任务同项目）；`RunRow.cwd` 优先取项目 `path`，其次运行时 `workdir`；spawn / handoff 任务继承来源任务的项目；规则可声明 `to.projectId`（保存时校验存在），老规则产出的任务按「未归属」展示。
 - 宿主 / 客户端：视图 `projects.all` / `tasks.byProject` / `tasks.unassigned`；`window.workbench.pickFolder()`（原生目录选择器，取消返回 null）；项目弹窗与「未归属」入口在任务栏；`KERNEL_VERSION=M10.0.0`。
-- 已知边界：项目文件夹只做形状校验，目录是否存在 / 可写由宿主选择器与执行器负责；项目下还有任务（含已完成）时拒绝删项目；v2 存量与老规则任务不迁移归属，统一落在「未归属」。
+- 已知边界：项目文件夹只做形状校验，目录是否存在 / 可写由宿主选择器与执行器负责；项目下有执行中的任务（queued / running / waiting）时拒绝删项目，其余任务随删除归默认目录（`task.updated`，`projectId=null`）；v2 存量与老规则任务不迁移归属，统一落在「未归属」。
 
 ## 文件去向
 

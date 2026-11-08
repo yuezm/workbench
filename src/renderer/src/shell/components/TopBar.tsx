@@ -19,7 +19,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
             <path d="M12 2c.6 4.8 3.2 7.4 8 8-4.8.6-7.4 3.2-8 8-.6-4.8-3.2-7.4-8-8 4.8-.6 7.4-3.2 8-8z" />
           </svg>
         </span>
-        <span className="text-[13px] font-semibold tracking-wide">Workbench</span>
+        <span className="text-action font-medium">Workbench</span>
       </div>
 
       {/* 应用标签 */}
@@ -32,7 +32,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
               type="button"
               className={cn(
                 'relative flex items-center gap-2 rounded-md px-3 py-1.5',
-                'text-[13px] font-medium transition-colors duration-150 outline-none',
+                'text-action font-medium transition-colors duration-150 outline-none',
                 'focus-visible:ring-2 focus-visible:ring-focus/50',
                 active
                   ? 'bg-surface-2 text-ink'
@@ -62,7 +62,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
         })}
       </nav>
 
-      <span className="ml-auto text-[11px] text-ink-faint">v0.1.0</span>
+      <span className="ml-auto text-meta text-ink-faint">v0.1.0</span>
     </header>
   )
 }

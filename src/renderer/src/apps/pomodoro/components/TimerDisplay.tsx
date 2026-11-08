@@ -111,7 +111,7 @@ export function TimerDisplay({
         <span
           className={cn(
             'inline-flex items-center gap-2 rounded-md border border-line bg-surface-2 px-4 py-1.5',
-            'text-xs tracking-[0.3em] text-ink-dim',
+            'text-meta tracking-[0.3em] text-ink-dim',
           )}
         >
           <i className={cn('size-1.5 rounded-full', theme.dot)} aria-hidden="true" />
@@ -121,7 +121,7 @@ export function TimerDisplay({
         <span
           className={cn(
             'bg-gradient-to-b from-white to-white/60 bg-clip-text tabular-nums',
-            'text-[80px] leading-none font-extralight tracking-tight text-transparent',
+            'text-[80px] leading-none font-extralight text-transparent',
           )}
         >
           {formatRemaining(remainingMs)}
@@ -139,7 +139,7 @@ export function TimerDisplay({
               style={i < completedRounds ? { boxShadow: `0 0 6px ${theme.from}` } : undefined}
             />
           ))}
-          <em className="ml-1 text-xs text-ink-faint not-italic tabular-nums">
+          <em className="ml-1 text-meta text-ink-faint not-italic tabular-nums">
             {completedRounds} / {roundsBeforeLongBreak}
           </em>
         </span>

@@ -3,7 +3,7 @@ import type { RuntimeProbe } from '../../../../../protocol/entities'
 import { cn } from '../../../lib/cn'
 
 /** 健康 pill 的统一基座：小圆角、等宽数字（耗时对齐不跳动） */
-const pillCls = 'rounded-sm px-2 py-0.5 text-[11px] tabular-nums'
+const pillCls = 'rounded-sm px-2 py-0.5 text-badge tabular-nums'
 
 export interface RuntimeStatusBadgeProps {
   /** 最近一次探测结论；null = 从未探测 */

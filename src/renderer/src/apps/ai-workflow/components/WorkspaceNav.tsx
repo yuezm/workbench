@@ -39,7 +39,7 @@ export function WorkspaceNav({ value, onChange, children }: WorkspaceNavProps): 
               type="button"
               aria-current={active ? 'page' : undefined}
               className={cn(
-                'flex items-center justify-center gap-1.5 rounded-md py-1.5 text-[13px] font-medium',
+                'flex items-center justify-center gap-1.5 rounded-md py-1.5 text-action font-medium',
                 'transition-colors duration-150 outline-none',
                 'focus-visible:ring-2 focus-visible:ring-focus/60',
                 active

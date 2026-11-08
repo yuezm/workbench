@@ -4,7 +4,7 @@ import { Button } from '../../../components/ui/button'
 import { fieldCls } from '../../../components/ui/input'
 import { cn } from '../../../lib/cn'
 
-const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2 leading-relaxed')
+const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2')
 
 export interface TaskCommentFormProps {
   value: string
@@ -56,7 +56,7 @@ export function TaskCommentForm({
       {error !== null && (
         <p
           role="alert"
-          className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-xs text-red-300"
+          className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-body text-red-300"
         >
           {error}
         </p>
@@ -65,7 +65,7 @@ export function TaskCommentForm({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label
           className={cn(
-            'flex items-center gap-2 text-[11px]',
+            'flex items-center gap-2 text-action',
             canRerun ? 'text-ink-dim' : 'text-ink-faint',
           )}
         >
@@ -84,7 +84,7 @@ export function TaskCommentForm({
         </Button>
       </div>
 
-      <p className="text-[11px] leading-relaxed text-ink-dim">
+      <p className="text-meta text-ink-dim">
         {canRerun
           ? '反馈会作为提示词的「反馈记录」资料段；勾选后若当前没有运行中的轮次，会立刻再跑一轮。'
           : '当前阶段不交给智能体：反馈只记上下文，任务下次进入智能体阶段时带上。'}

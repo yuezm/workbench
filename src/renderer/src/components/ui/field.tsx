@@ -2,7 +2,7 @@ import type { ReactElement, ReactNode } from 'react'
 import { cn } from '../../lib/cn'
 
 /** 字段小标签：用次级前景（ink-dim），不再用最暗一级 */
-export const labelCls = 'text-[11px] font-medium tracking-wide text-ink-dim'
+export const labelCls = 'text-meta font-medium text-ink-dim'
 
 export interface FieldProps {
   /** 小标签文案 */

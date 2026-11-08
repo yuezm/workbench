@@ -282,9 +282,7 @@ export function Menu({
                 aria-label={section.title}
               >
                 {section.title !== undefined && (
-                  <div className="px-2.5 pt-2 pb-1 text-[11px] tracking-wide text-ink-faint">
-                    {section.title}
-                  </div>
+                  <div className="px-2.5 pt-2 pb-1 text-meta text-ink-faint">{section.title}</div>
                 )}
                 {section.items.map((item, offset) => {
                   const index = groupStarts[sectionIndex] + offset
@@ -305,17 +303,17 @@ export function Menu({
                       )}
                     >
                       <span className="flex items-center gap-2">
-                        <span className="truncate text-sm font-medium text-ink">{item.label}</span>
+                        <span className="truncate text-action font-medium text-ink">
+                          {item.label}
+                        </span>
                         {item.badge !== undefined && (
-                          <span className="shrink-0 rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-dim tabular-nums">
+                          <span className="shrink-0 rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim tabular-nums">
                             {item.badge}
                           </span>
                         )}
                       </span>
                       {item.description !== undefined && (
-                        <span className="text-[11px] leading-relaxed text-ink-dim">
-                          {item.description}
-                        </span>
+                        <span className="text-meta text-ink-dim">{item.description}</span>
                       )}
                     </div>
                   )

@@ -26,8 +26,8 @@ function Meta({
 }): ReactElement {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
-      <dt className="text-[11px] tracking-wide text-ink-dim">{label}</dt>
-      <dd className={cn('truncate text-[11px] text-ink-dim', mono && 'font-mono')} title={value}>
+      <dt className="text-meta text-ink-dim">{label}</dt>
+      <dd className={cn('truncate text-meta text-ink-dim', mono && 'font-mono')} title={value}>
         {value}
       </dd>
     </div>
@@ -50,7 +50,7 @@ export function TaskInfoPanel({ task, stageName }: TaskInfoPanelProps): ReactEle
     <section aria-label="任务信息" className="flex flex-col gap-3">
       <p
         className={cn(
-          'text-xs leading-relaxed whitespace-pre-wrap',
+          'text-body whitespace-pre-wrap',
           task.description === '' ? 'text-ink-faint' : 'text-ink-dim',
         )}
       >
@@ -64,8 +64,8 @@ export function TaskInfoPanel({ task, stageName }: TaskInfoPanelProps): ReactEle
         <Meta label="创建时间" value={task.createdAt} mono />
         <Meta label="更新时间" value={task.updatedAt} mono />
         <div className="col-span-2 flex min-w-0 flex-col gap-0.5 sm:col-span-3">
-          <dt className="text-[11px] tracking-wide text-ink-dim">任务 ID</dt>
-          <dd className="truncate font-mono text-[11px] text-ink-dim" title={task.id}>
+          <dt className="text-meta text-ink-dim">任务 ID</dt>
+          <dd className="truncate font-mono text-body text-ink-dim" title={task.id}>
             {task.id}
           </dd>
         </div>
@@ -75,7 +75,7 @@ export function TaskInfoPanel({ task, stageName }: TaskInfoPanelProps): ReactEle
           {task.labels.map((label) => (
             <li
               key={label}
-              className="rounded-sm bg-white/[0.07] px-2 py-0.5 text-[10px] text-ink-dim"
+              className="rounded-sm bg-white/[0.07] px-2 py-0.5 text-badge text-ink-dim"
             >
               {label}
             </li>

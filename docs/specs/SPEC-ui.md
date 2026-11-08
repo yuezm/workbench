@@ -87,10 +87,25 @@
 - 不使用大面积模糊光斑、渐变背景、渐变按钮。品牌标记是实心主色方块。
 - 动效克制：颜色/位移 150–200ms；只保留 `animate-rise`（浮层与卡片入场），不做漂移背景。
 
-## 6. 字号与控件尺寸
+## 6. 字阶与控件尺寸
 
-- 正文 14px（`text-sm`）；次要 12px（`text-xs`）；元信息 11px；徽标 10–11px。10px 只允许放徽标，不放内容。
-- 页面/区块标题：13px `font-medium`；卡片标题：14px `font-medium`。
+字体只走六档，字号与行高成对定义在 `global.css` 的 `@theme`，`check:ui` 校验 token 值：
+
+| 档       | 类名          | 字号/行高 | 字重                             | 用在哪                                                       |
+| -------- | ------------- | --------- | -------------------------------- | ------------------------------------------------------------ |
+| 页面标题 | `text-page`   | 15 / 22   | `font-semibold`（唯一）          | 每个页面顶部的唯一标题                                       |
+| 标题     | `text-title`  | 14 / 20   | `font-medium`                    | 区块标题、卡片标题、会话标题、详情页标题、弹窗标题           |
+| 正文     | `text-body`   | 13 / 19   | 常规                             | 消息、描述、活动流正文、错误条、代码与输出、空态提示、输入值 |
+| 操作     | `text-action` | 13 / 18   | `font-medium`（按钮、行主文字）  | 按钮、菜单项、tab、分段项、可点列表行的主文字、复选框标签    |
+| 元信息   | `text-meta`   | 11 / 16   | 常规；分组小标题可 `font-medium` | 字段标签、单行说明、时间戳、计数行、分组小标题               |
+| 徽标     | `text-badge`  | 10 / 14   | 常规                             | 计数、状态标签、卡片角标                                     |
+
+规则：
+
+- 同一区域自内向外单调递减：标题 14 > 正文 13 = 操作 13（靠字重区分）> 元信息 11 > 徽标 10。不出现「标题比正文小」的倒挂。
+- 禁止 `text-[Npx]`、`text-xs/sm/base/lg`、`tracking-wide`、`leading-*` 覆盖、`font-semibold`（页面标题除外）；番茄钟计时数字是唯一例外（`TimerDisplay.tsx`）。
+- 行高由字档提供，组件里不写 `leading-relaxed`；中文不加字距，字距只给计时器等固定宽度数字。
+- 同一个区块里同类元素用同一档：标题都 14/500，说明都 11/常规，徽标都 10，不再按文件各写一套。
 - 控件高度：`sm` 32 / `md` 36 / `lg` 40；输入与下拉统一 36（`h-9`）。
 - 间距基数 4px；列表行纵向 12–16px；面板内边距 12–20px。
 
@@ -106,21 +121,21 @@
 
 ## 8. 组件映射（`components/ui/`）
 
-| 组件               | 关键类                                                                                                                       |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `Button`           | `rounded-md`；primary=实心 `bg-focus-deep`（hover `bg-focus`），secondary=`bg-surface-2 ring-1 ring-line`，ghost=纯文字      |
-| `Input`            | `fieldCls`：`rounded-md border-line bg-surface-2 text-ink placeholder:text-ink-faint focus:ring-2 ring-focus/25`             |
-| `Select`           | 触发器同 `Input`；浮层 `rounded-lg bg-surface border-line-strong/60`                                                         |
-| `Menu`             | 触发器同 `Button` + 折叠箭头；浮层同 `Select`，条目 `rounded-md`，标题行尾徽标 `rounded-sm`，说明 `text-[11px] text-ink-dim` |
-| `Panel` / `Dialog` | `rounded-xl bg-surface border-line`；弹窗遮罩 `bg-black/55 backdrop-blur-sm`                                                 |
-| `Segmented`        | 容器 `rounded-lg bg-surface-2`，选项 `rounded-md`，当前项 `bg-surface-3`                                                     |
-| `Field`            | 小标签 `text-[11px] text-ink-dim`                                                                                            |
-| 徽标               | `badgeCls`：`rounded-sm bg-white/[0.07] text-[11px] text-ink-dim`                                                            |
+| 组件               | 关键类                                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `Button`           | `rounded-md`；primary=实心 `bg-focus-deep`（hover `bg-focus`），secondary=`bg-surface-2 ring-1 ring-line`，ghost=纯文字    |
+| `Input`            | `fieldCls`：`rounded-md border-line bg-surface-2 text-ink placeholder:text-ink-faint focus:ring-2 ring-focus/25`           |
+| `Select`           | 触发器同 `Input`；浮层 `rounded-lg bg-surface border-line-strong/60`                                                       |
+| `Menu`             | 触发器同 `Button` + 折叠箭头；浮层同 `Select`，条目 `rounded-md`，标题行尾徽标 `rounded-sm`，说明 `text-meta text-ink-dim` |
+| `Panel` / `Dialog` | `rounded-xl bg-surface border-line`；弹窗遮罩 `bg-black/55 backdrop-blur-sm`                                               |
+| `Segmented`        | 容器 `rounded-lg bg-surface-2`，选项 `rounded-md`，当前项 `bg-surface-3`                                                   |
+| `Field`            | 小标签 `text-meta text-ink-dim`                                                                                            |
+| 徽标               | `badgeCls`：`rounded-sm bg-white/[0.07] text-badge text-ink-dim`                                                           |
 
 ## 9. 检查方式
 
 ```
-pnpm check:ui   # 圆角越界 / rounded-full 误用 / 重玻璃 / 调色板外色值 / 圆角刻度上限 / 前景对比度
+pnpm check:ui   # 圆角越界 / rounded-full 误用 / 重玻璃 / 调色板外色值 / 圆角刻度上限 / 前景对比度 / 字阶越界
 ```
 
 `check:ui` 已并入 `pnpm check:fast` 与 pre-commit。它只拦机械可判定的部分；下面这些靠 review：
@@ -131,6 +146,7 @@ pnpm check:ui   # 圆角越界 / rounded-full 误用 / 重玻璃 / 调色板外�
 - [ ] 主色只出现在强调位；一屏没有第二种彩色。
 - [ ] 空态、错误态、禁用态三类都有对应 token，没有临时色值。
 - [ ] 正文默认可选（`user-select: text`）：只有按钮、标签、菜单项这类控件外壳设 `user-select: none`；日志、提示词、智能体回复都要能拖动选中复制。
+- [ ] 同一区块里标题 / 正文 / 操作文字 / 数字告示用的是同一档字阶，没有同类元素混用两档。
 
 ## 10. 反例（出现即改）
 

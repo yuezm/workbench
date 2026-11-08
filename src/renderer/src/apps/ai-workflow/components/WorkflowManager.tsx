@@ -90,13 +90,13 @@ export function WorkflowManager(): ReactElement {
   return (
     <div className="flex flex-col gap-3">
       {(actionError ?? readError) && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
           {actionError ?? readError}
         </p>
       )}
 
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-ink-faint">阶段序列与流转</p>
+        <p className="text-meta text-ink-faint">阶段序列与流转</p>
         {/* 一个入口两种建法：空白起手，或按 SOP 模板预填阶段 */}
         <Menu
           label="新建工作流"
@@ -129,7 +129,7 @@ export function WorkflowManager(): ReactElement {
       </div>
 
       {workflows.length === 0 ? (
-        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
+        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
           暂无工作流
         </p>
       ) : (
@@ -151,15 +151,15 @@ export function WorkflowManager(): ReactElement {
                   className="flex min-w-0 flex-1 flex-col items-start text-left outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
                   onClick={() => setSelectedId(w.id)}
                 >
-                  <span className="flex items-center gap-2 text-sm font-medium text-ink">
+                  <span className="flex items-center gap-2 text-action font-medium text-ink">
                     {w.name}
                     {active && (
-                      <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-[11px] text-focus-soft">
+                      <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-badge text-focus-soft">
                         当前
                       </span>
                     )}
                   </span>
-                  <span className="text-[11px] text-ink-faint">
+                  <span className="text-meta text-ink-faint">
                     {w.stages.length} 阶段
                     {w.description ? ` · ${w.description}` : ''}
                   </span>
@@ -187,7 +187,7 @@ export function WorkflowManager(): ReactElement {
       {editing !== undefined && (
         <Dialog onClose={() => setEditing(undefined)} className="max-w-3xl">
           {saveError && (
-            <p className="mb-3 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+            <p className="mb-3 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
               {saveError}
             </p>
           )}

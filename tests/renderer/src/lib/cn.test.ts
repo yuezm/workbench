@@ -22,6 +22,14 @@ describe('cn（shadcn 同款类名合并）', () => {
     expect(cn('px-2 py-1', 'px-4')).toBe('py-1 px-4')
   })
 
+  it('字阶与文字颜色分属两组，互不吃掉', () => {
+    // text-body / text-meta 这类语义字号不能被 tailwind-merge 当成颜色类删除
+    expect(cn('text-body', 'text-ink')).toBe('text-body text-ink')
+    expect(cn('text-meta text-ink-faint', 'text-ink-dim')).toBe('text-meta text-ink-dim')
+    // 同组字号仍然后者胜出
+    expect(cn('text-body', 'text-title')).toBe('text-title')
+  })
+
   it('支持数组与对象语法', () => {
     expect(cn(['a', { b: true, c: false }])).toBe('a b')
   })

@@ -35,6 +35,24 @@
   --color-danger: #f87171;
   --color-warn: #fbbf24;
 
+  /*
+   * 字阶：只允许这六档（页面标题 / 标题 / 正文 / 操作 / 元信息 / 徽标）。
+   * 字号与行高成对定义，组件里不再写任意 px 或裸 text-xs/sm；
+   * 机械校验见 scripts/check-ui-rules.mjs。
+   */
+  --text-page: 15px;
+  --text-page--line-height: 22px;
+  --text-title: 14px;
+  --text-title--line-height: 20px;
+  --text-body: 13px;
+  --text-body--line-height: 19px;
+  --text-action: 13px;
+  --text-action--line-height: 18px;
+  --text-meta: 11px;
+  --text-meta--line-height: 16px;
+  --text-badge: 10px;
+  --text-badge--line-height: 14px;
+
   /* 圆角刻度：控件 6 / 容器 10 / 徽标 4；不允许超出 12px */
   --radius-xs: 3px;
   --radius-sm: 4px;

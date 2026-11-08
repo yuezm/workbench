@@ -59,7 +59,7 @@ export function ApprovalBar({ cards, error, onOpen }: ApprovalBarProps): ReactEl
       )}
 
       {error !== null && (
-        <p role="alert" className="px-1 text-[11px] text-danger">
+        <p role="alert" className="px-1 text-body text-danger">
           {error}
         </p>
       )}
@@ -87,14 +87,14 @@ function CardList({
               onClick={() => onOpen(card)}
               className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-white/[0.06] disabled:cursor-default"
             >
-              <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-ink">
+              <span className="min-w-0 flex-1 truncate text-title font-medium text-ink">
                 {card.title}
               </span>
               {card.options.length > 0 && (
                 <span className={badgeCls}>{card.options.length} 项待选</span>
               )}
               {target !== null && (
-                <span className="shrink-0 text-[11px] text-ink-faint">{TARGET_LABEL[target]}</span>
+                <span className="shrink-0 text-meta text-ink-faint">{TARGET_LABEL[target]}</span>
               )}
             </button>
           </li>
@@ -116,7 +116,7 @@ function SectionHead({
 }): ReactElement {
   return (
     <div className="flex items-center gap-2">
-      <span className={cn('text-[11px] font-medium tracking-wide', tone)}>{label}</span>
+      <span className={cn('text-meta font-medium', tone)}>{label}</span>
       <span className={cn(badgeCls, 'tabular-nums')}>{count}</span>
     </div>
   )

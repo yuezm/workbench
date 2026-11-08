@@ -88,7 +88,7 @@ export function AgentManager(): ReactElement {
   return (
     <div className="flex flex-col gap-4">
       {error && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
           {error}
         </p>
       )}
@@ -97,7 +97,7 @@ export function AgentManager(): ReactElement {
       <Panel className="flex animate-rise flex-col gap-3 p-5">
         <div className="flex items-center gap-2">
           <RobotIcon className="text-focus-soft" />
-          <h3 className="text-[13px] font-medium tracking-wide text-ink">已配置智能体</h3>
+          <h3 className="text-title font-medium text-ink">已配置智能体</h3>
           <span className={cn(badgeCls)}>{agents.length}</span>
           <Button
             type="button"
@@ -122,7 +122,7 @@ export function AgentManager(): ReactElement {
 
         <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
           {agents.length === 0 && (
-            <li className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
+            <li className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
               暂无智能体
             </li>
           )}
@@ -138,8 +138,8 @@ export function AgentManager(): ReactElement {
                   <RobotIcon />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate text-sm font-medium text-ink">{a.name}</span>
-                  <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-ink-faint">
+                  <span className="truncate text-action font-medium text-ink">{a.name}</span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-meta text-ink-faint">
                     <span
                       aria-hidden="true"
                       className={cn('size-1.5 shrink-0 rounded-full', HEALTH_DOT[health])}

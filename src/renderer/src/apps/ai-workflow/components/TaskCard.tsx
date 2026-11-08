@@ -84,14 +84,14 @@ export function TaskCard({
         dragging && 'opacity-40',
       )}
     >
-      <h3 className="text-sm leading-snug font-medium text-ink">{task.title}</h3>
+      <h3 className="text-title font-medium text-ink">{task.title}</h3>
       {task.description && (
-        <p className="line-clamp-3 text-xs leading-relaxed text-ink-dim">{task.description}</p>
+        <p className="line-clamp-3 text-body text-ink-dim">{task.description}</p>
       )}
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-meta text-ink-faint">
         {childProgress !== undefined && childProgress.total > 0 && (
           <span
-            className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-[10px] text-focus-soft"
+            className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-badge text-focus-soft"
             title="子任务完成进度"
           >
             子任务 {childProgress.done}/{childProgress.total}
@@ -99,7 +99,7 @@ export function TaskCard({
         )}
         {parentId !== null && (
           <span
-            className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-faint"
+            className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-faint"
             title={parentId}
           >
             {parentTitle === undefined || parentTitle === '' ? '子任务' : `子任务 · ${parentTitle}`}
@@ -107,7 +107,7 @@ export function TaskCard({
         )}
         {isHandoff && (
           <span
-            className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-ink-faint"
+            className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-faint"
             title="由其它工作流的阶段完成时自动创建"
           >
             交接
@@ -127,7 +127,7 @@ export function TaskCard({
               onOpenThread(threadId)
             }}
             className={cn(
-              'ml-auto rounded-md px-1.5 py-0.5 text-[11px] text-focus-soft',
+              'ml-auto rounded-md px-1.5 py-0.5 text-action font-medium text-focus-soft',
               'transition-colors duration-200 hover:bg-white/[0.06] hover:text-ink',
               'focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:outline-none',
             )}

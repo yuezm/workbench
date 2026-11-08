@@ -44,7 +44,7 @@ export function SettingsNav({ value, onChange }: SettingsNavProps): ReactElement
             type="button"
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-colors duration-200 outline-none',
+              'flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-action transition-colors duration-200 outline-none',
               'focus-visible:ring-2 focus-visible:ring-focus/60',
               active
                 ? 'bg-surface-3 text-ink shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'

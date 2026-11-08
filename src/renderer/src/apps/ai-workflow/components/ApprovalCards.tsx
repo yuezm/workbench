@@ -69,7 +69,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
     <section aria-label="待处理卡" className="flex flex-col gap-3">
       {pending.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
+          <h3 className="flex items-center gap-2 text-title font-medium text-ink">
             待审批
             <span className={badgeCls}>{pending.length}</span>
           </h3>
@@ -77,11 +77,9 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
             {pending.map((card) => (
               <li key={card.id}>
                 <CardShell tone="warn">
-                  <p className="text-[13px] leading-snug font-medium text-ink">{card.title}</p>
+                  <p className="text-title font-medium text-ink">{card.title}</p>
                   {card.text !== '' && (
-                    <p className="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-ink-dim">
-                      {card.text}
-                    </p>
+                    <p className="mt-1 text-body whitespace-pre-wrap text-ink-dim">{card.text}</p>
                   )}
                   <div className="mt-2 flex flex-wrap justify-end gap-1.5">
                     {card.options.map((option, index) => (
@@ -106,7 +104,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
 
       {notices.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
+          <h3 className="flex items-center gap-2 text-title font-medium text-ink">
             通知
             <span className={badgeCls}>{notices.length}</span>
           </h3>
@@ -116,9 +114,9 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
                 <CardShell>
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
-                      <p className="text-[13px] leading-snug text-ink">{card.title}</p>
+                      <p className="text-title font-medium text-ink">{card.title}</p>
                       {card.text !== '' && (
-                        <p className="mt-1 text-xs leading-relaxed whitespace-pre-wrap text-ink-dim">
+                        <p className="mt-1 text-body whitespace-pre-wrap text-ink-dim">
                           {card.text}
                         </p>
                       )}
@@ -141,7 +139,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
       )}
 
       {error !== null && (
-        <p role="alert" className="text-[11px] text-danger">
+        <p role="alert" className="text-body text-danger">
           {error}
         </p>
       )}

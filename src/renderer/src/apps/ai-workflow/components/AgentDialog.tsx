@@ -10,7 +10,7 @@ import { cn } from '../../../lib/cn'
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** System Prompt 是多行文本：等宽、可纵向拉伸，方便写分段指令 */
-const promptCls = cn(fieldCls, 'min-h-24 resize-y py-2 font-mono text-xs leading-relaxed')
+const promptCls = cn(fieldCls, 'min-h-24 resize-y py-2 text-body font-mono')
 
 /** 运行时健康：从未探测也算可用（不拦截未检测的运行时） */
 export type RuntimeHealth = 'ready' | 'unavailable' | 'unknown'
@@ -84,13 +84,13 @@ export function AgentDialog({
     <Dialog title={mode === 'edit' ? '编辑智能体' : '新建智能体'} onClose={onCancel}>
       <form className="flex flex-col gap-4" onSubmit={submit}>
         {runtimes.length === 0 && (
-          <div className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
+          <div className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
             先添加运行时。
           </div>
         )}
 
         {runtimes.length > 0 && usable.length === 0 && (
-          <p className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
+          <p className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-body text-amber-200">
             没有可用运行时，先到「运行时」测试通过。
           </p>
         )}
@@ -117,7 +117,7 @@ export function AgentDialog({
           </Field>
 
           {unavailable.length > 0 && (
-            <p className="col-span-2 rounded-lg border border-red-400/20 bg-red-400/[0.06] px-2.5 py-1.5 text-[11px] text-red-300">
+            <p className="col-span-2 rounded-lg border border-red-400/20 bg-red-400/[0.06] px-2.5 py-1.5 text-body text-red-300">
               不可用：{unavailable.map((r) => r.name).join('、')}
             </p>
           )}
@@ -142,7 +142,7 @@ export function AgentDialog({
         </div>
 
         {error && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
             {error}
           </p>
         )}

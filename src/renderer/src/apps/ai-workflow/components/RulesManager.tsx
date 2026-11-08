@@ -176,13 +176,13 @@ export function RulesManager(): ReactElement {
   return (
     <div className="flex flex-col gap-3">
       {error && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
           {error}
         </p>
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-ink-faint">命中后建任务</p>
+        <p className="text-meta text-ink-faint">命中后建任务</p>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -218,12 +218,12 @@ export function RulesManager(): ReactElement {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {rules.length} 条</span>
-        <span className="text-[11px] text-ink-faint">v{version}</span>
-        {noWorkflows && <span className="text-[11px] text-amber-200">先建工作流</span>}
+        <span className="text-meta text-ink-faint">v{version}</span>
+        {noWorkflows && <span className="text-body text-amber-200">先建工作流</span>}
       </div>
 
       {rules.length === 0 ? (
-        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
+        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
           暂无规则
         </p>
       ) : (
@@ -240,24 +240,22 @@ export function RulesManager(): ReactElement {
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-ink">{rule.name}</span>
+                    <span className="truncate text-action font-medium text-ink">{rule.name}</span>
                     {!rule.enabled && (
-                      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+                      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
                         已停用
                       </span>
                     )}
                   </span>
-                  <span className="truncate text-[11px] text-ink-faint">
-                    {conditionLabel(rule)}
-                  </span>
-                  <span className="truncate text-[11px] text-ink-faint">
+                  <span className="truncate text-meta text-ink-faint">{conditionLabel(rule)}</span>
+                  <span className="truncate text-meta text-ink-faint">
                     → {targetLabel(rule)}
                     {rule.prompt ? ' · 含提示词' : ''}
                   </span>
                 </span>
 
                 <div className="flex shrink-0 items-center gap-1">
-                  <label className="mr-1 flex items-center gap-1.5 text-[11px] text-ink-faint">
+                  <label className="mr-1 flex items-center gap-1.5 text-meta text-ink-faint">
                     <input
                       type="checkbox"
                       aria-label={`启用规则 ${rule.name}`}

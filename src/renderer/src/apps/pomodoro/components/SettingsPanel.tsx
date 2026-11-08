@@ -28,7 +28,7 @@ function NumberField({
   }
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-xs text-ink-dim">{label}</span>
+      <span className="text-meta text-ink-dim">{label}</span>
       <input
         type="number"
         value={value}
@@ -36,7 +36,7 @@ function NumberField({
         onChange={handle}
         inputMode="numeric"
         className={cn(
-          'h-10 rounded-xl border border-line bg-surface-2 px-3 text-sm text-ink tabular-nums',
+          'h-10 rounded-xl border border-line bg-surface-2 px-3 text-body text-ink tabular-nums',
           'transition-all duration-200 outline-none',
           'hover:border-line-strong',
           'focus:border-focus/60 focus:ring-2 focus:ring-focus/25',
@@ -54,7 +54,7 @@ export function SettingsPanel({ config, running, onChange }: SettingsPanelProps)
         className={cn(
           'flex cursor-pointer list-none items-center justify-between rounded-xl',
           'border border-line bg-surface px-5 py-3',
-          'text-sm text-ink-dim transition-colors duration-200',
+          'text-action text-ink-dim transition-colors duration-200',
           'hover:bg-white/[0.05] hover:text-ink [&::-webkit-details-marker]:hidden',
         )}
       >
@@ -118,7 +118,7 @@ export function SettingsPanel({ config, running, onChange }: SettingsPanelProps)
             onCommit={(roundsBeforeLongBreak) => onChange({ roundsBeforeLongBreak })}
           />
         </div>
-        <p className="mt-4 border-t border-line pt-3 text-[11px] leading-relaxed text-ink-faint">
+        <p className="mt-4 border-t border-line pt-3 text-meta text-ink-faint">
           范围：专注 {CONFIG_LIMITS.focusMin.min}–{CONFIG_LIMITS.focusMin.max}，短休息{' '}
           {CONFIG_LIMITS.shortBreakMin.min}–{CONFIG_LIMITS.shortBreakMin.max}，长休息{' '}
           {CONFIG_LIMITS.longBreakMin.min}–{CONFIG_LIMITS.longBreakMin.max}，轮数{' '}

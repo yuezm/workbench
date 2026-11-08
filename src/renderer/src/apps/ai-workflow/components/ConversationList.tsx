@@ -36,9 +36,11 @@ function MoreIcon(): ReactElement {
 /** 菜单项统一样式；`danger` 用于删除 */
 const menuItemCls = (danger: boolean): string =>
   cn(
-    'w-full rounded-md px-2 py-1.5 text-left text-xs transition-colors duration-150 outline-none',
+    'w-full rounded-md px-2 py-1.5 text-left text-action transition-colors duration-150 outline-none',
     'focus-visible:ring-2 focus-visible:ring-focus/60',
-    danger ? 'text-red-300 hover:bg-red-400/10' : 'text-ink-dim hover:bg-white/[0.06] hover:text-ink',
+    danger
+      ? 'text-red-300 hover:bg-red-400/10'
+      : 'text-ink-dim hover:bg-white/[0.06] hover:text-ink',
   )
 
 /**
@@ -94,7 +96,7 @@ export function ConversationList({
           onChange={onAgentChange}
         />
       ) : (
-        <p className="text-xs text-ink-faint">先配置智能体</p>
+        <p className="text-meta text-ink-faint">先配置智能体</p>
       )}
 
       <Button
@@ -116,7 +118,7 @@ export function ConversationList({
                   type="button"
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
-                    'flex min-w-0 flex-1 flex-col gap-0.5 rounded-xl px-2.5 py-2 pr-8 text-left text-sm transition-colors duration-200 outline-none',
+                    'flex min-w-0 flex-1 flex-col gap-0.5 rounded-xl px-2.5 py-2 pr-8 text-left text-action transition-colors duration-200 outline-none',
                     'focus-visible:ring-2 focus-visible:ring-focus/60',
                     isActive
                       ? 'bg-surface-3 text-ink shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'
@@ -125,7 +127,7 @@ export function ConversationList({
                   onClick={() => onSelect(conversation.id)}
                 >
                   <span className="w-full truncate font-medium">{conversation.title}</span>
-                  <span className="w-full truncate text-xs text-ink-faint">
+                  <span className="w-full truncate text-meta text-ink-faint">
                     {agentName(conversation.agentId)}
                   </span>
                 </button>
@@ -134,7 +136,7 @@ export function ConversationList({
                 <div
                   className={cn(
                     'absolute top-1.5 right-1 transition-opacity duration-150',
-                    'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+                    'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100',
                     menuId === conversation.id && 'opacity-100',
                   )}
                 >
@@ -144,7 +146,7 @@ export function ConversationList({
                     aria-haspopup="menu"
                     aria-expanded={menuId === conversation.id}
                     className={cn(
-                      'grid size-6 place-items-center rounded-lg text-ink-faint outline-none transition-colors duration-150',
+                      'grid size-6 place-items-center rounded-lg text-ink-faint transition-colors duration-150 outline-none',
                       'hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60',
                     )}
                     onPointerDown={(e) => e.stopPropagation()}
@@ -197,11 +199,11 @@ export function ConversationList({
             <button
               type="button"
               aria-expanded={showArchived}
-              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-left text-[11px] text-ink-faint transition-colors duration-150 outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60"
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-left text-action text-ink-faint transition-colors duration-150 outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60"
               onClick={() => setShowArchived((open) => !open)}
             >
               <span className="truncate">已归档</span>
-              <span className="rounded-sm bg-white/[0.06] px-1.5 text-[10px]">
+              <span className="rounded-sm bg-white/[0.06] px-1.5 text-badge">
                 {archived.length}
               </span>
             </button>
@@ -211,13 +213,13 @@ export function ConversationList({
                 {archived.map((conversation) => (
                   <li
                     key={conversation.id}
-                    className="flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-xs text-ink-faint"
+                    className="flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-action text-ink-faint"
                   >
                     <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
                     <button
                       type="button"
                       aria-label={`恢复会话 ${conversation.title}`}
-                      className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-ink-dim transition-colors duration-150 outline-none hover:bg-white/[0.06] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60"
+                      className="shrink-0 rounded-md px-1.5 py-0.5 text-action font-medium text-ink-dim transition-colors duration-150 outline-none hover:bg-white/[0.06] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60"
                       onClick={() => onArchive(conversation.id, false)}
                     >
                       恢复
@@ -225,7 +227,7 @@ export function ConversationList({
                     <button
                       type="button"
                       aria-label={`删除会话 ${conversation.title}`}
-                      className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-red-300/80 transition-colors duration-150 outline-none hover:bg-red-400/10 hover:text-red-300 focus-visible:ring-2 focus-visible:ring-focus/60"
+                      className="shrink-0 rounded-md px-1.5 py-0.5 text-action font-medium text-red-300/80 transition-colors duration-150 outline-none hover:bg-red-400/10 hover:text-red-300 focus-visible:ring-2 focus-visible:ring-focus/60"
                       onClick={() => onRemove(conversation.id)}
                     >
                       删除

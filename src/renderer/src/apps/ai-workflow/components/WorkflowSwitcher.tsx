@@ -41,7 +41,7 @@ export function WorkflowSwitcher({
           <rect x="10" y="4" width="5" height="10" rx="1.2" />
           <rect x="17" y="4" width="4" height="13" rx="1.2" />
         </svg>
-        <span className="text-xs text-ink-faint">工作流</span>
+        <span className="text-meta text-ink-faint">工作流</span>
         <Select
           ariaLabel="选择工作流"
           value={activeId ?? ''}
@@ -53,7 +53,7 @@ export function WorkflowSwitcher({
           className="h-8 w-auto max-w-56 border-0 bg-transparent px-1 hover:border-0 focus:bg-transparent"
         />
         {active && (
-          <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
+          <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim tabular-nums">
             {active.stages.length} 阶段
           </span>
         )}

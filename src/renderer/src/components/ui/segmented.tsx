@@ -36,7 +36,7 @@ export function Segmented<T extends string>({
             role="tab"
             aria-selected={active}
             className={cn(
-              'rounded-md px-3.5 py-1.5 text-[13px] font-medium whitespace-nowrap',
+              'rounded-md px-3.5 py-1.5 text-action font-medium whitespace-nowrap',
               'transition-colors duration-150 outline-none',
               'focus-visible:ring-2 focus-visible:ring-focus/50',
               active

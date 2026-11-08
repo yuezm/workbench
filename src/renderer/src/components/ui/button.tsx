@@ -6,7 +6,7 @@ const buttonVariants = cva(
   // 基座：控件圆角（6px）、过渡、焦点环与禁用态
   cn(
     'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md',
-    'text-sm font-medium tracking-wide select-none',
+    'text-action font-medium select-none',
     'transition-colors duration-150 ease-out outline-none',
     'focus-visible:ring-2 focus-visible:ring-focus/50 focus-visible:ring-offset-2 focus-visible:ring-offset-abyss',
     'disabled:pointer-events-none disabled:opacity-40',
@@ -26,7 +26,7 @@ const buttonVariants = cva(
       size: {
         sm: 'h-8 px-3',
         md: 'h-9 px-4',
-        lg: 'h-10 px-5 text-[15px]',
+        lg: 'h-10 px-5',
       },
     },
     defaultVariants: {

@@ -44,7 +44,7 @@ export function DetailHeader({ title, hint, onBack, actions }: DetailHeaderProps
         type="button"
         onClick={onBack}
         className={cn(
-          'flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-xs text-ink-dim',
+          'flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-action font-medium text-ink-dim',
           'transition-colors duration-200 hover:bg-white/[0.06] hover:text-ink',
           'focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:outline-none',
         )}
@@ -53,8 +53,8 @@ export function DetailHeader({ title, hint, onBack, actions }: DetailHeaderProps
         返回
       </button>
       <div className="flex min-w-0 flex-1 flex-col">
-        <h2 className="truncate text-sm font-medium tracking-wide text-ink">{title}</h2>
-        <span className="truncate text-[11px] text-ink-faint">{hint}</span>
+        <h2 className="truncate text-title font-medium text-ink">{title}</h2>
+        <span className="truncate text-meta text-ink-faint">{hint}</span>
       </div>
       {actions}
     </header>

@@ -12,7 +12,7 @@ import { DetailHeader } from './DetailHeader'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-const textareaCls = cn(fieldCls, 'min-h-16 resize-y py-2 leading-relaxed')
+const textareaCls = cn(fieldCls, 'min-h-16 resize-y py-2')
 
 /** 页面内一次写操作：进行中禁用全部动作，避免并发提交互相覆盖 */
 type BusyAction = 'note' | 'bind' | 'close'
@@ -101,29 +101,29 @@ function TaskTreeItem({
         )}
       >
         {depth > 0 && (
-          <span aria-hidden="true" className="text-[10px] text-ink-faint">
+          <span aria-hidden="true" className="text-badge text-ink-faint">
             ↳
           </span>
         )}
-        <span className="min-w-0 flex-1 truncate text-xs text-ink-dim transition-colors group-hover:text-ink">
+        <span className="min-w-0 flex-1 truncate text-meta text-ink-dim transition-colors group-hover:text-ink">
           {node.task.title}
         </span>
         <span
           className={cn(
-            'shrink-0 rounded-sm px-1.5 py-0.5 text-[10px]',
+            'shrink-0 rounded-sm px-1.5 py-0.5 text-badge',
             completed ? 'bg-white/[0.06] text-ink-faint' : 'bg-focus/15 text-focus-soft',
           )}
         >
           {completed ? '已完成' : '进行中'}
         </span>
         {depth > 0 && (
-          <span className="shrink-0 rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+          <span className="shrink-0 rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
             子任务
           </span>
         )}
         <span
           aria-hidden="true"
-          className="shrink-0 text-[11px] text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
+          className="shrink-0 text-meta text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
         >
           ›
         </span>
@@ -160,26 +160,24 @@ function NotesSection({
 }): ReactElement {
   return (
     <section aria-label="笔记" className="flex flex-col gap-1.5">
-      <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
+      <h3 className="flex items-center gap-2 text-title font-medium text-ink">
         笔记
         <span className={badgeCls}>{thread.notes.length}</span>
-        <span className="text-[11px] font-normal text-ink-faint">仅资料</span>
+        <span className="text-meta font-normal text-ink-faint">仅资料</span>
       </h3>
       {thread.notes.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
+        <p className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
           暂无笔记
         </p>
       ) : (
         <ul className="max-h-56 divide-y divide-line overflow-auto rounded-xl border border-line">
           {thread.notes.map((note) => (
             <li key={note.id} className="px-3 py-2">
-              <div className="flex items-center gap-2 text-[11px] text-ink-faint">
+              <div className="flex items-center gap-2 text-meta text-ink-faint">
                 <span>{note.author === 'owner' ? '我' : '智能体'}</span>
                 <span className="tabular-nums">{note.at}</span>
               </div>
-              <p className="text-xs leading-relaxed whitespace-pre-wrap text-ink-dim">
-                {note.text}
-              </p>
+              <p className="text-body whitespace-pre-wrap text-ink-dim">{note.text}</p>
             </li>
           ))}
         </ul>
@@ -225,9 +223,9 @@ function BindSection({
 }): ReactElement {
   return (
     <section aria-label="绑定入口" className="flex flex-col gap-1.5">
-      <h3 className="text-[13px] font-medium tracking-wide text-ink">绑定入口</h3>
+      <h3 className="text-title font-medium text-ink">绑定入口</h3>
       {thread.externalRef !== null ? (
-        <p className="rounded-lg border border-line bg-surface px-3 py-2 text-[11px] text-ink-dim">
+        <p className="rounded-lg border border-line bg-surface px-3 py-2 text-body text-ink-dim">
           已绑定：
           <span className="font-mono text-ink-dim">{thread.source}</span>
           {' / '}
@@ -258,9 +256,7 @@ function BindSection({
             </Field>
           </div>
           <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] leading-relaxed text-ink-faint">
-              同一入口的新事件续进本线程。
-            </p>
+            <p className="text-meta text-ink-faint">同一入口的新事件续进本线程。</p>
             <Button type="submit" variant="secondary" size="sm" disabled={busy}>
               绑定
             </Button>
@@ -363,21 +359,21 @@ function ThreadContent({
 
   return (
     <>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-[11px] sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-body sm:grid-cols-4">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-[11px] tracking-wide text-ink-dim">来源</dt>
+          <dt className="text-meta text-ink-dim">来源</dt>
           <dd className="truncate font-mono text-ink-dim">{thread.source}</dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-[11px] tracking-wide text-ink-dim">外部入口</dt>
+          <dt className="text-meta text-ink-dim">外部入口</dt>
           <dd className="truncate font-mono text-ink-dim">{thread.externalRef ?? '未绑定'}</dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-[11px] tracking-wide text-ink-dim">状态</dt>
+          <dt className="text-meta text-ink-dim">状态</dt>
           <dd className="text-ink-dim">{closed ? '已归档' : '进行中'}</dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-[11px] tracking-wide text-ink-dim">并发</dt>
+          <dt className="text-meta text-ink-dim">并发</dt>
           <dd className="text-ink-dim tabular-nums">{thread.concurrency}</dd>
         </div>
       </dl>
@@ -385,20 +381,20 @@ function ThreadContent({
       {actionError !== null && (
         <p
           role="alert"
-          className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300"
+          className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
         >
           {actionError}
         </p>
       )}
 
       <section aria-label="任务列表" className="flex flex-col gap-1.5">
-        <h3 className="flex items-center gap-2 text-[13px] font-medium tracking-wide text-ink">
+        <h3 className="flex items-center gap-2 text-title font-medium text-ink">
           任务列表
           <span className={badgeCls}>{thread.taskIds.length}</span>
-          <span className="text-[11px] font-normal text-ink-faint">点任务看详情</span>
+          <span className="text-meta font-normal text-ink-faint">点任务看详情</span>
         </h3>
         {roots.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
+          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
             暂无任务
           </p>
         ) : (
@@ -429,9 +425,7 @@ function ThreadContent({
       />
 
       <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-        <p className="text-[11px] leading-relaxed text-ink-faint">
-          {closed ? '线程已归档。' : '归档只影响界面。'}
-        </p>
+        <p className="text-meta text-ink-faint">{closed ? '线程已归档。' : '归档只影响界面。'}</p>
         {!closed && (
           <Button
             type="button"
@@ -473,16 +467,16 @@ export function ThreadDetailPage({
         {state.error !== null && (
           <p
             role="alert"
-            className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300"
+            className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
           >
             {state.error}
           </p>
         )}
 
         {detail === undefined ? (
-          state.error === null && <p className="text-xs text-ink-faint">正在读取线程…</p>
+          state.error === null && <p className="text-meta text-ink-faint">正在读取线程…</p>
         ) : detail === null ? (
-          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
+          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
             线程不存在
           </p>
         ) : (

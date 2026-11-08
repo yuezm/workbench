@@ -315,7 +315,7 @@ export function Select({
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => choose(option)}
                   className={cn(
-                    'flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors duration-150',
+                    'flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-body transition-colors duration-150',
                     option.disabled
                       ? 'cursor-not-allowed text-ink-faint opacity-60'
                       : cn(
@@ -358,7 +358,7 @@ export function Select({
         }}
         onKeyDown={handleKeyDown}
         className={cn(
-          'flex h-9 w-full items-center justify-between gap-2 rounded-md border border-line bg-surface-2 px-3 text-left text-sm text-ink',
+          'flex h-9 w-full items-center justify-between gap-2 rounded-md border border-line bg-surface-2 px-3 text-left text-body text-ink',
           'transition-colors duration-150 outline-none hover:border-line-strong focus:border-focus focus:ring-2 focus:ring-focus/25',
           'disabled:cursor-not-allowed disabled:opacity-40',
           className,

@@ -137,14 +137,14 @@ function PluginSwitch({
 function PluginMeta({ plugin }: { plugin: PluginView }): ReactElement {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="truncate text-sm font-medium text-ink">{plugin.name}</span>
-      <span className={cn('rounded-sm px-1.5 py-0.5 text-[10px]', STATUS_TONES[plugin.status])}>
+      <span className="truncate text-action font-medium text-ink">{plugin.name}</span>
+      <span className={cn('rounded-sm px-1.5 py-0.5 text-badge', STATUS_TONES[plugin.status])}>
         {STATUS_LABELS[plugin.status]}
       </span>
-      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
         {plugin.builtin ? '内置' : '外部'}
       </span>
-      <span className="text-[11px] text-ink-faint">
+      <span className="text-meta text-ink-faint">
         {KIND_LABELS[plugin.kind]} · v{plugin.version}
       </span>
     </div>
@@ -183,7 +183,7 @@ function PluginSummaryRow({
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <PluginMeta plugin={plugin} />
           {plugin.description !== '' && (
-            <span className="truncate text-[11px] text-ink-faint">{plugin.description}</span>
+            <span className="truncate text-meta text-ink-faint">{plugin.description}</span>
           )}
         </span>
         <ChevronIcon />
@@ -294,7 +294,7 @@ function PluginDetail({
     if (field.type === 'boolean') {
       return (
         <Field key={field.key} label={field.label} className="min-w-0">
-          <div className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 text-sm text-ink">
+          <div className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 text-body text-ink">
             <input
               type="checkbox"
               aria-label={name}
@@ -302,7 +302,7 @@ function PluginDetail({
               checked={config.flags[field.key] === true}
               onChange={(e) => setFlag(field.key, e.target.checked)}
             />
-            <span className="text-[11px] text-ink-faint">
+            <span className="text-meta text-ink-faint">
               {config.flags[field.key] === true ? '开启' : '关闭'}
             </span>
           </div>
@@ -344,7 +344,7 @@ function PluginDetail({
               })
             }}
           />
-          {written && <span className="text-[10px] text-short">已设置</span>}
+          {written && <span className="text-badge text-short">已设置</span>}
         </Field>
       )
     }
@@ -366,7 +366,7 @@ function PluginDetail({
         <Button type="button" variant="ghost" size="sm" onClick={onBack}>
           返回插件列表
         </Button>
-        <span className="text-[11px] text-ink-faint">插件详情</span>
+        <span className="text-meta text-ink-faint">插件详情</span>
       </div>
 
       <section className={cn(panelCls, 'flex flex-col gap-3 p-4')}>
@@ -377,27 +377,27 @@ function PluginDetail({
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <PluginMeta plugin={plugin} />
             {plugin.description !== '' && (
-              <p className="text-[11px] text-ink-faint">{plugin.description}</p>
+              <p className="text-meta text-ink-faint">{plugin.description}</p>
             )}
           </div>
           <PluginSwitch plugin={plugin} disabled={busy} onToggle={toggleEnabled} />
         </div>
 
         {plugin.error !== null && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
+          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-body text-red-300">
             {plugin.error}
           </p>
         )}
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span className="text-[11px] text-ink-faint">声明能力</span>
+          <span className="text-meta text-ink-faint">声明能力</span>
           {declared.length === 0 ? (
-            <span className="text-[11px] text-ink-faint">无</span>
+            <span className="text-meta text-ink-faint">无</span>
           ) : (
             declared.map((capability) => (
               <label
                 key={capability}
-                className="flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1 text-[11px] text-ink-dim"
+                className="flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1 text-badge text-ink-dim"
               >
                 <input
                   type="checkbox"
@@ -420,13 +420,13 @@ function PluginDetail({
         )}
 
         {actionError !== null && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-[11px] text-red-300">
+          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-body text-red-300">
             {actionError}
           </p>
         )}
 
         <div className="flex items-center gap-2">
-          <p className="text-[11px] text-ink-faint">授权只是信任门；secret 不回显。</p>
+          <p className="text-meta text-ink-faint">授权只是信任门；secret 不回显。</p>
           <Button
             type="button"
             variant="secondary"
@@ -491,28 +491,28 @@ export function PluginsManager(): ReactElement {
   return (
     <div className="flex flex-col gap-3">
       {error !== null && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
           {error}
         </p>
       )}
       {toggleError !== null && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
           {toggleError}
         </p>
       )}
 
-      <p className="text-xs text-ink-faint">未授权的插件不会启动。</p>
+      <p className="text-meta text-ink-faint">未授权的插件不会启动。</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {plugins.length} 个</span>
       </div>
 
       {loading ? (
-        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
+        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
           正在读取插件清单…
         </p>
       ) : plugins.length === 0 ? (
-        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
+        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
           未发现插件
         </p>
       ) : (

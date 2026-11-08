@@ -6,7 +6,7 @@ import { cn } from '../../lib/cn'
  * 聚焦时描边加主色环。占位符用 ink-faint（≥4.5:1），不额外降透明度。
  */
 export const fieldCls =
-  'w-full rounded-md border border-line bg-surface-2 px-3 text-sm text-ink caret-focus placeholder:text-ink-faint outline-none transition-colors duration-150 hover:border-line-strong focus:border-focus focus:ring-2 focus:ring-focus/25 disabled:cursor-not-allowed disabled:opacity-40'
+  'text-body w-full rounded-md border border-line bg-surface-2 px-3 text-ink caret-focus placeholder:text-ink-faint outline-none transition-colors duration-150 hover:border-line-strong focus:border-focus focus:ring-2 focus:ring-focus/25 disabled:cursor-not-allowed disabled:opacity-40'
 
 /** 单行输入框样式 */
 export const inputCls = `${fieldCls} h-9`

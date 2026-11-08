@@ -233,7 +233,7 @@ export function RuntimeManager(): ReactElement {
       <Panel className="flex animate-rise flex-col gap-3 p-5">
         <div className="flex items-center gap-2">
           <ScanIcon className="text-focus-soft" />
-          <h3 className="text-[13px] font-medium tracking-wide text-ink">已安装的运行时</h3>
+          <h3 className="text-title font-medium text-ink">已安装的运行时</h3>
           <span className={cn(badgeCls, 'ml-auto')}>{detected.length}</span>
           <Button type="button" variant="ghost" size="sm" disabled={detecting} onClick={rescan}>
             {detecting ? '扫描中…' : '重新扫描'}
@@ -241,7 +241,7 @@ export function RuntimeManager(): ReactElement {
         </div>
 
         {detected.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-line px-3 py-4 text-xs text-ink-faint">
+          <p className="rounded-xl border border-dashed border-line px-3 py-4 text-body text-ink-faint">
             {detecting ? '正在扫描本机 PATH…' : '未检测到 CLI，可在下方手动新建。'}
           </p>
         ) : (
@@ -257,13 +257,13 @@ export function RuntimeManager(): ReactElement {
                     <TerminalIcon />
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate text-sm font-medium text-ink">{d.label}</span>
-                    <span className="truncate font-mono text-[11px] text-ink-faint" title={d.path}>
+                    <span className="truncate text-action font-medium text-ink">{d.label}</span>
+                    <span className="truncate font-mono text-body text-ink-faint" title={d.path}>
                       {d.path}
                     </span>
                   </span>
                   {added ? (
-                    <span className="rounded-sm bg-white/[0.07] px-2 py-1 text-[11px] text-ink-faint">
+                    <span className="rounded-sm bg-white/[0.07] px-2 py-1 text-badge text-ink-faint">
                       已添加
                     </span>
                   ) : d.supported ? (
@@ -291,13 +291,13 @@ export function RuntimeManager(): ReactElement {
       </Panel>
 
       {pageError && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
           {pageError}
         </p>
       )}
 
       {detectError && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300">
+        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
           {detectError}
         </p>
       )}
@@ -306,7 +306,7 @@ export function RuntimeManager(): ReactElement {
       <Panel className="flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]">
         <div className="flex items-center gap-2">
           <ListIcon className="text-ink-dim" />
-          <h3 className="text-[13px] font-medium tracking-wide text-ink">已配置运行时</h3>
+          <h3 className="text-title font-medium text-ink">已配置运行时</h3>
           <span className={cn(badgeCls)}>{items.length}</span>
           <Button
             type="button"
@@ -321,7 +321,7 @@ export function RuntimeManager(): ReactElement {
 
         <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
           {items.length === 0 && (
-            <li className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-xs text-ink-faint">
+            <li className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
               暂无运行时
             </li>
           )}
@@ -344,8 +344,8 @@ export function RuntimeManager(): ReactElement {
 
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-medium text-ink">{r.name}</span>
-                    <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] tracking-wide text-ink-faint">
+                    <span className="truncate text-action font-medium text-ink">{r.name}</span>
+                    <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
                       {executorLabel(r.executorKey)}
                     </span>
                     <RuntimeStatusBadge
@@ -355,10 +355,10 @@ export function RuntimeManager(): ReactElement {
                       onToggle={() => toggleProbeDetails(r.id)}
                     />
                     {probe?.cliVersion && (
-                      <span className="text-[11px] text-ink-faint">CLI v{probe.cliVersion}</span>
+                      <span className="text-meta text-ink-faint">CLI v{probe.cliVersion}</span>
                     )}
                     {!r.enabled && (
-                      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-ink-faint">
+                      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
                         已停用
                       </span>
                     )}
@@ -366,12 +366,12 @@ export function RuntimeManager(): ReactElement {
 
                   {/* 启动头只展示运行时真正配置的部分：profile 是 dsh 的形态，
                       其它执行器留空，不要再拼 `--stdio` 这类插件内部参数 */}
-                  <span className="truncate font-mono text-[11px] text-ink-dim">
+                  <span className="truncate font-mono text-body text-ink-dim">
                     {r.command}
                     {r.profile ? ` --profile ${r.profile}` : ''}
                   </span>
 
-                  <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-faint">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ink-faint">
                     <span className="truncate font-mono" title={probe?.path ?? undefined}>
                       {probe?.path ?? '未找到可执行文件'}
                     </span>
@@ -385,9 +385,9 @@ export function RuntimeManager(): ReactElement {
 
                   {showDetails && (
                     <div className="flex flex-col gap-1 rounded-lg border border-red-400/20 bg-red-400/[0.06] px-2.5 py-2">
-                      <p className="text-[11px] text-red-300">{probe?.error ?? '未知错误'}</p>
+                      <p className="text-body text-red-300">{probe?.error ?? '未知错误'}</p>
                       {probe?.output && (
-                        <pre className="max-h-32 overflow-auto text-[11px] leading-relaxed whitespace-pre-wrap text-ink-faint">
+                        <pre className="max-h-32 overflow-auto text-body whitespace-pre-wrap text-ink-faint">
                           {probe.output}
                         </pre>
                       )}

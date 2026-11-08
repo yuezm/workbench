@@ -291,7 +291,7 @@ export function WorkflowEditor({
       <div className="flex items-center gap-2">
         <WorkflowIcon className="text-focus-soft" />
         <div className="flex flex-col">
-          <h3 className="text-[13px] font-medium tracking-wide text-ink">工作流定义</h3>
+          <h3 className="text-title font-medium text-ink">工作流定义</h3>
         </div>
       </div>
 
@@ -315,7 +315,7 @@ export function WorkflowEditor({
       <div className="grid gap-4 md:grid-cols-[200px_minmax(0,1fr)]">
         {/* 左：阶段序列（序号 + 名字，点一条换右侧详情；上移 / 下移就在行尾） */}
         <div className="flex min-w-0 flex-col gap-2">
-          <span className="text-[11px] font-medium tracking-wide text-ink-faint">阶段</span>
+          <span className="text-meta font-medium text-ink-faint">阶段</span>
           <ul className="flex flex-col gap-1" aria-label="阶段列表">
             {draft.stages.map((s, i) => {
               const isActive = i === index
@@ -326,7 +326,7 @@ export function WorkflowEditor({
                     aria-label={`阶段${i + 1}`}
                     aria-current={isActive ? 'true' : undefined}
                     className={cn(
-                      'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors duration-150 outline-none',
+                      'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-action transition-colors duration-150 outline-none',
                       'focus-visible:ring-2 focus-visible:ring-focus/60',
                       isActive
                         ? 'bg-focus/15 text-ink'
@@ -336,7 +336,7 @@ export function WorkflowEditor({
                   >
                     <span
                       className={cn(
-                        'grid size-5 shrink-0 place-items-center rounded-md text-[10px] font-medium',
+                        'grid size-5 shrink-0 place-items-center rounded-md text-badge font-medium',
                         isActive ? 'bg-focus/25 text-focus-soft' : 'bg-white/[0.05] text-ink-faint',
                       )}
                     >
@@ -385,13 +385,13 @@ export function WorkflowEditor({
 
         {/* 右：只展示选中的那个阶段 */}
         {stage === undefined ? (
-          <p className="grid place-items-center rounded-xl border border-dashed border-line p-6 text-xs text-ink-faint">
+          <p className="grid place-items-center rounded-xl border border-dashed border-line p-6 text-body text-ink-faint">
             还没有阶段，先「添加阶段」
           </p>
         ) : (
           <div className="rounded-xl border border-line bg-surface p-3">
             <div className="flex items-end gap-3">
-              <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-[11px] font-medium text-focus-soft">
+              <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-badge font-medium text-focus-soft">
                 {n}
               </span>
               <Field label="名称" className="min-w-0 flex-1">
@@ -452,7 +452,7 @@ export function WorkflowEditor({
             </div>
 
             {!hasFlowDetail(stage) ? (
-              <p className="mt-3 text-[11px] text-ink-faint">
+              <p className="mt-3 text-meta text-ink-faint">
                 {stage.entryMode === 'user'
                   ? '交给用户：任务进到这个阶段就停下来等人处理，不需要智能体、流转目标、交接或子任务。'
                   : '不交接：任务进到这个阶段不派活，由你在看板上拖到下一阶段；不需要智能体、流转目标、交接或子任务。'}
@@ -474,7 +474,7 @@ export function WorkflowEditor({
                       }))}
                     />
                   </Field>
-                  <p className="pb-2 text-[11px] text-ink-faint">
+                  <p className="pb-2 text-meta text-ink-faint">
                     第 {stage.gate.maxFails} 次仍未通过后放行
                   </p>
                 </div>
@@ -516,7 +516,7 @@ export function WorkflowEditor({
                     />
                   </Field>
                 </div>
-                <p className="mt-1 text-[11px] text-ink-faint">
+                <p className="mt-1 text-meta text-ink-faint">
                   智能体跑完要给出「通过 /
                   未通过」的判定；拿不出证据时任务停在闸门等人。闸门只判定，不交接、不拆子任务。
                 </p>
@@ -552,7 +552,7 @@ export function WorkflowEditor({
                     />
                   </Field>
                 </div>
-                <p className="mt-1 text-[11px] text-ink-faint">
+                <p className="mt-1 text-meta text-ink-faint">
                   末阶段完成后任务结束；「出错」指执行器崩溃或超时。
                 </p>
               </>
@@ -565,7 +565,7 @@ export function WorkflowEditor({
                 <Field label="要干什么" className="mt-3">
                   <textarea
                     aria-label={`阶段${n}要干什么`}
-                    className={cn(fieldCls, 'min-h-24 resize-y py-2 leading-relaxed')}
+                    className={cn(fieldCls, 'min-h-24 resize-y py-2')}
                     placeholder="写清这个阶段具体要做什么，例如：读需求、出实现方案、列出改动文件；进到本阶段的任务会带上这段说明交给智能体。"
                     value={stage.instructions ?? ''}
                     onChange={(e) => patchStage(index, { instructions: e.target.value })}
@@ -610,9 +610,7 @@ export function WorkflowEditor({
                       />
                     </Field>
                   )}
-                  <p className="w-full text-[11px] text-ink-faint">
-                    完成后在目标工作流建关联任务。
-                  </p>
+                  <p className="w-full text-meta text-ink-faint">完成后在目标工作流建关联任务。</p>
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">

@@ -8,6 +8,8 @@
 //   2. 重玻璃：src/renderer 内除弹窗遮罩外不允许 backdrop-blur
 //   3. 颜色字面量：tsx 里出现的 #rrggbb 必须在 global.css 的调色板里
 //   4. token 体检：圆角刻度未被放大、前景三级对比度达标（含 surface / surface-2）
+//   5. 字阶：只允许 page/title/body/action/meta/badge 六档，禁任意 px、裸 text-xs/sm、
+//      零散字距与行高覆盖、semibold/bold（页面标题例外）
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
@@ -93,6 +95,42 @@ for (const { token, min } of foreground) {
 // 圆形白名单：圆点、开关滑块、线段端点。矩形块不允许 rounded-full
 const CIRCLE_HINTS = ['size-', 'h-0.5', 'w-9', 'blur-']
 const HEX = /#[0-9a-fA-F]{3,8}\b/g
+
+// 字阶：六档固定值，行高成对；组件只许引用语义档
+const TYPE_SCALE = { page: 15, title: 14, body: 13, action: 13, meta: 11, badge: 10 }
+for (const [name, px] of Object.entries(TYPE_SCALE)) {
+  const size = tokenOf(`text-${name}`)
+  const height = tokenOf(`text-${name}--line-height`)
+  if (size === null) flag('type-token-missing', rel(CSS), `--text-${name}`)
+  else if (Number.parseFloat(size) !== px) {
+    flag('type-token-drift', rel(CSS), `--text-${name}=${size}，应为 ${px}px`)
+  }
+  if (height === null) flag('type-token-missing', rel(CSS), `--text-${name}--line-height`)
+}
+
+/** 显示型大字与计时数字字距：只在番茄钟计时器里出现 */
+const TYPE_EXEMPT = new Set(['src/renderer/src/apps/pomodoro/components/TimerDisplay.tsx'])
+/** 页面标题是唯一允许 semibold 的位置 */
+const WEIGHT_EXEMPT = new Set(['src/renderer/src/apps/ai-workflow/AiWorkflowPage.tsx'])
+const RAW_SIZE = /\btext-(?:xs|sm|base|lg|xl|2xl|3xl)\b/
+const ARBITRARY_SIZE = /\btext-\[[0-9.]+px\]/
+const TRACKING = /\btracking-(?!normal)\S+/
+const LEADING = /\bleading-(?:relaxed|snug|tight|loose)\b/
+const HEAVY_WEIGHT = /\bfont-(?:semibold|bold)\b/
+
+for (const file of walk(RENDERER)) {
+  const path = rel(file)
+  const exempt = TYPE_EXEMPT.has(path)
+  const source = readFileSync(file, 'utf8')
+  source.split('\n').forEach((line, index) => {
+    const at = `L${index + 1}: ${line.trim().slice(0, 100)}`
+    if (RAW_SIZE.test(line)) flag('type-raw-size', path, at)
+    if (!exempt && ARBITRARY_SIZE.test(line)) flag('type-arbitrary-size', path, at)
+    if (!exempt && TRACKING.test(line)) flag('type-tracking', path, at)
+    if (LEADING.test(line)) flag('type-leading', path, at)
+    if (HEAVY_WEIGHT.test(line) && !WEIGHT_EXEMPT.has(path)) flag('type-heavy-weight', path, at)
+  })
+}
 
 for (const file of walk(RENDERER)) {
   const path = rel(file)

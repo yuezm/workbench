@@ -229,6 +229,7 @@ describe('protocol/facts', () => {
       conversationId: null,
       title: '选一个',
       text: '做哪个？',
+      kind: 'ask',
       options: ['甲', '乙'],
       key: 'pick',
       version: 1,

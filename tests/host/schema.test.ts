@@ -575,6 +575,7 @@ describe('cards 投影（M4）', () => {
       'conversation_id',
       'title',
       'text',
+      'kind',
       'options_json',
       'key',
       'version',

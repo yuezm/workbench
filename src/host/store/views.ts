@@ -15,6 +15,7 @@ import type {
   Card,
   CardAnswerVia,
   CardDelivery,
+  CardKind,
   CardStatus,
   ChatRole,
   Conversation,
@@ -251,6 +252,7 @@ interface CardDbRow {
   conversation_id: string | null
   title: string
   text: string
+  kind: string
   options_json: string
   key: string | null
   version: number
@@ -474,6 +476,7 @@ const mapCard = (row: CardDbRow): Card => ({
   conversationId: row.conversation_id,
   title: row.title,
   text: row.text,
+  kind: row.kind as CardKind,
   options: JSON.parse(row.options_json) as string[],
   key: row.key,
   version: row.version,
@@ -783,7 +786,7 @@ const readMessages = (db: DatabaseSync): Message[] =>
   ).map(mapMessage)
 
 /** `cards` 投影的列清单（逐列写死，不用 `SELECT *`）。 */
-const CARD_COLUMNS = `id, run_id, task_id, conversation_id, title, text, options_json, key,
+const CARD_COLUMNS = `id, run_id, task_id, conversation_id, title, text, kind, options_json, key,
         version, status, delivery, delivery_ref, option_index, answered_by, answered_at,
         created_at, updated_at`
 

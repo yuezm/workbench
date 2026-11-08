@@ -18,7 +18,7 @@
  * 实时写入与重建共用这一条路径，所以同一事实序列按 seq fold 两次结果必然相同。
  */
 import type { FactType, SnapshotImportedPayload } from '../protocol/facts'
-import type { Task, WorkflowStage } from '../protocol/entities'
+import type { Task, Card, WorkflowStage } from '../protocol/entities'
 import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from './types'
 
 /**
@@ -69,8 +69,9 @@ export function normalizeTask(row: Task): Task {
   }
 }
 
-/** 老事实 replay 的阶段行归一（M7/M8/M9）：缺交接 / 子任务 / 阶段说明字段时补默认值。 */
-function normalizeStage(row: WorkflowStage): WorkflowStage {
+/** 老事实 replay 的阶段行归一（M7/M8/M9）：缺交接 / 子任务 / 阶段说明字段时补默认值。 */ function normalizeStage(
+  row: WorkflowStage,
+): WorkflowStage {
   const legacy = row as Partial<WorkflowStage>
   return {
     ...row,
@@ -81,6 +82,15 @@ function normalizeStage(row: WorkflowStage): WorkflowStage {
     spawnPolicy: legacy.spawnPolicy ?? null,
     instructions: legacy.instructions ?? '',
   }
+}
+
+/**
+ * 老事实 replay 的卡片行归一（M12）：M4–M11 的 `card.*` payload 没有 `kind`，
+ * 按当时的口径补齐——`options` 非空 = `ask`，否则 = `notice`。重建后投影列不会写 undefined。
+ */
+export function normalizeCard(row: Card): Card {
+  const legacy = row as Partial<Card>
+  return { ...row, kind: legacy.kind ?? (row.options.length > 0 ? 'ask' : 'notice') }
 }
 
 function importChanges(payload: SnapshotImportedPayload): Change[] {
@@ -179,8 +189,9 @@ function changesOf(fact: AnyFact): Change[] {
     case 'card.delivery_failed':
     case 'card.answered':
     case 'card.resolved':
-      // M4：卡片事实一律携带完整 `Card` 行，整行 upsert（投递/回答/关闭都不需要合并旧行）。
-      return [put('cards', fact.payload.card)]
+      // M4：卡片事实一律携带完整 `Card` 行，整行 upsert（投递/回答/关闭都不需要合并旧行）；
+      // M12：老事实缺 `kind` 时按「选项是否为空」归一。
+      return [put('cards', normalizeCard(fact.payload.card))]
     case 'event.received':
     case 'event.dropped':
       // M4 只入账、不投影；M6 起命中规则建任务由 decide 直接产 task.created，不回收这些事实。

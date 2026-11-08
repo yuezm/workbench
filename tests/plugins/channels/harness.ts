@@ -18,6 +18,7 @@ export const cardOf = (over: Partial<Card> = {}): Card => ({
   conversationId: null,
   title: '选一个',
   text: '用哪个方案？',
+  kind: 'ask',
   options: ['A', 'B'],
   key: 'plan',
   version: 1,

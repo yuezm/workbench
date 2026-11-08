@@ -248,6 +248,7 @@ export const sample = {
       conversationId: null,
       title: '选一个',
       text: '做哪个？',
+      kind: 'ask',
       options: ['甲', '乙'],
       key: null,
       version: 1,

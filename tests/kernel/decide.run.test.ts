@@ -804,6 +804,7 @@ describe('kernel/decide run.receipt 回执', () => {
             conversationId: null,
             title: '确认',
             text: '',
+            kind: 'ask',
             options: ['好'],
             key: null,
             version: 1,

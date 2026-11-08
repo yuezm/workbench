@@ -49,9 +49,10 @@ function openCardsOfRun(view: View, runId: Id): Card[] {
 }
 
 /**
- * 阻塞卡（`options` 非空）：只有它需要回答；信息卡（`notices`，`options: []`）不阻塞续接。
+ * 阻塞卡（`kind: 'ask'`）：只有它需要回答；信息卡（`kind: 'notice'`，`options` 空）
+ * 不阻塞续接。判据用显式 `kind`，不再靠「选项是否为空」推断（M12）。
  */
-const isBlocking = (card: Card): boolean => card.options.length > 0
+const isBlocking = (card: Card): boolean => card.kind === 'ask'
 
 /**
  * 回执 → 卡片事实（D5）。
@@ -112,6 +113,7 @@ export function cardsFromReceipt(
       conversationId: run.conversationId,
       title: ask.title,
       text: ask.text ?? '',
+      kind: 'ask',
       options: [...ask.options],
       key,
       version: 1,
@@ -137,6 +139,7 @@ export function cardsFromReceipt(
       conversationId: run.conversationId,
       title: notice,
       text: '',
+      kind: 'notice',
       options: [],
       key: null,
       version: 1,

@@ -118,6 +118,7 @@ const card = (over: Partial<Card> = {}): Card => ({
   conversationId: null,
   title: '确认',
   text: '',
+  kind: 'ask',
   options: ['好', '不好'],
   key: null,
   version: 1,
@@ -248,6 +249,7 @@ describe('kernel/decide 回执建卡（ask / notices / resolves）', () => {
       conversationId: null,
       title: '确认部署',
       text: '要点',
+      kind: 'ask',
       options: ['好', '不好'],
       key: 'deploy',
       version: 1,
@@ -329,7 +331,7 @@ describe('kernel/decide 回执建卡（ask / notices / resolves）', () => {
     expect(opened(decision)).toMatchObject({ id: 'card-new-1', key: 'deploy', version: 1 })
   })
 
-  it('notices：每条产 options 为空的信息卡，不挂起、不改变 run 终态', () => {
+  it('notices：每条产 kind=notice 的信息卡，不挂起、不改变 run 终态', () => {
     const active = running()
     const decision = receive(view({ runs: [active] }), receipt({ notices: ['已刷新依赖'] }))
 
@@ -338,6 +340,7 @@ describe('kernel/decide 回执建卡（ask / notices / resolves）', () => {
       id: 'card-new-1',
       title: '已刷新依赖',
       text: '',
+      kind: 'notice',
       options: [],
       key: null,
       version: 1,
@@ -467,8 +470,8 @@ describe('kernel/decide card.answer 回答与续接', () => {
     )
   })
 
-  it('信息卡（options 为空）不阻塞续接，也不进问答对', () => {
-    const info = card({ id: 'card-info', options: [], title: '仅通知' })
+  it('信息卡（kind=notice）不阻塞续接，也不进问答对', () => {
+    const info = card({ id: 'card-info', kind: 'notice', options: [], title: '仅通知' })
     const ask = card({ id: 'card-ask', title: '确认', options: ['A'] })
     const decision = answer(view({ runs: [waiting()], cards: [info, ask] }), 'card-ask', 0)
 
@@ -480,7 +483,7 @@ describe('kernel/decide card.answer 回答与续接', () => {
 
   it('信息卡本身没有可选项：回答即 invalid_input', () => {
     const decision = answer(
-      view({ runs: [waiting()], cards: [card({ options: [] })] }),
+      view({ runs: [waiting()], cards: [card({ kind: 'notice', options: [] })] }),
       'card-1',
       0,
     )

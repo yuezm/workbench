@@ -190,6 +190,7 @@ const card = (over: Partial<Card> = {}): Card => ({
   conversationId: null,
   title: '选一个',
   text: '做哪个？',
+  kind: 'ask',
   options: ['甲', '乙'],
   key: 'pick',
   version: 1,
@@ -755,6 +756,28 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
     expect(
       project(fact(81, 'event.dropped', { eventId: 'ev-2', hops: 9, reason: 'max_hops' })),
     ).toEqual([])
+  })
+
+  it('老事实缺 kind：按「有选项 = ask / 无选项 = notice」归一（M12）', () => {
+    const legacyAsk = card()
+    const legacyNotice = card({ options: [], title: '已刷新依赖' })
+    const noticeCard = card({ options: [], title: '已刷新依赖', kind: 'notice' })
+    const withoutKind = (row: Card): Card => {
+      const copy = { ...row } as Partial<Card>
+      delete copy.kind
+      return copy as Card
+    }
+
+    expect(project(fact(80, 'card.opened', { card: withoutKind(legacyAsk) }))).toEqual([
+      put('cards', legacyAsk),
+    ])
+    expect(project(fact(81, 'card.opened', { card: withoutKind(legacyNotice) }))).toEqual([
+      put('cards', noticeCard),
+    ])
+    // 已有 kind 的行原样保留，不被重新推断
+    expect(
+      project(fact(82, 'card.opened', { card: card({ kind: 'notice', options: ['甲'] }) })),
+    ).toEqual([put('cards', card({ kind: 'notice', options: ['甲'] }))])
   })
 
   it('重建 fold 卡片事实后 cards 表与最后一行全等', () => {

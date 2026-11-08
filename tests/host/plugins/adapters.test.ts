@@ -211,6 +211,7 @@ const card: Card = {
   conversationId: null,
   title: '待审批',
   text: '正文',
+  kind: 'ask',
   options: ['继续', '终止'],
   key: null,
   version: 1,

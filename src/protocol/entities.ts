@@ -617,6 +617,20 @@ export const CARD_DELIVERIES = ['pending', 'delivered', 'failed'] as const
 
 export type CardDelivery = (typeof CARD_DELIVERIES)[number]
 
+/**
+ * 卡片类型（M12）：**通知口径的唯一判据**，不再靠「`options` 是否为空」隐式推断。
+ *
+ * - `ask`：要人作答（`options` 非空），阻塞 run 的续接——系统通知只对这种卡弹；
+ * - `notice`：只知会（回执 `notices`，`options` 空），不阻塞续接、**不发系统通知**，
+ *   只在应用内通知区与任务详情里出现（打扰级别人为「查看级」，见 SPEC-ai-workflow）。
+ *
+ * 老事实（M4–M11 落库）没有该字段，由 `kernel/project` 按当时的口径归一：
+ * `options` 非空 = `ask`，否则 `notice`。
+ */
+export const CARD_KINDS = ['ask', 'notice'] as const
+
+export type CardKind = (typeof CARD_KINDS)[number]
+
 /** 回答来源：`ui` = in-app 界面，`channel` = 通道插件回传（记 `card.answered.by`）。 */
 export const CARD_ANSWER_VIA = ['ui', 'channel'] as const
 
@@ -644,6 +658,8 @@ export interface Card {
   conversationId: string | null
   title: string
   text: string
+  /** 卡片类型（M12）：`ask` = 要人作答并阻塞续接，`notice` = 只知会且不打扰 */
+  kind: CardKind
   /** 可选项文案；回答时回传下标。信息卡（`notices`）为空数组 */
   options: string[]
   /** 稳定键：同一 run 内同 key 的 open 卡再次出现时产 `card.updated` */

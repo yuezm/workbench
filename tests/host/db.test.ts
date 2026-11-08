@@ -12,6 +12,7 @@ import {
   needsTasksUpgrade,
   openDatabase,
   rebuildLegacyTasks,
+  upgradeLegacyCards,
   upgradeLegacyRuns,
   upgradeLegacyRuntimes,
 } from '../../src/host/db'
@@ -399,6 +400,66 @@ describe('openDatabase', () => {
       expect(
         local.prepare('SELECT title, project_id FROM conversations WHERE id = ?').get('cv-1'),
       ).toEqual({ title: '旧对话', project_id: null })
+    } finally {
+      local.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('upgradeLegacyCards：没有 cards 表时不动（返回 false），有 kind 列时也返回 false', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      // 表不存在（正常首启不会出现：SCHEMA_SQL 先建表）：不改结构、不抛错
+      expect(upgradeLegacyCards(db)).toBe(false)
+
+      db.exec(SCHEMA_SQL)
+      expect(columnNames(db, 'cards').has('kind')).toBe(true)
+      // 列已齐：无需补列
+      expect(upgradeLegacyCards(db)).toBe(false)
+    } finally {
+      db.close()
+    }
+  })
+  it('M12：旧库 cards 缺 kind → open 时 ALTER 补齐，老行默认 ask', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-m12-'))
+    const file = path.join(root, 'ai-workflow.db')
+    const seeded = new DatabaseSync(file)
+    try {
+      seeded.exec(SCHEMA_SQL)
+      // 卡片挂在 run 上：先建运行，再回到 M12 之前的表结构（数据行保留）
+      seeded.prepare(`PRAGMA foreign_keys = OFF`).get()
+      seeded
+        .prepare(
+          `INSERT INTO cards (id, run_id, title, text, kind, options_json, version, status, delivery, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'card-1',
+          'run-1',
+          '选一个',
+          '',
+          'notice',
+          '[]',
+          1,
+          'open',
+          'pending',
+          SEED_AT,
+          SEED_AT,
+        )
+      seeded.exec('ALTER TABLE cards DROP COLUMN kind')
+      expect(columnNames(seeded, 'cards').has('kind')).toBe(false)
+    } finally {
+      seeded.close()
+    }
+
+    const local = openDatabase(file)
+    try {
+      expect(columnNames(local, 'cards').has('kind')).toBe(true)
+      // 补列的默认值是 'ask'；历史信息卡的真实类型由投影重建按事实归一（kernel/project）
+      expect(local.prepare('SELECT title, kind FROM cards WHERE id = ?').get('card-1')).toEqual({
+        title: '选一个',
+        kind: 'ask',
+      })
     } finally {
       local.close()
       rmSync(root, { recursive: true, force: true })

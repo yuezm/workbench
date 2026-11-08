@@ -1,5 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import {
+  CARDS_M12_ADD_COLUMN_SQL,
+  CARDS_M12_ADDED_COLUMNS,
   COMMANDS_SQL,
   CONVERSATIONS_M9_ADD_COLUMN_SQL,
   CONVERSATIONS_M9_ADDED_COLUMNS,
@@ -295,6 +297,24 @@ function upgradeLegacyStages(db: DatabaseSync): boolean {
 }
 
 /**
+ * 旧 `cards` 一次性补列（M12 卡片类型）：缺 `kind` 就补，DEFAULT 'ask'。
+ *
+ * 补出来的默认值对历史信息卡不准（历史 `notices` 行的 `options` 为空，应是 `notice`）；
+ * 卡片是投影，下一次 `store.ensureProjection()` 重建时按 `kernel/project.normalizeCard`
+ * 从事实重新归一，所以这里只保证「列存在、写入不失败」。
+ */
+export function upgradeLegacyCards(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'cards')
+  if (columns.size === 0) return false
+  const missing = CARDS_M12_ADDED_COLUMNS.filter((column) => !columns.has(column))
+  if (missing.length === 0) return false
+  withTx(db, () => {
+    for (const column of missing) db.exec(CARDS_M12_ADD_COLUMN_SQL[column])
+  })
+  return true
+}
+
+/**
  * 旧 `conversations` 补列清单：M9 归档时间 + M11 所属项目（两批都走上表补列）。
  * 两列都可空、无默认值：老对话按「未归档」/「默认目录」归一。
  */
@@ -361,6 +381,8 @@ export function openDatabase(filePath: string): DatabaseSync {
     upgradeLegacyStages(db)
     // M9 / M11：对话补归档时间与所属项目（只增不改）
     upgradeLegacyConversations(db)
+    // M12：卡片补类型列（只增不改；历史行由投影重建按事实归一）
+    upgradeLegacyCards(db)
     // M6 / M6.5 / M7：tasks 需要时物理重建（M7 扩展 origin CHECK），否则只补缺列；必须在导入/写入之前完成。
     rebuildLegacyTasks(db)
     upgradeLegacyTasks(db)

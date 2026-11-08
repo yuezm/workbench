@@ -21,6 +21,7 @@ import { TASK_COMMENT_LIMITS } from '../protocol/task-comment'
 const RECEIPT_BLOCK_HINT: readonly string[] = [
   '## 回执块（可选）',
   '需要人拍板、留下不阻塞的通知、关闭旧卡片、约时间复查、派生事件或给出闸门判定时，在最终回复末尾输出最后一个 ```json 围栏代码块；对象含 ask/notices/resolves/later/events/verdict/checks 任一键即按回执块处理，非法块整块忽略、不影响本轮结果。',
+  '打扰规则（M12）：`ask` 会打断人（系统通知弹窗），**同一轮只发一张卡**——把同一决策的多个待定项写进 `text` 分行列出，`options` 放要人挑的做法；`notices` 不弹系统通知、只在应用内显示，只写「会改变人判断的一句话」，过程、假设、未核验清单、待办说明一律写在正文里，不要塞进 notices。',
   '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}],"verdict":"pass|fail","checks":[{"cmd":"pnpm check","exitCode":0}]}',
   '上限：每个键最多 100 项、每张卡 options 最多 20 项；title ≤200 字、text ≤2000 字、summary ≤200 字。ask 出现即挂起等回答（全部阻塞卡答完才续接），later 仅在无 ask/notices 时生效。',
 ]

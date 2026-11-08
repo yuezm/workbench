@@ -59,6 +59,7 @@ const card = (over: Partial<Card> = {}): Card => ({
   conversationId: null,
   title: '确认',
   text: '',
+  kind: 'ask',
   options: ['好', '不好'],
   key: null,
   version: 1,

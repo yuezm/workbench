@@ -247,6 +247,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
  * - `task_id` / `conversation_id` 是展示用的弱引用：阶段 run 挂任务、聊天 run 挂对话，
  *   历史卡片不因任务/对话删除而抹掉归属（不设外键）。
  * - `delivery` 单列 =「已送达至少一个通道」；`delivery_ref` 记最后一个成功通道。
+ * - `kind`（M12）= 通知口径的判据：`ask` 要人作答（阻塞续接），`notice` 只知会（不发系统通知）；
+ *   老库补列时默认 `ask`，重建投影按事实归一（`kernel/project.normalizeCard`）。
  * - `options_json` 存 `string[]` 的 JSON；`version` 是投递去重键的一部分。
  */
 const cardsTable = (name = 'cards'): string => `
@@ -257,6 +259,7 @@ CREATE TABLE IF NOT EXISTS ${name} (
   conversation_id TEXT,
   title TEXT NOT NULL,
   text TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice')),
   options_json TEXT NOT NULL DEFAULT '[]',
   key TEXT,
   version INTEGER NOT NULL DEFAULT 1,
@@ -669,8 +672,21 @@ export const CONVERSATIONS_M11_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
- * M8 给 `tasks` 新增的列（spawn 来源 / 批次 / 幂等键）。
- * 注意：M8 同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff','spawn')`，SQLite 不能
+ * M12 给 `cards` 新增的列（卡片类型）：`ask` 要人作答并阻塞续接，`notice` 只知会。
+ * 老库补列时默认 `ask`（与老口径「有选项才是阻塞卡」不同，故重建投影时按事实归一：
+ * `kernel/project.normalizeCard` 用 `options` 是否为空补齐历史行）。
+ */
+export const CARDS_M12_ADDED_COLUMNS = ['kind'] as const
+
+/** `cards` M12 补列语句（带常量 DEFAULT，NOT NULL 才合法）。 */
+export const CARDS_M12_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof CARDS_M12_ADDED_COLUMNS)[number], string>
+> = {
+  kind: "ALTER TABLE cards ADD COLUMN kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice'))",
+}
+
+/**
+ * M8 给 `tasks` 新增的列（spawn 来源 / 批次 / 幂等键）。 * 注意：M8 同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff','spawn')`，SQLite 不能
  * `ALTER TABLE` 改 CHECK —— 旧库首启时与 M7 同法物理重建 `tasks`（见 `host/db.ts`）。
  */
 export const TASKS_M8_ADDED_COLUMNS = ['spawned_by_run_id', 'batch_no', 'spawn_key'] as const

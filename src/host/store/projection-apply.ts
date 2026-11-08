@@ -242,6 +242,7 @@ const CARD_FIELDS: ReadonlyArray<readonly [keyof Card, string]> = [
   ['conversationId', 'conversation_id'],
   ['title', 'title'],
   ['text', 'text'],
+  ['kind', 'kind'],
   ['options', 'options_json'],
   ['key', 'key'],
   ['version', 'version'],

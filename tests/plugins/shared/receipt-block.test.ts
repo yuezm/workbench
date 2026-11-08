@@ -249,6 +249,74 @@ describe('parseReceiptBlock：键与字段', () => {
   })
 })
 
+describe('parseReceiptBlock：闸门判定（M11）', () => {
+  it('verdict + checks 原样返回（fail 允许非 0 退出码）', () => {
+    const checks = [
+      { cmd: 'git tag', exitCode: 0 },
+      { cmd: 'npm whoami', exitCode: 1 },
+    ]
+    expect(parseReceiptBlock(blockOf({ verdict: 'fail', checks }))).toEqual({
+      verdict: 'fail',
+      checks,
+    })
+  })
+
+  it('只带 verdict 也算回执块（闸门只给结论时不丢块）', () => {
+    expect(parseReceiptBlock(blockOf({ verdict: 'pass' }))).toEqual({ verdict: 'pass' })
+  })
+
+  it('只带 checks 也算回执块（结论缺省交给内核判「没给结论」）', () => {
+    const checks = [{ cmd: 'pnpm check', exitCode: 0 }]
+    expect(parseReceiptBlock(blockOf({ checks }))).toEqual({ checks })
+  })
+
+  it('verdict 不是 pass / fail：整块忽略', () => {
+    for (const verdict of ['PASS', '未通过', '', 1, true, {}]) {
+      expect(parseReceiptBlock(blockOf({ verdict, notices: ['同块也不能生效'] }))).toBeNull()
+    }
+  })
+
+  it('checks 非数组 / 条数超限 / cmd 为空或超长 / 退出码非整数或越界：整块忽略', () => {
+    const badChecks = [
+      'not-array',
+      [{ cmd: '  ', exitCode: 0 }],
+      [{ cmd: 'x'.repeat(COMMAND_LIMITS.gateCmd + 1), exitCode: 0 }],
+      [{ cmd: 'pnpm check', exitCode: '0' }],
+      [{ cmd: 'pnpm check', exitCode: 1.5 }],
+      [{ cmd: 'pnpm check', exitCode: 1_000_001 }],
+      [{ cmd: 'pnpm check', exitCode: -1_000_001 }],
+      [{ exitCode: 0 }],
+      ['not-object'],
+    ]
+    for (const checks of badChecks) {
+      expect(parseReceiptBlock(blockOf({ checks, notices: ['同块也不能生效'] }))).toBeNull()
+    }
+    const tooMany = Array.from({ length: COMMAND_LIMITS.gateChecks + 1 }, () => ({
+      cmd: 'pnpm check',
+      exitCode: 0,
+    }))
+    expect(parseReceiptBlock(blockOf({ checks: tooMany }))).toBeNull()
+  })
+
+  it('checks 空数组视为未提供：不连累同块 verdict', () => {
+    expect(parseReceiptBlock(blockOf({ verdict: 'fail', checks: [] }))).toEqual({
+      verdict: 'fail',
+    })
+    expect(parseReceiptBlock(blockOf({ verdict: 'fail', checks: null }))).toEqual({
+      verdict: 'fail',
+    })
+  })
+
+  it('与其余键同块时都解析', () => {
+    const checks = [{ cmd: 'git status --short', exitCode: 0 }]
+    expect(parseReceiptBlock(blockOf({ verdict: 'fail', checks, notices: ['未给量级'] }))).toEqual({
+      verdict: 'fail',
+      checks,
+      notices: ['未给量级'],
+    })
+  })
+})
+
 describe('applyReceiptBlock：执行器接线口径', () => {
   it('解析成功：只补六个字段，output 原文不动', () => {
     const text = blockOf({
@@ -270,6 +338,19 @@ describe('applyReceiptBlock：执行器接线口径', () => {
     expect(receipt.later).toBe('2026-11-06T09:00:00.000Z')
     expect(receipt.events).toEqual([eventOf()])
     expect(receipt.spawn).toEqual([{ subject: '子任务', key: 'k' }])
+  })
+
+  it('闸门判定：verdict 与 checks 写进回执（其余字段保持未提供）', () => {
+    const checks = [{ cmd: 'git tag', exitCode: 0 }]
+    const text = blockOf({ verdict: 'fail', checks })
+    const receipt = receiptOf({ output: text })
+    applyReceiptBlock(receipt, text)
+
+    expect(receipt.verdict).toBe('fail')
+    expect(receipt.checks).toEqual(checks)
+    expect(receipt.ask).toBeUndefined()
+    expect(receipt.notices).toBeUndefined()
+    expect(receipt.later).toBeUndefined()
   })
 
   it('只带部分字段：只补出现的字段，其余保持未提供', () => {

@@ -2,10 +2,14 @@
  * 回执块解析（M4，唯一口径见 SPEC-plugins「回执与执行约定」）：
  *
  * 执行器的最终输出里可以带一个 ```json 围栏块，对象只要含
- * `ask / notices / resolves / later / events` 任一键就算回执块，其余键忽略。
- * **只看最后一个 ```json 围栏块**：该块非法 JSON / 非对象 / 不含五键任一 /
+ * `ask / notices / resolves / later / events / spawn / notes / verdict / checks` 任一键
+ * 就算回执块，其余键忽略。
+ * **只看最后一个 ```json 围栏块**：该块非法 JSON / 非对象 / 不含九键任一 /
  * 字段校验不过 → 直接返回 null，不回退到更早的块（回退可能沿用上一轮或正文里的
  * 陈旧回执，宁可这次不产卡片）。解析不修改输出原文、不改终态、不抛错。
+ *
+ * M11：`verdict` / `checks` 是闸门判定，必须在这里就过一遍——漏掉它们，闸门阶段的
+ * 判定永远到不了内核，任务会一直停在闸门上（表现为「未通过也进不了阻塞阶段」）。
  *
  * 与 protocol 的分工是**两层校验**，不是等价的重复：
  * - 回执块层（本文件）：更严的前置过滤——空选项 `ask`、非 ISO `later`、畸形块一律
@@ -15,11 +19,13 @@
  * 两层判据并不相同（宿主层放行的空选项 ask / 非 ISO later 到不了内核），
  * 上限常量共用 `COMMAND_LIMITS`，本文件不另定义一份。
  */
+import type { GateCheck, GateVerdict } from '../../protocol/entities'
+import { GATE_VERDICTS } from '../../protocol/entities'
 import type { Ask, RawEvent, Receipt, SpawnTask } from '../../protocol/inputs'
 import { COMMAND_LIMITS } from '../../protocol/validate'
 import { THREAD_LIMITS } from '../../protocol/thread'
 
-/** 回执块可携带的六个字段；解析结果只含这些键。 */
+/** 回执块可携带的九个字段；解析结果只含这些键。 */
 export interface ReceiptBlock {
   ask?: Ask[]
   notices?: string[]
@@ -30,6 +36,10 @@ export interface ReceiptBlock {
   spawn?: SpawnTask[]
   /** 线程笔记（M6.5）：每条 ≤2000 字，只作资料 */
   notes?: string[]
+  /** 闸门判定（M11）：只对闸门阶段有意义；缺省 = 没给结论 */
+  verdict?: GateVerdict
+  /** 判定证据（M11）：`{ cmd, exitCode }`；缺省 / 空数组 = 没给证据 */
+  checks?: GateCheck[]
 }
 
 const RECEIPT_BLOCK_KEYS = [
@@ -40,6 +50,8 @@ const RECEIPT_BLOCK_KEYS = [
   'events',
   'spawn',
   'notes',
+  'verdict',
+  'checks',
 ] as const
 
 /** 开围栏：```json（标签大小写不敏感）单独成行 */
@@ -177,10 +189,28 @@ const parseLater = (value: unknown): string | null => {
   return Number.isNaN(Date.parse(value)) ? null : value
 }
 
+/** 闸门判定：只认 `pass` / `fail`，其余（含大小写变体、中文）整块忽略。 */
+const parseVerdict = (value: unknown): GateVerdict | null =>
+  typeof value === 'string' && (GATE_VERDICTS as readonly string[]).includes(value)
+    ? (value as GateVerdict)
+    : null
+
+/** 闸门证据：命令非空且不超长，退出码为 ±1000000 内的整数（同 validate 的 `checkGateCheck`）。 */
+const parseChecks = (value: unknown): GateCheck[] | null => {
+  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.gateChecks) return null
+  for (const entry of value) {
+    if (!isRecord(entry)) return null
+    if (!isText(entry.cmd, COMMAND_LIMITS.gateCmd)) return null
+    if (typeof entry.exitCode !== 'number' || !Number.isInteger(entry.exitCode)) return null
+    if (entry.exitCode < -1_000_000 || entry.exitCode > 1_000_000) return null
+  }
+  return value as GateCheck[]
+}
+
 /**
  * 解析执行器输出里的回执块。
  *
- * 只看最后一个 ```json 围栏块：没有块、非法 JSON、不是对象、五键全无、
+ * 只看最后一个 ```json 围栏块：没有块、非法 JSON、不是对象、九键全无、
  * 或任一字段校验不过，都返回 `null`（不回退到更早的块）。不抛异常。
  */
 export function parseReceiptBlock(output: string): ReceiptBlock | null {
@@ -264,6 +294,23 @@ export function parseReceiptBlock(output: string): ReceiptBlock | null {
         }
         break
       }
+      case 'verdict': {
+        const verdict = parseVerdict(value)
+        if (!verdict) return null
+        block.verdict = verdict
+        fields += 1
+        break
+      }
+      case 'checks': {
+        const checks = parseChecks(value)
+        if (!checks) return null
+        // 空数组 = 没给证据：不当作有效键，但也不连累同块的 verdict
+        if (checks.length > 0) {
+          block.checks = checks
+          fields += 1
+        }
+        break
+      }
     }
   }
 
@@ -271,7 +318,7 @@ export function parseReceiptBlock(output: string): ReceiptBlock | null {
 }
 
 /**
- * 把输出里的回执块写进回执：只补五个字段，解析失败保持原样。
+ * 把输出里的回执块写进回执：只补九个字段，解析失败保持原样。
  *
  * 执行器接线只调这一处——不改 `output`、不改终态、不抛错。
  */
@@ -285,4 +332,6 @@ export function applyReceiptBlock(receipt: Receipt, output: string): void {
   if (block.events !== undefined) receipt.events = block.events
   if (block.spawn !== undefined) receipt.spawn = block.spawn
   if (block.notes !== undefined) receipt.notes = block.notes
+  if (block.verdict !== undefined) receipt.verdict = block.verdict
+  if (block.checks !== undefined) receipt.checks = block.checks
 }

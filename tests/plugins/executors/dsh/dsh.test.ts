@@ -1372,6 +1372,26 @@ describe('回执块解析（M4）', () => {
     expect(receipt.events).toEqual(fullBlock.events)
   })
 
+  it('闸门判定（M11）：result 帧里的 verdict / checks 写进回执', async () => {
+    const h = harness()
+    const { running } = startRun(h)
+    const child = h.children[0]
+    const checks = [
+      { cmd: 'git tag', exitCode: 0 },
+      { cmd: 'npm whoami', exitCode: 1 },
+    ]
+    const output = outputWith({ verdict: 'fail', checks, notices: ['三项量级缺两项'] })
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output }))
+    child.close(0)
+
+    const receipt = await running
+    expect(receipt.status).toBe('succeeded')
+    expect(receipt.verdict).toBe('fail')
+    expect(receipt.checks).toEqual(checks)
+    expect(receipt.notices).toEqual(['三项量级缺两项'])
+  })
+
   it('回执块解析失败：五字段缺失，终态 / 错误 / output 不变', async () => {
     const h = harness()
     const { running } = startRun(h)

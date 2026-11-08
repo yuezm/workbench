@@ -55,10 +55,7 @@ async function choose(
 }
 
 /** 从列表进入某个插件的详情页 */
-async function openDetail(
-  user: ReturnType<typeof userEvent.setup>,
-  name: string,
-): Promise<void> {
+async function openDetail(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
   await user.click(screen.getByRole('button', { name: `插件 ${name} 详情` }))
 }
 
@@ -147,7 +144,7 @@ describe('PluginsManager', () => {
 
     // 详情里才有错误原因与声明能力；返回后回到概览列表
     await openDetail(user, 'notify')
-    expect(screen.getByText('清单缺少入口文件')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('清单缺少入口文件')
     expect(screen.getByRole('button', { name: '返回插件列表' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '返回插件列表' }))
     expect(screen.getByText('共 6 个')).toBeInTheDocument()
@@ -183,11 +180,14 @@ describe('PluginsManager', () => {
     await screen.findByText('webhook')
 
     await user.click(screen.getByRole('switch', { name: '启用插件 webhook' }))
-    expect(await screen.findByText('插件不存在: webhook')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('插件不存在: webhook')
     expect(screen.getByRole('switch', { name: '启用插件 webhook' })).toHaveAttribute(
       'aria-checked',
       'true',
     )
+    // 启停失败可手动关掉
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('插件不存在: webhook')).not.toBeInTheDocument()
   })
 
   it('详情里同样能启停，失败留在详情内；插件从视图消失时回到列表', async () => {
@@ -204,7 +204,7 @@ describe('PluginsManager', () => {
     // 详情里的启停失败：错误就地展示（不回列表）
     kernel.onDispatch(() => Promise.reject(new Error('启停失败')))
     await user.click(screen.getByRole('switch', { name: '启用插件 webhook' }))
-    expect(await screen.findByText('启停失败')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('启停失败')
     expect(screen.getByRole('button', { name: '保存插件 webhook' })).toBeInTheDocument()
 
     // 插件被移除（视图里没了）：详情自动回落到列表
@@ -285,7 +285,7 @@ describe('PluginsManager', () => {
     await openDetail(user, 'legacy')
 
     expect(screen.getByLabelText('legacy 后缀')).toHaveValue('')
-    expect(screen.getByLabelText('legacy 重试')).toHaveValue(3)
+    expect(screen.getByLabelText('legacy 重试')).toHaveValue('3')
     expect(screen.getByRole('combobox', { name: 'legacy 变体' })).toHaveTextContent('未设置')
     expect(screen.getByLabelText('legacy 开关')).not.toBeChecked()
     expect(screen.getByLabelText('legacy 令牌')).toHaveAttribute('placeholder', '未设置')
@@ -330,7 +330,58 @@ describe('PluginsManager', () => {
     await openDetail(user, 'webhook')
 
     await user.click(screen.getByRole('button', { name: '保存插件 webhook' }))
-    expect(await screen.findByText('secret 存储不可用')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('secret 存储不可用')
+  })
+
+  it('数字字段填了非数字：就地报错且不提交，草稿保留', async () => {
+    kernel.setView('plugins.all', undefined, [makePlugin()])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await screen.findByText('webhook')
+    await openDetail(user, 'webhook')
+
+    const port = screen.getByLabelText('webhook 端口')
+    await user.clear(port)
+    await user.type(port, 'abc')
+    await user.click(screen.getByRole('button', { name: '保存插件 webhook' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('必须是数字，留空用缺省值')
+    expect(kernel.dispatched).toHaveLength(0)
+    expect(port).toHaveValue('abc')
+
+    // 改回合法值后红字撤掉，保存可用
+    await user.clear(port)
+    await user.type(port, '47616')
+    expect(screen.queryByText('必须是数字，留空用缺省值')).toBeNull()
+    await user.click(screen.getByRole('button', { name: '保存插件 webhook' }))
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({ config: { port: 47616 } })
+  })
+
+  it('数字字段留空：按缺省值处理，不写空串也不报警', async () => {
+    kernel.setView('plugins.all', undefined, [makePlugin()])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await screen.findByText('webhook')
+    await openDetail(user, 'webhook')
+
+    expect(screen.getByText('只填数字；留空用缺省值')).toBeInTheDocument()
+    await user.clear(screen.getByLabelText('webhook 端口'))
+    await user.click(screen.getByRole('button', { name: '保存插件 webhook' }))
+
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    const config = (kernel.dispatched[0] as { config: Record<string, unknown> }).config
+    expect(config).not.toHaveProperty('port')
+  })
+
+  it('未授权的插件在详情里说明为什么不会启动', async () => {
+    kernel.setView('plugins.all', undefined, [makePlugin()])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await screen.findByText('webhook')
+    await openDetail(user, 'webhook')
+
+    expect(screen.getByText(/勾选声明的能力并保存后才会启动/)).toBeInTheDocument()
   })
 
   it('保存进行中禁用开关与保存按钮（不并发提交）', async () => {
@@ -343,7 +394,9 @@ describe('PluginsManager', () => {
 
     await user.click(screen.getByRole('button', { name: '保存插件 webhook' }))
     expect(await screen.findByRole('switch', { name: '启用插件 webhook' })).toBeDisabled()
+    // 禁用要交代原因：按钮文案自己说「正在保存」
     expect(screen.getByRole('button', { name: '保存插件 webhook' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存插件 webhook' })).toHaveTextContent('保存中…')
   })
 
   it('未就绪显示加载中；空清单显示空态', async () => {

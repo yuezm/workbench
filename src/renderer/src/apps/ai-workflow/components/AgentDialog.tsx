@@ -3,6 +3,7 @@ import type { AgentInput, Runtime } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
+import { FormError } from '../../../components/ui/form-error'
 import { fieldCls, Input } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
@@ -11,6 +12,14 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 
 /** System Prompt 是多行文本：等宽、可纵向拉伸，方便写分段指令 */
 const promptCls = cn(fieldCls, 'min-h-24 resize-y py-2 text-body font-mono')
+
+/**
+ * 把焦点移到出错的控件：下拉是自研组件（没转发 ref），统一按 aria-label 从表单里找，
+ * 输入框与下拉共用一条路径。
+ */
+function focusControl(form: HTMLFormElement, label: string): void {
+  form.querySelector<HTMLElement>(`[aria-label="${label}"]`)?.focus()
+}
 
 /** 运行时健康：从未探测也算可用（不拦截未检测的运行时） */
 export type RuntimeHealth = 'ready' | 'unavailable' | 'unknown'
@@ -44,6 +53,9 @@ export interface AgentDialogProps {
  * 运行时下拉直接带出健康状态；不可用的运行时禁用并汇总提示，
  * 默认选中第一个可用（未检测可选中）运行时，避免把智能体绑到已知失效的运行时。
  * 编辑模式下保留当前绑定，即使该运行时已不可用，也不替换成其它运行时。
+ *
+ * 校验：名称必填（保存时 trim），提交被拒时错误挂在对应字段上（`role="alert"`），
+ * 并把焦点移到第一个出错的控件；父级 reject 的文案留在弹窗底部，输入不丢。
  */
 export function AgentDialog({
   runtimes,
@@ -57,6 +69,8 @@ export function AgentDialog({
   const [selected, setSelected] = useState<string | null>(initial.runtimeId || null)
   const [systemPrompt, setSystemPrompt] = useState(initial.systemPrompt ?? '')
   const [saving, setSaving] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const usable = runtimes.filter((r) => runtimeHealth(r) !== 'unavailable')
@@ -67,12 +81,37 @@ export function AgentDialog({
   const runtimeId = kept?.id ?? usable[0]?.id ?? ''
   const unavailable = runtimes.filter((r) => runtimeHealth(r) === 'unavailable')
 
-  const submit = async (ev: React.FormEvent): Promise<void> => {
+  /** 按钮禁用必须伴随可见原因：点不动又不说为什么，和静默 return 是同一个毛病 */
+  const disabledHint =
+    runtimeId === '' ? '缺少可绑定的运行时：先到「运行时」新建并测试通过再回来。' : null
+
+  const submit = async (ev: React.FormEvent<HTMLFormElement>): Promise<void> => {
     ev.preventDefault()
-    setSaving(true)
     setError(null)
+    setNameError(null)
+    setRuntimeError(null)
+
+    // 必填校验放在前端：空值不再静默 return，也不靠内核 reject 兜底
+    const trimmedName = name.trim()
+    if (trimmedName === '') {
+      setNameError('名称必填')
+      focusControl(ev.currentTarget, '智能体名称')
+      return
+    }
+    if (runtimeId === '') {
+      setRuntimeError('没有可绑定的运行时：先到「运行时」新建并测试通过。')
+      focusControl(ev.currentTarget, '智能体运行时')
+      return
+    }
+
+    setSaving(true)
     try {
-      await onSubmit({ name, description, runtimeId, systemPrompt })
+      await onSubmit({
+        name: trimmedName,
+        description: description.trim(),
+        runtimeId,
+        systemPrompt: systemPrompt.trim(),
+      })
     } catch (e) {
       setError(errMsg(e))
     } finally {
@@ -82,7 +121,7 @@ export function AgentDialog({
 
   return (
     <Dialog title={mode === 'edit' ? '编辑智能体' : '新建智能体'} onClose={onCancel}>
-      <form className="flex flex-col gap-4" onSubmit={submit}>
+      <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
         {runtimes.length === 0 && (
           <div className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
             先添加运行时。
@@ -90,20 +129,30 @@ export function AgentDialog({
         )}
 
         {runtimes.length > 0 && usable.length === 0 && (
-          <p className="rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-body text-amber-200">
+          <p className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-body text-warn">
             没有可用运行时，先到「运行时」测试通过。
           </p>
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="名称">
-            <Input aria-label="智能体名称" value={name} onChange={(e) => setName(e.target.value)} />
+          <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
+            <Input
+              aria-label="智能体名称"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                setNameError(null)
+              }}
+            />
           </Field>
-          <Field label="绑定运行时">
+          <Field label="绑定运行时" required error={runtimeError}>
             <Select
               ariaLabel="智能体运行时"
               value={runtimeId}
-              onChange={setSelected}
+              onChange={(next) => {
+                setSelected(next)
+                setRuntimeError(null)
+              }}
               options={
                 runtimes.length === 0
                   ? [{ value: '', label: '无' }]
@@ -117,7 +166,7 @@ export function AgentDialog({
           </Field>
 
           {unavailable.length > 0 && (
-            <p className="col-span-2 rounded-lg border border-red-400/20 bg-red-400/[0.06] px-2.5 py-1.5 text-body text-red-300">
+            <p className="col-span-2 rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-body text-danger">
               不可用：{unavailable.map((r) => r.name).join('、')}
             </p>
           )}
@@ -141,19 +190,18 @@ export function AgentDialog({
           </Field>
         </div>
 
-        {error && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-            {error}
-          </p>
-        )}
+        <FormError message={error} onDismiss={() => setError(null)} />
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-            取消
-          </Button>
-          <Button type="submit" variant="primary" size="sm" disabled={saving || !runtimeId}>
-            {mode === 'edit' ? '保存' : '添加'}
-          </Button>
+        <div className="flex flex-col gap-2">
+          {disabledHint !== null && <p className="text-meta text-ink-faint">{disabledHint}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+              取消
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled={saving || runtimeId === ''}>
+              {mode === 'edit' ? '保存' : '添加'}
+            </Button>
+          </div>
         </div>
       </form>
     </Dialog>

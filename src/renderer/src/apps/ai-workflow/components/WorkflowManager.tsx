@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react'
 import type { WorkflowInput, WorkflowWithStages } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
+import { FormError } from '../../../components/ui/form-error'
 import { Menu } from '../../../components/ui/menu'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelViewState } from '../../../shell/useKernelView'
@@ -89,11 +90,11 @@ export function WorkflowManager(): ReactElement {
 
   return (
     <div className="flex flex-col gap-3">
-      {(actionError ?? readError) && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-          {actionError ?? readError}
-        </p>
-      )}
+      {/* 写命令失败可以关掉；读视图失败是持续状态，不给关闭入口 */}
+      <FormError
+        message={actionError ?? readError}
+        onDismiss={actionError === null ? undefined : () => setActionError(null)}
+      />
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-meta text-ink-faint">阶段序列与流转</p>
@@ -171,7 +172,7 @@ export function WorkflowManager(): ReactElement {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-red-400 hover:text-red-300"
+                    className="text-danger hover:bg-danger/10 hover:text-danger"
                     aria-label={`删除工作流 ${w.name}`}
                     onClick={() => void remove(w.id)}
                   >
@@ -186,11 +187,7 @@ export function WorkflowManager(): ReactElement {
 
       {editing !== undefined && (
         <Dialog onClose={() => setEditing(undefined)} className="max-w-3xl">
-          {saveError && (
-            <p className="mb-3 rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-              {saveError}
-            </p>
-          )}
+          <FormError message={saveError} className="mb-3" />
           <WorkflowEditor
             workflow={editing}
             initial={seed}

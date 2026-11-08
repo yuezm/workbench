@@ -154,6 +154,7 @@ describe('TaskDetailPage', () => {
         conversationId: null,
         title: '包名怎么定',
         text: '事实：裸名已被他人发布过 0.2.0；选哪个？',
+        kind: 'ask',
         options: ['裸名', '带前缀'],
         key: 'k',
         version: 1,
@@ -196,6 +197,7 @@ describe('TaskDetailPage', () => {
         conversationId: null,
         title: '别人的问题',
         text: '',
+        kind: 'ask',
         options: ['好'],
         key: null,
         version: 1,
@@ -371,15 +373,22 @@ describe('TaskDetailPage', () => {
     )
   })
 
-  it('空反馈就地提示，不发命令', async () => {
+  it('空反馈就地提示并聚焦输入，不发命令', async () => {
     const user = userEvent.setup()
     setup()
     await screen.findByRole('region', { name: '上下文' })
 
+    // 按钮可点：点了必须有反馈，不能靠「灰着不响」表达空值
     const button = screen.getByRole('button', { name: '发送反馈' })
-    expect(button).toBeDisabled()
+    expect(button).toBeEnabled()
+    await user.click(button)
+    expect(await screen.findByRole('alert')).toHaveTextContent('写点内容再发送')
+    expect(screen.getByLabelText('反馈内容')).toHaveFocus()
+
+    // 纯空格同样按空处理，仍然不发命令
     await user.type(screen.getByLabelText('反馈内容'), '   ')
-    expect(button).toBeDisabled()
+    await user.click(button)
+    expect(screen.getByRole('alert')).toHaveTextContent('写点内容再发送')
     expect(kernel.dispatched).toHaveLength(0)
   })
 
@@ -431,6 +440,33 @@ describe('TaskDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '发送中…' })).toBeDisabled())
     expect(screen.getByLabelText('反馈内容')).toBeDisabled()
     expect(screen.getByRole('checkbox', { name: '同时让智能体接着做' })).toBeDisabled()
+  })
+
+  it('审批卡视图读取失败：就地展示原因，任务正文照常渲染', async () => {
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    kernel.failView('cards.open', undefined, 'cards-down')
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+
+    // 卡片读不到时 run 可能停在 waiting：原因是必须看到的，不能只让卡片凭空消失
+    expect(await screen.findByRole('alert')).toHaveTextContent('cards-down')
+    expect(screen.getByRole('heading', { name: '任务A' })).toBeInTheDocument()
+  })
+
+  it('子任务视图读取失败：就地展示原因，不把失败当成「没有子任务」', async () => {
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    kernel.failView('tasks.byParent', { taskId: 't1' }, 'kids-down')
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+
+    expect(await screen.findByText('kids-down')).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '子任务' })).toBeNull()
   })
 
   it('返回按钮调用 onBack', async () => {

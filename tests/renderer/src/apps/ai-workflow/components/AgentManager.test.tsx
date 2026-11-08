@@ -185,7 +185,7 @@ describe('AgentManager', () => {
     kernel.failView('agents.all', undefined, 'boom')
     kernel.setView('runtimes.all', undefined, [])
     render(<AgentManager />)
-    expect(await screen.findByText('boom')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom')
   })
 
   it('新建失败在弹窗内展示错误；删除失败展示错误', async () => {
@@ -206,7 +206,10 @@ describe('AgentManager', () => {
 
     await user.click(screen.getByRole('button', { name: '取消' }))
     await user.click(screen.getAllByRole('button', { name: /删除智能体/ })[0])
-    expect(await screen.findByText('remove-fail')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('remove-fail')
+    // 写命令的失败可手动关掉
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('remove-fail')).not.toBeInTheDocument()
   })
 
   it('删除失败为非 Error 时按字符串展示', async () => {
@@ -221,7 +224,7 @@ describe('AgentManager', () => {
     expect(await screen.findByText('old')).toBeInTheDocument()
     const user = userEvent.setup()
     await user.click(screen.getAllByRole('button', { name: /删除智能体/ })[0])
-    expect(await screen.findByText('删除纯文本失败')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('删除纯文本失败')
   })
 
   it('写入后清单重取失败也展示错误', async () => {
@@ -241,7 +244,7 @@ describe('AgentManager', () => {
     await user.click(screen.getByRole('button', { name: '新建智能体' }))
     await user.type(screen.getByLabelText('智能体名称'), 'x')
     await user.click(screen.getByRole('button', { name: '添加' }))
-    expect(await screen.findByText('reload-boom')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('reload-boom')
   })
 
   it('新增运行时后经内核视图同步绑定下拉', async () => {
@@ -302,6 +305,19 @@ describe('AgentManager', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
+  it('删除进行中：该行按钮禁用并说明原因', async () => {
+    setup([agent()], [rt])
+    handleDispatch(() => new Promise(() => {}))
+    const user = userEvent.setup()
+    render(<AgentManager />)
+    await screen.findByText('old')
+
+    await user.click(screen.getByRole('button', { name: '删除智能体 old' }))
+
+    expect(await screen.findByText('删除中…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除智能体 old' })).toBeDisabled()
+  })
+
   it('编辑时保留已不可用的原绑定运行时，不被替换成其它运行时', async () => {
     setup(
       [agent({ runtimeId: 'r1' })],
@@ -318,7 +334,9 @@ describe('AgentManager', () => {
   it('更新失败在弹窗内展示错误并保持打开', async () => {
     setup([agent()], [rt])
     handleDispatch((command) =>
-      command.type === 'agent.update' ? Promise.reject(new Error('update-fail')) : { facts: [], value: null },
+      command.type === 'agent.update'
+        ? Promise.reject(new Error('update-fail'))
+        : { facts: [], value: null },
     )
 
     render(<AgentManager />)

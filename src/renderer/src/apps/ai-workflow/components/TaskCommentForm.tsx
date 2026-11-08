@@ -1,6 +1,7 @@
-import type { FormEvent, ReactElement } from 'react'
+import { useRef, useState, type FormEvent, type ReactElement } from 'react'
 import { TASK_COMMENT_LIMITS } from '../../../../../protocol/task-comment'
 import { Button } from '../../../components/ui/button'
+import { FormError } from '../../../components/ui/form-error'
 import { fieldCls } from '../../../components/ui/input'
 import { cn } from '../../../lib/cn'
 
@@ -25,6 +26,8 @@ export interface TaskCommentFormProps {
  *
  * - 只收集文本与「是否接着跑」的意图，提交由上层 dispatch `task.comment`；
  * - 勾选框只在「交给智能体」的阶段可用：其它阶段反馈只进上下文，不排运行；
+ * - 空反馈不靠「按钮灰着不响」表达：按钮可点，点了就地报「写点内容再发送」并把焦点
+ *   移回输入框（静默禁用和静默 return 是同一个毛病，用户看不出为什么没反应）；
  * - 提交中禁用全部输入，错误 / 提示就地展示。
  */
 export function TaskCommentForm({
@@ -37,30 +40,42 @@ export function TaskCommentForm({
   error,
   onSubmit,
 }: TaskCommentFormProps): ReactElement {
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [emptyError, setEmptyError] = useState(false)
+
+  const submit = (event: FormEvent): void => {
+    if (value.trim() === '') {
+      event.preventDefault()
+      setEmptyError(true)
+      textareaRef.current?.focus()
+      return
+    }
+    setEmptyError(false)
+    onSubmit(event)
+  }
+
   return (
     <form
       aria-label="添加反馈"
       className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3"
-      onSubmit={onSubmit}
+      onSubmit={submit}
     >
       <textarea
+        ref={textareaRef}
         aria-label="反馈内容"
         className={textareaCls}
         maxLength={TASK_COMMENT_LIMITS.text}
         placeholder="补充背景、指出问题、给验收意见…"
         value={value}
         disabled={busy}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => {
+          onChange(e.target.value)
+          setEmptyError(false)
+        }}
       />
 
-      {error !== null && (
-        <p
-          role="alert"
-          className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-body text-red-300"
-        >
-          {error}
-        </p>
-      )}
+      <FormError message={emptyError ? '写点内容再发送：空反馈不会提交。' : null} />
+      <FormError message={error} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label
@@ -79,7 +94,7 @@ export function TaskCommentForm({
           />
           同时让智能体接着做
         </label>
-        <Button type="submit" variant="primary" size="sm" disabled={busy || value.trim() === ''}>
+        <Button type="submit" variant="primary" size="sm" disabled={busy}>
           {busy ? '发送中…' : '发送反馈'}
         </Button>
       </div>

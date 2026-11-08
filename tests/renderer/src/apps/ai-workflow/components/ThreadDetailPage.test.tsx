@@ -213,7 +213,8 @@ describe('ThreadDetailPage', () => {
     await screen.findByText('上一轮笔记')
 
     await user.click(screen.getByRole('button', { name: '添加笔记' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('笔记不能为空')
+    const notes = screen.getByRole('region', { name: '笔记' })
+    expect(within(notes).getByRole('alert')).toHaveTextContent('笔记不能为空')
     expect(kernel.dispatched).toHaveLength(0)
   })
 
@@ -230,7 +231,8 @@ describe('ThreadDetailPage', () => {
     await user.type(screen.getByLabelText('线程笔记'), '重试文本')
     await user.click(screen.getByRole('button', { name: '添加笔记' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('笔记写不进去')
+    const notes = screen.getByRole('region', { name: '笔记' })
+    expect(await within(notes).findByRole('alert')).toHaveTextContent('笔记写不进去')
     expect(screen.getByLabelText('线程笔记')).toHaveValue('重试文本')
   })
 
@@ -252,6 +254,21 @@ describe('ThreadDetailPage', () => {
     expect(screen.getByLabelText('入口来源')).toBeDisabled()
     expect(screen.getByLabelText('外部入口键')).toBeDisabled()
     expect(screen.getByRole('button', { name: '归档' })).toBeDisabled()
+  })
+
+  it('写入进行中给出可见状态，不只是把按钮变灰', async () => {
+    dispatchWith(
+      <C extends Command>(): Promise<CommandDispatchResult<C>> =>
+        new Promise<CommandDispatchResult<C>>(() => {}),
+    )
+    const user = userEvent.setup()
+    setup(detailOf(implicitThread))
+    await screen.findByRole('heading', { name: '线程 · 隐式线程' })
+
+    await user.type(screen.getByLabelText('线程笔记'), '写很久')
+    await user.click(screen.getByRole('button', { name: '添加笔记' }))
+
+    expect(await screen.findByText('正在提交，其他操作暂不可用。')).toBeInTheDocument()
   })
 
   it('未绑定线程提供绑定表单，提交 dispatch thread.bind 后显示已绑定', async () => {
@@ -299,14 +316,15 @@ describe('ThreadDetailPage', () => {
     const user = userEvent.setup()
     setup(detailOf(implicitThread))
     await screen.findByRole('heading', { name: '线程 · 隐式线程' })
+    const bind = screen.getByRole('region', { name: '绑定入口' })
 
     await user.click(screen.getByRole('button', { name: '绑定' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('入口来源必填')
+    expect(await within(bind).findByRole('alert')).toHaveTextContent('入口来源必填')
     expect(kernel.dispatched).toHaveLength(0)
 
     await user.type(screen.getByLabelText('入口来源'), 'mail')
     await user.click(screen.getByRole('button', { name: '绑定' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('入口键必填')
+    expect(await within(bind).findByRole('alert')).toHaveTextContent('入口键必填')
     expect(kernel.dispatched).toHaveLength(0)
   })
 
@@ -324,7 +342,8 @@ describe('ThreadDetailPage', () => {
     await user.type(screen.getByLabelText('外部入口键'), 'issue-1')
     await user.click(screen.getByRole('button', { name: '绑定' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('外部入口已被占用')
+    const bind = screen.getByRole('region', { name: '绑定入口' })
+    expect(await within(bind).findByRole('alert')).toHaveTextContent('外部入口已被占用')
   })
 
   it('归档线程：dispatch thread.close，归档后隐藏归档按钮并展示归档态', async () => {

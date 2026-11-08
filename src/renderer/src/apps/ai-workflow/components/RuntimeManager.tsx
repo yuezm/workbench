@@ -7,6 +7,7 @@ import type {
   RuntimeStatus,
 } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
+import { FormError } from '../../../components/ui/form-error'
 import { Panel, badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
@@ -121,6 +122,8 @@ export function RuntimeManager(): ReactElement {
   const [probingId, setProbingId] = useState<string | null>(null)
   /** 展开失败详情的运行时 id */
   const [expandedProbeId, setExpandedProbeId] = useState<string | null>(null)
+  /** 正在删除的运行时 id：删除期间按钮禁用并说明原因，避免连点删两次 */
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const scan = useCallback(async (): Promise<void> => {
     try {
@@ -177,11 +180,15 @@ export function RuntimeManager(): ReactElement {
   }
 
   const remove = async (id: string): Promise<void> => {
+    setDeletingId(id)
+    setError(null)
     try {
       await getKernelStore().dispatch({ type: 'runtime.remove', commandId: '', id })
       setExpandedProbeId((prev) => (prev === id ? null : prev))
     } catch (e) {
       setError(errMsg(e))
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -290,17 +297,12 @@ export function RuntimeManager(): ReactElement {
         )}
       </Panel>
 
-      {pageError && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-          {pageError}
-        </p>
-      )}
-
-      {detectError && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-          {detectError}
-        </p>
-      )}
+      {/* 写命令失败可关掉；读视图失败是持续状态，不给关闭入口 */}
+      <FormError
+        message={pageError}
+        onDismiss={error === null ? undefined : () => setError(null)}
+      />
+      <FormError message={detectError} />
 
       {/* 已配置运行时 */}
       <Panel className="flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]">
@@ -378,14 +380,12 @@ export function RuntimeManager(): ReactElement {
                     <span className="tabular-nums">
                       负载 {running}/{maxConcurrent}
                     </span>
-                    {queued > 0 && (
-                      <span className="text-amber-300 tabular-nums">排队 {queued}</span>
-                    )}
+                    {queued > 0 && <span className="text-warn tabular-nums">排队 {queued}</span>}
                   </span>
 
                   {showDetails && (
-                    <div className="flex flex-col gap-1 rounded-lg border border-red-400/20 bg-red-400/[0.06] px-2.5 py-2">
-                      <p className="text-body text-red-300">{probe?.error ?? '未知错误'}</p>
+                    <div className="flex flex-col gap-1 rounded-lg border border-danger/20 bg-danger/[0.06] px-2.5 py-2">
+                      <p className="text-body text-danger">{probe?.error ?? '未知错误'}</p>
                       {probe?.output && (
                         <pre className="max-h-32 overflow-auto text-body whitespace-pre-wrap text-ink-faint">
                           {probe.output}
@@ -415,12 +415,15 @@ export function RuntimeManager(): ReactElement {
                   >
                     编辑
                   </Button>
+                  {/* 删除进行中给可见状态：按钮变灰本身不解释原因 */}
+                  {deletingId === r.id && <span className="text-meta text-ink-faint">删除中…</span>}
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="text-red-400 hover:text-red-300"
+                    className="text-danger hover:bg-danger/10 hover:text-danger"
                     aria-label={`删除运行时 ${r.name}`}
+                    disabled={deletingId === r.id}
                     onClick={() => void remove(r.id)}
                   >
                     删除

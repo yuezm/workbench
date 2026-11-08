@@ -1,14 +1,13 @@
 import { useState, type KeyboardEvent, type ReactElement } from 'react'
 import type { Agent, Card, Conversation, Message } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
+import { FormError } from '../../../components/ui/form-error'
 import { fieldCls } from '../../../components/ui/input'
 import { cn } from '../../../lib/cn'
 import type { ChatStreamState } from '../hooks/useChat'
 import { ApprovalCards } from './ApprovalCards'
 
-/** 错误条：任一操作失败都在输入区上方提示，下一次成功操作自动消失 */
-const ERROR_CLS =
-  'rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300'
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** 流式工具事件内容的最大展示长度 */
 const STREAM_TOOL_MAX = 120
@@ -55,6 +54,8 @@ export function ChatPanel({
   onCancel,
 }: ChatPanelProps): ReactElement {
   const [draft, setDraft] = useState('')
+  /** 本地提示：空内容发送 / 父级抛错，都贴在输入框上方，不静默吞掉 */
+  const [notice, setNotice] = useState<string | null>(null)
 
   const agentName = (id: string): string =>
     agents.find((item) => item.id === id)?.name ?? '未知智能体'
@@ -64,8 +65,17 @@ export function ChatPanel({
 
   const send = async (): Promise<void> => {
     const text = draft.trim()
-    if (!text) return
-    if (await onSend(text)) setDraft('')
+    if (!text) {
+      setNotice('先输入内容再发送')
+      return
+    }
+    setNotice(null)
+    try {
+      if (await onSend(text)) setDraft('')
+    } catch (e) {
+      // 父级可能 rethrow：就地说明，草稿留着，别让 async 处理器产生无人接的拒绝
+      setNotice(`发送失败：${errMsg(e)}`)
+    }
   }
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -122,7 +132,7 @@ export function ChatPanel({
                   >
                     {message.content}
                     {message.error !== null && (
-                      <p className="mt-1 text-body text-red-300">{message.error}</p>
+                      <p className="mt-1 text-body text-danger">{message.error}</p>
                     )}
                   </div>
                 </div>
@@ -141,7 +151,7 @@ export function ChatPanel({
                       key={`${tool.tool}-${index}`}
                       className={cn(
                         'rounded-md bg-surface-2 px-2 py-1 font-mono text-body text-ink-faint',
-                        tool.isError && 'text-red-300',
+                        tool.isError && 'text-danger',
                       )}
                     >
                       {[
@@ -163,13 +173,17 @@ export function ChatPanel({
       </div>
 
       <footer className="flex shrink-0 flex-col gap-2 border-t border-line p-3">
-        {error !== null && <p className={ERROR_CLS}>{error}</p>}
+        <FormError message={error} />
+        <FormError message={notice} />
         <textarea
           aria-label="消息输入"
           className={cn(fieldCls, 'min-h-20 resize-none py-2')}
           placeholder="输入消息，Enter 发送，Shift+Enter 换行"
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => {
+            setNotice(null)
+            setDraft(event.target.value)
+          }}
           onKeyDown={onKeyDown}
         />
         <div className="flex justify-end">

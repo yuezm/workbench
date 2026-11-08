@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react'
 import type { WorkflowWithStages } from '../../../../../protocol/entities'
 import type { AutomationRule } from '../../../../../protocol/rules'
 import { Button } from '../../../components/ui/button'
+import { FormError } from '../../../components/ui/form-error'
 import { badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
@@ -175,11 +176,11 @@ export function RulesManager(): ReactElement {
 
   return (
     <div className="flex flex-col gap-3">
-      {error && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-          {error}
-        </p>
-      )}
+      {/* 写命令失败可关掉；读视图失败是持续状态，不给关闭入口 */}
+      <FormError
+        message={error}
+        onDismiss={actionError === null ? undefined : () => setActionError(null)}
+      />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-meta text-ink-faint">命中后建任务</p>
@@ -219,7 +220,9 @@ export function RulesManager(): ReactElement {
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {rules.length} 条</span>
         <span className="text-meta text-ink-faint">v{version}</span>
-        {noWorkflows && <span className="text-body text-amber-200">先建工作流</span>}
+        {noWorkflows && <span className="text-body text-warn">先建工作流</span>}
+        {/* 整批写入进行中：整排按钮都会变灰，这里说清原因 */}
+        {busy && <span className="text-meta text-ink-faint">正在写入规则…</span>}
       </div>
 
       {rules.length === 0 ? (
@@ -290,7 +293,7 @@ export function RulesManager(): ReactElement {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="text-red-400 hover:text-red-300"
+                    className="text-danger hover:bg-danger/10 hover:text-danger"
                     aria-label={`删除规则 ${rule.name}`}
                     disabled={busy}
                     onClick={() => remove(rule)}

@@ -162,7 +162,8 @@ describe('TaskActivity', () => {
     const list = screen.getByRole('list', { name: '上下文' })
     expect(await within(list).findByText('失败')).toBeInTheDocument()
     expect(list).toHaveTextContent('非零退出')
-    expect(list).toHaveTextContent('进程非零退出')
+    // 失败原因是要人读的，用可播报的 alert 而不是又一段灰字
+    expect(within(list).getByRole('alert')).toHaveTextContent('进程非零退出')
     expect(list).toHaveTextContent('耗时 350ms')
     expect(list).toHaveTextContent('退出码 3')
     expect(list).not.toHaveTextContent('tokens')
@@ -218,7 +219,7 @@ describe('TaskActivity', () => {
     expect(screen.getByText(/工具调用：read · \{"path":"a+…$/)).toBeVisible()
     expect(screen.getByText('工具调用：未知工具')).toBeVisible()
     expect(screen.getByText('工具结果：read · 读取结果')).toBeVisible()
-    expect(screen.getByText('工具结果：write').className).toContain('text-red-300')
+    expect(screen.getByText('工具结果：write').className).toContain('text-danger')
     expect(screen.getByText('工具结果：未知工具')).toBeVisible()
     // status 事件既不是正文也不是过程
     expect(screen.queryByText('running')).not.toBeInTheDocument()
@@ -380,7 +381,7 @@ describe('TaskActivity', () => {
   it('事件流加载失败展示错误（非 Error 也字符串化）', async () => {
     kernel.failView('run.events', { runId: 'run1' }, 'events-down')
     render(<TaskActivity runs={[makeRun()]} comments={[]} stages={stages} />)
-    expect(await screen.findByText(/事件流加载失败：events-down/)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('事件流加载失败：events-down')
   })
 
   it('运行中的事件随 run.* 事实失效重取，不轮询', async () => {

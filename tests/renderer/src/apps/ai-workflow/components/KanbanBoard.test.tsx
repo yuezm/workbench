@@ -286,6 +286,36 @@ describe('KanbanBoard', () => {
     )
   })
 
+  it('执行中的任务不给落点：拖动途中进入执行中后阶段列与归档区都不高亮、不触发回调', async () => {
+    kernel.setView('tasks.executing', undefined, [])
+    const { onMoveToStage, onCompleteTask } = setup([task], agentWf)
+    // 先把规则写在归档区上，别让用户拖过去才吃内核的「执行中的阶段不能完成」
+    expect(screen.getByText('执行中的任务不能归档')).toBeInTheDocument()
+
+    fireEvent.dragStart(screen.getByLabelText('任务：卡片任务'))
+    expect(screen.getByText('拖到这里')).toBeInTheDocument()
+
+    // 拖动途中任务进入执行中（run 开跑 / tasks.executing 刷新）
+    kernel.setView('tasks.executing', undefined, ['t1'])
+    await waitFor(() =>
+      expect(screen.getByLabelText('任务：卡片任务')).toHaveAttribute('draggable', 'false'),
+    )
+
+    const stageCol = screen.getByRole('group', { name: '阶段：待办' })
+    fireEvent.dragOver(stageCol)
+    expect(stageCol.className).not.toContain('border-focus')
+    fireEvent.drop(stageCol)
+    expect(onMoveToStage).not.toHaveBeenCalled()
+
+    // 再模拟一次拖动来源（draggable=false 只是浏览器侧不发起，落点侧仍必须兜住）
+    fireEvent.dragStart(screen.getByLabelText('任务：卡片任务'))
+    const done = screen.getByRole('group', { name: '归档区' })
+    fireEvent.dragOver(done)
+    expect(done.className).not.toContain('border-short')
+    fireEvent.drop(done)
+    expect(onCompleteTask).not.toHaveBeenCalled()
+  })
+
   it('任务有 threadId 时卡片带线程入口，点击把任务交给上层', async () => {
     const onOpenThread = vi.fn()
     render(

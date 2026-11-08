@@ -173,7 +173,7 @@ describe('RuntimeDialog', () => {
     })
   })
 
-  it('新建：权限模式、工作目录、并发上限与错误都在弹窗内处理', async () => {
+  it('新建：并发上限非法时给文案并聚焦，不静默回落成 1', async () => {
     setup()
     const onSubmit = vi.fn().mockRejectedValue(new Error('create-fail'))
     const user = userEvent.setup()
@@ -182,8 +182,26 @@ describe('RuntimeDialog', () => {
     await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
     await user.click(screen.getByRole('option', { name: '只读' }))
     await user.type(screen.getByLabelText('运行时工作目录'), ' D:/work ')
-    await user.clear(screen.getByLabelText('运行时并发上限'))
-    await user.type(screen.getByLabelText('运行时并发上限'), '0')
+
+    const concurrent = screen.getByLabelText('运行时并发上限')
+    await user.clear(concurrent)
+    await user.type(concurrent, '0')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+
+    // 0 不再被悄悄改成 1：就地报错、聚焦该字段、不调父级
+    expect(await screen.findByText('并发上限必须是 ≥1 的整数')).toBeInTheDocument()
+    expect(concurrent).toHaveFocus()
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    // 小数同样非法（不是正整数）
+    await user.clear(concurrent)
+    await user.type(concurrent, '1.5')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    expect(screen.getByText('并发上限必须是 ≥1 的整数')).toBeInTheDocument()
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    await user.clear(concurrent)
+    await user.type(concurrent, '2')
     await user.click(screen.getByRole('button', { name: '添加' }))
 
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
@@ -191,8 +209,55 @@ describe('RuntimeDialog', () => {
     expect(onSubmit.mock.calls[0][0]).toMatchObject({
       permissionMode: 'read-only',
       workdir: 'D:/work',
-      maxConcurrent: 1,
+      maxConcurrent: 2,
     })
+  })
+
+  it('新建：名称为空就地报必填并聚焦，不调父级', async () => {
+    setup()
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(<RuntimeDialog onSubmit={onSubmit} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    expect(await screen.findByText('名称必填')).toBeInTheDocument()
+    expect(screen.getByLabelText('运行时名称')).toHaveFocus()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('新建：名称手填后 trim 提交，并清掉之前的必填错误', async () => {
+    setup()
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<RuntimeDialog onSubmit={onSubmit} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    expect(await screen.findByText('名称必填')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('运行时名称'), '  Codex  ')
+    // 一改就不再挂旧红字
+    expect(screen.queryByText('名称必填')).not.toBeInTheDocument()
+
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ name: 'Codex' })
+  })
+
+  it('完全访问未勾确认：按钮禁用并写明「为什么点不动」', async () => {
+    setup()
+    const user = userEvent.setup()
+    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
+    await user.click(screen.getByRole('option', { name: '完全访问' }))
+
+    expect(screen.getByText(/先勾选上面的/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
+
+    await user.click(screen.getByLabelText('已确认完全访问风险'))
+    expect(screen.queryByText(/先勾选上面的/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加' })).toBeEnabled()
   })
 
   it('工作目录：留空时占位提示宿主默认目录，并说明用 WORKBENCH_WORKDIR 覆盖', async () => {
@@ -453,7 +518,7 @@ describe('RuntimeDialog', () => {
     expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeDisabled()
   })
 
-  it('提交失败为非 Error 时也字符串化展示', async () => {
+  it('提交失败为非 Error 时也字符串化展示，并可在弹窗内关掉继续改', async () => {
     setup()
     const onSubmit = vi.fn().mockRejectedValue('plain-fail')
     const user = userEvent.setup()
@@ -461,6 +526,10 @@ describe('RuntimeDialog', () => {
 
     await user.click(screen.getByRole('button', { name: '添加' }))
     expect(await screen.findByText('plain-fail')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('plain-fail')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('运行时名称')).toHaveValue('n')
   })
 
   it('编辑时模型目录未返回即卸载：不写状态也不报错', async () => {

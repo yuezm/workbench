@@ -51,6 +51,8 @@ describe('ConversationList', () => {
     render(<ConversationList {...makeProps({ agents: [], conversations: [] })} />)
 
     expect(screen.getByText('先配置智能体')).toBeInTheDocument()
+    // 禁用不只靠灰：按钮旁说要先做什么
+    expect(screen.getByText('先去「设置 → 智能体」建一个，才能新建对话')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '选择智能体' })).toBeNull()
     expect(screen.getByRole('button', { name: '新对话' })).toBeDisabled()
   })
@@ -84,6 +86,8 @@ describe('ConversationList', () => {
 
     rerender(<ConversationList {...makeProps({ onCreate, creating: true })} />)
     expect(screen.getByRole('button', { name: '新对话' })).toBeDisabled()
+    // 进行中也要说清为什么点不动
+    expect(screen.getByText('正在新建对话…')).toBeInTheDocument()
   })
 
   it('会话列表：当前项标记 aria-current，点击回调选中；智能体缺失时回退文案', async () => {

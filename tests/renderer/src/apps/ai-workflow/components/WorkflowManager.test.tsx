@@ -134,7 +134,7 @@ describe('WorkflowManager', () => {
   })
 
   it('编辑保存：dispatch workflow.update；失败保持弹窗并展示错误', async () => {
-    kernel.setView('workflows.all', undefined, [wf('w1', '研发')])
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发', 1)])
     handleDispatch(() => Promise.reject(new Error('update-fail')))
     const user = userEvent.setup()
     render(<WorkflowManager />)
@@ -145,13 +145,13 @@ describe('WorkflowManager', () => {
     await user.type(screen.getByLabelText('工作流名称'), '研发2')
     await user.click(screen.getByRole('button', { name: '保存' }))
 
-    expect(await screen.findByText('update-fail')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('update-fail')
     expect(kernel.dispatched[0]).toMatchObject({ type: 'workflow.update', id: 'w1' })
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
   it('保存失败为非 Error 时按字符串展示，弹窗保持打开', async () => {
-    kernel.setView('workflows.all', undefined, [wf('w1', '研发')])
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发', 1)])
     handleDispatch(() => Promise.reject('保存纯文本失败'))
     const user = userEvent.setup()
     render(<WorkflowManager />)
@@ -161,6 +161,20 @@ describe('WorkflowManager', () => {
     await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(await screen.findByText('保存纯文本失败')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('阶段为空的旧数据在编辑器里就被拦下：不发命令，说明至少一个阶段', async () => {
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发')])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('研发')
+
+    await user.click(screen.getByRole('button', { name: '编辑' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('工作流至少要有一个阶段')
+    expect(kernel.dispatched).toHaveLength(0)
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
@@ -216,8 +230,12 @@ describe('WorkflowManager', () => {
     await screen.findByText('研发')
 
     await user.click(screen.getByRole('button', { name: '删除工作流 研发' }))
-    expect(await screen.findByText('remove-fail')).toBeInTheDocument()
+    // 写命令失败必须是可播报的 alert，并且能手动关掉
+    expect(await screen.findByRole('alert')).toHaveTextContent('remove-fail')
     expect(screen.getByText('研发')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('remove-fail')).not.toBeInTheDocument()
   })
 
   it('删除正在编辑的工作流：编辑态跟随失效，弹窗关闭', async () => {

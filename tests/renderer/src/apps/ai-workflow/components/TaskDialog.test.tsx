@@ -130,7 +130,7 @@ describe('TaskDialog', () => {
     expect(onSave.mock.calls[0][0]).toMatchObject({ stageId: 's1', projectId: 'p1' })
   })
 
-  it('标题为空不提交', async () => {
+  it('标题为空：就地给出必填错误并聚焦标题，不提交', async () => {
     const onSave = vi.fn()
     const user = userEvent.setup()
     render(
@@ -144,6 +144,113 @@ describe('TaskDialog', () => {
     )
     await user.click(screen.getByRole('button', { name: '创建' }))
     expect(onSave).not.toHaveBeenCalled()
+    // 反馈必须可见：不是「点了没反应」
+    expect(screen.getByRole('alert')).toHaveTextContent('任务标题必填')
+    const input = screen.getByLabelText('任务标题')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveFocus()
+  })
+
+  it('标题与描述带上协议上限：超长在输入阶段就挡住', () => {
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText('任务标题')).toHaveAttribute('maxLength', '200')
+    expect(screen.getByLabelText('任务描述')).toHaveAttribute('maxLength', '2000')
+  })
+
+  it('必填标识常驻：任务标题带星号与读屏说明', () => {
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('*')).toBeInTheDocument()
+    expect(screen.getByText('必填')).toBeInTheDocument()
+  })
+
+  it('改了标题就撤掉必填错误', async () => {
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    expect(screen.getByRole('alert')).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('任务标题'), 'a')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('任务标题')).toHaveAttribute('aria-invalid', 'false')
+  })
+
+  it('标题与描述提交前去首尾空白', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+    await user.type(screen.getByLabelText('任务标题'), '  带空白  ')
+    await user.type(screen.getByLabelText('任务描述'), '  背景  ')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).toMatchObject({ title: '带空白', description: '背景' })
+  })
+
+  it('命令被拒：错误留在弹窗里（role=alert），输入不丢', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('工作流不存在: w1'))
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+    await user.type(screen.getByLabelText('任务标题'), '会失败')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('工作流不存在: w1')
+    expect(screen.getByLabelText('任务标题')).toHaveValue('会失败')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('命令被拒为非 Error 时按字符串展示', async () => {
+    const onSave = vi.fn().mockRejectedValue('纯文本失败')
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflow={wf}
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+    await user.type(screen.getByLabelText('任务标题'), 'x')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('纯文本失败')
   })
 
   it('工作流没有阶段时兜底为空起始阶段', () => {

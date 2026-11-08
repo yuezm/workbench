@@ -37,14 +37,10 @@ export function RuntimeStatusBadge({
   }
 
   if (probe.state === 'ready') {
-    return (
-      <span className={cn(pillCls, 'bg-emerald-400/10 text-emerald-300')}>
-        可用 · {probe.elapsedMs}ms
-      </span>
-    )
+    return <span className={cn(pillCls, 'bg-short/10 text-short')}>可用 · {probe.elapsedMs}ms</span>
   }
 
-  const failCls = cn(pillCls, 'bg-red-400/10 text-red-300')
+  const failCls = cn(pillCls, 'bg-danger/10 text-danger')
   const text = `不可用 · ${probe.elapsedMs}ms`
   const title = probe.error ?? '探测失败'
 
@@ -64,7 +60,7 @@ export function RuntimeStatusBadge({
       className={cn(
         failCls,
         'cursor-pointer transition-colors duration-200 outline-none',
-        'hover:bg-red-400/15 focus-visible:ring-2 focus-visible:ring-focus/60',
+        'hover:bg-danger/15 focus-visible:ring-2 focus-visible:ring-focus/60',
       )}
       onClick={onToggle}
     >

@@ -143,9 +143,12 @@ describe('RulesManager', () => {
     await screen.findByText('Issue 进研发')
 
     await user.click(screen.getByRole('button', { name: '删除规则 Issue 进研发' }))
-    expect(await screen.findByText('整批非法')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('整批非法')
     // 视图未刷新：行内编辑按钮仍在（列表不变）
     expect(screen.getByRole('button', { name: '编辑规则 Issue 进研发' })).toBeInTheDocument()
+    // 写命令的失败可手动关掉
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('整批非法')).not.toBeInTheDocument()
   })
 
   it('立即运行：dispatch rule.trigger；失败展示内核文案', async () => {
@@ -167,7 +170,7 @@ describe('RulesManager', () => {
     await screen.findByText('Issue 进研发')
 
     await user.click(screen.getByRole('button', { name: '立即运行 Issue 进研发' }))
-    expect(await screen.findByText('规则已停用')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('规则已停用')
   })
 
   it('立即运行失败：非 Error 的拒绝按字符串展示', async () => {
@@ -178,7 +181,7 @@ describe('RulesManager', () => {
     await screen.findByText('Issue 进研发')
 
     await user.click(screen.getByRole('button', { name: '立即运行 Issue 进研发' }))
-    expect(await screen.findByText('桥接断开')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('桥接断开')
   })
 
   it('新建并保存：dispatch 整批（原规则 + 新规则），成功后关闭弹窗', async () => {
@@ -288,7 +291,7 @@ describe('RulesManager', () => {
   it('rules.all 读取失败展示错误', async () => {
     kernel.failView('rules.all', undefined, 'rules-down')
     render(<RulesManager />)
-    expect(await screen.findByText('rules-down')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('rules-down')
   })
 
   it('保存失败：错误留在弹窗内，列表不关闭', async () => {
@@ -318,6 +321,8 @@ describe('RulesManager', () => {
     expect(await screen.findByRole('button', { name: '新建规则' })).toBeDisabled()
     expect(screen.getByLabelText('启用规则 Issue 进研发')).toBeDisabled()
     expect(screen.getByRole('button', { name: '立即运行 Issue 进研发' })).toBeDisabled()
+    // 整批写入进行中：说清楚为什么整排都点不动
+    expect(screen.getByText('正在写入规则…')).toBeInTheDocument()
   })
 
   it('取消新建弹窗：不 dispatch、不发规则命令', async () => {

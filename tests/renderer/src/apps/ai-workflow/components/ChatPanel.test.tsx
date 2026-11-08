@@ -104,8 +104,11 @@ describe('ChatPanel', () => {
     await user.click(input)
     await user.keyboard('{Enter}')
     expect(onSend).not.toHaveBeenCalled()
+    // 空内容按 Enter 不能「什么都不发生」：给一句话说明为什么没发出去
+    expect(screen.getByText('先输入内容再发送')).toBeInTheDocument()
 
     await user.type(input, '  你好呀  ')
+    expect(screen.queryByText('先输入内容再发送')).toBeNull()
     await user.keyboard('{Shift>}{Enter}{/Shift}')
     expect(onSend).not.toHaveBeenCalled()
     expect(input).toHaveValue('  你好呀  \n')
@@ -113,6 +116,21 @@ describe('ChatPanel', () => {
     await user.keyboard('{Enter}')
     expect(onSend).toHaveBeenCalledWith('你好呀')
     await waitFor(() => expect(input).toHaveValue(''))
+  })
+
+  it('发送时父级抛错：就地说明原因并保留草稿', async () => {
+    const onSend = vi.fn(async () => {
+      throw new Error('桥接断开')
+    })
+    const user = userEvent.setup()
+    render(<ChatPanel {...makeProps({ onSend })} />)
+
+    const input = screen.getByLabelText('消息输入')
+    await user.type(input, '发不出去')
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByText('发送失败：桥接断开')).toBeInTheDocument()
+    expect(input).toHaveValue('发不出去')
   })
 
   it('点击发送按钮提交 trim 后的内容', async () => {
@@ -174,7 +192,8 @@ describe('ChatPanel', () => {
     expect(screen.getByText(/read · \{"path":"a+…$/)).toBeInTheDocument()
     expect(screen.getByText('grep · 短内容')).toBeInTheDocument()
     const failed = screen.getByText('write')
-    expect(failed.className).toContain('text-red-300')
+    // 失败色走语义 token，不用调色板外的 red-300
+    expect(failed.className).toContain('text-danger')
   })
 
   it('渲染消息流与消息级错误文案', () => {
@@ -196,7 +215,7 @@ describe('ChatPanel', () => {
 
   it('错误条渲染在输入区上方', () => {
     render(<ChatPanel {...makeProps({ error: '发送失败' })} />)
-    expect(screen.getByText('发送失败')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('发送失败')
   })
 })
 
@@ -208,6 +227,7 @@ describe('ChatPanel 会话内待处理卡', () => {
     conversationId: 'c1',
     title: '要继续吗',
     text: '上一轮停在方案选择',
+    kind: 'ask',
     options: ['继续', '重来'],
     key: null,
     version: 1,

@@ -9,12 +9,18 @@ import type {
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field, labelCls } from '../../../components/ui/field'
+import { FormError } from '../../../components/ui/form-error'
 import { Input, fieldCls } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+/** 焦点定位：下拉没转发 ref，统一按 aria-label 从表单里取控件 */
+function focusControl(form: HTMLFormElement, label: string): void {
+  form.querySelector<HTMLElement>(`[aria-label="${label}"]`)?.focus()
+}
 
 /** 模型下拉里代表「手动输入」的哨兵值（不会发给主进程） */
 const CUSTOM_MODEL = '__custom__'
@@ -90,6 +96,8 @@ export function RuntimeDialog({
   const [modelsLoading, setModelsLoading] = useState(editing)
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [concurrentError, setConcurrentError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // 执行器清单来自宿主视图 `runtimes.executors`（注册表顺序）；表单不写死任何执行器名。
@@ -207,12 +215,33 @@ export function RuntimeDialog({
     setReasoningEffort('')
   }
 
-  const submit = async (ev: React.FormEvent): Promise<void> => {
+  /** 按钮禁用必须伴随可见原因：解释了才知道要先去勾确认 */
+  const dangerHint =
+    permissionMode === 'danger-full-access' && !dangerAck
+      ? '先勾选上面的「我明白风险，仍要选完全访问」，才能保存。'
+      : null
+
+  const submit = async (ev: React.FormEvent<HTMLFormElement>): Promise<void> => {
     ev.preventDefault()
-    setSaving(true)
     setError(null)
+    setNameError(null)
+    setConcurrentError(null)
+
+    // 必填与数值校验放在前端：空名不再交给内核 reject，非法并发也不再被悄悄改成 1
+    if (name.trim() === '') {
+      setNameError('名称必填')
+      focusControl(ev.currentTarget, '运行时名称')
+      return
+    }
+    const concurrent = Number(maxConcurrent.trim())
+    if (!Number.isInteger(concurrent) || concurrent < 1) {
+      setConcurrentError('并发上限必须是 ≥1 的整数')
+      focusControl(ev.currentTarget, '运行时并发上限')
+      return
+    }
+
+    setSaving(true)
     try {
-      const concurrent = Math.floor(Number(maxConcurrent))
       const input: RuntimeInput = {
         name: name.trim(),
         command: command.trim(),
@@ -222,7 +251,7 @@ export function RuntimeDialog({
         model: modelValue === '' ? null : modelValue,
         reasoningEffort: reasoningEffort === '' ? null : reasoningEffort,
         workdir: workdir.trim() === '' ? null : workdir.trim(),
-        maxConcurrent: Number.isFinite(concurrent) && concurrent >= 1 ? concurrent : 1,
+        maxConcurrent: concurrent,
         enabled,
       }
       // 清单加载失败时没有可选执行器：不写空串 key（IPC 会把空串当成未注册的 key 拒绝）
@@ -240,10 +269,20 @@ export function RuntimeDialog({
     <Dialog title={editing ? '编辑运行时' : '新建运行时'} onClose={onCancel}>
       <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="名称">
-            <Input aria-label="运行时名称" value={name} onChange={(e) => setName(e.target.value)} />
+          <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
+            <Input
+              aria-label="运行时名称"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                setNameError(null)
+              }}
+            />
           </Field>
-          <Field label="执行器">
+          <Field
+            label="执行器"
+            error={executorsError === null ? null : `执行器加载失败：${executorsError}`}
+          >
             <Select
               ariaLabel="运行时执行器"
               value={executorKey}
@@ -252,9 +291,6 @@ export function RuntimeDialog({
               placeholder={executorsLoading ? '正在读取执行器…' : '无可用执行器'}
               options={executors.map((item) => ({ value: item.key, label: item.label }))}
             />
-            {executorsError && (
-              <span className="text-body text-red-300">执行器加载失败：{executorsError}</span>
-            )}
           </Field>
           <Field label="命令">
             <Input
@@ -272,7 +308,7 @@ export function RuntimeDialog({
               onChange={(e) => setProfile(e.target.value)}
             />
           </Field>
-          <Field label="参数模板" className="col-span-2">
+          <Field label="参数模板" className="col-span-2" hint={ARGS_TEMPLATE_HINT}>
             <textarea
               aria-label="运行时参数模板"
               className={textareaCls}
@@ -280,18 +316,20 @@ export function RuntimeDialog({
               value={argsTemplate}
               onChange={(e) => setArgsTemplate(e.target.value)}
             />
-            <span className="text-meta text-ink-faint">{ARGS_TEMPLATE_HINT}</span>
           </Field>
-          <Field label="并发上限">
+          <Field label="并发上限" hint="同一运行时同时执行的任务数，≥1" error={concurrentError}>
             <Input
               aria-label="运行时并发上限"
               type="number"
               min={1}
               value={maxConcurrent}
-              onChange={(e) => setMaxConcurrent(e.target.value)}
+              onChange={(e) => {
+                setMaxConcurrent(e.target.value)
+                setConcurrentError(null)
+              }}
             />
           </Field>
-          <Field label="权限模式">
+          <Field label="权限模式" hint={PERMISSION_HINT}>
             <Select
               ariaLabel="运行时权限模式"
               value={permissionMode}
@@ -302,9 +340,11 @@ export function RuntimeDialog({
               }}
               options={PERMISSION_OPTIONS}
             />
-            <span className="text-meta text-ink-faint">{PERMISSION_HINT}</span>
           </Field>
-          <Field label="工作目录">
+          <Field
+            label="工作目录"
+            hint="留空 = 默认目录（改默认值设 WORKBENCH_WORKDIR，缺省 ~/.workbench）"
+          >
             <Input
               aria-label="运行时工作目录"
               className="font-mono"
@@ -312,11 +352,12 @@ export function RuntimeDialog({
               placeholder={defaultWorkdir === '' ? '留空用默认目录' : defaultWorkdir}
               onChange={(e) => setWorkdir(e.target.value)}
             />
-            <span className="text-meta text-ink-faint">
-              留空 = 默认目录（改默认值设 WORKBENCH_WORKDIR，缺省 ~/.workbench）
-            </span>
           </Field>
-          <Field label="模型">
+          <Field
+            label="模型"
+            hint={modelsLoading ? '读取模型中…' : undefined}
+            error={modelsError === null ? null : `模型加载失败：${modelsError}（可手填）`}
+          >
             <Select
               ariaLabel="运行时模型"
               value={modelChoice}
@@ -325,10 +366,6 @@ export function RuntimeDialog({
               placeholder="默认"
               options={modelOptions}
             />
-            {modelsLoading && <span className="text-meta text-ink-faint">读取模型中…</span>}
-            {modelsError && (
-              <span className="text-body text-red-300">模型加载失败：{modelsError}（可手填）</span>
-            )}
           </Field>
           <Field label="推理强度">
             <Select
@@ -352,8 +389,8 @@ export function RuntimeDialog({
         </div>
 
         {permissionMode === 'danger-full-access' && (
-          <div className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2">
-            <p className="text-meta text-red-200">{DANGER_NOTICE}</p>
+          <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2">
+            <p className="text-meta text-danger">{DANGER_NOTICE}</p>
             <label className="mt-1.5 flex items-center gap-2 text-meta text-ink-dim">
               <input
                 type="checkbox"
@@ -383,24 +420,23 @@ export function RuntimeDialog({
           </div>
         )}
 
-        {error && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-            {error}
-          </p>
-        )}
+        <FormError message={error} onDismiss={() => setError(null)} />
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-            取消
-          </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            disabled={saving || (permissionMode === 'danger-full-access' && !dangerAck)}
-          >
-            {editing ? '保存' : '添加'}
-          </Button>
+        <div className="flex flex-col gap-2">
+          {dangerHint !== null && <p className="text-meta text-ink-faint">{dangerHint}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+              取消
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={saving || (permissionMode === 'danger-full-access' && !dangerAck)}
+            >
+              {editing ? '保存' : '添加'}
+            </Button>
+          </div>
         </div>
       </form>
     </Dialog>

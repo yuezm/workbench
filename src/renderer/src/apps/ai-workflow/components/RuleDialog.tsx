@@ -14,6 +14,7 @@ import {
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
+import { FormError } from '../../../components/ui/form-error'
 import { Input, fieldCls } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
@@ -41,6 +42,21 @@ const splitList = (text: string): string[] =>
     .map((item) => item.trim())
     .filter((item) => item !== '')
 
+/** 前端形状校验能定位的字段 */
+type RuleField = 'name' | 'workflow' | 'cron' | 'parallel'
+
+/** 字段 → 控件的 aria-label：下拉没转发 ref，统一按 aria-label 聚焦 */
+const FIELD_CONTROL: Record<RuleField, string> = {
+  name: '规则名称',
+  workflow: '规则目标工作流',
+  cron: 'cron 表达式',
+  parallel: '并行数',
+}
+
+function focusControl(form: HTMLFormElement, label: string): void {
+  form.querySelector<HTMLElement>(`[aria-label="${label}"]`)?.focus()
+}
+
 function RuleIcon({ className }: { className?: string }): ReactElement {
   return (
     <svg
@@ -64,8 +80,9 @@ function RuleIcon({ className }: { className?: string }): ReactElement {
  * 规则表单弹窗：条件（事件 / cron）、目标工作流与阶段、任务标题来源与标签、
  * 追加提示词、并行/合并/线程字段、启用开关。
  *
- * 前端只做三处形状提示（空名 / 未选工作流 / cron 非 5 段），其余语义（工作流存在、
- * cron 合法性、字段上限）交给内核 reject，文案原样展示。
+ * 前端做四类形状校验（空名 / 未选工作流 / cron 非 5 段 / 并行数越界）：错误挂在对应
+ * 字段上（`role="alert"`）并把焦点移过去；其余语义（工作流存在、cron 合法性、字段上限）
+ * 交给内核 reject，文案原样展示在弹窗底部，弹窗不关、输入不丢。
  */
 export function RuleDialog({
   initial,
@@ -105,6 +122,7 @@ export function RuleDialog({
   )
   const [enabled, setEnabled] = useState(initial.enabled)
   const [saving, setSaving] = useState(false)
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<RuleField, string>>>({})
   const [error, setError] = useState<string | null>(null)
 
   const workflow = workflows.find((item) => item.id === workflowId)
@@ -114,42 +132,54 @@ export function RuleDialog({
   ]
   const noWorkflow = workflows.length === 0
 
+  /** 按钮禁用必须伴随可见原因（点不动又不说为什么，等于静默失败） */
+  const disabledHint = noWorkflow ? '没有可选工作流：先到「工作流」新建一个再回来。' : null
+
+  /** 清掉某个字段的错误：用户一改就不再挂着旧红字 */
+  const clearError = (field: RuleField): void => {
+    setFieldErrors((prev) => ({ ...prev, [field]: undefined }))
+  }
+
   /** 换工作流时清掉不属于新工作流的阶段，避免提交悬空 id */
   const changeWorkflow = (nextId: string): void => {
     setWorkflowId(nextId)
+    clearError('workflow')
     const next = workflows.find((item) => item.id === nextId)
     if (!next?.stages.some((stage) => stage.id === stageId)) setStageId('')
   }
 
-  /** 形状校验（三处）：空名 / 未选工作流 / cron 非 5 段；其余交给内核 */
-  const checkFront = (): string | null => {
-    if (name.trim() === '') return '规则名称不能为空'
-    if (workflowId === '') return '请选择目标工作流'
+  /** 形状校验：返回第一个出错的字段与文案（错误要挂在字段上，不丢到底部一句） */
+  const validate = (): { field: RuleField; message: string } | null => {
+    if (name.trim() === '') return { field: 'name', message: '规则名称不能为空' }
+    if (workflowId === '') return { field: 'workflow', message: '请选择目标工作流' }
     if (kind === 'cron' && cron.trim().split(/\s+/).filter(Boolean).length !== 5) {
-      return 'cron 需 5 段'
+      return { field: 'cron', message: 'cron 需 5 段' }
+    }
+    const parallelText = parallel.trim()
+    if (parallelText !== '') {
+      const value = Number(parallelText)
+      // 非法值给文案，不静默回落成默认 1：用户以为填了 0 就是 0
+      if (!Number.isInteger(value) || value < 1 || value > RULE_LIMITS.parallel) {
+        return { field: 'parallel', message: `并行数需为 1–${RULE_LIMITS.parallel} 的整数` }
+      }
     }
     return null
   }
 
-  const submit = async (ev: React.FormEvent): Promise<void> => {
+  const submit = async (ev: React.FormEvent<HTMLFormElement>): Promise<void> => {
     ev.preventDefault()
-    const frontError = checkFront()
-    if (frontError !== null) {
-      setError(frontError)
+    setError(null)
+
+    const problem = validate()
+    if (problem !== null) {
+      setFieldErrors({ [problem.field]: problem.message })
+      focusControl(ev.currentTarget, FIELD_CONTROL[problem.field])
       return
     }
+    setFieldErrors({})
 
     const parallelText = parallel.trim()
     const parallelValue = parallelText === '' ? undefined : Number(parallelText)
-    if (
-      parallelValue !== undefined &&
-      (!Number.isInteger(parallelValue) ||
-        parallelValue < 1 ||
-        parallelValue > RULE_LIMITS.parallel)
-    ) {
-      setError(`并行数需为 1–${RULE_LIMITS.parallel} 的整数`)
-      return
-    }
 
     const when: RuleEventWhen | RuleCronWhen =
       kind === 'cron' ? { cron: cron.trim() } : { source: source.trim(), types: splitList(types) }
@@ -199,19 +229,31 @@ export function RuleDialog({
         )}
 
         <div className="flex flex-wrap items-end gap-3">
-          <Field label="规则名称" className="w-56">
+          <Field
+            label="规则名称"
+            required
+            hint={`最多 ${RULE_LIMITS.name} 字，保存时去掉首尾空格`}
+            error={fieldErrors.name ?? null}
+            className="w-56"
+          >
             <Input
               aria-label="规则名称"
               maxLength={RULE_LIMITS.name}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value)
+                clearError('name')
+              }}
             />
           </Field>
           <Field label="触发方式">
             <Select
               ariaLabel="规则触发方式"
               value={kind}
-              onChange={(value) => setKind(value as 'event' | 'cron')}
+              onChange={(value) => {
+                setKind(value as 'event' | 'cron')
+                clearError('cron')
+              }}
               options={[
                 { value: 'event', label: '事件' },
                 { value: 'cron', label: '定时' },
@@ -241,23 +283,23 @@ export function RuleDialog({
             </Field>
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5">
-            <Field label="cron">
-              <Input
-                aria-label="cron 表达式"
-                className="font-mono"
-                maxLength={RULE_LIMITS.cron}
-                placeholder="0 9 * * *"
-                value={cron}
-                onChange={(e) => setCron(e.target.value)}
-              />
-            </Field>
-            <span className="text-meta text-ink-faint">分 时 日 月 周</span>
-          </div>
+          <Field label="cron" required hint="分 时 日 月 周" error={fieldErrors.cron ?? null}>
+            <Input
+              aria-label="cron 表达式"
+              className="font-mono"
+              maxLength={RULE_LIMITS.cron}
+              placeholder="0 9 * * *"
+              value={cron}
+              onChange={(e) => {
+                setCron(e.target.value)
+                clearError('cron')
+              }}
+            />
+          </Field>
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="目标工作流">
+          <Field label="目标工作流" required error={fieldErrors.workflow ?? null}>
             <Select
               ariaLabel="规则目标工作流"
               value={workflowId}
@@ -324,13 +366,20 @@ export function RuleDialog({
         </Field>
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Field label="并行数">
+          <Field
+            label="并行数"
+            hint={`留空 = 1，最大 ${RULE_LIMITS.parallel}`}
+            error={fieldErrors.parallel ?? null}
+          >
             <Input
               aria-label="并行数"
               type="number"
               placeholder="默认 1"
               value={parallel}
-              onChange={(e) => setParallel(e.target.value)}
+              onChange={(e) => {
+                setParallel(e.target.value)
+                clearError('parallel')
+              }}
             />
           </Field>
           <Field label="合并策略">
@@ -380,19 +429,18 @@ export function RuleDialog({
           <span>启用</span>
         </label>
 
-        {error && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-            {error}
-          </p>
-        )}
+        <FormError message={error} onDismiss={() => setError(null)} />
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-            取消
-          </Button>
-          <Button type="submit" variant="primary" size="sm" disabled={saving || noWorkflow}>
-            保存
-          </Button>
+        <div className="flex flex-col gap-2">
+          {disabledHint !== null && <p className="text-meta text-ink-faint">{disabledHint}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+              取消
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled={saving || noWorkflow}>
+              保存
+            </Button>
+          </div>
         </div>
       </form>
     </Dialog>

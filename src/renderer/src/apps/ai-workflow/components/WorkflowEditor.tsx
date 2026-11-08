@@ -10,10 +10,13 @@ import type {
 } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Field } from '../../../components/ui/field'
+import { FormError } from '../../../components/ui/form-error'
 import { Input, fieldCls } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 import { useKernelView } from '../../../shell/useKernelView'
+
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 interface WorkflowEditorProps {
   workflow: WorkflowWithStages | null
@@ -105,6 +108,57 @@ function pruneStage(stage: StageInput): StageInput {
     instructions: stage.instructions,
     gate: null,
   }
+}
+
+/** 下标型流转目标是否越界：越界说明它指向的阶段已被删掉 */
+function outOfRange(index: number | null | undefined, count: number): boolean {
+  return index != null && (index < 0 || index >= count)
+}
+
+/** 阶段上是否挂着已失效的流转目标（完成 / 出错 / 闸门两侧任一处） */
+function hasDanglingTarget(stage: StageInput, count: number): boolean {
+  return (
+    outOfRange(stage.onCompleteIndex, count) ||
+    outOfRange(stage.onRejectIndex, count) ||
+    outOfRange(stage.gate?.onPassIndex, count) ||
+    outOfRange(stage.gate?.onFailIndex, count)
+  )
+}
+
+/**
+ * 草稿级校验：只拦「必填没填」与「引用已失效」——这两类能就地指出位置，用户改一下就好。
+ * 语义判定（自指、闸门形态、交接目标是否存在）仍归内核，这里不重写一遍规则。
+ */
+interface DraftErrors {
+  /** 工作流名称 */
+  name?: string
+  /** 表格级：没有阶段 / 某阶段的流转目标悬空 */
+  form?: string
+  /** 出错字段所属阶段的下标：校验失败时自动展开它 */
+  stageIndex?: number
+  /** 该阶段的名称 */
+  stageName?: string
+}
+
+function validateDraft(draft: WorkflowInput): DraftErrors {
+  const errors: DraftErrors = {}
+  if (draft.name.trim() === '') errors.name = '工作流名称必填'
+  const count = draft.stages.length
+  if (count === 0) return { ...errors, form: '工作流至少要有一个阶段' }
+
+  const unnamed = draft.stages.findIndex((stage) => stage.name.trim() === '')
+  if (unnamed >= 0) return { ...errors, stageIndex: unnamed, stageName: '阶段名称必填' }
+
+  const dangling = draft.stages.findIndex((stage) => hasDanglingTarget(stage, count))
+  if (dangling >= 0) {
+    const label = draft.stages[dangling].name.trim() || `阶段${dangling + 1}`
+    return {
+      ...errors,
+      stageIndex: dangling,
+      form: `「${label}」的流转目标已不在阶段列表里，请重新选择`,
+    }
+  }
+  return errors
 }
 
 function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
@@ -206,6 +260,10 @@ export function WorkflowEditor({
 }: WorkflowEditorProps): ReactElement {
   const [draft, setDraft] = useState<WorkflowInput>(() => initial ?? toDraft(workflow))
   const [saving, setSaving] = useState(false)
+  /** 校验结果：字段级错误与「至少一个阶段 / 目标悬空」这类表格级文案 */
+  const [errors, setErrors] = useState<DraftErrors>({})
+  /** 保存被宿主拒绝时的原因：就展示在按钮上方，草稿保持原样 */
+  const [submitError, setSubmitError] = useState<string | null>(null)
   /** 右侧展开的阶段下标；删除 / 新增后由对应 handler 修正 */
   const [selected, setSelected] = useState(0)
   // 阶段绑定的智能体清单：自己订阅视图，不再由页面传入
@@ -226,8 +284,33 @@ export function WorkflowEditor({
     setSelected(draft.stages.length)
   }
 
+  /**
+   * 删除一个阶段：后面的下标整体前移，指向被删阶段的目标同时清空。
+   * 不做这层重映射，界面上看不出任何异常，但流转会静默指到别的阶段。
+   */
   const removeStage = (i: number): void =>
-    setDraft((d) => ({ ...d, stages: d.stages.filter((_, k) => k !== i) }))
+    setDraft((d) => {
+      const remap = (idx: number | null | undefined): number | null => {
+        if (idx == null) return null
+        if (idx === i) return null
+        return idx > i ? idx - 1 : idx
+      }
+      const stages = d.stages
+        .filter((_, k) => k !== i)
+        .map((s) => ({
+          ...s,
+          onCompleteIndex: remap(s.onCompleteIndex),
+          onRejectIndex: remap(s.onRejectIndex),
+          gate: s.gate
+            ? {
+                ...s.gate,
+                onPassIndex: remap(s.gate.onPassIndex),
+                onFailIndex: remap(s.gate.onFailIndex),
+              }
+            : null,
+        }))
+      return { ...d, stages }
+    })
 
   /** 删除当前选中阶段：删完把选中落到相邻的一个（没有阶段时归零） */
   const removeSelected = (): void => {
@@ -270,21 +353,54 @@ export function WorkflowEditor({
     setSelected((current) => (current === i ? j : current === j ? i : current))
   }
 
+  /**
+   * 保存：先就地校验（必填 / 悬空目标），再把 trim 过的草稿交给父级。
+   *
+   * 父级可能 rethrow（宿主拒收、桥接断开）：必须在这里 catch，否则 async 事件处理器
+   * 只会产生一个无人接的拒绝 —— 界面上就是「点了保存什么都没发生」。
+   * 失败时草稿原样留着，方便改完再提交。
+   */
   const save = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
+    setSubmitError(null)
+    const input: WorkflowInput = {
+      ...draft,
+      name: draft.name.trim(),
+      stages: draft.stages.map((stage) => ({ ...pruneStage(stage), name: stage.name.trim() })),
+    }
+    const next = validateDraft(input)
+    setErrors(next)
+    if (Object.keys(next).length > 0) {
+      // 出错的阶段要顺手展开，不然提示藏在看不见的右侧面板里
+      if (next.stageIndex !== undefined) setSelected(next.stageIndex)
+      return
+    }
+
     setSaving(true)
     try {
-      await onSave({ ...draft, stages: draft.stages.map(pruneStage) })
+      await onSave(input)
+    } catch (e) {
+      setSubmitError(`保存失败：${errMsg(e)}`)
     } finally {
       setSaving(false)
     }
   }
+
+  /** 改了哪个字段就撤掉对应的红字：不必等到下一次提交 */
+  const clearError = (key: keyof DraftErrors): void =>
+    setErrors((prev) => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
 
   const targetOptions = draft.stages.map((s, i) => ({ i, name: s.name || `阶段${i + 1}` }))
   const index = Math.min(selected, draft.stages.length - 1)
   const stage = draft.stages[index]
   /** 当前展开阶段的序号文案（aria-label 用，与阶段列表一致是 1 基） */
   const n = index + 1
+  /** 该阶段的字段级错误只在它被展开时展示（错误面板与字段同屏才有意义） */
+  const stageErrors = errors.stageIndex === index ? errors : null
 
   return (
     <form className="flex flex-col gap-5" onSubmit={save}>
@@ -296,11 +412,14 @@ export function WorkflowEditor({
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
-        <Field label="名称" className="w-56">
+        <Field label="名称" className="w-56" required error={errors.name}>
           <Input
             aria-label="工作流名称"
             value={draft.name}
-            onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+            onChange={(e) => {
+              clearError('name')
+              setDraft((d) => ({ ...d, name: e.target.value }))
+            }}
           />
         </Field>
         <Field label="描述" className="min-w-0 flex-1">
@@ -394,18 +513,26 @@ export function WorkflowEditor({
               <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-badge font-medium text-focus-soft">
                 {n}
               </span>
-              <Field label="名称" className="min-w-0 flex-1">
+              <Field
+                label="名称"
+                className="min-w-0 flex-1"
+                required
+                error={stageErrors?.stageName}
+              >
                 <Input
                   aria-label={`阶段${n}名称`}
                   value={stage.name}
-                  onChange={(e) => patchStage(index, { name: e.target.value })}
+                  onChange={(e) => {
+                    clearError('stageName')
+                    patchStage(index, { name: e.target.value })
+                  }}
                 />
               </Field>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="text-red-400 hover:text-red-300"
+                className="text-danger hover:bg-danger/10 hover:text-danger"
                 onClick={removeSelected}
               >
                 删除
@@ -667,9 +794,17 @@ export function WorkflowEditor({
         )}
       </div>
 
+      {/* 悬空目标属于某个阶段：错误条跟着它所在的面板走，而不是只剩页脚一句 */}
+      {stageErrors?.form !== undefined && <FormError message={stageErrors.form} />}
+      {/* 没有阶段 / 保存被拒：表格级原因贴在提交按钮上方（阶段面板没展示时兜底） */}
+      {errors.form !== undefined && stageErrors?.form === undefined && (
+        <FormError message={errors.form} />
+      )}
+      <FormError message={submitError} />
+
       <div className="flex items-center gap-2 border-t border-line pt-4">
         <Button type="submit" variant="primary" size="sm" disabled={saving} className="ml-auto">
-          保存
+          {saving ? '保存中…' : '保存'}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           取消

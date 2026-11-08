@@ -8,6 +8,7 @@ import type {
 } from '../../../../../protocol/entities'
 import type { TaskComment } from '../../../../../protocol/task-comment'
 import { Button } from '../../../components/ui/button'
+import { FormError } from '../../../components/ui/form-error'
 import { cn } from '../../../lib/cn'
 import { useKernelViewState } from '../../../shell/useKernelView'
 
@@ -35,7 +36,7 @@ const STATUS_TONE: Record<RunStatus, string> = {
   running: 'text-focus-soft',
   waiting: 'text-long',
   succeeded: 'text-short',
-  failed: 'text-red-400',
+  failed: 'text-danger',
   cancelled: 'text-ink-faint',
 }
 
@@ -81,7 +82,7 @@ function RunEventLine({ event }: { event: RunEvent }): ReactElement | null {
         <p
           className={cn(
             'rounded-md bg-surface-2 px-2 py-1 font-mono text-body text-ink-dim',
-            event.isError === true && 'text-red-300',
+            event.isError === true && 'text-danger',
           )}
         >
           {['工具结果：' + (event.tool ?? '未知工具'), truncate(event.output ?? '', TOOL_TEXT_MAX)]
@@ -143,11 +144,7 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
   const events = state.data ?? []
 
   if (state.error !== null) {
-    return (
-      <p className="mt-2 rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-body text-red-300">
-        事件流加载失败：{state.error}
-      </p>
-    )
+    return <FormError message={`事件流加载失败：${state.error}`} className="mt-2" />
   }
   if (events.length > 0) {
     const body = events.filter((event) => !isProcessEvent(event))
@@ -240,7 +237,7 @@ function RunApprovals({ runId }: { runId: string }): ReactElement | null {
       {approvals.map((item) => (
         <li
           key={item.id}
-          className="rounded-md border border-amber-300/20 bg-amber-300/[0.06] px-2 py-1 text-body text-amber-100/90"
+          className="rounded-md border border-warn/20 bg-warn/[0.06] px-2 py-1 text-body text-warn"
         >
           <span className="font-medium">提权 · {item.tool === '' ? '未知工具' : item.tool}</span>
           <span className="ml-1.5 text-ink-faint">
@@ -289,16 +286,12 @@ function RunBlock({
         )}
         {run.exitCode !== null && <span className="tabular-nums">退出码 {run.exitCode}</span>}
         {run.errorCode !== null && (
-          <span className="text-red-300">{ERROR_CODE_LABEL[run.errorCode]}</span>
+          <span className="text-danger">{ERROR_CODE_LABEL[run.errorCode]}</span>
         )}
         {run.usage !== null && <UsageLine usage={run.usage} />}
       </div>
 
-      {run.error !== null && (
-        <p className="mt-2 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-body text-red-300">
-          {run.error}
-        </p>
-      )}
+      <FormError message={run.error} className="mt-2" />
 
       <RunApprovals runId={run.id} />
 

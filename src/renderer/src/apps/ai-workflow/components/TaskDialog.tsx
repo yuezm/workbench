@@ -1,8 +1,10 @@
-import { useState, type ReactElement } from 'react'
+import { useRef, useState, type ReactElement } from 'react'
 import type { Project, TaskInput, WorkflowWithStages } from '../../../../../protocol/entities'
+import { COMMAND_LIMITS } from '../../../../../protocol/validate'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
+import { FormError } from '../../../components/ui/form-error'
 import { Input, fieldCls } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
@@ -22,7 +24,16 @@ interface TaskDialogProps {
 
 const textareaCls = cn(fieldCls, 'min-h-24 resize-y py-2')
 
-/** 新建任务弹窗：可指定从哪个阶段开始（默认首阶段） */
+const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+/**
+ * 新建任务弹窗：可指定从哪个阶段开始（默认首阶段）。
+ *
+ * 校验与反馈（2026-11-08 修）：标题是内核的必填项，所以
+ * 1. 标题字段带必填标记（红色星号 + 读屏「必填」）；
+ * 2. 空标题点「创建」不再静默 return —— 就地给 `role="alert"` 的文案并把焦点移回标题框；
+ * 3. 命令被内核拒绝时把文案留在弹窗里（父级只负责页面级提示），弹窗不关、输入不丢。
+ */
 export function TaskDialog({
   workflow,
   project,
@@ -34,19 +45,33 @@ export function TaskDialog({
   const [description, setDescription] = useState('')
   const [stageId, setStageId] = useState(workflow.stages[0]?.id ?? '')
   const [saving, setSaving] = useState(false)
+  /** 标题字段级错误（必填） */
+  const [titleError, setTitleError] = useState<string | null>(null)
+  /** 表单级错误（命令被拒 / 宿主探测失败） */
+  const [formError, setFormError] = useState<string | null>(null)
+  const titleRef = useRef<HTMLInputElement>(null)
 
   const submit = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
-    if (!title.trim()) return
+    const trimmed = title.trim()
+    if (trimmed === '') {
+      setTitleError('任务标题必填')
+      titleRef.current?.focus()
+      return
+    }
+    setTitleError(null)
+    setFormError(null)
     setSaving(true)
     try {
       await onSave({
-        title,
-        description,
+        title: trimmed,
+        description: description.trim(),
         workflowId: workflow.id,
         stageId,
         projectId: project?.id ?? null,
       })
+    } catch (e) {
+      setFormError(errMsg(e))
     } finally {
       setSaving(false)
     }
@@ -54,7 +79,7 @@ export function TaskDialog({
 
   return (
     <Dialog title="新建任务" onClose={onCancel}>
-      <form className="flex flex-col gap-3" onSubmit={submit}>
+      <form className="flex flex-col gap-3" noValidate onSubmit={submit}>
         <Field label="所属项目">
           {/* 只读行：项目在侧栏顶层选好了，弹窗里再放开选择只会让「建在哪个目录」变得含糊 */}
           <div
@@ -67,18 +92,27 @@ export function TaskDialog({
             </span>
           </div>
         </Field>
-        <Field label="任务标题">
+        <Field label="任务标题" required error={titleError}>
           <Input
+            ref={titleRef}
             aria-label="任务标题"
+            aria-invalid={titleError !== null}
+            // 上限与协议一致（超长会被宿主直接拒），在输入阶段就挡住，别让用户白点一次
+            maxLength={COMMAND_LIMITS.title}
             placeholder="起个名字"
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value)
+              // 一改就撤掉错误：错误跟着输入走，不给用户留一条过期红字
+              if (titleError !== null) setTitleError(null)
+            }}
           />
         </Field>
         <Field label="任务描述">
           <textarea
             aria-label="任务描述"
             className={textareaCls}
+            maxLength={COMMAND_LIMITS.description}
             placeholder="背景、验收标准"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -93,6 +127,8 @@ export function TaskDialog({
           />
         </Field>
         <p className="text-meta text-ink-faint">「交给智能体」的阶段会立即执行。</p>
+
+        <FormError message={formError} />
 
         <div className="mt-2 flex items-center justify-end gap-2">
           <Button type="button" variant="ghost" size="sm" onClick={onCancel}>

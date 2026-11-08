@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactElement } from 'react'
+import type { ComponentPropsWithRef, ReactElement } from 'react'
 import { cn } from '../../lib/cn'
 
 /**
@@ -11,7 +11,8 @@ export const fieldCls =
 /** 单行输入框样式 */
 export const inputCls = `${fieldCls} h-9`
 
-export type InputProps = InputHTMLAttributes<HTMLInputElement>
+/** 带 `ref` 的输入属性：校验失败要把焦点移回出错字段，所以允许外部持有 ref */
+export type InputProps = ComponentPropsWithRef<'input'>
 
 /** 文本输入框：统一边框、圆角、留白与焦点环 */
 export function Input({ className, ...props }: InputProps): ReactElement {

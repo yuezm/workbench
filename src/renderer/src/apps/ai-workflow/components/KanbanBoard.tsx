@@ -70,6 +70,11 @@ export function KanbanBoard({
 
   // 「执行中」由内核判定（queued/running/waiting 的任务 id 集合），看板不自己现算
   const executingIds = new Set(useKernelView('tasks.executing') ?? [])
+  /**
+   * 拖拽途中任务变成「执行中」（run 开跑、视图刷新）时不再给落点：
+   * 内核会以「执行中的阶段不能拖动 / 不能完成」拒绝，让用户拖成功一次再吃错误条没有意义。
+   */
+  const draggingExecuting = dragging !== null && executingIds.has(dragging.id)
   // 任务树线索只按当前看板的任务列表查父任务标题，不另发视图查询
   const titleById = new Map(boardTasks.map((task) => [task.id, task.title]))
   // 子任务进度（M8）：同工作流的子任务也在 tasks 里，直接按 parentTaskId 汇总
@@ -88,7 +93,8 @@ export function KanbanBoard({
   }
 
   const allowDrop = (target: string, event: DragEvent<HTMLElement>): void => {
-    if (!dragging) return
+    // 执行中的任务不接落点：既不高亮，也不 preventDefault（不 preventDefault 就不会 drop）
+    if (dragging === null || draggingExecuting) return
     event.preventDefault()
     setOverTarget(target)
   }
@@ -97,7 +103,7 @@ export function KanbanBoard({
     event.preventDefault()
     const task = dragging
     stopDrag()
-    if (!task || task.currentStageId === stageId) return
+    if (!task || executingIds.has(task.id) || task.currentStageId === stageId) return
     onMoveToStage(task.id, stageId)
   }
 
@@ -105,7 +111,8 @@ export function KanbanBoard({
     event.preventDefault()
     const task = dragging
     stopDrag()
-    if (task) onCompleteTask(task.id)
+    // 执行中的任务归档必被内核拒绝（task.complete）：落点侧再兜一层
+    if (task && !executingIds.has(task.id)) onCompleteTask(task.id)
   }
 
   return (
@@ -207,6 +214,8 @@ export function KanbanBoard({
               {completedCount}
             </span>
           </div>
+          {/* 先把规则写出来：执行中的任务拖进来必被内核拒绝，别让用户点了才吃错误条 */}
+          <p className="px-1.5 text-meta text-ink-faint">执行中的任务不能归档</p>
           <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-body text-ink-faint">
             拖到这里归档
           </p>

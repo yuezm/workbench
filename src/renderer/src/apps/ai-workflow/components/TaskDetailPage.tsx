@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactElement } from 'react'
 import type { Task, WorkflowWithStages } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
+import { FormError } from '../../../components/ui/form-error'
 import { badgeCls } from '../../../components/ui/panel'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelViewState } from '../../../shell/useKernelView'
@@ -46,7 +47,8 @@ export function TaskDetailPage({
   const comments = commentsState.data ?? []
   const children: Task[] = childrenState.data ?? []
   /** 本任务的 open 卡：正文与选项就在页面里，顶部通知条只负责把人送过来 */
-  const openCards = useKernelViewState('cards.open').data ?? []
+  const cardsState = useKernelViewState('cards.open')
+  const openCards = cardsState.data ?? []
   const cards = openCards.filter((card) => card.taskId === taskId)
   const threadId = task?.threadId ?? null
   /** 反馈输入（提交成功后清空；失败保留待重试） */
@@ -115,12 +117,7 @@ export function TaskDetailPage({
 
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
         {state.error !== null ? (
-          <p
-            role="alert"
-            className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
-          >
-            {state.error}
-          </p>
+          <FormError message={state.error} className="rounded-xl" />
         ) : state.data === undefined ? (
           <p className="text-meta text-ink-faint">正在读取任务…</p>
         ) : task === null ? (
@@ -132,8 +129,12 @@ export function TaskDetailPage({
             <TaskInfoPanel task={task} stageName={stageName} />
 
             {/* 待审批：智能体在这一任务上等你回答（正文与选项都在这里，选完即续接） */}
+            {/* 卡片视图读失败时卡片会「凭空少一块」，run 却停在 waiting：把原因就地写出来 */}
+            <FormError message={cardsState.error} />
             <ApprovalCards cards={cards} />
 
+            {/* 子任务读失败同理：空列表和「读不到」是两件事 */}
+            <FormError message={childrenState.error} />
             {children.length > 0 && (
               <section aria-label="子任务" className="flex flex-col gap-2">
                 <h3 className="flex items-center gap-2 text-title font-medium text-ink">
@@ -179,20 +180,10 @@ export function TaskDetailPage({
                 <span className={badgeCls}>反馈 {comments.length}</span>
               </h3>
               {runsState.error !== null && (
-                <p
-                  role="alert"
-                  className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
-                >
-                  {runsState.error}
-                </p>
+                <FormError message={runsState.error} className="rounded-xl" />
               )}
               {commentsState.error !== null && (
-                <p
-                  role="alert"
-                  className="rounded-xl border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
-                >
-                  {commentsState.error}
-                </p>
+                <FormError message={commentsState.error} className="rounded-xl" />
               )}
               <TaskActivity runs={runs} comments={comments} stages={workflow?.stages ?? []} />
               <TaskCommentForm

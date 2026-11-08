@@ -3,6 +3,7 @@ import type { ConfigField, PluginKind } from '../../../../../protocol/manifest'
 import type { PluginStatus, PluginView } from '../../../../../protocol/plugins'
 import { Button } from '../../../components/ui/button'
 import { Field } from '../../../components/ui/field'
+import { FormError } from '../../../components/ui/form-error'
 import { Input } from '../../../components/ui/input'
 import { badgeCls, panelCls } from '../../../components/ui/panel'
 import { Select } from '../../../components/ui/select'
@@ -28,9 +29,9 @@ const STATUS_LABELS: Record<PluginStatus, string> = {
 const STATUS_TONES: Record<PluginStatus, string> = {
   ready: 'bg-short/15 text-short',
   disabled: 'bg-white/[0.07] text-ink-faint',
-  unauthorized: 'bg-amber-400/15 text-amber-300',
-  error: 'bg-red-400/15 text-red-300',
-  manifest_error: 'bg-red-400/15 text-red-300',
+  unauthorized: 'bg-warn/15 text-warn',
+  error: 'bg-danger/15 text-danger',
+  manifest_error: 'bg-danger/15 text-danger',
 }
 
 const KIND_LABELS: Record<PluginKind, string> = {
@@ -213,6 +214,8 @@ function PluginDetail({
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  /** 字段级校验（数字写法）：就地展示在对应输入框下方 */
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   const declared = plugin.declared
   const grantedSet = new Set(granted)
@@ -251,10 +254,26 @@ function PluginDetail({
 
   const setText = (key: string, value: string): void => {
     setConfig((current) => ({ ...current, text: { ...current.text, [key]: value } }))
+    // 改了就不再挂着旧的校验红字
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
   }
 
   const setFlag = (key: string, value: boolean): void => {
     setConfig((current) => ({ ...current, flags: { ...current.flags, [key]: value } }))
+  }
+
+  /**
+   * 数字字段的草稿校验：非空却不是数字就报错——不能静默跳过、把落库值退回缺省
+   * （用户看到自己填的数字「消失了」，却没有任何解释）。
+   */
+  function numberFieldError(raw: string): string | null {
+    const text = raw.trim()
+    if (text === '' || Number.isFinite(Number(text))) return null
+    return '必须是数字，留空用缺省值'
   }
 
   /** 按字段类型把草稿转成标量；空字符串不写入（保留 manifest 缺省值） */
@@ -274,6 +293,18 @@ function PluginDetail({
   }
 
   const save = (): void => {
+    // 先校验再提交：非法数字不落到内核，也不悄悄回落到缺省值
+    const invalid: Record<string, string> = {}
+    for (const field of plugin.configFields) {
+      if (field.type !== 'number') continue
+      const message = numberFieldError(config.text[field.key] ?? '')
+      if (message !== null) invalid[field.key] = message
+    }
+    setFieldErrors(invalid)
+    if (Object.keys(invalid).length > 0) {
+      setActionError(null)
+      return
+    }
     run(async () => {
       const hasSecrets = Object.keys(secrets).length > 0
       await getKernelStore().dispatch({
@@ -349,9 +380,18 @@ function PluginDetail({
       )
     }
     return (
-      <Field key={field.key} label={field.label} className="min-w-0">
+      <Field
+        key={field.key}
+        label={field.label}
+        className="min-w-0"
+        // 数字字段用文本输入：浏览器的 number 控件会把非法输入悄悄清成空串，
+        // 用户既看不到自己填了什么，也得不到「为什么没保存成功」的解释
+        hint={field.type === 'number' ? '只填数字；留空用缺省值' : undefined}
+        error={fieldErrors[field.key]}
+      >
         <Input
-          type={field.type === 'number' ? 'number' : 'text'}
+          type="text"
+          inputMode={field.type === 'number' ? 'numeric' : undefined}
           aria-label={name}
           value={config.text[field.key]}
           onChange={(e) => setText(field.key, e.target.value)}
@@ -383,11 +423,7 @@ function PluginDetail({
           <PluginSwitch plugin={plugin} disabled={busy} onToggle={toggleEnabled} />
         </div>
 
-        {plugin.error !== null && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-body text-red-300">
-            {plugin.error}
-          </p>
-        )}
+        <FormError message={plugin.error} />
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span className="text-meta text-ink-faint">声明能力</span>
@@ -413,17 +449,17 @@ function PluginDetail({
           )}
         </div>
 
+        {plugin.status === 'unauthorized' && (
+          <p className="text-meta text-ink-faint">未授权：勾选声明的能力并保存后才会启动。</p>
+        )}
+
         {plugin.configFields.length > 0 && (
           <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
             {plugin.configFields.map(renderControl)}
           </div>
         )}
 
-        {actionError !== null && (
-          <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-2.5 py-1.5 text-body text-red-300">
-            {actionError}
-          </p>
-        )}
+        <FormError message={actionError} />
 
         <div className="flex items-center gap-2">
           <p className="text-meta text-ink-faint">授权只是信任门；secret 不回显。</p>
@@ -436,7 +472,7 @@ function PluginDetail({
             className="ml-auto"
             onClick={save}
           >
-            保存
+            {busy ? '保存中…' : '保存'}
           </Button>
         </div>
       </section>
@@ -490,16 +526,9 @@ export function PluginsManager(): ReactElement {
 
   return (
     <div className="flex flex-col gap-3">
-      {error !== null && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-          {error}
-        </p>
-      )}
-      {toggleError !== null && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-          {toggleError}
-        </p>
-      )}
+      <FormError message={error} />
+      {/* 启停失败是写命令的结果：可关掉；读视图错误是持续状态，不给关闭入口 */}
+      <FormError message={toggleError} onDismiss={() => setToggleError(null)} />
 
       <p className="text-meta text-ink-faint">未授权的插件不会启动。</p>
 

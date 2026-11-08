@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import type { Agent, AgentInput, Runtime } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
+import { FormError } from '../../../components/ui/form-error'
 import { Panel, badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
@@ -9,8 +10,8 @@ import { AgentDialog, RUNTIME_HEALTH_LABEL, runtimeHealth, type RuntimeHealth } 
 
 /** 状态点配色：可用绿、不可用红、未检测灰 */
 const HEALTH_DOT: Record<RuntimeHealth, string> = {
-  ready: 'bg-emerald-400',
-  unavailable: 'bg-red-400',
+  ready: 'bg-short',
+  unavailable: 'bg-danger',
   unknown: 'bg-white/25',
 }
 
@@ -53,6 +54,8 @@ export function AgentManager(): ReactElement {
   const runtimes = runtimesState.data ?? []
   /** 写操作失败（读错误单独展示在动作错误之前） */
   const [actionError, setActionError] = useState<string | null>(null)
+  /** 正在删除的智能体 id：删除期间该行按钮禁用并说明原因，避免连点删两次 */
+  const [removingId, setRemovingId] = useState<string | null>(null)
   /** 非 null = 弹窗打开中 */
   const [dialog, setDialog] = useState<DialogState | null>(null)
 
@@ -75,10 +78,14 @@ export function AgentManager(): ReactElement {
   }
 
   const remove = async (id: string): Promise<void> => {
+    setRemovingId(id)
+    setActionError(null)
     try {
       await getKernelStore().dispatch({ type: 'agent.remove', commandId: '', id })
     } catch (e) {
       setActionError(errMsg(e))
+    } finally {
+      setRemovingId(null)
     }
   }
 
@@ -87,11 +94,11 @@ export function AgentManager(): ReactElement {
 
   return (
     <div className="flex flex-col gap-4">
-      {error && (
-        <p className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300">
-          {error}
-        </p>
-      )}
+      {/* 写命令失败可关掉；读视图失败是持续状态，不给关闭入口 */}
+      <FormError
+        message={error}
+        onDismiss={actionError === null ? undefined : () => setActionError(null)}
+      />
 
       {/* 已配置智能体 */}
       <Panel className="flex animate-rise flex-col gap-3 p-5">
@@ -169,12 +176,15 @@ export function AgentManager(): ReactElement {
                 >
                   编辑
                 </Button>
+                {/* 删除进行中给可见状态：按钮变灰本身不解释原因 */}
+                {removingId === a.id && <span className="text-meta text-ink-faint">删除中…</span>}
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="text-red-400 hover:text-red-300"
+                  className="text-danger hover:bg-danger/10 hover:text-danger"
                   aria-label={`删除智能体 ${a.name}`}
+                  disabled={removingId === a.id}
                   onClick={() => void remove(a.id)}
                 >
                   删除

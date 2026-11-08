@@ -218,7 +218,7 @@ describe('RuntimeManager', () => {
     kernel.failView('runtimes.all', undefined, 'boom')
 
     render(<RuntimeManager />)
-    expect(await screen.findByText('boom')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom')
   })
 
   it('检测清单区分支持/不支持/已添加', async () => {
@@ -286,10 +286,10 @@ describe('RuntimeManager', () => {
     const user = userEvent.setup()
     render(<RuntimeManager />)
 
-    expect(await screen.findByText('detect-boom')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('detect-boom')
     kernel.failView('runtimes.detected', undefined, 'rescan-boom')
     await user.click(screen.getByRole('button', { name: '重新扫描' }))
-    expect(await screen.findByText('rescan-boom')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('rescan-boom')
   })
 
   it('执行器清单读取失败：页面级错误兼容非 Error 异常（字符串）', async () => {
@@ -301,7 +301,7 @@ describe('RuntimeManager', () => {
     }
     render(<RuntimeManager />)
 
-    expect(await screen.findByText('executors-down')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('executors-down')
   })
 
   it('检测结果缺执行器键：使用后按默认执行器预填', async () => {
@@ -620,7 +620,7 @@ describe('RuntimeManager', () => {
     await screen.findByText('ds')
 
     await user.click(screen.getByRole('button', { name: '测试运行时 ds' }))
-    expect(await screen.findByText('probe-boom')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('probe-boom')
     expect(screen.getByRole('button', { name: '测试运行时 ds' })).toBeEnabled()
   })
 
@@ -689,8 +689,24 @@ describe('RuntimeManager', () => {
     await screen.findByText('ds')
 
     await user.click(screen.getByRole('button', { name: '删除运行时 ds' }))
-    expect(await screen.findByText('remove-fail')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('remove-fail')
     expect(screen.getByText('ds')).toBeInTheDocument()
+    // 写命令的失败可手动关掉
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('remove-fail')).not.toBeInTheDocument()
+  })
+
+  it('删除进行中：该行删除按钮禁用并说明原因', async () => {
+    setup()
+    handleDispatch(() => new Promise(() => {}))
+    const user = userEvent.setup()
+    render(<RuntimeManager />)
+    await screen.findByText('ds')
+
+    await user.click(screen.getByRole('button', { name: '删除运行时 ds' }))
+
+    expect(await screen.findByText('删除中…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '删除运行时 ds' })).toBeDisabled()
   })
 
   it('加载未完成即卸载不报错', async () => {

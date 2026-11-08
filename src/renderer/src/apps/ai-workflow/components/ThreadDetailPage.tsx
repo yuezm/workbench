@@ -3,6 +3,7 @@ import type { Task } from '../../../../../protocol/entities'
 import { THREAD_LIMITS, type ThreadRow } from '../../../../../protocol/thread'
 import { Button } from '../../../components/ui/button'
 import { Field } from '../../../components/ui/field'
+import { FormError } from '../../../components/ui/form-error'
 import { Input, fieldCls } from '../../../components/ui/input'
 import { badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
@@ -149,12 +150,14 @@ function NotesSection({
   thread,
   text,
   busy,
+  error,
   onChange,
   onSubmit,
 }: {
   thread: ThreadRow
   text: string
   busy: boolean
+  error: string | null
   onChange: (text: string) => void
   onSubmit: (event: FormEvent) => void
 }): ReactElement {
@@ -193,6 +196,8 @@ function NotesSection({
           disabled={busy}
           onChange={(e) => onChange(e.target.value)}
         />
+        {/* 笔记的失败就地贴在自己的输入框下方，不用去页顶找 */}
+        <FormError message={error} />
         <div className="flex justify-end">
           <Button type="submit" variant="secondary" size="sm" disabled={busy}>
             添加笔记
@@ -209,6 +214,9 @@ function BindSection({
   source,
   externalRef,
   busy,
+  sourceError,
+  refError,
+  formError,
   onChangeSource,
   onChangeExternalRef,
   onSubmit,
@@ -217,6 +225,9 @@ function BindSection({
   source: string
   externalRef: string
   busy: boolean
+  sourceError?: string
+  refError?: string
+  formError?: string | null
   onChangeSource: (value: string) => void
   onChangeExternalRef: (value: string) => void
   onSubmit: (event: FormEvent) => void
@@ -234,7 +245,7 @@ function BindSection({
       ) : (
         <form className="flex flex-col gap-2" onSubmit={onSubmit}>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="入口来源">
+            <Field label="入口来源" required error={sourceError}>
               <Input
                 aria-label="入口来源"
                 maxLength={THREAD_LIMITS.source}
@@ -244,7 +255,7 @@ function BindSection({
                 onChange={(e) => onChangeSource(e.target.value)}
               />
             </Field>
-            <Field label="外部入口键">
+            <Field label="外部入口键" required error={refError}>
               <Input
                 aria-label="外部入口键"
                 maxLength={THREAD_LIMITS.externalRef}
@@ -255,6 +266,8 @@ function BindSection({
               />
             </Field>
           </div>
+          {/* 内核拒绝绑定的原因（入口键被占用等）就地贴在提交按钮上方 */}
+          <FormError message={formError} />
           <div className="flex items-center justify-between gap-2">
             <p className="text-meta text-ink-faint">同一入口的新事件续进本线程。</p>
             <Button type="submit" variant="secondary" size="sm" disabled={busy}>
@@ -284,7 +297,16 @@ function ThreadContent({
   onOpenTask: (taskId: string) => void
 }): ReactElement {
   const [busy, setBusy] = useState<BusyAction | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
+  /** 笔记失败原因：贴在笔记输入框下方 */
+  const [noteError, setNoteError] = useState<string | null>(null)
+  /** 绑定失败原因：字段级 or 表单级（内核拒绝），都留在绑定表单里 */
+  const [bindErrors, setBindErrors] = useState<{
+    source?: string
+    ref?: string
+    form?: string
+  }>({})
+  /** 归档失败原因：贴在归档按钮旁边 */
+  const [closeError, setCloseError] = useState<string | null>(null)
   const [noteText, setNoteText] = useState('')
   const [bindSource, setBindSource] = useState('')
   const [bindRef, setBindRef] = useState('')
@@ -292,14 +314,24 @@ function ThreadContent({
   const busyNow = busy !== null
   const closed = thread.status === 'closed'
 
-  const runAction = (action: BusyAction, task: () => Promise<void>): void => {
+  /**
+   * 写操作的错误按「哪一块表单」分开存：失败文案要贴在用户刚动过的地方，
+   * 而不是统一丢到页面顶部（在长页面里那等于没提示）。
+   */
+  const runAction = (
+    action: BusyAction,
+    task: () => Promise<void>,
+    fail: (message: string) => void,
+  ): void => {
     setBusy(action)
-    setActionError(null)
+    setNoteError(null)
+    setBindErrors({})
+    setCloseError(null)
     void (async () => {
       try {
         await task()
       } catch (e) {
-        setActionError(errMsg(e))
+        fail(errMsg(e))
       } finally {
         setBusy(null)
       }
@@ -310,18 +342,22 @@ function ThreadContent({
     event.preventDefault()
     const text = noteText.trim()
     if (text === '') {
-      setActionError('笔记不能为空')
+      setNoteError('笔记不能为空')
       return
     }
-    runAction('note', async () => {
-      await getKernelStore().dispatch({
-        type: 'thread.note',
-        commandId: '',
-        threadId: thread.id,
-        text,
-      })
-      setNoteText('')
-    })
+    runAction(
+      'note',
+      async () => {
+        await getKernelStore().dispatch({
+          type: 'thread.note',
+          commandId: '',
+          threadId: thread.id,
+          text,
+        })
+        setNoteText('')
+      },
+      setNoteError,
+    )
   }
 
   const bind = (event: FormEvent): void => {
@@ -329,30 +365,42 @@ function ThreadContent({
     const source = bindSource.trim()
     const externalRef = bindRef.trim()
     if (source === '') {
-      setActionError('入口来源必填')
+      setBindErrors({ source: '入口来源必填' })
       return
     }
     if (externalRef === '') {
-      setActionError('入口键必填')
+      setBindErrors({ ref: '入口键必填' })
       return
     }
-    runAction('bind', async () => {
-      await getKernelStore().dispatch({
-        type: 'thread.bind',
-        commandId: '',
-        threadId: thread.id,
-        source,
-        externalRef,
-      })
-      setBindSource('')
-      setBindRef('')
-    })
+    runAction(
+      'bind',
+      async () => {
+        await getKernelStore().dispatch({
+          type: 'thread.bind',
+          commandId: '',
+          threadId: thread.id,
+          source,
+          externalRef,
+        })
+        setBindSource('')
+        setBindRef('')
+      },
+      (message) => setBindErrors({ form: message }),
+    )
   }
 
   const closeThread = (): void => {
-    runAction('close', async () => {
-      await getKernelStore().dispatch({ type: 'thread.close', commandId: '', threadId: thread.id })
-    })
+    runAction(
+      'close',
+      async () => {
+        await getKernelStore().dispatch({
+          type: 'thread.close',
+          commandId: '',
+          threadId: thread.id,
+        })
+      },
+      setCloseError,
+    )
   }
 
   const roots = taskTree(tasks, thread.rootTaskIds)
@@ -378,14 +426,8 @@ function ThreadContent({
         </div>
       </dl>
 
-      {actionError !== null && (
-        <p
-          role="alert"
-          className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
-        >
-          {actionError}
-        </p>
-      )}
+      {/* 写操作进行中：按钮会一起变灰，这里说清楚为什么点不动其它动作 */}
+      {busyNow && <p className="text-meta text-ink-faint">正在提交，其他操作暂不可用。</p>}
 
       <section aria-label="任务列表" className="flex flex-col gap-1.5">
         <h3 className="flex items-center gap-2 text-title font-medium text-ink">
@@ -410,7 +452,11 @@ function ThreadContent({
         thread={thread}
         text={noteText}
         busy={busyNow}
-        onChange={setNoteText}
+        error={noteError}
+        onChange={(value) => {
+          setNoteError(null)
+          setNoteText(value)
+        }}
         onSubmit={addNote}
       />
 
@@ -419,24 +465,36 @@ function ThreadContent({
         source={bindSource}
         externalRef={bindRef}
         busy={busyNow}
-        onChangeSource={setBindSource}
-        onChangeExternalRef={setBindRef}
+        sourceError={bindErrors.source}
+        refError={bindErrors.ref}
+        formError={bindErrors.form}
+        onChangeSource={(value) => {
+          setBindErrors({})
+          setBindSource(value)
+        }}
+        onChangeExternalRef={(value) => {
+          setBindErrors({})
+          setBindRef(value)
+        }}
         onSubmit={bind}
       />
 
-      <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
-        <p className="text-meta text-ink-faint">{closed ? '线程已归档。' : '归档只影响界面。'}</p>
-        {!closed && (
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={busyNow}
-            onClick={closeThread}
-          >
-            归档
-          </Button>
-        )}
+      <div className="flex flex-col gap-2 border-t border-line pt-3">
+        <FormError message={closeError} />
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-meta text-ink-faint">{closed ? '线程已归档。' : '归档只影响界面。'}</p>
+          {!closed && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={busyNow}
+              onClick={closeThread}
+            >
+              归档
+            </Button>
+          )}
+        </div>
       </div>
     </>
   )
@@ -464,14 +522,7 @@ export function ThreadDetailPage({
       <DetailHeader title={title} hint={hint} onBack={onBack} />
 
       <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
-        {state.error !== null && (
-          <p
-            role="alert"
-            className="rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-body text-red-300"
-          >
-            {state.error}
-          </p>
-        )}
+        <FormError message={state.error} />
 
         {detail === undefined ? (
           state.error === null && <p className="text-meta text-ink-faint">正在读取线程…</p>

@@ -3,13 +3,15 @@
 // 用法: node scripts/check-ui-rules.mjs
 // 退出码: 0 通过 / 1 有违规
 //
-// 检查四类：
+// 检查六类：
 //   1. 圆角越界：rounded-3xl、任意值 rounded-[..px]、非圆形元素用 rounded-full
 //   2. 重玻璃：src/renderer 内除弹窗遮罩外不允许 backdrop-blur
 //   3. 颜色字面量：tsx 里出现的 #rrggbb 必须在 global.css 的调色板里
 //   4. token 体检：圆角刻度未被放大、前景三级对比度达标（含 surface / surface-2）
 //   5. 字阶：只允许 page/title/body/action/meta/badge 六档，禁任意 px、裸 text-xs/sm、
 //      零散字距与行高覆盖、semibold/bold（页面标题例外）
+//   6. 表单校验静默失败：调色板外的 Tailwind 内置色（red-400 之类）与
+//      `if (!x.trim()) return` 这类「点了没反应」的静默校验
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
@@ -132,6 +134,14 @@ for (const file of walk(RENDERER)) {
   })
 }
 
+// 调色板外的 Tailwind 内置色（SPEC-ui §2：只用 token 类名）。`white` / `black` 不算
+// 调色板外色值：SPEC 明确允许 `bg-white/[0.06]` 这类描边与遮罩。
+const BUILTIN_COLOR =
+  /\b(?:text|bg|border|ring|ring-offset|from|to|via|fill|stroke|outline|divide|accent|placeholder|caret|decoration)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)(?:-\d{2,3})?\b/
+
+// 静默校验（SPEC-ui §11）：`if (!title.trim()) return` 让点击毫无反馈，禁止
+const SILENT_GUARD = /if\s*\(\s*![^)]*\.trim\(\)\s*\)\s*return\b/
+
 for (const file of walk(RENDERER)) {
   const path = rel(file)
   const source = readFileSync(file, 'utf8')
@@ -149,6 +159,12 @@ for (const file of walk(RENDERER)) {
       if (!palette.has(hex.toLowerCase())) {
         flag('off-palette-color', path, `L${index + 1}: ${hex}`)
       }
+    }
+    if (BUILTIN_COLOR.test(line)) {
+      flag('off-palette-utility', path, `L${index + 1}: ${line.trim().slice(0, 100)}`)
+    }
+    if (SILENT_GUARD.test(line)) {
+      flag('silent-validation-guard', path, `L${index + 1}: ${line.trim().slice(0, 100)}`)
     }
   })
 }

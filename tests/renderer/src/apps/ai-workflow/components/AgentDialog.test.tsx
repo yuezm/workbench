@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type {
@@ -80,6 +80,8 @@ describe('AgentDialog', () => {
     expect(screen.getByRole('option', { name: 'ds · 未检测' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'claude · 可用' })).toBeInTheDocument()
 
+    // 名称必填：空名提交会被拦下，这里先填名再验证「默认运行时随提交带上」
+    await user.type(screen.getByLabelText('智能体名称'), 'coder')
     await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ runtimeId: 'r1' })
@@ -130,6 +132,7 @@ describe('AgentDialog', () => {
     await user.click(screen.getByRole('option', { name: '挂了 · 不可用' }))
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r2')
 
+    await user.type(screen.getByLabelText('智能体名称'), 'coder')
     await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ runtimeId: 'r2' })
@@ -145,6 +148,8 @@ describe('AgentDialog', () => {
       />,
     )
     expect(screen.getByText(/没有可用运行时/)).toBeInTheDocument()
+    // 禁用必须写原因：否则用户只看到点不动
+    expect(screen.getByText(/缺少可绑定的运行时/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
   })
 
@@ -198,7 +203,7 @@ describe('AgentDialog', () => {
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ description: '', systemPrompt: '' })
   })
 
-  it('提交失败在弹窗内展示错误', async () => {
+  it('提交失败在弹窗内展示错误，且错误条可关闭、输入不丢', async () => {
     const onSubmit = vi.fn().mockRejectedValue('create-fail')
     const user = userEvent.setup()
     render(
@@ -210,7 +215,118 @@ describe('AgentDialog', () => {
       />,
     )
 
+    await user.type(screen.getByLabelText('智能体名称'), 'coder')
     await user.click(screen.getByRole('button', { name: '添加' }))
     expect(await screen.findByText('create-fail')).toBeInTheDocument()
+    // 父级 reject 不关弹窗、不清输入
+    expect(screen.getByLabelText('智能体名称')).toHaveValue('coder')
+
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('create-fail')).not.toBeInTheDocument()
+  })
+
+  it('名称为空：保存时就地报必填并把焦点移到名称，不调父级', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        runtimes={[makeRuntime()]}
+        initial={empty}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    // 名称与绑定运行时都标了必填（读屏读「必填」）
+    expect(screen.getAllByText('必填')).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: '添加' }))
+
+    expect(await screen.findByText('名称必填')).toBeInTheDocument()
+    expect(screen.getByLabelText('智能体名称')).toHaveFocus()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('名称只有空格同样按空处理', async () => {
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        runtimes={[makeRuntime()]}
+        initial={empty}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('智能体名称'), '   ')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    expect(await screen.findByText('名称必填')).toBeInTheDocument()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('名称与多行文本提交前都 trim', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        runtimes={[makeRuntime()]}
+        initial={empty}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('智能体名称'), '  coder  ')
+    await user.type(screen.getByLabelText('智能体描述'), ' 写代码 ')
+    await user.type(screen.getByLabelText('智能体能力'), ' you are coder ')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      name: 'coder',
+      description: '写代码',
+      runtimeId: 'r1',
+      systemPrompt: 'you are coder',
+    })
+  })
+
+  it('编辑态：标题与按钮文案切换，保留不可用的原运行时并提交 trim 后的值', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        runtimes={[makeRuntime({ id: 'r1', name: '挂了', lastProbe: probe('unavailable') })]}
+        initial={{ name: ' coder ', runtimeId: 'r1' }}
+        mode="edit"
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('编辑智能体')).toBeInTheDocument()
+    // 编辑时保留原绑定：不因为该运行时已不可用就悄悄改绑 / 拦住保存
+    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r1')
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ name: 'coder', runtimeId: 'r1' })
+  })
+
+  it('没有运行时时按钮禁用并写明原因；程序化提交落到运行时字段错误', async () => {
+    const onSubmit = vi.fn()
+    const { container } = render(
+      <AgentDialog runtimes={[]} initial={empty} onSubmit={onSubmit} onCancel={vi.fn()} />,
+    )
+
+    expect(screen.getByText(/缺少可绑定的运行时/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
+
+    // 按钮禁用时表单也可能被回车 / 程序化提交：不能静默 return，要给字段级错误并聚焦
+    fireEvent.change(screen.getByLabelText('智能体名称'), { target: { value: 'coder' } })
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+    expect(await screen.findByText(/没有可绑定的运行时/)).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveFocus()
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 })

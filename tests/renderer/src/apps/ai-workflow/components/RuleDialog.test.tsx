@@ -95,6 +95,8 @@ describe('RuleDialog', () => {
     expect(screen.getByText('新建规则')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('规则名称不能为空')).toBeInTheDocument()
+    // 错误挂在名称字段上，并把焦点移过去（不是只丢到底部一句）
+    expect(screen.getByLabelText('规则名称')).toHaveFocus()
     expect(onSubmit).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: '取消' }))
@@ -118,6 +120,7 @@ describe('RuleDialog', () => {
     await user.type(screen.getByLabelText('规则名称'), 'Issue 规则')
     await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('请选择目标工作流')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '规则目标工作流' })).toHaveFocus()
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
@@ -219,6 +222,7 @@ describe('RuleDialog', () => {
     await choose(user, '规则目标工作流', '研发')
     await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('cron 需 5 段')).toBeInTheDocument()
+    expect(screen.getByLabelText('cron 表达式')).toHaveFocus()
     expect(onSubmit).not.toHaveBeenCalled()
 
     await user.clear(screen.getByLabelText('cron 表达式'))
@@ -259,7 +263,59 @@ describe('RuleDialog', () => {
     await user.type(screen.getByLabelText('并行数'), '9')
     await user.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('并行数需为 1–8 的整数')).toBeInTheDocument()
+    expect(screen.getByLabelText('并行数')).toHaveFocus()
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('并行数非整数同样报错，不静默回落', async () => {
+    const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={blankRule()}
+        isNew
+        workflows={workflows}
+        projects={projects}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('规则名称'), 'x')
+    await choose(user, '规则目标工作流', '研发')
+    await user.type(screen.getByLabelText('并行数'), '1.5')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('并行数需为 1–8 的整数')).toBeInTheDocument()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('名称只有空格按空处理；名称与提示词提交前 trim', async () => {
+    const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={blankRule()}
+        isNew
+        workflows={workflows}
+        projects={projects}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('规则名称'), '   ')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('规则名称不能为空')).toBeInTheDocument()
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    await user.clear(screen.getByLabelText('规则名称'))
+    await user.type(screen.getByLabelText('规则名称'), '  日报  ')
+    await choose(user, '规则目标工作流', '研发')
+    await user.type(screen.getByLabelText('规则提示词'), '  汇总  ')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ name: '日报', prompt: '汇总' })
   })
 
   it('换工作流时清掉不属于新工作流的阶段', async () => {
@@ -422,6 +478,11 @@ describe('RuleDialog', () => {
     expect(await screen.findByText('cron 解析失败')).toBeInTheDocument()
     expect(onCancel).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+
+    // 父级 reject 的文案可以关掉继续改，输入不丢
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('cron 解析失败')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('规则名称')).toHaveValue('x')
   })
 
   it('没有工作流：提示先建工作流，保存禁用', () => {
@@ -437,6 +498,8 @@ describe('RuleDialog', () => {
     )
 
     expect(screen.getByText(/先建工作流/)).toBeInTheDocument()
+    // 禁用要写原因：例外情况是「先建工作流」这条前置条件本身，用户一眼能看到
+    expect(screen.getByText(/没有可选工作流/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })
 

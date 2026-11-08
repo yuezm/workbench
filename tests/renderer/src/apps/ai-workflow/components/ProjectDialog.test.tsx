@@ -50,8 +50,9 @@ describe('ProjectDialog', () => {
     expect(screen.getByText('新建项目')).toBeInTheDocument()
     // 新建态没有可删的东西
     expect(screen.queryByRole('button', { name: '删除项目' })).not.toBeInTheDocument()
-    // 名称与路径都空：保存不可点
+    // 名称与路径都空：保存不可点，且写明为什么
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(screen.getByText(/名称与文件夹路径都必填/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '选择文件夹' }))
     await waitFor(() =>
@@ -121,6 +122,11 @@ describe('ProjectDialog', () => {
     expect(onRemove).toHaveBeenCalledWith('p1')
     expect(await screen.findByText('项目下还有任务')).toBeInTheDocument()
     expect(screen.getByText('编辑项目')).toBeInTheDocument()
+
+    // 删除失败的文案贴在删除按钮上方，可单独关掉，不影响表单里的输入
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('项目下还有任务')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('项目名称')).toHaveValue('工作台')
   })
 
   it('取消回调 onCancel', async () => {
@@ -165,13 +171,16 @@ describe('ProjectDialog', () => {
 
     expect(await screen.findByText('picker-down')).toBeInTheDocument()
     expect(screen.getByLabelText('文件夹路径')).toHaveValue('')
+    // 选择器失败的文案可关掉，字段与按钮状态不受影响
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('picker-down')).not.toBeInTheDocument()
     // 失败不算致命：仍可手填后保存
     await user.type(screen.getByLabelText('文件夹路径'), 'D:\\tmp')
     await user.type(screen.getByLabelText('项目名称'), '临时')
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
   })
 
-  it('字段不全时提交表单不调用 onSave（保存按钮外还有 Enter / 程序化 submit）', async () => {
+  it('字段不全时提交表单不调用 onSave，并把焦点移到缺的字段', async () => {
     const onSave = vi.fn()
     const user = userEvent.setup()
     const { container } = render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
@@ -183,7 +192,40 @@ describe('ProjectDialog', () => {
     fireEvent.submit(container.querySelector('form') as HTMLFormElement)
 
     expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('项目名称必填')).toBeInTheDocument()
+    expect(screen.getByLabelText('项目名称')).toHaveFocus()
     expect(screen.getByText('新建项目')).toBeInTheDocument()
+  })
+
+  it('只有名称没有路径：提交落到路径字段错误并聚焦', async () => {
+    const onSave = vi.fn()
+    const { container } = render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '临时' } })
+    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+
+    expect(onSave).not.toHaveBeenCalled()
+    expect(await screen.findByText('文件夹路径必填')).toBeInTheDocument()
+    expect(screen.getByLabelText('文件夹路径')).toHaveFocus()
+  })
+
+  it('名称/路径/备注提交前都 trim', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: ' workbench ' } })
+    fireEvent.change(screen.getByLabelText('文件夹路径'), {
+      target: { value: ' D:\\Codes\\workbench ' },
+    })
+    fireEvent.change(screen.getByLabelText('项目备注'), { target: { value: ' 备注 ' } })
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(onSave.mock.calls[0]).toEqual([
+      { name: 'workbench', path: 'D:\\Codes\\workbench', description: '备注' },
+      undefined,
+    ])
   })
 
   it('保存失败就地展示错误、弹窗不关且按钮恢复可点', async () => {
@@ -199,5 +241,10 @@ describe('ProjectDialog', () => {
     expect(screen.getByText('新建项目')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
     expect(screen.getByLabelText('项目名称')).toHaveValue('坏目录')
+
+    // 错误条可关掉继续改，输入不丢
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('路径不可写')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('文件夹路径')).toHaveValue('D:\\bad')
   })
 })

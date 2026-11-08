@@ -39,7 +39,7 @@ const menuItemCls = (danger: boolean): string =>
     'w-full rounded-md px-2 py-1.5 text-left text-action transition-colors duration-150 outline-none',
     'focus-visible:ring-2 focus-visible:ring-focus/60',
     danger
-      ? 'text-red-300 hover:bg-red-400/10'
+      ? 'text-danger hover:bg-danger/10 hover:text-danger'
       : 'text-ink-dim hover:bg-white/[0.06] hover:text-ink',
   )
 
@@ -107,6 +107,12 @@ export function ConversationList({
       >
         新对话
       </Button>
+      {/* 禁用原因写在按钮下面：禁用态本身只说「不能点」，不解释为什么 */}
+      {agents.length === 0 ? (
+        <p className="text-meta text-ink-faint">先去「设置 → 智能体」建一个，才能新建对话</p>
+      ) : (
+        creating && <p className="text-meta text-ink-faint">正在新建对话…</p>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto">
         <ul className="flex flex-col gap-1">
@@ -227,7 +233,7 @@ export function ConversationList({
                     <button
                       type="button"
                       aria-label={`删除会话 ${conversation.title}`}
-                      className="shrink-0 rounded-md px-1.5 py-0.5 text-action font-medium text-red-300/80 transition-colors duration-150 outline-none hover:bg-red-400/10 hover:text-red-300 focus-visible:ring-2 focus-visible:ring-focus/60"
+                      className="shrink-0 rounded-md px-1.5 py-0.5 text-action font-medium text-danger transition-colors duration-150 outline-none hover:bg-danger/10 hover:text-danger focus-visible:ring-2 focus-visible:ring-focus/60"
                       onClick={() => onRemove(conversation.id)}
                     >
                       删除

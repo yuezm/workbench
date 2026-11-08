@@ -263,6 +263,7 @@ describe('WorkflowEditor', () => {
     render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
 
     // 新建阶段的默认类型是「不交接」，交接入口要先选成会干活的类型
+    await user.type(screen.getByLabelText('工作流名称'), '交接流')
     await choose(user, '阶段1类型', '交给智能体')
     await user.click(screen.getByRole('combobox', { name: '阶段1交接目标工作流' }))
     await user.click(await screen.findByRole('option', { name: '写作' }))
@@ -848,9 +849,7 @@ describe('WorkflowEditor', () => {
 
     // 切回普通类型：闸门字段消失，配置落 null
     await choose(user, '阶段2类型', '交给智能体')
-    expect(
-      screen.queryByRole('combobox', { name: '阶段2闸门次数' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '阶段2闸门次数' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
@@ -1099,4 +1098,184 @@ describe('WorkflowEditor', () => {
       spawnPolicy: null,
     })
   }, 30_000)
+})
+
+/** 造一条已存在的工作流：阶段名与流转都按下标给，省得每例重复写 id */
+function workflowWith(
+  stageNames: string[],
+  targets: Record<number, { onComplete?: number; onReject?: number }> = {},
+): WorkflowWithStages {
+  return {
+    id: 'w',
+    name: '研发',
+    description: '',
+    createdAt: 't',
+    stages: stageNames.map((name, index) => ({
+      id: `s${index}`,
+      workflowId: 'w',
+      name,
+      position: index,
+      entryMode: 'agent',
+      agentId: 'ag1',
+      onCompleteStageId:
+        targets[index]?.onComplete === undefined ? null : `s${targets[index].onComplete}`,
+      onRejectStageId:
+        targets[index]?.onReject === undefined ? null : `s${targets[index].onReject}`,
+      handoffWorkflowId: null,
+      handoffStageId: null,
+    })),
+  }
+}
+
+describe('WorkflowEditor 校验与失败反馈', () => {
+  beforeEach(() => {
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [])
+  })
+
+  it('名称为空点保存：不发命令，名称下方就地给必填提示', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('工作流名称必填')).toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+    // 必填标识：名称与阶段名称各一个红星（读屏文案「必填」）
+    expect(screen.getAllByText('必填')).toHaveLength(2)
+    // 只填空格也算空
+    await user.type(screen.getByLabelText('工作流名称'), '   ')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('阶段名称为空：拦住保存，并把右侧展开拉到出错的阶段', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <WorkflowEditor
+        workflow={workflowWith(['待办', '进行中'])}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    await user.clear(screen.getByLabelText('阶段2名称'))
+    // 展开回阶段 1：保存时应自动跳回出错的阶段 2
+    await user.click(screen.getByRole('button', { name: '阶段1' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('阶段名称必填')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '阶段2' })).toHaveAttribute('aria-current', 'true')
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('阶段删光后保存：说明至少要有一个阶段', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('工作流名称'), '空流')
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('工作流至少要有一个阶段')).toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('流转目标悬空：拦住保存并说明要重新选', async () => {
+    const stale: WorkflowInput = {
+      name: '旧流',
+      description: '',
+      stages: [
+        {
+          name: '待办',
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteIndex: 5,
+          onRejectIndex: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          subtaskStageId: null,
+          onChildrenSettled: null,
+          spawnPolicy: null,
+          instructions: '',
+          gate: null,
+        },
+      ],
+    }
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} initial={stale} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText(/的流转目标已不在阶段列表里/)).toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('保存失败：就地展示原因、草稿不丢、按钮恢复可点', async () => {
+    const onSave = vi.fn().mockRejectedValue(new Error('磁盘写不进去'))
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('工作流名称'), '研发')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('保存失败：磁盘写不进去')).toBeInTheDocument()
+    expect(screen.getByLabelText('工作流名称')).toHaveValue('研发')
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+  })
+
+  it('保存提进行中：按钮文案交代原因，且不接受第二次点击', async () => {
+    const onSave = vi.fn(() => new Promise<void>(() => {}))
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('工作流名称'), '研发')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    const saving = await screen.findByRole('button', { name: '保存中…' })
+    expect(saving).toBeDisabled()
+    await user.click(saving)
+    expect(onSave).toHaveBeenCalledTimes(1)
+  })
+
+  it('保存前 trim：名称两端空格不落库', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('工作流名称'), '  研发  ')
+    await user.clear(screen.getByLabelText('阶段1名称'))
+    await user.type(screen.getByLabelText('阶段1名称'), '  待办  ')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.name).toBe('研发')
+    expect(draft.stages[0].name).toBe('待办')
+  })
+
+  it('删除中间阶段：后面的流转下标跟着前移，不会静默指错', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    const existing = workflowWith(['A', 'B', 'C'], {
+      0: { onComplete: 2 },
+      1: { onComplete: 2 },
+    })
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 删掉 B：C 从下标 2 前移到 1，A 的「完成后进入」要跟着改
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages.map((stage) => stage.name)).toEqual(['A', 'C'])
+    expect(draft.stages[0].onCompleteIndex).toBe(1)
+  })
 })

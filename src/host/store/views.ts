@@ -226,6 +226,8 @@ interface ConversationRow {
   id: string
   title: string
   agent_id: string
+  /** M11 所属项目（NULL = 默认目录） */
+  project_id: string | null
   session_id: string | null
   archived_at: string | null
   created_at: string
@@ -447,6 +449,8 @@ const mapConversation = (row: ConversationRow): Conversation => ({
   id: row.id,
   title: row.title,
   agentId: row.agent_id,
+  // M11：列的 NULL 即「没有项目」（默认目录），老行同样落这里
+  projectId: row.project_id,
   sessionId: row.session_id,
   archivedAt: row.archived_at,
   createdAt: row.created_at,
@@ -732,13 +736,38 @@ const readWaitingRuns = (db: DatabaseSync): WaitingRun[] =>
     hasOpenCard: row.has_open_card === 1,
   }))
 
+/** `conversations` 投影的列清单（逐列写死，装载与三条会话查询共用）。 */
+const CONVERSATION_COLUMNS = `id, title, agent_id, project_id, session_id, archived_at,
+        created_at, updated_at`
+
+/** 会话清单按最近更新排序（与旧仓储 ORDER BY updated_at DESC 一致）。 */
+const CONVERSATION_ORDER = 'ORDER BY updated_at DESC, created_at DESC, rowid'
+
 const readConversations = (db: DatabaseSync): Conversation[] =>
   (
     db
+      .prepare(`SELECT ${CONVERSATION_COLUMNS} FROM conversations ${CONVERSATION_ORDER}`)
+      .all() as unknown as ConversationRow[]
+  ).map(mapConversation)
+
+/** 某项目下的会话（M11）：口径与 `tasks.byProject` 一致，排序同会话清单。 */
+const readConversationsByProject = (db: DatabaseSync, projectId: string): Conversation[] =>
+  (
+    db
       .prepare(
-        // 会话清单按最近更新排序（与旧仓储 ORDER BY updated_at DESC 一致）
-        `SELECT id, title, agent_id, session_id, archived_at, created_at, updated_at
-         FROM conversations ORDER BY updated_at DESC, created_at DESC, rowid`,
+        `SELECT ${CONVERSATION_COLUMNS} FROM conversations
+         WHERE project_id = ? ${CONVERSATION_ORDER}`,
+      )
+      .all(projectId) as unknown as ConversationRow[]
+  ).map(mapConversation)
+
+/** 没有项目的会话（M11）：老事实 / 存量行都归入「默认目录」。 */
+const readConversationsUnassigned = (db: DatabaseSync): Conversation[] =>
+  (
+    db
+      .prepare(
+        `SELECT ${CONVERSATION_COLUMNS} FROM conversations
+         WHERE project_id IS NULL ${CONVERSATION_ORDER}`,
       )
       .all() as unknown as ConversationRow[]
   ).map(mapConversation)
@@ -943,7 +972,9 @@ const readTasksByProject = (db: DatabaseSync, projectId: string): Task[] =>
 const readTasksUnassigned = (db: DatabaseSync): Task[] =>
   (
     db
-      .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE project_id IS NULL ORDER BY created_at, rowid`)
+      .prepare(
+        `SELECT ${TASK_COLUMNS} FROM tasks WHERE project_id IS NULL ORDER BY created_at, rowid`,
+      )
       .all() as unknown as TaskRow[]
   ).map(mapTask)
 
@@ -1098,6 +1129,12 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
       return readActiveRuns(db, readStringParam(params, 'taskId'))
     case 'conversations.all':
       return readConversations(db)
+    case 'conversations.byProject':
+      // M11：聊天清单按当前项目过滤（与 tasks.byProject 同口径）
+      return readConversationsByProject(db, readStringParam(params, 'projectId'))
+    case 'conversations.unassigned':
+      // M11：没有项目的会话归入「默认目录」，老行同样落这里（无参数）
+      return readConversationsUnassigned(db)
     case 'messages.byConversation':
       return readMessagesByConversation(db, readStringParam(params, 'conversationId'))
     case 'runs.active-by-conversation':

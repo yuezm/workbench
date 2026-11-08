@@ -221,6 +221,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL DEFAULT '',
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+  -- M11 项目：聊天与任务共用的顶层上下文（弱引用，不设外键；NULL = 默认目录，老行 / 老事实按 null 归一）
+  project_id TEXT,
   session_id TEXT,
   -- M9 归档：非 NULL = 已归档（聊天清单默认不展示；只影响列表，不删消息/run）
   archived_at TEXT,
@@ -651,6 +653,19 @@ export const CONVERSATIONS_M9_ADD_COLUMN_SQL: Readonly<
   Record<(typeof CONVERSATIONS_M9_ADDED_COLUMNS)[number], string>
 > = {
   archived_at: 'ALTER TABLE conversations ADD COLUMN archived_at TEXT',
+}
+
+/**
+ * M11 给 `conversations` 新增的列（所属项目）：可空、无 DEFAULT —— 老对话按「默认目录」归一。
+ * 清单与 `conversationsTable()` 的 DDL 保持同步。
+ */
+export const CONVERSATIONS_M11_ADDED_COLUMNS = ['project_id'] as const
+
+/** `conversations` M11 补列语句（可空、无 DEFAULT）。 */
+export const CONVERSATIONS_M11_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof CONVERSATIONS_M11_ADDED_COLUMNS)[number], string>
+> = {
+  project_id: 'ALTER TABLE conversations ADD COLUMN project_id TEXT',
 }
 
 /**

@@ -136,6 +136,7 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   id: 'cv-1',
   title: '对话',
   agentId: 'ag-1',
+  projectId: null,
   sessionId: null,
   createdAt: NOW,
   updatedAt: NOW,

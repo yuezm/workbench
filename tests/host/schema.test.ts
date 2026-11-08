@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  CONVERSATIONS_M11_ADD_COLUMN_SQL,
+  CONVERSATIONS_M11_ADDED_COLUMNS,
   FACTS_SQL,
   PROJECTION_DDL,
   PROJECTION_TABLES,
@@ -763,6 +765,50 @@ describe('线程投影（M6.5）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(foreignKeyShape(db, 'threads')).toEqual([])
+  })
+})
+
+describe('会话投影（M9 / M11）', () => {
+  it('conversations 列：project_id 落在 agent_id 与 session_id 之间，可空、无 DEFAULT', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect(columnShape(db, 'conversations').map((column) => column.split('|')[0])).toEqual([
+      'id',
+      'title',
+      'agent_id',
+      'project_id',
+      'session_id',
+      'archived_at',
+      'created_at',
+      'updated_at',
+    ])
+    const byName = new Map(
+      columnShape(db, 'conversations').map((shape) => [shape.split('|')[0], shape] as const),
+    )
+    // 弱引用：可空、无默认值（NULL = 默认目录）
+    expect(byName.get('project_id')).toBe('project_id|TEXT|0|null|0')
+    expect(byName.get('archived_at')).toBe('archived_at|TEXT|0|null|0')
+  })
+
+  it('补列清单与 DDL 同步：M11 只给 conversations 加 project_id', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect([...CONVERSATIONS_M11_ADDED_COLUMNS]).toEqual(['project_id'])
+    expect(CONVERSATIONS_M11_ADD_COLUMN_SQL.project_id).toBe(
+      'ALTER TABLE conversations ADD COLUMN project_id TEXT',
+    )
+    // 直接执行补列语句（幂等前提：列的列不存在时才用）；这里验证语句与 DDL 列定义一致
+    const memory = new DatabaseSync(':memory:')
+    try {
+      memory.exec('CREATE TABLE conversations (id TEXT PRIMARY KEY)')
+      memory.exec(CONVERSATIONS_M11_ADD_COLUMN_SQL.project_id)
+      expect(columnShape(memory, 'conversations').map((column) => column.split('|')[0])).toEqual([
+        'id',
+        'project_id',
+      ])
+    } finally {
+      memory.close()
+    }
   })
 })
 

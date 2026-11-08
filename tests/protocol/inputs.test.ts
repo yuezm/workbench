@@ -268,6 +268,17 @@ describe('protocol/inputs', () => {
     expect(rejected(host('chat.create', { commandId: 'c1', agentId: 'ag-1', title: 7 }))).toBe(
       'title必须是字符串',
     )
+    // M11：对话可以落到项目上；projectId 可选，给了才校验形状
+    expect(validateInput(host('chat.create', { commandId: 'c1', agentId: 'ag-1' })).ok).toBe(true)
+    expect(
+      validateInput(host('chat.create', { commandId: 'c1', agentId: 'ag-1', projectId: null })).ok,
+    ).toBe(true)
+    expect(
+      rejected(host('chat.create', { commandId: 'c1', agentId: 'ag-1', projectId: '   ' })),
+    ).toBe('projectId必填')
+    expect(rejected(host('chat.create', { commandId: 'c1', agentId: 'ag-1', projectId: 7 }))).toBe(
+      'projectId必须是字符串',
+    )
     expect(rejected(host('chat.send', { commandId: 'c2', content: 'x' }))).toBe(
       'conversationId必填',
     )

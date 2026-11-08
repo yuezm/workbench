@@ -103,9 +103,13 @@ export type KernelEvent =
   `runs.byTask`、`run.byId`、`run.events`、`run.last-event-seq`、`runs.stale-chat`、`conversations.all`、
   `messages.byConversation`、`cards.open`、`cards.byRun`、`runs.waiting`、**M5 新增** `tasks.executing`、
   `runtimes.statuses`、`kernel.seq`、`runtimes.executors`、`runtimes.detected`、`runtimes.models`、
-  **M6 新增** `rules.all`、**M6.5 新增** `thread.byId`（线程行 + 任务树 + 各智能体最近会话）。
-  其中后三个是**宿主视图**：由装配根注入只读函数（插件注册表 / CLI 探测 / 执行器
-  模型目录 / 运行时负载拼装），与 DB 视图共用同一个 `query` 动词，不写库、不发失效。
+  **M6 新增** `rules.all`、**M6.5 新增** `thread.byId`（线程行 + 任务树 + 各智能体最近会话）、
+  **M10 新增** `projects.all`、`tasks.byProject`、`tasks.unassigned`、**M11 新增** `conversations.byProject`、
+  `conversations.unassigned`、`runtimes.default-workdir`（宿主默认工作目录，聊天与任务没有项目时的落点）。
+  其中后几个是**宿主视图**：由装配根注入只读函数（插件注册表 / CLI 探测 / 执行器
+  模型目录 / 运行时负载拼装 / 默认工作目录解析），与 DB 视图共用同一个 `query` 动词，不写库、不发失效。
+- `conversations.byProject` / `conversations.unassigned`（M11）：会话清单按项目取，口径与
+  `tasks.byProject` / `tasks.unassigned` 一致——聊天和任务都落在项目上，`projectId = null` 即默认目录。
 - `tasks.executing`：存在 `queued/running/waiting` run 的任务 id 去重集合；看板「执行中」只读它。
 - `kernel.seq`：事实日志最大 seq，kernelStore 的启动快照水位。
 - 续传顺序：窗口加载时**先 `subscribe` 并缓冲**，再 `query('kernel.seq')` 取快照，最后回放缓存中

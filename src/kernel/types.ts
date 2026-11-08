@@ -39,9 +39,11 @@ export type Iso = string
  * M4：卡片与派生事件入账；M6：规则集与 cron 触发投影；M6.5：线程实体与事件合并；
  * M7：插件设置投影、跨工作流交接、外部插件与 webhook 端口；
  * M7.5：任务上下文 / 反馈（`task_comments` 投影 + 提示词反馈段）；
- * M10：项目（`projects` 第 16 张投影表 + 任务必须挂在项目下 + 运行工作目录取项目文件夹）。
+ * M10：项目（`projects` 第 16 张投影表 + 任务必须挂在项目下 + 运行工作目录取项目文件夹）；
+ * M11：项目升为聊天与任务共用的顶层上下文（`Conversation.projectId`、任务可省项目落默认目录、
+ * 删项目把会话归默认目录）。
  */
-export const KERNEL_VERSION = 'M10.0.0'
+export const KERNEL_VERSION = 'M11.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

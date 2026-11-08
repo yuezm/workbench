@@ -208,10 +208,12 @@ function changesOf(fact: AnyFact): Change[] {
       return [put('plugin_settings', fact.payload.pluginSettings)]
     case 'conversation.created':
     case 'conversation.updated':
-      // M9：老事实没有 `archivedAt`，按 null 归一，重建与增量折出同一行
+      // M9：老事实没有 `archivedAt`，按 null 归一，重建与增量折出同一行；
+      // M11：老事实没有 `projectId`，同样按 null 归一（默认目录）
       return [
         put('conversations', {
           ...fact.payload.conversation,
+          projectId: fact.payload.conversation.projectId ?? null,
           archivedAt: fact.payload.conversation.archivedAt ?? null,
         }),
       ]

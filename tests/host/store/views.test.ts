@@ -1359,3 +1359,75 @@ describe('项目视图（M10）', () => {
     expect(loadView(db, []).projects.size).toBe(0)
   })
 })
+
+describe('会话视图（M11：聊天归属项目）', () => {
+  const conversationAt = (id: string, projectId: string | null, updatedAt: string): Conversation =>
+    sample.conversation({
+      id,
+      title: id,
+      projectId,
+      createdAt: updatedAt,
+      updatedAt,
+    })
+
+  const seedConversations = (db: DatabaseSync): void => {
+    seed(db)
+    const writer = createProjectionWriter(db)
+    for (const row of [
+      conversationAt('cv-a', 'pj-1', OLDER_AT),
+      conversationAt('cv-b', 'pj-2', SAMPLE_AT),
+      conversationAt('cv-c', null, SAMPLE_AT),
+    ]) {
+      writer.apply({ table: 'conversations', key: row.id, row }, SAMPLE_AT)
+    }
+  }
+
+  it('conversations.all 仍按最近更新排序，行上带 projectId（NULL → null）', () => {
+    const db = memory()
+    seedConversations(db)
+
+    expect((queryView(db, 'conversations.all') as Conversation[]).map((row) => row.id)).toEqual([
+      'cv-b',
+      'cv-c',
+      'cv-a',
+    ])
+    const all = queryView(db, 'conversations.all') as Conversation[]
+    expect(all.find((row) => row.id === 'cv-a')?.projectId).toBe('pj-1')
+    expect(all.find((row) => row.id === 'cv-c')?.projectId).toBeNull()
+  })
+
+  it('conversations.byProject：只取该项目的会话；未归属单列；缺参数报错', () => {
+    const db = memory()
+    seedConversations(db)
+
+    expect(queryView(db, 'conversations.byProject', { projectId: 'pj-1' })).toEqual([
+      conversationAt('cv-a', 'pj-1', OLDER_AT),
+    ])
+    expect(queryView(db, 'conversations.byProject', { projectId: 'pj-2' })).toEqual([
+      conversationAt('cv-b', 'pj-2', SAMPLE_AT),
+    ])
+    expect(queryView(db, 'conversations.byProject', { projectId: 'pj-missing' })).toEqual([])
+    expect(queryView(db, 'conversations.unassigned')).toEqual([
+      conversationAt('cv-c', null, SAMPLE_AT),
+    ])
+
+    for (const params of [undefined, null, 42, {}, { projectId: '' }, { projectId: 7 }]) {
+      const error = captureError(() => queryView(db, 'conversations.byProject', params))
+      expect((error as StoreError).code).toBe('invalid_input')
+      expect((error as StoreError).message).toContain('projectId')
+    }
+  })
+
+  it('loadView：conversations 切片映射 projectId；chat.send 的切片包含 projects', () => {
+    const db = memory()
+    seedConversations(db)
+
+    const view = loadView(
+      db,
+      viewSpec({ commandId: 'c1', type: 'chat.send', conversationId: 'cv-a', content: '你好' }),
+    )
+    expect(view.conversations.get('cv-a')?.projectId).toBe('pj-1')
+    expect(view.conversations.get('cv-c')?.projectId).toBeNull()
+    expect(view.projects.size).toBe(0)
+  })
+})

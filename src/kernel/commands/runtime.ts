@@ -3,7 +3,7 @@
  */
 import type { Agent, Project, Runtime } from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
-import type { Decision, Environment, Id, Iso, View } from '../types'
+import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
 import { done, ownerDraft, reject, CONCURRENCY_CAP, CONCURRENCY_FLOOR } from './common'
 
 /** 权限模式白名单：`src/protocol/entities.ts` 里的常量是唯一真相源。 */
@@ -235,5 +235,19 @@ export function removeProject(
   if (projectHasTasks(view, current.id)) {
     return reject('conflict', '项目下还有任务，无法删除: ' + current.name)
   }
-  return done([ownerDraft('project.removed', { project: current }, now)])
+  // M11：项目下的会话不随项目消失，归到默认目录（`projectId: null`）；
+  // 逐条产 `conversation.updated` 再删项目，重建与增量折出同一行
+  const facts: FactDraft[] = []
+  for (const conversation of view.conversations.values()) {
+    if (conversation.projectId !== current.id) continue
+    facts.push(
+      ownerDraft(
+        'conversation.updated',
+        { conversation: { ...conversation, projectId: null, updatedAt: now } },
+        now,
+      ),
+    )
+  }
+  facts.push(ownerDraft('project.removed', { project: current }, now))
+  return done(facts)
 }

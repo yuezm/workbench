@@ -1,7 +1,14 @@
 /**
  * 对话命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
-import type { Agent, Conversation, Message, RunRow, Runtime } from '../../protocol/entities'
+import type {
+  Agent,
+  Conversation,
+  Message,
+  Project,
+  RunRow,
+  Runtime,
+} from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
 import { chatPrompt, titleFromContent } from '../prompt'
@@ -37,11 +44,17 @@ function conversationRunCount(view: View, conversationId: Id): number {
   return count
 }
 
-/** 聊天 run 的完整投影行：purpose='chat'，执行配置来自对话绑定的智能体/运行时。 */
+/**
+ * 聊天 run 的完整投影行：purpose='chat'，执行配置来自对话绑定的智能体/运行时。
+ *
+ * 工作目录（M11）：对话所属项目的文件夹；没有项目（默认目录）时回落运行时的 `workdir`，
+ * 再空串——空串由宿主在执行时换成宿主的默认工作目录（`runtimes.default-workdir`）。
+ */
 function chatRunRow(
   conversation: Conversation,
   agent: Agent,
   runtime: Runtime,
+  projects: ReadonlyMap<Id, Project>,
   runId: Id,
   prompt: string,
   turn: number,
@@ -59,7 +72,7 @@ function chatRunRow(
     rulesVersion: 0,
     executorKey: runtime.executorKey,
     threadId: null,
-    cwd: runtime.workdir ?? '',
+    cwd: projects.get(conversation.projectId ?? '')?.path ?? runtime.workdir ?? '',
     access: ACCESS_BY_PERMISSION[runtime.permissionMode],
     skill: null,
     promptRef: null,
@@ -99,10 +112,16 @@ export function createConversation(
 ): Decision {
   const agent = view.agents.get(input.agentId)
   if (!agent) return reject('not_found', '智能体不存在: ' + input.agentId)
+  // M11：聊天和任务共用项目这一顶层上下文；没给项目 = 默认目录（`projectId` 落 null）
+  const projectId = input.projectId?.trim() || null
+  if (projectId !== null && !view.projects.has(projectId)) {
+    return reject('not_found', '项目不存在: ' + projectId)
+  }
   const conversation: Conversation = {
     id: env.nextId('conversation'),
     title: input.title?.trim() || '新对话',
     agentId: agent.id,
+    projectId,
     sessionId: null,
     createdAt: now,
     updatedAt: now,
@@ -165,7 +184,7 @@ export function sendChat(
   facts.push(
     ownerDraft(
       'run.queued',
-      { run: chatRunRow(conversation, agent, runtime, runId, prompt, turn, now) },
+      { run: chatRunRow(conversation, agent, runtime, view.projects, runId, prompt, turn, now) },
       now,
     ),
   )

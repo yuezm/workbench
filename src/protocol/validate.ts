@@ -348,8 +348,8 @@ const checkTaskInput = (value: unknown): Check => {
     required(input.title, 'input.title', COMMAND_LIMITS.title) ??
     optionalText(input.description, 'input.description', COMMAND_LIMITS.description) ??
     requiredId(input.workflowId, 'input.workflowId') ??
-    // M10：任务必须挂在项目下（项目存在性由内核按视图判；这里只挡缺失与形状）
-    requiredId(input.projectId, 'input.projectId') ??
+    // M10 任务挂在项目下；M11 项目可选：省 = 默认目录（项目存在性由内核按视图判）
+    optionalId(input.projectId, 'input.projectId') ??
     optionalId(input.stageId, 'input.stageId') ??
     // M8：人工挂子任务的父任务 id（存在性 / 同工作流 / active 由内核判）
     optionalId(input.parentTaskId, 'input.parentTaskId')
@@ -645,7 +645,9 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'chat.create':
       return (
         requiredId(command.agentId, 'agentId') ??
-        optionalText(command.title, 'title', COMMAND_LIMITS.title)
+        optionalText(command.title, 'title', COMMAND_LIMITS.title) ??
+        // M11：对话可以落到项目上（项目存在性由内核判）；省 = 默认目录
+        optionalId(command.projectId, 'projectId')
       )
     case 'chat.send':
       return requiredId(command.conversationId, 'conversationId') ?? chatContent(command.content)

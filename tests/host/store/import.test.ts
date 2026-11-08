@@ -1284,6 +1284,7 @@ describe('importLegacyIfNeeded：旧聊天表迁移（T14b）', () => {
           id: 'cv-fact',
           title: '事实对话',
           agentId: 'ag-1',
+          projectId: null,
           sessionId: null,
           createdAt: IMPORT_AT,
           updatedAt: IMPORT_AT,

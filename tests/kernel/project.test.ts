@@ -165,6 +165,7 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   id: 'cv-1',
   title: '新对话',
   agentId: 'ag-1',
+  projectId: null,
   sessionId: null,
   archivedAt: null,
   createdAt: AT,
@@ -573,6 +574,31 @@ describe('kernel/project：对话与消息', () => {
       ),
     ).toEqual([
       put('conversations', conversation({ title: '改名', sessionId: 's-1', updatedAt: AT })),
+    ])
+  })
+
+  it('conversation.created / updated：projectId 原样保留（M11 会话挂在项目上）', () => {
+    expect(
+      project(
+        fact(55, 'conversation.created', { conversation: conversation({ projectId: 'pj-1' }) }),
+      ),
+    ).toEqual([put('conversations', conversation({ projectId: 'pj-1' }))])
+    expect(
+      project(
+        fact(56, 'conversation.updated', {
+          conversation: conversation({ projectId: null, updatedAt: AT }),
+        }),
+      ),
+    ).toEqual([put('conversations', conversation({ projectId: null, updatedAt: AT }))])
+  })
+
+  it('conversation.created / updated：老事实缺 projectId 时归一为 null（默认目录）', () => {
+    const legacy = { ...conversation(), projectId: undefined } as unknown as Conversation
+    expect(project(fact(57, 'conversation.created', { conversation: legacy }))).toEqual([
+      put('conversations', conversation()),
+    ])
+    expect(project(fact(58, 'conversation.updated', { conversation: legacy }))).toEqual([
+      put('conversations', conversation()),
     ])
   })
 

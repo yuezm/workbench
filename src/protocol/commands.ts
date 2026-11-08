@@ -237,6 +237,11 @@ export interface ChatCreateCommand extends CommandBase {
   agentId: string
   /** 首条消息可顺带给标题；缺省用「新对话」 */
   title?: string
+  /**
+   * 所属项目（M11）：项目是聊天与任务共用的顶层上下文。
+   * 给了就必须存在（内核校验）；省 / null = 默认目录。
+   */
+  projectId?: string | null
 }
 
 /** 发一轮：先落用户消息再入队 `purpose='chat'` 的 run；被拒绝时不落消息。 */

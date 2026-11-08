@@ -585,9 +585,20 @@ describe('protocol/validate', () => {
     expect(rejectedMessage(cmd('task.create', { input: { title: 't' } }))).toBe(
       'input.workflowId必填',
     )
-    expect(rejectedMessage(cmd('task.create', { input: { title: 't', workflowId: 'wf1' } }))).toBe(
-      'input.projectId必填',
-    )
+    // M11：projectId 可选（省 = 默认目录），给了才校验形状
+    expect(
+      validateCommand(cmd('task.create', { input: { title: 't', workflowId: 'wf1' } })).ok,
+    ).toBe(true)
+    expect(
+      validateCommand(
+        cmd('task.create', { input: { title: 't', workflowId: 'wf1', projectId: null } }),
+      ).ok,
+    ).toBe(true)
+    expect(
+      rejectedMessage(
+        cmd('task.create', { input: { title: 't', workflowId: 'wf1', projectId: 7 } }),
+      ),
+    ).toBe('input.projectId必须是字符串')
     expect(
       rejectedMessage(
         cmd('task.create', {

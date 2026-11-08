@@ -5,7 +5,14 @@
  * 缺 agent/runtime、title 截断、turn 递增、rename/remove、聊天终态 sessionId 落回对话。
  */
 import { describe, expect, it } from 'vitest'
-import type { Agent, Conversation, Message, RunRow, Runtime } from '../../src/protocol/entities'
+import type {
+  Agent,
+  Conversation,
+  Message,
+  Project,
+  RunRow,
+  Runtime,
+} from '../../src/protocol/entities'
 import { decide } from '../../src/kernel/decide'
 import { receiptBlockHint } from '../../src/kernel/prompt'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
@@ -65,7 +72,19 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
   id: 'cv-1',
   title: '新对话',
   agentId: 'ag-1',
+  projectId: null,
   sessionId: null,
+  createdAt: CREATED,
+  updatedAt: CREATED,
+  ...over,
+})
+
+/** M11：项目（聊天与任务共用的顶层上下文）；`path` 就是该项目下 run 的工作目录。 */
+const project = (over: Partial<Project> = {}): Project => ({
+  id: 'pj-1',
+  name: '工作台',
+  path: 'D:/work',
+  description: '',
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -129,6 +148,7 @@ const chatRun = (over: Partial<RunRow> = {}): RunRow => ({
 interface Seed {
   agents?: Agent[]
   runtimes?: Runtime[]
+  projects?: Project[]
   conversations?: Conversation[]
   messages?: Message[]
   runs?: RunRow[]
@@ -140,7 +160,7 @@ const view = (seed: Seed = {}): View => ({
   stages: new Map(),
   agents: new Map((seed.agents ?? []).map((row) => [row.id, row])),
   runtimes: new Map((seed.runtimes ?? []).map((row) => [row.id, row])),
-  projects: new Map(),
+  projects: new Map((seed.projects ?? []).map((row) => [row.id, row])),
   tasks: new Map(),
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
@@ -211,6 +231,7 @@ describe('kernel/decide conversation.create', () => {
               id: 'conversation-new-1',
               title: '新对话',
               agentId: 'ag-1',
+              projectId: null,
               sessionId: null,
               createdAt: NOW,
               updatedAt: NOW,
@@ -238,6 +259,88 @@ describe('kernel/decide conversation.create', () => {
       facts: [],
       reject: { code: 'not_found', message: '智能体不存在: ag-404' },
     })
+  })
+})
+
+describe('kernel/decide 对话归属项目（M11）', () => {
+  it('带项目建会话：projectId 落行（项目 id 前后空白被 trim）', () => {
+    const decision = decide(
+      view({ agents: [agent()], projects: [project()] }),
+      { commandId: 'm11-chat', type: 'chat.create', agentId: 'ag-1', projectId: ' pj-1 ' },
+      NOW,
+      env(),
+    )
+
+    expect(decision.reject).toBeUndefined()
+    expect((decision.facts[0]?.payload as { conversation: Conversation }).conversation).toEqual({
+      id: 'conversation-new-1',
+      title: '新对话',
+      agentId: 'ag-1',
+      projectId: 'pj-1',
+      sessionId: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    })
+  })
+
+  it('项目不存在：reject not_found 且零事实', () => {
+    expect(
+      decide(
+        view({ agents: [agent()], projects: [] }),
+        { commandId: 'm11-chat', type: 'chat.create', agentId: 'ag-1', projectId: 'pj-9' },
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [], reject: { code: 'not_found', message: '项目不存在: pj-9' } })
+  })
+
+  it('无项目 / 空字符串项目：落 null（默认目录）', () => {
+    for (const projectId of [undefined, null, '', '   ']) {
+      const decision = decide(
+        view({ agents: [agent()] }),
+        {
+          commandId: 'm11-chat',
+          type: 'chat.create',
+          agentId: 'ag-1',
+          ...(projectId === undefined ? {} : { projectId }),
+        },
+        NOW,
+        env(),
+      )
+      expect(decision.reject).toBeUndefined()
+      expect(
+        (decision.facts[0]?.payload as { conversation: Conversation }).conversation.projectId,
+      ).toBeNull()
+    }
+  })
+
+  it('chat.send：run.cwd 取会话所属项目的文件夹', () => {
+    const decision = send(
+      fullChatView({
+        projects: [project({ id: 'pj-1', path: 'D:/work/项目' })],
+        conversations: [conversation({ projectId: 'pj-1' })],
+      }),
+      '开工',
+    )
+
+    expect((decision.facts[2]?.payload as { run: RunRow }).run.cwd).toBe('D:/work/项目')
+  })
+
+  it('chat.send：没有项目 / 项目已被删：cwd 回落运行时 workdir，再空串', () => {
+    const fallback = send(
+      fullChatView({ conversations: [conversation({ projectId: 'pj-deleted' })] }),
+      '开工',
+    )
+    expect((fallback.facts[2]?.payload as { run: RunRow }).run.cwd).toBe('C:/work')
+
+    const emptyWorkdir = send(
+      fullChatView({
+        runtimes: [runtime({ workdir: null })],
+        conversations: [conversation({ projectId: 'pj-deleted' })],
+      }),
+      '开工',
+    )
+    expect((emptyWorkdir.facts[2]?.payload as { run: RunRow }).run.cwd).toBe('')
   })
 })
 
@@ -573,7 +676,11 @@ describe('kernel/decide conversation.archive', () => {
   })
 
   it('恢复：archived=false 清空 archivedAt', () => {
-    const decision = archive(fullChatView({ conversations: [conversation({ archivedAt: LATER })] }), 'cv-1', false)
+    const decision = archive(
+      fullChatView({ conversations: [conversation({ archivedAt: LATER })] }),
+      'cv-1',
+      false,
+    )
     expect(decision.facts).toHaveLength(1)
     expect((decision.facts[0]?.payload as { conversation: Conversation }).conversation).toEqual({
       ...conversation(),

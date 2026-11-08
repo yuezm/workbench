@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Card, RunEvent, Task } from '../../src/protocol/entities'
+import type { Card, Conversation, RunEvent, Task } from '../../src/protocol/entities'
 import {
   HOST_VIEW_IDS,
   VIEW_IDS,
@@ -62,6 +62,8 @@ describe('protocol/views', () => {
       'task.byId',
       'runs.active-by-task',
       'conversations.all',
+      'conversations.byProject',
+      'conversations.unassigned',
       'messages.byConversation',
       'runs.active-by-conversation',
       'runs.byTask',
@@ -221,5 +223,30 @@ describe('protocol/views：M5 客户端视图', () => {
     expect(VIEW_PARAM_FIELDS['runtimes.models']).toBe('runtimeId')
     expect(VIEW_PARAM_FIELDS['run.approvals']).toBe('runId')
     expect(VIEW_PARAM_FIELDS['runtimes.default-workdir']).toBeUndefined()
+  })
+})
+
+/** M11 项目顶层化：聊天清单按项目过滤 / 未归属（默认目录）。 */
+const convByProjectParams: Assert<
+  Equal<ViewParams<'conversations.byProject'>, { projectId: string }>
+> = true
+const convUnassignedNoParams: Assert<Equal<ViewParams<'conversations.unassigned'>, undefined>> =
+  true
+const convByProjectResult: Assert<Equal<ViewResult<'conversations.byProject'>, Conversation[]>> =
+  true
+const convUnassignedResult: Assert<Equal<ViewResult<'conversations.unassigned'>, Conversation[]>> =
+  true
+
+describe('protocol/views：M11 会话按项目', () => {
+  it('参数与返回类型映射（类型级断言）', () => {
+    expect(convByProjectParams).toBe(true)
+    expect(convUnassignedNoParams).toBe(true)
+    expect(convByProjectResult).toBe(true)
+    expect(convUnassignedResult).toBe(true)
+  })
+
+  it('参数字段只由 byProject 声明，未归属不带参数', () => {
+    expect(VIEW_PARAM_FIELDS['conversations.byProject']).toBe('projectId')
+    expect(VIEW_PARAM_FIELDS['conversations.unassigned']).toBeUndefined()
   })
 })

@@ -3,6 +3,8 @@ import {
   COMMANDS_SQL,
   CONVERSATIONS_M9_ADD_COLUMN_SQL,
   CONVERSATIONS_M9_ADDED_COLUMNS,
+  CONVERSATIONS_M11_ADD_COLUMN_SQL,
+  CONVERSATIONS_M11_ADDED_COLUMNS,
   FACTS_SQL,
   INDEX_SQL,
   PLUGIN_SECRETS_SQL,
@@ -293,15 +295,30 @@ function upgradeLegacyStages(db: DatabaseSync): boolean {
 }
 
 /**
- * 旧 `conversations` 一次性补列（M9 归档）：`archived_at` 可空、无默认，
- * 老对话按「未归档」归一。
+ * 旧 `conversations` 补列清单：M9 归档时间 + M11 所属项目（两批都走上表补列）。
+ * 两列都可空、无默认值：老对话按「未归档」/「默认目录」归一。
+ */
+const CONVERSATIONS_ADDED_COLUMNS = [
+  ...CONVERSATIONS_M9_ADDED_COLUMNS,
+  ...CONVERSATIONS_M11_ADDED_COLUMNS,
+] as const
+
+type ConversationAddedColumn = (typeof CONVERSATIONS_ADDED_COLUMNS)[number]
+
+const CONVERSATIONS_ADD_COLUMN_SQL: Readonly<Record<ConversationAddedColumn, string>> = {
+  ...CONVERSATIONS_M9_ADD_COLUMN_SQL,
+  ...CONVERSATIONS_M11_ADD_COLUMN_SQL,
+}
+
+/**
+ * 旧 `conversations` 一次性补列（M9 归档 / M11 项目）：缺哪列补哪列。
  */
 function upgradeLegacyConversations(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'conversations')
-  const missing = CONVERSATIONS_M9_ADDED_COLUMNS.filter((column) => !columns.has(column))
+  const missing = CONVERSATIONS_ADDED_COLUMNS.filter((column) => !columns.has(column))
   if (missing.length === 0) return false
   withTx(db, () => {
-    for (const column of missing) db.exec(CONVERSATIONS_M9_ADD_COLUMN_SQL[column])
+    for (const column of missing) db.exec(CONVERSATIONS_ADD_COLUMN_SQL[column])
   })
   return true
 }
@@ -342,7 +359,7 @@ export function openDatabase(filePath: string): DatabaseSync {
     upgradeLegacyRuntimes(db)
     // M7：阶段补交接两列（只增不改）；M8 / M9 同法补子任务与阶段说明
     upgradeLegacyStages(db)
-    // M9：对话补归档时间（只增不改）
+    // M9 / M11：对话补归档时间与所属项目（只增不改）
     upgradeLegacyConversations(db)
     // M6 / M6.5 / M7：tasks 需要时物理重建（M7 扩展 origin CHECK），否则只补缺列；必须在导入/写入之前完成。
     rebuildLegacyTasks(db)

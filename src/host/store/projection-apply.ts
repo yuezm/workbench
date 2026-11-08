@@ -409,11 +409,12 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          created_at = excluded.created_at`,
     ),
     conversations: db.prepare(
-      `INSERT INTO conversations (id, title, agent_id, session_id, archived_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO conversations (id, title, agent_id, project_id, session_id, archived_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          agent_id = excluded.agent_id,
+         project_id = excluded.project_id,
          session_id = excluded.session_id,
          archived_at = excluded.archived_at,
          created_at = excluded.created_at,
@@ -656,6 +657,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         conversation.id,
         conversation.title,
         conversation.agentId,
+        // M11：老事实 / 存量导入行没有项目，按 null（默认目录）归一
+        conversation.projectId ?? null,
         conversation.sessionId,
         conversation.archivedAt ?? null,
         conversation.createdAt,

@@ -2,7 +2,13 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '../../../src/kernel/types'
-import type { RunRow, Runtime, Task, WorkflowStage } from '../../../src/protocol/entities'
+import type {
+  Conversation,
+  RunRow,
+  Runtime,
+  Task,
+  WorkflowStage,
+} from '../../../src/protocol/entities'
 import type { PluginSettingsRow } from '../../../src/protocol/plugins'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '../../../src/protocol/rules'
 import { withTx } from '../../../src/host/schema'
@@ -739,5 +745,41 @@ describe('createProjectionWriter：列默认值兜底', () => {
     expect(
       db.prepare('SELECT instructions FROM workflow_stages WHERE id = ?').get(stage.id),
     ).toEqual({ instructions: '' })
+  })
+
+  it('conversations：project_id 逐列落库；老行缺 projectId 按 null（默认目录）归一', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const runtime = sample.runtime()
+    const agent = sample.agent()
+    writer.apply({ table: 'runtimes', key: runtime.id, row: runtime }, SAMPLE_AT)
+    writer.apply({ table: 'agents', key: agent.id, row: agent }, SAMPLE_AT)
+
+    const assigned = sample.conversation({ id: 'cv-assigned', projectId: 'pj-1' })
+    writer.apply({ table: 'conversations', key: assigned.id, row: assigned }, SAMPLE_AT)
+    // 兼容旧快照（M11 前的快照导入行）：负载里没有 projectId
+    const legacy = {
+      ...sample.conversation({ id: 'cv-legacy' }),
+      projectId: undefined,
+    } as unknown as Conversation
+    writer.apply({ table: 'conversations', key: legacy.id, row: legacy }, SAMPLE_AT)
+
+    expect(db.prepare('SELECT id, project_id FROM conversations ORDER BY id').all()).toEqual([
+      { id: 'cv-assigned', project_id: 'pj-1' },
+      { id: 'cv-legacy', project_id: null },
+    ])
+
+    // 项目删除后内核产 conversation.updated{projectId:null}：整行覆盖，项目引用被清掉
+    writer.apply(
+      {
+        table: 'conversations',
+        key: assigned.id,
+        row: { ...assigned, projectId: null, updatedAt: LATER_AT },
+      },
+      SAMPLE_AT,
+    )
+    expect(
+      db.prepare('SELECT project_id, updated_at FROM conversations WHERE id = ?').get(assigned.id),
+    ).toEqual({ project_id: null, updated_at: LATER_AT })
   })
 })

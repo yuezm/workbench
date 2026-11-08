@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Command } from '../../src/protocol/commands'
 import type {
   Agent,
+  Conversation,
   Project,
   Runtime,
   Task,
@@ -79,6 +80,18 @@ const project = (over: Partial<Project> = {}): Project => ({
   ...over,
 })
 
+/** M11：会话也挂在项目上；`projectId: null` = 默认目录。 */
+const conversation = (over: Partial<Conversation> = {}): Conversation => ({
+  id: 'cv-1',
+  title: '新对话',
+  agentId: 'ag-1',
+  projectId: 'pj-1',
+  sessionId: null,
+  createdAt: CREATED,
+  updatedAt: CREATED,
+  ...over,
+})
+
 const task = (over: Partial<Task> = {}): Task => ({
   id: 't-1',
   title: '任务',
@@ -107,6 +120,7 @@ interface Seed {
   runtimes?: Runtime[]
   projects?: Project[]
   tasks?: Task[]
+  conversations?: Conversation[]
   rules?: AutomationRule[]
   rulesVersion?: number
 }
@@ -120,7 +134,7 @@ const view = (seed: Seed = {}): View => ({
   projects: new Map((seed.projects ?? [project()]).map((row) => [row.id, row])),
   tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
   runs: new Map(),
-  conversations: new Map(),
+  conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
   messages: new Map(),
   cards: new Map(),
   activeTaskIds: new Set(),
@@ -305,19 +319,69 @@ describe('kernel/decide 项目（M10）', () => {
     expect((ok.facts[0]?.payload as { project: Project }).project.id).toBe('pj-1')
   })
 
-  it('task.create：缺项目 / 项目不存在被拒；行上落 projectId，运行目录取项目文件夹', () => {
+  it('project.remove：项目下的会话归默认目录（先逐条 conversation.updated，再 project.removed）', () => {
+    const ok = decide(
+      view({
+        conversations: [
+          conversation({ id: 'cv-1', projectId: 'pj-1', sessionId: 'sess-1' }),
+          conversation({ id: 'cv-2', projectId: 'pj-2' }),
+          conversation({ id: 'cv-3', projectId: null }),
+        ],
+      }),
+      command({ type: 'project.remove', id: 'pj-1' }),
+      NOW,
+      env(),
+    )
+
+    expect(ok.reject).toBeUndefined()
+    expect(ok.facts.map((fact) => fact.type)).toEqual(['conversation.updated', 'project.removed'])
+    expect(ok.facts[0]?.payload).toEqual({
+      conversation: {
+        ...conversation({ id: 'cv-1', sessionId: 'sess-1' }),
+        projectId: null,
+        updatedAt: NOW,
+      },
+    })
+    expect((ok.facts[1]?.payload as { project: Project }).project.id).toBe('pj-1')
+  })
+
+  it('project.remove：项目下没有会话时零 conversation.updated（只删项目）', () => {
+    const ok = decide(
+      view({ conversations: [conversation({ id: 'cv-2', projectId: 'pj-2' })] }),
+      command({ type: 'project.remove', id: 'pj-1' }),
+      NOW,
+      env(),
+    )
+    expect(ok.facts.map((fact) => fact.type)).toEqual(['project.removed'])
+  })
+
+  it('task.create：省项目成功且 projectId=null（默认目录）；项目不存在被拒', () => {
     const base = view({
       stages: [stage({ entryMode: 'agent', agentId: 'ag-1' })],
       agents: [agent()],
       runtimes: [runtime()],
     })
-    const missing = decide(
-      base,
-      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1' } as never }),
-      NOW,
-      env(),
-    )
-    expect(missing.reject).toEqual({ code: 'invalid_input', message: '任务必须属于一个项目' })
+    // M11：省 / null / 空白项目 = 默认目录，任务照建，`projectId` 落 null
+    for (const projectId of [undefined, null, '   ']) {
+      const ok = decide(
+        base,
+        command({
+          type: 'task.create',
+          input: {
+            title: 't',
+            workflowId: 'wf-1',
+            ...(projectId === undefined ? {} : { projectId }),
+          },
+        }),
+        NOW,
+        env(),
+      )
+      expect(ok.reject).toBeUndefined()
+      expect(createdTaskOf(ok).projectId).toBeNull()
+      // 没有项目时工作目录回落运行时 workdir（宿主再把空串换成默认目录）
+      const queued = ok.facts.find((fact) => fact.type === 'run.queued')
+      expect((queued?.payload as { run: { cwd: string } }).run.cwd).toBe('C:/runtime')
+    }
 
     expect(
       decide(
@@ -377,6 +441,40 @@ describe('kernel/decide 项目（M10）', () => {
       env(),
     )
     expect(createdTaskOf(ok).projectId).toBe('pj-1')
+
+    // 子任务不显式给项目：继承父任务的项目
+    const inherited = decide(
+      seeded,
+      command({
+        type: 'task.create',
+        input: { title: '子任务', workflowId: 'wf-1', parentTaskId: 't-1' },
+      }),
+      NOW,
+      env(),
+    )
+    expect(createdTaskOf(inherited).projectId).toBe('pj-1')
+  })
+
+  it('task.create：父任务没有项目（默认目录）时子任务也是 null，即便显式给了项目', () => {
+    const ok = decide(
+      view({
+        projects: [project({ id: 'pj-2', name: '另一个', path: 'D:/other' })],
+        tasks: [task({ projectId: null, threadId: 'th-1' })],
+      }),
+      command({
+        type: 'task.create',
+        input: {
+          title: '子任务',
+          workflowId: 'wf-1',
+          projectId: 'pj-2',
+          parentTaskId: 't-1',
+        },
+      }),
+      NOW,
+      env(),
+    )
+    expect(ok.reject).toBeUndefined()
+    expect(createdTaskOf(ok).projectId).toBeNull()
   })
 
   it('rules.replace：规则目标项目必须存在（老规则不带 projectId 仍可保存）', () => {

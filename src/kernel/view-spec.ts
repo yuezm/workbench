@@ -48,8 +48,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'project.update':
       return ['projects']
     case 'project.remove':
-      // 项目下还有任务时拒绝删除
-      return ['projects', 'tasks']
+      // 项目下还有任务时拒绝删除；M11：删项目要把该项目下的会话归到默认目录
+      // （逐条产 conversation.updated），因此还要读会话
+      return ['projects', 'tasks', 'conversations']
     case 'task.create':
       // 进入效果要判定落点是否 agent 入口并拼提示词 → 需要智能体与运行时配置；
       // M6.5：隐式线程在决策里本地构造（不读 threads），首轮无续接、无线程上下文历史
@@ -179,11 +180,13 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'task_comments',
       ]
     case 'chat.create':
-      // 对话绑定的智能体必须存在（M5 命令化后沿用原 conversation.create 语义）
-      return ['agents']
+      // 对话绑定的智能体必须存在（M5 命令化后沿用原 conversation.create 语义）；
+      // M11：对话可以落到项目上（项目必须存在，否则拒绝）
+      return ['agents', 'projects']
     case 'chat.send':
-      // 同一对话同时只跑一轮（runs）+ 智能体/运行时决定 execution 配置
-      return ['conversations', 'messages', 'runs', 'agents', 'runtimes']
+      // 同一对话同时只跑一轮（runs）+ 智能体/运行时决定 execution 配置；
+      // M11：工作目录取对话所属项目的文件夹，没有项目才回落运行时的 workdir
+      return ['conversations', 'messages', 'runs', 'agents', 'runtimes', 'projects']
     case 'chat.remove':
       // 消息随对话一并删除，删除前要能解释历史
       return ['conversations', 'messages']

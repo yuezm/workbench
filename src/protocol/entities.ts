@@ -416,8 +416,11 @@ export interface TaskInput {
   title: string
   description?: string
   workflowId: string
-  /** 所属项目（M10，必填）：项目必须存在；任务的运行工作目录取该项目的文件夹 */
-  projectId: string
+  /**
+   * 所属项目（M10 必填 → M11 可选）：给了就必须存在，任务的运行工作目录取该项目文件夹；
+   * 省 / null = 默认目录（与聊天同口径，`Task.projectId` 落 null）。
+   */
+  projectId?: string | null
   /** 起始阶段；缺省为首阶段 */
   stageId?: string
   /** M8：人工挂子任务时的父任务 id（校验父存在、同工作流、active） */
@@ -667,11 +670,21 @@ export const CHAT_ROLES = ['user', 'assistant'] as const
 
 export type ChatRole = (typeof CHAT_ROLES)[number]
 
-/** 一段独立对话：绑定一个智能体，与工作流/任务无关（`purpose='chat'` 的 run 挂在它上面） */
+/**
+ * 一段独立对话：绑定一个智能体，不挂任务、不推进阶段（`purpose='chat'` 的 run 挂在它上面）。
+ *
+ * M11 起对话和任务共用同一个**项目**维度：项目是顶层上下文，聊天与任务都落在项目上；
+ * 没有项目（`projectId: null`）= 默认目录（宿主的 `~/.workbench` / `WORKBENCH_WORKDIR`）。
+ */
 export interface Conversation {
   id: string
   title: string
   agentId: string
+  /**
+   * 所属项目（M11）：新建对话时由命令携带，之后不再改；项目删除时内核把会话归到默认目录。
+   * 老事实 / 存量行缺该字段，按 null 归一（默认目录）。
+   */
+  projectId: string | null
   /** 上一轮的协议会话 id；下一轮用它续接，避免整段历史重发 */
   sessionId: string | null
   /**

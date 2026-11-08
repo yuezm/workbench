@@ -145,7 +145,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'runtime.probed': ['runtimes'],
   'project.create': ['projects'],
   'project.update': ['projects'],
-  'project.remove': ['projects', 'tasks'],
+  'project.remove': ['projects', 'tasks', 'conversations'],
   'task.create': [
     'workflows',
     'workflow_stages',
@@ -227,8 +227,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'threads',
     'task_comments',
   ],
-  'chat.create': ['agents'],
-  'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes'],
+  'chat.create': ['agents', 'projects'],
+  'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes', 'projects'],
   'chat.remove': ['conversations', 'messages'],
   'chat.cancel': ['conversations', 'runs'],
   'chat.archive': ['conversations'],
@@ -336,5 +336,15 @@ describe('kernel/view-spec', () => {
     expect(viewSpec(byType.get('chat.send') as Input)).toContain('conversations')
     expect(viewSpec(byType.get('clock.tick') as Input)).toContain('runs')
     expect(viewSpec(byType.get('clock.tick') as Input)).toContain('rule_sets')
+  })
+
+  it('M11 项目顶层化：聊天要装 projects（工作目录），删项目要装 conversations（归默认目录）', () => {
+    expect(viewSpec(byType.get('chat.create') as Input)).toEqual(['agents', 'projects'])
+    expect(viewSpec(byType.get('chat.send') as Input)).toContain('projects')
+    expect(viewSpec(byType.get('project.remove') as Input)).toEqual([
+      'projects',
+      'tasks',
+      'conversations',
+    ])
   })
 })

@@ -45,6 +45,8 @@ export const VIEW_IDS = [
   'task.byId',
   'runs.active-by-task',
   'conversations.all',
+  'conversations.byProject',
+  'conversations.unassigned',
   'messages.byConversation',
   'runs.active-by-conversation',
   'runs.byTask',
@@ -156,6 +158,7 @@ export interface ViewArgs {
   'tasks.byParent': { taskId: string }
   'task.byId': { taskId: string }
   'runs.active-by-task': { taskId: string }
+  'conversations.byProject': { projectId: string }
   'messages.byConversation': { conversationId: string }
   'runs.active-by-conversation': { conversationId: string }
   'runs.byTask': { taskId: string }
@@ -190,6 +193,7 @@ export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'tasks.byParent': 'taskId',
   'task.byId': 'taskId',
   'runs.active-by-task': 'taskId',
+  'conversations.byProject': 'projectId',
   'messages.byConversation': 'conversationId',
   'runs.active-by-conversation': 'conversationId',
   'runs.byTask': 'taskId',
@@ -222,6 +226,13 @@ export interface ViewResults {
   'task.byId': Task | null
   'runs.active-by-task': ActiveRun[]
   'conversations.all': Conversation[]
+  /**
+   * 某项目下的对话（M11）：聊天清单按当前项目过滤，口径与 `tasks.byProject` 一致。
+   * 项目是聊天与任务共用的顶层上下文。
+   */
+  'conversations.byProject': Conversation[]
+  /** 没有项目的对话（M11）：归入「默认目录」，老事实 / 存量行同样落这里 */
+  'conversations.unassigned': Conversation[]
   'messages.byConversation': Message[]
   'runs.active-by-conversation': ActiveRun[]
   'runs.byTask': Run[]

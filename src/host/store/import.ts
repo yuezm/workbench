@@ -468,6 +468,8 @@ function readLegacyChatRows(db: DatabaseSync): {
     id: row.id,
     title: row.title,
     agentId: row.agent_id,
+    // M11：旧聊天表没有项目概念——一律落默认目录
+    projectId: null,
     sessionId: row.session_id,
     // M9：旧聊天表没有归档概念——一律未归档
     archivedAt: null,

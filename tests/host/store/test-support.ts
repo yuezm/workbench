@@ -221,6 +221,7 @@ export const sample = {
       id: 'cv-1',
       title: '新对话',
       agentId: 'ag-1',
+      projectId: null,
       sessionId: null,
       archivedAt: null,
       createdAt: SAMPLE_AT,

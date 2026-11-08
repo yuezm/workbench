@@ -48,20 +48,24 @@ export function createTask(
       return reject('conflict', '父任务已完成，不能挂子任务: ' + parentId)
     }
   }
-  // M10：任务必须挂在项目下（项目 = 本地文件夹 = 运行工作目录）。
+  // M11：项目是聊天与任务共用的顶层上下文；省 / 空 = 默认目录（`projectId` 落 null），
+  // 给了就必须存在（存在性只在视图里判，不靠外键）。
   const requestedProjectId = form.projectId?.trim() ?? ''
-  if (!requestedProjectId) return reject('invalid_input', '任务必须属于一个项目')
-  if (!view.projects.has(requestedProjectId)) {
+  if (requestedProjectId !== '' && !view.projects.has(requestedProjectId)) {
     return reject('not_found', '项目不存在: ' + requestedProjectId)
   }
-  if (
-    parent !== undefined &&
-    parent.projectId !== null &&
-    parent.projectId !== requestedProjectId
-  ) {
-    return reject('invalid_input', '子任务必须属于父任务的项目: ' + parent.projectId)
+  // 子任务与父任务同项目：父任务没有项目（默认目录）时子任务也落默认目录；
+  // 父任务有项目时子任务继承，显式给了别的项目仍拒绝（M8 判定）
+  let projectId: string | null = requestedProjectId === '' ? null : requestedProjectId
+  if (parent !== undefined) {
+    if (parent.projectId === null) {
+      projectId = null
+    } else if (projectId !== null && projectId !== parent.projectId) {
+      return reject('invalid_input', '子任务必须属于父任务的项目: ' + parent.projectId)
+    } else {
+      projectId = parent.projectId
+    }
   }
-  const projectId = parent?.projectId ?? requestedProjectId
   // 子任务继承父任务线程；没有父线程（或父任务无线程）时新建隐式线程
   const parentThread = parent?.threadId == null ? undefined : view.threads.get(parent.threadId)
   const thread =

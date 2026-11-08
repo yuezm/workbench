@@ -35,11 +35,17 @@ describe('renderer 入口 main.tsx', () => {
     delete (window as unknown as { workbench?: WorkbenchApi }).workbench
   })
 
-  it('preload 未注入：装配前明确报错，不挂载 DOM', async () => {
-    await expect(import('../../../src/renderer/src/main')).rejects.toThrow(
-      'window.workbench 未注入（preload 未加载）',
-    )
-    expect(createRootMock).not.toHaveBeenCalled()
+  it('preload 未注入：渲染启动失败页，不白屏、不挂载 Workbench', async () => {
+    const { StartupFailure } =
+      await import('../../../src/renderer/src/shell/components/StartupFailure')
+    await import('../../../src/renderer/src/main')
+
+    expect(createRootMock).toHaveBeenCalledTimes(1)
+    expect(renderMock).toHaveBeenCalledTimes(1)
+    const element = renderMock.mock.calls[0][0] as { type: unknown }
+    expect(element.type).toBe(StartupFailure)
+    // 没有桥接就不该去装配内核（否则会连不上宿主的订阅）
+    expect(queryMock).not.toHaveBeenCalled()
   })
 
   it('有桥接：先装配 kernel（取 kernel.seq 快照）再 createRoot().render(Workbench)', async () => {

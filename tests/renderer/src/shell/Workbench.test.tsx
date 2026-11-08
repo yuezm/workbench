@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AppPlugin } from '../../../../src/renderer/src/shell/types'
 import { Workbench } from '../../../../src/renderer/src/shell/Workbench'
 
@@ -34,5 +34,32 @@ describe('Workbench 空清单', () => {
     render(<Workbench apps={[]} />)
     expect(screen.queryAllByRole('button')).toHaveLength(0)
     expect(screen.getByText('Workbench')).toBeInTheDocument()
+  })
+})
+
+describe('Workbench 渲染兜底', () => {
+  it('某个 app 渲染抛错：只有内容槽变成兜底，顶部栏仍可切到别的 app', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const boom: AppPlugin = {
+      id: 'app-boom',
+      name: '会炸的',
+      icon: FakeIcon,
+      component: () => {
+        throw new Error('视图数据形状不对')
+      },
+    }
+    const user = userEvent.setup()
+    render(<Workbench apps={[boom, makeApp('app-ok', '正常的', '内容B')]} />)
+
+    // 白窗换成 role=alert 的兜底：标题 + 异常文案
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent('界面出错了')
+    expect(alert).toHaveTextContent('视图数据形状不对')
+
+    // 切到正常 app：边界按 app 重建，界面恢复
+    await user.click(screen.getByRole('button', { name: '正常的' }))
+    expect(screen.getByText('内容B')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    error.mockRestore()
   })
 })

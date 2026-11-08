@@ -15,7 +15,7 @@
 - 配置**运行时**：运行时 = 本机执行环境实例（执行器插件 + 启动命令 + profile + 权限模式 + 模型/推理强度 + 工作目录 + 并发上限 + 启用开关）；内置执行器插件 `dsh`、`claude`（Claude Code）、`hermes`（Hermes Agent / ACP）与 `command`，其余（codex 等）后续按「插件目录 + registry 一行」接入，不改内核与宿主。
 - **识别**已安装的运行时：运行时配置页扫描本机 PATH，自动列出已安装的 agent CLI，点「使用」打开新建表单并把名称与命令预填进去（不自动建记录，profile/权限模式等仍由用户确认）。
 - 配置**智能体**：名称、描述、执行配置（绑定某个运行时）、能力（System Prompt）。
-- 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【进入时】【完成后进入】【打回时退回到】。
+- 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【类型】【完成后进入】【出错时进入】；类型选「闸门（判定）」时改设【允许未通过次数】【通过时进入】【未通过时进入】（M11）。阶段详情按类型收敛字段：**不交接**与**交给用户**只留【名称】【类型】，其余字段（智能体 / 流转目标 / 交接 / 子任务 / 闸门配置 / 要干什么）一律不展示；**交给智能体**展示流转目标 / 交接 / 子任务 / 要干什么；**闸门（判定）**只展示次数、过与没过去向、要干什么——闸门只判定，不交接、不拆子任务，也不配「完成 / 出错」去向。界面上不展示的字段在保存时归一成默认值（「要干什么」原文保留）。
 - 用**看板**查看与推进任务：列 = 当前所选工作流的阶段；新建任务时可选**起始阶段**，之后把卡片**拖拽**到其它阶段列（或「归档」区）推进，不设执行按钮。
 
 **用户故事：**
@@ -44,7 +44,7 @@ app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区�
 
 - **运行时配置**：已配置运行时清单（健康状态、CLI 版本、启动头、负载、路径）；上方是「已安装的运行时」检测清单（自动扫描本机 CLI，点「使用」打开并预填新建表单）。每条已配置运行时提供「测试」做探测（见「运行时探测与健康」），可编辑（含删除）。
 - **智能体配置**：已配置智能体清单（名称、绑定运行时、描述、能力）。
-- **工作流配置**：工作流定义清单（新建 / 选择 / 编辑）；顶部另有「SOP 模板」入口，列出开箱 SOP（产品发现 / 研发交付 / 测试质量 / 发版运维 / 事故复盘 / 迭代回顾），选中即把阶段序列与每阶段「要干什么」预填进同一个编辑器，**保存前不落库**；模板不替用户绑定智能体（阶段 `entryMode='agent'` 仍需用户选 agent 才能通过内核校验）。
+- **工作流配置**：工作流定义清单（新建 / 选择 / 编辑）。新建只有一个入口：「新建工作流」按钮展开下拉（`components/ui/menu.tsx`），第一组是「从空白创建」（一个「待办」阶段），第二组是开箱 SOP 模板（产品发现 / 研发交付 / 测试质量 / 发版运维 / 事故复盘 / 迭代回顾，条目带阶段数与适用场景）；选中任一即把对应草稿（模板连每阶段「要干什么」）预填进同一个编辑器，**保存前不落库**。模板不替用户绑定智能体（阶段 `entryMode='agent'` 仍需用户选 agent 才能通过内核校验）。
 
 规则：
 
@@ -92,7 +92,7 @@ src/renderer/src/apps/ai-workflow/
     ├── ConversationList.tsx   # 聊天栏目的上下文列表：智能体选择 / 新建对话 / 会话清单
     ├── ChatPanel.tsx          # 聊天栏目内容区：消息流 + 输入区（流式回显、可中止）
     ├── WorkflowSwitcher.tsx   # 任务栏目侧栏：切换当前查看的工作流
-    ├── WorkflowManager.tsx    # 工作流配置栏目：工作流清单（新建 / 选择 / 编辑）
+    ├── WorkflowManager.tsx    # 工作流配置栏目：工作流清单（新建 / 选择 / 编辑）；「新建工作流」下拉含空白与 SOP 模板
     ├── SettingsNav.tsx        # 设置页左侧二级栏目（运行时 / 智能体 / 工作流）
     ├── KanbanBoard.tsx        # 列 = 阶段；卡片拖拽跨列 + 「已完成」落点；单击卡片进任务详情
     ├── TaskCard.tsx           # 标题/描述/进入方式提示（可拖拽卡片 + 详情入口）
@@ -111,7 +111,8 @@ src/renderer/src/apps/ai-workflow/
     ├── RuntimeDialog.tsx      # 新建/编辑运行时：执行器选择/命令/profile/参数模板/权限模式/模型/推理强度/工作目录/并发/启用
     ├── AgentManager.tsx       # 智能体配置页：已配置清单
     ├── AgentDialog.tsx        # 新建智能体（居中模态）
-    └── ApprovalBar.tsx        # 顶部「待审批」条：open 卡标题/选项，点击即回答（M4）
+    ├── ApprovalBar.tsx        # 顶部通知条：只列 open 卡标题 + 落点，点击进任务详情 / 会话（M4；本轮收紧为信标）
+    └── ApprovalCards.tsx      # 卡片处理区：正文 + 选项 + 「知道了」，内嵌在任务详情与聊天面板
 
 src/main/ai-workflow/
 └── ipc.ts                     # 注册 ai-workflow IPC handlers（读投影 / 写走 effects.dispatch；执行器 key 与默认值按插件 manifest 补齐；M4 卡片读写）
@@ -193,15 +194,16 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 - `on_complete` 目标：显式配置 → 该阶段；未配置 → **下一顺序阶段**；已无下一阶段 → 任务 `completed`。
 - `on_reject` 目标：显式配置 → 该阶段；未配置（不指定）→ **留在原地、不做任何流转**。
+- 闸门（`gate`）目标：`verdict=pass` → `onPassStageId`（未配置 → 下一顺序阶段）；`verdict=fail` 且未达 `maxFails` → `onFailStageId`（未配置 → 原地不动）；`fail` 且已达 `maxFails` → **放行**走通过分支，任务打 `gate:degraded` 标签并追加一条反馈。
 
-手动拖拽**不套用**上面两个目标：落点即目标阶段（可跨阶段前跳/后退）。
+手动拖拽**不套用**上面三个目标：落点即目标阶段（可跨阶段前跳/后退），闸门预算同时清零。
 
 **事件与转移：**
 
 | 事件               | 触发时机                     | 行为                                                                                                                                  |
 | ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | ENTER(stage)       | 新建任务 / 流转到某阶段      | 按该阶段 `entry_mode`：`none` 停留等待手动操作；`agent` 创建一条 `queued` run（交给 `agent_id`，视为执行中）；`user` 置为"等待你处理" |
-| RUN_SUCCEEDED(run) | agent run 正常结束           | 进入 `on_complete` 目标；到终端则 `completed`                                                                                         |
+| RUN_SUCCEEDED(run) | agent run 正常结束           | 普通阶段进 `on_complete` 目标；闸门阶段按回执 `verdict` 分流（见下）；到终端则 `completed`                                            |
 | RUN_FAILED(run)    | agent run 非零退出/超时/异常 | 进入 `on_reject` 目标；若未配置打回目标（不指定）或目标就是当前阶段则保持原阶段、**不触发进入效果**（不自动重建 run）                 |
 | MOVE_TO(stage)     | 用户把卡片拖到某个阶段列     | 直接进入该阶段（不套用 `on_complete`/`on_reject`）；该任务有活跃 run 时拒绝拖动                                                       |
 | COMPLETE           | 用户把卡片拖到「归档」区     | 任务 `completed`，移出看板；该任务有活跃 run 时拒绝完成                                                                               |
@@ -209,6 +211,15 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 **流转即触发进入：** 每次进入新阶段都重新按 `entry_mode` 产生对应效果（可能再次创建 run），即"SOP 串联"。
 
 **打回原地不重试：** `RUN_FAILED` 时若 `on_reject` 未配置（不指定）或解析结果就是当前阶段（显式配置为自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成（见下）。
+
+**闸门（M11）：** 阶段可设为闸门，由该阶段的智能体在回执里给 `verdict`（`pass` / `fail`）与 `checks`（实际执行的命令 + 退出码）。判定与 `run.status` **正交**：`succeeded` 只说明执行器跑完，`fail` 才是业务上没过。
+
+- `pass` 必须至少带一条 `checks` 且退出码全为 0，否则视为**没给结论**：任务停在闸门等人，既不放行也不消耗预算。
+- `fail` 未达 `maxFails` → 去未通过分支并把任务上的连续未通过次数 +1（回环保留累计值，否则「最多 N 次」永远到不了）。
+- `fail` 已达 `maxFails` → 放行，任务打 `gate:degraded` 标签并追加一条反馈（详情页可见），预算清零。
+- 执行出错（`run.status='failed'`）走 `on_reject`，**不消耗**闸门预算——执行器崩了不等于业务上没过。
+- 闸门未通过而离开本阶段**不算「向前完成」**，不触发跨工作流交接；放行才算。
+- 闸门只判定：编辑器不为闸门提供交接、子任务与「完成 / 出错」两个去向，保存时这些字段一律归一为空（内核侧仍保留 M7/M8/M11 的既有流转语义，只是编辑器不再产出这种配置）。
 
 **执行中 = 有活跃 run：** `queued`/`running`/`waiting` run 才算执行中，由 `runs` 现算（不落库、不看阶段配置）；`tasks.moveToStage`/`tasks.complete` 只在存在活跃 run 时拒绝。任务的阶段在其 run 结束前不变。
 
@@ -357,6 +368,7 @@ export interface DetectedRuntime {
 - 回执 `later`（无 `ask`/`notices`）→ run 回 `queued` 且 `notBefore=later`，由现有 `next-wake` 到点复查；`ask` 优先于 `later`。
 - 回执 `notices` → 空选项信息卡（不阻塞 run）；`resolves` → 关闭同 run 的 open 卡（`reason='agent'`）。`events` → `event.received`（`hops=父+1`）或 `event.dropped`，M4 只入账、不派活。
 - 「执行中」仍 = 存在 `queued`/`running`/`waiting` run；`waiting` 不占并发位、不参与 `nextWave` 的领取。
+- **界面分层（通知 vs 处理）：** 顶部 `ApprovalBar` 只是信标——一行一张卡，只给标题、待选项数与落点（任务 / 对话），**不渲染正文、选项与关闭按钮**；点条目把人送到卡片的落点：挂任务的进任务详情，聊天卡切到对应会话。正文、选项、「知道了」全部由 `ApprovalCards` 在落点内呈现（任务详情信息区之后、会话消息流上方）。系统通知（desktop 通道）同理只给标题 + 固定一句指引，卡片正文不进系统通知。
 
 ## IPC 契约（M5：三动词）
 
@@ -439,7 +451,7 @@ export function completeTask(task: Task): Task
 - **协议后端：** 逐帧解析（ready/session/text/thinking/tool_call/tool_result/usage/result/protocol_error）、`v`/`request_id` 校验、非 JSON 行忽略、usage 累加、终态归一（含 `run_failed`）；取消信号顺序（cancel 帧 → 3s → SIGTERM → 2s → SIGKILL，Windows `taskkill /T /F`）与进程树终止；`--list-models` 投影。
 - **聊天执行链（`tests/host/chat`）：** 假协议后端 + 真实内核/内存库测 `resume_session_id` 续接（只发新消息）、`resume_rejected` 自动重试一次、帧入账→终态→`message.appended` 顺序、非零退出/超时/取消失败落消息、并发第二次 `send` 拒绝、对话执行中被删仍正常收尾。
 - **IPC：** 三动词契约（命令形状 / 视图参数 / 推送事件）在 `tests/protocol`、`tests/host/commands`、`tests/main/ipc`、`tests/preload` 覆盖：命令校验拒绝非法载荷、`commandId` 幂等、拖拽/完成的非法路径（有活跃 run、目标阶段无效）、`runtime.probe` 编排、`detect`/`executors`/`models` 宿主视图只读、`chat.*` 路由与取消；renderer 用 kernelStore 替身覆盖订阅/失效/续传。
-- **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「归档」区触发 `complete`，单击卡片把任务交给上层；TaskCard 可拖拽（有活跃 run 时不可拖）、按进入方式显示提示、点击 / Enter / Space 进详情且线程入口不冒泡；TaskInfoPanel 任务信息（状态 / 阶段 / 来源 / 线程 / 时间 / 标签）；TaskActivity 上下文活动流（运行与反馈混排、text/thinking/tool 折叠、**提权记录**（`run.approvals`：工具 / 理由 / 结果，未知结果原样显示，无记录不占版面）、errorCode 文案、用量/退出码/耗时、空态与事件流失败）；TaskCommentForm 反馈提交（空文本禁用、勾选接着做、提交中禁用、失败保留输入）；TaskDetailPage 三个视图的加载 / 空态 / 读失败与 `task.comment` 提交；ThreadDetailPage 任务列表与笔记 / 绑定 / 归档；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉、**完全访问风险确认**（选中 `danger-full-access` 必须勾选才可保存，换模式即撤销）；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示。
+- **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「归档」区触发 `complete`，单击卡片把任务交给上层；TaskCard 可拖拽（有活跃 run 时不可拖）、按进入方式显示提示、点击 / Enter / Space 进详情且线程入口不冒泡；TaskInfoPanel 任务信息（状态 / 阶段 / 来源 / 线程 / 时间 / 标签）；TaskActivity 上下文活动流（运行与反馈混排、text/thinking/tool 折叠、**提权记录**（`run.approvals`：工具 / 理由 / 结果，未知结果原样显示，无记录不占版面）、errorCode 文案、用量/退出码/耗时、空态与事件流失败）；TaskCommentForm 反馈提交（空文本禁用、勾选接着做、提交中禁用、失败保留输入）；TaskDetailPage 三个视图的加载 / 空态 / 读失败与 `task.comment` 提交；ThreadDetailPage 任务列表与笔记 / 绑定 / 归档；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉、**完全访问风险确认**（选中 `danger-full-access` 必须勾选才可保存，换模式即撤销）；WorkspaceNav 切换条两个栏目切换并渲染上下文列表槽；ConversationList 的智能体选择/新建/选中/删除；ChatPanel 的草稿、Enter 发送、Shift+Enter 换行、发送中中止、空会话与错误提示、**会话内待处理卡**（正文与选项在消息流上方就地作答）；ApprovalBar 只列标题与落点（正文与选项不渲染、无落点的卡禁用、两栏计数互不串栏、读失败只在有卡时提示），ApprovalCards 的正文换行原样展示、选项作答 / 「知道了」关闭 / 重复回答与关闭失败文案 / 作答中禁用、任务详情只收本任务的卡。
 - **聊天 hook（`useChat`）：** 新建/发送/`event` 流式回显/`end` 落库重载/中止/删除/各类错误分支、卸载退订、只处理当前会话的增量。
 - **页面：** 两栏布局下工作台默认落在「聊天」栏（侧栏顶部切换条 + 会话列表可见、设置栏目不可见），切「任务」显示看板并隐藏输入区；单击任务卡进入任务详情页、`返回`/Esc 逐级回栈，线程详情页的任务列表可点进任务详情；侧栏底部「工作台/设置」分段控件切换视图，设置三栏目互不混排。
 - **执行器插件（`tests/plugins`）：** registry 汇总（顺序稳定、`executorKey`/`supported` 回填、同 command 先到先得、单插件抛错或超时隔离、空注册表）、`command` 插件的参数模板展开与 `{prompt}` 二选一（argv 元素 / stdin）、Windows `.cmd` 固定包装、假协议端到端验收（真 registry + 真 scheduler + 内存库）。

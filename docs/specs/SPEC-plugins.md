@@ -234,6 +234,12 @@ export interface Receipt {
   events?: RawEvent[] // 派生新事件（hops 由内核加一）
   /** M8：派生子任务（只声明 subject/summary/stageId/batch/key；父任务与派活目标由内核决定） */
   spawn?: SpawnTask[]
+  /** M6.5：线程笔记（只作资料，每条 ≤2000 字） */
+  notes?: string[]
+  /** M11：闸门判定（只对闸门阶段有意义；缺省 = 没给结论） */
+  verdict?: 'pass' | 'fail'
+  /** M11：判定证据（`{ cmd, exitCode }`，pass 时退出码必须全为 0） */
+  checks?: GateCheck[]
   errorCode?: ErrorCode
   /** 失败原因文案（给人看；与 errorCode 的归类分开） */
   error?: string
@@ -255,7 +261,7 @@ export interface Receipt {
 **回执与执行约定**：
 
 - 回执必须原样回传 `Turn` 里的 `leaseId` 与 `turn`；内核据此拒绝迟到尝试的写入（见 SPEC-kernel「调度」）。
-- **回执块格式（M4 唯一口径，M8 增 spawn）**：执行器取自己最终输出里**最后一个 ```json 围栏块**；该块解析成 JSON 对象后，**只要含 `ask / notices / resolves / later / events / spawn` 任一键**才算回执块，未知键忽略。示例：
+- **回执块格式（M4 唯一口径，M8 增 spawn、M6.5 增 notes、M11 增 verdict/checks）**：执行器取自己最终输出里**最后一个 ```json 围栏块**；该块解析成 JSON 对象后，**只要含 `ask / notices / resolves / later / events / spawn / notes / verdict / checks` 任一键**才算回执块，未知键忽略。示例：
 
   ```json
   {
@@ -269,13 +275,15 @@ export interface Receipt {
     "spawn": [
       { "subject": "实现登录页", "summary": "含表单与校验", "stageId": "st-2", "key": "login" }
     ],
-    "notes": ["先跑测试再提交"]
+    "notes": ["先跑测试再提交"],
+    "verdict": "fail",
+    "checks": [{ "cmd": "git tag", "exitCode": 0 }]
   }
   ```
 
-- **解析位置**：解析器是纯函数 `src/plugins/shared/receipt-block.ts`；`dsh` 执行器从 `result` 帧的 `output` 解析，`command` 执行器从 stdout 解析。解析结果只填 `Receipt` 的六个字段，**不改 `output` 原文、不改终态、不抛错**。
-- **解析失败不生效**：非法 JSON、非对象、六键全无、字段校验不过（`ask` 标题/选项超限、`later` 非 ISO、`events`/`spawn` 形状非法等）→ 整个块忽略，不产这些字段；终态与其他字段照常落库。SPEC 原「解析失败只重写最后一条回复、上限 2 次」需要额外 execute 帧与模型调用，**重写机制留 M6**（D15 已知边界），M4 不做。
-- 回执的 `ask / notices / resolves / later / events / spawn` 到内核事实的映射见 SPEC-kernel「审批」「M8 任务派生」与「事实目录」。
+- **解析位置**：解析器是纯函数 `src/plugins/shared/receipt-block.ts`；`dsh` 执行器从 `result` 帧的 `output` 解析，`command` 执行器从 stdout 解析。解析结果只填 `Receipt` 的九个字段，**不改 `output` 原文、不改终态、不抛错**。每个执行器的 `toReceipt` 都必须调 `applyReceiptBlock`——漏了任何一个字段（尤其 `verdict` / `checks`），闸门阶段的判定就到不了内核，任务会永远停在闸门上。
+- **解析失败不生效**：非法 JSON、非对象、九键全无、字段校验不过（`ask` 标题/选项超限、`later` 非 ISO、`events`/`spawn` 形状非法、`verdict` 非 `pass|fail`、`checks` 命令为空或退出码非整数等）→ 整个块忽略，不产这些字段；终态与其他字段照常落库。空数组 / `null` 视为未提供（`checks: []` 不连累同块 `verdict`）。SPEC 原「解析失败只重写最后一条回复、上限 2 次」需要额外 execute 帧与模型调用，**重写机制留 M6**（D15 已知边界），M4 不做。
+- 回执的 `ask / notices / resolves / later / events / spawn / notes / verdict / checks` 到内核事实的映射见 SPEC-kernel「审批」「M8 任务派生」「M6.5 线程」「M11 闸门」与「事实目录」。
 - **提示词不拼命令行**：`command` 执行器把 `runtime.argsTemplate`（JSON 数组文本，≤20 项、单项 ≤500 字符）逐项展开成 argv，占位符白名单 `{model}` / `{effort}` / `{cwd}` / `{context}` / `{prompt}`；模板含 `{prompt}` 时提示词替换成独立 argv 元素、不再写 stdin，否则只经 stdin 传入。Windows 下 `.cmd`/`.bat` 固定包装成 `cmd.exe /c <脚本> <参数...>`、`shell:false`，不做 shell 字符串拼接。
 - 终态归一、`errorCode` 取值、取消时序沿用 `SPEC-ai-workflow.md`，不变。
 
@@ -358,7 +366,7 @@ export interface AppPlugin {
 | source   | `webhook`         | 本机回环 HTTP（只绑 `127.0.0.1`）+ HMAC-SHA256 验签；通过后 `ctx.emit` → `event.received`                                                                       | `src/plugins/sources/webhook/`（M7）                             |
 | source   | `fs`              | 目录变化去抖                                                                                                                                                    | 可选                                                             |
 | channel  | `in-app`          | 默认通道：投影即送达，`start` 内把 `pending` 卡片 ack 为 `delivered{ref:'in-app'}`；UI 直接批                                                                   | `src/plugins/channels/in-app/`（M4）                             |
-| channel  | `desktop`         | Electron 系统通知：`sdk.notify(title, body)`，标题/正文只作参数；失败落 `card.delivery_failed`                                                                  | `src/plugins/channels/desktop/`（M4；原件 `src/main/notify.ts`） |
+| channel  | `desktop`         | Electron 系统通知：`sdk.notify(title, 固定指引)`——标题来自卡片，正文固定一句「点开工作台查看并处理」，卡片正文与选项不进系统通知；失败落 `card.delivery_failed` | `src/plugins/channels/desktop/`（M4；原件 `src/main/notify.ts`） |
 | channel  | `webhook-channel` | 出站 webhook（M7）：把卡片 POST 到配置地址（单向，不回收答案）；未配置不投递                                                                                    | `src/plugins/channels/webhook-channel/`（M7）                    |
 | app      | `pomodoro`        | 计时；可发 `pomodoro.completed` 事件                                                                                                                            | `src/renderer/src/apps/pomodoro`                                 |
 | app      | `ai-workflow`     | 看板/聊天/设置三视图                                                                                                                                            | `src/renderer/src/apps/ai-workflow`                              |
@@ -397,7 +405,7 @@ export interface AppPlugin {
 - **契约测试：** 每类插件用假实现跑通「manifest 校验 → 注册 → 启动 → 收到事件/卡片 → 回报」；通道契约覆盖「启动 → `onCard` 收到卡片 → `delivered` / `answer` 回报 → dispose 可重复调用」。
 - **边界测试：** 扫描插件源码，禁止 import 清单（host/其它插件/DB）；未声明能力被调用时拒绝（含 `notify` 的「声明 ↔ 用法」一致性）。
 - **执行器：** 假进程/假流覆盖帧解析、终态归一、取消时序、迟到回执；`detect` 零副作用；`command` 插件的模板展开（项数与单项长度上限、未知占位符拒绝）、`{prompt}` 存在与否决定 argv/stdin、Windows `.cmd` 固定包装、提示词不出现在 argv 拼接字符串里。
-- **回执块：** 多块取最后一块、块内无六键视为无回执、非法 JSON/非对象忽略、`ask` 选项为空/超限/标题超限整块忽略、`spawn` 标题为空/批次越界/条数超限整块忽略、解析不修改 `output` 与终态；dsh 从 `result` 帧、`command` 从 stdout 各一条成功与失败用例。
+- **回执块：** 多块取最后一块、块内无九键视为无回执、非法 JSON/非对象忽略、`ask` 选项为空/超限/标题超限整块忽略、`spawn` 标题为空/批次越界/条数超限整块忽略、`verdict` 非 `pass|fail` 与 `checks` 形状非法整块忽略（`checks: []` 不连累 `verdict`）、只带 `verdict` 也算回执块、解析不修改 `output` 与终态；dsh 从 `result` 帧、`command` 从 stdout 各一条成功与失败用例。
 - **通道：** 假通知/假平台，不发真消息；断言卡片文字与通知标题/正文只作为参数传递；补投只针对 `pending`、同一版本不重复投递。
 - **注册表：** id 唯一、`key === manifest.id`、kind 合法、capabilities 在枚举内、必填字段齐全；`executors/*`、`channels/*` 目录与清单双向一致。
 - **detect 汇总：** 按注册表顺序串行且顺序稳定、`executorKey`/`supported` 由汇总回填、输出按候选清单排序、同 `command` 先到先得、单插件抛错或超时被隔离、空注册表返回空数组且不扫盘。

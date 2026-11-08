@@ -106,15 +106,16 @@
 
 ## 8. 组件映射（`components/ui/`）
 
-| 组件               | 关键类                                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `Button`           | `rounded-md`；primary=实心 `bg-focus-deep`（hover `bg-focus`），secondary=`bg-surface-2 ring-1 ring-line`，ghost=纯文字 |
-| `Input`            | `fieldCls`：`rounded-md border-line bg-surface-2 text-ink placeholder:text-ink-faint focus:ring-2 ring-focus/25`        |
-| `Select`           | 触发器同 `Input`；浮层 `rounded-lg bg-surface border-line-strong/60`                                                    |
-| `Panel` / `Dialog` | `rounded-xl bg-surface border-line`；弹窗遮罩 `bg-black/55 backdrop-blur-sm`                                            |
-| `Segmented`        | 容器 `rounded-lg bg-surface-2`，选项 `rounded-md`，当前项 `bg-surface-3`                                                |
-| `Field`            | 小标签 `text-[11px] text-ink-dim`                                                                                       |
-| 徽标               | `badgeCls`：`rounded-sm bg-white/[0.07] text-[11px] text-ink-dim`                                                       |
+| 组件               | 关键类                                                                                                                       |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `Button`           | `rounded-md`；primary=实心 `bg-focus-deep`（hover `bg-focus`），secondary=`bg-surface-2 ring-1 ring-line`，ghost=纯文字      |
+| `Input`            | `fieldCls`：`rounded-md border-line bg-surface-2 text-ink placeholder:text-ink-faint focus:ring-2 ring-focus/25`             |
+| `Select`           | 触发器同 `Input`；浮层 `rounded-lg bg-surface border-line-strong/60`                                                         |
+| `Menu`             | 触发器同 `Button` + 折叠箭头；浮层同 `Select`，条目 `rounded-md`，标题行尾徽标 `rounded-sm`，说明 `text-[11px] text-ink-dim` |
+| `Panel` / `Dialog` | `rounded-xl bg-surface border-line`；弹窗遮罩 `bg-black/55 backdrop-blur-sm`                                                 |
+| `Segmented`        | 容器 `rounded-lg bg-surface-2`，选项 `rounded-md`，当前项 `bg-surface-3`                                                     |
+| `Field`            | 小标签 `text-[11px] text-ink-dim`                                                                                            |
+| 徽标               | `badgeCls`：`rounded-sm bg-white/[0.07] text-[11px] text-ink-dim`                                                            |
 
 ## 9. 检查方式
 
@@ -129,6 +130,7 @@ pnpm check:ui   # 圆角越界 / rounded-full 误用 / 重玻璃 / 调色板外�
 - [ ] 新面板用 `surface` 系实心底，没有新增半透明叠层或模糊。
 - [ ] 主色只出现在强调位；一屏没有第二种彩色。
 - [ ] 空态、错误态、禁用态三类都有对应 token，没有临时色值。
+- [ ] 正文默认可选（`user-select: text`）：只有按钮、标签、菜单项这类控件外壳设 `user-select: none`；日志、提示词、智能体回复都要能拖动选中复制。
 
 ## 10. 反例（出现即改）
 

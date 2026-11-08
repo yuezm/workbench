@@ -1,12 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
-import type { Agent, Conversation, Message } from '../../../../../../src/protocol/entities'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Agent, Card, Conversation, Message } from '../../../../../../src/protocol/entities'
 import type { ChatStreamState } from '../../../../../../src/renderer/src/apps/ai-workflow/hooks/useChat'
 import {
   ChatPanel,
   type ChatPanelProps,
 } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ChatPanel'
+import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const agent: Agent = {
   id: 'a1',
@@ -175,5 +176,65 @@ describe('ChatPanel', () => {
   it('错误条渲染在输入区上方', () => {
     render(<ChatPanel {...makeProps({ error: '发送失败' })} />)
     expect(screen.getByText('发送失败')).toBeInTheDocument()
+  })
+})
+
+describe('ChatPanel 会话内待处理卡', () => {
+  const card: Card = {
+    id: 'card-c',
+    runId: 'run-c',
+    taskId: null,
+    conversationId: 'c1',
+    title: '要继续吗',
+    text: '上一轮停在方案选择',
+    options: ['继续', '重来'],
+    key: null,
+    version: 1,
+    status: 'open',
+    delivery: 'delivered',
+    deliveryRef: 'in-app',
+    optionIndex: null,
+    answeredBy: null,
+    answeredAt: null,
+    createdAt: 't',
+    updatedAt: 't',
+  }
+
+  let kernel: FakeKernel
+
+  beforeEach(() => {
+    kernel = installFakeKernel()
+  })
+
+  it('本会话的卡展示在消息流上方：正文与选项都在会话内', () => {
+    render(<ChatPanel {...makeProps({ cards: [card] })} />)
+
+    const cards = screen.getByRole('region', { name: '待处理卡' })
+    expect(cards).toHaveTextContent('要继续吗')
+    expect(cards).toHaveTextContent('上一轮停在方案选择')
+    expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
+  })
+
+  it('点选项：dispatch card.answer，卡片留在会话里等事实刷新', async () => {
+    const user = userEvent.setup()
+    render(<ChatPanel {...makeProps({ cards: [card] })} />)
+
+    await user.click(screen.getByRole('button', { name: '重来' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({
+          type: 'card.answer',
+          cardId: 'card-c',
+          optionIndex: 1,
+          via: 'ui',
+        }),
+      ),
+    )
+    expect(screen.getByText('要继续吗')).toBeInTheDocument()
+  })
+
+  it('没有卡时会话内不占版面', () => {
+    render(<ChatPanel {...makeProps()} />)
+    expect(screen.queryByRole('region', { name: '待处理卡' })).toBeNull()
   })
 })

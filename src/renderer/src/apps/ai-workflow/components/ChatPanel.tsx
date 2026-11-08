@@ -1,9 +1,10 @@
 import { useState, type KeyboardEvent, type ReactElement } from 'react'
-import type { Agent, Conversation, Message } from '../../../../../protocol/entities'
+import type { Agent, Card, Conversation, Message } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { fieldCls } from '../../../components/ui/input'
 import { cn } from '../../../lib/cn'
 import type { ChatStreamState } from '../hooks/useChat'
+import { ApprovalCards } from './ApprovalCards'
 
 /** 错误条：任一操作失败都在输入区上方提示，下一次成功操作自动消失 */
 const ERROR_CLS = 'rounded-lg border border-red-400/30 bg-red-400/10 px-3 py-2 text-xs text-red-300'
@@ -20,6 +21,8 @@ export interface ChatPanelProps {
   agents: Agent[]
   conversation: Conversation | null
   messages: Message[]
+  /** 本会话的 open 卡：审批与选项在会话内处理，不在顶部通知条里 */
+  cards?: Card[]
   /** 当前轮已收到的流式输出（正文 / 思考 / 工具事件） */
   streaming: ChatStreamState
   sending: boolean
@@ -30,15 +33,17 @@ export interface ChatPanelProps {
 }
 
 /**
- * 聊天栏目内容区：会话头部 + 消息流 + 输入区。
+ * 聊天栏目内容区：会话头部 + 待处理卡片 + 消息流 + 输入区。
  *
  * 会话状态由 useChat 持有（侧栏与内容区共用），这里只留输入草稿。
  * 流式期间正文按增量追加，thinking / 工具事件以次要样式展示，本轮结束后丢弃。
+ * 本会话挂着的 open 卡（智能体回执 `ask` / `notices`）在消息流上方就地处理。
  */
 export function ChatPanel({
   agents,
   conversation,
   messages,
+  cards = [],
   streaming,
   sending,
   error,
@@ -74,6 +79,12 @@ export function ChatPanel({
             {agentName(conversation.agentId)}
           </span>
         </header>
+      )}
+
+      {conversation !== null && cards.length > 0 && (
+        <div className="shrink-0 border-b border-line px-5 py-3">
+          <ApprovalCards cards={cards} />
+        </div>
       )}
 
       <div className="flex-1 overflow-auto p-5" aria-label="消息">

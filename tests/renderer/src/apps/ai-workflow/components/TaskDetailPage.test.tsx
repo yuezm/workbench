@@ -144,6 +144,77 @@ describe('TaskDetailPage', () => {
     expect(labels).toHaveTextContent('urgent')
   })
 
+  it('本任务的 open 卡：正文与选项在任务详情里，选完即 dispatch card.answer', async () => {
+    setup()
+    kernel.setView('cards.open', undefined, [
+      {
+        id: 'card-1',
+        runId: 'run1',
+        taskId: 't1',
+        conversationId: null,
+        title: '包名怎么定',
+        text: '事实：裸名已被他人发布过 0.2.0；选哪个？',
+        options: ['裸名', '带前缀'],
+        key: 'k',
+        version: 1,
+        status: 'open',
+        delivery: 'delivered',
+        deliveryRef: 'in-app',
+        optionIndex: null,
+        answeredBy: null,
+        answeredAt: null,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ])
+    const user = userEvent.setup()
+
+    const cards = await screen.findByRole('region', { name: '待处理卡' })
+    expect(within(cards).getByText('包名怎么定')).toBeInTheDocument()
+    expect(within(cards).getByText(/裸名已被他人发布过/)).toBeInTheDocument()
+
+    await user.click(within(cards).getByRole('button', { name: '带前缀' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({
+          type: 'card.answer',
+          cardId: 'card-1',
+          optionIndex: 1,
+          via: 'ui',
+        }),
+      ),
+    )
+  })
+
+  it('别的任务的卡不进本任务详情', async () => {
+    setup()
+    kernel.setView('cards.open', undefined, [
+      {
+        id: 'card-2',
+        runId: 'run-9',
+        taskId: 't9',
+        conversationId: null,
+        title: '别人的问题',
+        text: '',
+        options: ['好'],
+        key: null,
+        version: 1,
+        status: 'open',
+        delivery: 'delivered',
+        deliveryRef: 'in-app',
+        optionIndex: null,
+        answeredBy: null,
+        answeredAt: null,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ])
+
+    expect(await screen.findByRole('heading', { name: '任务A' })).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '待处理卡' })).toBeNull()
+    expect(screen.queryByText('别人的问题')).toBeNull()
+  })
+
   it('上下文把运行与反馈按时间混排，计数随视图更新', async () => {
     setup()
 

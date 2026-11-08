@@ -4,6 +4,7 @@ import { Button } from '../../../components/ui/button'
 import { badgeCls } from '../../../components/ui/panel'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelViewState } from '../../../shell/useKernelView'
+import { ApprovalCards } from './ApprovalCards'
 import { DetailHeader } from './DetailHeader'
 import { TaskActivity } from './TaskActivity'
 import { TaskCommentForm } from './TaskCommentForm'
@@ -44,6 +45,9 @@ export function TaskDetailPage({
   const runs = runsState.data ?? []
   const comments = commentsState.data ?? []
   const children: Task[] = childrenState.data ?? []
+  /** 本任务的 open 卡：正文与选项就在页面里，顶部通知条只负责把人送过来 */
+  const openCards = useKernelViewState('cards.open').data ?? []
+  const cards = openCards.filter((card) => card.taskId === taskId)
   const threadId = task?.threadId ?? null
   /** 反馈输入（提交成功后清空；失败保留待重试） */
   const [draft, setDraft] = useState('')
@@ -126,6 +130,9 @@ export function TaskDetailPage({
         ) : (
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
             <TaskInfoPanel task={task} stageName={stageName} />
+
+            {/* 待审批：智能体在这一任务上等你回答（正文与选项都在这里，选完即续接） */}
+            <ApprovalCards cards={cards} />
 
             {children.length > 0 && (
               <section aria-label="子任务" className="flex flex-col gap-2">

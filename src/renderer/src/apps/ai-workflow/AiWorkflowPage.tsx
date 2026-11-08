@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import type { Project, ProjectInput, TaskInput } from '../../../../protocol/entities'
+import type { Card, Project, ProjectInput, TaskInput } from '../../../../protocol/entities'
 import { Segmented } from '../../components/ui/segmented'
 import { getKernelStore } from '../../shell/kernelStore'
 import { useKernelView, useKernelViewState } from '../../shell/useKernelView'
@@ -101,6 +101,9 @@ export function AiWorkflowPage(): ReactElement {
     activeProject ? { projectId: activeProject.id } : null,
   )
   const tasks = activeProject === undefined ? unassigned : (tasksState.data ?? [])
+  /** 全部 open 卡：顶部通知条只列标题，卡片本体在任务详情 / 会话里处理 */
+  const cardsState = useKernelViewState('cards.open')
+  const openCards = cardsState.data ?? []
   /** 写命令失败优先；否则展示读视图的错误（视图查询失败时 store 会给出文案） */
   const shownError = error ?? workflowsState.error ?? tasksState.error
 
@@ -112,6 +115,24 @@ export function AiWorkflowPage(): ReactElement {
 
   const openThread = (threadId: string): void => {
     setTrail((current) => [...current, { kind: 'thread', threadId }])
+  }
+
+  /**
+   * 点顶部通知条：把人送到卡片所在的地方去处理。
+   * 任务卡进任务详情（正文与选项在页面里），聊天卡切到聊天栏目并选中那个会话。
+   * 没有落点（卡既没任务也没会话）时通知条整行禁用，走不到这里。
+   */
+  const openCard = (card: Card): void => {
+    setView('workspace')
+    if (card.taskId !== null) {
+      setWorkspaceSection('tasks')
+      setTrail([{ kind: 'task', taskId: card.taskId }])
+      return
+    }
+    if (card.conversationId !== null) {
+      setWorkspaceSection('chat')
+      chat.selectConversation(card.conversationId)
+    }
   }
 
   const back = (): void => {
@@ -281,8 +302,8 @@ export function AiWorkflowPage(): ReactElement {
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {/* 顶部待审批条：有 open 卡才渲染；回答走 card.answer 命令 */}
-        <ApprovalBar />
+        {/* 顶部通知条：只列 open 卡标题，点击进任务详情 / 会话处理 */}
+        <ApprovalBar cards={openCards} error={cardsState.error} onOpen={openCard} />
 
         {shownError && (
           <p className="mx-4 mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-300">
@@ -295,6 +316,9 @@ export function AiWorkflowPage(): ReactElement {
             agents={agents}
             conversation={chat.active}
             messages={chat.messages}
+            cards={openCards.filter(
+              (card) => chat.activeId !== null && card.conversationId === chat.activeId,
+            )}
             streaming={chat.streaming}
             sending={chat.sending}
             error={chat.error}

@@ -356,6 +356,7 @@ describe('AiWorkflowPage', () => {
 
     await openSection(user, '工作流')
     await user.click(await screen.findByRole('button', { name: '新建工作流' }))
+    await user.click(screen.getByRole('menuitem', { name: '从空白创建工作流' }))
     expect(await screen.findByLabelText('工作流名称')).toBeInTheDocument()
 
     await openSection(user, '规则')
@@ -526,6 +527,7 @@ describe('AiWorkflowPage', () => {
 
     await openSection(user, '工作流')
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
+    await user.click(screen.getByRole('menuitem', { name: '从空白创建工作流' }))
     await user.type(screen.getByLabelText('工作流名称'), '第一条')
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() =>
@@ -875,17 +877,50 @@ describe('AiWorkflowPage', () => {
     expect(kernel.dispatched).toHaveLength(0)
   })
 
-  it('顶部审批条读 cards.open 并 dispatch card.answer', async () => {
+  it('顶部通知条只列标题：点条目进任务详情，在任务内部作答', async () => {
     seedBase()
-    kernel.setView('cards.open', undefined, [card])
+    kernel.setView('cards.open', undefined, [{ ...card, taskId: 't1' }])
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    expect(await screen.findByRole('region', { name: '待审批' })).toBeInTheDocument()
-    expect(screen.getByText('继续吗')).toBeInTheDocument()
+    const bar = await screen.findByRole('region', { name: '待审批' })
+    // 通知条只给标题与待选数：正文与选项都留在任务内部
+    expect(within(bar).getByText('继续吗')).toBeInTheDocument()
+    expect(within(bar).getByText('2 项待选')).toBeInTheDocument()
+    expect(within(bar).queryByText('选一个')).toBeNull()
+    expect(within(bar).queryByRole('button', { name: '继续' })).toBeNull()
+
+    await user.click(within(bar).getByRole('button', { name: /继续吗/ }))
+    expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+    expect(await screen.findByText('选一个')).toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: '继续' }))
     await waitFor(() =>
       expectDispatched({ type: 'card.answer', cardId: 'card-1', optionIndex: 0, via: 'ui' }),
+    )
+  })
+
+  it('聊天卡：点通知条切到对应会话，在会话内作答', async () => {
+    seedBase()
+    kernel.setView('conversations.all', undefined, [
+      conversation,
+      { ...conversation, id: 'c2', title: '第二段对话' },
+    ])
+    kernel.setView('cards.open', undefined, [
+      { ...card, id: 'card-c', taskId: null, conversationId: 'c2', title: '要继续吗' },
+    ])
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    const bar = await screen.findByRole('region', { name: '待审批' })
+    expect(within(bar).getByText('对话')).toBeInTheDocument()
+    await user.click(within(bar).getByRole('button', { name: /要继续吗/ }))
+
+    // 切换会话后卡片本体出现在会话里
+    expect(await screen.findByRole('heading', { name: '第二段对话' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '停止' }))
+    await waitFor(() =>
+      expectDispatched({ type: 'card.answer', cardId: 'card-c', optionIndex: 1, via: 'ui' }),
     )
   })
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   desktopChannel,
   desktopManifest,
-  notificationBody,
+  NOTIFICATION_BODY,
 } from '../../../src/plugins/channels/desktop'
 import { channelById, channels } from '../../../src/plugins/registry'
 import { cardOf, channelHarness } from './harness'
@@ -27,14 +27,11 @@ describe('desktop 通道 manifest 与注册', () => {
 })
 
 describe('desktop 通道通知文案', () => {
-  it('正文 = 卡片正文 + 选项各一行（空文案不占行）', () => {
-    expect(notificationBody(cardOf())).toBe('用哪个方案？\nA\nB')
-    expect(notificationBody(cardOf({ text: '', options: [] }))).toBe('')
-    expect(notificationBody(cardOf({ text: '', options: ['', 'B'] }))).toBe('B')
-    // 卡片文案原样拼接：不转义、不包 HTML/命令
-    expect(notificationBody(cardOf({ text: 'a && rm -rf / <b>x</b>', options: [] }))).toBe(
-      'a && rm -rf / <b>x</b>',
-    )
+  it('正文是固定一句指引：卡片正文与选项不进系统通知', () => {
+    // 通知只做提醒，正文与候选留在任务详情里看/选
+    expect(NOTIFICATION_BODY).toBe('点开工作台查看并处理')
+    expect(NOTIFICATION_BODY).not.toContain('用哪个方案')
+    expect(NOTIFICATION_BODY).not.toContain('A')
   })
 })
 
@@ -45,12 +42,12 @@ describe('desktop 通道 start', () => {
 
     h.deliver(cardOf({ id: 'card-9', version: 2, title: '选一个' }))
 
-    expect(h.sdk.notifyCalls).toEqual([{ title: '选一个', body: '用哪个方案？\nA\nB' }])
+    expect(h.sdk.notifyCalls).toEqual([{ title: '选一个', body: NOTIFICATION_BODY }])
     expect(h.delivered).toEqual([{ cardId: 'card-9', version: 2, ref: 'desktop' }])
     dispose()
   })
 
-  it('通知文案只作 notify 参数：不拼进其它调用，正文与卡片字段逐字一致', async () => {
+  it('通知只带标题：卡片正文与选项不外泄到系统通知', async () => {
     const h = channelHarness()
     await desktopChannel.start(h.ctx)
     const card = cardOf({
@@ -61,9 +58,11 @@ describe('desktop 通道 start', () => {
 
     h.deliver(card)
 
-    // 唯一一次 notify：title 与 body 都是卡片字段的纯拼接
+    // 唯一一次 notify：标题来自卡片，正文是固定指引（不含卡片正文与选项）
     expect(h.sdk.notifyCalls).toHaveLength(1)
-    expect(h.sdk.notifyCalls[0]).toEqual({ title: '部署确认', body: '继续发布吗？\n发布\n取消' })
+    expect(h.sdk.notifyCalls[0]).toEqual({ title: '部署确认', body: NOTIFICATION_BODY })
+    expect(JSON.stringify(h.sdk.notifyCalls[0])).not.toContain('继续发布吗')
+    expect(JSON.stringify(h.sdk.notifyCalls[0])).not.toContain('发布,取消')
     // delivered 只带回 id/version/通道键，不带任何卡片文案
     expect(h.delivered).toEqual([{ cardId: card.id, version: card.version, ref: 'desktop' }])
   })

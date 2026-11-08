@@ -1,148 +1,106 @@
-import { useState, type ReactElement } from 'react'
+import type { ReactElement } from 'react'
 import type { Card } from '../../../../../protocol/entities'
+import { badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
-import { getKernelStore } from '../../../shell/kernelStore'
-import { useKernelViewState } from '../../../shell/useKernelView'
 
-const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-
-/** 信息卡（`options` 为空）只是一条通知：给一个「知道了」把卡关掉，不要求选择。 */
+/** 信息卡（`options` 为空）只是一条通知：点进详情后给「知道了」，不要求选择。 */
 const isNotice = (card: Card): boolean => card.options.length === 0
 
+/** 卡片的落点：挂任务的卡进任务详情，聊天卡进对应会话 */
+const targetOf = (card: Card): 'task' | 'conversation' | null =>
+  card.taskId !== null ? 'task' : card.conversationId !== null ? 'conversation' : null
+
+const TARGET_LABEL: Record<'task' | 'conversation', string> = {
+  task: '任务',
+  conversation: '对话',
+}
+
+export interface ApprovalBarProps {
+  /** 全部 open 卡（`cards.open` 视图），由页面读取后下传 */
+  cards: Card[]
+  /** 视图读失败文案；无卡不展示 */
+  error: string | null
+  /** 点条目 → 跳到该卡的落点（任务详情 / 会话），处理动作在落点内做 */
+  onOpen: (card: Card) => void
+}
+
 /**
- * 顶部审批区（M4 最小审批面，M5 改内核视图 + 命令）。
+ * 顶部通知条：**只列标题**，不展示正文与选项。
  *
- * 读 `cards.open` 视图（全部 open 卡，按 createdAt 升序），按是否需要回答分两栏：
- * - 「待审批」：`options` 非空的阻塞卡，点选项即 dispatch `card.answer`（`via='ui'`）；
- * - 「通知」：`options` 为空的回执 `notices` 信息卡，点「知道了」dispatch `card.resolve`。
+ * 卡片正文可能很长（智能体写出来的问题背景、事实清单、多个候选项），塞在顶栏会挤掉工作区；
+ * 而回答又需要上下文。所以这里只做「有人在等你」的信标：一行标题 + 落点与选项数，
+ * 点进任务详情（或会话）后再看正文、再选（见 `ApprovalCards`）。
  *
- * 两栏都随 `card.*` 事实失效自动重取视图；失败（重复回答 / 越界 / 已关闭）只显示后端文案，
- * 卡片保留、不崩。无 open 卡时整块不渲染。
+ * 无 open 卡时整块不渲染；读失败只在有卡可处理时展示文案。
  */
-export function ApprovalBar(): ReactElement | null {
-  const cardsState = useKernelViewState('cards.open')
-  const cards = cardsState.data ?? []
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<string | null>(null)
-
-  const send = (cardId: string, run: () => Promise<unknown>): void => {
-    void (async () => {
-      setBusy(cardId)
-      try {
-        await run()
-        setError(null)
-      } catch (e) {
-        // 内核拒绝（重复回答 / 越界 / 已关闭）只改文案，卡片与列表保持原样
-        setError(errMsg(e))
-      } finally {
-        setBusy(null)
-      }
-    })()
-  }
-
-  const answer = (card: Card, optionIndex: number): void => {
-    send(card.id, () =>
-      getKernelStore().dispatch({
-        type: 'card.answer',
-        commandId: '',
-        cardId: card.id,
-        optionIndex,
-        via: 'ui',
-      }),
-    )
-  }
-
-  const dismiss = (card: Card): void => {
-    send(card.id, () =>
-      getKernelStore().dispatch({ type: 'card.resolve', commandId: '', cardId: card.id }),
-    )
-  }
-
-  // 无卡：不占版面（错误只在有卡可处理时才有展示语境）
+export function ApprovalBar({ cards, error, onOpen }: ApprovalBarProps): ReactElement | null {
   if (cards.length === 0) return null
 
   const pending = cards.filter((card) => !isNotice(card))
   const notices = cards.filter(isNotice)
-  const shownError = error ?? cardsState.error
 
   return (
     <div className="mx-4 mt-3 flex flex-col gap-2">
       {pending.length > 0 && (
         <section
           aria-label="待审批"
-          className="rounded-xl border border-amber-300/20 bg-amber-300/[0.06] px-3 py-2"
+          className="rounded-xl border border-warn/20 bg-warn/[0.06] px-3 py-2"
         >
-          <SectionHead label="待审批" count={pending.length} tone="text-amber-200" />
-          <ul className="mt-1.5 flex flex-col gap-2">
-            {pending.map((card) => (
-              <li key={card.id} className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] leading-snug text-ink">{card.title}</p>
-                  {card.text !== '' && (
-                    <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-ink-faint">
-                      {card.text}
-                    </p>
-                  )}
-                </div>
-                <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                  {card.options.map((option, index) => (
-                    <button
-                      key={`${card.id}-${index}`}
-                      type="button"
-                      disabled={busy === card.id}
-                      onClick={() => answer(card, index)}
-                      className={cn(
-                        'rounded-lg border border-line px-2 py-0.5 text-xs text-ink',
-                        'transition-colors hover:bg-white/10 disabled:cursor-default disabled:opacity-50',
-                      )}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <SectionHead label="待审批" count={pending.length} tone="text-warn" />
+          <CardList cards={pending} onOpen={onOpen} />
         </section>
       )}
 
       {notices.length > 0 && (
         <section aria-label="通知" className="rounded-xl border border-line bg-surface px-3 py-2">
           <SectionHead label="通知" count={notices.length} tone="text-ink-faint" />
-          <ul className="mt-1.5 flex flex-col gap-2">
-            {notices.map((card) => (
-              <li key={card.id} className="flex items-start gap-3">
-                <div className="min-w-0 flex-1">
-                  <p className="line-clamp-3 text-[13px] leading-snug text-ink-dim">{card.title}</p>
-                  {card.text !== '' && (
-                    <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-ink-faint">
-                      {card.text}
-                    </p>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  disabled={busy === card.id}
-                  onClick={() => dismiss(card)}
-                  className={cn(
-                    'shrink-0 rounded-lg border border-line px-2 py-0.5 text-xs text-ink',
-                    'transition-colors hover:bg-white/10 disabled:cursor-default disabled:opacity-50',
-                  )}
-                >
-                  知道了
-                </button>
-              </li>
-            ))}
-          </ul>
+          <CardList cards={notices} onOpen={onOpen} />
         </section>
       )}
 
-      {shownError !== null && (
-        <p role="alert" className="px-1 text-[11px] text-red-300">
-          {shownError}
+      {error !== null && (
+        <p role="alert" className="px-1 text-[11px] text-danger">
+          {error}
         </p>
       )}
     </div>
+  )
+}
+
+/** 一行一张卡：标题单行截断，尾随落点与选项数；整行可点 */
+function CardList({
+  cards,
+  onOpen,
+}: {
+  cards: Card[]
+  onOpen: (card: Card) => void
+}): ReactElement {
+  return (
+    <ul className="mt-1 flex flex-col">
+      {cards.map((card) => {
+        const target = targetOf(card)
+        return (
+          <li key={card.id}>
+            <button
+              type="button"
+              disabled={target === null}
+              onClick={() => onOpen(card)}
+              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-white/[0.06] disabled:cursor-default"
+            >
+              <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-ink">
+                {card.title}
+              </span>
+              {card.options.length > 0 && (
+                <span className={badgeCls}>{card.options.length} 项待选</span>
+              )}
+              {target !== null && (
+                <span className="shrink-0 text-[11px] text-ink-faint">{TARGET_LABEL[target]}</span>
+              )}
+            </button>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -159,9 +117,7 @@ function SectionHead({
   return (
     <div className="flex items-center gap-2">
       <span className={cn('text-[11px] font-medium tracking-wide', tone)}>{label}</span>
-      <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-[11px] text-ink-dim tabular-nums">
-        {count}
-      </span>
+      <span className={cn(badgeCls, 'tabular-nums')}>{count}</span>
     </div>
   )
 }

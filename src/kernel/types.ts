@@ -41,9 +41,11 @@ export type Iso = string
  * M7.5：任务上下文 / 反馈（`task_comments` 投影 + 提示词反馈段）；
  * M10：项目（`projects` 第 16 张投影表 + 任务必须挂在项目下 + 运行工作目录取项目文件夹）；
  * M11：项目升为聊天与任务共用的顶层上下文（`Conversation.projectId`、任务可省项目落默认目录、
- * 删项目把会话归默认目录）。
+ * 删项目把会话归默认目录）；
+ * M12：卡片加显式 `kind`（`cards.kind` 投影列）。投影列变了却没动版本，M12 前的库里那一列会按
+ * ALTER 的默认值写成 ask，旧的信息卡全部冒充「待审批」，所以这里必须递增以触发重建。
  */
-export const KERNEL_VERSION = 'M11.0.0'
+export const KERNEL_VERSION = 'M12.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

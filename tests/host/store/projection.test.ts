@@ -2,7 +2,9 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { KERNEL_VERSION } from '../../../src/kernel/types'
+import { project as kernelProject } from '../../../src/kernel/project'
 import type { Command } from '../../../src/protocol/commands'
+import type { Card } from '../../../src/protocol/entities'
 import { projectionFormat } from '../../../src/host/schema'
 import { createStore } from '../../../src/host/store/index'
 import { createFakeKernel } from './fake-kernel'
@@ -322,5 +324,52 @@ describe('rebuild：增量应用与重建等价', () => {
     ).toBe(0)
     expect(countRows(db, 'workflow_stages')).toBe(1)
     expect(countRows(db, 'tasks')).toBe(1)
+  })
+})
+
+describe('M12：cards.kind 投影列与老事实归一', () => {
+  /**
+   * 老库的卡：`Card` 还没有 `kind` 字段（M4–M11 的 `card.opened` 就是这样写的），
+   * 补列后投影里一律是 ALTER 的默认值 `ask`——界面上就表现为「通知混进待审批」。
+   */
+  const legacyCardPayload = (over: Partial<Card>): Record<string, unknown> => {
+    const payload: Record<string, unknown> = { ...sample.card(over) }
+    delete payload.kind
+    return payload
+  }
+
+  it('指纹失配重建：无 options 的老卡归一为 notice，有 options 的仍是 ask', () => {
+    const db = memory()
+    const insert = db.prepare(
+      'INSERT INTO facts (type, actor_json, at, payload) VALUES (?, ?, ?, ?)',
+    )
+    const host = JSON.stringify({ kind: 'host', via: 'scheduler' })
+    insert.run(
+      'card.opened',
+      host,
+      SAMPLE_AT,
+      JSON.stringify({ card: legacyCardPayload({ id: 'card-1', options: [] }) }),
+    )
+    insert.run(
+      'card.opened',
+      host,
+      SAMPLE_AT,
+      JSON.stringify({ card: legacyCardPayload({ id: 'card-2' }) }),
+    )
+
+    const store = createStore({ db, kernel: createFakeKernel({ project: kernelProject }) })
+
+    expect(store.ensureProjection()).toEqual({ rebuilt: true })
+
+    const rows = (
+      db.prepare('SELECT id, kind FROM cards ORDER BY id').all() as Array<{
+        id: string
+        kind: string
+      }>
+    ).map((row) => ({ id: row.id, kind: row.kind }))
+    expect(rows).toEqual([
+      { id: 'card-1', kind: 'notice' },
+      { id: 'card-2', kind: 'ask' },
+    ])
   })
 })

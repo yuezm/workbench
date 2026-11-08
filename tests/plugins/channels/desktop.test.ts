@@ -4,7 +4,6 @@ import {
   desktopChannel,
   desktopManifest,
   NOTIFICATION_BODY,
-  NOTIFICATION_WINDOW_MS,
 } from '../../../src/plugins/channels/desktop'
 import { channelById, channels } from '../../../src/plugins/registry'
 import { cardOf, channelHarness } from './harness'
@@ -47,32 +46,40 @@ describe('desktop 通道打扰口径（M12）', () => {
     expect(h.delivered).toEqual([{ cardId: 'card-1', version: 1, ref: 'desktop' }])
   })
 
-  it('同一 run 的窗口内多张卡只弹第一条（其余仍 ack）', async () => {
-    let clock = 1_000
-    const h = channelHarness({ sdk: fakeSdk({ now: () => clock }) })
+  it('同一 run 的两张 ask 卡各自弹一次（ask 不按 run 合并）', async () => {
+    const h = channelHarness()
     await desktopChannel.start(h.ctx)
 
     h.deliver(cardOf({ id: 'card-1', title: '第一问' }))
-    clock += NOTIFICATION_WINDOW_MS - 1
     h.deliver(cardOf({ id: 'card-2', title: '第二问', version: 1 }))
 
-    expect(h.sdk.notifyCalls).toEqual([{ title: '第一问', body: NOTIFICATION_BODY }])
+    expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['第一问', '第二问'])
     expect(h.delivered).toEqual([
       { cardId: 'card-1', version: 1, ref: 'desktop' },
       { cardId: 'card-2', version: 1, ref: 'desktop' },
     ])
   })
 
-  it('窗口到期后同一 run 的新卡再弹一次', async () => {
-    let clock = 1_000
-    const h = channelHarness({ sdk: fakeSdk({ now: () => clock }) })
+  it('同一张卡的同一版本重投不重复弹（补投 / 重放不打扰）', async () => {
+    const h = channelHarness()
+    await desktopChannel.start(h.ctx)
+    const card = cardOf({ id: 'card-1', title: '要你选' })
+
+    h.deliver(card)
+    h.deliver(card)
+
+    expect(h.sdk.notifyCalls).toHaveLength(1)
+    expect(h.delivered).toHaveLength(2)
+  })
+
+  it('同一张卡原地更新（version + 1，问题变了）再弹一次', async () => {
+    const h = channelHarness()
     await desktopChannel.start(h.ctx)
 
-    h.deliver(cardOf({ id: 'card-1', title: '第一问' }))
-    clock += NOTIFICATION_WINDOW_MS
-    h.deliver(cardOf({ id: 'card-2', title: '补一问' }))
+    h.deliver(cardOf({ id: 'card-1', title: '第一问', version: 1 }))
+    h.deliver(cardOf({ id: 'card-1', title: '第一问（补充了事实）', version: 2 }))
 
-    expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['第一问', '补一问'])
+    expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['第一问', '第一问（补充了事实）'])
   })
 
   it('不同 run 各自弹，互不影响', async () => {
@@ -85,7 +92,7 @@ describe('desktop 通道打扰口径（M12）', () => {
     expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['甲任务', '乙任务'])
   })
 
-  it('信息卡不占用窗口：它之后的 ask 卡照常弹', async () => {
+  it('信息卡不占用后续提醒：它之后的 ask 卡照常弹', async () => {
     const h = channelHarness()
     await desktopChannel.start(h.ctx)
 
@@ -93,6 +100,23 @@ describe('desktop 通道打扰口径（M12）', () => {
     h.deliver(cardOf({ id: 'card-2', title: '要你选', version: 1 }))
 
     expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['要你选'])
+  })
+
+  it('缺 kind 的老数据：无选项按信息卡处理（不弹），有选项照弹', async () => {
+    const h = channelHarness()
+    await desktopChannel.start(h.ctx)
+
+    const legacyNotice = cardOf({ id: 'card-1', options: [], title: '旧的知会' }) as {
+      kind?: string
+    }
+    delete legacyNotice.kind
+    const legacyAsk = cardOf({ id: 'card-2', title: '旧的提问' }) as { kind?: string }
+    delete legacyAsk.kind
+
+    h.deliver(legacyNotice as unknown as Parameters<typeof h.deliver>[0])
+    h.deliver(legacyAsk as unknown as Parameters<typeof h.deliver>[0])
+
+    expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['旧的提问'])
   })
 })
 

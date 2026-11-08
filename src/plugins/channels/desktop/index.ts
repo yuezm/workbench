@@ -1,11 +1,12 @@
 /**
- * desktop 通道插件（M4 D10；M12 收敛打扰口径）：系统通知只提醒「有人在等你回答」。
+ * desktop 通道插件（M4 D10；M12 收敛打扰口径）。
  *
  * 打扰规则（M12，SPEC-ai-workflow「通知分层」）：
  * - **只对 `kind === 'ask'` 的卡弹系统通知**：`notice` 卡（回执 `notices`，没有选项、不阻塞
  *   续接）只进应用内通知区与任务详情，不打断人；
- * - **同一 run 的窗口合并**：`run` 在 `NOTIFICATION_WINDOW_MS` 内已经弹过就不再弹——
- *   一轮回执里的多张卡、同一张卡的反复更新都只换来一次打扰；
+ * - **不按 run 合并**：每张 ask 卡都是一个独立的决定，`run` 相同不等于可以少弹一张。
+ *   去重只按「同一张卡的同一个版本」——重启补投、通道重放不会重复打扰，
+ *   而卡片原地更新（`card.updated`，`version + 1`，问题变了）照弹；
  * - 被跳过的卡照样 ack `delivered(card.id, card.version, 'desktop')`：投递语义是「已送达至少
  *   一个通道」，in-app 投影已经能看到它，跳过通知不是投递失败。
  *
@@ -29,25 +30,25 @@ export { desktopManifest } from './manifest'
  */
 export const NOTIFICATION_BODY = '点开工作台查看并处理'
 
-/** 同一 run 的通知合并窗口（毫秒）：窗口内只弹第一条，避免一轮多卡连弹。 */
-export const NOTIFICATION_WINDOW_MS = 30_000
+/**
+ * 是否该为这张卡打扰人：`kind` 是内核口径；缺列的老数据按「有没有选项」兜底
+ * （与 `kernel/project.normalizeCard` 同口径），免得把信息卡当提问弹出去。
+ */
+const needsAnswer = (card: { kind?: string; options: string[] }): boolean =>
+  card.kind === 'ask' || (card.kind === undefined && card.options.length > 0)
 
 export const desktopChannel: ChannelPlugin = {
   async start(ctx: ChannelContext): Promise<() => void> {
-    /** runId → 上次弹通知的时刻（进程内，重启清零：补投的 pending 卡会再提醒一次） */
-    const notifiedAt = new Map<string, number>()
+    /** cardId → 已弹过的版本（进程内，重启清零：补投的 pending 卡会再提醒一次） */
+    const notifiedVersion = new Map<string, number>()
 
     const off = ctx.onCard((card) => {
-      if (card.kind === 'ask') {
-        const now = ctx.sdk.now()
-        const last = notifiedAt.get(card.runId)
-        if (last === undefined || now - last >= NOTIFICATION_WINDOW_MS) {
-          // 通知失败同步抛给 hub（不 catch）：本通道记为失败，其余通道继续
-          ctx.sdk.notify(card.title, NOTIFICATION_BODY)
-          notifiedAt.set(card.runId, now)
-        }
+      if (needsAnswer(card) && notifiedVersion.get(card.id) !== card.version) {
+        // 通知失败同步抛给 hub（不 catch）：本通道记为失败，其余通道继续
+        ctx.sdk.notify(card.title, NOTIFICATION_BODY)
+        notifiedVersion.set(card.id, card.version)
       }
-      // 信息卡与窗口内的后续卡：不弹，但投影即送达
+      // 信息卡与同一版本的重复投递：不弹，但投影即送达
       void ctx.delivered(card.id, card.version, desktopManifest.id)
     })
 
@@ -56,7 +57,7 @@ export const desktopChannel: ChannelPlugin = {
       if (disposed) return
       disposed = true
       off()
-      notifiedAt.clear()
+      notifiedVersion.clear()
       ctx.signal.removeEventListener('abort', dispose)
     }
     ctx.signal.addEventListener('abort', dispose, { once: true })

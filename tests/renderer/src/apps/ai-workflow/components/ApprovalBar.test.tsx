@@ -180,4 +180,52 @@ describe('ApprovalBar', () => {
     expect(within(pending).queryByText('知会一条')).toBeNull()
     expect(within(notices).queryByText('包名怎么定')).toBeNull()
   })
+
+  it('同文案的信息卡合并成一行（×N），ask 仍一张一行', () => {
+    const notice: Card = { ...card, id: 'card-2', kind: 'notice', options: [], title: '依赖已装' }
+    render(<ApprovalBar cards={[card, notice, { ...notice, id: 'card-3' }]} onOpen={vi.fn()} />)
+
+    const notices = screen.getByRole('region', { name: '通知' })
+    expect(within(notices).getAllByRole('button')).toHaveLength(1)
+    expect(within(notices).getByText('×2')).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: '待审批' })).getAllByRole('button'),
+    ).toHaveLength(1)
+  })
+
+  it('聊天信息卡也按文案合并，落点仍写「对话」', () => {
+    const notice: Card = {
+      ...card,
+      id: 'card-8',
+      kind: 'notice',
+      options: [],
+      title: '聊完一句',
+      taskId: null,
+      conversationId: 'c-1',
+    }
+    render(<ApprovalBar cards={[notice, { ...notice, id: 'card-9' }]} onOpen={vi.fn()} />)
+
+    const notices = screen.getByRole('region', { name: '通知' })
+    expect(within(notices).getAllByRole('button')).toHaveLength(1)
+    expect(within(notices).getByText('×2')).toBeInTheDocument()
+    expect(within(notices).getByText('对话')).toBeInTheDocument()
+  })
+
+  it('缺 kind 的老数据：无选项按信息卡进「通知」，有选项仍进「待审批」', () => {
+    const legacyNotice = { ...card, id: 'card-2', options: [], title: '旧知会' } as {
+      kind?: string
+    }
+    delete legacyNotice.kind
+    const legacyAsk = { ...card, id: 'card-3' } as { kind?: string }
+    delete legacyAsk.kind
+
+    render(<ApprovalBar cards={[legacyNotice as never, legacyAsk as never]} onOpen={vi.fn()} />)
+
+    expect(
+      within(screen.getByRole('region', { name: '通知' })).getByText('旧知会'),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('region', { name: '待审批' })).getByText('包名怎么定'),
+    ).toBeInTheDocument()
+  })
 })

@@ -11,6 +11,6 @@ export const desktopManifest: PluginManifest = {
   kind: 'channel',
   name: '桌面通知',
   version: '1.0.0',
-  description: '系统通知提醒待审批卡片（只弹 kind=ask 的卡，同一 run 窗口内合并一次）',
+  description: '系统通知提醒待审批卡片（只弹 kind=ask 的卡，每张卡各自弹一次）',
   capabilities: ['notify'],
 }

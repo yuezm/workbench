@@ -3,10 +3,14 @@ import type { AgentInput, Runtime } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { Dialog } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
-import { Input } from '../../../components/ui/input'
+import { fieldCls, Input } from '../../../components/ui/input'
 import { Select } from '../../../components/ui/select'
+import { cn } from '../../../lib/cn'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+
+/** System Prompt 是多行文本：等宽、可纵向拉伸，方便写分段指令 */
+const promptCls = cn(fieldCls, 'min-h-24 resize-y py-2 font-mono text-xs leading-relaxed')
 
 /** 运行时健康：从未探测也算可用（不拦截未检测的运行时） */
 export type RuntimeHealth = 'ready' | 'unavailable' | 'unknown'
@@ -126,9 +130,11 @@ export function AgentDialog({
             />
           </Field>
           <Field label="System Prompt" className="col-span-2">
-            <Input
+            <textarea
               aria-label="智能体能力"
-              className="font-mono"
+              className={promptCls}
+              rows={6}
+              placeholder="写清这个智能体的角色、做事方式与产出要求；每轮运行都会带上这段。"
               value={systemPrompt}
               onChange={(e) => setSystemPrompt(e.target.value)}
             />

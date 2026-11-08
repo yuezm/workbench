@@ -4,6 +4,7 @@ import {
   desktopChannel,
   desktopManifest,
   NOTIFICATION_BODY,
+  NOTIFICATION_WINDOW_MS,
 } from '../../../src/plugins/channels/desktop'
 import { channelById, channels } from '../../../src/plugins/registry'
 import { cardOf, channelHarness } from './harness'
@@ -32,6 +33,66 @@ describe('desktop 通道通知文案', () => {
     expect(NOTIFICATION_BODY).toBe('点开工作台查看并处理')
     expect(NOTIFICATION_BODY).not.toContain('用哪个方案')
     expect(NOTIFICATION_BODY).not.toContain('A')
+  })
+})
+
+describe('desktop 通道打扰口径（M12）', () => {
+  it('信息卡（kind=notice）不弹系统通知，但照样 ack delivered', async () => {
+    const h = channelHarness()
+    await desktopChannel.start(h.ctx)
+
+    h.deliver(cardOf({ kind: 'notice', options: [], title: '顺带说一句' }))
+
+    expect(h.sdk.notifyCalls).toEqual([])
+    expect(h.delivered).toEqual([{ cardId: 'card-1', version: 1, ref: 'desktop' }])
+  })
+
+  it('同一 run 的窗口内多张卡只弹第一条（其余仍 ack）', async () => {
+    let clock = 1_000
+    const h = channelHarness({ sdk: fakeSdk({ now: () => clock }) })
+    await desktopChannel.start(h.ctx)
+
+    h.deliver(cardOf({ id: 'card-1', title: '第一问' }))
+    clock += NOTIFICATION_WINDOW_MS - 1
+    h.deliver(cardOf({ id: 'card-2', title: '第二问', version: 1 }))
+
+    expect(h.sdk.notifyCalls).toEqual([{ title: '第一问', body: NOTIFICATION_BODY }])
+    expect(h.delivered).toEqual([
+      { cardId: 'card-1', version: 1, ref: 'desktop' },
+      { cardId: 'card-2', version: 1, ref: 'desktop' },
+    ])
+  })
+
+  it('窗口到期后同一 run 的新卡再弹一次', async () => {
+    let clock = 1_000
+    const h = channelHarness({ sdk: fakeSdk({ now: () => clock }) })
+    await desktopChannel.start(h.ctx)
+
+    h.deliver(cardOf({ id: 'card-1', title: '第一问' }))
+    clock += NOTIFICATION_WINDOW_MS
+    h.deliver(cardOf({ id: 'card-2', title: '补一问' }))
+
+    expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['第一问', '补一问'])
+  })
+
+  it('不同 run 各自弹，互不影响', async () => {
+    const h = channelHarness()
+    await desktopChannel.start(h.ctx)
+
+    h.deliver(cardOf({ id: 'card-1', runId: 'run-1', title: '甲任务' }))
+    h.deliver(cardOf({ id: 'card-2', runId: 'run-2', title: '乙任务' }))
+
+    expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['甲任务', '乙任务'])
+  })
+
+  it('信息卡不占用窗口：它之后的 ask 卡照常弹', async () => {
+    const h = channelHarness()
+    await desktopChannel.start(h.ctx)
+
+    h.deliver(cardOf({ id: 'card-1', kind: 'notice', options: [], title: '知会' }))
+    h.deliver(cardOf({ id: 'card-2', title: '要你选', version: 1 }))
+
+    expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['要你选'])
   })
 })
 

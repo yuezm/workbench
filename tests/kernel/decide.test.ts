@@ -8,6 +8,7 @@ import type {
   Runtime,
   RuntimeProbe,
   StageInput,
+  Card,
   Task,
   Workflow,
   WorkflowStage,
@@ -171,6 +172,28 @@ const runRow = (over: Partial<RunRow> = {}): RunRow => ({
   ...over,
 })
 
+/** 卡片行（卡片随运行/任务结束自动收起的用例） */
+const card = (over: Partial<Card> = {}): Card => ({
+  id: 'card-1',
+  runId: 'run-1',
+  taskId: 't-1',
+  conversationId: null,
+  title: '知会',
+  text: '',
+  kind: 'notice',
+  options: [],
+  key: null,
+  version: 1,
+  status: 'open',
+  delivery: 'pending',
+  deliveryRef: null,
+  optionIndex: null,
+  answeredBy: null,
+  answeredAt: null,
+  createdAt: CREATED,
+  updatedAt: CREATED,
+  ...over,
+})
 const at = <T extends FactType>(type: T, payload: FactPayload<T>): FactDraft<T> => ({
   type,
   actor: ACTOR,
@@ -187,6 +210,7 @@ interface Seed {
   projects?: Project[]
   tasks?: Task[]
   runs?: RunRow[]
+  cards?: Card[]
   active?: Id[]
 }
 
@@ -201,7 +225,7 @@ const view = (seed: Seed = {}): View => ({
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
   conversations: new Map(),
   messages: new Map(),
-  cards: new Map(),
+  cards: new Map((seed.cards ?? []).map((row) => [row.id, row])),
   activeTaskIds: new Set(seed.active ?? []),
   threads: new Map(),
   taskComments: new Map(),
@@ -1413,6 +1437,41 @@ describe('kernel/decide 任务', () => {
     ).toEqual({ facts: [], reject: { code: 'not_found', message: '工作流不存在: wf-404' } })
   })
 
+  it('task.complete：任务名下还 open 的卡随任务一起收起（reason=cancelled，别的任务/已答的卡不动）', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [stage({ id: 'st-1' })],
+      tasks: [task({ id: 't-1' }), task({ id: 't-2', createdAt: LATER })],
+      cards: [
+        card({ id: 'card-1', runId: 'run-1', taskId: 't-1' }),
+        card({ id: 'card-2', runId: 'run-9', taskId: 't-9', createdAt: LATER }),
+        card({ id: 'card-3', runId: 'run-1', taskId: 't-1', status: 'answered', createdAt: LATER }),
+      ],
+    })
+
+    const decision = decide(seeded, command({ type: 'task.complete', id: 't-1' }), NOW, env())
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['task.completed', 'card.resolved'])
+    const resolved = decision.facts[1]?.payload as { card: Card; reason: string }
+    expect(resolved.card.id).toBe('card-1')
+    expect(resolved.card.status).toBe('resolved')
+    expect(resolved.card.updatedAt).toBe(NOW)
+    expect(resolved.reason).toBe('cancelled')
+  })
+
+  it('run.host_settled(cancelled)：该 run 还 open 的卡一并收起', () => {
+    const seeded = view({
+      runs: [runRow({ id: 'run-1', status: 'running' })],
+      cards: [card({ id: 'card-1', runId: 'run-1', taskId: 't-9' })],
+    })
+
+    const decision = decide(
+      seeded,
+      { type: 'run.host_settled', runId: 'run-1', status: 'cancelled' },
+      NOW,
+      env(),
+    )
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['run.cancelled', 'card.resolved'])
+  })
   it('task.remove：tombstone；不存在静默', () => {
     expect(
       decide(

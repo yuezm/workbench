@@ -18,8 +18,17 @@ import * as run from './commands/run'
 import * as task from './commands/task'
 import * as thread from './commands/thread'
 import * as workflow from './commands/workflow'
+import { closeCardsOnFinish } from './cards'
 
+/**
+ * 决策出口：命令分派之后统一收起「随运行/任务结束该消失」的卡片（见 closeCardsOnFinish）。
+ * 放在这里而不是每个 handler 里，是为了覆盖回执、宿主兜底、取消、任务完成等所有路径。
+ */
 export function decide(view: View, input: Input, now: Iso, env: Environment): Decision {
+  return closeCardsOnFinish(view, dispatch(view, input, now, env), now)
+}
+
+function dispatch(view: View, input: Input, now: Iso, env: Environment): Decision {
   switch (input.type) {
     // ---------- 运行时 ----------
     case 'runtime.create':

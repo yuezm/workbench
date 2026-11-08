@@ -335,7 +335,8 @@ describe('kernel/decide 回执建卡（ask / notices / resolves）', () => {
     const active = running()
     const decision = receive(view({ runs: [active] }), receipt({ notices: ['已刷新依赖'] }))
 
-    expect(types(decision)).toEqual(['card.opened', 'run.succeeded'])
+    // run 在这批里就落了终态：信息卡随后被自动收起（否则会一直挂在任务详情里）
+    expect(types(decision)).toEqual(['card.opened', 'run.succeeded', 'card.resolved'])
     expect(opened(decision)).toMatchObject({
       id: 'card-new-1',
       title: '已刷新依赖',
@@ -615,7 +616,8 @@ describe('kernel/decide run.receipt later 约时间复查', () => {
       view({ runs: [running()] }),
       receipt({ later: LATER, notices: ['顺便说一句'] }),
     )
-    expect(types(decision)).toEqual(['card.opened', 'run.succeeded'])
+    // run 在这批里就落了终态：信息卡随后被自动收起（否则会一直挂在任务详情里）
+    expect(types(decision)).toEqual(['card.opened', 'run.succeeded', 'card.resolved'])
   })
 })
 

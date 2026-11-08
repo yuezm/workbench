@@ -212,7 +212,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'task_comments',
   ],
   'run.frames': ['runs'],
-  'run.host_settled': ['runs', 'conversations'],
+  'run.host_settled': ['runs', 'conversations', 'cards'],
   'run.cancel': ['runs'],
   'clock.tick': [
     'runs',
@@ -226,6 +226,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'projects',
     'threads',
     'task_comments',
+    'cards',
   ],
   'chat.create': ['agents', 'projects'],
   'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes', 'projects'],

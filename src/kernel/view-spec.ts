@@ -158,8 +158,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'task_comments',
       ]
     case 'run.host_settled':
-      // 兜底终态；聊天 run 还要补一条 assistant 消息（读对话判断是否已删）
-      return ['runs', 'conversations']
+      // 兜底终态；聊天 run 还要补一条 assistant 消息（读对话判断是否已删）；
+      // 终态后要收起该 run 还 open 的卡（决策出口统一处理），所以也要装 cards
+      return ['runs', 'conversations', 'cards']
     case 'run.cancel':
       return ['runs']
     case 'clock.tick':
@@ -179,6 +180,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'threads',
         // M7.5：cron 规则建的任务首轮提示词要带上下文（新任务没有评论，按切片装载）
         'task_comments',
+        // 超时 / 失联落终态的 run 要收起还 open 的卡（决策出口统一处理）
+        'cards',
       ]
     case 'chat.create':
       // 对话绑定的智能体必须存在（M5 命令化后沿用原 conversation.create 语义）；

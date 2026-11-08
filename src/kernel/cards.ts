@@ -283,3 +283,74 @@ export function answerFacts(
   })
   return { facts }
 }
+
+/**
+ * 运行 / 任务结束时收起还 open 的卡（M12 补口）。
+ *
+ * 卡片只在「等人回答」时有意义：run 落终态（成功 / 失败 / 取消）或任务完成后，留在
+ * `cards.open` 里就是「审批和通知还不消失」。这里在决策出口统一扫一遍，覆盖回执直接结束、
+ * 宿主兜底终态、取消、任务完成等所有路径：
+ *
+ * - 候选 = 视图里还 open 的卡（其 run 本批终态，或所属任务本批完成）+ 本批新开在终态 run 上的卡；
+ * - 本批已经回答 / 关闭 / 更新过的卡跳过（事实顺序优先，不重复产 `card.resolved`）；
+ * - 理由统一 `cancelled`：是宿主随运行结束收尾，不是人点掉的，actor 随之记 host/cancel。
+ *
+ * 纯函数：只读视图与已产出的事实，不猜别的状态。
+ */
+export function closeCardsOnFinish(view: View, decision: Decision, now: Iso): Decision {
+  if (decision.facts.length === 0) return decision
+  const finishedRuns = new Set<Id>()
+  const finishedTasks = new Set<Id>()
+  /** 本批已经答掉 / 关掉的卡不再补一条关闭；本批新开的卡仍要按「run 是否结束」处理 */
+  const touched = new Set<Id>()
+
+  for (const fact of decision.facts) {
+    switch (fact.type) {
+      case 'run.succeeded':
+      case 'run.failed':
+      case 'run.cancelled':
+        finishedRuns.add((fact.payload as { run: RunRow }).run.id)
+        break
+      case 'task.completed':
+        finishedTasks.add((fact.payload as { task: { id: Id } }).task.id)
+        break
+      case 'card.answered':
+      case 'card.resolved':
+        touched.add((fact.payload as { card: Card }).card.id)
+        break
+      default:
+        break
+    }
+  }
+  if (finishedRuns.size === 0 && finishedTasks.size === 0) return decision
+
+  /** 卡的 run / 任务是否在本批结束 */
+  const closes = (card: Card): boolean =>
+    (card.runId !== null && finishedRuns.has(card.runId)) ||
+    (card.taskId !== null && finishedTasks.has(card.taskId))
+
+  const candidates = new Map<Id, Card>()
+  for (const card of view.cards.values()) {
+    if (card.status === 'open' && closes(card)) candidates.set(card.id, card)
+  }
+  // 同批新开的卡（回执成功的同时给了 notices）也在这里收掉：它们不在视图里
+  for (const fact of decision.facts) {
+    if (fact.type !== 'card.opened') continue
+    const card = (fact.payload as { card: Card }).card
+    if (closes(card)) candidates.set(card.id, card)
+  }
+
+  const facts = [...decision.facts]
+  for (const card of [...candidates.values()].sort(compareCards)) {
+    if (touched.has(card.id)) continue
+    // 同批新开的卡不在视图里，不能走 resolveFacts（它按 id 回查视图），直接按行造事实
+    const resolved: Card = { ...card, status: 'resolved', updatedAt: now }
+    facts.push({
+      type: 'card.resolved',
+      actor: RESOLVE_ACTOR.cancelled,
+      at: now,
+      payload: { card: resolved, reason: 'cancelled' },
+    })
+  }
+  return facts.length === decision.facts.length ? decision : { ...decision, facts }
+}

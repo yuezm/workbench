@@ -50,6 +50,26 @@ const emptyUsage = (): RunUsage => ({
   cacheWriteTokens: 0,
 })
 
+/** 一个 run 的定时器容器：超时 / 取消宽限 / 强杀（缺省表示未设置） */
+export interface ExecutorTimers {
+  timeout?: ReturnType<typeof setTimeout>
+  cancelGrace?: ReturnType<typeof setTimeout>
+  kill?: ReturnType<typeof setTimeout>
+}
+
+/**
+ * 清理 run 的全部定时器（未设置的定时器跳过）。
+ *
+ * 导出到模块级：「定时器没设置」这条防御分支在正常运行时不可达（`finish()` 的触发点
+ * 都在 `timers.timeout = setTimeout(...)` 之后），导出后由单测直接构造输入覆盖
+ * （逻辑与调用点均不变）。
+ */
+export function clearExecutorTimers(timers: ExecutorTimers): void {
+  if (timers.timeout !== undefined) clearTimeout(timers.timeout)
+  if (timers.cancelGrace !== undefined) clearTimeout(timers.cancelGrace)
+  if (timers.kill !== undefined) clearTimeout(timers.kill)
+}
+
 /** 插件终态 → 回执（timeout 折成 failed + errorCode='timeout'） */
 function toReceipt(turn: Turn, outcome: DshRunOutcome): Receipt {
   const receipt: Receipt = {
@@ -198,23 +218,13 @@ export async function executeDshRun(
     let cancelRequested = false
     let spawnError: Error | null = null
     // 定时器集中放在可写容器里：finish/terminate 互相引用，便于统一清理
-    const timers: {
-      timeout?: ReturnType<typeof setTimeout>
-      cancelGrace?: ReturnType<typeof setTimeout>
-      kill?: ReturnType<typeof setTimeout>
-    } = {}
+    const timers: ExecutorTimers = {}
 
     const lines = createLineReader((line) => {
       const frame = parseFrame<DshFrame>(line)
       if (!frame) return
       handleFrame(frame, requestId, state, emit)
     })
-
-    const clearTimers = (): void => {
-      if (timers.timeout !== undefined) clearTimeout(timers.timeout)
-      if (timers.cancelGrace !== undefined) clearTimeout(timers.cancelGrace)
-      if (timers.kill !== undefined) clearTimeout(timers.kill)
-    }
 
     const terminate = (): void => {
       if (closed) return
@@ -296,7 +306,7 @@ export async function executeDshRun(
     const finish = (): void => {
       if (settled) return
       settled = true
-      clearTimers()
+      clearExecutorTimers(timers)
       turn.signal.removeEventListener('abort', onAbort)
       try {
         child.stdin?.end()

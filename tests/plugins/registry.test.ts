@@ -16,6 +16,7 @@ import {
   sourceById,
   sources,
   executors,
+  withTimeout,
   type ExecutorRegistryEntry,
 } from '../../src/plugins/registry'
 import { CLI_CANDIDATES } from '../../src/plugins/shared/cli-catalog'
@@ -374,6 +375,27 @@ describe('detect 汇总（D8）', () => {
       'goose',
       'crush',
     ])
+  })
+})
+
+describe('withTimeout（detect 单插件超时）', () => {
+  it('定时器句柄取不到时（timer 为 undefined）仍按原值兑现，且不调用 clearTimeout', async () => {
+    // setTimeout 返回 undefined：模拟句柄缺失（正常运行时句柄必得，该分支不可达）
+    const clearTimeoutSpy = vi.fn()
+    vi.stubGlobal('setTimeout', () => undefined)
+    vi.stubGlobal('clearTimeout', clearTimeoutSpy)
+    try {
+      await expect(withTimeout(Promise.resolve(1), 10)).resolves.toBe(1)
+      // 守卫生效：句柄缺失时不拿 undefined 去清定时器
+      expect(clearTimeoutSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('正常路径：句柄存在时清理定时器，超时按可读错误拒绝', async () => {
+    await expect(withTimeout(Promise.resolve(2), 10)).resolves.toBe(2)
+    await expect(withTimeout(new Promise(() => undefined), 10)).rejects.toThrow(/检测超时（>10ms）/)
   })
 })
 

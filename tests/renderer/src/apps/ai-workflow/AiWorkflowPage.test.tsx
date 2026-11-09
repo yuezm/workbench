@@ -16,7 +16,10 @@ import type {
 } from '../../../../../src/protocol/entities'
 import type { CommandDispatchResult } from '../../../../../src/protocol/ipc'
 import type { ThreadRow } from '../../../../../src/protocol/thread'
-import { AiWorkflowPage } from '../../../../../src/renderer/src/apps/ai-workflow/AiWorkflowPage'
+import {
+  AiWorkflowPage,
+  cardLanding,
+} from '../../../../../src/renderer/src/apps/ai-workflow/AiWorkflowPage'
 import { installFakeKernel, type FakeKernel } from '../../../shell/fake-kernel'
 
 const runtime: Runtime = {
@@ -1266,5 +1269,20 @@ describe('AiWorkflowPage', () => {
     expect(kernel.dispatched.filter((command) => command.type.startsWith('project.'))).toHaveLength(
       0,
     )
+  })
+})
+
+describe('cardLanding', () => {
+  it('落点判定：任务卡优先、其次会话卡，都没有则没有落点', () => {
+    expect(cardLanding({ ...card, taskId: 't1', conversationId: null })).toEqual({
+      kind: 'task',
+      taskId: 't1',
+    })
+    expect(cardLanding({ ...card, taskId: null, conversationId: 'c1' })).toEqual({
+      kind: 'conversation',
+      conversationId: 'c1',
+    })
+    // 既没有任务也没有会话：通知条那一行整行禁用，走不到落点
+    expect(cardLanding({ ...card, taskId: null, conversationId: null })).toEqual({ kind: 'none' })
   })
 })

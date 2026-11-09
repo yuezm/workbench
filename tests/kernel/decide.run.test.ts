@@ -19,6 +19,7 @@ import type {
 } from '../../src/protocol/facts'
 import type { Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
+import { degradedCommentText } from '../../src/kernel/commands/run'
 import { project } from '../../src/kernel/project'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
@@ -1515,5 +1516,47 @@ describe('kernel/decide 闸门流转（M11）', () => {
     expect(comment?.payload).toMatchObject({
       comment: { taskId: 't-1', author: 'agent' },
     })
+  })
+})
+
+describe('kernel/decide 闸门标签与放行留痕（M11 补充）', () => {
+  const gateStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({
+      id: 'st-2',
+      position: 1,
+      name: '自测',
+      gate: { maxFails: 2, onPassStageId: 'st-3', onFailStageId: 'st-1' },
+      ...over,
+    })
+
+  const gateView = (taskOver: Partial<Task> = {}): View =>
+    view({
+      runs: [running()],
+      workflows: [{ id: 'wf-1', name: '研发', description: '', createdAt: CREATED }],
+      stages: [stage({ id: 'st-1', position: 0 }), gateStage(), stage({ id: 'st-3', position: 2 })],
+      tasks: [task({ currentStageId: 'st-2', ...taskOver })],
+    })
+
+  it('fail 达上限且任务已有 gate:degraded 标签：标签不重复追加', () => {
+    const decision = receive(
+      gateView({ gateFails: 1, labels: ['gate:degraded'] }),
+      'run-1',
+      receipt({ verdict: 'fail' }),
+    )
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    const movedTask = (moved?.payload as { task: Task }).task
+    expect(movedTask.labels.filter((label) => label === 'gate:degraded')).toHaveLength(1)
+  })
+
+  it('放行留痕的文案：闸门配置缺省时次数按 0 算，配置齐全时用配置值', () => {
+    expect(degradedCommentText('自测', undefined)).toBe(
+      '闸门「自测」已连续 0 次未通过，按配置放行（任务已打 gate:degraded 标签）。',
+    )
+    expect(degradedCommentText('自测', null)).toBe(
+      '闸门「自测」已连续 0 次未通过，按配置放行（任务已打 gate:degraded 标签）。',
+    )
+    expect(degradedCommentText('自测', 2)).toBe(
+      '闸门「自测」已连续 2 次未通过，按配置放行（任务已打 gate:degraded 标签）。',
+    )
   })
 })

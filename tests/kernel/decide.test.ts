@@ -17,6 +17,7 @@ import type { FactPayload, FactType } from '../../src/protocol/facts'
 import type { ThreadRow } from '../../src/protocol/thread'
 import type { HostInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
+import { indexTarget, sameInstructions } from '../../src/kernel/commands/workflow'
 import { receiptBlockHint, taskPrompt } from '../../src/kernel/prompt'
 import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
@@ -802,7 +803,9 @@ describe('kernel/decide 工作流', () => {
       NOW,
       env(),
     )
-    expect((created.facts[1]?.payload as { stage: WorkflowStage }).stage.instructions).toBe('读需求')
+    expect((created.facts[1]?.payload as { stage: WorkflowStage }).stage.instructions).toBe(
+      '读需求',
+    )
 
     const updated = decide(
       view({
@@ -851,9 +854,7 @@ describe('kernel/decide 工作流', () => {
           id: 'wf-1',
           input: {
             name: '研发',
-            stages: [
-              { id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', gate },
-            ],
+            stages: [{ id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', gate }],
           },
         }),
         NOW,
@@ -890,7 +891,13 @@ describe('kernel/decide 工作流', () => {
         input: {
           name: '研发',
           stages: [
-            { id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', gate: { maxFails: 5 } },
+            {
+              id: 'st-1',
+              name: '待办',
+              entryMode: 'agent',
+              agentId: 'ag-1',
+              gate: { maxFails: 5 },
+            },
           ],
         },
       }),
@@ -919,7 +926,13 @@ describe('kernel/decide 工作流', () => {
         input: {
           name: '研发',
           stages: [
-            { id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', gate: { maxFails: 3 } },
+            {
+              id: 'st-1',
+              name: '待办',
+              entryMode: 'agent',
+              agentId: 'ag-1',
+              gate: { maxFails: 3 },
+            },
           ],
         },
       }),
@@ -1192,7 +1205,10 @@ describe('kernel/decide 任务', () => {
 
     const first = decide(
       seeded,
-      command({ type: 'task.create', input: { title: ' 写计划 ', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: ' 写计划 ', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       NOW,
       env(),
     )
@@ -1232,7 +1248,10 @@ describe('kernel/decide 任务', () => {
 
     const blank = decide(
       seeded,
-      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1', stageId: '' } }),
+      command({
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1', stageId: '' },
+      }),
       NOW,
       env(),
     )
@@ -1242,7 +1261,10 @@ describe('kernel/decide 任务', () => {
   it('task.create：工作流没有任何阶段时 currentStageId 落 null', () => {
     const decision = decide(
       view({ workflows: [workflow()] }),
-      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       NOW,
       env(),
     )
@@ -1582,7 +1604,10 @@ describe('kernel/decide 进入效果（run.queued）', () => {
   it('task.create 进 agent 阶段：同批产 run.queued，行字段与提示词逐字正确', () => {
     const decision = decide(
       agentView(),
-      command({ type: 'task.create', input: { title: '写计划', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: '写计划', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       NOW,
       env(),
     )
@@ -1642,7 +1667,10 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     for (const entryMode of ['user', 'none'] as const) {
       const decision = decide(
         agentView({ stages: [stage({ id: 'st-1', entryMode })] }),
-        command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } }),
+        command({
+          type: 'task.create',
+          input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+        }),
         NOW,
         env(),
       )
@@ -1657,7 +1685,10 @@ describe('kernel/decide 进入效果（run.queued）', () => {
   it('缺智能体 / 缺运行时：只建任务，不产 run.queued', () => {
     const missingAgent = decide(
       agentView({ agents: [] }),
-      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       NOW,
       env(),
     )
@@ -1669,7 +1700,10 @@ describe('kernel/decide 进入效果（run.queued）', () => {
 
     const missingRuntime = decide(
       agentView({ runtimes: [] }),
-      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       NOW,
       env(),
     )
@@ -1681,7 +1715,10 @@ describe('kernel/decide 进入效果（run.queued）', () => {
 
     const noAgentBound = decide(
       agentView({ stages: [stage({ id: 'st-1', entryMode: 'agent', agentId: null })] }),
-      command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       NOW,
       env(),
     )
@@ -1701,7 +1738,10 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     for (const [permissionMode, access] of cases) {
       const decision = decide(
         agentView({ runtimes: [runtime({ permissionMode })] }),
-        command({ type: 'task.create', input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' } }),
+        command({
+          type: 'task.create',
+          input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+        }),
         NOW,
         env(),
       )
@@ -1999,7 +2039,10 @@ describe('kernel/prompt taskPrompt', () => {
     })
     const decision = decide(
       seeded,
-      command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       NOW,
       env(),
     )
@@ -2381,5 +2424,24 @@ describe('kernel/decide M8：任务派生', () => {
       env(),
     )
     expect(decision.facts.some((fact) => fact.type === 'task.children_settled')).toBe(false)
+  })
+})
+
+describe('kernel/commands/workflow 阶段下标与文案比较', () => {
+  it('indexTarget：下标 → 阶段 id；缺省与越界都归 null', () => {
+    expect(indexTarget(['st-1', 'st-2'], 0)).toBe('st-1')
+    expect(indexTarget(['st-1', 'st-2'], 1)).toBe('st-2')
+    expect(indexTarget(['st-1', 'st-2'], null)).toBeNull()
+    expect(indexTarget(['st-1', 'st-2'], undefined)).toBeNull()
+    // 越界在产品路径上被 `validateStageSet` 先挡住，但判定本身必须能测
+    expect(indexTarget(['st-1', 'st-2'], 9)).toBeNull()
+  })
+
+  it('sameInstructions：缺省与空串视为同值（改了「要干什么」要能存下去）', () => {
+    expect(sameInstructions('', '')).toBe(true)
+    expect(sameInstructions(undefined, '')).toBe(true)
+    expect(sameInstructions(null, undefined)).toBe(true)
+    expect(sameInstructions('干活', '干活')).toBe(true)
+    expect(sameInstructions('干活', '')).toBe(false)
   })
 })

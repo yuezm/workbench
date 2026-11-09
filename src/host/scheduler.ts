@@ -128,6 +128,52 @@ export interface Scheduler {
   idle(): Promise<void>
 }
 
+/**
+ * 取消链路的定时器句柄（宽限 / 强杀后等待）；`null` = 没有进行中的取消链。
+ *
+ * 取消链路的三条判定（是否该写兜底终态、是否该启动链路、是否该排下一步）都收在
+ * 下面这几个模块级函数里：它们只吃状态、不碰 IO，**行为与内联写法逐字等价**，
+ * 但可以被单测用构造状态直接覆盖——内联写法在产品路径上永远走不到「收口」那一侧。
+ */
+export interface CancelChain {
+  /** 宽限定时器句柄（等执行器自己交回执） */
+  grace: unknown
+  /** 强杀定时器句柄（宽限到期后再等一轮） */
+  kill: unknown
+}
+
+/**
+ * 兜底取消终态：run 已落终态时不再写（终态事实只追加一次，重复写会脏掉投影）。
+ */
+export function settleCancelledOnce(finished: boolean, settle: () => void): void {
+  if (finished) return
+  settle()
+}
+
+/**
+ * 启动取消链路：run 已落终态、或取消链路已在跑时忽略
+ * （迟到取消不重写终态；重复取消不重启链路）。
+ */
+export function startCancelChain(
+  finished: boolean,
+  chain: CancelChain | null,
+  start: (chain: CancelChain) => void,
+): void {
+  if (finished || chain !== null) return
+  start({ grace: null, kill: null })
+}
+
+/**
+ * 排下一步（强杀等待）：链路已收口时不再排——run 都落终态了，没必要再杀一次。
+ */
+export function scheduleKill(
+  chain: CancelChain | null,
+  schedule: (chain: CancelChain) => void,
+): void {
+  if (chain === null) return
+  schedule(chain)
+}
+
 const DEFAULT_SCHEDULER_LIMITS: SchedulerLimits = {
   heartbeatMs: 30_000,
   runTimeoutMs: 1_800_000,
@@ -318,7 +364,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         clearOneShot(flushTimer)
         flushTimer = null
       }
-      if (frames.length === 0) return
+      // 空缓冲交给 `flushFrames` 自己挡：权威判定只留一处（它直接返回，不写事实、
+      // 也不动 frameSeq），与原来在这里早退的行为完全一致。
       const buffered = frames
       frames = []
       flushFrames(run, buffered)
@@ -358,7 +405,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     // 执行开始即登记（spawn 之前）：进程还没起来也不能丢线索（pid 留空，对账只清理）
     const heartbeat = startHeartbeat(run)
     /** 取消时序的定时器（宽限 / 强杀后等待）；null = 没有进行中的取消链。 */
-    let cancelTimers: { grace: unknown; kill: unknown } | null = null
+    let cancelTimers: CancelChain | null = null
     /** 收尾只做一次：flush、清定时器/心跳/登记、释放执行位、唤醒下一条。 */
     let finished = false
 
@@ -393,19 +440,20 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
     /** 宽限与强杀都到期仍无回执：宿主写兜底终态（帧先入账，不丢已产生的输出）。 */
     const settleCancelledRun = (error: string): void => {
-      if (finished) return
-      framesClosed = true
-      flushBuffered()
-      dispatch({
-        type: 'run.host_settled',
-        runId: run.id,
-        leaseId: run.leaseId ?? undefined,
-        turn: run.turn,
-        status: 'cancelled',
-        errorCode: 'cancelled',
-        error,
+      settleCancelledOnce(finished, () => {
+        framesClosed = true
+        flushBuffered()
+        dispatch({
+          type: 'run.host_settled',
+          runId: run.id,
+          leaseId: run.leaseId ?? undefined,
+          turn: run.turn,
+          status: 'cancelled',
+          errorCode: 'cancelled',
+          error,
+        })
+        finishOnce()
       })
-      finishOnce()
     }
 
     // 取消链路（T15）：abort → cancelGraceMs（等执行器自己交回执）
@@ -413,21 +461,25 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     controller.signal.addEventListener(
       'abort',
       () => {
-        if (finished || cancelTimers !== null) return
-        cancelTimers = { grace: null, kill: null }
-        cancelTimers.grace = setOneShot(() => {
-          if (cancelTimers === null) return
-          cancelTimers.grace = null
-          // 宽限内没等到回执：按登记 pid 终止整棵进程树（Windows taskkill /T /F）
-          const pid = registry.pidOf(run.id)
-          if (pid !== null) killPid(pid)
-          if (cancelTimers === null) return
-          cancelTimers.kill = setOneShot(() => {
-            if (cancelTimers === null) return
-            cancelTimers.kill = null
-            settleCancelledRun('已取消')
-          }, killAfterMs)
-        }, cancelGraceMs)
+        startCancelChain(finished, cancelTimers, (chain) => {
+          cancelTimers = chain
+          chain.grace = setOneShot(() => {
+            const active = cancelTimers
+            if (active === null) return
+            active.grace = null
+            // 宽限内没等到回执：按登记 pid 终止整棵进程树（Windows taskkill /T /F）
+            const pid = registry.pidOf(run.id)
+            if (pid !== null) killPid(pid)
+            scheduleKill(cancelTimers, (next) => {
+              next.kill = setOneShot(() => {
+                const current = cancelTimers
+                if (current === null) return
+                current.kill = null
+                settleCancelledRun('已取消')
+              }, killAfterMs)
+            })
+          }, cancelGraceMs)
+        })
       },
       { once: true },
     )
@@ -555,9 +607,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     },
     cancelAll: () => {
       draining = true
-      for (const runId of [...controllers.keys()]) {
-        const controller = controllers.get(runId)
-        if (controller === undefined) continue
+      // 直接遍历 entries：controller 就是 Map 里的值，「这轮取不到 controller」在构造上不存在
+      for (const [runId, controller] of [...controllers.entries()]) {
         // 退出不等待宽限：直接 abort + 杀进程树 + 写兜底终态（best-effort，不阻塞退出）
         controller.abort()
         const pid = registry.pidOf(runId)

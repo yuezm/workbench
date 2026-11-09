@@ -83,8 +83,13 @@ export const emptyUsage = (): RunUsage => ({
 const num = (value: number | undefined): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : 0
 
-/** 工具入参 → JSON 文本（缺省给空串，前端按「无参数」处理） */
-const jsonText = (value: unknown): string =>
+/**
+ * 工具入参 → JSON 文本（缺省给空串，前端按「无参数」处理）。
+ *
+ * 导出到模块级：不可序列化的值（函数 / Symbol）这条兜底分支在正常运行时不可达，
+ * 导出后由单测直接构造输入覆盖（逻辑与调用点均不变）。
+ */
+export const jsonText = (value: unknown): string =>
   value === undefined ? '' : (JSON.stringify(value) ?? '')
 
 /**

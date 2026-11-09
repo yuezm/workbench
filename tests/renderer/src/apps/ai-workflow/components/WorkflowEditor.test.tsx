@@ -3,11 +3,15 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   Agent,
+  StageInput,
   WorkflowInput,
   WorkflowStage,
   WorkflowWithStages,
 } from '../../../../../../src/protocol/entities'
-import { WorkflowEditor } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowEditor'
+import {
+  moveStageInList,
+  WorkflowEditor,
+} from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowEditor'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const agent: Agent = {
@@ -1229,6 +1233,20 @@ describe('WorkflowEditor 校验与失败反馈', () => {
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
   })
 
+  it('保存失败为非 Error 值时按字符串展示', async () => {
+    // 桥接可能抛出非 Error 值：错误文案统一转成字符串
+    const onSave = vi.fn().mockRejectedValue('磁盘写不进去')
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('工作流名称'), '研发')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText('保存失败：磁盘写不进去')).toBeInTheDocument()
+    expect(screen.getByLabelText('工作流名称')).toHaveValue('研发')
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+  })
+
   it('保存提进行中：按钮文案交代原因，且不接受第二次点击', async () => {
     const onSave = vi.fn(() => new Promise<void>(() => {}))
     const user = userEvent.setup()
@@ -1277,5 +1295,195 @@ describe('WorkflowEditor 校验与失败反馈', () => {
     const draft = onSave.mock.calls[0][0] as WorkflowInput
     expect(draft.stages.map((stage) => stage.name)).toEqual(['A', 'C'])
     expect(draft.stages[0].onCompleteIndex).toBe(1)
+  })
+})
+
+/** 造一条带闸门的工作流：闸门挂在阶段自己身上（M11） */
+function workflowWithGate(
+  stageNames: string[],
+  gateIndex: number,
+  gate: { maxFails: number; onPassStageId: string | null; onFailStageId: string | null },
+): WorkflowWithStages {
+  const base = workflowWith(stageNames)
+  return {
+    ...base,
+    stages: base.stages.map((stage, index) => (index === gateIndex ? { ...stage, gate } : stage)),
+  }
+}
+
+describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
+  beforeEach(() => {
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [])
+  })
+
+  it('闸门去向指向已不存在的阶段：还原成 null（回到默认语义）', async () => {
+    const existing = workflowWithGate(['执行', '判定', '收尾'], 1, {
+      maxFails: 2,
+      onPassStageId: 'gone',
+      onFailStageId: null,
+    })
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 落点不在阶段列表里：两个去向都按默认回显
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    expect(screen.getByRole('combobox', { name: '阶段2闸门通过时进入' })).toHaveTextContent(
+      '下一阶段',
+    )
+    expect(screen.getByRole('combobox', { name: '阶段2闸门未通过时进入' })).toHaveTextContent(
+      '原地不动',
+    )
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[1].gate).toMatchObject({
+      maxFails: 2,
+      onPassIndex: null,
+      onFailIndex: null,
+    })
+  })
+
+  it('删掉被别的阶段指向的阶段：那个目标清成 null（不会静默指到别的阶段）', async () => {
+    const existing = workflowWith(['A', 'B', 'C'], { 0: { onComplete: 1 } })
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 删掉 B：A 的「完成后进入」正好指向它，不能改成指向 C
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages.map((stage) => stage.name)).toEqual(['A', 'C'])
+    expect(draft.stages[0].onCompleteIndex).toBeNull()
+  })
+
+  it('删阶段：带闸门的阶段保住闸门并重映射去向，没闸门的阶段闸门仍为 null', async () => {
+    const existing = workflowWithGate(['A', '判定', 'C'], 1, {
+      maxFails: 2,
+      onPassStageId: 's2',
+      onFailStageId: null,
+    })
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 删掉 A：判定阶段还在，它的闸门要保住，去向跟着重映射
+    await user.click(screen.getByRole('button', { name: '阶段1' }))
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages.map((stage) => stage.name)).toEqual(['判定', 'C'])
+    // C 从下标 2 前移到 1，闸门的「通过时进入」跟着改
+    expect(draft.stages[0].gate).toMatchObject({
+      maxFails: 2,
+      onPassIndex: 1,
+      onFailIndex: null,
+    })
+    // 没闸门的阶段闸门仍是 null
+    expect(draft.stages[1].gate).toBeNull()
+  })
+
+  it('上移阶段：带闸门的阶段保住闸门，闸门去向跟着重映射', async () => {
+    const existing = workflowWithGate(['A', '判定', 'C'], 1, {
+      maxFails: 2,
+      onPassStageId: 's2',
+      onFailStageId: null,
+    })
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // C 上移越过判定：C 从下标 2 移到 1，闸门的「通过时进入」要跟着改
+    await user.click(screen.getByRole('button', { name: '阶段3上移' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages.map((stage) => stage.name)).toEqual(['A', 'C', '判定'])
+    expect(draft.stages[2].gate).toMatchObject({
+      maxFails: 2,
+      onPassIndex: 1,
+      onFailIndex: null,
+    })
+  })
+
+  it('闸门两个去向可以选回默认：通过=下一阶段、未通过=原地不动', async () => {
+    const existing = workflowWithGate(['执行', '判定', '收尾'], 1, {
+      maxFails: 2,
+      onPassStageId: 's2',
+      onFailStageId: 's0',
+    })
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    // 先选到具体阶段，再选回默认项：两次都要落回 null
+    await choose(user, '阶段2闸门通过时进入', '收尾')
+    await choose(user, '阶段2闸门未通过时进入', '执行')
+    await choose(user, '阶段2闸门通过时进入', '下一阶段')
+    await choose(user, '阶段2闸门未通过时进入', '原地不动')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[1].gate).toMatchObject({
+      maxFails: 2,
+      onPassIndex: null,
+      onFailIndex: null,
+    })
+  })
+
+  it('预填草稿里的阶段没有「要干什么」：输入框回显空串', () => {
+    const initial: WorkflowInput = {
+      name: '研发',
+      description: '',
+      stages: [
+        {
+          name: '待办',
+          entryMode: 'agent',
+          agentId: 'ag1',
+          onCompleteIndex: null,
+          onRejectIndex: null,
+          handoffWorkflowId: null,
+          handoffStageId: null,
+          subtaskStageId: null,
+          onChildrenSettled: null,
+          spawnPolicy: null,
+          gate: null,
+        },
+      ],
+    }
+    render(<WorkflowEditor workflow={null} initial={initial} onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    expect(screen.getByLabelText('阶段1要干什么')).toHaveValue('')
+  })
+})
+
+describe('moveStageInList', () => {
+  const stages: StageInput[] = [
+    { name: 'A', entryMode: 'agent' },
+    { name: 'B', entryMode: 'agent' },
+  ]
+
+  it('正常移动：被移动的那一项换位，选中项跟着它走', () => {
+    const moved = moveStageInList(stages, 0, 0, 1)
+    expect(moved.stages.map((stage) => stage.name)).toEqual(['B', 'A'])
+    expect(moved.selected).toBe(1)
+  })
+
+  it('越界移动：阶段与选中下标原样返回（界面上这两个按钮本来就是禁用的）', () => {
+    // 首行上移
+    expect(moveStageInList(stages, 0, 0, -1)).toEqual({ stages, selected: 0 })
+    // 末行下移
+    expect(moveStageInList(stages, 1, 1, 1)).toEqual({ stages, selected: 1 })
   })
 })

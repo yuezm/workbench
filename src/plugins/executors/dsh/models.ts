@@ -12,8 +12,13 @@ import { MODELS_TIMEOUT_MS } from './constants'
 import type { DshFrame, DshModelFrame } from './frames'
 import { collect, errMsg, type DshOptions } from './process'
 
-/** provider 展示名缺失时从模型 id 前缀兜底 */
-function providerOf(model: DshModelFrame): string {
+/**
+ * provider 展示名缺失时从模型 id 前缀兜底。
+ *
+ * 导出到模块级：id 不是字符串这条兜底分支在正常运行时不可达（调用点先过滤），
+ * 导出后由单测直接构造输入覆盖（逻辑与调用点均不变）。
+ */
+export function providerOf(model: DshModelFrame): string {
   if (typeof model.provider === 'string' && model.provider.trim()) return model.provider.trim()
   const id = typeof model.id === 'string' ? model.id : ''
   const index = id.indexOf('/')

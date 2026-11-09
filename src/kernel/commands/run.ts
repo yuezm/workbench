@@ -98,6 +98,19 @@ function gateVerdictOf(receipt: Receipt): GateVerdict | undefined {
 /** 闸门放行标记（M11）：预算耗尽后走通过分支时打在任务上的标签，看板可据此筛选。 */
 export const GATE_DEGRADED_LABEL = 'gate:degraded'
 
+/**
+ * 闸门放行留痕的文案：预算次数取自闸门配置（脏数据缺省 0）。
+ *
+ * 单独成函数，是为了让「缺省」这一支能被单测直接覆盖：文案在产品路径上只在
+ * 「预算耗尽且闸门配置完整」时拼得出，缺省那一侧永远走不到。
+ */
+export function degradedCommentText(
+  stageName: string,
+  maxFails: number | null | undefined,
+): string {
+  return `闸门「${stageName}」已连续 ${maxFails ?? 0} 次未通过，按配置放行（任务已打 ${GATE_DEGRADED_LABEL} 标签）。`
+}
+
 function withLabel(labels: readonly string[], label: string): string[] {
   return labels.includes(label) ? [...labels] : [...labels, label]
 }
@@ -140,7 +153,7 @@ function stageTransitionFacts(
       id: env.nextId('task-comment'),
       taskId: task.id,
       author: 'agent',
-      text: `闸门「${current.name}」已连续 ${current.gate?.maxFails ?? 0} 次未通过，按配置放行（任务已打 ${GATE_DEGRADED_LABEL} 标签）。`,
+      text: degradedCommentText(current.name, current.gate?.maxFails),
       createdAt: now,
     }
     return [hostDraft('task.comment_added', { comment }, now)]
@@ -155,10 +168,8 @@ function stageTransitionFacts(
   if (next.currentStageId !== null && next.currentStageId !== task.currentStageId) {
     const target = flow.stages.find((stage) => stage.id === next.currentStageId)
     return [
-      // 目标阶段找不到属于脏投影：不当作「完成」，宁可不交接
-      ...(target === undefined
-        ? []
-        : handoffOnExit(view, task, current, target, forwarded, now, env, HOST_SCHEDULER)),
+      // 目标阶段找不到属于脏投影：不当作「完成」，宁可不交接（判断收在 handoffOnExit 里）
+      ...handoffOnExit(view, task, current, target, forwarded, now, env, HOST_SCHEDULER),
       hostDraft(
         'task.moved',
         {

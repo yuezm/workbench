@@ -156,12 +156,14 @@ export function handoffOnExit(
   view: View,
   task: Task,
   fromStage: WorkflowStage,
-  toStage: WorkflowStage | null,
+  toStage: WorkflowStage | null | undefined,
   succeeded: boolean,
   now: Iso,
   env: Environment,
   actor: Actor,
 ): FactDraft[] {
+  // 目标阶段在投影里找不到（脏投影）：不当作「完成」，宁可不交接
+  if (toStage === undefined) return []
   if (!exitsForward({ from: fromStage, to: toStage, succeeded })) return []
   return handoffFacts(view, task, fromStage.id, now, env, actor)
 }

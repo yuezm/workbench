@@ -34,6 +34,24 @@ type View = 'workspace' | 'settings'
  */
 type TaskRoute = { kind: 'task'; taskId: string } | { kind: 'thread'; threadId: string }
 
+/**
+ * 卡片的落点：挂任务的卡进任务详情，聊天卡进对应会话；
+ * 两者都没有则没有落点（通知条那一行会整行禁用，走不到那里）。
+ */
+export type CardLanding =
+  | { kind: 'task'; taskId: string }
+  | { kind: 'conversation'; conversationId: string }
+  | { kind: 'none' }
+
+/** 落点判定（纯函数）：任务卡优先，其次会话卡，都没有就没有落点 */
+export function cardLanding(card: Card): CardLanding {
+  if (card.taskId !== null) return { kind: 'task', taskId: card.taskId }
+  if (card.conversationId !== null) {
+    return { kind: 'conversation', conversationId: card.conversationId }
+  }
+  return { kind: 'none' }
+}
+
 /** 设置区页头：标题 + 一句话说明 */
 function SectionHeader({ title, hint }: { title: string; hint: string }): ReactElement {
   return (
@@ -162,20 +180,24 @@ export function AiWorkflowPage(): ReactElement {
    */
   const openCard = (card: Card): void => {
     setView('workspace')
-    if (card.taskId !== null) {
-      setWorkspaceSection('tasks')
-      setTrail([{ kind: 'task', taskId: card.taskId }])
-      return
-    }
-    if (card.conversationId !== null) {
-      // 会话清单按项目取（M11）：跨项目的卡要先换项目，否则选中项会被过滤掉
-      const target = allConversations.find((item) => item.id === card.conversationId)
-      if (target !== undefined) {
-        setSelectedProjectId(target.projectId ?? DEFAULT_PROJECT_ID)
-        setTrail([])
+    // 落点判定在纯函数里（cardLanding）：没有落点的卡通知条整行禁用，走不到这里
+    const landing = cardLanding(card)
+    switch (landing.kind) {
+      case 'task':
+        setWorkspaceSection('tasks')
+        setTrail([{ kind: 'task', taskId: landing.taskId }])
+        break
+      case 'conversation': {
+        // 会话清单按项目取（M11）：跨项目的卡要先换项目，否则选中项会被过滤掉
+        const target = allConversations.find((item) => item.id === landing.conversationId)
+        if (target !== undefined) {
+          setSelectedProjectId(target.projectId ?? DEFAULT_PROJECT_ID)
+          setTrail([])
+        }
+        setWorkspaceSection('chat')
+        chat.selectConversation(landing.conversationId)
+        break
       }
-      setWorkspaceSection('chat')
-      chat.selectConversation(card.conversationId)
     }
   }
 

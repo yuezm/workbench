@@ -199,7 +199,7 @@ const runValue = (field: keyof RunRow, run: RunRow): SQLInputValue => {
  * M6.5 前的历史行没有线程两列。`kernel/project` 已归一；这里是投影边界的第二道防线
  * （与 `normalizeRun` 同一模式），保证任何路径写入的 `Change` 都能绑参、且增量与重建折出同一行。
  */
-const normalizeTask = (row: Task): Task => {
+const normalizeTask = (row: Task): Task & { gateFails: number } => {
   const legacy = row as Partial<Task>
   return {
     ...row,
@@ -571,7 +571,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         task.handoffFromTaskId,
         task.handoffFromStageId,
         task.projectId ?? null,
-        task.gateFails ?? 0,
+        // 闸门预算已由 `normalizeTask` 归一（缺省 0），这里不再重复兜底
+        task.gateFails,
         task.createdAt,
         task.updatedAt,
       )

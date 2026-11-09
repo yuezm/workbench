@@ -38,10 +38,27 @@ function stageRow(workflowId: Id, ids: Id[], stage: StageInput, position: number
   }
 }
 
-/** 下标 → 阶段 id；`validateStageSet` 已保证下标在范围内。 */
-function indexTarget(ids: Id[], index: number | null | undefined): Id | null {
+/**
+ * 下标 → 阶段 id；`validateStageSet` 已保证下标在范围内。
+ *
+ * 导出到模块级：下标越界这一支在产品路径上不可达（校验先挡住了），
+ * 但判定本身要能测——导出后由单测直接构造越界下标覆盖（逻辑与调用点均不变）。
+ */
+export function indexTarget(ids: Id[], index: number | null | undefined): Id | null {
   if (index === null || index === undefined) return null
   return ids[index] ?? null
+}
+
+/**
+ * 阶段「要干什么」的深比较（M9）：缺省与空串视为同值。
+ *
+ * 单独成函数是为了让「缺省」这一支能被单测直接覆盖（投影归一时恒为字符串）。
+ */
+export function sameInstructions(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  return (a ?? '') === (b ?? '')
 }
 
 /** 闸门深比较（M11）：漏比较会让「改了闸门配置保存无效」。缺省与 null 视为同值。 */
@@ -74,7 +91,7 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     (a.onChildrenSettled ?? null) === (b.onChildrenSettled ?? null) &&
     (a.spawnPolicy ?? null) === (b.spawnPolicy ?? null) &&
     // M9：阶段要干什么（缺省与空串视为同值）
-    (a.instructions ?? '') === (b.instructions ?? '') &&
+    sameInstructions(a.instructions, b.instructions) &&
     // M11：闸门三列一变就要落 stage.updated
     sameGate(a.gate, b.gate)
   )

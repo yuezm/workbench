@@ -12,9 +12,13 @@ import {
   PROBE_TIMEOUT_MS,
   RUN_TIMEOUT_MS,
 } from '../../../../src/plugins/executors/dsh/constants'
-import { listDshModels } from '../../../../src/plugins/executors/dsh/models'
+import { listDshModels, providerOf } from '../../../../src/plugins/executors/dsh/models'
 import { probeDshRuntime } from '../../../../src/plugins/executors/dsh/probe'
-import { executeDshRun, type DshOptions } from '../../../../src/plugins/executors/dsh/run'
+import {
+  clearExecutorTimers,
+  executeDshRun,
+  type DshOptions,
+} from '../../../../src/plugins/executors/dsh/run'
 import { parseModelId } from '../../../../src/plugins/shared/model-id'
 import { fakeSdk, type FakeSdkOverrides } from '../../support/fake-sdk'
 
@@ -385,6 +389,17 @@ describe('probeDshRuntime', () => {
   })
 })
 
+describe('providerOf', () => {
+  it('provider 优先；缺失时从 id 前缀兜底；id 不是字符串时回落空串', () => {
+    expect(providerOf({ provider: 'DeepSeek Account' })).toBe('DeepSeek Account')
+    expect(providerOf({ id: 'magpie/workbuddy' })).toBe('magpie')
+    // id 不是字符串：调用点（listDshModels）先过滤，这里直接构造输入覆盖兜底分支
+    expect(providerOf({ id: 123 })).toBe('')
+    // provider 只有空白且没有 id：同样回落空串
+    expect(providerOf({ provider: '  ' })).toBe('')
+  })
+})
+
 describe('listDshModels', () => {
   it('解析模型帧：thinking 两种形态、provider 兜底、默认标记', async () => {
     const h = harness((_args, child) => {
@@ -472,6 +487,15 @@ describe('listDshModels', () => {
     })
 
     await expect(listDshModels(ctxOf(h))).rejects.toThrow('读取模型目录退出码 null')
+  })
+})
+
+describe('clearExecutorTimers', () => {
+  it('定时器都没设置时全部跳过，不抛错', () => {
+    expect(() => clearExecutorTimers({})).not.toThrow()
+    expect(() =>
+      clearExecutorTimers({ timeout: undefined, cancelGrace: undefined, kill: undefined }),
+    ).not.toThrow()
   })
 })
 

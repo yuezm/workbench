@@ -12,7 +12,7 @@ import {
   VERSION_TIMEOUT_MS,
 } from '../../../../src/plugins/executors/claude/constants'
 import { detectClaude } from '../../../../src/plugins/executors/claude/detect'
-import { contentText } from '../../../../src/plugins/executors/claude/frames'
+import { contentText, jsonText } from '../../../../src/plugins/executors/claude/frames'
 import { claudePlugin } from '../../../../src/plugins/executors/claude/index'
 import { claudeManifest } from '../../../../src/plugins/executors/claude/manifest'
 import { probeClaudeRuntime } from '../../../../src/plugins/executors/claude/probe'
@@ -264,6 +264,16 @@ describe('contentText', () => {
     expect(contentText({ type: 'text', text: 'x' })).toBe('')
     // 既没有字符串 text、也没有字符串 type 的块：留空，不参与拼接
     expect(contentText([{ text: 123 }, { type: 7 }])).toBe('')
+  })
+})
+
+describe('jsonText', () => {
+  it('工具入参 → JSON 文本；不可序列化的值回落空串', () => {
+    expect(jsonText({ file_path: 'a.ts' })).toBe('{"file_path":"a.ts"}')
+    expect(jsonText(undefined)).toBe('')
+    // 函数不是可序列化的值：JSON.stringify 返回 undefined，回落空串
+    expect(jsonText(() => undefined)).toBe('')
+    expect(jsonText(Symbol('x'))).toBe('')
   })
 })
 

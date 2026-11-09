@@ -26,6 +26,18 @@ describe('channelHarness：通道上下文夹具', () => {
     expect(received).toEqual(['card-1', 'second:card-1', 'card-2'])
   })
 
+  it('退订是幂等的：处理器已移除时再退订一次不改动订阅列表', () => {
+    const harness = channelHarness()
+    const unsubscribe = harness.ctx.onCard(() => undefined)
+    expect(harness.handlers).toHaveLength(1)
+
+    unsubscribe()
+    expect(harness.handlers).toHaveLength(0)
+    // 处理器已经不在列表里：再退订一次不抛错、也不误删别的处理器
+    expect(() => unsubscribe()).not.toThrow()
+    expect(harness.handlers).toHaveLength(0)
+  })
+
   it('delivered / notify 只记录参数，signal 可 abort', () => {
     const harness = channelHarness()
     void harness.ctx.delivered('card-1', 2, 'in-app')

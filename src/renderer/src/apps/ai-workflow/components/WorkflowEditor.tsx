@@ -151,7 +151,8 @@ function validateDraft(draft: WorkflowInput): DraftErrors {
 
   const dangling = draft.stages.findIndex((stage) => hasDanglingTarget(stage, count))
   if (dangling >= 0) {
-    const label = draft.stages[dangling].name.trim() || `阶段${dangling + 1}`
+    // 「阶段名称必填」的检查在前：走到这里时所有阶段名都已非空，不需要再兜一个「阶段N」
+    const label = draft.stages[dangling].name.trim()
     return {
       ...errors,
       stageIndex: dangling,
@@ -201,6 +202,54 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
           : null,
       }
     }),
+  }
+}
+
+/** 阶段重排的结果：重排后的阶段与新的选中下标 */
+export interface StageMove {
+  stages: StageInput[]
+  selected: number
+}
+
+/**
+ * 上/下移一个阶段：目标下标存在 stages 里，重排时要同步重映射，否则流转目标会指错阶段。
+ * 选中跟随被移动的那一项；被换位的相邻项若正展开，选中也换到它新的下标。
+ *
+ * 越界（首行上移 / 末行下移）时原样返回：界面上这两个按钮本来就是禁用的，这里留同一道护栏；
+ * 抽成纯函数后，单测可以直接用越界下标覆盖这一支。
+ */
+export function moveStageInList(
+  stages: StageInput[],
+  selected: number,
+  i: number,
+  dir: -1 | 1,
+): StageMove {
+  const j = i + dir
+  if (j < 0 || j >= stages.length) return { stages, selected }
+  const remap = (idx: number | null | undefined): number | null => {
+    if (idx == null) return null
+    if (idx === i) return j
+    if (dir === -1) return idx >= j && idx < i ? idx + 1 : idx
+    return idx > i && idx <= j ? idx - 1 : idx
+  }
+  const next = stages.map((s) => ({
+    ...s,
+    onCompleteIndex: remap(s.onCompleteIndex),
+    onRejectIndex: remap(s.onRejectIndex),
+    // M11：闸门去向也是下标，重排必须同步重映射，否则判定会把任务送错阶段
+    gate: s.gate
+      ? {
+          ...s.gate,
+          onPassIndex: remap(s.gate.onPassIndex),
+          onFailIndex: remap(s.gate.onFailIndex),
+        }
+      : null,
+  }))
+  const [moved] = next.splice(i, 1)
+  next.splice(j, 0, moved)
+  return {
+    stages: next,
+    selected: selected === i ? j : selected === j ? i : selected,
   }
 }
 
@@ -320,37 +369,13 @@ export function WorkflowEditor({
   }
 
   /**
-   * 上/下移一个阶段：目标下标存在 stages 里，重排时要同步重映射，否则流转目标会指错阶段。
-   * 选中跟随被移动的那一项；被换位的相邻项若正展开，选中也换到它新的下标。
+   * 上/下移一个阶段：重排与流转目标的重映射在纯函数里（moveStageInList），
+   * 组件只负责把结果落到草稿与选中项上。
    */
   const moveStage = (i: number, dir: -1 | 1): void => {
-    const j = i + dir
-    if (j < 0 || j >= draft.stages.length) return
-    setDraft((d) => {
-      const remap = (idx: number | null | undefined): number | null => {
-        if (idx == null) return null
-        if (idx === i) return j
-        if (dir === -1) return idx >= j && idx < i ? idx + 1 : idx
-        return idx > i && idx <= j ? idx - 1 : idx
-      }
-      const stages = d.stages.map((s) => ({
-        ...s,
-        onCompleteIndex: remap(s.onCompleteIndex),
-        onRejectIndex: remap(s.onRejectIndex),
-        // M11：闸门去向也是下标，重排必须同步重映射，否则判定会把任务送错阶段
-        gate: s.gate
-          ? {
-              ...s.gate,
-              onPassIndex: remap(s.gate.onPassIndex),
-              onFailIndex: remap(s.gate.onFailIndex),
-            }
-          : null,
-      }))
-      const [moved] = stages.splice(i, 1)
-      stages.splice(j, 0, moved)
-      return { ...d, stages }
-    })
-    setSelected((current) => (current === i ? j : current === j ? i : current))
+    const next = moveStageInList(draft.stages, selected, i, dir)
+    setDraft((d) => ({ ...d, stages: next.stages }))
+    setSelected(next.selected)
   }
 
   /**

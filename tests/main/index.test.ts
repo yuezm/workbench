@@ -88,6 +88,8 @@ const mocks = vi.hoisted(() => {
   const effectsMock = {
     dispatch: (): { facts: unknown[] } => ({ facts: [] }),
     afterCommit: (): void => undefined,
+    /** 装配根传进来的 announce 回调（结局通知）：mock 里留住它，用例直接触发 */
+    announce: undefined as undefined | ((facts: never[]) => void),
   }
   const pluginExecutors = [
     {
@@ -145,7 +147,10 @@ const mocks = vi.hoisted(() => {
     createSourcesMock: vi.fn(() => sourcesMock),
     createSchedulerMock: vi.fn(() => schedulerMock),
     createClockMock: vi.fn(() => clockMock),
-    createEffectsMock: vi.fn(() => effectsMock),
+    createEffectsMock: vi.fn((options?: { announce?: (facts: never[]) => void }) => {
+      effectsMock.announce = options?.announce
+      return effectsMock
+    }),
     openDatabaseMock: vi.fn(() => ({})),
     createStoreMock: vi.fn(() => storeMock),
     importLegacyMock: vi.fn(() => ({ imported: false, counts: {} })),
@@ -322,6 +327,21 @@ describe('主进程入口装配补测', () => {
     expect(open?.({ url: 'javascript:alert(1)' })).toEqual({ action: 'deny' })
     expect(open?.({ url: 'not a url' })).toEqual({ action: 'deny' })
     expect(mocks.shellMock.openExternal).toHaveBeenCalledTimes(1)
+  })
+
+  it('结局通知：装配根把 announce 接到系统通知原件（任务完成 → 一条通知）', async () => {
+    await loadEntry()
+
+    expect(typeof mocks.effectsMock.announce).toBe('function')
+    mocks.effectsMock.announce?.([
+      {
+        type: 'task.completed',
+        actor: { kind: 'host', via: 'scheduler' },
+        payload: { task: { id: 't-1', title: '收尾任务' } },
+      },
+    ] as never[])
+
+    expect(mocks.notifyMock).toHaveBeenCalledWith('任务完成：收尾任务', '点开工作台查看结果')
   })
 
   it('dev 模式导航只放行 ELECTRON_RENDERER_URL', async () => {

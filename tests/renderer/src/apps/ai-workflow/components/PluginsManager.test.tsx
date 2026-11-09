@@ -3,7 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ConfigField } from '../../../../../../src/protocol/manifest'
 import type { PluginView } from '../../../../../../src/protocol/plugins'
-import { PluginsManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/PluginsManager'
+import {
+  numberFieldErrors,
+  PluginsManager,
+} from '../../../../../../src/renderer/src/apps/ai-workflow/components/PluginsManager'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 /** webhook 来源插件的 config 字段：覆盖 text / number / boolean / select / secret 五种 */
@@ -446,5 +449,16 @@ describe('PluginsManager', () => {
       config: {},
     })
     expect(kernel.dispatched[0]).not.toHaveProperty('secrets')
+  })
+})
+
+describe('numberFieldErrors', () => {
+  it('数字字段缺省（表单项里没有这个 key）：按空值处理，不算非法', () => {
+    const fields: ConfigField[] = [{ key: 'port', label: '端口', type: 'number' }]
+    expect(numberFieldErrors(fields, {})).toEqual({})
+    // 有值但不是数字：仍要就地报错
+    expect(numberFieldErrors(fields, { port: 'abc' })).toEqual({
+      port: '必须是数字，留空用缺省值',
+    })
   })
 })

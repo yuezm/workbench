@@ -158,8 +158,13 @@ export interface DetectOptions {
 
 const errMsg = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
-/** 给一个 promise 加超时；`task` 未被选中时其后续拒绝由 race 内部处理器消化。 */
-function withTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
+/**
+ * 给一个 promise 加超时；`task` 未被选中时其后续拒绝由 race 内部处理器消化。
+ *
+ * 导出到模块级：定时器句柄缺失（`setTimeout` 未返回句柄）这条防御分支在正常运行时
+ * 不可达，导出后由单测直接构造输入覆盖（逻辑与调用点均不变）。
+ */
+export function withTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   const expires = new Promise<T>((_resolve, reject) => {
     timer = setTimeout(() => reject(new Error(`检测超时（>${timeoutMs}ms）`)), timeoutMs)

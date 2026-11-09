@@ -133,6 +133,20 @@ describe('ChatPanel', () => {
     expect(input).toHaveValue('发不出去')
   })
 
+  it('发送失败为非 Error 值时按字符串展示', async () => {
+    // 桥接可能抛出非 Error 值：错误文案统一转成字符串
+    const onSend = vi.fn(() => Promise.reject('桥接断了'))
+    const user = userEvent.setup()
+    render(<ChatPanel {...makeProps({ onSend })} />)
+
+    const input = screen.getByLabelText('消息输入')
+    await user.type(input, '发不出去')
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByText('发送失败：桥接断了')).toBeInTheDocument()
+    expect(input).toHaveValue('发不出去')
+  })
+
   it('点击发送按钮提交 trim 后的内容', async () => {
     const onSend = vi.fn(async () => true)
     const user = userEvent.setup()

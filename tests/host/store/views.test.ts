@@ -1431,3 +1431,30 @@ describe('会话视图（M11：聊天归属项目）', () => {
     expect(view.projects.size).toBe(0)
   })
 })
+
+describe('queryView：闸门缺省去向', () => {
+  it('workflows.all：闸门只配了次数、没配去向时读回来是 null（缺省 = 按默认下一阶段）', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+    const gateStage = sample.stage({
+      id: 'st-gate-default',
+      workflowId: 'wf-1',
+      name: '默认判定',
+      position: 2,
+      entryMode: 'agent',
+      agentId: agent.id,
+      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+    })
+    writer.apply({ table: 'workflow_stages', key: gateStage.id, row: gateStage }, SAMPLE_AT)
+
+    const stages = (queryView(db, 'workflows.all') as WorkflowWithStages[]).find(
+      (item) => item.id === 'wf-1',
+    )?.stages
+    expect(stages?.find((item) => item.id === 'st-gate-default')?.gate).toEqual({
+      maxFails: 2,
+      onPassStageId: null,
+      onFailStageId: null,
+    })
+  })
+})

@@ -63,6 +63,33 @@ function initialConfig(plugin: PluginView): ConfigDraft {
   return draft
 }
 
+/**
+ * 数字字段的草稿校验：非空却不是数字就报错——不能静默跳过、把落库值退回缺省
+ * （用户看到自己填的数字「消失了」，却没有任何解释）。
+ */
+export function numberFieldError(raw: string): string | null {
+  const text = raw.trim()
+  if (text === '' || Number.isFinite(Number(text))) return null
+  return '必须是数字，留空用缺省值'
+}
+
+/**
+ * 逐个数字字段做校验：表单项里没有这个 key（缺省）按空值处理，不算非法。
+ * 抽成纯函数后，缺省这一支可以直接用构造输入覆盖。
+ */
+export function numberFieldErrors(
+  fields: ConfigField[],
+  text: Record<string, string>,
+): Record<string, string> {
+  const invalid: Record<string, string> = {}
+  for (const field of fields) {
+    if (field.type !== 'number') continue
+    const message = numberFieldError(text[field.key] ?? '')
+    if (message !== null) invalid[field.key] = message
+  }
+  return invalid
+}
+
 function PluginIcon(): ReactElement {
   return (
     <svg
@@ -266,16 +293,6 @@ function PluginDetail({
     setConfig((current) => ({ ...current, flags: { ...current.flags, [key]: value } }))
   }
 
-  /**
-   * 数字字段的草稿校验：非空却不是数字就报错——不能静默跳过、把落库值退回缺省
-   * （用户看到自己填的数字「消失了」，却没有任何解释）。
-   */
-  function numberFieldError(raw: string): string | null {
-    const text = raw.trim()
-    if (text === '' || Number.isFinite(Number(text))) return null
-    return '必须是数字，留空用缺省值'
-  }
-
   /** 按字段类型把草稿转成标量；空字符串不写入（保留 manifest 缺省值） */
   const configPatch = (): Record<string, string | number | boolean> => {
     const patch: Record<string, string | number | boolean> = {}
@@ -294,12 +311,7 @@ function PluginDetail({
 
   const save = (): void => {
     // 先校验再提交：非法数字不落到内核，也不悄悄回落到缺省值
-    const invalid: Record<string, string> = {}
-    for (const field of plugin.configFields) {
-      if (field.type !== 'number') continue
-      const message = numberFieldError(config.text[field.key] ?? '')
-      if (message !== null) invalid[field.key] = message
-    }
+    const invalid = numberFieldErrors(plugin.configFields, config.text)
     setFieldErrors(invalid)
     if (Object.keys(invalid).length > 0) {
       setActionError(null)

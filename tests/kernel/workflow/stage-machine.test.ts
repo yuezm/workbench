@@ -485,7 +485,11 @@ describe('stage-machine 闸门（M11）', () => {
         gate: { maxFails: 1, onPassStageId: null, onFailStageId: null },
       }),
     ])
-    const r = moveTask({ ...sTask('test'), gateFails: 0 }, { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' }, f)
+    const r = moveTask(
+      { ...sTask('test'), gateFails: 0 },
+      { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' },
+      f,
+    )
     expect(r.task.status).toBe('completed')
     expect(r.task.gateFails).toBe(0)
     expect(r.gateExhausted).toBe(true)
@@ -494,5 +498,43 @@ describe('stage-machine 闸门（M11）', () => {
   it('人工拖拽落位视为重新开始：预算清零', () => {
     const r = moveTaskToStage({ ...sTask('exec'), gateFails: 3 }, 'test', gateFlow())
     expect(r.task.gateFails).toBe(0)
+  })
+})
+
+describe('kernel 闸门目标缺失（脏投影）', () => {
+  it('闸门「通过时进入」指向已不存在的阶段：回退默认下一阶段', () => {
+    const flow: WorkflowWithStages = {
+      ...workflow(),
+      stages: [
+        stage('s0', { gate: { maxFails: 2, onPassStageId: 'ghost', onFailStageId: null } }),
+        stage('s1'),
+      ],
+    }
+
+    const { task: next } = moveTask(
+      task('s0'),
+      { type: 'RUN_SUCCEEDED', runId: 'r1', verdict: 'pass' },
+      flow,
+    )
+    expect(next.currentStageId).toBe('s1')
+  })
+
+  it('闸门「未通过时进入」指向已不存在的阶段：原地累计次数，不重建 run', () => {
+    const flow: WorkflowWithStages = {
+      ...workflow(),
+      stages: [
+        stage('s0', { gate: { maxFails: 3, onPassStageId: null, onFailStageId: 'ghost' } }),
+        stage('s1'),
+      ],
+    }
+
+    const { task: next, effects } = moveTask(
+      task('s0'),
+      { type: 'RUN_SUCCEEDED', runId: 'r1', verdict: 'fail' },
+      flow,
+    )
+    expect(next.currentStageId).toBe('s0')
+    expect(next.gateFails).toBe(1)
+    expect(effects).toEqual([])
   })
 })

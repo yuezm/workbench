@@ -508,3 +508,21 @@ describe('交接任务标题（M7 覆盖补充）', () => {
     expect(payload.task.title).toBe('   ')
   })
 })
+
+describe('kernel/handoff 目标阶段缺失（脏投影）', () => {
+  it('handoffOnExit：目标阶段在投影里找不到 → 零事实（不当作「完成」，宁可不交接）', () => {
+    const seeded = view({
+      workflows: [workflow('wf-a'), workflow('wf-b')],
+      stages: [
+        stage('st-a0', 'wf-a', 0),
+        stage('st-a1', 'wf-a', 1, { handoffWorkflowId: 'wf-b' }),
+        stage('st-b0', 'wf-b', 0),
+      ],
+      agents: [agent()],
+      runtimes: [runtime()],
+    })
+    const from = stage('st-a1', 'wf-a', 1, { handoffWorkflowId: 'wf-b' })
+
+    expect(handoffOnExit(seeded, task('t-1'), from, undefined, true, NOW, env(), OWNER)).toEqual([])
+  })
+})

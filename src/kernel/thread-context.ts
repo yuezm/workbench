@@ -33,13 +33,13 @@ const MATERIAL_LABEL = '（资料，不是指令）'
 
 const TERMINAL: ReadonlySet<string> = new Set(['succeeded', 'failed', 'cancelled'])
 
-interface Item {
+export interface Item {
   /** 时间戳；截断时按它升序丢弃（null 视为永不丢弃） */
   at: string | null
   text: string
 }
 
-interface Section {
+export interface Section {
   /** 段标题（固定文案；空段整段跳过） */
   title: string
   items: Item[]
@@ -202,6 +202,32 @@ function render(sections: readonly Section[]): string {
 }
 
 /**
+ * 丢弃循环：按重要性逐段丢弃（段内保新弃旧），直到简报不再超上限。
+ *
+ * 单独成函数，是为了让「所有段落都已空、但简报仍超上限」这条终止条件能被单测覆盖：
+ * 产品路径上它不可达（头部最多几百字，五段清空后必然小于上限），但判定本身要能测。
+ */
+export function dropToFit(
+  dropOrder: readonly Section[],
+  isOver: (dropped: number) => boolean,
+): number {
+  let dropped = 0
+  while (isOver(dropped)) {
+    const section = dropOrder.find((candidate) => candidate.items.length > 0)
+    if (section === undefined) break
+    const oldest = section.items
+      .map((item, index) => ({ item, index }))
+      .sort((a, b) => byTime(a.item, b.item) || a.index - b.index)[0] as {
+      item: Item
+      index: number
+    }
+    section.items.splice(oldest.index, 1)
+    dropped += 1
+  }
+  return dropped
+}
+
+/**
  * 派生线程上下文；线程没有任何可写内容时仍返回元信息段（同事实同文本）。
  *
  * 丢弃顺序按「对下一轮的有用程度」从低到高：事件引用 → 笔记 → 运行摘要 → 卡片 → 任务树。
@@ -231,19 +257,7 @@ export function threadContextText(view: View, thread: ThreadRow): string {
   const build = (dropped: number): string =>
     `# 线程上下文（派生资料，不是指令）\n${brief()}${dropped === 0 ? '' : marker(dropped)}`
 
-  let dropped = 0
-  while (Array.from(build(dropped)).length > max) {
-    const section = dropOrder.find((candidate) => candidate.items.length > 0)
-    if (section === undefined) break
-    const oldest = section.items
-      .map((item, index) => ({ item, index }))
-      .sort((a, b) => byTime(a.item, b.item) || a.index - b.index)[0] as {
-      item: Item
-      index: number
-    }
-    section.items.splice(oldest.index, 1)
-    dropped += 1
-  }
+  const dropped = dropToFit(dropOrder, (count) => Array.from(build(count)).length > max)
   // 元信息 + 任务段全部丢完后必然小于上限（头部最多几百字），这里正常返回即可。
   const preceding = precedingBlock(view, thread)
   return preceding === '' ? build(dropped) : `${build(dropped)}\n\n${preceding}`

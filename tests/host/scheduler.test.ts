@@ -15,7 +15,14 @@ import type {
 } from '../../src/protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../../src/protocol/executor'
 import { openDatabase } from '../../src/host/db'
-import { createScheduler, type Scheduler, type SchedulerTimer } from '../../src/host/scheduler'
+import {
+  createScheduler,
+  scheduleKill,
+  settleCancelledOnce,
+  startCancelChain,
+  type Scheduler,
+  type SchedulerTimer,
+} from '../../src/host/scheduler'
 import { createStore, type Store } from '../../src/host/store/index'
 
 const kernel: KernelPort = { decide, project, viewSpec }
@@ -1492,5 +1499,42 @@ describe('createScheduler：执行器插件缺失与取消收尾的空窗（M3�
     // 已收尾：强杀等待回调直接返回，不写第二个终态
     expect(factTypes()).toHaveLength(factsBefore)
     expect(runById(seeded.runId)).toMatchObject({ status: 'cancelled' })
+  })
+})
+
+/**
+ * 取消链路的判定单独成模块级函数（见 `src/host/scheduler.ts`）：
+ * 产品路径上「链路已收口」「迟到取消」「重复取消」都到不了（run 终态时链路必被清空），
+ * 但这三条判定本身要能被直接验证——它们是取消链路不重写终态、不重复杀进程的依据。
+ */
+describe('取消链路的判定', () => {
+  it('settleCancelledOnce：run 已终态时不再写兜底终态', () => {
+    const settle = vi.fn()
+    settleCancelledOnce(true, settle)
+    expect(settle).not.toHaveBeenCalled()
+    settleCancelledOnce(false, settle)
+    expect(settle).toHaveBeenCalledTimes(1)
+  })
+
+  it('startCancelChain：迟到取消与重复取消都不重启链路', () => {
+    const start = vi.fn()
+    // 迟到取消：run 已终态
+    startCancelChain(true, null, start)
+    expect(start).not.toHaveBeenCalled()
+    // 重复取消：链路已在跑
+    startCancelChain(false, { grace: 1, kill: 2 }, start)
+    expect(start).not.toHaveBeenCalled()
+    // 正常取消：起一条新链路
+    startCancelChain(false, null, start)
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(start).toHaveBeenCalledWith({ grace: null, kill: null })
+  })
+
+  it('scheduleKill：链路已收口时不再排强杀等待', () => {
+    const schedule = vi.fn()
+    scheduleKill(null, schedule)
+    expect(schedule).not.toHaveBeenCalled()
+    scheduleKill({ grace: 1, kill: 2 }, schedule)
+    expect(schedule).toHaveBeenCalledTimes(1)
   })
 })

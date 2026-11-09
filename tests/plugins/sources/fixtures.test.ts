@@ -44,6 +44,11 @@ describe('source 测试夹具（M7）', () => {
     expect(plain.fetches).toEqual([{ url: 'http://x', options: undefined }])
   })
 
+  it('sdkWithNet：未给配置时 config() 回落空对象（宿主未合并默认值的兜底）', () => {
+    const assembled = sdkWithNet()
+    expect(assembled.sdk.config()).toEqual({})
+  })
+
   it('sdkWithNet：缺省 log 为静默函数；sourceHarness 的 emit / log 收集可用', () => {
     const assembled = sdkWithNet({ now: () => 1234 })
     expect(() => assembled.sdk.log('静默')).not.toThrow()

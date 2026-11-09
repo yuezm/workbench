@@ -91,7 +91,7 @@ export function SettingsPanel({ config, running, onChange }: SettingsPanelProps)
         </svg>
       </summary>
 
-      <div className="mt-3 rounded-xl border border-border bg-card p-5 shadow-[0_16px_48px_-24px_rgb(0_0_0/60%)]">
+      <div className="mt-3 rounded-xl border border-border bg-card p-5">
         <div className="grid grid-cols-2 gap-4">
           <NumberField
             label={`专注（分钟）`}

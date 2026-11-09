@@ -10,16 +10,19 @@ export function PomodoroPage(): ReactElement {
   const running = state.endsAt !== null
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-10 px-6 py-8">
-      <TimerDisplay
-        phase={state.phase}
-        remainingMs={state.remainingMs}
-        completedRounds={state.completedRounds}
-        roundsBeforeLongBreak={state.config.roundsBeforeLongBreak}
-        totalMs={phaseDurationMs(state.config, state.phase)}
-      />
-      <Controls running={running} onStart={start} onPause={pause} onReset={reset} onSkip={skip} />
-      <SettingsPanel config={state.config} running={running} onChange={setConfig} />
+    // 外层可滚动、内层 min-h-full：展开设置面板后内容超高时整体滚动，不被裁掉
+    <div className="h-full overflow-y-auto">
+      <div className="flex min-h-full flex-col items-center justify-center gap-10 px-6 py-8">
+        <TimerDisplay
+          phase={state.phase}
+          remainingMs={state.remainingMs}
+          completedRounds={state.completedRounds}
+          roundsBeforeLongBreak={state.config.roundsBeforeLongBreak}
+          totalMs={phaseDurationMs(state.config, state.phase)}
+        />
+        <Controls running={running} onStart={start} onPause={pause} onReset={reset} onSkip={skip} />
+        <SettingsPanel config={state.config} running={running} onChange={setConfig} />
+      </div>
     </div>
   )
 }

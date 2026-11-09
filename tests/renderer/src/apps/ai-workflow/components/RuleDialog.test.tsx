@@ -73,10 +73,12 @@ async function choose(
   option: string,
 ): Promise<void> {
   await user.click(screen.getByRole('combobox', { name: combobox }))
-  await user.click(await screen.findByRole('option', { name: option }))
+  // 浮层里的 option 走 Radix portal，等它挂出来要给足时间：
+  // 全量跑时 168 个测试文件并行抢 CPU，浮层偶尔超过默认的 1s 才出现。
+  await user.click(await screen.findByRole('option', { name: option }, { timeout: 5000 }))
 }
 
-describe('RuleDialog', () => {
+describe('RuleDialog', { timeout: 20_000 }, () => {
   it('空白新建：空名保存就地提示且不提交；取消走 onCancel', async () => {
     const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
     const onCancel = vi.fn()

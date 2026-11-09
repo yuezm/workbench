@@ -84,6 +84,8 @@ export const COMMAND_LIMITS = {
   receiptItems: 100,
   /** 选项文案条数上限 */
   askOptions: 20,
+  /** 卡片补充说明上限（与卡片正文 `text` 同量级） */
+  cardNote: 2000,
   /** 事件摘要上限（SPEC-kernel：≤200 字） */
   summary: 200,
   /** 时间戳字符串长度上限（ISO 8601 远小于此） */
@@ -639,7 +641,8 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
       return (
         requiredId(command.cardId, 'cardId') ??
         integerIn(command.optionIndex, 'optionIndex', 0, COMMAND_LIMITS.askOptions - 1) ??
-        optionalEnum(command.via, 'via', CARD_ANSWER_VIA)
+        optionalEnum(command.via, 'via', CARD_ANSWER_VIA) ??
+        optionalText(command.note, 'note', COMMAND_LIMITS.cardNote)
       )
     case 'card.resolve':
       return requiredId(command.cardId, 'cardId')

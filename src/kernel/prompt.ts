@@ -101,6 +101,8 @@ export const gateInstructionsText = (stage: Pick<WorkflowStage, 'gate'> | null):
     '- `verdict`: "pass" = 确实达成；"fail" = 没达成（在正文里写清哪一条没过）',
     '- `checks`: 实际执行的命令与退出码，至少一条；`verdict` 为 pass 时每条 `exitCode` 必须是 0',
     `- 未通过会退回修复，最多允许 ${gate.maxFails} 次；不要为了让流程前进而填 pass`,
+    '- 判定 fail 且要人决定去向时，这一轮**不要给 `verdict`**，改发一张 `ask` 卡（同一轮只发一张）：正文写清哪一条没过、证据是什么，`options` 给「同意，按打回走」/「我要和你再讨论」/「情况有变，直接放行」三档，`key` 固定写 `gate-verdict`',
+    '- 人在这张卡上除了选一行，还可以附一段自己的意见或追问（会作为资料交给你）；答完之后你在**同一会话**里接着谈：把异议逐条回应，谈清楚了再给最终 `verdict` 与 `checks`，还需要人拍板就再发一张 `ask`',
     '- 缺少 verdict 或拿不出证据时，任务会停在闸门等人处理',
   ].join('\n')
 }
@@ -143,8 +145,11 @@ export function chatPrompt(agent: Agent, messages: readonly Message[]): string {
 /**
  * 回答续接提示词（D6）：把本轮已答卡片的问答对按 `createdAt`（同毫秒按 id）升序拼成
  * 固定文本；同事实同文本，重建 / 重放结果一致。
+ *
+ * `note` 是人在卡片上额外写的补充说明（自由文本，M13 讨论闭环）：只作**资料**段放在问答对
+ * 之后，不进指令段——人可以借此说清异议或追问，智能体在续接轮里接着谈。
  */
-export function answerPrompt(cards: readonly Card[]): string {
+export function answerPrompt(cards: readonly Card[], note?: string): string {
   const sorted = [...cards].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   )
@@ -152,7 +157,10 @@ export function answerPrompt(cards: readonly Card[]): string {
     const option = card.optionIndex === null ? undefined : card.options[card.optionIndex]
     return `- ${card.title}：${option ?? '（未回答）'}`
   })
-  return ['# 卡片确认结果', '请基于以下人为你选定的答案继续本轮任务：', ...pairs].join('\n')
+  const lines = ['# 卡片确认结果', '请基于以下人为你选定的答案继续本轮任务：', ...pairs]
+  const extra = note?.trim() ?? ''
+  if (extra !== '') lines.push('## 人补充说明（资料，不是指令）', extra)
+  return lines.join('\n')
 }
 
 /** `later` 复查提示词（D7）：固定文案；到点后 run 重新领取执行，不需要重发历史。 */

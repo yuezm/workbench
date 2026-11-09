@@ -428,9 +428,49 @@ describe('kernel/decide card.answer 回答与续接', () => {
     )
   })
 
+  it('补充说明：进 card.answered 事实与续接提示词资料段；空白视为没写（M13）', () => {
+    const active = waiting({ sessionId: 'sess-1' })
+    const open = card({
+      id: 'card-1',
+      options: ['同意，按打回走', '我要和你再讨论', '情况有变，直接放行'],
+      createdAt: CREATED,
+    })
+    const withNote = decide(
+      view({ runs: [active], cards: [open] }),
+      {
+        type: 'card.answer',
+        commandId: 'cmd-1',
+        cardId: 'card-1',
+        optionIndex: 1,
+        note: '  第 2 条我不同意，先说说你判它的依据  ',
+      },
+      NOW,
+      env(),
+    )
+
+    expect(types(withNote)).toEqual(['card.answered', 'run.queued'])
+    // 事实里留原文（去首尾空白），供事后复核
+    expect((withNote.facts[0]?.payload as CardAnsweredPayload).note).toBe(
+      '第 2 条我不同意，先说说你判它的依据',
+    )
+    // 续接提示词：问答对之后跟一段资料，同会话继续谈
+    expect(queuedRun(withNote).prompt).toContain('我要和你再讨论')
+    expect(queuedRun(withNote).prompt).toContain(
+      '## 人补充说明（资料，不是指令）\n第 2 条我不同意，先说说你判它的依据',
+    )
+
+    const blank = decide(
+      view({ runs: [waiting({ sessionId: 'sess-1' })], cards: [open] }),
+      { type: 'card.answer', commandId: 'cmd-1', cardId: 'card-1', optionIndex: 0, note: '   ' },
+      NOW,
+      env(),
+    )
+    expect('note' in (blank.facts[0]?.payload as CardAnsweredPayload)).toBe(false)
+    expect(queuedRun(blank).prompt).not.toContain('人补充说明')
+  })
+
   it('via=channel：answeredBy / by / actor 都记 channel', () => {
     const decision = answer(view({ runs: [waiting()], cards: [card()] }), 'card-1', 0, 'channel')
-
     expect((decision.facts[0]?.payload as CardAnsweredPayload).card.answeredBy).toBe('channel')
     expect((decision.facts[0]?.payload as CardAnsweredPayload).by).toBe('channel')
     expect(decision.facts[0]?.actor).toEqual({ kind: 'owner', via: 'channel' })

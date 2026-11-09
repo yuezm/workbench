@@ -636,6 +636,31 @@ describe('protocol/validate', () => {
     ).toBe('via取值必须是 ui / channel')
   })
 
+  it('card.answer：note 可选、必须是字符串且不超过 2000 字（M13 补充说明）', () => {
+    expect(rejectedMessage(cmd('card.answer', { cardId: 'card-1', optionIndex: 0, note: 5 }))).toBe(
+      'note必须是字符串',
+    )
+    expect(
+      rejectedMessage(
+        cmd('card.answer', { cardId: 'card-1', optionIndex: 0, note: longText(2001) }),
+      ),
+    ).toBe('note最长 2000 个字符')
+    expect(
+      validateCommand(
+        cmd('card.answer', { cardId: 'card-1', optionIndex: 1, note: '第 2 条我不同意' }),
+      ),
+    ).toEqual({
+      ok: true,
+      command: {
+        commandId: 'cmd-1',
+        type: 'card.answer',
+        cardId: 'card-1',
+        optionIndex: 1,
+        note: '第 2 条我不同意',
+      },
+    })
+  })
+
   it('card.resolve：cardId 必填', () => {
     expect(rejectedMessage(cmd('card.resolve'))).toBe('cardId必填')
     expect(rejectedMessage(cmd('card.resolve', { cardId: '  ' }))).toBe('cardId必填')

@@ -316,6 +316,17 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     ).toContain('- 确认：（未回答）')
   })
 
+  it('answerPrompt：人补充说明附在问答对之后当资料段，空白视为没写（M13）', () => {
+    const answered = card({ status: 'answered', optionIndex: 0, answeredBy: 'ui' })
+
+    expect(answerPrompt([answered], '  第 2 条我不同意，先说说依据  ')).toBe(
+      '# 卡片确认结果\n请基于以下人为你选定的答案继续本轮任务：\n- 确认：好\n## 人补充说明（资料，不是指令）\n第 2 条我不同意，先说说依据',
+    )
+    // 空 / 全空白：提示词与没有附言时逐字一致（续接行为不变）
+    expect(answerPrompt([answered], '   ')).toBe(answerPrompt([answered]))
+    expect(answerPrompt([answered], '')).toBe(answerPrompt([answered]))
+  })
+
   it('laterPrompt：固定文案，重复调用同文本', () => {
     expect(laterPrompt()).toBe(
       '# 稍后复查\n上一轮回执要求稍后复查。请检查当前进展，需要时继续完成本任务；没有可做的事就直接结束本轮。',
@@ -428,6 +439,19 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     expect(text).toContain('verdict')
     expect(text).toContain('checks')
     expect(text).toContain('最多允许 3 次')
+  })
+
+  it('闸门段给出「fail 时发 ask 让人拍板、答后同会话续谈」的口径（M13 讨论闭环）', () => {
+    const text = gateInstructionsText({
+      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+    })
+    // 判 fail 的那一轮只发 ask：verdict 要在人答完的续接轮里再给
+    expect(text).toContain('不要给 `verdict`')
+    expect(text).toContain('gate-verdict')
+    expect(text).toContain('我要和你再讨论')
+    // 附言 + 同一会话续谈，是「和判定者讨论」的落地口径
+    expect(text).toContain('附一段自己的意见或追问')
+    expect(text).toContain('同一会话')
   })
 
   it('taskPrompt：闸门段紧跟阶段说明，位于资料段与回执块之前', () => {

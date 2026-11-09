@@ -209,7 +209,11 @@ export function resumedRun(run: RunRow, prompt: string, notBefore: Iso | null): 
 
 /**
  * `card.answer`（D6）：校验卡片存在、`open`、选项下标合法、run 仍在 `waiting`，产
- * `card.answered`；该 run 的阻塞卡全部答完时追加续接 `run.queued`（prompt 带全部问答对）。
+ * `card.answered`；该 run 的阻塞卡全部答完时追加续接 `run.queued`（prompt 带全部问答对，
+ * 以及人随答案写的补充说明）。
+ *
+ * `note` 只搬进事实与续接提示词的**资料**段：它是人写的自由文本，不能拼进指令段，也不改
+ * 阶段流转、不消耗闸门预算——判定与去向仍然只由回执 `verdict` 与人拖卡片决定。
  * 非法 / 重复回答一律 `reject`，零事实。
  */
 export function answerFacts(
@@ -255,12 +259,14 @@ export function answerFacts(
     answeredAt: now,
     updatedAt: now,
   }
+  /** 人随答案写的补充说明：空 / 全空白等于没写，不进事实也不进提示词 */
+  const note = input.note?.trim() ?? ''
   const facts: FactDraft[] = [
     {
       type: 'card.answered',
       actor: { kind: 'owner', via: by },
       at: now,
-      payload: { card: answered, by },
+      payload: { card: answered, by, ...(note === '' ? {} : { note }) },
     },
   ]
 
@@ -271,6 +277,9 @@ export function answerFacts(
   if (others) return { facts }
 
   // 该 run 的问答对（已回答的卡片，按创建时间升序）；本卡用答后的状态参与拼装。
+  // 已知边界：附言随「最后一张答完」的那次续接进提示词，同一批多张卡各自的附言只有最后
+  // 一张会被带上（其余留在 `card.answered.note` 事实里可审计）。M12 的打扰规则要求同一轮
+  // 只发一张 ask 卡，闸门判定也是一张卡，产品路径上不会走到这一支。
   const batch = cardsOfRun(view, run.id)
     .filter((entry) => entry.id !== answered.id && entry.optionIndex !== null)
     .concat(answered)
@@ -279,7 +288,7 @@ export function answerFacts(
     type: 'run.queued',
     actor: HOST,
     at: now,
-    payload: { run: resumedRun(run, answerPrompt(batch), null) },
+    payload: { run: resumedRun(run, answerPrompt(batch, note), null) },
   })
   return { facts }
 }

@@ -229,6 +229,10 @@ export interface TaskCommentCommand extends CommandBase {
  * 回答一张 open 卡（M4）：宿主入口 / 通道插件提交，内核校验卡片存在、`status='open'`、
  * 选项下标合法、run 处于 `waiting`；重复/越界/已关闭一律 reject。
  * `via` 缺省 `ui`；通道回传时写 `channel`，记为 `card.answered.by`。
+ *
+ * `note`（M13）：人随答案附上的补充说明，自由文本，≤2000 字。它只作**资料**进续接提示词
+ * （`answerPrompt`），不进指令段——闸门判定不合格时，人靠它说清异议或追问，智能体在同一
+ * 会话里接着谈。空 / 全空白视为没写。
  */
 export interface CardAnswerCommand extends CommandBase {
   type: 'card.answer'
@@ -236,6 +240,8 @@ export interface CardAnswerCommand extends CommandBase {
   /** 选项下标（0 基，须在卡片 `options` 范围内） */
   optionIndex: number
   via?: CardAnswerVia
+  /** 补充说明（可选，随续接提示词作为资料段交给智能体） */
+  note?: string
 }
 
 /** 手动关闭一张卡片（悬空卡兜底）；不改变 run 状态。 */

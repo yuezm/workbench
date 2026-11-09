@@ -338,10 +338,16 @@ export interface CardDeliveryFailedPayload {
   error: string
 }
 
-/** 回答：`by` 是来源（`ui` / `channel`），与行里的 `answeredBy` 一致。 */
+/**
+ * 回答：`by` 是来源（`ui` / `channel`），与行里的 `answeredBy` 一致。
+ *
+ * `note`（M13）是人随答案附上的补充说明原文：卡片行不存它（避免为一个可选附言加投影列），
+ * 事实日志留档供事后复核，续接轮则由 `run.queued.prompt` 带上。
+ */
 export interface CardAnsweredPayload {
   card: Card
   by: CardAnswerVia
+  note?: string
 }
 
 /** 关闭：`agent`（回执 `resolves`）/ `manual`（`card.resolve`）/ `cancelled`（run 取消）。 */

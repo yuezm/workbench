@@ -12,28 +12,29 @@ export function formatRemaining(remainingMs: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-/** 各阶段的视觉主题：色点 / 渐变端色 */
-const PHASE_THEME: Record<Phase, { text: string; dot: string; from: string; to: string }> = {
+/**
+ * 各阶段的视觉主题：色点 / 渐变端色。
+ *
+ * 全部走主题 token（`--brand` / `--success` / `--info` 及其深色端），
+ * 亮暗两套主题各有一套值——不写死颜色，否则亮色主题下会看不见。
+ */
+const PHASE_THEME: Record<Phase, { dot: string; from: string; to: string }> = {
   idle: {
-    text: 'text-brand',
     dot: 'bg-primary',
     from: 'var(--brand)',
     to: 'var(--ring)',
   },
   focus: {
-    text: 'text-brand',
     dot: 'bg-primary',
     from: 'var(--brand)',
     to: 'var(--ring)',
   },
   shortBreak: {
-    text: 'text-success',
     dot: 'bg-success',
     from: 'var(--success)',
     to: 'var(--success-deep)',
   },
   longBreak: {
-    text: 'text-info',
     dot: 'bg-info',
     from: 'var(--info)',
     to: 'var(--info-deep)',
@@ -89,7 +90,7 @@ export function TimerDisplay({
           r={RING_RADIUS}
           fill="none"
           strokeWidth={RING_STROKE}
-          className="stroke-white/[0.06]"
+          className="stroke-border"
         />
         <circle
           cx={RING_SIZE / 2}
@@ -102,7 +103,10 @@ export function TimerDisplay({
           strokeDasharray={RING_CIRCUMFERENCE}
           strokeDashoffset={RING_CIRCUMFERENCE * (1 - progress)}
           className="transition-[stroke-dashoffset] duration-300 ease-linear"
-          style={{ filter: `drop-shadow(0 0 6px ${theme.from})` }}
+          // 光晕取阶段色的半透明版：亮底上是淡淡一层，不糊成光斑（SPEC-ui §6）
+          style={{
+            filter: `drop-shadow(0 0 5px color-mix(in oklab, ${theme.from} 45%, transparent))`,
+          }}
         />
       </svg>
 
@@ -118,9 +122,10 @@ export function TimerDisplay({
           {PHASE_LABELS[phase]}
         </span>
 
+        {/* 倒计时数字：前景色渐变（亮色主题深字、暗色主题亮字），不写死白色 */}
         <span
           className={cn(
-            'bg-gradient-to-b from-white to-white/60 bg-clip-text tabular-nums',
+            'bg-gradient-to-b from-foreground to-foreground/70 bg-clip-text tabular-nums',
             'text-[80px] leading-none font-extralight text-transparent',
           )}
         >

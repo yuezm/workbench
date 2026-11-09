@@ -7,6 +7,8 @@ let page: Page
 test.beforeEach(async () => {
   launched = await launchApp()
   page = launched.page
+  // 默认打开的是第一个注册的 app（AI 工作流），番茄钟要自己切过来
+  await page.getByRole('button', { name: '番茄时钟' }).click()
 })
 
 test.afterEach(async () => {

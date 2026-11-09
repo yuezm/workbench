@@ -39,4 +39,12 @@ describe('app 注册表', () => {
       expect(ids.has(entry.id)).toBe(true)
     }
   })
+
+  it('顺序即导航顺序：AI 工作流排在番茄时钟前面', () => {
+    expect(appPlugins.map((a) => a.id)).toEqual(['ai-workflow', 'pomodoro'])
+  })
+
+  it('第一个注册的 app 是默认打开的 app（外壳取 apps[0]）', () => {
+    expect(appPlugins[0]?.id).toBe('ai-workflow')
+  })
 })

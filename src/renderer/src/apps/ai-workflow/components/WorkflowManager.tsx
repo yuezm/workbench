@@ -192,7 +192,9 @@ export function WorkflowManager(): ReactElement {
             if (!next) setEditing(undefined)
           }}
         >
-          <DialogContent className="max-w-3xl">
+          {/* 宽度必须带 sm: 前缀：基座里的是 sm:max-w-lg，裸 max-w-3xl 跟它不同变体、合不掉，
+              窄屏保底 max-w-[calc(100%-2rem)] 也会被覆盖。内容高，交给弹窗自己滚动。 */}
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
             {/* 标题由编辑器自己画（图标 + 「工作流定义」），这里只补一个无障碍名称 */}
             <DialogHeader>
               <DialogTitle className="sr-only">工作流定义</DialogTitle>

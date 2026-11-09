@@ -65,7 +65,14 @@ describe('WorkflowManager', () => {
     ).toBeNull()
 
     await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
-    expect(screen.getByRole('dialog')).toHaveTextContent('工作流定义')
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('工作流定义')
+    // 宽度必须带 sm: 变体：基座是 sm:max-w-lg，裸 max-w-3xl 合不掉它，弹窗会一直停在 512px
+    expect(dialog.className).toContain('sm:max-w-3xl')
+    expect(dialog.className).not.toContain('sm:max-w-lg')
+    expect(dialog.className).not.toMatch(/(^|\s)max-w-3xl(\s|$)/)
+    expect(dialog.className).toContain('max-w-[calc(100%-2rem)]')
+    expect(dialog.className).toContain('max-h-[85vh]')
     expect(screen.getByLabelText('工作流名称')).toHaveValue('研发')
   })
 

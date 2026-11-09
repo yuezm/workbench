@@ -85,6 +85,14 @@ export function tick(state: PomodoroState, now: number): PomodoroState {
 }
 ```
 
+## 界面（跟随全局主题）
+
+番茄钟不自带配色基座，**颜色一律走主题 token**（SPEC-ui §2/§3）：
+
+- 倒计时大号数字：前景色渐变（`--foreground` → `--foreground/60`），亮色主题下是深字、暗色主题下是亮字，两套主题都读得清；**不写死白色**（写死则在亮色主题下看不见）。
+- 进度环与轮次圆点：阶段主题色取 token——专注 `--brand`、短休息 `--success`、长休息 `--info`（含深色端 `--success-deep` / `--info-deep`），随主题自动切换。
+- 环底轨、徽标、面板：描边与底色走 `--border` / `--muted` / `--card`，不用硬编码色值。
+
 ## Testing Strategy
 
 - 框架：Vitest + @testing-library/react，测试文件就近放置。
@@ -112,4 +120,4 @@ export function tick(state: PomodoroState, now: number): PomodoroState {
 
 1. **阶段结束后自动切换并暂停**（等待用户点开始）——还是全自动连跑？按前者执行。
 2. **跳过 focus 不计轮数**——如果你希望跳过也算完成一轮，请指出。
-3. 界面文案中文、深色主题——按假设执行。
+3. 界面文案中文、跟随应用主题（亮色 / 暗色）——按假设执行。

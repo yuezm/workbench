@@ -12,7 +12,7 @@
 
 - **组件 API = 上游 API。** `components/ui/` 下的 `button` / `input` / `textarea` / `label` / `select` / `dialog` 是上游 v4 源码，只改 import 路径与 token 引用。调用点用上游复合 API（如 `<Select><SelectTrigger><SelectValue/>…`），不写项目自研的扁平封装。
 - **为什么换基座。** 自研的 select / dialog 缺焦点陷阱、缺 `aria-modal`、缺键盘导航，BUG 集中在这些地方；上游是经过验证的实现，AI 辅助开发时也能对上上游文档与 registry。
-- **主题层。** 上游 token 语义（`background` / `foreground` / `card` / `popover` / `primary` / `secondary` / `muted` / `accent` / `destructive` / `border` / `input` / `ring` / `radius`）原样保留，值由本项目决定。暗色单主题：变量写在 `:root`，`<html class="dark">` 让组件里的 `dark:` 变体生效。
+- **主题层。** 上游 token 语义（`background` / `foreground` / `card` / `popover` / `primary` / `secondary` / `muted` / `accent` / `destructive` / `border` / `input` / `ring` / `radius`）原样保留，值由本项目决定。**双主题**：亮色值写在 `:root`（`.light` 同值），暗色值写在 `.dark`；`<html>` 上的 `light` / `dark` 类决定用哪一套，同时让组件里的 `dark:` 变体生效。用户在界面里选「亮色 / 暗色 / 跟随系统」，偏好存 localStorage（`src/renderer/src/lib/theme.ts`），渲染层偏好不进工作台事实日志。
 - **覆盖层（本文件的重点）。** 上游没有、项目自己需要的部分，见 §4。
 
 方向三条硬取向（不变）：
@@ -23,7 +23,9 @@
 
 ## 2. 色彩 token（shadcn 基线）
 
-变量与上游同名，值是本项目的暗色主题：
+变量与上游同名，值分两套：**亮色**写在 `:root, .light`，**暗色**写在 `.dark`。语义名与用途两套一致，只有值不同；`@theme inline` 的 `--color-*` 映射两套共用。
+
+### 2.1 暗色主题（`.dark`）
 
 | Token                      | 值          | 用途                             | 用途底上的对比度 |
 | -------------------------- | ----------- | -------------------------------- | ---------------- |
@@ -38,7 +40,7 @@
 | `--secondary`              | `#19191d`   | 次要按钮底                       | —                |
 | `--secondary-foreground`   | `#f4f4f6`   | 次要按钮文字                     | —                |
 | `--muted`                  | `#19191d`   | 卡片、输入框、下拉、工具条       | —                |
-| `--muted-foreground`       | `#c7c7d0`   | 次要文字：说明、字段值、未选中项 | 11.2:1           |
+| `--muted-foreground`       | `#c7c7d0`   | 次要文字：说明、字段值、未选中项 | 11.1:1           |
 | `--accent`                 | `#232329`   | 悬停 / 选中行 / 分段当前项       | —                |
 | `--accent-foreground`      | `#f4f4f6`   | 强调底上的文字                   | —                |
 | `--destructive`            | `#f87171`   | 失败、危险操作                   | 6.8:1            |
@@ -46,6 +48,30 @@
 | `--border`                 | `white/8%`  | 常规描边、分隔线                 | —                |
 | `--input`                  | `white/16%` | 悬停描边、浮层描边、输入控件描边 | —                |
 | `--ring`                   | `#6366f1`   | 焦点环                           | —                |
+
+### 2.2 亮色主题（`:root, .light`）
+
+| Token                      | 值          | 用途底上的对比度                |
+| -------------------------- | ----------- | ------------------------------- |
+| `--background`             | `#f5f5f7`   | —                               |
+| `--foreground`             | `#17171a`   | 17.9:1（card）/ 15.9:1（muted） |
+| `--card`                   | `#ffffff`   | —                               |
+| `--card-foreground`        | `#17171a`   | —                               |
+| `--popover`                | `#ffffff`   | —                               |
+| `--popover-foreground`     | `#17171a`   | —                               |
+| `--primary`                | `#4f46e5`   | 白字 6.3:1                      |
+| `--primary-foreground`     | `#ffffff`   | —                               |
+| `--secondary`              | `#eeeef2`   | —                               |
+| `--secondary-foreground`   | `#17171a`   | —                               |
+| `--muted`                  | `#f1f1f4`   | —                               |
+| `--muted-foreground`       | `#43434d`   | 9.8:1（card）/ 8.7:1（muted）   |
+| `--accent`                 | `#e9e9ee`   | —                               |
+| `--accent-foreground`      | `#17171a`   | —                               |
+| `--destructive`            | `#dc2626`   | 白字 4.8:1                      |
+| `--destructive-foreground` | `#ffffff`   | —                               |
+| `--border`                 | `black/10%` | —                               |
+| `--input`                  | `black/16%` | —                               |
+| `--ring`                   | `#6366f1`   | —                               |
 
 规则：
 
@@ -55,15 +81,17 @@
 
 ## 3. 项目扩展 token（覆盖层）
 
-上游基线没有三级前景与状态色，本项目补 5 个变量（`global.css` 的 `:root`，映射到 `@theme inline` 的 `--color-*`）：
+上游基线没有三级前景与状态色，本项目补 5 个变量（`global.css` 的 `:root, .light` 与 `.dark` 两套，映射到 `@theme inline` 的 `--color-*`）：
 
-| Token                | 值        | 用途                             | 对 `card` / `muted` 的对比度 |
-| -------------------- | --------- | -------------------------------- | ---------------------------- |
-| `--faint-foreground` | `#8f8f9c` | 第三级前景：占位符、时间戳、计数 | 4.5:1 / 4.6:1                |
-| `--brand`            | `#818cf8` | 暗底上的强调**文字与图标**       | 6.3:1 / 6.4:1                |
-| `--success`          | `#34d399` | 成功、已完成                     | 9.7:1 / 9.8:1                |
-| `--info`             | `#38bdf8` | 信息、等待中                     | 8.7:1 / 8.8:1                |
-| `--warning`          | `#fbbf24` | 提权记录、提醒                   | 11.2:1 / 11.3:1              |
+| Token                | 暗色值（`.dark`） | 亮色值（`:root`） | 用途                             | 暗色 card/muted | 亮色 card/muted |
+| -------------------- | ----------------- | ----------------- | -------------------------------- | --------------- | --------------- |
+| `--faint-foreground` | `#8f8f9c`         | `#6b6b76`         | 第三级前景：占位符、时间戳、计数 | 5.9:1 / 5.5:1   | 5.3:1 / 4.7:1   |
+| `--brand`            | `#818cf8`         | `#4338ca`         | 强调**文字与图标**               | 6.3:1 / 5.9:1   | 7.9:1 / 7.0:1   |
+| `--success`          | `#34d399`         | `#15803d`         | 成功、已完成                     | 9.7:1 / 9.1:1   | 5.0:1 / 4.4:1   |
+| `--info`             | `#38bdf8`         | `#0369a1`         | 信息、等待中                     | 8.7:1 / 8.2:1   | 5.9:1 / 5.3:1   |
+| `--warning`          | `#fbbf24`         | `#b45309`         | 提权记录、提醒                   | 11.2:1 / 10.5:1 | 5.0:1 / 4.5:1   |
+
+另有番茄钟渐变用的两个端点色：暗色 `--success-deep: #10b981` / `--info-deep: #0ea5e9`，亮色 `#047857` / `#075985`。
 
 `--brand` 的存在理由：上游 `primary` 是深靛蓝（`#4f46e5`），在暗底上做**文字**对比度不够（4.5:1），做**填充**够。所以强调文字与图标一律 `text-brand`，`primary` 只用于 `bg-` / `border-` / `ring-`。
 
@@ -88,6 +116,14 @@
 - 把正文放进 10px 字号再配 `faint-foreground`。
 - 输入框底色叠 `bg-black/*`。
 
+### 主题偏好（亮 / 暗 / 跟随系统）
+
+- 偏好只有三档：**亮色 / 暗色 / 跟随系统**。存 localStorage 的 `workbench.theme`（渲染层自己的偏好，不进工作台事实日志）。
+- 生效主题 = 偏好解析结果：跟随系统时读 `prefers-color-scheme`；用户在系统里改深浅色，窗口开着也要跟着变（媒体查询监听）。
+- 落地方式：`<html>` 上挂 `light` / `dark` 类，token 与 `dark:` 变体随之切换。`initTheme()` 在渲染前调用，首帧不闪。
+- 入口：`ThemeSwitcher`（图标按钮，hover 弹三个图标：亮色 / 暗色 / 跟随系统）。主题是**全局设置**，固定在 shell 顶部栏右侧，任何 app 都从这里切；app 侧栏里不再放第二份入口。
+- 换主题只改 token：组件里不写任何按主题分支的样式。**app 内的颜色一律走 token**（含番茄钟的大号倒计时与进度环），不写死白/黑——写死就会在另一套主题下看不见。
+
 ## 4. 组件覆盖层（上游之上）
 
 上游基座之外的**项目自留**组件。它们保留项目需要的语义，不改成上游形态：
@@ -98,6 +134,7 @@
 | `Panel`         | 上游无对应物；项目面板是 `card` + 描边的实心容器，附 `panelCls` / `badgeCls` 类名导出                                              |
 | `Menu`          | 上游 `dropdown-menu` 是 Radix 复合结构且有子菜单能力；项目菜单是「锚定按钮 + 分组条目 + 浮层上翻」的另一种形态，行为不同，保留自研 |
 | `Segmented`     | 分段控件，上游无对应物                                                                                                             |
+| `ThemeSwitcher` | 主题切换器：图标按钮 + hover 浮层（三个图标），上游无对应物                                                                        |
 | `FormError`     | 错误条含 `role="alert"` + `onDismiss` 关闭入口，项目多处复用                                                                       |
 | `ErrorBoundary` | 渲染层兜底，上游无对应物                                                                                                           |
 

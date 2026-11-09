@@ -17,9 +17,10 @@
 改版前：左侧 224px app 边栏 + app 内二级栏目 192px + 上下文列表 224px，横向吃掉 640px，内容区被挤窄。
 现在导向：**导航层级越少越好，每层只保留一个切换点**。
 
-- **顶部栏（shell，`components/TopBar.tsx`）**：唯一的一级导航。左侧品牌（渐变标记 + Workbench），中间 app 标签（图标 + 名称，互斥、`aria-current="page"`），右侧版本号。高度 48px，全宽。
+- **顶部栏（shell，`components/TopBar.tsx`）**：唯一的一级导航。左侧品牌（渐变标记 + Workbench），中间 app 标签（图标 + 名称，互斥、`aria-current="page"`），右侧主题切换器（全局设置：亮色 / 暗色 / 跟随系统）+ 版本号。高度 48px，全宽。
 - **app 内部（归各 app 自己）**：只允许「单列侧栏（w-64 上下）+ 内容区」两栏。侧栏放当前 app 的二级切换与上下文列表；跨 app 的切换一律回到顶部栏，**禁止**在 app 侧栏里再造 app 入口。
-- **视图切换（如 ai-workflow 的工作台 / 设置）**：放在该 app 侧栏底部，不新开页头行。
+- **视图切换（如 ai-workflow 的工作台 / 设置）**：放在该 app 侧栏底部，不新开页头行。视图切换用图标按钮（设置图标 / 返回图标），不占横向空间。
+- **主题切换器**是全局设置（不是某个 app 的视图），固定在顶部栏右侧，任何 app 都能切；app 侧栏里不再放第二份入口。
 - app 内容区自己负责滚动（`main` 不再 `overflow-auto`），保证两栏布局能用 `min-h-0 flex-1` 吃满高度。
 
 ## Tech Stack
@@ -109,9 +110,11 @@ export interface AppPlugin {
 ```ts
 // renderer/shell/registry.ts
 import type { AppPlugin } from './types'
+import { aiWorkflowApp } from '../apps/ai-workflow'
 import { pomodoroApp } from '../apps/pomodoro'
 
-export const appPlugins: AppPlugin[] = [pomodoroApp]
+// 顺序即顶部栏显示顺序，也是默认打开的 app（外壳取 apps[0]）
+export const appPlugins: AppPlugin[] = [aiWorkflowApp, pomodoroApp]
 ```
 
 **跨进程 API（preload 暴露，契约定义在 `src/shared/workbench-api.ts`）：**
@@ -179,7 +182,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 
 ## Success Criteria
 
-1. `npm run dev` 启动后出现桌面窗口：顶部栏显示"番茄时钟"标签且处于选中态，内容区挂载番茄钟界面；点另一个 app 标签即切换，无整页刷新。
+1. `npm run dev` 启动后出现桌面窗口：顶部栏按注册表顺序显示 app 标签（当前为「AI 工作流」在前、「番茄时钟」在后），第一个标签处于选中态、内容区挂载对应 app；点另一个 app 标签即切换，无整页刷新。
 2. 新增一个 app 只需三步：新建 `src/renderer/apps/<id>/`、实现 `AppPlugin`、注册表加一行；外壳代码（TopBar/Workbench/主进程）零改动。（验收方式：以 pomodoro 的接入过程为证 + registry 类型约束。）
 3. `apps` 注册表被类型与测试双重约束：id 重复或字段缺失会在编译期/测试期暴露。
 4. renderer 调用 `window.workbench.notify(...)` 能弹出系统通知（手动验收）。
@@ -188,5 +191,5 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 
 ## Open Questions
 
-1. 主题默认为深色、UI 文案为中文——按假设执行，如需改请指出。
+1. 主题默认为跟随系统（亮色 / 暗色两套 token，用户可在顶部栏切换）、UI 文案为中文——按假设执行，如需改请指出。
 2. `notify` 目前只覆盖系统通知；后续如有剪贴板、文件对话框等需求，按同样模式在 `WorkbenchApi` 上扩展。

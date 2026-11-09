@@ -1,378 +1,181 @@
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactElement,
-} from 'react'
-import { createPortal } from 'react-dom'
+import * as React from 'react'
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react'
+import { Select as SelectPrimitive } from 'radix-ui'
 import { cn } from '../../lib/cn'
 
-/** 下拉项 */
-export interface SelectOption {
-  value: string
-  label: string
-  disabled?: boolean
-}
-
-export interface SelectProps {
-  value: string
-  onChange: (value: string) => void
-  options: SelectOption[]
-  /** 无障碍名称（触发器 aria-label） */
-  ariaLabel: string
-  /** 没有匹配项时显示的占位文案 */
-  placeholder?: string
-  className?: string
-  disabled?: boolean
-}
-
-/** 浮层位置（视口坐标，fixed 定位） */
-interface PopupPosition {
-  left: number
-  top: number
-  width: number
-  maxHeight: number
-}
-
-/** 浮层最小宽度：触发器很窄时（如工具条内的选择器）也要放得下选项文字 */
-const MIN_POPUP_WIDTH = 180
-
-/** 第一个可用项下标 */
-function firstEnabled(options: SelectOption[]): number {
-  return options.findIndex((o) => !o.disabled)
-}
-
-/** 最后一个可用项下标 */
-function lastEnabled(options: SelectOption[]): number {
-  for (let i = options.length - 1; i >= 0; i--) {
-    if (!options[i].disabled) return i
-  }
-  return -1
-}
-
-/** 从 start 出发按 step 找下一个可用项；start < 0 时取首/尾可用项 */
-function nextEnabled(options: SelectOption[], start: number, step: number): number {
-  const n = options.length
-  if (n === 0) return -1
-  if (start < 0) return step > 0 ? firstEnabled(options) : lastEnabled(options)
-  for (let i = 1; i <= n; i++) {
-    const idx = (start + step * i + n * 2) % n
-    if (!options[idx].disabled) return idx
-  }
-  return -1
-}
-
-function ChevronIcon({ className }: { className?: string }): ReactElement {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className={className}
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  )
-}
-
-function CheckIcon(): ReactElement {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="shrink-0 text-focus-soft"
-    >
-      <path d="m5 13 4 4 10-10" />
-    </svg>
-  )
-}
-
 /**
- * 自研下拉框（不使用原生 select，原生控件在 Windows 上观感与交互都不达标）。
+ * 基座：shadcn/ui v4 select（new-york-v4 基线，Radix Select 2.4）。
  *
- * - 触发器与输入框同款外观；浮层用 fixed 定位，由触发器 getBoundingClientRect 计算，
- *   不受父级 overflow-hidden 裁剪；窗口 resize/scroll 时关闭。
- * - 键盘：Enter/Space 打开，↑/↓ 移动高亮，Enter 选中，Esc 关闭。
+ * 复合结构：Select > SelectTrigger > SelectValue + SelectContent > SelectItem。
+ * - 触发器 role="combobox"，无障碍名称放在 SelectTrigger 上。
+ * - 选中项文案由 SelectItemText 注入 SelectValue；未命中值时显示 placeholder。
+ * - 空值项（value=""）在 Radix 2.x 受支持：此时触发器显示 placeholder，
+ *   因此把 placeholder 文案与该空值项标签对齐即可保持既有观感。
  */
-export function Select({
-  value,
-  onChange,
-  options,
-  ariaLabel,
-  placeholder = '请选择',
+function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  return <SelectPrimitive.Root data-slot="select" {...props} />
+}
+
+function SelectGroup({ ...props }: React.ComponentProps<typeof SelectPrimitive.Group>) {
+  return <SelectPrimitive.Group data-slot="select-group" {...props} />
+}
+
+function SelectValue({ ...props }: React.ComponentProps<typeof SelectPrimitive.Value>) {
+  return <SelectPrimitive.Value data-slot="select-value" {...props} />
+}
+
+function SelectTrigger({
   className,
-  disabled = false,
-}: SelectProps): ReactElement {
-  const [open, setOpen] = useState(false)
-  const [activeIndex, setActiveIndex] = useState(-1)
-  const [position, setPosition] = useState<PopupPosition | null>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const popupRef = useRef<HTMLDivElement>(null)
-  const listboxId = useId()
-
-  const selectedIndex = options.findIndex((o) => o.value === value)
-  const displayText = selectedIndex >= 0 ? options[selectedIndex].label : placeholder
-
-  const optionId = useCallback(
-    (index: number): string => `${listboxId}-option-${index}`,
-    [listboxId],
-  )
-
-  const computePosition = useCallback((rect: DOMRect): PopupPosition => {
-    const gap = 8
-    const width = Math.max(rect.width, MIN_POPUP_WIDTH)
-    return {
-      left: Math.min(rect.left, Math.max(8, window.innerWidth - width - 8)),
-      top: rect.bottom + gap,
-      width,
-      maxHeight: 320,
-    }
-  }, [])
-
-  /** 浮层渲染后按实际高度贴合触发器：下方放不下就上翻 */
-  const reposition = useCallback((): void => {
-    // 只在浮层打开时调用（调用方保证）：refs 此时一定已挂载
-    const trigger = triggerRef.current as HTMLButtonElement
-    const popup = popupRef.current as HTMLDivElement
-    const rect = trigger.getBoundingClientRect()
-    const gap = 8
-    const spaceBelow = window.innerHeight - rect.bottom - gap
-    const spaceAbove = rect.top - gap
-    // jsdom 等无布局环境拿不到 offsetHeight，退化为按选项数估算
-    const estimated = options.length * 34 + 10
-    const measured = popup.offsetHeight
-    const needed = measured > 0 ? measured : estimated
-    const flip = needed > spaceBelow && spaceAbove > spaceBelow
-    const maxHeight = Math.max(60, Math.min(320, flip ? spaceAbove : spaceBelow))
-    const height = Math.min(needed, maxHeight)
-    const width = Math.max(rect.width, MIN_POPUP_WIDTH)
-    setPosition({
-      left: Math.min(rect.left, Math.max(8, window.innerWidth - width - 8)),
-      top: flip ? rect.top - gap - height : rect.bottom + gap,
-      width,
-      maxHeight,
-    })
-  }, [options.length])
-
-  const openMenu = useCallback(
-    (rect: DOMRect, direction: 1 | -1 = 1): void => {
-      const active =
-        selectedIndex >= 0
-          ? selectedIndex
-          : direction > 0
-            ? firstEnabled(options)
-            : lastEnabled(options)
-      setPosition(computePosition(rect))
-      setActiveIndex(active)
-      setOpen(true)
-    },
-    [computePosition, options, selectedIndex],
-  )
-
-  const closeMenu = useCallback((): void => {
-    setOpen(false)
-    setPosition(null)
-  }, [])
-
-  const choose = useCallback(
-    (option: SelectOption): void => {
-      if (option.disabled) return
-      onChange(option.value)
-      closeMenu()
-      triggerRef.current?.focus()
-    },
-    [closeMenu, onChange],
-  )
-
-  // 浮层渲染后按实际高度贴合触发器（下方放不下则上翻）
-  useLayoutEffect(() => {
-    if (!open) return
-    reposition()
-  }, [open, options.length, reposition])
-
-  // 高亮项滚入可视区
-  useEffect(() => {
-    if (!open || activeIndex < 0) return
-    const el = document.getElementById(optionId(activeIndex))
-    el?.scrollIntoView?.({ block: 'nearest' })
-  }, [activeIndex, open, optionId])
-
-  // 点击浮层外部关闭
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: MouseEvent): void => {
-      const target = event.target as Node
-      if (triggerRef.current?.contains(target) || popupRef.current?.contains(target)) return
-      closeMenu()
-    }
-    document.addEventListener('mousedown', onPointerDown)
-    return () => document.removeEventListener('mousedown', onPointerDown)
-  }, [closeMenu, open])
-
-  // 视口尺寸变化或滚动时关闭，避免浮层与触发器错位
-  useEffect(() => {
-    if (!open) return
-    const onViewportChange = (): void => closeMenu()
-    window.addEventListener('resize', onViewportChange)
-    window.addEventListener('scroll', onViewportChange, true)
-    return () => {
-      window.removeEventListener('resize', onViewportChange)
-      window.removeEventListener('scroll', onViewportChange, true)
-    }
-  }, [closeMenu, open])
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
-    switch (event.key) {
-      case 'ArrowDown':
-      case 'ArrowUp': {
-        event.preventDefault()
-        const step = event.key === 'ArrowDown' ? 1 : -1
-        if (!open) {
-          openMenu(event.currentTarget.getBoundingClientRect(), step)
-          return
-        }
-        setActiveIndex((cur) => nextEnabled(options, cur, step))
-        return
-      }
-      case 'Home':
-      case 'End': {
-        if (!open) return
-        event.preventDefault()
-        setActiveIndex(event.key === 'Home' ? firstEnabled(options) : lastEnabled(options))
-        return
-      }
-      case 'Enter':
-      case ' ':
-      case 'Spacebar': {
-        event.preventDefault()
-        if (!open) {
-          openMenu(event.currentTarget.getBoundingClientRect())
-          return
-        }
-        const option = options[activeIndex]
-        if (option) choose(option)
-        return
-      }
-      case 'Escape': {
-        if (!open) return
-        event.preventDefault()
-        closeMenu()
-        return
-      }
-      case 'Tab': {
-        if (open) closeMenu()
-        return
-      }
-      default:
-    }
-  }
-
-  const popup =
-    open && position
-      ? createPortal(
-          <div
-            ref={popupRef}
-            id={listboxId}
-            role="listbox"
-            aria-label={ariaLabel}
-            style={{
-              position: 'fixed',
-              left: position.left,
-              top: position.top,
-              width: position.width,
-              maxHeight: position.maxHeight,
-            }}
-            className="z-50 animate-rise overflow-y-auto rounded-lg border border-line-strong/60 bg-surface p-1 shadow-[0_24px_60px_-24px_rgb(0_0_0/90%)]"
-          >
-            {options.map((option, index) => {
-              const selected = option.value === value
-              const active = index === activeIndex
-              return (
-                <div
-                  key={option.value}
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={selected}
-                  aria-disabled={option.disabled ? true : undefined}
-                  // 阻止默认行为，避免鼠标点击选项时焦点离开触发器（键盘导航随之失效）
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => choose(option)}
-                  className={cn(
-                    'flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-body transition-colors duration-150',
-                    option.disabled
-                      ? 'cursor-not-allowed text-ink-faint opacity-60'
-                      : cn(
-                          'cursor-pointer text-ink-dim hover:bg-white/[0.06] hover:text-ink',
-                          active && 'bg-white/[0.06] text-ink',
-                          selected && 'text-ink',
-                        ),
-                  )}
-                >
-                  <span className="truncate">{option.label}</span>
-                  {selected && <CheckIcon />}
-                </div>
-              )
-            })}
-          </div>,
-          document.body,
-        )
-      : null
-
+  size = 'default',
+  children,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Trigger> & {
+  size?: 'sm' | 'default'
+}) {
   return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        role="combobox"
-        aria-label={ariaLabel}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={open ? listboxId : undefined}
-        aria-activedescendant={open && activeIndex >= 0 ? optionId(activeIndex) : undefined}
-        // 与原生 select 一致：触发器上暴露当前选中项的 value
-        value={value}
-        disabled={disabled}
-        onClick={(event) => {
-          if (open) {
-            closeMenu()
-            return
-          }
-          openMenu(event.currentTarget.getBoundingClientRect())
-        }}
-        onKeyDown={handleKeyDown}
+    <SelectPrimitive.Trigger
+      data-slot="select-trigger"
+      data-size={size}
+      className={cn(
+        "flex w-fit items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 py-2 text-sm whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 data-[placeholder]:text-muted-foreground data-[size=default]:h-9 data-[size=sm]:h-8 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+      <SelectPrimitive.Icon asChild>
+        <ChevronDownIcon className="size-4 opacity-50" />
+      </SelectPrimitive.Icon>
+    </SelectPrimitive.Trigger>
+  )
+}
+
+function SelectContent({
+  className,
+  children,
+  position = 'item-aligned',
+  align = 'center',
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  return (
+    <SelectPrimitive.Portal>
+      <SelectPrimitive.Content
+        data-slot="select-content"
         className={cn(
-          'flex h-9 w-full items-center justify-between gap-2 rounded-md border border-line bg-surface-2 px-3 text-left text-body text-ink',
-          'transition-colors duration-150 outline-none hover:border-line-strong focus:border-focus focus:ring-2 focus:ring-focus/25',
-          'disabled:cursor-not-allowed disabled:opacity-40',
+          'relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
+          position === 'popper' &&
+            'data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1',
           className,
         )}
+        position={position}
+        align={align}
+        {...props}
       >
-        <span className={cn('truncate', selectedIndex < 0 && 'text-ink-faint')}>{displayText}</span>
-        <ChevronIcon
+        <SelectScrollUpButton />
+        <SelectPrimitive.Viewport
           className={cn(
-            'shrink-0 text-ink-faint transition-transform duration-200',
-            open && 'rotate-180',
+            'p-1',
+            position === 'popper' &&
+              'h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1',
           )}
-        />
-      </button>
-      {popup}
-    </>
+        >
+          {children}
+        </SelectPrimitive.Viewport>
+        <SelectScrollDownButton />
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
   )
+}
+
+function SelectLabel({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Label>) {
+  return (
+    <SelectPrimitive.Label
+      data-slot="select-label"
+      className={cn('px-2 py-1.5 text-xs text-muted-foreground', className)}
+      {...props}
+    />
+  )
+}
+
+function SelectItem({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Item>) {
+  return (
+    <SelectPrimitive.Item
+      data-slot="select-item"
+      className={cn(
+        "relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        className,
+      )}
+      {...props}
+    >
+      <span
+        data-slot="select-item-indicator"
+        className="absolute right-2 flex size-3.5 items-center justify-center"
+      >
+        <SelectPrimitive.ItemIndicator>
+          <CheckIcon className="size-4" />
+        </SelectPrimitive.ItemIndicator>
+      </span>
+      <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+    </SelectPrimitive.Item>
+  )
+}
+
+function SelectSeparator({
+  className,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.Separator>) {
+  return (
+    <SelectPrimitive.Separator
+      data-slot="select-separator"
+      className={cn('pointer-events-none -mx-1 my-1 h-px bg-border', className)}
+      {...props}
+    />
+  )
+}
+
+function SelectScrollUpButton({
+  className,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.ScrollUpButton>) {
+  return (
+    <SelectPrimitive.ScrollUpButton
+      data-slot="select-scroll-up-button"
+      className={cn('flex cursor-default items-center justify-center py-1', className)}
+      {...props}
+    >
+      <ChevronUpIcon className="size-4" />
+    </SelectPrimitive.ScrollUpButton>
+  )
+}
+
+function SelectScrollDownButton({
+  className,
+  ...props
+}: React.ComponentProps<typeof SelectPrimitive.ScrollDownButton>) {
+  return (
+    <SelectPrimitive.ScrollDownButton
+      data-slot="select-scroll-down-button"
+      className={cn('flex cursor-default items-center justify-center py-1', className)}
+      {...props}
+    >
+      <ChevronDownIcon className="size-4" />
+    </SelectPrimitive.ScrollDownButton>
+  )
+}
+
+export {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectScrollDownButton,
+  SelectScrollUpButton,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
 }

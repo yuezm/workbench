@@ -4,8 +4,9 @@ import { THREAD_LIMITS, type ThreadRow } from '../../../../../protocol/thread'
 import { Button } from '../../../components/ui/button'
 import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
-import { Input, fieldCls } from '../../../components/ui/input'
+import { Input } from '../../../components/ui/input'
 import { badgeCls } from '../../../components/ui/panel'
+import { Textarea } from '../../../components/ui/textarea'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelViewState } from '../../../shell/useKernelView'
@@ -13,7 +14,7 @@ import { DetailHeader } from './DetailHeader'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-const textareaCls = cn(fieldCls, 'min-h-16 resize-y py-2')
+const textareaCls = 'min-h-16 resize-y'
 
 /** 页面内一次写操作：进行中禁用全部动作，避免并发提交互相覆盖 */
 type BusyAction = 'note' | 'bind' | 'close'
@@ -97,34 +98,34 @@ function TaskTreeItem({
         style={{ paddingLeft: depth * 14 }}
         className={cn(
           'group flex w-full items-center gap-2 rounded-lg py-1 pr-1 text-left',
-          'transition-colors duration-200 hover:bg-white/[0.06]',
-          'focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:outline-none',
+          'transition-colors duration-200 hover:bg-accent',
+          'focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none',
         )}
       >
         {depth > 0 && (
-          <span aria-hidden="true" className="text-badge text-ink-faint">
+          <span aria-hidden="true" className="text-xs text-faint-foreground">
             ↳
           </span>
         )}
-        <span className="min-w-0 flex-1 truncate text-meta text-ink-dim transition-colors group-hover:text-ink">
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground transition-colors group-hover:text-foreground">
           {node.task.title}
         </span>
         <span
           className={cn(
-            'shrink-0 rounded-sm px-1.5 py-0.5 text-badge',
-            completed ? 'bg-white/[0.06] text-ink-faint' : 'bg-focus/15 text-focus-soft',
+            'shrink-0 rounded-sm px-1.5 py-0.5 text-xs',
+            completed ? 'bg-accent text-faint-foreground' : 'bg-primary/15 text-brand',
           )}
         >
           {completed ? '已完成' : '进行中'}
         </span>
         {depth > 0 && (
-          <span className="shrink-0 rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
+          <span className="shrink-0 rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground">
             子任务
           </span>
         )}
         <span
           aria-hidden="true"
-          className="shrink-0 text-meta text-ink-faint opacity-0 transition-opacity group-hover:opacity-100"
+          className="shrink-0 text-xs text-faint-foreground opacity-0 transition-opacity group-hover:opacity-100"
         >
           ›
         </span>
@@ -163,31 +164,31 @@ function NotesSection({
 }): ReactElement {
   return (
     <section aria-label="笔记" className="flex flex-col gap-1.5">
-      <h3 className="flex items-center gap-2 text-title font-medium text-ink">
+      <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
         笔记
         <span className={badgeCls}>{thread.notes.length}</span>
-        <span className="text-meta font-normal text-ink-faint">仅资料</span>
+        <span className="text-xs font-normal text-faint-foreground">仅资料</span>
       </h3>
       {thread.notes.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
+        <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
           暂无笔记
         </p>
       ) : (
-        <ul className="max-h-56 divide-y divide-line overflow-auto rounded-xl border border-line">
+        <ul className="max-h-56 divide-y divide-border overflow-auto rounded-xl border border-border">
           {thread.notes.map((note) => (
             <li key={note.id} className="px-3 py-2">
-              <div className="flex items-center gap-2 text-meta text-ink-faint">
+              <div className="flex items-center gap-2 text-xs text-faint-foreground">
                 <span>{note.author === 'owner' ? '我' : '智能体'}</span>
                 <span className="tabular-nums">{note.at}</span>
               </div>
-              <p className="text-body whitespace-pre-wrap text-ink-dim">{note.text}</p>
+              <p className="text-sm whitespace-pre-wrap text-muted-foreground">{note.text}</p>
             </li>
           ))}
         </ul>
       )}
 
       <form className="flex flex-col gap-2" onSubmit={onSubmit}>
-        <textarea
+        <Textarea
           aria-label="线程笔记"
           className={textareaCls}
           maxLength={THREAD_LIMITS.noteText}
@@ -234,13 +235,13 @@ function BindSection({
 }): ReactElement {
   return (
     <section aria-label="绑定入口" className="flex flex-col gap-1.5">
-      <h3 className="text-title font-medium text-ink">绑定入口</h3>
+      <h3 className="text-base font-medium text-foreground">绑定入口</h3>
       {thread.externalRef !== null ? (
-        <p className="rounded-lg border border-line bg-surface px-3 py-2 text-body text-ink-dim">
+        <p className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-muted-foreground">
           已绑定：
-          <span className="font-mono text-ink-dim">{thread.source}</span>
+          <span className="font-mono text-muted-foreground">{thread.source}</span>
           {' / '}
-          <span className="font-mono text-ink-dim">{thread.externalRef}</span>
+          <span className="font-mono text-muted-foreground">{thread.externalRef}</span>
         </p>
       ) : (
         <form className="flex flex-col gap-2" onSubmit={onSubmit}>
@@ -269,7 +270,7 @@ function BindSection({
           {/* 内核拒绝绑定的原因（入口键被占用等）就地贴在提交按钮上方 */}
           <FormError message={formError} />
           <div className="flex items-center justify-between gap-2">
-            <p className="text-meta text-ink-faint">同一入口的新事件续进本线程。</p>
+            <p className="text-xs text-faint-foreground">同一入口的新事件续进本线程。</p>
             <Button type="submit" variant="secondary" size="sm" disabled={busy}>
               绑定
             </Button>
@@ -407,40 +408,42 @@ function ThreadContent({
 
   return (
     <>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3 text-body sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-4 py-3 text-sm sm:grid-cols-4">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-meta text-ink-dim">来源</dt>
-          <dd className="truncate font-mono text-ink-dim">{thread.source}</dd>
+          <dt className="text-xs text-muted-foreground">来源</dt>
+          <dd className="truncate font-mono text-muted-foreground">{thread.source}</dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-meta text-ink-dim">外部入口</dt>
-          <dd className="truncate font-mono text-ink-dim">{thread.externalRef ?? '未绑定'}</dd>
+          <dt className="text-xs text-muted-foreground">外部入口</dt>
+          <dd className="truncate font-mono text-muted-foreground">
+            {thread.externalRef ?? '未绑定'}
+          </dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-meta text-ink-dim">状态</dt>
-          <dd className="text-ink-dim">{closed ? '已归档' : '进行中'}</dd>
+          <dt className="text-xs text-muted-foreground">状态</dt>
+          <dd className="text-muted-foreground">{closed ? '已归档' : '进行中'}</dd>
         </div>
         <div className="flex min-w-0 flex-col gap-0.5">
-          <dt className="text-meta text-ink-dim">并发</dt>
-          <dd className="text-ink-dim tabular-nums">{thread.concurrency}</dd>
+          <dt className="text-xs text-muted-foreground">并发</dt>
+          <dd className="text-muted-foreground tabular-nums">{thread.concurrency}</dd>
         </div>
       </dl>
 
       {/* 写操作进行中：按钮会一起变灰，这里说清楚为什么点不动其它动作 */}
-      {busyNow && <p className="text-meta text-ink-faint">正在提交，其他操作暂不可用。</p>}
+      {busyNow && <p className="text-xs text-faint-foreground">正在提交，其他操作暂不可用。</p>}
 
       <section aria-label="任务列表" className="flex flex-col gap-1.5">
-        <h3 className="flex items-center gap-2 text-title font-medium text-ink">
+        <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
           任务列表
           <span className={badgeCls}>{thread.taskIds.length}</span>
-          <span className="text-meta font-normal text-ink-faint">点任务看详情</span>
+          <span className="text-xs font-normal text-faint-foreground">点任务看详情</span>
         </h3>
         {roots.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
+          <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
             暂无任务
           </p>
         ) : (
-          <ul className="rounded-xl border border-line bg-surface px-2 py-1">
+          <ul className="rounded-xl border border-border bg-card px-2 py-1">
             {roots.map((node) => (
               <TaskTreeItem key={node.task.id} node={node} depth={0} onOpenTask={onOpenTask} />
             ))}
@@ -479,10 +482,12 @@ function ThreadContent({
         onSubmit={bind}
       />
 
-      <div className="flex flex-col gap-2 border-t border-line pt-3">
+      <div className="flex flex-col gap-2 border-t border-border pt-3">
         <FormError message={closeError} />
         <div className="flex items-center justify-between gap-3">
-          <p className="text-meta text-ink-faint">{closed ? '线程已归档。' : '归档只影响界面。'}</p>
+          <p className="text-xs text-faint-foreground">
+            {closed ? '线程已归档。' : '归档只影响界面。'}
+          </p>
           {!closed && (
             <Button
               type="button"
@@ -525,9 +530,9 @@ export function ThreadDetailPage({
         <FormError message={state.error} />
 
         {detail === undefined ? (
-          state.error === null && <p className="text-meta text-ink-faint">正在读取线程…</p>
+          state.error === null && <p className="text-xs text-faint-foreground">正在读取线程…</p>
         ) : detail === null ? (
-          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
+          <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
             线程不存在
           </p>
         ) : (

@@ -257,15 +257,24 @@ describe('AgentManager', () => {
 
     kernel.setView('runtimes.all', undefined, [rt])
     await waitFor(() => expect(screen.getByRole('button', { name: '添加' })).toBeEnabled())
-    expect(screen.getByLabelText('智能体运行时')).toHaveValue('r1')
+    // 上游 Select 触发器不带 value 属性：打开浮层看选中项
+    await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
+    expect(screen.getByRole('option', { name: 'ds · 可用' })).toHaveAttribute(
+      'data-state',
+      'checked',
+    )
+    await user.keyboard('{Escape}')
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('ds · 可用')
 
     // 运行时被删光后，下拉回落到空
     kernel.setView('runtimes.all', undefined, [])
-    await waitFor(() => expect(screen.getByLabelText('智能体运行时')).toHaveValue(''))
     await waitFor(() =>
       expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('无'),
     )
+    // 回落项就是那条空值项「无」
+    await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
+    expect(screen.getByRole('option', { name: '无' })).toHaveAttribute('data-state', 'checked')
+    await user.keyboard('{Escape}')
   })
 
   it('点击「编辑」预填表单并提交 agent.update（patch 覆盖）', async () => {
@@ -328,7 +337,16 @@ describe('AgentManager', () => {
     expect(await screen.findByText('old')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '编辑智能体 old' }))
-    expect(screen.getByLabelText('智能体运行时')).toHaveValue('r1')
+    // 上游 Select 触发器不带 value 属性：打开浮层看选中项仍是原绑定（不可用但保留）
+    await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
+    expect(screen.getByRole('option', { name: 'ds · 不可用' })).toHaveAttribute(
+      'data-state',
+      'checked',
+    )
+    expect(screen.getByRole('option', { name: 'claude · 可用' })).not.toHaveAttribute(
+      'data-state',
+      'checked',
+    )
   })
 
   it('更新失败在弹窗内展示错误并保持打开', async () => {

@@ -79,7 +79,7 @@ describe('ProjectSwitcher', () => {
 
     const active = screen.getByRole('button', { name: '项目：笔记' })
     expect(active).toHaveAttribute('aria-current', 'page')
-    expect(active.className).toContain('bg-surface-3')
+    expect(active.className).toContain('bg-accent')
     expect(screen.getByRole('button', { name: '项目：工作台' })).not.toHaveAttribute('aria-current')
 
     // 编辑只挂在选中项上：非选中项不出现编辑入口
@@ -120,7 +120,7 @@ describe('ProjectSwitcher', () => {
 
     const row = screen.getByRole('button', { name: '默认目录' })
     expect(row).toHaveAttribute('aria-current', 'page')
-    expect(row.className).toContain('bg-surface-3')
+    expect(row.className).toContain('bg-accent')
     expect(screen.getByText(DEFAULT_PATH)).toBeInTheDocument()
     // 默认目录不对应项目行：没有文件夹选择器也没有编辑入口
     expect(screen.queryByRole('button', { name: '编辑项目 默认目录' })).not.toBeInTheDocument()

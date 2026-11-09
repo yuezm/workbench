@@ -144,7 +144,7 @@ subscribe → `kernel.seq` 快照 → 回放；app 用 `useKernelView(view, para
 ```tsx
 export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
   return (
-    <header className="flex h-12 items-center gap-4 border-b border-line px-4">
+    <header className="flex h-12 items-center gap-4 border-b border-border px-4">
       <span>Workbench</span>
       <nav aria-label="应用导航" className="flex items-center gap-1">
         {apps.map((app) => (

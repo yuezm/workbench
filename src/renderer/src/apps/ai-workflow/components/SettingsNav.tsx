@@ -44,11 +44,11 @@ export function SettingsNav({ value, onChange }: SettingsNavProps): ReactElement
             type="button"
             aria-current={active ? 'page' : undefined}
             className={cn(
-              'flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-action transition-colors duration-200 outline-none',
-              'focus-visible:ring-2 focus-visible:ring-focus/60',
+              'flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition-colors duration-200 outline-none',
+              'focus-visible:ring-2 focus-visible:ring-ring/60',
               active
-                ? 'bg-surface-3 text-ink shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'
-                : 'text-ink-dim hover:bg-white/[0.04] hover:text-ink',
+                ? 'bg-accent text-foreground shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'
+                : 'text-muted-foreground hover:bg-accent hover:text-foreground',
             )}
             onClick={() => onChange(item.value)}
           >
@@ -56,7 +56,7 @@ export function SettingsNav({ value, onChange }: SettingsNavProps): ReactElement
               aria-hidden="true"
               className={cn(
                 'grid size-6 shrink-0 place-items-center rounded-lg transition-colors duration-200',
-                active ? 'bg-focus/15 text-focus-soft' : 'bg-white/[0.04] text-ink-faint',
+                active ? 'bg-primary/15 text-brand' : 'bg-accent text-faint-foreground',
               )}
             >
               <svg

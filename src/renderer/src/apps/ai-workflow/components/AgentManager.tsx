@@ -10,9 +10,9 @@ import { AgentDialog, RUNTIME_HEALTH_LABEL, runtimeHealth, type RuntimeHealth } 
 
 /** 状态点配色：可用绿、不可用红、未检测灰 */
 const HEALTH_DOT: Record<RuntimeHealth, string> = {
-  ready: 'bg-short',
-  unavailable: 'bg-danger',
-  unknown: 'bg-white/25',
+  ready: 'bg-success',
+  unavailable: 'bg-destructive',
+  unknown: 'bg-muted-foreground',
 }
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -103,12 +103,12 @@ export function AgentManager(): ReactElement {
       {/* 已配置智能体 */}
       <Panel className="flex animate-rise flex-col gap-3 p-5">
         <div className="flex items-center gap-2">
-          <RobotIcon className="text-focus-soft" />
-          <h3 className="text-title font-medium text-ink">已配置智能体</h3>
+          <RobotIcon className="text-brand" />
+          <h3 className="text-base font-medium text-foreground">已配置智能体</h3>
           <span className={cn(badgeCls)}>{agents.length}</span>
           <Button
             type="button"
-            variant="primary"
+            variant="default"
             size="sm"
             className="ml-auto"
             onClick={() =>
@@ -127,9 +127,9 @@ export function AgentManager(): ReactElement {
           </Button>
         </div>
 
-        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
           {agents.length === 0 && (
-            <li className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
+            <li className="grid place-items-center rounded-xl border border-dashed border-border py-6 text-sm text-faint-foreground">
               暂无智能体
             </li>
           )}
@@ -139,14 +139,14 @@ export function AgentManager(): ReactElement {
             return (
               <li
                 key={a.id}
-                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
+                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent"
               >
-                <span className="grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
+                <span className="grid size-7 shrink-0 place-items-center rounded-md bg-accent text-muted-foreground">
                   <RobotIcon />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="truncate text-action font-medium text-ink">{a.name}</span>
-                  <span className="flex min-w-0 items-center gap-1.5 text-meta text-ink-faint">
+                  <span className="truncate text-sm font-medium text-foreground">{a.name}</span>
+                  <span className="flex min-w-0 items-center gap-1.5 text-xs text-faint-foreground">
                     <span
                       aria-hidden="true"
                       className={cn('size-1.5 shrink-0 rounded-full', HEALTH_DOT[health])}
@@ -177,12 +177,14 @@ export function AgentManager(): ReactElement {
                   编辑
                 </Button>
                 {/* 删除进行中给可见状态：按钮变灰本身不解释原因 */}
-                {removingId === a.id && <span className="text-meta text-ink-faint">删除中…</span>}
+                {removingId === a.id && (
+                  <span className="text-xs text-faint-foreground">删除中…</span>
+                )}
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="text-danger hover:bg-danger/10 hover:text-danger"
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   aria-label={`删除智能体 ${a.name}`}
                   disabled={removingId === a.id}
                   onClick={() => void remove(a.id)}

@@ -1,71 +1,148 @@
-import { useEffect, type ReactElement, type ReactNode } from 'react'
+import * as React from 'react'
+import { XIcon } from 'lucide-react'
+import { Dialog as DialogPrimitive } from 'radix-ui'
+import { Button } from './button'
 import { cn } from '../../lib/cn'
-import { panelCls } from './panel'
 
-export interface DialogProps {
-  /** 标题栏文本；不传则不渲染标题栏（内容自带标题时用） */
-  title?: ReactNode
-  /** Esc 与右上角关闭按钮都走它 */
-  onClose: () => void
-  children: ReactNode
-  className?: string
+/**
+ * 基座：shadcn/ui v4 dialog（new-york-v4 基线，Radix Dialog）。
+ *
+ * 复合结构：Dialog > DialogContent > DialogHeader/DialogTitle + DialogFooter。
+ * - Radix 负责焦点陷阱、Esc 关闭、滚动锁定与 aria-modal（自研版本缺失这些）。
+ * - 标题语义走 DialogTitle（无障碍名称来源），描述走 DialogDescription。
+ */
+function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
 
-function CloseIcon(): ReactElement {
+function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
+  return <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />
+}
+
+function DialogPortal({ ...props }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
+  return <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />
+}
+
+function DialogClose({ ...props }: React.ComponentProps<typeof DialogPrimitive.Close>) {
+  return <DialogPrimitive.Close data-slot="dialog-close" {...props} />
+}
+
+function DialogOverlay({
+  className,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M6 6l12 12M18 6L6 18" />
-    </svg>
+    <DialogPrimitive.Overlay
+      data-slot="dialog-overlay"
+      className={cn(
+        'fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0',
+        className,
+      )}
+      {...props}
+    />
   )
 }
 
-/** 居中模态：遮罩 + Esc 关闭 + 右上角关闭按钮 */
-export function Dialog({ title, onClose, children, className }: DialogProps): ReactElement {
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
-
+function DialogContent({
+  className,
+  children,
+  showCloseButton = true,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  showCloseButton?: boolean
+}) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/55 p-6 backdrop-blur-sm">
-      <div
-        role="dialog"
-        aria-modal="true"
+    <DialogPortal data-slot="dialog-portal">
+      <DialogOverlay />
+      <DialogPrimitive.Content
+        data-slot="dialog-content"
         className={cn(
-          panelCls,
-          'max-h-[85vh] w-full max-w-lg overflow-auto p-5',
-          'shadow-[0_30px_80px_-30px_rgb(0_0_0/85%)]',
+          'fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg',
           className,
         )}
+        {...props}
       >
-        {title !== undefined && (
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-title font-medium text-ink">{title}</h2>
-            <button
-              type="button"
-              aria-label="关闭"
-              className="grid size-7 place-items-center rounded-md text-ink-dim transition-colors duration-150 hover:bg-white/[0.06] hover:text-ink"
-              onClick={onClose}
-            >
-              <CloseIcon />
-            </button>
-          </div>
-        )}
         {children}
-      </div>
+        {showCloseButton && (
+          <DialogPrimitive.Close
+            data-slot="dialog-close"
+            className="absolute top-4 right-4 rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4"
+          >
+            <XIcon />
+            <span className="sr-only">关闭</span>
+          </DialogPrimitive.Close>
+        )}
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  )
+}
+
+function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
+  return (
+    <div
+      data-slot="dialog-header"
+      className={cn('flex flex-col gap-2 text-center sm:text-left', className)}
+      {...props}
+    />
+  )
+}
+
+function DialogFooter({
+  className,
+  showCloseButton = false,
+  children,
+  ...props
+}: React.ComponentProps<'div'> & {
+  showCloseButton?: boolean
+}) {
+  return (
+    <div
+      data-slot="dialog-footer"
+      className={cn('flex flex-col-reverse gap-2 sm:flex-row sm:justify-end', className)}
+      {...props}
+    >
+      {children}
+      {showCloseButton && (
+        <DialogPrimitive.Close asChild>
+          <Button variant="outline">取消</Button>
+        </DialogPrimitive.Close>
+      )}
     </div>
   )
+}
+
+function DialogTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) {
+  return (
+    <DialogPrimitive.Title
+      data-slot="dialog-title"
+      className={cn('text-lg leading-none font-semibold', className)}
+      {...props}
+    />
+  )
+}
+
+function DialogDescription({
+  className,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Description>) {
+  return (
+    <DialogPrimitive.Description
+      data-slot="dialog-description"
+      className={cn('text-sm text-muted-foreground', className)}
+      {...props}
+    />
+  )
+}
+
+export {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogOverlay,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
 }

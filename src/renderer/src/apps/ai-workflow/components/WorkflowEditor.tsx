@@ -11,8 +11,15 @@ import type {
 import { Button } from '../../../components/ui/button'
 import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
-import { Input, fieldCls } from '../../../components/ui/input'
-import { Select } from '../../../components/ui/select'
+import { Input } from '../../../components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../components/ui/select'
+import { Textarea } from '../../../components/ui/textarea'
 import { cn } from '../../../lib/cn'
 import { useKernelView } from '../../../shell/useKernelView'
 
@@ -123,6 +130,16 @@ function hasDanglingTarget(stage: StageInput, count: number): boolean {
     outOfRange(stage.gate?.onPassIndex, count) ||
     outOfRange(stage.gate?.onFailIndex, count)
   )
+}
+
+/**
+ * 下拉框的取值：引用的候选已被删（智能体 / 工作流 / 阶段不在视图里了）时按空值展示。
+ *
+ * 上游 Select 只认候选里的值，认不到就显示占位文案；这里显式回落成空串，
+ * 触发器因此显示占位文案而不是一片空白。
+ */
+function picked(raw: string | null | undefined, values: readonly string[]): string {
+  return raw != null && values.includes(raw) ? raw : ''
 }
 
 /**
@@ -422,6 +439,15 @@ export function WorkflowEditor({
   const targetOptions = draft.stages.map((s, i) => ({ i, name: s.name || `阶段${i + 1}` }))
   const index = Math.min(selected, draft.stages.length - 1)
   const stage = draft.stages[index]
+  /** 各下拉框的候选值：取值不在候选里时按空值展示（引用的对象已被删） */
+  const targetValues = targetOptions.map((t) => String(t.i))
+  const agentIds = agents.map((a) => a.id)
+  const handoffWorkflowIds = handoffWorkflows.map((w) => w.id)
+  const handoffStageIds =
+    stage?.handoffWorkflowId == null
+      ? []
+      : stagesOfWorkflow(stage.handoffWorkflowId).map((s) => s.id)
+  const subtaskStageIds = draft.stages.flatMap((s) => (s.id === undefined ? [] : [s.id]))
   /** 当前展开阶段的序号文案（aria-label 用，与阶段列表一致是 1 基） */
   const n = index + 1
   /** 该阶段的字段级错误只在它被展开时展示（错误面板与字段同屏才有意义） */
@@ -430,9 +456,9 @@ export function WorkflowEditor({
   return (
     <form className="flex flex-col gap-5" onSubmit={save}>
       <div className="flex items-center gap-2">
-        <WorkflowIcon className="text-focus-soft" />
+        <WorkflowIcon className="text-brand" />
         <div className="flex flex-col">
-          <h3 className="text-title font-medium text-ink">工作流定义</h3>
+          <h3 className="text-base font-medium text-foreground">工作流定义</h3>
         </div>
       </div>
 
@@ -459,7 +485,7 @@ export function WorkflowEditor({
       <div className="grid gap-4 md:grid-cols-[200px_minmax(0,1fr)]">
         {/* 左：阶段序列（序号 + 名字，点一条换右侧详情；上移 / 下移就在行尾） */}
         <div className="flex min-w-0 flex-col gap-2">
-          <span className="text-meta font-medium text-ink-faint">阶段</span>
+          <span className="text-xs font-medium text-faint-foreground">阶段</span>
           <ul className="flex flex-col gap-1" aria-label="阶段列表">
             {draft.stages.map((s, i) => {
               const isActive = i === index
@@ -470,18 +496,18 @@ export function WorkflowEditor({
                     aria-label={`阶段${i + 1}`}
                     aria-current={isActive ? 'true' : undefined}
                     className={cn(
-                      'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-action transition-colors duration-150 outline-none',
-                      'focus-visible:ring-2 focus-visible:ring-focus/60',
+                      'flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors duration-150 outline-none',
+                      'focus-visible:ring-2 focus-visible:ring-ring/60',
                       isActive
-                        ? 'bg-focus/15 text-ink'
-                        : 'text-ink-dim hover:bg-white/[0.04] hover:text-ink',
+                        ? 'bg-primary/15 text-foreground'
+                        : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                     )}
                     onClick={() => setSelected(i)}
                   >
                     <span
                       className={cn(
-                        'grid size-5 shrink-0 place-items-center rounded-md text-badge font-medium',
-                        isActive ? 'bg-focus/25 text-focus-soft' : 'bg-white/[0.05] text-ink-faint',
+                        'grid size-5 shrink-0 place-items-center rounded-md text-xs font-medium',
+                        isActive ? 'bg-primary/25 text-brand' : 'bg-accent text-faint-foreground',
                       )}
                     >
                       {i + 1}
@@ -502,7 +528,7 @@ export function WorkflowEditor({
                       aria-label={`阶段${i + 1}上移`}
                       title="上移"
                       disabled={i === 0}
-                      className="grid size-5 place-items-center rounded text-ink-faint transition-colors duration-150 outline-none hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60 disabled:pointer-events-none disabled:opacity-25"
+                      className="grid size-5 place-items-center rounded text-faint-foreground transition-colors duration-150 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-25"
                       onClick={() => moveStage(i, -1)}
                     >
                       <MoveIcon dir="up" />
@@ -512,7 +538,7 @@ export function WorkflowEditor({
                       aria-label={`阶段${i + 1}下移`}
                       title="下移"
                       disabled={i === draft.stages.length - 1}
-                      className="grid size-5 place-items-center rounded text-ink-faint transition-colors duration-150 outline-none hover:bg-white/[0.08] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60 disabled:pointer-events-none disabled:opacity-25"
+                      className="grid size-5 place-items-center rounded text-faint-foreground transition-colors duration-150 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-25"
                       onClick={() => moveStage(i, 1)}
                     >
                       <MoveIcon dir="down" />
@@ -529,13 +555,13 @@ export function WorkflowEditor({
 
         {/* 右：只展示选中的那个阶段 */}
         {stage === undefined ? (
-          <p className="grid place-items-center rounded-xl border border-dashed border-line p-6 text-body text-ink-faint">
+          <p className="grid place-items-center rounded-xl border border-dashed border-border p-6 text-sm text-faint-foreground">
             还没有阶段，先「添加阶段」
           </p>
         ) : (
-          <div className="rounded-xl border border-line bg-surface p-3">
+          <div className="rounded-xl border border-border bg-card p-3">
             <div className="flex items-end gap-3">
-              <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-focus/15 text-badge font-medium text-focus-soft">
+              <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-primary/15 text-xs font-medium text-brand">
                 {n}
               </span>
               <Field
@@ -557,7 +583,7 @@ export function WorkflowEditor({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="text-danger hover:bg-danger/10 hover:text-danger"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={removeSelected}
               >
                 删除
@@ -567,9 +593,8 @@ export function WorkflowEditor({
             <div className="mt-3 flex flex-wrap items-end gap-2">
               <Field label="类型" className="w-36">
                 <Select
-                  ariaLabel={`阶段${n}类型`}
                   value={stageKindOf(stage)}
-                  onChange={(v) => {
+                  onValueChange={(v) => {
                     // 切到闸门：自动交给智能体并给出默认次数；切走则清掉闸门配置
                     if (v === 'gate') {
                       patchStage(index, {
@@ -580,31 +605,42 @@ export function WorkflowEditor({
                     }
                     patchStage(index, { entryMode: v as EntryMode, gate: null })
                   }}
-                  options={[
-                    { value: 'none', label: '不交接' },
-                    { value: 'agent', label: '交给智能体' },
-                    { value: 'gate', label: '闸门（判定）' },
-                    { value: 'user', label: '交给用户' },
-                  ]}
-                />
+                >
+                  <SelectTrigger aria-label={`阶段${n}类型`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">不交接</SelectItem>
+                    <SelectItem value="agent">交给智能体</SelectItem>
+                    <SelectItem value="gate">闸门（判定）</SelectItem>
+                    <SelectItem value="user">交给用户</SelectItem>
+                  </SelectContent>
+                </Select>
               </Field>
               {stage.entryMode === 'agent' && (
                 <Field label="智能体" className="min-w-0 flex-1">
                   <Select
-                    ariaLabel={`阶段${n}智能体`}
-                    value={stage.agentId ?? ''}
-                    onChange={(v) => patchStage(index, { agentId: v || null })}
-                    options={[
-                      { value: '', label: '选择' },
-                      ...agents.map((a) => ({ value: a.id, label: a.name })),
-                    ]}
-                  />
+                    value={picked(stage.agentId, agentIds)}
+                    onValueChange={(v) => patchStage(index, { agentId: v || null })}
+                  >
+                    <SelectTrigger aria-label={`阶段${n}智能体`} className="w-full">
+                      <SelectValue placeholder="选择" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">选择</SelectItem>
+                      {agents.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
               )}
             </div>
 
             {!hasFlowDetail(stage) ? (
-              <p className="mt-3 text-meta text-ink-faint">
+              <p className="mt-3 text-xs text-faint-foreground">
                 {stage.entryMode === 'user'
                   ? '交给用户：任务进到这个阶段就停下来等人处理，不需要智能体、流转目标、交接或子任务。'
                   : '不交接：任务进到这个阶段不派活，由你在看板上拖到下一阶段；不需要智能体、流转目标、交接或子任务。'}
@@ -615,27 +651,35 @@ export function WorkflowEditor({
                 <div className="mt-3 flex flex-wrap items-end gap-2">
                   <Field label="允许未通过" className="w-36">
                     <Select
-                      ariaLabel={`阶段${n}闸门次数`}
                       value={String(stage.gate.maxFails)}
-                      onChange={(v) =>
+                      onValueChange={(v) =>
                         patchStage(index, { gate: { ...stage.gate!, maxFails: Number(v) } })
                       }
-                      options={[1, 2, 3, 4, 5, 10].map((times) => ({
-                        value: String(times),
-                        label: `${times} 次`,
-                      }))}
-                    />
+                    >
+                      <SelectTrigger aria-label={`阶段${n}闸门次数`} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1, 2, 3, 4, 5, 10].map((times) => (
+                          <SelectItem key={times} value={String(times)}>
+                            {times} 次
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
-                  <p className="pb-2 text-meta text-ink-faint">
+                  <p className="pb-2 text-xs text-faint-foreground">
                     第 {stage.gate.maxFails} 次仍未通过后放行
                   </p>
                 </div>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <Field label="通过时进入">
                     <Select
-                      ariaLabel={`阶段${n}闸门通过时进入`}
-                      value={stage.gate.onPassIndex == null ? '' : String(stage.gate.onPassIndex)}
-                      onChange={(v) =>
+                      value={picked(
+                        stage.gate.onPassIndex == null ? '' : String(stage.gate.onPassIndex),
+                        targetValues,
+                      )}
+                      onValueChange={(v) =>
                         patchStage(index, {
                           gate: {
                             ...stage.gate!,
@@ -643,17 +687,27 @@ export function WorkflowEditor({
                           },
                         })
                       }
-                      options={[
-                        { value: '', label: '下一阶段' },
-                        ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
-                      ]}
-                    />
+                    >
+                      <SelectTrigger aria-label={`阶段${n}闸门通过时进入`} className="w-full">
+                        <SelectValue placeholder="下一阶段" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">下一阶段</SelectItem>
+                        {targetOptions.map((t) => (
+                          <SelectItem key={t.i} value={String(t.i)}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                   <Field label="未通过时进入">
                     <Select
-                      ariaLabel={`阶段${n}闸门未通过时进入`}
-                      value={stage.gate.onFailIndex == null ? '' : String(stage.gate.onFailIndex)}
-                      onChange={(v) =>
+                      value={picked(
+                        stage.gate.onFailIndex == null ? '' : String(stage.gate.onFailIndex),
+                        targetValues,
+                      )}
+                      onValueChange={(v) =>
                         patchStage(index, {
                           gate: {
                             ...stage.gate!,
@@ -661,14 +715,22 @@ export function WorkflowEditor({
                           },
                         })
                       }
-                      options={[
-                        { value: '', label: '原地不动' },
-                        ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
-                      ]}
-                    />
+                    >
+                      <SelectTrigger aria-label={`阶段${n}闸门未通过时进入`} className="w-full">
+                        <SelectValue placeholder="原地不动" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">原地不动</SelectItem>
+                        {targetOptions.map((t) => (
+                          <SelectItem key={t.i} value={String(t.i)}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                 </div>
-                <p className="mt-1 text-meta text-ink-faint">
+                <p className="mt-1 text-xs text-faint-foreground">
                   智能体跑完要给出「通过 /
                   未通过」的判定；拿不出证据时任务停在闸门等人。闸门只判定，不交接、不拆子任务。
                 </p>
@@ -679,32 +741,52 @@ export function WorkflowEditor({
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
                   <Field label="完成后进入">
                     <Select
-                      ariaLabel={`阶段${n}完成后进入`}
-                      value={stage.onCompleteIndex == null ? '' : String(stage.onCompleteIndex)}
-                      onChange={(v) =>
+                      value={picked(
+                        stage.onCompleteIndex == null ? '' : String(stage.onCompleteIndex),
+                        targetValues,
+                      )}
+                      onValueChange={(v) =>
                         patchStage(index, { onCompleteIndex: v === '' ? null : Number(v) })
                       }
-                      options={[
-                        { value: '', label: '下一阶段' },
-                        ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
-                      ]}
-                    />
+                    >
+                      <SelectTrigger aria-label={`阶段${n}完成后进入`} className="w-full">
+                        <SelectValue placeholder="下一阶段" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">下一阶段</SelectItem>
+                        {targetOptions.map((t) => (
+                          <SelectItem key={t.i} value={String(t.i)}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                   <Field label="出错时进入">
                     <Select
-                      ariaLabel={`阶段${n}出错时进入`}
-                      value={stage.onRejectIndex == null ? '' : String(stage.onRejectIndex)}
-                      onChange={(v) =>
+                      value={picked(
+                        stage.onRejectIndex == null ? '' : String(stage.onRejectIndex),
+                        targetValues,
+                      )}
+                      onValueChange={(v) =>
                         patchStage(index, { onRejectIndex: v === '' ? null : Number(v) })
                       }
-                      options={[
-                        { value: '', label: '不指定' },
-                        ...targetOptions.map((t) => ({ value: String(t.i), label: t.name })),
-                      ]}
-                    />
+                    >
+                      <SelectTrigger aria-label={`阶段${n}出错时进入`} className="w-full">
+                        <SelectValue placeholder="不指定" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">不指定</SelectItem>
+                        {targetOptions.map((t) => (
+                          <SelectItem key={t.i} value={String(t.i)}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                 </div>
-                <p className="mt-1 text-meta text-ink-faint">
+                <p className="mt-1 text-xs text-faint-foreground">
                   末阶段完成后任务结束；「出错」指执行器崩溃或超时。
                 </p>
               </>
@@ -715,9 +797,9 @@ export function WorkflowEditor({
               <>
                 {/* 阶段要干什么：这段文字会作为提示词的固定指令段交给智能体 */}
                 <Field label="要干什么" className="mt-3">
-                  <textarea
+                  <Textarea
                     aria-label={`阶段${n}要干什么`}
-                    className={cn(fieldCls, 'min-h-24 resize-y py-2')}
+                    className="min-h-24 resize-y"
                     placeholder="写清这个阶段具体要做什么，例如：读需求、出实现方案、列出改动文件；进到本阶段的任务会带上这段说明交给智能体。"
                     value={stage.instructions ?? ''}
                     onChange={(e) => patchStage(index, { instructions: e.target.value })}
@@ -729,88 +811,116 @@ export function WorkflowEditor({
             {/* 交接与子任务只属于真干活的智能体阶段：闸门只判定，不交接、不拆子任务 */}
             {hasRelayDetail(stage) && (
               <>
-                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
+                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
                   <Field label="目标工作流" className="min-w-0 flex-1">
                     <Select
-                      ariaLabel={`阶段${n}交接目标工作流`}
-                      value={stage.handoffWorkflowId ?? ''}
-                      onChange={(v) =>
+                      value={picked(stage.handoffWorkflowId, handoffWorkflowIds)}
+                      onValueChange={(v) =>
                         patchStage(index, {
                           handoffWorkflowId: v === '' ? null : v,
                           handoffStageId: null,
                         })
                       }
-                      options={[
-                        { value: '', label: '不交接' },
-                        ...handoffWorkflows.map((item) => ({ value: item.id, label: item.name })),
-                      ]}
-                    />
+                    >
+                      <SelectTrigger aria-label={`阶段${n}交接目标工作流`} className="w-full">
+                        <SelectValue placeholder="不交接" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">不交接</SelectItem>
+                        {handoffWorkflows.map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                   {stage.handoffWorkflowId != null && (
                     <Field label="目标阶段" className="min-w-0 flex-1">
                       <Select
-                        ariaLabel={`阶段${n}交接目标阶段`}
-                        value={stage.handoffStageId ?? ''}
-                        onChange={(v) => patchStage(index, { handoffStageId: v === '' ? null : v })}
-                        options={[
-                          { value: '', label: '首阶段' },
-                          ...stagesOfWorkflow(stage.handoffWorkflowId).map((item) => ({
-                            value: item.id,
-                            label: item.name,
-                          })),
-                        ]}
-                      />
+                        value={picked(stage.handoffStageId, handoffStageIds)}
+                        onValueChange={(v) =>
+                          patchStage(index, { handoffStageId: v === '' ? null : v })
+                        }
+                      >
+                        <SelectTrigger aria-label={`阶段${n}交接目标阶段`} className="w-full">
+                          <SelectValue placeholder="首阶段" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">首阶段</SelectItem>
+                          {stagesOfWorkflow(stage.handoffWorkflowId).map((item) => (
+                            <SelectItem key={item.id} value={item.id}>
+                              {item.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </Field>
                   )}
-                  <p className="w-full text-meta text-ink-faint">完成后在目标工作流建关联任务。</p>
+                  <p className="w-full text-xs text-faint-foreground">
+                    完成后在目标工作流建关联任务。
+                  </p>
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-line pt-3">
+                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
                   <Field label="子任务落点阶段" className="min-w-0 flex-1">
                     <Select
-                      ariaLabel={`阶段${n}子任务落点阶段`}
-                      value={stage.subtaskStageId ?? ''}
-                      onChange={(v) => patchStage(index, { subtaskStageId: v === '' ? null : v })}
-                      options={[
-                        { value: '', label: '跟随当前阶段' },
-                        // 候选跟着草稿走：改过的阶段名立刻反映，不用等保存后再打开
-                        ...draft.stages.flatMap((item, i) =>
-                          item.id === undefined
-                            ? []
-                            : [{ value: item.id, label: item.name || `阶段${i + 1}` }],
-                        ),
-                      ]}
-                    />
+                      value={picked(stage.subtaskStageId, subtaskStageIds)}
+                      onValueChange={(v) =>
+                        patchStage(index, { subtaskStageId: v === '' ? null : v })
+                      }
+                    >
+                      <SelectTrigger aria-label={`阶段${n}子任务落点阶段`} className="w-full">
+                        <SelectValue placeholder="跟随当前阶段" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">跟随当前阶段</SelectItem>
+                        {/* 候选跟着草稿走：改过的阶段名立刻反映，不用等保存后再打开 */}
+                        {draft.stages.map((item, i) =>
+                          item.id === undefined ? null : (
+                            <SelectItem key={item.id} value={item.id}>
+                              {item.name || `阶段${i + 1}`}
+                            </SelectItem>
+                          ),
+                        )}
+                      </SelectContent>
+                    </Select>
                   </Field>
                   <Field label="子任务完成后" className="min-w-0 flex-1">
                     <Select
-                      ariaLabel={`阶段${n}子任务完成后`}
                       value={stage.onChildrenSettled ?? ''}
-                      onChange={(v) =>
+                      onValueChange={(v) =>
                         patchStage(index, {
                           onChildrenSettled: v === '' ? null : (v as OnChildrenSettled),
                         })
                       }
-                      options={[
-                        { value: '', label: '按阶段推断' },
-                        { value: 'wake', label: '唤醒父 Agent' },
-                        { value: 'notify', label: '仅通知' },
-                        { value: 'complete', label: '完成父任务' },
-                      ]}
-                    />
+                    >
+                      <SelectTrigger aria-label={`阶段${n}子任务完成后`} className="w-full">
+                        <SelectValue placeholder="按阶段推断" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">按阶段推断</SelectItem>
+                        <SelectItem value="wake">唤醒父 Agent</SelectItem>
+                        <SelectItem value="notify">仅通知</SelectItem>
+                        <SelectItem value="complete">完成父任务</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </Field>
                   <Field label="允许拆子任务" className="min-w-0 flex-1">
                     <Select
-                      ariaLabel={`阶段${n}允许拆子任务`}
                       value={stage.spawnPolicy ?? ''}
-                      onChange={(v) =>
+                      onValueChange={(v) =>
                         patchStage(index, { spawnPolicy: v === '' ? null : (v as SpawnPolicy) })
                       }
-                      options={[
-                        { value: '', label: '允许' },
-                        { value: 'off', label: '禁止' },
-                      ]}
-                    />
+                    >
+                      <SelectTrigger aria-label={`阶段${n}允许拆子任务`} className="w-full">
+                        <SelectValue placeholder="允许" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">允许</SelectItem>
+                        <SelectItem value="off">禁止</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </Field>
                 </div>
               </>
@@ -827,8 +937,8 @@ export function WorkflowEditor({
       )}
       <FormError message={submitError} />
 
-      <div className="flex items-center gap-2 border-t border-line pt-4">
-        <Button type="submit" variant="primary" size="sm" disabled={saving} className="ml-auto">
+      <div className="flex items-center gap-2 border-t border-border pt-4">
+        <Button type="submit" variant="default" size="sm" disabled={saving} className="ml-auto">
           {saving ? '保存中…' : '保存'}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>

@@ -207,7 +207,7 @@ describe('ChatPanel', () => {
     expect(screen.getByText('grep · 短内容')).toBeInTheDocument()
     const failed = screen.getByText('write')
     // 失败色走语义 token，不用调色板外的 red-300
-    expect(failed.className).toContain('text-danger')
+    expect(failed.className).toContain('text-destructive')
   })
 
   it('渲染消息流与消息级错误文案', () => {

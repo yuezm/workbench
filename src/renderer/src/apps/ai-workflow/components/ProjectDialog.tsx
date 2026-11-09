@@ -1,11 +1,12 @@
 import { useState, type ReactElement } from 'react'
 import type { Project, ProjectInput } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
-import { Dialog } from '../../../components/ui/dialog'
-import { Field, labelCls } from '../../../components/ui/field'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
+import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
-import { Input, fieldCls } from '../../../components/ui/input'
-import { cn } from '../../../lib/cn'
+import { Input } from '../../../components/ui/input'
+import { Label } from '../../../components/ui/label'
+import { Textarea } from '../../../components/ui/textarea'
 
 export interface ProjectDialogProps {
   /** 编辑态传入现有项目；新建时省略 */
@@ -15,8 +16,6 @@ export interface ProjectDialogProps {
   onRemove?: (id: string) => Promise<void>
   onCancel: () => void
 }
-
-const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2')
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -139,127 +138,144 @@ export function ProjectDialog({
   }
 
   return (
-    <Dialog title={editing ? '编辑项目' : '新建项目'} onClose={onCancel}>
-      <form className="flex flex-col gap-3" noValidate onSubmit={submit}>
-        <Field label="项目名称" required hint="保存时去掉首尾空格" error={fieldErrors.name ?? null}>
-          <Input
-            aria-label="项目名称"
-            placeholder="用来区分项目的名字"
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value)
-              clearError('name')
-            }}
-          />
-        </Field>
-
-        {/*
-          路径这一格不用 `Field`：标签占第一行，输入框与「选择文件夹」同占第二行。
-          用 `Field` + `items-end` 时按钮的底边对齐的是「说明文字」的底边（Field 是整块
-          列布局），于是按钮掉到输入框下面、还比 h-9 的输入框矮 4px——看上去就是错位。
-        */}
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="project-path" className={cn('flex items-center gap-1', labelCls)}>
-            文件夹路径
-            <span aria-hidden="true" className="text-danger">
-              *
-            </span>
-            <span className="sr-only">必填</span>
-          </label>
-          <div className="flex items-center gap-2">
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onCancel()
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editing ? '编辑项目' : '新建项目'}</DialogTitle>
+        </DialogHeader>
+        <form className="flex flex-col gap-3" noValidate onSubmit={submit}>
+          <Field
+            label="项目名称"
+            required
+            hint="保存时去掉首尾空格"
+            error={fieldErrors.name ?? null}
+          >
             <Input
-              id="project-path"
-              aria-label="文件夹路径"
-              className="min-w-0 flex-1 font-mono text-body"
-              placeholder="D:\\Codes\\workbench"
-              value={path}
+              aria-label="项目名称"
+              placeholder="用来区分项目的名字"
+              value={name}
               onChange={(e) => {
-                setPath(e.target.value)
-                clearError('path')
+                setName(e.target.value)
+                clearError('name')
               }}
             />
-            {/* 默认 `md`（h-9）与输入框同高；`shrink-0` 让它不被长路径挤窄 */}
-            <Button
-              type="button"
-              variant="secondary"
-              className="shrink-0"
-              disabled={busy}
-              onClick={chooseFolder}
-            >
-              选择文件夹
-            </Button>
-          </div>
-          <span className="text-meta text-ink-faint">
-            项目的运行工作目录：从选择器挑，或粘贴绝对路径
-          </span>
-          {fieldErrors.path !== undefined && fieldErrors.path !== '' && (
-            <span role="alert" className="text-meta text-danger">
-              {fieldErrors.path}
-            </span>
-          )}
-          <FormError message={pickerError} onDismiss={() => setPickerError(null)} />
-        </div>
+          </Field>
 
-        <Field label="备注">
-          <textarea
-            aria-label="项目备注"
-            className={textareaCls}
-            placeholder="这个项目在做什么（可空）"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </Field>
-
-        <p className="text-meta text-ink-faint">项目文件夹就是该项目任务的运行工作目录。</p>
-
-        <FormError message={submitError} onDismiss={() => setSubmitError(null)} />
-
-        <div className="mt-2 flex flex-col gap-2">
-          <FormError message={removeError} onDismiss={() => setRemoveError(null)} />
-          {project !== undefined && onRemove !== undefined && (
-            // 删除会改任务与会话的归属：先写清后果；执行中的任务由内核拦下
-            <p className="text-meta text-ink-faint">
-              删除后，项目里的任务与会话归到默认目录（执行中的任务要先停掉）。
-            </p>
-          )}
-          <div className="flex items-center justify-between gap-2">
-            {/* 删除只在编辑态出现，放左边：与右侧的「取消 / 保存」隔开，避免误点 */}
-            <div>
-              {project !== undefined && onRemove !== undefined && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-danger hover:bg-danger/10 hover:text-danger"
-                  disabled={busy}
-                  onClick={() => remove(project.id, onRemove)}
-                >
-                  删除项目
-                </Button>
-              )}
+          {/*
+            路径这一格不用 `Field`：标签占第一行，输入框与「选择文件夹」同占第二行。
+            用 `Field` + `items-end` 时按钮的底边对齐的是「说明文字」的底边（Field 是整块
+            列布局），于是按钮掉到输入框下面、还比 h-9 的输入框矮 4px——看上去就是错位。
+          */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="project-path" className="gap-1">
+              文件夹路径
+              <span aria-hidden="true" className="text-destructive">
+                *
+              </span>
+              <span className="sr-only">必填</span>
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="project-path"
+                aria-label="文件夹路径"
+                className="min-w-0 flex-1 font-mono text-sm"
+                placeholder="D:\\Codes\\workbench"
+                value={path}
+                onChange={(e) => {
+                  setPath(e.target.value)
+                  clearError('path')
+                }}
+              />
+              {/* 默认 `md`（h-9）与输入框同高；`shrink-0` 让它不被长路径挤窄 */}
+              <Button
+                type="button"
+                variant="secondary"
+                className="shrink-0"
+                disabled={busy}
+                onClick={chooseFolder}
+              >
+                选择文件夹
+              </Button>
             </div>
-            <div className="flex flex-col items-end gap-1.5">
-              {!canSave && (
-                <p className="text-meta text-ink-faint">名称与文件夹路径都必填，填好后才能保存。</p>
-              )}
-              <div className="flex items-center gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-                  取消
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="sm"
-                  disabled={busy || !canSave}
-                  className="disabled:opacity-40"
-                >
-                  保存
-                </Button>
+            <span className="text-xs text-faint-foreground">
+              项目的运行工作目录：从选择器挑，或粘贴绝对路径
+            </span>
+            {fieldErrors.path !== undefined && fieldErrors.path !== '' && (
+              <span role="alert" className="text-xs text-destructive">
+                {fieldErrors.path}
+              </span>
+            )}
+            <FormError message={pickerError} onDismiss={() => setPickerError(null)} />
+          </div>
+
+          <Field label="备注">
+            <Textarea
+              aria-label="项目备注"
+              className="min-h-20 resize-y"
+              placeholder="这个项目在做什么（可空）"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </Field>
+
+          <p className="text-xs text-faint-foreground">项目文件夹就是该项目任务的运行工作目录。</p>
+
+          <FormError message={submitError} onDismiss={() => setSubmitError(null)} />
+
+          <div className="mt-2 flex flex-col gap-2">
+            <FormError message={removeError} onDismiss={() => setRemoveError(null)} />
+            {project !== undefined && onRemove !== undefined && (
+              // 删除会改任务与会话的归属：先写清后果；执行中的任务由内核拦下
+              <p className="text-xs text-faint-foreground">
+                删除后，项目里的任务与会话归到默认目录（执行中的任务要先停掉）。
+              </p>
+            )}
+            <div className="flex items-center justify-between gap-2">
+              {/* 删除只在编辑态出现，放左边：与右侧的「取消 / 保存」隔开，避免误点 */}
+              <div>
+                {project !== undefined && onRemove !== undefined && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    disabled={busy}
+                    onClick={() => remove(project.id, onRemove)}
+                  >
+                    删除项目
+                  </Button>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-1.5">
+                {!canSave && (
+                  <p className="text-xs text-faint-foreground">
+                    名称与文件夹路径都必填，填好后才能保存。
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+                    取消
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="default"
+                    size="sm"
+                    disabled={busy || !canSave}
+                    className="disabled:opacity-40"
+                  >
+                    保存
+                  </Button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </form>
+        </form>
+      </DialogContent>
     </Dialog>
   )
 }

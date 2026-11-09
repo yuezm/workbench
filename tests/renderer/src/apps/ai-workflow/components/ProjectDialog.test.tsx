@@ -195,13 +195,14 @@ describe('ProjectDialog', () => {
   it('字段不全时提交表单不调用 onSave，并把焦点移到缺的字段', async () => {
     const onSave = vi.fn()
     const user = userEvent.setup()
-    const { container } = render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
+    render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
 
     await user.type(screen.getByLabelText('文件夹路径'), 'D:\\Codes\\workbench')
     // 名称留空：保存按钮禁用，但表单提交事件本身会到达 submit 处理器
     await user.click(screen.getByLabelText('项目名称'))
     await user.keyboard('{Enter}')
-    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+    // 弹窗内容渲染在 portal 里，表单不在 render 容器内：从弹窗里取
+    fireEvent.submit(screen.getByRole('dialog').querySelector('form') as HTMLFormElement)
 
     expect(onSave).not.toHaveBeenCalled()
     expect(await screen.findByText('项目名称必填')).toBeInTheDocument()
@@ -211,10 +212,10 @@ describe('ProjectDialog', () => {
 
   it('只有名称没有路径：提交落到路径字段错误并聚焦', async () => {
     const onSave = vi.fn()
-    const { container } = render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
+    render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
 
     fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: '临时' } })
-    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+    fireEvent.submit(screen.getByRole('dialog').querySelector('form') as HTMLFormElement)
 
     expect(onSave).not.toHaveBeenCalled()
     expect(await screen.findByText('文件夹路径必填')).toBeInTheDocument()

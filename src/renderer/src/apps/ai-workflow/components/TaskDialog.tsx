@@ -2,12 +2,18 @@ import { useRef, useState, type ReactElement } from 'react'
 import type { Project, TaskInput, WorkflowWithStages } from '../../../../../protocol/entities'
 import { COMMAND_LIMITS } from '../../../../../protocol/validate'
 import { Button } from '../../../components/ui/button'
-import { Dialog } from '../../../components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
-import { Input, fieldCls } from '../../../components/ui/input'
-import { Select } from '../../../components/ui/select'
-import { cn } from '../../../lib/cn'
+import { Input } from '../../../components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../components/ui/select'
+import { Textarea } from '../../../components/ui/textarea'
 
 interface TaskDialogProps {
   workflow: WorkflowWithStages
@@ -21,8 +27,6 @@ interface TaskDialogProps {
   onSave: (input: TaskInput) => Promise<void>
   onCancel: () => void
 }
-
-const textareaCls = cn(fieldCls, 'min-h-24 resize-y py-2')
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -78,73 +82,91 @@ export function TaskDialog({
   }
 
   return (
-    <Dialog title="新建任务" onClose={onCancel}>
-      <form className="flex flex-col gap-3" noValidate onSubmit={submit}>
-        <Field label="所属项目">
-          {/* 只读行：项目在侧栏顶层选好了，弹窗里再放开选择只会让「建在哪个目录」变得含糊 */}
-          <div
-            aria-label="所属项目"
-            className="flex flex-col gap-0.5 rounded-lg border border-line bg-white/[0.04] px-3 py-2"
-          >
-            <span className="truncate text-body text-ink">{project?.name ?? '默认目录'}</span>
-            <span className="truncate text-meta text-ink-faint">
-              {project?.path ?? (defaultPath === '' ? '未配置项目时的工作目录' : defaultPath)}
-            </span>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onCancel()
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>新建任务</DialogTitle>
+        </DialogHeader>
+        <form className="flex flex-col gap-3" noValidate onSubmit={submit}>
+          <Field label="所属项目">
+            {/* 只读行：项目在侧栏顶层选好了，弹窗里再放开选择只会让「建在哪个目录」变得含糊 */}
+            <div
+              aria-label="所属项目"
+              className="flex flex-col gap-0.5 rounded-lg border border-border bg-accent px-3 py-2"
+            >
+              <span className="truncate text-sm text-foreground">
+                {project?.name ?? '默认目录'}
+              </span>
+              <span className="truncate text-xs text-faint-foreground">
+                {project?.path ?? (defaultPath === '' ? '未配置项目时的工作目录' : defaultPath)}
+              </span>
+            </div>
+          </Field>
+          <Field label="任务标题" required error={titleError}>
+            <Input
+              ref={titleRef}
+              aria-label="任务标题"
+              aria-invalid={titleError !== null}
+              // 上限与协议一致（超长会被宿主直接拒），在输入阶段就挡住，别让用户白点一次
+              maxLength={COMMAND_LIMITS.title}
+              placeholder="起个名字"
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value)
+                // 一改就撤掉错误：错误跟着输入走，不给用户留一条过期红字
+                if (titleError !== null) setTitleError(null)
+              }}
+            />
+          </Field>
+          <Field label="任务描述">
+            <Textarea
+              aria-label="任务描述"
+              className="min-h-24 resize-y"
+              maxLength={COMMAND_LIMITS.description}
+              placeholder="背景、验收标准"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </Field>
+          <Field label="起始阶段">
+            <Select value={stageId} onValueChange={setStageId}>
+              <SelectTrigger aria-label="起始阶段" className="w-full">
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                {workflow.stages.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <p className="text-xs text-faint-foreground">「交给智能体」的阶段会立即执行。</p>
+
+          <FormError message={formError} />
+
+          <div className="mt-2 flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+              取消
+            </Button>
+            <Button
+              type="submit"
+              variant="default"
+              size="sm"
+              disabled={saving}
+              className="disabled:opacity-40"
+            >
+              创建
+            </Button>
           </div>
-        </Field>
-        <Field label="任务标题" required error={titleError}>
-          <Input
-            ref={titleRef}
-            aria-label="任务标题"
-            aria-invalid={titleError !== null}
-            // 上限与协议一致（超长会被宿主直接拒），在输入阶段就挡住，别让用户白点一次
-            maxLength={COMMAND_LIMITS.title}
-            placeholder="起个名字"
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value)
-              // 一改就撤掉错误：错误跟着输入走，不给用户留一条过期红字
-              if (titleError !== null) setTitleError(null)
-            }}
-          />
-        </Field>
-        <Field label="任务描述">
-          <textarea
-            aria-label="任务描述"
-            className={textareaCls}
-            maxLength={COMMAND_LIMITS.description}
-            placeholder="背景、验收标准"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </Field>
-        <Field label="起始阶段">
-          <Select
-            ariaLabel="起始阶段"
-            value={stageId}
-            onChange={setStageId}
-            options={workflow.stages.map((s) => ({ value: s.id, label: s.name }))}
-          />
-        </Field>
-        <p className="text-meta text-ink-faint">「交给智能体」的阶段会立即执行。</p>
-
-        <FormError message={formError} />
-
-        <div className="mt-2 flex items-center justify-end gap-2">
-          <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-            取消
-          </Button>
-          <Button
-            type="submit"
-            variant="primary"
-            size="sm"
-            disabled={saving}
-            className="disabled:opacity-40"
-          >
-            创建
-          </Button>
-        </div>
-      </form>
+        </form>
+      </DialogContent>
     </Dialog>
   )
 }

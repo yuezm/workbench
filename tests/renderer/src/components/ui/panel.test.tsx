@@ -10,7 +10,7 @@ describe('Panel', () => {
       </Panel>,
     )
     const panel = screen.getByTestId('p')
-    expect(panel).toHaveClass('rounded-xl', 'border-line', 'bg-surface', 'p-5')
+    expect(panel).toHaveClass('rounded-xl', 'border-border', 'bg-card', 'p-5')
     expect(screen.getByText('内容')).toBeInTheDocument()
   })
 })

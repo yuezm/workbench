@@ -17,15 +17,15 @@ export interface TaskBriefProps {
 export function TaskBrief({ task }: TaskBriefProps): ReactElement {
   return (
     <section aria-label="任务说明" className="flex flex-col gap-2">
-      <h3 className="flex items-center gap-2 text-title font-medium text-ink">
+      <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
         任务说明
         <span className={badgeCls}>初始输入</span>
       </h3>
-      <div className="rounded-xl border border-line bg-surface px-4 py-3">
+      <div className="rounded-xl border border-border bg-card px-4 py-3">
         <p
           className={cn(
-            'text-body whitespace-pre-wrap break-words',
-            task.description === '' ? 'text-ink-faint' : 'text-ink',
+            'text-sm break-words whitespace-pre-wrap',
+            task.description === '' ? 'text-faint-foreground' : 'text-foreground',
           )}
         >
           {task.description === '' ? '没有描述' : task.description}

@@ -2,7 +2,7 @@ import { useState, type KeyboardEvent, type ReactElement } from 'react'
 import type { Agent, Card, Conversation, Message } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { FormError } from '../../../components/ui/form-error'
-import { fieldCls } from '../../../components/ui/input'
+import { Textarea } from '../../../components/ui/textarea'
 import { cn } from '../../../lib/cn'
 import type { ChatStreamState } from '../hooks/useChat'
 import { ApprovalCards } from './ApprovalCards'
@@ -87,32 +87,32 @@ export function ChatPanel({
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col">
       {conversation !== null && (
-        <header className="flex shrink-0 items-center gap-2 border-b border-line px-5 py-3">
-          <h2 className="truncate text-title font-medium text-ink">{conversation.title}</h2>
+        <header className="flex shrink-0 items-center gap-2 border-b border-border px-5 py-3">
+          <h2 className="truncate text-base font-medium text-foreground">{conversation.title}</h2>
           {projectName !== undefined && (
             <span
               aria-label="所属项目"
               title={projectName}
-              className="max-w-40 shrink-0 truncate rounded-md bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-dim"
+              className="max-w-40 shrink-0 truncate rounded-md bg-accent px-1.5 py-0.5 text-xs text-muted-foreground"
             >
               {projectName}
             </span>
           )}
-          <span className="shrink-0 rounded-md bg-focus/15 px-1.5 py-0.5 text-badge text-focus-soft">
+          <span className="shrink-0 rounded-md bg-primary/15 px-1.5 py-0.5 text-xs text-brand">
             {agentName(conversation.agentId)}
           </span>
         </header>
       )}
 
       {conversation !== null && cards.length > 0 && (
-        <div className="shrink-0 border-b border-line px-5 py-3">
+        <div className="shrink-0 border-b border-border px-5 py-3">
           <ApprovalCards cards={cards} />
         </div>
       )}
 
       <div className="flex-1 overflow-auto p-5" aria-label="消息">
         {conversation === null ? (
-          <div className="grid h-full place-items-center text-body text-ink-faint">
+          <div className="grid h-full place-items-center text-sm text-faint-foreground">
             点左侧「新对话」开始
           </div>
         ) : (
@@ -126,13 +126,13 @@ export function ChatPanel({
                 >
                   <div
                     className={cn(
-                      'max-w-[80%] rounded-xl px-3 py-2 text-body whitespace-pre-wrap text-ink',
-                      mine ? 'bg-focus/15' : 'bg-surface-2',
+                      'max-w-[80%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap text-foreground',
+                      mine ? 'bg-primary/15' : 'bg-muted',
                     )}
                   >
                     {message.content}
                     {message.error !== null && (
-                      <p className="mt-1 text-body text-danger">{message.error}</p>
+                      <p className="mt-1 text-sm text-destructive">{message.error}</p>
                     )}
                   </div>
                 </div>
@@ -140,9 +140,9 @@ export function ChatPanel({
             })}
             {sending && (
               <div className="flex justify-start">
-                <div className="flex max-w-[80%] flex-col gap-1.5 rounded-xl bg-surface-2 px-3 py-2 text-body text-ink">
+                <div className="flex max-w-[80%] flex-col gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm text-foreground">
                   {streaming.thinking !== '' && (
-                    <p className="text-body whitespace-pre-wrap text-ink-faint italic">
+                    <p className="text-sm whitespace-pre-wrap text-faint-foreground italic">
                       {streaming.thinking}
                     </p>
                   )}
@@ -150,8 +150,8 @@ export function ChatPanel({
                     <p
                       key={`${tool.tool}-${index}`}
                       className={cn(
-                        'rounded-md bg-surface-2 px-2 py-1 font-mono text-body text-ink-faint',
-                        tool.isError && 'text-danger',
+                        'rounded-md bg-muted px-2 py-1 font-mono text-sm text-faint-foreground',
+                        tool.isError && 'text-destructive',
                       )}
                     >
                       {[
@@ -172,12 +172,12 @@ export function ChatPanel({
         )}
       </div>
 
-      <footer className="flex shrink-0 flex-col gap-2 border-t border-line p-3">
+      <footer className="flex shrink-0 flex-col gap-2 border-t border-border p-3">
         <FormError message={error} />
         <FormError message={notice} />
-        <textarea
+        <Textarea
           aria-label="消息输入"
-          className={cn(fieldCls, 'min-h-20 resize-none py-2')}
+          className="min-h-20 resize-none"
           placeholder="输入消息，Enter 发送，Shift+Enter 换行"
           value={draft}
           onChange={(event) => {
@@ -192,7 +192,7 @@ export function ChatPanel({
               停止
             </Button>
           ) : (
-            <Button variant="primary" size="sm" disabled={!canSend} onClick={() => void send()}>
+            <Button variant="default" size="sm" disabled={!canSend} onClick={() => void send()}>
               发送
             </Button>
           )}

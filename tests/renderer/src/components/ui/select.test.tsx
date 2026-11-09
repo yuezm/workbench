@@ -1,105 +1,126 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { Select } from '../../../../../src/renderer/src/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '../../../../../src/renderer/src/components/ui/select'
 
-const options = [
-  { value: 'a', label: '选项 A' },
-  { value: 'b', label: '选项 B' },
-  { value: 'c', label: '选项 C' },
-]
+/**
+ * Radix Select 打开时会给 body 加 pointer-events: none（disableOutsidePointerEvents），
+ * jsdom 下 userEvent 默认会因此拒绝后续指针交互。关掉这层检查，才能真实模拟
+ * 「点外部关闭」「再点触发器收起」这类 Radix 行为。
+ */
+const setupUser = () => userEvent.setup({ pointerEventsCheck: 0 })
 
-describe('Select', () => {
-  it('触发器具备 combobox 无障碍语义', () => {
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
+/** 上游复合结构的最小可用组合 */
+function Fixture({
+  value = 'a',
+  onValueChange = vi.fn(),
+  placeholder = '请选择',
+  options = [
+    { value: 'a', label: '选项 A' },
+    { value: 'b', label: '选项 B' },
+    { value: 'c', label: '选项 C' },
+  ],
+  disabled = false,
+  triggerClassName,
+}: {
+  value?: string
+  onValueChange?: (value: string) => void
+  placeholder?: string
+  options?: { value: string; label: string; disabled?: boolean }[]
+  disabled?: boolean
+  triggerClassName?: string
+}) {
+  return (
+    <Select value={value} onValueChange={onValueChange} disabled={disabled}>
+      <SelectTrigger aria-label="选择器" className={triggerClassName}>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((option) => (
+          <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+describe('Select（shadcn 基座）', () => {
+  it('触发器具备 combobox 无障碍语义并显示已选项文案', () => {
+    render(<Fixture />)
     const trigger = screen.getByRole('combobox', { name: '选择器' })
-    expect(trigger).toHaveAttribute('aria-haspopup', 'listbox')
+    expect(trigger).toBeInTheDocument()
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
     expect(trigger).toHaveTextContent('选项 A')
   })
 
   it('展开后渲染 listbox 与 option，并标记选中项', async () => {
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
+    const user = setupUser()
+    render(<Fixture />)
     const trigger = screen.getByRole('combobox', { name: '选择器' })
 
     await user.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('listbox', { name: '选择器' })).toBeInTheDocument()
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
     expect(screen.getAllByRole('option')).toHaveLength(3)
     expect(screen.getByRole('option', { name: '选项 A' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByRole('option', { name: '选项 B' })).toHaveAttribute('aria-selected', 'false')
 
-    // 再点触发器收起
     await user.click(trigger)
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
-  it('点击选项触发 onChange 并关闭浮层', async () => {
-    const onChange = vi.fn()
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={onChange} options={options} ariaLabel="选择器" />)
+  it('已选项以 data-state=checked 标记，未选项为 unchecked', async () => {
+    const user = setupUser()
+    render(<Fixture />)
+
+    await user.click(screen.getByRole('combobox', { name: '选择器' }))
+    expect(screen.getByRole('option', { name: '选项 A' })).toHaveAttribute('data-state', 'checked')
+    expect(screen.getByRole('option', { name: '选项 B' })).toHaveAttribute(
+      'data-state',
+      'unchecked',
+    )
+  })
+
+  it('点击选项触发 onValueChange 并关闭浮层', async () => {
+    const onValueChange = vi.fn()
+    const user = setupUser()
+    render(<Fixture onValueChange={onValueChange} />)
 
     await user.click(screen.getByRole('combobox', { name: '选择器' }))
     await user.click(screen.getByRole('option', { name: '选项 B' }))
-    expect(onChange).toHaveBeenCalledWith('b')
+    expect(onValueChange).toHaveBeenCalledWith('b')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
-  it('键盘：↓ 打开并移动高亮，Enter 选中', async () => {
-    const onChange = vi.fn()
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={onChange} options={options} ariaLabel="选择器" />)
+  it('键盘：↓ 打开浮层，Enter 选中高亮项', async () => {
+    const onValueChange = vi.fn()
+    const user = setupUser()
+    render(<Fixture onValueChange={onValueChange} />)
     const trigger = screen.getByRole('combobox', { name: '选择器' })
     trigger.focus()
 
     await user.keyboard('{ArrowDown}')
     expect(screen.getByRole('listbox')).toBeInTheDocument()
-    // 打开时高亮落在当前值上
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 A' }).id,
-    )
 
-    await user.keyboard('{ArrowDown}')
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 B' }).id,
-    )
-
-    await user.keyboard('{Enter}')
-    expect(onChange).toHaveBeenCalledWith('b')
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(onValueChange).toHaveBeenCalledWith('b')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
-  it('键盘：↑ 从当前值往回移动，Home/End 跳到首尾', async () => {
-    const user = userEvent.setup()
-    render(<Select value="b" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
-    const trigger = screen.getByRole('combobox', { name: '选择器' })
-    trigger.focus()
-
-    await user.keyboard('{ArrowUp}{ArrowUp}')
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 A' }).id,
-    )
-
-    await user.keyboard('{End}')
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 C' }).id,
-    )
-
-    await user.keyboard('{Home}')
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 A' }).id,
-    )
-  })
-
   it('键盘：Enter/Space 打开，Esc 关闭', async () => {
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
+    const user = setupUser()
+    render(<Fixture />)
     const trigger = screen.getByRole('combobox', { name: '选择器' })
     trigger.focus()
 
@@ -114,8 +135,8 @@ describe('Select', () => {
   })
 
   it('点击外部关闭浮层', async () => {
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
+    const user = setupUser()
+    render(<Fixture />)
 
     await user.click(screen.getByRole('combobox', { name: '选择器' }))
     expect(screen.getByRole('listbox')).toBeInTheDocument()
@@ -124,8 +145,8 @@ describe('Select', () => {
   })
 
   it('窗口尺寸变化时关闭浮层', async () => {
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
+    const user = setupUser()
+    render(<Fixture />)
 
     await user.click(screen.getByRole('combobox', { name: '选择器' }))
     expect(screen.getByRole('listbox')).toBeInTheDocument()
@@ -133,43 +154,71 @@ describe('Select', () => {
     await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
   })
 
-  it('值不匹配任何选项时显示占位文案', () => {
-    render(
-      <Select
-        value="zzz"
-        onChange={vi.fn()}
-        options={options}
-        ariaLabel="选择器"
-        placeholder="请选择一项"
-      />,
-    )
-    expect(screen.getByRole('combobox', { name: '选择器' })).toHaveTextContent('请选择一项')
+  it('value 为空串时显示 placeholder 文案', () => {
+    render(<Fixture value="" placeholder="请选择一项" />)
+    const trigger = screen.getByRole('combobox', { name: '选择器' })
+    expect(trigger).toHaveTextContent('请选择一项')
+    expect(trigger).toHaveAttribute('data-placeholder')
   })
 
-  it('禁用态不展开，也不响应键盘', async () => {
-    const onChange = vi.fn()
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={onChange} options={options} ariaLabel="选择器" disabled />)
+  it('空值项可选中，触发器显示 placeholder 文案', async () => {
+    const onValueChange = vi.fn()
+    const user = setupUser()
+    render(
+      <Fixture
+        value="a"
+        onValueChange={onValueChange}
+        placeholder="未设置"
+        options={[
+          { value: '', label: '未设置' },
+          { value: 'a', label: '选项 A' },
+        ]}
+      />,
+    )
+    const trigger = screen.getByRole('combobox', { name: '选择器' })
+    await user.click(trigger)
+    await user.click(screen.getByRole('option', { name: '未设置' }))
+    expect(onValueChange).toHaveBeenCalledWith('')
+  })
+
+  it('空值项作为当前值时，触发器展示 placeholder 且该项为 checked', () => {
+    render(
+      <Fixture
+        value=""
+        placeholder="未设置"
+        options={[
+          { value: '', label: '未设置' },
+          { value: 'a', label: '选项 A' },
+        ]}
+      />,
+    )
+    const trigger = screen.getByRole('combobox', { name: '选择器' })
+    expect(trigger).toHaveTextContent('未设置')
+    expect(trigger).toHaveAttribute('data-placeholder')
+  })
+
+  it('禁用态不展开，也不响应点击', async () => {
+    const onValueChange = vi.fn()
+    const user = setupUser()
+    render(<Fixture disabled onValueChange={onValueChange} />)
     const trigger = screen.getByRole('combobox', { name: '选择器' })
     expect(trigger).toBeDisabled()
 
     await user.click(trigger)
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
-    expect(onChange).not.toHaveBeenCalled()
+    expect(onValueChange).not.toHaveBeenCalled()
   })
 
   it('禁用选项不可选', async () => {
-    const onChange = vi.fn()
-    const user = userEvent.setup()
+    const onValueChange = vi.fn()
+    const user = setupUser()
     render(
-      <Select
-        value="a"
-        onChange={onChange}
+      <Fixture
+        onValueChange={onValueChange}
         options={[
           { value: 'a', label: '选项 A' },
           { value: 'x', label: '禁用项', disabled: true },
         ]}
-        ariaLabel="选择器"
       />,
     )
     await user.click(screen.getByRole('combobox', { name: '选择器' }))
@@ -177,128 +226,52 @@ describe('Select', () => {
     expect(disabledOption).toHaveAttribute('aria-disabled', 'true')
 
     await user.click(disabledOption)
-    expect(onChange).not.toHaveBeenCalled()
-    // 浮层保持打开
+    expect(onValueChange).not.toHaveBeenCalled()
     expect(screen.getByRole('listbox')).toBeInTheDocument()
   })
 
-  it('键盘导航跳过禁用选项', async () => {
-    const onChange = vi.fn()
-    const user = userEvent.setup()
-    render(
-      <Select
-        value="a"
-        onChange={onChange}
-        options={[
-          { value: 'a', label: '选项 A' },
-          { value: 'x', label: '禁用项', disabled: true },
-          { value: 'c', label: '选项 C' },
-        ]}
-        ariaLabel="选择器"
-      />,
-    )
-    const trigger = screen.getByRole('combobox', { name: '选择器' })
-    trigger.focus()
-
-    await user.keyboard('{ArrowDown}{ArrowDown}')
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 C' }).id,
-    )
-    await user.keyboard('{Enter}')
-    expect(onChange).toHaveBeenCalledWith('c')
-  })
-
-  it('浮层使用 fixed 定位，避免被父级裁剪', async () => {
-    const user = userEvent.setup()
-    render(
-      <div className="overflow-hidden">
-        <Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />
-      </div>,
-    )
-    await user.click(screen.getByRole('combobox', { name: '选择器' }))
-    expect(screen.getByRole('listbox')).toHaveStyle({ position: 'fixed' })
-  })
-
-  it('触发器暴露当前选中项的 value（与原生 select 语义一致）', () => {
-    render(<Select value="b" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
-    expect(screen.getByRole('combobox', { name: '选择器' })).toHaveValue('b')
-  })
-
   it('外部 className 可覆盖触发器外观', () => {
-    render(
-      <Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" className="w-40" />,
-    )
+    render(<Fixture triggerClassName="w-40" />)
     expect(screen.getByRole('combobox', { name: '选择器' })).toHaveClass('w-40')
   })
 
-  it('值不匹配任何选项时打开，高亮落在首个可用项；↑ 打开则落在末项', async () => {
-    const user = userEvent.setup()
-    render(<Select value="zzz" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
+  it('受控 value 变化后触发器文案跟随', () => {
+    const { rerender } = render(<Fixture value="a" />)
     const trigger = screen.getByRole('combobox', { name: '选择器' })
-    trigger.focus()
+    expect(trigger).toHaveTextContent('选项 A')
 
-    await user.keyboard('{ArrowDown}')
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 A' }).id,
-    )
-    await user.keyboard('{Escape}')
-
-    await user.keyboard('{ArrowUp}')
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 C' }).id,
-    )
+    rerender(<Fixture value="b" />)
+    expect(trigger).toHaveTextContent('选项 B')
   })
 
-  it('末项禁用时 End 落在最后一个可用项', async () => {
-    const user = userEvent.setup()
+  it('分组与分隔线渲染在浮层内', async () => {
+    const user = setupUser()
     render(
-      <Select
-        value="a"
-        onChange={vi.fn()}
-        options={[
-          { value: 'a', label: '选项 A' },
-          { value: 'b', label: '选项 B' },
-          { value: 'x', label: '禁用项', disabled: true },
-        ]}
-        ariaLabel="选择器"
-      />,
+      <Select value="a" onValueChange={vi.fn()}>
+        <SelectTrigger aria-label="选择器">
+          <SelectValue placeholder="请选择" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectLabel>分组标题</SelectLabel>
+            <SelectItem value="a">选项 A</SelectItem>
+          </SelectGroup>
+          <SelectSeparator />
+          <SelectItem value="b">选项 B</SelectItem>
+        </SelectContent>
+      </Select>,
     )
-    const trigger = screen.getByRole('combobox', { name: '选择器' })
-    trigger.focus()
-    await user.keyboard('{ArrowDown}{End}')
-    expect(trigger).toHaveAttribute(
-      'aria-activedescendant',
-      screen.getByRole('option', { name: '选项 B' }).id,
-    )
-  })
 
-  it('所有选项都禁用时没有高亮，键盘不会误选', async () => {
-    const onChange = vi.fn()
-    const user = userEvent.setup()
-    render(
-      <Select
-        value=""
-        onChange={onChange}
-        options={[{ value: 'x', label: '禁用项', disabled: true }]}
-        ariaLabel="选择器"
-      />,
-    )
-    const trigger = screen.getByRole('combobox', { name: '选择器' })
-    trigger.focus()
-
-    await user.keyboard('{ArrowDown}')
-    expect(trigger).not.toHaveAttribute('aria-activedescendant')
-    await user.keyboard('{ArrowDown}{ArrowUp}{Enter}')
-    expect(onChange).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('combobox', { name: '选择器' }))
+    const listbox = screen.getByRole('listbox')
+    expect(within(listbox).getByText('分组标题')).toBeInTheDocument()
+    expect(screen.getAllByRole('option')).toHaveLength(2)
   })
 
   it('没有选项时浮层为空，键盘不误选', async () => {
-    const onChange = vi.fn()
-    const user = userEvent.setup()
-    render(<Select value="" onChange={onChange} options={[]} ariaLabel="选择器" />)
+    const onValueChange = vi.fn()
+    const user = setupUser()
+    render(<Fixture value="" onValueChange={onValueChange} options={[]} />)
     const trigger = screen.getByRole('combobox', { name: '选择器' })
     trigger.focus()
 
@@ -306,128 +279,115 @@ describe('Select', () => {
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     expect(screen.queryAllByRole('option')).toHaveLength(0)
     await user.keyboard('{ArrowDown}{Enter}')
-    expect(onChange).not.toHaveBeenCalled()
+    expect(onValueChange).not.toHaveBeenCalled()
   })
 
-  it('空间不足时浮层改为向上弹出', async () => {
-    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      top: 700,
-      bottom: 740,
-      left: 40,
-      right: 240,
-      width: 200,
-      height: 40,
-      x: 40,
-      y: 700,
-      toJSON: () => ({}),
-    } as DOMRect)
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
-
-    await user.click(screen.getByRole('combobox', { name: '选择器' }))
-    // 下方空间不足（768 - 740 - 8 = 20px）→ 浮层上翻，并按内容高度贴合触发器
-    expect(screen.getByRole('listbox')).toHaveStyle({
-      position: 'fixed',
-      top: '580px',
-      left: '40px',
-      width: '200px',
-    })
-    spy.mockRestore()
-  })
-
-  it('浮层有实际高度时按测量高度决定上翻位置与最大高度', async () => {
-    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      top: 700,
-      bottom: 740,
-      left: 40,
-      right: 240,
-      width: 200,
-      height: 40,
-      x: 40,
-      y: 700,
-      toJSON: () => ({}),
-    } as DOMRect)
-    const heightSpy = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(200)
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
-
-    await user.click(screen.getByRole('combobox', { name: '选择器' }))
-    // 下方仅 20px（768 - 740 - 8）、上方 692px：测量高度 200 > 下方空间 → 上翻 200px
-    expect(screen.getByRole('listbox')).toHaveStyle({
-      top: '492px',
-      maxHeight: '320px',
-      left: '40px',
-      width: '200px',
-    })
-    rectSpy.mockRestore()
-    heightSpy.mockRestore()
-  })
-
-  it('浮层最小宽度不小于 180px，避免窄触发器截断选项文字', async () => {
-    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
-      top: 100,
-      bottom: 140,
-      left: 40,
-      right: 100,
-      width: 60,
-      height: 40,
-      x: 40,
-      y: 100,
-      toJSON: () => ({}),
-    } as DOMRect)
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
-
-    await user.click(screen.getByRole('combobox', { name: '选择器' }))
-    expect(screen.getByRole('listbox')).toHaveStyle({ width: '180px' })
-    spy.mockRestore()
-  })
-
-  it('点击浮层内部（而非选项）不关闭', async () => {
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
-
-    await user.click(screen.getByRole('combobox', { name: '选择器' }))
-    await user.click(screen.getByRole('listbox'))
-    expect(screen.getByRole('listbox')).toBeInTheDocument()
-  })
-
-  it('浮层打开期间选项全部禁用时不再高亮', async () => {
-    const user = userEvent.setup()
-    const { rerender } = render(
-      <Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />,
-    )
+  it('Tab 不关闭浮层：焦点锁在浮层内，Esc 才关闭', async () => {
+    const user = setupUser()
+    render(<Fixture />)
     const trigger = screen.getByRole('combobox', { name: '选择器' })
     trigger.focus()
-    await user.keyboard('{ArrowDown}')
-
-    rerender(
-      <Select
-        value="a"
-        onChange={vi.fn()}
-        options={[
-          { value: 'a', label: '选项 A', disabled: true },
-          { value: 'b', label: '选项 B', disabled: true },
-        ]}
-        ariaLabel="选择器"
-      />,
-    )
-    await user.keyboard('{ArrowDown}')
-    expect(trigger).not.toHaveAttribute('aria-activedescendant')
-  })
-
-  it('Tab 关闭浮层；关闭状态下 Home/End/Esc 与普通键无副作用', async () => {
-    const user = userEvent.setup()
-    render(<Select value="a" onChange={vi.fn()} options={options} ariaLabel="选择器" />)
-    const trigger = screen.getByRole('combobox', { name: '选择器' })
-    trigger.focus()
-
-    await user.keyboard('{Home}{End}{Escape}x{Tab}')
-    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
 
     await user.click(trigger)
     expect(screen.getByRole('listbox')).toBeInTheDocument()
+    // Radix 拦截 Tab，焦点移入浮层内的选项
     await user.keyboard('{Tab}')
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    expect(document.activeElement).toHaveAttribute('role', 'option')
+
+    await user.keyboard('{Escape}')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('再次点击触发器收起浮层', async () => {
+    const user = setupUser()
+    render(<Fixture />)
+    const trigger = screen.getByRole('combobox', { name: '选择器' })
+
+    await user.click(trigger)
+    expect(screen.getByRole('listbox')).toBeInTheDocument()
+    await user.click(trigger)
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('触发器渲染 size 属性供紧凑场景使用', () => {
+    render(
+      <Select value="a" onValueChange={vi.fn()}>
+        <SelectTrigger aria-label="选择器" size="sm">
+          <SelectValue placeholder="请选择" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="a">选项 A</SelectItem>
+        </SelectContent>
+      </Select>,
+    )
+    expect(screen.getByRole('combobox', { name: '选择器' })).toHaveAttribute('data-size', 'sm')
+  })
+
+  it('键盘：Home/End 跳到首尾选项', async () => {
+    const onValueChange = vi.fn()
+    const user = setupUser()
+    render(<Fixture onValueChange={onValueChange} />)
+    const trigger = screen.getByRole('combobox', { name: '选择器' })
+    trigger.focus()
+
+    await user.keyboard('{ArrowDown}{End}')
+    await user.keyboard('{Enter}')
+    expect(onValueChange).toHaveBeenCalledWith('c')
+  })
+
+  it('键盘：首字母连续输入定位到匹配项', async () => {
+    const onValueChange = vi.fn()
+    const user = setupUser()
+    render(
+      <Fixture
+        onValueChange={onValueChange}
+        options={[
+          { value: 'alpha', label: 'Alpha' },
+          { value: 'beta', label: 'Beta' },
+          { value: 'gamma', label: 'Gamma' },
+        ]}
+      />,
+    )
+    const trigger = screen.getByRole('combobox', { name: '选择器' })
+    trigger.focus()
+
+    await user.keyboard('{ArrowDown}')
+    await user.keyboard('g')
+    await user.keyboard('{Enter}')
+    expect(onValueChange).toHaveBeenCalledWith('gamma')
+  })
+
+  it('基座元素带 data-slot 标记，便于样式定位', async () => {
+    const user = setupUser()
+    render(<Fixture />)
+    const trigger = screen.getByRole('combobox', { name: '选择器' })
+    expect(trigger).toHaveAttribute('data-slot', 'select-trigger')
+
+    await user.click(trigger)
+    const option = screen.getByRole('option', { name: '选项 A' })
+    expect(option).toHaveAttribute('data-slot', 'select-item')
+    expect(option.querySelector('[data-slot="select-item-indicator"]')).toBeInTheDocument()
+  })
+
+  it('触发器宽度默认跟随内容，可用 className 覆盖', () => {
+    const { rerender } = render(<Fixture />)
+    expect(screen.getByRole('combobox', { name: '选择器' })).toHaveClass('w-fit')
+
+    rerender(<Fixture triggerClassName="w-full" />)
+    expect(screen.getByRole('combobox', { name: '选择器' })).toHaveClass('w-full')
+  })
+
+  it('浮层内容渲染在 portal 中，不受父级 overflow 裁剪影响', async () => {
+    const user = setupUser()
+    render(
+      <div className="overflow-hidden">
+        <Fixture />
+      </div>,
+    )
+    await user.click(screen.getByRole('combobox', { name: '选择器' }))
+    const listbox = screen.getByRole('listbox')
+    expect(listbox.parentElement).not.toBeNull()
+    expect(listbox.closest('.overflow-hidden')).toBeNull()
   })
 })

@@ -1,68 +1,115 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 /*
- * 设计系统（Tailwind v4 @theme）——规则见 docs/specs/SPEC-ui.md，改动同步两边。
+ * shadcn/ui v4 主题（CSS Variables 模式）。
  *
- * 方向：中性石墨底色 + 单一靛蓝强调色，平面分层（不再用极光光斑与大面积玻璃）；
- * 圆角刻度收窄（控件 6px / 容器 10px / 徽标 4px）；前景三级都保证在底色上可读。
+ * 变量语义与官方一致：background / foreground / card / popover / primary /
+ * secondary / muted / accent / destructive / border / input / ring / radius。
+ * 上游组件（radix-ui 基座）直接消费这些变量，因此换主题只需改这一份。
+ *
+ * 本项目是暗色单主题应用：变量写在 :root，<html class="dark"> 让组件里的
+ * `dark:` 变体生效（上游 radix 组件用 dark: 覆盖输入框/下拉等底色）。
+ *
+ * 项目扩展 token（shadcn 基线之外，overlay 记录在 docs/specs/SPEC-ui.md）：
+ *   faint-foreground 第三级前景 / brand 靛蓝亮色（暗底可读）/ success / info / warning
  */
-@theme {
-  /* 底色层次：窗口 → 面板 → 控件 → 强调填充 */
-  --color-abyss: #0a0a0c;
-  --color-surface: #121214;
-  --color-surface-2: #19191d;
-  --color-surface-3: #232329;
+@custom-variant dark (&:is(.dark *));
 
-  /* 前景：主 / 次 / 辅助，对 surface 的对比度 17.0 / 11.2 / 5.9 */
-  --color-ink: #f4f4f6;
-  --color-ink-dim: #c7c7d0;
-  --color-ink-faint: #8f8f9c;
+:root {
+  color-scheme: dark;
+
+  /* 圆角基数：Tailwind v4 由它派生 sm/md/lg/xl/2xl/3xl/4xl */
+  --radius: 0.5rem;
+
+  /* 底色层次：窗口 → 面板 → 控件 → 悬浮层 */
+  --background: #0a0a0c;
+  --foreground: #f4f4f6;
+  --card: #121214;
+  --card-foreground: #f4f4f6;
+  --popover: #121214;
+  --popover-foreground: #f4f4f6;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #19191d;
+  --secondary-foreground: #f4f4f6;
+  --muted: #19191d;
+  --muted-foreground: #c7c7d0;
+  --accent: #232329;
+  --accent-foreground: #f4f4f6;
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
 
   /* 线与描边 */
-  --color-line: rgb(255 255 255 / 8%);
-  --color-line-strong: rgb(255 255 255 / 16%);
+  --border: rgb(255 255 255 / 8%);
+  --input: rgb(255 255 255 / 16%);
+  --ring: #6366f1;
 
-  /* 主色：靛蓝。focus 只用于填充与描边；暗底上的文字与图标一律用 focus-soft */
-  --color-focus: #6366f1;
-  --color-focus-deep: #4f46e5;
-  --color-focus-soft: #818cf8;
+  /* 项目扩展：第三级前景（占位符、时间戳、计数） */
+  --faint-foreground: #8f8f9c;
+  /* 项目扩展：靛蓝亮色，暗底上的强调文字与图标 */
+  --brand: #818cf8;
+  /* 项目扩展：状态色 */
+  --success: #34d399;
+  --success-deep: #10b981;
+  --info: #38bdf8;
+  --info-deep: #0ea5e9;
+  --warning: #fbbf24;
+}
 
-  /* 语义色：成功 / 信息 / 危险 / 警告（deep 只作渐变端色与按下态） */
-  --color-short: #34d399;
-  --color-short-deep: #10b981;
-  --color-long: #38bdf8;
-  --color-long-deep: #0ea5e9;
-  --color-danger: #f87171;
-  --color-warn: #fbbf24;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
+  --color-faint-foreground: var(--faint-foreground);
+  --color-brand: var(--brand);
+  --color-success: var(--success);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@theme {
   /*
-   * 字阶：只允许这六档（页面标题 / 标题 / 正文 / 操作 / 元信息 / 徽标）。
-   * 字号与行高成对定义，组件里不再写任意 px 或裸 text-xs/sm；
-   * 机械校验见 scripts/check-ui-rules.mjs。
+   * 字阶：沿用 Tailwind 原生档位名（xs/sm/base/lg），但取项目自己的紧凑值
+   * （macOS 密度：正文 13px、辅助 11px）。
+   * 用原生档位名而不是自定义 text-body/text-meta，是为了让上游 shadcn 组件
+   * 里的 text-sm / text-xs 与本项目正文同号，不会出现同一界面两种字号体系。
    */
-  --text-page: 15px;
-  --text-page--line-height: 22px;
-  --text-title: 14px;
-  --text-title--line-height: 20px;
-  --text-body: 13px;
-  --text-body--line-height: 19px;
-  --text-action: 13px;
-  --text-action--line-height: 18px;
-  --text-meta: 11px;
-  --text-meta--line-height: 16px;
-  --text-badge: 10px;
-  --text-badge--line-height: 14px;
+  --text-xs: 0.6875rem; /* 11px — 辅助信息、时间戳、计数 */
+  --text-xs--line-height: 1rem; /* 16px */
+  --text-sm: 0.8125rem; /* 13px — 正文、输入、按钮 */
+  --text-sm--line-height: 1.1875rem; /* 19px */
+  --text-base: 0.875rem; /* 14px — 标题 */
+  --text-base--line-height: 1.25rem; /* 20px */
+  --text-lg: 0.9375rem; /* 15px — 页面标题 */
+  --text-lg--line-height: 1.375rem; /* 22px */
 
-  /* 圆角刻度：控件 6 / 容器 10 / 徽标 4；不允许超出 12px */
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 10px;
-  --radius-2xl: 12px;
-  --radius-3xl: 12px;
-
-  /* 动效 */
+  /* 项目动效：面板与弹层入场 */
   --animate-rise: rise 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 
   @keyframes rise {
@@ -77,19 +124,19 @@
   }
 }
 
-:root {
-  color-scheme: dark;
-}
-
 @layer base {
   * {
-    box-sizing: border-box;
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   body {
     margin: 0;
-    background-color: var(--color-abyss);
-    color: var(--color-ink);
+    @apply bg-background text-foreground;
     font-family:
       'Segoe UI',
       system-ui,
@@ -98,7 +145,6 @@
       'Microsoft YaHei',
       sans-serif;
     font-size: 14px;
-    -webkit-font-smoothing: antialiased;
     /* 正文默认可选：日志、提示词、智能体回复都要能选中复制 */
     user-select: text;
     overflow: hidden;
@@ -123,8 +169,8 @@
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--color-focus) 45%, transparent);
-    color: var(--color-ink);
+    background: color-mix(in oklab, var(--primary) 45%, transparent);
+    color: var(--foreground);
   }
 
   /* 细滚动条 */
@@ -133,11 +179,11 @@
     height: 8px;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--color-surface-3);
+    background: var(--accent);
     border-radius: var(--radius-sm);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-line-strong);
+    background: var(--input);
   }
 
   /* 数字输入框去掉原生加减箭头 */

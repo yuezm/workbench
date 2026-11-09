@@ -219,7 +219,7 @@ describe('TaskActivity', () => {
     expect(screen.getByText(/工具调用：read · \{"path":"a+…$/)).toBeVisible()
     expect(screen.getByText('工具调用：未知工具')).toBeVisible()
     expect(screen.getByText('工具结果：read · 读取结果')).toBeVisible()
-    expect(screen.getByText('工具结果：write').className).toContain('text-danger')
+    expect(screen.getByText('工具结果：write').className).toContain('text-destructive')
     expect(screen.getByText('工具结果：未知工具')).toBeVisible()
     // status 事件既不是正文也不是过程
     expect(screen.queryByText('running')).not.toBeInTheDocument()

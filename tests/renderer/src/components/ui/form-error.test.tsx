@@ -19,7 +19,7 @@ describe('FormError', () => {
     render(<FormError message="任务标题必填" />)
     const alert = screen.getByRole('alert')
     expect(alert).toHaveTextContent('任务标题必填')
-    expect(alert).toHaveClass('border-danger/30', 'bg-danger/10', 'text-danger')
+    expect(alert).toHaveClass('border-destructive/30', 'bg-destructive/10', 'text-destructive')
     expect(screen.queryByRole('button', { name: '关闭错误提示' })).not.toBeInTheDocument()
   })
 

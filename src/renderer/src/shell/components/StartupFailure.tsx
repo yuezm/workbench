@@ -15,11 +15,11 @@ export function StartupFailure({
   message = 'window.workbench 未注入（preload 未加载）',
 }: StartupFailureProps): ReactElement {
   return (
-    <div role="alert" className="grid h-screen place-items-center bg-abyss p-6">
-      <div className="flex w-full max-w-md flex-col gap-2 rounded-xl border border-danger/30 bg-danger/10 p-5">
-        <h1 className="text-title font-medium text-ink">界面没有加载成功</h1>
-        <p className="text-body break-words text-danger">{message}</p>
-        <p className="text-meta text-ink-dim">
+    <div role="alert" className="grid h-screen place-items-center bg-background p-6">
+      <div className="flex w-full max-w-md flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-5">
+        <h1 className="text-base font-medium text-foreground">界面没有加载成功</h1>
+        <p className="text-sm break-words text-destructive">{message}</p>
+        <p className="text-xs text-muted-foreground">
           先重启工作台；仍然失败说明安装包里的 preload 桥接缺失，需要重新安装。
         </p>
       </div>

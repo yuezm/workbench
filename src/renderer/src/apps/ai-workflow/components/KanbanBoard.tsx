@@ -21,7 +21,7 @@ interface KanbanBoardProps {
 }
 
 /** 列头圆点按列序循环取四色点缀 */
-const DOT_COLORS = ['bg-focus', 'bg-short', 'bg-long', 'bg-focus-deep'] as const
+const DOT_COLORS = ['bg-primary', 'bg-success', 'bg-info', 'bg-primary'] as const
 
 /** 「归档」落点：不是阶段（不叫「已完成」，免得和同名阶段混淆），用哨兵值参与高亮判断 */
 const DONE_TARGET = '__done__'
@@ -118,15 +118,15 @@ export function KanbanBoard({
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-title font-medium text-ink">
-          <span className="text-focus-soft">
+        <h2 className="flex items-center gap-2 text-base font-medium text-foreground">
+          <span className="text-brand">
             <BoardIcon />
           </span>
           工作流「{workflow.name}」
-          <span className="text-meta font-normal text-ink-faint">拖拽换阶段</span>
+          <span className="text-xs font-normal text-faint-foreground">拖拽换阶段</span>
         </h2>
         {/* 任务可以建在当前项目，也可以落在默认目录（M11）：入口始终可用 */}
-        <Button type="button" variant="primary" size="sm" onClick={onNewTask}>
+        <Button type="button" variant="default" size="sm" onClick={onNewTask}>
           新建任务
         </Button>
       </div>
@@ -147,8 +147,8 @@ export function KanbanBoard({
                   'flex min-w-[150px] flex-1 flex-col gap-2.5 rounded-xl border p-2.5',
                   'animate-rise transition-colors duration-150',
                   isOver
-                    ? 'border-focus/60 bg-focus/[0.07]'
-                    : 'border-line bg-surface hover:border-line-strong',
+                    ? 'border-ring/60 bg-primary/[0.07]'
+                    : 'border-border bg-card hover:border-input',
                 )}
                 style={{ animationDelay: `${index * 60}ms` }}
               >
@@ -158,14 +158,14 @@ export function KanbanBoard({
                       className={`size-1.5 shrink-0 rounded-full ${DOT_COLORS[index % DOT_COLORS.length]}`}
                       aria-hidden="true"
                     />
-                    <span className="text-title font-medium text-ink">{stage.name}</span>
+                    <span className="text-base font-medium text-foreground">{stage.name}</span>
                   </div>
-                  <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim tabular-nums">
+                  <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
                     {cards.length}
                   </span>
                 </div>
                 {cards.length === 0 ? (
-                  <p className="grid place-items-center py-4 text-body text-ink-faint">
+                  <p className="grid place-items-center py-4 text-sm text-faint-foreground">
                     {dragging ? '拖到这里' : '空'}
                   </p>
                 ) : (
@@ -187,7 +187,7 @@ export function KanbanBoard({
                     />
                   ))
                 )}
-                <div className="mt-auto h-px w-full bg-white/[0.05]" aria-hidden="true" />
+                <div className="mt-auto h-px w-full bg-accent" aria-hidden="true" />
               </div>
             )
           })}
@@ -204,19 +204,19 @@ export function KanbanBoard({
             'flex w-28 shrink-0 flex-col gap-2.5 self-stretch rounded-xl border border-dashed p-2',
             'transition-colors duration-150',
             overTarget === DONE_TARGET
-              ? 'border-short/60 bg-short/[0.07]'
-              : 'border-line/70 bg-transparent',
+              ? 'border-success/60 bg-success/[0.07]'
+              : 'border-border/70 bg-transparent',
           )}
         >
           <div className="flex items-center justify-between px-1.5 pt-0.5 pb-1">
-            <span className="text-title font-medium text-ink-dim">归档</span>
-            <span className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim tabular-nums">
+            <span className="text-base font-medium text-muted-foreground">归档</span>
+            <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
               {completedCount}
             </span>
           </div>
           {/* 先把规则写出来：执行中的任务拖进来必被内核拒绝，别让用户点了才吃错误条 */}
-          <p className="px-1.5 text-meta text-ink-faint">执行中的任务不能归档</p>
-          <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-body text-ink-faint">
+          <p className="px-1.5 text-xs text-faint-foreground">执行中的任务不能归档</p>
+          <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-sm text-faint-foreground">
             拖到这里归档
           </p>
         </div>

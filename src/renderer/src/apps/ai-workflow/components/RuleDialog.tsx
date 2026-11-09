@@ -12,12 +12,25 @@ import {
   type RuleTitleFrom,
 } from '../../../../../protocol/rules'
 import { Button } from '../../../components/ui/button'
-import { Dialog } from '../../../components/ui/dialog'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
-import { Input, fieldCls } from '../../../components/ui/input'
-import { Select } from '../../../components/ui/select'
-import { cn } from '../../../lib/cn'
+import { Input } from '../../../components/ui/input'
+import { Label } from '../../../components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../components/ui/select'
+import { Textarea } from '../../../components/ui/textarea'
 
 export interface RuleDialogProps {
   /** 打开时的草稿：新建由模板/空白规则生成，编辑传现有规则（id 原样保留） */
@@ -32,8 +45,6 @@ export interface RuleDialogProps {
   onSubmit: (rule: AutomationRule) => Promise<void>
   onCancel: () => void
 }
-
-const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2')
 
 /** 逗号分隔文本 → 去空白后的数组（labels / types 共用） */
 const splitList = (text: string): string[] =>
@@ -212,237 +223,272 @@ export function RuleDialog({
   }
 
   return (
-    <Dialog onClose={onCancel} className="max-w-2xl">
-      <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
-        <div className="flex items-center gap-2">
-          <RuleIcon className="text-focus-soft" />
-          <div className="flex flex-col">
-            <h3 className="text-title font-medium text-ink">{isNew ? '新建规则' : '编辑规则'}</h3>
-            <p className="text-meta text-ink-faint">命中后建任务，派活由阶段决定</p>
-          </div>
-        </div>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onCancel()
+      }}
+    >
+      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RuleIcon className="text-brand" />
+            {isNew ? '新建规则' : '编辑规则'}
+          </DialogTitle>
+          <DialogDescription>命中后建任务，派活由阶段决定</DialogDescription>
+        </DialogHeader>
 
-        {noWorkflow && (
-          <p className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
-            先建工作流：规则需要目标工作流。
-          </p>
-        )}
+        <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
+          {noWorkflow && (
+            <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
+              先建工作流：规则需要目标工作流。
+            </p>
+          )}
 
-        <div className="flex flex-wrap items-end gap-3">
-          <Field
-            label="规则名称"
-            required
-            hint={`最多 ${RULE_LIMITS.name} 字，保存时去掉首尾空格`}
-            error={fieldErrors.name ?? null}
-            className="w-56"
-          >
-            <Input
-              aria-label="规则名称"
-              maxLength={RULE_LIMITS.name}
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                clearError('name')
-              }}
-            />
-          </Field>
-          <Field label="触发方式">
-            <Select
-              ariaLabel="规则触发方式"
-              value={kind}
-              onChange={(value) => {
-                setKind(value as 'event' | 'cron')
-                clearError('cron')
-              }}
-              options={[
-                { value: 'event', label: '事件' },
-                { value: 'cron', label: '定时' },
-              ]}
-            />
-          </Field>
-        </div>
-
-        {kind === 'event' ? (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="事件来源">
+          <div className="flex flex-wrap items-end gap-3">
+            <Field
+              label="规则名称"
+              required
+              hint={`最多 ${RULE_LIMITS.name} 字，保存时去掉首尾空格`}
+              error={fieldErrors.name ?? null}
+              className="w-56"
+            >
               <Input
-                aria-label="规则事件来源"
-                maxLength={RULE_LIMITS.source}
-                placeholder="github / app:pomodoro / *"
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
+                aria-label="规则名称"
+                maxLength={RULE_LIMITS.name}
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  clearError('name')
+                }}
               />
             </Field>
-            <Field label="事件类型">
-              <Input
-                aria-label="规则事件类型"
-                placeholder="issues.opened, issues.closed"
-                value={types}
-                onChange={(e) => setTypes(e.target.value)}
-              />
-            </Field>
-          </div>
-        ) : (
-          <Field label="cron" required hint="分 时 日 月 周" error={fieldErrors.cron ?? null}>
-            <Input
-              aria-label="cron 表达式"
-              className="font-mono"
-              maxLength={RULE_LIMITS.cron}
-              placeholder="0 9 * * *"
-              value={cron}
-              onChange={(e) => {
-                setCron(e.target.value)
-                clearError('cron')
-              }}
-            />
-          </Field>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="目标工作流" required error={fieldErrors.workflow ?? null}>
-            <Select
-              ariaLabel="规则目标工作流"
-              value={workflowId}
-              onChange={changeWorkflow}
-              options={[
-                { value: '', label: '选择工作流' },
-                ...workflows.map((item) => ({ value: item.id, label: item.name })),
-              ]}
-            />
-          </Field>
-          <Field label="起始阶段">
-            <Select
-              ariaLabel="规则起始阶段"
-              value={stageId}
-              onChange={setStageId}
-              disabled={workflow === undefined}
-              options={stageOptions}
-            />
-          </Field>
-          <Field label="项目（可选）">
-            <Select
-              ariaLabel="规则目标项目"
-              value={projectId}
-              onChange={setProjectId}
-              options={[
-                // M11：空值 = 不指定项目 → 任务落默认目录（与聊天同口径）
-                { value: '', label: '默认目录' },
-                ...projects.map((item) => ({ value: item.id, label: item.name })),
-              ]}
-            />
-          </Field>
-          {kind === 'event' && (
-            <Field label="标题取自">
+            <Field label="触发方式">
               <Select
-                ariaLabel="任务标题取字"
-                value={titleFrom}
-                onChange={(value) => setTitleFrom(value as RuleTitleFrom)}
-                options={[
-                  { value: 'subject', label: 'subject' },
-                  { value: 'summary', label: 'summary' },
-                ]}
+                value={kind}
+                onValueChange={(value) => {
+                  setKind(value as 'event' | 'cron')
+                  clearError('cron')
+                }}
+              >
+                <SelectTrigger aria-label="规则触发方式" className="w-full">
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="event">事件</SelectItem>
+                  <SelectItem value="cron">定时</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+
+          {kind === 'event' ? (
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="事件来源">
+                <Input
+                  aria-label="规则事件来源"
+                  maxLength={RULE_LIMITS.source}
+                  placeholder="github / app:pomodoro / *"
+                  value={source}
+                  onChange={(e) => setSource(e.target.value)}
+                />
+              </Field>
+              <Field label="事件类型">
+                <Input
+                  aria-label="规则事件类型"
+                  placeholder="issues.opened, issues.closed"
+                  value={types}
+                  onChange={(e) => setTypes(e.target.value)}
+                />
+              </Field>
+            </div>
+          ) : (
+            <Field label="cron" required hint="分 时 日 月 周" error={fieldErrors.cron ?? null}>
+              <Input
+                aria-label="cron 表达式"
+                className="font-mono"
+                maxLength={RULE_LIMITS.cron}
+                placeholder="0 9 * * *"
+                value={cron}
+                onChange={(e) => {
+                  setCron(e.target.value)
+                  clearError('cron')
+                }}
               />
             </Field>
           )}
-          <Field label="标签">
-            <Input
-              aria-label="任务标签"
-              placeholder="bug, p1"
-              value={labels}
-              onChange={(e) => setLabels(e.target.value)}
-            />
-          </Field>
-        </div>
 
-        <Field label="追加提示词">
-          <textarea
-            aria-label="规则提示词"
-            className={textareaCls}
-            maxLength={RULE_LIMITS.prompt}
-            placeholder="追加到本轮提示词"
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-          />
-        </Field>
-
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Field
-            label="并行数"
-            hint={`留空 = 1，最大 ${RULE_LIMITS.parallel}`}
-            error={fieldErrors.parallel ?? null}
-          >
-            <Input
-              aria-label="并行数"
-              type="number"
-              placeholder="默认 1"
-              value={parallel}
-              onChange={(e) => {
-                setParallel(e.target.value)
-                clearError('parallel')
-              }}
-            />
-          </Field>
-          <Field label="合并策略">
-            <Select
-              ariaLabel="合并策略"
-              value={merge}
-              onChange={(value) => setMerge(value as RuleMerge | '')}
-              options={[
-                { value: '', label: '默认' },
-                { value: 'subject', label: '按 subject' },
-                { value: 'none', label: '不合并' },
-              ]}
-            />
-          </Field>
-          <Field label="归并键">
-            <Select
-              ariaLabel="线程归并键"
-              value={keyFrom}
-              onChange={(value) => setKeyFrom(value as RuleThreadKeyFrom)}
-              options={[
-                { value: 'subject', label: 'subject' },
-                { value: 'externalRef', label: 'externalRef' },
-              ]}
-            />
-          </Field>
-          <Field label="已有任务时">
-            <Select
-              ariaLabel="线程已有任务时"
-              value={onExisting}
-              onChange={(value) => setOnExisting(value as RuleOnExisting)}
-              options={[
-                { value: 'reuse-task', label: '复用任务' },
-                { value: 'new-task', label: '新建任务' },
-              ]}
-            />
-          </Field>
-        </div>
-
-        <label className="flex items-center gap-2 text-action text-ink-dim">
-          <input
-            type="checkbox"
-            aria-label="启用规则"
-            className="size-4 accent-[var(--color-focus)]"
-            checked={enabled}
-            onChange={(e) => setEnabled(e.target.checked)}
-          />
-          <span>启用</span>
-        </label>
-
-        <FormError message={error} onDismiss={() => setError(null)} />
-
-        <div className="flex flex-col gap-2">
-          {disabledHint !== null && <p className="text-meta text-ink-faint">{disabledHint}</p>}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-              取消
-            </Button>
-            <Button type="submit" variant="primary" size="sm" disabled={saving || noWorkflow}>
-              保存
-            </Button>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="目标工作流" required error={fieldErrors.workflow ?? null}>
+              {/* 空值项（未选）显示 placeholder：placeholder 文案 = 该空值项的标签 */}
+              <Select value={workflowId} onValueChange={changeWorkflow}>
+                <SelectTrigger aria-label="规则目标工作流" className="w-full">
+                  <SelectValue placeholder="选择工作流" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">选择工作流</SelectItem>
+                  {workflows.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="起始阶段">
+              <Select value={stageId} onValueChange={setStageId} disabled={workflow === undefined}>
+                <SelectTrigger aria-label="规则起始阶段" className="w-full">
+                  <SelectValue placeholder="首阶段" />
+                </SelectTrigger>
+                <SelectContent>
+                  {stageOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="项目（可选）">
+              {/* M11：空值 = 不指定项目 → 任务落默认目录（与聊天同口径） */}
+              <Select value={projectId} onValueChange={setProjectId}>
+                <SelectTrigger aria-label="规则目标项目" className="w-full">
+                  <SelectValue placeholder="默认目录" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">默认目录</SelectItem>
+                  {projects.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            {kind === 'event' && (
+              <Field label="标题取自">
+                <Select
+                  value={titleFrom}
+                  onValueChange={(value) => setTitleFrom(value as RuleTitleFrom)}
+                >
+                  <SelectTrigger aria-label="任务标题取字" className="w-full">
+                    <SelectValue placeholder="请选择" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="subject">subject</SelectItem>
+                    <SelectItem value="summary">summary</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+            <Field label="标签">
+              <Input
+                aria-label="任务标签"
+                placeholder="bug, p1"
+                value={labels}
+                onChange={(e) => setLabels(e.target.value)}
+              />
+            </Field>
           </div>
-        </div>
-      </form>
+
+          <Field label="追加提示词">
+            <Textarea
+              aria-label="规则提示词"
+              className="min-h-20 resize-y"
+              maxLength={RULE_LIMITS.prompt}
+              placeholder="追加到本轮提示词"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+            />
+          </Field>
+
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Field
+              label="并行数"
+              hint={`留空 = 1，最大 ${RULE_LIMITS.parallel}`}
+              error={fieldErrors.parallel ?? null}
+            >
+              <Input
+                aria-label="并行数"
+                type="number"
+                placeholder="默认 1"
+                value={parallel}
+                onChange={(e) => {
+                  setParallel(e.target.value)
+                  clearError('parallel')
+                }}
+              />
+            </Field>
+            <Field label="合并策略">
+              <Select value={merge} onValueChange={(value) => setMerge(value as RuleMerge | '')}>
+                <SelectTrigger aria-label="合并策略" className="w-full">
+                  <SelectValue placeholder="默认" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">默认</SelectItem>
+                  <SelectItem value="subject">按 subject</SelectItem>
+                  <SelectItem value="none">不合并</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="归并键">
+              <Select
+                value={keyFrom}
+                onValueChange={(value) => setKeyFrom(value as RuleThreadKeyFrom)}
+              >
+                <SelectTrigger aria-label="线程归并键" className="w-full">
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="subject">subject</SelectItem>
+                  <SelectItem value="externalRef">externalRef</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="已有任务时">
+              <Select
+                value={onExisting}
+                onValueChange={(value) => setOnExisting(value as RuleOnExisting)}
+              >
+                <SelectTrigger aria-label="线程已有任务时" className="w-full">
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="reuse-task">复用任务</SelectItem>
+                  <SelectItem value="new-task">新建任务</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+
+          <Label className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
+            <input
+              type="checkbox"
+              aria-label="启用规则"
+              className="size-4 accent-[var(--ring)]"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
+            <span>启用</span>
+          </Label>
+
+          <FormError message={error} onDismiss={() => setError(null)} />
+
+          <div className="flex flex-col gap-2">
+            {disabledHint !== null && (
+              <p className="text-xs text-faint-foreground">{disabledHint}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+                取消
+              </Button>
+              <Button type="submit" variant="default" size="sm" disabled={saving || noWorkflow}>
+                保存
+              </Button>
+            </div>
+          </div>
+        </form>
+      </DialogContent>
     </Dialog>
   )
 }

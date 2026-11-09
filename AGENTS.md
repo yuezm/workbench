@@ -14,7 +14,7 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 
 ## 设计原则
 
-- UI 采用 macOS 风格：克制配色、小圆角（控件 6px / 容器 10px / 徽标 4px）、细腻留白、原生控件质感；样式用 Tailwind，组件放 `components/ui/`。硬规则（配色 token、前景对比度、圆角刻度、禁止玻璃与渐变）见 [SPEC-ui](docs/specs/SPEC-ui.md)，改样式前先读，改完跑 `pnpm check:ui`
+- UI 采用 macOS 风格：克制配色、小圆角（控件 6px / 容器 10px / 徽标 4px）、细腻留白、原生控件质感；样式用 Tailwind，组件放 `components/ui/`。**组件基座是 shadcn/ui v4**（Radix 底座），`components/ui/` 下的 button/input/textarea/label/select/dialog 是上游源码，调用点用上游复合 API；项目专属语义走 SPEC-ui §4 的覆盖层组件（Field / Panel / Menu / Segmented / FormError）。硬规则（配色 token、前景对比度、圆角刻度、禁止玻璃与渐变）见 [SPEC-ui](docs/specs/SPEC-ui.md)，改样式前先读，改完跑 `pnpm check:ui`
 
 ## 架构原则
 

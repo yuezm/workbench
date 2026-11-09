@@ -1,20 +1,27 @@
-import type { ComponentPropsWithRef, ReactElement } from 'react'
+import * as React from 'react'
 import { cn } from '../../lib/cn'
 
 /**
- * 字段控件基础样式：控件圆角 6px、实心面板底、正文用 ink（不借父级透明度压暗），
- * 聚焦时描边加主色环。占位符用 ink-faint（≥4.5:1），不额外降透明度。
+ * 基座：shadcn/ui v4 input（new-york-v4 基线）。
+ *
+ * 高度 h-9（与上游控件一致）、焦点环用 ring-[3px] + ring-ring/50，
+ * 非法值走 aria-invalid:border-destructive。
  */
-export const fieldCls =
-  'text-body w-full rounded-md border border-line bg-surface-2 px-3 text-ink caret-focus placeholder:text-ink-faint outline-none transition-colors duration-150 hover:border-line-strong focus:border-focus focus:ring-2 focus:ring-focus/25 disabled:cursor-not-allowed disabled:opacity-40'
-
-/** 单行输入框样式 */
-export const inputCls = `${fieldCls} h-9`
-
-/** 带 `ref` 的输入属性：校验失败要把焦点移回出错字段，所以允许外部持有 ref */
-export type InputProps = ComponentPropsWithRef<'input'>
-
-/** 文本输入框：统一边框、圆角、留白与焦点环 */
-export function Input({ className, ...props }: InputProps): ReactElement {
-  return <input className={cn(inputCls, className)} {...props} />
+function Input({ className, type, ...props }: React.ComponentProps<'input'>) {
+  return (
+    <input
+      type={type}
+      data-slot="input"
+      className={cn(
+        'h-9 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none selection:bg-primary selection:text-primary-foreground file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm dark:bg-input/30',
+        'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
+        'aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40',
+        className,
+      )}
+      {...props}
+    />
+  )
 }
+
+export { Input }
+export type InputProps = React.ComponentProps<'input'>

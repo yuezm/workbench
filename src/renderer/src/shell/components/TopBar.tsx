@@ -11,15 +11,15 @@ interface TopBarProps {
 /** 顶部栏：品牌 + app 一级导航（原左侧栏的第一层） */
 export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement {
   return (
-    <header className="relative z-10 flex h-12 shrink-0 items-center gap-4 border-b border-line bg-abyss px-4">
+    <header className="relative z-10 flex h-12 shrink-0 items-center gap-4 border-b border-border bg-background px-4">
       {/* 品牌区 */}
       <div className="flex shrink-0 items-center gap-2.5">
-        <span className="grid size-7 place-items-center rounded-md bg-focus">
+        <span className="grid size-7 place-items-center rounded-md bg-primary">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="white" aria-hidden="true">
             <path d="M12 2c.6 4.8 3.2 7.4 8 8-4.8.6-7.4 3.2-8 8-.6-4.8-3.2-7.4-8-8 4.8-.6 7.4-3.2 8-8z" />
           </svg>
         </span>
-        <span className="text-action font-medium">Workbench</span>
+        <span className="text-sm font-medium">Workbench</span>
       </div>
 
       {/* 应用标签 */}
@@ -32,11 +32,11 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
               type="button"
               className={cn(
                 'relative flex items-center gap-2 rounded-md px-3 py-1.5',
-                'text-action font-medium transition-colors duration-150 outline-none',
-                'focus-visible:ring-2 focus-visible:ring-focus/50',
+                'text-sm font-medium transition-colors duration-150 outline-none',
+                'focus-visible:ring-2 focus-visible:ring-ring/50',
                 active
-                  ? 'bg-surface-2 text-ink'
-                  : 'text-ink-dim hover:bg-white/[0.04] hover:text-ink',
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground',
               )}
               aria-current={active ? 'page' : undefined}
               onClick={() => onSelect(app.id)}
@@ -45,7 +45,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
                 aria-hidden="true"
                 className={cn(
                   'transition-colors duration-150',
-                  active ? 'text-focus-soft' : 'text-ink-faint',
+                  active ? 'text-brand' : 'text-faint-foreground',
                 )}
               >
                 <app.icon size={15} />
@@ -54,7 +54,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
               {active ? (
                 <span
                   aria-hidden="true"
-                  className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-focus"
+                  className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-primary"
                 />
               ) : null}
             </button>
@@ -62,7 +62,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
         })}
       </nav>
 
-      <span className="ml-auto text-meta text-ink-faint">v0.1.0</span>
+      <span className="ml-auto text-xs text-faint-foreground">v0.1.0</span>
     </header>
   )
 }

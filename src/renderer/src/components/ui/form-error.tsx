@@ -26,7 +26,7 @@ export interface FormErrorProps {
 }
 
 /**
- * 统一的错误条：`role="alert"` + 危险色 token（`text-danger` / `border-danger/30` / `bg-danger/10`）。
+ * 统一的错误条：`role="alert"` + 危险色 token（`text-destructive` / `border-destructive/30` / `bg-destructive/10`）。
  *
  * 全站错误文案只走这一个组件：之前每处各写一遍 `<p className="...red-400/30...">`，
  * 一半忘了 `role="alert"`，读屏与测试都抓不到；样式也散成了调色板外的色值。
@@ -37,7 +37,7 @@ export function FormError({ message, onDismiss, className }: FormErrorProps): Re
     <p
       role="alert"
       className={cn(
-        'flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-body text-danger',
+        'flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive',
         className,
       )}
     >
@@ -46,7 +46,7 @@ export function FormError({ message, onDismiss, className }: FormErrorProps): Re
         <button
           type="button"
           aria-label="关闭错误提示"
-          className="grid size-5 shrink-0 place-items-center rounded-sm text-danger transition-colors duration-150 hover:bg-danger/20"
+          className="grid size-5 shrink-0 place-items-center rounded-sm text-destructive transition-colors duration-150 hover:bg-destructive/20"
           onClick={onDismiss}
         >
           {closeIcon}

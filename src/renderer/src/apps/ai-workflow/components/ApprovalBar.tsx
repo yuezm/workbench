@@ -45,9 +45,9 @@ export function ApprovalBar({ cards, onOpen }: ApprovalBarProps): ReactElement |
       {pending.length > 0 && (
         <section
           aria-label="待审批"
-          className="rounded-xl border border-warn/20 bg-warn/[0.06] px-3 py-2"
+          className="rounded-xl border border-warning/20 bg-warning/[0.06] px-3 py-2"
         >
-          <SectionHead label="待审批" count={pending.length} tone="text-warn" />
+          <SectionHead label="待审批" count={pending.length} tone="text-warning" />
           <ul className="mt-1 flex flex-col">
             {pending.map((card) => (
               <li key={card.id}>
@@ -63,8 +63,8 @@ export function ApprovalBar({ cards, onOpen }: ApprovalBarProps): ReactElement |
       )}
 
       {notices.length > 0 && (
-        <section aria-label="通知" className="rounded-xl border border-line bg-surface px-3 py-2">
-          <SectionHead label="通知" count={notices.length} tone="text-ink-faint" />
+        <section aria-label="通知" className="rounded-xl border border-border bg-card px-3 py-2">
+          <SectionHead label="通知" count={notices.length} tone="text-faint-foreground" />
           <ul className="mt-1 flex flex-col">
             {notices.map((group) => (
               <li key={group.id}>
@@ -99,16 +99,18 @@ function Row({
       type="button"
       disabled={target === null}
       onClick={() => onOpen(card)}
-      className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-white/[0.06] disabled:cursor-default"
+      className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent disabled:cursor-default"
     >
-      <span className="min-w-0 flex-1 truncate text-title font-medium text-ink">{card.title}</span>
+      <span className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
+        {card.title}
+      </span>
       {note !== null && (
         <span className={cn(badgeCls, 'shrink-0')} aria-hidden={note.startsWith('×')}>
           {note}
         </span>
       )}
       {target !== null && (
-        <span className="shrink-0 text-meta text-ink-faint">{TARGET_LABEL[target]}</span>
+        <span className="shrink-0 text-xs text-faint-foreground">{TARGET_LABEL[target]}</span>
       )}
     </button>
   )
@@ -126,7 +128,7 @@ function SectionHead({
 }): ReactElement {
   return (
     <div className="flex items-center gap-2">
-      <span className={cn('text-meta font-medium', tone)}>{label}</span>
+      <span className={cn('text-xs font-medium', tone)}>{label}</span>
       <span className={cn(badgeCls, 'tabular-nums')}>{count}</span>
     </div>
   )

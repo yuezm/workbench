@@ -56,8 +56,8 @@ export function cardLanding(card: Card): CardLanding {
 function SectionHeader({ title, hint }: { title: string; hint: string }): ReactElement {
   return (
     <header className="mb-4 flex flex-col gap-0.5">
-      <h2 className="text-page font-semibold text-ink">{title}</h2>
-      <span className="text-meta text-ink-faint">{hint}</span>
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      <span className="text-xs text-faint-foreground">{hint}</span>
     </header>
   )
 }
@@ -311,9 +311,11 @@ export function AiWorkflowPage(): ReactElement {
   return (
     // 两栏：单列侧栏（w-64）+ 内容区，吃满 shell 顶部栏以下的高度
     <div className="flex h-full min-h-0">
-      <aside className="flex w-64 shrink-0 flex-col border-r border-line bg-surface/60">
+      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-card/60">
         {/* 应用标识：顶部栏只显示 app 标签，进到 app 内用次级标题交代当前所在 */}
-        <h2 className="shrink-0 px-4 pt-3.5 pb-1 text-title font-medium text-ink">AI 工作流</h2>
+        <h2 className="shrink-0 px-4 pt-3.5 pb-1 text-base font-medium text-foreground">
+          AI 工作流
+        </h2>
         {view === 'workspace' ? (
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
             {/* 项目在最顶层：聊天与任务都落在项目上，切栏目不换项目 */}
@@ -356,7 +358,7 @@ export function AiWorkflowPage(): ReactElement {
           </div>
         )}
 
-        <div className="border-t border-line p-3">
+        <div className="border-t border-border p-3">
           <Segmented
             value={view}
             onChange={changeView}
@@ -414,7 +416,7 @@ export function AiWorkflowPage(): ReactElement {
                     onOpenThread={openThread}
                   />
                 ) : (
-                  <div className="grid flex-1 place-items-center rounded-xl border border-dashed border-line px-6 py-10 text-center text-body text-ink-faint">
+                  <div className="grid flex-1 place-items-center rounded-xl border border-dashed border-border px-6 py-10 text-center text-sm text-faint-foreground">
                     尚无工作流，到「设置 → 工作流」新建。
                   </div>
                 )}

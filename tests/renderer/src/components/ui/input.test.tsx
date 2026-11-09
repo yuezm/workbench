@@ -3,14 +3,14 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { Input } from '../../../../../src/renderer/src/components/ui/input'
 
-describe('Input', () => {
+describe('Input（shadcn 基座）', () => {
   it('渲染原生 input 语义与统一外观', () => {
     render(<Input aria-label="名称" placeholder="请输入" value="x" onChange={vi.fn()} />)
     const input = screen.getByLabelText<HTMLInputElement>('名称')
     expect(input.type).toBe('text')
     expect(input).toHaveAttribute('placeholder', '请输入')
     expect(input).toHaveValue('x')
-    expect(input).toHaveClass('h-9', 'rounded-md', 'border-line', 'bg-surface-2')
+    expect(input).toHaveClass('h-9', 'rounded-md', 'border-input')
   })
 
   it('输入触发 onChange', async () => {
@@ -27,5 +27,22 @@ describe('Input', () => {
     expect(input).toHaveAttribute('type', 'password')
     expect(input).toBeDisabled()
     expect(input).toHaveClass('font-mono')
+  })
+
+  it('非法值走 aria-invalid 语义', () => {
+    render(<Input aria-label="名称" aria-invalid value="" onChange={vi.fn()} />)
+    const input = screen.getByLabelText('名称')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveClass('aria-invalid:border-destructive')
+  })
+
+  it('焦点环与禁用语义始终存在', () => {
+    render(<Input aria-label="名称" />)
+    const input = screen.getByLabelText('名称')
+    expect(input).toHaveClass(
+      'focus-visible:ring-[3px]',
+      'focus-visible:ring-ring/50',
+      'disabled:pointer-events-none',
+    )
   })
 })

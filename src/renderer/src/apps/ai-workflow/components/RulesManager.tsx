@@ -183,7 +183,7 @@ export function RulesManager(): ReactElement {
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-meta text-ink-faint">命中后建任务</p>
+        <p className="text-xs text-faint-foreground">命中后建任务</p>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -207,7 +207,7 @@ export function RulesManager(): ReactElement {
           </Button>
           <Button
             type="button"
-            variant="primary"
+            variant="default"
             size="sm"
             disabled={busy}
             onClick={() => open(blankRule(), true)}
@@ -219,50 +219,54 @@ export function RulesManager(): ReactElement {
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {rules.length} 条</span>
-        <span className="text-meta text-ink-faint">v{version}</span>
-        {noWorkflows && <span className="text-body text-warn">先建工作流</span>}
+        <span className="text-xs text-faint-foreground">v{version}</span>
+        {noWorkflows && <span className="text-sm text-warning">先建工作流</span>}
         {/* 整批写入进行中：整排按钮都会变灰，这里说清原因 */}
-        {busy && <span className="text-meta text-ink-faint">正在写入规则…</span>}
+        {busy && <span className="text-xs text-faint-foreground">正在写入规则…</span>}
       </div>
 
       {rules.length === 0 ? (
-        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
+        <p className="grid place-items-center rounded-xl border border-dashed border-border py-6 text-sm text-faint-foreground">
           暂无规则
         </p>
       ) : (
-        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
           {rules.map((rule) => {
             const running = runningId === rule.id
             return (
               <li
                 key={rule.id}
-                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
+                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-accent"
               >
-                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
+                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-accent text-muted-foreground">
                   <RuleIcon />
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                   <span className="flex items-center gap-2">
-                    <span className="truncate text-action font-medium text-ink">{rule.name}</span>
+                    <span className="truncate text-sm font-medium text-foreground">
+                      {rule.name}
+                    </span>
                     {!rule.enabled && (
-                      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
+                      <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground">
                         已停用
                       </span>
                     )}
                   </span>
-                  <span className="truncate text-meta text-ink-faint">{conditionLabel(rule)}</span>
-                  <span className="truncate text-meta text-ink-faint">
+                  <span className="truncate text-xs text-faint-foreground">
+                    {conditionLabel(rule)}
+                  </span>
+                  <span className="truncate text-xs text-faint-foreground">
                     → {targetLabel(rule)}
                     {rule.prompt ? ' · 含提示词' : ''}
                   </span>
                 </span>
 
                 <div className="flex shrink-0 items-center gap-1">
-                  <label className="mr-1 flex items-center gap-1.5 text-meta text-ink-faint">
+                  <label className="mr-1 flex items-center gap-1.5 text-xs text-faint-foreground">
                     <input
                       type="checkbox"
                       aria-label={`启用规则 ${rule.name}`}
-                      className="size-4 accent-[var(--color-focus)]"
+                      className="size-4 accent-[var(--ring)]"
                       checked={rule.enabled}
                       disabled={busy}
                       onChange={() => toggle(rule)}
@@ -293,7 +297,7 @@ export function RulesManager(): ReactElement {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="text-danger hover:bg-danger/10 hover:text-danger"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     aria-label={`删除规则 ${rule.name}`}
                     disabled={busy}
                     onClick={() => remove(rule)}

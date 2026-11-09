@@ -366,6 +366,9 @@ describe('AiWorkflowPage', () => {
     await user.click(await screen.findByRole('button', { name: '新建工作流' }))
     await user.click(screen.getByRole('menuitem', { name: '从空白创建工作流' }))
     expect(await screen.findByLabelText('工作流名称')).toBeInTheDocument()
+    // 编辑器是模态弹窗：开着时背景（栏目切换）不可交互，先关掉再切下一个栏目
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByLabelText('工作流名称')).not.toBeInTheDocument()
 
     await openSection(user, '规则')
     await user.click(await screen.findByRole('button', { name: '新建规则' }))
@@ -487,8 +490,21 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByRole('button', { name: '创建' }))
     await waitFor(() => expect(screen.getAllByText('可关闭的错误')).toHaveLength(2))
 
-    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
-    expect(screen.getAllByText('可关闭的错误')).toHaveLength(1)
+    // 模态弹窗开着时 Radix 把背景标成 aria-hidden：关闭按钮要带 hidden 才取得到，
+    // 再按容器区分——页面级错误条在弹窗外，弹窗内的 FormError 没有关闭入口
+    const pageLevelDismiss = screen
+      .getAllByRole('button', { name: '关闭错误提示', hidden: true })
+      .find((el) => !el.closest('[role="dialog"]'))
+    expect(pageLevelDismiss).toBeDefined()
+    // 背景此刻不可交互（模态语义）：按钮落在 aria-hidden 的背景里
+    expect(pageLevelDismiss?.closest('[aria-hidden="true"]')).not.toBeNull()
+
+    // 关掉页面级错误条：只剩弹窗内那份就地提示
+    // 背景按钮不可点（模态把背景的 pointer-events 也关掉了），这里程序化触发它的 onDismiss
+    fireEvent.click(pageLevelDismiss as HTMLElement)
+    const remaining = screen.getAllByText('可关闭的错误')
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].closest('[role="dialog"]')).not.toBeNull()
 
     // 弹窗关掉后错误不再残留
     await user.click(screen.getByRole('button', { name: '取消' }))
@@ -1251,7 +1267,9 @@ describe('AiWorkflowPage', () => {
 
     await waitFor(async () => expect((await screen.findAllByText('纯文本删除失败')).length).toBe(2))
     expect(screen.getByRole('dialog')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '项目：工作台' })).toBeInTheDocument()
+    // 弹窗开着时背景被 Radix 标成 aria-hidden，背景按钮不再是断言对象：
+    // 这条用例断言的是「失败文案按字符串展示」且「弹窗不关」
+    expect(within(screen.getByRole('dialog')).getByText('纯文本删除失败')).toBeInTheDocument()
   })
 
   it('项目弹窗：取消关闭弹窗且不发任何项目命令', async () => {

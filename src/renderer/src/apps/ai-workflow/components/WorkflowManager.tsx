@@ -1,7 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import type { WorkflowInput, WorkflowWithStages } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
-import { Dialog } from '../../../components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
 import { FormError } from '../../../components/ui/form-error'
 import { Menu } from '../../../components/ui/menu'
 import { getKernelStore } from '../../../shell/kernelStore'
@@ -97,11 +97,11 @@ export function WorkflowManager(): ReactElement {
       />
 
       <div className="flex items-center justify-between gap-3">
-        <p className="text-meta text-ink-faint">阶段序列与流转</p>
+        <p className="text-xs text-faint-foreground">阶段序列与流转</p>
         {/* 一个入口两种建法：空白起手，或按 SOP 模板预填阶段 */}
         <Menu
           label="新建工作流"
-          variant="primary"
+          variant="default"
           sections={[
             {
               items: [
@@ -130,11 +130,11 @@ export function WorkflowManager(): ReactElement {
       </div>
 
       {workflows.length === 0 ? (
-        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
+        <p className="grid place-items-center rounded-xl border border-dashed border-border py-6 text-sm text-faint-foreground">
           暂无工作流
         </p>
       ) : (
-        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
           {workflows.map((w) => {
             const active = w.id === activeId
             return (
@@ -142,25 +142,25 @@ export function WorkflowManager(): ReactElement {
                 key={w.id}
                 className={
                   active
-                    ? 'flex items-center gap-3 bg-focus/[0.06] px-4 py-3'
-                    : 'flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]'
+                    ? 'flex items-center gap-3 bg-primary/[0.06] px-4 py-3'
+                    : 'flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent'
                 }
               >
                 <button
                   type="button"
                   aria-label={`选择工作流 ${w.name}`}
-                  className="flex min-w-0 flex-1 flex-col items-start text-left outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
+                  className="flex min-w-0 flex-1 flex-col items-start text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   onClick={() => setSelectedId(w.id)}
                 >
-                  <span className="flex items-center gap-2 text-action font-medium text-ink">
+                  <span className="flex items-center gap-2 text-sm font-medium text-foreground">
                     {w.name}
                     {active && (
-                      <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-badge text-focus-soft">
+                      <span className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-xs text-brand">
                         当前
                       </span>
                     )}
                   </span>
-                  <span className="text-meta text-ink-faint">
+                  <span className="text-xs text-faint-foreground">
                     {w.stages.length} 阶段
                     {w.description ? ` · ${w.description}` : ''}
                   </span>
@@ -172,7 +172,7 @@ export function WorkflowManager(): ReactElement {
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="text-danger hover:bg-danger/10 hover:text-danger"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     aria-label={`删除工作流 ${w.name}`}
                     onClick={() => void remove(w.id)}
                   >
@@ -186,14 +186,25 @@ export function WorkflowManager(): ReactElement {
       )}
 
       {editing !== undefined && (
-        <Dialog onClose={() => setEditing(undefined)} className="max-w-3xl">
-          <FormError message={saveError} className="mb-3" />
-          <WorkflowEditor
-            workflow={editing}
-            initial={seed}
-            onSave={save}
-            onCancel={() => setEditing(undefined)}
-          />
+        <Dialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setEditing(undefined)
+          }}
+        >
+          <DialogContent className="max-w-3xl">
+            {/* 标题由编辑器自己画（图标 + 「工作流定义」），这里只补一个无障碍名称 */}
+            <DialogHeader>
+              <DialogTitle className="sr-only">工作流定义</DialogTitle>
+            </DialogHeader>
+            <FormError message={saveError} className="mb-3" />
+            <WorkflowEditor
+              workflow={editing}
+              initial={seed}
+              onSave={save}
+              onCancel={() => setEditing(undefined)}
+            />
+          </DialogContent>
         </Dialog>
       )}
     </div>

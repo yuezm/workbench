@@ -15,28 +15,28 @@ export function formatRemaining(remainingMs: number): string {
 /** 各阶段的视觉主题：色点 / 渐变端色 */
 const PHASE_THEME: Record<Phase, { text: string; dot: string; from: string; to: string }> = {
   idle: {
-    text: 'text-focus-soft',
-    dot: 'bg-focus',
-    from: 'var(--color-focus-soft)',
-    to: 'var(--color-focus)',
+    text: 'text-brand',
+    dot: 'bg-primary',
+    from: 'var(--brand)',
+    to: 'var(--ring)',
   },
   focus: {
-    text: 'text-focus-soft',
-    dot: 'bg-focus',
-    from: 'var(--color-focus-soft)',
-    to: 'var(--color-focus)',
+    text: 'text-brand',
+    dot: 'bg-primary',
+    from: 'var(--brand)',
+    to: 'var(--ring)',
   },
   shortBreak: {
-    text: 'text-short',
-    dot: 'bg-short',
-    from: 'var(--color-short)',
-    to: 'var(--color-short-deep)',
+    text: 'text-success',
+    dot: 'bg-success',
+    from: 'var(--success)',
+    to: 'var(--success-deep)',
   },
   longBreak: {
-    text: 'text-long',
-    dot: 'bg-long',
-    from: 'var(--color-long)',
-    to: 'var(--color-long-deep)',
+    text: 'text-info',
+    dot: 'bg-info',
+    from: 'var(--info)',
+    to: 'var(--info-deep)',
   },
 }
 
@@ -110,8 +110,8 @@ export function TimerDisplay({
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
         <span
           className={cn(
-            'inline-flex items-center gap-2 rounded-md border border-line bg-surface-2 px-4 py-1.5',
-            'text-meta tracking-[0.3em] text-ink-dim',
+            'inline-flex items-center gap-2 rounded-md border border-border bg-muted px-4 py-1.5',
+            'text-xs tracking-[0.3em] text-muted-foreground',
           )}
         >
           <i className={cn('size-1.5 rounded-full', theme.dot)} aria-hidden="true" />
@@ -134,12 +134,12 @@ export function TimerDisplay({
               aria-hidden="true"
               className={cn(
                 'size-1.5 rounded-full transition-colors duration-300',
-                i < completedRounds ? theme.dot : 'bg-white/10',
+                i < completedRounds ? theme.dot : 'bg-muted',
               )}
               style={i < completedRounds ? { boxShadow: `0 0 6px ${theme.from}` } : undefined}
             />
           ))}
-          <em className="ml-1 text-meta text-ink-faint not-italic tabular-nums">
+          <em className="ml-1 text-xs text-faint-foreground not-italic tabular-nums">
             {completedRounds} / {roundsBeforeLongBreak}
           </em>
         </span>

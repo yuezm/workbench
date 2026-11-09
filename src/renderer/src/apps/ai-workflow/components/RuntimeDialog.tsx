@@ -7,12 +7,19 @@ import type {
   RuntimeModelOption,
 } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
-import { Dialog } from '../../../components/ui/dialog'
-import { Field, labelCls } from '../../../components/ui/field'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
+import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
-import { Input, fieldCls } from '../../../components/ui/input'
-import { Select } from '../../../components/ui/select'
-import { cn } from '../../../lib/cn'
+import { Input } from '../../../components/ui/input'
+import { Label } from '../../../components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../components/ui/select'
+import { Textarea } from '../../../components/ui/textarea'
 import { getKernelStore } from '../../../shell/kernelStore'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -24,8 +31,6 @@ function focusControl(form: HTMLFormElement, label: string): void {
 
 /** 模型下拉里代表「手动输入」的哨兵值（不会发给主进程） */
 const CUSTOM_MODEL = '__custom__'
-
-const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2 font-mono')
 
 const ARGS_TEMPLATE_HINT = 'JSON 数组，占位符 {model}/{effort}/{cwd}/{context}/{prompt}'
 
@@ -266,179 +271,227 @@ export function RuntimeDialog({
   }
 
   return (
-    <Dialog title={editing ? '编辑运行时' : '新建运行时'} onClose={onCancel}>
-      <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
-            <Input
-              aria-label="运行时名称"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                setNameError(null)
-              }}
-            />
-          </Field>
-          <Field
-            label="执行器"
-            error={executorsError === null ? null : `执行器加载失败：${executorsError}`}
-          >
-            <Select
-              ariaLabel="运行时执行器"
-              value={executorKey}
-              onChange={changeExecutor}
-              disabled={executors.length === 0}
-              placeholder={executorsLoading ? '正在读取执行器…' : '无可用执行器'}
-              options={executors.map((item) => ({ value: item.key, label: item.label }))}
-            />
-          </Field>
-          <Field label="命令">
-            <Input
-              aria-label="运行时命令"
-              className="font-mono"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-            />
-          </Field>
-          <Field label="profile">
-            <Input
-              aria-label="运行时 profile"
-              className="font-mono"
-              value={profile}
-              onChange={(e) => setProfile(e.target.value)}
-            />
-          </Field>
-          <Field label="参数模板" className="col-span-2" hint={ARGS_TEMPLATE_HINT}>
-            <textarea
-              aria-label="运行时参数模板"
-              className={textareaCls}
-              placeholder='["--print","{prompt}"]'
-              value={argsTemplate}
-              onChange={(e) => setArgsTemplate(e.target.value)}
-            />
-          </Field>
-          <Field label="并发上限" hint="同一运行时同时执行的任务数，≥1" error={concurrentError}>
-            <Input
-              aria-label="运行时并发上限"
-              type="number"
-              min={1}
-              value={maxConcurrent}
-              onChange={(e) => {
-                setMaxConcurrent(e.target.value)
-                setConcurrentError(null)
-              }}
-            />
-          </Field>
-          <Field label="权限模式" hint={PERMISSION_HINT}>
-            <Select
-              ariaLabel="运行时权限模式"
-              value={permissionMode}
-              onChange={(v) => {
-                setPermissionMode(v as PermissionMode)
-                // 换了模式就撤销上一次的确认：确认只对当前选择有效
-                setDangerAck(false)
-              }}
-              options={PERMISSION_OPTIONS}
-            />
-          </Field>
-          <Field
-            label="工作目录"
-            hint="留空 = 默认目录（改默认值设 WORKBENCH_WORKDIR，缺省 ~/.workbench）"
-          >
-            <Input
-              aria-label="运行时工作目录"
-              className="font-mono"
-              value={workdir}
-              placeholder={defaultWorkdir === '' ? '留空用默认目录' : defaultWorkdir}
-              onChange={(e) => setWorkdir(e.target.value)}
-            />
-          </Field>
-          <Field
-            label="模型"
-            hint={modelsLoading ? '读取模型中…' : undefined}
-            error={modelsError === null ? null : `模型加载失败：${modelsError}（可手填）`}
-          >
-            <Select
-              ariaLabel="运行时模型"
-              value={modelChoice}
-              onChange={changeModel}
-              disabled={!editing || modelsLoading}
-              placeholder="默认"
-              options={modelOptions}
-            />
-          </Field>
-          <Field label="推理强度">
-            <Select
-              ariaLabel="运行时推理强度"
-              value={reasoningEffort}
-              onChange={setReasoningEffort}
-              disabled={!editing || thinkingLevels.length === 0}
-              options={effortOptions}
-            />
-          </Field>
-          {editing && modelChoice === CUSTOM_MODEL && (
-            <Field label="模型 id" className="col-span-2">
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onCancel()
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{editing ? '编辑运行时' : '新建运行时'}</DialogTitle>
+        </DialogHeader>
+
+        <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
               <Input
-                aria-label="运行时模型手填"
-                className="font-mono"
-                value={customModel}
-                onChange={(e) => changeCustomModel(e.target.value)}
+                aria-label="运行时名称"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  setNameError(null)
+                }}
               />
             </Field>
-          )}
-        </div>
-
-        {permissionMode === 'danger-full-access' && (
-          <div className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2">
-            <p className="text-meta text-danger">{DANGER_NOTICE}</p>
-            <label className="mt-1.5 flex items-center gap-2 text-meta text-ink-dim">
-              <input
-                type="checkbox"
-                aria-label="已确认完全访问风险"
-                className="size-4 accent-[var(--color-focus)]"
-                checked={dangerAck}
-                onChange={(e) => setDangerAck(e.target.checked)}
-              />
-              <span>我明白风险，仍要选完全访问</span>
-            </label>
-          </div>
-        )}
-
-        {editing && (
-          <div className="flex flex-col gap-1.5">
-            <span className={labelCls}>启用</span>
-            <label className="flex items-center gap-2 text-action text-ink-dim">
-              <input
-                type="checkbox"
-                aria-label="启用运行时"
-                className="size-4 accent-[var(--color-focus)]"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-              />
-              <span>启用后派发</span>
-            </label>
-          </div>
-        )}
-
-        <FormError message={error} onDismiss={() => setError(null)} />
-
-        <div className="flex flex-col gap-2">
-          {dangerHint !== null && <p className="text-meta text-ink-faint">{dangerHint}</p>}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-              取消
-            </Button>
-            <Button
-              type="submit"
-              variant="primary"
-              size="sm"
-              disabled={saving || (permissionMode === 'danger-full-access' && !dangerAck)}
+            <Field
+              label="执行器"
+              error={executorsError === null ? null : `执行器加载失败：${executorsError}`}
             >
-              {editing ? '保存' : '添加'}
-            </Button>
+              <Select
+                value={executorKey}
+                onValueChange={changeExecutor}
+                disabled={executors.length === 0}
+              >
+                <SelectTrigger aria-label="运行时执行器" className="w-full">
+                  <SelectValue
+                    placeholder={executorsLoading ? '正在读取执行器…' : '无可用执行器'}
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {executors.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="命令">
+              <Input
+                aria-label="运行时命令"
+                className="font-mono"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+              />
+            </Field>
+            <Field label="profile">
+              <Input
+                aria-label="运行时 profile"
+                className="font-mono"
+                value={profile}
+                onChange={(e) => setProfile(e.target.value)}
+              />
+            </Field>
+            <Field label="参数模板" className="col-span-2" hint={ARGS_TEMPLATE_HINT}>
+              <Textarea
+                aria-label="运行时参数模板"
+                className="min-h-20 resize-y font-mono"
+                placeholder='["--print","{prompt}"]'
+                value={argsTemplate}
+                onChange={(e) => setArgsTemplate(e.target.value)}
+              />
+            </Field>
+            <Field label="并发上限" hint="同一运行时同时执行的任务数，≥1" error={concurrentError}>
+              <Input
+                aria-label="运行时并发上限"
+                type="number"
+                min={1}
+                value={maxConcurrent}
+                onChange={(e) => {
+                  setMaxConcurrent(e.target.value)
+                  setConcurrentError(null)
+                }}
+              />
+            </Field>
+            <Field label="权限模式" hint={PERMISSION_HINT}>
+              <Select
+                value={permissionMode}
+                onValueChange={(v) => {
+                  setPermissionMode(v as PermissionMode)
+                  // 换了模式就撤销上一次的确认：确认只对当前选择有效
+                  setDangerAck(false)
+                }}
+              >
+                <SelectTrigger aria-label="运行时权限模式" className="w-full">
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PERMISSION_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field
+              label="工作目录"
+              hint="留空 = 默认目录（改默认值设 WORKBENCH_WORKDIR，缺省 ~/.workbench）"
+            >
+              <Input
+                aria-label="运行时工作目录"
+                className="font-mono"
+                value={workdir}
+                placeholder={defaultWorkdir === '' ? '留空用默认目录' : defaultWorkdir}
+                onChange={(e) => setWorkdir(e.target.value)}
+              />
+            </Field>
+            <Field
+              label="模型"
+              hint={modelsLoading ? '读取模型中…' : undefined}
+              error={modelsError === null ? null : `模型加载失败：${modelsError}（可手填）`}
+            >
+              {/* 空值项（默认模型）显示 placeholder：placeholder 文案 = 该空值项的标签 */}
+              <Select
+                value={modelChoice}
+                onValueChange={changeModel}
+                disabled={!editing || modelsLoading}
+              >
+                <SelectTrigger aria-label="运行时模型" className="w-full">
+                  <SelectValue placeholder="默认" />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="推理强度">
+              <Select
+                value={reasoningEffort}
+                onValueChange={setReasoningEffort}
+                disabled={!editing || thinkingLevels.length === 0}
+              >
+                <SelectTrigger aria-label="运行时推理强度" className="w-full">
+                  <SelectValue placeholder="默认" />
+                </SelectTrigger>
+                <SelectContent>
+                  {effortOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            {editing && modelChoice === CUSTOM_MODEL && (
+              <Field label="模型 id" className="col-span-2">
+                <Input
+                  aria-label="运行时模型手填"
+                  className="font-mono"
+                  value={customModel}
+                  onChange={(e) => changeCustomModel(e.target.value)}
+                />
+              </Field>
+            )}
           </div>
-        </div>
-      </form>
+
+          {permissionMode === 'danger-full-access' && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2">
+              <p className="text-xs text-destructive">{DANGER_NOTICE}</p>
+              <Label className="mt-1.5 flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                <input
+                  type="checkbox"
+                  aria-label="已确认完全访问风险"
+                  className="size-4 accent-[var(--ring)]"
+                  checked={dangerAck}
+                  onChange={(e) => setDangerAck(e.target.checked)}
+                />
+                <span>我明白风险，仍要选完全访问</span>
+              </Label>
+            </div>
+          )}
+
+          {editing && (
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-muted-foreground">启用</span>
+              <Label className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
+                <input
+                  type="checkbox"
+                  aria-label="启用运行时"
+                  className="size-4 accent-[var(--ring)]"
+                  checked={enabled}
+                  onChange={(e) => setEnabled(e.target.checked)}
+                />
+                <span>启用后派发</span>
+              </Label>
+            </div>
+          )}
+
+          <FormError message={error} onDismiss={() => setError(null)} />
+
+          <div className="flex flex-col gap-2">
+            {dangerHint !== null && <p className="text-xs text-faint-foreground">{dangerHint}</p>}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+                取消
+              </Button>
+              <Button
+                type="submit"
+                variant="default"
+                size="sm"
+                disabled={saving || (permissionMode === 'danger-full-access' && !dangerAck)}
+              >
+                {editing ? '保存' : '添加'}
+              </Button>
+            </div>
+          </div>
+        </form>
+      </DialogContent>
     </Dialog>
   )
 }

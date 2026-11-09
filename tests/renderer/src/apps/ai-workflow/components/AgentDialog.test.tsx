@@ -74,13 +74,25 @@ describe('AgentDialog', () => {
     )
 
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent('ds · 未检测')
-    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r1')
 
     await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
+    // 上游触发器没有 value 属性：改断言浮层里选中项的 checked 状态
+    expect(screen.getByRole('option', { name: 'ds · 未检测' })).toHaveAttribute(
+      'data-state',
+      'checked',
+    )
+    expect(screen.getByRole('option', { name: 'claude · 可用' })).toHaveAttribute(
+      'data-state',
+      'unchecked',
+    )
     expect(screen.getByRole('option', { name: 'ds · 未检测' })).toBeInTheDocument()
-    expect(screen.getByRole('option', { name: 'claude · 可用' })).toBeInTheDocument()
+    // 浮层打开时 Radix 会把弹窗本体标成 aria-hidden：这时取触发器要带 hidden
+    expect(screen.getByRole('combobox', { name: '智能体运行时', hidden: true })).toHaveTextContent(
+      'ds · 未检测',
+    )
 
-    // 名称必填：空名提交会被拦下，这里先填名再验证「默认运行时随提交带上」
+    // 收起浮层（浮层打开时弹窗内其它元素不可点），再填名验证「默认运行时随提交带上」
+    await user.keyboard('{Escape}')
     await user.type(screen.getByLabelText('智能体名称'), 'coder')
     await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
@@ -99,7 +111,9 @@ describe('AgentDialog', () => {
         onCancel={vi.fn()}
       />,
     )
-    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r2')
+    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent(
+      'claude · 可用',
+    )
   })
 
   it('不可用运行时选项禁用并提示，默认回落到首个可用项', async () => {
@@ -122,7 +136,12 @@ describe('AgentDialog', () => {
     )
 
     expect(screen.getByText(/不可用：挂了/)).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r2')
+    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent(
+      'claude · 可用',
+    )
+
+    // 先把名称填好：下拉浮层打开时点输入框会把焦点抢回触发器
+    await user.type(screen.getByLabelText('智能体名称'), 'coder')
 
     await user.click(screen.getByRole('combobox', { name: '智能体运行时' }))
     expect(screen.getByRole('option', { name: '挂了 · 不可用' })).toHaveAttribute(
@@ -130,9 +149,13 @@ describe('AgentDialog', () => {
       'true',
     )
     await user.click(screen.getByRole('option', { name: '挂了 · 不可用' }))
-    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r2')
+    // 点禁用项不改变选择（浮层打开时弹窗被 Radix 标成 aria-hidden，取触发器要带 hidden）
+    expect(screen.getByRole('combobox', { name: '智能体运行时', hidden: true })).toHaveTextContent(
+      'claude · 可用',
+    )
 
-    await user.type(screen.getByLabelText('智能体名称'), 'coder')
+    // 收起浮层后再提交（浮层打开时弹窗内其它元素不可点）
+    await user.keyboard('{Escape}')
     await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ runtimeId: 'r2' })
@@ -305,7 +328,9 @@ describe('AgentDialog', () => {
 
     expect(screen.getByText('编辑智能体')).toBeInTheDocument()
     // 编辑时保留原绑定：不因为该运行时已不可用就悄悄改绑 / 拦住保存
-    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveValue('r1')
+    expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveTextContent(
+      '挂了 · 不可用',
+    )
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
 
     await user.click(screen.getByRole('button', { name: '保存' }))
@@ -315,16 +340,15 @@ describe('AgentDialog', () => {
 
   it('没有运行时时按钮禁用并写明原因；程序化提交落到运行时字段错误', async () => {
     const onSubmit = vi.fn()
-    const { container } = render(
-      <AgentDialog runtimes={[]} initial={empty} onSubmit={onSubmit} onCancel={vi.fn()} />,
-    )
+    render(<AgentDialog runtimes={[]} initial={empty} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
     expect(screen.getByText(/缺少可绑定的运行时/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
 
     // 按钮禁用时表单也可能被回车 / 程序化提交：不能静默 return，要给字段级错误并聚焦
     fireEvent.change(screen.getByLabelText('智能体名称'), { target: { value: 'coder' } })
-    fireEvent.submit(container.querySelector('form') as HTMLFormElement)
+    // 弹窗内容渲染在 portal 里，表单不在 render 容器内：从弹窗里取
+    fireEvent.submit(screen.getByRole('dialog').querySelector('form') as HTMLFormElement)
     expect(await screen.findByText(/没有可绑定的运行时/)).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveFocus()
     expect(onSubmit).not.toHaveBeenCalled()

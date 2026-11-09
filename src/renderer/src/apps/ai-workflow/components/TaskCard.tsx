@@ -75,23 +75,23 @@ export function TaskCard({
       onDragStart={() => onDragStart(task)}
       onDragEnd={onDragEnd}
       className={cn(
-        'flex flex-col gap-2 rounded-xl border border-line bg-surface-2 p-3',
+        'flex flex-col gap-2 rounded-xl border border-border bg-muted p-3',
         'shadow-[0_1px_0_rgb(255_255_255/4%)_inset] transition-all duration-200',
-        'focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:outline-none',
+        'focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none',
         executing
           ? 'cursor-default'
-          : 'cursor-grab hover:border-line-strong hover:bg-surface-3 active:cursor-grabbing',
+          : 'cursor-grab hover:border-input hover:bg-accent active:cursor-grabbing',
         dragging && 'opacity-40',
       )}
     >
-      <h3 className="text-title font-medium text-ink">{task.title}</h3>
+      <h3 className="text-base font-medium text-foreground">{task.title}</h3>
       {task.description && (
-        <p className="line-clamp-3 text-body text-ink-dim">{task.description}</p>
+        <p className="line-clamp-3 text-sm text-muted-foreground">{task.description}</p>
       )}
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-meta text-ink-faint">
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-faint-foreground">
         {childProgress !== undefined && childProgress.total > 0 && (
           <span
-            className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-badge text-focus-soft"
+            className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-xs text-brand"
             title="子任务完成进度"
           >
             子任务 {childProgress.done}/{childProgress.total}
@@ -99,7 +99,7 @@ export function TaskCard({
         )}
         {parentId !== null && (
           <span
-            className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-faint"
+            className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground"
             title={parentId}
           >
             {parentTitle === undefined || parentTitle === '' ? '子任务' : `子任务 · ${parentTitle}`}
@@ -107,14 +107,14 @@ export function TaskCard({
         )}
         {isHandoff && (
           <span
-            className="rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-faint"
+            className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground"
             title="由其它工作流的阶段完成时自动创建"
           >
             交接
           </span>
         )}
         {executing && (
-          <span className="size-1.5 animate-pulse rounded-full bg-focus" aria-hidden="true" />
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden="true" />
         )}
         {executing ? '执行中…' : HINTS[stage.entryMode]}
         {threadId !== null && onOpenThread !== undefined && (
@@ -127,9 +127,9 @@ export function TaskCard({
               onOpenThread(threadId)
             }}
             className={cn(
-              'ml-auto rounded-md px-1.5 py-0.5 text-action font-medium text-focus-soft',
-              'transition-colors duration-200 hover:bg-white/[0.06] hover:text-ink',
-              'focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:outline-none',
+              'ml-auto rounded-md px-1.5 py-0.5 text-sm font-medium text-brand',
+              'transition-colors duration-200 hover:bg-accent hover:text-foreground',
+              'focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none',
             )}
           >
             线程

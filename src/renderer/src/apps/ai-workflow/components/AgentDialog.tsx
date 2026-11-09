@@ -1,20 +1,23 @@
 import { useState, type ReactElement } from 'react'
 import type { AgentInput, Runtime } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
-import { Dialog } from '../../../components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
-import { fieldCls, Input } from '../../../components/ui/input'
-import { Select } from '../../../components/ui/select'
-import { cn } from '../../../lib/cn'
+import { Input } from '../../../components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../components/ui/select'
+import { Textarea } from '../../../components/ui/textarea'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
-/** System Prompt 是多行文本：等宽、可纵向拉伸，方便写分段指令 */
-const promptCls = cn(fieldCls, 'min-h-24 resize-y py-2 text-body font-mono')
-
 /**
- * 把焦点移到出错的控件：下拉是自研组件（没转发 ref），统一按 aria-label 从表单里找，
+ * 把焦点移到出错的控件：下拉触发器（Radix Select）没转发 ref，统一按 aria-label 从表单里找，
  * 输入框与下拉共用一条路径。
  */
 function focusControl(form: HTMLFormElement, label: string): void {
@@ -81,6 +84,21 @@ export function AgentDialog({
   const runtimeId = kept?.id ?? usable[0]?.id ?? ''
   const unavailable = runtimes.filter((r) => runtimeHealth(r) === 'unavailable')
 
+  /**
+   * 下拉选项：没有运行时时给一个空值项「无」（迁移前就是这条空值项把触发器写成「无」）。
+   * Radix 在 `value === ''` 时显示 `SelectValue` 的 placeholder，所以 placeholder 与这条
+   * 空值项的文案对齐即可保持观感；有运行时但全都不可用时没有空值项，placeholder 回到
+   * 迁移前的「请选择」。
+   */
+  const runtimeOptions =
+    runtimes.length === 0
+      ? [{ value: '', label: '无', disabled: false }]
+      : runtimes.map((r) => ({
+          value: r.id,
+          label: `${r.name} · ${RUNTIME_HEALTH_LABEL[runtimeHealth(r)]}`,
+          disabled: runtimeHealth(r) === 'unavailable',
+        }))
+
   /** 按钮禁用必须伴随可见原因：点不动又不说为什么，和静默 return 是同一个毛病 */
   const disabledHint =
     runtimeId === '' ? '缺少可绑定的运行时：先到「运行时」新建并测试通过再回来。' : null
@@ -120,90 +138,108 @@ export function AgentDialog({
   }
 
   return (
-    <Dialog title={mode === 'edit' ? '编辑智能体' : '新建智能体'} onClose={onCancel}>
-      <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
-        {runtimes.length === 0 && (
-          <div className="rounded-lg border border-dashed border-line px-3 py-2 text-body text-ink-faint">
-            先添加运行时。
-          </div>
-        )}
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onCancel()
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{mode === 'edit' ? '编辑智能体' : '新建智能体'}</DialogTitle>
+        </DialogHeader>
+        <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
+          {runtimes.length === 0 && (
+            <div className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
+              先添加运行时。
+            </div>
+          )}
 
-        {runtimes.length > 0 && usable.length === 0 && (
-          <p className="rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-body text-warn">
-            没有可用运行时，先到「运行时」测试通过。
-          </p>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
-            <Input
-              aria-label="智能体名称"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value)
-                setNameError(null)
-              }}
-            />
-          </Field>
-          <Field label="绑定运行时" required error={runtimeError}>
-            <Select
-              ariaLabel="智能体运行时"
-              value={runtimeId}
-              onChange={(next) => {
-                setSelected(next)
-                setRuntimeError(null)
-              }}
-              options={
-                runtimes.length === 0
-                  ? [{ value: '', label: '无' }]
-                  : runtimes.map((r) => ({
-                      value: r.id,
-                      label: `${r.name} · ${RUNTIME_HEALTH_LABEL[runtimeHealth(r)]}`,
-                      disabled: runtimeHealth(r) === 'unavailable',
-                    }))
-              }
-            />
-          </Field>
-
-          {unavailable.length > 0 && (
-            <p className="col-span-2 rounded-lg border border-danger/30 bg-danger/10 px-2.5 py-1.5 text-body text-danger">
-              不可用：{unavailable.map((r) => r.name).join('、')}
+          {runtimes.length > 0 && usable.length === 0 && (
+            <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+              没有可用运行时，先到「运行时」测试通过。
             </p>
           )}
 
-          <Field label="描述" className="col-span-2">
-            <Input
-              aria-label="智能体描述"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </Field>
-          <Field label="System Prompt" className="col-span-2">
-            <textarea
-              aria-label="智能体能力"
-              className={promptCls}
-              rows={6}
-              placeholder="写清这个智能体的角色、做事方式与产出要求；每轮运行都会带上这段。"
-              value={systemPrompt}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-            />
-          </Field>
-        </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
+              <Input
+                aria-label="智能体名称"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value)
+                  setNameError(null)
+                }}
+              />
+            </Field>
+            <Field label="绑定运行时" required error={runtimeError}>
+              <Select
+                value={runtimeId}
+                onValueChange={(next) => {
+                  setSelected(next)
+                  setRuntimeError(null)
+                }}
+              >
+                <SelectTrigger aria-label="智能体运行时" className="w-full">
+                  <SelectValue placeholder={runtimes.length === 0 ? '无' : '请选择'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {runtimeOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
 
-        <FormError message={error} onDismiss={() => setError(null)} />
+            {unavailable.length > 0 && (
+              <p className="col-span-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-sm text-destructive">
+                不可用：{unavailable.map((r) => r.name).join('、')}
+              </p>
+            )}
 
-        <div className="flex flex-col gap-2">
-          {disabledHint !== null && <p className="text-meta text-ink-faint">{disabledHint}</p>}
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-              取消
-            </Button>
-            <Button type="submit" variant="primary" size="sm" disabled={saving || runtimeId === ''}>
-              {mode === 'edit' ? '保存' : '添加'}
-            </Button>
+            <Field label="描述" className="col-span-2">
+              <Input
+                aria-label="智能体描述"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </Field>
+            <Field label="System Prompt" className="col-span-2">
+              <Textarea
+                aria-label="智能体能力"
+                className="min-h-24 resize-y font-mono text-sm"
+                rows={6}
+                placeholder="写清这个智能体的角色、做事方式与产出要求；每轮运行都会带上这段。"
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+              />
+            </Field>
           </div>
-        </div>
-      </form>
+
+          <FormError message={error} onDismiss={() => setError(null)} />
+
+          <div className="flex flex-col gap-2">
+            {disabledHint !== null && (
+              <p className="text-xs text-faint-foreground">{disabledHint}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+                取消
+              </Button>
+              <Button
+                type="submit"
+                variant="default"
+                size="sm"
+                disabled={saving || runtimeId === ''}
+              >
+                {mode === 'edit' ? '保存' : '添加'}
+              </Button>
+            </div>
+          </div>
+        </form>
+      </DialogContent>
     </Dialog>
   )
 }

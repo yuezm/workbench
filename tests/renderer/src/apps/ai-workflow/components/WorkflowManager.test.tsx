@@ -258,7 +258,8 @@ describe('WorkflowManager', () => {
 
     // 弹窗仍开着时删掉同一条工作流（列表在遮罩之后，直接派发点击）：
     // 编辑态若正指向被删项，应回落到 undefined 关掉弹窗
-    fireEvent.click(screen.getByRole('button', { name: '删除工作流 研发' }))
+    // 弹窗打开后遮罩外的列表被标记为 aria-hidden，所以要带 hidden 才能取到
+    fireEvent.click(screen.getByRole('button', { name: '删除工作流 研发', hidden: true }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(kernel.dispatched[0]).toMatchObject({ type: 'workflow.remove', id: 'w1' })

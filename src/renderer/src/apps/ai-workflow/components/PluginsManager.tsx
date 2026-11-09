@@ -6,7 +6,13 @@ import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
 import { Input } from '../../../components/ui/input'
 import { badgeCls, panelCls } from '../../../components/ui/panel'
-import { Select } from '../../../components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelViewState } from '../../../shell/useKernelView'
@@ -27,11 +33,11 @@ const STATUS_LABELS: Record<PluginStatus, string> = {
 
 /** 状态徽标配色：可用 = 短休息绿，未授权 = 琥珀，异常 / 清单不合法 = 红 */
 const STATUS_TONES: Record<PluginStatus, string> = {
-  ready: 'bg-short/15 text-short',
-  disabled: 'bg-white/[0.07] text-ink-faint',
-  unauthorized: 'bg-warn/15 text-warn',
-  error: 'bg-danger/15 text-danger',
-  manifest_error: 'bg-danger/15 text-danger',
+  ready: 'bg-success/15 text-success',
+  disabled: 'bg-accent text-faint-foreground',
+  unauthorized: 'bg-warning/15 text-warning',
+  error: 'bg-destructive/15 text-destructive',
+  manifest_error: 'bg-destructive/15 text-destructive',
 }
 
 const KIND_LABELS: Record<PluginKind, string> = {
@@ -120,7 +126,7 @@ function ChevronIcon(): ReactElement {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      className="shrink-0 text-ink-faint"
+      className="shrink-0 text-faint-foreground"
     >
       <path d="m9 6 6 6-6 6" />
     </svg>
@@ -147,13 +153,13 @@ function PluginSwitch({
       onClick={onToggle}
       className={cn(
         'relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors duration-200 outline-none',
-        'focus-visible:ring-2 focus-visible:ring-focus/60 disabled:cursor-not-allowed disabled:opacity-40',
-        plugin.enabled ? 'bg-focus' : 'bg-white/10',
+        'focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-not-allowed disabled:opacity-40',
+        plugin.enabled ? 'bg-primary' : 'bg-muted',
       )}
     >
       <span
         className={cn(
-          'absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform duration-200',
+          'absolute top-0.5 left-0.5 size-4 rounded-full bg-background shadow transition-transform duration-200',
           plugin.enabled && 'translate-x-4',
         )}
       />
@@ -165,14 +171,14 @@ function PluginSwitch({
 function PluginMeta({ plugin }: { plugin: PluginView }): ReactElement {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="truncate text-action font-medium text-ink">{plugin.name}</span>
-      <span className={cn('rounded-sm px-1.5 py-0.5 text-badge', STATUS_TONES[plugin.status])}>
+      <span className="truncate text-sm font-medium text-foreground">{plugin.name}</span>
+      <span className={cn('rounded-sm px-1.5 py-0.5 text-xs', STATUS_TONES[plugin.status])}>
         {STATUS_LABELS[plugin.status]}
       </span>
-      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
+      <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground">
         {plugin.builtin ? '内置' : '外部'}
       </span>
-      <span className="text-meta text-ink-faint">
+      <span className="text-xs text-faint-foreground">
         {KIND_LABELS[plugin.kind]} · v{plugin.version}
       </span>
     </div>
@@ -197,21 +203,21 @@ function PluginSummaryRow({
   onOpen: () => void
 }): ReactElement {
   return (
-    <li className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.02]">
-      <span className="grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
+    <li className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent">
+      <span className="grid size-7 shrink-0 place-items-center rounded-md bg-accent text-muted-foreground">
         <PluginIcon />
       </span>
 
       <button
         type="button"
         aria-label={`插件 ${plugin.name} 详情`}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
+        className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
         onClick={onOpen}
       >
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <PluginMeta plugin={plugin} />
           {plugin.description !== '' && (
-            <span className="truncate text-meta text-ink-faint">{plugin.description}</span>
+            <span className="truncate text-xs text-faint-foreground">{plugin.description}</span>
           )}
         </span>
         <ChevronIcon />
@@ -337,15 +343,15 @@ function PluginDetail({
     if (field.type === 'boolean') {
       return (
         <Field key={field.key} label={field.label} className="min-w-0">
-          <div className="flex h-9 items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 text-body text-ink">
+          <div className="flex h-9 items-center gap-2 rounded-lg border border-border bg-muted px-3 text-sm text-foreground">
             <input
               type="checkbox"
               aria-label={name}
-              className="size-4 accent-[var(--color-focus)]"
+              className="size-4 accent-[var(--ring)]"
               checked={config.flags[field.key] === true}
               onChange={(e) => setFlag(field.key, e.target.checked)}
             />
-            <span className="text-meta text-ink-faint">
+            <span className="text-xs text-faint-foreground">
               {config.flags[field.key] === true ? '开启' : '关闭'}
             </span>
           </div>
@@ -353,17 +359,26 @@ function PluginDetail({
       )
     }
     if (field.type === 'select') {
+      const choices = field.options ?? []
+      const current = config.text[field.key]
       return (
         <Field key={field.key} label={field.label} className="min-w-0">
           <Select
-            ariaLabel={name}
-            value={config.text[field.key]}
-            options={[
-              { value: '', label: '未设置' },
-              ...(field.options ?? []).map((option) => ({ value: option, label: option })),
-            ]}
-            onChange={(next) => setText(field.key, next)}
-          />
+            value={choices.includes(current) ? current : ''}
+            onValueChange={(next) => setText(field.key, next)}
+          >
+            <SelectTrigger aria-label={name} className="w-full">
+              <SelectValue placeholder="未设置" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">未设置</SelectItem>
+              {choices.map((option) => (
+                <SelectItem key={option} value={option}>
+                  {option}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
       )
     }
@@ -387,7 +402,7 @@ function PluginDetail({
               })
             }}
           />
-          {written && <span className="text-badge text-short">已设置</span>}
+          {written && <span className="text-xs text-success">已设置</span>}
         </Field>
       )
     }
@@ -418,18 +433,18 @@ function PluginDetail({
         <Button type="button" variant="ghost" size="sm" onClick={onBack}>
           返回插件列表
         </Button>
-        <span className="text-meta text-ink-faint">插件详情</span>
+        <span className="text-xs text-faint-foreground">插件详情</span>
       </div>
 
       <section className={cn(panelCls, 'flex flex-col gap-3 p-4')}>
         <div className="flex items-start gap-3">
-          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
+          <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-accent text-muted-foreground">
             <PluginIcon />
           </span>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
             <PluginMeta plugin={plugin} />
             {plugin.description !== '' && (
-              <p className="text-meta text-ink-faint">{plugin.description}</p>
+              <p className="text-xs text-faint-foreground">{plugin.description}</p>
             )}
           </div>
           <PluginSwitch plugin={plugin} disabled={busy} onToggle={toggleEnabled} />
@@ -438,19 +453,19 @@ function PluginDetail({
         <FormError message={plugin.error} />
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <span className="text-meta text-ink-faint">声明能力</span>
+          <span className="text-xs text-faint-foreground">声明能力</span>
           {declared.length === 0 ? (
-            <span className="text-meta text-ink-faint">无</span>
+            <span className="text-xs text-faint-foreground">无</span>
           ) : (
             declared.map((capability) => (
               <label
                 key={capability}
-                className="flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1 text-badge text-ink-dim"
+                className="flex items-center gap-1.5 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground"
               >
                 <input
                   type="checkbox"
                   aria-label={`${plugin.name} 授权 ${capability}`}
-                  className="size-3.5 accent-[var(--color-focus)]"
+                  className="size-3.5 accent-[var(--ring)]"
                   checked={grantedSet.has(capability)}
                   disabled={busy}
                   onChange={(e) => toggleGranted(capability, e.target.checked)}
@@ -462,7 +477,7 @@ function PluginDetail({
         </div>
 
         {plugin.status === 'unauthorized' && (
-          <p className="text-meta text-ink-faint">未授权：勾选声明的能力并保存后才会启动。</p>
+          <p className="text-xs text-faint-foreground">未授权：勾选声明的能力并保存后才会启动。</p>
         )}
 
         {plugin.configFields.length > 0 && (
@@ -474,7 +489,7 @@ function PluginDetail({
         <FormError message={actionError} />
 
         <div className="flex items-center gap-2">
-          <p className="text-meta text-ink-faint">授权只是信任门；secret 不回显。</p>
+          <p className="text-xs text-faint-foreground">授权只是信任门；secret 不回显。</p>
           <Button
             type="button"
             variant="secondary"
@@ -542,22 +557,22 @@ export function PluginsManager(): ReactElement {
       {/* 启停失败是写命令的结果：可关掉；读视图错误是持续状态，不给关闭入口 */}
       <FormError message={toggleError} onDismiss={() => setToggleError(null)} />
 
-      <p className="text-meta text-ink-faint">未授权的插件不会启动。</p>
+      <p className="text-xs text-faint-foreground">未授权的插件不会启动。</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {plugins.length} 个</span>
       </div>
 
       {loading ? (
-        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
+        <p className="grid place-items-center rounded-xl border border-dashed border-border py-6 text-sm text-faint-foreground">
           正在读取插件清单…
         </p>
       ) : plugins.length === 0 ? (
-        <p className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
+        <p className="grid place-items-center rounded-xl border border-dashed border-border py-6 text-sm text-faint-foreground">
           未发现插件
         </p>
       ) : (
-        <ul className={cn(panelCls, 'divide-y divide-line overflow-hidden')}>
+        <ul className={cn(panelCls, 'divide-y divide-border overflow-hidden')}>
           {plugins.map((plugin) => (
             <PluginSummaryRow
               key={plugin.id}

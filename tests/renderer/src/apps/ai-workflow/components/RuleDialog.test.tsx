@@ -503,6 +503,60 @@ describe('RuleDialog', () => {
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })
 
+  it('空值项可选：选中「默认目录」后触发器显示同一文案，保存仍不写 projectId', async () => {
+    const onSubmit = vi.fn((_rule: AutomationRule): Promise<void> => Promise.resolve())
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={blankRule()}
+        isNew
+        workflows={workflows}
+        projects={projects}
+        onSubmit={onSubmit}
+        onCancel={() => {}}
+      />,
+    )
+
+    // 新建默认落在第一个项目
+    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('工作台')
+    await choose(user, '规则目标项目', '默认目录')
+    // 空值项在 Radix 里显示 placeholder：文案与迁移前一致
+    expect(screen.getByRole('combobox', { name: '规则目标项目' })).toHaveTextContent('默认目录')
+    // 该项确实被选中（而不是没选上）
+    await user.click(screen.getByRole('combobox', { name: '规则目标项目' }))
+    expect(await screen.findByRole('option', { name: '默认目录' })).toHaveAttribute(
+      'data-state',
+      'checked',
+    )
+    await user.keyboard('{Escape}')
+
+    await user.type(screen.getByLabelText('规则名称'), 'Issue 规则')
+    await choose(user, '规则目标工作流', '研发')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(onSubmit.mock.calls[0][0].to.projectId).toBeUndefined()
+  })
+
+  it('关闭出口：右上角关闭按钮与 Esc 都走 onCancel', async () => {
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={blankRule()}
+        isNew
+        workflows={workflows}
+        projects={projects}
+        onSubmit={() => Promise.resolve()}
+        onCancel={onCancel}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+
+    await user.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalledTimes(2)
+  })
+
   it('编辑回填并行数；非 Error 的保存失败按字符串展示', async () => {
     const onSubmit = vi.fn().mockRejectedValue('后端不可用')
     render(

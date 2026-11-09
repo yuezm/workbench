@@ -239,8 +239,8 @@ export function RuntimeManager(): ReactElement {
       {/* 自动识别本机已安装的运行时 */}
       <Panel className="flex animate-rise flex-col gap-3 p-5">
         <div className="flex items-center gap-2">
-          <ScanIcon className="text-focus-soft" />
-          <h3 className="text-title font-medium text-ink">已安装的运行时</h3>
+          <ScanIcon className="text-brand" />
+          <h3 className="text-base font-medium text-foreground">已安装的运行时</h3>
           <span className={cn(badgeCls, 'ml-auto')}>{detected.length}</span>
           <Button type="button" variant="ghost" size="sm" disabled={detecting} onClick={rescan}>
             {detecting ? '扫描中…' : '重新扫描'}
@@ -248,29 +248,32 @@ export function RuntimeManager(): ReactElement {
         </div>
 
         {detected.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-line px-3 py-4 text-body text-ink-faint">
+          <p className="rounded-xl border border-dashed border-border px-3 py-4 text-sm text-faint-foreground">
             {detecting ? '正在扫描本机 PATH…' : '未检测到 CLI，可在下方手动新建。'}
           </p>
         ) : (
-          <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+          <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
             {detected.map((d) => {
               const added = items.some((r) => r.command === d.command)
               return (
                 <li
                   key={d.command}
-                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
+                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent"
                 >
-                  <span className="grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-md bg-accent text-muted-foreground">
                     <TerminalIcon />
                   </span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate text-action font-medium text-ink">{d.label}</span>
-                    <span className="truncate font-mono text-body text-ink-faint" title={d.path}>
+                    <span className="truncate text-sm font-medium text-foreground">{d.label}</span>
+                    <span
+                      className="truncate font-mono text-sm text-faint-foreground"
+                      title={d.path}
+                    >
                       {d.path}
                     </span>
                   </span>
                   {added ? (
-                    <span className="rounded-sm bg-white/[0.07] px-2 py-1 text-badge text-ink-faint">
+                    <span className="rounded-sm bg-accent px-2 py-1 text-xs text-faint-foreground">
                       已添加
                     </span>
                   ) : d.supported ? (
@@ -307,12 +310,12 @@ export function RuntimeManager(): ReactElement {
       {/* 已配置运行时 */}
       <Panel className="flex animate-rise flex-col gap-3 p-5 [animation-delay:80ms]">
         <div className="flex items-center gap-2">
-          <ListIcon className="text-ink-dim" />
-          <h3 className="text-title font-medium text-ink">已配置运行时</h3>
+          <ListIcon className="text-muted-foreground" />
+          <h3 className="text-base font-medium text-foreground">已配置运行时</h3>
           <span className={cn(badgeCls)}>{items.length}</span>
           <Button
             type="button"
-            variant="primary"
+            variant="default"
             size="sm"
             className="ml-auto"
             onClick={() => setDialog({ runtime: null, initial: newRuntimeInput() })}
@@ -321,9 +324,9 @@ export function RuntimeManager(): ReactElement {
           </Button>
         </div>
 
-        <ul className="divide-y divide-line overflow-hidden rounded-xl border border-line">
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
           {items.length === 0 && (
-            <li className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
+            <li className="grid place-items-center rounded-xl border border-dashed border-border py-6 text-sm text-faint-foreground">
               暂无运行时
             </li>
           )}
@@ -338,16 +341,16 @@ export function RuntimeManager(): ReactElement {
             return (
               <li
                 key={r.id}
-                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white/[0.03]"
+                className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-accent"
               >
-                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-white/[0.06] text-ink-dim">
+                <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-md bg-accent text-muted-foreground">
                   <TerminalIcon />
                 </span>
 
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-action font-medium text-ink">{r.name}</span>
-                    <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
+                    <span className="truncate text-sm font-medium text-foreground">{r.name}</span>
+                    <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground">
                       {executorLabel(r.executorKey)}
                     </span>
                     <RuntimeStatusBadge
@@ -357,10 +360,10 @@ export function RuntimeManager(): ReactElement {
                       onToggle={() => toggleProbeDetails(r.id)}
                     />
                     {probe?.cliVersion && (
-                      <span className="text-meta text-ink-faint">CLI v{probe.cliVersion}</span>
+                      <span className="text-xs text-faint-foreground">CLI v{probe.cliVersion}</span>
                     )}
                     {!r.enabled && (
-                      <span className="rounded-sm bg-white/[0.06] px-1.5 py-0.5 text-badge text-ink-faint">
+                      <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground">
                         已停用
                       </span>
                     )}
@@ -368,26 +371,26 @@ export function RuntimeManager(): ReactElement {
 
                   {/* 启动头只展示运行时真正配置的部分：profile 是 dsh 的形态，
                       其它执行器留空，不要再拼 `--stdio` 这类插件内部参数 */}
-                  <span className="truncate font-mono text-body text-ink-dim">
+                  <span className="truncate font-mono text-sm text-muted-foreground">
                     {r.command}
                     {r.profile ? ` --profile ${r.profile}` : ''}
                   </span>
 
-                  <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-meta text-ink-faint">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-faint-foreground">
                     <span className="truncate font-mono" title={probe?.path ?? undefined}>
                       {probe?.path ?? '未找到可执行文件'}
                     </span>
                     <span className="tabular-nums">
                       负载 {running}/{maxConcurrent}
                     </span>
-                    {queued > 0 && <span className="text-warn tabular-nums">排队 {queued}</span>}
+                    {queued > 0 && <span className="text-warning tabular-nums">排队 {queued}</span>}
                   </span>
 
                   {showDetails && (
-                    <div className="flex flex-col gap-1 rounded-lg border border-danger/20 bg-danger/[0.06] px-2.5 py-2">
-                      <p className="text-body text-danger">{probe?.error ?? '未知错误'}</p>
+                    <div className="flex flex-col gap-1 rounded-lg border border-destructive/20 bg-destructive/[0.06] px-2.5 py-2">
+                      <p className="text-sm text-destructive">{probe?.error ?? '未知错误'}</p>
                       {probe?.output && (
-                        <pre className="max-h-32 overflow-auto text-body whitespace-pre-wrap text-ink-faint">
+                        <pre className="max-h-32 overflow-auto text-sm whitespace-pre-wrap text-faint-foreground">
                           {probe.output}
                         </pre>
                       )}
@@ -416,12 +419,14 @@ export function RuntimeManager(): ReactElement {
                     编辑
                   </Button>
                   {/* 删除进行中给可见状态：按钮变灰本身不解释原因 */}
-                  {deletingId === r.id && <span className="text-meta text-ink-faint">删除中…</span>}
+                  {deletingId === r.id && (
+                    <span className="text-xs text-faint-foreground">删除中…</span>
+                  )}
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="text-danger hover:bg-danger/10 hover:text-danger"
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     aria-label={`删除运行时 ${r.name}`}
                     disabled={deletingId === r.id}
                     onClick={() => void remove(r.id)}

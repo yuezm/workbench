@@ -273,7 +273,7 @@ export function Menu({
               width: position.width,
               maxHeight: position.maxHeight,
             }}
-            className="z-50 animate-rise overflow-y-auto overscroll-contain rounded-lg border border-line-strong/60 bg-surface p-1 shadow-[0_24px_60px_-24px_rgb(0_0_0/90%)]"
+            className="z-50 animate-rise overflow-y-auto overscroll-contain rounded-lg border border-input/60 bg-card p-1 shadow-[0_24px_60px_-24px_rgb(0_0_0/90%)]"
           >
             {sections.map((section, sectionIndex) => (
               <div
@@ -282,7 +282,9 @@ export function Menu({
                 aria-label={section.title}
               >
                 {section.title !== undefined && (
-                  <div className="px-2.5 pt-2 pb-1 text-meta text-ink-faint">{section.title}</div>
+                  <div className="px-2.5 pt-2 pb-1 text-xs text-faint-foreground">
+                    {section.title}
+                  </div>
                 )}
                 {section.items.map((item, offset) => {
                   const index = groupStarts[sectionIndex] + offset
@@ -299,21 +301,21 @@ export function Menu({
                       onClick={() => choose(index)}
                       className={cn(
                         'flex cursor-pointer flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors duration-150',
-                        index === activeIndex ? 'bg-surface-3' : 'hover:bg-white/[0.06]',
+                        index === activeIndex ? 'bg-accent' : 'hover:bg-accent',
                       )}
                     >
                       <span className="flex items-center gap-2">
-                        <span className="truncate text-action font-medium text-ink">
+                        <span className="truncate text-sm font-medium text-foreground">
                           {item.label}
                         </span>
                         {item.badge !== undefined && (
-                          <span className="shrink-0 rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim tabular-nums">
+                          <span className="shrink-0 rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
                             {item.badge}
                           </span>
                         )}
                       </span>
                       {item.description !== undefined && (
-                        <span className="text-meta text-ink-dim">{item.description}</span>
+                        <span className="text-xs text-muted-foreground">{item.description}</span>
                       )}
                     </div>
                   )

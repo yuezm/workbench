@@ -32,12 +32,12 @@ const STATUS_LABEL: Record<RunStatus, string> = {
 
 /** 运行状态配色：成功绿、失败红、进行中紫、取消灰 */
 const STATUS_TONE: Record<RunStatus, string> = {
-  queued: 'text-focus-soft',
-  running: 'text-focus-soft',
-  waiting: 'text-long',
-  succeeded: 'text-short',
-  failed: 'text-danger',
-  cancelled: 'text-ink-faint',
+  queued: 'text-brand',
+  running: 'text-brand',
+  waiting: 'text-info',
+  succeeded: 'text-success',
+  failed: 'text-destructive',
+  cancelled: 'text-faint-foreground',
 }
 
 const ERROR_CODE_LABEL: Record<RunErrorCode, string> = {
@@ -66,12 +66,14 @@ function truncate(text: string, max: number): string {
 function RunEventLine({ event }: { event: RunEvent }): ReactElement | null {
   switch (event.type) {
     case 'text':
-      return <p className="text-body whitespace-pre-wrap text-ink-dim">{event.text}</p>
+      return <p className="text-sm whitespace-pre-wrap text-muted-foreground">{event.text}</p>
     case 'thinking':
-      return <p className="text-body whitespace-pre-wrap text-ink-faint italic">{event.text}</p>
+      return (
+        <p className="text-sm whitespace-pre-wrap text-faint-foreground italic">{event.text}</p>
+      )
     case 'tool_call':
       return (
-        <p className="rounded-md bg-surface-2 px-2 py-1 font-mono text-body text-ink-dim">
+        <p className="rounded-md bg-muted px-2 py-1 font-mono text-sm text-muted-foreground">
           {['工具调用：' + (event.tool ?? '未知工具'), truncate(event.input ?? '', TOOL_TEXT_MAX)]
             .filter(Boolean)
             .join(' · ')}
@@ -81,8 +83,8 @@ function RunEventLine({ event }: { event: RunEvent }): ReactElement | null {
       return (
         <p
           className={cn(
-            'rounded-md bg-surface-2 px-2 py-1 font-mono text-body text-ink-dim',
-            event.isError === true && 'text-danger',
+            'rounded-md bg-muted px-2 py-1 font-mono text-sm text-muted-foreground',
+            event.isError === true && 'text-destructive',
           )}
         >
           {['工具结果：' + (event.tool ?? '未知工具'), truncate(event.output ?? '', TOOL_TEXT_MAX)]
@@ -116,8 +118,8 @@ function summarizeBody(text: string): string {
 /** 过程折叠行：思考 / 工具调用与结果，默认收起，展开后逐条看 */
 function ProcessFold({ process }: { process: RunEvent[] }): ReactElement {
   return (
-    <details className="rounded-md bg-surface-2 px-2 py-1">
-      <summary className="cursor-pointer text-action text-ink-faint select-none">
+    <details className="rounded-md bg-muted px-2 py-1">
+      <summary className="cursor-pointer text-sm text-faint-foreground select-none">
         过程 · {process.length} 条（思考 / 工具调用与结果）
       </summary>
       <div className="mt-1.5 flex flex-col gap-1.5">
@@ -170,7 +172,7 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
     if (!expanded) {
       return (
         <div className="mt-2 flex flex-col gap-1.5">
-          <p className="text-body whitespace-pre-wrap text-ink-dim">{summary}</p>
+          <p className="text-sm whitespace-pre-wrap text-muted-foreground">{summary}</p>
           {hidden && (
             <Button
               type="button"
@@ -206,7 +208,7 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
   }
   if (run.output === '') return null
   return (
-    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-surface-2 p-2.5 text-body whitespace-pre-wrap text-ink-dim">
+    <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-2.5 text-sm whitespace-pre-wrap text-muted-foreground">
       {run.output}
     </pre>
   )
@@ -237,13 +239,15 @@ function RunApprovals({ runId }: { runId: string }): ReactElement | null {
       {approvals.map((item) => (
         <li
           key={item.id}
-          className="rounded-md border border-warn/20 bg-warn/[0.06] px-2 py-1 text-body text-warn"
+          className="rounded-md border border-warning/20 bg-warning/[0.06] px-2 py-1 text-sm text-warning"
         >
           <span className="font-medium">提权 · {item.tool === '' ? '未知工具' : item.tool}</span>
-          <span className="ml-1.5 text-ink-faint">
+          <span className="ml-1.5 text-faint-foreground">
             {item.outcome === null ? '未落定' : (APPROVAL_LABEL[item.outcome] ?? item.outcome)}
           </span>
-          {item.reason !== '' && <span className="mt-0.5 block text-ink-faint">{item.reason}</span>}
+          {item.reason !== '' && (
+            <span className="mt-0.5 block text-faint-foreground">{item.reason}</span>
+          )}
         </li>
       ))}
     </ul>
@@ -271,13 +275,13 @@ function RunBlock({
   stages: ReadonlyArray<StageRef>
 }): ReactElement {
   return (
-    <div className="rounded-xl border border-line bg-surface px-4 py-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-ink-dim">
-        <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-focus-soft">
+    <div className="rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+        <span className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-brand">
           {stageLabelOf(stages, run.stageId)}
         </span>
-        <span className="text-ink-faint tabular-nums">第 {turn} 轮</span>
-        <span className={cn('rounded-sm bg-white/[0.06] px-2 py-0.5', STATUS_TONE[run.status])}>
+        <span className="text-faint-foreground tabular-nums">第 {turn} 轮</span>
+        <span className={cn('rounded-sm bg-accent px-2 py-0.5', STATUS_TONE[run.status])}>
           {STATUS_LABEL[run.status]}
         </span>
         <span className="tabular-nums">{run.startedAt ?? run.createdAt}</span>
@@ -286,7 +290,7 @@ function RunBlock({
         )}
         {run.exitCode !== null && <span className="tabular-nums">退出码 {run.exitCode}</span>}
         {run.errorCode !== null && (
-          <span className="text-danger">{ERROR_CODE_LABEL[run.errorCode]}</span>
+          <span className="text-destructive">{ERROR_CODE_LABEL[run.errorCode]}</span>
         )}
         {run.usage !== null && <UsageLine usage={run.usage} />}
       </div>
@@ -303,14 +307,14 @@ function RunBlock({
 /** 一条任务上下文 / 反馈：作者 + 时间 + 正文（只作资料） */
 function CommentBlock({ comment }: { comment: TaskComment }): ReactElement {
   return (
-    <div className="rounded-xl border border-line bg-surface-2 px-4 py-2.5">
-      <div className="flex items-center gap-2 text-meta text-ink-faint">
-        <span className="rounded-sm bg-focus/15 px-1.5 py-0.5 text-focus-soft">
+    <div className="rounded-xl border border-border bg-muted px-4 py-2.5">
+      <div className="flex items-center gap-2 text-xs text-faint-foreground">
+        <span className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-brand">
           {comment.author === 'owner' ? '我' : '智能体'}
         </span>
         <span className="tabular-nums">{comment.createdAt}</span>
       </div>
-      <p className="mt-1 text-body whitespace-pre-wrap text-ink-dim">{comment.text}</p>
+      <p className="mt-1 text-sm whitespace-pre-wrap text-muted-foreground">{comment.text}</p>
     </div>
   )
 }
@@ -365,7 +369,7 @@ export function TaskActivity({ runs, comments, stages }: TaskActivityProps): Rea
   const items = mergeActivity(runs, comments)
   if (items.length === 0) {
     return (
-      <div className="grid place-items-center rounded-xl border border-dashed border-line py-6 text-body text-ink-faint">
+      <div className="grid place-items-center rounded-xl border border-dashed border-border py-6 text-sm text-faint-foreground">
         还没有运行记录或反馈
       </div>
     )

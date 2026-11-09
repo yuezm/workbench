@@ -11,7 +11,7 @@ describe('Field', () => {
     )
     const label = screen.getByText('名称')
     expect(label.tagName).toBe('SPAN')
-    expect(label).toHaveClass('text-meta', 'text-ink-dim')
+    expect(label).toHaveClass('text-xs', 'text-muted-foreground')
     expect(label.closest('label')).toContainElement(screen.getByLabelText('名称输入'))
   })
 
@@ -42,7 +42,7 @@ describe('Field', () => {
       </Field>,
     )
     const star = screen.getByText('*')
-    expect(star).toHaveClass('text-danger')
+    expect(star).toHaveClass('text-destructive')
     expect(star).toHaveAttribute('aria-hidden', 'true')
     expect(screen.getByText('必填')).toHaveClass('sr-only')
   })
@@ -53,7 +53,7 @@ describe('Field', () => {
         <input aria-label="cron 输入" />
       </Field>,
     )
-    expect(screen.getByText('分 时 日 月 周')).toHaveClass('text-meta', 'text-ink-faint')
+    expect(screen.getByText('分 时 日 月 周')).toHaveClass('text-xs', 'text-faint-foreground')
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
@@ -64,7 +64,7 @@ describe('Field', () => {
       </Field>,
     )
     expect(screen.getByRole('alert')).toHaveTextContent('任务标题必填')
-    expect(screen.getByRole('alert')).toHaveClass('text-danger')
+    expect(screen.getByRole('alert')).toHaveClass('text-destructive')
 
     rerender(
       <Field label="任务标题" required error="">

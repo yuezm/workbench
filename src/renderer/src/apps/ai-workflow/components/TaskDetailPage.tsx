@@ -148,7 +148,7 @@ export function TaskDetailPage({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="text-warn"
+                className="text-warning"
                 disabled={action !== null}
                 onClick={stopInteraction}
               >
@@ -168,7 +168,7 @@ export function TaskDetailPage({
               </Button>
             )}
             {task !== null && task.status === 'completed' && (
-              <span className="text-meta text-ink-faint">已完成</span>
+              <span className="text-xs text-faint-foreground">已完成</span>
             )}
           </div>
         }
@@ -178,9 +178,9 @@ export function TaskDetailPage({
         {state.error !== null ? (
           <FormError message={state.error} className="rounded-xl" />
         ) : state.data === undefined ? (
-          <p className="text-meta text-ink-faint">正在读取任务…</p>
+          <p className="text-xs text-faint-foreground">正在读取任务…</p>
         ) : task === null ? (
-          <p className="rounded-xl border border-dashed border-line px-3 py-2 text-body text-ink-faint">
+          <p className="rounded-xl border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
             任务不存在
           </p>
         ) : (
@@ -200,7 +200,7 @@ export function TaskDetailPage({
             <FormError message={childrenState.error} />
             {children.length > 0 && (
               <section aria-label="子任务" className="flex flex-col gap-2">
-                <h3 className="flex items-center gap-2 text-title font-medium text-ink">
+                <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
                   子任务
                   <span className={badgeCls}>
                     {children.filter((child) => child.status === 'completed').length}/
@@ -214,17 +214,17 @@ export function TaskDetailPage({
                         type="button"
                         disabled={onOpenTask === undefined}
                         onClick={() => onOpenTask?.(child.id)}
-                        className="flex w-full items-center gap-2 rounded-xl border border-line bg-white/[0.02] px-3 py-2 text-left text-action text-ink transition-colors hover:bg-white/[0.05] disabled:cursor-default"
+                        className="flex w-full items-center gap-2 rounded-xl border border-border bg-accent px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent disabled:cursor-default"
                       >
                         <span className="min-w-0 flex-1 truncate">{child.title}</span>
-                        <span className="shrink-0 text-meta text-ink-faint">
+                        <span className="shrink-0 text-xs text-faint-foreground">
                           {stageNameOf(child)}
                         </span>
                         <span
                           className={
                             child.status === 'completed'
-                              ? 'shrink-0 rounded-sm bg-short/15 px-1.5 py-0.5 text-badge text-short'
-                              : 'shrink-0 rounded-sm bg-white/[0.07] px-1.5 py-0.5 text-badge text-ink-dim'
+                              ? 'shrink-0 rounded-sm bg-success/15 px-1.5 py-0.5 text-xs text-success'
+                              : 'shrink-0 rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground'
                           }
                         >
                           {child.status === 'completed' ? '已完成' : '进行中'}
@@ -237,7 +237,7 @@ export function TaskDetailPage({
             )}
 
             <section aria-label="上下文" className="flex flex-col gap-3">
-              <h3 className="flex items-center gap-2 text-title font-medium text-ink">
+              <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
                 上下文
                 <span className={badgeCls}>运行 {runs.length}</span>
                 <span className={badgeCls}>反馈 {comments.length}</span>

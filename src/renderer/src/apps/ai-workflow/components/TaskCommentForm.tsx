@@ -2,10 +2,10 @@ import { useRef, useState, type FormEvent, type ReactElement } from 'react'
 import { TASK_COMMENT_LIMITS } from '../../../../../protocol/task-comment'
 import { Button } from '../../../components/ui/button'
 import { FormError } from '../../../components/ui/form-error'
-import { fieldCls } from '../../../components/ui/input'
+import { Textarea } from '../../../components/ui/textarea'
 import { cn } from '../../../lib/cn'
 
-const textareaCls = cn(fieldCls, 'min-h-20 resize-y py-2')
+const textareaCls = 'min-h-20 resize-y'
 
 export interface TaskCommentFormProps {
   value: string
@@ -57,10 +57,10 @@ export function TaskCommentForm({
   return (
     <form
       aria-label="添加反馈"
-      className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3"
+      className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3"
       onSubmit={submit}
     >
-      <textarea
+      <Textarea
         ref={textareaRef}
         aria-label="反馈内容"
         className={textareaCls}
@@ -80,26 +80,26 @@ export function TaskCommentForm({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <label
           className={cn(
-            'flex items-center gap-2 text-action',
-            canRerun ? 'text-ink-dim' : 'text-ink-faint',
+            'flex items-center gap-2 text-sm',
+            canRerun ? 'text-muted-foreground' : 'text-faint-foreground',
           )}
         >
           <input
             type="checkbox"
             aria-label="同时让智能体接着做"
-            className="size-3.5 accent-focus"
+            className="size-3.5 accent-primary"
             checked={rerun && canRerun}
             disabled={!canRerun || busy}
             onChange={(e) => onRerunChange(e.target.checked)}
           />
           同时让智能体接着做
         </label>
-        <Button type="submit" variant="primary" size="sm" disabled={busy}>
+        <Button type="submit" variant="default" size="sm" disabled={busy}>
           {busy ? '发送中…' : '发送反馈'}
         </Button>
       </div>
 
-      <p className="text-meta text-ink-dim">
+      <p className="text-xs text-muted-foreground">
         {canRerun
           ? '反馈会作为提示词的「反馈记录」资料段；勾选后若当前没有运行中的轮次，会立刻再跑一轮。'
           : '当前阶段不交给智能体：反馈只记上下文，任务下次进入智能体阶段时带上。'}

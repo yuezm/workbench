@@ -28,7 +28,7 @@ describe('RuntimeStatusBadge', () => {
   it('可用时显示状态与耗时，绿色', () => {
     render(<RuntimeStatusBadge probe={probe()} />)
     const badge = screen.getByText('可用 · 12ms')
-    expect(badge.className).toContain('text-short')
+    expect(badge.className).toContain('text-success')
   })
 
   it('探测中优先于 lastProbe 展示', () => {
@@ -41,7 +41,7 @@ describe('RuntimeStatusBadge', () => {
     render(<RuntimeStatusBadge probe={probe({ state: 'unavailable', error: '登录态失效' })} />)
     const badge = screen.getByText('不可用 · 12ms')
     expect(badge).toHaveAttribute('title', '登录态失效')
-    expect(badge.className).toContain('text-danger')
+    expect(badge.className).toContain('text-destructive')
   })
 
   it('不可用且缺原因时用兜底文案', () => {

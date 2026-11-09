@@ -80,7 +80,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
     <section aria-label="待处理卡" className="flex flex-col gap-3">
       {pending.length > 0 && (
         <section aria-label="待审批" className="flex flex-col gap-2">
-          <h3 className="flex items-center gap-2 text-title font-medium text-ink">
+          <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
             待审批
             <span className={badgeCls}>{pending.length}</span>
           </h3>
@@ -88,12 +88,14 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
             {pending.map((card) => (
               <li key={card.id}>
                 <CardShell tone="ask">
-                  <p className="text-title font-medium text-ink">{card.title}</p>
+                  <p className="text-base font-medium text-foreground">{card.title}</p>
                   {card.text !== '' && (
-                    <p className="mt-1.5 text-body whitespace-pre-wrap text-ink-dim">{card.text}</p>
+                    <p className="mt-1.5 text-sm whitespace-pre-wrap text-muted-foreground">
+                      {card.text}
+                    </p>
                   )}
                   {/* 选项竖排：一行一个，整行可点，序号只是视觉锚点（读屏不念，避免「1 裸名」） */}
-                  <p className="mt-3 text-meta text-ink-dim">点一行即提交，不能撤回</p>
+                  <p className="mt-3 text-xs text-muted-foreground">点一行即提交，不能撤回</p>
                   <ul aria-label="可选项" className="mt-2 flex flex-col gap-2">
                     {card.options.map((option, index) => (
                       <li key={`${card.id}-${index}`}>
@@ -103,10 +105,10 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
                           onClick={() => answer(card, index)}
                           className={cn(
                             'flex min-h-10 w-full items-start gap-2.5 rounded-md px-3 py-2 text-left',
-                            'bg-surface-2 text-action font-medium text-ink ring-1 ring-line select-none',
+                            'bg-muted text-sm font-medium text-foreground ring-1 ring-border select-none',
                             'transition-colors duration-150 ease-out',
-                            'hover:bg-surface-3 hover:ring-line-strong',
-                            'focus-visible:ring-2 focus-visible:ring-focus/50 focus-visible:ring-offset-2 focus-visible:ring-offset-abyss',
+                            'hover:bg-accent hover:ring-input',
+                            'focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
                             'disabled:pointer-events-none disabled:opacity-40',
                           )}
                         >
@@ -129,7 +131,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
 
       {notices.length > 0 && (
         <section aria-label="通知" className="flex flex-col gap-2">
-          <h3 className="flex items-center gap-2 text-title font-medium text-ink">
+          <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
             通知
             <span className={badgeCls}>{notices.length}</span>
           </h3>
@@ -139,7 +141,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
                 <CardShell>
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
-                      <p className="flex items-center gap-2 text-action font-medium text-ink-dim">
+                      <p className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                         <span className="min-w-0 break-words">{group.notice.title}</span>
                         {group.cards.length > 1 && (
                           <span className={cn(badgeCls, 'shrink-0')} aria-hidden="true">
@@ -148,7 +150,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
                         )}
                       </p>
                       {group.notice.text !== '' && (
-                        <p className="mt-1 text-body whitespace-pre-wrap text-ink-dim">
+                        <p className="mt-1 text-sm whitespace-pre-wrap text-muted-foreground">
                           {group.notice.text}
                         </p>
                       )}
@@ -158,7 +160,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="w-8 px-0 text-ink-faint hover:text-ink"
+                        className="w-8 px-0 text-faint-foreground hover:text-foreground"
                         aria-label={`关闭通知：${group.notice.title}`}
                         title="关闭通知"
                         disabled={busy === group.id}
@@ -176,7 +178,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
       )}
 
       {error !== null && (
-        <p role="alert" className="text-body text-danger">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       )}
@@ -195,8 +197,8 @@ function CardShell({ tone, children }: { tone?: 'ask'; children: ReactNode }): R
     <div
       className={
         tone === 'ask'
-          ? 'rounded-xl border border-l-2 border-warn/25 border-l-warn bg-warn/[0.06] px-4 py-3'
-          : 'rounded-xl border border-line bg-surface px-4 py-3'
+          ? 'rounded-xl border border-l-2 border-warning/25 border-l-warning bg-warning/[0.06] px-4 py-3'
+          : 'rounded-xl border border-border bg-card px-4 py-3'
       }
     >
       {children}

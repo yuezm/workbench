@@ -303,7 +303,7 @@ describe('KanbanBoard', () => {
 
     const stageCol = screen.getByRole('group', { name: '阶段：待办' })
     fireEvent.dragOver(stageCol)
-    expect(stageCol.className).not.toContain('border-focus')
+    expect(stageCol.className).not.toContain('border-ring')
     fireEvent.drop(stageCol)
     expect(onMoveToStage).not.toHaveBeenCalled()
 
@@ -311,7 +311,7 @@ describe('KanbanBoard', () => {
     fireEvent.dragStart(screen.getByLabelText('任务：卡片任务'))
     const done = screen.getByRole('group', { name: '归档区' })
     fireEvent.dragOver(done)
-    expect(done.className).not.toContain('border-short')
+    expect(done.className).not.toContain('border-success')
     fireEvent.drop(done)
     expect(onCompleteTask).not.toHaveBeenCalled()
   })

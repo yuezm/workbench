@@ -1,8 +1,13 @@
 import type { ReactElement, ReactNode } from 'react'
 import { cn } from '../../lib/cn'
 
-/** 字段小标签：用次级前景（ink-dim），不再用最暗一级 */
-export const labelCls = 'text-meta font-medium text-ink-dim'
+/**
+ * 字段小标签：用次级前景（muted-foreground），不再用最暗一级。
+ *
+ * 只在本模块内用：模块外的小标签一律走上游 `<Label>`（components/ui/label），
+ * 不再从 field.tsx 拿类名字符串。
+ */
+const labelCls = 'text-xs font-medium text-muted-foreground'
 
 export interface FieldProps {
   /** 小标签文案 */
@@ -44,16 +49,16 @@ export function Field({
       <span className={cn('flex items-center gap-1', labelCls, labelClassName)}>
         {label}
         {required && (
-          <span aria-hidden="true" className="text-danger">
+          <span aria-hidden="true" className="text-destructive">
             *
           </span>
         )}
         {required && <span className="sr-only">必填</span>}
       </span>
       {children}
-      {hint !== undefined && <span className="text-meta text-ink-faint">{hint}</span>}
+      {hint !== undefined && <span className="text-xs text-faint-foreground">{hint}</span>}
       {message !== null && message !== '' && (
-        <span role="alert" className="text-meta text-danger">
+        <span role="alert" className="text-xs text-destructive">
           {message}
         </span>
       )}

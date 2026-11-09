@@ -24,12 +24,12 @@ export interface ProjectSwitcherProps {
 /** 行样式：选中态沿用会话清单的高亮（两侧都靠这层圆角底色表达「当前在哪」） */
 const rowCls = (isActive: boolean): string =>
   cn(
-    'flex min-w-0 flex-1 flex-col gap-0.5 rounded-xl px-2.5 py-2 text-left text-action',
+    'flex min-w-0 flex-1 flex-col gap-0.5 rounded-xl px-2.5 py-2 text-left text-sm',
     'transition-colors duration-200 outline-none',
-    'focus-visible:ring-2 focus-visible:ring-focus/60',
+    'focus-visible:ring-2 focus-visible:ring-ring/60',
     isActive
-      ? 'bg-surface-3 text-ink shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'
-      : 'text-ink-dim hover:bg-white/[0.04] hover:text-ink',
+      ? 'bg-accent text-foreground shadow-[inset_0_1px_0_rgb(255_255_255/6%)]'
+      : 'text-muted-foreground hover:bg-accent hover:text-foreground',
   )
 
 /**
@@ -54,12 +54,12 @@ export function ProjectSwitcher({
   return (
     <section aria-label="项目列表" className="flex shrink-0 flex-col gap-1.5">
       <div className="flex shrink-0 items-center justify-between gap-2 px-1">
-        <span className="text-meta font-medium text-ink-faint">项目</span>
+        <span className="text-xs font-medium text-faint-foreground">项目</span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 px-2 text-action"
+          className="h-6 px-2 text-sm"
           onClick={onCreate}
         >
           + 添加
@@ -69,7 +69,7 @@ export function ProjectSwitcher({
       <ul className="flex max-h-44 min-h-0 flex-col gap-1 overflow-auto">
         {projects.length === 0 && (
           // 空态一行：还没有项目时默认目录仍可用，添加入口在标题行，这里不重复放按钮
-          <li className="rounded-xl border border-dashed border-line px-2.5 py-3 text-center text-body text-ink-faint">
+          <li className="rounded-xl border border-dashed border-border px-2.5 py-3 text-center text-sm text-faint-foreground">
             还没有项目，可先落到默认目录
           </li>
         )}
@@ -86,7 +86,9 @@ export function ProjectSwitcher({
                 onClick={() => onSelect(project.id)}
               >
                 <span className="w-full truncate font-medium">{project.name}</span>
-                <span className="w-full truncate text-meta text-ink-faint">{project.path}</span>
+                <span className="w-full truncate text-xs text-faint-foreground">
+                  {project.path}
+                </span>
               </button>
 
               {/* 编辑只挂在选中项上：项目列表很短，常驻按钮反而挤掉路径 */}
@@ -95,9 +97,9 @@ export function ProjectSwitcher({
                   type="button"
                   aria-label={`编辑项目 ${project.name}`}
                   className={cn(
-                    'shrink-0 rounded-md px-1.5 py-0.5 text-action font-medium text-ink-faint',
+                    'shrink-0 rounded-md px-1.5 py-0.5 text-sm font-medium text-faint-foreground',
                     'transition-colors duration-150 outline-none',
-                    'hover:bg-white/[0.06] hover:text-ink focus-visible:ring-2 focus-visible:ring-focus/60',
+                    'hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60',
                   )}
                   onClick={() => onEdit(project)}
                 >
@@ -118,7 +120,7 @@ export function ProjectSwitcher({
             onClick={() => onSelect(DEFAULT_PROJECT_ID)}
           >
             <span className="w-full truncate font-medium">默认目录</span>
-            <span className="w-full truncate text-meta text-ink-faint">
+            <span className="w-full truncate text-xs text-faint-foreground">
               {defaultPath === '' ? '未配置项目时的工作目录' : defaultPath}
             </span>
           </button>

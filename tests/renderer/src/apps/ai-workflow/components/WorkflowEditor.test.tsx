@@ -106,7 +106,7 @@ describe('WorkflowEditor', () => {
     expect(onCancel).toHaveBeenCalled()
   }, 30_000)
 
-  it('编辑已有工作流：把阶段 id 还原成下标', () => {
+  it('编辑已有工作流：把阶段 id 还原成下标', async () => {
     const existing: WorkflowWithStages = {
       id: 'w',
       name: '旧流',
@@ -139,13 +139,19 @@ describe('WorkflowEditor', () => {
         },
       ],
     }
+    const user = userEvent.setup()
     render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
     expect(screen.getByLabelText('工作流名称')).toHaveValue('旧流')
-    expect(screen.getByLabelText('阶段1完成后进入')).toHaveValue('1')
+    // 上游 Select 的触发器不带 value 属性：改成打开浮层看哪一项是选中项
+    await user.click(screen.getByRole('combobox', { name: '阶段1完成后进入' }))
+    expect(screen.getByRole('option', { name: '进行中' })).toHaveAttribute('data-state', 'checked')
+    await user.keyboard('{Escape}')
     expect(screen.getByRole('combobox', { name: '阶段1完成后进入' })).toHaveTextContent('进行中')
     // 第二段详情要点左侧才展开
     fireEvent.click(screen.getByRole('button', { name: '阶段2' }))
-    expect(screen.getByLabelText('阶段2出错时进入')).toHaveValue('0')
+    await user.click(screen.getByRole('combobox', { name: '阶段2出错时进入' }))
+    expect(screen.getByRole('option', { name: '待办' })).toHaveAttribute('data-state', 'checked')
+    await user.keyboard('{Escape}')
     expect(screen.getByRole('combobox', { name: '阶段2出错时进入' })).toHaveTextContent('待办')
   })
 
@@ -411,11 +417,11 @@ describe('WorkflowEditor', () => {
     kernel.setView('workflows.all', undefined, [])
     kernel.setView('agents.all', undefined, [])
     render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
-    // 目标的 id 仍原样回传（不在候选里，下拉按占位文案展示），目标阶段候选为空
+    // 目标的 id 仍原样回传（不在候选里，下拉按未设置展示），目标阶段候选为空
     expect(screen.getByRole('combobox', { name: '阶段1交接目标工作流' })).toHaveTextContent(
-      '请选择',
+      '不交接',
     )
-    expect(screen.getByRole('combobox', { name: '阶段1交接目标阶段' })).toHaveTextContent('请选择')
+    expect(screen.getByRole('combobox', { name: '阶段1交接目标阶段' })).toHaveTextContent('首阶段')
   })
 
   it('子任务三字段：落点阶段 / 完成后动作 / 是否允许拆（M8）', async () => {

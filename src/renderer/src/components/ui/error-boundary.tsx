@@ -42,10 +42,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     if (error === null) return this.props.children
     return (
       <div role="alert" className="grid h-full place-items-center p-6">
-        <div className="flex w-full max-w-md flex-col gap-2 rounded-xl border border-danger/30 bg-danger/10 p-5">
-          <h2 className="text-title font-medium text-ink">{this.props.title ?? '界面出错了'}</h2>
-          <p className="text-body break-words text-danger">{error.message}</p>
-          <p className="text-meta text-ink-dim">
+        <div className="flex w-full max-w-md flex-col gap-2 rounded-xl border border-destructive/30 bg-destructive/10 p-5">
+          <h2 className="text-base font-medium text-foreground">
+            {this.props.title ?? '界面出错了'}
+          </h2>
+          <p className="text-sm break-words text-destructive">{error.message}</p>
+          <p className="text-xs text-muted-foreground">
             数据没有丢：界面由事实日志重建，重新加载后继续。反复出现请记下上面的文案。
           </p>
           <div className="mt-1 flex justify-end">

@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactElement } from 'react'
+import { ArrowLeftIcon, SettingsIcon } from 'lucide-react'
 import type { Card, Project, ProjectInput, TaskInput } from '../../../../protocol/entities'
 import { FormError } from '../../components/ui/form-error'
-import { Segmented } from '../../components/ui/segmented'
+import { Button } from '../../components/ui/button'
 import { getKernelStore } from '../../shell/kernelStore'
 import { useKernelViewState } from '../../shell/useKernelView'
 import { ApprovalBar } from './components/ApprovalBar'
@@ -359,15 +360,30 @@ export function AiWorkflowPage(): ReactElement {
         )}
 
         <div className="border-t border-border p-3">
-          <Segmented
-            value={view}
-            onChange={changeView}
-            ariaLabel="视图切换"
-            options={[
-              { value: 'workspace', label: '工作台' },
-              { value: 'settings', label: '设置' },
-            ]}
-          />
+          {/* 底部一行图标：视图切换（工作台↔设置）。主题切换器是全局设置，在顶部栏右侧。 */}
+          <div className="flex items-center gap-1">
+            {view === 'workspace' ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="设置"
+                title="设置"
+                onClick={() => changeView('settings')}
+              >
+                <SettingsIcon />
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="返回工作台"
+                title="返回工作台"
+                onClick={() => changeView('workspace')}
+              >
+                <ArrowLeftIcon />
+              </Button>
+            )}
+          </div>
         </div>
       </aside>
 

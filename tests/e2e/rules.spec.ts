@@ -38,7 +38,7 @@ test('规则页：UI 保存规则 → app 事件建任务，同 subject 不重�
 
   // 1) 设置 → 规则配置 → 新建规则（事件来源 app / pomodoro.completed）
   await page.getByRole('button', { name: 'AI 工作流' }).click()
-  await page.getByRole('tab', { name: '设置' }).click()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   await page.getByRole('button', { name: '规则', exact: true }).click()
   await page.getByRole('button', { name: '新建规则' }).click()
 
@@ -92,7 +92,7 @@ test('规则页：UI 保存规则 → app 事件建任务，同 subject 不重�
     })
 
   // 4) 看板出现规则任务（任务栏 + 唯一工作流默认选中）
-  await page.getByRole('tab', { name: '工作台' }).click()
+  await page.getByRole('button', { name: '返回工作台' }).click()
   await page.getByRole('button', { name: '任务' }).click()
   await expect(page.getByText('e2e-番茄', { exact: true })).toBeVisible()
 

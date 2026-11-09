@@ -30,7 +30,7 @@ test('AI 工作流：顶部标签可进入，单列侧栏切换栏目，设置�
   await expect(page.getByLabel('消息输入')).toBeHidden()
 
   // 侧栏底部切到设置：设置栏目
-  await page.getByRole('tab', { name: '设置' }).click()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   await expect(page.getByRole('navigation', { name: '设置栏目' })).toBeVisible()
 
   // 运行时配置

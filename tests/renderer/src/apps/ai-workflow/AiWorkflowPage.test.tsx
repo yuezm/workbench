@@ -219,9 +219,19 @@ function dispatchWith(
   kernel.onDispatch(handler)
 }
 
-/** 切到视图页签：工作台 / 设置 */
-async function openView(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
-  await user.click(screen.getByRole('tab', { name }))
+/** 切到视图：进设置点「设置」图标按钮，回工作台点「返回工作台」图标按钮 */
+async function openView(
+  user: ReturnType<typeof userEvent.setup>,
+  name: '设置' | '工作台',
+): Promise<void> {
+  if (name === '设置') {
+    // 已经在设置视图（侧栏显示「返回工作台」）就不用再点「设置」
+    if (screen.queryByRole('button', { name: '返回工作台' }) === null) {
+      await user.click(screen.getByRole('button', { name: '设置' }))
+    }
+    return
+  }
+  await user.click(screen.getByRole('button', { name: '返回工作台' }))
 }
 
 /** 打开设置并切到左侧二级栏目：运行时配置 / 智能体配置 / 工作流配置 */
@@ -708,25 +718,23 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    // 底部固定分段控件：两个 tab 常驻
-    expect(await screen.findByRole('tab', { name: '工作台' })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    )
-    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'false')
+    // 底部固定图标按钮：工作台视图给「设置」图标，设置视图给「返回工作台」图标
+    expect(await screen.findByRole('button', { name: '设置' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '返回工作台' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: '设置' }))
-    expect(screen.getByRole('tab', { name: '设置' })).toHaveAttribute('aria-selected', 'true')
+    await user.click(screen.getByRole('button', { name: '设置' }))
+    expect(screen.getByRole('button', { name: '返回工作台' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '设置栏目' })).toBeInTheDocument()
     // 默认设置栏目 = 运行时配置
     expect(await screen.findByRole('heading', { name: '运行时' })).toBeInTheDocument()
     // 内容区让位给设置内容
     expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: '工作台' }))
+    await user.click(screen.getByRole('button', { name: '返回工作台' }))
     expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '运行时' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: '设置栏目' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument()
   })
 
   it('任务栏的工作流切换器换工作流后看板随之切换', async () => {
@@ -1143,7 +1151,7 @@ describe('AiWorkflowPage', () => {
     await user.click(screen.getByLabelText('任务：任务A'))
     expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
     await openSection(user, '运行时')
-    await user.click(screen.getByRole('tab', { name: '工作台' }))
+    await user.click(screen.getByRole('button', { name: '返回工作台' }))
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
   })

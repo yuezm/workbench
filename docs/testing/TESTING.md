@@ -35,7 +35,7 @@
 - 契约测试**只守卫不改**：`WorkbenchApi` / `NOTIFY_CHANNEL` / `AppDefinition` 变更时，先改契约与消费方，再让测试跟随契约走。
 - E2E **有意不覆盖**阶段完成/系统通知（真实等待 ≥60s 且脆），该路径由 machine/usePomodoro 单测 + 手动验收覆盖。
 - renderer 单测默认 jsdom；main/preload 契约测试文件首行标 `// @vitest-environment node`。
-- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98；项目基线（2026-11-05 M2 退出）99.73 / 97.78 / 100 / 100，`pnpm test:coverage` 跌破基线即 finding。
+- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98；项目基线（2026-11-09 覆盖率补口）**100 / 100 / 100 / 100**，`pnpm test:coverage` 跌破基线即 finding。
 - M2 起 `runs` / `run_events` / `conversations` / `messages` 是事实投影：崩溃恢复用例在 `tests/e2e/crash-recovery.spec.ts`（临时 userData + 残留 pid + 重启），租约/退避/超时在 `tests/kernel/decide.run.test.ts`，调度/取消/帧在 `tests/host/{scheduler,cancel}.test.ts`。
 
 ## 常用命令
@@ -74,6 +74,10 @@ E2E 说明：`electron.launch({ args: ['.'] })` 按 package.json `main` 加载 `
 2. **新跨进程能力**（`WorkbenchApi` 加方法）→ 三处同步：契约 + preload 契约测试 + main ipc 契约测试，channel/payload 一处定义（`src/shared/`）。
 3. **新 app** → registry 契约测试自动覆盖（遍历断言）；app 内按 1 执行；E2E 视交互复杂度补关键路径。
 4. **新 UI 基元**（`components/ui/`）→ variant/size/语义类名测试，作为后续使用方的契约锚点。
+5. **某条分支在产品路径上到不了**（防御守卫、脏投影兜底）→ 优先用**正常业务场景**覆盖；场景不成立时，
+   把判定**抽成模块级导出函数**再单测它（产品路径的守卫一字不改，只是判定可测），
+   或与别处**等价的守卫合并**到一处。禁止删保护性守卫，也禁止加覆盖率抑制注释（`ignore` 类）来绕过。
+   逐条口径见 [COVERAGE-UNREACHABLE](COVERAGE-UNREACHABLE.md)。
 
 ## 与 SPEC 的关系
 

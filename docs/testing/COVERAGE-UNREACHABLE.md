@@ -4,7 +4,7 @@
 >
 > 复核方式：`pnpm test:coverage` 后解析 `coverage/coverage-final.json`，把 `s`（语句）与 `b`（分支）里计数为 0 的项对照本表；本表之外出现未覆盖项即为**新增缺口**，要补测试或补登记。
 >
-> 最后复核：2026-11-08（P1 线程上下文分段：新增「最近一轮产出」段与按重要性丢弃后，157 测试文件 / 2456 用例，99.91 / 99.51 / 100 / 100；新增 1 项不可达防御分支，见 `kernel/thread-context.ts`）。
+> 最后复核：2026-11-09（覆盖率补口到 **100 / 100 / 100 / 100**，本表清空）。
 
 ## 判定口径
 
@@ -16,80 +16,60 @@
 
 只满足"测试写起来麻烦"的，一律不算不可达。
 
-## 当前登记（24 项 / 10 个文件）
+## 当前登记（0 项）
 
-### src/host/scheduler.ts（10 项）
+2026-11-09 起本表**为空**：全项目覆盖率 **100 / 100 / 100 / 100**，零未覆盖语句、零未覆盖分支。
 
-| 位置                      | 内容                                                      | 为什么到达不了                                                                                                                                  |
-| ------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 257:29 语句 / 257:4 分支  | `flushFrames` 的 `frames.length === 0` 早退               | 唯一调用点 `flushBuffered` 已在 `frames.length === 0` 时先 return，空数组进不到这里。                                                           |
-| 396:20 语句 / 396:6 分支  | `settleCancelledRun` 的 `finished` 守卫                   | 唯一调用点是强杀定时器回调；而 `finishOnce` 会 `clearCancelTimers()` 把该定时器清掉——终态已定时定时器不会再触发。                               |
-| 416:47 语句 / 416:8 分支  | `abort` 监听的 `finished \|\| cancelTimers !== null` 早退 | `AbortController` 只存在 `controllers` 里，run 终态时从表里删除；`cancel` / `cancelAll` 拿不到它就无法再 `abort()`，终态后不会再有 abort 事件。 |
-| 424:37 语句 / 424:10 分支 | 杀进程树之后再判 `cancelTimers === null`                  | 宽限回调是同步执行的一段：取 pid → kill → 判空，中间没有 await 与外部回调，`cancelTimers` 不可能在此期间被置空。                                |
-| 560:38 语句 / 560:8 分支  | `cancelAll` 里 `controller === undefined` 的 continue     | 遍历的是同一个 `Map` 的 `keys()` 快照，键一定存在。                                                                                             |
+下面两节记录**不可达分支怎么变成可达**，供后续同类缺口复用；判定口径与禁止事项继续有效。
 
-### src/kernel/commands/workflow.ts（3 项）
+## 不可达防御分支的三种处理（2026-11-09 定）
 
-> 2026-11-08 复核：`kernel/decide.ts` 按命令域拆分（commit `cf26a8c`）后，原先登记在该文件的 4 条随代码搬到这里与 `commands/run.ts`，位置已更新。
+不可达分支 ≠ 可以删。三种处理，优先级从高到低：
 
-| 位置    | 内容                                               | 为什么到达不了                                                                    |
-| ------- | -------------------------------------------------- | --------------------------------------------------------------------------------- |
-| 36 分支 | `indexTarget` 的 `ids[index] ?? null` 兜底         | `validateStageSet` 已保证下标落在 `0..ids.length-1`。                             |
-| 57 分支 | `sameStage` 的 `instructions ?? ''` 左臂（`a` 侧） | 投影归一时 `instructions` 恒为字符串（空串表示未填），`null`/`undefined` 进不来。 |
-| 57 分支 | `sameStage` 的 `instructions ?? ''` 右臂（`b` 侧） | 同上，两侧都来自 `toStageRow` 的 `stage.instructions?.trim() ?? ''`。             |
+1. **正常业务场景能触发** → 直接补测试（首选）。例：任务经过两个都会耗尽预算的闸门阶段，
+   第二个闸门耗尽时任务已带 `gate:degraded` 标签 → `withLabel` 的「已存在」臂自然被走到。
+2. **守卫与别处的守卫等价（重复）** → **合并到一处**，保留可达的那一处，行为逐字等价。
+   - `host/scheduler.ts`：`flushBuffered` 与 `flushFrames` 各有一道「空数组」早退 → 只留 `flushFrames` 那道
+     （空数组进 `flushFrames` 直接返回，不写事实也不动 `frameSeq`，与原来在调用点早退完全一致）。
+   - `host/scheduler.ts`：`settleCancelledRun` 的 `finished` 守卫与调用点（强杀回调）的
+     `cancelTimers === null` 守卫**严格等价**（`clearCancelTimers` 只在 `finishOnce` 里调用，
+     而 `finishOnce` 必先置 `finished`）→ 保留调用点那道，删掉重复的那一道。
+   - `host/store/projection-apply.ts`：`normalizeTask` 已把 `gateFails` 归一成数字，写列处又兜一次
+     `?? 0` → 写列处直接用归一后的值（返回类型收窄为 `Task & { gateFails: number }`）。
+3. **守卫只可能在一处状态成立、但该状态不可构造** → **把判定抽成模块级导出函数**，
+   由单测用构造输入直接覆盖；产品路径上的守卫**一字不改**（仍然在、仍然生效），只是判定本身可测了。
+   抽出来的函数只吃状态、不碰 IO / 时钟 / 随机，仍满足内核纯函数铁律。
 
-### src/kernel/commands/run.ts（1 项）
+   | 抽出的判定            | 位置                                 | 覆盖方式                        |
+   | --------------------- | ------------------------------------ | ------------------------------- |
+   | `settleCancelledOnce` | `host/scheduler.ts`                  | 终态后不再写兜底终态            |
+   | `startCancelChain`    | `host/scheduler.ts`                  | 迟到取消 / 重复取消不重启链路   |
+   | `scheduleKill`        | `host/scheduler.ts`                  | 链路已收口不再排强杀等待        |
+   | `degradedCommentText` | `kernel/commands/run.ts`             | 闸门配置缺省时次数按 0 算       |
+   | `indexTarget`         | `kernel/commands/workflow.ts`        | 下标越界归 null                 |
+   | `sameInstructions`    | `kernel/commands/workflow.ts`        | 缺省与空串视为同值              |
+   | `dropToFit`           | `kernel/thread-context.ts`           | 所有段落已空但仍超上限时停下    |
+   | `moveStageInList`     | `renderer/.../WorkflowEditor.tsx`    | 阶段重排的越界早退              |
+   | `cardLanding`         | `renderer/.../AiWorkflowPage.tsx`    | 卡片的落点判定                  |
+   | `numberFieldErrors`   | `renderer/.../PluginsManager.tsx`    | 数字字段缺省按空值处理          |
+   | `withTimeout`         | `plugins/registry.ts`                | 定时器实现返回 undefined 时不崩 |
+   | `jsonText`            | `plugins/executors/claude/frames.ts` | 工具入参不是 JSON 值时归空串    |
+   | `providerOf`          | `plugins/executors/dsh/models.ts`    | 模型 id 不是字符串时归空串      |
+   | `clearExecutorTimers` | `plugins/executors/dsh/run.ts`       | 定时器没设置时跳过清理          |
 
-| 位置     | 内容                                          | 为什么到达不了                                          |
-| -------- | --------------------------------------------- | ------------------------------------------------------- |
-| 118 分支 | `moveTask` 交接里 `target === undefined ? []` | `target` 必取自 `flow.stages`，非脏投影构造不出未命中。 |
+   另有三处「守卫与另一处守卫等价」按第 2 种处理：`kernel/commands/run.ts` 的交接目标缺失判断
+   （收进 `handoffOnExit`，脏投影不交接）、`host/scheduler.ts` 的 `cancelAll`
+   （改为直接遍历 `entries`，controller 就是 Map 里的值，「取不到」在构造上不存在）、
+   `renderer/.../WorkflowEditor.tsx` 的「阶段N」兜底（`validateDraft` 先做名称必填检查，
+   走到该分支时阶段名必非空 → 删掉死表达式，行为等价）。
 
-### src/renderer/src/apps/ai-workflow/components/WorkflowEditor.tsx（3 项）
-
-| 位置                     | 内容                                   | 为什么到达不了                                                                                                                       |
-| ------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 172:43 语句 / 172:4 分支 | `moveStage` 的越界早退                 | 唯一调用点是阶段行的上移/下移按钮：首行上移、末行下移都是 `disabled`，React 不派发 `onClick`，任何实际调用都满足 `0 <= j < length`。 |
-| 399:45 分支              | 渲染 `stage.instructions ?? ''` 的兜底 | draft 里每个阶段的 `instructions` 都由 `emptyStage('')` 与 `toDraft(...)` 归一成字符串。                                             |
-
-### src/renderer/src/apps/ai-workflow/components/ProjectDialog.tsx（2 项）
-
-| 位置                   | 内容                                                                       | 为什么到达不了                                                                                                                                                                       |
-| ---------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 87:4 分支 / 87:57 语句 | `remove()` 的 `onRemove === undefined \|\| project === undefined` 收窄守卫 | 删除按钮只在 `editing && onRemove !== undefined`（`editing = project !== undefined`）时渲染，闭包里的 props 执行期间不会变；只判一个变量仍是死守卫，全删又会让 TypeScript 收窄失效。 |
-
-### src/plugins/registry.ts（1 项）
-
-| 位置     | 内容                                                         | 为什么到达不了                                                                    |
-| -------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| 168 分支 | `if (timer !== undefined) clearTimeout(timer)` 的 false 分支 | `timer` 由 `Promise` 执行器同步赋值，`Promise.race` 的 `finally` 执行时必已定义。 |
-
-### src/plugins/executors/dsh/models.ts（1 项）
-
-| 位置       | 内容                                                                        | 为什么到达不了                                                                                                 |
-| ---------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| 18:55 分支 | `providerOf` 的 `typeof model.id === 'string' ? model.id : ''` 的 `''` 分支 | 唯一调用点先按 `typeof item.id !== 'string' \|\| !item.id.trim()` 过滤，进入 `providerOf` 的 `id` 必为字符串。 |
-
-### src/plugins/executors/dsh/run.ts（1 项）
-
-| 位置     | 内容                                                          | 为什么到达不了                                                                                                                         |
-| -------- | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| 214 分支 | `clearTimers` 的 `timers.timeout !== undefined` 的 false 分支 | `clearTimers` 只在 `finish()` 里调用，而 `finish()` 的所有触发点（关流、错误、写帧失败）都在 `timers.timeout = setTimeout(...)` 之后。 |
-
-### src/plugins/executors/claude/frames.ts（1 项）
-
-| 位置    | 内容                                                | 为什么到达不了                                                                                                                                                                                                                                                                                  |
-| ------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 88 分支 | `jsonText` 里 `JSON.stringify(value) ?? ''` 的 `''` | 工具入参只来自 `parseFrame`（`JSON.parse`）的产物：`JSON.stringify` 对 JSON 值恒返回字符串，只有 `undefined`/函数/`Symbol` 才返回 `undefined`，而 `undefined` 已被同函数的三元挡掉，函数与 `Symbol` 进不了 JSON 帧。要触发只能直接调 `handleFrame` 注入非 JSON 值——那是伪造帧，不属于模块契约。 |
-
-### src/kernel/thread-context.ts（1 项）
-
-| 位置                     | 内容                                                 | 为什么到达不了                                                                                                                                                                                                                                                              |
-| ------------------------ | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 241:21 语句 / 241:4 分支 | 丢弃循环里的 `if (section === undefined) break` 早退 | 循环条件要求简报超 `contextChars`(6000)，而五段全部清空后简报只剩元信息两行（≤ 几百字），`dropOrder.find` 之前就已经退出循环；要触发必须是"全部段落为空但仍超 6000"，只能靠伪造 `headerLines` 的输出，即改产品代码。守卫保留：段数组未来新增时防止 `section.items` 空引用。 |
+**禁止**：为了让数字好看删掉保护性守卫，或加覆盖率抑制注释（`ignore` 类）来绕过——两者都按 `CONSTRAINTS.md` 的 Floor 处理（禁用清单已列明）。
+两者都按 `CONSTRAINTS.md` 的 Floor 处理。
 
 ## 变化记录
 
 - 2026-11-07：TDD 补口后从 90 项降到 22 项；本轮新增 47 个用例，全部为既有行为护栏（首跑即绿），除 `src/host/db.ts` 为覆盖「外键已关」分支补了 3 个 `export`（无行为变化）。
-- 2026-11-08：新增 `claude`（Claude Code stream-json）与 `hermes`（ACP over stdio）两个执行器插件，登记项 22 → 23：新增 `claude/frames.ts:88`（1 条），`kernel/decide.ts` 的 4 条随 `cf26a8c` 的按命令域拆分迁到 `kernel/commands/{workflow,run}.ts`（位置更新、条数不变），`registry.ts` / `WorkflowEditor.tsx` 因插行更新了行号。两个新插件目录里只有这 1 条未覆盖分支，其余全部 100%（含 `hermes` 的 `wire.ts` 收尾链路：用 `connect()` 造 link、`exited` 永不 resolve，断言 SIGTERM → SIGKILL）。
-- 2026-11-08：P1 线程上下文分段（`kernel/thread-context.ts` 新增「最近一轮产出」独立预算段、丢弃顺序改为按重要性、新增 `hasThreadHistory`）后登记项 23 → 24：新增 `thread-context.ts:241` 的早退守卫（1 条）；同一轮补了 9 个用例（产出段取数 / 截断保留换行 / 无终态 run 不产段 / chat run 不入选 / 归属行兜底 / 同刻 run 的 id 兜底排序 / `hasThreadHistory` 三态 / 丢弃顺序先动事件段），其余维度仍为 100%。
+- 2026-11-08：新增 `claude`（Claude Code stream-json）与 `hermes`（ACP over stdio）两个执行器插件，登记项 22 → 23；`kernel/decide.ts` 的 4 条随 `cf26a8c` 的按命令域拆分迁到 `kernel/commands/{workflow,run}.ts`（位置更新、条数不变）。
+- 2026-11-08：P1 线程上下文分段后登记项 23 → 24（`thread-context.ts` 的丢弃循环早退）。
+- 2026-11-09：**覆盖率补口到 100 / 100 / 100 / 100，本表清空**。原 24 项登记逐条按上面第 2 / 3 种方式关闭（守卫语义与产品行为均未改变）；同时把 2026-11-09 新出现的缺口一并补齐：全量 52 项未覆盖语句 / 分支按判定抽成模块级导出函数 22 项、重复守卫合并 3 项、守卫构造化 2 项、删证明不可达的表达式 1 项、正常业务场景与脏投影兜底补测试 24 项处理完。全项目 164 个测试文件 / 2653 个用例全绿。
 - 本表只登记，不驱动实现。删守卫来换覆盖率数字属于降低门槛，按 `CONSTRAINTS.md` 的 Floor 处理。

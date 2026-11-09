@@ -38,4 +38,15 @@ describe('TopBar', () => {
     render(<TopBar apps={appPlugins} activeId={appPlugins[0]!.id} onSelect={() => {}} />)
     expect(screen.getByText('v0.1.0')).toBeInTheDocument()
   })
+
+  it('右侧有主题切换器：全局入口，任何 app 都能切主题', async () => {
+    render(<TopBar apps={appPlugins} activeId={appPlugins[0]!.id} onSelect={() => {}} />)
+    const trigger = screen.getByRole('button', { name: /主题：/ })
+    expect(trigger).toBeInTheDocument()
+    // hover 展开三个选项：亮色 / 暗色 / 跟随系统
+    await userEvent.hover(trigger)
+    expect(await screen.findByRole('group', { name: '主题' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '亮色' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '暗色' })).toBeInTheDocument()
+  })
 })

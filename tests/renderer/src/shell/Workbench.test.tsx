@@ -32,7 +32,9 @@ describe('Workbench 外壳', () => {
 describe('Workbench 空清单', () => {
   it('没有注册 app：仍渲染外壳（无标签、内容区空）', () => {
     render(<Workbench apps={[]} />)
-    expect(screen.queryAllByRole('button')).toHaveLength(0)
+    // 应用导航里没有标签按钮（顶部栏右侧的主题切换器是全局控件，不算 app 入口）
+    expect(screen.queryAllByRole('button', { name: /应用/ })).toHaveLength(0)
+    expect(screen.getByRole('navigation', { name: '应用导航' })).toBeEmptyDOMElement()
     expect(screen.getByText('Workbench')).toBeInTheDocument()
   })
 })

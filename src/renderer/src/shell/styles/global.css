@@ -8,19 +8,62 @@
  * secondary / muted / accent / destructive / border / input / ring / radius。
  * 上游组件（radix-ui 基座）直接消费这些变量，因此换主题只需改这一份。
  *
- * 本项目是暗色单主题应用：变量写在 :root，<html class="dark"> 让组件里的
- * `dark:` 变体生效（上游 radix 组件用 dark: 覆盖输入框/下拉等底色）。
+ * 本项目是双主题应用：
+ *   - 亮色 token 写在 `:root, .light`（`:root` 兜底，`.light` 与之同值）
+ *   - 暗色 token 写在 `.dark`
+ * `<html>` 上的 light / dark 类决定生效哪一套（见 src/renderer/src/lib/theme.ts），
+ * 组件里的 `dark:` 变体也随之生效（上游 radix 组件用 dark: 覆盖输入框/下拉等底色）。
  *
  * 项目扩展 token（shadcn 基线之外，overlay 记录在 docs/specs/SPEC-ui.md）：
- *   faint-foreground 第三级前景 / brand 靛蓝亮色（暗底可读）/ success / info / warning
+ *   faint-foreground 第三级前景 / brand 靛蓝（暗底用亮靛、亮底用深靛）/
+ *   success / info / warning
  */
 @custom-variant dark (&:is(.dark *));
 
-:root {
-  color-scheme: dark;
+:root,
+.light {
+  color-scheme: light;
 
   /* 圆角基数：Tailwind v4 由它派生 sm/md/lg/xl/2xl/3xl/4xl */
   --radius: 0.5rem;
+
+  /* 底色层次：窗口 → 面板 → 控件 → 悬浮层 */
+  --background: #f5f5f7;
+  --foreground: #17171a;
+  --card: #ffffff;
+  --card-foreground: #17171a;
+  --popover: #ffffff;
+  --popover-foreground: #17171a;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #eeeef2;
+  --secondary-foreground: #17171a;
+  --muted: #f1f1f4;
+  --muted-foreground: #43434d;
+  --accent: #e9e9ee;
+  --accent-foreground: #17171a;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+
+  /* 线与描边 */
+  --border: rgb(0 0 0 / 10%);
+  --input: rgb(0 0 0 / 16%);
+  --ring: #6366f1;
+
+  /* 项目扩展：第三级前景（占位符、时间戳、计数） */
+  --faint-foreground: #6b6b76;
+  /* 项目扩展：靛蓝强调色，亮底上的强调文字与图标 */
+  --brand: #4338ca;
+  /* 项目扩展：状态色 */
+  --success: #15803d;
+  --success-deep: #047857;
+  --info: #0369a1;
+  --info-deep: #075985;
+  --warning: #b45309;
+}
+
+.dark {
+  color-scheme: dark;
 
   /* 底色层次：窗口 → 面板 → 控件 → 悬浮层 */
   --background: #0a0a0c;

@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { AppPlugin } from '../types'
 import { cn } from '../../lib/cn'
+import { ThemeSwitcher } from '../../components/ui/theme-switcher'
 
 interface TopBarProps {
   apps: AppPlugin[]
@@ -62,7 +63,11 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
         })}
       </nav>
 
-      <span className="ml-auto text-xs text-faint-foreground">v0.1.0</span>
+      <div className="ml-auto flex items-center gap-2">
+        {/* 主题切换器：全局设置（亮/暗/跟随系统），任何 app 都从这里切 */}
+        <ThemeSwitcher />
+        <span className="text-xs text-faint-foreground">v0.1.0</span>
+      </div>
     </header>
   )
 }

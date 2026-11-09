@@ -15,7 +15,7 @@
 //
 // 覆盖层（docs/specs/SPEC-ui.md）：
 //   6. 前景对比度下限：foreground≥12 / muted-foreground≥8 / faint-foreground≥4.5 /
-//      brand≥4.5（对 card 与 muted 两个底色）
+//      brand≥4.5（对 card 与 muted 两个底色；light / dark 两套主题分别校验）
 //   7. 表单校验静默失败守卫：`if (!x.trim()) return` 这类「点了没反应」
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -39,7 +39,7 @@ const rel = (p) => relative(ROOT, p).replace(/\\/g, '/')
 
 const css = readFileSync(CSS, 'utf8')
 
-// 调色板：#rrggbb 全部来源都在 global.css 的 :root 块里
+// 调色板：#rrggbb 全部来源都在 global.css 的主题块里（亮色 `:root, .light` 与暗色 `.dark`）
 const palette = new Set((css.match(/#[0-9a-fA-F]{6}\b/g) ?? []).map((h) => h.toLowerCase()))
 if (palette.size === 0) flag('palette-missing', rel(CSS), '没有解析到任何 #rrggbb token')
 
@@ -47,6 +47,85 @@ const tokenOf = (name) => {
   const m = css.match(new RegExp(`--${name}:\\s*([^;]+);`))
   return m ? m[1].trim() : null
 }
+
+/**
+ * 顶层规则扫描：把 CSS 拆成 { selector, body } 列表。
+ * 花括号配对取块体，块内嵌套规则整体归入该块。
+ */
+const topLevelRules = (source) => {
+  const rules = []
+  let start = 0
+  let i = 0
+  while (i < source.length) {
+    const ch = source[i]
+    if (ch === '{') {
+      const selector = source.slice(start, i)
+      let depth = 0
+      let j = i
+      for (; j < source.length; j++) {
+        if (source[j] === '{') depth++
+        else if (source[j] === '}') {
+          depth--
+          if (depth === 0) break
+        }
+      }
+      rules.push({ selector, body: source.slice(i + 1, j) })
+      i = j + 1
+      start = i
+      continue
+    }
+    // 顶层分号（@import / @custom-variant 等）结束当前选择器
+    if (ch === '}') {
+      i++
+      start = i
+      continue
+    }
+    if (ch === ';') {
+      i++
+      start = i
+      continue
+    }
+    i++
+  }
+  return rules
+}
+
+/** 选择器列表：按逗号拆分（注释已在解析前剥掉） */
+const selectorList = (selector) =>
+  selector
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+
+/** 规则块里取 `--name: value;` 的值 */
+const tokenIn = (body, name) => {
+  const m = body.match(new RegExp(`--${name}:\\s*([^;]+);`))
+  return m ? m[1].trim() : null
+}
+
+// 解析前先剥掉注释，免得注释里的花括号把配对算歪
+const rules = topLevelRules(css.replace(/\/\*[\s\S]*?\*\//g, ''))
+
+/**
+ * 主题块：亮色写在 `:root, .light`，暗色写在 `.dark`。
+ * 两套主题的语义名一致、只有值不同，所以对比度必须各查各的。
+ */
+const themeBodies = (() => {
+  const lightRule = rules.find((rule) => selectorList(rule.selector).includes(':root'))
+  const lightSelectors = lightRule ? selectorList(lightRule.selector) : []
+  const darkRule = rules.find(
+    (rule) =>
+      selectorList(rule.selector).length === 1 && selectorList(rule.selector)[0] === '.dark',
+  )
+  return {
+    // 亮色块必须同时挂 `:root` 与 `.light`：少了 `.light` 时 class 切换不到亮色
+    light:
+      lightSelectors.includes(':root') && lightSelectors.includes('.light')
+        ? (lightRule?.body ?? null)
+        : null,
+    dark: darkRule?.body ?? null,
+  }
+})()
 
 // ── 基线：圆角基数封顶（刻度由 Tailwind 从 --radius 派生，不再单档手写）─────
 const radiusRaw = tokenOf('radius')
@@ -78,25 +157,36 @@ const foreground = [
   { token: 'faint-foreground', min: 4.5 },
   { token: 'brand', min: 4.5 },
 ]
-for (const { token, min } of foreground) {
-  const fg = tokenOf(token)
-  if (fg === null || !/^#[0-9a-fA-F]{6}$/.test(fg)) {
-    flag('foreground-token-missing', rel(CSS), `--${token}`)
+// 两套主题分别校验：亮色写在 `:root, .light`，暗色写在 `.dark`，
+// 违规信息里带主题名，避免「改了暗色却在亮色上翻车」这类盲区。
+for (const [theme, body] of [
+  ['light', themeBodies.light],
+  ['dark', themeBodies.dark],
+]) {
+  if (body === null) {
+    flag('theme-block-missing', rel(CSS), `${theme} 主题块缺失`)
     continue
   }
-  for (const surface of surfaces) {
-    const bg = tokenOf(surface)
-    if (bg === null) {
-      flag('surface-token-missing', rel(CSS), `--${surface}`)
+  for (const { token, min } of foreground) {
+    const fg = tokenIn(body, token)
+    if (fg === null || !/^#[0-9a-fA-F]{6}$/.test(fg)) {
+      flag('foreground-token-missing', rel(CSS), `--${token} (${theme})`)
       continue
     }
-    const ratio = contrast(fg, bg)
-    if (ratio < min) {
-      flag(
-        'contrast-too-low',
-        rel(CSS),
-        `--${token} on --${surface} = ${ratio.toFixed(2)}:1 < ${min}:1`,
-      )
+    for (const surface of surfaces) {
+      const bg = tokenIn(body, surface)
+      if (bg === null) {
+        flag('surface-token-missing', rel(CSS), `--${surface} (${theme})`)
+        continue
+      }
+      const ratio = contrast(fg, bg)
+      if (ratio < min) {
+        flag(
+          'contrast-too-low',
+          rel(CSS),
+          `--${token} on --${surface} (${theme}) = ${ratio.toFixed(2)}:1 < ${min}:1`,
+        )
+      }
     }
   }
 }

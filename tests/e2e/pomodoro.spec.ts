@@ -57,3 +57,18 @@ test('设置面板：非法专注时长被状态机钳制（999 → 120）', asy
   await expect(focusInput).toHaveValue('120')
   await expect(timerText()).toHaveText('120:00')
 })
+
+test('亮色主题：倒计时数字用深色前景（不再是看不见的白字）', async () => {
+  // 主题切换器在顶部栏右侧（全局入口，番茄钟也在这里切）
+  await page.getByRole('button', { name: /主题：/ }).hover()
+  await page.getByRole('button', { name: '亮色', exact: true }).click()
+  await expect(page.locator('html')).toHaveClass(/light/)
+
+  // 数字是渐变字（background-image 上色），亮色主题的 --foreground = #17171a
+  // 注：e2e 跑在 node tsconfig 里（无 DOM lib），所以取 window 要从节点自身反查
+  const gradient = await timerText().evaluate((node) => {
+    const view = node.ownerDocument.defaultView
+    return view === null ? '' : view.getComputedStyle(node).backgroundImage
+  })
+  expect(gradient).toMatch(/23,\s*23,\s*26/)
+})

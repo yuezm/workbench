@@ -1,7 +1,9 @@
 import { useState, type ReactElement, type ReactNode } from 'react'
 import type { Card } from '../../../../../protocol/entities'
+import { COMMAND_LIMITS } from '../../../../../protocol/validate'
 import { Button } from '../../../components/ui/button'
 import { badgeCls } from '../../../components/ui/panel'
+import { Textarea } from '../../../components/ui/textarea'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { groupNotices, isNoticeCard, type NoticeGroup } from '../model/cards'
@@ -34,6 +36,8 @@ export interface ApprovalCardsProps {
 export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | null {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  /** 每张卡各自的补充说明草稿（按卡片 id），提交后卡片消失、草稿随之无意义 */
+  const [notes, setNotes] = useState<Record<string, string>>({})
 
   const send = (key: string, run: () => Promise<unknown>): void => {
     void (async () => {
@@ -51,6 +55,8 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
   }
 
   const answer = (card: Card, optionIndex: number): void => {
+    // 附言是可选资料：空 / 全空白时不带这个字段，续接提示词就与没有它时逐字一致
+    const note = notes[card.id]?.trim() ?? ''
     send(card.id, () =>
       getKernelStore().dispatch({
         type: 'card.answer',
@@ -58,6 +64,7 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
         cardId: card.id,
         optionIndex,
         via: 'ui',
+        ...(note === '' ? {} : { note }),
       }),
     )
   }
@@ -94,6 +101,24 @@ export function ApprovalCards({ cards }: ApprovalCardsProps): ReactElement | nul
                       {card.text}
                     </p>
                   )}
+                  {/* 补充说明：先写再选。人对这次判定有异议 / 想追问时，光选一行不够用，
+                      这段文字会作为资料跟答案一起交给智能体（`card.answer.note`）。 */}
+                  <label className="mt-3 block">
+                    <span className="mb-1 block text-xs text-muted-foreground">
+                      补充说明（可选）：有异议或想追问的写在这里，会随所选项一起交给它
+                    </span>
+                    <Textarea
+                      aria-label={`补充说明：${card.title}`}
+                      rows={2}
+                      value={notes[card.id] ?? ''}
+                      maxLength={COMMAND_LIMITS.cardNote}
+                      disabled={busy === card.id}
+                      placeholder="例如：第 2 条我不同意，先说说你判它的依据是什么"
+                      onChange={(event) =>
+                        setNotes((prev) => ({ ...prev, [card.id]: event.target.value }))
+                      }
+                    />
+                  </label>
                   {/* 选项竖排：一行一个，整行可点，序号只是视觉锚点（读屏不念，避免「1 裸名」） */}
                   <p className="mt-3 text-xs text-muted-foreground">点一行即提交，不能撤回</p>
                   <ul aria-label="可选项" className="mt-2 flex flex-col gap-2">

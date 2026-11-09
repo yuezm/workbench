@@ -89,6 +89,34 @@ describe('ApprovalCards', () => {
     )
   })
 
+  it('补充说明：先写再选，随 card.answer 一起提交（M13）', async () => {
+    render(<ApprovalCards cards={[card]} />)
+
+    fireEvent.change(screen.getByRole('textbox', { name: '补充说明：继续吗' }), {
+      target: { value: '  第 2 条我不同意  ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '停止' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({
+          type: 'card.answer',
+          cardId: 'card-1',
+          optionIndex: 1,
+          via: 'ui',
+          note: '第 2 条我不同意',
+        }),
+      ),
+    )
+  })
+
+  it('补充说明留空：card.answer 不带 note 字段（续接提示词与没有附言时一致）', async () => {
+    render(<ApprovalCards cards={[card]} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '继续' }))
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect('note' in kernel.dispatched[0]!).toBe(false)
+  })
+
   it('回答失败：显示后端文案，卡片仍保留、不崩', async () => {
     kernel.onDispatch(() => Promise.reject(new Error('卡片已回答或已关闭: card-1')))
     render(<ApprovalCards cards={[card]} />)

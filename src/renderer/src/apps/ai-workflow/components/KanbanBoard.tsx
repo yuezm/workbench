@@ -3,6 +3,7 @@ import type { Task, WorkflowWithStages } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { cn } from '../../../lib/cn'
 import { useKernelView } from '../../../shell/useKernelView'
+import { ArchivedTasksDialog } from './ArchivedTasksDialog'
 import { TaskCard } from './TaskCard'
 
 interface KanbanBoardProps {
@@ -57,6 +58,8 @@ export function KanbanBoard({
   /** 当前被拖动的任务（同一看板内拖拽，状态足够，不依赖 dataTransfer） */
   const [dragging, setDragging] = useState<Task | null>(null)
   const [overTarget, setOverTarget] = useState<string | null>(null)
+  /** 归档任务清单弹窗：归档只是移出看板，任务本身还要能翻回去看 */
+  const [archivedOpen, setArchivedOpen] = useState(false)
 
   /**
    * 传进来的是 `tasks.byProject`（项目下全部任务，可能混着别的工作流）：
@@ -66,7 +69,8 @@ export function KanbanBoard({
   const boardTasks = tasks.filter((t) => t.workflowId === workflow.id)
 
   const activeTasks = boardTasks.filter((t) => t.status === 'active')
-  const completedCount = boardTasks.filter((t) => t.status === 'completed').length
+  const doneTasks = boardTasks.filter((t) => t.status === 'completed')
+  const completedCount = doneTasks.length
 
   // 「执行中」由内核判定（queued/running/waiting 的任务 id 集合），看板不自己现算
   const executingIds = new Set(useKernelView('tasks.executing') ?? [])
@@ -219,8 +223,30 @@ export function KanbanBoard({
           <p className="grid flex-1 place-items-center rounded-xl px-2 py-4 text-center text-sm text-faint-foreground">
             拖到这里归档
           </p>
+          {/* 归档不是删除：给一条回看入口，能翻出已完成的任务点进详情 */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="w-full"
+            aria-label="查看归档任务"
+            title={completedCount === 0 ? '还没有归档任务' : '查看已完成的任务'}
+            disabled={completedCount === 0}
+            onClick={() => setArchivedOpen(true)}
+          >
+            查看归档
+          </Button>
         </div>
       </div>
+
+      {archivedOpen && (
+        <ArchivedTasksDialog
+          workflow={workflow}
+          tasks={doneTasks}
+          onOpenTask={onOpenTask}
+          onClose={() => setArchivedOpen(false)}
+        />
+      )}
     </section>
   )
 }

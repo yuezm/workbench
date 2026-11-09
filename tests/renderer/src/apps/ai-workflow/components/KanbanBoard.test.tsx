@@ -367,6 +367,35 @@ describe('KanbanBoard', () => {
     expect(screen.getAllByText(/子任务 ·/)).toHaveLength(1)
   })
 
+  it('归档区能翻出已完成任务：点行把任务交给上层进详情', async () => {
+    const onOpenTask = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <KanbanBoard
+        workflow={wf}
+        tasks={[task, doneTask]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+        onOpenTask={onOpenTask}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: '查看归档任务' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('已完成的活')
+
+    await user.click(within(dialog).getByRole('button', { name: '打开归档任务：已完成的活' }))
+    expect(onOpenTask).toHaveBeenCalledWith(expect.objectContaining({ id: 't0' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('没有已完成任务时「查看归档」禁用并说明原因', () => {
+    setup([task])
+    const view = screen.getByRole('button', { name: '查看归档任务' })
+    expect(view).toBeDisabled()
+    expect(view).toHaveAttribute('title', '还没有归档任务')
+  })
+
   it('父任务卡显示子任务完成进度（M8）', () => {
     const childOpen: Task = {
       ...task,

@@ -167,6 +167,15 @@ Radix `DialogContent` 是真模态：打开时 `hideOthers` 把背景整片标 `
 - jsdom 下 `user.click` 会被 user-event 的可交互性检查拒掉（`pointer-events: none`）。需要点击浮层外部时，用 `userEvent.setup({ pointerEventsCheck: 0 })` 或 `fireEvent`。
 - Radix 拦截 `Tab`（焦点锁在浮层内），`Esc` 才关闭。
 
+### Dialog 的尺寸（Tailwind 变体，踩过的坑）
+
+基座 `DialogContent` 带的是 `w-full max-w-[calc(100%-2rem)] sm:max-w-lg`。`cn()` 用 tailwind-merge 合并，**只合并同一变体**：
+
+- 传裸 `max-w-3xl` → 只会顶掉 `max-w-[calc(100%-2rem)]`，`sm:max-w-lg` 仍在，宽度还是锁在 512px，同时丢掉窄窗保底。
+- 传 `sm:max-w-3xl` → 顶掉 `sm:max-w-lg`，窄窗仍受 `calc(100%-2rem)` 约束。
+
+所以**弹窗宽度一律写 `sm:max-w-*`**。内容可能超出视口高度时同时给 `max-h-[85vh] overflow-y-auto`（弹窗是 `fixed` 居中 + translate，没有 `max-h` 会被裁掉上下两端）。
+
 ## 5. 圆角刻度
 
 `--radius: 0.5rem`（8px）为基数，`global.css` 的 `@theme inline` 派生刻度：

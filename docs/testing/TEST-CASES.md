@@ -6,27 +6,28 @@
 
 ## pomodoro（计时状态机与 UI）
 
-| 用例       | SPEC 规则                                                   | 层级 | 测试位置                                                                                                            |
-| ---------- | ----------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| TC-POM-001 | START：从就绪/暂停态开始倒计时                              | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-002 | TICK：剩余时间基于时间戳差值递减（非 interval 累加）        | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-003 | 大跨度假时间戳（休眠恢复）后剩余时间仍准确                  | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-004 | PAUSE：冻结剩余时间                                         | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-005 | PHASE_COMPLETE：切下一阶段并暂停等待确认                    | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-006 | focus 自然完成才 `completedRounds += 1`                     | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-007 | SKIP：不响铃、不计轮（跳过 focus 不计入完成轮数）           | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-008 | RESET：全部清零回 idle                                      | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-009 | 下一阶段规则：N 轮后长休 / 否则短休 / break 后回 focus      | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-010 | 配置钳制：focus 1–120 / short 1–30 / long 1–60 / rounds 2–8 | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts` + `renderer/src/apps/pomodoro/components/SettingsPanel.test.tsx` |
-| TC-POM-011 | 配置仅在非运行态可改（运行中面板禁用）                      | 单元 | `renderer/src/apps/pomodoro/components/SettingsPanel.test.tsx`                                                      |
-| TC-POM-012 | paused 下改配置不影响冻结值，新时长作用于下一阶段           | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
-| TC-POM-013 | `justCompleted` 恰好一次；SKIP/RESET 清除                   | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts` + `renderer/src/apps/pomodoro/hooks/usePomodoro.test.tsx`        |
-| TC-POM-014 | 阶段完成响铃（播放器可注入；惰性创建 AudioContext）         | 单元 | `renderer/src/apps/pomodoro/audio.test.ts` + `renderer/src/apps/pomodoro/hooks/usePomodoro.test.tsx`                |
-| TC-POM-015 | 系统通知经 `window.workbench.notify`，内容含阶段与分钟数    | 单元 | `renderer/src/apps/pomodoro/hooks/usePomodoro.test.tsx`                                                             |
-| TC-POM-016 | TimerDisplay：mm:ss、阶段标签、轮次圆点                     | 单元 | `renderer/src/apps/pomodoro/components/TimerDisplay.test.tsx`                                                       |
-| TC-POM-017 | Controls：开始/暂停/重置/跳过触发对应事件                   | 单元 | `renderer/src/apps/pomodoro/components/Controls.test.tsx`                                                           |
-| TC-POM-018 | SettingsPanel：修改配置生效、越界回弹                       | 单元 | `renderer/src/apps/pomodoro/components/SettingsPanel.test.tsx`                                                      |
-| TC-POM-019 | 页面组装：hook + 三组件接线                                 | 单元 | `renderer/src/apps/pomodoro/PomodoroPage.test.tsx`                                                                  |
+| 用例       | SPEC 规则                                                                                                  | 层级 | 测试位置                                                                                                            |
+| ---------- | ---------------------------------------------------------------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------- |
+| TC-POM-001 | START：从就绪/暂停态开始倒计时                                                                             | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-002 | TICK：剩余时间基于时间戳差值递减（非 interval 累加）                                                       | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-003 | 大跨度假时间戳（休眠恢复）后剩余时间仍准确                                                                 | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-004 | PAUSE：冻结剩余时间                                                                                        | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-005 | PHASE_COMPLETE：切下一阶段并暂停等待确认                                                                   | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-006 | focus 自然完成才 `completedRounds += 1`                                                                    | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-007 | SKIP：不响铃、不计轮（跳过 focus 不计入完成轮数）                                                          | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-008 | RESET：全部清零回 idle                                                                                     | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-009 | 下一阶段规则：N 轮后长休 / 否则短休 / break 后回 focus                                                     | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-010 | 配置钳制：focus 1–120 / short 1–30 / long 1–60 / rounds 2–8                                                | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts` + `renderer/src/apps/pomodoro/components/SettingsPanel.test.tsx` |
+| TC-POM-011 | 配置仅在非运行态可改（运行中面板禁用）                                                                     | 单元 | `renderer/src/apps/pomodoro/components/SettingsPanel.test.tsx`                                                      |
+| TC-POM-012 | paused 下改配置不影响冻结值，新时长作用于下一阶段                                                          | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts`                                                                  |
+| TC-POM-013 | `justCompleted` 恰好一次；SKIP/RESET 清除                                                                  | 单元 | `renderer/src/apps/pomodoro/timer/machine.test.ts` + `renderer/src/apps/pomodoro/hooks/usePomodoro.test.tsx`        |
+| TC-POM-014 | 阶段完成响铃（播放器可注入；惰性创建 AudioContext）                                                        | 单元 | `renderer/src/apps/pomodoro/audio.test.ts` + `renderer/src/apps/pomodoro/hooks/usePomodoro.test.tsx`                |
+| TC-POM-015 | 系统通知经 `window.workbench.notify`，内容含阶段与分钟数                                                   | 单元 | `renderer/src/apps/pomodoro/hooks/usePomodoro.test.tsx`                                                             |
+| TC-POM-016 | TimerDisplay：mm:ss、阶段标签、轮次圆点                                                                    | 单元 | `renderer/src/apps/pomodoro/components/TimerDisplay.test.tsx`                                                       |
+| TC-POM-017 | Controls：开始/暂停/重置/跳过触发对应事件                                                                  | 单元 | `renderer/src/apps/pomodoro/components/Controls.test.tsx`                                                           |
+| TC-POM-018 | SettingsPanel：修改配置生效、越界回弹                                                                      | 单元 | `renderer/src/apps/pomodoro/components/SettingsPanel.test.tsx`                                                      |
+| TC-POM-019 | 页面组装：hook + 三组件接线                                                                                | 单元 | `renderer/src/apps/pomodoro/PomodoroPage.test.tsx`                                                                  |
+| TC-POM-020 | 主题适配：倒计时数字走前景色 token、环底轨走 border token、阶段色取 --brand/--success/--info（不写死白色） | 单元 | `renderer/src/apps/pomodoro/components/TimerDisplay.test.tsx`                                                       |
 
 ## shell（注册机制与跨进程契约）
 
@@ -34,6 +35,7 @@
 | ---------- | ------------------------------------------------------------------------------------------------------------------ | ---- | --------------------------------------------------------------------------- |
 | TC-SHL-001 | registry：id 唯一、必填字段齐全、kebab-case                                                                        | 单元 | `renderer/src/shell/registry.test.ts`                                       |
 | TC-SHL-002 | TopBar：渲染全部注册 app 标签、点击切换、高亮当前项（aria-current）、版本号                                        | 单元 | `renderer/src/shell/components/TopBar.test.tsx`                             |
+| TC-SHL-008 | TopBar 右侧有主题切换器（全局入口，hover 弹亮色/暗色/跟随系统）                                                    | 单元 | `renderer/src/shell/components/TopBar.test.tsx`                             |
 | TC-SHL-003 | Workbench：内容区挂载当前 app                                                                                      | 单元 | `renderer/src/shell/Workbench.test.tsx`                                     |
 | TC-SHL-004 | main ipc：在 `NOTIFY_CHANNEL` 注册 handler，payload 完整透传 `Notification`，body 可缺省                           | 契约 | `main/ipc.test.ts`（node 环境 + mock electron）                             |
 | TC-SHL-005 | preload：以 `workbench` 名暴露的 API 形状与 `WorkbenchApi` 一致（有且仅有 notify），invoke 的 channel/payload 正确 | 契约 | `preload/index.test.ts`（node 环境 + mock electron）                        |
@@ -125,8 +127,8 @@
 
 | 用例       | 验证点                                                                                                                                                                                                     | 测试位置                        |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| TC-E2E-001 | 启动冒烟：窗口标题 Workbench、顶部栏「番茄时钟」标签且高亮                                                                                                                                                 | `e2e/smoke.spec.ts`             |
-| TC-E2E-002 | 默认挂载第一个注册 app：idle 25:00、阶段「专注」                                                                                                                                                           | `e2e/smoke.spec.ts`             |
+| TC-E2E-001 | 启动冒烟：窗口标题 Workbench、顶部栏「AI 工作流」标签在前且高亮、「番茄时钟」在后                                                                                                                          | `e2e/smoke.spec.ts`             |
+| TC-E2E-002 | 默认挂载第一个注册 app（AI 工作流，落在聊天栏）；切到番茄钟后 idle 25:00、阶段「专注」                                                                                                                     | `e2e/smoke.spec.ts`             |
 | TC-E2E-003 | 关键路径：开始 → 递减 → 暂停冻结 → 重置回 25:00，控制区状态切换                                                                                                                                            | `e2e/pomodoro.spec.ts`          |
 | TC-E2E-004 | 设置端到端：非法专注时长 999 被钳制为 120，大字显示 120:00                                                                                                                                                 | `e2e/pomodoro.spec.ts`          |
 | TC-E2E-005 | 崩溃恢复：强杀后重启回收 claimed、残留子进程被终止、任务可拖动                                                                                                                                             | `e2e/crash-recovery.spec.ts`    |
@@ -140,6 +142,7 @@
 | TC-E2E-013 | 聊天闭环（**真实子进程执行**）：界面发消息 → `chat.send` → 调度器 spawn 子进程（`command` 执行器插件，提示词只走 stdin）→ 助手回复落库并回显到会话流；正文里的提示词字数 > 0（证明提示词真的送进了子进程） | `e2e/chat-execution.spec.ts`    |
 | TC-E2E-014 | 闸门闭环（**真实子进程执行 + 闸门判定**）：agent 阶段的回执块给 `verdict=pass` 与退出码 0 的证据 → 内核判闸门通过 → 任务进入「通过时进入」的阶段；预算没消耗、无 `gate:degraded` 标签                      | `e2e/gate-execution.spec.ts`    |
 | TC-E2E-015 | 项目维度（M11）：项目切换器常驻栏目之上；切项目 → 看板任务与会话清单一起换回本项目的（切到项目甲见甲任务与甲会话，切到项目乙只剩乙任务，切回默认目录都不在）                                               | `e2e/project-dimension.spec.ts` |
+| TC-E2E-016 | 亮色主题：顶部栏切到亮色后 `<html>` 挂 light 类，番茄钟倒计时数字用深色前景（不再是看不见的白字）                                                                                                          | `e2e/pomodoro.spec.ts`          |
 
 ## 手动验收清单（感官/系统行为，无法自动化）
 

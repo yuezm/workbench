@@ -118,7 +118,8 @@ export interface ReviewReportedPayload {
 ```
 <userData>/artifacts/threads/<threadId>/     # Windows: %APPDATA%\<app>\artifacts\threads\...
   _meta.json                        # 显示名（标题快照）、来源、入口；仅显示用
-  runs/<runId>/output.md            # 原始产出（含回执块原文）
+  runs/<runId>/output.md            # 原始产出（含回执块原文）；M15 起宿主对每个挂线程的终态 stage run 都落盘，任务索引据此按需读取
+  runs/<runId>/review.md            # 评审报告正文（M14 实现落点；与 findings/report 的 rev 目录规划并存，暂不迁移）
   runs/<runId>/receipt.json         # 回执原文
   reviews/<rev>/report.md           # 人读：结论 + 清单散文
   reviews/<rev>/findings.json       # 机读：与 report.md 同 rev、同 id

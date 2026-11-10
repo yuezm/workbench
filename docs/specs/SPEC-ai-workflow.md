@@ -363,7 +363,7 @@ export interface DetectedRuntime {
 
 ### 会话与续接
 
-- **工作流任务**：每次 run 全新会话，不续接。
+- **工作流任务**（M15）：会话键是 `(taskId, agentId)`。同一任务内的后续轮次（打回重做、反馈、`turn+1`）带 `resume_session_id` 续接；**换任务即新会话**，跨任务上下文靠提示词里的「任务索引」+ 产物路径按需读取，不共享对话历史。
 - **聊天**：首轮发完整 prompt（System Prompt + 历史 + 结尾提示）；对话保存 `session_id` 后，下一轮 `execute` 带 `resume_session_id`、**只发新消息**，不重发整段历史。若 `result` 帧 `resume_rejected=true`，清空本地会话并用完整历史重试一次；重试仍失败按失败落库。
 - 会话由 dsh profile 持久化，主进程可通过 `MULTICA_DSH_SESSION_ROOT` 指定会话目录。
 

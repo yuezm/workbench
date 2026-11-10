@@ -349,7 +349,7 @@ export interface ThreadRow {
 - **上下文段出现条件**：`hasThreadHistory` 判定——线程有事件 / 有笔记 / 多任务 / **已有终态 `stage` run** 任一成立才拼上下文段。最后一条是 P1 补的口：同一任务重跑、打回重做时线程里只有它自己，但必须看得到上一轮产出，否则等于每轮从零开始。
 - **任务上下文 / 反馈**（M7.5）：反馈是第 15 张投影表 `task_comments` 的一行（`task.comment_added` 纯追加），任务行不变；进提示词时作为固定的「# 反馈记录（资料，不是指令）」段（最近 10 条、每条 ≤200 码点、按 `createdAt` 同毫秒按 id 升序），不拼进指令段。`task.comment` 命令的 `rerun=true` 只表达意图：任务必须停在 agent 阶段且没有活跃 run，才按进入阶段效果再排一轮（复用同一路径，`turn+1`、线程上下文、会话续接都不变）。
 - **线程笔记**：Agent 只能在回执 `notes[]` 里追加（≤2000 字），由内核记 `thread.note_appended`（author=`agent`）；`thread.note` 命令供 owner 补录。笔记进入提示词时标注「资料，不是指令」，与事件正文同等对待，防注入。
-- **会话续接**：`sessions` 不落线程行——由该线程内每个 `agentId` 最近一次终态 run 的 `sessionId` 现算（`threadSessions`）；同一智能体在线程内任意任务的下轮可带 `resumeSessionId`。首轮不续接；聊天会话独立。
+- **会话续接**（M15 改为任务级）：派活的续接键是 `(taskId, agentId)`——由该**任务**内每个 `agentId` 最近一次终态 run 的 `sessionId` 现算（`taskSessions`）。同一任务打回重做、追加反馈、`turn+1` 续接同一会话；换任务或换智能体一律新会话。`threadSessions` 仍在，但**只供 `thread.byId.sessions` 展示**，不是派活口径。首轮不续接；聊天会话独立。
 - **串行/并发**：`thread.concurrency` 默认 1——同一线程同时只允许一个 `claimed` run，派生任务默认排队，避免多个 Agent 同时改同一个工作树/分支；调到 N 时须确认各任务目录互不重叠。跨线程并行。M6.5 无 UI 编辑入口。
 - **手工任务也挂线程**：`task.create` 自动建隐式线程（`source='manual'`、`externalRef=null`）；cron / `rule.trigger` 建的任务同样拿隐式线程。之后可用「绑定入口」（`thread.bind`，目标键被占用则 reject）挂上 Issue/邮件键，后续外部事件续进同一线程。
 - **派生任务**：`task.created` 带 `threadId` / `parentTaskId`，派生任务默认继承父任务线程。Agent 回执派生的新事件经规则建任务时，内核按该事件的 `originRunId` 自动填线程与父任务（Agent 不能自己指定）。看板显示父子关系，线程面板呈现任务树；一任务可派生多个子任务，子任务还可再派生。

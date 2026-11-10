@@ -548,6 +548,8 @@ if (app.requestSingleInstanceLock()) {
       runtimes: () => store.query('runtimes.all'),
       executors,
       limits: DEFAULT_LIMITS,
+      // M14：评审报告正文落到 <userData>/artifacts/threads/<threadId>/runs/<runId>/review.md
+      artifactsRoot: path.join(userData, 'artifacts'),
       // 重启后重跑同一 run 时帧 seq 继续全局单调（读 run_events 投影的 MAX(seq)）
       lastFrameSeq: (runId) => store.query('run.last-event-seq', { runId }),
       registry,

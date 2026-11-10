@@ -14,6 +14,7 @@ import {
   validateQuery,
   type ValidateResult,
 } from '../../src/protocol/validate'
+import { REVIEW_LIMITS } from '../../src/protocol/review'
 
 const workflowInput: WorkflowInput = {
   name: '流程',
@@ -966,6 +967,77 @@ describe('validateQuery（M5：query 动词入口）', () => {
           checks: Array.from({ length: COMMAND_LIMITS.gateChecks + 1 }, () => ({
             cmd: 'x',
             exitCode: 0,
+          })),
+        }),
+      ).ok,
+    ).toBe(false)
+  })
+
+  it('receipt.findings / addresses：清单形状、小标不重复、处置必填项（M14）', () => {
+    const receipt = (extra: Record<string, unknown>): unknown => ({
+      type: 'run.receipt',
+      runId: 'run-1',
+      receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, ...extra },
+    })
+    const item = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+      key: 'R1',
+      severity: 'high',
+      location: 'src/a.ts:64',
+      claim: 'BOM 文件被判非法 JSON',
+      evidence: 'python verify.py',
+      requiredAction: '改成 utf-8-sig 后复跑',
+      ...over,
+    })
+    expect(validateInput(receipt({ findings: [item()] })).ok).toBe(true)
+    expect(validateInput(receipt({ findings: [item({ evidence: undefined })] })).ok).toBe(true)
+    expect(validateInput(receipt({ findings: [item({ severity: 'fatal' })] })).ok).toBe(false)
+    expect(validateInput(receipt({ findings: [item({ key: '  ' })] })).ok).toBe(false)
+    expect(validateInput(receipt({ findings: [item({ claim: 'x'.repeat(501) })] })).ok).toBe(false)
+    expect(validateInput(receipt({ findings: [item({ requiredAction: undefined })] })).ok).toBe(
+      false,
+    )
+    expect(validateInput(receipt({ findings: [42] })).ok).toBe(false)
+    // 小标重复：finding id 会撞车，逐条闭环就失效
+    expect(validateInput(receipt({ findings: [item(), item()] })).ok).toBe(false)
+    expect(
+      validateInput(
+        receipt({ findings: Array.from({ length: REVIEW_LIMITS.maxFindings + 1 }, () => item()) }),
+      ).ok,
+    ).toBe(false)
+
+    expect(
+      validateInput(
+        receipt({
+          addresses: [{ findingId: 'r#R1', disposition: 'fixed', checkRef: 'pnpm check' }],
+        }),
+      ).ok,
+    ).toBe(true)
+    expect(
+      validateInput(
+        receipt({ addresses: [{ findingId: 'r#R1', disposition: 'rejected', note: '不改' }] }),
+      ).ok,
+    ).toBe(true)
+    // fixed 必须给复核命令；rejected / deferred 必须写理由
+    expect(
+      validateInput(receipt({ addresses: [{ findingId: 'r#R1', disposition: 'fixed' }] })).ok,
+    ).toBe(false)
+    expect(
+      validateInput(receipt({ addresses: [{ findingId: 'r#R1', disposition: 'rejected' }] })).ok,
+    ).toBe(false)
+    expect(
+      validateInput(
+        receipt({ addresses: [{ findingId: '  ', disposition: 'deferred', note: 'x' }] }),
+      ).ok,
+    ).toBe(false)
+    expect(validateInput(receipt({ addresses: [{ disposition: 'fixed' }] })).ok).toBe(false)
+    expect(validateInput(receipt({ addresses: [42] })).ok).toBe(false)
+    expect(
+      validateInput(
+        receipt({
+          addresses: Array.from({ length: REVIEW_LIMITS.maxAddresses + 1 }, () => ({
+            findingId: 'r#R1',
+            disposition: 'deferred',
+            note: 'x',
           })),
         }),
       ).ok,

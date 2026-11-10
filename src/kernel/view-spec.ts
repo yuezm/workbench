@@ -67,6 +67,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'task_comments',
         'tasks',
         'threads',
+        'review_reports',
       ]
     case 'task.move':
       // 进入效果（每次进入都重新建 run）要拼线程上下文与按线程续接会话
@@ -78,6 +79,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'runtimes',
         'projects',
         'threads',
+        'review_reports',
         'runs',
         'cards',
         'task_comments',
@@ -97,6 +99,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'runtimes',
         'projects',
         'threads',
+        'review_reports',
         'task_comments',
         'runs',
         'cards',
@@ -118,6 +121,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'runtimes',
         'projects',
         'threads',
+        'review_reports',
         'runs',
         'cards',
         'task_comments',
@@ -132,6 +136,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'runtimes',
         'projects',
         'threads',
+        'review_reports',
         'runs',
         'task_comments',
       ]
@@ -170,6 +175,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'rule_sets',
         // M6.5：派生事件按父 run 归线程/父任务；回执 notes[] 写线程；完成后归档线程
         'threads',
+        'review_reports',
         // M7.5：流转到下一阶段时提示词带任务上下文 / 反馈
         'task_comments',
       ]
@@ -194,6 +200,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'runtimes',
         'projects',
         'threads',
+        'review_reports',
         // M7.5：cron 规则建的任务首轮提示词要带上下文（新任务没有评论，按切片装载）
         'task_comments',
         // 超时 / 失联落终态的 run 要收起还 open 的卡（决策出口统一处理）
@@ -229,6 +236,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'runtimes',
         'projects',
         'threads',
+        'review_reports',
         'runs',
         'cards',
         // M7.5：复用任务追加一轮时提示词带任务上下文 / 反馈

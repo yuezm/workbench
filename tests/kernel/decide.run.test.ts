@@ -18,6 +18,7 @@ import type {
   RunWaitingPayload,
 } from '../../src/protocol/facts'
 import type { Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
+import type { ReviewReport } from '../../src/protocol/review'
 import { decide } from '../../src/kernel/decide'
 import { degradedCommentText } from '../../src/kernel/commands/run'
 import { project } from '../../src/kernel/project'
@@ -112,6 +113,8 @@ interface Seed {
   tasks?: Task[]
   workflows?: Workflow[]
   stages?: WorkflowStage[]
+  /** M14：评审报告（定位 / 覆盖检查读它） */
+  reviewReports?: ReviewReport[]
 }
 
 const view = (seed: Seed = {}): View => ({
@@ -129,6 +132,7 @@ const view = (seed: Seed = {}): View => ({
   activeTaskIds: new Set(),
   threads: new Map(),
   taskComments: new Map(),
+  reviewReports: new Map((seed.reviewReports ?? []).map((row) => [row.id, row])),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,
@@ -1558,5 +1562,117 @@ describe('kernel/decide 闸门标签与放行留痕（M11 补充）', () => {
     expect(degradedCommentText('自测', 2)).toBe(
       '闸门「自测」已连续 2 次未通过，按配置放行（任务已打 gate:degraded 标签）。',
     )
+  })
+})
+describe('kernel/decide run.receipt 评审结论（M14）', () => {
+  const reviewStages = (): WorkflowStage[] => [
+    stage({ id: 'st-review', name: '评审', position: 0, onRejectStageId: 'st-fix' }),
+    stage({ id: 'st-fix', name: '修复', position: 1 }),
+    stage({ id: 'st-done', name: '归档', position: 2, entryMode: 'none', agentId: null }),
+  ]
+
+  const seeded = (over: Partial<ReviewReport> = {}): ReviewReport => ({
+    id: 'run-review:1',
+    taskId: 't-1',
+    stageId: 'st-review',
+    runId: 'run-review',
+    threadId: null,
+    rev: 1,
+    verdict: 'fail',
+    checks: [{ cmd: 'pnpm check', exitCode: 1 }],
+    findings: [
+      {
+        id: 'run-review:1#R1',
+        key: 'R1',
+        severity: 'high',
+        location: 'src/a.ts:64',
+        claim: 'BOM 文件被判非法 JSON',
+        evidence: null,
+        requiredAction: '改成 utf-8-sig 后复跑',
+        status: 'open',
+        note: null,
+        addressedByRunId: null,
+        updatedAt: CREATED,
+      },
+    ],
+    artifact: null,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+    ...over,
+  })
+
+  const reviewView = (taskOver: Partial<Task> = {}, reportOver: Partial<ReviewReport> = {}): View =>
+    view({
+      runs: [running()],
+      workflows: [workflow()],
+      stages: reviewStages(),
+      tasks: [task({ currentStageId: 'st-fix', ...taskOver })],
+      reviewReports: [seeded(reportOver)],
+    })
+
+  it('评审轮回执带 verdict + findings：产 review.reported（rev / id / 判定证据入行）', () => {
+    const decision = receive(
+      view({ runs: [running()], workflows: [workflow()], stages: reviewStages(), tasks: [task()] }),
+      'run-1',
+      receipt({
+        verdict: 'fail',
+        checks: [{ cmd: 'pnpm check', exitCode: 1 }],
+        findings: [
+          {
+            key: 'R1',
+            severity: 'high',
+            claim: 'BOM',
+            requiredAction: '复跑',
+            location: 'src/a.ts:1',
+          },
+          { key: 'R2', severity: 'low', claim: '文案', requiredAction: '改文案' },
+        ],
+      }),
+    )
+    const reported = decision.facts.find((fact) => fact.type === 'review.reported')
+    const row = (reported?.payload as { report: ReviewReport }).report
+    expect(row.id).toBe('run-1:1')
+    expect(row.rev).toBe(1)
+    expect(row.verdict).toBe('fail')
+    expect(row.findings.map((item) => item.id)).toEqual(['run-1:1#R1', 'run-1:1#R2'])
+    expect(row.checks).toEqual([{ cmd: 'pnpm check', exitCode: 1 }])
+  })
+
+  it('修复轮没逐条回应：停在原阶段（不打回、不前进），并追加漏项评论', () => {
+    const decision = receive(reviewView(), 'run-1', receipt())
+    expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
+    expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
+    const comment = decision.facts.find(
+      (fact) =>
+        fact.type === 'task.comment_added' &&
+        (fact.payload as { comment: { text: string } }).comment.text.includes('未处置条目'),
+    )
+    expect(comment).toBeDefined()
+  })
+
+  it('修复轮逐条回应且检查通过：照常前进到下一阶段', () => {
+    const decision = receive(
+      reviewView(),
+      'run-1',
+      receipt({
+        addresses: [{ findingId: 'run-review:1#R1', disposition: 'fixed', checkRef: 'cmd-0' }],
+        checks: [{ cmd: 'cmd-0', exitCode: 0 }],
+      }),
+    )
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-done')
+    expect(decision.facts.some((fact) => fact.type === 'review.addressed')).toBe(true)
+  })
+
+  it('rejected / deferred 带理由也算处置完成（留痕后放行）', () => {
+    const decision = receive(
+      reviewView(),
+      'run-1',
+      receipt({
+        addresses: [{ findingId: 'run-review:1#R1', disposition: 'deferred', note: '下轮一起改' }],
+      }),
+    )
+    expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(true)
   })
 })

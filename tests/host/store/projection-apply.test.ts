@@ -368,6 +368,74 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(countRows(db, 'task_comments')).toBe(0)
   })
 
+  it('review_reports 整行 upsert：findings / checks / artifact 序列化；任务删除联删（M14）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    writer.apply({ table: 'workflows', key: 'wf-1', row: sample.workflow() }, SAMPLE_AT)
+    writer.apply({ table: 'workflow_stages', key: 'st-1', row: sample.stage() }, SAMPLE_AT)
+    const task = sample.task()
+    writer.apply({ table: 'tasks', key: task.id, row: task }, SAMPLE_AT)
+
+    const row = {
+      id: 'run-1:1',
+      taskId: task.id,
+      stageId: 'st-1',
+      runId: 'run-1',
+      threadId: null,
+      rev: 1,
+      verdict: 'fail' as const,
+      checks: [{ cmd: 'pnpm check', exitCode: 1 }],
+      findings: [
+        {
+          id: 'run-1:1#R1',
+          key: 'R1',
+          severity: 'high' as const,
+          location: 'src/a.ts:64',
+          claim: 'BOM 文件被判非法 JSON',
+          evidence: null,
+          requiredAction: '改成 utf-8-sig 后复跑',
+          status: 'open' as const,
+          note: null,
+          addressedByRunId: null,
+          updatedAt: SAMPLE_AT,
+        },
+      ],
+      artifact: { path: '/artifacts/report.md', sha256: 'abc', bytes: 10 },
+      createdAt: SAMPLE_AT,
+      updatedAt: SAMPLE_AT,
+    }
+    writer.apply({ table: 'review_reports', key: row.id, row }, SAMPLE_AT)
+    const stored = db
+      .prepare(
+        'SELECT task_id, rev, verdict, checks_json, findings_json, artifact_json FROM review_reports WHERE id = ?',
+      )
+      .get(row.id) as unknown as Record<string, unknown>
+    expect(stored.task_id).toBe(task.id)
+    expect(stored.rev).toBe(1)
+    expect(stored.verdict).toBe('fail')
+    expect(JSON.parse(stored.checks_json as string)).toEqual([{ cmd: 'pnpm check', exitCode: 1 }])
+    expect(JSON.parse(stored.findings_json as string)[0].id).toBe('run-1:1#R1')
+    expect(JSON.parse(stored.artifact_json as string).path).toBe('/artifacts/report.md')
+
+    // 整行覆盖：逐条处置后同一行 id 换成新状态（不做局部合并）
+    const closed = {
+      ...row,
+      findings: [{ ...row.findings[0], status: 'addressed' as const, addressedByRunId: 'run-2' }],
+      updatedAt: LATER_AT,
+    }
+    writer.apply({ table: 'review_reports', key: row.id, row: closed }, LATER_AT)
+    expect(countRows(db, 'review_reports')).toBe(1)
+    const after = db
+      .prepare('SELECT findings_json, updated_at FROM review_reports WHERE id = ?')
+      .get(row.id) as unknown as { findings_json: string; updated_at: string }
+    expect(JSON.parse(after.findings_json)[0].status).toBe('addressed')
+    expect(after.updated_at).toBe(LATER_AT)
+
+    // 任务删除：报告随父键一起消失
+    writer.apply({ table: 'tasks', key: task.id, row: null }, LATER_AT)
+    expect(countRows(db, 'review_reports')).toBe(0)
+  })
+
   it('rule_sets 单行整行替换：版本与规则清单一起换，不合并旧规则', () => {
     const db = memory()
     const writer = createProjectionWriter(db)

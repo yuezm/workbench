@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decide } from '../../src/kernel/decide'
@@ -1536,5 +1539,43 @@ describe('取消链路的判定', () => {
     expect(schedule).not.toHaveBeenCalled()
     scheduleKill({ grace: 1, kill: 2 }, schedule)
     expect(schedule).toHaveBeenCalledTimes(1)
+  })
+})
+describe('createScheduler：评审正文落盘（M14）', () => {
+  it('回执带 verdict 且 run 挂线程：正文落到 artifactsRoot，报告行拿到引用', async () => {
+    const seeded = seed()
+    const root = mkdtempSync(path.join(tmpdir(), 'wb-sched-artifacts-'))
+    const scheduler = makeScheduler(
+      portOf((turn) =>
+        receiptOf(turn, { verdict: 'fail', output: '## 评审\n\nVerdict: REQUEST CHANGES\n' }),
+      ),
+      { artifactsRoot: root },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const run = world.db
+      .prepare('SELECT thread_id, status FROM runs WHERE id = ?')
+      .get(seeded.runId) as unknown as {
+      thread_id: string | null
+      status: string
+    }
+    expect(run.status).toBe('succeeded')
+    expect(run.thread_id).not.toBeNull()
+
+    const report = world.db
+      .prepare('SELECT artifact_json, findings_json FROM review_reports')
+      .get() as unknown as { artifact_json: string | null; findings_json: string }
+    const artifact = JSON.parse(report.artifact_json as string) as {
+      path: string
+      sha256: string
+      bytes: number
+    }
+    expect(artifact.path).toContain(path.join('threads', run.thread_id as string))
+    expect(artifact.path.endsWith('review.md')).toBe(true)
+    expect(artifact.bytes).toBeGreaterThan(0)
+    expect(artifact.sha256).toHaveLength(64)
+    expect(report.findings_json).toBe('[]')
   })
 })

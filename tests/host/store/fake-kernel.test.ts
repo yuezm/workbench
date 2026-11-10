@@ -44,6 +44,7 @@ const view = (seed: Seed = {}): View => ({
   cards: new Map(),
   threads: new Map(),
   taskComments: new Map(),
+  reviewReports: new Map(),
   activeTaskIds: new Set(seed.active ?? []),
   rules: [],
   rulesVersion: 0,
@@ -183,7 +184,10 @@ describe('defaultDecide：任务', () => {
     expect(
       defaultDecide(
         view(),
-        command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' } }),
+        command({
+          type: 'task.create',
+          input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' },
+        }),
         SAMPLE_AT,
         env(),
       ),
@@ -205,7 +209,10 @@ describe('defaultDecide：任务', () => {
   it('task.create：缺省落首阶段；没有阶段时 currentStageId 为 null', () => {
     const withStages = defaultDecide(
       view({ workflows: [workflow], stages: [first, second] }),
-      command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       SAMPLE_AT,
       env(),
     )
@@ -223,7 +230,10 @@ describe('defaultDecide：任务', () => {
 
     const noStages = defaultDecide(
       view({ workflows: [workflow] }),
-      command({ type: 'task.create', input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' } }),
+      command({
+        type: 'task.create',
+        input: { title: 'T', workflowId: 'wf-1', projectId: 'pj-1' },
+      }),
       SAMPLE_AT,
       env(),
     )

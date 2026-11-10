@@ -52,6 +52,7 @@ import type { RuleFireRow, RuleSetRow } from '../../protocol/rules'
 import type { PluginSettingsRow } from '../../protocol/plugins'
 import type { ThreadRow } from '../../protocol/thread'
 import type { TaskComment } from '../../protocol/task-comment'
+import type { ReviewReport } from '../../protocol/review'
 import { StoreError } from './errors'
 
 /** 一条投影变更 + 它所属事实的时间（阶段行首次插入的 created_at 兜底）。 */
@@ -449,6 +450,25 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          replaced_at = excluded.replaced_at,
          settings_json = excluded.settings_json`,
     ),
+    /** 评审结论整行 upsert（M14）：findings 的逐条状态在行内演进，不做局部合并。 */
+    review_reports: db.prepare(
+      `INSERT INTO review_reports
+         (id, task_id, stage_id, run_id, thread_id, rev, verdict, checks_json, findings_json,
+          artifact_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         task_id = excluded.task_id,
+         stage_id = excluded.stage_id,
+         run_id = excluded.run_id,
+         thread_id = excluded.thread_id,
+         rev = excluded.rev,
+         verdict = excluded.verdict,
+         checks_json = excluded.checks_json,
+         findings_json = excluded.findings_json,
+         artifact_json = excluded.artifact_json,
+         created_at = excluded.created_at,
+         updated_at = excluded.updated_at`,
+    ),
   }
 
   const runColumns = RUN_FIELDS.map(([, column]) => column).join(', ')
@@ -519,6 +539,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     /** 任务上下文没有删除事实：按 id 与按父任务联删（任务删除时）两条路径。 */
     task_comments: db.prepare('DELETE FROM task_comments WHERE id = ?'),
     taskCommentsByTask: db.prepare('DELETE FROM task_comments WHERE task_id = ?'),
+    /** M14：评审报告没有单独的删除事实，随任务删除联删。 */
+    review_reports: db.prepare('DELETE FROM review_reports WHERE id = ?'),
+    reviewReportsByTask: db.prepare('DELETE FROM review_reports WHERE task_id = ?'),
   }
 
   const clearAll = {
@@ -538,6 +561,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     threads: db.prepare('DELETE FROM threads'),
     plugin_settings: db.prepare('DELETE FROM plugin_settings'),
     task_comments: db.prepare('DELETE FROM task_comments'),
+    review_reports: db.prepare('DELETE FROM review_reports'),
   }
 
   const stageOccupant = db.prepare(
@@ -725,6 +749,23 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         comment.createdAt,
       )
     },
+    review_reports: (row) => {
+      const report = row as ReviewReport
+      upserts.review_reports.run(
+        report.id,
+        report.taskId,
+        report.stageId,
+        report.runId,
+        report.threadId,
+        report.rev,
+        report.verdict,
+        JSON.stringify(report.checks),
+        JSON.stringify(report.findings),
+        report.artifact === null ? null : JSON.stringify(report.artifact),
+        report.createdAt,
+        report.updatedAt,
+      )
+    },
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */
@@ -748,7 +789,11 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       }
       if (change.table === 'conversations') deletes.messages.run(change.key)
       // M7.5：任务删除联删其上下文 / 反馈（重建事务关外键，不能只靠级联）
-      if (change.table === 'tasks') deletes.taskCommentsByTask.run(change.key)
+      if (change.table === 'tasks') {
+        deletes.taskCommentsByTask.run(change.key)
+        // M14：评审报告同样随任务删除联删（无独立删除事实）
+        deletes.reviewReportsByTask.run(change.key)
+      }
       deletes[change.table].run(change.key)
       return
     }
@@ -785,6 +830,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     clearAll.rule_sets.run()
     clearAll.threads.run()
     clearAll.plugin_settings.run()
+    clearAll.review_reports.run()
   }
 
   return { apply, applyAll, clear }

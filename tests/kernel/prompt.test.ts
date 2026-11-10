@@ -135,16 +135,23 @@ describe('kernel/prompt chatPrompt', () => {
 })
 
 describe('kernel/prompt 回执块说明', () => {
-  it('固定文本：七键与上限齐全，重复调用同文本', () => {
+  it('固定文本：回执键与上限齐全，重复调用同文本', () => {
     const hint = receiptBlockHint()
     expect(hint).toBe(HINT)
-    expect(hint).toContain('ask/notices/resolves/later/events/verdict/checks')
+    expect(hint).toContain('ask/notices/resolves/later/events/spawn/verdict/checks')
+    expect(hint).toContain('findings/addresses')
     expect(hint).toContain('100')
     expect(hint).toContain('options 最多 20 项')
     expect(hint).toContain('summary ≤200')
     // M11：闸门判定键与证据示例都在文案里（缺了模型输出会被整块忽略）
     expect(hint).toContain('"verdict":"pass|fail"')
     expect(hint).toContain('"checks":[{"cmd":"pnpm check","exitCode":0}]')
+    // M14：评审清单与逐条回应的键、处置枚举、上限都在文案里
+    expect(hint).toContain('"findings":[{"key":"R1"')
+    expect(hint).toContain('"addresses":[{"findingId":"<报告id>#R1"')
+    expect(hint).toContain('`fixed` 要带 `checkRef`')
+    expect(hint).toContain('`rejected` / `deferred` 要写 `note`')
+    expect(hint).toContain('`findings` / `addresses` 各 200 项')
     // 固定文案不随调用变化（同输入同文本）
     expect(receiptBlockHint()).toBe(hint)
     // 短文案：含标题与 JSON 示例在内不超过 6 行

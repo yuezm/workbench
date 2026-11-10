@@ -29,6 +29,7 @@ import {
 import { cronTaskFacts, eventThreadFacts } from '../rules'
 import { childrenSettledFacts, spawnFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
+import { reviewFactsOf } from '../review'
 import { closeIfAllDone, inactivityFacts, makeNote, noteFacts, withNote } from '../threads'
 import { moveTask } from '../workflow/stage-machine'
 import {
@@ -246,8 +247,17 @@ export function receiveRun(
     return done(rejectedReceiptFacts(run, input.receipt, rejection, now, HOST_SCHEDULER))
   }
   const receiptCards = cardsFromReceipt(view, run, input.receipt, now, env)
+  // M14：评审结论 / 逐条处置 / 硬门判定（阶段图定位，不读 runs.output 摘要）
+  const review = reviewFactsOf(
+    view,
+    run,
+    input.receipt,
+    input.receipt.artifact ?? null,
+    HOST_SCHEDULER,
+    now,
+  )
   const derivedEvents = eventFacts(run, input.receipt, now, env)
-  const facts: FactDraft[] = [...receiptCards.facts, ...derivedEvents]
+  const facts: FactDraft[] = [...receiptCards.facts, ...review.facts, ...derivedEvents]
   // M6：回执派生的 event.received 同样命中规则；M6.5：按父 run 归线程/父任务
   for (const derived of derivedEvents) {
     if (derived.type !== 'event.received') continue
@@ -295,7 +305,11 @@ export function receiveRun(
   const settled = settledRun(run, input.receipt, now)
   facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
   if (run.purpose === 'stage') {
-    const transition = stageTransitionFacts(view, settled, gateVerdictOf(input.receipt), now, env)
+    // M14 硬门：评审清单还有未处置条目时不推进阶段——run 照常落终态、任务停在当前阶段，
+    // 漏项由 `reviewFactsOf` 追加的任务评论说明「缺哪几条、怎么回应」。
+    const transition = review.blocked
+      ? []
+      : stageTransitionFacts(view, settled, gateVerdictOf(input.receipt), now, env)
     facts.push(...transition)
     // 进入效果：流转到目标阶段后若目标阶段是 agent 入口，立刻入队下一轮（形成链条）
     for (const fact of transition) {

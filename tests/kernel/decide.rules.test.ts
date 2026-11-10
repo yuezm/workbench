@@ -106,6 +106,7 @@ const view = (seed: Seed = {}): View => ({
   activeTaskIds: new Set(),
   threads: new Map(),
   taskComments: new Map(),
+  reviewReports: new Map(),
   rules: seed.rules ?? [],
   rulesVersion: seed.rulesVersion ?? 0,
   ruleSetReplacedAt: seed.replacedAt === undefined ? CREATED : seed.replacedAt,

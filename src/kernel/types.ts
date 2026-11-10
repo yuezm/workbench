@@ -29,6 +29,7 @@ import type { AutomationRule, RuleFireRow, RuleSetRow } from '../protocol/rules'
 import type { PluginSettingsRow } from '../protocol/plugins'
 import type { ThreadRow } from '../protocol/thread'
 import type { TaskComment } from '../protocol/task-comment'
+import type { ReviewReport } from '../protocol/review'
 
 export type Seq = number
 export type Id = string
@@ -44,8 +45,10 @@ export type Iso = string
  * 删项目把会话归默认目录）；
  * M12：卡片加显式 `kind`（`cards.kind` 投影列）。投影列变了却没动版本，M12 前的库里那一列会按
  * ALTER 的默认值写成 ask，旧的信息卡全部冒充「待审批」，所以这里必须递增以触发重建。
+ * M14：评审结论（`review_reports` 第 17 张投影表）——修理阶段要按阶段图取评审结论，
+ * 而不是从被截断的 `runs.output` 摘要里猜。
  */
-export const KERNEL_VERSION = 'M12.0.0'
+export const KERNEL_VERSION = 'M14.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
@@ -64,7 +67,7 @@ export type Actor =
  * M2 在实体五表之后追加运行生命周期相关的四张表；M4 追加卡片表（第 10 张）；
  * M6 追加规则集与规则触发记录（第 11、12 张）；M6.5 追加线程（第 13 张）；
  * M7 追加插件设置（第 14 张）；M7.5 追加任务上下文 / 反馈（第 15 张）；
- * M10 追加项目（第 16 张）。
+ * M10 追加项目（第 16 张）；M14 追加评审结论（第 17 张）。
  */
 export const PROJECTION_TABLES = [
   'tasks',
@@ -83,6 +86,7 @@ export const PROJECTION_TABLES = [
   'threads',
   'plugin_settings',
   'task_comments',
+  'review_reports',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -104,6 +108,7 @@ export type ProjectionRow =
   | ThreadRow
   | PluginSettingsRow
   | TaskComment
+  | ReviewReport
 
 export interface FactDraft<T extends FactType = FactType> {
   type: T
@@ -145,6 +150,8 @@ export interface View {
   threads: Map<Id, ThreadRow>
   /** M7.5：任务上下文 / 反馈（拼提示词时按 taskId 取；待落库的新评论经 options 传） */
   taskComments: Map<Id, TaskComment>
+  /** M14：评审结论（修复阶段按阶段图定位、索引段渲染、逐条覆盖检查都只读它） */
+  reviewReports: Map<Id, ReviewReport>
   /** 存在 queued/running/waiting run 的任务；「执行中」只认它，不由 UI 推导。 */
   activeTaskIds: Set<Id>
   /** M6：当前规则集（整批替换；空集为 `[]`） */

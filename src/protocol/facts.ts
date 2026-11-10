@@ -33,6 +33,7 @@ import type {
 import type { TaskComment } from './task-comment'
 import type { RuleFireRow, RuleSetRow } from './rules'
 import type { PluginSettingsRow } from './plugins'
+import type { ReviewReport } from './review'
 import type { ThreadCloseReason, ThreadNote, ThreadRow } from './thread'
 
 /** 事实名全集。M4 加卡片与派生事件；M6 加规则；M6.5 加线程与事件合并；M7 加插件设置。 */
@@ -92,6 +93,8 @@ export const FACT_TYPES = [
   'rules.replaced',
   'rule.fired',
   'plugins.replaced',
+  'review.reported',
+  'review.addressed',
   'conversation.created',
   'conversation.updated',
   'conversation.removed',
@@ -471,6 +474,27 @@ export interface PluginsReplacedPayload {
   pluginSettings: PluginSettingsRow
 }
 
+// ---------- 评审结论（M14） ----------
+
+/**
+ * 评审结论入账：payload 携带完整 `ReviewReport` 行（判定 + 待改清单 + 正文引用），
+ * 一行事实 → 一行投影，重建不回查。改版 = 新的 `rev` = 新的行 id，旧版本保留。
+ */
+export interface ReviewReportedPayload {
+  report: ReviewReport
+}
+
+/**
+ * 清单逐条处置落库：一次修复回执把若干 finding 从 `open` 改到
+ * `addressed` / `rejected` / `deferred`，payload 仍是**完整报告行**（状态已改），
+ * 投影整行 upsert——与 `card.*` 的「整行携带」同口径，不做局部合并。
+ */
+export interface ReviewAddressedPayload {
+  report: ReviewReport
+  /** 本轮真正被处置的 finding id（审计：谁关的、关了哪几条） */
+  addressed: string[]
+}
+
 // ---------- 对话 ----------
 
 export interface ConversationCreatedPayload {
@@ -568,6 +592,8 @@ export interface FactPayloads {
   'rules.replaced': RulesReplacedPayload
   'rule.fired': RuleFiredPayload
   'plugins.replaced': PluginsReplacedPayload
+  'review.reported': ReviewReportedPayload
+  'review.addressed': ReviewAddressedPayload
   'conversation.created': ConversationCreatedPayload
   'conversation.updated': ConversationUpdatedPayload
   'conversation.removed': ConversationRemovedPayload

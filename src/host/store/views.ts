@@ -44,6 +44,7 @@ import type { RuleSetRow, RuleSetView } from '../../protocol/rules'
 import type { PluginSettingsRow, PluginSettingsView } from '../../protocol/plugins'
 import type { ThreadRow } from '../../protocol/thread'
 import type { TaskComment } from '../../protocol/task-comment'
+import type { ReviewArtifact, ReviewReport } from '../../protocol/review'
 import type {
   ActiveRun,
   RuntimeWorkload,
@@ -392,6 +393,22 @@ interface TaskCommentDbRow {
   author: string
   text: string
   created_at: string
+}
+
+/** `review_reports` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
+interface ReviewReportDbRow {
+  id: string
+  task_id: string
+  stage_id: string
+  run_id: string
+  thread_id: string | null
+  rev: number
+  verdict: string | null
+  checks_json: string
+  findings_json: string
+  artifact_json: string | null
+  created_at: string
+  updated_at: string
 }
 
 /** `task_comments` 行 → `TaskComment`：逐列直取（无 JSON 列）。 */
@@ -913,6 +930,34 @@ const readPluginSettingsView = (db: DatabaseSync): PluginSettingsView => {
     : { version: settings.version, replacedAt: settings.replacedAt, settings: settings.settings }
 }
 
+/**
+ * 评审结论行（M14）：`findings` / `checks` / `artifact` 都是 JSON 列，读路径逐列写死 SELECT。
+ * 老库没有这张表时由 `schema.ts` 在启动时建齐，这里不做缺表兜底。
+ */
+const readReviewReports = (db: DatabaseSync): ReviewReport[] =>
+  (
+    db
+      .prepare(
+        `SELECT id, task_id, stage_id, run_id, thread_id, rev, verdict, checks_json,
+                findings_json, artifact_json, created_at, updated_at
+           FROM review_reports`,
+      )
+      .all() as unknown as ReviewReportDbRow[]
+  ).map((row) => ({
+    id: row.id,
+    taskId: row.task_id,
+    stageId: row.stage_id,
+    runId: row.run_id,
+    threadId: row.thread_id,
+    rev: row.rev,
+    verdict: row.verdict as ReviewReport['verdict'],
+    checks: JSON.parse(row.checks_json) as ReviewReport['checks'],
+    findings: JSON.parse(row.findings_json) as ReviewReport['findings'],
+    artifact: row.artifact_json === null ? null : (JSON.parse(row.artifact_json) as ReviewArtifact),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }))
+
 /** 按输入声明的切片装载视图：未声明的表不查，`activeTaskIds` 总是装载。 */
 export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): View {
   const slice = new Set<ProjectionTable>(tables)
@@ -933,6 +978,7 @@ export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): 
     cards: slice.has('cards') ? toMap(readCards(db)) : new Map(),
     threads: slice.has('threads') ? toMap(readThreads(db)) : new Map(),
     taskComments: slice.has('task_comments') ? toMap(readTaskComments(db)) : new Map(),
+    reviewReports: slice.has('review_reports') ? toMap(readReviewReports(db)) : new Map(),
     activeTaskIds: readActiveTaskIds(db),
     rules: ruleSet?.rules ?? [],
     rulesVersion: ruleSet?.version ?? 0,

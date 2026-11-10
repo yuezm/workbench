@@ -218,6 +218,11 @@ function changesOf(fact: AnyFact): Change[] {
     case 'plugins.replaced':
       // M7：插件设置整批替换，一行事实 → 单行投影（key='current'）
       return [put('plugin_settings', fact.payload.pluginSettings)]
+    case 'review.reported':
+    case 'review.addressed':
+      // M14：评审结论与逐条处置都携带完整报告行（findings 状态已在行内），整行 upsert。
+      // 改版是新 rev = 新行 id；处置是同一行 id 的状态演进——与 `card.*` 同口径。
+      return [put('review_reports', fact.payload.report)]
     case 'conversation.created':
     case 'conversation.updated':
       // M9：老事实没有 `archivedAt`，按 null 归一，重建与增量折出同一行；

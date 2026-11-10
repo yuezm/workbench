@@ -135,6 +135,7 @@ function makeView(over: Partial<View> = {}): View {
     messages: new Map(),
     threads: new Map([[thread.id, thread]]),
     taskComments: new Map(),
+    reviewReports: new Map(),
     activeTaskIds: new Set(),
     rules: [],
     rulesVersion: 0,

@@ -102,6 +102,8 @@ export const THREAD_LIMITS = {
   contextChars: 6_000,
   /** 「最近一轮产出」段的码点上限（独立预算，不挤占 `contextChars`） */
   precedingChars: 2_000,
+  /** 「待修复清单」段的码点上限（M14，独立预算：评审清单是下一轮最该看到的东西） */
+  reviewChars: 4_000,
   /** 每次回执 `notes[]` 与命令的条数上限 */
   notesPerReceipt: 100,
 } as const

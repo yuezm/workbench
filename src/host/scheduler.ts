@@ -24,6 +24,7 @@ import type { RunErrorCode, RunEvent, RunEventRow, RunRow, Runtime } from '../pr
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
 import type { Fact, Id, Iso } from '../kernel/types'
 import { killPidTree } from './process'
+import { withReviewArtifact } from './artifacts'
 import type { ProcessRegistry } from './process-registry'
 import type { DispatchResult } from './store/index'
 
@@ -104,7 +105,11 @@ export interface SchedulerDeps {
   /** 聊天 run 一轮结束（AI_WORKFLOW_CHAT 的 `end`）：终态事实写完后发一次 */
   onChatStreamEnd?: (runId: string, conversationId: string) => void
   /**
-   * 聊天续接轮的「完整历史 prompt」：协议会话失效重试时用（`Turn.fallbackPrompt`）。
+   * 评审报告正文的落盘根（装配根传 `<userData>/artifacts`）。缺省不落盘：报告行里
+   * `artifact` 为 null，索引段退化成「完整清单：报告 id」。
+   */
+  artifactsRoot?: string
+  /** 聊天续接轮的「完整历史 prompt」：协议会话失效重试时用（`Turn.fallbackPrompt`）。
    * 装配根按投影里的智能体 + 对话消息拼；缺省不提供（重试退回当前 prompt）。
    */
   chatFallbackPrompt?: (run: RunRow) => string | null
@@ -497,10 +502,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       framesClosed = true
       flushBuffered()
       // 执行器只经旁路报过 sessionId 时补进回执（终态行据此可续接）
-      const finalReceipt: Receipt =
+      const finalReceipt: Receipt = withReviewArtifact(
+        deps.artifactsRoot,
+        run,
         receipt.sessionId === undefined && observedSession !== null
           ? { ...receipt, sessionId: observedSession }
-          : receipt
+          : receipt,
+      )
       dispatch({ type: 'run.receipt', runId: run.id, receipt: finalReceipt })
     } catch (error) {
       // 宿主兜底终态已写过（执行器迟到的抛错只是收尾信号）

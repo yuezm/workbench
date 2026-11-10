@@ -169,6 +169,7 @@ const view = (seed: Seed = {}): View => ({
   activeTaskIds: new Set(),
   threads: new Map(),
   taskComments: new Map(),
+  reviewReports: new Map(),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

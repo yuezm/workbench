@@ -365,6 +365,34 @@ CREATE TABLE IF NOT EXISTS ${name} (
   created_at TEXT NOT NULL
 );`
 
+/**
+ * `review_reports` 投影（M14，第 17 张表）：评审结论 + 待改清单，整行由 `review.reported`
+ * / `review.addressed` 事实携带。
+ *
+ * - 主键 `id = '<runId>:<rev>'`：同一轮 run 只产一份报告，改版是新的 `rev`（旧版本保留可查）。
+ * - `task_id` 外键 + `ON DELETE CASCADE`：任务删除时报告一并消失；增量路径由
+ *   `projection-apply` 按父键显式联删（重建事务关外键，不能只靠级联）。
+ * - `findings_json` 存 `ReviewFinding[]`（含逐条状态）：上限由 `REVIEW_LIMITS` 收口，
+ *   逐条处置用整行 upsert 表达，与 `cards` 同口径。
+ * - `checks_json` 是判定证据（退出码），不落 `runs`：闸门读一次就丢的老问题在这里收口。
+ * - `artifact_json` 是正文引用（路径 / sha256 / 字节数），正文落宿主 artifacts 目录。
+ */
+const reviewReportsTable = (name = 'review_reports'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  stage_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  thread_id TEXT,
+  rev INTEGER NOT NULL,
+  verdict TEXT CHECK (verdict IN ('pass','fail')),
+  checks_json TEXT NOT NULL DEFAULT '[]',
+  findings_json TEXT NOT NULL DEFAULT '[]',
+  artifact_json TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);`
+
 export const INDEX_SQL = `
 CREATE INDEX IF NOT EXISTS idx_stages_workflow ON workflow_stages(workflow_id, position);
 CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
@@ -381,9 +409,11 @@ CREATE INDEX IF NOT EXISTS idx_cards_delivery ON cards(delivery);
 CREATE INDEX IF NOT EXISTS idx_rule_fires_rule ON rule_fires(rule_id, scheduled_for);
 CREATE INDEX IF NOT EXISTS idx_threads_key ON threads(source, external_ref);
 CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_review_reports_task ON review_reports(task_id, stage_id, rev);
+CREATE INDEX IF NOT EXISTS idx_review_reports_run ON review_reports(run_id);
 `
 
-/** v2 全量 schema（新建库；十六张投影表 + 索引） */
+/** v2 全量 schema（新建库；十七张投影表 + 索引） */
 export const SCHEMA_SQL = [
   runtimesTable(),
   agentsTable(),
@@ -401,6 +431,7 @@ export const SCHEMA_SQL = [
   threadsTable(),
   pluginSettingsTable(),
   taskCommentsTable(),
+  reviewReportsTable(),
   INDEX_SQL,
 ].join('\n')
 
@@ -458,6 +489,7 @@ export const tableDdl = {
   threads: threadsTable,
   pluginSettings: pluginSettingsTable,
   taskComments: taskCommentsTable,
+  reviewReports: reviewReportsTable,
 } as const
 
 /**
@@ -799,7 +831,7 @@ CREATE TABLE IF NOT EXISTS projection_meta (
 );
 `
 
-/** 投影集白名单：重建清空并重放的就是这十六张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
+/** 投影集白名单：重建清空并重放的就是这十七张表（与 `kernel/types` 的 `PROJECTION_TABLES` 一致）。 */
 export const PROJECTION_TABLES = [
   'tasks',
   'workflows',
@@ -817,6 +849,7 @@ export const PROJECTION_TABLES = [
   'threads',
   'plugin_settings',
   'task_comments',
+  'review_reports',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -838,9 +871,10 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   threads: tableDdl.threads(),
   plugin_settings: tableDdl.pluginSettings(),
   task_comments: tableDdl.taskComments(),
+  review_reports: tableDdl.reviewReports(),
 }
 
-/** 十六张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 十七张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */

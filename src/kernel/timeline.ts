@@ -165,6 +165,10 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'plugins.replaced':
       // 插件设置快照没有独立 scope：设置变更只影响插件装载与授权，不挂业务实体。
       return []
+    case 'review.reported':
+    case 'review.addressed':
+      // M14：评审报告归到它所属的任务（时间线上「谁在什么时候评的、改了哪几条」）。
+      return [{ scope: 'task', id: fact.payload.report.taskId }]
     case 'conversation.created':
     case 'conversation.updated':
     case 'conversation.removed':

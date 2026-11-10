@@ -186,6 +186,7 @@ const view = (
   activeTaskIds: new Set(seed.active ?? []),
   threads: new Map(),
   taskComments: new Map((seed.comments ?? []).map((row) => [row.id, row])),
+  reviewReports: new Map(),
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

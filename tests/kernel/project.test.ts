@@ -246,6 +246,7 @@ const emptyTables = (): Tables => ({
   threads: new Map(),
   plugin_settings: new Map(),
   task_comments: new Map(),
+  review_reports: new Map(),
 })
 
 /** 按 seq 顺序 fold 事实：投影应用器的最小等价实现（重建与实时写入共用路径）。 */
@@ -914,6 +915,48 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
     expect(project(fact(203, 'event.merged', { run: merged, eventId: 'ev-1' }))).toEqual([
       put('runs', merged),
     ])
+  })
+
+  it('M14 评审事实：review.reported / review.addressed 一律整行 upsert 到 review_reports', () => {
+    const row = {
+      id: 'run-1:1',
+      taskId: 't-1',
+      stageId: 'st-1',
+      runId: 'run-1',
+      threadId: null,
+      rev: 1,
+      verdict: 'fail' as const,
+      checks: [{ cmd: 'pnpm check', exitCode: 1 }],
+      findings: [],
+      artifact: null,
+      createdAt: AT,
+      updatedAt: AT,
+    }
+    expect(project(fact(300, 'review.reported', { report: row }))).toEqual([
+      put('review_reports', row),
+    ])
+    const addressedRow = {
+      ...row,
+      findings: [
+        {
+          id: 'run-1:1#R1',
+          key: 'R1',
+          severity: 'high' as const,
+          location: null,
+          claim: '断言',
+          evidence: null,
+          requiredAction: '复跑',
+          status: 'addressed' as const,
+          note: null,
+          addressedByRunId: 'run-2',
+          updatedAt: AT,
+        },
+      ],
+      updatedAt: AT,
+    }
+    expect(
+      project(fact(301, 'review.addressed', { report: addressedRow, addressed: ['run-1:1#R1'] })),
+    ).toEqual([put('review_reports', addressedRow)])
   })
 
   it('M6 存量导入：snapshot.imported 的 tasks 行同样归一', () => {

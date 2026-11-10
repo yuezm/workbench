@@ -594,6 +594,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   plugin_settings: 0,
   // M8：v2 没有任务上下文 / 反馈；键要补齐以匹配 `ProjectionTable` 全集
   task_comments: 0,
+  // M14：v2 没有评审报告；键要补齐以匹配 `ProjectionTable` 全集
+  review_reports: 0,
 })
 
 describe('importLegacyIfNeeded', () => {
@@ -622,6 +624,7 @@ describe('importLegacyIfNeeded', () => {
       threads: 0,
       plugin_settings: 0,
       task_comments: 0,
+      review_reports: 0,
     })
 
     const facts = allFacts(db)

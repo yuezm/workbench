@@ -22,6 +22,7 @@ import type {
   RunTerminalStatus,
   RunUsage,
 } from './entities'
+import type { FindingAddress, ReviewArtifact, ReviewFindingInput } from './review'
 
 /** 宿主内部输入名全集：不经 IPC，只由宿主（scheduler / clock / reconcile / 通道 hub）发。 */
 export const HOST_INPUT_NAMES = [
@@ -131,6 +132,22 @@ export interface Receipt {
   verdict?: GateVerdict
   /** 判定证据（M11）：闸门阶段应随 `verdict` 一起给，内核用退出码交叉校验结论 */
   checks?: GateCheck[]
+  /**
+   * 评审清单（M14）：本轮评定出的待改项。给了就产一条 `review.reported`（`rev` 自动递增），
+   * 修复阶段会按阶段图取到它并逐条要求回应；`id` 不接受自报，由内核拼 `<reportId>#<key>`。
+   */
+  findings?: ReviewFindingInput[]
+  /**
+   * 逐条回应（M14）：修复轮对已定位报告的清单作答。`fixed` 必须带 `checkRef`
+   * （指向同回执 `checks` 且退出码为 0）；`rejected` / `deferred` 必须写 `note`。
+   * 仍有 `open` 条目且当前阶段正是该报告打回的目标阶段时，任务不推进（硬门）。
+   */
+  addresses?: FindingAddress[]
+  /**
+   * 正文引用（M14）：**宿主**把报告正文落到 `<userData>/artifacts/threads/<threadId>/` 后回填，
+   * 内核只把它抄进报告行、不读文件。缺省 = 正文没落盘（索引段只给清单与报告 id）。
+   */
+  artifact?: ReviewArtifact
 }
 
 // ---------- 运行 ----------

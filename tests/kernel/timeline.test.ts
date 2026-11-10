@@ -604,4 +604,30 @@ describe('kernel/timeline', () => {
     expect(kinds(timeline(facts, 'task', 't-1'))).toEqual(['1:task.children_settled'])
     expect(kinds(timeline(facts, 'task', 't-2'))).toEqual([])
   })
+
+  it('M14：评审报告 / 逐条处置都归到所属任务时间线', () => {
+    const report = {
+      id: 'run-1:1',
+      taskId: 't-1',
+      stageId: 'st-1',
+      runId: 'run-1',
+      threadId: null,
+      rev: 1,
+      verdict: 'fail' as const,
+      checks: [],
+      findings: [],
+      artifact: null,
+      createdAt: AT,
+      updatedAt: AT,
+    }
+    const facts: Fact[] = [
+      fact(1, 'review.reported', { report }),
+      fact(2, 'review.addressed', { report, addressed: [] }),
+    ]
+    expect(kinds(timeline(facts, 'task', 't-1'))).toEqual([
+      '1:review.reported',
+      '2:review.addressed',
+    ])
+    expect(kinds(timeline(facts, 'task', 't-2'))).toEqual([])
+  })
 })

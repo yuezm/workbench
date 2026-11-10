@@ -387,6 +387,57 @@ describe('loadView：按 viewSpec 装载切片', () => {
     expect(chatView.tasks.size).toBe(0)
   })
 
+  it('review_reports 切片：JSON 列还原为行（artifact 为 null 时不吃 JSON.parse）；未声明时不装载', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+    const task = sample.task()
+    writer.apply({ table: 'tasks', key: task.id, row: task }, SAMPLE_AT)
+    const base = {
+      taskId: task.id,
+      stageId: 'st-1',
+      runId: 'run-1',
+      threadId: null,
+      rev: 1,
+      verdict: 'fail' as const,
+      checks: [{ cmd: 'pnpm check', exitCode: 1 }],
+      findings: [
+        {
+          id: 'run-1:1#R1',
+          key: 'R1',
+          severity: 'high' as const,
+          location: null,
+          claim: '断言',
+          evidence: null,
+          requiredAction: '复跑',
+          status: 'open' as const,
+          note: null,
+          addressedByRunId: null,
+          updatedAt: SAMPLE_AT,
+        },
+      ],
+      createdAt: SAMPLE_AT,
+      updatedAt: SAMPLE_AT,
+    }
+    const withArtifact = {
+      ...base,
+      id: 'run-1:1',
+      artifact: { path: '/a/report.md', sha256: 'x', bytes: 3 },
+    }
+    const withoutArtifact = { ...base, id: 'run-2:1', runId: 'run-2', artifact: null }
+    writer.apply({ table: 'review_reports', key: withArtifact.id, row: withArtifact }, SAMPLE_AT)
+    writer.apply(
+      { table: 'review_reports', key: withoutArtifact.id, row: withoutArtifact },
+      SAMPLE_AT,
+    )
+
+    const view = loadView(db, ['review_reports'])
+    expect(view.reviewReports.get('run-1:1')).toEqual(withArtifact)
+    expect(view.reviewReports.get('run-2:1')?.artifact).toBeNull()
+    expect(view.reviewReports.get('run-2:1')?.findings[0]?.id).toBe('run-1:1#R1')
+    expect(loadView(db, []).reviewReports.size).toBe(0)
+  })
+
   it('cards 切片：装载完整 Card 行并还原 options_json；未声明时不装载', () => {
     const db = memory()
     seed(db)

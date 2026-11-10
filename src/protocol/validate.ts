@@ -35,6 +35,7 @@ import {
 import { VIEW_IDS, VIEW_PARAM_FIELDS, type ViewId } from './views'
 import { THREAD_LIMITS } from './thread'
 import { TASK_COMMENT_LIMITS } from './task-comment'
+import { FINDING_DISPOSITIONS, REVIEW_LIMITS, REVIEW_SEVERITIES } from './review'
 
 /** 校验通过返回收窄后的命令；失败返回首条错误文案。 */
 export type ValidateResult = { ok: true; command: Command } | { ok: false; message: string }
@@ -861,6 +862,61 @@ const checkGateCheck = (value: unknown, at: string): Check => {
   )
 }
 
+/**
+ * 评审条目（M14）：`{ key, severity, location?, claim, evidence?, requiredAction }`。
+ * `key` 是报告内小标（内核据此拼 `<reportId>#<key>`），重复小标在 `checkFindings` 里拒。
+ */
+const checkReviewFinding = (value: unknown, at: string): Check => {
+  const finding = asRecord(value)
+  if (!finding) return `${at} 必须是对象`
+  return (
+    required(finding.key, `${at}.key`, REVIEW_LIMITS.key) ??
+    requiredEnum(finding.severity, `${at}.severity`, REVIEW_SEVERITIES) ??
+    optionalText(finding.location, `${at}.location`, REVIEW_LIMITS.location) ??
+    required(finding.claim, `${at}.claim`, REVIEW_LIMITS.claim) ??
+    optionalText(finding.evidence, `${at}.evidence`, REVIEW_LIMITS.evidence) ??
+    required(finding.requiredAction, `${at}.requiredAction`, REVIEW_LIMITS.requiredAction)
+  )
+}
+
+/** 清单整体：逐条形状 + 小标不重复（重复会让 finding id 撞车，无法逐条闭环）。 */
+const checkFindings = (value: unknown): Check => {
+  const list = checkList(value, 'receipt.findings', REVIEW_LIMITS.maxFindings, checkReviewFinding)
+  if (list) return list
+  if (!Array.isArray(value)) return null
+  const seen = new Set<string>()
+  for (const entry of value as Obj[]) {
+    const key = String(entry.key).trim()
+    if (seen.has(key)) return `receipt.findings 的小标重复：${key}`
+    seen.add(key)
+  }
+  return null
+}
+
+/**
+ * 处置条目（M14）：`{ findingId, disposition, note?, checkRef? }`。
+ * `fixed` 必须带 `checkRef`（内核还要核对它指向的同回执 `checks` 退出码为 0）；
+ * `rejected` / `deferred` 必须带理由。
+ */
+const checkFindingAddress = (value: unknown, at: string): Check => {
+  const address = asRecord(value)
+  if (!address) return `${at} 必须是对象`
+  const disposition = requiredEnum(address.disposition, `${at}.disposition`, FINDING_DISPOSITIONS)
+  if (disposition) return disposition
+  const shape =
+    requiredId(address.findingId, `${at}.findingId`) ??
+    optionalText(address.note, `${at}.note`, REVIEW_LIMITS.note) ??
+    optionalText(address.checkRef, `${at}.checkRef`, COMMAND_LIMITS.gateCmd)
+  if (shape) return shape
+  if (address.disposition === 'fixed' && (address.checkRef ?? '') === '') {
+    return `${at}.checkRef 必填（fixed 必须给出复核命令）`
+  }
+  if (address.disposition !== 'fixed' && (address.note ?? '') === '') {
+    return `${at}.note 必填（不改 / 延后都要写理由）`
+  }
+  return null
+}
+
 /** 执行器回执：`leaseId` / `turn` 必填（D15），其余按 SPEC-plugins 逐项校验。 */
 const checkReceipt = (value: unknown): Check => {
   const receipt = asRecord(value)
@@ -893,7 +949,14 @@ const checkReceipt = (value: unknown): Check => {
     optionalIntegerIn(receipt.durationMs, 'receipt.durationMs', 0, COMMAND_LIMITS.elapsedMs) ??
     optionalBoolean(receipt.resumeRejected, 'receipt.resumeRejected') ??
     optionalEnum(receipt.verdict, 'receipt.verdict', GATE_VERDICTS) ??
-    checkList(receipt.checks, 'receipt.checks', COMMAND_LIMITS.gateChecks, checkGateCheck)
+    checkList(receipt.checks, 'receipt.checks', COMMAND_LIMITS.gateChecks, checkGateCheck) ??
+    checkFindings(receipt.findings) ??
+    checkList(
+      receipt.addresses,
+      'receipt.addresses',
+      REVIEW_LIMITS.maxAddresses,
+      checkFindingAddress,
+    )
   )
 }
 

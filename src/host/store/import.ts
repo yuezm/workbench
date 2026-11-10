@@ -523,6 +523,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   plugin_settings: 0,
   // M7.5：v2 没有任务上下文 / 反馈；导入不产 task_comments 行。
   task_comments: 0,
+  // M14：v2 没有评审报告；导入不产 review_reports 行。
+  review_reports: 0,
 })
 
 /** 一组行 + 表名 → `snapshot.imported` 草稿（payload 按表收窄成判别联合）。 */

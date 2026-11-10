@@ -58,6 +58,7 @@ const view = (seed: { settings?: PluginSetting[]; version?: number } = {}): View
   cards: new Map(),
   threads: new Map(),
   taskComments: new Map(),
+  reviewReports: new Map(),
   activeTaskIds: new Set(),
   rules: [],
   rulesVersion: 0,

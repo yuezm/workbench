@@ -1,20 +1,39 @@
 /**
- * 工作流命令（R2 从 `decide.ts` 拆出，行为不变）。
+ * 工作流命令（R2 从 `decide.ts` 拆出，行为不变；M18 加内置阶段）。
  */
-import type { GateConfig, StageInput, Workflow, WorkflowStage } from '../../protocol/entities'
+import type {
+  BuiltinStageKey,
+  GateConfig,
+  StageInput,
+  Workflow,
+  WorkflowStage,
+} from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
 import { validateStageHandoffs } from '../handoff'
+import {
+  builtinStageInput,
+  orderStagesByBuiltin,
+  resolveBuiltinStages,
+} from '../workflow/builtin-stages'
 import { validateStageSet } from '../workflow/stage-validation'
 import { done, hasActiveRun, ownerDraft, reject, runsOfTask, stagesOf, tasksOf } from './common'
 
-function stageRow(workflowId: Id, ids: Id[], stage: StageInput, position: number): WorkflowStage {
+function stageRow(
+  workflowId: Id,
+  id: Id,
+  ids: Id[],
+  stage: StageInput,
+  position: number,
+  builtin: BuiltinStageKey | null,
+): WorkflowStage {
   return {
-    id: ids[position],
+    id,
     workflowId,
     name: stage.name.trim(),
     position,
     entryMode: stage.entryMode,
+    builtin,
     agentId: stage.agentId ?? null,
     onCompleteStageId: indexTarget(ids, stage.onCompleteIndex),
     onRejectStageId: indexTarget(ids, stage.onRejectIndex),
@@ -80,6 +99,8 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     a.name === b.name &&
     a.position === b.position &&
     a.entryMode === b.entryMode &&
+    // M18：内置键一变就要落 stage.updated（否则锁名 / 锁位的修复会被静默吞掉）
+    (a.builtin ?? null) === (b.builtin ?? null) &&
     a.agentId === b.agentId &&
     a.onCompleteStageId === b.onCompleteStageId &&
     a.onRejectStageId === b.onRejectStageId &&
@@ -105,6 +126,51 @@ function missingAgentId(view: View, stages: StageInput[]): Id | null {
   return null
 }
 
+/** 一个待落行的阶段：内置键 + 按最终 position 造行（还原的内置行原样复用）。 */
+interface StageEntry {
+  builtin: BuiltinStageKey | null
+  row: (position: number) => WorkflowStage
+}
+
+/**
+ * 提交的阶段 + 补齐的内置阶段 → 规范顺序的待落行阶段。
+ *
+ * `builtins.keys[i]` 与 `inputs[i]` 一一对应；`missing` 里的内置阶段：
+ * 更新时优先按既有行还原（保留原 id / 配置），新建时用默认值。
+ */
+function stageEntries(
+  inputs: readonly StageInput[],
+  ids: Id[],
+  keys: Array<BuiltinStageKey | null>,
+  missing: readonly BuiltinStageKey[],
+  existing: readonly WorkflowStage[] | null,
+  workflowId: Id,
+  nextId: () => Id,
+): StageEntry[] {
+  const byBuiltin = new Map<BuiltinStageKey, WorkflowStage>()
+  for (const stage of existing ?? []) {
+    if (stage.builtin) byBuiltin.set(stage.builtin, stage)
+  }
+  const submitted: StageEntry[] = inputs.map((input, index) => ({
+    builtin: keys[index],
+    row: (position) => stageRow(workflowId, ids[index], ids, input, position, keys[index] ?? null),
+  }))
+  const restored: StageEntry[] = missing.map((key) => {
+    const previous = byBuiltin.get(key)
+    // 还原：字段原样保留，只有位置由规范顺序决定
+    if (previous !== undefined) {
+      return { builtin: key, row: (position) => ({ ...previous, position }) }
+    }
+    const id = nextId()
+    const input = builtinStageInput(key)
+    return {
+      builtin: key,
+      row: (position) => stageRow(workflowId, id, [], input, position, key),
+    }
+  })
+  return orderStagesByBuiltin([...submitted, ...restored])
+}
+
 export function createWorkflow(
   view: View,
   input: Extract<Input, { type: 'workflow.create' }>,
@@ -116,13 +182,25 @@ export function createWorkflow(
   if (!name) return reject('invalid_input', '工作流名称必填')
   const invalid = validateStageSet(form.stages)
   if (invalid) return reject('invalid_input', invalid)
+  // M18：内置阶段（待办 / 已阻塞 / 已完成 / 已取消）由系统保证存在，改名、重复直接拒
+  const resolved = resolveBuiltinStages(form.stages, null)
+  if (resolved.error) return reject('invalid_input', resolved.error)
   const missingAgent = missingAgentId(view, form.stages)
   if (missingAgent) return reject('not_found', '智能体不存在: ' + missingAgent)
   const workflowId = env.nextId('workflow')
   // M7：交接目标必须存在且 ≠ 自身、目标阶段属于目标工作流（保存时校验，读时再防御）
   const handoffError = validateStageHandoffs(view, workflowId, form.stages)
   if (handoffError) return reject('invalid_input', handoffError)
-  const stageIds = form.stages.map(() => env.nextId('stage'))
+  const ids = form.stages.map(() => env.nextId('stage'))
+  const entries = stageEntries(
+    form.stages,
+    ids,
+    resolved.keys,
+    resolved.missing,
+    null,
+    workflowId,
+    () => env.nextId('stage'),
+  )
   const workflow: Workflow = {
     id: workflowId,
     name,
@@ -130,10 +208,8 @@ export function createWorkflow(
     createdAt: now,
   }
   const facts: FactDraft[] = [ownerDraft('workflow.created', { workflow }, now)]
-  form.stages.forEach((stage, position) => {
-    facts.push(
-      ownerDraft('stage.created', { stage: stageRow(workflowId, stageIds, stage, position) }, now),
-    )
+  entries.forEach((entry, position) => {
+    facts.push(ownerDraft('stage.created', { stage: entry.row(position) }, now))
   })
   return done(facts)
 }
@@ -154,6 +230,10 @@ export function updateWorkflow(
   if (hasActiveRun(view, current.id)) {
     return reject('conflict', '工作流有执行中的任务，无法修改阶段: ' + current.id)
   }
+  const existing = stagesOf(view, current.id)
+  // M18：内置阶段删不掉——缺的按既有行原样还原；改名 / 换类别 / 终态交接直接拒
+  const resolved = resolveBuiltinStages(form.stages, existing)
+  if (resolved.error) return reject('invalid_input', resolved.error)
   const missingAgent = missingAgentId(view, form.stages)
   if (missingAgent) return reject('not_found', '智能体不存在: ' + missingAgent)
   // M7：交接目标工作流 / 阶段的存在与从属（自指在保存时就拒绝）
@@ -161,7 +241,6 @@ export function updateWorkflow(
   if (handoffError) return reject('invalid_input', handoffError)
 
   // 阶段 id 差量：回传的 id 保留，缺省 id 拿新 id，未出现在提交集合里的旧阶段 tombstone。
-  const existing = stagesOf(view, current.id)
   const existingById = new Map(existing.map((stage) => [stage.id, stage]))
   const refs: Array<Id | null> = []
   const claimed = new Set<Id>()
@@ -175,8 +254,17 @@ export function updateWorkflow(
     refs.push(ref)
   }
   const ids = refs.map((ref) => ref ?? env.nextId('stage'))
-  const rows = form.stages.map((stage, position) => stageRow(current.id, ids, stage, position))
-  const nextIds = new Set(ids)
+  const entries = stageEntries(
+    form.stages,
+    ids,
+    resolved.keys,
+    resolved.missing,
+    existing,
+    current.id,
+    () => env.nextId('stage'),
+  )
+  const rows = entries.map((entry, position) => entry.row(position))
+  const nextIds = new Set(rows.map((row) => row.id))
   const removed = existing.filter((stage) => !nextIds.has(stage.id))
 
   const workflow: Workflow = {

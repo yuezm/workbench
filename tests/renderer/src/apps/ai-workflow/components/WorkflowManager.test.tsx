@@ -171,18 +171,37 @@ describe('WorkflowManager', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('阶段为空的旧数据在编辑器里就被拦下：不发命令，说明至少一个阶段', async () => {
+  it('阶段为空的旧数据：编辑器补出四个内置阶段，保存把它们一并提交', async () => {
     kernel.setView('workflows.all', undefined, [wf('w1', '研发')])
+    handleDispatch(() => ({ facts: [], value: null }))
     const user = userEvent.setup()
     render(<WorkflowManager />)
     await screen.findByText('研发')
 
     await user.click(screen.getByRole('button', { name: '编辑' }))
+    // 视图里没有阶段（M18 之前的老数据）：内置四件套隐式补出，名称锁定
+    expect(screen.getByLabelText('阶段1名称')).toHaveValue('待办')
+    expect(screen.getByLabelText('阶段1名称')).toHaveAttribute('readonly')
+    expect(screen.getByRole('button', { name: '阶段4' }).textContent).toContain('已取消')
+
     await user.click(screen.getByRole('button', { name: '保存' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('工作流至少要有一个阶段')
-    expect(kernel.dispatched).toHaveLength(0)
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    const command = kernel.dispatched[0]
+    expect(command).toMatchObject({ type: 'workflow.update', id: 'w1' })
+    if (command.type !== 'workflow.update') throw new Error('命令类型不对')
+    expect(command.input.stages.map((stage) => stage.name)).toEqual([
+      '待办',
+      '已阻塞',
+      '已完成',
+      '已取消',
+    ])
+    expect(command.input.stages.map((stage) => stage.builtin ?? null)).toEqual([
+      'todo',
+      'blocked',
+      'done',
+      'cancelled',
+    ])
   })
 
   it('工作流视图读取失败展示错误', async () => {
@@ -283,6 +302,10 @@ describe('WorkflowManager', () => {
     const menu = screen.getByRole('menu', { name: '新建工作流' })
     expect(menu).toHaveTextContent('SOP 模板')
     expect(screen.getByRole('menuitem', { name: '从空白创建工作流' })).toBeInTheDocument()
+    // 空白起手的说明与「内置阶段恒在」的新模型一致
+    expect(screen.getByRole('menuitem', { name: '从空白创建工作流' })).toHaveTextContent(
+      '内置待办 / 已阻塞 / 已完成 / 已取消，自己往中间加阶段',
+    )
     for (const template of SOP_TEMPLATES) {
       const item = screen.getByRole('menuitem', { name: `使用模板 ${template.name}` })
       expect(item).toHaveTextContent(template.description)
@@ -304,13 +327,13 @@ describe('WorkflowManager', () => {
     await user.click(screen.getByRole('button', { name: '新建工作流' }))
     await user.click(screen.getByRole('menuitem', { name: `使用模板 ${release.name}` }))
 
-    // 下拉关闭，编辑器带着模板的阶段与「要干什么」打开
+    // 下拉关闭，编辑器带着模板的阶段与「要干什么」打开；默认展开第一个自己添加的阶段
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(screen.getByRole('dialog')).toHaveTextContent('工作流定义')
     expect(screen.getByLabelText('工作流名称')).toHaveValue(release.name)
-    expect(screen.getByLabelText('阶段1名称')).toHaveValue(release.stages[0].name)
-    expect(screen.getByLabelText('阶段1要干什么')).toHaveValue(release.stages[0].instructions)
+    expect(screen.getByLabelText('阶段2名称')).toHaveValue(release.stages[0].name)
+    expect(screen.getByLabelText('阶段2要干什么')).toHaveValue(release.stages[0].instructions)
   })
 
   it('下拉可按 Esc 关闭：不打开编辑器、不 dispatch', async () => {
@@ -352,15 +375,22 @@ describe('WorkflowManager', () => {
     const command = kernel.dispatched[0]
     expect(command).toMatchObject({ type: 'workflow.create', input: { name: release.name } })
     if (command.type !== 'workflow.create') throw new Error('命令类型不对')
-    expect(command.input.stages.map((stage) => stage.name)).toEqual(
-      release.stages.map((stage) => stage.name),
-    )
+    // 提交整份定义：四个内置阶段 + 模板阶段（顺序即看板顺序）
+    const names = command.input.stages.map((stage) => stage.name)
+    expect(names).toEqual([
+      '待办',
+      ...release.stages.map((stage) => stage.name),
+      '已阻塞',
+      '已完成',
+      '已取消',
+    ])
     // 「要干什么」原样落库（会拼进阶段提示词）
-    expect(command.input.stages[0].instructions).toBe(release.stages[0].instructions)
-    // 阶段名在下标里解析：灰度阶段的打回目标指向「发布准备」而不是自己
-    const canaryIndex = release.stages.findIndex((stage) => stage.name === '灰度发布')
-    const prepareIndex = release.stages.findIndex((stage) => stage.name === '发布准备')
-    expect(command.input.stages[canaryIndex].onRejectIndex).toBe(prepareIndex)
-    expect(canaryIndex).toBeGreaterThan(-1)
+    expect(
+      command.input.stages.find((stage) => stage.name === release.stages[0].name),
+    ).toMatchObject({ instructions: release.stages[0].instructions })
+    // 阶段名在完整数组的下标里解析：灰度阶段的打回目标指向「发布准备」而不是自己
+    expect(command.input.stages[names.indexOf('灰度发布')].onRejectIndex).toBe(
+      names.indexOf('发布准备'),
+    )
   })
 })

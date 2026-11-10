@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   gate_max_fails INTEGER,
   gate_on_pass_stage_id TEXT,
   gate_on_fail_stage_id TEXT,
+  -- M18 内置阶段键（待办 / 已阻塞 / 已完成 / 已取消；NULL = 自己添加的阶段）
+  builtin TEXT CHECK (builtin IN ('todo','blocked','done','cancelled')),
   created_at TEXT NOT NULL,
   UNIQUE (workflow_id, position)
 );`
@@ -776,6 +778,21 @@ export const TASKS_M11_ADD_COLUMN_SQL: Readonly<
   Record<(typeof TASKS_M11_ADDED_COLUMNS)[number], string>
 > = {
   gate_fails: 'ALTER TABLE tasks ADD COLUMN gate_fails INTEGER NOT NULL DEFAULT 0',
+}
+
+/**
+ * M18 给 `workflow_stages` 新增的列（内置阶段键）：可空、无 DEFAULT ——
+ * 旧行按「自己添加的阶段」归一（null），内置行由启动补齐写成四个固定键之一。
+ * 清单与 `stagesTable()` 的 DDL 保持同步。
+ */
+export const STAGES_M18_ADDED_COLUMNS = ['builtin'] as const
+
+/** `workflow_stages` M18 补列语句（可空、无 DEFAULT；CHECK 与 DDL 一致）。 */
+export const STAGES_M18_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M18_ADDED_COLUMNS)[number], string>
+> = {
+  builtin:
+    "ALTER TABLE workflow_stages ADD COLUMN builtin TEXT CHECK (builtin IN ('todo','blocked','done','cancelled'))",
 }
 
 /**

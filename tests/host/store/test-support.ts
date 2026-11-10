@@ -124,6 +124,8 @@ export const sample = {
       name: '待办',
       position: 0,
       entryMode: 'none',
+      // M18：自己添加的阶段 builtin 为 null；内置阶段由内核 / 启动补齐写成固定键
+      builtin: null,
       agentId: null,
       onCompleteStageId: null,
       onRejectStageId: null,
@@ -317,6 +319,7 @@ const PROJECTION_COLUMNS: Record<string, { columns: readonly string[]; orderBy: 
       'name',
       'position',
       'entry_mode',
+      'builtin',
       'agent_id',
       'on_complete_stage_id',
       'on_reject_stage_id',

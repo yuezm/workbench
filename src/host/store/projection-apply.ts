@@ -221,11 +221,12 @@ const normalizeTask = (row: Task): Task & { gateFails: number } => {
   }
 }
 
-/** 规整阶段行的缺省值（M7 / M8 / M11）：缺交接 / 子任务 / 闸门字段时补 null。 */
+/** 规整阶段行的缺省值（M7 / M8 / M11 / M18）：缺交接 / 子任务 / 闸门 / 内置键时补 null。 */
 const normalizeStage = (row: WorkflowStage): WorkflowStage => {
   const legacy = row as Partial<WorkflowStage>
   return {
     ...row,
+    builtin: legacy.builtin ?? null,
     handoffWorkflowId: legacy.handoffWorkflowId ?? null,
     handoffStageId: legacy.handoffStageId ?? null,
     subtaskStageId: legacy.subtaskStageId ?? null,
@@ -360,13 +361,14 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, instructions, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, builtin, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, instructions, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
          position = excluded.position,
          entry_mode = excluded.entry_mode,
+         builtin = excluded.builtin,
          agent_id = excluded.agent_id,
          on_complete_stage_id = excluded.on_complete_stage_id,
          on_reject_stage_id = excluded.on_reject_stage_id,
@@ -624,6 +626,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.name,
         stage.position,
         stage.entryMode,
+        stage.builtin ?? null,
         stage.agentId,
         stage.onCompleteStageId,
         stage.onRejectStageId,

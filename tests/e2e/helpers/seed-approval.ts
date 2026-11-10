@@ -113,7 +113,7 @@ export async function seedApprovalState(dbPath: string): Promise<ApprovalSeed> {
         name: '审批流程',
         stages: [
           { name: '执行', entryMode: 'agent', agentId: agent.id },
-          { name: '待办', entryMode: 'none' },
+          { name: '收尾', entryMode: 'none' },
         ],
       },
     }).facts
@@ -122,6 +122,10 @@ export async function seedApprovalState(dbPath: string): Promise<ApprovalSeed> {
       'workflow.created',
       '工作流',
     ).workflow
+    // M18：内置「待办」是最前一个阶段（不派活），任务要显式落 `执行` 才会入队
+    const workflowView = store.query('workflows.all').find((row) => row.id === workflow.id)
+    const execStage = workflowView?.stages.find((stage) => stage.name === '执行')
+    if (execStage === undefined) throw new Error('审批种子缺少执行阶段')
 
     // M10：任务必须挂在项目下（项目文件夹就是本轮工作目录）。
     const projectFacts = store.dispatch({
@@ -134,7 +138,12 @@ export async function seedApprovalState(dbPath: string): Promise<ApprovalSeed> {
     const taskFacts = store.dispatch({
       type: 'task.create',
       commandId: 'e2e-approval-task',
-      input: { title: '审批任务', workflowId: workflow.id, projectId: project.id },
+      input: {
+        title: '审批任务',
+        workflowId: workflow.id,
+        projectId: project.id,
+        stageId: execStage.id,
+      },
     }).facts
     const task = payloadOf<{ task: Task }>(taskFacts, 'task.created', '任务').task
 

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   ACCESS_LEVELS,
   ARGV_PLACEHOLDERS,
+  BUILTIN_STAGE_KEYS,
+  BUILTIN_STAGE_NAMES,
   CHAT_ROLES,
   ENTRY_MODES,
   ENTITY_TABLES,
@@ -14,10 +16,15 @@ import {
   RUN_PURPOSES,
   RUN_STATUSES,
   RUN_TERMINAL_STATUSES,
+  STAGE_KINDS,
   TASK_STATUSES,
+  builtinStageKind,
+  isBuiltinStageName,
+  stageKindOf,
   type Access,
   type Agent,
   type AgentInput,
+  type BuiltinStageKey,
   type Card,
   type CardDelivery,
   type CardStatus,
@@ -41,6 +48,7 @@ import {
   type RuntimeProbe,
   type RuntimeProbeState,
   type StageInput,
+  type StageKind,
   type Task,
   type TaskInput,
   type TaskStatus,
@@ -86,7 +94,15 @@ const contractChecks: [
   Assert<Equal<RunEventRow['type'], RunEventType>>,
   Assert<Equal<Card['status'], CardStatus>>,
   Assert<Equal<Card['delivery'], CardDelivery>>,
+  Assert<Equal<NonNullable<WorkflowStage['builtin']>, BuiltinStageKey>>,
+  Assert<Equal<NonNullable<StageInput['builtin']>, BuiltinStageKey>>,
+  Assert<Equal<StageKind, (typeof STAGE_KINDS)[number]>>,
+  Assert<Equal<BuiltinStageKey, (typeof BUILTIN_STAGE_KEYS)[number]>>,
 ] = [
+  true,
+  true,
+  true,
+  true,
   true,
   true,
   true,
@@ -420,7 +436,7 @@ describe('protocol/entities', () => {
   })
 
   it('实体契约锁：字段与枚举/输入类型对应（类型级断言，M5 起 protocol 是唯一真相）', () => {
-    expect(contractChecks).toHaveLength(26)
+    expect(contractChecks).toHaveLength(30)
     expect(contractChecks.every(Boolean)).toBe(true)
   })
 
@@ -520,5 +536,36 @@ describe('protocol/entities', () => {
       'id',
       'role',
     ])
+  })
+})
+
+describe('protocol/entities 内置阶段（M18）', () => {
+  it('四个内置键、固定名称与类别映射', () => {
+    expect(BUILTIN_STAGE_KEYS).toEqual(['todo', 'blocked', 'done', 'cancelled'])
+    expect(BUILTIN_STAGE_NAMES).toEqual({
+      todo: '待办',
+      blocked: '已阻塞',
+      done: '已完成',
+      cancelled: '已取消',
+    })
+    expect(BUILTIN_STAGE_KEYS.map((key) => builtinStageKind(key))).toEqual([
+      'pending',
+      'active',
+      'done',
+      'closed',
+    ])
+    expect(STAGE_KINDS).toEqual(['pending', 'active', 'done', 'closed'])
+  })
+
+  it('stageKindOf：内置按键取，自己添加的阶段一律「进行中」', () => {
+    expect(stageKindOf({ builtin: 'todo' })).toBe('pending')
+    expect(stageKindOf({ builtin: 'cancelled' })).toBe('closed')
+    expect(stageKindOf({ builtin: null })).toBe('active')
+    expect(stageKindOf({})).toBe('active')
+  })
+
+  it('isBuiltinStageName：去首尾空白后匹配，非内置名返回 false', () => {
+    expect(isBuiltinStageName(' 已完成 ')).toBe(true)
+    expect(isBuiltinStageName('开发')).toBe(false)
   })
 })

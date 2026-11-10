@@ -414,7 +414,10 @@ describe('kernel/decide 交接——阶段保存校验', () => {
       env(),
     )
 
-    const created = payloadsOf<{ stage: WorkflowStage }>(decision.facts, 'stage.created')[0].stage
+    // M18：内置阶段也各产一条 stage.created，这里按交接两列定位用户阶段
+    const created = payloadsOf<{ stage: WorkflowStage }>(decision.facts, 'stage.created')
+      .map((payload) => payload.stage)
+      .find((item) => item.handoffWorkflowId === 'wf-b')
 
     expect(created).toMatchObject({ handoffWorkflowId: 'wf-b', handoffStageId: 'st-b1' })
   })
@@ -472,7 +475,9 @@ describe('kernel/decide 交接——阶段保存校验', () => {
       env(),
     )
 
-    const updated = payloadsOf<{ stage: WorkflowStage }>(decision.facts, 'stage.updated')[0].stage
+    const updated = payloadsOf<{ stage: WorkflowStage }>(decision.facts, 'stage.updated')
+      .map((payload) => payload.stage)
+      .find((item) => item.id === 'st-a0')
 
     expect(updated).toMatchObject({
       id: 'st-a0',

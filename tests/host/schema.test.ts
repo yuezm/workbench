@@ -10,6 +10,8 @@ import {
   PROJECTION_TABLES,
   SCHEMA_SQL,
   SCHEMA_VERSION,
+  STAGES_M18_ADD_COLUMN_SQL,
+  STAGES_M18_ADDED_COLUMNS,
   formatOfProjection,
   projectionFormat,
   tableDdl,
@@ -136,6 +138,8 @@ const STAGES_M7_COLUMNS = [
   'gate_max_fails',
   'gate_on_pass_stage_id',
   'gate_on_fail_stage_id',
+  // M18：内置阶段键（null = 自己添加的阶段）
+  'builtin',
   'created_at',
 ]
 
@@ -250,7 +254,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     }
   })
 
-  it('workflow_stages 按 M7/M8 结构：交接两列 + 子任务三列插在 on_reject_stage_id 与时间列之间，M1 列逐列不变', () => {
+  it('workflow_stages 按 M7/M8/M18 结构：交接两列 + 子任务三列插在 on_reject_stage_id 与时间列之间，M1 列逐列不变', () => {
     const legacy = memoryDb()
     legacy.exec(PRE_M1_FIVE_TABLE_DDL)
     legacy.exec(PRE_M1_FIVE_TABLE_INDEXES)
@@ -273,6 +277,41 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       foreignKeyShape(legacy, 'workflow_stages'),
     )
     expect(indexShape(current, 'workflow_stages')).toEqual(indexShape(legacy, 'workflow_stages'))
+  })
+
+  it('M18 内置阶段列：builtin 可空无默认、只认四个内置键，补列语句与 DDL 同口径', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    const builtin = columnShape(db, 'workflow_stages').find(
+      (shape) => shape.split('|')[0] === 'builtin',
+    )
+    // name | type | notnull | default | pk
+    expect(builtin).toBe('builtin|TEXT|0|null|0')
+    expect(STAGES_M18_ADDED_COLUMNS).toEqual(['builtin'])
+    expect(STAGES_M18_ADD_COLUMN_SQL.builtin).toContain(
+      "CHECK (builtin IN ('todo','blocked','done','cancelled'))",
+    )
+    expect(STAGES_M18_ADD_COLUMN_SQL.builtin).toContain('ADD COLUMN builtin TEXT')
+
+    db.exec(
+      "INSERT INTO workflows (id, name, created_at) VALUES ('wf-18', '流程', '2026-01-01T00:00:00.000Z')",
+    )
+    const insert = db.prepare(
+      `INSERT INTO workflow_stages (id, workflow_id, name, position, entry_mode, builtin, created_at)
+       VALUES (?, 'wf-18', ?, ?, 'none', ?, '2026-01-01T00:00:00.000Z')`,
+    )
+    // null = 自己添加的阶段；四个内置键各自可写
+    insert.run('st-user', '自己加的', 0, null)
+    ;(['todo', 'blocked', 'done', 'cancelled'] as const).forEach((key, index) => {
+      insert.run(`st-${key}`, `内置 ${key}`, index + 1, key)
+    })
+    expect(
+      db.prepare('SELECT builtin FROM workflow_stages WHERE id = ?').get('st-user') as {
+        builtin: string | null
+      },
+    ).toEqual({ builtin: null })
+    // 五个键之外的值被 CHECK 拒
+    expect(() => insert.run('st-bad', '非法', 9, 'archived')).toThrow()
   })
 
   it('tasks 新列默认值 / CHECK：旧行与手工任务 origin=manual、线程与交接列为 null，非法来源被拒', () => {

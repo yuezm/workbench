@@ -208,6 +208,10 @@ interface Seeded {
 /**
  * 建一条「运行时 + 智能体 + 两阶段工作流（首阶段 agent、次阶段 none）+ 任务」的世界；
  * 任务进入 agent 首阶段时，内核自动入队一条 run（T10 把进入效果搬进内核）。
+ *
+ * M18：工作流恒有四个内置阶段（待办 / 已阻塞 / 已完成 / 已取消），新任务默认落内置
+ * 「待办」且不会立刻派活。要任务进 agent 阶段起 run 必须显式传 stageId；`stages.first`
+ * / `stages.second` 只取自己添加的阶段（`builtin === null`）。
  */
 function seed(maxConcurrent = 1, runtimePatch: Partial<RuntimeInput> = {}): Seeded {
   const runtime = createRuntime({ name: 'rt-' + commandSeq, maxConcurrent, ...runtimePatch })
@@ -231,13 +235,14 @@ function seed(maxConcurrent = 1, runtimePatch: Partial<RuntimeInput> = {}): Seed
   const stageIds = workflowFacts
     .filter((fact) => fact.type === 'stage.created')
     .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
+    .filter((stage) => (stage.builtin ?? null) === null)
     .sort((left, right) => left.position - right.position)
     .map((stage) => stage.id)
   const projectId = createProject()
   const taskFacts = world.store.dispatch({
     type: 'task.create',
     commandId: nextCommandId(),
-    input: { title: 'T', description: 'd', workflowId, projectId },
+    input: { title: 'T', description: 'd', workflowId, projectId, stageId: stageIds[0] },
   }).facts
   const task = (taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task })
     .task
@@ -778,11 +783,20 @@ describe('createScheduler：阶段链', () => {
         workflow: { id: string }
       }
     ).workflow.id
+    // M18：只取自己添加的两个 agent 阶段（内置四件套不参与链式流转）；链尾落到内置「已完成」
+    const chainStages = workflowFacts
+      .filter((fact) => fact.type === 'stage.created')
+      .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
+      .sort((left, right) => left.position - right.position)
+    const chainStageIds = chainStages
+      .filter((stage) => (stage.builtin ?? null) === null)
+      .map((stage) => stage.id)
+    const doneStageId = chainStages.find((stage) => stage.builtin === 'done')?.id
     const projectId = createProject()
     const taskFacts = world.store.dispatch({
       type: 'task.create',
       commandId: nextCommandId(),
-      input: { title: 'T', workflowId, projectId },
+      input: { title: 'T', workflowId, projectId, stageId: chainStageIds[0] },
     }).facts
     const taskId = (
       taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task }
@@ -796,7 +810,10 @@ describe('createScheduler：阶段链', () => {
 
     expect(execute).toHaveBeenCalledTimes(2)
     expect(runStatuses(taskId)).toEqual(['succeeded', 'succeeded'])
-    expect((world.store.query('task.byId', { taskId }) as Task).status).toBe('completed')
+    // M18：最后一个用户阶段成功后进入内置「已完成」，任务仍是 active（归档要显式 task.complete）
+    const chained = world.store.query('task.byId', { taskId }) as Task
+    expect(chained.status).toBe('active')
+    expect(chained.currentStageId).toBe(doneStageId)
   })
 })
 

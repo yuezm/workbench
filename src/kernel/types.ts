@@ -47,8 +47,10 @@ export type Iso = string
  * ALTER 的默认值写成 ask，旧的信息卡全部冒充「待审批」，所以这里必须递增以触发重建。
  * M14：评审结论（`review_reports` 第 17 张投影表）——修理阶段要按阶段图取评审结论，
  * 而不是从被截断的 `runs.output` 摘要里猜。
+ * M18：工作流内置四个阶段（`workflow_stages.builtin` 投影列）——老库的列一旦补出来，
+ * 启动补齐按名认领 / 补建内置阶段，所以这里递增以触发一次重建。
  */
-export const KERNEL_VERSION = 'M14.0.0'
+export const KERNEL_VERSION = 'M18.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

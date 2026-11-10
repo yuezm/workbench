@@ -123,10 +123,20 @@ function seedClaimedRun(store: Store, label: string): ClaimedRun {
     store.query('projects.all').find((item) => item.name === `项目 ${label}`),
     `项目 ${label}`,
   )
+  // M18：新任务默认落内置「待办」（不派活）；要起 run 必须显式落到自己添加的阶段
+  const stageId = must(
+    workflow.stages.find((stage) => (stage.builtin ?? null) === null),
+    `流程 ${label} 的 agent 阶段`,
+  ).id
   store.dispatch({
     type: 'task.create',
     commandId: `s-tk-${label}`,
-    input: { title: `任务 ${label}`, workflowId: workflow.id, projectId: project.id },
+    input: {
+      title: `任务 ${label}`,
+      workflowId: workflow.id,
+      projectId: project.id,
+      stageId,
+    },
   })
   const task = must(
     store

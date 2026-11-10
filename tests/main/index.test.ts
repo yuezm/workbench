@@ -44,6 +44,8 @@ const mocks = vi.hoisted(() => {
   }
   const storeMock = {
     ensureProjection: (): { rebuilt: boolean } => ({ rebuilt: false }),
+    // M18：启动补齐内置阶段（待办 / 已阻塞 / 已完成 / 已取消），排在 ensureProjection 之后
+    ensureBuiltinStages: (): { created: number; updated: number } => ({ created: 0, updated: 0 }),
     query: vi.fn(storeQuery),
     nextWakeAt: (): null => null,
     dispatch: (): { facts: unknown[] } => ({ facts: [] }),

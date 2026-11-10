@@ -68,7 +68,7 @@ test('闸门闭环：真实执行带回执块判定 → 任务通过闸门进入
         input,
       })
     },
-    { title: '闸门任务', workflowId, projectId: seeded.projectId },
+    { title: '闸门任务', workflowId, projectId: seeded.projectId, stageId: seeded.stageIds[0] },
   )
   expect(created.value).toBeTruthy()
 

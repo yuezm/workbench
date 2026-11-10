@@ -113,7 +113,7 @@ export async function seedCrashState(dbPath: string): Promise<CrashSeed> {
         name: '崩溃恢复流程',
         stages: [
           { name: '执行', entryMode: 'agent', agentId: agent.id },
-          { name: '待办', entryMode: 'none' },
+          { name: '收尾', entryMode: 'none' },
         ],
       },
     }).facts
@@ -126,6 +126,9 @@ export async function seedCrashState(dbPath: string): Promise<CrashSeed> {
       .filter((fact) => fact.type === 'stage.created')
       .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
       .sort((left, right) => left.position - right.position)
+      // M18：内置四阶段由系统补齐，这里只取种子声明的用户阶段（执行 / 收尾）
+      .filter((stage) => stage.builtin == null)
+    if (stages.length < 2) throw new Error('崩溃恢复种子缺少阶段')
 
     // M10：任务必须挂在项目下（项目文件夹就是本轮工作目录）。
     const projectFacts = store.dispatch({
@@ -142,7 +145,13 @@ export async function seedCrashState(dbPath: string): Promise<CrashSeed> {
     const taskFacts = store.dispatch({
       type: 'task.create',
       commandId: 'e2e-seed-task',
-      input: { title: '崩溃恢复任务', workflowId: workflow.id, projectId: project.id },
+      input: {
+        title: '崩溃恢复任务',
+        workflowId: workflow.id,
+        projectId: project.id,
+        // M18：默认落「待办」不派活，显式进执行阶段才会入队
+        stageId: stages[0]?.id,
+      },
     }).facts
     const task = (
       taskFacts.find((fact) => fact.type === 'task.created')?.payload as {

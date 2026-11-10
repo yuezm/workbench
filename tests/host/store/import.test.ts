@@ -301,6 +301,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       name: '待办',
       position: 0,
       entryMode: 'none',
+      // M18：v2 存量没有内置阶段概念，归一为自己添加的阶段（null）
+      builtin: null,
       agentId: null,
       onCompleteStageId: 'st-2',
       onRejectStageId: null,
@@ -315,6 +317,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       name: '实现',
       position: 1,
       entryMode: 'agent',
+      builtin: null,
       agentId: 'ag-1',
       onCompleteStageId: null,
       onRejectStageId: 'st-1',

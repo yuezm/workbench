@@ -5,13 +5,19 @@ import {
   type KeyboardEvent,
   type ReactElement,
 } from 'react'
-import type { Task, WorkflowStage, WorkflowWithStages } from '../../../../../protocol/entities'
+import {
+  stageKindOf,
+  type Task,
+  type WorkflowStage,
+  type WorkflowWithStages,
+} from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
 import { FormError } from '../../../components/ui/form-error'
 import { Input } from '../../../components/ui/input'
 import { Textarea } from '../../../components/ui/textarea'
 import { cn } from '../../../lib/cn'
 import { useKernelView } from '../../../shell/useKernelView'
+import { STAGE_KIND_META } from '../model/stage-kinds'
 import { ArchivedTasksDialog } from './ArchivedTasksDialog'
 import { TaskCard } from './TaskCard'
 
@@ -39,9 +45,6 @@ interface KanbanBoardProps {
   /** 打开卡片所属线程的详情页（任务有 threadId 时才渲染入口） */
   onOpenThread?: (threadId: string) => void
 }
-
-/** 列头圆点按列序循环取四色点缀 */
-const DOT_COLORS = ['bg-primary', 'bg-success', 'bg-info', 'bg-primary'] as const
 
 /** 「归档」落点：不是阶段（不叫「已完成」，免得和同名阶段混淆），用哨兵值参与高亮判断 */
 const DONE_TARGET = '__done__'
@@ -303,6 +306,9 @@ export function KanbanBoard({
           {workflow.stages.map((stage, index) => {
             const cards = activeTasks.filter((t) => t.currentStageId === stage.id)
             const isOver = overTarget === stage.id
+            // M18：列头圆点按阶段**类别**取色（未开始 / 进行中 / 已完成 / 已关闭），
+            // 不再按列序循环四色——颜色要说明状态，不是装饰
+            const kindMeta = STAGE_KIND_META[stageKindOf(stage)]
             return (
               <div
                 key={stage.id}
@@ -322,12 +328,21 @@ export function KanbanBoard({
                 style={{ animationDelay: `${index * 60}ms` }}
               >
                 <div className="flex items-center justify-between px-1.5 pt-0.5 pb-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
                     <span
-                      className={`size-1.5 shrink-0 rounded-full ${DOT_COLORS[index % DOT_COLORS.length]}`}
+                      className={cn('size-1.5 shrink-0 rounded-full', kindMeta.dot)}
                       aria-hidden="true"
                     />
-                    <span className="text-base font-medium text-foreground">{stage.name}</span>
+                    <span className="truncate text-base font-medium text-foreground">
+                      {stage.name}
+                    </span>
+                    {/* 内置阶段补一行类别小字：待办 / 已阻塞 各自什么状态一眼可见。
+                        名称本身已经是类别文案时（已完成 / 已取消）不再重复一遍。 */}
+                    {stage.builtin != null && kindMeta.label !== stage.name && (
+                      <span className={cn('shrink-0 text-xs font-normal', kindMeta.text)}>
+                        {kindMeta.label}
+                      </span>
+                    )}
                   </div>
                   <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
                     {cards.length}

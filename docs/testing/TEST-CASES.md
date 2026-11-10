@@ -187,3 +187,6 @@
 | 随时         | `pnpm test:watch`、`pnpm e2e -- --ui`    | 开发期快速反馈                     |
 
 覆盖率阈值（2026-10-30 基线 99.3/95.5/97.9/99.2）：statements **98** / branches **93** / functions **95** / lines **98**。当前实测基线（2026-11-09 覆盖率补口）：**100 / 100 / 100 / 100**（164 测试文件 / 2653 用例；补口含「判定抽成模块级导出函数」的重构，产品行为零变化，改动行 89/89 = 100%），`pnpm e2e` 17/17。
+| TC-AIW-090 | 内置阶段（M18）：每个工作流恒有「待办 / 已阻塞 / 已完成 / 已取消」四个内置阶段（`builtin` 列），新建时缺的按默认值补齐、历史工作流按名认领（保留 id / 配置 / 任务）；名称、类别、位置由内核锁定（改名 / 换键 / 换 id 重建 / 终态交接分别给出可读拒绝），其余字段可改；顺序恒为 待办 → 用户阶段 → 已阻塞 → 已完成 → 已取消，`position` 随之归一 | 单元 | `kernel/workflow/builtin-stages.test.ts` + `kernel/decide.test.ts` + `host/store/builtin-stages.test.ts` |
+| TC-AIW-091 | 阶段类别与配色：`stageKindOf` 把内置键映射为 未开始 / 进行中 / 已完成 / 已关闭，自己添加的阶段一律「进行中」；看板列头按类别取色（灰 / 靛蓝 / 绿 / 红点），编辑器阶段列表给内置项「内置」徽标并锁住名称、删除、移动 | 单元 | `protocol/entities.test.ts` + `renderer/.../model/stage-kinds.test.ts` + `renderer/.../WorkflowEditor.test.tsx` + `KanbanBoard.test.tsx` |
+| TC-AIW-092 | 默认流转与终态列：自动流转跳过「已阻塞」，最后一个用户阶段成功后进入「已完成」且任务仍 `active`；「已完成」再成功才归档；新任务默认落「待办」（不带 `stageId`），需要直接派活时显式传用户阶段 | 单元 | `kernel/workflow/stage-machine.test.ts` + `kernel/decide.test.ts` + `host/scheduler.test.ts` |

@@ -84,6 +84,8 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             name: '阶段 1',
             position: 0,
             entryMode: 'none',
+            // M18：自己添加的阶段 builtin 为 null
+            builtin: null,
             agentId: null,
             onCompleteStageId: null,
             onRejectStageId: null,
@@ -101,6 +103,7 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             name: '阶段 2',
             position: 1,
             entryMode: 'user',
+            builtin: null,
             agentId: null,
             onCompleteStageId: null,
             onRejectStageId: null,

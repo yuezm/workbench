@@ -116,6 +116,20 @@
 - 把正文放进 10px 字号再配 `faint-foreground`。
 - 输入框底色叠 `bg-black/*`。
 
+### 阶段类别配色（M18）
+
+工作流阶段按四类取色（`model/stage-kinds.ts` 的 `STAGE_KIND_META`，纯类名，不改 token）：
+
+| 类别（`StageKind`） | 名称   | 圆点 / 强调           | 文字                    | 说明                                     |
+| ------------------- | ------ | --------------------- | ----------------------- | ---------------------------------------- |
+| `pending`           | 未开始 | `bg-muted-foreground` | `text-muted-foreground` | 内置「待办」                             |
+| `active`            | 进行中 | `bg-brand`            | `text-brand`            | 内置「已阻塞」自己添加的阶段             |
+| `done`              | 已完成 | `bg-success`          | `text-success`          | 内置「已完成」                           |
+| `closed`            | 已关闭 | `bg-destructive`      | `text-muted-foreground` | 内置「已取消」（圆点用警示色区分于待办） |
+
+- 颜色只出现在列头圆点、类别小字与徽标底色（`/10`–`/15`），不铺满列背景，也不给卡片上色。
+- 类别名固定用这四组中文，不出现在按钮上（阶段名才是可点对象）。
+
 ### 主题偏好（亮 / 暗 / 跟随系统）
 
 - 偏好只有三档：**亮色 / 暗色 / 跟随系统**。存 localStorage 的 `workbench.theme`（渲染层自己的偏好，不进工作台事实日志）。

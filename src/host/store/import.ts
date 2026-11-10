@@ -353,6 +353,8 @@ function readLegacyEntityRows(
     name: row.name,
     position: row.position,
     entryMode: row.entry_mode as EntryMode,
+    // M18：v2 存量没有内置阶段——四个内置阶段由启动补齐按名认领 / 补建。
+    builtin: null,
     agentId: row.agent_id,
     onCompleteStageId: row.on_complete_stage_id,
     onRejectStageId: row.on_reject_stage_id,

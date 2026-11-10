@@ -192,6 +192,8 @@ if (app.requestSingleInstanceLock()) {
     // 先导入更安全：空事实 + 存量投影时不会因为指纹失配把存量当投影清掉。
     importLegacyIfNeeded(db, kernel)
     store.ensureProjection()
+    // M18：每个工作流补成「待办 / 已阻塞 / 已完成 / 已取消」四件套（含历史工作流按名认领）
+    store.ensureBuiltinStages()
     // 执行器插件：dsh 会话持久化放在 userData 下，聊天才能跨轮续接；
     // 目录必须先存在（dsh profile 会直接在 session root 下写会话/spill 文件）。
     const sessionsDir = path.join(userData, 'ai-workflow', 'sessions')

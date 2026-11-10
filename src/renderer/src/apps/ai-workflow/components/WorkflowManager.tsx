@@ -18,10 +18,13 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * `dispatch` 返回的实体选中新建项）。新建/编辑共用一个弹窗，保存命令也在这里发，
  * 页面不再传任何 props。
  *
- * 新建只有一个入口：点「新建工作流」展开下拉，取空白草稿（一个「待办」阶段）或某条
+ * 新建只有一个入口：点「新建工作流」展开下拉，取空白草稿（只有四个内置阶段）或某条
  * 开箱 SOP 模板（产品发现 / 研发交付 / 测试质量 / 发版运维 / 事故复盘 / 迭代回顾）。
  * 模板只把阶段序列与每阶段「要干什么」预填进同一个编辑器，保存前不落库；阶段绑定的
  * 智能体是本机配置，模板不替用户做主。
+ *
+ * M18：每个工作流恒有四个内置阶段（待办 / 已阻塞 / 已完成 / 已取消），名称与位置锁定，
+ * 自己添加的阶段落在「待办」与「已阻塞」之间。
  */
 export function WorkflowManager(): ReactElement {
   const { data, error: readError } = useKernelViewState('workflows.all')
@@ -108,7 +111,7 @@ export function WorkflowManager(): ReactElement {
                 {
                   id: 'blank',
                   label: '从空白创建',
-                  description: '一个「待办」阶段，自己搭流程',
+                  description: '内置待办 / 已阻塞 / 已完成 / 已取消，自己往中间加阶段',
                   ariaLabel: '从空白创建工作流',
                   onSelect: () => openEditor(null),
                 },

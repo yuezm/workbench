@@ -107,6 +107,8 @@ const {
   }
   const storeMock = {
     ensureProjection: vi.fn(() => ({ rebuilt: false })),
+    // M18：启动补齐内置阶段（待办 / 已阻塞 / 已完成 / 已取消），排在 ensureProjection 之后
+    ensureBuiltinStages: vi.fn(() => ({ created: 0, updated: 0 })),
     query: vi.fn(storeQueryDefault),
     nextWakeAt: vi.fn(() => null),
     dispatch: vi.fn((_input: unknown) => ({ facts: [] })),
@@ -536,6 +538,10 @@ describe('主进程入口装配', () => {
       startupOrder.push('ensureProjection')
       return { rebuilt: false }
     })
+    storeMock.ensureBuiltinStages.mockImplementation(() => {
+      startupOrder.push('ensureBuiltinStages')
+      return { created: 0, updated: 0 }
+    })
     createExecutorRegistryMock.mockImplementation(() => {
       startupOrder.push('executors')
       return executorsMock
@@ -728,7 +734,7 @@ describe('主进程入口装配', () => {
     }
   })
 
-  it('启动顺序：事实推送 → 开库 → 建 store → 导入存量 → 对账投影 → 建仓储 → 清崩溃残留 → 通道 → clock → scheduler → 命令路由 → IPC', async () => {
+  it('启动顺序：事实推送 → 开库 → 建 store → 导入存量 → 对账投影 → 补内置阶段 → 建仓储 → 清崩溃残留 → 通道 → clock → scheduler → 命令路由 → IPC', async () => {
     await loadEntry()
 
     expect(startupOrder).toEqual([
@@ -737,6 +743,7 @@ describe('主进程入口装配', () => {
       'createStore',
       'importLegacy',
       'ensureProjection',
+      'ensureBuiltinStages',
       'executors',
       'registry',
       'reconcile',
@@ -746,6 +753,11 @@ describe('主进程入口装配', () => {
       'router',
       'ipc',
     ])
+    // M18：内置阶段补齐读的是投影，必须排在 ensureProjection 之后
+    expect(startupOrder.indexOf('ensureBuiltinStages')).toBe(
+      startupOrder.indexOf('ensureProjection') + 1,
+    )
+    expect(storeMock.ensureBuiltinStages).toHaveBeenCalledTimes(1)
     // 事实推送（feed）先建：effects.onFacts / 聊天流旁路在装配期就接到它
     expect(createFactFeedMock).toHaveBeenCalledTimes(1)
     // store 拿到的是内核门面：decide / project / viewSpec / nextWakeAt 纯函数
@@ -988,6 +1000,7 @@ describe('主进程入口装配', () => {
     expect(openDatabaseMock).not.toHaveBeenCalled()
     expect(createStoreMock).not.toHaveBeenCalled()
     expect(storeMock.ensureProjection).not.toHaveBeenCalled()
+    expect(storeMock.ensureBuiltinStages).not.toHaveBeenCalled()
     expect(importLegacyMock).not.toHaveBeenCalled()
     expect(createProcessRegistryMock).not.toHaveBeenCalled()
     expect(reconcileMock).not.toHaveBeenCalled()

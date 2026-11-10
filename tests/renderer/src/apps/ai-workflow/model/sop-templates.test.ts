@@ -33,7 +33,17 @@ describe('draftFromTemplate', () => {
 
     expect(draft.name).toBe('示例流')
     expect(draft.description).toBe('示例')
-    expect(draft.stages).toEqual([
+    // 模板只描述自己添加的阶段：四个内置阶段由草稿补齐
+    expect(draft.stages.map((stage) => stage.name)).toEqual([
+      '待办',
+      '甲',
+      '乙',
+      '丙',
+      '已阻塞',
+      '已完成',
+      '已取消',
+    ])
+    expect(draft.stages.filter((stage) => stage.builtin == null)).toEqual([
       {
         name: '甲',
         entryMode: 'agent',
@@ -45,18 +55,21 @@ describe('draftFromTemplate', () => {
         onChildrenSettled: null,
         spawnPolicy: null,
         instructions: '做甲',
+        gate: null,
       },
       {
         name: '乙',
         entryMode: 'user',
         onCompleteIndex: null,
-        onRejectIndex: 0,
+        // 「打回退回到甲」：甲排在待办之后，下标 1
+        onRejectIndex: 1,
         handoffWorkflowId: null,
         handoffStageId: null,
         subtaskStageId: null,
         onChildrenSettled: null,
         spawnPolicy: null,
         instructions: '看乙',
+        gate: null,
       },
       {
         name: '丙',
@@ -69,8 +82,25 @@ describe('draftFromTemplate', () => {
         onChildrenSettled: null,
         spawnPolicy: null,
         instructions: '等丙',
+        gate: null,
       },
     ])
+  })
+
+  it('草稿里的内置阶段按规范顺序补齐，且不带 id（保存时由内核分配）', () => {
+    const draft = draftFromTemplate(fixture())
+    expect(draft.stages.map((stage) => stage.builtin ?? null)).toEqual([
+      'todo',
+      null,
+      null,
+      null,
+      'blocked',
+      'done',
+      'cancelled',
+    ])
+    for (const stage of draft.stages) {
+      expect(stage.id, `${stage.name} 不该带 id`).toBeUndefined()
+    }
   })
 
   it('引用不存在的阶段名按默认处理（null），不产出越界下标', () => {
@@ -89,9 +119,10 @@ describe('draftFromTemplate', () => {
     }
 
     const draft = draftFromTemplate(template)
+    const user = draft.stages.filter((stage) => stage.builtin == null)
 
-    expect(draft.stages.map((stage) => stage.onCompleteIndex)).toEqual([null, null])
-    expect(draft.stages.map((stage) => stage.onRejectIndex)).toEqual([null, null])
+    expect(user.map((stage) => stage.onCompleteIndex)).toEqual([null, null])
+    expect(user.map((stage) => stage.onRejectIndex)).toEqual([null, null])
   })
 
   it('模板阶段带 id 时不复制 id（模板永远是新工作流）', () => {

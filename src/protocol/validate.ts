@@ -9,6 +9,7 @@
 import { COMMAND_NAMES, type Command, type CommandName } from './commands'
 import {
   ARGV_PLACEHOLDERS,
+  BUILTIN_STAGE_KEYS,
   CARD_ANSWER_VIA,
   ENTRY_MODES,
   EXECUTOR_KEY_PATTERN,
@@ -251,6 +252,8 @@ const checkStage = (value: unknown, label: string): Check => {
     optionalText(stage.id, `${label}.id`, COMMAND_LIMITS.stageId) ??
     required(stage.name, `${label}.name`, COMMAND_LIMITS.name) ??
     requiredEnum(stage.entryMode, `${label}.entryMode`, ENTRY_MODES) ??
+    // M18 内置阶段键：只认四个固定值，锁名 / 锁位 / 锁类别由内核按它判
+    optionalEnum(stage.builtin, `${label}.builtin`, BUILTIN_STAGE_KEYS) ??
     optionalId(stage.agentId, `${label}.agentId`) ??
     optionalIntegerIn(
       stage.onCompleteIndex,

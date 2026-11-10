@@ -221,6 +221,61 @@ export const ENTRY_MODES = ['none', 'agent', 'user'] as const
 export type EntryMode = (typeof ENTRY_MODES)[number]
 
 /**
+ * 阶段类别（M18）：看板与编辑器按类别取色，也决定默认流转怎么走。
+ *
+ * - `pending`（未开始）：任务还没动，只有内置「待办」；
+ * - `active`（进行中）：内置「已阻塞」+ 全部自己添加的阶段；
+ * - `done`（已完成）：内置「已完成」，默认流转的终点；
+ * - `closed`（已关闭）：内置「已取消」，只能手动进入。
+ */
+export const STAGE_KINDS = ['pending', 'active', 'done', 'closed'] as const
+
+export type StageKind = (typeof STAGE_KINDS)[number]
+
+/**
+ * 系统内置阶段的键（M18）：每个工作流必有这四个阶段，删不掉、改不了名，
+ * 其余字段（进入时交给 / 智能体 / 要干什么 / 闸门 / 流转目标）照常可改。
+ *
+ * 顺序即看板顺序：待办 → 自己添加的阶段 → 已阻塞 → 已完成 → 已取消。
+ * 「已完成」「已取消」是终态，不允许再交接。
+ */
+export const BUILTIN_STAGE_KEYS = ['todo', 'blocked', 'done', 'cancelled'] as const
+
+export type BuiltinStageKey = (typeof BUILTIN_STAGE_KEYS)[number]
+
+/** 内置阶段的固定名称（改名请求由内核拒绝，投影里恒为这张表的值）。 */
+export const BUILTIN_STAGE_NAMES: Readonly<Record<BuiltinStageKey, string>> = {
+  todo: '待办',
+  blocked: '已阻塞',
+  done: '已完成',
+  cancelled: '已取消',
+}
+
+/** 内置阶段 → 类别。 */
+export function builtinStageKind(key: BuiltinStageKey): StageKind {
+  switch (key) {
+    case 'todo':
+      return 'pending'
+    case 'blocked':
+      return 'active'
+    case 'done':
+      return 'done'
+    case 'cancelled':
+      return 'closed'
+  }
+}
+
+/** 阶段的类别：内置阶段按键取，自己添加的阶段一律「进行中」。 */
+export function stageKindOf(stage: { builtin?: BuiltinStageKey | null }): StageKind {
+  return stage.builtin ? builtinStageKind(stage.builtin) : 'active'
+}
+
+/** 名称是否被内置阶段占用（自己添加的阶段不能叫这些名字）。 */
+export function isBuiltinStageName(name: string): boolean {
+  return BUILTIN_STAGE_KEYS.some((key) => BUILTIN_STAGE_NAMES[key] === name.trim())
+}
+
+/**
  * 子任务全部结束时父任务的处理（M8）：
  * `wake` = 唤醒父 Agent 续接决定；`notify` = 只开信息卡等人；`complete` = 父任务直接完成。
  */
@@ -281,6 +336,11 @@ export interface WorkflowStage {
   position: number
   entryMode: EntryMode
   agentId: string | null
+  /**
+   * 系统内置阶段的键（M18）：内置阶段恒有值，自己添加的阶段为 null。
+   * 内置阶段不可删除、不可改名，位置由内核按类别归一。
+   */
+  builtin?: BuiltinStageKey | null
   onCompleteStageId: string | null
   onRejectStageId: string | null
   /**
@@ -313,6 +373,11 @@ export interface StageInput {
   id?: string
   name: string
   entryMode: EntryMode
+  /**
+   * 内置阶段的键（M18）：UI 提交内置阶段时带上，内核据此锁名、锁位、锁类别。
+   * 自己添加的阶段不填（填了由内核拒绝）。
+   */
+  builtin?: BuiltinStageKey | null
   agentId?: string | null
   /** 完成后进入：目标阶段在 stages 数组中的下标；null/undefined = 默认（下一阶段 / 终端） */
   onCompleteIndex?: number | null

@@ -63,7 +63,13 @@ function indexOfStage(workflow: WorkflowWithStages, stage: WorkflowStage): numbe
   return workflow.stages.findIndex((s) => s.id === stage.id)
 }
 
-/** 完成后进入的目标阶段；无下一阶段返回 null（表示任务完成）。 */
+/**
+ * 完成后进入的目标阶段；无下一阶段返回 null（表示任务完成）。
+ *
+ * M18 起默认只沿「自己添加的进行中阶段」往前走：内置的「已阻塞」是旁路状态，
+ * 默认流转跳过它；没有下一阶段时落到内置「已完成」（同样只在当前阶段之后找，
+ * 从「已完成」出发再成功即视为任务走完）。
+ */
 export function resolveNextStage(
   stage: WorkflowStage,
   workflow: WorkflowWithStages,
@@ -72,7 +78,9 @@ export function resolveNextStage(
     return workflow.stages.find((s) => s.id === stage.onCompleteStageId) ?? null
   }
   const idx = indexOfStage(workflow, stage)
-  return idx >= 0 ? (workflow.stages[idx + 1] ?? null) : null
+  if (idx < 0) return null
+  const rest = workflow.stages.slice(idx + 1)
+  return rest.find((s) => s.builtin == null) ?? rest.find((s) => s.builtin === 'done') ?? null
 }
 
 /** 打回退回到的目标阶段；未配置（不指定）则留在原地、不产生流转。 */

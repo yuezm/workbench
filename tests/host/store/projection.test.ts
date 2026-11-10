@@ -151,6 +151,8 @@ describe('rebuild：增量应用与重建等价', () => {
             name: '阶段 1',
             position: 0,
             entryMode: 'none',
+            // M18：自己添加的阶段 builtin 为 null
+            builtin: null,
             agentId: null,
             onCompleteStageId: null,
             onRejectStageId: null,
@@ -168,6 +170,8 @@ describe('rebuild：增量应用与重建等价', () => {
             name: '阶段 2',
             position: 1,
             entryMode: 'none',
+            // M18：自己添加的阶段 builtin 为 null
+            builtin: null,
             agentId: null,
             onCompleteStageId: null,
             onRejectStageId: null,

@@ -48,6 +48,9 @@ test('规则页：UI 保存规则 → app 事件建任务，同 subject 不重�
   await page.getByLabel('规则事件类型').fill('pomodoro.completed')
   await page.getByRole('combobox', { name: '规则目标工作流' }).click()
   await page.getByRole('option', { name: seeded.workflowName }).click()
+  // M18：首阶段是内置「待办」（不派活），规则要选 agent 阶段才会入队一轮 run
+  await page.getByRole('combobox', { name: '规则起始阶段' }).click()
+  await page.getByRole('option', { name: '执行' }).click()
   await page.getByRole('button', { name: '保存' }).click()
   await expect(page.getByLabel('规则名称')).toBeHidden()
 

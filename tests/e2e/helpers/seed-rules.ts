@@ -73,7 +73,7 @@ export async function seedRulesBase(dbPath: string): Promise<RulesSeed> {
         name: workflowName,
         stages: [
           { name: '执行', entryMode: 'agent', agentId: agent.id },
-          { name: '待办', entryMode: 'none' },
+          { name: '收尾', entryMode: 'none' },
         ],
       },
     }).facts

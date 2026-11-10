@@ -175,7 +175,10 @@ describe('重建等价：≥200 条混合命令', () => {
     })
     const main = findWorkflow(store, '主流程')
     for (let index = 0; index < 4; index += 1) {
-      send({ type: 'task.create', input: { title: `主任务 ${index}`, workflowId: main.id, projectId: project } })
+      send({
+        type: 'task.create',
+        input: { title: `主任务 ${index}`, workflowId: main.id, projectId: project },
+      })
     }
     const mainTasks = store.query('tasks.byWorkflow', { workflowId: main.id })
     const firstTaskId = must(mainTasks[0], '主任务 0').id
@@ -215,7 +218,10 @@ describe('重建等价：≥200 条混合命令', () => {
       input: { name: '临时流程', stages: [{ name: '唯一阶段', entryMode: 'none' }] },
     })
     const tempWorkflow = findWorkflow(store, '临时流程')
-    send({ type: 'task.create', input: { title: '临时任务', workflowId: tempWorkflow.id, projectId: project } })
+    send({
+      type: 'task.create',
+      input: { title: '临时任务', workflowId: tempWorkflow.id, projectId: project },
+    })
     send({ type: 'workflow.remove', id: tempWorkflow.id })
 
     // 循环混合操作把命令数推过 200：每轮建流程/建任务/移动/完成/删除任务/删流程
@@ -265,7 +271,9 @@ describe('重建等价：≥200 条混合命令', () => {
     expect(incremental.runtimes).toHaveLength(1)
     expect(incremental.agents).toHaveLength(3)
     expect(incremental.workflows).toHaveLength(1)
-    expect(incremental.workflow_stages).toHaveLength(4)
+    // M18：只剩主流程，7 个阶段 = 待办（按名认领成内置）+ 实现 / 验收 / 复盘（自己添加的）
+    // + 已阻塞 / 已完成 / 已取消（workflow.update 按既有行还原的内置阶段）
+    expect(incremental.workflow_stages).toHaveLength(7)
     expect(tasksBefore.map((item) => item.title)).toEqual(['主任务 0', '主任务 1', '主任务 3'])
 
     store.rebuild()
@@ -305,10 +313,19 @@ describe('重建等价：删除带 run 的任务 / 工作流（D13 run.removed�
       input: { name: '流程', stages: [agentStage] },
     })
     const workflow = findWorkflow(store, '流程')
+    // M18：新任务默认落内置「待办」（不会派活），要起 run 必须显式落到 agent 阶段
     store.dispatch({
       type: 'task.create',
       commandId: 'rt-1',
-      input: { title: '任务', workflowId: workflow.id, projectId: project },
+      input: {
+        title: '任务',
+        workflowId: workflow.id,
+        projectId: project,
+        stageId: must(
+          workflow.stages.find((item) => item.name === '执行'),
+          '执行阶段',
+        ).id,
+      },
     })
     const task = findTask(store, workflow.id, '任务')
     const runId = must(store.query('runs.byTask', { taskId: task.id })[0], '任务 run').id
@@ -333,7 +350,15 @@ describe('重建等价：删除带 run 的任务 / 工作流（D13 run.removed�
     store.dispatch({
       type: 'task.create',
       commandId: 'rt-2',
-      input: { title: '任务 2', workflowId: second.id, projectId: project },
+      input: {
+        title: '任务 2',
+        workflowId: second.id,
+        projectId: project,
+        stageId: must(
+          second.stages.find((item) => item.name === '执行'),
+          '执行阶段',
+        ).id,
+      },
     })
     const secondTask = findTask(store, second.id, '任务 2')
     const secondRunId = must(
@@ -365,7 +390,7 @@ describe('强杀重启：事实已提交、投影落后', () => {
       try {
         const store = createStore({ db, kernel: realKernel })
         store.ensureProjection()
-    const project = seedProject(store)
+        const project = seedProject(store)
 
         // 强杀前已经提交并落了投影的命令
         store.dispatch({

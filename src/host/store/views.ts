@@ -71,6 +71,8 @@ interface StageRow {
   name: string
   position: number
   entry_mode: string
+  /** M18 内置阶段键（NULL = 自己添加的阶段） */
+  builtin: string | null
   agent_id: string | null
   on_complete_stage_id: string | null
   on_reject_stage_id: string | null
@@ -288,6 +290,7 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   name: row.name,
   position: row.position,
   entryMode: row.entry_mode as EntryMode,
+  builtin: row.builtin as WorkflowStage['builtin'],
   agentId: row.agent_id,
   onCompleteStageId: row.on_complete_stage_id,
   onRejectStageId: row.on_reject_stage_id,
@@ -519,7 +522,7 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
   (
     db
       .prepare(
-        `SELECT id, workflow_id, name, position, entry_mode, agent_id,
+        `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id,
                 on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id,
                 subtask_stage_id, on_children_settled, spawn_policy, instructions,
                 gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id

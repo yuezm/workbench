@@ -128,19 +128,67 @@ describe('host/commands：命令路由（M5）', () => {
   it('普通命令：提交事实并返回实体值；同一 commandId 重复提交返回原事实、不重复落库', async () => {
     const { store, router } = setup()
     const first = await router.dispatch(workflowCommand())
+    // M18：提交的「待办」按名认领为内置阶段，缺的「已阻塞 / 已完成 / 已取消」由内核按默认值补建
     expect(first.facts.map((fact) => fact.type)).toEqual([
       'workflow.created',
       'stage.created',
       'stage.created',
+      'stage.created',
+      'stage.created',
+      'stage.created',
     ])
     expect((first.value as { name: string; stages: unknown[] }).name).toBe('研发')
-    expect((first.value as { stages: unknown[] }).stages).toHaveLength(2)
+    const stages = (first.value as { stages: Array<{ name: string; builtin: string | null }> })
+      .stages
+    // 规范顺序：待办 → 自己添加的阶段 → 已阻塞 → 已完成 → 已取消
+    expect(stages.map((stage) => stage.name)).toEqual([
+      '待办',
+      '完成',
+      '已阻塞',
+      '已完成',
+      '已取消',
+    ])
+    expect(stages.map((stage) => stage.builtin)).toEqual([
+      'todo',
+      null,
+      'blocked',
+      'done',
+      'cancelled',
+    ])
 
     const factsBefore = store.factsCount()
     const second = await router.dispatch(workflowCommand())
     expect(second.facts).toEqual(first.facts)
     expect(second.value).toMatchObject({ id: (first.value as { id: string }).id })
     expect(store.factsCount()).toBe(factsBefore)
+  })
+
+  it('workflow.create：阶段 id 先按提交顺序发，再给补建的内置阶段发（内置 id 更靠后）', async () => {
+    const { router } = setup()
+    const created = await router.dispatch({
+      commandId: 'c-order',
+      type: 'workflow.create',
+      // 提交顺序与规范顺序相反：待办排在自己添加的阶段之后
+      input: {
+        name: '乱序',
+        stages: [
+          { name: '实现', entryMode: 'none' },
+          { name: '待办', entryMode: 'none' },
+        ],
+      },
+    })
+    const stages = (created.value as { stages: Array<{ id: string; name: string }> }).stages
+    // id-1 是工作流；提交的两个阶段按提交顺序拿 id-2 / id-3；三个补建的内置阶段拿 id-4..id-6
+    expect((created.value as { id: string }).id).toBe('id-1')
+    expect(stages.map((stage) => [stage.name, stage.id])).toEqual([
+      ['待办', 'id-3'],
+      ['实现', 'id-2'],
+      ['已阻塞', 'id-4'],
+      ['已完成', 'id-5'],
+      ['已取消', 'id-6'],
+    ])
+    // 位置 = 规范顺序的 0 基下标
+    expect(created.facts.filter((fact) => fact.type === 'stage.created')).toHaveLength(5)
   })
 
   it('reject 不记录幂等：同一 commandId 再提交会重新决策并照样拒绝', async () => {
@@ -277,7 +325,8 @@ describe('host/commands：命令路由（M5）', () => {
     const replay = await router.dispatch(command)
     expect(replay.facts).toEqual(saved.facts)
     expect(replay.value).toEqual(saved.value)
-    expect(store.factsCount()).toBe(4) // workflow.created + 2 stage.created + rules.replaced
+    // M18：workflow.created + 5 条 stage.created（2 提交 + 3 补建内置）+ rules.replaced
+    expect(store.factsCount()).toBe(7)
   })
 
   it('rules.replace：非法整批 reject，旧规则继续生效', async () => {
@@ -301,7 +350,8 @@ describe('host/commands：命令路由（M5）', () => {
       }),
     ).rejects.toMatchObject({ code: 'invalid_input' })
     expect(store.query('rules.all')).toEqual({ version: 1, rules: [rule] })
-    expect(store.factsCount()).toBe(4) // 非法整批零事实：仍是 workflow(3) + rules.replaced
+    // 非法整批零事实：仍是 workflow(6) + rules.replaced（M18 内置阶段补建后 6 条）
+    expect(store.factsCount()).toBe(7)
   })
 
   it('rule.trigger：手动运行建一条规则任务并返回任务值；重复 commandId 幂等', async () => {
@@ -339,7 +389,8 @@ describe('host/commands：命令路由（M5）', () => {
     const replay = await router.dispatch(command)
     expect(replay.facts).toEqual(fired.facts)
     expect(replay.value).toEqual(fired.value)
-    expect(store.factsCount()).toBe(7) // workflow(3) + rules.replaced + thread 两行 + task.created
+    // workflow(6，含 3 条补建的内置阶段) + rules.replaced + thread 两行 + task.created
+    expect(store.factsCount()).toBe(10)
   })
 
   it('event.received 是宿主输入：不能经命令路由（renderer）提交', async () => {
@@ -697,7 +748,11 @@ describe('host/commands：命令路由（M5）', () => {
       commandId: 'c-workflow-update',
       type: 'workflow.update',
       id: workflowRow.id,
-      input: { name: '研发二', stages: [{ name: '待办', entryMode: 'none' }] },
+      // M18：内置阶段按 id 认领（改名 / 换 id 重建会被拒），只提交「待办」= 删掉自加的「完成」
+      input: {
+        name: '研发二',
+        stages: [{ id: workflowRow.stages[0]!.id, name: '待办', entryMode: 'none' }],
+      },
     }
     const updated = await router.dispatch(workflowUpdate)
     expect((updated.value as { name: string }).name).toBe('研发二')

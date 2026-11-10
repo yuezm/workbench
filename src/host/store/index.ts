@@ -27,6 +27,7 @@ import { validateInput } from '../../protocol/validate'
 import { withTx } from '../schema'
 import { lastSeq, appendFacts, factsBetween, factsCount, factsSince } from './facts'
 import { createProjectionWriter, type ProjectionWrite } from './projection-apply'
+import { backfillBuiltinStages, type BuiltinBackfillResult } from './builtin-stages'
 import {
   currentProjectionFormat,
   ensureProjection,
@@ -92,6 +93,11 @@ export interface Store {
   query<T extends ViewId>(view: T, params?: ViewParams<T>): ViewResult<T>
   /** 启动对账：指纹失配或 seq 落后则重建。 */
   ensureProjection(): EnsureProjectionResult
+  /**
+   * 启动补齐内置阶段（M18）：每个工作流补成「待办 / 已阻塞 / 已完成 / 已取消」四件套。
+   * 幂等；必须在 `ensureProjection()` 之后调用。
+   */
+  ensureBuiltinStages(): BuiltinBackfillResult
   /** 强制重建（测试与维护入口）。 */
   rebuild(): void
   factsSince(seq: Seq): Fact[]
@@ -246,6 +252,7 @@ export function createStore(options: StoreOptions): Store {
     dispatch,
     query,
     ensureProjection: () => ensureProjection(db, kernel),
+    ensureBuiltinStages: () => backfillBuiltinStages(db, kernel, newId, now),
     rebuild: () => rebuildProjection(db, kernel),
     factsSince: (seq) => factsSince(db, seq),
     factsCount: () => factsCount(db),

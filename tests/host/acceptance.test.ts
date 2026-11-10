@@ -31,7 +31,7 @@ import { project } from '../../src/kernel/project'
 import { viewSpec } from '../../src/kernel/view-spec'
 import type { KernelPort } from '../../src/kernel/types'
 import { executors } from '../../src/plugins/registry'
-import type { Runtime, Task } from '../../src/protocol/entities'
+import type { Runtime, Task, WorkflowStage } from '../../src/protocol/entities'
 import type { Turn } from '../../src/protocol/executor'
 import type { ExecutorContext, ExecutorPlugin, SdkHost } from '../../src/sdk/types'
 import { FAKE_FRAME_TEXTS, fakePlugin, fakePluginEntry } from '../plugins/support/fake-plugin'
@@ -161,6 +161,13 @@ function seedTask(world: World, executorKey: string): Seeded {
       workflow: { id: string }
     }
   ).workflow.id
+  // M18：新任务默认落内置「待办」（不派活）；要起 run 必须显式落到自己添加的阶段
+  const stageId = (
+    workflowFacts
+      .filter((fact) => fact.type === 'stage.created')
+      .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
+      .find((stage) => (stage.builtin ?? null) === null) as WorkflowStage
+  ).id
 
   // M10：任务必须挂在项目下（项目文件夹就是本轮工作目录）。
   // 同一个库里可能 seed 多次：名称与路径都要唯一（内核按项目集判重）。
@@ -179,7 +186,7 @@ function seedTask(world: World, executorKey: string): Seeded {
   const taskFacts = world.effects.dispatch({
     type: 'task.create',
     commandId: nextCommandId(),
-    input: { title: 'T', description: 'd', workflowId, projectId },
+    input: { title: 'T', description: 'd', workflowId, projectId, stageId },
   }).facts
   const task = (taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task })
     .task

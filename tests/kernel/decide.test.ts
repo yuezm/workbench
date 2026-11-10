@@ -3,6 +3,7 @@ import type { Command } from '../../src/protocol/commands'
 import type { Input } from '../../src/protocol/inputs'
 import type {
   Agent,
+  BuiltinStageKey,
   Project,
   RunRow,
   Runtime,
@@ -13,6 +14,7 @@ import type {
   Workflow,
   WorkflowStage,
 } from '../../src/protocol/entities'
+import { BUILTIN_STAGE_NAMES } from '../../src/protocol/entities'
 import type { FactPayload, FactType } from '../../src/protocol/facts'
 import type { ThreadRow } from '../../src/protocol/thread'
 import type { HostInput } from '../../src/protocol/inputs'
@@ -42,6 +44,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   name: '待办',
   position: 0,
   entryMode: 'none',
+  // M18：内置键（null = 自己添加的阶段）；投影行恒有该字段
+  builtin: null,
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
@@ -54,6 +58,28 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   gate: null,
   ...over,
 })
+
+/** M18：内置阶段行（四件套之一）。 */
+const builtinStage = (
+  key: BuiltinStageKey,
+  position: number,
+  over: Partial<WorkflowStage> = {},
+): WorkflowStage =>
+  stage({
+    id: `bs-${key}`,
+    name: BUILTIN_STAGE_NAMES[key],
+    builtin: key,
+    position,
+    ...over,
+  })
+
+/** M18：无用户阶段的四件套（待办 0 / 已阻塞 1 / 已完成 2 / 已取消 3）。 */
+const builtinStages = (): WorkflowStage[] => [
+  builtinStage('todo', 0),
+  builtinStage('blocked', 1),
+  builtinStage('done', 2),
+  builtinStage('cancelled', 3),
+]
 
 /** M10：项目行（任务的容器与执行工作目录；默认项目 pj-1 供 task.create 使用）。 */
 const project = (over: Partial<Project> = {}): Project => ({
@@ -734,6 +760,7 @@ describe('kernel/decide 工作流', () => {
             id: 'stage-new-1',
             workflowId: 'workflow-new-1',
             name: '待办',
+            builtin: 'todo',
             position: 0,
           }),
         }),
@@ -756,6 +783,34 @@ describe('kernel/decide 工作流', () => {
             position: 2,
             entryMode: 'user',
             onRejectStageId: 'stage-new-1',
+          }),
+        }),
+        // M18：缺的另外三个内置阶段按默认值补齐，位置紧随用户阶段之后
+        at('stage.created', {
+          stage: stage({
+            id: 'stage-new-4',
+            workflowId: 'workflow-new-1',
+            name: '已阻塞',
+            builtin: 'blocked',
+            position: 3,
+          }),
+        }),
+        at('stage.created', {
+          stage: stage({
+            id: 'stage-new-5',
+            workflowId: 'workflow-new-1',
+            name: '已完成',
+            builtin: 'done',
+            position: 4,
+          }),
+        }),
+        at('stage.created', {
+          stage: stage({
+            id: 'stage-new-6',
+            workflowId: 'workflow-new-1',
+            name: '已取消',
+            builtin: 'cancelled',
+            position: 5,
           }),
         }),
       ],
@@ -830,7 +885,10 @@ describe('kernel/decide 工作流', () => {
 
     // 说明没变（含缺省 ↔ 空串）时不产 stage.updated：避免每次保存都刷一遍阶段
     const unchanged = decide(
-      view({ workflows: [workflow()], stages: [stage({ id: 'st-1', instructions: '' })] }),
+      view({
+        workflows: [workflow()],
+        stages: [builtinStage('todo', 0, { id: 'st-1', instructions: '' })],
+      }),
       command({
         type: 'workflow.update',
         id: 'wf-1',
@@ -913,7 +971,7 @@ describe('kernel/decide 工作流', () => {
         agents: [agent()],
         workflows: [workflow()],
         stages: [
-          stage({
+          builtinStage('todo', 0, {
             id: 'st-1',
             entryMode: 'agent',
             agentId: 'ag-1',
@@ -984,26 +1042,59 @@ describe('kernel/decide 工作流', () => {
         at('stage.updated', {
           stage: stage({
             id: 'st-2',
-            position: 0,
+            position: 1,
             name: '实现',
             entryMode: 'agent',
             agentId: 'ag-1',
             onRejectStageId: 'stage-new-1',
           }),
         }),
+        // M18：内置阶段按规范顺序补齐（待办在前、已阻塞 / 已完成 / 已取消在后）
+        at('stage.created', {
+          stage: stage({
+            id: 'stage-new-2',
+            name: '待办',
+            builtin: 'todo',
+            position: 0,
+          }),
+        }),
         at('stage.created', {
           stage: stage({
             id: 'stage-new-1',
-            position: 1,
+            position: 2,
             name: '验收',
             entryMode: 'user',
             onRejectStageId: 'st-2',
           }),
         }),
+        at('stage.created', {
+          stage: stage({
+            id: 'stage-new-3',
+            name: '已阻塞',
+            builtin: 'blocked',
+            position: 3,
+          }),
+        }),
+        at('stage.created', {
+          stage: stage({
+            id: 'stage-new-4',
+            name: '已完成',
+            builtin: 'done',
+            position: 4,
+          }),
+        }),
+        at('stage.created', {
+          stage: stage({
+            id: 'stage-new-5',
+            name: '已取消',
+            builtin: 'cancelled',
+            position: 5,
+          }),
+        }),
         at('task.moved', {
-          task: task({ id: 't-1', currentStageId: 'st-2' }),
+          task: task({ id: 't-1', currentStageId: 'stage-new-2' }),
           from: 'st-1',
-          to: 'st-2',
+          to: 'stage-new-2',
         }),
       ],
     })
@@ -1041,21 +1132,34 @@ describe('kernel/decide 工作流', () => {
         at('workflow.updated', { workflow: workflow() }),
         at('stage.deleted', { stage: stage({ id: 'st-1', position: 0 }) }),
         at('stage.deleted', { stage: stage({ id: 'st-2', position: 1 }) }),
+        // M18：内置「待办」由系统补建，排在最前
         at('stage.created', {
-          stage: stage({ id: 'stage-new-1', name: 'A', position: 0 }),
+          stage: stage({ id: 'stage-new-3', name: '待办', builtin: 'todo', position: 0 }),
         }),
         at('stage.created', {
-          stage: stage({ id: 'stage-new-2', name: 'B', position: 1 }),
+          stage: stage({ id: 'stage-new-1', name: 'A', position: 1 }),
+        }),
+        at('stage.created', {
+          stage: stage({ id: 'stage-new-2', name: 'B', position: 2 }),
+        }),
+        at('stage.created', {
+          stage: stage({ id: 'stage-new-4', name: '已阻塞', builtin: 'blocked', position: 3 }),
+        }),
+        at('stage.created', {
+          stage: stage({ id: 'stage-new-5', name: '已完成', builtin: 'done', position: 4 }),
+        }),
+        at('stage.created', {
+          stage: stage({ id: 'stage-new-6', name: '已取消', builtin: 'cancelled', position: 5 }),
         }),
         at('task.moved', {
-          task: task({ id: 't-1', currentStageId: 'stage-new-1' }),
+          task: task({ id: 't-1', currentStageId: 'stage-new-3' }),
           from: 'st-1',
-          to: 'stage-new-1',
+          to: 'stage-new-3',
         }),
         at('task.moved', {
-          task: task({ id: 't-2', currentStageId: 'stage-new-2', createdAt: LATER }),
+          task: task({ id: 't-2', currentStageId: 'stage-new-1', createdAt: LATER }),
           from: 'st-2',
-          to: 'stage-new-2',
+          to: 'stage-new-1',
         }),
       ],
     })
@@ -1064,7 +1168,7 @@ describe('kernel/decide 工作流', () => {
   it('workflow.update：阶段集合与名称未变时只发 workflow.updated（阶段不重建）', () => {
     const seeded = view({
       workflows: [workflow()],
-      stages: [stage({ id: 'st-1', position: 0, name: '待办' })],
+      stages: builtinStages(),
     })
 
     expect(
@@ -1073,7 +1177,15 @@ describe('kernel/decide 工作流', () => {
         command({
           type: 'workflow.update',
           id: 'wf-1',
-          input: { name: '研发', stages: [{ id: 'st-1', name: '待办', entryMode: 'none' }] },
+          input: {
+            name: '研发',
+            stages: [
+              { id: 'bs-todo', name: '待办', entryMode: 'none', builtin: 'todo' },
+              { id: 'bs-blocked', name: '已阻塞', entryMode: 'none', builtin: 'blocked' },
+              { id: 'bs-done', name: '已完成', entryMode: 'none', builtin: 'done' },
+              { id: 'bs-cancelled', name: '已取消', entryMode: 'none', builtin: 'cancelled' },
+            ],
+          },
         }),
         NOW,
         env(),
@@ -1081,15 +1193,86 @@ describe('kernel/decide 工作流', () => {
     ).toEqual({ facts: [at('workflow.updated', { workflow: workflow() })] })
   })
 
+  it('M18 内置阶段：名称 / 类别 / 交接由内核锁定，缺的内置阶段按既有行还原', () => {
+    const seeded = view({ workflows: [workflow()], stages: builtinStages() })
+    const update = (stages: StageInput[]): ReturnType<typeof decide> =>
+      decide(
+        seeded,
+        command({ type: 'workflow.update', id: 'wf-1', input: { name: '研发', stages } }),
+        NOW,
+        env(),
+      )
+
+    expect(update([{ id: 'bs-todo', name: '待办', entryMode: 'none', builtin: 'done' }])).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '阶段「待办」是内置阶段，类别不可修改' },
+    })
+    expect(update([{ id: 'bs-done', name: '验收', entryMode: 'none' }])).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '内置阶段「已完成」不可改名' },
+    })
+    expect(
+      update([
+        { id: 'bs-cancelled', name: '已取消', entryMode: 'none', handoffWorkflowId: 'wf-2' },
+      ]),
+    ).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '内置阶段「已取消」不允许交接' },
+    })
+    // 只提交「待办」：另外三条内置阶段按既有行还原，位置不变 → 只有 workflow.updated
+    expect(update([{ id: 'bs-todo', name: '待办', entryMode: 'none', builtin: 'todo' }])).toEqual({
+      facts: [at('workflow.updated', { workflow: workflow() })],
+    })
+  })
+
+  it('M18 内置阶段：新建时缺的内置阶段按默认值补齐、禁止改名与终态交接', () => {
+    const create = (stages: StageInput[]): ReturnType<typeof decide> =>
+      decide(
+        view({ agents: [agent()] }),
+        command({ type: 'workflow.create', input: { name: 'w', stages } }),
+        NOW,
+        env(),
+      )
+
+    expect(create([{ name: '待办', entryMode: 'none', builtin: 'done' }])).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '内置阶段名称固定为「已完成」' },
+    })
+    expect(create([{ name: '已完成', entryMode: 'none', handoffWorkflowId: 'wf-1' }])).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '内置阶段「已完成」不允许交接' },
+    })
+    const created = create([{ name: '开发', entryMode: 'agent', agentId: 'ag-1' }])
+    expect(created.facts.map((fact) => fact.type)).toEqual([
+      'workflow.created',
+      'stage.created',
+      'stage.created',
+      'stage.created',
+      'stage.created',
+      'stage.created',
+    ])
+    const rows = created.facts
+      .filter((fact) => fact.type === 'stage.created')
+      .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
+    expect(rows.map((row) => [row.name, row.builtin ?? null, row.position])).toEqual([
+      ['待办', 'todo', 0],
+      ['开发', null, 1],
+      ['已阻塞', 'blocked', 2],
+      ['已完成', 'done', 3],
+      ['已取消', 'cancelled', 4],
+    ])
+  })
+
   it('workflow.update：非法输入与守卫（名称/阶段/存在性/活跃 run/智能体/阶段 id）', () => {
     const seed: Seed = {
       workflows: [workflow()],
-      stages: [stage({ id: 'st-1' })],
+      // M18：用非内置名，避免内置阶段认领先一步拦掉 id 校验
+      stages: [stage({ id: 'st-1', name: '开发' })],
       agents: [agent()],
       tasks: [task({ id: 't-1' })],
     }
     const seeded = view(seed)
-    const validStages: StageInput[] = [{ id: 'st-1', name: '待办', entryMode: 'none' }]
+    const validStages: StageInput[] = [{ id: 'st-1', name: '开发', entryMode: 'none' }]
     const run = (over: Record<string, unknown>, target = seeded): unknown =>
       decide(
         target,

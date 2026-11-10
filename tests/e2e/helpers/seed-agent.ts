@@ -119,7 +119,13 @@ function createWorkflow(
   }).facts
   const workflow = payloadOf<{ workflow: Workflow }>(facts, 'workflow.created', '工作流').workflow
   const view = store.query('workflows.all').find((row) => row.id === workflow.id)
-  return { workflow, stageIds: (view?.stages ?? []).map((stage) => stage.id) }
+  // M18：内置四阶段由系统补齐；`stageIds` 只给用户阶段（种子声明的那些），按位置排序
+  return {
+    workflow,
+    stageIds: (view?.stages ?? [])
+      .filter((stage) => stage.builtin == null)
+      .map((stage) => stage.id),
+  }
 }
 
 function createTask(

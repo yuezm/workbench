@@ -56,6 +56,9 @@ test('任务详情页：补一条反馈，上下文与运行记录一起展示',
   await page.getByRole('button', { name: '任务' }).click()
   await page.getByRole('button', { name: '新建任务' }).click()
   await page.getByLabel('任务标题').fill('e2e 反馈任务')
+  // M18：默认落内置「待办」（不派活），要进 agent 阶段得显式选
+  await page.getByLabel('起始阶段').click()
+  await page.getByRole('option', { name: '执行' }).click()
   await page.getByRole('button', { name: '创建' }).click()
   await expect(page.getByText('e2e 反馈任务', { exact: true })).toBeVisible()
 

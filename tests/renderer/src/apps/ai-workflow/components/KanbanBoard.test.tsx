@@ -424,6 +424,66 @@ describe('KanbanBoard', () => {
   })
 })
 
+describe('KanbanBoard 列头类别', () => {
+  /** 四件套内置阶段 + 一个自己添加的阶段（M18 的规范顺序） */
+  const withBuiltins = (): WorkflowWithStages => ({
+    ...wf,
+    stages: [
+      { ...stage('s0', '待办', 0, 'none'), builtin: 'todo' },
+      { ...stage('s1', '审核', 1, 'user'), builtin: null },
+      { ...stage('s2', '已阻塞', 2, 'none'), builtin: 'blocked' },
+      { ...stage('s3', '已完成', 3, 'none'), builtin: 'done' },
+      { ...stage('s4', '已取消', 4, 'none'), builtin: 'cancelled' },
+    ],
+  })
+
+  /** 列头圆点（`aria-hidden` 的圆点，不带可访问文案） */
+  const dotOf = (columnName: string): Element | null =>
+    screen.getByRole('group', { name: `阶段：${columnName}` }).querySelector('span.rounded-full')
+
+  it('列头圆点按阶段类别取色：未开始 / 进行中 / 已完成 / 已关闭', () => {
+    render(
+      <KanbanBoard
+        workflow={withBuiltins()}
+        tasks={[]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+      />,
+    )
+
+    expect(dotOf('待办')?.className).toContain('bg-muted-foreground')
+    // 自己添加的阶段一律「进行中」
+    expect(dotOf('审核')?.className).toContain('bg-brand')
+    expect(dotOf('已阻塞')?.className).toContain('bg-brand')
+    expect(dotOf('已完成')?.className).toContain('bg-success')
+    expect(dotOf('已取消')?.className).toContain('bg-destructive')
+  })
+
+  it('内置阶段列头补类别小字；名称已是类别文案时不重复', () => {
+    render(
+      <KanbanBoard
+        workflow={withBuiltins()}
+        tasks={[]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+      />,
+    )
+
+    const todo = screen.getByRole('group', { name: '阶段：待办' })
+    expect(within(todo).getByText('未开始')).toHaveClass('text-muted-foreground')
+    const blocked = screen.getByRole('group', { name: '阶段：已阻塞' })
+    expect(within(blocked).getByText('进行中')).toHaveClass('text-brand')
+    // 已完成 / 已取消 的列名本身就是类别文案：不再补一行重复小字
+    const done = screen.getByRole('group', { name: '阶段：已完成' })
+    expect(within(done).getAllByText('已完成')).toHaveLength(1)
+    // 自己添加的阶段不带类别小字
+    const review = screen.getByRole('group', { name: '阶段：审核' })
+    expect(within(review).queryByText('进行中')).not.toBeInTheDocument()
+  })
+})
+
 describe('KanbanBoard 列内快速新建', () => {
   function renderQuick(
     onQuickCreateTask = vi.fn<

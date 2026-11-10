@@ -538,3 +538,64 @@ describe('kernel 闸门目标缺失（脏投影）', () => {
     expect(effects).toEqual([])
   })
 })
+
+describe('stage-machine 内置阶段（M18）', () => {
+  const builtin = (
+    key: 'todo' | 'blocked' | 'done' | 'cancelled',
+    position: number,
+  ): WorkflowStage =>
+    stage(`bs-${key}`, {
+      name: {
+        todo: '待办',
+        blocked: '已阻塞',
+        done: '已完成',
+        cancelled: '已取消',
+      }[key],
+      builtin: key,
+      position,
+    })
+
+  const flow = (): WorkflowWithStages => ({
+    id: 'wf',
+    name: 'wf',
+    description: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    stages: [
+      builtin('todo', 0),
+      stage('u1', { position: 1 }),
+      stage('u2', { position: 2 }),
+      builtin('blocked', 3),
+      builtin('done', 4),
+      builtin('cancelled', 5),
+    ],
+  })
+
+  it('默认流转跳过「已阻塞」，用户阶段之间照常前进', () => {
+    expect(resolveNextStage(stage('u1', { position: 1 }), flow())?.id).toBe('u2')
+  })
+
+  it('最后一个用户阶段成功后落入「已完成」', () => {
+    expect(resolveNextStage(stage('u2', { position: 2 }), flow())?.id).toBe('bs-done')
+  })
+
+  it('「已完成」再成功 → 无下一阶段（任务走完）', () => {
+    expect(resolveNextStage(builtin('done', 4), flow())).toBeNull()
+  })
+
+  it('显式配到「已阻塞」时按显式目标走（跳过规则只作用于缺省）', () => {
+    const explicit = stage('u1', { position: 1, onCompleteStageId: 'bs-blocked' })
+    expect(resolveNextStage(explicit, flow())?.id).toBe('bs-blocked')
+  })
+
+  it('进入「已完成」仍是 active（归档走 task.complete），离开「已阻塞」成功后也回「已完成」', () => {
+    const { task: next } = moveTask(task('u2'), { type: 'RUN_SUCCEEDED', runId: 'run-1' }, flow())
+    expect(next.currentStageId).toBe('bs-done')
+    expect(next.status).toBe('active')
+    const fromBlocked = moveTask(
+      task('bs-blocked'),
+      { type: 'RUN_SUCCEEDED', runId: 'run-1' },
+      flow(),
+    )
+    expect(fromBlocked.task.currentStageId).toBe('bs-done')
+  })
+})

@@ -20,6 +20,7 @@
  * - 迭代回顾：Start/Stop/Continue + Kanban WIP 限制与 flow 指标（Atlassian）。
  */
 import type { EntryMode, StageInput, WorkflowInput } from '../../../../../protocol/entities'
+import { withBuiltinStages } from './stage-draft'
 
 /** 一个阶段模板：`onComplete` / `onReject` 写**阶段名**（找不到的名字按默认语义处理） */
 export interface SopStage {
@@ -57,23 +58,27 @@ function targetIndex(stages: readonly SopStage[], name: string | null | undefine
  *
  * 流转目标在模板里是**阶段名**（人写起来稳定），落成 `StageInput` 时换成下标；
  * 名字对不上按默认处理（`null`），不会产出越界下标。
+ *
+ * M18：模板只描述「自己添加的阶段」，草稿再由 `withBuiltinStages` 补出四个内置阶段并排成
+ * 「待办 → 模板阶段 → 已阻塞 → 已完成 → 已取消」，模板里的下标随之整体重映射。
  */
 export function draftFromTemplate(template: SopTemplate): WorkflowInput {
+  const stages = template.stages.map((stage): StageInput => ({
+    name: stage.name,
+    entryMode: stage.entryMode,
+    onCompleteIndex: targetIndex(template.stages, stage.onComplete),
+    onRejectIndex: targetIndex(template.stages, stage.onReject),
+    handoffWorkflowId: null,
+    handoffStageId: null,
+    subtaskStageId: null,
+    onChildrenSettled: null,
+    spawnPolicy: null,
+    instructions: stage.instructions,
+  }))
   return {
     name: template.name,
     description: template.description,
-    stages: template.stages.map((stage): StageInput => ({
-      name: stage.name,
-      entryMode: stage.entryMode,
-      onCompleteIndex: targetIndex(template.stages, stage.onComplete),
-      onRejectIndex: targetIndex(template.stages, stage.onReject),
-      handoffWorkflowId: null,
-      handoffStageId: null,
-      subtaskStageId: null,
-      onChildrenSettled: null,
-      spawnPolicy: null,
-      instructions: stage.instructions,
-    })),
+    stages: withBuiltinStages(stages),
   }
 }
 

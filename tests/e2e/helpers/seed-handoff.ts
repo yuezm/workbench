@@ -56,7 +56,8 @@ export async function seedHandoffBase(dbPath: string): Promise<HandoffSeed> {
       '目标工作流',
     ).workflow
     const targetView = store.query('workflows.all').find((row) => row.id === targetWorkflow.id)
-    const targetStage = targetView?.stages[0]
+    // M18：内置四阶段由系统补齐，这里取用户阶段（`builtin == null`）
+    const targetStage = targetView?.stages.find((stage) => stage.builtin == null)
     if (targetStage === undefined) throw new Error('交接种子缺少目标阶段')
 
     const sourceTitle = 'e2e 交接源任务'
@@ -82,7 +83,9 @@ export async function seedHandoffBase(dbPath: string): Promise<HandoffSeed> {
       '源工作流',
     ).workflow
     const sourceView = store.query('workflows.all').find((row) => row.id === sourceWorkflow.id)
-    const sourceStage = sourceView?.stages[0]
+    const sourceStage = sourceView?.stages.find(
+      (stage) => stage.builtin == null && stage.name === '完成',
+    )
     if (sourceStage === undefined) throw new Error('交接种子缺少源阶段')
 
     // M10：任务必须挂在项目下（交接产物沿用来源任务的项目）。

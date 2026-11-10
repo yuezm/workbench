@@ -7,6 +7,14 @@
  * 交给 `WorkflowEditor` 让用户确认后再保存。模板**不替用户绑定智能体**——那属于本机配置，
  * 所以 `agentRole` 只作建议文案，进不了任务提示词。
  *
+ * M19/M20 的写法约定（约束分三层，见 docs/planning/flexible-workflow-plan.md）：
+ * - 「要干什么」写**目标 / 产出 / 边界**三段，不再写「照着这几条做」的操作清单；
+ *   参考做法放在「边界」段里并显式标注「可合并、可跳过」。
+ * - 「验收」是**结构化字段** `acceptance`（一条一句），不再塞进 instructions——
+ *   它要能被回执逐条自评、被闸门要求证据，纯文本做不到。
+ * - 只有**不可逆 / 需人拍板 / 口径不清**的地方才留 `user` 阶段；能自己判定的地方用
+ *   闸门（`gate`）而不是人工阶段。
+ *
  * 方法论依据（2026-11 调研，逐条可查）：
  * - 产品发现：Amazon Working Backwards PR/FAQ（workingbackwards.com/pr-faq-mastery）、
  *   SVPG 双轨制 Discovery/Delivery、Product Talk 机会树、Intercom RICE 排序。
@@ -22,16 +30,33 @@
 import type { EntryMode, StageInput, WorkflowInput } from '../../../../../protocol/entities'
 import { withBuiltinStages } from './stage-draft'
 
-/** 一个阶段模板：`onComplete` / `onReject` 写**阶段名**（找不到的名字按默认语义处理） */
+/** 模板里的闸门（M19）：目标按**阶段名**写，落草稿时换成下标。 */
+export interface SopGate {
+  /** 允许未通过的次数（≥1） */
+  maxFails: number
+  /** 通过时进入；缺省 = 默认下一阶段 */
+  onPass?: string | null
+  /** 未通过时进入；缺省 = 原地不动 */
+  onFail?: string | null
+}
+
+/** 一个阶段模板：`onComplete` / `onReject` / `gate.*` 写**阶段名**（找不到的名字按默认语义处理） */
 export interface SopStage {
   name: string
   entryMode: EntryMode
-  /** 该阶段具体要干什么：会拼进进入本阶段的任务提示词 */
+  /**
+   * 该阶段具体要干什么：会拼进进入本阶段的任务提示词。
+   * 三段式：`### 目标` / `### 产出` / `### 边界`（参考做法放边界里，标「可跳过」）。
+   */
   instructions: string
+  /** 验收条目（一条一句，可判定）；空 = 不声明，跑到 run 结束即算完成 */
+  acceptance?: readonly string[]
   /** 完成后进入；缺省 = 下一阶段（末阶段 = 任务完成） */
   onComplete?: string | null
   /** 打回时退回到；缺省 = 不指定（原地不动、不自动重试） */
   onReject?: string | null
+  /** 闸门（M19）：非空时本阶段按判定结果流转 */
+  gate?: SopGate | null
   /** 这个阶段适合交给什么样的智能体（建 agent 时的参考文案） */
   agentRole: string
 }
@@ -60,7 +85,7 @@ function targetIndex(stages: readonly SopStage[], name: string | null | undefine
  * 名字对不上按默认处理（`null`），不会产出越界下标。
  *
  * M18：模板只描述「自己添加的阶段」，草稿再由 `withBuiltinStages` 补出四个内置阶段并排成
- * 「待办 → 模板阶段 → 已阻塞 → 已完成 → 已取消」，模板里的下标随之整体重映射。
+ * 「待办 → 模板阶段 → 已阻塞 → 已完成 → 已取消」，模板里的下标（含闸门两侧）随之整体重映射。
  */
 export function draftFromTemplate(template: SopTemplate): WorkflowInput {
   const stages = template.stages.map((stage): StageInput => ({
@@ -74,6 +99,14 @@ export function draftFromTemplate(template: SopTemplate): WorkflowInput {
     onChildrenSettled: null,
     spawnPolicy: null,
     instructions: stage.instructions,
+    acceptance: stage.acceptance ?? [],
+    gate: stage.gate
+      ? {
+          maxFails: stage.gate.maxFails,
+          onPassIndex: targetIndex(template.stages, stage.gate.onPass),
+          onFailIndex: targetIndex(template.stages, stage.gate.onFail),
+        }
+      : null,
   }))
   return {
     name: template.name,
@@ -94,35 +127,50 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '机会识别',
         entryMode: 'agent',
         instructions:
-          '· 汇总信号源：用户反馈、工单、埋点、竞品动态，各摘 3 条证据\n· 画机会树：目标结果 → 机会 → 方案假设，标出证据强度\n· 写问题陈述：谁、什么场景、什么痛点，附证据出处',
+          '### 目标\n把模糊诉求收敛成一组可验证的机会，并说清证据强度。\n\n### 产出\n- 机会卡：目标结果 → 机会 → 方案假设\n- 问题陈述：谁、什么场景、什么痛点，附证据出处\n\n### 边界\n- 只整理证据，不替人拍板做不做\n- 参考做法（可合并、可跳过）：按用户反馈 / 工单 / 埋点 / 竞品各摘 3 条',
+        acceptance: [
+          '每个机会都标了证据等级（A–E），并注明证据出处',
+          '问题陈述写清了人群、场景、痛点三要素',
+          '至少有一条明确的「当前不做」判断及理由',
+        ],
         agentRole: '产品分析型：擅长从反馈与数据里提炼机会',
       },
       {
         name: '用户验证',
         entryMode: 'none',
         instructions:
-          '· 设计 5–8 个开放式访谈问题，避免引导性提问\n· 完成 N 次真实用户访谈并逐字记录\n· 每条假设标注「成立 / 证伪」，附用户原话',
+          '### 目标\n用真实用户的话确认或证伪机会卡上的假设。\n\n### 产出\n- 访谈记录（原话，不美化）\n- 每条假设标「成立 / 证伪」及依据\n\n### 边界\n- 人来做访谈；智能体只协助整理记录\n- 参考做法（可跳过）：5–8 个开放式问题，避免引导性提问',
         agentRole: '用户研究型：能拟访谈脚本并归纳结论',
       },
       {
         name: '方案设计',
         entryMode: 'agent',
         instructions:
-          '· 针对 Top 机会给 2–3 个候选方案并写取舍\n· 写 1 页 PR/FAQ：客户视角新闻稿 + 内部/外部 FAQ\n· 写清目标客户、核心收益、上线判定标准\n· 列出尚未回答的开放问题',
+          '### 目标\n针对已验证的 Top 机会给出可取舍的方案，并写成决策依据。\n\n### 产出\n- 2–3 个候选方案，各自写清覆盖哪条机会、放弃什么\n- 1 页 PR/FAQ：客户视角新闻稿 + 内部问答\n\n### 边界\n- 不做技术选型的最终决定（留给研发阶段）\n- 参考做法（可跳过）：按「人日成本 / 风险 / 可逆性」列对比表',
+        acceptance: [
+          '每个方案都写清了放弃什么（不能只写好处）',
+          'PR/FAQ 里有可判定的上线标准',
+          '列出了尚未回答的开放问题，且每条标了由谁回答',
+        ],
         agentRole: '产品设计型：能把方案写成 PR/FAQ 并说清取舍',
       },
       {
         name: '价值排序',
         entryMode: 'agent',
         instructions:
-          '· 用 RICE（触达/影响/信心/投入）给候选方案打分，出分值表\n· 标注依赖、前置条件与「不做会怎样」\n· 给出建议优先级 Top3 及理由',
+          '### 目标\n把候选方案排成「先做哪个」的确定顺序。\n\n### 产出\n- RICE（触达 / 影响 / 信心 / 投入）分值表\n- 建议优先级 Top3 与理由\n\n### 边界\n- 排序依据要能被人复核：分值怎么来的要写出来\n- 参考做法（可跳过）：RICE 换成 ICE / 加权评分表',
+        acceptance: [
+          '每个方案四项分值齐全，没有留空',
+          'Top3 的排序理由能追溯到分值或证据',
+          '标出了依赖与前置条件',
+        ],
         agentRole: '产品运营型：能用 RICE/ICE 做量化排序',
       },
       {
         name: '立项评审',
         entryMode: 'user',
         instructions:
-          '· 核对 PR/FAQ 与 RICE 结论：目标、范围、成功指标是否清楚\n· 拍板 Go / No-Go / 打回补充；No-Go 要写明缺口\n· 记录决策与理由，回写到任务描述',
+          '### 目标\n拍板 Go / No-Go，并留下决策依据。\n\n### 产出\n- 决策结论 + 理由\n- No-Go 或缺口的补充清单\n\n### 边界\n- 人拍板；结论回写到任务描述',
         onReject: '方案设计',
         agentRole: '人工拍板（不需要智能体）',
       },
@@ -130,7 +178,12 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '交接排期',
         entryMode: 'agent',
         instructions:
-          '· 输出交付包：PR/FAQ 终稿、RICE 表、验收指标、依赖清单\n· 拆出首个可交付里程碑与工作量预估\n· 生成待进入「研发交付」的需求条目',
+          '### 目标\n把立项结论整理成研发能直接开工的交付包。\n\n### 产出\n- PR/FAQ 终稿、RICE 表、验收指标、依赖清单\n- 首个可交付里程碑与工作量预估\n\n### 边界\n- 不重写立项结论；有异议写成开放问题\n- 产出交给「研发交付」工作流接手（可用跨工作流交接）',
+        acceptance: [
+          '交付包里四项齐全（PR/FAQ / RICE / 验收指标 / 依赖清单）',
+          '里程碑有明确的可交付物与完成判据',
+          '开放问题都指向了负责人',
+        ],
         agentRole: '产品助理型：负责整理交付物并生成研发需求',
       },
     ],
@@ -146,44 +199,59 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '需求澄清',
         entryMode: 'agent',
         instructions:
-          '· 把需求拆成可独立验收的用户故事\n· 每条写 Given/When/Then 验收标准\n· 列出边界条件、异常路径与非功能约束（性能、安全）\n· 输出待确认的澄清问题清单',
+          '### 目标\n把需求变成可独立验收的工作项，让实现阶段不必再猜口径。\n\n### 产出\n- 用户故事 + 每条 Given/When/Then 验收标准\n- 边界条件、异常路径、非功能约束（性能 / 安全）\n- 待确认的澄清问题（能自己定的就别问）\n\n### 边界\n- 不写实现细节；方案取舍留给实现阶段\n- 参考做法（可跳过）：技术方案单独出 ADR，或直接并进本阶段产出',
+        acceptance: [
+          '每条用户故事都有 Given/When/Then，且可被测试直接覆盖',
+          '异常路径与边界条件各至少一条',
+          '澄清问题清单非空，或明确写「无」',
+        ],
+        onReject: null,
         agentRole: '业务分析型：擅长把需求转成可验收的用户故事',
-      },
-      {
-        name: '技术方案',
-        entryMode: 'agent',
-        instructions:
-          '· 写 ADR：背景、决策、备选方案、后果\n· 标注影响面（模块 / 接口 / 数据 / 兼容性）\n· 给出回滚与降级方案\n· 更新关键时序图或架构图',
-        agentRole: '架构型：负责输出 ADR 与影响面评估',
-      },
-      {
-        name: '任务拆解',
-        entryMode: 'agent',
-        instructions:
-          '· 拆成 ≤1 天粒度的任务，标注依赖与顺序\n· 每个任务写完成定义（DoD）\n· 标出可并行项与关键路径\n· 输出任务清单表',
-        agentRole: '技术管理型：能把方案拆成可排期任务',
       },
       {
         name: '编码实现',
         entryMode: 'agent',
         instructions:
-          '· 在主干上拉短分支，小步提交，单个 PR ≤400 行\n· 提交信息按 Conventional Commits 写\n· 未完成功能用 feature flag 包住并默认关闭\n· 补单测/集成测试并本地跑通 lint、typecheck',
-        onReject: '技术方案',
+          '### 目标\n让这项工作在主干上可运行、默认关闭、可回滚。\n\n### 产出\n- 代码：短分支 → PR（说明写清改了什么、怎么验证）\n- 测试：覆盖需求澄清里的每条验收标准\n- 证据：门禁命令的实际输出\n\n### 边界\n- 不动需求澄清之外的模块；需要动时先发 ask\n- 参考做法（可合并、可跳过）：小步提交、Conventional Commits、feature flag 默认关闭、单 PR ≤400 行',
+        acceptance: [
+          '`pnpm check` 退出码 0',
+          '新增测试覆盖需求澄清里的每条 Given/When/Then',
+          '未完成功能被开关包住且默认关闭',
+        ],
+        onReject: '需求澄清',
         agentRole: '编码型：能改代码、补测试并跑本地门禁',
       },
       {
         name: '代码评审',
+        entryMode: 'agent',
+        instructions:
+          '### 目标\n判断这次改动能不能进主干，并给出可执行的待改项。\n\n### 产出\n- 评审结论：pass / fail + 依据\n- 待改项：文件与行号、问题、必须怎么改（末项可判定）\n\n### 边界\n- 只看正确性 / 可读性 / 测试 / 安全 / 性能，不纠结风格偏好\n- 不为了过而改测试或降阈值',
+        acceptance: [
+          '每条待改项都带位置与可判定的修复要求',
+          '判定 pass 时 `checks` 全部退出码 0',
+          '没有 P0 / P1 级未解决问题',
+        ],
+        gate: { maxFails: 3, onFail: '编码实现' },
+        agentRole: '评审型：能按清单评审并给出可执行待改项',
+      },
+      {
+        name: '人工验收',
         entryMode: 'user',
         instructions:
-          '· 按正确性 / 可读性 / 测试 / 安全 / 性能逐项看，不纠结风格偏好\n· 每条评论标注是否 blocking\n· 通过则批准；否则打回编码实现并写明必须改的点',
+          '### 目标\n确认交付结果符合需求，而不是「测试过了」。\n\n### 产出\n- 逐条核对记录（预期 / 实测 / 结论）\n- 通过则放行；不通过写明缺什么\n\n### 边界\n- 人拍板；不清楚的实现细节回问评审结论，不靠猜',
         onReject: '编码实现',
-        agentRole: '人工评审（可由评审智能体辅助，结论由人下）',
+        agentRole: '人工拍板（需求提出人或产品验收人）',
       },
       {
         name: '合并归档',
         entryMode: 'agent',
         instructions:
-          '· squash merge 到主干并删分支\n· 按 SemVer 判定版本号并更新 Changelog\n· 把 ADR 归档到 docs/adr\n· 输出本次交付摘要与遗留项',
+          '### 目标\n把改动落到主干并留下可追溯的版本记录。\n\n### 产出\n- 合并记录（squash merge、分支已删）\n- 版本号与 Changelog 条目\n- ADR 归档（有决策时）\n\n### 边界\n- 不改代码逻辑；发现遗留问题写进任务，不顺手改\n- 参考做法（可跳过）：SemVer 判定、按 Keep a Changelog 写条目',
+        acceptance: [
+          '主干包含本次改动，分支已删除',
+          'Changelog 有对应条目且版本号符合 SemVer',
+          '遗留项已写进任务或新任务，不留在对话里',
+        ],
         agentRole: '发布工程型：负责合并、打版本与归档',
       },
     ],
@@ -199,21 +267,36 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '测试计划',
         entryMode: 'agent',
         instructions:
-          '· 定义测试范围、风险、环境与资源\n· 写出口准则（通过阈值）与暂停 / 恢复条件\n· 输出测试计划与风险矩阵',
+          '### 目标\n先定清「测什么、测到什么程度算通过」，再动手。\n\n### 产出\n- 测试范围、风险、环境与资源\n- 出口准则（可判定的通过阈值）与暂停 / 恢复条件\n\n### 边界\n- 不写具体用例（下一阶段的事）\n- 参考做法（可跳过）：风险矩阵按「影响 × 概率」打分',
+        acceptance: [
+          '出口准则是可判定的（阈值 / 清单），不是「质量达标」这类描述',
+          '风险项都有对应的测试策略',
+          '环境与数据准备责任到人',
+        ],
         agentRole: '测试负责型：能写测试计划与风险矩阵',
       },
       {
         name: '用例设计',
         entryMode: 'agent',
         instructions:
-          '· 按测试金字塔分配单元 / 接口 / E2E 比例\n· 用等价类、边界值、状态迁移设计用例\n· 每条含前置、步骤、预期、优先级\n· 输出用例表并关联需求条目',
+          '### 目标\n用最低成本的用例组合覆盖主要风险。\n\n### 产出\n- 单元 / 接口 / E2E 的用例清单（含前置、步骤、预期、优先级）\n- 用例与需求条目的对应关系\n\n### 边界\n- 不为覆盖率写没有断言的用例\n- 参考做法（可跳过）：等价类 + 边界值 + 状态迁移',
+        acceptance: [
+          '每条用例有可判定的预期结果',
+          '高风险项至少有一个 E2E 或接口级用例覆盖',
+          '用例能追溯到需求条目或风险项',
+        ],
         agentRole: '测试设计型：擅长等价类 / 边界值等方法',
       },
       {
         name: '自动化测试',
         entryMode: 'agent',
         instructions:
-          '· 编写并运行单元 + 集成测试，按 test size 标注规模\n· 覆盖率达标（如行覆盖 ≥70%）\n· 输出测试报告与失败明细\n· 记录不稳定（flaky）用例并单独列出',
+          '### 目标\n把能自动化的用例跑成可重复的证据。\n\n### 产出\n- 单元 + 集成测试代码与运行结果\n- 测试报告（通过率、失败明细、flaky 清单）\n\n### 边界\n- 不为了让 CI 变绿而放宽断言或跳过用例\n- 参考做法（可跳过）：行覆盖 ≥70%、按 test size 标注规模',
+        acceptance: [
+          '测试命令退出码 0（或失败明细已逐条定位）',
+          '没有 skip 掉的既有用例',
+          'flaky 用例单独列出并标了原因',
+        ],
         onReject: '用例设计',
         agentRole: '自动化测试型：能写测试、跑 CI、出报告',
       },
@@ -221,21 +304,31 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '探索测试',
         entryMode: 'none',
         instructions:
-          '· 按 SBTM 写 charter：目标、时长 60–90 分钟、范围\n· 执行探索会话，记录操作 / 发现 / 疑点\n· 输出 session sheet 与缺陷候选',
+          '### 目标\n用人眼发现自动化覆盖不到的疑点。\n\n### 产出\n- session sheet：操作、发现、疑点\n- 缺陷候选清单\n\n### 边界\n- 人来做探索；智能体只协助整理记录\n- 参考做法（可跳过）：SBTM charter，60–90 分钟一轮',
         agentRole: '人工测试（智能体可协助整理 session sheet）',
       },
       {
         name: '缺陷分级',
         entryMode: 'agent',
         instructions:
-          '· 按严重度 S1–S4 与优先级 triage\n· 去重合并，关联用例与日志\n· 输出缺陷清单：状态 / 负责人 / 复现步骤\n· 标出阻断发布的缺陷',
+          '### 目标\n让缺陷变成可排序、可派活的条目。\n\n### 产出\n- 缺陷清单：严重度 S1–S4、优先级、复现步骤、关联用例\n- 阻断发布的缺陷单独标出\n\n### 边界\n- 去重合并，不重复提单\n- 参考做法（可跳过）：按「影响面 × 复现概率」定级',
+        acceptance: [
+          '每条缺陷有可复现的步骤',
+          '阻断项（S1/S2）都已标明是否阻塞发布',
+          '重复缺陷已合并并注明主单',
+        ],
         agentRole: '缺陷管理型：负责 triage 与缺陷清单维护',
       },
       {
         name: '回归验证',
         entryMode: 'agent',
         instructions:
-          '· 依据影响面圈定回归范围 + 全量冒烟\n· 跑自动化回归并比对基线\n· 输出回归结果：通过率、新增失败、遗留风险',
+          '### 目标\n确认修复没有引入新的破坏。\n\n### 产出\n- 回归结果：通过率、新增失败、遗留风险\n- 与基线的对比\n\n### 边界\n- 不改代码；发现问题回到缺陷分级\n- 参考做法（可跳过）：按影响面圈定范围 + 全量冒烟',
+        acceptance: [
+          '自动化回归全部执行过，结果附命令输出',
+          '新增失败逐条定位到缺陷或环境原因',
+          '遗留风险写明「接受 / 不接受」及依据',
+        ],
         onReject: '缺陷分级',
         agentRole: '回归测试型：能跑回归并比对基线',
       },
@@ -243,7 +336,7 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '验收确认',
         entryMode: 'user',
         instructions:
-          '· 对照出口准则与验收标准逐条核对（预期 / 实测 / 结论）\n· 判定是否放行并签署\n· 不通过则打回回归验证',
+          '### 目标\n对着出口准则拍板放行或打回。\n\n### 产出\n- 逐条核对记录（预期 / 实测 / 结论）\n- 放行签署，或打回并写明缺口\n\n### 边界\n- 人拍板；出口准则之外的争论不改判定',
         onReject: '回归验证',
         agentRole: '人工拍板（测试负责人或产品验收人）',
       },
@@ -260,14 +353,19 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '发布准备',
         entryMode: 'agent',
         instructions:
-          '· 生成发布就绪清单：变更项、依赖、DB 迁移、配置\n· 写回滚方案与触发条件（错误率 / 延迟阈值）\n· 确认监控看板与告警就位\n· 更新 Changelog / Release Notes（Keep a Changelog 格式）',
+          '### 目标\n让这次发布「可退」——先把回滚路径准备好，再谈上线。\n\n### 产出\n- 发布就绪清单：变更项、依赖、DB 迁移、配置\n- 回滚方案与触发条件（错误率 / 延迟阈值）\n- Changelog / Release Notes\n\n### 边界\n- 不动生产配置；需要人操作的步骤单独列出\n- 参考做法（可跳过）：Keep a Changelog 格式',
+        acceptance: [
+          '回滚方案写到「谁、执行什么命令、多久生效」',
+          '触发条件是可观测的数值，不是「异常就回滚」',
+          '监控看板与告警已就位并给出链接或名称',
+        ],
         agentRole: '发布工程型：负责发布准备与回滚预案',
       },
       {
         name: '发布评审',
         entryMode: 'user',
         instructions:
-          '· go/no-go 核对：DORA 指标、error budget 余量、风险清单\n· 确认回滚可用、值守到位\n· 拍板 Go / No-Go；No-Go 则打回发布准备并写明缺什么',
+          '### 目标\ngo / no-go 拍板。\n\n### 产出\n- 决策与依据（DORA 指标、error budget 余量、风险清单）\n- No-Go 时写明缺什么\n\n### 边界\n- 人拍板；这是不可逆动作前唯一的人工关',
         onReject: '发布准备',
         agentRole: '人工拍板（发布负责人或 on-call lead 主持）',
       },
@@ -275,7 +373,13 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '灰度发布',
         entryMode: 'agent',
         instructions:
-          '· 以 5% 流量 canary 放量，用 feature flag 控制开关\n· 观察错误率、延迟、SLO 与 error budget 消耗\n· 输出灰度对比数据与是否放行建议',
+          '### 目标\n用最小流量验证生产行为，拿到放量或回滚的依据。\n\n### 产出\n- canary 放量记录（流量比例、时间窗口）\n- 指标对比：错误率、延迟、SLO、error budget 消耗\n- 放行建议\n\n### 边界\n- 不超过约定的灰度比例；超阈值直接按回滚方案执行并记录',
+        acceptance: [
+          '灰度窗口内核心指标与发布前对比有数据',
+          '任一触发条件命中时有明确处置记录',
+          '放行建议能追溯到具体指标',
+        ],
+        gate: { maxFails: 2, onFail: '发布准备' },
         onReject: '发布准备',
         agentRole: 'SRE 型：负责 canary 放量与指标观察',
       },
@@ -283,7 +387,7 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '发布确认',
         entryMode: 'user',
         instructions:
-          '· 审阅灰度数据，判定指标是否达成\n· 拍板进入全量，或打回发布准备\n· 记录决策时间点与依据',
+          '### 目标\n基于灰度数据拍板是否全量。\n\n### 产出\n- 决策 + 依据\n- 记录决策时间点\n\n### 边界\n- 人拍板；数据不足时按未达成处理',
         onReject: '发布准备',
         agentRole: '人工拍板（发布负责人确认灰度结果）',
       },
@@ -291,7 +395,12 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '全量发布',
         entryMode: 'agent',
         instructions:
-          '· 分批放量至 100%，每批之间留观察窗口\n· 逐步打开 feature flag，按 cohort 扩量\n· 记录每批时间、指标、异常',
+          '### 目标\n把流量安全推到 100%，每一步都可停。\n\n### 产出\n- 分批放量记录（每批比例、时间、指标）\n- 开关推进记录\n\n### 边界\n- 每批之间必须留观察窗口；异常即停',
+        acceptance: [
+          '100% 流量达成，每批都有观察窗口记录',
+          '开关状态与代码默认值一致',
+          '异常批次有处置记录',
+        ],
         onReject: '发布准备',
         agentRole: 'SRE 型：负责分批放量与开关推进',
       },
@@ -299,7 +408,12 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '发布监控',
         entryMode: 'agent',
         instructions:
-          '· 发布后 30–60 分钟盯 SLO、告警、error budget burn rate\n· 输出发布后健康报告（与发布前指标对比）\n· 异常则按 runbook 回滚，并在任务里记录触发点',
+          '### 目标\n确认上线后系统回到稳定状态，或及时止损。\n\n### 产出\n- 发布后健康报告（与发布前指标对比）\n- 异常时的回滚记录与触发点\n\n### 边界\n- 观察期内不改代码；只做回滚与降级\n- 参考做法（可跳过）：观察 30–60 分钟 SLO / 告警 / burn rate',
+        acceptance: [
+          '核心 SLO 在观察期内回到发布前水平',
+          '告警数量与发布前对比有结论',
+          '需要跟进的问题已建任务',
+        ],
         agentRole: 'SRE 监控型：负责发布后观测与回滚执行',
       },
     ],
@@ -314,28 +428,38 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '事故响应',
         entryMode: 'none',
         instructions:
-          '· 记录告警时间、影响面、严重级别（P0–P3）\n· 执行止损：回滚 / 降级 / 切流，记录每步时间\n· 建时间线草稿与沟通频道',
+          '### 目标\n先止损，再谈原因。\n\n### 产出\n- 影响面、严重级别（P0–P3）、告警时间\n- 止损动作与时间线草稿\n\n### 边界\n- 值班工程师主导；智能体只协助拉上下文\n- 参考做法（可跳过）：回滚 / 降级 / 切流按 runbook 走',
         agentRole: '值班工程师主导；智能体可协助拉取告警上下文',
       },
       {
         name: '恢复确认',
         entryMode: 'user',
         instructions:
-          '· 确认服务恢复、核心指标回到 SLO 内\n· 核对数据一致性与残留影响\n· 拍板宣布事故结束',
+          '### 目标\n确认恢复，宣布事故结束。\n\n### 产出\n- 服务恢复证据（SLO / 核心指标）\n- 数据一致性核对结论\n\n### 边界\n- 人拍板；恢复不等于根因清楚',
         agentRole: '人工拍板（事故指挥确认恢复）',
       },
       {
         name: '时间线梳理',
         entryMode: 'agent',
         instructions:
-          '· 从日志 / 告警 / 工单 / 聊天记录重建时间线，时间戳对齐\n· 标注每个关键动作与决策点\n· 事实与推测分开写，推测注明依据',
+          '### 目标\n把「什么时候发生了什么」变成可核对的事实链。\n\n### 产出\n- 时间线：时间戳对齐的告警 / 动作 / 决策\n- 事实与推测分开写\n\n### 边界\n- 不评判个人；只记录动作与依据\n- 参考做法（可跳过）：从日志 / 告警 / 工单 / 聊天记录交叉校验',
+        acceptance: [
+          '关键动作都有时间戳与来源',
+          '推测项明确标了「推测」及依据',
+          '时间线能覆盖从首个异常到恢复',
+        ],
         agentRole: '日志分析型：能重建可核对的时间线',
       },
       {
         name: '根因分析',
         entryMode: 'agent',
         instructions:
-          '· 用 5 Whys / 鱼骨图区分触发因素与系统性根因\n· 分析检测与响应为什么快或慢\n· 输出根因结论与证据链',
+          '### 目标\n区分「触发因素」与「系统性根因」，并给出证据链。\n\n### 产出\n- 根因结论 + 证据链\n- 检测与响应快慢的分析\n\n### 边界\n- 不做人事评价；结论必须能被反证\n- 参考做法（可跳过）：5 Whys / 鱼骨图',
+        acceptance: [
+          '触发因素与系统性根因分开写',
+          '每条结论都有对应证据（日志 / 变更 / 指标）',
+          '能解释「为什么没更早发现」',
+        ],
         onReject: '时间线梳理',
         agentRole: '可靠性分析型：擅长 RCA 与证据链整理',
       },
@@ -343,7 +467,7 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '复盘评审',
         entryMode: 'user',
         instructions:
-          '· 组织无责复盘会，确认时间线、影响与根因\n· 只谈机制不谈个人；根因不成立则打回重分析\n· 校准改进方向',
+          '### 目标\n确认根因与改进方向，只谈机制不谈个人。\n\n### 产出\n- 复盘会结论\n- 不成立时的打回说明\n\n### 边界\n- 人主持；根因不成立就回上一阶段重分析',
         onReject: '根因分析',
         agentRole: '人工拍板（事故负责人主持）',
       },
@@ -351,7 +475,12 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '改进跟踪',
         entryMode: 'agent',
         instructions:
-          '· 把改进措施拆成行动项：动作、负责人、期限、验收方式\n· 区分预防 / 检测 / 响应三类\n· 建跟踪表并定期核对闭环率',
+          '### 目标\n把改进措施变成能闭环的行动项。\n\n### 产出\n- 行动项：动作、负责人、期限、验收方式\n- 按预防 / 检测 / 响应分类的跟踪表\n\n### 边界\n- 不重复已有行动项；发现重复就合并并注明\n- 参考做法（可跳过）：定期核对闭环率',
+        acceptance: [
+          '每条行动项都有负责人与期限',
+          '验收方式是具体产物（文档 / 代码 / 演练记录）',
+          '能看出哪一类（预防 / 检测 / 响应）覆盖最弱',
+        ],
         agentRole: '工程效率型：负责行动项建账与闭环跟踪',
       },
     ],
@@ -367,21 +496,31 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '数据准备',
         entryMode: 'agent',
         instructions:
-          '· 拉本迭代 flow 指标：吞吐、周期时间、WIP、缺陷数\n· 与上一迭代环比，标出异常点\n· 整理关键事件与阻塞点清单\n· 输出回顾数据包',
+          '### 目标\n用数据把「感觉慢」变成「哪里慢」。\n\n### 产出\n- flow 指标：吞吐、周期时间、WIP、缺陷数（含环比）\n- 关键事件与阻塞点清单\n\n### 边界\n- 不解释原因，只给数据（解释留给会议）\n- 参考做法（可跳过）：画趋势图，标出异常点',
+        acceptance: [
+          '四项 flow 指标齐全，且与上一迭代有环比',
+          '异常点标注了具体日期或任务',
+          '阻塞点清单能对应到具体任务',
+        ],
         agentRole: '数据分析型：负责聚合 flow 指标并做趋势对比',
       },
       {
         name: '回顾会议',
         entryMode: 'user',
         instructions:
-          '· 用 Start/Stop/Continue 组织讨论\n· 先各自写、再投票，聚焦可控项\n· 汇总 Top 问题并达成共识',
+          '### 目标\n聚焦可控项，达成 Top 问题共识。\n\n### 产出\n- Start / Stop / Continue 清单\n- Top 问题及共识\n\n### 边界\n- 人主持；智能体不参与拍板\n- 参考做法（可跳过）：先各自写、再投票',
         agentRole: '人工主持（Scrum Master 或团队轮值）',
       },
       {
         name: '行动提炼',
         entryMode: 'agent',
         instructions:
-          '· 把 Top 问题转成 2–3 个 SMART 行动项\n· 每项指定负责人、截止迭代、验收标准\n· 输出可直接建任务的行动项卡片',
+          '### 目标\n把共识变成 2–3 个真的会做的行动项。\n\n### 产出\n- SMART 行动项：负责人、截止迭代、验收标准\n- 可直接建任务的卡片\n\n### 边界\n- 不追求数量；超过 3 个就先砍优先级\n- 参考做法（可跳过）：按「影响 ÷ 成本」排序',
+        acceptance: [
+          '每个行动项都有负责人与截止迭代',
+          '验收标准可判定（产物或指标）',
+          '行动项总数不超过 3 个，或写明了超出的理由',
+        ],
         onReject: '回顾会议',
         agentRole: '敏捷教练型：能把问题转成可跟踪行动项',
       },
@@ -389,7 +528,12 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
         name: '跟踪验证',
         entryMode: 'agent',
         instructions:
-          '· 下个迭代检查行动项完成率与效果\n· 未完成项分析原因，决定顺延还是撤销\n· 输出改进闭环报告',
+          '### 目标\n确认行动项真的改变了行为，而不只是「完成了」。\n\n### 产出\n- 完成率与效果对比\n- 未完成项的原因与顺延 / 撤销决定\n\n### 边界\n- 不做新的改进提案；只核对上一轮\n- 参考做法（可跳过）：用下个迭代的 flow 指标验证效果',
+        acceptance: [
+          '每个行动项有「完成 / 未完成」及证据',
+          '未完成项有明确的顺延或撤销决定',
+          '能看出本轮改进对指标的影响（或说明观察期不足）',
+        ],
         agentRole: '敏捷教练型：负责行动项闭环跟踪与报告',
       },
     ],

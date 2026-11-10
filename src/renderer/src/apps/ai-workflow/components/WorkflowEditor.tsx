@@ -111,6 +111,10 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     onChildrenSettled: null,
     spawnPolicy: null,
     instructions: stage.instructions,
+    // M20：验收条目只对派活 / 判定有意义，不展示的类型一并归一掉
+    acceptance: [],
+    // M21：轮次上限同理，只有会自己跑的阶段才有意义
+    maxRounds: null,
     gate: null,
   }
 }
@@ -224,6 +228,8 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       onChildrenSettled: s.onChildrenSettled ?? null,
       spawnPolicy: s.spawnPolicy ?? null,
       instructions: s.instructions ?? '',
+      acceptance: s.acceptance ?? [],
+      maxRounds: s.maxRounds ?? null,
       gate: s.gate
         ? {
             maxFails: s.gate.maxFails,
@@ -863,11 +869,58 @@ export function WorkflowEditor({
                 <Textarea
                   aria-label={`阶段${n}要干什么`}
                   className="min-h-24 resize-y"
-                  placeholder="写清这个阶段具体要做什么，例如：读需求、出实现方案、列出改动文件；进到本阶段的任务会带上这段说明交给智能体。"
+                  placeholder={
+                    '一句话写目标，别写操作清单。例如：\n### 目标\n让 <功能> 在主干上可运行，默认关闭\n\n### 产出\n- 代码：短分支 → PR\n\n### 边界\n- 不动 <模块>；参考做法（可跳过）：小步提交'
+                  }
                   value={stage.instructions ?? ''}
                   onChange={(e) => patchStage(index, { instructions: e.target.value })}
                 />
               </Field>
+
+              {/* M20 验收：这条阶段「做完」的可判定口径，一条一行，进提示词带序号 */}
+              <Field label="验收（做完的判据，一条一行）" className="mt-3">
+                <Textarea
+                  aria-label={`阶段${n}验收`}
+                  className="min-h-20 resize-y"
+                  placeholder={
+                    '一条一句、可核对。例如：\n`pnpm check` 退出码 0\n新增测试覆盖每条 Given/When/Then\n不改数据库 schema'
+                  }
+                  value={(stage.acceptance ?? []).join('\n')}
+                  onChange={(e) =>
+                    patchStage(index, {
+                      acceptance: e.target.value.split('\n'),
+                    })
+                  }
+                />
+              </Field>
+              {(stage.acceptance ?? []).filter((item) => item.trim() !== '').length === 0 && (
+                <p className="mt-1 text-xs text-faint-foreground">
+                  没有验收条目时，本阶段跑到「run 正常结束」就算完成——等于让智能体自己说做完了。
+                </p>
+              )}
+
+              {/* M21：验收未全达时原地续一轮的次数（1 = 不续轮） */}
+              {(stage.acceptance ?? []).filter((item) => item.trim() !== '').length > 0 && (
+                <Field label="阶段内最多跑几轮" className="mt-3 w-40">
+                  <Select
+                    value={String(stage.maxRounds ?? 1)}
+                    onValueChange={(v) =>
+                      patchStage(index, { maxRounds: v === '1' ? null : Number(v) })
+                    }
+                  >
+                    <SelectTrigger aria-label={`阶段${n}轮次上限`} className="w-full">
+                      <SelectValue placeholder="1" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4, 5].map((round) => (
+                        <SelectItem key={round} value={String(round)}>
+                          {round === 1 ? '1（不续轮）' : `${round} 轮`}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
             </>
           )}
 

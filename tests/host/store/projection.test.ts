@@ -162,6 +162,8 @@ describe('rebuild：增量应用与重建等价', () => {
             onChildrenSettled: null,
             spawnPolicy: null,
             instructions: '',
+            acceptance: [],
+            maxRounds: null,
             gate: null,
           },
           {
@@ -181,6 +183,8 @@ describe('rebuild：增量应用与重建等价', () => {
             onChildrenSettled: null,
             spawnPolicy: null,
             instructions: '',
+            acceptance: [],
+            maxRounds: null,
             gate: null,
           },
         ],

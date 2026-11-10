@@ -20,10 +20,10 @@ import { TASK_COMMENT_LIMITS } from '../protocol/task-comment'
  */
 const RECEIPT_BLOCK_HINT: readonly string[] = [
   '## 回执块（可选）',
-  '要人拍板、留通知、关旧卡、约复查、派生事件、派子任务、给闸门判定或评审清单时，在最终回复末尾输出最后一个 ```json 围栏块；对象含 ask/notices/resolves/later/events/spawn/verdict/checks/findings/addresses 任一键即按回执处理，非法块整块忽略、不影响本轮。',
+  '要人拍板、留通知、关旧卡、约复查、派生事件、派子任务、给闸门判定或评审清单、自评验收时，在最终回复末尾输出最后一个 ```json 围栏块；对象含 ask/notices/resolves/later/events/spawn/verdict/checks/findings/addresses/acceptance 任一键即按回执处理，非法块整块忽略、不影响本轮。',
   '`ask` 弹系统通知，一轮只发一张：同一决策的多个待定项写进 `text` 分行、`options` 给人挑；`notices` 不弹通知，只写会改变判断的一句话，过程与待办写正文。',
-  '待改项写 `findings`（`key`/`severity`/`location`/`claim`/`requiredAction`，末项须可判定）；修复轮用 `addresses` 逐条回应：`fixed` 要带 `checkRef`（指向同回执里退出码 0 的 `checks` 命令），`rejected` / `deferred` 要写 `note`，未回应不进下一阶段。',
-  '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}],"verdict":"pass|fail","checks":[{"cmd":"pnpm check","exitCode":0}],"findings":[{"key":"R1","severity":"blocker","location":"src/a.ts:42","claim":"...","requiredAction":"..."}],"addresses":[{"findingId":"<报告id>#R1","disposition":"fixed","checkRef":"pnpm check","note":"..."}]}',
+  '待改项写 `findings`（`key`/`severity`/`location`/`claim`/`requiredAction`，末项须可判定）；修复轮用 `addresses` 逐条回应：`fixed` 要带 `checkRef`（指向同回执里退出码 0 的 `checks` 命令），`rejected` / `deferred` 要写 `note`，未回应不进下一阶段。阶段有「验收」时逐条自评写 `acceptance`（`no` 是验收段序号，缺项按未达）。',
+  '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}],"verdict":"pass|fail","checks":[{"cmd":"pnpm check","exitCode":0}],"acceptance":[{"no":1,"met":true,"evidence":"pnpm check 退出码 0"}],"findings":[{"key":"R1","severity":"blocker","location":"src/a.ts:42","claim":"...","requiredAction":"..."}],"addresses":[{"findingId":"<报告id>#R1","disposition":"fixed","checkRef":"pnpm check","note":"..."}]}',
   '上限：每键 100 项（`findings` / `addresses` 各 200 项），options 最多 20 项；title ≤200、text ≤2000、summary ≤200、`claim`/`requiredAction` ≤500、`key` ≤32 字。ask 即挂起等回答，later 只在无 ask/notices 时生效。',
 ]
 
@@ -60,16 +60,35 @@ export const taskCommentsText = (comments: readonly TaskComment[]): string => {
 }
 
 /**
- * 阶段任务提示词（M6.5 增加线程上下文段，M7.5 增加反馈记录段，M9 增加阶段要干什么）。
+ * 打断规则（M19）：固定文案，告诉智能体**什么时候才配打断人**。
+ *
+ * 放开路径（阶段说明从「照做清单」改成「目标 + 验收」）之后，最常见的退化是 ask 泛滥——
+ * 每轮都问确认，比原来更烦。这段把「人只在四类点出现」写成硬口径：不可逆 / 口径缺失 /
+ * 越边界 / 两轮未收敛；其余自己决定并写清假设。
+ *
+ * 固定文案同事实同文本，不由阶段配置改写（否则每个阶段都要重写一遍，且会漂移）。
+ */
+export const interruptRuleText = (): string =>
+  [
+    '## 打断规则（什么时候叫人）',
+    '- 只在四种情况发 `ask` 卡：① 不可逆动作（发布 / 删除 / 改生产数据 / 花钱 / 对外发信）；② 需求口径缺失且猜错返工成本高；③ 需要越出本阶段「边界」段；④ 同一问题连续两轮未收敛。',
+    '- 其余一律自己决定并继续做完：拿不准但可回滚的先做，在正文写清假设，不要为确认小事打断。',
+    '- 一轮只发一张 ask，多个待定项写进同一张的 `text` 分行。',
+  ].join('\n')
+
+/**
+ * 阶段任务提示词（M6.5 增加线程上下文段，M7.5 增加反馈记录段，M9 增加阶段要干什么，
+ * M19 增加打断规则段）。
  *
  * 段序：systemPrompt（能力）→ 任务 → 描述 → 阶段 → 阶段要干什么（固定指令段）→
- * 反馈记录（任务上下文，资料）→ 线程上下文（派生资料，不是指令）→ 回执块说明。
+ * 闸门判定（指令）→ 打断规则（固定指令段）→ 反馈记录（资料）→ 线程上下文（派生资料，
+ * 不是指令）→ 回执块说明。
  * 阶段说明由人在工作流设置里填写，属于指令段；任务/线程资料段都由内核按事实派生。
  */
 export const taskPrompt = (
   agent: Agent,
   task: Task,
-  stage: Pick<WorkflowStage, 'name' | 'instructions' | 'gate'> | null,
+  stage: Pick<WorkflowStage, 'name' | 'instructions' | 'gate' | 'acceptance'> | null,
   threadContext?: string | null,
   comments?: readonly TaskComment[],
 ): string =>
@@ -79,7 +98,9 @@ export const taskPrompt = (
     task.description,
     stage ? `# 阶段：${stage.name}` : '',
     stageInstructionsText(stage),
+    acceptanceText(stage),
     gateInstructionsText(stage),
+    interruptRuleText(),
     taskCommentsText(comments ?? []),
     threadContext ?? '',
     threadContext ? CROSS_TASK_RULE : '',
@@ -100,13 +121,34 @@ export const stageInstructionsText = (
 }
 
 /**
+ * 阶段「验收」段（M20）：本阶段「做完」的可判定口径，一条一行、带序号。
+ *
+ * 空数组不产文本——老工作流（没有验收条目）的提示词逐字不变。
+ * 编号是**稳定键**：回执 `acceptance[].no` 用它指回具体条目，所以顺序即原文顺序。
+ */
+export const acceptanceText = (stage: Pick<WorkflowStage, 'acceptance'> | null): string => {
+  const items = stage?.acceptance ?? []
+  if (items.length === 0) return ''
+  return [
+    '## 验收（做完的判据）',
+    '做完不是你说完了：每条都要么给出可核对的证据，要么说明为什么这条不适用。',
+    ...items.map((item, index) => `${index + 1}. ${item}`),
+  ].join('\n')
+}
+
+/**
  * 闸门判定段（M11）：固定文案，只对闸门阶段出现。这段是**指令**，不能由人改写——
  * 判定格式一旦走样，内核会把「没给结论」当成停住等人，任务会卡在闸门上。
+ *
+ * M20：阶段声明了验收条目时，追加一句「证据要覆盖验收」——闸门是唯一能把
+ * 「自评」升级成「可核对」的地方，两者绑定才有意义。
  */
-export const gateInstructionsText = (stage: Pick<WorkflowStage, 'gate'> | null): string => {
+export const gateInstructionsText = (
+  stage: Pick<WorkflowStage, 'gate' | 'acceptance'> | null,
+): string => {
   const gate = stage?.gate ?? null
   if (gate === null) return ''
-  return [
+  const lines = [
     '## 闸门判定（必须）',
     '本阶段是闸门：做完之后必须对「过没过」下结论，在最终回复末尾的回执块里写 `verdict` 与 `checks`。',
     '- `verdict`: "pass" = 确实达成；"fail" = 没达成（在正文里写清哪一条没过）',
@@ -115,7 +157,13 @@ export const gateInstructionsText = (stage: Pick<WorkflowStage, 'gate'> | null):
     '- 判定 fail 且要人决定去向时，这一轮**不要给 `verdict`**，改发一张 `ask` 卡（同一轮只发一张）：正文写清哪一条没过、证据是什么，`options` 给「同意，按打回走」/「我要和你再讨论」/「情况有变，直接放行」三档，`key` 固定写 `gate-verdict`',
     '- 人在这张卡上除了选一行，还可以附一段自己的意见或追问（会作为资料交给你）；答完之后你在**同一会话**里接着谈：把异议逐条回应，谈清楚了再给最终 `verdict` 与 `checks`，还需要人拍板就再发一张 `ask`',
     '- 缺少 verdict 或拿不出证据时，任务会停在闸门等人处理',
-  ].join('\n')
+  ]
+  if ((stage?.acceptance ?? []).length > 0) {
+    lines.push(
+      '- 本阶段的「验收」条目要落到证据上：每条要么在 `checks` 里有对应命令与退出码，要么在正文说明为什么无法机检（人工判断 / 外部系统 / 主观质量）',
+    )
+  }
+  return lines.join('\n')
 }
 
 /** prompt 里的角色文案（与旧 chat.ts 一致） */

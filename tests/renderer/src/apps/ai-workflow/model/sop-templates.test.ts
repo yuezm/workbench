@@ -54,6 +54,7 @@ describe('draftFromTemplate', () => {
         subtaskStageId: null,
         onChildrenSettled: null,
         spawnPolicy: null,
+        acceptance: [],
         instructions: '做甲',
         gate: null,
       },
@@ -68,6 +69,7 @@ describe('draftFromTemplate', () => {
         subtaskStageId: null,
         onChildrenSettled: null,
         spawnPolicy: null,
+        acceptance: [],
         instructions: '看乙',
         gate: null,
       },
@@ -81,6 +83,7 @@ describe('draftFromTemplate', () => {
         subtaskStageId: null,
         onChildrenSettled: null,
         spawnPolicy: null,
+        acceptance: [],
         instructions: '等丙',
         gate: null,
       },
@@ -198,6 +201,73 @@ describe('SOP_TEMPLATES', () => {
         stage.entryMode === 'agent' ? { ...stage, agentId: 'agent-1' } : stage,
       )
       expect(validateStageSet(bound), `${template.id} 生成的草稿不合法`).toBeNull()
+    }
+  })
+
+  it('「要干什么」按目标 / 产出 / 边界三段写，不再是一份操作清单（M19）', () => {
+    for (const template of SOP_TEMPLATES) {
+      for (const stage of template.stages) {
+        const text = stage.instructions
+        expect(text, `${template.id}/${stage.name} 缺「### 目标」`).toContain('### 目标')
+        expect(text, `${template.id}/${stage.name} 缺「### 产出」`).toContain('### 产出')
+        expect(text, `${template.id}/${stage.name} 缺「### 边界」`).toContain('### 边界')
+        // 验收是结构化字段，不塞进说明里（否则会与提示词里的验收段重复）
+        expect(text, `${template.id}/${stage.name} 说明里不该再写验收段`).not.toContain('### 验收')
+      }
+    }
+  })
+
+  it('交给智能体的阶段都声明了验收条目（一条一句），人阶段不声明（M20）', () => {
+    for (const template of SOP_TEMPLATES) {
+      for (const stage of template.stages) {
+        const items = stage.acceptance ?? []
+        if (stage.entryMode === 'agent') {
+          expect(items.length, `${template.id}/${stage.name} 没有验收条目`).toBeGreaterThanOrEqual(
+            2,
+          )
+          for (const item of items) {
+            expect(item.trim(), `${template.id}/${stage.name} 有空验收条目`).not.toBe('')
+          }
+        } else {
+          expect(items.length, `${template.id}/${stage.name} 人阶段不该带验收条目`).toBe(0)
+        }
+      }
+    }
+  })
+
+  it('研发交付按「澄清 → 实现 → 评审(闸门) → 人工验收 → 收尾」排，拆解交给 spawn（M19）', () => {
+    const dev = SOP_TEMPLATES.find((template) => template.id === 'dev-delivery')
+    expect(dev).toBeDefined()
+    expect(dev!.stages.map((stage) => stage.name)).toEqual([
+      '需求澄清',
+      '编码实现',
+      '代码评审',
+      '人工验收',
+      '合并归档',
+    ])
+    // 评审是闸门：未通过退回编码实现，不再单开一个人工阶段
+    const review = dev!.stages.find((stage) => stage.name === '代码评审')
+    expect(review?.entryMode).toBe('agent')
+    expect(review?.gate).toEqual({ maxFails: 3, onFail: '编码实现' })
+    // 模板里没有「任务拆解」阶段：拆分归 Agent（SPEC-task-fanout D10）
+    expect(dev!.stages.some((stage) => stage.name.includes('拆解'))).toBe(false)
+  })
+
+  it('模板里的闸门在草稿里落成下标形态，两侧都能指到本模板的阶段', () => {
+    for (const template of SOP_TEMPLATES) {
+      const draft = draftFromTemplate(template)
+      const names = draft.stages.map((stage) => stage.name)
+      for (const [index, stage] of draft.stages.entries()) {
+        const gate = draft.stages[index].gate
+        if (!gate) continue
+        expect(gate.maxFails, `${template.id}/${stage.name} 闸门次数不合法`).toBeGreaterThanOrEqual(
+          1,
+        )
+        for (const target of [gate.onPassIndex, gate.onFailIndex]) {
+          if (target == null) continue
+          expect(names[target], `${template.id}/${stage.name} 闸门目标越界`).toBeDefined()
+        }
+      }
     }
   })
 })

@@ -73,6 +73,7 @@ export const VIEW_IDS = [
   'reviews.byTask',
   'run.approvals',
   'runtimes.default-workdir',
+  'workflow.stage-metrics',
 ] as const
 
 /**
@@ -155,6 +156,7 @@ export interface RunApproval {
 
 /** 需要参数的视图 → 参数形状；无参数视图不出现在这里。 */
 export interface ViewArgs {
+  'workflow.stage-metrics': { workflowId: string }
   'tasks.byProject': { projectId: string }
   'tasks.byWorkflow': { workflowId: string }
   'tasks.byParent': { taskId: string }
@@ -187,10 +189,40 @@ export interface ThreadDetail {
 }
 
 /**
+ * 一个阶段的运行指标（M23）：全部由投影**现算**，不新增表。
+ *
+ * 用途是「先放后收」的判定依据——哪条流程真的在自动跑、哪条总是卡在人手里。
+ * 这里的口径都取近似可算的那一种（评论按任务当前阶段归属），不做归因推断。
+ */
+export interface StageMetric {
+  stageId: string
+  stageName: string
+  /** 该阶段跑过多少轮 stage run */
+  runs: number
+  /** 同一 (任务, 阶段) 的平均轮数：>1 说明内层在自我修复 */
+  avgRounds: number
+  /** 验收自评「已达轮次上限」的评论条数（近似：按任务当前阶段归属） */
+  repairExhausted: number
+  /** 任务标签里带 `gate:degraded` 且停在该阶段的条数 */
+  degraded: number
+  /** 该阶段 run 上发出的 ask 卡数量 */
+  asks: number
+  /** 该阶段任务上的人写评论数 */
+  humanComments: number
+}
+
+/** 工作流阶段指标（`workflow.stage-metrics`）：按阶段 position 排序。 */
+export interface WorkflowStageMetrics {
+  workflowId: string
+  stages: StageMetric[]
+}
+
+/**
  * 需要参数的视图 → 参数对象里的字段名（宿主在 `query` 入口按它校验形状：
  * 字段必填、字符串、长度上限与 id 一致；renderer 传的是不可信数据）。
  */
 export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
+  'workflow.stage-metrics': 'workflowId',
   'tasks.byProject': 'projectId',
   'tasks.byWorkflow': 'workflowId',
   'tasks.byParent': 'taskId',
@@ -285,6 +317,8 @@ export interface ViewResults {
    * 解析口径 = `WORKBENCH_WORKDIR` 环境变量 > `~/.workbench`，启动时确保目录存在。
    */
   'runtimes.default-workdir': string
+  /** 工作流各阶段的运行指标（M23，只读派生）：用于判断「哪条流程真的在自动跑」 */
+  'workflow.stage-metrics': WorkflowStageMetrics
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

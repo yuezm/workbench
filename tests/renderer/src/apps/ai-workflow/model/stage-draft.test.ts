@@ -47,6 +47,8 @@ describe('emptyStage / builtinStageDraft', () => {
       onChildrenSettled: null,
       spawnPolicy: null,
       instructions: '',
+      acceptance: [],
+      maxRounds: null,
       gate: null,
     })
   })

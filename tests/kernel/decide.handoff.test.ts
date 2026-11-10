@@ -324,7 +324,8 @@ describe('kernel/decide 交接——拖拽', () => {
       env(),
     )
 
-    expect(typesOf(decision.facts)).toEqual(['task.moved'])
+    // M22：拖回更前阶段是人工跳转（自然去向不是它），留一条评论；仍不交接
+    expect(typesOf(decision.facts)).toEqual(['task.moved', 'task.comment_added'])
   })
 
   it('拖到当前阶段（原地）→ 不交接', () => {

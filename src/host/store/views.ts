@@ -52,6 +52,7 @@ import type {
   ThreadDetail,
   ViewId,
   WaitingRun,
+  WorkflowStageMetrics,
 } from '../../protocol/views'
 import { VIEW_IDS } from '../../protocol/views'
 import type { Id, Iso, ProjectionTable, View } from '../../kernel/types'
@@ -82,6 +83,10 @@ interface StageRow {
   on_children_settled: string | null
   spawn_policy: string | null
   instructions: string
+  /** M20 验收条目（JSON 数组文本；`[]` = 未声明） */
+  acceptance_json: string
+  /** M21 阶段内轮次上限（NULL = 1，不续轮） */
+  max_rounds: number | null
   /** M11 闸门三列：全空 = 不是闸门 */
   gate_max_fails: number | null
   gate_on_pass_stage_id: string | null
@@ -300,6 +305,10 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   onChildrenSettled: row.on_children_settled as WorkflowStage['onChildrenSettled'],
   spawnPolicy: row.spawn_policy as WorkflowStage['spawnPolicy'],
   instructions: row.instructions,
+  // M20：坏 JSON / 空串按「未声明」归一，不让一条脏行把整张视图读挂
+  acceptance:
+    row.acceptance_json.trim() === '' ? [] : (JSON.parse(row.acceptance_json) as string[]),
+  maxRounds: row.max_rounds ?? null,
   // M11：三列全空表示不是闸门（`max_fails` 缺省 / null 都按「不是闸门」归一）
   gate:
     row.gate_max_fails === null || row.gate_max_fails === undefined
@@ -524,8 +533,8 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
       .prepare(
         `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id,
                 on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id,
-                subtask_stage_id, on_children_settled, spawn_policy, instructions,
-                gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id
+                subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
+                max_rounds, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id
          FROM workflow_stages ORDER BY workflow_id, position`,
       )
       .all() as unknown as StageRow[]
@@ -1153,6 +1162,101 @@ const readStringParam = (params: unknown, key: string): string => {
   return value
 }
 
+/**
+ * M23：工作流各阶段的运行指标（只读派生，不新增表）。
+ *
+ * 口径都是「能确定算出来的那一种」，不做归因推断：
+ * - `runs` = 该阶段的 stage run 条数；
+ * - `avgRounds` = 同一 (任务, 阶段) 的 run 条数取平均（>1 说明内层在自我修复）；
+ * - `degraded` = 打 `gate:degraded` 且当前停在该阶段的任务数；
+ * - `asks` = 该阶段 run 上发出的 ask 卡数（cards.run_id → runs.stage_id）；
+ * - `humanComments` / `repairExhausted` = 按任务**当前**阶段归属的评论数（近似：评论没有阶段列）。
+ */
+const readStageMetrics = (db: DatabaseSync, workflowId: string): WorkflowStageMetrics => {
+  const stages = db
+    .prepare(
+      'SELECT id, name, position FROM workflow_stages WHERE workflow_id = ? ORDER BY position',
+    )
+    .all(workflowId) as unknown as Array<{ id: string; name: string; position: number }>
+  const byStage = <T extends { stageId: string | null }>(rows: T[]): Map<string, T> =>
+    new Map(rows.filter((row) => row.stageId !== null).map((row) => [row.stageId as string, row]))
+
+  const runs = byStage(
+    db
+      .prepare(
+        `SELECT r.stage_id AS stageId, COUNT(*) AS runs
+           FROM runs r
+          WHERE r.purpose = 'stage' AND r.stage_id IS NOT NULL AND r.task_id IS NOT NULL
+          GROUP BY r.stage_id`,
+      )
+      .all() as unknown as Array<{ stageId: string; runs: number }>,
+  )
+  const rounds = byStage(
+    db
+      .prepare(
+        `SELECT stage_id AS stageId, AVG(cnt) AS avgRounds FROM (
+           SELECT task_id, stage_id, COUNT(*) AS cnt FROM runs
+            WHERE purpose = 'stage' AND task_id IS NOT NULL AND stage_id IS NOT NULL
+            GROUP BY task_id, stage_id
+         ) GROUP BY stage_id`,
+      )
+      .all() as unknown as Array<{ stageId: string; avgRounds: number }>,
+  )
+  const degraded = byStage(
+    db
+      .prepare(
+        `SELECT current_stage_id AS stageId, COUNT(*) AS n FROM tasks
+          WHERE workflow_id = ? AND current_stage_id IS NOT NULL AND labels_json LIKE '%gate:degraded%'
+          GROUP BY current_stage_id`,
+      )
+      .all(workflowId) as unknown as Array<{ stageId: string; n: number }>,
+  )
+  const asks = byStage(
+    db
+      .prepare(
+        `SELECT r.stage_id AS stageId, COUNT(*) AS n FROM cards c JOIN runs r ON r.id = c.run_id
+          WHERE c.kind = 'ask' AND r.stage_id IS NOT NULL
+          GROUP BY r.stage_id`,
+      )
+      .all() as unknown as Array<{ stageId: string; n: number }>,
+  )
+  const human = byStage(
+    db
+      .prepare(
+        `SELECT t.current_stage_id AS stageId, COUNT(*) AS n
+           FROM task_comments tc JOIN tasks t ON t.id = tc.task_id
+          WHERE tc.author = 'owner' AND t.workflow_id = ? AND t.current_stage_id IS NOT NULL
+          GROUP BY t.current_stage_id`,
+      )
+      .all(workflowId) as unknown as Array<{ stageId: string; n: number }>,
+  )
+  const exhausted = byStage(
+    db
+      .prepare(
+        `SELECT t.current_stage_id AS stageId, COUNT(*) AS n
+           FROM task_comments tc JOIN tasks t ON t.id = tc.task_id
+          WHERE tc.text LIKE '%已达本阶段轮次上限%' AND t.workflow_id = ?
+            AND t.current_stage_id IS NOT NULL
+          GROUP BY t.current_stage_id`,
+      )
+      .all(workflowId) as unknown as Array<{ stageId: string; n: number }>,
+  )
+
+  return {
+    workflowId,
+    stages: stages.map((stage) => ({
+      stageId: stage.id,
+      stageName: stage.name,
+      runs: runs.get(stage.id)?.runs ?? 0,
+      avgRounds: Math.round((rounds.get(stage.id)?.avgRounds ?? 0) * 10) / 10,
+      repairExhausted: exhausted.get(stage.id)?.n ?? 0,
+      degraded: degraded.get(stage.id)?.n ?? 0,
+      asks: asks.get(stage.id)?.n ?? 0,
+      humanComments: human.get(stage.id)?.n ?? 0,
+    })),
+  }
+}
+
 /** `query(view, params)` 的实现：视图 id 与参数形状由 `protocol/views` 固定。 */
 export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unknown {
   if (!(VIEW_IDS as readonly string[]).includes(view)) {
@@ -1161,6 +1265,9 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
   switch (view) {
     case 'workflows.all':
       return readWorkflowsWithStages(db)
+    case 'workflow.stage-metrics':
+      // M23：阶段运行指标（只读派生，先放后收的判定依据）
+      return readStageMetrics(db, readStringParam(params, 'workflowId'))
     case 'agents.all':
       return readAgents(db)
     case 'runtimes.all':
@@ -1246,15 +1353,15 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
   }
 }
 
-/** M5：`runtimes.statuses` = 全部运行时 + 实时负载（与旧 IPC 方法逐行等价）。 */
-const readRuntimeStatuses = (db: DatabaseSync): RuntimeStatus[] => {
-  const workloads = new Map(readRuntimeWorkloads(db).map((item) => [item.runtimeId, item]))
-  return readRuntimes(db).map((runtime) => ({
-    runtimeId: runtime.id,
-    workload: {
-      running: workloads.get(runtime.id)?.running ?? 0,
-      queued: workloads.get(runtime.id)?.queued ?? 0,
-      maxConcurrent: runtime.maxConcurrent,
-    },
-  }))
-}
+/** M5：`runtimes.statuses` = 全部运行时 + 实时负载（与旧 IPC 方法逐行等价）。 */ const readRuntimeStatuses =
+  (db: DatabaseSync): RuntimeStatus[] => {
+    const workloads = new Map(readRuntimeWorkloads(db).map((item) => [item.runtimeId, item]))
+    return readRuntimes(db).map((runtime) => ({
+      runtimeId: runtime.id,
+      workload: {
+        running: workloads.get(runtime.id)?.running ?? 0,
+        queued: workloads.get(runtime.id)?.queued ?? 0,
+        maxConcurrent: runtime.maxConcurrent,
+      },
+    }))
+  }

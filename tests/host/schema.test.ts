@@ -12,6 +12,8 @@ import {
   SCHEMA_VERSION,
   STAGES_M18_ADD_COLUMN_SQL,
   STAGES_M18_ADDED_COLUMNS,
+  STAGES_M20_ADDED_COLUMNS,
+  STAGES_M20_ADD_COLUMN_SQL,
   formatOfProjection,
   projectionFormat,
   tableDdl,
@@ -134,6 +136,10 @@ const STAGES_M7_COLUMNS = [
   'spawn_policy',
   // M9：阶段要干什么
   'instructions',
+  // M20：验收条目（JSON 数组文本）
+  'acceptance_json',
+  // M21：阶段内轮次上限（NULL = 不续轮）
+  'max_rounds',
   // M11：闸门三列
   'gate_max_fails',
   'gate_on_pass_stage_id',
@@ -277,6 +283,21 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       foreignKeyShape(legacy, 'workflow_stages'),
     )
     expect(indexShape(current, 'workflow_stages')).toEqual(indexShape(legacy, 'workflow_stages'))
+  })
+
+  it('M20 验收列与 M21 轮次列：默认值与 CHECK 与 DDL 同口径', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    const shapeOf = (name: string): string | undefined =>
+      columnShape(db, 'workflow_stages').find((shape) => shape.split('|')[0] === name)
+    // name | type | notnull | default | pk
+    expect(shapeOf('acceptance_json')).toBe("acceptance_json|TEXT|1|'[]'|0")
+    expect(shapeOf('max_rounds')).toBe('max_rounds|INTEGER|0|null|0')
+    expect(STAGES_M20_ADDED_COLUMNS).toEqual(['acceptance_json', 'max_rounds'])
+    expect(STAGES_M20_ADD_COLUMN_SQL.acceptance_json).toContain('ADD COLUMN acceptance_json TEXT')
+    expect(STAGES_M20_ADD_COLUMN_SQL.acceptance_json).toContain("DEFAULT '[]'")
+    expect(STAGES_M20_ADD_COLUMN_SQL.max_rounds).toContain('ADD COLUMN max_rounds INTEGER')
+    expect(STAGES_M20_ADD_COLUMN_SQL.max_rounds).toContain('BETWEEN 1 AND 5')
   })
 
   it('M18 内置阶段列：builtin 可空无默认、只认四个内置键，补列语句与 DDL 同口径', () => {

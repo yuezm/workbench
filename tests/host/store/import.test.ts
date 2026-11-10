@@ -309,6 +309,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       handoffWorkflowId: null,
       handoffStageId: null,
       instructions: '',
+      acceptance: [],
+      maxRounds: null,
       gate: null,
     },
     {
@@ -324,6 +326,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       handoffWorkflowId: null,
       handoffStageId: null,
       instructions: '',
+      acceptance: [],
+      maxRounds: null,
       gate: null,
     },
   ]

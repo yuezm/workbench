@@ -35,6 +35,8 @@ export function emptyStage(name: string): StageInput {
     onChildrenSettled: null,
     spawnPolicy: null,
     instructions: '',
+    acceptance: [],
+    maxRounds: null,
     gate: null,
   }
 }

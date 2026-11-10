@@ -297,6 +297,16 @@ export const GATE_VERDICTS = ['pass', 'fail'] as const
 export type GateVerdict = (typeof GATE_VERDICTS)[number]
 
 /** 判定证据：模型自报跑了什么、退出码是多少；内核用它交叉校验 `verdict`。 */
+/** 验收条目上限（M20）：条数与单条长度都由内核归一，UI 只做提示。 */
+export const ACCEPTANCE_LIMITS = { maxItems: 12, maxChars: 200 } as const
+
+/**
+ * 阶段内轮次上限（M21）：run 结束但验收未全达时原地续一轮的次数。
+ *
+ * 下限 1 = 不续轮（老行为）；上限 5 = 防烧 token 的硬护栏。
+ */
+export const STAGE_ROUND_LIMITS = { min: 1, max: 5 } as const
+
 export interface GateCheck {
   /** 实际执行的命令（如 `pnpm check`） */
   cmd: string
@@ -362,6 +372,17 @@ export interface WorkflowStage {
    */
   instructions?: string
   /**
+   * 验收条目（M20）：本阶段「做完」的可判定口径，一条一句、独立成段拼进提示词。
+   * 进入本阶段的任务跑完一轮后由回执 `acceptance[]` 逐条自评；`[]` = 未声明（不做自评）。
+   * 老事实 / 存量导入缺该字段时按空数组归一。
+   */
+  acceptance?: readonly string[]
+  /**
+   * 阶段内轮次上限（M21）：run 结束但验收未全达时原地续一轮，不流转；
+   * `null` / 缺省 = 1（不续轮，老行为）。
+   */
+  maxRounds?: number | null
+  /**
    * 闸门（M11）：非 null 时本阶段是判定关卡，run 正常结束后读 `receipt.verdict` 决定去向。
    * 老事实 / 存量导入缺该字段时按 null 归一（不是闸门）。
    */
@@ -395,6 +416,13 @@ export interface StageInput {
   spawnPolicy?: SpawnPolicy | null
   /** 阶段要干什么（M9，可空 = 空串）：本阶段具体事项，会拼进阶段任务提示词交给智能体 */
   instructions?: string
+  /**
+   * 验收条目（M20，可空 = 空数组）：一条一句的可判定口径；超过 `ACCEPTANCE_LIMITS`
+   * 会被内核截断/去重，不做静默丢弃以外的补偿。
+   */
+  acceptance?: readonly string[]
+  /** 阶段内轮次上限（M21，可空 = 1）：run 结束但验收未全达时原地续一轮的次数 */
+  maxRounds?: number | null
   /** 闸门（M11，可空 = 不是闸门）：非空时本阶段按判定结果流转，并受 `maxFails` 预算约束 */
   gate?: GateInput | null
 }

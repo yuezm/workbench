@@ -17,6 +17,7 @@ import {
   resolveBuiltinStages,
 } from '../workflow/builtin-stages'
 import { validateStageSet } from '../workflow/stage-validation'
+import { normalizeAcceptance, sameAcceptance } from '../workflow/acceptance'
 import { done, hasActiveRun, ownerDraft, reject, runsOfTask, stagesOf, tasksOf } from './common'
 
 function stageRow(
@@ -46,6 +47,10 @@ function stageRow(
     spawnPolicy: stage.spawnPolicy ?? null,
     // M9：阶段要干什么，去首尾空白后存；空串表示没写
     instructions: stage.instructions?.trim() ?? '',
+    // M20：验收条目归一（去空 / 去重 / 截断）；空数组表示未声明
+    acceptance: normalizeAcceptance(stage.acceptance),
+    // M21：阶段内轮次上限（1–5；缺省 = 1，不续轮）
+    maxRounds: stage.maxRounds ?? null,
     // M11：闸门按 id 直存（下标已由 `validateStageSet` 保证在范围内）
     gate: stage.gate
       ? {
@@ -113,6 +118,10 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     (a.spawnPolicy ?? null) === (b.spawnPolicy ?? null) &&
     // M9：阶段要干什么（缺省与空串视为同值）
     sameInstructions(a.instructions, b.instructions) &&
+    // M20：验收条目一变就要落 stage.updated（缺省与空数组视为同值）
+    sameAcceptance(a.acceptance, b.acceptance) &&
+    // M21：轮次上限一变要落 stage.updated（缺省与 null 视为同值）
+    (a.maxRounds ?? null) === (b.maxRounds ?? null) &&
     // M11：闸门三列一变就要落 stage.updated
     sameGate(a.gate, b.gate)
   )

@@ -68,6 +68,8 @@ function builtinStageRow(
     onChildrenSettled: null,
     spawnPolicy: null,
     instructions: '',
+    acceptance: [],
+    maxRounds: null,
     gate: null,
   }
 }

@@ -22,6 +22,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   onChildrenSettled: null,
   spawnPolicy: null,
   instructions: '',
+  acceptance: [],
+  maxRounds: null,
   gate: null,
   ...over,
 })
@@ -187,6 +189,8 @@ describe('kernel/workflow/builtin-stages builtinStageInput', () => {
       onChildrenSettled: null,
       spawnPolicy: null,
       instructions: '',
+      acceptance: [],
+      maxRounds: null,
       gate: null,
     })
   })

@@ -102,6 +102,11 @@ export const THREAD_LIMITS = {
   contextChars: 6_000,
   /** 「最近一轮产出」段的码点上限（独立预算，不挤占 `contextChars`） */
   precedingChars: 2_000,
+  /**
+   * M22「按引用交接」：产物目录可用时，上一轮产出只留这么长的骨架 + 绝对路径，
+   * 正文让执行器按需读（`precedingChars` 保留给「宿主没配产物目录」的降级路径）。
+   */
+  precedingExcerptChars: 400,
   /** 「待修复清单」段的码点上限（M14，独立预算：评审清单是下一轮最该看到的东西） */
   reviewChars: 4_000,
   /** 「任务索引」段的码点上限（M15，独立预算：跨任务查询靠索引 + 按需读产物正文） */

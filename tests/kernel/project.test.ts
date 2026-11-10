@@ -42,6 +42,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   onChildrenSettled: null,
   spawnPolicy: null,
   instructions: '',
+  acceptance: [],
+  maxRounds: null,
   ...over,
 })
 

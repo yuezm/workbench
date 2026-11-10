@@ -81,6 +81,10 @@ export function normalizeTask(row: Task): Task {
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,
     instructions: legacy.instructions ?? '',
+    // M20：老事实没有验收条目，按「未声明」归一
+    acceptance: legacy.acceptance ?? [],
+    // M21：老事实没有轮次上限，按「不续轮」归一
+    maxRounds: legacy.maxRounds ?? null,
   }
 }
 

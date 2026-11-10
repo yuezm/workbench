@@ -363,6 +363,10 @@ function readLegacyEntityRows(
     handoffStageId: null,
     // M9：v2 存量没有阶段说明——按空串归一（与投影层 `normalizeStage` 一致）。
     instructions: '',
+    // M20：v2 存量没有验收条目——按空数组归一。
+    acceptance: [],
+    // M21：v2 存量没有阶段内轮次概念——按「不续轮」归一。
+    maxRounds: null,
     // M11：v2 存量没有闸门概念——按「不是闸门」归一。
     gate: null,
   }))

@@ -4,6 +4,7 @@ import type { Input } from '../../src/protocol/inputs'
 import type {
   Agent,
   BuiltinStageKey,
+  Conversation,
   Project,
   RunRow,
   Runtime,
@@ -20,7 +21,7 @@ import type { ThreadRow } from '../../src/protocol/thread'
 import type { HostInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
 import { indexTarget, sameInstructions } from '../../src/kernel/commands/workflow'
-import { receiptBlockHint, taskPrompt } from '../../src/kernel/prompt'
+import { interruptRuleText, receiptBlockHint, taskPrompt } from '../../src/kernel/prompt'
 import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
@@ -29,6 +30,8 @@ const NOW = '2026-11-04T12:00:00.000Z'
 const ACTOR = { kind: 'owner', via: 'ui' } as const
 /** 阶段任务提示词末尾固定追加的回执块说明（M4 D4）。 */
 const HINT = receiptBlockHint()
+/** 阶段任务提示词里的打断规则段（M19）。 */
+const INTERRUPT = interruptRuleText()
 
 const workflow = (over: Partial<Workflow> = {}): Workflow => ({
   id: 'wf-1',
@@ -55,6 +58,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   onChildrenSettled: null,
   spawnPolicy: null,
   instructions: '',
+  acceptance: [],
+  maxRounds: null,
   gate: null,
   ...over,
 })
@@ -99,6 +104,18 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   runtimeId: 'rt-1',
   systemPrompt: 'sys',
   createdAt: CREATED,
+  ...over,
+})
+
+/** 对话行（`conversations.agent_id` 是 ON DELETE RESTRICT：智能体被对话引用时不允许删） */
+const conversation = (over: Partial<Conversation> = {}): Conversation => ({
+  id: 'cv-1',
+  title: '对话',
+  agentId: 'ag-1',
+  projectId: null,
+  sessionId: null,
+  createdAt: CREATED,
+  updatedAt: CREATED,
   ...over,
 })
 
@@ -238,6 +255,8 @@ interface Seed {
   tasks?: Task[]
   runs?: RunRow[]
   cards?: Card[]
+  /** 对话（删智能体时按 agentId 查引用） */
+  conversations?: Conversation[]
   active?: Id[]
 }
 
@@ -250,7 +269,7 @@ const view = (seed: Seed = {}): View => ({
   projects: new Map(((seed.projects ?? [project()]) as Project[]).map((row) => [row.id, row])),
   tasks: new Map((seed.tasks ?? []).map((row) => [row.id, row])),
   runs: new Map((seed.runs ?? []).map((row) => [row.id, row])),
-  conversations: new Map(),
+  conversations: new Map((seed.conversations ?? []).map((row) => [row.id, row])),
   messages: new Map(),
   cards: new Map((seed.cards ?? []).map((row) => [row.id, row])),
   activeTaskIds: new Set(seed.active ?? []),
@@ -697,7 +716,7 @@ describe('kernel/decide 智能体', () => {
     ).toEqual({ facts: [], reject: { code: 'not_found', message: '运行时不存在: rt-404' } })
   })
 
-  it('agent.remove：被阶段引用时拒绝；存在则 tombstone；不存在静默', () => {
+  it('agent.remove：被阶段 / 对话引用时拒绝；存在则 tombstone；不存在静默', () => {
     expect(
       decide(
         view({ agents: [agent()], stages: [stage({ agentId: 'ag-1', entryMode: 'agent' })] }),
@@ -707,8 +726,55 @@ describe('kernel/decide 智能体', () => {
       ),
     ).toEqual({
       facts: [],
-      reject: { code: 'conflict', message: '智能体被工作流阶段或对话引用，无法删除: ag-1' },
+      reject: {
+        code: 'conflict',
+        message:
+          '智能体被工作流阶段「待办」引用，无法删除：先到「工作流」里把这个阶段换绑到别的智能体',
+      },
     })
+
+    // 被对话引用同样拒删：`conversations.agent_id` 是外键 RESTRICT，不拦就会抛 SQLite 原始错误
+    expect(
+      decide(
+        view({ agents: [agent()], conversations: [conversation()] }),
+        command({ type: 'agent.remove', id: 'ag-1' }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({
+      facts: [],
+      reject: {
+        code: 'conflict',
+        message: '智能体被 1 个对话引用（含已归档），无法删除：先删除这些对话，再回来删智能体',
+      },
+    })
+
+    // 已归档的对话也算引用（归档只影响列表，不解除外键）
+    const archived = [conversation(), conversation({ id: 'cv-2', archivedAt: LATER })]
+    expect(
+      decide(
+        view({ agents: [agent()], conversations: archived }),
+        command({ type: 'agent.remove', id: 'ag-1' }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({
+      facts: [],
+      reject: {
+        code: 'conflict',
+        message: '智能体被 2 个对话引用（含已归档），无法删除：先删除这些对话，再回来删智能体',
+      },
+    })
+
+    // 别的智能体的对话不算引用
+    expect(
+      decide(
+        view({ agents: [agent()], conversations: [conversation({ agentId: 'ag-9' })] }),
+        command({ type: 'agent.remove', id: 'ag-1' }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [at('agent.removed', { agent: agent() })] })
 
     expect(
       decide(
@@ -1826,7 +1892,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       threadContextRef: null,
       queueSeq: 0,
       status: 'queued',
-      prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${HINT}`,
+      prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${INTERRUPT}\n\n${HINT}`,
       output: '',
       error: null,
       errorCode: null,
@@ -1964,7 +2030,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       attempt: 0,
       queueSeq: 0,
     })
-    expect(run.prompt).toBe(`sys\n\n# 任务：任务\n\n# 阶段：实现\n\n${HINT}`)
+    expect(run.prompt).toBe(`sys\n\n# 任务：任务\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`)
   })
 
   it('task.move 原地（from===to）或已完成任务：不产 run.queued', () => {
@@ -2027,7 +2093,8 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     )
 
     expect(first.facts.map((fact) => fact.type)).toEqual(['task.moved', 'run.queued'])
-    expect(back.facts.map((fact) => fact.type)).toEqual(['task.moved'])
+    // M22：回退到更前阶段是人工跳转（自然去向是「已完成」），留一条评论
+    expect(back.facts.map((fact) => fact.type)).toEqual(['task.moved', 'task.comment_added'])
     expect(again.facts.map((fact) => fact.type)).toEqual(['task.moved', 'run.queued'])
   })
 
@@ -2071,7 +2138,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     expect(moved).toMatchObject({ from: 'st-1', to: 'st-2' })
     const queued = entryRun(decision.facts)
     expect(queued).toMatchObject({ taskId: 't-1', stageId: 'st-2', status: 'queued' })
-    expect(queued.prompt).toBe(`sys\n\n# 任务：任务\n\n# 阶段：实现\n\n${HINT}`)
+    expect(queued.prompt).toBe(`sys\n\n# 任务：任务\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`)
     // 进入效果由宿主调度器发起（actor 标明来源）
     expect(decision.facts[2]?.actor).toEqual({ kind: 'host', via: 'scheduler' })
   })
@@ -2232,7 +2299,7 @@ describe('kernel/prompt taskPrompt', () => {
     )
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
-    expect(run.prompt).toBe(`# 任务：T\n\n# 阶段：执行\n\n${HINT}`)
+    expect(run.prompt).toBe(`# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${HINT}`)
   })
 
   it('描述非空时按「智能体 → 任务 → 描述 → 阶段」顺序、两两空行分隔', () => {
@@ -2253,7 +2320,7 @@ describe('kernel/prompt taskPrompt', () => {
     )
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
-    expect(run.prompt).toBe(`sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${HINT}`)
+    expect(run.prompt).toBe(`sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${HINT}`)
   })
 })
 
@@ -2261,7 +2328,7 @@ describe('kernel/prompt taskPrompt（无阶段名）', () => {
   it('stageName 为 null 时不拼阶段段', () => {
     expect(
       taskPrompt(agent({ systemPrompt: 'sys' }), task({ title: 'T', description: 'd' }), null),
-    ).toBe(`sys\n\n# 任务：T\n\nd\n\n${HINT}`)
+    ).toBe(`sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${HINT}`)
   })
 })
 
@@ -2294,7 +2361,11 @@ describe('kernel/decide 引用扫描', () => {
 
     expect(decide(seeded, command({ type: 'agent.remove', id: 'ag-2' }), NOW, env())).toEqual({
       facts: [],
-      reject: { code: 'conflict', message: '智能体被工作流阶段或对话引用，无法删除: ag-2' },
+      reject: {
+        code: 'conflict',
+        message:
+          '智能体被工作流阶段「待办」引用，无法删除：先到「工作流」里把这个阶段换绑到别的智能体',
+      },
     })
   })
 })

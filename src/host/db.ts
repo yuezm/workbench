@@ -25,6 +25,8 @@ import {
   STAGES_M11_ADD_COLUMN_SQL,
   STAGES_M18_ADDED_COLUMNS,
   STAGES_M18_ADD_COLUMN_SQL,
+  STAGES_M20_ADDED_COLUMNS,
+  STAGES_M20_ADD_COLUMN_SQL,
   TASKS_M6_ADDED_COLUMNS,
   TASKS_M6_ADD_COLUMN_SQL,
   TASKS_M65_ADDED_COLUMNS,
@@ -271,6 +273,7 @@ export function needsStagesUpgrade(db: DatabaseSync): boolean {
     ...STAGES_M9_ADDED_COLUMNS,
     ...STAGES_M11_ADDED_COLUMNS,
     ...STAGES_M18_ADDED_COLUMNS,
+    ...STAGES_M20_ADDED_COLUMNS,
   ].some((column) => !columns.has(column))
 }
 
@@ -286,6 +289,7 @@ function upgradeLegacyStages(db: DatabaseSync): boolean {
     ...STAGES_M9_ADD_COLUMN_SQL,
     ...STAGES_M11_ADD_COLUMN_SQL,
     ...STAGES_M18_ADD_COLUMN_SQL,
+    ...STAGES_M20_ADD_COLUMN_SQL,
   }
   const missing = [
     ...STAGES_M7_ADDED_COLUMNS,
@@ -293,6 +297,7 @@ function upgradeLegacyStages(db: DatabaseSync): boolean {
     ...STAGES_M9_ADDED_COLUMNS,
     ...STAGES_M11_ADDED_COLUMNS,
     ...STAGES_M18_ADDED_COLUMNS,
+    ...STAGES_M20_ADDED_COLUMNS,
   ].filter((column) => !columns.has(column))
   if (missing.length === 0) return false
   withTx(db, () => {

@@ -1556,3 +1556,98 @@ describe('queryView：reviews.byTask（M14）', () => {
     expect(queryView(db, 'reviews.byTask', { taskId: 'tk-none' })).toEqual([])
   })
 })
+
+describe('queryView：workflow.stage-metrics（M23）', () => {
+  it('按阶段 position 汇总 run 数 / 平均轮数 / 降级 / ask / 人评；没有数据的阶段给 0', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+    const stageB = sample.stage({ id: 'st-2', name: '第二步', position: 1 })
+    writer.apply({ table: 'workflow_stages', key: stageB.id, row: stageB }, SAMPLE_AT)
+
+    const done = sample.task({ id: 'tk-1', currentStageId: 'st-1' })
+    writer.apply({ table: 'tasks', key: done.id, row: done }, SAMPLE_AT)
+    // 同一任务在同一阶段跑了两轮：avgRounds 应为 2
+    for (const id of ['run-1', 'run-2']) {
+      writer.apply(
+        { table: 'runs', key: id, row: sample.run({ id, taskId: 'tk-1', stageId: 'st-1' }) },
+        SAMPLE_AT,
+      )
+    }
+    writer.apply(
+      {
+        table: 'runs',
+        key: 'run-3',
+        row: sample.run({ id: 'run-3', taskId: 'tk-1', stageId: 'st-2' }),
+      },
+      SAMPLE_AT,
+    )
+    // 降级标记 + 人评留在 st-1 的任务上
+    writer.apply(
+      {
+        table: 'tasks',
+        key: 'tk-degraded',
+        row: sample.task({ id: 'tk-degraded', currentStageId: 'st-1', labels: ['gate:degraded'] }),
+      },
+      SAMPLE_AT,
+    )
+    writer.apply(
+      {
+        table: 'task_comments',
+        key: 'tc-1',
+        row: {
+          id: 'tc-1',
+          taskId: 'tk-1',
+          author: 'owner',
+          text: '这里再稳一点',
+          createdAt: SAMPLE_AT,
+        },
+      },
+      SAMPLE_AT,
+    )
+    writer.apply(
+      {
+        table: 'cards',
+        key: 'card-1',
+        row: sample.card({ id: 'card-1', runId: 'run-1', taskId: 'tk-1', kind: 'ask' }),
+      },
+      SAMPLE_AT,
+    )
+
+    const metrics = queryView(db, 'workflow.stage-metrics', { workflowId: 'wf-1' }) as {
+      workflowId: string
+      stages: Array<{
+        stageId: string
+        stageName: string
+        runs: number
+        avgRounds: number
+        degraded: number
+        asks: number
+        humanComments: number
+        repairExhausted: number
+      }>
+    }
+    expect(metrics.workflowId).toBe('wf-1')
+    const first = metrics.stages.find((stage) => stage.stageId === 'st-1')
+    expect(first).toMatchObject({
+      stageName: '第一步',
+      runs: 2,
+      avgRounds: 2,
+      degraded: 1,
+      asks: 1,
+      humanComments: 1,
+      repairExhausted: 0,
+    })
+    const second = metrics.stages.find((stage) => stage.stageId === 'st-2')
+    expect(second).toMatchObject({ runs: 1, avgRounds: 1, degraded: 0, asks: 0 })
+    // 按 position 排：st-1 在 st-2 之前
+    expect(metrics.stages.map((stage) => stage.stageId)).toEqual(['st-1', 'st-2'])
+
+    expect(queryView(db, 'workflow.stage-metrics', { workflowId: 'wf-missing' })).toEqual({
+      workflowId: 'wf-missing',
+      stages: [],
+    })
+    const error = captureError(() => queryView(db, 'workflow.stage-metrics', {}))
+    expect((error as StoreError).code).toBe('invalid_input')
+  })
+})

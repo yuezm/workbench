@@ -8,6 +8,7 @@
  */
 import { COMMAND_NAMES, type Command, type CommandName } from './commands'
 import {
+  ACCEPTANCE_LIMITS,
   ARGV_PLACEHOLDERS,
   BUILTIN_STAGE_KEYS,
   CARD_ANSWER_VIA,
@@ -21,6 +22,7 @@ import {
   RUN_EVENT_TYPES,
   RUN_TERMINAL_STATUSES,
   SPAWN_POLICIES,
+  STAGE_ROUND_LIMITS,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
 import { CAPABILITIES, PLUGIN_KINDS } from './manifest'
@@ -245,6 +247,22 @@ const checkGate = (value: unknown, label: string): Check => {
   )
 }
 
+/**
+ * 验收条目清单（M20）：数组、逐条文本、条数上限。空串条目由内核归一丢弃，
+ * 这里只挡形状——写长了一句是文案问题，不该让整张工作流存不下去。
+ */
+const checkAcceptanceList = (value: unknown, label: string): Check => {
+  if (!Array.isArray(value)) return `${label} 必须是数组`
+  if (value.length > ACCEPTANCE_LIMITS.maxItems) {
+    return `${label} 最多 ${ACCEPTANCE_LIMITS.maxItems} 条`
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    const error = text(value[i], `${label}[${i}]`, ACCEPTANCE_LIMITS.maxChars)
+    if (error) return error
+  }
+  return null
+}
+
 const checkStage = (value: unknown, label: string): Check => {
   const stage = asRecord(value)
   if (!stage) return `${label} 必须是对象`
@@ -276,6 +294,17 @@ const checkStage = (value: unknown, label: string): Check => {
     optionalEnum(stage.spawnPolicy, `${label}.spawnPolicy`, SPAWN_POLICIES) ??
     // M9 阶段要干什么：纯文本资料段，空串表示清空
     optionalText(stage.instructions, `${label}.instructions`, COMMAND_LIMITS.stageInstructions) ??
+    // M20 验收条目：条数有上限，单条长度按 ACCEPTANCE_LIMITS 截（内核归一，这里只挡形状）
+    (stage.acceptance === undefined || stage.acceptance === null
+      ? null
+      : checkAcceptanceList(stage.acceptance, `${label}.acceptance`)) ??
+    // M21 阶段内轮次上限：1–5，可空 = 不续轮
+    optionalIntegerIn(
+      stage.maxRounds,
+      `${label}.maxRounds`,
+      STAGE_ROUND_LIMITS.min,
+      STAGE_ROUND_LIMITS.max,
+    ) ??
     // M11 闸门：次数范围与目标下标在此校验；是否指向自己 / 是否 agent 阶段由内核判
     (stage.gate === undefined || stage.gate === null
       ? null
@@ -871,6 +900,20 @@ const checkGateCheck = (value: unknown, at: string): Check => {
 }
 
 /**
+ * 验收自评（M21）：`{ no, met, evidence? }`。`no` 是 1 基序号，越界由内核丢弃，
+ * 这里只挡形状（非法条目整块会让回执被拒，所以校验放在条目级）。
+ */
+const checkAcceptanceCheck = (value: unknown, at: string): Check => {
+  const check = asRecord(value)
+  if (!check) return `${at} 必须是对象`
+  return (
+    integerIn(check.no, `${at}.no`, 1, ACCEPTANCE_LIMITS.maxItems) ??
+    (typeof check.met === 'boolean' ? null : `${at}.met 必须是布尔值`) ??
+    optionalText(check.evidence, `${at}.evidence`, COMMAND_LIMITS.description)
+  )
+}
+
+/**
  * 评审条目（M14）：`{ key, severity, location?, claim, evidence?, requiredAction }`。
  * `key` 是报告内小标（内核据此拼 `<reportId>#<key>`），重复小标在 `checkFindings` 里拒。
  */
@@ -958,6 +1001,13 @@ const checkReceipt = (value: unknown): Check => {
     optionalBoolean(receipt.resumeRejected, 'receipt.resumeRejected') ??
     optionalEnum(receipt.verdict, 'receipt.verdict', GATE_VERDICTS) ??
     checkList(receipt.checks, 'receipt.checks', COMMAND_LIMITS.gateChecks, checkGateCheck) ??
+    // M21 验收自评：逐条形状；越界序号由内核丢弃，缺项按未达处理
+    checkList(
+      receipt.acceptance,
+      'receipt.acceptance',
+      ACCEPTANCE_LIMITS.maxItems,
+      checkAcceptanceCheck,
+    ) ??
     checkFindings(receipt.findings) ??
     checkList(
       receipt.addresses,

@@ -75,6 +75,10 @@ CREATE TABLE IF NOT EXISTS ${name} (
   spawn_policy TEXT CHECK (spawn_policy IN ('off','agent')),
   -- M9 阶段要干什么：进入本阶段的任务提示词里带的固定指令段（空串 = 没写）
   instructions TEXT NOT NULL DEFAULT '',
+  -- M20 验收条目：JSON 数组文本（一条一句的可判定口径；空数组 = 未声明）
+  acceptance_json TEXT NOT NULL DEFAULT '[]',
+  -- M21 阶段内轮次上限：空 = 1（不续轮），1–5
+  max_rounds INTEGER CHECK (max_rounds IS NULL OR (max_rounds BETWEEN 1 AND 5)),
   -- M11 闸门：允许未通过次数 / 通过去向 / 未通过去向（三列全空 = 不是闸门；弱引用不设外键）
   gate_max_fails INTEGER,
   gate_on_pass_stage_id TEXT,
@@ -793,6 +797,23 @@ export const STAGES_M18_ADD_COLUMN_SQL: Readonly<
 > = {
   builtin:
     "ALTER TABLE workflow_stages ADD COLUMN builtin TEXT CHECK (builtin IN ('todo','blocked','done','cancelled'))",
+}
+
+/**
+ * M20 给 `workflow_stages` 新增的列（验收条目 + 阶段内轮次上限）：JSON 数组文本 DEFAULT '[]'、
+ * 轮次可空 INTEGER（1–5）。老行按「未声明验收 / 不续轮」归一。
+ * 清单与 `stagesTable()` 的 DDL 保持同步。
+ */
+export const STAGES_M20_ADDED_COLUMNS = ['acceptance_json', 'max_rounds'] as const
+
+/** `workflow_stages` M20 补列语句（默认值 / CHECK 与 DDL 一致）。 */
+export const STAGES_M20_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M20_ADDED_COLUMNS)[number], string>
+> = {
+  acceptance_json:
+    "ALTER TABLE workflow_stages ADD COLUMN acceptance_json TEXT NOT NULL DEFAULT '[]'",
+  max_rounds:
+    'ALTER TABLE workflow_stages ADD COLUMN max_rounds INTEGER CHECK (max_rounds IS NULL OR (max_rounds BETWEEN 1 AND 5))',
 }
 
 /**

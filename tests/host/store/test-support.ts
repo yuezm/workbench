@@ -135,6 +135,8 @@ export const sample = {
       onChildrenSettled: null,
       spawnPolicy: null,
       instructions: '',
+      acceptance: [],
+      maxRounds: null,
       gate: null,
       ...overrides,
     }

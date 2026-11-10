@@ -7,6 +7,7 @@ import type {
   TaskInput,
   WorkflowInput,
 } from '../../src/protocol/entities'
+import { ACCEPTANCE_LIMITS, STAGE_ROUND_LIMITS } from '../../src/protocol/entities'
 import {
   COMMAND_LIMITS,
   validateCommand,
@@ -969,6 +970,70 @@ describe('validateQuery（M5：query 动词入口）', () => {
             exitCode: 0,
           })),
         }),
+      ).ok,
+    ).toBe(false)
+  })
+
+  it('阶段 acceptance / maxRounds：条数、条长、轮次范围（M20/M21）', () => {
+    const check = (stages: unknown): boolean =>
+      validateCommand({
+        commandId: 'c-acceptance',
+        type: 'workflow.create',
+        input: { name: '流程', stages },
+      }).ok
+    const stage = (extra: Record<string, unknown>): unknown => ({
+      name: '实现',
+      entryMode: 'agent',
+      agentId: 'ag1',
+      ...extra,
+    })
+    expect(check([stage({ acceptance: ['pnpm check 退出码 0'] })])).toBe(true)
+    expect(check([stage({ acceptance: 'x' })])).toBe(false)
+    expect(check([stage({ acceptance: [42] })])).toBe(false)
+    expect(check([stage({ acceptance: ['x'.repeat(ACCEPTANCE_LIMITS.maxChars + 1)] })])).toBe(false)
+    expect(
+      check([
+        stage({ acceptance: Array.from({ length: ACCEPTANCE_LIMITS.maxItems + 1 }, () => 'x') }),
+      ]),
+    ).toBe(false)
+
+    expect(check([stage({ maxRounds: STAGE_ROUND_LIMITS.min })])).toBe(true)
+    expect(check([stage({ maxRounds: STAGE_ROUND_LIMITS.max })])).toBe(true)
+    expect(check([stage({ maxRounds: 0 })])).toBe(false)
+    expect(check([stage({ maxRounds: STAGE_ROUND_LIMITS.max + 1 })])).toBe(false)
+    expect(check([stage({ maxRounds: 2.5 })])).toBe(false)
+  })
+
+  it('receipt.acceptance：序号范围、met 布尔、evidence 长度、条数上限（M21）', () => {
+    const receipt = (acceptance: unknown): unknown => ({
+      type: 'run.receipt',
+      runId: 'run-1',
+      receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, acceptance },
+    })
+    expect(validateInput(receipt([{ no: 1, met: true, evidence: 'pnpm check 退出码 0' }])).ok).toBe(
+      true,
+    )
+    expect(validateInput(receipt([{ no: 1, met: false }])).ok).toBe(true)
+    expect(validateInput(receipt([{ no: 0, met: true }])).ok).toBe(false)
+    expect(validateInput(receipt([{ no: ACCEPTANCE_LIMITS.maxItems + 1, met: true }])).ok).toBe(
+      false,
+    )
+    expect(validateInput(receipt([{ no: 1, met: 'yes' }])).ok).toBe(false)
+    expect(validateInput(receipt([42])).ok).toBe(false)
+    expect(
+      validateInput(
+        receipt([{ no: 1, met: true, evidence: longText(COMMAND_LIMITS.description + 1) }]),
+      ).ok,
+    ).toBe(false)
+    expect(
+      validateInput(
+        receipt(
+          Array.from({ length: ACCEPTANCE_LIMITS.maxItems + 1 }, (_, index) => ({
+            no: 1,
+            met: true,
+            evidence: `第 ${index} 条`,
+          })),
+        ),
       ).ok,
     ).toBe(false)
   })

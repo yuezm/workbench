@@ -1,7 +1,8 @@
 /**
  * 运行命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
-import type { GateVerdict, RunRow, Task } from '../../protocol/entities'
+import type { GateVerdict, RunRow, Task, WorkflowStage } from '../../protocol/entities'
+import { STAGE_ROUND_LIMITS } from '../../protocol/entities'
 import type { EventReceivedPayload } from '../../protocol/facts'
 import type { Input, Receipt } from '../../protocol/inputs'
 import type { TaskComment } from '../../protocol/task-comment'
@@ -98,6 +99,120 @@ function gateVerdictOf(receipt: Receipt): GateVerdict | undefined {
 
 /** 闸门放行标记（M11）：预算耗尽后走通过分支时打在任务上的标签，看板可据此筛选。 */
 export const GATE_DEGRADED_LABEL = 'gate:degraded'
+
+/**
+ * 验收自评里仍未达的条目（M21）：回执缺项、序号越界、`met` 非真都按**未达**处理
+ * （fail-closed）。返回条目原文，顺序即阶段 `acceptance` 的顺序。
+ */
+export function unmetAcceptance(
+  stage: Pick<WorkflowStage, 'acceptance'>,
+  receipt: Receipt,
+): string[] {
+  const items = stage.acceptance ?? []
+  if (items.length === 0) return []
+  const met = new Set<number>()
+  for (const check of receipt.acceptance ?? []) {
+    if (
+      check.met === true &&
+      Number.isInteger(check.no) &&
+      check.no >= 1 &&
+      check.no <= items.length
+    ) {
+      met.add(check.no)
+    }
+  }
+  return items.filter((_, index) => !met.has(index + 1))
+}
+
+/**
+ * 该任务在该阶段已经跑过几轮（含刚结算的这一轮）。
+ *
+ * 轮次**派生**而不是加 `runs` 列：加列要物理重建 `runs` 表，而这里只需要一个计数
+ * （沿用 review-handoff D2 的口径：不扩 `RunRow` 契约）。
+ */
+export function stageRoundCount(view: View, taskId: Id, stageId: Id): number {
+  let count = 0
+  for (const run of view.runs.values()) {
+    if (run.purpose === 'stage' && run.taskId === taskId && run.stageId === stageId) count += 1
+  }
+  return count
+}
+
+/**
+ * 阶段内续轮留痕（M21）：本轮自评达成几条、未达哪几条，以及接下来是续轮还是按原规则流转。
+ *
+ * 这段是**资料**（任务评论）：它进下一轮的反馈记录段，不进指令段——未达项怎么补是 Agent 的判断。
+ */
+export function repairCommentText(
+  round: number,
+  total: number,
+  unmet: readonly string[],
+  exhausted: boolean,
+): string {
+  const lines = [
+    `第 ${round} 轮验收自评：${total - unmet.length}/${total} 达成。`,
+    '未达条目：',
+    ...unmet.map((item, index) => `${index + 1}. ${item}`),
+    exhausted
+      ? '已达本阶段轮次上限，按原规则继续流转；未达项请在后续阶段或反馈里跟进。'
+      : `按配置续第 ${round + 1} 轮：补上未达项，已达成的不必重做。`,
+  ]
+  return lines.join('\n')
+}
+
+/**
+ * 阶段内多轮自修复（M21）：run 正常结束但验收未全达时，原地续一轮而不是流转。
+ *
+ * 判据全部确定性：验收条目来自阶段配置、达成情况来自回执、轮数来自既有 run 计数。
+ * 以下情况零事实（走原规则）：验收未声明 / 全达 / run 不是 succeeded / 任务已完成 /
+ * 阶段不是 agent 入口。轮数用尽时只留一条评论，不改任务状态、不额外打标签——
+ * 流转仍由 `stageTransitionFacts` 决定，避免同批两个 `task.moved` 互相覆盖。
+ */
+function repairRoundFacts(
+  view: View,
+  run: SettledRun,
+  receipt: Receipt,
+  now: Iso,
+  env: Environment,
+): { facts: FactDraft[]; blocked: boolean } {
+  const idle = { facts: [] as FactDraft[], blocked: false }
+  if (run.status !== 'succeeded' || run.taskId === null) return idle
+  const task = view.tasks.get(run.taskId)
+  if (!task || task.status !== 'active' || task.currentStageId === null) return idle
+  const stage = view.stages.get(task.currentStageId)
+  if (!stage || stage.entryMode !== 'agent') return idle
+  const total = (stage.acceptance ?? []).length
+  if (total === 0) return idle
+  const unmet = unmetAcceptance(stage, receipt)
+  if (unmet.length === 0) return idle
+  const rounds = stageRoundCount(view, task.id, stage.id)
+  const configured = stage.maxRounds ?? STAGE_ROUND_LIMITS.min
+  const maxRounds = Math.min(Math.max(configured, STAGE_ROUND_LIMITS.min), STAGE_ROUND_LIMITS.max)
+  const exhausted = rounds >= maxRounds
+  const comment: TaskComment = {
+    id: env.nextId('task-comment'),
+    taskId: task.id,
+    author: 'agent',
+    text: repairCommentText(rounds, total, unmet, exhausted),
+    createdAt: now,
+  }
+  const facts: FactDraft[] = [hostDraft('task.comment_added', { comment }, now)]
+  if (exhausted) return { facts, blocked: false }
+  // 续轮的会话必须接上本轮：`taskSessions` 只认**终态** run，而本轮的结算事实还在同一批里
+  // （视图尚未更新），所以这里显式回填本轮 sessionId，否则多轮之间会丢掉上下文记忆。
+  const sessionId = run.sessionId ?? run.resumeSessionId
+  const queued = entryRunFacts(view, task, now, env, HOST_SCHEDULER, undefined, {
+    pendingComment: comment,
+  }).map((fact) => ({
+    ...fact,
+    payload: {
+      run:
+        sessionId === null ? fact.payload.run : { ...fact.payload.run, resumeSessionId: sessionId },
+    },
+  }))
+  facts.push(...queued)
+  return { facts, blocked: true }
+}
 
 /**
  * 闸门放行留痕的文案：预算次数取自闸门配置（脏数据缺省 0）。
@@ -305,11 +420,17 @@ export function receiveRun(
   const settled = settledRun(run, input.receipt, now)
   facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
   if (run.purpose === 'stage') {
+    // M21 阶段内自修复：验收未全达且轮数未用尽 → 原地续一轮（不流转）
+    const repair = review.blocked
+      ? { facts: [] as FactDraft[], blocked: false }
+      : repairRoundFacts(view, settled, input.receipt, now, env)
     // M14 硬门：评审清单还有未处置条目时不推进阶段——run 照常落终态、任务停在当前阶段，
     // 漏项由 `reviewFactsOf` 追加的任务评论说明「缺哪几条、怎么回应」。
-    const transition = review.blocked
-      ? []
-      : stageTransitionFacts(view, settled, gateVerdictOf(input.receipt), now, env)
+    const transition =
+      review.blocked || repair.blocked
+        ? []
+        : stageTransitionFacts(view, settled, gateVerdictOf(input.receipt), now, env)
+    facts.push(...repair.facts)
     facts.push(...transition)
     // 进入效果：流转到目标阶段后若目标阶段是 agent 入口，立刻入队下一轮（形成链条）
     for (const fact of transition) {

@@ -17,8 +17,17 @@ import {
   threadOfTask,
   withTask,
 } from '../threads'
-import { completeTask, moveTaskToStage } from '../workflow/stage-machine'
-import { done, OWNER, ownerDraft, reject, runsOfTask, stagesOf, workflowWithStages } from './common'
+import { completeTask, moveTask, moveTaskToStage } from '../workflow/stage-machine'
+import {
+  done,
+  hostDraft,
+  OWNER,
+  ownerDraft,
+  reject,
+  runsOfTask,
+  stagesOf,
+  workflowWithStages,
+} from './common'
 
 export function createTask(
   view: View,
@@ -140,6 +149,26 @@ export function moveTaskCommand(
   // 进入效果：落点阶段的 agent 入口每次进入都重新建 run；原地（from=to）不重建
   if (moved.currentStageId !== task.currentStageId) {
     facts.push(...entryRunFacts(view, moved, now, env, OWNER))
+  }
+  // M22：人工跳转留痕——落点不等于本阶段的自然去向时记一条评论。
+  // 允许跳级/回退是「松绑」的一部分，但没有留痕的松绑收不回来（审计链要完整）。
+  if (moved.currentStageId !== task.currentStageId) {
+    const natural = moveTask(task, { type: 'RUN_SUCCEEDED', runId: 'manual-move-probe' }, flow).task
+      .currentStageId
+    if (natural !== moved.currentStageId) {
+      const naturalName =
+        natural === null
+          ? '完成'
+          : (flow.stages.find((stage) => stage.id === natural)?.name ?? '未知阶段')
+      const comment: TaskComment = {
+        id: env.nextId('task-comment'),
+        taskId: task.id,
+        author: 'agent',
+        text: `人工跳转：「${fromStage.name}」→「${target.name}」（自然去向：${naturalName}）。`,
+        createdAt: now,
+      }
+      facts.push(hostDraft('task.comment_added', { comment }, now))
+    }
   }
   // M7：拖到更后阶段 = 向前离开，触发交接；拖回更前阶段不触发
   facts.push(...handoffOnExit(view, task, fromStage, target, true, now, env, OWNER))

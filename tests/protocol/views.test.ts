@@ -89,6 +89,7 @@ describe('protocol/views', () => {
       'reviews.byTask',
       'run.approvals',
       'runtimes.default-workdir',
+      'workflow.stage-metrics',
     ])
   })
 

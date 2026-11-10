@@ -285,6 +285,8 @@ export interface Change {
 - **`tasks.origin`**（M7 扩为 `manual` / `rule` / `handoff`）：`origin='handoff'` 只由内核产，Agent 与 UI 不能指定。
 - **阶段要干什么（M9）**：`workflow_stages.instructions`（空串 = 没写）。进到该阶段的任务，其提示词在「# 阶段：名称」之后多一段固定指令「## 阶段要做什么」+ 原文（只去首尾空白、保留换行）；空/全空白时不产这一段，老提示词逐字不变。编辑时说明变化与其它字段一样按 `sameStage` 比较，变化才产 `stage.updated`。
 - **闸门（M11）**：阶段可配 `gate = { maxFails, onPassStageId, onFailStageId }`（三列全空 = 不是闸门；必须 `entry_mode='agent'`，判定者就是该阶段的智能体）。`run.succeeded` 时读回执 `verdict`：`pass` 走通过分支并把任务上的 `gateFails` 清零；`fail` 未达 `maxFails` 走去未通过分支并 +1；`fail` 已达 `maxFails` **放行**走通过分支、任务打 `gate:degraded` 标签并追加一条 `task.comment_added`。`pass` 必须至少一条 `checks` 且退出码全为 0，否则按**没给结论**处理（任务原地停住，零事实）。`run.failed`（执行出错）走 `on_reject` 且**不消耗**预算。闸门未通过而离开不算 `exitsForward`，不触发交接；人工拖拽落位清零预算。
+- **验收续轮（M21）**：阶段声明了 `acceptance` 时，`run.succeeded` 带回首执 `acceptance[]`（`no` 是 1 基序号，缺项 / 越界 / `met` 非真都按**未达**）；未全达且该 `(taskId, stageId)` 的 stage run 条数 < `maxRounds` 时，产一条 `task.comment_added`（自评摘要：达成几条、未达哪几条）+ `run.queued`（同阶段、`resumeSessionId` = 本轮 `sessionId`、`turn+1`），**不流转**；轮数用尽只留评论，流转仍按 `on_complete` / 闸门分支。`run.failed` 不消耗轮次。轮次由 `runs` 现算（不新增列，沿用 review-handoff D2 的口径）。
+- **人工跳转留痕（M22）**：`task.move` 的落点不等于本阶段自然去向（`on_complete` 解析结果）时，同批追加一条 `author='agent'` 的 `task.comment_added`（「人工跳转：A → B（自然去向：C）」）；不改转移公式，只留痕。
 - **闸门判定与 `run.status` 正交**：`status` 只表达「执行器跑完没有」，`verdict` 表达「业务上过没过」；两者缺一都不能推进闸门。
 
 ## 规则

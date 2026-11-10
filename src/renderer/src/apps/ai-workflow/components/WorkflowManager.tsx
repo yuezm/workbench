@@ -5,7 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../compo
 import { FormError } from '../../../components/ui/form-error'
 import { Menu } from '../../../components/ui/menu'
 import { getKernelStore } from '../../../shell/kernelStore'
-import { useKernelViewState } from '../../../shell/useKernelView'
+import { useKernelView, useKernelViewState } from '../../../shell/useKernelView'
 import { SOP_TEMPLATES, draftFromTemplate, type SopTemplate } from '../model/sop-templates'
 import { WorkflowEditor } from './WorkflowEditor'
 
@@ -43,6 +43,14 @@ export function WorkflowManager(): ReactElement {
     selectedId !== null && workflows.some((w) => w.id === selectedId)
       ? selectedId
       : workflows[0]?.id
+  /** M23：当前工作流的阶段指标（只读派生；没有选中时暂不订阅） */
+  const metrics = useKernelView(
+    'workflow.stage-metrics',
+    activeId === undefined ? null : { workflowId: activeId },
+  )
+  const measured = (metrics?.stages ?? []).filter(
+    (stage) => stage.runs > 0 || stage.asks > 0 || stage.humanComments > 0,
+  )
 
   const openEditor = (workflow: WorkflowWithStages | null): void => {
     setSaveError(null)
@@ -186,6 +194,39 @@ export function WorkflowManager(): ReactElement {
             )
           })}
         </ul>
+      )}
+
+      {measured.length > 0 && (
+        <section className="rounded-xl border border-border">
+          <div className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-2">
+            <h3 className="text-xs font-medium text-foreground">阶段指标</h3>
+            <p className="text-xs text-faint-foreground">累计值，用来判断哪条流程真的在自动跑</p>
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-faint-foreground">
+                <th className="px-4 py-1.5 font-normal">阶段</th>
+                <th className="px-2 py-1.5 text-right font-normal">轮次</th>
+                <th className="px-2 py-1.5 text-right font-normal">平均轮数</th>
+                <th className="px-2 py-1.5 text-right font-normal">降级</th>
+                <th className="px-2 py-1.5 text-right font-normal">问人</th>
+                <th className="px-4 py-1.5 text-right font-normal">人评</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {measured.map((stage) => (
+                <tr key={stage.stageId} className="text-foreground">
+                  <td className="px-4 py-1.5">{stage.stageName}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{stage.runs}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{stage.avgRounds}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{stage.degraded}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums">{stage.asks}</td>
+                  <td className="px-4 py-1.5 text-right tabular-nums">{stage.humanComments}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       )}
 
       {editing !== undefined && (

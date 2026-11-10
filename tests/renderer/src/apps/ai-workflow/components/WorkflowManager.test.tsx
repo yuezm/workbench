@@ -388,9 +388,72 @@ describe('WorkflowManager', () => {
     expect(
       command.input.stages.find((stage) => stage.name === release.stages[0].name),
     ).toMatchObject({ instructions: release.stages[0].instructions })
-    // 阶段名在完整数组的下标里解析：灰度阶段的打回目标指向「发布准备」而不是自己
-    expect(command.input.stages[names.indexOf('灰度发布')].onRejectIndex).toBe(
-      names.indexOf('发布准备'),
+    // 阶段名在完整数组的下标里解析：灰度是闸门，未通过时指向「发布准备」而不是自己
+    const gray = command.input.stages[names.indexOf('灰度发布')]
+    expect(gray.gate?.onFailIndex).toBe(names.indexOf('发布准备'))
+  })
+
+  it('阶段指标（M23）：有运行数据时按阶段展示轮次 / 降级 / 问人 / 人评；全 0 时不显示', async () => {
+    const flows = [wf('w1', '研发', 2), wf('w2', '写作', 1)]
+    kernel.setView('workflows.all', undefined, flows)
+    kernel.setView(
+      'workflow.stage-metrics',
+      { workflowId: 'w1' },
+      {
+        workflowId: 'w1',
+        stages: [
+          {
+            stageId: 'w1-s0',
+            stageName: '阶段1',
+            runs: 4,
+            avgRounds: 2,
+            repairExhausted: 1,
+            degraded: 1,
+            asks: 2,
+            humanComments: 3,
+          },
+          {
+            stageId: 'w1-s1',
+            stageName: '阶段2',
+            runs: 0,
+            avgRounds: 0,
+            repairExhausted: 0,
+            degraded: 0,
+            asks: 0,
+            humanComments: 0,
+          },
+        ],
+      },
     )
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+
+    expect(await screen.findByText('阶段指标')).toBeInTheDocument()
+    const measured = screen.getByRole('table')
+    // 只列出真有数据的阶段：全 0 的阶段不占一行
+    expect(within(measured).getByText('阶段1')).toBeInTheDocument()
+    expect(within(measured).queryByText('阶段2')).toBeNull()
+    // 一行 = 阶段 + 轮次 / 平均轮数 / 降级 / 问人 / 人评
+    const row = within(measured).getAllByRole('row')[1]
+    expect(Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent)).toEqual([
+      '阶段1',
+      '4',
+      '2',
+      '1',
+      '2',
+      '3',
+    ])
+
+    // 切到没有指标数据的工作流：查询参数跟着换，指标区消失
+    kernel.setView(
+      'workflow.stage-metrics',
+      { workflowId: 'w2' },
+      {
+        workflowId: 'w2',
+        stages: [],
+      },
+    )
+    await user.click(screen.getByRole('button', { name: '选择工作流 写作' }))
+    await waitFor(() => expect(screen.queryByText('阶段指标')).toBeNull())
   })
 })

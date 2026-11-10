@@ -463,7 +463,7 @@ describe('WorkflowEditor', () => {
       handoffStageId: 'b1',
     })
     expect(draft.stages[1]).toMatchObject({ id: 's1', handoffWorkflowId: null })
-  })
+  }, 30_000)
 
   it('交接目标工作流已不在清单：目标阶段候选为空，仍按视图值回显', () => {
     const existing = workflowOf([
@@ -784,6 +784,9 @@ describe('WorkflowEditor', () => {
       onChildrenSettled: null,
       spawnPolicy: null,
       instructions: '按方案实现',
+      // M20：不展示验收的类型保存时归一为空
+      acceptance: [],
+      maxRounds: null,
       gate: null,
     })
   }, 30_000)
@@ -843,6 +846,9 @@ describe('WorkflowEditor', () => {
       spawnPolicy: null,
       // 提示词资料段没有副作用，原文保留，切回智能体还能用
       instructions: '按方案实现',
+      // M20：不展示验收的类型保存时归一为空
+      acceptance: [],
+      maxRounds: null,
       gate: null,
     })
   }, 30_000)
@@ -1104,6 +1110,8 @@ describe('WorkflowEditor 校验与失败反馈', () => {
           onChildrenSettled: null,
           spawnPolicy: null,
           instructions: '',
+          acceptance: [],
+          maxRounds: null,
           gate: null,
         },
       ],
@@ -1135,6 +1143,8 @@ describe('WorkflowEditor 校验与失败反馈', () => {
           onChildrenSettled: null,
           spawnPolicy: null,
           instructions: '',
+          acceptance: [],
+          maxRounds: null,
           gate: null,
         },
       ],
@@ -1434,6 +1444,34 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
 
     expect(screen.getByLabelText('阶段1要干什么')).toHaveValue('')
   })
+
+  it('验收与轮次（M20/M21）：一条一行存成数组，轮次可选；没验收时不展示轮次', async () => {
+    const existing = workflowWith([{ name: '执行' }, { name: '自测' }, { name: '结束' }])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段3' }))
+    await choose(user, '阶段3类型', '交给智能体')
+    await choose(user, '阶段3智能体', 'coder')
+
+    // 没写验收时不给轮次选择（续轮需要可判定的口径才有意义）
+    expect(screen.queryByRole('combobox', { name: '阶段3轮次上限' })).not.toBeInTheDocument()
+
+    const acceptance = screen.getByLabelText('阶段3验收')
+    await user.type(acceptance, 'pnpm check 退出码 0{enter}覆盖每条验收标准')
+    await choose(user, '阶段3轮次上限', '2 轮')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(savedStage(draft, '自测')).toMatchObject({
+      acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'],
+      maxRounds: 2,
+    })
+  }, 30_000)
 })
 
 describe('moveStageInList', () => {

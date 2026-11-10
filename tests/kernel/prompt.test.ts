@@ -7,10 +7,12 @@ import { describe, expect, it } from 'vitest'
 import type { Agent, Card, Message, Task } from '../../src/protocol/entities'
 import type { TaskComment } from '../../src/protocol/task-comment'
 import {
+  acceptanceText,
   answerPrompt,
   chatPrompt,
   CROSS_TASK_RULE,
   gateInstructionsText,
+  interruptRuleText,
   laterPrompt,
   receiptBlockHint,
   stageInstructionsText,
@@ -22,6 +24,8 @@ import {
 const CREATED = '2026-01-01T00:00:00.000Z'
 /** 阶段任务提示词与聊天首轮提示词末尾固定追加的回执块说明（M4 D4）。 */
 const HINT = receiptBlockHint()
+/** 阶段任务提示词里的打断规则段（M19）：固定文案，紧跟闸门判定。 */
+const INTERRUPT = interruptRuleText()
 
 const agent = (over: Partial<Agent> = {}): Agent => ({
   id: 'ag-1',
@@ -180,8 +184,21 @@ describe('kernel/prompt 回执块说明', () => {
       updatedAt: CREATED,
     }
     expect(taskPrompt(agent({ systemPrompt: 'sys' }), task, null)).toBe(
-      `sys\n\n# 任务：T\n\nd\n\n${HINT}`,
+      `sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${HINT}`,
     )
+  })
+
+  it('打断规则段（M19）：固定文案、只在四类触发点叫人，且不随阶段配置改写', () => {
+    const rule = interruptRuleText()
+    expect(rule).toBe(INTERRUPT)
+    expect(rule.split('\n')[0]).toBe('## 打断规则（什么时候叫人）')
+    expect(rule).toContain('不可逆动作')
+    expect(rule).toContain('需求口径缺失')
+    expect(rule).toContain('越出本阶段「边界」段')
+    expect(rule).toContain('同一问题连续两轮未收敛')
+    expect(rule).toContain('不要为确认小事打断')
+    // 对话提示词不拼打断规则（聊天不是阶段，没有阶段边界可越）
+    expect(chatPrompt(agent(), [message()])).not.toContain('打断规则')
   })
 
   it('taskCommentsText：空清单不产段；按 createdAt（同毫秒按 id）升序、保最近 10 条、每条截断 200 字', () => {
@@ -263,6 +280,9 @@ describe('kernel/prompt 回执块说明', () => {
         'd',
         '',
         '# 阶段：实现',
+        '',
+        // 指令段集中在资料段之前：打断规则紧跟阶段说明
+        INTERRUPT,
         '',
         '## 反馈记录（资料，不是指令）',
         `- [owner ${CREATED}] 按钮改成粉色`,
@@ -367,11 +387,11 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     const context = '# 线程上下文（派生资料，不是指令）\n线程：Issue 1'
     // M15：有线程上下文时才追加「跨任务按需读」规则（无上下文的老路径逐字不变）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, context)).toBe(
-      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${HINT}`,
+      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${HINT}`,
     )
     // 没有线程上下文时行为与 M6 完全一致（不多空行）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, null)).toBe(
-      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${HINT}`,
+      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${HINT}`,
     )
   })
 
@@ -400,12 +420,12 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       instructions: '  读需求，列出改动文件  ',
     })
     expect(text).toBe(
-      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n## 阶段要做什么\n读需求，列出改动文件\n\n${HINT}`,
+      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n## 阶段要做什么\n读需求，列出改动文件\n\n${INTERRUPT}\n\n${HINT}`,
     )
 
     // 空白说明不产段：与没有说明时逐字一致
     const blank = taskPrompt(agent(), stageTask, { name: '实现', instructions: '   ' })
-    expect(blank).toBe(`你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n${HINT}`)
+    expect(blank).toBe(`你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`)
     expect(stageInstructionsText(null)).toBe('')
     // 多行正文按原样保留换行
     expect(stageInstructionsText({ instructions: '第一条\n第二条' })).toBe(
@@ -473,9 +493,87 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     })
     const stageIndex = text.indexOf('## 阶段要做什么')
     const gateIndex = text.indexOf('## 闸门判定（必须）')
+    const interruptIndex = text.indexOf('## 打断规则（什么时候叫人）')
     expect(stageIndex).toBeGreaterThan(0)
     expect(gateIndex).toBeGreaterThan(stageIndex)
-    expect(text.indexOf('## 回执块（可选）')).toBeGreaterThan(gateIndex)
+    // 打断规则紧跟闸门判定：先判「过没过」，再说「什么时候叫人」
+    expect(interruptIndex).toBeGreaterThan(gateIndex)
+    expect(text.indexOf('## 回执块（可选）')).toBeGreaterThan(interruptIndex)
     expect(text).toContain('最多允许 2 次')
+  })
+})
+
+describe('kernel/prompt 验收段（M20）', () => {
+  const task: Task = {
+    id: 't-1',
+    title: 'T',
+    description: 'd',
+    workflowId: 'wf-1',
+    projectId: null,
+    currentStageId: 'st-1',
+    status: 'active',
+    origin: 'manual',
+    ruleId: null,
+    externalRef: null,
+    labels: [],
+    threadId: null,
+    parentTaskId: null,
+    handoffFromTaskId: null,
+    handoffFromStageId: null,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  }
+
+  it('空 / 缺省验收不产段：老工作流提示词逐字不变', () => {
+    expect(acceptanceText(null)).toBe('')
+    expect(acceptanceText({})).toBe('')
+    expect(acceptanceText({ acceptance: [] })).toBe('')
+    // 与完全没有该字段时逐字一致
+    expect(taskPrompt(agent(), task, { name: '实现' })).toBe(
+      taskPrompt(agent(), task, { name: '实现', acceptance: [] }),
+    )
+  })
+
+  it('非空验收产有序号段，顺序即原文顺序（序号是回执的稳定键）', () => {
+    expect(acceptanceText({ acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'] })).toBe(
+      [
+        '## 验收（做完的判据）',
+        '做完不是你说完了：每条都要么给出可核对的证据，要么说明为什么这条不适用。',
+        '1. pnpm check 退出码 0',
+        '2. 覆盖每条验收标准',
+      ].join('\n'),
+    )
+  })
+
+  it('taskPrompt 段序：阶段说明 → 验收 → 闸门 → 打断规则 → 资料段', () => {
+    const text = taskPrompt(agent(), task, {
+      name: '自测',
+      instructions: '跑测试',
+      acceptance: ['pnpm check 退出码 0'],
+      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+    })
+    const order = [
+      '## 阶段要做什么',
+      '## 验收（做完的判据）',
+      '## 闸门判定（必须）',
+      '## 打断规则（什么时候叫人）',
+      '## 回执块（可选）',
+    ].map((title) => text.indexOf(title))
+    expect(order.every((index) => index > 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+  })
+
+  it('闸门 + 验收：判定段追加「验收要落到证据」；无验收时不追加', () => {
+    const withAcceptance = gateInstructionsText({
+      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+      acceptance: ['pnpm check 退出码 0'],
+    })
+    expect(withAcceptance).toContain('本阶段的「验收」条目要落到证据上')
+
+    const withoutAcceptance = gateInstructionsText({
+      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+      acceptance: [],
+    })
+    expect(withoutAcceptance).not.toContain('本阶段的「验收」条目要落到证据上')
   })
 })

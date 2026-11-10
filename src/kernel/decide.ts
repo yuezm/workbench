@@ -15,6 +15,7 @@ import * as card from './commands/card'
 import * as chat from './commands/chat'
 import * as runtime from './commands/runtime'
 import * as run from './commands/run'
+import * as review from './commands/review'
 import * as task from './commands/task'
 import * as thread from './commands/thread'
 import * as workflow from './commands/workflow'
@@ -141,5 +142,9 @@ function dispatch(view: View, input: Input, now: Iso, env: Environment): Decisio
       return thread.closeThread(view, input, now)
     case 'thread.bind':
       return thread.bindThread(view, input, now)
+
+    // ---------- 评审结论（M14） ----------
+    case 'review.export':
+      return review.exportReview(view, input)
   }
 }

@@ -263,6 +263,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'projects',
         'task_comments',
       ]
+    case 'review.export':
+      // M14：归属校验（任务 / 项目）与报告定位都只看投影
+      return ['tasks', 'projects', 'review_reports']
     case 'thread.note':
     case 'thread.close':
     case 'thread.bind':

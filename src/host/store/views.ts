@@ -1174,6 +1174,11 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'comments.byTask':
       // M7.5：任务上下文 / 反馈（按追加顺序）
       return readTaskCommentsByTask(db, readStringParam(params, 'taskId'))
+    case 'reviews.byTask':
+      // M14：任务的评审报告，按 rev 升序（同一任务重评不覆盖旧结论）
+      return readReviewReports(db)
+        .filter((report) => report.taskId === readStringParam(params, 'taskId'))
+        .sort((left, right) => left.rev - right.rev || left.id.localeCompare(right.id))
     case 'runs.active-by-task':
       return readActiveRuns(db, readStringParam(params, 'taskId'))
     case 'conversations.all':

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { GateCheck, RunRow, Task, WorkflowStage } from '../../src/protocol/entities'
 import type { Receipt } from '../../src/protocol/inputs'
 import { REVIEW_LIMITS, type ReviewFinding, type ReviewReport } from '../../src/protocol/review'
+import { exportReview } from '../../src/kernel/commands/review'
+import { findReportForExport, reviewDocFileName, reviewMarkdown } from '../../src/kernel/review'
 import type { ThreadRow } from '../../src/protocol/thread'
 import type { View } from '../../src/kernel/types'
 import {
@@ -701,5 +703,106 @@ describe('kernel/review 排序与渲染的边角分支', () => {
       NOW,
     )
     expect(built.findings[0]?.evidence).toBe('python verify.py')
+  })
+})
+describe('kernel/review 提升为文档（M14 S5）', () => {
+  const project = {
+    id: 'pj-1',
+    name: 'P',
+    path: 'D:/work',
+    description: '',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  }
+
+  const exportView = (over: Partial<View> = {}): View =>
+    view({
+      projects: new Map([[project.id, project]]),
+      tasks: new Map([['task-1', task({ projectId: 'pj-1' })]]),
+      ...over,
+    })
+
+  it('内核只做归属校验：任务 / 项目 / 报告齐备时零事实', () => {
+    const decision = exportReview(exportView(), {
+      type: 'review.export',
+      commandId: 'c1',
+      taskId: 'task-1',
+    })
+    expect(decision.facts).toEqual([])
+    expect(decision.reject).toBeUndefined()
+  })
+
+  it('任务不存在 → not_found；未归属项目 → conflict；没有报告 → conflict', () => {
+    expect(
+      exportReview(exportView(), { type: 'review.export', commandId: 'c1', taskId: 't-x' }).reject
+        ?.code,
+    ).toBe('not_found')
+    expect(
+      exportReview(exportView({ tasks: new Map([['task-1', task({ projectId: null })]]) }), {
+        type: 'review.export',
+        commandId: 'c1',
+        taskId: 'task-1',
+      }).reject?.message,
+    ).toContain('未归属项目')
+    expect(
+      exportReview(exportView({ reviewReports: new Map() }), {
+        type: 'review.export',
+        commandId: 'c1',
+        taskId: 'task-1',
+      }).reject?.message,
+    ).toContain('还没有评审报告')
+  })
+
+  it('指定 reportId：取不到 / 属于别的任务都按不存在处理', () => {
+    const decision = exportReview(exportView(), {
+      type: 'review.export',
+      commandId: 'c1',
+      taskId: 'task-1',
+      reportId: 'nope',
+    })
+    expect(decision.reject?.message).toContain('报告不存在')
+    expect(findReportForExport(view(), 'task-1', 'report-1')?.id).toBe('report-1')
+    expect(findReportForExport(view(), 'task-2', 'report-1')).toBeUndefined()
+    expect(findReportForExport(view(), 'task-1')?.id).toBe('report-1')
+    expect(findReportForExport(view({ tasks: new Map() }), 'task-1')).toBeUndefined()
+  })
+
+  it('文件名：标题净化 + 任务 id 前 8 + rev；全被净化掉时退回 review', () => {
+    expect(reviewDocFileName('导出 JSON 加 HASH', 'task-1234567890', 2)).toBe(
+      '导出-JSON-加-HASH-task-123-r2.md',
+    )
+    expect(reviewDocFileName('a/b:c*d?"<>|e', 't-1', 1)).toBe('a-b-c-d-e-t-1-r1.md')
+    expect(reviewDocFileName('   ', 't-1', 1)).toBe('review-t-1-r1.md')
+    expect(reviewDocFileName('x'.repeat(60), 't-1', 1).split('-')[0]).toHaveLength(40)
+  })
+
+  it('markdown：判定与证据在前，open 条目优先，含断言 / 证据 / 验收 / 处置说明', () => {
+    const text = reviewMarkdown(
+      '导出 JSON 加 HASH',
+      report({
+        rev: 2,
+        checks: [{ cmd: 'pnpm check', exitCode: 1 }],
+        findings: [
+          finding({ id: 'r#R2', key: 'R2', severity: 'low', status: 'addressed', note: '改了' }),
+          finding({ id: 'r#R1', key: 'R1', severity: 'blocker', status: 'open' }),
+        ],
+      }),
+    )
+    expect(text.startsWith('# 评审报告：导出 JSON 加 HASH')).toBe(true)
+    expect(text).toContain('- 判定：fail')
+    expect(text).toContain('`pnpm check` → 退出码 1')
+    expect(text).toContain('待改清单（open 1 / 共 2）')
+    // open 的 R1 排在已处置的 R2 前面
+    expect(text.indexOf('R1 [blocker]')).toBeLessThan(text.indexOf('R2 [low]'))
+    expect(text).toContain('- 证据：python verify.py')
+    expect(text).toContain('- 验收：改成 utf-8-sig 后复跑')
+    expect(text).toContain('- 处置说明：改了')
+  })
+
+  it('markdown：无判定证据 / 无条目时给占位文案', () => {
+    const text = reviewMarkdown('任务', report({ verdict: null, checks: [], findings: [] }))
+    expect(text).toContain('- 判定：（无判定）')
+    expect(text).toContain('（未给出复核命令）')
+    expect(text).toContain('（这份评审没有列条目）')
   })
 })

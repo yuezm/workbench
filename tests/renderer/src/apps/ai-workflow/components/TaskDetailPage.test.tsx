@@ -716,3 +716,68 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('执行中的阶段不能完成')
   })
 })
+describe('TaskDetailPage 评审结论（M14）', () => {
+  const reviewReport = {
+    id: 'run-r:1',
+    taskId: 't1',
+    stageId: 's1',
+    runId: 'run-r',
+    threadId: null,
+    rev: 1,
+    verdict: 'fail' as const,
+    checks: [{ cmd: 'pnpm check', exitCode: 1 }],
+    findings: [
+      {
+        id: 'run-r:1#R1',
+        key: 'R1',
+        severity: 'blocker' as const,
+        location: 'src/a.ts:64',
+        claim: 'BOM 文件被判非法 JSON',
+        evidence: null,
+        requiredAction: '改成 utf-8-sig 后复跑',
+        status: 'open' as const,
+        note: null,
+        addressedByRunId: null,
+        updatedAt: '2026-11-10T00:00:00.000Z',
+      },
+    ],
+    artifact: null,
+    createdAt: '2026-11-10T00:00:00.000Z',
+    updatedAt: '2026-11-10T00:00:00.000Z',
+  }
+
+  it('展示清单，点「提升为文档」发 review.export 并回显路径', async () => {
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    kernel.setView('reviews.byTask', { taskId: 't1' }, [reviewReport])
+    // 泛型 handler 的返回类型按 `C['type']` 收窄，这里按 fake kernel 的契约断言返回值
+    kernel.onDispatch(
+      () =>
+        ({
+          facts: [],
+          value: { path: '/repo/docs/reviews/任务A-t1-r1.md' },
+        }) as never,
+    )
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+    expect(await screen.findByText('BOM 文件被判非法 JSON')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: '提升为文档' }))
+    const exported = kernel.dispatched.find((command) => command.type === 'review.export')
+    expect(exported).toMatchObject({ taskId: 't1', reportId: 'run-r:1' })
+    expect(await screen.findByText(/已写入/)).toBeTruthy()
+  })
+
+  it('没有评审报告：面板给空态（不显示按钮）', async () => {
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    kernel.setView('reviews.byTask', { taskId: 't1' }, [])
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+    expect(await screen.findByText(/还没有评审结论/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '提升为文档' })).toBeNull()
+  })
+})

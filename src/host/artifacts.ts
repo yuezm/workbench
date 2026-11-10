@@ -62,6 +62,30 @@ export function writeReviewArtifact(
 }
 
 /**
+ * 把一份文档写进项目的 `docs/`（「提升为文档」出口）。
+ *
+ * 与 `writeReviewArtifact` 的区别：这里失败**必须抛错**——这是用户显式点的动作，
+ * 悄悄失败比报错更糟。目标目录不存在时递归创建；同样走临时文件 + rename。
+ */
+export function writeProjectDoc(dir: string, fileName: string, text: string): string {
+  const target = path.join(dir, fileName)
+  const temp = `${target}.tmp`
+  try {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(temp, text, 'utf8')
+    renameSync(temp, target)
+    return target
+  } catch (error) {
+    try {
+      rmSync(temp, { force: true })
+    } catch {
+      // 清理失败不影响错误上抛
+    }
+    throw error
+  }
+}
+
+/**
  * 回执 → 带回正文引用的回执（宿主在派发 `run.receipt` 前调用）。
  *
  * 只对**带评审内容**的回执落盘：有 `verdict` 或非空 `findings`；运行没挂线程时跳过

@@ -62,6 +62,7 @@ export const COMMAND_NAMES = [
   'thread.note',
   'thread.close',
   'thread.bind',
+  'review.export',
 ] as const
 
 export type CommandName = (typeof COMMAND_NAMES)[number]
@@ -372,6 +373,7 @@ export type Command =
   | ThreadNoteCommand
   | ThreadCloseCommand
   | ThreadBindCommand
+  | ReviewExportCommand
 
 // ---------- 自动化规则（M6） ----------
 
@@ -416,6 +418,21 @@ export interface PluginSetCommand extends CommandBase, PluginSetCommandPayload {
   type: 'plugin.set'
 }
 
+// ---------- 评审结论（M14） ----------
+
+/**
+ * 把任务的评审报告提升为项目文档（「提升为文档」出口）。
+ *
+ * 语义：内核只做归属校验（任务存在、挂在项目上、有可导出的报告），**零事实**；
+ * 真正落盘由宿主完成——写到该任务项目的 `docs/reviews/` 下，由人决定何时提交。
+ * 报告正文本来就只作资料（`<userData>/artifacts/...`），这条命令是它进仓库的唯一出口。
+ */
+export interface ReviewExportCommand extends CommandBase {
+  type: 'review.export'
+  taskId: string
+  /** 指定要导出的报告版本；缺省导出定位到的最新一份 */
+  reportId?: string
+}
 // ---------- 线程（M6.5） ----------
 
 /** 给线程追加一条笔记（owner 补录；agent 笔记只能经回执 `notes[]`）。 */

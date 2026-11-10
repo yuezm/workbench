@@ -26,6 +26,7 @@ import type {
 import type { RuleSetView } from './rules'
 import type { PluginSettingsView, PluginView } from './plugins'
 import type { ThreadRow } from './thread'
+import type { ReviewReport } from './review'
 import type { TaskComment } from './task-comment'
 
 /**
@@ -69,6 +70,7 @@ export const VIEW_IDS = [
   'plugins.all',
   'thread.byId',
   'comments.byTask',
+  'reviews.byTask',
   'run.approvals',
   'runtimes.default-workdir',
 ] as const
@@ -169,6 +171,7 @@ export interface ViewArgs {
   'runtimes.models': { runtimeId: string }
   'thread.byId': { threadId: string }
   'comments.byTask': { taskId: string }
+  'reviews.byTask': { taskId: string }
   'run.approvals': { runId: string }
 }
 
@@ -204,6 +207,7 @@ export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'runtimes.models': 'runtimeId',
   'thread.byId': 'threadId',
   'comments.byTask': 'taskId',
+  'reviews.byTask': 'taskId',
   'run.approvals': 'runId',
 }
 
@@ -269,6 +273,8 @@ export interface ViewResults {
   'thread.byId': ThreadDetail | null
   /** 任务上下文 / 反馈（M7.5）：按追加顺序（`createdAt` 升序） */
   'comments.byTask': TaskComment[]
+  /** 任务的评审报告（M14）：按 `rev` 升序；没有任何评审时为空数组 */
+  'reviews.byTask': ReviewReport[]
   /**
    * 该 run 的沙箱提权记录（宿主视图，只读会话日志）：
    * 按请求时刻升序，最多 50 条；没有记录 / 会话日志缺席时为空数组。

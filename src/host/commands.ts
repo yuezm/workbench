@@ -9,6 +9,7 @@
  * 读只走 `query`：DB 视图交给 store，宿主视图（插件注册表/CLI 探测/执行器模型目录）由装配根注入。
  */
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import type { Store } from './store/index'
 import type { DispatchResult } from './store/index'
 import type { Fact } from '../kernel/types'
@@ -24,6 +25,9 @@ import { HOST_VIEW_IDS, type HostViewId, type ViewId, type ViewParams } from '..
 import { validateCommand, validateQuery } from '../protocol/validate'
 import { mergePluginSetting, type PluginSettingSeed } from '../kernel/plugins'
 import { StoreError } from './store/errors'
+import { reviewDocFileName, reviewMarkdown } from '../kernel/review'
+import { writeProjectDoc } from './artifacts'
+import type { ReviewReport } from '../protocol/review'
 import { isDeclaredAppEvent } from '../shared/apps'
 
 /** 运行时配置的默认值（来自执行器插件 manifest；内核不写产品名）。 */
@@ -330,6 +334,38 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
     return { facts: summarize(facts), value: probe }
   }
 
+  /**
+   * 编排：把评审报告提升为项目文档（M14）。
+   *
+   * 内核只做归属校验（零事实），这里做真正的事：定位报告 → 读任务与项目 → 生成 markdown →
+   * 写到 `<项目>/docs/reviews/<文件名>`。写盘失败直接抛（用户显式点的动作，不能悄悄失败）。
+   */
+  const exportReview = (
+    command: Extract<Command, { type: 'review.export' }>,
+  ): IpcDispatchResult<unknown> => {
+    const facts = deps.dispatch(command).facts
+    const reports: ReviewReport[] = store.query('reviews.byTask', { taskId: command.taskId })
+    const report =
+      command.reportId === undefined
+        ? reports[reports.length - 1]
+        : reports.find((item) => item.id === command.reportId)
+    if (report === undefined) {
+      throw new StoreError('not_found', '报告不存在: ' + (command.reportId ?? '（最新）'))
+    }
+    const task = taskById(command.taskId)
+    if (task === null) throw new StoreError('not_found', '任务不存在: ' + command.taskId)
+    const project =
+      task.projectId === null
+        ? null
+        : (store.query('projects.all').find((item) => item.id === task.projectId) ?? null)
+    if (project === null) throw new StoreError('conflict', '任务未归属项目，无法落到 docs/reviews')
+    const target = writeProjectDoc(
+      path.join(project.path, 'docs', 'reviews'),
+      reviewDocFileName(task.title, task.id, report.rev),
+      reviewMarkdown(task.title, report),
+    )
+    return { facts: summarize(facts), value: { path: target } }
+  }
   /** manifest 的非 secret 默认值（新插件还没有设置行时用它当 seed）。 */
   const defaultPluginConfig = (manifest: PluginManifest): PluginSetting['config'] => {
     const config: PluginSetting['config'] = {}
@@ -407,6 +443,7 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       if (parsed.type === 'runtime.update') return updateRuntime(parsed)
       if (parsed.type === 'runtime.probe') return probeOnly(parsed)
       if (parsed.type === 'plugin.set') return setPlugin(parsed)
+      if (parsed.type === 'review.export') return exportReview(parsed)
 
       const facts = executePlain(parsed)
       return { facts: summarize(facts), value: valueOf(parsed, facts) }

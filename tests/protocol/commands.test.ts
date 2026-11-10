@@ -46,6 +46,7 @@ const expected = [
   'thread.note',
   'thread.close',
   'thread.bind',
+  'review.export',
 ]
 
 describe('protocol/commands', () => {

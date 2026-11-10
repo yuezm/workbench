@@ -86,6 +86,7 @@ describe('protocol/views', () => {
       'plugins.all',
       'thread.byId',
       'comments.byTask',
+      'reviews.byTask',
       'run.approvals',
       'runtimes.default-workdir',
     ])

@@ -99,6 +99,7 @@ const commandSamples: Command[] = [
   },
   { commandId: 'c28', type: 'plugins.replace', settings: [] },
   { commandId: 'c29', type: 'plugin.set', pluginId: 'webhook', enabled: true },
+  { commandId: 'c37', type: 'review.export', taskId: 't-1' },
   { commandId: 'c30', type: 'task.comment', taskId: 't-1', text: '按钮改成粉色', rerun: true },
   { commandId: 'c30b', type: 'task.rerun', id: 't-1' },
   { commandId: 'c31', type: 'project.create', input: projectInput },
@@ -297,6 +298,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'thread.note': ['threads'],
   'thread.close': ['threads'],
   'thread.bind': ['threads'],
+  'review.export': ['tasks', 'projects', 'review_reports'],
   'card.delivered': ['cards'],
   'card.delivery_failed': ['cards'],
 }
@@ -304,8 +306,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 36 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(36)
+  it('覆盖 37 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(37)
     expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)

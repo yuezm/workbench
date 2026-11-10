@@ -632,6 +632,9 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'task.rerun':
       // 重新执行只带任务 id：阶段 / 智能体 / 运行时都由内核按视图现算
       return requiredId(command.id, 'id')
+    case 'review.export':
+      // M14：提升为文档只带任务与可选的报告版本；归属与「有没有报告」由内核判
+      return requiredId(command.taskId, 'taskId') ?? optionalId(command.reportId, 'reportId')
     case 'task.comment':
       // 反馈正文只作资料（资料段）；`rerun` 只表示「顺带再跑一轮」的意图，能否跑由内核判
       return (

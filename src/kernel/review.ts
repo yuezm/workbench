@@ -323,3 +323,88 @@ export function reviewFactsOf(
   })
   return { facts, blocked: true }
 }
+/**
+ * 导出用的报告定位：给了 `reportId` 就按 id 取（越权取别的任务的报告也算「不存在」），
+ * 否则按修复阶段的定位口径取最新一份。
+ */
+export function findReportForExport(
+  view: View,
+  taskId: Id,
+  reportId?: string,
+): ReviewReport | undefined {
+  if (reportId !== undefined) {
+    const report = view.reviewReports.get(reportId)
+    return report === undefined || report.taskId !== taskId ? undefined : report
+  }
+  const task = view.tasks.get(taskId)
+  return task === undefined ? undefined : locateReport(view, task)
+}
+
+/** 文件名里不允许出现的字符（Windows 保留字符）；连续空白也并成 `-`。 */
+const UNSAFE_FILENAME = /[\\/:*?"<>|]+/g
+
+/** 控制字符（Unicode `Cc`）同样不能进文件名；用属性转义而不是字面量，避免源码里出现控制符。 */
+const CONTROL_CHARS = /\p{Cc}+/gu
+
+/**
+ * 「提升为文档」的文件名：`<标题 slug>-<任务 id 前 8>-r<rev>.md`。
+ *
+ * 带上 `rev` 才能同一任务多版共存（重评不覆盖旧结论）；标题只做可读性，净化后超长截断，
+ * 全被净化掉时退回 `review`。id 与 rev 保证唯一，不靠标题。
+ */
+export function reviewDocFileName(taskTitle: string, taskId: Id, rev: number): string {
+  const slug = taskTitle
+    .replace(UNSAFE_FILENAME, '-')
+    .replace(CONTROL_CHARS, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40)
+  const prefix = slug === '' ? 'review' : slug
+  return `${prefix}-${taskId.slice(0, 8)}-r${rev}.md`
+}
+
+/** 清单条目的渲染块（导出文档用；`open` 在前面，其余按原顺序）。 */
+const findingDocBlock = (finding: ReviewFinding): string[] => {
+  const place = finding.location === null ? '' : ` ${finding.location}`
+  const lines = [
+    `### ${finding.key} [${finding.severity}]${place} — ${finding.status}`,
+    `- 断言：${finding.claim}`,
+  ]
+  if (finding.evidence !== null) lines.push(`- 证据：${finding.evidence}`)
+  lines.push(`- 验收：${finding.requiredAction}`)
+  if (finding.note !== null) lines.push(`- 处置说明：${finding.note}`)
+  if (finding.addressedByRunId !== null) lines.push(`- 处置轮次：${finding.addressedByRunId}`)
+  return lines
+}
+
+/**
+ * 报告 → 可直接进仓库的 markdown（确定性：同一报告同一文本，不含导出时刻）。
+ *
+ * 为什么把判定与证据写在最前面：这份文档的读者是人和外部单位，先看结论再看清单；
+ * 证据（命令 + 退出码）是「为什么这么判」的唯一凭据，不能只留在提示词里。
+ */
+export function reviewMarkdown(taskTitle: string, report: ReviewReport): string {
+  const open = openFindings(report)
+  const verdict = report.verdict === null ? '（无判定）' : report.verdict
+  const lines = [
+    `# 评审报告：${taskTitle}`,
+    '',
+    `- 判定：${verdict}`,
+    `- 报告：\`${report.id}\`（rev ${report.rev}）`,
+    `- 评审阶段：\`${report.stageId}\`｜运行：\`${report.runId}\``,
+    `- 时间：${report.createdAt}（更新 ${report.updatedAt}）`,
+    '',
+    '## 判定证据',
+    '',
+  ]
+  if (report.checks.length === 0) lines.push('（未给出复核命令）')
+  for (const check of report.checks) lines.push(`- \`${check.cmd}\` → 退出码 ${check.exitCode}`)
+  lines.push('', `## 待改清单（open ${open.length} / 共 ${report.findings.length}）`, '')
+  if (report.findings.length === 0) lines.push('（这份评审没有列条目）')
+  const ordered = [...open, ...report.findings.filter((finding) => finding.status !== 'open')]
+  for (const finding of ordered) {
+    lines.push(...findingDocBlock(finding), '')
+  }
+  return lines.join('\n').trimEnd() + '\n'
+}

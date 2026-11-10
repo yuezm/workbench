@@ -393,6 +393,8 @@ describe('loadView：按 viewSpec 装载切片', () => {
     const writer = createProjectionWriter(db)
     const task = sample.task()
     writer.apply({ table: 'tasks', key: task.id, row: task }, SAMPLE_AT)
+    const otherTask = sample.task({ id: 'tk-other' })
+    writer.apply({ table: 'tasks', key: otherTask.id, row: otherTask }, SAMPLE_AT)
     const base = {
       taskId: task.id,
       stageId: 'st-1',
@@ -1507,5 +1509,50 @@ describe('queryView：闸门缺省去向', () => {
       onPassStageId: null,
       onFailStageId: null,
     })
+  })
+})
+describe('queryView：reviews.byTask（M14）', () => {
+  it('按任务过滤、按 rev 升序返回整行（含 JSON 列还原）；别的任务不混进来', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+    const task = sample.task()
+    writer.apply({ table: 'tasks', key: task.id, row: task }, SAMPLE_AT)
+    const otherTask = sample.task({ id: 'tk-other' })
+    writer.apply({ table: 'tasks', key: otherTask.id, row: otherTask }, SAMPLE_AT)
+    const base = {
+      taskId: task.id,
+      stageId: 'st-1',
+      runId: 'run-1',
+      threadId: null,
+      verdict: 'fail' as const,
+      checks: [],
+      findings: [],
+      artifact: null,
+      createdAt: SAMPLE_AT,
+      updatedAt: SAMPLE_AT,
+    }
+    writer.apply(
+      { table: 'review_reports', key: 'run-2:2', row: { ...base, id: 'run-2:2', rev: 2 } },
+      SAMPLE_AT,
+    )
+    writer.apply(
+      { table: 'review_reports', key: 'run-1:1', row: { ...base, id: 'run-1:1', rev: 1 } },
+      SAMPLE_AT,
+    )
+    writer.apply(
+      {
+        table: 'review_reports',
+        key: 'other:1',
+        row: { ...base, id: 'other:1', rev: 1, taskId: 'tk-other' },
+      },
+      SAMPLE_AT,
+    )
+    expect(
+      (queryView(db, 'reviews.byTask', { taskId: task.id }) as Array<{ id: string }>).map(
+        (row) => row.id,
+      ),
+    ).toEqual(['run-1:1', 'run-2:2'])
+    expect(queryView(db, 'reviews.byTask', { taskId: 'tk-none' })).toEqual([])
   })
 })

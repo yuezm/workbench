@@ -11,6 +11,7 @@ import { TaskActivity } from './TaskActivity'
 import { TaskBrief } from './TaskBrief'
 import { TaskCommentForm } from './TaskCommentForm'
 import { TaskInfoPanel } from './TaskInfoPanel'
+import { ReviewPanel } from './ReviewPanel'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -43,10 +44,13 @@ export function TaskDetailPage({
   const runsState = useKernelViewState('runs.byTask', { taskId })
   const commentsState = useKernelViewState('comments.byTask', { taskId })
   const childrenState = useKernelViewState('tasks.byParent', { taskId })
+  /** M14：该任务的评审报告（按 rev 升序；没有评审时为空） */
+  const reviewsState = useKernelViewState('reviews.byTask', { taskId })
   const task = state.data ?? null
   const runs = runsState.data ?? []
   const comments = commentsState.data ?? []
   const children: Task[] = childrenState.data ?? []
+  const reviews = reviewsState.data ?? []
   /** 本任务的 open 卡：正文与选项就在页面里，顶部通知条只负责把人送过来 */
   const cardsState = useKernelViewState('cards.open')
   const openCards = cardsState.data ?? []
@@ -128,6 +132,20 @@ export function TaskDetailPage({
       .dispatch({ type: 'task.stop', commandId: '', id: taskId })
       .catch((e: unknown) => setActionError(errMsg(e)))
       .finally(() => setAction(null))
+  }
+
+  /**
+   * 提升为文档（M14）：把某个版本的评审报告写进任务所属项目的 `docs/reviews/`。
+   * 归属校验在内核、落盘在宿主；成功后把路径回显给用户（是否提交由人决定）。
+   */
+  const exportReview = async (reportId: string): Promise<string> => {
+    const result = await getKernelStore().dispatch({
+      type: 'review.export',
+      commandId: '',
+      taskId,
+      reportId,
+    })
+    return result.value?.path ?? ''
   }
 
   /** 完成任务：终态动作；执行中会被内核拒绝，所以按钮先禁用（title 说明原因）。 */
@@ -262,6 +280,10 @@ export function TaskDetailPage({
                 </ul>
               </section>
             )}
+
+            {/* 评审结论（M14）：判定、证据与待改清单；正文在 artifacts，进仓库要人点一下 */}
+            <FormError message={reviewsState.error} />
+            <ReviewPanel reports={reviews} onExport={exportReview} />
 
             <section aria-label="上下文" className="flex flex-col gap-3">
               <h3 className="flex items-center gap-2 text-base font-medium text-foreground">

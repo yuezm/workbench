@@ -87,6 +87,8 @@ export interface CommandResults {
   'thread.note': null
   'thread.close': null
   'thread.bind': null
+  /** M14：提升为文档后返回落盘路径（`<项目>/docs/reviews/<文件名>`） */
+  'review.export': { path: string }
 }
 
 export type CommandValue<T extends Command['type']> = CommandResults[T]

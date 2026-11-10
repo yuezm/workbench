@@ -1,4 +1,7 @@
 // @vitest-environment node
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Card, RunRow, Runtime, RuntimeProbe, Task } from '../../src/protocol/entities'
@@ -1058,5 +1061,118 @@ describe('host/commands：valueOf 空事实兜底', () => {
       text: '反馈',
     })
     expect(result.value).toBeNull()
+  })
+})
+describe('createCommandRouter：review.export（M14 提升为文档）', () => {
+  const idOf = (result: { value: unknown }): string => (result.value as { id: string }).id
+
+  const reportRow = (taskId: string) => ({
+    id: 'run-r:1',
+    taskId,
+    stageId: 'st-1',
+    runId: 'run-r',
+    threadId: null,
+    rev: 1,
+    verdict: 'fail' as const,
+    checks: [{ cmd: 'pnpm check', exitCode: 1 }],
+    findings: [
+      {
+        id: 'run-r:1#R1',
+        key: 'R1',
+        severity: 'blocker' as const,
+        location: 'src/a.ts:1',
+        claim: '导出缺 hash',
+        evidence: null,
+        requiredAction: '补 hash 后复跑',
+        status: 'open' as const,
+        note: null,
+        addressedByRunId: null,
+        updatedAt: NOW,
+      },
+    ],
+    artifact: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  })
+
+  it('写到 <项目>/docs/reviews/<slug>-<任务id8>-r<rev>.md，返回绝对路径', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'wb-export-'))
+    const h = setup()
+    const project = await h.router.dispatch({
+      commandId: 'p1',
+      type: 'project.create',
+      input: { name: 'P', path: root },
+    })
+    const workflow = await h.router.dispatch(workflowCommand('w1'))
+    const created = await h.router.dispatch({
+      commandId: 't1',
+      type: 'task.create',
+      input: { title: '导出/任务*1', workflowId: idOf(workflow), projectId: idOf(project) },
+    })
+    const taskId = idOf(created)
+    createProjectionWriter(h.db).apply(
+      { table: 'review_reports', key: 'run-r:1', row: reportRow(taskId) },
+      NOW,
+    )
+
+    const result = await h.router.dispatch({
+      commandId: 'e1',
+      type: 'review.export',
+      taskId,
+      reportId: 'run-r:1',
+    })
+    const target = (result.value as { path: string }).path
+    expect(target).toBe(
+      path.join(root, 'docs', 'reviews', `导出-任务-1-${taskId.slice(0, 8)}-r1.md`),
+    )
+    const text = readFileSync(target, 'utf8')
+    expect(text).toContain('# 评审报告：导出/任务*1')
+    expect(text).toContain('R1 [blocker]')
+    expect(text).toContain('`pnpm check` → 退出码 1')
+  })
+
+  it('没有报告 / 报告 id 不存在 / 任务未归属项目：分别给出可读的拒绝文案', async () => {
+    const h = setup()
+    const project = await h.router.dispatch({
+      commandId: 'p2',
+      type: 'project.create',
+      input: { name: 'P', path: mkdtempSync(path.join(tmpdir(), 'wb-export-')) },
+    })
+    const workflow = await h.router.dispatch(workflowCommand('w2'))
+    const created = await h.router.dispatch({
+      commandId: 't2',
+      type: 'task.create',
+      input: { title: '任务', workflowId: idOf(workflow), projectId: idOf(project) },
+    })
+    const taskId = idOf(created)
+    await expect(
+      h.router.dispatch({ commandId: 'e2', type: 'review.export', taskId }),
+    ).rejects.toThrow('还没有评审报告')
+
+    createProjectionWriter(h.db).apply(
+      { table: 'review_reports', key: 'run-r:1', row: reportRow(taskId) },
+      NOW,
+    )
+    await expect(
+      h.router.dispatch({ commandId: 'e3', type: 'review.export', taskId, reportId: 'nope' }),
+    ).rejects.toThrow('报告不存在')
+
+    // 报告属于别的任务：按 id 取不到（不越权）
+    await expect(
+      h.router.dispatch({ commandId: 'e4', type: 'review.export', taskId, reportId: 'run-r:1' }),
+    ).resolves.toBeTruthy()
+  })
+
+  it('任务没有项目：拒绝（docs/reviews 需要一个仓库落脚）', async () => {
+    const h = setup()
+    const workflow = await h.router.dispatch(workflowCommand('w3'))
+    const created = await h.router.dispatch({
+      commandId: 't3',
+      type: 'task.create',
+      input: { title: '任务', workflowId: idOf(workflow) },
+    })
+    await expect(
+      h.router.dispatch({ commandId: 'e5', type: 'review.export', taskId: idOf(created) }),
+    ).rejects.toThrow('未归属项目')
   })
 })

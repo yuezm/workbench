@@ -209,6 +209,9 @@ function changesOf(fact: AnyFact): Change[] {
     case 'thread.bound':
       // M6.5：线程事实一律携带完整 ThreadRow，整行 upsert
       return [put('threads', fact.payload.thread)]
+    case 'thread.removed':
+      // 只删 threads：线程内的 run 由同批 `run.removed` 逐条删除，不在这里联删
+      return [remove('threads', fact.payload.thread.id)]
     case 'rules.replaced':
       // M6：规则集整批替换，一行事实 → 单行投影（key='current'）
       return [put('rule_sets', fact.payload.ruleSet)]

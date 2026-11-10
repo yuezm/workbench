@@ -2,6 +2,14 @@ import { useState, type FormEvent, type ReactElement } from 'react'
 import type { Task } from '../../../../../protocol/entities'
 import { THREAD_LIMITS, type ThreadRow } from '../../../../../protocol/thread'
 import { Button } from '../../../components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../../components/ui/dialog'
 import { Field } from '../../../components/ui/field'
 import { FormError } from '../../../components/ui/form-error'
 import { Input } from '../../../components/ui/input'
@@ -17,7 +25,7 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
 const textareaCls = 'min-h-16 resize-y'
 
 /** 页面内一次写操作：进行中禁用全部动作，避免并发提交互相覆盖 */
-type BusyAction = 'note' | 'bind' | 'close'
+type BusyAction = 'note' | 'bind' | 'close' | 'remove'
 
 export interface ThreadDetailPageProps {
   threadId: string
@@ -25,6 +33,8 @@ export interface ThreadDetailPageProps {
   onBack: () => void
   /** 从线程的任务列表进入任务详情页 */
   onOpenTask: (taskId: string) => void
+  /** 线程被删除后回到上一级（页面数据已不存在，留在原地只会显示「线程不存在」） */
+  onRemoved?: () => void
 }
 
 /** 任务树节点：`children` 按 `parentTaskId` 归到父任务下 */
@@ -292,10 +302,12 @@ function ThreadContent({
   thread,
   tasks,
   onOpenTask,
+  onRemoved,
 }: {
   thread: ThreadRow
   tasks: Task[]
   onOpenTask: (taskId: string) => void
+  onRemoved?: () => void
 }): ReactElement {
   const [busy, setBusy] = useState<BusyAction | null>(null)
   /** 笔记失败原因：贴在笔记输入框下方 */
@@ -308,6 +320,10 @@ function ThreadContent({
   }>({})
   /** 归档失败原因：贴在归档按钮旁边 */
   const [closeError, setCloseError] = useState<string | null>(null)
+  /** 删除失败原因：贴在底部动作区（删除是终态动作，弹窗关掉也要留下原因） */
+  const [removeError, setRemoveError] = useState<string | null>(null)
+  /** 删除确认弹窗：删除连带任务与执行记录，先问一次 */
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [bindSource, setBindSource] = useState('')
   const [bindRef, setBindRef] = useState('')
@@ -328,6 +344,7 @@ function ThreadContent({
     setNoteError(null)
     setBindErrors({})
     setCloseError(null)
+    setRemoveError(null)
     void (async () => {
       try {
         await task()
@@ -401,6 +418,30 @@ function ThreadContent({
         })
       },
       setCloseError,
+    )
+  }
+
+  /**
+   * 删除线程：线程行、线程内任务与它们的执行记录一起消失（内核删 run 行，宿主清落盘归档）。
+   * 成功后立刻出栈——线程已经不存在，留在详情页只会看到「线程不存在」。
+   */
+  const deleteThread = (): void => {
+    runAction(
+      'remove',
+      async () => {
+        await getKernelStore().dispatch({
+          type: 'thread.remove',
+          commandId: '',
+          threadId: thread.id,
+        })
+        setConfirmRemove(false)
+        onRemoved?.()
+      },
+      (message) => {
+        // 失败时把弹窗收起，原因贴在底部动作区（弹窗里再塞一坨错误信息容易被忽略）
+        setConfirmRemove(false)
+        setRemoveError(message)
+      },
     )
   }
 
@@ -484,23 +525,70 @@ function ThreadContent({
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
         <FormError message={closeError} />
+        <FormError message={removeError} />
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-faint-foreground">
-            {closed ? '线程已归档。' : '归档只影响界面。'}
+            {closed ? '线程已归档。' : '归档只影响界面；删除会连同任务与执行记录一起清掉。'}
           </p>
-          {!closed && (
+          <div className="flex shrink-0 items-center gap-2">
+            {!closed && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={busyNow}
+                onClick={closeThread}
+              >
+                归档
+              </Button>
+            )}
             <Button
               type="button"
-              variant="secondary"
+              variant="destructive"
               size="sm"
               disabled={busyNow}
-              onClick={closeThread}
+              onClick={() => setConfirmRemove(true)}
             >
-              归档
+              删除线程
             </Button>
-          )}
+          </div>
         </div>
       </div>
+
+      {/* 删除是终态动作：连带任务与执行记录，先问一次再动手 */}
+      {confirmRemove && (
+        <Dialog open onOpenChange={() => setConfirmRemove(false)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>删除线程</DialogTitle>
+              <DialogDescription>
+                线程「{thread.title}」、它下面的 {thread.taskIds.length}{' '}
+                个任务与执行记录（运行记录、落盘归档）会一起删除，不能撤销。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={busyNow}
+                onClick={() => setConfirmRemove(false)}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={busyNow}
+                onClick={deleteThread}
+              >
+                删除
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   )
 }
@@ -513,6 +601,7 @@ export function ThreadDetailPage({
   threadId,
   onBack,
   onOpenTask,
+  onRemoved,
 }: ThreadDetailPageProps): ReactElement {
   const state = useKernelViewState('thread.byId', { threadId })
   const detail = state.data
@@ -537,7 +626,12 @@ export function ThreadDetailPage({
           </p>
         ) : (
           <div className="mx-auto flex w-full max-w-3xl flex-col gap-4">
-            <ThreadContent thread={detail.thread} tasks={detail.tasks} onOpenTask={onOpenTask} />
+            <ThreadContent
+              thread={detail.thread}
+              tasks={detail.tasks}
+              onOpenTask={onOpenTask}
+              onRemoved={onRemoved}
+            />
           </div>
         )}
       </div>

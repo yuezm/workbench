@@ -8,6 +8,8 @@
  * 写路径唯一的例外是重建（`ensureProjection` / `rebuild`）：它按 seq 顺序 fold `project`。
  */
 import { randomUUID } from 'node:crypto'
+import { rmSync } from 'node:fs'
+import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import type { Input } from '../../protocol/inputs'
 import type { ViewId, ViewParams, ViewResult } from '../../protocol/views'
@@ -189,20 +191,45 @@ export function createStore(options: StoreOptions): Store {
     })
   }
 
+  /**
+   * 线程删除后的落盘清理：`<artifacts>/threads/<threadId>/`（`index.md` 与 `runs/*`）就是
+   * 这个线程的执行记录，库里的 run 行已随事实删除，磁盘上不能留孤本。
+   * 清理失败不改变命令结果（归档与其它落盘路径同口径：增益项不拖垮写路径）。
+   */
+  const dropThreadArtifacts = (facts: readonly Fact[]): void => {
+    if (artifactsRoot === null) return
+    for (const fact of facts) {
+      if (fact.type !== 'thread.removed') continue
+      const threadId = (fact.payload as { thread: { id: string } }).thread.id
+      try {
+        rmSync(path.join(artifactsRoot, 'threads', threadId), { recursive: true, force: true })
+      } catch {
+        // 目录不存在 / 被占用：删除结果不受影响
+      }
+    }
+  }
+
   const dispatch = (input: unknown): DispatchResult => {
     const validated = validateInput(input)
     if (!validated.ok) throw new StoreError('invalid_input', validated.message)
     const commandId = commandIdOf(validated.input)
     if (commandId !== null) {
       const replay = readCommandFacts(commandId)
-      if (replay !== null) return { facts: replay }
+      if (replay !== null) {
+        dropThreadArtifacts(replay)
+        return { facts: replay }
+      }
     }
     try {
-      return attemptDispatch(validated.input, commandId)
+      const result = attemptDispatch(validated.input, commandId)
+      dropThreadArtifacts(result.facts)
+      return result
     } catch (error) {
       if (!(error instanceof SeqConflictError)) throw error
       try {
-        return attemptDispatch(validated.input, commandId)
+        const result = attemptDispatch(validated.input, commandId)
+        dropThreadArtifacts(result.facts)
+        return result
       } catch (retryError) {
         if (retryError instanceof SeqConflictError) {
           throw new StoreError('conflict', '事实日志序号冲突，请重试')

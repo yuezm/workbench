@@ -134,6 +134,9 @@
 
 | TC-AIW-085 | 任务详情「评审结论」面板（M14 S5）：展示 `rev` / 判定 / 待处理计数、判定证据（命令与退出码）、逐条清单（严重度、位置、断言、验收、处置说明、状态）；多版本只展开最新一版并给历史计数；无评审时给空态文案且不渲染「提升为文档」 | 单元 | `renderer/.../ReviewPanel.test.tsx` + `renderer/.../TaskDetailPage.test.tsx` |
 | TC-AIW-086 | 提升为文档（`review.export`）：内核只做归属校验（任务 / 项目 / 报告）并零事实，宿主写到 `<项目>/docs/reviews/<标题slug>-<任务id8>-r<rev>.md` 并返回路径；无报告、报告 id 不存在、任务未归属项目分别给出可读拒绝文案；标题净化非法字符与控制字符，`rev` 不同不覆盖 | 单元 | `host/commands.test.ts` + `kernel/review.test.ts` + `host/store/views.test.ts` |
+| TC-AIW-087 | 删除线程（`thread.remove`）：线程内没有活跃 run 时逐条 `run.removed` → `task.removed` → `thread.removed`（tombstone 删 `threads` 行），线程行的历史 taskId 与聊天 run 不影响判定；有 queued / running / waiting 时 reject conflict，线程不存在按幂等零事实；宿主在提交后清 `<artifacts>/threads/<threadId>/`（index.md 与 runs/*），未配置 artifactsRoot 时只删行，同一 commandId 重放不重复报错；线程详情页「删除线程」走确认弹窗、成功出栈、失败就地展示原因，Esc / 取消只关弹窗 | 单元 | `kernel/decide.thread.test.ts` + `host/store/thread-remove.test.ts` + `renderer/src/apps/ai-workflow/components/ThreadDetailPage.test.tsx` + `AiWorkflowPage.test.tsx` |
+| TC-AIW-088 | 看板布局：阶段列固定宽度（`w-64`，不随列数拉伸，列多时横向滚动），「归档」为最下面一条横排（计数 / 落点提示 / 「查看归档」入口同行），拖到归档条触发 `task.complete`，执行中的任务不给落点 | 单元 | `renderer/src/apps/ai-workflow/components/KanbanBoard.test.tsx` + `AiWorkflowPage.test.tsx` + `e2e/thread.spec.ts` |
+| TC-AIW-089 | 列内快速新建：每个阶段列底部有「+ 新建任务」，就地填标题 + 描述/要求（标题回车或 Ctrl/⌘+Enter 提交，描述里 Enter 只换行），以该阶段 `task.create`（带 `stageId`、`description` 与当前项目），成功后清空并保持展开可连续建；`agent` 阶段再提示「会立即交给智能体执行」；空标题提示必填、Esc 收起不发命令、失败文案就地展示并保留输入；未传回调时不渲染入口 | 单元 | `renderer/src/apps/ai-workflow/components/KanbanBoard.test.tsx` + `AiWorkflowPage.test.tsx` + `e2e/thread.spec.ts` |
 
 ## E2E（构建产物 + 真实 Electron）
 

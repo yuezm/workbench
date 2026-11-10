@@ -90,6 +90,7 @@ export const FACT_TYPES = [
   'thread.closed',
   'thread.reopened',
   'thread.bound',
+  'thread.removed',
   'rules.replaced',
   'rule.fired',
   'plugins.replaced',
@@ -441,6 +442,14 @@ export interface ThreadBoundPayload {
 }
 
 /**
+ * 删除线程：payload 携带末态行（tombstone，与 `workflow.removed` 同口径），
+ * `project` 据此删 `threads` 行；线程内的执行记录由同批 `run.removed` 逐条删除。
+ */
+export interface ThreadRemovedPayload {
+  thread: ThreadRow
+}
+
+/**
  * 事件合并到 queued run（M6.5）：`payload.run` 是追加 `eventId` 后的整行，
  * `project` 据此更新 `runs.eventIds`（与运行类事实同口径，重建不回查）。
  */
@@ -589,6 +598,7 @@ export interface FactPayloads {
   'thread.closed': ThreadClosedPayload
   'thread.reopened': ThreadReopenedPayload
   'thread.bound': ThreadBoundPayload
+  'thread.removed': ThreadRemovedPayload
   'rules.replaced': RulesReplacedPayload
   'rule.fired': RuleFiredPayload
   'plugins.replaced': PluginsReplacedPayload

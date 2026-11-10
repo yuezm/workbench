@@ -46,6 +46,7 @@ const expected = [
   'thread.note',
   'thread.close',
   'thread.bind',
+  'thread.remove',
   'review.export',
 ]
 

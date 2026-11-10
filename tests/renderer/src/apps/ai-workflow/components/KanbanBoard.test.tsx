@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -421,5 +421,187 @@ describe('KanbanBoard', () => {
       />,
     )
     expect(screen.getByText('子任务 1/2')).toBeInTheDocument()
+  })
+})
+
+describe('KanbanBoard 列内快速新建', () => {
+  function renderQuick(
+    onQuickCreateTask = vi.fn<
+      (stageId: string, title: string, description: string) => Promise<void>
+    >(async () => undefined),
+  ): { onQuickCreateTask: ReturnType<typeof vi.fn> } {
+    render(
+      <KanbanBoard
+        workflow={wf}
+        tasks={[]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+        onQuickCreateTask={onQuickCreateTask}
+      />,
+    )
+    return { onQuickCreateTask }
+  }
+
+  it('每个阶段列底部都有「+ 新建任务」入口；未传回调时不渲染', () => {
+    renderQuick()
+    expect(screen.getByRole('button', { name: '在「待办」阶段添加任务' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '在「审核」阶段添加任务' })).toBeInTheDocument()
+    cleanup()
+    render(
+      <KanbanBoard
+        workflow={wf}
+        tasks={[]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: /^在「/ })).not.toBeInTheDocument()
+  })
+
+  it('点开后就地输入，回车以该阶段建任务；成功后清空并保持展开（可连着建）', async () => {
+    const user = userEvent.setup()
+    const onQuickCreateTask = vi.fn<
+      (stageId: string, title: string, description: string) => Promise<void>
+    >(async () => undefined)
+    renderQuick(onQuickCreateTask)
+
+    await user.click(screen.getByRole('button', { name: '在「待办」阶段添加任务' }))
+    const input = screen.getByLabelText('阶段「待办」的新任务标题')
+    expect(input).toHaveFocus()
+    await user.type(input, '  新卡片  {Enter}')
+
+    await waitFor(() => expect(onQuickCreateTask).toHaveBeenCalledWith('s0', '新卡片', ''))
+    expect(input).toHaveValue('')
+    // 保持展开：输入框还在，接着敲下一张不用再点一次
+    expect(screen.getByLabelText('阶段「待办」的新任务标题')).toBeInTheDocument()
+  })
+
+  it('描述随任务一起提交：Ctrl+Enter 创建，描述里的 Enter 只换行', async () => {
+    const user = userEvent.setup()
+    const onQuickCreateTask = vi.fn<
+      (stageId: string, title: string, description: string) => Promise<void>
+    >(async () => undefined)
+    renderQuick(onQuickCreateTask)
+
+    await user.click(screen.getByRole('button', { name: '在「待办」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '带要求的任务')
+    const desc = screen.getByLabelText('阶段「待办」的新任务要求')
+    await user.type(desc, '第一行{Enter}第二行')
+
+    // 描述里的 Enter 是换行，不提交
+    expect(onQuickCreateTask).not.toHaveBeenCalled()
+    expect(desc).toHaveValue('第一行\n第二行')
+
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await waitFor(() =>
+      expect(onQuickCreateTask).toHaveBeenCalledWith('s0', '带要求的任务', '第一行\n第二行'),
+    )
+  })
+
+  it('agent 阶段的列展开时提示「会立即交给智能体执行」', async () => {
+    const user = userEvent.setup()
+    render(
+      <KanbanBoard
+        workflow={agentWf}
+        tasks={[]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+        onQuickCreateTask={async () => undefined}
+      />,
+    )
+    // 非 agent 列（待办）不提示
+    await user.click(screen.getByRole('button', { name: '在「待办」阶段添加任务' }))
+    expect(screen.queryByText(/立即交给智能体执行/)).not.toBeInTheDocument()
+    // agent 列（执行）提示
+    await user.click(screen.getByRole('button', { name: '在「执行」阶段添加任务' }))
+    expect(screen.getByText(/立即交给智能体执行/)).toBeInTheDocument()
+  })
+
+  it('空标题回车提示必填、不发命令', async () => {
+    const user = userEvent.setup()
+    const { onQuickCreateTask } = renderQuick()
+    await user.click(screen.getByRole('button', { name: '在「待办」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '   {Enter}')
+
+    expect(await screen.findByText('任务标题必填')).toBeInTheDocument()
+    expect(onQuickCreateTask).not.toHaveBeenCalled()
+  })
+
+  it('Esc 收起输入框且不发命令', async () => {
+    const user = userEvent.setup()
+    const { onQuickCreateTask } = renderQuick()
+    await user.click(screen.getByRole('button', { name: '在「待办」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '半截{Escape}')
+
+    expect(screen.queryByLabelText('阶段「待办」的新任务标题')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '在「待办」阶段添加任务' })).toBeInTheDocument()
+    expect(onQuickCreateTask).not.toHaveBeenCalled()
+  })
+
+  it('描述里按 Esc 也收起表单（不发命令）', async () => {
+    const user = userEvent.setup()
+    const { onQuickCreateTask } = renderQuick()
+    await user.click(screen.getByRole('button', { name: '在「待办」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '半截标题')
+    await user.click(screen.getByLabelText('阶段「待办」的新任务要求'))
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByLabelText('阶段「待办」的新任务标题')).not.toBeInTheDocument()
+    expect(onQuickCreateTask).not.toHaveBeenCalled()
+  })
+
+  it('创建失败就地展示错误并保留输入', async () => {
+    const user = userEvent.setup()
+    const onQuickCreateTask = vi
+      .fn<(stageId: string, title: string, description: string) => Promise<void>>()
+      .mockRejectedValue(new Error('任务标题重复'))
+    renderQuick(onQuickCreateTask)
+
+    await user.click(screen.getByRole('button', { name: '在「审核」阶段添加任务' }))
+    const input = screen.getByLabelText('阶段「审核」的新任务标题')
+    await user.type(input, '重复卡片{Enter}')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('任务标题重复')
+    expect(input).toHaveValue('重复卡片')
+  })
+
+  it('提交中按 Esc 不收起表单（正在落库，半途关掉会让人以为没建成）', async () => {
+    const user = userEvent.setup()
+    let resolve!: () => void
+    const onQuickCreateTask = vi.fn<
+      (stageId: string, title: string, description: string) => Promise<void>
+    >(
+      () =>
+        new Promise<void>((done) => {
+          resolve = done
+        }),
+    )
+    renderQuick(onQuickCreateTask)
+
+    await user.click(screen.getByRole('button', { name: '在「待办」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '慢任务{Enter}')
+    await waitFor(() => expect(onQuickCreateTask).toHaveBeenCalled())
+
+    await user.keyboard('{Escape}')
+    expect(screen.getByLabelText('阶段「待办」的新任务标题')).toBeInTheDocument()
+
+    resolve()
+    await waitFor(() => expect(screen.getByLabelText('阶段「待办」的新任务标题')).toHaveValue(''))
+  })
+
+  it('失败原因不是 Error 时也转成可展示文案', async () => {
+    const user = userEvent.setup()
+    const onQuickCreateTask = vi
+      .fn<(stageId: string, title: string, description: string) => Promise<void>>()
+      .mockRejectedValue('工作流已被删除')
+    renderQuick(onQuickCreateTask)
+
+    await user.click(screen.getByRole('button', { name: '在「待办」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '卡片{Enter}')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('工作流已被删除')
   })
 })

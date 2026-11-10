@@ -309,6 +309,37 @@ export function AiWorkflowPage(): ReactElement {
 
   const active = workflows.find((w) => w.id === activeId)
 
+  /**
+   * 列内快速新建：点某列底部的「+ 新建任务」，回车即以该阶段为起始阶段建任务。
+   * 标题 + 描述一起提交（`agent` 阶段的列建完立刻派活，只有标题智能体没法干）；
+   * 失败挂页面错误条并抛回列内。
+   * `workflowId` 由调用处给（看板只在有工作流时渲染，这里不重复判空）。
+   */
+  const quickCreateTask = async (
+    workflowId: string,
+    stageId: string,
+    title: string,
+    description: string,
+  ): Promise<void> => {
+    try {
+      await getKernelStore().dispatch({
+        type: 'task.create',
+        commandId: '',
+        input: {
+          title,
+          description,
+          workflowId,
+          stageId,
+          projectId: activeProject?.id ?? null,
+        },
+      })
+      setError(null)
+    } catch (e) {
+      setError(errMsg(e))
+      throw e instanceof Error ? e : new Error(String(e))
+    }
+  }
+
   return (
     // 两栏：单列侧栏（w-64）+ 内容区，吃满 shell 顶部栏以下的高度
     <div className="flex h-full min-h-0">
@@ -428,6 +459,9 @@ export function AiWorkflowPage(): ReactElement {
                     onMoveToStage={moveToStage}
                     onCompleteTask={completeTask}
                     onNewTask={() => setDialogOpen(true)}
+                    onQuickCreateTask={(stageId, title, description) =>
+                      quickCreateTask(active.id, stageId, title, description)
+                    }
                     onOpenTask={(task) => openTask(task.id)}
                     onOpenThread={openThread}
                   />
@@ -447,7 +481,13 @@ export function AiWorkflowPage(): ReactElement {
               onOpenTask={openTask}
             />
           ) : (
-            <ThreadDetailPage threadId={route.threadId} onBack={back} onOpenTask={openTask} />
+            <ThreadDetailPage
+              threadId={route.threadId}
+              onBack={back}
+              onOpenTask={openTask}
+              // 线程删了就不是「返回」，是这一页没了：整段出栈回到看板
+              onRemoved={() => setTrail([])}
+            />
           ))}
 
         {view === 'settings' && (

@@ -157,6 +157,7 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'thread.closed':
     case 'thread.reopened':
     case 'thread.bound':
+    case 'thread.removed':
       return [{ scope: 'thread', id: fact.payload.thread.id }]
     case 'rules.replaced':
     case 'rule.fired':

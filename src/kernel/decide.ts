@@ -140,6 +140,8 @@ function dispatch(view: View, input: Input, now: Iso, env: Environment): Decisio
       return thread.noteThread(view, input, now, env)
     case 'thread.close':
       return thread.closeThread(view, input, now)
+    case 'thread.remove':
+      return thread.removeThread(view, input, now)
     case 'thread.bind':
       return thread.bindThread(view, input, now)
 

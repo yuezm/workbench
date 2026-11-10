@@ -271,6 +271,10 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'thread.bind':
       // 线程命令只读线程行（bind 还要校验目标键唯一）
       return ['threads']
+    case 'thread.remove':
+      // 删除线程要按线程内任务逐条产 run.removed / task.removed（D13），
+      // 并先确认线程里没有执行中的 run（先停再删，免得执行记录被回执写回来）
+      return ['threads', 'tasks', 'runs']
     case 'card.delivered':
     case 'card.delivery_failed':
       // 投递回写只读卡片当前行（校验版本 / 幂等：迟到与重复投递零事实）

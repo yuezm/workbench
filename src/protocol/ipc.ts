@@ -87,6 +87,8 @@ export interface CommandResults {
   'thread.note': null
   'thread.close': null
   'thread.bind': null
+  /** M17：删除线程（连带任务与执行记录），返回值由 UI 出栈后重取视图 */
+  'thread.remove': null
   /** M14：提升为文档后返回落盘路径（`<项目>/docs/reviews/<文件名>`） */
   'review.export': { path: string }
 }

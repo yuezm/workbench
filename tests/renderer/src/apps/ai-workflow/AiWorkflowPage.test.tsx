@@ -1132,6 +1132,77 @@ describe('AiWorkflowPage', () => {
     expect(screen.getByText(/工作流「研发」/)).toBeInTheDocument()
   })
 
+  it('列内快速新建：标题 + 描述一起 dispatch task.create（带 stageId 与项目）', async () => {
+    seedBase()
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(screen.getByRole('button', { name: '在「审核」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「审核」的新任务标题'), '列内新任务')
+    await user.type(screen.getByLabelText('阶段「审核」的新任务要求'), '把按钮改成绿色')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+
+    await waitFor(() =>
+      expectDispatched({
+        type: 'task.create',
+        input: {
+          title: '列内新任务',
+          description: '把按钮改成绿色',
+          workflowId: 'w1',
+          stageId: 's1',
+          projectId: 'p1',
+        },
+      }),
+    )
+  })
+
+  it('列内新建失败：列内与页面顶部各展示一份原因，输入保留', async () => {
+    seedBase()
+    dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
+      command.type === 'task.create'
+        ? Promise.reject(new Error('任务标题重复'))
+        : Promise.resolve({ facts: [], value: null } as CommandDispatchResult<C>),
+    )
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '在「审核」阶段添加任务' }))
+    const input = screen.getByLabelText('阶段「审核」的新任务标题')
+    await user.type(input, '重复任务{Enter}')
+
+    expect(await screen.findAllByText('任务标题重复')).toHaveLength(2)
+    expect(input).toHaveValue('重复任务')
+  })
+
+  it('删除线程后回到看板：线程页不残留「线程不存在」', async () => {
+    seedBase()
+    const threadedTask: Task = { ...task, threadId: 'th1' }
+    kernel.setView('tasks.byProject', { projectId: 'p1' }, [threadedTask])
+    kernel.setView(
+      'thread.byId',
+      { threadId: 'th1' },
+      { thread, tasks: [threadedTask], sessions: {} },
+    )
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '打开线程：任务A' }))
+    await screen.findByRole('region', { name: '线程详情' })
+
+    await user.click(screen.getByRole('button', { name: '删除线程' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: '删除' }),
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: '线程详情' })).not.toBeInTheDocument(),
+    )
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+  })
+
   it('详情页在切换栏目 / 视图后回到看板，不残留上一页', async () => {
     seedBase()
     const user = userEvent.setup()

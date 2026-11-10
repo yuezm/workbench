@@ -126,6 +126,7 @@ const expected = [
   'thread.closed',
   'thread.reopened',
   'thread.bound',
+  'thread.removed',
   'rules.replaced',
   'rule.fired',
   'plugins.replaced',

@@ -347,6 +347,113 @@ describe('decide 线程命令补充', () => {
   })
 })
 
+describe('decide 删除线程', () => {
+  it('thread.remove：先删执行记录再删任务，最后删线程行', () => {
+    const decision = decide(
+      view({ threads: [thread()], tasks: [task()], runs: [run()] }),
+      command({ type: 'thread.remove', threadId: 'th-1' }),
+      NOW,
+      env(),
+    )
+    expect(decision.reject).toBeUndefined()
+    expect(factTypes(decision)).toEqual(['run.removed', 'task.removed', 'thread.removed'])
+    expect(payloadOf<{ runId: string }>(decision, 'run.removed').runId).toBe('run-1')
+    expect(payloadOf<{ task: Task }>(decision, 'task.removed').task.id).toBe('task-1')
+    expect(payloadOf<{ thread: ThreadRow }>(decision, 'thread.removed').thread.id).toBe('th-1')
+    expect(decision.facts.every((fact) => fact.actor)).toBe(true)
+  })
+
+  it('thread.remove：线程内每个任务的执行记录都清掉', () => {
+    const decision = decide(
+      view({
+        threads: [thread({ taskIds: ['task-1', 'task-2'], rootTaskIds: ['task-1', 'task-2'] })],
+        tasks: [task(), task({ id: 'task-2', title: '写实现' })],
+        runs: [run(), run({ id: 'run-2', taskId: 'task-2' })],
+      }),
+      command({ type: 'thread.remove', threadId: 'th-1' }),
+      NOW,
+      env(),
+    )
+    expect(factTypes(decision)).toEqual([
+      'run.removed',
+      'task.removed',
+      'run.removed',
+      'task.removed',
+      'thread.removed',
+    ])
+  })
+
+  it('thread.remove：线程里有执行中的 run → reject conflict（先停再删）', () => {
+    const decision = decide(
+      view({
+        threads: [thread()],
+        tasks: [task()],
+        runs: [run({ status: 'running' })],
+      }),
+      command({ type: 'thread.remove', threadId: 'th-1' }),
+      NOW,
+      env(),
+    )
+    expect(decision.facts).toEqual([])
+    expect(decision.reject).toMatchObject({ code: 'conflict' })
+  })
+
+  it('thread.remove：线程不存在按幂等删除（零事实）', () => {
+    const decision = decide(
+      view(),
+      command({ type: 'thread.remove', threadId: 'th-x' }),
+      NOW,
+      env(),
+    )
+    expect(decision.reject).toBeUndefined()
+    expect(decision.facts).toEqual([])
+  })
+
+  it('thread.remove：taskIds 里留下已删任务 id 时只删线程行', () => {
+    // 线程行的 taskIds 保留历史 id（任务删了不回收）：没有任务行就没有 task.removed
+    const decision = decide(
+      view({ threads: [thread({ taskIds: ['task-gone'], rootTaskIds: [] })] }),
+      command({ type: 'thread.remove', threadId: 'th-1' }),
+      NOW,
+      env(),
+    )
+    expect(factTypes(decision)).toEqual(['thread.removed'])
+  })
+
+  it('thread.remove：聊天 run（无任务）不算线程执行中，不阻塞删除', () => {
+    const chatRun = run({ id: 'run-chat', purpose: 'chat', taskId: null, threadId: null })
+    const decision = decide(
+      view({
+        threads: [thread()],
+        tasks: [task()],
+        runs: [chatRun, run({ status: 'waiting' })],
+      }),
+      command({ type: 'thread.remove', threadId: 'th-1' }),
+      NOW,
+      env(),
+    )
+    expect(decision.reject).toMatchObject({ code: 'conflict' })
+
+    const onlyChat = decide(
+      view({
+        threads: [thread()],
+        tasks: [task()],
+        runs: [chatRun, run()],
+      }),
+      command({ type: 'thread.remove', threadId: 'th-1' }),
+      NOW,
+      env(),
+    )
+    expect(onlyChat.reject).toBeUndefined()
+    // 聊天 run 不挂任务：只删任务自己的那条 run，聊天记录不受影响
+    expect(
+      onlyChat.facts
+        .filter((fact) => fact.type === 'run.removed')
+        .map((fact) => (fact.payload as { runId: string }).runId),
+    ).toEqual(['run-1'])
+  })
+})
+
 describe('decide 线程生命周期', () => {
   it('task.complete：线程内任务全部完成 → 归档', () => {
     const decision = decide(

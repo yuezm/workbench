@@ -83,14 +83,24 @@ beforeEach(() => {
   kernel = installFakeKernel()
 })
 
-function setup(detail: ThreadDetail | null): {
+function setup(
+  detail: ThreadDetail | null,
+  onRemoved?: () => void,
+): {
   onBack: ReturnType<typeof vi.fn>
   onOpenTask: ReturnType<typeof vi.fn>
 } {
   const onBack = vi.fn()
   const onOpenTask = vi.fn()
   kernel.setView('thread.byId', { threadId: 'th1' }, detail)
-  render(<ThreadDetailPage threadId="th1" onBack={onBack} onOpenTask={onOpenTask} />)
+  render(
+    <ThreadDetailPage
+      threadId="th1"
+      onBack={onBack}
+      onOpenTask={onOpenTask}
+      onRemoved={onRemoved}
+    />,
+  )
   return { onBack, onOpenTask }
 }
 
@@ -404,5 +414,70 @@ describe('ThreadDetailPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('线程读取失败')
     expect(screen.queryByText(/正在读取线程/)).not.toBeInTheDocument()
     expect(screen.queryByText(/线程不存在/)).not.toBeInTheDocument()
+  })
+
+  it('删除线程：确认弹窗说明连带任务与执行记录，确认后 dispatch 并出栈', async () => {
+    const onRemoved = vi.fn()
+    const user = userEvent.setup()
+    setup(detailOf(thread), onRemoved)
+    await screen.findByText('上一轮笔记')
+
+    await user.click(screen.getByRole('button', { name: '删除线程' }))
+    const dialog = await screen.findByRole('dialog')
+    // 弹窗里的数字与说明都来自线程行：3 个任务、执行记录一起删
+    expect(dialog).toHaveTextContent('3 个任务')
+    expect(dialog).toHaveTextContent('执行记录')
+
+    await user.click(within(dialog).getByRole('button', { name: '删除' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'thread.remove', threadId: 'th1' }),
+      ),
+    )
+    expect(onRemoved).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('删除线程：取消确认不发命令、不出栈（Esc 与「取消」都只关弹窗）', async () => {
+    const onRemoved = vi.fn()
+    const user = userEvent.setup()
+    setup(detailOf(thread), onRemoved)
+    await screen.findByText('上一轮笔记')
+
+    await user.click(screen.getByRole('button', { name: '删除线程' }))
+    await screen.findByRole('dialog')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '删除线程' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(kernel.dispatched).toEqual([])
+    expect(onRemoved).not.toHaveBeenCalled()
+  })
+
+  it('删除失败：弹窗收起、原因贴在底部动作区，不出栈', async () => {
+    const onRemoved = vi.fn()
+    dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
+      command.type === 'thread.remove'
+        ? Promise.reject(new Error('线程内还有执行中的任务，先停止执行再删除线程'))
+        : Promise.resolve({ facts: [], value: null } as CommandDispatchResult<C>),
+    )
+    const user = userEvent.setup()
+    setup(detailOf(thread), onRemoved)
+    await screen.findByText('上一轮笔记')
+
+    await user.click(screen.getByRole('button', { name: '删除线程' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: '删除' }),
+    )
+
+    expect(
+      await screen.findByText('线程内还有执行中的任务，先停止执行再删除线程'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(onRemoved).not.toHaveBeenCalled()
   })
 })

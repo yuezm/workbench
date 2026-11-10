@@ -712,6 +712,8 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
       )
     case 'thread.close':
       return requiredId(command.threadId, 'threadId')
+    case 'thread.remove':
+      return requiredId(command.threadId, 'threadId')
     case 'thread.bind':
       return (
         requiredId(command.threadId, 'threadId') ??

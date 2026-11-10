@@ -62,6 +62,7 @@ export const COMMAND_NAMES = [
   'thread.note',
   'thread.close',
   'thread.bind',
+  'thread.remove',
   'review.export',
 ] as const
 
@@ -373,6 +374,7 @@ export type Command =
   | ThreadNoteCommand
   | ThreadCloseCommand
   | ThreadBindCommand
+  | ThreadRemoveCommand
   | ReviewExportCommand
 
 // ---------- 自动化规则（M6） ----------
@@ -458,4 +460,18 @@ export interface ThreadBindCommand extends CommandBase {
   threadId: string
   source: string
   externalRef: string
+}
+
+/**
+ * 删除线程（连同它的执行记录）：线程行消失，线程内各任务的 run 记录逐条清除
+ * （`run.removed`；`run_events`、卡片、评论、评审报告由投影层按父键联删），
+ * 宿主再清掉 `<artifacts>/threads/<threadId>/` 下的落盘归档（index.md / runs/*）。
+ *
+ * 任务随线程一起删：任务创建时必挂线程（隐式线程），线程没了任务就是悬空引用。
+ * 线程内有执行中的 run（queued / running / waiting）时 reject——先 `task.stop` 再删，
+ * 免得跑到一半的执行记录没有落点。线程不存在按幂等删除（零事实）。
+ */
+export interface ThreadRemoveCommand extends CommandBase {
+  type: 'thread.remove'
+  threadId: string
 }

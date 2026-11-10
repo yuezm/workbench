@@ -15,16 +15,16 @@ import type { TaskComment } from '../protocol/task-comment'
 import { TASK_COMMENT_LIMITS } from '../protocol/task-comment'
 
 /**
- * 回执块说明（D4）：固定文案，告诉智能体可以在最终回复末尾附带一个 ```json 围栏块，
- * 由执行器解析成回执字段。字段与上限与 `protocol/validate` 的 receipt 校验保持一致。
+ * 回执块说明（D4）：固定文案，告诉智能体可在最终回复末尾附带一个 ```json 围栏块，
+ * 由执行器解析成回执字段。字段与上限与 `protocol/validate` 的 receipt 校验一致。
  */
 const RECEIPT_BLOCK_HINT: readonly string[] = [
   '## 回执块（可选）',
-  '需要人拍板、留下不阻塞的通知、关闭旧卡片、约时间复查、派生事件、派出子任务或给出闸门判定与评审清单时，在最终回复末尾输出最后一个 ```json 围栏代码块；对象含 ask/notices/resolves/later/events/spawn/verdict/checks/findings/addresses 任一键即按回执块处理，非法块整块忽略、不影响本轮结果。',
-  '打扰规则（M12）：`ask` 会打断人（系统通知弹窗），**同一轮只发一张卡**——把同一决策的多个待定项写进 `text` 分行列出，`options` 放要人挑的做法；`notices` 不弹系统通知、只在应用内显示，只写「会改变人判断的一句话」，过程、假设、未核验清单、待办说明一律写在正文里，不要塞进 notices。',
-  '评审清单（M14）：评审判出待改项时给 `findings`（每条写 `key` / `severity` / `location` / `claim` / `requiredAction`，`requiredAction` 要写成可判定的验收条件）；打回后的修复轮必须用 `addresses` 逐条回应：`fixed` 要带 `checkRef`（指向同回执 `checks` 里的命令且退出码为 0），`rejected` / `deferred` 要写 `note` 说明理由。还有未回应的条目时任务不会进入下一阶段。',
-  '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}],"verdict":"pass|fail","checks":[{"cmd":"pnpm check","exitCode":0}],"findings":[{"key":"R1","severity":"blocker","location":"src/a.ts:42","claim":"...","evidence":"...","requiredAction":"..."}],"addresses":[{"findingId":"<报告id>#R1","disposition":"fixed","checkRef":"pnpm check","note":"..."}]}',
-  '上限：每个键最多 100 项（`findings` / `addresses` 各 200 项）、每张卡 options 最多 20 项；title ≤200 字、text ≤2000 字、summary ≤200 字、`claim` / `requiredAction` ≤500 字、`key` ≤32 字。ask 出现即挂起等回答（全部阻塞卡答完才续接），later 仅在无 ask/notices 时生效。',
+  '要人拍板、留通知、关旧卡、约复查、派生事件、派子任务、给闸门判定或评审清单时，在最终回复末尾输出最后一个 ```json 围栏块；对象含 ask/notices/resolves/later/events/spawn/verdict/checks/findings/addresses 任一键即按回执处理，非法块整块忽略、不影响本轮。',
+  '`ask` 弹系统通知，一轮只发一张：同一决策的多个待定项写进 `text` 分行、`options` 给人挑；`notices` 不弹通知，只写会改变判断的一句话，过程与待办写正文。',
+  '待改项写 `findings`（`key`/`severity`/`location`/`claim`/`requiredAction`，末项须可判定）；修复轮用 `addresses` 逐条回应：`fixed` 要带 `checkRef`（指向同回执里退出码 0 的 `checks` 命令），`rejected` / `deferred` 要写 `note`，未回应不进下一阶段。',
+  '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}],"verdict":"pass|fail","checks":[{"cmd":"pnpm check","exitCode":0}],"findings":[{"key":"R1","severity":"blocker","location":"src/a.ts:42","claim":"...","requiredAction":"..."}],"addresses":[{"findingId":"<报告id>#R1","disposition":"fixed","checkRef":"pnpm check","note":"..."}]}',
+  '上限：每键 100 项（`findings` / `addresses` 各 200 项），options 最多 20 项；title ≤200、text ≤2000、summary ≤200、`claim`/`requiredAction` ≤500、`key` ≤32 字。ask 即挂起等回答，later 只在无 ask/notices 时生效。',
 ]
 
 /** 回执块说明（确定性文本；阶段任务提示词与聊天首轮提示词末尾共用）。 */

@@ -15,11 +15,14 @@
 import type { StageKind } from '../../../../../protocol/entities'
 
 export interface StageKindMeta {
-  /** 类别文案（看板列头小字、编辑器徽标） */
+  /**
+   * 类别文案（编辑器阶段详情里的徽标）。
+   * 看板列头不显示它：列头只留阶段名 + 类别圆点，「待办」旁边不再写「未开始」。
+   */
   label: string
   /** 圆点底色（`bg-` 前缀的类名）：看板列头、阶段列表 */
   dot: string
-  /** 文字色（`text-` 前缀）：类别小字 */
+  /** 文字色（`text-` 前缀）：编辑器徽标文字 */
   text: string
   /** 徽标底色（同色低透明度 15% 或 10%）：与 `text` 搭配 */
   chip: string

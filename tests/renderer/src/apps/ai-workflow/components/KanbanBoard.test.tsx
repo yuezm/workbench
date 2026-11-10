@@ -460,7 +460,7 @@ describe('KanbanBoard 列头类别', () => {
     expect(dotOf('已取消')?.className).toContain('bg-destructive')
   })
 
-  it('内置阶段列头补类别小字；名称已是类别文案时不重复', () => {
+  it('列头只显示阶段名，不挂类别文案', () => {
     render(
       <KanbanBoard
         workflow={withBuiltins()}
@@ -472,13 +472,11 @@ describe('KanbanBoard 列头类别', () => {
     )
 
     const todo = screen.getByRole('group', { name: '阶段：待办' })
-    expect(within(todo).getByText('未开始')).toHaveClass('text-muted-foreground')
+    expect(within(todo).getByText('待办')).toBeInTheDocument()
+    expect(within(todo).queryByText('未开始')).not.toBeInTheDocument()
     const blocked = screen.getByRole('group', { name: '阶段：已阻塞' })
-    expect(within(blocked).getByText('进行中')).toHaveClass('text-brand')
-    // 已完成 / 已取消 的列名本身就是类别文案：不再补一行重复小字
-    const done = screen.getByRole('group', { name: '阶段：已完成' })
-    expect(within(done).getAllByText('已完成')).toHaveLength(1)
-    // 自己添加的阶段不带类别小字
+    expect(within(blocked).queryByText('进行中')).not.toBeInTheDocument()
+    // 自己添加的阶段同样不带类别文案
     const review = screen.getByRole('group', { name: '阶段：审核' })
     expect(within(review).queryByText('进行中')).not.toBeInTheDocument()
   })

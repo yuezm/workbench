@@ -333,16 +333,11 @@ export function KanbanBoard({
                       className={cn('size-1.5 shrink-0 rounded-full', kindMeta.dot)}
                       aria-hidden="true"
                     />
+                    {/* 列头只留阶段名：状态由圆点颜色表达，不再挂类别文案
+                        （「待办」旁边不写「未开始」——名字已经够读） */}
                     <span className="truncate text-base font-medium text-foreground">
                       {stage.name}
                     </span>
-                    {/* 内置阶段补一行类别小字：待办 / 已阻塞 各自什么状态一眼可见。
-                        名称本身已经是类别文案时（已完成 / 已取消）不再重复一遍。 */}
-                    {stage.builtin != null && kindMeta.label !== stage.name && (
-                      <span className={cn('shrink-0 text-xs font-normal', kindMeta.text)}>
-                        {kindMeta.label}
-                      </span>
-                    )}
                   </div>
                   <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
                     {cards.length}

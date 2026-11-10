@@ -51,9 +51,34 @@ describe('main/run-approvals', () => {
       expect(decodeSessionLog(Buffer.alloc(0))).toBe('')
       // 没有魔数的裸字节：解不出任何帧
       expect(decodeSessionLog(Buffer.from('not a zstd frame'))).toBe('')
-      // 坏帧夹在好帧中间：坏帧跳过，好帧照常解出来
+      // 坏帧夹在好帧后面：好帧照常解出来，坏帧后不再有可解内容
       const broken = Buffer.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x01, 0x02, 0x03, 0x04])
       expect(decodeSessionLog(Buffer.concat([frames('ok\n'), broken]))).toBe('ok\n')
+    })
+
+    it('毫秒级畸形帧：魔数截断 / 缺 block 头 / 保留 block / 缺校验和都只丢该帧', () => {
+      const magic = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
+      // 只有魔数：后面没有描述符
+      expect(decodeSessionLog(magic)).toBe('')
+      // 描述符要求 window descriptor 与 frame content size，数据只到描述符
+      expect(decodeSessionLog(Buffer.concat([magic, Buffer.from([0x00])]))).toBe('')
+      // 描述符与 FCS 齐了，block 头不足 3 字节
+      expect(decodeSessionLog(Buffer.from([...magic, 0x20, 0x00, 0x00, 0x00]))).toBe('')
+      // blockType=3 是保留值：整帧作废
+      expect(decodeSessionLog(Buffer.from([...magic, 0x20, 0x00, 0x06, 0x00, 0x00]))).toBe('')
+      // 声明了校验和但末尾没有 4 字节：帧不完整
+      expect(decodeSessionLog(Buffer.from([...magic, 0x24, 0x00, 0x01, 0x00, 0x00]))).toBe('')
+      // 完整帧在前、畸形帧在后：完整帧照常解出来
+      expect(
+        decodeSessionLog(Buffer.concat([frames('ok\n'), Buffer.from([...magic, 0x20, 0x00])])),
+      ).toBe('ok\n')
+    })
+
+    it('大量帧（真实日志是逐次 flush 追加的）逐帧不乱序、不漏帧', () => {
+      // 回归：Electron 的 Node 24 会对「起点到末尾」一次解出所有后续帧，
+      // 旧实现按魔数每个起点解一次会变成 O(n²)（1MB 日志解出 1GB）。
+      const texts = Array.from({ length: 400 }, (_, i) => `line ${i}\n`)
+      expect(decodeSessionLog(frames(...texts))).toBe(texts.join(''))
     })
   })
 
@@ -159,10 +184,10 @@ describe('main/run-approvals', () => {
       expect(locateSessionLog(path.join(root, 'missing'), 'sess-1')).toBeNull()
     })
 
-    it('端到端：解压 + 解析出提权记录', () => {
+    it('端到端：解压 + 解析出提权记录', async () => {
       const root = tempDir()
       plant(root, 'sess-1')
-      expect(readRunApprovals(root, 'sess-1')).toHaveLength(1)
+      expect(await readRunApprovals(root, 'sess-1')).toHaveLength(1)
     })
 
     it('槽下同名的目录不是日志文件：定位返回 null', () => {
@@ -176,18 +201,18 @@ describe('main/run-approvals', () => {
       expect(locateSessionLog(oddRoot, 'sess-1')).toBeNull()
     })
 
-    it('降级：无 sessionId / 找不到文件 / 超大文件 / 坏文件都返回空', () => {
+    it('降级：无 sessionId / 找不到文件 / 超大文件 / 坏文件都返回空', async () => {
       const root = tempDir()
-      expect(readRunApprovals(root, null)).toEqual([])
-      expect(readRunApprovals(root, 'nope')).toEqual([])
+      expect(await readRunApprovals(root, null)).toEqual([])
+      expect(await readRunApprovals(root, 'nope')).toEqual([])
 
       const big = plant(root, 'sess-big')
       truncateSync(big, 33 * 1024 * 1024)
-      expect(readRunApprovals(root, 'sess-big')).toEqual([])
+      expect(await readRunApprovals(root, 'sess-big')).toEqual([])
 
       const broken = plant(root, 'sess-broken')
       writeFileSync(broken, Buffer.from('garbage'))
-      expect(readRunApprovals(root, 'sess-broken')).toEqual([])
+      expect(await readRunApprovals(root, 'sess-broken')).toEqual([])
     })
   })
 })

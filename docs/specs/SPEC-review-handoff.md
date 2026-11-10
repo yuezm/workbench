@@ -1,7 +1,7 @@
 # Spec: review-handoff（评审结论 → 修复阶段的可寻址交接）
 
 > Module id：`review-handoff`。内核 + 协议 + 投影扩展，复用宿主落盘，不改 shell / preload 桥接形状。
-> 状态：**待评审**（本文件只做设计，不动代码；评审通过后再出 plan / tasks / 实现）。
+> 状态：**S1–S4 已实现（M14）**，S5（任务详情 UI）未做；实现口径与本文的四处偏离记在文末「实现记录」。
 > 关联：[ARCHITECTURE](../ARCHITECTURE.md)、[SPEC-kernel](SPEC-kernel.md)（Thread / 闸门 / 打回 / 回执）、[SPEC-ai-workflow](SPEC-ai-workflow.md)（阶段流转与闸门闭环）、[SPEC-host](SPEC-host.md)（artifacts 落盘）、[SPEC-plugins](SPEC-plugins.md)（回执与执行器能力）。
 
 ## Objective
@@ -249,3 +249,21 @@ B 档禁止把结果写成「评审修复完成」；UI 与评论模板都用 `p
 - **S5 降级与 UI**：A/B 档文案与卡片、任务详情 finding 列表、「提升为文档」出口。
 
 S1+S2 已能解决「修复阶段看不到结论」；S3 才解决「修没修全」；S4 解决上下文预算与人类可读。
+
+## 实现记录（M14，2026-11-10）
+
+已落地：S1 / S2 / S3 / S4。S5（任务详情页的 finding 列表与「提升为文档」出口）未做，本版仍只能从提示词与任务动态看清单。
+
+落地口径与上文设计的**四处偏离**（都是在「不新建基础设施 / 少一张表」方向上收窄，语义不变）：
+
+1. **不新增 `run_verdicts`**。结论随 `review.reported` 落进 `review_reports`（`verdict` + `checks_json`），闸门「读完即丢」的问题同样解决，但投影只多一张表（第 17 张）。
+2. **不新增 `review_findings`**，清单存 `review_reports.findings_json`：一次评审 ≤ `REVIEW_LIMITS.maxFindings`（200）条，逐条处置用**整行 upsert** 表达——与 `cards` 的「版本演进、整行携带」同口径。需要按 finding 跨报告查询时再拆表。
+3. **正文路径按键 runId 而非 rev**：`<userData>/artifacts/threads/<threadId>/runs/<runId>/review.md`。原因：`rev` 由内核在决策时算，而落盘发生在派发之前，路径必须先可算，否则引用与文件对不上。
+4. **硬门的触发条件收窄**：仅当「定到的报告正是打回当前阶段的那一份」且处置后仍有 `open` 条目时不推进（`reportTargetsStage`），避免误伤普通阶段。
+
+新增事实：`review.reported`（建行 / 改版）、`review.addressed`（逐条处置，payload 带 `addressed[]` 审计）。
+新增投影：`review_reports`。`KERNEL_VERSION` → `M14.0.0`（新表触发重建）。
+新增回执字段：`findings[]` / `addresses[]`；只读引用 `artifact`（宿主回填，内核不读文件）。
+宿主侧：`host/artifacts.ts`（原子写 + sha256 + 失败不阻断），调度器在派发 `run.receipt` 前补齐引用，装配根注入 `<userData>/artifacts`。
+
+验证：`pnpm check` 全绿（改动行 97.9% ≥ 90%，项目覆盖率 99.91 / 99.58 / 99.91 / 99.96），全量 2786 用例通过。

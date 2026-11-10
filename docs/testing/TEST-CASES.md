@@ -132,6 +132,9 @@
 | TC-AIW-083 | 逐条闭环硬门：`addresses[]` 的 `fixed` 需同回执里退出码 0 的 `checkRef`、`rejected` / `deferred` 需写理由；处置后仍有 open 条目且当前阶段正是该报告的打回目标时不推进并追加漏项评论，全部处置后照常前进 | 单元 | `kernel/review.test.ts` + `kernel/decide.run.test.ts` + `protocol/validate.test.ts` |
 | TC-AIW-084 | 评审正文落盘（M14）：宿主在派发 `run.receipt` 前把正文原子写到 `<userData>/artifacts/threads/<threadId>/runs/<runId>/review.md` 并回填路径 / sha256 / 字节数；目录不可建时回执原样返回（引用为空、任务照常推进） | 单元 | `host/artifacts.test.ts` + `host/scheduler.test.ts` |
 
+| TC-AIW-085 | 任务详情「评审结论」面板（M14 S5）：展示 `rev` / 判定 / 待处理计数、判定证据（命令与退出码）、逐条清单（严重度、位置、断言、验收、处置说明、状态）；多版本只展开最新一版并给历史计数；无评审时给空态文案且不渲染「提升为文档」 | 单元 | `renderer/.../ReviewPanel.test.tsx` + `renderer/.../TaskDetailPage.test.tsx` |
+| TC-AIW-086 | 提升为文档（`review.export`）：内核只做归属校验（任务 / 项目 / 报告）并零事实，宿主写到 `<项目>/docs/reviews/<标题slug>-<任务id8>-r<rev>.md` 并返回路径；无报告、报告 id 不存在、任务未归属项目分别给出可读拒绝文案；标题净化非法字符与控制字符，`rev` 不同不覆盖 | 单元 | `host/commands.test.ts` + `kernel/review.test.ts` + `host/store/views.test.ts` |
+
 ## E2E（构建产物 + 真实 Electron）
 
 | 用例       | 验证点                                                                                                                                                                                                     | 测试位置                        |

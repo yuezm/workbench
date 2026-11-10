@@ -1,7 +1,7 @@
 # Spec: review-handoff（评审结论 → 修复阶段的可寻址交接）
 
 > Module id：`review-handoff`。内核 + 协议 + 投影扩展，复用宿主落盘，不改 shell / preload 桥接形状。
-> 状态：**S1–S4 已实现（M14）**，S5（任务详情 UI）未做；实现口径与本文的四处偏离记在文末「实现记录」。
+> 状态：**S1–S5 已实现（M14）**；实现口径与本文的偏离记在文末「实现记录」。
 > 关联：[ARCHITECTURE](../ARCHITECTURE.md)、[SPEC-kernel](SPEC-kernel.md)（Thread / 闸门 / 打回 / 回执）、[SPEC-ai-workflow](SPEC-ai-workflow.md)（阶段流转与闸门闭环）、[SPEC-host](SPEC-host.md)（artifacts 落盘）、[SPEC-plugins](SPEC-plugins.md)（回执与执行器能力）。
 
 ## Objective
@@ -266,4 +266,13 @@ S1+S2 已能解决「修复阶段看不到结论」；S3 才解决「修没修�
 新增回执字段：`findings[]` / `addresses[]`；只读引用 `artifact`（宿主回填，内核不读文件）。
 宿主侧：`host/artifacts.ts`（原子写 + sha256 + 失败不阻断），调度器在派发 `run.receipt` 前补齐引用，装配根注入 `<userData>/artifacts`。
 
-验证：`pnpm check` 全绿（改动行 97.9% ≥ 90%，项目覆盖率 99.91 / 99.58 / 99.91 / 99.96），全量 2786 用例通过。
+验证（S1–S4）：`pnpm check` 全绿（改动行 97.9% ≥ 90%，项目覆盖率 99.91 / 99.58 / 99.91 / 99.96），全量 2786 用例通过。
+
+### S5（任务详情 UI，2026-11-10 补）
+
+- `reviews.byTask` 只读视图（按任务过滤、按 `rev` 升序）：判定、`checks`、清单与逐条状态都在一行里，UI 不再从提示词里猜。
+- `ReviewPanel.tsx`：任务详情新增「评审结论」区块——`rev` / 判定徽标 / 待处理计数、判定证据（命令 + 退出码）、逐条清单（严重度、位置、断言、验收、处置说明与状态）；多版本只展开最新一版并给历史计数；无评审时给空态文案。
+- 「提升为文档」出口：新命令 `review.export`（内核只做归属校验并**零事实**，落盘在宿主）→ 写到 `<项目>/docs/reviews/<标题slug>-<任务id8>-r<rev>.md`；文件名净化非法字符与控制字符，按 `rev` 共存不覆盖；写盘失败直接报错（人显式点的动作不静默失败）。
+- 命令面 36 → 37、视图面 +1；`KERNEL_VERSION` 不变（投影语义未变）。
+
+验证（S5）：`pnpm check` 全绿（改动行 89/96 = 92.71% ≥ 90%，项目覆盖率 99.87 / 99.51 / 99.91 / 99.93），全量 2810 用例通过。

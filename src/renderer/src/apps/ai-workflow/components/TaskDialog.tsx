@@ -88,7 +88,8 @@ export function TaskDialog({
         if (!next) onCancel()
       }}
     >
-      <DialogContent>
+      {/* 高度上限 + 内部滚动：长描述不把弹窗顶出视口（SPEC-ui §4「Dialog 的尺寸」） */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>新建任务</DialogTitle>
         </DialogHeader>
@@ -126,7 +127,7 @@ export function TaskDialog({
           <Field label="任务描述">
             <Textarea
               aria-label="任务描述"
-              className="min-h-24 resize-y"
+              className="max-h-48 min-h-24 resize-y"
               maxLength={COMMAND_LIMITS.description}
               placeholder="背景、验收标准"
               value={description}

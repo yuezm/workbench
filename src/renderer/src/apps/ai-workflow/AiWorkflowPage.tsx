@@ -385,37 +385,45 @@ export function AiWorkflowPage(): ReactElement {
             </WorkspaceNav>
           </div>
         ) : (
-          <div className="min-h-0 flex-1 overflow-auto p-3">
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
+            {/*
+              出口放在设置侧栏顶部：设置视图里没有别的路回工作台，原来那个左下角小图标
+              既不在视线第一屏、也没有文字，等于没有出口。改成带箭头的整行按钮，
+              与底部「设置」入口上下对称。
+            */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-muted-foreground"
+              aria-label="返回工作台"
+              onClick={() => changeView('workspace')}
+            >
+              <ArrowLeftIcon />
+              返回工作台
+            </Button>
+            <div className="h-px shrink-0 bg-border" />
             <SettingsNav value={section} onChange={setSection} />
           </div>
         )}
 
-        <div className="border-t border-border p-3">
-          {/* 底部一行图标：视图切换（工作台↔设置）。主题切换器是全局设置，在顶部栏右侧。 */}
-          <div className="flex items-center gap-1">
-            {view === 'workspace' ? (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="设置"
-                title="设置"
-                onClick={() => changeView('settings')}
-              >
-                <SettingsIcon />
-              </Button>
-            ) : (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="返回工作台"
-                title="返回工作台"
-                onClick={() => changeView('workspace')}
-              >
-                <ArrowLeftIcon />
-              </Button>
-            )}
+        {/* 底部入口只在工作台出现；设置视图的出口在顶部。主题切换器是全局设置，在顶部栏右侧。 */}
+        {view === 'workspace' && (
+          <div className="border-t border-border p-3">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full justify-start text-muted-foreground"
+              aria-label="设置"
+              title="设置"
+              onClick={() => changeView('settings')}
+            >
+              <SettingsIcon />
+              设置
+            </Button>
           </div>
-        </div>
+        )}
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

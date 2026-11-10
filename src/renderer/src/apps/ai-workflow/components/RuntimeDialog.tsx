@@ -277,7 +277,8 @@ export function RuntimeDialog({
         if (!next) onCancel()
       }}
     >
-      <DialogContent>
+      {/* 高度上限 + 内部滚动：字段多的表单不把弹窗顶出视口（SPEC-ui §4「Dialog 的尺寸」） */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? '编辑运行时' : '新建运行时'}</DialogTitle>
         </DialogHeader>
@@ -336,7 +337,7 @@ export function RuntimeDialog({
             <Field label="参数模板" className="col-span-2" hint={ARGS_TEMPLATE_HINT}>
               <Textarea
                 aria-label="运行时参数模板"
-                className="min-h-20 resize-y font-mono"
+                className="max-h-48 min-h-20 resize-y font-mono"
                 placeholder='["--print","{prompt}"]'
                 value={argsTemplate}
                 onChange={(e) => setArgsTemplate(e.target.value)}

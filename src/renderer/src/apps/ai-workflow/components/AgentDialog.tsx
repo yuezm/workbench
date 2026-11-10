@@ -144,83 +144,96 @@ export function AgentDialog({
         if (!next) onCancel()
       }}
     >
-      <DialogContent>
-        <DialogHeader>
+      {/*
+        必须有高度上限：System Prompt 能写几千字，`field-sizing-content` 的 textarea 会把
+        弹窗撑到比视口还高，而 DialogContent 是 fixed + translate 居中（SPEC-ui §4「Dialog 的
+        尺寸」），超出的上下两端会被裁到屏幕外，保存按钮点不到。改为头部 / 底部固定、
+        字段区自己滚动的列布局。
+      */}
+      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{mode === 'edit' ? '编辑智能体' : '新建智能体'}</DialogTitle>
         </DialogHeader>
-        <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
-          {runtimes.length === 0 && (
-            <div className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
-              先添加运行时。
-            </div>
-          )}
+        <form className="flex min-h-0 flex-1 flex-col gap-4" noValidate onSubmit={submit}>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+            {runtimes.length === 0 && (
+              <div className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
+                先添加运行时。
+              </div>
+            )}
 
-          {runtimes.length > 0 && usable.length === 0 && (
-            <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-              没有可用运行时，先到「运行时」测试通过。
-            </p>
-          )}
-
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
-              <Input
-                aria-label="智能体名称"
-                value={name}
-                onChange={(e) => {
-                  setName(e.target.value)
-                  setNameError(null)
-                }}
-              />
-            </Field>
-            <Field label="绑定运行时" required error={runtimeError}>
-              <Select
-                value={runtimeId}
-                onValueChange={(next) => {
-                  setSelected(next)
-                  setRuntimeError(null)
-                }}
-              >
-                <SelectTrigger aria-label="智能体运行时" className="w-full">
-                  <SelectValue placeholder={runtimes.length === 0 ? '无' : '请选择'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {runtimeOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {unavailable.length > 0 && (
-              <p className="col-span-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-sm text-destructive">
-                不可用：{unavailable.map((r) => r.name).join('、')}
+            {runtimes.length > 0 && usable.length === 0 && (
+              <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+                没有可用运行时，先到「运行时」测试通过。
               </p>
             )}
 
-            <Field label="描述" className="col-span-2">
-              <Input
-                aria-label="智能体描述"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </Field>
-            <Field label="System Prompt" className="col-span-2">
-              <Textarea
-                aria-label="智能体能力"
-                className="min-h-24 resize-y font-mono text-sm"
-                rows={6}
-                placeholder="写清这个智能体的角色、做事方式与产出要求；每轮运行都会带上这段。"
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-              />
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
+                <Input
+                  aria-label="智能体名称"
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value)
+                    setNameError(null)
+                  }}
+                />
+              </Field>
+              <Field label="绑定运行时" required error={runtimeError}>
+                <Select
+                  value={runtimeId}
+                  onValueChange={(next) => {
+                    setSelected(next)
+                    setRuntimeError(null)
+                  }}
+                >
+                  <SelectTrigger aria-label="智能体运行时" className="w-full">
+                    <SelectValue placeholder={runtimes.length === 0 ? '无' : '请选择'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {runtimeOptions.map((option) => (
+                      <SelectItem
+                        key={option.value}
+                        value={option.value}
+                        disabled={option.disabled}
+                      >
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              {unavailable.length > 0 && (
+                <p className="col-span-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-sm text-destructive">
+                  不可用：{unavailable.map((r) => r.name).join('、')}
+                </p>
+              )}
+
+              <Field label="描述" className="col-span-2">
+                <Input
+                  aria-label="智能体描述"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </Field>
+              <Field label="System Prompt" className="col-span-2">
+                <Textarea
+                  aria-label="智能体能力"
+                  // 上限压住自动增高：几千字的提示词也只占这么高，框内自己滚，不把弹窗顶大
+                  className="max-h-56 min-h-24 resize-y font-mono text-sm"
+                  rows={6}
+                  placeholder="写清这个智能体的角色、做事方式与产出要求；每轮运行都会带上这段。"
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                />
+              </Field>
+            </div>
           </div>
 
           <FormError message={error} onDismiss={() => setError(null)} />
 
-          <div className="flex flex-col gap-2">
+          <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-3">
             {disabledHint !== null && (
               <p className="text-xs text-faint-foreground">{disabledHint}</p>
             )}

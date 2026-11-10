@@ -46,6 +46,10 @@ export interface SeedAgentOptions {
   projectPath: string
   /** 工作流阶段（缺省不建工作流：聊天用例不需要） */
   stages?: SeedStage[]
+  /** 智能体名称（缺省「e2e 假智能体」） */
+  agentName?: string
+  /** 智能体提示词（缺省空；设置页弹窗的尺寸用例要种一段超长提示词） */
+  systemPrompt?: string
 }
 
 function payloadOf<T>(facts: readonly Fact[], type: string, what: string): T {
@@ -80,11 +84,19 @@ function createRuntime(
   return payloadOf<{ runtime: Runtime }>(facts, 'runtime.created', '运行时').runtime
 }
 
-function createAgent(store: ReturnType<typeof createStore>, runtimeId: string): Agent {
+function createAgent(
+  store: ReturnType<typeof createStore>,
+  runtimeId: string,
+  options: { name?: string; systemPrompt?: string } = {},
+): Agent {
   const facts = store.dispatch({
     type: 'agent.create',
     commandId: 'e2e-agent-agent',
-    input: { name: 'e2e 假智能体', runtimeId },
+    input: {
+      name: options.name ?? 'e2e 假智能体',
+      runtimeId,
+      systemPrompt: options.systemPrompt,
+    },
   }).facts
   return payloadOf<{ agent: Agent }>(facts, 'agent.created', '智能体').agent
 }
@@ -149,7 +161,10 @@ export async function seedAgentBase(dbPath: string, options: SeedAgentOptions): 
     const store = createStore({ db, kernel })
 
     const runtime = createRuntime(store, options.command, options.projectPath)
-    const agent = createAgent(store, runtime.id)
+    const agent = createAgent(store, runtime.id, {
+      name: options.agentName,
+      systemPrompt: options.systemPrompt,
+    })
     const project = createProject(store, 'e2e 项目', options.projectPath)
 
     let workflowId: string | null = null

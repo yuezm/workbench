@@ -28,8 +28,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'agent.update':
       return ['agents', 'runtimes']
     case 'agent.remove':
-      // 被阶段引用时拒绝删除
-      return ['agents', 'workflow_stages']
+      // 被工作流阶段或对话引用时拒绝删除（`conversations.agent_id` 外键 RESTRICT，
+      // 不先查就会把 SQLite 的 FOREIGN KEY 错误抛给界面）
+      return ['agents', 'workflow_stages', 'conversations']
     case 'runtime.create':
     case 'runtime.update':
       // 名称唯一（含改名时与其它运行时比较）

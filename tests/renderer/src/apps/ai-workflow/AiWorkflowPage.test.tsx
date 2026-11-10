@@ -219,7 +219,7 @@ function dispatchWith(
   kernel.onDispatch(handler)
 }
 
-/** 切到视图：进设置点「设置」图标按钮，回工作台点「返回工作台」图标按钮 */
+/** 切到视图：进设置点侧栏底部的「设置」，回工作台点设置侧栏顶部的「返回工作台」 */
 async function openView(
   user: ReturnType<typeof userEvent.setup>,
   name: '设置' | '工作台',
@@ -718,13 +718,17 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    // 底部固定图标按钮：工作台视图给「设置」图标，设置视图给「返回工作台」图标
+    // 入口在侧栏底部（带文字的整行按钮）；出口在设置侧栏顶部，跟着栏目一起出现在第一屏
     expect(await screen.findByRole('button', { name: '设置' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '返回工作台' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '设置' }))
     expect(screen.getByRole('button', { name: '返回工作台' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '设置栏目' })).toBeInTheDocument()
+    // 出口在栏目之上：设置视图里第一屏就能看到，不像原来那样只留在左下角
+    const back = screen.getByRole('button', { name: '返回工作台' })
+    const nav = screen.getByRole('navigation', { name: '设置栏目' })
+    expect(back.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // 默认设置栏目 = 运行时配置
     expect(await screen.findByRole('heading', { name: '运行时' })).toBeInTheDocument()
     // 内容区让位给设置内容

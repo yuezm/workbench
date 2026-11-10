@@ -144,7 +144,8 @@ export function ProjectDialog({
         if (!next) onCancel()
       }}
     >
-      <DialogContent>
+      {/* 高度上限 + 内部滚动：长备注 / 窄窗口下不把弹窗顶出视口（SPEC-ui §4「Dialog 的尺寸」） */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{editing ? '编辑项目' : '新建项目'}</DialogTitle>
         </DialogHeader>
@@ -216,7 +217,7 @@ export function ProjectDialog({
           <Field label="备注">
             <Textarea
               aria-label="项目备注"
-              className="min-h-20 resize-y"
+              className="max-h-48 min-h-20 resize-y"
               placeholder="这个项目在做什么（可空）"
               value={description}
               onChange={(e) => setDescription(e.target.value)}

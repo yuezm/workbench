@@ -141,7 +141,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'workflow.remove': ['workflows', 'workflow_stages', 'tasks', 'runs'],
   'agent.create': ['runtimes'],
   'agent.update': ['agents', 'runtimes'],
-  'agent.remove': ['agents', 'workflow_stages'],
+  'agent.remove': ['agents', 'workflow_stages', 'conversations'],
   'runtime.create': ['runtimes'],
   'runtime.update': ['runtimes'],
   'runtime.remove': ['runtimes', 'agents'],

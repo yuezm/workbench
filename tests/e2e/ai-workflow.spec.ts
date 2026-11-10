@@ -29,9 +29,10 @@ test('AI 工作流：顶部标签可进入，单列侧栏切换栏目，设置�
   await expect(page.getByRole('combobox', { name: '选择工作流' })).toBeVisible()
   await expect(page.getByLabel('消息输入')).toBeHidden()
 
-  // 侧栏底部切到设置：设置栏目
+  // 侧栏底部切到设置：设置栏目；出口（返回工作台）在侧栏顶部，带文字，不再藏在左下角图标里
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await expect(page.getByRole('navigation', { name: '设置栏目' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '返回工作台' })).toBeVisible()
 
   // 运行时配置
   await expect(page.getByRole('heading', { name: '运行时', exact: true })).toBeVisible()

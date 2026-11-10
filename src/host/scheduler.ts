@@ -24,7 +24,7 @@ import type { RunErrorCode, RunEvent, RunEventRow, RunRow, Runtime } from '../pr
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
 import type { Fact, Id, Iso } from '../kernel/types'
 import { killPidTree } from './process'
-import { withReviewArtifact } from './artifacts'
+import { withRunArtifacts } from './artifacts'
 import type { ProcessRegistry } from './process-registry'
 import type { DispatchResult } from './store/index'
 
@@ -502,7 +502,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       framesClosed = true
       flushBuffered()
       // 执行器只经旁路报过 sessionId 时补进回执（终态行据此可续接）
-      const finalReceipt: Receipt = withReviewArtifact(
+      const finalReceipt: Receipt = withRunArtifacts(
         deps.artifactsRoot,
         run,
         receipt.sessionId === undefined && observedSession !== null

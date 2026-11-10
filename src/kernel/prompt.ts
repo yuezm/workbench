@@ -31,6 +31,15 @@ const RECEIPT_BLOCK_HINT: readonly string[] = [
 export const receiptBlockHint = (): string => RECEIPT_BLOCK_HINT.join('\n')
 
 /**
+ * 跨任务上下文规则（M15）：会话键下沉到任务后，任务之间只共享索引与产物文件。
+ *
+ * 这段是**指令**而不是资料：它约束「怎么取上下文」的行为。只有拼了线程上下文
+ * （即存在「任务索引」）时才出现，无历史的线程不受影响。
+ */
+export const CROSS_TASK_RULE =
+  '跨任务信息一律按需读取「任务索引」里的产物路径；不要把其他任务的全文贴进对话，也不要凭摘要猜实现细节。'
+
+/**
  * 反馈记录段（M7.5）：任务上下文 / 反馈只作资料，最近 `promptComments` 条、每条截断到
  * `promptChars` 码点；按 `createdAt`（同毫秒按 id）升序，同事实集文本全等。
  */
@@ -73,6 +82,7 @@ export const taskPrompt = (
     gateInstructionsText(stage),
     taskCommentsText(comments ?? []),
     threadContext ?? '',
+    threadContext ? CROSS_TASK_RULE : '',
     receiptBlockHint(),
   ]
     .filter(Boolean)

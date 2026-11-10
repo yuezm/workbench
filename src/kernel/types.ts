@@ -148,6 +148,12 @@ export interface View {
   messages: Map<Id, Message>
   /** M6.5：线程投影（事件归并、复用任务、并发闸门、上下文派生都只读它） */
   threads: Map<Id, ThreadRow>
+  /**
+   * M15：产物落盘根（`<userData>/artifacts`）。宿主装载视图时注入，内核只拿它拼
+   * 「任务索引」里的产物路径，**不读文件**。缺省 / null 时索引只给 runId，不给路径
+   * （测试与未配置产物的场景）。
+   */
+  artifactsRoot?: string | null
   /** M7.5：任务上下文 / 反馈（拼提示词时按 taskId 取；待落库的新评论经 options 传） */
   taskComments: Map<Id, TaskComment>
   /** M14：评审结论（修复阶段按阶段图定位、索引段渲染、逐条覆盖检查都只读它） */

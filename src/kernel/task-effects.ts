@@ -13,7 +13,7 @@ import type { ThreadRow } from '../protocol/thread'
 import type { TaskComment } from '../protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from './types'
 import { taskPrompt } from './prompt'
-import { runCountOfTask, threadSessions } from './threads'
+import { runCountOfTask, taskSessions } from './threads'
 import { threadContextText, hasThreadHistory } from './thread-context'
 
 /** 权限模式 → 协议帧的 access 级别（SPEC-plugins「Turn」）。 */
@@ -71,7 +71,9 @@ export function entryRunFacts(
   // 新开的隐式线程没有历史（无事件 / 笔记 / 兄弟任务 / 已终态 run）：不拼上下文段，避免提示词噪音。
   // 判据收在 `hasThreadHistory`：同一任务重跑、打回重做时线程只有它自己，但仍要看到上一轮产出。
   const context =
-    thread !== undefined && hasThreadHistory(view, thread) ? threadContextText(view, thread) : null
+    thread !== undefined && hasThreadHistory(view, thread)
+      ? threadContextText(view, thread, task.id)
+      : null
   const comments = [
     ...[...view.taskComments.values()].filter((comment) => comment.taskId === task.id),
     ...(options?.pendingComment === undefined ? [] : [options.pendingComment]),
@@ -79,8 +81,9 @@ export function entryRunFacts(
   const prompt = [taskPrompt(agent, task, stage, context, comments), trigger?.promptExtra ?? '']
     .filter(Boolean)
     .join('\n\n')
-  const resumeSessionId =
-    thread === undefined ? null : (threadSessions(view, thread.id)[agent.id] ?? null)
+  // M15：会话键 = (taskId, agentId)。同一任务续接（打回重做 / 反馈 / turn+1），
+  // 换任务或换智能体都开新会话——跨任务信息走「任务索引 + 产物路径」，不共享历史。
+  const resumeSessionId = taskSessions(view, task.id)[agent.id] ?? null
   const turn = options?.turn ?? runCountOfTask(view, task.id) + 1
   // M10：项目文件夹就是本轮的工作目录；任务没有项目（存量 / 未归属）时退回运行时配置。
   const project = task.projectId === null ? undefined : view.projects.get(task.projectId)

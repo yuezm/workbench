@@ -176,10 +176,13 @@ if (app.requestSingleInstanceLock()) {
       }
     })
     const userData = app.getPath('userData')
+    // 产物落盘根：评审报告（review.md）与本轮正文（output.md）都落这里；
+    // 内核只拿它拼「任务索引」里的路径，不读文件。
+    const artifactsRoot = path.join(userData, 'artifacts')
     const db = openDatabase(path.join(userData, 'ai-workflow.db'))
     // 内核门面：decide / project / viewSpec / nextWakeAt 是纯函数，store 与 clock 只依赖这个端口。
     const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
-    const store = createStore({ db, kernel })
+    const store = createStore({ db, kernel, artifactsRoot })
     // 启动顺序：先把 v2 存量导成事实导入根，再对账投影（指纹失配/seq 落后则从事实重建）。
     // 先导入更安全：空事实 + 存量投影时不会因为指纹失配把存量当投影清掉。
     importLegacyIfNeeded(db, kernel)
@@ -548,8 +551,9 @@ if (app.requestSingleInstanceLock()) {
       runtimes: () => store.query('runtimes.all'),
       executors,
       limits: DEFAULT_LIMITS,
-      // M14：评审报告正文落到 <userData>/artifacts/threads/<threadId>/runs/<runId>/review.md
-      artifactsRoot: path.join(userData, 'artifacts'),
+      // M14：评审报告正文落 `<artifactsRoot>/threads/<threadId>/runs/<runId>/review.md`；
+      // M15：同一轮正文另落 `output.md`（任务索引据此按需读）
+      artifactsRoot,
       // 重启后重跑同一 run 时帧 seq 继续全局单调（读 run_events 投影的 MAX(seq)）
       lastFrameSeq: (runId) => store.query('run.last-event-seq', { runId }),
       registry,

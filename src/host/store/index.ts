@@ -69,6 +69,11 @@ export interface StoreOptions {
   timezone?: string
   /** 内核限制；默认 `DEFAULT_LIMITS`。 */
   limits?: Limits
+  /**
+   * 产物落盘根（M15）：随视图交给内核拼「任务索引」的产物路径。
+   * 缺省 null 时索引只给 runId（测试与未配置产物的场景）。
+   */
+  artifactsRoot?: string | null
 }
 
 export interface DispatchResult {
@@ -118,6 +123,7 @@ export function createStore(options: StoreOptions): Store {
   const newId = options.newId ?? (() => randomUUID())
   const timezone = options.timezone ?? systemTimezone()
   const limits = options.limits ?? DEFAULT_LIMITS
+  const artifactsRoot = options.artifactsRoot ?? null
 
   const environment = (): Environment => ({
     timezone,
@@ -155,7 +161,7 @@ export function createStore(options: StoreOptions): Store {
 
   /** 单次尝试：装载 → 决策 → 单事务写入；序号冲突抛 `SeqConflictError` 交给 dispatch 重试。 */
   const attemptDispatch = (command: Input, commandId: string | null): DispatchResult => {
-    const view = loadView(db, kernel.viewSpec(command))
+    const view = loadView(db, kernel.viewSpec(command), artifactsRoot)
     const decision = kernel.decide(view, command, now(), environment())
     if (decision.reject) throw new StoreError(decision.reject.code, decision.reject.message)
     if (decision.facts.length === 0) {
@@ -222,7 +228,7 @@ export function createStore(options: StoreOptions): Store {
     },
     nextWakeAt: (at) => {
       if (!kernel.nextWakeAt) return null
-      const view = loadView(db, kernel.viewSpec({ type: 'clock.tick' }))
+      const view = loadView(db, kernel.viewSpec({ type: 'clock.tick' }), artifactsRoot)
       return kernel.nextWakeAt(view, at, environment())
     },
   }

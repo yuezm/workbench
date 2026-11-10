@@ -12,6 +12,7 @@ import {
   openThreadRow,
   queuedRunOfTask,
   runCountOfTask,
+  taskSessions,
   tasksOfThread,
   threadSessions,
   threadTitle,
@@ -361,6 +362,33 @@ describe('kernel/threads 读视图', () => {
       ]),
     })
     expect(threadSessions(noEndFirst, 'th-1')).toEqual({ 'ag-1': 'sess-new' })
+  })
+
+  it('taskSessions：只认本任务的终态 run，同线程其他任务的会话不串', () => {
+    const runs = [
+      run({ id: 'run-a', endedAt: '2026-11-01T00:00:00.000Z', sessionId: 'sess-a' }),
+      run({ id: 'run-b', endedAt: '2026-11-02T00:00:00.000Z', sessionId: 'sess-b' }),
+      run({ id: 'run-other', taskId: 'task-2', sessionId: 'sess-other' }),
+      run({ id: 'run-live', status: 'running', sessionId: 'sess-live', endedAt: null }),
+      run({ id: 'run-no-session', sessionId: null }),
+    ]
+    const view = emptyView({ runs: new Map(runs.map((row) => [row.id, row])) })
+    expect(taskSessions(view, 'task-1')).toEqual({ 'ag-1': 'sess-b' })
+    expect(taskSessions(view, 'task-2')).toEqual({ 'ag-1': 'sess-other' })
+  })
+
+  it('taskSessions：同一任务换智能体各取各的会话（不合并成一份历史）', () => {
+    const runs = [
+      run({ id: 'run-1', sessionId: 'sess-a' }),
+      run({
+        id: 'run-2',
+        agentId: 'ag-2',
+        endedAt: '2026-11-02T00:00:00.000Z',
+        sessionId: 'sess-b',
+      }),
+    ]
+    const view = emptyView({ runs: new Map(runs.map((row) => [row.id, row])) })
+    expect(taskSessions(view, 'task-1')).toEqual({ 'ag-1': 'sess-a', 'ag-2': 'sess-b' })
   })
 
   it('runCountOfTask / queuedRunOfTask', () => {

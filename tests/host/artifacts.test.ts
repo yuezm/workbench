@@ -6,7 +6,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Receipt } from '../../src/protocol/inputs'
 import {
   reviewArtifactPath,
+  runOutputPath,
   withReviewArtifact,
+  withRunArtifacts,
   writeReviewArtifact,
 } from '../../src/host/artifacts'
 
@@ -106,5 +108,59 @@ describe('host/artifacts 评审报告落盘（M14）', () => {
     expect(artifact?.bytes).toBe(0)
     expect(artifact?.sha256).toBe(createHash('sha256').update('', 'utf8').digest('hex'))
     mkdirSync(path.dirname(artifact?.path as string), { recursive: true })
+  })
+})
+
+describe('host/artifacts 本轮正文落盘（M15）', () => {
+  const run = (
+    over: { id?: string; threadId?: string | null; purpose?: 'stage' | 'chat' } = {},
+  ) => ({
+    id: 'run-1',
+    threadId: 'th-1',
+    purpose: 'stage' as const,
+    ...over,
+  })
+
+  it('路径只用 id：<root>/threads/<threadId>/runs/<runId>/output.md', () => {
+    expect(runOutputPath('R', 'th-1', 'run-1')).toBe(
+      path.join('R', 'threads', 'th-1', 'runs', 'run-1', 'output.md'),
+    )
+  })
+
+  it('挂线程的 stage run：正文原样落盘，临时文件不残留', () => {
+    const result = withRunArtifacts(root, run(), receipt({ output: '实现完成' }))
+    const target = runOutputPath(root, 'th-1', 'run-1')
+    expect(result.output).toBe('实现完成')
+    expect(readFileSync(target, 'utf8')).toBe('实现完成')
+    expect(existsSync(`${target}.tmp`)).toBe(false)
+  })
+
+  it('没有正文但失败：写错误说明，索引指过去仍有东西可读', () => {
+    const result = withRunArtifacts(
+      root,
+      run(),
+      receipt({ status: 'failed', output: '', error: '编译失败' }),
+    )
+    expect(result.status).toBe('failed')
+    expect(readFileSync(runOutputPath(root, 'th-1', 'run-1'), 'utf8')).toContain('编译失败')
+  })
+
+  it('正文为空且没有错误：不写空文件', () => {
+    withRunArtifacts(root, run(), receipt({ output: '' }))
+    expect(existsSync(runOutputPath(root, 'th-1', 'run-1'))).toBe(false)
+  })
+
+  it('评审 run 同时落 output.md 与 review.md', () => {
+    withRunArtifacts(root, run(), receipt({ verdict: 'fail' }))
+    expect(existsSync(runOutputPath(root, 'th-1', 'run-1'))).toBe(true)
+    expect(existsSync(reviewArtifactPath(root, 'th-1', 'run-1'))).toBe(true)
+  })
+
+  it('不挂线程 / 聊天 run / 没配 root：都不落盘，回执原样返回', () => {
+    const source = receipt({ output: '聊天回复' })
+    expect(withRunArtifacts(root, run({ threadId: null }), source)).toBe(source)
+    expect(withRunArtifacts(root, run({ purpose: 'chat' }), source)).toBe(source)
+    expect(withRunArtifacts(undefined, run(), source)).toBe(source)
+    expect(existsSync(path.join(root, 'threads'))).toBe(false)
   })
 })

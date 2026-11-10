@@ -104,6 +104,12 @@ export const THREAD_LIMITS = {
   precedingChars: 2_000,
   /** 「待修复清单」段的码点上限（M14，独立预算：评审清单是下一轮最该看到的东西） */
   reviewChars: 4_000,
+  /** 「任务索引」段的码点上限（M15，独立预算：跨任务查询靠索引 + 按需读产物正文） */
+  indexChars: 3_200,
+  /** 「任务索引」段的条目上限（超出折叠成计数，不静默丢） */
+  indexTasks: 20,
+  /** 索引条目里单条摘要的码点上限 */
+  indexSummary: 60,
   /** 每次回执 `notes[]` 与命令的条数上限 */
   notesPerReceipt: 100,
 } as const

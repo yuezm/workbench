@@ -148,30 +148,56 @@ export function activeTasksOfThread(view: View, thread: ThreadRow): Task[] {
   return tasksOfThread(view, thread).filter((task) => task.status === 'active')
 }
 
-/**
- * 线程内每个 agentId 最近一次终态 run 的 `sessionId`（不落线程行，按 runs 现算）。
- *
- * 排序：`endedAt`（缺省 `createdAt`）→ `createdAt` → `id`，后写覆盖先写；
- * 只有终态且带 `sessionId` 的 run 才算数（首轮没有会话可续接）。
- */
-export function threadSessions(view: View, threadId: Id): Record<Id, Id> {
-  const settled = [...view.runs.values()]
-    .filter(
-      (run) =>
-        run.threadId === threadId &&
-        run.agentId !== null &&
-        run.sessionId !== null &&
-        (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled'),
-    )
+const TERMINAL_RUN: ReadonlySet<string> = new Set(['succeeded', 'failed', 'cancelled'])
+
+/** 视图里满足 `match` 的终态 run，按「结束 → 创建 → id」升序（后写覆盖先写）。 */
+function settledRuns(view: View, match: (run: RunRow) => boolean): RunRow[] {
+  return [...view.runs.values()]
+    .filter((run) => match(run) && TERMINAL_RUN.has(run.status))
     .sort(
       (a, b) =>
         (a.endedAt ?? a.createdAt).localeCompare(b.endedAt ?? b.createdAt) ||
         a.createdAt.localeCompare(b.createdAt) ||
         a.id.localeCompare(b.id),
     )
+}
+
+/**
+ * 线程内每个 agentId 最近一次终态 run 的 `sessionId`（不落线程行，按 runs 现算）。
+ *
+ * **仅供视图展示**（`thread.byId.sessions`，界面上的「各智能体最近会话」）。
+ * 派活的续接口径是 `taskSessions`：同一线程的另一个任务不得复用这份历史。
+ *
+ * 排序：`endedAt`（缺省 `createdAt`）→ `createdAt` → `id`，后写覆盖先写；
+ * 只有终态且带 `sessionId` 的 run 才算数（首轮没有会话可续接）。
+ */
+export function threadSessions(view: View, threadId: Id): Record<Id, Id> {
   const sessions: Record<Id, Id> = {}
-  // 上面的 filter 已收口 agentId/sessionId 非空，这里只做类型断言
-  for (const run of settled) sessions[run.agentId as Id] = run.sessionId as Id
+  for (const run of settledRuns(
+    view,
+    (run) => run.threadId === threadId && run.agentId !== null && run.sessionId !== null,
+  )) {
+    // filter 已收口 agentId/sessionId 非空，这里只做类型断言
+    sessions[run.agentId as Id] = run.sessionId as Id
+  }
+  return sessions
+}
+
+/**
+ * 任务内每个 agentId 最近一次终态 run 的 `sessionId`（M15：会话键下沉到任务）。
+ *
+ * 这是派活的唯一续接口径：同一任务打回重做 / 追加反馈 / `turn+1` 续接同一会话，
+ * 换任务、换智能体都开新会话（跨任务上下文靠「任务索引 + 产物路径」按需读取，
+ * 不靠共享对话历史）。排序与终态判定与 `threadSessions` 同口径。
+ */
+export function taskSessions(view: View, taskId: Id): Record<Id, Id> {
+  const sessions: Record<Id, Id> = {}
+  for (const run of settledRuns(
+    view,
+    (run) => run.taskId === taskId && run.agentId !== null && run.sessionId !== null,
+  )) {
+    sessions[run.agentId as Id] = run.sessionId as Id
+  }
   return sessions
 }
 

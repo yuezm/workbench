@@ -959,7 +959,11 @@ const readReviewReports = (db: DatabaseSync): ReviewReport[] =>
   }))
 
 /** 按输入声明的切片装载视图：未声明的表不查，`activeTaskIds` 总是装载。 */
-export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): View {
+export function loadView(
+  db: DatabaseSync,
+  tables: readonly ProjectionTable[],
+  artifactsRoot: string | null = null,
+): View {
   const slice = new Set<ProjectionTable>(tables)
   // 规则集与插件设置是单行切片：未声明时按「无快照」装载（version 0 / 空清单）。
   const ruleSet = slice.has('rule_sets') ? readRuleSet(db) : null
@@ -977,6 +981,8 @@ export function loadView(db: DatabaseSync, tables: readonly ProjectionTable[]): 
     messages: slice.has('messages') ? toMap(readMessages(db)) : new Map(),
     cards: slice.has('cards') ? toMap(readCards(db)) : new Map(),
     threads: slice.has('threads') ? toMap(readThreads(db)) : new Map(),
+    // M15：产物落盘根随视图给内核（只用于拼「任务索引」里的路径，内核不读文件）。
+    artifactsRoot,
     taskComments: slice.has('task_comments') ? toMap(readTaskComments(db)) : new Map(),
     reviewReports: slice.has('review_reports') ? toMap(readReviewReports(db)) : new Map(),
     activeTaskIds: readActiveTaskIds(db),

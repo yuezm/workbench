@@ -326,6 +326,27 @@ export function closeIfAllDone(
   return closedFacts(withStatus(thread, 'closed', now), 'all-tasks-done', actor, now)
 }
 
+/**
+ * 线程内的任务行已被删光 → `thread.removed`（线程连同执行记录一起消失）。
+ *
+ * `removedTaskId` 是本批刚删的任务——视图里它还在，判定时跳过。**只要还剩一条任务行就不删**：
+ * 那种情况属于 `closeIfAllDone` 的归档（线程保留，历史还能回看）。
+ * 与 `thread.remove` 同口径：线程行删掉，线程内执行记录由各任务自己的 `run.removed` 逐条清掉
+ * （任务都删过了，这里不再补），落盘归档由宿主按 `thread.removed` 清 `<artifacts>/threads/<id>/`。
+ */
+export function removedIfNoTasksLeft(
+  view: View,
+  thread: ThreadRow | undefined,
+  removedTaskId: Id,
+  actor: Actor,
+  now: Iso,
+): FactDraft<'thread.removed'>[] {
+  if (thread === undefined) return []
+  const left = thread.taskIds.filter((taskId) => taskId !== removedTaskId && view.tasks.has(taskId))
+  if (left.length > 0) return []
+  return [{ type: 'thread.removed', actor, at: now, payload: { thread } }]
+}
+
 /** 任务完成后取它所属线程（找不到 / 已关闭返回 undefined）。 */
 export function threadOfTask(view: View, task: Task): ThreadRow | undefined {
   if (task.threadId === null) return undefined

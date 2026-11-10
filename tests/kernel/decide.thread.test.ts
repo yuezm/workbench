@@ -336,14 +336,48 @@ describe('decide 线程命令补充', () => {
     expect(factTypes(decision)).toEqual(['thread.bound'])
   })
 
-  it('task.remove：删除后线程内已无任务 → 归档', () => {
+  it('task.remove：删掉线程里最后一个任务 → 线程一起删', () => {
     const decision = decide(
       view({ tasks: [task()], threads: [thread()] }),
       command({ type: 'task.remove', id: 'task-1' }),
       NOW,
       env(),
     )
-    expect(factTypes(decision)).toEqual(['task.removed', 'thread.closed'])
+    expect(factTypes(decision)).toEqual(['task.removed', 'thread.removed'])
+    expect(payloadOf<{ thread: ThreadRow }>(decision, 'thread.removed').thread.id).toBe('th-1')
+  })
+
+  it('task.remove：线程里还有别的任务 → 不删线程，按是否全部结束归档', () => {
+    const seeded = view({
+      tasks: [task(), task({ id: 'task-2', title: '写实现' })],
+      threads: [thread({ taskIds: ['task-1', 'task-2'], rootTaskIds: ['task-1', 'task-2'] })],
+    })
+    const decision = decide(seeded, command({ type: 'task.remove', id: 'task-1' }), NOW, env())
+    // task-2 还在进行中：线程既不该删，也不该归档
+    expect(factTypes(decision)).toEqual(['task.removed'])
+
+    const doneThread = decide(
+      view({
+        tasks: [task(), task({ id: 'task-2', title: '写实现', status: 'completed' })],
+        threads: [thread({ taskIds: ['task-1', 'task-2'], rootTaskIds: ['task-1', 'task-2'] })],
+      }),
+      command({ type: 'task.remove', id: 'task-1' }),
+      NOW,
+      env(),
+    )
+    // 剩下的任务都已完成：线程保留，只是归档（历史还能回看）
+    expect(factTypes(doneThread)).toEqual(['task.removed', 'thread.closed'])
+    expect(payloadOf<{ reason: string }>(doneThread, 'thread.closed').reason).toBe('all-tasks-done')
+  })
+
+  it('task.remove：线程 taskIds 里只剩已删的 id（无任务行）→ 线程一起删', () => {
+    const decision = decide(
+      view({ tasks: [task()], threads: [thread({ taskIds: ['task-gone', 'task-1'] })] }),
+      command({ type: 'task.remove', id: 'task-1' }),
+      NOW,
+      env(),
+    )
+    expect(factTypes(decision)).toEqual(['task.removed', 'thread.removed'])
   })
 })
 

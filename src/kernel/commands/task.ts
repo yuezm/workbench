@@ -12,6 +12,7 @@ import {
   closeIfAllDone,
   openThreadRow,
   openedFacts,
+  removedIfNoTasksLeft,
   taskAttachedFacts,
   threadOfTask,
   withTask,
@@ -266,15 +267,14 @@ export function removeTask(
     ownerDraft('run.removed', { runId: run.id }, now),
   )
   facts.push(ownerDraft('task.removed', { task }, now))
-  // M6.5：删除后剩余任务都已完成 → 归档线程（已删任务视为完成）
+  // 线程内任务删光 → 线程一起删（线程保留一个「没有任务的壳」只会留在检索里）；
+  // 还剩任务时按 M6.5 口径判归档（已删任务视为完成）
+  const thread = threadOfTask(view, task)
+  const emptied = removedIfNoTasksLeft(view, thread, task.id, OWNER, now)
   facts.push(
-    ...closeIfAllDone(
-      view,
-      threadOfTask(view, task),
-      now,
-      OWNER,
-      new Map([[task.id, 'completed']]),
-    ),
+    ...(emptied.length > 0
+      ? emptied
+      : closeIfAllDone(view, thread, now, OWNER, new Map([[task.id, 'completed']]))),
   )
   // M8：删掉子任务 → 父任务 rollup（删除视为放弃，不阻塞）
   if (task.parentTaskId !== null) {

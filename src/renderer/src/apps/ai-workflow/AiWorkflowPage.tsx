@@ -479,6 +479,8 @@ export function AiWorkflowPage(): ReactElement {
               onBack={back}
               onOpenThread={openThread}
               onOpenTask={openTask}
+              // 任务删了就不是「返回」：整段出栈回看板（线程可能随最后一个任务一起删了）
+              onRemoved={() => setTrail([])}
             />
           ) : (
             <ThreadDetailPage

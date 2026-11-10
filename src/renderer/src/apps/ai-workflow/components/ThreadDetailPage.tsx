@@ -449,6 +449,10 @@ function ThreadContent({
 
   return (
     <>
+      {/* 页面级动作失败统一贴在内容区顶部（与任务详情同位置），不埋到底部动作区里 */}
+      <FormError message={closeError} />
+      <FormError message={removeError} />
+
       <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-xl border border-border bg-card px-4 py-3 text-sm sm:grid-cols-4">
         <div className="flex min-w-0 flex-col gap-0.5">
           <dt className="text-xs text-muted-foreground">来源</dt>
@@ -523,35 +527,36 @@ function ThreadContent({
         onSubmit={bind}
       />
 
-      <div className="flex flex-col gap-2 border-t border-border pt-3">
-        <FormError message={closeError} />
-        <FormError message={removeError} />
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-faint-foreground">
-            {closed ? '线程已归档。' : '归档只影响界面；删除会连同任务与执行记录一起清掉。'}
-          </p>
-          <div className="flex shrink-0 items-center gap-2">
-            {!closed && (
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                disabled={busyNow}
-                onClick={closeThread}
-              >
-                归档
-              </Button>
-            )}
+      {/* 页面级终态动作统一在内容区底部（与任务详情同位置）：左说明、右按钮 */}
+      <div
+        role="group"
+        aria-label="页面动作"
+        className="flex items-center justify-between gap-3 border-t border-border pt-3"
+      >
+        <p className="text-xs text-faint-foreground">
+          {closed ? '线程已归档。' : '归档只影响界面；删除会连同任务与执行记录一起清掉。'}
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          {!closed && (
             <Button
               type="button"
-              variant="destructive"
+              variant="secondary"
               size="sm"
               disabled={busyNow}
-              onClick={() => setConfirmRemove(true)}
+              onClick={closeThread}
             >
-              删除线程
+              归档
             </Button>
-          </div>
+          )}
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={busyNow}
+            onClick={() => setConfirmRemove(true)}
+          >
+            删除线程
+          </Button>
         </div>
       </div>
 

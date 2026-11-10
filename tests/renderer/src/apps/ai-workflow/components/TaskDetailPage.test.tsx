@@ -99,9 +99,14 @@ function setup(
   detail: Task | null = task,
   runs: Run[] = [run],
   comments: TaskComment[] = [comment],
-): { onBack: ReturnType<typeof vi.fn>; onOpenThread: ReturnType<typeof vi.fn> } {
+): {
+  onBack: ReturnType<typeof vi.fn>
+  onOpenThread: ReturnType<typeof vi.fn>
+  onRemoved: ReturnType<typeof vi.fn>
+} {
   const onBack = vi.fn()
   const onOpenThread = vi.fn()
+  const onRemoved = vi.fn()
   kernel.setView('task.byId', { taskId: 't1' }, detail)
   kernel.setView('runs.byTask', { taskId: 't1' }, runs)
   kernel.setView('comments.byTask', { taskId: 't1' }, comments)
@@ -111,9 +116,10 @@ function setup(
       workflows={[workflow]}
       onBack={onBack}
       onOpenThread={onOpenThread}
+      onRemoved={onRemoved}
     />,
   )
-  return { onBack, onOpenThread }
+  return { onBack, onOpenThread, onRemoved }
 }
 
 function dispatchWith(
@@ -714,6 +720,117 @@ describe('TaskDetailPage', () => {
     await screen.findByRole('heading', { name: '任务A' })
     await user.click(screen.getByRole('button', { name: '完成任务' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('执行中的阶段不能完成')
+  })
+
+  it('删除任务：确认弹窗说明连带执行记录与线程，确认后 dispatch 并出栈', async () => {
+    const user = userEvent.setup()
+    const { onRemoved } = setup()
+    await screen.findByRole('heading', { name: '任务A' })
+
+    // 位置与线程详情页一致：内容区底部的「页面动作」组里，左侧说明右侧按钮；页头不留删除
+    const bar = screen.getByRole('group', { name: '页面动作' })
+    expect(bar).toHaveTextContent('线程也一并删除')
+    expect(
+      within(screen.getByRole('banner')).queryByRole('button', { name: '删除任务' }),
+    ).toBeNull()
+
+    await user.click(within(bar).getByRole('button', { name: '删除任务' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('任务「任务A」')
+    expect(dialog).toHaveTextContent('执行记录')
+    // 线程可能随最后一个任务一起消失：弹窗里先讲清楚
+    expect(dialog).toHaveTextContent('线程也会一并删除')
+
+    await user.click(within(dialog).getByRole('button', { name: '删除' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'task.remove', id: 't1' }),
+      ),
+    )
+    expect(onRemoved).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('删除任务：Esc 与「取消」都只关弹窗，不发命令、不出栈', async () => {
+    const user = userEvent.setup()
+    const { onRemoved } = setup()
+    await screen.findByRole('heading', { name: '任务A' })
+
+    await user.click(screen.getByRole('button', { name: '删除任务' }))
+    await screen.findByRole('dialog')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '删除任务' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(kernel.dispatched).toEqual([])
+    expect(onRemoved).not.toHaveBeenCalled()
+  })
+
+  it('删除失败：弹窗收起、原因贴在页面顶部，不出栈', async () => {
+    dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
+      command.type === 'task.remove'
+        ? Promise.reject(new Error('任务读取失败，先刷新'))
+        : Promise.resolve({ facts: [], value: null } as CommandDispatchResult<C>),
+    )
+    const user = userEvent.setup()
+    const { onRemoved } = setup()
+    await screen.findByRole('heading', { name: '任务A' })
+
+    await user.click(screen.getByRole('button', { name: '删除任务' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: '删除' }),
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('任务读取失败，先刷新')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(onRemoved).not.toHaveBeenCalled()
+  })
+
+  it('删除中点不动：两个按钮都禁用并写「正在删除…」', async () => {
+    dispatchWith(
+      <C extends Command>(): Promise<CommandDispatchResult<C>> =>
+        new Promise<CommandDispatchResult<C>>(() => {}),
+    )
+    const user = userEvent.setup()
+    setup()
+    await screen.findByRole('heading', { name: '任务A' })
+
+    await user.click(screen.getByRole('button', { name: '删除任务' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: '删除' }),
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '正在删除…' })).toBeDisabled())
+    expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
+    // 弹窗把页面内容从无障碍树里摘掉了：用 hidden 查询确认页头按钮也一起锁住
+    expect(screen.getByRole('button', { name: '删除任务', hidden: true })).toBeDisabled()
+  })
+
+  it('没有 onRemoved 回调时：删除照常 dispatch，不抛错（页面可独立复用）', async () => {
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    const user = userEvent.setup()
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+    await screen.findByRole('heading', { name: '任务A' })
+
+    await user.click(screen.getByRole('button', { name: '删除任务' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: '删除' }),
+    )
+
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'task.remove', id: 't1' }),
+      ),
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
 describe('TaskDetailPage 评审结论（M14）', () => {

@@ -422,7 +422,14 @@ describe('ThreadDetailPage', () => {
     setup(detailOf(thread), onRemoved)
     await screen.findByText('上一轮笔记')
 
-    await user.click(screen.getByRole('button', { name: '删除线程' }))
+    // 位置与任务详情页一致：内容区底部的「页面动作」组里，左侧说明右侧按钮；页头不留删除
+    const bar = screen.getByRole('group', { name: '页面动作' })
+    expect(bar).toHaveTextContent('删除会连同任务与执行记录一起清掉')
+    expect(
+      within(screen.getByRole('banner')).queryByRole('button', { name: '删除线程' }),
+    ).toBeNull()
+
+    await user.click(within(bar).getByRole('button', { name: '删除线程' }))
     const dialog = await screen.findByRole('dialog')
     // 弹窗里的数字与说明都来自线程行：3 个任务、执行记录一起删
     expect(dialog).toHaveTextContent('3 个任务')

@@ -1203,6 +1203,27 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
   })
 
+  it('删除任务后回到看板：任务详情不残留「任务不存在」', async () => {
+    seedBase()
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByLabelText('任务：任务A'))
+    await screen.findByRole('region', { name: '任务详情' })
+
+    await user.click(screen.getByRole('button', { name: '删除任务' }))
+    await user.click(
+      within(await screen.findByRole('dialog')).getByRole('button', { name: '删除' }),
+    )
+
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument(),
+    )
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+    expectDispatched({ type: 'task.remove', id: 't1' })
+  })
+
   it('详情页在切换栏目 / 视图后回到看板，不残留上一页', async () => {
     seedBase()
     const user = userEvent.setup()

@@ -1,6 +1,14 @@
 import { useState, type FormEvent, type ReactElement } from 'react'
 import type { Task, WorkflowWithStages } from '../../../../../protocol/entities'
 import { Button } from '../../../components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../../components/ui/dialog'
 import { FormError } from '../../../components/ui/form-error'
 import { badgeCls } from '../../../components/ui/panel'
 import { getKernelStore } from '../../../shell/kernelStore'
@@ -24,6 +32,8 @@ export interface TaskDetailPageProps {
   onOpenThread: (threadId: string) => void
   /** 打开子任务详情（M8；没有子任务时不渲染区块） */
   onOpenTask?: (taskId: string) => void
+  /** 任务被删除后调用：任务行已经不存在，留在详情页只会显示「任务不存在」 */
+  onRemoved?: () => void
 }
 
 /**
@@ -39,6 +49,7 @@ export function TaskDetailPage({
   onBack,
   onOpenThread,
   onOpenTask,
+  onRemoved,
 }: TaskDetailPageProps): ReactElement {
   const state = useKernelViewState('task.byId', { taskId })
   const runsState = useKernelViewState('runs.byTask', { taskId })
@@ -64,9 +75,11 @@ export function TaskDetailPage({
   const [rerun, setRerun] = useState(true)
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
-  /** 顶部结束动作（重新执行 / 停止执行 / 完成任务）的进行中与失败文案 */
-  const [action, setAction] = useState<'rerun' | 'stop' | 'complete' | null>(null)
+  /** 顶部结束动作（重新执行 / 停止执行 / 完成任务 / 删除任务）的进行中与失败文案 */
+  const [action, setAction] = useState<'rerun' | 'stop' | 'complete' | 'remove' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
+  /** 删除确认弹窗：删除连带执行记录（可能连带线程），先问一次 */
+  const [confirmRemove, setConfirmRemove] = useState(false)
 
   const workflow = task === null ? undefined : workflows.find((w) => w.id === task.workflowId)
   const stage =
@@ -155,6 +168,28 @@ export function TaskDetailPage({
     void getKernelStore()
       .dispatch({ type: 'task.complete', commandId: '', id: taskId })
       .catch((e: unknown) => setActionError(errMsg(e)))
+      .finally(() => setAction(null))
+  }
+
+  /**
+   * 删除任务：任务行与它的执行记录（运行、反馈、评审报告、落盘归档）一起消失。
+   * 线程里没有别的任务时内核连线程一起删（宿主清该线程的落盘归档），所以删除成功后
+   * 一律出栈——留在详情页只会看到「任务不存在」，它所属的线程页可能也不在了。
+   */
+  const deleteTask = (): void => {
+    setAction('remove')
+    setActionError(null)
+    void getKernelStore()
+      .dispatch({ type: 'task.remove', commandId: '', id: taskId })
+      .then(() => {
+        setConfirmRemove(false)
+        onRemoved?.()
+      })
+      .catch((e: unknown) => {
+        // 失败时把弹窗收起，原因贴在页面顶部（弹窗里塞错误容易被当成按钮没反应）
+        setConfirmRemove(false)
+        setActionError(errMsg(e))
+      })
       .finally(() => setAction(null))
   }
 
@@ -309,9 +344,66 @@ export function TaskDetailPage({
                 onSubmit={submit}
               />
             </section>
+
+            {/* 页面级终态动作统一在内容区底部（与线程详情同位置）：左说明、右按钮 */}
+            <div
+              role="group"
+              aria-label="页面动作"
+              className="flex items-center justify-between gap-3 border-t border-border pt-3"
+            >
+              <p className="text-xs text-faint-foreground">
+                删除会连同运行记录、反馈与落盘归档一起清掉；线程里没有别的任务时线程也一并删除。
+              </p>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={action !== null}
+                  onClick={() => setConfirmRemove(true)}
+                >
+                  删除任务
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </div>
+
+      {/* 删除是终态动作：连带执行记录，可能连带线程，先问一次再动手 */}
+      {task !== null && confirmRemove && (
+        <Dialog open onOpenChange={() => setConfirmRemove(false)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>删除任务</DialogTitle>
+              <DialogDescription>
+                任务「{task.title}」与它的执行记录（运行记录、反馈、落盘归档）会一起删除，
+                不能撤销。线程里没有别的任务时，线程也会一并删除。
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={action !== null}
+                onClick={() => setConfirmRemove(false)}
+              >
+                取消
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={action !== null}
+                onClick={deleteTask}
+              >
+                {action === 'remove' ? '正在删除…' : '删除'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </section>
   )
 }

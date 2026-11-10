@@ -106,7 +106,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
       ]
     case 'task.remove':
       // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价；
-      // M6.5：删除后同样判定线程是否可归档（任务上下文由投影层按 task_id 联删）
+      // M6.5：删除后判定线程——还剩任务就按是否全部结束归档，队列删光则连线程一起删
+      // （`thread.removed` 只需线程行本身，落盘归档由宿主按事实里的 threadId 清）
       // M8：删除子任务后父任务 rollup 要读卡片（幂等）
       // M10：rollup 唤醒父 Agent 时要按父任务的项目取工作目录
       return ['tasks', 'runs', 'threads', 'cards', 'projects']

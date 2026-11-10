@@ -118,3 +118,58 @@ describe('thread.remove：执行记录随线程一起消失', () => {
     expect(existsSync(path.join(artifactsRoot, 'threads', threadId))).toBe(false)
   })
 })
+
+describe('task.remove：线程里的任务删光时同步删线程', () => {
+  it('删掉线程里最后一个任务：线程行一起消失，落盘归档目录一起清掉', () => {
+    const db = memory()
+    const root = tempRoot()
+    const artifactsRoot = path.join(root, 'artifacts')
+    const store = createStore({ db, kernel, artifactsRoot })
+    const { taskId, threadId } = seedTask(store)
+
+    const runDir = path.join(artifactsRoot, 'threads', threadId, 'runs', 'run-1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(path.join(artifactsRoot, 'threads', threadId, 'index.md'), '# 线程执行索引\n')
+
+    const result = store.dispatch({ type: 'task.remove', commandId: 'rm-task', id: taskId })
+
+    // 口径与 thread.remove 一致：先删任务行，再删线程行（执行记录随任务一起删）
+    expect(result.facts.map((fact) => fact.type)).toEqual(['task.removed', 'thread.removed'])
+    expect(store.query('task.byId', { taskId })).toBeNull()
+    expect(store.query('thread.byId', { threadId })).toBeNull()
+    // 线程没了，它的落盘归档不能留孤本
+    expect(existsSync(path.join(artifactsRoot, 'threads', threadId))).toBe(false)
+  })
+
+  it('线程里还有别的任务时线程保留，删光剩下的才连线程一起删', () => {
+    const db = memory()
+    const store = createStore({ db, kernel })
+    const { taskId, threadId } = seedTask(store)
+    const parent = store.query('task.byId', { taskId }) as Task
+    const createdChild = store.dispatch({
+      type: 'task.create',
+      commandId: 'task-2',
+      input: {
+        title: '写实现',
+        workflowId: parent.workflowId,
+        stageId: parent.currentStageId ?? undefined,
+        parentTaskId: taskId,
+      },
+    })
+    const childId = (
+      createdChild.facts.find((fact) => fact.type === 'task.created')?.payload as {
+        task: { id: string }
+      }
+    ).task.id
+    // 子任务继承父任务线程
+    expect((store.query('task.byId', { taskId: childId }) as Task).threadId).toBe(threadId)
+
+    const first = store.dispatch({ type: 'task.remove', commandId: 'rm-1', id: taskId })
+    expect(first.facts.map((fact) => fact.type)).toEqual(['task.removed'])
+    expect(store.query('thread.byId', { threadId })).not.toBeNull()
+
+    const second = store.dispatch({ type: 'task.remove', commandId: 'rm-2', id: childId })
+    expect(second.facts.map((fact) => fact.type)).toEqual(['task.removed', 'thread.removed'])
+    expect(store.query('thread.byId', { threadId })).toBeNull()
+  })
+})

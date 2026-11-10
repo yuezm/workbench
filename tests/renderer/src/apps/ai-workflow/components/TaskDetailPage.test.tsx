@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Command } from '../../../../../../src/protocol/commands'
@@ -590,6 +590,58 @@ describe('TaskDetailPage', () => {
 
     const brief = await screen.findByRole('region', { name: '任务说明' })
     expect(within(brief).getByText('没有描述')).toBeInTheDocument()
+  })
+
+  it('失败后给出「重新执行」：点击 dispatch task.rerun（原地重排当前阶段）', async () => {
+    const user = userEvent.setup()
+    setup(task, [
+      { ...run, status: 'failed', error: '执行器失联', errorCode: 'executor_lost', output: '' },
+    ])
+
+    await screen.findByRole('heading', { name: '任务A' })
+    const retry = screen.getByRole('button', { name: '重新执行' })
+    expect(retry).toHaveAttribute('title', expect.stringContaining('这一轮'))
+
+    await user.click(retry)
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'task.rerun', id: 't1' }),
+      ),
+    )
+  })
+
+  it('没有历史运行 / 正在执行 / 已完成：都不给「重新执行」', async () => {
+    setup(task, [])
+    await screen.findByRole('heading', { name: '任务A' })
+    expect(screen.queryByRole('button', { name: '重新执行' })).toBeNull()
+    cleanup()
+
+    kernel.setView('tasks.executing', undefined, ['t1'])
+    setup()
+    await screen.findByRole('heading', { name: '任务A' })
+    expect(screen.queryByRole('button', { name: '重新执行' })).toBeNull()
+    cleanup()
+
+    setup({ ...task, status: 'completed' })
+    await screen.findByRole('heading', { name: '任务A' })
+    expect(screen.queryByRole('button', { name: '重新执行' })).toBeNull()
+  })
+
+  it('重新执行失败：亮后端文案，页面不崩', async () => {
+    dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
+      command.type === 'task.rerun'
+        ? Promise.reject(new Error('当前阶段正在执行，先停止执行再重排'))
+        : Promise.resolve({ facts: [], value: null } as CommandDispatchResult<C>),
+    )
+    const user = userEvent.setup()
+    setup(task, [
+      { ...run, status: 'failed', error: '执行器失联', errorCode: 'executor_lost', output: '' },
+    ])
+
+    await screen.findByRole('heading', { name: '任务A' })
+    await user.click(screen.getByRole('button', { name: '重新执行' }))
+    // 失败 run 的错误文案也占一个 alert，这里按文案找重排那条
+    expect(await screen.findByText('当前阶段正在执行，先停止执行再重排')).toBeInTheDocument()
   })
 
   it('执行中：出现「停止执行」，点击 dispatch task.stop；「完成任务」禁用', async () => {

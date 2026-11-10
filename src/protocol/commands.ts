@@ -46,6 +46,7 @@ export const COMMAND_NAMES = [
   'task.stop',
   'task.remove',
   'task.comment',
+  'task.rerun',
   'card.answer',
   'card.resolve',
   'chat.create',
@@ -223,6 +224,19 @@ export interface TaskCommentCommand extends CommandBase {
   rerun?: boolean
 }
 
+/**
+ * 重新执行当前阶段（失败重跑）：执行器崩了 / 关机 / CLI 坏了导致 run 失败后，
+ * 不用把卡片拖走再拖回，直接在原地再排一轮。
+ *
+ * 与 `task.comment` 的 `rerun` 走同一条进入阶段效果（`turn+1`、线程上下文、会话续接、
+ * 项目工作目录都不变），区别只是不追加反馈正文。任务行不动：执行出错不是业务上没过，
+ * 阶段与闸门预算都保留。
+ */
+export interface TaskRerunCommand extends CommandBase {
+  type: 'task.rerun'
+  id: string
+}
+
 // ---------- 卡片 ----------
 
 /**
@@ -342,6 +356,7 @@ export type Command =
   | TaskStopCommand
   | TaskRemoveCommand
   | TaskCommentCommand
+  | TaskRerunCommand
   | CardAnswerCommand
   | CardResolveCommand
   | ChatCreateCommand

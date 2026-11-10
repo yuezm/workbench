@@ -628,6 +628,8 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'task.complete':
     case 'task.stop':
     case 'task.remove':
+    case 'task.rerun':
+      // 重新执行只带任务 id：阶段 / 智能体 / 运行时都由内核按视图现算
       return requiredId(command.id, 'id')
     case 'task.comment':
       // 反馈正文只作资料（资料段）；`rerun` 只表示「顺带再跑一轮」的意图，能否跑由内核判

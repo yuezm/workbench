@@ -60,8 +60,8 @@ export function TaskDetailPage({
   const [rerun, setRerun] = useState(true)
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
-  /** 顶部结束动作（停止执行 / 完成任务）的进行中与失败文案 */
-  const [action, setAction] = useState<'stop' | 'complete' | null>(null)
+  /** 顶部结束动作（重新执行 / 停止执行 / 完成任务）的进行中与失败文案 */
+  const [action, setAction] = useState<'rerun' | 'stop' | 'complete' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
   const workflow = task === null ? undefined : workflows.find((w) => w.id === task.workflowId)
@@ -74,6 +74,21 @@ export function TaskDetailPage({
     task === null ? '读取任务中' : `${workflow?.name ?? '未知工作流'} · ${stageName ?? '未知阶段'}`
   /** 勾选「接着做」只在「交给智能体」的阶段有意义（是否真跑仍由内核判定） */
   const canRerun = task !== null && task.status === 'active' && stage?.entryMode === 'agent'
+  /**
+   * 重新执行当前阶段：失败收口后（关机 / CLI 崩了）能原地再排一轮，不用把卡片拖走再拖回。
+   * 内核判任务在 agent 阶段、无活跃 run、智能体与运行时齐备；UI 另加一条：该任务已经跑过
+   * 至少一轮（`runs.byTask` 非空）——没跑过的任务没有「这一轮」可重跑。
+   */
+  const canRerunStage = canRerun && !executing && runs.length > 0
+
+  const rerunStage = (): void => {
+    setAction('rerun')
+    setActionError(null)
+    void getKernelStore()
+      .dispatch({ type: 'task.rerun', commandId: '', id: taskId })
+      .catch((e: unknown) => setActionError(errMsg(e)))
+      .finally(() => setAction(null))
+  }
 
   const post = async (text: string, withRerun: boolean): Promise<boolean> => {
     setPosting(true)
@@ -141,6 +156,18 @@ export function TaskDetailPage({
                 onClick={() => onOpenThread(threadId)}
               >
                 打开线程
+              </Button>
+            )}
+            {canRerunStage && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={action !== null}
+                title={`重新执行「${stageName ?? '当前阶段'}」这一轮（失败后原地重排）`}
+                onClick={rerunStage}
+              >
+                {action === 'rerun' ? '正在重排…' : '重新执行'}
               </Button>
             )}
             {task !== null && task.status === 'active' && executing && (

@@ -30,6 +30,7 @@ const expected = [
   'task.stop',
   'task.remove',
   'task.comment',
+  'task.rerun',
   'card.answer',
   'card.resolve',
   'chat.create',

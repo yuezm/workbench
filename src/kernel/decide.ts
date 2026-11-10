@@ -79,6 +79,8 @@ function dispatch(view: View, input: Input, now: Iso, env: Environment): Decisio
       return task.removeTask(view, input, now, env)
     case 'task.comment':
       return task.commentTask(view, input, now, env)
+    case 'task.rerun':
+      return task.rerunTask(view, input, now, env)
 
     // ---------- 卡片（M4 审批） ----------
     case 'card.answer':

@@ -65,6 +65,8 @@ export interface CommandResults {
   'task.remove': null
   /** M7.5：返回追加后的评论行（UI 仍重取 `comments.byTask`） */
   'task.comment': TaskComment
+  /** 失败重跑只产一条 `run.queued`；任务行不动，返回值由 UI 重取视图 */
+  'task.rerun': null
   'card.answer': Card
   'card.resolve': Card
   'chat.create': Conversation

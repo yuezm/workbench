@@ -81,6 +81,7 @@ const validCommands: Command[] = [
   { commandId: 'c13', type: 'task.complete', id: 't1' },
   { commandId: 'c13b', type: 'task.stop', id: 't1' },
   { commandId: 'c14', type: 'task.remove', id: 't1' },
+  { commandId: 'c14b', type: 'task.rerun', id: 't1' },
   { commandId: 'c15', type: 'card.answer', cardId: 'card-1', optionIndex: 0 },
   { commandId: 'c16', type: 'card.answer', cardId: 'card-1', optionIndex: 2, via: 'channel' },
   { commandId: 'c17', type: 'card.resolve', cardId: 'card-1' },
@@ -609,13 +610,18 @@ describe('protocol/validate', () => {
     ).toBe('input.stageId必须是字符串')
   })
 
-  it('task.move / complete / stop / remove：id 与目标阶段', () => {
+  it('task.move / complete / stop / remove / rerun：id 与目标阶段', () => {
     expect(rejectedMessage(cmd('task.move', { stageId: 'st1' }))).toBe('id必填')
     expect(rejectedMessage(cmd('task.move', { id: 't1' }))).toBe('stageId必填')
     expect(rejectedMessage(cmd('task.move', { id: 't1', stageId: '  ' }))).toBe('stageId必填')
     expect(rejectedMessage(cmd('task.complete'))).toBe('id必填')
     expect(rejectedMessage(cmd('task.stop'))).toBe('id必填')
     expect(rejectedMessage(cmd('task.remove'))).toBe('id必填')
+    expect(rejectedMessage(cmd('task.rerun'))).toBe('id必填')
+    expect(validateCommand(cmd('task.rerun', { id: 't1' }))).toEqual({
+      ok: true,
+      command: { commandId: 'cmd-1', type: 'task.rerun', id: 't1' },
+    })
   })
 
   it('card.answer：cardId 必填、下标在范围内、via 只接受 ui / channel', () => {

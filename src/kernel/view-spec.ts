@@ -122,6 +122,19 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'cards',
         'task_comments',
       ]
+    case 'task.rerun':
+      // 失败重跑：只复用进入阶段效果（拼反馈段 + 线程上下文、按线程续接会话、
+      // 判定是否已有活跃 run）；不追加反馈、不改任务行，因此不需要 workflows / cards
+      return [
+        'tasks',
+        'workflow_stages',
+        'agents',
+        'runtimes',
+        'projects',
+        'threads',
+        'runs',
+        'task_comments',
+      ]
     case 'card.answer':
       // 校验卡片 open / 下标合法（cards）、run 仍 waiting（runs）；续接读同 run 的其余 open 卡（cards）
       return ['runs', 'cards']

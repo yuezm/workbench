@@ -219,6 +219,40 @@ export function stopTask(
   return done(facts)
 }
 
+/**
+ * 重新执行当前阶段（`task.rerun`）：run 失败收口后原地再排一轮。
+ *
+ * 与 `task.comment{rerun}` 共用进入阶段效果——`turn+1`、线程上下文、会话续接、项目工作
+ * 目录都不变，区别只是不追加反馈正文。任务行不动（阶段与闸门预算都保留）：执行器崩了
+ * 不等于业务上没过。执行中 / 非 agent 阶段 / 智能体或运行时缺失一律 reject——「点了没
+ * 反应」比报错更难查。
+ */
+export function rerunTask(
+  view: View,
+  input: Extract<Input, { type: 'task.rerun' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  const task = view.tasks.get(input.id)
+  if (!task) return reject('not_found', '任务不存在: ' + input.id)
+  if (task.status !== 'active') return reject('conflict', '已完成的任务不能重新执行')
+  if (view.activeTaskIds.has(task.id)) {
+    return reject('conflict', '当前阶段正在执行，先停止执行再重排')
+  }
+  const stage = task.currentStageId === null ? undefined : view.stages.get(task.currentStageId)
+  if (!stage || stage.workflowId !== task.workflowId) {
+    return reject('conflict', '任务当前阶段无效')
+  }
+  if (stage.entryMode !== 'agent') {
+    return reject('conflict', '当前阶段不交给智能体执行: ' + stage.name)
+  }
+  const facts = entryRunFacts(view, task, now, env, OWNER)
+  if (facts.length === 0) {
+    return reject('conflict', '当前阶段没有可用的智能体或运行时: ' + stage.name)
+  }
+  return done(facts)
+}
+
 export function removeTask(
   view: View,
   input: Extract<Input, { type: 'task.remove' }>,

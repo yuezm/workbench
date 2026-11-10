@@ -138,6 +138,64 @@ export function withBuiltinStages(stages: readonly StageInput[]): StageInput[] {
   }))
 }
 
+/**
+ * 删掉若干下标的阶段：指向被删阶段的目标清空，它后面的下标整体前移。
+ *
+ * 用户点「删除」与保存前丢掉「别处已删掉」的阶段共用这一套重映射——不重映射的话，
+ * 界面上看不出任何异常，但流转会静默指到别的阶段。
+ */
+export function dropStageIndexes(
+  stages: readonly StageInput[],
+  removed: readonly number[],
+): StageInput[] {
+  const gone = new Set(removed)
+  const target = (index: number | null | undefined): number | null => {
+    if (index == null) return null
+    if (gone.has(index)) return null
+    let shift = 0
+    for (const i of gone) if (i < index) shift += 1
+    return index - shift
+  }
+  return stages
+    .filter((_, i) => !gone.has(i))
+    .map((stage) => ({
+      ...stage,
+      onCompleteIndex: target(stage.onCompleteIndex),
+      onRejectIndex: target(stage.onRejectIndex),
+      gate: stage.gate
+        ? {
+            ...stage.gate,
+            onPassIndex: target(stage.gate.onPassIndex),
+            onFailIndex: target(stage.gate.onFailIndex),
+          }
+        : null,
+    }))
+}
+
+/**
+ * 保存前按最新定义过滤：`id` 已经不在库里的阶段（别处删掉了 / 本机迁移脚本改过）直接丢掉。
+ *
+ * 为什么必须过滤：内核按「回传的 id 必须属于本工作流」严格校验，一个已删 id 就会整份拒收，
+ * 界面上只剩一个 uuid，用户只能重启应用——而外部进程直接写库不经过宿主的事实广播，
+ * 渲染层的 `workflows.all` 会一直停在旧值，光重开弹窗也不够。
+ *
+ * `subtaskStageId` 指向被丢掉的阶段时一并清空：内核不校验这一列，留着是看不见的死引用。
+ */
+export function dropVanishedStages(
+  stages: readonly StageInput[],
+  liveIds: ReadonlySet<string>,
+): StageInput[] {
+  const gone = stages.flatMap((stage, i) =>
+    stage.id !== undefined && !liveIds.has(stage.id) ? [i] : [],
+  )
+  if (gone.length === 0) return [...stages]
+  return dropStageIndexes(stages, gone).map((stage) =>
+    stage.subtaskStageId != null && !liveIds.has(stage.subtaskStageId)
+      ? { ...stage, subtaskStageId: null }
+      : stage,
+  )
+}
+
 /** 新阶段插入的位置：「已阻塞」之前 = 用户阶段区块末尾（待办占 1 个位置）。 */
 export function insertStageIndex(stages: readonly StageInput[]): number {
   return userStageRange(stages).end

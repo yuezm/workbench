@@ -204,6 +204,60 @@ describe('WorkflowManager', () => {
     ])
   })
 
+  it('编辑期间别处删掉了阶段：保存前按最新视图过滤，不再整份被「阶段 id 不存在」拒收', async () => {
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发', 3)])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('研发')
+
+    await user.click(screen.getByRole('button', { name: '编辑' }))
+    // 弹窗开着的时候，外部进程把「阶段2」删了（本机迁移脚本不经过宿主的事实广播）
+    const live = wf('w1', '研发', 3)
+    live.stages = [live.stages[0], live.stages[2]]
+    kernel.setView('workflows.all', undefined, [live])
+
+    // 用户此时删除「阶段1」：草稿里还留着已消失的「阶段2」的 id
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    const command = kernel.dispatched[0]
+    if (command.type !== 'workflow.update') throw new Error('命令类型不对')
+    expect(command).toMatchObject({ type: 'workflow.update', id: 'w1' })
+    expect(command.input.stages.map((stage) => stage.name)).toEqual([
+      '待办',
+      '阶段3',
+      '已阻塞',
+      '已完成',
+      '已取消',
+    ])
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('保存前取最新定义失败：按草稿原样提交（由内核兜底），不吞掉用户改动', async () => {
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发', 2)])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('研发')
+
+    await user.click(screen.getByRole('button', { name: '编辑' }))
+    // 打开弹窗后视图查询开始失败：保存前的「一次性取最新定义」也跟着失败
+    kernel.failView('workflows.all', undefined, 'wf-down')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    const command = kernel.dispatched[0]
+    if (command.type !== 'workflow.update') throw new Error('命令类型不对')
+    expect(command.input.stages.map((stage) => stage.name)).toEqual([
+      '待办',
+      '阶段1',
+      '阶段2',
+      '已阻塞',
+      '已完成',
+      '已取消',
+    ])
+  })
+
   it('工作流视图读取失败展示错误', async () => {
     kernel.failView('workflows.all', undefined, 'wf-down')
     render(<WorkflowManager />)

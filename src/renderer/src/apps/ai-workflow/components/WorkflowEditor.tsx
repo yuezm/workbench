@@ -25,6 +25,7 @@ import { cn } from '../../../lib/cn'
 import { useKernelView } from '../../../shell/useKernelView'
 import { STAGE_KIND_META } from '../model/stage-kinds'
 import {
+  dropStageIndexes,
   emptyStage,
   firstUserStageIndex,
   insertUserStage,
@@ -386,32 +387,11 @@ export function WorkflowEditor({
   }
 
   /**
-   * 删除一个自己添加的阶段：后面的下标整体前移，指向被删阶段的目标同时清空。
-   * 不做这层重映射，界面上看不出任何异常，但流转会静默指到别的阶段。
+   * 删除一个自己添加的阶段：下标重映射（指向被删阶段的目标清空、后面的整体前移）在纯函数
+   * `dropStageIndexes` 里，与保存前的「别处已删掉」过滤共用同一套规则。
    */
   const removeStage = (i: number): void =>
-    setDraft((d) => {
-      const remap = (idx: number | null | undefined): number | null => {
-        if (idx == null) return null
-        if (idx === i) return null
-        return idx > i ? idx - 1 : idx
-      }
-      const stages = d.stages
-        .filter((_, k) => k !== i)
-        .map((s) => ({
-          ...s,
-          onCompleteIndex: remap(s.onCompleteIndex),
-          onRejectIndex: remap(s.onRejectIndex),
-          gate: s.gate
-            ? {
-                ...s.gate,
-                onPassIndex: remap(s.gate.onPassIndex),
-                onFailIndex: remap(s.gate.onFailIndex),
-              }
-            : null,
-        }))
-      return { ...d, stages }
-    })
+    setDraft((d) => ({ ...d, stages: dropStageIndexes(d.stages, [i]) }))
 
   /** 删除当前选中阶段：删完把选中落到相邻的一个 */
   const removeSelected = (): void => {

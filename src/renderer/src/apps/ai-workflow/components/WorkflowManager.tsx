@@ -7,6 +7,7 @@ import { Menu } from '../../../components/ui/menu'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelView, useKernelViewState } from '../../../shell/useKernelView'
 import { SOP_TEMPLATES, draftFromTemplate, type SopTemplate } from '../model/sop-templates'
+import { dropVanishedStages } from '../model/stage-draft'
 import { WorkflowEditor } from './WorkflowEditor'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -81,11 +82,20 @@ export function WorkflowManager(): ReactElement {
     try {
       const store = getKernelStore()
       if (editing) {
+        // 编辑期间别处可能删过阶段（本机迁移脚本 / 另一个窗口）：一次性查询里拿到最新定义，
+        // 把草稿里已经不存在的阶段过滤掉再提交。不过滤的话内核按「阶段 id 不存在」整份拒收，
+        // 界面上只剩一个 uuid，用户只能重启应用。
+        const latest = await store.query('workflows.all').catch(() => null)
+        const live = latest?.find((item) => item.id === editing.id)
+        const stages =
+          live === undefined
+            ? input.stages
+            : dropVanishedStages(input.stages, new Set(live.stages.map((s) => s.id)))
         await store.dispatch({
           type: 'workflow.update',
           commandId: '',
           id: editing.id,
-          input,
+          input: { ...input, stages },
         })
       } else {
         const result = await store.dispatch({ type: 'workflow.create', commandId: '', input })

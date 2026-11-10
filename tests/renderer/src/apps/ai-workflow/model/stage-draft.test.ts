@@ -4,6 +4,8 @@ import type { StageInput } from '../../../../../../src/protocol/entities'
 import {
   builtinKeyOfName,
   builtinStageDraft,
+  dropStageIndexes,
+  dropVanishedStages,
   emptyStage,
   firstUserStageIndex,
   insertStageIndex,
@@ -225,5 +227,89 @@ describe('insertUserStage', () => {
     const result = insertUserStage(withBuiltinStages([]), user('A'))
     expect(result.stages[1]).toMatchObject({ onCompleteIndex: null, onRejectIndex: null })
     expect(result.stages[1].gate).toBeNull()
+  })
+})
+
+/**
+ * 规范顺序的草稿（待办 → 用户阶段 → 已阻塞 → 已完成 → 已取消），用户阶段的下标恰好从 1 起。
+ *
+ * 直接拼而不走 `withBuiltinStages`：那个函数会重映射下标，这里要按下标精确断言。
+ */
+const draft = (...stages: readonly StageInput[]): StageInput[] => [
+  builtinStageDraft('todo'),
+  ...stages,
+  builtinStageDraft('blocked'),
+  builtinStageDraft('done'),
+  builtinStageDraft('cancelled'),
+]
+
+describe('dropStageIndexes', () => {
+  it('删掉中间一个阶段：后面的下标整体前移，指向它的目标清空', () => {
+    // 下标：0 待办 / 1 A / 2 B / 3 C / 4 已阻塞 / 5 已完成 / 6 已取消
+    const stages = draft(
+      user('A', { id: 'a', onCompleteIndex: 2 }),
+      user('B', {
+        id: 'b',
+        entryMode: 'agent',
+        gate: { maxFails: 2, onPassIndex: 1, onFailIndex: 4 },
+      }),
+      user('C', { id: 'c', onRejectIndex: 1, subtaskStageId: 'b' }),
+    )
+    const next = dropStageIndexes(stages, [2])
+    expect(names(next)).toEqual(['待办', 'A', 'C', '已阻塞', '已完成', '已取消'])
+    // A 原来指向 B（2）→ 清空；C 原来指向 A（1）保持 1
+    expect(next[1]).toMatchObject({ onCompleteIndex: null, onRejectIndex: null })
+    expect(next[2]).toMatchObject({ onRejectIndex: 1, subtaskStageId: 'b' })
+  })
+
+  it('闸门两侧的去向一起重映射；一次删多个下标按新顺序压紧', () => {
+    const stages = draft(
+      user('A', { id: 'a' }),
+      user('B', {
+        id: 'b',
+        entryMode: 'agent',
+        onCompleteIndex: 4,
+        gate: { maxFails: 2, onPassIndex: 4, onFailIndex: 0 },
+      }),
+      user('C', { id: 'c' }),
+    )
+    // 删掉「待办」之后的第一项与最后一项 → 只剩 B
+    const next = dropStageIndexes(stages, [1, 3])
+    expect(names(next)).toEqual(['待办', 'B', '已阻塞', '已完成', '已取消'])
+    // 已阻塞原来在下标 4：删掉 1、3 之后变 2
+    expect(next[1]).toMatchObject({ onCompleteIndex: 2 })
+    expect(next[1].gate).toEqual({ maxFails: 2, onPassIndex: 2, onFailIndex: 0 })
+  })
+
+  it('越界下标原样保留：交给保存前的悬空目标校验去指出位置', () => {
+    const next = dropStageIndexes(draft(user('A', { id: 'a', onCompleteIndex: 99 })), [2])
+    expect(next[1]).toMatchObject({ name: 'A', onCompleteIndex: 98 })
+  })
+})
+
+describe('dropVanishedStages', () => {
+  it('库里有 / 没 id 的阶段都留着：新阶段还没 id，不能当成「已删除」', () => {
+    const stages = draft(user('A', { id: 'a' }), user('B'))
+    expect(dropVanishedStages(stages, new Set(['a']))).toEqual(stages)
+  })
+
+  it('id 已不在库里的阶段丢掉，并清掉指向它的子任务落点', () => {
+    const stages = draft(
+      user('A', { id: 'a', onCompleteIndex: 2 }),
+      user('B', { id: 'gone', subtaskStageId: 'a' }),
+      user('C', { id: 'c', subtaskStageId: 'gone', onRejectIndex: 4 }),
+    )
+    const live = new Set(['a', 'c'])
+    const next = dropVanishedStages(stages, live)
+    expect(names(next)).toEqual(['待办', 'A', 'C', '已阻塞', '已完成', '已取消'])
+    // A 原来指向 B（2，已被别处删掉）→ 清空；C 的子任务落点指向已删阶段 → 清空，
+    // 指向「已阻塞」的出错去向跟着前移一位
+    expect(next[1]).toMatchObject({ onCompleteIndex: null })
+    expect(next[2]).toMatchObject({ subtaskStageId: null, onRejectIndex: 3 })
+  })
+
+  it('内置项本来就没有 id：不算「已删除」，原样提交由内核补齐', () => {
+    const stages = draft()
+    expect(dropVanishedStages(stages, new Set())).toEqual(stages)
   })
 })

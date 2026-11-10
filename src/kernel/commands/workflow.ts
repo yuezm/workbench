@@ -257,7 +257,13 @@ export function updateWorkflow(
     const ref = stage.id?.trim() || null
     if (ref !== null) {
       if (claimed.has(ref)) return reject('conflict', '阶段 id 重复: ' + ref)
-      if (!existingById.has(ref)) return reject('conflict', '阶段 id 不存在: ' + ref)
+      // 带上阶段名：只给一个 uuid 时用户无从判断该改哪里（典型成因是编辑期间别处删过阶段）
+      if (!existingById.has(ref)) {
+        return reject(
+          'conflict',
+          `阶段「${stage.name.trim()}」已不存在（${ref}），工作流可能已在别处被修改`,
+        )
+      }
       claimed.add(ref)
     }
     refs.push(ref)

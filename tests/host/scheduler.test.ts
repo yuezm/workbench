@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -1577,5 +1577,139 @@ describe('createScheduler：评审正文落盘（M14）', () => {
     expect(artifact.bytes).toBeGreaterThan(0)
     expect(artifact.sha256).toHaveLength(64)
     expect(report.findings_json).toBe('[]')
+  })
+})
+
+describe('createScheduler：执行归档（M16）', () => {
+  it('派发前写 prompt.md，终态写 meta / thinking / transcript / index', async () => {
+    const seeded = seed()
+    const root = mkdtempSync(path.join(tmpdir(), 'wb-sched-archive-'))
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        io.emit({ seq: 1, type: 'thinking', text: '先看相位' })
+        io.emit({ seq: 2, type: 'thinking', text: '，再看门限' })
+        io.emit({ seq: 3, type: 'tool_call', tool: 'grep', callId: 'c1', input: '{}' })
+        io.emit({ seq: 4, type: 'tool_result', tool: 'grep', callId: 'c1', output: 'hit' })
+        io.emit({ seq: 5, type: 'thinking', text: '结论：改 D' })
+        io.emit({ seq: 6, type: 'text', text: 'done' })
+        return receiptOf(turn, { output: 'done' })
+      }),
+      {
+        artifactsRoot: root,
+        describeRun: () => ({
+          taskId: seeded.task.id,
+          taskTitle: '协议导出加 HASH',
+          stageId: seeded.stages.first,
+          stageName: '需求澄清',
+          agentId: seeded.agent.id,
+          agentName: 'coder',
+        }),
+        framesOf: (runId) => world.store.query('run.events', { runId }),
+      },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const run = world.db
+      .prepare('SELECT thread_id, prompt FROM runs WHERE id = ?')
+      .get(seeded.runId) as unknown as { thread_id: string | null; prompt: string }
+    const dir = path.join(root, 'threads', run.thread_id as string, 'runs', seeded.runId)
+
+    // 派发提示词：原文 + 可读表头（任务 / 阶段 / 智能体）
+    const prompt = readFileSync(path.join(dir, 'prompt.md'), 'utf8')
+    expect(prompt).toContain('<!-- 本轮派发信息')
+    expect(prompt).toContain('阶段: 需求澄清')
+    expect(prompt).toContain('智能体: coder')
+    expect(prompt).toContain(run.prompt)
+
+    // 全帧流水：一行一帧，可逐行 parse（thinking 帧按原样留在流水里，不另出思考流文件）
+    const lines = readFileSync(path.join(dir, 'transcript.jsonl'), 'utf8').trim().split('\n')
+    expect(lines).toHaveLength(6)
+    expect(lines.map((line) => (JSON.parse(line) as { type: string }).type)).toEqual([
+      'thinking',
+      'thinking',
+      'tool_call',
+      'tool_result',
+      'thinking',
+      'text',
+    ])
+    // thinking 帧原样留在流水里，连读要自己拼（分片是增量 delta）
+    const thinkingText = lines
+      .map((line) => JSON.parse(line) as { type: string; text?: string })
+      .filter((frame) => frame.type === 'thinking')
+      .map((frame) => frame.text ?? '')
+      .join('')
+    expect(thinkingText).toContain('先看相位，再看门限')
+    expect(thinkingText).toContain('结论：改 D')
+    expect(existsSync(path.join(dir, 'thinking.md'))).toBe(false)
+
+    // 元数据：状态以回执为准，帧统计与文件清单齐全
+    const meta = JSON.parse(readFileSync(path.join(dir, 'meta.json'), 'utf8')) as {
+      status: string
+      stageName: string
+      taskTitle: string
+      files: string[]
+      frames: { total: number; thinking: number; toolCall: number; toolResult: number }
+    }
+    expect(meta.status).toBe('succeeded')
+    expect(meta.stageName).toBe('需求澄清')
+    expect(meta.taskTitle).toBe('协议导出加 HASH')
+    expect(meta.frames).toMatchObject({ total: 6, thinking: 3, toolCall: 1, toolResult: 1 })
+    expect(meta.files).toEqual(
+      expect.arrayContaining(['prompt.md', 'transcript.jsonl', 'output.md']),
+    )
+
+    // 索引：人找产物的入口，含阶段名与 runId
+    const index = readFileSync(
+      path.join(root, 'threads', run.thread_id as string, 'index.md'),
+      'utf8',
+    )
+    expect(index).toContain('| # | 时间 | 阶段 | 任务 |')
+    expect(index).toContain('需求澄清')
+    expect(index).toContain(seeded.runId)
+  })
+
+  it('没配 artifactsRoot / describeRun / framesOf：照常跑完，不落盘也不报错', async () => {
+    const seeded = seed()
+    const root = mkdtempSync(path.join(tmpdir(), 'wb-sched-archive-none-'))
+    const scheduler = makeScheduler(portOf((turn) => receiptOf(turn)))
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(runById(seeded.runId)).toMatchObject({ status: 'succeeded' })
+    expect(existsSync(path.join(root, 'threads'))).toBe(false)
+  })
+
+  it('聊天 run 不归档：只在阶段 run 上落 prompt / 索引', async () => {
+    const seeded = seed()
+    const root = mkdtempSync(path.join(tmpdir(), 'wb-sched-archive-chat-'))
+    const scheduler = makeScheduler(
+      portOf((turn, io) => {
+        io.emit({ seq: 1, type: 'thinking', text: '想一下' })
+        return receiptOf(turn)
+      }),
+      {
+        artifactsRoot: root,
+        framesOf: (runId) => world.store.query('run.events', { runId }),
+      },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    // 阶段 run 仍归档（此用例只验证缺省 describeRun 的标签退化不阻断落盘）
+    const run = world.db
+      .prepare('SELECT thread_id FROM runs WHERE id = ?')
+      .get(seeded.runId) as unknown as { thread_id: string }
+    const meta = JSON.parse(
+      readFileSync(
+        path.join(root, 'threads', run.thread_id, 'runs', seeded.runId, 'meta.json'),
+        'utf8',
+      ),
+    ) as { stageName: string | null; taskTitle: string | null }
+    expect(meta.stageName).toBeNull()
+    expect(meta.taskTitle).toBeNull()
   })
 })

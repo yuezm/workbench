@@ -3,13 +3,33 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { RunEvent } from '../../src/protocol/entities'
 import type { Receipt } from '../../src/protocol/inputs'
 import {
+  RUN_ARCHIVE_SCHEMA_VERSION,
+  archiveRunTerminal,
+  backfillRunOutputs,
+  buildRunMeta,
+  readRunMetas,
+  renderThreadIndex,
+  renderTranscript,
   reviewArtifactPath,
+  runDirPath,
+  runMetaPath,
   runOutputPath,
+  runPromptPath,
+  runTranscriptPath,
+  summarizeFrames,
+  threadIndexPath,
   withReviewArtifact,
   withRunArtifacts,
   writeReviewArtifact,
+  writeRunOutput,
+  writeRunPrompt,
+  writeThreadIndex,
+  type ArchiveRun,
+  type RunArchiveLabels,
+  type RunArchiveMeta,
 } from '../../src/host/artifacts'
 
 let root = ''
@@ -150,6 +170,11 @@ describe('host/artifacts 本轮正文落盘（M15）', () => {
     expect(existsSync(runOutputPath(root, 'th-1', 'run-1'))).toBe(false)
   })
 
+  it('只有 errorCode 没有错误正文：退到 errorCode，不留读不到的路径', () => {
+    withRunArtifacts(root, run(), receipt({ status: 'failed', output: '', errorCode: 'timeout' }))
+    expect(readFileSync(runOutputPath(root, 'th-1', 'run-1'), 'utf8')).toBe('# 错误\n\ntimeout\n')
+  })
+
   it('评审 run 同时落 output.md 与 review.md', () => {
     withRunArtifacts(root, run(), receipt({ verdict: 'fail' }))
     expect(existsSync(runOutputPath(root, 'th-1', 'run-1'))).toBe(true)
@@ -162,5 +187,480 @@ describe('host/artifacts 本轮正文落盘（M15）', () => {
     expect(withRunArtifacts(root, run({ purpose: 'chat' }), source)).toBe(source)
     expect(withRunArtifacts(undefined, run(), source)).toBe(source)
     expect(existsSync(path.join(root, 'threads'))).toBe(false)
+  })
+})
+
+// ---------- 执行归档（M16） ----------
+
+const labels = (over: Partial<RunArchiveLabels> = {}): RunArchiveLabels => ({
+  taskId: 'task-1',
+  taskTitle: '协议导出加 HASH',
+  stageId: 'stage-1',
+  stageName: '需求澄清',
+  agentId: 'agent-1',
+  agentName: 'coder',
+  ...over,
+})
+
+const archiveRun = (over: Partial<ArchiveRun> = {}): ArchiveRun => ({
+  id: 'run-1',
+  threadId: 'th-1',
+  taskId: 'task-1',
+  stageId: 'stage-1',
+  agentId: 'agent-1',
+  purpose: 'stage',
+  turn: 2,
+  status: 'running',
+  executorKey: 'dsh',
+  startedAt: '2026-11-10T08:07:00.000Z',
+  endedAt: null,
+  createdAt: '2026-11-10T08:06:59.000Z',
+  durationMs: null,
+  exitCode: null,
+  errorCode: null,
+  error: null,
+  sessionId: null,
+  usage: null,
+  ...over,
+})
+
+const frames = (
+  items: Array<Partial<RunEvent> & { seq: number; type: RunEvent['type'] }>,
+): RunEvent[] => items.map((item) => ({ ...item }) as RunEvent)
+
+describe('host/artifacts 执行归档路径（M16）', () => {
+  it('全部只用 id：runs/<runId>/<file> 与线程 index.md', () => {
+    expect(runDirPath('R', 'th-1', 'run-1')).toBe(
+      path.join('R', 'threads', 'th-1', 'runs', 'run-1'),
+    )
+    expect(runPromptPath('R', 'th-1', 'run-1')).toBe(
+      path.join('R', 'threads', 'th-1', 'runs', 'run-1', 'prompt.md'),
+    )
+    expect(runTranscriptPath('R', 'th-1', 'run-1')).toBe(
+      path.join('R', 'threads', 'th-1', 'runs', 'run-1', 'transcript.jsonl'),
+    )
+    expect(runMetaPath('R', 'th-1', 'run-1')).toBe(
+      path.join('R', 'threads', 'th-1', 'runs', 'run-1', 'meta.json'),
+    )
+    expect(threadIndexPath('R', 'th-1')).toBe(path.join('R', 'threads', 'th-1', 'index.md'))
+  })
+})
+
+describe('host/artifacts 派发提示词（M16）', () => {
+  it('写表头 + 原文；原文缺尾换行时补齐', () => {
+    const wrote = writeRunPrompt(
+      root,
+      archiveRun(),
+      labels(),
+      '你负责需求澄清',
+      '2026-11-10T08:07:00.000Z',
+    )
+    expect(wrote).toBe(true)
+    const text = readFileSync(runPromptPath(root, 'th-1', 'run-1'), 'utf8')
+    expect(text.startsWith('<!-- 本轮派发信息')).toBe(true)
+    expect(text).toContain('runId: run-1')
+    expect(text).toContain('turn: 2')
+    expect(text).toContain('任务: 协议导出加 HASH <task-1>')
+    expect(text).toContain('阶段: 需求澄清 <stage-1>')
+    expect(text).toContain('智能体: coder <agent-1>')
+    expect(text.endsWith('你负责需求澄清\n')).toBe(true)
+    expect(existsSync(`${runPromptPath(root, 'th-1', 'run-1')}.tmp`)).toBe(false)
+  })
+
+  it('已有尾换行不重复补', () => {
+    writeRunPrompt(root, archiveRun(), labels(), '提示词\n', '2026-11-10T08:07:00.000Z')
+    expect(readFileSync(runPromptPath(root, 'th-1', 'run-1'), 'utf8').endsWith('提示词\n\n')).toBe(
+      false,
+    )
+  })
+
+  it('标签缺失时写「-」而不是 undefined', () => {
+    writeRunPrompt(
+      root,
+      archiveRun(),
+      labels({ taskTitle: null, stageName: null, agentName: null }),
+      'x',
+      '2026-11-10T08:07:00.000Z',
+    )
+    const text = readFileSync(runPromptPath(root, 'th-1', 'run-1'), 'utf8')
+    expect(text).toContain('任务: - <task-1>')
+    expect(text).toContain('阶段: - <stage-1>')
+    expect(text).not.toContain('undefined')
+  })
+
+  it('空提示词 / 聊天 run / 不挂线程 / 没配 root：都不写', () => {
+    expect(writeRunPrompt(root, archiveRun(), labels(), '   ', 'now')).toBe(false)
+    expect(writeRunPrompt(root, archiveRun({ purpose: 'chat' }), labels(), 'x', 'now')).toBe(false)
+    expect(writeRunPrompt(root, archiveRun({ threadId: null }), labels(), 'x', 'now')).toBe(false)
+    expect(writeRunPrompt(undefined, archiveRun(), labels(), 'x', 'now')).toBe(false)
+    expect(existsSync(path.join(root, 'threads'))).toBe(false)
+  })
+})
+
+describe('host/artifacts 帧流水与元数据（M16）', () => {
+  it('transcript：一行一帧，空帧返回空串', () => {
+    const text = renderTranscript(
+      frames([
+        { seq: 1, type: 'thinking', text: 'a' },
+        { seq: 2, type: 'tool_result', tool: 'grep', output: 'hit' },
+      ]),
+    )
+    const lines = text.trim().split('\n')
+    expect(lines).toHaveLength(2)
+    expect(JSON.parse(lines[0] as string)).toEqual({ seq: 1, type: 'thinking', text: 'a' })
+    expect(renderTranscript([])).toBe('')
+  })
+
+  it('帧统计：thinking / text / tool_call / tool_result 分别计数', () => {
+    expect(
+      summarizeFrames(
+        frames([
+          { seq: 1, type: 'thinking', text: 'a' },
+          { seq: 2, type: 'text', text: 'b' },
+          { seq: 3, type: 'tool_call', tool: 'grep' },
+          { seq: 4, type: 'tool_result', tool: 'grep' },
+          { seq: 5, type: 'status', status: 'running' },
+        ]),
+      ),
+    ).toEqual({ total: 5, thinking: 1, text: 1, toolCall: 1, toolResult: 1 })
+  })
+
+  it('meta：回执字段优先，缺失回落投影行；endedAt 用落盘时刻兜底', () => {
+    const meta = buildRunMeta(
+      archiveRun({ durationMs: 100, exitCode: 1, sessionId: 'old', error: '旧错误' }),
+      labels(),
+      frames([{ seq: 1, type: 'thinking', text: 'a' }]),
+      { status: 'failed', durationMs: 42, exitCode: 2, sessionId: 'sess-9', error: '超时' },
+      '2026-11-10T08:09:00.000Z',
+      ['prompt.md'],
+    )
+    expect(meta.schemaVersion).toBe(RUN_ARCHIVE_SCHEMA_VERSION)
+    expect(meta.runId).toBe('run-1')
+    expect(meta.threadId).toBe('th-1')
+    expect(meta.status).toBe('failed')
+    expect(meta.durationMs).toBe(42)
+    expect(meta.exitCode).toBe(2)
+    expect(meta.sessionId).toBe('sess-9')
+    expect(meta.error).toBe('超时')
+    expect(meta.endedAt).toBe('2026-11-10T08:09:00.000Z')
+    expect(meta.files).toEqual(['prompt.md'])
+  })
+
+  it('meta：回执没给的字段回落投影行（含 usage / startedAt）', () => {
+    const meta = buildRunMeta(
+      archiveRun({
+        durationMs: 100,
+        exitCode: 0,
+        sessionId: 'sess-1',
+        usage: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      }),
+      labels(),
+      [],
+      { status: 'succeeded' },
+      '2026-11-10T08:09:00.000Z',
+      [],
+    )
+    expect(meta.durationMs).toBe(100)
+    expect(meta.exitCode).toBe(0)
+    expect(meta.sessionId).toBe('sess-1')
+    expect(meta.usage).toEqual({
+      inputTokens: 1,
+      outputTokens: 2,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    })
+  })
+})
+
+describe('host/artifacts 终态归档与索引（M16）', () => {
+  it('写 transcript / meta，并把已有文件列进 meta.files', () => {
+    writeReviewArtifact(root, 'th-1', 'run-1', '## 评审\n')
+    writeRunOutput(root, 'th-1', 'run-1', '本轮产出')
+    writeRunPrompt(root, archiveRun(), labels(), '提示词', '2026-11-10T08:07:00.000Z')
+
+    archiveRunTerminal(root, {
+      run: archiveRun(),
+      labels: labels(),
+      frames: frames([
+        { seq: 1, type: 'thinking', text: 'a' },
+        { seq: 2, type: 'text', text: 'b' },
+      ]),
+      receipt: receipt({ status: 'succeeded', durationMs: 12 }),
+      at: '2026-11-10T08:09:00.000Z',
+    })
+
+    const meta = JSON.parse(
+      readFileSync(runMetaPath(root, 'th-1', 'run-1'), 'utf8'),
+    ) as RunArchiveMeta
+    expect(meta.status).toBe('succeeded')
+    expect(meta.files).toEqual(['prompt.md', 'transcript.jsonl', 'output.md', 'review.md'])
+    expect(
+      readFileSync(runTranscriptPath(root, 'th-1', 'run-1'), 'utf8')
+        .trim()
+        .split('\n'),
+    ).toHaveLength(2)
+  })
+
+  it('没有帧：只写 meta（不产生空 transcript）', () => {
+    archiveRunTerminal(root, {
+      run: archiveRun(),
+      labels: labels(),
+      frames: [],
+      receipt: receipt(),
+      at: '2026-11-10T08:09:00.000Z',
+    })
+    expect(existsSync(runTranscriptPath(root, 'th-1', 'run-1'))).toBe(false)
+    const meta = JSON.parse(
+      readFileSync(runMetaPath(root, 'th-1', 'run-1'), 'utf8'),
+    ) as RunArchiveMeta
+    expect(meta.files).toEqual([])
+  })
+
+  it('聊天 run / 不挂线程 / 没配 root：一律不落盘', () => {
+    const base = { labels: labels(), frames: [], receipt: receipt(), at: 'now' }
+    archiveRunTerminal(root, { ...base, run: archiveRun({ purpose: 'chat' }) })
+    archiveRunTerminal(root, { ...base, run: archiveRun({ threadId: null }) })
+    archiveRunTerminal(undefined, { ...base, run: archiveRun() })
+    expect(existsSync(path.join(root, 'threads'))).toBe(false)
+  })
+
+  it('索引：按开始时间排序，编号从 1 起，含阶段名与文件链接', () => {
+    const archive = (runId: string, startedAt: string, stageName: string): void => {
+      archiveRunTerminal(root, {
+        run: archiveRun({ id: runId, startedAt }),
+        labels: labels({ stageName }),
+        frames: frames([{ seq: 1, type: 'thinking', text: 'x' }]),
+        receipt: receipt(),
+        at: '2026-11-10T09:30:00.000Z',
+      })
+    }
+    archive('run-b', '2026-11-10T09:00:00.000Z', '实现')
+    archive('run-a', '2026-11-10T08:00:00.000Z', '需求澄清')
+
+    const index = readFileSync(threadIndexPath(root, 'th-1'), 'utf8')
+    expect(index.indexOf('需求澄清')).toBeLessThan(index.indexOf('实现'))
+    expect(index).toContain('| 1 |')
+    expect(index).toContain('| 2 |')
+    expect(index).toContain('[`transcript.jsonl`](runs/run-a/transcript.jsonl)')
+    expect(index).toContain('run-b')
+  })
+
+  it('标题里的竖线与换行不会破坏表格', () => {
+    archiveRunTerminal(root, {
+      run: archiveRun(),
+      labels: labels({ taskTitle: 'A|B\nC' }),
+      frames: [],
+      receipt: receipt(),
+      at: '2026-11-10T08:09:00.000Z',
+    })
+    const index = readFileSync(threadIndexPath(root, 'th-1'), 'utf8')
+    expect(index).toContain('A\\|B C')
+  })
+
+  it('空线程也写一份索引（占位行），readRunMetas 对缺失目录返回空', () => {
+    expect(readRunMetas(root, 'th-empty')).toEqual([])
+    expect(writeThreadIndex(root, 'th-empty')).toBe(true)
+    const index = readFileSync(threadIndexPath(root, 'th-empty'), 'utf8')
+    expect(index).toContain('还没有终态 run')
+    expect(renderThreadIndex('th-empty', [])).toContain('还没有终态 run')
+  })
+
+  it('坏 meta.json 跳过，不影响同目录其他 run 进索引', () => {
+    writeRunMetaPlaceholder('run-bad')
+    archiveRunTerminal(root, {
+      run: archiveRun({ id: 'run-good' }),
+      labels: labels(),
+      frames: [],
+      receipt: receipt(),
+      at: '2026-11-10T08:09:00.000Z',
+    })
+    expect(readRunMetas(root, 'th-1').map((meta) => meta.runId)).toEqual(['run-good'])
+    const index = readFileSync(threadIndexPath(root, 'th-1'), 'utf8')
+    expect(index).toContain('run-good')
+  })
+
+  it('没有 meta.json 的目录不进索引', () => {
+    mkdirSync(path.join(root, 'threads', 'th-1', 'runs', 'run-orphan'), { recursive: true })
+    writeThreadIndex(root, 'th-1')
+    expect(readRunMetas(root, 'th-1')).toEqual([])
+  })
+})
+
+/** 坏 meta（内容不是 JSON 对象）：索引必须跳过它而不是整体失败。 */
+function writeRunMetaPlaceholder(runId: string): void {
+  const file = runMetaPath(root, 'th-1', runId)
+  mkdirSync(path.dirname(file), { recursive: true })
+  writeFileSync(file, 'not json', 'utf8')
+}
+
+describe('host/artifacts 索引列格式（M16）', () => {
+  const metaWith = (over: {
+    id: string
+    startedAt: string | null
+    createdAt: string
+    durationMs: number | null
+  }): RunArchiveMeta =>
+    buildRunMeta(
+      archiveRun({
+        id: over.id,
+        startedAt: over.startedAt,
+        createdAt: over.createdAt,
+        durationMs: null,
+      }),
+      labels(),
+      [],
+      { status: 'succeeded', durationMs: over.durationMs ?? undefined },
+      '2026-11-10T08:09:00.000Z',
+      [],
+    )
+
+  it('时间缺失写「-」；用时按毫秒 / 秒 / 分秒三档渲染', () => {
+    const index = renderThreadIndex('th-1', [
+      metaWith({ id: 'run-a', startedAt: null, createdAt: '2026', durationMs: null }),
+      metaWith({
+        id: 'run-b',
+        startedAt: '2026-11-10T08:07:00.000Z',
+        createdAt: '2026-11-10T08:06:00.000Z',
+        durationMs: 1234,
+      }),
+      metaWith({
+        id: 'run-c',
+        startedAt: '2026-11-10T09:07:00.000Z',
+        createdAt: '2026-11-10T09:06:00.000Z',
+        durationMs: 125_000,
+      }),
+      metaWith({
+        id: 'run-d',
+        startedAt: '2026-11-10T10:07:00.000Z',
+        createdAt: '2026-11-10T10:06:00.000Z',
+        durationMs: 7,
+      }),
+    ])
+    expect(index).toContain('| 1 | - |')
+    expect(index).toContain('11-10 08:07')
+    expect(index).toContain('| 1.2s |')
+    expect(index).toContain('| 2m05s |')
+    expect(index).toContain('| 7ms |')
+  })
+})
+
+describe('host/artifacts 历史 run 回填 output.md（M16）', () => {
+  /** 造一个「只有流水、没有正文」的老 run 目录（M15 之前的归档形态）。 */
+  const legacyRun = (
+    runId: string,
+    frames: string[],
+    meta: Partial<RunArchiveMeta> = {},
+  ): string => {
+    const dir = path.join(root, 'threads', 'th-1', 'runs', runId)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'transcript.jsonl'), `${frames.join('\n')}\n`, 'utf8')
+    writeFileSync(
+      path.join(dir, 'meta.json'),
+      JSON.stringify({
+        schemaVersion: RUN_ARCHIVE_SCHEMA_VERSION,
+        runId,
+        threadId: 'th-1',
+        taskId: 'task-1',
+        taskTitle: '协议导出加 HASH',
+        stageId: 'stage-1',
+        stageName: '实现',
+        agentId: 'agent-1',
+        agentName: 'coder',
+        purpose: 'stage',
+        turn: 1,
+        status: 'succeeded',
+        executorKey: 'dsh',
+        createdAt: '2026-11-08T00:00:00.000Z',
+        startedAt: '2026-11-08T00:00:00.000Z',
+        endedAt: '2026-11-08T00:01:00.000Z',
+        durationMs: 60_000,
+        exitCode: 0,
+        errorCode: null,
+        error: null,
+        sessionId: null,
+        usage: null,
+        frames: { total: frames.length, thinking: 0, text: 0, toolCall: 0, toolResult: 0 },
+        files: ['prompt.md', 'transcript.jsonl'],
+        ...meta,
+      }),
+      'utf8',
+    )
+    return dir
+  }
+
+  it('只有 text 帧进正文：thinking / 工具帧不混进去，分片按顺序拼接', () => {
+    const dir = legacyRun('run-legacy', [
+      '{"seq":1,"type":"thinking","text":"先想"}',
+      '{"seq":2,"type":"text","text":"改好了"}',
+      '{"seq":3,"type":"tool_call","tool":"grep","input":"x"}',
+      '{"seq":4,"type":"tool_result","tool":"grep","output":"hit"}',
+      '{"seq":5,"type":"text","text":"，测过"}',
+    ])
+    expect(backfillRunOutputs(root)).toBe(1)
+    expect(readFileSync(path.join(dir, 'output.md'), 'utf8')).toBe('改好了，测过')
+  })
+
+  it('已有 output.md 一律不动（幂等，重复调用返回 0）', () => {
+    const dir = legacyRun('run-legacy', ['{"seq":1,"type":"text","text":"流水果"}'])
+    writeFileSync(path.join(dir, 'output.md'), '有人写过的正文', 'utf8')
+    expect(backfillRunOutputs(root)).toBe(0)
+    expect(readFileSync(path.join(dir, 'output.md'), 'utf8')).toBe('有人写过的正文')
+  })
+
+  it('没有 text 帧：有 error 写「# 错误」段，只有 errorCode 也写，两者都没有就跳过', () => {
+    const failed = legacyRun('run-failed', ['{"seq":1,"type":"status","status":"failed"}'], {
+      status: 'failed',
+      error: '超时',
+    })
+    const coded = legacyRun('run-coded', [], { status: 'failed', errorCode: 'timeout' })
+    const empty = legacyRun('run-empty', [])
+    expect(backfillRunOutputs(root)).toBe(2)
+    expect(readFileSync(path.join(failed, 'output.md'), 'utf8')).toBe('# 错误\n\n超时\n')
+    expect(readFileSync(path.join(coded, 'output.md'), 'utf8')).toBe('# 错误\n\ntimeout\n')
+    expect(existsSync(path.join(empty, 'output.md'))).toBe(false)
+  })
+
+  it('坏流水行只跳过那一行，不废掉整轮', () => {
+    const dir = legacyRun('run-legacy', [
+      'not json',
+      '{"seq":1,"type":"text","text":"正文"}',
+      '{"seq":2,"type":"text"',
+    ])
+    expect(backfillRunOutputs(root)).toBe(1)
+    expect(readFileSync(path.join(dir, 'output.md'), 'utf8')).toBe('正文')
+  })
+
+  it('补写后重算 meta.files 并重建索引，链接写进表里', () => {
+    const dir = legacyRun('run-legacy', ['{"seq":1,"type":"text","text":"正文"}'])
+    writeFileSync(path.join(dir, 'prompt.md'), '提示词', 'utf8')
+    writeFileSync(path.join(dir, 'review.md'), '评审', 'utf8')
+
+    backfillRunOutputs(root)
+
+    const meta = JSON.parse(readFileSync(path.join(dir, 'meta.json'), 'utf8')) as RunArchiveMeta
+    expect(meta.files).toEqual(['prompt.md', 'transcript.jsonl', 'output.md', 'review.md'])
+    const index = readFileSync(threadIndexPath(root, 'th-1'), 'utf8')
+    expect(index).toContain('[`output.md`](runs/run-legacy/output.md)')
+  })
+
+  it('已下线的产物类型不再被索引列出（meta.files 与磁盘对齐）', () => {
+    const dir = legacyRun('run-legacy', ['{"seq":1,"type":"text","text":"正文"}'], {
+      files: ['prompt.md', 'thinking.md', 'transcript.jsonl'],
+    })
+    writeFileSync(path.join(dir, 'prompt.md'), '提示词', 'utf8')
+    writeFileSync(path.join(dir, 'thinking.md'), '旧思考流', 'utf8')
+
+    backfillRunOutputs(root)
+
+    const meta = JSON.parse(readFileSync(path.join(dir, 'meta.json'), 'utf8')) as RunArchiveMeta
+    expect(meta.files).toEqual(['prompt.md', 'transcript.jsonl', 'output.md'])
+    const index = readFileSync(threadIndexPath(root, 'th-1'), 'utf8')
+    expect(index).not.toContain('thinking.md')
+  })
+
+  it('根目录不存在 / 未配置：返回 0，不建目录也不抛错', () => {
+    expect(backfillRunOutputs(undefined)).toBe(0)
+    expect(backfillRunOutputs(path.join(root, 'nope'))).toBe(0)
+    expect(existsSync(path.join(root, 'nope'))).toBe(false)
   })
 })

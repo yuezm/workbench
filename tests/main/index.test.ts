@@ -145,7 +145,7 @@ const mocks = vi.hoisted(() => {
     createCommandRouterMock: vi.fn((_deps: unknown) => routerMock),
     createChannelsMock: vi.fn(() => channelsMock),
     createSourcesMock: vi.fn(() => sourcesMock),
-    createSchedulerMock: vi.fn(() => schedulerMock),
+    createSchedulerMock: vi.fn((_deps: unknown) => schedulerMock),
     createClockMock: vi.fn(() => clockMock),
     createEffectsMock: vi.fn((options?: { announce?: (facts: never[]) => void }) => {
       effectsMock.announce = options?.announce
@@ -342,6 +342,45 @@ describe('主进程入口装配补测', () => {
     ] as never[])
 
     expect(mocks.notifyMock).toHaveBeenCalledWith('任务完成：收尾任务', '点开工作台查看结果')
+  })
+
+  it('M16 归档标签与帧来源：任务/阶段/智能体名从视图取，查不到留 null', async () => {
+    await loadEntry()
+    const deps = mocks.createSchedulerMock.mock.calls[0][0] as {
+      describeRun: (run: Record<string, string | null>) => Record<string, unknown>
+      framesOf: (runId: string) => unknown
+    }
+
+    mocks.storeMock.query.mockImplementation((view: string) => {
+      if (view === 'task.byId')
+        return { id: 'task-1', title: '协议导出加 HASH', workflowId: 'wf-1' }
+      if (view === 'workflows.all')
+        return [{ id: 'wf-1', stages: [{ id: 'stage-1', name: '需求澄清' }] }]
+      if (view === 'agents.all') return [{ id: 'agent-1', name: 'coder' }]
+      if (view === 'run.events') return [{ seq: 1, type: 'thinking', text: 'x' }]
+      return []
+    })
+
+    expect(deps.describeRun({ taskId: 'task-1', stageId: 'stage-1', agentId: 'agent-1' })).toEqual({
+      taskId: 'task-1',
+      taskTitle: '协议导出加 HASH',
+      stageId: 'stage-1',
+      stageName: '需求澄清',
+      agentId: 'agent-1',
+      agentName: 'coder',
+    })
+    expect(deps.framesOf('run-1')).toEqual([{ seq: 1, type: 'thinking', text: 'x' }])
+
+    // 任务已删 / 阶段已删 / 智能体已删：名称回落 null（归档照常，只是少可读标签）
+    mocks.storeMock.query.mockImplementation((view: string) => (view === 'task.byId' ? null : []))
+    expect(deps.describeRun({ taskId: 'task-9', stageId: 'stage-9', agentId: 'agent-9' })).toEqual({
+      taskId: 'task-9',
+      taskTitle: null,
+      stageId: 'stage-9',
+      stageName: null,
+      agentId: 'agent-9',
+      agentName: null,
+    })
   })
 
   it('dev 模式导航只放行 ELECTRON_RENDERER_URL', async () => {

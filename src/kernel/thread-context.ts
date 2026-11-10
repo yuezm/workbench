@@ -350,7 +350,16 @@ export function indexBlock(view: View, thread: ThreadRow, currentTaskId: Id | nu
       : `产物：${root}/threads/${thread.id}/runs/<runId>/output.md`,
   ]
   const lines: string[] = []
-  let used = 0
+  // 读取规则按**白名单**写：目录里还有几百 KB 的流水与提示词，模型一旦「看目录猜内容」
+  // 就会把排查材料当上下文整读，比读不到更贵。所以只点名该读的那一个文件。
+  const readRule = [
+    '读取：需要正文时只打开该轮的 `output.md`（路径见上）；同目录的',
+    '`transcript.jsonl`（全帧流水，单轮数百 KB）、`prompt.md`、`meta.json` 是排查材料，',
+    '不要作为上下文读取，也不要遍历 `runs/` 去找别的轮次。',
+    '读不到 `output.md` 说明该轮没有落盘，按摘要与任务动态继续，不要向用户索要全文。',
+  ].join('')
+  // 段首与读取规则是固定开销：先扣掉，条目填充才不会把整段顶出 `indexChars`。
+  let used = Array.from([...head, readRule].join('\n')).length + 1
   let shown = 0
   for (const task of ordered) {
     if (shown >= THREAD_LIMITS.indexTasks) break
@@ -380,8 +389,11 @@ export function indexBlock(view: View, thread: ThreadRow, currentTaskId: Id | nu
     ...lines,
     hidden > 0
       ? `…（还有 ${hidden} 个任务未列出：它们同样是本线程的一部分，需要时按上面的产物规则或任务动态查看）`
-      : '读取：需要正文时按上面的规则打开产物；读不到说明该轮没有落盘，按摘要与任务动态继续，不要向用户索要全文。',
-  ].join('\n')
+      : '',
+    readRule,
+  ]
+    .filter((line) => line !== '')
+    .join('\n')
 }
 
 function render(sections: readonly Section[]): string {

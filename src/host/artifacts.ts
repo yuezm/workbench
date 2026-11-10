@@ -1,25 +1,40 @@
 /**
- * 评审报告正文落盘（M14）。
+ * 产物落盘（M14 / M15 / M16）。
  *
- * 报告正文是长文本，塞进提示词预算只会被截断（老实现就是 `runs.output` 头部 2000 码点）。
- * 这里把正文写到**应用数据目录**，内核只拿引用（路径 / sha256 / 字节数）进报告行：
+ * 正文类数据不留在库里：库只存实体、状态与引用，正文一律写到**应用数据目录**，
+ * 一个 run 一个目录，人可以直接打开看：
  *
  * ```
- * <root>/threads/<threadId>/runs/<runId>/review.md
+ * <root>/threads/<threadId>/
+ *   index.md                              # 线程执行索引（run → 任务/阶段/轮次/状态）
+ *   runs/<runId>/
+ *     meta.json                           # 机器可读元数据
+ *     prompt.md                           # 本轮派发给智能体的完整提示词
+ *     transcript.jsonl                    # 全帧流水（thinking/text/tool_call/tool_result/status）
+ *     output.md                           # 本轮产出正文
+ *     review.md                           # 评审报告正文
  * ```
  *
  * 三个口径：
  *
- * 1. **路径只依赖 runId + threadId**，不依赖 `rev`——`rev` 由内核在决策时算，
- *    而落盘发生在派发之前；路径必须先可算，否则引用与文件对不上。
+ * 1. **路径只依赖 threadId + runId**：`rev` / 阶段名 / 标题都在决策期才知道，
+ *    而落盘发生在派发之前或之后的不同时刻；路径必须先可算，否则引用与文件对不上。
+ *    人类可读的关联（任务、阶段、轮次、时间）进 `meta.json` 与 `index.md`，不进路径。
  * 2. **原子写**：先写 `.tmp` 再 `rename`，崩溃只会留 `.tmp`，不会让下游读到半截文件。
- * 3. **失败不阻断运行**：落盘是增强项，磁盘满 / 权限不足时原样返回回执（报告行里
- *    `artifact` 为 null，索引段退化成「完整清单：报告 id」），任务照常推进。
+ * 3. **失败不阻断运行**：落盘是增强项，磁盘满 / 权限不足时回执照常返回、任务照常推进。
  */
 import { createHash } from 'node:crypto'
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import path from 'node:path'
-import type { RunRow } from '../protocol/entities'
+import type { RunEvent, RunRow } from '../protocol/entities'
 import type { Receipt } from '../protocol/inputs'
 import type { ReviewArtifact } from '../protocol/review'
 
@@ -148,13 +163,419 @@ export function withRunArtifacts(
   if (root === undefined || run.threadId === null) return receipt
   if (run.purpose === 'stage') {
     const output = (receipt.output ?? '').trim()
+    // 失败但没有错误正文时退到 `errorCode`：任务索引按规则给 `output.md` 路径，
+    // 一条永远读不到的死链接比一段「timeout」更糟。
+    const reason = (receipt.error ?? '').trim() !== '' ? receipt.error : receipt.errorCode
     const body =
       output !== ''
         ? (receipt.output as string)
-        : receipt.error === undefined || receipt.error.trim() === ''
+        : reason === undefined || reason === null || reason.trim() === ''
           ? ''
-          : `# 错误\n\n${receipt.error}\n`
+          : `# 错误\n\n${reason}\n`
     if (body !== '') writeRunOutput(root, run.threadId, run.id, body)
   }
   return withReviewArtifact(root, run, receipt)
+}
+
+// ---------- 执行归档（M16）：一个 run 一个可读目录 ----------
+
+/** 归档用的名称标签：由装配根从视图查，缺名称时留 null（只影响可读性，不影响落盘）。 */
+export interface RunArchiveLabels {
+  taskId: string | null
+  taskTitle: string | null
+  stageId: string | null
+  stageName: string | null
+  agentId: string | null
+  agentName: string | null
+}
+
+/** 归档关心的 run 列（渲染 meta 只需这些；测试可传字面量）。 */
+export type ArchiveRun = Pick<
+  RunRow,
+  | 'id'
+  | 'threadId'
+  | 'taskId'
+  | 'stageId'
+  | 'agentId'
+  | 'purpose'
+  | 'turn'
+  | 'status'
+  | 'executorKey'
+  | 'startedAt'
+  | 'endedAt'
+  | 'createdAt'
+  | 'durationMs'
+  | 'exitCode'
+  | 'errorCode'
+  | 'error'
+  | 'sessionId'
+  | 'usage'
+>
+
+/** `meta.json` 的形状：机器可读的那一份（人不读它，人读 `index.md`）。 */
+export interface RunArchiveMeta extends RunArchiveLabels {
+  schemaVersion: number
+  runId: string
+  threadId: string
+  purpose: string
+  turn: number
+  status: string
+  executorKey: string
+  createdAt: string
+  startedAt: string | null
+  endedAt: string | null
+  durationMs: number | null
+  exitCode: number | null
+  errorCode: string | null
+  error: string | null
+  sessionId: string | null
+  usage: unknown
+  frames: { total: number; thinking: number; text: number; toolCall: number; toolResult: number }
+  files: string[]
+}
+
+export const RUN_ARCHIVE_SCHEMA_VERSION = 1
+
+/** run 目录：`<root>/threads/<threadId>/runs/<runId>`（只用 id）。 */
+export function runDirPath(root: string, threadId: string, runId: string): string {
+  return path.join(root, 'threads', threadId, 'runs', runId)
+}
+
+/** 派发提示词：`runs/<runId>/prompt.md`。 */
+export function runPromptPath(root: string, threadId: string, runId: string): string {
+  return path.join(runDirPath(root, threadId, runId), 'prompt.md')
+}
+
+/** 全帧流水：`runs/<runId>/transcript.jsonl`。 */
+export function runTranscriptPath(root: string, threadId: string, runId: string): string {
+  return path.join(runDirPath(root, threadId, runId), 'transcript.jsonl')
+}
+
+/** 元数据：`runs/<runId>/meta.json`。 */
+export function runMetaPath(root: string, threadId: string, runId: string): string {
+  return path.join(runDirPath(root, threadId, runId), 'meta.json')
+}
+
+/** 线程执行索引：`threads/<threadId>/index.md`。 */
+export function threadIndexPath(root: string, threadId: string): string {
+  return path.join(root, 'threads', threadId, 'index.md')
+}
+
+/** 表头里的派发信息：给人看的上下文块，不参与执行（模型读的是后面的原文）。 */
+function renderPromptDoc(
+  run: Pick<ArchiveRun, 'id' | 'turn'>,
+  labels: RunArchiveLabels,
+  prompt: string,
+  at: string,
+): string {
+  const head = [
+    '<!-- 本轮派发信息（宿主写入，修改不影响执行）',
+    `runId: ${run.id}`,
+    `turn: ${run.turn}`,
+    `任务: ${labels.taskTitle ?? '-'} <${labels.taskId ?? '-'}>`,
+    `阶段: ${labels.stageName ?? '-'} <${labels.stageId ?? '-'}>`,
+    `智能体: ${labels.agentName ?? '-'} <${labels.agentId ?? '-'}>`,
+    `派发时间: ${at}`,
+    '-->',
+    '',
+  ].join('\n')
+  return head + (prompt.endsWith('\n') ? prompt : `${prompt}\n`)
+}
+
+/**
+ * 写本轮派发提示词（M16）。
+ *
+ * 只对挂线程的 `stage` run 生效：聊天 run 的提示词由对话消息还原，阶段 run 的提示词
+ * 是内核按阶段 + 线程上下文拼出来的那一份——出问题时最先要看的就是它。
+ */
+export function writeRunPrompt(
+  root: string | undefined,
+  run: Pick<ArchiveRun, 'id' | 'threadId' | 'purpose' | 'turn'>,
+  labels: RunArchiveLabels,
+  prompt: string,
+  at: string,
+): boolean {
+  if (root === undefined || run.threadId === null || run.purpose !== 'stage') return false
+  if (prompt.trim() === '') return false
+  return writeAtomic(
+    runPromptPath(root, run.threadId, run.id),
+    renderPromptDoc(run, labels, prompt, at),
+  )
+}
+
+/** 全帧流水（JSON Lines）：每行是一条原样帧，`jq` 可直接按 `type` 过滤。 */
+export function renderTranscript(frames: readonly RunEvent[]): string {
+  if (frames.length === 0) return ''
+  return `${frames.map((frame) => JSON.stringify(frame)).join('\n')}\n`
+}
+
+/** 帧统计：写进 meta，一眼看出这轮有没有思考、调了多少工具。 */
+export function summarizeFrames(frames: readonly RunEvent[]): RunArchiveMeta['frames'] {
+  const summary = { total: frames.length, thinking: 0, text: 0, toolCall: 0, toolResult: 0 }
+  for (const frame of frames) {
+    if (frame.type === 'thinking') summary.thinking += 1
+    else if (frame.type === 'text') summary.text += 1
+    else if (frame.type === 'tool_call') summary.toolCall += 1
+    else if (frame.type === 'tool_result') summary.toolResult += 1
+  }
+  return summary
+}
+
+/** 组装 `meta.json`：状态以回执为准（投影行可能还没被终态事实刷新）。 */
+export function buildRunMeta(
+  run: ArchiveRun,
+  labels: RunArchiveLabels,
+  frames: readonly RunEvent[],
+  receipt: Pick<
+    Receipt,
+    'status' | 'sessionId' | 'usage' | 'exitCode' | 'errorCode' | 'error' | 'durationMs'
+  >,
+  at: string,
+  files: readonly string[],
+): RunArchiveMeta {
+  return {
+    schemaVersion: RUN_ARCHIVE_SCHEMA_VERSION,
+    runId: run.id,
+    threadId: run.threadId ?? '',
+    ...labels,
+    purpose: run.purpose,
+    turn: run.turn,
+    status: receipt.status,
+    executorKey: run.executorKey,
+    createdAt: run.createdAt,
+    startedAt: run.startedAt,
+    endedAt: run.endedAt ?? at,
+    durationMs: receipt.durationMs ?? run.durationMs,
+    exitCode: receipt.exitCode ?? run.exitCode,
+    errorCode: receipt.errorCode ?? run.errorCode,
+    error: receipt.error ?? run.error,
+    sessionId: receipt.sessionId ?? run.sessionId,
+    usage: receipt.usage ?? run.usage,
+    frames: summarizeFrames(frames),
+    files: [...files],
+  }
+}
+
+/** 读线程下所有 `meta.json`（坏文件跳过：索引是重建出来的，不能因为一行坏 JSON 就空）。 */
+export function readRunMetas(root: string, threadId: string): RunArchiveMeta[] {
+  const dir = path.join(root, 'threads', threadId, 'runs')
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return []
+  }
+  const metas: RunArchiveMeta[] = []
+  for (const entry of entries) {
+    const file = path.join(dir, entry, 'meta.json')
+    if (!existsSync(file)) continue
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as RunArchiveMeta
+      if (typeof parsed?.runId === 'string') metas.push(parsed)
+    } catch {
+      // 单项损坏只丢这一条：其余 run 仍要出现在索引里
+    }
+  }
+  return metas.sort((left, right) =>
+    (left.startedAt ?? left.createdAt).localeCompare(right.startedAt ?? right.createdAt),
+  )
+}
+
+/** 表格单元格：竖线与换行会破坏 Markdown 表格，统一转义。 */
+function cell(value: string | null | undefined): string {
+  const text = value === null || value === undefined || value.trim() === '' ? '-' : value.trim()
+  return text.replace(/\|/g, '\\|').replace(/\r?\n/g, ' ')
+}
+
+/** 时间列：`2026-11-10T08:07:00.123Z` → `11-10 08:07`（UTC，与事实日志同源）。 */
+function stamp(value: string | null): string {
+  if (value === null || value.length < 16) return '-'
+  return `${value.slice(5, 10)} ${value.slice(11, 16)}`
+}
+
+/** 用时列：毫秒转「12.4s」/「1m02s」，无耗时写 `-`。 */
+function elapsed(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms) || ms < 0) return '-'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  return `${Math.floor(ms / 60_000)}m${String(Math.floor((ms % 60_000) / 1000)).padStart(2, '0')}s`
+}
+
+/**
+ * 线程执行索引（Markdown）：**这是人找产物的入口**。
+ *
+ * 用户能记住的是「任务 + 阶段 + 第几轮」，不是 UUID；所以索引必须把
+ * runId 与任务/阶段/轮次/状态/文件清单排在一张表里。整表由 `meta.json` 重建，
+ * 同一个 run 重跑只会覆盖自己那一行。
+ */
+export function renderThreadIndex(threadId: string, metas: readonly RunArchiveMeta[]): string {
+  const lines = [
+    `# 线程执行索引`,
+    '',
+    `- 线程：\`${threadId}\``,
+    `- 每个 run 一个目录：\`runs/<runId>/\`，内含 \`prompt.md\`（派发提示词）、`,
+    '  `transcript.jsonl`（全帧流水，含 thinking 帧）、`output.md`（本轮产出）、`review.md`（评审报告，若有）、`meta.json`（元数据）。',
+    '- 本表由宿主在每次 run 终态时重建；时间列为 UTC。',
+    '',
+    '| # | 时间 | 阶段 | 任务 | 轮次 | 状态 | 用时 | runId | 文件 |',
+    '| - | ---- | ---- | ---- | ---- | ---- | ---- | ----- | ---- |',
+  ]
+  metas.forEach((meta, index) => {
+    lines.push(
+      `| ${index + 1} | ${stamp(meta.startedAt ?? meta.createdAt)} | ${cell(meta.stageName)} | ${cell(meta.taskTitle)} | ` +
+        `${meta.turn} | ${meta.status} | ${elapsed(meta.durationMs)} | \`${meta.runId}\` | ` +
+        `${meta.files.length === 0 ? '-' : meta.files.map((file) => `[\`${file}\`](runs/${meta.runId}/${file})`).join(' ')} |`,
+    )
+  })
+  if (metas.length === 0) lines.push('| - | - | 还没有终态 run | - | - | - | - | - | - |')
+  return `${lines.join('\n')}\n`
+}
+
+/** 重建一个线程的索引（读目录 → 渲染 → 原子写）。失败不抛错。 */
+export function writeThreadIndex(root: string, threadId: string): boolean {
+  return writeAtomic(
+    threadIndexPath(root, threadId),
+    renderThreadIndex(threadId, readRunMetas(root, threadId)),
+  )
+}
+
+/** 归档目录里一个 run 的固定文件顺序（`meta.files` 按它排列，缺的跳过）。 */
+const RUN_ARCHIVE_FILES = ['prompt.md', 'transcript.jsonl', 'output.md', 'review.md'] as const
+
+/** 读单个 `meta.json`；缺失或坏 JSON 返回 undefined（回填是尽力而为）。 */
+function readRunMeta(target: string): RunArchiveMeta | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(target, 'utf8')) as RunArchiveMeta
+    return typeof parsed?.runId === 'string' ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 从全帧流水拼正文：与执行器累计 `state.text` 同口径——只取 `text` 帧，按顺序原样追加。
+ *
+ * 中间的 `thinking` / `tool_call` / `tool_result` 帧不进正文；坏行跳过（一行坏不该废掉整轮）。
+ */
+function textFromTranscript(target: string): string {
+  let raw: string
+  try {
+    raw = readFileSync(target, 'utf8')
+  } catch {
+    return ''
+  }
+  const parts: string[] = []
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed === '') continue
+    try {
+      const frame = JSON.parse(trimmed) as { type?: unknown; text?: unknown }
+      if (frame.type === 'text' && typeof frame.text === 'string') parts.push(frame.text)
+    } catch {
+      // 坏行跳过
+    }
+  }
+  return parts.join('')
+}
+
+/**
+ * 回填历史 run 的 `output.md`（一次性，幂等）。
+ *
+ * 为什么要它：`output.md` 落盘晚于最早的终态归档，老 run 只有 `transcript.jsonl`——
+ * 任务索引按规则给模型一个 `output.md` 路径，模型读一次失败才回退，每轮都白吃一次。
+ * 这里把正文从流水里拼回来，与 `withRunArtifacts` 同口径：
+ * `text` 帧拼接非空就用它，否则用 `meta.error` 写 `# 错误` 段（都没有就跳过）。
+ *
+ * 三条边界：
+ * - 已有 `output.md` 的 run 一律不动（幂等，重复调用无副作用）；
+ * - 补写成功后按固定顺序重算 `meta.files`，让索引能把新文件列出来；
+ * - 顺带校准 `meta.files` 与磁盘的一致性：已下线的产物类型（如 `thinking.md`）不再被索引列出，
+ *   所以这条路径也是「删掉一种产物」之后的陈留清理入口；
+ * - 全程 `writeAtomic` + 容错读取，坏文件只跳过那一条，不影响其余 run 与整表重建。
+ *
+ * @returns 实际补写的 run 数（调用方可据此决定要不要提示用户）
+ */
+export function backfillRunOutputs(root: string | undefined): number {
+  if (root === undefined) return 0
+  const threadsDir = path.join(root, 'threads')
+  let threads: string[]
+  try {
+    threads = readdirSync(threadsDir)
+  } catch {
+    return 0
+  }
+  let filled = 0
+  for (const threadId of threads) {
+    let runIds: string[]
+    try {
+      runIds = readdirSync(path.join(threadsDir, threadId, 'runs'))
+    } catch {
+      continue
+    }
+    let indexDirty = false
+    for (const runId of runIds) {
+      const dir = runDirPath(root, threadId, runId)
+      const meta = readRunMeta(runMetaPath(root, threadId, runId))
+      let touched = false
+      if (!existsSync(runOutputPath(root, threadId, runId))) {
+        const text = textFromTranscript(runTranscriptPath(root, threadId, runId))
+        const reason = (meta?.error ?? '').trim() !== '' ? meta?.error : meta?.errorCode
+        const body =
+          text.trim() !== ''
+            ? text
+            : reason === undefined || reason === null || reason.trim() === ''
+              ? ''
+              : `# 错误\n\n${reason}\n`
+        if (body !== '' && writeRunOutput(root, threadId, runId, body)) {
+          filled += 1
+          touched = true
+        }
+      }
+      // `files` 与磁盘不一致就重写：删掉的产物类型（如 `thinking.md`）不能再被索引继续列出。
+      if (meta !== undefined) {
+        const actual = RUN_ARCHIVE_FILES.filter((file) => existsSync(path.join(dir, file)))
+        if (actual.join(',') !== meta.files.join(',')) {
+          meta.files = actual
+          writeAtomic(runMetaPath(root, threadId, runId), `${JSON.stringify(meta, null, 2)}\n`)
+          touched = true
+        }
+      }
+      if (touched) indexDirty = true
+    }
+    if (indexDirty) writeThreadIndex(root, threadId)
+  }
+  return filled
+}
+
+/** `archiveRunTerminal` 的入参（宿主在 `run.receipt` 之前调用）。 */
+export interface RunArchiveInput {
+  run: ArchiveRun
+  labels: RunArchiveLabels
+  frames: readonly RunEvent[]
+  receipt: Receipt
+  /** 终态落盘时刻（ISO）；`runs.endedAt` 还没被投影刷到时用它兜底 */
+  at: string
+}
+
+/**
+ * 终态归档（M16）：写 `transcript.jsonl` / `meta.json`，再重建线程索引。
+ *
+ * 调用顺序要求：先 `withRunArtifacts`（写 `output.md` / `review.md`），再调本函数——
+ * `meta.json` 的 `files` 列的是**已经存在**的文件，顺序反了会漏报。
+ * 每一步落盘都走 `writeAtomic`（失败返回 false，不抛错），归档失败不影响回执与推进。
+ */
+export function archiveRunTerminal(root: string | undefined, input: RunArchiveInput): void {
+  const { run, labels, frames, receipt, at } = input
+  if (root === undefined || run.threadId === null || run.purpose !== 'stage') return
+  const threadId = run.threadId
+  const files: string[] = []
+  if (existsSync(runPromptPath(root, threadId, run.id))) files.push('prompt.md')
+  const transcript = renderTranscript(frames)
+  if (transcript !== '' && writeAtomic(runTranscriptPath(root, threadId, run.id), transcript))
+    files.push('transcript.jsonl')
+  if (existsSync(runOutputPath(root, threadId, run.id))) files.push('output.md')
+  if (existsSync(reviewArtifactPath(root, threadId, run.id))) files.push('review.md')
+  const meta = buildRunMeta(run, labels, frames, receipt, at, files)
+  writeAtomic(runMetaPath(root, threadId, run.id), `${JSON.stringify(meta, null, 2)}\n`)
+  writeThreadIndex(root, threadId)
 }

@@ -24,7 +24,12 @@ import type { RunErrorCode, RunEvent, RunEventRow, RunRow, Runtime } from '../pr
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
 import type { Fact, Id, Iso } from '../kernel/types'
 import { killPidTree } from './process'
-import { withRunArtifacts } from './artifacts'
+import {
+  archiveRunTerminal,
+  withRunArtifacts,
+  writeRunPrompt,
+  type RunArchiveLabels,
+} from './artifacts'
 import type { ProcessRegistry } from './process-registry'
 import type { DispatchResult } from './store/index'
 
@@ -109,6 +114,16 @@ export interface SchedulerDeps {
    * `artifact` 为 null，索引段退化成「完整清单：报告 id」。
    */
   artifactsRoot?: string
+  /**
+   * 归档用的名称标签（M16）：任务标题 / 阶段名 / 智能体名，装配根从视图查。
+   * 缺省只写 id——归档照常，只是人不好认。
+   */
+  describeRun?: (run: RunRow) => RunArchiveLabels
+  /**
+   * 该 run 的全量帧（M16 终态归档读 `run_events`）：写 `transcript.jsonl`。
+   * 缺省不提供时只归档提示词与元数据。
+   */
+  framesOf?: (runId: Id) => RunEvent[]
   /** 聊天续接轮的「完整历史 prompt」：协议会话失效重试时用（`Turn.fallbackPrompt`）。
    * 装配根按投影里的智能体 + 对话消息拼；缺省不提供（重试退回当前 prompt）。
    */
@@ -287,6 +302,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     run.runtimeId === null
       ? undefined
       : deps.runtimes().find((runtime) => runtime.id === run.runtimeId)
+
+  /** 归档标签（M16）：装配根没接视图查询时退化成 id——可读性差，但归档不中断。 */
+  const labelsOf = (run: RunRow): RunArchiveLabels =>
+    deps.describeRun?.(run) ?? {
+      taskId: run.taskId,
+      taskTitle: null,
+      stageId: run.stageId,
+      stageName: null,
+      agentId: run.agentId,
+      agentName: null,
+    }
 
   /** 宿主兜底终态（执行器不可达 / 缺失配置）：run 不悬空（D14）。 */
   const settleFailed = (run: RunRow, errorCode: RunErrorCode, error: string): void => {
@@ -495,6 +521,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
     try {
       registry.begin(run.id, now())
+      // 派发前先落本轮提示词（M16）：中途崩溃 / 失败也能回看「到底给了它什么」
+      writeRunPrompt(deps.artifactsRoot, run, labelsOf(run), run.prompt, now())
       const receipt = await port.run(turnOf(run, runtime, controller.signal), io)
       // 兜底取消已落终态：迟到的回执不再写事实（清理统一走 finally）
       if (finished) return
@@ -509,6 +537,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           ? { ...receipt, sessionId: observedSession }
           : receipt,
       )
+      // 归档（M16）必须在 output/review 之后：meta.json 列的是已经存在的文件
+      archiveRunTerminal(deps.artifactsRoot, {
+        run,
+        labels: labelsOf(run),
+        frames: deps.framesOf?.(run.id) ?? [],
+        receipt: finalReceipt,
+        at: now(),
+      })
       dispatch({ type: 'run.receipt', runId: run.id, receipt: finalReceipt })
     } catch (error) {
       // 宿主兜底终态已写过（执行器迟到的抛错只是收尾信号）

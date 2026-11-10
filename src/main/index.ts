@@ -7,6 +7,7 @@ import { nextWakeAt } from '../kernel/next-wake'
 import { project } from '../kernel/project'
 import { viewSpec } from '../kernel/view-spec'
 import type { KernelPort } from '../kernel/types'
+import { backfillRunOutputs } from '../host/artifacts'
 import { createClock, type Clock } from '../host/clock'
 import { createChannels, type Channels } from '../host/channels'
 import {
@@ -179,6 +180,10 @@ if (app.requestSingleInstanceLock()) {
     // 产物落盘根：评审报告（review.md）与本轮正文（output.md）都落这里；
     // 内核只拿它拼「任务索引」里的路径，不读文件。
     const artifactsRoot = path.join(userData, 'artifacts')
+    // 一次性回填（幂等）：output.md 落盘晚于最早的终态归档，老 run 只有全帧流水。
+    // 索引按规则给模型 output.md 路径，缺文件时每轮都会先 read 失败一次，所以启动时补齐。
+    // 失败 / 目录不存在都只是少补几条，不阻塞启动。
+    backfillRunOutputs(artifactsRoot)
     const db = openDatabase(path.join(userData, 'ai-workflow.db'))
     // 内核门面：decide / project / viewSpec / nextWakeAt 是纯函数，store 与 clock 只依赖这个端口。
     const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
@@ -554,6 +559,31 @@ if (app.requestSingleInstanceLock()) {
       // M14：评审报告正文落 `<artifactsRoot>/threads/<threadId>/runs/<runId>/review.md`；
       // M15：同一轮正文另落 `output.md`（任务索引据此按需读）
       artifactsRoot,
+      // M16 归档标签：任务标题 / 阶段名 / 智能体名（查不到就给 id，不阻断归档）
+      describeRun: (run) => {
+        const task = run.taskId === null ? null : store.query('task.byId', { taskId: run.taskId })
+        const stage =
+          task === null || run.stageId === null
+            ? undefined
+            : store
+                .query('workflows.all')
+                .find((workflow) => workflow.id === task.workflowId)
+                ?.stages.find((item) => item.id === run.stageId)
+        const agent =
+          run.agentId === null
+            ? undefined
+            : store.query('agents.all').find((item) => item.id === run.agentId)
+        return {
+          taskId: run.taskId,
+          taskTitle: task?.title ?? null,
+          stageId: run.stageId,
+          stageName: stage?.name ?? null,
+          agentId: run.agentId,
+          agentName: agent?.name ?? null,
+        }
+      },
+      // M16 终态归档的帧来源：run_events 投影（与 UI 时间线同源）
+      framesOf: (runId) => store.query('run.events', { runId }),
       // 重启后重跑同一 run 时帧 seq 继续全局单调（读 run_events 投影的 MAX(seq)）
       lastFrameSeq: (runId) => store.query('run.last-event-seq', { runId }),
       registry,

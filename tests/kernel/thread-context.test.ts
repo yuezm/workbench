@@ -860,6 +860,34 @@ describe('kernel/thread-context 任务索引（M15）', () => {
     expect(bare).not.toContain('/runs/')
   })
 
+  it('读取规则是白名单：只点名 output.md，明确禁止把流水当上下文读', () => {
+    const text = indexBlock(view({ artifactsRoot: 'C:/data/artifacts' }), thread(), 'task-1')
+    expect(text).toContain('只打开该轮的 `output.md`')
+    expect(text).toContain('`transcript.jsonl`（全帧流水，单轮数百 KB）')
+    expect(text).toContain('不要作为上下文读取')
+    expect(text).toContain('不要遍历 `runs/`')
+    // 折叠到上限时规则也要留着：它是防止整读几百 KB 流水的唯一约束
+    const manyTasks = new Map<string, Task>()
+    const manyRuns = new Map<string, RunRow>()
+    const ids: string[] = []
+    for (let index = 0; index < 40; index += 1) {
+      const id = `task-${index}`
+      ids.push(id)
+      manyTasks.set(id, task({ id }))
+      manyRuns.set(`run-${index}`, run({ id: `run-${index}`, taskId: id }))
+    }
+    const seeded = view({
+      artifactsRoot: 'C:/data/artifacts',
+      tasks: manyTasks,
+      runs: manyRuns,
+      threads: new Map([['th-1', thread({ taskIds: ids, rootTaskIds: ids })]]),
+    })
+    const folded = indexBlock(seeded, threadOf(seeded), 'task-0')
+    expect(folded).toContain('还有')
+    expect(folded).toContain('只打开该轮的 `output.md`')
+    expect(Array.from(folded).length).toBeLessThanOrEqual(THREAD_LIMITS.indexChars)
+  })
+
   it('当前任务与祖先链优先；超出条目上限折叠成计数，当前任务不被折掉', () => {
     const tasks = new Map<string, Task>()
     const runs = new Map<string, RunRow>()

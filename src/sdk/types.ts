@@ -61,6 +61,18 @@ export interface ProcessCapability {
   findInDirs(command: string, dirs: string[]): string | null
 }
 
+/**
+ * 回执工具 server 的启动配置（M24）：宿主解析好，插件只负责塞进协议帧。
+ *
+ * 为什么由宿主给：定位脚本要读环境变量与文件系统（`plugins/**` 禁用 Node 内置），
+ * 开关也在宿主侧——默认关，没配好就等于不存在，执行器自动退回纯文本通道。
+ */
+export interface SdkReceiptTool {
+  command: string
+  args: string[]
+  env: Array<{ name: string; value: string }>
+}
+
 /** 宿主注入的路径（执行器用于跨轮续接的会话根等） */
 export interface SdkPaths {
   /** 协议会话持久化目录；宿主未配置时为 null */
@@ -71,6 +83,10 @@ export interface SdkPaths {
    * dsh 协议要求 `execute.cwd` 必须是非空绝对路径，不能省略。
    */
   cwd?: string
+  /**
+   * 回执工具 server（M24）：`null` / 缺省 = 不注入，回执只走输出末尾的 ```json 围栏块。
+   */
+  receiptTool?: SdkReceiptTool | null
 }
 
 // ---------- 网络能力（M7） ----------

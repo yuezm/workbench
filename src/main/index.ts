@@ -18,6 +18,7 @@ import {
 import { createEffects } from '../host/effects'
 import { createFactFeed, type FactFeed } from '../host/feed'
 import { noticesFromFacts } from '../host/notices'
+import { resolveReceiptTool } from '../host/receipt-tool'
 import { defaultSpawn, killPidTree } from '../host/process'
 import { createProcessRegistry } from '../host/process-registry'
 import { reconcile } from '../host/reconcile'
@@ -212,6 +213,11 @@ if (app.requestSingleInstanceLock()) {
       cwd: defaultWorkdir,
       notify,
       net,
+      // M24：回执工具 server 默认不注入（开关 + 脚本都要到位），拿不到就纯文本通道
+      receiptTool: resolveReceiptTool({
+        mainDir: __dirname,
+        resourcesDir: process.resourcesPath,
+      }),
     })
     // 执行器注册表：按运行时配置的 executorKey 取插件端口；未知 key 由调度器兜底终态。
     const executors = createExecutorRegistry(pluginExecutors, sdkHost)

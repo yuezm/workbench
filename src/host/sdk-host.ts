@@ -15,7 +15,14 @@
  * 不注入（M7：装配根注入 `host/net.ts` 的原件；没有原件时声明了 `net` 的插件调用即
  * `capability_unavailable`，不影响其它能力）。
  */
-import type { NetCapability, NotifyFn, SdkHost, SdkPaths, SpawnFn } from '../sdk/types'
+import type {
+  NetCapability,
+  NotifyFn,
+  SdkHost,
+  SdkPaths,
+  SdkReceiptTool,
+  SpawnFn,
+} from '../sdk/types'
 import { defaultScanDirs, findInDirs, resolveExecutable } from './executable'
 import { defaultSpawn, killProcessTree } from './process'
 
@@ -37,6 +44,8 @@ export interface SdkHostOptions {
   notify?: NotifyFn
   /** 网络原件（M7）：装配根注入 `host/net.ts` 的 `createNetCapability()`；缺省不注入 */
   net?: NetCapability
+  /** 回执工具 server（M24）：装配根注入 `host/receipt-tool` 的解析结果；缺省 null（不注入） */
+  receiptTool?: SdkReceiptTool | null
 }
 
 /** 缺省日志：M3 没有日志面板，插件日志先落主进程终端。 */
@@ -56,6 +65,7 @@ export function createSdkHost(options: SdkHostOptions = {}): SdkHost {
   const paths: SdkPaths = {
     sessionRoot: options.sessionRoot ?? null,
     cwd: options.cwd ?? process.cwd(),
+    receiptTool: options.receiptTool ?? null,
   }
 
   return {

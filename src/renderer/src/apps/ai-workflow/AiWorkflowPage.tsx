@@ -1,9 +1,14 @@
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useEffectEvent, useRef, useState, type ReactElement } from 'react'
 import { ArrowLeftIcon, SettingsIcon } from 'lucide-react'
 import type { Card, Project, ProjectInput, TaskInput } from '../../../../protocol/entities'
 import { FormError } from '../../components/ui/form-error'
 import { Button } from '../../components/ui/button'
 import { getKernelStore } from '../../shell/kernelStore'
+import {
+  clearOpenTarget,
+  subscribeOpenTarget,
+  type PendingOpenTarget,
+} from '../../shell/openTarget'
 import { useKernelViewState } from '../../shell/useKernelView'
 import { ApprovalBar } from './components/ApprovalBar'
 import { AgentManager } from './components/AgentManager'
@@ -123,6 +128,14 @@ export function AiWorkflowPage(): ReactElement {
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('chat')
   const [section, setSection] = useState<SettingsSection>('runtimes')
   /**
+   * 要定位并高亮的卡（卡 id）：点顶部通知条、或系统通知落点带 `cardId` 时给。
+   * 卡本体在 `ApprovalCards` 里（任务详情 / 会话内），由它滚到锚点并闪一下；普通导航
+   * （自己点任务、换项目、换栏目、返回）一律清空——否则下个页面会带着别人的高亮。
+   */
+  const [focusCardId, setFocusCardId] = useState<string | null>(null)
+  /** 已经处理过的落点序号：同一个落点只消费一次（重放 / StrictMode 双订阅都不重复跳转） */
+  const handledTargetSeq = useRef(0)
+  /**
    * 聊天状态机：侧栏（会话清单）与内容区（消息流）共用同一份。
    * 项目是聊天的顶层上下文（M11）：`null` = 默认目录，会话清单按它取。
    */
@@ -167,10 +180,12 @@ export function AiWorkflowPage(): ReactElement {
   const route = trail.length > 0 ? trail[trail.length - 1] : undefined
 
   const openTask = (taskId: string): void => {
+    setFocusCardId(null)
     setTrail((current) => [...current, { kind: 'task', taskId }])
   }
 
   const openThread = (threadId: string): void => {
+    setFocusCardId(null)
     setTrail((current) => [...current, { kind: 'thread', threadId }])
   }
 
@@ -178,6 +193,9 @@ export function AiWorkflowPage(): ReactElement {
    * 点顶部通知条：把人送到卡片所在的地方去处理。
    * 任务卡进任务详情（正文与选项在页面里）；聊天卡切到聊天栏目、把项目切到会话所属项目，
    * 再选中那个会话。没有落点（卡既没任务也没会话）时通知条整行禁用，走不到这里。
+   *
+   * 跳转完把这些卡的 id 交给 `focusCardId`：通知条只给标题，进来必须一眼看到是哪一张在等，
+   * 否则还是得在任务详情里自己翻（这正是「点了通知却还要翻找」的那半个问题）。
    */
   const openCard = (card: Card): void => {
     setView('workspace')
@@ -200,25 +218,88 @@ export function AiWorkflowPage(): ReactElement {
         break
       }
     }
+    setFocusCardId(card.id)
   }
 
+  /**
+   * 消费 shell 的落点：系统通知被点击（`main` 接住 → `bridge.onOpenTarget` → shell store）。
+   *
+   * 落到哪里只有三种：带会话 → 聊天栏 + 选会话（同 `openCard` 的会话分支，跨项目要连项目
+   * 一起切）；只有任务 → 任务详情（并把左侧项目切到任务所属项目，否则看板与会话清单都还
+   * 停在原来的项目上）；什么都没有 → 只切回工作台视图。三种落点都带 `cardId` 时交给
+   * `focusCardId` 去高亮。
+   *
+   * 用 `useEffectEvent`（而不是把这段放进 effect 主体）：这里要读最新的一批视图（会话清单、
+   * 聊天状态机）并连续改多处本地状态，放进 effect 主体就是「effect 里同步 setState」——
+   * 级联渲染，`react-hooks` v7 判 error；而 effect 事件拿到的是**最新一次渲染**的闭包，
+   * 订阅却只建立一次，不会因为视图刷新而反复退订重订。
+   *
+   * 项目归属只能问内核（`task.byId` 单次查询，绕开视图缓存）：任务卡可能来自别的项目。
+   * 查询失败**不弹错误条**——任务详情已经从落点打开了，这里只是左侧项目没跟过去，
+   * 报一条读错误反而盖住用户要看的内容。
+   */
+  const consumeOpenTarget = useEffectEvent((target: PendingOpenTarget | null): void => {
+    if (target === null || handledTargetSeq.current === target.seq) return
+    handledTargetSeq.current = target.seq
+    const targetSeq = target.seq
+    const { taskId, conversationId, cardId } = target
+    setView('workspace')
+
+    if (conversationId !== undefined) {
+      const conversation = allConversations.find((item) => item.id === conversationId)
+      if (conversation !== undefined) {
+        setSelectedProjectId(conversation.projectId ?? DEFAULT_PROJECT_ID)
+        setTrail([])
+      }
+      setWorkspaceSection('chat')
+      chat.selectConversation(conversationId)
+    } else if (taskId !== undefined) {
+      setWorkspaceSection('tasks')
+      setTrail([{ kind: 'task', taskId }])
+      void (async () => {
+        try {
+          const row = await getKernelStore().query('task.byId', { taskId })
+          // 期间又点了一条通知：这次查询已经过期，别用旧落点的项目盖掉新的
+          if (handledTargetSeq.current !== targetSeq) return
+          // 查不到（任务刚被删）按默认目录处理：落点本身已经打开过详情了
+          setSelectedProjectId(row?.projectId ?? DEFAULT_PROJECT_ID)
+        } catch {
+          // 见上：查不到就留在当前项目，不打断已经打开的详情页
+        }
+      })()
+    }
+
+    // 落点带卡就定位那一张；没有可定位的东西就清掉高亮，别把上一张的光环带到新页面
+    setFocusCardId(cardId ?? null)
+    // 消费即清空：落点是一次性的，留着会在重新挂载 / 重连时被重放一遍
+    clearOpenTarget()
+  })
+
+  // 订阅一次即可：`subscribeOpenTarget` 会把「还没被消费的落点」先重放一遍，
+  // 因此系统通知先于本组件挂载到达（窗口加载期间点的）也不会漏。
+  useEffect(() => subscribeOpenTarget(consumeOpenTarget), [])
+
   const back = (): void => {
+    setFocusCardId(null)
     setTrail((current) => current.slice(0, -1))
   }
 
   /** 切换栏目 / 视图都回到看板：详情栈不跨栏目保留，避免回来时停在别人家的页面 */
   const changeWorkspaceSection = (next: WorkspaceSection): void => {
+    setFocusCardId(null)
     if (next !== 'tasks') setTrail([])
     setWorkspaceSection(next)
   }
 
   const changeView = (next: View): void => {
+    setFocusCardId(null)
     if (next !== 'workspace') setTrail([])
     setView(next)
   }
 
   /** 换项目 = 换一批任务与会话：详情栈不跨项目保留（同切换栏目的理由） */
   const selectProject = (id: string): void => {
+    setFocusCardId(null)
     setSelectedProjectId(id)
     setTrail([])
   }
@@ -451,6 +532,8 @@ export function AiWorkflowPage(): ReactElement {
             error={chat.error}
             onSend={chat.sendMessage}
             onCancel={() => void chat.cancelRun()}
+            // 从通知条 / 系统通知进来时定位那张卡（本会话内的 open 卡）
+            focusCardId={focusCardId}
           />
         )}
 
@@ -488,7 +571,12 @@ export function AiWorkflowPage(): ReactElement {
               onOpenThread={openThread}
               onOpenTask={openTask}
               // 任务删了就不是「返回」：整段出栈回看板（线程可能随最后一个任务一起删了）
-              onRemoved={() => setTrail([])}
+              onRemoved={() => {
+                setFocusCardId(null)
+                setTrail([])
+              }}
+              // 从通知条 / 系统通知进来时定位那张卡（本任务内的 open 卡）
+              focusCardId={focusCardId}
             />
           ) : (
             <ThreadDetailPage
@@ -496,7 +584,10 @@ export function AiWorkflowPage(): ReactElement {
               onBack={back}
               onOpenTask={openTask}
               // 线程删了就不是「返回」，是这一页没了：整段出栈回到看板
-              onRemoved={() => setTrail([])}
+              onRemoved={() => {
+                setFocusCardId(null)
+                setTrail([])
+              }}
             />
           ))}
 

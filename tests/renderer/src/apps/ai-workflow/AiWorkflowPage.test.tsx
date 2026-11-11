@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Command } from '../../../../../src/protocol/commands'
 import type {
   Agent,
@@ -20,6 +20,10 @@ import {
   AiWorkflowPage,
   cardLanding,
 } from '../../../../../src/renderer/src/apps/ai-workflow/AiWorkflowPage'
+import {
+  pushOpenTarget,
+  resetOpenTargetForTest,
+} from '../../../../../src/renderer/src/shell/openTarget'
 import { installFakeKernel, type FakeKernel } from '../../../shell/fake-kernel'
 
 const runtime: Runtime = {
@@ -81,6 +85,16 @@ const project: Project = {
   id: 'p1',
   name: '工作台',
   path: 'D:\\Codes\\workbench',
+  description: '',
+  createdAt: 't',
+  updatedAt: 't',
+}
+
+/** 另一个项目：系统通知的落点可能来自别的项目，左侧项目要跟着任务走 */
+const otherProject: Project = {
+  id: 'p2',
+  name: '另一个项目',
+  path: 'D:\\Codes\\other',
   description: '',
   createdAt: 't',
   updatedAt: 't',
@@ -189,6 +203,8 @@ let kernel: FakeKernel
 
 beforeEach(() => {
   kernel = installFakeKernel()
+  // 落点是 shell 的模块级 store：每个用例从「没有落点」开始，避免上一个用例的点击串场
+  resetOpenTargetForTest()
 })
 
 /** 工作台基础数据：项目 / 工作流 / 智能体 / 任务 / 运行记录 / 设置区清单 */
@@ -1032,13 +1048,18 @@ describe('AiWorkflowPage', () => {
     expect(within(bar).getByText('继续吗')).toBeInTheDocument()
     expect(within(bar).getByText('2 项待选')).toBeInTheDocument()
     expect(within(bar).queryByText('选一个')).toBeNull()
-    expect(within(bar).queryByRole('button', { name: '继续' })).toBeNull()
+    // 条子里没有选项（选项在任务内部，且是「先选一项，再提交」的 radio）
+    expect(within(bar).queryByRole('radio', { name: '继续' })).toBeNull()
+    expect(within(bar).queryByRole('button', { name: '提交所选' })).toBeNull()
 
     await user.click(within(bar).getByRole('button', { name: /继续吗/ }))
     expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
     expect(await screen.findByText('选一个')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '继续' }))
+    // 选中 ≠ 提交：先点一行，再按「提交所选」
+    await user.click(screen.getByRole('radio', { name: '继续' }))
+    expect(kernel.dispatched).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: '提交所选' }))
     await waitFor(() =>
       expectDispatched({ type: 'card.answer', cardId: 'card-1', optionIndex: 0, via: 'ui' }),
     )
@@ -1089,10 +1110,267 @@ describe('AiWorkflowPage', () => {
 
     // 切换会话后卡片本体出现在会话里
     expect(await screen.findByRole('heading', { name: '第二段对话' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '停止' }))
+    await user.click(screen.getByRole('radio', { name: '停止' }))
+    await user.click(screen.getByRole('button', { name: '提交所选' }))
     await waitFor(() =>
       expectDispatched({ type: 'card.answer', cardId: 'card-c', optionIndex: 1, via: 'ui' }),
     )
+  })
+
+  /**
+   * 落点（M27）：系统通知 / 通知条点进来之后，除了「进任务详情 / 会话」还要**定位到那张卡**。
+   * 通知条只给标题，落点不给高亮的话人还得在任务里自己翻——那正是要修的半个问题。
+   * 锚点与高亮由 `ApprovalCards` 打在卡片元素上（`data-card-id` / `data-focused`）。
+   */
+  describe('落点与高亮定位', () => {
+    /** 卡上出现 `data-focused="true"`：`ApprovalCards` 按 `focusCardId` 找到锚点后打的标记 */
+    async function expectFocused(cardId: string): Promise<void> {
+      await waitFor(() => {
+        const node = document.querySelector(`[data-card-id="${cardId}"]`)
+        expect(node).not.toBeNull()
+        expect(node).toHaveAttribute('data-focused', 'true')
+      })
+    }
+
+    it('点顶部通知条条目：进任务详情，并高亮那一张卡', async () => {
+      seedBase()
+      kernel.setView('cards.open', undefined, [{ ...card, taskId: 't1' }])
+      const user = userEvent.setup()
+      render(<AiWorkflowPage />)
+
+      const bar = await screen.findByRole('region', { name: '待审批' })
+      await user.click(within(bar).getByRole('button', { name: /继续吗/ }))
+
+      expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+      await expectFocused('card-1')
+    })
+
+    it('系统通知落点（taskId + cardId）：进对应任务详情并定位卡片，落点消费后不重放', async () => {
+      seedBase()
+      kernel.setView('cards.open', undefined, [{ ...card, taskId: 't1' }])
+      const user = userEvent.setup()
+      render(<AiWorkflowPage />)
+      // 先落到看板：落点必须自己把人送到任务详情，而不是等用户点
+      await user.click(await screen.findByRole('button', { name: '任务' }))
+      expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+
+      act(() => pushOpenTarget({ appId: 'ai-workflow', taskId: 't1', cardId: 'card-1' }))
+
+      expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+      await expectFocused('card-1')
+
+      // 落点是一次性的：返回看板后再来一批事实（必然重渲染），不该被拉回详情
+      await user.click(screen.getByRole('button', { name: '返回' }))
+      expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
+      act(() => kernel.pushFacts(['task.updated']))
+      expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
+    })
+
+    it('聊天落点（conversationId + cardId）：切到聊天栏目、选中会话并定位卡片', async () => {
+      seedBase()
+      // 跨项目会话：`openCard` 与新落点都靠 `conversations.all` 反查会话所属项目，切完项目再选中
+      kernel.setView('conversations.all', undefined, [
+        conversation,
+        { ...conversation, id: 'c2', title: '第二段对话', projectId: 'p2' },
+      ])
+      kernel.setView('projects.all', undefined, [project, otherProject])
+      kernel.setView('conversations.byProject', { projectId: 'p2' }, [
+        { ...conversation, id: 'c2', title: '第二段对话', projectId: 'p2' },
+      ])
+      kernel.setView('cards.open', undefined, [
+        { ...card, id: 'card-c', taskId: null, conversationId: 'c2', title: '要继续吗' },
+      ])
+      const user = userEvent.setup()
+      render(<AiWorkflowPage />)
+      // 先在任务栏，落点要自己切回聊天
+      await user.click(await screen.findByRole('button', { name: '任务' }))
+      expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+
+      act(() => pushOpenTarget({ appId: 'ai-workflow', conversationId: 'c2', cardId: 'card-c' }))
+
+      expect(await screen.findByRole('heading', { name: '第二段对话' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '聊天' })).toHaveAttribute('aria-current', 'page')
+      // 项目跟着会话走（会话挂在 p2）
+      expect(screen.getByRole('button', { name: '项目：另一个项目' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      )
+      await expectFocused('card-c')
+    })
+
+    it('系统通知落点：左侧项目跟着任务所属项目切（task.byId 单次查询）', async () => {
+      seedBase()
+      // 任务属于 p2，而页面当前在 p1：只打开详情不切项目的话，看板与会话清单都还停在 p1
+      kernel.setView('projects.all', undefined, [project, otherProject])
+      kernel.setView('tasks.byProject', { projectId: 'p2' }, [{ ...task, projectId: 'p2' }])
+      kernel.setView('task.byId', { taskId: 't1' }, { ...task, projectId: 'p2' })
+      render(<AiWorkflowPage />)
+      expect(await screen.findByRole('button', { name: '项目：工作台' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      )
+
+      act(() => pushOpenTarget({ appId: 'ai-workflow', taskId: 't1' }))
+
+      expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: '项目：另一个项目' })).toHaveAttribute(
+          'aria-current',
+          'page',
+        ),
+      )
+    })
+
+    it('系统通知落点：任务已被删（归属查询为空）时项目回落默认目录，详情照常打开', async () => {
+      seedBase()
+      // 任务行已经不在（别处删了）：落点打开详情会显示「任务不存在」，左侧不该停在旧项目
+      kernel.setView('task.byId', { taskId: 't1' }, null)
+      render(<AiWorkflowPage />)
+
+      act(() => pushOpenTarget({ appId: 'ai-workflow', taskId: 't1' }))
+
+      expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute(
+          'aria-current',
+          'page',
+        ),
+      )
+    })
+
+    it('连点两条任务通知：迟到的归属查询不覆盖后一条落点的项目', async () => {
+      seedBase()
+      kernel.setView('projects.all', undefined, [project, otherProject])
+      kernel.setView('task.byId', { taskId: 't1' }, { ...task, projectId: 'p2' })
+      kernel.setView('task.byId', { taskId: 't2' }, { ...task, id: 't2', projectId: 'p1' })
+
+      // 让第一条落点的归属查询卡住：模拟「查询还在路上，人已经点了下一条通知」
+      const realQuery = kernel.store.query.bind(kernel.store)
+      let releaseFirst: (value: Task | null) => void = () => {}
+      const spy = vi.spyOn(kernel.store, 'query').mockImplementation(((
+        view: string,
+        params?: unknown,
+      ) => {
+        if (view === 'task.byId' && (params as { taskId?: string } | undefined)?.taskId === 't1') {
+          return new Promise((resolve) => {
+            releaseFirst = resolve as (value: Task | null) => void
+          })
+        }
+        return realQuery(view as never, params as never)
+      }) as typeof kernel.store.query)
+
+      try {
+        render(<AiWorkflowPage />)
+        act(() => pushOpenTarget({ appId: 'ai-workflow', taskId: 't1' }))
+        act(() => pushOpenTarget({ appId: 'ai-workflow', taskId: 't2' }))
+
+        // 后一条先落地：项目切到它所属的 p1
+        await waitFor(() =>
+          expect(screen.getByRole('button', { name: '项目：工作台' })).toHaveAttribute(
+            'aria-current',
+            'page',
+          ),
+        )
+
+        // 迟到的第一条带着 p2 回来：seq 已经变了，这次结果必须被丢掉
+        await act(async () => {
+          releaseFirst({ ...task, projectId: 'p2' })
+        })
+        expect(screen.getByRole('button', { name: '项目：工作台' })).toHaveAttribute(
+          'aria-current',
+          'page',
+        )
+        expect(screen.getByRole('button', { name: '项目：另一个项目' })).not.toHaveAttribute(
+          'aria-current',
+          'page',
+        )
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it('落点会话不在本地清单里：仍切到聊天栏目，项目不动', async () => {
+      seedBase()
+      // 会话刚被别处删掉 / 清单还没取回来：找不到就只切栏目，别把项目也切走
+      kernel.setView('conversations.all', undefined, [])
+      render(<AiWorkflowPage />)
+
+      act(() => pushOpenTarget({ appId: 'ai-workflow', conversationId: 'c-missing' }))
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: '聊天' })).toHaveAttribute(
+          'aria-current',
+          'page',
+        ),
+      )
+      expect(screen.getByRole('button', { name: '项目：工作台' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      )
+    })
+
+    it('落点会话属于默认目录（projectId 为空）：项目回落到默认目录', async () => {
+      seedBase()
+      const orphan: Conversation = {
+        ...conversation,
+        id: 'c3',
+        title: '默认目录里的对话',
+        projectId: null,
+      }
+      kernel.setView('conversations.all', undefined, [orphan])
+      kernel.setView('conversations.unassigned', undefined, [orphan])
+      render(<AiWorkflowPage />)
+      // 视图是异步取的：等会话清单就绪再点通知（真实点击发生在启动完成之后）
+      await waitFor(() => expect(kernel.store.peek('conversations.all')).toEqual([orphan]))
+
+      act(() => pushOpenTarget({ appId: 'ai-workflow', conversationId: 'c3' }))
+
+      expect(await screen.findByRole('heading', { name: '默认目录里的对话' })).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute(
+          'aria-current',
+          'page',
+        ),
+      )
+      expect(await screen.findByRole('heading', { name: '默认目录里的对话' })).toBeInTheDocument()
+    })
+
+    it('落点只有 appId（没有任务 / 会话）：只切回工作台视图', async () => {
+      seedBase()
+      const user = userEvent.setup()
+      render(<AiWorkflowPage />)
+      await openView(user, '设置')
+      expect(await screen.findByRole('button', { name: '返回工作台' })).toBeInTheDocument()
+
+      act(() => pushOpenTarget({ appId: 'ai-workflow' }))
+
+      // 没有可定位的东西：能做的只有把人从设置带回工作台，页面不动
+      await waitFor(() =>
+        expect(screen.queryByRole('button', { name: '设置' })).toBeInTheDocument(),
+      )
+      expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '返回工作台' })).not.toBeInTheDocument()
+    })
+
+    it('系统通知落点：任务归属查询失败也不崩，项目留在原处、不多弹错误条', async () => {
+      seedBase()
+      // 单次查询与详情页共用 `task.byId`：这条路径失败时详情页照实播报读错误（既有行为），
+      // 但落点自己不能把「问项目归属失败」再挂一份到页面错误条上盖住内容
+      kernel.failView('task.byId', { taskId: 't1' }, '归属查询失败')
+      render(<AiWorkflowPage />)
+
+      act(() => pushOpenTarget({ appId: 'ai-workflow', taskId: 't1', cardId: 'card-1' }))
+
+      expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+      // 只有详情页那一份：落点的 catch 吞掉查询失败，不往页面顶部加第二条
+      expect(await screen.findAllByText('归属查询失败')).toHaveLength(1)
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: '项目：工作台' })).toHaveAttribute(
+          'aria-current',
+          'page',
+        ),
+      )
+    })
   })
 
   it('任务卡线程入口打开线程详情页；线程内点任务进详情；Esc 逐级返回看板', async () => {

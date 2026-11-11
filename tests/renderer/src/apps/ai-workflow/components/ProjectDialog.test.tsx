@@ -30,6 +30,8 @@ function stubBridge(pickFolder: () => Promise<string | null>): void {
     query: <T extends ViewId>(): Promise<ViewResult<T>> =>
       Promise.reject(new Error('本组件不用 query')),
     subscribe: () => () => {},
+    // 落点管道（系统通知 → shell）与本组件无关：装一个空订阅，真被调到也不影响选择文件夹
+    onOpenTarget: () => () => {},
     pickFolder,
     notify: () => {},
   }

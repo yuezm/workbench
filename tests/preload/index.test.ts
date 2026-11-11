@@ -5,6 +5,7 @@ import { NOTIFY_CHANNEL, type WorkbenchApi } from '../../src/shared/workbench-ap
 import {
   WORKBENCH_DISPATCH_CHANNEL,
   WORKBENCH_EVENT_CHANNEL,
+  WORKBENCH_OPEN_TARGET_CHANNEL,
   WORKBENCH_PICK_FOLDER_CHANNEL,
   WORKBENCH_QUERY_CHANNEL,
 } from '../../src/protocol/ipc'
@@ -43,11 +44,12 @@ describe('preload 桥接契约（M5 三动词）', () => {
     expect(names).toEqual(['workbench'])
   })
 
-  it('workbench 形状 = dispatch / query / subscribe / notify', async () => {
+  it('workbench 形状 = dispatch / query / subscribe / onOpenTarget / pickFolder / notify', async () => {
     const { workbench } = await loadExposed()
     expect(Object.keys(workbench).sort()).toEqual([
       'dispatch',
       'notify',
+      'onOpenTarget',
       'pickFolder',
       'query',
       'subscribe',
@@ -113,6 +115,46 @@ describe('preload 桥接契约（M5 三动词）', () => {
       title: '番茄时钟',
       body: '已进入短休息',
     })
+  })
+
+  it('onOpenTarget：订阅 open-target 通道，只把落点交给调用方（不引出 event），退订走 off', async () => {
+    const { workbench } = await loadExposed()
+    const cb = vi.fn()
+    const off = workbench.onOpenTarget(cb)
+    expect(ipcRenderer.on).toHaveBeenCalledWith(WORKBENCH_OPEN_TARGET_CHANNEL, expect.any(Function))
+
+    const listener = vi.mocked(ipcRenderer.on).mock.calls[0][1] as (
+      event: unknown,
+      payload: { appId: string; cardId: string },
+    ) => void
+    const target = { appId: 'ai-workflow', cardId: 'card-1', taskId: 't-1' }
+    // 事件对象不传出去：回调只收到落点本身
+    listener({ sender: '不该外泄' }, target)
+    expect(cb).toHaveBeenCalledWith(target)
+    expect(cb.mock.calls[0]).toEqual([target])
+
+    off()
+    expect(ipcRenderer.off).toHaveBeenCalledWith(WORKBENCH_OPEN_TARGET_CHANNEL, listener)
+  })
+
+  it('onOpenTarget：连续点击逐个透传，退订后不再打扰', async () => {
+    const { workbench } = await loadExposed()
+    const cb = vi.fn()
+    const off = workbench.onOpenTarget(cb)
+    const listener = vi.mocked(ipcRenderer.on).mock.calls[0][1] as (
+      event: unknown,
+      payload: { appId: string; taskId: string },
+    ) => void
+
+    listener({}, { appId: 'ai-workflow', taskId: 't-1' })
+    listener({}, { appId: 'ai-workflow', taskId: 't-2' })
+    expect(cb.mock.calls.map((call) => (call[0] as { taskId: string }).taskId)).toEqual([
+      't-1',
+      't-2',
+    ])
+
+    off()
+    expect(ipcRenderer.off).toHaveBeenCalledTimes(1)
   })
 
   it('notify：body 缺省时透传 undefined，不改变标题', async () => {

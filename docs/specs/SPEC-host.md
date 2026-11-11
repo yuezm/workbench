@@ -19,7 +19,8 @@ src/
 │   ├── scheduler.ts # 按运行时领取可跑的 run → 调用执行器插件 → 转交回执
 │   ├── executor.ts  # 执行器插件 → ExecutorPort 包装（终态归一、续接重试）
 │   ├── executor-registry.ts # 按 runtime.executorKey 取插件端口，组装 SchedulerExecutors
-│   ├── sdk-host.ts  # 插件能力面原件（spawn/解析/杀树/扫描目录/时钟/日志/会话根/notify）
+│   ├── sdk-host.ts  # 插件能力面原件（spawn/解析/杀树/扫描目录/时钟/日志/会话根/notify/回执工具）
+│   ├── receipt-tool.ts # 回执工具 server 的定位与开关（M24，默认关；读环境变量与文件系统）
 │   ├── reconcile.ts # 启动对账：租约过期、残留 running、未完成对话轮次
 │   ├── process.ts   # spawn、行读取、进程树终止（沿用现有实现）
 │   ├── artifacts.ts # 事件资料落盘 artifacts/<eventId>.md

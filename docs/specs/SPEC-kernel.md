@@ -282,6 +282,7 @@ export interface Change {
 - 有活跃 run 的工作流拒绝改阶段（改前后端校验同一规则）。
 - 人工任务的分活入口：`task.create` 时选工作流与起始阶段；进入该阶段时按 `entry_mode` 决定交给阶段绑定的智能体（`agentId`）、停下等人、还是仅停留。任务本身不携带「派给谁」的指令，派发只来自阶段配置。
 - **跨工作流交接（M7）**：阶段可配交接目标 `handoffWorkflowId` / `handoffStageId`（目标工作流不能是自身；目标阶段可空 = 目标首阶段）。任务**离开该阶段且向前**时（成功流转到下一阶段 / 向前拖拽 / 直接完成），内核在目标工作流建一条关联任务：`origin='handoff'`、`handoffFromTaskId` / `handoffFromStageId` 指向来源任务与阶段、新隐式线程（`source='handoff'`）、目标阶段为 `agent` 时同时产入口 run；**不回写来源任务**（不引入 `task.updated`）。同一 `(来源任务, 阶段)` 只交接一次；交接链深上限 8（沿 `handoffFromTaskId` 回溯），超深/目标失效/已交接一律零事实。打回与删阶段重挂不触发；目标工作流/阶段在保存时校验（`workflow.create/update` reject）。
+- **交接产物挂父任务（M25）**：交接任务同时写 `parentTaskId = 来源任务`，于是它进得进来源任务的子任务树与 `tasks.byParent`；但它**只有**在来源阶段显式配了 `onChildrenSettled` 时才参与 rollup ——「一条交接产物把来源任务叫醒」不是 M7 的语义，老工作流行为逐字不变（`childrenSettledFacts` 的交接守卫）。配了 `wake` 的用法是「缺陷全修完 → 自动唤醒测试任务去回归」。`rootTaskIds` 相应按**线程内**判根：父任务不在本线程（交接产物）时它在自己的新线程里就是根。副作用是 `spawnDepth` 沿 `parentTaskId` 回溯，交接产物因此继承来源任务的深度——一条 8 层交接链的末端任务不能再 spawn（两个预算在这个方向上叠加），这是刻意收紧而非 bug。
 - **`tasks.origin`**（M7 扩为 `manual` / `rule` / `handoff`）：`origin='handoff'` 只由内核产，Agent 与 UI 不能指定。
 - **阶段要干什么（M9）**：`workflow_stages.instructions`（空串 = 没写）。进到该阶段的任务，其提示词在「# 阶段：名称」之后多一段固定指令「## 阶段要做什么」+ 原文（只去首尾空白、保留换行）；空/全空白时不产这一段，老提示词逐字不变。编辑时说明变化与其它字段一样按 `sameStage` 比较，变化才产 `stage.updated`。
 - **闸门（M11）**：阶段可配 `gate = { maxFails, onPassStageId, onFailStageId }`（三列全空 = 不是闸门；必须 `entry_mode='agent'`，判定者就是该阶段的智能体）。`run.succeeded` 时读回执 `verdict`：`pass` 走通过分支并把任务上的 `gateFails` 清零；`fail` 未达 `maxFails` 走去未通过分支并 +1；`fail` 已达 `maxFails` **放行**走通过分支、任务打 `gate:degraded` 标签并追加一条 `task.comment_added`。`pass` 必须至少一条 `checks` 且退出码全为 0，否则按**没给结论**处理（任务原地停住，零事实）。`run.failed`（执行出错）走 `on_reject` 且**不消耗**预算。闸门未通过而离开不算 `exitsForward`，不触发交接；人工拖拽落位清零预算。
@@ -336,7 +337,7 @@ export interface ThreadRow {
   title: string
   status: 'open' | 'closed'
   taskIds: Id[] // 含派生任务
-  rootTaskIds: Id[] // 无 parentTaskId 的任务
+  rootTaskIds: Id[] // 线程内没有父任务的任务（父在别的线程里也算根）
   concurrency: number // 同时可运行的轮数，默认 1
   notesVersion: number
   notes: ThreadNote[] // 最近 50 条（保最新）；资料，不是指令

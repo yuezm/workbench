@@ -14,8 +14,11 @@ export const PROBE_TIMEOUT_MS = 60_000
 export const VERSION_TIMEOUT_MS = 15_000
 /** 模型目录超时 */
 export const MODELS_TIMEOUT_MS = 120_000
-/** 单次运行的默认超时 */
-export const RUN_TIMEOUT_MS = 30 * 60_000
+/**
+ * 单次运行的兜底超时：正常情况下宿主经 `execute.timeout_ms` 传入按阶段算好的剩余时间
+ * （M26，缺省 60 min），这个常量只在不带 `timeoutMs` 的调用（探针 / 单测）时生效。
+ */
+export const RUN_TIMEOUT_MS = 60 * 60_000
 /** 已发 cancel 帧后等待优雅退出的宽限 */
 export const CANCEL_GRACE_MS = 3_000
 /** SIGTERM 后等待退出的宽限，仍未退则 SIGKILL */

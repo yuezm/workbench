@@ -84,7 +84,15 @@ test('审批等待期：租约已释放、无子进程、无 Token、回答续�
   // 3) 经桥回答：卡变 answered，run 回到 queued 且续接同一会话、turn+1
   const answered = await page.evaluate(async (cardId) => {
     const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
-    return (await bridge.dispatch({ type: 'card.answer', commandId: 'e2e-answer', cardId, optionIndex: 0, via: 'ui' })).value
+    return (
+      await bridge.dispatch({
+        type: 'card.answer',
+        commandId: 'e2e-answer',
+        cardId,
+        optionIndex: 0,
+        via: 'ui',
+      })
+    ).value
   }, seeded.cardId)
   expect(answered).toMatchObject({ status: 'answered', optionIndex: 0, answeredBy: 'ui' })
 
@@ -119,7 +127,13 @@ test('审批等待期：租约已释放、无子进程、无 Token、回答续�
   const second = await page.evaluate(async (cardId) => {
     const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
     try {
-      await bridge.dispatch({ type: 'card.answer', commandId: 'e2e-answer-2', cardId, optionIndex: 0, via: 'ui' })
+      await bridge.dispatch({
+        type: 'card.answer',
+        commandId: 'e2e-answer-2',
+        cardId,
+        optionIndex: 0,
+        via: 'ui',
+      })
       return { rejected: false, message: '' }
     } catch (error) {
       return { rejected: true, message: error instanceof Error ? error.message : String(error) }

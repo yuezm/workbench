@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS ${name} (
   acceptance_json TEXT NOT NULL DEFAULT '[]',
   -- M21 阶段内轮次上限：空 = 1（不续轮），1–5
   max_rounds INTEGER CHECK (max_rounds IS NULL OR (max_rounds BETWEEN 1 AND 5)),
+  -- M26 阶段单轮运行超时（毫秒）：空 = 用全局缺省（60 min）
+  run_timeout_ms INTEGER CHECK (
+    run_timeout_ms IS NULL OR (run_timeout_ms BETWEEN 300000 AND 14400000)
+  ),
   -- M11 闸门：允许未通过次数 / 通过去向 / 未通过去向（三列全空 = 不是闸门；弱引用不设外键）
   gate_max_fails INTEGER,
   gate_on_pass_stage_id TEXT,
@@ -814,6 +818,20 @@ export const STAGES_M20_ADD_COLUMN_SQL: Readonly<
     "ALTER TABLE workflow_stages ADD COLUMN acceptance_json TEXT NOT NULL DEFAULT '[]'",
   max_rounds:
     'ALTER TABLE workflow_stages ADD COLUMN max_rounds INTEGER CHECK (max_rounds IS NULL OR (max_rounds BETWEEN 1 AND 5))',
+}
+
+/**
+ * M26 给 `workflow_stages` 新增的列（阶段单轮运行超时）：可空 INTEGER（毫秒，300000–14400000）。
+ * 老行按「用全局缺省 60 min」归一。清单与 `stagesTable()` 的 DDL 保持同步。
+ */
+export const STAGES_M26_ADDED_COLUMNS = ['run_timeout_ms'] as const
+
+/** `workflow_stages` M26 补列语句（CHECK 与 DDL 一致）。 */
+export const STAGES_M26_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M26_ADDED_COLUMNS)[number], string>
+> = {
+  run_timeout_ms:
+    'ALTER TABLE workflow_stages ADD COLUMN run_timeout_ms INTEGER CHECK (run_timeout_ms IS NULL OR (run_timeout_ms BETWEEN 300000 AND 14400000))',
 }
 
 /**

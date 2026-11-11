@@ -37,6 +37,8 @@ export function emptyStage(name: string): StageInput {
     instructions: '',
     acceptance: [],
     maxRounds: null,
+    // M26：阶段超时缺省不写（= 用全局缺省 60 min）
+    runTimeoutMs: null,
     gate: null,
   }
 }

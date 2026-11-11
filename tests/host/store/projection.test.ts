@@ -164,6 +164,7 @@ describe('rebuild：增量应用与重建等价', () => {
             instructions: '',
             acceptance: [],
             maxRounds: null,
+            runTimeoutMs: null,
             gate: null,
           },
           {
@@ -185,6 +186,7 @@ describe('rebuild：增量应用与重建等价', () => {
             instructions: '',
             acceptance: [],
             maxRounds: null,
+            runTimeoutMs: null,
             gate: null,
           },
         ],

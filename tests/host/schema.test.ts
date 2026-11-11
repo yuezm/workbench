@@ -14,6 +14,8 @@ import {
   STAGES_M18_ADDED_COLUMNS,
   STAGES_M20_ADDED_COLUMNS,
   STAGES_M20_ADD_COLUMN_SQL,
+  STAGES_M26_ADDED_COLUMNS,
+  STAGES_M26_ADD_COLUMN_SQL,
   formatOfProjection,
   projectionFormat,
   tableDdl,
@@ -140,6 +142,8 @@ const STAGES_M7_COLUMNS = [
   'acceptance_json',
   // M21：阶段内轮次上限（NULL = 不续轮）
   'max_rounds',
+  // M26：阶段单轮运行超时（NULL = 用全局缺省 60 min）
+  'run_timeout_ms',
   // M11：闸门三列
   'gate_max_fails',
   'gate_on_pass_stage_id',
@@ -298,6 +302,18 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
     expect(STAGES_M20_ADD_COLUMN_SQL.acceptance_json).toContain("DEFAULT '[]'")
     expect(STAGES_M20_ADD_COLUMN_SQL.max_rounds).toContain('ADD COLUMN max_rounds INTEGER')
     expect(STAGES_M20_ADD_COLUMN_SQL.max_rounds).toContain('BETWEEN 1 AND 5')
+  })
+
+  it('M26 阶段超时列：可空无默认、CHECK 认 5 min–4 h，补列语句与 DDL 同口径', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    const shapeOf = (name: string): string | undefined =>
+      columnShape(db, 'workflow_stages').find((shape) => shape.split('|')[0] === name)
+    // name | type | notnull | default | pk
+    expect(shapeOf('run_timeout_ms')).toBe('run_timeout_ms|INTEGER|0|null|0')
+    expect(STAGES_M26_ADDED_COLUMNS).toEqual(['run_timeout_ms'])
+    expect(STAGES_M26_ADD_COLUMN_SQL.run_timeout_ms).toContain('ADD COLUMN run_timeout_ms INTEGER')
+    expect(STAGES_M26_ADD_COLUMN_SQL.run_timeout_ms).toContain('BETWEEN 300000 AND 14400000')
   })
 
   it('M18 内置阶段列：builtin 可空无默认、只认四个内置键，补列语句与 DDL 同口径', () => {

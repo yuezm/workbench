@@ -311,6 +311,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       instructions: '',
       acceptance: [],
       maxRounds: null,
+      runTimeoutMs: null,
       gate: null,
     },
     {
@@ -328,6 +329,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       instructions: '',
       acceptance: [],
       maxRounds: null,
+      runTimeoutMs: null,
       gate: null,
     },
   ]

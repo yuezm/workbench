@@ -361,8 +361,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, builtin, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, max_rounds, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, builtin, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, max_rounds, run_timeout_ms, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
@@ -380,6 +380,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          instructions = excluded.instructions,
          acceptance_json = excluded.acceptance_json,
          max_rounds = excluded.max_rounds,
+         run_timeout_ms = excluded.run_timeout_ms,
          gate_max_fails = excluded.gate_max_fails,
          gate_on_pass_stage_id = excluded.gate_on_pass_stage_id,
          gate_on_fail_stage_id = excluded.gate_on_fail_stage_id`,
@@ -640,6 +641,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.instructions ?? '',
         JSON.stringify(stage.acceptance ?? []),
         stage.maxRounds ?? null,
+        stage.runTimeoutMs ?? null,
         stage.gate?.maxFails ?? null,
         stage.gate?.onPassStageId ?? null,
         stage.gate?.onFailStageId ?? null,

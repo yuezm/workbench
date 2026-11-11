@@ -787,6 +787,7 @@ describe('WorkflowEditor', () => {
       // M20：不展示验收的类型保存时归一为空
       acceptance: [],
       maxRounds: null,
+      runTimeoutMs: null,
       gate: null,
     })
   }, 30_000)
@@ -849,6 +850,7 @@ describe('WorkflowEditor', () => {
       // M20：不展示验收的类型保存时归一为空
       acceptance: [],
       maxRounds: null,
+      runTimeoutMs: null,
       gate: null,
     })
   }, 30_000)
@@ -1112,6 +1114,7 @@ describe('WorkflowEditor 校验与失败反馈', () => {
           instructions: '',
           acceptance: [],
           maxRounds: null,
+          runTimeoutMs: null,
           gate: null,
         },
       ],
@@ -1145,6 +1148,7 @@ describe('WorkflowEditor 校验与失败反馈', () => {
           instructions: '',
           acceptance: [],
           maxRounds: null,
+          runTimeoutMs: null,
           gate: null,
         },
       ],
@@ -1463,6 +1467,8 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
     const acceptance = screen.getByLabelText('阶段3验收')
     await user.type(acceptance, 'pnpm check 退出码 0{enter}覆盖每条验收标准')
     await choose(user, '阶段3轮次上限', '2 轮')
+    // M26：单轮超时按档位选，落库是毫秒（90 分钟）
+    await choose(user, '阶段3单轮超时', '90 分钟')
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
@@ -1470,6 +1476,7 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
     expect(savedStage(draft, '自测')).toMatchObject({
       acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'],
       maxRounds: 2,
+      runTimeoutMs: 5_400_000,
     })
   }, 30_000)
 })

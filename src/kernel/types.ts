@@ -50,7 +50,7 @@ export type Iso = string
  * M18：工作流内置四个阶段（`workflow_stages.builtin` 投影列）——老库的列一旦补出来，
  * 启动补齐按名认领 / 补建内置阶段，所以这里递增以触发一次重建。
  */
-export const KERNEL_VERSION = 'M20.0.0'
+export const KERNEL_VERSION = 'M26.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }
@@ -200,7 +200,7 @@ export interface Limits {
   backoffBaseMs: number
   /** 退避封顶（1 h） */
   backoffCapMs: number
-  /** 单次运行超时（30 min），到期由 `clock.tick` 产 `run.failed{timeout}` */
+  /** 单次运行超时缺省值（60 min），到期由 `clock.tick` 产 `run.failed{timeout}`；阶段可用 `runTimeoutMs` 覆盖 */
   runTimeoutMs: number
   /** 取消宽限：cancel 帧后等待回执的时长 */
   cancelGraceMs: number

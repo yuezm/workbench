@@ -51,6 +51,8 @@ function stageRow(
     acceptance: normalizeAcceptance(stage.acceptance),
     // M21：阶段内轮次上限（1–5；缺省 = 1，不续轮）
     maxRounds: stage.maxRounds ?? null,
+    // M26：阶段单轮超时（毫秒；缺省 = null，用全局缺省）
+    runTimeoutMs: stage.runTimeoutMs ?? null,
     // M11：闸门按 id 直存（下标已由 `validateStageSet` 保证在范围内）
     gate: stage.gate
       ? {
@@ -122,6 +124,8 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     sameAcceptance(a.acceptance, b.acceptance) &&
     // M21：轮次上限一变要落 stage.updated（缺省与 null 视为同值）
     (a.maxRounds ?? null) === (b.maxRounds ?? null) &&
+    // M26：阶段超时一变要落 stage.updated（缺省与 null 视为同值）
+    (a.runTimeoutMs ?? null) === (b.runTimeoutMs ?? null) &&
     // M11：闸门三列一变就要落 stage.updated
     sameGate(a.gate, b.gate)
   )

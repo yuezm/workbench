@@ -78,6 +78,20 @@ function hasRelayDetail(stage: StageInput): boolean {
 }
 
 /**
+ * M26 阶段单轮超时的可选值：`default` = 不写字段、用全局缺省（60 min）。
+ * 只给常用档位——下限 5 min / 上限 4 h 由 `STAGE_TIMEOUT_LIMITS` 硬挡，界面上不让人手填毫秒。
+ */
+const STAGE_TIMEOUT_CHOICES = [
+  { value: 'default', label: '默认（60 分钟）' },
+  { value: String(10 * 60_000), label: '10 分钟' },
+  { value: String(30 * 60_000), label: '30 分钟' },
+  { value: String(60 * 60_000), label: '60 分钟' },
+  { value: String(90 * 60_000), label: '90 分钟' },
+  { value: String(120 * 60_000), label: '2 小时' },
+  { value: String(180 * 60_000), label: '3 小时' },
+] as const
+
+/**
  * 界面上不展示的字段，保存前一概归一——这些字段仍有消费者（交接在任务离开阶段时建关联任务、
  * 子任务落点是派活落点、`agentId` 会参与智能体存在性校验、`onComplete` 会改闸门的默认通过去向），
  * 留着就是看不见的配置。「要干什么」只对派活有意义、且没有副作用，原文保留，切回智能体时还能用。
@@ -116,6 +130,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     acceptance: [],
     // M21：轮次上限同理，只有会自己跑的阶段才有意义
     maxRounds: null,
+    // M26：阶段超时同理
+    runTimeoutMs: null,
     gate: null,
   }
 }
@@ -231,6 +247,8 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       instructions: s.instructions ?? '',
       acceptance: s.acceptance ?? [],
       maxRounds: s.maxRounds ?? null,
+      // M26：阶段超时原样带回（null = 用全局缺省）
+      runTimeoutMs: s.runTimeoutMs ?? null,
       gate: s.gate
         ? {
             maxFails: s.gate.maxFails,
@@ -901,6 +919,27 @@ export function WorkflowEditor({
                   </Select>
                 </Field>
               )}
+
+              {/* M26：本阶段一次 run 最长跑多久；到点宿主按超时收口（不再被全局常量掐死） */}
+              <Field label="单轮超时" className="mt-3 w-40">
+                <Select
+                  value={stage.runTimeoutMs == null ? 'default' : String(stage.runTimeoutMs)}
+                  onValueChange={(v) =>
+                    patchStage(index, { runTimeoutMs: v === 'default' ? null : Number(v) })
+                  }
+                >
+                  <SelectTrigger aria-label={`阶段${n}单轮超时`} className="w-full">
+                    <SelectValue placeholder="默认（60 分钟）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STAGE_TIMEOUT_CHOICES.map((choice) => (
+                      <SelectItem key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
             </>
           )}
 

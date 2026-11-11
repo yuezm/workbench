@@ -7,7 +7,11 @@ import type {
   TaskInput,
   WorkflowInput,
 } from '../../src/protocol/entities'
-import { ACCEPTANCE_LIMITS, STAGE_ROUND_LIMITS } from '../../src/protocol/entities'
+import {
+  ACCEPTANCE_LIMITS,
+  STAGE_ROUND_LIMITS,
+  STAGE_TIMEOUT_LIMITS,
+} from '../../src/protocol/entities'
 import {
   COMMAND_LIMITS,
   validateCommand,
@@ -1002,6 +1006,29 @@ describe('validateQuery（M5：query 动词入口）', () => {
     expect(check([stage({ maxRounds: 0 })])).toBe(false)
     expect(check([stage({ maxRounds: STAGE_ROUND_LIMITS.max + 1 })])).toBe(false)
     expect(check([stage({ maxRounds: 2.5 })])).toBe(false)
+  })
+
+  it('阶段 runTimeoutMs：5 min–4 h 的毫秒区间，可空（M26）', () => {
+    const check = (stages: unknown): boolean =>
+      validateCommand({
+        commandId: 'c-timeout',
+        type: 'workflow.create',
+        input: { name: '流程', stages },
+      }).ok
+    const stage = (extra: Record<string, unknown>): unknown => ({
+      name: '澄清',
+      entryMode: 'agent',
+      agentId: 'ag1',
+      ...extra,
+    })
+
+    expect(check([stage({ runTimeoutMs: null })])).toBe(true)
+    expect(check([stage({})])).toBe(true)
+    expect(check([stage({ runTimeoutMs: STAGE_TIMEOUT_LIMITS.minMs })])).toBe(true)
+    expect(check([stage({ runTimeoutMs: STAGE_TIMEOUT_LIMITS.maxMs })])).toBe(true)
+    expect(check([stage({ runTimeoutMs: STAGE_TIMEOUT_LIMITS.minMs - 1 })])).toBe(false)
+    expect(check([stage({ runTimeoutMs: STAGE_TIMEOUT_LIMITS.maxMs + 1 })])).toBe(false)
+    expect(check([stage({ runTimeoutMs: 60_000.5 })])).toBe(false)
   })
 
   it('receipt.acceptance：序号范围、met 布尔、evidence 长度、条数上限（M21）', () => {

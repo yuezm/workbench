@@ -87,6 +87,8 @@ interface StageRow {
   acceptance_json: string
   /** M21 阶段内轮次上限（NULL = 1，不续轮） */
   max_rounds: number | null
+  /** M26 阶段单轮运行超时（毫秒；NULL = 用全局缺省） */
+  run_timeout_ms: number | null
   /** M11 闸门三列：全空 = 不是闸门 */
   gate_max_fails: number | null
   gate_on_pass_stage_id: string | null
@@ -309,6 +311,8 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   acceptance:
     row.acceptance_json.trim() === '' ? [] : (JSON.parse(row.acceptance_json) as string[]),
   maxRounds: row.max_rounds ?? null,
+  // M26：阶段超时（NULL = 用全局缺省）
+  runTimeoutMs: row.run_timeout_ms ?? null,
   // M11：三列全空表示不是闸门（`max_fails` 缺省 / null 都按「不是闸门」归一）
   gate:
     row.gate_max_fails === null || row.gate_max_fails === undefined
@@ -534,7 +538,8 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
         `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id,
                 on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id,
                 subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
-                max_rounds, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id
+                max_rounds, run_timeout_ms, gate_max_fails, gate_on_pass_stage_id,
+                gate_on_fail_stage_id
          FROM workflow_stages ORDER BY workflow_id, position`,
       )
       .all() as unknown as StageRow[]

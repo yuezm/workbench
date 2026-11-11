@@ -20,7 +20,7 @@ src/
 │   ├── executor.ts  # 执行器插件 → ExecutorPort 包装（终态归一、续接重试）
 │   ├── executor-registry.ts # 按 runtime.executorKey 取插件端口，组装 SchedulerExecutors
 │   ├── sdk-host.ts  # 插件能力面原件（spawn/解析/杀树/扫描目录/时钟/日志/会话根/notify/回执工具）
-│   ├── receipt-tool.ts # 回执工具 server 的定位与开关（M24，默认关；读环境变量与文件系统）
+│   ├── receipt-tool.ts # 回执工具 server 的定位与开关（M24 定位；M26 起默认注入，WORKBENCH_RECEIPT_TOOL=0 关）
 │   ├── reconcile.ts # 启动对账：租约过期、残留 running、未完成对话轮次
 │   ├── process.ts   # spawn、行读取、进程树终止（沿用现有实现）
 │   ├── artifacts.ts # 事件资料落盘 artifacts/<eventId>.md
@@ -63,6 +63,7 @@ src/
 - SQLite PRAGMA：`journal_mode=WAL`、`busy_timeout=5000`、`foreign_keys=ON`、`synchronous=NORMAL`；启动时跑 `PRAGMA integrity_check`，失败先备份坏库、再从事实重建。
 - 事务：追加事实 + 应用投影 + 更新 `projection_meta.seq` 在同一事务内完成；提交成功才向调用方应答。
 - 宿主兜底写入：执行器不可达、超时或取消无回执时，宿主以 `run.host_settled` 输入写终态（`run.failed` 的 `timeout`/`executor_lost`，或 `run.cancelled` 的 `cancelled`；见 SPEC-kernel「输入目录」），不让 run 悬空。
+- 执行器进程超时（M26）：`Turn.timeoutMs` 取本轮 `deadlineAt` 减当前时刻（`remainingRunMs`），不再用调度器常量；内核按阶段算 deadline（阶段 `runTimeoutMs` 优先，缺省 60 min），进程与内核只有一套时限。
 - **M3 结构升级**：`runtimes` 从旧列 `protocol_family`（旧字段，仅迁移归一用）改成 `executor_key` + `args_template`；旧列被 CHECK 引用、不能 `DROP COLUMN`，因此与 M2 的 `runs` 同法做一次性物理重建（外键 OFF → 临时表 → 拷贝旧行并回填 → 删旧 → 改名）；升级在 `openDatabase` 内完成。
 - **M6 结构升级**：`tasks` 追加来源四列（`origin` / `rule_id` / `external_ref` / `labels_json`），旧库用 `ALTER TABLE ADD COLUMN` 一次性补齐（**不重建表**，避免 SQLite 重写 `runs.task_id` 的外键引用）；老事实 payload 缺字段由 `kernel/project` 与投影 writer 的 `normalizeTask` 双层归一。新增投影表 `rule_sets`（单行 `id='current'`）与 `rule_fires`（append-only），`KERNEL_VERSION=m6.0.0` 触发全量重建。
 - **M6.5 结构升级**：`tasks` 再补 `thread_id` / `parent_task_id` 两列（同样 `ALTER TABLE ADD COLUMN`，不重建表；老 payload 由双层 `normalizeTask` 补 null）；新增第 13 张投影表 `threads`（线程行整行由 `thread.*` 事实携带，`notes_json/events_json/task_ids_json/root_task_ids_json` 存 JSON），`KERNEL_VERSION=m6.5.0` 触发全量重建。

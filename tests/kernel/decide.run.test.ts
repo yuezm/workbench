@@ -489,6 +489,42 @@ describe('kernel/decide run.claim 领取', () => {
     ])
   })
 
+  it('M26：阶段配了 runTimeoutMs 就按阶段算 deadlineAt，没配 / 查不到阶段回落全局', () => {
+    const decision = claim(
+      view({
+        runtimes: [runtime({ maxConcurrent: 8 })],
+        stages: [
+          stage({ id: 'st-1', runTimeoutMs: 5_400_000 }),
+          stage({ id: 'st-2', runTimeoutMs: null }),
+        ],
+        runs: [
+          run({ id: 'run-a' }),
+          run({ id: 'run-b', stageId: 'st-2', createdAt: '2026-01-01T00:00:01.000Z' }),
+          run({ id: 'run-c', stageId: 'st-gone', createdAt: '2026-01-01T00:00:02.000Z' }),
+          run({
+            id: 'run-d',
+            purpose: 'chat',
+            stageId: null,
+            createdAt: '2026-01-01T00:00:03.000Z',
+          }),
+        ],
+      }),
+      'rt-1',
+      8,
+      env({ leaseMs: 1_000, runTimeoutMs: 60_000 }),
+    )
+
+    // 12:00 起算：阶段 90 min / 全局 60 s（阶段没配、阶段不存在、聊天 run 都走全局）
+    expect(
+      decision.facts.map((fact) => (fact.payload as RunClaimedPayload).run.deadlineAt),
+    ).toEqual([
+      '2026-11-04T13:30:00.000Z',
+      '2026-11-04T12:01:00.000Z',
+      '2026-11-04T12:01:00.000Z',
+      '2026-11-04T12:01:00.000Z',
+    ])
+  })
+
   it('claim 后 run 行：status=running、租约/attempt/startedAt 落到新行，不改输入行', () => {
     const queued = run({ id: 'run-1', attempt: 1, queueSeq: 3, startedAt: null })
     const decision = claim(

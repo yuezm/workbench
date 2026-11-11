@@ -454,9 +454,7 @@ describe('崩溃重拉', () => {
 })
 
 describe('停止与释放', () => {
-  async function readyProcess(
-    overrides: Partial<ExternalPluginProcessOptions> = {},
-  ): Promise<{
+  async function readyProcess(overrides: Partial<ExternalPluginProcessOptions> = {}): Promise<{
     process: ExternalPluginProcess
     child: FakeChild
     killTree: ReturnType<typeof vi.fn>

@@ -6,7 +6,7 @@ import { STAGE_ROUND_LIMITS } from '../../protocol/entities'
 import type { EventReceivedPayload } from '../../protocol/facts'
 import type { Input, Receipt } from '../../protocol/inputs'
 import type { TaskComment } from '../../protocol/task-comment'
-import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
+import type { Decision, Environment, FactDraft, Id, Iso, Limits, View } from '../types'
 import type { SettledRun } from '../run'
 import { cardsFromReceipt, resumedRun } from '../cards'
 import { handoffOnExit } from '../handoff'
@@ -318,7 +318,23 @@ export function claimRun(
     return reject('invalid_input', '领取数量必须是 1–8 的整数')
   }
   const claimed = pickClaims(view, runtime, input.capacity, now)
-  return done(claimFacts(claimed, now, env.limits, HOST_SCHEDULER))
+  return done(
+    claimFacts(claimed, now, env.limits, HOST_SCHEDULER, stageTimeoutOf(view, env.limits)),
+  )
+}
+
+/**
+ * 本轮超时（M26）：阶段自己配了 `runTimeoutMs` 用它，否则用全局 `limits.runTimeoutMs`。
+ *
+ * 阶段查找失败（stageId 指向不存在的行 / 聊天 run 没有阶段）一律回落全局缺省——
+ * 超时算长一点不会破坏数据，算短了会把还在推理的 run 掐死。
+ */
+export function stageTimeoutOf(view: View, limits: Limits): (run: RunRow) => number {
+  return (run) => {
+    if (run.stageId === null) return limits.runTimeoutMs
+    const stage = view.stages.get(run.stageId)
+    return stage?.runTimeoutMs ?? limits.runTimeoutMs
+  }
 }
 
 export function heartbeatRun(

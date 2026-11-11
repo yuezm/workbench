@@ -53,7 +53,7 @@ export const DEFAULT_LIMITS: Limits = {
   maxAttempts: 3,
   backoffBaseMs: 300_000,
   backoffCapMs: 3_600_000,
-  runTimeoutMs: 1_800_000,
+  runTimeoutMs: 3_600_000,
   cancelGraceMs: 3_000,
   killAfterMs: 2_000,
   maxFramesPerBatch: 500,

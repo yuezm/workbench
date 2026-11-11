@@ -307,6 +307,14 @@ export const ACCEPTANCE_LIMITS = { maxItems: 12, maxChars: 200 } as const
  */
 export const STAGE_ROUND_LIMITS = { min: 1, max: 5 } as const
 
+/**
+ * 阶段单轮运行超时（M26）：不配就取全局缺省 `limits.runTimeoutMs`（60 min）。
+ *
+ * 下限 5 分钟 = 低于这个值只会把还在推理的 run 掐死；上限 4 小时 = 防悬空烧钱的硬护栏。
+ * 单位毫秒，与 `RunRow.deadlineAt` 的计算口径一致。
+ */
+export const STAGE_TIMEOUT_LIMITS = { minMs: 5 * 60_000, maxMs: 240 * 60_000 } as const
+
 export interface GateCheck {
   /** 实际执行的命令（如 `pnpm check`） */
   cmd: string
@@ -383,6 +391,11 @@ export interface WorkflowStage {
    */
   maxRounds?: number | null
   /**
+   * 单轮运行超时（M26）：本阶段一次 run 最长跑多久（毫秒）。
+   * `null` / 缺省 = 用全局缺省 `limits.runTimeoutMs`（60 min）。
+   */
+  runTimeoutMs?: number | null
+  /**
    * 闸门（M11）：非 null 时本阶段是判定关卡，run 正常结束后读 `receipt.verdict` 决定去向。
    * 老事实 / 存量导入缺该字段时按 null 归一（不是闸门）。
    */
@@ -423,6 +436,8 @@ export interface StageInput {
   acceptance?: readonly string[]
   /** 阶段内轮次上限（M21，可空 = 1）：run 结束但验收未全达时原地续一轮的次数 */
   maxRounds?: number | null
+  /** 单轮运行超时（M26，可空 = 全局缺省 60 min）：本阶段一次 run 的最长时长（毫秒） */
+  runTimeoutMs?: number | null
   /** 闸门（M11，可空 = 不是闸门）：非空时本阶段按判定结果流转，并受 `maxFails` 预算约束 */
   gate?: GateInput | null
 }

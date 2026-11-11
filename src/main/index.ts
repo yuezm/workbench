@@ -213,7 +213,8 @@ if (app.requestSingleInstanceLock()) {
       cwd: defaultWorkdir,
       notify,
       net,
-      // M24：回执工具 server 默认不注入（开关 + 脚本都要到位），拿不到就纯文本通道
+      // M24：回执工具 server 默认注入（脚本找不到就退回纯文本通道）；
+      // `WORKBENCH_RECEIPT_TOOL=0` 可关掉，排查协议问题时用。
       receiptTool: resolveReceiptTool({
         mainDir: __dirname,
         resourcesDir: process.resourcesPath,

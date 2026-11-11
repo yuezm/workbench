@@ -85,6 +85,8 @@ export function normalizeTask(row: Task): Task {
     acceptance: legacy.acceptance ?? [],
     // M21：老事实没有轮次上限，按「不续轮」归一
     maxRounds: legacy.maxRounds ?? null,
+    // M26：老事实没有阶段超时，按「用全局缺省」归一
+    runTimeoutMs: legacy.runTimeoutMs ?? null,
   }
 }
 

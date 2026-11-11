@@ -196,7 +196,7 @@ export function scheduleKill(
 
 const DEFAULT_SCHEDULER_LIMITS: SchedulerLimits = {
   heartbeatMs: 30_000,
-  runTimeoutMs: 1_800_000,
+  runTimeoutMs: 3_600_000,
   maxFramesPerBatch: 500,
   cancelGraceMs: 3_000,
   killAfterMs: 2_000,
@@ -215,6 +215,21 @@ const noopRegistry: Pick<ProcessRegistry, 'begin' | 'attachPid' | 'remove' | 'pi
   attachPid: () => undefined,
   remove: () => undefined,
   pidOf: () => null,
+}
+
+/**
+ * 执行器超时 = 本轮剩余时间（M26）：`deadlineAt` 由内核按阶段算好（阶段配了
+ * `runTimeoutMs` 就用它，否则用全局缺省），这里只做减法。
+ *
+ * - 缺 `deadlineAt`（脏投影 / 聊天 run）：回落全局缺省；
+ * - 已过期：给 1 ms，让执行器立刻收口，而不是拿到负数当成「永不超时」。
+ *
+ * 导出到模块级：三个分支要能直接测（`createScheduler` 里只能覆盖正常那一条）。
+ */
+export const remainingRunMs = (deadlineAt: string | null, now: Iso, fallbackMs: number): number => {
+  if (deadlineAt === null) return fallbackMs
+  const left = Date.parse(deadlineAt) - Date.parse(now)
+  return left > 0 ? left : 1
 }
 
 /** 运行时配置的 `provider/model` → `Turn.model`；格式不对不传（后端会给出可读错误）。 */
@@ -354,6 +369,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     )
   }
 
+  /**
+   * 执行器超时 = 本轮剩余时间（M26）：内核按阶段算好的 `deadlineAt` 才是权威口径，
+   * 这里只做减法，避免「内核按阶段给 90 min、进程按常量 30 min 先自杀」的两套时限。
+   */
   const turnOf = (run: RunRow, runtime: Runtime, signal: AbortSignal): Turn => ({
     runId: run.id,
     leaseId: run.leaseId ?? `${run.id}:${Math.max(1, run.attempt)}`,
@@ -367,7 +386,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     resumeSessionId: run.resumeSessionId,
     // 聊天续接轮的重试提示词（完整历史）：协议会话失效时执行器用它重发一次
     fallbackPrompt: run.purpose === 'chat' ? (deps.chatFallbackPrompt?.(run) ?? null) : null,
-    timeoutMs: limits.runTimeoutMs,
+    timeoutMs: remainingRunMs(run.deadlineAt, now(), limits.runTimeoutMs),
     contextFile: run.promptRef,
     signal,
   })

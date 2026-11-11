@@ -68,6 +68,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   instructions: '',
   acceptance: [],
   maxRounds: null,
+  runTimeoutMs: null,
   gate: null,
   ...over,
 })

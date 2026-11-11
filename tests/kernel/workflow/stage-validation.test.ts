@@ -70,12 +70,22 @@ describe('validateStageSet', () => {
   it('闸门去向同样受越界与自指约束', () => {
     expect(
       validateStageSet([
-        stage({ name: '自测', entryMode: 'agent', agentId: 'a-1', gate: { maxFails: 3, onFailIndex: 0 } }),
+        stage({
+          name: '自测',
+          entryMode: 'agent',
+          agentId: 'a-1',
+          gate: { maxFails: 3, onFailIndex: 0 },
+        }),
       ]),
     ).toBe('阶段「自测」的闸门未通过时进入不能指向自己')
     expect(
       validateStageSet([
-        stage({ name: '自测', entryMode: 'agent', agentId: 'a-1', gate: { maxFails: 3, onPassIndex: 9 } }),
+        stage({
+          name: '自测',
+          entryMode: 'agent',
+          agentId: 'a-1',
+          gate: { maxFails: 3, onPassIndex: 9 },
+        }),
       ]),
     ).toBe('阶段「自测」的闸门通过时进入目标越界')
   })

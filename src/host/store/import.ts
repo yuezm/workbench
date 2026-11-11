@@ -367,6 +367,8 @@ function readLegacyEntityRows(
     acceptance: [],
     // M21：v2 存量没有阶段内轮次概念——按「不续轮」归一。
     maxRounds: null,
+    // M26：v2 存量没有阶段超时概念——按「用全局缺省」归一。
+    runTimeoutMs: null,
     // M11：v2 存量没有闸门概念——按「不是闸门」归一。
     gate: null,
   }))

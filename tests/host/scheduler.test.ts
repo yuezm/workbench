@@ -20,6 +20,7 @@ import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../../src/protocol
 import { openDatabase } from '../../src/host/db'
 import {
   createScheduler,
+  remainingRunMs,
   scheduleKill,
   settleCancelledOnce,
   startCancelChain,
@@ -817,6 +818,22 @@ describe('createScheduler：阶段链', () => {
   })
 })
 
+describe('remainingRunMs：执行器超时 = 本轮剩余时间（M26）', () => {
+  it('正常：deadline 减当前时刻', () => {
+    expect(remainingRunMs('2026-11-04T12:01:00.000Z', '2026-11-04T12:00:00.000Z', 9_999)).toBe(
+      60_000,
+    )
+  })
+
+  it('缺 deadline（脏投影 / 聊天 run）：回落全局缺省', () => {
+    expect(remainingRunMs(null, '2026-11-04T12:00:00.000Z', 12_345)).toBe(12_345)
+  })
+
+  it('已过期：给 1 ms，不让负数变成「永不超时」', () => {
+    expect(remainingRunMs('2026-11-04T11:59:00.000Z', '2026-11-04T12:00:00.000Z', 9_999)).toBe(1)
+  })
+})
+
 describe('createScheduler：诊断', () => {
   it('active() 暴露执行中的 run；没有执行时 idle 立即完成', async () => {
     const seeded = seed()
@@ -863,7 +880,10 @@ describe('createScheduler：Turn 与旁路会话', () => {
       .find((item) => item.id === seeded.projectId)?.path
     expect(projectPath).toBeDefined()
     expect(turn.cwd).toBe(projectPath)
-    expect(turn.timeoutMs).toBe(10_000)
+    // M26：执行器超时 = 本轮剩余时间（内核按阶段算好的 deadlineAt 减当前时刻），
+    // 不再取调度器常量；这轮的 deadline 来自全局缺省 60 min，跑完还留着大半个窗口。
+    expect(turn.timeoutMs).toBeGreaterThan(3_500_000)
+    expect(turn.timeoutMs).toBeLessThanOrEqual(3_600_000)
     expect(turn.runId).toBe(seeded.runId)
     expect(runById(seeded.runId)?.session_id).toBe('sess-observed')
   })

@@ -137,6 +137,7 @@ export const sample = {
       instructions: '',
       acceptance: [],
       maxRounds: null,
+      runTimeoutMs: null,
       gate: null,
       ...overrides,
     }

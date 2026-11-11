@@ -94,16 +94,18 @@ export function pickClaims(view: View, runtime: Runtime, capacity: number, now: 
 
 /**
  * `run.claimed` 事实：`attempt` = 当前领取次数 + 1（1 基），
- * `leaseId = '<runId>:<attempt>'`、`leaseUntil = now + leaseMs`、`deadlineAt = now + runTimeoutMs`。
+ * `leaseId = '<runId>:<attempt>'`、`leaseUntil = now + leaseMs`、
+ * `deadlineAt = now + 本次运行超时`（M26：阶段配了 `runTimeoutMs` 用它，否则用 `limits.runTimeoutMs`）。
  */
 export function claimFacts(
   claimed: readonly RunRow[],
   now: Iso,
   limits: Limits,
   actor: Actor,
+  /** 本次超时（毫秒）；由调用方按阶段解析（`stageTimeoutOf`），不在这里兜底。 */
+  timeoutOf: (run: RunRow) => number,
 ): FactDraft<'run.claimed'>[] {
   const leaseUntil = plusMs(now, limits.leaseMs)
-  const deadlineAt = plusMs(now, limits.runTimeoutMs)
   return claimed.map((run) => {
     const attempt = run.attempt + 1
     const leaseId = `${run.id}:${attempt}`
@@ -113,7 +115,7 @@ export function claimFacts(
       leaseId,
       attempt,
       leaseUntil,
-      deadlineAt,
+      deadlineAt: plusMs(now, timeoutOf(run)),
       startedAt: run.startedAt ?? now,
     }
     return { type: 'run.claimed', actor, at: now, payload: { run: next } }

@@ -6,7 +6,8 @@
  * `sdk.paths.receiptTool`，插件只负责把它塞进协议帧。
  *
  * 两道闸门让「没配好就等于不存在」：
- * 1. `WORKBENCH_RECEIPT_TOOL=1` 才启用（默认关——注入用的协议字段还没在真实 CLI 上验证）；
+ * 1. `WORKBENCH_RECEIPT_TOOL=0` 才关（默认开——dsh 0.2.1-rc.5 / ACP 两边的注入形状
+ *    都已在真机核对，关掉只是为了排查协议问题时能退回纯文本通道）；
  * 2. 脚本必须真的找得到（开发态在 `out/main` 同级、打包态在 resources），找不到就退回
  *    纯文本通道，不会把 CLI 起坏。
  */
@@ -14,7 +15,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SdkReceiptTool } from '../sdk/types'
 
-/** 显式开关：只有 `=1` 才尝试注入 */
+/** 显式关闭开关：`=0` 时退回纯文本回执通道（其余值都按启用处理） */
 export const RECEIPT_TOOL_ENV_KEY = 'WORKBENCH_RECEIPT_TOOL'
 /** 直接指定 server 脚本绝对路径（产物没和脚本放一起时用） */
 export const RECEIPT_TOOL_SERVER_ENV_KEY = 'WORKBENCH_RECEIPT_TOOL_SERVER'
@@ -41,7 +42,8 @@ export const resolveReceiptTool = (
   options: ResolveReceiptToolOptions = {},
 ): SdkReceiptTool | null => {
   const env = options.env ?? process.env
-  if (env[RECEIPT_TOOL_ENV_KEY] !== '1') return null
+  // 默认开：只有显式 `=0` 才退回纯文本通道（脚本找不到时下面还会再退一次）
+  if (env[RECEIPT_TOOL_ENV_KEY] === '0') return null
   const exists = options.exists ?? existsSync
   const candidates = [
     env[RECEIPT_TOOL_SERVER_ENV_KEY],

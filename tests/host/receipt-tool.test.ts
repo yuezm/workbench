@@ -2,8 +2,8 @@
 /**
  * 回执工具 server 的定位与开关（M24，宿主侧）。
  *
- * 断言的核心是「默认等于不存在」：没开开关、或者脚本没跟着产物走，执行器拿到的就是
- * null → 注入空数组 → 行为与 M4 的纯文本通道逐字一致，不会因为打包漏文件把 CLI 起坏。
+ * M26 起默认注入：脚本在就该有工具通道（`ask` 才能在一轮里发出来）。脚本没跟着产物走、
+ * 或显式 `WORKBENCH_RECEIPT_TOOL=0` 时才退回纯文本通道——不会因为打包漏文件把 CLI 起坏。
  */
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -16,18 +16,28 @@ import {
 const ENABLED = { [RECEIPT_TOOL_ENV_KEY]: '1' }
 
 describe('resolveReceiptTool', () => {
-  it('默认关：开关没开时，即便脚本就在那也不给', () => {
-    expect(resolveReceiptTool({ env: {}, mainDir: '/app/out/main', exists: () => true })).toBeNull()
+  it('默认开：环境变量没写也注入（脚本在就给）', () => {
+    const tool = resolveReceiptTool({
+      env: {},
+      mainDir: '/app/out/main',
+      exists: () => true,
+      command: '/app/electron',
+    })
+    expect(tool?.command).toBe('/app/electron')
+    expect(tool?.args).toEqual([join('/app/out/main', 'receipt-mcp-server.cjs')])
+  })
+
+  it('显式 =0 才关：即便脚本就在那也不给', () => {
     expect(
       resolveReceiptTool({
-        env: { [RECEIPT_TOOL_ENV_KEY]: 'true' },
+        env: { [RECEIPT_TOOL_ENV_KEY]: '0' },
         mainDir: '/app/out/main',
         exists: () => true,
       }),
     ).toBeNull()
   })
 
-  it('开关开了但找不到脚本：null（打包漏文件时自动退回文本通道）', () => {
+  it('脚本找不到：null（打包漏文件时自动退回文本通道）', () => {
     expect(
       resolveReceiptTool({ env: ENABLED, mainDir: '/app/out/main', exists: () => false }),
     ).toBeNull()

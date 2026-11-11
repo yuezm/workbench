@@ -23,6 +23,7 @@ import {
   RUN_TERMINAL_STATUSES,
   SPAWN_POLICIES,
   STAGE_ROUND_LIMITS,
+  STAGE_TIMEOUT_LIMITS,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
 import { CAPABILITIES, PLUGIN_KINDS } from './manifest'
@@ -304,6 +305,13 @@ const checkStage = (value: unknown, label: string): Check => {
       `${label}.maxRounds`,
       STAGE_ROUND_LIMITS.min,
       STAGE_ROUND_LIMITS.max,
+    ) ??
+    // M26 单轮运行超时：5 min–4 h（毫秒），可空 = 用全局缺省
+    optionalIntegerIn(
+      stage.runTimeoutMs,
+      `${label}.runTimeoutMs`,
+      STAGE_TIMEOUT_LIMITS.minMs,
+      STAGE_TIMEOUT_LIMITS.maxMs,
     ) ??
     // M11 闸门：次数范围与目标下标在此校验；是否指向自己 / 是否 agent 阶段由内核判
     (stage.gate === undefined || stage.gate === null

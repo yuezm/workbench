@@ -51,6 +51,7 @@ describe('emptyStage / builtinStageDraft', () => {
       instructions: '',
       acceptance: [],
       maxRounds: null,
+      runTimeoutMs: null,
       gate: null,
     })
   })

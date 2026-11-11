@@ -97,6 +97,7 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             instructions: '',
             acceptance: [],
             maxRounds: null,
+            runTimeoutMs: null,
             gate: null,
           },
           {
@@ -117,6 +118,7 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             instructions: '',
             acceptance: [],
             maxRounds: null,
+            runTimeoutMs: null,
             gate: null,
           },
         ],

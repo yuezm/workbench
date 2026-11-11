@@ -56,7 +56,7 @@ const defaultLog = (line: string): void => {
 /** 缺省配置：没有配置消费者时返回空对象（插件拿不到宿主配置，只能用 manifest 默认值）。 */
 const defaultConfig = <T = Record<string, unknown>>(): T => ({}) as T
 
-/** 缺省通知：无桌面环境/测试宿主没有原件，静默丢弃（文案不落日志）。 */
+/** 缺省通知：无桌面环境/测试宿主没有原件，静默丢弃（文案与落点都不落日志、不入库）。 */
 const defaultNotify: NotifyFn = (): void => undefined
 
 /** 组装宿主原件：所有缺省值集中在这里，插件侧不感知来源。 */

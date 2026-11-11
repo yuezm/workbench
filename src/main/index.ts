@@ -64,6 +64,7 @@ import type {
   SourceRegistryEntry as BuiltinSourceEntry,
 } from '../plugins/registry'
 import type { RuntimeExecutorChoice, RuntimeInput } from '../protocol/entities'
+import type { NotifyTarget } from '../protocol/ipc'
 import type { PluginManifest, PluginKind } from '../protocol/manifest'
 import { PLUGIN_KINDS } from '../protocol/manifest'
 import type { PluginSetting, PluginView, PluginStatus } from '../protocol/plugins'
@@ -79,6 +80,24 @@ let activeChannels: Channels | null = null
 let activeSources: Sources | null = null
 /** 事实推送（M5）：批次 + 聊天流；退出时停表。 */
 let activeFeed: FactFeed | null = null
+
+/**
+ * 系统通知落点里的 app 身份：**与渲染层 `AppPlugin.id` 同名**（`src/renderer/src/apps/ai-workflow`）。
+ *
+ * 只放在装配根：`host` 与插件都不该知道产品名，`NotifyTarget` 也刻意不含 `appId`——
+ * 系统通知只会落到发通知的那个 app，所以「我是谁」由唯一知道装配关系的地方补一次。
+ * 改名时要与渲染层注册表同步（`AppPlugin.id` 是本常量的真相源）。
+ */
+const NOTIFY_APP_ID = 'ai-workflow'
+
+/**
+ * 给通知补上 app 身份后交给原件。
+ *
+ * `target` 缺省时保持 `undefined`：没有落点就不该有点击行为，和 M4 的「只弹不跳」一致。
+ */
+function notifyInApp(title: string, body: string, target?: NotifyTarget): boolean {
+  return notify(title, body, target === undefined ? undefined : { appId: NOTIFY_APP_ID, ...target })
+}
 
 /** M7：磁盘插件目录（内置 + 用户目录）合并后的一条。 */
 interface CatalogEntry {
@@ -211,7 +230,8 @@ if (app.requestSingleInstanceLock()) {
     const sdkHost = createSdkHost({
       sessionRoot: sessionsDir,
       cwd: defaultWorkdir,
-      notify,
+      // 插件只给业务落点（卡 / 任务 / 会话），app 身份在这里补一次
+      notify: notifyInApp,
       net,
       // M24：回执工具 server 默认注入（脚本找不到就退回纯文本通道）；
       // `WORKBENCH_RECEIPT_TOOL=0` 可关掉，排查协议问题时用。
@@ -422,9 +442,12 @@ if (app.requestSingleInstanceLock()) {
         return hub
       },
       onFacts: (facts) => feed.publish(facts),
-      // M12：卡片之外的两类打扰（任务完成 / 运行失败）；复用托盘/系统通知原件，异常由 effects 隔离
+      // M12：卡片之外的两类打扰（任务完成 / 运行失败）；复用托盘/系统通知原件，异常由 effects 隔离。
+      // 落点同样是业务值（`taskId`），appId 由 `notifyInApp` 补。
       announce: (facts) => {
-        for (const request of noticesFromFacts(facts)) notify(request.title, request.body)
+        for (const request of noticesFromFacts(facts)) {
+          notifyInApp(request.title, request.body, request.target)
+        }
       },
     })
     // 通道 hub（M4 D9）：effects 之后创建、scheduler 之前 startAll；

@@ -1,13 +1,34 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
+import type { NotifyTarget } from '../../../src/protocol/ipc'
 import {
   desktopChannel,
   desktopManifest,
   NOTIFICATION_BODY,
+  notifyTargetOf,
 } from '../../../src/plugins/channels/desktop'
 import { channelById, channels } from '../../../src/plugins/registry'
 import { cardOf, channelHarness } from './harness'
 import { fakeSdk } from '../support/fake-sdk'
+
+/** 通知调用记录（含落点）：落点只有 `sdk.notify` 第三参能看到，缺省 fakeSdk 不记它。 */
+interface NotifyCall {
+  title: string
+  body: string
+  target?: NotifyTarget
+}
+
+function recordingHarness(): { calls: NotifyCall[]; h: ReturnType<typeof channelHarness> } {
+  const calls: NotifyCall[] = []
+  const h = channelHarness({
+    sdk: fakeSdk({
+      notify: (title, body, target) => {
+        calls.push({ title, body, target })
+      },
+    }),
+  })
+  return { calls, h }
+}
 
 describe('desktop 通道 manifest 与注册', () => {
   it('manifest：id/kind/capabilities 符合通道契约', () => {
@@ -117,6 +138,63 @@ describe('desktop 通道打扰口径（M12）', () => {
     h.deliver(legacyAsk as unknown as Parameters<typeof h.deliver>[0])
 
     expect(h.sdk.notifyCalls.map((call) => call.title)).toEqual(['旧的提问'])
+  })
+})
+
+describe('desktop 通道通知落点（点通知去哪儿）', () => {
+  it('notifyTargetOf：cardId 必带，任务 / 会话缺值不占位', () => {
+    expect(notifyTargetOf(cardOf({ id: 'card-7', taskId: 't-1', conversationId: null }))).toEqual({
+      cardId: 'card-7',
+      taskId: 't-1',
+    })
+    expect(
+      notifyTargetOf(cardOf({ id: 'card-8', taskId: 't-1', conversationId: null })).conversationId,
+    ).toBeUndefined()
+
+    expect(notifyTargetOf(cardOf({ id: 'card-8', taskId: null, conversationId: 'c-1' }))).toEqual({
+      cardId: 'card-8',
+      conversationId: 'c-1',
+    })
+    expect(
+      notifyTargetOf(cardOf({ id: 'card-8', taskId: null, conversationId: 'c-1' })).taskId,
+    ).toBeUndefined()
+  })
+
+  it('ask 卡弹通知：第三参是这张卡的落点（任务卡带 taskId）', async () => {
+    const { calls, h } = recordingHarness()
+    await desktopChannel.start(h.ctx)
+
+    h.deliver(cardOf({ id: 'card-9', taskId: 't-9', title: '选一个' }))
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toEqual({
+      title: '选一个',
+      body: NOTIFICATION_BODY,
+      target: { cardId: 'card-9', taskId: 't-9' },
+    })
+    expect(calls[0]?.target?.conversationId).toBeUndefined()
+    // 落点不影响投递语义：照样 ack delivered
+    expect(h.delivered).toEqual([{ cardId: 'card-9', version: 1, ref: 'desktop' }])
+  })
+
+  it('聊天卡（taskId 为 null）：落点只带会话，不带空任务', async () => {
+    const { calls, h } = recordingHarness()
+    await desktopChannel.start(h.ctx)
+
+    h.deliver(cardOf({ id: 'card-5', taskId: null, conversationId: 'conv-5', title: '聊聊' }))
+
+    expect(calls[0]?.target).toEqual({ cardId: 'card-5', conversationId: 'conv-5' })
+    expect(calls[0]?.target?.taskId).toBeUndefined()
+  })
+
+  it('信息卡（kind=notice）：不弹通知（连落点都不产生），但照样 ack delivered', async () => {
+    const { calls, h } = recordingHarness()
+    await desktopChannel.start(h.ctx)
+
+    h.deliver(cardOf({ id: 'card-3', kind: 'notice', options: [], title: '顺带说一句' }))
+
+    expect(calls).toEqual([])
+    expect(h.delivered).toEqual([{ cardId: 'card-3', version: 1, ref: 'desktop' }])
   })
 })
 

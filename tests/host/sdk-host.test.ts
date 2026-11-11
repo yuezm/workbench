@@ -87,12 +87,13 @@ describe('createSdkHost 缺省值', () => {
     expect(spawn).toHaveBeenCalledWith('dsh.cmd', ['--stdio'], options)
   })
 
-  it('notify 缺省静默丢弃：不抛、不落日志（通知文案不落日志）', () => {
+  it('notify 缺省静默丢弃：不抛、不落日志（通知文案与落点都不落日志）', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const host = createSdkHost()
 
     expect(host.notify).toBeTypeOf('function')
     expect(() => host.notify?.('待审批', '任务已挂起')).not.toThrow()
+    expect(() => host.notify?.('待审批', '任务已挂起', { cardId: 'card-1' })).not.toThrow()
     expect(warn).not.toHaveBeenCalled()
   })
 
@@ -104,6 +105,18 @@ describe('createSdkHost 缺省值', () => {
 
     expect(notify).toHaveBeenCalledTimes(1)
     expect(notify).toHaveBeenCalledWith('待审批', '任务已挂起\n1. 继续\n2. 终止')
+  })
+
+  it('notify 注入后第三参落点原样转发（宿主原件不补 appId、不改写）', () => {
+    const notify = vi.fn()
+    const host = createSdkHost({ notify })
+
+    host.notify?.('待审批', '点开工作台查看并处理', { cardId: 'card-1', conversationId: 'c-1' })
+
+    expect(notify).toHaveBeenCalledWith('待审批', '点开工作台查看并处理', {
+      cardId: 'card-1',
+      conversationId: 'c-1',
+    })
   })
 
   it('net 缺省不注入（声明 net 的插件调用即 capability_unavailable），注入后原样保留', () => {

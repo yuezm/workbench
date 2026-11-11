@@ -11,15 +11,26 @@
  * - **人在 UI 里自己点的完成不算**（`fact.actor.kind === 'owner'`）：你刚做完的事不必再提醒；
  * - 聊天 run（`taskId === null`）不通知：回答就在对话里，弹窗只是噪音。
  *
+ * 落点：完成通知带 `taskId`（点通知直接进任务详情）；失败通知只在**只有一个任务失败**时带，
+ * 一批里几个任务一起挂没有单一落点，跳哪个都是猜。
+ *
  * 纯函数，只读事实行；同一批事实里同一任务只产一条。
  */
 import type { Fact } from '../kernel/types'
 import type { Task } from '../protocol/entities'
+import type { NotifyTarget } from '../protocol/ipc'
 
 /** 一条待发的系统通知（title/body 只作 `notify` 参数，不拼命令或模板）。 */
 export interface NoticeRequest {
   title: string
   body: string
+  /**
+   * 点通知后的落点（缺省 = 只弹不跳）。
+   *
+   * 结局通知能定位到**任务**，定位不到具体卡片：完成 / 失败时卡已被内核收起。
+   * 一批里多个任务同时失败没有单一落点，宁可不跳，也不要随机跳一个。
+   */
+  target?: NotifyTarget
 }
 
 /** 结局通知的固定正文（不含任务正文，避免长文进通知条）。 */
@@ -56,6 +67,7 @@ export function noticesFromFacts(facts: readonly Fact[]): NoticeRequest[] {
       completed.push({
         title: `任务完成：${task.title}`,
         body: SETTLEMENT_NOTICE_BODY.completed,
+        target: { taskId: task.id },
       })
       continue
     }
@@ -68,8 +80,12 @@ export function noticesFromFacts(facts: readonly Fact[]): NoticeRequest[] {
   }
 
   if (failedTasks.size === 0) return completed
-  return [
-    ...completed,
-    { title: failedTitleOf(failedTasks.size), body: SETTLEMENT_NOTICE_BODY.failed },
-  ]
+  const failed = [...failedTasks]
+  const failedNotice: NoticeRequest = {
+    title: failedTitleOf(failed.length),
+    body: SETTLEMENT_NOTICE_BODY.failed,
+  }
+  // 只有一个任务失败时落点明确；多个任务一起失败时通知本身就是「一批」，不挂落点
+  if (failed.length === 1) failedNotice.target = { taskId: failed[0] }
+  return [...completed, failedNotice]
 }

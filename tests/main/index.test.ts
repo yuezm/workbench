@@ -176,7 +176,7 @@ const mocks = vi.hoisted(() => {
     resolvePluginConfigMock: vi.fn(() => ({})),
     createExternalChannelPluginMock: vi.fn(() => ({ start: (): void => undefined })),
     createExternalSourcePluginMock: vi.fn(() => ({ start: (): void => undefined })),
-    createSdkHostMock: vi.fn(() => ({
+    createSdkHostMock: vi.fn((_options: unknown) => ({
       log: (): void => undefined,
       now: (): number => 0,
       paths: { sessionRoot: null },
@@ -331,7 +331,7 @@ describe('主进程入口装配补测', () => {
     expect(mocks.shellMock.openExternal).toHaveBeenCalledTimes(1)
   })
 
-  it('结局通知：装配根把 announce 接到系统通知原件（任务完成 → 一条通知）', async () => {
+  it('结局通知：装配根把 announce 接到系统通知原件（任务完成 → 一条通知 + 任务落点）', async () => {
     await loadEntry()
 
     expect(typeof mocks.effectsMock.announce).toBe('function')
@@ -343,7 +343,27 @@ describe('主进程入口装配补测', () => {
       },
     ] as never[])
 
-    expect(mocks.notifyMock).toHaveBeenCalledWith('任务完成：收尾任务', '点开工作台查看结果')
+    // 落点：host 只给业务 id，app 身份（ai-workflow）由装配根补
+    expect(mocks.notifyMock).toHaveBeenCalledWith('任务完成：收尾任务', '点开工作台查看结果', {
+      appId: 'ai-workflow',
+      taskId: 't-1',
+    })
+  })
+
+  it('注入给插件的 notify 也补 appId；没有落点时保持缺省（不挂点击）', async () => {
+    await loadEntry()
+    const deps = mocks.createSdkHostMock.mock.calls[0][0] as {
+      notify: (title: string, body: string, target?: { cardId?: string }) => boolean
+    }
+
+    deps.notify('待审批', '点开工作台查看并处理', { cardId: 'card-9' })
+    deps.notify('番茄时钟', '已进入短休息')
+
+    expect(mocks.notifyMock).toHaveBeenNthCalledWith(1, '待审批', '点开工作台查看并处理', {
+      appId: 'ai-workflow',
+      cardId: 'card-9',
+    })
+    expect(mocks.notifyMock).toHaveBeenNthCalledWith(2, '番茄时钟', '已进入短休息', undefined)
   })
 
   it('M16 归档标签与帧来源：任务/阶段/智能体名从视图取，查不到留 null', async () => {

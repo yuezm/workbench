@@ -66,6 +66,8 @@ export function createSdk(host: SdkHost, manifest: PluginManifest): Sdk {
     },
     get notify() {
       requireCapability(manifest, 'notify')
+      // 落点（第三参）原样转交：sdk 不认识 app 身份，也没有要改写的字段；
+      // 保持返回原件本身（同一性），调用方拿到的就是宿主注入的那个函数。
       return host.notify ?? silentNotify
     },
   }

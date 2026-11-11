@@ -122,6 +122,29 @@ export interface StreamEndEvent {
 /** main → renderer 的推送（subscribe 动词的唯一载荷）。 */
 export type KernelEvent = FactsEvent | StreamEvent | StreamEndEvent
 
+/**
+ * 应用内深链（系统通知与顶部通知条共用）：点一条通知把人送到「哪张卡 / 哪个任务 / 哪个会话」。
+ *
+ * 只描述落点，不描述动作：怎么打开由渲染层决定（`appId` 与 `AppPlugin.id` 同名）。
+ * `cardId` 有值时渲染层要**滚到那张卡并高亮**——这正是「点了通知却还要自己翻找」的修法。
+ */
+export interface OpenTarget {
+  /** 目标 app id（渲染层注册表里的 `AppPlugin.id`） */
+  appId: string
+  /** 卡片 id：定位并高亮这一张（没有则只进任务 / 会话） */
+  cardId?: string
+  taskId?: string
+  conversationId?: string
+}
+
+/**
+ * 通知调用方给的落点：**不含 `appId`**。
+ *
+ * 系统通知只落到发通知的那个 app（当前唯一会发通知的是 AI 工作流），所以 app 身份由装配根
+ * 统一补一次；host 与插件因此不必知道产品名，也不需要互相同步 app id。
+ */
+export type NotifyTarget = Omit<OpenTarget, 'appId'>
+
 /** IPC 错误（跨进程只传 code + message；renderer 按 message 展示，按 code 分支）。 */
 export interface IpcError {
   code: string
@@ -141,3 +164,9 @@ export const WORKBENCH_QUERY_CHANNEL = 'workbench:query'
 export const WORKBENCH_PICK_FOLDER_CHANNEL = 'workbench:pick-folder'
 /** main → renderer：`KernelEvent` 推送 */
 export const WORKBENCH_EVENT_CHANNEL = 'workbench:kernel-event'
+/**
+ * main → renderer：系统通知被点击，载荷是 `OpenTarget`。
+ *
+ * 点击发生在系统通知中心，渲染层无从得知；只能由主进程接住点击、把窗口唤到前台再推一次落点。
+ */
+export const WORKBENCH_OPEN_TARGET_CHANNEL = 'workbench:open-target'

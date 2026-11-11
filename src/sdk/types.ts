@@ -18,6 +18,7 @@ import type {
 } from '../protocol/entities'
 import type { ExecutorIO, Receipt, Turn } from '../protocol/executor'
 import type { RawEvent } from '../protocol/inputs'
+import type { NotifyTarget } from '../protocol/ipc'
 
 /** 子进程句柄（与 `host/process.ts` 的 `SpawnedProcess` 结构兼容） */
 export interface Spawned {
@@ -159,12 +160,18 @@ export interface Sdk {
    * 系统通知：未声明 `notify` 时访问即抛 `capability_not_declared`。
    * title/body 只作通知 API 参数（不拼命令行/HTML/脚本），也不落日志；
    * 不可用或构造失败时静默丢弃，不影响调用方继续投递/回答。
+   * `target` 是点击通知后的落点（哪张卡 / 哪个任务 / 哪个会话）；省略 = 只弹不跳。
    */
-  notify(title: string, body: string): void
+  notify(title: string, body: string, target?: NotifyTarget): void
 }
 
-/** 系统通知原件：装配根注入 Electron 实现，测试注入假实现。 */
-export type NotifyFn = (title: string, body: string) => void
+/**
+ * 系统通知原件：装配根注入 Electron 实现，测试注入假实现。
+ *
+ * 落点透传而不是在这里解释：`sdk` 层不知道 app 身份（`NotifyTarget` 不含 `appId`），
+ * 补 `appId` 只在装配根做一次，原件只管「弹出去 + 记下落点」。
+ */
+export type NotifyFn = (title: string, body: string, target?: NotifyTarget) => void
 
 /**
  * `createSdk` 的宿主原件（`host/sdk-host.ts` 的唯一实现；测试注入假实现）。

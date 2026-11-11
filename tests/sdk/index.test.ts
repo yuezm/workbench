@@ -120,6 +120,26 @@ describe('createSdk notify 能力门控（M4 T6）', () => {
     expect(host.notify).toHaveBeenCalledWith('待审批', '任务已挂起，请选择选项')
   })
 
+  it('声明 notify 后透传第三参落点（sdk 不改写、不补 appId）', () => {
+    const host = hostOf()
+    const sdk = createSdk(host, manifestOf(['notify']))
+
+    sdk.notify('待审批', '点开工作台查看并处理', { cardId: 'card-1', taskId: 't-1' })
+
+    expect(host.notify).toHaveBeenCalledWith('待审批', '点开工作台查看并处理', {
+      cardId: 'card-1',
+      taskId: 't-1',
+    })
+    expect(sdk.notify).toBe(host.notify)
+  })
+
+  it('声明了 notify 但宿主没有原件：带落点的调用同样静默丢弃，不抛', () => {
+    const bare: SdkHost = { ...hostOf(), notify: undefined }
+    const sdk = createSdk(bare, manifestOf(['notify']))
+
+    expect(() => sdk.notify('待审批', '正文', { cardId: 'card-1' })).not.toThrow()
+  })
+
   it('声明了 notify 但宿主没有原件：静默丢弃，不抛（通知失败不拖住投递）', () => {
     const bare: SdkHost = { ...hostOf(), notify: undefined }
     const sdk = createSdk(bare, manifestOf(['notify']))

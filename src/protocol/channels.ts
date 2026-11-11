@@ -11,6 +11,7 @@
  * HTML/模板字符串。
  */
 import type { Card } from './entities'
+import type { NotifyTarget } from './ipc'
 
 /** 卡片 / 版本等业务 id 的字符串别名（与 `kernel/types` 的 `Id` 同形，protocol 不依赖 kernel）。 */
 type Id = string
@@ -40,8 +41,13 @@ export interface ChannelSdk {
   log(line: string): void
   /** 当前时刻（毫秒）。 */
   now(): number
-  /** 系统通知：需要 manifest 声明 `capabilities: ['notify']`。 */
-  notify(title: string, body: string): void
+  /**
+   * 系统通知：需要 manifest 声明 `capabilities: ['notify']`。
+   *
+   * `target` 是「点了这条通知该去哪儿」：不传就与 M4 一样只弹不跳。通道只负责给出落点的
+   * 业务部分（卡 / 任务 / 会话），app 身份由装配根补——插件不认识产品名。
+   */
+  notify(title: string, body: string, target?: NotifyTarget): void
   /** 插件自有配置（M7：manifest 默认值 + 用户设置合并；宿主按通道分别注入）。 */
   config<T = Record<string, unknown>>(): T
   /** 出站 HTTP（M7）：需要 manifest 声明 `capabilities: ['net']`；宿主未注入时缺省不可用。 */

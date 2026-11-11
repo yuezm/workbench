@@ -357,7 +357,7 @@ describe('kernel/handoff 建任务事实', () => {
       labels: [],
       ruleId: null,
       externalRef: null,
-      parentTaskId: null,
+      parentTaskId: 't-1',
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
       status: 'active',

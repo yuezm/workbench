@@ -96,11 +96,17 @@ export function withEvent(thread: ThreadRow, event: EventReceivedPayload, at: Is
   }
 }
 
-/** 任务挂进线程：`rootTaskIds` 只收无父任务的任务（任务树根）。 */
+/**
+ * 任务挂进线程：`rootTaskIds` 收「在本线程里没有父任务」的任务（任务树根）。
+ *
+ * 不直接看 `parentTaskId === null`：交接产物（M7）挂的是**别的线程里**的来源任务，
+ * 它在新线程里就是根，否则线程树会认为这条线程没有根任务。
+ */
 export function withTask(thread: ThreadRow, task: Task, at: Iso): ThreadRow {
   const taskIds = thread.taskIds.includes(task.id) ? thread.taskIds : [...thread.taskIds, task.id]
+  const parentInThread = task.parentTaskId !== null && thread.taskIds.includes(task.parentTaskId)
   const rootTaskIds =
-    task.parentTaskId === null && !thread.rootTaskIds.includes(task.id)
+    !parentInThread && !thread.rootTaskIds.includes(task.id)
       ? [...thread.rootTaskIds, task.id]
       : thread.rootTaskIds
   return { ...thread, taskIds, rootTaskIds, lastActivityAt: at }

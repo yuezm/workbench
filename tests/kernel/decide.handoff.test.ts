@@ -243,7 +243,7 @@ describe('kernel/decide 交接——直接完成', () => {
       currentStageId: 'st-b0',
       handoffFromTaskId: 'task-1',
       handoffFromStageId: 'st-a0',
-      parentTaskId: null,
+      parentTaskId: 'task-1',
     })
   })
 

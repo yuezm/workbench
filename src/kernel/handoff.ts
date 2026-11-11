@@ -9,6 +9,8 @@
  * - 产物 = 目标工作流一条 `task.created`（`origin='handoff'`）+ 新隐式线程
  *   （`source='handoff'`、`externalRef=null`）+ 目标阶段为 agent 时的入口 run；
  * - **不回写来源任务**：不产 `task.updated`，来源任务的状态只由它自己的流转事实表达；
+ *   交接任务挂 `parentTaskId = 来源任务`，但只有在来源阶段显式配了 `onChildrenSettled`
+ *   时才会参与 rollup（见 `spawn.ts#childrenSettledFacts` 的交接守卫）；
  * - 去重：扫 `view.tasks` 的 `(handoffFromTaskId, handoffFromStageId)`，同一对只交接一次；
  * - 链深上限 8：沿 `handoffFromTaskId` 回溯，超限零事实（防交接环无限擴张）。
  */
@@ -130,7 +132,10 @@ export function handoffFacts(
     externalRef: null,
     labels: [],
     threadId: thread.id,
-    parentTaskId: null,
+    // 挂来源任务（M25）：交接产物同样是一条「父任务的子任务」，来源阶段显式配了
+    // `onChildrenSettled` 时，它全部结终态就能唤醒来源任务（缺陷全修完 → 自动回归）。
+    // 但「不回写来源任务」的语义不变：这里不产 `task.updated`。
+    parentTaskId: sourceTask.id,
     spawnedByRunId: null,
     batchNo: null,
     spawnKey: null,

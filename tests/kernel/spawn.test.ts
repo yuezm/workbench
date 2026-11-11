@@ -349,6 +349,69 @@ describe('kernel/spawn：childrenSettledFacts', () => {
     expect((facts[0].payload as { action: string }).action).toBe('notify')
     expect(facts.some((fact) => fact.type === 'task.comment_added')).toBe(true)
   })
+
+  it('交接来的子任务默认不参与 rollup：父阶段没配 onChildrenSettled 就零事实', () => {
+    const handed = task({
+      id: 'tk-handed',
+      parentTaskId: 'tk-1',
+      status: 'completed',
+      origin: 'handoff',
+      handoffFromTaskId: 'tk-1',
+      handoffFromStageId: 'st-1',
+    })
+    const implicit = makeView({
+      tasks: new Map([
+        ['tk-1', task()],
+        ['tk-handed', handed],
+      ]),
+    })
+
+    // entryMode='agent' 本来会默认 wake，但交接产物不该自己把父任务叫醒
+    expect(
+      childrenSettledFacts(implicit, 'tk-1', AT, env(), { kind: 'host', via: 'scheduler' }),
+    ).toEqual([])
+
+    // 父阶段显式配了 wake：缺陷全修完 → 唤醒测试任务去回归
+    const explicit = makeView({
+      stages: new Map([['st-1', stage({ onChildrenSettled: 'wake' })]]),
+      tasks: new Map([
+        ['tk-1', task()],
+        ['tk-handed', handed],
+      ]),
+    })
+    const facts = childrenSettledFacts(explicit, 'tk-1', AT, env(), {
+      kind: 'host',
+      via: 'scheduler',
+    })
+
+    expect(facts[0]).toMatchObject({
+      type: 'task.children_settled',
+      payload: { parentTaskId: 'tk-1', action: 'wake', childIds: ['tk-handed'] },
+    })
+    expect(facts.filter((fact) => fact.type === 'run.queued')).toHaveLength(1)
+  })
+
+  it('混有 spawn 子任务时按原口径：未配置也唤醒', () => {
+    const handed = task({
+      id: 'tk-handed',
+      parentTaskId: 'tk-1',
+      status: 'completed',
+      origin: 'handoff',
+    })
+    const view = makeView({
+      tasks: new Map([
+        ['tk-1', task()],
+        ['tk-child', doneChild],
+        ['tk-handed', handed],
+      ]),
+    })
+    const facts = childrenSettledFacts(view, 'tk-1', AT, env(), { kind: 'host', via: 'scheduler' })
+
+    expect(facts[0]).toMatchObject({
+      type: 'task.children_settled',
+      payload: { action: 'wake', childIds: ['tk-child', 'tk-handed'] },
+    })
+  })
 })
 
 function mapOf(tasks: Task[]): Map<string, Task> {

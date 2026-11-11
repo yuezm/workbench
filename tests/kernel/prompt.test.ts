@@ -310,14 +310,17 @@ describe('kernel/prompt 回执块说明', () => {
     expect(rule).toContain('能查能推的，自己决定')
     expect(rule).toContain('有多个合理选项的，自己选一个')
     expect(rule).toContain('### 停下先问')
-    // 四类触发点一条不少：不可逆 / 口径缺失且返工贵 / 越出阶段 / 同一验收连续两次没过
+    // 五类触发点一条不少：不可逆 / 口径缺失且返工贵 / 越出阶段 / 同一验收连续两次没过 / 动公共面
     expect(rule).toContain('1. 不可逆或不可回滚：对外发布、发消息、花钱、改删生产数据、force push')
     expect(rule).toContain('2. 口径缺失且猜错要返工')
     expect(rule).toContain('3. 越出当前阶段')
     expect(rule).toContain('4. 同一验收标准下连续两次没过')
+    expect(rule).toContain('5. 修改了数据库 schema / 接口契约 / 事实日志 / 预置数据 / 公共配置')
     // 反向判据与提问格式同段给出：能查别问、一次问完、每题带推荐与代价、说清兜底去向
     expect(rule).toContain('### 别问')
     expect(rule).toContain('答案在仓库里能找到 → 去读')
+    expect(rule).toContain('答案已经有最佳实践、业界共识 → 按照最佳实践')
+    expect(rule).toContain('选项有明显优劣 → 选优先级高的')
     expect(rule).toContain('### 怎么问')
     expect(rule).toContain('一次问完')
     expect(rule).toContain('没人回我按 X 走')

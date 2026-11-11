@@ -197,6 +197,14 @@ describe('kernel/prompt 回执块说明', () => {
     expect(hint.split('\n').length).toBeGreaterThan(20)
   })
 
+  it('键全裁掉时只剩标题 / 开场白 / 上限：空键列表不多出空行', () => {
+    const lines = receiptBlockHint([]).split('\n')
+    expect(lines).toHaveLength(3)
+    expect(lines[0]).toBe('## 回执块（可选）')
+    expect(lines[1].startsWith('需要人拍板')).toBe(true)
+    expect(lines[2].startsWith('上限：')).toBe(true)
+  })
+
   it('taskPrompt 末尾追加回执块说明，空段过滤不受影响', () => {
     const task: Task = {
       id: 't-1',
@@ -222,16 +230,31 @@ describe('kernel/prompt 回执块说明', () => {
     )
   })
 
-  it('打断规则段（M19）：固定文案、只在四类触发点叫人，且不随阶段配置改写', () => {
+  it('打断规则段（M19）：整段文案分「自己决定 / 停下先问 / 别问 / 怎么问 / 不用问但要说」，不随阶段配置改写', () => {
     const rule = interruptRuleText()
     expect(rule).toBe(INTERRUPT)
-    expect(rule.split('\n')[0]).toBe('## 打断规则（什么时候叫人）')
-    expect(rule.split('\n')[1]).toBe('只在四种情况**必须 ask**：')
-    expect(rule).toContain('1. 不可逆动作，例如发布 / 删除 / 改生产数据 / 花钱 / 对外发信')
-    expect(rule).toContain('2. 需求口径缺失且猜错返工成本高')
-    expect(rule).toContain('3. 需要越出本阶段边界段')
-    expect(rule).toContain('4. 同一问题连续两轮未收敛')
-    expect(rule).toContain('其余可以先自己决定，拿不准再问我，不要为确认小事打断')
+    // 首行即标题、首尾不带换行：段内是一整段模板字面量，拼进提示词时不会多出空行
+    expect(rule.split('\n')[0]).toBe('## 打断规则')
+    expect(rule.startsWith('\n')).toBe(false)
+    expect(rule.endsWith('\n')).toBe(false)
+    // 能自己定的先说清：能查能推的自己决定，多个合理选项自己选一个并交代取舍
+    expect(rule).toContain('能查能推的，自己决定')
+    expect(rule).toContain('有多个合理选项的，自己选一个')
+    expect(rule).toContain('### 停下先问')
+    // 四类触发点一条不少：不可逆 / 口径缺失且返工贵 / 越出阶段 / 同一验收连续两次没过
+    expect(rule).toContain('1. 不可逆或不可回滚：对外发布、发消息、花钱、改删生产数据、force push')
+    expect(rule).toContain('2. 口径缺失且猜错要返工')
+    expect(rule).toContain('3. 越出当前阶段')
+    expect(rule).toContain('4. 同一验收标准下连续两次没过')
+    // 反向判据与提问格式同段给出：能查别问、一次问完、每题带推荐与代价、说清兜底去向
+    expect(rule).toContain('### 别问')
+    expect(rule).toContain('答案在仓库里能找到 → 去读')
+    expect(rule).toContain('### 怎么问')
+    expect(rule).toContain('一次问完')
+    expect(rule).toContain('没人回我按 X 走')
+    // 不用问但要出声的三类情形
+    expect(rule).toContain('### 不用问但要说')
+    expect(rule).toContain('需求自相矛盾')
     // 对话提示词不拼打断规则（聊天不是阶段，没有阶段边界可越）
     expect(chatPrompt(agent(), [message()])).not.toContain('打断规则')
   })
@@ -532,7 +555,7 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     })
     const stageIndex = text.indexOf('## 阶段要做什么')
     const gateIndex = text.indexOf('## 闸门判定（必须）')
-    const interruptIndex = text.indexOf('## 打断规则（什么时候叫人）')
+    const interruptIndex = text.indexOf('## 打断规则')
     expect(stageIndex).toBeGreaterThan(0)
     expect(gateIndex).toBeGreaterThan(stageIndex)
     // 打断规则紧跟闸门判定：先判「过没过」，再说「什么时候叫人」
@@ -606,7 +629,7 @@ describe('kernel/prompt 验收段（M20）', () => {
       '## 阶段要做什么',
       '## 验收（做完的判据）',
       '## 闸门判定（必须）',
-      '## 打断规则（什么时候叫人）',
+      '## 打断规则',
       '## 回执块（可选）',
     ].map((title) => text.indexOf(title))
     expect(order.every((index) => index > 0)).toBe(true)

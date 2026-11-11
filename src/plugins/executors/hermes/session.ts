@@ -5,6 +5,8 @@
  * 失败由调用方归一成 `protocol_error`（initialize 等握手失败）或 `run_failed`。
  */
 import type { PermissionMode } from '../../../protocol/entities'
+import type { SdkReceiptTool } from '../../../sdk/types'
+import { receiptMcpServers } from '../../shared/receipt-mcp-config'
 import { isRecord, type AcpClient } from './acp'
 import { ACP_PROTOCOL_VERSION } from './constants'
 
@@ -103,10 +105,16 @@ export function readSessionState(result: Record<string, unknown>): AcpSessionSta
  */
 export async function openSession(
   acp: AcpClient,
-  request: { cwd: string | undefined; resumeSessionId: string | null },
+  request: {
+    cwd: string | undefined
+    resumeSessionId: string | null
+    /** M24 回执工具 server；null / 缺省 = 不注入 */
+    receiptTool?: SdkReceiptTool | null
+  },
   timeoutMs: number,
 ): Promise<AcpSessionState> {
-  const params: Record<string, unknown> = { mcpServers: [] }
+  // M24：拿得到回执工具 server 才注入（默认关）；空数组 = 纯文本通道
+  const params: Record<string, unknown> = { mcpServers: receiptMcpServers(request.receiptTool) }
   if (request.cwd !== undefined) params.cwd = request.cwd
   if (request.resumeSessionId !== null) {
     params.sessionId = request.resumeSessionId

@@ -17,6 +17,8 @@ import type { ExecutorIO, Receipt, Turn } from '../../../protocol/executor'
 import type { ExecutorContext } from '../../../sdk/types'
 import { parseModelId } from '../../shared/model-id'
 import { applyReceiptBlock } from '../../shared/receipt-block'
+import type { ReceiptBlock } from '../../shared/receipt-fields'
+import { applyReceiptFields } from '../../shared/receipt-fields'
 import type { NormalizedRunStatus } from '../../shared/status'
 import { withStderr } from '../../shared/text'
 import {
@@ -55,6 +57,8 @@ interface HermesRunOutcome {
   resumeRejected: boolean
   usage: RunUsage
   durationMs: number
+  /** 工具通道拿到的回执（M24）；null = 模型没调回执工具，交给文本通道 */
+  toolReceipt: ReceiptBlock | null
 }
 
 /** 明确的失败（阶段内归一，不再依赖退出码） */
@@ -85,8 +89,10 @@ function toReceipt(turn: Turn, outcome: HermesRunOutcome): Receipt {
   if (outcome.errorCode !== null) receipt.errorCode = outcome.errorCode
   if (outcome.exitCode !== null) receipt.exitCode = outcome.exitCode
   if (outcome.resumeRejected) receipt.resumeRejected = true
-  // 回执块：从最终 output 解析，失败不改终态与 output
+  // 回执块：先按文本通道（最终 output）解析，再用工具通道覆盖——结构化参数优先。
+  // 两条通道都不改终态与 output。
   applyReceiptBlock(receipt, outcome.output)
+  if (outcome.toolReceipt !== null) applyReceiptFields(receipt, outcome.toolReceipt)
   return receipt
 }
 
@@ -141,6 +147,7 @@ export async function executeHermesRun(
       resumeRejected: false,
       usage,
       durationMs: 0,
+      toolReceipt: null,
     })
   }
 
@@ -157,6 +164,7 @@ export async function executeHermesRun(
       resumeRejected: false,
       usage,
       durationMs: 0,
+      toolReceipt: null,
     })
   }
 
@@ -175,6 +183,7 @@ export async function executeHermesRun(
       resumeRejected: false,
       usage,
       durationMs: 0,
+      toolReceipt: null,
     })
   }
   const child = launched.process
@@ -186,6 +195,7 @@ export async function executeHermesRun(
     text: '',
     usage,
     toolResults: new Set<string>(),
+    receipt: null,
     result: null,
     resumeRejected: false,
   }
@@ -308,7 +318,11 @@ export async function executeHermesRun(
     let opened: AcpSessionState | null = null
     if (resumeSessionId !== null) {
       try {
-        opened = await openSession(link.acp, { cwd, resumeSessionId }, handshakeTimeout)
+        opened = await openSession(
+          link.acp,
+          { cwd, resumeSessionId, receiptTool: sdk.paths.receiptTool },
+          handshakeTimeout,
+        )
       } catch (error) {
         // 续接被拒：记标志交给宿主换新会话重试，本次按失败收口
         state.resumeRejected = true
@@ -318,7 +332,11 @@ export async function executeHermesRun(
         }
       }
     } else {
-      opened = await openSession(link.acp, { cwd, resumeSessionId: null }, handshakeTimeout)
+      opened = await openSession(
+        link.acp,
+        { cwd, resumeSessionId: null, receiptTool: sdk.paths.receiptTool },
+        handshakeTimeout,
+      )
     }
 
     if (failure === null) {
@@ -385,6 +403,7 @@ export async function executeHermesRun(
     resumeRejected: state.resumeRejected,
     usage: state.usage,
     durationMs: sdk.now() - started,
+    toolReceipt: state.receipt,
   }
 
   if (stopReason !== null) {

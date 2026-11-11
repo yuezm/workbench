@@ -6,6 +6,8 @@
  * `plugins/shared/jsonl.ts`。
  */
 import type { PermissionMode, RunEvent, RunUsage } from '../../../protocol/entities'
+import type { ReceiptBlock } from '../../shared/receipt-fields'
+import { parseReceiptToolInput } from '../../shared/receipt-tool'
 import type { NormalizedRunStatus } from '../../shared/status'
 import { isRecord } from './acp'
 
@@ -18,6 +20,11 @@ export interface HermesRunState {
   usage: RunUsage
   /** 已发过终态 tool_result 的调用键（同一 toolCallId 多次 update 只发一次） */
   toolResults: Set<string>
+  /**
+   * 工具通道的回执（M24）：模型调了 `workbench.receipt` 才会填；与文本通道同时
+   * 存在时以它为准。
+   */
+  receipt: ReceiptBlock | null
   /** `session/prompt` 的终态（拿到它才算有终态结果） */
   result: { stopReason: string } | null
   /** 续接的会话已失效（宿主据此换新会话重试一次） */
@@ -153,11 +160,16 @@ export function handleSessionUpdate(
       return
     }
     case 'tool_call': {
+      const name = toolNameOf(update)
+      const input = jsonText(update.rawInput)
+      // M24 工具通道：认得出回执工具就留下结构化回执（参数非法返回 null，保持未给）
+      const receipt = parseReceiptToolInput(name, input)
+      if (receipt !== null) state.receipt = receipt
       emit({
         type: 'tool_call',
-        tool: toolNameOf(update),
+        tool: name,
         callId: typeof update.toolCallId === 'string' ? update.toolCallId : '',
-        input: jsonText(update.rawInput),
+        input,
       })
       return
     }

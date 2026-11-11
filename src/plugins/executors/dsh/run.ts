@@ -14,6 +14,9 @@ import type { ExecutorContext } from '../../../sdk/types'
 import { createLineReader, parseFrame } from '../../shared/jsonl'
 import { parseModelId } from '../../shared/model-id'
 import { applyReceiptBlock } from '../../shared/receipt-block'
+import type { ReceiptBlock } from '../../shared/receipt-fields'
+import { applyReceiptFields } from '../../shared/receipt-fields'
+import { dshReceiptMcpServers } from '../../shared/receipt-mcp-config'
 import { mapResultStatus, type NormalizedRunStatus } from '../../shared/status'
 import { tail, withStderr } from '../../shared/text'
 import {
@@ -41,6 +44,8 @@ interface DshRunOutcome {
   resumeRejected: boolean
   usage: RunUsage
   durationMs: number
+  /** 工具通道拿到的回执（M24）；null = 模型没调回执工具，交给文本通道 */
+  toolReceipt: ReceiptBlock | null
 }
 
 const emptyUsage = (): RunUsage => ({
@@ -85,8 +90,10 @@ function toReceipt(turn: Turn, outcome: DshRunOutcome): Receipt {
   if (outcome.errorCode !== null) receipt.errorCode = outcome.errorCode
   if (outcome.exitCode !== null) receipt.exitCode = outcome.exitCode
   if (outcome.resumeRejected) receipt.resumeRejected = true
-  // 回执块：dsh 从 result 帧的最终 output 解析，失败不改终态与 output
+  // 回执块：先按文本通道（result 帧的最终 output）解析，再用工具通道覆盖——
+  // 结构化参数优先，模型没调工具时行为与 M4 完全一致。两条通道都不改终态与 output。
   applyReceiptBlock(receipt, outcome.output)
+  if (outcome.toolReceipt !== null) applyReceiptFields(receipt, outcome.toolReceipt)
   return receipt
 }
 
@@ -132,6 +139,7 @@ export async function executeDshRun(
       resumeRejected: false,
       usage,
       durationMs: 0,
+      toolReceipt: null,
     })
   }
 
@@ -148,6 +156,7 @@ export async function executeDshRun(
       resumeRejected: false,
       usage,
       durationMs: 0,
+      toolReceipt: null,
     })
   }
 
@@ -173,6 +182,7 @@ export async function executeDshRun(
       resumeRejected: false,
       usage,
       durationMs: 0,
+      toolReceipt: null,
     })
   }
   const child = launched.process
@@ -184,6 +194,7 @@ export async function executeDshRun(
     protocolError: '',
     text: '',
     usage,
+    receipt: null,
     result: null,
   }
 
@@ -255,6 +266,7 @@ export async function executeDshRun(
         resumeRejected: state.result?.resumeRejected ?? false,
         usage,
         durationMs: sdk.now() - started,
+        toolReceipt: state.receipt,
       }
       if (state.result) {
         const status = mapResultStatus(state.result.status)
@@ -345,7 +357,9 @@ export async function executeDshRun(
       type: 'execute',
       request_id: requestId,
       prompt: turn.prompt,
-      mcp_servers: [],
+      // M24：拿得到回执工具 server 才注入（默认关，见 receipt-mcp-config）；
+      // 注入不成功时退回 []，纯文本通道照常工作
+      mcp_servers: dshReceiptMcpServers(sdk.paths.receiptTool),
     }
     if (cwd !== undefined) executeFrame.cwd = cwd
     if (modelSelection) executeFrame.model = modelSelection

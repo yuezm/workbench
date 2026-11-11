@@ -6,6 +6,8 @@
  */
 import type { RunEvent, RunUsage } from '../../../protocol/entities'
 import { frameErrorText } from '../../shared/jsonl'
+import type { ReceiptBlock } from '../../shared/receipt-fields'
+import { parseReceiptToolInput } from '../../shared/receipt-tool'
 import { DSH_PROTOCOL_VERSION, DSH_RUNTIME_ID } from './constants'
 
 export interface DshThinkingLevel {
@@ -56,6 +58,11 @@ export interface DshRunState {
   protocolError: string
   text: string
   usage: RunUsage
+  /**
+   * 工具通道的回执（M24）：模型调了 `workbench.receipt` 才会填。
+   * 与文本通道同时存在时以它为准（结构化参数不会有「取最后一个围栏块」的歧义）。
+   */
+  receipt: ReceiptBlock | null
   result: {
     status: string | undefined
     output: string
@@ -99,7 +106,10 @@ export function handleFrame(
     case 'thinking':
       if (frame.content) emit({ type: 'thinking', text: frame.content })
       return
-    case 'tool_call':
+    case 'tool_call': {
+      // M24 工具通道：认得出回执工具就留下结构化回执（参数非法返回 null，保持未给）
+      const receipt = parseReceiptToolInput(frame.name, frame.arguments)
+      if (receipt !== null) state.receipt = receipt
       emit({
         type: 'tool_call',
         tool: frame.name ?? '',
@@ -107,6 +117,7 @@ export function handleFrame(
         input: frame.arguments ?? '',
       })
       return
+    }
     case 'tool_result':
       emit({
         type: 'tool_result',

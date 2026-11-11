@@ -1446,6 +1446,85 @@ describe('回执块解析（M4）', () => {
   })
 })
 
+describe('工具通道（M24）：tool_call 带回执参数', () => {
+  /** 一条回执工具调用帧 */
+  const toolCall = (value: unknown, name = 'workbench.receipt'): string =>
+    frame({ v: 1, type: 'tool_call', name, call_id: 'call-1', arguments: JSON.stringify(value) })
+
+  it('模型调了回执工具：结构化参数直接进回执，正文不需要围栏块', async () => {
+    const h = harness()
+    const { running } = startRun(h)
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(
+      toolCall({
+        verdict: 'pass',
+        checks: [{ cmd: 'pnpm check', exitCode: 0 }],
+        notices: ['来自工具'],
+      }),
+    )
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: '做完了。' }))
+    child.close(0)
+
+    const receipt = await running
+    expect(receipt.status).toBe('succeeded')
+    expect(receipt.output).toBe('做完了。')
+    expect(receipt.verdict).toBe('pass')
+    expect(receipt.checks).toEqual([{ cmd: 'pnpm check', exitCode: 0 }])
+    expect(receipt.notices).toEqual(['来自工具'])
+  })
+
+  it('两条通道都有：工具通道优先（不吃「最后一块围栏块」的歧义）', async () => {
+    const h = harness()
+    const { running } = startRun(h)
+    const child = h.children[0]
+    const output = ['```json', JSON.stringify({ notices: ['来自文本'] }), '```'].join('\n')
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(toolCall({ notices: ['来自工具'] }))
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output }))
+    child.close(0)
+
+    const receipt = await running
+    expect(receipt.notices).toEqual(['来自工具'])
+  })
+
+  it('工具名不认 / 参数非法 / 参数里没有回执键：工具通道不生效，退回文本块', async () => {
+    const cases: Array<() => string> = [
+      () => toolCall({ notices: ['工具'] }, 'mcp__other__receipt'),
+      () => frame({ v: 1, type: 'tool_call', name: 'workbench.receipt', arguments: '{坏 JSON' }),
+      () => toolCall({ foo: 1 }),
+      () => toolCall({ ask: 1 }),
+    ]
+    for (const make of cases) {
+      const h = harness()
+      const { running } = startRun(h)
+      const child = h.children[0]
+      const output = ['```json', JSON.stringify({ notices: ['来自文本'] }), '```'].join('\n')
+      child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+      child.emitStdout(make())
+      child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output }))
+      child.close(0)
+
+      expect((await running).notices).toEqual(['来自文本'])
+    }
+  })
+
+  it('工具调用照常进事件流（run.frames 审计面不丢）', async () => {
+    const h = harness()
+    const { running, events } = startRun(h)
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(toolCall({ notices: ['来自工具'] }))
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
+    child.close(0)
+    await running
+
+    const call = events.find((event) => event.type === 'tool_call')
+    expect(call).toMatchObject({ tool: 'workbench.receipt', callId: 'call-1' })
+    expect(call?.input).toContain('来自工具')
+  })
+})
+
 describe('启动失败的兜底文案（spawn 返回空）', () => {
   it('sdk.process.spawn 返回空子进程、无 error 文案：回执走 spawn_failed + 「启动失败」', async () => {
     // 宿主缺陷：resolve 命中但 spawn 没给进程对象；startProcess 返回 { process: undefined }

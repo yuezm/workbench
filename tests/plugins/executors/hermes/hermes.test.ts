@@ -1739,12 +1739,114 @@ describe('createAcpClient（JSON-RPC 最小客户端）', () => {
   })
 })
 
+describe('工具通道（M24）：tool_call 里的回执', () => {
+  const stateOf = (): HermesRunState => ({
+    sessionId: 'sess-1',
+    text: '',
+    usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    toolResults: new Set<string>(),
+    receipt: null,
+    result: null,
+    resumeRejected: false,
+  })
+
+  const feed = (state: HermesRunState, update: Record<string, unknown>): void => {
+    handleSessionUpdate({ sessionId: 'sess-1', update }, state, () => undefined)
+  }
+
+  it('回执工具（mcp__workbench__receipt）：rawInput 写进 state.receipt', () => {
+    const state = stateOf()
+    feed(state, {
+      sessionUpdate: 'tool_call',
+      toolCallId: 'c1',
+      title: 'mcp__workbench__receipt',
+      kind: 'other',
+      status: 'pending',
+      rawInput: { verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0 }] },
+    })
+    expect(state.receipt).toEqual({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0 }] })
+  })
+
+  it('别的工具 / 参数非法 / 参数里没有回执键：state.receipt 保持 null', () => {
+    for (const [name, rawInput] of [
+      ['read file', { path: 'a.ts' }],
+      ['mcp__other__receipt', { notices: ['x'] }],
+      ['mcp__workbench__receipt', { ask: 1 }],
+      ['mcp__workbench__receipt', { foo: 1 }],
+    ] as const) {
+      const state = stateOf()
+      feed(state, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'c1',
+        title: name,
+        kind: 'other',
+        status: 'pending',
+        rawInput,
+      })
+      expect(state.receipt).toBeNull()
+    }
+  })
+
+  it('工具调用照常发 tool_call 事件（审计面不丢）', () => {
+    const state = stateOf()
+    const events: Array<Omit<RunEvent, 'seq'>> = []
+    handleSessionUpdate(
+      {
+        sessionId: 'sess-1',
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'c1',
+          title: 'mcp__workbench__receipt',
+          kind: 'other',
+          status: 'pending',
+          rawInput: { notices: ['来自工具'] },
+        },
+      },
+      state,
+      (event) => events.push(event),
+    )
+    expect(events).toEqual([
+      {
+        type: 'tool_call',
+        tool: 'mcp__workbench__receipt',
+        callId: 'c1',
+        input: '{"notices":["来自工具"]}',
+      },
+    ])
+  })
+
+  it('整轮执行：prompt 期间的工具调用写进回执（工具通道优先于文本）', async () => {
+    const { receipt } = await runWith({
+      'session/prompt': (_frame, child, id) => {
+        update(child, 'sess-1', {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'c1',
+          title: 'mcp__workbench__receipt',
+          kind: 'other',
+          status: 'pending',
+          rawInput: { notices: ['来自工具'] },
+        })
+        // 正文里也写一份围栏块：工具通道应当赢
+        update(child, 'sess-1', {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: '```json\n{"notices":["来自文本"]}\n```' },
+        })
+        replyResult(child, id, { stopReason: 'end_turn' })
+      },
+    })
+
+    expect(receipt.notices).toEqual(['来自工具'])
+    expect(receipt.status).toBe('succeeded')
+  })
+})
+
 describe('handleSessionUpdate / decidePermission（脏数据）', () => {
   const stateOf = (): HermesRunState => ({
     sessionId: 'sess-1',
     text: '',
     usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
     toolResults: new Set<string>(),
+    receipt: null,
     result: null,
     resumeRejected: false,
   })

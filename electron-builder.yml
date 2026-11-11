@@ -20,6 +20,11 @@ extraResources:
     to: tray.png
   - from: resources/tray@2x.png
     to: tray@2x.png
+  # 回执工具 server（M24）：舞台产物由 electron.vite.config.ts 的 emit 插件生成，
+  # 这里拷到 resources/plugins/ —— host/receipt-tool.ts 的打包态候选路径就是这个。
+  # 开关默认关（WORKBENCH_RECEIPT_TOOL=1 才注入），漏拷也只是退回纯文本通道。
+  - from: out/main/receipt-mcp-server.cjs
+    to: plugins/receipt-mcp-server.cjs
 
 # 国内网络：从 npmmirror 拉取 Electron 二进制
 electronDownload:

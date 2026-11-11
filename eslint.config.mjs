@@ -336,6 +336,67 @@ export default tseslint.config(
       'no-restricted-globals': 'off',
     },
   },
+  // 独立子进程脚本（M24）：`receipt-mcp-server.cjs` 不在插件进程里跑，是宿主用
+  // ELECTRON_RUN_AS_NODE 拉起的 stdio 服务（插件运行时协议里外部插件也是这个形态）。
+  // 它不是 TS 模块，CommonJS 的 require/module/process 在这里是合法写法。
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        require: 'readonly',
+        module: 'writable',
+        process: 'readonly',
+        __dirname: 'readonly',
+        console: 'readonly',
+      },
+    },
+    rules: {
+      'no-undef': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
+      'no-restricted-imports': 'off',
+    },
+  },
+  // 回执工具 server 的契约测试必须真起一个子进程按 MCP stdio 说话——被测对象本身就是
+  // 独立进程，只能在进程外断言。只放开起进程用的三个内置（子进程/按行读/取脚本路径），
+  // electron、网络与跨层 import 仍然禁止。
+  {
+    files: ['tests/plugins/shared/receipt-mcp-server.test.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                'node:crypto',
+                'node:net',
+                'node:http',
+                'node:https',
+                'crypto',
+                'net',
+                'http',
+                'https',
+              ],
+              message: '回执 server 契约测试只允许起本地子进程，不得发起网络请求。',
+            },
+            {
+              group: [
+                'electron',
+                '**/src/host/**',
+                '**/host/**',
+                '**/src/main/**',
+                '**/main/**',
+                '**/renderer/**',
+                '**/src/shared/**',
+              ],
+              message: '回执 server 契约测试只依赖 src/plugins 与 src/protocol。',
+            },
+          ],
+        },
+      ],
+    },
+  },
   // 末位关闭所有格式类规则，交给 Prettier
   prettier,
 )

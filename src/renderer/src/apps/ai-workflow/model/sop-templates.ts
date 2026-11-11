@@ -27,7 +27,13 @@
  * - 事故复盘：Google SRE Book《Postmortem Culture》的无责复盘。
  * - 迭代回顾：Start/Stop/Continue + Kanban WIP 限制与 flow 指标（Atlassian）。
  */
-import type { EntryMode, StageInput, WorkflowInput } from '../../../../../protocol/entities'
+import type {
+  EntryMode,
+  OnChildrenSettled,
+  SpawnPolicy,
+  StageInput,
+  WorkflowInput,
+} from '../../../../../protocol/entities'
 import { withBuiltinStages } from './stage-draft'
 
 /** 模板里的闸门（M19）：目标按**阶段名**写，落草稿时换成下标。 */
@@ -57,6 +63,16 @@ export interface SopStage {
   onReject?: string | null
   /** 闸门（M19）：非空时本阶段按判定结果流转 */
   gate?: SopGate | null
+  /** 本阶段是否允许 Agent 派生子任务（缺省 = 允许；`off` = 丢弃） */
+  spawnPolicy?: SpawnPolicy | null
+  /**
+   * 本阶段派生的子任务（含交接来的任务）全部结束时父任务怎么办（缺省 = 按入口模式推断：
+   * agent → wake，否则 notify）。测试流把「缺陷修复」交给别的流水线时，这里配 `wake`
+   * 才能在缺陷全部关闭后自动进入回归验证。
+   */
+  onChildrenSettled?: OnChildrenSettled | null
+  /** 阶段内轮次上限（缺省 = 1）：验收未全达时原地续一轮，不流转 */
+  maxRounds?: number | null
   /** 这个阶段适合交给什么样的智能体（建 agent 时的参考文案） */
   agentRole: string
 }
@@ -88,26 +104,30 @@ function targetIndex(stages: readonly SopStage[], name: string | null | undefine
  * 「待办 → 模板阶段 → 已阻塞 → 已完成 → 已取消」，模板里的下标（含闸门两侧）随之整体重映射。
  */
 export function draftFromTemplate(template: SopTemplate): WorkflowInput {
-  const stages = template.stages.map((stage): StageInput => ({
-    name: stage.name,
-    entryMode: stage.entryMode,
-    onCompleteIndex: targetIndex(template.stages, stage.onComplete),
-    onRejectIndex: targetIndex(template.stages, stage.onReject),
-    handoffWorkflowId: null,
-    handoffStageId: null,
-    subtaskStageId: null,
-    onChildrenSettled: null,
-    spawnPolicy: null,
-    instructions: stage.instructions,
-    acceptance: stage.acceptance ?? [],
-    gate: stage.gate
-      ? {
-          maxFails: stage.gate.maxFails,
-          onPassIndex: targetIndex(template.stages, stage.gate.onPass),
-          onFailIndex: targetIndex(template.stages, stage.gate.onFail),
-        }
-      : null,
-  }))
+  const stages = template.stages.map((stage): StageInput => {
+    const draft: StageInput = {
+      name: stage.name,
+      entryMode: stage.entryMode,
+      onCompleteIndex: targetIndex(template.stages, stage.onComplete),
+      onRejectIndex: targetIndex(template.stages, stage.onReject),
+      handoffWorkflowId: null,
+      handoffStageId: null,
+      subtaskStageId: null,
+      onChildrenSettled: stage.onChildrenSettled ?? null,
+      spawnPolicy: stage.spawnPolicy ?? null,
+      instructions: stage.instructions,
+      acceptance: stage.acceptance ?? [],
+      gate: stage.gate
+        ? {
+            maxFails: stage.gate.maxFails,
+            onPassIndex: targetIndex(template.stages, stage.gate.onPass),
+            onFailIndex: targetIndex(template.stages, stage.gate.onFail),
+          }
+        : null,
+    }
+    // 缺省不写键：老模板的草稿形状逐字不变（`null` 与缺省同义，但形状比对会看出来）
+    return stage.maxRounds == null ? draft : { ...draft, maxRounds: stage.maxRounds }
+  })
   return {
     name: template.name,
     description: template.description,
@@ -259,86 +279,130 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
   {
     id: 'testing-qa',
     name: '测试质量',
-    description: '系统化验证待上线版本：分层测试 + 缺陷闭环 + 出口准则，适合迭代测试。',
+    description: '智能体跑完测试、人只做最终验收：四个 agent 阶段卡门槛，缺陷修复交给独立流水线。',
     basis:
-      'ISO/IEC/IEEE 29119 测试过程 + 测试金字塔/Testing Trophy + Google test sizes + SBTM + 缺陷 triage：分层覆盖成本最低。',
+      'ISO/IEC/IEEE 29119 测试过程 + 测试金字塔/Testing Trophy + SBTM 探索式测试 + 缺陷 triage：设计与执行分离、出口准则可判定；修复与验证权分离，避免修复方自己关单。',
     stages: [
       {
-        name: '测试计划',
+        name: '测试设计',
         entryMode: 'agent',
         instructions:
-          '### 目标\n先定清「测什么、测到什么程度算通过」，再动手。\n\n### 产出\n- 测试范围、风险、环境与资源\n- 出口准则（可判定的通过阈值）与暂停 / 恢复条件\n\n### 边界\n- 不写具体用例（下一阶段的事）\n- 参考做法（可跳过）：风险矩阵按「影响 × 概率」打分',
+          '### 目标\n一次定清「测什么、测到什么程度算过」，后续路径自己排。\n\n### 产出\n- 测试范围与风险清单（按影响 × 概率排序）\n- 出口准则：可判定的阈值或清单，附不通过时的处置\n- 用例清单：前置、步骤、预期、优先级、对应的需求或风险项\n\n### 边界\n- 本阶段不写测试代码，也不追求覆盖率数字\n- 参考做法（可合并、可跳过）：等价类 / 边界值 / 状态迁移，挑主要风险即可',
         acceptance: [
-          '出口准则是可判定的（阈值 / 清单），不是「质量达标」这类描述',
-          '风险项都有对应的测试策略',
-          '环境与数据准备责任到人',
+          '出口准则是可判定的（阈值或清单），不是「质量达标」这类描述',
+          '每个高风险项都有对应用例覆盖',
+          '每条用例有可判定的预期结果，并能追溯到需求或风险项',
         ],
-        agentRole: '测试负责型：能写测试计划与风险矩阵',
+        agentRole: '测试负责型：能划范围、定出口准则与风险策略',
       },
       {
-        name: '用例设计',
+        name: '执行测试',
         entryMode: 'agent',
         instructions:
-          '### 目标\n用最低成本的用例组合覆盖主要风险。\n\n### 产出\n- 单元 / 接口 / E2E 的用例清单（含前置、步骤、预期、优先级）\n- 用例与需求条目的对应关系\n\n### 边界\n- 不为覆盖率写没有断言的用例\n- 参考做法（可跳过）：等价类 + 边界值 + 状态迁移',
+          '### 目标\n按自己的判断把该跑的都跑完，拿到可核对的结果证据。\n\n### 产出\n- 执行记录：用例 → 结果 → 证据（命令输出 / 截图 / 日志路径）\n- 缺陷候选清单：现象、复现步骤、期望 vs 实测\n- 放行风险初判\n\n### 边界\n- 不为让结果变绿而放宽断言、跳过用例或改测试数据\n- 测试量大就按模块拆子任务并行，小就自己跑完\n- 参考做法（可合并、可跳过）：自动化跑主路径、探索式补边角、手工只验机器判断不了的项',
         acceptance: [
-          '每条用例有可判定的预期结果',
-          '高风险项至少有一个 E2E 或接口级用例覆盖',
-          '用例能追溯到需求条目或风险项',
+          '计划内每条用例都有结论（通过 / 失败 / 阻塞）并附证据',
+          '没有静默跳过的用例；跳过项写明原因',
+          '失败项都能复现，或已标注不可复现并说明排查范围',
         ],
-        agentRole: '测试设计型：擅长等价类 / 边界值等方法',
+        spawnPolicy: 'agent',
+        maxRounds: 2,
+        onReject: '测试设计',
+        agentRole: '测试执行型：能跑自动化、做探索、出证据',
       },
       {
-        name: '自动化测试',
+        name: '缺陷定级',
         entryMode: 'agent',
         instructions:
-          '### 目标\n把能自动化的用例跑成可重复的证据。\n\n### 产出\n- 单元 + 集成测试代码与运行结果\n- 测试报告（通过率、失败明细、flaky 清单）\n\n### 边界\n- 不为了让 CI 变绿而放宽断言或跳过用例\n- 参考做法（可跳过）：行覆盖 ≥70%、按 test size 标注规模',
+          '### 目标\n把发现变成能排序、能派活、能验收的缺陷单，并决定哪些必须这轮修。\n\n### 产出\n- 缺陷单：编号、严重度 S1–S4、是否阻断发布、关联用例与需求、复现步骤、期望 vs 实测、证据\n- 本轮汇总：阻断项清单与已接受的风险\n- 需修的缺陷派出去：配了交接就产一条「本轮修复」任务；要一条缺陷一张任务，就按缺陷单在本任务下建子任务（挂父任务，rollup 才等得到它们）\n\n### 边界\n- 去重合并：同一根因只留一张单，其余注明关联主单\n- 「已修复」只能由回归验证回写，本阶段不得自己关单\n- 参考做法（可跳过）：按影响面 × 复现概率定级',
         acceptance: [
-          '测试命令退出码 0（或失败明细已逐条定位）',
-          '没有 skip 掉的既有用例',
-          'flaky 用例单独列出并标了原因',
-        ],
-        onReject: '用例设计',
-        agentRole: '自动化测试型：能写测试、跑 CI、出报告',
-      },
-      {
-        name: '探索测试',
-        entryMode: 'none',
-        instructions:
-          '### 目标\n用人眼发现自动化覆盖不到的疑点。\n\n### 产出\n- session sheet：操作、发现、疑点\n- 缺陷候选清单\n\n### 边界\n- 人来做探索；智能体只协助整理记录\n- 参考做法（可跳过）：SBTM charter，60–90 分钟一轮',
-        agentRole: '人工测试（智能体可协助整理 session sheet）',
-      },
-      {
-        name: '缺陷分级',
-        entryMode: 'agent',
-        instructions:
-          '### 目标\n让缺陷变成可排序、可派活的条目。\n\n### 产出\n- 缺陷清单：严重度 S1–S4、优先级、复现步骤、关联用例\n- 阻断发布的缺陷单独标出\n\n### 边界\n- 去重合并，不重复提单\n- 参考做法（可跳过）：按「影响面 × 复现概率」定级',
-        acceptance: [
-          '每条缺陷有可复现的步骤',
-          '阻断项（S1/S2）都已标明是否阻塞发布',
+          '每条缺陷都有可复现的步骤与期望 / 实测对照',
+          'S1/S2 已明确标注是否阻断发布',
           '重复缺陷已合并并注明主单',
+          '需修的缺陷都已派出，且每条能反查到对应修复任务',
         ],
-        agentRole: '缺陷管理型：负责 triage 与缺陷清单维护',
+        onChildrenSettled: 'wake',
+        onComplete: '回归验证',
+        agentRole: '缺陷管理型：负责 triage、派单与缺陷单维护',
       },
       {
         name: '回归验证',
         entryMode: 'agent',
         instructions:
-          '### 目标\n确认修复没有引入新的破坏。\n\n### 产出\n- 回归结果：通过率、新增失败、遗留风险\n- 与基线的对比\n\n### 边界\n- 不改代码；发现问题回到缺陷分级\n- 参考做法（可跳过）：按影响面圈定范围 + 全量冒烟',
+          '### 目标\n确认修复真的生效，且没有把别的地方弄坏。\n\n### 产出\n- 回归结果：通过率、新增失败、与基线的对比\n- 缺陷状态回写：哪些从「已修复」升到「已验证」，哪些打回\n- 遗留风险：接受 / 不接受及依据\n\n### 边界\n- 本阶段不改代码；发现问题回缺陷定级再走一轮\n- **关联缺陷还没修完就不写 `verdict`**：只交基线采样与等待项，本阶段会停在原地等缺陷全部关闭，之后被自动唤醒再跑一轮\n- 参考做法（可跳过）：按影响面圈定范围 + 全量冒烟',
         acceptance: [
-          '自动化回归全部执行过，结果附命令输出',
-          '新增失败逐条定位到缺陷或环境原因',
-          '遗留风险写明「接受 / 不接受」及依据',
+          '回归命令全部执行过，结果附命令输出或报告路径',
+          '每个新增失败都定位到缺陷单或环境原因',
+          '每条缺陷都有结论（已验证 / 打回），没有留在「已修复」',
+          '遗留风险写明接受或不接受及依据',
         ],
-        onReject: '缺陷分级',
-        agentRole: '回归测试型：能跑回归并比对基线',
+        gate: { maxFails: 2, onFail: '缺陷定级' },
+        agentRole: '回归测试型：能跑回归、比对基线、回写缺陷状态',
       },
       {
         name: '验收确认',
         entryMode: 'user',
         instructions:
-          '### 目标\n对着出口准则拍板放行或打回。\n\n### 产出\n- 逐条核对记录（预期 / 实测 / 结论）\n- 放行签署，或打回并写明缺口\n\n### 边界\n- 人拍板；出口准则之外的争论不改判定',
+          '### 目标\n对着出口准则拍板放行或打回，只看证据不看过程。\n\n### 产出\n- 逐条核对记录：预期 / 实测 / 结论\n- 放行签署，或打回并写明缺口\n\n### 边界\n- 人拍板；出口准则之外的争论不改判定',
         onReject: '回归验证',
         agentRole: '人工拍板（测试负责人或产品验收人）',
+      },
+    ],
+  },
+  {
+    id: 'testing-issue',
+    name: '缺陷修复',
+    description: '一条缺陷一张任务：定位 → 修复 → 评审 → 回归确认，验证权留在测试方。',
+    basis:
+      '缺陷生命周期（open → fixed → verified → reopened）+ 先红后绿的回归用例 + 修复方不得自验：状态机的写入权分开，AI 才不会自己关自己的单。',
+    stages: [
+      {
+        name: '定位复现',
+        entryMode: 'agent',
+        instructions:
+          '### 目标\n把「偶发」变成「必然」，并给出可反证的根因假设与影响面。\n\n### 产出\n- 复现步骤，或一条能稳定失败的用例\n- 根因假设：指向具体文件 / 提交 / 配置\n- 影响面：牵动哪些需求、用例、其他缺陷单\n\n### 边界\n- 本阶段不改代码，只读、只跑、只记录\n- 参考做法（可跳过）：二分定位、加临时日志、对比正常路径',
+        acceptance: [
+          '有可复现步骤，或一条修复前稳定失败的用例',
+          '根因假设指向具体文件 / 提交 / 配置，不是「某处逻辑有问题」',
+          '影响面写清了会牵动哪些需求或用例',
+        ],
+        agentRole: '排查型：能稳定复现并定位到根因所在',
+      },
+      {
+        name: '修复',
+        entryMode: 'agent',
+        instructions:
+          '### 目标\n用最小的改动修好，并留下能防复发的东西。\n\n### 产出\n- 代码改动（范围限于根因所在）\n- 回归用例：修复前红、修复后绿的那条\n- 自测证据：门禁退出码与关键命令输出\n\n### 边界\n- 不顺带重构、不动无关文件；发现别的缺陷另开单\n- 不为让门禁变绿而放宽断言或跳过用例\n- 参考做法（可跳过）：小步提交、提交信息带缺陷单号',
+        acceptance: [
+          '新增用例在修复前失败、修复后通过',
+          '门禁命令退出码 0，或失败明细已逐条说明',
+          '改动范围与根因一致，没有顺手重构',
+          '提交信息带缺陷单号，能反查到本次修复',
+        ],
+        maxRounds: 2,
+        onReject: '定位复现',
+        agentRole: '编码修复型：能定位后小步改对并补回归用例',
+      },
+      {
+        name: '修复评审',
+        entryMode: 'agent',
+        instructions:
+          '### 目标\n判断这次修复能不能合入，以及会不会引出下一个缺陷。\n\n### 产出\n- 判定：pass / fail 与依据\n- fail 时逐条给可执行待改项\n\n### 边界\n- 只审这次修复，不重新设计\n- S1/S2 缺陷通过后仍需人工确认，不能直接关单',
+        acceptance: [
+          '改动与缺陷根因对得上，没有越界修改',
+          '回归用例能覆盖原始复现步骤',
+          'S1/S2 缺陷标注了是否已通知相关方',
+        ],
+        gate: { maxFails: 2, onFail: '修复' },
+        agentRole: '评审型：只看这次修复的正确性与影响面',
+      },
+      {
+        name: '回归确认',
+        entryMode: 'user',
+        instructions:
+          '### 目标\n确认缺陷单可以关闭，或需要送回测试流做回归。\n\n### 产出\n- 缺陷单状态决定：已验证 / 打回\n- 是否需要回到测试工作流做回归，及范围\n\n### 边界\n- 人拍板；修复方不能自己关单',
+        onReject: '修复',
+        agentRole: '人工拍板（测试负责人或缺陷提出人）',
       },
     ],
   },

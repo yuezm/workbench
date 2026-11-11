@@ -144,6 +144,7 @@ describe('SOP_TEMPLATES', () => {
         'product-discovery',
         'dev-delivery',
         'testing-qa',
+        'testing-issue',
         'release-ops',
         'incident-postmortem',
         'sprint-retro',
@@ -269,5 +270,85 @@ describe('SOP_TEMPLATES', () => {
         }
       }
     }
+  })
+
+  it('测试质量压成五阶段：设计与执行合并，缺陷修复不进这条流水线', () => {
+    const qa = SOP_TEMPLATES.find((template) => template.id === 'testing-qa')
+    expect(qa).toBeDefined()
+    expect(qa!.stages.map((stage) => stage.name)).toEqual([
+      '测试设计',
+      '执行测试',
+      '缺陷定级',
+      '回归验证',
+      '验收确认',
+    ])
+    // 四个 agent 阶段 + 一处人工验收：人只在最后出现
+    expect(qa!.stages.map((stage) => stage.entryMode)).toEqual([
+      'agent',
+      'agent',
+      'agent',
+      'agent',
+      'user',
+    ])
+  })
+
+  it('执行测试允许 Agent 自己拆并行子任务，并有两轮原地自修复', () => {
+    const run = SOP_TEMPLATES.find((template) => template.id === 'testing-qa')!.stages.find(
+      (stage) => stage.name === '执行测试',
+    )
+    expect(run?.spawnPolicy).toBe('agent')
+    expect(run?.maxRounds).toBe(2)
+    expect(run?.onReject).toBe('测试设计')
+  })
+
+  it('缺陷定级在修复任务全部结终态后唤醒自己，再进回归验证', () => {
+    const triage = SOP_TEMPLATES.find((template) => template.id === 'testing-qa')!.stages.find(
+      (stage) => stage.name === '缺陷定级',
+    )
+    expect(triage?.onChildrenSettled).toBe('wake')
+    expect(triage?.onComplete).toBe('回归验证')
+  })
+
+  it('回归验证是闸门：两轮没过回缺陷定级，到上限由内核放行并留痕', () => {
+    const regression = SOP_TEMPLATES.find((template) => template.id === 'testing-qa')!.stages.find(
+      (stage) => stage.name === '回归验证',
+    )
+    expect(regression?.gate).toEqual({ maxFails: 2, onFail: '缺陷定级' })
+    // 不配 maxRounds：等待轮（缺陷还没修完、不写 verdict）不该被「阶段内续轮」当成自修复空转
+    expect(regression?.maxRounds ?? null).toBeNull()
+  })
+
+  it('缺陷修复是独立模板：四阶段，关单权留在人工确认', () => {
+    const issue = SOP_TEMPLATES.find((template) => template.id === 'testing-issue')
+    expect(issue).toBeDefined()
+    expect(issue!.stages.map((stage) => stage.name)).toEqual([
+      '定位复现',
+      '修复',
+      '修复评审',
+      '回归确认',
+    ])
+    expect(issue!.stages.at(-1)?.entryMode).toBe('user')
+    // 修复方不能自己关单：修复阶段的验收里不出现「已验证」
+    const fix = issue!.stages.find((stage) => stage.name === '修复')
+    expect((fix?.acceptance ?? []).join('')).not.toContain('已验证')
+    expect(issue!.stages.find((stage) => stage.name === '修复评审')?.gate).toEqual({
+      maxFails: 2,
+      onFail: '修复',
+    })
+  })
+
+  it('模板字段落进草稿：spawnPolicy / onChildrenSettled 透传，maxRounds 只在给了才写键', () => {
+    const qa = SOP_TEMPLATES.find((template) => template.id === 'testing-qa')
+    const byName = new Map(draftFromTemplate(qa!).stages.map((stage) => [stage.name, stage]))
+
+    expect(byName.get('执行测试')).toMatchObject({ spawnPolicy: 'agent', maxRounds: 2 })
+    expect(byName.get('缺陷定级')).toMatchObject({ onChildrenSettled: 'wake' })
+    expect(byName.get('回归验证')).toMatchObject({
+      onChildrenSettled: null,
+      spawnPolicy: null,
+    })
+    // 没声明 maxRounds 的阶段不写这个键：老模板的草稿形状逐字不变
+    expect(Object.keys(byName.get('测试设计')!)).not.toContain('maxRounds')
+    expect(byName.get('测试设计')!.spawnPolicy).toBeNull()
   })
 })

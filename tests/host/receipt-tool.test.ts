@@ -68,6 +68,15 @@ describe('resolveReceiptTool', () => {
     expect(tool?.args).toEqual([join('/app/resources/plugins', 'receipt-mcp-server.cjs')])
   })
 
+  it('没给 mainDir / command：只按环境变量找脚本，node 退回 process.execPath', () => {
+    const tool = resolveReceiptTool({
+      env: { ...ENABLED, [RECEIPT_TOOL_SERVER_ENV_KEY]: '/custom/server.cjs' },
+      exists: () => true,
+    })
+    expect(tool?.args).toEqual(['/custom/server.cjs'])
+    expect(tool?.command).toBe(process.execPath)
+  })
+
   it('环境变量指定的路径优先于两个默认候选', () => {
     const tool = resolveReceiptTool({
       env: { ...ENABLED, [RECEIPT_TOOL_SERVER_ENV_KEY]: '/custom/server.cjs' },

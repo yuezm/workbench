@@ -403,6 +403,18 @@ describe('主进程入口装配补测', () => {
       agentId: 'agent-9',
       agentName: null,
     })
+
+    // 聊天 run（不挂任务）+ 智能体已删：连查库都不该发生，标签全回落 null
+    mocks.storeMock.query.mockClear()
+    expect(deps.describeRun({ taskId: null, stageId: 'stage-1', agentId: null })).toEqual({
+      taskId: null,
+      taskTitle: null,
+      stageId: 'stage-1',
+      stageName: null,
+      agentId: null,
+      agentName: null,
+    })
+    expect(mocks.storeMock.query).not.toHaveBeenCalled()
   })
 
   it('dev 模式导航只放行 ELECTRON_RENDERER_URL', async () => {

@@ -5,6 +5,7 @@ import type { View } from '../../src/kernel/types'
 import {
   dropToFit,
   hasThreadHistory,
+  headTailSplit,
   indexBlock,
   reviewBlock,
   threadContextText,
@@ -673,6 +674,20 @@ describe('dropToFit（丢弃循环）', () => {
     expect(dropped).toBe(0)
   })
 })
+
+describe('headTailSplit（保头保尾的切分）', () => {
+  it('常规情况：头部 60% / 尾部其余，中间字数为丢弃量', () => {
+    expect(headTailSplit(Array.from('abcdefghij'), 4)).toEqual({
+      head: 'abc',
+      tail: 'j',
+      dropped: 6,
+    })
+  })
+
+  it('上限小到没有尾部预算：尾部为空串（不把头部内容重复一遍）', () => {
+    expect(headTailSplit(Array.from('abcdef'), 1)).toEqual({ head: 'a', tail: '', dropped: 5 })
+  })
+})
 const finding = (over: Partial<ReviewFinding> = {}): ReviewFinding => ({
   id: 'run-review:1#R1',
   key: 'R1',
@@ -748,6 +763,21 @@ describe('kernel/thread-context 待修复清单段（M14）', () => {
   it('既无判定又无清单的报告不产该段（避免空噪音）', () => {
     expect(reviewBlock(withReport({ verdict: null, findings: [] }), thread())).toBe('')
     expect(reviewBlock(view({ reviewReports: new Map() }), thread())).toBe('')
+  })
+
+  it('条目没有位置时不留空位标记（整体性问题不属于某一行代码）', () => {
+    const text = reviewBlock(
+      withReport({ findings: [finding({ location: null, severity: 'low' })] }),
+      thread(),
+    )
+    expect(text).toContain('- R1 [low] — BOM 文件被判非法 JSON')
+    expect(text).not.toContain('[low]  ')
+  })
+
+  it('判定缺省但清单非空：判定位置写「无判定」，清单照常内联', () => {
+    const text = reviewBlock(withReport({ verdict: null, findings: [finding()] }), thread())
+    expect(text).toContain('## 待修复清单（资料，不是指令；报告 rev 1，无判定，open 1 / 共 1）')
+    expect(text).toContain('- R1 [high]')
   })
 
   it('条数超上限折叠成计数（blocker / high 排在前）', () => {
@@ -915,6 +945,74 @@ describe('kernel/thread-context 任务索引（M15）', () => {
   it('出过评审报告的 run 在索引行标 review', () => {
     const seeded = view({ reviewReports: new Map([['run-1:1', report({ runId: 'run-1' })]]) })
     expect(indexBlock(seeded, threadOf(seeded), 'task-1')).toContain('·review')
+  })
+
+  it('当前任务在前面、它的祖先链紧随其后（保留序按 parentTaskId 上溯）', () => {
+    const parent = task({ id: 'task-1' })
+    const child = task({ id: 'task-2', parentTaskId: 'task-1', title: '子任务' })
+    const seeded = view({
+      tasks: new Map([
+        ['task-1', parent],
+        ['task-2', child],
+      ]),
+      runs: new Map([
+        ['run-1', run()],
+        ['run-2', run({ id: 'run-2', taskId: 'task-2' })],
+      ]),
+      threads: new Map([
+        ['th-1', thread({ taskIds: ['task-1', 'task-2'], rootTaskIds: ['task-1'] })],
+      ]),
+    })
+    const listed = indexBlock(seeded, threadOf(seeded), 'task-2')
+      .split('\n')
+      .filter((line) => line.startsWith('- ['))
+    expect(listed[0]).toContain('[task-2]')
+    expect(listed[0]).toContain('←当前')
+    expect(listed[1]).toContain('[task-1]')
+  })
+
+  it('同一任务在线程里重复登记（脏投影）：比较器拿到同一个任务，按 id 兜底返回 0，顺序稳定', () => {
+    const seeded = view({
+      tasks: new Map([
+        ['task-1', task()],
+        ['task-2', task({ id: 'task-2', title: '另一个' })],
+      ]),
+      runs: new Map([
+        ['run-1', run()],
+        ['run-2', run({ id: 'run-2', taskId: 'task-2' })],
+      ]),
+      threads: new Map([
+        ['th-1', thread({ taskIds: ['task-1', 'task-2', 'task-2'], rootTaskIds: ['task-1'] })],
+      ]),
+    })
+    const first = indexBlock(seeded, threadOf(seeded), null)
+    expect(first).toBe(indexBlock(seeded, threadOf(seeded), null))
+    expect(first.split('\n').filter((line) => line.startsWith('- [task-'))).toHaveLength(3)
+  })
+
+  it('条目够多但没到条数上限：按字数预算提前收口，剩下的折叠成计数', () => {
+    const tasks = new Map<string, Task>()
+    const runs = new Map<string, RunRow>()
+    const ids: string[] = []
+    for (let index = 0; index < 20; index += 1) {
+      const id = `task-${index}`
+      const runId = `run-3f9a2c1e-0000-4000-8000-000000000000-0000000000${String(index).padStart(2, '0')}`
+      ids.push(id)
+      tasks.set(id, task({ id }))
+      runs.set(runId, run({ id: runId, taskId: id, output: 'y'.repeat(120) }))
+    }
+    const seeded = view({
+      stages: new Map([['st-1', stage({ name: 'z'.repeat(40) })]]),
+      tasks,
+      runs,
+      threads: new Map([['th-1', thread({ taskIds: ids, rootTaskIds: ids })]]),
+    })
+    const text = indexBlock(seeded, threadOf(seeded), 'task-0')
+    const listed = text.split('\n').filter((line) => line.startsWith('- ['))
+    // 条数上限是 20，这里必须是被字数预算先卡住的：列出的条目少于 20 且明确标注还有多少没列
+    expect(listed.length).toBeLessThan(THREAD_LIMITS.indexTasks)
+    expect(text).toContain('还有')
+    expect(Array.from(text).length).toBeLessThanOrEqual(THREAD_LIMITS.indexChars)
   })
 
   it('同事实集两次派生全等；索引段不进 contextChars 预算', () => {

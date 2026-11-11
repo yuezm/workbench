@@ -4,7 +4,7 @@
 >
 > 复核方式：`pnpm test:coverage` 后解析 `coverage/coverage-final.json`，把 `s`（语句）与 `b`（分支）里计数为 0 的项对照本表；本表之外出现未覆盖项即为**新增缺口**，要补测试或补登记。
 >
-> 最后复核：2026-11-09（覆盖率补口到 **100 / 100 / 100 / 100**，本表清空）。
+> 最后复核：2026-11-11（覆盖率补口到 **100 / 100 / 100 / 100**，本表仍为空）。
 
 ## 判定口径
 
@@ -19,6 +19,7 @@
 ## 当前登记（0 项）
 
 2026-11-09 起本表**为空**：全项目覆盖率 **100 / 100 / 100 / 100**，零未覆盖语句、零未覆盖分支。
+2026-11-11 复核仍为空（188 测试文件 / 3185 用例，`coverage-final.json` 里 `s` / `b` / `f` 零计数项 0）。
 
 下面两节记录**不可达分支怎么变成可达**，供后续同类缺口复用；判定口径与禁止事项继续有效。
 
@@ -40,28 +41,41 @@
    由单测用构造输入直接覆盖；产品路径上的守卫**一字不改**（仍然在、仍然生效），只是判定本身可测了。
    抽出来的函数只吃状态、不碰 IO / 时钟 / 随机，仍满足内核纯函数铁律。
 
-   | 抽出的判定            | 位置                                 | 覆盖方式                        |
-   | --------------------- | ------------------------------------ | ------------------------------- |
-   | `settleCancelledOnce` | `host/scheduler.ts`                  | 终态后不再写兜底终态            |
-   | `startCancelChain`    | `host/scheduler.ts`                  | 迟到取消 / 重复取消不重启链路   |
-   | `scheduleKill`        | `host/scheduler.ts`                  | 链路已收口不再排强杀等待        |
-   | `degradedCommentText` | `kernel/commands/run.ts`             | 闸门配置缺省时次数按 0 算       |
-   | `indexTarget`         | `kernel/commands/workflow.ts`        | 下标越界归 null                 |
-   | `sameInstructions`    | `kernel/commands/workflow.ts`        | 缺省与空串视为同值              |
-   | `dropToFit`           | `kernel/thread-context.ts`           | 所有段落已空但仍超上限时停下    |
-   | `moveStageInList`     | `renderer/.../WorkflowEditor.tsx`    | 阶段重排的越界早退              |
-   | `cardLanding`         | `renderer/.../AiWorkflowPage.tsx`    | 卡片的落点判定                  |
-   | `numberFieldErrors`   | `renderer/.../PluginsManager.tsx`    | 数字字段缺省按空值处理          |
-   | `withTimeout`         | `plugins/registry.ts`                | 定时器实现返回 undefined 时不崩 |
-   | `jsonText`            | `plugins/executors/claude/frames.ts` | 工具入参不是 JSON 值时归空串    |
-   | `providerOf`          | `plugins/executors/dsh/models.ts`    | 模型 id 不是字符串时归空串      |
-   | `clearExecutorTimers` | `plugins/executors/dsh/run.ts`       | 定时器没设置时跳过清理          |
+   | 抽出的判定                   | 位置                                 | 覆盖方式                        |
+   | ---------------------------- | ------------------------------------ | ------------------------------- |
+   | `settleCancelledOnce`        | `host/scheduler.ts`                  | 终态后不再写兜底终态            |
+   | `startCancelChain`           | `host/scheduler.ts`                  | 迟到取消 / 重复取消不重启链路   |
+   | `scheduleKill`               | `host/scheduler.ts`                  | 链路已收口不再排强杀等待        |
+   | `degradedCommentText`        | `kernel/commands/run.ts`             | 闸门配置缺省时次数按 0 算       |
+   | `indexTarget`                | `kernel/commands/workflow.ts`        | 下标越界归 null                 |
+   | `sameInstructions`           | `kernel/commands/workflow.ts`        | 缺省与空串视为同值              |
+   | `dropToFit`                  | `kernel/thread-context.ts`           | 所有段落已空但仍超上限时停下    |
+   | `moveStageInList`            | `renderer/.../WorkflowEditor.tsx`    | 阶段重排的越界早退              |
+   | `cardLanding`                | `renderer/.../AiWorkflowPage.tsx`    | 卡片的落点判定                  |
+   | `numberFieldErrors`          | `renderer/.../PluginsManager.tsx`    | 数字字段缺省按空值处理          |
+   | `withTimeout`                | `plugins/registry.ts`                | 定时器实现返回 undefined 时不崩 |
+   | `jsonText`                   | `plugins/executors/claude/frames.ts` | 工具入参不是 JSON 值时归空串    |
+   | `providerOf`                 | `plugins/executors/dsh/models.ts`    | 模型 id 不是字符串时归空串      |
+   | `clearExecutorTimers`        | `plugins/executors/dsh/run.ts`       | 定时器没设置时跳过清理          |
+   | `naturalStageLabel`          | `kernel/commands/task.ts`            | 自然去向：完成 / 阶段已不存在   |
+   | `headTailSplit`              | `kernel/thread-context.ts`           | 上限小到没有尾部预算（尾空串）  |
+   | `stageIdAfterWorkflowChange` | `renderer/.../model/stage-draft.ts`  | 换工作流后起始阶段保留 / 回空串 |
+   | `rerunStageLabel`            | `renderer/.../TaskDetailPage.tsx`    | 阶段名缺失时退化「当前阶段」    |
 
    另有三处「守卫与另一处守卫等价」按第 2 种处理：`kernel/commands/run.ts` 的交接目标缺失判断
    （收进 `handoffOnExit`，脏投影不交接）、`host/scheduler.ts` 的 `cancelAll`
    （改为直接遍历 `entries`，controller 就是 Map 里的值，「取不到」在构造上不存在）、
    `renderer/.../WorkflowEditor.tsx` 的「阶段N」兜底（`validateDraft` 先做名称必填检查，
    走到该分支时阶段名必非空 → 删掉死表达式，行为等价）。
+
+   2026-11-11 又按第 2 种处理了七处「产品路径上必然成立的判定」：
+   - 六个受控弹窗（`AgentDialog` / `ProjectDialog` / `RuleDialog` / `RuntimeDialog` / `TaskDialog` /
+     `WorkflowManager` 内嵌定义弹窗）的 `onOpenChange={(next) => { if (!next) onCancel() }}` →
+     `onOpenChange={() => onCancel()}`。依据：`open` 受控且无 `DialogTrigger`，Radix 只从
+     `onDismiss` 发 `false`，`next === true` 在产品路径上不存在（与 `ArchivedTasksDialog` 既有写法一致）。
+   - `renderer/.../WorkflowSwitcher.tsx` 的 `workflows.some((w) => w.id === activeId) ? (activeId ?? '') : ''`
+     → `value={active?.id ?? ''}`：`some()` 为真 ⟺ `find()` 命中 ⟺ 值就是 `activeId`，
+     内层 `?? ''` 只在 `some()` 为假时才需要，而那一路外层已经给了 `''`。
 
 **禁止**：为了让数字好看删掉保护性守卫，或加覆盖率抑制注释（`ignore` 类）来绕过——两者都按 `CONSTRAINTS.md` 的 Floor 处理（禁用清单已列明）。
 两者都按 `CONSTRAINTS.md` 的 Floor 处理。
@@ -72,4 +86,5 @@
 - 2026-11-08：新增 `claude`（Claude Code stream-json）与 `hermes`（ACP over stdio）两个执行器插件，登记项 22 → 23；`kernel/decide.ts` 的 4 条随 `cf26a8c` 的按命令域拆分迁到 `kernel/commands/{workflow,run}.ts`（位置更新、条数不变）。
 - 2026-11-08：P1 线程上下文分段后登记项 23 → 24（`thread-context.ts` 的丢弃循环早退）。
 - 2026-11-09：**覆盖率补口到 100 / 100 / 100 / 100，本表清空**。原 24 项登记逐条按上面第 2 / 3 种方式关闭（守卫语义与产品行为均未改变）；同时把 2026-11-09 新出现的缺口一并补齐：全量 52 项未覆盖语句 / 分支按判定抽成模块级导出函数 22 项、重复守卫合并 3 项、守卫构造化 2 项、删证明不可达的表达式 1 项、正常业务场景与脏投影兜底补测试 24 项处理完。全项目 164 个测试文件 / 2653 个用例全绿。
+- 2026-11-11：覆盖率复位到 **100 / 100 / 100 / 100**（188 测试文件 / 3185 用例）。缺口 19 条语句 / 70 条分支臂 / 3 个函数逐条关闭：补测试 44 条（服务端 25 / 客户端 19），第 3 种处理 4 项（`naturalStageLabel` / `headTailSplit` / `stageIdAfterWorkflowChange` / `rerunStageLabel`），第 2 种处理 7 项（6 个受控弹窗 `onOpenChange` + `WorkflowSwitcher` 的死 `?? ''`）。本表登记项仍为 0。
 - 本表只登记，不驱动实现。删守卫来换覆盖率数字属于降低门槛，按 `CONSTRAINTS.md` 的 Floor 处理。

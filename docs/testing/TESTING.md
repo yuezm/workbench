@@ -35,7 +35,7 @@
 - 契约测试**只守卫不改**：`WorkbenchApi` / `NOTIFY_CHANNEL` / `AppDefinition` 变更时，先改契约与消费方，再让测试跟随契约走。
 - E2E **有意不覆盖**阶段完成/系统通知（真实等待 ≥60s 且脆），该路径由 machine/usePomodoro 单测 + 手动验收覆盖。
 - renderer 单测默认 jsdom；main/preload 契约测试文件首行标 `// @vitest-environment node`。
-- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98；项目基线（2026-11-09 覆盖率补口）**100 / 100 / 100 / 100**，`pnpm test:coverage` 跌破基线即 finding。
+- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98；项目基线（2026-11-11 复位复核）**100 / 100 / 100 / 100**（188 测试文件 / 3185 用例；服务端 `kernel`/`protocol`/`host`/`main`/`plugins`/`sdk`/`shared`/`preload` 与客户端 `renderer` 各自四维 100%），`pnpm test:coverage` 跌破基线即 finding。
 - M2 起 `runs` / `run_events` / `conversations` / `messages` 是事实投影：崩溃恢复用例在 `tests/e2e/crash-recovery.spec.ts`（临时 userData + 残留 pid + 重启），租约/退避/超时在 `tests/kernel/decide.run.test.ts`，调度/取消/帧在 `tests/host/{scheduler,cancel}.test.ts`。
 
 ## 常用命令

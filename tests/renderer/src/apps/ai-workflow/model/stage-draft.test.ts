@@ -13,6 +13,7 @@ import {
   isTerminalStage,
   isUserStage,
   nextUserStageName,
+  stageIdAfterWorkflowChange,
   userStageRange,
   withBuiltinStages,
 } from '../../../../../../src/renderer/src/apps/ai-workflow/model/stage-draft'
@@ -312,5 +313,19 @@ describe('dropVanishedStages', () => {
   it('内置项本来就没有 id：不算「已删除」，原样提交由内核补齐', () => {
     const stages = draft()
     expect(dropVanishedStages(stages, new Set())).toEqual(stages)
+  })
+})
+
+describe('stageIdAfterWorkflowChange（规则弹窗换工作流后的起始阶段）', () => {
+  it('新流程里还有这个阶段：保留原值', () => {
+    expect(stageIdAfterWorkflowChange([{ id: 's1' }, { id: 's2' }], 's2')).toBe('s2')
+  })
+
+  it('新流程里没有这个阶段：回到首阶段（空串），避免提交悬空 id', () => {
+    expect(stageIdAfterWorkflowChange([{ id: 's1' }], 's2')).toBe('')
+  })
+
+  it('新流程读不到（工作流被删 / 还没同步）：同样回到首阶段', () => {
+    expect(stageIdAfterWorkflowChange(undefined, 's1')).toBe('')
   })
 })

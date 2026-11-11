@@ -296,4 +296,11 @@ describe('kernel/decide task.rerun', () => {
     expect(decision.reject?.code).toBe('conflict')
     expect(decision.reject?.message).toContain('当前阶段无效')
   })
+
+  it('任务没有当前阶段（工作流还没配阶段就建了任务）→ conflict，不猜阶段', () => {
+    const decision = rerun(view({ tasks: [task({ currentStageId: null })] }))
+    expect(decision.reject?.code).toBe('conflict')
+    expect(decision.reject?.message).toContain('当前阶段无效')
+    expect(decision.facts).toEqual([])
+  })
 })

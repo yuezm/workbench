@@ -390,4 +390,32 @@ describe('Select（shadcn 基座）', () => {
     expect(listbox.parentElement).not.toBeNull()
     expect(listbox.closest('.overflow-hidden')).toBeNull()
   })
+
+  it('position="popper"：浮层按触发器宽度贴合，选项照常可选', async () => {
+    const onValueChange = vi.fn()
+    const user = setupUser()
+    render(
+      <Select value="a" onValueChange={onValueChange}>
+        <SelectTrigger aria-label="选择器">
+          <SelectValue placeholder="请选择" />
+        </SelectTrigger>
+        <SelectContent position="popper">
+          <SelectItem value="a">选项 A</SelectItem>
+          <SelectItem value="b">选项 B</SelectItem>
+        </SelectContent>
+      </Select>,
+    )
+
+    await user.click(screen.getByRole('combobox', { name: '选择器' }))
+    const listbox = screen.getByRole('listbox')
+    // popper 定位专属：浮层按落点偏移、视口按触发器宽度铺满（item-aligned 时这两组类名不出现）
+    expect(listbox).toHaveClass('data-[side=bottom]:translate-y-1')
+    const viewport = listbox.querySelector('[data-radix-select-viewport]')
+    expect(viewport).not.toBeNull()
+    expect(viewport).toHaveClass('min-w-[var(--radix-select-trigger-width)]')
+
+    await user.click(screen.getByRole('option', { name: '选项 B' }))
+    expect(onValueChange).toHaveBeenCalledWith('b')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
 })

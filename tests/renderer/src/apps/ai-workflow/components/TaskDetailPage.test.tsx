@@ -10,7 +10,10 @@ import type {
 } from '../../../../../../src/protocol/entities'
 import type { CommandDispatchResult } from '../../../../../../src/protocol/ipc'
 import type { TaskComment } from '../../../../../../src/protocol/task-comment'
-import { TaskDetailPage } from '../../../../../../src/renderer/src/apps/ai-workflow/components/TaskDetailPage'
+import {
+  rerunStageLabel,
+  TaskDetailPage,
+} from '../../../../../../src/renderer/src/apps/ai-workflow/components/TaskDetailPage'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function stage(
@@ -939,5 +942,33 @@ describe('TaskDetailPage 评审结论（M14）', () => {
     )
     expect(await screen.findByText(/还没有评审结论/)).toBeTruthy()
     expect(screen.queryByRole('button', { name: '提升为文档' })).toBeNull()
+  })
+
+  it('导出成功但结果里没有 path（脏结果兜底）：不显示 undefined，也不报错', async () => {
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    kernel.setView('reviews.byTask', { taskId: 't1' }, [reviewReport])
+    // 宿主只回 value 不回 path（旧版本 / 脏结果）：路径按空串处理
+    kernel.onDispatch(() => ({ facts: [], value: {} }) as never)
+    render(
+      <TaskDetailPage taskId="t1" workflows={[workflow]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+
+    expect(await screen.findByText('BOM 文件被判非法 JSON')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: '提升为文档' }))
+
+    const line = await screen.findByText(/已写入/)
+    expect(line.textContent?.trim()).toBe('已写入')
+    expect(screen.queryByText(/undefined|null/)).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('rerunStageLabel', () => {
+  it('阶段名在就原样用；缺失（脏投影）时退化「当前阶段」', () => {
+    expect(rerunStageLabel('执行')).toBe('执行')
+    expect(rerunStageLabel(undefined)).toBe('当前阶段')
+    expect(rerunStageLabel(null)).toBe('当前阶段')
   })
 })

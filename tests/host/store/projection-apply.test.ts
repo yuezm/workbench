@@ -851,3 +851,17 @@ describe('createProjectionWriter：列默认值兜底', () => {
     ).toEqual({ project_id: null, updated_at: LATER_AT })
   })
 })
+
+describe('createProjectionWriter：M20 验收列的旧快照兜底', () => {
+  it('workflow_stages：阶段负载缺 acceptance（M20 补列前）时按空数组落库', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    const stage = { ...sample.stage(), acceptance: undefined } as unknown as WorkflowStage
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+    expect(
+      db.prepare('SELECT acceptance_json FROM workflow_stages WHERE id = ?').get(stage.id),
+    ).toEqual({ acceptance_json: '[]' })
+  })
+})

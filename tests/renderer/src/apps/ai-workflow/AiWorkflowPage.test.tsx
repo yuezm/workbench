@@ -852,6 +852,54 @@ describe('AiWorkflowPage', () => {
     )
   })
 
+  it('列内快速新建（默认目录）：projectId 落成 null，标题与要求一起提交', async () => {
+    seedBase()
+    kernel.setView('runtimes.default-workdir', undefined, DEFAULT_PATH)
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    // 先切到默认目录：此时没有选中项目，快速新建必须把归属落成 null
+    await user.click(await screen.findByRole('button', { name: '默认目录' }))
+    await user.click(await screen.findByRole('button', { name: '在「待办」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '快速建的')
+    await user.type(screen.getByLabelText('阶段「待办」的新任务要求'), '只写标题也行')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+
+    await waitFor(() =>
+      expectDispatched({
+        type: 'task.create',
+        input: expect.objectContaining({
+          title: '快速建的',
+          description: '只写标题也行',
+          workflowId: 'w1',
+          stageId: 's0',
+          projectId: null,
+        }),
+      }),
+    )
+  })
+
+  it('列内快速新建失败且后端抛非 Error：页面错误条与列内都按字符串展示，输入不丢', async () => {
+    seedBase()
+    dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
+      command.type === 'task.create'
+        ? Promise.reject('看板写不进去')
+        : Promise.resolve({ facts: [], value: null } as CommandDispatchResult<C>),
+    )
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openTasks(user)
+
+    await user.click(await screen.findByRole('button', { name: '在「待办」阶段添加任务' }))
+    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '会失败的')
+    await user.click(screen.getByRole('button', { name: '添加' }))
+
+    // 页面顶部一条 + 列内一条：同一个字符串，界面不崩、输入留着可重试
+    await waitFor(() => expect(screen.getAllByText('看板写不进去')).toHaveLength(2))
+    expect(screen.getByLabelText('阶段「待办」的新任务标题')).toHaveValue('会失败的')
+  })
+
   it('项目弹窗：新建项目 dispatch project.create，成功后选中新项目', async () => {
     seedBase()
     const created: Project = {

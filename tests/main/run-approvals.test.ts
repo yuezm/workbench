@@ -80,6 +80,30 @@ describe('main/run-approvals', () => {
       const texts = Array.from({ length: 400 }, (_, i) => `line ${i}\n`)
       expect(decodeSessionLog(frames(...texts))).toBe(texts.join(''))
     })
+
+    it('帧头带显式 content size（≥256 字节）与多 block 的大帧都能解出来', () => {
+      // 小帧走单字节 FCS；≥256 字节的单段帧改成 2 字节 FCS（fcsFlag 1/2），必须按尺寸跳过
+      const medium = 'x'.repeat(300)
+      expect(decodeSessionLog(frames(medium))).toBe(medium)
+
+      // 300KB 近似随机的日志：压缩后是一个多 block 帧（只有最后一块 lastBlock=1）
+      const seed = { value: 12345 }
+      const noise = Buffer.alloc(300_000)
+      for (let i = 0; i < noise.length; i += 1) {
+        seed.value = (seed.value * 1103515245 + 12345) >>> 0
+        noise[i] = 32 + ((seed.value >>> 24) % 95) // 可打印 ASCII：UTF-8 往返无损
+      }
+      const big = zstdCompressSync(noise)
+      expect(decodeSessionLog(big)).toBe(noise.toString('utf8'))
+    })
+
+    it('解压总量超过上限：提前停止，保留已解出的部分', () => {
+      // 单个 33MB 的可压缩帧（压缩后几十字节）：两帧就把 64MB 预算撑爆
+      const chunk = 'a'.repeat(33 * 1024 * 1024)
+      const out = decodeSessionLog(frames(chunk, chunk))
+      expect(out.length).toBe(chunk.length)
+      expect(out.startsWith('aaa')).toBe(true)
+    })
   })
 
   describe('parseApprovals', () => {

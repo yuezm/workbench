@@ -1555,6 +1555,40 @@ describe('queryView：reviews.byTask（M14）', () => {
     ).toEqual(['run-1:1', 'run-2:2'])
     expect(queryView(db, 'reviews.byTask', { taskId: 'tk-none' })).toEqual([])
   })
+
+  it('同一 rev 的两份报告（不同 run）：按 id 升序稳定排序', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+    const task = sample.task({ id: 'tk-same-rev' })
+    writer.apply({ table: 'tasks', key: task.id, row: task }, SAMPLE_AT)
+    const base = {
+      taskId: task.id,
+      stageId: 'st-1',
+      threadId: null,
+      verdict: 'pass' as const,
+      checks: [],
+      findings: [],
+      artifact: null,
+      rev: 1,
+      createdAt: SAMPLE_AT,
+      updatedAt: SAMPLE_AT,
+    }
+    // 倒序写入：rev 相同，排序只能靠 id
+    writer.apply(
+      { table: 'review_reports', key: 'run-z:1', row: { ...base, id: 'run-z:1', runId: 'run-z' } },
+      SAMPLE_AT,
+    )
+    writer.apply(
+      { table: 'review_reports', key: 'run-a:1', row: { ...base, id: 'run-a:1', runId: 'run-a' } },
+      SAMPLE_AT,
+    )
+    expect(
+      (queryView(db, 'reviews.byTask', { taskId: task.id }) as Array<{ id: string }>).map(
+        (row) => row.id,
+      ),
+    ).toEqual(['run-a:1', 'run-z:1'])
+  })
 })
 
 describe('queryView：workflow.stage-metrics（M23）', () => {
@@ -1649,5 +1683,48 @@ describe('queryView：workflow.stage-metrics（M23）', () => {
     })
     const error = captureError(() => queryView(db, 'workflow.stage-metrics', {}))
     expect((error as StoreError).code).toBe('invalid_input')
+  })
+
+  it('有阶段但一轮都没跑：run 数与平均轮数都给 0（不是空对象）', () => {
+    const db = memory()
+    seed(db)
+    const writer = createProjectionWriter(db)
+    writer.apply(
+      {
+        table: 'workflow_stages',
+        key: 'st-idle',
+        row: sample.stage({ id: 'st-idle', name: '闲置阶段', position: 3 }),
+      },
+      SAMPLE_AT,
+    )
+    const metrics = queryView(db, 'workflow.stage-metrics', { workflowId: 'wf-1' }) as {
+      stages: Array<Record<string, unknown>>
+    }
+    expect(metrics.stages.find((stage) => stage.stageId === 'st-idle')).toMatchObject({
+      stageName: '闲置阶段',
+      runs: 0,
+      avgRounds: 0,
+      repairExhausted: 0,
+      degraded: 0,
+      asks: 0,
+      humanComments: 0,
+    })
+  })
+})
+
+describe('queryView：阶段验收列的空串归一（M20 老行）', () => {
+  it('acceptance_json 是空串（M20 补列前的老行）：按「未声明」归成空数组', () => {
+    const db = memory()
+    seed(db)
+    // 直写一行老数据：补列后默认值是 '[]'，但手工迁移 / 老快照可能留下空串
+    db.prepare(
+      `INSERT INTO workflow_stages (id, workflow_id, name, position, entry_mode, acceptance_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run('st-legacy', 'wf-1', '老阶段', 9, 'none', '', SAMPLE_AT)
+
+    const stages = (queryView(db, 'workflows.all') as WorkflowWithStages[]).find(
+      (item) => item.id === 'wf-1',
+    )?.stages
+    expect(stages?.find((item) => item.id === 'st-legacy')?.acceptance).toEqual([])
   })
 })

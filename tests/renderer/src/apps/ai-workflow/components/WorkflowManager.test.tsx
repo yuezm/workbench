@@ -510,4 +510,19 @@ describe('WorkflowManager', () => {
     await user.click(screen.getByRole('button', { name: '选择工作流 写作' }))
     await waitFor(() => expect(screen.queryByText('阶段指标')).toBeNull())
   })
+
+  it('Esc 关闭工作流定义弹窗：dismiss 收口到 setEditing(undefined)，弹窗消失', async () => {
+    kernel.setView('workflows.all', undefined, [wf('w1', '研发', 2)])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+
+    await user.click(await screen.findByRole('button', { name: '选择工作流 研发' }))
+    await user.click(screen.getAllByRole('button', { name: '编辑' })[0])
+    expect(screen.getByRole('dialog')).toHaveTextContent('工作流定义')
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // 关掉的是编辑态，工作流本身还在清单里
+    expect(screen.getByRole('button', { name: '选择工作流 研发' })).toBeInTheDocument()
+  })
 })

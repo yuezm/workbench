@@ -189,4 +189,19 @@ describe('ConversationList', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('menu')).toBeNull()
   })
+
+  it('选中的智能体已不在清单里（被删 / 别处改过）：下拉回落到 placeholder，不假装选中一个', async () => {
+    const onAgentChange = vi.fn()
+    const user = userEvent.setup()
+    render(<ConversationList {...makeProps({ agentId: 'gone', onAgentChange })} />)
+
+    const select = screen.getByRole('combobox', { name: '选择智能体' })
+    expect(select).toHaveTextContent('请选择')
+    expect(select).toHaveAttribute('data-placeholder')
+
+    // 仍可从现有智能体里重新选一个
+    await user.click(select)
+    await user.click(screen.getByRole('option', { name: '研究员' }))
+    expect(onAgentChange).toHaveBeenCalledWith('a2')
+  })
 })

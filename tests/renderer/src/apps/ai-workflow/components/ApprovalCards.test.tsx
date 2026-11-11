@@ -455,4 +455,26 @@ describe('ApprovalCards', () => {
     expect(within(notices).getByRole('button', { name: '关闭通知：继续吗' })).toBeInTheDocument()
     expect(within(pending).getByRole('radio', { name: '继续' })).toBeInTheDocument()
   })
+
+  it('运行环境没有 scrollIntoView（老 WebView / 非浏览器宿主）：跳过滚动，仍标出定位态', () => {
+    vi.useFakeTimers()
+    const original = Element.prototype.scrollIntoView
+    // 宿主可能根本没有这个方法：这里把它拿掉，验证定位不会因此崩掉
+    Element.prototype.scrollIntoView = undefined as unknown as typeof original
+    try {
+      render(<ApprovalCards cards={[card]} focusCardId="card-1" />)
+
+      const anchor = document.getElementById('approval-card-card-1')
+      expect(anchor).not.toBeNull()
+      expect(anchor).toHaveAttribute('data-focused', 'true')
+
+      act(() => {
+        vi.advanceTimersByTime(2400)
+      })
+      expect(anchor).not.toHaveAttribute('data-focused')
+    } finally {
+      Element.prototype.scrollIntoView = original
+      vi.useRealTimers()
+    }
+  })
 })

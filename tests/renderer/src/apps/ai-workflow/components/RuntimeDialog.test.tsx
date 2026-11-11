@@ -792,4 +792,16 @@ describe('RuntimeDialog', () => {
 
     expect(screen.queryByText(/模型加载失败/)).not.toBeInTheDocument()
   })
+
+  it('Esc 关闭弹窗：走 dismiss 收口到 onCancel，不提交', async () => {
+    const onSubmit = vi.fn()
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(<RuntimeDialog initial={{ name: 'ds' }} onSubmit={onSubmit} onCancel={onCancel} />)
+
+    await user.keyboard('{Escape}')
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 })

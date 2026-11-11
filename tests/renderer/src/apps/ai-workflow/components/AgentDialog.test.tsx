@@ -353,4 +353,24 @@ describe('AgentDialog', () => {
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveFocus()
     expect(onSubmit).not.toHaveBeenCalled()
   })
+
+  it('Esc 关闭弹窗：走 dismiss 收口到 onCancel，不提交任何东西', async () => {
+    const onSubmit = vi.fn()
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        runtimes={[makeRuntime()]}
+        initial={empty}
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('智能体名称'), 'coder')
+    await user.keyboard('{Escape}')
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 })

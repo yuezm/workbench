@@ -262,4 +262,17 @@ describe('ProjectDialog', () => {
     expect(screen.queryByText('路径不可写')).not.toBeInTheDocument()
     expect(screen.getByLabelText('文件夹路径')).toHaveValue('D:\\bad')
   })
+
+  it('右上角 × 关闭：走 dismiss 收口到 onCancel，不保存', async () => {
+    const onSave = vi.fn()
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={onSave} onCancel={onCancel} />)
+
+    await user.type(screen.getByLabelText('项目名称'), '工作台')
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSave).not.toHaveBeenCalled()
+  })
 })

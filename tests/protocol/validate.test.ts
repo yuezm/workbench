@@ -1123,6 +1123,14 @@ describe('validateQuery（M5：query 动词入口）', () => {
     ).toBe(false)
     expect(validateInput(receipt({ addresses: [{ disposition: 'fixed' }] })).ok).toBe(false)
     expect(validateInput(receipt({ addresses: [42] })).ok).toBe(false)
+    // 处置动作不在枚举里：直接按处置字段的文案拒收（后面的必填项检查不再跑）
+    const badDisposition = validateInput(
+      receipt({ addresses: [{ findingId: 'r#R1', disposition: 'done' }] }),
+    )
+    expect(badDisposition.ok).toBe(false)
+    expect((badDisposition as Extract<ValidateResult, { ok: false }>).message).toBe(
+      'receipt.addresses[0].disposition取值必须是 fixed / rejected / deferred',
+    )
     expect(
       validateInput(
         receipt({

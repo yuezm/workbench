@@ -1479,6 +1479,35 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
       runTimeoutMs: 5_400_000,
     })
   }, 30_000)
+
+  it('轮次上限选「1（不续轮）」、单轮超时选「默认」：都回落到 null（改用全局缺省）', async () => {
+    const existing = workflowWith([{ name: '执行' }, { name: '自测' }, { name: '结束' }])
+    const selfTest = existing.stages.find((item) => item.name === '自测')
+    if (selfTest === undefined) throw new Error('夹具缺「自测」阶段')
+    // 既有配置：验收 1 条、续 3 轮、单轮 10 分钟
+    selfTest.acceptance = ['pnpm check 退出码 0']
+    selfTest.maxRounds = 3
+    selfTest.runTimeoutMs = 600_000
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段3' }))
+    // 回显既有配置
+    expect(screen.getByRole('combobox', { name: '阶段3轮次上限' })).toHaveTextContent('3 轮')
+    expect(screen.getByRole('combobox', { name: '阶段3单轮超时' })).toHaveTextContent('10 分钟')
+
+    await choose(user, '阶段3轮次上限', '1（不续轮）')
+    await choose(user, '阶段3单轮超时', '默认（60 分钟）')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    // 两处都选回「不写字段」：null 表示用全局缺省，不是 0 / 60 分钟写死
+    expect(savedStage(draft, '自测')).toMatchObject({ maxRounds: null, runTimeoutMs: null })
+  }, 30_000)
 })
 
 describe('moveStageInList', () => {

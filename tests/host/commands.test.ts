@@ -1231,3 +1231,119 @@ describe('createCommandRouter：review.export（M14 提升为文档）', () => {
     ).rejects.toThrow('未归属项目')
   })
 })
+
+describe('createCommandRouter：review.export 的宿主侧判空（内核已先拒的二次守卫）', () => {
+  /**
+   * 桩 dispatch 的 host-only 路由：跳过内核校验，专测宿主「读库时再判一次」的口径。
+   * 内核在真路由上会先拒，这三道判空只有这样才能走到（产品行为一字不改）。
+   */
+  const hostOnlyRouter = (store: Harness['store']): CommandRouter =>
+    createCommandRouter({
+      store,
+      dispatch: () => ({ facts: [], value: null }) as never,
+      executors: { forRuntime: () => null },
+      executorDefaults: (key) => ({
+        executorKey: key ?? 'dsh',
+        command: 'dsh',
+        profile: 'multica',
+      }),
+      hostView: () => null,
+    })
+
+  const reportRowFor = (taskId: string, over: Record<string, unknown> = {}) => ({
+    id: 'run-r:1',
+    taskId,
+    stageId: 'st-1',
+    runId: 'run-r',
+    threadId: null,
+    rev: 1,
+    verdict: 'fail' as const,
+    checks: [],
+    findings: [],
+    artifact: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...over,
+  })
+
+  it('报告不存在：不给 id 报「（最新）」，给了 id 报该 id', async () => {
+    const h = setup()
+    const router = hostOnlyRouter(h.store)
+    await expect(
+      router.dispatch({ commandId: 'hx1', type: 'review.export', taskId: 't-1' }),
+    ).rejects.toThrow('报告不存在: （最新）')
+    await expect(
+      router.dispatch({
+        commandId: 'hx2',
+        type: 'review.export',
+        taskId: 't-1',
+        reportId: 'run-r:9',
+      }),
+    ).rejects.toThrow('报告不存在: run-r:9')
+  })
+
+  it('报告在但任务行已不存在：报「任务不存在」（脏投影下的二次判空）', async () => {
+    const h = setup()
+    // 造脏投影：报告指向一个已经没有任务行的 taskId（外键关掉才能构造）
+    h.db.exec('PRAGMA foreign_keys = OFF')
+    createProjectionWriter(h.db).apply(
+      { table: 'review_reports', key: 'run-r:1', row: reportRowFor('t-ghost') },
+      NOW,
+    )
+    await expect(
+      hostOnlyRouter(h.store).dispatch({
+        commandId: 'hx3',
+        type: 'review.export',
+        taskId: 't-ghost',
+      }),
+    ).rejects.toThrow('任务不存在: t-ghost')
+  })
+
+  it('任务未归属项目：报告与任务都在也拒绝（docs/reviews 需要一个仓库落脚）', async () => {
+    const h = setup()
+    const workflow = await h.router.dispatch(workflowCommand('hw1'))
+    const created = await h.router.dispatch({
+      commandId: 'ht1',
+      type: 'task.create',
+      input: { title: '没有项目的任务', workflowId: (workflow.value as { id: string }).id },
+    })
+    const taskId = (created.value as { id: string }).id
+    createProjectionWriter(h.db).apply(
+      { table: 'review_reports', key: 'run-r:1', row: reportRowFor(taskId) },
+      NOW,
+    )
+    await expect(
+      hostOnlyRouter(h.store).dispatch({ commandId: 'hx4', type: 'review.export', taskId }),
+    ).rejects.toThrow('未归属项目')
+  })
+
+  it('项目行已不存在（脏投影）：同样按「未归属项目」拒绝，不抛原始错误', async () => {
+    const h = setup()
+    const project = await h.router.dispatch({
+      commandId: 'hp2',
+      type: 'project.create',
+      input: { name: 'P', path: mkdtempSync(path.join(tmpdir(), 'wb-export-')) },
+    })
+    const workflow = await h.router.dispatch(workflowCommand('hw2'))
+    const created = await h.router.dispatch({
+      commandId: 'ht2',
+      type: 'task.create',
+      input: {
+        title: '项目被删的任务',
+        workflowId: (workflow.value as { id: string }).id,
+        projectId: (project.value as { id: string }).id,
+      },
+    })
+    const taskId = (created.value as { id: string }).id
+    createProjectionWriter(h.db).apply(
+      { table: 'review_reports', key: 'run-r:1', row: reportRowFor(taskId) },
+      NOW,
+    )
+    // 项目行消失、任务行仍带着 projectId（外键关掉才能构造）
+    h.db.exec('PRAGMA foreign_keys = OFF')
+    h.db.prepare('DELETE FROM projects WHERE id = ?').run((project.value as { id: string }).id)
+    await expect(
+      hostOnlyRouter(h.store).dispatch({ commandId: 'hx5', type: 'review.export', taskId }),
+    ).rejects.toThrow('未归属项目')
+  })
+})

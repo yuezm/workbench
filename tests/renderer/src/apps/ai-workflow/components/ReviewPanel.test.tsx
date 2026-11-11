@@ -147,4 +147,32 @@ describe('ReviewPanel（任务详情里的评审结论）', () => {
     release('/x.md')
     await waitFor(() => expect(screen.getByRole('button', { name: '提升为文档' })).toBeTruthy())
   })
+
+  it('导出失败为非 Error（宿主抛字符串）：按字符串展示原因', async () => {
+    const onExport = vi.fn(() => Promise.reject('docs 目录不可写'))
+    render(<ReviewPanel reports={[report()]} onExport={onExport} />)
+    await userEvent.click(screen.getByRole('button', { name: '提升为文档' }))
+    await waitFor(() => expect(screen.getByText('docs 目录不可写')).toBeTruthy())
+    expect(screen.queryByText(/已写入/)).toBeNull()
+  })
+
+  it('判定证据的退出码分色：0 是成功色，非 0 是警告色', () => {
+    render(
+      <ReviewPanel
+        reports={[
+          report({
+            checks: [
+              { cmd: 'pnpm check', exitCode: 0 },
+              { cmd: 'pnpm e2e', exitCode: 1 },
+            ],
+          }),
+        ]}
+        onExport={async () => ''}
+      />,
+    )
+
+    const evidence = screen.getByLabelText('判定证据')
+    expect(within(evidence).getByText('0')).toHaveClass('text-success')
+    expect(within(evidence).getByText('1')).toHaveClass('text-warning')
+  })
 })

@@ -25,6 +25,7 @@ import {
   degradedCommentText,
   repairCommentText,
   stageRoundCount,
+  unmetAcceptance,
 } from '../../src/kernel/commands/run'
 import { project } from '../../src/kernel/project'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
@@ -1832,6 +1833,57 @@ describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
   it('回执缺条目按未达处理（fail-closed）：只说达成第一条也算没做完', () => {
     const decision = submit(view(baseSeed()), receipt({ acceptance: [{ no: 1, met: true }] }))
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(true)
+  })
+
+  it('回执没带验收自评：全部条目按未达处理（0/2 达成，仍续轮）', () => {
+    const decision = submit(view(baseSeed()), receipt())
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment!.payload as { comment: { text: string } }).comment.text).toContain('0/2 达成')
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(true)
+  })
+
+  it('阶段没配轮次上限：按默认下限 1 轮算，首轮即用尽，只留评论不续轮', () => {
+    const decision = submit(
+      view(
+        baseSeed({
+          stages: [acceptanceStage({ maxRounds: null, onCompleteStageId: 'st-done' }), doneStage()],
+        }),
+      ),
+      receipt({ acceptance: [{ no: 1, met: false }] }),
+    )
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment!.payload as { comment: { text: string } }).comment.text).toContain(
+      '已达本阶段轮次上限',
+    )
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+  })
+
+  it('本轮没有 sessionId：续轮沿用上一轮要续接的会话（resumeSessionId）', () => {
+    const decision = submit(
+      view(baseSeed({ runs: [running({ sessionId: null, resumeSessionId: 'ss-old' })] })),
+      receipt({ acceptance: [{ no: 2, met: false }] }),
+    )
+    const queued = decision.facts.filter((fact) => fact.type === 'run.queued')
+    expect((queued[0].payload as { run: RunRow }).run.resumeSessionId).toBe('ss-old')
+  })
+
+  it('本轮与上一轮都没有会话：续轮不带 resumeSessionId（不伪造续接）', () => {
+    const decision = submit(
+      view(baseSeed({ runs: [running({ sessionId: null })] })),
+      receipt({ acceptance: [{ no: 2, met: false }] }),
+    )
+    const queued = decision.facts.filter((fact) => fact.type === 'run.queued')
+    expect(queued).toHaveLength(1)
+    expect((queued[0].payload as { run: RunRow }).run.resumeSessionId).toBeNull()
+  })
+
+  it('unmetAcceptance：阶段没声明验收条目时没有未达项（不误判成没做完）', () => {
+    expect(unmetAcceptance({ acceptance: [] }, receipt())).toEqual([])
+    // 老事实 / 存量导入的阶段行连字段都没有：同样按「未声明」处理
+    expect(unmetAcceptance({}, receipt())).toEqual([])
+    expect(unmetAcceptance({ acceptance: ['覆盖每条验收标准'] }, receipt())).toEqual([
+      '覆盖每条验收标准',
+    ])
   })
 
   it('阶段没声明验收 / run 失败 / 任务已完成：都不续轮', () => {

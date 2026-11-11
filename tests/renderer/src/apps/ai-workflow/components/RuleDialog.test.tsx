@@ -576,4 +576,25 @@ describe('RuleDialog', { timeout: 20_000 }, () => {
     await userEvent.click(screen.getByRole('button', { name: '保存' }))
     expect(await screen.findByText('后端不可用')).toBeInTheDocument()
   })
+
+  it('Esc 关闭弹窗：走 dismiss 收口到 onCancel，不保存', async () => {
+    const onSubmit = vi.fn()
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <RuleDialog
+        initial={dailyRule()}
+        isNew={false}
+        workflows={workflows}
+        projects={projects}
+        onSubmit={onSubmit}
+        onCancel={onCancel}
+      />,
+    )
+
+    await user.keyboard('{Escape}')
+
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
 })

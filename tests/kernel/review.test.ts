@@ -604,6 +604,19 @@ describe('kernel/review 回执 → 事实与硬门', () => {
     )
     expect(outcome).toEqual({ facts: [], blocked: false })
   })
+
+  it('任务当前阶段缺失（脏投影）时报告不指向任何阶段：不拦不评', () => {
+    const outcome = reviewFactsOf(
+      view({ tasks: new Map([['task-1', task({ currentStageId: null })]]) }),
+      run(),
+      receipt(),
+      null,
+      { kind: 'kernel' },
+      NOW,
+    )
+    expect(outcome.blocked).toBe(false)
+    expect(outcome.facts).toEqual([])
+  })
 })
 describe('kernel/review 排序与渲染的边角分支', () => {
   it('同 rev 时 a 更新 → 取 a；同刻同 rev 时按 id 兜底（两个方向都稳定）', () => {
@@ -804,5 +817,24 @@ describe('kernel/review 提升为文档（M14 S5）', () => {
     expect(text).toContain('- 判定：（无判定）')
     expect(text).toContain('（未给出复核命令）')
     expect(text).toContain('（这份评审没有列条目）')
+  })
+
+  it('markdown：条目没有位置时不写空位置；已处置的条目带处置轮次', () => {
+    const text = reviewMarkdown(
+      '任务',
+      report({
+        findings: [
+          finding({
+            location: null,
+            status: 'addressed',
+            note: '改了',
+            addressedByRunId: 'run-2',
+          }),
+        ],
+      }),
+    )
+    expect(text).toContain('### R1 [high] — addressed')
+    expect(text).toContain('- 处置说明：改了')
+    expect(text).toContain('- 处置轮次：run-2')
   })
 })

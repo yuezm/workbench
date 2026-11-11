@@ -47,4 +47,22 @@ describe('WorkflowSwitcher', () => {
     )
     expect(screen.getByRole('button', { name: '编辑' })).toBeDisabled()
   })
+
+  it('激活的工作流已不在清单里（别处删掉 / 还没读到）：下拉回落到「未选择」，编辑禁用', () => {
+    render(
+      <WorkflowSwitcher
+        workflows={[wf('w1', 'A')]}
+        activeId="gone"
+        onSelect={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    )
+
+    const select = screen.getByRole('combobox', { name: '选择工作流' })
+    expect(select).toHaveTextContent('未选择')
+    expect(select).toHaveAttribute('data-placeholder')
+    expect(screen.getByRole('button', { name: '编辑' })).toBeDisabled()
+    // 阶段数徽标只在命中时才渲染
+    expect(screen.queryByText(/阶段$/)).toBeNull()
+  })
 })

@@ -47,6 +47,13 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   description: '',
   runtimeId: 'rt-1',
   systemPrompt: '你是助手。',
+  // 执行配置在智能体上（运行时只管连接）
+  model: null,
+  reasoningEffort: null,
+  maxConcurrent: 1,
+  permissionMode: 'workspace-write',
+  workdir: 'C:/work',
+  env: {},
   createdAt: CREATED,
   ...over,
 })
@@ -58,11 +65,6 @@ const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   argsTemplate: '',
   command: 'dsh',
   profile: 'multica',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: 'C:/work',
-  maxConcurrent: 1,
   enabled: true,
   createdAt: CREATED,
   lastProbe: null,
@@ -328,7 +330,7 @@ describe('kernel/decide 对话归属项目（M11）', () => {
     expect((decision.facts[2]?.payload as { run: RunRow }).run.cwd).toBe('D:/work/项目')
   })
 
-  it('chat.send：没有项目 / 项目已被删：cwd 回落运行时 workdir，再空串', () => {
+  it('chat.send：没有项目 / 项目已被删：cwd 回落智能体 workdir，再空串', () => {
     const fallback = send(
       fullChatView({ conversations: [conversation({ projectId: 'pj-deleted' })] }),
       '开工',
@@ -337,7 +339,7 @@ describe('kernel/decide 对话归属项目（M11）', () => {
 
     const emptyWorkdir = send(
       fullChatView({
-        runtimes: [runtime({ workdir: null })],
+        agents: [agent({ workdir: null })],
         conversations: [conversation({ projectId: 'pj-deleted' })],
       }),
       '开工',

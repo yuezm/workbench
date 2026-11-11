@@ -116,6 +116,13 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   description: '',
   runtimeId: 'rt-1',
   systemPrompt: 'sys',
+  // 执行配置在智能体上（运行时只管连接）
+  model: null,
+  reasoningEffort: null,
+  maxConcurrent: 1,
+  permissionMode: 'workspace-write',
+  workdir: null,
+  env: {},
   createdAt: CREATED,
   ...over,
 })
@@ -151,11 +158,6 @@ const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   argsTemplate: '',
   command: 'dsh',
   profile: 'multica',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: CREATED,
   lastProbe: null,
@@ -360,7 +362,7 @@ describe('kernel/decide 运行时', () => {
     })
   })
 
-  it('runtime.create：字段透传、并发上限封顶 8、enabled 显式为 false 才关', () => {
+  it('runtime.create：只落连接字段；执行配置字段不属于运行时（传了也不进行）', () => {
     const decision = decide(
       view(),
       command({
@@ -371,13 +373,15 @@ describe('kernel/decide 运行时', () => {
           command: ' dsh2 ',
           profile: ' p2 ',
           argsTemplate: '["--print"]',
+          enabled: false,
+          // 老契约残留 / 表单误传：运行时不再接收执行配置，落行时必须消失
           permissionMode: 'danger-full-access',
           model: 'm',
           reasoningEffort: 'high',
           workdir: 'C:/w',
           maxConcurrent: 99,
-          enabled: false,
-        },
+          env: { FOO: 'bar' },
+        } as never,
       }),
       NOW,
       env(),
@@ -392,17 +396,24 @@ describe('kernel/decide 运行时', () => {
             argsTemplate: '["--print"]',
             command: 'dsh2',
             profile: 'p2',
-            permissionMode: 'danger-full-access',
-            model: 'm',
-            reasoningEffort: 'high',
-            workdir: 'C:/w',
-            maxConcurrent: 8,
             enabled: false,
             createdAt: NOW,
           }),
         }),
       ],
     })
+    // 运行时行上不再有这些列（执行配置的归属层是智能体）
+    const created = (decision.facts[0]?.payload as { runtime: Runtime }).runtime
+    for (const key of [
+      'permissionMode',
+      'model',
+      'reasoningEffort',
+      'workdir',
+      'maxConcurrent',
+      'env',
+    ]) {
+      expect(created).not.toHaveProperty(key)
+    }
   })
 
   it('runtime.create：非法输入 reject，不抛', () => {
@@ -428,18 +439,6 @@ describe('kernel/decide 运行时', () => {
     expect(run({ name: 'x', command: '  ' })).toEqual({
       facts: [],
       reject: { code: 'invalid_input', message: '运行时缺少启动命令（command）' },
-    })
-    expect(run({ name: 'x', permissionMode: 'root' })).toEqual({
-      facts: [],
-      reject: { code: 'invalid_input', message: '不支持的权限模式: root' },
-    })
-    expect(run({ name: 'x', maxConcurrent: 0 })).toEqual({
-      facts: [],
-      reject: { code: 'invalid_input', message: '并发上限必须是正整数' },
-    })
-    expect(run({ name: 'x', maxConcurrent: 1.5 })).toEqual({
-      facts: [],
-      reject: { code: 'invalid_input', message: '并发上限必须是正整数' },
     })
     expect(run({ name: '本机 dsh' })).toEqual({
       facts: [],
@@ -469,7 +468,7 @@ describe('kernel/decide 运行时', () => {
     })
   })
 
-  it('runtime.update：保留 createdAt 与 lastProbe，按 patch 覆盖', () => {
+  it('runtime.update：保留 createdAt 与 lastProbe，按 patch 覆盖连接字段', () => {
     const decision = decide(
       view({ runtimes: [runtime({ lastProbe: probe })] }),
       command({
@@ -479,12 +478,8 @@ describe('kernel/decide 运行时', () => {
           name: ' 改名 ',
           executorKey: 'dsh',
           argsTemplate: '',
-          permissionMode: 'read-only',
           command: ' dsh2 ',
-          maxConcurrent: 3,
-          model: null,
-          reasoningEffort: 'low',
-          workdir: 'C:/w2',
+          profile: ' p3 ',
           enabled: false,
         },
       }),
@@ -498,10 +493,7 @@ describe('kernel/decide 运行时', () => {
           runtime: runtime({
             name: '改名',
             command: 'dsh2',
-            permissionMode: 'read-only',
-            maxConcurrent: 3,
-            reasoningEffort: 'low',
-            workdir: 'C:/w2',
+            profile: 'p3',
             enabled: false,
             lastProbe: probe,
           }),
@@ -547,7 +539,7 @@ describe('kernel/decide 运行时', () => {
     ).toEqual({ facts: [at('runtime.updated', { runtime: runtime({ profile: 'p2' }) })] })
   })
 
-  it('runtime.update：目标不存在与枚举/并发非法都 reject', () => {
+  it('runtime.update：目标不存在与执行器键非法都 reject', () => {
     const seeded = view({ runtimes: [runtime()] })
     const run = (patch: Record<string, unknown>, id = 'rt-1'): unknown =>
       decide(seeded, command({ type: 'runtime.update', id, patch: patch as never }), NOW, env())
@@ -560,14 +552,6 @@ describe('kernel/decide 运行时', () => {
     expect(run({ executorKey: '  ' })).toEqual({
       facts: [],
       reject: { code: 'invalid_input', message: '运行时缺少执行器键（executorKey）' },
-    })
-    expect(run({ permissionMode: 'root' })).toEqual({
-      facts: [],
-      reject: { code: 'invalid_input', message: '不支持的权限模式: root' },
-    })
-    expect(run({ maxConcurrent: 0 })).toEqual({
-      facts: [],
-      reject: { code: 'invalid_input', message: '并发上限必须是正整数' },
     })
   })
 
@@ -661,7 +645,77 @@ describe('kernel/decide 智能体', () => {
     })
   })
 
-  it('agent.create：名称必填、运行时必须存在', () => {
+  it('agent.create：环境变量只收字符串值（非字符串值被丢弃）', () => {
+    const decision = decide(
+      view({ runtimes: [runtime()] }),
+      command({
+        type: 'agent.create',
+        input: {
+          name: 'env',
+          runtimeId: 'rt-1',
+          // 形状由 protocol/validate 把关；内核只防御非字符串值（脏输入不炸、也不落库）
+          env: { OK: 'v', BAD: 1 } as unknown as Record<string, string>,
+        },
+      }),
+      NOW,
+      env(),
+    )
+    expect(decision).toEqual({
+      facts: [
+        at('agent.created', {
+          agent: agent({
+            id: 'agent-new-1',
+            name: 'env',
+            systemPrompt: '',
+            env: { OK: 'v' },
+            createdAt: NOW,
+          }),
+        }),
+      ],
+    })
+  })
+
+  it('agent.create：执行配置字段透传，并发上限封顶 8、权限模式按枚举落行', () => {
+    const decision = decide(
+      view({ runtimes: [runtime()] }),
+      command({
+        type: 'agent.create',
+        input: {
+          name: 'fast',
+          runtimeId: 'rt-1',
+          model: 'deepseek/v3',
+          reasoningEffort: 'high',
+          maxConcurrent: 99,
+          permissionMode: 'danger-full-access',
+          workdir: 'C:/w',
+          env: { FOO: 'bar' },
+        },
+      }),
+      NOW,
+      env(),
+    )
+
+    expect(decision).toEqual({
+      facts: [
+        at('agent.created', {
+          agent: agent({
+            id: 'agent-new-1',
+            name: 'fast',
+            systemPrompt: '',
+            model: 'deepseek/v3',
+            reasoningEffort: 'high',
+            maxConcurrent: 8,
+            permissionMode: 'danger-full-access',
+            workdir: 'C:/w',
+            env: { FOO: 'bar' },
+            createdAt: NOW,
+          }),
+        }),
+      ],
+    })
+  })
+
+  it('agent.create：名称必填、运行时必须存在、权限模式与并发上限非法都 reject', () => {
     const run = (input: Record<string, unknown>): unknown =>
       decide(
         view({ runtimes: [runtime()] }),
@@ -677,6 +731,18 @@ describe('kernel/decide 智能体', () => {
     expect(run({ name: 'a', runtimeId: 'rt-404' })).toEqual({
       facts: [],
       reject: { code: 'not_found', message: '运行时不存在: rt-404' },
+    })
+    expect(run({ name: 'a', runtimeId: 'rt-1', permissionMode: 'root' })).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '不支持的权限模式: root' },
+    })
+    expect(run({ name: 'a', runtimeId: 'rt-1', maxConcurrent: 0 })).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '并发上限必须是正整数' },
+    })
+    expect(run({ name: 'a', runtimeId: 'rt-1', maxConcurrent: 1.5 })).toEqual({
+      facts: [],
+      reject: { code: 'invalid_input', message: '并发上限必须是正整数' },
     })
   })
 
@@ -712,7 +778,42 @@ describe('kernel/decide 智能体', () => {
     ).toEqual({ facts: [at('agent.updated', { agent: agent() })] })
   })
 
-  it('agent.update：目标不存在 / 运行时不存在都 reject', () => {
+  it('agent.update：执行配置按 patch 覆盖（模型 / 思考强度 / 并发 / 权限 / 目录 / 环境）', () => {
+    const decision = decide(
+      view({ agents: [agent()], runtimes: [runtime()] }),
+      command({
+        type: 'agent.update',
+        id: 'ag-1',
+        patch: {
+          permissionMode: 'read-only',
+          maxConcurrent: 3,
+          model: 'deepseek/v3',
+          reasoningEffort: 'low',
+          workdir: 'C:/w2',
+          env: { BAR: 'baz' },
+        },
+      }),
+      NOW,
+      env(),
+    )
+
+    expect(decision).toEqual({
+      facts: [
+        at('agent.updated', {
+          agent: agent({
+            permissionMode: 'read-only',
+            maxConcurrent: 3,
+            model: 'deepseek/v3',
+            reasoningEffort: 'low',
+            workdir: 'C:/w2',
+            env: { BAR: 'baz' },
+          }),
+        }),
+      ],
+    })
+  })
+
+  it('agent.update：目标不存在 / 运行时不存在 / 权限模式与并发非法都 reject', () => {
     const seeded = view({ agents: [agent()], runtimes: [runtime()] })
 
     expect(
@@ -727,6 +828,28 @@ describe('kernel/decide 智能体', () => {
         env(),
       ),
     ).toEqual({ facts: [], reject: { code: 'not_found', message: '运行时不存在: rt-404' } })
+
+    expect(
+      decide(
+        seeded,
+        command({
+          type: 'agent.update',
+          id: 'ag-1',
+          patch: { permissionMode: 'root' as never },
+        }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [], reject: { code: 'invalid_input', message: '不支持的权限模式: root' } })
+
+    expect(
+      decide(
+        seeded,
+        command({ type: 'agent.update', id: 'ag-1', patch: { maxConcurrent: 0 } }),
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [], reject: { code: 'invalid_input', message: '并发上限必须是正整数' } })
   })
 
   it('agent.remove：被阶段 / 对话引用时拒绝；存在则 tombstone；不存在静默', () => {
@@ -1854,8 +1977,8 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     view({
       workflows: [workflow()],
       stages: [stage({ id: 'st-1', entryMode: 'agent', agentId: 'ag-1' })],
-      agents: [agent()],
-      runtimes: [runtime({ workdir: 'C:/work' })],
+      agents: [agent({ workdir: 'C:/work' })],
+      runtimes: [runtime()],
       ...over,
     })
 
@@ -1896,7 +2019,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       rulesVersion: 0,
       executorKey: 'dsh',
       threadId: 'thread-new-1',
-      // M10：任务挂在项目 pj-1 下，工作目录取项目文件夹（优先于运行时 workdir）
+      // M10：任务挂在项目 pj-1 下，工作目录取项目文件夹（优先于智能体 workdir）
       cwd: 'D:/work',
       access: 'edit',
       skill: null,
@@ -2003,7 +2126,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     ] as const
     for (const [permissionMode, access] of cases) {
       const decision = decide(
-        agentView({ runtimes: [runtime({ permissionMode })] }),
+        agentView({ agents: [agent({ permissionMode })] }),
         command({
           type: 'task.create',
           input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },

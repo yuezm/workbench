@@ -322,7 +322,7 @@ describe('defaultDecide：任务', () => {
 })
 
 describe('defaultDecide：运行时与智能体', () => {
-  it('runtime.create：缺省值回填；显式字段透传', () => {
+  it('runtime.create：缺省值回填；连接字段透传（执行配置不在运行时上）', () => {
     const defaults = defaultDecide(
       view(),
       command({ type: 'runtime.create', input: { name: '本机' } }),
@@ -341,11 +341,6 @@ describe('defaultDecide：运行时与智能体', () => {
           name: 'fast',
           command: 'dsh2',
           profile: 'p',
-          permissionMode: 'danger-full-access',
-          model: 'm',
-          reasoningEffort: 'high',
-          workdir: 'C:/w',
-          maxConcurrent: 4,
           enabled: false,
         },
       }),
@@ -358,11 +353,6 @@ describe('defaultDecide：运行时与智能体', () => {
         name: 'fast',
         command: 'dsh2',
         profile: 'p',
-        permissionMode: 'danger-full-access',
-        model: 'm',
-        reasoningEffort: 'high',
-        workdir: 'C:/w',
-        maxConcurrent: 4,
         enabled: false,
       }),
     })
@@ -390,7 +380,7 @@ describe('defaultDecide：运行时与智能体', () => {
     })
   })
 
-  it('agent.create：运行时不存在 → not_found；正常 → 行与输入一致', () => {
+  it('agent.create：运行时不存在 → not_found；正常 → 行与输入一致（含执行配置）', () => {
     expect(
       defaultDecide(
         view(),
@@ -418,6 +408,44 @@ describe('defaultDecide：运行时与智能体', () => {
             name: 'coder',
             description: 'd',
             systemPrompt: 'sys',
+            createdAt: SAMPLE_AT,
+          }),
+        }),
+      ],
+    })
+
+    // M27：执行配置（模型 / 思考强度 / 并发 / 权限 / 工作目录 / 环境变量）由智能体携带
+    expect(
+      defaultDecide(
+        view({ runtimes: [sample.runtime()] }),
+        command({
+          type: 'agent.create',
+          input: {
+            name: 'coder',
+            runtimeId: 'rt-1',
+            model: 'deepseek/v4',
+            reasoningEffort: 'high',
+            maxConcurrent: 4,
+            permissionMode: 'danger-full-access',
+            workdir: 'C:/w',
+            env: { CI: '1' },
+          },
+        }),
+        SAMPLE_AT,
+        env(),
+      ),
+    ).toEqual({
+      facts: [
+        draft('agent.created', {
+          agent: sample.agent({
+            id: 'agent-1',
+            name: 'coder',
+            model: 'deepseek/v4',
+            reasoningEffort: 'high',
+            maxConcurrent: 4,
+            permissionMode: 'danger-full-access',
+            workdir: 'C:/w',
+            env: { CI: '1' },
             createdAt: SAMPLE_AT,
           }),
         }),

@@ -10,6 +10,7 @@ import { viewSpec } from '../../src/kernel/view-spec'
 import type { KernelPort } from '../../src/kernel/types'
 import type {
   Agent,
+  AgentInput,
   RunRow,
   Runtime,
   RuntimeInput,
@@ -163,6 +164,8 @@ function makeScheduler(
   return createScheduler({
     dispatch: (input) => world.store.dispatch(input),
     runtimes: () => world.store.query('runtimes.all'),
+    // M27：执行配置在智能体上，调度器按 run.agentId 取（模型 / 思考强度 / 环境变量）
+    agents: () => world.store.query('agents.all'),
     executors: { forRuntime: () => port },
     timer: fakeTimer(),
     limits: { heartbeatMs: 1_000, runTimeoutMs: 10_000, maxFramesPerBatch: 500 },
@@ -184,11 +187,15 @@ function createRuntime(input: Partial<RuntimeInput> & { name: string }): Runtime
   return world.store.query('runtimes.all').find((runtime) => runtime.id === id) as Runtime
 }
 
-function createAgent(runtimeId: string, systemPrompt = 'sys'): Agent {
+function createAgent(
+  runtimeId: string,
+  systemPrompt = 'sys',
+  patch: Partial<Omit<AgentInput, 'name' | 'runtimeId'>> = {},
+): Agent {
   const facts = world.store.dispatch({
     type: 'agent.create',
     commandId: nextCommandId(),
-    input: { name: 'coder', runtimeId, systemPrompt },
+    input: { name: 'coder', runtimeId, systemPrompt, ...patch },
   }).facts
   const id = (facts.find((fact) => fact.type === 'agent.created')?.payload as { agent: Agent })
     .agent.id
@@ -213,10 +220,16 @@ interface Seeded {
  * M18：工作流恒有四个内置阶段（待办 / 已阻塞 / 已完成 / 已取消），新任务默认落内置
  * 「待办」且不会立刻派活。要任务进 agent 阶段起 run 必须显式传 stageId；`stages.first`
  * / `stages.second` 只取自己添加的阶段（`builtin === null`）。
+ *
+ * M27：`maxConcurrent` 与执行配置都在智能体上（运行时只剩连接），因此第二个参数是
+ * `agent.create` 的 input 补丁。
  */
-function seed(maxConcurrent = 1, runtimePatch: Partial<RuntimeInput> = {}): Seeded {
-  const runtime = createRuntime({ name: 'rt-' + commandSeq, maxConcurrent, ...runtimePatch })
-  const agent = createAgent(runtime.id)
+function seed(
+  maxConcurrent = 1,
+  agentPatch: Partial<Omit<AgentInput, 'name' | 'runtimeId'>> = {},
+): Seeded {
+  const runtime = createRuntime({ name: 'rt-' + commandSeq })
+  const agent = createAgent(runtime.id, 'sys', { maxConcurrent, ...agentPatch })
   const workflowFacts = world.store.dispatch({
     type: 'workflow.create',
     commandId: nextCommandId(),
@@ -328,6 +341,7 @@ const claimedRow = (runId: string): RunRow => {
   return {
     id: String(row.id),
     runtimeId: row.runtime_id === null ? null : String(row.runtime_id),
+    agentId: row.agent_id === null ? null : String(row.agent_id),
     leaseId: row.lease_id === null ? null : String(row.lease_id),
     turn: Number(row.turn),
     status: row.status as RunRow['status'],
@@ -596,7 +610,9 @@ describe('createScheduler：执行一轮', () => {
 })
 
 describe('createScheduler：领取与并发', () => {
-  it('同一运行时按 maxConcurrent 限流，完成后自动领取下一条', async () => {
+  // M27：并发窗口由内核按**智能体**的 maxConcurrent 逐条把关（不再读运行时的 maxConcurrent），
+  // 调度器一次 pump 只给 capacity 上界，领取与否由内核判定。
+  it('同一智能体按 maxConcurrent 限流，完成后自动领取下一条', async () => {
     const seeded = seed(1)
     const secondFacts = world.store.dispatch({
       type: 'task.create',
@@ -643,6 +659,90 @@ describe('createScheduler：领取与并发', () => {
     expect(peak).toBe(1)
     expect(runStatuses(seeded.task.id)).toEqual(['succeeded'])
     expect(runStatuses(secondTaskId)).toEqual(['succeeded'])
+  })
+
+  it('同一智能体 maxConcurrent=2：一次领取把两条都放出去', async () => {
+    const seeded = seed(2)
+    const secondFacts = world.store.dispatch({
+      type: 'task.create',
+      commandId: nextCommandId(),
+      input: {
+        title: 'T2',
+        workflowId: seeded.workflowId,
+        projectId: seeded.projectId,
+        stageId: seeded.stages.first,
+      },
+    }).facts
+    const secondTaskId = (
+      secondFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task }
+    ).task.id
+
+    const releases = new Map<string, Deferred>()
+    let peak = 0
+    let active = 0
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        active += 1
+        peak = Math.max(peak, active)
+        const gate = deferred()
+        releases.set(turn.runId, gate)
+        await gate.promise
+        active -= 1
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    // 窗口按智能体算：两条候选都属于同一个 maxConcurrent=2 的智能体，必须一起领走
+    await vi.waitFor(() => expect(releases.size).toBe(2))
+    expect(peak).toBe(2)
+    expect(runStatuses(seeded.task.id)).toEqual(['running'])
+    expect(runStatuses(secondTaskId)).toEqual(['running'])
+
+    for (const gate of releases.values()) gate.resolve()
+    await scheduler.idle()
+    expect(runStatuses(seeded.task.id)).toEqual(['succeeded'])
+    expect(runStatuses(secondTaskId)).toEqual(['succeeded'])
+  })
+
+  it('claimsPerPump：run.claim 的 capacity 取注入值（缺省 8，不再读运行时）', async () => {
+    seed()
+    const capacities: unknown[] = []
+    const scheduler = makeScheduler(
+      portOf((turn) => receiptOf(turn)),
+      {
+        claimsPerPump: 3,
+        dispatch: (input) => {
+          if ((input as { type?: string }).type === 'run.claim') {
+            capacities.push((input as { capacity?: unknown }).capacity)
+          }
+          return world.store.dispatch(input)
+        },
+      },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(capacities.length).toBeGreaterThan(0)
+    expect(capacities.every((value) => value === 3)).toBe(true)
+  })
+
+  it('run 的智能体不存在：兜底 failed/run_failed（执行配置无处可取）', async () => {
+    const seeded = seed()
+    const execute = vi.fn()
+    // M27：调度器只从 agents() 取执行配置；智能体查不到就不能派发
+    const scheduler = makeScheduler(portOf(execute), { agents: () => [] })
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'failed',
+      error_code: 'run_failed',
+      error: '智能体不存在（可能已被删除）',
+    })
   })
 
   it('不同运行时并行执行', async () => {
@@ -721,6 +821,7 @@ describe('createScheduler：领取与并发', () => {
     scheduler.start({
       id: seeded.runId,
       runtimeId: null,
+      agentId: seeded.agent.id,
       leaseId: String(claimed.lease_id),
       turn: Number(claimed.turn),
       status: 'running',
@@ -750,6 +851,7 @@ describe('createScheduler：领取与并发', () => {
     scheduler.start({
       id: seeded.runId,
       runtimeId: seeded.runtime.id,
+      agentId: seeded.agent.id,
       leaseId: String(claimed.lease_id),
       turn: Number(claimed.turn),
       status: 'running',
@@ -762,12 +864,36 @@ describe('createScheduler：领取与并发', () => {
       error_code: 'runtime_disabled',
     })
   })
+  it('接管已领取的 run：run 上没有智能体（脏投影）时兜底 failed/run_failed', async () => {
+    const seeded = seed()
+    world.store.dispatch({ type: 'run.claim', runtimeId: seeded.runtime.id, capacity: 1 })
+    const claimed = runById(seeded.runId) as Record<string, unknown>
+
+    const execute = vi.fn()
+    const scheduler = makeScheduler(portOf(execute))
+    scheduler.start({
+      id: seeded.runId,
+      runtimeId: seeded.runtime.id,
+      agentId: null,
+      leaseId: String(claimed.lease_id),
+      turn: Number(claimed.turn),
+      status: 'running',
+    } as unknown as RunRow)
+    await scheduler.idle()
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(runById(seeded.runId)).toMatchObject({
+      status: 'failed',
+      error_code: 'run_failed',
+      error: '智能体不存在（可能已被删除）',
+    })
+  })
 })
 
 describe('createScheduler：阶段链', () => {
   it('链式阶段：成功后自动进入下一 agent 阶段并跑完', async () => {
-    const runtime = createRuntime({ name: 'chain', maxConcurrent: 1 })
-    const agent = createAgent(runtime.id)
+    const runtime = createRuntime({ name: 'chain' })
+    const agent = createAgent(runtime.id, 'sys', { maxConcurrent: 1 })
     const workflowFacts = world.store.dispatch({
       type: 'workflow.create',
       commandId: nextCommandId(),
@@ -857,8 +983,13 @@ describe('createScheduler：诊断', () => {
 })
 
 describe('createScheduler：Turn 与旁路会话', () => {
-  it('Turn 取运行时配置的模型/推理强度；io.session 的会话兜底回执', async () => {
-    const seeded = seed(1, { model: 'provider/x', reasoningEffort: 'high', workdir: 'C:/work' })
+  it('Turn 取智能体配置的模型/思考强度/环境变量；io.session 的会话兜底回执', async () => {
+    const seeded = seed(1, {
+      model: 'provider/x',
+      reasoningEffort: 'high',
+      workdir: 'C:/work',
+      env: { CI: '1' },
+    })
     let captured: Turn | null = null
     const scheduler = makeScheduler(
       portOf((turn, io) => {
@@ -874,12 +1005,15 @@ describe('createScheduler：Turn 与旁路会话', () => {
     const turn = captured as unknown as Turn
     expect(turn.model).toEqual({ provider: 'provider', id: 'x' })
     expect(turn.effort).toBe('high')
-    // M10：任务挂在项目下，工作目录取项目文件夹（优先于运行时 workdir）
+    expect(turn.env).toEqual({ CI: '1' })
+    // M10：任务挂在项目下，工作目录取项目文件夹（优先于智能体 workdir）
     const projectPath = world.store
       .query('projects.all')
       .find((item) => item.id === seeded.projectId)?.path
     expect(projectPath).toBeDefined()
     expect(turn.cwd).toBe(projectPath)
+    // access 同样来自智能体（默认可写）；run 行上的 access 已由内核按智能体写入
+    expect(turn.access).toBe('edit')
     // M26：执行器超时 = 本轮剩余时间（内核按阶段算好的 deadlineAt 减当前时刻），
     // 不再取调度器常量；这轮的 deadline 来自全局缺省 60 min，跑完还留着大半个窗口。
     expect(turn.timeoutMs).toBeGreaterThan(3_500_000)
@@ -921,6 +1055,7 @@ describe('createScheduler：防御性分支', () => {
     const row = {
       id: seeded.runId,
       runtimeId: seeded.runtime.id,
+      agentId: seeded.agent.id,
       leaseId: String(claimed.lease_id),
       turn: Number(claimed.turn),
       status: 'running',
@@ -953,6 +1088,7 @@ describe('createScheduler：防御性分支', () => {
     scheduler.start({
       id: seeded.runId,
       runtimeId: seeded.runtime.id,
+      agentId: seeded.agent.id,
       leaseId: null,
       turn: 1,
       status: 'running',
@@ -988,6 +1124,7 @@ const leaseLessRow = (seeded: Seeded, overrides: Partial<RunRow> = {}): RunRow =
   ({
     id: seeded.runId,
     runtimeId: seeded.runtime.id,
+    agentId: seeded.agent.id,
     leaseId: null,
     turn: 1,
     status: 'queued',

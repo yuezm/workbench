@@ -232,6 +232,111 @@ describe('host/commands：命令路由（M5）', () => {
     expect(store.query('runtimes.all')).toEqual([])
   })
 
+  it('runtime.create / runtime.update：执行配置不再属于运行时（旧字段被忽略）', async () => {
+    const { store, router } = setup()
+    const created = await router.dispatch({
+      commandId: 'c-runtime',
+      type: 'runtime.create',
+      // M27：模型 / 权限 / 并发 / 工作目录 / 思考强度不再是运行时字段，校验层也不拦
+      input: {
+        ...runtimeInput,
+        permissionMode: 'read-only',
+        model: 'deepseek/v4',
+        reasoningEffort: 'high',
+        workdir: 'C:/work',
+        maxConcurrent: 4,
+      },
+    } as unknown as Command)
+    const runtime = created.value as Runtime
+    expect(runtime).toMatchObject({ executorKey: 'dsh', command: 'dsh', enabled: true })
+    for (const key of ['permissionMode', 'model', 'reasoningEffort', 'workdir', 'maxConcurrent']) {
+      expect(Object.keys(runtime), key).not.toContain(key)
+    }
+
+    const updated = await router.dispatch({
+      commandId: 'c-runtime-update',
+      type: 'runtime.update',
+      id: runtime.id,
+      patch: { permissionMode: 'danger-full-access', maxConcurrent: 2 },
+    } as unknown as Command)
+    const row = store.query('runtimes.all').find((item) => item.id === runtime.id) as Runtime
+    expect(updated.value).toMatchObject({ enabled: true })
+    for (const key of ['permissionMode', 'maxConcurrent']) {
+      expect(Object.keys(row), key).not.toContain(key)
+    }
+  })
+
+  it('agent.create / agent.update：执行配置在智能体上（默认值、显式值与非法值）', async () => {
+    const { store, router } = setup()
+    const runtime = await router.dispatch({
+      commandId: 'c-runtime',
+      type: 'runtime.create',
+      input: runtimeInput,
+    })
+    const runtimeId = (runtime.value as Runtime).id
+
+    // 默认值：模型默认、可写、并发 1、无工作目录、无环境变量
+    const created = await router.dispatch({
+      commandId: 'c-agent',
+      type: 'agent.create',
+      input: { name: '助手', runtimeId },
+    })
+    const agentId = (created.value as { id: string }).id
+    expect(store.query('agents.all').find((item) => item.id === agentId)).toMatchObject({
+      model: null,
+      reasoningEffort: null,
+      maxConcurrent: 1,
+      permissionMode: 'workspace-write',
+      workdir: null,
+      env: {},
+    })
+
+    // 显式值整行落库（env 走 JSON 列，读回来是对象）
+    const updated = await router.dispatch({
+      commandId: 'c-agent-update',
+      type: 'agent.update',
+      id: agentId,
+      patch: {
+        model: 'deepseek/v4',
+        reasoningEffort: 'high',
+        maxConcurrent: 4,
+        permissionMode: 'danger-full-access',
+        workdir: 'C:/work',
+        env: { CI: '1' },
+      },
+    })
+    expect(updated.value).toMatchObject({
+      model: 'deepseek/v4',
+      reasoningEffort: 'high',
+      maxConcurrent: 4,
+      permissionMode: 'danger-full-access',
+      workdir: 'C:/work',
+      env: { CI: '1' },
+    })
+
+    // 非法值仍被校验层拒绝（错误文案指明是哪一列）
+    await expect(
+      router.dispatch({
+        commandId: 'c-agent-bad-mode',
+        type: 'agent.create',
+        input: { name: '坏权限', runtimeId, permissionMode: 'root' },
+      } as unknown as Command),
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: 'input.permissionMode取值必须是 read-only / workspace-write / danger-full-access',
+    })
+    await expect(
+      router.dispatch({
+        commandId: 'c-agent-bad-concurrency',
+        type: 'agent.create',
+        input: { name: '坏并发', runtimeId, maxConcurrent: 0 },
+      }),
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: 'input.maxConcurrent必须在 1 到 8 之间',
+    })
+  })
+
   it('runtime.update：保存后重探，探测结论入账', async () => {
     const { router, probe } = setup()
     const created = await router.dispatch({

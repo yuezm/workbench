@@ -138,7 +138,7 @@ function seedRun(): { runtime: Runtime; run: Record<string, unknown> } {
   const runtimeFacts = world.store.dispatch({
     type: 'runtime.create',
     commandId: nextCommandId(),
-    input: { name: 'rt-' + commandSeq, executorKey: 'dsh', command: 'dsh', maxConcurrent: 1 },
+    input: { name: 'rt-' + commandSeq, executorKey: 'dsh', command: 'dsh' },
   }).facts
   const runtimeId = (
     runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as { runtime: Runtime }
@@ -204,6 +204,7 @@ const claimedRunRow = (run: Record<string, unknown>): RunRow =>
   ({
     id: String(run.id),
     runtimeId: String(run.runtime_id),
+    agentId: String(run.agent_id),
     leaseId: String(run.lease_id),
     turn: Number(run.turn),
     status: 'running',
@@ -213,6 +214,7 @@ function makeScheduler(port: ExecutorPort, registry: ProcessRegistry): Scheduler
   return createScheduler({
     dispatch: (input) => world.store.dispatch(input),
     runtimes: () => world.store.query('runtimes.all'),
+    agents: () => world.store.query('agents.all'),
     executors: { forRuntime: () => port },
     timer: fakeTimer(),
     limits: { heartbeatMs: 1_000, runTimeoutMs: 10_000, maxFramesPerBatch: 500 },

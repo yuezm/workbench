@@ -9,10 +9,10 @@
  *   换新会话 + 完整历史重试一次（D6）。
  */
 import type { RunErrorCode, RunEvent, RunUsage } from '../../../protocol/entities'
+import { permissionModeOfAccess } from '../../../protocol/entities'
 import type { ExecutorIO, Receipt, Turn } from '../../../protocol/executor'
 import type { ExecutorContext } from '../../../sdk/types'
 import { createLineReader, parseFrame } from '../../shared/jsonl'
-import { parseModelId } from '../../shared/model-id'
 import { applyReceiptBlock } from '../../shared/receipt-block'
 import type { ReceiptBlock } from '../../shared/receipt-fields'
 import { applyReceiptFields } from '../../shared/receipt-fields'
@@ -143,33 +143,19 @@ export async function executeDshRun(
     })
   }
 
-  const model = runtime.model
-  const modelSelection = model ? parseModelId(model) : null
-  if (model && !modelSelection) {
-    return toReceipt(turn, {
-      status: 'failed',
-      output: '',
-      error: `模型 id 格式不对（应为 provider/model）：${model}`,
-      errorCode: 'run_failed',
-      exitCode: null,
-      sessionId: null,
-      resumeRejected: false,
-      usage,
-      durationMs: 0,
-      toolReceipt: null,
-    })
-  }
+  // 执行配置来自智能体（宿主已折算进 Turn）：模型与思考强度原样进 execute 帧。
+  const modelSelection = turn.model ?? null
 
-  // D10：运行时 workdir 优先；turn.cwd 可能为空串（workdir 为 null 时内核记 ''）。
-  // dsh 协议要求 execute.cwd 必须是非空绝对路径，不能省略，所以最后回落到宿主默认目录
+  // cwd 由内核按「项目文件夹 > 智能体工作目录」写进 run.cwd；空串表示没有配置，
+  // dsh 协议要求 execute.cwd 必须是非空绝对路径，回落到宿主默认目录
   // （main 启动时解析 `WORKBENCH_WORKDIR` / `~/.workbench` 并注入 `sdk.paths.cwd`）。
-  const cwd = runtime.workdir ?? (turn.cwd || sdk.paths.cwd)
+  const cwd = turn.cwd || sdk.paths.cwd
   const launched = startProcess(
     sdk,
     runtime.command,
     ['--profile', runtime.profile, '--stdio'],
     cwd,
-    dshEnv(runtime.permissionMode, sdk.paths.sessionRoot),
+    dshEnv(permissionModeOfAccess(turn.access), sdk.paths.sessionRoot, turn.env),
   )
   if (!launched.process) {
     return toReceipt(turn, {
@@ -363,7 +349,7 @@ export async function executeDshRun(
     }
     if (cwd !== undefined) executeFrame.cwd = cwd
     if (modelSelection) executeFrame.model = modelSelection
-    if (runtime.reasoningEffort) executeFrame.reasoning_effort = runtime.reasoningEffort
+    if (turn.effort) executeFrame.reasoning_effort = turn.effort
     if (turn.resumeSessionId) executeFrame.resume_session_id = turn.resumeSessionId
     if (!writeFrame(executeFrame)) {
       // 写不进去（子进程已退）：按启动失败收口，避免悬挂

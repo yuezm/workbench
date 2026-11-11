@@ -152,11 +152,6 @@ const createRuntime = (input: RuntimeCreateCommand, at: Iso, env: Environment): 
     argsTemplate: input.input.argsTemplate ?? '',
     command: input.input.command ?? 'dsh',
     profile: input.input.profile ?? 'multica',
-    permissionMode: input.input.permissionMode ?? 'workspace-write',
-    model: input.input.model ?? null,
-    reasoningEffort: input.input.reasoningEffort ?? null,
-    workdir: input.input.workdir ?? null,
-    maxConcurrent: input.input.maxConcurrent ?? 1,
     enabled: input.input.enabled ?? true,
     createdAt: at,
     lastProbe: null,
@@ -178,6 +173,13 @@ const createAgent = (
     description: input.input.description ?? '',
     runtimeId: runtime.id,
     systemPrompt: input.input.systemPrompt ?? '',
+    // M27：执行配置落在智能体上（假内核不校验取值，真内核在 decide 里校验）
+    model: input.input.model ?? null,
+    reasoningEffort: input.input.reasoningEffort ?? null,
+    maxConcurrent: input.input.maxConcurrent ?? 1,
+    permissionMode: input.input.permissionMode ?? 'workspace-write',
+    workdir: input.input.workdir ?? null,
+    env: input.input.env ?? {},
     createdAt: at,
   })
   return { facts: [{ type: 'agent.created', actor: OWNER, at, payload: { agent } }] }

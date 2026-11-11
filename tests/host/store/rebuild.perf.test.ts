@@ -51,7 +51,12 @@ describe('rebuild 性能基准', () => {
     let row = seeded
     const drafts: FactDraft[] = []
     for (let index = 1; index < FACTS_TARGET; index += 1) {
-      row = { ...row, maxConcurrent: (index % 8) + 1, enabled: index % 2 === 0 }
+      // M27：运行时只剩连接字段，逐条换参数模板与启停（并发上限在智能体上）
+      row = {
+        ...row,
+        argsTemplate: JSON.stringify([`--v${(index % 8) + 1}`]),
+        enabled: index % 2 === 0,
+      }
       drafts.push({ type: 'runtime.updated', actor: OWNER, at: AT, payload: { runtime: row } })
     }
     const writer = createProjectionWriter(db)
@@ -80,7 +85,7 @@ describe('rebuild 性能基准', () => {
     expect(store.factsSince(0)).toHaveLength(FACTS_TARGET)
     expect(dumpProjection(db)).toEqual(incremental)
     const runtime = store.query('runtimes.all')[0]
-    expect(runtime?.maxConcurrent).toBe(((FACTS_TARGET - 1) % 8) + 1)
+    expect(runtime?.argsTemplate).toBe(JSON.stringify([`--v${((FACTS_TARGET - 1) % 8) + 1}`]))
     expect(runtime?.enabled).toBe((FACTS_TARGET - 1) % 2 === 0)
   }, 60_000)
 })

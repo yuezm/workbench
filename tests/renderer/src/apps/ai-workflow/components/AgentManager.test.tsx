@@ -35,11 +35,6 @@ function makeRuntime(over: Partial<Runtime> = {}): Runtime {
     argsTemplate: '',
     command: 'dsh',
     profile: 'multica',
-    permissionMode: 'workspace-write',
-    model: null,
-    reasoningEffort: null,
-    workdir: null,
-    maxConcurrent: 1,
     enabled: true,
     createdAt: 't',
     lastProbe: probe('ready'),
@@ -50,6 +45,7 @@ function makeRuntime(over: Partial<Runtime> = {}): Runtime {
 const rt = makeRuntime()
 const rt2 = makeRuntime({ id: 'r2', name: 'claude' })
 
+/** 智能体 = 派活目标 + 执行配置（模型 / 思考强度 / 并发 / 权限 / 目录 / 环境变量） */
 function agent(over: Partial<Agent> = {}): Agent {
   return {
     id: 'a1',
@@ -57,6 +53,12 @@ function agent(over: Partial<Agent> = {}): Agent {
     description: '',
     runtimeId: 'r1',
     systemPrompt: '',
+    model: null,
+    reasoningEffort: null,
+    maxConcurrent: 1,
+    permissionMode: 'workspace-write',
+    workdir: null,
+    env: {},
     createdAt: 't',
     ...over,
   }
@@ -101,9 +103,17 @@ describe('AgentManager', () => {
     expect(screen.queryByLabelText('智能体名称')).not.toBeInTheDocument()
   })
 
-  it('行内展示绑定运行时名与健康状态点', async () => {
+  it('行内展示绑定运行时名、健康状态，以及模型 / 并发 / 访问权限', async () => {
     setup(
-      [agent({ description: '写代码' }), agent({ id: 'a3', name: 'ghost', runtimeId: 'missing' })],
+      [
+        agent({
+          description: '写代码',
+          model: 'deepseek/chat',
+          maxConcurrent: 3,
+          permissionMode: 'danger-full-access',
+        }),
+        agent({ id: 'a3', name: 'ghost', runtimeId: 'missing' }),
+      ],
       [
         makeRuntime({ id: 'r1', name: 'ds', lastProbe: probe('unavailable') }),
         makeRuntime({ id: 'r2', name: 'claude', lastProbe: probe('ready') }),
@@ -111,9 +121,14 @@ describe('AgentManager', () => {
     )
     render(<AgentManager />)
 
-    expect(await screen.findByText(/运行时：ds · 不可用/)).toBeInTheDocument()
+    // 执行配置归智能体：清单行把它们一起展示出来（模型缺省写「默认」）
+    expect(
+      await screen.findByText(/运行时：ds · 不可用 · 模型 deepseek\/chat · 并发 3 · 完全访问/),
+    ).toBeInTheDocument()
     expect(screen.getByText(/写代码/)).toBeInTheDocument()
-    expect(screen.getByText(/运行时：missing · 未检测/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/运行时：missing · 未检测 · 模型 默认 · 并发 1 · 可写/),
+    ).toBeInTheDocument()
   })
 
   it('新建智能体（切换运行时、填描述与能力）后删除：都走 dispatch 且视图刷新', async () => {
@@ -159,6 +174,13 @@ describe('AgentManager', () => {
         runtimeId: 'r2',
         description: '写代码',
         systemPrompt: 'you are coder',
+        // 执行配置随创建一起落库（缺省：默认模型 / 默认强度 / 并发 1 / 可写 / 无目录 / 无变量）
+        model: null,
+        reasoningEffort: null,
+        maxConcurrent: 1,
+        permissionMode: 'workspace-write',
+        workdir: null,
+        env: {},
       },
     })
     expect(await screen.findByText('coder')).toBeInTheDocument()
@@ -308,7 +330,19 @@ describe('AgentManager', () => {
     expect(kernel.dispatched[0]).toMatchObject({
       type: 'agent.update',
       id: 'a1',
-      patch: { name: 'new-name', runtimeId: 'r1', description: '旧描述', systemPrompt: '' },
+      patch: {
+        name: 'new-name',
+        runtimeId: 'r1',
+        description: '旧描述',
+        systemPrompt: '',
+        // 执行配置跟着 patch 走：编辑弹窗提交的是全量执行配置，不是只改名字
+        model: null,
+        reasoningEffort: null,
+        maxConcurrent: 1,
+        permissionMode: 'workspace-write',
+        workdir: null,
+        env: {},
+      },
     })
     expect(await screen.findByText('new-name')).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()

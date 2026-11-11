@@ -23,13 +23,12 @@ interface DialogState {
   initial: RuntimeInput | null
 }
 
-/** 新建运行时的默认值：执行器与 command/profile 由弹窗从 executors 清单首项 manifest 取 */
+/**
+ * 新建运行时的默认值：执行器与 command/profile 由弹窗从 executors 清单首项 manifest 取；
+ * 执行配置（模型 / 并发 / 权限等）在智能体上，这里只有名字。
+ */
 function newRuntimeInput(): RuntimeInput {
-  return {
-    name: '',
-    permissionMode: 'workspace-write',
-    maxConcurrent: 1,
-  }
+  return { name: '' }
 }
 
 function TerminalIcon({ className }: { className?: string }): ReactElement {
@@ -333,7 +332,6 @@ export function RuntimeManager(): ReactElement {
           {items.map((r) => {
             const status = statuses[r.id]
             const running = status?.workload.running ?? 0
-            const maxConcurrent = status?.workload.maxConcurrent ?? r.maxConcurrent
             const queued = status?.workload.queued ?? 0
             const probing = probingId === r.id
             const probe = r.lastProbe
@@ -380,9 +378,7 @@ export function RuntimeManager(): ReactElement {
                     <span className="truncate font-mono" title={probe?.path ?? undefined}>
                       {probe?.path ?? '未找到可执行文件'}
                     </span>
-                    <span className="tabular-nums">
-                      负载 {running}/{maxConcurrent}
-                    </span>
+                    <span className="tabular-nums">运行中 {running}</span>
                     {queued > 0 && <span className="text-warning tabular-nums">排队 {queued}</span>}
                   </span>
 

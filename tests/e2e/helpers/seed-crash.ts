@@ -84,8 +84,6 @@ export async function seedCrashState(dbPath: string): Promise<CrashSeed> {
         executorKey: 'dsh',
         command: process.execPath,
         profile: 'multica',
-        permissionMode: 'workspace-write',
-        maxConcurrent: 1,
         enabled: true,
       },
     }).facts
@@ -98,7 +96,12 @@ export async function seedCrashState(dbPath: string): Promise<CrashSeed> {
     const agentFacts = store.dispatch({
       type: 'agent.create',
       commandId: 'e2e-seed-agent',
-      input: { name: 'e2e 智能体', runtimeId: runtime.id },
+      input: {
+        name: 'e2e 智能体',
+        runtimeId: runtime.id,
+        permissionMode: 'workspace-write',
+        maxConcurrent: 1,
+      },
     }).facts
     const agent = (
       agentFacts.find((fact) => fact.type === 'agent.created')?.payload as {

@@ -79,7 +79,7 @@ export interface SdkPaths {
   /** 协议会话持久化目录；宿主未配置时为 null */
   sessionRoot: string | null
   /**
-   * 默认工作目录（绝对路径）。运行时 `workdir` 留空时的执行目录兜底：
+   * 默认工作目录（绝对路径）。`turn.cwd` 为空（项目与智能体都没配工作目录）时的执行目录兜底：
    * 宿主启动时解析 `WORKBENCH_WORKDIR` / `~/.workbench` 并确保目录存在；
    * dsh 协议要求 `execute.cwd` 必须是非空绝对路径，不能省略。
    */

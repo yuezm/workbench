@@ -1,7 +1,7 @@
 /**
- * `run.claim` / `run.heartbeat` / `run.receipt` 的黄金用例（T5/T6）：领取排序、按运行时开窗、
+ * `run.claim` / `run.heartbeat` / `run.receipt` 的黄金用例（T5/T6）：领取排序、按智能体开窗、
  * 租约计算、心跳匹配、回执校验、终态归一、waiting 与阶段流转。夹具只装内核判定需要的
- * 切片（runs / runtimes / tasks / workflows / stages），其余投影表留空。
+ * 切片（runs / runtimes / agents / tasks / workflows / stages），其余投影表留空。
  */
 import { describe, expect, it } from 'vitest'
 import type {
@@ -57,14 +57,26 @@ const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   argsTemplate: '',
   command: 'dsh',
   profile: 'multica',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: CREATED,
   lastProbe: null,
+  ...over,
+})
+
+/** 智能体（M27）：并发窗口与访问权限的归属层；缺省 1 个并发位。 */
+const agent = (over: Partial<Agent> = {}): Agent => ({
+  id: 'ag-1',
+  name: '实现者',
+  description: '',
+  runtimeId: 'rt-1',
+  systemPrompt: 'sys',
+  model: null,
+  reasoningEffort: null,
+  maxConcurrent: 1,
+  permissionMode: 'workspace-write',
+  workdir: null,
+  env: {},
+  createdAt: CREATED,
   ...over,
 })
 
@@ -293,10 +305,11 @@ const hostSettle = (
   )
 
 describe('kernel/decide run.claim 领取', () => {
-  it('超并发不领取：窗口 = maxConcurrent − running 数', () => {
+  it('超并发不领取：窗口 = 智能体 maxConcurrent − 该智能体 running 数', () => {
     const decision = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 2 })],
+        agents: [agent({ maxConcurrent: 2 })],
+        runtimes: [runtime()],
         runs: [
           run({ id: 'run-1', createdAt: '2026-01-01T00:00:01.000Z' }),
           run({ id: 'run-2', createdAt: '2026-01-01T00:00:02.000Z' }),
@@ -310,10 +323,80 @@ describe('kernel/decide run.claim 领取', () => {
     expect(decision.facts.every((fact) => fact.type === 'run.claimed')).toBe(true)
   })
 
+  it('并发窗口按智能体：两个智能体各 1，一次 capacity 8 也只能各领 1', () => {
+    const decision = claim(
+      view({
+        agents: [agent({ maxConcurrent: 1 }), agent({ id: 'ag-2', name: '另一个' })],
+        runtimes: [runtime()],
+        runs: [
+          run({ id: 'run-ag1-a', createdAt: '2026-01-01T00:00:01.000Z' }),
+          run({ id: 'run-ag1-b', createdAt: '2026-01-01T00:00:02.000Z' }),
+          run({ id: 'run-ag2-a', agentId: 'ag-2', createdAt: '2026-01-01T00:00:03.000Z' }),
+          run({ id: 'run-ag2-b', agentId: 'ag-2', createdAt: '2026-01-01T00:00:04.000Z' }),
+        ],
+      }),
+    )
+
+    // capacity 只是单次领取上界；窗口分别由智能体算，互不占用
+    expect(claimedIds(decision)).toEqual(['run-ag1-a', 'run-ag2-a'])
+  })
+
+  it('run 的智能体查不到（脏投影）：按 1 个并发位放行，不永久卡队列', () => {
+    const decision = claim(
+      view({
+        agents: [agent({ maxConcurrent: 8 })],
+        runtimes: [runtime()],
+        runs: [
+          run({
+            id: 'run-ghost-agent',
+            agentId: 'ag-missing',
+            createdAt: '2026-01-01T00:00:01.000Z',
+          }),
+          run({ id: 'run-ghost-2', agentId: 'ag-missing', createdAt: '2026-01-01T00:00:02.000Z' }),
+        ],
+      }),
+    )
+
+    expect(claimedIds(decision)).toEqual(['run-ghost-agent'])
+  })
+
+  it('capacity 小于候选数：只领上界条数（窗口不是唯一约束）', () => {
+    const decision = claim(
+      view({
+        agents: [agent({ maxConcurrent: 8 })],
+        runtimes: [runtime()],
+        runs: [
+          run({ id: 'run-1', createdAt: '2026-01-01T00:00:01.000Z' }),
+          run({ id: 'run-2', createdAt: '2026-01-01T00:00:02.000Z' }),
+        ],
+      }),
+      'rt-1',
+      1,
+    )
+
+    expect(claimedIds(decision)).toEqual(['run-1'])
+  })
+
+  it('run 没有智能体（脏投影）：按 1 个并发位放行', () => {
+    const decision = claim(
+      view({
+        agents: [agent()],
+        runtimes: [runtime()],
+        runs: [
+          run({ id: 'run-no-agent', agentId: null, createdAt: '2026-01-01T00:00:01.000Z' }),
+          run({ id: 'run-no-agent-2', agentId: null, createdAt: '2026-01-01T00:00:02.000Z' }),
+        ],
+      }),
+    )
+
+    expect(claimedIds(decision)).toEqual(['run-no-agent'])
+  })
+
   it('窗口为 0 时零事实（running 已占满并发位）', () => {
     const decision = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 2 })],
+        agents: [agent({ maxConcurrent: 2 })],
+        runtimes: [runtime()],
         runs: [
           run({ id: 'run-a', status: 'running', attempt: 1, leaseId: 'run-a:1' }),
           run({ id: 'run-b', status: 'running', attempt: 1, leaseId: 'run-b:1' }),
@@ -328,7 +411,8 @@ describe('kernel/decide run.claim 领取', () => {
   it('waiting 不占位：挂起等回答的 run 已释放并发位', () => {
     const decision = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 1 })],
+        agents: [agent({ maxConcurrent: 1 })],
+        runtimes: [runtime()],
         runs: [
           run({ id: 'run-waiting', status: 'waiting', attempt: 1, leaseId: null }),
           run({ id: 'run-queued', createdAt: '2026-01-01T00:00:02.000Z' }),
@@ -342,7 +426,8 @@ describe('kernel/decide run.claim 领取', () => {
   it('running 占位、waiting 不占位：窗口只扣 running', () => {
     const decision = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 2 })],
+        agents: [agent({ maxConcurrent: 2 })],
+        runtimes: [runtime()],
         runs: [
           run({ id: 'run-running', status: 'running', attempt: 1, leaseId: 'run-running:1' }),
           run({ id: 'run-waiting', status: 'waiting', attempt: 1 }),
@@ -359,7 +444,8 @@ describe('kernel/decide run.claim 领取', () => {
   it('FIFO：notBefore 升序，同序按 queueSeq，再按 createdAt + id（存量兜底）', () => {
     const decision = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 8 })],
+        agents: [agent({ maxConcurrent: 8 })],
+        runtimes: [runtime()],
         runs: [
           run({
             id: 'run-late',
@@ -397,7 +483,8 @@ describe('kernel/decide run.claim 领取', () => {
   it('notBefore 未到不领取；恰好等于 now 可领取', () => {
     const decision = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 8 })],
+        agents: [agent({ maxConcurrent: 8 })],
+        runtimes: [runtime()],
         runs: [
           run({ id: 'run-immediate' }),
           run({ id: 'run-due', notBefore: NOW }),
@@ -409,18 +496,46 @@ describe('kernel/decide run.claim 领取', () => {
     expect(claimedIds(decision)).toEqual(['run-immediate', 'run-due'])
   })
 
-  it('多运行时互不影响：各运行时按自己的窗口领取', () => {
+  it('多运行时互不影响：各运行时只领自己的 run，窗口按智能体算', () => {
     const target = view({
-      runtimes: [
-        runtime({ id: 'rt-1', maxConcurrent: 1 }),
-        runtime({ id: 'rt-2', name: '本机 dsh 2', maxConcurrent: 2 }),
+      // 窗口跟着智能体走：同一连接上挂两个智能体，各算各的
+      agents: [
+        agent({ id: 'ag-rt1', maxConcurrent: 1 }),
+        agent({ id: 'ag-rt2', name: '另一个', maxConcurrent: 2 }),
       ],
+      runtimes: [runtime({ id: 'rt-1' }), runtime({ id: 'rt-2', name: '本机 dsh 2' })],
       runs: [
-        run({ id: 'run-rt1-running', runtimeId: 'rt-1', status: 'running', attempt: 1 }),
-        run({ id: 'run-rt1-queued', runtimeId: 'rt-1', createdAt: '2026-01-01T00:00:02.000Z' }),
-        run({ id: 'run-rt2-1', runtimeId: 'rt-2', createdAt: '2026-01-01T00:00:03.000Z' }),
-        run({ id: 'run-rt2-2', runtimeId: 'rt-2', createdAt: '2026-01-01T00:00:04.000Z' }),
-        run({ id: 'run-rt2-3', runtimeId: 'rt-2', createdAt: '2026-01-01T00:00:05.000Z' }),
+        run({
+          id: 'run-rt1-running',
+          runtimeId: 'rt-1',
+          agentId: 'ag-rt1',
+          status: 'running',
+          attempt: 1,
+        }),
+        run({
+          id: 'run-rt1-queued',
+          runtimeId: 'rt-1',
+          agentId: 'ag-rt1',
+          createdAt: '2026-01-01T00:00:02.000Z',
+        }),
+        run({
+          id: 'run-rt2-1',
+          runtimeId: 'rt-2',
+          agentId: 'ag-rt2',
+          createdAt: '2026-01-01T00:00:03.000Z',
+        }),
+        run({
+          id: 'run-rt2-2',
+          runtimeId: 'rt-2',
+          agentId: 'ag-rt2',
+          createdAt: '2026-01-01T00:00:04.000Z',
+        }),
+        run({
+          id: 'run-rt2-3',
+          runtimeId: 'rt-2',
+          agentId: 'ag-rt2',
+          createdAt: '2026-01-01T00:00:05.000Z',
+        }),
       ],
     })
 
@@ -431,7 +546,8 @@ describe('kernel/decide run.claim 领取', () => {
   it('capacity 大于窗口时只领取窗口数', () => {
     const decision = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 3 })],
+        agents: [agent({ maxConcurrent: 3 })],
+        runtimes: [runtime()],
         runs: [
           run({ id: 'run-a', status: 'running', attempt: 1 }),
           run({ id: 'run-b', status: 'running', attempt: 1 }),
@@ -448,7 +564,11 @@ describe('kernel/decide run.claim 领取', () => {
     const fresh = run({ id: 'run-fresh', attempt: 0 })
     const retry = run({ id: 'run-retry', attempt: 2, createdAt: '2026-01-01T00:00:02.000Z' })
     const decision = claim(
-      view({ runtimes: [runtime({ maxConcurrent: 8 })], runs: [fresh, retry] }),
+      view({
+        agents: [agent({ maxConcurrent: 8 })],
+        runtimes: [runtime()],
+        runs: [fresh, retry],
+      }),
       'rt-1',
       8,
       env({ leaseMs: 1_000, runTimeoutMs: 5_000 }),
@@ -493,7 +613,8 @@ describe('kernel/decide run.claim 领取', () => {
   it('M26：阶段配了 runTimeoutMs 就按阶段算 deadlineAt，没配 / 查不到阶段回落全局', () => {
     const decision = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 8 })],
+        agents: [agent({ maxConcurrent: 8 })],
+        runtimes: [runtime()],
         stages: [
           stage({ id: 'st-1', runTimeoutMs: 5_400_000 }),
           stage({ id: 'st-2', runTimeoutMs: null }),
@@ -890,7 +1011,8 @@ describe('kernel/decide run.receipt 回执', () => {
     const waiting = (decision.facts[1]?.payload as RunWaitingPayload).run
     const nextClaim = claim(
       view({
-        runtimes: [runtime({ maxConcurrent: 1 })],
+        agents: [agent({ maxConcurrent: 1 })],
+        runtimes: [runtime()],
         runs: [waiting, run({ id: 'run-2', createdAt: '2026-01-01T00:00:02.000Z' })],
       }),
     )
@@ -1722,16 +1844,6 @@ describe('kernel/decide run.receipt 评审结论（M14）', () => {
 })
 
 describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
-  const agent = (over: Partial<Agent> = {}): Agent => ({
-    id: 'ag-1',
-    name: '实现者',
-    description: '',
-    runtimeId: 'rt-1',
-    systemPrompt: 'sys',
-    createdAt: CREATED,
-    ...over,
-  })
-
   const acceptanceStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
     stage({
       acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'],

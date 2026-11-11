@@ -38,18 +38,6 @@ export function claimOrder(a: RunRow, b: RunRow): number {
   )
 }
 
-/**
- * 该运行时当前占用的并发位：只数 `running`。
- * `waiting` 已释放租约与并发位（D12），`queued` 尚未占用，都不计数。
- */
-export function occupiedSlots(view: View, runtimeId: Id): number {
-  let count = 0
-  for (const run of view.runs.values()) {
-    if (run.runtimeId === runtimeId && run.status === 'running') count += 1
-  }
-  return count
-}
-
 /** 领取候选：该运行时下 `queued` 且 `notBefore` 已到（null = 立即）的 run，已按 FIFO 排好。 */
 export function claimCandidates(view: View, runtimeId: Id, now: Iso): RunRow[] {
   const candidates: RunRow[] = []
@@ -62,24 +50,29 @@ export function claimCandidates(view: View, runtimeId: Id, now: Iso): RunRow[] {
 }
 
 /**
- * 本次实际领取的 run：窗口 = `maxConcurrent − running 数`，最多
- * `min(window, capacity)`（capacity 已由 decide 校验为 1–8）。
+ * 本次实际领取的 run：并发窗口按**智能体**算——每个智能体最多
+ * `agent.maxConcurrent - 该智能体 running 数`，一次领取总量不超过 `capacity`。
  *
  * M6.5 线程闸门：同一线程同时 `running` 数 ≥ `thread.concurrency`（缺省 1）时跳过它的
  * 候选；跨线程互不影响。`waiting` 不占位（已释放租约与并发位），`queued` 尚未占位。
+ *
+ * 找不到智能体的 run（脏投影）按并发 1 放行，不让它永久卡在队列里。
  */
 export function pickClaims(view: View, runtime: Runtime, capacity: number, now: Iso): RunRow[] {
-  const window = runtime.maxConcurrent - occupiedSlots(view, runtime.id)
-  if (window <= 0) return []
+  const runningByAgent = new Map<Id | null, number>()
   const runningByThread = new Map<Id, number>()
   for (const run of view.runs.values()) {
-    if (run.status !== 'running' || run.threadId === null) continue
+    if (run.status !== 'running') continue
+    runningByAgent.set(run.agentId, (runningByAgent.get(run.agentId) ?? 0) + 1)
+    if (run.threadId === null) continue
     runningByThread.set(run.threadId, (runningByThread.get(run.threadId) ?? 0) + 1)
   }
   const picked: RunRow[] = []
-  const limit = Math.min(window, capacity)
   for (const run of claimCandidates(view, runtime.id, now)) {
-    if (picked.length >= limit) break
+    if (picked.length >= capacity) break
+    const limit = run.agentId === null ? 1 : (view.agents.get(run.agentId)?.maxConcurrent ?? 1)
+    const usedByAgent = runningByAgent.get(run.agentId) ?? 0
+    if (usedByAgent >= limit) continue
     if (run.threadId !== null) {
       const thread = view.threads.get(run.threadId)
       const concurrency = thread?.concurrency ?? 1
@@ -87,6 +80,7 @@ export function pickClaims(view: View, runtime: Runtime, capacity: number, now: 
       if (used >= concurrency) continue
       runningByThread.set(run.threadId, used + 1)
     }
+    runningByAgent.set(run.agentId, usedByAgent + 1)
     picked.push(run)
   }
   return picked
@@ -234,8 +228,8 @@ export function settlementFacts(
 }
 
 /**
- * 回执带 `ask[]`：挂起等回答（D12）。释放租约与超时时刻（并发位由 `occupiedSlots`
- * 只数 `running` 自然让出）；会话 id 记在 run 上供续接。`cardIds` 是本次 `ask` 产生的
+ * 回执带 `ask[]`：挂起等回答（D12）。释放租约与超时时刻（并发位只数 `running`
+ * 自然让出）；会话 id 记在 run 上供续接。`cardIds` 是本次 `ask` 产生的
  * 卡片 id（M4 由 `kernel/cards.ts` 生成后传入），信息卡不进这里。
  */
 export function waitingRun(run: RunRow, receipt: Receipt): RunRow & { status: 'waiting' } {

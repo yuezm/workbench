@@ -13,9 +13,9 @@
  *   换新会话 + 完整历史重试一次。
  */
 import type { RunErrorCode, RunEvent, RunUsage } from '../../../protocol/entities'
+import { permissionModeOfAccess } from '../../../protocol/entities'
 import type { ExecutorIO, Receipt, Turn } from '../../../protocol/executor'
 import type { ExecutorContext } from '../../../sdk/types'
-import { parseModelId } from '../../shared/model-id'
 import { applyReceiptBlock } from '../../shared/receipt-block'
 import type { ReceiptBlock } from '../../shared/receipt-fields'
 import { applyReceiptFields } from '../../shared/receipt-fields'
@@ -151,27 +151,10 @@ export async function executeHermesRun(
     })
   }
 
-  const modelSelection = runtime.model ? parseModelId(runtime.model) : null
-  if (runtime.model && !modelSelection) {
-    // 非法模型 id 不 spawn：先拦住，别让对端揣着错配置白跑
-    return toReceipt(turn, {
-      status: 'failed',
-      output: '',
-      error: `模型 id 格式不对（应为 provider/model）：${runtime.model}`,
-      errorCode: 'run_failed',
-      exitCode: null,
-      sessionId: null,
-      resumeRejected: false,
-      usage,
-      durationMs: 0,
-      toolReceipt: null,
-    })
-  }
-
-  // 运行时 workdir 优先；turn.cwd 可能为空串（workdir 为 null 时内核记 ''），
-  // 最后回落到宿主默认目录（`sdk.paths.cwd` 由宿主启动时解析并注入）。
-  const cwd = runtime.workdir ?? (turn.cwd || sdk.paths.cwd)
-  const launched = startProcess(sdk, runtime.command, ['acp'], cwd, {})
+  // 执行配置来自智能体（宿主已折算进 Turn）；cwd 空串回落到宿主默认目录
+  const modelSelection = turn.model ?? null
+  const cwd = turn.cwd || sdk.paths.cwd
+  const launched = startProcess(sdk, runtime.command, ['acp'], cwd, turn.env ?? {})
   if (!launched.process) {
     return toReceipt(turn, {
       status: 'failed',
@@ -218,7 +201,7 @@ export async function executeHermesRun(
     onRequest: (method, params) => {
       if (method !== 'session/request_permission') return null
       // 审批往返：这台机器上是常态 —— 必须回帧，否则对端会一直等
-      const decision = decidePermission(params, runtime.permissionMode)
+      const decision = decidePermission(params, permissionModeOfAccess(turn.access))
       sdk.log(
         `ACP 审批请求（${decision.tool || '未命名工具'}）：${
           decision.allowed ? '允许' : '拒绝'
@@ -347,7 +330,7 @@ export async function executeHermesRun(
       if (opened !== null) {
         await applySessionConfig(link.acp, opened, {
           sessionId,
-          permissionMode: runtime.permissionMode,
+          permissionMode: permissionModeOfAccess(turn.access),
           model: modelSelection,
           log: (line) => sdk.log(line),
           timeoutMs: requestTimeout,

@@ -126,11 +126,6 @@ const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   command: NODE,
   // Claude Code 没有 profile 概念：运行时行的这一列留空，插件不拼进 argv
   profile: '',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastProbe: null,
@@ -212,7 +207,7 @@ describe('constants', () => {
 
 describe('claudeArgs', () => {
   it('恒定参数 + 按需追加 model/effort/resume，每项都是独立元素', () => {
-    expect(claudeArgs(runtime(), null, null)).toEqual([
+    expect(claudeArgs('workspace-write', null, null, null)).toEqual([
       '--print',
       '--output-format',
       'stream-json',
@@ -224,8 +219,9 @@ describe('claudeArgs', () => {
     ])
     expect(
       claudeArgs(
-        runtime({ model: 'anthropic/claude-opus-4-1', reasoningEffort: 'xhigh' }),
+        'workspace-write',
         { provider: 'anthropic', id: 'claude-opus-4-1' },
+        'xhigh',
         'sess-prev',
       ).slice(8),
     ).toEqual(['--model', 'claude-opus-4-1', '--effort', 'xhigh', '--resume', 'sess-prev'])
@@ -233,7 +229,7 @@ describe('claudeArgs', () => {
 
   it('三种权限模式映射到 claude 的 --permission-mode 取值', () => {
     const flags = (['read-only', 'workspace-write', 'danger-full-access'] as const).map((mode) => {
-      const args = claudeArgs(runtime({ permissionMode: mode }), null, null)
+      const args = claudeArgs(mode, null, null, null)
       return args[args.indexOf('--permission-mode') + 1]
     })
     expect(flags).toEqual(['plan', 'acceptEdits', 'bypassPermissions'])
@@ -291,8 +287,13 @@ describe('executeClaudeRun 成功路径', () => {
     const processCalls: number[] = []
     const sessionCalls: string[] = []
     const { running, events } = startRun(h, {
-      runtime: { model: 'anthropic/claude-opus-4-1', reasoningEffort: 'high' },
-      turn: { resumeSessionId: 'sess-prev' },
+      // 执行配置来自智能体（宿主折进 Turn）：模型只取斜杠后那段、强度进 --effort
+      turn: {
+        model: { provider: 'anthropic', id: 'claude-opus-4-1' },
+        effort: 'high',
+        env: { HTTP_PROXY: 'http://127.0.0.1:7890' },
+        resumeSessionId: 'sess-prev',
+      },
       io: {
         process: (pid) => processCalls.push(pid),
         session: (id) => sessionCalls.push(id),
@@ -319,7 +320,8 @@ describe('executeClaudeRun 成功路径', () => {
       'sess-prev',
     ])
     expect(h.calls[0].options.cwd).toBe('C:/work')
-    expect(h.calls[0].options.env).toEqual({})
+    // 智能体配的环境变量原样进 spawn（宿主基线由 sdk 合并）
+    expect(h.calls[0].options.env).toEqual({ HTTP_PROXY: 'http://127.0.0.1:7890' })
     // 提示词写 stdin 后立刻关闭（不占 argv）
     expect(child.writes).toEqual(['只回复 OK'])
     expect(child.stdinEnded).toBe(true)
@@ -559,9 +561,9 @@ describe('executeClaudeRun 成功路径', () => {
     expect(sessionCalls).toEqual([])
   })
 
-  it('cwd 取舍：runtime.workdir 优先，turn.cwd 为空时用宿主默认目录', async () => {
+  it('cwd 取舍：turn.cwd 优先，为空时用宿主默认目录', async () => {
     const h1 = harness()
-    const first = startRun(h1, { runtime: { workdir: 'D:/proj' } })
+    const first = startRun(h1, { turn: { cwd: 'D:/proj' } })
     h1.children[0].close(0)
     await first.running
     expect(h1.calls[0].options.cwd).toBe('D:/proj')
@@ -571,19 +573,45 @@ describe('executeClaudeRun 成功路径', () => {
     h2.children[0].close(0)
     await second.running
     expect(h2.calls[0].options.cwd).toBe('C:/host-default')
+    // 智能体没配环境变量：不追加任何键（宿主基线由 sdk 合并）
+    expect(h2.calls[0].options.env).toEqual({})
+  })
+
+  it('访问权限由 Turn.access 还原：read → --permission-mode plan', async () => {
+    const h = harness()
+    const { running } = startRun(h, { turn: { access: 'read' } })
+    const args = h.calls[0].args
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('plan')
+
+    const child = h.children[0]
+    child.emitStdout(initFrame())
+    child.emitStdout(frame({ type: 'result', subtype: 'success', result: 'ok' }))
+    child.close(0)
+    expect((await running).status).toBe('succeeded')
   })
 })
 
 describe('executeClaudeRun 归档与失败', () => {
-  it('runtime.model 非法格式：failed + run_failed，不 spawn', async () => {
+  it('宿主给 null 模型：不追加 --model，按 CLI 默认模型跑', async () => {
     const h = harness()
-    const { running, events } = startRun(h, { runtime: { model: 'nomodel' } })
-    const receipt = await running
-    expect(receipt.status).toBe('failed')
-    expect(receipt.errorCode).toBe('run_failed')
-    expect(receipt.error).toContain('provider/model')
-    expect(h.children).toHaveLength(0)
-    expect(events).toEqual([])
+    const { running } = startRun(h, { turn: { model: null, effort: null } })
+    const child = h.children[0]
+    // 恒定参数里没有 --model / --effort
+    expect(h.calls[0].args).toEqual([
+      '--print',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--permission-mode',
+      'acceptEdits',
+      '--permission-prompts',
+      'none',
+    ])
+
+    child.emitStdout(initFrame())
+    child.emitStdout(frame({ type: 'result', subtype: 'success', result: 'ok' }))
+    child.close(0)
+    expect((await running).status).toBe('succeeded')
   })
 
   it('开始前已 abort：cancelled，不 spawn', async () => {

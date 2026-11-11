@@ -215,7 +215,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   ],
   'card.answer': ['runs', 'cards'],
   'card.resolve': ['cards'],
-  'run.claim': ['runs', 'runtimes', 'threads'],
+  // 并发窗口按智能体（`maxConcurrent`）算，领取必须装 agents
+  'run.claim': ['runs', 'runtimes', 'agents', 'threads'],
   'run.heartbeat': ['runs'],
   'run.receipt': [
     'runs',

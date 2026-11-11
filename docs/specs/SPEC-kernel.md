@@ -11,13 +11,15 @@
 
 ## 派活单位：智能体
 
-| 概念                       | 是什么                                                                                | 谁拥有                        |
-| -------------------------- | ------------------------------------------------------------------------------------- | ----------------------------- |
-| **智能体（Agent）**        | 派活目标：名称、描述、能力（System Prompt）、绑定的运行时                             | 用户配置，内核投影 `agents`   |
-| **运行时（Runtime）**      | 执行环境实例：执行器插件、命令、profile、权限模式、模型、工作目录、并发上限、启用开关 | 用户配置，内核投影 `runtimes` |
-| **执行器插件（Executor）** | 协议适配实现（dsh / command / claude…），无状态；只负责「怎么调起并读回一轮」         | 插件注册表                    |
+| 概念                       | 是什么                                                                                                   | 谁拥有                        |
+| -------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| **智能体（Agent）**        | 派活目标 + 执行配置：System Prompt、模型、思考强度、并发上限、访问权限、工作目录、环境变量、绑定的运行时 | 用户配置，内核投影 `agents`   |
+| **运行时（Runtime）**      | 一条连接：执行器插件、命令、profile、参数模板、启用开关、最近探测结论                                    | 用户配置，内核投影 `runtimes` |
+| **执行器插件（Executor）** | 协议适配实现（dsh / command / claude…），无状态；只负责「怎么调起并读回一轮」                            | 插件注册表                    |
 
 派活链固定为：**规则 → 任务（工作流 + 阶段）→ 阶段绑定的智能体 `agentId` → 该智能体的运行时 `runtimeId` → 运行时的 `executorKey` 选择执行器插件**。规则只建任务，不直接派 run。内核只透传 `executorKey` 字符串，不知道 dsh、claude 是什么。执行器插件不是派活目标，也不能自己挑活。
+
+**连接与执行配置分家（M27）**：运行时只回答「怎么把 CLI 起来」；模型、思考强度、并发上限、访问权限、工作目录、环境变量是智能体的设置。派活时内核把智能体的 `permissionMode` 映射成 `run.access`、`workdir` 参与折算 `run.cwd`（项目文件夹优先）；激活时宿主把模型 / 思考强度 / 环境变量放进 `Turn`。
 
 内核只校验 `executorKey` 的形状（非空 slug，`^[a-z][a-z0-9-]{0,63}$`），**不校验取值**；取值合法性由宿主入口按执行器插件注册表判断。`command` / `profile` / `executorKey` 的缺省值由 IPC 入口按执行器插件 manifest 补齐后再 `dispatch`，内核只见完整输入、零产品名。
 
@@ -99,7 +101,8 @@ export interface Card {
 
 /**
  * `View.runtimes` 的元素（`runtimes` 投影行）：字段与 `src/protocol/entities.ts` 的
- * `Runtime` 逐列对应。M3 起用 `executorKey` 表达「用哪个执行器插件」，无协议族字段。
+ * `Runtime` 逐列对应。M3 起用 `executorKey` 表达「用哪个执行器插件」，无协议族字段；
+ * M27 起运行时只描述**连接**（执行配置搬到 `agents`，见 `Agent`）。
  */
 export interface RuntimeRow {
   id: Id
@@ -108,14 +111,25 @@ export interface RuntimeRow {
   command: string // 启动命令（缺省值来自执行器插件 manifest）
   profile: string // 启动 profile（dsh 用它选 --stdio/--probe；其它执行器可为空串）
   argsTemplate: string // 参数模板（JSON 数组文本；空串 = 无参数）
-  permissionMode: PermissionMode
-  model: string | null
-  reasoningEffort: string | null
-  workdir: string | null
-  maxConcurrent: number
   enabled: boolean
   createdAt: Iso
   lastProbe: RuntimeProbe | null
+}
+
+/** `View.agents` 的元素：派活目标 + 执行配置（M27 从运行时搬来）。 */
+export interface Agent {
+  id: Id
+  name: string
+  description: string
+  runtimeId: Id
+  systemPrompt: string
+  model: string | null // provider/model；null = CLI 默认
+  reasoningEffort: string | null // null = 模型默认
+  maxConcurrent: number // 1–8，默认 1（同一智能体同时在跑的 run 上限）
+  permissionMode: PermissionMode // 派活时映射成 run.access
+  workdir: string | null // 项目文件夹优先，其次这里，再空串 = 宿主默认目录
+  env: Record<string, string> // 追加给子进程的环境变量
+  createdAt: Iso
 }
 
 export interface Environment {
@@ -183,14 +197,14 @@ export interface Change {
 | 输入                                                          | 来源                                            | 前置校验                                                                                                                                                       | 事实                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `event.received`                                              | source 插件、app 插件、执行器回执派生（经宿主） | 字段白名单、类型合法、`hops` ≤ 上限、不带 `cwd/agent/runtime/access`                                                                                           | `event.received`（M6 起入账后立即按当前规则集匹配建任务；同一规则 + 同一入口键不重复建任务）；超过跳数则 `event.dropped`                                                                                                                     |
-| `run.claim`                                                   | 宿主调度器（未来远端 worker 用同一形状）        | 运行时已配置且启用，`capacity` 1–8                                                                                                                             | `run.claimed` ×N（N ≤ capacity，且该运行时在跑数 < `maxConcurrent`）                                                                                                                                                                         |
+| `run.claim`                                                   | 宿主调度器（未来远端 worker 用同一形状）        | 运行时已配置且启用，`capacity` 1–8                                                                                                                             | `run.claimed` ×N（N ≤ capacity，且每条候选所属**智能体**在跑数 < 该智能体的 `maxConcurrent`）                                                                                                                                                |
 | `run.heartbeat`                                               | 宿主调度器                                      | `leaseId` 匹配当前租约                                                                                                                                         | `run.lease_extended`                                                                                                                                                                                                                         |
 | `run.receipt`                                                 | 执行器插件（经宿主转交）                        | run 属于该运行时、`leaseId` 与 `turn` 匹配当前轮                                                                                                               | 终态事实 + 回执五字段（`ask` → `card.opened` + `run.waiting`；`notices` → 信息卡；`resolves` → `card.resolved`；`later` → `run.queued`；`events` → `event.received`/`event.dropped`）+ 阶段流转                                              |
 | `run.cancel`                                                  | owner                                           | run 处于 queued/claimed/waiting                                                                                                                                | `run.cancel_requested`                                                                                                                                                                                                                       |
 | `run.host_settled`                                            | 宿主（scheduler / reconcile / cancel）          | 仅宿主 actor；run 存在                                                                                                                                         | 终态事实：`run.failed`（`timeout`/`executor_lost`）或 `run.cancelled`（`cancelled`）                                                                                                                                                         |
 | `card.answer`                                                 | owner（ui）、通道插件（经宿主）                 | 卡片存在且 `status='open'`、`optionIndex` 在 `options` 范围内、run 处于 `waiting`；同一卡片只答一次                                                            | `card.answered`；该 run 的 open 卡**全部答完**时再产 `run.queued`（续接，`turn+1`、`resumeSessionId`）                                                                                                                                       |
 | `card.resolve`                                                | owner                                           | 卡片存在且 `status='open'`                                                                                                                                     | `card.resolved{reason:'manual'}`；不改变 run 状态                                                                                                                                                                                            |
-| `task.create` / `task.move` / `task.complete` / `task.remove` | owner                                           | 工作流/阶段存在；有活跃 run 时拒绝移动/完成；`task.create` 的项目可省（M11，省 = 默认目录），给了必须存在；子任务必须与父任务同项目                            | 任务事实 + 进入阶段效果（阶段绑定的智能体）；run 的工作目录取项目文件夹，无项目回落运行时 `workdir` / 默认目录；`task.remove` 顺带判定线程：还剩任务就按是否全部结束归档，队列删光则连线程一起删（`thread.removed`，宿主清该线程的落盘归档） |
+| `task.create` / `task.move` / `task.complete` / `task.remove` | owner                                           | 工作流/阶段存在；有活跃 run 时拒绝移动/完成；`task.create` 的项目可省（M11，省 = 默认目录），给了必须存在；子任务必须与父任务同项目                            | 任务事实 + 进入阶段效果（阶段绑定的智能体）；run 的工作目录取项目文件夹，无项目回落智能体 `workdir` / 默认目录；`task.remove` 顺带判定线程：还剩任务就按是否全部结束归档，队列删光则连线程一起删（`thread.removed`，宿主清该线程的落盘归档） |
 | `thread.note`                                                 | owner、执行器回执（经宿主）                     | 线程 open、文本 ≤2000 字                                                                                                                                       | `thread.note_appended`                                                                                                                                                                                                                       |
 | `thread.close`                                                | owner                                           | 线程存在                                                                                                                                                       | `thread.closed`（reason=manual）；有新事件时自动重开                                                                                                                                                                                         |
 | `thread.bind`                                                 | owner                                           | 线程存在、`(source, externalRef)` 未被占用                                                                                                                     | `thread.bound`                                                                                                                                                                                                                               |
@@ -366,7 +380,7 @@ export interface ThreadRow {
 
 | 事项       | 规则                                                                                                                                                                                                                |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 领取       | 宿主按运行时发起；按 `notBefore` 升序、同序按 `seq` FIFO；该运行时在跑数 < `maxConcurrent`；`waiting` 不占位                                                                                                        |
+| 领取       | 宿主按运行时发起；按 `notBefore` 升序、同序按 `seq` FIFO；每条 run 所属智能体在跑数 < 该智能体的 `maxConcurrent`；`waiting` 不占位                                                                                  |
 | 租约       | 领取即 `leaseId = runId:attempt`、`leaseUntil = now + leaseMs`、`deadlineAt = now + 本次超时`（M26：阶段 `runTimeoutMs` 优先，否则 `limits.runTimeoutMs` = 60 min）；心跳续租；过期 → `run.abandoned`，`attempts+1` |
 | 超时       | `clock.tick` 到 `deadlineAt` → `run.failed{errorCode:'timeout'}`（actor `{kind:'host',via:'timeout'}`），终止进程同取消时序                                                                                         |
 | 迟到的回执 | 只接受 `leaseId` 与当前 `turn` 匹配的回执；旧 attempt 的回执直接丢弃并记 `run.receipt_rejected` 审计事实，**不覆盖终态**                                                                                            |
@@ -376,7 +390,7 @@ export interface ThreadRow {
 
 **单轮超时（M26）**：`run.claim` 时按 `run.stageId` 查阶段，阶段 `runTimeoutMs` 非空就按它算 `deadlineAt`，否则（阶段没配 / 阶段行查不到 / 聊天 run 没有阶段）用 `limits.runTimeoutMs`；执行器进程的超时由宿主取「`deadlineAt` 减当前时刻」传入，内核与进程不各留一套时限。
 | 合并 | 仅 `queued` 可合并；`claimed`/`waiting` 期间的新事件排队为下一轮的独立事件，不静默丢弃 |
-| 并发隔离 | 按**运行时**隔离：不同运行时互不影响；同一运行时共享 `maxConcurrent` 窗口 |
+| 并发隔离 | 按**智能体**隔离：每个智能体有自己的 `maxConcurrent` 窗口；同一连接上的不同智能体互不占位 |
 | 线程并发 | 同一线程同时 `claimed` 数 ≤ `thread.concurrency`（默认 1）；超出排队，跨线程不受影响 |
 
 ## 审批（挂起零消耗）

@@ -59,11 +59,7 @@ function payloadOf<T>(facts: readonly Fact[], type: string, what: string): T {
 }
 
 /** 建一个走 `command` 执行器插件的运行时（命令是假智能体，提示词只走 stdin）。 */
-function createRuntime(
-  store: ReturnType<typeof createStore>,
-  command: string,
-  workdir: string,
-): Runtime {
+function createRuntime(store: ReturnType<typeof createStore>, command: string): Runtime {
   const facts = store.dispatch({
     type: 'runtime.create',
     commandId: 'e2e-agent-runtime',
@@ -74,20 +70,21 @@ function createRuntime(
       // 空模板 = 无参数 → 提示词只走 stdin（不进 argv）
       argsTemplate: '',
       profile: '',
-      permissionMode: 'workspace-write',
-      // 执行工作目录固定到项目目录：run 的 cwd 取它，避免落到宿主默认目录
-      workdir,
-      maxConcurrent: 1,
       enabled: true,
     },
   }).facts
   return payloadOf<{ runtime: Runtime }>(facts, 'runtime.created', '运行时').runtime
 }
 
+/**
+ * 建智能体：执行配置（工作目录 / 权限 / 并发）挂在智能体上。
+ *
+ * 工作目录给项目目录：没有项目时 run 的 cwd 取它，避免落到宿主默认目录。
+ */
 function createAgent(
   store: ReturnType<typeof createStore>,
   runtimeId: string,
-  options: { name?: string; systemPrompt?: string } = {},
+  options: { name?: string; systemPrompt?: string; workdir?: string } = {},
 ): Agent {
   const facts = store.dispatch({
     type: 'agent.create',
@@ -96,6 +93,9 @@ function createAgent(
       name: options.name ?? 'e2e 假智能体',
       runtimeId,
       systemPrompt: options.systemPrompt,
+      workdir: options.workdir ?? null,
+      permissionMode: 'workspace-write',
+      maxConcurrent: 1,
     },
   }).facts
   return payloadOf<{ agent: Agent }>(facts, 'agent.created', '智能体').agent
@@ -160,10 +160,12 @@ export async function seedAgentBase(dbPath: string, options: SeedAgentOptions): 
   try {
     const store = createStore({ db, kernel })
 
-    const runtime = createRuntime(store, options.command, options.projectPath)
+    const runtime = createRuntime(store, options.command)
     const agent = createAgent(store, runtime.id, {
       name: options.agentName,
       systemPrompt: options.systemPrompt,
+      // 执行目录挂在智能体上：项目存在时 run.cwd 仍优先取项目文件夹
+      workdir: options.projectPath,
     })
     const project = createProject(store, 'e2e 项目', options.projectPath)
 
@@ -221,8 +223,8 @@ export async function seedProjectDimension(
   try {
     const store = createStore({ db, kernel })
 
-    const runtime = createRuntime(store, options.command, options.dirA)
-    const agent = createAgent(store, runtime.id)
+    const runtime = createRuntime(store, options.command)
+    const agent = createAgent(store, runtime.id, { workdir: options.dirA })
     const { workflow, stageIds } = createWorkflow(
       store,
       'e2e 项目流程',

@@ -15,6 +15,12 @@ const agent: Agent = {
   description: '',
   runtimeId: 'r1',
   systemPrompt: '',
+  model: null,
+  reasoningEffort: null,
+  maxConcurrent: 1,
+  permissionMode: 'workspace-write',
+  workdir: null,
+  env: {},
   createdAt: 't',
 }
 

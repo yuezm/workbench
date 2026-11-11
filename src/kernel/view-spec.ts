@@ -149,9 +149,10 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 只改卡片状态；run 状态不动
       return ['cards']
     case 'run.claim':
-      // 候选 run 来自 runs 投影；运行时配置（启用 / 并发上限）来自 runtimes；
+      // 候选 run 来自 runs 投影；运行时配置（启用 / 执行器键）来自 runtimes；
+      // 并发窗口按**智能体**（`maxConcurrent`）算，必须装 agents；
       // M6.5：同一线程的并发闸门要读 threads（concurrency 默认 1）
-      return ['runs', 'runtimes', 'threads']
+      return ['runs', 'runtimes', 'agents', 'threads']
     case 'run.heartbeat':
       // 只校验租约是否匹配，不改其它表
       return ['runs']

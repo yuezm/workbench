@@ -4,7 +4,14 @@
 import type { Agent, Conversation, WorkflowStage } from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
 import type { Decision, Environment, Id, Iso, View } from '../types'
-import { done, ownerDraft, reject } from './common'
+import {
+  done,
+  normalizeConcurrency,
+  normalizeEnv,
+  ownerDraft,
+  permissionModeOf,
+  reject,
+} from './common'
 
 /** 绑定了该智能体的第一个工作流阶段（阶段绑定的智能体不允许删） */
 function stageUsingAgent(view: View, agentId: Id): WorkflowStage | undefined {
@@ -41,12 +48,24 @@ export function createAgent(
   if (!view.runtimes.has(form.runtimeId)) {
     return reject('not_found', '运行时不存在: ' + form.runtimeId)
   }
+  const permissionMode = permissionModeOf(form.permissionMode ?? 'workspace-write')
+  if (!permissionMode) {
+    return reject('invalid_input', '不支持的权限模式: ' + String(form.permissionMode))
+  }
+  const maxConcurrent = normalizeConcurrency(form.maxConcurrent, 1)
+  if (maxConcurrent === null) return reject('invalid_input', '并发上限必须是正整数')
   const agent: Agent = {
     id: env.nextId('agent'),
     name,
     description: form.description ?? '',
     runtimeId: form.runtimeId,
     systemPrompt: form.systemPrompt ?? '',
+    model: form.model ?? null,
+    reasoningEffort: form.reasoningEffort ?? null,
+    maxConcurrent,
+    permissionMode,
+    workdir: form.workdir ?? null,
+    env: normalizeEnv(form.env),
     createdAt: now,
   }
   return done([ownerDraft('agent.created', { agent }, now)])
@@ -64,12 +83,28 @@ export function updateAgent(
   if (patch.runtimeId && !view.runtimes.has(patch.runtimeId)) {
     return reject('not_found', '运行时不存在: ' + patch.runtimeId)
   }
+  const permissionMode =
+    patch.permissionMode === undefined
+      ? current.permissionMode
+      : permissionModeOf(patch.permissionMode)
+  if (!permissionMode) {
+    return reject('invalid_input', '不支持的权限模式: ' + String(patch.permissionMode))
+  }
+  const maxConcurrent = normalizeConcurrency(patch.maxConcurrent, current.maxConcurrent)
+  if (maxConcurrent === null) return reject('invalid_input', '并发上限必须是正整数')
   const agent: Agent = {
     ...current,
     name: patch.name?.trim() || current.name,
     description: patch.description ?? current.description,
     runtimeId,
     systemPrompt: patch.systemPrompt ?? current.systemPrompt,
+    model: patch.model !== undefined ? patch.model : current.model,
+    reasoningEffort:
+      patch.reasoningEffort !== undefined ? patch.reasoningEffort : current.reasoningEffort,
+    maxConcurrent,
+    permissionMode,
+    workdir: patch.workdir !== undefined ? patch.workdir : current.workdir,
+    env: patch.env !== undefined ? normalizeEnv(patch.env) : current.env,
   }
   return done([ownerDraft('agent.updated', { agent }, now)])
 }

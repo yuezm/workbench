@@ -48,6 +48,13 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   description: '',
   runtimeId: 'rt-1',
   systemPrompt: 'sys',
+  // 执行配置在智能体上（运行时只管连接）
+  model: null,
+  reasoningEffort: null,
+  maxConcurrent: 1,
+  permissionMode: 'workspace-write',
+  workdir: 'C:/runtime',
+  env: {},
   createdAt: CREATED,
   ...over,
 })
@@ -59,11 +66,6 @@ const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   argsTemplate: '',
   command: 'dsh',
   profile: 'multica',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: 'C:/runtime',
-  maxConcurrent: 1,
   enabled: true,
   createdAt: CREATED,
   lastProbe: null,
@@ -398,7 +400,7 @@ describe('kernel/decide 项目（M10）', () => {
       )
       expect(ok.reject).toBeUndefined()
       expect(createdTaskOf(ok).projectId).toBeNull()
-      // 没有项目时工作目录回落运行时 workdir（宿主再把空串换成默认目录）
+      // 没有项目时工作目录回落智能体 workdir（宿主再把空串换成默认目录）
       const queued = ok.facts.find((fact) => fact.type === 'run.queued')
       expect((queued?.payload as { run: { cwd: string } }).run.cwd).toBe('C:/runtime')
     }

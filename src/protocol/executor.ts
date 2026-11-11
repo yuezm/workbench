@@ -41,12 +41,16 @@ export interface Turn {
   purpose: RunPurpose
   /** 宿主按模板拼好的提示词（不拼进命令行，走 stdin 或 argv 元素） */
   prompt: string
+  /** 执行目录（项目文件夹 > 智能体工作目录 > 空串 = 宿主默认目录） */
   cwd: string
+  /** 访问权限（来自智能体的 `permissionMode`） */
   access: Access
-  /** 模型覆盖（provider/model 形式，来自运行时配置）；null / 缺省 = CLI 默认 */
+  /** 模型覆盖（来自智能体配置）；null / 缺省 = CLI 默认 */
   model?: { provider: string; id: string } | null
-  /** 推理强度（运行时配置）；null / 缺省 = 模型默认 */
+  /** 思考强度（来自智能体配置）；null / 缺省 = 模型默认 */
   effort?: string | null
+  /** 追加给子进程的环境变量（来自智能体配置；只覆盖，不清空宿主基线） */
+  env?: Record<string, string>
   /** 上一轮的协议会话 id；首轮为 null */
   resumeSessionId?: string | null
   /**

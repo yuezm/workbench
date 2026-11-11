@@ -8,7 +8,8 @@
  * 规则触发的首轮可带 `RunTrigger`：`ruleId/rulesVersion/eventIds/hops` 写进 run 行，
  * 规则 `prompt` 追加到提示词末尾（固定段，不拼外部事件正文）。
  */
-import type { Runtime, Task } from '../protocol/entities'
+import type { Task } from '../protocol/entities'
+import { ACCESS_BY_PERMISSION } from '../protocol/entities'
 import type { ThreadRow } from '../protocol/thread'
 import type { TaskComment } from '../protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from './types'
@@ -16,13 +17,6 @@ import { taskPrompt } from './prompt'
 import { locateReport } from './review'
 import { runCountOfTask, taskSessions } from './threads'
 import { threadContextText, hasThreadHistory } from './thread-context'
-
-/** 权限模式 → 协议帧的 access 级别（SPEC-plugins「Turn」）。 */
-export const ACCESS_BY_PERMISSION: Record<Runtime['permissionMode'], 'read' | 'edit' | 'full'> = {
-  'read-only': 'read',
-  'workspace-write': 'edit',
-  'danger-full-access': 'full',
-}
 
 /** 规则触发的首轮元信息（规则建任务时传给 `entryRunFacts`）。 */
 export interface RunTrigger {
@@ -92,7 +86,7 @@ export function entryRunFacts(
   // 换任务或换智能体都开新会话——跨任务信息走「任务索引 + 产物路径」，不共享历史。
   const resumeSessionId = taskSessions(view, task.id)[agent.id] ?? null
   const turn = options?.turn ?? runCountOfTask(view, task.id) + 1
-  // M10：项目文件夹就是本轮的工作目录；任务没有项目（存量 / 未归属）时退回运行时配置。
+  // M10：项目文件夹就是本轮的工作目录；任务没有项目（存量 / 未归属）时退回智能体配置。
   const project = task.projectId === null ? undefined : view.projects.get(task.projectId)
   return [
     {
@@ -112,8 +106,8 @@ export function entryRunFacts(
           rulesVersion: trigger?.rulesVersion ?? 0,
           executorKey: runtime.executorKey,
           threadId: thread?.id ?? task.threadId,
-          cwd: project?.path ?? runtime.workdir ?? '',
-          access: ACCESS_BY_PERMISSION[runtime.permissionMode],
+          cwd: project?.path ?? agent.workdir ?? '',
+          access: ACCESS_BY_PERMISSION[agent.permissionMode],
           skill: null,
           promptRef: null,
           eventIds: trigger?.eventIds ?? [],

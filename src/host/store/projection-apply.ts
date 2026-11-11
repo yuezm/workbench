@@ -135,6 +135,20 @@ const normalizeRuntime = (runtime: LegacyRuntime): Runtime => ({
 })
 
 /**
+ * 规整智能体行的执行配置：M27 之前的事实只有身份与系统提示词（执行配置放在运行时上），
+ * 这里按「模型默认 / 可写 / 并发 1 / 无工作目录 / 无环境变量」归一，重建与增量同口径。
+ */
+const normalizeAgent = (agent: Agent): Agent => ({
+  ...agent,
+  model: agent.model ?? null,
+  reasoningEffort: agent.reasoningEffort ?? null,
+  maxConcurrent: agent.maxConcurrent ?? 1,
+  permissionMode: agent.permissionMode ?? 'workspace-write',
+  workdir: agent.workdir ?? null,
+  env: agent.env ?? {},
+})
+
+/**
  * 规整 run 行的缺省值：`snapshot.imported` 的存量行可能缺 M2 新列（T2 迁移），
  * 补默认值后与实时写入得到同一行；`queueSeq` 默认 0 表示「早期导入、无稳定入队序」。
  */
@@ -386,31 +400,34 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          gate_on_fail_stage_id = excluded.gate_on_fail_stage_id`,
     ),
     agents: db.prepare(
-      `INSERT INTO agents (id, name, description, runtime_id, system_prompt, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO agents
+         (id, name, description, runtime_id, system_prompt, model, reasoning_effort,
+          max_concurrent, permission_mode, workdir, env_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          description = excluded.description,
          runtime_id = excluded.runtime_id,
          system_prompt = excluded.system_prompt,
+         model = excluded.model,
+         reasoning_effort = excluded.reasoning_effort,
+         max_concurrent = excluded.max_concurrent,
+         permission_mode = excluded.permission_mode,
+         workdir = excluded.workdir,
+         env_json = excluded.env_json,
          created_at = excluded.created_at`,
     ),
     runtimes: db.prepare(
       `INSERT INTO runtimes
-         (id, name, executor_key, command, profile, args_template, permission_mode, model,
-          reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, name, executor_key, command, profile, args_template, enabled, last_probe_json,
+          created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = excluded.name,
          executor_key = excluded.executor_key,
          command = excluded.command,
          profile = excluded.profile,
          args_template = excluded.args_template,
-         permission_mode = excluded.permission_mode,
-         model = excluded.model,
-         reasoning_effort = excluded.reasoning_effort,
-         workdir = excluded.workdir,
-         max_concurrent = excluded.max_concurrent,
          enabled = excluded.enabled,
          last_probe_json = excluded.last_probe_json,
          created_at = excluded.created_at`,
@@ -649,13 +666,19 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       )
     },
     agents: (row) => {
-      const agent = row as Agent
+      const agent = normalizeAgent(row as Agent)
       upserts.agents.run(
         agent.id,
         agent.name,
         agent.description,
         agent.runtimeId,
         agent.systemPrompt,
+        agent.model,
+        agent.reasoningEffort,
+        agent.maxConcurrent,
+        agent.permissionMode,
+        agent.workdir,
+        JSON.stringify(agent.env),
         agent.createdAt,
       )
     },
@@ -668,11 +691,6 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         runtime.command,
         runtime.profile,
         runtime.argsTemplate,
-        runtime.permissionMode,
-        runtime.model,
-        runtime.reasoningEffort,
-        runtime.workdir,
-        runtime.maxConcurrent,
         runtime.enabled ? 1 : 0,
         runtime.lastProbe === null ? null : JSON.stringify(runtime.lastProbe),
         runtime.createdAt,

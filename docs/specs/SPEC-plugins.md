@@ -137,7 +137,7 @@ export type ConfigField =
 ```
 
 - 类型定义在 `src/protocol/manifest.ts`（`sdk` 需要引用 manifest，依赖方向只允许 `sdk → protocol`），`src/plugins/manifest.ts` 只做再导出，保持「插件目录内固定文件名」的约定。
-- 执行器的 `config` 是**运行时表单的字段来源与默认值**：`command` / `profile` / `permissionMode` / `model` / `reasoningEffort` / `workdir`（`dsh`）、`command` / `profile` / `argsTemplate`（`command`）由宿主按所选 manifest 写入 `Runtime` 行。`runtimes.create` 的缺省值由 IPC 从 manifest 取（未指定 `executorKey` 取注册表首项），表单下拉选项来自 `runtimes.executors()`。
+- 执行器的 `config` 是**运行时表单的字段来源与默认值**，只覆盖连接字段：`command` / `profile`（`dsh`）、`command` / `profile` / `argsTemplate`（`command`）由宿主按所选 manifest 写入 `Runtime` 行。**执行配置（模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量）是智能体的设置**，由运行时表单之外的地方维护。`runtimes.create` 的缺省值由 IPC 从 manifest 取（未指定 `executorKey` 取注册表首项），表单下拉选项来自 `runtimes.executors()`。
 - 配置值存 `plugin_config` 投影；`secret` 字段用 Electron `safeStorage` 加密后落库，只存主进程，不进 UI 快照、不进日志、不回传明文。
 - 新增运行时协议只需：`src/plugins/executors/<id>/`（manifest + 实现）+ registry 一行，契约枚举、DB CHECK、UI 选项、detect 白名单四处硬编码全部消失。**验收含义**：加完这一行，`runtimes.executors()` 立刻出现该选项、detect 自动汇总该插件的 `detect()`、在运行时配置里选中它即可跑通一轮——内核、宿主、renderer 都不改动。
 
@@ -185,7 +185,8 @@ export interface ExecutorPlugin {
 }
 
 export interface ExecutorContext {
-  runtime: Runtime // 运行时配置整行：executorKey / command / profile / argsTemplate / permissionMode / model / maxConcurrent …
+  /** 运行时配置整行 = **连接**：executorKey / command / profile / argsTemplate / 启用。执行配置在 `Turn` 上。 */
+  runtime: Runtime
   sdk: Sdk
 }
 
@@ -200,10 +201,11 @@ export interface Turn {
   turn: number // 第几轮（续接递增）
   purpose: 'stage' | 'chat'
   prompt: string // 宿主按模板拼好
-  cwd: string
-  access: Access
-  model?: { provider: string; id: string } | null
-  effort?: string | null
+  cwd: string // 项目文件夹 > 智能体工作目录 > 空串（宿主默认目录）
+  access: Access // 由智能体的 permissionMode 映射
+  model?: { provider: string; id: string } | null // 智能体的模型配置
+  effort?: string | null // 智能体的思考强度
+  env?: Record<string, string> // 智能体配置的环境变量（只覆盖，不清空宿主基线）
   resumeSessionId?: string | null
   /** 续接被拒后的重试提示词（带完整历史）；执行器用它重发一次 */
   fallbackPrompt?: string | null

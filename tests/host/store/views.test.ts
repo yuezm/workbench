@@ -1,7 +1,12 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Conversation, Runtime, WorkflowWithStages } from '../../../src/protocol/entities'
+import type {
+  Conversation,
+  Runtime,
+  RuntimeStatus,
+  WorkflowWithStages,
+} from '../../../src/protocol/entities'
 import type { AutomationRule } from '../../../src/protocol/rules'
 import type { ViewId } from '../../../src/protocol/views'
 import type { Change } from '../../../src/kernel/types'
@@ -357,7 +362,7 @@ describe('loadView：按 viewSpec 装载切片', () => {
     expect(view.activeTaskIds).toEqual(new Set(['tk-1', 'tk-2']))
   })
 
-  it('viewSpec 裁剪：run.claim 只装 runs + runtimes，chat.send 装 chat 相关切片', () => {
+  it('viewSpec 裁剪：run.claim 装 runs + runtimes + agents + threads，chat.send 装 chat 相关切片', () => {
     const db = memory()
     seed(db)
     seedRunProjection(db)
@@ -366,7 +371,8 @@ describe('loadView：按 viewSpec 装载切片', () => {
     expect(claimView.runs.size).toBe(9)
     expect(claimView.runtimes.size).toBe(2)
     expect(claimView.tasks.size).toBe(0)
-    expect(claimView.agents.size).toBe(0)
+    // M27：领取窗口按智能体算，`pickClaims` 要读 `view.agents`——切片必须带上 agents
+    expect(claimView.agents.size).toBe(1)
     expect(claimView.conversations.size).toBe(0)
     expect(claimView.messages.size).toBe(0)
 
@@ -801,15 +807,19 @@ describe('queryView：M5 客户端视图（tasks.executing / runtimes.statuses /
     expect(queryView(db, 'tasks.executing')).toEqual([])
   })
 
-  it('runtimes.statuses：全部运行时 + 负载（running/queued 只数活跃 run，maxConcurrent 取自配置）', () => {
+  it('runtimes.statuses：全部运行时 + 负载（running/queued 只数活跃 run，并发上限在智能体上）', () => {
     const db = memory()
     seed(db)
     seedRunProjection(db)
 
     expect(queryView(db, 'runtimes.statuses')).toEqual([
-      { runtimeId: 'rt-2', workload: { running: 0, queued: 0, maxConcurrent: 1 } },
-      { runtimeId: 'rt-1', workload: { running: 2, queued: 3, maxConcurrent: 1 } },
+      { runtimeId: 'rt-2', workload: { running: 0, queued: 0 } },
+      { runtimeId: 'rt-1', workload: { running: 2, queued: 3 } },
     ])
+    // M27：并发上限属于智能体，不再随运行时负载一起给出
+    for (const row of queryView(db, 'runtimes.statuses') as RuntimeStatus[]) {
+      expect(Object.keys(row.workload).sort()).toEqual(['queued', 'running'])
+    }
   })
 
   it('runtimes.statuses：空库为空数组', () => {

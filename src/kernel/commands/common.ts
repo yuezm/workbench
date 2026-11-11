@@ -4,6 +4,7 @@
  * 只放跨命令域复用的纯函数、演员常量与派生事实；时间 / ID / 随机仍由宿主在边界注入。
  */
 import type {
+  PermissionMode,
   RunRow,
   Task,
   Workflow,
@@ -36,6 +37,34 @@ export const HOST_CHANNEL: Actor = { kind: 'host', via: 'channel' }
 /** 并发上限：至少 1，最多 8（本地单机没必要更多）。 */
 export const CONCURRENCY_FLOOR = 1
 export const CONCURRENCY_CAP = 8
+
+/** 权限模式白名单：形状与取值以 `protocol/entities` 为准，内核只做本地校验。 */
+const PERMISSION_MODES: readonly PermissionMode[] = [
+  'read-only',
+  'workspace-write',
+  'danger-full-access',
+]
+
+/** 权限模式归一：不认识的值返回 null，由调用方拒绝。 */
+export function permissionModeOf(value: string): PermissionMode | null {
+  return (PERMISSION_MODES as readonly string[]).includes(value) ? (value as PermissionMode) : null
+}
+
+/** 并发上限归一：未给沿用 fallback；非正整数返回 null（交给调用方拒绝）；超过上限按上限。 */
+export function normalizeConcurrency(value: number | undefined, fallback: number): number | null {
+  if (value === undefined) return fallback
+  if (!Number.isInteger(value) || value < CONCURRENCY_FLOOR) return null
+  return Math.min(value, CONCURRENCY_CAP)
+}
+
+/** 智能体环境变量归一：只收字符串值（形状与上限由 `protocol/validate` 把关）。 */
+export function normalizeEnv(value: Record<string, string> | undefined): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [key, item] of Object.entries(value ?? {})) {
+    if (typeof item === 'string') env[key] = item
+  }
+  return env
+}
 
 export const done = (facts: FactDraft[]): Decision => ({ facts })
 

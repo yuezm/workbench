@@ -12,6 +12,7 @@ const usage: RunUsage = {
   cacheWriteTokens: 4,
 }
 
+/** 运行时只描述连接（M27：执行配置在智能体上） */
 const runtime = (patch: Partial<Runtime> = {}): Runtime => ({
   id: 'rt-1',
   name: '本机 dsh',
@@ -19,11 +20,6 @@ const runtime = (patch: Partial<Runtime> = {}): Runtime => ({
   command: 'dsh',
   profile: 'multica',
   argsTemplate: '',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastProbe: null,

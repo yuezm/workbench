@@ -122,11 +122,13 @@ export async function executeCommandRun(
     })
   }
 
-  // D10：运行时 workdir 优先；turn.cwd 为空串时回落到宿主默认目录（不把空串传给 spawn，避免 ENOENT）
-  const cwd = runtime.workdir ?? (turn.cwd || sdk.paths.cwd)
+  // cwd 由内核按「项目文件夹 > 智能体工作目录」写进 run.cwd；空串回落到宿主默认目录
+  // （不把空串传给 spawn，避免 ENOENT）
+  const cwd = turn.cwd || sdk.paths.cwd
   const vars: ArgvVars = {
-    model: runtime.model ?? '',
-    effort: runtime.reasoningEffort ?? '',
+    // 占位符 {model} 保持 `provider/model` 原文（与配置里写的形态一致）
+    model: turn.model ? `${turn.model.provider}/${turn.model.id}` : '',
+    effort: turn.effort ?? '',
     cwd: cwd ?? '',
     context: turn.contextFile ?? '',
     prompt: turn.prompt,
@@ -145,10 +147,11 @@ export async function executeCommandRun(
 
   let child: Spawned
   try {
+    const env = turn.env ?? {}
     child = isWindowsCommandScript(command)
       ? // 固定包装：脚本路径与参数都作为 cmd.exe 的独立参数（此时 argv 内不得有提示词）
-        sdk.process.spawn('cmd.exe', ['/c', command, ...args], { cwd, env: {}, shell: false })
-      : sdk.process.spawn(command, args, { cwd, env: {}, shell: false })
+        sdk.process.spawn('cmd.exe', ['/c', command, ...args], { cwd, env, shell: false })
+      : sdk.process.spawn(command, args, { cwd, env, shell: false })
   } catch (error) {
     return report({
       status: 'failed',

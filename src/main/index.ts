@@ -586,6 +586,8 @@ if (app.requestSingleInstanceLock()) {
     const scheduler: Scheduler = createScheduler({
       dispatch: (input) => effects.dispatch(input),
       runtimes: () => store.query('runtimes.all'),
+      // 执行配置（模型 / 思考强度 / 环境变量）来自智能体：调度器按 run.agentId 取整行
+      agents: () => store.query('agents.all'),
       executors,
       limits: DEFAULT_LIMITS,
       // M14：评审报告正文落 `<artifactsRoot>/threads/<threadId>/runs/<runId>/review.md`；

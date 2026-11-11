@@ -111,6 +111,13 @@ const agent = (): Agent => ({
   description: '',
   runtimeId: 'rt-1',
   systemPrompt: '',
+  // 执行配置在智能体上（运行时只管连接）
+  model: null,
+  reasoningEffort: null,
+  maxConcurrent: 2,
+  permissionMode: 'workspace-write',
+  workdir: null,
+  env: {},
   createdAt: CREATED,
 })
 
@@ -121,11 +128,6 @@ const runtime = (): Runtime => ({
   argsTemplate: '',
   command: 'dsh',
   profile: 'multica',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 2,
   enabled: true,
   createdAt: CREATED,
   lastProbe: null,

@@ -68,6 +68,7 @@ import type {
 import { withTx } from '../schema'
 import { currentProjectionFormat, writeProjectionMeta } from './projection'
 import { appendFacts, factsCount, lastSeq } from './facts'
+import { parseAgentEnv } from './agent-env'
 import { createProjectionWriter } from './projection-apply'
 
 /** 单条 `snapshot.imported` 事实承载的最大行数（SPEC：按表分批，每批 ≤500 行）。 */
@@ -116,11 +117,6 @@ interface RuntimeRow {
   command: string
   profile: string
   args_template: string
-  permission_mode: string
-  model: string | null
-  reasoning_effort: string | null
-  workdir: string | null
-  max_concurrent: number
   enabled: number
   last_probe_json: string | null
   created_at: string
@@ -132,6 +128,12 @@ interface AgentRow {
   description: string
   runtime_id: string
   system_prompt: string
+  model: string | null
+  reasoning_effort: string | null
+  max_concurrent: number
+  permission_mode: string
+  workdir: string | null
+  env_json: string
   created_at: string
 }
 
@@ -289,8 +291,8 @@ function readLegacyEntityRows(
   const runtimes = (
     db
       .prepare(
-        `SELECT id, name, executor_key, command, profile, args_template, permission_mode, model,
-                reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
+        `SELECT id, name, executor_key, command, profile, args_template, enabled,
+                last_probe_json, created_at
          FROM runtimes ORDER BY created_at, rowid`,
       )
       .all() as unknown as RuntimeRow[]
@@ -301,11 +303,6 @@ function readLegacyEntityRows(
     command: row.command,
     profile: row.profile,
     argsTemplate: row.args_template,
-    permissionMode: row.permission_mode as PermissionMode,
-    model: row.model,
-    reasoningEffort: row.reasoning_effort,
-    workdir: row.workdir,
-    maxConcurrent: row.max_concurrent,
     enabled: row.enabled === 1,
     createdAt: row.created_at,
     lastProbe:
@@ -315,7 +312,8 @@ function readLegacyEntityRows(
   const agents = (
     db
       .prepare(
-        `SELECT id, name, description, runtime_id, system_prompt, created_at
+        `SELECT id, name, description, runtime_id, system_prompt, model, reasoning_effort,
+                max_concurrent, permission_mode, workdir, env_json, created_at
          FROM agents ORDER BY created_at, rowid`,
       )
       .all() as unknown as AgentRow[]
@@ -325,6 +323,12 @@ function readLegacyEntityRows(
     description: row.description,
     runtimeId: row.runtime_id,
     systemPrompt: row.system_prompt,
+    model: row.model,
+    reasoningEffort: row.reasoning_effort,
+    maxConcurrent: row.max_concurrent,
+    permissionMode: row.permission_mode as PermissionMode,
+    workdir: row.workdir,
+    env: parseAgentEnv(row.env_json),
     createdAt: row.created_at,
   }))
 

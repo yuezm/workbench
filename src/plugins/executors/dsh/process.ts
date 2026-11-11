@@ -28,10 +28,21 @@ export const errMsg = (e: unknown): string => (e instanceof Error ? e.message : 
 /** Windows 下 .cmd/.bat 需要经 shell 启动；纯扩展名判断，与宿主 needsShell 同判据 */
 const needsShell = (file: string): boolean => /\.(cmd|bat)$/i.test(file)
 
-/** dsh 需要的额外环境：权限模式 + 会话持久化根（宿主基线由 sdk 合并） */
-export function dshEnv(permissionMode: string, sessionRoot: string | null): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { DSH_PERMISSION_MODE: permissionMode }
+/**
+ * dsh 需要的额外环境：权限模式 + 会话持久化根 + **智能体配置的环境变量**。
+ *
+ * 顺序：智能体变量先铺开，权限模式与会话根随后覆盖——权限是宿主的判定，不允许被
+ * 智能体配置悄悄改成更宽的模式。宿主基线（PATH 等）由 sdk 合并，插件拿不到 process.env。
+ */
+export function dshEnv(
+  permissionMode: string,
+  sessionRoot: string | null,
+  extra: Record<string, string> = {},
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...extra, DSH_PERMISSION_MODE: permissionMode }
+  // 会话根是宿主判定的路径：有值就覆盖，没配置就把智能体写的同名键删掉
   if (sessionRoot) env.MULTICA_DSH_SESSION_ROOT = sessionRoot
+  else delete env.MULTICA_DSH_SESSION_ROOT
   return env
 }
 

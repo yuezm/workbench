@@ -42,7 +42,8 @@ export async function listHermesModels(
   const { sdk, runtime } = ctx
   const modelsTimeout = options.timeouts?.models ?? MODELS_TIMEOUT_MS
   const graceKill = options.grace?.kill ?? KILL_GRACE_MS
-  const cwd = runtime.workdir ?? sdk.paths.cwd
+  // 读目录只关心连接：工作目录用宿主默认目录（执行配置在智能体上，这里没有 run 上下文）
+  const cwd = sdk.paths.cwd
 
   const launched = startProcess(sdk, runtime.command, ['acp'], undefined, {})
   if (!launched.process) {

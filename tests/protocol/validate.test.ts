@@ -9,6 +9,7 @@ import type {
 } from '../../src/protocol/entities'
 import {
   ACCEPTANCE_LIMITS,
+  AGENT_ENV_LIMITS,
   STAGE_ROUND_LIMITS,
   STAGE_TIMEOUT_LIMITS,
 } from '../../src/protocol/entities'
@@ -35,6 +36,13 @@ const agentInput: AgentInput = {
   description: '',
   runtimeId: 'rt1',
   systemPrompt: '',
+  // 执行配置是智能体的：模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量
+  model: 'deepseek/deepseek-v4',
+  reasoningEffort: 'high',
+  maxConcurrent: 2,
+  permissionMode: 'workspace-write',
+  workdir: 'D:/repo',
+  env: { HTTP_PROXY: 'http://127.0.0.1:7890' },
 }
 
 const runtimeInput: RuntimeInput = {
@@ -43,11 +51,6 @@ const runtimeInput: RuntimeInput = {
   command: 'dsh',
   profile: 'multica',
   argsTemplate: '',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 2,
   enabled: true,
 }
 
@@ -79,7 +82,7 @@ const validCommands: Command[] = [
   { commandId: 'c05', type: 'agent.update', id: 'ag1', patch: { name: '新名字' } },
   { commandId: 'c06', type: 'agent.remove', id: 'ag1' },
   { commandId: 'c07', type: 'runtime.create', input: runtimeInput },
-  { commandId: 'c08', type: 'runtime.update', id: 'rt1', patch: { maxConcurrent: 8 } },
+  { commandId: 'c08', type: 'runtime.update', id: 'rt1', patch: { profile: 'dev' } },
   { commandId: 'c09', type: 'runtime.remove', id: 'rt1' },
   { commandId: 'c10', type: 'runtime.probed', id: 'rt1', probe: runtimeProbe },
   { commandId: 'c11', type: 'task.create', input: taskInput },
@@ -388,6 +391,83 @@ describe('protocol/validate', () => {
     ).toBe('input.systemPrompt必须是字符串')
   })
 
+  it('agent.create / update：执行配置的取值、上限与模型 id 形态', () => {
+    const withInput = (fields: Record<string, unknown>): Record<string, unknown> =>
+      cmd('agent.create', { input: { name: 'a', runtimeId: 'rt1', ...fields } })
+
+    // 访问权限白名单（越界即拒，不静默回落到可写）
+    expect(rejectedMessage(withInput({ permissionMode: 'root' }))).toBe(
+      'input.permissionMode取值必须是 read-only / workspace-write / danger-full-access',
+    )
+    // 模型：给了就必须是 provider/model（宿主据此拆成 Turn.model，写错不再静默回退）
+    expect(rejectedMessage(withInput({ model: 7 }))).toBe('input.model必须是字符串')
+    expect(rejectedMessage(withInput({ model: longText(201) }))).toBe('input.model最长 200 个字符')
+    expect(rejectedMessage(withInput({ model: 'nomodel' }))).toBe(
+      'input.model必须是 provider/model 形式',
+    )
+    expect(rejectedMessage(withInput({ model: '/model' }))).toBe(
+      'input.model必须是 provider/model 形式',
+    )
+    expect(rejectedMessage(withInput({ model: 'provider/' }))).toBe(
+      'input.model必须是 provider/model 形式',
+    )
+    // null / 空串都表示「用 CLI 默认模型」
+    expect(validateCommand(withInput({ model: null }))).toMatchObject({ ok: true })
+    expect(validateCommand(withInput({ model: '' }))).toMatchObject({ ok: true })
+
+    expect(rejectedMessage(withInput({ reasoningEffort: longText(201) }))).toBe(
+      'input.reasoningEffort最长 200 个字符',
+    )
+    expect(rejectedMessage(withInput({ workdir: longText(1001) }))).toBe(
+      'input.workdir最长 1000 个字符',
+    )
+    // 并发上限：1..8 的整数
+    expect(rejectedMessage(withInput({ maxConcurrent: 0 }))).toBe(
+      'input.maxConcurrent必须在 1 到 8 之间',
+    )
+    expect(rejectedMessage(withInput({ maxConcurrent: 1.5 }))).toBe('input.maxConcurrent必须是整数')
+
+    // patch 走同一套校验（修改执行配置的入口在 agent.update）
+    expect(
+      rejectedMessage(cmd('agent.update', { id: 'ag1', patch: { permissionMode: 'root' } })),
+    ).toBe('input.permissionMode取值必须是 read-only / workspace-write / danger-full-access')
+    expect(rejectedMessage(cmd('agent.update', { id: 'ag1', patch: { model: 'nomodel' } }))).toBe(
+      'input.model必须是 provider/model 形式',
+    )
+  })
+
+  it('agent.create / update：环境变量是合法键名的键值对象，条数与长度受上限约束', () => {
+    const withEnv = (env: unknown): Record<string, unknown> =>
+      cmd('agent.create', { input: { name: 'a', runtimeId: 'rt1', env } })
+    const manyKeys = (n: number): Record<string, string> =>
+      Object.fromEntries(Array.from({ length: n }, (_, index) => [`K${index}`, 'v']))
+
+    // 形状：必须是对象（数组 / 字符串都不算键值对）
+    expect(rejectedMessage(withEnv([]))).toBe('input.env 必须是键值对象')
+    expect(rejectedMessage(withEnv('A=1'))).toBe('input.env 必须是键值对象')
+    // 键名：POSIX 环境变量名，且不超过 64 字符
+    expect(rejectedMessage(withEnv({ '1BAD': 'x' }))).toBe('input.env 的键非法: 1BAD')
+    expect(rejectedMessage(withEnv({ 'A-B': 'x' }))).toBe('input.env 的键非法: A-B')
+    expect(rejectedMessage(withEnv({ 'A B': 'x' }))).toBe('input.env 的键非法: A B')
+    expect(rejectedMessage(withEnv({ ['K'.repeat(65)]: 'x' }))).toBe(
+      `input.env 的键非法: ${'K'.repeat(65)}`,
+    )
+    // 值：字符串，且不超过 1000 字符
+    expect(rejectedMessage(withEnv({ OK: 7 }))).toBe('input.env.OK 必须是字符串')
+    expect(rejectedMessage(withEnv({ OK: longText(1001) }))).toBe('input.env.OK 最长 1000 个字符')
+    // 条数：最多 32 项
+    expect(validateCommand(withEnv(manyKeys(AGENT_ENV_LIMITS.maxVars)))).toMatchObject({ ok: true })
+    expect(rejectedMessage(withEnv(manyKeys(AGENT_ENV_LIMITS.maxVars + 1)))).toBe(
+      `input.env 最多 ${AGENT_ENV_LIMITS.maxVars} 项`,
+    )
+    // 空对象 / null / 缺省都合法（= 不追加环境变量）
+    expect(validateCommand(withEnv({}))).toMatchObject({ ok: true })
+    expect(validateCommand(withEnv(null))).toMatchObject({ ok: true })
+    expect(
+      validateCommand(cmd('agent.create', { input: { name: 'a', runtimeId: 'rt1' } })),
+    ).toMatchObject({ ok: true })
+  })
+
   it('agent.update / remove：id 与 patch 形状', () => {
     expect(rejectedMessage(cmd('agent.update', { patch: {} }))).toBe('id必填')
     expect(rejectedMessage(cmd('agent.update', { id: 'ag1' }))).toBe('input 必须是对象')
@@ -432,32 +512,37 @@ describe('protocol/validate', () => {
     expect(
       rejectedMessage(cmd('runtime.create', { input: { name: 'r', profile: longText(101) } })),
     ).toBe('input.profile最长 100 个字符')
-    expect(
-      rejectedMessage(cmd('runtime.create', { input: { name: 'r', permissionMode: 'root' } })),
-    ).toBe('input.permissionMode取值必须是 read-only / workspace-write / danger-full-access')
-    expect(rejectedMessage(cmd('runtime.create', { input: { name: 'r', model: 7 } }))).toBe(
-      'input.model必须是字符串',
-    )
-    expect(
-      rejectedMessage(cmd('runtime.create', { input: { name: 'r', model: longText(201) } })),
-    ).toBe('input.model最长 200 个字符')
-    expect(
-      rejectedMessage(
-        cmd('runtime.create', { input: { name: 'r', reasoningEffort: longText(201) } }),
-      ),
-    ).toBe('input.reasoningEffort最长 200 个字符')
-    expect(
-      rejectedMessage(cmd('runtime.create', { input: { name: 'r', workdir: longText(1001) } })),
-    ).toBe('input.workdir最长 1000 个字符')
-    expect(rejectedMessage(cmd('runtime.create', { input: { name: 'r', maxConcurrent: 0 } }))).toBe(
-      'input.maxConcurrent必须在 1 到 8 之间',
-    )
-    expect(
-      rejectedMessage(cmd('runtime.create', { input: { name: 'r', maxConcurrent: 1.5 } })),
-    ).toBe('input.maxConcurrent必须是整数')
     expect(rejectedMessage(cmd('runtime.create', { input: { name: 'r', enabled: 'yes' } }))).toBe(
       'input.enabled必须是布尔值',
     )
+  })
+
+  it('runtime.create / update：执行配置不再属于连接（校验不过问，字段原样透传）', () => {
+    // 运行时只描述连接：模型 / 思考强度 / 并发 / 访问权限 / 工作目录写成什么样都不拦
+    // —— 这几项的责任已经迁到 agent.create / agent.update（见上面的执行配置用例）
+    const createWithExecutionConfig = cmd('runtime.create', {
+      input: {
+        name: 'r',
+        model: 'nomodel',
+        reasoningEffort: 7,
+        maxConcurrent: 0,
+        permissionMode: 'root',
+        workdir: 7,
+      },
+    })
+    expect(validateCommand(createWithExecutionConfig)).toEqual({
+      ok: true,
+      command: createWithExecutionConfig,
+    })
+
+    const updateWithExecutionConfig = cmd('runtime.update', {
+      id: 'rt1',
+      patch: { model: 'nomodel', maxConcurrent: 0, permissionMode: 'root', workdir: 7 },
+    })
+    expect(validateCommand(updateWithExecutionConfig)).toEqual({
+      ok: true,
+      command: updateWithExecutionConfig,
+    })
   })
 
   it('runtime.create：argsTemplate 的结构、项数与单项长度上限', () => {
@@ -507,8 +592,8 @@ describe('protocol/validate', () => {
       'input.name必填',
     )
     expect(
-      rejectedMessage(cmd('runtime.update', { id: 'rt1', patch: { permissionMode: 'root' } })),
-    ).toBe('input.permissionMode取值必须是 read-only / workspace-write / danger-full-access')
+      rejectedMessage(cmd('runtime.update', { id: 'rt1', patch: { executorKey: 'Dsh' } })),
+    ).toBe('input.executorKey 必须是小写 slug（字母开头，可含数字与连字符）')
     expect(rejectedMessage(cmd('runtime.remove'))).toBe('id必填')
   })
 

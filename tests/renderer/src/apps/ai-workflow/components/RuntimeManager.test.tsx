@@ -35,6 +35,7 @@ function makeProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
   }
 }
 
+/** 运行时 = 一条连接：执行配置（模型 / 并发 / 权限 / 目录 / 环境变量）在智能体上 */
 function makeRuntime(over: Partial<Runtime> = {}): Runtime {
   return {
     id: 'r1',
@@ -43,11 +44,6 @@ function makeRuntime(over: Partial<Runtime> = {}): Runtime {
     argsTemplate: '',
     command: 'dsh',
     profile: 'multica',
-    permissionMode: 'workspace-write',
-    model: null,
-    reasoningEffort: null,
-    workdir: null,
-    maxConcurrent: 2,
     enabled: true,
     createdAt: 't',
     lastProbe: makeProbe(),
@@ -59,7 +55,7 @@ function makeStatus(
   runtimeId: string,
   over: Partial<RuntimeStatus['workload']> = {},
 ): RuntimeStatus {
-  return { runtimeId, workload: { running: 0, queued: 0, maxConcurrent: 2, ...over } }
+  return { runtimeId, workload: { running: 0, queued: 0, ...over } }
 }
 
 function makeDetected(over: Partial<DetectedRuntime> = {}): DetectedRuntime {
@@ -129,9 +125,9 @@ function recordQueries(): Array<{ view: ViewId; params?: unknown }> {
 }
 
 describe('RuntimeManager', () => {
-  it('清单展示名称/执行器/健康/CLI 版本/启动头/路径/负载', async () => {
+  it('清单展示名称/执行器/健康/CLI 版本/启动头/路径/在跑数', async () => {
     setup({
-      statuses: [makeStatus('r1', { running: 1, maxConcurrent: 2 })],
+      statuses: [makeStatus('r1', { running: 1 })],
     })
 
     render(<RuntimeManager />)
@@ -142,7 +138,9 @@ describe('RuntimeManager', () => {
     expect(screen.getByText('CLI v1.2.3')).toBeInTheDocument()
     expect(screen.getByText('dsh --profile multica')).toBeInTheDocument()
     expect(screen.getByText('C:/tools/dsh.exe')).toBeInTheDocument()
-    expect(screen.getByText('负载 1/2')).toBeInTheDocument()
+    // 负载只说在跑几个：并发上限属于智能体，连接行不再显示 running/maxConcurrent
+    expect(screen.getByText('运行中 1')).toBeInTheDocument()
+    expect(screen.queryByText(/负载/)).not.toBeInTheDocument()
     expect(screen.queryByText(/排队/)).not.toBeInTheDocument()
   })
 
@@ -192,7 +190,7 @@ describe('RuntimeManager', () => {
           lastProbe: makeProbe({ state: 'unavailable', elapsedMs: 8, error: '登录态失效' }),
         }),
       ],
-      statuses: [makeStatus('r1'), makeStatus('r2', { queued: 2, running: 0, maxConcurrent: 4 })],
+      statuses: [makeStatus('r1'), makeStatus('r2', { queued: 2, running: 0 })],
     })
 
     render(<RuntimeManager />)
@@ -202,15 +200,17 @@ describe('RuntimeManager', () => {
     expect(screen.getByText('未找到可执行文件')).toBeInTheDocument()
     expect(screen.getByText('已停用')).toBeInTheDocument()
     expect(screen.getByText('不可用 · 8ms')).toBeInTheDocument()
-    expect(screen.getByText('负载 0/4')).toBeInTheDocument()
+    // 两个运行时都 0 在跑：连接行的负载只报在跑数
+    expect(screen.getAllByText('运行中 0')).toHaveLength(2)
     expect(screen.getByText('排队 2')).toBeInTheDocument()
   })
 
-  it('statuses 缺该运行时 use runtime.maxConcurrent 兜底', async () => {
-    setup({ runtimes: [makeRuntime({ maxConcurrent: 3 })], statuses: [] })
+  it('statuses 缺该运行时：按 0 在跑展示，不猜并发上限', async () => {
+    setup({ runtimes: [makeRuntime()], statuses: [] })
 
     render(<RuntimeManager />)
-    expect(await screen.findByText('负载 0/3')).toBeInTheDocument()
+    expect(await screen.findByText('运行中 0')).toBeInTheDocument()
+    expect(screen.queryByText(/负载/)).not.toBeInTheDocument()
   })
 
   it('清单读取失败展示错误', async () => {
@@ -405,19 +405,16 @@ describe('RuntimeManager', () => {
     await user.click(screen.getByRole('button', { name: '添加' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
-    expect(kernel.dispatched[0]).toMatchObject({
+    // 运行时只提交连接字段：执行配置（模型/并发/权限/目录/环境变量）不在这个表单里
+    expect(kernel.dispatched[0]).toEqual({
       type: 'runtime.create',
+      commandId: expect.any(String),
       input: {
         name: '新的',
         executorKey: 'dsh',
         command: 'dsh',
         profile: 'multica',
         argsTemplate: '',
-        permissionMode: 'workspace-write',
-        model: null,
-        reasoningEffort: null,
-        workdir: null,
-        maxConcurrent: 1,
         enabled: true,
       },
     })
@@ -447,20 +444,8 @@ describe('RuntimeManager', () => {
     expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
   })
 
-  it('编辑运行时：预填、读取模型目录、提交 update 后关闭并刷新', async () => {
-    setup({
-      runtimes: [makeRuntime({ name: 'ds', maxConcurrent: 3, enabled: true, workdir: 'D:/work' })],
-    })
-    kernel.setView('runtimes.models', { runtimeId: 'r1' }, [
-      {
-        id: 'deepseek/chat',
-        label: 'DeepSeek Chat',
-        provider: 'deepseek',
-        default: true,
-        thinkingLevels: ['low', 'high'],
-        defaultThinkingLevel: 'low',
-      },
-    ])
+  it('编辑运行时：预填连接字段、不读模型目录、提交 update 后关闭并刷新', async () => {
+    setup({ runtimes: [makeRuntime({ name: 'ds', enabled: true })] })
     const queries = recordQueries()
     handleDispatch((command) => {
       if (command.type !== 'runtime.update') return { facts: [], value: null }
@@ -474,10 +459,12 @@ describe('RuntimeManager', () => {
 
     await user.click(screen.getByRole('button', { name: '编辑运行时 ds' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('编辑运行时')
-    expect(queries).toContainEqual({ view: 'runtimes.models', params: { runtimeId: 'r1' } })
     expect(screen.getByLabelText('运行时名称')).toHaveValue('ds')
-    expect(screen.getByLabelText('运行时工作目录')).toHaveValue('D:/work')
-    expect(screen.getByLabelText('运行时并发上限')).toHaveValue(3)
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh')
+    // 执行配置迁到智能体：连接弹窗不查模型目录，也没有这些控件
+    expect(queries.some((call) => call.view === 'runtimes.models')).toBe(false)
+    expect(screen.queryByLabelText('运行时工作目录')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('运行时并发上限')).not.toBeInTheDocument()
 
     await user.clear(screen.getByLabelText('运行时名称'))
     await user.type(screen.getByLabelText('运行时名称'), 'ds2')
@@ -485,15 +472,17 @@ describe('RuntimeManager', () => {
     await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
-    expect(kernel.dispatched[0]).toMatchObject({ type: 'runtime.update', id: 'r1' })
-    expect(kernel.dispatched[0]).toMatchObject({
+    expect(kernel.dispatched[0]).toEqual({
+      type: 'runtime.update',
+      commandId: expect.any(String),
+      id: 'r1',
       patch: {
         name: 'ds2',
         executorKey: 'dsh',
+        command: 'dsh',
+        profile: 'multica',
         argsTemplate: '',
-        maxConcurrent: 3,
         enabled: false,
-        workdir: 'D:/work',
       },
     })
     await waitFor(() =>

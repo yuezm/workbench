@@ -279,11 +279,6 @@ const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   argsTemplate: '',
   command: NODE,
   profile: '',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastProbe: null,
@@ -748,7 +743,11 @@ describe('executeHermesRun：成功路径', () => {
     const sessionCalls: string[] = []
     const processCalls: number[] = []
     const { running, events } = startRun(h, {
-      runtime: { model: 'opencode-go/kimi-k3' },
+      // 执行配置来自智能体（宿主折进 Turn）：set_model 由 turn.model 拼 provider:id
+      turn: {
+        model: { provider: 'opencode-go', id: 'kimi-k3' },
+        env: { HTTP_PROXY: 'http://127.0.0.1:7890' },
+      },
       io: { session: (id) => sessionCalls.push(id), process: (pid) => processCalls.push(pid) },
     })
     const receipt = await running
@@ -757,6 +756,8 @@ describe('executeHermesRun：成功路径', () => {
     // 帧顺序与参数
     expect(h.calls[0].args).toEqual(['acp'])
     expect(h.calls[0].command).toBe(NODE)
+    // 智能体配的环境变量原样进 spawn（宿主基线由 sdk 合并）
+    expect(h.calls[0].options.env).toEqual({ HTTP_PROXY: 'http://127.0.0.1:7890' })
     expect(child.frames()).toEqual([
       {
         jsonrpc: '2.0',
@@ -970,7 +971,7 @@ describe('executeHermesRun：审批往返（session/request_permission）', () =
   const runServerRequest = async (
     method: string,
     params: Record<string, unknown>,
-    runtimeOver: Partial<Runtime> = {},
+    turnOver: Partial<Turn> = {},
   ): Promise<PermissionRun> => {
     const responses: Array<Record<string, unknown>> = []
     const logs: string[] = []
@@ -994,7 +995,7 @@ describe('executeHermesRun：审批往返（session/request_permission）', () =
       },
     )
     const { running, events } = startRun(h, {
-      runtime: runtimeOver,
+      turn: turnOver,
       sdk: { log: (message) => logs.push(message) },
     })
     const receipt = await running
@@ -1051,11 +1052,11 @@ describe('executeHermesRun：审批往返（session/request_permission）', () =
     expect(run.receipt.status).toBe('succeeded')
   })
 
-  it('read-only 模式下出现审批请求：仍然回拒绝', async () => {
+  it('只读运行（Turn.access=read）下出现审批请求：仍然回拒绝', async () => {
     const run = await runServerRequest(
       'session/request_permission',
       permissionParams([{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }]),
-      { permissionMode: 'read-only' },
+      { access: 'read' },
     )
     expect(run.responses).toEqual([
       { jsonrpc: '2.0', id: 'srv-1', result: { outcome: { outcome: 'cancelled' } } },
@@ -1228,7 +1229,7 @@ describe('executeHermesRun：会话建立与配置', () => {
             modes: DEFAULT_MODES,
           }),
       },
-      { runtime: { model: 'opencode-go/kimi-k3' } },
+      { turn: { model: { provider: 'opencode-go', id: 'kimi-k3' } } },
     )
     expect(frames.map((frame) => frame.method)).toEqual([
       'initialize',
@@ -1238,8 +1239,8 @@ describe('executeHermesRun：会话建立与配置', () => {
     ])
   })
 
-  it('没配模型 / reasoningEffort：不拼任何额外帧与参数', async () => {
-    const { frames } = await runWith({}, { runtime: { model: null, reasoningEffort: 'high' } })
+  it('没配模型 / 思考强度：不拼任何额外帧与参数', async () => {
+    const { frames } = await runWith({}, { turn: { model: null, effort: 'high' } })
     expect(frames.map((frame) => frame.method)).toEqual([
       'initialize',
       'session/new',
@@ -1248,8 +1249,8 @@ describe('executeHermesRun：会话建立与配置', () => {
     ])
   })
 
-  it('danger-full-access 映射到 dont_ask', async () => {
-    const { frames } = await runWith({}, { runtime: { permissionMode: 'danger-full-access' } })
+  it('完全访问（Turn.access=full）映射到 dont_ask', async () => {
+    const { frames } = await runWith({}, { turn: { access: 'full' } })
     expect(frames[2]).toMatchObject({
       method: 'session/set_mode',
       params: { sessionId: 'sess-1', modeId: 'dont_ask' },
@@ -1325,13 +1326,12 @@ describe('executeHermesRun：失败与终态兜底', () => {
     expect(receipt.error).toContain('-32603: 内容过长')
   })
 
-  it('模型 id 非法：run_failed，不 spawn', async () => {
+  it('宿主给 null 模型：不拼 session/set_model，按 CLI 默认模型跑', async () => {
     const h = acpHarness()
-    const { running } = startRun(h, { runtime: { model: 'nomodel' } })
+    const { running } = startRun(h, { turn: { model: null } })
     const receipt = await running
-    expect(receipt.errorCode).toBe('run_failed')
-    expect(receipt.error).toContain('provider/model')
-    expect(h.children).toHaveLength(0)
+    expect(receipt.status).toBe('succeeded')
+    expect(h.children[0].methods()).not.toContain('session/set_model')
   })
 
   it('signal 已取消：直接返回 cancelled，不启动进程', async () => {
@@ -2078,10 +2078,9 @@ describe('executeHermesRun：条件分支补口', () => {
     expect(frames.map((frame) => frame.method)).toEqual(['initialize'])
   })
 
-  it('workdir 与 turn.cwd 都空：回落宿主默认目录（spawn 与 session/new 都用它）', async () => {
+  it('turn.cwd 为空：回落宿主默认目录（spawn 与 session/new 都用它）', async () => {
     const h = acpHarness()
     const { running } = startRun(h, {
-      runtime: { workdir: null },
       turn: { cwd: '' },
       sdk: { cwd: 'D:/main-cwd' },
     })

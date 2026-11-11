@@ -1,5 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import {
+  AGENTS_M27_ADD_COLUMN_SQL,
+  AGENTS_M27_ADDED_COLUMNS,
   CARDS_M12_ADD_COLUMN_SQL,
   CARDS_M12_ADDED_COLUMNS,
   COMMANDS_SQL,
@@ -168,6 +170,23 @@ export function upgradeLegacyRuntimes(db: DatabaseSync): boolean {
   } finally {
     if (foreignKeys) db.exec('PRAGMA foreign_keys = ON')
   }
+  return true
+}
+
+/**
+ * M27 智能体补执行配置列（模型 / 思考强度 / 并发 / 权限 / 工作目录 / 环境变量）。
+ *
+ * 只增不改：旧行按默认值归一（模型默认、可写、并发 1、无环境变量）。运行时表上的同名
+ * 旧列不再读写（投影表按新 DDL 指纹自动重建，旧库里多出来的列只是不被 SELECT 到）。
+ */
+export function upgradeLegacyAgents(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'agents')
+  if (columns.size === 0) return false
+  const missing = AGENTS_M27_ADDED_COLUMNS.filter((column) => !columns.has(column))
+  if (missing.length === 0) return false
+  withTx(db, () => {
+    for (const column of missing) db.exec(AGENTS_M27_ADD_COLUMN_SQL[column])
+  })
   return true
 }
 
@@ -392,6 +411,8 @@ export function openDatabase(filePath: string): DatabaseSync {
     })
     upgradeLegacyRuns(db)
     upgradeLegacyRuntimes(db)
+    // M27：智能体补执行配置列（模型 / 思考强度 / 并发 / 权限 / 工作目录 / 环境变量）
+    upgradeLegacyAgents(db)
     // M7：阶段补交接两列（只增不改）；M8 / M9 同法补子任务与阶段说明
     upgradeLegacyStages(db)
     // M9 / M11：对话补归档时间与所属项目（只增不改）

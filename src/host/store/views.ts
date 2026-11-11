@@ -57,6 +57,7 @@ import type {
 import { VIEW_IDS } from '../../protocol/views'
 import type { Id, Iso, ProjectionTable, View } from '../../kernel/types'
 import { lastSeq } from './facts'
+import { parseAgentEnv } from './agent-env'
 import { StoreError } from './errors'
 
 interface WorkflowRow {
@@ -101,6 +102,12 @@ interface AgentRow {
   description: string
   runtime_id: string
   system_prompt: string
+  model: string | null
+  reasoning_effort: string | null
+  max_concurrent: number
+  permission_mode: string
+  workdir: string | null
+  env_json: string
   created_at: string
 }
 
@@ -111,11 +118,6 @@ interface RuntimeRow {
   command: string
   profile: string
   args_template: string
-  permission_mode: string
-  model: string | null
-  reasoning_effort: string | null
-  workdir: string | null
-  max_concurrent: number
   enabled: number
   last_probe_json: string | null
   created_at: string
@@ -330,6 +332,12 @@ const mapAgent = (row: AgentRow): Agent => ({
   description: row.description,
   runtimeId: row.runtime_id,
   systemPrompt: row.system_prompt,
+  model: row.model,
+  reasoningEffort: row.reasoning_effort,
+  maxConcurrent: row.max_concurrent,
+  permissionMode: row.permission_mode as PermissionMode,
+  workdir: row.workdir,
+  env: parseAgentEnv(row.env_json),
   createdAt: row.created_at,
 })
 
@@ -340,11 +348,6 @@ const mapRuntime = (row: RuntimeRow): Runtime => ({
   command: row.command,
   profile: row.profile,
   argsTemplate: row.args_template,
-  permissionMode: row.permission_mode as PermissionMode,
-  model: row.model,
-  reasoningEffort: row.reasoning_effort,
-  workdir: row.workdir,
-  maxConcurrent: row.max_concurrent,
   enabled: row.enabled === 1,
   createdAt: row.created_at,
   lastProbe:
@@ -549,7 +552,9 @@ const readAgents = (db: DatabaseSync): Agent[] =>
   (
     db
       .prepare(
-        'SELECT id, name, description, runtime_id, system_prompt, created_at FROM agents ORDER BY created_at, rowid',
+        `SELECT id, name, description, runtime_id, system_prompt, model, reasoning_effort,
+                max_concurrent, permission_mode, workdir, env_json, created_at
+         FROM agents ORDER BY created_at, rowid`,
       )
       .all() as unknown as AgentRow[]
   ).map(mapAgent)
@@ -558,8 +563,8 @@ const readRuntimes = (db: DatabaseSync): Runtime[] =>
   (
     db
       .prepare(
-        `SELECT id, name, executor_key, command, profile, args_template, permission_mode, model,
-                reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
+        `SELECT id, name, executor_key, command, profile, args_template, enabled,
+                last_probe_json, created_at
          FROM runtimes ORDER BY created_at, rowid`,
       )
       .all() as unknown as RuntimeRow[]
@@ -1358,15 +1363,14 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
   }
 }
 
-/** M5：`runtimes.statuses` = 全部运行时 + 实时负载（与旧 IPC 方法逐行等价）。 */ const readRuntimeStatuses =
-  (db: DatabaseSync): RuntimeStatus[] => {
-    const workloads = new Map(readRuntimeWorkloads(db).map((item) => [item.runtimeId, item]))
-    return readRuntimes(db).map((runtime) => ({
-      runtimeId: runtime.id,
-      workload: {
-        running: workloads.get(runtime.id)?.running ?? 0,
-        queued: workloads.get(runtime.id)?.queued ?? 0,
-        maxConcurrent: runtime.maxConcurrent,
-      },
-    }))
-  }
+/** M5：`runtimes.statuses` = 全部运行时 + 实时负载。并发上限在智能体上，这里只给在跑/排队数。 */
+const readRuntimeStatuses = (db: DatabaseSync): RuntimeStatus[] => {
+  const workloads = new Map(readRuntimeWorkloads(db).map((item) => [item.runtimeId, item]))
+  return readRuntimes(db).map((runtime) => ({
+    runtimeId: runtime.id,
+    workload: {
+      running: workloads.get(runtime.id)?.running ?? 0,
+      queued: workloads.get(runtime.id)?.queued ?? 0,
+    },
+  }))
+}

@@ -106,6 +106,7 @@ function makeWorld(backend: TestBackend): World {
   const scheduler = createScheduler({
     dispatch: (input) => effects.dispatch(input),
     runtimes: () => store.query('runtimes.all'),
+    agents: () => store.query('agents.all'),
     // 走真实包装层：续接重试 / 错误文案归一都被覆盖
     executors: { forRuntime: () => createExecutorPort(pluginFromBackend(backend), testContext()) },
     registry,

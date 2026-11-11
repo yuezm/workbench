@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  ACCESS_BY_PERMISSION,
   ACCESS_LEVELS,
+  AGENT_ENV_LIMITS,
   ARGV_PLACEHOLDERS,
   BUILTIN_STAGE_KEYS,
   BUILTIN_STAGE_NAMES,
   CHAT_ROLES,
   ENTRY_MODES,
   ENTITY_TABLES,
+  ENV_KEY_PATTERN,
   EXECUTOR_KEY_PATTERN,
   PERMISSION_MODES,
   PROBE_STATES,
@@ -20,6 +23,7 @@ import {
   TASK_STATUSES,
   builtinStageKind,
   isBuiltinStageName,
+  permissionModeOfAccess,
   stageKindOf,
   type Access,
   type Agent,
@@ -66,9 +70,18 @@ type Assert<T extends true> = T
 /**
  * 实体契约锁（M5：`shared/ai-workflow-api.ts` 已删除，protocol/entities 是唯一真相）。
  * 这里逐项锁定「实体字段与枚举/输入类型的对应关系」，防止字段类型被悄悄放宽。
+ *
+ * 执行配置归智能体后，模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量都挂在
+ * `Agent` 上（运行时只剩连接字段），所以这几个断言的目标从 `Runtime` 换成 `Agent`。
  */
 const contractChecks: [
-  Assert<Equal<Runtime['permissionMode'], PermissionMode>>,
+  Assert<Equal<Agent['model'], string | null>>,
+  Assert<Equal<Agent['reasoningEffort'], string | null>>,
+  Assert<Equal<Agent['maxConcurrent'], number>>,
+  Assert<Equal<Agent['permissionMode'], PermissionMode>>,
+  Assert<Equal<Agent['workdir'], string | null>>,
+  Assert<Equal<Agent['env'], Record<string, string>>>,
+  Assert<Equal<AgentInput['env'], Record<string, string> | undefined>>,
   Assert<Equal<RuntimeProbe['state'], RuntimeProbeState>>,
   Assert<Equal<Runtime['lastProbe'], RuntimeProbe | null>>,
   Assert<Equal<RuntimeInput['executorKey'], string | undefined>>,
@@ -98,7 +111,21 @@ const contractChecks: [
   Assert<Equal<NonNullable<StageInput['builtin']>, BuiltinStageKey>>,
   Assert<Equal<StageKind, (typeof STAGE_KINDS)[number]>>,
   Assert<Equal<BuiltinStageKey, (typeof BUILTIN_STAGE_KEYS)[number]>>,
+  // 权限模式 → 运行权限级别：派活写 `run.access`、执行器反查 CLI 参数都走这张表
+  Assert<Equal<(typeof ACCESS_BY_PERMISSION)[PermissionMode], Access>>,
+  Assert<Equal<ReturnType<typeof permissionModeOfAccess>, PermissionMode>>,
+  // 环境变量上限是常量（协议层与 UI 共用），不是散落的字面量
+  Assert<Equal<(typeof AGENT_ENV_LIMITS)['maxVars'], 32>>,
 ] = [
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
+  true,
   true,
   true,
   true,
@@ -187,11 +214,6 @@ const sampleRuntime = {
   command: 'dsh',
   profile: 'multica',
   argsTemplate: '',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastProbe: null,
@@ -203,6 +225,12 @@ const sampleAgent = {
   description: '',
   runtimeId: 'rt1',
   systemPrompt: '',
+  model: null,
+  reasoningEffort: null,
+  maxConcurrent: 1,
+  permissionMode: 'workspace-write',
+  workdir: null,
+  env: {},
   createdAt: '2026-01-01T00:00:00.000Z',
 } satisfies Agent
 
@@ -376,6 +404,27 @@ describe('protocol/entities', () => {
     expect(RUN_ERROR_CODES.indexOf('executor_lost')).toBe(RUN_ERROR_CODES.length - 1)
   })
 
+  it('执行配置归属智能体：权限模式与环境变量的唯一取值口径', () => {
+    // 派活：智能体的 permissionMode → run.access；执行器：Turn.access → CLI 权限参数
+    expect(ACCESS_BY_PERMISSION).toEqual({
+      'read-only': 'read',
+      'workspace-write': 'edit',
+      'danger-full-access': 'full',
+    })
+    for (const access of ACCESS_LEVELS) {
+      expect(ACCESS_BY_PERMISSION[permissionModeOfAccess(access)]).toBe(access)
+    }
+    // 不在表里的级别按可写处理（协议帧缺字段时不放大权限）
+    expect(permissionModeOfAccess('edit')).toBe('workspace-write')
+
+    expect(ENV_KEY_PATTERN.test('HTTP_PROXY')).toBe(true)
+    expect(ENV_KEY_PATTERN.test('_A1')).toBe(true)
+    expect(ENV_KEY_PATTERN.test('1A')).toBe(false)
+    expect(ENV_KEY_PATTERN.test('A-B')).toBe(false)
+    expect(ENV_KEY_PATTERN.test('A B')).toBe(false)
+    expect(AGENT_ENV_LIMITS).toEqual({ maxVars: 32, maxKeyChars: 64, maxValueChars: 1000 })
+  })
+
   it('五张表的行字段与现有投影列（camelCase 映射）逐一对应', () => {
     expect(keysOf(sampleTask)).toEqual([
       'createdAt',
@@ -412,10 +461,16 @@ describe('protocol/entities', () => {
     expect(keysOf(sampleAgent)).toEqual([
       'createdAt',
       'description',
+      'env',
       'id',
+      'maxConcurrent',
+      'model',
       'name',
+      'permissionMode',
+      'reasoningEffort',
       'runtimeId',
       'systemPrompt',
+      'workdir',
     ])
     expect(keysOf(sampleRuntime)).toEqual([
       'argsTemplate',
@@ -425,18 +480,13 @@ describe('protocol/entities', () => {
       'executorKey',
       'id',
       'lastProbe',
-      'maxConcurrent',
-      'model',
       'name',
-      'permissionMode',
       'profile',
-      'reasoningEffort',
-      'workdir',
     ])
   })
 
   it('实体契约锁：字段与枚举/输入类型对应（类型级断言，M5 起 protocol 是唯一真相）', () => {
-    expect(contractChecks).toHaveLength(30)
+    expect(contractChecks).toHaveLength(39)
     expect(contractChecks.every(Boolean)).toBe(true)
   })
 

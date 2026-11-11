@@ -47,8 +47,6 @@ export async function seedRulesBase(dbPath: string): Promise<RulesSeed> {
         executorKey: 'dsh',
         command: process.execPath,
         profile: 'multica',
-        permissionMode: 'workspace-write',
-        maxConcurrent: 1,
         enabled: true,
       },
     }).facts
@@ -61,7 +59,12 @@ export async function seedRulesBase(dbPath: string): Promise<RulesSeed> {
     const agentFacts = store.dispatch({
       type: 'agent.create',
       commandId: 'e2e-rules-agent',
-      input: { name: 'e2e 规则智能体', runtimeId: runtime.id },
+      input: {
+        name: 'e2e 规则智能体',
+        runtimeId: runtime.id,
+        permissionMode: 'workspace-write',
+        maxConcurrent: 1,
+      },
     }).facts
     const agent = payloadOf<{ agent: Agent }>(agentFacts, 'agent.created', '智能体').agent
 

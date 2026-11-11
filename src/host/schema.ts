@@ -19,6 +19,11 @@ import type { DatabaseSync } from 'node:sqlite'
 
 export const SCHEMA_VERSION = 2
 
+/**
+ * `runtimes` 投影：只描述**连接**（执行器键、命令、profile、参数模板、启停、最近探测）。
+ *
+ * 执行配置（模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量）在 `agents` 上。
+ */
 const runtimesTable = (name = 'runtimes'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
@@ -27,17 +32,18 @@ CREATE TABLE IF NOT EXISTS ${name} (
   command TEXT NOT NULL DEFAULT 'dsh',
   profile TEXT NOT NULL DEFAULT 'multica',
   args_template TEXT NOT NULL DEFAULT '',
-  permission_mode TEXT NOT NULL DEFAULT 'workspace-write'
-    CHECK (permission_mode IN ('read-only','workspace-write','danger-full-access')),
-  model TEXT,
-  reasoning_effort TEXT,
-  workdir TEXT,
-  max_concurrent INTEGER NOT NULL DEFAULT 1,
   enabled INTEGER NOT NULL DEFAULT 1,
   last_probe_json TEXT,
   created_at TEXT NOT NULL
 );`
 
+/**
+ * `agents` 投影：派活目标 + 执行配置。
+ *
+ * - `runtime_id` 是连接（`ON DELETE RESTRICT`：被引用的运行时删不掉）；
+ * - 执行配置列（`model` / `reasoning_effort` / `max_concurrent` / `permission_mode` /
+ *   `workdir` / `env_json`）由 `agent.*` 事实整行携带；`env_json` 存 `Record<string,string>`。
+ */
 const agentsTable = (name = 'agents'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
@@ -45,6 +51,13 @@ CREATE TABLE IF NOT EXISTS ${name} (
   description TEXT NOT NULL DEFAULT '',
   runtime_id TEXT NOT NULL REFERENCES runtimes(id) ON DELETE RESTRICT,
   system_prompt TEXT NOT NULL DEFAULT '',
+  model TEXT,
+  reasoning_effort TEXT,
+  max_concurrent INTEGER NOT NULL DEFAULT 1,
+  permission_mode TEXT NOT NULL DEFAULT 'workspace-write'
+    CHECK (permission_mode IN ('read-only','workspace-write','danger-full-access')),
+  workdir TEXT,
+  env_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL
 );`
 
@@ -565,19 +578,47 @@ export function legacyRunsCopySql(targetTable: string): string {
 export const RUNTIMES_M3_ADDED_COLUMNS = ['executor_key', 'args_template'] as const
 
 /**
+ * M27 给 `agents` 新增的列（执行配置从运行时搬到智能体）：缺任一列即一次性补齐。
+ *
+ * 运行时表同时**去掉**这六列对应的旧列（模型 / 思考强度 / 并发 / 权限 / 工作目录）：
+ * 投影表由事实重建，指纹随 DDL 变化自动重算；旧库里多出来的列不再读写。
+ * 清单与 `agentsTable()` 的 DDL 保持同步（新增列必须同时改这里）。
+ */
+export const AGENTS_M27_ADDED_COLUMNS = [
+  'model',
+  'reasoning_effort',
+  'max_concurrent',
+  'permission_mode',
+  'workdir',
+  'env_json',
+] as const
+
+/** `agents` M27 补列语句（默认值 / CHECK 与 DDL 一致）。 */
+export const AGENTS_M27_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof AGENTS_M27_ADDED_COLUMNS)[number], string>
+> = {
+  model: 'ALTER TABLE agents ADD COLUMN model TEXT',
+  reasoning_effort: 'ALTER TABLE agents ADD COLUMN reasoning_effort TEXT',
+  max_concurrent: 'ALTER TABLE agents ADD COLUMN max_concurrent INTEGER NOT NULL DEFAULT 1',
+  permission_mode:
+    "ALTER TABLE agents ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'workspace-write' CHECK (permission_mode IN ('read-only','workspace-write','danger-full-access'))",
+  workdir: 'ALTER TABLE agents ADD COLUMN workdir TEXT',
+  env_json: "ALTER TABLE agents ADD COLUMN env_json TEXT NOT NULL DEFAULT '{}'",
+}
+
+/**
  * 旧 `runtimes` 行 → 新 `runtimes` 行（指名字表）的拷贝 SQL。
  *
  * M3 口径：旧库只有协议族 `protocol_family`（当前取值仅 `dsh`），它按「旧协议族 = 执行器键」
- * 的映射回填；`args_template` 补空串。旧库的表名固定是 `runtimes`。
+ * 的映射回填；`args_template` 补空串。M27 起运行时不再携带执行配置列（模型 / 权限 /
+ * 并发 / 工作目录随智能体走），拷贝只保留连接字段。旧库的表名固定是 `runtimes`。
  */
 export function legacyRuntimesCopySql(targetTable: string): string {
   return `INSERT INTO ${targetTable} (
-    id, name, executor_key, command, profile, args_template, permission_mode, model,
-    reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
+    id, name, executor_key, command, profile, args_template, enabled, last_probe_json, created_at
   )
   SELECT
-    id, name, protocol_family, command, profile, '', permission_mode, model,
-    reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
+    id, name, protocol_family, command, profile, '', enabled, last_probe_json, created_at
   FROM runtimes`
 }
 

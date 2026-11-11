@@ -455,6 +455,8 @@ function ipcDeps(): { router: unknown } {
 type SchedulerDeps = {
   dispatch: (input: unknown) => { facts: unknown[] }
   runtimes: () => unknown[]
+  /** M27：执行配置在智能体上，调度器按 run.agentId 取整行 */
+  agents: () => unknown[]
   executors: unknown
   limits: unknown
   lastFrameSeq: (runId: string) => number
@@ -786,6 +788,9 @@ describe('主进程入口装配', () => {
     expect(schedulerDeps().limits).toBe(defaultLimitsMock)
     schedulerDeps().runtimes()
     expect(storeMock.query).toHaveBeenCalledWith('runtimes.all')
+    // M27：智能体从同一仓储读（模型 / 思考强度 / 环境变量在它上面）
+    schedulerDeps().agents()
+    expect(storeMock.query).toHaveBeenCalledWith('agents.all')
     // 帧 seq 从仓储读（重启后续接全局单调）
     expect(schedulerDeps().lastFrameSeq('run-1')).toBe(0)
     // 帧 seq 从 run_events 投影的 MAX(seq) 视图读（不再走仓储 SQL）

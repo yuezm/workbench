@@ -70,7 +70,13 @@ export interface RuntimeProbe {
   checkedAt: string
 }
 
-/** 运行时配置（本机执行环境实例） */
+/**
+ * 运行时配置 = **一条连接**：用哪个执行器协议、怎么把 CLI 起来、可选启动参数、是否可用。
+ *
+ * 执行期的配置（模型、思考强度、并发上限、访问权限、工作目录、环境变量）在智能体上
+ * （见 `Agent`）；执行器插件也据此只从 `Turn` 读执行配置，从 `ExecutorContext.runtime`
+ * 只读连接字段。
+ */
 export interface Runtime {
   id: string
   name: string
@@ -82,15 +88,6 @@ export interface Runtime {
   profile: string
   /** `command` 的参数模板（JSON 数组文本，`command` 执行器用；空串 = 无参数） */
   argsTemplate: string
-  permissionMode: PermissionMode
-  /** 模型 id（provider/model 形式）；null = 用 CLI 默认模型 */
-  model: string | null
-  /** 推理强度；null = 用模型默认 */
-  reasoningEffort: string | null
-  /** 执行工作目录；null = 主进程当前目录 */
-  workdir: string | null
-  /** 并发上限（同一运行时同时执行的任务数） */
-  maxConcurrent: number
   /** 停用后不再派发执行 */
   enabled: boolean
   createdAt: string
@@ -105,11 +102,6 @@ export interface RuntimeInput {
   profile?: string
   /** `command` 执行器的参数模板（JSON 数组文本） */
   argsTemplate?: string
-  permissionMode?: PermissionMode
-  model?: string | null
-  reasoningEffort?: string | null
-  workdir?: string | null
-  maxConcurrent?: number
   enabled?: boolean
 }
 
@@ -132,13 +124,16 @@ export interface DetectedRuntime {
   supported: boolean
 }
 
-/** 运行时的动态负载（不落库，按 runs 现算；`runtimes.statuses` 视图与调度器同口径） */
+/**
+ * 运行时的动态负载（不落库，按 runs 现算；`runtimes.statuses` 视图与调度器同口径）。
+ *
+ * 并发上限不在这里：它是智能体的设置，同一个连接上可以挂多个智能体、各有各的窗口。
+ */
 export interface RuntimeStatus {
   runtimeId: string
   workload: {
     running: number
     queued: number
-    maxConcurrent: number
   }
 }
 
@@ -157,7 +152,7 @@ export interface RuntimeExecutorChoice {
 
 /** 执行器 `models()` 的模型目录项；字段与旧 `RuntimeModelOption` 一致 */
 export interface RuntimeModelOption {
-  /** provider/model 形式的 id，可直接写入 Runtime.model */
+  /** provider/model 形式的 id，可直接写入 `Agent.model` */
   id: string
   label: string
   provider: string
@@ -197,12 +192,37 @@ export interface ProjectInput {
 
 // ---------- 智能体 ----------
 
+/** 智能体环境变量上限（每个变量一个键值对；键必须是合法环境变量名）。 */
+export const AGENT_ENV_LIMITS = { maxVars: 32, maxKeyChars: 64, maxValueChars: 1000 } as const
+
+/** 环境变量名：字母或下划线开头，后接字母数字下划线（与 POSIX 口径一致）。 */
+export const ENV_KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
+
+/**
+ * 智能体 = 派活目标 + 执行配置。
+ *
+ * - 连接是运行时的事（`runtimeId` → 命令/profile/参数模板/执行器协议）；
+ * - 执行配置是智能体的事：模型、思考强度、并发上限、访问权限、工作目录、环境变量。
+ *   派活时内核据此写 `run.cwd` / `run.access`，激活时宿主据此拼 `Turn`。
+ */
 export interface Agent {
   id: string
   name: string
   description: string
   runtimeId: string
   systemPrompt: string
+  /** 模型 id（provider/model 形式）；null = 用 CLI 默认模型 */
+  model: string | null
+  /** 思考强度；null = 用模型默认 */
+  reasoningEffort: string | null
+  /** 并发上限（同一智能体同时执行的任务数） */
+  maxConcurrent: number
+  /** 访问权限（沙箱基线）；派活时映射成 `run.access` */
+  permissionMode: PermissionMode
+  /** 执行工作目录；null = 用项目的文件夹 / 主进程当前目录 */
+  workdir: string | null
+  /** 追加给子进程的环境变量（键值都原样传给执行器） */
+  env: Record<string, string>
   createdAt: string
 }
 
@@ -211,6 +231,12 @@ export interface AgentInput {
   description?: string
   runtimeId: string
   systemPrompt?: string
+  model?: string | null
+  reasoningEffort?: string | null
+  maxConcurrent?: number
+  permissionMode?: PermissionMode
+  workdir?: string | null
+  env?: Record<string, string>
 }
 
 // ---------- 工作流 / 阶段 ----------
@@ -701,10 +727,29 @@ export interface RunRow extends Omit<Run, 'taskId'> {
   cancelRequested: boolean
 }
 
-/** 运行权限级别（协议帧 access 语义；与运行时 `permissionMode` 不是一回事）。 */
+/** 运行权限级别（协议帧 access 语义；由智能体的 `permissionMode` 映射而来）。 */
 export const ACCESS_LEVELS = ['read', 'edit', 'full'] as const
 
 export type Access = (typeof ACCESS_LEVELS)[number]
+
+/** 智能体权限模式 → 运行权限级别（派活时写进 `run.access`）。 */
+export const ACCESS_BY_PERMISSION: Record<PermissionMode, Access> = {
+  'read-only': 'read',
+  'workspace-write': 'edit',
+  'danger-full-access': 'full',
+}
+
+/** 反查（执行器按 `Turn.access` 还原 CLI 权限参数）；不在表里的按可写处理。 */
+export function permissionModeOfAccess(access: Access): PermissionMode {
+  switch (access) {
+    case 'read':
+      return 'read-only'
+    case 'full':
+      return 'danger-full-access'
+    default:
+      return 'workspace-write'
+  }
+}
 
 // ---------- 卡片（审批） ----------
 

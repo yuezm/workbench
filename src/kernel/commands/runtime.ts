@@ -1,30 +1,13 @@
 /**
  * 运行时 / 项目命令（R2 从 `decide.ts` 拆出，行为不变）。
+ *
+ * 运行时只描述**连接**：执行器键、命令、profile、参数模板、启停。执行期配置
+ * （模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量）属于智能体，见 `agent.ts`。
  */
 import type { Agent, Project, Runtime, Task } from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
-import { done, ownerDraft, reject, CONCURRENCY_CAP, CONCURRENCY_FLOOR } from './common'
-
-/** 权限模式白名单：`src/protocol/entities.ts` 里的常量是唯一真相源。 */
-const PERMISSION_MODES: readonly Runtime['permissionMode'][] = [
-  'read-only',
-  'workspace-write',
-  'danger-full-access',
-]
-
-function permissionModeOf(value: string): Runtime['permissionMode'] | null {
-  return (PERMISSION_MODES as readonly string[]).includes(value)
-    ? (value as Runtime['permissionMode'])
-    : null
-}
-
-/** 并发上限归一：未给沿用 fallback；非正整数返回 null（交给调用方拒绝）；超过 8 按 8。 */
-function normalizeConcurrency(value: number | undefined, fallback: number): number | null {
-  if (value === undefined) return fallback
-  if (!Number.isInteger(value) || value < CONCURRENCY_FLOOR) return null
-  return Math.min(value, CONCURRENCY_CAP)
-}
+import { done, ownerDraft, reject } from './common'
 
 function runtimeNamed(view: View, name: string, exceptId: Id): Runtime | undefined {
   for (const runtime of view.runtimes.values()) {
@@ -76,12 +59,6 @@ export function createRuntime(
   if (!executorKey) return reject('invalid_input', '运行时缺少执行器键（executorKey）')
   const command = form.command?.trim() ?? ''
   if (!command) return reject('invalid_input', '运行时缺少启动命令（command）')
-  const permissionMode = permissionModeOf(form.permissionMode ?? 'workspace-write')
-  if (!permissionMode) {
-    return reject('invalid_input', '不支持的权限模式: ' + String(form.permissionMode))
-  }
-  const maxConcurrent = normalizeConcurrency(form.maxConcurrent, 1)
-  if (maxConcurrent === null) return reject('invalid_input', '并发上限必须是正整数')
   if (runtimeNamed(view, name, '')) return reject('conflict', '运行时名称已存在: ' + name)
   const runtime: Runtime = {
     id: env.nextId('runtime'),
@@ -90,11 +67,6 @@ export function createRuntime(
     command,
     profile: form.profile?.trim() ?? '',
     argsTemplate: form.argsTemplate ?? '',
-    permissionMode,
-    model: form.model ?? null,
-    reasoningEffort: form.reasoningEffort ?? null,
-    workdir: form.workdir ?? null,
-    maxConcurrent,
     enabled: form.enabled !== false,
     createdAt: now,
     lastProbe: null,
@@ -113,15 +85,6 @@ export function updateRuntime(
   const executorKey =
     patch.executorKey === undefined ? current.executorKey : patch.executorKey.trim()
   if (!executorKey) return reject('invalid_input', '运行时缺少执行器键（executorKey）')
-  const permissionMode =
-    patch.permissionMode === undefined
-      ? current.permissionMode
-      : permissionModeOf(patch.permissionMode)
-  if (!permissionMode) {
-    return reject('invalid_input', '不支持的权限模式: ' + String(patch.permissionMode))
-  }
-  const maxConcurrent = normalizeConcurrency(patch.maxConcurrent, current.maxConcurrent)
-  if (maxConcurrent === null) return reject('invalid_input', '并发上限必须是正整数')
   const name = patch.name?.trim() || current.name
   if (name !== current.name && runtimeNamed(view, name, current.id)) {
     return reject('conflict', '运行时名称已存在: ' + name)
@@ -130,15 +93,9 @@ export function updateRuntime(
     ...current,
     name,
     executorKey,
-    permissionMode,
     command: patch.command?.trim() || current.command,
     profile: patch.profile !== undefined ? patch.profile.trim() : current.profile,
     argsTemplate: patch.argsTemplate !== undefined ? patch.argsTemplate : current.argsTemplate,
-    model: patch.model !== undefined ? patch.model : current.model,
-    reasoningEffort:
-      patch.reasoningEffort !== undefined ? patch.reasoningEffort : current.reasoningEffort,
-    workdir: patch.workdir !== undefined ? patch.workdir : current.workdir,
-    maxConcurrent,
     enabled: patch.enabled !== undefined ? patch.enabled === true : current.enabled,
   }
   return done([ownerDraft('runtime.updated', { runtime }, now)])

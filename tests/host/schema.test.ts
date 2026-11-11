@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  AGENTS_M27_ADD_COLUMN_SQL,
+  AGENTS_M27_ADDED_COLUMNS,
   CONVERSATIONS_M11_ADD_COLUMN_SQL,
   CONVERSATIONS_M11_ADDED_COLUMNS,
   FACTS_SQL,
@@ -90,10 +92,10 @@ CREATE INDEX IF NOT EXISTS idx_tasks_workflow ON tasks(workflow_id);
 `
 
 /**
- * 静态两表：DDL 自 M1 起未变（`runtimes` 在 M3 换成 `executor_key`；`tasks` 在 M6 / M7 追加列；
- * `workflow_stages` 在 M7 追加交接两列；三者都单独断言）。
+ * 静态表：DDL 自 M1 起未变（`runtimes` 在 M3 换成 `executor_key`；`tasks` 在 M6 / M7 追加列；
+ * `workflow_stages` 在 M7 追加交接两列；`agents` 在 M27 追加执行配置六列；各自单独断言）。
  */
-const STATIC_TABLES = ['workflows', 'agents']
+const STATIC_TABLES = ['workflows']
 
 /** M7 tasks 列（顺序与 DDL 一致）：来源四列 + 线程两列 + 交接两列，时间列仍在末尾。 */
 const TASKS_M7_COLUMNS = [
@@ -161,13 +163,33 @@ const RUNTIMES_M3_COLUMNS = [
   'command',
   'profile',
   'args_template',
+  'enabled',
+  'last_probe_json',
+  'created_at',
+]
+
+/** M27 起运行时不再携带的执行配置列（搬到 agents 上）。 */
+const RUNTIMES_M27_REMOVED_COLUMNS = [
   'permission_mode',
   'model',
   'reasoning_effort',
   'workdir',
   'max_concurrent',
-  'enabled',
-  'last_probe_json',
+]
+
+/** M27 agents 列（顺序与 DDL 一致）：身份五列之后追加执行配置六列，时间列仍在末尾。 */
+const AGENTS_M27_COLUMNS = [
+  'id',
+  'name',
+  'description',
+  'runtime_id',
+  'system_prompt',
+  'model',
+  'reasoning_effort',
+  'max_concurrent',
+  'permission_mode',
+  'workdir',
+  'env_json',
   'created_at',
 ]
 
@@ -234,7 +256,7 @@ function tableNames(db: DatabaseSync): string[] {
   return rows.map((row) => row.name).sort()
 }
 
-describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
+describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M27 结构', () => {
   it('runtimes 按 M3 结构：executor_key + args_template，无 protocol_family', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
@@ -242,6 +264,90 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构', () => {
       RUNTIMES_M3_COLUMNS,
     )
     expect(columnShape(db, 'runtimes').join('\n')).not.toContain('protocol_family')
+  })
+
+  it('M27：runtimes 只剩连接字段，执行配置五列全部搬走', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    const columns = columnShape(db, 'runtimes').map((column) => column.split('|')[0])
+    for (const column of RUNTIMES_M27_REMOVED_COLUMNS) {
+      expect(columns, column).not.toContain(column)
+    }
+  })
+
+  it('agents 按 M27 结构：身份列逐列不变，执行配置六列插在 system_prompt 与时间列之间', () => {
+    const legacy = memoryDb()
+    legacy.exec(PRE_M1_FIVE_TABLE_DDL)
+
+    const current = memoryDb()
+    current.exec(SCHEMA_SQL)
+
+    expect(columnShape(current, 'agents').map((column) => column.split('|')[0])).toEqual(
+      AGENTS_M27_COLUMNS,
+    )
+    // M1 的智能体五列（名 / 类型 / NOT NULL / 默认值 / 主键）逐列原样保留
+    const byName = new Map(
+      columnShape(current, 'agents').map((shape) => [shape.split('|')[0], shape] as const),
+    )
+    for (const shape of columnShape(legacy, 'agents')) {
+      const name = shape.split('|')[0]
+      expect(byName.get(name), name).toBe(shape)
+    }
+    // 执行配置新列：可空 / 有默认值 / 权限列带 CHECK
+    expect(byName.get('model')).toBe('model|TEXT|0|null|0')
+    expect(byName.get('reasoning_effort')).toBe('reasoning_effort|TEXT|0|null|0')
+    expect(byName.get('max_concurrent')).toBe('max_concurrent|INTEGER|1|1|0')
+    expect(byName.get('permission_mode')).toBe("permission_mode|TEXT|1|'workspace-write'|0")
+    expect(byName.get('workdir')).toBe('workdir|TEXT|0|null|0')
+    expect(byName.get('env_json')).toBe("env_json|TEXT|1|'{}'|0")
+  })
+
+  it('agents 索引与外键与 M1 一致：runtime_id → runtimes ON DELETE RESTRICT', () => {
+    const legacy = memoryDb()
+    legacy.exec(PRE_M1_FIVE_TABLE_DDL)
+
+    const current = memoryDb()
+    current.exec(SCHEMA_SQL)
+
+    expect(indexShape(current, 'agents')).toEqual(indexShape(legacy, 'agents'))
+    expect(foreignKeyShape(current, 'agents')).toEqual(foreignKeyShape(legacy, 'agents'))
+  })
+
+  it('M27 智能体补列清单与 DDL 同步：六列、默认值 / CHECK 与建表语句同口径', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect([...AGENTS_M27_ADDED_COLUMNS]).toEqual([
+      'model',
+      'reasoning_effort',
+      'max_concurrent',
+      'permission_mode',
+      'workdir',
+      'env_json',
+    ])
+    expect(AGENTS_M27_ADD_COLUMN_SQL.model).toBe('ALTER TABLE agents ADD COLUMN model TEXT')
+    expect(AGENTS_M27_ADD_COLUMN_SQL.max_concurrent).toContain(
+      'ADD COLUMN max_concurrent INTEGER NOT NULL DEFAULT 1',
+    )
+    expect(AGENTS_M27_ADD_COLUMN_SQL.permission_mode).toContain("DEFAULT 'workspace-write'")
+    expect(AGENTS_M27_ADD_COLUMN_SQL.permission_mode).toContain(
+      "CHECK (permission_mode IN ('read-only','workspace-write','danger-full-access'))",
+    )
+    expect(AGENTS_M27_ADD_COLUMN_SQL.env_json).toContain("DEFAULT '{}'")
+
+    // 补列语句逐条执行后与建表 DDL 的列形状一致（旧库补列口径）
+    const memory = new DatabaseSync(':memory:')
+    try {
+      memory.exec('CREATE TABLE agents (id TEXT PRIMARY KEY)')
+      for (const column of AGENTS_M27_ADDED_COLUMNS) {
+        memory.exec(AGENTS_M27_ADD_COLUMN_SQL[column])
+      }
+      expect(columnShape(memory, 'agents').map((column) => column.split('|')[0])).toEqual([
+        'id',
+        ...AGENTS_M27_ADDED_COLUMNS,
+      ])
+    } finally {
+      memory.close()
+    }
   })
 
   it('tasks 按 M7/M8 结构：来源四列 + 线程两列 + spawn 三列 + 交接两列插在 status 与时间列之间，旧 8 列逐列不变', () => {

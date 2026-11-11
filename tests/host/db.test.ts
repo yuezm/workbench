@@ -12,11 +12,13 @@ import {
   needsTasksUpgrade,
   openDatabase,
   rebuildLegacyTasks,
+  upgradeLegacyAgents,
   upgradeLegacyCards,
   upgradeLegacyRuns,
   upgradeLegacyRuntimes,
 } from '../../src/host/db'
 import {
+  AGENTS_M27_ADDED_COLUMNS,
   PROJECTION_TABLES,
   RUN_M2_ADDED_COLUMNS,
   RUNTIMES_M3_ADDED_COLUMNS,
@@ -464,6 +466,72 @@ describe('openDatabase', () => {
     } finally {
       local.close()
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('M27：旧库 agents 缺执行配置六列 → open 时 ALTER 补齐，老行取默认值', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-m27-'))
+    const file = path.join(root, 'ai-workflow.db')
+    const seeded = new DatabaseSync(file)
+    try {
+      seeded.exec(SCHEMA_SQL)
+      seeded
+        .prepare(`INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)`)
+        .run('rt-1', '本机', 'dsh', SEED_AT)
+      seeded
+        .prepare(`INSERT INTO agents (id, name, runtime_id, created_at) VALUES (?, ?, ?, ?)`)
+        .run('ag-1', '助手', 'rt-1', SEED_AT)
+      // 回到 M27 之前的 agents 结构（数据行保留）：六列由 open 阶段按默认值补齐
+      for (const column of AGENTS_M27_ADDED_COLUMNS) {
+        seeded.exec(`ALTER TABLE agents DROP COLUMN ${column}`)
+      }
+      expect(columnNames(seeded, 'agents').has('max_concurrent')).toBe(false)
+      expect(columnNames(seeded, 'agents').has('env_json')).toBe(false)
+      expect(upgradeLegacyAgents(seeded)).toBe(true)
+    } finally {
+      seeded.close()
+    }
+
+    const local = openDatabase(file)
+    try {
+      const columns = columnNames(local, 'agents')
+      for (const column of AGENTS_M27_ADDED_COLUMNS) {
+        expect(columns, column).toContain(column)
+      }
+      // 补列已齐：再次调用是 no-op
+      expect(upgradeLegacyAgents(local)).toBe(false)
+      // 老行按默认值归一：模型默认、可写、并发 1、无工作目录、无环境变量
+      expect(
+        local
+          .prepare(
+            `SELECT name, model, reasoning_effort, max_concurrent, permission_mode, workdir,
+                    env_json
+             FROM agents WHERE id = ?`,
+          )
+          .get('ag-1'),
+      ).toEqual({
+        name: '助手',
+        model: null,
+        reasoning_effort: null,
+        max_concurrent: 1,
+        permission_mode: 'workspace-write',
+        workdir: null,
+        env_json: '{}',
+      })
+      // M27：运行时表不再携带执行配置列（新建库按新 DDL 建表，旧库残留列不再被读写）
+      expect(columnNames(local, 'runtimes').has('max_concurrent')).toBe(false)
+    } finally {
+      local.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('upgradeLegacyAgents：没有 agents 表时不动（返回 false）', () => {
+    const empty = new DatabaseSync(':memory:')
+    try {
+      expect(upgradeLegacyAgents(empty)).toBe(false)
+    } finally {
+      empty.close()
     }
   })
 

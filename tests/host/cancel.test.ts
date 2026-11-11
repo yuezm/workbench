@@ -136,7 +136,7 @@ function seedTask(entryMode: 'agent' | 'none' = 'agent'): Seeded {
   const runtimeFacts = world.store.dispatch({
     type: 'runtime.create',
     commandId: nextCommandId(),
-    input: { name: 'rt-' + commandSeq, executorKey: 'dsh', command: 'dsh', maxConcurrent: 2 },
+    input: { name: 'rt-' + commandSeq, executorKey: 'dsh', command: 'dsh' },
   }).facts
   const runtimeId = (
     runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as { runtime: Runtime }
@@ -146,7 +146,8 @@ function seedTask(entryMode: 'agent' | 'none' = 'agent'): Seeded {
   const agentFacts = world.store.dispatch({
     type: 'agent.create',
     commandId: nextCommandId(),
-    input: { name: 'coder', runtimeId, systemPrompt: 'sys' },
+    // M27：并发窗口在智能体上（这里是 2，允许取消用例同时压多条 run）
+    input: { name: 'coder', runtimeId, systemPrompt: 'sys', maxConcurrent: 2 },
   }).facts
   const agentId = (
     agentFacts.find((fact) => fact.type === 'agent.created')?.payload as { agent: Agent }
@@ -220,6 +221,7 @@ function makeScheduler(
   const scheduler = createScheduler({
     dispatch: options.dispatch ?? world.store.dispatch,
     runtimes: () => world.store.query('runtimes.all'),
+    agents: () => world.store.query('agents.all'),
     executors: options.executors ?? { forRuntime: () => port },
     timer,
     limits: {

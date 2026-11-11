@@ -59,7 +59,7 @@ function claimRun(): { runtime: Runtime; runId: string; taskId: string } {
   const runtimeFacts = world.store.dispatch({
     type: 'runtime.create',
     commandId: nextCommandId(),
-    input: { name: 'rt-' + commandSeq, executorKey: 'dsh', command: 'dsh', maxConcurrent: 1 },
+    input: { name: 'rt-' + commandSeq, executorKey: 'dsh', command: 'dsh' },
   }).facts
   const runtimeId = (
     runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as { runtime: Runtime }
@@ -69,7 +69,8 @@ function claimRun(): { runtime: Runtime; runId: string; taskId: string } {
   const agentFacts = world.store.dispatch({
     type: 'agent.create',
     commandId: nextCommandId(),
-    input: { name: 'coder', runtimeId, systemPrompt: 'sys' },
+    // M27：并发窗口在智能体上（保留原来的 1）
+    input: { name: 'coder', runtimeId, systemPrompt: 'sys', maxConcurrent: 1 },
   }).facts
   const agentId = (
     agentFacts.find((fact) => fact.type === 'agent.created')?.payload as { agent: Agent }
@@ -423,7 +424,7 @@ describe('reconcile：中断的聊天轮次（T14b）', () => {
     const runtimeFacts = world.store.dispatch({
       type: 'runtime.create',
       commandId: nextCommandId(),
-      input: { name: 'rt-chat', executorKey: 'dsh', command: 'dsh', maxConcurrent: 1 },
+      input: { name: 'rt-chat', executorKey: 'dsh', command: 'dsh' },
     }).facts
     const runtimeId = (
       runtimeFacts.find((fact) => fact.type === 'runtime.created')?.payload as {
@@ -433,7 +434,7 @@ describe('reconcile：中断的聊天轮次（T14b）', () => {
     const agentFacts = world.store.dispatch({
       type: 'agent.create',
       commandId: nextCommandId(),
-      input: { name: 'coder', runtimeId, systemPrompt: 'sys' },
+      input: { name: 'coder', runtimeId, systemPrompt: 'sys', maxConcurrent: 1 },
     }).facts
     const agentId = (
       agentFacts.find((fact) => fact.type === 'agent.created')?.payload as {

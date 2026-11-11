@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Card, Conversation, RunEvent, Task } from '../../src/protocol/entities'
+import type { Card, Conversation, RunEvent, RuntimeStatus, Task } from '../../src/protocol/entities'
 import {
   HOST_VIEW_IDS,
   VIEW_IDS,
@@ -184,6 +184,10 @@ describe('protocol/views：M4 waiting run 视图', () => {
 /** M5 客户端视图：执行中集合、负载汇总、内核水位；宿主视图走同一个 query 动词。 */
 const executingNoParams: Assert<Equal<ViewParams<'tasks.executing'>, undefined>> = true
 const statusesNoParams: Assert<Equal<ViewParams<'runtimes.statuses'>, undefined>> = true
+/** `runtimes.statuses` 的负载只给在跑/排队数：并发上限在智能体上，视图里不再带。 */
+const statusesWorkload: Assert<
+  Equal<RuntimeStatus['workload'], { running: number; queued: number }>
+> = true
 const seqNoParams: Assert<Equal<ViewParams<'kernel.seq'>, undefined>> = true
 const executorsNoParams: Assert<Equal<ViewParams<'runtimes.executors'>, undefined>> = true
 const detectedNoParams: Assert<Equal<ViewParams<'runtimes.detected'>, undefined>> = true
@@ -208,6 +212,7 @@ describe('protocol/views：M5 客户端视图', () => {
   it('参数与返回类型映射（类型级断言）', () => {
     expect(executingNoParams).toBe(true)
     expect(statusesNoParams).toBe(true)
+    expect(statusesWorkload).toBe(true)
     expect(seqNoParams).toBe(true)
     expect(executorsNoParams).toBe(true)
     expect(detectedNoParams).toBe(true)

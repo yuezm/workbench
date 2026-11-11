@@ -239,6 +239,7 @@ const expectedRuns = (): RunRow[] => legacyRuns.map(normalizedRun)
 
 /** 造 v2 存量实体五表：含运行时/智能体/工作流/阶段/任务的外键与阶段自引用。 */
 function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
+  // M27：v2 存量里执行配置（模型 / 权限 / 并发 / 工作目录）挂在运行时上，导入只取连接字段
   const runtimes: Runtime[] = [
     {
       id: 'rt-1',
@@ -247,11 +248,6 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       argsTemplate: '',
       command: 'dsh',
       profile: 'multica',
-      permissionMode: 'workspace-write',
-      model: 'deepseek/v4',
-      reasoningEffort: 'high',
-      workdir: 'C:/work',
-      maxConcurrent: 2,
       enabled: true,
       createdAt: seedAt(1),
       lastProbe: probe,
@@ -263,16 +259,12 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       argsTemplate: '',
       command: 'dsh',
       profile: 'multica',
-      permissionMode: 'read-only',
-      model: null,
-      reasoningEffort: null,
-      workdir: null,
-      maxConcurrent: 1,
       enabled: false,
       createdAt: seedAt(2),
       lastProbe: null,
     },
   ]
+  // M27：执行配置在智能体上，导入读这六列（老库缺列由 upgradeLegacyAgents 补默认值）
   const agents: Agent[] = [
     {
       id: 'ag-1',
@@ -280,6 +272,12 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       description: '写代码',
       runtimeId: 'rt-1',
       systemPrompt: '你是实现者',
+      model: 'deepseek/v4',
+      reasoningEffort: 'high',
+      maxConcurrent: 2,
+      permissionMode: 'danger-full-access',
+      workdir: 'C:/work',
+      env: { DEEPSEEK_API_KEY: 'sk-test' },
       createdAt: seedAt(3),
     },
     {
@@ -288,6 +286,12 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       description: '',
       runtimeId: 'rt-2',
       systemPrompt: '',
+      model: null,
+      reasoningEffort: null,
+      maxConcurrent: 1,
+      permissionMode: 'workspace-write',
+      workdir: null,
+      env: {},
       createdAt: seedAt(4),
     },
   ]
@@ -386,9 +390,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
 
   const insertRuntime = db.prepare(
     `INSERT INTO runtimes
-       (id, name, executor_key, command, profile, args_template, permission_mode, model,
-        reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, name, executor_key, command, profile, args_template, enabled, last_probe_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   for (const runtime of runtimes) {
     insertRuntime.run(
@@ -398,11 +401,6 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       runtime.command,
       runtime.profile,
       runtime.argsTemplate,
-      runtime.permissionMode,
-      runtime.model,
-      runtime.reasoningEffort,
-      runtime.workdir,
-      runtime.maxConcurrent,
       runtime.enabled ? 1 : 0,
       runtime.lastProbe === null ? null : JSON.stringify(runtime.lastProbe),
       runtime.createdAt,
@@ -410,8 +408,10 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
   }
 
   const insertAgent = db.prepare(
-    `INSERT INTO agents (id, name, description, runtime_id, system_prompt, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO agents
+       (id, name, description, runtime_id, system_prompt, model, reasoning_effort,
+        max_concurrent, permission_mode, workdir, env_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   for (const agent of agents) {
     insertAgent.run(
@@ -420,6 +420,12 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       agent.description,
       agent.runtimeId,
       agent.systemPrompt,
+      agent.model,
+      agent.reasoningEffort,
+      agent.maxConcurrent,
+      agent.permissionMode,
+      agent.workdir,
+      JSON.stringify(agent.env),
       agent.createdAt,
     )
   }

@@ -9,10 +9,12 @@
 import { COMMAND_NAMES, type Command, type CommandName } from './commands'
 import {
   ACCEPTANCE_LIMITS,
+  AGENT_ENV_LIMITS,
   ARGV_PLACEHOLDERS,
   BUILTIN_STAGE_KEYS,
   CARD_ANSWER_VIA,
   ENTRY_MODES,
+  ENV_KEY_PATTERN,
   EXECUTOR_KEY_PATTERN,
   GATE_VERDICTS,
   ON_CHILDREN_SETTLED,
@@ -341,6 +343,39 @@ const checkWorkflowInput = (value: unknown): Check => {
   )
 }
 
+/** 环境变量：值必须全为字符串、键名合法、条数与长度受 `AGENT_ENV_LIMITS` 约束。 */
+const checkEnv = (value: unknown, label: string): Check => {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'object' || Array.isArray(value)) return `${label} 必须是键值对象`
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length > AGENT_ENV_LIMITS.maxVars) {
+    return `${label} 最多 ${AGENT_ENV_LIMITS.maxVars} 项`
+  }
+  for (const [key, raw] of entries) {
+    if (key.length > AGENT_ENV_LIMITS.maxKeyChars || !ENV_KEY_PATTERN.test(key)) {
+      return `${label} 的键非法: ${key}`
+    }
+    if (typeof raw !== 'string') return `${label}.${key} 必须是字符串`
+    if (raw.length > AGENT_ENV_LIMITS.maxValueChars) {
+      return `${label}.${key} 最长 ${AGENT_ENV_LIMITS.maxValueChars} 个字符`
+    }
+  }
+  return null
+}
+
+/** 模型 id：可空；给了就必须是 `provider/model`（宿主据此拆成 Turn.model，写错就不再静默回退）。 */
+const checkModelId = (value: unknown, label: string): Check => {
+  const text = optionalText(value, label, COMMAND_LIMITS.model)
+  if (text !== null) return text
+  if (value === undefined || value === null) return null
+  const raw = (value as string).trim()
+  if (raw === '') return null
+  const at = raw.indexOf('/')
+  if (at <= 0 || at === raw.length - 1) return `${label}必须是 provider/model 形式`
+  return null
+}
+
+/** 智能体输入：身份 + 执行配置（模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量）。 */
 const checkAgentInput = (value: unknown, partial: boolean): Check => {
   const input = asRecord(value)
   if (!input) return 'input 必须是对象'
@@ -354,10 +389,22 @@ const checkAgentInput = (value: unknown, partial: boolean): Check => {
     name ??
     optionalText(input.description, 'input.description', COMMAND_LIMITS.description) ??
     runtimeId ??
-    optionalText(input.systemPrompt, 'input.systemPrompt', COMMAND_LIMITS.systemPrompt)
+    optionalText(input.systemPrompt, 'input.systemPrompt', COMMAND_LIMITS.systemPrompt) ??
+    checkModelId(input.model, 'input.model') ??
+    optionalText(input.reasoningEffort, 'input.reasoningEffort', COMMAND_LIMITS.model) ??
+    optionalEnum(input.permissionMode, 'input.permissionMode', PERMISSION_MODES) ??
+    optionalText(input.workdir, 'input.workdir', COMMAND_LIMITS.workdir) ??
+    optionalIntegerIn(
+      input.maxConcurrent,
+      'input.maxConcurrent',
+      1,
+      COMMAND_LIMITS.maxConcurrent,
+    ) ??
+    checkEnv(input.env, 'input.env')
   )
 }
 
+/** 运行时输入：只描述连接（执行器 / 命令 / profile / 参数模板 / 启停）。 */
 const checkRuntimeInput = (value: unknown, partial: boolean): Check => {
   const input = asRecord(value)
   if (!input) return 'input 必须是对象'
@@ -370,16 +417,6 @@ const checkRuntimeInput = (value: unknown, partial: boolean): Check => {
     optionalText(input.command, 'input.command', COMMAND_LIMITS.command) ??
     optionalText(input.profile, 'input.profile', COMMAND_LIMITS.profile) ??
     optionalArgsTemplate(input.argsTemplate) ??
-    optionalEnum(input.permissionMode, 'input.permissionMode', PERMISSION_MODES) ??
-    optionalText(input.model, 'input.model', COMMAND_LIMITS.model) ??
-    optionalText(input.reasoningEffort, 'input.reasoningEffort', COMMAND_LIMITS.model) ??
-    optionalText(input.workdir, 'input.workdir', COMMAND_LIMITS.workdir) ??
-    optionalIntegerIn(
-      input.maxConcurrent,
-      'input.maxConcurrent',
-      1,
-      COMMAND_LIMITS.maxConcurrent,
-    ) ??
     optionalBoolean(input.enabled, 'input.enabled')
   )
 }

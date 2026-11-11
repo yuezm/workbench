@@ -146,6 +146,14 @@ const migratedCounterpart = (f) => {
   }
   return null
 }
+// 断言搬家（M27）：被测组件本身瘦身（运行时表单只留连接、执行配置移到智能体表单），
+// 迁走的断言由另一个测试文件承接。这里登记「谁承接」，只有承接方的断言净增覆盖得住
+// 迁出方的净减才算迁移；承接方没涨，照样按「断言净减少」阻断。
+const ASSERTION_MIGRATIONS = {
+  // 运行时表单精简：模型 / 思考强度 / 并发 / 权限 / 工作目录 的用例搬到智能体表单
+  'tests/renderer/src/apps/ai-workflow/components/RuntimeDialog.test.tsx':
+    'tests/renderer/src/apps/ai-workflow/components/AgentDialog.test.tsx',
+}
 for (const f of deleted) {
   if (!isTest(f)) continue
   if (sourceCandidates(f).some((source) => deletedSet.has(source))) continue
@@ -166,9 +174,16 @@ const addedAssertions = countBy(added)
 for (const [file, removedCount] of removedAssertions) {
   if (deletedSet.has(file)) continue
   const addedCount = addedAssertions.get(file) ?? 0
-  if (removedCount > addedCount) {
-    flag('assertion-removed', file, `assertions ${removedCount} -> ${addedCount}`)
-  }
+  if (removedCount <= addedCount) continue
+  const counterpart = ASSERTION_MIGRATIONS[file]
+  const movedIn = counterpart
+    ? Math.max(
+        0,
+        (addedAssertions.get(counterpart) ?? 0) - (removedAssertions.get(counterpart) ?? 0),
+      )
+    : 0
+  if (counterpart !== undefined && removedCount <= addedCount + movedIn) continue
+  flag('assertion-removed', file, `assertions ${removedCount} -> ${addedCount}`)
 }
 
 // 1b/2c. CONSTRAINTS.md 的规则被放松或删除（与参考实现一致的阈值方向判定）。

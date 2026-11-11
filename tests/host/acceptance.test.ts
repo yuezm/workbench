@@ -90,6 +90,7 @@ function makeWorld(entries: readonly ExecutorPluginEntry[]): World {
   const scheduler = createScheduler({
     dispatch: (input) => effects.dispatch(input),
     runtimes: () => store.query('runtimes.all'),
+    agents: () => store.query('agents.all'),
     executors: schedulerExecutors,
     limits: {
       heartbeatMs: 30_000,

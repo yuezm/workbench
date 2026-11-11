@@ -20,7 +20,14 @@
  * 本模块只依赖 `protocol` 与宿主内部类型，不 import `main`（ESLint 强制）：
  * 执行器实现与装配在 `main/ai-workflow/executor-port.ts`。
  */
-import type { RunErrorCode, RunEvent, RunEventRow, RunRow, Runtime } from '../protocol/entities'
+import type {
+  Agent,
+  RunErrorCode,
+  RunEvent,
+  RunEventRow,
+  RunRow,
+  Runtime,
+} from '../protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
 import type { Fact, Id, Iso } from '../kernel/types'
 import { killPidTree } from './process'
@@ -74,8 +81,12 @@ export interface SchedulerDeps {
   dispatch: SchedulerStore['dispatch']
   /** 读运行时配置（装配根传 `() => store.query('runtimes.all')`） */
   runtimes: () => Runtime[]
+  /** 读智能体配置（装配根传 `() => store.query('agents.all')`）：执行配置从这里取 */
+  agents: () => Agent[]
   /** 执行器工厂（装配根注入 main 侧实现） */
   executors: SchedulerExecutors
+  /** 一次 `wake()` 每个运行时最多领多少（缺省 8：并发窗口由内核按智能体把关） */
+  claimsPerPump?: number
   /** 心跳定时器；默认系统实现 */
   timer?: SchedulerTimer
   /** 调度限制；默认与 `DEFAULT_LIMITS` 同值 */
@@ -232,9 +243,9 @@ export const remainingRunMs = (deadlineAt: string | null, now: Iso, fallbackMs: 
   return left > 0 ? left : 1
 }
 
-/** 运行时配置的 `provider/model` → `Turn.model`；格式不对不传（后端会给出可读错误）。 */
-const modelOf = (runtime: Runtime): Turn['model'] => {
-  const value = runtime.model?.trim() ?? ''
+/** 智能体配置的 `provider/model` → `Turn.model`；格式不对不传（后端会给出可读错误）。 */
+const modelOf = (agent: Agent): Turn['model'] => {
+  const value = agent.model?.trim() ?? ''
   const index = value.indexOf('/')
   if (index <= 0 || index === value.length - 1) return null
   return { provider: value.slice(0, index), id: value.slice(index + 1) }
@@ -318,6 +329,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       ? undefined
       : deps.runtimes().find((runtime) => runtime.id === run.runtimeId)
 
+  const agentOf = (run: RunRow): Agent | undefined =>
+    run.agentId === null ? undefined : deps.agents().find((agent) => agent.id === run.agentId)
+
   /** 归档标签（M16）：装配根没接视图查询时退化成 id——可读性差，但归档不中断。 */
   const labelsOf = (run: RunRow): RunArchiveLabels =>
     deps.describeRun?.(run) ?? {
@@ -372,8 +386,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   /**
    * 执行器超时 = 本轮剩余时间（M26）：内核按阶段算好的 `deadlineAt` 才是权威口径，
    * 这里只做减法，避免「内核按阶段给 90 min、进程按常量 30 min 先自杀」的两套时限。
+   *
+   * 执行配置（模型 / 思考强度 / 环境变量）来自**智能体**；`cwd` 与 `access` 在入队时
+   * 已由内核按智能体配置写进 run 行（项目文件夹优先），这里原样透传。
    */
-  const turnOf = (run: RunRow, runtime: Runtime, signal: AbortSignal): Turn => ({
+  const turnOf = (run: RunRow, agent: Agent, signal: AbortSignal): Turn => ({
     runId: run.id,
     leaseId: run.leaseId ?? `${run.id}:${Math.max(1, run.attempt)}`,
     turn: run.turn,
@@ -381,8 +398,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     prompt: run.prompt,
     cwd: run.cwd,
     access: run.access,
-    model: modelOf(runtime),
-    effort: runtime.reasoningEffort,
+    model: modelOf(agent),
+    effort: agent.reasoningEffort,
+    env: agent.env,
     resumeSessionId: run.resumeSessionId,
     // 聊天续接轮的重试提示词（完整历史）：协议会话失效时执行器用它重发一次
     fallbackPrompt: run.purpose === 'chat' ? (deps.chatFallbackPrompt?.(run) ?? null) : null,
@@ -398,7 +416,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   const execute = async (
     run: RunRow,
-    runtime: Runtime,
+    agent: Agent,
     controller: AbortController,
     port: ExecutorPort,
   ): Promise<void> => {
@@ -542,7 +560,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       registry.begin(run.id, now())
       // 派发前先落本轮提示词（M16）：中途崩溃 / 失败也能回看「到底给了它什么」
       writeRunPrompt(deps.artifactsRoot, run, labelsOf(run), run.prompt, now())
-      const receipt = await port.run(turnOf(run, runtime, controller.signal), io)
+      const receipt = await port.run(turnOf(run, agent, controller.signal), io)
       // 兜底取消已落终态：迟到的回执不再写事实（清理统一走 finally）
       if (finished) return
       // 终态前先关缓冲再 flush：保证 receipt 之前所有帧都已入账（后续帧被拒绝）。
@@ -608,6 +626,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       settleFailed(run, 'runtime_disabled', '运行时已停用')
       return
     }
+    // 执行配置在智能体上：智能体没了就没有模型 / 权限 / 环境变量可用，直接落失败终态
+    const agent = agentOf(run)
+    if (!agent) {
+      settleFailed(run, 'run_failed', '智能体不存在（可能已被删除）')
+      return
+    }
     // 执行器插件缺失：配置引用了未注册的 executorKey（M3 D7）。用既有 errorCode
     // `runtime_missing` 收口，不新增协议取值；文案带 key 便于定位。
     const port = deps.executors.forRuntime(runtime)
@@ -619,8 +643,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     controllers.set(run.id, controller)
     // 收尾（删控制器 / 唤醒 / 置空闲）统一在 execute 的 finally 里做：取消兜底路径
     // 也要能提前释放执行位，不能在两条路径上各写一份。
-    void execute(run, runtime, controller, port)
+    void execute(run, agent, controller, port)
   }
+
+  /**
+   * 一轮唤醒最多领多少：并发窗口由内核按**智能体**的 `maxConcurrent` 逐条把关，
+   * 这里只做单次领取量的上界（一次 pump 不必领完全部队列，收尾会再触发 wake）。
+   */
+  const claimsPerPump = () => deps.claimsPerPump ?? 8
 
   const pump = (): void => {
     for (const runtime of deps.runtimes()) {
@@ -628,7 +658,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       const facts = dispatch({
         type: 'run.claim',
         runtimeId: runtime.id,
-        capacity: runtime.maxConcurrent,
+        capacity: claimsPerPump(),
       })
       for (const fact of facts) {
         if (fact.type === 'run.claimed') start((fact.payload as { run: RunRow }).run)

@@ -117,11 +117,6 @@ const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   command: 'agent',
   profile: '',
   argsTemplate: '',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastProbe: null,
@@ -280,11 +275,14 @@ describe('executeCommandRun 成功路径', () => {
           '--context',
           '{context}',
         ]),
-        model: 'magpie/auto',
-        reasoningEffort: 'high',
-        workdir: 'D:/repo',
       },
-      turn: { contextFile: 'C:/refs/brief.md' },
+      // 执行配置来自智能体：{model} 取 provider/id 原文，{effort} 取 turn.effort，{cwd} 取 turn.cwd
+      turn: {
+        model: { provider: 'magpie', id: 'auto' },
+        effort: 'high',
+        cwd: 'D:/repo',
+        contextFile: 'C:/refs/brief.md',
+      },
     })
 
     expect(h.calls[0].args).toEqual([
@@ -297,6 +295,22 @@ describe('executeCommandRun 成功路径', () => {
       'C:/refs/brief.md',
     ])
     expect(h.calls[0].options.cwd).toBe('D:/repo')
+
+    h.children[0].close(0)
+    expect((await running).status).toBe('succeeded')
+  })
+
+  it('turn.env 原样进 spawn 环境（智能体配置的环境变量）', async () => {
+    const h = harness()
+    const { running } = startRun(h, {
+      turn: { env: { HTTP_PROXY: 'http://127.0.0.1:7890', AGENT_HOME: 'D:/agents/a1' } },
+    })
+
+    expect(h.calls[0].options).toEqual({
+      cwd: 'C:/work',
+      env: { HTTP_PROXY: 'http://127.0.0.1:7890', AGENT_HOME: 'D:/agents/a1' },
+      shell: false,
+    })
 
     h.children[0].close(0)
     expect((await running).status).toBe('succeeded')

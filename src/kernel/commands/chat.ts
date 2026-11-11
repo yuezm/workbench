@@ -9,10 +9,10 @@ import type {
   RunRow,
   Runtime,
 } from '../../protocol/entities'
+import { ACCESS_BY_PERMISSION } from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
 import { chatPrompt, titleFromContent } from '../prompt'
-import { ACCESS_BY_PERMISSION } from '../task-effects'
 import { done, ownerDraft, reject } from './common'
 
 /** 对话下的消息，按创建时间排序（同毫秒按 id 兜底），供首轮提示词拼历史。 */
@@ -45,9 +45,9 @@ function conversationRunCount(view: View, conversationId: Id): number {
 }
 
 /**
- * 聊天 run 的完整投影行：purpose='chat'，执行配置来自对话绑定的智能体/运行时。
+ * 聊天 run 的完整投影行：purpose='chat'，连接来自运行时、执行配置来自智能体。
  *
- * 工作目录（M11）：对话所属项目的文件夹；没有项目（默认目录）时回落运行时的 `workdir`，
+ * 工作目录（M11）：对话所属项目的文件夹；没有项目（默认目录）时回落智能体的 `workdir`，
  * 再空串——空串由宿主在执行时换成宿主的默认工作目录（`runtimes.default-workdir`）。
  */
 function chatRunRow(
@@ -72,8 +72,8 @@ function chatRunRow(
     rulesVersion: 0,
     executorKey: runtime.executorKey,
     threadId: null,
-    cwd: projects.get(conversation.projectId ?? '')?.path ?? runtime.workdir ?? '',
-    access: ACCESS_BY_PERMISSION[runtime.permissionMode],
+    cwd: projects.get(conversation.projectId ?? '')?.path ?? agent.workdir ?? '',
+    access: ACCESS_BY_PERMISSION[agent.permissionMode],
     skill: null,
     promptRef: null,
     eventIds: [],

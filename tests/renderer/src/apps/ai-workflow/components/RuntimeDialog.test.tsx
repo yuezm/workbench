@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   Runtime,
   RuntimeExecutorChoice,
-  RuntimeModelOption,
   RuntimeProbe,
 } from '../../../../../../src/protocol/entities'
 import type { ViewId, ViewParams, ViewResult } from '../../../../../../src/protocol/views'
@@ -32,6 +31,7 @@ function makeProbe(over: Partial<RuntimeProbe> = {}): RuntimeProbe {
   }
 }
 
+/** 运行时 = 一条连接：只有执行器 / 命令 / profile / 参数模板 / 启停 */
 function makeRuntime(over: Partial<Runtime> = {}): Runtime {
   return {
     id: 'r1',
@@ -40,26 +40,9 @@ function makeRuntime(over: Partial<Runtime> = {}): Runtime {
     argsTemplate: '',
     command: 'dsh',
     profile: 'multica',
-    permissionMode: 'workspace-write',
-    model: null,
-    reasoningEffort: null,
-    workdir: null,
-    maxConcurrent: 1,
     enabled: true,
     createdAt: 't',
     lastProbe: makeProbe(),
-    ...over,
-  }
-}
-
-function makeModel(over: Partial<RuntimeModelOption> = {}): RuntimeModelOption {
-  return {
-    id: 'deepseek/chat',
-    label: 'DeepSeek Chat',
-    provider: 'deepseek',
-    default: true,
-    thinkingLevels: ['low', 'high'],
-    defaultThinkingLevel: 'low',
     ...over,
   }
 }
@@ -74,24 +57,12 @@ afterEach(() => {
   stopFakeKernel()
 })
 
-/** 弹窗用两个宿主视图：executors（挂载即取）与 models（仅编辑时） */
-function setup(
-  options: {
-    executors?: RuntimeExecutorChoice[]
-    models?: RuntimeModelOption[]
-    defaultWorkdir?: string
-  } = {},
-): void {
+/** 弹窗只用一个宿主视图：executors（挂载即取） */
+function setup(options: { executors?: RuntimeExecutorChoice[] } = {}): void {
   kernel.setView('runtimes.executors', undefined, options.executors ?? EXECUTORS)
-  if (options.defaultWorkdir !== undefined) {
-    kernel.setView('runtimes.default-workdir', undefined, options.defaultWorkdir)
-  }
-  if (options.models !== undefined) {
-    kernel.setView('runtimes.models', { runtimeId: 'r1' }, options.models)
-  }
 }
 
-/** 记录窗口对 store.query 的调用（不经 useKernelView，宿主视图走它） */
+/** 记录窗口对 store.query 的调用（宿主视图走它） */
 function recordQueries(): Array<{ view: ViewId; params?: unknown }> {
   const calls: Array<{ view: ViewId; params?: unknown }> = []
   const original = kernel.store.query
@@ -105,30 +76,8 @@ function recordQueries(): Array<{ view: ViewId; params?: unknown }> {
   return calls
 }
 
-/** 让 `runtimes.models` 的查询悬起（验证读取中的禁用态）；返回手动 reject 的句柄 */
-function holdModelsQuery(): {
-  reject: (e: unknown) => void
-  resolve: (v: RuntimeModelOption[]) => void
-} {
-  let reject!: (e: unknown) => void
-  let resolve!: (v: RuntimeModelOption[]) => void
-  const pending = new Promise<RuntimeModelOption[]>((res, rej) => {
-    reject = rej
-    resolve = res
-  })
-  const original = kernel.store.query
-  kernel.store.query = <T extends ViewId>(
-    view: T,
-    params?: ViewParams<T>,
-  ): Promise<ViewResult<T>> => {
-    if (view === 'runtimes.models') return pending as Promise<ViewResult<T>>
-    return original(view, params)
-  }
-  return { reject, resolve }
-}
-
 describe('RuntimeDialog', () => {
-  it('新建：默认值渲染，模型与推理强度在创建前不可选', async () => {
+  it('新建：只渲染连接字段，执行配置字段一个都不出现', async () => {
     setup()
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
@@ -147,14 +96,18 @@ describe('RuntimeDialog', () => {
     expect(screen.getByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
       'DeepSeek Harness',
     )
-    expect(screen.getByLabelText('运行时并发上限')).toHaveValue(1)
-    expect(screen.getByRole('combobox', { name: '运行时权限模式' })).toHaveTextContent('可写')
-    expect(screen.getByText(/提权请求由运行时自动放行/)).toBeInTheDocument()
     expect(screen.getByText(/占位符 \{model\}/)).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeDisabled()
-    expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeDisabled()
     expect(screen.queryByRole('checkbox', { name: '启用运行时' })).not.toBeInTheDocument()
+
+    // 执行配置迁到智能体：弹窗里不再有这些控件
+    expect(screen.queryByLabelText('运行时并发上限')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '运行时权限模式' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('运行时工作目录')).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '运行时模型' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '运行时推理强度' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('运行时模型手填')).not.toBeInTheDocument()
+    // 但要说清「这些去哪配」：弹窗里给出指向智能体的说明
+    expect(screen.getByText(/都在「智能体」里配/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
@@ -164,52 +117,7 @@ describe('RuntimeDialog', () => {
       command: 'codex',
       profile: 'multica',
       argsTemplate: '',
-      permissionMode: 'workspace-write',
-      model: null,
-      reasoningEffort: null,
-      workdir: null,
-      maxConcurrent: 1,
       enabled: true,
-    })
-  })
-
-  it('新建：并发上限非法时给文案并聚焦，不静默回落成 1', async () => {
-    setup()
-    const onSubmit = vi.fn().mockRejectedValue(new Error('create-fail'))
-    const user = userEvent.setup()
-    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
-
-    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
-    await user.click(screen.getByRole('option', { name: '只读' }))
-    await user.type(screen.getByLabelText('运行时工作目录'), ' D:/work ')
-
-    const concurrent = screen.getByLabelText('运行时并发上限')
-    await user.clear(concurrent)
-    await user.type(concurrent, '0')
-    await user.click(screen.getByRole('button', { name: '添加' }))
-
-    // 0 不再被悄悄改成 1：就地报错、聚焦该字段、不调父级
-    expect(await screen.findByText('并发上限必须是 ≥1 的整数')).toBeInTheDocument()
-    expect(concurrent).toHaveFocus()
-    expect(onSubmit).not.toHaveBeenCalled()
-
-    // 小数同样非法（不是正整数）
-    await user.clear(concurrent)
-    await user.type(concurrent, '1.5')
-    await user.click(screen.getByRole('button', { name: '添加' }))
-    expect(screen.getByText('并发上限必须是 ≥1 的整数')).toBeInTheDocument()
-    expect(onSubmit).not.toHaveBeenCalled()
-
-    await user.clear(concurrent)
-    await user.type(concurrent, '2')
-    await user.click(screen.getByRole('button', { name: '添加' }))
-
-    expect(await screen.findByText('create-fail')).toBeInTheDocument()
-    expect(screen.getByLabelText('运行时名称')).toBeInTheDocument()
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({
-      permissionMode: 'read-only',
-      workdir: 'D:/work',
-      maxConcurrent: 2,
     })
   })
 
@@ -244,245 +152,42 @@ describe('RuntimeDialog', () => {
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ name: 'Codex' })
   })
 
-  it('完全访问未勾确认：按钮禁用并写明「为什么点不动」', async () => {
+  it('编辑：预填连接字段与启用开关，提交只带连接字段', async () => {
     setup()
-    const user = userEvent.setup()
-    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
-
-    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
-    await user.click(screen.getByRole('option', { name: '完全访问' }))
-
-    expect(screen.getByText(/先勾选上面的/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
-
-    await user.click(screen.getByLabelText('已确认完全访问风险'))
-    expect(screen.queryByText(/先勾选上面的/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '添加' })).toBeEnabled()
-  })
-
-  it('工作目录：留空时占位提示宿主默认目录，并说明用 WORKBENCH_WORKDIR 覆盖', async () => {
-    setup({ defaultWorkdir: 'C:/Users/me/.workbench' })
-    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
-
-    await waitFor(() =>
-      expect(screen.getByLabelText('运行时工作目录')).toHaveAttribute(
-        'placeholder',
-        'C:/Users/me/.workbench',
-      ),
-    )
-    expect(screen.getByText(/WORKBENCH_WORKDIR/)).toBeInTheDocument()
-  })
-
-  it('默认工作目录读取失败：占位回落到「留空用默认目录」，不留错误条', async () => {
-    setup()
-    kernel.failView('runtimes.default-workdir', undefined, 'workdir-down')
-    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
-
-    await waitFor(() =>
-      expect(screen.getByLabelText('运行时工作目录')).toHaveAttribute(
-        'placeholder',
-        '留空用默认目录',
-      ),
-    )
-    // 读不到只是占位文案问题：不把运行时弹窗变成错误页
-    expect(screen.queryByText(/workdir-down/)).not.toBeInTheDocument()
-    // 留空提交仍按「走宿主默认目录」处理
-    expect(screen.getByLabelText('运行时工作目录')).toHaveValue('')
-  })
-
-  it('默认工作目录读取在卸载后失败：丢弃结果，不报错', async () => {
-    setup()
-    let queried = false
-    let rejectLate!: (error: unknown) => void
-    const original = kernel.store.query
-    kernel.store.query = <T extends ViewId>(
-      view: T,
-      params?: ViewParams<T>,
-    ): Promise<ViewResult<T>> => {
-      if (view === 'runtimes.default-workdir') {
-        queried = true
-        return new Promise<string>((_resolve, reject) => {
-          rejectLate = reject
-        }) as Promise<ViewResult<T>>
-      }
-      return original(view, params)
-    }
-
-    const { container, unmount } = render(
-      <RuntimeDialog initial={{ name: 'x' }} onSubmit={vi.fn()} onCancel={vi.fn()} />,
-    )
-    unmount()
-    await act(async () => {
-      rejectLate(new Error('late-workdir'))
-      await Promise.resolve()
-    })
-    // 查询确实发过，但迟到的失败被 alive 守卫吃掉：没有未处理拒绝，也没有重新渲染
-    expect(queried).toBe(true)
-    expect(container).toBeEmptyDOMElement()
-  })
-
-  it('完全访问：必须勾选风险确认才可保存，勾选后提交带上 danger-full-access', async () => {
-    setup()
-    const onSubmit = vi.fn().mockResolvedValue(undefined)
-    const user = userEvent.setup()
-    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
-
-    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
-    await user.click(screen.getByRole('option', { name: '完全访问' }))
-
-    const save = screen.getByRole('button', { name: '添加' })
-    expect(screen.getByText(/完全访问没有沙箱/)).toBeInTheDocument()
-    expect(save).toBeDisabled()
-
-    await user.click(screen.getByLabelText('已确认完全访问风险'))
-    expect(save).toBeEnabled()
-    await user.click(save)
-    await waitFor(() =>
-      expect(onSubmit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          permissionMode: 'danger-full-access',
-        }),
-      ),
-    )
-  })
-
-  it('完全访问确认只对当前选择有效：换模式即撤销，再选回要重新勾', async () => {
-    setup()
-    const user = userEvent.setup()
-    render(<RuntimeDialog initial={{ name: 'x' }} onSubmit={vi.fn()} onCancel={vi.fn()} />)
-    const save = screen.getByRole('button', { name: '添加' })
-
-    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
-    await user.click(screen.getByRole('option', { name: '完全访问' }))
-    await user.click(screen.getByLabelText('已确认完全访问风险'))
-    expect(save).toBeEnabled()
-
-    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
-    await user.click(screen.getByRole('option', { name: '可写' }))
-    expect(screen.queryByText(/完全访问没有沙箱/)).toBeNull()
-    expect(save).toBeEnabled()
-
-    await user.click(screen.getByRole('combobox', { name: '运行时权限模式' }))
-    await user.click(screen.getByRole('option', { name: '完全访问' }))
-    expect(save).toBeDisabled()
-  })
-
-  it('编辑：预填、按运行时 id 读模型目录、推理强度随模型能力可选', async () => {
-    const model = makeModel()
-    setup({ models: [model] })
-    const queries = recordQueries()
-    const runtime = makeRuntime({
-      model: model.id,
-      reasoningEffort: 'high',
-      maxConcurrent: 3,
-      enabled: false,
-    })
+    const runtime = makeRuntime({ enabled: false })
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(<RuntimeDialog runtime={runtime} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
     expect(screen.getByRole('dialog')).toHaveTextContent('编辑运行时')
-    expect(queries).toContainEqual({ view: 'runtimes.models', params: { runtimeId: 'r1' } })
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: '运行时模型' })).toHaveTextContent(
-        'DeepSeek Chat',
-      ),
-    )
-    expect(screen.queryByLabelText('运行时模型手填')).not.toBeInTheDocument()
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeEnabled(),
-    )
-    expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toHaveTextContent('high')
+    expect(screen.getByLabelText('运行时名称')).toHaveValue('ds')
+    expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh')
     expect(screen.getByRole('checkbox', { name: '启用运行时' })).not.toBeChecked()
-
-    await user.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({
-      model: 'deepseek/chat',
-      reasoningEffort: 'high',
-      maxConcurrent: 3,
-      enabled: false,
-    })
-  })
-
-  it('编辑：模型目录读取中禁用下拉并提示；读取失败仍可手动填写模型 id', async () => {
-    setup()
-    const { reject } = holdModelsQuery()
-    const runtime = makeRuntime({ model: 'custom/model' })
-    const onSubmit = vi.fn().mockResolvedValue(undefined)
-    const user = userEvent.setup()
-    render(<RuntimeDialog runtime={runtime} onSubmit={onSubmit} onCancel={vi.fn()} />)
-
-    expect(screen.getByText('读取模型中…')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeDisabled()
-
-    reject(new Error('models-down'))
-    expect(await screen.findByText(/模型加载失败：models-down/)).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeEnabled()
-    expect(screen.getByLabelText('运行时模型手填')).toHaveValue('custom/model')
-
-    await user.clear(screen.getByLabelText('运行时模型手填'))
-    await user.type(screen.getByLabelText('运行时模型手填'), ' manual/model ')
-    await user.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({ model: 'manual/model' })
-  })
-
-  it('编辑：模型下拉可切默认/手动输入，推理强度随模型清空', async () => {
-    setup({ models: [makeModel()] })
-    const onSubmit = vi.fn().mockResolvedValue(undefined)
-    const user = userEvent.setup()
-    render(
-      <RuntimeDialog
-        runtime={makeRuntime({ model: null, reasoningEffort: 'high' })}
-        onSubmit={onSubmit}
-        onCancel={vi.fn()}
-      />,
-    )
-
-    // 未知目录时已有的推理强度仍显示出来
-    expect(await screen.findByRole('combobox', { name: '运行时推理强度' })).toHaveTextContent(
-      'high',
-    )
-
-    await user.click(screen.getByRole('combobox', { name: '运行时模型' }))
-    await user.click(screen.getByRole('option', { name: 'DeepSeek Chat' }))
-    expect(screen.getByRole('combobox', { name: '运行时模型' })).toHaveTextContent('DeepSeek Chat')
-    expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toHaveTextContent('默认')
-
-    await user.click(screen.getByRole('combobox', { name: '运行时推理强度' }))
-    await user.click(screen.getByRole('option', { name: 'high' }))
-
-    await user.click(screen.getByRole('combobox', { name: '运行时模型' }))
-    await user.click(screen.getByRole('option', { name: '手动输入…' }))
-    expect(screen.getByLabelText('运行时模型手填')).toHaveValue('')
-    expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeDisabled()
-
-    await user.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({ model: null, reasoningEffort: null })
-  })
-
-  it('编辑：切回默认模型并保留/提交已有推理强度，启用开关可修改', async () => {
-    setup({ models: [makeModel()] })
-    const onSubmit = vi.fn().mockResolvedValue(undefined)
-    const user = userEvent.setup()
-    render(
-      <RuntimeDialog
-        runtime={makeRuntime({ model: 'deepseek/chat', reasoningEffort: 'low', enabled: true })}
-        onSubmit={onSubmit}
-        onCancel={vi.fn()}
-      />,
-    )
 
     await user.click(screen.getByRole('checkbox', { name: '启用运行时' }))
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())
-    expect(onSubmit.mock.calls[0][0]).toMatchObject({
-      model: 'deepseek/chat',
-      reasoningEffort: 'low',
-      enabled: false,
+    expect(onSubmit.mock.calls[0][0]).toEqual({
+      name: 'ds',
+      executorKey: 'dsh',
+      command: 'dsh',
+      profile: 'multica',
+      argsTemplate: '',
+      enabled: true,
     })
+  })
+
+  it('编辑：不再读模型目录与默认工作目录（执行配置已迁到智能体）', async () => {
+    setup()
+    const queries = recordQueries()
+    render(<RuntimeDialog runtime={makeRuntime()} onSubmit={vi.fn()} onCancel={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '运行时执行器' })).toHaveTextContent(
+        'DeepSeek Harness',
+      ),
+    )
+    expect(queries.map((call) => call.view)).toEqual(['runtimes.executors'])
   })
 
   it('新建：命令与 profile 可手填并 trim 后提交', async () => {
@@ -503,21 +208,6 @@ describe('RuntimeDialog', () => {
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ command: '/opt/dsh', profile: 'dev' })
   })
 
-  it('编辑：已有模型不在目录里时保留手动输入，未知推理强度仍显示', async () => {
-    setup({ models: [] })
-    render(
-      <RuntimeDialog
-        runtime={makeRuntime({ model: 'custom/model', reasoningEffort: 'max' })}
-        onSubmit={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    )
-
-    expect(await screen.findByLabelText('运行时模型手填')).toHaveValue('custom/model')
-    expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toHaveTextContent('max')
-    expect(screen.getByRole('combobox', { name: '运行时推理强度' })).toBeDisabled()
-  })
-
   it('提交失败为非 Error 时也字符串化展示，并可在弹窗内关掉继续改', async () => {
     setup()
     const onSubmit = vi.fn().mockRejectedValue('plain-fail')
@@ -530,17 +220,6 @@ describe('RuntimeDialog', () => {
     await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
     expect(screen.queryByText('plain-fail')).not.toBeInTheDocument()
     expect(screen.getByLabelText('运行时名称')).toHaveValue('n')
-  })
-
-  it('编辑时模型目录未返回即卸载：不写状态也不报错', async () => {
-    setup()
-    const { resolve } = holdModelsQuery()
-    const { unmount } = render(
-      <RuntimeDialog runtime={makeRuntime()} onSubmit={vi.fn()} onCancel={vi.fn()} />,
-    )
-    unmount()
-    resolve([makeModel()])
-    await new Promise((r) => setTimeout(r, 0))
   })
 
   it('取消与关闭按钮都回调 onCancel', async () => {
@@ -565,7 +244,6 @@ describe('RuntimeDialog', () => {
       'DeepSeek Harness',
     )
     expect(screen.getByLabelText('运行时参数模板')).toHaveValue('')
-    expect(screen.getByLabelText('运行时并发上限')).toHaveValue(1)
   })
 
   it('新建：切执行器按 manifest 预填 command/profile，手改后提交用户值', async () => {
@@ -692,6 +370,39 @@ describe('RuntimeDialog', () => {
     expect(screen.getByLabelText('运行时命令')).toHaveValue('')
   })
 
+  it('执行器清单查询在卸载后迟到成功：丢弃结果，不写进已关闭的弹窗', async () => {
+    setup()
+    const original = kernel.store.query
+    let first = true
+    let resolveLate!: (list: RuntimeExecutorChoice[]) => void
+    kernel.store.query = <T extends ViewId>(
+      view: T,
+      params?: ViewParams<T>,
+    ): Promise<ViewResult<T>> => {
+      if (view === 'runtimes.executors' && first) {
+        first = false
+        return new Promise<RuntimeExecutorChoice[]>((resolve) => {
+          resolveLate = resolve
+        }) as Promise<ViewResult<T>>
+      }
+      return original(view, params)
+    }
+
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const { unmount } = render(
+      <RuntimeDialog initial={{ name: 'n' }} onSubmit={vi.fn()} onCancel={vi.fn()} />,
+    )
+    unmount()
+
+    // 卸载后迟到的成功：effect 已 cleanup，结果必须被丢弃（不 setState、不告警）
+    resolveLate([{ key: 'dsh', label: 'DSH', command: 'dsh', profile: 'multica' }])
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(errors).not.toHaveBeenCalled()
+    errors.mockRestore()
+  })
+
   it('新建：显式预填的 profile 不被执行器 manifest 默认值覆盖', async () => {
     setup()
     render(
@@ -705,20 +416,6 @@ describe('RuntimeDialog', () => {
     // command 仍按 manifest 首项预填，profile 保留调用方带入的值
     await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
     expect(screen.getByLabelText('运行时 profile')).toHaveValue('from-detect')
-  })
-
-  it('编辑：模型目录查询无数据时保留手动输入的模型 id', async () => {
-    setup()
-    render(
-      <RuntimeDialog
-        runtime={makeRuntime({ model: 'custom/model' })}
-        onSubmit={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    )
-
-    expect(await screen.findByLabelText('运行时模型手填')).toHaveValue('custom/model')
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeEnabled())
   })
 
   it('执行器清单查询在切换编辑态后迟到的失败：不写进当前弹窗', async () => {
@@ -755,42 +452,6 @@ describe('RuntimeDialog', () => {
     })
 
     expect(screen.queryByText(/执行器加载失败/)).not.toBeInTheDocument()
-  })
-
-  it('模型目录查询在切换运行时后迟到的失败：不写进当前弹窗', async () => {
-    setup()
-    const original = kernel.store.query
-    let first = true
-    let rejectLate!: (error: unknown) => void
-    kernel.store.query = <T extends ViewId>(
-      view: T,
-      params?: ViewParams<T>,
-    ): Promise<ViewResult<T>> => {
-      if (view === 'runtimes.models' && first) {
-        first = false
-        return new Promise<RuntimeModelOption[]>((_resolve, reject) => {
-          rejectLate = reject
-        }) as Promise<ViewResult<T>>
-      }
-      return original(view, params)
-    }
-
-    const { rerender } = render(
-      <RuntimeDialog runtime={makeRuntime()} onSubmit={vi.fn()} onCancel={vi.fn()} />,
-    )
-    // runtime 变化会重建 effect：旧运行时的模型查询被弃用，迟到的失败不写入
-    rerender(
-      <RuntimeDialog runtime={makeRuntime({ id: 'r2' })} onSubmit={vi.fn()} onCancel={vi.fn()} />,
-    )
-    // 新运行时的模型清单已返回（下拉可用）说明新 effect 已接管
-    await waitFor(() => expect(screen.getByRole('combobox', { name: '运行时模型' })).toBeEnabled())
-
-    await act(async () => {
-      rejectLate(new Error('stale-models'))
-      await Promise.resolve()
-    })
-
-    expect(screen.queryByText(/模型加载失败/)).not.toBeInTheDocument()
   })
 
   it('Esc 关闭弹窗：走 dismiss 收口到 onCancel，不提交', async () => {

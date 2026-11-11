@@ -11,17 +11,11 @@
  * - 续接被拒的重试不在插件里：插件只上报 `resumeRejected` 标志，宿主包装层负责
  *   换新会话 + 完整历史重试一次（与 dsh 同口径）。
  */
-import type {
-  PermissionMode,
-  RunErrorCode,
-  RunEvent,
-  RunUsage,
-  Runtime,
-} from '../../../protocol/entities'
+import type { PermissionMode, RunErrorCode, RunEvent, RunUsage } from '../../../protocol/entities'
+import { permissionModeOfAccess } from '../../../protocol/entities'
 import type { ExecutorIO, Receipt, Turn } from '../../../protocol/executor'
 import type { ExecutorContext } from '../../../sdk/types'
 import { createLineReader, parseFrame } from '../../shared/jsonl'
-import { parseModelId } from '../../shared/model-id'
 import { applyReceiptBlock } from '../../shared/receipt-block'
 import { mapResultStatus, type NormalizedRunStatus } from '../../shared/status'
 import { tail, withStderr } from '../../shared/text'
@@ -60,14 +54,15 @@ const PERMISSION_ARGS: Record<PermissionMode, string> = {
 const RESUME_REJECT_RE = /no conversation found|session.*not found|could not find session/i
 
 /**
- * 运行时字段 → CLI 参数：每个字段都是独立 argv 元素，不做 shell 拼接。
+ * 一轮执行配置 → CLI 参数：每个字段都是独立 argv 元素，不做 shell 拼接。
  *
  * `--permission-prompts none` 恒定追加：print 模式没有人工审批往返，提示类权限一律
- * 自动拒（越界即失败），否则进程会挂在审批上直到超时。`runtime.profile` 不参与。
+ * 自动拒（越界即失败），否则进程会挂在审批上直到超时。
  */
 export function claudeArgs(
-  runtime: Runtime,
+  permissionMode: PermissionMode,
   model: { provider: string; id: string } | null,
+  effort: string | null,
   resumeSessionId: string | null,
 ): string[] {
   const args = [
@@ -77,13 +72,13 @@ export function claudeArgs(
     // print + stream-json 下 --verbose 是必需的（否则 CLI 直接拒跑）
     '--verbose',
     '--permission-mode',
-    PERMISSION_ARGS[runtime.permissionMode],
+    PERMISSION_ARGS[permissionMode],
     '--permission-prompts',
     'none',
   ]
   // --model 只吃别名或完整模型名，不吃 provider/id：只传斜杠后那段
   if (model) args.push('--model', model.id)
-  if (runtime.reasoningEffort) args.push('--effort', runtime.reasoningEffort)
+  if (effort) args.push('--effort', effort)
   if (resumeSessionId) args.push('--resume', resumeSessionId)
   return args
 }
@@ -170,32 +165,22 @@ export async function executeClaudeRun(
     })
   }
 
-  const model = runtime.model
-  const modelSelection = model ? parseModelId(model) : null
-  if (model && !modelSelection) {
-    return toReceipt(turn, {
-      status: 'failed',
-      output: '',
-      error: `模型 id 格式不对（应为 provider/model）：${model}`,
-      errorCode: 'run_failed',
-      exitCode: null,
-      sessionId: null,
-      resumeRejected: false,
-      usage,
-      durationMs: 0,
-    })
-  }
-
-  // 运行时 workdir 优先；turn.cwd 可能为空串（workdir 为 null 时内核记 ''），
-  // 最后回落到宿主默认目录（`sdk.paths.cwd` 由宿主启动时解析并注入）。
-  const cwd = runtime.workdir ?? (turn.cwd || sdk.paths.cwd)
+  // 执行配置来自智能体（宿主已折算进 Turn）；cwd 由内核按项目 / 智能体工作目录写进 run，
+  // 空串回落到宿主默认目录（`sdk.paths.cwd` 由宿主启动时解析并注入）。
+  const modelSelection = turn.model ?? null
+  const cwd = turn.cwd || sdk.paths.cwd
   const resumeSessionId = turn.resumeSessionId ?? null
   const launched = startProcess(
     sdk,
     runtime.command,
-    claudeArgs(runtime, modelSelection, resumeSessionId),
+    claudeArgs(
+      permissionModeOfAccess(turn.access),
+      modelSelection,
+      turn.effort ?? null,
+      resumeSessionId,
+    ),
     cwd,
-    {},
+    turn.env ?? {},
   )
   if ('error' in launched) {
     return toReceipt(turn, {

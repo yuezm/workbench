@@ -129,7 +129,7 @@ describe('重建等价：≥200 条混合命令', () => {
       commands += 1
     }
 
-    // 运行时：创建 → 更新 → 探测；另建一个临时运行时删除（tombstone）
+    // 运行时：创建 → 更新（连接字段）→ 探测；另建一个临时运行时删除（tombstone）
     send({
       type: 'runtime.create',
       input: { name: '运行时 A', executorKey: 'dsh', command: 'dsh' },
@@ -138,7 +138,7 @@ describe('重建等价：≥200 条混合命令', () => {
     send({
       type: 'runtime.update',
       id: runtime.id,
-      patch: { model: 'deepseek/v4', reasoningEffort: 'high', maxConcurrent: 3 },
+      patch: { command: 'dsh2', profile: 'multica-2', argsTemplate: '["--stdio"]' },
     })
     send({ type: 'runtime.probed', id: runtime.id, probe })
     send({
@@ -147,7 +147,7 @@ describe('重建等价：≥200 条混合命令', () => {
     })
     send({ type: 'runtime.remove', id: findRuntime(store, '临时运行时').id })
 
-    // 智能体：三个常驻 + 一个创建后删除；改名走 agent.update
+    // 智能体：三个常驻 + 一个创建后删除；改名与执行配置都走 agent.update（M27）
     for (let index = 0; index < 3; index += 1) {
       send({ type: 'agent.create', input: { name: `智能体 ${index}`, runtimeId: runtime.id } })
     }
@@ -156,7 +156,16 @@ describe('重建等价：≥200 条混合命令', () => {
     send({
       type: 'agent.update',
       id: must(agents[0], '第一个智能体').id,
-      patch: { name: '智能体 0（改）', description: '改过' },
+      patch: {
+        name: '智能体 0（改）',
+        description: '改过',
+        model: 'deepseek/v4',
+        reasoningEffort: 'high',
+        maxConcurrent: 3,
+        permissionMode: 'danger-full-access',
+        workdir: 'C:/work',
+        env: { CI: '1' },
+      },
     })
     send({ type: 'agent.create', input: { name: '临时智能体', runtimeId: runtime.id } })
     send({ type: 'agent.remove', id: findAgent(store, '临时智能体').id })
@@ -430,11 +439,6 @@ describe('强杀重启：事实已提交、投影落后', () => {
           argsTemplate: '',
           command: 'dsh',
           profile: 'multica',
-          permissionMode: 'workspace-write',
-          model: null,
-          reasoningEffort: null,
-          workdir: null,
-          maxConcurrent: 1,
           enabled: true,
           createdAt: AT,
           lastProbe: null,

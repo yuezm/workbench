@@ -88,8 +88,6 @@ export async function seedApprovalState(dbPath: string): Promise<ApprovalSeed> {
         executorKey: 'dsh',
         command: process.execPath,
         profile: 'multica',
-        permissionMode: 'workspace-write',
-        maxConcurrent: 1,
         enabled: true,
       },
     }).facts
@@ -102,7 +100,12 @@ export async function seedApprovalState(dbPath: string): Promise<ApprovalSeed> {
     const agentFacts = store.dispatch({
       type: 'agent.create',
       commandId: 'e2e-approval-agent',
-      input: { name: 'e2e 审批智能体', runtimeId: runtime.id },
+      input: {
+        name: 'e2e 审批智能体',
+        runtimeId: runtime.id,
+        permissionMode: 'workspace-write',
+        maxConcurrent: 1,
+      },
     }).facts
     const agent = payloadOf<{ agent: Agent }>(agentFacts, 'agent.created', '智能体').agent
 

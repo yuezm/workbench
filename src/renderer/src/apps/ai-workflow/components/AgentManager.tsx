@@ -6,7 +6,13 @@ import { Panel, badgeCls } from '../../../components/ui/panel'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelViewState } from '../../../shell/useKernelView'
-import { AgentDialog, RUNTIME_HEALTH_LABEL, runtimeHealth, type RuntimeHealth } from './AgentDialog'
+import {
+  AgentDialog,
+  PERMISSION_LABEL,
+  RUNTIME_HEALTH_LABEL,
+  runtimeHealth,
+  type RuntimeHealth,
+} from './AgentDialog'
 
 /** 状态点配色：可用绿、不可用红、未检测灰 */
 const HEALTH_DOT: Record<RuntimeHealth, string> = {
@@ -91,6 +97,8 @@ export function AgentManager(): ReactElement {
 
   const runtimeOf = (id: string): Runtime | undefined => runtimes.find((r) => r.id === id)
   const runtimeName = (id: string): string => runtimeOf(id)?.name ?? id
+  /** 访问权限的中文名（清单只读展示，改在弹窗里） */
+  const permissionLabel = (agent: Agent): string => PERMISSION_LABEL[agent.permissionMode]
 
   return (
     <div className="flex flex-col gap-4">
@@ -152,7 +160,8 @@ export function AgentManager(): ReactElement {
                       className={cn('size-1.5 shrink-0 rounded-full', HEALTH_DOT[health])}
                     />
                     <span className="truncate">
-                      运行时：{runtimeName(a.runtimeId)} · {RUNTIME_HEALTH_LABEL[health]}
+                      运行时：{runtimeName(a.runtimeId)} · {RUNTIME_HEALTH_LABEL[health]} · 模型{' '}
+                      {a.model ?? '默认'} · 并发 {a.maxConcurrent} · {permissionLabel(a)}
                       {a.description ? ` · ${a.description}` : ''}
                     </span>
                   </span>
@@ -170,6 +179,12 @@ export function AgentManager(): ReactElement {
                         description: a.description,
                         runtimeId: a.runtimeId,
                         systemPrompt: a.systemPrompt,
+                        model: a.model,
+                        reasoningEffort: a.reasoningEffort,
+                        maxConcurrent: a.maxConcurrent,
+                        permissionMode: a.permissionMode,
+                        workdir: a.workdir,
+                        env: a.env,
                       },
                     })
                   }

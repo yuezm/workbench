@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '../../../src/kernel/types'
 import type {
+  Agent,
   Conversation,
   RunRow,
   Runtime,
@@ -48,17 +49,22 @@ function memory(): DatabaseSync {
 }
 
 describe('createProjectionWriter：显式行映射', () => {
-  it('五表 upsert 逐列写入（含 last_probe_json / enabled / 阶段 created_at）', () => {
+  it('五表 upsert 逐列写入（含 last_probe_json / enabled / 智能体执行配置 / 阶段 created_at）', () => {
     const db = memory()
     const writer = createProjectionWriter(db)
+    // M27：运行时只有连接字段，执行配置写进智能体
     const runtime = sample.runtime({
       enabled: false,
-      model: 'dsh/模型',
-      reasoningEffort: 'high',
-      workdir: 'D:\\Codes\\workbench',
       lastProbe: sampleProbe,
     })
-    const agent = sample.agent()
+    const agent = sample.agent({
+      model: 'dsh/模型',
+      reasoningEffort: 'high',
+      maxConcurrent: 3,
+      permissionMode: 'read-only',
+      workdir: 'D:\\Codes\\workbench',
+      env: { CI: '1' },
+    })
     const workflow = sample.workflow()
     const stage = sample.stage()
     const task = sample.task({ status: 'completed' })
@@ -75,8 +81,8 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(
       db
         .prepare(
-          `SELECT id, name, executor_key, command, profile, args_template, permission_mode, model,
-                  reasoning_effort, workdir, max_concurrent, enabled, last_probe_json, created_at
+          `SELECT id, name, executor_key, command, profile, args_template, enabled,
+                  last_probe_json, created_at
            FROM runtimes`,
         )
         .get(),
@@ -87,18 +93,17 @@ describe('createProjectionWriter：显式行映射', () => {
       command: 'dsh',
       profile: 'multica',
       args_template: '',
-      permission_mode: 'workspace-write',
-      model: 'dsh/模型',
-      reasoning_effort: 'high',
-      workdir: 'D:\\Codes\\workbench',
-      max_concurrent: 1,
       enabled: 0,
       last_probe_json: JSON.stringify(sampleProbe),
       created_at: SAMPLE_AT,
     })
     expect(
       db
-        .prepare('SELECT id, name, description, runtime_id, system_prompt, created_at FROM agents')
+        .prepare(
+          `SELECT id, name, description, runtime_id, system_prompt, model, reasoning_effort,
+                  max_concurrent, permission_mode, workdir, env_json, created_at
+           FROM agents`,
+        )
         .get(),
     ).toEqual({
       id: 'ag-1',
@@ -106,6 +111,12 @@ describe('createProjectionWriter：显式行映射', () => {
       description: '',
       runtime_id: 'rt-1',
       system_prompt: '',
+      model: 'dsh/模型',
+      reasoning_effort: 'high',
+      max_concurrent: 3,
+      permission_mode: 'read-only',
+      workdir: 'D:\\Codes\\workbench',
+      env_json: JSON.stringify({ CI: '1' }),
       created_at: SAMPLE_AT,
     })
     expect(db.prepare('SELECT id, name, description, created_at FROM workflows').get()).toEqual({
@@ -156,6 +167,39 @@ describe('createProjectionWriter：显式行映射', () => {
       parent_task_id: null,
       created_at: SAMPLE_AT,
       updated_at: SAMPLE_AT,
+    })
+  })
+
+  it('老智能体行缺执行配置六列：写入时归一为默认值（M27 前的 agent.* 事实 replay 兼容）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const runtime = sample.runtime()
+    writer.apply({ table: 'runtimes', key: runtime.id, row: runtime }, SAMPLE_AT)
+    // M27 前的 Agent 行只有身份字段（执行配置那时在运行时上）
+    const legacyRow = {
+      ...sample.agent(),
+      model: undefined,
+      reasoningEffort: undefined,
+      maxConcurrent: undefined,
+      permissionMode: undefined,
+      workdir: undefined,
+      env: undefined,
+    } as unknown as Agent
+    writer.apply({ table: 'agents', key: legacyRow.id, row: legacyRow }, SAMPLE_AT)
+
+    expect(
+      db
+        .prepare(
+          'SELECT model, reasoning_effort, max_concurrent, permission_mode, workdir, env_json FROM agents',
+        )
+        .get(),
+    ).toEqual({
+      model: null,
+      reasoning_effort: null,
+      max_concurrent: 1,
+      permission_mode: 'workspace-write',
+      workdir: null,
+      env_json: '{}',
     })
   })
 

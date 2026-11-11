@@ -40,7 +40,7 @@ export interface TestBackend {
   execute(request: TestBackendRequest): Promise<TestBackendOutcome>
 }
 
-/** 测试用运行时（插件若读 ctx.runtime，拿到的是这一行） */
+/** 测试用运行时（插件若读 ctx.runtime，拿到的是这一行：只有连接字段） */
 export const testRuntime = (patch: Partial<Runtime> = {}): Runtime => ({
   id: 'rt-test',
   name: '测试运行时',
@@ -48,11 +48,6 @@ export const testRuntime = (patch: Partial<Runtime> = {}): Runtime => ({
   command: 'dsh',
   profile: 'multica',
   argsTemplate: '',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastProbe: null,

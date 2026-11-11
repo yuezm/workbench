@@ -124,11 +124,6 @@ const runtime = (over: Partial<Runtime> = {}): Runtime => ({
   argsTemplate: '',
   command: NODE,
   profile: 'multica',
-  permissionMode: 'workspace-write',
-  model: null,
-  reasoningEffort: null,
-  workdir: null,
-  maxConcurrent: 1,
   enabled: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   lastProbe: null,
@@ -507,12 +502,15 @@ describe('executeDshRun', () => {
     const sessionCalls: string[] = []
     const processCalls: number[] = []
     const { running, events } = startRun(h, {
-      runtime: {
-        model: 'magpie/workbuddy%2Fauto',
-        reasoningEffort: 'high',
-        workdir: 'C:/work',
+      // 执行配置来自智能体（宿主折进 Turn）：模型已是 {provider,id}，强度 / cwd / env 同理
+      turn: {
+        model: { provider: 'magpie', id: 'workbuddy/auto' },
+        effort: 'high',
+        cwd: 'C:/work',
+        env: { HTTP_PROXY: 'http://127.0.0.1:7890' },
+        resumeSessionId: 'sess-prev',
+        signal: controller.signal,
       },
-      turn: { resumeSessionId: 'sess-prev', signal: controller.signal },
       sdk: { now: () => (tick += 3), sessionRoot: 'C:/sessions' },
       io: {
         session: (id) => sessionCalls.push(id),
@@ -535,7 +533,8 @@ describe('executeDshRun', () => {
     ])
     expect(h.calls[0].options.env.DSH_PERMISSION_MODE).toBe('workspace-write')
     expect(h.calls[0].options.env.MULTICA_DSH_SESSION_ROOT).toBe('C:/sessions')
-
+    // 智能体的环境变量原样铺开（权限与会话根随后覆盖，智能体改不动权限）
+    expect(h.calls[0].options.env.HTTP_PROXY).toBe('http://127.0.0.1:7890')
     child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
     child.emitStdout(frame({ v: 1, type: 'session', session_id: 'sess-1' }))
     child.emitStdout(frame({ v: 1, type: 'text', content: '你' }))
@@ -617,6 +616,26 @@ describe('executeDshRun', () => {
     // 旁路通道：pid 立即上报、会话 id 经 io.session 回报
     expect(processCalls).toEqual([4242])
     expect(sessionCalls).toEqual(['sess-1'])
+  })
+
+  it('宿主没配 sessionRoot：智能体写的同名会话根被删掉（路径只由宿主决定）', async () => {
+    const h = harness()
+    const { running } = startRun(h, {
+      turn: { env: { MULTICA_DSH_SESSION_ROOT: 'C:/agent-sessions' } },
+      sdk: { sessionRoot: null },
+    })
+    const child = h.children[0]
+
+    expect(h.calls[0].options.env.MULTICA_DSH_SESSION_ROOT).toBeUndefined()
+    expect(h.calls[0].options.env.DSH_PERMISSION_MODE).toBe('workspace-write')
+
+    // 正常收尾：不留下悬空的执行器 Promise
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(
+      frame({ v: 1, type: 'result', status: 'completed', output: 'ok', session_id: 'sess-1' }),
+    )
+    child.close(0)
+    await running
   })
 
   it('result 帧没有 output 时回退到 text 累计', async () => {
@@ -972,13 +991,32 @@ describe('executeDshRun', () => {
     expect(h.children).toHaveLength(0)
   })
 
-  it('模型 id 非法：run_failed，不启动进程', async () => {
+  it('宿主给 null 模型：execute 帧不带 model / reasoning_effort，按 CLI 默认跑', async () => {
     const h = harness()
-    const { running } = startRun(h, { runtime: { model: 'nomodel' } })
-    const receipt = await running
-    expect(receipt.errorCode).toBe('run_failed')
-    expect(receipt.error).toContain('provider/model')
-    expect(h.children).toHaveLength(0)
+    const { running } = startRun(h, { turn: { model: null, effort: null } })
+    const frameIn = h.children[0].frames()[0]
+    expect(frameIn).not.toHaveProperty('model')
+    expect(frameIn).not.toHaveProperty('reasoning_effort')
+
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
+    child.close(0)
+    expect((await running).status).toBe('succeeded')
+  })
+
+  it('智能体的 env 不能覆盖宿主判定的权限模式（DSH_PERMISSION_MODE 由 Turn.access 决定）', async () => {
+    const h = harness()
+    const { running } = startRun(h, {
+      turn: { access: 'read', env: { DSH_PERMISSION_MODE: 'danger-full-access' } },
+    })
+    expect(h.calls[0].options.env.DSH_PERMISSION_MODE).toBe('read-only')
+
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
+    child.close(0)
+    expect((await running).status).toBe('succeeded')
   })
 
   it('子进程 error 事件：spawn_failed 并收尾', async () => {
@@ -1322,12 +1360,11 @@ describe('取消/超时终止的定时器收尾（假定时器）', () => {
   })
 })
 
-describe('D10：工作目录优先级', () => {
-  it('workdir 优先；workdir 为空用 turn.cwd；两者都空回落到主进程当前目录（execute.cwd 不省略）', async () => {
-    // workdir=null、turn.cwd=''：回落到 sdk.paths.cwd，spawn 与 execute 帧都用它
+describe('工作目录来自 Turn（内核按「项目文件夹 > 智能体工作目录」写入 run.cwd）', () => {
+  it('turn.cwd 有值就用它；空串回落到主进程当前目录（execute.cwd 不省略）', async () => {
+    // turn.cwd=''：回落到 sdk.paths.cwd，spawn 与 execute 帧都用它
     const h = harness()
     const first = startRun(h, {
-      runtime: { workdir: null },
       turn: { cwd: '' },
       sdk: { cwd: 'D:/main-cwd' },
     })
@@ -1338,10 +1375,9 @@ describe('D10：工作目录优先级', () => {
     h.children[0].close(0)
     expect((await first.running).status).toBe('succeeded')
 
-    // workdir=null、turn.cwd 有值：turn.cwd 赢
+    // turn.cwd 有值：它同时是 spawn 的 cwd 与 execute 帧的 cwd
     const hMid = harness()
     const mid = startRun(hMid, {
-      runtime: { workdir: null },
       turn: { cwd: 'C:/work' },
       sdk: { cwd: 'D:/main-cwd' },
     })
@@ -1351,16 +1387,6 @@ describe('D10：工作目录优先级', () => {
     hMid.children[0].emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
     hMid.children[0].close(0)
     expect((await mid.running).status).toBe('succeeded')
-
-    // runtime.workdir 优先于 turn.cwd
-    const h2 = harness()
-    const second = startRun(h2, { runtime: { workdir: 'D:/repo' }, turn: { cwd: 'C:/work' } })
-    expect(h2.calls[0].options.cwd).toBe('D:/repo')
-    expect(h2.children[0].frames()[0].cwd).toBe('D:/repo')
-    h2.children[0].emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
-    h2.children[0].emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: 'ok' }))
-    h2.children[0].close(0)
-    expect((await second.running).status).toBe('succeeded')
   })
 })
 
@@ -1544,7 +1570,7 @@ describe('启动失败的兜底文案（spawn 返回空）', () => {
     const h = harness()
     const base = fakeSdk({ spawn: h.spawn, killTree: h.killTree })
     const ctx: ExecutorContext = {
-      runtime: runtime({ workdir: null }),
+      runtime: runtime(),
       sdk: { ...base, paths: { sessionRoot: null, cwd: undefined as unknown as string } },
     }
 

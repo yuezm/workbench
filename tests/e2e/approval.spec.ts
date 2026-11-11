@@ -153,6 +153,42 @@ test('审批等待期：租约已释放、无子进程、无 Token、回答续�
   })
 })
 
+test('通知条点进来：进任务详情并定位高亮那张卡，选中后提交才续接', async () => {
+  test.setTimeout(120_000)
+
+  const userDataDir = createTempUserDataDir()
+  seed = await seedApprovalState(path.join(userDataDir, 'ai-workflow.db'))
+  const seeded = seed
+  launched = await launchApp({ userDataDir })
+  page = launched.page
+  await expect(page).toHaveTitle('Workbench')
+
+  // 顶部通知条只列标题：点条目进任务详情
+  const bar = page.getByRole('region', { name: '待审批' })
+  await bar.getByRole('button', { name: /审批：是否继续？/ }).click()
+  await expect(page.getByRole('region', { name: '任务详情' })).toBeVisible()
+
+  // 定位：卡片带锚点并被标成高亮态，且确实滚进了视口（「点进去还要自己翻」的回归）。
+  // `toBeInViewport` 会轮询：`scrollIntoView({behavior:'smooth'})` 是动画，量一次不算数。
+  const anchor = page.locator(`[data-card-id="${seeded.cardId}"]`)
+  await expect(anchor).toHaveAttribute('data-focused', 'true')
+  await expect(anchor).toBeInViewport({ ratio: 0.8 })
+
+  // 选中 ≠ 提交：点了「停止」数据库里的卡还是 open
+  await anchor.getByRole('radio', { name: '停止' }).click()
+  await expect(anchor.getByRole('radio', { name: '停止' })).toHaveAttribute('aria-checked', 'true')
+  expect(readApprovalState(seeded.dbPath, seeded.runId, seeded.cardId).cardStatus).toBe('open')
+
+  // 按「提交所选」才续接：卡变 answered，随后从 cards.open 消失（界面上锚点被移除）
+  await page.getByRole('button', { name: '提交所选' }).click()
+  await expect
+    .poll(() => readApprovalState(seeded.dbPath, seeded.runId, seeded.cardId).cardStatus, {
+      timeout: 15_000,
+    })
+    .toBe('answered')
+  await expect(page.locator(`[data-card-id="${seeded.cardId}"]`)).toHaveCount(0)
+})
+
 test('卡片投递：pending 到 delivered，in-app 通道优先（不触发桌面通知）', async () => {
   test.setTimeout(120_000)
 

@@ -140,8 +140,9 @@ export function AgentDialog({
   return (
     <Dialog
       open
-      onOpenChange={(next) => {
-        if (!next) onCancel()
+      onOpenChange={() => {
+        // Radix 受控弹窗无 Trigger：dismiss 只会发 false，故直接收口
+        onCancel()
       }}
     >
       {/*

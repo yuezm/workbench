@@ -242,8 +242,9 @@ export function WorkflowManager(): ReactElement {
       {editing !== undefined && (
         <Dialog
           open
-          onOpenChange={(next) => {
-            if (!next) setEditing(undefined)
+          onOpenChange={() => {
+            // Radix 受控弹窗无 Trigger：dismiss 只会发 false，故直接收口
+            setEditing(undefined)
           }}
         >
           {/* 宽度必须带 sm: 前缀：基座里的是 sm:max-w-lg，裸 max-w-3xl 跟它不同变体、合不掉，

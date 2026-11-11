@@ -203,6 +203,19 @@ export function insertStageIndex(stages: readonly StageInput[]): number {
   return userStageRange(stages).end
 }
 
+/**
+ * 规则弹窗换目标工作流后该保留哪个起始阶段：新流程里还有这个 id 就保留，否则回到「首阶段」（空串）。
+ *
+ * 阶段 id 全局唯一，所以「保留」只会发生在同一个工作流被重新选中时；抽成纯函数是为了让
+ * 「阶段还在 / 阶段已不属于新流程 / 新流程读不到」三种输入都能直接单测，规则弹窗里的守卫一字不改。
+ */
+export function stageIdAfterWorkflowChange(
+  stages: readonly { id: string }[] | undefined,
+  stageId: string,
+): string {
+  return stages?.some((stage) => stage.id === stageId) === true ? stageId : ''
+}
+
 /** 添加阶段的默认名称：按自己添加的阶段数编号，不把内置阶段算进去。 */
 export function nextUserStageName(stages: readonly StageInput[]): string {
   return `阶段${stages.filter(isUserStage).length + 1}`

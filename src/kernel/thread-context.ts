@@ -35,14 +35,26 @@ const truncate = (value: string, max: number): string => {
 const truncateBlock = (value: string, max: number): string => {
   const chars = Array.from(value.trim())
   if (chars.length <= max) return chars.join('')
+  const { head, tail, dropped } = headTailSplit(chars, max)
+  return [head, `\n…（中间已截断 ${dropped} 字，尾部保留）\n`, tail].join('')
+}
+
+/**
+ * 超长正文的头尾切分（保头 `ceil(max*60%)` / 保尾其余）：`max` 小到没有尾部预算时尾部
+ * 为空串（不重复头部）。单列成导出函数只为让这条「尾长为 0」的判定能被单测直接覆盖——
+ * 产品路径的 `max` 恒取自 `THREAD_LIMITS`（400 / 2000），构造不出尾长为 0 的入参。
+ */
+export function headTailSplit(
+  chars: readonly string[],
+  max: number,
+): { head: string; tail: string; dropped: number } {
   const headLen = Math.ceil(max * 0.6)
   const tailLen = max - headLen
-  const dropped = chars.length - max
-  return [
-    chars.slice(0, headLen).join(''),
-    `\n…（中间已截断 ${dropped} 字，尾部保留）\n`,
-    tailLen === 0 ? '' : chars.slice(chars.length - tailLen).join(''),
-  ].join('')
+  return {
+    head: chars.slice(0, headLen).join(''),
+    tail: tailLen === 0 ? '' : chars.slice(chars.length - tailLen).join(''),
+    dropped: chars.length - max,
+  }
 }
 
 /** 资料段统一标注（防注入口径：正文只作资料）。 */

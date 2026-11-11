@@ -84,8 +84,9 @@ export function TaskDialog({
   return (
     <Dialog
       open
-      onOpenChange={(next) => {
-        if (!next) onCancel()
+      onOpenChange={() => {
+        // Radix 受控弹窗无 Trigger：dismiss 只会发 false，故直接收口
+        onCancel()
       }}
     >
       {/* 高度上限 + 内部滚动：长描述不把弹窗顶出视口（SPEC-ui §4「Dialog 的尺寸」） */}

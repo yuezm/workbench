@@ -1,10 +1,10 @@
 /**
  * 任务命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
-import type { Task } from '../../protocol/entities'
+import type { Task, WorkflowWithStages } from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
 import type { TaskComment } from '../../protocol/task-comment'
-import type { Decision, Environment, FactDraft, Iso, View } from '../types'
+import type { Decision, Environment, FactDraft, Id, Iso, View } from '../types'
 import { handoffOnExit } from '../handoff'
 import { childrenSettledFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
@@ -121,6 +121,18 @@ export function createTask(
   return done(facts)
 }
 
+/**
+ * 人工跳转留痕里的「自然去向」文案：`null` = 完成（该阶段没有下一阶段），阶段已不存在时
+ * 退「未知阶段」。
+ *
+ * 单列成导出函数只为让这两条判定能被单测直接覆盖：命令路径进到该处前已经断言当前阶段
+ * 属于本工作流，`moveTask` 的返回值因此恒为「当前阶段」或 flow 里的阶段，构造不出另外两支。
+ */
+export function naturalStageLabel(natural: Id | null, flow: WorkflowWithStages): string {
+  if (natural === null) return '完成'
+  return flow.stages.find((stage) => stage.id === natural)?.name ?? '未知阶段'
+}
+
 export function moveTaskCommand(
   view: View,
   input: Extract<Input, { type: 'task.move' }>,
@@ -156,10 +168,7 @@ export function moveTaskCommand(
     const natural = moveTask(task, { type: 'RUN_SUCCEEDED', runId: 'manual-move-probe' }, flow).task
       .currentStageId
     if (natural !== moved.currentStageId) {
-      const naturalName =
-        natural === null
-          ? '完成'
-          : (flow.stages.find((stage) => stage.id === natural)?.name ?? '未知阶段')
+      const naturalName = naturalStageLabel(natural, flow)
       const comment: TaskComment = {
         id: env.nextId('task-comment'),
         taskId: task.id,

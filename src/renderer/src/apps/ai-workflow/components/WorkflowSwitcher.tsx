@@ -26,8 +26,8 @@ export function WorkflowSwitcher({
   onNew,
   onEdit,
 }: WorkflowSwitcherProps): ReactElement {
-  const hasActive = Boolean(workflows.find((w) => w.id === activeId))
   const active = workflows.find((w) => w.id === activeId)
+  const hasActive = active !== undefined
   return (
     <div className="flex items-center gap-2">
       <div className="flex items-center gap-2 rounded-lg border border-border bg-muted py-1 pr-1.5 pl-3 transition-colors duration-150 hover:border-input">
@@ -48,10 +48,7 @@ export function WorkflowSwitcher({
           <rect x="17" y="4" width="4" height="13" rx="1.2" />
         </svg>
         <span className="text-xs text-faint-foreground">工作流</span>
-        <Select
-          value={workflows.some((w) => w.id === activeId) ? (activeId ?? '') : ''}
-          onValueChange={onSelect}
-        >
+        <Select value={active?.id ?? ''} onValueChange={onSelect}>
           <SelectTrigger
             aria-label="选择工作流"
             size="sm"

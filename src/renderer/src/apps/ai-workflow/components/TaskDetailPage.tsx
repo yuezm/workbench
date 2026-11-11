@@ -23,6 +23,17 @@ import { ReviewPanel } from './ReviewPanel'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
+/**
+ * 「重新执行」按钮文案里的阶段名：阶段名缺失（脏投影）时退化「当前阶段」。
+ *
+ * 产品路径上该按钮只在阶段存在且 `entryMode === 'agent'` 时渲染，所以 `name` 缺失只能来自
+ * 脏投影；抽成模块级导出函数后，两种输入都能直接单测（与 `WorkflowEditor` 的
+ * `moveStageInList` 同口径），产品路径的判定一字不改。
+ */
+export function rerunStageLabel(stageName: string | null | undefined): string {
+  return stageName ?? '当前阶段'
+}
+
 export interface TaskDetailPageProps {
   taskId: string
   /** 工作流清单：阶段名与工作流名从这里查，缺数据时退化为未知 */
@@ -220,7 +231,7 @@ export function TaskDetailPage({
                 variant="secondary"
                 size="sm"
                 disabled={action !== null}
-                title={`重新执行「${stageName ?? '当前阶段'}」这一轮（失败后原地重排）`}
+                title={`重新执行「${rerunStageLabel(stageName)}」这一轮（失败后原地重排）`}
                 onClick={rerunStage}
               >
                 {action === 'rerun' ? '正在重排…' : '重新执行'}

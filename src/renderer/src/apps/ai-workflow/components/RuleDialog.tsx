@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from '../../../components/ui/select'
 import { Textarea } from '../../../components/ui/textarea'
+import { stageIdAfterWorkflowChange } from '../model/stage-draft'
 
 export interface RuleDialogProps {
   /** 打开时的草稿：新建由模板/空白规则生成，编辑传现有规则（id 原样保留） */
@@ -156,7 +157,7 @@ export function RuleDialog({
     setWorkflowId(nextId)
     clearError('workflow')
     const next = workflows.find((item) => item.id === nextId)
-    if (!next?.stages.some((stage) => stage.id === stageId)) setStageId('')
+    setStageId(stageIdAfterWorkflowChange(next?.stages, stageId))
   }
 
   /** 形状校验：返回第一个出错的字段与文案（错误要挂在字段上，不丢到底部一句） */
@@ -225,8 +226,9 @@ export function RuleDialog({
   return (
     <Dialog
       open
-      onOpenChange={(next) => {
-        if (!next) onCancel()
+      onOpenChange={() => {
+        // Radix 受控弹窗无 Trigger：dismiss 只会发 false，故直接收口
+        onCancel()
       }}
     >
       <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto sm:max-w-2xl">

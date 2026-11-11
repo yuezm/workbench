@@ -20,9 +20,11 @@ import type { FactPayload, FactType } from '../../src/protocol/facts'
 import type { ThreadRow } from '../../src/protocol/thread'
 import type { HostInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
+import { naturalStageLabel } from '../../src/kernel/commands/task'
 import { indexTarget, sameInstructions } from '../../src/kernel/commands/workflow'
 import {
   interruptRuleText,
+  outputContractText,
   receiptBlockHint,
   taskPrompt,
   taskReceiptKeys,
@@ -40,6 +42,8 @@ const HINT = receiptBlockHint(BASE_RECEIPT_KEYS)
 const THREAD_HINT = receiptBlockHint(taskReceiptKeys(null, { threadId: 'th-1' }))
 /** 阶段任务提示词里的打断规则段（M19）。 */
 const INTERRUPT = interruptRuleText()
+/** 本轮正文段（M27）：挂线程的阶段才有。 */
+const CONTRACT = outputContractText()
 
 const workflow = (over: Partial<Workflow> = {}): Workflow => ({
   id: 'wf-1',
@@ -1904,7 +1908,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       threadContextRef: null,
       queueSeq: 0,
       status: 'queued',
-      prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
       output: '',
       error: null,
       errorCode: null,
@@ -2311,7 +2315,9 @@ describe('kernel/prompt taskPrompt', () => {
     )
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
-    expect(run.prompt).toBe(`# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${THREAD_HINT}`)
+    expect(run.prompt).toBe(
+      `# 任务：T\n\n# 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+    )
   })
 
   it('描述非空时按「智能体 → 任务 → 描述 → 阶段」顺序、两两空行分隔', () => {
@@ -2333,7 +2339,7 @@ describe('kernel/prompt taskPrompt', () => {
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
     expect(run.prompt).toBe(
-      `sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      `sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 })
@@ -2712,5 +2718,24 @@ describe('kernel/commands/workflow 阶段下标与文案比较', () => {
     expect(sameInstructions(null, undefined)).toBe(true)
     expect(sameInstructions('干活', '干活')).toBe(true)
     expect(sameInstructions('干活', '')).toBe(false)
+  })
+})
+
+describe('kernel/commands/task 人工跳转留痕的「自然去向」文案', () => {
+  const flow = {
+    ...workflow(),
+    stages: [stage(), stage({ id: 'st-2', name: '实现', position: 1 })],
+  }
+
+  it('目标阶段还在：「自然去向」用它自己的名字', () => {
+    expect(naturalStageLabel('st-2', flow)).toBe('实现')
+  })
+
+  it('没有下一阶段（自然去向是完成）：文案写「完成」', () => {
+    expect(naturalStageLabel(null, flow)).toBe('完成')
+  })
+
+  it('目标阶段已不在工作流里（脏投影）：文案退「未知阶段」，不写空', () => {
+    expect(naturalStageLabel('st-404', flow)).toBe('未知阶段')
   })
 })

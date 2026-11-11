@@ -14,6 +14,7 @@ import {
   gateInstructionsText,
   interruptRuleText,
   laterPrompt,
+  outputContractText,
   receiptBlockHint,
   stageInstructionsText,
   taskCommentsText,
@@ -32,6 +33,8 @@ const TASK_HINT = receiptBlockHint(BASE_RECEIPT_KEYS)
 const CHAT_HINT = receiptBlockHint(CHAT_RECEIPT_KEYS)
 /** 阶段任务提示词里的打断规则段（M19）：固定文案，紧跟闸门判定。 */
 const INTERRUPT = interruptRuleText()
+/** 本轮正文段（M27）：固定文案，挂线程的阶段才有。 */
+const OUTPUT_CONTRACT = outputContractText()
 
 const agent = (over: Partial<Agent> = {}): Agent => ({
   id: 'ag-1',
@@ -142,6 +145,65 @@ describe('kernel/prompt chatPrompt', () => {
     expect(prompt).toBe(
       `你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n今天做什么？\n用户：继续\n\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
     )
+  })
+})
+
+describe('kernel/prompt 本轮正文段（M27）', () => {
+  const stageTask = (over: Partial<Task> = {}): Task => ({
+    id: 't-1',
+    title: 'T',
+    description: 'd',
+    workflowId: 'wf-1',
+    projectId: null,
+    currentStageId: 'st-1',
+    status: 'active',
+    origin: 'manual',
+    ruleId: null,
+    externalRef: null,
+    labels: [],
+    threadId: 'th-1',
+    parentTaskId: null,
+    handoffFromTaskId: null,
+    handoffFromStageId: null,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+    ...over,
+  })
+  const gate = { maxFails: 2, onPassStageId: null, onFailStageId: null }
+
+  it('固定文案：四类要点齐、禁过程叙述、首尾不带换行', () => {
+    const text = outputContractText()
+    expect(text).toBe(OUTPUT_CONTRACT)
+    expect(text.split('\n')[0]).toBe('## 本轮正文（会落盘给后续阶段当上下文）')
+    expect(text.startsWith('\n')).toBe(false)
+    expect(text.endsWith('\n')).toBe(false)
+    expect(text).toContain('后续阶段只读这一段')
+    expect(text).toContain('结论 / 决策')
+    expect(text).toContain('契约')
+    expect(text).toContain('落盘文件')
+    expect(text).toContain('未决项与假设')
+    expect(text).toContain('不复述过程')
+  })
+
+  it('挂线程才出现，位置在验收之后、闸门判定之前', () => {
+    const stage = {
+      name: '需求澄清',
+      instructions: '### 目标\n把需求变成工作项',
+      gate,
+      acceptance: ['一条'],
+    }
+    const text = taskPrompt(agent(), stageTask(), stage)
+    expect(text).toContain(OUTPUT_CONTRACT)
+    expect(text.indexOf('## 验收（做完的判据）')).toBeLessThan(text.indexOf(OUTPUT_CONTRACT))
+    expect(text.indexOf(OUTPUT_CONTRACT)).toBeLessThan(text.indexOf('## 闸门判定（必须）'))
+
+    // 不挂线程：没有 output.md 的消费者，逐字不产这段
+    const plain = taskPrompt(agent(), stageTask({ threadId: null }), stage)
+    expect(plain).not.toContain(OUTPUT_CONTRACT)
+  })
+
+  it('对话提示词不拼这段（聊天没有落盘正文）', () => {
+    expect(chatPrompt(agent(), [message()])).not.toContain('本轮正文')
   })
 })
 
@@ -447,11 +509,11 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     const THREAD_HINT = receiptBlockHint(taskReceiptKeys(null, threadTask))
     // M15：有线程上下文时才追加「跨任务按需读」规则（无上下文的老路径逐字不变）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, context)).toBe(
-      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${THREAD_HINT}`,
+      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${OUTPUT_CONTRACT}\n\n${INTERRUPT}\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${THREAD_HINT}`,
     )
     // 没有线程上下文时行为与 M6 完全一致（不多空行）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, null)).toBe(
-      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${OUTPUT_CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 

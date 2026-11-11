@@ -407,6 +407,12 @@ function elapsed(ms: number | null): string {
  * 用户能记住的是「任务 + 阶段 + 第几轮」，不是 UUID；所以索引必须把
  * runId 与任务/阶段/轮次/状态/文件清单排在一张表里。整表由 `meta.json` 重建，
  * 同一个 run 重跑只会覆盖自己那一行。
+ *
+ * 表里**只链 `output.md`**（M27）：其余文件是排查材料（`prompt.md` /
+ * `transcript.jsonl` / `meta.json`）或评审正文（`review.md`，模型侧的入口在
+ * 「待修复清单」段，不靠这里），给人的正文入口一个就够；`runId` 列保留，
+ * 要看别的文件按 runId 进目录即可。评审报告存在时行内加 `·review` 纯文本标记，
+ * 保住「这轮有没有评审」这个信号。
  */
 export function renderThreadIndex(threadId: string, metas: readonly RunArchiveMeta[]): string {
   const lines = [
@@ -414,17 +420,23 @@ export function renderThreadIndex(threadId: string, metas: readonly RunArchiveMe
     '',
     `- 线程：\`${threadId}\``,
     `- 每个 run 一个目录：\`runs/<runId>/\`，内含 \`prompt.md\`（派发提示词）、`,
-    '  `transcript.jsonl`（全帧流水，含 thinking 帧）、`output.md`（本轮产出）、`review.md`（评审报告，若有）、`meta.json`（元数据）。',
+    '  `transcript.jsonl`（全帧流水，含 thinking 帧）、`output.md`（本轮正文）、`review.md`（评审报告，若有）、`meta.json`（元数据）。',
+    '- 表里只链 `output.md`；其余文件按 `runId` 进目录看。`·review` = 该轮落过评审报告。',
     '- 本表由宿主在每次 run 终态时重建；时间列为 UTC。',
     '',
-    '| # | 时间 | 阶段 | 任务 | 轮次 | 状态 | 用时 | runId | 文件 |',
+    '| # | 时间 | 阶段 | 任务 | 轮次 | 状态 | 用时 | runId | 产出 |',
     '| - | ---- | ---- | ---- | ---- | ---- | ---- | ----- | ---- |',
   ]
   metas.forEach((meta, index) => {
+    // 只给正文链接；没有 output.md（空正文且无错误）时退到「-」，与「只列确实存在的文件」同口径
+    const links = meta.files
+      .filter((file) => INDEX_LINKED_FILES.includes(file))
+      .map((file) => `[\`${file}\`](runs/${meta.runId}/${file})`)
+    const review = meta.files.includes('review.md') ? '·review' : ''
+    const body = [...links, review].filter((part) => part !== '').join(' ') || '-'
     lines.push(
       `| ${index + 1} | ${stamp(meta.startedAt ?? meta.createdAt)} | ${cell(meta.stageName)} | ${cell(meta.taskTitle)} | ` +
-        `${meta.turn} | ${meta.status} | ${elapsed(meta.durationMs)} | \`${meta.runId}\` | ` +
-        `${meta.files.length === 0 ? '-' : meta.files.map((file) => `[\`${file}\`](runs/${meta.runId}/${file})`).join(' ')} |`,
+        `${meta.turn} | ${meta.status} | ${elapsed(meta.durationMs)} | \`${meta.runId}\` | ${body} |`,
     )
   })
   if (metas.length === 0) lines.push('| - | - | 还没有终态 run | - | - | - | - | - | - |')
@@ -441,6 +453,24 @@ export function writeThreadIndex(root: string, threadId: string): boolean {
 
 /** 归档目录里一个 run 的固定文件顺序（`meta.files` 按它排列，缺的跳过）。 */
 const RUN_ARCHIVE_FILES = ['prompt.md', 'transcript.jsonl', 'output.md', 'review.md'] as const
+
+/**
+ * 索引里挂链接的文件（M27）：只有正文。
+ *
+ * `meta.files` 继续记全四件套（排查与脚本要用），但索引只给 `output.md` 一个入口——
+ * 模型据索引读正文、人据索引找正文，两个消费者要的都是它；`prompt.md` /
+ * `transcript.jsonl` 是排查材料（体量大、不该被当上下文整读），`meta.json` 是脚本输入。
+ */
+const INDEX_LINKED_FILES: readonly string[] = ['output.md']
+
+/** 读文本；缺失或不可读返回 null（「与渲染结果比对」用它，读不到就算不一致）。 */
+function readTextOrNull(target: string): string | null {
+  try {
+    return readFileSync(target, 'utf8')
+  } catch {
+    return null
+  }
+}
 
 /** 读单个 `meta.json`；缺失或坏 JSON 返回 undefined（回填是尽力而为）。 */
 function readRunMeta(target: string): RunArchiveMeta | undefined {
@@ -491,6 +521,9 @@ function textFromTranscript(target: string): string {
  * - 补写成功后按固定顺序重算 `meta.files`，让索引能把新文件列出来；
  * - 顺带校准 `meta.files` 与磁盘的一致性：已下线的产物类型（如 `thinking.md`）不再被索引列出，
  *   所以这条路径也是「删掉一种产物」之后的陈留清理入口；
+ * - 索引也在这里对齐渲染口径：磁盘上的 `index.md` 与当前 `renderThreadIndex` 的输出不一致
+ *   （渲染格式改过 / 手工编辑过 / 半截写入）就重写。否则改一次表格形态，老线程的索引会一直
+ *   停在旧格式，直到它下一次有 run 终态——那可能永远不来；
  * - 全程 `writeAtomic` + 容错读取，坏文件只跳过那一条，不影响其余 run 与整表重建。
  *
  * @returns 实际补写的 run 数（调用方可据此决定要不要提示用户）
@@ -542,7 +575,11 @@ export function backfillRunOutputs(root: string | undefined): number {
       }
       if (touched) indexDirty = true
     }
-    if (indexDirty) writeThreadIndex(root, threadId)
+    // 索引口径自愈：渲染结果与磁盘内容不一致就重写（缺文件、格式改版、手工编辑都归到这里）
+    const rendered = renderThreadIndex(threadId, readRunMetas(root, threadId))
+    if (indexDirty || readTextOrNull(threadIndexPath(root, threadId)) !== rendered) {
+      writeThreadIndex(root, threadId)
+    }
   }
   return filled
 }

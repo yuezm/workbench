@@ -417,3 +417,136 @@ describe('applyReceiptBlock：执行器接线口径', () => {
     expect(parseReceiptBlock(text)).toEqual({ notices: ['完成'], notes: ['资料'] })
   })
 })
+
+describe('parseReceiptBlock：评审与验收键（M14 / M21）', () => {
+  /** 合法待改项夹具 */
+  const findingOf = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    key: 'R1',
+    severity: 'blocker',
+    location: 'src/a.ts:42',
+    claim: '越界下标没有校验',
+    requiredAction: '复跑 pnpm check 且不红即算修好',
+    ...over,
+  })
+
+  /** 合法处置夹具 */
+  const addressOf = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    findingId: 'rpt-1#R1',
+    disposition: 'fixed',
+    checkRef: 'pnpm check',
+    ...over,
+  })
+
+  it('findings：合法清单原样返回；单独 findings 也算回执块', () => {
+    expect(parseReceiptBlock(blockOf({ findings: [findingOf()] }))).toEqual({
+      findings: [findingOf()],
+    })
+    // 提示词里有、解析器不认，评审硬门就永远触发不了
+    expect(parseReceiptBlock(blockOf({ findings: [findingOf()], notices: ['n'] }))).toEqual({
+      findings: [findingOf()],
+      notices: ['n'],
+    })
+  })
+
+  it('findings 非法：缺必填 / severity 不认 / 小标重复 / 超条数 → 整块忽略', () => {
+    for (const bad of [
+      [{ ...findingOf(), key: '  ' }],
+      [{ ...findingOf(), severity: 'critical' }],
+      [{ ...findingOf(), claim: '' }],
+      [{ ...findingOf(), requiredAction: '' }],
+      [findingOf(), findingOf()],
+      Array.from({ length: 201 }, (_, index) => findingOf({ key: `R${index}` })),
+    ]) {
+      expect(parseReceiptBlock(blockOf({ findings: bad }))).toBeNull()
+    }
+    expect(parseReceiptBlock(blockOf({ findings: [], notices: ['n'] }))).toEqual({ notices: ['n'] })
+  })
+
+  it('addresses：fixed 带 checkRef、rejected / deferred 带 note 才认', () => {
+    const ok = [
+      addressOf(),
+      addressOf({ findingId: 'rpt-1#R2', disposition: 'deferred', note: '下轮再改' }),
+    ]
+    expect(parseReceiptBlock(blockOf({ addresses: ok }))).toEqual({ addresses: ok })
+    for (const bad of [
+      [addressOf({ checkRef: '' })],
+      [addressOf({ checkRef: undefined })],
+      [addressOf({ disposition: 'rejected' })],
+      [addressOf({ disposition: 'done' })],
+      [addressOf({ findingId: '' })],
+      Array.from({ length: 201 }, (_, index) =>
+        addressOf({ findingId: `rpt-1#R${index}`, disposition: 'rejected', note: '不改' }),
+      ),
+    ]) {
+      expect(parseReceiptBlock(blockOf({ addresses: bad }))).toBeNull()
+    }
+    expect(parseReceiptBlock(blockOf({ addresses: [], notices: ['n'] }))).toEqual({
+      notices: ['n'],
+    })
+  })
+
+  it('acceptance：no 是 1 基整数、met 必须是布尔；越界 / 非整数 / 缺 met 整块忽略', () => {
+    const ok = [{ no: 1, met: true, evidence: 'pnpm check 退出码 0' }]
+    expect(parseReceiptBlock(blockOf({ acceptance: ok }))).toEqual({ acceptance: ok })
+    // met=false 也是有效自评（未达会被内核判续轮）
+    expect(parseReceiptBlock(blockOf({ acceptance: [{ no: 2, met: false }] }))).toEqual({
+      acceptance: [{ no: 2, met: false }],
+    })
+    for (const bad of [
+      [{ no: 0, met: true }],
+      [{ no: 13, met: true }],
+      [{ no: 1.5, met: true }],
+      [{ no: '1', met: true }],
+      [{ no: 1 }],
+      [{ no: 1, met: 'yes' }],
+      [{ met: true }],
+      Array.from({ length: 13 }, (_, index) => ({ no: index + 1, met: true })),
+    ]) {
+      expect(parseReceiptBlock(blockOf({ acceptance: bad }))).toBeNull()
+    }
+    expect(parseReceiptBlock(blockOf({ acceptance: [], notices: ['n'] }))).toEqual({
+      notices: ['n'],
+    })
+  })
+
+  it('applyReceiptBlock：三个键写进回执，output 与终态不动', () => {
+    const text = blockOf({
+      findings: [findingOf()],
+      addresses: [addressOf()],
+      acceptance: [{ no: 1, met: true, evidence: 'pnpm check 退出码 0' }],
+    })
+    const receipt = receiptOf({ output: text })
+    applyReceiptBlock(receipt, text)
+
+    expect(receipt.output).toBe(text)
+    expect(receipt.status).toBe('succeeded')
+    expect(receipt.findings).toEqual([findingOf()])
+    expect(receipt.addresses).toEqual([addressOf()])
+    expect(receipt.acceptance).toEqual([{ no: 1, met: true, evidence: 'pnpm check 退出码 0' }])
+  })
+
+  it('非对象条目 / 超长字段：整块忽略（不把半截清单送进内核）', () => {
+    for (const bad of [
+      { findings: ['R1'] },
+      { findings: [findingOf({ location: 'x'.repeat(301) })] },
+      { findings: [findingOf({ evidence: 'x'.repeat(2001) })] },
+      { addresses: ['rpt-1#R1'] },
+      { addresses: [addressOf({ checkRef: 'x'.repeat(501) })] },
+      { addresses: [addressOf({ disposition: 'deferred', note: 'x'.repeat(501) })] },
+      { acceptance: ['1'] },
+      { acceptance: [{ no: 1, met: true, evidence: 'x'.repeat(2001) }] },
+    ]) {
+      expect(parseReceiptBlock(blockOf(bad))).toBeNull()
+    }
+  })
+
+  it('applyReceiptBlock：只带 acceptance 时 findings / addresses 保持未提供', () => {
+    const text = blockOf({ acceptance: [{ no: 1, met: false }] })
+    const receipt = receiptOf({ output: text })
+    applyReceiptBlock(receipt, text)
+
+    expect(receipt.acceptance).toEqual([{ no: 1, met: false }])
+    expect(receipt.findings).toBeUndefined()
+    expect(receipt.addresses).toBeUndefined()
+  })
+})

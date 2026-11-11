@@ -1,78 +1,40 @@
 /**
- * 回执块解析（M4，唯一口径见 SPEC-plugins「回执与执行约定」）：
+ * 回执块解析（M4，唯一口径见 SPEC-plugins「回执与执行约定」；M24 抽出字段校验）：
  *
  * 执行器的最终输出里可以带一个 ```json 围栏块，对象只要含
- * `ask / notices / resolves / later / events / spawn / notes / verdict / checks` 任一键
- * 就算回执块，其余键忽略。
- * **只看最后一个 ```json 围栏块**：该块非法 JSON / 非对象 / 不含九键任一 /
+ * `ask / notices / resolves / later / events / spawn / notes / verdict / checks /
+ * findings / addresses / acceptance` 任一键就算回执块，其余键忽略。
+ * **只看最后一个 ```json 围栏块**：该块非法 JSON / 非对象 / 十二键全无 /
  * 字段校验不过 → 直接返回 null，不回退到更早的块（回退可能沿用上一轮或正文里的
  * 陈旧回执，宁可这次不产卡片）。解析不修改输出原文、不改终态、不抛错。
  *
- * M11：`verdict` / `checks` 是闸门判定，必须在这里就过一遍——漏掉它们，闸门阶段的
- * 判定永远到不了内核，任务会一直停在闸门上（表现为「未通过也进不了阻塞阶段」）。
+ * 字段口径与 tool 通道（`receipt-tool.ts`）共用 `receipt-fields.ts` 的
+ * `receiptFromObject` / `applyReceiptFields`——两条传输只有「怎么拿到那个 JSON
+ * 对象」不同，校验不能有两套。
  *
  * 与 protocol 的分工是**两层校验**，不是等价的重复：
- * - 回执块层（本文件）：更严的前置过滤——空选项 `ask`、非 ISO `later`、畸形块一律
- *   忽略，宁可这次不产卡片，也不把可疑回执送进内核；
+ * - 回执块层：更严的前置过滤——空选项 `ask`、非 ISO `later`、畸形块、
+ *   重复小标的 `findings`、缺 `checkRef` 的 `fixed` 一律忽略，宁可这次不产卡片，
+ *   也不把可疑回执送进内核；
  * - 宿主层（`protocol/validate` 的 `checkReceipt`）：形状兜底——只校验必填/类型/
  *   长度/枚举，保证任意来源的 `run.receipt` 输入不破坏事实 schema。
  * 两层判据并不相同（宿主层放行的空选项 ask / 非 ISO later 到不了内核），
- * 上限常量共用 `COMMAND_LIMITS`，本文件不另定义一份。
+ * 上限常量共用 `COMMAND_LIMITS` / `REVIEW_LIMITS` / `ACCEPTANCE_LIMITS`，本文件不另定义一份。
  */
-import type { GateCheck, GateVerdict } from '../../protocol/entities'
-import { GATE_VERDICTS } from '../../protocol/entities'
-import type { Ask, RawEvent, Receipt, SpawnTask } from '../../protocol/inputs'
-import { COMMAND_LIMITS } from '../../protocol/validate'
-import { THREAD_LIMITS } from '../../protocol/thread'
+import type { Receipt } from '../../protocol/inputs'
+import { RECEIPT_KEYS } from '../../protocol/receipt-keys'
+import type { ReceiptBlock } from './receipt-fields'
+import { applyReceiptFields, receiptFromObject } from './receipt-fields'
 
-/** 回执块可携带的九个字段；解析结果只含这些键。 */
-export interface ReceiptBlock {
-  ask?: Ask[]
-  notices?: string[]
-  resolves?: string[]
-  later?: string
-  events?: RawEvent[]
-  /** 派生子任务（M8）：每条 ≤2000 字描述；只作声明，落地由内核决定 */
-  spawn?: SpawnTask[]
-  /** 线程笔记（M6.5）：每条 ≤2000 字，只作资料 */
-  notes?: string[]
-  /** 闸门判定（M11）：只对闸门阶段有意义；缺省 = 没给结论 */
-  verdict?: GateVerdict
-  /** 判定证据（M11）：`{ cmd, exitCode }`；缺省 / 空数组 = 没给证据 */
-  checks?: GateCheck[]
-}
+export type { ReceiptBlock } from './receipt-fields'
 
-const RECEIPT_BLOCK_KEYS = [
-  'ask',
-  'notices',
-  'resolves',
-  'later',
-  'events',
-  'spawn',
-  'notes',
-  'verdict',
-  'checks',
-] as const
+/** 解析白名单：与提示词、协议校验同源（`protocol/receipt-keys` 的 `RECEIPT_KEYS`）。 */
+export const RECEIPT_BLOCK_KEYS = RECEIPT_KEYS
 
 /** 开围栏：```json（标签大小写不敏感）单独成行 */
 const FENCE_OPEN_RE = /^```json\s*$/i
 /** 闭围栏：``` 单独成行 */
 const FENCE_CLOSE_RE = /^```\s*$/
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-
-/** 必填文本：非空、不超长（同 validate 的 `text`）。 */
-const isText = (value: unknown, max: number): value is string =>
-  typeof value === 'string' && value.trim() !== '' && value.length <= max
-
-/** 可选文本：缺省 / null 视为未提供，空串允许（同 validate 的 `optionalText`）。 */
-const isOptionalText = (value: unknown, max: number): boolean =>
-  value === undefined || value === null || (typeof value === 'string' && value.length <= max)
-
-/** 可选字符串：不设上限（同 validate 的 `optionalString`，用于 `events.detail`）。 */
-const isOptionalString = (value: unknown): boolean =>
-  value === undefined || value === null || typeof value === 'string'
 
 /** 逐行切出 ```json 围栏块；未闭合的块丢弃，其它语言的围栏不识别。 */
 function jsonBlocks(text: string): string[] {
@@ -104,113 +66,10 @@ function lastJsonBlock(text: string): string | null {
   return jsonBlocks(text).at(-1) ?? null
 }
 
-const parseAskList = (value: unknown): Ask[] | null => {
-  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.receiptItems) return null
-  for (const entry of value) {
-    if (!isRecord(entry)) return null
-    if (!isText(entry.title, COMMAND_LIMITS.title)) return null
-    if (!isOptionalText(entry.text, COMMAND_LIMITS.description)) return null
-    if (!Array.isArray(entry.options)) return null
-    // 空选项的 ask 无法拍板：整块忽略（协议层允许空数组，比分回执块口径更严）
-    if (entry.options.length === 0 || entry.options.length > COMMAND_LIMITS.askOptions) return null
-    for (const option of entry.options) {
-      if (!isText(option, COMMAND_LIMITS.title)) return null
-    }
-    if (!isOptionalText(entry.key, COMMAND_LIMITS.id)) return null
-  }
-  return value as Ask[]
-}
-
-const parseNotices = (value: unknown): string[] | null => {
-  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.receiptItems) return null
-  for (const notice of value) {
-    if (!isText(notice, COMMAND_LIMITS.description)) return null
-  }
-  return value as string[]
-}
-
-const parseResolves = (value: unknown): string[] | null => {
-  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.receiptItems) return null
-  for (const id of value) {
-    if (!isText(id, COMMAND_LIMITS.id)) return null
-  }
-  return value as string[]
-}
-
-const parseEvents = (value: unknown): RawEvent[] | null => {
-  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.receiptItems) return null
-  for (const entry of value) {
-    if (!isRecord(entry)) return null
-    if (!isText(entry.source, COMMAND_LIMITS.name)) return null
-    if (!isText(entry.type, COMMAND_LIMITS.name)) return null
-    if (!isText(entry.subject, COMMAND_LIMITS.title)) return null
-    if (!isOptionalText(entry.summary, COMMAND_LIMITS.summary)) return null
-    if (!isOptionalString(entry.detail)) return null
-    if (!isOptionalText(entry.link, COMMAND_LIMITS.workdir)) return null
-    if (!isOptionalText(entry.dedupeKey, COMMAND_LIMITS.id)) return null
-  }
-  return value as RawEvent[]
-}
-
-const parseNotes = (value: unknown): string[] | null => {
-  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.receiptItems) return null
-  for (const note of value) {
-    if (!isText(note, THREAD_LIMITS.noteText)) return null
-  }
-  return value as string[]
-}
-
-const parseSpawnList = (value: unknown): SpawnTask[] | null => {
-  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.spawnItems) return null
-  for (const entry of value) {
-    if (!isRecord(entry)) return null
-    if (!isText(entry.subject, COMMAND_LIMITS.title)) return null
-    if (!isOptionalText(entry.summary, COMMAND_LIMITS.description)) return null
-    if (!isOptionalText(entry.stageId, COMMAND_LIMITS.id)) return null
-    const batch = entry.batch
-    if (batch !== undefined && batch !== null) {
-      if (
-        typeof batch !== 'number' ||
-        !Number.isInteger(batch) ||
-        batch < 1 ||
-        batch > COMMAND_LIMITS.spawnBatchMax
-      ) {
-        return null
-      }
-    }
-    if (!isOptionalText(entry.key, COMMAND_LIMITS.id)) return null
-  }
-  return value as SpawnTask[]
-}
-
-const parseLater = (value: unknown): string | null => {
-  if (!isText(value, COMMAND_LIMITS.iso)) return null
-  // 内核会把 later 直接当 notBefore：非 ISO 时间整块忽略，不让无效时刻进调度
-  return Number.isNaN(Date.parse(value)) ? null : value
-}
-
-/** 闸门判定：只认 `pass` / `fail`，其余（含大小写变体、中文）整块忽略。 */
-const parseVerdict = (value: unknown): GateVerdict | null =>
-  typeof value === 'string' && (GATE_VERDICTS as readonly string[]).includes(value)
-    ? (value as GateVerdict)
-    : null
-
-/** 闸门证据：命令非空且不超长，退出码为 ±1000000 内的整数（同 validate 的 `checkGateCheck`）。 */
-const parseChecks = (value: unknown): GateCheck[] | null => {
-  if (!Array.isArray(value) || value.length > COMMAND_LIMITS.gateChecks) return null
-  for (const entry of value) {
-    if (!isRecord(entry)) return null
-    if (!isText(entry.cmd, COMMAND_LIMITS.gateCmd)) return null
-    if (typeof entry.exitCode !== 'number' || !Number.isInteger(entry.exitCode)) return null
-    if (entry.exitCode < -1_000_000 || entry.exitCode > 1_000_000) return null
-  }
-  return value as GateCheck[]
-}
-
 /**
  * 解析执行器输出里的回执块。
  *
- * 只看最后一个 ```json 围栏块：没有块、非法 JSON、不是对象、九键全无、
+ * 只看最后一个 ```json 围栏块：没有块、非法 JSON、不是对象、十二键全无、
  * 或任一字段校验不过，都返回 `null`（不回退到更早的块）。不抛异常。
  */
 export function parseReceiptBlock(output: string): ReceiptBlock | null {
@@ -222,116 +81,16 @@ export function parseReceiptBlock(output: string): ReceiptBlock | null {
   } catch {
     return null
   }
-  if (!isRecord(parsed)) return null
-
-  const block: ReceiptBlock = {}
-  let fields = 0
-
-  for (const key of RECEIPT_BLOCK_KEYS) {
-    if (!Object.prototype.hasOwnProperty.call(parsed, key)) continue
-    const value = parsed[key]
-    // 缺省 / null 视为未提供（同 protocol 回执校验口径）
-    if (value === null || value === undefined) continue
-    switch (key) {
-      case 'ask': {
-        const ask = parseAskList(value)
-        if (!ask) return null
-        if (ask.length > 0) {
-          block.ask = ask
-          fields += 1
-        }
-        break
-      }
-      case 'notices': {
-        const notices = parseNotices(value)
-        if (!notices) return null
-        if (notices.length > 0) {
-          block.notices = notices
-          fields += 1
-        }
-        break
-      }
-      case 'resolves': {
-        const resolves = parseResolves(value)
-        if (!resolves) return null
-        if (resolves.length > 0) {
-          block.resolves = resolves
-          fields += 1
-        }
-        break
-      }
-      case 'later': {
-        const later = parseLater(value)
-        if (!later) return null
-        block.later = later
-        fields += 1
-        break
-      }
-      case 'events': {
-        const events = parseEvents(value)
-        if (!events) return null
-        if (events.length > 0) {
-          block.events = events
-          fields += 1
-        }
-        break
-      }
-      case 'spawn': {
-        const spawn = parseSpawnList(value)
-        if (!spawn) return null
-        if (spawn.length > 0) {
-          block.spawn = spawn
-          fields += 1
-        }
-        break
-      }
-      case 'notes': {
-        const notes = parseNotes(value)
-        if (!notes) return null
-        if (notes.length > 0) {
-          block.notes = notes
-          fields += 1
-        }
-        break
-      }
-      case 'verdict': {
-        const verdict = parseVerdict(value)
-        if (!verdict) return null
-        block.verdict = verdict
-        fields += 1
-        break
-      }
-      case 'checks': {
-        const checks = parseChecks(value)
-        if (!checks) return null
-        // 空数组 = 没给证据：不当作有效键，但也不连累同块的 verdict
-        if (checks.length > 0) {
-          block.checks = checks
-          fields += 1
-        }
-        break
-      }
-    }
-  }
-
-  return fields > 0 ? block : null
+  return receiptFromObject(parsed)
 }
 
 /**
- * 把输出里的回执块写进回执：只补九个字段，解析失败保持原样。
+ * 把输出里的回执块写进回执：只补十二个字段，解析失败保持原样。
  *
  * 执行器接线只调这一处——不改 `output`、不改终态、不抛错。
  */
 export function applyReceiptBlock(receipt: Receipt, output: string): void {
   const block = parseReceiptBlock(output)
   if (!block) return
-  if (block.ask !== undefined) receipt.ask = block.ask
-  if (block.notices !== undefined) receipt.notices = block.notices
-  if (block.resolves !== undefined) receipt.resolves = block.resolves
-  if (block.later !== undefined) receipt.later = block.later
-  if (block.events !== undefined) receipt.events = block.events
-  if (block.spawn !== undefined) receipt.spawn = block.spawn
-  if (block.notes !== undefined) receipt.notes = block.notes
-  if (block.verdict !== undefined) receipt.verdict = block.verdict
-  if (block.checks !== undefined) receipt.checks = block.checks
+  applyReceiptFields(receipt, block)
 }

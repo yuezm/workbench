@@ -13,6 +13,7 @@ import {
   type TestBackendRequest,
 } from './plugin-support'
 import { chatPrompt, receiptBlockHint } from '../../src/kernel/prompt'
+import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
 import { createProcessRegistry } from '../../src/host/process-registry'
 import { createScheduler, type Scheduler } from '../../src/host/scheduler'
 import { createCommandRouter, type CommandRouter } from '../../src/host/commands'
@@ -286,7 +287,7 @@ describe('chat：一轮执行（首轮 / 续接 / 错误文案）', () => {
     expect(chatRuns(conv.id)[0]?.status).toBe('succeeded')
     // 首轮 prompt 带 systemPrompt + 完整对话记录 + 结尾提示 + 固定的回执块说明（M4 D4）
     expect(script.requests[0]?.turn.prompt).toBe(
-      `你是助手。\n\n# 对话记录\n\n用户：你好\n\n请回答最后一条用户消息。\n\n${receiptBlockHint()}`,
+      `你是助手。\n\n# 对话记录\n\n用户：你好\n\n请回答最后一条用户消息。\n\n${receiptBlockHint(CHAT_RECEIPT_KEYS)}`,
     )
     expect(endsOf(conv.id)).toBe(1)
   })

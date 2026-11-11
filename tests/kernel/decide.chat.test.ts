@@ -15,6 +15,7 @@ import type {
 } from '../../src/protocol/entities'
 import { decide } from '../../src/kernel/decide'
 import { receiptBlockHint } from '../../src/kernel/prompt'
+import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
@@ -22,7 +23,7 @@ const CREATED = '2026-01-01T00:00:00.000Z'
 const LATER = '2026-01-02T00:00:00.000Z'
 const OWNER = { kind: 'owner', via: 'ui' } as const
 /** 聊天首轮提示词末尾固定追加的回执块说明（M4 D4）。 */
-const HINT = receiptBlockHint()
+const HINT = receiptBlockHint(CHAT_RECEIPT_KEYS)
 
 const limits = (over: Partial<Limits> = {}): Limits => ({
   maxStagesPerWorkflow: 50,

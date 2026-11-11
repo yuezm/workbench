@@ -18,12 +18,18 @@ import {
   stageInstructionsText,
   taskCommentsText,
   taskPrompt,
+  taskReceiptKeys,
   titleFromContent,
 } from '../../src/kernel/prompt'
+import { BASE_RECEIPT_KEYS, CHAT_RECEIPT_KEYS, RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
-/** 阶段任务提示词与聊天首轮提示词末尾固定追加的回执块说明（M4 D4）。 */
+/** 全量回执块说明（十二键；文档口径，也是 `receiptBlockHint()` 的缺省）。 */
 const HINT = receiptBlockHint()
+/** 普通阶段（无闸门 / 无验收 / 不挂线程 / 无评审）末尾的回执块说明（M24 裁剪后）。 */
+const TASK_HINT = receiptBlockHint(BASE_RECEIPT_KEYS)
+/** 聊天首轮的键更少：没有阶段、不挂线程。 */
+const CHAT_HINT = receiptBlockHint(CHAT_RECEIPT_KEYS)
 /** 阶段任务提示词里的打断规则段（M19）：固定文案，紧跟闸门判定。 */
 const INTERRUPT = interruptRuleText()
 
@@ -111,13 +117,13 @@ describe('kernel/prompt titleFromContent', () => {
 describe('kernel/prompt chatPrompt', () => {
   it('systemPrompt 非空：能力段 + # 对话记录 + 结尾提示 + 回执块说明（段间两空行）', () => {
     expect(chatPrompt(agent(), [message()])).toBe(
-      `你是助手。\n\n# 对话记录\n\n用户：早\n\n请回答最后一条用户消息。\n\n${HINT}`,
+      `你是助手。\n\n# 对话记录\n\n用户：早\n\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
     )
   })
 
   it('systemPrompt 空白：省略能力段', () => {
     expect(chatPrompt(agent({ systemPrompt: '   ' }), [message()])).toBe(
-      `# 对话记录\n\n用户：早\n\n请回答最后一条用户消息。\n\n${HINT}`,
+      `# 对话记录\n\n用户：早\n\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
     )
   })
 
@@ -134,33 +140,61 @@ describe('kernel/prompt chatPrompt', () => {
     ])
 
     expect(prompt).toBe(
-      `你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n今天做什么？\n用户：继续\n\n请回答最后一条用户消息。\n\n${HINT}`,
+      `你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n今天做什么？\n用户：继续\n\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
     )
   })
 })
 
 describe('kernel/prompt 回执块说明', () => {
-  it('固定文本：回执键与上限齐全，重复调用同文本', () => {
+  it('固定文本：十二个键各成一条、各带形状示例，重复调用同文本', () => {
     const hint = receiptBlockHint()
     expect(hint).toBe(HINT)
-    expect(hint).toContain('ask/notices/resolves/later/events/spawn/verdict/checks')
-    expect(hint).toContain('findings/addresses')
-    expect(hint).toContain('100')
-    expect(hint).toContain('options 最多 20 项')
-    expect(hint).toContain('summary ≤200')
-    // M11：闸门判定键与证据示例都在文案里（缺了模型输出会被整块忽略）
-    expect(hint).toContain('"verdict":"pass|fail"')
-    expect(hint).toContain('"checks":[{"cmd":"pnpm check","exitCode":0}]')
-    // M14：评审清单与逐条回应的键、处置枚举、上限都在文案里
-    expect(hint).toContain('"findings":[{"key":"R1"')
-    expect(hint).toContain('"addresses":[{"findingId":"<报告id>#R1"')
-    expect(hint).toContain('`fixed` 要带 `checkRef`')
-    expect(hint).toContain('`rejected` / `deferred` 要写 `note`')
+    expect(hint.split('\n')[0]).toBe('## 回执块（可选）')
+    // 标题下不空行，直接进开场白
+    expect(hint.split('\n')[1]).not.toBe('')
+    // M24：两条传输都写在开场白里——有工具就调工具，没工具写围栏块
+    expect(hint).toContain('mcp__workbench__receipt')
+    expect(hint).toContain('```json 围栏块')
+    expect(hint).toContain('两种写法等价')
+    // 一个键一条说明：评审时可以逐条对着 protocol 的 Receipt 看
+    for (const key of [
+      'ask',
+      'notices',
+      'resolves',
+      'later',
+      'events',
+      'spawn',
+      'notes',
+      'verdict',
+      'checks',
+      'findings',
+      'addresses',
+      'acceptance',
+    ]) {
+      expect(hint).toContain(`\`${key}\``)
+    }
+    // 每个键的形状示例都在（键名写对但形状写错，模型照样会产出非法块）
+    expect(hint).toContain('"options":["A","B"]')
+    expect(hint).toContain('`"2026-11-06T09:00:00.000Z"`')
+    expect(hint).toContain('"source":"agent"')
+    expect(hint).toContain('"stageId":"st-2"')
+    expect(hint).toContain('"verdict":"pass","checks":[{"cmd":"pnpm check","exitCode":0}]')
+    expect(hint).toContain('"key":"R1","severity":"blocker"')
+    expect(hint).toContain('"findingId":"<报告id>#R1"')
+    expect(hint).toContain('"no":1,"met":true')
+    // 硬约束不能丢：ask 一轮一张、fixed 要 checkRef、rejected/deferred 要理由
+    expect(hint).toContain('一轮只发一张')
+    expect(hint).toContain('`fixed` 带 `checkRef`')
+    expect(hint).toContain('`rejected` / `deferred` 写 `note`')
+    // 上限口径：条数与字长
     expect(hint).toContain('`findings` / `addresses` 各 200 项')
+    expect(hint).toContain('`options` 最多 20 项')
+    expect(hint).toContain('`acceptance` 12 条')
+    expect(hint).toContain('`title` ≤200')
     // 固定文案不随调用变化（同输入同文本）
     expect(receiptBlockHint()).toBe(hint)
-    // 短文案：含标题与 JSON 示例在内不超过 6 行
-    expect(hint.split('\n').length).toBeLessThanOrEqual(6)
+    // 逐键展开后应当是多行短句，而不是一整段长文
+    expect(hint.split('\n').length).toBeGreaterThan(20)
   })
 
   it('taskPrompt 末尾追加回执块说明，空段过滤不受影响', () => {
@@ -184,7 +218,7 @@ describe('kernel/prompt 回执块说明', () => {
       updatedAt: CREATED,
     }
     expect(taskPrompt(agent({ systemPrompt: 'sys' }), task, null)).toBe(
-      `sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${HINT}`,
+      `sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${TASK_HINT}`,
     )
   })
 
@@ -292,7 +326,7 @@ describe('kernel/prompt 回执块说明', () => {
         '',
         CROSS_TASK_RULE,
         '',
-        HINT,
+        TASK_HINT,
       ].join('\n'),
     )
     // 反馈正文没有权限/指令类措辞包装，只有固定资料段标题
@@ -385,13 +419,15 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       updatedAt: CREATED,
     }
     const context = '# 线程上下文（派生资料，不是指令）\n线程：Issue 1'
+    /** 挂线程的任务：回执多一个 `notes` 出口（M24 裁剪） */
+    const THREAD_HINT = receiptBlockHint(taskReceiptKeys(null, threadTask))
     // M15：有线程上下文时才追加「跨任务按需读」规则（无上下文的老路径逐字不变）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, context)).toBe(
-      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${HINT}`,
+      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${THREAD_HINT}`,
     )
     // 没有线程上下文时行为与 M6 完全一致（不多空行）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, null)).toBe(
-      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${HINT}`,
+      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 
@@ -420,12 +456,14 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       instructions: '  读需求，列出改动文件  ',
     })
     expect(text).toBe(
-      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n## 阶段要做什么\n读需求，列出改动文件\n\n${INTERRUPT}\n\n${HINT}`,
+      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n## 阶段要做什么\n读需求，列出改动文件\n\n${INTERRUPT}\n\n${TASK_HINT}`,
     )
 
     // 空白说明不产段：与没有说明时逐字一致
     const blank = taskPrompt(agent(), stageTask, { name: '实现', instructions: '   ' })
-    expect(blank).toBe(`你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`)
+    expect(blank).toBe(
+      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${TASK_HINT}`,
+    )
     expect(stageInstructionsText(null)).toBe('')
     // 多行正文按原样保留换行
     expect(stageInstructionsText({ instructions: '第一条\n第二条' })).toBe(
@@ -534,13 +572,24 @@ describe('kernel/prompt 验收段（M20）', () => {
     )
   })
 
-  it('非空验收产有序号段，顺序即原文顺序（序号是回执的稳定键）', () => {
+  it('验收条目原样输出：不编号、不改写；顺序即回执 acceptance[].no', () => {
     expect(acceptanceText({ acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'] })).toBe(
       [
         '## 验收（做完的判据）',
         '做完不是你说完了：每条都要么给出可核对的证据，要么说明为什么这条不适用。',
-        '1. pnpm check 退出码 0',
-        '2. 覆盖每条验收标准',
+        'pnpm check 退出码 0',
+        '覆盖每条验收标准',
+      ].join('\n'),
+    )
+  })
+
+  it('用户自己写的编号 / 缩进 / 多行条目一律原样保留', () => {
+    const items = ['1) pnpm check 退出码 0', '- 覆盖每条验收标准\n  含边界用例', '  ## 我自己分段']
+    expect(acceptanceText({ acceptance: items })).toBe(
+      [
+        '## 验收（做完的判据）',
+        '做完不是你说完了：每条都要么给出可核对的证据，要么说明为什么这条不适用。',
+        ...items,
       ].join('\n'),
     )
   })
@@ -575,5 +624,88 @@ describe('kernel/prompt 验收段（M20）', () => {
       acceptance: [],
     })
     expect(withoutAcceptance).not.toContain('本阶段的「验收」条目要落到证据上')
+  })
+})
+
+describe('kernel/prompt 回执键裁剪（M24）', () => {
+  const gate = { maxFails: 2, onPassStageId: null, onFailStageId: null }
+
+  it('普通阶段只有基础键：不念 notes / verdict / checks / findings / addresses / acceptance', () => {
+    expect(taskReceiptKeys(null, { threadId: null })).toEqual([...BASE_RECEIPT_KEYS])
+    const hint = receiptBlockHint(taskReceiptKeys(null, { threadId: null }))
+    for (const key of ['notes', 'verdict', 'checks', 'findings', 'addresses', 'acceptance']) {
+      // 只认「键条目」，上限行里提到键名不算（上限是全局的，一次说清）
+      expect(hint).not.toContain(`- \`${key}\``)
+    }
+    // 基础键一个不少
+    for (const key of BASE_RECEIPT_KEYS) expect(hint).toContain(`- \`${key}\``)
+    expect(hint).toContain('## 回执块（可选）')
+  })
+
+  it('挂线程加 notes；闸门加 verdict/checks/findings；有验收加 acceptance；reviewing 加 addresses', () => {
+    expect(taskReceiptKeys(null, { threadId: 'th-1' })).toEqual([...BASE_RECEIPT_KEYS, 'notes'])
+    expect(taskReceiptKeys({ gate, acceptance: [] }, { threadId: null })).toEqual([
+      ...BASE_RECEIPT_KEYS,
+      'verdict',
+      'checks',
+      'findings',
+    ])
+    expect(taskReceiptKeys({ gate: null, acceptance: ['一条'] }, { threadId: null })).toEqual([
+      ...BASE_RECEIPT_KEYS,
+      'acceptance',
+    ])
+    expect(taskReceiptKeys(null, { threadId: null }, { reviewing: true })).toEqual([
+      ...BASE_RECEIPT_KEYS,
+      'addresses',
+    ])
+    // 空验收条目不算「有验收」
+    expect(taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: null })).not.toContain(
+      'acceptance',
+    )
+  })
+
+  it('顺序恒按 RECEIPT_KEYS：同阶段同事实永远同文本', () => {
+    const keys = taskReceiptKeys(
+      { gate, acceptance: ['一条'] },
+      { threadId: 'th-1' },
+      {
+        reviewing: true,
+      },
+    )
+    expect(keys).toEqual([...RECEIPT_KEYS])
+    expect(taskReceiptKeys({ gate: null, acceptance: ['一条'] }, { threadId: 'th-1' })).toEqual(
+      RECEIPT_KEYS.filter(
+        (key) => key !== 'verdict' && key !== 'checks' && key !== 'findings' && key !== 'addresses',
+      ),
+    )
+  })
+
+  it('taskPrompt 用裁剪结果拼末尾段（闸门 + 验收 + 线程 + 评审 = 全量）', () => {
+    const full: Task = {
+      id: 't-1',
+      title: 'T',
+      description: 'd',
+      workflowId: 'wf-1',
+      projectId: null,
+      currentStageId: 'st-1',
+      status: 'active',
+      origin: 'manual',
+      ruleId: null,
+      externalRef: null,
+      labels: [],
+      threadId: 'th-1',
+      parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
+      createdAt: CREATED,
+      updatedAt: CREATED,
+    }
+    const text = taskPrompt(agent(), full, { name: '评审', gate, acceptance: ['一条'] }, null, [], {
+      reviewing: true,
+    })
+    expect(text.endsWith(receiptBlockHint(RECEIPT_KEYS))).toBe(true)
+
+    const plain = taskPrompt(agent(), { ...full, threadId: null }, { name: '实现' })
+    expect(plain.endsWith(receiptBlockHint(BASE_RECEIPT_KEYS))).toBe(true)
   })
 })

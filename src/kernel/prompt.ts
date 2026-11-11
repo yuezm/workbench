@@ -4,31 +4,82 @@
  * - `taskPrompt`：阶段任务提示词，与迁移前 `host/task-effects.buildTaskPrompt` 逐字一致；
  * - `chatPrompt`：对话首轮提示词，与迁移前 `main/ai-workflow/chat.ts` 的 `buildChatPrompt`
  *   逐字一致；`titleFromContent` 也沿用旧实现的文案（首行、24 码点截断加省略号）。
- * - M4 起两处提示词末尾都追加固定的「回执块」说明（`receiptBlockHint`）；续接轮由
- *   `answerPrompt`（回答）/ `laterPrompt()`（约时间复查）生成。
+ * - M4 起两处提示词末尾都追加「回执块」说明；M24 起这段由 `protocol/receipt-keys`
+ *   的键表按阶段裁剪生成（`receiptBlockHint(keys)`），不再手写全文。
+ *   续接轮由 `answerPrompt`（回答）/ `laterPrompt()`（约时间复查）生成。
  *
  * 提示词只由内核/宿主按模板拼装，事件与消息正文只作为资料段，不进指令段；
- * 回执块说明是固定文案，同事实同文本（不含任何外部事件文字）。
+ * 回执块说明是确定性文本，同阶段同事实同文本（不含任何外部事件文字）。
  */
 import type { Agent, Card, ChatRole, Message, Task, WorkflowStage } from '../protocol/entities'
+import type { ReceiptKey } from '../protocol/receipt-keys'
+import {
+  BASE_RECEIPT_KEYS,
+  CHAT_RECEIPT_KEYS,
+  RECEIPT_KEYS,
+  RECEIPT_KEY_DOCS,
+  RECEIPT_LIMITS_LINE,
+} from '../protocol/receipt-keys'
 import type { TaskComment } from '../protocol/task-comment'
 import { TASK_COMMENT_LIMITS } from '../protocol/task-comment'
 
 /**
- * 回执块说明（D4）：固定文案，告诉智能体可在最终回复末尾附带一个 ```json 围栏块，
- * 由执行器解析成回执字段。字段与上限与 `protocol/validate` 的 receipt 校验一致。
+ * 回执块开场白（固定文本；键说明与上限由 `protocol/receipt-keys` 提供）。
+ *
+ * 两条传输都写进同一段：有 `receipt` 工具（M24 工具通道注入成功时模型能看见）就调工具，
+ * 没有就写末尾围栏块。**不能只写围栏块**——工具开着也白开，模型不会主动去用；也不能
+ * 只写工具——`command` 执行器与未注入的运行时没有工具，回执就全丢了。
  */
-const RECEIPT_BLOCK_HINT: readonly string[] = [
-  '## 回执块（可选）',
-  '要人拍板、留通知、关旧卡、约复查、派生事件、派子任务、给闸门判定或评审清单、自评验收时，在最终回复末尾输出最后一个 ```json 围栏块；对象含 ask/notices/resolves/later/events/spawn/verdict/checks/findings/addresses/acceptance 任一键即按回执处理，非法块整块忽略、不影响本轮。',
-  '`ask` 弹系统通知，一轮只发一张：同一决策的多个待定项写进 `text` 分行、`options` 给人挑；`notices` 不弹通知，只写会改变判断的一句话，过程与待办写正文。',
-  '待改项写 `findings`（`key`/`severity`/`location`/`claim`/`requiredAction`，末项须可判定）；修复轮用 `addresses` 逐条回应：`fixed` 要带 `checkRef`（指向同回执里退出码 0 的 `checks` 命令），`rejected` / `deferred` 要写 `note`，未回应不进下一阶段。阶段有「验收」时逐条自评写 `acceptance`（`no` 是验收段序号，缺项按未达）。',
-  '{"ask":[{"title":"...","text":"...","options":["..."],"key":"..."}],"notices":["..."],"resolves":["card-id"],"later":"ISO 8601","events":[{"source":"...","type":"...","subject":"...","summary":"...","link":"...","dedupeKey":"..."}],"verdict":"pass|fail","checks":[{"cmd":"pnpm check","exitCode":0}],"acceptance":[{"no":1,"met":true,"evidence":"pnpm check 退出码 0"}],"findings":[{"key":"R1","severity":"blocker","location":"src/a.ts:42","claim":"...","requiredAction":"..."}],"addresses":[{"findingId":"<报告id>#R1","disposition":"fixed","checkRef":"pnpm check","note":"..."}]}',
-  '上限：每键 100 项（`findings` / `addresses` 各 200 项），options 最多 20 项；title ≤200、text ≤2000、summary ≤200、`claim`/`requiredAction` ≤500、`key` ≤32 字。ask 即挂起等回答，later 只在无 ask/notices 时生效。',
-]
+const RECEIPT_BLOCK_INTRO =
+  '需要人拍板、留知会、给结论或自评时：工具列表里有回执工具（`mcp__workbench__receipt` 或 `workbench.receipt`）就直接调用它，参数就是下面的对象；没有这个工具时，在**最终回复末尾**放一个 ```json 围栏块。两种写法等价，执行器都只认最后一份：不认识的键忽略，不是合法 JSON 就当没写——本轮照常结束，不挂起也不报错。用哪个键写哪个，下面每项的缩进行是形状示例：'
 
-/** 回执块说明（确定性文本；阶段任务提示词与聊天首轮提示词末尾共用）。 */
-export const receiptBlockHint = (): string => RECEIPT_BLOCK_HINT.join('\n')
+/**
+ * 回执块说明（确定性文本）：标题 + 开场白 + 逐键「一句话 + 形状示例」+ 上限。
+ *
+ * `keys` 是本轮真正有出口的键（见 `taskReceiptKeys`）。默认全量，供文档与聊天之外的
+ * 场景使用；不传就退化成「十二键全讲」，别在阶段任务里这么用——没出口的键只会诱导
+ * 模型乱填。
+ */
+export const receiptBlockHint = (keys: readonly ReceiptKey[] = RECEIPT_KEYS): string =>
+  [
+    '## 回执块（可选）',
+    RECEIPT_BLOCK_INTRO,
+    ...keys.flatMap((key) => [
+      `- \`${key}\` ${RECEIPT_KEY_DOCS[key].text}`,
+      `  \`${RECEIPT_KEY_DOCS[key].shape}\``,
+    ]),
+    RECEIPT_LIMITS_LINE,
+  ].join('\n')
+
+/**
+ * 本轮任务真正有出口的回执键（M24）。
+ *
+ * 判据只看「这个键有没有人能接」：
+ * - 基础键（`BASE_RECEIPT_KEYS`）任何阶段都成立；
+ * - `notes` 只在任务挂线程时落地（`thread.note_appended`）；
+ * - `verdict` / `checks` / `findings` 只对闸门阶段有意义（判定入口与评审产物）；
+ * - `acceptance` 只在阶段声明了验收条目时才有自评对象；
+ * - `addresses` 只在「本阶段要对上一轮评审逐条回应」时给（`reviewing`，由宿主按
+ *   阶段图定位报告后告知）。
+ *
+ * 顺序固定按 `RECEIPT_KEYS`：同一阶段同一事实永远同文本。
+ */
+export const taskReceiptKeys = (
+  stage: Pick<WorkflowStage, 'gate' | 'acceptance'> | null,
+  task: Pick<Task, 'threadId'>,
+  options?: { reviewing?: boolean },
+): ReceiptKey[] => {
+  const enabled = new Set<ReceiptKey>(BASE_RECEIPT_KEYS)
+  if (task.threadId !== null) enabled.add('notes')
+  if (stage?.gate != null) {
+    enabled.add('verdict')
+    enabled.add('checks')
+    enabled.add('findings')
+  }
+  if ((stage?.acceptance ?? []).length > 0) enabled.add('acceptance')
+  if (options?.reviewing === true) enabled.add('addresses')
+  return RECEIPT_KEYS.filter((key) => enabled.has(key))
+}
 
 /**
  * 跨任务上下文规则（M15）：会话键下沉到任务后，任务之间只共享索引与产物文件。
@@ -78,12 +129,15 @@ export const interruptRuleText = (): string =>
 
 /**
  * 阶段任务提示词（M6.5 增加线程上下文段，M7.5 增加反馈记录段，M9 增加阶段要干什么，
- * M19 增加打断规则段）。
+ * M19 增加打断规则段，M24 回执块按阶段裁剪）。
  *
  * 段序：systemPrompt（能力）→ 任务 → 描述 → 阶段 → 阶段要干什么（固定指令段）→
- * 闸门判定（指令）→ 打断规则（固定指令段）→ 反馈记录（资料）→ 线程上下文（派生资料，
- * 不是指令）→ 回执块说明。
+ * 验收 → 闸门判定（指令）→ 打断规则（固定指令段）→ 反馈记录（资料）→ 线程上下文
+ * （派生资料，不是指令）→ 回执块说明（按 `taskReceiptKeys` 裁出本轮有出口的键）。
  * 阶段说明由人在工作流设置里填写，属于指令段；任务/线程资料段都由内核按事实派生。
+ *
+ * `options.reviewing` 由宿主在定位到「打回本阶段的那次评审」时置 true——
+ * 只有这时 `addresses` 才有对象，其余阶段念它只是噪音。
  */
 export const taskPrompt = (
   agent: Agent,
@@ -91,6 +145,7 @@ export const taskPrompt = (
   stage: Pick<WorkflowStage, 'name' | 'instructions' | 'gate' | 'acceptance'> | null,
   threadContext?: string | null,
   comments?: readonly TaskComment[],
+  options?: { reviewing?: boolean },
 ): string =>
   [
     agent.systemPrompt,
@@ -104,7 +159,7 @@ export const taskPrompt = (
     taskCommentsText(comments ?? []),
     threadContext ?? '',
     threadContext ? CROSS_TASK_RULE : '',
-    receiptBlockHint(),
+    receiptBlockHint(taskReceiptKeys(stage, task, options)),
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -121,10 +176,13 @@ export const stageInstructionsText = (
 }
 
 /**
- * 阶段「验收」段（M20）：本阶段「做完」的可判定口径，一条一行、带序号。
+ * 阶段「验收」段（M20）：本阶段「做完」的可判定口径。
+ *
+ * 条目**逐条原样**输出，不编号、不改写、不动换行——写的是文案，不是模板。
+ * 顺序即编号：回执 `acceptance[].no` 按这里的出现次序从 1 数（归一在
+ * `kernel/workflow/acceptance.ts`，去空 / 去重 / 截断都在保存时做完）。
  *
  * 空数组不产文本——老工作流（没有验收条目）的提示词逐字不变。
- * 编号是**稳定键**：回执 `acceptance[].no` 用它指回具体条目，所以顺序即原文顺序。
  */
 export const acceptanceText = (stage: Pick<WorkflowStage, 'acceptance'> | null): string => {
   const items = stage?.acceptance ?? []
@@ -132,7 +190,7 @@ export const acceptanceText = (stage: Pick<WorkflowStage, 'acceptance'> | null):
   return [
     '## 验收（做完的判据）',
     '做完不是你说完了：每条都要么给出可核对的证据，要么说明为什么这条不适用。',
-    ...items.map((item, index) => `${index + 1}. ${item}`),
+    ...items,
   ].join('\n')
 }
 
@@ -197,7 +255,7 @@ export function chatPrompt(agent: Agent, messages: readonly Message[]): string {
     messages.map((message) => `${ROLE_LABEL[message.role]}：${message.content}`).join('\n'),
   )
   parts.push(ANSWER_HINT)
-  parts.push(receiptBlockHint())
+  parts.push(receiptBlockHint(CHAT_RECEIPT_KEYS))
   return parts.join('\n\n')
 }
 

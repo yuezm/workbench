@@ -13,6 +13,7 @@ import type { ThreadRow } from '../protocol/thread'
 import type { TaskComment } from '../protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from './types'
 import { taskPrompt } from './prompt'
+import { locateReport } from './review'
 import { runCountOfTask, taskSessions } from './threads'
 import { threadContextText, hasThreadHistory } from './thread-context'
 
@@ -78,7 +79,13 @@ export function entryRunFacts(
     ...[...view.taskComments.values()].filter((comment) => comment.taskId === task.id),
     ...(options?.pendingComment === undefined ? [] : [options.pendingComment]),
   ]
-  const prompt = [taskPrompt(agent, task, stage, context, comments), trigger?.promptExtra ?? '']
+  // M24：本阶段要处理的评审报告决定回执里有没有 `addresses` 的出口——没有报告时
+  // 提示词不再念「逐条回应」，省掉一段用不上的指令。
+  const reviewing = locateReport(view, task) !== undefined
+  const prompt = [
+    taskPrompt(agent, task, stage, context, comments, { reviewing }),
+    trigger?.promptExtra ?? '',
+  ]
     .filter(Boolean)
     .join('\n\n')
   // M15：会话键 = (taskId, agentId)。同一任务续接（打回重做 / 反馈 / turn+1），

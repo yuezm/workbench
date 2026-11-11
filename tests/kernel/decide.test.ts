@@ -21,7 +21,13 @@ import type { ThreadRow } from '../../src/protocol/thread'
 import type { HostInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
 import { indexTarget, sameInstructions } from '../../src/kernel/commands/workflow'
-import { interruptRuleText, receiptBlockHint, taskPrompt } from '../../src/kernel/prompt'
+import {
+  interruptRuleText,
+  receiptBlockHint,
+  taskPrompt,
+  taskReceiptKeys,
+} from '../../src/kernel/prompt'
+import { BASE_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
 import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
@@ -29,7 +35,9 @@ const LATER = '2026-01-02T00:00:00.000Z'
 const NOW = '2026-11-04T12:00:00.000Z'
 const ACTOR = { kind: 'owner', via: 'ui' } as const
 /** 阶段任务提示词末尾固定追加的回执块说明（M4 D4）。 */
-const HINT = receiptBlockHint()
+const HINT = receiptBlockHint(BASE_RECEIPT_KEYS)
+/** 建任务会开隐式线程：回执比普通阶段多一个 notes 出口（M24 裁剪） */
+const THREAD_HINT = receiptBlockHint(taskReceiptKeys(null, { threadId: 'th-1' }))
 /** 阶段任务提示词里的打断规则段（M19）。 */
 const INTERRUPT = interruptRuleText()
 
@@ -1400,7 +1408,10 @@ describe('kernel/decide 工作流', () => {
     })
     expect(run({ stages: [{ id: 'st-404', name: 'a', entryMode: 'none' }] })).toEqual({
       facts: [],
-      reject: { code: 'conflict', message: '阶段 id 不存在: st-404' },
+      reject: {
+        code: 'conflict',
+        message: '阶段「a」已不存在（st-404），工作流可能已在别处被修改',
+      },
     })
   })
 
@@ -1892,7 +1903,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       threadContextRef: null,
       queueSeq: 0,
       status: 'queued',
-      prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${INTERRUPT}\n\n${HINT}`,
+      prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
       output: '',
       error: null,
       errorCode: null,
@@ -2299,7 +2310,7 @@ describe('kernel/prompt taskPrompt', () => {
     )
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
-    expect(run.prompt).toBe(`# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${HINT}`)
+    expect(run.prompt).toBe(`# 任务：T\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${THREAD_HINT}`)
   })
 
   it('描述非空时按「智能体 → 任务 → 描述 → 阶段」顺序、两两空行分隔', () => {
@@ -2320,7 +2331,9 @@ describe('kernel/prompt taskPrompt', () => {
     )
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
-    expect(run.prompt).toBe(`sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${HINT}`)
+    expect(run.prompt).toBe(
+      `sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+    )
   })
 })
 

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { receiptBlockHint } from '../../src/kernel/prompt'
+import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
 import { WORKBENCH_EVENT_CHANNEL } from '../../src/protocol/ipc'
 import type { ExternalPluginEntry, ExternalPluginRejection } from '../../src/host/plugins/discover'
 
@@ -1544,7 +1545,7 @@ describe('主进程入口装配', () => {
       table === 'agents.all' ? [agent] : messages,
     )
     expect(fallback(run)).toBe(
-      `你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n\n请回答最后一条用户消息。\n\n${receiptBlockHint()}`,
+      `你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n\n请回答最后一条用户消息。\n\n${receiptBlockHint(CHAT_RECEIPT_KEYS)}`,
     )
 
     // 非聊天 run / 没有对话：回退不适用

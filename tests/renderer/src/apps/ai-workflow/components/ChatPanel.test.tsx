@@ -267,14 +267,15 @@ describe('ChatPanel 会话内待处理卡', () => {
     const cards = screen.getByRole('region', { name: '待处理卡' })
     expect(cards).toHaveTextContent('要继续吗')
     expect(cards).toHaveTextContent('上一轮停在方案选择')
-    expect(screen.getByRole('button', { name: '继续' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: '继续' })).toBeInTheDocument()
   })
 
-  it('点选项：dispatch card.answer，卡片留在会话里等事实刷新', async () => {
+  it('选中再提交：dispatch card.answer，卡片留在会话里等事实刷新', async () => {
     const user = userEvent.setup()
     render(<ChatPanel {...makeProps({ cards: [card] })} />)
 
-    await user.click(screen.getByRole('button', { name: '重来' }))
+    await user.click(screen.getByRole('radio', { name: '重来' }))
+    await user.click(screen.getByRole('button', { name: '提交所选' }))
     await waitFor(() =>
       expect(kernel.dispatched).toContainEqual(
         expect.objectContaining({
@@ -286,6 +287,14 @@ describe('ChatPanel 会话内待处理卡', () => {
       ),
     )
     expect(screen.getByText('要继续吗')).toBeInTheDocument()
+  })
+
+  it('点系统通知进来：focusCardId 透传，会话内那张卡被标成定位态', () => {
+    render(<ChatPanel {...makeProps({ cards: [card], focusCardId: 'card-c' })} />)
+
+    const anchor = screen.getByText('要继续吗').closest('[data-card-id]')
+    expect(anchor).toHaveAttribute('data-card-id', 'card-c')
+    expect(anchor).toHaveAttribute('data-focused', 'true')
   })
 
   it('没有卡时会话内不占版面', () => {

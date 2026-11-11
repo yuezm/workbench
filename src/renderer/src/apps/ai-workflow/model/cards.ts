@@ -46,3 +46,18 @@ export function groupNotices(notices: readonly Card[]): NoticeGroup[] {
     cards,
   }))
 }
+
+/**
+ * 「其他 / 自定义」类选项：选了它却不写内容，答案等于空。
+ *
+ * 选项文案是智能体写的自由文本，协议里没有「这是自由输入项」的标记（`Card.options` 只是
+ * `string[]`），所以只能按措辞认。命中后 UI 把补充说明升成必填，并在提交前挡住空答案；
+ * 认错的代价只是多要求一段文字，不会把正常选项堵死。
+ */
+const FREE_FORM_OPTION =
+  /(其他|其它|自定义|自己(写|填|说)|说点|另说|另填|手动(输入|填写)|other|something else)/i
+
+/** 这个选项是不是要求人自己写内容（`说点其他的` / `其他（请说明）` / `custom` 等） */
+export function isFreeFormOption(option: string): boolean {
+  return FREE_FORM_OPTION.test(option)
+}

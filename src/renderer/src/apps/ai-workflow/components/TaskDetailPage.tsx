@@ -34,6 +34,8 @@ export interface TaskDetailPageProps {
   onOpenTask?: (taskId: string) => void
   /** 任务被删除后调用：任务行已经不存在，留在详情页只会显示「任务不存在」 */
   onRemoved?: () => void
+  /** 要定位并高亮的卡片（点顶部通知条 / 系统通知进来时给）；卡片处理完自然消失 */
+  focusCardId?: string | null
 }
 
 /**
@@ -50,6 +52,7 @@ export function TaskDetailPage({
   onOpenThread,
   onOpenTask,
   onRemoved,
+  focusCardId,
 }: TaskDetailPageProps): ReactElement {
   const state = useKernelViewState('task.byId', { taskId })
   const runsState = useKernelViewState('runs.byTask', { taskId })
@@ -268,10 +271,10 @@ export function TaskDetailPage({
             <FormError message={actionError} />
             <TaskInfoPanel task={task} stageName={stageName} />
 
-            {/* 待审批：智能体在这一任务上等你回答（正文与选项都在这里，选完即续接） */}
+            {/* 待审批：智能体在这一任务上等你回答（正文与选项都在这里，提交后即续接） */}
             {/* 卡片视图读失败时卡片会「凭空少一块」，run 却停在 waiting：把原因就地写出来 */}
             <FormError message={cardsState.error} />
-            <ApprovalCards cards={cards} />
+            <ApprovalCards cards={cards} focusCardId={focusCardId} />
 
             {/* 任务说明（初始输入）：审批之后、上下文之前，先看要求再看过程 */}
             <TaskBrief task={task} />

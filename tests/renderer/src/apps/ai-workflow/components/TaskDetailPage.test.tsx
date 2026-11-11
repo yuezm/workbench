@@ -150,7 +150,7 @@ describe('TaskDetailPage', () => {
     expect(labels).toHaveTextContent('urgent')
   })
 
-  it('本任务的 open 卡：正文与选项在任务详情里，选完即 dispatch card.answer', async () => {
+  it('本任务的 open 卡：正文与选项在任务详情里，选中后提交才 dispatch card.answer', async () => {
     setup()
     kernel.setView('cards.open', undefined, [
       {
@@ -180,7 +180,8 @@ describe('TaskDetailPage', () => {
     expect(within(cards).getByText('包名怎么定')).toBeInTheDocument()
     expect(within(cards).getByText(/裸名已被他人发布过/)).toBeInTheDocument()
 
-    await user.click(within(cards).getByRole('button', { name: '带前缀' }))
+    await user.click(within(cards).getByRole('radio', { name: '带前缀' }))
+    await user.click(within(cards).getByRole('button', { name: '提交所选' }))
     await waitFor(() =>
       expect(kernel.dispatched).toContainEqual(
         expect.objectContaining({
@@ -191,6 +192,48 @@ describe('TaskDetailPage', () => {
         }),
       ),
     )
+  })
+
+  it('从通知进来：focusCardId 交给卡片区，那张卡被标成定位态', async () => {
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [run])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [comment])
+    kernel.setView('cards.open', undefined, [
+      {
+        id: 'card-1',
+        runId: 'run1',
+        taskId: 't1',
+        conversationId: null,
+        title: '包名怎么定',
+        text: '选一个',
+        kind: 'ask',
+        options: ['裸名', '带前缀'],
+        key: 'k',
+        version: 1,
+        status: 'open',
+        delivery: 'delivered',
+        deliveryRef: 'in-app',
+        optionIndex: null,
+        answeredBy: null,
+        answeredAt: null,
+        createdAt: 't',
+        updatedAt: 't',
+      },
+    ])
+    render(
+      <TaskDetailPage
+        taskId="t1"
+        workflows={[workflow]}
+        onBack={vi.fn()}
+        onOpenThread={vi.fn()}
+        focusCardId="card-1"
+      />,
+    )
+
+    const anchor = await screen.findByText('包名怎么定')
+    const cardNode = anchor.closest('[data-card-id]')
+    expect(cardNode).toHaveAttribute('data-card-id', 'card-1')
+    expect(cardNode).toHaveAttribute('data-focused', 'true')
   })
 
   it('别的任务的卡不进本任务详情', async () => {

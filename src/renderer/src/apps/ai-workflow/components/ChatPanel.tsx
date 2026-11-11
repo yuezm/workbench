@@ -25,6 +25,8 @@ export interface ChatPanelProps {
   messages: Message[]
   /** 本会话的 open 卡：审批与选项在会话内处理，不在顶部通知条里 */
   cards?: Card[]
+  /** 要定位并高亮的卡片（点系统通知进来时给）：会话内卡片不在滚动区，仍要标出是哪一张 */
+  focusCardId?: string | null
   /** 当前轮已收到的流式输出（正文 / 思考 / 工具事件） */
   streaming: ChatStreamState
   sending: boolean
@@ -47,6 +49,7 @@ export function ChatPanel({
   projectName,
   messages,
   cards = [],
+  focusCardId,
   streaming,
   sending,
   error,
@@ -106,7 +109,7 @@ export function ChatPanel({
 
       {conversation !== null && cards.length > 0 && (
         <div className="shrink-0 border-b border-border px-5 py-3">
-          <ApprovalCards cards={cards} />
+          <ApprovalCards cards={cards} focusCardId={focusCardId} />
         </div>
       )}
 

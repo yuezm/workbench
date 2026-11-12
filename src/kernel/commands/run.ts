@@ -102,6 +102,9 @@ function gateVerdictOf(receipt: Receipt): GateVerdict | undefined {
 /** 闸门放行标记（M11）：预算耗尽后走通过分支时打在任务上的标签，看板可据此筛选。 */
 export const GATE_DEGRADED_LABEL = 'gate:degraded'
 
+/** 原地重跑预算用尽后收口的任务标签（M33）。 */
+export const STAGE_FAILED_LABEL = 'stage:failed'
+
 /**
  * 验收自评里仍未达的条目（M21）：回执缺项、序号越界、`met` 非真都按**未达**处理
  * （fail-closed）。返回条目原文，顺序即阶段 `acceptance` 的顺序。
@@ -233,21 +236,27 @@ function withLabel(labels: readonly string[], label: string): string[] {
  * `onReject` 打回；闸门阶段（M11）按 `verdict` 分流，预算耗尽后放行并留痕。
  * 打回原地 / 任务已完成 / 阶段无效 / 任务已删时零事实，取消不推进。
  */
+/** 阶段结算的结果：要落的事实 + 需要立刻入队入口 run 的任务（流转 / 原地重跑）。 */
+interface StageTransition {
+  facts: FactDraft[]
+  enter?: Task
+}
+
 function stageTransitionFacts(
   view: View,
   run: SettledRun,
   verdict: GateVerdict | undefined,
   now: Iso,
   env: Environment,
-): FactDraft[] {
-  if (run.status === 'cancelled' || run.taskId === null) return []
+): StageTransition {
+  if (run.status === 'cancelled' || run.taskId === null) return { facts: [] }
   const task = view.tasks.get(run.taskId)
-  if (!task || task.status === 'completed') return []
+  if (!task || task.status === 'completed') return { facts: [] }
   const workflow = view.workflows.get(task.workflowId)
-  if (!workflow) return []
+  if (!workflow) return { facts: [] }
   const flow = workflowWithStages(view, workflow)
   const current = flow.stages.find((stage) => stage.id === task.currentStageId)
-  if (!current) return []
+  if (!current) return { facts: [] }
   const succeeded = run.status === 'succeeded'
   const event = succeeded
     ? ({ type: 'RUN_SUCCEEDED', runId: run.id, verdict } as const)
@@ -255,7 +264,9 @@ function stageTransitionFacts(
   const moved = moveTask(task, event, flow)
   const next = moved.gateExhausted
     ? { ...moved.task, labels: withLabel(moved.task.labels, GATE_DEGRADED_LABEL) }
-    : moved.task
+    : moved.retryExhausted === true
+      ? { ...moved.task, labels: withLabel(moved.task.labels, STAGE_FAILED_LABEL) }
+      : moved.task
   // M29：派单按触发条件分组——执行成功但被判定挡下是 `failed`，判定缺结论 / 打回原地
   // 都不算「离开」，一条都不派（与 M7 的「向前完成才交接」等价，但不再靠位置猜）。
   const leftStage =
@@ -277,6 +288,16 @@ function stageTransitionFacts(
         })
   /** 预算耗尽放行时的留痕：任务评论（详情页可见，不改状态） */
   const degradedFacts = (): FactDraft[] => {
+    if (moved.retryExhausted === true) {
+      const comment: TaskComment = {
+        id: env.nextId('task-comment'),
+        taskId: task.id,
+        author: 'agent',
+        text: `阶段「${current.name}」重跑次数已用尽，按配置收口（任务已打 ${STAGE_FAILED_LABEL} 标签）。`,
+        createdAt: now,
+      }
+      return [hostDraft('task.comment_added', { comment }, now)]
+    }
     if (moved.gateExhausted !== true) return []
     const comment: TaskComment = {
       id: env.nextId('task-comment'),
@@ -288,28 +309,43 @@ function stageTransitionFacts(
     return [hostDraft('task.comment_added', { comment }, now)]
   }
   if (next.status === 'completed') {
-    return [
-      ...handoffFacts(),
-      hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now),
-      ...degradedFacts(),
-    ]
+    return {
+      facts: [
+        ...handoffFacts(),
+        hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now),
+        ...degradedFacts(),
+      ],
+    }
   }
   if (leftStage) {
-    return [
-      ...handoffFacts(),
-      hostDraft(
-        'task.moved',
-        {
-          task: { ...next, updatedAt: now },
-          from: task.currentStageId,
-          to: next.currentStageId,
-        },
-        now,
-      ),
-      ...degradedFacts(),
-    ]
+    return {
+      facts: [
+        ...handoffFacts(),
+        hostDraft(
+          'task.moved',
+          {
+            task: { ...next, updatedAt: now },
+            from: task.currentStageId,
+            to: next.currentStageId,
+          },
+          now,
+        ),
+        ...degradedFacts(),
+      ],
+      enter: next,
+    }
   }
-  return degradedFacts()
+  // 原地重跑（M33）：阶段没变，但重跑计数改了、还要重排一轮入口 run
+  if (moved.effects.some((effect) => effect.type === 'createRun')) {
+    return {
+      facts: [
+        hostDraft('task.updated', { task: { ...next, updatedAt: now } }, now),
+        ...degradedFacts(),
+      ],
+      enter: next,
+    }
+  }
+  return { facts: degradedFacts() }
 }
 
 export function claimRun(
@@ -455,22 +491,21 @@ export function receiveRun(
     // 漏项由 `reviewFactsOf` 追加的任务评论说明「缺哪几条、怎么回应」。
     const transition =
       review.blocked || repair.blocked
-        ? []
+        ? { facts: [] as FactDraft[] }
         : stageTransitionFacts(view, settled, gateVerdictOf(input.receipt), now, env)
     facts.push(...repair.facts)
-    facts.push(...transition)
-    // 进入效果：流转到目标阶段后若目标阶段是 agent 入口，立刻入队下一轮（形成链条）
-    for (const fact of transition) {
-      if (fact.type === 'task.moved') {
-        const movedTask = (fact.payload as { task: Task }).task
-        // M28：阶段流转进入的下一轮开新会话——上一轮正文与待修复清单已在提示词里，
-        // 续接只是把上一阶段全量工具流水再送一遍。
-        facts.push(
-          ...entryRunFacts(view, movedTask, now, env, HOST_SCHEDULER, undefined, {
-            roundSession: 'fresh',
-          }),
-        )
-      }
+    facts.push(...transition.facts)
+    // 进入效果：流转到目标阶段 / 原地重跑后立刻入队下一轮（形成链条）
+    if (transition.enter !== undefined) {
+      // M28：阶段流转进入的下一轮开新会话——上一轮正文与待修复清单已在提示词里，
+      // 续接只是把上一阶段全量工具流水再送一遍。
+      facts.push(
+        ...entryRunFacts(view, transition.enter, now, env, HOST_SCHEDULER, undefined, {
+          roundSession: 'fresh',
+        }),
+      )
+    }
+    for (const fact of transition.facts) {
       // M6.5：阶段流转把任务完成时，若线程内任务已全部完成 → 归档线程
       if (fact.type === 'task.completed') {
         const completedTask = (fact.payload as { task: Task }).task

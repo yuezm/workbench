@@ -1,6 +1,7 @@
 import { useState, type ReactElement } from 'react'
 import {
   STAGE_EXIT_GUARDS,
+  STAGE_EXIT_RETRY_LIMITS,
   stageKindOf,
   type EntryMode,
   type OnChildrenSettled,
@@ -147,6 +148,9 @@ const EXIT_ROW_META: Record<StageExitGuard, { label: string; fallback: string }>
   passed: { label: '通过时', fallback: '默认（下一阶段）' },
   failed: { label: '未通过时', fallback: '默认（停在这里等人）' },
 }
+
+/** 重跑次数候选项（1–5） */
+const RETRY_CHOICES = [1, 2, 3, 4, 5] as const
 
 /** 本阶段有哪几行出口：判定阶段没有「完成时」（跑完没结论不构成去向）。 */
 function exitRowsFor(stage: StageInput): StageExitGuard[] {
@@ -299,6 +303,7 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
     const exits: StageExitInput[] = STAGE_EXIT_GUARDS.flatMap<StageExitInput>((guard) => {
       const exit = source[guard]
       if (exit === undefined) return []
+      if (exit.do === 'retry') return [{ on: guard, do: 'retry', max: exit.max }]
       if (exit.do !== 'goto') return [{ on: guard, do: exit.do }]
       const index = indexOfId(workflow, exit.stageId)
       return [{ on: guard, do: 'goto' as const, stageIndex: index >= 0 ? index : null }]
@@ -457,7 +462,22 @@ export function WorkflowEditor({
       patchStage(i, { exits: [...others, { on: guard, do: 'goto', stageIndex: null }] })
       return
     }
+    if (value === 'retry') {
+      patchStage(i, {
+        exits: [...others, { on: guard, do: 'retry', max: STAGE_EXIT_RETRY_LIMITS.min }],
+      })
+      return
+    }
     patchStage(i, { exits: [...others, { on: guard, do: value as 'await' | 'close' }] })
+  }
+
+  /** 出口表的重跑上限 */
+  const setExitMax = (i: number, guard: StageExitGuard, max: number): void => {
+    patchStage(i, {
+      exits: (draft.stages[i]?.exits ?? []).map((exit) =>
+        exit.on === guard && exit.do === 'retry' ? { ...exit, max } : exit,
+      ),
+    })
   }
 
   /** 出口表的目标阶段（下标） */
@@ -810,10 +830,33 @@ export function WorkflowEditor({
                             <SelectItem value="default">{EXIT_ROW_META[guard].fallback}</SelectItem>
                             <SelectItem value="goto">进入指定阶段</SelectItem>
                             <SelectItem value="await">停在这里等人</SelectItem>
+                            <SelectItem value="retry">原地重跑</SelectItem>
                             <SelectItem value="close">结束并归档</SelectItem>
                           </SelectContent>
                         </Select>
                       </Field>
+                      {exit?.do === 'retry' && (
+                        <Field label="最多重跑" className="w-28">
+                          <Select
+                            value={String(exit.max ?? STAGE_EXIT_RETRY_LIMITS.min)}
+                            onValueChange={(v) => setExitMax(index, guard, Number(v))}
+                          >
+                            <SelectTrigger
+                              aria-label={`阶段${n}${EXIT_ROW_META[guard].label}最多重跑`}
+                              className="w-full"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {RETRY_CHOICES.map((times) => (
+                                <SelectItem key={times} value={String(times)}>
+                                  {times} 次
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      )}
                       {exit?.do === 'goto' && (
                         <Field label="目标阶段" className="min-w-0 flex-1">
                           <Select

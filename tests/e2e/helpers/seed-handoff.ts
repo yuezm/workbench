@@ -131,6 +131,7 @@ export interface HandoffState {
   handoffFromTaskId: string | null
   handoffFromStageId: string | null
   handoffFromRunId: string | null
+  stageFails: 0
   title: string | null
   threadId: string | null
   threadSource: string | null
@@ -180,6 +181,7 @@ export function readHandoffState(dbPath: string, seed: HandoffSeed): HandoffStat
       handoffFromTaskId: row?.handoff_from_task_id ?? null,
       handoffFromStageId: row?.handoff_from_stage_id ?? null,
       handoffFromRunId: null,
+      stageFails: 0,
       title: row?.title ?? null,
       threadId: row?.thread_id ?? null,
       threadSource: thread?.source ?? null,

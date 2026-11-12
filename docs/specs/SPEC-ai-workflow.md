@@ -237,13 +237,14 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 **出口表（M32，取代 `on_complete` / `on_reject` / 闸门两侧四列）：**
 
-一次离开只落**一条主去向**，三种动作：`goto`（同一张工单换阶段）/ `await`（显式停在这里等人）/ `close`（本单结束并归档）。派单是附加动作，不在这里。
+一次离开只落**一条主去向**，四种动作：`goto`（同一张工单换阶段）/ `await`（显式停在这里等人）/ `close`（本单结束并归档）/ `retry`（原地重跑，最多 N 次）。派单是附加动作，不在这里。
 
 - `done`（非判定阶段跑完）：缺省 → **下一个自己添加的阶段** → 内置「已完成」→ 没有就 `close`。
 - `errored`（执行出错：非零退出 / 超时 / 失联）：缺省 → `await`。
 - `passed` / `failed`（判定两侧）：缺省 → 同 `done` / `await`。
 - 判定阶段（`judge` 非 null）没有 `done`；非判定阶段没有 `passed` / `failed`。
 - `goto` 的目标阶段找不到（脏投影 / 被删）→ **原地停住**，不猜去向。
+- `retry`（M33）：原地再跑一轮，`max` 取 1–5；用尽后按 `close` 收口并给任务打 `stage:failed`（详情页留一条评论）。计数落在 `tasks.stage_fails`，进入别的阶段清零。
 - **缺省只在决策时解析**（`stage-machine#completeExits`），落库保存的是**人配了什么**——界面上「默认（下一阶段）」这类占位就是「没配」，改顺序后自动跟着变。
 - 判定护栏 `judge.maxFails`：连续未通过达上限后**放行**（改走 `passed`），任务打 `gate:degraded` 并追加一条反馈；`null` = 不设护栏。
 

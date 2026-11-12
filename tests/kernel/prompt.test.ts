@@ -178,6 +178,7 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
+    stageFails: 0,
     createdAt: CREATED,
     updatedAt: CREATED,
     ...over,
@@ -298,6 +299,7 @@ describe('kernel/prompt 回执块说明', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
+      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -399,6 +401,7 @@ describe('kernel/prompt 回执块说明', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
+      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -520,6 +523,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
+      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -556,6 +560,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
+      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -598,6 +603,7 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
+    stageFails: 0,
     gateFails: 0,
     createdAt: CREATED,
     updatedAt: CREATED,
@@ -668,6 +674,7 @@ describe('kernel/prompt 验收段（M20）', () => {
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
+    stageFails: 0,
     createdAt: CREATED,
     updatedAt: CREATED,
   }
@@ -810,6 +817,7 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
+      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -857,6 +865,7 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
+      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }

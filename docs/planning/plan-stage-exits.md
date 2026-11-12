@@ -1,6 +1,6 @@
 # 计划：阶段出口表（Stage Exits）
 
-> 状态：**S1a / S1b / S2 / 来源工单段已实现（M29 – M32，2026-11-12）；`retry` 与 S4 待做**。
+> 状态：**S1a / S1b / S2 / 来源工单段 / `retry` 已实现（M29 – M33，2026-11-12）；S4（旧列清理）待做**。
 > 关联：[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)（阶段状态机、闸门）、[SPEC-review-handoff](../specs/SPEC-review-handoff.md)、[ARCHITECTURE](../ARCHITECTURE.md)。
 
 ## 已落地：S1b 出口表（M32）
@@ -19,7 +19,9 @@
 - 界面：阶段详情固定「类型 / 出口表 / 放行护栏（判定阶段）/ 要干什么 / 验收 / 轮次 / 超时 / 派单 / 子任务」，
   删掉「字段按类型收敛、不可见字段只归一」的那套规则带来的隐式行为（切类型现在会清掉对应出口）。
 
-未做：`retry`（原地重跑 + 预算）需要新增 `tasks.stage_fails` 计数列，单列一个切片。
+`retry`（M33）：原地再跑一轮，`max` 1–5，用尽后 `close` 收口并打 `stage:failed`；计数在 `tasks.stage_fails`，进入别的阶段清零。
+
+未做：S4（把 `on_complete_stage_id` / `on_reject_stage_id` / `gate_*` / `handoff_*` 这些已不写的旧列从表里物理删掉，需要一次 12-step 重建）。
 
 ## 已落地：S1a 派单按触发条件分组（M29）
 

@@ -120,6 +120,8 @@ const TASKS_M7_COLUMNS = [
   'project_id',
   // M11：闸门预算
   'gate_fails',
+  // M33：原地重跑次数
+  'stage_fails',
   'created_at',
   'updated_at',
 ]

@@ -108,6 +108,7 @@ function handoffFactsFor(
     handoffFromTaskId: sourceTask.id,
     handoffFromStageId: exitedStageId,
     handoffFromRunId: sourceRunId,
+    stageFails: 0,
     createdAt: now,
     updatedAt: now,
   }

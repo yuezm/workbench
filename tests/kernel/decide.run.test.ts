@@ -212,6 +212,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
+  stageFails: 0,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -2136,5 +2137,64 @@ describe('kernel/decide 阶段交付物（M28）', () => {
       files: [],
       gates: [],
     })
+  })
+})
+
+describe('kernel/decide 原地重跑（M33）', () => {
+  const retryStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({ exits: { errored: { do: 'retry', max: 1 } }, ...over })
+
+  it('出错且预算内 → 原地重排一轮，重跑计数 +1', () => {
+    const decision = receive(
+      view({
+        workflows: [workflow()],
+        agents: [agent()],
+        runtimes: [runtime()],
+        stages: [retryStage()],
+        tasks: [task()],
+        runs: [running()],
+      }),
+      'run-1',
+      receipt({ status: 'failed', errorCode: 'run_failed' }),
+    )
+    const types = decision.facts.map((fact) => fact.type)
+
+    expect(types).toContain('run.queued')
+    expect(types).not.toContain('task.completed')
+    const queued = (
+      decision.facts.find((fact) => fact.type === 'run.queued')?.payload as {
+        run: { stageId: string; taskId: string }
+      }
+    ).run
+
+    expect(queued.stageId).toBe('st-1')
+    expect(queued.taskId).toBe('t-1')
+  })
+
+  it('预算用尽 → 任务收口、打 stage:failed、留一条评论', () => {
+    const decision = receive(
+      view({
+        workflows: [workflow()],
+        agents: [agent()],
+        runtimes: [runtime()],
+        stages: [retryStage()],
+        tasks: [task({ stageFails: 1 })],
+        runs: [running()],
+      }),
+      'run-1',
+      receipt({ status: 'failed', errorCode: 'run_failed' }),
+    )
+    const types = decision.facts.map((fact) => fact.type)
+
+    expect(types).toContain('task.completed')
+    expect(types).toContain('task.comment_added')
+    const completed = (
+      decision.facts.find((fact) => fact.type === 'task.completed')?.payload as {
+        task: Task
+      }
+    ).task
+
+    expect(completed.labels).toContain('stage:failed')
+    expect(completed.stageFails).toBe(0)
   })
 })

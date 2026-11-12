@@ -372,20 +372,25 @@ export const STAGE_EXIT_GUARDS = ['done', 'errored', 'passed', 'failed'] as cons
 export type StageExitGuard = (typeof STAGE_EXIT_GUARDS)[number]
 
 /** 主去向的动作 */
-export const STAGE_EXIT_ACTIONS = ['goto', 'await', 'close'] as const
+export const STAGE_EXIT_ACTIONS = ['goto', 'await', 'close', 'retry'] as const
 
 export type StageExitAction = (typeof STAGE_EXIT_ACTIONS)[number]
+
+/** 原地重跑的次数上限（1–5）：下限 1 = 只重跑一次，上限防烧 token。 */
+export const STAGE_EXIT_RETRY_LIMITS = { min: 1, max: 5 } as const
 
 /**
  * 主去向（M32）：一张工单离开本阶段时**只能**落到一个去处。
  *
  * - `goto`：同一张工单进另一个阶段；
  * - `await`：显式停在这里等人（不是「没有出口」，是「出口就是等人」）；
- * - `close`：本单结束并归档（工单模型里执行完就结束）。
+ * - `close`：本单结束并归档（工单模型里执行完就结束）；
+ * - `retry`：原地再跑一轮，最多 `max` 次；用尽后按 `close` 收口并打 `stage:failed`（M33）。
  *
  * 派单（跨工作流建新工单）不在这里——它不终结本单，见 `StageHandoff`。
  */
-export type StagePrimary = { do: 'goto'; stageId: string } | { do: 'await' } | { do: 'close' }
+export type StagePrimary =
+  { do: 'goto'; stageId: string } | { do: 'await' } | { do: 'close' } | { do: 'retry'; max: number }
 
 /** 出口表：每个触发条件最多一条主去向；保存时由内核补齐缺省。 */
 export type StageExits = Partial<Record<StageExitGuard, StagePrimary>>
@@ -481,6 +486,8 @@ export interface StageExitInput {
   do: StageExitAction
   /** do='goto' 时的目标下标 */
   stageIndex?: number | null
+  /** do='retry' 时的重跑上限（1–5） */
+  max?: number | null
 }
 
 export interface StageInput {
@@ -572,6 +579,8 @@ export interface Task {
   projectId: string | null
   currentStageId: string | null
   status: TaskStatus
+  /** 本阶段原地重跑过几次（M33）：进入新阶段清零，`retry` 出口用它计预算。 */
+  stageFails: number
   /**
    * 闸门预算（M11）：**当前阶段**连续未通过次数。进入阶段时清零（失败回环保留累计值），
    * 闸门判定 `pass` 或预算耗尽放行时清零。老事实 / 存量导入缺该字段时按 0 归一。

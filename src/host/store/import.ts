@@ -414,6 +414,7 @@ function readLegacyEntityRows(
     handoffFromRunId: null,
     // M11：v2 存量没有闸门概念——预算按 0 归一（与投影层 `normalizeTask` 一致）。
     gateFails: 0,
+    stageFails: 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))

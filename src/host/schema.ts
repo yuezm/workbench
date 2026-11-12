@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   project_id TEXT,
   -- M11 闸门预算：当前阶段连续未通过次数（0 = 没失败过；旧行默认 0）
   gate_fails INTEGER NOT NULL DEFAULT 0,
+  -- M33 原地重跑次数（进入阶段清零，retry 出口用它计预算）
+  stage_fails INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -914,6 +916,18 @@ export const STAGES_M32_ADD_COLUMN_SQL: Readonly<
 > = {
   exits_json: "ALTER TABLE workflow_stages ADD COLUMN exits_json TEXT NOT NULL DEFAULT '{}'",
   judge_json: "ALTER TABLE workflow_stages ADD COLUMN judge_json TEXT NOT NULL DEFAULT 'null'",
+}
+
+/**
+ * M33 给 `tasks` 新增的列（原地重跑次数）：NOT NULL DEFAULT 0，老行按「没重跑过」归一。
+ */
+export const TASKS_M33_ADDED_COLUMNS = ['stage_fails'] as const
+
+/** `tasks` M33 补列语句（默认值与 DDL 一致）。 */
+export const TASKS_M33_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M33_ADDED_COLUMNS)[number], string>
+> = {
+  stage_fails: 'ALTER TABLE tasks ADD COLUMN stage_fails INTEGER NOT NULL DEFAULT 0',
 }
 
 /**

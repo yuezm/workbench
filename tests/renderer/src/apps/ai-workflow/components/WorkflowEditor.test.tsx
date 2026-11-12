@@ -1726,3 +1726,25 @@ describe('出口表的健壮性（M32）', () => {
     )
   })
 })
+
+describe('出口表：原地重跑（M33）', () => {
+  it('选「原地重跑」出现次数下拉，保存回传次数', async () => {
+    const existing = workflowWith([{ name: '实现' }, { name: '收尾' }])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await choose(user, '阶段2出错时去向', '原地重跑')
+    expect(screen.getByRole('combobox', { name: '阶段2出错时最多重跑' })).toHaveTextContent('1 次')
+
+    await choose(user, '阶段2出错时最多重跑', '3 次')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+
+    expect(savedStage(draft, '实现').exits).toEqual([{ on: 'errored', do: 'retry', max: 3 }])
+  }, 30_000)
+})

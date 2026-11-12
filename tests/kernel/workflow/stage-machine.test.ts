@@ -49,6 +49,7 @@ const task = (currentStageId: string | null): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
+  stageFails: 0,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 })
@@ -156,6 +157,7 @@ function sTask(currentStageId: string | null, status: Task['status'] = 'active')
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
+    stageFails: 0,
     createdAt: 't',
     updatedAt: 't',
   }
@@ -659,5 +661,35 @@ describe('stage-machine 去向与位置无关（M29 删掉 exitsForward）', () 
 
     expect(done.status).toBe('completed')
     expect(done.currentStageId).toBe('s1')
+  })
+})
+
+describe('stage-machine applyExit retry（M33：原地重跑预算）', () => {
+  const flow = (): WorkflowWithStages =>
+    sWf([s0, s1, sStage({ id: 'ag', position: 2, entryMode: 'agent', agentId: 'ag1' })])
+
+  it('预算内：计数 +1、原地重建入口 run', () => {
+    const r = applyExit(sTask('ag'), { do: 'retry', max: 2 }, flow())
+
+    expect(r.task.currentStageId).toBe('ag')
+    expect(r.task.stageFails).toBe(1)
+    expect(r.effects).toEqual([{ type: 'createRun', stageId: 'ag', agentId: 'ag1' }])
+    expect(r.retryExhausted).toBeUndefined()
+  })
+
+  it('用尽：任务收口（completed）、计数清零、标记 retryExhausted', () => {
+    const r = applyExit({ ...sTask('ag'), stageFails: 2 }, { do: 'retry', max: 2 }, flow())
+
+    expect(r.task.status).toBe('completed')
+    expect(r.task.stageFails).toBe(0)
+    expect(r.effects).toEqual([])
+    expect(r.retryExhausted).toBe(true)
+  })
+
+  it('进入别的阶段时重跑计数清零', () => {
+    const r = applyExit({ ...sTask('s0'), stageFails: 3 }, { do: 'goto', stageId: 's1' }, flow())
+
+    expect(r.task.currentStageId).toBe('s1')
+    expect(r.task.stageFails).toBe(0)
   })
 })

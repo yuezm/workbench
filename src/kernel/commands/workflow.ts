@@ -1,6 +1,7 @@
 /**
  * 工作流命令（R2 从 `decide.ts` 拆出，行为不变；M18 加内置阶段）。
  */
+import { STAGE_EXIT_RETRY_LIMITS } from '../../protocol/entities'
 import type {
   BuiltinStageKey,
   JudgeConfig,
@@ -72,6 +73,10 @@ function exitsOf(ids: Id[], stage: StageInput): StageExits {
     if (exit.do === 'goto') {
       const stageId = indexTarget(ids, exit.stageIndex)
       if (stageId !== null) exits[exit.on] = { do: 'goto', stageId }
+      continue
+    }
+    if (exit.do === 'retry') {
+      exits[exit.on] = { do: 'retry', max: exit.max ?? STAGE_EXIT_RETRY_LIMITS.min }
       continue
     }
     exits[exit.on] = { do: exit.do }

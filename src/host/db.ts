@@ -49,6 +49,8 @@ import {
   TASKS_M11_ADD_COLUMN_SQL,
   TASKS_M30_ADDED_COLUMNS,
   TASKS_M30_ADD_COLUMN_SQL,
+  TASKS_M33_ADDED_COLUMNS,
+  TASKS_M33_ADD_COLUMN_SQL,
   legacyRunsCopySql,
   legacyRuntimesCopySql,
   legacyTasksCopySql,
@@ -210,6 +212,7 @@ const TASKS_ADDED_COLUMNS = [
   ...TASKS_M10_ADDED_COLUMNS,
   ...TASKS_M11_ADDED_COLUMNS,
   ...TASKS_M30_ADDED_COLUMNS,
+  ...TASKS_M33_ADDED_COLUMNS,
 ] as const
 
 type TaskAddedColumn = (typeof TASKS_ADDED_COLUMNS)[number]
@@ -222,6 +225,7 @@ const TASKS_ADD_COLUMN_SQL: Readonly<Record<TaskAddedColumn, string>> = {
   ...TASKS_M10_ADD_COLUMN_SQL,
   ...TASKS_M11_ADD_COLUMN_SQL,
   ...TASKS_M30_ADD_COLUMN_SQL,
+  ...TASKS_M33_ADD_COLUMN_SQL,
 }
 
 /**

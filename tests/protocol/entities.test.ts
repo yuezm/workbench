@@ -274,6 +274,7 @@ const sampleTask = {
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
+  stageFails: 0,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 } satisfies Task
@@ -444,6 +445,7 @@ describe('protocol/entities', () => {
       'parentTaskId',
       'projectId',
       'ruleId',
+      'stageFails',
       'status',
       'threadId',
       'title',

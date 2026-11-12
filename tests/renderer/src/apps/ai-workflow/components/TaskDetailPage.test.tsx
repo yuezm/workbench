@@ -60,6 +60,7 @@ const task: Task = {
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
+  stageFails: 0,
   createdAt: '2026-11-06T09:00:00.000Z',
   updatedAt: '2026-11-06T10:00:00.000Z',
 }

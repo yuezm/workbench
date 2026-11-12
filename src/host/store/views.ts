@@ -148,6 +148,8 @@ interface TaskRow {
   handoff_from_run_id: string | null
   /** M11 闸门预算：当前阶段连续未通过次数 */
   gate_fails: number
+  /** M33：本阶段原地重跑次数 */
+  stage_fails: number
   created_at: string
   updated_at: string
 }
@@ -380,6 +382,8 @@ const mapTask = (row: TaskRow): Task => ({
   handoffFromTaskId: row.handoff_from_task_id,
   handoffFromStageId: row.handoff_from_stage_id,
   handoffFromRunId: row.handoff_from_run_id ?? null,
+  // M33：重跑计数（老行按 0 归一）
+  stageFails: row.stage_fails ?? 0,
   gateFails: row.gate_fails,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -592,7 +596,7 @@ const readProjects = (db: DatabaseSync): Project[] =>
 const TASK_COLUMNS = `id, title, description, workflow_id, project_id, current_stage_id, status, origin,
         rule_id, external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id,
         batch_no, spawn_key, handoff_from_task_id, handoff_from_stage_id, handoff_from_run_id,
-        created_at, updated_at`
+        stage_fails, created_at, updated_at`
 
 const readTasks = (db: DatabaseSync): Task[] =>
   (

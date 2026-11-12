@@ -181,6 +181,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
+  stageFails: 0,
   gateFails: 0,
   createdAt: CREATED,
   updatedAt: CREATED,
@@ -1076,6 +1077,35 @@ describe('kernel/decide 工作流', () => {
         }),
       ],
     })
+  })
+
+  it('workflow.create：原地重跑的出口按下标落成 id（M33）', () => {
+    const decision = decide(
+      view({ agents: [agent()] }),
+      command({
+        type: 'workflow.create',
+        input: {
+          name: '重跑流',
+          stages: [
+            {
+              name: '实现',
+              entryMode: 'agent',
+              agentId: 'ag-1',
+              exits: [{ on: 'errored', do: 'retry', max: 2 }],
+            },
+          ],
+        },
+      }),
+      NOW,
+      env(),
+    )
+
+    const created = decision.facts
+      .filter((fact) => fact.type === 'stage.created')
+      .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
+      .find((stage) => stage.name === '实现')
+
+    expect(created?.exits).toEqual({ errored: { do: 'retry', max: 2 } })
   })
 
   it('workflow.create：名称必填、阶段集合校验、智能体必须存在', () => {

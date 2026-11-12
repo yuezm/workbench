@@ -126,6 +126,18 @@ describe('validateStageSet', () => {
     )
   })
 
+  it('原地重跑必须给 1–5 的次数', () => {
+    expect(
+      validateStageSet([stage({ name: '待办', exits: [{ on: 'errored', do: 'retry' }] })]),
+    ).toBe('阶段「待办」的出错时进入重跑次数必须是 1–5 的整数')
+    expect(
+      validateStageSet([stage({ name: '待办', exits: [{ on: 'errored', do: 'retry', max: 9 }] })]),
+    ).toBe('阶段「待办」的出错时进入重跑次数必须是 1–5 的整数')
+    expect(
+      validateStageSet([stage({ name: '待办', exits: [{ on: 'errored', do: 'retry', max: 2 }] })]),
+    ).toBeNull()
+  })
+
   it('合法配置返回 null（判定两侧 + 普通阶段 + 护栏不设）', () => {
     expect(
       validateStageSet([

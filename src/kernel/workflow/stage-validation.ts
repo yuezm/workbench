@@ -1,3 +1,4 @@
+import { STAGE_EXIT_RETRY_LIMITS } from '../../protocol/entities'
 import type { StageExitGuard, StageInput } from '../../protocol/entities'
 
 /**
@@ -54,6 +55,18 @@ function validateExits(stage: StageInput, index: number, count: number): string 
     }
     if (!stage.judge && (exit.on === 'passed' || exit.on === 'failed')) {
       return `阶段「${stage.name}」不是判定阶段，没有「${label}」`
+    }
+    if (exit.do === 'retry') {
+      const max = exit.max ?? null
+      if (
+        max === null ||
+        !Number.isInteger(max) ||
+        max < STAGE_EXIT_RETRY_LIMITS.min ||
+        max > STAGE_EXIT_RETRY_LIMITS.max
+      ) {
+        return `阶段「${stage.name}」的${label}重跑次数必须是 ${STAGE_EXIT_RETRY_LIMITS.min}–${STAGE_EXIT_RETRY_LIMITS.max} 的整数`
+      }
+      continue
     }
     if (exit.do !== 'goto') continue
     const target = exit.stageIndex

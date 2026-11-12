@@ -100,6 +100,7 @@ const task = (id: string, over: Partial<Task> = {}): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
+  stageFails: 0,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -219,6 +220,7 @@ describe('kernel/handoff 去重与链深', () => {
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
       handoffFromRunId: 'run-9',
+      stageFails: 0,
     })
 
     expect(handedOffAlready(view({ tasks: [handed] }), 'run-9')).toBe(true)
@@ -263,6 +265,7 @@ describe('kernel/handoff 去重与链深', () => {
             handoffFromTaskId: `t-${index - 1}`,
             handoffFromStageId: 'st-a0',
             handoffFromRunId: null,
+            stageFails: 0,
           }),
         )
       }
@@ -278,6 +281,7 @@ describe('kernel/handoff 去重与链深', () => {
         handoffFromTaskId: `t-${HANDOFF_MAX_DEPTH - 1}`,
         handoffFromStageId: 'st-a0',
         handoffFromRunId: null,
+        stageFails: 0,
       }),
       'done',
     )
@@ -292,6 +296,7 @@ describe('kernel/handoff 去重与链深', () => {
         handoffFromTaskId: `t-${HANDOFF_MAX_DEPTH}`,
         handoffFromStageId: 'st-a0',
         handoffFromRunId: null,
+        stageFails: 0,
       }),
       'done',
     )
@@ -380,6 +385,7 @@ describe('kernel/handoff 触发条件分组', () => {
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
       handoffFromRunId: 'run-9',
+      stageFails: 0,
     })
 
     expect(exit(withTasks(baseView(), [handed]), task('t-1'), 'done', { runId: 'run-9' })).toEqual(
@@ -396,6 +402,7 @@ describe('kernel/handoff 触发条件分组', () => {
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
       handoffFromRunId: 'run-9',
+      stageFails: 0,
     })
     const seeded = withTasks(baseView([handoff({ on: 'done' }), handoff({ on: 'manual' })]), [
       handed,
@@ -446,6 +453,7 @@ describe('kernel/handoff 建任务事实', () => {
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
       handoffFromRunId: null,
+      stageFails: 0,
       status: 'active',
     })
     expect(attached).toMatchObject({ taskId: created.id, ruleId: null })

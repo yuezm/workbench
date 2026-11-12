@@ -163,6 +163,7 @@ export const sample = {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
+      stageFails: 0,
       createdAt: SAMPLE_AT,
       updatedAt: SAMPLE_AT,
       ...overrides,

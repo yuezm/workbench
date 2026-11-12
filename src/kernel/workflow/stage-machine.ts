@@ -29,6 +29,8 @@ export interface MoveResult {
   effects: StageEffect[]
   /** 判定预算耗尽后按配置放行：本次是 fail 但走了通过分支 */
   gateExhausted?: boolean
+  /** 原地重跑预算用尽：本次已按 close 收口（调用方打 `stage:failed` 留痕） */
+  retryExhausted?: boolean
 }
 
 /** 读取某阶段「进入时」应产生的效果。 */
@@ -116,7 +118,7 @@ export function enterStage(
   gateFails = 0,
 ): { task: Task; effects: StageEffect[] } {
   return {
-    task: { ...task, currentStageId: stage.id, status: 'active', gateFails },
+    task: { ...task, currentStageId: stage.id, status: 'active', gateFails, stageFails: 0 },
     effects: entryEffects(stage),
   }
 }
@@ -133,8 +135,22 @@ export function applyExit(
   exit: StagePrimary,
   workflow: WorkflowWithStages,
   options?: { gateFails?: number },
-): { task: Task; effects: StageEffect[] } {
+): { task: Task; effects: StageEffect[]; retryExhausted?: boolean } {
   switch (exit.do) {
+    case 'retry': {
+      // 原地再跑一轮：次数落在 task 上；用尽后按 close 收口（调用方据此打 stage:failed）
+      const attempts = (task.stageFails ?? 0) + 1
+      const stage = workflow.stages.find((item) => item.id === task.currentStageId)
+      if (stage === undefined) return { task, effects: [] }
+      if (attempts > exit.max) {
+        return {
+          task: { ...task, status: 'completed', stageFails: 0, gateFails: 0 },
+          effects: [],
+          retryExhausted: true,
+        }
+      }
+      return { task: { ...task, stageFails: attempts }, effects: entryEffects(stage) }
+    }
     case 'goto': {
       const target = workflow.stages.find((stage) => stage.id === exit.stageId)
       if (!target) {
@@ -174,7 +190,13 @@ export function moveTask(task: Task, event: StageEvent, workflow: WorkflowWithSt
   const follow = (guard: StageExitGuard, gateFails?: number): MoveResult => {
     const exit = currentExits[guard]
     if (exit === undefined) return { task, effects: [] }
-    return applyExit(task, exit, workflow, gateFails === undefined ? undefined : { gateFails })
+    const applied = applyExit(
+      task,
+      exit,
+      workflow,
+      gateFails === undefined ? undefined : { gateFails },
+    )
+    return applied.retryExhausted === true ? { ...applied, retryExhausted: true } : applied
   }
 
   switch (event.type) {

@@ -48,6 +48,7 @@ function task(id: string, title: string, updatedAt: string, currentStageId = 's1
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
+    stageFails: 0,
     createdAt: 't',
     updatedAt,
   }

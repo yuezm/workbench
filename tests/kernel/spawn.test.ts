@@ -71,6 +71,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
+  stageFails: 0,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -361,6 +362,7 @@ describe('kernel/spawn：childrenSettledFacts', () => {
       handoffFromTaskId: 'tk-1',
       handoffFromStageId: 'st-1',
       handoffFromRunId: null,
+      stageFails: 0,
     })
     const implicit = makeView({
       tasks: new Map([

@@ -69,6 +69,7 @@ export function normalizeTask(row: Task): Task {
     handoffFromTaskId: legacy.handoffFromTaskId ?? null,
     handoffFromStageId: legacy.handoffFromStageId ?? null,
     handoffFromRunId: legacy.handoffFromRunId ?? null,
+    stageFails: legacy.stageFails ?? 0,
   }
 }
 

@@ -674,6 +674,14 @@ export interface Run {
   usage: RunUsage | null
   /** 执行耗时（毫秒） */
   durationMs: number | null
+  /**
+   * 本轮的**实际**权限级别（`read` / `edit` / `full`）。
+   *
+   * 不等于智能体上配的 `permissionMode`：闸门阶段内核会把它抬到 `full`
+   * （`kernel/task-effects.ts#runAccessOf`），所以任务详情展示的是这个值。
+   * 投影行里一直有它，之前只是没进 IPC 契约。
+   */
+  access: Access
   startedAt: string | null
   endedAt: string | null
   createdAt: string
@@ -697,9 +705,8 @@ export interface RunRow extends Omit<Run, 'taskId'> {
   /** 执行器键：取自运行时配置的 `executorKey`（M3），决定「怎么调起」 */
   executorKey: string
   threadId: string | null
-  /** 执行目录与权限（来自运行时/阶段配置，不由事件携带） */
+  /** 执行目录（来自项目 / 阶段配置，不由事件携带） */
   cwd: string
-  access: Access
   skill: string | null
   /** 提示词里的资料文件引用（不是指令） */
   promptRef: string | null

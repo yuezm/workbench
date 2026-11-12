@@ -21,6 +21,7 @@ import {
   claudeArgs,
   executeClaudeRun,
   mapResultSubtype,
+  WORKSPACE_ALLOWED_TOOLS,
   type ClaudeOptions,
 } from '../../../../src/plugins/executors/claude/run'
 import { fakeSdk, type FakeSdkOverrides } from '../../support/fake-sdk'
@@ -206,7 +207,7 @@ describe('constants', () => {
 })
 
 describe('claudeArgs', () => {
-  it('恒定参数 + 按需追加 model/effort/resume，每项都是独立元素', () => {
+  it('恒定参数 + 白名单 + 按需追加 model/effort/resume，每项都是独立元素', () => {
     expect(claudeArgs('workspace-write', null, null, null)).toEqual([
       '--print',
       '--output-format',
@@ -216,15 +217,32 @@ describe('claudeArgs', () => {
       'acceptEdits',
       '--permission-prompts',
       'none',
+      '--allowed-tools',
+      ...WORKSPACE_ALLOWED_TOOLS,
     ])
-    expect(
-      claudeArgs(
-        'workspace-write',
-        { provider: 'anthropic', id: 'claude-opus-4-1' },
-        'xhigh',
-        'sess-prev',
-      ).slice(8),
-    ).toEqual(['--model', 'claude-opus-4-1', '--effort', 'xhigh', '--resume', 'sess-prev'])
+    const withModel = claudeArgs(
+      'workspace-write',
+      { provider: 'anthropic', id: 'claude-opus-4-1' },
+      'xhigh',
+      'sess-prev',
+    )
+    expect(withModel.slice(withModel.indexOf('--model'))).toEqual([
+      '--model',
+      'claude-opus-4-1',
+      '--effort',
+      'xhigh',
+      '--resume',
+      'sess-prev',
+    ])
+  })
+
+  it('白名单只在 workspace-write 出现：只读与全权都不加（权限由模式本身收口）', () => {
+    expect(claudeArgs('read-only', null, null, null)).not.toContain('--allowed-tools')
+    expect(claudeArgs('danger-full-access', null, null, null)).not.toContain('--allowed-tools')
+    // 白名单只覆盖只读查询 / 构建 / 测试，不含写入与网络命令
+    expect(WORKSPACE_ALLOWED_TOOLS).toContain('Bash(pnpm:*)')
+    expect(WORKSPACE_ALLOWED_TOOLS).toContain('Bash(python3:*)')
+    expect(WORKSPACE_ALLOWED_TOOLS.some((tool) => /curl|wget|rm|mv|chmod/.test(tool))).toBe(false)
   })
 
   it('三种权限模式映射到 claude 的 --permission-mode 取值', () => {
@@ -312,6 +330,8 @@ describe('executeClaudeRun 成功路径', () => {
       'acceptEdits',
       '--permission-prompts',
       'none',
+      '--allowed-tools',
+      ...WORKSPACE_ALLOWED_TOOLS,
       '--model',
       'claude-opus-4-1',
       '--effort',
@@ -606,6 +626,8 @@ describe('executeClaudeRun 归档与失败', () => {
       'acceptEdits',
       '--permission-prompts',
       'none',
+      '--allowed-tools',
+      ...WORKSPACE_ALLOWED_TOOLS,
     ])
 
     child.emitStdout(initFrame())

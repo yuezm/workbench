@@ -57,6 +57,10 @@ export function claimCandidates(view: View, runtimeId: Id, now: Iso): RunRow[] {
  * 候选；跨线程互不影响。`waiting` 不占位（已释放租约与并发位），`queued` 尚未占位。
  *
  * 找不到智能体的 run（脏投影）按并发 1 放行，不让它永久卡在队列里。
+ *
+ * 注意「同一运行时不能并发」不在这里收口（M28）：那是**连接**级约束，由宿主调度器
+ * 按运行时逐个 pump、一次只领一个来保证（`host/scheduler.ts#claimsPerPump`）。
+ * 内核只认智能体与线程的窗口，才能让「一次 claim 多个」在直连内核的路径上仍然成立。
  */
 export function pickClaims(view: View, runtime: Runtime, capacity: number, now: Iso): RunRow[] {
   const runningByAgent = new Map<Id | null, number>()

@@ -9,13 +9,14 @@
  * 规则 `prompt` 追加到提示词末尾（固定段，不拼外部事件正文）。
  */
 import type { Task } from '../protocol/entities'
+import type { Access, PermissionMode } from '../protocol/entities'
 import { ACCESS_BY_PERMISSION } from '../protocol/entities'
 import type { ThreadRow } from '../protocol/thread'
 import type { TaskComment } from '../protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from './types'
 import { taskPrompt } from './prompt'
 import { locateReport } from './review'
-import { runCountOfTask, taskSessions } from './threads'
+import { runCountOfTask, stageRoundCount, taskSessions } from './threads'
 import { threadContextText, hasThreadHistory } from './thread-context'
 
 /** 规则触发的首轮元信息（规则建任务时传给 `entryRunFacts`）。 */
@@ -26,6 +27,25 @@ export interface RunTrigger {
   hops: number
   /** 规则附加说明（固定文本，不拼外部事件正文） */
   promptExtra?: string
+}
+
+/**
+ * 派活权限（M28）：**闸门阶段至少 full**。
+ *
+ * 为什么要有这条：闸门阶段的验收要求「`checks` 里给命令与退出码」，而 `workspace-write`
+ * 在 Claude Code 里是 `acceptEdits`——只能改文件，跑 `pnpm` / `pytest` 这类命令仍要审批；
+ * 无审批面时被自动拒（实测 2026-11-12 线程 `27787670`：三轮评审 31 次 permission denied，
+ * 评审者只能静态通读，判据「checks 全部退出码 0」永远拿不到）。闸门阶段本来就要跑门禁，
+ * 所以它的权限由阶段语义决定，不受智能体 `permissionMode` 拖累。
+ *
+ * 非闸门阶段仍按智能体配置走（`ACCESS_BY_PERMISSION`）。
+ */
+export function runAccessOf(
+  stage: { gate?: { maxFails: number } | null },
+  mode: PermissionMode,
+): Access {
+  const gated = stage.gate !== null && stage.gate !== undefined
+  return gated ? 'full' : ACCESS_BY_PERMISSION[mode]
 }
 
 /**
@@ -51,7 +71,18 @@ export function entryRunFacts(
   env: Environment,
   actor: Actor,
   trigger?: RunTrigger,
-  options?: { thread?: ThreadRow; turn?: number; pendingComment?: TaskComment },
+  options?: {
+    thread?: ThreadRow
+    turn?: number
+    pendingComment?: TaskComment
+    /**
+     * 本轮的会话策略（M28）：
+     * - `resume`：接同任务同智能体上一轮的会话（重跑 / 反馈顺带再跑）；
+     * - `fresh`：新开会话（阶段流转进入新一轮、人工拖拽重进）；
+     * - 缺省：本阶段第 1 轮续接，第 2 轮起新开。
+     */
+    roundSession?: 'resume' | 'fresh'
+  },
 ): FactDraft<'run.queued'>[] {
   if (task.status !== 'active' || task.currentStageId === null) return []
   const stage = view.stages.get(task.currentStageId)
@@ -76,15 +107,29 @@ export function entryRunFacts(
   // M24：本阶段要处理的评审报告决定回执里有没有 `addresses` 的出口——没有报告时
   // 提示词不再念「逐条回应」，省掉一段用不上的指令。
   const reviewing = locateReport(view, task) !== undefined
+  // M28：本阶段已跑过几轮（不含本轮）。第 1 轮只给「第 1 轮」的语义（不产段），
+  // 第 2 轮起在提示词里写明「第 N 轮 / 上限」，并把会话换成新的。
+  const previousRounds = stageRoundCount(view, task.id, stage.id)
   const prompt = [
-    taskPrompt(agent, task, stage, context, comments, { reviewing }),
+    taskPrompt(agent, task, stage, context, comments, {
+      reviewing,
+      round: { index: previousRounds + 1, max: stage.maxRounds ?? null },
+    }),
     trigger?.promptExtra ?? '',
   ]
     .filter(Boolean)
     .join('\n\n')
   // M15：会话键 = (taskId, agentId)。同一任务续接（打回重做 / 反馈 / turn+1），
   // 换任务或换智能体都开新会话——跨任务信息走「任务索引 + 产物路径」，不共享历史。
-  const resumeSessionId = taskSessions(view, task.id)[agent.id] ?? null
+  //
+  // M28：**本阶段第 2 轮起默认不再续接**。评审 / 复核这类阶段第二轮读的是「新的代码状态 +
+  // 上一轮待改项」，而续接会把上一轮全部工具流水再送一遍（实测单轮 input 从 305k 涨到
+  // 696k，cacheRead 18M）。上一轮的正文与待修复清单已经在提示词里（`precedingBlock` /
+  // `reviewBlock`），续接没有新信息。调用方可以用 `roundSession` 明确覆盖：
+  // `task.rerun` / 反馈顺带重跑传 `resume`（人主动重跑，要记忆），阶段流转传 `fresh`。
+  const attachSession =
+    options?.roundSession === undefined ? previousRounds === 0 : options.roundSession === 'resume'
+  const resumeSessionId = attachSession ? (taskSessions(view, task.id)[agent.id] ?? null) : null
   const turn = options?.turn ?? runCountOfTask(view, task.id) + 1
   // M10：项目文件夹就是本轮的工作目录；任务没有项目（存量 / 未归属）时退回智能体配置。
   const project = task.projectId === null ? undefined : view.projects.get(task.projectId)
@@ -107,7 +152,7 @@ export function entryRunFacts(
           executorKey: runtime.executorKey,
           threadId: thread?.id ?? task.threadId,
           cwd: project?.path ?? agent.workdir ?? '',
-          access: ACCESS_BY_PERMISSION[agent.permissionMode],
+          access: runAccessOf(stage, agent.permissionMode),
           skill: null,
           promptRef: null,
           eventIds: trigger?.eventIds ?? [],

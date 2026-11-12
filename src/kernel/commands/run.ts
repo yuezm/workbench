@@ -32,6 +32,7 @@ import { childrenSettledFacts, spawnFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
 import { reviewFactsOf } from '../review'
 import { closeIfAllDone, inactivityFacts, makeNote, noteFacts, withNote } from '../threads'
+import { stageRoundCount } from '../threads'
 import { moveTask } from '../workflow/stage-machine'
 import {
   chatMessageFacts,
@@ -127,16 +128,11 @@ export function unmetAcceptance(
 /**
  * 该任务在该阶段已经跑过几轮（含刚结算的这一轮）。
  *
- * 轮次**派生**而不是加 `runs` 列：加列要物理重建 `runs` 表，而这里只需要一个计数
- * （沿用 review-handoff D2 的口径：不扩 `RunRow` 契约）。
+ * 实现搬到 `kernel/threads.ts`（M28）：派活（`task-effects`）也要用它决定「第 2 轮起换新会话」
+ * 与提示词里的阶段轮次，而 `commands/run.ts` 已经 import `task-effects`，反向 import 会成环。
+ * 这里保留出口，既有调用点与用例不必跟着搬家。
  */
-export function stageRoundCount(view: View, taskId: Id, stageId: Id): number {
-  let count = 0
-  for (const run of view.runs.values()) {
-    if (run.purpose === 'stage' && run.taskId === taskId && run.stageId === stageId) count += 1
-  }
-  return count
-}
+export { stageRoundCount }
 
 /**
  * 阶段内续轮留痕（M21）：本轮自评达成几条、未达哪几条，以及接下来是续轮还是按原规则流转。
@@ -452,7 +448,13 @@ export function receiveRun(
     for (const fact of transition) {
       if (fact.type === 'task.moved') {
         const movedTask = (fact.payload as { task: Task }).task
-        facts.push(...entryRunFacts(view, movedTask, now, env, HOST_SCHEDULER))
+        // M28：阶段流转进入的下一轮开新会话——上一轮正文与待修复清单已在提示词里，
+        // 续接只是把上一阶段全量工具流水再送一遍。
+        facts.push(
+          ...entryRunFacts(view, movedTask, now, env, HOST_SCHEDULER, undefined, {
+            roundSession: 'fresh',
+          }),
+        )
       }
       // M6.5：阶段流转把任务完成时，若线程内任务已全部完成 → 归档线程
       if (fact.type === 'task.completed') {

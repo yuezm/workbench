@@ -650,10 +650,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   }
 
   /**
-   * 一轮唤醒最多领多少：并发窗口由内核按**智能体**的 `maxConcurrent` 逐条把关，
-   * 这里只做单次领取量的上界（一次 pump 不必领完全部队列，收尾会再触发 wake）。
+   * 一轮唤醒最多领多少。
+   *
+   * 默认 **1**（M28）：`pump` 是按运行时逐个领的，而一个运行时就是一条执行器连接
+   * （`claude --print` 子进程 / dsh 的 ACP 会话）。一次领多个 = 同一连接上并行两个
+   * 子进程，实测（2026-11-12 线程 `27787670`）会互相挤到网关报 503，且排队在界面上
+   * 看不出来。串行领取后，多出来的 run 留在队列里按 `queueSeq` 排队，语义清楚。
+   *
+   * 要并行就配多个运行时；`deps.claimsPerPump` 仍可覆盖（测试与特殊部署用）。
    */
-  const claimsPerPump = () => deps.claimsPerPump ?? 8
+  const claimsPerPump = () => deps.claimsPerPump ?? 1
 
   const pump = (): void => {
     for (const runtime of deps.runtimes()) {

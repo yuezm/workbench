@@ -54,6 +54,48 @@ const PERMISSION_ARGS: Record<PermissionMode, string> = {
 const RESUME_REJECT_RE = /no conversation found|session.*not found|could not find session/i
 
 /**
+ * `workspace-write` 模式下的命令白名单（M28）。
+ *
+ * `acceptEdits` 只管「改文件」，跑命令仍然要审批；而 print 模式没有审批面
+ * （`--permission-prompts none`），于是 `pnpm check` / `pytest` 这类命令被**自动拒**。
+ * 实测（线程 `27787670`）：评审阶段三次 run 共 31 次 permission denied，判据
+ * 「checks 全部退出码 0」永远拿不到。
+ *
+ * 这里只放**仓库内查询 + 构建 + 测试**前缀。范围由 CLI 自己的前缀匹配执行
+ * （`Bash(pnpm:*)` 覆盖 `pnpm check`、`pnpm vitest run` 等）。
+ *
+ * 它保证什么、不保证什么（别按注释想多了）：
+ * - 保证：这些前缀不必审批就能跑，所以构建 / 测试门禁能落地；
+ * - 不保证「只能读」：`node -e` / `python -c` / `npx` / `pnpm run <script>` 都能执行任意代码，
+ *   白名单管的是「要不要审批」，不是「能不能执行」。真正的边界仍是沙箱——
+ *   `workspace-write` 只挡越界写盘，网络与子进程不在它的约束里。
+ * - 不放终态 / 网络类命令：`git commit` / `git push` / `npm publish` / `curl` 一律不在表内，
+ *   需要时由人把阶段权限调成 `danger-full-access`。
+ */
+export const WORKSPACE_ALLOWED_TOOLS: readonly string[] = [
+  'Bash(pnpm:*)',
+  'Bash(npx:*)',
+  'Bash(node:*)',
+  'Bash(python:*)',
+  'Bash(python3:*)',
+  'Bash(pip:*)',
+  'Bash(git status:*)',
+  'Bash(git diff:*)',
+  'Bash(git log:*)',
+  'Bash(git show:*)',
+  'Bash(git rev-parse:*)',
+  'Bash(ls:*)',
+  'Bash(cat:*)',
+  'Bash(grep:*)',
+  'Bash(rg:*)',
+  'Bash(find:*)',
+  'Bash(sed:*)',
+  'Bash(head:*)',
+  'Bash(tail:*)',
+  'Bash(wc:*)',
+]
+
+/**
  * 一轮执行配置 → CLI 参数：每个字段都是独立 argv 元素，不做 shell 拼接。
  *
  * `--permission-prompts none` 恒定追加：print 模式没有人工审批往返，提示类权限一律
@@ -76,6 +118,10 @@ export function claudeArgs(
     '--permission-prompts',
     'none',
   ]
+  // 可改工作区时补命令白名单：否则构建 / 测试命令在无审批面下被自动拒（见常量注释）
+  if (permissionMode === 'workspace-write') {
+    args.push('--allowed-tools', ...WORKSPACE_ALLOWED_TOOLS)
+  }
   // --model 只吃别名或完整模型名，不吃 provider/id：只传斜杠后那段
   if (model) args.push('--model', model.id)
   if (effort) args.push('--effort', effort)

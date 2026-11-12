@@ -662,6 +662,8 @@ const toRun = (row: RunDbRow, taskId: string): Run => {
     sessionId: run.sessionId,
     usage: run.usage,
     durationMs: run.durationMs,
+    // M28：本轮实际权限（闸门阶段被内核抬到 full），任务详情据此显示「这一轮跑成了什么」
+    access: run.access,
     startedAt: run.startedAt,
     endedAt: run.endedAt,
     createdAt: run.createdAt,

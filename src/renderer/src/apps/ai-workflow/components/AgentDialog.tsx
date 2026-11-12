@@ -475,7 +475,11 @@ export function AgentDialog({
                 </Select>
               </Field>
 
-              <Field label="并发上限" hint="同一智能体同时执行的任务数，≥1" error={concurrentError}>
+              <Field
+                label="并发上限"
+                hint="同一智能体同时执行的任务数，≥1；运行时侧一次只跑一轮，要并行就多配几个运行时"
+                error={concurrentError}
+              >
                 <Input
                   aria-label="智能体并发上限"
                   type="number"

@@ -285,7 +285,9 @@ export function rerunTask(
   if (stage.entryMode !== 'agent') {
     return reject('conflict', '当前阶段不交给智能体执行: ' + stage.name)
   }
-  const facts = entryRunFacts(view, task, now, env, OWNER)
+  const facts = entryRunFacts(view, task, now, env, OWNER, undefined, {
+    roundSession: 'resume',
+  })
   if (facts.length === 0) {
     return reject('conflict', '当前阶段没有可用的智能体或运行时: ' + stage.name)
   }
@@ -349,10 +351,13 @@ export function commentTask(
     createdAt: now,
   }
   const facts: FactDraft[] = [ownerDraft('task.comment_added', { comment }, now)]
-  // 顺带再跑一轮：任务停在 agent 阶段且没有活跃 run 才会产 run.queued；
+  // 顺带再跑一轮：任务停在 agent 阶段且没有活跃 run 才会产 run.queued（人写反馈 → 接上一轮会话）
   if (input.rerun === true && !view.activeTaskIds.has(task.id)) {
     facts.push(
-      ...entryRunFacts(view, task, now, env, OWNER, undefined, { pendingComment: comment }),
+      ...entryRunFacts(view, task, now, env, OWNER, undefined, {
+        pendingComment: comment,
+        roundSession: 'resume',
+      }),
     )
   }
   return done(facts)

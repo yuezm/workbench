@@ -216,6 +216,21 @@ export function runCountOfTask(view: View, taskId: Id): number {
   return count
 }
 
+/**
+ * 该任务在该阶段已经跑过几轮（M28：从 `commands/run.ts` 挪过来，供派活与提示词共用）。
+ *
+ * 轮次**派生**而不是加 `runs` 列：加列要物理重建 `runs` 表，而这里只需要一个计数
+ * （沿用 review-handoff D2 的口径：不扩 `RunRow` 契约）。`running` / `queued` 都算一轮，
+ * 因为「本阶段跑过几轮」在派活那一刻就该反映刚结束的那一轮。
+ */
+export function stageRoundCount(view: View, taskId: Id, stageId: Id): number {
+  let count = 0
+  for (const run of view.runs.values()) {
+    if (run.purpose === 'stage' && run.taskId === taskId && run.stageId === stageId) count += 1
+  }
+  return count
+}
+
 /** 任务当前阶段是否已有 queued run（只合并 queued；claimed / waiting 不合并）。 */
 export function queuedRunOfTask(view: View, taskId: Id): RunRow | undefined {
   const runs = [...view.runs.values()].filter(

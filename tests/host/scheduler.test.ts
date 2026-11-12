@@ -661,7 +661,7 @@ describe('createScheduler：领取与并发', () => {
     expect(runStatuses(secondTaskId)).toEqual(['succeeded'])
   })
 
-  it('同一智能体 maxConcurrent=2：一次领取把两条都放出去', async () => {
+  it('同一智能体 maxConcurrent=2 且注入 claimsPerPump=2：一次领取把两条都放出去', async () => {
     const seeded = seed(2)
     const secondFacts = world.store.dispatch({
       type: 'task.create',
@@ -690,10 +690,11 @@ describe('createScheduler：领取与并发', () => {
         active -= 1
         return receiptOf(turn)
       }),
+      { claimsPerPump: 2 },
     )
 
     scheduler.wake()
-    // 窗口按智能体算：两条候选都属于同一个 maxConcurrent=2 的智能体，必须一起领走
+    // 窗口按智能体算：两条候选都属于同一个 maxConcurrent=2 的智能体，注入 2 时一起领走
     await vi.waitFor(() => expect(releases.size).toBe(2))
     expect(peak).toBe(2)
     expect(runStatuses(seeded.task.id)).toEqual(['running'])
@@ -705,7 +706,7 @@ describe('createScheduler：领取与并发', () => {
     expect(runStatuses(secondTaskId)).toEqual(['succeeded'])
   })
 
-  it('claimsPerPump：run.claim 的 capacity 取注入值（缺省 8，不再读运行时）', async () => {
+  it('claimsPerPump：run.claim 的 capacity 取注入值，缺省 1（同一运行时串行领取）', async () => {
     seed()
     const capacities: unknown[] = []
     const scheduler = makeScheduler(
@@ -726,6 +727,28 @@ describe('createScheduler：领取与并发', () => {
 
     expect(capacities.length).toBeGreaterThan(0)
     expect(capacities.every((value) => value === 3)).toBe(true)
+  })
+
+  it('缺省 claimsPerPump=1：run.claim 的 capacity 是 1（连接级串行，不一次领多条）', async () => {
+    seed()
+    const capacities: unknown[] = []
+    const scheduler = makeScheduler(
+      portOf((turn) => receiptOf(turn)),
+      {
+        dispatch: (input) => {
+          if ((input as { type?: string }).type === 'run.claim') {
+            capacities.push((input as { capacity?: unknown }).capacity)
+          }
+          return world.store.dispatch(input)
+        },
+      },
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect(capacities.length).toBeGreaterThan(0)
+    expect(capacities.every((value) => value === 1)).toBe(true)
   })
 
   it('run 的智能体不存在：兜底 failed/run_failed（执行配置无处可取）', async () => {

@@ -181,13 +181,14 @@ export const taskPrompt = (
   stage: Pick<WorkflowStage, 'name' | 'instructions' | 'gate' | 'acceptance'> | null,
   threadContext?: string | null,
   comments?: readonly TaskComment[],
-  options?: { reviewing?: boolean },
+  options?: { reviewing?: boolean; round?: StageRound },
 ): string =>
   [
     agent.systemPrompt,
     `# 任务：${task.title}`,
     task.description,
     stage ? `# 阶段：${stage.name}` : '',
+    roundText(options?.round),
     stageInstructionsText(stage),
     acceptanceText(stage),
     task.threadId === null ? '' : outputContractText(),
@@ -200,6 +201,28 @@ export const taskPrompt = (
   ]
     .filter(Boolean)
     .join(SECTION_SEPARATOR)
+
+/** 本阶段第几轮（`index` 1 基；`max` = 阶段配置的轮次上限，null = 没配）。 */
+export interface StageRound {
+  index: number
+  max: number | null
+}
+
+/**
+ * 阶段轮次段（M28）：告诉智能体「这一轮是本阶段第几轮、还剩几轮」。
+ *
+ * 为什么要有它：`runs.turn` 是**任务级**计数（同一个 `turn` 会同时出现在两个阶段），
+ * 实测里第 2 轮评审的提示词写着 `turn 6`，模型据此以为自己是第 6 轮评审，把上一轮的
+ * 待改项当成「历史遗留」而不是「本轮要收敛的清单」。
+ *
+ * 第 1 轮不产这段——老工作流（只有一轮）的提示词逐字不变。
+ */
+export const roundText = (round: StageRound | undefined): string => {
+  if (round === undefined || round.index <= 1) return ''
+  const limit = round.max === null ? '未设上限' : `上限 ${round.max} 轮`
+  return `## 阶段轮次
+本阶段第 ${round.index} 轮（${limit}）。前几轮的结论在「待修复清单」与「最近一轮产出」里：补上未达项，已达成的不必重做。`
+}
 
 /**
  * 阶段「要干什么」段（M9）：空 / 全空白时不产文本，保持老提示词逐字不变。

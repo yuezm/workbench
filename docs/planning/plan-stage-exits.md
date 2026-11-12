@@ -1,6 +1,6 @@
 # 计划：阶段出口表（Stage Exits）
 
-> 状态：**S1a + S2 已实现（M29 / M30，2026-11-12）；S1b、S3、S4 待做**。
+> 状态：**S1a + S2 + 来源工单段已实现（M29 / M30 / M31，2026-11-12）；S1b、S3、S4 待做**。
 > 关联：[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)（阶段状态机、闸门）、[SPEC-review-handoff](../specs/SPEC-review-handoff.md)、[ARCHITECTURE](../ARCHITECTURE.md)。
 
 ## 已落地：S1a 派单按触发条件分组（M29）

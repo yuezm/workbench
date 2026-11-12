@@ -15,6 +15,7 @@ import type { ThreadRow } from '../protocol/thread'
 import type { TaskComment } from '../protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from './types'
 import { taskPrompt } from './prompt'
+import { sourceHandoffOf } from './handoff-source'
 import { locateReport } from './review'
 import { runCountOfTask, stageRoundCount, taskSessions } from './threads'
 import { threadContextText, hasThreadHistory } from './thread-context'
@@ -114,6 +115,7 @@ export function entryRunFacts(
     taskPrompt(agent, task, stage, context, comments, {
       reviewing,
       round: { index: previousRounds + 1, max: stage.maxRounds ?? null },
+      handoffSource: sourceHandoffOf(view, task),
     }),
     trigger?.promptExtra ?? '',
   ]

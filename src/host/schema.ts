@@ -77,18 +77,10 @@ CREATE TABLE IF NOT EXISTS ${name} (
   position INTEGER NOT NULL,
   entry_mode TEXT NOT NULL CHECK (entry_mode IN ('none','agent','user')),
   agent_id TEXT REFERENCES agents(id) ON DELETE RESTRICT,
-  -- M32 出口表：JSON 对象文本（每个触发条件一条主去向），取代下面两组旧列
+  -- M32 出口表：JSON 对象文本（每个触发条件一条主去向）
   exits_json TEXT NOT NULL DEFAULT '{}',
-  -- M11 旧闸门两列（已被 M32 的出口表取代，不再写入）
-  on_complete_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
-  on_reject_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
-  -- M29 派单：JSON 数组文本（on / workflowId / stageId / forwardOnly），取代下面 M7 两列。
-  -- 旧两列不再写入（恒为 NULL），老事实重建时由 kernel/project 按它们归一成 handoffs，
-  -- 物理删除留给独立的清理任务（SQLite 不能 DROP COLUMN，要重建表）。
+  -- M29 派单：JSON 数组文本（on / workflowId / stageId / forwardOnly）
   handoffs_json TEXT NOT NULL DEFAULT '[]',
-  -- M7 跨工作流交接（已被 M29 取代）：目标工作流 / 目标阶段
-  handoff_workflow_id TEXT,
-  handoff_stage_id TEXT,
   -- M8 子任务：默认落点阶段 / 子任务全部结束时的父任务处理 / 是否允许派生子任务
   subtask_stage_id TEXT,
   on_children_settled TEXT CHECK (on_children_settled IN ('wake','notify','complete')),
@@ -105,10 +97,6 @@ CREATE TABLE IF NOT EXISTS ${name} (
   ),
   -- M32 判定者：JSON 文本（对象 = 判定，null = 本阶段不判定；去向在 exits_json 里）
   judge_json TEXT NOT NULL DEFAULT 'null',
-  -- M11 旧闸门三列（已被 M32 取代，不再写入）
-  gate_max_fails INTEGER,
-  gate_on_pass_stage_id TEXT,
-  gate_on_fail_stage_id TEXT,
   -- M18 内置阶段键（待办 / 已阻塞 / 已完成 / 已取消；NULL = 自己添加的阶段）
   builtin TEXT CHECK (builtin IN ('todo','blocked','done','cancelled')),
   created_at TEXT NOT NULL,
@@ -586,6 +574,35 @@ export function legacyRunsCopySql(targetTable: string): string {
   FROM runs`
 }
 
+/** M32 起 `workflow_stages` 必须有的三列：缺任一列即触发一次性物理重建。 */
+export const STAGES_REQUIRED_COLUMNS = [
+  'exits_json',
+  'handoffs_json',
+  'judge_json',
+  'instructions',
+  'acceptance_json',
+  'max_rounds',
+  'run_timeout_ms',
+  'builtin',
+  'subtask_stage_id',
+  'on_children_settled',
+  'spawn_policy',
+] as const
+
+/**
+ * 已废弃的 `workflow_stages` 列（M34，S4 清理）：去向搬进出口表、交接搬进 handoffs_json 之后
+ * 不再读写。表里只要还有任一列就重建一次，把它们物理删掉（SQLite 不能 DROP COLUMN）。
+ */
+export const LEGACY_STAGE_COLUMNS = [
+  'on_complete_stage_id',
+  'on_reject_stage_id',
+  'handoff_workflow_id',
+  'handoff_stage_id',
+  'gate_max_fails',
+  'gate_on_pass_stage_id',
+  'gate_on_fail_stage_id',
+] as const
+
 /**
  * M3 给 `runtimes` 新增的列（旧库 `CREATE TABLE IF NOT EXISTS` 不会补列，且
  * `protocol_family` 被 CHECK 引用不能 `DROP COLUMN`）：缺任一列即触发一次性物理升级。
@@ -676,22 +693,6 @@ export const TASKS_M65_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
- * M7 给 `workflow_stages` 新增的列（跨工作流交接目标）。
- *
- * 两列都可空、无默认值；`ALTER TABLE ADD COLUMN` 只增不改，不影响既有行。
- * 清单与 `stagesTable()` 的 DDL 保持同步（新增列必须同时改这里）。
- */
-export const STAGES_M7_ADDED_COLUMNS = ['handoff_workflow_id', 'handoff_stage_id'] as const
-
-/** `workflow_stages` M7 补列语句（可空、无 DEFAULT）。 */
-export const STAGES_M7_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M7_ADDED_COLUMNS)[number], string>
-> = {
-  handoff_workflow_id: 'ALTER TABLE workflow_stages ADD COLUMN handoff_workflow_id TEXT',
-  handoff_stage_id: 'ALTER TABLE workflow_stages ADD COLUMN handoff_stage_id TEXT',
-}
-
-/**
  * M7 给 `tasks` 新增的列（交接来源）。
  *
  * 注意：M7 同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff')`，而 SQLite 不能
@@ -706,42 +707,6 @@ export const TASKS_M7_ADD_COLUMN_SQL: Readonly<
 > = {
   handoff_from_task_id: 'ALTER TABLE tasks ADD COLUMN handoff_from_task_id TEXT',
   handoff_from_stage_id: 'ALTER TABLE tasks ADD COLUMN handoff_from_stage_id TEXT',
-}
-
-/**
- * M8 给 `workflow_stages` 新增的列（子任务落点 / rollup / 派发策略）。
- * 三列都可空、无默认值；`ALTER TABLE ADD COLUMN` 只增不改。清单与 `stagesTable()` 同步。
- */
-export const STAGES_M8_ADDED_COLUMNS = [
-  'subtask_stage_id',
-  'on_children_settled',
-  'spawn_policy',
-] as const
-
-/** `workflow_stages` M8 补列语句（可空、无 DEFAULT）。 */
-export const STAGES_M8_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M8_ADDED_COLUMNS)[number], string>
-> = {
-  subtask_stage_id: 'ALTER TABLE workflow_stages ADD COLUMN subtask_stage_id TEXT',
-  on_children_settled:
-    "ALTER TABLE workflow_stages ADD COLUMN on_children_settled TEXT CHECK (on_children_settled IN ('wake','notify','complete'))",
-  spawn_policy:
-    "ALTER TABLE workflow_stages ADD COLUMN spawn_policy TEXT CHECK (spawn_policy IN ('off','agent'))",
-}
-
-/**
- * M9 给 `workflow_stages` 新增的列（阶段要干什么）。
- *
- * 有 DEFAULT ''（老阶段按「没写」归一，与内核 `normalizeStage` 一致）；`ALTER TABLE ADD COLUMN`
- * 只增不改。清单与 `stagesTable()` 的 DDL 保持同步（新增列必须同时改这里）。
- */
-export const STAGES_M9_ADDED_COLUMNS = ['instructions'] as const
-
-/** `workflow_stages` M9 补列语句（默认值与 DDL 一致）。 */
-export const STAGES_M9_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M9_ADDED_COLUMNS)[number], string>
-> = {
-  instructions: "ALTER TABLE workflow_stages ADD COLUMN instructions TEXT NOT NULL DEFAULT ''",
 }
 
 /**
@@ -813,26 +778,6 @@ export const TASKS_M10_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
- * M11 给 `workflow_stages` 新增的列（闸门）：三列都可空，三列全空表示「不是闸门」。
- * 去向两列是弱引用（删阶段后由内核判缺失，与 M7 交接同口径）。
- * 清单与 `stagesTable()` 的 DDL 保持同步。
- */
-export const STAGES_M11_ADDED_COLUMNS = [
-  'gate_max_fails',
-  'gate_on_pass_stage_id',
-  'gate_on_fail_stage_id',
-] as const
-
-/** `workflow_stages` M11 补列语句（可空、无 DEFAULT）。 */
-export const STAGES_M11_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M11_ADDED_COLUMNS)[number], string>
-> = {
-  gate_max_fails: 'ALTER TABLE workflow_stages ADD COLUMN gate_max_fails INTEGER',
-  gate_on_pass_stage_id: 'ALTER TABLE workflow_stages ADD COLUMN gate_on_pass_stage_id TEXT',
-  gate_on_fail_stage_id: 'ALTER TABLE workflow_stages ADD COLUMN gate_on_fail_stage_id TEXT',
-}
-
-/**
  * M11 给 `tasks` 新增的列（闸门预算）：有 DEFAULT 0 —— 旧行按「没失败过」归一，
  * 与内核 `normalizeTask` 一致。清单与 `tasksTable()` 的 DDL 保持同步。
  */
@@ -843,79 +788,6 @@ export const TASKS_M11_ADD_COLUMN_SQL: Readonly<
   Record<(typeof TASKS_M11_ADDED_COLUMNS)[number], string>
 > = {
   gate_fails: 'ALTER TABLE tasks ADD COLUMN gate_fails INTEGER NOT NULL DEFAULT 0',
-}
-
-/**
- * M18 给 `workflow_stages` 新增的列（内置阶段键）：可空、无 DEFAULT ——
- * 旧行按「自己添加的阶段」归一（null），内置行由启动补齐写成四个固定键之一。
- * 清单与 `stagesTable()` 的 DDL 保持同步。
- */
-export const STAGES_M18_ADDED_COLUMNS = ['builtin'] as const
-
-/** `workflow_stages` M18 补列语句（可空、无 DEFAULT；CHECK 与 DDL 一致）。 */
-export const STAGES_M18_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M18_ADDED_COLUMNS)[number], string>
-> = {
-  builtin:
-    "ALTER TABLE workflow_stages ADD COLUMN builtin TEXT CHECK (builtin IN ('todo','blocked','done','cancelled'))",
-}
-
-/**
- * M20 给 `workflow_stages` 新增的列（验收条目 + 阶段内轮次上限）：JSON 数组文本 DEFAULT '[]'、
- * 轮次可空 INTEGER（1–5）。老行按「未声明验收 / 不续轮」归一。
- * 清单与 `stagesTable()` 的 DDL 保持同步。
- */
-export const STAGES_M20_ADDED_COLUMNS = ['acceptance_json', 'max_rounds'] as const
-
-/** `workflow_stages` M20 补列语句（默认值 / CHECK 与 DDL 一致）。 */
-export const STAGES_M20_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M20_ADDED_COLUMNS)[number], string>
-> = {
-  acceptance_json:
-    "ALTER TABLE workflow_stages ADD COLUMN acceptance_json TEXT NOT NULL DEFAULT '[]'",
-  max_rounds:
-    'ALTER TABLE workflow_stages ADD COLUMN max_rounds INTEGER CHECK (max_rounds IS NULL OR (max_rounds BETWEEN 1 AND 5))',
-}
-
-/**
- * M26 给 `workflow_stages` 新增的列（阶段单轮运行超时）：可空 INTEGER（毫秒，300000–14400000）。
- * 老行按「用全局缺省 60 min」归一。清单与 `stagesTable()` 的 DDL 保持同步。
- */
-export const STAGES_M26_ADDED_COLUMNS = ['run_timeout_ms'] as const
-
-/** `workflow_stages` M26 补列语句（CHECK 与 DDL 一致）。 */
-export const STAGES_M26_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M26_ADDED_COLUMNS)[number], string>
-> = {
-  run_timeout_ms:
-    'ALTER TABLE workflow_stages ADD COLUMN run_timeout_ms INTEGER CHECK (run_timeout_ms IS NULL OR (run_timeout_ms BETWEEN 300000 AND 14400000))',
-}
-
-/**
- * M29 给 `workflow_stages` 新增的列（派单）：JSON 数组文本，DEFAULT '[]'。
- * 取代 M7 两列（那两列不再写入，物理删除留给独立清理任务）。
- */
-export const STAGES_M29_ADDED_COLUMNS = ['handoffs_json'] as const
-
-/** `workflow_stages` M29 补列语句（默认值与 DDL 一致）。 */
-export const STAGES_M29_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M29_ADDED_COLUMNS)[number], string>
-> = {
-  handoffs_json: "ALTER TABLE workflow_stages ADD COLUMN handoffs_json TEXT NOT NULL DEFAULT '[]'",
-}
-
-/**
- * M32 给 `workflow_stages` 新增的列（出口表 + 判定护栏）。旧四列不再写入，
- * 物理删除留给独立清理任务。
- */
-export const STAGES_M32_ADDED_COLUMNS = ['exits_json', 'judge_json'] as const
-
-/** `workflow_stages` M32 补列语句（默认值与 DDL 一致）。 */
-export const STAGES_M32_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof STAGES_M32_ADDED_COLUMNS)[number], string>
-> = {
-  exits_json: "ALTER TABLE workflow_stages ADD COLUMN exits_json TEXT NOT NULL DEFAULT '{}'",
-  judge_json: "ALTER TABLE workflow_stages ADD COLUMN judge_json TEXT NOT NULL DEFAULT 'null'",
 }
 
 /**

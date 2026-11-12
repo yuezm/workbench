@@ -440,12 +440,11 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
   }
 
   // 旧表阶段行的 created_at 与导入 at 不同：导入后应统一对齐成 at（行类型里没有该字段）。
-  // 两个阶段互相引用（on_complete / on_reject），造数时先关外键，模拟已存在的 v2 存量。
+  // 阶段按 M32 口径造（出口表 JSON），M34 起旧的分向列已不在表里。
   const insertStage = db.prepare(
     `INSERT INTO workflow_stages
-       (id, workflow_id, name, position, entry_mode, agent_id, on_complete_stage_id,
-        on_reject_stage_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, workflow_id, name, position, entry_mode, agent_id, exits_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   db.exec('PRAGMA foreign_keys = OFF')
   try {
@@ -457,8 +456,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
         stage.position,
         stage.entryMode,
         stage.agentId,
-        stage.exits.done?.do === 'goto' ? stage.exits.done.stageId : null,
-        stage.exits.errored?.do === 'goto' ? stage.exits.errored.stageId : null,
+        JSON.stringify(stage.exits),
         seedAt(10),
       )
     }
@@ -676,8 +674,6 @@ describe('importLegacyIfNeeded', () => {
       workflow_stages: previousStages.map((row) => ({
         ...row,
         created_at: IMPORT_AT,
-        on_complete_stage_id: null,
-        on_reject_stage_id: null,
       })),
       runs: previousRuns.map((row) => ({ ...row, attempt: 1 })),
       run_events: previousEvents.map((row) => ({ ...row, created_at: IMPORT_AT })),

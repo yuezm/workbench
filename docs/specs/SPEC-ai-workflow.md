@@ -256,8 +256,8 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | ENTER(stage)       | 新建任务 / 流转到某阶段      | 按该阶段 `entry_mode`：`none` 停留等待手动操作；`agent` 创建一条 `queued` run（交给 `agent_id`，视为执行中）；`user` 置为"等待你处理" |
 | RUN_SUCCEEDED(run) | agent run 正常结束           | 普通阶段走 `exits.done`；判定阶段按回执 `verdict` 走 `exits.passed` / `exits.failed`（见下）；`close` 则 `completed`                  |
-| RUN_FAILED(run)    | agent run 非零退出/超时/异常 | 进入 `on_reject` 目标；若未配置打回目标（不指定）或目标就是当前阶段则保持原阶段、**不触发进入效果**（不自动重建 run）                 |
-| MOVE_TO(stage)     | 用户把卡片拖到某个阶段列     | 直接进入该阶段（不套用 `on_complete`/`on_reject`）；该任务有活跃 run 时拒绝拖动                                                       |
+| RUN_FAILED(run)    | agent run 非零退出/超时/异常 | 走 `exits.errored`；若未配置打回目标（不指定）或目标就是当前阶段则保持原阶段、**不触发进入效果**（不自动重建 run）                    |
+| MOVE_TO(stage)     | 用户把卡片拖到某个阶段列     | 直接进入该阶段（不套用出口表）；该任务有活跃 run 时拒绝拖动                                                                           |
 | COMPLETE           | 用户把卡片拖到「归档」区     | 任务 `completed`，移出看板；该任务有活跃 run 时拒绝完成                                                                               |
 
 **流转即触发进入：** 每次进入新阶段都重新按 `entry_mode` 产生对应效果（可能再次创建 run），即"SOP 串联"。
@@ -278,7 +278,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 - 老事实的 M7 两列按「`done` + `manual`（仅向前）」归一，判定阶段归成「`passed` + `manual`」，见 `kernel/workflow/stage-handoffs.ts#legacyHandoffs`。
 - **接单的人看得到来源**（M31）：派单产物会开新线程（无线程历史），所以提示词单独加「来源工单」段——来源工作流 / 阶段 / 任务、那一轮的 run 与**结论末尾**（保尾 1200 码点，标「前文略」）；人工派出的没有 run，退回来源任务在来源阶段上最后一条终态 run，再没有就写明「没有可引用的执行结论」。解析在 `kernel/handoff-source.ts`，排版在 `kernel/prompt.ts#handoffSourceText`，都是纯函数。
 
-**打回原地不重试：** `RUN_FAILED` 时若 `on_reject` 未配置（不指定）或解析结果就是当前阶段（显式配置为自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成，详情页也可直接「重新执行」原地重排（`task.rerun`，见下）。
+**打回原地不重试：** `RUN_FAILED` 时若 `exits.errored` 未配置（缺省为「停在这里等人」）或解析结果就是当前阶段（显式配 `goto` 自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成，详情页也可直接「重新执行」原地重排（`task.rerun`，见下）。
 
 **判定（M32，M11 的闸门）：** 阶段可设**判定者**（`judge`：只回答「谁给结论 + 放行护栏多大」），由该阶段的智能体在回执里给 `verdict`（`pass` / `fail`）与 `checks`（实际执行的命令 + 退出码）。判定与 `run.status` **正交**：`succeeded` 只说明执行器跑完，`fail` 才是业务上没过；去向在出口表的 `passed` / `failed` 两行里。
 

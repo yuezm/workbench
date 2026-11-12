@@ -12,12 +12,8 @@ import {
   PROJECTION_TABLES,
   SCHEMA_SQL,
   SCHEMA_VERSION,
-  STAGES_M18_ADD_COLUMN_SQL,
-  STAGES_M18_ADDED_COLUMNS,
-  STAGES_M20_ADDED_COLUMNS,
-  STAGES_M20_ADD_COLUMN_SQL,
-  STAGES_M26_ADDED_COLUMNS,
-  STAGES_M26_ADD_COLUMN_SQL,
+  LEGACY_STAGE_COLUMNS,
+  STAGES_REQUIRED_COLUMNS,
   formatOfProjection,
   projectionFormat,
   tableDdl,
@@ -134,13 +130,9 @@ const STAGES_M7_COLUMNS = [
   'position',
   'entry_mode',
   'agent_id',
-  // M32：出口表（旧两组四列保留在表里等清理）
+  // M32：出口表 / M29：派单（M34 起旧七列已物理删除）
   'exits_json',
-  'on_complete_stage_id',
-  'on_reject_stage_id',
   'handoffs_json',
-  'handoff_workflow_id',
-  'handoff_stage_id',
   'subtask_stage_id',
   'on_children_settled',
   'spawn_policy',
@@ -154,10 +146,6 @@ const STAGES_M7_COLUMNS = [
   'run_timeout_ms',
   // M32：判定者（JSON 文本；null = 不判定）
   'judge_json',
-  // M11：旧闸门三列（已不写，等清理）
-  'gate_max_fails',
-  'gate_on_pass_stage_id',
-  'gate_on_fail_stage_id',
   // M18：内置阶段键（null = 自己添加的阶段）
   'builtin',
   'created_at',
@@ -394,13 +382,43 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     )
     for (const shape of columnShape(legacy, 'workflow_stages')) {
       const name = shape.split('|')[0]
+      // M34 起旧去向两列已物理删除：它们不再出现在新表里
+      if ((LEGACY_STAGE_COLUMNS as readonly string[]).includes(name)) continue
       expect(byName.get(name), name).toBe(shape)
     }
-    // 交接两列是弱引用：不改变既有外键与唯一约束
-    expect(foreignKeyShape(current, 'workflow_stages')).toEqual(
-      foreignKeyShape(legacy, 'workflow_stages'),
+    // M34 删掉的两列各带一条自引用外键：其余外键与唯一约束不变（id / seq 会重排，只比语义）
+    const fkKey = (shape: string): string => shape.split('|').slice(2).join('|')
+    expect(foreignKeyShape(current, 'workflow_stages').map(fkKey)).toEqual(
+      foreignKeyShape(legacy, 'workflow_stages')
+        .filter((shape) => !LEGACY_STAGE_COLUMNS.some((column) => shape.includes(column)))
+        .map(fkKey),
     )
     expect(indexShape(current, 'workflow_stages')).toEqual(indexShape(legacy, 'workflow_stages'))
+  })
+
+  it('M34：旧列清单与重建拷贝 SQL（旧列物理删除）', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    const columns = columnShape(db, 'workflow_stages').map((shape) => shape.split('|')[0])
+    // 已废弃的七列不再出现在新库里
+    for (const legacy of LEGACY_STAGE_COLUMNS) {
+      expect(columns).not.toContain(legacy)
+    }
+    expect(LEGACY_STAGE_COLUMNS).toHaveLength(7)
+
+    // 重建后的三列默认值与 DDL 同口径
+    expect(columns).toContain('exits_json')
+    expect(columns).toContain('handoffs_json')
+    expect(columns).toContain('judge_json')
+    expect(
+      columnShape(db, 'workflow_stages').find((shape) => shape.split('|')[0] === 'exits_json'),
+    ).toBe("exits_json|TEXT|1|'{}'|0")
+    expect(
+      columnShape(db, 'workflow_stages').find((shape) => shape.split('|')[0] === 'judge_json'),
+    ).toBe("judge_json|TEXT|1|'null'|0")
+    // 必须列全部在位，否则重建判定会把这张表当成老库
+    expect(STAGES_REQUIRED_COLUMNS.every((column) => columns.includes(column))).toBe(true)
+    expect(LEGACY_STAGE_COLUMNS).toContain('gate_max_fails')
   })
 
   it('M20 验收列与 M21 轮次列：默认值与 CHECK 与 DDL 同口径', () => {
@@ -411,11 +429,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     // name | type | notnull | default | pk
     expect(shapeOf('acceptance_json')).toBe("acceptance_json|TEXT|1|'[]'|0")
     expect(shapeOf('max_rounds')).toBe('max_rounds|INTEGER|0|null|0')
-    expect(STAGES_M20_ADDED_COLUMNS).toEqual(['acceptance_json', 'max_rounds'])
-    expect(STAGES_M20_ADD_COLUMN_SQL.acceptance_json).toContain('ADD COLUMN acceptance_json TEXT')
-    expect(STAGES_M20_ADD_COLUMN_SQL.acceptance_json).toContain("DEFAULT '[]'")
-    expect(STAGES_M20_ADD_COLUMN_SQL.max_rounds).toContain('ADD COLUMN max_rounds INTEGER')
-    expect(STAGES_M20_ADD_COLUMN_SQL.max_rounds).toContain('BETWEEN 1 AND 5')
+    expect(STAGES_REQUIRED_COLUMNS).toHaveLength(11)
   })
 
   it('M26 阶段超时列：可空无默认、CHECK 认 5 min–4 h，补列语句与 DDL 同口径', () => {
@@ -425,9 +439,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
       columnShape(db, 'workflow_stages').find((shape) => shape.split('|')[0] === name)
     // name | type | notnull | default | pk
     expect(shapeOf('run_timeout_ms')).toBe('run_timeout_ms|INTEGER|0|null|0')
-    expect(STAGES_M26_ADDED_COLUMNS).toEqual(['run_timeout_ms'])
-    expect(STAGES_M26_ADD_COLUMN_SQL.run_timeout_ms).toContain('ADD COLUMN run_timeout_ms INTEGER')
-    expect(STAGES_M26_ADD_COLUMN_SQL.run_timeout_ms).toContain('BETWEEN 300000 AND 14400000')
+    expect(shapeOf('run_timeout_ms')).toContain('INTEGER')
   })
 
   it('M18 内置阶段列：builtin 可空无默认、只认四个内置键，补列语句与 DDL 同口径', () => {
@@ -438,11 +450,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     )
     // name | type | notnull | default | pk
     expect(builtin).toBe('builtin|TEXT|0|null|0')
-    expect(STAGES_M18_ADDED_COLUMNS).toEqual(['builtin'])
-    expect(STAGES_M18_ADD_COLUMN_SQL.builtin).toContain(
-      "CHECK (builtin IN ('todo','blocked','done','cancelled'))",
-    )
-    expect(STAGES_M18_ADD_COLUMN_SQL.builtin).toContain('ADD COLUMN builtin TEXT')
+    expect(builtin).toContain('TEXT')
 
     db.exec(
       "INSERT INTO workflows (id, name, created_at) VALUES ('wf-18', '流程', '2026-01-01T00:00:00.000Z')",

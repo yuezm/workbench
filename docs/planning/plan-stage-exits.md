@@ -1,6 +1,6 @@
 # 计划：阶段出口表（Stage Exits）
 
-> 状态：**S1a / S1b / S2 / 来源工单段 / `retry` 已实现（M29 – M33，2026-11-12）；S4（旧列清理）待做**。
+> 状态：**S1a / S1b / S2 / 来源工单段 / `retry` / S4 旧列清理全部落地（M29 – M34，2026-11-12）**。
 > 关联：[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)（阶段状态机、闸门）、[SPEC-review-handoff](../specs/SPEC-review-handoff.md)、[ARCHITECTURE](../ARCHITECTURE.md)。
 
 ## 已落地：S1b 出口表（M32）
@@ -21,7 +21,19 @@
 
 `retry`（M33）：原地再跑一轮，`max` 1–5，用尽后 `close` 收口并打 `stage:failed`；计数在 `tasks.stage_fails`，进入别的阶段清零。
 
-未做：S4（把 `on_complete_stage_id` / `on_reject_stage_id` / `gate_*` / `handoff_*` 这些已不写的旧列从表里物理删掉，需要一次 12-step 重建）。
+## 已落地：S4 旧列清理（M34）
+
+`workflow_stages` 上七个已废弃的列（`on_complete_stage_id` / `on_reject_stage_id` /
+`handoff_workflow_id` / `handoff_stage_id` / `gate_max_fails` / `gate_on_pass_stage_id` /
+`gate_on_fail_stage_id`）物理删除：
+
+- `needsStagesRebuild`：还剩旧列、或缺任一必须列 → 一次性整表重建；
+- **重建是无损的**：挪行时按旧列现算 `exits_json` / `judge_json` / `handoffs_json`
+  （`legacyExits` / `legacyJudge` / `legacyHandoffs`），阶段说明 / 验收 / 内置键原样搬——
+  这条对 v2 存量库是硬要求：`snapshot.imported` 读的就是这张表，配置丢了没有事实可回滚；
+- 旧的 M7/M8/M9/M11/M18/M20/M26/M29/M32 补列常量随之删除（重建覆盖所有老形状）；
+- 导入只读出口表三列（打开库时已经重建过），不再认旧列；
+- `KERNEL_VERSION` → `M34.0.0`，投影顺手按事实重折一遍。
 
 ## 已落地：S1a 派单按触发条件分组（M29）
 

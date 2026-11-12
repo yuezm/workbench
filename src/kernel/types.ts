@@ -56,8 +56,10 @@ export type Iso = string
  * 「这一次离开」，同一阶段第二次成功要能再派一张单。
  * M32：出口表（`workflow_stages.exits_json` + `judge_json`）——旧的四个去向列不再写入，
  * 存量行按 ALTER 默认值会是空表；不重建就等于把已有工作流的流转配置静默清零。
+ * M34：阶段表去掉七个废弃列（S4）——旧的去向 / 交接 / 判定列物理删除，行按新口径重建，
+ * 顺手让所有库的投影重新按事实折一遍（新列的形状变了）。
  */
-export const KERNEL_VERSION = 'M32.0.0'
+export const KERNEL_VERSION = 'M34.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

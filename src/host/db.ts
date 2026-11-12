@@ -1,3 +1,5 @@
+import { legacyExits } from '../kernel/workflow/stage-machine'
+import { legacyHandoffs } from '../kernel/workflow/stage-handoffs'
 import { DatabaseSync } from 'node:sqlite'
 import {
   AGENTS_M27_ADD_COLUMN_SQL,
@@ -17,24 +19,8 @@ import {
   RUNTIMES_M3_ADDED_COLUMNS,
   SCHEMA_SQL,
   SCHEMA_VERSION,
-  STAGES_M7_ADDED_COLUMNS,
-  STAGES_M7_ADD_COLUMN_SQL,
-  STAGES_M8_ADDED_COLUMNS,
-  STAGES_M8_ADD_COLUMN_SQL,
-  STAGES_M9_ADDED_COLUMNS,
-  STAGES_M9_ADD_COLUMN_SQL,
-  STAGES_M11_ADDED_COLUMNS,
-  STAGES_M11_ADD_COLUMN_SQL,
-  STAGES_M18_ADDED_COLUMNS,
-  STAGES_M18_ADD_COLUMN_SQL,
-  STAGES_M20_ADDED_COLUMNS,
-  STAGES_M20_ADD_COLUMN_SQL,
-  STAGES_M26_ADDED_COLUMNS,
-  STAGES_M26_ADD_COLUMN_SQL,
-  STAGES_M29_ADDED_COLUMNS,
-  STAGES_M29_ADD_COLUMN_SQL,
-  STAGES_M32_ADDED_COLUMNS,
-  STAGES_M32_ADD_COLUMN_SQL,
+  LEGACY_STAGE_COLUMNS,
+  STAGES_REQUIRED_COLUMNS,
   TASKS_M6_ADDED_COLUMNS,
   TASKS_M6_ADD_COLUMN_SQL,
   TASKS_M65_ADDED_COLUMNS,
@@ -86,7 +72,7 @@ function assertIntegrity(db: DatabaseSync, filePath: string): void {
 }
 
 /** 表的列名集合；表不存在时返回空集合。 */
-function tableColumns(db: DatabaseSync, table: string): Set<string> {
+export function tableColumns(db: DatabaseSync, table: string): Set<string> {
   const rows = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{
     name: string
   }>
@@ -296,56 +282,173 @@ function upgradeLegacyTasks(db: DatabaseSync): boolean {
   return true
 }
 
-/** 旧库 `workflow_stages` 缺 M7 / M8 列 → 需要一次性补列（不重建表）。 */
-export function needsStagesUpgrade(db: DatabaseSync): boolean {
+/** 阶段表临时名（重建期间用）。 */
+const STAGES_UPGRADE_TEMP = 'workflow_stages_m34_upgrade'
+
+/**
+ * 旧库 `workflow_stages` 要不要一次性物理重建（M34 / S4）：表里还有已废弃的旧列，
+ * 或缺出口表 / 派单 / 判定者这三列。
+ */
+export function needsStagesRebuild(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'workflow_stages')
   if (columns.size === 0) return false
-  return [
-    ...STAGES_M7_ADDED_COLUMNS,
-    ...STAGES_M8_ADDED_COLUMNS,
-    ...STAGES_M9_ADDED_COLUMNS,
-    ...STAGES_M11_ADDED_COLUMNS,
-    ...STAGES_M18_ADDED_COLUMNS,
-    ...STAGES_M20_ADDED_COLUMNS,
-    ...STAGES_M26_ADDED_COLUMNS,
-    ...STAGES_M29_ADDED_COLUMNS,
-    ...STAGES_M32_ADDED_COLUMNS,
-  ].some((column) => !columns.has(column))
+  return (
+    LEGACY_STAGE_COLUMNS.some((column) => columns.has(column)) ||
+    STAGES_REQUIRED_COLUMNS.some((column) => !columns.has(column))
+  )
 }
 
 /**
- * 旧 `workflow_stages` 一次性补列（M7 / M8 / M9）：M7/M8 列可空无默认，M9 的
- * `instructions` 带 DEFAULT ''。
+ * 旧 `workflow_stages` 一次性物理重建（M34 / S4）。
+ *
+ * 旧列被外键 / 历史约束引用，SQLite 不支持 `DROP COLUMN`，只能「建新表 → 挪行 → 删旧表 →
+ * 改名」。**挪行时按旧列现算**（出口表 / 派单 / 判定者由 `legacyExits` / `legacyJudge` /
+ * `legacyHandoffs` 归一），所以这次重建对数据是无损的——尤其重要的一条：v2 存量库的
+ * `snapshot.imported` 读的就是这张表，丢了配置就再也找不回来（那时还没有事实日志）。
+ *
+ * 全程 `PRAGMA foreign_keys = OFF`（必须在事务外设置）；`tasks.current_stage_id` /
+ * `runs.stage_id` 按 id 弱引用，id 不变，重建后仍然对得上。
+ *
+ * @returns 本次是否真的做了重建
  */
-function upgradeLegacyStages(db: DatabaseSync): boolean {
-  const columns = tableColumns(db, 'workflow_stages')
-  const stageColumnSql: Readonly<Record<string, string>> = {
-    ...STAGES_M7_ADD_COLUMN_SQL,
-    ...STAGES_M8_ADD_COLUMN_SQL,
-    ...STAGES_M9_ADD_COLUMN_SQL,
-    ...STAGES_M11_ADD_COLUMN_SQL,
-    ...STAGES_M18_ADD_COLUMN_SQL,
-    ...STAGES_M20_ADD_COLUMN_SQL,
-    ...STAGES_M26_ADD_COLUMN_SQL,
-    ...STAGES_M29_ADD_COLUMN_SQL,
-    ...STAGES_M32_ADD_COLUMN_SQL,
+export function upgradeLegacyStagesTable(db: DatabaseSync): boolean {
+  if (!needsStagesRebuild(db)) return false
+
+  const rows = db
+    .prepare('SELECT * FROM workflow_stages ORDER BY workflow_id, position')
+    .all() as unknown as Array<Record<string, unknown>>
+  const foreignKeys = readForeignKeys(db)
+  if (foreignKeys) db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    withTx(db, () => {
+      db.exec(`DROP TABLE IF EXISTS ${STAGES_UPGRADE_TEMP}`)
+      db.exec(tableDdl.stages(STAGES_UPGRADE_TEMP))
+      const insert = db.prepare(
+        `INSERT INTO ${STAGES_UPGRADE_TEMP}
+           (id, workflow_id, name, position, entry_mode, agent_id, exits_json, handoffs_json,
+            subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
+            max_rounds, run_timeout_ms, judge_json, builtin, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      for (const row of rows) {
+        const stage = legacyStageRow(row)
+        insert.run(
+          stage.id,
+          stage.workflowId,
+          stage.name,
+          stage.position,
+          stage.entryMode,
+          stage.agentId,
+          JSON.stringify(stage.exits),
+          JSON.stringify(stage.handoffs),
+          stage.subtaskStageId,
+          stage.onChildrenSettled,
+          stage.spawnPolicy,
+          stage.instructions,
+          JSON.stringify(stage.acceptance),
+          stage.maxRounds,
+          stage.runTimeoutMs,
+          JSON.stringify(stage.judge),
+          stage.builtin,
+          stage.createdAt,
+        )
+      }
+      db.exec('DROP TABLE workflow_stages')
+      db.exec(`ALTER TABLE ${STAGES_UPGRADE_TEMP} RENAME TO workflow_stages`)
+    })
+  } finally {
+    if (foreignKeys) db.exec('PRAGMA foreign_keys = ON')
   }
-  const missing = [
-    ...STAGES_M7_ADDED_COLUMNS,
-    ...STAGES_M8_ADDED_COLUMNS,
-    ...STAGES_M9_ADDED_COLUMNS,
-    ...STAGES_M11_ADDED_COLUMNS,
-    ...STAGES_M18_ADDED_COLUMNS,
-    ...STAGES_M20_ADDED_COLUMNS,
-    ...STAGES_M26_ADDED_COLUMNS,
-    ...STAGES_M29_ADDED_COLUMNS,
-    ...STAGES_M32_ADDED_COLUMNS,
-  ].filter((column) => !columns.has(column))
-  if (missing.length === 0) return false
-  withTx(db, () => {
-    for (const column of missing) db.exec(stageColumnSql[column])
-  })
   return true
+}
+
+/**
+ * 旧行 → 新行：新旧列都可能出现（v2 / M7 / M11 / M29 / M32 各种形状），逐列取「有就用，
+ * 没有就补默认」。出口表与派单按老列现算，判定者由老闸门收窄。
+ */
+function legacyStageRow(raw: Record<string, unknown>): {
+  id: string
+  workflowId: string
+  name: string
+  position: number
+  entryMode: string
+  agentId: string | null
+  exits: unknown
+  handoffs: unknown
+  subtaskStageId: string | null
+  onChildrenSettled: string | null
+  spawnPolicy: string | null
+  instructions: string
+  acceptance: unknown
+  maxRounds: number | null
+  runTimeoutMs: number | null
+  judge: unknown
+  builtin: string | null
+  createdAt: string
+} {
+  const text = (value: unknown): string | null =>
+    value === null || value === undefined ? null : String(value)
+  const gateMaxFails =
+    raw.gate_max_fails === null || raw.gate_max_fails === undefined
+      ? null
+      : Number(raw.gate_max_fails)
+  const legacy = {
+    onCompleteStageId: text(raw.on_complete_stage_id),
+    onRejectStageId: text(raw.on_reject_stage_id),
+    gate:
+      gateMaxFails === null
+        ? null
+        : {
+            maxFails: gateMaxFails,
+            onPassStageId: text(raw.gate_on_pass_stage_id),
+            onFailStageId: text(raw.gate_on_fail_stage_id),
+          },
+    handoffWorkflowId: text(raw.handoff_workflow_id),
+    handoffStageId: text(raw.handoff_stage_id),
+  }
+  const exits =
+    raw.exits_json === undefined || raw.exits_json === null
+      ? legacyExits(legacy)
+      : JSON.parse(String(raw.exits_json))
+  const judge =
+    raw.judge_json !== undefined && raw.judge_json !== null
+      ? JSON.parse(String(raw.judge_json))
+      : gateMaxFails === null
+        ? null
+        : { maxFails: gateMaxFails }
+  const handoffs =
+    raw.handoffs_json !== undefined && raw.handoffs_json !== null
+      ? JSON.parse(String(raw.handoffs_json))
+      : legacyHandoffs(legacy)
+
+  return {
+    id: String(raw.id),
+    workflowId: String(raw.workflow_id),
+    name: String(raw.name),
+    position: Number(raw.position),
+    entryMode: String(raw.entry_mode),
+    agentId: text(raw.agent_id),
+    exits,
+    handoffs,
+    subtaskStageId: text(raw.subtask_stage_id),
+    onChildrenSettled: text(raw.on_children_settled),
+    spawnPolicy: text(raw.spawn_policy),
+    instructions:
+      raw.instructions === undefined || raw.instructions === null ? '' : String(raw.instructions),
+    acceptance:
+      raw.acceptance_json === undefined || raw.acceptance_json === null
+        ? []
+        : JSON.parse(String(raw.acceptance_json)),
+    maxRounds:
+      raw.max_rounds === undefined || raw.max_rounds === null ? null : Number(raw.max_rounds),
+    runTimeoutMs:
+      raw.run_timeout_ms === undefined || raw.run_timeout_ms === null
+        ? null
+        : Number(raw.run_timeout_ms),
+    judge,
+    builtin: text(raw.builtin),
+    createdAt: String(raw.created_at),
+  }
 }
 
 /**
@@ -431,8 +534,8 @@ export function openDatabase(filePath: string): DatabaseSync {
     upgradeLegacyRuntimes(db)
     // M27：智能体补执行配置列（模型 / 思考强度 / 并发 / 权限 / 工作目录 / 环境变量）
     upgradeLegacyAgents(db)
-    // M7：阶段补交接两列（只增不改）；M8 / M9 同法补子任务与阶段说明
-    upgradeLegacyStages(db)
+    // M34：阶段表去掉已废弃的旧列（去向 / 交接 / 判定的旧列），需要时整表重建
+    upgradeLegacyStagesTable(db)
     // M9 / M11：对话补归档时间与所属项目（只增不改）
     upgradeLegacyConversations(db)
     // M12：卡片补类型列（只增不改；历史行由投影重建按事实归一）

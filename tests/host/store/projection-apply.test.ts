@@ -129,7 +129,7 @@ describe('createProjectionWriter：显式行映射', () => {
       db
         .prepare(
           `SELECT id, workflow_id, name, position, entry_mode, agent_id,
-                  on_complete_stage_id, on_reject_stage_id, created_at
+                  exits_json, handoffs_json, judge_json, created_at
            FROM workflow_stages`,
         )
         .get(),
@@ -140,8 +140,9 @@ describe('createProjectionWriter：显式行映射', () => {
       position: 0,
       entry_mode: 'none',
       agent_id: null,
-      on_complete_stage_id: null,
-      on_reject_stage_id: null,
+      exits_json: '{}',
+      handoffs_json: '[]',
+      judge_json: 'null',
       created_at: SAMPLE_AT,
     })
     expect(

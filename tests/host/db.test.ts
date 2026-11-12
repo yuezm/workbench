@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   needsRunsUpgrade,
   needsRuntimesUpgrade,
-  needsStagesUpgrade,
+  needsStagesRebuild,
   needsTasksRebuild,
   needsTasksUpgrade,
   openDatabase,
@@ -262,56 +262,62 @@ describe('openDatabase', () => {
     }
   })
 
-  it('M7：表不存在（空列集合）时 needsTasksRebuild / needsStagesUpgrade 均返回 false', () => {
+  it('M7：表不存在（空列集合）时 needsTasksRebuild / needsStagesRebuild 均返回 false', () => {
     const empty = new DatabaseSync(':memory:')
     try {
       expect(needsTasksRebuild(empty)).toBe(false)
-      expect(needsStagesUpgrade(empty)).toBe(false)
+      expect(needsStagesRebuild(empty)).toBe(false)
     } finally {
       empty.close()
     }
   })
 
-  it('M7：旧库 workflow_stages 缺交接两列 → open 时 ALTER 补齐（不重建表）', () => {
+  it('M34：旧库 workflow_stages 带已废弃的旧列 → open 时整表重建、旧列消失、行保留', () => {
     const root = mkdtempSync(path.join(tmpdir(), 'hostdb-stages-'))
     const file = path.join(root, 'ai-workflow.db')
     const seeded = new DatabaseSync(file)
     try {
       seeded.exec(SCHEMA_SQL)
-      seeded.exec('ALTER TABLE workflow_stages DROP COLUMN handoff_workflow_id')
-      seeded.exec('ALTER TABLE workflow_stages DROP COLUMN handoff_stage_id')
+      // 造一张 M11 形状的旧表：把新列删掉、把旧列加回去
+      seeded.exec('ALTER TABLE workflow_stages DROP COLUMN exits_json')
+      seeded.exec('ALTER TABLE workflow_stages DROP COLUMN judge_json')
+      seeded.exec('ALTER TABLE workflow_stages DROP COLUMN handoffs_json')
+      seeded.exec('ALTER TABLE workflow_stages ADD COLUMN on_complete_stage_id TEXT')
+      seeded.exec('ALTER TABLE workflow_stages ADD COLUMN gate_max_fails INTEGER')
       // 旧表结构里插入一行，验证补列不影响数据
       seeded
         .prepare(`INSERT INTO workflows (id, name, description, created_at) VALUES (?, ?, '', ?)`)
         .run('wf-1', '旧流程', '2026-01-01T00:00:00.000Z')
       seeded
         .prepare(
-          `INSERT INTO workflow_stages (id, workflow_id, name, position, entry_mode, created_at)
-           VALUES (?, ?, ?, 0, 'none', ?)`,
+          `INSERT INTO workflow_stages
+             (id, workflow_id, name, position, entry_mode, on_complete_stage_id, gate_max_fails, created_at)
+           VALUES (?, ?, ?, 0, 'none', NULL, 3, ?)`,
         )
         .run('st-1', 'wf-1', '旧阶段', '2026-01-01T00:00:00.000Z')
-      expect(needsStagesUpgrade(seeded)).toBe(true)
+      expect(needsStagesRebuild(seeded)).toBe(true)
     } finally {
       seeded.close()
     }
 
     const local = openDatabase(file)
     try {
-      expect(needsStagesUpgrade(local)).toBe(false)
+      expect(needsStagesRebuild(local)).toBe(false)
       const columns = (
         local.prepare('PRAGMA table_info(workflow_stages)').all() as unknown as Array<{
           name: string
         }>
       ).map((row) => row.name)
-      expect(columns).toEqual(expect.arrayContaining(['handoff_workflow_id', 'handoff_stage_id']))
+      // 七个旧列物理消失，三列新口径就位
+      expect(columns).not.toContain('on_complete_stage_id')
+      expect(columns).not.toContain('reject_stage_id')
+      expect(columns).not.toContain('gate_max_fails')
+      expect(columns).toEqual(expect.arrayContaining(['exits_json', 'handoffs_json', 'judge_json']))
+      // 行与配置都在：老闸门次数收窄成判定者
       const row = local
-        .prepare('SELECT name, handoff_workflow_id, handoff_stage_id FROM workflow_stages')
-        .get() as {
-        name: string
-        handoff_workflow_id: string | null
-        handoff_stage_id: string | null
-      }
-      expect(row).toEqual({ name: '旧阶段', handoff_workflow_id: null, handoff_stage_id: null })
+        .prepare('SELECT name, exits_json, judge_json FROM workflow_stages')
+        .get() as { name: string; exits_json: string; judge_json: string }
+      expect(row).toEqual({ name: '旧阶段', exits_json: '{}', judge_json: '{"maxFails":3}' })
     } finally {
       local.close()
       rmSync(root, { recursive: true, force: true })

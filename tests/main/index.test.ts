@@ -196,6 +196,7 @@ const mocks = vi.hoisted(() => {
     defaultSpawnMock: vi.fn(),
     registerIpcHandlersMock: vi.fn(),
     createTrayMock: vi.fn(),
+    ensureShortcutMock: vi.fn(),
     notifyMock: vi.fn(() => true),
     detectAllMock: vi.fn(async () => []),
     channelByIdMock: vi.fn(() => registryEntries[0]),
@@ -210,6 +211,11 @@ vi.mock('electron', () => ({
   shell: mocks.shellMock,
 }))
 vi.mock('../../src/main/tray', () => ({ createTray: mocks.createTrayMock }))
+// 通知归属快捷方式会真的读写开始菜单：单测里换成 spy
+vi.mock('../../src/main/shell-integration', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/main/shell-integration')>()
+  return { ...actual, ensureNotificationShortcut: mocks.ensureShortcutMock }
+})
 vi.mock('../../src/main/ipc', () => ({ registerIpcHandlers: mocks.registerIpcHandlersMock }))
 vi.mock('../../src/main/notify', () => ({ notify: mocks.notifyMock }))
 vi.mock('../../src/main/workdir', async (importOriginal) => {
@@ -355,6 +361,8 @@ describe('主进程入口装配补测', () => {
     const deps = mocks.createSdkHostMock.mock.calls[0][0] as {
       notify: (title: string, body: string, target?: { cardId?: string }) => boolean
     }
+    // 启动时已经修过一次（见装配顺序用例），这里只看「每次弹之前」那次
+    mocks.ensureShortcutMock.mockClear()
 
     deps.notify('待审批', '点开工作台查看并处理', { cardId: 'card-9' })
     deps.notify('番茄时钟', '已进入短休息')
@@ -364,6 +372,8 @@ describe('主进程入口装配补测', () => {
       cardId: 'card-9',
     })
     expect(mocks.notifyMock).toHaveBeenNthCalledWith(2, '番茄时钟', '已进入短休息', undefined)
+    // 每次弹通知前都修一遍归属快捷方式（Electron 首次弹通知时才补自己那条）
+    expect(mocks.ensureShortcutMock).toHaveBeenCalledTimes(2)
   })
 
   it('M16 归档标签与帧来源：任务/阶段/智能体名从视图取，查不到留 null', async () => {

@@ -18,6 +18,7 @@ const {
   windows,
   BrowserWindowMock,
   createTrayMock,
+  ensureShortcutMock,
   registerIpcHandlersMock,
   createFactFeedMock,
   feedMock,
@@ -72,8 +73,12 @@ const {
     show: ReturnType<typeof vi.fn>
     hide: ReturnType<typeof vi.fn>
     focus: ReturnType<typeof vi.fn>
+    isMinimized: ReturnType<typeof vi.fn>
+    restore: ReturnType<typeof vi.fn>
     loadURL: ReturnType<typeof vi.fn>
     loadFile: ReturnType<typeof vi.fn>
+    /** 构造参数（窗口图标等装配值在这里断言） */
+    options: Record<string, unknown>
   }
   const windows: WindowMock[] = []
   class BrowserWindowMock {
@@ -83,9 +88,13 @@ const {
     show = vi.fn()
     hide = vi.fn()
     focus = vi.fn()
+    isMinimized = vi.fn(() => false)
+    restore = vi.fn()
+    options: Record<string, unknown>
     loadURL = vi.fn()
     loadFile = vi.fn()
-    constructor() {
+    constructor(options: Record<string, unknown>) {
+      this.options = options
       windows.push(this)
     }
   }
@@ -292,6 +301,7 @@ const {
     windows,
     BrowserWindowMock,
     createTrayMock: vi.fn(),
+    ensureShortcutMock: vi.fn(),
     registerIpcHandlersMock: vi.fn(),
     createFactFeedMock,
     feedMock,
@@ -345,6 +355,11 @@ vi.mock('electron', () => ({
   safeStorage: safeStorageMock,
 }))
 vi.mock('../../src/main/tray', () => ({ createTray: createTrayMock }))
+// 通知归属快捷方式会真的读写开始菜单：单测里换成 spy，只断言「装配根什么时候修」
+vi.mock('../../src/main/shell-integration', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/main/shell-integration')>()
+  return { ...actual, ensureNotificationShortcut: ensureShortcutMock }
+})
 vi.mock('../../src/main/ipc', () => ({ registerIpcHandlers: registerIpcHandlersMock }))
 vi.mock('../../src/host/feed', () => ({ createFactFeed: createFactFeedMock }))
 vi.mock('../../src/host/commands', () => ({ createCommandRouter: createCommandRouterMock }))
@@ -529,6 +544,11 @@ describe('主进程入口装配', () => {
     windows.length = 0
     startupOrder.length = 0
     delete process.env['ELECTRON_RENDERER_URL']
+    // 打包态探针：`process.resourcesPath` 只有 Electron 主进程里才有，单测里补一个
+    Object.defineProperty(process, 'resourcesPath', {
+      value: path.join('C:', 'Program Files', 'Workbench', 'resources'),
+      configurable: true,
+    })
     openDatabaseMock.mockImplementation(() => {
       startupOrder.push('openDatabase')
       return {}
@@ -612,6 +632,10 @@ describe('主进程入口装配', () => {
     expect(windows).toHaveLength(1)
     expect(windows[0].loadFile).toHaveBeenCalledTimes(1)
     expect(createTrayMock).toHaveBeenCalledTimes(1)
+    // 通知归属：启动就修一遍开始菜单快捷方式（点通知才唤得回已运行的窗口）
+    expect(ensureShortcutMock).toHaveBeenCalledTimes(1)
+    // 窗口图标显式给：不传就走进程 exe 的资源，开发态（electron.exe）会显示 Electron 图标
+    expect(windows[0].options.icon).toBe(path.join('/app', 'resources', 'icon.ico'))
 
     // 执行器装配：会话根注入 sdk，注册表把清单接成端口工厂
     expect(createSdkHostMock).toHaveBeenCalledWith(
@@ -1019,13 +1043,32 @@ describe('主进程入口装配', () => {
     expect(windows).toHaveLength(0)
   })
 
-  it('second-instance：有窗口时唤出，窗口都没了则重建', async () => {
+  it('注入给插件的 notify：弹之前先修一遍通知归属快捷方式（Electron 是首次弹通知时才补自己那条）', async () => {
+    await loadEntry()
+    const deps = createSdkHostMock.mock.calls[0][0] as {
+      notify: (title: string, body: string, target?: { cardId?: string }) => boolean
+    }
+    ensureShortcutMock.mockClear()
+
+    deps.notify('番茄时钟', '已进入短休息')
+
+    expect(ensureShortcutMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('second-instance：有窗口时唤出（最小化的先还原），窗口都没了则重建', async () => {
     await loadEntry()
     const secondInstance = appHandler('second-instance')
 
     secondInstance()
+    expect(windows[0].isMinimized).toHaveBeenCalled()
+    expect(windows[0].restore).not.toHaveBeenCalled()
     expect(windows[0].show).toHaveBeenCalledTimes(1)
     expect(windows[0].focus).toHaveBeenCalledTimes(1)
+
+    // 最小化时只 show() 不会弹回来（点系统通知落到这里的那条路径）
+    windows[0].isMinimized.mockReturnValue(true)
+    secondInstance()
+    expect(windows[0].restore).toHaveBeenCalledTimes(1)
 
     windows.length = 0
     secondInstance()
@@ -1514,7 +1557,7 @@ describe('主进程入口装配', () => {
     })
 
     // feed 订阅者把同一事件推给所有窗口（新开的窗口也经订阅拿到）
-    const second = new BrowserWindowMock()
+    const second = new BrowserWindowMock({})
     const event = { kind: 'stream-end', runId: 'run-1', conversationId: 'c1' }
     feedListener()(event)
     expect(windows[0].webContents.send).toHaveBeenCalledWith(WORKBENCH_EVENT_CHANNEL, event)

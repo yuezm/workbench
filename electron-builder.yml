@@ -20,6 +20,10 @@ extraResources:
     to: tray.png
   - from: resources/tray@2x.png
     to: tray@2x.png
+  # 窗口 / 任务栏图标与通知归属快捷方式的图标（main/shell-integration.ts 从
+  # process.resourcesPath 读它）。exe 自己的图标由 win.icon 打进去，这份是运行时现读的。
+  - from: resources/icon.ico
+    to: icon.ico
   # 回执工具 server（M24）：舞台产物由 electron.vite.config.ts 的 emit 插件生成，
   # 这里拷到 resources/plugins/ —— host/receipt-tool.ts 的打包态候选路径就是这个。
   # 开关默认关（WORKBENCH_RECEIPT_TOOL=1 才注入），漏拷也只是退回纯文本通道。

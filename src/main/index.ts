@@ -49,6 +49,7 @@ import { registerIpcHandlers } from './ipc'
 // 系统通知原件（M4）：宿主不 import electron，由装配根注入 sdk（`sdk.notify` 的门控在 sdk 层）
 import { notify } from './notify'
 import { createTray } from './tray'
+import { APP_USER_MODEL_ID, ensureNotificationShortcut, windowIconPath } from './shell-integration'
 import { createSdkHost } from '../host/sdk-host'
 import { createExecutorRegistry } from '../host/executor-registry'
 import {
@@ -94,8 +95,13 @@ const NOTIFY_APP_ID = 'ai-workflow'
  * 给通知补上 app 身份后交给原件。
  *
  * `target` 缺省时保持 `undefined`：没有落点就不该有点击行为，和 M4 的「只弹不跳」一致。
+ *
+ * 每次弹之前顺手把 Windows 的通知归属快捷方式修一遍：Electron 是在**第一次弹通知**时
+ * 才补自己那条（名字取 exe 描述名、不带启动参数，开发态点通知就是拉起一个空 Electron），
+ * 只在启动时修会漏掉它；修一次只读几个 .lnk，通知本身也不高频。
  */
 function notifyInApp(title: string, body: string, target?: NotifyTarget): boolean {
+  ensureNotificationShortcut()
   return notify(title, body, target === undefined ? undefined : { appId: NOTIFY_APP_ID, ...target })
 }
 
@@ -131,6 +137,9 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#16161e',
+    // 窗口 / 任务栏图标：不传就走进程 exe 的资源，开发态是 electron.exe（显示 Electron 图标）。
+    // 显式给一份，开发态与打包态一致（托盘图标另见 tray.ts）。
+    icon: windowIconPath(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       // 渲染进程只经 preload 的三个动词访问内核：显式关掉 Node 集成，开启隔离与沙箱。
@@ -170,19 +179,25 @@ function createWindow(): void {
 // 单实例：锁必须在 whenReady 之前判断。已有实例在跑时，本进程直接退出，
 // 不建窗口、不注册托盘、不开库、不注册 IPC，全部装配都留给第一个实例。
 if (app.requestSingleInstanceLock()) {
-  // 第二次启动：已有窗口就唤到前台，窗口全关了则重建
+  // 第二次启动：已有窗口就唤到前台，窗口全关了则重建。
+  // 这条路径也是「点系统通知」的落点：Windows 会按 AUMID 快捷方式重新拉起本应用
+  // （见 shell-integration.ts），单实例锁把这请求转成 second-instance。
   app.on('second-instance', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow()
       return
     }
+    // 最小化的窗口只 show() 不会弹回来，必须先 restore
+    if (win?.isMinimized()) win.restore()
     win?.show()
     win?.focus()
   })
 
   app.whenReady().then(async () => {
-    // Windows 通知归属需要 AppUserModelId
-    app.setAppUserModelId('com.workbench.desktop')
+    // Windows 通知归属需要 AppUserModelId（与 electron-builder 的 appId 同一个值）
+    app.setAppUserModelId(APP_USER_MODEL_ID)
+    // 启动就修一遍归属快捷方式：任务栏图标与「点通知进得来」都靠它（幂等，失败只 warn）
+    ensureNotificationShortcut()
 
     // M5：事实推送（批次 ≤500 条 / 16 ms + 聊天流旁路）；IPC 只暴露 dispatch/query/subscribe。
     const feed = createFactFeed()

@@ -49,8 +49,11 @@ export type Iso = string
  * 而不是从被截断的 `runs.output` 摘要里猜。
  * M18：工作流内置四个阶段（`workflow_stages.builtin` 投影列）——老库的列一旦补出来，
  * 启动补齐按名认领 / 补建内置阶段，所以这里递增以触发一次重建。
+ * M29：派单（`workflow_stages.handoffs_json`）——M7 的交接两列不再写入，存量行按
+ * ALTER 的默认值会是空清单；不重建就等于把已有工作流的交接配置静默清零，
+ * 所以这里必须递增，让 `normalizeStage` 按老事实的两列重新归一。
  */
-export const KERNEL_VERSION = 'M28.0.0'
+export const KERNEL_VERSION = 'M29.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

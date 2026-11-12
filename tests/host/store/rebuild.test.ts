@@ -704,3 +704,85 @@ describe('why 时间线：kernel/timeline', () => {
     expect(entries.map((entry) => entry.fact.seq)).toEqual([5, 6])
   })
 })
+
+describe('M29 派单：老事实重建后按 M7 两列归一（迁移保证）', () => {
+  it('stage.created 只有老交接两列 → 重建后 handoffs 是 done + manual', () => {
+    const db = memory()
+    const store = createStore({ db, kernel: realKernel })
+    store.ensureProjection()
+
+    const stageRow = {
+      id: 'st-legacy',
+      workflowId: 'wf-legacy',
+      name: '评审',
+      position: 0,
+      entryMode: 'none',
+      agentId: null,
+      onCompleteStageId: null,
+      onRejectStageId: null,
+      // M7 形状：只有两列，没有 handoffs
+      handoffWorkflowId: 'wf-target',
+      handoffStageId: 'st-target',
+    }
+    const appended = appendFacts(db, [
+      {
+        type: 'workflow.created',
+        actor: OWNER,
+        at: AT,
+        payload: {
+          workflow: { id: 'wf-legacy', name: '老流程', description: '', createdAt: AT },
+        },
+      } as FactDraft,
+      {
+        type: 'stage.created',
+        actor: OWNER,
+        at: AT,
+        payload: { stage: stageRow },
+      } as unknown as FactDraft,
+      {
+        type: 'workflow.created',
+        actor: OWNER,
+        at: AT,
+        payload: {
+          workflow: { id: 'wf-target', name: '目标流程', description: '', createdAt: AT },
+        },
+      } as FactDraft,
+      {
+        type: 'stage.created',
+        actor: OWNER,
+        at: AT,
+        payload: {
+          stage: {
+            id: 'st-target',
+            workflowId: 'wf-target',
+            name: '待办',
+            position: 0,
+            entryMode: 'none',
+            agentId: null,
+            onCompleteStageId: null,
+            onRejectStageId: null,
+            handoffs: [],
+          },
+        },
+      } as FactDraft,
+    ])
+
+    expect(lastSeq(db)).toBeGreaterThan(0)
+    expect(appended).toHaveLength(4)
+
+    rebuildProjection(db, realKernel)
+
+    const stage = must(
+      store
+        .query('workflows.all')
+        .find((item) => item.id === 'wf-legacy')
+        ?.stages.find((item) => item.id === 'st-legacy'),
+      '老阶段',
+    )
+
+    expect(stage.handoffs).toEqual([
+      { on: 'done', workflowId: 'wf-target', stageId: 'st-target' },
+      { on: 'manual', workflowId: 'wf-target', stageId: 'st-target', forwardOnly: true },
+    ])
+  })
+})

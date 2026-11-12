@@ -19,7 +19,7 @@
 
 派活链固定为：**规则 → 任务（工作流 + 阶段）→ 阶段绑定的智能体 `agentId` → 该智能体的运行时 `runtimeId` → 运行时的 `executorKey` 选择执行器插件**。规则只建任务，不直接派 run。内核只透传 `executorKey` 字符串，不知道 dsh、claude 是什么。执行器插件不是派活目标，也不能自己挑活。
 
-**连接与执行配置分家（M27）**：运行时只回答「怎么把 CLI 起来」；模型、思考强度、并发上限、访问权限、工作目录、环境变量是智能体的设置。派活时内核把智能体的 `permissionMode` 映射成 `run.access`、`workdir` 参与折算 `run.cwd`（项目文件夹优先）；激活时宿主把模型 / 思考强度 / 环境变量放进 `Turn`。
+**连接与执行配置分家（M27）**：运行时只回答「怎么把 CLI 起来」；模型、思考强度、并发上限、访问权限、工作目录、环境变量是智能体的设置。派活时内核把智能体的 `permissionMode` 映射成 `run.access`（闸门阶段至少 `full`：验收要求回执给出命令退出码，而 `workspace-write` 跑不了命令）、`workdir` 参与折算 `run.cwd`（项目文件夹优先）；激活时宿主把模型 / 思考强度 / 环境变量放进 `Turn`。
 
 内核只校验 `executorKey` 的形状（非空 slug，`^[a-z][a-z0-9-]{0,63}$`），**不校验取值**；取值合法性由宿主入口按执行器插件注册表判断。`command` / `profile` / `executorKey` 的缺省值由 IPC 入口按执行器插件 manifest 补齐后再 `dispatch`，内核只见完整输入、零产品名。
 
@@ -126,7 +126,7 @@ export interface Agent {
   model: string | null // provider/model；null = CLI 默认
   reasoningEffort: string | null // null = 模型默认
   maxConcurrent: number // 1–8，默认 1（同一智能体同时在跑的 run 上限）
-  permissionMode: PermissionMode // 派活时映射成 run.access
+  permissionMode: PermissionMode // 派活时映射成 run.access（闸门阶段抬到 full）
   workdir: string | null // 项目文件夹优先，其次这里，再空串 = 宿主默认目录
   env: Record<string, string> // 追加给子进程的环境变量
   createdAt: Iso

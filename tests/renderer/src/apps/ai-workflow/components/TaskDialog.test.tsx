@@ -16,8 +16,8 @@ function stage(id: string, name: string, position: number): WorkflowStage {
     position,
     entryMode: 'none',
     agentId: null,
-    onCompleteStageId: null,
-    onRejectStageId: null,
+    exits: {},
+    judge: null,
     handoffs: [],
   }
 }

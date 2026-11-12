@@ -22,7 +22,7 @@ import {
  * 草稿阶段列表（M18）：内置阶段的补齐 / 规范排序 / 下标重映射。
  *
  * 这里守住三件事：① 四个内置阶段恒在、顺序固定；② 老数据按内置名认领（保留 id 与配置）；
- * ③ 任何插入 / 排序都要把流转目标的下标一起重映射——不然界面看不出异常，流转会指错阶段。
+ * ③ 任何插入 / 排序都要把出口表里 `goto` 的下标一起重映射——不然界面看不出异常，流转会指错阶段。
  */
 
 /** 一个自己添加的阶段（只是名字 + 进入方式，字段形状与草稿一致） */
@@ -42,8 +42,7 @@ describe('emptyStage / builtinStageDraft', () => {
       name: '阶段1',
       entryMode: 'none',
       builtin: null,
-      onCompleteIndex: null,
-      onRejectIndex: null,
+      exits: [],
       handoffs: [],
       subtaskStageId: null,
       onChildrenSettled: null,
@@ -52,7 +51,7 @@ describe('emptyStage / builtinStageDraft', () => {
       acceptance: [],
       maxRounds: null,
       runTimeoutMs: null,
-      gate: null,
+      judge: null,
     })
   })
 
@@ -61,8 +60,9 @@ describe('emptyStage / builtinStageDraft', () => {
       name: '待办',
       builtin: 'todo',
       entryMode: 'none',
-      onCompleteIndex: null,
-      gate: null,
+      // 出口表留空：缺省（done → 下一阶段，errored → 停在这里等人）由内核保存时补齐
+      exits: [],
+      judge: null,
     })
     expect(builtinStageDraft('cancelled')).toMatchObject({ name: '已取消', builtin: 'cancelled' })
   })
@@ -114,7 +114,9 @@ describe('withBuiltinStages', () => {
   })
 
   it('幂等：已经规范的列表再跑一次，顺序与字段都不变', () => {
-    const once = withBuiltinStages([user('方案', { onCompleteIndex: 2 })])
+    const once = withBuiltinStages([
+      user('方案', { exits: [{ on: 'done', do: 'goto', stageIndex: 2 }] }),
+    ])
     const twice = withBuiltinStages(once)
     expect(twice).toEqual(once)
   })
@@ -142,33 +144,51 @@ describe('withBuiltinStages', () => {
     expect(stages.map((stage) => stage.id)).toEqual(['a', 'b', undefined, undefined, undefined])
   })
 
-  it('重映射下标：待办插到最前面，原有目标整体 +1', () => {
-    // A 的「完成后进入」指向 B（老数组下标 2 = C？不：老数组是 [A,B,C]，指向 B = 下标 1）
+  it('重映射下标：待办插到最前面，出口表里的 goto 目标整体 +1', () => {
+    // A 的「完成时」指向老数组下标 2（C），「出错时」指向 0（A 自己）
     const stages = withBuiltinStages([
-      user('A', { onCompleteIndex: 2, onRejectIndex: 0 }),
+      user('A', {
+        exits: [
+          { on: 'done', do: 'goto', stageIndex: 2 },
+          { on: 'errored', do: 'goto', stageIndex: 0 },
+        ],
+      }),
       user('B'),
       user('C'),
     ])
     expect(names(stages)).toEqual(['待办', 'A', 'B', 'C', '已阻塞', '已完成', '已取消'])
     // A 在新数组里是下标 1：2 → 3（C），0 → 1（A 自己，内核会以自指拒收，这里只管下标正确）
-    expect(stages[1]).toMatchObject({ onCompleteIndex: 3, onRejectIndex: 1 })
+    expect(stages[1].exits).toEqual([
+      { on: 'done', do: 'goto', stageIndex: 3 },
+      { on: 'errored', do: 'goto', stageIndex: 1 },
+    ])
   })
 
-  it('闸门两侧的去向也一起重映射', () => {
+  it('判定阶段的通过 / 未通过两条出口也一起重映射', () => {
     const stages = withBuiltinStages([
       user('执行', { entryMode: 'agent' }),
       user('判定', {
         entryMode: 'agent',
-        gate: { maxFails: 2, onPassIndex: 1, onFailIndex: 0 },
+        judge: { maxFails: 2 },
+        exits: [
+          { on: 'passed', do: 'goto', stageIndex: 1 },
+          { on: 'failed', do: 'goto', stageIndex: 0 },
+        ],
       }),
     ])
-    // 判定在新数组里是下标 2：通过 = 1 → 2（自己）？老数组下标 1 就是判定自己，重映射后仍是 2
-    expect(stages[2].gate).toEqual({ maxFails: 2, onPassIndex: 2, onFailIndex: 1 })
+    // 判定在新数组里是下标 2：通过 = 1 → 2（自己，重映射只管下标），未通过 0 → 1
+    expect(stages[2].judge).toEqual({ maxFails: 2 })
+    expect(stages[2].exits).toEqual([
+      { on: 'passed', do: 'goto', stageIndex: 2 },
+      { on: 'failed', do: 'goto', stageIndex: 1 },
+    ])
   })
 
   it('越界下标原样保留：交给保存前的悬空目标校验去指出位置', () => {
-    const stages = withBuiltinStages([user('A', { onCompleteIndex: 9 })])
-    expect(stages[1].onCompleteIndex).toBe(9)
+    const stages = withBuiltinStages([
+      user('A', { exits: [{ on: 'done', do: 'goto', stageIndex: 9 }] }),
+    ])
+    expect(stages[1].exits).toEqual([{ on: 'done', do: 'goto', stageIndex: 9 }])
   })
 
   it('没有内置阶段的老数据里，名字不撞内置名的阶段不受影响', () => {
@@ -209,25 +229,41 @@ describe('insertUserStage', () => {
     expect(result.index).toBe(2)
   })
 
-  it('插入点之后的流转目标 +1（指向「已阻塞 / 已完成」的目标不会差一位）', () => {
+  it('插入点之后的出口表目标 +1（指向「已阻塞 / 已完成」的目标不会差一位）', () => {
     const stages = withBuiltinStages([
-      user('A', { onCompleteIndex: 3, onRejectIndex: 0 }),
+      user('A', {
+        exits: [
+          { on: 'done', do: 'goto', stageIndex: 3 },
+          { on: 'errored', do: 'goto', stageIndex: 0 },
+        ],
+      }),
       user('B', {
         entryMode: 'agent',
-        gate: { maxFails: 3, onPassIndex: 3, onFailIndex: 0 },
+        judge: { maxFails: 3 },
+        exits: [
+          { on: 'passed', do: 'goto', stageIndex: 3 },
+          { on: 'failed', do: 'goto', stageIndex: 0 },
+        ],
       }),
     ])
     // 「已阻塞」在下标 3：插入一个用户阶段后变 4
     const result = insertUserStage(stages, user('C'))
     expect(names(result.stages)).toEqual(['待办', 'A', 'B', 'C', '已阻塞', '已完成', '已取消'])
-    expect(result.stages[1]).toMatchObject({ onCompleteIndex: 4, onRejectIndex: 1 })
-    expect(result.stages[2].gate).toEqual({ maxFails: 3, onPassIndex: 4, onFailIndex: 1 })
+    expect(result.stages[1].exits).toEqual([
+      { on: 'done', do: 'goto', stageIndex: 4 },
+      { on: 'errored', do: 'goto', stageIndex: 1 },
+    ])
+    expect(result.stages[2].judge).toEqual({ maxFails: 3 })
+    expect(result.stages[2].exits).toEqual([
+      { on: 'passed', do: 'goto', stageIndex: 4 },
+      { on: 'failed', do: 'goto', stageIndex: 1 },
+    ])
   })
 
-  it('空目标保持 null', () => {
+  it('空出口表保持为空：判定者与出口都不凭空补', () => {
     const result = insertUserStage(withBuiltinStages([]), user('A'))
-    expect(result.stages[1]).toMatchObject({ onCompleteIndex: null, onRejectIndex: null })
-    expect(result.stages[1].gate).toBeNull()
+    expect(result.stages[1].exits).toEqual([])
+    expect(result.stages[1].judge).toBeNull()
   })
 })
 
@@ -245,46 +281,66 @@ const draft = (...stages: readonly StageInput[]): StageInput[] => [
 ]
 
 describe('dropStageIndexes', () => {
-  it('删掉中间一个阶段：后面的下标整体前移，指向它的目标清空', () => {
+  it('删掉中间一个阶段：后面的下标整体前移，指向它的出口清空', () => {
     // 下标：0 待办 / 1 A / 2 B / 3 C / 4 已阻塞 / 5 已完成 / 6 已取消
     const stages = draft(
-      user('A', { id: 'a', onCompleteIndex: 2 }),
+      user('A', { id: 'a', exits: [{ on: 'done', do: 'goto', stageIndex: 2 }] }),
       user('B', {
         id: 'b',
         entryMode: 'agent',
-        gate: { maxFails: 2, onPassIndex: 1, onFailIndex: 4 },
+        judge: { maxFails: 2 },
+        exits: [
+          { on: 'passed', do: 'goto', stageIndex: 1 },
+          { on: 'failed', do: 'goto', stageIndex: 4 },
+        ],
       }),
-      user('C', { id: 'c', onRejectIndex: 1, subtaskStageId: 'b' }),
+      user('C', {
+        id: 'c',
+        exits: [{ on: 'errored', do: 'goto', stageIndex: 1 }],
+        subtaskStageId: 'b',
+      }),
     )
     const next = dropStageIndexes(stages, [2])
     expect(names(next)).toEqual(['待办', 'A', 'C', '已阻塞', '已完成', '已取消'])
-    // A 原来指向 B（2）→ 清空；C 原来指向 A（1）保持 1
-    expect(next[1]).toMatchObject({ onCompleteIndex: null, onRejectIndex: null })
-    expect(next[2]).toMatchObject({ onRejectIndex: 1, subtaskStageId: 'b' })
+    // A 原来指向 B（2）→ 清成「未指定」；C 原来指向 A（1）保持 1
+    expect(next[1].exits).toEqual([{ on: 'done', do: 'goto', stageIndex: null }])
+    expect(next[2]).toMatchObject({ subtaskStageId: 'b' })
+    expect(next[2].exits).toEqual([{ on: 'errored', do: 'goto', stageIndex: 1 }])
   })
 
-  it('闸门两侧的去向一起重映射；一次删多个下标按新顺序压紧', () => {
+  it('判定两侧的出口一起重映射；一次删多个下标按新顺序压紧', () => {
     const stages = draft(
       user('A', { id: 'a' }),
       user('B', {
         id: 'b',
         entryMode: 'agent',
-        onCompleteIndex: 4,
-        gate: { maxFails: 2, onPassIndex: 4, onFailIndex: 0 },
+        judge: { maxFails: 2 },
+        exits: [
+          { on: 'done', do: 'goto', stageIndex: 4 },
+          { on: 'passed', do: 'goto', stageIndex: 4 },
+          { on: 'failed', do: 'goto', stageIndex: 0 },
+        ],
       }),
       user('C', { id: 'c' }),
     )
     // 删掉「待办」之后的第一项与最后一项 → 只剩 B
     const next = dropStageIndexes(stages, [1, 3])
     expect(names(next)).toEqual(['待办', 'B', '已阻塞', '已完成', '已取消'])
-    // 已阻塞原来在下标 4：删掉 1、3 之后变 2
-    expect(next[1]).toMatchObject({ onCompleteIndex: 2 })
-    expect(next[1].gate).toEqual({ maxFails: 2, onPassIndex: 2, onFailIndex: 0 })
+    // 已阻塞原来在下标 4：删掉 1、3 之后变 2；失败退回「待办」仍在下标 0
+    expect(next[1].exits).toEqual([
+      { on: 'done', do: 'goto', stageIndex: 2 },
+      { on: 'passed', do: 'goto', stageIndex: 2 },
+      { on: 'failed', do: 'goto', stageIndex: 0 },
+    ])
+    expect(next[1].judge).toEqual({ maxFails: 2 })
   })
 
   it('越界下标原样保留：交给保存前的悬空目标校验去指出位置', () => {
-    const next = dropStageIndexes(draft(user('A', { id: 'a', onCompleteIndex: 99 })), [2])
-    expect(next[1]).toMatchObject({ name: 'A', onCompleteIndex: 98 })
+    const next = dropStageIndexes(
+      draft(user('A', { id: 'a', exits: [{ on: 'done', do: 'goto', stageIndex: 99 }] })),
+      [2],
+    )
+    expect(next[1].exits).toEqual([{ on: 'done', do: 'goto', stageIndex: 98 }])
   })
 })
 
@@ -296,17 +352,22 @@ describe('dropVanishedStages', () => {
 
   it('id 已不在库里的阶段丢掉，并清掉指向它的子任务落点', () => {
     const stages = draft(
-      user('A', { id: 'a', onCompleteIndex: 2 }),
+      user('A', { id: 'a', exits: [{ on: 'done', do: 'goto', stageIndex: 2 }] }),
       user('B', { id: 'gone', subtaskStageId: 'a' }),
-      user('C', { id: 'c', subtaskStageId: 'gone', onRejectIndex: 4 }),
+      user('C', {
+        id: 'c',
+        subtaskStageId: 'gone',
+        exits: [{ on: 'errored', do: 'goto', stageIndex: 4 }],
+      }),
     )
     const live = new Set(['a', 'c'])
     const next = dropVanishedStages(stages, live)
     expect(names(next)).toEqual(['待办', 'A', 'C', '已阻塞', '已完成', '已取消'])
-    // A 原来指向 B（2，已被别处删掉）→ 清空；C 的子任务落点指向已删阶段 → 清空，
-    // 指向「已阻塞」的出错去向跟着前移一位
-    expect(next[1]).toMatchObject({ onCompleteIndex: null })
-    expect(next[2]).toMatchObject({ subtaskStageId: null, onRejectIndex: 3 })
+    // A 原来指向 B（2，已被别处删掉）→ 清成「未指定」；C 的子任务落点指向已删阶段 → 清空，
+    // 指向「已阻塞」的出错出口跟着前移一位
+    expect(next[1].exits).toEqual([{ on: 'done', do: 'goto', stageIndex: null }])
+    expect(next[2]).toMatchObject({ subtaskStageId: null })
+    expect(next[2].exits).toEqual([{ on: 'errored', do: 'goto', stageIndex: 3 }])
   })
 
   it('内置项本来就没有 id：不算「已删除」，原样提交由内核补齐', () => {

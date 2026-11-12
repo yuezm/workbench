@@ -489,7 +489,9 @@ describe('queryView：各视图', () => {
       position: 2,
       entryMode: 'agent',
       agentId: agent.id,
-      gate: { maxFails: 3, onPassStageId: 'st-1', onFailStageId: 'st-2' },
+      judge: { maxFails: 3 },
+
+      exits: { passed: { do: 'goto', stageId: 'st-1' }, failed: { do: 'goto', stageId: 'st-2' } },
     })
     writer.apply({ table: 'workflow_stages', key: gateStage.id, row: gateStage }, SAMPLE_AT)
 
@@ -498,7 +500,7 @@ describe('queryView：各视图', () => {
     )?.stages
     expect(stages?.find((item) => item.id === 'st-gate')).toEqual(gateStage)
     // 三列全空的阶段仍归一成「不是闸门」
-    expect(stages?.find((item) => item.id === 'st-1')?.gate).toBeNull()
+    expect(stages?.find((item) => item.id === 'st-1')?.judge).toBeNull()
   })
 
   it('agents.all / runtimes.all：按创建时间排序并映射 lastProbe', () => {
@@ -1507,17 +1509,17 @@ describe('queryView：闸门缺省去向', () => {
       position: 2,
       entryMode: 'agent',
       agentId: agent.id,
-      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+      judge: { maxFails: 2 },
+
+      exits: {},
     })
     writer.apply({ table: 'workflow_stages', key: gateStage.id, row: gateStage }, SAMPLE_AT)
 
     const stages = (queryView(db, 'workflows.all') as WorkflowWithStages[]).find(
       (item) => item.id === 'wf-1',
     )?.stages
-    expect(stages?.find((item) => item.id === 'st-gate-default')?.gate).toEqual({
+    expect(stages?.find((item) => item.id === 'st-gate-default')?.judge).toEqual({
       maxFails: 2,
-      onPassStageId: null,
-      onFailStageId: null,
     })
   })
 })

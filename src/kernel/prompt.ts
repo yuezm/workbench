@@ -69,14 +69,14 @@ export const receiptBlockHint = (keys: readonly ReceiptKey[] = RECEIPT_KEYS): st
  * 顺序固定按 `RECEIPT_KEYS`：同一阶段同一事实永远同文本。
  */
 export const taskReceiptKeys = (
-  stage: Pick<WorkflowStage, 'gate' | 'acceptance'> | null,
+  stage: PromptStage | null,
   task: Pick<Task, 'threadId'>,
   options?: { reviewing?: boolean },
 ): ReceiptKey[] => {
   const enabled = new Set<ReceiptKey>(BASE_RECEIPT_KEYS)
   if (task.threadId !== null) enabled.add('notes')
   if (stage !== null) enabled.add('deliverables')
-  if (stage?.gate != null) {
+  if (stage?.judge != null) {
     enabled.add('verdict')
     enabled.add('checks')
     enabled.add('findings')
@@ -162,6 +162,14 @@ export const interruptRuleText = (): string => `## 打断规则
 
 需求自相矛盾、沿途发现 bug、你正偏离原方案`
 
+/** 提示词只读阶段上的这几项，其余字段缺省也行（老的 stage 夹具不必补齐判定位）。 */
+export interface PromptStage {
+  name?: string
+  instructions?: string
+  judge?: { maxFails: number | null } | null
+  acceptance?: readonly string[]
+}
+
 /** 来源工单段的摘要上限（码点）：只保末尾，结论在尾部（同 review-handoff D10 的口径）。 */
 export const HANDOFF_SOURCE_LIMITS = { summaryChars: 1200 } as const
 
@@ -222,7 +230,7 @@ ${summary}`
 export const taskPrompt = (
   agent: Agent,
   task: Task,
-  stage: Pick<WorkflowStage, 'name' | 'instructions' | 'gate' | 'acceptance'> | null,
+  stage: PromptStage | null,
   threadContext?: string | null,
   comments?: readonly TaskComment[],
   options?: { reviewing?: boolean; round?: StageRound; handoffSource?: HandoffSource | null },
@@ -232,7 +240,7 @@ export const taskPrompt = (
     `# 任务：${task.title}`,
     task.description,
     handoffSourceText(options?.handoffSource),
-    stage ? `# 阶段：${stage.name}` : '',
+    stage?.name ? `# 阶段：${stage.name}` : '',
     roundText(options?.round),
     stageInstructionsText(stage),
     acceptanceText(stage),
@@ -330,17 +338,15 @@ const GATE_ACCEPTANCE_RULE = `- 本阶段的「验收」条目要落到证据上
  * M20：阶段声明了验收条目时，追加一句「证据要覆盖验收」——闸门是唯一能把
  * 「自评」升级成「可核对」的地方，两者绑定才有意义。
  */
-export const gateInstructionsText = (
-  stage: Pick<WorkflowStage, 'gate' | 'acceptance'> | null,
-): string => {
-  const gate = stage?.gate ?? null
+export const gateInstructionsText = (stage: PromptStage | null): string => {
+  const gate = stage?.judge ?? null
   if (gate === null) return ''
   const acceptanceRule = (stage?.acceptance ?? []).length > 0 ? `\n${GATE_ACCEPTANCE_RULE}` : ''
   return `## 闸门判定（必须）
 本阶段是闸门：做完之后必须对「过没过」下结论，在最终回复末尾的回执块里写 \`verdict\` 与 \`checks\`。
 - \`verdict\`: "pass" = 确实达成；"fail" = 没达成（在正文里写清哪一条没过）
 - \`checks\`: 实际执行的命令与退出码，至少一条；\`verdict\` 为 pass 时每条 \`exitCode\` 必须是 0
-- 未通过会退回修复，最多允许 ${gate.maxFails} 次；不要为了让流程前进而填 pass
+- 未通过会退回修复${gate.maxFails === null ? '' : `，最多允许 ${gate.maxFails} 次`}；不要为了让流程前进而填 pass
 - 判定 fail 且要人决定去向时，这一轮**不要给 \`verdict\`**，改发一张 \`ask\` 卡（同一轮只发一张）：正文写清哪一条没过、证据是什么，\`options\` 给「同意，按打回走」/「我要和你再讨论」/「情况有变，直接放行」三档，\`key\` 固定写 \`gate-verdict\`
 - 人在这张卡上除了选一行，还可以附一段自己的意见或追问（会作为资料交给你）；答完之后你在**同一会话**里接着谈：把异议逐条回应，谈清楚了再给最终 \`verdict\` 与 \`checks\`，还需要人拍板就再发一张 \`ask\`
 - 缺少 verdict 或拿不出证据时，任务会停在闸门等人处理${acceptanceRule}`

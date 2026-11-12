@@ -36,8 +36,8 @@ export function builtinStageInput(key: BuiltinStageKey): StageInput {
     entryMode: 'none',
     builtin: key,
     agentId: null,
-    onCompleteIndex: null,
-    onRejectIndex: null,
+    exits: [],
+    judge: null,
     handoffs: [],
     subtaskStageId: null,
     onChildrenSettled: null,
@@ -45,7 +45,6 @@ export function builtinStageInput(key: BuiltinStageKey): StageInput {
     instructions: '',
     acceptance: [],
     maxRounds: null,
-    gate: null,
   }
 }
 

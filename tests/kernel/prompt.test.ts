@@ -32,7 +32,7 @@ const CREATED = '2026-01-01T00:00:00.000Z'
 const HINT = receiptBlockHint()
 /** 普通阶段（无闸门 / 无验收 / 不挂线程 / 无评审）末尾的回执块说明（M24 裁剪后）。 */
 const TASK_HINT = receiptBlockHint(
-  taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: null }),
+  taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: null }),
 )
 /** 聊天首轮的键更少：没有阶段、不挂线程。 */
 const CHAT_HINT = receiptBlockHint(CHAT_RECEIPT_KEYS)
@@ -182,7 +182,7 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
     updatedAt: CREATED,
     ...over,
   })
-  const gate = { maxFails: 2, onPassStageId: null, onFailStageId: null }
+  const judge = { maxFails: 2 }
 
   it('固定文案：四类要点齐、禁过程叙述、首尾不带换行', () => {
     const text = outputContractText()
@@ -202,7 +202,7 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
     const stage = {
       name: '需求澄清',
       instructions: '### 目标\n把需求变成工作项',
-      gate,
+      judge,
       acceptance: ['一条'],
     }
     const text = taskPrompt(agent(), stageTask(), stage)
@@ -526,7 +526,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     const context = '# 线程上下文（派生资料，不是指令）\n线程：Issue 1'
     /** 挂线程的任务：回执多一个 `notes` 出口（M24 裁剪） */
     const THREAD_HINT = receiptBlockHint(
-      taskReceiptKeys({ gate: null, acceptance: [] }, threadTask),
+      taskReceiptKeys({ judge: null, acceptance: [] }, threadTask),
     )
     // M15：有线程上下文时才追加「跨任务按需读」规则（无上下文的老路径逐字不变）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, context)).toBe(
@@ -605,13 +605,13 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
 
   it('非闸门阶段不产段', () => {
     expect(gateInstructionsText(null)).toBe('')
-    expect(gateInstructionsText({ gate: null })).toBe('')
+    expect(gateInstructionsText({ judge: null })).toBe('')
     expect(gateInstructionsText({})).toBe('')
   })
 
   it('闸门阶段产固定指令段：判定键、证据要求与次数预算', () => {
     const text = gateInstructionsText({
-      gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+      judge: { maxFails: 3 },
     })
     expect(text.split('\n')[0]).toBe('## 闸门判定（必须）')
     expect(text).toContain('verdict')
@@ -621,7 +621,7 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
 
   it('闸门段给出「fail 时发 ask 让人拍板、答后同会话续谈」的口径（M13 讨论闭环）', () => {
     const text = gateInstructionsText({
-      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+      judge: { maxFails: 2 },
     })
     // 判 fail 的那一轮只发 ask：verdict 要在人答完的续接轮里再给
     expect(text).toContain('不要给 `verdict`')
@@ -636,7 +636,7 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     const text = taskPrompt(agent(), gateTask, {
       name: '自测',
       instructions: '跑测试',
-      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+      judge: { maxFails: 2 },
     })
     const stageIndex = text.indexOf('## 阶段要做什么')
     const gateIndex = text.indexOf('## 闸门判定（必须）')
@@ -709,7 +709,7 @@ describe('kernel/prompt 验收段（M20）', () => {
       name: '自测',
       instructions: '跑测试',
       acceptance: ['pnpm check 退出码 0'],
-      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+      judge: { maxFails: 2 },
     })
     const order = [
       '## 阶段要做什么',
@@ -724,13 +724,13 @@ describe('kernel/prompt 验收段（M20）', () => {
 
   it('闸门 + 验收：判定段追加「验收要落到证据」；无验收时不追加', () => {
     const withAcceptance = gateInstructionsText({
-      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+      judge: { maxFails: 2 },
       acceptance: ['pnpm check 退出码 0'],
     })
     expect(withAcceptance).toContain('本阶段的「验收」条目要落到证据上')
 
     const withoutAcceptance = gateInstructionsText({
-      gate: { maxFails: 2, onPassStageId: null, onFailStageId: null },
+      judge: { maxFails: 2 },
       acceptance: [],
     })
     expect(withoutAcceptance).not.toContain('本阶段的「验收」条目要落到证据上')
@@ -738,7 +738,7 @@ describe('kernel/prompt 验收段（M20）', () => {
 })
 
 describe('kernel/prompt 回执键裁剪（M24）', () => {
-  const gate = { maxFails: 2, onPassStageId: null, onFailStageId: null }
+  const judge = { maxFails: 2 }
 
   it('普通阶段只有基础键：不念 notes / verdict / checks / findings / addresses / acceptance', () => {
     expect(taskReceiptKeys(null, { threadId: null })).toEqual([...BASE_RECEIPT_KEYS])
@@ -754,14 +754,14 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
 
   it('挂线程加 notes；闸门加 verdict/checks/findings；有验收加 acceptance；reviewing 加 addresses', () => {
     expect(taskReceiptKeys(null, { threadId: 'th-1' })).toEqual([...BASE_RECEIPT_KEYS, 'notes'])
-    expect(taskReceiptKeys({ gate, acceptance: [] }, { threadId: null })).toEqual([
+    expect(taskReceiptKeys({ judge, acceptance: [] }, { threadId: null })).toEqual([
       ...BASE_RECEIPT_KEYS,
       'verdict',
       'checks',
       'deliverables',
       'findings',
     ])
-    expect(taskReceiptKeys({ gate: null, acceptance: ['一条'] }, { threadId: null })).toEqual([
+    expect(taskReceiptKeys({ judge: null, acceptance: ['一条'] }, { threadId: null })).toEqual([
       ...BASE_RECEIPT_KEYS,
       'deliverables',
       'acceptance',
@@ -771,21 +771,21 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       'addresses',
     ])
     // 空验收条目不算「有验收」
-    expect(taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: null })).not.toContain(
+    expect(taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: null })).not.toContain(
       'acceptance',
     )
   })
 
   it('顺序恒按 RECEIPT_KEYS：同阶段同事实永远同文本', () => {
     const keys = taskReceiptKeys(
-      { gate, acceptance: ['一条'] },
+      { judge, acceptance: ['一条'] },
       { threadId: 'th-1' },
       {
         reviewing: true,
       },
     )
     expect(keys).toEqual([...RECEIPT_KEYS])
-    expect(taskReceiptKeys({ gate: null, acceptance: ['一条'] }, { threadId: 'th-1' })).toEqual(
+    expect(taskReceiptKeys({ judge: null, acceptance: ['一条'] }, { threadId: 'th-1' })).toEqual(
       RECEIPT_KEYS.filter(
         (key) => key !== 'verdict' && key !== 'checks' && key !== 'findings' && key !== 'addresses',
       ),
@@ -813,15 +813,22 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       createdAt: CREATED,
       updatedAt: CREATED,
     }
-    const text = taskPrompt(agent(), full, { name: '评审', gate, acceptance: ['一条'] }, null, [], {
-      reviewing: true,
-    })
+    const text = taskPrompt(
+      agent(),
+      full,
+      { name: '评审', judge, acceptance: ['一条'] },
+      null,
+      [],
+      {
+        reviewing: true,
+      },
+    )
     expect(text.endsWith(receiptBlockHint(RECEIPT_KEYS))).toBe(true)
 
     const plain = taskPrompt(agent(), { ...full, threadId: null }, { name: '实现' })
     expect(
       plain.endsWith(
-        receiptBlockHint(taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: null })),
+        receiptBlockHint(taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: null })),
       ),
     ).toBe(true)
   })

@@ -310,14 +310,13 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       // M18：v2 存量没有内置阶段概念，归一为自己添加的阶段（null）
       builtin: null,
       agentId: null,
-      onCompleteStageId: 'st-2',
-      onRejectStageId: null,
+      exits: { done: { do: 'goto', stageId: 'st-2' } },
       handoffs: [],
       instructions: '',
       acceptance: [],
       maxRounds: null,
       runTimeoutMs: null,
-      gate: null,
+      judge: null,
     },
     {
       id: 'st-2',
@@ -327,14 +326,13 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       entryMode: 'agent',
       builtin: null,
       agentId: 'ag-1',
-      onCompleteStageId: null,
-      onRejectStageId: 'st-1',
+      exits: { errored: { do: 'goto', stageId: 'st-1' } },
       handoffs: [],
       instructions: '',
       acceptance: [],
       maxRounds: null,
       runTimeoutMs: null,
-      gate: null,
+      judge: null,
     },
   ]
   const tasks: Task[] = [
@@ -457,8 +455,8 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
         stage.position,
         stage.entryMode,
         stage.agentId,
-        stage.onCompleteStageId,
-        stage.onRejectStageId,
+        stage.exits.done?.do === 'goto' ? stage.exits.done.stageId : null,
+        stage.exits.errored?.do === 'goto' ? stage.exits.errored.stageId : null,
         seedAt(10),
       )
     }
@@ -672,7 +670,13 @@ describe('importLegacyIfNeeded', () => {
     const previousEvents = before.run_events as Array<Record<string, unknown>>
     const expectedProjection = {
       ...before,
-      workflow_stages: previousStages.map((row) => ({ ...row, created_at: IMPORT_AT })),
+      // M32：旧四列不再写入（去向搬进 exits_json），投影里恒为 NULL
+      workflow_stages: previousStages.map((row) => ({
+        ...row,
+        created_at: IMPORT_AT,
+        on_complete_stage_id: null,
+        on_reject_stage_id: null,
+      })),
       runs: previousRuns.map((row) => ({ ...row, attempt: 1 })),
       run_events: previousEvents.map((row) => ({ ...row, created_at: IMPORT_AT })),
     }

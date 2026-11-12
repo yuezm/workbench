@@ -54,8 +54,10 @@ export type Iso = string
  * 所以这里必须递增，让 `normalizeStage` 按老事实的两列重新归一。
  * M30：派单来源 run（`tasks.handoff_from_run_id`）——去重粒度从「(任务, 阶段)」换成
  * 「这一次离开」，同一阶段第二次成功要能再派一张单。
+ * M32：出口表（`workflow_stages.exits_json` + `judge_json`）——旧的四个去向列不再写入，
+ * 存量行按 ALTER 默认值会是空表；不重建就等于把已有工作流的流转配置静默清零。
  */
-export const KERNEL_VERSION = 'M30.0.0'
+export const KERNEL_VERSION = 'M32.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

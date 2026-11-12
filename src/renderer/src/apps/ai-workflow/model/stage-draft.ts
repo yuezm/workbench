@@ -15,6 +15,7 @@
  */
 import {
   BUILTIN_STAGE_KEYS,
+  type StageExitInput,
   BUILTIN_STAGE_NAMES,
   type BuiltinStageKey,
   type StageInput,
@@ -27,8 +28,7 @@ export function emptyStage(name: string): StageInput {
     entryMode: 'none',
     // 自己添加的阶段恒为 null（内置键由系统给，不给用户填）
     builtin: null,
-    onCompleteIndex: null,
-    onRejectIndex: null,
+    exits: [],
     handoffs: [],
     subtaskStageId: null,
     onChildrenSettled: null,
@@ -38,7 +38,7 @@ export function emptyStage(name: string): StageInput {
     maxRounds: null,
     // M26：阶段超时缺省不写（= 用全局缺省 60 min）
     runTimeoutMs: null,
-    gate: null,
+    judge: null,
   }
 }
 
@@ -125,18 +125,7 @@ export function withBuiltinStages(stages: readonly StageInput[]): StageInput[] {
     if (stages[index] === undefined) return index
     return moved[index]
   }
-  return ordered.map((stage) => ({
-    ...stage,
-    onCompleteIndex: target(stage.onCompleteIndex),
-    onRejectIndex: target(stage.onRejectIndex),
-    gate: stage.gate
-      ? {
-          ...stage.gate,
-          onPassIndex: target(stage.gate.onPassIndex),
-          onFailIndex: target(stage.gate.onFailIndex),
-        }
-      : null,
-  }))
+  return ordered.map((stage) => ({ ...stage, exits: remapExits(stage.exits, target) }))
 }
 
 /**
@@ -159,18 +148,7 @@ export function dropStageIndexes(
   }
   return stages
     .filter((_, i) => !gone.has(i))
-    .map((stage) => ({
-      ...stage,
-      onCompleteIndex: target(stage.onCompleteIndex),
-      onRejectIndex: target(stage.onRejectIndex),
-      gate: stage.gate
-        ? {
-            ...stage.gate,
-            onPassIndex: target(stage.gate.onPassIndex),
-            onFailIndex: target(stage.gate.onFailIndex),
-          }
-        : null,
-    }))
+    .map((stage) => ({ ...stage, exits: remapExits(stage.exits, target) }))
 }
 
 /**
@@ -240,16 +218,25 @@ export function insertUserStage(stages: readonly StageInput[], stage: StageInput
   }
   const next: StageInput[] = stages.map((item) => ({
     ...item,
-    onCompleteIndex: shift(item.onCompleteIndex),
-    onRejectIndex: shift(item.onRejectIndex),
-    gate: item.gate
-      ? {
-          ...item.gate,
-          onPassIndex: shift(item.gate.onPassIndex),
-          onFailIndex: shift(item.gate.onFailIndex),
-        }
-      : null,
+    exits: remapExits(item.exits, shift),
   }))
   next.splice(at, 0, stage)
   return { stages: next, index: at }
+}
+
+/**
+ * 出口表的下标重映射（M32）：`goto` 的目标跟着阶段一起挪。
+ *
+ * 重映射函数返回 null 表示目标没了（阶段被删）：留 null，保存前的悬空目标校验会就地
+ * 指出「目标未指定」，而不是静默指到别的阶段。
+ */
+export function remapExits(
+  exits: readonly StageExitInput[] | undefined,
+  remap: (index: number) => number | null,
+): StageExitInput[] {
+  return (exits ?? []).map((exit) =>
+    exit.do === 'goto' && exit.stageIndex != null
+      ? { ...exit, stageIndex: remap(exit.stageIndex) }
+      : exit,
+  )
 }

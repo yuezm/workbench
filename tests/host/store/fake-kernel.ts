@@ -42,9 +42,7 @@ const reject = (code: Reason, message: string): Decision => ({
   reject: { code, message },
 })
 
-const stageIdAt = (ids: readonly string[], index: number | null | undefined): string | null =>
-  index === null || index === undefined ? null : (ids[index] ?? null)
-
+// 未使用：出口表由 stageExits 直接映射
 const stagesOf = (view: View, workflowId: string): WorkflowStage[] =>
   [...view.stages.values()]
     .filter((stage) => stage.workflowId === workflowId)
@@ -53,6 +51,20 @@ const stagesOf = (view: View, workflowId: string): WorkflowStage[] =>
 const createWorkflow = (input: WorkflowCreateCommand, at: Iso, env: Environment): Decision => {
   const workflowId = env.nextId('workflow')
   const stageIds = input.input.stages.map(() => env.nextId('stage'))
+  /** 出口表：输入的下标映射成阶段 id（缺省由内核补齐，这里只搬显式配的） */
+  const stageExits = (ids: string[], definition: StageInput): WorkflowStage['exits'] => {
+    const exits: WorkflowStage['exits'] = {}
+    for (const exit of definition.exits ?? []) {
+      const stageId = exit.stageIndex == null ? null : (ids[exit.stageIndex] ?? null)
+      if (exit.do === 'goto') {
+        if (stageId !== null) exits[exit.on] = { do: 'goto', stageId }
+        continue
+      }
+      exits[exit.on] = { do: exit.do }
+    }
+    return exits
+  }
+
   const buildStage = (definition: StageInput, index: number): WorkflowStage =>
     sample.stage({
       id: stageIds[index],
@@ -61,8 +73,7 @@ const createWorkflow = (input: WorkflowCreateCommand, at: Iso, env: Environment)
       position: index,
       entryMode: definition.entryMode,
       agentId: definition.agentId ?? null,
-      onCompleteStageId: stageIdAt(stageIds, definition.onCompleteIndex),
-      onRejectStageId: stageIdAt(stageIds, definition.onRejectIndex),
+      exits: stageExits(stageIds, definition),
     })
   const workflow = sample.workflow({
     id: workflowId,

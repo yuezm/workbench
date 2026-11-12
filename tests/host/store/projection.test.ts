@@ -154,8 +154,8 @@ describe('rebuild：增量应用与重建等价', () => {
             // M18：自己添加的阶段 builtin 为 null
             builtin: null,
             agentId: null,
-            onCompleteStageId: null,
-            onRejectStageId: null,
+            exits: {},
+            judge: null,
             handoffs: [],
             subtaskStageId: null,
             onChildrenSettled: null,
@@ -164,7 +164,6 @@ describe('rebuild：增量应用与重建等价', () => {
             acceptance: [],
             maxRounds: null,
             runTimeoutMs: null,
-            gate: null,
           },
           {
             id: 'st-a2',
@@ -175,8 +174,8 @@ describe('rebuild：增量应用与重建等价', () => {
             // M18：自己添加的阶段 builtin 为 null
             builtin: null,
             agentId: null,
-            onCompleteStageId: null,
-            onRejectStageId: null,
+            exits: {},
+            judge: null,
             handoffs: [],
             subtaskStageId: null,
             onChildrenSettled: null,
@@ -185,7 +184,6 @@ describe('rebuild：增量应用与重建等价', () => {
             acceptance: [],
             maxRounds: null,
             runTimeoutMs: null,
-            gate: null,
           },
         ],
       },

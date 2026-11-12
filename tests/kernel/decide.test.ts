@@ -37,10 +37,10 @@ const LATER = '2026-01-02T00:00:00.000Z'
 const NOW = '2026-11-04T12:00:00.000Z'
 const ACTOR = { kind: 'owner', via: 'ui' } as const
 /** 阶段任务提示词末尾固定追加的回执块说明（M4 D4）。 */
-const HINT = receiptBlockHint(taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: null }))
+const HINT = receiptBlockHint(taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: null }))
 /** 建任务会开隐式线程：回执比普通阶段多一个 notes 出口（M24 裁剪） */
 const THREAD_HINT = receiptBlockHint(
-  taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: 'th-1' }),
+  taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: 'th-1' }),
 )
 /** 阶段任务提示词里的打断规则段（M19）。 */
 const INTERRUPT = interruptRuleText()
@@ -64,8 +64,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   // M18：内置键（null = 自己添加的阶段）；投影行恒有该字段
   builtin: null,
   agentId: null,
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   subtaskStageId: null,
   onChildrenSettled: null,
@@ -74,7 +74,6 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   acceptance: [],
   maxRounds: null,
   runTimeoutMs: null,
-  gate: null,
   ...over,
 })
 
@@ -990,8 +989,17 @@ describe('kernel/decide 工作流', () => {
             description: '描述',
             stages: [
               { name: ' 待办 ', entryMode: 'none' },
-              { name: '实现', entryMode: 'agent', agentId: 'ag-1', onCompleteIndex: 2 },
-              { name: '验收', entryMode: 'user', onRejectIndex: 0 },
+              {
+                name: '实现',
+                entryMode: 'agent',
+                agentId: 'ag-1',
+                exits: [{ on: 'done', do: 'goto', stageIndex: 2 }],
+              },
+              {
+                name: '验收',
+                entryMode: 'user',
+                exits: [{ on: 'errored', do: 'goto', stageIndex: 0 }],
+              },
             ],
           },
         }),
@@ -1025,7 +1033,7 @@ describe('kernel/decide 工作流', () => {
             position: 1,
             entryMode: 'agent',
             agentId: 'ag-1',
-            onCompleteStageId: 'stage-new-3',
+            exits: { done: { do: 'goto', stageId: 'stage-new-3' } },
           }),
         }),
         at('stage.created', {
@@ -1035,7 +1043,7 @@ describe('kernel/decide 工作流', () => {
             name: '验收',
             position: 2,
             entryMode: 'user',
-            onRejectStageId: 'stage-new-1',
+            exits: { errored: { do: 'goto', stageId: 'stage-new-1' } },
           }),
         }),
         // M18：缺的另外三个内置阶段按默认值补齐，位置紧随用户阶段之后
@@ -1154,7 +1162,7 @@ describe('kernel/decide 工作流', () => {
   })
 
   it('闸门：新增 / 改次数产 stage.updated，配置未变不产（M11）', () => {
-    const update = (gate: StageInput['gate']): ReturnType<typeof decide> =>
+    const update = (judge: StageInput['judge']): ReturnType<typeof decide> =>
       decide(
         view({
           agents: [agent()],
@@ -1166,7 +1174,7 @@ describe('kernel/decide 工作流', () => {
           id: 'wf-1',
           input: {
             name: '研发',
-            stages: [{ id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', gate }],
+            stages: [{ id: 'st-1', name: '待办', entryMode: 'agent', agentId: 'ag-1', judge }],
           },
         }),
         NOW,
@@ -1177,10 +1185,8 @@ describe('kernel/decide 工作流', () => {
     const added = update({ maxFails: 3 })
     const addedFacts = added.facts.filter((fact) => fact.type === 'stage.updated')
     expect(addedFacts).toHaveLength(1)
-    expect((addedFacts[0]?.payload as { stage: WorkflowStage }).stage.gate).toEqual({
+    expect((addedFacts[0]?.payload as { stage: WorkflowStage }).stage.judge).toEqual({
       maxFails: 3,
-      onPassStageId: null,
-      onFailStageId: null,
     })
 
     // 次数从 3 改 5 → 同样落 stage.updated
@@ -1193,7 +1199,8 @@ describe('kernel/decide 工作流', () => {
             id: 'st-1',
             entryMode: 'agent',
             agentId: 'ag-1',
-            gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+            judge: { maxFails: 3 },
+            exits: {},
           }),
         ],
       }),
@@ -1208,7 +1215,7 @@ describe('kernel/decide 工作流', () => {
               name: '待办',
               entryMode: 'agent',
               agentId: 'ag-1',
-              gate: { maxFails: 5 },
+              judge: { maxFails: 5 },
             },
           ],
         },
@@ -1228,7 +1235,8 @@ describe('kernel/decide 工作流', () => {
             id: 'st-1',
             entryMode: 'agent',
             agentId: 'ag-1',
-            gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+            judge: { maxFails: 3 },
+            exits: {},
           }),
         ],
       }),
@@ -1243,7 +1251,7 @@ describe('kernel/decide 工作流', () => {
               name: '待办',
               entryMode: 'agent',
               agentId: 'ag-1',
-              gate: { maxFails: 3 },
+              judge: { maxFails: 3 },
             },
           ],
         },
@@ -1278,8 +1286,18 @@ describe('kernel/decide 工作流', () => {
           input: {
             name: '研发v2',
             stages: [
-              { id: 'st-2', name: '实现', entryMode: 'agent', agentId: 'ag-1', onRejectIndex: 1 },
-              { name: '验收', entryMode: 'user', onRejectIndex: 0 },
+              {
+                id: 'st-2',
+                name: '实现',
+                entryMode: 'agent',
+                agentId: 'ag-1',
+                exits: [{ on: 'errored', do: 'goto', stageIndex: 1 }],
+              },
+              {
+                name: '验收',
+                entryMode: 'user',
+                exits: [{ on: 'errored', do: 'goto', stageIndex: 0 }],
+              },
             ],
           },
         }),
@@ -1299,7 +1317,7 @@ describe('kernel/decide 工作流', () => {
             name: '实现',
             entryMode: 'agent',
             agentId: 'ag-1',
-            onRejectStageId: 'stage-new-1',
+            exits: { errored: { do: 'goto', stageId: 'stage-new-1' } },
           }),
         }),
         // M18：内置阶段按规范顺序补齐（待办在前、已阻塞 / 已完成 / 已取消在后）
@@ -1317,7 +1335,7 @@ describe('kernel/decide 工作流', () => {
             position: 2,
             name: '验收',
             entryMode: 'user',
-            onRejectStageId: 'st-2',
+            exits: { errored: { do: 'goto', stageId: 'st-2' } },
           }),
         }),
         at('stage.created', {
@@ -2311,7 +2329,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
           position: 0,
           entryMode: 'agent',
           agentId: 'ag-1',
-          onCompleteStageId: 'st-2',
+          exits: { done: { do: 'goto', stageId: 'st-2' } },
         }),
         stage({ id: 'st-2', position: 1, name: '实现', entryMode: 'agent', agentId: 'ag-1' }),
       ],
@@ -2357,7 +2375,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
           position: 1,
           entryMode: 'agent',
           agentId: 'ag-1',
-          onRejectStageId: 'st-0',
+          exits: { errored: { do: 'goto', stageId: 'st-0' } },
         }),
       ],
       agents: [agent()],

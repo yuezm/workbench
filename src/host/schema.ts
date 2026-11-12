@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS ${name} (
   position INTEGER NOT NULL,
   entry_mode TEXT NOT NULL CHECK (entry_mode IN ('none','agent','user')),
   agent_id TEXT REFERENCES agents(id) ON DELETE RESTRICT,
+  -- M32 出口表：JSON 对象文本（每个触发条件一条主去向），取代下面两组旧列
+  exits_json TEXT NOT NULL DEFAULT '{}',
+  -- M11 旧闸门两列（已被 M32 的出口表取代，不再写入）
   on_complete_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
   on_reject_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
   -- M29 派单：JSON 数组文本（on / workflowId / stageId / forwardOnly），取代下面 M7 两列。
@@ -100,7 +103,9 @@ CREATE TABLE IF NOT EXISTS ${name} (
   run_timeout_ms INTEGER CHECK (
     run_timeout_ms IS NULL OR (run_timeout_ms BETWEEN 300000 AND 14400000)
   ),
-  -- M11 闸门：允许未通过次数 / 通过去向 / 未通过去向（三列全空 = 不是闸门；弱引用不设外键）
+  -- M32 判定者：JSON 文本（对象 = 判定，null = 本阶段不判定；去向在 exits_json 里）
+  judge_json TEXT NOT NULL DEFAULT 'null',
+  -- M11 旧闸门三列（已被 M32 取代，不再写入）
   gate_max_fails INTEGER,
   gate_on_pass_stage_id TEXT,
   gate_on_fail_stage_id TEXT,
@@ -895,6 +900,20 @@ export const STAGES_M29_ADD_COLUMN_SQL: Readonly<
   Record<(typeof STAGES_M29_ADDED_COLUMNS)[number], string>
 > = {
   handoffs_json: "ALTER TABLE workflow_stages ADD COLUMN handoffs_json TEXT NOT NULL DEFAULT '[]'",
+}
+
+/**
+ * M32 给 `workflow_stages` 新增的列（出口表 + 判定护栏）。旧四列不再写入，
+ * 物理删除留给独立清理任务。
+ */
+export const STAGES_M32_ADDED_COLUMNS = ['exits_json', 'judge_json'] as const
+
+/** `workflow_stages` M32 补列语句（默认值与 DDL 一致）。 */
+export const STAGES_M32_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M32_ADDED_COLUMNS)[number], string>
+> = {
+  exits_json: "ALTER TABLE workflow_stages ADD COLUMN exits_json TEXT NOT NULL DEFAULT '{}'",
+  judge_json: "ALTER TABLE workflow_stages ADD COLUMN judge_json TEXT NOT NULL DEFAULT 'null'",
 }
 
 /**

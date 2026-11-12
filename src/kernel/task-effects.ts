@@ -8,7 +8,7 @@
  * 规则触发的首轮可带 `RunTrigger`：`ruleId/rulesVersion/eventIds/hops` 写进 run 行，
  * 规则 `prompt` 追加到提示词末尾（固定段，不拼外部事件正文）。
  */
-import type { Task } from '../protocol/entities'
+import type { Task, WorkflowStage } from '../protocol/entities'
 import type { Access, PermissionMode } from '../protocol/entities'
 import { ACCESS_BY_PERMISSION } from '../protocol/entities'
 import type { ThreadRow } from '../protocol/thread'
@@ -41,11 +41,8 @@ export interface RunTrigger {
  *
  * 非闸门阶段仍按智能体配置走（`ACCESS_BY_PERMISSION`）。
  */
-export function runAccessOf(
-  stage: { gate?: { maxFails: number } | null },
-  mode: PermissionMode,
-): Access {
-  const gated = stage.gate !== null && stage.gate !== undefined
+export function runAccessOf(stage: Pick<WorkflowStage, 'judge'>, mode: PermissionMode): Access {
+  const gated = stage.judge !== null && stage.judge !== undefined
   return gated ? 'full' : ACCESS_BY_PERMISSION[mode]
 }
 

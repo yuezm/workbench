@@ -1,9 +1,12 @@
 import { useState, type ReactElement } from 'react'
 import {
+  STAGE_EXIT_GUARDS,
   stageKindOf,
   type EntryMode,
   type OnChildrenSettled,
   type SpawnPolicy,
+  type StageExitGuard,
+  type StageExitInput,
   type StageHandoff,
   type StageHandoffGuard,
   type StageInput,
@@ -64,7 +67,7 @@ function indexOfId(workflow: WorkflowWithStages, id: string | null): number {
 type EntryKind = EntryMode | 'gate'
 
 function entryKindOf(stage: StageInput): EntryKind {
-  return stage.gate ? 'gate' : stage.entryMode
+  return stage.judge ? 'gate' : stage.entryMode
 }
 
 /**
@@ -137,6 +140,23 @@ function defaultHandoff(stage: StageInput, workflows: readonly WorkflowWithStage
   }
 }
 
+/** 出口表每行的文案（M32）：名字按「谁触发」，缺省按内核补齐后的实际行为写。 */
+const EXIT_ROW_META: Record<StageExitGuard, { label: string; fallback: string }> = {
+  done: { label: '完成时', fallback: '默认（下一阶段）' },
+  errored: { label: '出错时', fallback: '默认（停在这里等人）' },
+  passed: { label: '通过时', fallback: '默认（下一阶段）' },
+  failed: { label: '未通过时', fallback: '默认（停在这里等人）' },
+}
+
+/** 本阶段有哪几行出口：判定阶段没有「完成时」（跑完没结论不构成去向）。 */
+function exitRowsFor(stage: StageInput): StageExitGuard[] {
+  return stage.judge ? ['passed', 'failed', 'errored'] : ['done', 'errored']
+}
+
+function exitOf(stage: StageInput, guard: StageExitGuard): StageExitInput | undefined {
+  return (stage.exits ?? []).find((exit) => exit.on === guard)
+}
+
 /**
  * 界面上不展示的字段，保存前一概归一——这些字段仍有消费者（派单在任务离开阶段时建新工单、
  * 子任务落点是派活落点、`agentId` 会参与智能体存在性校验、`onComplete` 会改闸门的默认通过去向），
@@ -144,14 +164,19 @@ function defaultHandoff(stage: StageInput, workflows: readonly WorkflowWithStage
  */
 function pruneByEntryKind(stage: StageInput): StageInput {
   const kind = entryKindOf(stage)
-  if (kind === 'agent') return stage
+  if (kind === 'agent') {
+    return {
+      ...stage,
+      judge: null,
+      // 判定两侧的出口只有判定阶段才有，切回普通阶段要一并收掉，否则内核整份拒收
+      exits: (stage.exits ?? []).filter((exit) => exit.on === 'done' || exit.on === 'errored'),
+    }
+  }
   if (kind === 'gate') {
     return {
       ...stage,
-      // 闸门面板里没有「完成 / 出错」两个去向：留着会偷偷改掉「通过时进入」显示为默认时的真实落点
-      onCompleteIndex: null,
-      onRejectIndex: null,
-      // 闸门跑完不给结论就不算离开，`done` 这一支永远不触发
+      // 判定阶段跑完不给结论就不算离开，done 这一支永远不触发
+      exits: (stage.exits ?? []).filter((exit) => exit.on !== 'done'),
       handoffs: (stage.handoffs ?? []).filter((handoff) => handoff.on !== 'done'),
       subtaskStageId: null,
       onChildrenSettled: null,
@@ -164,9 +189,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     entryMode: stage.entryMode,
     builtin: stage.builtin ?? null,
     agentId: null,
-    onCompleteIndex: null,
-    onRejectIndex: null,
-    // 不派活的阶段没有 run，只有人工拖动能触发派单
+    // 不派活 / 不判定的阶段没有 run：出口表与判定者都清空，只留人工拖动派单
+    exits: [],
     handoffs: (stage.handoffs ?? []).filter((handoff) => handoff.on === 'manual'),
     subtaskStageId: null,
     onChildrenSettled: null,
@@ -178,7 +202,7 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     maxRounds: null,
     // M26：阶段超时同理
     runTimeoutMs: null,
-    gate: null,
+    judge: null,
   }
 }
 
@@ -191,8 +215,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
 function pruneStage(stage: StageInput): StageInput {
   const pruned = pruneByEntryKind(stage)
   if (!isTerminalStage(stage)) return pruned
-  // 终态没有「离开」这回事：派单永远不触发，留着就是看不见的配置
-  return { ...pruned, handoffs: [] }
+  // 终态没有「离开」这回事：出口表与派单永远不触发，留着就是看不见的配置
+  return { ...pruned, exits: [], handoffs: [] }
 }
 
 /** 下标型流转目标是否越界：越界说明它指向的阶段已被删掉 */
@@ -200,13 +224,10 @@ function outOfRange(index: number | null | undefined, count: number): boolean {
   return index != null && (index < 0 || index >= count)
 }
 
-/** 阶段上是否挂着已失效的流转目标（完成 / 出错 / 闸门两侧任一处） */
+/** 阶段上是否挂着已失效的出口目标（出口表里任一条 goto 指到已删阶段） */
 function hasDanglingTarget(stage: StageInput, count: number): boolean {
-  return (
-    outOfRange(stage.onCompleteIndex, count) ||
-    outOfRange(stage.onRejectIndex, count) ||
-    outOfRange(stage.gate?.onPassIndex, count) ||
-    outOfRange(stage.gate?.onFailIndex, count)
+  return (stage.exits ?? []).some(
+    (exit) => exit.do === 'goto' && outOfRange(exit.stageIndex, count),
   )
 }
 
@@ -272,11 +293,16 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
     }
   }
   const stages = workflow.stages.map((s) => {
-    const oc = indexOfId(workflow, s.onCompleteStageId)
-    const rj = indexOfId(workflow, s.onRejectStageId)
-    // M11：闸门去向按 id 还原成下标；找不到按 null（默认语义）
-    const gp = s.gate ? indexOfId(workflow, s.gate.onPassStageId) : -1
-    const gf = s.gate ? indexOfId(workflow, s.gate.onFailStageId) : -1
+    // M32：出口表按 id 还原成下标；指不到的阶段按 null（保存前的悬空目标校验会就地指出）
+    // 视图里 exits 缺失（半迁移 / 老库）时按「没配」处理，不让一条脏行把弹窗打挂
+    const source = s.exits ?? {}
+    const exits: StageExitInput[] = STAGE_EXIT_GUARDS.flatMap<StageExitInput>((guard) => {
+      const exit = source[guard]
+      if (exit === undefined) return []
+      if (exit.do !== 'goto') return [{ on: guard, do: exit.do }]
+      const index = indexOfId(workflow, exit.stageId)
+      return [{ on: guard, do: 'goto' as const, stageIndex: index >= 0 ? index : null }]
+    })
     return {
       // 回传既有阶段 id：更新时保留历史（否则每次保存都会重建阶段）
       id: s.id,
@@ -284,8 +310,7 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       entryMode: s.entryMode,
       builtin: s.builtin ?? null,
       agentId: s.agentId,
-      onCompleteIndex: oc >= 0 ? oc : null,
-      onRejectIndex: rj >= 0 ? rj : null,
+      exits,
       handoffs: s.handoffs,
       subtaskStageId: s.subtaskStageId ?? null,
       onChildrenSettled: s.onChildrenSettled ?? null,
@@ -295,13 +320,7 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       maxRounds: s.maxRounds ?? null,
       // M26：阶段超时原样带回（null = 用全局缺省）
       runTimeoutMs: s.runTimeoutMs ?? null,
-      gate: s.gate
-        ? {
-            maxFails: s.gate.maxFails,
-            onPassIndex: gp >= 0 ? gp : null,
-            onFailIndex: gf >= 0 ? gf : null,
-          }
-        : null,
+      judge: s.judge === null ? null : { maxFails: s.judge.maxFails },
     }
   })
   return {
@@ -347,18 +366,12 @@ export function moveStageToIndex(
   }
   /** 流转目标可能没配（null） */
   const remap = (idx: number | null | undefined): number | null => (idx == null ? null : shift(idx))
+  // M32：出口表的 goto 也是下标，重排必须同步重映射，否则流转会把任务送错阶段
   const next = stages.map((s) => ({
     ...s,
-    onCompleteIndex: remap(s.onCompleteIndex),
-    onRejectIndex: remap(s.onRejectIndex),
-    // M11：闸门去向也是下标，重排必须同步重映射，否则判定会把任务送错阶段
-    gate: s.gate
-      ? {
-          ...s.gate,
-          onPassIndex: remap(s.gate.onPassIndex),
-          onFailIndex: remap(s.gate.onFailIndex),
-        }
-      : null,
+    exits: (s.exits ?? []).map((exit) =>
+      exit.do === 'goto' ? { ...exit, stageIndex: remap(exit.stageIndex) } : exit,
+    ),
   }))
   const [moved] = next.splice(i, 1)
   next.splice(j, 0, moved)
@@ -432,6 +445,30 @@ export function WorkflowEditor({
   /** 改派单清单：按行下标替换 / 删除，列表整体回写（派单没有下标型引用，不必重映射） */
   const patchHandoffs = (i: number, next: readonly StageHandoff[]): void =>
     patchStage(i, { handoffs: [...next] })
+
+  /** 出口表的一行：`default` = 收回这一条，由内核保存时按阶段顺序补缺省 */
+  const setExit = (i: number, guard: StageExitGuard, value: string): void => {
+    const others = (draft.stages[i]?.exits ?? []).filter((exit) => exit.on !== guard)
+    if (value === 'default') {
+      patchStage(i, { exits: others })
+      return
+    }
+    if (value === 'goto') {
+      patchStage(i, { exits: [...others, { on: guard, do: 'goto', stageIndex: null }] })
+      return
+    }
+    patchStage(i, { exits: [...others, { on: guard, do: value as 'await' | 'close' }] })
+  }
+
+  /** 出口表的目标阶段（下标） */
+  const setExitTarget = (i: number, guard: StageExitGuard, value: string): void => {
+    const exits = (draft.stages[i]?.exits ?? []).map((exit) =>
+      exit.on === guard
+        ? { ...exit, do: 'goto' as const, stageIndex: value === '' ? null : Number(value) }
+        : exit,
+    )
+    patchStage(i, { exits })
+  }
 
   /** 新阶段落在用户区块末尾（「已阻塞」之前）并直接展开它 */
   const addStage = (): void => {
@@ -701,15 +738,15 @@ export function WorkflowEditor({
               <Select
                 value={entryKindOf(stage)}
                 onValueChange={(v) => {
-                  // 切到闸门：自动交给智能体并给出默认次数；切走则清掉闸门配置
+                  // 切到判定：自动交给智能体并给出默认护栏；切走则清掉判定者
                   if (v === 'gate') {
                     patchStage(index, {
                       entryMode: 'agent',
-                      gate: { maxFails: 3, onPassIndex: null, onFailIndex: null },
+                      judge: { maxFails: 3 },
                     })
                     return
                   }
-                  patchStage(index, { entryMode: v as EntryMode, gate: null })
+                  patchStage(index, { entryMode: v as EntryMode, judge: null })
                 }}
               >
                 <SelectTrigger aria-label={`阶段${n}类型`} className="w-full">
@@ -751,149 +788,96 @@ export function WorkflowEditor({
                 ? '交给用户：任务进到这个阶段就停下来等人处理，不需要智能体、流转目标、交接或子任务。'
                 : '不交接：任务进到这个阶段不派活，由你在看板上拖到下一阶段；不需要智能体、流转目标、交接或子任务。'}
             </p>
-          ) : stage.gate ? (
-            <>
-              {/* 闸门：先定次数预算，再定「过 / 没过」两个去向 */}
-              <div className="mt-3 flex flex-wrap items-end gap-2">
-                <Field label="允许未通过" className="w-36">
-                  <Select
-                    value={String(stage.gate.maxFails)}
-                    onValueChange={(v) =>
-                      patchStage(index, { gate: { ...stage.gate!, maxFails: Number(v) } })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}闸门次数`} className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[1, 2, 3, 4, 5, 10].map((times) => (
-                        <SelectItem key={times} value={String(times)}>
-                          {times} 次
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <p className="pb-2 text-xs text-faint-foreground">
-                  第 {stage.gate.maxFails} 次仍未通过后放行
-                </p>
-              </div>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <Field label="通过时进入">
-                  <Select
-                    value={picked(
-                      stage.gate.onPassIndex == null ? '' : String(stage.gate.onPassIndex),
-                      targetValues,
-                    )}
-                    onValueChange={(v) =>
-                      patchStage(index, {
-                        gate: {
-                          ...stage.gate!,
-                          onPassIndex: v === '' ? null : Number(v),
-                        },
-                      })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}闸门通过时进入`} className="w-full">
-                      <SelectValue placeholder="下一阶段" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">下一阶段</SelectItem>
-                      {targetOptions.map((t) => (
-                        <SelectItem key={t.i} value={String(t.i)}>
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="未通过时进入">
-                  <Select
-                    value={picked(
-                      stage.gate.onFailIndex == null ? '' : String(stage.gate.onFailIndex),
-                      targetValues,
-                    )}
-                    onValueChange={(v) =>
-                      patchStage(index, {
-                        gate: {
-                          ...stage.gate!,
-                          onFailIndex: v === '' ? null : Number(v),
-                        },
-                      })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}闸门未通过时进入`} className="w-full">
-                      <SelectValue placeholder="原地不动" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">原地不动</SelectItem>
-                      {targetOptions.map((t) => (
-                        <SelectItem key={t.i} value={String(t.i)}>
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-              <p className="mt-1 text-xs text-faint-foreground">
-                智能体跑完要给出「通过 /
-                未通过」的判定；拿不出证据时任务停在闸门等人。闸门只判定，不交接、不拆子任务。
-              </p>
-            </>
           ) : (
             <>
-              {/* 完成后 / 出错并排一行，与「类型」分开：目标阶段名再长也不用和智能体抢宽度 */}
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                <Field label="完成后进入">
-                  <Select
-                    value={picked(
-                      stage.onCompleteIndex == null ? '' : String(stage.onCompleteIndex),
-                      targetValues,
-                    )}
-                    onValueChange={(v) =>
-                      patchStage(index, { onCompleteIndex: v === '' ? null : Number(v) })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}完成后进入`} className="w-full">
-                      <SelectValue placeholder="下一阶段" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">下一阶段</SelectItem>
-                      {targetOptions.map((t) => (
-                        <SelectItem key={t.i} value={String(t.i)}>
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="出错时进入">
-                  <Select
-                    value={picked(
-                      stage.onRejectIndex == null ? '' : String(stage.onRejectIndex),
-                      targetValues,
-                    )}
-                    onValueChange={(v) =>
-                      patchStage(index, { onRejectIndex: v === '' ? null : Number(v) })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}出错时进入`} className="w-full">
-                      <SelectValue placeholder="不指定" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">不指定</SelectItem>
-                      {targetOptions.map((t) => (
-                        <SelectItem key={t.i} value={String(t.i)}>
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
+              {/* M32：出口表——每个触发条件一条主去向；缺省由内核保存时补齐，界面上写明缺省是什么 */}
+              <div className="mt-3 flex flex-col gap-2">
+                <p className="text-xs text-muted-foreground">出口（离开本阶段时去哪）</p>
+                {exitRowsFor(stage).map((guard) => {
+                  const exit = exitOf(stage, guard)
+                  const value = exit === undefined ? 'default' : exit.do
+                  return (
+                    <div key={guard} className="flex flex-wrap items-end gap-2">
+                      <Field label={EXIT_ROW_META[guard].label} className="w-28">
+                        <Select value={value} onValueChange={(v) => setExit(index, guard, v)}>
+                          <SelectTrigger
+                            aria-label={`阶段${n}${EXIT_ROW_META[guard].label}去向`}
+                            className="w-full"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="default">{EXIT_ROW_META[guard].fallback}</SelectItem>
+                            <SelectItem value="goto">进入指定阶段</SelectItem>
+                            <SelectItem value="await">停在这里等人</SelectItem>
+                            <SelectItem value="close">结束并归档</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      {exit?.do === 'goto' && (
+                        <Field label="目标阶段" className="min-w-0 flex-1">
+                          <Select
+                            value={picked(
+                              exit.stageIndex == null ? null : String(exit.stageIndex),
+                              targetValues,
+                            )}
+                            onValueChange={(v) => setExitTarget(index, guard, v)}
+                          >
+                            <SelectTrigger
+                              aria-label={`阶段${n}${EXIT_ROW_META[guard].label}目标阶段`}
+                              className="w-full"
+                            >
+                              <SelectValue placeholder="选择阶段" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {targetOptions.map((t) => (
+                                <SelectItem key={t.i} value={String(t.i)}>
+                                  {t.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
+
+              {stage.judge && (
+                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
+                  <Field label="放行护栏" className="w-32">
+                    <Select
+                      value={stage.judge.maxFails == null ? 'none' : String(stage.judge.maxFails)}
+                      onValueChange={(v) =>
+                        patchStage(index, {
+                          judge: { maxFails: v === 'none' ? null : Number(v) },
+                        })
+                      }
+                    >
+                      <SelectTrigger aria-label={`阶段${n}放行护栏`} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">不设护栏</SelectItem>
+                        {[1, 2, 3, 4, 5].map((times) => (
+                          <SelectItem key={times} value={String(times)}>
+                            {times} 次
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <p className="pb-2 text-xs text-faint-foreground">
+                    连续未通过达到这个次数后放行（会打标留痕）；「不设护栏」= 一直按未通过走
+                  </p>
+                </div>
+              )}
+
               <p className="mt-1 text-xs text-faint-foreground">
-                末阶段完成后任务结束；「出错」指执行器崩溃或超时。
+                {stage.judge
+                  ? '智能体跑完要给「通过 / 未通过」的判定；拿不出证据时任务停在原地等人。'
+                  : '「出错」指执行器崩溃、超时或失联；「结束并归档」= 这张工单走完。'}
               </p>
             </>
           )}

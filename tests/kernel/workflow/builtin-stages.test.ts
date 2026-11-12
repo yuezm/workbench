@@ -14,8 +14,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   entryMode: 'none',
   builtin: null,
   agentId: null,
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   subtaskStageId: null,
   onChildrenSettled: null,
@@ -24,7 +24,6 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   acceptance: [],
   maxRounds: null,
   runTimeoutMs: null,
-  gate: null,
   ...over,
 })
 
@@ -169,8 +168,7 @@ describe('kernel/workflow/builtin-stages builtinStageInput', () => {
       entryMode: 'none',
       builtin: 'blocked',
       agentId: null,
-      onCompleteIndex: null,
-      onRejectIndex: null,
+      exits: [],
       handoffs: [],
       subtaskStageId: null,
       onChildrenSettled: null,
@@ -178,7 +176,7 @@ describe('kernel/workflow/builtin-stages builtinStageInput', () => {
       instructions: '',
       acceptance: [],
       maxRounds: null,
-      gate: null,
+      judge: null,
     })
   })
 })

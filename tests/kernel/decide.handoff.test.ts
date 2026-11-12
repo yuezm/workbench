@@ -69,8 +69,8 @@ const stage = (
   position,
   entryMode: 'none',
   agentId: null,
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   ...over,
 })
@@ -415,7 +415,7 @@ describe('kernel/decide 派单——运行结算', () => {
   it('打回（即使 onReject 配到更后阶段）→ 不派单', () => {
     const decision = receive(
       view({
-        stages: stages({ onRejectStageId: 'st-a2' }),
+        stages: stages({ exits: { errored: { do: 'goto', stageId: 'st-a2' } } }),
         runs: [run()],
       }),
       { status: 'failed', leaseId: 'run-1:1', turn: 1, errorCode: 'run_failed' },
@@ -543,7 +543,10 @@ describe('kernel/decide 派单——按触发条件分流（M29）', () => {
   it('执行出错 + 配了「出错时进入」→ 走 errored 组的单（M7 表达不出来的那一支）', () => {
     const decision = receive(
       view({
-        stages: stages({ onRejectStageId: 'st-a1', handoffs: [handoff({ on: 'errored' })] }),
+        stages: stages({
+          exits: { errored: { do: 'goto', stageId: 'st-a1' } },
+          handoffs: [handoff({ on: 'errored' })],
+        }),
         runs: [run()],
       }),
       { status: 'failed', leaseId: 'run-1:1', turn: 1, errorCode: 'run_failed' },
@@ -579,7 +582,9 @@ describe('kernel/decide 派单——按触发条件分流（M29）', () => {
         stages: stages({
           entryMode: 'agent',
           agentId: 'ag-1',
-          gate: { maxFails: 3, onPassStageId: null, onFailStageId: 'st-a1' },
+          judge: { maxFails: 3 },
+
+          exits: { failed: { do: 'goto', stageId: 'st-a1' } },
           handoffs: [handoff({ on: 'failed' })],
         }),
         runs: [run()],
@@ -597,7 +602,9 @@ describe('kernel/decide 派单——按触发条件分流（M29）', () => {
     const stagesWithGate = stages({
       entryMode: 'agent',
       agentId: 'ag-1',
-      gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+      judge: { maxFails: 3 },
+
+      exits: {},
       handoffs: [handoff({ on: 'passed' })],
     })
     const decision = receive(view({ stages: stagesWithGate, runs: [run()] }), {

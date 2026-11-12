@@ -189,8 +189,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   position: 0,
   entryMode: 'agent',
   agentId: 'ag-1',
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   ...over,
 })
@@ -1130,7 +1130,7 @@ describe('kernel/decide run.receipt 回执', () => {
         workflows: [workflow()],
         stages: [
           stage({ id: 'st-1', position: 0 }),
-          stage({ id: 'st-2', position: 1, onRejectStageId: 'st-1' }),
+          stage({ id: 'st-2', position: 1, exits: { errored: { do: 'goto', stageId: 'st-1' } } }),
         ],
         tasks: [current],
       }),
@@ -1632,7 +1632,9 @@ describe('kernel/decide 闸门流转（M11）', () => {
       id: 'st-2',
       position: 1,
       name: '自测',
-      gate: { maxFails: 2, onPassStageId: 'st-3', onFailStageId: 'st-1' },
+      judge: { maxFails: 2 },
+
+      exits: { passed: { do: 'goto', stageId: 'st-3' }, failed: { do: 'goto', stageId: 'st-1' } },
       ...over,
     })
 
@@ -1697,7 +1699,9 @@ describe('kernel/decide 闸门标签与放行留痕（M11 补充）', () => {
       id: 'st-2',
       position: 1,
       name: '自测',
-      gate: { maxFails: 2, onPassStageId: 'st-3', onFailStageId: 'st-1' },
+      judge: { maxFails: 2 },
+
+      exits: { passed: { do: 'goto', stageId: 'st-3' }, failed: { do: 'goto', stageId: 'st-1' } },
       ...over,
     })
 
@@ -1734,7 +1738,12 @@ describe('kernel/decide 闸门标签与放行留痕（M11 补充）', () => {
 })
 describe('kernel/decide run.receipt 评审结论（M14）', () => {
   const reviewStages = (): WorkflowStage[] => [
-    stage({ id: 'st-review', name: '评审', position: 0, onRejectStageId: 'st-fix' }),
+    stage({
+      id: 'st-review',
+      name: '评审',
+      position: 0,
+      exits: { errored: { do: 'goto', stageId: 'st-fix' } },
+    }),
     stage({ id: 'st-fix', name: '修复', position: 1 }),
     stage({ id: 'st-done', name: '归档', position: 2, entryMode: 'none', agentId: null }),
   ]
@@ -1874,7 +1883,7 @@ describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
     agents: [agent()],
     workflows: [workflow()],
     tasks: [task()],
-    stages: [acceptanceStage({ onCompleteStageId: 'st-done' }), doneStage()],
+    stages: [acceptanceStage({ exits: { done: { do: 'goto', stageId: 'st-done' } } }), doneStage()],
     ...over,
   })
 
@@ -1912,7 +1921,10 @@ describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
     const decision = submit(
       view(
         baseSeed({
-          stages: [acceptanceStage({ maxRounds: 1, onCompleteStageId: 'st-done' }), doneStage()],
+          stages: [
+            acceptanceStage({ maxRounds: 1, exits: { done: { do: 'goto', stageId: 'st-done' } } }),
+            doneStage(),
+          ],
         }),
       ),
       receipt({ acceptance: [{ no: 1, met: false }] }),
@@ -1960,7 +1972,13 @@ describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
     const decision = submit(
       view(
         baseSeed({
-          stages: [acceptanceStage({ maxRounds: null, onCompleteStageId: 'st-done' }), doneStage()],
+          stages: [
+            acceptanceStage({
+              maxRounds: null,
+              exits: { done: { do: 'goto', stageId: 'st-done' } },
+            }),
+            doneStage(),
+          ],
         }),
       ),
       receipt({ acceptance: [{ no: 1, met: false }] }),
@@ -2048,11 +2066,11 @@ describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
 
 describe('kernel/runAccessOf（M28：闸门阶段至少 full）', () => {
   it('闸门阶段强制 full；非闸门阶段按智能体权限折算', () => {
-    expect(runAccessOf({ gate: { maxFails: 1 } }, 'workspace-write')).toBe('full')
-    expect(runAccessOf({ gate: { maxFails: 1 } }, 'read-only')).toBe('full')
-    expect(runAccessOf({ gate: null }, 'workspace-write')).toBe('edit')
-    expect(runAccessOf({}, 'danger-full-access')).toBe('full')
-    expect(runAccessOf({ gate: null }, 'read-only')).toBe('read')
+    expect(runAccessOf({ judge: { maxFails: 1 } }, 'workspace-write')).toBe('full')
+    expect(runAccessOf({ judge: { maxFails: 1 } }, 'read-only')).toBe('full')
+    expect(runAccessOf({ judge: null }, 'workspace-write')).toBe('edit')
+    expect(runAccessOf({ judge: null }, 'danger-full-access')).toBe('full')
+    expect(runAccessOf({ judge: null }, 'read-only')).toBe('read')
   })
 })
 

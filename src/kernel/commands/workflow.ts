@@ -3,7 +3,8 @@
  */
 import type {
   BuiltinStageKey,
-  GateConfig,
+  JudgeConfig,
+  StageExits,
   StageInput,
   Workflow,
   WorkflowStage,
@@ -37,8 +38,8 @@ function stageRow(
     entryMode: stage.entryMode,
     builtin,
     agentId: stage.agentId ?? null,
-    onCompleteStageId: indexTarget(ids, stage.onCompleteIndex),
-    onRejectStageId: indexTarget(ids, stage.onRejectIndex),
+    // M32：出口表按下标映射到 id；缺省的触发条件由 completeExits 在排序后补齐
+    exits: exitsOf(ids, stage),
     // M29：派单按触发条件分组直存（跨工作流，不能用本批下标表达）
     handoffs: [...(stage.handoffs ?? [])],
     // M8：子任务落点 / rollup / 派发策略原样落行（null = 按默认推断）
@@ -53,14 +54,8 @@ function stageRow(
     maxRounds: stage.maxRounds ?? null,
     // M26：阶段单轮超时（毫秒；缺省 = null，用全局缺省）
     runTimeoutMs: stage.runTimeoutMs ?? null,
-    // M11：闸门按 id 直存（下标已由 `validateStageSet` 保证在范围内）
-    gate: stage.gate
-      ? {
-          maxFails: stage.gate.maxFails,
-          onPassStageId: indexTarget(ids, stage.gate.onPassIndex),
-          onFailStageId: indexTarget(ids, stage.gate.onFailIndex),
-        }
-      : null,
+    // M32：判定者只回答「谁给结论 + 护栏多大」，去向在 exits 里
+    judge: stage.judge ? { maxFails: stage.judge.maxFails ?? null } : null,
   }
 }
 
@@ -70,6 +65,20 @@ function stageRow(
  * 导出到模块级：下标越界这一支在产品路径上不可达（校验先挡住了），
  * 但判定本身要能测——导出后由单测直接构造越界下标覆盖（逻辑与调用点均不变）。
  */
+/** 出口表：输入行（下标）→ 行内形状（id）。 */
+function exitsOf(ids: Id[], stage: StageInput): StageExits {
+  const exits: StageExits = {}
+  for (const exit of stage.exits ?? []) {
+    if (exit.do === 'goto') {
+      const stageId = indexTarget(ids, exit.stageIndex)
+      if (stageId !== null) exits[exit.on] = { do: 'goto', stageId }
+      continue
+    }
+    exits[exit.on] = { do: exit.do }
+  }
+  return exits
+}
+
 export function indexTarget(ids: Id[], index: number | null | undefined): Id | null {
   if (index === null || index === undefined) return null
   return ids[index] ?? null
@@ -87,16 +96,34 @@ export function sameInstructions(
   return (a ?? '') === (b ?? '')
 }
 
-/** 闸门深比较（M11）：漏比较会让「改了闸门配置保存无效」。缺省与 null 视为同值。 */
-function sameGate(a: GateConfig | null | undefined, b: GateConfig | null | undefined): boolean {
+/** 判定者深比较（M32）：漏比较会让「改了护栏保存无效」。缺省与 null 视为同值。 */
+export function sameJudge(
+  a: JudgeConfig | null | undefined,
+  b: JudgeConfig | null | undefined,
+): boolean {
   const left = a ?? null
   const right = b ?? null
   if (left === null || right === null) return left === right
-  return (
-    left.maxFails === right.maxFails &&
-    left.onPassStageId === right.onPassStageId &&
-    left.onFailStageId === right.onFailStageId
-  )
+  return left.maxFails === right.maxFails
+}
+
+/** 出口表深比较（M32）：逐组比较动作与目标，缺省与「没有这一组」同值。 */
+export function sameExits(a: StageExits | undefined, b: StageExits | undefined): boolean {
+  const left = a ?? {}
+  const right = b ?? {}
+  const guards = new Set([...Object.keys(left), ...Object.keys(right)])
+
+  for (const guard of guards) {
+    const one = left[guard as keyof StageExits]
+    const other = right[guard as keyof StageExits]
+    if (one === undefined || other === undefined) {
+      if (one !== other) return false
+      continue
+    }
+    if (one.do !== other.do) return false
+    if (one.do === 'goto' && other.do === 'goto' && one.stageId !== other.stageId) return false
+  }
+  return true
 }
 
 function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
@@ -109,8 +136,8 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     // M18：内置键一变就要落 stage.updated（否则锁名 / 锁位的修复会被静默吞掉）
     (a.builtin ?? null) === (b.builtin ?? null) &&
     a.agentId === b.agentId &&
-    a.onCompleteStageId === b.onCompleteStageId &&
-    a.onRejectStageId === b.onRejectStageId &&
+    // M32：出口表一变就要落 stage.updated（缺省与「没有这一组」视为同值）
+    sameExits(a.exits, b.exits) &&
     // M29：派单清单一变就要落 stage.updated（缺省与空数组视为同值）
     sameHandoffs(a.handoffs, b.handoffs) &&
     // M8：子任务三列同理（缺省与 null 视为同值）
@@ -125,8 +152,8 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     (a.maxRounds ?? null) === (b.maxRounds ?? null) &&
     // M26：阶段超时一变要落 stage.updated（缺省与 null 视为同值）
     (a.runTimeoutMs ?? null) === (b.runTimeoutMs ?? null) &&
-    // M11：闸门三列一变就要落 stage.updated
-    sameGate(a.gate, b.gate)
+    // M32：判定者一变就要落 stage.updated
+    sameJudge(a.judge, b.judge)
   )
 }
 
@@ -220,9 +247,9 @@ export function createWorkflow(
     createdAt: now,
   }
   const facts: FactDraft[] = [ownerDraft('workflow.created', { workflow }, now)]
-  entries.forEach((entry, position) => {
-    facts.push(ownerDraft('stage.created', { stage: entry.row(position) }, now))
-  })
+  // M32：出口表只存**显式配的**去向；缺省由决策时的 completeExits 按顺序解析（唯一一份缺省规则）
+  const rows = entries.map((entry, position) => entry.row(position))
+  for (const row of rows) facts.push(ownerDraft('stage.created', { stage: row }, now))
   return done(facts)
 }
 

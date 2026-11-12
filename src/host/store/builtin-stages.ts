@@ -60,8 +60,8 @@ function builtinStageRow(
     entryMode: 'none',
     builtin: key,
     agentId: null,
-    onCompleteStageId: null,
-    onRejectStageId: null,
+    exits: {},
+    judge: null,
     handoffs: [],
     subtaskStageId: null,
     onChildrenSettled: null,
@@ -69,7 +69,6 @@ function builtinStageRow(
     instructions: '',
     acceptance: [],
     maxRounds: null,
-    gate: null,
   }
 }
 

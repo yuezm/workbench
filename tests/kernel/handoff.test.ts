@@ -77,8 +77,8 @@ const stage = (
   position,
   entryMode: 'none',
   agentId: null,
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   ...over,
 })
@@ -316,7 +316,9 @@ describe('kernel/handoff 触发条件分组', () => {
         stage('st-a0', 'wf-a', 0, {
           entryMode: 'agent',
           agentId: 'ag-1',
-          gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+          judge: { maxFails: 3 },
+
+          exits: {},
           handoffs: [
             handoff({ on: 'passed', workflowId: 'wf-ok' }),
             handoff({ on: 'failed', workflowId: 'wf-bad' }),

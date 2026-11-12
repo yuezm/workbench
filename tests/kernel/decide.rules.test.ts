@@ -44,8 +44,8 @@ const stage: WorkflowStage = {
   position: 0,
   entryMode: 'agent',
   agentId: 'ag-1',
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
 }
 const agent: Agent = {

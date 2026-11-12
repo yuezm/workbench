@@ -132,6 +132,8 @@ const STAGES_M7_COLUMNS = [
   'position',
   'entry_mode',
   'agent_id',
+  // M32：出口表（旧两组四列保留在表里等清理）
+  'exits_json',
   'on_complete_stage_id',
   'on_reject_stage_id',
   'handoffs_json',
@@ -148,7 +150,9 @@ const STAGES_M7_COLUMNS = [
   'max_rounds',
   // M26：阶段单轮运行超时（NULL = 用全局缺省 60 min）
   'run_timeout_ms',
-  // M11：闸门三列
+  // M32：判定者（JSON 文本；null = 不判定）
+  'judge_json',
+  // M11：旧闸门三列（已不写，等清理）
   'gate_max_fails',
   'gate_on_pass_stage_id',
   'gate_on_fail_stage_id',

@@ -24,8 +24,8 @@ const stage = (id: string, workflowId: string, name: string): WorkflowStage => (
   position: 0,
   entryMode: 'none',
   agentId: null,
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
 })
 

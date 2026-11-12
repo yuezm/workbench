@@ -22,8 +22,8 @@ function stage(
     position,
     entryMode,
     agentId: null,
-    onCompleteStageId: null,
-    onRejectStageId: null,
+    exits: {},
+    judge: null,
     handoffs: [],
   }
 }

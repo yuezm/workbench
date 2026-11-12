@@ -31,6 +31,8 @@ import type {
   EntryMode,
   OnChildrenSettled,
   SpawnPolicy,
+  StageExitGuard,
+  StageExitInput,
   StageInput,
   WorkflowInput,
 } from '../../../../../protocol/entities'
@@ -108,21 +110,14 @@ export function draftFromTemplate(template: SopTemplate): WorkflowInput {
     const draft: StageInput = {
       name: stage.name,
       entryMode: stage.entryMode,
-      onCompleteIndex: targetIndex(template.stages, stage.onComplete),
-      onRejectIndex: targetIndex(template.stages, stage.onReject),
+      exits: templateExits(template, stage),
       handoffs: [],
       subtaskStageId: null,
       onChildrenSettled: stage.onChildrenSettled ?? null,
       spawnPolicy: stage.spawnPolicy ?? null,
       instructions: stage.instructions,
       acceptance: stage.acceptance ?? [],
-      gate: stage.gate
-        ? {
-            maxFails: stage.gate.maxFails,
-            onPassIndex: targetIndex(template.stages, stage.gate.onPass),
-            onFailIndex: targetIndex(template.stages, stage.gate.onFail),
-          }
-        : null,
+      judge: stage.gate ? { maxFails: stage.gate.maxFails } : null,
     }
     // 缺省不写键：老模板的草稿形状逐字不变（`null` 与缺省同义，但形状比对会看出来）
     return stage.maxRounds == null ? draft : { ...draft, maxRounds: stage.maxRounds }
@@ -602,3 +597,25 @@ export const SOP_TEMPLATES: readonly SopTemplate[] = [
     ],
   },
 ]
+
+/**
+ * 模板里的去向（M32）：名字稳定，落成下标；名字对不上就当没配（由内核保存时补缺省）。
+ *
+ * 判定阶段模板给的是「通过 / 未通过」，非判定阶段是「完成 / 出错」——两套字段并存，
+ * 这里按模板实际填了哪些来产出口。
+ */
+function templateExits(template: SopTemplate, stage: SopStage): StageExitInput[] {
+  const exits: StageExitInput[] = []
+  const push = (on: StageExitGuard, name: string | null | undefined): void => {
+    if (name === null || name === undefined) return
+    exits.push({ on, do: 'goto', stageIndex: targetIndex(template.stages, name) })
+  }
+  if (stage.gate) {
+    push('passed', stage.gate.onPass)
+    push('failed', stage.gate.onFail)
+    return exits
+  }
+  push('done', stage.onComplete)
+  push('errored', stage.onReject)
+  return exits
+}

@@ -21,6 +21,7 @@ import type { FactType, SnapshotImportedPayload } from '../protocol/facts'
 import type { Task, Card, WorkflowStage } from '../protocol/entities'
 import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from './types'
 import { legacyHandoffs } from './workflow/stage-handoffs'
+import { legacyExits, legacyJudge } from './workflow/stage-machine'
 
 /**
  * `Fact` 的默认泛型是单对象类型，`switch (fact.type)` 无法收窄 payload；
@@ -79,6 +80,9 @@ export function normalizeTask(row: Task): Task {
     ...row,
     // M29：老事实只有 M7 两列，按触发条件归一出派单数组
     handoffs: legacy.handoffs ?? legacyHandoffs(legacy),
+    // M32：四组旧去向归一成出口表；缺的去向由启动补齐按顺序补
+    exits: legacyExits(legacy),
+    judge: legacyJudge(legacy),
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,

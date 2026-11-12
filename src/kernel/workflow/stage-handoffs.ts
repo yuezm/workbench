@@ -57,13 +57,13 @@ export function stagesOfWorkflow(view: View, workflowId: Id): WorkflowStage[] {
  * （任务停在闸门等人，不是一次「离开」）。
  */
 export function handoffGuardOf(
-  stage: Pick<WorkflowStage, 'gate'>,
+  stage: Pick<WorkflowStage, 'judge'>,
   signal: HandoffSignal,
 ): StageHandoffGuard | null {
   if (signal.kind === 'manual') return 'manual'
   if (signal.status === 'cancelled') return null
   if (signal.status !== 'succeeded') return 'errored'
-  const gated = stage.gate !== null && stage.gate !== undefined
+  const gated = stage.judge !== null && stage.judge !== undefined
   if (!gated) return 'done'
   if (signal.gateExhausted === true) return 'passed'
   if (signal.verdict === 'pass') return 'passed'
@@ -113,6 +113,7 @@ export function handoffTargetsOf(
  * 只有通过（含预算耗尽放行）才向前完成，所以它今天实际只在那一条支路上生效。
  */
 export function legacyHandoffs(stage: {
+  judge?: { maxFails: number | null } | null
   gate?: { maxFails: number } | null
   handoffWorkflowId?: string | null
   handoffStageId?: string | null
@@ -120,7 +121,14 @@ export function legacyHandoffs(stage: {
   const workflowId = stage.handoffWorkflowId ?? null
   if (workflowId === null) return []
   const stageId = stage.handoffStageId ?? null
-  const auto: StageHandoffGuard = stage.gate != null ? 'passed' : 'done'
+  const auto: StageHandoffGuard =
+    stage.judge !== undefined
+      ? stage.judge === null
+        ? 'done'
+        : 'passed'
+      : stage.gate != null
+        ? 'passed'
+        : 'done'
   return [
     { on: auto, workflowId, stageId },
     { on: 'manual', workflowId, stageId, forwardOnly: true },

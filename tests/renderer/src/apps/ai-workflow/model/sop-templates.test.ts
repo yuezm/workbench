@@ -47,42 +47,39 @@ describe('draftFromTemplate', () => {
       {
         name: '甲',
         entryMode: 'agent',
-        onCompleteIndex: null,
-        onRejectIndex: null,
+        exits: [],
         handoffs: [],
         subtaskStageId: null,
         onChildrenSettled: null,
         spawnPolicy: null,
         acceptance: [],
         instructions: '做甲',
-        gate: null,
+        judge: null,
       },
       {
         name: '乙',
         entryMode: 'user',
-        onCompleteIndex: null,
         // 「打回退回到甲」：甲排在待办之后，下标 1
-        onRejectIndex: 1,
+        exits: [{ on: 'errored', do: 'goto', stageIndex: 1 }],
         handoffs: [],
         subtaskStageId: null,
         onChildrenSettled: null,
         spawnPolicy: null,
         acceptance: [],
         instructions: '看乙',
-        gate: null,
+        judge: null,
       },
       {
         name: '丙',
         entryMode: 'none',
-        onCompleteIndex: null,
-        onRejectIndex: null,
+        exits: [],
         handoffs: [],
         subtaskStageId: null,
         onChildrenSettled: null,
         spawnPolicy: null,
         acceptance: [],
         instructions: '等丙',
-        gate: null,
+        judge: null,
       },
     ])
   })
@@ -121,8 +118,11 @@ describe('draftFromTemplate', () => {
     const draft = draftFromTemplate(template)
     const user = draft.stages.filter((stage) => stage.builtin == null)
 
-    expect(user.map((stage) => stage.onCompleteIndex)).toEqual([null, null])
-    expect(user.map((stage) => stage.onRejectIndex)).toEqual([null, null])
+    // 引用不到的名字落成「未指定」（stageIndex null），不产出越界下标
+    const exitsOf = (on: 'done' | 'errored'): unknown[] =>
+      user.flatMap((stage) => (stage.exits ?? []).filter((exit) => exit.on === on))
+    expect(exitsOf('done')).toEqual([{ on: 'done', do: 'goto', stageIndex: null }])
+    expect(exitsOf('errored')).toEqual([{ on: 'errored', do: 'goto', stageIndex: null }])
   })
 
   it('模板阶段带 id 时不复制 id（模板永远是新工作流）', () => {
@@ -251,19 +251,20 @@ describe('SOP_TEMPLATES', () => {
     expect(dev!.stages.some((stage) => stage.name.includes('拆解'))).toBe(false)
   })
 
-  it('模板里的闸门在草稿里落成下标形态，两侧都能指到本模板的阶段', () => {
+  it('模板里的闸门在草稿里落成判定者 + 出口表，两侧都能指到本模板的阶段', () => {
     for (const template of SOP_TEMPLATES) {
       const draft = draftFromTemplate(template)
       const names = draft.stages.map((stage) => stage.name)
-      for (const [index, stage] of draft.stages.entries()) {
-        const gate = draft.stages[index].gate
-        if (!gate) continue
-        expect(gate.maxFails, `${template.id}/${stage.name} 闸门次数不合法`).toBeGreaterThanOrEqual(
-          1,
-        )
-        for (const target of [gate.onPassIndex, gate.onFailIndex]) {
-          if (target == null) continue
-          expect(names[target], `${template.id}/${stage.name} 闸门目标越界`).toBeDefined()
+      for (const stage of draft.stages) {
+        const judge = stage.judge
+        if (!judge) continue
+        expect(
+          judge.maxFails ?? 0,
+          `${template.id}/${stage.name} 闸门次数不合法`,
+        ).toBeGreaterThanOrEqual(1)
+        for (const exit of stage.exits ?? []) {
+          if (exit.do !== 'goto' || exit.stageIndex == null) continue
+          expect(names[exit.stageIndex], `${template.id}/${stage.name} 闸门目标越界`).toBeDefined()
         }
       }
     }

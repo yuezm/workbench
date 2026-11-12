@@ -1,7 +1,25 @@
 # 计划：阶段出口表（Stage Exits）
 
-> 状态：**S1a + S2 + 来源工单段已实现（M29 / M30 / M31，2026-11-12）；S1b、S3、S4 待做**。
+> 状态：**S1a / S1b / S2 / 来源工单段已实现（M29 – M32，2026-11-12）；`retry` 与 S4 待做**。
 > 关联：[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)（阶段状态机、闸门）、[SPEC-review-handoff](../specs/SPEC-review-handoff.md)、[ARCHITECTURE](../ARCHITECTURE.md)。
+
+## 已落地：S1b 出口表（M32）
+
+主去向从四组字段（`on_complete_stage_id` / `on_reject_stage_id` / 闸门两侧）并成一张**出口表**：
+
+- `WorkflowStage.exits: Partial<Record<'done'|'errored'|'passed'|'failed', StagePrimary>>`，
+  `StagePrimary = goto(stageId) | await | close`；
+- `gate` 收窄成 `judge: { maxFails: number | null } | null`（只管「谁给结论 + 放行护栏」，去向在出口表里），
+  `maxFails = null` = 不设护栏；老库三列归一成 `{ maxFails }`；
+- **缺省只在决策时解析**（`stage-machine#completeExits`），落库存的是「人配了什么」——界面上
+  「默认（下一阶段）」这类占位就是没配，改顺序后自动跟着变；
+- `goto` 目标找不到（脏投影 / 被删）→ 原地停住，不猜去向；判定预算照记；
+- 投影：`exits_json` / `judge_json`（DEFAULT `'{ }'` / `'null'`），旧四列不再写入、等 S4 清理；
+  `KERNEL_VERSION` → `M32.0.0`；
+- 界面：阶段详情固定「类型 / 出口表 / 放行护栏（判定阶段）/ 要干什么 / 验收 / 轮次 / 超时 / 派单 / 子任务」，
+  删掉「字段按类型收敛、不可见字段只归一」的那套规则带来的隐式行为（切类型现在会清掉对应出口）。
+
+未做：`retry`（原地重跑 + 预算）需要新增 `tasks.stage_fails` 计数列，单列一个切片。
 
 ## 已落地：S1a 派单按触发条件分组（M29）
 

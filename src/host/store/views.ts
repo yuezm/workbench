@@ -77,6 +77,9 @@ interface StageRow {
   /** M18 内置阶段键（NULL = 自己添加的阶段） */
   builtin: string | null
   agent_id: string | null
+  /** M32 出口表（JSON 对象文本；老行由启动补齐写全） */
+  exits_json: string
+  /** 旧 M11 闸门两列（已不读，保留在表里等清理） */
   on_complete_stage_id: string | null
   on_reject_stage_id: string | null
   /** M29 派单（JSON 数组文本；老行由投影迁移补 '[]'） */
@@ -91,10 +94,8 @@ interface StageRow {
   max_rounds: number | null
   /** M26 阶段单轮运行超时（毫秒；NULL = 用全局缺省） */
   run_timeout_ms: number | null
-  /** M11 闸门三列：全空 = 不是闸门 */
-  gate_max_fails: number | null
-  gate_on_pass_stage_id: string | null
-  gate_on_fail_stage_id: string | null
+  /** M32 判定者（JSON 文本；`null` = 不判定） */
+  judge_json: string
 }
 
 interface AgentRow {
@@ -305,8 +306,15 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   entryMode: row.entry_mode as EntryMode,
   builtin: row.builtin as WorkflowStage['builtin'],
   agentId: row.agent_id,
-  onCompleteStageId: row.on_complete_stage_id,
-  onRejectStageId: row.on_reject_stage_id,
+  exits:
+    row.exits_json === undefined || row.exits_json.trim() === ''
+      ? {}
+      : (JSON.parse(row.exits_json) as WorkflowStage['exits']),
+  // M32：判定者只剩护栏；旧行没有该列时按「不判定」归一
+  judge:
+    row.judge_json === undefined || row.judge_json.trim() === '' || row.judge_json === 'null'
+      ? null
+      : (JSON.parse(row.judge_json) as WorkflowStage['judge']),
   // M29：坏 JSON / 空串按「不派单」归一，不让一条脏行把整张视图读挂
   handoffs:
     row.handoffs_json === undefined || row.handoffs_json.trim() === ''
@@ -322,15 +330,6 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   maxRounds: row.max_rounds ?? null,
   // M26：阶段超时（NULL = 用全局缺省）
   runTimeoutMs: row.run_timeout_ms ?? null,
-  // M11：三列全空表示不是闸门（`max_fails` 缺省 / null 都按「不是闸门」归一）
-  gate:
-    row.gate_max_fails === null || row.gate_max_fails === undefined
-      ? null
-      : {
-          maxFails: row.gate_max_fails,
-          onPassStageId: row.gate_on_pass_stage_id ?? null,
-          onFailStageId: row.gate_on_fail_stage_id ?? null,
-        },
 })
 
 const mapAgent = (row: AgentRow): Agent => ({
@@ -549,10 +548,9 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
     db
       .prepare(
         `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id,
-                on_complete_stage_id, on_reject_stage_id, handoffs_json,
+                exits_json, handoffs_json,
                 subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
-                max_rounds, run_timeout_ms, gate_max_fails, gate_on_pass_stage_id,
-                gate_on_fail_stage_id
+                max_rounds, run_timeout_ms, judge_json
          FROM workflow_stages ORDER BY workflow_id, position`,
       )
       .all() as unknown as StageRow[]

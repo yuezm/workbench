@@ -34,8 +34,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   position: 0,
   entryMode: 'none',
   agentId: null,
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   subtaskStageId: null,
   onChildrenSettled: null,
@@ -1039,7 +1039,7 @@ describe('kernel/project stage 归一（M29 派单）', () => {
 
   it('老事实的判定阶段：老交接折算成「通过 + 人工往前」', () => {
     const legacy = {
-      ...stage({ gate: { maxFails: 2, onPassStageId: null, onFailStageId: null } }),
+      ...stage({ judge: { maxFails: 2 }, exits: {} }),
       handoffWorkflowId: 'wf-b',
       handoffStageId: null,
     } as unknown as Record<string, unknown>

@@ -15,7 +15,7 @@
 - 配置**运行时**：运行时 = 一条连接（执行器插件 + 启动命令 + profile + 参数模板 + 启用开关）；内置执行器插件 `dsh`、`claude`（Claude Code）、`hermes`（Hermes Agent / ACP）与 `command`，其余（codex 等）后续按「插件目录 + registry 一行」接入，不改内核与宿主。
 - **识别**已安装的运行时：运行时配置页扫描本机 PATH，自动列出已安装的 agent CLI，点「使用」打开新建表单并把名称与命令预填进去（不自动建记录，profile 等仍由用户确认）。
 - 配置**智能体**：名称、描述、绑定运行时（连接）、能力（System Prompt）与**执行配置**（模型、思考强度、并发上限、访问权限、工作目录、环境变量）。
-- 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【类型】【完成后进入】【出错时进入】；类型选「闸门（判定）」时改设【允许未通过次数】【通过时进入】【未通过时进入】（M11）。**每个工作流恒有四个系统内置阶段**（M18：待办 / 已阻塞 / 已完成 / 已取消，名称、类别、位置锁定，其余字段照常可改；已完成 / 已取消不允许交接），自己添加的阶段插在「待办」之后、「已阻塞」之前。阶段详情按类型收敛字段：**不交接**与**交给用户**只留【名称】【类型】，其余字段（智能体 / 流转目标 / 交接 / 子任务 / 闸门配置 / 要干什么）一律不展示；**交给智能体**展示流转目标 / 交接 / 子任务 / 要干什么；**闸门（判定）**只展示次数、过与没过去向、要干什么——闸门只判定，不交接、不拆子任务，也不配「完成 / 出错」去向。界面上不展示的字段在保存时归一成默认值（「要干什么」原文保留）。
+- 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【类型】与**出口表**（M32：每个触发条件一条主去向——进入指定阶段 / 停在这里等人 / 结束并归档）；类型选「闸门（判定）」时改设【放行护栏】+ 通过时 / 未通过时两行出口，另可配**派单**（M29：离开本阶段时在另一个工作流建一张工单）。**每个工作流恒有四个系统内置阶段**（M18：待办 / 已阻塞 / 已完成 / 已取消，名称、类别、位置锁定，其余字段照常可改；已完成 / 已取消不允许交接），自己添加的阶段插在「待办」之后、「已阻塞」之前。阶段详情按类型收敛字段：**不交接**与**交给用户**只留【名称】【类型】，其余字段（智能体 / 流转目标 / 交接 / 子任务 / 闸门配置 / 要干什么）一律不展示；**交给智能体**展示流转目标 / 交接 / 子任务 / 要干什么；**闸门（判定）**只展示次数、过与没过去向、要干什么——闸门只判定，不交接、不拆子任务，也不配「完成 / 出错」去向。界面上不展示的字段在保存时归一成默认值（「要干什么」原文保留）。
 - 用**看板**查看与推进任务：列 = 当前所选工作流的阶段（M18 起列头圆点按**阶段类别**取色：未开始灰 / 进行中靛蓝 / 已完成绿 / 已关闭红点，「已完成 / 已取消」是终态列、卡片停在里面仍算在看板）；新建任务时可选**起始阶段**（缺省落「待办」），之后把卡片**拖拽**到其它阶段列（或「归档」区）推进，不设执行按钮。
 
 **用户故事：**
@@ -176,7 +176,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `runtimes`        | id, name(uniq), executor_key, command, profile, args_template, enabled, last_probe_json, created_at                                                                                                                                                                                                                          | 运行时 = 一条**连接**；`executor_key` 指向执行器插件（**无 CHECK**：取值合法性由宿主入口按插件注册表校验，避免加插件就改 DDL 触发全库重建；列本身 NOT NULL 无 DEFAULT，必须由 IPC 按 manifest 补齐）；`last_probe_json` 存最近一次探测结论（从未探测为 NULL）。执行配置不在本表                                                                                                                                     |
 | `agents`          | id, name, description, runtime_id → runtimes, system_prompt, model, reasoning_effort, max_concurrent, permission_mode, workdir, env_json, created_at                                                                                                                                                                         | 智能体 = 连接 + 执行配置；`env_json` 存 `Record<string,string>`（默认 `'{}'`）；`permission_mode` 有 CHECK（三档）;`max_concurrent` 默认 1                                                                                                                                                                                                                                                                          |
 | `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, builtin, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, handoffs_json, acceptance_json, max_rounds, created_at                                                                                                 | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一；`builtin` = `todo`\|`blocked`\|`done`\|`cancelled`（M18 内置阶段；NULL = 自己添加的阶段）；`acceptance_json` = 验收条目的 JSON 数组（M20，空数组 = 未声明）；`max_rounds` = 阶段内轮次上限 1–5（M21，NULL = 1 即不续轮）；`run_timeout_ms` = 本阶段单轮运行超时（M26，毫秒 300000–14400000，NULL = 用全局缺省 60 min） |
+| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, builtin, agent_id → agents?, exits_json, handoffs_json, judge_json, acceptance_json, max_rounds, created_at                                                                                                                                                         | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一；`builtin` = `todo`\|`blocked`\|`done`\|`cancelled`（M18 内置阶段；NULL = 自己添加的阶段）；`acceptance_json` = 验收条目的 JSON 数组（M20，空数组 = 未声明）；`max_rounds` = 阶段内轮次上限 1–5（M21，NULL = 1 即不续轮）；`run_timeout_ms` = 本阶段单轮运行超时（M26，毫秒 300000–14400000，NULL = 用全局缺省 60 min） |
 | `tasks`           | id, title, description, workflow_id → workflows, project_id, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                              | `status` = `active`\|`completed`；`project_id` 是弱引用（M10，NULL = 默认目录），任务的运行工作目录取项目 `path`                                                                                                                                                                                                                                                                                                    |
 | `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                          | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下有执行中的任务时拒绝删除；删除时其余任务与会话改归默认目录（`projectId=null`）                                                                                                                                                                                                                         |
 | `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进）                                                                                                                                                                                                                                    |
@@ -228,27 +228,33 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 - 顺序固定：**待办 → 自己添加的阶段（按提交顺序）→ 已阻塞 → 已完成 → 已取消**；`position` 就是这个顺序的 0 基下标。
 - 自己添加的阶段一律属于「进行中」类别，颜色与「已阻塞」同族（都按 `active` 取色）。
-- 内置阶段**除名称 / 类别 / 位置外都可改**：进入时交给（`entry_mode` + `agent_id`）、要干什么、闸门、完成后 / 出错时进入。
+- 内置阶段**除名称 / 类别 / 位置外都可改**：进入时交给（`entry_mode` + `agent_id`）、要干什么、判定、出口表。
 - **已完成 / 已取消不允许派单**：保存时 `handoffs` 非空一律 reject（校验在 `validateStageHandoffs`）。
 - 新建 / 编辑时缺的内置阶段由内核补齐（新建按默认值，更新按既有行原样还原——所以「删除」不成立）；历史库在首启由 `store.ensureBuiltinStages()` 按名认领（叫「待办」「已完成」的旧阶段原地变成内置阶段，保留 id / 配置 / 任务）。
 - 老数据里若有重名，只有第一条被认领为内置阶段，其余按普通阶段保留。
 
 **任务状态：** `active`（在看板中）| `completed`（已归档，移出看板）。进入「已完成 / 已取消」不会自动归档：终态列是看板的一部分，归档仍走「归档」区（`task.complete`）。
 
-**目标解析（默认值，仅用于 run 结果自动流转）：**
+**出口表（M32，取代 `on_complete` / `on_reject` / 闸门两侧四列）：**
 
-- `on_complete` 目标：显式配置 → 该阶段（可以显式指到「已阻塞」）；未配置 → **下一个自己添加的阶段**（跳过内置的「已阻塞」/「已取消」）；没有下一个时 → 内置「已完成」；连「已完成」也没有（老工作流）→ 任务 `completed`。
-- `on_reject` 目标：显式配置 → 该阶段；未配置（不指定）→ **留在原地、不做任何流转**。
-- 闸门（`gate`）目标：`verdict=pass` → `onPassStageId`（未配置 → 同上默认下一阶段）；`verdict=fail` 且未达 `maxFails` → `onFailStageId`（未配置 → 原地不动）；`fail` 且已达 `maxFails` → **放行**走通过分支，任务打 `gate:degraded` 标签并追加一条反馈。
+一次离开只落**一条主去向**，三种动作：`goto`（同一张工单换阶段）/ `await`（显式停在这里等人）/ `close`（本单结束并归档）。派单是附加动作，不在这里。
 
-手动拖拽**不套用**上面三个目标：落点即目标阶段（可跨阶段前跳/后退），闸门预算同时清零。
+- `done`（非判定阶段跑完）：缺省 → **下一个自己添加的阶段** → 内置「已完成」→ 没有就 `close`。
+- `errored`（执行出错：非零退出 / 超时 / 失联）：缺省 → `await`。
+- `passed` / `failed`（判定两侧）：缺省 → 同 `done` / `await`。
+- 判定阶段（`judge` 非 null）没有 `done`；非判定阶段没有 `passed` / `failed`。
+- `goto` 的目标阶段找不到（脏投影 / 被删）→ **原地停住**，不猜去向。
+- **缺省只在决策时解析**（`stage-machine#completeExits`），落库保存的是**人配了什么**——界面上「默认（下一阶段）」这类占位就是「没配」，改顺序后自动跟着变。
+- 判定护栏 `judge.maxFails`：连续未通过达上限后**放行**（改走 `passed`），任务打 `gate:degraded` 并追加一条反馈；`null` = 不设护栏。
+
+手动拖拽**不套用**出口表：落点即目标阶段（可跨阶段前跳/后退），判定预算同时清零。
 
 **事件与转移：**
 
 | 事件               | 触发时机                     | 行为                                                                                                                                  |
 | ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | ENTER(stage)       | 新建任务 / 流转到某阶段      | 按该阶段 `entry_mode`：`none` 停留等待手动操作；`agent` 创建一条 `queued` run（交给 `agent_id`，视为执行中）；`user` 置为"等待你处理" |
-| RUN_SUCCEEDED(run) | agent run 正常结束           | 普通阶段进 `on_complete` 目标；闸门阶段按回执 `verdict` 分流（见下）；到终端则 `completed`                                            |
+| RUN_SUCCEEDED(run) | agent run 正常结束           | 普通阶段走 `exits.done`；判定阶段按回执 `verdict` 走 `exits.passed` / `exits.failed`（见下）；`close` 则 `completed`                  |
 | RUN_FAILED(run)    | agent run 非零退出/超时/异常 | 进入 `on_reject` 目标；若未配置打回目标（不指定）或目标就是当前阶段则保持原阶段、**不触发进入效果**（不自动重建 run）                 |
 | MOVE_TO(stage)     | 用户把卡片拖到某个阶段列     | 直接进入该阶段（不套用 `on_complete`/`on_reject`）；该任务有活跃 run 时拒绝拖动                                                       |
 | COMPLETE           | 用户把卡片拖到「归档」区     | 任务 `completed`，移出看板；该任务有活跃 run 时拒绝完成                                                                               |
@@ -264,7 +270,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `passed` / `failed` | 通过时 / 未通过时                | 判定者 |
 | `manual`            | 人工拖动 / 点完成任务            | 人     |
 
-- **派单不终结本单**：本单去向仍由 `onComplete` / `onReject` / `gate` 决定，所以同一触发条件可以「既进下一阶段又派一张单」，也可以只派单本单照旧流转。
+- **派单不终结本单**：本单去向仍由出口表（`exits`）决定，所以同一触发条件可以「既进下一阶段又派一张单」，也可以只派单本单照旧流转。
 - **只有真的离开阶段才派**：打回原地、判定没给结论、取消都不算离开，一条都不派（与 M7 的「向前完成才交接」等价，但不再按 `position` 比较）。
 - 判定阶段没有 `done`：跑完但没结论不构成去向；`errored` 仍然可用（执行崩溃与业务过没过是两件事）。
 - **去重按「这一次离开」**（M30）：一条 run 只派一批（`tasks.handoff_from_run_id`），同一阶段第二次成功会**再派一张**——工单模型下每次发起都是新单。人工拖动 / 完成任务没有 run，不去重。链深上限 8。
@@ -273,14 +279,14 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 **打回原地不重试：** `RUN_FAILED` 时若 `on_reject` 未配置（不指定）或解析结果就是当前阶段（显式配置为自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成，详情页也可直接「重新执行」原地重排（`task.rerun`，见下）。
 
-**闸门（M11）：** 阶段可设为闸门，由该阶段的智能体在回执里给 `verdict`（`pass` / `fail`）与 `checks`（实际执行的命令 + 退出码）。判定与 `run.status` **正交**：`succeeded` 只说明执行器跑完，`fail` 才是业务上没过。
+**判定（M32，M11 的闸门）：** 阶段可设**判定者**（`judge`：只回答「谁给结论 + 放行护栏多大」），由该阶段的智能体在回执里给 `verdict`（`pass` / `fail`）与 `checks`（实际执行的命令 + 退出码）。判定与 `run.status` **正交**：`succeeded` 只说明执行器跑完，`fail` 才是业务上没过；去向在出口表的 `passed` / `failed` 两行里。
 
 - `pass` 必须至少带一条 `checks` 且退出码全为 0，否则视为**没给结论**：任务停在闸门等人，既不放行也不消耗预算。
 - `fail` 未达 `maxFails` → 去未通过分支并把任务上的连续未通过次数 +1（回环保留累计值，否则「最多 N 次」永远到不了）。
-- `fail` 已达 `maxFails` → 放行，任务打 `gate:degraded` 标签并追加一条反馈（详情页可见），预算清零。
-- 执行出错（`run.status='failed'`）走 `on_reject`，**不消耗**闸门预算——执行器崩了不等于业务上没过。
-- 闸门未通过而离开本阶段**不算「向前完成」**，不触发跨工作流交接；放行才算。
-- 闸门只判定：编辑器不为闸门提供交接、子任务与「完成 / 出错」两个去向，保存时这些字段一律归一为空（内核侧仍保留 M7/M8/M11 的既有流转语义，只是编辑器不再产出这种配置）。
+- `fail` 已达 `maxFails` → 放行（改走 `exits.passed`），任务打 `gate:degraded` 标签并追加一条反馈（详情页可见），预算清零；`maxFails = null` 表示不设护栏，永远按 `exits.failed` 走。
+- 执行出错（`run.status='failed'`）走 `exits.errored`，**不消耗**判定预算——执行器崩了不等于业务上没过。
+- 判定未通过而离开本阶段按 `failed` 组派单；通过（含放行）按 `passed` 组派单。
+- 判定只判定：编辑器不为判定阶段提供「完成时」这一行与子任务；切回普通类型时判定者与通过 / 未通过两行出口一并归一掉（否则内核整份拒收）。
 
 **闸门不合格 → 与人讨论（M13）：** 判定 `fail` 时人往往不只想看到结论，还想就这次判断追问。落地口径是「**阻塞 = run 在等你**」，不是「run 已结束、另开会话」：
 
@@ -435,7 +441,7 @@ export interface DetectedRuntime {
 ### 调度
 
 - 领取按运行时逐个进行、一次一个（`claimsPerPump` 缺省 1）：同一运行时上不会有两个 run 并行，多出来的留队列按 `queueSeq` FIFO；不同运行时并行。智能体的 `maxConcurrent` 仍是内核侧的窗口上限（防止一个智能体被塞满）。
-- 闸门阶段（`stage.gate` 非空）的 run 权限由阶段语义决定：`run.access` 至少是 `full`（`kernel/task-effects.ts#runAccessOf`）。理由：验收要求回执给出 `checks` 的命令与退出码，而 `workspace-write` 在 Claude Code 里是 `acceptEdits`——只能改文件，跑 `pnpm` / `pytest` 仍要审批，无审批面时被自动拒。任务详情展示的是 `run.access`（本轮实际值），不是智能体上配的 `permissionMode`。
+- 判定阶段（`stage.judge` 非空）的 run 权限由阶段语义决定：`run.access` 至少是 `full`（`kernel/task-effects.ts#runAccessOf`）。理由：验收要求回执给出 `checks` 的命令与退出码，而 `workspace-write` 在 Claude Code 里是 `acceptEdits`——只能改文件，跑 `pnpm` / `pytest` 仍要审批，无审批面时被自动拒。任务详情展示的是 `run.access`（本轮实际值），不是智能体上配的 `permissionMode`。
 - 运行时不存在 / 已停用时不派发，run 直接 `failed` 并记 `runtime_missing` / `runtime_disabled`；配置引用了未注册的 `executorKey` 同样落 `runtime_missing`（文案 `执行器插件未注册: <key>`），不新增 `errorCode`。
 - `src/host/scheduler.ts` 负责：领取（内核按 `notBefore`/`queueSeq` 决定顺序与并发窗口）、调执行器端口跑一轮、帧批量入账、回执转交内核、取消时序（abort → 宽限 → 强杀 → 兜底终态）；租约/超时/退避由唯一 `clock.tick` 驱动。终态后由内核产 `RUN_SUCCEEDED`/`RUN_FAILED` 的阶段流转事实；取消的 run 不推进阶段。
 

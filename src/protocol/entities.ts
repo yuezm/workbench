@@ -348,30 +348,47 @@ export interface GateCheck {
 }
 
 /**
- * 闸门配置（M11）：挂在**被看守阶段自己**身上，不是独立节点。
+ * 判定者（M32，原闸门配置收窄）：只回答「谁给结论、放行护栏多大」，去向在 `exits` 里。
  *
- * 判定发生在该阶段 run 正常结束之后：
- * - `pass` → 走 `onPassStageId`（缺省 = 默认下一阶段）；
- * - `fail` 且未达 `maxFails` → 走 `onFailStageId`（缺省 = 原地不动）；
- * - `fail` 且已达 `maxFails` → **放行**（走通过分支），由内核打 `gate:degraded` 标签留痕。
+ * 判定发生在该阶段 run 正常结束之后，读回执的 `verdict`：
+ * - `pass` → 走 `exits.passed`；
+ * - `fail` 且未达护栏 → 走 `exits.failed`，任务上的连续未通过次数 +1；
+ * - `fail` 且已达护栏 → **放行**（改走 `exits.passed`），由内核打 `gate:degraded` 标签留痕。
  *
- * 执行出错（`run.status='failed'`）不消耗预算，仍按原「错误时进入」语义处理。
+ * `maxFails = null` 表示不设护栏（失败永远按 `exits.failed` 走）。执行出错不消耗预算。
  */
-export interface GateConfig {
-  /** 允许未通过的次数（≥1）；第 `maxFails` 次未通过之后仍未通过则放行 */
-  maxFails: number
-  /** 通过时进入；null = 默认下一阶段 */
-  onPassStageId: string | null
-  /** 未通过时进入；null = 原地不动 */
-  onFailStageId: string | null
+export interface JudgeConfig {
+  /** 允许连续未通过的次数；null = 不设护栏 */
+  maxFails: number | null
 }
 
-/** 闸门配置的保存形态（`onPassIndex` / `onFailIndex` 是 `stages` 数组下标）。 */
-export interface GateInput {
-  maxFails: number
-  onPassIndex?: number | null
-  onFailIndex?: number | null
+export interface JudgeInput {
+  maxFails?: number | null
 }
+
+/** 离开阶段的触发条件（主去向表按它分组，恰好一条） */
+export const STAGE_EXIT_GUARDS = ['done', 'errored', 'passed', 'failed'] as const
+
+export type StageExitGuard = (typeof STAGE_EXIT_GUARDS)[number]
+
+/** 主去向的动作 */
+export const STAGE_EXIT_ACTIONS = ['goto', 'await', 'close'] as const
+
+export type StageExitAction = (typeof STAGE_EXIT_ACTIONS)[number]
+
+/**
+ * 主去向（M32）：一张工单离开本阶段时**只能**落到一个去处。
+ *
+ * - `goto`：同一张工单进另一个阶段；
+ * - `await`：显式停在这里等人（不是「没有出口」，是「出口就是等人」）；
+ * - `close`：本单结束并归档（工单模型里执行完就结束）。
+ *
+ * 派单（跨工作流建新工单）不在这里——它不终结本单，见 `StageHandoff`。
+ */
+export type StagePrimary = { do: 'goto'; stageId: string } | { do: 'await' } | { do: 'close' }
+
+/** 出口表：每个触发条件最多一条主去向；保存时由内核补齐缺省。 */
+export type StageExits = Partial<Record<StageExitGuard, StagePrimary>>
 
 /**
  * 派单的触发条件（M29）：离开一个阶段有五种触发，每种都能单独指定要不要派单、派给谁。
@@ -414,8 +431,11 @@ export interface WorkflowStage {
    * 内置阶段不可删除、不可改名，位置由内核按类别归一。
    */
   builtin?: BuiltinStageKey | null
-  onCompleteStageId: string | null
-  onRejectStageId: string | null
+  /**
+   * 出口表（M32）：每个触发条件一条主去向；取代 `on_complete_stage_id` / `on_reject_stage_id` /
+   * 闸门两侧四列。老事实由 `normalizeStage` 按旧字段合成。
+   */
+  exits: StageExits
   /**
    * 派单（M29）：按触发条件分组的跨工作流交接。老事实缺该字段时按 M7 两列归一
    * （见 `kernel/workflow/stage-handoffs.ts#legacyHandoffs`）。
@@ -449,10 +469,18 @@ export interface WorkflowStage {
    */
   runTimeoutMs?: number | null
   /**
-   * 闸门（M11）：非 null 时本阶段是判定关卡，run 正常结束后读 `receipt.verdict` 决定去向。
-   * 老事实 / 存量导入缺该字段时按 null 归一（不是闸门）。
+   * 判定者（M32，原闸门）：非 null 时本阶段读回执 `verdict` 决定走 `exits.passed` 还是
+   * `exits.failed`。老事实 / 存量导入缺该字段时按 null 归一（不判定）。
    */
-  gate?: GateConfig | null
+  judge: JudgeConfig | null
+}
+
+/** 出口表的一行（保存形态）：`stageIndex` 是 `stages` 数组下标。 */
+export interface StageExitInput {
+  on: StageExitGuard
+  do: StageExitAction
+  /** do='goto' 时的目标下标 */
+  stageIndex?: number | null
 }
 
 export interface StageInput {
@@ -466,10 +494,11 @@ export interface StageInput {
    */
   builtin?: BuiltinStageKey | null
   agentId?: string | null
-  /** 完成后进入：目标阶段在 stages 数组中的下标；null/undefined = 默认（下一阶段 / 终端） */
-  onCompleteIndex?: number | null
-  /** 打回时退回到：目标阶段下标；null/undefined = 不指定（打回后原地不动、不流转） */
-  onRejectIndex?: number | null
+  /**
+   * 出口表（M32）：每项一个触发条件 + 一个主去向；`stageIndex` 是 `stages` 数组下标。
+   * 缺省的触发条件由内核补齐（done → 下一阶段，errored / failed → await）。
+   */
+  exits?: readonly StageExitInput[]
   /**
    * 派单（M29，可空 = 不派单）：按触发条件分组的跨工作流交接；
    * 目标工作流 / 阶段的存在性与自指由内核按视图判。
@@ -492,8 +521,8 @@ export interface StageInput {
   maxRounds?: number | null
   /** 单轮运行超时（M26，可空 = 全局缺省 60 min）：本阶段一次 run 的最长时长（毫秒） */
   runTimeoutMs?: number | null
-  /** 闸门（M11，可空 = 不是闸门）：非空时本阶段按判定结果流转，并受 `maxFails` 预算约束 */
-  gate?: GateInput | null
+  /** 判定者（M32，可空 = 不判定）：非空时本阶段按回执 `verdict` 走 passed / failed 两侧 */
+  judge?: JudgeInput | null
 }
 
 export interface Workflow {

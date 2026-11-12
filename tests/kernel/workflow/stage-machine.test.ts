@@ -7,7 +7,7 @@ import {
   moveTask,
   moveTaskToStage,
   resolveNextStage,
-  resolveRejectStage,
+  applyExit,
   type StageEvent,
 } from '../../../src/kernel/workflow/stage-machine'
 
@@ -18,8 +18,8 @@ const stage = (id: string, over: Partial<WorkflowStage> = {}): WorkflowStage => 
   position: 0,
   entryMode: 'none',
   agentId: null,
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   ...over,
 })
@@ -86,7 +86,7 @@ describe('kernel 阶段状态机', () => {
     const flow: WorkflowWithStages = {
       ...workflow(),
       stages: [
-        stage('s0', { onCompleteStageId: 's2' }),
+        stage('s0', { exits: { done: { do: 'goto', stageId: 's2' } } }),
         stage('s1'),
         stage('s2', { entryMode: 'agent', agentId: 'ag1' }),
       ],
@@ -108,7 +108,7 @@ describe('kernel 阶段状态机', () => {
       stages: [
         stage('s0', { entryMode: 'agent', agentId: 'ag0' }),
         stage('s1'),
-        stage('s2', { onRejectStageId: 's0' }),
+        stage('s2', { exits: { errored: { do: 'goto', stageId: 's0' } } }),
       ],
     }
 
@@ -127,8 +127,8 @@ function sStage(partial: Partial<WorkflowStage> & { id: string; position: number
     name: partial.id,
     entryMode: 'none',
     agentId: null,
-    onCompleteStageId: null,
-    onRejectStageId: null,
+    exits: {},
+    judge: null,
     handoffs: [],
     ...partial,
   }
@@ -188,11 +188,11 @@ describe('stage-machine（shared 用例并入）entryEffects', () => {
 
 describe('stage-machine（shared 用例并入）resolveNextStage', () => {
   it('显式配置且存在 → 该阶段', () => {
-    const a = sStage({ id: 'a', position: 0, onCompleteStageId: 's2' })
+    const a = sStage({ id: 'a', position: 0, exits: { done: { do: 'goto', stageId: 's2' } } })
     expect(resolveNextStage(a, sWf([a, s1, s2]))?.id).toBe('s2')
   })
   it('显式配置但目标不存在 → null', () => {
-    const a = sStage({ id: 'a', position: 0, onCompleteStageId: 'ghost' })
+    const a = sStage({ id: 'a', position: 0, exits: { done: { do: 'goto', stageId: 'ghost' } } })
     expect(resolveNextStage(a, sWf([a, s1]))).toBeNull()
   })
   it('未配置 → 下一顺序阶段', () => {
@@ -206,24 +206,36 @@ describe('stage-machine（shared 用例并入）resolveNextStage', () => {
   })
 })
 
-describe('stage-machine（shared 用例并入）resolveRejectStage', () => {
-  it('显式配置且存在 → 该阶段', () => {
-    const a = sStage({ id: 'a', position: 2, onRejectStageId: 's0' })
-    expect(resolveRejectStage(a, sWf([s0, s1, a])).id).toBe('s0')
+describe('stage-machine applyExit（M32：主去向）', () => {
+  const flow = (): WorkflowWithStages => sWf([s0, s1, s2])
+
+  it('goto：换阶段并清零预算', () => {
+    const r = applyExit({ ...sTask('s0'), gateFails: 2 }, { do: 'goto', stageId: 's1' }, flow())
+
+    expect(r.task.currentStageId).toBe('s1')
+    expect(r.task.gateFails).toBe(0)
   })
-  it('显式配置但目标不存在 → 回落到原地（不指定）', () => {
-    const a = sStage({ id: 'a', position: 2, onRejectStageId: 'ghost' })
-    expect(resolveRejectStage(a, sWf([s0, s1, a])).id).toBe('a')
+
+  it('goto 目标不存在（脏投影）→ 原样不动、零效果', () => {
+    const task = sTask('s0')
+    const r = applyExit(task, { do: 'goto', stageId: 'ghost' }, flow())
+
+    expect(r.task).toBe(task)
+    expect(r.effects).toEqual([])
   })
-  it('未配置（不指定）→ 原地', () => {
-    expect(resolveRejectStage(s2, sWf([s0, s1, s2])).id).toBe('s2')
+
+  it('await：不流转，但预算按传入值落下', () => {
+    const r = applyExit({ ...sTask('s1'), gateFails: 1 }, { do: 'await' }, flow(), { gateFails: 2 })
+
+    expect(r.task.currentStageId).toBe('s1')
+    expect(r.task.gateFails).toBe(2)
   })
-  it('未配置且已是首阶段 → 原地', () => {
-    expect(resolveRejectStage(s0, sWf([s0, s1])).id).toBe('s0')
-  })
-  it('阶段不在工作流中 → 原地', () => {
-    const orphan = sStage({ id: 'zz', position: 9 })
-    expect(resolveRejectStage(orphan, sWf([s0, s1]))).toBe(orphan)
+
+  it('close：任务完成并清零预算', () => {
+    const r = applyExit({ ...sTask('s1'), gateFails: 2 }, { do: 'close' }, flow())
+
+    expect(r.task.status).toBe('completed')
+    expect(r.task.gateFails).toBe(0)
   })
 })
 
@@ -291,7 +303,7 @@ describe('stage-machine（shared 用例并入）moveTaskToStage（手动拖拽�
 
   it('直接落到任意阶段，不套用完成后/打回目标', () => {
     // s0 配了「完成后进入 s2」，拖拽仍以落点为准
-    const from = sStage({ id: 's0', position: 0, onCompleteStageId: 's2' })
+    const from = sStage({ id: 's0', position: 0, exits: { done: { do: 'goto', stageId: 's2' } } })
     const f = sWf([from, s1, s2])
     const r = moveTaskToStage(sTask('s0'), 's1', f)
     expect(r.task.currentStageId).toBe('s1')
@@ -348,7 +360,8 @@ describe('stage-machine 闸门（M11）', () => {
         position: 1,
         entryMode: 'agent',
         agentId: 'ag1',
-        gate: { maxFails: 3, onPassStageId: 'done', onFailStageId: 'exec' },
+        judge: { maxFails: 3 },
+        exits: { passed: { do: 'goto', stageId: 'done' }, failed: { do: 'goto', stageId: 'exec' } },
         ...over,
       }),
       sStage({ id: 'done', position: 2 }),
@@ -373,7 +386,8 @@ describe('stage-machine 闸门（M11）', () => {
         position: 1,
         entryMode: 'agent',
         agentId: 'ag1',
-        gate: { maxFails: 2, onPassStageId: null, onFailStageId: 'exec' },
+        judge: { maxFails: 2 },
+        exits: { failed: { do: 'goto', stageId: 'exec' } },
       }),
       sStage({ id: 'done', position: 2 }),
     ])
@@ -411,7 +425,8 @@ describe('stage-machine 闸门（M11）', () => {
         position: 1,
         entryMode: 'agent',
         agentId: 'ag1',
-        gate: { maxFails: 3, onPassStageId: 'done', onFailStageId: null },
+        judge: { maxFails: 3 },
+        exits: { passed: { do: 'goto', stageId: 'done' } },
       }),
       sStage({ id: 'done', position: 2 }),
     ])
@@ -437,8 +452,12 @@ describe('stage-machine 闸门（M11）', () => {
         position: 1,
         entryMode: 'agent',
         agentId: 'ag1',
-        onRejectStageId: 'exec',
-        gate: { maxFails: 3, onPassStageId: 'done', onFailStageId: 'exec' },
+        judge: { maxFails: 3 },
+        exits: {
+          errored: { do: 'goto', stageId: 'exec' },
+          passed: { do: 'goto', stageId: 'done' },
+          failed: { do: 'goto', stageId: 'exec' },
+        },
       }),
       sStage({ id: 'done', position: 2 }),
     ])
@@ -464,7 +483,8 @@ describe('stage-machine 闸门（M11）', () => {
         position: 0,
         entryMode: 'agent',
         agentId: 'ag1',
-        gate: { maxFails: 1, onPassStageId: null, onFailStageId: null },
+        judge: { maxFails: 1 },
+        exits: {},
       }),
     ])
     const r = moveTask(
@@ -484,11 +504,14 @@ describe('stage-machine 闸门（M11）', () => {
 })
 
 describe('kernel 闸门目标缺失（脏投影）', () => {
-  it('闸门「通过时进入」指向已不存在的阶段：回退默认下一阶段', () => {
+  it('闸门「通过时进入」指向已不存在的阶段：原地停住，不猜去向', () => {
     const flow: WorkflowWithStages = {
       ...workflow(),
       stages: [
-        stage('s0', { gate: { maxFails: 2, onPassStageId: 'ghost', onFailStageId: null } }),
+        stage('s0', {
+          judge: { maxFails: 2 },
+          exits: { passed: { do: 'goto', stageId: 'ghost' } },
+        }),
         stage('s1'),
       ],
     }
@@ -498,14 +521,17 @@ describe('kernel 闸门目标缺失（脏投影）', () => {
       { type: 'RUN_SUCCEEDED', runId: 'r1', verdict: 'pass' },
       flow,
     )
-    expect(next.currentStageId).toBe('s1')
+    expect(next.currentStageId).toBe('s0')
   })
 
   it('闸门「未通过时进入」指向已不存在的阶段：原地累计次数，不重建 run', () => {
     const flow: WorkflowWithStages = {
       ...workflow(),
       stages: [
-        stage('s0', { gate: { maxFails: 3, onPassStageId: null, onFailStageId: 'ghost' } }),
+        stage('s0', {
+          judge: { maxFails: 3 },
+          exits: { failed: { do: 'goto', stageId: 'ghost' } },
+        }),
         stage('s1'),
       ],
     }
@@ -565,7 +591,10 @@ describe('stage-machine 内置阶段（M18）', () => {
   })
 
   it('显式配到「已阻塞」时按显式目标走（跳过规则只作用于缺省）', () => {
-    const explicit = stage('u1', { position: 1, onCompleteStageId: 'bs-blocked' })
+    const explicit = stage('u1', {
+      position: 1,
+      exits: { done: { do: 'goto', stageId: 'bs-blocked' } },
+    })
     expect(resolveNextStage(explicit, flow())?.id).toBe('bs-blocked')
   })
 
@@ -586,7 +615,11 @@ describe('stage-machine 去向与位置无关（M29 删掉 exitsForward）', () 
   /** s2 显式把「完成后进入」指回 s0：回路是合法边，不再被判成「不向前」 */
   const backFlow = (): WorkflowWithStages => ({
     ...workflow(),
-    stages: [stage('s0'), stage('s1'), stage('s2', { entryMode: 'user', onCompleteStageId: 's0' })],
+    stages: [
+      stage('s0'),
+      stage('s1'),
+      stage('s2', { entryMode: 'user', exits: { done: { do: 'goto', stageId: 's0' } } }),
+    ],
   })
 
   it('成功后显式去更前的阶段：照样落过去', () => {
@@ -605,7 +638,11 @@ describe('stage-machine 去向与位置无关（M29 删掉 exitsForward）', () 
   it('打回显式配到更前的阶段：照样落过去', () => {
     const flow: WorkflowWithStages = {
       ...workflow(),
-      stages: [stage('s0'), stage('s1', { onRejectStageId: 's0' }), stage('s2')],
+      stages: [
+        stage('s0'),
+        stage('s1', { exits: { errored: { do: 'goto', stageId: 's0' } } }),
+        stage('s2'),
+      ],
     }
     const moved = moveTask(task('s1'), { type: 'RUN_FAILED', runId: 'r1' }, flow)
 

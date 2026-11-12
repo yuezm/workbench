@@ -129,8 +129,8 @@ export const sample = {
       // M18：自己添加的阶段 builtin 为 null；内置阶段由内核 / 启动补齐写成固定键
       builtin: null,
       agentId: null,
-      onCompleteStageId: null,
-      onRejectStageId: null,
+      exits: {},
+      judge: null,
       handoffs: [],
       subtaskStageId: null,
       onChildrenSettled: null,
@@ -139,7 +139,6 @@ export const sample = {
       acceptance: [],
       maxRounds: null,
       runTimeoutMs: null,
-      gate: null,
       ...overrides,
     }
   },

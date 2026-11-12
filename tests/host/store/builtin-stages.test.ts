@@ -71,14 +71,13 @@ function stageRow(
     entryMode: 'none',
     builtin: null,
     agentId: null,
-    onCompleteStageId: null,
-    onRejectStageId: null,
+    exits: {},
+    judge: null,
     handoffs: [],
     subtaskStageId: null,
     onChildrenSettled: null,
     spawnPolicy: null,
     instructions: '',
-    gate: null,
     ...overrides,
   }
 }
@@ -218,10 +217,9 @@ describe('store.ensureBuiltinStages：老工作流按名认领 / 补建 / 重排
       id: 'st-blocked',
       entryMode: 'none',
       agentId: null,
-      onCompleteStageId: null,
-      onRejectStageId: null,
+      exits: {},
+      judge: null,
       instructions: '',
-      gate: null,
     })
   })
 

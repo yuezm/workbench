@@ -87,8 +87,8 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             // M18：自己添加的阶段 builtin 为 null
             builtin: null,
             agentId: null,
-            onCompleteStageId: null,
-            onRejectStageId: null,
+            exits: {},
+            judge: null,
             handoffs: [],
             subtaskStageId: null,
             onChildrenSettled: null,
@@ -97,7 +97,6 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             acceptance: [],
             maxRounds: null,
             runTimeoutMs: null,
-            gate: null,
           },
           {
             id: 'st-2',
@@ -107,8 +106,8 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             entryMode: 'user',
             builtin: null,
             agentId: null,
-            onCompleteStageId: null,
-            onRejectStageId: null,
+            exits: {},
+            judge: null,
             handoffs: [],
             subtaskStageId: null,
             onChildrenSettled: null,
@@ -117,7 +116,6 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
             acceptance: [],
             maxRounds: null,
             runTimeoutMs: null,
-            gate: null,
           },
         ],
       },
@@ -172,7 +170,7 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
       input: {
         name: '流程',
         stages: [
-          { name: '阶段 1', entryMode: 'none', onCompleteIndex: 2 },
+          { name: '阶段 1', entryMode: 'none', exits: [{ on: 'done', do: 'goto', stageIndex: 2 }] },
           { name: '阶段 2', entryMode: 'none' },
           { name: '阶段 3', entryMode: 'none' },
         ],
@@ -188,7 +186,11 @@ describe('dispatch：事实 + 投影 + 元信息原子提交', () => {
     expect(
       store
         .query('workflows.all')[0]
-        ?.stages.map((stage) => [stage.id, stage.position, stage.onCompleteStageId]),
+        ?.stages.map((stage) => [
+          stage.id,
+          stage.position,
+          stage.exits.done?.do === 'goto' ? stage.exits.done.stageId : null,
+        ]),
     ).toEqual([
       ['st-1', 0, 'st-3'],
       ['st-2', 1, null],

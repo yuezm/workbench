@@ -28,7 +28,12 @@ const workflowInput: WorkflowInput = {
   description: '',
   stages: [
     { name: '待办', entryMode: 'none' },
-    { name: '实现', entryMode: 'agent', agentId: 'ag1', onCompleteIndex: 0, onRejectIndex: null },
+    {
+      name: '实现',
+      entryMode: 'agent',
+      agentId: 'ag1',
+      exits: [{ on: 'done', do: 'goto', stageIndex: 0 }],
+    },
   ],
 }
 

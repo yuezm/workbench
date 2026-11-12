@@ -1,3 +1,4 @@
+import { legacyExits } from '../../kernel/workflow/stage-machine'
 /**
  * v2 存量导入：把旧表写成 `snapshot.imported` 事实根，之后日志即唯一权威。
  *
@@ -361,8 +362,12 @@ function readLegacyEntityRows(
     // M18：v2 存量没有内置阶段——四个内置阶段由启动补齐按名认领 / 补建。
     builtin: null,
     agentId: row.agent_id,
-    onCompleteStageId: row.on_complete_stage_id,
-    onRejectStageId: row.on_reject_stage_id,
+    // M32：v2 存量按旧四列归一（DB 行是 snake_case，先转成旧字段名）；缺的缺省在决策时补
+    exits: legacyExits({
+      onCompleteStageId: row.on_complete_stage_id ?? null,
+      onRejectStageId: row.on_reject_stage_id ?? null,
+    }),
+    judge: null,
     // M29：v2 存量没有派单概念——清单为空。
     handoffs: [],
     // M9：v2 存量没有阶段说明——按空串归一（与投影层 `normalizeStage` 一致）。
@@ -373,8 +378,6 @@ function readLegacyEntityRows(
     maxRounds: null,
     // M26：v2 存量没有阶段超时概念——按「用全局缺省」归一。
     runTimeoutMs: null,
-    // M11：v2 存量没有闸门概念——按「不是闸门」归一。
-    gate: null,
   }))
 
   const tasks = (

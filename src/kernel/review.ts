@@ -42,11 +42,16 @@ export interface ReviewOutcome {
 
 const EMPTY: ReviewOutcome = { facts: [], blocked: false }
 
-/** 该报告的所属阶段是否把任务打到 `stageId`（`gate.onFailStageId` / `onRejectStageId`）。 */
+/** 该报告的所属阶段是否把任务打到 `stageId`：看出口表的 `failed` / `errored` 是不是指过去。 */
 export function reportTargetsStage(view: View, report: ReviewReport, stageId: Id): boolean {
   const stage = view.stages.get(report.stageId)
   if (stage === undefined) return false
-  return stage.gate?.onFailStageId === stageId || stage.onRejectStageId === stageId
+  const failed = stage.exits.failed
+  const errored = stage.exits.errored
+  return (
+    (failed?.do === 'goto' && failed.stageId === stageId) ||
+    (errored?.do === 'goto' && errored.stageId === stageId)
+  )
 }
 
 /** 仍为 `open` 的条目（覆盖判定的唯一依据）。 */

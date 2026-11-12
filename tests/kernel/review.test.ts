@@ -28,8 +28,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   position: 0,
   entryMode: 'agent',
   agentId: 'ag-1',
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   instructions: '',
   ...over,
@@ -154,7 +154,7 @@ const view = (over: Partial<View> = {}): View => ({
   seq: 1,
   workflows: new Map(),
   stages: new Map([
-    ['st-review', stage({ onRejectStageId: 'st-fix' })],
+    ['st-review', stage({ exits: { errored: { do: 'goto', stageId: 'st-fix' } } })],
     ['st-fix', stage({ id: 'st-fix', name: '修复' })],
   ]),
   agents: new Map(),
@@ -195,7 +195,7 @@ describe('kernel/review 定位（按阶段图，不按时间序）', () => {
       stages: new Map([
         [
           'st-review',
-          stage({ gate: { maxFails: 3, onPassStageId: null, onFailStageId: 'st-fix' } }),
+          stage({ judge: { maxFails: 3 }, exits: { failed: { do: 'goto', stageId: 'st-fix' } } }),
         ],
         ['st-fix', stage({ id: 'st-fix', name: '修复' })],
       ]),

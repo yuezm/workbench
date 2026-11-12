@@ -25,8 +25,8 @@ function wf(id: string, name: string, stages = 0, description = ''): WorkflowWit
       position: i,
       entryMode: 'none' as const,
       agentId: null,
-      onCompleteStageId: null,
-      onRejectStageId: null,
+      exits: {},
+      judge: null,
       handoffs: [],
     })),
   }
@@ -491,9 +491,12 @@ describe('WorkflowManager', () => {
     expect(
       command.input.stages.find((stage) => stage.name === release.stages[0].name),
     ).toMatchObject({ instructions: release.stages[0].instructions })
-    // 阶段名在完整数组的下标里解析：灰度是闸门，未通过时指向「发布准备」而不是自己
+    // 阶段名在完整数组的下标里解析：灰度是闸门（判定者 + 出口表），未通过时指向「发布准备」
     const gray = command.input.stages[names.indexOf('灰度发布')]
-    expect(gray.gate?.onFailIndex).toBe(names.indexOf('发布准备'))
+    expect(gray.judge).toEqual({ maxFails: 2 })
+    expect(gray.exits).toEqual([
+      { on: 'failed', do: 'goto', stageIndex: names.indexOf('发布准备') },
+    ])
   })
 
   it('阶段指标（M23）：有运行数据时按阶段展示轮次 / 降级 / 问人 / 人评；全 0 时不显示', async () => {

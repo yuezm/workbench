@@ -282,7 +282,7 @@ function stageTransitionFacts(
       id: env.nextId('task-comment'),
       taskId: task.id,
       author: 'agent',
-      text: degradedCommentText(current.name, current.gate?.maxFails),
+      text: degradedCommentText(current.name, current.judge?.maxFails),
       createdAt: now,
     }
     return [hostDraft('task.comment_added', { comment }, now)]

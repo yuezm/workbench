@@ -66,8 +66,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   position: 0,
   entryMode: 'agent',
   agentId: 'ag-1',
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   ...over,
 })

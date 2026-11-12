@@ -35,8 +35,8 @@ const stage = (
   position,
   entryMode: 'none',
   agentId: null,
-  onCompleteStageId: null,
-  onRejectStageId: null,
+  exits: {},
+  judge: null,
   handoffs: [],
   ...over,
 })
@@ -69,37 +69,32 @@ const handoff = (over: Partial<StageHandoff> = {}): StageHandoff => ({
 
 describe('handoffGuardOf 触发条件', () => {
   it('人工拖动与完成任务恒为 manual', () => {
-    expect(handoffGuardOf({ gate: null }, { kind: 'manual' })).toBe('manual')
+    expect(handoffGuardOf({ judge: null }, { kind: 'manual' })).toBe('manual')
     // 闸门阶段的人工拖动同样是 manual：人拖走就是人定的去向
-    expect(
-      handoffGuardOf(
-        { gate: { maxFails: 3, onPassStageId: null, onFailStageId: null } },
-        { kind: 'manual' },
-      ),
-    ).toBe('manual')
+    expect(handoffGuardOf({ judge: { maxFails: 3 } }, { kind: 'manual' })).toBe('manual')
   })
 
   it('取消不派单', () => {
-    expect(handoffGuardOf({ gate: null }, { kind: 'run', status: 'cancelled' })).toBeNull()
+    expect(handoffGuardOf({ judge: null }, { kind: 'run', status: 'cancelled' })).toBeNull()
   })
 
   it('执行出错 → errored（与业务过没过无关）', () => {
-    expect(handoffGuardOf({ gate: null }, { kind: 'run', status: 'failed' })).toBe('errored')
+    expect(handoffGuardOf({ judge: null }, { kind: 'run', status: 'failed' })).toBe('errored')
     // 判定阶段崩了也走 errored：崩了不是「没通过」
     expect(
       handoffGuardOf(
-        { gate: { maxFails: 3, onPassStageId: null, onFailStageId: null } },
+        { judge: { maxFails: 3 } },
         { kind: 'run', status: 'failed', verdict: 'fail' },
       ),
     ).toBe('errored')
   })
 
   it('非判定阶段跑完 → done', () => {
-    expect(handoffGuardOf({ gate: null }, { kind: 'run', status: 'succeeded' })).toBe('done')
+    expect(handoffGuardOf({ judge: null }, { kind: 'run', status: 'succeeded' })).toBe('done')
   })
 
   it('判定阶段：pass → passed，fail → failed，没给结论 → 不派单', () => {
-    const gated = { gate: { maxFails: 3, onPassStageId: null, onFailStageId: null } }
+    const gated = { judge: { maxFails: 3 } }
 
     expect(handoffGuardOf(gated, { kind: 'run', status: 'succeeded', verdict: 'pass' })).toBe(
       'passed',
@@ -111,7 +106,7 @@ describe('handoffGuardOf 触发条件', () => {
   })
 
   it('闸门预算耗尽放行 → passed（放行也算通过）', () => {
-    const gated = { gate: { maxFails: 1, onPassStageId: null, onFailStageId: null } }
+    const gated = { judge: { maxFails: 1 } }
 
     expect(
       handoffGuardOf(gated, {
@@ -204,7 +199,7 @@ describe('legacyHandoffs 老事实归一', () => {
     ])
     expect(
       legacyHandoffs({
-        gate: { maxFails: 3 },
+        judge: { maxFails: 3 },
         handoffWorkflowId: 'wf-b',
         handoffStageId: null,
       }),

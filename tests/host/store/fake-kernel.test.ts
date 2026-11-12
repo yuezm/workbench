@@ -103,9 +103,21 @@ describe('defaultDecide：工作流', () => {
           name: '研发',
           description: 'd',
           stages: [
-            { name: '待办', entryMode: 'none', onCompleteIndex: null, onRejectIndex: undefined },
-            { name: '执行', entryMode: 'agent', agentId: 'ag-1', onCompleteIndex: 0 },
-            { name: '审核', entryMode: 'user', onCompleteIndex: 99, onRejectIndex: 1 },
+            { name: '待办', entryMode: 'none' },
+            {
+              name: '执行',
+              entryMode: 'agent',
+              agentId: 'ag-1',
+              exits: [{ on: 'done', do: 'goto', stageIndex: 0 }],
+            },
+            {
+              name: '审核',
+              entryMode: 'user',
+              exits: [
+                { on: 'done', do: 'goto', stageIndex: 99 },
+                { on: 'errored', do: 'goto', stageIndex: 1 },
+              ],
+            },
           ],
         },
       }),
@@ -133,10 +145,11 @@ describe('defaultDecide：工作流', () => {
       ['stage-2', 1, '执行', 'ag-1'],
       ['stage-3', 2, '审核', null],
     ])
-    expect(stages.map((stage) => [stage.onCompleteStageId, stage.onRejectStageId])).toEqual([
-      [null, null],
-      ['stage-1', null],
-      [null, 'stage-2'],
+    expect(stages.map((stage) => [stage.exits.done, stage.exits.errored])).toEqual([
+      [undefined, undefined],
+      [{ do: 'goto', stageId: 'stage-1' }, undefined],
+      // 99 越界 → 不落 goto（校验会先拒，这里只看映射）
+      [undefined, { do: 'goto', stageId: 'stage-2' }],
     ])
   })
 

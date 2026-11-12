@@ -247,7 +247,12 @@ export function RuleDialog({
             </p>
           )}
 
-          <div className="flex flex-wrap items-end gap-3">
+          {/*
+            这一行用 `items-start`，不用 `items-end`：`Field` 是 flex-col 整块，名称字段
+            多一行 hint（+ 可能的错误行），触发方式没有；底对齐会把「触发方式」整块压到
+            与 hint 底边齐平，标签和下拉都低一行——肉眼就是两列没对齐。
+          */}
+          <div className="flex flex-wrap items-start gap-3">
             <Field
               label="规则名称"
               required
@@ -265,7 +270,7 @@ export function RuleDialog({
                 }}
               />
             </Field>
-            <Field label="触发方式">
+            <Field label="触发方式" className="w-40">
               <Select
                 value={kind}
                 onValueChange={(value) => {

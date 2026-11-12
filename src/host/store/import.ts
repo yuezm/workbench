@@ -272,6 +272,7 @@ function toRunRow(row: LegacyRunRow): RunRow {
     notBefore: null,
     deadlineAt: null,
     cancelRequested: false,
+    deliverables: null,
     startedAt: row.started_at,
     endedAt: row.ended_at,
     createdAt: row.created_at,

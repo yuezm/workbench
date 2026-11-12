@@ -69,6 +69,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
   notBefore: null,
   deadlineAt: null,
   cancelRequested: false,
+  deliverables: null,
   ...over,
 })
 

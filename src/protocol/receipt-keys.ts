@@ -27,6 +27,7 @@ export const RECEIPT_KEYS = [
   'notes',
   'verdict',
   'checks',
+  'deliverables',
   'findings',
   'addresses',
   'acceptance',
@@ -82,6 +83,11 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
     text: '闸门证据：实际执行过的命令与退出码，`verdict` 为 `pass` 时每条 `exitCode` 必须是 0。',
     shape: '[{"cmd":"pnpm check","exitCode":0}]',
   },
+  deliverables: {
+    text: '阶段交付物：交给下游的坐标（分支 / 基线 / 提交 / 文件 / 门禁）。没有产出的项省略或写 null，别把过程写进来。',
+    shape:
+      '{"branch":"feat/x","base":"develop","commits":["57be895"],"files":["src/a.ts"],"gates":[{"cmd":"pnpm check","exitCode":0}]}',
+  },
   findings: {
     text: '评审待改项。`requiredAction` 写成「复跑什么、看到什么算修好」。',
     shape:
@@ -100,7 +106,7 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
 
 /** 条数与字长上限（一次说清，不散落在各键文案里）。 */
 export const RECEIPT_LIMITS_LINE =
-  '上限：`ask` / `notices` / `resolves` / `events` / `notes` 各 100 项，`findings` / `addresses` 各 200 项，`spawn` 32 项，`checks` 32 条，`acceptance` 12 条，`options` 最多 20 项；`title` ≤200、`text` / `evidence` ≤2000、`summary` ≤200、`claim` / `requiredAction` / `note` ≤500、`key` ≤32 字。'
+  '上限：`ask` / `notices` / `resolves` / `events` / `notes` 各 100 项，`findings` / `addresses` 各 200 项，`spawn` 32 项，`checks` 32 条，`deliverables` 的 `commits` 20 项 / `files` 40 项 / `gates` 32 条，`acceptance` 12 条，`options` 最多 20 项；`title` ≤200、`text` / `evidence` ≤2000、`summary` ≤200、`claim` / `requiredAction` / `note` ≤500、`key` ≤32 字。'
 
 /**
  * 任何阶段都可能用到的出口（不含阶段专属的 `notes` / `verdict` / `checks` /

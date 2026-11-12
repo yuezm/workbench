@@ -50,7 +50,7 @@ export type Iso = string
  * M18：工作流内置四个阶段（`workflow_stages.builtin` 投影列）——老库的列一旦补出来，
  * 启动补齐按名认领 / 补建内置阶段，所以这里递增以触发一次重建。
  */
-export const KERNEL_VERSION = 'M26.0.0'
+export const KERNEL_VERSION = 'M28.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

@@ -115,6 +115,37 @@ export function hasThreadHistory(view: View, thread: ThreadRow): boolean {
   )
 }
 
+/** 交付物行里最多列几个文件路径（再多只给个数；路径本身是坐标，不截断免得失真） */
+const DELIVERABLE_FILE_HINTS = 4
+
+/**
+ * 交付物行（M28）：把上一轮声明的分支 / 基线 / 提交 / 文件 / 门禁压成一行。
+ *
+ * 没有声明时返回空数组——整行消失，没写 `deliverables` 的历史轮次提示词逐字不变。
+ * 下游阶段（合并 / 归档 / 复查）据此直接定位产物，不必再 `git log` / `git worktree list`。
+ * 文件给前几条路径而不是只给个数：这段的目的就是「不用再考古」。
+ */
+function deliverableLine(run: RunRow): string[] {
+  const items = run.deliverables
+  if (items === null) return []
+  const parts: string[] = []
+  if (items.branch !== null) parts.push(`分支 ${items.branch}`)
+  if (items.base !== null) parts.push(`基线 ${items.base}`)
+  if (items.commits.length > 0) parts.push(`提交 ${items.commits.join(' ')}`)
+  if (items.files.length > 0) {
+    const shown = items.files.slice(0, DELIVERABLE_FILE_HINTS).join(' ')
+    parts.push(
+      items.files.length <= DELIVERABLE_FILE_HINTS
+        ? `文件 ${shown}`
+        : `文件 ${shown} 等 ${items.files.length} 个`,
+    )
+  }
+  if (items.gates.length > 0) {
+    parts.push(`门禁 ${items.gates.map((gate) => `${gate.cmd}=${gate.exitCode}`).join(' ')}`)
+  }
+  return parts.length === 0 ? [] : [`交付物：${parts.join(', ')}`]
+}
+
 /**
  * 最近一轮产出段：最近一条终态 stage run 的归属 + 正文摘要 + 产物绝对路径。
  *
@@ -139,6 +170,7 @@ function precedingBlock(view: View, thread: ThreadRow): string {
     `结束：${run.endedAt ?? run.createdAt}`,
     // 没配产物目录时这一行不出现：老路径的提示词保持逐字不变
     ...(artifact === null ? [] : [`产物：${artifact}`]),
+    ...deliverableLine(run),
   ].join('｜')
   const body = truncateBlock(
     run.output.trim() === '' ? (run.error ?? '（无输出）') : run.output,

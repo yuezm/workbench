@@ -6,11 +6,13 @@ import type {
   RunStatus,
   RunUsage,
 } from '../../../../../protocol/entities'
+import { permissionModeOfAccess } from '../../../../../protocol/entities'
 import type { TaskComment } from '../../../../../protocol/task-comment'
 import { Button } from '../../../components/ui/button'
 import { FormError } from '../../../components/ui/form-error'
 import { cn } from '../../../lib/cn'
 import { useKernelViewState } from '../../../shell/useKernelView'
+import { PERMISSION_LABEL } from './AgentDialog'
 
 /** 工具事件内容的展示截断长度 */
 const TOOL_TEXT_MAX = 120
@@ -285,6 +287,11 @@ function RunBlock({
           {STATUS_LABEL[run.status]}
         </span>
         <span className="tabular-nums">{run.startedAt ?? run.createdAt}</span>
+        {/* 本轮实际权限：闸门阶段由内核抬到「完整访问」，与智能体上配的模式可以不一致，
+            所以这里给的是 run 的实际值而不是配置值（事后复核要的正是「这轮跑成了什么」） */}
+        <span className="tabular-nums">
+          权限 {PERMISSION_LABEL[permissionModeOfAccess(run.access)]}
+        </span>
         {run.durationMs !== null && (
           <span className="tabular-nums">耗时 {formatDuration(run.durationMs)}</span>
         )}

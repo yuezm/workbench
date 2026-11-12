@@ -85,6 +85,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
   notBefore: null,
   deadlineAt: null,
   cancelRequested: false,
+  deliverables: null,
   ...over,
 })
 
@@ -422,6 +423,7 @@ describe('kernel/decide card.answer 回答与续接', () => {
       leaseUntil: null,
       deadlineAt: null,
       cancelRequested: false,
+      deliverables: null,
       prompt: answerPrompt([answered]),
     })
     expect(queuedRun(decision).prompt).toBe(
@@ -626,6 +628,7 @@ describe('kernel/decide run.receipt later 约时间复查', () => {
       leaseUntil: null,
       deadlineAt: null,
       cancelRequested: false,
+      deliverables: null,
       prompt: laterPrompt(),
     })
     expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(false)

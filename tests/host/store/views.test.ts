@@ -1738,3 +1738,27 @@ describe('queryView：阶段验收列的空串归一（M20 老行）', () => {
     expect(stages?.find((item) => item.id === 'st-legacy')?.acceptance).toEqual([])
   })
 })
+
+describe('runs.deliverables（M28：JSON 列往返）', () => {
+  it('写入时序列化、读回时还原成对象', () => {
+    const db = createMemoryDb()
+    const run = sample.run({
+      id: 'run-deliverables',
+      // 外键列全空：本用例只验 JSON 列往返，不建整套任务/阶段/智能体世界
+      taskId: null,
+      stageId: null,
+      agentId: null,
+      runtimeId: null,
+      deliverables: {
+        branch: 'feat/x',
+        base: 'develop',
+        commits: ['57be895'],
+        files: ['src/a.ts'],
+        gates: [{ cmd: 'pnpm check', exitCode: 0 }],
+      },
+    })
+    createProjectionWriter(db).apply({ table: 'runs', key: run.id, row: run }, SAMPLE_AT)
+    const view = loadView(db, ['runs'])
+    expect(view.runs.get(run.id)?.deliverables).toEqual(run.deliverables)
+  })
+})

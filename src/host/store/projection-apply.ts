@@ -115,6 +115,7 @@ const RUN_FIELDS: ReadonlyArray<readonly [keyof RunRow, string]> = [
   ['notBefore', 'not_before'],
   ['deadlineAt', 'deadline_at'],
   ['cancelRequested', 'cancel_requested'],
+  ['deliverables', 'deliverables_json'],
   ['startedAt', 'started_at'],
   ['endedAt', 'ended_at'],
   ['createdAt', 'created_at'],
@@ -190,6 +191,7 @@ const normalizeRun = (run: RunRow): RunRow => ({
   notBefore: run.notBefore ?? null,
   deadlineAt: run.deadlineAt ?? null,
   cancelRequested: run.cancelRequested ?? false,
+  deliverables: run.deliverables ?? null,
   startedAt: run.startedAt ?? null,
   endedAt: run.endedAt ?? null,
   createdAt: run.createdAt,
@@ -202,6 +204,10 @@ const runValue = (field: keyof RunRow, run: RunRow): SQLInputValue => {
       return run.usage === null ? null : JSON.stringify(run.usage)
     case 'eventIds':
       return JSON.stringify(run.eventIds)
+    case 'deliverables':
+      return run.deliverables === null || run.deliverables === undefined
+        ? null
+        : JSON.stringify(run.deliverables)
     case 'cancelRequested':
       return run.cancelRequested ? 1 : 0
     default:

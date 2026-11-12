@@ -387,6 +387,7 @@ describe('decide 回执派生事件命中规则', () => {
       notBefore: null,
       deadlineAt: '2026-11-05T10:00:00.000Z',
       cancelRequested: false,
+      deliverables: null,
       startedAt: CREATED,
       endedAt: null,
       createdAt: CREATED,

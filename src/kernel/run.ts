@@ -10,6 +10,7 @@
  * 各自的入队 seq，回退到 `createdAt` + `id` 保持稳定顺序。
  */
 import type { GateVerdict, RunRow, RunTerminalStatus, Runtime } from '../protocol/entities'
+import { normalizeDeliverables } from '../protocol/entities'
 import type { Receipt, RunHostSettledInput } from '../protocol/inputs'
 import type { Actor, FactDraft, Id, Iso, Limits, View } from './types'
 
@@ -211,6 +212,13 @@ export function settledRun(run: RunRow, receipt: Receipt, now: Iso): SettledRun 
     leaseId: null,
     leaseUntil: null,
     deadlineAt: null,
+    // M28：本轮回执声明的交付物（没声明就保留上一轮的值，续接轮不必重复声明）。
+    // 回执侧允许省略项，落库前补齐——下游（线程上下文）按五项都在读，不能让
+    // `{branch}` 这种合法形状把自己的 `items.commits.length` 打成 undefined。
+    deliverables:
+      receipt.deliverables === undefined
+        ? (run.deliverables ?? null)
+        : normalizeDeliverables(receipt.deliverables),
     ...(receipt.verdict === undefined ? {} : { verdict: receipt.verdict }),
   }
 }

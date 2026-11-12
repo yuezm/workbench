@@ -211,6 +211,7 @@ export const sample = {
       notBefore: null,
       deadlineAt: null,
       cancelRequested: false,
+      deliverables: null,
       ...overrides,
     }
   },

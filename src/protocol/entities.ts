@@ -732,6 +732,60 @@ export interface RunRow extends Omit<Run, 'taskId'> {
   deadlineAt: string | null
   /** 已请求取消（`run.cancel_requested`），宿主管完终止流程后落终态 */
   cancelRequested: boolean
+  /**
+   * 阶段交付物（M28）：本轮产出的分支 / 基线 / 提交 / 文件 / 门禁证据。
+   *
+   * 由回执 `deliverables` 写入（写前过 `normalizeDeliverables` 补齐缺项），没声明为 null。
+   * 加它的原因：实测合并阶段拿到的是散文（「分支 feat/x，提交 abc123」），它只能重新
+   * `git log` / `git worktree list` 考古（线程 `27787670` 的合并 run 前 40 帧里 12 次在做
+   * 这件事）。结构化后下游直接读。
+   */
+  deliverables: RunDeliverables | null
+}
+
+/** 交付物条目上限（校验与提示词裁剪共用）。 */
+export const DELIVERABLE_LIMITS = {
+  /** 提交数上限 */
+  maxCommits: 20,
+  /** 文件路径数上限 */
+  maxFiles: 40,
+  /** 单个字符串（分支名 / 路径 / 提交）的码点上限 */
+  maxChars: 200,
+} as const
+
+/** 阶段交付物（回执 `deliverables`，M28）。落库后的形态：五项都在，没有的写 null / 空数组。 */
+export interface RunDeliverables {
+  /** 工作分支；不产分支的阶段为 null */
+  branch: string | null
+  /** 基线（如 `develop` / 某个 commit） */
+  base: string | null
+  /** 提交列表（短 hash 即可） */
+  commits: string[]
+  /** 产出/改动文件（相对项目根） */
+  files: string[]
+  /** 门禁证据（命令 + 退出码），与闸门 `checks` 同形 */
+  gates: GateCheck[]
+}
+
+/**
+ * 回执侧的交付物输入：**只声明本阶段真产出的项**（README 与回执说明都这么写，
+ * 校验也允许 `{branch}` 这种形状），缺项由 `normalizeDeliverables` 补齐。
+ *
+ * 两者分开的原因：`RunDeliverables` 是落库形态，下游（线程上下文）按「五个字段都在」读；
+ * 若让输入类型兼任落库类型，省略项的 `undefined` 会一路穿到 `items.commits.length` 上——
+ * 一条合法回执就能把下游提示词构建打崩。
+ */
+export type RunDeliverablesInput = Partial<RunDeliverables>
+
+/** 回执输入 → 落库形态：缺项补 `null` / `[]`，其余按原值（校验已挡过形状）。 */
+export function normalizeDeliverables(input: RunDeliverablesInput): RunDeliverables {
+  return {
+    branch: input.branch ?? null,
+    base: input.base ?? null,
+    commits: [...(input.commits ?? [])],
+    files: [...(input.files ?? [])],
+    gates: [...(input.gates ?? [])],
+  }
 }
 
 /** 运行权限级别（协议帧 access 语义；由智能体的 `permissionMode` 映射而来）。 */

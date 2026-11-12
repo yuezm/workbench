@@ -75,6 +75,7 @@ export const taskReceiptKeys = (
 ): ReceiptKey[] => {
   const enabled = new Set<ReceiptKey>(BASE_RECEIPT_KEYS)
   if (task.threadId !== null) enabled.add('notes')
+  if (stage !== null) enabled.add('deliverables')
   if (stage?.gate != null) {
     enabled.add('verdict')
     enabled.add('checks')

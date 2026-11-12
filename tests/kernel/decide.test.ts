@@ -37,9 +37,11 @@ const LATER = '2026-01-02T00:00:00.000Z'
 const NOW = '2026-11-04T12:00:00.000Z'
 const ACTOR = { kind: 'owner', via: 'ui' } as const
 /** 阶段任务提示词末尾固定追加的回执块说明（M4 D4）。 */
-const HINT = receiptBlockHint(BASE_RECEIPT_KEYS)
+const HINT = receiptBlockHint(taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: null }))
 /** 建任务会开隐式线程：回执比普通阶段多一个 notes 出口（M24 裁剪） */
-const THREAD_HINT = receiptBlockHint(taskReceiptKeys(null, { threadId: 'th-1' }))
+const THREAD_HINT = receiptBlockHint(
+  taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: 'th-1' }),
+)
 /** 阶段任务提示词里的打断规则段（M19）。 */
 const INTERRUPT = interruptRuleText()
 /** 本轮正文段（M27）：挂线程的阶段才有。 */
@@ -225,6 +227,7 @@ const runRow = (over: Partial<RunRow> = {}): RunRow => ({
   notBefore: null,
   deadlineAt: LATER,
   cancelRequested: false,
+  deliverables: null,
   startedAt: NOW,
   endedAt: null,
   createdAt: CREATED,
@@ -811,6 +814,54 @@ describe('kernel/decide 智能体', () => {
         }),
       ],
     })
+  })
+
+  it('agent.create / agent.update：模型 id 归一（剥 [1m]、解 %2F），非法格式拒收', () => {
+    const created = decide(
+      view({ runtimes: [runtime()] }),
+      command({
+        type: 'agent.create',
+        input: {
+          name: '模型',
+          runtimeId: 'rt-1',
+          model: ' magpie/auto%2Fdeepseek-v4.1-flash[1m] ',
+        },
+      }),
+      NOW,
+      env(),
+    )
+    const createdAgent = (created.facts[0]?.payload as { agent: { model: string | null } }).agent
+    expect(createdAgent.model).toBe('magpie/auto/deepseek-v4.1-flash')
+
+    const updated = decide(
+      view({ agents: [agent()], runtimes: [runtime()] }),
+      command({ type: 'agent.update', id: 'ag-1', patch: { model: '  ' } }),
+      NOW,
+      env(),
+    )
+    expect((updated.facts[0]?.payload as { agent: { model: string | null } }).agent.model).toBe(
+      null,
+    )
+
+    const badCreate = decide(
+      view({ runtimes: [runtime()] }),
+      command({
+        type: 'agent.create',
+        input: { name: '坏模型', runtimeId: 'rt-1', model: 'nomodel' },
+      }),
+      NOW,
+      env(),
+    )
+    expect(badCreate.reject?.code).toBe('invalid_input')
+    expect(badCreate.reject?.message).toContain('模型格式不对')
+
+    const badUpdate = decide(
+      view({ agents: [agent()], runtimes: [runtime()] }),
+      command({ type: 'agent.update', id: 'ag-1', patch: { model: 'x/' } }),
+      NOW,
+      env(),
+    )
+    expect(badUpdate.reject?.code).toBe('invalid_input')
   })
 
   it('agent.update：目标不存在 / 运行时不存在 / 权限模式与并发非法都 reject', () => {
@@ -2046,6 +2097,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       notBefore: null,
       deadlineAt: null,
       cancelRequested: false,
+      deliverables: null,
       startedAt: null,
       endedAt: null,
       createdAt: NOW,
@@ -2471,7 +2523,7 @@ describe('kernel/prompt taskPrompt（无阶段名）', () => {
   it('stageName 为 null 时不拼阶段段', () => {
     expect(
       taskPrompt(agent({ systemPrompt: 'sys' }), task({ title: 'T', description: 'd' }), null),
-    ).toBe(`sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${HINT}`)
+    ).toBe(`sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS)}`)
   })
 })
 

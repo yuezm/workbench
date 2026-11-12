@@ -24,6 +24,7 @@ import type {
   PermissionMode,
   Project,
   Run,
+  RunDeliverables,
   RunErrorCode,
   RunEvent,
   RunPurpose,
@@ -230,6 +231,7 @@ interface RunDbRow {
   not_before: string | null
   deadline_at: string | null
   cancel_requested: number
+  deliverables_json: string | null
   started_at: string | null
   ended_at: string | null
   created_at: string
@@ -478,6 +480,8 @@ const mapRun = (row: RunDbRow): RunRow => ({
   notBefore: row.not_before,
   deadlineAt: row.deadline_at,
   cancelRequested: row.cancel_requested === 1,
+  deliverables:
+    row.deliverables_json === null ? null : (JSON.parse(row.deliverables_json) as RunDeliverables),
   startedAt: row.started_at,
   endedAt: row.ended_at,
   createdAt: row.created_at,
@@ -632,7 +636,7 @@ const RUN_COLUMNS = `id, purpose, task_id, stage_id, agent_id, runtime_id, conve
         event_ids_json, hops, turn, resume_session_id, thread_context_ref, queue_seq,
         status, prompt, output, error, error_code, exit_code, session_id, usage_json,
         duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at,
-        cancel_requested, started_at, ended_at, created_at`
+        cancel_requested, deliverables_json, started_at, ended_at, created_at`
 
 const readRuns = (db: DatabaseSync): RunRow[] =>
   (

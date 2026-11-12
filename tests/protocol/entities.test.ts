@@ -23,6 +23,7 @@ import {
   TASK_STATUSES,
   builtinStageKind,
   isBuiltinStageName,
+  normalizeDeliverables,
   permissionModeOfAccess,
   stageKindOf,
   type Access,
@@ -177,6 +178,8 @@ interface ExpectedIpcRun {
   sessionId: string | null
   usage: RunUsage | null
   durationMs: number | null
+  /** 本轮实际权限（M28：闸门阶段由内核抬到 full，所以它不等于智能体上配的 permissionMode） */
+  access: Access
   startedAt: string | null
   endedAt: string | null
   createdAt: string
@@ -290,6 +293,7 @@ const sampleRun = {
   sessionId: null,
   usage: null,
   durationMs: null,
+  access: 'edit',
   startedAt: null,
   endedAt: null,
   createdAt: '2026-01-01T00:00:00.000Z',
@@ -304,7 +308,6 @@ const sampleRunRow = {
   executorKey: 'dsh',
   threadId: null,
   cwd: 'D:/work',
-  access: 'edit',
   skill: null,
   promptRef: null,
   eventIds: [],
@@ -320,6 +323,7 @@ const sampleRunRow = {
   notBefore: null,
   deadlineAt: '2026-01-01T00:30:00.000Z',
   cancelRequested: false,
+  deliverables: null,
 } satisfies RunRow
 
 const sampleRunEvent = {
@@ -506,6 +510,7 @@ describe('protocol/entities', () => {
       'createdAt',
       'cwd',
       'deadlineAt',
+      'deliverables',
       'durationMs',
       'endedAt',
       'error',
@@ -541,13 +546,13 @@ describe('protocol/entities', () => {
     const runKeys = new Set(keysOf(sampleRun))
     const schedulingKeys = keysOf(sampleRunRow).filter((key) => !runKeys.has(key))
     expect(schedulingKeys).toEqual([
-      'access',
       'attempt',
       'attempts',
       'cancelRequested',
       'conversationId',
       'cwd',
       'deadlineAt',
+      'deliverables',
       'eventIds',
       'executorKey',
       'hops',
@@ -617,5 +622,37 @@ describe('protocol/entities 内置阶段（M18）', () => {
   it('isBuiltinStageName：去首尾空白后匹配，非内置名返回 false', () => {
     expect(isBuiltinStageName(' 已完成 ')).toBe(true)
     expect(isBuiltinStageName('开发')).toBe(false)
+  })
+})
+
+describe('normalizeDeliverables（回执输入 → 落库形态）', () => {
+  it('五项齐全时原样（数组是副本，不与入参共享引用）', () => {
+    const commits = ['57be895']
+    const normalized = normalizeDeliverables({
+      branch: 'feat/x',
+      base: 'develop',
+      commits,
+      files: ['src/a.ts'],
+      gates: [{ cmd: 'pnpm check', exitCode: 0 }],
+    })
+    expect(normalized).toEqual({
+      branch: 'feat/x',
+      base: 'develop',
+      commits: ['57be895'],
+      files: ['src/a.ts'],
+      gates: [{ cmd: 'pnpm check', exitCode: 0 }],
+    })
+    expect(normalized.commits).not.toBe(commits)
+  })
+
+  it('省略项 / null 一律补齐：null 保持 null，数组补空', () => {
+    expect(normalizeDeliverables({})).toEqual({
+      branch: null,
+      base: null,
+      commits: [],
+      files: [],
+      gates: [],
+    })
+    expect(normalizeDeliverables({ branch: null, commits: [] }).branch).toBeNull()
   })
 })

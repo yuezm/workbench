@@ -83,6 +83,7 @@ const probe: RuntimeProbe = {
  */
 const RUN_DEFAULTS = {
   purpose: 'stage',
+  deliverables: null,
   conversationId: null,
   ruleId: null,
   rulesVersion: 0,
@@ -108,6 +109,7 @@ const RUN_DEFAULTS = {
 } satisfies Pick<
   RunRow,
   | 'purpose'
+  | 'deliverables'
   | 'conversationId'
   | 'ruleId'
   | 'rulesVersion'

@@ -17,6 +17,7 @@ import { COMMAND_NAMES } from './commands'
 import type {
   GateCheck,
   GateVerdict,
+  RunDeliverablesInput,
   RunErrorCode,
   RunEventRow,
   RunTerminalStatus,
@@ -145,6 +146,16 @@ export interface Receipt {
   verdict?: GateVerdict
   /** 判定证据（M11）：闸门阶段应随 `verdict` 一起给，内核用退出码交叉校验结论 */
   checks?: GateCheck[]
+  /**
+   * 阶段交付物（M28）：本轮产出的分支 / 基线 / 提交 / 文件 / 门禁证据。
+   *
+   * 与 `checks` 分开：`checks` 是「判定用的证据」，`deliverables` 是「交给下游的坐标」。
+   * 合并 / 归档 / 复查阶段据此定位产物，不必重新 git 考古。
+   *
+   * 只声明本阶段真产出的项（省略 / null 都行）：内核落库前会用 `normalizeDeliverables`
+   * 补齐五项，下游按「五项都在」读。
+   */
+  deliverables?: RunDeliverablesInput
   /**
    * 评审清单（M14）：本轮评定出的待改项。给了就产一条 `review.reported`（`rev` 自动递增），
    * 修复阶段会按阶段图取到它并逐条要求回应；`id` 不接受自报，由内核拼 `<reportId>#<key>`。

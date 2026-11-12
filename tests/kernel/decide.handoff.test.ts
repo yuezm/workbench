@@ -162,6 +162,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
   notBefore: null,
   deadlineAt: '2026-11-05T09:30:00.000Z',
   cancelRequested: false,
+  deliverables: null,
   startedAt: NOW,
   endedAt: null,
   createdAt: NOW,

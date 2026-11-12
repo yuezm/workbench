@@ -259,6 +259,7 @@ export function resumedRun(run: RunRow, prompt: string, notBefore: Iso | null): 
     leaseUntil: null,
     deadlineAt: null,
     cancelRequested: false,
+    deliverables: null,
     prompt,
   }
 }

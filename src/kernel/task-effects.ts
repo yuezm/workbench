@@ -177,6 +177,7 @@ export function entryRunFacts(
           notBefore: null,
           deadlineAt: null,
           cancelRequested: false,
+          deliverables: null,
           startedAt: null,
           endedAt: null,
           createdAt: now,

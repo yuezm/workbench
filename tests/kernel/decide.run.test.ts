@@ -21,6 +21,7 @@ import type {
 import type { Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
 import type { ReviewReport } from '../../src/protocol/review'
 import { decide } from '../../src/kernel/decide'
+import { runAccessOf } from '../../src/kernel/task-effects'
 import {
   degradedCommentText,
   repairCommentText,
@@ -121,6 +122,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
   notBefore: null,
   deadlineAt: null,
   cancelRequested: false,
+  deliverables: null,
   ...over,
 })
 
@@ -2041,5 +2043,80 @@ describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
 
     const exhausted = repairCommentText(2, 3, ['覆盖每条验收标准'], true)
     expect(exhausted).toContain('已达本阶段轮次上限')
+  })
+})
+
+describe('kernel/runAccessOf（M28：闸门阶段至少 full）', () => {
+  it('闸门阶段强制 full；非闸门阶段按智能体权限折算', () => {
+    expect(runAccessOf({ gate: { maxFails: 1 } }, 'workspace-write')).toBe('full')
+    expect(runAccessOf({ gate: { maxFails: 1 } }, 'read-only')).toBe('full')
+    expect(runAccessOf({ gate: null }, 'workspace-write')).toBe('edit')
+    expect(runAccessOf({}, 'danger-full-access')).toBe('full')
+    expect(runAccessOf({ gate: null }, 'read-only')).toBe('read')
+  })
+})
+
+describe('kernel/decide 阶段交付物（M28）', () => {
+  it('回执 deliverables 落到终态 run 行；没声明时保留上一轮的值', () => {
+    const active = running()
+    const decision = receive(
+      view({ runs: [active] }),
+      'run-1',
+      receipt({
+        deliverables: {
+          branch: 'feat/x',
+          base: 'develop',
+          commits: ['57be895'],
+          files: ['src/a.ts', 'src/b.ts'],
+          gates: [{ cmd: 'pnpm check', exitCode: 0 }],
+        },
+      }),
+    )
+    const settled = (decision.facts[0]?.payload as { run: RunRow }).run
+    expect(settled.deliverables).toEqual({
+      branch: 'feat/x',
+      base: 'develop',
+      commits: ['57be895'],
+      files: ['src/a.ts', 'src/b.ts'],
+      gates: [{ cmd: 'pnpm check', exitCode: 0 }],
+    })
+
+    // 续接轮没重复声明：沿用上一轮（否则下游会以为交付物消失了）
+    const continued = receive(
+      view({
+        runs: [
+          running({
+            deliverables: {
+              branch: 'feat/x',
+              base: 'develop',
+              commits: [],
+              files: [],
+              gates: [],
+            },
+          }),
+        ],
+      }),
+      'run-1',
+      receipt({ deliverables: undefined }),
+    )
+    const kept = (continued.facts[0]?.payload as { run: RunRow }).run
+    expect(kept.deliverables?.branch).toBe('feat/x')
+  })
+
+  it('只声明一部分（校验允许的形状）也落成五项齐全：缺项补 null / 空数组', () => {
+    const decision = receive(
+      view({ runs: [running()] }),
+      'run-1',
+      // `{branch}` 是 validate 明确放行的形状；不补齐的话下游读 `commits.length` 会崩
+      receipt({ deliverables: { branch: 'feat/x' } }),
+    )
+    const settled = (decision.facts[0]?.payload as { run: RunRow }).run
+    expect(settled.deliverables).toEqual({
+      branch: 'feat/x',
+      base: null,
+      commits: [],
+      files: [],
+      gates: [],
+    })
   })
 })

@@ -209,6 +209,7 @@ CREATE TABLE IF NOT EXISTS ${name} (
   not_before TEXT,
   deadline_at TEXT,
   cancel_requested INTEGER NOT NULL DEFAULT 0,
+  deliverables_json TEXT,
   started_at TEXT,
   ended_at TEXT,
   created_at TEXT NOT NULL
@@ -545,6 +546,8 @@ export const RUN_M2_ADDED_COLUMNS = [
   'not_before',
   'deadline_at',
   'cancel_requested',
+  // M28：阶段交付物（`RunDeliverables` 的 JSON；null = 没声明）
+  'deliverables_json',
 ] as const
 
 /**
@@ -559,14 +562,14 @@ export function legacyRunsCopySql(targetTable: string): string {
     executor_key, thread_id, cwd, access, skill, prompt_ref, event_ids_json, hops, turn,
     resume_session_id, thread_context_ref, queue_seq, status, prompt, output, error, error_code,
     exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until,
-    not_before, deadline_at, cancel_requested, started_at, ended_at, created_at
+    not_before, deadline_at, cancel_requested, deliverables_json, started_at, ended_at, created_at
   )
   SELECT
     id, task_id, stage_id, agent_id, runtime_id, 'stage', NULL, NULL, 0,
     '', NULL, '', 'edit', NULL, NULL, '[]', 0, 1,
     NULL, NULL, 0, status, prompt, output, error, error_code,
     exit_code, session_id, usage_json, duration_ms, NULL, 1, 0, NULL,
-    NULL, NULL, 0, started_at, ended_at, created_at
+    NULL, NULL, 0, NULL, started_at, ended_at, created_at
   FROM runs`
 }
 

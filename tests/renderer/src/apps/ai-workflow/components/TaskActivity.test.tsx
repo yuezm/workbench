@@ -25,6 +25,7 @@ function makeRun(over: Partial<Run> = {}): Run {
     sessionId: null,
     usage: null,
     durationMs: null,
+    access: 'edit',
     startedAt: '2026-11-03T00:00:00Z',
     endedAt: '2026-11-03T00:01:00Z',
     createdAt: '2026-11-03T00:00:00Z',
@@ -87,6 +88,8 @@ describe('TaskActivity', () => {
     expect(list).toHaveTextContent('耗时 1.5s')
     expect(list).toHaveTextContent('退出码 0')
     expect(list).toHaveTextContent('输入 12 / 输出 34 tokens')
+    // 本轮实际权限（闸门阶段被内核抬到 full，所以展示的是 run.access 而不是智能体配置）
+    expect(list).toHaveTextContent('权限 可写')
     expect(screen.queryByText(/事件流加载失败/)).not.toBeInTheDocument()
   })
 

@@ -10,6 +10,7 @@ import type {
 import {
   ACCEPTANCE_LIMITS,
   AGENT_ENV_LIMITS,
+  DELIVERABLE_LIMITS,
   STAGE_ROUND_LIMITS,
   STAGE_TIMEOUT_LIMITS,
 } from '../../src/protocol/entities'
@@ -1336,5 +1337,47 @@ describe('validateCommand：规则目标项目（M10）', () => {
         cmd('rules.replace', { rules: [rule({ workflowId: 'wf-1', projectId: '' })] }),
       ),
     ).toBe('rules[0].to.projectId必填')
+  })
+})
+
+describe('receipt.deliverables（M28：阶段交付物形状）', () => {
+  const receipt = (extra: Record<string, unknown>): unknown => ({
+    type: 'run.receipt',
+    runId: 'run-1',
+    receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, ...extra },
+  })
+
+  it('全可选：只给 branch / 只给 commits 都合法；整体缺省也合法', () => {
+    expect(validateInput(receipt({})).ok).toBe(true)
+    expect(validateInput(receipt({ deliverables: { branch: 'feat/x' } })).ok).toBe(true)
+    expect(validateInput(receipt({ deliverables: { base: 'develop' } })).ok).toBe(true)
+    expect(validateInput(receipt({ deliverables: { commits: ['57be895'] } })).ok).toBe(true)
+    expect(validateInput(receipt({ deliverables: { files: ['src/a.ts'] } })).ok).toBe(true)
+    expect(
+      validateInput(receipt({ deliverables: { gates: [{ cmd: 'pnpm check', exitCode: 0 }] } })).ok,
+    ).toBe(true)
+  })
+
+  it('形状不对整块拒：非对象 / 超长 / 超条数 / 门禁条目畸形', () => {
+    expect(validateInput(receipt({ deliverables: 'feat/x' })).ok).toBe(false)
+    expect(validateInput(receipt({ deliverables: [] })).ok).toBe(false)
+    expect(
+      validateInput(
+        receipt({ deliverables: { branch: 'x'.repeat(DELIVERABLE_LIMITS.maxChars + 1) } }),
+      ).ok,
+    ).toBe(false)
+    expect(
+      validateInput(
+        receipt({
+          deliverables: {
+            commits: Array.from({ length: DELIVERABLE_LIMITS.maxCommits + 1 }, () => 'c'),
+          },
+        }),
+      ).ok,
+    ).toBe(false)
+    expect(validateInput(receipt({ deliverables: { files: [42] } })).ok).toBe(false)
+    expect(
+      validateInput(receipt({ deliverables: { gates: [{ cmd: 'x', exitCode: 1.5 }] } })).ok,
+    ).toBe(false)
   })
 })

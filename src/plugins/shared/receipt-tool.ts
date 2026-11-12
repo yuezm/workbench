@@ -51,6 +51,7 @@ const SCHEMA_OF: Record<(typeof RECEIPT_KEYS)[number], Record<string, unknown>> 
   notes: { type: 'array', items: { type: 'string' } },
   verdict: { type: 'string', enum: ['pass', 'fail'] },
   checks: { type: 'array', items: { type: 'object' } },
+  deliverables: { type: 'object' },
   findings: { type: 'array', items: { type: 'object' } },
   addresses: { type: 'array', items: { type: 'object' } },
   acceptance: { type: 'array', items: { type: 'object' } },

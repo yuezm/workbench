@@ -17,6 +17,7 @@ import {
   ENV_KEY_PATTERN,
   EXECUTOR_KEY_PATTERN,
   GATE_VERDICTS,
+  DELIVERABLE_LIMITS,
   ON_CHILDREN_SETTLED,
   PERMISSION_MODES,
   PROBE_STATES,
@@ -945,6 +946,34 @@ const checkGateCheck = (value: unknown, at: string): Check => {
 }
 
 /**
+ * 阶段交付物（M28）：`{ branch?, base?, commits?, files?, gates? }`。
+ *
+ * 全部可选（只声明本阶段真产出的项）；给了就按形状校验——它是下游定位产物的坐标，
+ * 「大概写写」会让合并阶段重新考古。`gates` 与闸门 `checks` 同形，直接复用条目校验。
+ */
+const checkDeliverables = (value: unknown): Check => {
+  if (value === undefined || value === null) return null
+  const at = 'receipt.deliverables'
+  const record = asRecord(value)
+  if (!record) return `${at} 必须是对象`
+  const name = (field: 'branch' | 'base'): Check =>
+    record[field] === undefined || record[field] === null
+      ? null
+      : optionalText(record[field], `${at}.${field}`, DELIVERABLE_LIMITS.maxChars)
+  return (
+    name('branch') ??
+    name('base') ??
+    checkList(record.commits, `${at}.commits`, DELIVERABLE_LIMITS.maxCommits, (item, where) =>
+      text(item, where, DELIVERABLE_LIMITS.maxChars),
+    ) ??
+    checkList(record.files, `${at}.files`, DELIVERABLE_LIMITS.maxFiles, (item, where) =>
+      text(item, where, DELIVERABLE_LIMITS.maxChars),
+    ) ??
+    checkList(record.gates, `${at}.gates`, COMMAND_LIMITS.gateChecks, checkGateCheck)
+  )
+}
+
+/**
  * 验收自评（M21）：`{ no, met, evidence? }`。`no` 是 1 基序号，越界由内核丢弃，
  * 这里只挡形状（非法条目整块会让回执被拒，所以校验放在条目级）。
  */
@@ -1046,6 +1075,8 @@ const checkReceipt = (value: unknown): Check => {
     optionalBoolean(receipt.resumeRejected, 'receipt.resumeRejected') ??
     optionalEnum(receipt.verdict, 'receipt.verdict', GATE_VERDICTS) ??
     checkList(receipt.checks, 'receipt.checks', COMMAND_LIMITS.gateChecks, checkGateCheck) ??
+    // M28 阶段交付物：可选；形状不对整块拒（它是下游定位产物的坐标，不能含糊）
+    checkDeliverables(receipt.deliverables) ??
     // M21 验收自评：逐条形状；越界序号由内核丢弃，缺项按未达处理
     checkList(
       receipt.acceptance,

@@ -211,10 +211,14 @@ vi.mock('electron', () => ({
   shell: mocks.shellMock,
 }))
 vi.mock('../../src/main/tray', () => ({ createTray: mocks.createTrayMock }))
-// 通知归属快捷方式会真的读写开始菜单：单测里换成 spy
+// 通知归属快捷方式会真的读写开始菜单：单测里换成 spy；窗口图标同理（真实现要 nativeImage）
 vi.mock('../../src/main/shell-integration', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/main/shell-integration')>()
-  return { ...actual, ensureNotificationShortcut: mocks.ensureShortcutMock }
+  return {
+    ...actual,
+    ensureNotificationShortcut: mocks.ensureShortcutMock,
+    windowIcon: (): undefined => undefined,
+  }
 })
 vi.mock('../../src/main/ipc', () => ({ registerIpcHandlers: mocks.registerIpcHandlersMock }))
 vi.mock('../../src/main/notify', () => ({ notify: mocks.notifyMock }))

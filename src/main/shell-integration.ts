@@ -20,7 +20,8 @@
  * 边界：只动同 AUMID 的快捷方式（别人家的一个都不碰）；非 Windows 直接返回；任何一步
  * 失败只留一条 warn，不阻断启动。
  */
-import { app, shell } from 'electron'
+import { app, nativeImage, shell } from 'electron'
+import type { NativeImage } from 'electron'
 import { existsSync, readdirSync, unlinkSync } from 'node:fs'
 import path from 'node:path'
 
@@ -37,6 +38,32 @@ export const APP_SHORTCUT_NAME = '工作台'
 export function windowIconPath(): string {
   const dir = app.isPackaged ? process.resourcesPath : path.join(app.getAppPath(), 'resources')
   return path.join(dir, process.platform === 'win32' ? 'icon.ico' : 'icon.png')
+}
+
+/**
+ * 窗口图标（给 `BrowserWindow.icon`）。
+ *
+ * **不给空图**：`nativeImage.createFromPath` 读不到文件时返回空图而不是抛错，把空图交给
+ * 窗口就是「任务栏一个空白图标」。所以读不到就返回 `undefined`，调用方索性不传——
+ * Windows 会退回 exe 内嵌图标（打包后本来就对），比空白好。
+ */
+export function windowIcon(): NativeImage | undefined {
+  const file = windowIconPath()
+  try {
+    const image = nativeImage.createFromPath(file)
+    return image.isEmpty() ? undefined : image
+  } catch {
+    // 图标文件损坏 / 权限不足：交给 exe 内嵌图标兜底
+    return undefined
+  }
+}
+
+/**
+ * 归属快捷方式的图标：打包态指向 exe 自己（图标已 rcedit 进 exe，不经文件系统，
+ * 装完挪目录也不会变空白）；开发态指向仓库里的 ico（exe 是 electron.exe，图标是 Electron 的）。
+ */
+function shortcutIcon(): string {
+  return app.isPackaged ? process.execPath : windowIconPath()
 }
 
 /** 快捷方式要写的字段（Electron `ShortcutDetails` 的子集） */
@@ -91,9 +118,9 @@ function readShortcut(file: string): Partial<ShortcutDetails> | null {
 }
 
 /** 写快捷方式：失败只留 warn（不影响通知本身照常弹） */
-function writeShortcut(file: string, details: ShortcutDetails, mode: 'create' | 'update'): void {
+function writeShortcut(file: string, details: ShortcutDetails): void {
   try {
-    if (!shell.writeShortcutLink(file, mode, details)) {
+    if (!shell.writeShortcutLink(file, 'create', details)) {
       console.warn(`[shell] 快捷方式写入被拒：${file}`)
     }
   } catch (error) {
@@ -112,7 +139,7 @@ export function ensureNotificationShortcut(programsDir?: string): void {
   const dir =
     programsDir ??
     path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')
-  const icon = windowIconPath()
+  const icon = shortcutIcon()
   const next: ShortcutDetails = {
     target: process.execPath,
     // 开发态必须带上 app 目录：不带就只会拉起一个空的 Electron（默认 app 打印
@@ -130,18 +157,15 @@ export function ensureNotificationShortcut(programsDir?: string): void {
     const current = readShortcut(file)
     // 只处理同 AUMID 的：它们才是本应用的归属入口
     if (current === null || current.appUserModelId !== APP_USER_MODEL_ID) continue
-    if (typeof current.target !== 'string' || !samePath(current.target, next.target)) {
-      // 残留（例如装过安装版后开发态那条 Electron.lnk）：任务栏图标与点通知都跟着它错
-      removeShortcut(file)
-      continue
-    }
-    if (sameShortcut(current, next)) continue
-    writeShortcut(file, next, 'update')
+    // 同一个 AUMID 只允许一条入口（Windows 按它解析任务栏图标与通知归属）：
+    // 指向别的 exe 的残留、以及 Electron 自己补的同 AUMID 条目都删掉，统一由保留下来的
+    // 那条「工作台.lnk」承担。留两条会让归属变得不确定，图标尤其容易空白。
+    removeShortcut(file)
   }
 
   const currentOwn = readShortcut(own)
   if (currentOwn === null || !sameShortcut(currentOwn, next)) {
-    writeShortcut(own, next, 'create')
+    writeShortcut(own, next)
   }
 }
 

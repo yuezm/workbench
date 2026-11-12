@@ -19,6 +19,8 @@ const {
   BrowserWindowMock,
   createTrayMock,
   ensureShortcutMock,
+  windowIconFn,
+  windowIconMock,
   registerIpcHandlersMock,
   createFactFeedMock,
   feedMock,
@@ -302,6 +304,8 @@ const {
     BrowserWindowMock,
     createTrayMock: vi.fn(),
     ensureShortcutMock: vi.fn(),
+    windowIconFn: vi.fn(),
+    windowIconMock: { isEmpty: () => false },
     registerIpcHandlersMock: vi.fn(),
     createFactFeedMock,
     feedMock,
@@ -358,7 +362,12 @@ vi.mock('../../src/main/tray', () => ({ createTray: createTrayMock }))
 // 通知归属快捷方式会真的读写开始菜单：单测里换成 spy，只断言「装配根什么时候修」
 vi.mock('../../src/main/shell-integration', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/main/shell-integration')>()
-  return { ...actual, ensureNotificationShortcut: ensureShortcutMock }
+  return {
+    ...actual,
+    ensureNotificationShortcut: ensureShortcutMock,
+    // 真实现要走 nativeImage：这里的 electron 是桩，直接给一张「已加载」的图
+    windowIcon: windowIconFn,
+  }
 })
 vi.mock('../../src/main/ipc', () => ({ registerIpcHandlers: registerIpcHandlersMock }))
 vi.mock('../../src/host/feed', () => ({ createFactFeed: createFactFeedMock }))
@@ -543,6 +552,8 @@ describe('主进程入口装配', () => {
     vi.clearAllMocks()
     windows.length = 0
     startupOrder.length = 0
+    // 窗口图标默认「加载成功」；要验空图标分支的用例自己 mockReturnValueOnce(undefined)
+    windowIconFn.mockReturnValue(windowIconMock)
     delete process.env['ELECTRON_RENDERER_URL']
     // 打包态探针：`process.resourcesPath` 只有 Electron 主进程里才有，单测里补一个
     Object.defineProperty(process, 'resourcesPath', {
@@ -635,7 +646,7 @@ describe('主进程入口装配', () => {
     // 通知归属：启动就修一遍开始菜单快捷方式（点通知才唤得回已运行的窗口）
     expect(ensureShortcutMock).toHaveBeenCalledTimes(1)
     // 窗口图标显式给：不传就走进程 exe 的资源，开发态（electron.exe）会显示 Electron 图标
-    expect(windows[0].options.icon).toBe(path.join('/app', 'resources', 'icon.ico'))
+    expect(windows[0].options.icon).toBe(windowIconMock)
 
     // 执行器装配：会话根注入 sdk，注册表把清单接成端口工厂
     expect(createSdkHostMock).toHaveBeenCalledWith(
@@ -1073,6 +1084,13 @@ describe('主进程入口装配', () => {
     windows.length = 0
     secondInstance()
     expect(windows).toHaveLength(1)
+  })
+
+  it('窗口图标读不到（空图）：不传 icon，交给 exe 内嵌图标兜底（绝不出现空白任务栏图标）', async () => {
+    windowIconFn.mockReturnValue(undefined)
+    await loadEntry()
+
+    expect(windows[0].options).not.toHaveProperty('icon')
   })
 
   it('开发服务器地址存在时加载 URL', async () => {

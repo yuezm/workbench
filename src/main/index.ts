@@ -49,7 +49,7 @@ import { registerIpcHandlers } from './ipc'
 // 系统通知原件（M4）：宿主不 import electron，由装配根注入 sdk（`sdk.notify` 的门控在 sdk 层）
 import { notify } from './notify'
 import { createTray } from './tray'
-import { APP_USER_MODEL_ID, ensureNotificationShortcut, windowIconPath } from './shell-integration'
+import { APP_USER_MODEL_ID, ensureNotificationShortcut, windowIcon } from './shell-integration'
 import { createSdkHost } from '../host/sdk-host'
 import { createExecutorRegistry } from '../host/executor-registry'
 import {
@@ -131,15 +131,17 @@ function isAllowedNavigation(url: string, devUrl: string | undefined): boolean {
 }
 
 function createWindow(): void {
+  // 窗口 / 任务栏图标：不传就走进程 exe 的资源，开发态是 electron.exe（显示 Electron 图标）。
+  // 读不到图标文件时 `windowIcon()` 返回 undefined，这里索性不传——Windows 退回 exe 内嵌图标，
+  // 绝不能把一个空图交给窗口（那就是任务栏一个空白图标）。
+  const icon = windowIcon()
   win = new BrowserWindow({
     width: 1100,
     height: 720,
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#16161e',
-    // 窗口 / 任务栏图标：不传就走进程 exe 的资源，开发态是 electron.exe（显示 Electron 图标）。
-    // 显式给一份，开发态与打包态一致（托盘图标另见 tray.ts）。
-    icon: windowIconPath(),
+    ...(icon === undefined ? {} : { icon }),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       // 渲染进程只经 preload 的三个动词访问内核：显式关掉 Node 集成，开启隔离与沙箱。

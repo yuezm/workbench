@@ -19,6 +19,9 @@ const mocks = vi.hoisted(() => {
     getAppPath: vi.fn((): string => 'C:/app'),
     getPath: (): string => 'C:/Users/me/AppData/Roaming',
   }
+  /** nativeImage 桩：默认给一张「加载成功」的图，用例按需改成空图 / 抛错 */
+  const image = { isEmpty: () => false }
+  const createFromPathMock = vi.fn((): unknown => image)
   const readShortcutLink = vi.fn((file: string): Record<string, unknown> => {
     const value = links.get(path.resolve(file))
     if (value === undefined || value === null) throw new Error('bad shortcut')
@@ -30,11 +33,12 @@ const mocks = vi.hoisted(() => {
       return true
     },
   )
-  return { links, written, appMock, readShortcutLink, writeShortcutLink }
+  return { links, written, appMock, image, createFromPathMock, readShortcutLink, writeShortcutLink }
 })
 
 vi.mock('electron', () => ({
   app: mocks.appMock,
+  nativeImage: { createFromPath: mocks.createFromPathMock },
   shell: {
     readShortcutLink: mocks.readShortcutLink,
     writeShortcutLink: mocks.writeShortcutLink,
@@ -46,6 +50,7 @@ import {
   APP_USER_MODEL_ID,
   ensureNotificationShortcut,
   sameShortcut,
+  windowIcon,
   windowIconPath,
 } from '../../src/main/shell-integration'
 
@@ -89,6 +94,23 @@ describe('main/shell-integration：窗口图标路径', () => {
     expect(windowIconPath()).toBe(
       path.join('C:', 'Program Files', 'Workbench', 'resources', 'icon.png'),
     )
+  })
+
+  it('windowIcon：读得到就给图', () => {
+    expect(windowIcon()).toBe(mocks.image)
+    expect(mocks.createFromPathMock).toHaveBeenCalledWith(
+      path.join('C:/app', 'resources', 'icon.ico'),
+    )
+  })
+
+  it('windowIcon：空图 / 读取抛错都返回 undefined（绝不给窗口一个空图 → 任务栏空白）', () => {
+    mocks.createFromPathMock.mockReturnValueOnce({ isEmpty: () => true })
+    expect(windowIcon()).toBeUndefined()
+
+    mocks.createFromPathMock.mockImplementationOnce(() => {
+      throw new Error('EACCES')
+    })
+    expect(windowIcon()).toBeUndefined()
   })
 })
 
@@ -163,7 +185,8 @@ describe('main/shell-integration：通知归属快捷方式', () => {
     dir = programsWith([`${APP_SHORTCUT_NAME}.lnk`])
     mocks.links.set(
       path.resolve(path.join(dir, `${APP_SHORTCUT_NAME}.lnk`)),
-      link({ args: '', appUserModelId: APP_USER_MODEL_ID }),
+      // 打包态的图标是 exe 自己（上一轮我们写进去的形态）
+      link({ args: '', icon: process.execPath }),
     )
     ensureNotificationShortcut(dir)
     expect(mocks.written).toHaveLength(0)
@@ -181,20 +204,43 @@ describe('main/shell-integration：通知归属快捷方式', () => {
     expect(existsSync(path.join(dir, 'Electron.lnk'))).toBe(false)
   })
 
-  it('同 AUMID、同 exe、但参数不对（Electron 自己补的那条）：就地修正成带 app 目录', () => {
+  it('同 AUMID 的第二条（Electron 首次弹通知时自己补的那条）：删掉，一个 AUMID 只留一条入口', () => {
     dir = programsWith(['Workbench.lnk'])
-    const file = path.resolve(path.join(dir, 'Workbench.lnk'))
-    mocks.links.set(file, link({ args: '' }))
+    mocks.links.set(path.resolve(path.join(dir, 'Workbench.lnk')), link({ args: '' }))
 
     ensureNotificationShortcut(dir)
 
-    const repair = mocks.written.find((entry) => entry.file === file)
-    expect(repair).toMatchObject({ mode: 'update' })
-    expect(repair?.details.args).toBe(`"C:/app"`)
-    // 顺带把我们自己的入口补上（目录里原来没有）
-    expect(mocks.written.map((entry) => path.basename(entry.file))).toContain(
+    expect(existsSync(path.join(dir, 'Workbench.lnk'))).toBe(false)
+    expect(mocks.written.map((entry) => path.basename(entry.file))).toEqual([
       `${APP_SHORTCUT_NAME}.lnk`,
-    )
+    ])
+  })
+
+  it('同 AUMID 且内容已一致的第二条：同样删掉（归属只由我们的入口承担）', () => {
+    dir = programsWith(['Workbench.lnk'])
+    mocks.links.set(path.resolve(path.join(dir, 'Workbench.lnk')), link({ args: `"C:/app"` }))
+
+    ensureNotificationShortcut(dir)
+
+    expect(existsSync(path.join(dir, 'Workbench.lnk'))).toBe(false)
+    expect(mocks.written.map((entry) => path.basename(entry.file))).toEqual([
+      `${APP_SHORTCUT_NAME}.lnk`,
+    ])
+  })
+
+  it('打包态的图标指向 exe 自己（不走文件系统，装完挪目录也不会空白）', () => {
+    mocks.appMock.isPackaged = true
+    Object.defineProperty(process, 'resourcesPath', { value: 'C:/res', configurable: true })
+    dir = programsWith([])
+
+    ensureNotificationShortcut(dir)
+
+    expect(mocks.written[0]?.details).toMatchObject({
+      target: process.execPath,
+      args: '',
+      icon: process.execPath,
+      iconIndex: 0,
+    })
   })
 
   it('别人的快捷方式（AUMID 不同）与坏链接都不碰', () => {
@@ -258,16 +304,14 @@ describe('main/shell-integration：通知归属快捷方式', () => {
   })
 
   it('同 AUMID 且内容已一致（例如我们之前写过的那条）：不重复写', () => {
-    dir = programsWith(['Workbench.lnk'])
-    const file = path.resolve(path.join(dir, 'Workbench.lnk'))
-    mocks.links.set(file, link({ args: `"C:/app"` }))
+    dir = programsWith([])
+    const own = path.resolve(path.join(dir, `${APP_SHORTCUT_NAME}.lnk`))
+    // 先把我们的入口写成「已一致」的样子，再跑一遍：应当零写入
+    mocks.links.set(own, link({ args: `"C:/app"` }))
 
     ensureNotificationShortcut(dir)
 
-    // 只补我们自己的入口，那条已一致的没被动
-    expect(mocks.written.map((entry) => path.basename(entry.file))).toEqual([
-      `${APP_SHORTCUT_NAME}.lnk`,
-    ])
+    expect(mocks.written).toHaveLength(0)
   })
 
   it('不传目录：走 %APPDATA%\\...\\Start Menu\\Programs', () => {

@@ -373,6 +373,35 @@ export interface GateInput {
   onFailIndex?: number | null
 }
 
+/**
+ * 派单的触发条件（M29）：离开一个阶段有五种触发，每种都能单独指定要不要派单、派给谁。
+ *
+ * - `done`：执行器正常结束，且本阶段没有判定（判定的阶段跑完不构成去向）；
+ * - `errored`：执行出错（非零退出 / 超时 / 失联），与业务过没过无关；
+ * - `passed` / `failed`：判定的两侧（原闸门的通过与未通过）；
+ * - `manual`：人工拖动卡片 / 点「完成任务」。
+ */
+export const STAGE_HANDOFF_GUARDS = ['done', 'errored', 'passed', 'failed', 'manual'] as const
+
+export type StageHandoffGuard = (typeof STAGE_HANDOFF_GUARDS)[number]
+
+/**
+ * 一条派单（M29，取代 M7 的 `handoffWorkflowId` / `handoffStageId` 两列）：
+ * 任务离开本阶段且触发条件命中时，在目标工作流建一张新工单。
+ *
+ * 派单**不终结本单**——本单的去向仍由 `onComplete` / `onReject` / `gate` 决定，
+ * 所以同一个触发条件可以同时「进下一阶段」和「派一张单」，也可以只派单本单照旧流转。
+ */
+export interface StageHandoff {
+  on: StageHandoffGuard
+  /** 目标工作流（不能是自身） */
+  workflowId: string
+  /** 目标阶段（必须属于 `workflowId`）；null = 目标工作流首个阶段 */
+  stageId: string | null
+  /** 只对 `manual` 有意义：拖到更前阶段（返工）不派单。缺省 = true */
+  forwardOnly?: boolean
+}
+
 export interface WorkflowStage {
   id: string
   workflowId: string
@@ -388,12 +417,10 @@ export interface WorkflowStage {
   onCompleteStageId: string | null
   onRejectStageId: string | null
   /**
-   * 跨工作流交接（M7，可空）：任务**离开本阶段**（成功向前流转 / 向前拖拽 / 直接完成）时，
-   * 在目标工作流建一条关联任务。目标工作流不能是自身；打回与删阶段重挂不触发。
+   * 派单（M29）：按触发条件分组的跨工作流交接。老事实缺该字段时按 M7 两列归一
+   * （见 `kernel/workflow/stage-handoffs.ts#legacyHandoffs`）。
    */
-  handoffWorkflowId: string | null
-  /** 交接目标阶段（必须属于 `handoffWorkflowId`）；null = 目标工作流首阶段 */
-  handoffStageId: string | null
+  handoffs: StageHandoff[]
   /** M8：本阶段派生的子任务默认落点阶段；null = 父任务当前阶段 */
   subtaskStageId?: string | null
   /** M8：子任务全部结束时父任务处理；null = 按 entryMode 推断（agent→wake，否则 notify） */
@@ -443,10 +470,11 @@ export interface StageInput {
   onCompleteIndex?: number | null
   /** 打回时退回到：目标阶段下标；null/undefined = 不指定（打回后原地不动、不流转） */
   onRejectIndex?: number | null
-  /** 交接目标工作流 id（M7，可空）；语义校验用视图判断存在性与自指 */
-  handoffWorkflowId?: string | null
-  /** 交接目标阶段 id（M7，可空 = 目标工作流首阶段） */
-  handoffStageId?: string | null
+  /**
+   * 派单（M29，可空 = 不派单）：按触发条件分组的跨工作流交接；
+   * 目标工作流 / 阶段的存在性与自指由内核按视图判。
+   */
+  handoffs?: readonly StageHandoff[]
   /** 子任务默认落点阶段 id（M8，可空 = 父任务当前阶段；须属于本工作流） */
   subtaskStageId?: string | null
   /** 子任务全部结束时的父任务处理（M8，可空 = 按 entryMode 推断） */

@@ -79,7 +79,11 @@ CREATE TABLE IF NOT EXISTS ${name} (
   agent_id TEXT REFERENCES agents(id) ON DELETE RESTRICT,
   on_complete_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
   on_reject_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
-  -- M7 跨工作流交接：目标工作流 / 目标阶段（可空；弱引用，不设外键，删除目标后由内核判缺失）
+  -- M29 派单：JSON 数组文本（on / workflowId / stageId / forwardOnly），取代下面 M7 两列。
+  -- 旧两列不再写入（恒为 NULL），老事实重建时由 kernel/project 按它们归一成 handoffs，
+  -- 物理删除留给独立的清理任务（SQLite 不能 DROP COLUMN，要重建表）。
+  handoffs_json TEXT NOT NULL DEFAULT '[]',
+  -- M7 跨工作流交接（已被 M29 取代）：目标工作流 / 目标阶段
   handoff_workflow_id TEXT,
   handoff_stage_id TEXT,
   -- M8 子任务：默认落点阶段 / 子任务全部结束时的父任务处理 / 是否允许派生子任务
@@ -876,6 +880,19 @@ export const STAGES_M26_ADD_COLUMN_SQL: Readonly<
 > = {
   run_timeout_ms:
     'ALTER TABLE workflow_stages ADD COLUMN run_timeout_ms INTEGER CHECK (run_timeout_ms IS NULL OR (run_timeout_ms BETWEEN 300000 AND 14400000))',
+}
+
+/**
+ * M29 给 `workflow_stages` 新增的列（派单）：JSON 数组文本，DEFAULT '[]'。
+ * 取代 M7 两列（那两列不再写入，物理删除留给独立清理任务）。
+ */
+export const STAGES_M29_ADDED_COLUMNS = ['handoffs_json'] as const
+
+/** `workflow_stages` M29 补列语句（默认值与 DDL 一致）。 */
+export const STAGES_M29_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof STAGES_M29_ADDED_COLUMNS)[number], string>
+> = {
+  handoffs_json: "ALTER TABLE workflow_stages ADD COLUMN handoffs_json TEXT NOT NULL DEFAULT '[]'",
 }
 
 /**

@@ -17,6 +17,7 @@ import {
   resolveBuiltinStages,
 } from '../workflow/builtin-stages'
 import { validateStageSet } from '../workflow/stage-validation'
+import { sameHandoffs } from '../workflow/stage-handoffs'
 import { normalizeAcceptance, sameAcceptance } from '../workflow/acceptance'
 import { done, hasActiveRun, ownerDraft, reject, runsOfTask, stagesOf, tasksOf } from './common'
 
@@ -38,9 +39,8 @@ function stageRow(
     agentId: stage.agentId ?? null,
     onCompleteStageId: indexTarget(ids, stage.onCompleteIndex),
     onRejectStageId: indexTarget(ids, stage.onRejectIndex),
-    // M7：交接目标按 id 直存（跨工作流，不能用本批下标表达）
-    handoffWorkflowId: stage.handoffWorkflowId ?? null,
-    handoffStageId: stage.handoffStageId ?? null,
+    // M29：派单按触发条件分组直存（跨工作流，不能用本批下标表达）
+    handoffs: [...(stage.handoffs ?? [])],
     // M8：子任务落点 / rollup / 派发策略原样落行（null = 按默认推断）
     subtaskStageId: stage.subtaskStageId ?? null,
     onChildrenSettled: stage.onChildrenSettled ?? null,
@@ -111,9 +111,8 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     a.agentId === b.agentId &&
     a.onCompleteStageId === b.onCompleteStageId &&
     a.onRejectStageId === b.onRejectStageId &&
-    // M7：交接两列一变就要落 stage.updated，否则更新被静默吞掉
-    a.handoffWorkflowId === b.handoffWorkflowId &&
-    a.handoffStageId === b.handoffStageId &&
+    // M29：派单清单一变就要落 stage.updated（缺省与空数组视为同值）
+    sameHandoffs(a.handoffs, b.handoffs) &&
     // M8：子任务三列同理（缺省与 null 视为同值）
     (a.subtaskStageId ?? null) === (b.subtaskStageId ?? null) &&
     (a.onChildrenSettled ?? null) === (b.onChildrenSettled ?? null) &&
@@ -202,7 +201,7 @@ export function createWorkflow(
   if (missingAgent) return reject('not_found', '智能体不存在: ' + missingAgent)
   const workflowId = env.nextId('workflow')
   // M7：交接目标必须存在且 ≠ 自身、目标阶段属于目标工作流（保存时校验，读时再防御）
-  const handoffError = validateStageHandoffs(view, workflowId, form.stages)
+  const handoffError = validateStageHandoffs(view, workflowId, form.stages, resolved.keys)
   if (handoffError) return reject('invalid_input', handoffError)
   const ids = form.stages.map(() => env.nextId('stage'))
   const entries = stageEntries(
@@ -250,7 +249,7 @@ export function updateWorkflow(
   const missingAgent = missingAgentId(view, form.stages)
   if (missingAgent) return reject('not_found', '智能体不存在: ' + missingAgent)
   // M7：交接目标工作流 / 阶段的存在与从属（自指在保存时就拒绝）
-  const handoffError = validateStageHandoffs(view, current.id, form.stages)
+  const handoffError = validateStageHandoffs(view, current.id, form.stages, resolved.keys)
   if (handoffError) return reject('invalid_input', handoffError)
 
   // 阶段 id 差量：回传的 id 保留，缺省 id 拿新 id，未出现在提交集合里的旧阶段 tombstone。

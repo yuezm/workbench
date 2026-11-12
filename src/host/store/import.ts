@@ -363,9 +363,8 @@ function readLegacyEntityRows(
     agentId: row.agent_id,
     onCompleteStageId: row.on_complete_stage_id,
     onRejectStageId: row.on_reject_stage_id,
-    // M7：v2 存量没有跨工作流交付概念——两个交接目标一律为空。
-    handoffWorkflowId: null,
-    handoffStageId: null,
+    // M29：v2 存量没有派单概念——清单为空。
+    handoffs: [],
     // M9：v2 存量没有阶段说明——按空串归一（与投影层 `normalizeStage` 一致）。
     instructions: '',
     // M20：v2 存量没有验收条目——按空数组归一。

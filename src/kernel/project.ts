@@ -20,6 +20,7 @@
 import type { FactType, SnapshotImportedPayload } from '../protocol/facts'
 import type { Task, Card, WorkflowStage } from '../protocol/entities'
 import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from './types'
+import { legacyHandoffs } from './workflow/stage-handoffs'
 
 /**
  * `Fact` 的默认泛型是单对象类型，`switch (fact.type)` 无法收窄 payload；
@@ -75,8 +76,8 @@ export function normalizeTask(row: Task): Task {
   const legacy = row as Partial<WorkflowStage>
   return {
     ...row,
-    handoffWorkflowId: legacy.handoffWorkflowId ?? null,
-    handoffStageId: legacy.handoffStageId ?? null,
+    // M29：老事实只有 M7 两列，按触发条件归一出派单数组
+    handoffs: legacy.handoffs ?? legacyHandoffs(legacy),
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,

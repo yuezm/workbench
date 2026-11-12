@@ -123,7 +123,7 @@ const TASKS_M7_COLUMNS = [
   'updated_at',
 ]
 
-/** M7 workflow_stages 列（顺序与 DDL 一致）：交接两列插在 on_reject_stage_id 与时间列之间。 */
+/** M29 workflow_stages 列（顺序与 DDL 一致）：派单列插在 on_reject_stage_id 之后，旧 M7 两列仍保留。 */
 const STAGES_M7_COLUMNS = [
   'id',
   'workflow_id',
@@ -133,6 +133,7 @@ const STAGES_M7_COLUMNS = [
   'agent_id',
   'on_complete_stage_id',
   'on_reject_stage_id',
+  'handoffs_json',
   'handoff_workflow_id',
   'handoff_stage_id',
   'subtask_stage_id',

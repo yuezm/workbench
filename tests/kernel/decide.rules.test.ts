@@ -46,8 +46,7 @@ const stage: WorkflowStage = {
   agentId: 'ag-1',
   onCompleteStageId: null,
   onRejectStageId: null,
-  handoffWorkflowId: null,
-  handoffStageId: null,
+  handoffs: [],
 }
 const agent: Agent = {
   id: 'ag-1',

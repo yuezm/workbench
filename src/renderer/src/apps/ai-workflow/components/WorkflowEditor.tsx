@@ -4,6 +4,8 @@ import {
   type EntryMode,
   type OnChildrenSettled,
   type SpawnPolicy,
+  type StageHandoff,
+  type StageHandoffGuard,
   type StageInput,
   type WorkflowInput,
   type WorkflowStage,
@@ -75,6 +77,11 @@ function hasFlowDetail(stage: StageInput): boolean {
 }
 
 /** 交接与拆子任务只属于真干活的智能体阶段：闸门只判定过没过，不交接、不拆子任务。 */
+/** 派单挂在「离开阶段」上：会跑单的阶段（交给智能体 / 闸门）才有自动触发条件。 */
+function hasHandoffDetail(stage: StageInput): boolean {
+  return entryKindOf(stage) === 'agent' || entryKindOf(stage) === 'gate'
+}
+
 function hasRelayDetail(stage: StageInput): boolean {
   return entryKindOf(stage) === 'agent'
 }
@@ -94,7 +101,44 @@ const STAGE_TIMEOUT_CHOICES = [
 ] as const
 
 /**
- * 界面上不展示的字段，保存前一概归一——这些字段仍有消费者（交接在任务离开阶段时建关联任务、
+ * 派单的触发条件文案（M29）。命名按「谁触发」而不是「成功 / 失败」：
+ * 执行器跑完与业务过了是两件事，混着叫会让人把「执行成功但评审没过」配到错的一行。
+ */
+const HANDOFF_GUARD_LABELS: Record<StageHandoffGuard, string> = {
+  done: '跑完时',
+  errored: '出错时',
+  passed: '通过时',
+  failed: '未通过时',
+  manual: '人工拖动时',
+}
+
+/**
+ * 本阶段能配哪些触发条件：判定阶段没有「跑完时」（跑完没结论不构成去向），
+ * 不派活的阶段只有「人工拖动时」（没有 run，其余四行永远不触发）。
+ */
+function guardChoicesFor(stage: StageInput): Array<{ value: StageHandoffGuard; label: string }> {
+  const kind = entryKindOf(stage)
+  const guards: StageHandoffGuard[] =
+    kind === 'gate'
+      ? ['passed', 'failed', 'errored', 'manual']
+      : kind === 'agent'
+        ? ['done', 'errored', 'manual']
+        : ['manual']
+  return guards.map((value) => ({ value, label: HANDOFF_GUARD_LABELS[value] }))
+}
+
+/** 新加的一行派单：触发条件按阶段类型取第一项，目标工作流取第一个候选。 */
+function defaultHandoff(stage: StageInput, workflows: readonly WorkflowWithStages[]): StageHandoff {
+  const first = guardChoicesFor(stage)[0]
+  return {
+    on: first?.value ?? 'done',
+    workflowId: workflows[0]?.id ?? '',
+    stageId: null,
+  }
+}
+
+/**
+ * 界面上不展示的字段，保存前一概归一——这些字段仍有消费者（派单在任务离开阶段时建新工单、
  * 子任务落点是派活落点、`agentId` 会参与智能体存在性校验、`onComplete` 会改闸门的默认通过去向），
  * 留着就是看不见的配置。「要干什么」只对派活有意义、且没有副作用，原文保留，切回智能体时还能用。
  */
@@ -107,8 +151,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
       // 闸门面板里没有「完成 / 出错」两个去向：留着会偷偷改掉「通过时进入」显示为默认时的真实落点
       onCompleteIndex: null,
       onRejectIndex: null,
-      handoffWorkflowId: null,
-      handoffStageId: null,
+      // 闸门跑完不给结论就不算离开，`done` 这一支永远不触发
+      handoffs: (stage.handoffs ?? []).filter((handoff) => handoff.on !== 'done'),
       subtaskStageId: null,
       onChildrenSettled: null,
       spawnPolicy: null,
@@ -122,8 +166,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     agentId: null,
     onCompleteIndex: null,
     onRejectIndex: null,
-    handoffWorkflowId: null,
-    handoffStageId: null,
+    // 不派活的阶段没有 run，只有人工拖动能触发派单
+    handoffs: (stage.handoffs ?? []).filter((handoff) => handoff.on === 'manual'),
     subtaskStageId: null,
     onChildrenSettled: null,
     spawnPolicy: null,
@@ -147,7 +191,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
 function pruneStage(stage: StageInput): StageInput {
   const pruned = pruneByEntryKind(stage)
   if (!isTerminalStage(stage)) return pruned
-  return { ...pruned, handoffWorkflowId: null, handoffStageId: null }
+  // 终态没有「离开」这回事：派单永远不触发，留着就是看不见的配置
+  return { ...pruned, handoffs: [] }
 }
 
 /** 下标型流转目标是否越界：越界说明它指向的阶段已被删掉 */
@@ -241,8 +286,7 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       agentId: s.agentId,
       onCompleteIndex: oc >= 0 ? oc : null,
       onRejectIndex: rj >= 0 ? rj : null,
-      handoffWorkflowId: s.handoffWorkflowId,
-      handoffStageId: s.handoffStageId,
+      handoffs: s.handoffs,
       subtaskStageId: s.subtaskStageId ?? null,
       onChildrenSettled: s.onChildrenSettled ?? null,
       spawnPolicy: s.spawnPolicy ?? null,
@@ -385,6 +429,10 @@ export function WorkflowEditor({
   const patchStage = (i: number, patch: Partial<StageInput>): void =>
     setDraft((d) => ({ ...d, stages: d.stages.map((s, k) => (k === i ? { ...s, ...patch } : s)) }))
 
+  /** 改派单清单：按行下标替换 / 删除，列表整体回写（派单没有下标型引用，不必重映射） */
+  const patchHandoffs = (i: number, next: readonly StageHandoff[]): void =>
+    patchStage(i, { handoffs: [...next] })
+
   /** 新阶段落在用户区块末尾（「已阻塞」之前）并直接展开它 */
   const addStage = (): void => {
     const inserted = insertUserStage(draft.stages, emptyStage(nextUserStageName(draft.stages)))
@@ -491,10 +539,7 @@ export function WorkflowEditor({
   const targetValues = targetOptions.map((t) => String(t.i))
   const agentIds = agents.map((a) => a.id)
   const handoffWorkflowIds = handoffWorkflows.map((w) => w.id)
-  const handoffStageIds =
-    stage.handoffWorkflowId == null
-      ? []
-      : stagesOfWorkflow(stage.handoffWorkflowId).map((s) => s.id)
+  const guardChoices = guardChoicesFor(stage)
   const subtaskStageIds = draft.stages.flatMap((s) => (s.id === undefined ? [] : [s.id]))
   /** 当前展开阶段的序号文案（aria-label 用，与阶段列表一致是 1 基） */
   const n = index + 1
@@ -937,129 +982,210 @@ export function WorkflowEditor({
             </>
           )}
 
-          {/* 交接与子任务只属于真干活的智能体阶段：闸门只判定，不交接、不拆子任务 */}
-          {hasRelayDetail(stage) && (
+          {/* 派单：会跑单的阶段都能配（跑完 / 出错），闸门另有通过 / 未通过两行；子任务只属于智能体阶段 */}
+          {hasHandoffDetail(stage) && (
             <>
               {isTerminalStage(stage) ? (
-                // 终态不许交接：内核会拒，界面上也不给这两块，省得配了却存不下去
+                // 终态不许派单：内核会拒，界面上也不给这块，省得配了却存不下去
                 <p className="mt-3 border-t border-border pt-3 text-xs text-faint-foreground">
-                  已完成 / 已取消是终态，不交接。
+                  已完成 / 已取消是终态，不派单。
                 </p>
               ) : (
-                <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
-                  <Field label="目标工作流" className="min-w-0 flex-1">
-                    <Select
-                      value={picked(stage.handoffWorkflowId, handoffWorkflowIds)}
-                      onValueChange={(v) =>
-                        patchStage(index, {
-                          handoffWorkflowId: v === '' ? null : v,
-                          handoffStageId: null,
-                        })
+                <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-faint-foreground">
+                      派单：离开本阶段时在别的流程建一张新工单，本单照常流转。
+                    </p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={handoffWorkflows.length === 0}
+                      aria-label={`阶段${n}新增派单`}
+                      onClick={() =>
+                        patchHandoffs(index, [
+                          ...(stage.handoffs ?? []),
+                          defaultHandoff(stage, handoffWorkflows),
+                        ])
                       }
                     >
-                      <SelectTrigger aria-label={`阶段${n}交接目标工作流`} className="w-full">
-                        <SelectValue placeholder="不交接" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">不交接</SelectItem>
-                        {handoffWorkflows.map((item) => (
-                          <SelectItem key={item.id} value={item.id}>
-                            {item.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  {stage.handoffWorkflowId != null && (
-                    <Field label="目标阶段" className="min-w-0 flex-1">
-                      <Select
-                        value={picked(stage.handoffStageId, handoffStageIds)}
-                        onValueChange={(v) =>
-                          patchStage(index, { handoffStageId: v === '' ? null : v })
+                      + 派单
+                    </Button>
+                  </div>
+                  {(stage.handoffs ?? []).length === 0 && (
+                    <p className="text-xs text-faint-foreground">不派单。</p>
+                  )}
+                  {(stage.handoffs ?? []).map((handoff, hi) => (
+                    <div key={`${handoff.on}-${hi}`} className="flex flex-wrap items-end gap-2">
+                      <Field label="触发" className="w-32">
+                        <Select
+                          value={picked(
+                            handoff.on,
+                            guardChoices.map((choice) => choice.value),
+                          )}
+                          onValueChange={(v) =>
+                            patchHandoffs(
+                              index,
+                              (stage.handoffs ?? []).map((item, k) =>
+                                k === hi ? { ...item, on: v as StageHandoffGuard } : item,
+                              ),
+                            )
+                          }
+                        >
+                          <SelectTrigger
+                            aria-label={`阶段${n}派单${hi + 1}触发`}
+                            className="w-full"
+                          >
+                            <SelectValue placeholder="触发" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {guardChoices.map((choice) => (
+                              <SelectItem key={choice.value} value={choice.value}>
+                                {choice.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="目标工作流" className="min-w-0 flex-1">
+                        <Select
+                          value={picked(handoff.workflowId, handoffWorkflowIds)}
+                          onValueChange={(v) =>
+                            patchHandoffs(
+                              index,
+                              (stage.handoffs ?? []).map((item, k) =>
+                                k === hi ? { ...item, workflowId: v, stageId: null } : item,
+                              ),
+                            )
+                          }
+                        >
+                          <SelectTrigger
+                            aria-label={`阶段${n}派单${hi + 1}目标工作流`}
+                            className="w-full"
+                          >
+                            <SelectValue placeholder="选择工作流" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {handoffWorkflows.map((item) => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {item.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="目标阶段" className="min-w-0 flex-1">
+                        <Select
+                          value={picked(
+                            handoff.stageId,
+                            stagesOfWorkflow(handoff.workflowId).map((s) => s.id),
+                          )}
+                          onValueChange={(v) =>
+                            patchHandoffs(
+                              index,
+                              (stage.handoffs ?? []).map((item, k) =>
+                                k === hi ? { ...item, stageId: v === '' ? null : v } : item,
+                              ),
+                            )
+                          }
+                        >
+                          <SelectTrigger
+                            aria-label={`阶段${n}派单${hi + 1}目标阶段`}
+                            className="w-full"
+                          >
+                            <SelectValue placeholder="首阶段" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">首阶段</SelectItem>
+                            {stagesOfWorkflow(handoff.workflowId).map((item) => (
+                              <SelectItem key={item.id} value={item.id}>
+                                {item.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`阶段${n}删除派单${hi + 1}`}
+                        onClick={() =>
+                          patchHandoffs(
+                            index,
+                            (stage.handoffs ?? []).filter((_, k) => k !== hi),
+                          )
                         }
                       >
-                        <SelectTrigger aria-label={`阶段${n}交接目标阶段`} className="w-full">
-                          <SelectValue placeholder="首阶段" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="">首阶段</SelectItem>
-                          {stagesOfWorkflow(stage.handoffWorkflowId).map((item) => (
-                            <SelectItem key={item.id} value={item.id}>
-                              {item.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  )}
-                  <p className="w-full text-xs text-faint-foreground">
-                    完成后在目标工作流建关联任务。
-                  </p>
+                        删除
+                      </Button>
+                    </div>
+                  ))}
                 </div>
               )}
-
-              <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
-                <Field label="子任务落点阶段" className="min-w-0 flex-1">
-                  <Select
-                    value={picked(stage.subtaskStageId, subtaskStageIds)}
-                    onValueChange={(v) =>
-                      patchStage(index, { subtaskStageId: v === '' ? null : v })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}子任务落点阶段`} className="w-full">
-                      <SelectValue placeholder="跟随当前阶段" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">跟随当前阶段</SelectItem>
-                      {/* 候选跟着草稿走：改过的阶段名立刻反映，不用等保存后再打开 */}
-                      {draft.stages.map((item, i) =>
-                        item.id === undefined ? null : (
-                          <SelectItem key={item.id} value={item.id}>
-                            {item.name || `阶段${i + 1}`}
-                          </SelectItem>
-                        ),
-                      )}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="子任务完成后" className="min-w-0 flex-1">
-                  <Select
-                    value={stage.onChildrenSettled ?? ''}
-                    onValueChange={(v) =>
-                      patchStage(index, {
-                        onChildrenSettled: v === '' ? null : (v as OnChildrenSettled),
-                      })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}子任务完成后`} className="w-full">
-                      <SelectValue placeholder="按阶段推断" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">按阶段推断</SelectItem>
-                      <SelectItem value="wake">唤醒父 Agent</SelectItem>
-                      <SelectItem value="notify">仅通知</SelectItem>
-                      <SelectItem value="complete">完成父任务</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="允许拆子任务" className="min-w-0 flex-1">
-                  <Select
-                    value={stage.spawnPolicy ?? ''}
-                    onValueChange={(v) =>
-                      patchStage(index, { spawnPolicy: v === '' ? null : (v as SpawnPolicy) })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}允许拆子任务`} className="w-full">
-                      <SelectValue placeholder="允许" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">允许</SelectItem>
-                      <SelectItem value="off">禁止</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
             </>
+          )}
+
+          {hasRelayDetail(stage) && (
+            <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
+              <Field label="子任务落点阶段" className="min-w-0 flex-1">
+                <Select
+                  value={picked(stage.subtaskStageId, subtaskStageIds)}
+                  onValueChange={(v) => patchStage(index, { subtaskStageId: v === '' ? null : v })}
+                >
+                  <SelectTrigger aria-label={`阶段${n}子任务落点阶段`} className="w-full">
+                    <SelectValue placeholder="跟随当前阶段" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">跟随当前阶段</SelectItem>
+                    {/* 候选跟着草稿走：改过的阶段名立刻反映，不用等保存后再打开 */}
+                    {draft.stages.map((item, i) =>
+                      item.id === undefined ? null : (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.name || `阶段${i + 1}`}
+                        </SelectItem>
+                      ),
+                    )}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="子任务完成后" className="min-w-0 flex-1">
+                <Select
+                  value={stage.onChildrenSettled ?? ''}
+                  onValueChange={(v) =>
+                    patchStage(index, {
+                      onChildrenSettled: v === '' ? null : (v as OnChildrenSettled),
+                    })
+                  }
+                >
+                  <SelectTrigger aria-label={`阶段${n}子任务完成后`} className="w-full">
+                    <SelectValue placeholder="按阶段推断" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">按阶段推断</SelectItem>
+                    <SelectItem value="wake">唤醒父 Agent</SelectItem>
+                    <SelectItem value="notify">仅通知</SelectItem>
+                    <SelectItem value="complete">完成父任务</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="允许拆子任务" className="min-w-0 flex-1">
+                <Select
+                  value={stage.spawnPolicy ?? ''}
+                  onValueChange={(v) =>
+                    patchStage(index, { spawnPolicy: v === '' ? null : (v as SpawnPolicy) })
+                  }
+                >
+                  <SelectTrigger aria-label={`阶段${n}允许拆子任务`} className="w-full">
+                    <SelectValue placeholder="允许" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">允许</SelectItem>
+                    <SelectItem value="off">禁止</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
           )}
         </div>
       </div>

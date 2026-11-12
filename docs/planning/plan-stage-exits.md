@@ -1,7 +1,25 @@
 # 计划：阶段出口表（Stage Exits）
 
-> 状态：**待评审**（未动代码）。取代 `on_complete_stage_id` / `on_reject_stage_id` / `gate_*` / `handoff_*` 四组字段。
+> 状态：**S1a 已实现（M29，2026-11-12）；S1b–S4 待做**。
 > 关联：[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)（阶段状态机、闸门）、[SPEC-review-handoff](../specs/SPEC-review-handoff.md)、[ARCHITECTURE](../ARCHITECTURE.md)。
+
+## 已落地：S1a 派单按触发条件分组（M29）
+
+派单先做：它是这个模型里唯一「现在根本表达不出来」的能力缺口（出错 / 业务失败派到另一个工作流），
+而主去向（`onComplete` / `onReject` / `gate`）今天已能表达，属于形状统一而非能力缺口。
+
+落地口径（与本篇后半部分的全量 `exits` 设计有差异，差异是有意的）：
+
+- `WorkflowStage.handoffs: StageHandoff[]`，`StageHandoff = { on, workflowId, stageId, forwardOnly? }`；
+  `on` 取 `done` / `errored` / `passed` / `failed` / `manual` 五档。取代 `handoffWorkflowId` / `handoffStageId` 两列。
+- 主去向仍然是原来三组字段（`onComplete` / `onReject` / `gate` 两侧），**没有**并成 `exits`；因此
+  `retry` / `await` / `close` 三种动作也还没落地（S1b/S3）。
+- 纯函数落在 `kernel/workflow/stage-handoffs.ts`（`handoffGuardOf` / `handoffTargetsOf` / `legacyHandoffs` / `sameHandoffs`），
+  事实落在 `kernel/handoff.ts#handoffOnExit`。
+- 投影列 `workflow_stages.handoffs_json`（DEFAULT `'[]'`）；M7 两列不再写入、保留到独立清理任务（S4）。
+- 老事实归一：`done` + `manual`（仅向前），判定阶段 `passed` + `manual`——M7 的「成功且向前就交接」在
+  两条路（自动流转 / 人工拖拽）上都被保留下来。
+- 已知取舍：同一 `(任务, 阶段)` 仍只派一次；要「每次成功都发一张新单」得把去重键换成 runId（S2）。
 
 ## 要解决的问题
 

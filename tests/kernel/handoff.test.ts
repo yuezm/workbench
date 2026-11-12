@@ -1,13 +1,15 @@
 /**
- * 交接纯函数用例（M7 T5）：目标解析、去重、链深、建任务事实、保存校验。
+ * 派单事实用例（M29，M7 交接的重做）：去重、链深、建任务事实、保存校验。
  *
- * 只构造 `View` 假数据，不起 DB；`decide` 三处钩子的集成用例见
+ * 只构造 `View` 假数据，不起 DB；触发条件与目标解析的纯函数用例见
+ * `tests/kernel/workflow/stage-handoffs.test.ts`，`decide` 三处钩子的集成用例见
  * `tests/kernel/decide.handoff.test.ts`。
  */
 import { describe, expect, it } from 'vitest'
 import type {
   Agent,
   Runtime,
+  StageHandoff,
   StageInput,
   Task,
   Workflow,
@@ -18,10 +20,8 @@ import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src
 import {
   HANDOFF_MAX_DEPTH,
   handoffDepth,
-  handoffFacts,
   handoffOnExit,
   handedOffAlready,
-  handoffTargetOf,
   validateStageHandoffs,
 } from '../../src/kernel/handoff'
 
@@ -79,8 +79,7 @@ const stage = (
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
-  handoffWorkflowId: null,
-  handoffStageId: null,
+  handoffs: [],
   ...over,
 })
 
@@ -166,16 +165,22 @@ const view = (
   pluginSettingsVersion: 0,
 })
 
-/** 两工作流：A（st-a0 配交接）→ B（st-b0 / st-b1，st-b1 是 agent 阶段）。 */
-const baseView = (over: Partial<WorkflowStage> = {}, targetStageId: string | null = null): View =>
+const handoff = (over: Partial<StageHandoff> = {}): StageHandoff => ({
+  on: 'done',
+  workflowId: 'wf-b',
+  stageId: null,
+  ...over,
+})
+
+/**
+ * 两工作流：A（st-a0 配派单）→ B（st-b0 / st-b1，st-b1 是 agent 阶段）。
+ * `over` 覆盖 st-a0 的字段，`handoffs` 直接给派单清单。
+ */
+const baseView = (handoffs: StageHandoff[] = [handoff()]): View =>
   view({
     workflows: [workflow('wf-a'), workflow('wf-b')],
     stages: [
-      stage('st-a0', 'wf-a', 0, {
-        handoffWorkflowId: 'wf-b',
-        handoffStageId: targetStageId,
-        ...over,
-      }),
+      stage('st-a0', 'wf-a', 0, { handoffs }),
       stage('st-a1', 'wf-a', 1),
       stage('st-b0', 'wf-b', 0),
       stage('st-b1', 'wf-b', 1, { entryMode: 'agent', agentId: 'ag-1' }),
@@ -193,53 +198,19 @@ const withTasks = (base: View, rows: Task[]): View => ({
 const payloadsOf = <T>(facts: FactDraft[], type: string): T[] =>
   facts.filter((fact) => fact.type === type).map((fact) => fact.payload as T)
 
-describe('kernel/handoff 目标解析', () => {
-  it('阶段没配交接 / 目标工作流已删 / 目标是自身 → null', () => {
-    const plain = handoffTargetOf(baseView({ handoffWorkflowId: null }), task('t-1'), 'st-a0')
+/** 视图里的 st-a0（来源阶段）；派单事实都从它身上取配置。 */
+const sourceStage = (seeded: View): WorkflowStage => seeded.stages.get('st-a0') as WorkflowStage
 
-    expect(plain).toBeNull()
-    const missing = handoffTargetOf(
-      baseView({ handoffWorkflowId: 'wf-gone' }),
-      task('t-1'),
-      'st-a0',
-    )
-
-    expect(missing).toBeNull()
-    const self = handoffTargetOf(baseView({ handoffWorkflowId: 'wf-a' }), task('t-1'), 'st-a0')
-
-    expect(self).toBeNull()
-  })
-
-  it('handoffStageId 为空 → 目标工作流首阶段（按 position）', () => {
-    expect(handoffTargetOf(baseView(), task('t-1'), 'st-a0')).toEqual({
-      workflowId: 'wf-b',
-      stageId: 'st-b0',
-    })
-  })
-
-  it('handoffStageId 指定目标阶段；已不属目标工作流 → null', () => {
-    expect(handoffTargetOf(baseView({}, 'st-b1'), task('t-1'), 'st-a0')).toEqual({
-      workflowId: 'wf-b',
-      stageId: 'st-b1',
-    })
-    // 目标阶段被删（或错指到别的工作流的阶段）：防御性零事实
-    expect(handoffTargetOf(baseView({}, 'st-gone'), task('t-1'), 'st-a0')).toBeNull()
-  })
-
-  it('目标工作流没有阶段 → null（无处落地）', () => {
-    const empty = view({
-      workflows: [workflow('wf-a'), workflow('wf-b')],
-      stages: [stage('st-a0', 'wf-a', 0, { handoffWorkflowId: 'wf-b' })],
-    })
-
-    expect(handoffTargetOf(empty, task('t-1'), 'st-a0')).toBeNull()
-    // 阶段行本身不存在（任务当前阶段已失效）
-    expect(handoffTargetOf(baseView(), task('t-1'), 'st-gone')).toBeNull()
-  })
-})
+const exit = (
+  seeded: View,
+  source: Task,
+  guard: 'done' | 'errored' | 'passed' | 'failed' | 'manual',
+  options?: { forward?: boolean },
+): FactDraft[] =>
+  handoffOnExit(seeded, source, sourceStage(seeded), guard, NOW, env(), OWNER, options)
 
 describe('kernel/handoff 去重与链深', () => {
-  it('同一 (来源任务, 阶段) 已存在交接产物 → 视为已交接', () => {
+  it('同一 (来源任务, 阶段) 已存在派单产物 → 视为已派过', () => {
     const handed = task('t-2', {
       origin: 'handoff',
       workflowId: 'wf-b',
@@ -278,7 +249,7 @@ describe('kernel/handoff 去重与链深', () => {
     expect(handoffDepth(orphaned, orphan)).toBe(1)
   })
 
-  it(`链深上限 ${HANDOFF_MAX_DEPTH}：第 9 层不再交接，第 8 层仍可`, () => {
+  it(`链深上限 ${HANDOFF_MAX_DEPTH}：第 9 层不再派单，第 8 层仍可`, () => {
     const chainOf = (depth: number): Task[] => {
       const rows: Task[] = [task('t-1')]
       for (let index = 2; index <= depth + 1; index += 1) {
@@ -295,42 +266,120 @@ describe('kernel/handoff 去重与链深', () => {
 
     // 来源任务深度 7 → 新任务第 8 层，允许
     const atLimit = withTasks(baseView(), chainOf(HANDOFF_MAX_DEPTH - 1))
-    const allowed = handoffFacts(
+    const allowed = exit(
       atLimit,
       task(`t-${HANDOFF_MAX_DEPTH}`, {
         origin: 'handoff',
         handoffFromTaskId: `t-${HANDOFF_MAX_DEPTH - 1}`,
         handoffFromStageId: 'st-a0',
       }),
-      'st-a0',
-      NOW,
-      env(),
-      OWNER,
+      'done',
     )
 
     expect(allowed.map((fact) => fact.type)).toContain('task.created')
     // 来源任务深度 8 → 新任务第 9 层，拒绝
     const atCap = withTasks(baseView(), chainOf(HANDOFF_MAX_DEPTH))
-    const blocked = handoffFacts(
+    const blocked = exit(
       atCap,
       task(`t-${HANDOFF_MAX_DEPTH + 1}`, {
         origin: 'handoff',
         handoffFromTaskId: `t-${HANDOFF_MAX_DEPTH}`,
         handoffFromStageId: 'st-a0',
       }),
-      'st-a0',
-      NOW,
-      env(),
-      OWNER,
+      'done',
     )
 
     expect(blocked).toEqual([])
   })
 })
 
+describe('kernel/handoff 触发条件分组', () => {
+  it('只派命中这一组的单：done 配的不在 errored 时派', () => {
+    const seeded = baseView([handoff({ on: 'done' })])
+
+    expect(exit(seeded, task('t-1'), 'done').length).toBeGreaterThan(0)
+    expect(exit(seeded, task('t-1'), 'errored')).toEqual([])
+    expect(exit(seeded, task('t-1'), 'manual', { forward: true })).toEqual([])
+  })
+
+  it('同一阶段可以同时配「成功派 A、失败派 B」：各走各的', () => {
+    const seeded = view({
+      workflows: [workflow('wf-a'), workflow('wf-ok'), workflow('wf-bad')],
+      stages: [
+        stage('st-a0', 'wf-a', 0, {
+          entryMode: 'agent',
+          agentId: 'ag-1',
+          gate: { maxFails: 3, onPassStageId: null, onFailStageId: null },
+          handoffs: [
+            handoff({ on: 'passed', workflowId: 'wf-ok' }),
+            handoff({ on: 'failed', workflowId: 'wf-bad' }),
+          ],
+        }),
+        stage('st-ok0', 'wf-ok', 0),
+        stage('st-bad0', 'wf-bad', 0),
+      ],
+      agents: [agent()],
+      runtimes: [runtime()],
+    })
+    const source = task('t-1')
+
+    const passed = exit(seeded, source, 'passed')
+
+    expect(
+      payloadsOf<{ task: Task }>(passed, 'task.created').map((item) => item.task.workflowId),
+    ).toEqual(['wf-ok'])
+
+    const failed = exit(seeded, source, 'failed')
+
+    expect(
+      payloadsOf<{ task: Task }>(failed, 'task.created').map((item) => item.task.workflowId),
+    ).toEqual(['wf-bad'])
+  })
+
+  it('同一触发条件可扇出到多个目标：一批里建多条任务', () => {
+    const seeded = view({
+      workflows: [workflow('wf-a'), workflow('wf-b'), workflow('wf-c')],
+      stages: [
+        stage('st-a0', 'wf-a', 0, {
+          handoffs: [
+            handoff({ on: 'done', workflowId: 'wf-b' }),
+            handoff({ on: 'done', workflowId: 'wf-c' }),
+          ],
+        }),
+        stage('st-b0', 'wf-b', 0),
+        stage('st-c0', 'wf-c', 0),
+      ],
+    })
+
+    const created = payloadsOf<{ task: Task }>(exit(seeded, task('t-1'), 'done'), 'task.created')
+
+    expect(created.map((item) => item.task.workflowId)).toEqual(['wf-b', 'wf-c'])
+  })
+
+  it('manual 的「仅向前」：拖回更前阶段不派单', () => {
+    const seeded = baseView([handoff({ on: 'manual' })])
+
+    expect(exit(seeded, task('t-1'), 'manual', { forward: true }).length).toBeGreaterThan(0)
+    expect(exit(seeded, task('t-1'), 'manual', { forward: false })).toEqual([])
+  })
+
+  it('已派过 / 目标工作流已删 → 零事实', () => {
+    const handed = task('t-2', {
+      origin: 'handoff',
+      workflowId: 'wf-b',
+      currentStageId: 'st-b0',
+      handoffFromTaskId: 't-1',
+      handoffFromStageId: 'st-a0',
+    })
+
+    expect(exit(withTasks(baseView(), [handed]), task('t-1'), 'done')).toEqual([])
+    expect(exit(baseView([handoff({ workflowId: 'wf-gone' })]), task('t-1'), 'done')).toEqual([])
+  })
+})
+
 describe('kernel/handoff 建任务事实', () => {
   it('目标工作流建任务 + 新隐式线程（source=handoff）+ 挂线程', () => {
-    const facts = handoffFacts(baseView(), task('t-1'), 'st-a0', NOW, env(), OWNER)
+    const facts = exit(baseView(), task('t-1'), 'done')
 
     expect(facts.map((fact) => fact.type)).toEqual([
       'thread.opened',
@@ -375,7 +424,7 @@ describe('kernel/handoff 建任务事实', () => {
   })
 
   it('目标阶段是 agent → 入口 run 挂在新线程上（turn=1）', () => {
-    const facts = handoffFacts(baseView({}, 'st-b1'), task('t-1'), 'st-a0', NOW, env(), OWNER)
+    const facts = exit(baseView([handoff({ stageId: 'st-b1' })]), task('t-1'), 'done')
     const created = payloadsOf<{ task: Task }>(facts, 'task.created')[0].task
     const run = payloadsOf<{ run: { taskId: Id; threadId: Id | null; turn: number } }>(
       facts,
@@ -386,59 +435,9 @@ describe('kernel/handoff 建任务事实', () => {
   })
 
   it('目标阶段不是 agent → 零 run.queued', () => {
-    const types = handoffFacts(baseView(), task('t-1'), 'st-a0', NOW, env(), OWNER).map(
-      (fact) => fact.type,
-    )
+    const types = exit(baseView(), task('t-1'), 'done').map((fact) => fact.type)
 
     expect(types).not.toContain('run.queued')
-  })
-
-  it('已交接 / 目标失效 → 零事实', () => {
-    const handed = task('t-2', {
-      origin: 'handoff',
-      workflowId: 'wf-b',
-      currentStageId: 'st-b0',
-      handoffFromTaskId: 't-1',
-      handoffFromStageId: 'st-a0',
-    })
-    const seeded = withTasks(baseView(), [handed])
-
-    expect(handoffFacts(seeded, task('t-1'), 'st-a0', NOW, env(), OWNER)).toEqual([])
-    expect(
-      handoffFacts(
-        baseView({ handoffWorkflowId: 'wf-gone' }),
-        task('t-1'),
-        'st-a0',
-        NOW,
-        env(),
-        OWNER,
-      ),
-    ).toEqual([])
-  })
-
-  it('handoffOnExit：成功且向前才交接，打回 / 原地 / 拖回零事实', () => {
-    const seeded = view({
-      workflows: [workflow('wf-a'), workflow('wf-b')],
-      stages: [
-        stage('st-a0', 'wf-a', 0),
-        stage('st-a1', 'wf-a', 1, { handoffWorkflowId: 'wf-b' }),
-        stage('st-a2', 'wf-a', 2),
-        stage('st-b0', 'wf-b', 0),
-      ],
-      agents: [agent()],
-      runtimes: [runtime()],
-    })
-    const from = stage('st-a1', 'wf-a', 1, { handoffWorkflowId: 'wf-b' })
-    const earlier = stage('st-a0', 'wf-a', 0)
-    const later = stage('st-a2', 'wf-a', 2)
-
-    expect(
-      handoffOnExit(seeded, task('t-1'), from, later, true, NOW, env(), OWNER).length,
-    ).toBeGreaterThan(0)
-    expect(handoffOnExit(seeded, task('t-1'), from, earlier, true, NOW, env(), OWNER)).toEqual([])
-    expect(handoffOnExit(seeded, task('t-1'), from, from, true, NOW, env(), OWNER)).toEqual([])
-    // 打回即使配到更后阶段也不交接
-    expect(handoffOnExit(seeded, task('t-1'), from, later, false, NOW, env(), OWNER)).toEqual([])
   })
 })
 
@@ -453,44 +452,42 @@ describe('kernel/handoff 阶段保存校验', () => {
     const seeded = baseView()
 
     expect(
-      validateStageHandoffs(seeded, 'wf-a', [
-        input({ handoffWorkflowId: 'wf-b', handoffStageId: 'st-b1' }),
-      ]),
+      validateStageHandoffs(seeded, 'wf-a', [input({ handoffs: [handoff({ stageId: 'st-b1' })] })]),
     ).toBeNull()
-    expect(validateStageHandoffs(seeded, 'wf-a', [input({ handoffWorkflowId: 'wf-b' })])).toBeNull()
     expect(validateStageHandoffs(seeded, 'wf-a', [input()])).toBeNull()
   })
 
-  it('自指 / 目标工作流不存在 / 目标阶段不属于目标工作流 / 只给阶段 → 明确文案', () => {
+  it('自指 / 目标工作流不存在 / 目标阶段不属于目标工作流 / 终态派单 → 明确文案', () => {
     const seeded = baseView()
 
-    expect(validateStageHandoffs(seeded, 'wf-a', [input({ handoffWorkflowId: 'wf-a' })])).toBe(
-      '阶段「阶段」的交接目标工作流不能是自身',
-    )
-    expect(validateStageHandoffs(seeded, 'wf-a', [input({ handoffWorkflowId: 'wf-gone' })])).toBe(
-      '阶段「阶段」的交接目标工作流不存在: wf-gone',
-    )
     expect(
       validateStageHandoffs(seeded, 'wf-a', [
-        input({ handoffWorkflowId: 'wf-b', handoffStageId: 'st-a0' }),
+        input({ handoffs: [handoff({ workflowId: 'wf-a' })] }),
       ]),
-    ).toBe('阶段「阶段」的交接目标阶段不属于目标工作流: st-a0')
-    expect(validateStageHandoffs(seeded, 'wf-a', [input({ handoffStageId: 'st-b0' })])).toBe(
-      '阶段「阶段」的交接目标阶段缺少目标工作流',
-    )
+    ).toBe('阶段「阶段」的派单目标工作流不能是自身')
+    expect(
+      validateStageHandoffs(seeded, 'wf-a', [
+        input({ handoffs: [handoff({ workflowId: 'wf-gone' })] }),
+      ]),
+    ).toBe('阶段「阶段」的派单目标工作流不存在: wf-gone')
+    expect(
+      validateStageHandoffs(seeded, 'wf-a', [input({ handoffs: [handoff({ stageId: 'st-a0' })] })]),
+    ).toBe('阶段「阶段」的派单目标阶段不属于目标工作流: st-a0')
+    // 目标阶段已被删（视图里查不到）：同一个文案，不当作合法
+    expect(
+      validateStageHandoffs(seeded, 'wf-a', [
+        input({ handoffs: [handoff({ stageId: 'st-gone' })] }),
+      ]),
+    ).toBe('阶段「阶段」的派单目标阶段不属于目标工作流: st-gone')
+    expect(
+      validateStageHandoffs(seeded, 'wf-a', [input({ builtin: 'done', handoffs: [handoff()] })]),
+    ).toBe('内置阶段「阶段」不允许派单')
   })
 })
 
-describe('交接任务标题（M7 覆盖补充）', () => {
+describe('派单任务标题（M7 覆盖补充）', () => {
   it('超长标题按 200 码点截断', () => {
-    const facts = handoffFacts(
-      baseView(),
-      task('t-long', { title: 'x'.repeat(250) }),
-      'st-a0',
-      NOW,
-      env(),
-      OWNER,
-    )
+    const facts = exit(baseView(), task('t-long', { title: 'x'.repeat(250) }), 'done')
     const created = facts.find((fact) => fact.type === 'task.created')
     expect(created).toBeDefined()
     const payload = created?.payload as { task: Task }
@@ -498,34 +495,50 @@ describe('交接任务标题（M7 覆盖补充）', () => {
   })
 
   it('纯空白标题保留原值兜底（不回落到空串）', () => {
-    const facts = handoffFacts(
-      baseView(),
-      task('t-blank', { title: '   ' }),
-      'st-a0',
-      NOW,
-      env(),
-      OWNER,
-    )
+    const facts = exit(baseView(), task('t-blank', { title: '   ' }), 'done')
     const created = facts.find((fact) => fact.type === 'task.created')
     const payload = created?.payload as { task: Task }
     expect(payload.task.title).toBe('   ')
   })
 })
 
-describe('kernel/handoff 目标阶段缺失（脏投影）', () => {
-  it('handoffOnExit：目标阶段在投影里找不到 → 零事实（不当作「完成」，宁可不交接）', () => {
-    const seeded = view({
-      workflows: [workflow('wf-a'), workflow('wf-b')],
-      stages: [
-        stage('st-a0', 'wf-a', 0),
-        stage('st-a1', 'wf-a', 1, { handoffWorkflowId: 'wf-b' }),
-        stage('st-b0', 'wf-b', 0),
-      ],
-      agents: [agent()],
-      runtimes: [runtime()],
-    })
-    const from = stage('st-a1', 'wf-a', 1, { handoffWorkflowId: 'wf-b' })
+describe('kernel/handoff 事实内容', () => {
+  it('描述按 2000 码点截断后带进新任务', () => {
+    const facts = exit(baseView(), task('t-d', { description: 'y'.repeat(2100) }), 'done')
+    const created = payloadsOf<{ task: Task }>(facts, 'task.created')[0].task
 
-    expect(handoffOnExit(seeded, task('t-1'), from, undefined, true, NOW, env(), OWNER)).toEqual([])
+    expect(created.description).toHaveLength(2000)
+    expect(created.title).toBe('任务 t-d')
+  })
+
+  it('沿用来源任务的项目（同一工作目录）', () => {
+    const facts = exit(baseView(), task('t-p', { projectId: 'pj-1' }), 'done')
+    const created = payloadsOf<{ task: Task }>(facts, 'task.created')[0].task
+
+    expect(created.projectId).toBe('pj-1')
+  })
+
+  it('扇出到两个工作流：两条任务、两条独立线程', () => {
+    const seeded = view({
+      workflows: [workflow('wf-a'), workflow('wf-b'), workflow('wf-c')],
+      stages: [
+        stage('st-a0', 'wf-a', 0, {
+          handoffs: [
+            handoff({ on: 'done', workflowId: 'wf-b' }),
+            handoff({ on: 'done', workflowId: 'wf-c' }),
+          ],
+        }),
+        stage('st-b0', 'wf-b', 0),
+        stage('st-c0', 'wf-c', 0),
+      ],
+    })
+    const created = payloadsOf<{ task: Task }>(
+      exit(seeded, task('t-1'), 'done'),
+      'task.created',
+    ).map((item) => item.task)
+
+    expect(created).toHaveLength(2)
+    expect(new Set(created.map((item) => item.threadId)).size).toBe(2)
+    expect(created[0].id).not.toBe(created[1].id)
   })
 })

@@ -191,8 +191,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: 'ag-1',
   onCompleteStageId: null,
   onRejectStageId: null,
-  handoffWorkflowId: null,
-  handoffStageId: null,
+  handoffs: [],
   ...over,
 })
 

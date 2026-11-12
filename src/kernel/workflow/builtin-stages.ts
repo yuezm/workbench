@@ -38,8 +38,7 @@ export function builtinStageInput(key: BuiltinStageKey): StageInput {
     agentId: null,
     onCompleteIndex: null,
     onRejectIndex: null,
-    handoffWorkflowId: null,
-    handoffStageId: null,
+    handoffs: [],
     subtaskStageId: null,
     onChildrenSettled: null,
     spawnPolicy: null,
@@ -124,11 +123,6 @@ export function resolveBuiltinStages(
       const taken = owner.get(key)
       if (taken !== undefined) return fail(`内置阶段「${expected}」重复`)
       owner.set(key, index)
-      if (key === 'done' || key === 'cancelled') {
-        if ((input.handoffWorkflowId ?? null) !== null || (input.handoffStageId ?? null) !== null) {
-          return fail(`内置阶段「${expected}」不允许交接`)
-        }
-      }
     }
     keys.push(key)
   }

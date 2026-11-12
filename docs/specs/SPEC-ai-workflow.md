@@ -176,7 +176,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `runtimes`        | id, name(uniq), executor_key, command, profile, args_template, enabled, last_probe_json, created_at                                                                                                                                                                                                                          | 运行时 = 一条**连接**；`executor_key` 指向执行器插件（**无 CHECK**：取值合法性由宿主入口按插件注册表校验，避免加插件就改 DDL 触发全库重建；列本身 NOT NULL 无 DEFAULT，必须由 IPC 按 manifest 补齐）；`last_probe_json` 存最近一次探测结论（从未探测为 NULL）。执行配置不在本表                                                                                                                                     |
 | `agents`          | id, name, description, runtime_id → runtimes, system_prompt, model, reasoning_effort, max_concurrent, permission_mode, workdir, env_json, created_at                                                                                                                                                                         | 智能体 = 连接 + 执行配置；`env_json` 存 `Record<string,string>`（默认 `'{}'`）；`permission_mode` 有 CHECK（三档）;`max_concurrent` 默认 1                                                                                                                                                                                                                                                                          |
 | `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, builtin, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, acceptance_json, max_rounds, created_at                                                                                                                | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一；`builtin` = `todo`\|`blocked`\|`done`\|`cancelled`（M18 内置阶段；NULL = 自己添加的阶段）；`acceptance_json` = 验收条目的 JSON 数组（M20，空数组 = 未声明）；`max_rounds` = 阶段内轮次上限 1–5（M21，NULL = 1 即不续轮）；`run_timeout_ms` = 本阶段单轮运行超时（M26，毫秒 300000–14400000，NULL = 用全局缺省 60 min） |
+| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, builtin, agent_id → agents?, on_complete_stage_id → workflow_stages?, on_reject_stage_id → workflow_stages?, handoffs_json, acceptance_json, max_rounds, created_at                                                                                                 | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一；`builtin` = `todo`\|`blocked`\|`done`\|`cancelled`（M18 内置阶段；NULL = 自己添加的阶段）；`acceptance_json` = 验收条目的 JSON 数组（M20，空数组 = 未声明）；`max_rounds` = 阶段内轮次上限 1–5（M21，NULL = 1 即不续轮）；`run_timeout_ms` = 本阶段单轮运行超时（M26，毫秒 300000–14400000，NULL = 用全局缺省 60 min） |
 | `tasks`           | id, title, description, workflow_id → workflows, project_id, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                              | `status` = `active`\|`completed`；`project_id` 是弱引用（M10，NULL = 默认目录），任务的运行工作目录取项目 `path`                                                                                                                                                                                                                                                                                                    |
 | `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                          | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下有执行中的任务时拒绝删除；删除时其余任务与会话改归默认目录（`projectId=null`）                                                                                                                                                                                                                         |
 | `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进）                                                                                                                                                                                                                                    |
@@ -229,7 +229,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 - 顺序固定：**待办 → 自己添加的阶段（按提交顺序）→ 已阻塞 → 已完成 → 已取消**；`position` 就是这个顺序的 0 基下标。
 - 自己添加的阶段一律属于「进行中」类别，颜色与「已阻塞」同族（都按 `active` 取色）。
 - 内置阶段**除名称 / 类别 / 位置外都可改**：进入时交给（`entry_mode` + `agent_id`）、要干什么、闸门、完成后 / 出错时进入。
-- **已完成 / 已取消不允许交接**：保存时带 `handoffWorkflowId` / `handoffStageId` 一律 reject。
+- **已完成 / 已取消不允许派单**：保存时 `handoffs` 非空一律 reject（校验在 `validateStageHandoffs`）。
 - 新建 / 编辑时缺的内置阶段由内核补齐（新建按默认值，更新按既有行原样还原——所以「删除」不成立）；历史库在首启由 `store.ensureBuiltinStages()` 按名认领（叫「待办」「已完成」的旧阶段原地变成内置阶段，保留 id / 配置 / 任务）。
 - 老数据里若有重名，只有第一条被认领为内置阶段，其余按普通阶段保留。
 
@@ -254,6 +254,21 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | COMPLETE           | 用户把卡片拖到「归档」区     | 任务 `completed`，移出看板；该任务有活跃 run 时拒绝完成                                                                               |
 
 **流转即触发进入：** 每次进入新阶段都重新按 `entry_mode` 产生对应效果（可能再次创建 run），即"SOP 串联"。
+
+**派单（M29，取代 M7 的交接两列）：** 一个阶段可以配多张**派单**——任务离开本阶段时在另一个工作流建一张新工单。派单按**触发条件**分组，槽位与去向正交：
+
+| 触发条件            | 含义                             | 谁来   |
+| ------------------- | -------------------------------- | ------ |
+| `done`              | 跑完时（本阶段没有判定）         | 执行器 |
+| `errored`           | 出错时（非零退出 / 超时 / 失联） | 执行器 |
+| `passed` / `failed` | 通过时 / 未通过时                | 判定者 |
+| `manual`            | 人工拖动 / 点完成任务            | 人     |
+
+- **派单不终结本单**：本单去向仍由 `onComplete` / `onReject` / `gate` 决定，所以同一触发条件可以「既进下一阶段又派一张单」，也可以只派单本单照旧流转。
+- **只有真的离开阶段才派**：打回原地、判定没给结论、取消都不算离开，一条都不派（与 M7 的「向前完成才交接」等价，但不再按 `position` 比较）。
+- 判定阶段没有 `done`：跑完但没结论不构成去向；`errored` 仍然可用（执行崩溃与业务过没过是两件事）。
+- 同一 `(来源任务, 阶段)` 只派一次（去重扫 `tasks` 的 `handoffFromTaskId` / `handoffFromStageId`），链深上限 8。
+- 老事实的 M7 两列按「`done` + `manual`（仅向前）」归一，判定阶段归成「`passed` + `manual`」，见 `kernel/workflow/stage-handoffs.ts#legacyHandoffs`。
 
 **打回原地不重试：** `RUN_FAILED` 时若 `on_reject` 未配置（不指定）或解析结果就是当前阶段（显式配置为自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成，详情页也可直接「重新执行」原地重排（`task.rerun`，见下）。
 

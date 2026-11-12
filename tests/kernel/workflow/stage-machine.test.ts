@@ -4,7 +4,6 @@ import {
   completeTask,
   enterStage,
   entryEffects,
-  exitsForward,
   moveTask,
   moveTaskToStage,
   resolveNextStage,
@@ -21,8 +20,7 @@ const stage = (id: string, over: Partial<WorkflowStage> = {}): WorkflowStage => 
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
-  handoffWorkflowId: null,
-  handoffStageId: null,
+  handoffs: [],
   ...over,
 })
 
@@ -130,8 +128,7 @@ function sStage(partial: Partial<WorkflowStage> & { id: string; position: number
     agentId: null,
     onCompleteStageId: null,
     onRejectStageId: null,
-    handoffWorkflowId: null,
-    handoffStageId: null,
+    handoffs: [],
     ...partial,
   }
 }
@@ -336,23 +333,6 @@ describe('stage-machine（shared 用例并入）completeTask', () => {
   it('标记为 completed，其余字段不变', () => {
     const t = sTask('s1')
     expect(completeTask(t)).toEqual({ ...t, status: 'completed' })
-  })
-})
-
-describe('stage-machine exitsForward（M7 交接触发判定）', () => {
-  it('成功流转到更后阶段 / 任务完成 → 向前', () => {
-    expect(exitsForward({ from: s0, to: s2, succeeded: true })).toBe(true)
-    expect(exitsForward({ from: s2, to: null, succeeded: true })).toBe(true)
-  })
-
-  it('原地 / 拖回更前阶段 → 不向前', () => {
-    expect(exitsForward({ from: s1, to: s1, succeeded: true })).toBe(false)
-    expect(exitsForward({ from: s2, to: s0, succeeded: true })).toBe(false)
-  })
-
-  it('打回（成功标记为 false）→ 不向前，即使 onReject 配到更后阶段', () => {
-    expect(exitsForward({ from: s1, to: s0, succeeded: false })).toBe(false)
-    expect(exitsForward({ from: s0, to: s2, succeeded: false })).toBe(false)
   })
 })
 
@@ -597,5 +577,48 @@ describe('stage-machine 内置阶段（M18）', () => {
       flow(),
     )
     expect(fromBlocked.task.currentStageId).toBe('bs-done')
+  })
+})
+
+describe('stage-machine 去向与位置无关（M29 删掉 exitsForward）', () => {
+  /** s2 显式把「完成后进入」指回 s0：回路是合法边，不再被判成「不向前」 */
+  const backFlow = (): WorkflowWithStages => ({
+    ...workflow(),
+    stages: [stage('s0'), stage('s1'), stage('s2', { entryMode: 'user', onCompleteStageId: 's0' })],
+  })
+
+  it('成功后显式去更前的阶段：照样落过去', () => {
+    const moved = moveTask(task('s2'), { type: 'RUN_SUCCEEDED', runId: 'r1' }, backFlow())
+
+    expect(moved.task.currentStageId).toBe('s0')
+    expect(moved.effects).toEqual([{ type: 'none' }])
+  })
+
+  it('未配去向 → 仍是下一个阶段（默认值只看顺序，不看位置语义）', () => {
+    const moved = moveTask(task('s0'), { type: 'RUN_SUCCEEDED', runId: 'r1' }, backFlow())
+
+    expect(moved.task.currentStageId).toBe('s1')
+  })
+
+  it('打回显式配到更前的阶段：照样落过去', () => {
+    const flow: WorkflowWithStages = {
+      ...workflow(),
+      stages: [stage('s0'), stage('s1', { onRejectStageId: 's0' }), stage('s2')],
+    }
+    const moved = moveTask(task('s1'), { type: 'RUN_FAILED', runId: 'r1' }, flow)
+
+    expect(moved.task.currentStageId).toBe('s0')
+  })
+
+  it('人工拖到更前 / 更后的阶段都以落点为准', () => {
+    expect(moveTaskToStage(task('s2'), 's1', workflow()).task.currentStageId).toBe('s1')
+    expect(moveTaskToStage(task('s1'), 's2', workflow()).effects).toEqual([{ type: 'waitUser' }])
+  })
+
+  it('完成任务只改状态，不动阶段', () => {
+    const done = completeTask(task('s1'))
+
+    expect(done.status).toBe('completed')
+    expect(done.currentStageId).toBe('s1')
   })
 })

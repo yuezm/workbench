@@ -246,8 +246,7 @@ const sampleStage = {
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
-  handoffWorkflowId: null,
-  handoffStageId: null,
+  handoffs: [],
 } satisfies WorkflowStage
 
 const sampleWorkflow = {
@@ -453,8 +452,7 @@ describe('protocol/entities', () => {
     expect(keysOf(sampleStage)).toEqual([
       'agentId',
       'entryMode',
-      'handoffStageId',
-      'handoffWorkflowId',
+      'handoffs',
       'id',
       'name',
       'onCompleteStageId',

@@ -1,74 +1,40 @@
 /**
- * 跨工作流交接（纯函数，M7）：阶段离开且向前时，在目标工作流建一条关联任务。
+ * 派单（M29，取代 M7 的跨工作流交接）：阶段离开且触发条件命中时，在目标工作流建一张新工单。
  *
- * 触发点收敛到 `decide` 的三处（成功流转、向前拖拽、直接完成），本文件只回答两件事：
- * 「这次离开该交接给谁」与「交接要产哪些事实」。打回与删阶段重挂显式排除（见
- * `workflow/stage-machine.ts` 的 `exitsForward`）。
+ * 触发点收敛到 `decide` 的三处（run 结算、人工拖拽、直接完成），本文件只回答两件事：
+ * 「这次离开命中哪些派单目标」与「派单要产哪些事实」。
  *
  * 语义边界（D11）：
  * - 产物 = 目标工作流一条 `task.created`（`origin='handoff'`）+ 新隐式线程
  *   （`source='handoff'`、`externalRef=null`）+ 目标阶段为 agent 时的入口 run；
  * - **不回写来源任务**：不产 `task.updated`，来源任务的状态只由它自己的流转事实表达；
- *   交接任务挂 `parentTaskId = 来源任务`，但只有在来源阶段显式配了 `onChildrenSettled`
+ *   派单产物挂 `parentTaskId = 来源任务`，但只有在来源阶段显式配了 `onChildrenSettled`
  *   时才会参与 rollup（见 `spawn.ts#childrenSettledFacts` 的交接守卫）；
- * - 去重：扫 `view.tasks` 的 `(handoffFromTaskId, handoffFromStageId)`，同一对只交接一次；
- * - 链深上限 8：沿 `handoffFromTaskId` 回溯，超限零事实（防交接环无限擴张）。
+ * - 去重：扫 `view.tasks` 的 `(handoffFromTaskId, handoffFromStageId)`，同一对只派一次
+ *   （同一阶段可以配多条派单，它们在同一批里一起产出；离开第二次才需要 runId 维度，见待办）；
+ * - 链深上限 8：沿 `handoffFromTaskId` 回溯，超限零事实（防交接环无限扩张）。
  */
-import type { StageInput, Task, WorkflowStage } from '../protocol/entities'
+import type {
+  BuiltinStageKey,
+  StageHandoffGuard,
+  StageInput,
+  Task,
+  WorkflowStage,
+} from '../protocol/entities'
 import type { Actor, Environment, FactDraft, Id, Iso, View } from './types'
 import { entryRunFacts } from './task-effects'
 import { openThreadRow, openedFacts, taskAttachedFacts, withTask } from './threads'
-import { exitsForward } from './workflow/stage-machine'
+import { handoffTargetsOf, stagesOfWorkflow, type HandoffTarget } from './workflow/stage-handoffs'
+
+export { handoffTargetsOf, stagesOfWorkflow, type HandoffTarget }
 
 /** 交接链深上限：新产出的任务最多是第 8 层，第 9 层不再建。 */
 export const HANDOFF_MAX_DEPTH = 8
 
-/** 交接目标：目标工作流 + 落地阶段（目标工作流没有阶段时不交接，不会出现 null）。 */
-export interface HandoffTarget {
-  workflowId: Id
-  stageId: Id
-}
-
 const truncate = (value: string, max: number): string =>
   Array.from(value).length > max ? Array.from(value).slice(0, max).join('') : value
 
-/** 工作流下的阶段，按 position 升序（与投影唯一约束一致）。 */
-function stagesOfWorkflow(view: View, workflowId: Id): WorkflowStage[] {
-  const stages: WorkflowStage[] = []
-  for (const stage of view.stages.values()) {
-    if (stage.workflowId === workflowId) stages.push(stage)
-  }
-  return stages.sort((left, right) => left.position - right.position)
-}
-
-/**
- * 解析本次离开的交接目标：读阶段两列 → 目标工作流 + 目标阶段。
- *
- * 以下情况返回 null（零事实，不 reject）：阶段没配交接、目标工作流已删 / 是自身、
- * `handoffStageId` 已不属目标工作流、目标工作流没有任何阶段。保存时已校验，这里是防御
- * （删工作流与导入旧数据都会绕过校验）。
- */
-export function handoffTargetOf(
-  view: View,
-  sourceTask: Task,
-  exitedStageId: Id,
-): HandoffTarget | null {
-  const stage = view.stages.get(exitedStageId)
-  if (stage === undefined || stage.handoffWorkflowId === null) return null
-  const workflowId = stage.handoffWorkflowId
-  if (workflowId === sourceTask.workflowId) return null
-  const workflow = view.workflows.get(workflowId)
-  if (workflow === undefined) return null
-  const stages = stagesOfWorkflow(view, workflow.id)
-  if (stage.handoffStageId === null) {
-    const first = stages[0]
-    return first === undefined ? null : { workflowId: workflow.id, stageId: first.id }
-  }
-  const target = stages.find((candidate) => candidate.id === stage.handoffStageId)
-  return target === undefined ? null : { workflowId: workflow.id, stageId: target.id }
-}
-
-/** 同一 `(来源任务, 阶段)` 是否已经交接：扫 `view.tasks` 的交接两列。 */
+/** 同一 `(来源任务, 阶段)` 是否已经派过单：扫 `view.tasks` 的交接两列。 */
 export function handedOffAlready(view: View, sourceTaskId: Id, exitedStageId: Id): boolean {
   for (const task of view.tasks.values()) {
     if (task.handoffFromTaskId === sourceTaskId && task.handoffFromStageId === exitedStageId) {
@@ -97,25 +63,20 @@ export function handoffDepth(view: View, task: Task): number {
 }
 
 /**
- * 交接事实（D11）：目标工作流的一条任务 + 新隐式线程 + 入口 run。
+ * 单个派单目标的事实（D11）：目标工作流的一条任务 + 新隐式线程 + 入口 run。
  *
- * 零事实：没配目标 / 目标已失效 / 同一 `(任务, 阶段)` 已交接 / 链深已达上限。
  * 事实顺序与 `kernel/rules` 的隐式任务一致（线程 → 挂任务 → 任务 → 入口 run），
  * 保证重建可复现。
  */
-export function handoffFacts(
+function handoffFactsFor(
   view: View,
   sourceTask: Task,
   exitedStageId: Id,
+  target: HandoffTarget,
   now: Iso,
   env: Environment,
   actor: Actor,
 ): FactDraft[] {
-  const target = handoffTargetOf(view, sourceTask, exitedStageId)
-  if (target === null) return []
-  if (handedOffAlready(view, sourceTask.id, exitedStageId)) return []
-  if (handoffDepth(view, sourceTask) >= HANDOFF_MAX_DEPTH) return []
-
   const title = truncate(sourceTask.title.trim(), 200) || sourceTask.title
   const thread = openThreadRow(env, { source: 'handoff', externalRef: null, title, now })
   const task: Task = {
@@ -132,7 +93,7 @@ export function handoffFacts(
     externalRef: null,
     labels: [],
     threadId: thread.id,
-    // 挂来源任务（M25）：交接产物同样是一条「父任务的子任务」，来源阶段显式配了
+    // 挂来源任务（M25）：派单产物同样是一条「父任务的子任务」，来源阶段显式配了
     // `onChildrenSettled` 时，它全部结终态就能唤醒来源任务（缺陷全修完 → 自动回归）。
     // 但「不回写来源任务」的语义不变：这里不产 `task.updated`。
     parentTaskId: sourceTask.id,
@@ -154,55 +115,63 @@ export function handoffFacts(
 }
 
 /**
- * 阶段退出 → 交接事实：只有「成功离开且向前」才产事实。
- * 打回 / 原地 / 拖回更早阶段一律零事实；这是三处钩子共用的入口。
+ * 阶段离开 → 派单事实：只有触发条件命中且还有目标时才产事实。
+ *
+ * 打回 / 原地 / 取消不派单由调用方选的 `guard` 表达（见 `handoffGuardOf`）；
+ * `options.forward` 只影响 `manual` 里标了 `forwardOnly` 的派单。
  */
 export function handoffOnExit(
   view: View,
   task: Task,
-  fromStage: WorkflowStage,
-  toStage: WorkflowStage | null | undefined,
-  succeeded: boolean,
+  stage: WorkflowStage,
+  guard: StageHandoffGuard,
   now: Iso,
   env: Environment,
   actor: Actor,
+  options?: { forward?: boolean },
 ): FactDraft[] {
-  // 目标阶段在投影里找不到（脏投影）：不当作「完成」，宁可不交接
-  if (toStage === undefined) return []
-  if (!exitsForward({ from: fromStage, to: toStage, succeeded })) return []
-  return handoffFacts(view, task, fromStage.id, now, env, actor)
+  const targets = handoffTargetsOf(view, task.workflowId, stage, guard, options)
+  if (targets.length === 0) return []
+  if (handedOffAlready(view, task.id, stage.id)) return []
+  if (handoffDepth(view, task) >= HANDOFF_MAX_DEPTH) return []
+  return targets.flatMap((target) => handoffFactsFor(view, task, stage.id, target, now, env, actor))
 }
 
 /**
- * 阶段交接目标语义校验（`workflow.create` / `workflow.update` 共用）。
+ * 派单目标语义校验（`workflow.create` / `workflow.update` 共用）。
  * 返回第一条错误文案；全部合法返回 null。
  *
- * 只做视图能判的部分：目标工作流存在且 ≠ 自身、给了 `handoffStageId` 就必须属于目标
- * 工作流；只给阶段不给工作流同样非法（形状校验在 `protocol/validate`）。
+ * 只做视图能判的部分：目标工作流存在且 ≠ 自身、给了 `stageId` 就必须属于目标工作流、
+ * 内置终态不允许派单。形状校验在 `protocol/validate`。
  */
 export function validateStageHandoffs(
   view: View,
   workflowId: Id,
   stages: readonly StageInput[],
+  builtinKeys?: readonly (BuiltinStageKey | null)[],
 ): string | null {
-  for (const stage of stages) {
-    const workflowTarget = stage.handoffWorkflowId ?? null
-    const stageTarget = stage.handoffStageId ?? null
-    if (workflowTarget === null) {
-      if (stageTarget !== null) return `阶段「${stage.name}」的交接目标阶段缺少目标工作流`
-      continue
+  for (let index = 0; index < stages.length; index += 1) {
+    const stage = stages[index]
+    const handoffs = stage.handoffs ?? []
+    if (handoffs.length === 0) continue
+    // 内置键优先取调用方解析好的（提交的输入可能只给了名字，没带 builtin）
+    const key = builtinKeys?.[index] ?? stage.builtin ?? null
+    if (key === 'done' || key === 'cancelled') {
+      return `内置阶段「${stage.name}」不允许派单`
     }
-    if (workflowTarget === workflowId) {
-      return `阶段「${stage.name}」的交接目标工作流不能是自身`
-    }
-    const target = view.workflows.get(workflowTarget)
-    if (target === undefined) {
-      return `阶段「${stage.name}」的交接目标工作流不存在: ${workflowTarget}`
-    }
-    if (stageTarget === null) continue
-    const targetStage = view.stages.get(stageTarget)
-    if (targetStage === undefined || targetStage.workflowId !== target.id) {
-      return `阶段「${stage.name}」的交接目标阶段不属于目标工作流: ${stageTarget}`
+    for (const handoff of handoffs) {
+      if (handoff.workflowId === workflowId) {
+        return `阶段「${stage.name}」的派单目标工作流不能是自身`
+      }
+      const target = view.workflows.get(handoff.workflowId)
+      if (target === undefined) {
+        return `阶段「${stage.name}」的派单目标工作流不存在: ${handoff.workflowId}`
+      }
+      if (handoff.stageId === null) continue
+      const targetStage = view.stages.get(handoff.stageId)
+      if (targetStage === undefined || targetStage.workflowId !== target.id) {
+        return `阶段「${stage.name}」的派单目标阶段不属于目标工作流: ${handoff.stageId}`
+      }
     }
   }
   return null

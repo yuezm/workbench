@@ -66,8 +66,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
-  handoffWorkflowId: null,
-  handoffStageId: null,
+  handoffs: [],
   subtaskStageId: null,
   onChildrenSettled: null,
   spawnPolicy: null,
@@ -1466,11 +1465,16 @@ describe('kernel/decide 工作流', () => {
     })
     expect(
       update([
-        { id: 'bs-cancelled', name: '已取消', entryMode: 'none', handoffWorkflowId: 'wf-2' },
+        {
+          id: 'bs-cancelled',
+          name: '已取消',
+          entryMode: 'none',
+          handoffs: [{ on: 'done', workflowId: 'wf-2', stageId: null }],
+        },
       ]),
     ).toEqual({
       facts: [],
-      reject: { code: 'invalid_input', message: '内置阶段「已取消」不允许交接' },
+      reject: { code: 'invalid_input', message: '内置阶段「已取消」不允许派单' },
     })
     // 只提交「待办」：另外三条内置阶段按既有行还原，位置不变 → 只有 workflow.updated
     expect(update([{ id: 'bs-todo', name: '待办', entryMode: 'none', builtin: 'todo' }])).toEqual({
@@ -1491,9 +1495,17 @@ describe('kernel/decide 工作流', () => {
       facts: [],
       reject: { code: 'invalid_input', message: '内置阶段名称固定为「已完成」' },
     })
-    expect(create([{ name: '已完成', entryMode: 'none', handoffWorkflowId: 'wf-1' }])).toEqual({
+    expect(
+      create([
+        {
+          name: '已完成',
+          entryMode: 'none',
+          handoffs: [{ on: 'done', workflowId: 'wf-1', stageId: null }],
+        },
+      ]),
+    ).toEqual({
       facts: [],
-      reject: { code: 'invalid_input', message: '内置阶段「已完成」不允许交接' },
+      reject: { code: 'invalid_input', message: '内置阶段「已完成」不允许派单' },
     })
     const created = create([{ name: '开发', entryMode: 'agent', agentId: 'ag-1' }])
     expect(created.facts.map((fact) => fact.type)).toEqual([

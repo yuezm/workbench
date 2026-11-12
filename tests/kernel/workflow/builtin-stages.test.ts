@@ -16,8 +16,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
-  handoffWorkflowId: null,
-  handoffStageId: null,
+  handoffs: [],
   subtaskStageId: null,
   onChildrenSettled: null,
   spawnPolicy: null,
@@ -138,24 +137,12 @@ describe('kernel/workflow/builtin-stages resolveBuiltinStages', () => {
     })
   })
 
-  it('已完成 / 已取消不允许交接（两列都判）', () => {
-    expect(
-      resolveBuiltinStages(
-        [{ name: '已完成', entryMode: 'none', handoffWorkflowId: 'wf-b' }],
-        null,
-      ),
-    ).toEqual({
-      keys: [],
-      missing: [],
-      error: '内置阶段「已完成」不允许交接',
-    })
-    expect(
-      resolveBuiltinStages([{ name: '已取消', entryMode: 'none', handoffStageId: 'st-b1' }], null),
-    ).toEqual({
-      keys: [],
-      missing: [],
-      error: '内置阶段「已取消」不允许交接',
-    })
+  it('终态也不拦：派单的终态校验归 validateStageHandoffs（M29 从本函数移出）', () => {
+    const resolved = resolveBuiltinStages([{ name: '已完成', entryMode: 'none' }], null)
+
+    expect(resolved.keys).toEqual(['done'])
+    expect(resolved.missing).toEqual(['todo', 'blocked', 'cancelled'])
+    expect(resolved.error).toBeNull()
   })
 
   it('自己添加的阶段不受影响：键为 null、参与缺失计算', () => {
@@ -184,8 +171,7 @@ describe('kernel/workflow/builtin-stages builtinStageInput', () => {
       agentId: null,
       onCompleteIndex: null,
       onRejectIndex: null,
-      handoffWorkflowId: null,
-      handoffStageId: null,
+      handoffs: [],
       subtaskStageId: null,
       onChildrenSettled: null,
       spawnPolicy: null,

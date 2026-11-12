@@ -79,8 +79,8 @@ interface StageRow {
   agent_id: string | null
   on_complete_stage_id: string | null
   on_reject_stage_id: string | null
-  handoff_workflow_id: string | null
-  handoff_stage_id: string | null
+  /** M29 派单（JSON 数组文本；老行由投影迁移补 '[]'） */
+  handoffs_json: string
   subtask_stage_id: string | null
   on_children_settled: string | null
   spawn_policy: string | null
@@ -305,8 +305,11 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   agentId: row.agent_id,
   onCompleteStageId: row.on_complete_stage_id,
   onRejectStageId: row.on_reject_stage_id,
-  handoffWorkflowId: row.handoff_workflow_id,
-  handoffStageId: row.handoff_stage_id,
+  // M29：坏 JSON / 空串按「不派单」归一，不让一条脏行把整张视图读挂
+  handoffs:
+    row.handoffs_json === undefined || row.handoffs_json.trim() === ''
+      ? []
+      : (JSON.parse(row.handoffs_json) as WorkflowStage['handoffs']),
   subtaskStageId: row.subtask_stage_id,
   onChildrenSettled: row.on_children_settled as WorkflowStage['onChildrenSettled'],
   spawnPolicy: row.spawn_policy as WorkflowStage['spawnPolicy'],
@@ -543,7 +546,7 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
     db
       .prepare(
         `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id,
-                on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id,
+                on_complete_stage_id, on_reject_stage_id, handoffs_json,
                 subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
                 max_rounds, run_timeout_ms, gate_max_fails, gate_on_pass_stage_id,
                 gate_on_fail_stage_id

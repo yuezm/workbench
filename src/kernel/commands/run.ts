@@ -10,6 +10,7 @@ import type { Decision, Environment, FactDraft, Id, Iso, Limits, View } from '..
 import type { SettledRun } from '../run'
 import { cardsFromReceipt, expiredCardFacts, resumedRun } from '../cards'
 import { handoffOnExit } from '../handoff'
+import { handoffGuardOf } from '../workflow/stage-handoffs'
 import { laterPrompt } from '../prompt'
 import {
   abandonedFacts,
@@ -252,12 +253,24 @@ function stageTransitionFacts(
     ? ({ type: 'RUN_SUCCEEDED', runId: run.id, verdict } as const)
     : ({ type: 'RUN_FAILED', runId: run.id } as const)
   const moved = moveTask(task, event, flow)
-  // 闸门未通过而离开本阶段不算「向前完成」：不触发跨工作流交接（放行才算）
-  const gateFailed = current.gate !== null && current.gate !== undefined && verdict === 'fail'
-  const forwarded = succeeded && !(gateFailed && moved.gateExhausted !== true)
   const next = moved.gateExhausted
     ? { ...moved.task, labels: withLabel(moved.task.labels, GATE_DEGRADED_LABEL) }
     : moved.task
+  // M29：派单按触发条件分组——执行成功但被判定挡下是 `failed`，判定缺结论 / 打回原地
+  // 都不算「离开」，一条都不派（与 M7 的「向前完成才交接」等价，但不再靠位置猜）。
+  const leftStage =
+    next.status === 'completed' ||
+    (next.currentStageId !== null && next.currentStageId !== task.currentStageId)
+  const guard = leftStage
+    ? handoffGuardOf(current, {
+        kind: 'run',
+        status: run.status,
+        verdict,
+        gateExhausted: moved.gateExhausted === true,
+      })
+    : null
+  const handoffFacts = (): FactDraft[] =>
+    guard === null ? [] : handoffOnExit(view, task, current, guard, now, env, HOST_SCHEDULER)
   /** 预算耗尽放行时的留痕：任务评论（详情页可见，不改状态） */
   const degradedFacts = (): FactDraft[] => {
     if (moved.gateExhausted !== true) return []
@@ -272,16 +285,14 @@ function stageTransitionFacts(
   }
   if (next.status === 'completed') {
     return [
-      ...handoffOnExit(view, task, current, null, forwarded, now, env, HOST_SCHEDULER),
+      ...handoffFacts(),
       hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now),
       ...degradedFacts(),
     ]
   }
-  if (next.currentStageId !== null && next.currentStageId !== task.currentStageId) {
-    const target = flow.stages.find((stage) => stage.id === next.currentStageId)
+  if (leftStage) {
     return [
-      // 目标阶段找不到属于脏投影：不当作「完成」，宁可不交接（判断收在 handoffOnExit 里）
-      ...handoffOnExit(view, task, current, target, forwarded, now, env, HOST_SCHEDULER),
+      ...handoffFacts(),
       hostDraft(
         'task.moved',
         {

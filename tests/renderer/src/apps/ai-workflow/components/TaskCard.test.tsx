@@ -13,8 +13,7 @@ function stage(entryMode: WorkflowStage['entryMode']): WorkflowStage {
     agentId: null,
     onCompleteStageId: null,
     onRejectStageId: null,
-    handoffWorkflowId: null,
-    handoffStageId: null,
+    handoffs: [],
   }
 }
 const task: Task = {

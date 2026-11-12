@@ -1381,3 +1381,57 @@ describe('receipt.deliverables（M28：阶段交付物形状）', () => {
     ).toBe(false)
   })
 })
+
+describe('protocol/validate 派单形状（M29）', () => {
+  const withStage = (stage: Record<string, unknown>): WorkflowInput =>
+    ({ name: '流程', stages: [{ name: '实现', entryMode: 'none', ...stage }] }) as WorkflowInput
+  const message = (input: WorkflowInput): string | undefined =>
+    rejectedMessage(cmd('workflow.create', { input }))
+
+  it('handoffs 必须是数组；条目必须是对象', () => {
+    expect(message(withStage({ handoffs: 'x' }))).toBe('input.stages[0].handoffs 必须是数组')
+    expect(message(withStage({ handoffs: ['x'] }))).toBe('input.stages[0].handoffs[0] 必须是对象')
+  })
+
+  it('条数上限按 COMMAND_LIMITS.stageHandoffs', () => {
+    const many = Array.from({ length: COMMAND_LIMITS.stageHandoffs + 1 }, () => ({
+      on: 'done',
+      workflowId: 'wf2',
+      stageId: null,
+    }))
+
+    expect(message(withStage({ handoffs: many }))).toBe(
+      `input.stages[0].handoffs 最多 ${COMMAND_LIMITS.stageHandoffs} 条`,
+    )
+  })
+
+  it('on 只认五个触发条件；workflowId 必填；stageId 可空；forwardOnly 只认布尔', () => {
+    expect(message(withStage({ handoffs: [{ on: 'ok', workflowId: 'wf2' }] }))).toBe(
+      'input.stages[0].handoffs[0].on取值必须是 done / errored / passed / failed / manual',
+    )
+    expect(message(withStage({ handoffs: [{ on: 'done' }] }))).toBe(
+      'input.stages[0].handoffs[0].workflowId必填',
+    )
+    expect(message(withStage({ handoffs: [{ on: 'done', workflowId: 'wf2', stageId: 7 }] }))).toBe(
+      'input.stages[0].handoffs[0].stageId必须是字符串',
+    )
+    expect(
+      message(withStage({ handoffs: [{ on: 'manual', workflowId: 'wf2', forwardOnly: 'yes' }] })),
+    ).toBe('input.stages[0].handoffs[0].forwardOnly必须是布尔值')
+  })
+
+  it('合法清单通过', () => {
+    const result = validateCommand(
+      cmd('workflow.create', {
+        input: withStage({
+          handoffs: [
+            { on: 'done', workflowId: 'wf2', stageId: 'st2' },
+            { on: 'errored', workflowId: 'wf2', stageId: null, forwardOnly: false },
+          ],
+        }),
+      }),
+    )
+
+    expect(result.ok).toBe(true)
+  })
+})

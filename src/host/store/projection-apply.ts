@@ -54,6 +54,7 @@ import type { ThreadRow } from '../../protocol/thread'
 import type { TaskComment } from '../../protocol/task-comment'
 import type { ReviewReport } from '../../protocol/review'
 import { StoreError } from './errors'
+import { legacyHandoffs } from '../../kernel/workflow/stage-handoffs'
 
 /** 一条投影变更 + 它所属事实的时间（阶段行首次插入的 created_at 兜底）。 */
 export interface ProjectionWrite {
@@ -247,8 +248,7 @@ const normalizeStage = (row: WorkflowStage): WorkflowStage => {
   return {
     ...row,
     builtin: legacy.builtin ?? null,
-    handoffWorkflowId: legacy.handoffWorkflowId ?? null,
-    handoffStageId: legacy.handoffStageId ?? null,
+    handoffs: legacy.handoffs ?? legacyHandoffs(legacy),
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,
@@ -381,8 +381,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, builtin, agent_id, on_complete_stage_id, on_reject_stage_id, handoff_workflow_id, handoff_stage_id, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, max_rounds, run_timeout_ms, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, builtin, agent_id, on_complete_stage_id, on_reject_stage_id, handoffs_json, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, max_rounds, run_timeout_ms, gate_max_fails, gate_on_pass_stage_id, gate_on_fail_stage_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
@@ -392,8 +392,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          agent_id = excluded.agent_id,
          on_complete_stage_id = excluded.on_complete_stage_id,
          on_reject_stage_id = excluded.on_reject_stage_id,
-         handoff_workflow_id = excluded.handoff_workflow_id,
-         handoff_stage_id = excluded.handoff_stage_id,
+         handoffs_json = excluded.handoffs_json,
          subtask_stage_id = excluded.subtask_stage_id,
          on_children_settled = excluded.on_children_settled,
          spawn_policy = excluded.spawn_policy,
@@ -656,8 +655,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.agentId,
         stage.onCompleteStageId,
         stage.onRejectStageId,
-        stage.handoffWorkflowId,
-        stage.handoffStageId,
+        JSON.stringify(stage.handoffs ?? []),
         stage.subtaskStageId ?? null,
         stage.onChildrenSettled ?? null,
         stage.spawnPolicy ?? null,

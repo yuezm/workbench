@@ -25,6 +25,7 @@ import {
   RUN_EVENT_TYPES,
   RUN_TERMINAL_STATUSES,
   SPAWN_POLICIES,
+  STAGE_HANDOFF_GUARDS,
   STAGE_ROUND_LIMITS,
   STAGE_TIMEOUT_LIMITS,
 } from './entities'
@@ -78,6 +79,8 @@ export const COMMAND_LIMITS = {
   elapsedMs: 86_400_000,
   protocolVersion: 1_000_000,
   stages: 50,
+  /** 单个阶段最多几条派单（同一触发条件可以扇出到多个工作流） */
+  stageHandoffs: 5,
   maxConcurrent: 8,
   /** 领取容量上限：与运行时并发上限一致（1–8） */
   claimCapacity: 8,
@@ -267,6 +270,29 @@ const checkAcceptanceList = (value: unknown, label: string): Check => {
   return null
 }
 
+/**
+ * 派单清单（M29）：触发条件 + 目标工作流 / 阶段。目标的存在性、自指与从属由内核按视图判，
+ * 这里只挡形状与条数。
+ */
+const checkHandoffs = (value: unknown, label: string): Check => {
+  if (!Array.isArray(value)) return `${label} 必须是数组`
+  if (value.length > COMMAND_LIMITS.stageHandoffs) {
+    return `${label} 最多 ${COMMAND_LIMITS.stageHandoffs} 条`
+  }
+  for (let i = 0; i < value.length; i += 1) {
+    const at = `${label}[${i}]`
+    const handoff = asRecord(value[i])
+    if (!handoff) return `${at} 必须是对象`
+    const error =
+      requiredEnum(handoff.on, `${at}.on`, STAGE_HANDOFF_GUARDS) ??
+      requiredId(handoff.workflowId, `${at}.workflowId`) ??
+      optionalId(handoff.stageId, `${at}.stageId`) ??
+      optionalBoolean(handoff.forwardOnly, `${at}.forwardOnly`)
+    if (error) return error
+  }
+  return null
+}
+
 const checkStage = (value: unknown, label: string): Check => {
   const stage = asRecord(value)
   if (!stage) return `${label} 必须是对象`
@@ -289,9 +315,10 @@ const checkStage = (value: unknown, label: string): Check => {
       0,
       COMMAND_LIMITS.stages - 1,
     ) ??
-    // M7 交接：目标工作流 / 目标阶段存在性由内核按视图判（这里只校验 id 形状）
-    optionalId(stage.handoffWorkflowId, `${label}.handoffWorkflowId`) ??
-    optionalId(stage.handoffStageId, `${label}.handoffStageId`) ??
+    // M29 派单：触发条件枚举在这里挡，目标工作流 / 阶段的存在性由内核按视图判
+    (stage.handoffs === undefined || stage.handoffs === null
+      ? null
+      : checkHandoffs(stage.handoffs, `${label}.handoffs`)) ??
     // M8 子任务：落点阶段存在性 / 从属由内核按视图判
     optionalId(stage.subtaskStageId, `${label}.subtaskStageId`) ??
     optionalEnum(stage.onChildrenSettled, `${label}.onChildrenSettled`, ON_CHILDREN_SETTLED) ??

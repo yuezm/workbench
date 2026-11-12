@@ -36,8 +36,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   agentId: null,
   onCompleteStageId: null,
   onRejectStageId: null,
-  handoffWorkflowId: null,
-  handoffStageId: null,
+  handoffs: [],
   subtaskStageId: null,
   onChildrenSettled: null,
   spawnPolicy: null,
@@ -1014,5 +1013,49 @@ describe('kernel/project：项目（M10）', () => {
     delete legacy.projectId
     const changes = project(fact(4, 'task.created', { task: legacy as unknown as Task }))
     expect((changes[0]?.row as Task).projectId).toBeNull()
+  })
+})
+
+describe('kernel/project stage 归一（M29 派单）', () => {
+  it('老事实缺 handoffs：按 M7 两列归一成「跑完 + 人工往前」两条', () => {
+    // 老事实根本没有 handoffs 这个字段：删掉再回放
+    const legacy = {
+      ...stage(),
+      handoffWorkflowId: 'wf-b',
+      handoffStageId: 'st-b1',
+    } as unknown as Record<string, unknown>
+    delete legacy.handoffs
+
+    const changes = project(fact(5, 'stage.created', { stage: legacy as unknown as WorkflowStage }))
+    const row = changes[0]?.row as WorkflowStage
+
+    expect(row.handoffs).toEqual([
+      { on: 'done', workflowId: 'wf-b', stageId: 'st-b1' },
+      { on: 'manual', workflowId: 'wf-b', stageId: 'st-b1', forwardOnly: true },
+    ])
+  })
+
+  it('老事实的判定阶段：老交接折算成「通过 + 人工往前」', () => {
+    const legacy = {
+      ...stage({ gate: { maxFails: 2, onPassStageId: null, onFailStageId: null } }),
+      handoffWorkflowId: 'wf-b',
+      handoffStageId: null,
+    } as unknown as Record<string, unknown>
+    delete legacy.handoffs
+
+    const row = project(fact(6, 'stage.created', { stage: legacy as unknown as WorkflowStage }))[0]
+      ?.row as WorkflowStage
+
+    expect(row.handoffs?.map((item) => item.on)).toEqual(['passed', 'manual'])
+  })
+
+  it('新事实带 handoffs：原样保留，不再看老两列', () => {
+    const next = stage({
+      handoffs: [{ on: 'errored', workflowId: 'wf-b', stageId: null }],
+    })
+
+    const row = project(fact(7, 'stage.created', { stage: next }))[0]?.row as WorkflowStage
+
+    expect(row.handoffs).toEqual([{ on: 'errored', workflowId: 'wf-b', stageId: null }])
   })
 })

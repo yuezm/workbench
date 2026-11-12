@@ -179,8 +179,12 @@ export function moveTaskCommand(
       facts.push(hostDraft('task.comment_added', { comment }, now))
     }
   }
-  // M7：拖到更后阶段 = 向前离开，触发交接；拖回更前阶段不触发
-  facts.push(...handoffOnExit(view, task, fromStage, target, true, now, env, OWNER))
+  // M29：人工拖动走 `manual` 触发条件；标了「仅向前」的派单在拖回更前阶段（返工）时不发
+  facts.push(
+    ...handoffOnExit(view, task, fromStage, 'manual', now, env, OWNER, {
+      forward: target.position > fromStage.position,
+    }),
+  )
   return done(facts)
 }
 
@@ -198,9 +202,9 @@ export function completeTaskCommand(
   if (!fromStage) return reject('conflict', '任务当前阶段无效')
   if (view.activeTaskIds.has(task.id)) return reject('conflict', '执行中的阶段不能完成')
   const completed: Task = { ...completeTask(task), updatedAt: now }
-  // M7：完成前先产交接事实（完成 = 离开当前阶段且向前）
+  // M29：完成 = 离开当前阶段且视为向前，派单按 `manual` 触发
   const facts: FactDraft[] = [
-    ...handoffOnExit(view, task, fromStage, null, true, now, env, OWNER),
+    ...handoffOnExit(view, task, fromStage, 'manual', now, env, OWNER, { forward: true }),
     ownerDraft('task.completed', { task: completed }, now),
   ]
   // M6.5：线程内任务全部完成 → 归档线程

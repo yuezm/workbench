@@ -458,8 +458,7 @@ describe('强杀重启：事实已提交、投影落后', () => {
           agentId: null,
           onCompleteStageId: null,
           onRejectStageId: null,
-          handoffWorkflowId: null,
-          handoffStageId: null,
+          handoffs: [],
         }
         const aheadTask: Task = {
           id: 'tk-ahead',

@@ -1,11 +1,13 @@
 /**
- * M7 跨工作流交接 E2E：真实应用里完成任务 → 目标工作流出现关联任务。
+ * 派单 E2E（M29 取代 M7 交接两列）：真实应用里完成任务 → 目标工作流出现关联工单。
  *
- * 种子（`helpers/seed-handoff.ts`）建 A（首阶段交接目标 = B）与 B，并在 A 首阶段建源任务；
+ * 种子（`helpers/seed-handoff.ts`）建 A（首阶段配一条 `manual` 派单到 B）与 B，并在 A 首阶段建源任务；
  * 之后经桥 `task.complete`，断言：
  * - B 出现一条 `origin='handoff'` 的任务，`handoff_from_task_id` / `handoff_from_stage_id` 指向源；
  * - 该任务挂新隐式线程（`threads.source='handoff'`）；
- * - 源任务变 `completed`；重复完成任务不重复建（同一 (任务, 阶段) 只交接一次）。
+ * - 源任务变 `completed`；同一 `commandId` 重放（连点 / 重试）不重复建——命令幂等，
+ *   这是 M29/M30 下仍然成立的去重口径：人工离开不按 `(任务, 阶段)` 去重（SPEC 派单一节：
+ *   「人工拖动 / 完成任务没有 run，不去重」），重复提交由 `commands` 表按 `commandId` 回放。
  *
  * 断言一律读临时 userData 里的库文件，不依赖真 CLI、不动真实 %APPDATA%。
  */
@@ -25,7 +27,7 @@ test.afterEach(async () => {
   seed = undefined
 })
 
-test('跨工作流交接：完成阶段在目标工作流建关联任务，重复完成不重复建', async () => {
+test('跨工作流派单：完成阶段在目标工作流建关联工单，同一命令重放不重复建', async () => {
   test.setTimeout(120_000)
 
   const userDataDir = createTempUserDataDir()
@@ -60,11 +62,11 @@ test('跨工作流交接：完成阶段在目标工作流建关联任务，重�
       taskCreatedFacts: 2,
     })
 
-  // 2) 再完成一次（源任务已完成 / 同 (任务, 阶段) 已交接）：不重复建任务
+  // 2) 同一 commandId 重放（连点「完成任务」/ 请求重试）：命令幂等，不重复建工单
   await page.evaluate(
     ({ taskId }) => {
       const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
-      return bridge.dispatch({ type: 'task.complete', commandId: 'e2e-handoff-2', id: taskId })
+      return bridge.dispatch({ type: 'task.complete', commandId: 'e2e-handoff-1', id: taskId })
     },
     { taskId: seeded.sourceTaskId },
   )

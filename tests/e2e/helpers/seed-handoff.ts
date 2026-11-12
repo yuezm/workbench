@@ -1,10 +1,10 @@
 /**
- * M7 跨工作流交接 E2E 的种子夹具（纯 Node，不碰 Electron）：
+ * 派单 E2E 的种子夹具（纯 Node，不碰 Electron）：
  *
  * 1. 用真实 `openDatabase` + `createStore`（真实 kernel）在临时 userData 里建库；
- * 2. 种两个工作流：源工作流 A（首阶段 `entryMode='none'`，交接目标 = B）与 B（单阶段）；
+ * 2. 种两个工作流：源工作流 A（首阶段 `entryMode='none'`，配一条 `manual` 派单到 B）与 B（单阶段）；
  * 3. 在 A 首阶段建一条手工任务（不产 run：none 阶段）；
- * 4. e2e 在真实应用里 `task.complete`，断言 B 出现一条 `origin='handoff'` 的关联任务。
+ * 4. e2e 在真实应用里 `task.complete`，断言 B 出现一条 `origin='handoff'` 的关联工单。
  *
  * 断言一律读临时 userData 里的库文件（应用运行中亦可，WAL + busy_timeout）。
  */
@@ -70,8 +70,9 @@ export async function seedHandoffBase(dbPath: string): Promise<HandoffSeed> {
           {
             name: '完成',
             entryMode: 'none',
-            handoffWorkflowId: targetWorkflow.id,
-            handoffStageId: targetStage.id,
+            // M29 起派单按触发条件配置（M7 的 handoffWorkflowId / handoffStageId 已废弃）。
+            // `task.complete` 走 `manual` 触发，`forwardOnly` 缺省 true 即可。
+            handoffs: [{ on: 'manual', workflowId: targetWorkflow.id, stageId: targetStage.id }],
           },
           { name: '收尾', entryMode: 'none' },
         ],

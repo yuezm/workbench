@@ -95,6 +95,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
   notBefore: null,
   deadlineAt: null,
   cancelRequested: false,
+  deliverables: null,
   startedAt: CREATED,
   endedAt: NOW,
   createdAt: CREATED,
@@ -414,6 +415,78 @@ describe('kernel/review 建行与逐条处置', () => {
     }))
     const built = buildReport(view(), run(), 'task-1', 'st-review', undefined, [], many, null, NOW)
     expect(built.findings).toHaveLength(REVIEW_LIMITS.maxFindings)
+  })
+
+  it('严重度冻结（M28）：上一版 high 不能被新版降成 medium；已处置的条目可降；升与新增不受限', () => {
+    const prev = report({ findings: [finding({ severity: 'high', status: 'open' })] })
+    // 混入别的任务 / 别的阶段 / 更旧版本：上一版定位必须只认 (taskId, stageId, 最大 rev)
+    const base = view({
+      reviewReports: new Map([
+        [prev.id, prev],
+        ['other-task', report({ id: 'other-task', taskId: 'task-9', findings: [] })],
+        ['other-stage', report({ id: 'other-stage', stageId: 'st-9', findings: [] })],
+        ['older', report({ id: 'older', rev: 0, findings: [] })],
+      ]),
+    })
+
+    const downgraded = buildReport(
+      base,
+      run(),
+      'task-1',
+      'st-review',
+      'pass',
+      [],
+      [{ key: 'R1', severity: 'medium', claim: 'c', requiredAction: 'a' }],
+      null,
+      NOW,
+    )
+    expect(downgraded.rev).toBe(2)
+    expect(downgraded.findings[0]?.severity).toBe('high')
+
+    const rejected = report({ findings: [finding({ severity: 'high', status: 'rejected' })] })
+    const allowed = buildReport(
+      view({ reviewReports: new Map([[rejected.id, rejected]]) }),
+      run(),
+      'task-1',
+      'st-review',
+      'pass',
+      [],
+      [{ key: 'R1', severity: 'low', claim: 'c', requiredAction: 'a' }],
+      null,
+      NOW,
+    )
+    expect(allowed.findings[0]?.severity).toBe('low')
+
+    // 已标记 addressed 的旧条目不设下限（它是「已修好」的出口，不参与冻结）
+    const addressed = report({ findings: [finding({ severity: 'high', status: 'addressed' })] })
+    const afterFix = buildReport(
+      view({ reviewReports: new Map([[addressed.id, addressed]]) }),
+      run(),
+      'task-1',
+      'st-review',
+      'pass',
+      [],
+      [{ key: 'R1', severity: 'low', claim: 'c', requiredAction: 'a' }],
+      null,
+      NOW,
+    )
+    expect(afterFix.findings[0]?.severity).toBe('low')
+
+    const raised = buildReport(
+      base,
+      run(),
+      'task-1',
+      'st-review',
+      'pass',
+      [],
+      [
+        { key: 'R1', severity: 'blocker', claim: 'c', requiredAction: 'a' },
+        { key: 'R2', severity: 'low', claim: 'c', requiredAction: 'a' },
+      ],
+      null,
+      NOW,
+    )
+    expect(raised.findings.map((item) => item.severity)).toEqual(['blocker', 'low'])
   })
 
   it('fixed 必须带同回执里退出码 0 的 checkRef；rejected / deferred 必须写理由', () => {

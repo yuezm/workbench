@@ -160,11 +160,54 @@ const toFinding = (input: ReviewFindingInput, reportId: string, now: Iso): Revie
   updatedAt: now,
 })
 
+/** 严重度序号（越大越重）：用于「不许把上一版的重条目降级」。 */
+const SEVERITY_WEIGHT: Record<ReviewFinding['severity'], number> = {
+  blocker: 3,
+  high: 2,
+  medium: 1,
+  low: 0,
+}
+
+/**
+ * 同一 (任务, 阶段) 的上一版报告（不存在返回 undefined）。
+ *
+ * 报告主键是 `<runId>:<rev>`，runId 每轮不同，所以只能按 (taskId, stageId) 找 `rev` 最大的
+ * 那一份，不能靠拼主键。
+ */
+function previousReport(view: View, taskId: Id, stageId: Id): ReviewReport | undefined {
+  let best: ReviewReport | undefined
+  for (const report of view.reviewReports.values()) {
+    if (report.taskId !== taskId || report.stageId !== stageId) continue
+    if (best === undefined || report.rev > best.rev) best = report
+  }
+  return best
+}
+
+/**
+ * 严重度冻结（M28）：上一版还是 `blocker` / `high` 的条目，新一版不得悄悄降级。
+ *
+ * 为什么要有它：评审者自己也能改代码时，最容易发生的退化是「上一版给的 P1，这一版自己
+ * 改成 P2 然后判 pass」（实测 2026-11-12：P1-2 在第二轮变成 P2-1 并被写成「只记已知缺口」）。
+ * 降级不是不能做，但要显式处置（`rejected` / `deferred` + 理由），不能靠重写 severity 抹掉。
+ *
+ * 已处置（`rejected` / `deferred`）的条目不设下限——那正是「人已同意不修」的出口。
+ */
+function guardSeverity(
+  next: ReviewFindingInput['severity'],
+  previous: ReviewFinding | undefined,
+): ReviewFindingInput['severity'] {
+  if (previous === undefined || previous.status === 'addressed') return next
+  if (previous.status === 'rejected' || previous.status === 'deferred') return next
+  return SEVERITY_WEIGHT[next] < SEVERITY_WEIGHT[previous.severity] ? previous.severity : next
+}
+
 /**
  * 回执 → `review.reported` 的报告行。
  *
  * `rev` 由内核按 `(taskId, stageId)` 递增；`id = '<runId>:<rev>'`。finding 的 `id` 由内核
  * 拼成 `<reportId>#<key>`，`key` 只在本次报告内唯一。
+ *
+ * M28：同一 `key` 的严重度不得低于上一版（`guardSeverity`），降级要走显式处置。
  */
 export function buildReport(
   view: View,
@@ -179,6 +222,10 @@ export function buildReport(
 ): ReviewReport {
   const rev = latestRev(view, taskId, stageId) + 1
   const id = `${run.id}:${rev}`
+  const previous = rev > 1 ? previousReport(view, taskId, stageId) : undefined
+  const previousByKey = new Map<string, ReviewFinding>()
+  // 同一份报告里 `key` 唯一（`toFinding` 用它拼 id），重复时后写覆盖即可，不必判重
+  for (const finding of previous?.findings ?? []) previousByKey.set(finding.key, finding)
   return {
     id,
     taskId,
@@ -188,9 +235,13 @@ export function buildReport(
     rev,
     verdict: verdict ?? null,
     checks: [...checks],
-    findings: findings
-      .slice(0, REVIEW_LIMITS.maxFindings)
-      .map((finding) => toFinding(finding, id, now)),
+    findings: findings.slice(0, REVIEW_LIMITS.maxFindings).map((finding) => {
+      const guarded: ReviewFindingInput = {
+        ...finding,
+        severity: guardSeverity(finding.severity, previousByKey.get(finding.key.trim())),
+      }
+      return toFinding(guarded, id, now)
+    }),
     artifact,
     createdAt: now,
     updatedAt: now,

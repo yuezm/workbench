@@ -30,6 +30,7 @@ import type {
 } from '../protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
 import type { Fact, Id, Iso } from '../kernel/types'
+import { parseModelId } from '../plugins/shared/model-id'
 import { killPidTree } from './process'
 import {
   archiveRunTerminal,
@@ -243,13 +244,15 @@ export const remainingRunMs = (deadlineAt: string | null, now: Iso, fallbackMs: 
   return left > 0 ? left : 1
 }
 
-/** 智能体配置的 `provider/model` → `Turn.model`；格式不对不传（后端会给出可读错误）。 */
-const modelOf = (agent: Agent): Turn['model'] => {
-  const value = agent.model?.trim() ?? ''
-  const index = value.indexOf('/')
-  if (index <= 0 || index === value.length - 1) return null
-  return { provider: value.slice(0, index), id: value.slice(index + 1) }
-}
+/**
+ * 智能体配置的 `provider/model` → `Turn.model`；格式不对不传（后端会给出可读错误）。
+ *
+ * 解析必须走 `parseModelId`：模型目录里的 id 允许把模型名里的斜杠编码成 `%2F`
+ * （dsh `--list-models` 的 `magpie/auto%2Fdeepseek-v4.1-flash` 就是 provider `magpie` +
+ * 模型名 `auto/deepseek-v4.1-flash`）。不解码就把 `%2F` 原样发给运行时，等于声称模型名叫
+ * `auto%2Fdeepseek-v4.1-flash`，pi-ai 会回 `provider "magpie" has no configured model`。
+ */
+const modelOf = (agent: Agent): Turn['model'] => parseModelId(agent.model ?? '')
 
 /** `run.frames` 的帧：丢掉执行器本地 `seq`/`type`，只留负载（`seq` 由宿主分配）。 */
 const framePayload = (event: RunEvent): Omit<RunEventRow, 'runId' | 'seq' | 'type'> => {

@@ -1022,6 +1022,27 @@ describe('createScheduler：Turn 与旁路会话', () => {
     expect(runById(seeded.runId)?.session_id).toBe('sess-observed')
   })
 
+  it('模型 id 里的 %2F 必须解码：`magpie/auto%2F…` 发给运行时的是 provider + 模型名', async () => {
+    // dsh `--list-models` 的 id 形如 `magpie/auto%2Fdeepseek-v4.1-flash`（模型名里的斜杠编码成 %2F）。
+    // 不解码就原样发出去，pi-ai 会回 `provider "magpie" has no configured model "auto%2F…"`。
+    seed(1, { model: 'magpie/auto%2Fdeepseek-v4.1-flash' })
+    let captured: Turn | null = null
+    const scheduler = makeScheduler(
+      portOf((turn) => {
+        captured = turn
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect((captured as unknown as Turn).model).toEqual({
+      provider: 'magpie',
+      id: 'auto/deepseek-v4.1-flash',
+    })
+  })
+
   it('wake 重入：领取过程中再次 wake 只合并在下一轮，不重复执行', async () => {
     const seeded = seed(1)
     const box: { current?: Scheduler } = {}

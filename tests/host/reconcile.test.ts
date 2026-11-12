@@ -161,7 +161,18 @@ const waitingStates =
 /** 给 run 种一张 open 卡（走投影 writer，与真实写入路径同一套列映射）。 */
 const seedOpenCard = (runId: string, cardId: string): void => {
   createProjectionWriter(world.db).apply(
-    { table: 'cards', key: cardId, row: sample.card({ id: cardId, runId, taskId: null }) },
+    // M28：卡片超时按 createdAt + 20min 判，这里用「现在」建档，避免跨用例被超时关闭
+    {
+      table: 'cards',
+      key: cardId,
+      row: sample.card({
+        id: cardId,
+        runId,
+        taskId: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }),
+    },
     AT,
   )
 }

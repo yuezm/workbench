@@ -63,7 +63,10 @@ const cardPayloads: [
   Assert<Equal<FactPayload<'card.delivery_failed'>, { card: Card; error: string }>>,
   Assert<Equal<FactPayload<'card.answered'>, CardAnsweredPayload>>,
   Assert<
-    Equal<FactPayload<'card.resolved'>, { card: Card; reason: 'agent' | 'manual' | 'cancelled' }>
+    Equal<
+      FactPayload<'card.resolved'>,
+      { card: Card; reason: 'agent' | 'manual' | 'cancelled' | 'expired' }
+    >
   >,
 ] = [true, true, true, true, true, true]
 

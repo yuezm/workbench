@@ -5,8 +5,8 @@
  * 而且只有属于**本批**结束的 run / 任务的卡才该收——别的卡照常开着。
  */
 import { describe, expect, it } from 'vitest'
-import type { Card } from '../../src/protocol/entities'
-import { closeCardsOnFinish } from '../../src/kernel/cards'
+import type { Card, RunRow } from '../../src/protocol/entities'
+import { CARD_TIMEOUT_MS, closeCardsOnFinish, expiredCardFacts } from '../../src/kernel/cards'
 import type { Decision, FactDraft, View } from '../../src/kernel/types'
 
 const NOW = '2026-11-09T00:00:00.000Z'
@@ -36,7 +36,7 @@ const card = (over: Partial<Card> = {}): Card => ({
   ...over,
 })
 
-const view = (cards: Card[] = []): View => ({
+const view = (cards: Card[] = [], runs: RunRow[] = []): View => ({
   seq: 7,
   workflows: new Map(),
   stages: new Map(),
@@ -44,7 +44,7 @@ const view = (cards: Card[] = []): View => ({
   runtimes: new Map(),
   projects: new Map(),
   tasks: new Map(),
-  runs: new Map(),
+  runs: new Map(runs.map((row) => [row.id, row])),
   conversations: new Map(),
   messages: new Map(),
   cards: new Map(cards.map((row) => [row.id, row])),
@@ -128,5 +128,109 @@ describe('closeCardsOnFinish（决策出口：随结束收卡）', () => {
 
     const result = closeCardsOnFinish(view([open]), decision, NOW)
     expect(result.facts.some((fact) => fact.type === 'card.resolved')).toBe(false)
+  })
+})
+
+/** 等待中的 run（超时续接需要它的 id / turn / sessionId）。 */
+const waitingRun = (over: Partial<RunRow> = {}): RunRow =>
+  ({
+    id: 'run-a',
+    purpose: 'stage',
+    taskId: 't-1',
+    conversationId: null,
+    stageId: 'st-1',
+    agentId: 'ag-1',
+    runtimeId: 'rt-1',
+    ruleId: null,
+    rulesVersion: 0,
+    executorKey: 'dsh',
+    threadId: null,
+    cwd: '',
+    access: 'edit',
+    skill: null,
+    promptRef: null,
+    eventIds: [],
+    hops: 0,
+    turn: 1,
+    resumeSessionId: null,
+    threadContextRef: null,
+    queueSeq: 1,
+    status: 'waiting',
+    prompt: '',
+    output: '',
+    error: null,
+    errorCode: null,
+    exitCode: null,
+    sessionId: 'sess-1',
+    usage: null,
+    durationMs: null,
+    leaseId: null,
+    attempt: 1,
+    attempts: 0,
+    leaseUntil: null,
+    notBefore: null,
+    deadlineAt: null,
+    cancelRequested: false,
+    deliverables: null,
+    startedAt: CREATED,
+    endedAt: null,
+    createdAt: CREATED,
+    ...over,
+  }) as RunRow
+
+describe('expiredCardFacts（M28：卡片超时）', () => {
+  const later = (ms: number): string => new Date(Date.parse(CREATED) + ms).toISOString()
+
+  it('到期且 run 仍 waiting：关掉 ask 卡并续接一轮，提示词列出超时问题', () => {
+    const ask = card({ id: 'card-old', title: '方案选型' })
+    const decision = expiredCardFacts(view([ask], [waitingRun()]), later(CARD_TIMEOUT_MS + 1000))
+
+    const resolved = decision.filter((fact) => fact.type === 'card.resolved')
+    expect(resolved).toHaveLength(1)
+    expect((resolved[0]?.payload as { reason: string }).reason).toBe('expired')
+    expect(resolved[0]?.actor).toEqual({ kind: 'host', via: 'timer' })
+
+    const queued = decision.find((fact) => fact.type === 'run.queued')
+    const run = (queued?.payload as { run: RunRow }).run
+    expect(run.status).toBe('queued')
+    expect(run.turn).toBe(2)
+    expect(run.resumeSessionId).toBe('sess-1')
+    expect(run.prompt).toContain('# 卡片超时')
+    expect(run.prompt).toContain('方案选型')
+    expect(run.prompt).toContain('好 / 不好')
+  })
+
+  it('未到期 / 非 ask / run 不在 waiting：零事实', () => {
+    const ask = card({ id: 'card-fresh' })
+    expect(expiredCardFacts(view([ask], [waitingRun()]), later(CARD_TIMEOUT_MS - 1000))).toEqual([])
+    const notice = card({ id: 'card-notice', kind: 'notice', options: [] })
+    expect(expiredCardFacts(view([notice], [waitingRun()]), later(CARD_TIMEOUT_MS + 1000))).toEqual(
+      [],
+    )
+    const done = card({ id: 'card-answered', status: 'answered', optionIndex: 0 })
+    expect(expiredCardFacts(view([done], [waitingRun()]), later(CARD_TIMEOUT_MS + 1000))).toEqual(
+      [],
+    )
+    const running = waitingRun({ status: 'running' })
+    expect(expiredCardFacts(view([ask], [running]), later(CARD_TIMEOUT_MS + 1000))).toEqual([])
+    // 聊天 run 不超时续接：没人问话时助手自己接着说一轮不是「继续干活」
+    const chat = waitingRun({ purpose: 'chat', taskId: null, stageId: null, conversationId: 'c-1' })
+    expect(expiredCardFacts(view([ask], [chat]), later(CARD_TIMEOUT_MS + 1000))).toEqual([])
+    // run 行缺失（脏投影）：只跳过，不炸
+    expect(expiredCardFacts(view([ask], []), later(CARD_TIMEOUT_MS + 1000))).toEqual([])
+  })
+
+  it('同一 run 多张卡：一起关，只续接一次', () => {
+    const first = card({ id: 'card-a', title: 'A' })
+    const second = card({ id: 'card-b', title: 'B', createdAt: later(1000) })
+    const decision = expiredCardFacts(
+      view([first, second], [waitingRun()]),
+      later(CARD_TIMEOUT_MS + 60_000),
+    )
+    expect(decision.filter((fact) => fact.type === 'card.resolved')).toHaveLength(2)
+    const queued = decision.filter((fact) => fact.type === 'run.queued')
+    expect(queued).toHaveLength(1)
+    expect((queued[0]?.payload as { run: RunRow }).run.prompt).toContain('A')
+    expect((queued[0]?.payload as { run: RunRow }).run.prompt).toContain('B')
   })
 })

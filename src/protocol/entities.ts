@@ -797,7 +797,7 @@ export const CARD_ANSWER_VIA = ['ui', 'channel'] as const
 export type CardAnswerVia = (typeof CARD_ANSWER_VIA)[number]
 
 /** 关闭原因：`agent` = 回执 `resolves`，`manual` = `card.resolve`，`cancelled` = run 取消。 */
-export const CARD_RESOLVE_REASONS = ['agent', 'manual', 'cancelled'] as const
+export const CARD_RESOLVE_REASONS = ['agent', 'manual', 'cancelled', 'expired'] as const
 
 export type CardResolveReason = (typeof CARD_RESOLVE_REASONS)[number]
 

@@ -17,16 +17,33 @@ import type { Card, CardAnswerVia, CardResolveReason, RunRow } from '../protocol
 import type { CardAnswerCommand } from '../protocol/commands'
 import type { Receipt } from '../protocol/inputs'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, View } from './types'
-import { answerPrompt } from './prompt'
+import { answerPrompt, expiredPrompt } from './prompt'
+import { plusMs } from './run'
 
 /** 回执事实的 actor：与 `run.receipt` 的其它事实同口径（宿主调度器）。 */
 const HOST: Actor = { kind: 'host', via: 'scheduler' }
+
+/** 超时关闭卡片的 actor（宿主定时器到点，不是人也不是调度器）。 */
+const TIMER: Actor = { kind: 'host', via: 'timer' }
+
+/**
+ * 卡片等人回答的最长时间（M28）。
+ *
+ * 为什么要有它：实测（线程 `27787670`）两次卡片各挂了 51 分钟才被回答，而这两次问题
+ * 都是「方案选型」「待改项谁来落地」——本来就能由智能体自决。超时后关闭卡片、让它带着
+ * 已知约束继续，比让人在界面上被动地卡一天更划算；想拦的人仍然可以在这 20 分钟里回答。
+ */
+export const CARD_TIMEOUT_MS = 20 * 60_000
+
+/** 卡片到期时刻（`createdAt + CARD_TIMEOUT_MS`）。 */
+const expiredAt = (card: Card): Iso => plusMs(card.createdAt, CARD_TIMEOUT_MS)
 
 /** 关闭原因 → actor：agent 来自回执、manual 来自 owner、cancelled 来自宿主取消兜底。 */
 const RESOLVE_ACTOR: Record<CardResolveReason, Actor> = {
   agent: HOST,
   manual: { kind: 'owner', via: 'ui' },
   cancelled: { kind: 'host', via: 'cancel' },
+  expired: TIMER,
 }
 
 /** 卡片的稳定顺序：创建时间升序，同毫秒按 id（与 `cards.open` / `cards.byRun` 一致）。 */
@@ -186,6 +203,45 @@ export function resolveFacts(
       payload: { card: resolved, reason },
     },
   ]
+}
+
+/**
+ * 卡片超时（M28）：等待超过 `CARD_TIMEOUT_MS` 的 `ask` 卡关闭，并把该 run 续接一轮。
+ *
+ * 口径：
+ * - 只看 `open` 的 `ask` 卡（`notice` 不阻塞，不需要超时），且所属 run 仍在 `waiting`
+ *   ——run 已经离开等待态说明卡早晚会被 `closeCardsOnFinish` 收掉，这里不重复处理；
+ * - **只对阶段 run 生效**：续接提示词是阶段口径（验收 / 闸门 / 待改项），而聊天由人发起，
+ *   没人问话时助手自己接着说一轮不是「继续干活」，是自言自语；
+ * - 同一 run 的多张卡一起关、只续接一次（续接提示词里列出全部超时问题）；
+ * - 到期判定用 `createdAt + CARD_TIMEOUT_MS` 与注入的 `now` 比较，不读时钟。
+ */
+export function expiredCardFacts(
+  view: View,
+  now: Iso,
+): FactDraft<'card.resolved' | 'run.queued'>[] {
+  const facts: FactDraft<'card.resolved' | 'run.queued'>[] = []
+  const byRun = new Map<Id, { run: RunRow; cards: Card[] }>()
+  for (const card of view.cards.values()) {
+    if (card.status !== 'open' || card.kind !== 'ask') continue
+    if (expiredAt(card) > now) continue
+    const run = view.runs.get(card.runId)
+    if (!run || run.status !== 'waiting' || run.purpose !== 'stage') continue
+    const bucket = byRun.get(card.runId)
+    if (bucket) bucket.cards.push(card)
+    else byRun.set(card.runId, { run, cards: [card] })
+  }
+  for (const { run, cards } of byRun.values()) {
+    const ordered = [...cards].sort(compareCards)
+    for (const card of ordered) facts.push(...resolveFacts(view, card.id, 'expired', now))
+    facts.push({
+      type: 'run.queued',
+      actor: TIMER,
+      at: now,
+      payload: { run: resumedRun(run, expiredPrompt(ordered), null) },
+    })
+  }
+  return facts
 }
 
 /**

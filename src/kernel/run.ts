@@ -21,7 +21,7 @@ function compareIso(a: Iso, b: Iso): number {
 }
 
 /** `now + ms` 的纯算术：`Date` 只解析注入的时刻，不读时钟。 */
-function plusMs(now: Iso, ms: number): Iso {
+export function plusMs(now: Iso, ms: number): Iso {
   return new Date(Date.parse(now) + ms).toISOString()
 }
 

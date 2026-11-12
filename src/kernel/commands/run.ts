@@ -8,7 +8,7 @@ import type { Input, Receipt } from '../../protocol/inputs'
 import type { TaskComment } from '../../protocol/task-comment'
 import type { Decision, Environment, FactDraft, Id, Iso, Limits, View } from '../types'
 import type { SettledRun } from '../run'
-import { cardsFromReceipt, resumedRun } from '../cards'
+import { cardsFromReceipt, expiredCardFacts, resumedRun } from '../cards'
 import { handoffOnExit } from '../handoff'
 import { laterPrompt } from '../prompt'
 import {
@@ -569,7 +569,7 @@ export function settleRunByHost(
 }
 
 export function tickClock(view: View, now: Iso, env: Environment): Decision {
-  // 唯一定时器到点：先判整体超时（终态），再看租约过期（放弃 / 重试），最后 cron 规则。
+  // 唯一定时器到点：先判整体超时（终态），再看租约过期（放弃 / 重试），然后卡片超时、cron 规则。
   const facts: FactDraft[] = []
   for (const run of view.runs.values()) {
     if (deadlineReached(run, now)) {
@@ -578,6 +578,8 @@ export function tickClock(view: View, now: Iso, env: Environment): Decision {
       facts.push(...abandonedFacts(run, now, env.limits, HOST_TIMER))
     }
   }
+  // M28：等人超过时限的 ask 卡关闭并续接一轮（不让任务挂在「等人拍板」上过夜）
+  facts.push(...expiredCardFacts(view, now))
   // M6：cron 规则到点建任务（同刻只触发一次；停机错过只补最近一次）
   facts.push(...cronTaskFacts(view, now, env, env.timezone))
   // M6.5：14 天无活动的 open 线程归档（只影响 UI 检索，不改任务/运行）

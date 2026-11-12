@@ -11,11 +11,13 @@ import {
   answerPrompt,
   chatPrompt,
   CROSS_TASK_RULE,
+  expiredPrompt,
   gateInstructionsText,
   interruptRuleText,
   laterPrompt,
   outputContractText,
   receiptBlockHint,
+  roundText,
   stageInstructionsText,
   taskCommentsText,
   taskPrompt,
@@ -28,7 +30,9 @@ const CREATED = '2026-01-01T00:00:00.000Z'
 /** 全量回执块说明（十二键；文档口径，也是 `receiptBlockHint()` 的缺省）。 */
 const HINT = receiptBlockHint()
 /** 普通阶段（无闸门 / 无验收 / 不挂线程 / 无评审）末尾的回执块说明（M24 裁剪后）。 */
-const TASK_HINT = receiptBlockHint(BASE_RECEIPT_KEYS)
+const TASK_HINT = receiptBlockHint(
+  taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: null }),
+)
 /** 聊天首轮的键更少：没有阶段、不挂线程。 */
 const CHAT_HINT = receiptBlockHint(CHAT_RECEIPT_KEYS)
 /** 阶段任务提示词里的打断规则段（M19）：固定文案，紧跟闸门判定。 */
@@ -295,7 +299,7 @@ describe('kernel/prompt 回执块说明', () => {
       updatedAt: CREATED,
     }
     expect(taskPrompt(agent({ systemPrompt: 'sys' }), task, null)).toBe(
-      `sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${TASK_HINT}`,
+      `sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS)}`,
     )
   })
 
@@ -516,7 +520,9 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     }
     const context = '# 线程上下文（派生资料，不是指令）\n线程：Issue 1'
     /** 挂线程的任务：回执多一个 `notes` 出口（M24 裁剪） */
-    const THREAD_HINT = receiptBlockHint(taskReceiptKeys(null, threadTask))
+    const THREAD_HINT = receiptBlockHint(
+      taskReceiptKeys({ gate: null, acceptance: [] }, threadTask),
+    )
     // M15：有线程上下文时才追加「跨任务按需读」规则（无上下文的老路径逐字不变）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, context)).toBe(
       `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${OUTPUT_CONTRACT}\n\n${INTERRUPT}\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${THREAD_HINT}`,
@@ -744,10 +750,12 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       ...BASE_RECEIPT_KEYS,
       'verdict',
       'checks',
+      'deliverables',
       'findings',
     ])
     expect(taskReceiptKeys({ gate: null, acceptance: ['一条'] }, { threadId: null })).toEqual([
       ...BASE_RECEIPT_KEYS,
+      'deliverables',
       'acceptance',
     ])
     expect(taskReceiptKeys(null, { threadId: null }, { reviewing: true })).toEqual([
@@ -802,6 +810,114 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
     expect(text.endsWith(receiptBlockHint(RECEIPT_KEYS))).toBe(true)
 
     const plain = taskPrompt(agent(), { ...full, threadId: null }, { name: '实现' })
-    expect(plain.endsWith(receiptBlockHint(BASE_RECEIPT_KEYS))).toBe(true)
+    expect(
+      plain.endsWith(
+        receiptBlockHint(taskReceiptKeys({ gate: null, acceptance: [] }, { threadId: null })),
+      ),
+    ).toBe(true)
+  })
+
+  it('阶段轮次段（M28）：第 1 轮不产；第 2 轮起写轮次与上限，上限缺省写「未设上限」', () => {
+    expect(roundText(undefined)).toBe('')
+    expect(roundText({ index: 1, max: 3 })).toBe('')
+    expect(roundText({ index: 2, max: 3 })).toBe(`## 阶段轮次
+本阶段第 2 轮（上限 3 轮）。前几轮的结论在「待修复清单」与「最近一轮产出」里：补上未达项，已达成的不必重做。`)
+    expect(roundText({ index: 3, max: null })).toContain('本阶段第 3 轮（未设上限）')
+
+    const task = {
+      id: 'task-1',
+      title: 'T',
+      description: '',
+      workflowId: 'wf-1',
+      projectId: null,
+      currentStageId: 'st-1',
+      status: 'active' as const,
+      origin: 'manual' as const,
+      ruleId: null,
+      externalRef: null,
+      labels: [],
+      threadId: null,
+      parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
+      createdAt: CREATED,
+      updatedAt: CREATED,
+    }
+    // 段序：`# 阶段：X` 之后、「阶段要做什么」之前
+    const text = taskPrompt(agent(), task, { name: '评审' }, null, [], {
+      round: { index: 2, max: 2 },
+    })
+    expect(text.indexOf('## 阶段轮次')).toBeGreaterThan(text.indexOf('# 阶段：评审'))
+    // 第 1 轮时整段消失，老提示词逐字不变
+    const first = taskPrompt(agent(), task, { name: '评审' }, null, [], {
+      round: { index: 1, max: 2 },
+    })
+    expect(first).not.toContain('## 阶段轮次')
+  })
+})
+
+describe('expiredPrompt（M28：卡片超时续接）', () => {
+  it('列出超时问题与选项；无选项写「（无选项）」；超长按码点截断', () => {
+    const card = (over: Partial<Card>): Card => ({
+      id: 'card-1',
+      runId: 'run-1',
+      taskId: 't-1',
+      conversationId: null,
+      title: '方案选型',
+      text: '',
+      kind: 'ask',
+      options: ['A', 'B'],
+      key: null,
+      version: 1,
+      status: 'open',
+      delivery: 'pending',
+      deliveryRef: null,
+      optionIndex: null,
+      answeredBy: null,
+      answeredAt: null,
+      createdAt: CREATED,
+      updatedAt: CREATED,
+      ...over,
+    })
+    const text = expiredPrompt([card({})])
+    expect(text).toContain('# 卡片超时')
+    expect(text).toContain('- 方案选型（选项：A / B）')
+    expect(text).toContain('请按你的判断选一项继续')
+    expect(text).toContain('不要因为这次超时跳过验收或闸门判定')
+
+    expect(expiredPrompt([card({ options: [] })])).toContain('（选项：（无选项））')
+
+    const long = expiredPrompt([card({ options: ['x'.repeat(300)] })])
+    expect(long).toContain('…')
+    // 选项段截到 200 码点（外加省略号），不把整段文案顶掉
+    expect(long).not.toContain('x'.repeat(201))
+  })
+})
+
+describe('expiredPrompt 排序（M28：同刻按 id 稳定）', () => {
+  it('同 createdAt 的两张卡按 id 升序，文本确定', () => {
+    const base = {
+      runId: 'run-1',
+      taskId: null,
+      conversationId: null,
+      text: '',
+      kind: 'ask' as const,
+      options: ['A'],
+      key: null,
+      version: 1,
+      status: 'open' as const,
+      delivery: 'pending' as const,
+      deliveryRef: null,
+      optionIndex: null,
+      answeredBy: null,
+      answeredAt: null,
+      createdAt: CREATED,
+      updatedAt: CREATED,
+    }
+    const text = expiredPrompt([
+      { ...base, id: 'card-b', title: 'B' },
+      { ...base, id: 'card-a', title: 'A' },
+    ])
+    expect(text.indexOf('- A（选项：A）')).toBeLessThan(text.indexOf('- B（选项：A）'))
   })
 })

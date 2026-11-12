@@ -363,3 +363,29 @@ export function answerPrompt(cards: readonly Card[], note?: string): string {
 /** `later` 复查提示词（D7）：固定文案；到点后 run 重新领取执行，不需要重发历史。 */
 export const laterPrompt = (): string => `# 稍后复查
 上一轮回执要求稍后复查。请检查当前进展，需要时继续完成本任务；没有可做的事就直接结束本轮。`
+
+/** 单张超时卡的索引行：标题 + 选项（超长按码点截断）。 */
+const expiredCardLine = (card: Card): string => {
+  const options = card.options.length === 0 ? '（无选项）' : card.options.join(' / ')
+  return `- ${card.title}（选项：${Array.from(options).length > 200 ? Array.from(options).slice(0, 200).join('') + '…' : options}）`
+}
+
+/**
+ * 卡片超时续接提示词（M28）：等待超过时限的 `ask` 卡已被宿主关闭，本轮带着这段继续。
+ *
+ * 为什么不让它停在原地：实测有卡片挂 51 分钟才被回答，而问题本身（方案选型、待改项
+ * 谁来落地）本来就能由智能体自决。超时续接不等于放行——闸门判定与验收照旧，只是把
+ * 「等人拍板」换成「你先按最合理的选择走，并在正文交代取舍」。
+ */
+export function expiredPrompt(cards: readonly Card[]): string {
+  const sorted = [...cards].sort(
+    (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
+  )
+  return [
+    '# 卡片超时',
+    '以下问题等了超过时限仍没有人回答，已按超时关闭：',
+    ...sorted.map(expiredCardLine),
+    '请按你的判断选一项继续，并在正文写清：选了什么、为什么、哪一步需要人回看确认。',
+    '不要因为这次超时跳过验收或闸门判定。',
+  ].join('\n')
+}

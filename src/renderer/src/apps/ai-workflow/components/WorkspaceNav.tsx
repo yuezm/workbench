@@ -18,13 +18,14 @@ interface NavItem {
   path: string
 }
 
+/** 栏目次序：任务在前（看板是日常主入口），聊天在后 */
 const ITEMS: NavItem[] = [
-  { value: 'chat', label: '聊天', path: 'M4 5h16v11H9l-5 4z' },
   { value: 'tasks', label: '任务', path: 'M4 6h6v5H4zM14 6h6v5h-6zM4 13h16v5H4z' },
+  { value: 'chat', label: '聊天', path: 'M4 5h16v11H9l-5 4z' },
 ]
 
 /**
- * 工作台侧栏顶部：横向「聊天 / 任务」切换条 + 当前栏目的上下文列表槽。
+ * 工作台侧栏顶部：横向「任务 / 聊天」切换条（任务在前）+ 当前栏目的上下文列表槽。
  * 外壳（宽度 / 边框 / 背景）由父级侧栏提供。
  */
 export function WorkspaceNav({ value, onChange, children }: WorkspaceNavProps): ReactElement {

@@ -3,9 +3,12 @@ import type { Agent, AgentInput, Runtime } from '../../../../../protocol/entitie
 import { Button } from '../../../components/ui/button'
 import { FormError } from '../../../components/ui/form-error'
 import { Panel, badgeCls } from '../../../components/ui/panel'
+import { SortHandle } from '../../../components/ui/sort-handle'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelViewState } from '../../../shell/useKernelView'
+import { useRowDrag } from '../../../lib/use-row-drag'
+import { useEntityOrder } from '../model/entity-order'
 import {
   AgentDialog,
   PERMISSION_LABEL,
@@ -56,7 +59,13 @@ export function AgentManager(): ReactElement {
   // 智能体与运行时都来自内核视图：CRUD 成功后由事实批次失效重取，无需手动 refresh
   const agentsState = useKernelViewState('agents.all')
   const runtimesState = useKernelViewState('runtimes.all')
-  const agents = agentsState.data ?? []
+  /**
+   * 清单顺序是渲染层偏好（`model/entity-order.ts`）：拖动行（或抓手上的 ↑ / ↓）只改本地顺序，
+   * 不动智能体本身；同一份顺序也决定侧栏与聊天默认智能体先看到谁。
+   */
+  const { items: agents, move, moveTo } = useEntityOrder('agent', agentsState.data ?? [])
+  /** 拖拽排序：整行是拖拽源与落点，落点行高亮；松手才落盘一次 */
+  const drag = useRowDrag(moveTo)
   const runtimes = runtimesState.data ?? []
   /** 写操作失败（读错误单独展示在动作错误之前） */
   const [actionError, setActionError] = useState<string | null>(null)
@@ -114,6 +123,8 @@ export function AgentManager(): ReactElement {
           <RobotIcon className="text-brand" />
           <h3 className="text-base font-medium text-foreground">已配置智能体</h3>
           <span className={cn(badgeCls)}>{agents.length}</span>
+          {/* 顺序是本地偏好（不进事实日志）：给一句话说明，否则空手去拖没人知道能拖 */}
+          <span className="text-xs text-faint-foreground">拖动行调整顺序</span>
           <Button
             type="button"
             variant="default"
@@ -141,14 +152,27 @@ export function AgentManager(): ReactElement {
               暂无智能体
             </li>
           )}
-          {agents.map((a) => {
+          {agents.map((a, index) => {
             const runtime = runtimeOf(a.runtimeId)
             const health: RuntimeHealth = runtime ? runtimeHealth(runtime) : 'unknown'
             return (
               <li
                 key={a.id}
-                className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent"
+                {...drag.rowProps(a.id)}
+                className={cn(
+                  // 拖拽中不显示 hover 底：半透明的源行再变色会看不出被拖走的是哪一行
+                  'flex items-center gap-2 px-3 py-3 transition-colors select-none',
+                  drag.draggingId === a.id ? 'opacity-40' : 'hover:bg-accent',
+                  // 落点只换底色不加边框：拖动过程中行高不能变，否则整份清单会跳
+                  drag.overId === a.id && 'bg-primary/[0.08]',
+                )}
               >
+                {/* 抓手是拖拽与键盘两用的入口：鼠标按住行任意位置也能拖 */}
+                <SortHandle
+                  label={`拖动排序：智能体 ${a.name}`}
+                  onMoveUp={index > 0 ? () => move(a.id, -1) : undefined}
+                  onMoveDown={index < agents.length - 1 ? () => move(a.id, 1) : undefined}
+                />
                 <span className="grid size-7 shrink-0 place-items-center rounded-md bg-accent text-muted-foreground">
                   <RobotIcon />
                 </span>

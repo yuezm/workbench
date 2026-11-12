@@ -28,7 +28,7 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  *
  * 产品路径上该按钮只在阶段存在且 `entryMode === 'agent'` 时渲染，所以 `name` 缺失只能来自
  * 脏投影；抽成模块级导出函数后，两种输入都能直接单测（与 `WorkflowEditor` 的
- * `moveStageInList` 同口径），产品路径的判定一字不改。
+ * `moveStageToIndex` 同口径），产品路径的判定一字不改。
  */
 export function rerunStageLabel(stageName: string | null | undefined): string {
   return stageName ?? '当前阶段'

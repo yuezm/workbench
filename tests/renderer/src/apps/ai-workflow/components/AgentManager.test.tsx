@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { Command } from '../../../../../../src/protocol/commands'
@@ -10,6 +10,10 @@ import type {
 } from '../../../../../../src/protocol/entities'
 import type { DispatchResult } from '../../../../../../src/protocol/ipc'
 import { AgentManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/AgentManager'
+import {
+  ENTITY_ORDER_STORAGE_KEYS,
+  resetEntityOrderForTest,
+} from '../../../../../../src/renderer/src/apps/ai-workflow/model/entity-order'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function probe(state: RuntimeProbeState, over: Partial<RuntimeProbe> = {}): RuntimeProbe {
@@ -68,10 +72,13 @@ let kernel: FakeKernel
 
 beforeEach(() => {
   kernel = installFakeKernel()
+  // 顺序是渲染层偏好（localStorage）：每个用例从「没调过顺序」开始
+  resetEntityOrderForTest()
 })
 
 afterEach(() => {
   stopFakeKernel()
+  resetEntityOrderForTest()
 })
 
 /** 预置两个视图：智能体清单与绑定运行时下拉的上游 */
@@ -101,6 +108,53 @@ describe('AgentManager', () => {
 
     await user.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByLabelText('智能体名称')).not.toBeInTheDocument()
+  })
+
+  it('拖动行调整清单顺序并落盘：落点「占位」而不是交换，顺序不改实体', async () => {
+    setup(
+      [
+        agent({ id: 'a1', name: 'one' }),
+        agent({ id: 'a2', name: 'two' }),
+        agent({ id: 'a3', name: 'three' }),
+      ],
+      [rt],
+    )
+    const user = userEvent.setup()
+    render(<AgentManager />)
+    await screen.findByText('one')
+
+    /** 清单当前次序（按行内「编辑」按钮的 aria-label 读，跟视觉顺序一致） */
+    const order = (): string[] =>
+      screen
+        .getAllByRole('button', { name: /^编辑智能体 / })
+        .map((button) => button.getAttribute('aria-label')?.replace('编辑智能体 ', '') ?? '')
+
+    expect(order()).toEqual(['one', 'two', 'three'])
+
+    // 首行拖到末行：占末行的位置（首尾都能拖，不再有禁用态）
+    fireEvent.dragStart(screen.getByRole('button', { name: '拖动排序：智能体 one' }))
+    fireEvent.dragOver(screen.getByRole('button', { name: '拖动排序：智能体 three' }))
+    fireEvent.drop(screen.getByRole('button', { name: '拖动排序：智能体 three' }))
+    expect(order()).toEqual(['two', 'three', 'one'])
+    // 顺序落盘为整份 id 清单（渲染层偏好，不发命令、不改智能体本身）
+    expect(window.localStorage.getItem(ENTITY_ORDER_STORAGE_KEYS.agent)).toBe('["a2","a3","a1"]')
+    expect(kernel.dispatched).toHaveLength(0)
+
+    // 末行拖回首位：整份清单跟着换，落盘同步
+    fireEvent.dragStart(screen.getByRole('button', { name: '拖动排序：智能体 one' }))
+    fireEvent.drop(screen.getByRole('button', { name: '拖动排序：智能体 two' }))
+    expect(order()).toEqual(['one', 'two', 'three'])
+    expect(window.localStorage.getItem(ENTITY_ORDER_STORAGE_KEYS.agent)).toBe('["a1","a2","a3"]')
+
+    // 键盘兜底：抓手聚焦后 ↓ / ↑ 各挪一格（原生拖拽本来不可键盘操作）
+    await user.click(screen.getByRole('button', { name: '拖动排序：智能体 one' }))
+    await user.keyboard('{ArrowDown}')
+    expect(order()).toEqual(['two', 'one', 'three'])
+    expect(window.localStorage.getItem(ENTITY_ORDER_STORAGE_KEYS.agent)).toBe('["a2","a1","a3"]')
+
+    await user.keyboard('{ArrowUp}')
+    expect(order()).toEqual(['one', 'two', 'three'])
+    expect(window.localStorage.getItem(ENTITY_ORDER_STORAGE_KEYS.agent)).toBe('["a1","a2","a3"]')
   })
 
   it('行内展示绑定运行时名、健康状态，以及模型 / 并发 / 访问权限', async () => {

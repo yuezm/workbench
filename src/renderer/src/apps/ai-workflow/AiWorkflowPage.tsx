@@ -28,6 +28,7 @@ import { WorkflowManager } from './components/WorkflowManager'
 import { WorkflowSwitcher } from './components/WorkflowSwitcher'
 import { WorkspaceNav, type WorkspaceSection } from './components/WorkspaceNav'
 import { useChat } from './hooks/useChat'
+import { useEntityOrder } from './model/entity-order'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -82,14 +83,20 @@ function SectionHeader({ title, hint }: { title: string; hint: string }): ReactE
  */
 export function AiWorkflowPage(): ReactElement {
   const workflowsState = useKernelViewState('workflows.all')
-  const workflows = workflowsState.data ?? []
+  /**
+   * 工作流与智能体的显示顺序是渲染层偏好（设置 → 工作流 / 智能体里手动调，见
+   * `model/entity-order.ts`）：命中顺序的排前面，没登记过的按原次序追加在末尾。
+   * 首个工作流是默认选中项，因此顺序也决定看板默认落在哪条流程上。
+   */
+  const { items: workflows } = useEntityOrder('workflow', workflowsState.data ?? [])
   /**
    * 页面依赖的清单一律走 `useKernelViewState`（而不是只看 `.data` 的 `useKernelView`）：
    * 读失败时 `.data` 只是 `undefined`，界面会退化成「还没有项目 / 尚无工作流」这类空态，
    * 骗用户去重建一遍。错误必须进页面级错误条，见下面的 `readError`。
    */
   const agentsState = useKernelViewState('agents.all')
-  const agents = agentsState.data ?? []
+  /** 智能体同样按存下的顺序排：聊天的默认智能体取排完的第一个 */
+  const { items: agents } = useEntityOrder('agent', agentsState.data ?? [])
   /** 项目（M10）：聊天与任务共用的顶层上下文 */
   const projectsState = useKernelViewState('projects.all')
   const projects = projectsState.data ?? []
@@ -124,8 +131,11 @@ export function AiWorkflowPage(): ReactElement {
   /** 任务栏的详情路由栈：栈顶是当前页面，`[]` = 看板 */
   const [trail, setTrail] = useState<TaskRoute[]>([])
   const [view, setView] = useState<View>('workspace')
-  /** 工作台侧栏栏目：聊天（主动对话）/ 任务（看板与任务详情） */
-  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('chat')
+  /**
+   * 工作台侧栏栏目：任务（看板与任务详情）/ 聊天（主动对话）。
+   * 默认落「任务」：看板是日常主入口，聊天是按需进入的第二个栏目。
+   */
+  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('tasks')
   const [section, setSection] = useState<SettingsSection>('runtimes')
   /**
    * 要定位并高亮的卡（卡 id）：点顶部通知条、或系统通知落点带 `cardId` 时给。

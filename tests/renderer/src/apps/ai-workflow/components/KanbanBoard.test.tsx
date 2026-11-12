@@ -424,6 +424,64 @@ describe('KanbanBoard', () => {
   })
 })
 
+describe('KanbanBoard 列内顺序', () => {
+  /** 某一列里从上到下的卡片标题（卡片可访问名是「任务：<标题>」） */
+  const cardTitles = (columnName: string): string[] =>
+    within(screen.getByRole('group', { name: `阶段：${columnName}` }))
+      .getAllByLabelText(/^任务：/)
+      .map((card) => card.getAttribute('aria-label')?.replace('任务：', '') ?? '')
+
+  it('最近活动的排最上面：后进入的卡片压过老卡', () => {
+    const inTodo: Task = { ...task, currentStageId: 's0' }
+    const older: Task = {
+      ...inTodo,
+      id: 't-old',
+      title: '老卡',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    const newer: Task = {
+      ...inTodo,
+      id: 't-new',
+      title: '新卡',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    }
+    // 视图给的是创建升序（老卡在前），看板要翻过来
+    setup([older, newer])
+    expect(cardTitles('待办')).toEqual(['新卡', '老卡'])
+  })
+
+  it('排序键是最近活动而不是创建时间：刚推进到本列的老卡排最上、中间层按各自的活动时间', () => {
+    const inTodo: Task = { ...task, currentStageId: 's0' }
+    // 视图按创建升序给：老卡 → 中间卡 → 新卡
+    const oldest: Task = {
+      ...inTodo,
+      id: 't-oldest',
+      title: '刚推进的老卡',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-05T00:00:00.000Z',
+    }
+    const middle: Task = {
+      ...inTodo,
+      id: 't-middle',
+      title: '没动过的中间卡',
+      createdAt: '2026-01-02T00:00:00.000Z',
+      updatedAt: '2026-01-02T00:00:00.000Z',
+    }
+    const newest: Task = {
+      ...inTodo,
+      id: 't-newest',
+      title: '后建的新卡',
+      createdAt: '2026-01-03T00:00:00.000Z',
+      updatedAt: '2026-01-03T00:00:00.000Z',
+    }
+    setup([oldest, middle, newest])
+    // 按活动时间（不是创建时间）倒序：01-05 → 01-03 → 01-02
+    expect(cardTitles('待办')).toEqual(['刚推进的老卡', '后建的新卡', '没动过的中间卡'])
+  })
+})
+
 describe('KanbanBoard 列头类别', () => {
   /** 四件套内置阶段 + 一个自己添加的阶段（M18 的规范顺序） */
   const withBuiltins = (): WorkflowWithStages => ({

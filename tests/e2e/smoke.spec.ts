@@ -32,8 +32,12 @@ test('顶部栏顺序：AI 工作流在番茄时钟前面', async () => {
 })
 
 test('默认打开第一个注册的 app：AI 工作流工作台', async () => {
-  await expect(page.getByRole('button', { name: '聊天' })).toHaveAttribute('aria-current', 'page')
-  await expect(page.getByRole('button', { name: '新对话' })).toBeVisible()
+  // 工作台默认栏目是任务（看板），聊天是针对需进入的第二个栏目
+  await expect(page.getByRole('button', { name: '任务', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  await expect(page.getByRole('combobox', { name: '选择工作流' })).toBeVisible()
 })
 
 test('切到番茄时钟：idle 25:00 专注', async () => {

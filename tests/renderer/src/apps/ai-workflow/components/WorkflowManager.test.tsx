@@ -5,6 +5,10 @@ import type { Command } from '../../../../../../src/protocol/commands'
 import type { WorkflowWithStages } from '../../../../../../src/protocol/entities'
 import type { DispatchResult } from '../../../../../../src/protocol/ipc'
 import { WorkflowManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowManager'
+import {
+  ENTITY_ORDER_STORAGE_KEYS,
+  resetEntityOrderForTest,
+} from '../../../../../../src/renderer/src/apps/ai-workflow/model/entity-order'
 import { SOP_TEMPLATES } from '../../../../../../src/renderer/src/apps/ai-workflow/model/sop-templates'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
@@ -33,10 +37,13 @@ let kernel: FakeKernel
 
 beforeEach(() => {
   kernel = installFakeKernel()
+  // 顺序是渲染层偏好（localStorage）：每个用例从「没调过顺序」开始
+  resetEntityOrderForTest()
 })
 
 afterEach(() => {
   stopFakeKernel()
+  resetEntityOrderForTest()
 })
 
 /** dispatch 注入：绕过 onDispatch 的泛型签名，测试里按命令 type 分支 */
@@ -74,6 +81,49 @@ describe('WorkflowManager', () => {
     expect(dialog.className).toContain('max-w-[calc(100%-2rem)]')
     expect(dialog.className).toContain('max-h-[85vh]')
     expect(screen.getByLabelText('工作流名称')).toHaveValue('研发')
+  })
+
+  it('拖动行调整清单顺序并落盘：落点「占位」而不是交换，顺序不改定义', async () => {
+    kernel.setView('workflows.all', undefined, [
+      wf('w1', '研发'),
+      wf('w2', '写作'),
+      wf('w3', '发布'),
+    ])
+    const user = userEvent.setup()
+    render(<WorkflowManager />)
+    await screen.findByText('研发')
+
+    /** 清单当前次序（按行内「选择工作流」按钮的 aria-label 读，跟视觉顺序一致） */
+    const order = (): string[] =>
+      screen
+        .getAllByRole('button', { name: /^选择工作流 / })
+        .map((button) => button.getAttribute('aria-label')?.replace('选择工作流 ', '') ?? '')
+
+    expect(order()).toEqual(['研发', '写作', '发布'])
+
+    // 首行拖到末行：占末行的位置，首尾都能拖（不再有禁用态）
+    fireEvent.dragStart(screen.getByRole('button', { name: '拖动排序：工作流 研发' }))
+    fireEvent.dragOver(screen.getByRole('button', { name: '拖动排序：工作流 发布' }))
+    fireEvent.drop(screen.getByRole('button', { name: '拖动排序：工作流 发布' }))
+    expect(order()).toEqual(['写作', '发布', '研发'])
+    // 顺序落盘为整份 id 清单（渲染层偏好，不发命令、不改工作流定义）
+    expect(window.localStorage.getItem(ENTITY_ORDER_STORAGE_KEYS.workflow)).toBe('["w2","w3","w1"]')
+    expect(kernel.dispatched).toHaveLength(0)
+    // 首个仍是「当前」：重开窗口默认落在这条流程上
+    expect(
+      within(screen.getByRole('button', { name: '选择工作流 写作' })).getByText('当前'),
+    ).toBeInTheDocument()
+
+    // 键盘兜底：抓手聚焦后 ↑ / ↓ 各挪一格
+    await user.click(screen.getByRole('button', { name: '拖动排序：工作流 研发' }))
+    await user.keyboard('{ArrowUp}')
+    expect(order()).toEqual(['写作', '研发', '发布'])
+    expect(window.localStorage.getItem(ENTITY_ORDER_STORAGE_KEYS.workflow)).toBe('["w2","w1","w3"]')
+
+    await user.click(screen.getByRole('button', { name: '拖动排序：工作流 写作' }))
+    await user.keyboard('{ArrowDown}')
+    expect(order()).toEqual(['研发', '写作', '发布'])
+    expect(window.localStorage.getItem(ENTITY_ORDER_STORAGE_KEYS.workflow)).toBe('["w1","w2","w3"]')
   })
 
   it('空清单显示空态；新建工作流下拉里选「从空白创建」打开空表单', async () => {

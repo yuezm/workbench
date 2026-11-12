@@ -8,15 +8,20 @@ describe('WorkspaceNav', () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
     render(
-      <WorkspaceNav value="chat" onChange={onChange}>
+      <WorkspaceNav value="tasks" onChange={onChange}>
         <span>上下文列表</span>
       </WorkspaceNav>,
     )
 
     expect(screen.getByRole('navigation', { name: '工作台栏目' })).toBeInTheDocument()
     expect(screen.getAllByRole('button')).toHaveLength(2)
-    expect(screen.getByRole('button', { name: '聊天' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByRole('button', { name: '任务' })).not.toHaveAttribute('aria-current')
+    // 任务在前、聊天在后：看板是日常主入口
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([
+      '任务',
+      '聊天',
+    ])
+    expect(screen.getByRole('button', { name: '任务' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '聊天' })).not.toHaveAttribute('aria-current')
 
     await user.click(screen.getByRole('button', { name: '任务' }))
     expect(onChange).toHaveBeenCalledWith('tasks')

@@ -83,7 +83,7 @@ test('线程详情页：手工任务隐式线程 → 笔记 → 绑定入口 →
 
   // 1) 建手工任务：自动挂隐式线程（source=manual / externalRef=null）
   await page.getByRole('button', { name: 'AI 工作流' }).click()
-  await page.getByRole('button', { name: '任务' }).click()
+  await page.getByRole('button', { name: '任务', exact: true }).click()
   await page.getByRole('button', { name: '新建任务' }).click()
   await page.getByLabel('任务标题').fill('e2e 线程任务')
   await page.getByRole('button', { name: '创建' }).click()
@@ -185,7 +185,7 @@ test('删除线程：连带任务与执行记录一起清掉，并回到看板�
   await expect(page).toHaveTitle('Workbench')
 
   await page.getByRole('button', { name: 'AI 工作流' }).click()
-  await page.getByRole('button', { name: '任务' }).click()
+  await page.getByRole('button', { name: '任务', exact: true }).click()
 
   // 布局：归档条压在阶段列下方，比单列宽（横排一条，不再挤占列宽）
   const archive = page.getByRole('group', { name: '归档区' })
@@ -247,7 +247,7 @@ test('看板列内快速新建：标题 + 描述落到该阶段，agent 列建�
   await expect(page).toHaveTitle('Workbench')
 
   await page.getByRole('button', { name: 'AI 工作流' }).click()
-  await page.getByRole('button', { name: '任务' }).click()
+  await page.getByRole('button', { name: '任务', exact: true }).click()
 
   // 「待办」（entryMode=none）：标题 + 描述一起提交，描述里的 Enter 只换行
   const stage = page.getByRole('group', { name: '阶段：待办' })

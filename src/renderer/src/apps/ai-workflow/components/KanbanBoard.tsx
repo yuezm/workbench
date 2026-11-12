@@ -234,7 +234,14 @@ export function KanbanBoard({
    */
   const boardTasks = tasks.filter((t) => t.workflowId === workflow.id)
 
-  const activeTasks = boardTasks.filter((t) => t.status === 'active')
+  /**
+   * 列内次序：最近活动的在最上面（`updatedAt` 倒序，与归档清单同口径）。
+   * 视图给的是创建升序，直接铺出来就是「老卡永远压在下面」；这里翻过来，
+   * 刚建好的、刚推进到本列的、刚改过的卡片先看到。
+   */
+  const activeTasks = boardTasks
+    .filter((t) => t.status === 'active')
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   const doneTasks = boardTasks.filter((t) => t.status === 'completed')
   const completedCount = doneTasks.length
 

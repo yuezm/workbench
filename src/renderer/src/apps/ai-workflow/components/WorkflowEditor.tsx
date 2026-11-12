@@ -20,8 +20,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../../components/ui/select'
+import { SortHandle } from '../../../components/ui/sort-handle'
 import { Textarea } from '../../../components/ui/textarea'
 import { cn } from '../../../lib/cn'
+import { useRowDrag } from '../../../lib/use-row-drag'
 import { useKernelView } from '../../../shell/useKernelView'
 import { STAGE_KIND_META } from '../model/stage-kinds'
 import {
@@ -272,28 +274,35 @@ export interface StageMove {
 }
 
 /**
- * 上/下移一个自己添加的阶段：目标下标存在 stages 里，重排时要同步重映射，否则流转目标会指错阶段。
- * 选中跟随被移动的那一项；被换位的相邻项若正展开，选中也换到它新的下标。
+ * 把第 i 个阶段挪到第 j 个下标（拖动落点 / 抓手 ↑↓ 共用）：目标下标存在 stages 里，
+ * 重排时必须同步重映射，否则流转目标（完成 / 出错 / 闸门两侧）会指错阶段。
  *
- * 越界（首行上移 / 末行下移）时原样返回：界面上这两个按钮本来就是禁用的，这里留同一道护栏；
- * 抽成纯函数后，单测可以直接用越界下标覆盖这一支。
+ * 选中跟随被移动的那一项；被让位的阶段若正展开，选中也换到它新的下标。
  *
- * 内置阶段不由这里管：界面上不给它们上/下移，位置由内核按类别归一。
+ * 原地不动 / 越界（首行再上移、末行再下移）时原样返回；抽成纯函数后，
+ * 单测可以直接用越界下标覆盖这一支。
+ *
+ * 内置阶段不由这里管：界面上不给它们拖动与 ↑↓，位置由内核按类别归一。
  */
-export function moveStageInList(
+export function moveStageToIndex(
   stages: StageInput[],
   selected: number,
   i: number,
-  dir: -1 | 1,
+  j: number,
 ): StageMove {
-  const j = i + dir
-  if (j < 0 || j >= stages.length) return { stages, selected }
-  const remap = (idx: number | null | undefined): number | null => {
-    if (idx == null) return null
-    if (idx === i) return j
-    if (dir === -1) return idx >= j && idx < i ? idx + 1 : idx
-    return idx > i && idx <= j ? idx - 1 : idx
+  if (i === j || i < 0 || j < 0 || i >= stages.length || j >= stages.length) {
+    return { stages, selected }
   }
+  /** 下标重映射：被移动的那一项落到位，被跨过的整体让开一格，其余不动 */
+  const shift = (idx: number): number => {
+    if (idx === i) return j
+    // 往下挪：被跨过的整体前移一格
+    if (i < j) return idx > i && idx <= j ? idx - 1 : idx
+    // 往上挪：被跨过的整体后移一格
+    return idx >= j && idx < i ? idx + 1 : idx
+  }
+  /** 流转目标可能没配（null） */
+  const remap = (idx: number | null | undefined): number | null => (idx == null ? null : shift(idx))
   const next = stages.map((s) => ({
     ...s,
     onCompleteIndex: remap(s.onCompleteIndex),
@@ -309,10 +318,7 @@ export function moveStageInList(
   }))
   const [moved] = next.splice(i, 1)
   next.splice(j, 0, moved)
-  return {
-    stages: next,
-    selected: selected === i ? j : selected === j ? i : selected,
-  }
+  return { stages: next, selected: shift(selected) }
 }
 
 function WorkflowIcon({ className }: { className?: string }): ReactElement {
@@ -338,33 +344,15 @@ function WorkflowIcon({ className }: { className?: string }): ReactElement {
   )
 }
 
-function MoveIcon({ dir }: { dir: 'up' | 'down' }): ReactElement {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      {dir === 'up' ? <path d="m6 15 6-6 6 6" /> : <path d="m6 9 6 6 6-6" />}
-    </svg>
-  )
-}
-
 /**
  * 工作流编辑器：左侧阶段序列，右侧只展开**当前选中的那一个阶段**。
  *
  * 阶段多的时候一屏铺满所有详情既读不下也改不动，所以详情按选中收敛；
- * 上移 / 下移 / 删除作用在选中阶段上，保存仍提交整份定义（阶段 id 稳定）。
+ * 拖动行（或抓手上的 ↑ / ↓）重排、删除作用在选中阶段上，保存仍提交整份定义（阶段 id 稳定）。
  * 每个阶段都能写「要干什么」：这段文字会拼进进入该阶段的任务提示词交给智能体。
  *
  * M18：阶段序列恒含四个内置阶段（待办 / 已阻塞 / 已完成 / 已取消）。它们的名称、位置与
- * 类别由系统锁定——名称只读、不给删除、不给移动；其余字段照常可编辑。自己添加的阶段只能
+ * 类别由系统锁定——名称只读、不给删除、不给拖动；其余字段照常可编辑。自己添加的阶段只能
  * 在用户区块里（待办之后、已阻塞之前）增删与排序。
  */
 export function WorkflowEditor({
@@ -418,14 +406,28 @@ export function WorkflowEditor({
     setSelected(Math.max(0, Math.min(i, draft.stages.length - 2)))
   }
 
-  /**
-   * 上/下移一个自己添加的阶段：重排与流转目标的重映射在纯函数里（moveStageInList），
-   * 组件只负责把结果落到草稿与选中项上。
-   */
-  const moveStage = (i: number, dir: -1 | 1): void => {
-    const next = moveStageInList(draft.stages, selected, i, dir)
+  /** 阶段重排的唯一出口：重排规则在纯函数里，这里只把结果落到草稿与选中项上 */
+  const applyStageMove = (i: number, j: number): void => {
+    const next = moveStageToIndex(draft.stages, selected, i, j)
     setDraft((d) => ({ ...d, stages: next.stages }))
     setSelected(next.selected)
+  }
+
+  /**
+   * 拖动的落点只是「第几行」：下标解析交给纯函数，组件不自己算重映射。
+   * 阶段可能是新建的（还没有 id），所以行标识用 id 兜底成位置键；
+   * 键已经查不到（拖动途中清单被换过）时下标是 -1，由 `moveStageToIndex` 原样退回。
+   */
+  const stageKeys = draft.stages.map((s, i) => s.id ?? `new-${i}`)
+  const drag = useRowDrag((fromKey, toKey) => {
+    applyStageMove(stageKeys.indexOf(fromKey), stageKeys.indexOf(toKey))
+  })
+
+  /**
+   * 抓手上的 ↑ / ↓：一次挪一格，与拖动共用同一个落点函数（越界在纯函数里挡）。
+   */
+  const moveStage = (i: number, dir: -1 | 1): void => {
+    applyStageMove(i, i + dir)
   }
 
   /**
@@ -529,16 +531,26 @@ export function WorkflowEditor({
       </div>
 
       <div className="grid gap-4 md:grid-cols-[200px_minmax(0,1fr)]">
-        {/* 左：阶段序列（序号 + 类别圆点 + 名字，点一条换右侧详情；上移 / 下移就在行尾） */}
+        {/* 左：阶段序列（抓手 + 序号 + 类别圆点 + 名字，点一条换右侧详情；拖动行重排） */}
         <div className="flex min-w-0 flex-col gap-2">
           <span className="text-xs font-medium text-faint-foreground">阶段</span>
           <ul className="flex flex-col gap-1" aria-label="阶段列表">
             {draft.stages.map((s, i) => {
               const isActive = i === index
-              /** 内置阶段不给排序入口：位置由系统按类别排定 */
+              /** 内置阶段不给排序入口：位置由系统按类别排定，拖动也接不了落点 */
               const movable = s.builtin == null
+              const key = stageKeys[i]
               return (
-                <li key={s.id ?? `new-${i}`} className="group flex items-center gap-1">
+                <li
+                  key={key}
+                  {...(movable ? drag.rowProps(key) : {})}
+                  className={cn(
+                    'group flex items-center gap-1 rounded-lg transition-colors duration-150',
+                    drag.draggingId === key ? 'opacity-40' : undefined,
+                    // 落点只换底色不加边框：拖动过程中行高不能变，否则整份列表会跳
+                    drag.overId === key && 'bg-primary/[0.08]',
+                  )}
+                >
                   <button
                     type="button"
                     aria-label={`阶段${i + 1}`}
@@ -570,37 +582,19 @@ export function WorkflowEditor({
                     <span className="truncate">{s.name || `阶段${i + 1}`}</span>
                   </button>
 
-                  {/* 排序按钮：hover / 键盘聚焦 / 当前阶段时显形，免得窄列里一直挂着图标。
-                      内置阶段没有这两个按钮（位置锁定），首尾用户阶段各自只能单向移动。 */}
+                  {/* 抓手：鼠标按住行任意位置即可拖；键盘用户聚焦抓手按 ↑ / ↓ 挪一格。
+                      内置阶段没有抓手（位置锁定），首尾用户阶段各自只能单向移动。 */}
                   {movable && (
-                    <div
+                    <SortHandle
+                      label={`拖动排序：阶段${i + 1}`}
+                      onMoveUp={i > range.start ? () => moveStage(i, -1) : undefined}
+                      onMoveDown={i < range.end - 1 ? () => moveStage(i, 1) : undefined}
                       className={cn(
-                        'flex shrink-0 items-center transition-opacity duration-150',
+                        'transition-opacity duration-150',
                         'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100',
                         isActive && 'opacity-100',
                       )}
-                    >
-                      <button
-                        type="button"
-                        aria-label={`阶段${i + 1}上移`}
-                        title="上移"
-                        disabled={i <= range.start}
-                        className="grid size-5 place-items-center rounded text-faint-foreground transition-colors duration-150 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-25"
-                        onClick={() => moveStage(i, -1)}
-                      >
-                        <MoveIcon dir="up" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`阶段${i + 1}下移`}
-                        title="下移"
-                        disabled={i >= range.end - 1}
-                        className="grid size-5 place-items-center rounded text-faint-foreground transition-colors duration-150 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60 disabled:pointer-events-none disabled:opacity-25"
-                        onClick={() => moveStage(i, 1)}
-                      >
-                        <MoveIcon dir="down" />
-                      </button>
-                    </div>
+                    />
                   )}
                 </li>
               )

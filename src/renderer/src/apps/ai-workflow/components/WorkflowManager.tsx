@@ -4,8 +4,12 @@ import { Button } from '../../../components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../components/ui/dialog'
 import { FormError } from '../../../components/ui/form-error'
 import { Menu } from '../../../components/ui/menu'
+import { SortHandle } from '../../../components/ui/sort-handle'
+import { cn } from '../../../lib/cn'
+import { useRowDrag } from '../../../lib/use-row-drag'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelView, useKernelViewState } from '../../../shell/useKernelView'
+import { useEntityOrder } from '../model/entity-order'
 import { SOP_TEMPLATES, draftFromTemplate, type SopTemplate } from '../model/sop-templates'
 import { dropVanishedStages } from '../model/stage-draft'
 import { WorkflowEditor } from './WorkflowEditor'
@@ -29,7 +33,13 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  */
 export function WorkflowManager(): ReactElement {
   const { data, error: readError } = useKernelViewState('workflows.all')
-  const workflows = data ?? []
+  /**
+   * 清单顺序是渲染层偏好（`model/entity-order.ts`）：拖动行（或抓手上的 ↑ / ↓）只改本地顺序，
+   * 不动工作流定义；首个工作流仍是「当前」，所以顺序也决定默认选中哪条流程。
+   */
+  const { items: workflows, move, moveTo } = useEntityOrder('workflow', data ?? [])
+  /** 拖拽排序：整行是拖拽源与落点，落点行高亮；松手才落盘一次 */
+  const drag = useRowDrag(moveTo)
   /** 用户选中的工作流 id；失效（被删）时回落到首个 */
   const [selectedId, setSelectedId] = useState<string | null>(null)
   /** 非 undefined = 编辑器打开中（null = 新建，实体 = 编辑） */
@@ -118,7 +128,7 @@ export function WorkflowManager(): ReactElement {
       />
 
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-faint-foreground">阶段序列与流转</p>
+        <p className="text-xs text-faint-foreground">阶段序列与流转 · 拖动行调整清单顺序</p>
         {/* 一个入口两种建法：空白起手，或按 SOP 模板预填阶段 */}
         <Menu
           label="新建工作流"
@@ -156,17 +166,29 @@ export function WorkflowManager(): ReactElement {
         </p>
       ) : (
         <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-          {workflows.map((w) => {
+          {workflows.map((w, index) => {
             const active = w.id === activeId
             return (
               <li
                 key={w.id}
-                className={
-                  active
-                    ? 'flex items-center gap-3 bg-primary/[0.06] px-4 py-3'
-                    : 'flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent'
-                }
+                {...drag.rowProps(w.id)}
+                className={cn(
+                  'flex items-center gap-2 px-3 py-3 transition-colors select-none',
+                  // 拖拽中不叠 hover / 当前项底色：半透明的源行再变色就看不出被拖走的是哪一行
+                  drag.draggingId === w.id
+                    ? 'opacity-40'
+                    : active
+                      ? 'bg-primary/[0.06]'
+                      : 'hover:bg-accent',
+                  // 落点只换底色不加边框：拖动过程中行高不能变，否则整份清单会跳
+                  drag.overId === w.id && 'bg-primary/[0.08]',
+                )}
               >
+                <SortHandle
+                  label={`拖动排序：工作流 ${w.name}`}
+                  onMoveUp={index > 0 ? () => move(w.id, -1) : undefined}
+                  onMoveDown={index < workflows.length - 1 ? () => move(w.id, 1) : undefined}
+                />
                 <button
                   type="button"
                   aria-label={`选择工作流 ${w.name}`}

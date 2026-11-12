@@ -250,7 +250,7 @@ export interface ViewResults {
   'runtimes.all': Runtime[]
   /** 全部项目（M10），按创建时间升序；项目是任务的容器与执行工作目录 */
   'projects.all': Project[]
-  /** 某项目下的任务（M10），按创建时间升序；看板再按工作流过滤 */
+  /** 某项目下的任务（M10），按创建时间升序；看板再按工作流过滤，并按最近活动倒序铺开 */
   'tasks.byProject': Task[]
   /**
    * 没有项目的任务（M10）：v2 存量、老规则建的任务。界面归入「未归属」，

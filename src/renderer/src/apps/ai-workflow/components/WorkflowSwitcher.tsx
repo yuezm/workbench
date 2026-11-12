@@ -47,7 +47,9 @@ export function WorkflowSwitcher({
           <rect x="10" y="4" width="5" height="10" rx="1.2" />
           <rect x="17" y="4" width="4" height="13" rx="1.2" />
         </svg>
-        <span className="text-xs text-faint-foreground">工作流</span>
+        {/* 侧栏窄（w-64）：标签与徽标不参与收缩，长工作流名交给下拉自己截断，
+            否则「工作流」会被挤成两行 */}
+        <span className="shrink-0 text-xs whitespace-nowrap text-faint-foreground">工作流</span>
         <Select value={active?.id ?? ''} onValueChange={onSelect}>
           <SelectTrigger
             aria-label="选择工作流"
@@ -66,7 +68,7 @@ export function WorkflowSwitcher({
           </SelectContent>
         </Select>
         {active && (
-          <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
+          <span className="shrink-0 rounded-sm bg-accent px-1.5 py-0.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
             {active.stages.length} 阶段
           </span>
         )}

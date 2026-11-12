@@ -21,6 +21,10 @@ import {
   cardLanding,
 } from '../../../../../src/renderer/src/apps/ai-workflow/AiWorkflowPage'
 import {
+  resetEntityOrderForTest,
+  setEntityOrder,
+} from '../../../../../src/renderer/src/apps/ai-workflow/model/entity-order'
+import {
   pushOpenTarget,
   resetOpenTargetForTest,
 } from '../../../../../src/renderer/src/shell/openTarget'
@@ -139,6 +143,7 @@ const run: Run = {
   sessionId: null,
   usage: null,
   durationMs: null,
+  access: 'edit',
   startedAt: 't',
   endedAt: 't',
   createdAt: 't',
@@ -206,6 +211,8 @@ beforeEach(() => {
   kernel = installFakeKernel()
   // 落点是 shell 的模块级 store：每个用例从「没有落点」开始，避免上一个用例的点击串场
   resetOpenTargetForTest()
+  // 智能体 / 工作流顺序是渲染层偏好（localStorage）：每个用例从「没调过顺序」开始
+  resetEntityOrderForTest()
 })
 
 /** 工作台基础数据：项目 / 工作流 / 智能体 / 任务 / 运行记录 / 设置区清单 */
@@ -260,9 +267,14 @@ async function openSection(
   await user.click(screen.getByRole('button', { name: section }))
 }
 
-/** 工作台默认落在「聊天」栏：看板相关用例先切到「任务」栏 */
+/** 工作台默认落在「任务」栏：看板相关用例先切到「任务」栏 */
 async function openTasks(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByRole('button', { name: '任务' }))
+}
+
+/** 聊天相关用例先切到「聊天」栏（默认是任务栏） */
+async function openChat(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByRole('button', { name: '聊天' }))
 }
 
 /** 把任务卡拖到落点：cardLabel 为卡片 aria-label，targetLabel 为阶段列 / 归档区 aria-label */
@@ -695,34 +707,34 @@ describe('AiWorkflowPage', () => {
     unmount()
   })
 
-  it('工作台默认落在聊天栏；任务栏显示看板；切回聊天隐藏看板', async () => {
+  it('工作台默认落在任务栏；聊天栏显示会话清单；切回任务隐藏聊天', async () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
     // 页头已移除：一级标题归 shell 顶部栏；app 侧栏用 h2 标识当前所在
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
-    // 默认聊天：侧栏顶部是工作台栏目，下方紧接会话清单
+    // 默认任务：看板就位，侧栏顶部是栏目切换 + 工作流切换器
     expect(await screen.findByRole('navigation', { name: '工作台栏目' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '聊天' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByRole('button', { name: '新对话' })).toBeInTheDocument()
-    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
-    expect(screen.queryByText(/工作流「研发」/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
-    // 工作流切换器只在任务栏目显示
-    expect(screen.queryByRole('combobox', { name: '选择工作流' })).not.toBeInTheDocument()
-
-    // 切到任务：看板就位，侧栏换成工作流切换器
-    await openTasks(user)
+    expect(screen.getByRole('button', { name: '任务' })).toHaveAttribute('aria-current', 'page')
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '选择工作流' })).toBeInTheDocument()
     expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新对话' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
 
-    // 切回聊天：看板隐藏，会话清单回来
-    await user.click(screen.getByRole('button', { name: '聊天' }))
+    // 切到聊天：会话清单与会话消息流就位，看板让位
+    await openChat(user)
     expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新对话' })).toBeInTheDocument()
     expect(screen.queryByText(/工作流「研发」/)).not.toBeInTheDocument()
+    // 工作流切换器只在任务栏目显示
+    expect(screen.queryByRole('combobox', { name: '选择工作流' })).not.toBeInTheDocument()
+
+    // 切回任务：看板回来，聊天让位
+    await openTasks(user)
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
 
     // 设置视图不显示工作台栏目
     await openSection(user, '运行时')
@@ -752,7 +764,7 @@ describe('AiWorkflowPage', () => {
     expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '返回工作台' }))
-    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '任务' })).toHaveAttribute('aria-current', 'page')
     expect(screen.queryByRole('heading', { name: '运行时' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: '设置栏目' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument()
@@ -785,6 +797,37 @@ describe('AiWorkflowPage', () => {
     expect(screen.getByRole('group', { name: '阶段：草稿' })).toBeInTheDocument()
     expect(await screen.findByText('写稿')).toBeInTheDocument()
     expect(screen.queryByText('任务A')).not.toBeInTheDocument()
+  })
+
+  it('设置里调过的工作流顺序在任务栏生效：默认选中的流程跟着换', async () => {
+    seedBase()
+    const writingWf: WorkflowWithStages = { ...wf, id: 'w2', name: '写作' }
+    kernel.setView('workflows.all', undefined, [wf, writingWf])
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    // 没调过顺序：首个工作流（研发）是默认看板
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+
+    await openSection(user, '工作流')
+    // 拖动排序：研发拖到写作的位置，研发排到后面
+    fireEvent.dragStart(await screen.findByRole('button', { name: '拖动排序：工作流 研发' }))
+    fireEvent.drop(screen.getByRole('button', { name: '拖动排序：工作流 写作' }))
+    await openView(user, '工作台')
+
+    // 顺序是同一份偏好：回到任务栏，默认落在排完后的第一条
+    expect(await screen.findByText(/工作流「写作」/)).toBeInTheDocument()
+  })
+
+  it('智能体顺序也决定聊天默认智能体：新对话按排完后的第一个派活', async () => {
+    seedBase()
+    kernel.setView('agents.all', undefined, [agent, { ...agent, id: 'a2', name: 'writer' }])
+    setEntityOrder('agent', ['a2', 'a1'])
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await openChat(user)
+
+    await user.click(await screen.findByRole('button', { name: '新对话' }))
+    await waitFor(() => expectDispatched({ type: 'chat.create', agentId: 'a2', projectId: 'p1' }))
   })
 
   it('没有项目时落在默认目录：看板照常可用，新建入口仍在', async () => {
@@ -1009,6 +1052,7 @@ describe('AiWorkflowPage', () => {
     ])
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openChat(user)
 
     // 默认落在第一个项目：清单是该项目的会话，头部交代项目名
     expect(await screen.findByRole('button', { name: /^第一段对话/ })).toBeInTheDocument()
@@ -1026,6 +1070,7 @@ describe('AiWorkflowPage', () => {
     kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openChat(user)
 
     await user.click(await screen.findByRole('button', { name: '新对话' }))
     // 聊天与任务同口径落项目：新对话带当前项目 id
@@ -1057,6 +1102,7 @@ describe('AiWorkflowPage', () => {
     )
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openChat(user)
 
     await user.type(await screen.findByLabelText('消息输入'), '你好')
     await user.click(screen.getByRole('button', { name: '发送' }))
@@ -1069,7 +1115,9 @@ describe('AiWorkflowPage', () => {
     seedBase()
     kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
     kernel.setView('messages.byConversation', { conversationId: 'c1' }, [chatMessage])
+    const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openChat(user)
 
     expect(await screen.findByRole('heading', { name: '第一段对话' })).toBeInTheDocument()
     expect(await screen.findByText('你好')).toBeInTheDocument()
@@ -1131,6 +1179,7 @@ describe('AiWorkflowPage', () => {
     ])
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
+    await openChat(user)
 
     expect(await screen.findByLabelText('所属项目')).toHaveTextContent('工作台')
     const bar = await screen.findByRole('region', { name: '待审批' })

@@ -1043,7 +1043,7 @@ const readTasksByWorkflow = (db: DatabaseSync, workflowId: string): Task[] =>
       .all(workflowId) as unknown as TaskRow[]
   ).map(mapTask)
 
-/** 某项目下的任务（M10）：按创建顺序；看板再按工作流过滤。 */
+/** 某项目下的任务（M10）：按创建顺序；看板再按工作流过滤，并按最近活动倒序铺开。 */
 const readTasksByProject = (db: DatabaseSync, projectId: string): Task[] =>
   (
     db

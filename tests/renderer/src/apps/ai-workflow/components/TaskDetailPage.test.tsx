@@ -79,6 +79,7 @@ const run: Run = {
   sessionId: null,
   usage: null,
   durationMs: null,
+  access: 'edit',
   startedAt: 't',
   endedAt: 't',
   createdAt: '2026-11-06T09:10:00.000Z',

@@ -53,7 +53,8 @@ test('聊天闭环：发消息 → 真实子进程执行 → 助手回复落库�
   await page.getByRole('button', { name: 'AI 工作流' }).click()
   await expect(page.getByRole('heading', { name: 'AI 工作流' })).toBeVisible()
 
-  // 新建对话 → 输入 → 发送（走真实界面，不经桥）
+  // 新建对话 → 输入 → 发送（走真实界面，不经桥）；工作台默认落在任务栏，先进聊天
+  await page.getByRole('button', { name: '聊天', exact: true }).click()
   await page.getByRole('button', { name: '新对话' }).click()
   const input = page.getByLabel('消息输入')
   await expect(input).toBeVisible()

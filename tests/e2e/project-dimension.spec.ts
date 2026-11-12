@@ -53,25 +53,25 @@ test('项目维度：切项目 → 看板任务与会话清单一起换回本项
 
   // 切到项目乙：看板是乙的任务；甲会话不在清单里（会话按项目过滤）
   await page.getByRole('button', { name: `项目：${seeded.projectB.name}` }).click()
-  await page.getByRole('button', { name: '任务' }).click()
+  await page.getByRole('button', { name: '任务', exact: true }).click()
   await expect(page.getByText('乙任务')).toBeVisible()
   await expect(page.getByText('甲任务')).toHaveCount(0)
-  await page.getByRole('button', { name: '聊天' }).click()
+  await page.getByRole('button', { name: '聊天', exact: true }).click()
   await expect(page.getByRole('button', { name: /^甲会话/ })).toHaveCount(0)
 
   // 切到项目甲：看板换成甲的任务；甲会话出现在会话清单里
   await page.getByRole('button', { name: `项目：${seeded.projectA.name}` }).click()
-  await page.getByRole('button', { name: '任务' }).click()
+  await page.getByRole('button', { name: '任务', exact: true }).click()
   await expect(page.getByText('甲任务')).toBeVisible()
   await expect(page.getByText('乙任务')).toHaveCount(0)
-  await page.getByRole('button', { name: '聊天' }).click()
+  await page.getByRole('button', { name: '聊天', exact: true }).click()
   // 会话清单里有甲会话，聊天区也把它的标题摆出来
   await expect(page.getByRole('button', { name: /^甲会话/ })).toBeVisible()
   await expect(page.getByRole('heading', { name: '甲会话' })).toBeVisible()
 
   // 切回默认目录：两个项目的任务都不在（默认目录 = 没有项目文件夹）
   await page.getByRole('button', { name: '默认目录' }).click()
-  await page.getByRole('button', { name: '任务' }).click()
+  await page.getByRole('button', { name: '任务', exact: true }).click()
   await expect(page.getByText('甲任务')).toHaveCount(0)
   await expect(page.getByText('乙任务')).toHaveCount(0)
 })

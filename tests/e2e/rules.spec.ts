@@ -96,7 +96,7 @@ test('规则页：UI 保存规则 → app 事件建任务，同 subject 不重�
 
   // 4) 看板出现规则任务（任务栏 + 唯一工作流默认选中）
   await page.getByRole('button', { name: '返回工作台' }).click()
-  await page.getByRole('button', { name: '任务' }).click()
+  await page.getByRole('button', { name: '任务', exact: true }).click()
   await expect(page.getByText('e2e-番茄', { exact: true })).toBeVisible()
 
   // 5) 同一 subject 再发一次：事件照常入账，但同规则 + 同 externalRef 不再建任务

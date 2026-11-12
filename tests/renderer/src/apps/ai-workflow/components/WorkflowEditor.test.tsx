@@ -12,10 +12,17 @@ import type {
   WorkflowWithStages,
 } from '../../../../../../src/protocol/entities'
 import {
-  moveStageInList,
+  moveStageToIndex,
   WorkflowEditor,
 } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowEditor'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
+
+/** 拖一行到另一行（序号 1 基，与左侧列表一致）：整行是拖拽源与落点，抓到目标行松手 */
+function dragStageRow(from: number, to: number): void {
+  fireEvent.dragStart(screen.getByRole('button', { name: `阶段${from}` }))
+  fireEvent.dragOver(screen.getByRole('button', { name: `阶段${to}` }))
+  fireEvent.drop(screen.getByRole('button', { name: `阶段${to}` }))
+}
 
 const agent: Agent = {
   id: 'ag1',
@@ -218,15 +225,14 @@ describe('WorkflowEditor', () => {
       expect(screen.getByRole('button', { name: `阶段${index + 1}` }).textContent).toContain(name)
     }
 
-    // 名称只读、带「内置」徽标与类别；没有删除、没有上移 / 下移
+    // 名称只读、带「内置」徽标与类别；没有删除、没有拖动抓手
     const nameInput = screen.getByLabelText('阶段1名称')
     expect(nameInput).toHaveValue('待办')
     expect(nameInput).toHaveAttribute('readonly')
     expect(screen.getByText('内置')).toBeInTheDocument()
     expect(screen.getByText('未开始')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '删除' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '阶段1上移' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '阶段1下移' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '拖动排序：阶段1' })).not.toBeInTheDocument()
 
     // 类别跟着内置键走：已取消是「已关闭」
     await user.click(screen.getByRole('button', { name: '阶段4' }))
@@ -285,7 +291,7 @@ describe('WorkflowEditor', () => {
     expect(screen.getByRole('button', { name: '阶段4' })).toBeInTheDocument()
   })
 
-  it('阶段上/下移：只在用户区块里交换，并同步重映射流转目标下标', async () => {
+  it('拖动阶段：只在用户区块里重排，并同步重映射流转目标下标', async () => {
     const existing = workflowWith([
       { name: 'A' },
       { name: 'B', onComplete: 'C' },
@@ -301,23 +307,32 @@ describe('WorkflowEditor', () => {
         (name) => screen.getByRole('button', { name }).textContent ?? null,
       )
 
-    // 选中第三个阶段（C）再上移：顺序变为 A、C、B，选中跟着 C 走
+    // 选中第三个阶段（C）再拖到 B 的位置：顺序变为 A、C、B，选中跟着 C 走
     await user.click(screen.getByRole('button', { name: '阶段4' }))
-    await user.click(screen.getByRole('button', { name: '阶段4上移' }))
+    dragStageRow(4, 3)
     expect(order()).toEqual(['2A', '3C', '4B'])
     expect(screen.getByLabelText('阶段3名称')).toHaveValue('C')
-    // 内置阶段没有排序入口；用户区块的首尾各自只能单向移动
-    expect(screen.queryByRole('button', { name: '阶段1上移' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '阶段6下移' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '阶段2上移' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '阶段4下移' })).toBeDisabled()
+    // 内置阶段没有抓手（位置锁定）；用户阶段都有，首尾各自少一个方向键
+    expect(screen.queryByRole('button', { name: '拖动排序：阶段1' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '拖动排序：阶段6' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '拖动排序：阶段2' })).toBeInTheDocument()
 
-    // 再下移一次回到原位：A、B、C
-    await user.click(screen.getByRole('button', { name: '阶段3下移' }))
+    // 再拖回去：A、B、C
+    dragStageRow(3, 4)
     expect(order()).toEqual(['2A', '3B', '4C'])
 
-    // 再次上移后保存，验证目标下标随重排重映射
-    await user.click(screen.getByRole('button', { name: '阶段4上移' }))
+    // 抓手键盘：用户区块中间一条 ↑ / ↓ 各挪一格，首条按 ↑ 不动（拖拽不可键盘操作）
+    await user.click(screen.getByRole('button', { name: '拖动排序：阶段3' }))
+    await user.keyboard('{ArrowUp}')
+    expect(order()).toEqual(['2B', '3A', '4C'])
+    await user.keyboard('{ArrowDown}')
+    expect(order()).toEqual(['2A', '3B', '4C'])
+    await user.click(screen.getByRole('button', { name: '拖动排序：阶段2' }))
+    await user.keyboard('{ArrowUp}')
+    expect(order()).toEqual(['2A', '3B', '4C'])
+
+    // 再次拖动后保存，验证目标下标随重排重映射
+    dragStageRow(4, 3)
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0] as WorkflowInput
@@ -550,7 +565,7 @@ describe('WorkflowEditor', () => {
     expect(savedStage(draft, '实现')).toMatchObject({ id: 's2', instructions: '按方案实现并自测' })
   })
 
-  it('移动别的阶段：展开项不跳，被换位时才跟着换（左侧行内上移 / 下移）', async () => {
+  it('移动别的阶段：展开项不跳，被让位时才跟着换（左侧行内拖动）', async () => {
     const existing = workflowWith([{ name: 'A' }, { name: 'B' }, { name: 'C' }])
     kernel.setView('agents.all', undefined, [])
     kernel.setView('workflows.all', undefined, [])
@@ -562,16 +577,16 @@ describe('WorkflowEditor', () => {
         (name) => screen.getByRole('button', { name }).textContent ?? null,
       )
 
-    // 展开 A，把 C 上移：A 仍在展开，C 进到第 3 行
+    // 展开 A，把 C 拖到 B 的位置：A 仍在展开，C 进到第 3 行
     await user.click(screen.getByRole('button', { name: '阶段2' }))
-    await user.click(screen.getByRole('button', { name: '阶段4上移' }))
+    dragStageRow(4, 3)
     expect(order()).toEqual(['2A', '3C', '4B'])
     expect(screen.getByLabelText('阶段2名称')).toHaveValue('A')
 
-    // 展开 B（现在第 4 行），把 C 下移回去：B 被换到第 3 行，展开项跟着走
+    // 展开 B（现在第 4 行），把 C 拖回去：B 被让到第 3 行，展开项跟着走
     await user.click(screen.getByRole('button', { name: '阶段4' }))
     expect(screen.getByLabelText('阶段4名称')).toHaveValue('B')
-    await user.click(screen.getByRole('button', { name: '阶段3下移' }))
+    dragStageRow(3, 4)
     expect(order()).toEqual(['2A', '3B', '4C'])
     expect(screen.getByLabelText('阶段3名称')).toHaveValue('B')
   })
@@ -597,7 +612,7 @@ describe('WorkflowEditor', () => {
     expect(screen.getByLabelText('阶段2名称')).toHaveValue('阶段1')
   })
 
-  it('上移阶段：目标指向正被让位的相邻阶段时，目标下标 +1（重映射上移方向）', async () => {
+  it('拖动阶段：目标指向被让位的阶段时，目标下标 +1（重映射往上挪的方向）', async () => {
     const existing = workflowWith([{ name: 'A', onComplete: 'B' }, { name: 'B' }, { name: 'C' }])
     kernel.setView('agents.all', undefined, [])
     kernel.setView('workflows.all', undefined, [])
@@ -605,8 +620,8 @@ describe('WorkflowEditor', () => {
     const user = userEvent.setup()
     render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
 
-    // C 上移越过 B：B 从下标 3 被挤到 4，A 指向 B 的下标要同步 +1
-    await user.click(screen.getByRole('button', { name: '阶段4上移' }))
+    // C 拖到 B 的位置：B 从下标 3 被挤到 4，A 指向 B 的下标要同步 +1
+    dragStageRow(4, 3)
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0] as WorkflowInput
@@ -622,7 +637,7 @@ describe('WorkflowEditor', () => {
     expect(savedStage(draft, 'A')).toMatchObject({ name: 'A', onCompleteIndex: 3 })
   })
 
-  it('下移阶段：目标指向正被让位的相邻阶段时，目标下标 -1（重映射下移方向）', async () => {
+  it('拖动阶段：目标指向被让位的阶段时，目标下标 -1（重映射往下挪的方向）', async () => {
     const existing = workflowWith([{ name: 'A' }, { name: 'B' }, { name: 'C', onComplete: 'B' }])
     kernel.setView('agents.all', undefined, [])
     kernel.setView('workflows.all', undefined, [])
@@ -630,8 +645,8 @@ describe('WorkflowEditor', () => {
     const user = userEvent.setup()
     render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
 
-    // A 下移越过 B：B 从下标 3 被挤到 2，C 指向 B 的下标要同步 -1
-    await user.click(screen.getByRole('button', { name: '阶段2下移' }))
+    // A 拖到 B 的位置：B 从下标 3 被挤到 2，C 指向 B 的下标要同步 -1
+    dragStageRow(2, 3)
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0] as WorkflowInput
@@ -1371,7 +1386,7 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
     expect(savedStage(draft, 'C').gate).toBeNull()
   })
 
-  it('上移阶段：带闸门的阶段保住闸门，闸门去向跟着重映射', async () => {
+  it('拖动阶段：带闸门的阶段保住闸门，闸门去向跟着重映射', async () => {
     const existing = workflowWith([
       { name: 'A' },
       { name: '判定', gate: { maxFails: 2, onPass: 'C' } },
@@ -1381,8 +1396,8 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
     const user = userEvent.setup()
     render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
 
-    // C 上移越过判定：C 从下标 3 移到 2，闸门的「通过时进入」要跟着改
-    await user.click(screen.getByRole('button', { name: '阶段4上移' }))
+    // C 拖到判定的位置：C 从下标 3 移到 2，闸门的「通过时进入」要跟着改
+    dragStageRow(4, 3)
     await user.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(onSave).toHaveBeenCalled())
@@ -1516,22 +1531,48 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
   }, 30_000)
 })
 
-describe('moveStageInList', () => {
-  const stages: StageInput[] = [
-    { name: 'A', entryMode: 'agent' },
-    { name: 'B', entryMode: 'agent' },
+describe('moveStageToIndex（拖动落点：跨多行也一样重映射）', () => {
+  const stages = (): StageInput[] => [
+    { name: 'A', entryMode: 'agent', onCompleteIndex: 1 },
+    { name: 'B', entryMode: 'agent', onRejectIndex: 0 },
+    { name: 'C', entryMode: 'agent', gate: { maxFails: 2, onPassIndex: 0, onFailIndex: 2 } },
+    { name: 'D', entryMode: 'none' },
   ]
 
-  it('正常移动：被移动的那一项换位，选中项跟着它走', () => {
-    const moved = moveStageInList(stages, 0, 0, 1)
-    expect(moved.stages.map((stage) => stage.name)).toEqual(['B', 'A'])
+  it('相邻一格（抓手上的 ↑ / ↓ 走同一条路径）：换位且选中跟着走', () => {
+    const moved = moveStageToIndex(stages(), 0, 0, 1)
+    expect(moved.stages.map((stage) => stage.name)).toEqual(['B', 'A', 'C', 'D'])
     expect(moved.selected).toBe(1)
   })
 
-  it('越界移动：阶段与选中下标原样返回（界面上这两个按钮本来就是禁用的）', () => {
-    // 首行上移
-    expect(moveStageInList(stages, 0, 0, -1)).toEqual({ stages, selected: 0 })
-    // 末行下移
-    expect(moveStageInList(stages, 1, 1, 1)).toEqual({ stages, selected: 1 })
+  it('往下拖：被跨过的整体前移一格，目标下标跟着重映射', () => {
+    const moved = moveStageToIndex(stages(), 1, 0, 2)
+    expect(moved.stages.map((stage) => stage.name)).toEqual(['B', 'C', 'A', 'D'])
+    // A 从 0 落到 2：它自己的「完成后进入」原本指向 B(1)，B 让到 0
+    expect(moved.stages[2].onCompleteIndex).toBe(0)
+    // B 的「出错退回」原本指向 A(0)，A 现在在 2
+    expect(moved.stages[0].onRejectIndex).toBe(2)
+    // 选中跟着让位后的下标走
+    expect(moved.selected).toBe(0)
+  })
+
+  it('往上拖：被跨过的整体后移一格，闸门两侧去向一起重映射', () => {
+    const moved = moveStageToIndex(stages(), 2, 2, 0)
+    expect(moved.stages.map((stage) => stage.name)).toEqual(['C', 'A', 'B', 'D'])
+    // C 自己带着闸门：通过 = A(0) 现在在 1，「未通过 = 自己」从 2 变 0
+    expect(moved.stages[0].gate).toMatchObject({ onPassIndex: 1, onFailIndex: 0 })
+    // A 的「完成后进入」原本指向 B(1)，B 让到 2；B 的「出错退回」指向 A(0)，A 让到 1
+    expect(moved.stages[1].onCompleteIndex).toBe(2)
+    expect(moved.stages[2].onRejectIndex).toBe(1)
+    expect(moved.selected).toBe(0)
+  })
+
+  it('原地 / 越界：阶段与选中下标原样返回', () => {
+    const original = stages()
+    expect(moveStageToIndex(original, 1, 0, 0)).toEqual({ stages: original, selected: 1 })
+    expect(moveStageToIndex(original, 1, -1, 2)).toEqual({ stages: original, selected: 1 })
+    expect(moveStageToIndex(original, 1, 0, -1)).toEqual({ stages: original, selected: 1 })
+    expect(moveStageToIndex(original, 1, 0, 4)).toEqual({ stages: original, selected: 1 })
+    expect(moveStageToIndex(original, 1, 4, 0)).toEqual({ stages: original, selected: 1 })
   })
 })

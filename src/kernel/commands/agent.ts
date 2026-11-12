@@ -3,6 +3,7 @@
  */
 import type { Agent, Conversation, WorkflowStage } from '../../protocol/entities'
 import type { Input } from '../../protocol/inputs'
+import { normalizeModelId } from '../../protocol/model-id'
 import type { Decision, Environment, Id, Iso, View } from '../types'
 import {
   done,
@@ -12,6 +13,23 @@ import {
   permissionModeOf,
   reject,
 } from './common'
+
+/**
+ * 模型 id 归一（M28）：空 → null；有值就按 `provider/id` 存（剥 `[1m]` 这类窗口标注、
+ * 解 `%2F`），格式不对直接拒。
+ *
+ * 为什么收在决策层：`[1m]` 后缀进到 CLI 会变成 `unrecognized_model`，`%2F` 不解码会变成
+ * `no configured model`——两种都是「存的时候没人管、跑的时候炸一轮」。存入口归一一次，
+ * 解析侧（`parseModelId`）再兜一次，两侧同口径。
+ */
+function modelOf(
+  model: string | null | undefined,
+): { ok: true; value: string | null } | { ok: false } {
+  const trimmed = (model ?? '').trim()
+  if (trimmed === '') return { ok: true, value: null }
+  const normalized = normalizeModelId(trimmed)
+  return normalized === null ? { ok: false } : { ok: true, value: normalized }
+}
 
 /** 绑定了该智能体的第一个工作流阶段（阶段绑定的智能体不允许删） */
 function stageUsingAgent(view: View, agentId: Id): WorkflowStage | undefined {
@@ -54,13 +72,17 @@ export function createAgent(
   }
   const maxConcurrent = normalizeConcurrency(form.maxConcurrent, 1)
   if (maxConcurrent === null) return reject('invalid_input', '并发上限必须是正整数')
+  const model = modelOf(form.model)
+  if (!model.ok) {
+    return reject('invalid_input', '模型格式不对（要 `provider/model`）：' + String(form.model))
+  }
   const agent: Agent = {
     id: env.nextId('agent'),
     name,
     description: form.description ?? '',
     runtimeId: form.runtimeId,
     systemPrompt: form.systemPrompt ?? '',
-    model: form.model ?? null,
+    model: model.value,
     reasoningEffort: form.reasoningEffort ?? null,
     maxConcurrent,
     permissionMode,
@@ -92,13 +114,18 @@ export function updateAgent(
   }
   const maxConcurrent = normalizeConcurrency(patch.maxConcurrent, current.maxConcurrent)
   if (maxConcurrent === null) return reject('invalid_input', '并发上限必须是正整数')
+  const model =
+    patch.model === undefined ? { ok: true as const, value: current.model } : modelOf(patch.model)
+  if (!model.ok) {
+    return reject('invalid_input', '模型格式不对（要 `provider/model`）：' + String(patch.model))
+  }
   const agent: Agent = {
     ...current,
     name: patch.name?.trim() || current.name,
     description: patch.description ?? current.description,
     runtimeId,
     systemPrompt: patch.systemPrompt ?? current.systemPrompt,
-    model: patch.model !== undefined ? patch.model : current.model,
+    model: model.value,
     reasoningEffort:
       patch.reasoningEffort !== undefined ? patch.reasoningEffort : current.reasoningEffort,
     maxConcurrent,

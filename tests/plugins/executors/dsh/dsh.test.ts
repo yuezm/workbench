@@ -19,7 +19,7 @@ import {
   executeDshRun,
   type DshOptions,
 } from '../../../../src/plugins/executors/dsh/run'
-import { parseModelId } from '../../../../src/plugins/shared/model-id'
+import { parseModelId } from '../../../../src/protocol/model-id'
 import { fakeSdk, type FakeSdkOverrides } from '../../support/fake-sdk'
 
 /** 用 node 自身作为「存在的可执行文件」，避免依赖本机 dsh */

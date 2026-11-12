@@ -34,12 +34,16 @@ export const HANDOFF_MAX_DEPTH = 8
 const truncate = (value: string, max: number): string =>
   Array.from(value).length > max ? Array.from(value).slice(0, max).join('') : value
 
-/** 同一 `(来源任务, 阶段)` 是否已经派过单：扫 `view.tasks` 的交接两列。 */
-export function handedOffAlready(view: View, sourceTaskId: Id, exitedStageId: Id): boolean {
+/**
+ * 这一轮 run 是否已经派过单（M30）：扫 `view.tasks` 的派单来源 run。
+ *
+ * 以「一次离开」为粒度，同一阶段第二次成功会再派一张（工单模型：每次发起都是新单）。
+ * 人工离开（runId = null）不去重——每次拖动 / 完成都是一次独立发起。
+ */
+export function handedOffAlready(view: View, sourceRunId: Id | null): boolean {
+  if (sourceRunId === null) return false
   for (const task of view.tasks.values()) {
-    if (task.handoffFromTaskId === sourceTaskId && task.handoffFromStageId === exitedStageId) {
-      return true
-    }
+    if (task.handoffFromRunId === sourceRunId) return true
   }
   return false
 }
@@ -72,6 +76,7 @@ function handoffFactsFor(
   view: View,
   sourceTask: Task,
   exitedStageId: Id,
+  sourceRunId: Id | null,
   target: HandoffTarget,
   now: Iso,
   env: Environment,
@@ -102,6 +107,7 @@ function handoffFactsFor(
     spawnKey: null,
     handoffFromTaskId: sourceTask.id,
     handoffFromStageId: exitedStageId,
+    handoffFromRunId: sourceRunId,
     createdAt: now,
     updatedAt: now,
   }
@@ -128,13 +134,16 @@ export function handoffOnExit(
   now: Iso,
   env: Environment,
   actor: Actor,
-  options?: { forward?: boolean },
+  options?: { forward?: boolean; runId?: Id | null },
 ): FactDraft[] {
+  const runId = options?.runId ?? null
+  if (handedOffAlready(view, runId)) return []
   const targets = handoffTargetsOf(view, task.workflowId, stage, guard, options)
   if (targets.length === 0) return []
-  if (handedOffAlready(view, task.id, stage.id)) return []
   if (handoffDepth(view, task) >= HANDOFF_MAX_DEPTH) return []
-  return targets.flatMap((target) => handoffFactsFor(view, task, stage.id, target, now, env, actor))
+  return targets.flatMap((target) =>
+    handoffFactsFor(view, task, stage.id, runId, target, now, env, actor),
+  )
 }
 
 /**

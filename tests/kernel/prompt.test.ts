@@ -176,6 +176,7 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
     parentTaskId: null,
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    handoffFromRunId: null,
     createdAt: CREATED,
     updatedAt: CREATED,
     ...over,
@@ -295,6 +296,7 @@ describe('kernel/prompt 回执块说明', () => {
       parentTaskId: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      handoffFromRunId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -395,6 +397,7 @@ describe('kernel/prompt 回执块说明', () => {
       parentTaskId: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      handoffFromRunId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -515,6 +518,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       parentTaskId: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      handoffFromRunId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -550,6 +554,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       parentTaskId: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      handoffFromRunId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -591,6 +596,7 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     parentTaskId: null,
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    handoffFromRunId: null,
     gateFails: 0,
     createdAt: CREATED,
     updatedAt: CREATED,
@@ -660,6 +666,7 @@ describe('kernel/prompt 验收段（M20）', () => {
     parentTaskId: null,
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    handoffFromRunId: null,
     createdAt: CREATED,
     updatedAt: CREATED,
   }
@@ -801,6 +808,7 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       parentTaskId: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      handoffFromRunId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -840,6 +848,7 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       parentTaskId: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      handoffFromRunId: null,
       createdAt: CREATED,
       updatedAt: CREATED,
     }

@@ -476,6 +476,7 @@ describe('强杀重启：事实已提交、投影落后', () => {
           parentTaskId: null,
           handoffFromTaskId: null,
           handoffFromStageId: null,
+          handoffFromRunId: null,
           createdAt: AT,
           updatedAt: AT,
         }

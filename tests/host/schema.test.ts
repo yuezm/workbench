@@ -116,6 +116,7 @@ const TASKS_M7_COLUMNS = [
   'spawn_key',
   'handoff_from_task_id',
   'handoff_from_stage_id',
+  'handoff_from_run_id',
   'project_id',
   // M11：闸门预算
   'gate_fails',

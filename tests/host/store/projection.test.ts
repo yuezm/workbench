@@ -210,6 +210,7 @@ describe('rebuild：增量应用与重建等价', () => {
         spawnKey: null,
         handoffFromTaskId: null,
         handoffFromStageId: null,
+        handoffFromRunId: null,
         createdAt: SAMPLE_AT,
         updatedAt: SAMPLE_AT,
       },

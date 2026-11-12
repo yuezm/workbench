@@ -141,6 +141,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   spawn_key TEXT,
   handoff_from_task_id TEXT,
   handoff_from_stage_id TEXT,
+  -- M30 派单来源 run（弱引用）：同一 run 只派一批，人工离开为 NULL
+  handoff_from_run_id TEXT,
   project_id TEXT,
   -- M11 闸门预算：当前阶段连续未通过次数（0 = 没失败过；旧行默认 0）
   gate_fails INTEGER NOT NULL DEFAULT 0,
@@ -893,6 +895,19 @@ export const STAGES_M29_ADD_COLUMN_SQL: Readonly<
   Record<(typeof STAGES_M29_ADDED_COLUMNS)[number], string>
 > = {
   handoffs_json: "ALTER TABLE workflow_stages ADD COLUMN handoffs_json TEXT NOT NULL DEFAULT '[]'",
+}
+
+/**
+ * M30 给 `tasks` 新增的列（派单来源 run）：可空 TEXT，弱引用不设外键。
+ * 老行按「不知道来自哪一轮」归一成 NULL（人工离开）——升级前的派单本来也不记这一层。
+ */
+export const TASKS_M30_ADDED_COLUMNS = ['handoff_from_run_id'] as const
+
+/** `tasks` M30 补列语句（可空、无 DEFAULT）。 */
+export const TASKS_M30_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M30_ADDED_COLUMNS)[number], string>
+> = {
+  handoff_from_run_id: 'ALTER TABLE tasks ADD COLUMN handoff_from_run_id TEXT',
 }
 
 /**

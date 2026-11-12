@@ -91,6 +91,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   parentTaskId: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
+  handoffFromRunId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -254,6 +255,7 @@ describe('kernel/decide 派单——直接完成', () => {
       currentStageId: 'st-b0',
       handoffFromTaskId: 'task-1',
       handoffFromStageId: 'st-a0',
+      handoffFromRunId: null,
       parentTaskId: 'task-1',
     })
   })
@@ -269,7 +271,7 @@ describe('kernel/decide 派单——直接完成', () => {
     expect(typesOf(decision.facts)).toEqual(['task.completed'])
   })
 
-  it('同一 (任务, 阶段) 已派过 → 不重复建', () => {
+  it('同一轮 run 已派过 → 不重复建（人工完成没有 run，再次完成就是新的一张）', () => {
     const handed: Task = task({
       id: 'task-handed',
       origin: 'handoff',
@@ -277,7 +279,9 @@ describe('kernel/decide 派单——直接完成', () => {
       currentStageId: 'st-b0',
       handoffFromTaskId: 'task-1',
       handoffFromStageId: 'st-a0',
+      handoffFromRunId: 'run-1',
     })
+    // 人工完成不带 run：不会因为「同一任务同一阶段派过」就吞掉——这是第二次发起
     const decision = decide(
       view({ tasks: [task(), handed] }),
       command({ type: 'task.complete', id: 'task-1' }),
@@ -285,7 +289,12 @@ describe('kernel/decide 派单——直接完成', () => {
       env(),
     )
 
-    expect(typesOf(decision.facts)).toEqual(['task.completed'])
+    expect(typesOf(decision.facts)).toEqual([
+      'thread.opened',
+      'thread.task_attached',
+      'task.created',
+      'task.completed',
+    ])
   })
 
   it('目标阶段是 agent → 同一批里产入口 run（挂新线程）', () => {
@@ -379,6 +388,7 @@ describe('kernel/decide 派单——运行结算', () => {
       workflowId: 'wf-b',
       handoffFromTaskId: 'task-1',
       handoffFromStageId: 'st-a0',
+      handoffFromRunId: 'run-1',
     })
   })
 
@@ -550,6 +560,7 @@ describe('kernel/decide 派单——按触发条件分流（M29）', () => {
       origin: 'handoff',
       workflowId: 'wf-b',
       handoffFromStageId: 'st-a0',
+      handoffFromRunId: 'run-1',
     })
   })
 

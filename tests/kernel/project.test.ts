@@ -108,6 +108,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   spawnKey: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
+  handoffFromRunId: null,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -878,6 +879,7 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
           spawnKey: null,
           handoffFromTaskId: null,
           handoffFromStageId: null,
+          handoffFromRunId: null,
         },
       },
     ])

@@ -267,7 +267,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 - **派单不终结本单**：本单去向仍由 `onComplete` / `onReject` / `gate` 决定，所以同一触发条件可以「既进下一阶段又派一张单」，也可以只派单本单照旧流转。
 - **只有真的离开阶段才派**：打回原地、判定没给结论、取消都不算离开，一条都不派（与 M7 的「向前完成才交接」等价，但不再按 `position` 比较）。
 - 判定阶段没有 `done`：跑完但没结论不构成去向；`errored` 仍然可用（执行崩溃与业务过没过是两件事）。
-- 同一 `(来源任务, 阶段)` 只派一次（去重扫 `tasks` 的 `handoffFromTaskId` / `handoffFromStageId`），链深上限 8。
+- **去重按「这一次离开」**（M30）：一条 run 只派一批（`tasks.handoff_from_run_id`），同一阶段第二次成功会**再派一张**——工单模型下每次发起都是新单。人工拖动 / 完成任务没有 run，不去重。链深上限 8。
 - 老事实的 M7 两列按「`done` + `manual`（仅向前）」归一，判定阶段归成「`passed` + `manual`」，见 `kernel/workflow/stage-handoffs.ts#legacyHandoffs`。
 
 **打回原地不重试：** `RUN_FAILED` 时若 `on_reject` 未配置（不指定）或解析结果就是当前阶段（显式配置为自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成，详情页也可直接「重新执行」原地重排（`task.rerun`，见下）。

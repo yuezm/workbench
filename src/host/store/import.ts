@@ -408,6 +408,7 @@ function readLegacyEntityRows(
     // M7：v2 存量没有交接概念——来源任务与阶段一律为空。
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    handoffFromRunId: null,
     // M11：v2 存量没有闸门概念——预算按 0 归一（与投影层 `normalizeTask` 一致）。
     gateFails: 0,
     createdAt: row.created_at,

@@ -47,6 +47,7 @@ function task(id: string, title: string, updatedAt: string, currentStageId = 's1
     parentTaskId: null,
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    handoffFromRunId: null,
     createdAt: 't',
     updatedAt,
   }

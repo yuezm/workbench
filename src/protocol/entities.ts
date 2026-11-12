@@ -570,6 +570,11 @@ export interface Task {
   handoffFromTaskId: string | null
   /** 交接来源阶段（M7，`origin='handoff'` 时非 null）：触发交接的阶段 id */
   handoffFromStageId: string | null
+  /**
+   * 派单来源 run（M30）：这一次「离开阶段」的结算来自哪一轮。
+   * 同一 run 只派一批（重放 / 重复处理不重复建单）；人工拖动 / 完成任务没有 run，按 null 落。
+   */
+  handoffFromRunId: string | null
   createdAt: string
   updatedAt: string
 }

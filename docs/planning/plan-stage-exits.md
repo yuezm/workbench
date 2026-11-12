@@ -1,6 +1,6 @@
 # 计划：阶段出口表（Stage Exits）
 
-> 状态：**S1a 已实现（M29，2026-11-12）；S1b–S4 待做**。
+> 状态：**S1a + S2 已实现（M29 / M30，2026-11-12）；S1b、S3、S4 待做**。
 > 关联：[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)（阶段状态机、闸门）、[SPEC-review-handoff](../specs/SPEC-review-handoff.md)、[ARCHITECTURE](../ARCHITECTURE.md)。
 
 ## 已落地：S1a 派单按触发条件分组（M29）
@@ -19,7 +19,8 @@
 - 投影列 `workflow_stages.handoffs_json`（DEFAULT `'[]'`）；M7 两列不再写入、保留到独立清理任务（S4）。
 - 老事实归一：`done` + `manual`（仅向前），判定阶段 `passed` + `manual`——M7 的「成功且向前就交接」在
   两条路（自动流转 / 人工拖拽）上都被保留下来。
-- 已知取舍：同一 `(任务, 阶段)` 仍只派一次；要「每次成功都发一张新单」得把去重键换成 runId（S2）。
+- 去重按「这一次离开」：`tasks.handoff_from_run_id`（M30），同一阶段第二次成功会再派一张；人工离开不去重。
+  旧库按 NULL（人工离开）归一，升级前的派单本来也没记这一层。
 
 ## 要解决的问题
 

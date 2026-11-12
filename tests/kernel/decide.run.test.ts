@@ -211,6 +211,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   parentTaskId: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
+  handoffFromRunId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,

@@ -163,6 +163,7 @@ export const sample = {
       spawnKey: null,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      handoffFromRunId: null,
       createdAt: SAMPLE_AT,
       updatedAt: SAMPLE_AT,
       ...overrides,

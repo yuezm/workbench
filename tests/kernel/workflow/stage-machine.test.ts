@@ -48,6 +48,7 @@ const task = (currentStageId: string | null): Task => ({
   parentTaskId: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
+  handoffFromRunId: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 })
@@ -154,6 +155,7 @@ function sTask(currentStageId: string | null, status: Task['status'] = 'active')
     parentTaskId: null,
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    handoffFromRunId: null,
     createdAt: 't',
     updatedAt: 't',
   }

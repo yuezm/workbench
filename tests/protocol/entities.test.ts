@@ -273,6 +273,7 @@ const sampleTask = {
   parentTaskId: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
+  handoffFromRunId: null,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 } satisfies Task
@@ -434,6 +435,7 @@ describe('protocol/entities', () => {
       'currentStageId',
       'description',
       'externalRef',
+      'handoffFromRunId',
       'handoffFromStageId',
       'handoffFromTaskId',
       'id',

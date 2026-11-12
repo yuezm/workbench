@@ -52,6 +52,7 @@ test('跨工作流交接：完成阶段在目标工作流建关联任务，重�
       origin: 'handoff',
       handoffFromTaskId: seeded.sourceTaskId,
       handoffFromStageId: seeded.sourceStageId,
+      handoffFromRunId: null,
       title: seeded.sourceTitle,
       threadSource: 'handoff',
       sourceStatus: 'completed',

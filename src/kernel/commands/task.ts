@@ -105,6 +105,7 @@ export function createTask(
     spawnKey: null,
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    handoffFromRunId: null,
     createdAt: now,
     updatedAt: now,
   }
@@ -183,6 +184,7 @@ export function moveTaskCommand(
   facts.push(
     ...handoffOnExit(view, task, fromStage, 'manual', now, env, OWNER, {
       forward: target.position > fromStage.position,
+      runId: null,
     }),
   )
   return done(facts)
@@ -204,7 +206,10 @@ export function completeTaskCommand(
   const completed: Task = { ...completeTask(task), updatedAt: now }
   // M29：完成 = 离开当前阶段且视为向前，派单按 `manual` 触发
   const facts: FactDraft[] = [
-    ...handoffOnExit(view, task, fromStage, 'manual', now, env, OWNER, { forward: true }),
+    ...handoffOnExit(view, task, fromStage, 'manual', now, env, OWNER, {
+      forward: true,
+      runId: null,
+    }),
     ownerDraft('task.completed', { task: completed }, now),
   ]
   // M6.5：线程内任务全部完成 → 归档线程

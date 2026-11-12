@@ -143,6 +143,8 @@ interface TaskRow {
   spawn_key: string | null
   handoff_from_task_id: string | null
   handoff_from_stage_id: string | null
+  /** M30 派单来源 run（人工离开为 NULL） */
+  handoff_from_run_id: string | null
   /** M11 闸门预算：当前阶段连续未通过次数 */
   gate_fails: number
   created_at: string
@@ -378,6 +380,7 @@ const mapTask = (row: TaskRow): Task => ({
   spawnKey: row.spawn_key,
   handoffFromTaskId: row.handoff_from_task_id,
   handoffFromStageId: row.handoff_from_stage_id,
+  handoffFromRunId: row.handoff_from_run_id ?? null,
   gateFails: row.gate_fails,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -590,7 +593,8 @@ const readProjects = (db: DatabaseSync): Project[] =>
 /** `tasks` 投影的列清单（逐列写死，不用 `SELECT *`；三处读路径共用）。 */
 const TASK_COLUMNS = `id, title, description, workflow_id, project_id, current_stage_id, status, origin,
         rule_id, external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id,
-        batch_no, spawn_key, handoff_from_task_id, handoff_from_stage_id, created_at, updated_at`
+        batch_no, spawn_key, handoff_from_task_id, handoff_from_stage_id, handoff_from_run_id,
+        created_at, updated_at`
 
 const readTasks = (db: DatabaseSync): Task[] =>
   (

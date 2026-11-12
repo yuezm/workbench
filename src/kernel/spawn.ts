@@ -145,6 +145,7 @@ export function spawnFacts(
       spawnKey: key,
       handoffFromTaskId: null,
       handoffFromStageId: null,
+      handoffFromRunId: null,
       createdAt: now,
       updatedAt: now,
     }

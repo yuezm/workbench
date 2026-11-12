@@ -134,6 +134,7 @@ function buildTask(
     spawnKey: null,
     handoffFromTaskId: null,
     handoffFromStageId: null,
+    handoffFromRunId: null,
     createdAt: now,
     updatedAt: now,
   }

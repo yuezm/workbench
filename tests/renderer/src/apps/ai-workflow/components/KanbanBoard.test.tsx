@@ -58,6 +58,7 @@ const task: Task = {
   parentTaskId: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
+  handoffFromRunId: null,
   createdAt: 't',
   updatedAt: 't',
 }

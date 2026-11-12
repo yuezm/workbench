@@ -237,6 +237,8 @@ const normalizeTask = (row: Task): Task & { gateFails: number } => {
     spawnKey: legacy.spawnKey ?? null,
     handoffFromTaskId: legacy.handoffFromTaskId ?? null,
     handoffFromStageId: legacy.handoffFromStageId ?? null,
+    // M30：老行不知道来自哪一轮，按人工离开（null）归一
+    handoffFromRunId: legacy.handoffFromRunId ?? null,
     // M11：闸门预算缺省 0（没失败过）
     gateFails: legacy.gateFails ?? 0,
   }
@@ -336,9 +338,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
       `INSERT INTO tasks
          (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
           external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
-          spawn_key, handoff_from_task_id, handoff_from_stage_id, project_id, gate_fails,
-          created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          spawn_key, handoff_from_task_id, handoff_from_stage_id, handoff_from_run_id, project_id,
+          gate_fails, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
@@ -356,6 +358,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          spawn_key = excluded.spawn_key,
          handoff_from_task_id = excluded.handoff_from_task_id,
          handoff_from_stage_id = excluded.handoff_from_stage_id,
+         handoff_from_run_id = excluded.handoff_from_run_id,
          project_id = excluded.project_id,
          gate_fails = excluded.gate_fails,
          created_at = excluded.created_at,
@@ -621,6 +624,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         task.spawnKey ?? null,
         task.handoffFromTaskId,
         task.handoffFromStageId,
+        task.handoffFromRunId ?? null,
         task.projectId ?? null,
         // 闸门预算已由 `normalizeTask` 归一（缺省 0），这里不再重复兜底
         task.gateFails,

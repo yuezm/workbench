@@ -99,6 +99,7 @@ const task = (id: string, over: Partial<Task> = {}): Task => ({
   parentTaskId: null,
   handoffFromTaskId: null,
   handoffFromStageId: null,
+  handoffFromRunId: null,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -205,24 +206,27 @@ const exit = (
   seeded: View,
   source: Task,
   guard: 'done' | 'errored' | 'passed' | 'failed' | 'manual',
-  options?: { forward?: boolean },
+  options?: { forward?: boolean; runId?: string | null },
 ): FactDraft[] =>
   handoffOnExit(seeded, source, sourceStage(seeded), guard, NOW, env(), OWNER, options)
 
 describe('kernel/handoff 去重与链深', () => {
-  it('同一 (来源任务, 阶段) 已存在派单产物 → 视为已派过', () => {
+  it('同一轮 run 已派过 → 不重复建；另一轮 / 人工离开不算', () => {
     const handed = task('t-2', {
       origin: 'handoff',
       workflowId: 'wf-b',
       currentStageId: 'st-b0',
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
+      handoffFromRunId: 'run-9',
     })
 
-    expect(handedOffAlready(view({ tasks: [handed] }), 't-1', 'st-a0')).toBe(true)
-    // 同任务但不同阶段不算
-    expect(handedOffAlready(view({ tasks: [handed] }), 't-1', 'st-a1')).toBe(false)
-    expect(handedOffAlready(view(), 't-1', 'st-a0')).toBe(false)
+    expect(handedOffAlready(view({ tasks: [handed] }), 'run-9')).toBe(true)
+    // 另一轮 run：同一阶段第二次成功要能再派一张
+    expect(handedOffAlready(view({ tasks: [handed] }), 'run-10')).toBe(false)
+    expect(handedOffAlready(view(), 'run-9')).toBe(false)
+    // 人工离开没有 run：不去重，每次拖动 / 完成都是一次独立发起
+    expect(handedOffAlready(view({ tasks: [handed] }), null)).toBe(false)
   })
 
   it('链深沿 handoffFromTaskId 回溯；非交接任务为 0；环不无限循环', () => {
@@ -258,6 +262,7 @@ describe('kernel/handoff 去重与链深', () => {
             origin: 'handoff',
             handoffFromTaskId: `t-${index - 1}`,
             handoffFromStageId: 'st-a0',
+            handoffFromRunId: null,
           }),
         )
       }
@@ -272,6 +277,7 @@ describe('kernel/handoff 去重与链深', () => {
         origin: 'handoff',
         handoffFromTaskId: `t-${HANDOFF_MAX_DEPTH - 1}`,
         handoffFromStageId: 'st-a0',
+        handoffFromRunId: null,
       }),
       'done',
     )
@@ -285,6 +291,7 @@ describe('kernel/handoff 去重与链深', () => {
         origin: 'handoff',
         handoffFromTaskId: `t-${HANDOFF_MAX_DEPTH}`,
         handoffFromStageId: 'st-a0',
+        handoffFromRunId: null,
       }),
       'done',
     )
@@ -363,17 +370,42 @@ describe('kernel/handoff 触发条件分组', () => {
     expect(exit(seeded, task('t-1'), 'manual', { forward: false })).toEqual([])
   })
 
-  it('已派过 / 目标工作流已删 → 零事实', () => {
+  it('同一轮已派过 / 目标工作流已删 → 零事实', () => {
     const handed = task('t-2', {
       origin: 'handoff',
       workflowId: 'wf-b',
       currentStageId: 'st-b0',
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
+      handoffFromRunId: 'run-9',
     })
 
-    expect(exit(withTasks(baseView(), [handed]), task('t-1'), 'done')).toEqual([])
+    expect(exit(withTasks(baseView(), [handed]), task('t-1'), 'done', { runId: 'run-9' })).toEqual(
+      [],
+    )
     expect(exit(baseView([handoff({ workflowId: 'wf-gone' })]), task('t-1'), 'done')).toEqual([])
+  })
+
+  it('同一阶段第二次成功（新一轮 run）→ 再派一张；人工离开也不去重', () => {
+    const handed = task('t-2', {
+      origin: 'handoff',
+      workflowId: 'wf-b',
+      currentStageId: 'st-b0',
+      handoffFromTaskId: 't-1',
+      handoffFromStageId: 'st-a0',
+      handoffFromRunId: 'run-9',
+    })
+    const seeded = withTasks(baseView([handoff({ on: 'done' }), handoff({ on: 'manual' })]), [
+      handed,
+    ])
+
+    const again = exit(seeded, task('t-1'), 'done', { runId: 'run-10' })
+
+    expect(payloadsOf<{ task: Task }>(again, 'task.created')).toHaveLength(1)
+    // 人工拖两次 → 两张单
+    expect(
+      payloadsOf<{ task: Task }>(exit(seeded, task('t-1'), 'manual'), 'task.created'),
+    ).toHaveLength(1)
   })
 })
 
@@ -411,6 +443,7 @@ describe('kernel/handoff 建任务事实', () => {
       parentTaskId: 't-1',
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
+      handoffFromRunId: null,
       status: 'active',
     })
     expect(attached).toMatchObject({ taskId: created.id, ruleId: null })

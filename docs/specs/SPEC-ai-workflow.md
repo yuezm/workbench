@@ -15,7 +15,7 @@
 - 配置**运行时**：运行时 = 一条连接（执行器插件 + 启动命令 + profile + 参数模板 + 启用开关）；内置执行器插件 `dsh`、`claude`（Claude Code）、`hermes`（Hermes Agent / ACP）与 `command`，其余（codex 等）后续按「插件目录 + registry 一行」接入，不改内核与宿主。
 - **识别**已安装的运行时：运行时配置页扫描本机 PATH，自动列出已安装的 agent CLI，点「使用」打开新建表单并把名称与命令预填进去（不自动建记录，profile 等仍由用户确认）。
 - 配置**智能体**：名称、描述、绑定运行时（连接）、能力（System Prompt）与**执行配置**（模型、思考强度、并发上限、访问权限、工作目录、环境变量）。
-- 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【类型】与**出口表**（M32：每个触发条件一条主去向——进入指定阶段 / 停在这里等人 / 结束并归档）；类型选「闸门（判定）」时改设【放行护栏】+ 通过时 / 未通过时两行出口，另可配**派单**（M29：离开本阶段时在另一个工作流建一张工单）。**每个工作流恒有四个系统内置阶段**（M18：待办 / 已阻塞 / 已完成 / 已取消，名称、类别、位置锁定，其余字段照常可改；已完成 / 已取消不允许交接），自己添加的阶段插在「待办」之后、「已阻塞」之前。阶段详情按类型收敛字段：**不交接**与**交给用户**只留【名称】【类型】，其余字段（智能体 / 流转目标 / 交接 / 子任务 / 闸门配置 / 要干什么）一律不展示；**交给智能体**展示流转目标 / 交接 / 子任务 / 要干什么；**闸门（判定）**只展示次数、过与没过去向、要干什么——闸门只判定，不交接、不拆子任务，也不配「完成 / 出错」去向。界面上不展示的字段在保存时归一成默认值（「要干什么」原文保留）。
+- 配置**工作流**：一条有序的**阶段**序列；每个阶段可设【类型】与**出口表**（M32：每个触发条件一条主去向——进入指定阶段 / 停在这里等人 / 结束并归档）；类型选「闸门（判定）」时改设【验收条目】【放行护栏】+ 通过时 / 未通过时两行出口（M34：验收条目只能配在闸门阶段，配在执行阶段内核整份拒收）；另可配**派单**（M29：离开本阶段时在另一个工作流建一张工单）。**每个工作流恒有四个系统内置阶段**（M18：待办 / 已阻塞 / 已完成 / 已取消，名称、类别、位置锁定，其余字段照常可改；已完成 / 已取消不允许交接），自己添加的阶段插在「待办」之后、「已阻塞」之前。阶段详情按类型收敛字段：**不交接**与**交给用户**只留【名称】【类型】，其余字段（智能体 / 流转目标 / 交接 / 子任务 / 闸门配置 / 要干什么）一律不展示；**交给智能体**展示流转目标 / 派单 / 子任务 / 要干什么——**不展示验收，也不展示轮次**（M34：执行阶段只管干，干完即业务成功）；**闸门（判定）**展示验收条目、放行护栏、过与没过去向、要干什么——闸门只验收与判定，不交接、不拆子任务，也不配「完成 / 出错」去向。界面上不展示的字段在保存时归一成默认值（「要干什么」原文保留）。
 - 用**看板**查看与推进任务：列 = 当前所选工作流的阶段（M18 起列头圆点按**阶段类别**取色：未开始灰 / 进行中靛蓝 / 已完成绿 / 已关闭红点，「已完成 / 已取消」是终态列、卡片停在里面仍算在看板）；新建任务时可选**起始阶段**（缺省落「待办」），之后把卡片**拖拽**到其它阶段列（或「归档」区）推进，不设执行按钮。
 
 **用户故事：**
@@ -176,7 +176,7 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 | `runtimes`        | id, name(uniq), executor_key, command, profile, args_template, enabled, last_probe_json, created_at                                                                                                                                                                                                                          | 运行时 = 一条**连接**；`executor_key` 指向执行器插件（**无 CHECK**：取值合法性由宿主入口按插件注册表校验，避免加插件就改 DDL 触发全库重建；列本身 NOT NULL 无 DEFAULT，必须由 IPC 按 manifest 补齐）；`last_probe_json` 存最近一次探测结论（从未探测为 NULL）。执行配置不在本表                                                                                                                                     |
 | `agents`          | id, name, description, runtime_id → runtimes, system_prompt, model, reasoning_effort, max_concurrent, permission_mode, workdir, env_json, created_at                                                                                                                                                                         | 智能体 = 连接 + 执行配置；`env_json` 存 `Record<string,string>`（默认 `'{}'`）；`permission_mode` 有 CHECK（三档）;`max_concurrent` 默认 1                                                                                                                                                                                                                                                                          |
 | `workflows`       | id, name, description, created_at                                                                                                                                                                                                                                                                                            | 工作流                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, builtin, agent_id → agents?, exits_json, handoffs_json, judge_json, acceptance_json, max_rounds, created_at                                                                                                                                                         | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一；`builtin` = `todo`\|`blocked`\|`done`\|`cancelled`（M18 内置阶段；NULL = 自己添加的阶段）；`acceptance_json` = 验收条目的 JSON 数组（M20，空数组 = 未声明）；`max_rounds` = 阶段内轮次上限 1–5（M21，NULL = 1 即不续轮）；`run_timeout_ms` = 本阶段单轮运行超时（M26，毫秒 300000–14400000，NULL = 用全局缺省 60 min） |
+| `workflow_stages` | id, workflow_id → workflows, name, position, entry_mode, builtin, agent_id → agents?, exits_json, handoffs_json, judge_json, acceptance_json, max_rounds, created_at                                                                                                                                                         | `entry_mode` = `none`\|`agent`\|`user`；`position` 决定顺序，`(workflow_id, position)` 唯一；`builtin` = `todo`\|`blocked`\|`done`\|`cancelled`（M18 内置阶段；NULL = 自己添加的阶段）；`acceptance_json` = **闸门阶段**的验收条目 JSON 数组（M34：非闸门阶段必须为空数组，内核拒收非空）；`run_timeout_ms` = 本阶段单轮运行超时（M26，毫秒 300000–14400000，NULL = 用全局缺省 60 min） |
 | `tasks`           | id, title, description, workflow_id → workflows, project_id, current_stage_id → workflow_stages, status, created_at, updated_at                                                                                                                                                                                              | `status` = `active`\|`completed`；`project_id` 是弱引用（M10，NULL = 默认目录），任务的运行工作目录取项目 `path`                                                                                                                                                                                                                                                                                                    |
 | `projects`        | id, name, path, description, created_at, updated_at                                                                                                                                                                                                                                                                          | M10 项目：名称与文件夹路径在项目集内唯一（内核校验）；`path` 是绝对路径，也是该项目任务的执行工作目录；项目下有执行中的任务时拒绝删除；删除时其余任务与会话改归默认目录（`projectId=null`）                                                                                                                                                                                                                         |
 | `runs`            | id, purpose, task_id → tasks?, conversation_id → conversations?, stage_id, agent_id, runtime_id (SET NULL), status, prompt, output, error, error_code, exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at, cancel_requested, started_at, ended_at, created_at | `purpose` = `stage`\|`chat`；`status` = `queued`\|`running`\|`waiting`\|`succeeded`\|`failed`\|`cancelled`；`error_code` 见「终态归一」；M2 起是事实投影（`run.*` 事实整行演进）                                                                                                                                                                                                                                    |
@@ -197,21 +197,32 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 **M18 升级（内置阶段，`KERNEL_VERSION` = `M18.0.0`）：** `workflow_stages` 追加 `builtin` 列（可空，`CHECK` 只认四个键）。启动顺序在 `ensureProjection()` 之后加一步 `store.ensureBuiltinStages()`：按名认领历史阶段（「待办 / 已阻塞 / 已完成 / 已取消」）、补建缺的内置阶段、把位置归一到规范顺序，全部写成 `stage.created` / `stage.updated` 事实（作者 `host/reconcile`）。幂等：已经是规范形态时零事实；重建投影与增量结果一致。
 
-## 柔性工作流（M19–M23）
+**M34 升级（验收归属口径变更，`KERNEL_VERSION` = `M34.0.0`）：** `workflow_stages` 删 `max_rounds` 列、`tasks` 删 `stage_fails` 列（12-step 物理重建，外键 OFF → 建临时表 → 拷行 → 删旧 → 改名；`max_rounds` 与 `stage_fails` 分别进 `LEGACY_STAGE_COLUMNS` / `LEGACY_TASK_COLUMNS`，表里还有就重建一次），`KERNEL_VERSION` 递增触发首启全量重建投影。存量归一走**内核纯函数**（`normalizeStage` / `legacyExits`），不额外写事实、不需要启动步骤：
 
-约束分三层：**不变量**（派给谁 / 在哪跑 / 权限 / 落点，内核硬规则）、**验收**（`acceptance`，阶段配置）、**参考做法**（阶段说明里的文案，Agent 可偏离）。放开的是第三层。
+- **非闸门阶段的 `acceptance` 清空**：`normalizeStage` 看到 `judge === null` 就把验收条目归一成空数组——验收只属于闸门阶段，执行阶段留着的条目一律作废。重放老事实与读新库得到同一个形状（幂等）。
+- **`exits` 里的 `{do:'retry'}` 归一成 `{do:'await'}`**：`legacyExits` 里统一过滤，`await` 是有意的保守选择（不替用户猜目标阶段）。
+- 历史 `tasks.stage_fails` 随列删除丢弃，不迁去别处（它只服务已删除的自动重跑）。
+- 判定阶段若无验收条目，行为与 M32 一致（`pass` 只要有一条全 0 的 `checks`）。
+
+## 柔性工作流（M19–M34）
+
+约束分三层：**不变量**（派给谁 / 在哪跑 / 权限 / 落点，内核硬规则）、**验收**（`acceptance`，**只属于闸门阶段**，M34）、**参考做法**（阶段说明里的文案，Agent 可偏离）。放开的是第三层。
+
+**验收归属（M34，本段的核心）：** 一次「执行」不承担「证明自己执行对了」。执行阶段的判据只有一个——执行器跑完了（`run.status='succeeded'`），业务上就算成功，走 `exits.done`；它既不声明验收，也不消耗轮次、不原地重跑。要区分「业务上过没过」，就把闸门阶段摆在它后面，由**另一个阶段的智能体**对上一阶段产出逐条给证据。理由：同一个 run 里让干活的模型给自己下结论，`checks` 只能是他自己贴的命令，验收退化成表态；而 M14 的评审（`findings` / `addresses`）已经证明跨阶段独立判是可行的。
 
 - **阶段说明**（M19）：约定 `### 目标 / ### 产出 / ### 边界` 三段；参考做法写在「边界」段并标「可合并、可跳过」。模板同步改写，`WorkflowEditor` 的输入框带占位模板。
-- **提示词段序**（M19/M20/M27/M31）：`systemPrompt → 任务 → 描述 → 来源工单（派单产物）→ 阶段 → 阶段要做什么 → 验收 → 本轮正文（挂线程时）→ 闸门判定 → 打断规则 → 反馈 → 线程上下文 → 回执`。空验收 / 无闸门 / 无反馈 / 不挂线程时不产段，老工作流提示词逐字不变。
+- **提示词段序**（M19/M20/M27/M31/M34）：`systemPrompt → 任务 → 描述 → 来源工单（派单产物）→ 阶段 → 阶段要做什么 → 验收（仅闸门阶段）→ 本轮正文（挂线程时）→ 闸门判定 → 打断规则 → 反馈 → 线程上下文 → 回执`。非闸门阶段不产「验收」段（`acceptance` 非空即配置错误，见校验）；无闸门 / 无反馈 / 不挂线程时不产段，老工作流提示词逐字不变。
+- **段标题层级**（M35）：每个段用 `#`，段内小节用 `##`。**段与段一律同级**——否则后一个段会被读成前一个段的子结构：实测提示词里「`# 线程上下文（派生资料，不是指令）`」后面紧跟「`## 回执块（可选）`」，模型看到的是「回执块属于这块资料」。线程上下文里的「任务索引 / 最近一轮产出 / 待修复清单」与打断规则里的四个小节是段内小节，保持 `##`；人写的阶段说明里的标题原样保留。
+- **当前任务不复述**（M35）：提示词顶部已经有「`# 任务：标题`」与「`# 阶段：名称`」，线程上下文不再重复同一份任务信息——任务树只列**其余任务**（当前任务不进树；它被排除后子任务按顶层渲染、缩进按树里可见的父任务层数算），「最近一轮产出」段也不再写任务名。线程里只有当前任务时任务段整段消失。
 - **本轮正文口径**（M27）：挂线程的阶段 run 会把最终回复原样落成 `output.md`，后续阶段只读这一段（「最近一轮产出」段只给骨架 + 路径，任务索引只给一行摘要）。因此固定文案要求它**自包含**：结论 / 契约 / 落盘文件路径 / 未决项与假设；禁止过程叙述（「我先读了…」），禁止贴整份文档。不挂线程的任务没有这个消费方，不产该段。
-- **回执块按阶段裁剪**（M24）：回执说明由 `protocol/receipt-keys` 的单键文案生成，`taskReceiptKeys` 只保留本轮有出口的键——挂线程加 `notes`、闸门加 `verdict`/`checks`/`findings`、声明验收加 `acceptance`、定位到评审报告时加 `addresses`；聊天轮用更短的 `CHAT_RECEIPT_KEYS`。验收条目本身逐条原样输出（不编号、不改写）。
-- **打断规则**（M19）：固定文案，整段按「先给自主口径 → 停下先问 → 别问 → 怎么问 → 不用问但要说」分节。能查能推的自己决定；有多个合理选项的自己选一个，交付时交代选了什么、为什么、改起来贵不贵。只有五类点**停下先问**：① 不可逆或不可回滚（对外发布、发消息、花钱、改删生产数据、force push；本地能回滚的删除不算）、② 口径缺失且猜错要返工（波及 ≥3 个模块、动公共契约 `AppDefinition` / preload 桥接 / 事实日志、要重写已通过的测试、结论要对外）、③ 越出当前阶段（SPEC 或计划里不属于本阶段，或要新增依赖、新基础设施）、④ 同一验收标准下连续两次没过、⑤ 改了数据库 schema / 接口契约 / 事实日志 / 预置数据 / 公共配置等会影响其他阶段的公共面。反向判据（答案能在仓库里找到 → 去读 / 已有最佳实践或业界共识 → 照做 / 选项有明显优劣 → 选优先级高的，都不问）与提问格式（一次问完、每题 2–3 个选项带推荐与代价、说清「没人回我按 X 走」、非阻塞疑问记清单）同段给出；「一轮只发一张 `ask`」由回执块 `ask` 键口径约束（见 `protocol/receipt-keys`）。段内文案写成**一整段模板字面量**（首尾不带换行），不拆成逐行字符串拼接。
-- **验收自评与续轮**（M20/M21）：回执 `acceptance[]` 逐条声明达成情况，`no` 是验收段序号；缺项按未达（fail-closed）。未全达且 `rounds < maxRounds` 时**原地续一轮**（同阶段、续接同一会话、附一条自评评论），不流转；轮数用尽只留评论，流转仍按原规则。
-- **验收与闸门正交**：`acceptance` 是「本阶段自己做完了吗」（阶段内、可续轮），`verdict` 是「业务上过没过」（阶段出口、消耗预算）。
+- **回执块按阶段裁剪**（M24/M34）：回执说明由 `protocol/receipt-keys` 的单键文案生成，`taskReceiptKeys` 只保留本轮有出口的键——挂线程加 `notes`、闸门加 `verdict`/`checks`/`findings`、定位到评审报告时加 `addresses`；聊天轮用更短的 `CHAT_RECEIPT_KEYS`。**`acceptance` 键已删除**（M34：执行阶段不再自评）；闸门阶段的验收条目按 **1 基序号**原样输出（不改写），`checks[]` 用 `acceptance: n` 指向它。
+- **打断规则**（M19）：固定文案，整段按「先给自主口径 → 停下先问 → 别问 → 怎么问 → 不用问但要说」分节。能查能推的自己决定；有多个合理选项的自己选一个，交付时交代选了什么、为什么、改起来贵不贵。只有四类点**停下先问**：① 不可逆或不可回滚（对外发布、发消息、花钱、改删生产数据、force push；本地能回滚的删除不算）、② 口径缺失且猜错要返工（波及 ≥3 个模块、动公共契约 `AppDefinition` / preload 桥接 / 事实日志、要重写已通过的测试、结论要对外）、③ 越出当前阶段（SPEC 或计划里不属于本阶段，或要新增依赖、新基础设施）、④ 同一验收标准下连续两次没过。「改 schema / 接口契约 / 事实日志 / 预置数据 / 公共配置等公共面」不再单列一类（2026-11-13 人决定删除）：它落在 ② 与 ③ 里，按返工代价与阶段边界判，不再无条件打断。反向判据（答案能在仓库里找到 → 去读 / 已有最佳实践或业界共识 → 照做 / 选项有明显优劣 → 选优先级高的，都不问）与提问格式（一次问完、每题 2–3 个选项带推荐与代价、说清「没人回我按 X 走」、非阻塞疑问记清单）同段给出；「一轮只发一张 `ask`」由回执块 `ask` 键口径约束（见 `protocol/receipt-keys`）。段内文案写成**一整段模板字面量**（首尾不带换行），不拆成逐行字符串拼接。
+- **验收只在闸门**（M34，取代 M20/M21 的验收自评与续轮）：执行阶段不声明达成情况——`run.succeeded` 即业务成功，走 `exits.done`。`acceptance` 只作为闸门阶段的判据清单存在，由闸门的判定者用 `checks[]` 逐条给证据（每条 `checks` 带 `acceptance: n` 指向第 n 条）。有验收条目没被任何 `exitCode=0` 的 `checks` 覆盖 → 按「没给结论」处理：任务停在闸门等人，既不放行也不消耗预算。阶段内 `maxRounds` 与 `tasks.stage_fails` 一并删除，返工统一走出口表（`goto` 到修复阶段 / `await` 等人）。**提示词里的「本阶段第 N 轮（上限 M 轮）」段一并删除**：续轮没了，第几次执行对 agent 没有行动指引，怎么改由「待修复清单」段说；「同阶段第 2 次起开新会话」这条会话策略不变，仍由内核用 `stageRoundCount` 算，不进提示词。
+- **判定与执行正交**：`run.status` 只说明执行器跑完没有，`verdict` 才说明业务上过没过；两者都只由闸门阶段的判定者给，执行阶段不产 `verdict`。
 - **阶段单轮超时**（M26）：阶段可配 `runTimeoutMs`（编辑器「单轮超时」按档位选：10 / 30 / 60 / 90 / 120 / 180 分钟，缺省 = 全局 60 分钟）。内核按它算本轮 `deadlineAt`，宿主把「剩余时间」交给执行器进程，两边只有一套时限；到点落 `run.failed{errorCode:'timeout'}`。澄清 / 设计这类读代码多的阶段给 90 分钟，实现阶段给 90–120 分钟，纯判定阶段可以保持缺省。
 - **人工跳转留痕**（M22）：`task.move` 的落点不等于本阶段自然去向时，自动追加一条 `author='agent'` 的评论（「人工跳转：A → B（自然去向：C）」），审计链不断。
 - **段间按引用**（M22）：配置了产物目录时，「最近一轮产出」段只给骨架 + `output.md` 绝对路径（`THREAD_LIMITS.precedingExcerptChars`）；没配时退回长摘要。
-- **阶段指标**（M23）：只读派生视图 `workflow.stage-metrics`，按阶段给 `runs / avgRounds / repairExhausted / degraded / asks / humanComments`，用于「先放后收」的收紧判断（设置 → 工作流页展示有数据的阶段）。
+- **阶段指标**（M23/M34）：只读派生视图 `workflow.stage-metrics`，按阶段给 `runs / verdicts / degraded / asks / humanComments`，用于「先放后收」的收紧判断（设置 → 工作流页展示有数据的阶段）。`verdicts` = 该阶段判定结论的 `pass` / `fail` 计数；`degraded` = 护栏放行次数。`avgRounds` / `repairExhausted` 随阶段内续轮一并删除。
 
 ## 阶段状态机（核心规则）
 
@@ -237,14 +248,14 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 **出口表（M32，取代 `on_complete` / `on_reject` / 闸门两侧四列）：**
 
-一次离开只落**一条主去向**，四种动作：`goto`（同一张工单换阶段）/ `await`（显式停在这里等人）/ `close`（本单结束并归档）/ `retry`（原地重跑，最多 N 次）。派单是附加动作，不在这里。
+一次离开只落**一条主去向**，三种动作：`goto`（同一张工单换阶段）/ `await`（显式停在这里等人）/ `close`（本单结束并归档）。派单是附加动作，不在这里。**`retry` 已删除**（M34：执行阶段不设轮次，「原地再来一轮」由人拖回该阶段或点「重新执行」表达）。
 
 - `done`（非判定阶段跑完）：缺省 → **下一个自己添加的阶段** → 内置「已完成」→ 没有就 `close`。
 - `errored`（执行出错：非零退出 / 超时 / 失联）：缺省 → `await`。
 - `passed` / `failed`（判定两侧）：缺省 → 同 `done` / `await`。
 - 判定阶段（`judge` 非 null）没有 `done`；非判定阶段没有 `passed` / `failed`。
 - `goto` 的目标阶段找不到（脏投影 / 被删）→ **原地停住**，不猜去向。
-- `retry`（M33）：原地再跑一轮，`max` 取 1–5；用尽后按 `close` 收口并给任务打 `stage:failed`（详情页留一条评论）。计数落在 `tasks.stage_fails`，进入别的阶段清零。
+- `retry`（M33，M34 移除）：原地重跑与 `maxRounds` 是同一件事的两套写法，均随「执行阶段不设轮次」删除；`tasks.stage_fails` 列一并删掉，原地再来一轮只能由人触发（拖回该阶段 / 详情页「重新执行」）。
 - **缺省只在决策时解析**（`stage-machine#completeExits`），落库保存的是**人配了什么**——界面上「默认（下一阶段）」这类占位就是「没配」，改顺序后自动跟着变。
 - 判定护栏 `judge.maxFails`：连续未通过达上限后**放行**（改走 `passed`），任务打 `gate:degraded` 并追加一条反馈；`null` = 不设护栏。
 
@@ -280,9 +291,10 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 
 **打回原地不重试：** `RUN_FAILED` 时若 `exits.errored` 未配置（缺省为「停在这里等人」）或解析结果就是当前阶段（显式配 `goto` 自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成，详情页也可直接「重新执行」原地重排（`task.rerun`，见下）。
 
-**判定（M32，M11 的闸门）：** 阶段可设**判定者**（`judge`：只回答「谁给结论 + 放行护栏多大」），由该阶段的智能体在回执里给 `verdict`（`pass` / `fail`）与 `checks`（实际执行的命令 + 退出码）。判定与 `run.status` **正交**：`succeeded` 只说明执行器跑完，`fail` 才是业务上没过；去向在出口表的 `passed` / `failed` 两行里。
+**判定（M32，M11 的闸门）：** 闸门阶段是工作流里**唯一**做验收的地方——它不实现任何东西，只对上一个自己添加阶段的产出给结论。阶段可设**判定者**（`judge`：只回答「谁给结论 + 放行护栏多大」），由该阶段的智能体在回执里给 `verdict`（`pass` / `fail`）与 `checks`（实际执行的命令 + 退出码 + 指向验收条目的 `acceptance: n`）。判定与 `run.status` **正交**：`succeeded` 只说明执行器跑完，`fail` 才是业务上没过；去向在出口表的 `passed` / `failed` 两行里。判定者必须是与被验阶段不同的智能体（编辑器不许选同一个；内核保存时按「被判阶段」校验，同人即拒收）。
 
 - `pass` 必须至少带一条 `checks` 且退出码全为 0，否则视为**没给结论**：任务停在闸门等人，既不放行也不消耗预算。
+- 闸门声明了验收条目时，`pass` 还要求**每条验收都有至少一条 `exitCode=0` 的 `checks` 指向它**（`checks[].acceptance = n`）。漏判条目与「没给结论」同待遇：停在闸门，不消耗预算。验收条目本身由人写（脚本跑得出退出码的、或正文说明为何只能人工判），判定者不许增删。
 - `fail` 未达 `maxFails` → 去未通过分支并把任务上的连续未通过次数 +1（回环保留累计值，否则「最多 N 次」永远到不了）。
 - `fail` 已达 `maxFails` → 放行（改走 `exits.passed`），任务打 `gate:degraded` 标签并追加一条反馈（详情页可见），预算清零；`maxFails = null` 表示不设护栏，永远按 `exits.failed` 走。
 - 执行出错（`run.status='failed'`）走 `exits.errored`，**不消耗**判定预算——执行器崩了不等于业务上没过。
@@ -442,7 +454,7 @@ export interface DetectedRuntime {
 ### 调度
 
 - 领取按运行时逐个进行、一次一个（`claimsPerPump` 缺省 1）：同一运行时上不会有两个 run 并行，多出来的留队列按 `queueSeq` FIFO；不同运行时并行。智能体的 `maxConcurrent` 仍是内核侧的窗口上限（防止一个智能体被塞满）。
-- 判定阶段（`stage.judge` 非空）的 run 权限由阶段语义决定：`run.access` 至少是 `full`（`kernel/task-effects.ts#runAccessOf`）。理由：验收要求回执给出 `checks` 的命令与退出码，而 `workspace-write` 在 Claude Code 里是 `acceptEdits`——只能改文件，跑 `pnpm` / `pytest` 仍要审批，无审批面时被自动拒。任务详情展示的是 `run.access`（本轮实际值），不是智能体上配的 `permissionMode`。
+- 判定阶段（`stage.judge` 非空）的 run 权限由阶段语义决定：`run.access` 至少是 `full`（`kernel/task-effects.ts#runAccessOf`）。理由：验收要求回执给出 `checks` 的命令与退出码，而 `workspace-write` 在 Claude Code 里是 `acceptEdits`——只能改文件，跑 `pnpm` / `pytest` 仍要审批，无审批面时被自动拒。任务详情展示的是 `run.access`（本轮实际值），不是智能体上配的 `permissionMode`。**M34 边界：** 判定者拿到写的权限只是为了跑核对命令，它的产出不参与交付（下一阶段读的是被判阶段的 `output.md`，不是判定者的改动）；把评审者的写权限收回需要执行器侧「可跑命令但不可写文件」的能力位，见 Open Questions。
 - 运行时不存在 / 已停用时不派发，run 直接 `failed` 并记 `runtime_missing` / `runtime_disabled`；配置引用了未注册的 `executorKey` 同样落 `runtime_missing`（文案 `执行器插件未注册: <key>`），不新增 `errorCode`。
 - `src/host/scheduler.ts` 负责：领取（内核按 `notBefore`/`queueSeq` 决定顺序与并发窗口）、调执行器端口跑一轮、帧批量入账、回执转交内核、取消时序（abort → 宽限 → 强杀 → 兜底终态）；租约/超时/退避由唯一 `clock.tick` 驱动。终态后由内核产 `RUN_SUCCEEDED`/`RUN_FAILED` 的阶段流转事实；取消的 run 不推进阶段。
 
@@ -605,3 +617,4 @@ export function completeTask(task: Task): Task
 2. **`none` / `user` 阶段的推进方式**：看板上把卡片拖到目标阶段（已按此实现，不再有「推进 / 通过 / 打回」按钮）。
 3. **终端阶段**：最后阶段完成后任务置 `completed` 并移出看板；看板末尾的「归档」区是拖拽落点（显示已完成数量）**加回看入口**（「查看归档」弹出已完成任务清单，点一行进任务详情），不是可反向拖出的虚拟列。落点不叫「已完成」，因为阶段本来就可以叫「已完成」——那种阶段只是普通阶段，卡片进去仍是 `active`（`entry_mode='agent'` 时还会起一轮 run），只有自动流转越过最后阶段或拖到「归档」区才 `completed`。
 4. **执行工作目录**：任务有项目时用项目文件夹；没有项目时用智能体 `workdir`，再 `null` = 宿主默认目录——`WORKBENCH_WORKDIR` 环境变量 > `~/.workbench`（启动时创建，`runtimes.default-workdir` 可查）。
+5. **判定者权限**（M34）：判定阶段当前 `run.access` 至少 `full`（跑核对命令要用）。代价是评审者也能改文件，而它的改动不参与交付（下一阶段读被判阶段的 `output.md`）。收窄需要执行器暴露「可执行、不可写」的能力位，属协议扩展，暂保持 full 并在任务详情留痕。

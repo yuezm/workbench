@@ -1,5 +1,7 @@
 # 计划：阶段出口表（Stage Exits）
 
+> **M34 起 `retry` 作废**：出口只剩 `goto` / `await` / `close`，`tasks.stage_fails` 与 `stage:failed` 一并删除。见 [plan-acceptance-ownership](plan-acceptance-ownership.md)。
+
 > 状态：**S1a / S1b / S2 / 来源工单段 / `retry` / S4 旧列清理全部落地（M29 – M34，2026-11-12）**。
 > 关联：[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)（阶段状态机、闸门）、[SPEC-review-handoff](../specs/SPEC-review-handoff.md)、[ARCHITECTURE](../ARCHITECTURE.md)。
 

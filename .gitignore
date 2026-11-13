@@ -12,6 +12,8 @@ coverage/
 test-results/
 playwright-report/
 blob-report/
+.stryker-tmp/
+reports/
 *.lcov
 
 # ---- 工具缓存 ----

@@ -1,6 +1,4 @@
-import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
-import '@testing-library/jest-dom/vitest'
 
 /**
  * Radix 基座在 jsdom 下需要的浏览器 API 垫片。
@@ -34,4 +32,12 @@ if (hasDom && typeof Element.prototype.scrollIntoView !== 'function') {
   Element.prototype.scrollIntoView = () => {}
 }
 
-afterEach(() => cleanup())
+/**
+ * RTL 与 jest-dom 只在 DOM 环境里装：node 用例（内核 / 协议 / 宿主 / 插件 / 纯 model）
+ * 占全部用例文件的一半以上，每个文件冷启动都白装一遍 RTL 是纯浪费。
+ */
+if (hasDom) {
+  await import('@testing-library/jest-dom/vitest')
+  const { cleanup } = await import('@testing-library/react')
+  afterEach(() => cleanup())
+}

@@ -32,7 +32,7 @@ Electron 桌面工作台：electron-vite + React + TypeScript + Tailwind（shadc
 - [ARCHITECTURE](docs/ARCHITECTURE.md)：内核 + 插件总纲（架构问题先读这个）
 - [CAPABILITY-MAP](docs/CAPABILITY-MAP.md)：模块索引、边界决定、构建顺序
 - [docs/specs/](docs/specs/)：kernel / plugins / host / shell / ui / pomodoro / ai-workflow（ai-workflow 为迁移期行为基线）
-- [docs/testing/](docs/testing/)：测试策略（TESTING）与用例目录（TEST-CASES）；改代码前后跑 `pnpm check`
+- [docs/testing/](docs/testing/)：测试策略（TESTING）、用例目录（TEST-CASES）、人工验收自查（ACCEPTANCE，含需求覆盖矩阵与走查表）；改代码前后跑 `pnpm check`
 - [docs/planning/](docs/planning/)：计划与任务；重构分阶段与文件去向见 [refactor-plan](docs/planning/refactor-plan.md)
 
 ## 禁止事项

@@ -1,6 +1,8 @@
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
+import playwright from 'eslint-plugin-playwright'
+import vitest from '@vitest/eslint-plugin'
 import prettier from 'eslint-config-prettier'
 
 export default tseslint.config(
@@ -15,6 +17,8 @@ export default tseslint.config(
       'coverage/**',
       'scripts/**',
       '.scratch/**',
+      // Stryker 变异测试的沙箱目录（源码副本）；中断的运行会留下残留，不能参与 lint 门禁
+      '.stryker-tmp/**',
     ],
   },
   js.configs.recommended,
@@ -394,6 +398,41 @@ export default tseslint.config(
             },
           ],
         },
+      ],
+    },
+  },
+  // 断言强度（防假绿）：覆盖率与「全绿」都证明不了断言有效，但有一类失败是纯机械可查的——
+  // 空断言、漏 await 的断言、被跳过（skip / fixme）的用例、断言写在 if 分支里、`isVisible()`
+  // 取布尔再断言这类「看起来绿、实际证明不了任何事」的写法。这里用两个上游插件把它们变成 lint 命中：
+  // - playwright 插件只对 e2e 用例生效（`tests/e2e/**/*.spec.ts`，真起 Electron）；
+  // - vitest 插件只对单测/集成用例生效（`tests/**/*.test.{ts,tsx}`）。
+  // 严重度沿用上游 recommended，下面两处按本仓库口径调整（都不是放松门禁的理由）；
+  // `expect-expect` 提到 error——没有断言的用例等于没写用例，这是本段唯一加严的地方。
+  {
+    files: ['tests/e2e/**/*.spec.ts'],
+    ...playwright.configs['flat/recommended'],
+    rules: {
+      ...playwright.configs['flat/recommended'].rules,
+      'playwright/expect-expect': 'error',
+    },
+  },
+  {
+    files: ['tests/**/*.test.{ts,tsx}'],
+    ...vitest.configs.recommended,
+    rules: {
+      ...vitest.configs.recommended.rules,
+      // vitest 的 `expect(value, message)` 是合法签名（失败时把 message 打出来），
+      // 本仓库大量用它标注「哪个键、哪条规则」——上游默认 maxArgs=1 会误报。
+      'vitest/valid-expect': ['error', { maxArgs: 2, minArgs: 1 }],
+      // 断言包在 if / 循环里：本仓库的性质用例（fast-check 随机生成）与表驱动用例
+      // 本来就按生成物的形状分支断言，逐条改写成不断言的形态只会让断言更难读。
+      // 降到 warn 仍会出现在 lint 输出里，但不阻断；真·空转用例由 expect-expect 兜住。
+      'vitest/no-conditional-expect': 'warn',
+      // 没有断言的用例等于没写用例。默认只认 `expect`，本仓库另有包装断言
+      // （`expectDispatched` 断言「这条命令被派发过」）与类型级断言 `expectTypeOf`。
+      'vitest/expect-expect': [
+        'error',
+        { assertFunctionNames: ['expect', 'expectDispatched', 'expectTypeOf'] },
       ],
     },
   },

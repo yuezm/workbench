@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "plugins": [
+    "@stryker-mutator/*",
+    "./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"
+  ],
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.mutation.config.mts"
+  },
+  "mutate": ["src/kernel/cron.ts"],
+  "reporters": ["clear-text", "json", "html"],
+  "jsonReporter": {
+    "fileName": ".scratch/mutation/mutation.json"
+  },
+  "htmlReporter": {
+    "fileName": ".scratch/mutation/html"
+  },
+  "incrementalFile": ".scratch/mutation/incremental.json",
+  "coverageAnalysis": "perTest",
+  "concurrency": 10,
+  "timeoutMS": 30000,
+  "thresholds": {
+    "high": 85,
+    "low": 70,
+    "break": 80
+  }
+}

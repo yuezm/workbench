@@ -24,6 +24,7 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 | 依赖漏洞           | 生产依赖无 high 及以上                                                                                                                             | `pnpm audit`                               | 任务结束 / CI         |
 | Floor              | 零违规                                                                                                                                             | `pnpm check:floor`                         | 每次编辑 / pre-commit |
 | UI 规则            | shadcn 基线零违规：只用语义 token 类名、零调色板外色值、无重玻璃；前景对比度 foreground≥12 / muted-foreground≥8 / faint-foreground≥4.5 / brand≥4.5 | `pnpm check:ui`                            | 每次编辑 / pre-commit |
+| 变异分数（试点）   | `src/kernel/cron.ts` 变异评分 ≥ **80**（killed+timeout 占总变异体比例；基线 2026-11-13 实测 85.61）                                                | `pnpm mutation:cron`                       | 合并前 / CI 定时      |
 
 每一行都写出产生判定的命令；没有命令的维度只是愿望，不是约束。
 
@@ -69,6 +70,7 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 | 交付 / 推送 | `pnpm e2e`                              | 真实 Electron 关键路径（先 build 再跑；每条用例独立临时 userData） | 分钟级 |
 | 打包验收    | `pnpm e2e:packaged`                     | electron-builder 产物冒烟（打包进程内 node:sqlite / 单实例锁）     | 分钟级 |
 | 数据备份    | `pnpm db:export --db <库> --out <文件>` | 只读导出全表 JSON，确定性输出（M1 前回滚点）                       | 秒级   |
+| 合并前      | `pnpm mutation:changed`（MR 层）        | Stryker 变异评分（假绿自检；`pnpm mutation:scan` 为定期全量层）    | 分钟级 |
 
 ## 备注
 
@@ -79,6 +81,7 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 - 测试目录重组复核：2026-11-04。测试与夹具搬到 `tests/`（与 `src/` 同构镜像）后覆盖率仍为 99.71 / 97.59 / 99.52 / 99.85，基线不变。
 - M2 复核：2026-11-05。运行生命周期入账后覆盖率为 99.73 / 97.78 / 100 / 100（改动行 1024/1031 = 99.32%）；`main/ai-workflow/{repository,runner,chat}.ts` 与 `shared/stage-machine.ts` 删除，运行时读路径改投影视图，检测见 [refactor-plan](docs/planning/refactor-plan.md) M2 退出记录。
 - 改本文件的**规则行**时，保留原行、另起一行补充，不要就地改写措辞：`floor-guard` 按行文本匹配规则，措辞改写会被判成 `rule-removed`（收紧也会误报）。
+- 表格的**首列宽度不能变**：`floor-guard` 用表格首格当规则键，Prettier 对齐表格时会改分隔行的破折号——首列一变宽，分隔行首格就变 → 判 `rule-removed`。改本文件表格时保持首列文字宽度不变（新增行可以加长后面的列）。
 - M3 复核：2026-11-05。执行器插件化收尾（detect 归插件、`runtimes.executors`、`command` 插件与 `argsTemplate`）后覆盖率为 99.81 / 97.92 / 100 / 100（改动行 693/695 = 99.71%），阈值与门禁强度不变；`pnpm e2e` 6/6。证据与已知边界见 [refactor-plan](docs/planning/refactor-plan.md) M3 退出记录。
 - M4 复核：2026-11-05。审批与通道落地后覆盖率为 99.85 / 98.12 / 100 / 100（改动行 496/496 = 100%），`pnpm e2e` 8/8；证据见 [refactor-plan](docs/planning/refactor-plan.md) M4 退出记录。
 - M5 复核：2026-11-05。三动词 IPC + kernelStore + AppPlugin 落地后覆盖率为 99.89 / 98.18 / 100 / 100（改动行 565/565 = 100%）；证据见 [refactor-plan](docs/planning/refactor-plan.md) M5 退出记录。

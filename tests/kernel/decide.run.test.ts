@@ -2283,7 +2283,6 @@ describe('kernel/decide 出错不自动重跑（M34）', () => {
 describe('脚本轮（M40）：退出码即闸门结论', () => {
   const scriptOf = (over: Partial<StageScript> = {}): StageScript => ({
     runtimeId: 'rt-1',
-    command: 'pnpm',
     args: ['check'],
     cwd: null,
     env: {},

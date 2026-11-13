@@ -130,8 +130,8 @@ export async function executeCommandRun(
     promptInArgs = false
   }
 
-  // M40：命令本体也是执行配置——脚本阶段随阶段走，缺省用连接上的 command
-  const commandName = turn.command ?? runtime.command
+  // M40：命令只来自运行时连接——脚本阶段给的是 argv，不给可执行文件
+  const commandName = runtime.command
   const resolved = sdk.process.resolve(commandName)
   if (!resolved.path) {
     return report({

@@ -175,14 +175,13 @@ function missingScriptRuntime(view: View, stages: StageInput[]): Id | null {
   return null
 }
 
-/** 脚本配置比较（M40）：逐字段比，缺省与 null 视为同值。 */
+/** 脚本配置比较（M40）：逐字段比，缺省与 null 视为同值。命令不在其中——它只属于运行时。 */
 function sameScript(a: WorkflowStage['script'], b: WorkflowStage['script']): boolean {
   const one = a ?? null
   const other = b ?? null
   if (one === null || other === null) return one === other
   return (
     one.runtimeId === other.runtimeId &&
-    one.command === other.command &&
     one.cwd === other.cwd &&
     (one.timeoutMs ?? null) === (other.timeoutMs ?? null) &&
     one.args.length === other.args.length &&

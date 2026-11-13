@@ -295,15 +295,15 @@ const checkHandoffs = (value: unknown, label: string): Check => {
 }
 
 /**
- * 阶段脚本（M40）：形状校验。命令必填、参数逐项、环境变量复用智能体口径、
- * 超时与阶段同范围；占位符一律拒绝（脚本没有提示词 / 模型 / 思考强度可展开）。
+ * 阶段脚本（M40）：形状校验。命令不在这里——它只来自运行时连接（`runtime.command`）；
+ * 参数逐项、环境变量复用智能体口径、超时与阶段同范围；占位符一律拒绝
+ * （脚本没有提示词 / 模型 / 思考强度可展开）。
  */
 const checkScript = (value: unknown, label: string): Check => {
   const script = asRecord(value)
   if (!script) return `${label} 必须是对象`
   return (
     requiredId(script.runtimeId, `${label}.runtimeId`) ??
-    required(script.command, `${label}.command`, COMMAND_LIMITS.command) ??
     checkScriptArgs(script.args, `${label}.args`) ??
     optionalText(script.cwd, `${label}.cwd`, COMMAND_LIMITS.workdir) ??
     checkEnv(script.env, `${label}.env`) ??

@@ -4,6 +4,7 @@ import {
   stageKindOf,
   type EntryMode,
   type OnChildrenSettled,
+  type Runtime,
   type SpawnPolicy,
   type StageExitGuard,
   type StageExitInput,
@@ -33,6 +34,8 @@ import { useRowDrag } from '../../../lib/use-row-drag'
 import { useKernelView } from '../../../shell/useKernelView'
 import { STAGE_KIND_META } from '../model/stage-kinds'
 import {
+  applyScriptPatch,
+  cleanScript,
   formatArgLines,
   formatEnvLines,
   defaultScript,
@@ -138,6 +141,34 @@ function hasRelayDetail(stage: StageInput): boolean {
 }
 
 /**
+ * 「要干什么」只对智能体有意义：它会被拼进提示词。
+ *
+ * M40：脚本没有提示词、不续会话，「这段文字给谁读」这个问题在脚本阶段没有答案，
+ * 因此脚本两项（执行 / 闸门）都不展示这个字段，保存时也归一成空串。
+ */
+function hasInstructions(stage: StageInput): boolean {
+  const kind = entryKindOf(stage)
+  return kind === 'agent' || kind === 'gate'
+}
+
+/**
+ * 验收条目只属于**智能体闸门**：判定者逐条给证据（checks 里的 acceptance 序号）。
+ *
+ * M40：脚本闸门的判据是退出码——一条命令只能证明一件事，逐条验收在这里没有消费者。
+ */
+function hasAcceptance(stage: StageInput): boolean {
+  return entryKindOf(stage) === 'gate'
+}
+
+/**
+ * 阶段单轮超时同理：脚本自带「超时」档位，且优先级更高（脚本 > 阶段 > 全局），
+ * 阶段超时对脚本阶段永远不生效，留着就是一个看不见也不起作用的配置。
+ */
+function hasStageTimeout(stage: StageInput): boolean {
+  return hasInstructions(stage)
+}
+
+/**
  * M26 阶段单轮超时的可选值：`default` = 不写字段、用全局缺省（60 min）。
  * 只给常用档位——下限 5 min / 上限 4 h 由 `STAGE_TIMEOUT_LIMITS` 硬挡，界面上不让人手填毫秒。
  */
@@ -222,10 +253,13 @@ function pruneByEntryKind(stage: StageInput): StageInput {
       // M40：脚本阶段不挂智能体，其余阶段不挂脚本（两者互斥）
       entryMode: isScript ? 'script' : 'agent',
       agentId: isScript ? null : stage.agentId,
-      script: isScript ? (stage.script ?? null) : null,
+      script: isScript ? cleanScript(stage.script) : null,
       judge: null,
       // 验收是闸门的判据清单：执行阶段不给自己判分
       acceptance: [],
+      // M40：脚本没有提示词，也没有阶段超时（脚本自带超时且优先级更高）
+      instructions: isScript ? '' : stage.instructions,
+      runTimeoutMs: isScript ? null : (stage.runTimeoutMs ?? null),
       // 判定两侧的出口只有判定阶段才有，切回普通阶段要一并收掉，否则内核整份拒收
       exits: (stage.exits ?? []).filter((exit) => exit.on === 'done' || exit.on === 'errored'),
     }
@@ -235,7 +269,12 @@ function pruneByEntryKind(stage: StageInput): StageInput {
       ...stage,
       entryMode: isScript ? 'script' : 'agent',
       agentId: isScript ? null : stage.agentId,
-      script: isScript ? (stage.script ?? null) : null,
+      script: isScript ? cleanScript(stage.script) : null,
+      // M40：脚本闸门的三块看不见——要干什么（没有提示词）、验收（判据是退出码）、
+      // 阶段超时（脚本超时优先）。不归一会变成存得下、看不着、也改不动的配置
+      instructions: isScript ? '' : stage.instructions,
+      acceptance: isScript ? [] : stage.acceptance,
+      runTimeoutMs: isScript ? null : (stage.runTimeoutMs ?? null),
       // 判定阶段跑完不给结论就不算离开，done 这一支永远不触发
       exits: (stage.exits ?? []).filter((exit) => exit.on !== 'done'),
       handoffs: (stage.handoffs ?? []).filter((handoff) => handoff.on !== 'done'),
@@ -317,7 +356,8 @@ interface DraftErrors {
   stageName?: string
 }
 
-function validateDraft(draft: WorkflowInput): DraftErrors {
+function validateDraft(draft: WorkflowInput, scriptRuntimes: readonly Runtime[]): DraftErrors {
+  const scriptRuntimeIds = scriptRuntimes.map((runtime) => runtime.id)
   const errors: DraftErrors = {}
   if (draft.name.trim() === '') errors.name = '工作流名称必填'
   const count = draft.stages.length
@@ -334,6 +374,44 @@ function validateDraft(draft: WorkflowInput): DraftErrors {
       ...errors,
       stageIndex: dangling,
       form: `「${label}」的流转目标已不在阶段列表里，请重新选择`,
+    }
+  }
+
+  // M40：脚本阶段的运行时是必填引用。没选 / 所选运行时已停用或被删，都就地指出，
+  // 别等到协议层甩一句 `input.stages[N].script.runtimeId必填`
+  const badScript = draft.stages.findIndex((stage) => {
+    if (stage.entryMode !== 'script') return false
+    const id = stage.script?.runtimeId ?? ''
+    return id === '' || !scriptRuntimeIds.includes(id)
+  })
+  if (badScript >= 0) {
+    const label = draft.stages[badScript].name.trim()
+    const id = draft.stages[badScript].script?.runtimeId ?? ''
+    return {
+      ...errors,
+      stageIndex: badScript,
+      form:
+        id === ''
+          ? `「${label}」选了执行脚本但还没选运行时：先到「运行时」页新建一条（执行器选「通用命令」，命令填 pnpm 这类），再回来选它`
+          : `「${label}」的脚本运行时已停用或被删除，请重新选择`,
+    }
+  }
+
+  // 命令不在阶段上，唯一来源是运行时连接：引用通过但那条连接自己没有命令（手工改库 /
+  // 老数据）时，脚本连可执行文件都解析不出来，保存前一并指出
+  const noCommand = draft.stages.findIndex((stage) => {
+    if (stage.entryMode !== 'script') return false
+    const runtime = scriptRuntimes.find((item) => item.id === (stage.script?.runtimeId ?? ''))
+    return runtime !== undefined && runtime.command.trim() === ''
+  })
+  if (noCommand >= 0) {
+    const label = draft.stages[noCommand].name.trim()
+    const runtimeId = draft.stages[noCommand].script?.runtimeId ?? ''
+    const name = scriptRuntimes.find((item) => item.id === runtimeId)?.name ?? ''
+    return {
+      ...errors,
+      stageIndex: noCommand,
+      form: `「${label}」的脚本运行时「${name}」没有命令：命令只来自运行时，先到「运行时」页把它补上`,
     }
   }
   return errors
@@ -371,6 +449,9 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       entryMode: s.entryMode,
       builtin: s.builtin ?? null,
       agentId: s.agentId,
+      // M40：脚本配置原样带回。少了这一行，编辑既有脚本阶段时脚本块整块不渲染，
+      // 保存又会以「设为执行脚本时必须填写命令」被内核整份拒收
+      script: s.script ?? null,
       exits,
       handoffs: s.handoffs,
       subtaskStageId: s.subtaskStageId ?? null,
@@ -507,12 +588,9 @@ export function WorkflowEditor({
   const patchStage = (i: number, patch: Partial<StageInput>): void =>
     setDraft((d) => ({ ...d, stages: d.stages.map((s, k) => (k === i ? { ...s, ...patch } : s)) }))
 
-  /** 改脚本配置：没有脚本时忽略（切到脚本类型时由类型下拉补一份默认配置） */
-  const patchScript = (i: number, patch: Partial<StageScript>): void => {
-    const current = draft.stages[i]?.script
-    if (!current) return
-    patchStage(i, { script: { ...current, ...patch } })
-  }
+  /** 改脚本配置：合并规则在纯函数里（`script` 缺失时补默认），这里只落到草稿 */
+  const patchScript = (i: number, patch: Partial<StageScript>): void =>
+    patchStage(i, { script: applyScriptPatch(draft.stages[i]?.script, patch) })
 
   /** 切到「执行脚本」：清掉智能体、按需补一份默认脚本配置（保留已填的） */
   const toScript = (i: number, gated: boolean): void => {
@@ -620,7 +698,7 @@ export function WorkflowEditor({
         builtin: stage.builtin ?? null,
       })),
     }
-    const next = validateDraft(input)
+    const next = validateDraft(input, commandRuntimes)
     setErrors(next)
     if (Object.keys(next).length > 0) {
       // 出错的阶段要顺手展开，不然提示藏在看不见的右侧面板里
@@ -659,6 +737,14 @@ export function WorkflowEditor({
   const targetValues = targetOptions.map((t) => String(t.i))
   const agentIds = agents.map((a) => a.id)
   const commandRuntimeIds = commandRuntimes.map((runtime) => runtime.id)
+  /**
+   * 所选脚本运行时的命令（只读展示）：阶段没有命令字段，脚本跑的就是运行时上的这一条，
+   * 界面得把它写出来，否则「选了运行时」看不出到底会执行什么。
+   */
+  const scriptRuntimeCommand = ((): string => {
+    const id = stage.script?.runtimeId ?? ''
+    return (commandRuntimes.find((runtime) => runtime.id === id)?.command ?? '').trim()
+  })()
   const handoffWorkflowIds = handoffWorkflows.map((w) => w.id)
   const guardChoices = guardChoicesFor(stage)
   const subtaskStageIds = draft.stages.flatMap((s) => (s.id === undefined ? [] : [s.id]))
@@ -822,7 +908,8 @@ export function WorkflowEditor({
           </div>
 
           <div className="mt-3 flex flex-wrap items-end gap-2">
-            <Field label="类型" className="w-36">
+            {/* 宽度按最长的类型文案（「智能体闸门」）留够：窄一档就会被 line-clamp 截掉 */}
+            <Field label="类型" className="w-44">
               <Select
                 value={entryKindOf(stage)}
                 onValueChange={(v) => {
@@ -848,10 +935,10 @@ export function WorkflowEditor({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">不交接</SelectItem>
-                  <SelectItem value="agent">交给智能体</SelectItem>
+                  <SelectItem value="agent">智能体</SelectItem>
                   <SelectItem value="script">执行脚本</SelectItem>
-                  <SelectItem value="gate">闸门（判定）</SelectItem>
-                  <SelectItem value="script-gate">脚本闸门（判定）</SelectItem>
+                  <SelectItem value="gate">智能体闸门</SelectItem>
+                  <SelectItem value="script-gate">脚本闸门</SelectItem>
                   <SelectItem value="user">交给用户</SelectItem>
                 </SelectContent>
               </Select>
@@ -878,7 +965,15 @@ export function WorkflowEditor({
             )}
             {stage.entryMode === 'script' && stage.script && (
               <div className="mt-3 flex w-full flex-col gap-2 rounded-md border border-border p-3">
-                <div className="flex flex-wrap items-end gap-2">
+                {/* 没有命令运行时 = 这个阶段类型暂时配不上：说清怎么补，别只留一个空下拉 */}
+                {commandRuntimes.length === 0 && (
+                  <p className="text-xs text-warning">
+                    还没有「通用命令」运行时：到「运行时」页新建一条（执行器选「通用命令」、命令填
+                    pnpm 这类），再回来选它。
+                  </p>
+                )}
+                {/* 命令不在阶段上：选了运行时就用这条运行时的命令，界面只把它读出来给人看 */}
+                <div className="flex flex-wrap items-start gap-2">
                   <Field label="运行时" className="w-44">
                     <Select
                       value={picked(stage.script.runtimeId, commandRuntimeIds)}
@@ -896,15 +991,15 @@ export function WorkflowEditor({
                       </SelectContent>
                     </Select>
                   </Field>
-                  <Field label="命令" className="min-w-0 flex-1">
-                    <Input
-                      aria-label={`阶段${n}脚本命令`}
-                      value={stage.script.command}
-                      placeholder="pnpm"
-                      onChange={(event) => patchScript(index, { command: event.target.value })}
-                    />
-                  </Field>
                 </div>
+                {/* 命令只读展示：整行铺开而不是塞进 176px 的列里，长路径也读得全 */}
+                <p className="text-xs text-faint-foreground">
+                  {!commandRuntimeIds.includes(stage.script.runtimeId)
+                    ? '先选一条命令运行时：脚本跑的就是它连接上的那条命令。'
+                    : scriptRuntimeCommand === ''
+                      ? '所选运行时没有命令：脚本跑不起来，先到「运行时」页把它补上。'
+                      : `命令用运行时上的「${scriptRuntimeCommand}」（阶段不再单独配命令）。`}
+                </p>
                 <Field label="参数（一行一个，逐项传参）">
                   <ScriptLinesField
                     key={`args-${stage.id ?? index}`}
@@ -1066,24 +1161,26 @@ export function WorkflowEditor({
             </>
           )}
 
-          {/* 要干什么只对会派活 / 会判定的阶段有意义：不交接、交给用户时不展示 */}
+          {/* 要干什么 / 验收 / 单轮超时只对智能体有意义：脚本阶段的这三块都不展示 */}
           {hasFlowDetail(stage) && (
             <>
               {/* 阶段要干什么：这段文字会作为提示词的固定指令段交给智能体 */}
-              <Field label="要干什么" className="mt-3">
-                <Textarea
-                  aria-label={`阶段${n}要干什么`}
-                  className="min-h-24 resize-y"
-                  placeholder={
-                    '一句话写目标，别写操作清单。例如：\n### 目标\n让 <功能> 在主干上可运行，默认关闭\n\n### 产出\n- 代码：短分支 → PR\n\n### 边界\n- 不动 <模块>；参考做法（可跳过）：小步提交'
-                  }
-                  value={stage.instructions ?? ''}
-                  onChange={(e) => patchStage(index, { instructions: e.target.value })}
-                />
-              </Field>
+              {hasInstructions(stage) && (
+                <Field label="要干什么" className="mt-3">
+                  <Textarea
+                    aria-label={`阶段${n}要干什么`}
+                    className="min-h-24 resize-y"
+                    placeholder={
+                      '一句话写目标，别写操作清单。例如：\n### 目标\n让 <功能> 在主干上可运行，默认关闭\n\n### 产出\n- 代码：短分支 → PR\n\n### 边界\n- 不动 <模块>；参考做法（可跳过）：小步提交'
+                    }
+                    value={stage.instructions ?? ''}
+                    onChange={(e) => patchStage(index, { instructions: e.target.value })}
+                  />
+                </Field>
+              )}
 
               {/* M34 验收只属于闸门：执行阶段不给自己判分，验收由后面的另一个智能体逐条给证据 */}
-              {stage.judge && (
+              {hasAcceptance(stage) && (
                 <>
                   <p className="mt-3 text-xs text-muted-foreground">
                     判定者要逐条给证据（checks 里带 acceptance 序号），漏一条算没给结论
@@ -1124,25 +1221,27 @@ export function WorkflowEditor({
               )}
 
               {/* M26：本阶段一次 run 最长跑多久；到点宿主按超时收口（不再被全局常量掐死） */}
-              <Field label="单轮超时" className="mt-3 w-40">
-                <Select
-                  value={stage.runTimeoutMs == null ? 'default' : String(stage.runTimeoutMs)}
-                  onValueChange={(v) =>
-                    patchStage(index, { runTimeoutMs: v === 'default' ? null : Number(v) })
-                  }
-                >
-                  <SelectTrigger aria-label={`阶段${n}单轮超时`} className="w-full">
-                    <SelectValue placeholder="默认（60 分钟）" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {STAGE_TIMEOUT_CHOICES.map((choice) => (
-                      <SelectItem key={choice.value} value={choice.value}>
-                        {choice.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+              {hasStageTimeout(stage) && (
+                <Field label="单轮超时" className="mt-3 w-40">
+                  <Select
+                    value={stage.runTimeoutMs == null ? 'default' : String(stage.runTimeoutMs)}
+                    onValueChange={(v) =>
+                      patchStage(index, { runTimeoutMs: v === 'default' ? null : Number(v) })
+                    }
+                  >
+                    <SelectTrigger aria-label={`阶段${n}单轮超时`} className="w-full">
+                      <SelectValue placeholder="默认（60 分钟）" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STAGE_TIMEOUT_CHOICES.map((choice) => (
+                        <SelectItem key={choice.value} value={choice.value}>
+                          {choice.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
             </>
           )}
 

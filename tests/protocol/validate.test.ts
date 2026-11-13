@@ -352,7 +352,6 @@ describe('protocol/validate', () => {
       })
     const ok = {
       runtimeId: 'rt-1',
-      command: 'pnpm',
       args: ['check'],
       cwd: null,
       env: { CI: '1' },
@@ -365,9 +364,9 @@ describe('protocol/validate', () => {
     expect(rejectedMessage(create({ ...ok, runtimeId: '' }))).toBe(
       'input.stages[0].script.runtimeId必填',
     )
-    expect(rejectedMessage(create({ ...ok, command: '' }))).toBe(
-      'input.stages[0].script.command必填',
-    )
+    // 命令不是阶段字段（只来自运行时连接）：多写一个 `command` 键既不校验也不落库
+    expect(validateCommand(create({ ...ok, command: '' })).ok).toBe(true)
+    expect(validateCommand(create({ ...ok, command: 'a'.repeat(501) })).ok).toBe(true)
     expect(rejectedMessage(create({ ...ok, args: 'check' }))).toBe(
       'input.stages[0].script.args 必须是字符串数组',
     )

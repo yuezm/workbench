@@ -13,6 +13,7 @@ import {
   type StageHandoff,
   type StageInput,
   type StagePrimary,
+  type StageScript,
   type Runtime,
   type WorkflowInput,
   type WorkflowWithStages,
@@ -85,6 +86,10 @@ interface StageSpec {
   acceptance?: readonly string[]
   /** 判定者（非空 = 判定阶段，出口只有通过 / 未通过 / 出错三行） */
   judge?: { maxFails: number | null }
+  /** M40 脚本配置（entryMode='script' 时配上，与 agentId 互斥） */
+  script?: StageScript
+  /** M26 单轮超时（毫秒；缺省 = 用全局缺省） */
+  runTimeoutMs?: number | null
 }
 
 /**
@@ -130,6 +135,8 @@ function workflowOf(specs: StageSpec[]): WorkflowWithStages {
       spawnPolicy: spec.spawnPolicy ?? null,
       instructions: spec.instructions ?? '',
       acceptance: spec.acceptance ?? [],
+      runTimeoutMs: spec.runTimeoutMs ?? null,
+      script: spec.script ?? null,
     })),
   }
 }
@@ -172,7 +179,7 @@ describe('WorkflowEditor', () => {
     // 新阶段落在「已阻塞」之前并自动展开
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
     expect(screen.getByLabelText('阶段2名称')).toHaveValue('阶段1')
-    await choose(user, '阶段2类型', '交给智能体')
+    await choose(user, '阶段2类型', '智能体')
     await waitFor(() =>
       expect(screen.getByRole('combobox', { name: '阶段2智能体' })).toBeInTheDocument(),
     )
@@ -261,7 +268,7 @@ describe('WorkflowEditor', () => {
 
     // 其它字段照常可编辑：把「待办」改成交给智能体并绑定智能体
     await user.click(screen.getByRole('button', { name: '阶段1' }))
-    await choose(user, '阶段1类型', '交给智能体')
+    await choose(user, '阶段1类型', '智能体')
     await choose(user, '阶段1智能体', 'coder')
     await user.type(screen.getByLabelText('工作流名称'), '研发')
     await user.click(screen.getByRole('button', { name: '保存' }))
@@ -411,7 +418,7 @@ describe('WorkflowEditor', () => {
 
     // 内置「待办」不是终态：派单照常可配（名称与位置才锁）
     await user.type(screen.getByLabelText('工作流名称'), '派单流')
-    await choose(user, '阶段1类型', '交给智能体')
+    await choose(user, '阶段1类型', '智能体')
     await user.click(screen.getByRole('button', { name: '阶段1新增派单' }))
     await user.click(screen.getByRole('combobox', { name: '阶段1派单1目标工作流' }))
     await user.click(await screen.findByRole('option', { name: '写作' }))
@@ -743,7 +750,7 @@ describe('WorkflowEditor', () => {
     render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: '阶段3' }))
-    await choose(user, '阶段3类型', '闸门（判定）')
+    await choose(user, '阶段3类型', '智能体闸门')
 
     // 切到闸门即自动交给智能体，并给出默认 3 次护栏
     expect(screen.getByRole('combobox', { name: '阶段3智能体' })).toBeInTheDocument()
@@ -791,7 +798,7 @@ describe('WorkflowEditor', () => {
 
     await user.click(screen.getByRole('button', { name: '阶段3' }))
     // 还原：类型显示为闸门，护栏与两侧出口的目标阶段按下标回填
-    expect(screen.getByRole('combobox', { name: '阶段3类型' })).toHaveTextContent('闸门（判定）')
+    expect(screen.getByRole('combobox', { name: '阶段3类型' })).toHaveTextContent('智能体闸门')
     expect(screen.getByRole('combobox', { name: '阶段3放行护栏' })).toHaveTextContent('2 次')
     expect(screen.getByRole('combobox', { name: '阶段3通过时目标阶段' })).toHaveTextContent('结束')
     expect(screen.getByRole('combobox', { name: '阶段3未通过时目标阶段' })).toHaveTextContent(
@@ -799,7 +806,7 @@ describe('WorkflowEditor', () => {
     )
 
     // 切回普通类型：判定者消失，出口表换成完成 / 出错两行
-    await choose(user, '阶段3类型', '交给智能体')
+    await choose(user, '阶段3类型', '智能体')
     expect(screen.queryByRole('combobox', { name: '阶段3放行护栏' })).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '阶段3通过时去向' })).not.toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '阶段3完成时去向' })).toBeInTheDocument()
@@ -1811,7 +1818,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     id: 'rt-cmd',
     name: '本机命令',
     executorKey: 'command',
-    command: '',
+    command: 'pnpm',
     profile: '',
     argsTemplate: '',
     enabled: true,
@@ -1827,7 +1834,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
   /** 第二条命令执行器：用来覆盖「换运行时」这一支 */
   const spareRuntime: Runtime = { ...commandRuntime, id: 'rt-cmd2', name: '备用命令' }
 
-  it('新建：切到「执行脚本」后能填命令 / 参数 / 目录 / 环境变量 / 超时，保存原样提交', async () => {
+  it('新建：切到「执行脚本」后能填参数 / 目录 / 环境变量 / 超时，保存原样提交（不带命令）', async () => {
     kernel.setView('agents.all', undefined, [agent])
     // 只列命令执行器：dsh 连接不出现在下拉里
     kernel.setView('runtimes.all', undefined, [commandRuntime, dshRuntime, spareRuntime])
@@ -1850,7 +1857,10 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     // 换到另一条命令执行器
     await user.click(screen.getByRole('option', { name: '备用命令' }))
 
-    await user.type(screen.getByLabelText('阶段2脚本命令'), 'pnpm')
+    // 命令不可输入：脚本块里根本没有那个输入框，只把运行时命中的命令读出来
+    expect(screen.queryByLabelText('阶段2脚本命令')).toBeNull()
+    expect(screen.getByText(/命令用运行时上的「pnpm」/)).toBeInTheDocument()
+
     await user.type(screen.getByLabelText('阶段2脚本参数'), 'check{Enter}--reporter=dot')
     await user.type(screen.getByLabelText('阶段2脚本工作目录'), 'C:/repo')
     await user.type(screen.getByLabelText('阶段2脚本环境变量'), 'CI=1')
@@ -1862,7 +1872,6 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     const draft = onSave.mock.calls[0][0] as WorkflowInput
     expect(savedStage(draft, '阶段1').script).toEqual({
       runtimeId: 'rt-cmd2',
-      command: 'pnpm',
       args: ['check', '--reporter=dot'],
       cwd: 'C:/repo',
       env: { CI: '1' },
@@ -1884,14 +1893,14 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     )
     await user.type(screen.getByLabelText('工作流名称'), '脚本闸门')
     await user.click(screen.getByRole('button', { name: '添加阶段' }))
-    await choose(user, '阶段2类型', '脚本闸门（判定）')
+    await choose(user, '阶段2类型', '脚本闸门')
 
     // 判定阶段：出口只有通过 / 未通过 / 出错三行
     expect(screen.getByRole('combobox', { name: '阶段2通过时去向' })).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '阶段2完成时去向' })).toBeNull()
 
     // 切回智能体：脚本字段收起，脚本配置在保存时归空
-    await choose(user, '阶段2类型', '交给智能体')
+    await choose(user, '阶段2类型', '智能体')
     await user.click(screen.getByRole('combobox', { name: '阶段2智能体' }))
     await user.click(screen.getByRole('option', { name: 'coder' }))
     expect(screen.queryByRole('combobox', { name: '阶段2脚本运行时' })).toBeNull()
@@ -1903,5 +1912,259 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     expect(saved.entryMode).toBe('agent')
     expect(saved.agentId).toBe('ag1')
     expect(saved.script).toBeNull()
+  })
+
+  /** 一条脚本配置：连接取给定运行时，其余字段是脚本阶段的最小形态 */
+  const stageScript = (runtimeId: string): StageScript => ({
+    runtimeId,
+    args: ['check'],
+    cwd: null,
+    env: {},
+    timeoutMs: 600_000,
+  })
+
+  it('编辑既有脚本阶段：运行时 / 参数 / 目录 / 环境变量 / 超时全部回填并原样保存', async () => {
+    const existing = workflowWith([
+      {
+        name: '自测',
+        entryMode: 'script',
+        agentId: null,
+        script: {
+          ...stageScript('rt-cmd'),
+          args: ['check', '-r', 'dot'],
+          cwd: 'C:/repo',
+          env: { CI: '1' },
+          timeoutMs: 300_000,
+        },
+      },
+    ])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [commandRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 少一行 `script: s.script` 就会整块不渲染：这条断言防的就是那个回归
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '阶段2脚本运行时' })).toHaveTextContent(
+        '本机命令',
+      ),
+    )
+    // 命令不在阶段上：只读展示运行时命中的那条
+    expect(screen.queryByLabelText('阶段2脚本命令')).toBeNull()
+    expect(screen.getByText(/命令用运行时上的「pnpm」/)).toBeInTheDocument()
+    expect(screen.getByLabelText('阶段2脚本参数')).toHaveValue('check\n-r\ndot')
+    expect(screen.getByLabelText('阶段2脚本工作目录')).toHaveValue('C:/repo')
+    expect(screen.getByLabelText('阶段2脚本环境变量')).toHaveValue('CI=1')
+    expect(screen.getByRole('combobox', { name: '阶段2脚本超时' })).toHaveTextContent('5 分钟')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, '自测').script).toEqual({
+      runtimeId: 'rt-cmd',
+      args: ['check', '-r', 'dot'],
+      cwd: 'C:/repo',
+      env: { CI: '1' },
+      timeoutMs: 300_000,
+    })
+  })
+
+  it('执行脚本：不渲染「要干什么」「验收」「单轮超时」，保存时归一成空', async () => {
+    const existing = workflowWith([
+      { name: '实现', instructions: '逐条实现验收项', runTimeoutMs: 1_800_000 },
+    ])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [commandRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 切之前是智能体阶段：三块都在
+    expect(screen.getByLabelText('阶段2要干什么')).toHaveValue('逐条实现验收项')
+    expect(screen.getByRole('combobox', { name: '阶段2单轮超时' })).toBeInTheDocument()
+
+    await choose(user, '阶段2类型', '执行脚本')
+
+    expect(screen.queryByLabelText('阶段2要干什么')).toBeNull()
+    expect(screen.queryByLabelText('阶段2验收')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: '阶段2单轮超时' })).toBeNull()
+
+    // 脚本阶段不需要额外填命令（命令来自运行时）
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const saved = savedStage(onSave.mock.calls[0][0] as WorkflowInput, '实现')
+    expect(saved.entryMode).toBe('script')
+    // 看不见的配置不提交（否则会变成存得下、看不着、改不动的残留）
+    expect(saved.instructions).toBe('')
+    expect(saved.acceptance).toEqual([])
+    expect(saved.runTimeoutMs ?? null).toBeNull()
+  })
+
+  it('脚本闸门：只要退出码，不要「要干什么」「验收」「单轮超时」，放行护栏仍在', async () => {
+    const existing = workflowWith([
+      { name: '评审', judge: { maxFails: 3 }, acceptance: ['`pnpm check` 退出码 0'] },
+    ])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [commandRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 智能体闸门：验收逐条展示
+    expect(screen.getByLabelText('阶段2验收')).toBeInTheDocument()
+
+    await choose(user, '阶段2类型', '脚本闸门')
+
+    expect(screen.queryByLabelText('阶段2要干什么')).toBeNull()
+    expect(screen.queryByLabelText('阶段2验收')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: '阶段2单轮超时' })).toBeNull()
+    // 放行护栏属于判定本身，与执行目标无关：仍要能配
+    expect(screen.getByRole('combobox', { name: '阶段2放行护栏' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const saved = savedStage(onSave.mock.calls[0][0] as WorkflowInput, '评审')
+    expect(saved.entryMode).toBe('script')
+    expect(saved.judge).toEqual({ maxFails: 3 })
+    expect(saved.acceptance).toEqual([])
+    expect(saved.instructions).toBe('')
+  })
+
+  it('脚本闸门：可以配派单，触发档位按闸门给（没有「跑完时」）', async () => {
+    const other = { ...workflowWith([{ name: '收尾' }]), id: 'w2' }
+    const existing = workflowWith([
+      {
+        name: '自测',
+        entryMode: 'script',
+        agentId: null,
+        script: stageScript('rt-cmd'),
+        judge: { maxFails: null },
+      },
+    ])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [commandRuntime])
+    kernel.setView('workflows.all', undefined, [existing, other])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段2新增派单' }))
+    await user.click(screen.getByRole('combobox', { name: '阶段2派单1触发' }))
+    // 闸门跑完没结论不构成去向：选项里没有「跑完时」
+    expect(await screen.findByRole('option', { name: '通过时' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '跑完时' })).toBeNull()
+    await user.click(screen.getByRole('option', { name: '人工拖动时' }))
+    expect(screen.getByRole('combobox', { name: '阶段2派单1触发' })).toHaveTextContent('人工拖动时')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, '自测').handoffs).toEqual([
+      { on: 'manual', workflowId: 'w2', stageId: null },
+    ])
+  })
+
+  it('没有命令执行器的运行时：脚本块给指路提示，保存被就地拦住', async () => {
+    kernel.setView('agents.all', undefined, [agent])
+    // 只有 dsh 连接：脚本阶段没有可选连接
+    kernel.setView('runtimes.all', undefined, [dshRuntime])
+    const onSave = vi.fn()
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '阶段1类型' })).toBeInTheDocument(),
+    )
+    await user.type(screen.getByLabelText('工作流名称'), '自测流程')
+    await user.click(screen.getByRole('button', { name: '添加阶段' }))
+    await choose(user, '阶段2类型', '执行脚本')
+
+    expect(screen.getByText(/还没有「通用命令」运行时/)).toBeInTheDocument()
+    // 没选连接时命令说明也不冒充「没有命令」：先让人把运行时选上
+    expect(screen.getByText(/先选一条命令运行时/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    // 拦住的位置要能指出是哪个阶段，而不是协议层的 `input.stages[N].script.runtimeId必填`
+    expect(await screen.findByText(/选了执行脚本但还没选运行时/)).toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('命令只来自运行时：没有命令输入框，界面把运行时命中的那条读出来', async () => {
+    const npmRuntime: Runtime = {
+      ...commandRuntime,
+      id: 'rt-npm',
+      name: 'npm 连接',
+      command: 'npm',
+    }
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [npmRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '阶段1类型' })).toBeInTheDocument(),
+    )
+    await user.type(screen.getByLabelText('工作流名称'), '自测流程')
+    await user.click(screen.getByRole('button', { name: '添加阶段' }))
+    await choose(user, '阶段2类型', '执行脚本')
+
+    // 运行时已自动预填：命令不可输入，只展示「将执行哪一条」
+    expect(screen.queryByLabelText('阶段2脚本命令')).toBeNull()
+    expect(screen.getByText(/命令用运行时上的「npm」/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const saved = savedStage(onSave.mock.calls[0][0] as WorkflowInput, '阶段1')
+    expect(saved.entryMode).toBe('script')
+    // 提交的脚本里没有命令键：命令只在运行时的连接上
+    expect(saved.script).toEqual({
+      runtimeId: 'rt-npm',
+      args: [],
+      cwd: null,
+      env: {},
+      timeoutMs: 600_000,
+    })
+  })
+
+  it('所选运行时自己没有命令（老数据 / 手工改库）：保存前拦住并指出是哪条连接', async () => {
+    const legacyRuntime: Runtime = {
+      ...commandRuntime,
+      id: 'rt-empty',
+      name: '空命令连接',
+      command: '',
+    }
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [legacyRuntime])
+    const onSave = vi.fn()
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '阶段1类型' })).toBeInTheDocument(),
+    )
+    await user.type(screen.getByLabelText('工作流名称'), '自测流程')
+    await user.click(screen.getByRole('button', { name: '添加阶段' }))
+    await choose(user, '阶段2类型', '执行脚本')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText(/的脚本运行时「空命令连接」没有命令/)).toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('所选脚本运行时被停用：保存时说「已停用或被删除」，不冒充「没选」', async () => {
+    const existing = workflowWith([
+      { name: '自测', entryMode: 'script', agentId: null, script: stageScript('rt-cmd') },
+    ])
+    kernel.setView('agents.all', undefined, [agent])
+    // 停用后不再出现在下拉候选里：引用的运行时「还在，但用不了」
+    kernel.setView('runtimes.all', undefined, [{ ...commandRuntime, enabled: false }])
+    const onSave = vi.fn()
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByText(/的脚本运行时已停用或被删除，请重新选择/)).toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
   })
 })

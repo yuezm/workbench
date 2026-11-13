@@ -258,17 +258,17 @@ export const SCRIPT_LIMITS = { maxArgs: 20, maxArgChars: 500 } as const
 export const SCRIPT_FORBIDDEN_PLACEHOLDERS = ['prompt', 'model', 'effort'] as const
 
 /**
- * 阶段脚本（M40 内联在阶段上）：一条命令 + 参数。
+ * 阶段脚本（M40 内联在阶段上）：选一条命令运行时 + 参数。
  *
- * - 连接取自 `runtimeId` 指向的运行时（`executorKey` 应为 `command`），命令本体与参数是执行配置；
+ * - **命令只来自运行时**：`runtimeId` 指向的那条运行时决定跑哪个可执行文件与执行器协议；
+ *   阶段只给参数（`args`）、工作目录、环境变量与超时。选了运行时又以阶段命令覆盖，
+ *   等于两条真相源——M40 首版的 `command` 字段因此撤掉；
  * - 不产生提示词、不续会话、不派活——脚本只回答「命令跑没跑成」；
  * - 闸门阶段读 `exitCode` 当结论（`0` = 通过），非闸门阶段只看成功 / 失败。
  */
 export interface StageScript {
   /** 连接：必须指向一条已存在的运行时（表单预填第一条命令执行器运行时） */
   runtimeId: string
-  /** 命令名或绝对路径（宿主按 PATH 解析；找不到即 spawn_failed） */
-  command: string
   /** 逐项 argv，不经 shell；不允许 `{prompt}` / `{model}` / `{effort}` */
   args: readonly string[]
   /** 工作目录；null = 项目文件夹 > 宿主默认目录 */

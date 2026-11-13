@@ -82,6 +82,8 @@ interface Harness {
   spawn: SpawnFn
   killTree: (pid: number, signal?: NodeJS.Signals) => boolean
   resolve: (command: string) => ResolvedExecutable
+  /** 每次 resolve 收到的命令名（断言「命令只来自运行时」用） */
+  resolvedIn: string[]
   children: FakeChild[]
   killedTrees: Array<{ pid: number; signal: string | undefined }>
   calls: Array<{ command: string; args: string[]; options: SpawnOptions }>
@@ -95,6 +97,7 @@ function harness(
   const children: FakeChild[] = []
   const killedTrees: Harness['killedTrees'] = []
   const calls: Harness['calls'] = []
+  const resolvedIn: string[] = []
   const spawn: SpawnFn = (command, args, options) => {
     const child = new FakeChild()
     configure?.(child)
@@ -106,8 +109,11 @@ function harness(
     killedTrees.push({ pid, signal })
     return true
   }
-  const resolve = (): ResolvedExecutable => ({ path: resolvedPath, error: null })
-  return { spawn, killTree, resolve, children, killedTrees, calls }
+  const resolve = (command: string): ResolvedExecutable => {
+    resolvedIn.push(command)
+    return { path: resolvedPath, error: null }
+  }
+  return { spawn, killTree, resolve, resolvedIn, children, killedTrees, calls }
 }
 
 const runtime = (over: Partial<Runtime> = {}): Runtime => ({
@@ -182,7 +188,7 @@ describe('command manifest 与插件装配', () => {
   it('manifest：id/kind/name/capabilities 与表单默认值（command/profile/argsTemplate 空串）', () => {
     expect(commandManifest.id).toBe('command')
     expect(commandManifest.kind).toBe('executor')
-    expect(commandManifest.name).toBe('命令')
+    expect(commandManifest.name).toBe('通用命令')
     expect(commandManifest.capabilities).toEqual(['spawn'])
 
     const config = commandManifest.config ?? []
@@ -195,9 +201,11 @@ describe('command manifest 与插件装配', () => {
     }
   })
 
-  it('插件只实现 run（D12：不给 detect/probe）', () => {
+  it('插件实现 probe + run（不给 detect）：没有 probe 就建不出脚本阶段的连接', () => {
     expect(commandPlugin.run).toBeTypeOf('function')
-    expect(commandPlugin.probe).toBeUndefined()
+    // M40 缺口：`runtime.create` 要求探测通过，command 没有 detect 也没有别的建行路径，
+    // 少了 probe 等于「执行脚本」这个阶段类型永远配不上运行时
+    expect(commandPlugin.probe).toBeTypeOf('function')
     expect(commandPlugin.detect).toBeUndefined()
   })
 })
@@ -715,14 +723,16 @@ describe('cwd 兜底（宿主未提供默认目录）', () => {
   })
 })
 
-describe('脚本轮（M40）：命令与 argv 来自 Turn', () => {
-  it('turn.command 覆盖运行时命令、turn.args 逐项传参（不展开占位符）', async () => {
+describe('脚本轮（M40）：argv 来自 Turn，命令只来自运行时', () => {
+  it('可执行文件解析自 runtime.command、turn.args 逐项传参（不展开占位符）', async () => {
     const h = harness()
     const { running } = startRun(h, {
-      turn: { command: 'pnpm', args: ['check', '{cwd}'], prompt: '' },
+      runtime: { command: 'pnpm' },
+      turn: { args: ['check', '{cwd}'], prompt: '' },
     })
 
-    // 命令名经 resolve 后落到 spawn 的绝对路径；argv 原样传，不替换 {cwd}
+    // 命令名只认运行时连接上的那一条：Turn 上没有命令字段可以覆盖
+    expect(h.resolvedIn).toEqual(['pnpm'])
     expect(h.calls[0].command).toBe('C:/tools/agent.exe')
     expect(h.calls[0].args).toEqual(['check', '{cwd}'])
 
@@ -734,9 +744,7 @@ describe('脚本轮（M40）：命令与 argv 来自 Turn', () => {
 
   it('空提示词不写 stdin（脚本秒退时管道已关，写入会被当成 spawn_failed）', async () => {
     const h = harness()
-    const { running } = startRun(h, {
-      turn: { command: 'pnpm', args: ['check'], prompt: '' },
-    })
+    const { running } = startRun(h, { turn: { args: ['check'], prompt: '' } })
 
     expect(h.children[0].writes).toEqual([])
     expect(h.children[0].stdinEnded).toBe(false)
@@ -745,10 +753,9 @@ describe('脚本轮（M40）：命令与 argv 来自 Turn', () => {
     expect((await running).status).toBe('succeeded')
   })
 
-  it('没有 turn.command 时仍用运行时连接上的命令', async () => {
+  it('turn.args 缺省时退回运行时的参数模板', async () => {
     const h = harness()
     const { running } = startRun(h, { runtime: { argsTemplate: template(['--print']) } })
-    expect(h.calls[0].command).toBe('C:/tools/agent.exe')
     expect(h.calls[0].args).toEqual(['--print'])
     h.children[0].close(0)
     await running

@@ -149,7 +149,7 @@ export function TaskDialog({
               </SelectContent>
             </Select>
           </Field>
-          <p className="text-xs text-faint-foreground">「交给智能体」的阶段会立即执行。</p>
+          <p className="text-xs text-faint-foreground">「智能体」的阶段会立即执行。</p>
 
           <FormError message={formError} />
 

@@ -1943,7 +1943,6 @@ describe('createScheduler：脚本轮（M40）', () => {
     })
     const script: StageScript = {
       runtimeId: runtime.id,
-      command: 'pnpm',
       args: ['check'],
       cwd: null,
       env: { CI: '1' },
@@ -1983,7 +1982,7 @@ describe('createScheduler：脚本轮（M40）', () => {
     return { runtime, script, task, runId: String(dbRun(task.id).id) }
   }
 
-  it('Turn 用脚本配置：命令 / argv / 环境变量 / 无模型 / 超时取脚本自己的', async () => {
+  it('Turn 用脚本配置：argv / 环境变量 / 无模型 / 超时取脚本自己的，命令不在 Turn 上', async () => {
     const seeded = seedScript()
     let captured: Turn | null = null
     const scheduler = makeScheduler(
@@ -1997,7 +1996,8 @@ describe('createScheduler：脚本轮（M40）', () => {
     await scheduler.idle()
 
     const turn = captured as unknown as Turn
-    expect(turn.command).toBe('pnpm')
+    // 命令只来自运行时连接（`runtime.command`）：Turn 上没有可覆盖命令的字段
+    expect(turn).not.toHaveProperty('command')
     expect(turn.args).toEqual(['check'])
     expect(turn.env).toEqual({ CI: '1' })
     // 脚本没有模型 / 思考强度
@@ -2006,11 +2006,17 @@ describe('createScheduler：脚本轮（M40）', () => {
     // 超时取脚本自己的 5 分钟（优先于阶段 / 全局缺省）
     expect(turn.timeoutMs).toBeGreaterThan(250_000)
     expect(turn.timeoutMs).toBeLessThanOrEqual(300_000)
-    // run 行：没有智能体、权限恒为 full、脚本快照落库
+    // run 行：没有智能体、权限恒为 full、脚本快照落库（不含命令）
     const row = runById(seeded.runId)
     expect(row?.agent_id).toBeNull()
     expect(row?.access).toBe('full')
-    expect((JSON.parse(String(row?.script_json)) as StageScript).command).toBe('pnpm')
+    expect(JSON.parse(String(row?.script_json))).toEqual({
+      runtimeId: seeded.script.runtimeId,
+      args: ['check'],
+      cwd: null,
+      env: { CI: '1' },
+      timeoutMs: 300_000,
+    })
   })
 
   it('脚本轮没有提示词时也能跑完：回执照常落终态', async () => {

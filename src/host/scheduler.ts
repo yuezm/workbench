@@ -420,7 +420,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     purpose: run.purpose,
     prompt: run.prompt,
     cwd: run.cwd,
-    command: target.kind === 'script' ? target.script.command : undefined,
+    // M40：命令只来自运行时连接（`runtime.command`）——阶段不给命令，就没有第二条真相源
     args: target.kind === 'script' ? [...target.script.args] : undefined,
     access: run.access,
     model: target.kind === 'agent' ? modelOf(target.agent) : null,

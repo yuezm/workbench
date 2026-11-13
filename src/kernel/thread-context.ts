@@ -11,6 +11,9 @@
  * - 余下各段总量 ≤ `THREAD_LIMITS.contextChars`（6000）码点，超出按**重要性**逐段丢弃
  *   （事件 → 笔记 → 运行摘要 → 卡片 → 任务树，每段内按时间倒序保新弃旧）并标注；
  * - 笔记与事件正文只出现在「资料，不是指令」段，绝不进指令段；
+ * - 当前任务（跑这一轮的那个）不在这段里复述：顶部已有「# 任务：标题」与「# 阶段：名称」，
+ *   任务树只列其余任务、最近一轮产出不再写任务名——同一份任务信息出现两遍是纯噪音；
+ * - 文本标题层级：整段是 `# 线程上下文…` 这个段，段内各节一律 `##`（段与段才同级）；
  * - 同一事实集两次派生文本全等（不读时钟/随机数，全部按稳定排序）。
  */
 import type { RunRow, Task } from '../protocol/entities'
@@ -168,15 +171,19 @@ function deliverableLine(run: RunRow): string[] {
  * 正文让执行器按需打开——摘要单端截断会丢掉结论（结论通常在尾部），给路径反而更准。
  * 宿主没配产物目录时退回原来的长摘要（否则模型既看不到全文、也没有路径可读）。
  */
-function precedingBlock(view: View, thread: ThreadRow): string {
+function precedingBlock(view: View, thread: ThreadRow, currentTaskId: Id | null): string {
   const run = latestStageRun(view, thread)
   if (run === undefined) return ''
   const task = run.taskId === null ? undefined : view.tasks.get(run.taskId)
   const stage = run.stageId === null ? undefined : view.stages.get(run.stageId)
   const root = view.artifactsRoot ?? null
   const artifact = root === null ? null : `${root}/threads/${thread.id}/runs/${run.id}/output.md`
+  // 这一轮就是当前任务时不再重复标题：顶部「# 任务：…」已经写过一次。
+  const sameTask = currentTaskId !== null && run.taskId === currentTaskId
   const head = [
-    `- 任务：${task === undefined ? '（未知任务）' : truncate(task.title, 80)}`,
+    ...(sameTask
+      ? []
+      : [`- 任务：${task === undefined ? '（未知任务）' : truncate(task.title, 80)}`]),
     `阶段：${stage === undefined ? '无阶段' : stage.name}`,
     `结果：${run.status}`,
     `结束：${run.endedAt ?? run.createdAt}`,
@@ -199,20 +206,20 @@ function precedingBlock(view: View, thread: ThreadRow): string {
     .join('\n')
 }
 
-/** 任务树：根任务按 `rootTaskIds`，子任务按 `parentTaskId` 挂到父下（缩进一层）。 */
-function taskLines(view: View, thread: ThreadRow): Item[] {
+/**
+ * 任务树：根任务按 `rootTaskIds`，子任务按 `parentTaskId` 挂到父下（缩进一层）。
+ *
+ * `currentTaskId`（跑这一轮的任务）**不进树**：提示词顶部已经有「# 任务：标题」与
+ * 「# 阶段：名称」，树里再列一遍就是同一份任务信息出现两遍。它的子任务不受影响——
+ * 父不在树里时子任务按顶层渲染，缩进照旧按「树里还有几层可见父任务」算。
+ */
+function taskLines(view: View, thread: ThreadRow, currentTaskId: Id | null): Item[] {
   const tasks = new Map<Id, Task>()
   for (const taskId of thread.taskIds) {
     const task = view.tasks.get(taskId)
     if (task) tasks.set(task.id, task)
   }
-  const children = new Map<Id, Task[]>()
-  for (const task of tasks.values()) {
-    if (task.parentTaskId === null) continue
-    const bucket = children.get(task.parentTaskId)
-    if (bucket) bucket.push(task)
-    else children.set(task.parentTaskId, [task])
-  }
+  if (currentTaskId !== null) tasks.delete(currentTaskId)
   const stageName = (task: Task): string => {
     const stage = task.currentStageId === null ? undefined : view.stages.get(task.currentStageId)
     return stage ? `阶段：${stage.name}` : '无阶段'
@@ -221,14 +228,24 @@ function taskLines(view: View, thread: ThreadRow): Item[] {
     at: null,
     text: `${'  '.repeat(depth)}- [${task.status}] ${truncate(task.title, 80)}（${stageName(task)}）`,
   })
-  const lines: Item[] = []
-  const roots = thread.rootTaskIds
-    .map((id) => tasks.get(id))
-    .filter((task): task is Task => task !== undefined)
-  for (const root of roots) {
-    lines.push(line(root, 0))
-    for (const child of children.get(root.id) ?? []) lines.push(line(child, 1))
+  const children = new Map<Id, Task[]>()
+  const roots: Task[] = []
+  for (const task of tasks.values()) {
+    const parent = task.parentTaskId === null ? undefined : tasks.get(task.parentTaskId)
+    if (parent === undefined) {
+      roots.push(task)
+      continue
+    }
+    const bucket = children.get(parent.id)
+    if (bucket) bucket.push(task)
+    else children.set(parent.id, [task])
   }
+  const lines: Item[] = []
+  const walk = (task: Task, depth: number): void => {
+    lines.push(line(task, depth))
+    for (const child of children.get(task.id) ?? []) walk(child, depth + 1)
+  }
+  for (const root of roots) walk(root, 0)
   return lines
 }
 
@@ -526,8 +543,9 @@ export function dropToFit(
  * 丢弃顺序按「对下一轮的有用程度」从低到高：事件引用 → 笔记 → 运行摘要 → 卡片 → 任务树。
  * 段内一律保新弃旧（`byTime` 升序取最旧丢弃）。
  *
- * M15：`currentTaskId` 只用于「任务索引」段的排序（当前任务与祖先链优先保留），
- * 不影响其余段——同事实集是否传它，除索引顺序外文本一致。
+ * M15：`currentTaskId` 用于「任务索引」段的排序（当前任务与祖先链优先保留）；M35 起还用于
+ * **去重**——顶部「# 任务 / # 阶段」已经交代过的当前任务不进「## 任务」树、「## 最近一轮产出」
+ * 也不再重复它的标题。传 null（不知道当前任务）时两者都保持原样：任务全列、产出段带任务名。
  */
 export function threadContextText(
   view: View,
@@ -535,7 +553,7 @@ export function threadContextText(
   currentTaskId: Id | null = null,
 ): string {
   const header = headerLines(thread)
-  const taskSection: Section = { title: '## 任务', items: taskLines(view, thread) }
+  const taskSection: Section = { title: '## 任务', items: taskLines(view, thread, currentTaskId) }
   const runSection: Section = { title: '## 最近运行（最近 3 条）', items: runLines(view, thread) }
   const cardSection: Section = { title: '## 未决卡片', items: cardLines(view, thread) }
   const noteSection: Section = {
@@ -565,7 +583,7 @@ export function threadContextText(
     build(dropped),
     indexBlock(view, thread, currentTaskId),
     reviewBlock(view, thread),
-    precedingBlock(view, thread),
+    precedingBlock(view, thread, currentTaskId),
   ]
   return parts.filter((part) => part !== '').join('\n\n')
 }

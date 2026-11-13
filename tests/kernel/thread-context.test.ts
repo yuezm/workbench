@@ -247,6 +247,43 @@ describe('kernel/thread-context', () => {
     expect(text).toContain('  - [completed] 子任务（阶段：实现）')
   })
 
+  it('传当前任务：任务树不复述它（顶部已写「# 任务 / # 阶段」），只剩子任务时子任务升为顶层', () => {
+    const child = task({
+      id: 'task-2',
+      parentTaskId: 'task-1',
+      title: '子任务',
+      status: 'completed',
+    })
+    const seeded = view({
+      tasks: new Map([
+        ['task-1', task()],
+        ['task-2', child],
+      ]),
+      threads: new Map([
+        ['th-1', thread({ taskIds: ['task-1', 'task-2'], rootTaskIds: ['task-1'] })],
+      ]),
+    })
+    const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow, 'task-1')
+    expect(text).not.toContain('- [active] 写计划')
+    // 父任务不在树里：子任务按顶层渲染（缩进按「树里可见的父任务层数」算）
+    expect(text).toContain('## 任务\n- [completed] 子任务（阶段：实现）')
+
+    // 线程里只有当前任务：整段消失，不产一行业务复述
+    const alone = threadContextText(view(), thread(), 'task-1')
+    expect(alone).not.toContain('## 任务\n')
+    expect(alone).not.toContain('- [active] 写计划（阶段：实现）')
+  })
+
+  it('传当前任务：最近一轮产出不再重复任务名（不传时保持原样）', () => {
+    const seeded = view()
+    const current = precedingOf(threadContextText(seeded, thread(), 'task-1'))
+    expect(current).not.toContain('任务：写计划')
+    expect(current).toContain('阶段：实现')
+
+    const unknown = precedingOf(threadContextText(seeded, thread()))
+    expect(unknown).toContain('任务：写计划')
+  })
+
   it('多子任务 / 多条运行 / 多张未决卡：各自按稳定顺序渲染', () => {
     const childA = task({ id: 'task-a', parentTaskId: 'task-1', title: '子 A' })
     const childB = task({ id: 'task-b', parentTaskId: 'task-1', title: '子 B' })

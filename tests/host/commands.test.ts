@@ -223,6 +223,22 @@ describe('host/commands：命令路由（M5）', () => {
     expect((replay.value as Runtime).id).toBe((result.value as Runtime).id)
   })
 
+  it('runtime.create：参数模板进草稿（探测看到它）并原样落库，不被静默丢成空串', async () => {
+    const { store, router, probe } = setup()
+    const created = await router.dispatch({
+      commandId: 'c-runtime',
+      type: 'runtime.create',
+      input: { ...runtimeInput, argsTemplate: ' ["--print","{prompt}"] ' },
+    })
+
+    // 探测拿到的是补全后的整行（下划线 trim 过）：非法模板在创建阶段就该被拦
+    expect(probe).toHaveBeenCalledWith(
+      expect.objectContaining({ argsTemplate: '["--print","{prompt}"]' }),
+    )
+    expect((created.value as Runtime).argsTemplate).toBe('["--print","{prompt}"]')
+    expect(store.query('runtimes.all')[0].argsTemplate).toBe('["--print","{prompt}"]')
+  })
+
   it('runtime.create：探测失败不落库、不产事实', async () => {
     const { store, router } = setup({ probeResult: unavailableProbe })
     await expect(

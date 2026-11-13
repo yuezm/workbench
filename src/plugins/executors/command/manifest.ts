@@ -9,7 +9,9 @@ import type { PluginManifest } from '../../../protocol/manifest'
 export const commandManifest: PluginManifest = {
   id: 'command',
   kind: 'executor',
-  name: '命令',
+  // 展示名叫「通用命令」而不是「命令」：运行时表单里已经有一个「命令」输入框，
+  // 执行器下拉与字段同名会让人以为「选不了命令」（M40 的实际反馈）
+  name: '通用命令',
   version: '1.0.0',
   description: '通用命令执行：按参数模板调起本机命令，提示词只作为独立 argv 元素或走 stdin',
   // spawn = 子进程 + 杀进程树 + 可执行文件解析（sdk 没有 fs/net 能力面）

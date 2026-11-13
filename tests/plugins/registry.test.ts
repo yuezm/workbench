@@ -77,6 +77,12 @@ describe('执行器插件注册表', () => {
     }
   })
 
+  it('command 执行器必须自带 probe：脚本阶段的连接只能靠它建出来', () => {
+    // `runtime.create` 要求探测通过，而 command 没有 detect（不产出候选），
+    // 少一个 probe 就等于「执行脚本」这个阶段类型永远配不上运行时（M40 缺口回归）
+    expect(executorById('command').plugin.probe).toBeTypeOf('function')
+  })
+
   it('executorById 命中同一条注册项，未知 key 抛可读错误', () => {
     for (const entry of executors) {
       expect(executorById(entry.key)).toBe(entry)

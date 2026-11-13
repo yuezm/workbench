@@ -61,6 +61,7 @@ export function RuntimeDialog({
   const [executorsError, setExecutorsError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
+  const [commandError, setCommandError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   // 执行器清单来自宿主视图 `runtimes.executors`（注册表顺序）；表单不写死任何执行器名。
@@ -106,11 +107,20 @@ export function RuntimeDialog({
     ev.preventDefault()
     setError(null)
     setNameError(null)
+    setCommandError(null)
 
     // 必填校验放在前端：空名不再交给内核 reject
     if (name.trim() === '') {
       setNameError('名称必填')
       focusControl(ev.currentTarget, '运行时名称')
+      return
+    }
+
+    // `command` 执行器没有 manifest 默认命令：空命令的探测必失败（命令必填），
+    // 先在这里说清，别让用户去读一句「探测失败：命令必填：…」
+    if (command.trim() === '') {
+      setCommandError('命令必填：填命令名或绝对路径（如 pnpm）')
+      focusControl(ev.currentTarget, '运行时命令')
       return
     }
 
@@ -183,12 +193,20 @@ export function RuntimeDialog({
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="命令">
+            <Field
+              label="命令"
+              required
+              hint="命令名或绝对路径；脚本阶段用的就是这一条（阶段上不再单独填命令）；保存前会探测这条连接能否起来"
+              error={commandError}
+            >
               <Input
                 aria-label="运行时命令"
                 className="font-mono"
                 value={command}
-                onChange={(e) => setCommand(e.target.value)}
+                onChange={(e) => {
+                  setCommand(e.target.value)
+                  setCommandError(null)
+                }}
               />
             </Field>
             <Field label="profile">

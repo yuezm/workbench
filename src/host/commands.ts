@@ -108,7 +108,13 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
 
   /** 按 manifest 默认值补全运行时草稿（创建前探测用；不落库）。 */
   const draftRuntime = (
-    input: { executorKey?: string; name: string; command?: string; profile?: string },
+    input: {
+      executorKey?: string
+      name: string
+      command?: string
+      profile?: string
+      argsTemplate?: string
+    },
     defaults: ExecutorDefaults,
   ): Runtime => ({
     id: 'draft',
@@ -116,7 +122,9 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
     executorKey: input.executorKey ?? defaults.executorKey,
     command: input.command?.trim() || defaults.command,
     profile: input.profile?.trim() || defaults.profile,
-    argsTemplate: '',
+    // 参数模板也要进草稿：`command` 的 probe 要验它，且创建时原样落库——
+    // 早先这里写死空串，等于「新建时填的参数模板被静默丢掉」，只有编辑才存得进去
+    argsTemplate: input.argsTemplate?.trim() ?? '',
     enabled: true,
     createdAt: '',
     lastProbe: null,

@@ -133,6 +133,29 @@ describe('RuntimeDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
+  it('新建：命令为空就地报必填并聚焦，不调父级（命令执行器没有默认可解析的命令）', async () => {
+    setup()
+    const onSubmit = vi.fn()
+    const user = userEvent.setup()
+    render(<RuntimeDialog initial={{ name: 'pnpm' }} onSubmit={onSubmit} onCancel={vi.fn()} />)
+
+    // 首次进入按 registry 首项预填了 dsh：清空后就是「命令执行器」的默认形态
+    await waitFor(() => expect(screen.getByLabelText('运行时命令')).toHaveValue('dsh'))
+    await user.clear(screen.getByLabelText('运行时命令'))
+    await user.click(screen.getByRole('button', { name: '添加' }))
+
+    expect(await screen.findByText('命令必填：填命令名或绝对路径（如 pnpm）')).toBeInTheDocument()
+    expect(screen.getByLabelText('运行时命令')).toHaveFocus()
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    // 填上就撤掉红字，再交出去
+    await user.type(screen.getByLabelText('运行时命令'), 'pnpm')
+    expect(screen.queryByText(/命令必填/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '添加' }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ name: 'pnpm', command: 'pnpm' })
+  })
+
   it('新建：名称手填后 trim 提交，并清掉之前的必填错误', async () => {
     setup()
     const onSubmit = vi.fn().mockResolvedValue(undefined)

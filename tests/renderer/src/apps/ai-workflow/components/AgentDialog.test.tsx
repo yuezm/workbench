@@ -950,6 +950,7 @@ describe('AgentDialog', () => {
 
   it('模型目录未返回即卸载：不写状态也不报错', async () => {
     setup()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const { resolve } = holdModelsQuery()
     const { unmount } = render(
       <AgentDialog
@@ -962,6 +963,9 @@ describe('AgentDialog', () => {
     unmount()
     resolve([makeModel()])
     await new Promise((r) => setTimeout(r, 0))
+    // 迟到的模型目录被丢弃：不写状态，也不告警（React 的越界 setState 会走 console.error）
+    expect(errors).not.toHaveBeenCalled()
+    errors.mockRestore()
   })
 
   it('环境变量：每行 KEY=VALUE 解析进 env，等号只在第一个位置切开', async () => {

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { COMMAND_NAMES, type Command } from '../../src/protocol/commands'
 import { EXECUTOR_PORT_VERSION } from '../../src/protocol/executor'

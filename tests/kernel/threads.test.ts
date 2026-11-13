@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import type { RunRow, Task } from '../../src/protocol/entities'
 import { THREAD_LIMITS, type ThreadEventRef, type ThreadRow } from '../../src/protocol/thread'

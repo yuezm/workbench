@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
 import { fakeHmacHex, fakeNet, fakeSignatureHeader } from './fake-net'
 import { sdkWithNet, sourceHarness } from './harness'

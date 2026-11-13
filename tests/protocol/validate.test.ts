@@ -1,5 +1,7 @@
+// @vitest-environment node
+import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import type { Command } from '../../src/protocol/commands'
+import { COMMAND_NAMES, type Command } from '../../src/protocol/commands'
 import type {
   AgentInput,
   RuntimeInput,
@@ -1504,5 +1506,123 @@ describe('protocol/validate 派单形状（M29）', () => {
     )
 
     expect(result.ok).toBe(true)
+  })
+})
+
+/**
+ * 负向性质：这一组是「故意给错东西」的随机化版本。
+ *
+ * 逐条手写 `expect(...).toBe('文案')` 能钉住已知的坏输入，但钉不住「我没想到的坏输入」。
+ * 这里用 fast-check 生成**任意值**，断言的是校验层的三条不变量：
+ * 1. 永远不抛错，且结论二元完备（要么合法命令，要么一句能被界面直接展示的原因）；
+ * 2. 合法输入二次校验逐字相同（校验封闭：不补默认值、不裁剪）；
+ * 3. 必填键 / 类型 / 形状被破坏时一律拒收，且文案点名到具体键——界面不会弹出一句
+ *    「校验未通过」这种查不出原因的废话。
+ *
+ * 这是 e2e 层「空表单提交」负向用例的等价物：宿主收到 renderer 传来的不可信命令时，
+ * 唯一的闸门就是这里。
+ */
+describe('protocol/validate 负向性质（fast-check 随机生成非法输入）', () => {
+  /** 每条合法命令的顶层 id 键（`commandId` 之外）：必填或可选，但都必须是字符串 id。 */
+  const idKeysOf = (command: Command): string[] =>
+    Object.keys(command).filter((key) => key !== 'commandId' && /Id$/.test(key))
+
+  it('任意值都不抛错：结论二元完备，失败一定给得出原因', () => {
+    fc.assert(
+      fc.property(fc.anything(), (input) => {
+        const result = validateCommand(input)
+        if (result.ok) {
+          expect(typeof result.command.commandId).toBe('string')
+          expect(COMMAND_NAMES as readonly string[]).toContain(result.command.type)
+        } else {
+          expect(typeof result.message).toBe('string')
+          expect(result.message.trim()).not.toBe('')
+        }
+      }),
+      { numRuns: 300 },
+    )
+  })
+
+  it('合法命令二次校验逐字相同（封闭：不补默认值、不裁剪）', () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...validCommands), (command) => {
+        const once = validateCommand(command)
+        expect(once).toEqual({ ok: true, command })
+        expect(validateCommand((once as { command: Command }).command)).toEqual(once)
+      }),
+      { numRuns: validCommands.length },
+    )
+  })
+
+  it('commandId 缺失 / 空串 / 空白 / 超长 / 非字符串：一律拒收且点名 commandId', () => {
+    const poison = fc.constantFrom<unknown>(
+      undefined,
+      null,
+      '',
+      '   ',
+      42,
+      {},
+      [],
+      true,
+      'x'.repeat(COMMAND_LIMITS.commandId + 1),
+    )
+    fc.assert(
+      fc.property(fc.constantFrom(...validCommands), poison, (command, value) => {
+        const rest: Record<string, unknown> = { ...command }
+        delete rest.commandId
+        const message = rejectedMessage(value === undefined ? rest : { ...rest, commandId: value })
+        expect(message).toContain('commandId')
+      }),
+      { numRuns: 200 },
+    )
+  })
+
+  it('未知命令名（含空串与怪字符）一律拒收，文案回显原值', () => {
+    fc.assert(
+      fc.property(
+        fc.string().filter((name) => !(COMMAND_NAMES as readonly string[]).includes(name)),
+        (name) => {
+          const message = rejectedMessage({ commandId: 'c1', type: name })
+          expect(message.startsWith('未知命令')).toBe(true)
+          expect(message).toContain(name)
+        },
+      ),
+      { numRuns: 200 },
+    )
+  })
+
+  it('顶层 id 键换成非字符串 / 空串：必拒（必填与可选键同口径）', () => {
+    const poison = fc.constantFrom<unknown>(42, '', [], true, {})
+    fc.assert(
+      fc.property(fc.constantFrom(...validCommands), poison, (command, value) => {
+        const keys = idKeysOf(command)
+        // 没有顶层 id 键的命令（如 plugins.replace）不在这条性质的范围里
+        if (keys.length === 0) return
+        for (const key of keys) {
+          const message = rejectedMessage({ ...command, [key]: value })
+          expect(message).toContain(key)
+        }
+      }),
+      { numRuns: 200 },
+    )
+  })
+
+  it('input / patch / rules / settings 被换成原始值：必拒且说清要的是什么形状', () => {
+    const cases = validCommands.flatMap((command) => {
+      const keys = (['input', 'patch', 'rules', 'settings'] as const).filter(
+        (key) => key in command,
+      )
+      return keys.map((key) => ({ command, key }))
+    })
+    expect(cases.length).toBeGreaterThan(0)
+
+    const poison = fc.constantFrom<unknown>(42, 'x', true, null)
+    fc.assert(
+      fc.property(fc.constantFrom(...cases), poison, ({ command, key }, value) => {
+        const message = rejectedMessage({ ...command, [key]: value })
+        expect(message).toMatch(/必须是(对象|数组)/)
+      }),
+      { numRuns: 200 },
+    )
   })
 })

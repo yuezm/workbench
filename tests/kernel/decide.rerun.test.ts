@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `task.rerun`（失败重跑）：执行器崩了 / 关机 / CLI 坏了导致 run 失败后，原地再排一轮。
  *

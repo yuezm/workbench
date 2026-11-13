@@ -1,3 +1,5 @@
+// @vitest-environment node
+import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import type { Card, RunRow, Task, WorkflowStage } from '../../src/protocol/entities'
 import { THREAD_LIMITS, type ThreadNote, type ThreadRow } from '../../src/protocol/thread'
@@ -9,6 +11,8 @@ import {
   indexBlock,
   reviewBlock,
   threadContextText,
+  type Item,
+  type Section,
 } from '../../src/kernel/thread-context'
 import type { ReviewFinding, ReviewReport } from '../../src/protocol/review'
 
@@ -366,6 +370,10 @@ describe('kernel/thread-context', () => {
     expect(text).toContain('- [issues.closed] issue-empty')
     // M28：唯一一条 stage run 就是「最近一轮」，正文只在产出段出现，不再进「最近运行」
     expect(precedingOf(text)).toContain('失败原因')
+    // 兜底文案不得把缺失字段打成字面量 undefined
+    expect(text).not.toContain('undefined')
+    // 兜底铺满也不越简报预算
+    expect(briefOf(text).length).toBeLessThanOrEqual(THREAD_LIMITS.contextChars)
   })
 
   it('运行缺失 endedAt / 卡片同刻：按 createdAt 与 id 稳定排序', () => {
@@ -387,6 +395,42 @@ describe('kernel/thread-context', () => {
     expect(text).toContain('## 最近运行（最近 3 条）')
     const cardPart = text.slice(text.indexOf('## 未决卡片'), text.indexOf('## 笔记'))
     expect(cardPart.indexOf('卡 A')).toBeLessThan(cardPart.indexOf('卡 B'))
+
+    // 同一批投影换一个插入顺序：渲染结果逐字相同（排序不依赖 Map 迭代顺序）
+    const swapped = view({
+      runs: new Map([
+        [runSameEnd.id, runSameEnd],
+        [runNoEnd.id, runNoEnd],
+      ]),
+      cards: new Map([
+        [cardA.id, cardA],
+        [cardB.id, cardB],
+      ]),
+    })
+    expect(threadContextText(swapped, swapped.threads.get('th-1') as ThreadRow)).toBe(text)
+    // 纯函数：同一视图连算两次逐字相同（没有跨调用的隐藏状态）
+    expect(threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)).toBe(text)
+  })
+
+  it('性质：运行段的渲染顺序不依赖投影 Map 的插入顺序（随机打乱仍逐字相同）', () => {
+    const rows = [
+      run({ id: 'run-a', endedAt: '2026-11-02T00:00:00.000Z', output: '甲' }),
+      run({ id: 'run-b', endedAt: '2026-11-03T00:00:00.000Z', output: '乙' }),
+      run({ id: 'run-c', endedAt: '2026-11-04T00:00:00.000Z', output: '丙' }),
+    ]
+    fc.assert(
+      fc.property(fc.shuffledSubarray(rows, { minLength: 3, maxLength: 3 }), (ordered) => {
+        const seeded = view({ runs: new Map(ordered.map((row) => [row.id, row])) })
+        const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
+        const reversed = view({
+          runs: new Map([...ordered].reverse().map((row) => [row.id, row])),
+        })
+        expect(threadContextText(reversed, reversed.threads.get('th-1') as ThreadRow)).toBe(text)
+        // 顺序按时间升序，与插入顺序无关：甲（最早）必在乙之前
+        expect(text.indexOf('甲')).toBeGreaterThanOrEqual(0)
+        expect(text.indexOf('甲')).toBeLessThan(text.indexOf('乙'))
+      }),
+    )
   })
 
   it('超过 6000 码点：按时间倒序截断并标注（保新弃旧）', () => {
@@ -410,74 +454,7 @@ describe('kernel/thread-context', () => {
     expect(text).not.toContain('## 任务')
   })
 
-  it('阶段缺失 / 未绑定入口 / 无链接事件 / endedAt 缺失的兜底文案', () => {
-    const noStage = task({ id: 'task-a', title: '无阶段任务', currentStageId: null })
-    const missingStage = task({ id: 'task-b', title: '坏阶段任务', currentStageId: 'st-gone' })
-    const unbound = thread({
-      externalRef: null,
-      taskIds: ['task-a', 'task-b'],
-      rootTaskIds: ['task-a', 'task-b'],
-      events: [
-        {
-          eventId: 'event-empty',
-          type: 'issues.closed',
-          subject: 'issue-empty',
-          summary: '',
-          link: null,
-          detailRef: null,
-          at: CREATED,
-        },
-      ],
-    })
-    const fallbackRun = run({
-      id: 'run-empty',
-      endedAt: null,
-      createdAt: '2026-11-03T00:00:00.000Z',
-      output: '',
-      error: '失败原因',
-      status: 'failed',
-    })
-    const text = threadContextText(
-      view({
-        tasks: new Map([
-          [noStage.id, noStage],
-          [missingStage.id, missingStage],
-        ]),
-        runs: new Map([[fallbackRun.id, fallbackRun]]),
-        threads: new Map([['th-1', unbound]]),
-      }),
-      unbound,
-    )
-    expect(text).toContain('入口：（未绑定）')
-    expect(text).toContain('- [active] 无阶段任务（无阶段）')
-    expect(text).toContain('- [active] 坏阶段任务（无阶段）')
-    expect(text).toContain('- [issues.closed] issue-empty')
-    // M28：唯一一条 stage run 就是「最近一轮」，正文只在产出段出现，不再进「最近运行」
-    expect(precedingOf(text)).toContain('失败原因')
-  })
-
-  it('运行缺失 endedAt / 卡片同刻：按 createdAt 与 id 稳定排序', () => {
-    const runNoEnd = run({ id: 'run-z', endedAt: null, createdAt: '2026-11-02T00:00:00.000Z' })
-    const runSameEnd = run({ id: 'run-a', endedAt: '2026-11-02T00:00:00.000Z' })
-    const cardB = card({ id: 'card-b', runId: 'run-a', title: '卡 B' })
-    const cardA = card({ id: 'card-a', runId: 'run-a', title: '卡 A' })
-    const seeded = view({
-      runs: new Map([
-        [runNoEnd.id, runNoEnd],
-        [runSameEnd.id, runSameEnd],
-      ]),
-      cards: new Map([
-        [cardB.id, cardB],
-        [cardA.id, cardA],
-      ]),
-    })
-    const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
-    expect(text).toContain('## 最近运行（最近 3 条）')
-    const cardPart = text.slice(text.indexOf('## 未决卡片'), text.indexOf('## 笔记'))
-    expect(cardPart.indexOf('卡 A')).toBeLessThan(cardPart.indexOf('卡 B'))
-  })
-
-  it('超过 6000 码点：按时间倒序截断并标注（保新弃旧）', () => {
+  it('超过 6000 码点：100 个任务时按时间倒序截断（最旧的先丢，最新保留）', () => {
     const tasks = new Map<string, Task>()
     const taskIds: string[] = []
     for (let index = 0; index < 100; index += 1) {
@@ -1188,5 +1165,194 @@ describe('最近一轮产出的交付物行（M28）', () => {
     const seededEmpty = view({ runs: new Map([[empty.id, empty]]) })
     const textEmpty = threadContextText(seededEmpty, seededEmpty.threads.get('th-1') as ThreadRow)
     expect(precedingOf(textEmpty)).not.toContain('交付物：')
+  })
+})
+
+// —— 性质测试（fast-check）：预算截断的不变量 ————————————————————————————————————
+//
+// `headTailSplit` 与 `dropToFit` 是「超预算怎么办」的唯一判定处，边界全在 ±1 与排序上。
+// 随机生成长度与预算、段与条目时刻，断言：
+// ① 头尾恰好用满预算、按码点/元素不重不漏，`dropped` 与预算差严格对应；
+// ② 丢弃从低重要性段开始（靠前段先空），段内按 (时刻, 正文) 升序丢弃，即保新弃旧；
+// ③ 删到不超预算就停，删空也不再动，同输入结果确定。
+// 固定种子，反例可复现（`FC_SEED` 换一批）。
+
+const PROPERTY_SEED = Number(process.env.FC_SEED ?? 20261113)
+const PROPERTY_RUNS = 100
+
+const headTailArb: Arbitrary<{ chars: string[]; max: number }> = fc
+  .tuple(fc.array(fc.string({ maxLength: 6 }), { maxLength: 30 }), fc.integer({ min: 1, max: 30 }))
+  .map(([chars, max]) => ({ chars, max }))
+
+describe('headTailSplit 的性质（fast-check 随机生成）', () => {
+  it('头是前缀、尾是后缀，头尾恰好用满预算且不重叠', () => {
+    fc.assert(
+      fc.property(headTailArb, ({ chars, max }) => {
+        // 契约范围：只在超预算时切分（未超预算的调用方根本不会进来）
+        fc.pre(chars.length >= max)
+        const { head, tail } = headTailSplit(chars, max)
+        const headLen = Math.ceil(max * 0.6)
+        const tailLen = max - headLen
+        expect(head).toBe(chars.slice(0, headLen).join(''))
+        expect(tail).toBe(tailLen === 0 ? '' : chars.slice(chars.length - tailLen).join(''))
+        // 头尾元素数加起来正好是预算，中间那截才是被丢掉的
+        expect(headLen + tailLen).toBe(max)
+        // 头预算不小于尾预算（保头的口径）
+        expect(headLen).toBeGreaterThanOrEqual(tailLen)
+        if (tailLen > 0) expect(chars.slice(-tailLen).join('')).toBe(tail)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('未被截断时头就是全部：没有丢内容，也没有凭空补内容', () => {
+    fc.assert(
+      fc.property(headTailArb, ({ chars, max }) => {
+        fc.pre(chars.length <= Math.ceil(max * 0.6))
+        const { head } = headTailSplit(chars, max)
+        expect(head).toBe(chars.join(''))
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('dropped 恒等于长度与预算之差（±1 会立刻露馅）', () => {
+    fc.assert(
+      fc.property(headTailArb, ({ chars, max }) => {
+        const { dropped } = headTailSplit(chars, max)
+        expect(dropped).toBe(chars.length - max)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('预算为 1 时没有尾部预算：tail 为空串（不重复头部）', () => {
+    fc.assert(
+      fc.property(fc.array(fc.string({ maxLength: 6 }), { maxLength: 20 }), (chars) => {
+        expect(headTailSplit(chars, 1).tail).toBe('')
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+})
+
+/** 段内条目：`text` 做成唯一键，保证 (时刻, 正文) 是全序，剩余集合可逐项核对。 */
+const sectionsArb: Arbitrary<Section[]> = fc
+  .array(
+    fc.array(
+      fc.record({
+        at: fc.oneof(
+          fc.constant<string | null>(null),
+          fc.integer({ min: 1, max: 5 }).map((day) => `2026-11-0${day}T00:00:00.000Z`),
+        ),
+      }),
+      { maxLength: 4 },
+    ),
+    { minLength: 2, maxLength: 4 },
+  )
+  .map((sections) =>
+    sections.map((items, sectionIndex) => ({
+      title: `S${sectionIndex}`,
+      items: items.map((item, itemIndex): Item => ({
+        at: item.at,
+        text: `t${sectionIndex}-${itemIndex}`,
+      })),
+    })),
+  )
+
+const cloneSections = (sections: readonly Section[]): Section[] =>
+  sections.map((section) => ({
+    title: section.title,
+    items: section.items.map((item) => ({ ...item })),
+  }))
+
+/** 与实现同口径的排序键（用来独立算「该保留哪些」）。 */
+const byTimeKey = (a: Item, b: Item): number =>
+  (a.at ?? '').localeCompare(b.at ?? '') || a.text.localeCompare(b.text)
+
+const countItems = (sections: readonly Section[]): number =>
+  sections.reduce((total, section) => total + section.items.length, 0)
+
+describe('dropToFit 的性质（fast-check 随机生成）', () => {
+  it('删到不超上限就停：返回值等于实际删除数，剩余数 ≤ 上限或全空', () => {
+    fc.assert(
+      fc.property(sectionsArb, fc.integer({ min: 0, max: 16 }), (sections, limit) => {
+        const total = countItems(sections)
+        const working = cloneSections(sections)
+        const dropped = dropToFit(working, (count) => total - count > limit)
+        expect(dropped).toBe(total - countItems(working))
+        const remaining = countItems(working)
+        expect(remaining).toBeLessThanOrEqual(limit)
+        expect(dropped).toBeLessThanOrEqual(total)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('从低重要性段开始丢：某段被删过时，靠前的段必须已空', () => {
+    fc.assert(
+      fc.property(sectionsArb, fc.integer({ min: 0, max: 16 }), (sections, limit) => {
+        const total = countItems(sections)
+        const working = cloneSections(sections)
+        dropToFit(working, (count) => total - count > limit)
+        sections.forEach((section, index) => {
+          const trimmed = (working[index] as Section).items.length < section.items.length
+          if (!trimmed) return
+          for (let front = 0; front < index; front += 1) {
+            expect((working[front] as Section).items.length).toBe(0)
+          }
+        })
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('段内保新弃旧：删掉的是按 (时刻, 正文) 升序排在最前的那批，留下的保持原序', () => {
+    fc.assert(
+      fc.property(sectionsArb, fc.integer({ min: 0, max: 16 }), (sections, limit) => {
+        const total = countItems(sections)
+        const working = cloneSections(sections)
+        dropToFit(working, (count) => total - count > limit)
+        sections.forEach((section, index) => {
+          const kept = (working[index] as Section).items.map((item) => item.text)
+          const before = section.items.map((item) => item.text)
+          const ordered = [...section.items].sort(byTimeKey).map((item) => item.text)
+          const removed = before.filter((text) => !kept.includes(text))
+          expect([...removed].sort()).toEqual(ordered.slice(0, removed.length).sort())
+          // 留下的是原序的子序列（splice 不会被排序打乱）
+          expect(kept).toEqual(before.filter((text) => kept.includes(text)))
+        })
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('同输入结果确定；没有条目时直接返回 0（不会死循环）', () => {
+    fc.assert(
+      fc.property(sectionsArb, fc.integer({ min: 0, max: 16 }), (sections, limit) => {
+        const total = countItems(sections)
+        const first = cloneSections(sections)
+        const second = cloneSections(sections)
+        const once = dropToFit(first, (count) => total - count > limit)
+        const twice = dropToFit(second, (count) => total - count > limit)
+        expect(twice).toBe(once)
+        expect(second.map((section) => section.items.map((item) => item.text))).toEqual(
+          first.map((section) => section.items.map((item) => item.text)),
+        )
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('全部删空仍超上限：不越界、不抛错，返回总条目数', () => {
+    fc.assert(
+      fc.property(sectionsArb, (sections) => {
+        const total = countItems(sections)
+        const working = cloneSections(sections)
+        expect(dropToFit(working, () => true)).toBe(total)
+        expect(countItems(working)).toBe(0)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
   })
 })

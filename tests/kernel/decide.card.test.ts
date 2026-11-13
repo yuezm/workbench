@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * M4-T3 卡片闭环黄金用例：回执 → 卡片事实（建卡 / 同 key 更新 / 信息卡 / 关闭）、
  * 回答校验与续接（全部阻塞卡答完才 `run.queued`）、`card.resolve`、`later` 复查、

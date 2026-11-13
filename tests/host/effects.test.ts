@@ -273,7 +273,7 @@ describe('createEffects：结局通知（M12）', () => {
   })
 })
 
-describe('createEffects：结局通知（M12）', () => {
+describe('createEffects：结局通知的装配与异常隔离（M12）', () => {
   it('announce 收到整批事实（完成 / 失败由装配根翻译成系统通知）', () => {
     const announce = vi.fn()
     const effects = createEffects({

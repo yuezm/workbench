@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `nextWakeAt` 的黄金用例（T7）：租约 / 超时 / 退避三类到期的最早未来时刻。
  * 夹具只装 runs 切片；内核不读时钟，`now` 由测试注入。

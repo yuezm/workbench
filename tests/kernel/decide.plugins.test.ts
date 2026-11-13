@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { decide } from '../../src/kernel/decide'
 import { mergePluginSetting, validatePluginSettings } from '../../src/kernel/plugins'

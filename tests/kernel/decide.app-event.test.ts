@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `app.event`（M5）：app 插件事件只入账、不派活。
  *

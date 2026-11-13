@@ -1,7 +1,18 @@
+// @vitest-environment node
+import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import type { Task, WorkflowStage, WorkflowWithStages } from '../../../src/protocol/entities'
+import type {
+  JudgeConfig,
+  StageExitGuard,
+  StageExits,
+  StagePrimary,
+  Task,
+  WorkflowStage,
+  WorkflowWithStages,
+} from '../../../src/protocol/entities'
 import { STAGE_EXIT_ACTIONS } from '../../../src/protocol/entities'
 import {
+  completeExits,
   completeTask,
   enterStage,
   entryEffects,
@@ -734,5 +745,229 @@ describe('stage-machine legacyExits（M34：老 retry 归一成 await）', () =>
       passed: { do: 'goto', stageId: 's2' },
     })
     expect(legacyExits({ gate: null, onCompleteStageId: null })).toEqual({})
+  })
+})
+
+// —— 性质测试（fast-check）：阶段流转的不变量 ————————————————————————————————————
+//
+// 阶段图是随机的：阶段数、顺序、内置终态、缺省出口、判定护栏都随机生成，任务是「任意
+// 阶段 + 任意状态」。断言：
+// ① `completeExits` 幂等且形状封闭（非终态必有 done/errored，判定阶段才有 passed/failed）；
+// ② `applyExit` 只在目标真实存在且不是当前阶段时才动任务，预算按传入值落下；
+// ③ 脏投影（当前阶段不存在）、已完成的任任务、自指 goto 一律零流转；
+// ④ 判定预算只在 `verdict='fail'` 时累计，达到 maxFails 才放行；`RUN_FAILED` 不消耗预算。
+// 固定种子，反例可复现（`FC_SEED` 换一批）。
+
+const PROPERTY_SEED = Number(process.env.FC_SEED ?? 20261113)
+const PROPERTY_RUNS = 100
+const AT = '2026-01-01T00:00:00.000Z'
+
+const judgeArb: Arbitrary<JudgeConfig | null> = fc.oneof(
+  fc.constant<JudgeConfig | null>(null),
+  fc.record({
+    maxFails: fc.oneof(fc.constant<number | null>(null), fc.integer({ min: 1, max: 3 })),
+  }),
+)
+
+const actionArb: Arbitrary<StagePrimary> = fc.oneof(
+  fc
+    .constantFrom('s0', 's1', 's2', 's3', 'ghost')
+    .map((stageId): StagePrimary => ({ do: 'goto', stageId })),
+  fc.constant<StagePrimary>({ do: 'await' }),
+  fc.constant<StagePrimary>({ do: 'close' }),
+)
+
+const exitsArb: Arbitrary<StageExits> = fc
+  .array(
+    fc.tuple(fc.constantFrom<StageExitGuard>('done', 'errored', 'passed', 'failed'), actionArb),
+    { maxLength: 4 },
+  )
+  .map((rows) => Object.fromEntries(rows) as StageExits)
+
+const stageArbFor = (id: string): Arbitrary<WorkflowStage> =>
+  fc
+    .tuple(
+      fc.constantFrom<WorkflowStage['entryMode']>('none', 'agent', 'user'),
+      fc.constantFrom('ag-1', null),
+      judgeArb,
+      exitsArb,
+      fc.constantFrom<'done' | 'cancelled' | null>('done', 'cancelled', null),
+    )
+    .map(([entryMode, agentId, judge, exits, builtin]) =>
+      stage(id, { entryMode, agentId, judge, exits, ...(builtin === null ? {} : { builtin }) }),
+    )
+
+const stagesArb: Arbitrary<WorkflowStage[]> = fc
+  .tuple(stageArbFor('s0'), stageArbFor('s1'), stageArbFor('s2'), stageArbFor('s3'))
+  .chain((list) =>
+    fc.tuple(fc.integer({ min: 1, max: 4 }), fc.boolean()).map(([count, reversed]) => {
+      const picked = list.slice(0, count)
+      return reversed ? [...picked].reverse() : picked
+    }),
+  )
+
+const flowArb: Arbitrary<WorkflowWithStages> = stagesArb.map((stages) => ({
+  id: 'wf',
+  name: 'wf',
+  description: '',
+  createdAt: AT,
+  stages,
+}))
+
+const judgedFlow = (maxFails: number): WorkflowWithStages => ({
+  id: 'wf',
+  name: 'wf',
+  description: '',
+  createdAt: AT,
+  stages: [stage('s0', { judge: { maxFails } }), stage('s1')],
+})
+
+describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
+  it('completeExits 幂等且形状封闭：非终态必有 done/errored，判定阶段才有 passed/failed', () => {
+    fc.assert(
+      fc.property(flowArb, (flow) => {
+        const once = completeExits(flow.stages)
+        expect(completeExits(once)).toEqual(once)
+        once.forEach((row) => {
+          if (row.builtin === 'done' || row.builtin === 'cancelled') {
+            expect(row.exits).toEqual({})
+            return
+          }
+          expect(row.exits.done).toBeDefined()
+          expect(row.exits.errored).toBeDefined()
+          if (row.judge === null) {
+            expect(row.exits.passed).toBeUndefined()
+            expect(row.exits.failed).toBeUndefined()
+          } else {
+            expect(row.exits.passed).toBeDefined()
+            expect(row.exits.failed).toBeDefined()
+          }
+        })
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('applyExit(goto)：目标存在且不是当前阶段才换阶段，悬空目标与自指原地不动', () => {
+    fc.assert(
+      fc.property(
+        flowArb,
+        fc.constantFrom('s0', 's1', 's2', 's3', 'ghost'),
+        fc.integer({ min: 0, max: 3 }),
+        (flow, targetId, gateFails) => {
+          const before = { ...task('s2'), gateFails: 9 }
+          const target = flow.stages.find((row) => row.id === targetId)
+          const result = applyExit(before, { do: 'goto', stageId: targetId }, flow, { gateFails })
+          if (target === undefined || target.id === before.currentStageId) {
+            expect(result.effects).toEqual([])
+            expect(result.task.currentStageId).toBe('s2')
+            expect(result.task.status).toBe('active')
+          } else {
+            expect(result.task.currentStageId).toBe(target.id)
+            expect(result.task.status).toBe('active')
+            expect(result.effects).toEqual(entryEffects(target))
+          }
+          // 预算按传入值落下（清不清零由调用方决定，不是这里猜）
+          expect(result.task.gateFails).toBe(gateFails)
+        },
+      ),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('applyExit(close) 归档并清零预算；(await) 原地保留传入预算', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 3 }), (gateFails) => {
+        const flow = judgedFlow(1)
+        const before = { ...task('s0'), gateFails: 5 }
+        const closed = applyExit(before, { do: 'close' }, flow)
+        expect(closed.task.status).toBe('completed')
+        expect(closed.task.gateFails).toBe(0)
+        expect(closed.effects).toEqual([])
+        const awaited = applyExit(before, { do: 'await' }, flow, { gateFails })
+        expect(awaited.task.status).toBe('active')
+        expect(awaited.task.currentStageId).toBe('s0')
+        expect(awaited.task.gateFails).toBe(gateFails)
+        expect(awaited.effects).toEqual([])
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('脏投影与已完成任务：moveTask 零流转并返回同一对象', () => {
+    fc.assert(
+      fc.property(
+        flowArb,
+        fc.constantFrom<Task['status']>('active', 'completed'),
+        (flow, status) => {
+          const row: Task =
+            status === 'completed'
+              ? { ...task(flow.stages[0]?.id ?? 'ghost'), status, gateFails: 2 }
+              : { ...task('ghost'), status }
+          const result = moveTask(row, { type: 'RUN_SUCCEEDED', runId: 'r1' }, flow)
+          expect(result.task).toBe(row)
+          expect(result.effects).toEqual([])
+        },
+      ),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('moveTaskToStage：目标缺失 / 已在目标 / 已完成时原样返回，否则落位并清零预算', () => {
+    fc.assert(
+      fc.property(flowArb, fc.constantFrom('s0', 's1', 's2', 's3', 'ghost'), (flow, targetId) => {
+        const before = { ...task('s0'), gateFails: 3 }
+        const target = flow.stages.find((row) => row.id === targetId)
+        const result = moveTaskToStage(before, targetId, flow)
+        if (target === undefined || target.id === before.currentStageId) {
+          expect(result).toEqual({ task: before, effects: [] })
+          return
+        }
+        expect(result.task.currentStageId).toBe(target.id)
+        expect(result.task.gateFails).toBe(0)
+        expect(result.effects).toEqual(entryEffects(target))
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('判定失败累计到 maxFails 才放行：放行时清零并标 gateExhausted', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 3 }), (maxFails) => {
+        const flow = judgedFlow(maxFails)
+        let current: Task = task('s0')
+        for (let round = 1; round <= maxFails; round += 1) {
+          const result = moveTask(
+            current,
+            { type: 'RUN_SUCCEEDED', runId: 'r1', verdict: 'fail' },
+            flow,
+          )
+          current = result.task
+          const exhausted = round === maxFails
+          expect(result.gateExhausted).toBe(exhausted ? true : undefined)
+          expect(current.gateFails).toBe(exhausted ? 0 : round)
+          // 预算没用完时 failed 出口缺省 await：停在原阶段等人
+          expect(current.currentStageId).toBe(exhausted ? 's1' : 's0')
+        }
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('执行出错不消耗判定预算：RUN_FAILED 保 gateFails 并停在原阶段', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 3 }), (fails) => {
+        const flow = judgedFlow(3)
+        const result = moveTask(
+          { ...task('s0'), gateFails: fails },
+          { type: 'RUN_FAILED', runId: 'r1' },
+          flow,
+        )
+        expect(result.task.currentStageId).toBe('s0')
+        expect(result.task.gateFails).toBe(fails)
+        expect(result.gateExhausted).toBeUndefined()
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
   })
 })

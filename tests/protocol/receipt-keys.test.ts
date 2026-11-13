@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * 回执键单一真相源的护栏（M24）。
  *

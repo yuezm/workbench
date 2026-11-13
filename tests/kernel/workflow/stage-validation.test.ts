@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import type { StageExitInput, StageInput } from '../../../src/protocol/entities'
 import { STAGE_EXIT_ACTIONS } from '../../../src/protocol/entities'

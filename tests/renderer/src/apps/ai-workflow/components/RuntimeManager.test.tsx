@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Command } from '../../../../../../src/protocol/commands'
 import type {
   DetectedRuntime,
@@ -700,6 +700,7 @@ describe('RuntimeManager', () => {
 
   it('加载未完成即卸载不报错', async () => {
     setup()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const slow = deferred<unknown>()
     const original = kernel.store.query
     kernel.store.query = <T extends ViewId>(
@@ -714,6 +715,9 @@ describe('RuntimeManager', () => {
     await act(async () => {
       slow.resolve(EXECUTORS)
     })
+    // 卸载后迟到的执行器清单被丢弃：不写状态，也不告警
+    expect(errors).not.toHaveBeenCalled()
+    errors.mockRestore()
   })
 
   /**

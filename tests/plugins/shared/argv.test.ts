@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { expandArgs, parseArgsTemplate, type ArgvVars } from '../../../src/plugins/shared/argv'
 

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import type { Card, Conversation, RunEvent, RuntimeStatus, Task } from '../../src/protocol/entities'
 import {

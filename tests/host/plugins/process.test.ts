@@ -530,10 +530,13 @@ describe('停止与释放', () => {
     const { spawn, children } = spawnQueue()
     const process = makeProcess({ spawn, helloTimeoutMs: 1_000 })
     const started = process.start()
-    // 先挂 reject 断言再停止，避免未处理拒绝
-    const rejection = expect(started).rejects.toThrow(/plugin_stopped/)
+    // 先挂上拒绝处理再停止，避免未处理拒绝；断言等到 stop 之后再取结论
+    const outcome = started.then(
+      () => 'resolved',
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    )
     await process.stop()
-    await rejection
+    expect(await outcome).toMatch(/plugin_stopped/)
     expect(process.status()).toBe('stopped')
     expect(children).toHaveLength(1)
   })

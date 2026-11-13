@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { ACCEPTANCE_LIMITS } from '../../../src/protocol/entities'
 import { normalizeAcceptance, sameAcceptance } from '../../../src/kernel/workflow/acceptance'

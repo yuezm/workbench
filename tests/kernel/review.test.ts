@@ -1,7 +1,14 @@
+// @vitest-environment node
+import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import type { GateCheck, RunRow, Task, WorkflowStage } from '../../src/protocol/entities'
 import type { Receipt } from '../../src/protocol/inputs'
-import { REVIEW_LIMITS, type ReviewFinding, type ReviewReport } from '../../src/protocol/review'
+import {
+  REVIEW_LIMITS,
+  type FindingAddress,
+  type ReviewFinding,
+  type ReviewReport,
+} from '../../src/protocol/review'
 import { exportReview } from '../../src/kernel/commands/review'
 import { findReportForExport, reviewDocFileName, reviewMarkdown } from '../../src/kernel/review'
 import type { ThreadRow } from '../../src/protocol/thread'
@@ -909,5 +916,283 @@ describe('kernel/review 提升为文档（M14 S5）', () => {
     expect(text).toContain('### R1 [high] — addressed')
     expect(text).toContain('- 处置说明：改了')
     expect(text).toContain('- 处置轮次：run-2')
+  })
+})
+
+// —— 性质测试（fast-check）：逐条处置的不变量 ————————————————————————————————————
+//
+// 示例用例挑的是「一条 fixed + 一条 rejected」这类人工组合；这里随机生成任意状态组合的
+// 清单与任意处置批，断言 `applyAddresses` 的五类不变量：
+// ① 只动原本 open 的条目（已 addressed / rejected / deferred 的逐字段不变）；
+// ② 被处置的 id 必在原 open 集合内、无重复、顺序与清单顺序一致；
+// ③ 同批重放幂等；④ 去重后与处置批顺序无关；
+// ⑤ 未知 id / `fixed` 缺有效 checkRef / 缺理由：零处置、报告引用不变。
+// 固定种子，同一份输入永远给出同一条反例（`FC_SEED` 换一批）。
+
+const PROPERTY_SEED = Number(process.env.FC_SEED ?? 20261113)
+const PROPERTY_RUNS = 100
+const ADDRESSING_RUN = 'run-fix-2'
+const PASS_CMD = 'cmd-pass'
+const PROPERTY_CHECKS: readonly GateCheck[] = [
+  { cmd: PASS_CMD, exitCode: 0 },
+  { cmd: 'cmd-fail', exitCode: 1 },
+]
+
+const severityArb: Arbitrary<ReviewFinding['severity']> = fc.constantFrom(
+  'blocker',
+  'high',
+  'medium',
+  'low',
+)
+const statusArb: Arbitrary<ReviewFinding['status']> = fc.constantFrom(
+  'open',
+  'addressed',
+  'rejected',
+  'deferred',
+)
+
+const propertyFindingArb: Arbitrary<ReviewFinding> = fc
+  .tuple(fc.integer({ min: 1, max: 8 }), severityArb, statusArb)
+  .map(([key, severity, status]): ReviewFinding => ({
+    id: `report-prop#R${key}`,
+    key: `R${key}`,
+    severity,
+    location: null,
+    claim: `断言 ${key}`,
+    evidence: null,
+    requiredAction: '复跑门禁',
+    status,
+    note: status === 'open' ? null : '已处置',
+    addressedByRunId: status === 'open' ? null : 'run-review',
+    updatedAt: CREATED,
+  }))
+
+const findingsArb: Arbitrary<ReviewFinding[]> = fc.uniqueArray(propertyFindingArb, {
+  selector: (row) => row.id,
+  minLength: 1,
+  maxLength: 6,
+})
+
+const dispositionArb: Arbitrary<FindingAddress['disposition']> = fc.constantFrom(
+  'fixed',
+  'rejected',
+  'deferred',
+)
+const addressNoteArb: Arbitrary<string | undefined> = fc.oneof(
+  fc.constant(undefined),
+  fc.constant(''),
+  fc.constant('   '),
+  fc.string({ maxLength: 20 }),
+)
+const addressRefArb: Arbitrary<string | undefined> = fc.constantFrom(
+  undefined,
+  '',
+  PASS_CMD,
+  'cmd-fail',
+  'cmd-missing',
+)
+
+interface AddressCase {
+  findings: ReviewFinding[]
+  addresses: FindingAddress[]
+}
+
+/** 处置批：`index === findings.length` 时指向不存在的 finding（未知 id）。 */
+const addressCaseArb: Arbitrary<AddressCase> = findingsArb.chain((findings) =>
+  fc
+    .array(
+      fc.tuple(
+        fc.integer({ min: 0, max: findings.length }),
+        dispositionArb,
+        addressNoteArb,
+        addressRefArb,
+      ),
+      { maxLength: 8 },
+    )
+    .map((rows) => ({
+      findings,
+      addresses: rows.map(([index, disposition, note, checkRef]): FindingAddress => {
+        const target = findings[index]
+        return {
+          findingId: target === undefined ? 'report-prop#ghost' : target.id,
+          disposition,
+          ...(note === undefined ? {} : { note }),
+          ...(checkRef === undefined ? {} : { checkRef }),
+        }
+      }),
+    })),
+)
+
+/** 实现口径：同一 findingId 只认第一条。 */
+const dedupeAddresses = (addresses: readonly FindingAddress[]): FindingAddress[] => {
+  const seen = new Set<string>()
+  return addresses.filter((address) => {
+    if (seen.has(address.findingId)) return false
+    seen.add(address.findingId)
+    return true
+  })
+}
+
+/** 全部非法的处置批：未知 id 不用管，`note` / `checkRef` 一律缺省。 */
+const invalidAddressCaseArb: Arbitrary<AddressCase> = findingsArb.chain((findings) =>
+  fc
+    .array(fc.tuple(fc.integer({ min: 0, max: findings.length }), dispositionArb), {
+      maxLength: 6,
+    })
+    .map((rows) => ({
+      findings,
+      addresses: rows.map(([index, disposition]): FindingAddress => {
+        const target = findings[index]
+        return {
+          findingId: target === undefined ? 'report-prop#ghost' : target.id,
+          disposition,
+        }
+      }),
+    })),
+)
+
+const applyTo = (findings: ReviewFinding[], addresses: FindingAddress[]): ReviewReport =>
+  applyAddresses(report({ findings }), addresses, PROPERTY_CHECKS, ADDRESSING_RUN, NOW).report
+
+describe('kernel/review 逐条处置的性质（fast-check 随机生成）', () => {
+  it('只动原本 open 的条目：已处置的逐字段不变', () => {
+    fc.assert(
+      fc.property(addressCaseArb, ({ findings, addresses }) => {
+        const after = applyTo(findings, addresses)
+        expect(after.findings).toHaveLength(findings.length)
+        after.findings.forEach((row, index) => {
+          const before = findings[index]
+          if (before !== undefined && before.status !== 'open') expect(row).toEqual(before)
+        })
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('被处置的 id 都在原 open 集合内、不重复、按清单顺序', () => {
+    fc.assert(
+      fc.property(addressCaseArb, ({ findings, addresses }) => {
+        const { addressed } = applyAddresses(
+          report({ findings }),
+          addresses,
+          PROPERTY_CHECKS,
+          ADDRESSING_RUN,
+          NOW,
+        )
+        const openIds = findings.filter((row) => row.status === 'open').map((row) => row.id)
+        expect(new Set(addressed).size).toBe(addressed.length)
+        for (const id of addressed) expect(openIds).toContain(id)
+        const positions = addressed.map((id) => findings.findIndex((row) => row.id === id))
+        expect(positions).toEqual([...positions].sort((left, right) => left - right))
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('同批重放幂等：第二次零处置且返回同一报告引用', () => {
+    fc.assert(
+      fc.property(addressCaseArb, ({ findings, addresses }) => {
+        const first = applyAddresses(
+          report({ findings }),
+          addresses,
+          PROPERTY_CHECKS,
+          ADDRESSING_RUN,
+          NOW,
+        )
+        const second = applyAddresses(first.report, addresses, PROPERTY_CHECKS, ADDRESSING_RUN, NOW)
+        expect(second.addressed).toEqual([])
+        expect(second.report).toBe(first.report)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('去重后与处置批顺序无关', () => {
+    fc.assert(
+      fc.property(addressCaseArb, ({ findings, addresses }) => {
+        const unique = dedupeAddresses(addresses)
+        expect(applyTo(findings, unique)).toEqual(applyTo(findings, [...unique].reverse()))
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('同一 findingId 出现多次只认第一条', () => {
+    fc.assert(
+      fc.property(addressCaseArb, ({ findings, addresses }) => {
+        expect(applyTo(findings, addresses)).toEqual(applyTo(findings, dedupeAddresses(addresses)))
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('全不合法的处置批：零处置且报告引用不变', () => {
+    fc.assert(
+      fc.property(invalidAddressCaseArb, ({ findings, addresses }) => {
+        const before = report({ findings })
+        const result = applyAddresses(before, addresses, PROPERTY_CHECKS, ADDRESSING_RUN, NOW)
+        expect(result.addressed).toEqual([])
+        expect(result.report).toBe(before)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('处置说明规范化：首尾空白去掉，空白等于没写', () => {
+    fc.assert(
+      fc.property(addressCaseArb, ({ findings, addresses }) => {
+        const { report: after } = applyAddresses(
+          report({ findings }),
+          addresses,
+          PROPERTY_CHECKS,
+          ADDRESSING_RUN,
+          NOW,
+        )
+        const beforeById = new Map(findings.map((row) => [row.id, row]))
+        const firstBy = new Map<string, FindingAddress>()
+        for (const address of addresses) {
+          if (!firstBy.has(address.findingId)) firstBy.set(address.findingId, address)
+        }
+        for (const row of after.findings) {
+          if (beforeById.get(row.id)?.status !== 'open') continue
+          if (row.status === 'open') continue
+          const address = firstBy.get(row.id)
+          const expected = address?.note?.trim() ? address.note.trim() : null
+          expect(row.note).toBe(expected)
+        }
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('处置为 addressed 必有同回执里退出码 0 的 checkRef', () => {
+    fc.assert(
+      fc.property(addressCaseArb, ({ findings, addresses }) => {
+        const { report: after } = applyAddresses(
+          report({ findings }),
+          addresses,
+          PROPERTY_CHECKS,
+          ADDRESSING_RUN,
+          NOW,
+        )
+        const beforeById = new Map(findings.map((row) => [row.id, row]))
+        const firstBy = new Map<string, FindingAddress>()
+        for (const address of addresses) {
+          if (!firstBy.has(address.findingId)) firstBy.set(address.findingId, address)
+        }
+        for (const row of after.findings) {
+          if (row.status !== 'addressed') continue
+          if (beforeById.get(row.id)?.status !== 'open') continue
+          const address = firstBy.get(row.id)
+          expect(address?.disposition).toBe('fixed')
+          expect(
+            PROPERTY_CHECKS.some(
+              (check) => check.cmd === address?.checkRef?.trim() && check.exitCode === 0,
+            ),
+          ).toBe(true)
+        }
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
   })
 })

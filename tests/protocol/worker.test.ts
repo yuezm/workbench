@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import type { RunEvent } from '../../src/protocol/entities'
 import type { Receipt, Turn } from '../../src/protocol/executor'

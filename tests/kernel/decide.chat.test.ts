@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `conversation.*` 黄金用例（T14a）：聊天并入 `purpose='chat'` 的统一执行路径。
  *

@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `run.claim` / `run.heartbeat` / `run.receipt` 的黄金用例（T5/T6）：领取排序、按智能体开窗、
  * 租约计算、心跳匹配、回执校验、终态归一、waiting 与阶段流转。夹具只装内核判定需要的

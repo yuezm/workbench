@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../src/protocol/entities'
 import type { AutomationRule } from '../../src/protocol/rules'

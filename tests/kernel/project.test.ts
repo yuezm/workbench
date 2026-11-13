@@ -1,3 +1,5 @@
+// @vitest-environment node
+import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import type {
   Agent,
@@ -13,7 +15,7 @@ import type {
   WorkflowStage,
 } from '../../src/protocol/entities'
 import type { FactPayload, FactType } from '../../src/protocol/facts'
-import { project } from '../../src/kernel/project'
+import { normalizeCard, normalizeTask, project } from '../../src/kernel/project'
 import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from '../../src/kernel/types'
 
 const ACTOR = { kind: 'owner', via: 'ui' } as const
@@ -1058,5 +1060,155 @@ describe('kernel/project stage 归一（M29 派单）', () => {
     const row = project(fact(7, 'stage.created', { stage: next }))[0]?.row as WorkflowStage
 
     expect(row.handoffs).toEqual([{ on: 'errored', workflowId: 'wf-b', stageId: null }])
+  })
+})
+
+// —— 性质测试（fast-check）：老事实归一的幂等性 ————————————————————————————————
+//
+// `normalizeTask` / `normalizeCard` 把老 payload 缺的列补成默认值。漏一个键，重建出来的
+// 投影列就是 `undefined`（写库报错或读成脏行）；示例用例只覆盖人想到的那几个老版本。
+// 这里随机删掉任意子集的老字段，断言：
+// ① `normalize(normalize(x)) = normalize(x)`（重放老事实与二次重建同结果）；
+// ② 每个老字段都补上了值，已有值一个不改；③ 卡片的 `kind` 只按「有没有选项」兜底。
+// 固定种子，反例可复现（`FC_SEED` 换一批）。
+
+const PROPERTY_SEED = Number(process.env.FC_SEED ?? 20261113)
+const PROPERTY_RUNS = 100
+
+const NULLABLE_ID_FIELDS = ['projectId', 'ruleId', 'externalRef', 'threadId'] as const
+
+const TASK_LEGACY_FIELDS = [
+  'origin',
+  'ruleId',
+  'externalRef',
+  'labels',
+  'projectId',
+  'threadId',
+  'parentTaskId',
+  'spawnedByRunId',
+  'batchNo',
+  'spawnKey',
+  'handoffFromTaskId',
+  'handoffFromStageId',
+  'handoffFromRunId',
+] as const
+
+const nullableIdArb = fc.oneof(fc.constant<string | null>(null), fc.constantFrom('t-1', 'r-1'))
+
+const taskRowArb: Arbitrary<Task> = fc
+  .record({
+    id: fc.constantFrom('t-1', 't-2'),
+    title: fc.string({ maxLength: 6 }),
+    description: fc.string({ maxLength: 6 }),
+    workflowId: fc.constant('wf-1'),
+    projectId: nullableIdArb,
+    currentStageId: fc.oneof(fc.constant<string | null>(null), fc.constant('st-1')),
+    status: fc.constantFrom<Task['status']>('active', 'completed'),
+    origin: fc.constantFrom<Task['origin']>('manual', 'rule', 'handoff', 'spawn'),
+    ruleId: nullableIdArb,
+    externalRef: nullableIdArb,
+    labels: fc.array(fc.string({ maxLength: 4 }), { maxLength: 3 }),
+    threadId: nullableIdArb,
+    parentTaskId: nullableIdArb,
+    spawnedByRunId: nullableIdArb,
+    batchNo: fc.oneof(fc.constant<number | null>(null), fc.integer({ min: 1, max: 3 })),
+    spawnKey: nullableIdArb,
+    handoffFromTaskId: nullableIdArb,
+    handoffFromStageId: nullableIdArb,
+    handoffFromRunId: nullableIdArb,
+    createdAt: fc.constant(AT),
+    updatedAt: fc.constant(AT),
+  })
+  .map((row) => row as unknown as Task)
+
+/** 随机删掉若干老字段：模拟 M6–M10 各版本遗留的 payload。 */
+const partialTaskRowArb: Arbitrary<Task> = fc
+  .tuple(taskRowArb, fc.subarray([...TASK_LEGACY_FIELDS]))
+  .map(([row, missing]) => {
+    const copy: Record<string, unknown> = { ...row }
+    for (const field of missing) delete copy[field]
+    return copy as unknown as Task
+  })
+
+const partialCardRowArb: Arbitrary<Card> = fc
+  .tuple(
+    fc.array(fc.string({ maxLength: 4 }), { maxLength: 3 }),
+    fc.boolean(),
+    fc.constantFrom<Card['status']>('open', 'answered', 'resolved'),
+  )
+  .map(([options, dropKind, status]) => {
+    const row: Record<string, unknown> = { ...card({ options, status }) }
+    if (dropKind) delete row.kind
+    return row as unknown as Card
+  })
+
+describe('老事实归一的性质（fast-check 随机生成）', () => {
+  it('normalizeTask 幂等：重放老事实与二次重建结果相同', () => {
+    fc.assert(
+      fc.property(partialTaskRowArb, (row) => {
+        const once = normalizeTask(row)
+        expect(normalizeTask(once)).toEqual(once)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('normalizeTask 补齐所有老字段，已有值一个不改', () => {
+    fc.assert(
+      fc.property(partialTaskRowArb, (row) => {
+        const before = row as Partial<Task>
+        const after = normalizeTask(row) as unknown as Record<string, unknown>
+        for (const field of TASK_LEGACY_FIELDS) expect(after[field]).toBeDefined()
+        expect(Array.isArray(after.labels)).toBe(true)
+        for (const [key, value] of Object.entries(before)) {
+          if (value === undefined) continue
+          expect(after[key]).toEqual(value)
+        }
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('normalizeTask 的缺省值与契约一致（origin / labels / 可空 id）', () => {
+    fc.assert(
+      fc.property(partialTaskRowArb, (row) => {
+        const before = row as Partial<Task>
+        const after = normalizeTask(row)
+        if (before.origin === undefined) expect(after.origin).toBe('manual')
+        if (before.labels === undefined) expect(after.labels).toEqual([])
+        for (const field of NULLABLE_ID_FIELDS) {
+          if (before[field] === undefined) expect(after[field]).toBeNull()
+        }
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('normalizeCard 幂等；kind 缺失时按「有没有选项」兜底，有值时原样保留', () => {
+    fc.assert(
+      fc.property(partialCardRowArb, (row) => {
+        const once = normalizeCard(row)
+        expect(normalizeCard(once)).toEqual(once)
+        const original = (row as Partial<Card>).kind
+        if (original === undefined) {
+          expect(once.kind).toBe(row.options.length > 0 ? 'ask' : 'notice')
+        } else {
+          expect(once.kind).toBe(original)
+        }
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('normalizeCard 不动其它字段（选项与状态原样带过）', () => {
+    fc.assert(
+      fc.property(partialCardRowArb, (row) => {
+        const after = normalizeCard(row)
+        expect(after.options).toEqual(row.options)
+        expect(after.status).toBe(row.status)
+        expect(after.id).toBe(row.id)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
   })
 })

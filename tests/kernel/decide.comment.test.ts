@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * `task.comment`（M7.5 任务上下文 / 反馈）的决策用例：
  * 追加评论 → `task.comment_added`；`rerun` 时按 agent 阶段与活跃 run 判定是否再排一轮，

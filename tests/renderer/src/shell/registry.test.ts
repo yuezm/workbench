@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { appPlugins } from '../../../../src/renderer/src/shell/registry'
 import { APP_EVENTS } from '../../../../src/shared/apps'

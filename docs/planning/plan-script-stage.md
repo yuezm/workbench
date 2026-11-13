@@ -1,7 +1,7 @@
 # 计划：脚本阶段（Script Stage）
 
 > 2026-11-13 起草。回答一个问题：**阶段能不能选「执行脚本」而不是智能体**——例如审查前先跑测试。
-> 状态：**M40 已实施（2026-11-13）**，M41（脚本实体复用）与 M42（同阶段前置脚本）未开工。实施口径与偏离见文末「实施记录」。
+> 状态：**M40 已实施（2026-11-13）**，M41（脚本实体复用）与 M42（同阶段前置脚本）未开工。实施口径与偏离见文末「实施记录」。**2026-11-13 补**：D5 已撤销——命令只来自运行时连接，`StageScript.command` / `Turn.command` 已删除，见文末「命令只来自运行时」。
 > 关联：[ARCHITECTURE](../ARCHITECTURE.md)（派活单位、执行器不是派活目标）、[SPEC-kernel](../specs/SPEC-kernel.md)（阶段 / 闸门 / 调度）、[SPEC-plugins](../specs/SPEC-plugins.md)（executor 端口与 `Turn`）、[plan-stage-exits](plan-stage-exits.md)（出口表）、[flexible-workflow-plan](flexible-workflow-plan.md)（「卡边界不卡步骤」）。
 
 ## 结论
@@ -50,16 +50,16 @@
 
 ## 设计决策
 
-| 编号   | 决策                                                                                                | 理由 / 取舍                                                                                                                                                                                      |
-| ------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **D1** | 新增 `entryMode='script'`，不做第五类插件                                                           | 脚本没有协议帧、没有会话、没有 `probe/models`，进插件体系只会产生一堆 `if (kind==='script')`。执行器 `command` 已经是「跑一条命令并读回退出码」，缺的只是「谁来决定跑什么」                      |
-| **D2** | 脚本与智能体对称：**连接**在运行时，**执行配置**在目标上                                            | 沿用 M27 的分家口径；脚本的 `args/env/cwd/timeout` 与智能体的 `model/effort/env/workdir` 同层                                                                                                    |
-| **D3** | `run.purpose` 不变，脚本 run 仍是 `'stage'`                                                         | `thread-context` 的「最近一轮产出」只取终态 `purpose='stage'`，脚本输出自动成为下一阶段资料；artifacts / 帧批 / 结算 / 出口表全部零改动复用                                                      |
-| **D4** | 脚本闸门用 `exitCode` 给结论；闸门阶段的非 0 退出在结算时归一回 `succeeded`，业务结论交给 `verdict` | 真实退出码优于自述；不归一的话 `command` 执行器报的 `failed` 会让脚本闸门永远走 `errored`、`failed` 边成死代码。`exitCode=null`（超时 / 被杀）按「没给结论」处理，原地停、不消耗 `maxFails` 预算 |
-| **D5** | `Turn` 新增 `command` / `args` 两个执行配置字段                                                     | 命令本体随阶段走（`pnpm` / `node` / `pwsh` 各不相同），不为一脚本建一条运行时。代价：`Runtime.command` 从「唯一命令来源」降为「缺省命令」，SPEC-plugins 补一句                                   |
-| **D6** | `prompt === ''` 时不写 stdin                                                                        | 脚本不读 stdin；秒退脚本上写已关闭的管道会抛错，被 `command` 执行器当成 `spawn_failed`——这是必须修的一行，否则脚本阶段随机失败                                                                   |
-| **D7** | 脚本 run 的「最近一轮产出」取**尾部** N 行                                                          | 测试日志的失败信息在尾部，头部是最没用的 banner；全文照常落 `artifacts/.../output.md`                                                                                                            |
-| **D8** | M40 用**内联** `stage.script`，M41 才抽 `scripts` 表                                                | 先打通「脚本能跑、退出码能给结论」；中间态丑一点，但端到端可验。与 M19（文案）→ M20（DDL）的节奏一致                                                                                             |
+| 编号             | 决策                                                                                                | 理由 / 取舍                                                                                                                                                                                                              |
+| ---------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **D1**           | 新增 `entryMode='script'`，不做第五类插件                                                           | 脚本没有协议帧、没有会话、没有 `probe/models`，进插件体系只会产生一堆 `if (kind==='script')`。执行器 `command` 已经是「跑一条命令并读回退出码」，缺的只是「谁来决定跑什么」                                              |
+| **D2**           | 脚本与智能体对称：**连接**在运行时，**执行配置**在目标上                                            | 沿用 M27 的分家口径；脚本的 `args/env/cwd/timeout` 与智能体的 `model/effort/env/workdir` 同层                                                                                                                            |
+| **D3**           | `run.purpose` 不变，脚本 run 仍是 `'stage'`                                                         | `thread-context` 的「最近一轮产出」只取终态 `purpose='stage'`，脚本输出自动成为下一阶段资料；artifacts / 帧批 / 结算 / 出口表全部零改动复用                                                                              |
+| **D4**           | 脚本闸门用 `exitCode` 给结论；闸门阶段的非 0 退出在结算时归一回 `succeeded`，业务结论交给 `verdict` | 真实退出码优于自述；不归一的话 `command` 执行器报的 `failed` 会让脚本闸门永远走 `errored`、`failed` 边成死代码。`exitCode=null`（超时 / 被杀）按「没给结论」处理，原地停、不消耗 `maxFails` 预算                         |
+| **D5**（已撤销） | ~~`Turn` 新增 `command` / `args` 两个执行配置字段~~                                                 | 首版让命令随阶段走（`pnpm` / `node` / `pwsh` 各不相同），代价是同一件事在运行时与阶段各写一遍。**2026-11-13 撤销**：命令只来自运行时连接，`StageScript.command` 与 `Turn.command` 一并删除（见文末「命令只来自运行时」） |
+| **D6**           | `prompt === ''` 时不写 stdin                                                                        | 脚本不读 stdin；秒退脚本上写已关闭的管道会抛错，被 `command` 执行器当成 `spawn_failed`——这是必须修的一行，否则脚本阶段随机失败                                                                                           |
+| **D7**           | 脚本 run 的「最近一轮产出」取**尾部** N 行                                                          | 测试日志的失败信息在尾部，头部是最没用的 banner；全文照常落 `artifacts/.../output.md`                                                                                                                                    |
+| **D8**           | M40 用**内联** `stage.script`，M41 才抽 `scripts` 表                                                | 先打通「脚本能跑、退出码能给结论」；中间态丑一点，但端到端可验。与 M19（文案）→ M20（DDL）的节奏一致                                                                                                                     |
 
 ## 契约（M40）
 
@@ -376,7 +376,7 @@ M40 与 M41 之间不要长期停顿：M40 的阶段脚本写在阶段里，改�
 | 投影 | `workflow_stages.script_json` / `runs.script_json`（`NOT NULL DEFAULT 'null'`）、`entry_mode` CHECK 四档、`STAGES_REQUIRED_COLUMNS` + `RUN_M2_ADDED_COLUMNS` 补列、重建拷贝 SQL、`normalizeStage` / `normalizeRun` / `runValue` 的脚本列                                                                                                                                                                 | `src/host/{schema,db}.ts`、`src/host/store/{views,projection-apply}.ts` |
 | 宿主 | `targetOf` 取代「必须有智能体」：脚本轮从 run 行快照取执行配置（`command`/`args`/`env`，模型与思考强度置空），缺失时落 `run_failed` 兜底                                                                                                                                                                                                                                                                 | `src/host/scheduler.ts`                                                 |
 | 插件 | `command` 执行器：`turn.command` 覆盖连接命令、`turn.args` 逐项原样传参（不展开占位符）、`prompt` 为空不写 stdin                                                                                                                                                                                                                                                                                         | `src/plugins/executors/command/run.ts`                                  |
-| UI   | 类型下拉加「执行脚本 / 脚本闸门（判定）」；脚本块（运行时只列命令执行器、命令、参数、工作目录、超时、环境变量）；`ScriptLinesField` 用本地原文避免半行被格式化擦掉；`pruneByEntryKind` 认两种脚本类型；看板 / 任务详情 / 重跑对脚本阶段同口径；`model/stage-script.ts` 纯函数                                                                                                                            | `src/renderer/src/apps/ai-workflow/**`                                  |
+| UI   | 类型下拉加「执行脚本 / 脚本闸门」；脚本块（运行时只列命令执行器、命令、参数、工作目录、超时、环境变量）；`ScriptLinesField` 用本地原文避免半行被格式化擦掉；`pruneByEntryKind` 认两种脚本类型；看板 / 任务详情 / 重跑对脚本阶段同口径；`model/stage-script.ts` 纯函数                                                                                                                                    | `src/renderer/src/apps/ai-workflow/**`                                  |
 | 文档 | ARCHITECTURE「派活单位」与术语、SPEC-plugins 派活链与 `Turn`、SPEC-kernel 的 `entry_mode` 与闸门段                                                                                                                                                                                                                                                                                                       | `docs/**`                                                               |
 
 ### 与计划的偏离（都以「不破坏既有不变量」为准）
@@ -386,7 +386,7 @@ M40 与 M41 之间不要长期停顿：M40 的阶段脚本写在阶段里，改�
 3. **`normalizeRun` 落在 `host/store/projection-apply.ts`（投影边界）而不是 `kernel/project.ts`**：该文件本来就是 run 行的第二道防线（`normalizeAgent` / `normalizeTask` 同处），重建与增量共用一条归一。
 4. **结算归一放在 `kernel/commands/run.ts#scriptGateSettled`**：`command` 执行器对非 0 退出的 `failed/exit_nonzero` 归类不变（非闸门脚本阶段要靠它走 `errored`），只在闸门阶段翻成 `succeeded` 让 `failed` 边可达。
 5. **脚本闸门不采信脚本自报的 `verdict`**：结论只取 `exitCode`；脚本仍可 echo 回执块上报 `notices` / `findings`，但那些不参与闸门判定。
-6. **UI 的脚本类型拆成两项**（「执行脚本」与「脚本闸门（判定）」）：闸门在本项目里一直是「类型下拉里的一项 + `judge` 开关」的形态，脚本闸门沿用同一交互，而不是让人先选脚本再单独找判定开关。
+6. **UI 的脚本类型拆成两项**（「执行脚本」与「脚本闸门」）：闸门在本项目里一直是「类型下拉里的一项 + `judge` 开关」的形态，脚本闸门沿用同一交互，而不是让人先选脚本再单独找判定开关。
 7. **环境变量的值在解析时 `trim()`**：界面按 `KEY=VALUE` 一行一个，行内两侧空白没有语义。
 
 ### 验证
@@ -395,3 +395,45 @@ M40 与 M41 之间不要长期停顿：M40 的阶段脚本写在阶段里，改�
 - 改动行 **168/170 = 98.82%**（门槛 90%）。
 - `pnpm check:fast` 各门（类型 / lint / floor / secrets / ui）exit 0。
 - 新增用例覆盖：脚本阶段派活（快照 / 无智能体 / access=full / 提示词只有资料 / 缺脚本与缺运行时零事实 / 无项目回落脚本 cwd）、脚本闸门三条（0 / 非 0 / 拿不到退出码）、非闸门脚本阶段的 `errored` 边、超时优先级、`workflow.create/update` 的落库与引用校验与 `sameScript`、调度器 `Turn`（command/args/env/无模型/脚本超时）、`command` 执行器（命令与 argv 覆盖、空提示词不写 stdin）、表单纯函数与编辑器脚本块。
+
+## 补口（2026-11-13，M40 实测 BUG）
+
+**症状**：新建运行时选执行器「命令」→ 保存报「执行器不支持探测: command」，一条命令运行时都建不出来；工作流编辑器里选「执行脚本」后运行时下拉恒空，保存报 `input.stages[N].script.runtimeId必填`。**两层是同一个空洞**：M40 让脚本阶段的连接必须是 `executorKey='command'` 的运行时，而这条运行时在真实环境里没有任何创建路径。
+
+| 根因                       | 位置                                     | 说明                                                                                                                                                                                         |
+| -------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command` 插件没有 `probe` | `src/plugins/executors/command/index.ts` | `runtime.create` 先探测后落库，`probe` 缺失一律 `unsupported`；`command` 也没有 `detect`（不产出候选），所以一条 `executorKey='command'` 的运行时既建不出、也检不到，只有 e2e 直接塞 DB 才有 |
+| 编辑器空候选只留死路       | `WorkflowEditor.tsx` 脚本块              | 候选恒空 → 下拉选不了 → `runtimeId=''`，最后由协议层 `requiredId` 甩一句路径式错误                                                                                                           |
+| 编辑既有脚本阶段丢配置     | `WorkflowEditor.tsx#toDraft`             | 没回传 `script`，脚本块整块不渲染，保存时又以「设为执行脚本时必须填写命令」整份拒收                                                                                                          |
+
+**修法**
+
+1. `src/plugins/executors/command/probe.ts`（新）：只解析 `runtime.command`（`sdk.process.resolve`）与 `argsTemplate`，**不 spawn**——通用命令没有统一的版本旗标，猜一个只会把「没实现 `--version`」误报成不可用。空命令给「命令必填」。装配进 `commandPlugin.probe`。
+2. `RuntimeDialog`：命令空就前端拦（清掉从前端到内核的一次无用往返）。
+3. `WorkflowEditor`：`validateDraft` 收脚本运行时候选，脚本阶段没选 / 所选运行时已停用或被删都就地指出并展开该阶段；脚本块在候选为空时给出「去运行时页新建一条」的文案；`toDraft` 回填 `script`。
+4. 表单口径（本轮需求）：脚本两项都不展示「要干什么」「单轮超时」（脚本没有提示词；脚本自带超时且优先级更高），脚本闸门另外不展示「验收」（判据是退出码）；保存时随 `pruneByEntryKind` 归一成空，不留看不见的残留配置。内核的「脚本闸门最多一条验收」上限不动——程序化调用仍受它约束。
+5. `command` 的展示名从「命令」改成「通用命令」：运行时表单里已经有一个「命令」输入框，同名会让人以为「选不了命令」。
+
+**验证**：新增 `tests/plugins/executors/command/probe.test.ts`（6 例）、注册表一条「command 必须自带 probe」的不变量、编辑器 5 条（回填 / 两条脚本类型不渲染三块并归一 / 无候选指路 / 运行时停用文案）、运行时表单一条命令必填；旧用例「插件只实现 run（不给 probe）」按新契约改写。
+
+## 命令只来自运行时（2026-11-13，M40 实测 UI 反馈）
+
+三条反馈都出在脚本阶段的编辑面上。前两条是排版，第三条是口径：**既然选了运行时，就以运行时为准——阶段上不能再输入命令**。
+
+| 反馈                                                                   | 根因                                                                                                                                | 修法                                                                                                                                                                                                  |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 类型下拉选「脚本闸门（判定）」（8 个全角字，当时的最长项）时文案被截断 | 类型 `Field` 固定 `w-36`（144px），减掉 `px-3` 与 chevron 只剩约 96px，放不下 8 个全角字，`select-value` 的 `line-clamp-1` 直接裁掉 | 宽度提到 `w-44`（176px），按最长类型文案留够                                                                                                                                                          |
+| 「运行时」与「命令」不在一条水平线上                                   | 脚本块那一行是 `items-end`，而「命令」带常驻 `hint`：底对齐把输入框顶高了一行                                                       | 命令字段删除后该行只剩「运行时」，`items-start` + 命令说明整行铺开；「工作目录 + 超时」保持原行不动                                                                                                   |
+| 已选命令执行器运行时（如 npm / pnpm）还要再填一遍命令                  | 首版让 `Turn.command` 覆盖 `runtime.command`，于是阶段上也有一条命令：同一个可执行文件两处可写，谁生效取决于实现细节                | **删字段而不是改提示**：`StageScript.command` 与 `Turn.command` 一起删掉，命令唯一来源是运行时连接（`runtime.command`）；脚本块只把运行时命中的那条以说明文字读出来；所选连接自身没有命令时保存前拦住 |
+
+**契约影响**
+
+1. `protocol/entities.ts`：`StageScript` 去掉 `command`；`protocol/executor.ts`：`Turn` 去掉 `command`（`args` 保留——参数仍属阶段执行配置）。
+2. `protocol/validate.ts`：`checkScript` 不再校验命令；多写的 `command` 键既不校验也不落库。
+3. `host/scheduler.ts`：`turnOf` 不再搬运命令，脚本轮的可执行文件由执行器读 `runtime.command`。
+4. `plugins/executors/command/run.ts`：`turn.command ?? runtime.command` → `runtime.command`。
+5. `model/stage-script.ts`：`defaultScript` 不再带命令；新增 `cleanScript` 在保存时只保留当前契约字段，老数据 / 外部写入里的 `command` 键随保存脱落。
+6. 编辑器：删除「命令」输入框，运行时命中命令以说明文字展示（`命令用运行时上的「pnpm」`），所选运行时命令为空时就地拦住并指出是哪条连接。
+7. 类型下拉文案（2026-11-13）：`交给智能体` → `智能体`、`闸门（判定）` → `智能体闸门`、`脚本闸门（判定）` → `脚本闸门`；类型列宽 `w-44` 按「智能体闸门」留够。`TaskDialog` 里引用类型名的「「智能体」的阶段会立即执行」随之更新，`执行脚本` / `不交接` / `交给用户` 不动。
+
+**验证**：`tests/protocol/validate.test.ts`（`command` 键被忽略）、`tests/host/scheduler.test.ts`（`Turn` 上没有 `command`、`script_json` 快照不含命令）、`tests/plugins/executors/command/command.test.ts`（可执行文件解析自 `runtime.command`，`resolvedIn` 断言）、`tests/kernel/decide.run.test.ts`、`tests/renderer/.../{WorkflowEditor,stage-script}.test.tsx`（无命令输入框 / 命令只读展示 / 运行时无命令被拦 / `cleanScript` 清掉遗留键）。

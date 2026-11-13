@@ -291,14 +291,14 @@ export function rerunTask(
   if (!stage || stage.workflowId !== task.workflowId) {
     return reject('conflict', '任务当前阶段无效')
   }
-  if (stage.entryMode !== 'agent') {
-    return reject('conflict', '当前阶段不交给智能体执行: ' + stage.name)
+  if (stage.entryMode !== 'agent' && stage.entryMode !== 'script') {
+    return reject('conflict', '当前阶段不派活，无法重新执行: ' + stage.name)
   }
   const facts = entryRunFacts(view, task, now, env, OWNER, undefined, {
     roundSession: 'resume',
   })
   if (facts.length === 0) {
-    return reject('conflict', '当前阶段没有可用的智能体或运行时: ' + stage.name)
+    return reject('conflict', '当前阶段没有可用的智能体 / 脚本或运行时: ' + stage.name)
   }
   return done(facts)
 }

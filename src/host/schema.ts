@@ -75,8 +75,10 @@ CREATE TABLE IF NOT EXISTS ${name} (
   workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   position INTEGER NOT NULL,
-  entry_mode TEXT NOT NULL CHECK (entry_mode IN ('none','agent','user')),
+  entry_mode TEXT NOT NULL CHECK (entry_mode IN ('none','agent','script','user')),
   agent_id TEXT REFERENCES agents(id) ON DELETE RESTRICT,
+  -- M40 阶段脚本：JSON 文本（对象 = 执行脚本，null = 不是脚本阶段）
+  script_json TEXT NOT NULL DEFAULT 'null',
   -- M32 出口表：JSON 对象文本（每个触发条件一条主去向）
   exits_json TEXT NOT NULL DEFAULT '{}',
   -- M29 派单：JSON 数组文本（on / workflowId / stageId / forwardOnly）
@@ -172,6 +174,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   task_id TEXT REFERENCES tasks(id) ON DELETE CASCADE,
   stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
   agent_id TEXT REFERENCES agents(id) ON DELETE SET NULL,
+  -- M40 脚本 run 的执行配置快照：JSON 文本（null = 不是脚本轮）
+  script_json TEXT NOT NULL DEFAULT 'null',
   runtime_id TEXT REFERENCES runtimes(id) ON DELETE SET NULL,
   purpose TEXT NOT NULL DEFAULT 'stage' CHECK (purpose IN ('stage','chat')),
   -- 历史引用，不设外键：删对话不能把历史 run 的 conversationId 抹成 null（重建等价）
@@ -545,6 +549,8 @@ export const RUN_M2_ADDED_COLUMNS = [
   'cancel_requested',
   // M28：阶段交付物（`RunDeliverables` 的 JSON；null = 没声明）
   'deliverables_json',
+  // M40：脚本 run 的执行配置快照（JSON；null = 不是脚本轮）
+  'script_json',
 ] as const
 
 /**
@@ -559,14 +565,14 @@ export function legacyRunsCopySql(targetTable: string): string {
     executor_key, thread_id, cwd, access, skill, prompt_ref, event_ids_json, hops, turn,
     resume_session_id, thread_context_ref, queue_seq, status, prompt, output, error, error_code,
     exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until,
-    not_before, deadline_at, cancel_requested, deliverables_json, started_at, ended_at, created_at
+    not_before, deadline_at, cancel_requested, deliverables_json, script_json, started_at, ended_at, created_at
   )
   SELECT
     id, task_id, stage_id, agent_id, runtime_id, 'stage', NULL, NULL, 0,
     '', NULL, '', 'edit', NULL, NULL, '[]', 0, 1,
     NULL, NULL, 0, status, prompt, output, error, error_code,
     exit_code, session_id, usage_json, duration_ms, NULL, 1, 0, NULL,
-    NULL, NULL, 0, NULL, started_at, ended_at, created_at
+    NULL, NULL, 0, NULL, 'null', started_at, ended_at, created_at
   FROM runs`
 }
 
@@ -582,6 +588,8 @@ export const STAGES_REQUIRED_COLUMNS = [
   'subtask_stage_id',
   'on_children_settled',
   'spawn_policy',
+  // M40：脚本列缺失（且 entry_mode 的 CHECK 还是三档）即重建一次
+  'script_json',
 ] as const
 
 /**

@@ -138,6 +138,8 @@ export const sample = {
       instructions: '',
       acceptance: [],
       runTimeoutMs: null,
+      // M40：不是脚本阶段
+      script: null,
       ...overrides,
     }
   },
@@ -212,6 +214,8 @@ export const sample = {
       deadlineAt: null,
       cancelRequested: false,
       deliverables: null,
+      // M40：不是脚本轮
+      script: null,
       ...overrides,
     }
   },

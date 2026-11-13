@@ -94,6 +94,8 @@ interface StageRow {
   run_timeout_ms: number | null
   /** M32 判定者（JSON 文本；`null` = 不判定） */
   judge_json: string
+  /** M40 阶段脚本（JSON 文本；`null` = 不是脚本阶段） */
+  script_json: string
 }
 
 interface AgentRow {
@@ -233,6 +235,8 @@ interface RunDbRow {
   deadline_at: string | null
   cancel_requested: number
   deliverables_json: string | null
+  /** M40 脚本 run 的执行配置快照（JSON；`null` = 不是脚本轮） */
+  script_json: string
   started_at: string | null
   ended_at: string | null
   created_at: string
@@ -304,6 +308,11 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   entryMode: row.entry_mode as EntryMode,
   builtin: row.builtin as WorkflowStage['builtin'],
   agentId: row.agent_id,
+  // M40：坏 JSON / 空串 / 'null' 按「不是脚本阶段」归一
+  script:
+    row.script_json === undefined || row.script_json.trim() === '' || row.script_json === 'null'
+      ? null
+      : (JSON.parse(row.script_json) as WorkflowStage['script']),
   exits:
     row.exits_json === undefined || row.exits_json.trim() === ''
       ? {}
@@ -484,6 +493,11 @@ const mapRun = (row: RunDbRow): RunRow => ({
   cancelRequested: row.cancel_requested === 1,
   deliverables:
     row.deliverables_json === null ? null : (JSON.parse(row.deliverables_json) as RunDeliverables),
+  // M40：坏 JSON / 空串按「不是脚本轮」归一，不让一条脏行把整张视图读挂
+  script:
+    row.script_json === undefined || row.script_json.trim() === '' || row.script_json === 'null'
+      ? null
+      : (JSON.parse(row.script_json) as RunRow['script']),
   startedAt: row.started_at,
   endedAt: row.ended_at,
   createdAt: row.created_at,
@@ -544,7 +558,7 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
   (
     db
       .prepare(
-        `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id,
+        `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id, script_json,
                 exits_json, handoffs_json,
                 subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
                 run_timeout_ms, judge_json
@@ -638,7 +652,7 @@ const RUN_COLUMNS = `id, purpose, task_id, stage_id, agent_id, runtime_id, conve
         event_ids_json, hops, turn, resume_session_id, thread_context_ref, queue_seq,
         status, prompt, output, error, error_code, exit_code, session_id, usage_json,
         duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at,
-        cancel_requested, deliverables_json, started_at, ended_at, created_at`
+        cancel_requested, deliverables_json, script_json, started_at, ended_at, created_at`
 
 const readRuns = (db: DatabaseSync): RunRow[] =>
   (

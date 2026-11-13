@@ -241,10 +241,43 @@ export interface AgentInput {
 
 // ---------- 工作流 / 阶段 ----------
 
-/** 阶段入口模式：none = 停留，agent = 交给阶段绑定的智能体，user = 等人 */
-export const ENTRY_MODES = ['none', 'agent', 'user'] as const
+/**
+ * 阶段入口模式：none = 停留，agent = 交给阶段绑定的智能体，script = 执行阶段脚本，user = 等人。
+ *
+ * `script` 是第二个**执行目标**（与智能体对称），不是第五类插件、也不是新的 run `purpose`：
+ * 脚本走同一条 run 生命周期，`command` 执行器负责跑完并读回退出码。
+ */
+export const ENTRY_MODES = ['none', 'agent', 'script', 'user'] as const
 
 export type EntryMode = (typeof ENTRY_MODES)[number]
+
+/** 阶段脚本的参数上限（与 `argsTemplate` 同口径：逐项 argv，不经 shell）。 */
+export const SCRIPT_LIMITS = { maxArgs: 20, maxArgChars: 500 } as const
+
+/** 脚本参数里不允许出现的占位符：脚本没有提示词、模型与思考强度。 */
+export const SCRIPT_FORBIDDEN_PLACEHOLDERS = ['prompt', 'model', 'effort'] as const
+
+/**
+ * 阶段脚本（M40 内联在阶段上）：一条命令 + 参数。
+ *
+ * - 连接取自 `runtimeId` 指向的运行时（`executorKey` 应为 `command`），命令本体与参数是执行配置；
+ * - 不产生提示词、不续会话、不派活——脚本只回答「命令跑没跑成」；
+ * - 闸门阶段读 `exitCode` 当结论（`0` = 通过），非闸门阶段只看成功 / 失败。
+ */
+export interface StageScript {
+  /** 连接：必须指向一条已存在的运行时（表单预填第一条命令执行器运行时） */
+  runtimeId: string
+  /** 命令名或绝对路径（宿主按 PATH 解析；找不到即 spawn_failed） */
+  command: string
+  /** 逐项 argv，不经 shell；不允许 `{prompt}` / `{model}` / `{effort}` */
+  args: readonly string[]
+  /** 工作目录；null = 项目文件夹 > 宿主默认目录 */
+  cwd: string | null
+  /** 追加给子进程的环境变量（只覆盖，不清空宿主基线） */
+  env: Record<string, string>
+  /** 单轮超时；null = 阶段 `runTimeoutMs` > 全局缺省 */
+  timeoutMs: number | null
+}
 
 /**
  * 阶段类别（M18）：看板与编辑器按类别取色，也决定默认流转怎么走。
@@ -427,6 +460,11 @@ export interface WorkflowStage {
   entryMode: EntryMode
   agentId: string | null
   /**
+   * 阶段脚本（M40）：`entryMode='script'` 时必填，其余模式必须为 null
+   * （归一由内核与投影边界做，校验拒绝两者同时给）。老事实缺该字段时按 null 归一。
+   */
+  script?: StageScript | null
+  /**
    * 系统内置阶段的键（M18）：内置阶段恒有值，自己添加的阶段为 null。
    * 内置阶段不可删除、不可改名，位置由内核按类别归一。
    */
@@ -490,6 +528,8 @@ export interface StageInput {
    */
   builtin?: BuiltinStageKey | null
   agentId?: string | null
+  /** 阶段脚本（M40，可空）：`entryMode='script'` 时必填，其余模式保存时归一为 null */
+  script?: StageScript | null
   /**
    * 出口表（M32）：每项一个触发条件 + 一个主去向；`stageIndex` 是 `stages` 数组下标。
    * 缺省的触发条件由内核补齐（done → 下一阶段，errored / failed → await）。
@@ -753,6 +793,12 @@ export interface Run {
 export interface RunRow extends Omit<Run, 'taskId'> {
   purpose: RunPurpose
   taskId: string | null
+  /**
+   * 脚本 run 的执行配置快照（M40）：非 null 即「这一轮由脚本执行」，`agentId` 为 null。
+   * 与 `prompt` / `cwd` / `access` 同口径——历史轮次自包含，阶段配置后来改了不影响审计。
+   * 老事实缺该字段时按 null 归一。
+   */
+  script?: StageScript | null
   /** 聊天 run 挂的对话；阶段 run 为 null */
   conversationId: string | null
   /** 命中/触发来源（阶段 run 记规则版本；手工任务为 null/0） */

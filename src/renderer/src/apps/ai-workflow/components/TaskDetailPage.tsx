@@ -103,8 +103,11 @@ export function TaskDetailPage({
     workflow?.stages.find((item) => item.id === child.currentStageId)?.name ?? '未知阶段'
   const hint =
     task === null ? '读取任务中' : `${workflow?.name ?? '未知工作流'} · ${stageName ?? '未知阶段'}`
-  /** 勾选「接着做」只在「交给智能体」的阶段有意义（是否真跑仍由内核判定） */
-  const canRerun = task !== null && task.status === 'active' && stage?.entryMode === 'agent'
+  /** 勾选「接着做」只在会跑单的阶段（交给智能体 / 执行脚本）有意义（是否真跑仍由内核判定） */
+  const canRerun =
+    task !== null &&
+    task.status === 'active' &&
+    (stage?.entryMode === 'agent' || stage?.entryMode === 'script')
   /**
    * 重新执行当前阶段：失败收口后（关机 / CLI 崩了）能原地再排一轮，不用把卡片拖走再拖回。
    * 内核判任务在 agent 阶段、无活跃 run、智能体与运行时齐备；UI 另加一条：该任务已经跑过

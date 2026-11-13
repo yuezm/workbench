@@ -324,10 +324,10 @@ export function upgradeLegacyStagesTable(db: DatabaseSync): boolean {
       db.exec(tableDdl.stages(STAGES_UPGRADE_TEMP))
       const insert = db.prepare(
         `INSERT INTO ${STAGES_UPGRADE_TEMP}
-           (id, workflow_id, name, position, entry_mode, agent_id, exits_json, handoffs_json,
+           (id, workflow_id, name, position, entry_mode, agent_id, script_json, exits_json, handoffs_json,
             subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
             run_timeout_ms, judge_json, builtin, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       for (const row of rows) {
         const stage = legacyStageRow(row)
@@ -338,6 +338,7 @@ export function upgradeLegacyStagesTable(db: DatabaseSync): boolean {
           stage.position,
           stage.entryMode,
           stage.agentId,
+          JSON.stringify(stage.script),
           JSON.stringify(stage.exits),
           JSON.stringify(stage.handoffs),
           stage.subtaskStageId,
@@ -371,6 +372,8 @@ function legacyStageRow(raw: Record<string, unknown>): {
   position: number
   entryMode: string
   agentId: string | null
+  /** M40：旧行没有脚本列，恒为 null（脚本阶段只能由新版本写入） */
+  script: null
   exits: unknown
   handoffs: unknown
   subtaskStageId: string | null
@@ -425,6 +428,7 @@ function legacyStageRow(raw: Record<string, unknown>): {
     position: Number(raw.position),
     entryMode: String(raw.entry_mode),
     agentId: text(raw.agent_id),
+    script: null,
     exits,
     handoffs,
     subtaskStageId: text(raw.subtask_stage_id),

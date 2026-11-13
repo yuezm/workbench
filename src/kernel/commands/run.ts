@@ -91,7 +91,17 @@ function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): 
  * 任一条不满足即视为**没给结论**。不信任模型的自述——说通过却拿不出证据时任务原地停住等人，
  * 既不放行也不消耗预算。`fail` 不需要证据（失败本身就是要修）。
  */
-function gateVerdictOf(receipt: Receipt, stage: WorkflowStage): GateVerdict | undefined {
+function gateVerdictOf(
+  receipt: Receipt,
+  stage: WorkflowStage,
+  run: RunRow,
+): GateVerdict | undefined {
+  // M40 脚本闸门：真实退出码即结论，不采信脚本自报的 verdict / checks。
+  // `exitCode=null`（超时 / 被杀 / 起不来）按「没给结论」处理：原地停、不消耗预算。
+  if ((run.script ?? null) !== null) {
+    if (run.exitCode === null) return undefined
+    return run.exitCode === 0 ? 'pass' : 'fail'
+  }
   const verdict = receipt.verdict
   if (verdict === undefined) return undefined
   if (verdict === 'fail') return 'fail'
@@ -107,6 +117,27 @@ function gateVerdictOf(receipt: Receipt, stage: WorkflowStage): GateVerdict | un
 
 /** 闸门放行标记（M11）：预算耗尽后走通过分支时打在任务上的标签，看板可据此筛选。 */
 export const GATE_DEGRADED_LABEL = 'gate:degraded'
+
+/**
+ * 脚本闸门结算归一（M40）：「进程跑完了、退出码非 0」是业务没过，不是执行出错。
+ *
+ * `command` 执行器把非 0 退出报成 `failed` + `exit_nonzero`；闸门阶段要把它翻成
+ * `succeeded`（业务结论交给 `gateVerdictOf`），否则出口表的 `failed` 边永远走不到。
+ * 非闸门脚本阶段不翻：命令跑挂了就是执行出错，走 `errored` 边。
+ */
+function scriptGateSettled(
+  run: RunRow,
+  receipt: Receipt,
+  stage: WorkflowStage | undefined,
+  now: Iso,
+): SettledRun {
+  const settled = settledRun(run, receipt, now)
+  const gated = (run.script ?? null) !== null && stage !== undefined && stage.judge !== null
+  if (gated && settled.status === 'failed' && settled.errorCode === 'exit_nonzero') {
+    return { ...settled, status: 'succeeded', error: null, errorCode: null }
+  }
+  return settled
+}
 
 /**
  * 该任务在该阶段已经跑过几轮（含刚结算的这一轮）。
@@ -261,6 +292,9 @@ export function claimRun(
  */
 export function stageTimeoutOf(view: View, limits: Limits): (run: RunRow) => number {
   return (run) => {
+    // M40：脚本自己配的超时最优先（脚本轮询类命令通常比阶段短得多）
+    const scriptTimeout = run.script?.timeoutMs ?? null
+    if (scriptTimeout !== null) return scriptTimeout
     if (run.stageId === null) return limits.runTimeoutMs
     const stage = view.stages.get(run.stageId)
     return stage?.runTimeoutMs ?? limits.runTimeoutMs
@@ -363,16 +397,20 @@ export function receiveRun(
     )
     return done(facts)
   }
-  const settled = settledRun(run, input.receipt, now)
+  // M40：脚本闸门阶段的「跑完了但没过」按 succeeded 落（业务结论交给 verdict）。
+  // 不归一的话 `command` 执行器报的 failed 会让 failed 边永远走不到。
+  const stage = run.stageId === null ? undefined : view.stages.get(run.stageId)
+  const settled = scriptGateSettled(run, input.receipt, stage, now)
   facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
   if (run.purpose === 'stage') {
     // M14 硬门：评审清单还有未处置条目时不推进阶段——run 照常落终态、任务停在当前阶段，
     // 漏项由 `reviewFactsOf` 追加的任务评论说明「缺哪几条、怎么回应」。
     // M34：执行阶段不看业务结论（succeeded 即成功）；只有闸门阶段读回执 `verdict`，
     // 且 `pass` 要逐条覆盖验收条目（见 `gateVerdictOf`）。
-    const stage = run.stageId === null ? undefined : view.stages.get(run.stageId)
     const verdict =
-      stage === undefined || stage.judge === null ? undefined : gateVerdictOf(input.receipt, stage)
+      stage === undefined || stage.judge === null
+        ? undefined
+        : gateVerdictOf(input.receipt, stage, settled)
     const transition = review.blocked
       ? { facts: [] as FactDraft[] }
       : stageTransitionFacts(view, settled, verdict, now, env)

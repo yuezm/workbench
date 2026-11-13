@@ -267,10 +267,10 @@ describe('kernel/decide task.rerun', () => {
     expect(executing.facts).toEqual([])
   })
 
-  it('当前阶段不交给智能体（user / none）→ conflict，不静默零事实', () => {
+  it('当前阶段不派活（user / none）→ conflict，不静默零事实', () => {
     const user = rerun(view({ stages: [stage({ entryMode: 'user', agentId: null })] }))
     expect(user.reject?.code).toBe('conflict')
-    expect(user.reject?.message).toContain('不交给智能体')
+    expect(user.reject?.message).toContain('不派活')
 
     const none = rerun(view({ stages: [stage({ entryMode: 'none', agentId: null })] }))
     expect(none.reject?.code).toBe('conflict')

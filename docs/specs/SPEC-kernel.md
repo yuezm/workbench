@@ -288,7 +288,8 @@ export interface Change {
 
 沿用 `src/shared/stage-machine.ts` 的全部规则与 15 条硬约束（见 `SPEC-ai-workflow.md`「阶段状态机」与 `TEST-CASES.md`）：
 
-- `entry_mode` = `none` / `agent` / `user`；每次进入阶段都重新触发进入效果。
+- `entry_mode` = `none` / `agent` / `script` / `user`；每次进入阶段都重新触发进入效果。
+- **脚本阶段（M40）**：`entry_mode='script'` 时阶段带内联脚本 `script = { runtimeId, command, args, cwd, env, timeoutMs }`（`agentId` 必须为空，二者互斥，保存时归一）。派活与智能体阶段同一条链路：产 `run.queued`，`agentId=null`、`script` 快照随 run 行落库、`access='full'`、`resumeSessionId=null`，提示词只有资料（任务 / 阶段说明 / 验收条目），不拼系统提示词与模型。工作目录取「项目文件夹 > 脚本 cwd」，超时取「脚本 `timeoutMs` > 阶段 `runTimeoutMs` > 全局缺省」。并发窗口固定 1。运行时不存在 / 脚本缺失 → 零事实（任务停在列里等人）。
 - 自动流转只由 `run.succeeded` / `run.failed` 触发；打回目标解析后等于当前阶段时**零效果**、不重建 run。
 - 人工拖拽落点即目标，不套用 `on_complete` / `on_reject`；有活跃 run（queued/claimed/waiting）时拒绝移动与完成。
 - 「执行中」由内核投影现算，UI 与插件不得自行推导。
@@ -299,7 +300,7 @@ export interface Change {
 - **交接产物挂父任务（M25）**：交接任务同时写 `parentTaskId = 来源任务`，于是它进得进来源任务的子任务树与 `tasks.byParent`；但它**只有**在来源阶段显式配了 `onChildrenSettled` 时才参与 rollup ——「一条交接产物把来源任务叫醒」不是 M7 的语义，老工作流行为逐字不变（`childrenSettledFacts` 的交接守卫）。配了 `wake` 的用法是「缺陷全修完 → 自动唤醒测试任务去回归」。`rootTaskIds` 相应按**线程内**判根：父任务不在本线程（交接产物）时它在自己的新线程里就是根。副作用是 `spawnDepth` 沿 `parentTaskId` 回溯，交接产物因此继承来源任务的深度——一条 8 层交接链的末端任务不能再 spawn（两个预算在这个方向上叠加），这是刻意收紧而非 bug。
 - **`tasks.origin`**（M7 扩为 `manual` / `rule` / `handoff`）：`origin='handoff'` 只由内核产，Agent 与 UI 不能指定。
 - **阶段要干什么（M9）**：`workflow_stages.instructions`（空串 = 没写）。进到该阶段的任务，其提示词在「# 阶段：名称」之后多一段固定指令「# 阶段要做什么」+ 原文（只去首尾空白、保留换行）；空/全空白时不产这一段，老提示词逐字不变。编辑时说明变化与其它字段一样按 `sameStage` 比较，变化才产 `stage.updated`。
-- **闸门（M11，M32 改为 `judge` + 出口表）**：阶段可配 `judge = { maxFails }`（空 = 不是闸门；必须 `entry_mode='agent'`，**判定者就是闸门阶段自己的智能体**——它不实现任何东西，只验上一阶段产出；与被验阶段同一智能体时保存 reject，见下条）。`run.succeeded` 时读回执 `verdict`：`pass` 走 `exits.passed` 并把任务上的 `gateFails` 清零；`fail` 未达 `maxFails` 走 `exits.failed` 并 +1；`fail` 已达 `maxFails` **放行**走 `exits.passed`、任务打 `gate:degraded` 标签并追加一条 `task.comment_added`。`pass` 必须至少一条 `checks` 且退出码全为 0，否则按**没给结论**处理（任务原地停住，零事实）。`run.failed`（执行出错）走 `exits.errored` 且**不消耗**预算。判定未通过而离开不算 `exitsForward`，不触发派单；人工拖拽落位清零预算。
+- **闸门（M11，M32 改为 `judge` + 出口表；M40 支持脚本判定）**：阶段可配 `judge = { maxFails }`（空 = 不是闸门；必须 `entry_mode='agent'` 或 `'script'`，**判定者就是闸门阶段自己的执行目标**——它不实现任何东西，只验上一阶段产出；与被验阶段同一智能体时保存 reject，见下条）。`run.succeeded` 时读回执 `verdict`：`pass` 走 `exits.passed` 并把任务上的 `gateFails` 清零；`fail` 未达 `maxFails` 走 `exits.failed` 并 +1；`fail` 已达 `maxFails` **放行**走 `exits.passed`、任务打 `gate:degraded` 标签并追加一条 `task.comment_added`。`pass` 必须至少一条 `checks` 且退出码全为 0，否则按**没给结论**处理（任务原地停住，零事实）。`run.failed`（执行出错）走 `exits.errored` 且**不消耗**预算。判定未通过而离开不算 `exitsForward`，不触发派单；人工拖拽落位清零预算。**脚本闸门**：结论取 `run.exitCode`（`0` = pass、非 0 = fail、`null` = 没给结论，不采信脚本自报的 `verdict`）；`command` 执行器把非 0 退出报成 `failed`/`exit_nonzero`，闸门阶段在结算时归一回 `succeeded`（业务结论交给 `verdict`），非闸门脚本阶段保持 `failed` 走 `errored`；脚本闸门最多一条验收条目（一条命令只能证明一条验收）。
 - **验收归属（M34，取代 M21 验收续轮）**：`acceptance` 只允许出现在闸门阶段（`judge` 非空）；执行阶段带非空验收条目 → `workflow.create/update` 整份 reject（`验收只能配在闸门阶段`）。执行阶段的 `run.succeeded` 不再读任何业务结论，直接走 `exits.done`；`maxRounds` / `tasks.stage_fails` / 出口 `retry` 全部删除，阶段内不再有自动续轮；提示词也不再产「本阶段第 N 轮（上限 M 轮）」段（`roundText` 删除），`stageRoundCount` 只留给会话策略（同阶段第 2 次起开新会话）。闸门阶段的 `pass` 需覆盖全部验收条目：每条验收要有至少一条 `exitCode=0` 的 `checks`（`acceptance: n` 1 基序号）指向它，未覆盖按**没给结论**处理（零事实、停在闸门、不消耗预算）。判定者与被验阶段同一智能体 → 保存时 reject。
 - **人工跳转留痕（M22）**：`task.move` 的落点不等于本阶段自然去向（`on_complete` 解析结果）时，同批追加一条 `author='agent'` 的 `task.comment_added`（「人工跳转：A → B（自然去向：C）」）；不改转移公式，只留痕。
 - **闸门判定与 `run.status` 正交**：`status` 只表达「执行器跑完没有」，`verdict` 表达「业务上过没过」；两者缺一都不能推进闸门。

@@ -8,7 +8,7 @@
  * 规则触发的首轮可带 `RunTrigger`：`ruleId/rulesVersion/eventIds/hops` 写进 run 行，
  * 规则 `prompt` 追加到提示词末尾（固定段，不拼外部事件正文）。
  */
-import type { Task, WorkflowStage } from '../protocol/entities'
+import type { Agent, StageScript, Task, WorkflowStage } from '../protocol/entities'
 import type { Access, PermissionMode } from '../protocol/entities'
 import { ACCESS_BY_PERMISSION } from '../protocol/entities'
 import type { ThreadRow } from '../protocol/thread'
@@ -84,10 +84,12 @@ export function entryRunFacts(
 ): FactDraft<'run.queued'>[] {
   if (task.status !== 'active' || task.currentStageId === null) return []
   const stage = view.stages.get(task.currentStageId)
-  if (!stage || stage.entryMode !== 'agent') return []
-  const agent = stage.agentId === null ? undefined : view.agents.get(stage.agentId)
-  if (!agent) return []
-  const runtime = view.runtimes.get(agent.runtimeId)
+  if (!stage) return []
+  const target = entryTargetOf(view, stage)
+  if (target === null) return []
+  const runtime = view.runtimes.get(
+    target.kind === 'agent' ? target.agent.runtimeId : target.script.runtimeId,
+  )
   if (!runtime) return []
 
   const thread =
@@ -108,15 +110,14 @@ export function entryRunFacts(
   // M28：本阶段已跑过几次（不含本轮）。它只决定会话策略（第 2 次起开新会话），
   // M34 起不再进提示词——续轮已删除，「第 N 轮」对执行没有行动指引。
   const previousRounds = stageRoundCount(view, task.id, stage.id)
-  const prompt = [
-    taskPrompt(agent, task, stage, context, comments, {
-      reviewing,
-      handoffSource: sourceHandoffOf(view, task),
-    }),
-    trigger?.promptExtra ?? '',
-  ]
-    .filter(Boolean)
-    .join('\n\n')
+  const base =
+    target.kind === 'script'
+      ? scriptContextText(task, stage)
+      : taskPrompt(target.agent, task, stage, context, comments, {
+          reviewing,
+          handoffSource: sourceHandoffOf(view, task),
+        })
+  const prompt = [base, trigger?.promptExtra ?? ''].filter(Boolean).join('\n\n')
   // M15：会话键 = (taskId, agentId)。同一任务续接（打回重做 / 反馈 / turn+1），
   // 换任务或换智能体都开新会话——跨任务信息走「任务索引 + 产物路径」，不共享历史。
   //
@@ -127,10 +128,14 @@ export function entryRunFacts(
   // `task.rerun` / 反馈顺带重跑传 `resume`（人主动重跑，要记忆），阶段流转传 `fresh`。
   const attachSession =
     options?.roundSession === undefined ? previousRounds === 0 : options.roundSession === 'resume'
-  const resumeSessionId = attachSession ? (taskSessions(view, task.id)[agent.id] ?? null) : null
+  const resumeSessionId =
+    target.kind === 'agent' && attachSession
+      ? (taskSessions(view, task.id)[target.agent.id] ?? null)
+      : null
   const turn = options?.turn ?? runCountOfTask(view, task.id) + 1
-  // M10：项目文件夹就是本轮的工作目录；任务没有项目（存量 / 未归属）时退回智能体配置。
+  // M10：项目文件夹就是本轮的工作目录；任务没有项目（存量 / 未归属）时退回目标自己的配置。
   const project = task.projectId === null ? undefined : view.projects.get(task.projectId)
+  const ownCwd = target.kind === 'agent' ? target.agent.workdir : target.script.cwd
   return [
     {
       type: 'run.queued',
@@ -143,14 +148,16 @@ export function entryRunFacts(
           taskId: task.id,
           conversationId: null,
           stageId: stage.id,
-          agentId: agent.id,
+          agentId: target.kind === 'agent' ? target.agent.id : null,
+          script: target.kind === 'script' ? target.script : null,
           runtimeId: runtime.id,
           ruleId: trigger?.ruleId ?? null,
           rulesVersion: trigger?.rulesVersion ?? 0,
           executorKey: runtime.executorKey,
           threadId: thread?.id ?? task.threadId,
-          cwd: project?.path ?? agent.workdir ?? '',
-          access: runAccessOf(stage, agent.permissionMode),
+          cwd: project?.path ?? ownCwd ?? '',
+          access:
+            target.kind === 'script' ? 'full' : runAccessOf(stage, target.agent.permissionMode),
           skill: null,
           promptRef: null,
           eventIds: trigger?.eventIds ?? [],
@@ -183,4 +190,48 @@ export function entryRunFacts(
       },
     },
   ]
+}
+
+/**
+ * 阶段执行目标（M40）：智能体或脚本。
+ *
+ * 两者都没有（阶段绑定的智能体 / 脚本已被删除，或 `entryMode` 是 `none` / `user`）返回 null——
+ * 调用方据此零事实，任务停在列里等人，不派给空目标。
+ */
+function entryTargetOf(
+  view: View,
+  stage: WorkflowStage,
+): { kind: 'agent'; agent: Agent } | { kind: 'script'; script: StageScript } | null {
+  if (stage.entryMode === 'agent') {
+    const agent = stage.agentId === null ? undefined : view.agents.get(stage.agentId)
+    return agent === undefined ? null : { kind: 'agent', agent }
+  }
+  if (stage.entryMode === 'script') {
+    const script = stage.script ?? undefined
+    return script === undefined ? null : { kind: 'script', script }
+  }
+  return null
+}
+
+/**
+ * 脚本轮的提示词：只有资料（任务 / 阶段 / 验收条目），没有指令。
+ *
+ * 脚本通常不读 stdin，这段文本的用途是「run 详情页能看懂这一轮在做什么」与审计；
+ * 与智能体轮的 `taskPrompt` 分开，避免把系统提示词、模型、会话这类脚本没有的概念拼进去。
+ */
+function scriptContextText(task: Task, stage: WorkflowStage): string {
+  const lines = ['# 任务', task.title]
+  const description = task.description.trim()
+  if (description !== '') lines.push('', description)
+  lines.push('', '# 阶段', stage.name)
+  const instructions = (stage.instructions ?? '').trim()
+  if (instructions !== '') lines.push('', instructions)
+  const acceptance = stage.acceptance ?? []
+  if (acceptance.length > 0) {
+    lines.push('', '## 验收')
+    for (let index = 0; index < acceptance.length; index += 1) {
+      lines.push(`${index + 1}. ${acceptance[index]}`)
+    }
+  }
+  return lines.join('\n')
 }

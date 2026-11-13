@@ -13,7 +13,7 @@
 import type { RunErrorCode, RunEvent, RunUsage } from '../../../protocol/entities'
 import type { ExecutorIO, Receipt, Turn } from '../../../protocol/executor'
 import type { ExecutorContext, Spawned } from '../../../sdk/types'
-import { expandArgs, parseArgsTemplate, type ArgvVars } from '../../shared/argv'
+import { expandArgs, parseArgsTemplate } from '../../shared/argv'
 import { applyReceiptBlock } from '../../shared/receipt-block'
 import { tail, withStderr } from '../../shared/text'
 
@@ -104,36 +104,47 @@ export async function executeCommandRun(
     return report({ status: 'cancelled', output: '', error: '已取消', errorCode: 'cancelled' })
   }
 
-  // 插件只防御非法 JSON：项数/长度/占位符白名单由协议层与 IPC 拒绝
-  let template: string[]
-  try {
-    template = parseArgsTemplate(runtime.argsTemplate)
-  } catch (error) {
-    return report({ status: 'failed', output: '', error: errMsg(error), errorCode: 'run_failed' })
+  // 插件只防御非法 JSON：项数/长度/占位符白名单由协议层与 IPC 拒绝。
+  // M40：脚本阶段把 argv 直接放在 `turn.args`（执行配置），逐项原样传参、不展开占位符。
+  let args: string[]
+  let promptInArgs: boolean
+  if (turn.args === undefined) {
+    let template: string[]
+    try {
+      template = parseArgsTemplate(runtime.argsTemplate)
+    } catch (error) {
+      return report({ status: 'failed', output: '', error: errMsg(error), errorCode: 'run_failed' })
+    }
+    const expanded = expandArgs(template, {
+      // 占位符 {model} 保持 `provider/model` 原文（与配置里写的形态一致）
+      model: turn.model ? `${turn.model.provider}/${turn.model.id}` : '',
+      effort: turn.effort ?? '',
+      cwd: turn.cwd || sdk.paths.cwd || '',
+      context: turn.contextFile ?? '',
+      prompt: turn.prompt,
+    })
+    args = expanded.args
+    promptInArgs = expanded.promptInArgs
+  } else {
+    args = [...turn.args]
+    promptInArgs = false
   }
 
-  const resolved = sdk.process.resolve(runtime.command)
+  // M40：命令本体也是执行配置——脚本阶段随阶段走，缺省用连接上的 command
+  const commandName = turn.command ?? runtime.command
+  const resolved = sdk.process.resolve(commandName)
   if (!resolved.path) {
     return report({
       status: 'failed',
       output: '',
-      error: resolved.error ?? `找不到可执行文件：${runtime.command}`,
+      error: resolved.error ?? `找不到可执行文件：${commandName}`,
       errorCode: 'spawn_failed',
     })
   }
 
-  // cwd 由内核按「项目文件夹 > 智能体工作目录」写进 run.cwd；空串回落到宿主默认目录
+  // cwd 由内核按「项目文件夹 > 目标的工作目录」写进 run.cwd；空串回落到宿主默认目录
   // （不把空串传给 spawn，避免 ENOENT）
   const cwd = turn.cwd || sdk.paths.cwd
-  const vars: ArgvVars = {
-    // 占位符 {model} 保持 `provider/model` 原文（与配置里写的形态一致）
-    model: turn.model ? `${turn.model.provider}/${turn.model.id}` : '',
-    effort: turn.effort ?? '',
-    cwd: cwd ?? '',
-    context: turn.contextFile ?? '',
-    prompt: turn.prompt,
-  }
-  const { args, promptInArgs } = expandArgs(template, vars)
   const command = resolved.path
   // 安全：批处理脚本经 cmd.exe 执行时，argv 仍会被 cmd.exe 重新解析；提示词只允许走 stdin。
   if (isWindowsCommandScript(command) && promptInArgs) {
@@ -291,8 +302,10 @@ export async function executeCommandRun(
     })
     turn.signal.addEventListener('abort', onAbort, { once: true })
 
-    if (!promptInArgs) {
-      // 模板没有 {prompt}：提示词只经 stdin 传给子进程，不进 argv
+    if (!promptInArgs && turn.prompt !== '') {
+      // 模板没有 {prompt}：提示词只经 stdin 传给子进程，不进 argv。
+      // M40：脚本轮的提示词只是资料，可能为空——空串不写 stdin（脚本秒退时管道已关，
+      // 写入会抛错并被当成 spawn_failed）。
       try {
         child.stdin?.write(turn.prompt)
         child.stdin?.end()

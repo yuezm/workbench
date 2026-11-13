@@ -10,6 +10,7 @@ import {
   type StageHandoff,
   type StageHandoffGuard,
   type StageInput,
+  type StageScript,
   type WorkflowInput,
   type WorkflowStage,
   type WorkflowWithStages,
@@ -31,6 +32,14 @@ import { cn } from '../../../lib/cn'
 import { useRowDrag } from '../../../lib/use-row-drag'
 import { useKernelView } from '../../../shell/useKernelView'
 import { STAGE_KIND_META } from '../model/stage-kinds'
+import {
+  formatArgLines,
+  formatEnvLines,
+  defaultScript,
+  parseArgLines,
+  parseEnvLines,
+  SCRIPT_TIMEOUT_CHOICES,
+} from '../model/stage-script'
 import {
   dropStageIndexes,
   emptyStage,
@@ -58,16 +67,54 @@ function indexOfId(workflow: WorkflowWithStages, id: string | null): number {
 }
 
 /**
+ * 脚本参数 / 环境变量的多行输入（M40）：**本地保留原文**，每次改动解析后写回草稿。
+ *
+ * 不能直接受控于「解析结果再格式化」——输入 `CI` 时还没有 `=`，解析结果为空对象，
+ * 格式化回去会把用户刚敲的字擦掉；参数同理（半行被 trim 掉）。切换阶段时由 `key` 重建。
+ */
+function ScriptLinesField({
+  label,
+  placeholder,
+  rows,
+  initial,
+  parse,
+  onCommit,
+}: {
+  label: string
+  placeholder: string
+  rows: number
+  initial: string
+  parse: (text: string) => unknown
+  onCommit: (parsed: unknown) => void
+}): ReactElement {
+  const [text, setText] = useState(initial)
+  return (
+    <Textarea
+      aria-label={label}
+      rows={rows}
+      value={text}
+      placeholder={placeholder}
+      onChange={(event) => {
+        setText(event.target.value)
+        onCommit(parse(event.target.value))
+      }}
+    />
+  )
+}
+
+/**
  * 阶段在编辑器里的「进入方式」：闸门不是独立 `entryMode`，而是 agent 阶段上的一个开关
  * （M11）。UI 上把它单列一项，是为了让人一眼看出这是一道判定关卡。
  *
  * 与协议里的阶段**类别**（`stageKindOf`：未开始 / 进行中 / 已完成 / 已关闭）是两件事，
  * 因此这里叫 `entryKind`——类别决定颜色与位置，进入方式决定进到这一阶段发生什么。
  */
-type EntryKind = EntryMode | 'gate'
+type EntryKind = EntryMode | 'gate' | 'script-gate'
 
 function entryKindOf(stage: StageInput): EntryKind {
-  return stage.judge ? 'gate' : stage.entryMode
+  if (!stage.judge) return stage.entryMode
+  // 闸门有两种判定者：智能体（回执 verdict）与脚本（退出码），类型下拉分开列
+  return stage.entryMode === 'script' ? 'script-gate' : 'gate'
 }
 
 /**
@@ -76,13 +123,14 @@ function entryKindOf(stage: StageInput): EntryKind {
  */
 function hasFlowDetail(stage: StageInput): boolean {
   const kind = entryKindOf(stage)
-  return kind === 'agent' || kind === 'gate'
+  return kind === 'agent' || kind === 'gate' || kind === 'script' || kind === 'script-gate'
 }
 
 /** 交接与拆子任务只属于真干活的智能体阶段：闸门只判定过没过，不交接、不拆子任务。 */
-/** 派单挂在「离开阶段」上：会跑单的阶段（交给智能体 / 闸门）才有自动触发条件。 */
+/** 派单挂在「离开阶段」上：会跑单的阶段（交给智能体 / 闸门 / 执行脚本）才有自动触发条件。 */
 function hasHandoffDetail(stage: StageInput): boolean {
-  return entryKindOf(stage) === 'agent' || entryKindOf(stage) === 'gate'
+  const kind = entryKindOf(stage)
+  return kind === 'agent' || kind === 'gate' || kind === 'script' || kind === 'script-gate'
 }
 
 function hasRelayDetail(stage: StageInput): boolean {
@@ -122,9 +170,9 @@ const HANDOFF_GUARD_LABELS: Record<StageHandoffGuard, string> = {
 function guardChoicesFor(stage: StageInput): Array<{ value: StageHandoffGuard; label: string }> {
   const kind = entryKindOf(stage)
   const guards: StageHandoffGuard[] =
-    kind === 'gate'
+    kind === 'gate' || kind === 'script-gate'
       ? ['passed', 'failed', 'errored', 'manual']
-      : kind === 'agent'
+      : kind === 'agent' || kind === 'script'
         ? ['done', 'errored', 'manual']
         : ['manual']
   return guards.map((value) => ({ value, label: HANDOFF_GUARD_LABELS[value] }))
@@ -167,9 +215,14 @@ function exitOf(stage: StageInput, guard: StageExitGuard): StageExitInput | unde
  */
 function pruneByEntryKind(stage: StageInput): StageInput {
   const kind = entryKindOf(stage)
-  if (kind === 'agent') {
+  const isScript = kind === 'script' || kind === 'script-gate'
+  if (kind === 'agent' || kind === 'script') {
     return {
       ...stage,
+      // M40：脚本阶段不挂智能体，其余阶段不挂脚本（两者互斥）
+      entryMode: isScript ? 'script' : 'agent',
+      agentId: isScript ? null : stage.agentId,
+      script: isScript ? (stage.script ?? null) : null,
       judge: null,
       // 验收是闸门的判据清单：执行阶段不给自己判分
       acceptance: [],
@@ -177,9 +230,12 @@ function pruneByEntryKind(stage: StageInput): StageInput {
       exits: (stage.exits ?? []).filter((exit) => exit.on === 'done' || exit.on === 'errored'),
     }
   }
-  if (kind === 'gate') {
+  if (kind === 'gate' || kind === 'script-gate') {
     return {
       ...stage,
+      entryMode: isScript ? 'script' : 'agent',
+      agentId: isScript ? null : stage.agentId,
+      script: isScript ? (stage.script ?? null) : null,
       // 判定阶段跑完不给结论就不算离开，done 这一支永远不触发
       exits: (stage.exits ?? []).filter((exit) => exit.on !== 'done'),
       handoffs: (stage.handoffs ?? []).filter((handoff) => handoff.on !== 'done'),
@@ -206,6 +262,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     // M26：阶段超时同理
     runTimeoutMs: null,
     judge: null,
+    // M40：不派活的阶段也不该留脚本
+    script: null,
   }
 }
 
@@ -434,6 +492,11 @@ export function WorkflowEditor({
   const [selected, setSelected] = useState(() => firstUserStageIndex(draft.stages))
   // 阶段绑定的智能体清单：自己订阅视图，不再由页面传入
   const agents = useKernelView('agents.all') ?? []
+  // 阶段脚本的连接候选：只列已启用的命令执行器（内核不校验 executorKey，界面替人挡一层）
+  const runtimes = useKernelView('runtimes.all') ?? []
+  const commandRuntimes = runtimes.filter(
+    (runtime) => runtime.enabled && runtime.executorKey === 'command',
+  )
   // 交接目标候选：全部工作流里排除当前工作流（内核保存时还会再校验一次）
   const workflows = useKernelView('workflows.all') ?? []
   const handoffWorkflows = workflows.filter((item) => item.id !== workflow?.id)
@@ -443,6 +506,24 @@ export function WorkflowEditor({
 
   const patchStage = (i: number, patch: Partial<StageInput>): void =>
     setDraft((d) => ({ ...d, stages: d.stages.map((s, k) => (k === i ? { ...s, ...patch } : s)) }))
+
+  /** 改脚本配置：没有脚本时忽略（切到脚本类型时由类型下拉补一份默认配置） */
+  const patchScript = (i: number, patch: Partial<StageScript>): void => {
+    const current = draft.stages[i]?.script
+    if (!current) return
+    patchStage(i, { script: { ...current, ...patch } })
+  }
+
+  /** 切到「执行脚本」：清掉智能体、按需补一份默认脚本配置（保留已填的） */
+  const toScript = (i: number, gated: boolean): void => {
+    const stage = draft.stages[i]
+    patchStage(i, {
+      entryMode: 'script',
+      agentId: null,
+      judge: gated ? { maxFails: 3 } : null,
+      script: stage?.script ?? defaultScript(commandRuntimes[0]?.id ?? ''),
+    })
+  }
 
   /** 改派单清单：按行下标替换 / 删除，列表整体回写（派单没有下标型引用，不必重映射） */
   const patchHandoffs = (i: number, next: readonly StageHandoff[]): void =>
@@ -577,6 +658,7 @@ export function WorkflowEditor({
   /** 各下拉框的候选值：取值不在候选里时按空值展示（引用的对象已被删） */
   const targetValues = targetOptions.map((t) => String(t.i))
   const agentIds = agents.map((a) => a.id)
+  const commandRuntimeIds = commandRuntimes.map((runtime) => runtime.id)
   const handoffWorkflowIds = handoffWorkflows.map((w) => w.id)
   const guardChoices = guardChoicesFor(stage)
   const subtaskStageIds = draft.stages.flatMap((s) => (s.id === undefined ? [] : [s.id]))
@@ -749,10 +831,16 @@ export function WorkflowEditor({
                     patchStage(index, {
                       entryMode: 'agent',
                       judge: { maxFails: 3 },
+                      script: null,
                     })
                     return
                   }
-                  patchStage(index, { entryMode: v as EntryMode, judge: null })
+                  // M40：脚本两种（判定 / 不判定）共用同一套脚本配置
+                  if (v === 'script' || v === 'script-gate') {
+                    toScript(index, v === 'script-gate')
+                    return
+                  }
+                  patchStage(index, { entryMode: v as EntryMode, judge: null, script: null })
                 }}
               >
                 <SelectTrigger aria-label={`阶段${n}类型`} className="w-full">
@@ -761,7 +849,9 @@ export function WorkflowEditor({
                 <SelectContent>
                   <SelectItem value="none">不交接</SelectItem>
                   <SelectItem value="agent">交给智能体</SelectItem>
+                  <SelectItem value="script">执行脚本</SelectItem>
                   <SelectItem value="gate">闸门（判定）</SelectItem>
+                  <SelectItem value="script-gate">脚本闸门（判定）</SelectItem>
                   <SelectItem value="user">交给用户</SelectItem>
                 </SelectContent>
               </Select>
@@ -785,6 +875,93 @@ export function WorkflowEditor({
                   </SelectContent>
                 </Select>
               </Field>
+            )}
+            {stage.entryMode === 'script' && stage.script && (
+              <div className="mt-3 flex w-full flex-col gap-2 rounded-md border border-border p-3">
+                <div className="flex flex-wrap items-end gap-2">
+                  <Field label="运行时" className="w-44">
+                    <Select
+                      value={picked(stage.script.runtimeId, commandRuntimeIds)}
+                      onValueChange={(v) => patchScript(index, { runtimeId: v })}
+                    >
+                      <SelectTrigger aria-label={`阶段${n}脚本运行时`} className="w-full">
+                        <SelectValue placeholder="选择" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {commandRuntimes.map((runtime) => (
+                          <SelectItem key={runtime.id} value={runtime.id}>
+                            {runtime.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="命令" className="min-w-0 flex-1">
+                    <Input
+                      aria-label={`阶段${n}脚本命令`}
+                      value={stage.script.command}
+                      placeholder="pnpm"
+                      onChange={(event) => patchScript(index, { command: event.target.value })}
+                    />
+                  </Field>
+                </div>
+                <Field label="参数（一行一个，逐项传参）">
+                  <ScriptLinesField
+                    key={`args-${stage.id ?? index}`}
+                    label={`阶段${n}脚本参数`}
+                    rows={3}
+                    placeholder={'check\n--reporter=dot'}
+                    initial={formatArgLines(stage.script.args)}
+                    parse={(text) => parseArgLines(text)}
+                    onCommit={(parsed) => patchScript(index, { args: parsed as readonly string[] })}
+                  />
+                </Field>
+                <div className="flex flex-wrap items-end gap-2">
+                  <Field label="工作目录" className="min-w-0 flex-1">
+                    <Input
+                      aria-label={`阶段${n}脚本工作目录`}
+                      value={stage.script.cwd ?? ''}
+                      placeholder="留空 = 项目文件夹"
+                      onChange={(event) =>
+                        patchScript(index, { cwd: event.target.value.trim() || null })
+                      }
+                    />
+                  </Field>
+                  <Field label="超时" className="w-36">
+                    <Select
+                      value={String(stage.script.timeoutMs ?? SCRIPT_TIMEOUT_CHOICES[1].value)}
+                      onValueChange={(v) => patchScript(index, { timeoutMs: Number(v) })}
+                    >
+                      <SelectTrigger aria-label={`阶段${n}脚本超时`} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SCRIPT_TIMEOUT_CHOICES.map((choice) => (
+                          <SelectItem key={choice.value} value={choice.value}>
+                            {choice.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                <Field label="环境变量（一行一个 KEY=VALUE）">
+                  <ScriptLinesField
+                    key={`env-${stage.id ?? index}`}
+                    label={`阶段${n}脚本环境变量`}
+                    rows={2}
+                    placeholder="CI=1"
+                    initial={formatEnvLines(stage.script.env)}
+                    parse={(text) => parseEnvLines(text)}
+                    onCommit={(parsed) =>
+                      patchScript(index, { env: parsed as Record<string, string> })
+                    }
+                  />
+                </Field>
+                <p className="text-xs text-faint-foreground">
+                  脚本不产生提示词、不续会话；判定阶段按退出码给结论（0 = 通过，非 0 = 未通过）。
+                </p>
+              </div>
             )}
           </div>
 

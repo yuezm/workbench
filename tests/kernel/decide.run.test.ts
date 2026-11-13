@@ -9,6 +9,7 @@ import type {
   Conversation,
   RunRow,
   Runtime,
+  StageScript,
   Task,
   Workflow,
   WorkflowStage,
@@ -22,7 +23,7 @@ import type { Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
 import type { ReviewReport } from '../../src/protocol/review'
 import { decide } from '../../src/kernel/decide'
 import { runAccessOf } from '../../src/kernel/task-effects'
-import { degradedCommentText, stageRoundCount } from '../../src/kernel/commands/run'
+import { degradedCommentText, stageRoundCount, stageTimeoutOf } from '../../src/kernel/commands/run'
 import { project } from '../../src/kernel/project'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
@@ -2276,5 +2277,103 @@ describe('kernel/decide 出错不自动重跑（M34）', () => {
     expect((moved?.payload as { to: string }).to).toBe('st-fix')
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     expect((queued?.payload as { run: RunRow }).run.stageId).toBe('st-fix')
+  })
+})
+
+describe('脚本轮（M40）：退出码即闸门结论', () => {
+  const scriptOf = (over: Partial<StageScript> = {}): StageScript => ({
+    runtimeId: 'rt-1',
+    command: 'pnpm',
+    args: ['check'],
+    cwd: null,
+    env: {},
+    timeoutMs: null,
+    ...over,
+  })
+
+  const scriptRun = (over: Partial<RunRow> = {}): RunRow =>
+    running({ stageId: 'st-2', agentId: null, script: scriptOf(), ...over })
+
+  const judgeStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({
+      id: 'st-2',
+      position: 1,
+      name: '自测',
+      entryMode: 'script',
+      agentId: null,
+      script: scriptOf(),
+      judge: { maxFails: 2 },
+      exits: { passed: { do: 'goto', stageId: 'st-3' }, failed: { do: 'goto', stageId: 'st-1' } },
+      ...over,
+    })
+
+  const scriptView = (over: Partial<WorkflowStage> = {}, runOver: Partial<RunRow> = {}): View =>
+    view({
+      workflows: [workflow()],
+      agents: [agent()],
+      runtimes: [runtime()],
+      stages: [
+        stage({ id: 'st-1', position: 0 }),
+        judgeStage(over),
+        stage({ id: 'st-3', position: 2 }),
+      ],
+      tasks: [task({ currentStageId: 'st-2' })],
+      runs: [scriptRun(runOver)],
+    })
+
+  it('退出码 0 → 走通过分支', () => {
+    const decision = receive(scriptView(), 'run-1', receipt({ status: 'succeeded', exitCode: 0 }))
+    expect(decision.reject).toBeUndefined()
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
+  })
+
+  it('退出码非 0：结算归一成 succeeded（跑完了），业务判 fail 走未通过分支', () => {
+    const decision = receive(
+      scriptView(),
+      'run-1',
+      receipt({ status: 'failed', errorCode: 'exit_nonzero', exitCode: 1 }),
+    )
+    const succeeded = decision.facts.find((fact) => fact.type === 'run.succeeded')
+    expect(succeeded).toBeDefined()
+    expect((succeeded?.payload as { run: RunRow }).run.exitCode).toBe(1)
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-1' })
+    expect((moved?.payload as { task: Task }).task.gateFails).toBe(1)
+  })
+
+  it('拿不到退出码（超时 / 起不来）→ 没给结论：原地停、不消耗预算', () => {
+    const decision = receive(
+      scriptView(),
+      'run-1',
+      receipt({ status: 'failed', errorCode: 'timeout' }),
+    )
+    expect(decision.facts.some((fact) => fact.type === 'run.failed')).toBe(true)
+    expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
+  })
+
+  it('非闸门脚本阶段：退出码非 0 仍是执行出错，走 errored 分支', () => {
+    const decision = receive(
+      scriptView(
+        {
+          judge: null,
+          exits: { errored: { do: 'goto', stageId: 'st-3' } },
+        },
+        {},
+      ),
+      'run-1',
+      receipt({ status: 'failed', errorCode: 'exit_nonzero', exitCode: 1 }),
+    )
+    expect(decision.facts.some((fact) => fact.type === 'run.failed')).toBe(true)
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
+  })
+
+  it('超时优先级：脚本自己的超时 > 阶段超时 > 全局缺省', () => {
+    const timeoutOf = stageTimeoutOf(scriptView({ runTimeoutMs: 1_800_000 }), limits())
+    expect(timeoutOf(scriptRun({ script: scriptOf({ timeoutMs: 300_000 }) }))).toBe(300_000)
+    expect(timeoutOf(scriptRun())).toBe(1_800_000)
+    const plain = stageTimeoutOf(scriptView({ runTimeoutMs: null }), limits())
+    expect(plain(scriptRun())).toBe(limits().runTimeoutMs)
   })
 })

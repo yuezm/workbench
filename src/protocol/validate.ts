@@ -24,6 +24,8 @@ import {
   RUN_ERROR_CODES,
   RUN_EVENT_TYPES,
   RUN_TERMINAL_STATUSES,
+  SCRIPT_FORBIDDEN_PLACEHOLDERS,
+  SCRIPT_LIMITS,
   SPAWN_POLICIES,
   STAGE_HANDOFF_GUARDS,
   STAGE_TIMEOUT_LIMITS,
@@ -292,6 +294,49 @@ const checkHandoffs = (value: unknown, label: string): Check => {
   return null
 }
 
+/**
+ * 阶段脚本（M40）：形状校验。命令必填、参数逐项、环境变量复用智能体口径、
+ * 超时与阶段同范围；占位符一律拒绝（脚本没有提示词 / 模型 / 思考强度可展开）。
+ */
+const checkScript = (value: unknown, label: string): Check => {
+  const script = asRecord(value)
+  if (!script) return `${label} 必须是对象`
+  return (
+    requiredId(script.runtimeId, `${label}.runtimeId`) ??
+    required(script.command, `${label}.command`, COMMAND_LIMITS.command) ??
+    checkScriptArgs(script.args, `${label}.args`) ??
+    optionalText(script.cwd, `${label}.cwd`, COMMAND_LIMITS.workdir) ??
+    checkEnv(script.env, `${label}.env`) ??
+    optionalIntegerIn(
+      script.timeoutMs,
+      `${label}.timeoutMs`,
+      STAGE_TIMEOUT_LIMITS.minMs,
+      STAGE_TIMEOUT_LIMITS.maxMs,
+    )
+  )
+}
+
+/** 脚本参数：字符串数组，项数与单项长度受 `SCRIPT_LIMITS` 约束，不允许占位符。 */
+const checkScriptArgs = (value: unknown, label: string): Check => {
+  if (value === undefined || value === null) return null
+  if (!Array.isArray(value)) return `${label} 必须是字符串数组`
+  if (value.length > SCRIPT_LIMITS.maxArgs) return `${label} 最多 ${SCRIPT_LIMITS.maxArgs} 项`
+  for (let index = 0; index < value.length; index += 1) {
+    const item = value[index]
+    if (typeof item !== 'string') return `${label}[${index}] 必须是字符串`
+    if (item.length > SCRIPT_LIMITS.maxArgChars) {
+      return `${label}[${index}] 最长 ${SCRIPT_LIMITS.maxArgChars} 个字符`
+    }
+    const placeholder = /\{([a-z]+)\}/g
+    for (const match of item.matchAll(placeholder)) {
+      if ((SCRIPT_FORBIDDEN_PLACEHOLDERS as readonly string[]).includes(match[1])) {
+        return `${label}[${index}] 不支持占位符 {${match[1]}}（脚本没有提示词 / 模型）`
+      }
+    }
+  }
+  return null
+}
+
 const checkStage = (value: unknown, label: string): Check => {
   const stage = asRecord(value)
   if (!stage) return `${label} 必须是对象`
@@ -302,6 +347,10 @@ const checkStage = (value: unknown, label: string): Check => {
     // M18 内置阶段键：只认四个固定值，锁名 / 锁位 / 锁类别由内核按它判
     optionalEnum(stage.builtin, `${label}.builtin`, BUILTIN_STAGE_KEYS) ??
     optionalId(stage.agentId, `${label}.agentId`) ??
+    // M40 阶段脚本：形状在这里挡；「与 entryMode 是否配套」由内核判
+    (stage.script === undefined || stage.script === null
+      ? null
+      : checkScript(stage.script, `${label}.script`)) ??
     optionalIntegerIn(
       stage.onCompleteIndex,
       `${label}.onCompleteIndex`,

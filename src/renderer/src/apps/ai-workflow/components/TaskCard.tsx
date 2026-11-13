@@ -26,6 +26,7 @@ const HINTS: Record<WorkflowStage['entryMode'], string> = {
   none: '拖动推进',
   user: '等待你处理',
   agent: '可拖走重试',
+  script: '等待执行脚本',
 }
 
 /**

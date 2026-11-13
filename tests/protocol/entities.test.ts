@@ -374,7 +374,7 @@ describe('protocol/entities', () => {
     expect([...ARGV_PLACEHOLDERS]).toEqual(['model', 'effort', 'cwd', 'context', 'prompt'])
     expect([...PERMISSION_MODES]).toEqual(['read-only', 'workspace-write', 'danger-full-access'])
     expect([...PROBE_STATES]).toEqual(['ready', 'unavailable'])
-    expect([...ENTRY_MODES]).toEqual(['none', 'agent', 'user'])
+    expect([...ENTRY_MODES]).toEqual(['none', 'agent', 'script', 'user'])
     expect([...TASK_STATUSES]).toEqual(['active', 'completed'])
     expect([...RUN_STATUSES]).toEqual([
       'queued',

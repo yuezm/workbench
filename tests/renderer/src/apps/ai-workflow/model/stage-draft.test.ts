@@ -51,6 +51,7 @@ describe('emptyStage / builtinStageDraft', () => {
       acceptance: [],
       runTimeoutMs: null,
       judge: null,
+      script: null,
     })
   })
 

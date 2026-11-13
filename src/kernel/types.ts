@@ -59,7 +59,7 @@ export type Iso = string
  * M34：阶段表去掉七个废弃列（S4）——旧的去向 / 交接 / 判定列物理删除，行按新口径重建，
  * 顺手让所有库的投影重新按事实折一遍（新列的形状变了）。
  */
-export const KERNEL_VERSION = 'M34.0.0'
+export const KERNEL_VERSION = 'M40.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

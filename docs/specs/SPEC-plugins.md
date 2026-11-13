@@ -12,7 +12,7 @@
 | `channel`  | 卡片送到哪、答案怎么回来                                 | 展示卡片、收回答、回报投递状态                 | 改卡片内容、改派活                 |
 | `app`      | 人看到的界面                                             | 注册视图组件、发命令、发自身事件               | 算业务规则、直读数据库             |
 
-**派活链固定为：规则或阶段 → 智能体 `agentId` → 该智能体的运行时 `runtimeId` → 运行时的 `executorKey` 选执行器插件。** 执行器只负责「怎么调起 CLI」，不决定也不领取任务（领取由宿主调度器按运行时发起）。
+**派活链固定为：规则或阶段 → 执行目标（智能体 `agentId` 或脚本 `script`）→ 运行时 `runtimeId` → 运行时的 `executorKey` 选执行器插件。** 执行器只负责「怎么调起 CLI」，不决定也不领取任务（领取由宿主调度器按运行时发起）。脚本是第二个执行目标（M40）：命令与参数是执行配置，不产生提示词、不续会话、不派活。
 
 交付流水线（CI/CD）**不是第五类插件**：它是「自动化规则 + 智能体 + 项目配置」的组合。
 
@@ -201,7 +201,9 @@ export interface Turn {
   turn: number // 第几轮（续接递增）
   purpose: 'stage' | 'chat'
   prompt: string // 宿主按模板拼好
-  cwd: string // 项目文件夹 > 智能体工作目录 > 空串（宿主默认目录）
+  cwd: string // 项目文件夹 > 智能体工作目录（脚本阶段为脚本 cwd）> 空串（宿主默认目录）
+  command?: string // M40 脚本阶段：命令覆盖（缺省用运行时连接上的 command）
+  args?: readonly string[] // M40 脚本阶段：argv 逐项原样传参、不展开占位符（缺省用 argsTemplate）
   access: Access // 由智能体的 permissionMode 映射
   model?: { provider: string; id: string } | null // 智能体的模型配置
   effort?: string | null // 智能体的思考强度
@@ -378,7 +380,7 @@ export interface AppPlugin {
 | 类型     | id                | 说明（运行时协议）                                                                                                                                                                                                                                                                                                                                                      | 现状来源                                                                           |
 | -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | executor | `dsh`             | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                                                                                                                                                                                                                                                                                | `src/plugins/executors/dsh/`（含 `detect.ts`）                                     |
-| executor | `command`         | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**不提供 `detect`/`probe`**                                                                                                                                                                                                                                                                | `src/plugins/executors/command/`                                                   |
+| executor | `command`         | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**M40**：脚本阶段用 `Turn.command` / `Turn.args`（逐项原样、不展开），`prompt` 为空时不写 stdin；**不提供 `detect`/`probe`**                                                                                                                                                               | `src/plugins/executors/command/`                                                   |
 | executor | `remote`          | 远端 Worker 架构位（M7）：无传输时回执 `runtime_missing`，有传输时透传事件/回执；不监听端口                                                                                                                                                                                                                                                                             | `src/plugins/executors/remote/`（M7）                                              |
 | executor | `claude`          | Claude Code `--print --output-format stream-json`：提示词走 stdin、逐行 JSON 帧；探测要求 `--help` 含 `--print`/`--output-format`；不支持 `models`                                                                                                                                                                                                                      | `src/plugins/executors/claude/`（2026-11-08）                                      |
 | executor | `hermes`          | Hermes Agent `hermes acp`（ACP / JSON-RPC 2.0 over stdio）：initialize → session/new\|load → set_mode/set_model → prompt；审批往返回帧、取消走 `session/cancel`                                                                                                                                                                                                         | `src/plugins/executors/hermes/`（2026-11-08）                                      |

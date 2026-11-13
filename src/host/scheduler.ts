@@ -27,6 +27,7 @@ import type {
   RunEventRow,
   RunRow,
   Runtime,
+  StageScript,
 } from '../protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
 import type { Fact, Id, Iso } from '../kernel/types'
@@ -335,6 +336,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const agentOf = (run: RunRow): Agent | undefined =>
     run.agentId === null ? undefined : deps.agents().find((agent) => agent.id === run.agentId)
 
+  /**
+   * 本轮的执行目标（M40）：智能体或脚本。
+   *
+   * 脚本的执行配置是 run 行上的快照（`run.script`），不查配置——阶段配置后来改了，
+   * 已经入队的这一轮仍按入队时的命令跑，与 `prompt` / `cwd` / `access` 同口径。
+   */
+  const targetOf = (
+    run: RunRow,
+  ): { kind: 'agent'; agent: Agent } | { kind: 'script'; script: StageScript } | null => {
+    const script = run.script ?? null
+    if (script !== null) return { kind: 'script', script }
+    const agent = agentOf(run)
+    return agent === undefined ? null : { kind: 'agent', agent }
+  }
+
   /** 归档标签（M16）：装配根没接视图查询时退化成 id——可读性差，但归档不中断。 */
   const labelsOf = (run: RunRow): RunArchiveLabels =>
     deps.describeRun?.(run) ?? {
@@ -393,17 +409,23 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
    * 执行配置（模型 / 思考强度 / 环境变量）来自**智能体**；`cwd` 与 `access` 在入队时
    * 已由内核按智能体配置写进 run 行（项目文件夹优先），这里原样透传。
    */
-  const turnOf = (run: RunRow, agent: Agent, signal: AbortSignal): Turn => ({
+  const turnOf = (
+    run: RunRow,
+    target: { kind: 'agent'; agent: Agent } | { kind: 'script'; script: StageScript },
+    signal: AbortSignal,
+  ): Turn => ({
     runId: run.id,
     leaseId: run.leaseId ?? `${run.id}:${Math.max(1, run.attempt)}`,
     turn: run.turn,
     purpose: run.purpose,
     prompt: run.prompt,
     cwd: run.cwd,
+    command: target.kind === 'script' ? target.script.command : undefined,
+    args: target.kind === 'script' ? [...target.script.args] : undefined,
     access: run.access,
-    model: modelOf(agent),
-    effort: agent.reasoningEffort,
-    env: agent.env,
+    model: target.kind === 'agent' ? modelOf(target.agent) : null,
+    effort: target.kind === 'agent' ? target.agent.reasoningEffort : null,
+    env: target.kind === 'agent' ? target.agent.env : target.script.env,
     resumeSessionId: run.resumeSessionId,
     // 聊天续接轮的重试提示词（完整历史）：协议会话失效时执行器用它重发一次
     fallbackPrompt: run.purpose === 'chat' ? (deps.chatFallbackPrompt?.(run) ?? null) : null,
@@ -419,7 +441,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   const execute = async (
     run: RunRow,
-    agent: Agent,
+    target: { kind: 'agent'; agent: Agent } | { kind: 'script'; script: StageScript },
     controller: AbortController,
     port: ExecutorPort,
   ): Promise<void> => {
@@ -563,7 +585,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       registry.begin(run.id, now())
       // 派发前先落本轮提示词（M16）：中途崩溃 / 失败也能回看「到底给了它什么」
       writeRunPrompt(deps.artifactsRoot, run, labelsOf(run), run.prompt, now())
-      const receipt = await port.run(turnOf(run, agent, controller.signal), io)
+      const receipt = await port.run(turnOf(run, target, controller.signal), io)
       // 兜底取消已落终态：迟到的回执不再写事实（清理统一走 finally）
       if (finished) return
       // 终态前先关缓冲再 flush：保证 receipt 之前所有帧都已入账（后续帧被拒绝）。
@@ -629,10 +651,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       settleFailed(run, 'runtime_disabled', '运行时已停用')
       return
     }
-    // 执行配置在智能体上：智能体没了就没有模型 / 权限 / 环境变量可用，直接落失败终态
-    const agent = agentOf(run)
-    if (!agent) {
-      settleFailed(run, 'run_failed', '智能体不存在（可能已被删除）')
+    // 执行配置在目标上：智能体 / 脚本都没了就没有模型 / 权限 / 环境变量可用，直接落失败终态
+    const target = targetOf(run)
+    if (target === null) {
+      settleFailed(run, 'run_failed', '智能体或脚本不存在（可能已被删除）')
       return
     }
     // 执行器插件缺失：配置引用了未注册的 executorKey（M3 D7）。用既有 errorCode
@@ -646,7 +668,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     controllers.set(run.id, controller)
     // 收尾（删控制器 / 唤醒 / 置空闲）统一在 execute 的 finally 里做：取消兜底路径
     // 也要能提前释放执行位，不能在两条路径上各写一份。
-    void execute(run, agent, controller, port)
+    void execute(run, target, controller, port)
   }
 
   /**

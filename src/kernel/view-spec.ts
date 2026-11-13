@@ -14,12 +14,12 @@ import type { ProjectionTable } from './types'
 export function viewSpec(input: Input): ProjectionTable[] {
   switch (input.type) {
     case 'workflow.create':
-      // 阶段绑定的智能体必须存在（旧实现靠外键，M1 由内核校验）；
+      // 阶段绑定的智能体 / 脚本运行时必须存在（旧实现靠外键，M1 由内核校验）；
       // M7：阶段的交接目标工作流 / 目标阶段也要校验存在与从属
-      return ['agents', 'workflows', 'workflow_stages']
+      return ['agents', 'runtimes', 'workflows', 'workflow_stages']
     case 'workflow.update':
       // 改阶段：既有阶段做差量、任务的当前阶段可能因删阶段而重挂、活跃 run 守卫
-      return ['workflows', 'workflow_stages', 'agents', 'tasks']
+      return ['workflows', 'workflow_stages', 'agents', 'runtimes', 'tasks']
     case 'workflow.remove':
       // 级联删阶段、任务与运行；run 要先逐条产 run.removed（D13），不能靠 SQL 级联
       return ['workflows', 'workflow_stages', 'tasks', 'runs']

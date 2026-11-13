@@ -128,6 +128,8 @@ const STAGES_M7_COLUMNS = [
   'position',
   'entry_mode',
   'agent_id',
+  // M40：阶段脚本（JSON 文本；null = 不是脚本阶段）
+  'script_json',
   // M32：出口表 / M29：派单（M34 起旧七列已物理删除）
   'exits_json',
   'handoffs_json',
@@ -427,7 +429,9 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     // name | type | notnull | default | pk
     expect(shapeOf('acceptance_json')).toBe("acceptance_json|TEXT|1|'[]'|0")
     expect(shapeOf('max_rounds')).toBeUndefined()
-    expect(STAGES_REQUIRED_COLUMNS).toHaveLength(10)
+    // M40：脚本列进入必须列清单（旧库缺它即重建一次）
+    expect(shapeOf('script_json')).toBe("script_json|TEXT|1|'null'|0")
+    expect(STAGES_REQUIRED_COLUMNS).toHaveLength(11)
   })
 
   it('M26 阶段超时列：可空无默认、CHECK 认 5 min–4 h，补列语句与 DDL 同口径', () => {

@@ -38,6 +38,8 @@ export function emptyStage(name: string): StageInput {
     // M26：阶段超时缺省不写（= 用全局缺省 60 min）
     runTimeoutMs: null,
     judge: null,
+    // M40：新阶段不是脚本阶段（切到「执行脚本」时编辑器补默认脚本配置）
+    script: null,
   }
 }
 

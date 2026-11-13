@@ -13,6 +13,7 @@ import type {
   Card,
   Task,
   Workflow,
+  WorkflowInput,
   WorkflowStage,
 } from '../../src/protocol/entities'
 import { BUILTIN_STAGE_NAMES } from '../../src/protocol/entities'
@@ -73,6 +74,8 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   instructions: '',
   acceptance: [],
   runTimeoutMs: null,
+  // M40：不是脚本阶段（投影行恒有该字段）
+  script: null,
   ...over,
 })
 
@@ -2199,6 +2202,8 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       conversationId: null,
       stageId: 'st-1',
       agentId: 'ag-1',
+      // M40：智能体轮没有脚本快照
+      script: null,
       runtimeId: 'rt-1',
       ruleId: null,
       rulesVersion: 0,
@@ -2302,6 +2307,118 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       'thread.task_attached',
       'task.created',
     ])
+  })
+
+  it('脚本阶段进入：run.queued 带脚本快照、无智能体、access=full、提示词只有资料（M40）', () => {
+    const script = {
+      runtimeId: 'rt-1',
+      command: 'pnpm',
+      args: ['check'],
+      cwd: 'C:/scripts',
+      env: { CI: '1' },
+      timeoutMs: 600_000,
+    }
+    const view = agentView({
+      stages: [
+        stage({
+          id: 'st-1',
+          name: '自测',
+          entryMode: 'script',
+          agentId: null,
+          script,
+          instructions: '先跑门禁',
+          judge: { maxFails: null },
+          acceptance: ['pnpm check 退出码 0'],
+        }),
+      ],
+    })
+    const decision = decide(
+      view,
+      command({
+        type: 'task.create',
+        input: {
+          title: '写计划',
+          description: '先跑门禁再评审',
+          workflowId: 'wf-1',
+          projectId: 'pj-1',
+        },
+      }),
+      NOW,
+      env(),
+    )
+    const run = entryRun(decision.facts)
+    expect(run.agentId).toBeNull()
+    expect(run.script).toEqual(script)
+    expect(run.runtimeId).toBe('rt-1')
+    // 脚本轮没有会话、权限恒为 full、工作目录取项目文件夹（优先于脚本自己的 cwd）
+    expect(run.resumeSessionId).toBeNull()
+    expect(run.access).toBe('full')
+    expect(run.cwd).toBe('D:/work')
+    // 提示词只有资料：任务 / 阶段 / 阶段说明 / 验收条目
+    expect(run.prompt).toContain('# 任务\n写计划')
+    expect(run.prompt).toContain('先跑门禁再评审')
+    expect(run.prompt).toContain('# 阶段\n自测')
+    expect(run.prompt).toContain('先跑门禁')
+    expect(run.prompt).toContain('1. pnpm check 退出码 0')
+    expect(run.prompt).not.toContain('sys')
+  })
+
+  it('脚本阶段缺配置 / 缺运行时 / 任务没有项目：零 run 或回落脚本工作目录（M40）', () => {
+    const script = {
+      runtimeId: 'rt-1',
+      command: 'pnpm',
+      args: ['check'],
+      cwd: 'C:/scripts',
+      env: {},
+      timeoutMs: null,
+    }
+    const create = (over: Parameters<typeof agentView>[0]) =>
+      decide(
+        agentView(over),
+        command({
+          type: 'task.create',
+          input: { title: 't', workflowId: 'wf-1', projectId: 'pj-1' },
+        }),
+        NOW,
+        env(),
+      )
+    // 脚本阶段没配脚本：不派活（校验会挡，这里直接喂脏数据）
+    expect(
+      create({
+        stages: [stage({ id: 'st-1', entryMode: 'script', agentId: null, script: null })],
+      }).facts.map((fact) => fact.type),
+    ).toEqual(['thread.opened', 'thread.task_attached', 'task.created'])
+    // 脚本引用的运行时不存在：零 run
+    expect(
+      create({
+        stages: [stage({ id: 'st-1', entryMode: 'script', agentId: null, script })],
+        runtimes: [],
+      }).facts.map((fact) => fact.type),
+    ).toEqual(['thread.opened', 'thread.task_attached', 'task.created'])
+  })
+
+  it('脚本阶段任务没有项目时用脚本自己的工作目录（M40）', () => {
+    const script = {
+      runtimeId: 'rt-1',
+      command: 'pnpm',
+      args: [],
+      cwd: 'C:/scripts',
+      env: {},
+      timeoutMs: null,
+    }
+    const decision = decide(
+      agentView({
+        stages: [stage({ id: 'st-1', entryMode: 'script', agentId: null, script })],
+      }),
+      command({
+        type: 'task.create',
+        input: { title: 't', workflowId: 'wf-1' },
+      }),
+      NOW,
+      env(),
+    )
+    // 没有项目 → 用脚本自己配的工作目录
+    expect(entryRun(decision.facts).cwd).toBe('C:/scripts')
   })
 
   it('权限模式映射到 access：read-only→read、workspace-write→edit、danger-full-access→full', () => {
@@ -3046,5 +3163,170 @@ describe('kernel/commands/task 人工跳转留痕的「自然去向」文案', (
 
   it('目标阶段已不在工作流里（脏投影）：文案退「未知阶段」，不写空', () => {
     expect(naturalStageLabel('st-404', flow)).toBe('未知阶段')
+  })
+})
+
+describe('M40：阶段脚本的落库、引用校验与比较', () => {
+  const script = {
+    runtimeId: 'rt-1',
+    command: 'pnpm',
+    args: ['check'],
+    cwd: null,
+    env: { CI: '1' },
+    timeoutMs: null,
+  }
+
+  const scriptView = (over: Parameters<typeof view>[0] = {}): View =>
+    view({
+      workflows: [workflow()],
+      agents: [agent()],
+      runtimes: [runtime()],
+      stages: [
+        builtinStage('todo', 0),
+        stage({
+          id: 'st-1',
+          name: '自测',
+          position: 1,
+          entryMode: 'script',
+          agentId: null,
+          script,
+        }),
+        builtinStage('blocked', 2),
+        builtinStage('done', 3),
+        builtinStage('cancelled', 4),
+      ],
+      ...over,
+    })
+
+  const updateInput = (stageOver: Partial<StageInput>): WorkflowInput => ({
+    name: '研发',
+    stages: [{ id: 'st-1', name: '自测', entryMode: 'script', script, ...stageOver }],
+  })
+
+  it('workflow.create：脚本原样落行、脚本阶段不挂智能体', () => {
+    const decision = decide(
+      view({ runtimes: [runtime()] }),
+      command({
+        type: 'workflow.create',
+        input: { name: 'w', stages: [{ name: '自测', entryMode: 'script', script }] },
+      }),
+      NOW,
+      env(),
+    )
+    const created = decision.facts.find(
+      (fact) =>
+        fact.type === 'stage.created' &&
+        (fact.payload as { stage: WorkflowStage }).stage.name === '自测',
+    )
+    const row = (created?.payload as { stage: WorkflowStage }).stage
+    expect(row.entryMode).toBe('script')
+    expect(row.agentId).toBeNull()
+    expect(row.script).toEqual(script)
+  })
+
+  it('workflow.create：脚本引用的运行时不存在 → 整份拒收', () => {
+    const decision = decide(
+      view({ runtimes: [] }),
+      command({
+        type: 'workflow.create',
+        input: { name: 'w', stages: [{ name: '自测', entryMode: 'script', script }] },
+      }),
+      NOW,
+      env(),
+    )
+    expect(decision.reject?.code).toBe('not_found')
+    expect(decision.reject?.message).toBe('运行时不存在: rt-1')
+  })
+
+  it('workflow.update：切回智能体时清空脚本、保留智能体', () => {
+    const decision = decide(
+      scriptView(),
+      command({
+        type: 'workflow.update',
+        id: 'wf-1',
+        input: {
+          name: '研发',
+          stages: [{ id: 'st-1', name: '自测', entryMode: 'agent', agentId: 'ag-1' }],
+        },
+      }),
+      NOW,
+      env(),
+    )
+    const updated = decision.facts.find(
+      (fact) =>
+        fact.type === 'stage.updated' &&
+        (fact.payload as { stage: WorkflowStage }).stage.id === 'st-1',
+    )
+    const row = (updated?.payload as { stage: WorkflowStage }).stage
+    expect(row.entryMode).toBe('agent')
+    expect(row.agentId).toBe('ag-1')
+    expect(row.script).toBeNull()
+  })
+
+  it('workflow.update：脚本引用的运行时不存在 → 整份拒收', () => {
+    const decision = decide(
+      scriptView(),
+      command({
+        type: 'workflow.update',
+        id: 'wf-1',
+        input: updateInput({ script: { ...script, runtimeId: 'rt-404' } }),
+      }),
+      NOW,
+      env(),
+    )
+    expect(decision.reject?.code).toBe('not_found')
+    expect(decision.reject?.message).toBe('运行时不存在: rt-404')
+  })
+
+  it('workflow.update：脚本没变不产 stage.updated，改一个字段就产', () => {
+    const unchanged = decide(
+      scriptView(),
+      command({ type: 'workflow.update', id: 'wf-1', input: updateInput({}) }),
+      NOW,
+      env(),
+    )
+    expect(
+      unchanged.facts.some(
+        (fact) =>
+          fact.type === 'stage.updated' &&
+          (fact.payload as { stage: WorkflowStage }).stage.id === 'st-1',
+      ),
+    ).toBe(false)
+
+    const changed = decide(
+      scriptView(),
+      command({
+        type: 'workflow.update',
+        id: 'wf-1',
+        input: updateInput({ script: { ...script, env: { CI: '2' } } }),
+      }),
+      NOW,
+      env(),
+    )
+    const updated = changed.facts.find(
+      (fact) =>
+        fact.type === 'stage.updated' &&
+        (fact.payload as { stage: WorkflowStage }).stage.id === 'st-1',
+    )
+    expect((updated?.payload as { stage: WorkflowStage }).stage.script?.env).toEqual({ CI: '2' })
+
+    // 键数量变化也算变了（sameEnv 的长度分支）
+    const envChanged = decide(
+      scriptView(),
+      command({
+        type: 'workflow.update',
+        id: 'wf-1',
+        input: updateInput({ script: { ...script, env: { CI: '1', EXTRA: 'x' } } }),
+      }),
+      NOW,
+      env(),
+    )
+    expect(
+      envChanged.facts.some(
+        (fact) =>
+          fact.type === 'stage.updated' &&
+          (fact.payload as { stage: WorkflowStage }).stage.id === 'st-1',
+      ),
+    ).toBe(true)
   })
 })

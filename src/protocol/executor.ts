@@ -43,6 +43,15 @@ export interface Turn {
   prompt: string
   /** 执行目录（项目文件夹 > 智能体工作目录 > 空串 = 宿主默认目录） */
   cwd: string
+  /**
+   * 命令覆盖（M40 脚本阶段）：缺省用运行时连接上的 `command`。
+   *
+   * 脚本的命令本体随阶段走（`pnpm` / `node` / `pwsh` 各不相同），连接（执行器协议、启停）
+   * 仍由运行时决定；与 `args` 一样属于执行配置。
+   */
+  command?: string
+  /** argv（M40 脚本阶段）：逐项原样传参，不展开占位符；缺省用运行时的 `argsTemplate` */
+  args?: readonly string[]
   /** 访问权限（来自智能体的 `permissionMode`） */
   access: Access
   /** 模型覆盖（来自智能体配置）；null / 缺省 = CLI 默认 */

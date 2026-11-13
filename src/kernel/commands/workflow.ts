@@ -37,7 +37,10 @@ function stageRow(
     position,
     entryMode: stage.entryMode,
     builtin,
-    agentId: stage.agentId ?? null,
+    // M40：脚本阶段不挂智能体（两者互斥，保存时归一）
+    agentId: stage.entryMode === 'script' ? null : (stage.agentId ?? null),
+    // M40：脚本只在脚本阶段生效；其余模式上残留的脚本归一清空
+    script: stage.entryMode === 'script' ? (stage.script ?? null) : null,
     // M32：出口表按下标映射到 id；缺省的触发条件由 completeExits 在排序后补齐
     exits: exitsOf(ids, stage),
     // M29：派单按触发条件分组直存（跨工作流，不能用本批下标表达）
@@ -134,6 +137,8 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     // M18：内置键一变就要落 stage.updated（否则锁名 / 锁位的修复会被静默吞掉）
     (a.builtin ?? null) === (b.builtin ?? null) &&
     a.agentId === b.agentId &&
+    // M40：脚本配置一变就要落 stage.updated（缺省与 null 视为同值）
+    sameScript(a.script, b.script) &&
     // M32：出口表一变就要落 stage.updated（缺省与「没有这一组」视为同值）
     sameExits(a.exits, b.exits) &&
     // M29：派单清单一变就要落 stage.updated（缺省与空数组视为同值）
@@ -159,6 +164,38 @@ function missingAgentId(view: View, stages: StageInput[]): Id | null {
     if (stage.agentId && !view.agents.has(stage.agentId)) return stage.agentId
   }
   return null
+}
+
+/** 阶段脚本引用的运行时是否存在（命令与参数是执行配置，连接仍必须存在）。 */
+function missingScriptRuntime(view: View, stages: StageInput[]): Id | null {
+  for (const stage of stages) {
+    const script = stage.entryMode === 'script' ? stage.script : null
+    if (script && !view.runtimes.has(script.runtimeId)) return script.runtimeId
+  }
+  return null
+}
+
+/** 脚本配置比较（M40）：逐字段比，缺省与 null 视为同值。 */
+function sameScript(a: WorkflowStage['script'], b: WorkflowStage['script']): boolean {
+  const one = a ?? null
+  const other = b ?? null
+  if (one === null || other === null) return one === other
+  return (
+    one.runtimeId === other.runtimeId &&
+    one.command === other.command &&
+    one.cwd === other.cwd &&
+    (one.timeoutMs ?? null) === (other.timeoutMs ?? null) &&
+    one.args.length === other.args.length &&
+    one.args.every((item, index) => item === other.args[index]) &&
+    sameEnv(one.env, other.env)
+  )
+}
+
+/** 环境变量比较：键集合与值全等（与 `sameEnv` 在智能体侧同口径）。 */
+function sameEnv(a: Record<string, string>, b: Record<string, string>): boolean {
+  const keys = Object.keys(a)
+  if (keys.length !== Object.keys(b).length) return false
+  return keys.every((key) => a[key] === b[key])
 }
 
 /** 一个待落行的阶段：内置键 + 按最终 position 造行（还原的内置行原样复用）。 */
@@ -222,6 +259,8 @@ export function createWorkflow(
   if (resolved.error) return reject('invalid_input', resolved.error)
   const missingAgent = missingAgentId(view, form.stages)
   if (missingAgent) return reject('not_found', '智能体不存在: ' + missingAgent)
+  const missingRuntime = missingScriptRuntime(view, form.stages)
+  if (missingRuntime) return reject('not_found', '运行时不存在: ' + missingRuntime)
   const workflowId = env.nextId('workflow')
   // M7：交接目标必须存在且 ≠ 自身、目标阶段属于目标工作流（保存时校验，读时再防御）
   const handoffError = validateStageHandoffs(view, workflowId, form.stages, resolved.keys)
@@ -271,6 +310,8 @@ export function updateWorkflow(
   if (resolved.error) return reject('invalid_input', resolved.error)
   const missingAgent = missingAgentId(view, form.stages)
   if (missingAgent) return reject('not_found', '智能体不存在: ' + missingAgent)
+  const missingRuntime = missingScriptRuntime(view, form.stages)
+  if (missingRuntime) return reject('not_found', '运行时不存在: ' + missingRuntime)
   // M7：交接目标工作流 / 阶段的存在与从属（自指在保存时就拒绝）
   const handoffError = validateStageHandoffs(view, current.id, form.stages, resolved.keys)
   if (handoffError) return reject('invalid_input', handoffError)

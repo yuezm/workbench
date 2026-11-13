@@ -163,6 +163,7 @@ describe('rebuild：增量应用与重建等价', () => {
             instructions: '',
             acceptance: [],
             runTimeoutMs: null,
+            script: null,
           },
           {
             id: 'st-a2',
@@ -182,6 +183,7 @@ describe('rebuild：增量应用与重建等价', () => {
             instructions: '',
             acceptance: [],
             runTimeoutMs: null,
+            script: null,
           },
         ],
       },

@@ -118,6 +118,8 @@ const RUN_FIELDS: ReadonlyArray<readonly [keyof RunRow, string]> = [
   ['deadlineAt', 'deadline_at'],
   ['cancelRequested', 'cancel_requested'],
   ['deliverables', 'deliverables_json'],
+  // M40：脚本 run 的执行配置快照（JSON 文本）
+  ['script', 'script_json'],
   ['startedAt', 'started_at'],
   ['endedAt', 'ended_at'],
   ['createdAt', 'created_at'],
@@ -194,6 +196,8 @@ const normalizeRun = (run: RunRow): RunRow => ({
   deadlineAt: run.deadlineAt ?? null,
   cancelRequested: run.cancelRequested ?? false,
   deliverables: run.deliverables ?? null,
+  // M40：老事实没有脚本快照，按「不是脚本轮」归一
+  script: run.script ?? null,
   startedAt: run.startedAt ?? null,
   endedAt: run.endedAt ?? null,
   createdAt: run.createdAt,
@@ -210,6 +214,8 @@ const runValue = (field: keyof RunRow, run: RunRow): SQLInputValue => {
       return run.deliverables === null || run.deliverables === undefined
         ? null
         : JSON.stringify(run.deliverables)
+    case 'script':
+      return JSON.stringify(run.script ?? null)
     case 'cancelRequested':
       return run.cancelRequested ? 1 : 0
     default:
@@ -260,6 +266,8 @@ const normalizeStage = (row: WorkflowStage): WorkflowStage => {
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,
+    // M40：老事实没有脚本配置，按「不是脚本阶段」归一
+    script: legacy.script ?? null,
   }
 }
 
@@ -389,8 +397,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, builtin, agent_id, exits_json, handoffs_json, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, run_timeout_ms, judge_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, builtin, agent_id, script_json, exits_json, handoffs_json, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, run_timeout_ms, judge_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
@@ -398,6 +406,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          entry_mode = excluded.entry_mode,
          builtin = excluded.builtin,
          agent_id = excluded.agent_id,
+         script_json = excluded.script_json,
          exits_json = excluded.exits_json,
          handoffs_json = excluded.handoffs_json,
          subtask_stage_id = excluded.subtask_stage_id,
@@ -658,6 +667,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.entryMode,
         stage.builtin ?? null,
         stage.agentId,
+        JSON.stringify(stage.script ?? null),
         JSON.stringify(stage.exits ?? {}),
         JSON.stringify(stage.handoffs ?? []),
         stage.subtaskStageId ?? null,

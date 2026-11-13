@@ -14,6 +14,7 @@ import type {
   RunRow,
   Runtime,
   RuntimeInput,
+  StageScript,
   Task,
   WorkflowStage,
 } from '../../src/protocol/entities'
@@ -764,7 +765,7 @@ describe('createScheduler：领取与并发', () => {
     expect(runById(seeded.runId)).toMatchObject({
       status: 'failed',
       error_code: 'run_failed',
-      error: '智能体不存在（可能已被删除）',
+      error: '智能体或脚本不存在（可能已被删除）',
     })
   })
 
@@ -908,7 +909,7 @@ describe('createScheduler：领取与并发', () => {
     expect(runById(seeded.runId)).toMatchObject({
       status: 'failed',
       error_code: 'run_failed',
-      error: '智能体不存在（可能已被删除）',
+      error: '智能体或脚本不存在（可能已被删除）',
     })
   })
 })
@@ -1929,5 +1930,94 @@ describe('createScheduler：执行归档（M16）', () => {
     ) as { stageName: string | null; taskTitle: string | null }
     expect(meta.stageName).toBeNull()
     expect(meta.taskTitle).toBeNull()
+  })
+})
+
+describe('createScheduler：脚本轮（M40）', () => {
+  /** 建一条「命令运行时 + 脚本阶段工作流 + 任务」，任务进入脚本阶段即入队一条 run。 */
+  const seedScript = (scriptOver: Partial<StageScript> = {}) => {
+    const runtime = createRuntime({
+      name: 'cmd-' + commandSeq,
+      executorKey: 'command',
+      command: 'pnpm',
+    })
+    const script: StageScript = {
+      runtimeId: runtime.id,
+      command: 'pnpm',
+      args: ['check'],
+      cwd: null,
+      env: { CI: '1' },
+      timeoutMs: 300_000,
+      ...scriptOver,
+    }
+    const workflowFacts = world.store.dispatch({
+      type: 'workflow.create',
+      commandId: nextCommandId(),
+      input: {
+        name: 'w-script',
+        stages: [
+          { name: '自测', entryMode: 'script', script },
+          { name: '完成', entryMode: 'none' },
+        ],
+      },
+    }).facts
+    const workflowId = (
+      workflowFacts.find((fact) => fact.type === 'workflow.created')?.payload as {
+        workflow: { id: string }
+      }
+    ).workflow.id
+    const stageIds = workflowFacts
+      .filter((fact) => fact.type === 'stage.created')
+      .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
+      .filter((stage) => (stage.builtin ?? null) === null)
+      .sort((left, right) => left.position - right.position)
+      .map((stage) => stage.id)
+    const projectId = createProject()
+    const taskFacts = world.store.dispatch({
+      type: 'task.create',
+      commandId: nextCommandId(),
+      input: { title: 'T', description: '', workflowId, projectId, stageId: stageIds[0] },
+    }).facts
+    const task = (taskFacts.find((fact) => fact.type === 'task.created')?.payload as { task: Task })
+      .task
+    return { runtime, script, task, runId: String(dbRun(task.id).id) }
+  }
+
+  it('Turn 用脚本配置：命令 / argv / 环境变量 / 无模型 / 超时取脚本自己的', async () => {
+    const seeded = seedScript()
+    let captured: Turn | null = null
+    const scheduler = makeScheduler(
+      portOf((turn) => {
+        captured = turn
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const turn = captured as unknown as Turn
+    expect(turn.command).toBe('pnpm')
+    expect(turn.args).toEqual(['check'])
+    expect(turn.env).toEqual({ CI: '1' })
+    // 脚本没有模型 / 思考强度
+    expect(turn.model).toBeNull()
+    expect(turn.effort).toBeNull()
+    // 超时取脚本自己的 5 分钟（优先于阶段 / 全局缺省）
+    expect(turn.timeoutMs).toBeGreaterThan(250_000)
+    expect(turn.timeoutMs).toBeLessThanOrEqual(300_000)
+    // run 行：没有智能体、权限恒为 full、脚本快照落库
+    const row = runById(seeded.runId)
+    expect(row?.agent_id).toBeNull()
+    expect(row?.access).toBe('full')
+    expect((JSON.parse(String(row?.script_json)) as StageScript).command).toBe('pnpm')
+  })
+
+  it('脚本轮没有提示词时也能跑完：回执照常落终态', async () => {
+    seedScript({ args: [] })
+    const scheduler = makeScheduler(portOf((turn) => receiptOf(turn, { output: '' })))
+    scheduler.wake()
+    await scheduler.idle()
+    expect(factTypes()).toContain('run.succeeded')
   })
 })

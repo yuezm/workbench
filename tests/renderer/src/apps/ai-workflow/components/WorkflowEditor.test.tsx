@@ -13,6 +13,7 @@ import {
   type StageHandoff,
   type StageInput,
   type StagePrimary,
+  type Runtime,
   type WorkflowInput,
   type WorkflowWithStages,
 } from '../../../../../../src/protocol/entities'
@@ -867,6 +868,8 @@ describe('WorkflowEditor', () => {
       acceptance: [],
       runTimeoutMs: null,
       judge: null,
+      // M40：不展示脚本的类型保存时归一为空
+      script: null,
     })
   }, 30_000)
 
@@ -927,6 +930,8 @@ describe('WorkflowEditor', () => {
       acceptance: [],
       runTimeoutMs: null,
       judge: null,
+      // M40：不展示脚本的类型保存时归一为空
+      script: null,
     })
   }, 30_000)
 
@@ -1799,4 +1804,104 @@ describe('出口表：没有原地重跑（M34）', () => {
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('combobox', { name: '阶段2出错时最多重跑' })).not.toBeInTheDocument()
   }, 30_000)
+})
+
+describe('WorkflowEditor：阶段脚本（M40）', () => {
+  const commandRuntime: Runtime = {
+    id: 'rt-cmd',
+    name: '本机命令',
+    executorKey: 'command',
+    command: '',
+    profile: '',
+    argsTemplate: '',
+    enabled: true,
+    createdAt: 't',
+    lastProbe: null,
+  }
+  const dshRuntime: Runtime = {
+    ...commandRuntime,
+    id: 'rt-dsh',
+    name: 'dsh 连接',
+    executorKey: 'dsh',
+  }
+  /** 第二条命令执行器：用来覆盖「换运行时」这一支 */
+  const spareRuntime: Runtime = { ...commandRuntime, id: 'rt-cmd2', name: '备用命令' }
+
+  it('新建：切到「执行脚本」后能填命令 / 参数 / 目录 / 环境变量 / 超时，保存原样提交', async () => {
+    kernel.setView('agents.all', undefined, [agent])
+    // 只列命令执行器：dsh 连接不出现在下拉里
+    kernel.setView('runtimes.all', undefined, [commandRuntime, dshRuntime, spareRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '阶段1类型' })).toBeInTheDocument(),
+    )
+    await user.type(screen.getByLabelText('工作流名称'), '自测流程')
+    await user.click(screen.getByRole('button', { name: '添加阶段' }))
+    await choose(user, '阶段2类型', '执行脚本')
+
+    // 脚本块出现：运行时下拉只有命令执行器
+    expect(screen.getByRole('combobox', { name: '阶段2脚本运行时' })).toBeInTheDocument()
+    await user.click(screen.getByRole('combobox', { name: '阶段2脚本运行时' }))
+    expect(await screen.findByRole('option', { name: '本机命令' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'dsh 连接' })).toBeNull()
+    // 换到另一条命令执行器
+    await user.click(screen.getByRole('option', { name: '备用命令' }))
+
+    await user.type(screen.getByLabelText('阶段2脚本命令'), 'pnpm')
+    await user.type(screen.getByLabelText('阶段2脚本参数'), 'check{Enter}--reporter=dot')
+    await user.type(screen.getByLabelText('阶段2脚本工作目录'), 'C:/repo')
+    await user.type(screen.getByLabelText('阶段2脚本环境变量'), 'CI=1')
+    await choose(user, '阶段2脚本超时', '5 分钟')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(savedStage(draft, '阶段1').script).toEqual({
+      runtimeId: 'rt-cmd2',
+      command: 'pnpm',
+      args: ['check', '--reporter=dot'],
+      cwd: 'C:/repo',
+      env: { CI: '1' },
+      timeoutMs: 300_000,
+    })
+    expect(savedStage(draft, '阶段1').entryMode).toBe('script')
+    expect(savedStage(draft, '阶段1').agentId ?? null).toBeNull()
+  })
+
+  it('脚本闸门：判定开关随类型打开；切回智能体时脚本被清空', async () => {
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [commandRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '阶段1类型' })).toBeInTheDocument(),
+    )
+    await user.type(screen.getByLabelText('工作流名称'), '脚本闸门')
+    await user.click(screen.getByRole('button', { name: '添加阶段' }))
+    await choose(user, '阶段2类型', '脚本闸门（判定）')
+
+    // 判定阶段：出口只有通过 / 未通过 / 出错三行
+    expect(screen.getByRole('combobox', { name: '阶段2通过时去向' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '阶段2完成时去向' })).toBeNull()
+
+    // 切回智能体：脚本字段收起，脚本配置在保存时归空
+    await choose(user, '阶段2类型', '交给智能体')
+    await user.click(screen.getByRole('combobox', { name: '阶段2智能体' }))
+    await user.click(screen.getByRole('option', { name: 'coder' }))
+    expect(screen.queryByRole('combobox', { name: '阶段2脚本运行时' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    const saved = savedStage(draft, '阶段1')
+    expect(saved.entryMode).toBe('agent')
+    expect(saved.agentId).toBe('ag1')
+    expect(saved.script).toBeNull()
+  })
 })

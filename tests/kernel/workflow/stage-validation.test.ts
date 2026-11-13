@@ -37,6 +37,44 @@ describe('validateStageSet', () => {
     )
   })
 
+  it('脚本阶段必须带脚本配置；脚本闸门最多一条验收条目（M40）', () => {
+    const script = {
+      runtimeId: 'rt-1',
+      command: 'pnpm',
+      args: ['check'],
+      cwd: null,
+      env: {},
+      timeoutMs: null,
+    }
+    expect(validateStageSet([stage({ name: '自测', entryMode: 'script' })])).toBe(
+      '阶段「自测」设为执行脚本时必须填写命令',
+    )
+    expect(validateStageSet([stage({ name: '自测', entryMode: 'script', script })])).toBeNull()
+    // 脚本闸门：判定允许，验收最多一条
+    expect(
+      validateStageSet([
+        stage({
+          name: '自测',
+          entryMode: 'script',
+          script,
+          judge: { maxFails: null },
+          acceptance: ['pnpm check 退出码 0'],
+        }),
+      ]),
+    ).toBeNull()
+    expect(
+      validateStageSet([
+        stage({
+          name: '自测',
+          entryMode: 'script',
+          script,
+          judge: { maxFails: null },
+          acceptance: ['a', 'b'],
+        }),
+      ]),
+    ).toBe('阶段「自测」的脚本闸门最多一条验收条目')
+  })
+
   it('出口的 goto 目标越界时报错（过大 / 负数 / 非整数）', () => {
     expect(
       validateStageSet([
@@ -76,10 +114,10 @@ describe('validateStageSet', () => {
     ).toBe('阶段「待办」的完成后进入只能配一条去向')
   })
 
-  it('判定必须是 agent 阶段；护栏是不设或 ≥1 的整数', () => {
+  it('判定必须是 agent / script 阶段；护栏是不设或 ≥1 的整数', () => {
     expect(
       validateStageSet([stage({ name: '自测', entryMode: 'none', judge: { maxFails: 3 } })]),
-    ).toBe('阶段「自测」设为判定时必须交给智能体')
+    ).toBe('阶段「自测」设为判定时必须交给智能体或脚本')
     expect(
       validateStageSet([
         stage({ name: '自测', entryMode: 'agent', agentId: 'a-1', judge: { maxFails: 0 } }),

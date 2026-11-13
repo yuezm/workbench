@@ -26,10 +26,14 @@ export function validateStageSet(stages: StageInput[]): string | null {
     if (s.entryMode === 'agent' && !s.agentId) {
       return `阶段「${s.name}」设为交给智能体时必须选择智能体`
     }
-    // 判定必须有判定者：结论来自回执，只有 agent 阶段才会产出回执
+    // M40：脚本阶段必须带脚本；非脚本阶段上残留的脚本由内核归一清空（不报错）
+    if (s.entryMode === 'script' && (s.script === undefined || s.script === null)) {
+      return `阶段「${s.name}」设为执行脚本时必须填写命令`
+    }
+    // 判定必须有判定者：结论来自回执（智能体）或退出码（脚本）
     if (s.judge) {
-      if (s.entryMode !== 'agent') {
-        return `阶段「${s.name}」设为判定时必须交给智能体`
+      if (s.entryMode !== 'agent' && s.entryMode !== 'script') {
+        return `阶段「${s.name}」设为判定时必须交给智能体或脚本`
       }
       const maxFails = s.judge.maxFails ?? null
       if (maxFails !== null && (!Number.isInteger(maxFails) || maxFails < 1)) {
@@ -39,6 +43,10 @@ export function validateStageSet(stages: StageInput[]): string | null {
     // M34：验收只属于闸门阶段——执行阶段不给自己判分
     if (!s.judge && (s.acceptance?.length ?? 0) > 0) {
       return `阶段「${s.name}」不是判定阶段：验收条目只能配在闸门阶段`
+    }
+    // M40：一条脚本只能证明一条验收（退出码是一个值，不是逐条证据）
+    if (s.entryMode === 'script' && (s.acceptance?.length ?? 0) > 1) {
+      return `阶段「${s.name}」的脚本闸门最多一条验收条目`
     }
     // M34：判定者不能同时是被验阶段的执行者，否则又变成自己判自己
     if (s.judge) {

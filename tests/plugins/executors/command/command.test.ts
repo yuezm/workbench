@@ -714,3 +714,43 @@ describe('cwd 兜底（宿主未提供默认目录）', () => {
     expect((await running).status).toBe('succeeded')
   })
 })
+
+describe('脚本轮（M40）：命令与 argv 来自 Turn', () => {
+  it('turn.command 覆盖运行时命令、turn.args 逐项传参（不展开占位符）', async () => {
+    const h = harness()
+    const { running } = startRun(h, {
+      turn: { command: 'pnpm', args: ['check', '{cwd}'], prompt: '' },
+    })
+
+    // 命令名经 resolve 后落到 spawn 的绝对路径；argv 原样传，不替换 {cwd}
+    expect(h.calls[0].command).toBe('C:/tools/agent.exe')
+    expect(h.calls[0].args).toEqual(['check', '{cwd}'])
+
+    h.children[0].close(0)
+    const receipt = await running
+    expect(receipt.status).toBe('succeeded')
+    expect(receipt.exitCode).toBe(0)
+  })
+
+  it('空提示词不写 stdin（脚本秒退时管道已关，写入会被当成 spawn_failed）', async () => {
+    const h = harness()
+    const { running } = startRun(h, {
+      turn: { command: 'pnpm', args: ['check'], prompt: '' },
+    })
+
+    expect(h.children[0].writes).toEqual([])
+    expect(h.children[0].stdinEnded).toBe(false)
+
+    h.children[0].close(0)
+    expect((await running).status).toBe('succeeded')
+  })
+
+  it('没有 turn.command 时仍用运行时连接上的命令', async () => {
+    const h = harness()
+    const { running } = startRun(h, { runtime: { argsTemplate: template(['--print']) } })
+    expect(h.calls[0].command).toBe('C:/tools/agent.exe')
+    expect(h.calls[0].args).toEqual(['--print'])
+    h.children[0].close(0)
+    await running
+  })
+})

@@ -174,9 +174,12 @@ function QuickAddTask({
         }}
         onKeyDown={onTextareaKeyDown}
       />
-      {/* agent 阶段建完立刻派活：先说清楚，别让人以为还能慢慢补 */}
+      {/* agent / script 阶段建完立刻派活：先说清楚，别让人以为还能慢慢补 */}
       {entryMode === 'agent' && (
         <p className="text-xs text-faint-foreground">这一列会立即交给智能体执行，写清要求。</p>
+      )}
+      {entryMode === 'script' && (
+        <p className="text-xs text-faint-foreground">这一列会立即执行脚本，写清要求。</p>
       )}
       <FormError message={error} />
       <div className="flex items-center gap-2">

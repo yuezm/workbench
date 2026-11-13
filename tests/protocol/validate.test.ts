@@ -253,7 +253,7 @@ describe('protocol/validate', () => {
           input: { name: 'p', stages: [{ name: 's', entryMode: 'kind' }] },
         }),
       ),
-    ).toBe('input.stages[0].entryMode取值必须是 none / agent / user')
+    ).toBe('input.stages[0].entryMode取值必须是 none / agent / script / user')
     expect(
       rejectedMessage(
         cmd('workflow.create', {
@@ -340,6 +340,57 @@ describe('protocol/validate', () => {
         }),
       ).ok,
     ).toBe(true)
+  })
+
+  it('workflow.create：阶段脚本形状（M40）', () => {
+    const create = (script: unknown): unknown =>
+      cmd('workflow.create', {
+        input: {
+          name: 'p',
+          stages: [{ name: 's', entryMode: 'script', script }],
+        },
+      })
+    const ok = {
+      runtimeId: 'rt-1',
+      command: 'pnpm',
+      args: ['check'],
+      cwd: null,
+      env: { CI: '1' },
+      timeoutMs: 600_000,
+    }
+    expect(validateCommand(create(ok)).ok).toBe(true)
+    expect(validateCommand(create({ ...ok, args: undefined, cwd: undefined })).ok).toBe(true)
+    expect(validateCommand(create(null)).ok).toBe(true)
+    expect(rejectedMessage(create('x'))).toBe('input.stages[0].script 必须是对象')
+    expect(rejectedMessage(create({ ...ok, runtimeId: '' }))).toBe(
+      'input.stages[0].script.runtimeId必填',
+    )
+    expect(rejectedMessage(create({ ...ok, command: '' }))).toBe(
+      'input.stages[0].script.command必填',
+    )
+    expect(rejectedMessage(create({ ...ok, args: 'check' }))).toBe(
+      'input.stages[0].script.args 必须是字符串数组',
+    )
+    expect(rejectedMessage(create({ ...ok, args: Array.from({ length: 21 }, () => 'a') }))).toBe(
+      'input.stages[0].script.args 最多 20 项',
+    )
+    expect(rejectedMessage(create({ ...ok, args: [1] }))).toBe(
+      'input.stages[0].script.args[0] 必须是字符串',
+    )
+    expect(rejectedMessage(create({ ...ok, args: ['a'.repeat(501)] }))).toBe(
+      'input.stages[0].script.args[0] 最长 500 个字符',
+    )
+    expect(rejectedMessage(create({ ...ok, args: ['{prompt}'] }))).toBe(
+      'input.stages[0].script.args[0] 不支持占位符 {prompt}（脚本没有提示词 / 模型）',
+    )
+    // 非白名单占位符只是普通文本（脚本参数不展开），不拦
+    expect(validateCommand(create({ ...ok, args: ['{cwd}'] })).ok).toBe(true)
+    expect(rejectedMessage(create({ ...ok, env: [] }))).toBe(
+      'input.stages[0].script.env 必须是键值对象',
+    )
+    expect(rejectedMessage(create({ ...ok, timeoutMs: 1000 }))).toBe(
+      'input.stages[0].script.timeoutMs必须在 300000 到 14400000 之间',
+    )
   })
 
   it('workflow.create：闸门形状（M11）', () => {

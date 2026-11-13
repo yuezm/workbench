@@ -136,8 +136,8 @@ const hostSamples: Input[] = [
 const samples: Input[] = [...commandSamples, ...hostSamples]
 
 const expected: Record<Input['type'], ProjectionTable[]> = {
-  'workflow.create': ['agents', 'workflows', 'workflow_stages'],
-  'workflow.update': ['workflows', 'workflow_stages', 'agents', 'tasks'],
+  'workflow.create': ['agents', 'runtimes', 'workflows', 'workflow_stages'],
+  'workflow.update': ['workflows', 'workflow_stages', 'agents', 'runtimes', 'tasks'],
   'workflow.remove': ['workflows', 'workflow_stages', 'tasks', 'runs'],
   'agent.create': ['runtimes'],
   'agent.update': ['agents', 'runtimes'],

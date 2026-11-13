@@ -29,8 +29,6 @@ export interface MoveResult {
   effects: StageEffect[]
   /** 判定预算耗尽后按配置放行：本次是 fail 但走了通过分支 */
   gateExhausted?: boolean
-  /** 原地重跑预算用尽：本次已按 close 收口（调用方打 `stage:failed` 留痕） */
-  retryExhausted?: boolean
 }
 
 /** 读取某阶段「进入时」应产生的效果。 */
@@ -118,7 +116,7 @@ export function enterStage(
   gateFails = 0,
 ): { task: Task; effects: StageEffect[] } {
   return {
-    task: { ...task, currentStageId: stage.id, status: 'active', gateFails, stageFails: 0 },
+    task: { ...task, currentStageId: stage.id, status: 'active', gateFails },
     effects: entryEffects(stage),
   }
 }
@@ -129,32 +127,21 @@ export function enterStage(
  * - `goto`：目标阶段不存在（脏投影 / 已删）时零流转，宁可不走；
  * - `await`：不产效果，`gateFails` 按传入值落下（判定预算要能累计）；
  * - `close`：任务 `completed`（工单走完），预算清零。
+ *
+ * M34 删掉 `retry`：执行阶段不设轮次，原地再来一轮只能由人触发（拖回阶段 / 重新执行）。
  */
 export function applyExit(
   task: Task,
   exit: StagePrimary,
   workflow: WorkflowWithStages,
   options?: { gateFails?: number },
-): { task: Task; effects: StageEffect[]; retryExhausted?: boolean } {
+): { task: Task; effects: StageEffect[] } {
   switch (exit.do) {
-    case 'retry': {
-      // 原地再跑一轮：次数落在 task 上；用尽后按 close 收口（调用方据此打 stage:failed）
-      const attempts = (task.stageFails ?? 0) + 1
-      const stage = workflow.stages.find((item) => item.id === task.currentStageId)
-      if (stage === undefined) return { task, effects: [] }
-      if (attempts > exit.max) {
-        return {
-          task: { ...task, status: 'completed', stageFails: 0, gateFails: 0 },
-          effects: [],
-          retryExhausted: true,
-        }
-      }
-      return { task: { ...task, stageFails: attempts }, effects: entryEffects(stage) }
-    }
     case 'goto': {
       const target = workflow.stages.find((stage) => stage.id === exit.stageId)
-      if (!target) {
-        // 脏投影（目标阶段被删）：不猜去向，原地停住；预算照记，否则失败次数会永远不涨
+      // 目标不存在（脏投影）或就是当前阶段（旧数据里可能存过自指 goto）：不猜去向，原地停住。
+      // 保存时 `validateStageSet` 已拦自指，这里只兜历史数据。
+      if (!target || target.id === task.currentStageId) {
         return {
           task: options?.gateFails === undefined ? task : { ...task, gateFails: options.gateFails },
           effects: [],
@@ -167,7 +154,7 @@ export function applyExit(
         task: options?.gateFails === undefined ? task : { ...task, gateFails: options.gateFails },
         effects: [],
       }
-    default:
+    case 'close':
       return { task: { ...task, status: 'completed', gateFails: 0 }, effects: [] }
   }
 }
@@ -190,13 +177,7 @@ export function moveTask(task: Task, event: StageEvent, workflow: WorkflowWithSt
   const follow = (guard: StageExitGuard, gateFails?: number): MoveResult => {
     const exit = currentExits[guard]
     if (exit === undefined) return { task, effects: [] }
-    const applied = applyExit(
-      task,
-      exit,
-      workflow,
-      gateFails === undefined ? undefined : { gateFails },
-    )
-    return applied.retryExhausted === true ? { ...applied, retryExhausted: true } : applied
+    return applyExit(task, exit, workflow, gateFails === undefined ? undefined : { gateFails })
   }
 
   switch (event.type) {
@@ -264,7 +245,9 @@ export function legacyExits(stage: {
   onCompleteStageId?: string | null
   onRejectStageId?: string | null
 }): StageExits {
-  if (stage.exits !== undefined) return stage.exits ?? {}
+  // M34：`retry` 已删除——老事实 / 旧库里的「原地重跑」归一成「停在这里等人」，
+  // 由人决定改配去向还是手动再跑（不猜用户想改成哪个阶段）。
+  if (stage.exits !== undefined) return withoutRetry(stage.exits ?? {})
   const exits: StageExits = {}
   const complete = stage.onCompleteStageId ?? null
   if (complete !== null) exits.done = { do: 'goto', stageId: complete }
@@ -276,4 +259,21 @@ export function legacyExits(stage: {
     if (gate.onFailStageId !== null) exits.failed = { do: 'goto', stageId: gate.onFailStageId }
   }
   return exits
+}
+
+/**
+ * 老事实里的 `retry` 出口归一成 `await`（M34）。
+ *
+ * 类型层已没有这个动作（`STAGE_EXIT_ACTIONS` 只剩三种），但旧库 / 老事实的 JSON 里还留着，
+ * 不归一会在重建后写进投影，再被 UI 读成「未知去向」。归一成 `await` 是有意的保守选择：
+ * 不替用户猜目标阶段。
+ */
+function withoutRetry(exits: StageExits): StageExits {
+  const result: StageExits = {}
+  for (const [guard, exit] of Object.entries(exits) as Array<[StageExitGuard, unknown]>) {
+    if (exit === null || exit === undefined) continue
+    const action = (exit as { do?: string }).do
+    result[guard] = action === 'retry' ? { do: 'await' } : (exit as StagePrimary)
+  }
+  return result
 }

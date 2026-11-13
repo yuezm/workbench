@@ -22,12 +22,7 @@ import type { Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
 import type { ReviewReport } from '../../src/protocol/review'
 import { decide } from '../../src/kernel/decide'
 import { runAccessOf } from '../../src/kernel/task-effects'
-import {
-  degradedCommentText,
-  repairCommentText,
-  stageRoundCount,
-  unmetAcceptance,
-} from '../../src/kernel/commands/run'
+import { degradedCommentText, stageRoundCount } from '../../src/kernel/commands/run'
 import { project } from '../../src/kernel/project'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
 
@@ -130,7 +125,7 @@ interface Seed {
   conversations?: Conversation[]
   runs?: RunRow[]
   runtimes?: Runtime[]
-  /** M21：续轮要能查到绑定的智能体（默认空 = 不产新 run） */
+  /** 派活要能查到绑定的智能体（M34：流转到 agent 阶段时入队下一轮；默认空 = 不产新 run） */
   agents?: Agent[]
   tasks?: Task[]
   workflows?: Workflow[]
@@ -212,7 +207,6 @@ const task = (over: Partial<Task> = {}): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
-  stageFails: 0,
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -1641,7 +1635,7 @@ describe('kernel/decide 闸门流转（M11）', () => {
 
   const gateView = (taskOver: Partial<Task> = {}): View =>
     view({
-      runs: [running()],
+      runs: [running({ stageId: 'st-2' })],
       workflows: [{ id: 'wf-1', name: '研发', description: '', createdAt: CREATED }],
       stages: [stage({ id: 'st-1', position: 0 }), gateStage(), stage({ id: 'st-3', position: 2 })],
       tasks: [task({ currentStageId: 'st-2', ...taskOver })],
@@ -1653,8 +1647,12 @@ describe('kernel/decide 闸门流转（M11）', () => {
       'run-1',
       receipt({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0 }] }),
     )
+    expect(decision.reject).toBeUndefined()
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
+    // 通过即进下一阶段：判定预算清零（覆盖完整才算 pass）
+    expect((moved?.payload as { task: Task }).task.gateFails).toBe(0)
+    expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
   })
 
   it('说 pass 但证据里有非 0 退出码 → 视为没结论，原地不动', () => {
@@ -1708,7 +1706,7 @@ describe('kernel/decide 闸门标签与放行留痕（M11 补充）', () => {
 
   const gateView = (taskOver: Partial<Task> = {}): View =>
     view({
-      runs: [running()],
+      runs: [running({ stageId: 'st-2' })],
       workflows: [{ id: 'wf-1', name: '研发', description: '', createdAt: CREATED }],
       stages: [stage({ id: 'st-1', position: 0 }), gateStage(), stage({ id: 'st-3', position: 2 })],
       tasks: [task({ currentStageId: 'st-2', ...taskOver })],
@@ -1851,22 +1849,19 @@ describe('kernel/decide run.receipt 评审结论（M14）', () => {
         addresses: [{ findingId: 'run-review:1#R1', disposition: 'deferred', note: '下轮一起改' }],
       }),
     )
-    expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(true)
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-done')
   })
 })
 
-describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
-  const acceptanceStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
-    stage({
-      acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'],
-      maxRounds: 2,
-      ...over,
-    })
+// M34 移除验收自评与阶段内续轮（原 M21 的九例整组删除：未全达续轮 / 轮次用尽 /
+// 缺条目 fail-closed / 无 sessionId 续接 / unmetAcceptance / repairCommentText）。
+// 现在执行阶段只看执行器跑完没有：`run.succeeded` 即业务成功，一律走 `exits.done`。
+describe('kernel/commands/run 验收归属（M34）', () => {
+  const execStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({ exits: { done: { do: 'goto', stageId: 'st-done' } }, ...over })
 
-  /** 一条正在跑、等待回执的 run（lease 与 `receipt()` 默认值配套）。 */
-  const activeRun = (): RunRow => running({ sessionId: 'ss-1' })
-
-  /** 「已完成」内置阶段：默认流转的终点，用来验证「全达 → 正常流转」。 */
+  /** 「已完成」内置阶段：默认流转的终点，用来验证「跑完就前进」。 */
   const doneStage = (): WorkflowStage =>
     stage({
       id: 'st-done',
@@ -1875,168 +1870,74 @@ describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
       entryMode: 'none',
       agentId: null,
       builtin: 'done',
-      acceptance: [],
     })
 
   const baseSeed = (over: Partial<Seed> = {}): Seed => ({
-    runs: [activeRun()],
+    runs: [running({ sessionId: 'ss-1' })],
     runtimes: [runtime()],
     agents: [agent()],
     workflows: [workflow()],
     tasks: [task()],
-    stages: [acceptanceStage({ exits: { done: { do: 'goto', stageId: 'st-done' } } }), doneStage()],
+    stages: [execStage(), doneStage()],
     ...over,
   })
 
   const submit = (target: View, body: Receipt, environment = env()): ReturnType<typeof decide> =>
     decide(target, { type: 'run.receipt', runId: 'run-1', receipt: body }, NOW, environment)
 
-  it('验收未全达且还有轮次：原地续一轮，不流转', () => {
-    const decision = submit(
-      view(baseSeed()),
-      receipt({
-        acceptance: [
-          { no: 1, met: true },
-          { no: 2, met: false },
-        ],
-      }),
-    )
-    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
-    expect(comment).toBeDefined()
-    expect((comment!.payload as { comment: { text: string } }).comment.text).toBe(
-      repairCommentText(1, 2, ['覆盖每条验收标准'], false),
-    )
-    const queued = decision.facts.filter((fact) => fact.type === 'run.queued')
-    expect(queued).toHaveLength(1)
-    const nextRun = (queued[0].payload as { run: RunRow }).run
-    expect(nextRun.status).toBe('queued')
-    expect(nextRun.stageId).toBe('st-1')
-    expect(nextRun.taskId).toBe('t-1')
-    // 同一任务续接同一会话：不换 agent、不开新会话
-    expect(nextRun.resumeSessionId).toBe('ss-1')
-    // 不流转：没有 task.moved / task.completed
-    expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
-  })
-
-  it('轮次用尽：只留评论，仍按原规则流转（不续轮、不打标签覆盖流转）', () => {
-    const decision = submit(
-      view(
-        baseSeed({
-          stages: [
-            acceptanceStage({ maxRounds: 1, exits: { done: { do: 'goto', stageId: 'st-done' } } }),
-            doneStage(),
-          ],
-        }),
-      ),
-      receipt({ acceptance: [{ no: 1, met: false }] }),
-    )
-    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
-    expect(comment).toBeDefined()
-    expect((comment!.payload as { comment: { text: string } }).comment.text).toContain(
-      '已达本阶段轮次上限',
-    )
-    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
-    // 流转仍走配置的「完成后进入」
-    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
-    expect(moved).toBeDefined()
-    expect((moved!.payload as { to: string }).to).toBe('st-done')
-  })
-
-  it('验收全达：不产自评评论、不续轮，正常流转', () => {
-    const decision = submit(
-      view(baseSeed()),
-      receipt({
-        acceptance: [
-          { no: 1, met: true },
-          { no: 2, met: true },
-        ],
-      }),
-    )
-    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
-    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
-    expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(true)
-  })
-
-  it('回执缺条目按未达处理（fail-closed）：只说达成第一条也算没做完', () => {
-    const decision = submit(view(baseSeed()), receipt({ acceptance: [{ no: 1, met: true }] }))
-    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(true)
-  })
-
-  it('回执没带验收自评：全部条目按未达处理（0/2 达成，仍续轮）', () => {
+  it('执行阶段 run.succeeded → 恰好一条流转事实、零 run.queued、零评论（黄金用例）', () => {
     const decision = submit(view(baseSeed()), receipt())
-    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
-    expect((comment!.payload as { comment: { text: string } }).comment.text).toContain('0/2 达成')
-    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(true)
+
+    expect(decision.reject).toBeUndefined()
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['run.succeeded', 'task.moved'])
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-done')
+    // 结算行照旧：终态 + 清租约 + 结束时刻（执行阶段不额外读任何业务结论）
+    const settled = (decision.facts[0]?.payload as { run: RunRow }).run
+    expect(settled.status).toBe('succeeded')
+    expect(settled.leaseId).toBeNull()
+    expect(settled.endedAt).toBe(NOW)
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
   })
 
-  it('阶段没配轮次上限：按默认下限 1 轮算，首轮即用尽，只留评论不续轮', () => {
+  it('执行阶段带了 verdict / checks 也不读：判定只由闸门给', () => {
+    const decision = submit(
+      view(baseSeed()),
+      receipt({ verdict: 'fail', checks: [{ cmd: 'pnpm check', exitCode: 1 }] }),
+    )
+
+    expect(decision.reject).toBeUndefined()
+    // M14 仍把回执里的 verdict 当评审结论留档（review.reported）——那是审计资料；
+    // M34 的差别在**流转**：执行阶段不读它，`fail` 也不改变 exits.done。
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'review.reported',
+      'run.succeeded',
+      'task.moved',
+    ])
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-done')
+    expect((moved?.payload as { task: Task }).task.gateFails).toBe(0)
+    expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+  })
+
+  it('执行阶段残留验收条目（老库 / 脏投影）也不续轮、不产评论', () => {
     const decision = submit(
       view(
         baseSeed({
-          stages: [
-            acceptanceStage({
-              maxRounds: null,
-              exits: { done: { do: 'goto', stageId: 'st-done' } },
-            }),
-            doneStage(),
-          ],
+          stages: [execStage({ acceptance: ['pnpm check 退出码 0'] }), doneStage()],
         }),
       ),
-      receipt({ acceptance: [{ no: 1, met: false }] }),
+      receipt(),
     )
-    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
-    expect((comment!.payload as { comment: { text: string } }).comment.text).toContain(
-      '已达本阶段轮次上限',
-    )
+
+    expect(decision.reject).toBeUndefined()
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['run.succeeded', 'task.moved'])
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
-  })
-
-  it('本轮没有 sessionId：续轮沿用上一轮要续接的会话（resumeSessionId）', () => {
-    const decision = submit(
-      view(baseSeed({ runs: [running({ sessionId: null, resumeSessionId: 'ss-old' })] })),
-      receipt({ acceptance: [{ no: 2, met: false }] }),
-    )
-    const queued = decision.facts.filter((fact) => fact.type === 'run.queued')
-    expect((queued[0].payload as { run: RunRow }).run.resumeSessionId).toBe('ss-old')
-  })
-
-  it('本轮与上一轮都没有会话：续轮不带 resumeSessionId（不伪造续接）', () => {
-    const decision = submit(
-      view(baseSeed({ runs: [running({ sessionId: null })] })),
-      receipt({ acceptance: [{ no: 2, met: false }] }),
-    )
-    const queued = decision.facts.filter((fact) => fact.type === 'run.queued')
-    expect(queued).toHaveLength(1)
-    expect((queued[0].payload as { run: RunRow }).run.resumeSessionId).toBeNull()
-  })
-
-  it('unmetAcceptance：阶段没声明验收条目时没有未达项（不误判成没做完）', () => {
-    expect(unmetAcceptance({ acceptance: [] }, receipt())).toEqual([])
-    // 老事实 / 存量导入的阶段行连字段都没有：同样按「未声明」处理
-    expect(unmetAcceptance({}, receipt())).toEqual([])
-    expect(unmetAcceptance({ acceptance: ['覆盖每条验收标准'] }, receipt())).toEqual([
-      '覆盖每条验收标准',
-    ])
-  })
-
-  it('阶段没声明验收 / run 失败 / 任务已完成：都不续轮', () => {
-    const noAcceptance = submit(
-      view(baseSeed({ stages: [acceptanceStage({ acceptance: [] })] })),
-      receipt({ acceptance: [{ no: 1, met: false }] }),
-    )
-    expect(noAcceptance.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
-
-    const failed = submit(
-      view(baseSeed({ runs: [running({ status: 'failed', errorCode: 'exit_nonzero' })] })),
-      receipt({ status: 'failed', errorCode: 'exit_nonzero', acceptance: [{ no: 2, met: false }] }),
-    )
-    expect(failed.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
-
-    const done = submit(
-      view(baseSeed({ tasks: [task({ status: 'completed' })] })),
-      receipt({ acceptance: [{ no: 2, met: false }] }),
-    )
-    expect(done.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-done')
   })
 
   it('stageRoundCount 按 (任务, 阶段) 数 stage run：派生轮数，不新增列', () => {
@@ -2052,16 +1953,207 @@ describe('kernel/commands/run 阶段内多轮自修复（M21）', () => {
     expect(stageRoundCount(target, 't-1', 'st-2')).toBe(1)
     expect(stageRoundCount(target, 't-9', 'st-1')).toBe(0)
   })
+})
 
-  it('repairCommentText：达成计数、未达清单与下一步说明都在文案里', () => {
-    const continuing = repairCommentText(1, 3, ['覆盖每条验收标准', '不改 schema'], false)
-    expect(continuing).toContain('1/3 达成')
-    expect(continuing).toContain('1. 覆盖每条验收标准')
-    expect(continuing).toContain('2. 不改 schema')
-    expect(continuing).toContain('按配置续第 2 轮')
+// M34：闸门 `pass` 除了「有 checks 且退出码全 0」，还要求每条验收都被一条
+// `exitCode=0` 的 `checks` 用 `acceptance: n` 指向。漏一条按「没给结论」：
+// 零流转、不消耗 gateFails。
+describe('kernel/decide 闸门验收覆盖（M34）', () => {
+  const gateStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({
+      id: 'st-2',
+      position: 1,
+      name: '自测',
+      judge: { maxFails: 2 },
+      acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准', '不改 schema'],
+      exits: { passed: { do: 'goto', stageId: 'st-3' }, failed: { do: 'goto', stageId: 'st-1' } },
+      ...over,
+    })
 
-    const exhausted = repairCommentText(2, 3, ['覆盖每条验收标准'], true)
-    expect(exhausted).toContain('已达本阶段轮次上限')
+  const gateView = (taskOver: Partial<Task> = {}): View =>
+    view({
+      runs: [running({ stageId: 'st-2' })],
+      workflows: [workflow()],
+      stages: [
+        stage({ id: 'st-1', position: 0 }),
+        gateStage(),
+        stage({ id: 'st-3', position: 2, entryMode: 'none', agentId: null }),
+      ],
+      tasks: [task({ currentStageId: 'st-2', ...taskOver })],
+    })
+
+  const transitionOf = (decision: ReturnType<typeof decide>): string[] =>
+    decision.facts
+      .filter((fact) => fact.type === 'task.moved' || fact.type === 'task.completed')
+      .map((fact) => fact.type)
+
+  it('验收 3 条只用 2 条证据覆盖 → 零流转，gateFails 不变', () => {
+    const decision = receive(
+      gateView({ gateFails: 1 }),
+      'run-1',
+      receipt({
+        verdict: 'pass',
+        checks: [
+          { cmd: 'pnpm check', exitCode: 0, acceptance: 1 },
+          { cmd: 'pnpm lint', exitCode: 0, acceptance: 2 },
+        ],
+      }),
+    )
+
+    expect(decision.reject).toBeUndefined()
+    expect(transitionOf(decision)).toEqual([])
+    // run 照常落终态，只是任务不动（停在闸门等人补证据）
+    expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
+    expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+  })
+
+  it('验收 3 条全被覆盖 → 走 passed', () => {
+    const decision = receive(
+      gateView(),
+      'run-1',
+      receipt({
+        verdict: 'pass',
+        checks: [
+          { cmd: 'pnpm check', exitCode: 0, acceptance: 1 },
+          { cmd: 'pnpm lint', exitCode: 0, acceptance: 2 },
+          { cmd: 'git diff --stat', exitCode: 0, acceptance: 3 },
+        ],
+      }),
+    )
+
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
+  })
+
+  it('覆盖某条验收的 checks 退出码非 0 → 仍算未覆盖（零流转）', () => {
+    const decision = receive(
+      gateView(),
+      'run-1',
+      receipt({
+        verdict: 'pass',
+        checks: [
+          { cmd: 'pnpm check', exitCode: 0, acceptance: 1 },
+          { cmd: 'pnpm lint', exitCode: 0, acceptance: 2 },
+          { cmd: 'git diff --stat', exitCode: 2, acceptance: 3 },
+        ],
+      }),
+    )
+
+    expect(decision.reject).toBeUndefined()
+    expect(transitionOf(decision)).toEqual([])
+    expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+  })
+
+  it('与验收无关的多余 checks 不顶替：少了某条的指向就停在闸门', () => {
+    const decision = receive(
+      gateView(),
+      'run-1',
+      receipt({
+        verdict: 'pass',
+        checks: [
+          { cmd: 'pnpm check', exitCode: 0, acceptance: 1 },
+          { cmd: 'pnpm lint', exitCode: 0, acceptance: 2 },
+          { cmd: 'pnpm typecheck', exitCode: 0 },
+        ],
+      }),
+    )
+
+    expect(decision.reject).toBeUndefined()
+    expect(transitionOf(decision)).toEqual([])
+    expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
+  })
+
+  it('闸门没声明验收条目：只要有全 0 的 checks 就 pass', () => {
+    const decision = receive(
+      view({
+        runs: [running({ stageId: 'st-2' })],
+        workflows: [workflow()],
+        stages: [
+          stage({ id: 'st-1', position: 0 }),
+          gateStage({ acceptance: [] }),
+          stage({ id: 'st-3', position: 2, entryMode: 'none', agentId: null }),
+        ],
+        tasks: [task({ currentStageId: 'st-2' })],
+      }),
+      'run-1',
+      receipt({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0 }] }),
+    )
+
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-3')
+    expect((moved?.payload as { task: Task }).task.gateFails).toBe(0)
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+  })
+
+  it('acceptance 序号越界（指向不存在的验收）：不顶替，仍算没给结论', () => {
+    const decision = receive(
+      gateView(),
+      'run-1',
+      receipt({
+        verdict: 'pass',
+        checks: [
+          { cmd: 'pnpm check', exitCode: 0, acceptance: 1 },
+          { cmd: 'pnpm lint', exitCode: 0, acceptance: 2 },
+          { cmd: 'pnpm test', exitCode: 0, acceptance: 9 },
+        ],
+      }),
+    )
+
+    expect(decision.reject).toBeUndefined()
+    expect(transitionOf(decision)).toEqual([])
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+  })
+
+  it('两条证据指向同一条验收：第三条无人覆盖，仍停在闸门', () => {
+    const decision = receive(
+      gateView(),
+      'run-1',
+      receipt({
+        verdict: 'pass',
+        checks: [
+          { cmd: 'pnpm check', exitCode: 0, acceptance: 1 },
+          { cmd: 'pnpm check --fix', exitCode: 0, acceptance: 1 },
+          { cmd: 'pnpm lint', exitCode: 0, acceptance: 2 },
+        ],
+      }),
+    )
+
+    expect(decision.reject).toBeUndefined()
+    expect(transitionOf(decision)).toEqual([])
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+  })
+
+  it('全部覆盖且有 findings：结论照常放行，清单另存为评审报告（M14 留档）', () => {
+    const decision = receive(
+      gateView(),
+      'run-1',
+      receipt({
+        verdict: 'pass',
+        checks: [
+          { cmd: 'pnpm check', exitCode: 0, acceptance: 1 },
+          { cmd: 'pnpm lint', exitCode: 0, acceptance: 2 },
+          { cmd: 'git diff --stat', exitCode: 0, acceptance: 3 },
+        ],
+        findings: [
+          {
+            key: 'R1',
+            severity: 'low',
+            claim: '命名可以更清楚',
+            requiredAction: '重命名后复跑 pnpm check',
+          },
+        ],
+      }),
+    )
+
+    expect(decision.facts.some((fact) => fact.type === 'review.reported')).toBe(true)
+    expect(transitionOf(decision)).toEqual(['task.moved'])
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-3')
   })
 })
 
@@ -2140,61 +2232,49 @@ describe('kernel/decide 阶段交付物（M28）', () => {
   })
 })
 
-describe('kernel/decide 原地重跑（M33）', () => {
-  const retryStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
-    stage({ exits: { errored: { do: 'retry', max: 1 } }, ...over })
-
-  it('出错且预算内 → 原地重排一轮，重跑计数 +1', () => {
+// M34 移除 `retry` 出口动作与 `tasks.stage_fails`（原「原地重跑（M33）」两例删除）：
+// 执行出错只走 `exits.errored`，缺省是「停在这里等人」，不自动重建 run、不打 `stage:failed`。
+describe('kernel/decide 出错不自动重跑（M34）', () => {
+  it('errored 缺省 → 停在本阶段等人：只有 run.failed，无 run.queued / 无收口', () => {
     const decision = receive(
       view({
         workflows: [workflow()],
         agents: [agent()],
         runtimes: [runtime()],
-        stages: [retryStage()],
+        stages: [stage({ entryMode: 'user' })],
         tasks: [task()],
         runs: [running()],
       }),
       'run-1',
       receipt({ status: 'failed', errorCode: 'run_failed' }),
     )
-    const types = decision.facts.map((fact) => fact.type)
 
-    expect(types).toContain('run.queued')
-    expect(types).not.toContain('task.completed')
-    const queued = (
-      decision.facts.find((fact) => fact.type === 'run.queued')?.payload as {
-        run: { stageId: string; taskId: string }
-      }
-    ).run
-
-    expect(queued.stageId).toBe('st-1')
-    expect(queued.taskId).toBe('t-1')
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['run.failed'])
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
   })
 
-  it('预算用尽 → 任务收口、打 stage:failed、留一条评论', () => {
+  it('errored 显式 goto 修复阶段 → 由出口表决定，返工不靠阶段内重跑', () => {
     const decision = receive(
       view({
         workflows: [workflow()],
         agents: [agent()],
         runtimes: [runtime()],
-        stages: [retryStage()],
-        tasks: [task({ stageFails: 1 })],
+        stages: [
+          stage({ id: 'st-1', position: 0, exits: { errored: { do: 'goto', stageId: 'st-fix' } } }),
+          stage({ id: 'st-fix', position: 1, entryMode: 'agent', agentId: 'ag-1' }),
+        ],
+        tasks: [task()],
         runs: [running()],
       }),
       'run-1',
       receipt({ status: 'failed', errorCode: 'run_failed' }),
     )
-    const types = decision.facts.map((fact) => fact.type)
 
-    expect(types).toContain('task.completed')
-    expect(types).toContain('task.comment_added')
-    const completed = (
-      decision.facts.find((fact) => fact.type === 'task.completed')?.payload as {
-        task: Task
-      }
-    ).task
-
-    expect(completed.labels).toContain('stage:failed')
-    expect(completed.stageFails).toBe(0)
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-fix')
+    const queued = decision.facts.find((fact) => fact.type === 'run.queued')
+    expect((queued?.payload as { run: RunRow }).run.stageId).toBe('st-fix')
   })
 })

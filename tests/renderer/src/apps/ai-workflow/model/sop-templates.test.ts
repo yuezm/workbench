@@ -194,9 +194,10 @@ describe('SOP_TEMPLATES', () => {
   it('生成的草稿能通过内核的阶段校验（绑定智能体后）', () => {
     for (const template of SOP_TEMPLATES) {
       const draft = draftFromTemplate(template)
-      // 模板不替用户绑定智能体；校验前补一个占位 agentId，验证的是结构与流向
-      const bound: StageInput[] = draft.stages.map((stage) =>
-        stage.entryMode === 'agent' ? { ...stage, agentId: 'agent-1' } : stage,
+      // 模板不替用户绑定智能体；校验前给每个阶段补一个不同的占位 agentId：
+      // M34 要求闸门的判定者 ≠ 被验阶段的执行者，模板自己不绑人，这里只要结构合法
+      const bound: StageInput[] = draft.stages.map((stage, index) =>
+        stage.entryMode === 'agent' ? { ...stage, agentId: `agent-${index}` } : stage,
       )
       expect(validateStageSet(bound), `${template.id} 生成的草稿不合法`).toBeNull()
     }
@@ -215,22 +216,32 @@ describe('SOP_TEMPLATES', () => {
     }
   })
 
-  it('交给智能体的阶段都声明了验收条目（一条一句），人阶段不声明（M20）', () => {
+  it('验收条目只挂在闸门阶段（M34）：执行阶段与人工阶段一律不带', () => {
     for (const template of SOP_TEMPLATES) {
       for (const stage of template.stages) {
         const items = stage.acceptance ?? []
-        if (stage.entryMode === 'agent') {
-          expect(items.length, `${template.id}/${stage.name} 没有验收条目`).toBeGreaterThanOrEqual(
-            2,
-          )
+        if (stage.gate) {
+          expect(
+            items.length,
+            `${template.id}/${stage.name} 闸门没有验收条目`,
+          ).toBeGreaterThanOrEqual(2)
           for (const item of items) {
             expect(item.trim(), `${template.id}/${stage.name} 有空验收条目`).not.toBe('')
           }
-        } else {
-          expect(items.length, `${template.id}/${stage.name} 人阶段不该带验收条目`).toBe(0)
+          const trimmed = items.map((item) => item.trim())
+          expect(new Set(trimmed).size, `${template.id}/${stage.name} 验收条目重复`).toBe(
+            trimmed.length,
+          )
+          continue
         }
+        expect(items.length, `${template.id}/${stage.name} 非闸门阶段不该带验收条目`).toBe(0)
       }
     }
+    // 至少有一条模板的闸门真的声明了判据，否则这套字段就成了摆设
+    const withAcceptance = SOP_TEMPLATES.flatMap((template) => template.stages).filter(
+      (stage) => stage.gate && (stage.acceptance ?? []).length > 0,
+    )
+    expect(withAcceptance.length).toBeGreaterThan(0)
   })
 
   it('研发交付按「澄清 → 实现 → 评审(闸门) → 人工验收 → 收尾」排，拆解交给 spawn（M19）', () => {
@@ -247,6 +258,10 @@ describe('SOP_TEMPLATES', () => {
     const review = dev!.stages.find((stage) => stage.name === '代码评审')
     expect(review?.entryMode).toBe('agent')
     expect(review?.gate).toEqual({ maxFails: 3, onFail: '编码实现' })
+    // M34：编码实现的判据搬进紧接着的评审闸门；执行阶段自己不带验收
+    const impl = dev!.stages.find((stage) => stage.name === '编码实现')
+    expect(impl?.acceptance ?? []).toEqual([])
+    expect(review?.acceptance ?? []).toContain('`pnpm check` 退出码 0')
     // 模板里没有「任务拆解」阶段：拆分归 Agent（SPEC-task-fanout D10）
     expect(dev!.stages.some((stage) => stage.name.includes('拆解'))).toBe(false)
   })
@@ -290,13 +305,14 @@ describe('SOP_TEMPLATES', () => {
     ])
   })
 
-  it('执行测试允许 Agent 自己拆并行子任务，并有两轮原地自修复', () => {
+  it('执行测试允许 Agent 自己拆并行子任务，出错退回测试设计', () => {
     const run = SOP_TEMPLATES.find((template) => template.id === 'testing-qa')!.stages.find(
       (stage) => stage.name === '执行测试',
     )
     expect(run?.spawnPolicy).toBe('agent')
-    expect(run?.maxRounds).toBe(2)
     expect(run?.onReject).toBe('测试设计')
+    // M34：执行阶段不带验收（判据在后面的闸门上），也不再设阶段内轮次
+    expect(run?.acceptance ?? []).toEqual([])
   })
 
   it('缺陷定级在修复任务全部结终态后唤醒自己，再进回归验证', () => {
@@ -308,12 +324,15 @@ describe('SOP_TEMPLATES', () => {
   })
 
   it('回归验证是闸门：两轮没过回缺陷定级，到上限由内核放行并留痕', () => {
-    const regression = SOP_TEMPLATES.find((template) => template.id === 'testing-qa')!.stages.find(
-      (stage) => stage.name === '回归验证',
-    )
+    const template = SOP_TEMPLATES.find((item) => item.id === 'testing-qa')!
+    const regression = template.stages.find((stage) => stage.name === '回归验证')
     expect(regression?.gate).toEqual({ maxFails: 2, onFail: '缺陷定级' })
-    // 不配 maxRounds：等待轮（缺陷还没修完、不写 verdict）不该被「阶段内续轮」当成自修复空转
-    expect(regression?.maxRounds ?? null).toBeNull()
+    // M34：缺陷定级的判据搬进紧随其后的闸门，逐条核对
+    const triage = template.stages.find((stage) => stage.name === '缺陷定级')
+    expect(triage?.acceptance ?? []).toEqual([])
+    expect(regression?.acceptance ?? []).toContain('每条缺陷都有可复现的步骤与期望 / 实测对照')
+    expect(regression?.acceptance ?? []).toContain('需修的缺陷都已派出，且每条能反查到对应修复任务')
+    expect(regression?.acceptance ?? []).toContain('遗留风险写明接受或不接受及依据')
   })
 
   it('缺陷修复是独立模板：四阶段，关单权留在人工确认', () => {
@@ -326,27 +345,33 @@ describe('SOP_TEMPLATES', () => {
       '回归确认',
     ])
     expect(issue!.stages.at(-1)?.entryMode).toBe('user')
-    // 修复方不能自己关单：修复阶段的验收里不出现「已验证」
+    // 修复方不能自己关单：判据在修复评审闸门上，且不出现「已验证」
     const fix = issue!.stages.find((stage) => stage.name === '修复')
-    expect((fix?.acceptance ?? []).join('')).not.toContain('已验证')
+    expect(fix?.acceptance ?? []).toEqual([])
+    const review = issue!.stages.find((stage) => stage.name === '修复评审')
+    expect((review?.acceptance ?? []).join('')).not.toContain('已验证')
+    // 修复阶段的判据搬进评审闸门，逐条核对
+    expect(review?.acceptance ?? []).toContain('新增用例在修复前失败、修复后通过')
     expect(issue!.stages.find((stage) => stage.name === '修复评审')?.gate).toEqual({
       maxFails: 2,
       onFail: '修复',
     })
   })
 
-  it('模板字段落进草稿：spawnPolicy / onChildrenSettled 透传，maxRounds 只在给了才写键', () => {
+  it('模板字段落进草稿：spawnPolicy / onChildrenSettled 透传，验收只落在闸门', () => {
     const qa = SOP_TEMPLATES.find((template) => template.id === 'testing-qa')
     const byName = new Map(draftFromTemplate(qa!).stages.map((stage) => [stage.name, stage]))
 
-    expect(byName.get('执行测试')).toMatchObject({ spawnPolicy: 'agent', maxRounds: 2 })
-    expect(byName.get('缺陷定级')).toMatchObject({ onChildrenSettled: 'wake' })
+    expect(byName.get('执行测试')).toMatchObject({ spawnPolicy: 'agent', acceptance: [] })
+    expect(byName.get('缺陷定级')).toMatchObject({ onChildrenSettled: 'wake', acceptance: [] })
     expect(byName.get('回归验证')).toMatchObject({
       onChildrenSettled: null,
       spawnPolicy: null,
+      judge: { maxFails: 2 },
     })
-    // 没声明 maxRounds 的阶段不写这个键：老模板的草稿形状逐字不变
-    expect(Object.keys(byName.get('测试设计')!)).not.toContain('maxRounds')
+    // 闸门带着自己的判据 + 搬过来的缺陷定级判据
+    expect((byName.get('回归验证')!.acceptance ?? []).length).toBeGreaterThan(4)
     expect(byName.get('测试设计')!.spawnPolicy).toBeNull()
+    expect(byName.get('测试设计')!.acceptance).toEqual([])
   })
 })

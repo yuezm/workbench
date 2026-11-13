@@ -1,4 +1,3 @@
-import { STAGE_EXIT_RETRY_LIMITS } from '../../protocol/entities'
 import type { StageExitGuard, StageInput } from '../../protocol/entities'
 
 /**
@@ -6,6 +5,7 @@ import type { StageExitGuard, StageInput } from '../../protocol/entities'
  * 返回第一条错误文案；全部合法时返回 null。调用方决定如何落地（抛异常 / 回给 IPC）。
  *
  * 判定顺序与文案是行为基线：阶段数量 → 名称 → agent 阶段必选智能体 → 判定形态 →
+ * 验收归属（M34：只许闸门）→ 判定者独立（不与被验阶段同一智能体）→
  * 出口表（每组一条、判定与非判定互斥、goto 目标越界 / 自指）。
  *
  * `errored` 这条边只表示**执行出错**（CLI 崩 / 超时）；业务上没过是判定的 `failed`。
@@ -36,6 +36,17 @@ export function validateStageSet(stages: StageInput[]): string | null {
         return `阶段「${s.name}」的放行护栏必须是不设或 ≥1 的整数`
       }
     }
+    // M34：验收只属于闸门阶段——执行阶段不给自己判分
+    if (!s.judge && (s.acceptance?.length ?? 0) > 0) {
+      return `阶段「${s.name}」不是判定阶段：验收条目只能配在闸门阶段`
+    }
+    // M34：判定者不能同时是被验阶段的执行者，否则又变成自己判自己
+    if (s.judge) {
+      const reviewed = reviewedStage(stages, i)
+      if (reviewed !== null && reviewed.agentId !== null && reviewed.agentId === s.agentId) {
+        return `阶段「${s.name}」的判定者不能与被验阶段「${reviewed.name}」是同一个智能体`
+      }
+    }
     const error = validateExits(s, i, n)
     if (error) return error
   }
@@ -56,18 +67,6 @@ function validateExits(stage: StageInput, index: number, count: number): string 
     if (!stage.judge && (exit.on === 'passed' || exit.on === 'failed')) {
       return `阶段「${stage.name}」不是判定阶段，没有「${label}」`
     }
-    if (exit.do === 'retry') {
-      const max = exit.max ?? null
-      if (
-        max === null ||
-        !Number.isInteger(max) ||
-        max < STAGE_EXIT_RETRY_LIMITS.min ||
-        max > STAGE_EXIT_RETRY_LIMITS.max
-      ) {
-        return `阶段「${stage.name}」的${label}重跑次数必须是 ${STAGE_EXIT_RETRY_LIMITS.min}–${STAGE_EXIT_RETRY_LIMITS.max} 的整数`
-      }
-      continue
-    }
     if (exit.do !== 'goto') continue
     const target = exit.stageIndex
     if (target === null || target === undefined) {
@@ -77,6 +76,20 @@ function validateExits(stage: StageInput, index: number, count: number): string 
       return `阶段「${stage.name}」的${label}目标越界`
     }
     if (target === index) return `阶段「${stage.name}」的${label}不能指向自己`
+  }
+  return null
+}
+
+/**
+ * 闸门阶段的被验阶段（M34）：往前找最近的**执行**阶段（`entry_mode='agent'` 且自身不是闸门）。
+ *
+ * 跳过闸门是为了「A → 判定1 → 判定2」这种链：判定2 验的仍是 A 的产出，不是判定1 的结论。
+ * 找不到（例如工作流以闸门开头）时返回 null——没有可比的执行者，不拦。
+ */
+function reviewedStage(stages: StageInput[], index: number): StageInput | null {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const candidate = stages[i]
+    if (candidate.entryMode === 'agent' && !candidate.judge) return candidate
   }
   return null
 }

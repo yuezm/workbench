@@ -199,10 +199,8 @@ export interface StageMetric {
   stageName: string
   /** 该阶段跑过多少轮 stage run */
   runs: number
-  /** 同一 (任务, 阶段) 的平均轮数：>1 说明内层在自我修复 */
-  avgRounds: number
-  /** 验收自评「已达轮次上限」的评论条数（近似：按任务当前阶段归属） */
-  repairExhausted: number
+  /** 闸门结论计数（M34）：该阶段评审报告的 `verdict`；非闸门阶段恒 0 */
+  verdicts: { pass: number; fail: number }
   /** 任务标签里带 `gate:degraded` 且停在该阶段的条数 */
   degraded: number
   /** 该阶段 run 上发出的 ask 卡数量 */

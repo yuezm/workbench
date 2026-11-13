@@ -3,9 +3,8 @@
  *
  * 同一份事实原来写了三处：提示词文案（`kernel/prompt`）、解析器白名单
  * （`plugins/shared/receipt-block`）、协议校验（`protocol/validate` 的 `checkReceipt`）。
- * M14/M20/M21 加键时改了后两处、漏了解析器——提示词让模型写 `findings` /
- * `addresses` / `acceptance`，执行器却把整块判成「不是回执」，评审硬门与验收续评
- * 整条断路，而且不报错。
+ * M14 加键时改了后两处、漏了解析器——提示词让模型写 `findings` /
+ * `addresses`，执行器却把整块判成「不是回执」，评审硬门整条断路，而且不报错。
  *
  * 现在键集合、每键口径、形状示例、上限文案只在这里定义一次：
  * - `kernel/prompt` 按可用键生成提示词段落（不再手写文案）；
@@ -30,7 +29,6 @@ export const RECEIPT_KEYS = [
   'deliverables',
   'findings',
   'addresses',
-  'acceptance',
 ] as const
 
 export type ReceiptKey = (typeof RECEIPT_KEYS)[number]
@@ -80,8 +78,8 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
     shape: '{"verdict":"pass","checks":[{"cmd":"pnpm check","exitCode":0}]}',
   },
   checks: {
-    text: '闸门证据：实际执行过的命令与退出码，`verdict` 为 `pass` 时每条 `exitCode` 必须是 0。',
-    shape: '[{"cmd":"pnpm check","exitCode":0}]',
+    text: '闸门证据：实际执行过的命令与退出码。`verdict` 为 `pass` 时每条 `exitCode` 必须是 0，且每条验收都要有一条 `acceptance` 指向它的全 0 证据。',
+    shape: '[{"cmd":"pnpm check","exitCode":0,"acceptance":1}]',
   },
   deliverables: {
     text: '阶段交付物：交给下游的坐标（分支 / 基线 / 提交 / 文件 / 门禁）。没有产出的项省略或写 null，别把过程写进来。',
@@ -98,19 +96,15 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
     shape:
       '[{"findingId":"<报告id>#R1","disposition":"fixed","checkRef":"pnpm check","note":"..."}]',
   },
-  acceptance: {
-    text: '逐条自评本阶段「验收」。`no` = 验收段第几条（按出现顺序，从 1 数），配 `met` 与 `evidence`；缺项按未达。',
-    shape: '[{"no":1,"met":true,"evidence":"pnpm check 退出码 0"}]',
-  },
 }
 
 /** 条数与字长上限（一次说清，不散落在各键文案里）。 */
 export const RECEIPT_LIMITS_LINE =
-  '上限：`ask` / `notices` / `resolves` / `events` / `notes` 各 100 项，`findings` / `addresses` 各 200 项，`spawn` 32 项，`checks` 32 条，`deliverables` 的 `commits` 20 项 / `files` 40 项 / `gates` 32 条，`acceptance` 12 条，`options` 最多 20 项；`title` ≤200、`text` / `evidence` ≤2000、`summary` ≤200、`claim` / `requiredAction` / `note` ≤500、`key` ≤32 字。'
+  '上限：`ask` / `notices` / `resolves` / `events` / `notes` 各 100 项，`findings` / `addresses` 各 200 项，`spawn` 32 项，`checks` 32 条，`deliverables` 的 `commits` 20 项 / `files` 40 项 / `gates` 32 条，`options` 最多 20 项；`title` ≤200、`text` / `evidence` ≤2000、`summary` ≤200、`claim` / `requiredAction` / `note` ≤500、`key` ≤32 字。'
 
 /**
  * 任何阶段都可能用到的出口（不含阶段专属的 `notes` / `verdict` / `checks` /
- * `findings` / `addresses` / `acceptance`）。
+ * `findings` / `addresses`）。
  */
 export const BASE_RECEIPT_KEYS: readonly ReceiptKey[] = [
   'ask',
@@ -122,7 +116,7 @@ export const BASE_RECEIPT_KEYS: readonly ReceiptKey[] = [
 ]
 
 /**
- * 聊天轮的键：没有阶段、不挂线程，所以没有验收自评、闸门判定、评审回应与线程笔记。
+ * 聊天轮的键：没有阶段、不挂线程，所以没有闸门判定、评审回应与线程笔记。
  * 留全量只是噪音，还会诱导模型在没有出口的键上乱填。
  */
 export const CHAT_RECEIPT_KEYS: readonly ReceiptKey[] = BASE_RECEIPT_KEYS

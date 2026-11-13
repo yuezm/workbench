@@ -106,7 +106,6 @@ export function createTask(
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
-    stageFails: 0,
     createdAt: now,
     updatedAt: now,
   }

@@ -68,7 +68,6 @@ function builtinStageRow(
     spawnPolicy: null,
     instructions: '',
     acceptance: [],
-    maxRounds: null,
   }
 }
 

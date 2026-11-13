@@ -1,7 +1,6 @@
 /**
  * 工作流命令（R2 从 `decide.ts` 拆出，行为不变；M18 加内置阶段）。
  */
-import { STAGE_EXIT_RETRY_LIMITS } from '../../protocol/entities'
 import type {
   BuiltinStageKey,
   JudgeConfig,
@@ -49,10 +48,8 @@ function stageRow(
     spawnPolicy: stage.spawnPolicy ?? null,
     // M9：阶段要干什么，去首尾空白后存；空串表示没写
     instructions: stage.instructions?.trim() ?? '',
-    // M20：验收条目归一（去空 / 去重 / 截断）；空数组表示未声明
+    // M20/M34：验收条目归一（去空 / 去重 / 截断）；只有闸门阶段允许非空（validateStageSet 挡）
     acceptance: normalizeAcceptance(stage.acceptance),
-    // M21：阶段内轮次上限（1–5；缺省 = 1，不续轮）
-    maxRounds: stage.maxRounds ?? null,
     // M26：阶段单轮超时（毫秒；缺省 = null，用全局缺省）
     runTimeoutMs: stage.runTimeoutMs ?? null,
     // M32：判定者只回答「谁给结论 + 护栏多大」，去向在 exits 里
@@ -73,10 +70,6 @@ function exitsOf(ids: Id[], stage: StageInput): StageExits {
     if (exit.do === 'goto') {
       const stageId = indexTarget(ids, exit.stageIndex)
       if (stageId !== null) exits[exit.on] = { do: 'goto', stageId }
-      continue
-    }
-    if (exit.do === 'retry') {
-      exits[exit.on] = { do: 'retry', max: exit.max ?? STAGE_EXIT_RETRY_LIMITS.min }
       continue
     }
     exits[exit.on] = { do: exit.do }
@@ -151,10 +144,8 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     (a.spawnPolicy ?? null) === (b.spawnPolicy ?? null) &&
     // M9：阶段要干什么（缺省与空串视为同值）
     sameInstructions(a.instructions, b.instructions) &&
-    // M20：验收条目一变就要落 stage.updated（缺省与空数组视为同值）
+    // M20/M34：验收条目一变就要落 stage.updated（缺省与空数组视为同值）
     sameAcceptance(a.acceptance, b.acceptance) &&
-    // M21：轮次上限一变要落 stage.updated（缺省与 null 视为同值）
-    (a.maxRounds ?? null) === (b.maxRounds ?? null) &&
     // M26：阶段超时一变要落 stage.updated（缺省与 null 视为同值）
     (a.runTimeoutMs ?? null) === (b.runTimeoutMs ?? null) &&
     // M32：判定者一变就要落 stage.updated

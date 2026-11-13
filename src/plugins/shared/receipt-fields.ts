@@ -14,7 +14,7 @@
  */
 import type { GateCheck, GateVerdict } from '../../protocol/entities'
 import { ACCEPTANCE_LIMITS, GATE_VERDICTS } from '../../protocol/entities'
-import type { AcceptanceCheck, Ask, RawEvent, Receipt, SpawnTask } from '../../protocol/inputs'
+import type { Ask, RawEvent, Receipt, SpawnTask } from '../../protocol/inputs'
 import type { FindingAddress, ReviewFindingInput } from '../../protocol/review'
 import { FINDING_DISPOSITIONS, REVIEW_LIMITS, REVIEW_SEVERITIES } from '../../protocol/review'
 import { RECEIPT_KEYS } from '../../protocol/receipt-keys'
@@ -41,7 +41,6 @@ export interface ReceiptBlock {
   /** 逐条回应（M14）：`fixed` 必带 `checkRef`，其余必带 `note` */
   addresses?: FindingAddress[]
   /** 验收自评（M21）：`no` 是验收段 1 基序号；越界条目由内核丢弃 */
-  acceptance?: AcceptanceCheck[]
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -161,6 +160,11 @@ const parseChecks = (value: unknown): GateCheck[] | null => {
     if (!isText(entry.cmd, COMMAND_LIMITS.gateCmd)) return null
     if (typeof entry.exitCode !== 'number' || !Number.isInteger(entry.exitCode)) return null
     if (entry.exitCode < -1_000_000 || entry.exitCode > 1_000_000) return null
+    // M34：指向第 n 条验收（1 基），可省略 = 与验收无关的环境检查
+    if (entry.acceptance !== undefined && entry.acceptance !== null) {
+      if (typeof entry.acceptance !== 'number' || !Number.isInteger(entry.acceptance)) return null
+      if (entry.acceptance < 1 || entry.acceptance > ACCEPTANCE_LIMITS.maxItems) return null
+    }
   }
   return value as GateCheck[]
 }
@@ -205,29 +209,10 @@ const parseAddresses = (value: unknown): FindingAddress[] | null => {
   return value as FindingAddress[]
 }
 
-/** 验收自评（M21）：`no` 是 1 基序号，`met` 必须是布尔；越界序号由内核丢弃。 */
-const parseAcceptance = (value: unknown): AcceptanceCheck[] | null => {
-  if (!Array.isArray(value) || value.length > ACCEPTANCE_LIMITS.maxItems) return null
-  for (const entry of value) {
-    if (!isRecord(entry)) return null
-    if (
-      typeof entry.no !== 'number' ||
-      !Number.isInteger(entry.no) ||
-      entry.no < 1 ||
-      entry.no > ACCEPTANCE_LIMITS.maxItems
-    ) {
-      return null
-    }
-    if (typeof entry.met !== 'boolean') return null
-    if (!isOptionalText(entry.evidence, COMMAND_LIMITS.description)) return null
-  }
-  return value as AcceptanceCheck[]
-}
-
 /**
  * 回执对象 → 回执块（fence 与 tool 共用）。
  *
- * 十二键全无、或任一字段校验不过 → `null`（整块忽略，不做部分采纳）。
+ * 十一键全无、或任一字段校验不过 → `null`（整块忽略，不做部分采纳）。
  * 空数组 / `null` 视为未提供（`checks: []` 不连累同块 `verdict`）。
  */
 export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
@@ -338,15 +323,6 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
         }
         break
       }
-      case 'acceptance': {
-        const acceptance = parseAcceptance(value)
-        if (!acceptance) return null
-        if (acceptance.length > 0) {
-          block.acceptance = acceptance
-          fields += 1
-        }
-        break
-      }
     }
   }
 
@@ -370,5 +346,4 @@ export function applyReceiptFields(receipt: Receipt, block: ReceiptBlock): void 
   if (block.checks !== undefined) receipt.checks = block.checks
   if (block.findings !== undefined) receipt.findings = block.findings
   if (block.addresses !== undefined) receipt.addresses = block.addresses
-  if (block.acceptance !== undefined) receipt.acceptance = block.acceptance
 }

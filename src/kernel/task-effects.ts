@@ -105,13 +105,12 @@ export function entryRunFacts(
   // M24：本阶段要处理的评审报告决定回执里有没有 `addresses` 的出口——没有报告时
   // 提示词不再念「逐条回应」，省掉一段用不上的指令。
   const reviewing = locateReport(view, task) !== undefined
-  // M28：本阶段已跑过几轮（不含本轮）。第 1 轮只给「第 1 轮」的语义（不产段），
-  // 第 2 轮起在提示词里写明「第 N 轮 / 上限」，并把会话换成新的。
+  // M28：本阶段已跑过几次（不含本轮）。它只决定会话策略（第 2 次起开新会话），
+  // M34 起不再进提示词——续轮已删除，「第 N 轮」对执行没有行动指引。
   const previousRounds = stageRoundCount(view, task.id, stage.id)
   const prompt = [
     taskPrompt(agent, task, stage, context, comments, {
       reviewing,
-      round: { index: previousRounds + 1, max: stage.maxRounds ?? null },
       handoffSource: sourceHandoffOf(view, task),
     }),
     trigger?.promptExtra ?? '',

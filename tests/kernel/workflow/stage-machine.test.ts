@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { Task, WorkflowStage, WorkflowWithStages } from '../../../src/protocol/entities'
+import { STAGE_EXIT_ACTIONS } from '../../../src/protocol/entities'
 import {
   completeTask,
   enterStage,
   entryEffects,
+  legacyExits,
+  legacyJudge,
   moveTask,
   moveTaskToStage,
   resolveNextStage,
@@ -49,7 +52,6 @@ const task = (currentStageId: string | null): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
-  stageFails: 0,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
 })
@@ -157,7 +159,6 @@ function sTask(currentStageId: string | null, status: Task['status'] = 'active')
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
-    stageFails: 0,
     createdAt: 't',
     updatedAt: 't',
   }
@@ -664,32 +665,74 @@ describe('stage-machine 去向与位置无关（M29 删掉 exitsForward）', () 
   })
 })
 
-describe('stage-machine applyExit retry（M33：原地重跑预算）', () => {
+// M34 移除 `retry` 出口动作（原「原地重跑预算」三例删除）：出口只剩 goto / await / close，
+// 原地再来一轮只能由人触发（拖回阶段 / 重新执行）。
+describe('stage-machine applyExit 出口只有三种动作（M34 移除 retry）', () => {
   const flow = (): WorkflowWithStages =>
     sWf([s0, s1, sStage({ id: 'ag', position: 2, entryMode: 'agent', agentId: 'ag1' })])
 
-  it('预算内：计数 +1、原地重建入口 run', () => {
-    const r = applyExit(sTask('ag'), { do: 'retry', max: 2 }, flow())
+  it('动作表就是 goto / await / close，没有 retry', () => {
+    expect(STAGE_EXIT_ACTIONS).toEqual(['goto', 'await', 'close'])
+  })
+
+  it('goto：换阶段并重建入口 run', () => {
+    const r = applyExit(sTask('s0'), { do: 'goto', stageId: 'ag' }, flow())
 
     expect(r.task.currentStageId).toBe('ag')
-    expect(r.task.stageFails).toBe(1)
     expect(r.effects).toEqual([{ type: 'createRun', stageId: 'ag', agentId: 'ag1' }])
-    expect(r.retryExhausted).toBeUndefined()
   })
 
-  it('用尽：任务收口（completed）、计数清零、标记 retryExhausted', () => {
-    const r = applyExit({ ...sTask('ag'), stageFails: 2 }, { do: 'retry', max: 2 }, flow())
+  it('await：原地不动、零效果（不再有重跑计数与「预算用尽」收口）', () => {
+    const r = applyExit(sTask('ag'), { do: 'await' }, flow())
 
-    expect(r.task.status).toBe('completed')
-    expect(r.task.stageFails).toBe(0)
+    expect(r.task.currentStageId).toBe('ag')
+    expect(r.task.status).toBe('active')
     expect(r.effects).toEqual([])
-    expect(r.retryExhausted).toBe(true)
+    expect(Object.hasOwn(r, 'retryExhausted')).toBe(false)
+  })
+})
+
+// 老事实的判定者（M11 的 `gate` 列 → M32 的 `judge`）：只搬护栏，去向搬进出口表。
+describe('stage-machine legacyJudge（老 gate 列只搬护栏）', () => {
+  it('judge 已给就原样用；只有老 gate 时只取 maxFails；都没有时 null', () => {
+    expect(legacyJudge({ judge: { maxFails: 2 }, gate: { maxFails: 5 } })).toEqual({ maxFails: 2 })
+    expect(legacyJudge({ judge: null, gate: { maxFails: 5 } })).toBeNull()
+    expect(legacyJudge({ gate: { maxFails: 3 } })).toEqual({ maxFails: 3 })
+    expect(legacyJudge({})).toBeNull()
+    expect(legacyJudge({ judge: undefined, gate: null })).toBeNull()
+  })
+})
+
+// M34：`retry` 从动作表里删了，但旧库 / 老事实的 JSON 里还留着——归一成 `await`
+// （不替用户猜目标阶段），其余出口原样保留。
+describe('stage-machine legacyExits（M34：老 retry 归一成 await）', () => {
+  it('老 exits 里的 retry → await，goto / await / close 原样', () => {
+    const legacy = {
+      errored: { do: 'retry', max: 2 },
+      done: { do: 'goto', stageId: 's2' },
+      passed: { do: 'await' },
+      failed: { do: 'close' },
+    } as unknown as WorkflowStage['exits']
+
+    expect(legacyExits({ exits: legacy })).toEqual({
+      errored: { do: 'await' },
+      done: { do: 'goto', stageId: 's2' },
+      passed: { do: 'await' },
+      failed: { do: 'close' },
+    })
+    expect(legacyExits({ exits: {} })).toEqual({})
+    // null 项丢掉（老事实里可能是显式 null）
+    expect(legacyExits({ exits: { done: null } as unknown as WorkflowStage['exits'] })).toEqual({})
   })
 
-  it('进入别的阶段时重跑计数清零', () => {
-    const r = applyExit({ ...sTask('s0'), stageFails: 3 }, { do: 'goto', stageId: 's1' }, flow())
-
-    expect(r.task.currentStageId).toBe('s1')
-    expect(r.task.stageFails).toBe(0)
+  it('没有 exits 时按老的 onComplete / onReject / 闸门两列还原', () => {
+    expect(legacyExits({ onCompleteStageId: 's1', onRejectStageId: 's0' })).toEqual({
+      done: { do: 'goto', stageId: 's1' },
+      errored: { do: 'goto', stageId: 's0' },
+    })
+    expect(legacyExits({ gate: { onPassStageId: 's2', onFailStageId: null } })).toEqual({
+      passed: { do: 'goto', stageId: 's2' },
+    })
+    expect(legacyExits({ gate: null, onCompleteStageId: null })).toEqual({})
   })
 })

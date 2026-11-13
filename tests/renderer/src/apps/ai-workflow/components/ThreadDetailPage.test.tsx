@@ -26,7 +26,6 @@ const parentTask: Task = {
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
-  stageFails: 0,
   createdAt: 't',
   updatedAt: 't',
 }
@@ -47,7 +46,6 @@ const doneTask: Task = {
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
-  stageFails: 0,
   status: 'completed',
 }
 

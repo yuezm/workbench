@@ -26,7 +26,6 @@ import {
   RUN_TERMINAL_STATUSES,
   SPAWN_POLICIES,
   STAGE_HANDOFF_GUARDS,
-  STAGE_ROUND_LIMITS,
   STAGE_TIMEOUT_LIMITS,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
@@ -325,17 +324,10 @@ const checkStage = (value: unknown, label: string): Check => {
     optionalEnum(stage.spawnPolicy, `${label}.spawnPolicy`, SPAWN_POLICIES) ??
     // M9 阶段要干什么：纯文本资料段，空串表示清空
     optionalText(stage.instructions, `${label}.instructions`, COMMAND_LIMITS.stageInstructions) ??
-    // M20 验收条目：条数有上限，单条长度按 ACCEPTANCE_LIMITS 截（内核归一，这里只挡形状）
+    // M34 验收条目：只有闸门阶段可配（由内核按 judge 判），这里只挡形状与条数
     (stage.acceptance === undefined || stage.acceptance === null
       ? null
       : checkAcceptanceList(stage.acceptance, `${label}.acceptance`)) ??
-    // M21 阶段内轮次上限：1–5，可空 = 不续轮
-    optionalIntegerIn(
-      stage.maxRounds,
-      `${label}.maxRounds`,
-      STAGE_ROUND_LIMITS.min,
-      STAGE_ROUND_LIMITS.max,
-    ) ??
     // M26 单轮运行超时：5 min–4 h（毫秒），可空 = 用全局缺省
     optionalIntegerIn(
       stage.runTimeoutMs,
@@ -968,7 +960,9 @@ const checkGateCheck = (value: unknown, at: string): Check => {
   if (!check) return `${at} 必须是对象`
   return (
     required(check.cmd, `${at}.cmd`, COMMAND_LIMITS.gateCmd) ??
-    integerIn(check.exitCode, `${at}.exitCode`, -1_000_000, 1_000_000)
+    integerIn(check.exitCode, `${at}.exitCode`, -1_000_000, 1_000_000) ??
+    // M34：指向第 n 条验收（1 基）；越界由内核按阶段配置丢弃
+    optionalIntegerIn(check.acceptance, `${at}.acceptance`, 1, ACCEPTANCE_LIMITS.maxItems)
   )
 }
 
@@ -997,20 +991,6 @@ const checkDeliverables = (value: unknown): Check => {
       text(item, where, DELIVERABLE_LIMITS.maxChars),
     ) ??
     checkList(record.gates, `${at}.gates`, COMMAND_LIMITS.gateChecks, checkGateCheck)
-  )
-}
-
-/**
- * 验收自评（M21）：`{ no, met, evidence? }`。`no` 是 1 基序号，越界由内核丢弃，
- * 这里只挡形状（非法条目整块会让回执被拒，所以校验放在条目级）。
- */
-const checkAcceptanceCheck = (value: unknown, at: string): Check => {
-  const check = asRecord(value)
-  if (!check) return `${at} 必须是对象`
-  return (
-    integerIn(check.no, `${at}.no`, 1, ACCEPTANCE_LIMITS.maxItems) ??
-    (typeof check.met === 'boolean' ? null : `${at}.met 必须是布尔值`) ??
-    optionalText(check.evidence, `${at}.evidence`, COMMAND_LIMITS.description)
   )
 }
 
@@ -1104,13 +1084,6 @@ const checkReceipt = (value: unknown): Check => {
     checkList(receipt.checks, 'receipt.checks', COMMAND_LIMITS.gateChecks, checkGateCheck) ??
     // M28 阶段交付物：可选；形状不对整块拒（它是下游定位产物的坐标，不能含糊）
     checkDeliverables(receipt.deliverables) ??
-    // M21 验收自评：逐条形状；越界序号由内核丢弃，缺项按未达处理
-    checkList(
-      receipt.acceptance,
-      'receipt.acceptance',
-      ACCEPTANCE_LIMITS.maxItems,
-      checkAcceptanceCheck,
-    ) ??
     checkFindings(receipt.findings) ??
     checkList(
       receipt.addresses,

@@ -239,7 +239,7 @@ export function WorkflowManager(): ReactElement {
               <tr className="text-left text-faint-foreground">
                 <th className="px-4 py-1.5 font-normal">阶段</th>
                 <th className="px-2 py-1.5 text-right font-normal">轮次</th>
-                <th className="px-2 py-1.5 text-right font-normal">平均轮数</th>
+                <th className="px-2 py-1.5 text-right font-normal">结论</th>
                 <th className="px-2 py-1.5 text-right font-normal">降级</th>
                 <th className="px-2 py-1.5 text-right font-normal">问人</th>
                 <th className="px-4 py-1.5 text-right font-normal">人评</th>
@@ -250,7 +250,12 @@ export function WorkflowManager(): ReactElement {
                 <tr key={stage.stageId} className="text-foreground">
                   <td className="px-4 py-1.5">{stage.stageName}</td>
                   <td className="px-2 py-1.5 text-right tabular-nums">{stage.runs}</td>
-                  <td className="px-2 py-1.5 text-right tabular-nums">{stage.avgRounds}</td>
+                  {/* M34：判定结论按通过 / 未通过计数（阶段内续轮已删，不再有平均轮数）；没判过就是无结论 */}
+                  <td className="px-2 py-1.5 text-right tabular-nums">
+                    {stage.verdicts.pass + stage.verdicts.fail === 0
+                      ? '无结论'
+                      : `通过 ${stage.verdicts.pass} · 未通过 ${stage.verdicts.fail}`}
+                  </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">{stage.degraded}</td>
                   <td className="px-2 py-1.5 text-right tabular-nums">{stage.asks}</td>
                   <td className="px-4 py-1.5 text-right tabular-nums">{stage.humanComments}</td>

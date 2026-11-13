@@ -418,7 +418,7 @@ describe('applyReceiptBlock：执行器接线口径', () => {
   })
 })
 
-describe('parseReceiptBlock：评审与验收键（M14 / M21）', () => {
+describe('parseReceiptBlock：评审键与废弃的验收自评键（M14 / M34）', () => {
   /** 合法待改项夹具 */
   const findingOf = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
     key: 'R1',
@@ -485,35 +485,71 @@ describe('parseReceiptBlock：评审与验收键（M14 / M21）', () => {
     })
   })
 
-  it('acceptance：no 是 1 基整数、met 必须是布尔；越界 / 非整数 / 缺 met 整块忽略', () => {
-    const ok = [{ no: 1, met: true, evidence: 'pnpm check 退出码 0' }]
-    expect(parseReceiptBlock(blockOf({ acceptance: ok }))).toEqual({ acceptance: ok })
-    // met=false 也是有效自评（未达会被内核判续轮）
-    expect(parseReceiptBlock(blockOf({ acceptance: [{ no: 2, met: false }] }))).toEqual({
-      acceptance: [{ no: 2, met: false }],
-    })
-    for (const bad of [
-      [{ no: 0, met: true }],
-      [{ no: 13, met: true }],
-      [{ no: 1.5, met: true }],
-      [{ no: '1', met: true }],
-      [{ no: 1 }],
-      [{ no: 1, met: 'yes' }],
-      [{ met: true }],
-      Array.from({ length: 13 }, (_, index) => ({ no: index + 1, met: true })),
-    ]) {
-      expect(parseReceiptBlock(blockOf({ acceptance: bad }))).toBeNull()
-    }
-    expect(parseReceiptBlock(blockOf({ acceptance: [], notices: ['n'] }))).toEqual({
+  // M34：回执键 `acceptance` 已删除（执行阶段不再自评）。老执行器残留这个键时整键忽略，
+  // 同块其它键照常生效——一块里混着废弃键不该让整块失效。
+  it('acceptance 键出现即忽略：同块 verdict / checks 仍生效', () => {
+    expect(
+      parseReceiptBlock(
+        blockOf({
+          verdict: 'pass',
+          checks: [{ cmd: 'pnpm check', exitCode: 0 }],
+          acceptance: [{ no: 1, met: false, evidence: '早已废弃的自评' }],
+        }),
+      ),
+    ).toEqual({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0 }] })
+    // 形状再离谱也一样忽略：它已不是可校验的字段
+    expect(
+      parseReceiptBlock(blockOf({ acceptance: [{ no: 0, met: 'yes' }], notices: ['n'] })),
+    ).toEqual({
       notices: ['n'],
     })
   })
 
-  it('applyReceiptBlock：三个键写进回执，output 与终态不动', () => {
+  it('只有 acceptance 键：不算回执块（没有可用键 → null）', () => {
+    expect(parseReceiptBlock(blockOf({ acceptance: [{ no: 1, met: true }] }))).toBeNull()
+    expect(parseReceiptBlock(blockOf({ acceptance: [] }))).toBeNull()
+  })
+
+  // M34：闸门逐条给证据——`checks[].acceptance` 是 1 基序号，可省略（环境检查）
+  it('checks[].acceptance：1–12 的整数原样保留，可省略', () => {
+    const checks = [
+      { cmd: 'pnpm check', exitCode: 0, acceptance: 1 },
+      { cmd: 'pnpm lint', exitCode: 0, acceptance: 12 },
+      { cmd: 'git status --short', exitCode: 0 },
+    ]
+    expect(parseReceiptBlock(blockOf({ verdict: 'pass', checks }))).toEqual({
+      verdict: 'pass',
+      checks,
+    })
+  })
+
+  it('checks[].acceptance 非法（非整数 / 越界 / 字符串）：整块忽略', () => {
+    for (const acceptance of [0, 13, 1.5, '1', true, {}]) {
+      expect(
+        parseReceiptBlock(
+          blockOf({
+            verdict: 'pass',
+            checks: [{ cmd: 'pnpm check', exitCode: 0, acceptance }],
+            notices: ['同块也不能生效'],
+          }),
+        ),
+      ).toBeNull()
+    }
+    // null 视为未提供
+    expect(
+      parseReceiptBlock(
+        blockOf({
+          verdict: 'pass',
+          checks: [{ cmd: 'pnpm check', exitCode: 0, acceptance: null }],
+        }),
+      ),
+    ).toEqual({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0, acceptance: null }] })
+  })
+
+  it('applyReceiptBlock：评审两键写进回执，output 与终态不动', () => {
     const text = blockOf({
       findings: [findingOf()],
       addresses: [addressOf()],
-      acceptance: [{ no: 1, met: true, evidence: 'pnpm check 退出码 0' }],
     })
     const receipt = receiptOf({ output: text })
     applyReceiptBlock(receipt, text)
@@ -522,7 +558,7 @@ describe('parseReceiptBlock：评审与验收键（M14 / M21）', () => {
     expect(receipt.status).toBe('succeeded')
     expect(receipt.findings).toEqual([findingOf()])
     expect(receipt.addresses).toEqual([addressOf()])
-    expect(receipt.acceptance).toEqual([{ no: 1, met: true, evidence: 'pnpm check 退出码 0' }])
+    expect(Object.hasOwn(receipt, 'acceptance')).toBe(false)
   })
 
   it('非对象条目 / 超长字段：整块忽略（不把半截清单送进内核）', () => {
@@ -533,20 +569,20 @@ describe('parseReceiptBlock：评审与验收键（M14 / M21）', () => {
       { addresses: ['rpt-1#R1'] },
       { addresses: [addressOf({ checkRef: 'x'.repeat(501) })] },
       { addresses: [addressOf({ disposition: 'deferred', note: 'x'.repeat(501) })] },
-      { acceptance: ['1'] },
-      { acceptance: [{ no: 1, met: true, evidence: 'x'.repeat(2001) }] },
     ]) {
       expect(parseReceiptBlock(blockOf(bad))).toBeNull()
     }
   })
 
-  it('applyReceiptBlock：只带 acceptance 时 findings / addresses 保持未提供', () => {
+  // M34：`acceptance` 键已从回执口径里删除，老执行器还写它时整块不成立，什么都不写
+  it('applyReceiptBlock：只剩废弃的 acceptance 键时不改回执', () => {
     const text = blockOf({ acceptance: [{ no: 1, met: false }] })
     const receipt = receiptOf({ output: text })
     applyReceiptBlock(receipt, text)
 
-    expect(receipt.acceptance).toEqual([{ no: 1, met: false }])
+    expect(Object.hasOwn(receipt, 'acceptance')).toBe(false)
     expect(receipt.findings).toBeUndefined()
     expect(receipt.addresses).toBeUndefined()
+    expect(receipt.output).toBe(text)
   })
 })

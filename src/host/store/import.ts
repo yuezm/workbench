@@ -372,7 +372,6 @@ function readLegacyEntityRows(
     // M20：v2 存量没有验收条目——按空数组归一。
     acceptance: [],
     // M21：v2 存量没有阶段内轮次概念——按「不续轮」归一。
-    maxRounds: null,
     // M26：v2 存量没有阶段超时概念——按「用全局缺省」归一。
     runTimeoutMs: null,
   }))
@@ -411,7 +410,6 @@ function readLegacyEntityRows(
     handoffFromRunId: null,
     // M11：v2 存量没有闸门概念——预算按 0 归一（与投影层 `normalizeTask` 一致）。
     gateFails: 0,
-    stageFails: 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }))

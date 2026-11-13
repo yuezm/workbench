@@ -96,19 +96,6 @@ export interface SpawnTask {
 }
 
 /**
- * 一条验收自评（M21）：回执 `acceptance[]` 逐条声明本阶段验收条目的达成情况。
- *
- * `no` 是 **1 基序号**，对应阶段 `acceptance` 数组的下标；越界条目一律丢弃，
- * 缺项按**未达**处理（fail-closed）——「没说」不等于「达成了」。
- */
-export interface AcceptanceCheck {
-  no: number
-  met: boolean
-  /** 证据（命令 / 链接 / 一句话说明）；未达时写清差在哪 */
-  evidence?: string
-}
-
-/**
  * 一轮执行的回执：执行器 → 宿主 → `run.receipt` 输入 → 内核。
  * `later / events / notices / resolves / spawn` 留到 M4/M6/M8 处理。
  */
@@ -172,11 +159,6 @@ export interface Receipt {
    * 内核只把它抄进报告行、不读文件。缺省 = 正文没落盘（索引段只给清单与报告 id）。
    */
   artifact?: ReviewArtifact
-  /**
-   * 验收自评（M21）：本阶段 `acceptance` 各条是否达成。阶段没声明验收时忽略；
-   * 未全达且未超 `maxRounds` 时内核原地续一轮，不流转。
-   */
-  acceptance?: AcceptanceCheck[]
 }
 
 // ---------- 运行 ----------

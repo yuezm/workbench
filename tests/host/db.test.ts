@@ -295,6 +295,14 @@ describe('openDatabase', () => {
            VALUES (?, ?, ?, 0, 'none', NULL, 3, ?)`,
         )
         .run('st-1', 'wf-1', '旧阶段', '2026-01-01T00:00:00.000Z')
+      // M34：非闸门阶段上残留的验收条目在升级时作废（judge 为 null 的那一行）
+      seeded
+        .prepare(
+          `INSERT INTO workflow_stages
+             (id, workflow_id, name, position, entry_mode, acceptance_json, created_at)
+           VALUES (?, ?, ?, 1, 'agent', ?, ?)`,
+        )
+        .run('st-2', 'wf-1', '执行阶段', '["pnpm check 退出码 0"]', '2026-01-01T00:00:00.000Z')
       expect(needsStagesRebuild(seeded)).toBe(true)
     } finally {
       seeded.close()
@@ -318,6 +326,14 @@ describe('openDatabase', () => {
         .prepare('SELECT name, exits_json, judge_json FROM workflow_stages')
         .get() as { name: string; exits_json: string; judge_json: string }
       expect(row).toEqual({ name: '旧阶段', exits_json: '{}', judge_json: '{"maxFails":3}' })
+      // M34：执行阶段（judge=null）的验收条目被清空，闸门阶段的保留
+      const acceptance = local
+        .prepare('SELECT id, acceptance_json FROM workflow_stages ORDER BY position')
+        .all() as unknown as Array<{ id: string; acceptance_json: string }>
+      expect(acceptance).toEqual([
+        { id: 'st-1', acceptance_json: '[]' },
+        { id: 'st-2', acceptance_json: '[]' },
+      ])
     } finally {
       local.close()
       rmSync(root, { recursive: true, force: true })
@@ -1271,6 +1287,44 @@ describe('openDatabase：旧库 tasks 结构升级（M6 / M6.5 / M7 一次性物
         })
       } finally {
         inspect.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('M34：旧库 tasks 带已废弃的 stage_fails → open 时整表重建、列消失、行保留', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-tasks-m34-'))
+    const file = path.join(root, 'ai-workflow.db')
+    try {
+      const seeded = new DatabaseSync(file)
+      try {
+        seeded.exec(SCHEMA_SQL)
+        seeded.exec('ALTER TABLE tasks ADD COLUMN stage_fails INTEGER NOT NULL DEFAULT 0')
+        seeded
+          .prepare(`INSERT INTO workflows (id, name, description, created_at) VALUES (?, ?, '', ?)`)
+          .run('wf-1', '旧流程', SEED_AT)
+        seeded
+          .prepare(
+            `INSERT INTO tasks (id, title, description, workflow_id, current_stage_id, status, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          // current_stage_id 留空：阶段行是弱引用，省掉一层外键准备
+          .run('tk-1', '旧任务', '', 'wf-1', null, 'active', SEED_AT, SEED_AT)
+        seeded.exec('UPDATE tasks SET stage_fails = 3')
+        // 表里还有 stage_fails：M34 需要重建一次把它物理删掉
+        expect(needsTasksRebuild(seeded)).toBe(true)
+      } finally {
+        seeded.close()
+      }
+
+      const local = openDatabase(file)
+      try {
+        expect(needsTasksRebuild(local)).toBe(false)
+        expect(columnNames(local, 'tasks').has('stage_fails')).toBe(false)
+        expect((local.prepare('SELECT COUNT(*) AS n FROM tasks').get() as { n: number }).n).toBe(1)
+      } finally {
+        local.close()
       }
     } finally {
       rmSync(root, { recursive: true, force: true })

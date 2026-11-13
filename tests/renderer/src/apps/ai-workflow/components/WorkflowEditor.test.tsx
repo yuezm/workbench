@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -80,6 +80,8 @@ interface StageSpec {
   onChildrenSettled?: OnChildrenSettled | null
   spawnPolicy?: SpawnPolicy | null
   instructions?: string
+  /** 验收条目（M34：只有闸门阶段能带；非闸门阶段带上内核会拒收） */
+  acceptance?: readonly string[]
   /** 判定者（非空 = 判定阶段，出口只有通过 / 未通过 / 出错三行） */
   judge?: { maxFails: number | null }
 }
@@ -126,6 +128,7 @@ function workflowOf(specs: StageSpec[]): WorkflowWithStages {
       onChildrenSettled: spec.onChildrenSettled ?? null,
       spawnPolicy: spec.spawnPolicy ?? null,
       instructions: spec.instructions ?? '',
+      acceptance: spec.acceptance ?? [],
     })),
   }
 }
@@ -862,7 +865,6 @@ describe('WorkflowEditor', () => {
       instructions: '按方案实现',
       // M20：不展示验收的类型保存时归一为空
       acceptance: [],
-      maxRounds: null,
       runTimeoutMs: null,
       judge: null,
     })
@@ -923,7 +925,6 @@ describe('WorkflowEditor', () => {
       instructions: '按方案实现',
       // M20：不展示验收的类型保存时归一为空
       acceptance: [],
-      maxRounds: null,
       runTimeoutMs: null,
       judge: null,
     })
@@ -1246,7 +1247,6 @@ describe('WorkflowEditor 校验与失败反馈', () => {
           spawnPolicy: null,
           instructions: '',
           acceptance: [],
-          maxRounds: null,
           runTimeoutMs: null,
           judge: null,
         },
@@ -1278,7 +1278,6 @@ describe('WorkflowEditor 校验与失败反馈', () => {
           spawnPolicy: null,
           instructions: '',
           acceptance: [],
-          maxRounds: null,
           runTimeoutMs: null,
           judge: null,
         },
@@ -1575,45 +1574,53 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
     expect(screen.getByLabelText('阶段1要干什么')).toHaveValue('')
   })
 
-  it('验收与轮次（M20/M21）：一条一行存成数组，轮次可选；没验收时不展示轮次', async () => {
-    const existing = workflowWith([{ name: '执行' }, { name: '自测' }, { name: '结束' }])
+  it('执行阶段不渲染验收输入框：判据只属于闸门（M34）', async () => {
+    const existing = workflowWith([
+      // M34 迁移前的脏数据：执行阶段上还挂着验收条目
+      { name: '执行', acceptance: ['pnpm check 退出码 0'] },
+      { name: '收尾' },
+    ])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    // 交智能体的执行阶段：要干什么在，验收与轮次都不在
+    expect(screen.getByLabelText('阶段2要干什么')).toBeInTheDocument()
+    expect(screen.queryByLabelText('阶段2验收')).not.toBeInTheDocument()
+    expect(screen.queryByText(/判定者要逐条给证据/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '阶段2轮次上限' })).not.toBeInTheDocument()
+  }, 30_000)
+
+  it('保存执行阶段时验收归一为空：看不见的判据不提交', async () => {
+    const existing = workflowWith([
+      { name: '执行', acceptance: ['pnpm check 退出码 0', '不改数据库 schema'] },
+      { name: '收尾' },
+    ])
     kernel.setView('agents.all', undefined, [agent])
     kernel.setView('workflows.all', undefined, [existing])
     const onSave = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
-
-    await user.click(screen.getByRole('button', { name: '阶段3' }))
-    await choose(user, '阶段3类型', '交给智能体')
-    await choose(user, '阶段3智能体', 'coder')
-
-    // 没写验收时不给轮次选择（续轮需要可判定的口径才有意义）
-    expect(screen.queryByRole('combobox', { name: '阶段3轮次上限' })).not.toBeInTheDocument()
-
-    const acceptance = screen.getByLabelText('阶段3验收')
-    await user.type(acceptance, 'pnpm check 退出码 0{enter}覆盖每条验收标准')
-    await choose(user, '阶段3轮次上限', '2 轮')
-    // M26：单轮超时按档位选，落库是毫秒（90 分钟）
-    await choose(user, '阶段3单轮超时', '90 分钟')
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0] as WorkflowInput
-    expect(savedStage(draft, '自测')).toMatchObject({
-      acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'],
-      maxRounds: 2,
-      runTimeoutMs: 5_400_000,
-    })
+    // 执行阶段不声明验收：留着内核会以「非判定阶段配了验收」整份拒收
+    expect(savedStage(draft, '执行').acceptance).toEqual([])
+    expect(savedStage(draft, '执行')).toMatchObject({ entryMode: 'agent', judge: null })
   }, 30_000)
 
-  it('轮次上限选「1（不续轮）」、单轮超时选「默认」：都回落到 null（改用全局缺省）', async () => {
-    const existing = workflowWith([{ name: '执行' }, { name: '自测' }, { name: '结束' }])
-    const selfTest = existing.stages.find((item) => item.name === '自测')
-    if (selfTest === undefined) throw new Error('夹具缺「自测」阶段')
-    // 既有配置：验收 1 条、续 3 轮、单轮 10 分钟
-    selfTest.acceptance = ['pnpm check 退出码 0']
-    selfTest.maxRounds = 3
-    selfTest.runTimeoutMs = 600_000
+  it('闸门阶段渲染验收：一条一行、按 1 基序号展示，并给出逐条给证据的提示', async () => {
+    const existing = workflowWith([
+      { name: '执行' },
+      {
+        name: '评审',
+        judge: { maxFails: 2 },
+        acceptance: ['pnpm check 退出码 0', '覆盖每条 Given/When/Then'],
+      },
+    ])
     kernel.setView('agents.all', undefined, [agent])
     kernel.setView('workflows.all', undefined, [existing])
     const onSave = vi.fn().mockResolvedValue(undefined)
@@ -1621,18 +1628,69 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
     render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: '阶段3' }))
-    // 回显既有配置
-    expect(screen.getByRole('combobox', { name: '阶段3轮次上限' })).toHaveTextContent('3 轮')
-    expect(screen.getByRole('combobox', { name: '阶段3单轮超时' })).toHaveTextContent('10 分钟')
+    // 提示写清判定者的义务：checks 里带 acceptance 序号，漏一条算没给结论
+    expect(screen.getByText(/checks 里带 acceptance 序号/)).toBeInTheDocument()
+    const acceptance = screen.getByLabelText('阶段3验收')
+    expect(acceptance).toHaveValue('pnpm check 退出码 0\n覆盖每条 Given/When/Then')
 
-    await choose(user, '阶段3轮次上限', '1（不续轮）')
+    // 序号与提示词同口径（1 基），编辑时仍按行
+    const sequence = screen.getByRole('list', { name: '阶段3验收序号' })
+    expect(
+      within(sequence)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent),
+    ).toEqual(['1. pnpm check 退出码 0', '2. 覆盖每条 Given/When/Then'])
+
+    fireEvent.change(acceptance, {
+      target: { value: 'pnpm check 退出码 0\n覆盖每条 Given/When/Then\n没有 P0 未解决问题' },
+    })
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(savedStage(draft, '评审')).toMatchObject({
+      judge: { maxFails: 2 },
+      acceptance: ['pnpm check 退出码 0', '覆盖每条 Given/When/Then', '没有 P0 未解决问题'],
+    })
+  }, 30_000)
+
+  it('闸门没有验收条目：说明只要求一条全 0 的 checks，保存提交空数组', async () => {
+    const existing = workflowWith([{ name: '执行' }, { name: '评审', judge: { maxFails: 2 } }])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段3' }))
+    expect(screen.getByText(/闸门只要求一条退出码全 0 的 checks/)).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '阶段3验收序号' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(savedStage(draft, '评审').acceptance).toEqual([])
+  }, 30_000)
+
+  it('闸门阶段：单轮超时选「默认」回落到 null（改用全局缺省）', async () => {
+    const existing = workflowWith([{ name: '执行' }, { name: '评审', judge: { maxFails: 2 } }])
+    const gate = existing.stages.find((item) => item.name === '评审')
+    if (gate === undefined) throw new Error('夹具缺「评审」阶段')
+    gate.runTimeoutMs = 600_000
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('workflows.all', undefined, [existing])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '阶段3' }))
+    expect(screen.getByRole('combobox', { name: '阶段3单轮超时' })).toHaveTextContent('10 分钟')
     await choose(user, '阶段3单轮超时', '默认（60 分钟）')
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const draft = onSave.mock.calls[0][0] as WorkflowInput
-    // 两处都选回「不写字段」：null 表示用全局缺省，不是 0 / 60 分钟写死
-    expect(savedStage(draft, '自测')).toMatchObject({ maxRounds: null, runTimeoutMs: null })
+    // null 表示用全局缺省，不是 0 / 60 分钟写死
+    expect(savedStage(draft, '评审')).toMatchObject({ runTimeoutMs: null })
   }, 30_000)
 })
 
@@ -1727,24 +1785,18 @@ describe('出口表的健壮性（M32）', () => {
   })
 })
 
-describe('出口表：原地重跑（M33）', () => {
-  it('选「原地重跑」出现次数下拉，保存回传次数', async () => {
+describe('出口表：没有原地重跑（M34）', () => {
+  it('去向里不再有「原地重跑」，也没有重跑次数下拉', async () => {
     const existing = workflowWith([{ name: '实现' }, { name: '收尾' }])
     kernel.setView('agents.all', undefined, [agent])
     kernel.setView('workflows.all', undefined, [existing])
-    const onSave = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
-    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+    render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
 
-    await choose(user, '阶段2出错时去向', '原地重跑')
-    expect(screen.getByRole('combobox', { name: '阶段2出错时最多重跑' })).toHaveTextContent('1 次')
-
-    await choose(user, '阶段2出错时最多重跑', '3 次')
-
-    await user.click(screen.getByRole('button', { name: '保存' }))
-    await waitFor(() => expect(onSave).toHaveBeenCalled())
-    const draft = onSave.mock.calls[0][0] as WorkflowInput
-
-    expect(savedStage(draft, '实现').exits).toEqual([{ on: 'errored', do: 'retry', max: 3 }])
+    await user.click(screen.getByRole('combobox', { name: '阶段2出错时去向' }))
+    expect(await screen.findByRole('option', { name: '停在这里等人' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: '原地重跑' })).not.toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('combobox', { name: '阶段2出错时最多重跑' })).not.toBeInTheDocument()
   }, 30_000)
 })

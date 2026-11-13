@@ -499,7 +499,7 @@ describe('WorkflowManager', () => {
     ])
   })
 
-  it('阶段指标（M23）：有运行数据时按阶段展示轮次 / 降级 / 问人 / 人评；全 0 时不显示', async () => {
+  it('阶段指标（M34）：有运行数据时按阶段展示轮次 / 结论 / 降级 / 问人 / 人评；全 0 时不显示', async () => {
     const flows = [wf('w1', '研发', 2), wf('w2', '写作', 1)]
     kernel.setView('workflows.all', undefined, flows)
     kernel.setView(
@@ -512,8 +512,7 @@ describe('WorkflowManager', () => {
             stageId: 'w1-s0',
             stageName: '阶段1',
             runs: 4,
-            avgRounds: 2,
-            repairExhausted: 1,
+            verdicts: { pass: 3, fail: 1 },
             degraded: 1,
             asks: 2,
             humanComments: 3,
@@ -522,8 +521,17 @@ describe('WorkflowManager', () => {
             stageId: 'w1-s1',
             stageName: '阶段2',
             runs: 0,
-            avgRounds: 0,
-            repairExhausted: 0,
+            verdicts: { pass: 0, fail: 0 },
+            degraded: 0,
+            asks: 0,
+            humanComments: 0,
+          },
+          {
+            stageId: 'w1-s2',
+            stageName: '阶段3',
+            runs: 2,
+            // 跑过但还没给结论（执行阶段的常态）：不显示 0/0
+            verdicts: { pass: 0, fail: 0 },
             degraded: 0,
             asks: 0,
             humanComments: 0,
@@ -539,15 +547,24 @@ describe('WorkflowManager', () => {
     // 只列出真有数据的阶段：全 0 的阶段不占一行
     expect(within(measured).getByText('阶段1')).toBeInTheDocument()
     expect(within(measured).queryByText('阶段2')).toBeNull()
-    // 一行 = 阶段 + 轮次 / 平均轮数 / 降级 / 问人 / 人评
-    const row = within(measured).getAllByRole('row')[1]
-    expect(Array.from(row.querySelectorAll('td')).map((cell) => cell.textContent)).toEqual([
+    // 一行 = 阶段 + 轮次 / 结论 / 降级 / 问人 / 人评（M34：结论是闸门的通过 / 未通过计数）
+    const rows = within(measured).getAllByRole('row')
+    expect(Array.from(rows[1].querySelectorAll('td')).map((cell) => cell.textContent)).toEqual([
       '阶段1',
       '4',
-      '2',
+      '通过 3 · 未通过 1',
       '1',
       '2',
       '3',
+    ])
+    // 没有结论的阶段给「无结论」，不是 0 / 0
+    expect(Array.from(rows[2].querySelectorAll('td')).map((cell) => cell.textContent)).toEqual([
+      '阶段3',
+      '2',
+      '无结论',
+      '0',
+      '0',
+      '0',
     ])
 
     // 切到没有指标数据的工作流：查询参数跟着换，指标区消失

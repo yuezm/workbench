@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { StageExitInput, StageInput } from '../../../src/protocol/entities'
+import { STAGE_EXIT_ACTIONS } from '../../../src/protocol/entities'
 import { validateStageSet } from '../../../src/kernel/workflow/stage-validation'
 
 const stage = (over: Partial<StageInput> = {}): StageInput => ({
@@ -126,15 +127,101 @@ describe('validateStageSet', () => {
     )
   })
 
-  it('原地重跑必须给 1–5 的次数', () => {
+  // M34 移除 `retry` 出口动作：出口只剩 goto / await / close（原「原地重跑必须给 1–5 次数」三例删除）
+  it('出口只有三种动作', () => {
+    expect(STAGE_EXIT_ACTIONS).toEqual(['goto', 'await', 'close'])
+  })
+
+  // M34：验收只属于闸门阶段
+  it('非闸门阶段配了验收条目 → 拒收', () => {
     expect(
-      validateStageSet([stage({ name: '待办', exits: [{ on: 'errored', do: 'retry' }] })]),
-    ).toBe('阶段「待办」的出错时进入重跑次数必须是 1–5 的整数')
+      validateStageSet([
+        stage({ name: '待办' }),
+        stage({
+          name: '实现',
+          entryMode: 'agent',
+          agentId: 'a-1',
+          acceptance: ['pnpm check 退出码 0'],
+        }),
+      ]),
+    ).toBe('阶段「实现」不是判定阶段：验收条目只能配在闸门阶段')
+    expect(validateStageSet([stage({ name: '实现', acceptance: ['一条'] })])).toBe(
+      '阶段「实现」不是判定阶段：验收条目只能配在闸门阶段',
+    )
+  })
+
+  it('闸门阶段配验收 → 通过（空数组也不算违规）', () => {
     expect(
-      validateStageSet([stage({ name: '待办', exits: [{ on: 'errored', do: 'retry', max: 9 }] })]),
-    ).toBe('阶段「待办」的出错时进入重跑次数必须是 1–5 的整数')
+      validateStageSet([
+        stage({ name: '实现', entryMode: 'agent', agentId: 'a-1' }),
+        stage({
+          name: '验收',
+          entryMode: 'agent',
+          agentId: 'a-2',
+          judge: { maxFails: null },
+          acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'],
+        }),
+      ]),
+    ).toBeNull()
     expect(
-      validateStageSet([stage({ name: '待办', exits: [{ on: 'errored', do: 'retry', max: 2 }] })]),
+      validateStageSet([
+        stage({ name: '实现', entryMode: 'agent', agentId: 'a-1' }),
+        stage({
+          name: '验收',
+          entryMode: 'agent',
+          agentId: 'a-2',
+          judge: { maxFails: null },
+          acceptance: [],
+        }),
+      ]),
+    ).toBeNull()
+  })
+
+  // M34：判定者不能就是被验阶段的执行者
+  it('判定者与被验阶段同一智能体 → 拒收', () => {
+    expect(
+      validateStageSet([
+        stage({ name: '实现', entryMode: 'agent', agentId: 'a-1' }),
+        stage({
+          name: '验收',
+          entryMode: 'agent',
+          agentId: 'a-1',
+          judge: { maxFails: null },
+          acceptance: ['一条'],
+        }),
+      ]),
+    ).toBe('阶段「验收」的判定者不能与被验阶段「实现」是同一个智能体')
+  })
+
+  it('判定者校验跳过闸门与内置「待办」：被验阶段取向前最近的执行阶段', () => {
+    // 待办（none）→ 实现（agent a-1）→ 判定1（agent a-2）→ 判定2（agent a-1，验的仍是「实现」）
+    const judge1 = stage({
+      name: '判定 1',
+      entryMode: 'agent',
+      agentId: 'a-2',
+      judge: { maxFails: null },
+    })
+    expect(
+      validateStageSet([
+        stage({ name: '待办' }),
+        stage({ name: '实现', entryMode: 'agent', agentId: 'a-1' }),
+        judge1,
+        stage({ name: '判定 2', entryMode: 'agent', agentId: 'a-1', judge: { maxFails: null } }),
+      ]),
+    ).toBe('阶段「判定 2」的判定者不能与被验阶段「实现」是同一个智能体')
+    // 判定 1 用 a-2：不同人 → 通过
+    expect(
+      validateStageSet([
+        stage({ name: '待办' }),
+        stage({ name: '实现', entryMode: 'agent', agentId: 'a-1' }),
+        judge1,
+      ]),
+    ).toBeNull()
+    // 找不到被验阶段（工作流以闸门开头）→ 不拦
+    expect(
+      validateStageSet([
+        stage({ name: '判定', entryMode: 'agent', agentId: 'a-1', judge: { maxFails: null } }),
+      ]),
     ).toBeNull()
   })
 
@@ -145,7 +232,8 @@ describe('validateStageSet', () => {
         stage({
           name: '自测',
           entryMode: 'agent',
-          agentId: 'a-1',
+          // M34：判定者必须与被验阶段不同人
+          agentId: 'a-2',
           judge: { maxFails: 3 },
           exits: [goto('passed', 2), goto('failed', 0)],
         }),

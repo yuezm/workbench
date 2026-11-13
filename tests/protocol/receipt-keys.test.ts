@@ -38,7 +38,8 @@ describe('protocol/receipt-keys：键集合是三处共用的一份', () => {
       expect(RECEIPT_LIMITS_LINE).toContain(`\`${key}\``)
     }
     expect(RECEIPT_LIMITS_LINE).toContain('`checks` 32 条')
-    expect(RECEIPT_LIMITS_LINE).toContain('`acceptance` 12 条')
+    // M34：验收自评键已删除，上限行不该再提它（验收在 checks 里以 acceptance 序号出现）
+    expect(RECEIPT_LIMITS_LINE).not.toContain('`acceptance`')
     expect(RECEIPT_LIMITS_LINE).toContain('`spawn` 32 项')
   })
 
@@ -47,7 +48,7 @@ describe('protocol/receipt-keys：键集合是三处共用的一份', () => {
       expect(RECEIPT_KEYS).toContain(key)
     }
     expect(CHAT_RECEIPT_KEYS).toEqual(BASE_RECEIPT_KEYS)
-    for (const key of ['notes', 'verdict', 'checks', 'findings', 'addresses', 'acceptance']) {
+    for (const key of ['notes', 'verdict', 'checks', 'findings', 'addresses']) {
       expect(CHAT_RECEIPT_KEYS).not.toContain(key as ReceiptKey)
     }
   })

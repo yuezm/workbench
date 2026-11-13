@@ -1,7 +1,6 @@
 import { useState, type ReactElement } from 'react'
 import {
   STAGE_EXIT_GUARDS,
-  STAGE_EXIT_RETRY_LIMITS,
   stageKindOf,
   type EntryMode,
   type OnChildrenSettled,
@@ -149,9 +148,6 @@ const EXIT_ROW_META: Record<StageExitGuard, { label: string; fallback: string }>
   failed: { label: '未通过时', fallback: '默认（停在这里等人）' },
 }
 
-/** 重跑次数候选项（1–5） */
-const RETRY_CHOICES = [1, 2, 3, 4, 5] as const
-
 /** 本阶段有哪几行出口：判定阶段没有「完成时」（跑完没结论不构成去向）。 */
 function exitRowsFor(stage: StageInput): StageExitGuard[] {
   return stage.judge ? ['passed', 'failed', 'errored'] : ['done', 'errored']
@@ -163,8 +159,11 @@ function exitOf(stage: StageInput, guard: StageExitGuard): StageExitInput | unde
 
 /**
  * 界面上不展示的字段，保存前一概归一——这些字段仍有消费者（派单在任务离开阶段时建新工单、
- * 子任务落点是派活落点、`agentId` 会参与智能体存在性校验、`onComplete` 会改闸门的默认通过去向），
- * 留着就是看不见的配置。「要干什么」只对派活有意义、且没有副作用，原文保留，切回智能体时还能用。
+ * 子任务落点是派活落点、`agentId` 会参与智能体存在性校验），留着就是看不见的配置。
+ * 「要干什么」只对派活有意义、且没有副作用，原文保留，切回智能体时还能用。
+ *
+ * M34：验收只属于闸门阶段（`judge` 非空）。执行阶段不渲染验收输入框，保存时归一成空数组，
+ * 否则内核按「非闸门阶段配了验收」整份拒收。
  */
 function pruneByEntryKind(stage: StageInput): StageInput {
   const kind = entryKindOf(stage)
@@ -172,6 +171,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     return {
       ...stage,
       judge: null,
+      // 验收是闸门的判据清单：执行阶段不给自己判分
+      acceptance: [],
       // 判定两侧的出口只有判定阶段才有，切回普通阶段要一并收掉，否则内核整份拒收
       exits: (stage.exits ?? []).filter((exit) => exit.on === 'done' || exit.on === 'errored'),
     }
@@ -200,10 +201,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     onChildrenSettled: null,
     spawnPolicy: null,
     instructions: stage.instructions,
-    // M20：验收条目只对派活 / 判定有意义，不展示的类型一并归一掉
+    // M34：验收只对闸门有意义，不展示的类型一并归一掉
     acceptance: [],
-    // M21：轮次上限同理，只有会自己跑的阶段才有意义
-    maxRounds: null,
     // M26：阶段超时同理
     runTimeoutMs: null,
     judge: null,
@@ -303,7 +302,6 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
     const exits: StageExitInput[] = STAGE_EXIT_GUARDS.flatMap<StageExitInput>((guard) => {
       const exit = source[guard]
       if (exit === undefined) return []
-      if (exit.do === 'retry') return [{ on: guard, do: 'retry', max: exit.max }]
       if (exit.do !== 'goto') return [{ on: guard, do: exit.do }]
       const index = indexOfId(workflow, exit.stageId)
       return [{ on: guard, do: 'goto' as const, stageIndex: index >= 0 ? index : null }]
@@ -322,7 +320,6 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       spawnPolicy: s.spawnPolicy ?? null,
       instructions: s.instructions ?? '',
       acceptance: s.acceptance ?? [],
-      maxRounds: s.maxRounds ?? null,
       // M26：阶段超时原样带回（null = 用全局缺省）
       runTimeoutMs: s.runTimeoutMs ?? null,
       judge: s.judge === null ? null : { maxFails: s.judge.maxFails },
@@ -462,22 +459,7 @@ export function WorkflowEditor({
       patchStage(i, { exits: [...others, { on: guard, do: 'goto', stageIndex: null }] })
       return
     }
-    if (value === 'retry') {
-      patchStage(i, {
-        exits: [...others, { on: guard, do: 'retry', max: STAGE_EXIT_RETRY_LIMITS.min }],
-      })
-      return
-    }
     patchStage(i, { exits: [...others, { on: guard, do: value as 'await' | 'close' }] })
-  }
-
-  /** 出口表的重跑上限 */
-  const setExitMax = (i: number, guard: StageExitGuard, max: number): void => {
-    patchStage(i, {
-      exits: (draft.stages[i]?.exits ?? []).map((exit) =>
-        exit.on === guard && exit.do === 'retry' ? { ...exit, max } : exit,
-      ),
-    })
   }
 
   /** 出口表的目标阶段（下标） */
@@ -602,6 +584,10 @@ export function WorkflowEditor({
   const n = index + 1
   /** 该阶段的字段级错误只在它被展开时展示（错误面板与字段同屏才有意义） */
   const stageErrors = errors.stageIndex === index ? errors : null
+  /** 已填的验收条目（丢掉空行）：按 1 基序号展示，与提示词里给判定者的编号同口径 */
+  const acceptanceItems = (stage.acceptance ?? [])
+    .map((item) => item.trim())
+    .filter((item) => item !== '')
 
   return (
     <form className="flex flex-col gap-5" onSubmit={save}>
@@ -818,7 +804,8 @@ export function WorkflowEditor({
                   const value = exit === undefined ? 'default' : exit.do
                   return (
                     <div key={guard} className="flex flex-wrap items-end gap-2">
-                      <Field label={EXIT_ROW_META[guard].label} className="w-28">
+                      {/* 宽度按最长缺省文案（「默认（停在这里等人）」）留够，别把去向截断 */}
+                      <Field label={EXIT_ROW_META[guard].label} className="w-52">
                         <Select value={value} onValueChange={(v) => setExit(index, guard, v)}>
                           <SelectTrigger
                             aria-label={`阶段${n}${EXIT_ROW_META[guard].label}去向`}
@@ -830,33 +817,10 @@ export function WorkflowEditor({
                             <SelectItem value="default">{EXIT_ROW_META[guard].fallback}</SelectItem>
                             <SelectItem value="goto">进入指定阶段</SelectItem>
                             <SelectItem value="await">停在这里等人</SelectItem>
-                            <SelectItem value="retry">原地重跑</SelectItem>
                             <SelectItem value="close">结束并归档</SelectItem>
                           </SelectContent>
                         </Select>
                       </Field>
-                      {exit?.do === 'retry' && (
-                        <Field label="最多重跑" className="w-28">
-                          <Select
-                            value={String(exit.max ?? STAGE_EXIT_RETRY_LIMITS.min)}
-                            onValueChange={(v) => setExitMax(index, guard, Number(v))}
-                          >
-                            <SelectTrigger
-                              aria-label={`阶段${n}${EXIT_ROW_META[guard].label}最多重跑`}
-                              className="w-full"
-                            >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {RETRY_CHOICES.map((times) => (
-                                <SelectItem key={times} value={String(times)}>
-                                  {times} 次
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </Field>
-                      )}
                       {exit?.do === 'goto' && (
                         <Field label="目标阶段" className="min-w-0 flex-1">
                           <Select
@@ -941,49 +905,45 @@ export function WorkflowEditor({
                 />
               </Field>
 
-              {/* M20 验收：这条阶段「做完」的可判定口径，一条一行，进提示词带序号 */}
-              <Field label="验收（做完的判据，一条一行）" className="mt-3">
-                <Textarea
-                  aria-label={`阶段${n}验收`}
-                  className="min-h-20 resize-y"
-                  placeholder={
-                    '一条一句、可核对。例如：\n`pnpm check` 退出码 0\n新增测试覆盖每条 Given/When/Then\n不改数据库 schema'
-                  }
-                  value={(stage.acceptance ?? []).join('\n')}
-                  onChange={(e) =>
-                    patchStage(index, {
-                      acceptance: e.target.value.split('\n'),
-                    })
-                  }
-                />
-              </Field>
-              {(stage.acceptance ?? []).filter((item) => item.trim() !== '').length === 0 && (
-                <p className="mt-1 text-xs text-faint-foreground">
-                  没有验收条目时，本阶段跑到「run 正常结束」就算完成——等于让智能体自己说做完了。
-                </p>
-              )}
-
-              {/* M21：验收未全达时原地续一轮的次数（1 = 不续轮） */}
-              {(stage.acceptance ?? []).filter((item) => item.trim() !== '').length > 0 && (
-                <Field label="阶段内最多跑几轮" className="mt-3 w-40">
-                  <Select
-                    value={String(stage.maxRounds ?? 1)}
-                    onValueChange={(v) =>
-                      patchStage(index, { maxRounds: v === '1' ? null : Number(v) })
-                    }
-                  >
-                    <SelectTrigger aria-label={`阶段${n}轮次上限`} className="w-full">
-                      <SelectValue placeholder="1" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[1, 2, 3, 4, 5].map((round) => (
-                        <SelectItem key={round} value={String(round)}>
-                          {round === 1 ? '1（不续轮）' : `${round} 轮`}
-                        </SelectItem>
+              {/* M34 验收只属于闸门：执行阶段不给自己判分，验收由后面的另一个智能体逐条给证据 */}
+              {stage.judge && (
+                <>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    判定者要逐条给证据（checks 里带 acceptance 序号），漏一条算没给结论
+                  </p>
+                  <Field label="验收（做完的判据，一条一行）" className="mt-2">
+                    <Textarea
+                      aria-label={`阶段${n}验收`}
+                      className="min-h-20 resize-y"
+                      placeholder={
+                        '一条一句、可核对。例如：\n`pnpm check` 退出码 0\n新增测试覆盖每条 Given/When/Then\n不改数据库 schema'
+                      }
+                      value={(stage.acceptance ?? []).join('\n')}
+                      onChange={(e) =>
+                        patchStage(index, {
+                          acceptance: e.target.value.split('\n'),
+                        })
+                      }
+                    />
+                  </Field>
+                  {acceptanceItems.length === 0 ? (
+                    <p className="mt-1 text-xs text-faint-foreground">
+                      没有验收条目：闸门只要求一条退出码全 0 的 checks。
+                    </p>
+                  ) : (
+                    // 与提示词同口径的 1 基序号：判定者的 checks 用这个号指回条目
+                    <ol
+                      aria-label={`阶段${n}验收序号`}
+                      className="mt-1 flex flex-col gap-0.5 text-xs text-faint-foreground"
+                    >
+                      {acceptanceItems.map((item, order) => (
+                        <li key={`${order}-${item}`} className="tabular-nums">
+                          {`${order + 1}. ${item}`}
+                        </li>
                       ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
+                    </ol>
+                  )}
+                </>
               )}
 
               {/* M26：本阶段一次 run 最长跑多久；到点宿主按超时收口（不再被全局常量掐死） */}

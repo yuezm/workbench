@@ -36,7 +36,6 @@ const RECEIPT_KEYS = [
   'deliverables',
   'findings',
   'addresses',
-  'acceptance',
 ]
 
 const TYPE_OF = {
@@ -52,13 +51,12 @@ const TYPE_OF = {
   deliverables: 'object',
   findings: 'array',
   addresses: 'array',
-  acceptance: 'array',
 }
 
 const TOOL = {
   name: 'receipt',
   description:
-    '向工作台提交本轮回执：要人拍板、知会、闸门判定、评审清单、验收自评。' +
+    '向工作台提交本轮回执：要人拍板、知会、闸门判定、评审清单。' +
     '与在回复末尾写 ```json 回执块等价，用哪个键写哪个。键：' +
     RECEIPT_KEYS.map((key) => `\`${key}\``).join(' / '),
   inputSchema: {

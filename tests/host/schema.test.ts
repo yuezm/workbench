@@ -116,8 +116,6 @@ const TASKS_M7_COLUMNS = [
   'project_id',
   // M11：闸门预算
   'gate_fails',
-  // M33：原地重跑次数
-  'stage_fails',
   'created_at',
   'updated_at',
 ]
@@ -138,10 +136,8 @@ const STAGES_M7_COLUMNS = [
   'spawn_policy',
   // M9：阶段要干什么
   'instructions',
-  // M20：验收条目（JSON 数组文本）
+  // M20/M34：验收条目（JSON 数组文本；只有闸门阶段可非空）
   'acceptance_json',
-  // M21：阶段内轮次上限（NULL = 不续轮）
-  'max_rounds',
   // M26：阶段单轮运行超时（NULL = 用全局缺省 60 min）
   'run_timeout_ms',
   // M32：判定者（JSON 文本；null = 不判定）
@@ -404,7 +400,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     for (const legacy of LEGACY_STAGE_COLUMNS) {
       expect(columns).not.toContain(legacy)
     }
-    expect(LEGACY_STAGE_COLUMNS).toHaveLength(7)
+    expect(LEGACY_STAGE_COLUMNS).toHaveLength(8)
 
     // 重建后的三列默认值与 DDL 同口径
     expect(columns).toContain('exits_json')
@@ -419,17 +415,19 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     // 必须列全部在位，否则重建判定会把这张表当成老库
     expect(STAGES_REQUIRED_COLUMNS.every((column) => columns.includes(column))).toBe(true)
     expect(LEGACY_STAGE_COLUMNS).toContain('gate_max_fails')
+    // M34：轮次上限列已删除，重建时按废弃列清掉
+    expect(LEGACY_STAGE_COLUMNS).toContain('max_rounds')
   })
 
-  it('M20 验收列与 M21 轮次列：默认值与 CHECK 与 DDL 同口径', () => {
+  it('M34 验收列：只有闸门阶段可非空，DDL 默认空数组', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     const shapeOf = (name: string): string | undefined =>
       columnShape(db, 'workflow_stages').find((shape) => shape.split('|')[0] === name)
     // name | type | notnull | default | pk
     expect(shapeOf('acceptance_json')).toBe("acceptance_json|TEXT|1|'[]'|0")
-    expect(shapeOf('max_rounds')).toBe('max_rounds|INTEGER|0|null|0')
-    expect(STAGES_REQUIRED_COLUMNS).toHaveLength(11)
+    expect(shapeOf('max_rounds')).toBeUndefined()
+    expect(STAGES_REQUIRED_COLUMNS).toHaveLength(10)
   })
 
   it('M26 阶段超时列：可空无默认、CHECK 认 5 min–4 h，补列语句与 DDL 同口径', () => {

@@ -322,16 +322,8 @@ export const GATE_VERDICTS = ['pass', 'fail'] as const
 
 export type GateVerdict = (typeof GATE_VERDICTS)[number]
 
-/** 判定证据：模型自报跑了什么、退出码是多少；内核用它交叉校验 `verdict`。 */
-/** 验收条目上限（M20）：条数与单条长度都由内核归一，UI 只做提示。 */
+/** 验收条目上限（M34）：闸门阶段的判据清单，条数与单条长度由内核归一，UI 只做提示。 */
 export const ACCEPTANCE_LIMITS = { maxItems: 12, maxChars: 200 } as const
-
-/**
- * 阶段内轮次上限（M21）：run 结束但验收未全达时原地续一轮的次数。
- *
- * 下限 1 = 不续轮（老行为）；上限 5 = 防烧 token 的硬护栏。
- */
-export const STAGE_ROUND_LIMITS = { min: 1, max: 5 } as const
 
 /**
  * 阶段单轮运行超时（M26）：不配就取全局缺省 `limits.runTimeoutMs`（60 min）。
@@ -341,10 +333,18 @@ export const STAGE_ROUND_LIMITS = { min: 1, max: 5 } as const
  */
 export const STAGE_TIMEOUT_LIMITS = { minMs: 5 * 60_000, maxMs: 240 * 60_000 } as const
 
+/**
+ * 判定证据（M11/M34）：模型自报跑了什么、退出码是多少；内核用它交叉校验 `verdict`。
+ *
+ * `acceptance` 是闸门阶段验收条目的 **1 基序号**（M34）：声明「这条证据是在核对第 n 条验收」。
+ * 闸门 `pass` 要求每条验收至少被一条 `exitCode=0` 的 check 指向，漏判按没给结论处理。
+ */
 export interface GateCheck {
   /** 实际执行的命令（如 `pnpm check`） */
   cmd: string
   exitCode: number
+  /** 指向第 n 条验收（1 基）；省略 = 与验收条目无关的环境检查 */
+  acceptance?: number
 }
 
 /**
@@ -371,26 +371,21 @@ export const STAGE_EXIT_GUARDS = ['done', 'errored', 'passed', 'failed'] as cons
 
 export type StageExitGuard = (typeof STAGE_EXIT_GUARDS)[number]
 
-/** 主去向的动作 */
-export const STAGE_EXIT_ACTIONS = ['goto', 'await', 'close', 'retry'] as const
+/** 主去向的动作（M34 删掉 `retry`：执行阶段不设轮次） */
+export const STAGE_EXIT_ACTIONS = ['goto', 'await', 'close'] as const
 
 export type StageExitAction = (typeof STAGE_EXIT_ACTIONS)[number]
-
-/** 原地重跑的次数上限（1–5）：下限 1 = 只重跑一次，上限防烧 token。 */
-export const STAGE_EXIT_RETRY_LIMITS = { min: 1, max: 5 } as const
 
 /**
  * 主去向（M32）：一张工单离开本阶段时**只能**落到一个去处。
  *
  * - `goto`：同一张工单进另一个阶段；
  * - `await`：显式停在这里等人（不是「没有出口」，是「出口就是等人」）；
- * - `close`：本单结束并归档（工单模型里执行完就结束）；
- * - `retry`：原地再跑一轮，最多 `max` 次；用尽后按 `close` 收口并打 `stage:failed`（M33）。
+ * - `close`：本单结束并归档（工单模型里执行完就结束）。
  *
  * 派单（跨工作流建新工单）不在这里——它不终结本单，见 `StageHandoff`。
  */
-export type StagePrimary =
-  { do: 'goto'; stageId: string } | { do: 'await' } | { do: 'close' } | { do: 'retry'; max: number }
+export type StagePrimary = { do: 'goto'; stageId: string } | { do: 'await' } | { do: 'close' }
 
 /** 出口表：每个触发条件最多一条主去向；保存时由内核补齐缺省。 */
 export type StageExits = Partial<Record<StageExitGuard, StagePrimary>>
@@ -458,16 +453,12 @@ export interface WorkflowStage {
    */
   instructions?: string
   /**
-   * 验收条目（M20）：本阶段「做完」的可判定口径，一条一句、独立成段拼进提示词。
-   * 进入本阶段的任务跑完一轮后由回执 `acceptance[]` 逐条自评；`[]` = 未声明（不做自评）。
+   * 验收条目（M34）：**只属于闸门阶段**，是判定者逐条核对「上一个阶段的交付做成了没有」的口径。
+   * 一条一句，按 1 基序号拼进提示词；判定者用 `checks[].acceptance` 指向条目给证据。
+   * `[]` = 闸门未声明验收（此时 `pass` 只要有一条全 0 的 `checks`）。
    * 老事实 / 存量导入缺该字段时按空数组归一。
    */
   acceptance?: readonly string[]
-  /**
-   * 阶段内轮次上限（M21）：run 结束但验收未全达时原地续一轮，不流转；
-   * `null` / 缺省 = 1（不续轮，老行为）。
-   */
-  maxRounds?: number | null
   /**
    * 单轮运行超时（M26）：本阶段一次 run 最长跑多久（毫秒）。
    * `null` / 缺省 = 用全局缺省 `limits.runTimeoutMs`（60 min）。
@@ -486,8 +477,6 @@ export interface StageExitInput {
   do: StageExitAction
   /** do='goto' 时的目标下标 */
   stageIndex?: number | null
-  /** do='retry' 时的重跑上限（1–5） */
-  max?: number | null
 }
 
 export interface StageInput {
@@ -520,12 +509,10 @@ export interface StageInput {
   /** 阶段要干什么（M9，可空 = 空串）：本阶段具体事项，会拼进阶段任务提示词交给智能体 */
   instructions?: string
   /**
-   * 验收条目（M20，可空 = 空数组）：一条一句的可判定口径；超过 `ACCEPTANCE_LIMITS`
-   * 会被内核截断/去重，不做静默丢弃以外的补偿。
+   * 验收条目（M34，可空 = 空数组）：**只有闸门阶段可配**，是非闸门阶段配了就整份拒收的口径清单；
+   * 超过 `ACCEPTANCE_LIMITS` 会被内核截断/去重。
    */
   acceptance?: readonly string[]
-  /** 阶段内轮次上限（M21，可空 = 1）：run 结束但验收未全达时原地续一轮的次数 */
-  maxRounds?: number | null
   /** 单轮运行超时（M26，可空 = 全局缺省 60 min）：本阶段一次 run 的最长时长（毫秒） */
   runTimeoutMs?: number | null
   /** 判定者（M32，可空 = 不判定）：非空时本阶段按回执 `verdict` 走 passed / failed 两侧 */
@@ -579,8 +566,6 @@ export interface Task {
   projectId: string | null
   currentStageId: string | null
   status: TaskStatus
-  /** 本阶段原地重跑过几次（M33）：进入新阶段清零，`retry` 出口用它计预算。 */
-  stageFails: number
   /**
    * 闸门预算（M11）：**当前阶段**连续未通过次数。进入阶段时清零（失败回环保留累计值），
    * 闸门判定 `pass` 或预算耗尽放行时清零。老事实 / 存量导入缺该字段时按 0 归一。

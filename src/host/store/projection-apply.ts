@@ -240,22 +240,23 @@ const normalizeTask = (row: Task): Task & { gateFails: number } => {
     handoffFromStageId: legacy.handoffFromStageId ?? null,
     // M30：老行不知道来自哪一轮，按人工离开（null）归一
     handoffFromRunId: legacy.handoffFromRunId ?? null,
-    // M33：老行没有重跑计数，按 0 归一
-    stageFails: legacy.stageFails ?? 0,
     // M11：闸门预算缺省 0（没失败过）
     gateFails: legacy.gateFails ?? 0,
   }
 }
 
-/** 规整阶段行的缺省值（M7 / M8 / M11 / M18）：缺交接 / 子任务 / 闸门 / 内置键时补 null。 */
+/** 规整阶段行的缺省值（M7 / M8 / M11 / M18 / M34）：缺交接 / 子任务 / 闸门 / 内置键时补 null。 */
 const normalizeStage = (row: WorkflowStage): WorkflowStage => {
   const legacy = row as Partial<WorkflowStage>
+  const judge = legacyJudge(legacy)
   return {
     ...row,
     builtin: legacy.builtin ?? null,
     handoffs: legacy.handoffs ?? legacyHandoffs(legacy),
     exits: legacyExits(legacy),
-    judge: legacyJudge(legacy),
+    judge,
+    // M34：验收只属于闸门阶段——执行阶段的条目在投影边界一并作废（与 kernel 归一同步）
+    acceptance: judge === null ? [] : (row.acceptance ?? []),
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,
@@ -343,8 +344,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
           external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
           spawn_key, handoff_from_task_id, handoff_from_stage_id, handoff_from_run_id, project_id,
-          gate_fails, stage_fails, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          gate_fails, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          title = excluded.title,
          description = excluded.description,
@@ -365,7 +366,6 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          handoff_from_run_id = excluded.handoff_from_run_id,
          project_id = excluded.project_id,
          gate_fails = excluded.gate_fails,
-         stage_fails = excluded.stage_fails,
          created_at = excluded.created_at,
          updated_at = excluded.updated_at`,
     ),
@@ -389,8 +389,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     ),
     workflow_stages: db.prepare(
       `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, builtin, agent_id, exits_json, handoffs_json, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, max_rounds, run_timeout_ms, judge_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, workflow_id, name, position, entry_mode, builtin, agent_id, exits_json, handoffs_json, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, run_timeout_ms, judge_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          workflow_id = excluded.workflow_id,
          name = excluded.name,
@@ -405,7 +405,6 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
          spawn_policy = excluded.spawn_policy,
          instructions = excluded.instructions,
          acceptance_json = excluded.acceptance_json,
-         max_rounds = excluded.max_rounds,
          run_timeout_ms = excluded.run_timeout_ms,
          judge_json = excluded.judge_json`,
     ),
@@ -630,7 +629,6 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         task.projectId ?? null,
         // 闸门预算已由 `normalizeTask` 归一（缺省 0），这里不再重复兜底
         task.gateFails,
-        task.stageFails ?? 0,
         task.createdAt,
         task.updatedAt,
       )
@@ -667,7 +665,6 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         stage.spawnPolicy ?? null,
         stage.instructions ?? '',
         JSON.stringify(stage.acceptance ?? []),
-        stage.maxRounds ?? null,
         stage.runTimeoutMs ?? null,
         JSON.stringify(stage.judge ?? null),
         at,

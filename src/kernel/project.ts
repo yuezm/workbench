@@ -69,7 +69,6 @@ export function normalizeTask(row: Task): Task {
     handoffFromTaskId: legacy.handoffFromTaskId ?? null,
     handoffFromStageId: legacy.handoffFromStageId ?? null,
     handoffFromRunId: legacy.handoffFromRunId ?? null,
-    stageFails: legacy.stageFails ?? 0,
   }
 }
 
@@ -77,21 +76,21 @@ export function normalizeTask(row: Task): Task {
   row: WorkflowStage,
 ): WorkflowStage {
   const legacy = row as Partial<WorkflowStage>
+  const judge = legacyJudge(legacy)
   return {
     ...row,
     // M29：老事实只有 M7 两列，按触发条件归一出派单数组
     handoffs: legacy.handoffs ?? legacyHandoffs(legacy),
     // M32：四组旧去向归一成出口表；缺的去向由启动补齐按顺序补
     exits: legacyExits(legacy),
-    judge: legacyJudge(legacy),
+    judge,
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,
     instructions: legacy.instructions ?? '',
-    // M20：老事实没有验收条目，按「未声明」归一
-    acceptance: legacy.acceptance ?? [],
-    // M21：老事实没有轮次上限，按「不续轮」归一
-    maxRounds: legacy.maxRounds ?? null,
+    // M20/M34：老事实没有验收条目时按「未声明」归一；执行阶段上的条目一并作废
+    // （验收只属于闸门阶段——留着它会让重建后的库里存在「配了却不生效」的字段）
+    acceptance: judge === null ? [] : (legacy.acceptance ?? []),
     // M26：老事实没有阶段超时，按「用全局缺省」归一
     runTimeoutMs: legacy.runTimeoutMs ?? null,
   }

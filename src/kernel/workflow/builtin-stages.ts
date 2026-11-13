@@ -44,7 +44,6 @@ export function builtinStageInput(key: BuiltinStageKey): StageInput {
     spawnPolicy: null,
     instructions: '',
     acceptance: [],
-    maxRounds: null,
   }
 }
 

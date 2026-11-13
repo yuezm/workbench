@@ -90,8 +90,6 @@ interface StageRow {
   instructions: string
   /** M20 验收条目（JSON 数组文本；`[]` = 未声明） */
   acceptance_json: string
-  /** M21 阶段内轮次上限（NULL = 1，不续轮） */
-  max_rounds: number | null
   /** M26 阶段单轮运行超时（毫秒；NULL = 用全局缺省） */
   run_timeout_ms: number | null
   /** M32 判定者（JSON 文本；`null` = 不判定） */
@@ -148,8 +146,6 @@ interface TaskRow {
   handoff_from_run_id: string | null
   /** M11 闸门预算：当前阶段连续未通过次数 */
   gate_fails: number
-  /** M33：本阶段原地重跑次数 */
-  stage_fails: number
   created_at: string
   updated_at: string
 }
@@ -329,7 +325,6 @@ const mapStage = (row: StageRow): WorkflowStage => ({
   // M20：坏 JSON / 空串按「未声明」归一，不让一条脏行把整张视图读挂
   acceptance:
     row.acceptance_json.trim() === '' ? [] : (JSON.parse(row.acceptance_json) as string[]),
-  maxRounds: row.max_rounds ?? null,
   // M26：阶段超时（NULL = 用全局缺省）
   runTimeoutMs: row.run_timeout_ms ?? null,
 })
@@ -382,8 +377,6 @@ const mapTask = (row: TaskRow): Task => ({
   handoffFromTaskId: row.handoff_from_task_id,
   handoffFromStageId: row.handoff_from_stage_id,
   handoffFromRunId: row.handoff_from_run_id ?? null,
-  // M33：重跑计数（老行按 0 归一）
-  stageFails: row.stage_fails ?? 0,
   gateFails: row.gate_fails,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -554,7 +547,7 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
         `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id,
                 exits_json, handoffs_json,
                 subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
-                max_rounds, run_timeout_ms, judge_json
+                run_timeout_ms, judge_json
          FROM workflow_stages ORDER BY workflow_id, position`,
       )
       .all() as unknown as StageRow[]
@@ -596,7 +589,7 @@ const readProjects = (db: DatabaseSync): Project[] =>
 const TASK_COLUMNS = `id, title, description, workflow_id, project_id, current_stage_id, status, origin,
         rule_id, external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id,
         batch_no, spawn_key, handoff_from_task_id, handoff_from_stage_id, handoff_from_run_id,
-        stage_fails, created_at, updated_at`
+        gate_fails, created_at, updated_at`
 
 const readTasks = (db: DatabaseSync): Task[] =>
   (
@@ -1192,10 +1185,10 @@ const readStringParam = (params: unknown, key: string): string => {
  *
  * 口径都是「能确定算出来的那一种」，不做归因推断：
  * - `runs` = 该阶段的 stage run 条数；
- * - `avgRounds` = 同一 (任务, 阶段) 的 run 条数取平均（>1 说明内层在自我修复）；
+ * - `verdicts` = 该阶段评审报告的闸门结论（pass / fail 分开计数，M34）；
  * - `degraded` = 打 `gate:degraded` 且当前停在该阶段的任务数；
  * - `asks` = 该阶段 run 上发出的 ask 卡数（cards.run_id → runs.stage_id）；
- * - `humanComments` / `repairExhausted` = 按任务**当前**阶段归属的评论数（近似：评论没有阶段列）。
+ * - `humanComments` = 按任务**当前**阶段归属的人写评论数（近似：评论没有阶段列）。
  */
 const readStageMetrics = (db: DatabaseSync, workflowId: string): WorkflowStageMetrics => {
   const stages = db
@@ -1216,17 +1209,16 @@ const readStageMetrics = (db: DatabaseSync, workflowId: string): WorkflowStageMe
       )
       .all() as unknown as Array<{ stageId: string; runs: number }>,
   )
-  const rounds = byStage(
-    db
-      .prepare(
-        `SELECT stage_id AS stageId, AVG(cnt) AS avgRounds FROM (
-           SELECT task_id, stage_id, COUNT(*) AS cnt FROM runs
-            WHERE purpose = 'stage' AND task_id IS NOT NULL AND stage_id IS NOT NULL
-            GROUP BY task_id, stage_id
-         ) GROUP BY stage_id`,
-      )
-      .all() as unknown as Array<{ stageId: string; avgRounds: number }>,
-  )
+  // M34：闸门结论按 (阶段, 结论) 分组——一个阶段既有 pass 也有 fail，不能按阶段建 Map
+  const verdictRows = db
+    .prepare(
+      `SELECT stage_id AS stageId, verdict, COUNT(*) AS n FROM review_reports
+         WHERE stage_id IS NOT NULL AND verdict IS NOT NULL
+         GROUP BY stage_id, verdict`,
+    )
+    .all() as unknown as Array<{ stageId: string; verdict: string; n: number }>
+  const verdictCount = (stageId: string, verdict: 'pass' | 'fail'): number =>
+    verdictRows.find((row) => row.stageId === stageId && row.verdict === verdict)?.n ?? 0
   const degraded = byStage(
     db
       .prepare(
@@ -1255,26 +1247,16 @@ const readStageMetrics = (db: DatabaseSync, workflowId: string): WorkflowStageMe
       )
       .all(workflowId) as unknown as Array<{ stageId: string; n: number }>,
   )
-  const exhausted = byStage(
-    db
-      .prepare(
-        `SELECT t.current_stage_id AS stageId, COUNT(*) AS n
-           FROM task_comments tc JOIN tasks t ON t.id = tc.task_id
-          WHERE tc.text LIKE '%已达本阶段轮次上限%' AND t.workflow_id = ?
-            AND t.current_stage_id IS NOT NULL
-          GROUP BY t.current_stage_id`,
-      )
-      .all(workflowId) as unknown as Array<{ stageId: string; n: number }>,
-  )
-
   return {
     workflowId,
     stages: stages.map((stage) => ({
       stageId: stage.id,
       stageName: stage.name,
       runs: runs.get(stage.id)?.runs ?? 0,
-      avgRounds: Math.round((rounds.get(stage.id)?.avgRounds ?? 0) * 10) / 10,
-      repairExhausted: exhausted.get(stage.id)?.n ?? 0,
+      verdicts: {
+        pass: verdictCount(stage.id, 'pass'),
+        fail: verdictCount(stage.id, 'fail'),
+      },
       degraded: degraded.get(stage.id)?.n ?? 0,
       asks: asks.get(stage.id)?.n ?? 0,
       humanComments: human.get(stage.id)?.n ?? 0,

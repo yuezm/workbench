@@ -72,7 +72,6 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   spawnPolicy: null,
   instructions: '',
   acceptance: [],
-  maxRounds: null,
   runTimeoutMs: null,
   ...over,
 })
@@ -181,7 +180,6 @@ const task = (over: Partial<Task> = {}): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
-  stageFails: 0,
   gateFails: 0,
   createdAt: CREATED,
   updatedAt: CREATED,
@@ -1079,19 +1077,21 @@ describe('kernel/decide 工作流', () => {
     })
   })
 
-  it('workflow.create：原地重跑的出口按下标落成 id（M33）', () => {
+  // M34 移除：`retry` 出口动作已删（原「原地重跑的出口按下标落成 id」用例删除）。
+  // 出口只剩 goto / await / close——「再来一轮」只能由人触发（拖回阶段 / 重新执行）。
+  it('workflow.create：出口只落 goto / await / close（M34 移除 retry）', () => {
     const decision = decide(
       view({ agents: [agent()] }),
       command({
         type: 'workflow.create',
         input: {
-          name: '重跑流',
+          name: '返工流',
           stages: [
             {
               name: '实现',
               entryMode: 'agent',
               agentId: 'ag-1',
-              exits: [{ on: 'errored', do: 'retry', max: 2 }],
+              exits: [{ on: 'errored', do: 'await' }],
             },
           ],
         },
@@ -1105,7 +1105,80 @@ describe('kernel/decide 工作流', () => {
       .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
       .find((stage) => stage.name === '实现')
 
-    expect(created?.exits).toEqual({ errored: { do: 'retry', max: 2 } })
+    expect(created?.exits).toEqual({ errored: { do: 'await' } })
+  })
+
+  // M34：验收只属于闸门阶段，小标是 1 基序号；执行阶段配了就整份拒收
+  it('workflow.create：非闸门阶段配验收 → reject（文案可读）；闸门阶段配验收 → 通过', () => {
+    const run = (stages: unknown): ReturnType<typeof decide> =>
+      decide(
+        view({ agents: [agent(), agent({ id: 'ag-2', name: '判定者' })] }),
+        command({ type: 'workflow.create', input: { name: 'w', stages } as never }),
+        NOW,
+        env(),
+      )
+
+    expect(
+      run([
+        { name: '实现', entryMode: 'agent', agentId: 'ag-1', acceptance: ['pnpm check 退出码 0'] },
+      ]),
+    ).toEqual({
+      facts: [],
+      reject: {
+        code: 'invalid_input',
+        message: '阶段「实现」不是判定阶段：验收条目只能配在闸门阶段',
+      },
+    })
+
+    const accepted = run([
+      { name: '实现', entryMode: 'agent', agentId: 'ag-1' },
+      {
+        name: '验收',
+        entryMode: 'agent',
+        agentId: 'ag-2',
+        judge: { maxFails: null },
+        acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'],
+      },
+    ])
+    expect(accepted.reject).toBeUndefined()
+    const gate = accepted.facts
+      .filter((fact) => fact.type === 'stage.created')
+      .map((fact) => (fact.payload as { stage: WorkflowStage }).stage)
+      .find((stage) => stage.name === '验收')
+    expect(gate?.acceptance).toEqual(['pnpm check 退出码 0', '覆盖每条验收标准'])
+  })
+
+  // M34：判定者不能同时是被验阶段的执行者（被验阶段 = 向前最近的执行阶段）
+  it('workflow.create：判定者与被验阶段同一智能体 → reject', () => {
+    const decision = decide(
+      view({ agents: [agent()] }),
+      command({
+        type: 'workflow.create',
+        input: {
+          name: 'w',
+          stages: [
+            { name: '实现', entryMode: 'agent', agentId: 'ag-1' },
+            {
+              name: '验收',
+              entryMode: 'agent',
+              agentId: 'ag-1',
+              judge: { maxFails: null },
+              acceptance: ['pnpm check 退出码 0'],
+            },
+          ],
+        } as never,
+      }),
+      NOW,
+      env(),
+    )
+
+    expect(decision).toEqual({
+      facts: [],
+      reject: {
+        code: 'invalid_input',
+        message: '阶段「验收」的判定者不能与被验阶段「实现」是同一个智能体',
+      },
+    })
   })
 
   it('workflow.create：名称必填、阶段集合校验、智能体必须存在', () => {

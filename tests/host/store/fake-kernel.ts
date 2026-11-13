@@ -60,10 +60,6 @@ const createWorkflow = (input: WorkflowCreateCommand, at: Iso, env: Environment)
         if (stageId !== null) exits[exit.on] = { do: 'goto', stageId }
         continue
       }
-      if (exit.do === 'retry') {
-        exits[exit.on] = { do: 'retry', max: exit.max ?? 1 }
-        continue
-      }
       exits[exit.on] = { do: exit.do }
     }
     return exits

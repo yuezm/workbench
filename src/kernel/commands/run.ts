@@ -2,7 +2,6 @@
  * 运行命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
 import type { GateVerdict, RunRow, Task, WorkflowStage } from '../../protocol/entities'
-import { STAGE_ROUND_LIMITS } from '../../protocol/entities'
 import type { EventReceivedPayload } from '../../protocol/facts'
 import type { Input, Receipt } from '../../protocol/inputs'
 import type { TaskComment } from '../../protocol/task-comment'
@@ -87,132 +86,36 @@ function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): 
 }
 
 /**
- * 闸门判定归一（M11）：`pass` 必须带齐证据（至少一条 `checks` 且退出码全为 0），
- * 否则视为**没给结论**。不信任模型的自述——说通过却拿不出证据时任务原地停住等人，
+ * 闸门判定归一（M11/M34）：`pass` 必须带齐证据（至少一条 `checks` 且退出码全为 0）；
+ * 阶段声明了验收条目时，每条验收还要有一条 `exitCode=0` 的 `checks` 指向它（`acceptance: n`）。
+ * 任一条不满足即视为**没给结论**。不信任模型的自述——说通过却拿不出证据时任务原地停住等人，
  * 既不放行也不消耗预算。`fail` 不需要证据（失败本身就是要修）。
  */
-function gateVerdictOf(receipt: Receipt): GateVerdict | undefined {
+function gateVerdictOf(receipt: Receipt, stage: WorkflowStage): GateVerdict | undefined {
   const verdict = receipt.verdict
   if (verdict === undefined) return undefined
   if (verdict === 'fail') return 'fail'
   const checks = receipt.checks ?? []
-  return checks.length > 0 && checks.every((check) => check.exitCode === 0) ? 'pass' : undefined
+  if (checks.length === 0 || !checks.every((check) => check.exitCode === 0)) return undefined
+  // M34：验收条目逐条要有全 0 证据指向它，漏一条按没给结论处理
+  const covered = new Set(
+    checks.map((check) => check.acceptance).filter((no): no is number => no !== undefined),
+  )
+  const missing = (stage.acceptance ?? []).some((_, index) => !covered.has(index + 1))
+  return missing ? undefined : 'pass'
 }
 
 /** 闸门放行标记（M11）：预算耗尽后走通过分支时打在任务上的标签，看板可据此筛选。 */
 export const GATE_DEGRADED_LABEL = 'gate:degraded'
 
-/** 原地重跑预算用尽后收口的任务标签（M33）。 */
-export const STAGE_FAILED_LABEL = 'stage:failed'
-
-/**
- * 验收自评里仍未达的条目（M21）：回执缺项、序号越界、`met` 非真都按**未达**处理
- * （fail-closed）。返回条目原文，顺序即阶段 `acceptance` 的顺序。
- */
-export function unmetAcceptance(
-  stage: Pick<WorkflowStage, 'acceptance'>,
-  receipt: Receipt,
-): string[] {
-  const items = stage.acceptance ?? []
-  if (items.length === 0) return []
-  const met = new Set<number>()
-  for (const check of receipt.acceptance ?? []) {
-    if (
-      check.met === true &&
-      Number.isInteger(check.no) &&
-      check.no >= 1 &&
-      check.no <= items.length
-    ) {
-      met.add(check.no)
-    }
-  }
-  return items.filter((_, index) => !met.has(index + 1))
-}
-
 /**
  * 该任务在该阶段已经跑过几轮（含刚结算的这一轮）。
  *
- * 实现搬到 `kernel/threads.ts`（M28）：派活（`task-effects`）也要用它决定「第 2 轮起换新会话」
- * 与提示词里的阶段轮次，而 `commands/run.ts` 已经 import `task-effects`，反向 import 会成环。
+ * 实现搬到 `kernel/threads.ts`（M28）：派活（`task-effects`）也要用它决定「第 2 轮起换新会话」，
+ * 而 `commands/run.ts` 已经 import `task-effects`，反向 import 会成环。
  * 这里保留出口，既有调用点与用例不必跟着搬家。
  */
 export { stageRoundCount }
-
-/**
- * 阶段内续轮留痕（M21）：本轮自评达成几条、未达哪几条，以及接下来是续轮还是按原规则流转。
- *
- * 这段是**资料**（任务评论）：它进下一轮的反馈记录段，不进指令段——未达项怎么补是 Agent 的判断。
- */
-export function repairCommentText(
-  round: number,
-  total: number,
-  unmet: readonly string[],
-  exhausted: boolean,
-): string {
-  const lines = [
-    `第 ${round} 轮验收自评：${total - unmet.length}/${total} 达成。`,
-    '未达条目：',
-    ...unmet.map((item, index) => `${index + 1}. ${item}`),
-    exhausted
-      ? '已达本阶段轮次上限，按原规则继续流转；未达项请在后续阶段或反馈里跟进。'
-      : `按配置续第 ${round + 1} 轮：补上未达项，已达成的不必重做。`,
-  ]
-  return lines.join('\n')
-}
-
-/**
- * 阶段内多轮自修复（M21）：run 正常结束但验收未全达时，原地续一轮而不是流转。
- *
- * 判据全部确定性：验收条目来自阶段配置、达成情况来自回执、轮数来自既有 run 计数。
- * 以下情况零事实（走原规则）：验收未声明 / 全达 / run 不是 succeeded / 任务已完成 /
- * 阶段不是 agent 入口。轮数用尽时只留一条评论，不改任务状态、不额外打标签——
- * 流转仍由 `stageTransitionFacts` 决定，避免同批两个 `task.moved` 互相覆盖。
- */
-function repairRoundFacts(
-  view: View,
-  run: SettledRun,
-  receipt: Receipt,
-  now: Iso,
-  env: Environment,
-): { facts: FactDraft[]; blocked: boolean } {
-  const idle = { facts: [] as FactDraft[], blocked: false }
-  if (run.status !== 'succeeded' || run.taskId === null) return idle
-  const task = view.tasks.get(run.taskId)
-  if (!task || task.status !== 'active' || task.currentStageId === null) return idle
-  const stage = view.stages.get(task.currentStageId)
-  if (!stage || stage.entryMode !== 'agent') return idle
-  const total = (stage.acceptance ?? []).length
-  if (total === 0) return idle
-  const unmet = unmetAcceptance(stage, receipt)
-  if (unmet.length === 0) return idle
-  const rounds = stageRoundCount(view, task.id, stage.id)
-  const configured = stage.maxRounds ?? STAGE_ROUND_LIMITS.min
-  const maxRounds = Math.min(Math.max(configured, STAGE_ROUND_LIMITS.min), STAGE_ROUND_LIMITS.max)
-  const exhausted = rounds >= maxRounds
-  const comment: TaskComment = {
-    id: env.nextId('task-comment'),
-    taskId: task.id,
-    author: 'agent',
-    text: repairCommentText(rounds, total, unmet, exhausted),
-    createdAt: now,
-  }
-  const facts: FactDraft[] = [hostDraft('task.comment_added', { comment }, now)]
-  if (exhausted) return { facts, blocked: false }
-  // 续轮的会话必须接上本轮：`taskSessions` 只认**终态** run，而本轮的结算事实还在同一批里
-  // （视图尚未更新），所以这里显式回填本轮 sessionId，否则多轮之间会丢掉上下文记忆。
-  const sessionId = run.sessionId ?? run.resumeSessionId
-  const queued = entryRunFacts(view, task, now, env, HOST_SCHEDULER, undefined, {
-    pendingComment: comment,
-  }).map((fact) => ({
-    ...fact,
-    payload: {
-      run:
-        sessionId === null ? fact.payload.run : { ...fact.payload.run, resumeSessionId: sessionId },
-    },
-  }))
-  facts.push(...queued)
-  return { facts, blocked: true }
-}
 
 /**
  * 闸门放行留痕的文案：预算次数取自闸门配置（脏数据缺省 0）。
@@ -264,9 +167,7 @@ function stageTransitionFacts(
   const moved = moveTask(task, event, flow)
   const next = moved.gateExhausted
     ? { ...moved.task, labels: withLabel(moved.task.labels, GATE_DEGRADED_LABEL) }
-    : moved.retryExhausted === true
-      ? { ...moved.task, labels: withLabel(moved.task.labels, STAGE_FAILED_LABEL) }
-      : moved.task
+    : moved.task
   // M29：派单按触发条件分组——执行成功但被判定挡下是 `failed`，判定缺结论 / 打回原地
   // 都不算「离开」，一条都不派（与 M7 的「向前完成才交接」等价，但不再靠位置猜）。
   const leftStage =
@@ -288,16 +189,6 @@ function stageTransitionFacts(
         })
   /** 预算耗尽放行时的留痕：任务评论（详情页可见，不改状态） */
   const degradedFacts = (): FactDraft[] => {
-    if (moved.retryExhausted === true) {
-      const comment: TaskComment = {
-        id: env.nextId('task-comment'),
-        taskId: task.id,
-        author: 'agent',
-        text: `阶段「${current.name}」重跑次数已用尽，按配置收口（任务已打 ${STAGE_FAILED_LABEL} 标签）。`,
-        createdAt: now,
-      }
-      return [hostDraft('task.comment_added', { comment }, now)]
-    }
     if (moved.gateExhausted !== true) return []
     const comment: TaskComment = {
       id: env.nextId('task-comment'),
@@ -335,16 +226,8 @@ function stageTransitionFacts(
       enter: next,
     }
   }
-  // 原地重跑（M33）：阶段没变，但重跑计数改了、还要重排一轮入口 run
-  if (moved.effects.some((effect) => effect.type === 'createRun')) {
-    return {
-      facts: [
-        hostDraft('task.updated', { task: { ...next, updatedAt: now } }, now),
-        ...degradedFacts(),
-      ],
-      enter: next,
-    }
-  }
+  // 阶段没变 = 没有去向（判定没给结论 / 打回原地 / 停在这里等人）：只留可能的放行留痕。
+  // M34 删掉 `retry` 后不再有「原地重排一轮」这条路径——重跑只能由人触发。
   return { facts: degradedFacts() }
 }
 
@@ -483,17 +366,16 @@ export function receiveRun(
   const settled = settledRun(run, input.receipt, now)
   facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
   if (run.purpose === 'stage') {
-    // M21 阶段内自修复：验收未全达且轮数未用尽 → 原地续一轮（不流转）
-    const repair = review.blocked
-      ? { facts: [] as FactDraft[], blocked: false }
-      : repairRoundFacts(view, settled, input.receipt, now, env)
     // M14 硬门：评审清单还有未处置条目时不推进阶段——run 照常落终态、任务停在当前阶段，
     // 漏项由 `reviewFactsOf` 追加的任务评论说明「缺哪几条、怎么回应」。
-    const transition =
-      review.blocked || repair.blocked
-        ? { facts: [] as FactDraft[] }
-        : stageTransitionFacts(view, settled, gateVerdictOf(input.receipt), now, env)
-    facts.push(...repair.facts)
+    // M34：执行阶段不看业务结论（succeeded 即成功）；只有闸门阶段读回执 `verdict`，
+    // 且 `pass` 要逐条覆盖验收条目（见 `gateVerdictOf`）。
+    const stage = run.stageId === null ? undefined : view.stages.get(run.stageId)
+    const verdict =
+      stage === undefined || stage.judge === null ? undefined : gateVerdictOf(input.receipt, stage)
+    const transition = review.blocked
+      ? { facts: [] as FactDraft[] }
+      : stageTransitionFacts(view, settled, verdict, now, env)
     facts.push(...transition.facts)
     // 进入效果：流转到目标阶段 / 原地重跑后立刻入队下一轮（形成链条）
     if (transition.enter !== undefined) {

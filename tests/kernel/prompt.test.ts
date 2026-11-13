@@ -18,7 +18,6 @@ import {
   laterPrompt,
   outputContractText,
   receiptBlockHint,
-  roundText,
   stageInstructionsText,
   taskCommentsText,
   taskPrompt,
@@ -178,7 +177,6 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
-    stageFails: 0,
     createdAt: CREATED,
     updatedAt: CREATED,
     ...over,
@@ -188,7 +186,7 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
   it('固定文案：四类要点齐、禁过程叙述、首尾不带换行', () => {
     const text = outputContractText()
     expect(text).toBe(OUTPUT_CONTRACT)
-    expect(text.split('\n')[0]).toBe('## 本轮正文（会落盘给后续阶段当上下文）')
+    expect(text.split('\n')[0]).toBe('# 本轮正文（会落盘给后续阶段当上下文）')
     expect(text.startsWith('\n')).toBe(false)
     expect(text.endsWith('\n')).toBe(false)
     expect(text).toContain('后续阶段只读这一段')
@@ -208,8 +206,8 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
     }
     const text = taskPrompt(agent(), stageTask(), stage)
     expect(text).toContain(OUTPUT_CONTRACT)
-    expect(text.indexOf('## 验收（做完的判据）')).toBeLessThan(text.indexOf(OUTPUT_CONTRACT))
-    expect(text.indexOf(OUTPUT_CONTRACT)).toBeLessThan(text.indexOf('## 闸门判定（必须）'))
+    expect(text.indexOf('# 验收（判据，逐条核对）')).toBeLessThan(text.indexOf(OUTPUT_CONTRACT))
+    expect(text.indexOf(OUTPUT_CONTRACT)).toBeLessThan(text.indexOf('# 闸门判定（必须）'))
 
     // 不挂线程：没有 output.md 的消费者，逐字不产这段
     const plain = taskPrompt(agent(), stageTask({ threadId: null }), stage)
@@ -225,7 +223,7 @@ describe('kernel/prompt 回执块说明', () => {
   it('固定文本：十二个键各成一条、各带形状示例，重复调用同文本', () => {
     const hint = receiptBlockHint()
     expect(hint).toBe(HINT)
-    expect(hint.split('\n')[0]).toBe('## 回执块（可选）')
+    expect(hint.split('\n')[0]).toBe('# 回执块（可选）')
     // 标题下不空行，直接进开场白
     expect(hint.split('\n')[1]).not.toBe('')
     // M24：两条传输都写在开场白里——有工具就调工具，没工具写围栏块
@@ -243,12 +241,15 @@ describe('kernel/prompt 回执块说明', () => {
       'notes',
       'verdict',
       'checks',
+      'deliverables',
       'findings',
       'addresses',
-      'acceptance',
     ]) {
       expect(hint).toContain(`\`${key}\``)
     }
+    // M34：验收自评键已删，闸门用 `checks[].acceptance` 指向验收条目
+    expect(hint).not.toContain('- `acceptance`')
+    expect(hint).toContain('"acceptance":1')
     // 每个键的形状示例都在（键名写对但形状写错，模型照样会产出非法块）
     expect(hint).toContain('"options":["A","B"]')
     expect(hint).toContain('`"2026-11-06T09:00:00.000Z"`')
@@ -257,7 +258,7 @@ describe('kernel/prompt 回执块说明', () => {
     expect(hint).toContain('"verdict":"pass","checks":[{"cmd":"pnpm check","exitCode":0}]')
     expect(hint).toContain('"key":"R1","severity":"blocker"')
     expect(hint).toContain('"findingId":"<报告id>#R1"')
-    expect(hint).toContain('"no":1,"met":true')
+    expect(hint).toContain('"branch":"feat/x"')
     // 硬约束不能丢：ask 一轮一张、fixed 要 checkRef、rejected/deferred 要理由
     expect(hint).toContain('一轮只发一张')
     expect(hint).toContain('`fixed` 带 `checkRef`')
@@ -265,7 +266,7 @@ describe('kernel/prompt 回执块说明', () => {
     // 上限口径：条数与字长
     expect(hint).toContain('`findings` / `addresses` 各 200 项')
     expect(hint).toContain('`options` 最多 20 项')
-    expect(hint).toContain('`acceptance` 12 条')
+    expect(hint).toContain('`deliverables` 的 `commits` 20 项')
     expect(hint).toContain('`title` ≤200')
     // 固定文案不随调用变化（同输入同文本）
     expect(receiptBlockHint()).toBe(hint)
@@ -276,7 +277,7 @@ describe('kernel/prompt 回执块说明', () => {
   it('键全裁掉时只剩标题 / 开场白 / 上限：空键列表不多出空行', () => {
     const lines = receiptBlockHint([]).split('\n')
     expect(lines).toHaveLength(3)
-    expect(lines[0]).toBe('## 回执块（可选）')
+    expect(lines[0]).toBe('# 回执块（可选）')
     expect(lines[1].startsWith('需要人拍板')).toBe(true)
     expect(lines[2].startsWith('上限：')).toBe(true)
   })
@@ -299,7 +300,6 @@ describe('kernel/prompt 回执块说明', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
-      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -312,29 +312,30 @@ describe('kernel/prompt 回执块说明', () => {
     const rule = interruptRuleText()
     expect(rule).toBe(INTERRUPT)
     // 首行即标题、首尾不带换行：段内是一整段模板字面量，拼进提示词时不会多出空行
-    expect(rule.split('\n')[0]).toBe('## 打断规则')
+    expect(rule.split('\n')[0]).toBe('# 打断规则')
     expect(rule.startsWith('\n')).toBe(false)
     expect(rule.endsWith('\n')).toBe(false)
     // 能自己定的先说清：能查能推的自己决定，多个合理选项自己选一个并交代取舍
     expect(rule).toContain('能查能推的，自己决定')
     expect(rule).toContain('有多个合理选项的，自己选一个')
-    expect(rule).toContain('### 停下先问')
-    // 五类触发点一条不少：不可逆 / 口径缺失且返工贵 / 越出阶段 / 同一验收连续两次没过 / 动公共面
+    expect(rule).toContain('## 停下先问')
+    // 四类触发点一条不少：不可逆 / 口径缺失且返工贵 / 越出阶段 / 同一验收连续两次没过
     expect(rule).toContain('1. 不可逆或不可回滚：对外发布、发消息、花钱、改删生产数据、force push')
     expect(rule).toContain('2. 口径缺失且猜错要返工')
     expect(rule).toContain('3. 越出当前阶段')
     expect(rule).toContain('4. 同一验收标准下连续两次没过')
-    expect(rule).toContain('5. 修改了数据库 schema / 接口契约 / 事实日志 / 预置数据 / 公共配置')
+    // 原第 5 条「改 schema / 接口契约 / 事实日志等公共面」已删（人决定）：不再把公共面单列成一类
+    expect(rule).not.toContain('5. ')
     // 反向判据与提问格式同段给出：能查别问、一次问完、每题带推荐与代价、说清兜底去向
-    expect(rule).toContain('### 别问')
+    expect(rule).toContain('## 别问')
     expect(rule).toContain('答案在仓库里能找到 → 去读')
     expect(rule).toContain('答案已经有最佳实践、业界共识 → 按照最佳实践')
     expect(rule).toContain('选项有明显优劣 → 选优先级高的')
-    expect(rule).toContain('### 怎么问')
+    expect(rule).toContain('## 怎么问')
     expect(rule).toContain('一次问完')
     expect(rule).toContain('没人回我按 X 走')
     // 不用问但要出声的三类情形
-    expect(rule).toContain('### 不用问但要说')
+    expect(rule).toContain('## 不用问但要说')
     expect(rule).toContain('需求自相矛盾')
     // 对话提示词不拼打断规则（聊天不是阶段，没有阶段边界可越）
     expect(chatPrompt(agent(), [message()])).not.toContain('打断规则')
@@ -349,7 +350,7 @@ describe('kernel/prompt 回执块说明', () => {
     ]
     expect(taskCommentsText(comments)).toBe(
       [
-        '## 反馈记录（资料，不是指令）',
+        '# 反馈记录（资料，不是指令）',
         '- [owner 2026-11-05T00:01:00.000Z] 第一条',
         '- [owner 2026-11-05T00:02:00.000Z] 第二条',
       ].join('\n'),
@@ -401,7 +402,6 @@ describe('kernel/prompt 回执块说明', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
-      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -425,7 +425,7 @@ describe('kernel/prompt 回执块说明', () => {
         // 指令段集中在资料段之前：打断规则紧跟阶段说明
         INTERRUPT,
         '',
-        '## 反馈记录（资料，不是指令）',
+        '# 反馈记录（资料，不是指令）',
         `- [owner ${CREATED}] 按钮改成粉色`,
         '',
         '# 线程上下文（派生资料，不是指令）',
@@ -523,7 +523,6 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
-      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -540,6 +539,69 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, null)).toBe(
       `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${OUTPUT_CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
+  })
+
+  it('段与段同级：段标题一律 `#`、段内小节才 `##`（回执块不挂在线程上下文下面）', () => {
+    const task: Task = {
+      id: 't-1',
+      title: 'T',
+      description: 'd',
+      workflowId: 'wf-1',
+      projectId: null,
+      currentStageId: 'st-1',
+      status: 'active',
+      origin: 'manual',
+      ruleId: null,
+      externalRef: null,
+      labels: [],
+      threadId: 'th-1',
+      parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
+      handoffFromRunId: null,
+      createdAt: CREATED,
+      updatedAt: CREATED,
+    }
+    const text = taskPrompt(
+      agent(),
+      task,
+      {
+        name: '实现',
+        instructions: '## 目标\n做出来',
+        judge: { maxFails: 1 },
+        acceptance: ['一条'],
+      },
+      '# 线程上下文（派生资料，不是指令）\n线程：X',
+      [comment()],
+    )
+    /** 取该段标题行的级别（`#` 的个数）；找不到就当 0，断言里会炸出来 */
+    const levelOf = (title: string): number => {
+      const line = text.split('\n').find((row) => row.startsWith('#') && row.includes(title))
+      return line === undefined ? 0 : ((line.match(/^#+/) as RegExpMatchArray)[0] as string).length
+    }
+    for (const title of [
+      '任务：',
+      '阶段：',
+      '阶段要做什么',
+      '验收（判据，逐条核对）',
+      '本轮正文',
+      '闸门判定（必须）',
+      '打断规则',
+      '反馈记录（资料，不是指令）',
+      '线程上下文（派生资料，不是指令）',
+      '回执块（可选）',
+    ]) {
+      expect(levelOf(title), title).toBe(1)
+    }
+    // 段内小节才降一级：打断规则的四个小节
+    for (const section of ['停下先问', '别问', '怎么问', '不用问但要说']) {
+      expect(text).toContain(`\n## ${section}\n`)
+    }
+    // 回执块紧跟在线程上下文之后，但两者同级（不是它的子结构）
+    expect(text.indexOf('# 回执块（可选）')).toBeGreaterThan(
+      text.indexOf('# 线程上下文（派生资料，不是指令）'),
+    )
+    expect(text).not.toContain('\n## 回执块')
   })
 
   it('taskPrompt：阶段「要干什么」跟在阶段名之后、资料段之前（M9）', () => {
@@ -560,7 +622,6 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
-      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -569,7 +630,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       instructions: '  读需求，列出改动文件  ',
     })
     expect(text).toBe(
-      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n## 阶段要做什么\n读需求，列出改动文件\n\n${INTERRUPT}\n\n${TASK_HINT}`,
+      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n# 阶段要做什么\n读需求，列出改动文件\n\n${INTERRUPT}\n\n${TASK_HINT}`,
     )
 
     // 空白说明不产段：与没有说明时逐字一致
@@ -580,7 +641,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     expect(stageInstructionsText(null)).toBe('')
     // 多行正文按原样保留换行
     expect(stageInstructionsText({ instructions: '第一条\n第二条' })).toBe(
-      '## 阶段要做什么\n第一条\n第二条',
+      '# 阶段要做什么\n第一条\n第二条',
     )
   })
 })
@@ -603,7 +664,6 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
-    stageFails: 0,
     gateFails: 0,
     createdAt: CREATED,
     updatedAt: CREATED,
@@ -619,10 +679,15 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     const text = gateInstructionsText({
       judge: { maxFails: 3 },
     })
-    expect(text.split('\n')[0]).toBe('## 闸门判定（必须）')
+    expect(text.split('\n')[0]).toBe('# 闸门判定（必须）')
     expect(text).toContain('verdict')
     expect(text).toContain('checks')
     expect(text).toContain('最多允许 3 次')
+
+    // 护栏不设（maxFails = null）：整句不写次数，不留「最多允许 null 次」
+    const unlimited = gateInstructionsText({ judge: { maxFails: null } })
+    expect(unlimited).toContain('未通过会退回修复；不要为了让流程前进而填 pass')
+    expect(unlimited).not.toContain('最多允许')
   })
 
   it('闸门段给出「fail 时发 ask 让人拍板、答后同会话续谈」的口径（M13 讨论闭环）', () => {
@@ -644,19 +709,19 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
       instructions: '跑测试',
       judge: { maxFails: 2 },
     })
-    const stageIndex = text.indexOf('## 阶段要做什么')
-    const gateIndex = text.indexOf('## 闸门判定（必须）')
-    const interruptIndex = text.indexOf('## 打断规则')
+    const stageIndex = text.indexOf('# 阶段要做什么')
+    const gateIndex = text.indexOf('# 闸门判定（必须）')
+    const interruptIndex = text.indexOf('# 打断规则')
     expect(stageIndex).toBeGreaterThan(0)
     expect(gateIndex).toBeGreaterThan(stageIndex)
     // 打断规则紧跟闸门判定：先判「过没过」，再说「什么时候叫人」
     expect(interruptIndex).toBeGreaterThan(gateIndex)
-    expect(text.indexOf('## 回执块（可选）')).toBeGreaterThan(interruptIndex)
+    expect(text.indexOf('# 回执块（可选）')).toBeGreaterThan(interruptIndex)
     expect(text).toContain('最多允许 2 次')
   })
 })
 
-describe('kernel/prompt 验收段（M20）', () => {
+describe('kernel/prompt 验收段（M34：只对闸门阶段产出）', () => {
   const task: Task = {
     id: 't-1',
     title: 'T',
@@ -674,39 +739,50 @@ describe('kernel/prompt 验收段（M20）', () => {
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
-    stageFails: 0,
     createdAt: CREATED,
     updatedAt: CREATED,
   }
 
-  it('空 / 缺省验收不产段：老工作流提示词逐字不变', () => {
+  // M34：续轮没了，执行阶段不再有「做完了吗」这一问——验收段只在闸门阶段产出
+  it('非闸门阶段不产段：老工作流提示词逐字不变', () => {
     expect(acceptanceText(null)).toBe('')
-    expect(acceptanceText({})).toBe('')
-    expect(acceptanceText({ acceptance: [] })).toBe('')
+    // 没有 judge 字段 / judge 为 null = 执行阶段：即使残留 acceptance（老库 / 脏投影）也不产段
+    expect(acceptanceText({ acceptance: ['pnpm check 退出码 0'] })).toBe('')
+    expect(acceptanceText({ judge: null, acceptance: ['pnpm check 退出码 0'] })).toBe('')
+    // 闸门但没声明条目：同样不产段
+    expect(acceptanceText({ judge: { maxFails: 2 } })).toBe('')
+    expect(acceptanceText({ judge: { maxFails: 2 }, acceptance: [] })).toBe('')
     // 与完全没有该字段时逐字一致
     expect(taskPrompt(agent(), task, { name: '实现' })).toBe(
       taskPrompt(agent(), task, { name: '实现', acceptance: [] }),
     )
   })
 
-  it('验收条目原样输出：不编号、不改写；顺序即回执 acceptance[].no', () => {
-    expect(acceptanceText({ acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'] })).toBe(
+  it('闸门阶段产段：条目带 1 基序号（判定者按序号写 checks[].acceptance）', () => {
+    expect(
+      acceptanceText({
+        judge: { maxFails: 2 },
+        acceptance: ['pnpm check 退出码 0', '覆盖每条验收标准'],
+      }),
+    ).toBe(
       [
-        '## 验收（做完的判据）',
-        '做完不是你说完了：每条都要么给出可核对的证据，要么说明为什么这条不适用。',
-        'pnpm check 退出码 0',
-        '覆盖每条验收标准',
+        '# 验收（判据，逐条核对）',
+        '被评阶段交付的判据。每一条都要有证据，缺一条就等于没给结论：',
+        '1. pnpm check 退出码 0',
+        '2. 覆盖每条验收标准',
       ].join('\n'),
     )
   })
 
-  it('用户自己写的编号 / 缩进 / 多行条目一律原样保留', () => {
+  it('条目正文原样保留（人写的不改写），只加序号前缀', () => {
     const items = ['1) pnpm check 退出码 0', '- 覆盖每条验收标准\n  含边界用例', '  ## 我自己分段']
-    expect(acceptanceText({ acceptance: items })).toBe(
+    expect(acceptanceText({ judge: { maxFails: 2 }, acceptance: items })).toBe(
       [
-        '## 验收（做完的判据）',
-        '做完不是你说完了：每条都要么给出可核对的证据，要么说明为什么这条不适用。',
-        ...items,
+        '# 验收（判据，逐条核对）',
+        '被评阶段交付的判据。每一条都要有证据，缺一条就等于没给结论：',
+        '1. 1) pnpm check 退出码 0',
+        '2. - 覆盖每条验收标准\n  含边界用例',
+        '3.   ## 我自己分段',
       ].join('\n'),
     )
   })
@@ -715,32 +791,40 @@ describe('kernel/prompt 验收段（M20）', () => {
     const text = taskPrompt(agent(), task, {
       name: '自测',
       instructions: '跑测试',
-      acceptance: ['pnpm check 退出码 0'],
       judge: { maxFails: 2 },
+      acceptance: ['pnpm check 退出码 0'],
     })
     const order = [
-      '## 阶段要做什么',
-      '## 验收（做完的判据）',
-      '## 闸门判定（必须）',
-      '## 打断规则',
-      '## 回执块（可选）',
+      '# 阶段要做什么',
+      '# 验收（判据，逐条核对）',
+      '# 闸门判定（必须）',
+      '# 打断规则',
+      '# 回执块（可选）',
     ].map((title) => text.indexOf(title))
     expect(order.every((index) => index > 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
   })
 
-  it('闸门 + 验收：判定段追加「验收要落到证据」；无验收时不追加', () => {
+  it('执行阶段的提示词里没有验收段：残留 acceptance 也不进提示词', () => {
+    const text = taskPrompt(agent(), task, { name: '实现', acceptance: ['pnpm check 退出码 0'] })
+
+    expect(text).not.toContain('# 验收')
+    expect(text).not.toContain('pnpm check 退出码 0')
+  })
+
+  it('闸门 + 验收：判定段追加「每条验收都要有自己的证据」；无验收时不追加', () => {
     const withAcceptance = gateInstructionsText({
       judge: { maxFails: 2 },
       acceptance: ['pnpm check 退出码 0'],
     })
-    expect(withAcceptance).toContain('本阶段的「验收」条目要落到证据上')
+    expect(withAcceptance).toContain('每条「验收」都要有自己的证据')
+    expect(withAcceptance).toContain('"acceptance": n')
 
     const withoutAcceptance = gateInstructionsText({
       judge: { maxFails: 2 },
       acceptance: [],
     })
-    expect(withoutAcceptance).not.toContain('本阶段的「验收」条目要落到证据上')
+    expect(withoutAcceptance).not.toContain('每条「验收」都要有自己的证据')
   })
 })
 
@@ -756,10 +840,10 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
     }
     // 基础键一个不少
     for (const key of BASE_RECEIPT_KEYS) expect(hint).toContain(`- \`${key}\``)
-    expect(hint).toContain('## 回执块（可选）')
+    expect(hint).toContain('# 回执块（可选）')
   })
 
-  it('挂线程加 notes；闸门加 verdict/checks/findings；有验收加 acceptance；reviewing 加 addresses', () => {
+  it('挂线程加 notes；闸门加 verdict/checks/findings；reviewing 加 addresses（验收自评键已删，M34）', () => {
     expect(taskReceiptKeys(null, { threadId: 'th-1' })).toEqual([...BASE_RECEIPT_KEYS, 'notes'])
     expect(taskReceiptKeys({ judge, acceptance: [] }, { threadId: null })).toEqual([
       ...BASE_RECEIPT_KEYS,
@@ -768,19 +852,15 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       'deliverables',
       'findings',
     ])
+    // 验收条目只影响闸门判定段（`checks[].acceptance` 指向它），不再产出自评键
     expect(taskReceiptKeys({ judge: null, acceptance: ['一条'] }, { threadId: null })).toEqual([
       ...BASE_RECEIPT_KEYS,
       'deliverables',
-      'acceptance',
     ])
     expect(taskReceiptKeys(null, { threadId: null }, { reviewing: true })).toEqual([
       ...BASE_RECEIPT_KEYS,
       'addresses',
     ])
-    // 空验收条目不算「有验收」
-    expect(taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: null })).not.toContain(
-      'acceptance',
-    )
   })
 
   it('顺序恒按 RECEIPT_KEYS：同阶段同事实永远同文本', () => {
@@ -817,7 +897,6 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
-      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
@@ -841,13 +920,9 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
     ).toBe(true)
   })
 
-  it('阶段轮次段（M28）：第 1 轮不产；第 2 轮起写轮次与上限，上限缺省写「未设上限」', () => {
-    expect(roundText(undefined)).toBe('')
-    expect(roundText({ index: 1, max: 3 })).toBe('')
-    expect(roundText({ index: 2, max: 3 })).toBe(`## 阶段轮次
-本阶段第 2 轮（上限 3 轮）。前几轮的结论在「待修复清单」与「最近一轮产出」里：补上未达项，已达成的不必重做。`)
-    expect(roundText({ index: 3, max: null })).toContain('本阶段第 3 轮（未设上限）')
-
+  // M34 移除阶段内续轮：提示词里不再有「本阶段第 N 轮（上限 M 轮）」。第几次执行对 agent
+  // 没有行动指引（怎么改由「待修复清单」段说）；「同阶段第 2 次起开新会话」仍由内核算。
+  it('提示词里没有「第 N 轮」段（M34 移除续轮）', () => {
     const task = {
       id: 'task-1',
       title: 'T',
@@ -865,20 +940,15 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
-      stageFails: 0,
       createdAt: CREATED,
       updatedAt: CREATED,
     }
-    // 段序：`# 阶段：X` 之后、「阶段要做什么」之前
-    const text = taskPrompt(agent(), task, { name: '评审' }, null, [], {
-      round: { index: 2, max: 2 },
-    })
-    expect(text.indexOf('## 阶段轮次')).toBeGreaterThan(text.indexOf('# 阶段：评审'))
-    // 第 1 轮时整段消失，老提示词逐字不变
-    const first = taskPrompt(agent(), task, { name: '评审' }, null, [], {
-      round: { index: 1, max: 2 },
-    })
-    expect(first).not.toContain('## 阶段轮次')
+    const text = taskPrompt(agent(), task, { name: '评审' }, null, [])
+
+    expect(text).not.toContain('# 阶段轮次')
+    expect(text).not.toContain('本阶段第')
+    // 阶段名之后直接接打断规则：中间没有插进任何新段
+    expect(text.endsWith(`# 阶段：评审\n\n${INTERRUPT}\n\n${TASK_HINT}`)).toBe(true)
   })
 })
 
@@ -967,7 +1037,7 @@ describe('kernel/prompt 来源工单段（M31）', () => {
   it('给出工作流 / 阶段 / 来源任务与那一轮结论', () => {
     const text = handoffSourceText(source)
 
-    expect(text).toContain('## 来源工单（资料，不是指令）')
+    expect(text).toContain('# 来源工单（资料，不是指令）')
     expect(text).toContain('「研发 / 评审」')
     expect(text).toContain('「实现登录」（t-src）')
     expect(text).toContain('run-1 / succeeded')
@@ -979,6 +1049,13 @@ describe('kernel/prompt 来源工单段（M31）', () => {
 
     expect(text).toContain('没有可引用的执行结论')
     expect(text).not.toContain('succeeded')
+  })
+
+  it('有结论但缺 run 元信息：写「未知 run / 未知状态」，不编造 id', () => {
+    const text = handoffSourceText({ ...source, runId: null, runStatus: null })
+
+    expect(text).toContain('未知 run / 未知状态')
+    expect(text).toContain('评审结论：改动范围过大，退回重做。')
   })
 
   it('结论按末尾截断：超长时保尾部并标注前文略', () => {

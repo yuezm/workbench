@@ -2,6 +2,7 @@ import { legacyExits } from '../kernel/workflow/stage-machine'
 import { legacyHandoffs } from '../kernel/workflow/stage-handoffs'
 import { DatabaseSync } from 'node:sqlite'
 import {
+  LEGACY_TASK_COLUMNS,
   AGENTS_M27_ADD_COLUMN_SQL,
   AGENTS_M27_ADDED_COLUMNS,
   CARDS_M12_ADD_COLUMN_SQL,
@@ -35,8 +36,6 @@ import {
   TASKS_M11_ADD_COLUMN_SQL,
   TASKS_M30_ADDED_COLUMNS,
   TASKS_M30_ADD_COLUMN_SQL,
-  TASKS_M33_ADDED_COLUMNS,
-  TASKS_M33_ADD_COLUMN_SQL,
   legacyRunsCopySql,
   legacyRuntimesCopySql,
   legacyTasksCopySql,
@@ -198,7 +197,6 @@ const TASKS_ADDED_COLUMNS = [
   ...TASKS_M10_ADDED_COLUMNS,
   ...TASKS_M11_ADDED_COLUMNS,
   ...TASKS_M30_ADDED_COLUMNS,
-  ...TASKS_M33_ADDED_COLUMNS,
 ] as const
 
 type TaskAddedColumn = (typeof TASKS_ADDED_COLUMNS)[number]
@@ -211,7 +209,6 @@ const TASKS_ADD_COLUMN_SQL: Readonly<Record<TaskAddedColumn, string>> = {
   ...TASKS_M10_ADD_COLUMN_SQL,
   ...TASKS_M11_ADD_COLUMN_SQL,
   ...TASKS_M30_ADD_COLUMN_SQL,
-  ...TASKS_M33_ADD_COLUMN_SQL,
 }
 
 /**
@@ -231,6 +228,8 @@ export function needsTasksUpgrade(db: DatabaseSync): boolean {
 export function needsTasksRebuild(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'tasks')
   if (columns.size === 0) return false
+  // M34：还留着 stage_fails 的库也要重建一次，把这列物理删掉
+  if (LEGACY_TASK_COLUMNS.some((column) => columns.has(column))) return true
   return [...TASKS_M7_ADDED_COLUMNS, ...TASKS_M8_ADDED_COLUMNS].some(
     (column) => !columns.has(column),
   )
@@ -327,8 +326,8 @@ export function upgradeLegacyStagesTable(db: DatabaseSync): boolean {
         `INSERT INTO ${STAGES_UPGRADE_TEMP}
            (id, workflow_id, name, position, entry_mode, agent_id, exits_json, handoffs_json,
             subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
-            max_rounds, run_timeout_ms, judge_json, builtin, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            run_timeout_ms, judge_json, builtin, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       for (const row of rows) {
         const stage = legacyStageRow(row)
@@ -346,7 +345,6 @@ export function upgradeLegacyStagesTable(db: DatabaseSync): boolean {
           stage.spawnPolicy,
           stage.instructions,
           JSON.stringify(stage.acceptance),
-          stage.maxRounds,
           stage.runTimeoutMs,
           JSON.stringify(stage.judge),
           stage.builtin,
@@ -380,7 +378,6 @@ function legacyStageRow(raw: Record<string, unknown>): {
   spawnPolicy: string | null
   instructions: string
   acceptance: unknown
-  maxRounds: number | null
   runTimeoutMs: number | null
   judge: unknown
   builtin: string | null
@@ -436,11 +433,10 @@ function legacyStageRow(raw: Record<string, unknown>): {
     instructions:
       raw.instructions === undefined || raw.instructions === null ? '' : String(raw.instructions),
     acceptance:
-      raw.acceptance_json === undefined || raw.acceptance_json === null
-        ? []
-        : JSON.parse(String(raw.acceptance_json)),
-    maxRounds:
-      raw.max_rounds === undefined || raw.max_rounds === null ? null : Number(raw.max_rounds),
+      // M34：验收只属于闸门阶段——非闸门阶段的条目在升级时直接作废
+      judge !== null && raw.acceptance_json !== undefined && raw.acceptance_json !== null
+        ? JSON.parse(String(raw.acceptance_json))
+        : [],
     runTimeoutMs:
       raw.run_timeout_ms === undefined || raw.run_timeout_ms === null
         ? null

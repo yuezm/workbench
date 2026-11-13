@@ -87,10 +87,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   spawn_policy TEXT CHECK (spawn_policy IN ('off','agent')),
   -- M9 阶段要干什么：进入本阶段的任务提示词里带的固定指令段（空串 = 没写）
   instructions TEXT NOT NULL DEFAULT '',
-  -- M20 验收条目：JSON 数组文本（一条一句的可判定口径；空数组 = 未声明）
+  -- M20/M34 验收条目：JSON 数组文本（一条一句）；只有闸门阶段可非空
   acceptance_json TEXT NOT NULL DEFAULT '[]',
-  -- M21 阶段内轮次上限：空 = 1（不续轮），1–5
-  max_rounds INTEGER CHECK (max_rounds IS NULL OR (max_rounds BETWEEN 1 AND 5)),
   -- M26 阶段单轮运行超时（毫秒）：空 = 用全局缺省（60 min）
   run_timeout_ms INTEGER CHECK (
     run_timeout_ms IS NULL OR (run_timeout_ms BETWEEN 300000 AND 14400000)
@@ -139,8 +137,6 @@ CREATE TABLE IF NOT EXISTS ${name} (
   project_id TEXT,
   -- M11 闸门预算：当前阶段连续未通过次数（0 = 没失败过；旧行默认 0）
   gate_fails INTEGER NOT NULL DEFAULT 0,
-  -- M33 原地重跑次数（进入阶段清零，retry 出口用它计预算）
-  stage_fails INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -581,7 +577,6 @@ export const STAGES_REQUIRED_COLUMNS = [
   'judge_json',
   'instructions',
   'acceptance_json',
-  'max_rounds',
   'run_timeout_ms',
   'builtin',
   'subtask_stage_id',
@@ -594,6 +589,7 @@ export const STAGES_REQUIRED_COLUMNS = [
  * 不再读写。表里只要还有任一列就重建一次，把它们物理删掉（SQLite 不能 DROP COLUMN）。
  */
 export const LEGACY_STAGE_COLUMNS = [
+  'max_rounds',
   'on_complete_stage_id',
   'on_reject_stage_id',
   'handoff_workflow_id',
@@ -791,16 +787,10 @@ export const TASKS_M11_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
- * M33 给 `tasks` 新增的列（原地重跑次数）：NOT NULL DEFAULT 0，老行按「没重跑过」归一。
+ * 已废弃的 `tasks` 列（M34 删 `stage_fails`）：表里还有它就重建一次把它物理删掉。
+ * 原值只服务已删除的自动重跑，不迁移。
  */
-export const TASKS_M33_ADDED_COLUMNS = ['stage_fails'] as const
-
-/** `tasks` M33 补列语句（默认值与 DDL 一致）。 */
-export const TASKS_M33_ADD_COLUMN_SQL: Readonly<
-  Record<(typeof TASKS_M33_ADDED_COLUMNS)[number], string>
-> = {
-  stage_fails: 'ALTER TABLE tasks ADD COLUMN stage_fails INTEGER NOT NULL DEFAULT 0',
-}
+export const LEGACY_TASK_COLUMNS = ['stage_fails'] as const
 
 /**
  * M30 给 `tasks` 新增的列（派单来源 run）：可空 TEXT，弱引用不设外键。

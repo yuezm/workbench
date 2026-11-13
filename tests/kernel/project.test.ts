@@ -42,7 +42,6 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   spawnPolicy: null,
   instructions: '',
   acceptance: [],
-  maxRounds: null,
   runTimeoutMs: null,
   ...over,
 })
@@ -109,7 +108,6 @@ const task = (over: Partial<Task> = {}): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
-  stageFails: 0,
   createdAt: AT,
   updatedAt: AT,
   ...over,
@@ -881,7 +879,6 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
           handoffFromTaskId: null,
           handoffFromStageId: null,
           handoffFromRunId: null,
-          stageFails: 0,
         },
       },
     ])

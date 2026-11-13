@@ -11,7 +11,6 @@ import {
   ACCEPTANCE_LIMITS,
   AGENT_ENV_LIMITS,
   DELIVERABLE_LIMITS,
-  STAGE_ROUND_LIMITS,
   STAGE_TIMEOUT_LIMITS,
 } from '../../src/protocol/entities'
 import {
@@ -1069,7 +1068,9 @@ describe('validateQuery（M5：query 动词入口）', () => {
     ).toBe(false)
   })
 
-  it('阶段 acceptance / maxRounds：条数、条长、轮次范围（M20/M21）', () => {
+  // M34 删掉 `maxRounds`（阶段内续轮）——协议层不再有这一列；验收的**归属**（只许闸门）
+  // 不是形状问题，由内核 `validateStageSet` 在保存时拒收（见 tests/kernel/workflow/stage-validation）。
+  it('阶段 acceptance：只挡形状与条数（M34：归属由内核校验）', () => {
     const check = (stages: unknown): boolean =>
       validateCommand({
         commandId: 'c-acceptance',
@@ -1083,7 +1084,13 @@ describe('validateQuery（M5：query 动词入口）', () => {
       ...extra,
     })
     expect(check([stage({ acceptance: ['pnpm check 退出码 0'] })])).toBe(true)
+    expect(check([stage({ acceptance: [] })])).toBe(true)
     expect(check([stage({ acceptance: 'x' })])).toBe(false)
+    expect(
+      check([
+        stage({ acceptance: Array.from({ length: ACCEPTANCE_LIMITS.maxItems + 1 }, () => '一条') }),
+      ]),
+    ).toBe(false)
     expect(check([stage({ acceptance: [42] })])).toBe(false)
     expect(check([stage({ acceptance: ['x'.repeat(ACCEPTANCE_LIMITS.maxChars + 1)] })])).toBe(false)
     expect(
@@ -1091,12 +1098,8 @@ describe('validateQuery（M5：query 动词入口）', () => {
         stage({ acceptance: Array.from({ length: ACCEPTANCE_LIMITS.maxItems + 1 }, () => 'x') }),
       ]),
     ).toBe(false)
-
-    expect(check([stage({ maxRounds: STAGE_ROUND_LIMITS.min })])).toBe(true)
-    expect(check([stage({ maxRounds: STAGE_ROUND_LIMITS.max })])).toBe(true)
-    expect(check([stage({ maxRounds: 0 })])).toBe(false)
-    expect(check([stage({ maxRounds: STAGE_ROUND_LIMITS.max + 1 })])).toBe(false)
-    expect(check([stage({ maxRounds: 2.5 })])).toBe(false)
+    // 协议层不看 judge：没配判定者的阶段带验收条目照样通过形状校验，归属留给内核
+    expect(check([stage({ acceptance: ['一条'] })])).toBe(true)
   })
 
   it('阶段 runTimeoutMs：5 min–4 h 的毫秒区间，可空（M26）', () => {
@@ -1122,38 +1125,51 @@ describe('validateQuery（M5：query 动词入口）', () => {
     expect(check([stage({ runTimeoutMs: 60_000.5 })])).toBe(false)
   })
 
-  it('receipt.acceptance：序号范围、met 布尔、evidence 长度、条数上限（M21）', () => {
+  // M34：回执键 `acceptance`（验收自评）已删除。协议层不再认识它，任何形状都不再校验，
+  // 内核也不读——执行阶段不给自己下结论，闸门用 `checks[].acceptance` 指向验收条目。
+  it('receipt.acceptance：废弃键不再校验（M34 移除验收自评）', () => {
     const receipt = (acceptance: unknown): unknown => ({
       type: 'run.receipt',
       runId: 'run-1',
       receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, acceptance },
     })
+    // 老执行器残留这个键时整键忽略，不连累同一条回执
     expect(validateInput(receipt([{ no: 1, met: true, evidence: 'pnpm check 退出码 0' }])).ok).toBe(
       true,
     )
-    expect(validateInput(receipt([{ no: 1, met: false }])).ok).toBe(true)
-    expect(validateInput(receipt([{ no: 0, met: true }])).ok).toBe(false)
-    expect(validateInput(receipt([{ no: ACCEPTANCE_LIMITS.maxItems + 1, met: true }])).ok).toBe(
+    expect(validateInput(receipt([{ no: 0, met: 'yes' }])).ok).toBe(true)
+    expect(validateInput(receipt('任意形状')).ok).toBe(true)
+  })
+
+  it('receipt.checks[].acceptance：1–12 的整数，可空（M34 闸门逐条给证据）', () => {
+    const receipt = (checks: unknown): unknown => ({
+      type: 'run.receipt',
+      runId: 'run-1',
+      receipt: { status: 'succeeded', leaseId: 'run-1:1', turn: 1, verdict: 'pass', checks },
+    })
+    expect(validateInput(receipt([{ cmd: 'pnpm check', exitCode: 0, acceptance: 1 }])).ok).toBe(
+      true,
+    )
+    expect(
+      validateInput(
+        receipt([{ cmd: 'pnpm check', exitCode: 0, acceptance: ACCEPTANCE_LIMITS.maxItems }]),
+      ).ok,
+    ).toBe(true)
+    expect(validateInput(receipt([{ cmd: 'pnpm check', exitCode: 0 }])).ok).toBe(true)
+    expect(validateInput(receipt([{ cmd: 'pnpm check', exitCode: 0, acceptance: null }])).ok).toBe(
+      true,
+    )
+    expect(validateInput(receipt([{ cmd: 'pnpm check', exitCode: 0, acceptance: 0 }])).ok).toBe(
       false,
     )
-    expect(validateInput(receipt([{ no: 1, met: 'yes' }])).ok).toBe(false)
-    expect(validateInput(receipt([42])).ok).toBe(false)
     expect(
       validateInput(
-        receipt([{ no: 1, met: true, evidence: longText(COMMAND_LIMITS.description + 1) }]),
+        receipt([{ cmd: 'pnpm check', exitCode: 0, acceptance: ACCEPTANCE_LIMITS.maxItems + 1 }]),
       ).ok,
     ).toBe(false)
-    expect(
-      validateInput(
-        receipt(
-          Array.from({ length: ACCEPTANCE_LIMITS.maxItems + 1 }, (_, index) => ({
-            no: 1,
-            met: true,
-            evidence: `第 ${index} 条`,
-          })),
-        ),
-      ).ok,
-    ).toBe(false)
+    expect(validateInput(receipt([{ cmd: 'pnpm check', exitCode: 0, acceptance: 1.5 }])).ok).toBe(
+      false,
+    )
   })
 
   it('receipt.findings / addresses：清单形状、小标不重复、处置必填项（M14）', () => {

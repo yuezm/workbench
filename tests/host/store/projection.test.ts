@@ -162,7 +162,6 @@ describe('rebuild：增量应用与重建等价', () => {
             spawnPolicy: null,
             instructions: '',
             acceptance: [],
-            maxRounds: null,
             runTimeoutMs: null,
           },
           {
@@ -182,7 +181,6 @@ describe('rebuild：增量应用与重建等价', () => {
             spawnPolicy: null,
             instructions: '',
             acceptance: [],
-            maxRounds: null,
             runTimeoutMs: null,
           },
         ],
@@ -209,7 +207,8 @@ describe('rebuild：增量应用与重建等价', () => {
         handoffFromTaskId: null,
         handoffFromStageId: null,
         handoffFromRunId: null,
-        stageFails: 0,
+        // M11 闸门预算：TASK_COLUMNS 补齐 gate_fails 后按列读出
+        gateFails: 0,
         createdAt: SAMPLE_AT,
         updatedAt: SAMPLE_AT,
       },

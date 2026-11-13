@@ -29,7 +29,6 @@ const fullReceipt = {
     },
   ],
   addresses: [{ findingId: 'rpt-1#R1', disposition: 'deferred', note: '下轮再改' }],
-  acceptance: [{ no: 1, met: false, evidence: 'pnpm check 退出码 1' }],
 }
 
 const toolCall = (value: unknown): string => JSON.stringify(value)
@@ -86,13 +85,27 @@ describe('parseReceiptToolInput', () => {
     expect(parseReceiptToolInput('workbench.receipt', 'null')).toBeNull()
     expect(parseReceiptToolInput('workbench.receipt', toolCall({ ask: 1 }))).toBeNull()
     expect(parseReceiptToolInput('workbench.receipt', toolCall({ verdict: 'maybe' }))).toBeNull()
-    // 十二键全无（只有未知键）也算没有回执
+    // 十一键全无（只有未知键）也算没有回执
     expect(parseReceiptToolInput('workbench.receipt', toolCall({ foo: 1 }))).toBeNull()
   })
 
-  it('键齐全时全量解析（含 M14 / M21 的键）', () => {
+  it('键齐全时全量解析（含 M14 的评审键）', () => {
     const block = parseReceiptToolInput('workbench.receipt', toolCall(fullReceipt))
     expect(block).toEqual(fullReceipt)
+  })
+
+  // M34：`acceptance` 已从回执键里删除，工具通道同样整键忽略，同块其它键照常生效
+  it('废弃的 acceptance 键被忽略，不连累同块 verdict', () => {
+    expect(
+      parseReceiptToolInput(
+        'workbench.receipt',
+        toolCall({
+          verdict: 'pass',
+          checks: [{ cmd: 'pnpm check', exitCode: 0, acceptance: 1 }],
+          acceptance: [{ no: 1, met: true }],
+        }),
+      ),
+    ).toEqual({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 0, acceptance: 1 }] })
   })
 
   it('两条传输同口径：同一对象的工具解析与围栏解析结果一致', () => {

@@ -1603,8 +1603,8 @@ describe('queryView：reviews.byTask（M14）', () => {
   })
 })
 
-describe('queryView：workflow.stage-metrics（M23）', () => {
-  it('按阶段 position 汇总 run 数 / 平均轮数 / 降级 / ask / 人评；没有数据的阶段给 0', () => {
+describe('queryView：workflow.stage-metrics（M23/M34）', () => {
+  it('按阶段 position 汇总 run 数 / 闸门结论 / 降级 / ask / 人评；没有数据的阶段给 0', () => {
     const db = memory()
     seed(db)
     const writer = createProjectionWriter(db)
@@ -1613,7 +1613,7 @@ describe('queryView：workflow.stage-metrics（M23）', () => {
 
     const done = sample.task({ id: 'tk-1', currentStageId: 'st-1' })
     writer.apply({ table: 'tasks', key: done.id, row: done }, SAMPLE_AT)
-    // 同一任务在同一阶段跑了两轮：avgRounds 应为 2
+    // 同一任务在同一阶段跑了两轮：runs 累计到阶段上
     for (const id of ['run-1', 'run-2']) {
       writer.apply(
         { table: 'runs', key: id, row: sample.run({ id, taskId: 'tk-1', stageId: 'st-1' }) },
@@ -1666,11 +1666,10 @@ describe('queryView：workflow.stage-metrics（M23）', () => {
         stageId: string
         stageName: string
         runs: number
-        avgRounds: number
+        verdicts: { pass: number; fail: number }
         degraded: number
         asks: number
         humanComments: number
-        repairExhausted: number
       }>
     }
     expect(metrics.workflowId).toBe('wf-1')
@@ -1678,14 +1677,13 @@ describe('queryView：workflow.stage-metrics（M23）', () => {
     expect(first).toMatchObject({
       stageName: '第一步',
       runs: 2,
-      avgRounds: 2,
+      verdicts: { pass: 0, fail: 0 },
       degraded: 1,
       asks: 1,
       humanComments: 1,
-      repairExhausted: 0,
     })
     const second = metrics.stages.find((stage) => stage.stageId === 'st-2')
-    expect(second).toMatchObject({ runs: 1, avgRounds: 1, degraded: 0, asks: 0 })
+    expect(second).toMatchObject({ runs: 1, verdicts: { pass: 0, fail: 0 }, degraded: 0, asks: 0 })
     // 按 position 排：st-1 在 st-2 之前
     expect(metrics.stages.map((stage) => stage.stageId)).toEqual(['st-1', 'st-2'])
 
@@ -1697,7 +1695,7 @@ describe('queryView：workflow.stage-metrics（M23）', () => {
     expect((error as StoreError).code).toBe('invalid_input')
   })
 
-  it('有阶段但一轮都没跑：run 数与平均轮数都给 0（不是空对象）', () => {
+  it('有阶段但一轮都没跑：run 数与闸门结论都给 0（不是空对象）', () => {
     const db = memory()
     seed(db)
     const writer = createProjectionWriter(db)
@@ -1715,11 +1713,33 @@ describe('queryView：workflow.stage-metrics（M23）', () => {
     expect(metrics.stages.find((stage) => stage.stageId === 'st-idle')).toMatchObject({
       stageName: '闲置阶段',
       runs: 0,
-      avgRounds: 0,
-      repairExhausted: 0,
+      verdicts: { pass: 0, fail: 0 },
       degraded: 0,
       asks: 0,
       humanComments: 0,
+    })
+  })
+
+  it('M34 闸门结论：按 (阶段, 结论) 分开计数，同一阶段既通过又未通过', () => {
+    const db = memory()
+    seed(db)
+    const insert = db.prepare(
+      `INSERT INTO review_reports
+         (id, task_id, stage_id, run_id, thread_id, rev, verdict, checks_json, findings_json,
+          artifact_json, created_at, updated_at)
+       VALUES (?, 'tk-1', 'st-1', 'run-1', NULL, ?, ?, '[]', '[]', NULL, ?, ?)`,
+    )
+    insert.run('rp-pass', 1, 'pass', SAMPLE_AT, SAMPLE_AT)
+    insert.run('rp-fail', 2, 'fail', SAMPLE_AT, SAMPLE_AT)
+    // 无结论的评审（只报 findings）不计入两侧
+    insert.run('rp-none', 3, null, SAMPLE_AT, SAMPLE_AT)
+
+    const metrics = queryView(db, 'workflow.stage-metrics', { workflowId: 'wf-1' }) as {
+      stages: Array<{ stageId: string; verdicts: { pass: number; fail: number } }>
+    }
+    expect(metrics.stages.find((stage) => stage.stageId === 'st-1')?.verdicts).toEqual({
+      pass: 1,
+      fail: 1,
     })
   })
 })

@@ -49,7 +49,6 @@ describe('emptyStage / builtinStageDraft', () => {
       spawnPolicy: null,
       instructions: '',
       acceptance: [],
-      maxRounds: null,
       runTimeoutMs: null,
       judge: null,
     })

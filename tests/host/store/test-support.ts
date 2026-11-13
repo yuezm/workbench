@@ -137,7 +137,6 @@ export const sample = {
       spawnPolicy: null,
       instructions: '',
       acceptance: [],
-      maxRounds: null,
       runTimeoutMs: null,
       ...overrides,
     }
@@ -163,7 +162,8 @@ export const sample = {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
-      stageFails: 0,
+      // M11 闸门预算：视图现在按列读出（此前 TASK_COLUMNS 漏了这一列）
+      gateFails: 0,
       createdAt: SAMPLE_AT,
       updatedAt: SAMPLE_AT,
       ...overrides,

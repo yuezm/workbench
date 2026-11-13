@@ -3,7 +3,7 @@
  *
  * 执行器的最终输出里可以带一个 ```json 围栏块，对象只要含
  * `ask / notices / resolves / later / events / spawn / notes / verdict / checks /
- * findings / addresses / acceptance` 任一键就算回执块，其余键忽略。
+ * findings / addresses` 任一键就算回执块，其余键忽略（`acceptance` 已废弃，出现即忽略）。
  * **只看最后一个 ```json 围栏块**：该块非法 JSON / 非对象 / 十二键全无 /
  * 字段校验不过 → 直接返回 null，不回退到更早的块（回退可能沿用上一轮或正文里的
  * 陈旧回执，宁可这次不产卡片）。解析不修改输出原文、不改终态、不抛错。

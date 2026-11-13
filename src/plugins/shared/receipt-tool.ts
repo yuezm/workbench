@@ -54,7 +54,6 @@ const SCHEMA_OF: Record<(typeof RECEIPT_KEYS)[number], Record<string, unknown>> 
   deliverables: { type: 'object' },
   findings: { type: 'array', items: { type: 'object' } },
   addresses: { type: 'array', items: { type: 'object' } },
-  acceptance: { type: 'array', items: { type: 'object' } },
 }
 
 /**
@@ -66,7 +65,7 @@ const SCHEMA_OF: Record<(typeof RECEIPT_KEYS)[number], Record<string, unknown>> 
 export const receiptToolDefinition = (): ReceiptToolDefinition => ({
   name: RECEIPT_TOOL_NAME,
   description:
-    '向工作台提交本轮回执：要人拍板（ask）、知会（notices）、闸门判定（verdict/checks）、评审清单（findings/addresses）、验收自评（acceptance）等。与在回复末尾写 ```json 回执块等价；用哪个键写哪个。',
+    '向工作台提交本轮回执：要人拍板（ask）、知会（notices）、闸门判定（verdict/checks，闸门阶段用它逐条覆盖验收）、评审清单（findings/addresses）等。与在回复末尾写 ```json 回执块等价；用哪个键写哪个。',
   inputSchema: {
     type: 'object',
     additionalProperties: true,

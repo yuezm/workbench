@@ -9,6 +9,8 @@ import {
   CARDS_M12_ADDED_COLUMNS,
   CARDS_M41_ADD_COLUMN_SQL,
   CARDS_M41_ADDED_COLUMNS,
+  CARDS_M43_ADD_COLUMN_SQL,
+  CARDS_M43_ADDED_COLUMNS,
   COMMANDS_SQL,
   CONVERSATIONS_M9_ADD_COLUMN_SQL,
   CONVERSATIONS_M9_ADDED_COLUMNS,
@@ -466,6 +468,7 @@ export function upgradeLegacyCards(db: DatabaseSync): boolean {
   const wanted = [
     ...CARDS_M12_ADDED_COLUMNS.map((column) => ({ column, sql: CARDS_M12_ADD_COLUMN_SQL[column] })),
     ...CARDS_M41_ADDED_COLUMNS.map((column) => ({ column, sql: CARDS_M41_ADD_COLUMN_SQL[column] })),
+    ...CARDS_M43_ADDED_COLUMNS.map((column) => ({ column, sql: CARDS_M43_ADD_COLUMN_SQL[column] })),
   ]
   const missing = wanted.filter((entry) => !columns.has(entry.column))
   if (missing.length === 0) return false

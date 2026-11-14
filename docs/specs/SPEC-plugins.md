@@ -26,7 +26,7 @@ src/
     ├── shared/                 # 仅纯函数：JSONL 切行、argv 模板展开、CLI 候选清单（cli-catalog）
     ├── sources/{app,manual,webhook,fs}/
     ├── executors/{dsh,command,claude,hermes,remote}/
-    └── channels/{in-app,desktop,webhook}/
+    └── channels/{in-app,desktop,webhook,feishu}/
 
 src/renderer/src/apps/          # app 插件（UI 侧，见 SPEC-host）
 ├── pomodoro/
@@ -327,12 +327,24 @@ export interface ChannelContext {
   /** 通道所需的能力子集（log / now / notify）；`src/sdk` 的 `Sdk` 结构上满足它。
    *  protocol 不反向 import sdk（依赖方向 plugins → sdk → protocol）。 */
   sdk: ChannelSdk
-  /** 订阅卡片投递（宿主按 registry 顺序分发 card.opened / card.updated）；返回退订函数 */
-  onCard(handler: (card: Card) => void): () => void
-  /** 回报「已送达至少一个通道」；ref 写进 cards.deliveryRef 与 card.delivered 的审计字段 */
+  /**
+   * 订阅卡片（M43）：宿主按 registry 顺序分发 `card.opened` / `card.updated`（新版本）与
+   * `card.answered` / `card.resolved`（这张卡在这个通道发过时，回到原消息改口）。
+   * 第二参 `ref` 是这个通道上次成功发出的引用（从未发过为 null）——有它就原地更新，
+   * 没有就是第一次发。返回退订函数。 */
+  onCard(handler: (card: Card, ref: string | null) => void): () => void
+  /** 回报「这个通道送达了」：每个通道各写一条 card.delivered{channel}，ref 是该通道侧引用 */
   delivered(cardId: Id, version: number, ref: string): Promise<void>
-  /** 通道侧回答：经宿主发 card.answer（via='channel'）；被内核拒绝时 Promise reject */
-  answer(cardId: Id, optionIndex: number): Promise<void>
+  /**
+   * 通道侧回答：经宿主发 card.answer（via='channel'，`ref` 用来确认「点的是我发出去的那条
+   * 消息」，`byRef` 是回答人标识）。返回 `{ changed, status }`：已经不在等你时
+   * `changed=false`（不抛错），通道据此把那张卡刷成终态。 */
+  answer(
+    cardId: Id,
+    optionIndex: number,
+    ref?: string,
+    byRef?: string,
+  ): Promise<{ changed: boolean; status: Card['status'] }>
   /** 宿主停用通道或退出时 abort */
   signal: AbortSignal
 }
@@ -345,15 +357,27 @@ export interface ChannelSdk {
   config<T = Record<string, unknown>>(): T
   /** 出站 HTTP（M7）：需要 manifest 声明 capabilities: ['net']；宿主未注入时不可用 */
   net?: ChannelNet
+  /**
+   * 子进程（M42）：需要 manifest 声明 capabilities: ['spawn']，未声明时访问即抛
+   * `capability_not_declared`。只暴露 `spawn` / `resolve` / `killTree` 三件事——
+   * IM 通道要驱动自带凭据与长连接的 CLI（`lark-cli`），宿主不为每个平台写适配器。
+   * `spawn(command, args, options)` 的 `options.env` **省略即继承宿主环境**，卡片正文
+   * 只作 argv / stdin 参数，不拼命令行字符串。
+   */
+  process: ChannelProcess
 }
 ```
 
-- 端口版本：`CHANNEL_PORT_VERSION = 1`（`src/protocol/channels.ts`）；上下文形状变化时递增，外部通道（M7）按它做兼容判断。
+- 端口版本：`CHANNEL_PORT_VERSION = 3`（`src/protocol/channels.ts`；1 = M4 最小面，2 = M42 增 `process`，3 = M43 的 `onCard(card, ref)` 与 `answer(..., ref, byRef) → { changed, status }`）；上下文形状变化时递增，外部通道（M7）按它做兼容判断。外部通道的 `card` 帧带 `ref`，`answer` 帧不带 ref（适配器按 `undefined` 处理，校验退化为「只认 open 状态」）。
 - 卡片正文是**别人写的文字**：只能作为参数传进平台/通知 API，绝不能拼进脚本/模板/HTML；`notify(title, body)` 的两个参数同样只作参数。
-- 投递状态是 `cards` 的**单列** `delivery`（`pending → delivered | failed`，= 已送达至少一个通道，不按通道拆表）：重启后只补投 `pending`，已投递的同一版本不重复打扰；卡片更新（`version+1`）重新进 `pending`。`deliveryRef` 记最后一个成功通道。
-- 通道崩溃、抛错或超时不影响内核：卡片仍是 `open`，投递由宿主 fire-and-forget 隔离并在恢复后按上面的规则补投；失败只落 `card.delivery_failed`。
+- 投递状态是**两层账**（M43）：
+  - **按通道**：`cards.delivery_refs_json` 存 `Record<通道键, { version, status, ref, at }>`，只有成功发出过才有条目；同一 `(通道, 卡片, 版本, 状态)` 只投一次。回答 / 关闭也是「状态」，所以终态会**回到每一处已经发出去的消息**上改口（IM 里的卡不会永远带按钮）。
+  - **聚合**：`cards.delivery`（`pending → delivered | failed` = 至少一个通道送达）、`deliveryRef`（本版本首个成功通道的 ref）、`deliveryAttempts` / `nextDeliveryAt` / `deliveryGivenUp`（重投曲线，不按通道各算一份）。重启后只补「卡片仍 open、该通道还没同步这个版本 / 状态」的那些。
+- 投递语义（`src/host/channels.ts#planFor`）：卡片 open → 没发过 / 版本变了就发（有 ref 走原地更新）；卡片已答或已关 → **只补给「发过这张卡、且还停在旧版本 / 旧状态」的通道**，从未发过的通道不必知道「已经答复了」；`deliveryGivenUp` 且从未发过 → 不再打扰。
+- **回答的唯一性与锁定**在内核（`kernel/scopes/cards.ts#answerFacts`）：`open` 之外一律 `conflict` 零事实，所以同一张卡无论从工作台还是 IM 回答，只有第一次有效；`answer` 的 `ref` 校验保证「旧消息上的点击」不计入（答案必须配当前这一版问题）。
+- 通道崩溃、抛错或超时不影响内核：卡片仍是 `open`，投递由宿主 fire-and-forget 隔离并在恢复后按上面的规则补投；本轮所有通道都没成功才落 `card.delivery_failed{channel}`。
 - 通道只读卡片、只回报投递与回答；**不改卡片内容、不改派活**。
-- 宿主 hub（`src/host/channels.ts`）负责注册/启停/分发/补投，通道启停排在 effects 之后、scheduler 之前；退出时 abort + best-effort dispose。
+- 宿主 hub（`src/host/channels.ts`）负责注册/启停/分发/补投，通道启停排在 effects 之后、scheduler 之前；退出时 abort + best-effort dispose。每个通道的 ack / 未确认都记一条 `[channels]` 日志（按通道可观）。
 
 ### app
 
@@ -381,23 +405,24 @@ export interface AppPlugin {
 
 ## 内置插件清单
 
-| 类型     | id                | 说明（运行时协议）                                                                                                                                                                                                                                                                                                                                                      | 现状来源                                                                           |
-| -------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| executor | `dsh`             | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                                                                                                                                                                                                                                                                                | `src/plugins/executors/dsh/`（含 `detect.ts`）                                     |
-| executor | `command`         | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**M40**：脚本阶段用 `Turn.args`（逐项原样、不展开）且命令只取 `runtime.command`，`prompt` 为空时不写 stdin；`probe` 只解析可执行文件 + 参数模板（不 spawn），**不提供 `detect`**                                                                                                           | `src/plugins/executors/command/`                                                   |
-| executor | `remote`          | 远端 Worker 架构位（M7）：无传输时回执 `runtime_missing`，有传输时透传事件/回执；不监听端口                                                                                                                                                                                                                                                                             | `src/plugins/executors/remote/`（M7）                                              |
-| executor | `claude`          | Claude Code `--print --output-format stream-json`：提示词走 stdin、逐行 JSON 帧；探测要求 `--help` 含 `--print`/`--output-format`；不支持 `models`                                                                                                                                                                                                                      | `src/plugins/executors/claude/`（2026-11-08）                                      |
-| executor | `hermes`          | Hermes Agent `hermes acp`（ACP / JSON-RPC 2.0 over stdio）：initialize → session/new\|load → set_mode/set_model → prompt；审批往返回帧、取消走 `session/cancel`                                                                                                                                                                                                         | `src/plugins/executors/hermes/`（2026-11-08）                                      |
-| executor | `codex`           | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                                                                                                                                                                                                                                                                                        | 后续                                                                               |
-| source   | `app`             | app 插件发来的事件（经 `app.event` 命令，按 `APP_EVENTS` 白名单校验）                                                                                                                                                                                                                                                                                                   | M5 起（事件消费 M6）                                                               |
-| source   | `manual`          | 设置里手动触发一条自动化规则（`rule.trigger` 命令，不是独立插件进程）                                                                                                                                                                                                                                                                                                   | M6                                                                                 |
-| source   | `webhook`         | 本机回环 HTTP（只绑 `127.0.0.1`）+ HMAC-SHA256 验签；通过后 `ctx.emit` → `event.received`                                                                                                                                                                                                                                                                               | `src/plugins/sources/webhook/`（M7）                                               |
-| source   | `fs`              | 目录变化去抖                                                                                                                                                                                                                                                                                                                                                            | 可选                                                                               |
-| channel  | `in-app`          | 默认通道：投影即送达，`start` 内把 `pending` 卡片 ack 为 `delivered{ref:'in-app'}`；UI 直接批                                                                                                                                                                                                                                                                           | `src/plugins/channels/in-app/`（M4）                                               |
-| channel  | `desktop`         | Electron 系统通知：`sdk.notify(title, 固定指引)`——标题来自卡片，正文固定一句「点开工作台查看并处理」，卡片正文与选项不进系统通知；**只弹 `kind='ask'` 的卡**（缺 `kind` 的老数据按「有无选项」兜底），**不按 run 合并**：每张卡各弹一次，同一张卡的同一 `version` 重投不重复弹、`version + 1` 的原地更新照弹（其余照常 ack `delivered`）；失败落 `card.delivery_failed` | `src/plugins/channels/desktop/`（M4；M12 收敛打扰口径；原件 `src/main/notify.ts`） |
-| channel  | `webhook-channel` | 出站 webhook（M7）：把卡片 POST 到配置地址（单向，不回收答案）；未配置不投递                                                                                                                                                                                                                                                                                            | `src/plugins/channels/webhook-channel/`（M7）                                      |
-| app      | `pomodoro`        | 计时；可发 `pomodoro.completed` 事件                                                                                                                                                                                                                                                                                                                                    | `src/renderer/src/apps/pomodoro`                                                   |
-| app      | `ai-workflow`     | 看板/聊天/设置三视图                                                                                                                                                                                                                                                                                                                                                    | `src/renderer/src/apps/ai-workflow`                                                |
+| 类型     | id                | 说明（运行时协议）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | 现状来源                                                                           |
+| -------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| executor | `dsh`             | DeepSeek Harness `--stdio` JSONL 协议，探测/模型/执行/终止；`detect` 只报本机 `dsh` 命中                                                                                                                                                                                                                                                                                                                                                                                                                   | `src/plugins/executors/dsh/`（含 `detect.ts`）                                     |
+| executor | `command`         | 通用 CLI：`argsTemplate` 逐项展开成 argv，`{prompt}` 决定 argv 元素或 stdin；**M40**：脚本阶段用 `Turn.args`（逐项原样、不展开）且命令只取 `runtime.command`，`prompt` 为空时不写 stdin；`probe` 只解析可执行文件 + 参数模板（不 spawn），**不提供 `detect`**                                                                                                                                                                                                                                              | `src/plugins/executors/command/`                                                   |
+| executor | `remote`          | 远端 Worker 架构位（M7）：无传输时回执 `runtime_missing`，有传输时透传事件/回执；不监听端口                                                                                                                                                                                                                                                                                                                                                                                                                | `src/plugins/executors/remote/`（M7）                                              |
+| executor | `claude`          | Claude Code `--print --output-format stream-json`：提示词走 stdin、逐行 JSON 帧；探测要求 `--help` 含 `--print`/`--output-format`；不支持 `models`                                                                                                                                                                                                                                                                                                                                                         | `src/plugins/executors/claude/`（2026-11-08）                                      |
+| executor | `hermes`          | Hermes Agent `hermes acp`（ACP / JSON-RPC 2.0 over stdio）：initialize → session/new\|load → set_mode/set_model → prompt；审批往返回帧、取消走 `session/cancel`                                                                                                                                                                                                                                                                                                                                            | `src/plugins/executors/hermes/`（2026-11-08）                                      |
+| executor | `codex`           | 后续；接入方式 = 新增插件目录 + registry 一行，`detect` 只读扫描                                                                                                                                                                                                                                                                                                                                                                                                                                           | 后续                                                                               |
+| source   | `app`             | app 插件发来的事件（经 `app.event` 命令，按 `APP_EVENTS` 白名单校验）                                                                                                                                                                                                                                                                                                                                                                                                                                      | M5 起（事件消费 M6）                                                               |
+| source   | `manual`          | 设置里手动触发一条自动化规则（`rule.trigger` 命令，不是独立插件进程）                                                                                                                                                                                                                                                                                                                                                                                                                                      | M6                                                                                 |
+| source   | `webhook`         | 本机回环 HTTP（只绑 `127.0.0.1`）+ HMAC-SHA256 验签；通过后 `ctx.emit` → `event.received`                                                                                                                                                                                                                                                                                                                                                                                                                  | `src/plugins/sources/webhook/`（M7）                                               |
+| source   | `fs`              | 目录变化去抖                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 可选                                                                               |
+| channel  | `in-app`          | 默认通道：投影即送达，收到卡片（含终态回写）立即 ack `delivered{ref:'in-app'}`；UI 直接批                                                                                                                                                                                                                                                                                                                                                                                                                  | `src/plugins/channels/in-app/`（M4；M43 终态也 ack）                               |
+| channel  | `desktop`         | Electron 系统通知：`sdk.notify(title, 固定指引)`——标题来自卡片，正文固定一句「点开工作台查看并处理」，卡片正文与选项不进系统通知；**只弹 `kind='ask'` 的卡**（缺 `kind` 的老数据按「有无选项」兜底），**不按 run 合并**：每张卡各弹一次，同一张卡的同一 `version` 重投不重复弹、`version + 1` 的原地更新照弹（其余照常 ack `delivered`）；失败落 `card.delivery_failed`                                                                                                                                    | `src/plugins/channels/desktop/`（M4；M12 收敛打扰口径；原件 `src/main/notify.ts`） |
+| channel  | `webhook-channel` | 出站 webhook（M7）：把 open 卡 POST 到配置地址（单向，不回收答案）；终态不推送、只 ack；未配置不投递                                                                                                                                                                                                                                                                                                                                                                                                       | `src/plugins/channels/webhook-channel/`（M7；M43 终态 ack）                        |
+| channel  | `feishu`          | 飞书（M42/M43）：经本机 `lark-cli` 发 interactive 卡片（`im +messages-send`）、原地更新（`im messages patch`）、长连接收回调（`event consume card.action.trigger`）→ `answer`；同一 `(cardId, version)` 只发一次，`ref` 由宿主按通道持久化（重启后仍能改口），**渲染一律按卡片当前状态**（已答 → 绿色「已记录：X」且去掉按钮；已关 → 灰色）；点击监听退出 30 s 重连（同一飞书应用全局只允许一处 event bus）；未登录 / 没配接收人时 no-op。**不存 app secret、不开公网端口**（凭证与 WS 长连接都在 CLI 侧） | `src/plugins/channels/feishu/`（M42；M43 终态回写）                                |
+| app      | `pomodoro`        | 计时；可发 `pomodoro.completed` 事件                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `src/renderer/src/apps/pomodoro`                                                   |
+| app      | `ai-workflow`     | 看板/聊天/设置三视图                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `src/renderer/src/apps/ai-workflow`                                                |
 
 ## 外部插件（M7）
 
@@ -434,7 +459,8 @@ export interface AppPlugin {
 - **边界测试：** 扫描插件源码，禁止 import 清单（host/其它插件/DB）；未声明能力被调用时拒绝（含 `notify` 的「声明 ↔ 用法」一致性）。
 - **执行器：** 假进程/假流覆盖帧解析、终态归一、取消时序、迟到回执；`detect` 零副作用；`command` 插件的模板展开（项数与单项长度上限、未知占位符拒绝）、`{prompt}` 存在与否决定 argv/stdin、Windows `.cmd` 固定包装、提示词不出现在 argv 拼接字符串里。
 - **回执块：** 多块取最后一块、块内无十一键视为无回执、非法 JSON/非对象忽略、`ask` 选项为空/超限/标题超限整块忽略、`spawn` 标题为空/批次越界/条数超限整块忽略、`verdict` 非 `pass|fail` 与 `checks` 形状非法整块忽略（`checks: []` 不连累 `verdict`）、`checks[].acceptance` 非正整数整块忽略、`findings` 小标重复或字段超限整块忽略、`addresses` 的 `fixed` 缺 `checkRef` / `rejected`·`deferred` 缺 `note` 整块忽略、**`acceptance` 键出现即忽略（M34 废弃，不连累同块其它键）**、只带 `verdict` 也算回执块、解析不修改 `output` 与终态；dsh 从 `result` 帧、`command` 从 stdout 各一条成功与失败用例。
-- **通道：** 假通知/假平台，不发真消息；断言卡片文字与通知标题/正文只作为参数传递；补投只针对 `pending`、同一版本不重复投递。
+- **通道：** 假通知/假平台，不发真消息；断言卡片文字与通知标题/正文只作为参数传递；每个通道各写一条 `card.delivered{channel}`、同一 `(通道, 版本, 状态)` 不重复投递；终态（answered / resolved）只补给「发过这张卡」的通道，从未发过它的通道不打扰；回答返回 `{changed, status}`，旧消息（ref 对不上）的点击不计入。
+- **飞书通道（M42/M43）：** 假 `ChannelProcess`（脚本化 stdout/退出/超时）覆盖：卡片 JSON 结构（ask 三态色、按钮回传值、notice 无按钮、已答 / 已关无按钮且换成结论、越界下标给占位文案）、`card.action.trigger` 解析（对象/JSON 字符串回传值、非按钮组件与表单提交不算答案、下标非整数忽略）、`lark-cli` 适配（argv 顺序、`--content` 整串、patch 走 stdin、非零退出/超时/找不到命令/输出非 JSON 都拒绝）、`start` 编排（未登录与缺答复人时 no-op、同版本重投走原地更新、版本更新走 patch 且失败退回新发、终态更新失败只记日志、白名单外点击不计数、已 settled 只记「未计入」、监听退出 30 s 重连、dispose 幂等）。不发真消息、不连真长连接。
 - **注册表：** id 唯一、`key === manifest.id`、kind 合法、capabilities 在枚举内、必填字段齐全；`executors/*`、`channels/*` 目录与清单双向一致。
 - **detect 汇总：** 按注册表顺序串行且顺序稳定、`executorKey`/`supported` 由汇总回填、输出按候选清单排序、同 `command` 先到先得、单插件抛错或超时被隔离、空注册表返回空数组且不扫盘。
 - **外部插件装载（M7）：** 用户目录扫描按 `source`/`channel` 分目录；manifest 非法 / 入口缺失 / 未知类别 / 跨 kind 撞 id 全部拒绝并带原因；同 kind+id 用户覆盖内置且只保留一份；根目录/类别目录不可读降级不抛；`kind_unsupported` 只对合法的 `executor`/`app` 声明。

@@ -156,6 +156,12 @@ export const webhookChannel: ChannelPlugin = {
     }
 
     const off = ctx.onCard((card) => {
+      // M43：单向通道只推新卡；终态（answered / resolved）没有要推的内容，ack 一下让 hub
+      // 知道这个通道已跟上，避免每次状态变化都重走一遍。
+      if (card.status !== 'open') {
+        void ctx.delivered(card.id, card.version, webhookChannelManifest.id)
+        return
+      }
       void deliver(card)
     })
 

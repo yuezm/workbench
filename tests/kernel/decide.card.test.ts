@@ -130,6 +130,8 @@ const card = (over: Partial<Card> = {}): Card => ({
   deliveryAttempts: 0,
   nextDeliveryAt: null,
   deliveryGivenUp: false,
+  deliveryRefs: {},
+  answeredByRef: null,
   optionIndex: null,
   answeredBy: null,
   answeredAt: null,
@@ -267,6 +269,8 @@ describe('kernel/decide 回执建卡（ask / notices / resolves）', () => {
       deliveryAttempts: 0,
       nextDeliveryAt: null,
       deliveryGivenUp: false,
+      deliveryRefs: {},
+      answeredByRef: null,
       optionIndex: null,
       answeredBy: null,
       answeredAt: null,
@@ -795,8 +799,9 @@ const deliver = (
   cardId = 'card-1',
   version = 1,
   ref = 'in-app',
+  channel = 'in-app',
 ): ReturnType<typeof decide> =>
-  decide(target, { type: 'card.delivered', cardId, version, ref }, NOW, env())
+  decide(target, { type: 'card.delivered', cardId, version, channel, ref }, NOW, env())
 
 const deliveryFail = (
   target: View,
@@ -813,13 +818,14 @@ const failedCard = (decision: ReturnType<typeof decide>, index = 0): Card =>
   (decision.facts[index]?.payload as CardDeliveryFailedPayload).card
 
 describe('kernel/decide 通道投递回写（D9）', () => {
-  it('delivered：整行事实只改 delivery / deliveryRef / updatedAt，actor=host via channel', () => {
+  it('delivered：整行事实写本通道的条目与聚合列，actor=host via channel', () => {
     const pending = card()
-    const decision = deliver(view({ cards: [pending] }), 'card-1', 1, 'desktop')
+    const decision = deliver(view({ cards: [pending] }), 'card-1', 1, 'desktop', 'desktop')
 
     expect(types(decision)).toEqual(['card.delivered'])
     expect(decision.facts[0]?.actor).toEqual({ kind: 'host', via: 'channel' })
-    expect((decision.facts[0]?.payload as CardDeliveredPayload).ref).toBe('desktop')
+    const payload = decision.facts[0]?.payload as CardDeliveredPayload
+    expect([payload.channel, payload.ref]).toEqual(['desktop', 'desktop'])
     expect(deliveredCard(decision)).toEqual({
       ...pending,
       delivery: 'delivered',
@@ -827,14 +833,39 @@ describe('kernel/decide 通道投递回写（D9）', () => {
       deliveryAttempts: 1,
       nextDeliveryAt: null,
       deliveryGivenUp: false,
+      deliveryRefs: { desktop: { version: 1, status: 'open', ref: 'desktop', at: NOW } },
+      answeredByRef: null,
       updatedAt: NOW,
     })
   })
 
-  it('同版本重复 delivered：幂等零事实（不覆盖已有投递）', () => {
-    const already = card({ delivery: 'delivered', deliveryRef: 'in-app' })
+  it('第二个通道送达：补自己的条目，不动聚合 ref 与尝试次数', () => {
+    const first = card({
+      delivery: 'delivered',
+      deliveryRef: 'in-app',
+      deliveryAttempts: 1,
+      deliveryRefs: { 'in-app': { version: 1, status: 'open', ref: 'in-app', at: NOW } },
+    })
+    const decision = deliver(view({ cards: [first] }), 'card-1', 1, 'desktop', 'desktop')
 
-    expect(deliver(view({ cards: [already] }), 'card-1', 1, 'desktop').facts).toEqual([])
+    expect(deliveredCard(decision)).toEqual({
+      ...first,
+      deliveryRefs: {
+        'in-app': { version: 1, status: 'open', ref: 'in-app', at: NOW },
+        desktop: { version: 1, status: 'open', ref: 'desktop', at: NOW },
+      },
+      updatedAt: NOW,
+    })
+  })
+
+  it('同通道同版本重复 delivered：幂等零事实（不覆盖已有投递）', () => {
+    const already = card({
+      delivery: 'delivered',
+      deliveryRef: 'in-app',
+      deliveryRefs: { 'in-app': { version: 1, status: 'open', ref: 'in-app', at: NOW } },
+    })
+
+    expect(deliver(view({ cards: [already] }), 'card-1', 1, 'in-app', 'in-app').facts).toEqual([])
   })
 
   it('failed：置 delivery=failed / deliveryRef=null；同版本可被后续 delivered 覆盖', () => {
@@ -849,6 +880,8 @@ describe('kernel/decide 通道投递回写（D9）', () => {
       deliveryAttempts: 1,
       nextDeliveryAt: '2026-11-04T12:00:30.000Z',
       deliveryGivenUp: false,
+      deliveryRefs: {},
+      answeredByRef: null,
       updatedAt: NOW,
     })
     expect((failed.facts[0]?.payload as CardDeliveryFailedPayload).error).toBe('通道不可用')
@@ -885,6 +918,8 @@ describe('kernel/decide 通道投递回写（D9）', () => {
       deliveryAttempts: 1,
       nextDeliveryAt: '2026-11-04T12:00:30.000Z',
       deliveryGivenUp: false,
+      deliveryRefs: {},
+      answeredByRef: null,
     })
 
     const later = deliveryFail(
@@ -894,6 +929,8 @@ describe('kernel/decide 通道投递回写（D9）', () => {
       deliveryAttempts: 4,
       nextDeliveryAt: '2026-11-04T12:30:00.000Z',
       deliveryGivenUp: false,
+      deliveryRefs: {},
+      answeredByRef: null,
     })
   })
 
@@ -920,6 +957,8 @@ describe('kernel/decide 通道投递回写（D9）', () => {
       deliveryAttempts: 3,
       nextDeliveryAt: null,
       deliveryGivenUp: false,
+      deliveryRefs: {},
+      answeredByRef: null,
     })
   })
 })

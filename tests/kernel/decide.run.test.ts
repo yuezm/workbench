@@ -990,6 +990,8 @@ describe('kernel/decide run.receipt 回执', () => {
             deliveryAttempts: 0,
             nextDeliveryAt: null,
             deliveryGivenUp: false,
+            deliveryRefs: {},
+            answeredByRef: null,
             optionIndex: null,
             answeredBy: null,
             answeredAt: null,

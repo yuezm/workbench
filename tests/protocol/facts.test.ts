@@ -68,8 +68,10 @@ const runChatPayloads: [
 const cardPayloads: [
   Assert<Equal<FactPayload<'card.opened'>, CardOpenedPayload>>,
   Assert<Equal<FactPayload<'card.updated'>, CardUpdatedPayload>>,
-  Assert<Equal<FactPayload<'card.delivered'>, { card: Card; ref: string }>>,
-  Assert<Equal<FactPayload<'card.delivery_failed'>, { card: Card; error: string }>>,
+  Assert<Equal<FactPayload<'card.delivered'>, { card: Card; channel: string; ref: string }>>,
+  Assert<
+    Equal<FactPayload<'card.delivery_failed'>, { card: Card; channel?: string; error: string }>
+  >,
   Assert<Equal<FactPayload<'card.answered'>, CardAnsweredPayload>>,
   Assert<
     Equal<

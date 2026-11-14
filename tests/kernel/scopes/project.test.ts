@@ -210,11 +210,13 @@ const card = (over: Partial<Card> = {}): Card => ({
   status: 'open',
   delivery: 'pending',
   deliveryRef: null,
+  deliveryRefs: {},
   deliveryAttempts: 0,
   nextDeliveryAt: null,
   deliveryGivenUp: false,
   optionIndex: null,
   answeredBy: null,
+  answeredByRef: null,
   answeredAt: null,
   createdAt: AT,
   updatedAt: AT,
@@ -733,10 +735,14 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
       project(fact(71, 'card.updated', { card: updated, changes: ['title', 'version'] })),
     ).toEqual([put('cards', updated)])
 
-    const delivered = card({ delivery: 'delivered', deliveryRef: 'in-app' })
-    expect(project(fact(72, 'card.delivered', { card: delivered, ref: 'in-app' }))).toEqual([
-      put('cards', delivered),
-    ])
+    const delivered = card({
+      delivery: 'delivered',
+      deliveryRef: 'in-app',
+      deliveryRefs: { 'in-app': { version: 1, status: 'open', ref: 'in-app', at: AT } },
+    })
+    expect(
+      project(fact(72, 'card.delivered', { card: delivered, channel: 'in-app', ref: 'in-app' })),
+    ).toEqual([put('cards', delivered)])
 
     const failed = card({ delivery: 'failed' })
     expect(project(fact(73, 'card.delivery_failed', { card: failed, error: '通知失败' }))).toEqual([
@@ -866,7 +872,11 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
   it('重建 fold 卡片事实后 cards 表与最后一行全等', () => {
     const facts: Fact[] = [
       fact(90, 'card.opened', { card: card() }),
-      fact(91, 'card.delivered', { card: card({ delivery: 'delivered' }), ref: 'in-app' }),
+      fact(91, 'card.delivered', {
+        card: card({ delivery: 'delivered', deliveryRef: 'in-app' }),
+        channel: 'in-app',
+        ref: 'in-app',
+      }),
       fact(92, 'card.answered', {
         card: card({
           delivery: 'delivered',

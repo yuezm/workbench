@@ -109,6 +109,9 @@ export function normalizeCard(row: Card): Card {
     deliveryAttempts: legacy.deliveryAttempts ?? 0,
     nextDeliveryAt: legacy.nextDeliveryAt ?? null,
     deliveryGivenUp: legacy.deliveryGivenUp ?? false,
+    // M43：按通道的投递记录 / 回答人的老事实归一（M4–M42 的卡片行没有这两项）
+    deliveryRefs: legacy.deliveryRefs ?? {},
+    answeredByRef: legacy.answeredByRef ?? null,
   }
 }
 

@@ -15,6 +15,7 @@ import type { DetectedRuntime } from '../protocol/entities'
 import type { ExecutorPlugin, SdkHost, SourcePlugin } from '../sdk/types'
 import { createSdk } from '../sdk'
 import { desktopChannel, desktopManifest } from './channels/desktop'
+import { feishuChannel, feishuManifest } from './channels/feishu'
 import { inAppChannel, inAppManifest } from './channels/in-app'
 import { webhookChannel, webhookChannelManifest } from './channels/webhook-channel'
 import { claudePlugin } from './executors/claude'
@@ -88,7 +89,8 @@ export interface ChannelRegistryEntry {
 }
 
 /**
- * 内置通道清单（M4）：数组顺序即投递顺序（in-app 在前、desktop 在后）。
+ * 内置通道清单（M4）：数组顺序即投递顺序（in-app 在前、desktop 其次、出站/webhook 与
+ * 远程 IM 在后——本地能看到的先看到，远端推送是补充而不是唯一出口）。
  * 宿主只经本清单启停，不直接 import 具体通道插件。
  */
 export const channels: ReadonlyArray<ChannelRegistryEntry> = [
@@ -110,6 +112,13 @@ export const channels: ReadonlyArray<ChannelRegistryEntry> = [
     label: webhookChannelManifest.name,
     manifest: webhookChannelManifest,
     plugin: webhookChannel,
+  },
+  {
+    // M42：飞书（经本机 lark-cli 收发；未登录 / 没配接收人时插件自己 no-op）
+    key: feishuManifest.id,
+    label: feishuManifest.name,
+    manifest: feishuManifest,
+    plugin: feishuChannel,
   },
 ]
 

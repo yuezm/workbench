@@ -59,8 +59,12 @@ export type Iso = string
  * 存量行按 ALTER 默认值会是空表；不重建就等于把已有工作流的流转配置静默清零。
  * M34：阶段表去掉七个废弃列（S4）——旧的去向 / 交接 / 判定列物理删除，行按新口径重建，
  * 顺手让所有库的投影重新按事实折一遍（新列的形状变了）。
+ * M42：事件投影（`events` / `event_skips`）——规则暂停与补跑要能按事件回看。
+ * M43：卡片按通道记账（`cards.delivery_refs_json` + `answered_by_ref`）——一张卡会同时进
+ * 工作台 / 桌面通知 / IM，回答后要回到每一处原消息改口；老行按 ALTER 默认值只能得到
+ * 「没发过任何通道」，重建才能按事实折出真实投递记录。
  */
-export const KERNEL_VERSION = 'M42.0.0'
+export const KERNEL_VERSION = 'M43.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

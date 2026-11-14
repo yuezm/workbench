@@ -138,7 +138,7 @@ Agent 没有选择权：只能在回执里 `ask`（拍板）、`events`（再触
 | ---------- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | `source`   | 把世界变成事件                                           | manual（UI 手动）、app 事件、Webhook、文件变化                                                                                        | `start(ctx) → stop`                                 |
 | `executor` | 怎么调起并读回一轮（协议适配，无状态；**不是派活目标**） | `dsh`（DeepSeek Harness stdio）、`claude`（Claude Code stream-json）、`hermes`（ACP over stdio）、`command`（通用 CLI）；`codex` 后续 | `probe / models / detect(ctx) / run(ctx, turn, io)` |
-| `channel`  | 把卡片送到人面前并接回答案                               | 应用内卡片（默认）、桌面通知、Webhook（飞书等，M7 后）                                                                                | `start(ctx)` + `onCard`                             |
+| `channel`  | 把卡片送到人面前并接回答案                               | 应用内卡片（默认）、桌面通知、Webhook（单向出站）、飞书（M42，经本机 `lark-cli` 收发；M43 按通道记账并回写终态）                      | `start(ctx)` + `onCard`                             |
 | `app`      | 界面插件                                                 | `pomodoro`、`ai-workflow`                                                                                                             | `AppPlugin`（见 `SPEC-plugins.md`）                 |
 
 - 交付流水线**不是新插件类型**：它是「自动化规则 + 智能体 + 项目配置」的组合（照抄 autoloop 结论）。

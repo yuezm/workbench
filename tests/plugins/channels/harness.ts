@@ -1,12 +1,13 @@
 /**
  * 通道插件测试夹具：按 `ChannelContext` 形状构造可控上下文（不启动 hub、不读写库）。
  *
- * - `onCard` 记录订阅者并返回退订函数，`deliver(card)` 模拟 hub 分发；
+ * - `onCard` 记录订阅者并返回退订函数，`deliver(card, ref)` 模拟 hub 分发（M43：带上这个
+ *   通道自己的消息引用）；
  * - `delivered` / `answer` 只是记录回调参数并返回已兑现的 Promise（hub 的真实实现更复杂，
  *   通道插件只依赖回调契约）；
  * - `sdk` 用 `fakeSdk`（notify 调用记进 `sdk.notifyCalls`，文案只作参数）。
  */
-import type { ChannelContext } from '../../../src/protocol/channels'
+import type { ChannelAnswerOutcome, ChannelContext } from '../../../src/protocol/channels'
 import type { Card } from '../../../src/protocol/entities'
 import { fakeSdk, type FakeSdk } from '../support/fake-sdk'
 
@@ -25,34 +26,53 @@ export const cardOf = (over: Partial<Card> = {}): Card => ({
   status: 'open',
   delivery: 'pending',
   deliveryRef: null,
+  deliveryRefs: {},
   deliveryAttempts: 0,
   nextDeliveryAt: null,
   deliveryGivenUp: false,
   optionIndex: null,
   answeredBy: null,
+  answeredByRef: null,
   answeredAt: null,
   createdAt: '2026-11-05T00:00:00.000Z',
   updatedAt: '2026-11-05T00:00:00.000Z',
   ...over,
 })
 
+/** 通道侧回答的参数（M43：带上消息引用与操作人） */
+export interface AnswerCall {
+  cardId: string
+  optionIndex: number
+  ref?: string
+  byRef?: string
+}
+
 export interface ChannelHarness {
   ctx: ChannelContext
   sdk: FakeSdk
   controller: AbortController
   /** 已订阅的 onCard 处理器（模拟 hub 的分发列表） */
-  handlers: Array<(card: Card) => void>
+  handlers: Array<(card: Card, ref: string | null) => void>
   /** 通道回报的 delivered 参数 */
   delivered: Array<{ cardId: string; version: number; ref: string }>
+  /** 通道回报的 answer 参数（`answer` 抛错时仍记录，再抛错） */
+  answers: AnswerCall[]
   /** 模拟 hub 把一张卡片分发给所有订阅者（与 hub 的同步调用口径一致） */
-  deliver(card: Card): void
+  deliver(card: Card, ref?: string | null): void
 }
 
-export function channelHarness(options: { sdk?: FakeSdk } = {}): ChannelHarness {
+export interface ChannelHarnessOptions {
+  sdk?: FakeSdk
+  /** 自定义 answer 行为：用于「内核拒绝 / 已经 settled」这类路径（缺省总是成功） */
+  answer?: (call: AnswerCall) => Promise<ChannelAnswerOutcome>
+}
+
+export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarness {
   const sdk = options.sdk ?? fakeSdk()
   const controller = new AbortController()
   const handlers: ChannelHarness['handlers'] = []
   const delivered: ChannelHarness['delivered'] = []
+  const answers: ChannelHarness['answers'] = []
 
   const ctx: ChannelContext = {
     sdk,
@@ -67,7 +87,18 @@ export function channelHarness(options: { sdk?: FakeSdk } = {}): ChannelHarness 
       delivered.push({ cardId, version, ref })
       return Promise.resolve()
     },
-    answer: () => Promise.resolve(),
+    answer: (cardId, optionIndex, ref, byRef) => {
+      const call: AnswerCall = {
+        cardId,
+        optionIndex,
+        ...(ref === undefined ? {} : { ref }),
+        ...(byRef === undefined ? {} : { byRef }),
+      }
+      answers.push(call)
+      return options.answer === undefined
+        ? Promise.resolve({ changed: true, status: 'answered' })
+        : options.answer(call)
+    },
     signal: controller.signal,
   }
 
@@ -77,9 +108,10 @@ export function channelHarness(options: { sdk?: FakeSdk } = {}): ChannelHarness 
     controller,
     handlers,
     delivered,
-    deliver: (card) => {
+    answers,
+    deliver: (card, ref = null) => {
       // 复制一份：处理器可能在分发过程中退订（与 hub 递归分发时的表现一致）
-      for (const handler of [...handlers]) handler(card)
+      for (const handler of [...handlers]) handler(card, ref)
     },
   }
 }

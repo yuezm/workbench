@@ -257,6 +257,8 @@ export interface CardAnswerCommand extends CommandBase {
   /** 选项下标（0 基，须在卡片 `options` 范围内） */
   optionIndex: number
   via?: CardAnswerVia
+  /** 回答人（M43，通道回传的操作人标识，如飞书 open_id）；UI 回答不带 */
+  byRef?: string
   /** 补充说明（可选，随续接提示词作为资料段交给智能体） */
   note?: string
 }

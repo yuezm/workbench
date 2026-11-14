@@ -63,7 +63,13 @@ export const desktopChannel: ChannelPlugin = {
     const notifiedVersion = new Map<string, number>()
 
     const off = ctx.onCard((card) => {
-      if (needsAnswer(card) && notifiedVersion.get(card.id) !== card.version) {
+      // M43：只对仍 open 的卡弹；终态（answered / resolved）不打扰，但照样 ack，
+      // 让 hub 知道这个通道已经跟上（否则每变一次状态都会再来问一遍）。
+      if (
+        card.status === 'open' &&
+        needsAnswer(card) &&
+        notifiedVersion.get(card.id) !== card.version
+      ) {
         // 通知失败同步抛给 hub（不 catch）：本通道记为失败，其余通道继续。
         // 第三参是落点：点了通知直接进这张卡所在的任务 / 会话并高亮它。
         ctx.sdk.notify(card.title, NOTIFICATION_BODY, notifyTargetOf(card))

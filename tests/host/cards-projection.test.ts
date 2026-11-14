@@ -322,7 +322,7 @@ describe('cards 投影：实时写入与重建等价（真实 SQLite 临时库 +
         type: 'card.delivered',
         actor: HOST,
         at: AT_2,
-        payload: { card: delivered, ref: 'in-app' },
+        payload: { card: delivered, channel: 'in-app', ref: 'in-app' },
       },
       {
         type: 'card.updated',
@@ -365,12 +365,15 @@ describe('cards 投影：实时写入与重建等价（真实 SQLite 临时库 +
         status: 'resolved',
         delivery: 'failed',
         delivery_ref: null,
+        // 手工构造的老形状事实没有 M43 两列 → 归一成空对象 / null
+        delivery_refs_json: '{}',
         // 这条事实是手工构造的（老形状，没有 M41 三列）→ 归一成 0 / null / 0
         delivery_attempts: 0,
         next_delivery_at: null,
         delivery_given_up: 0,
         option_index: 0,
         answered_by: 'channel',
+        answered_by_ref: null,
         answered_at: AT_5,
         created_at: AT,
         updated_at: AT_6,

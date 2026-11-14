@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '../../../src/kernel/core/types'
 import type {
   Agent,
+  Card,
   Conversation,
   RunRow,
   Runtime,
@@ -201,6 +202,38 @@ describe('createProjectionWriter：显式行映射', () => {
       permission_mode: 'workspace-write',
       workdir: null,
       env_json: '{}',
+    })
+  })
+
+  it('老卡片行缺 M43 两列：写入时按 NULL / 空对象归一（手工构造 / 迁移前的快照）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const runtime = sample.runtime()
+    const agent = sample.agent({ runtimeId: runtime.id })
+    const workflow = sample.workflow()
+    const stage = sample.stage({ workflowId: workflow.id, agentId: agent.id })
+    const task = sample.task({ workflowId: workflow.id, currentStageId: stage.id })
+    const run = sample.run({ taskId: task.id, stageId: stage.id, agentId: agent.id })
+    for (const change of [
+      { table: 'runtimes', key: runtime.id, row: runtime },
+      { table: 'agents', key: agent.id, row: agent },
+      { table: 'workflows', key: workflow.id, row: workflow },
+      { table: 'workflow_stages', key: stage.id, row: stage },
+      { table: 'tasks', key: task.id, row: task },
+      { table: 'runs', key: run.id, row: run },
+    ] as Change[]) {
+      writer.apply(change, SAMPLE_AT)
+    }
+    const legacy = {
+      ...sample.card({ runId: run.id }),
+      deliveryRefs: undefined,
+      answeredByRef: undefined,
+    } as unknown as Card
+    writer.apply({ table: 'cards', key: legacy.id, row: legacy }, SAMPLE_AT)
+
+    expect(db.prepare('SELECT delivery_refs_json, answered_by_ref FROM cards').get()).toEqual({
+      delivery_refs_json: '{}',
+      answered_by_ref: null,
     })
   })
 

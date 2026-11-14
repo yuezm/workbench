@@ -237,7 +237,9 @@ export interface CardDeliveredInput {
   cardId: string
   /** 卡片版本（1 基）；只有「被投递的那一版」才算数 */
   version: number
-  /** 通道键（in-app / desktop / …），写进 `cards.deliveryRef` 与事实审计字段 */
+  /** 通道注册键（in-app / desktop / feishu / …）：投递记录按它分别记账（M43） */
+  channel: string
+  /** 该通道侧的引用（消息 id 等）：只作平台参数，不拼命令 / 模板 */
   ref: string
 }
 
@@ -246,6 +248,8 @@ export interface CardDeliveryFailedInput {
   type: 'card.delivery_failed'
   cardId: string
   version: number
+  /** 触发这次失败的通道（M43，审计用）；聚合判定仍是「本轮全部通道失败」 */
+  channel?: string
   error: string
 }
 

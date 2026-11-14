@@ -10,24 +10,47 @@ import { answerFacts, resolveFacts } from '../cards'
 import { done, HOST_CHANNEL } from './common'
 
 /**
- * 通道投递回写（D2/D9）：只对「当前仍存在的卡片 + 版本一致」生效。
+ * 通道投递回写（D2/D9；M43 按通道分别记账）：只对「当前仍存在的卡片 + 版本一致」生效。
+ *
+ * - `delivered`：把 `(channel, version, ref)` 记进 `deliveryRefs`，同一通道同一版本重复回报
+ *   零事实；`deliveryRef` 仍记**本版本首个**成功通道的 ref（聚合列语义不变）。
+ * - `failed`：只要这张卡已经送达过任何一个通道就不再降级（失败账是聚合口径，不按通道各算）。
  */
 function deliveryFacts(
   view: View,
-  input: { cardId: Id; version: number },
+  input: { cardId: Id; version: number; channel: string },
   patch: { kind: 'delivered'; ref: string } | { kind: 'failed'; error: string },
   now: Iso,
 ): FactDraft[] {
   const card = view.cards.get(input.cardId)
   if (!card || card.version !== input.version) return []
   if (patch.kind === 'delivered') {
-    if (card.delivery === 'delivered') return []
+    const own = card.deliveryRefs?.[input.channel]
+    if (
+      own !== undefined &&
+      own.version === input.version &&
+      own.status === card.status &&
+      own.ref === patch.ref
+    ) {
+      return []
+    }
+    // 本版本第一次成功：计一次尝试、记聚合 ref；后续通道（或终态回写）只补自己的条目
+    const firstForVersion = card.delivery !== 'delivered'
     const next: Card = {
       ...card,
       delivery: 'delivered',
-      deliveryRef: patch.ref,
-      // M41：送达也计一次尝试，并把重投排期清干净（放弃标记一并复位）
-      deliveryAttempts: card.deliveryAttempts + 1,
+      deliveryRef: firstForVersion ? patch.ref : card.deliveryRef,
+      deliveryRefs: {
+        ...(card.deliveryRefs ?? {}),
+        [input.channel]: {
+          version: input.version,
+          status: card.status,
+          ref: patch.ref,
+          at: now,
+        },
+      },
+      deliveryAttempts: firstForVersion ? card.deliveryAttempts + 1 : card.deliveryAttempts,
+      // M41：送达也把重投排期清干净（放弃标记一并复位）
       nextDeliveryAt: null,
       deliveryGivenUp: false,
       updatedAt: now,
@@ -37,7 +60,7 @@ function deliveryFacts(
         type: 'card.delivered',
         actor: HOST_CHANNEL,
         at: now,
-        payload: { card: next, ref: patch.ref },
+        payload: { card: next, channel: input.channel, ref: patch.ref },
       },
     ]
   }
@@ -60,7 +83,7 @@ function deliveryFacts(
       type: 'card.delivery_failed',
       actor: HOST_CHANNEL,
       at: now,
-      payload: { card: next, error: patch.error },
+      payload: { card: next, channel: input.channel, error: patch.error },
     },
   ]
 }
@@ -95,5 +118,13 @@ export function failedCardDelivery(
   input: Extract<Input, { type: 'card.delivery_failed' }>,
   now: Iso,
 ): Decision {
-  return done(deliveryFacts(view, input, { kind: 'failed', error: input.error }, now))
+  // 没带通道 = 「本轮所有通道都没投出去」的聚合失败（聚合账不按通道各算一份）
+  return done(
+    deliveryFacts(
+      view,
+      { ...input, channel: input.channel ?? 'all' },
+      { kind: 'failed', error: input.error },
+      now,
+    ),
+  )
 }

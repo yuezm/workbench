@@ -27,11 +27,13 @@ const card: Card = {
   status: 'open',
   delivery: 'pending',
   deliveryRef: null,
+  deliveryRefs: {},
   deliveryAttempts: 0,
   nextDeliveryAt: null,
   deliveryGivenUp: false,
   optionIndex: null,
   answeredBy: null,
+  answeredByRef: null,
   answeredAt: null,
   createdAt: '2026-11-05T00:00:00.000Z',
   updatedAt: '2026-11-05T00:00:00.000Z',
@@ -40,11 +42,11 @@ const card: Card = {
 /** 假通道 hub：保存订阅者，记录 delivered / answer 的参数。 */
 function fakeHub(signal: AbortSignal): {
   ctx: ChannelContext
-  listeners: Set<(card: Card) => void>
+  listeners: Set<(card: Card, ref: string | null) => void>
   delivered: Array<[string, number, string]>
   answers: Array<[string, number]>
 } {
-  const listeners = new Set<(card: Card) => void>()
+  const listeners = new Set<(card: Card, ref: string | null) => void>()
   const delivered: Array<[string, number, string]> = []
   const answers: Array<[string, number]> = []
   const sdk: ChannelSdk = {
@@ -52,6 +54,14 @@ function fakeHub(signal: AbortSignal): {
     now: () => 0,
     notify: () => undefined,
     config: <T = Record<string, unknown>>() => ({}) as T,
+    // 通道契约不启动子进程：声明了 `spawn` 的通道用真实实现，这里只保证能力面形状齐全
+    process: {
+      spawn: () => {
+        throw new Error('契约测试不启动子进程')
+      },
+      resolve: (command) => ({ path: null, error: `契约测试不解析命令：${command}` }),
+      killTree: () => false,
+    },
   }
   return {
     listeners,
@@ -70,6 +80,7 @@ function fakeHub(signal: AbortSignal): {
       },
       answer: async (cardId, optionIndex) => {
         answers.push([cardId, optionIndex])
+        return { changed: true, status: 'answered' }
       },
       signal,
     },
@@ -77,22 +88,23 @@ function fakeHub(signal: AbortSignal): {
 }
 
 describe('protocol/channels', () => {
-  it('通道端口版本固定为 1', () => {
-    expect(CHANNEL_PORT_VERSION).toBe(1)
+  it('通道端口版本固定为 3（M43：onCard 带 ref、answer 带 ref 与 outcome）', () => {
+    expect(CHANNEL_PORT_VERSION).toBe(3)
   })
 
-  it('start 收到上下文：onCard 收卡片、delivered / answer 回传参数、dispose 可重复调用', async () => {
+  it('start 收到上下文：onCard 收卡片与 ref、delivered / answer 回传参数、dispose 可重复调用', async () => {
     const controller = new AbortController()
     const hub = fakeHub(controller.signal)
-    const received: Card[] = []
+    const received: Array<[Card, string | null]> = []
+    let outcome: { changed: boolean } | null = null
 
     const plugin: ChannelPlugin = {
       start: async (ctx) => {
-        const off = ctx.onCard((deliveredCard) => {
-          received.push(deliveredCard)
+        const off = ctx.onCard((deliveredCard, ref) => {
+          received.push([deliveredCard, ref])
         })
         await ctx.delivered(card.id, card.version, 'fake')
-        await ctx.answer(card.id, 1)
+        outcome = await ctx.answer(card.id, 1)
         return () => {
           off()
         }
@@ -101,11 +113,12 @@ describe('protocol/channels', () => {
 
     const dispose = await plugin.start(hub.ctx)
     expect(hub.listeners.size).toBe(1)
-    for (const listener of hub.listeners) listener(card)
+    for (const listener of hub.listeners) listener(card, 'om_1')
 
-    expect(received).toEqual([card])
+    expect(received).toEqual([[card, 'om_1']])
     expect(hub.delivered).toEqual([['card-1', 1, 'fake']])
     expect(hub.answers).toEqual([['card-1', 1]])
+    expect(outcome).toEqual({ changed: true, status: 'answered' })
 
     dispose()
     expect(hub.listeners.size).toBe(0)

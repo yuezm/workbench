@@ -64,6 +64,14 @@ const safely = (run: () => void): void => {
   }
 }
 
+/** 需要交给通道 hub 的卡片事实：新卡 / 新版本 / 已答 / 已关（M43 起终态也要回写原消息）。 */
+const CARD_DISPATCH_TYPES: ReadonlySet<string> = new Set([
+  'card.opened',
+  'card.updated',
+  'card.answered',
+  'card.resolved',
+])
+
 export function createEffects(options: EffectsOptions): Effects {
   const { store } = options
 
@@ -80,7 +88,7 @@ export function createEffects(options: EffectsOptions): Effects {
     }
     if (facts.length === 0) return
     // 卡片投递：hub 的 dispatch 只做「选集 + 异步投递」，立即返回；异常/超时在 hub 内隔离
-    if (facts.some((fact) => fact.type === 'card.opened' || fact.type === 'card.updated')) {
+    if (facts.some((fact) => CARD_DISPATCH_TYPES.has(fact.type))) {
       safely(() => options.channels?.().dispatch(facts))
     }
     safely(() => options.onFacts?.(facts))

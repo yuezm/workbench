@@ -531,10 +531,10 @@ describe('executeDshRun', () => {
         resume_session_id: 'sess-prev',
       },
     ])
-    expect(h.calls[0].options.env.DSH_PERMISSION_MODE).toBe('workspace-write')
-    expect(h.calls[0].options.env.MULTICA_DSH_SESSION_ROOT).toBe('C:/sessions')
+    expect(h.calls[0].options.env?.['DSH_PERMISSION_MODE']).toBe('workspace-write')
+    expect(h.calls[0].options.env?.['MULTICA_DSH_SESSION_ROOT']).toBe('C:/sessions')
     // 智能体的环境变量原样铺开（权限与会话根随后覆盖，智能体改不动权限）
-    expect(h.calls[0].options.env.HTTP_PROXY).toBe('http://127.0.0.1:7890')
+    expect(h.calls[0].options.env?.['HTTP_PROXY']).toBe('http://127.0.0.1:7890')
     child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
     child.emitStdout(frame({ v: 1, type: 'session', session_id: 'sess-1' }))
     child.emitStdout(frame({ v: 1, type: 'text', content: '你' }))
@@ -626,8 +626,8 @@ describe('executeDshRun', () => {
     })
     const child = h.children[0]
 
-    expect(h.calls[0].options.env.MULTICA_DSH_SESSION_ROOT).toBeUndefined()
-    expect(h.calls[0].options.env.DSH_PERMISSION_MODE).toBe('workspace-write')
+    expect(h.calls[0].options.env?.['MULTICA_DSH_SESSION_ROOT']).toBeUndefined()
+    expect(h.calls[0].options.env?.['DSH_PERMISSION_MODE']).toBe('workspace-write')
 
     // 正常收尾：不留下悬空的执行器 Promise
     child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
@@ -1010,7 +1010,7 @@ describe('executeDshRun', () => {
     const { running } = startRun(h, {
       turn: { access: 'read', env: { DSH_PERMISSION_MODE: 'danger-full-access' } },
     })
-    expect(h.calls[0].options.env.DSH_PERMISSION_MODE).toBe('read-only')
+    expect(h.calls[0].options.env?.['DSH_PERMISSION_MODE']).toBe('read-only')
 
     const child = h.children[0]
     child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))

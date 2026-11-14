@@ -8,22 +8,40 @@ import { cardOf, channelHarness } from './harness'
  * 与 `tests/plugins/support/fake-sdk.test.ts` 同一口径：夹具缺省也是契约。
  */
 describe('channelHarness：通道上下文夹具', () => {
-  it('answer 走宿主回调：返回已兑现的 Promise（通道只依赖回调契约）', async () => {
+  it('answer 走宿主回调：返回内核的结论（通道只依赖回调契约）', async () => {
     const harness = channelHarness()
-    await expect(harness.ctx.answer('card-1', 1)).resolves.toBeUndefined()
+    await expect(harness.ctx.answer('card-1', 1)).resolves.toEqual({
+      changed: true,
+      status: 'answered',
+    })
+    await expect(harness.ctx.answer('card-1', 1, 'om_1', 'ou_me')).resolves.toEqual({
+      changed: true,
+      status: 'answered',
+    })
+    expect(harness.answers).toEqual([
+      { cardId: 'card-1', optionIndex: 1 },
+      { cardId: 'card-1', optionIndex: 1, ref: 'om_1', byRef: 'ou_me' },
+    ])
   })
 
-  it('deliver 分发给全部订阅者；退订后不再收到', () => {
+  it('deliver 分发给全部订阅者并带上自己的 ref；退订后不再收到', () => {
     const harness = channelHarness()
     const received: string[] = []
-    harness.ctx.onCard((card) => received.push(card.id))
-    const unsubscribe = harness.ctx.onCard((card) => received.push(`second:${card.id}`))
+    harness.ctx.onCard((card, ref) => received.push(`${card.id}:${ref ?? '-'}`))
+    const unsubscribe = harness.ctx.onCard((card, ref) => received.push(`second:${card.id}:${ref}`))
 
     harness.deliver(cardOf())
+    harness.deliver(cardOf(), 'om_1')
     unsubscribe()
     harness.deliver(cardOf({ id: 'card-2' }))
 
-    expect(received).toEqual(['card-1', 'second:card-1', 'card-2'])
+    expect(received).toEqual([
+      'card-1:-',
+      'second:card-1:null',
+      'card-1:om_1',
+      'second:card-1:om_1',
+      'card-2:-',
+    ])
   })
 
   it('退订是幂等的：处理器已移除时再退订一次不改动订阅列表', () => {

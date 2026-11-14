@@ -794,6 +794,8 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
         requiredId(command.cardId, 'cardId') ??
         integerIn(command.optionIndex, 'optionIndex', 0, COMMAND_LIMITS.askOptions - 1) ??
         optionalEnum(command.via, 'via', CARD_ANSWER_VIA) ??
+        // M43：回答人标识（通道回传，只做审计与展示）
+        optionalText(command.byRef, 'byRef', COMMAND_LIMITS.id) ??
         optionalText(command.note, 'note', COMMAND_LIMITS.cardNote)
       )
     case 'card.resolve':
@@ -1208,16 +1210,18 @@ const checkHostPayload = (type: HostInputName, input: Obj): Check => {
     case 'clock.tick':
       return null
     case 'card.delivered':
-      // 通道投递回写：版本 1 基正整数（与回执/轮次同档上界），ref 是通道键
+      // 通道投递回写（M43）：版本 1 基正整数（与回执/轮次同档上界），按通道分别记账。
       return (
         requiredId(input.cardId, 'cardId') ??
         integerIn(input.version, 'version', 1, COMMAND_LIMITS.turn) ??
+        required(input.channel, 'channel', COMMAND_LIMITS.id) ??
         required(input.ref, 'ref', COMMAND_LIMITS.description)
       )
     case 'card.delivery_failed':
       return (
         requiredId(input.cardId, 'cardId') ??
         integerIn(input.version, 'version', 1, COMMAND_LIMITS.turn) ??
+        optionalText(input.channel, 'channel', COMMAND_LIMITS.id) ??
         required(input.error, 'error', COMMAND_LIMITS.description)
       )
     case 'event.received':

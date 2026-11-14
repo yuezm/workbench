@@ -963,12 +963,32 @@ export const CARD_RESOLVE_REASONS = ['agent', 'manual', 'cancelled', 'expired'] 
 export type CardResolveReason = (typeof CARD_RESOLVE_REASONS)[number]
 
 /**
+ * 一条通道对这张卡的投递记录（M43）：**成功发出过才有条目**，值是该通道侧的引用
+ * （飞书 `om_xxx`、本地通道用自身键）。
+ *
+ * 为什么按通道存：同一张卡会同时进 in-app / 桌面 / IM，回答可能来自任意一处；卡状态变了
+ * 必须回到**每一处已经发出去的地方**改口，否则 IM 里那张卡永远带着按钮、永远显示「待答」。
+ * 失败账仍走 `delivery / deliveryAttempts / nextDeliveryAt / deliveryGivenUp` 那套聚合列——
+ * 重投曲线问的是「这张卡还值不值得再试」，不按通道各算一份。
+ */
+export interface CardChannelRef {
+  /** 该通道最后收到的卡片版本 */
+  version: number
+  /** 该通道最后看到的卡片状态：`open` → `answered` / `resolved` 也要回原消息改口 */
+  status: CardStatus
+  /** 通道侧引用（消息 id 等）：只作平台参数，不拼命令 / 模板 / HTML */
+  ref: string
+  /** 记录时刻（审计与排错用） */
+  at: string
+}
+
+/**
  * `cards` 投影行（第 10 张投影表，M4）：带完整行由事实携带，`project` 只做
  * 「一行事实 → 一行投影」，重建无需回查。
  *
  * 卡片正文是智能体产出的文字：只能作为平台/通知 API 的参数，不得拼进命令行、
- * 脚本或 HTML（SPEC-plugins「channel」）。投递按 `(id, version)` 去重：同一版本只投一次，
- * 更新（`version+1`）重新进 `pending`。
+ * 脚本或 HTML（SPEC-plugins「channel」）。投递按 `(通道, id, version)` 去重：同一通道同一
+ * 版本只投一次，更新（`version+1`）重新进 `pending`。
  */
 export interface Card {
   id: string
@@ -997,10 +1017,20 @@ export interface Card {
   nextDeliveryAt: string | null
   /** 重投预算用尽（M41）：宿主不再自动补投，等人处理或等新版本 */
   deliveryGivenUp: boolean
+  /**
+   * 按通道的成功投递记录（M43）：键是通道注册键（`in-app` / `desktop` / `feishu` …）。
+   * 老事实 / 老库没有它，由 `kernel/project.normalizeCard` 归一成空对象。
+   */
+  deliveryRefs?: Record<string, CardChannelRef>
   /** 选中的选项下标（`answered` 后）；信息卡与未回答为 null */
   optionIndex: number | null
   /** 回答来源（`answered` 后）；未回答为 null */
   answeredBy: CardAnswerVia | null
+  /**
+   * 回答人（M43，可选）：通道回传的操作人标识（飞书 open_id）；UI 回答为 null。
+   * 只做审计与「谁答的」展示，不参与判定。
+   */
+  answeredByRef?: string | null
   answeredAt: string | null
   createdAt: string
   updatedAt: string

@@ -33,8 +33,12 @@ export interface Spawned {
 
 export interface SpawnOptions {
   cwd?: string
-  /** 宿主构造的子进程环境（插件拿不到 `process.env` 本身） */
-  env: NodeJS.ProcessEnv
+  /**
+   * 子进程环境：**省略 = 继承宿主进程环境**（`host/process.ts` 兜底 `process.env`），
+   * 显式给值则整体替换（不合并）。执行器按智能体配置逐键覆盖，通道（M42）直接省略，
+   * 让 CLI 自己读本机登录态（如 `lark-cli` 的凭证目录）——插件始终拿不到 `process.env` 本身。
+   */
+  env?: NodeJS.ProcessEnv
   /** Windows 的 .cmd/.bat 需要经 shell 启动 */
   shell?: boolean
 }

@@ -25,7 +25,7 @@ interface StartedChannel {
   net: FakeNet
   logs: string[]
   delivered: Array<{ cardId: string; version: number; ref: string }>
-  handlers: Array<(card: ReturnType<typeof cardOf>) => void>
+  handlers: Array<(card: ReturnType<typeof cardOf>, ref: string | null) => void>
   deliver: ReturnType<typeof channelHarness>['deliver']
   controller: AbortController
   ctx: ReturnType<typeof channelHarness>['ctx']
@@ -77,6 +77,16 @@ describe('webhook 通道 manifest', () => {
 })
 
 describe('webhook 通道：投递', () => {
+  it('终态（answered / resolved）不推送，但 ack 一下让 hub 知道这个通道已跟上', async () => {
+    const channel = await started()
+
+    channel.deliver(cardOf({ status: 'answered', optionIndex: 1 }))
+    channel.deliver(cardOf({ status: 'resolved' }))
+
+    await vi.waitFor(() => expect(channel.delivered).toHaveLength(2))
+    expect(channel.net.fetches).toEqual([])
+  })
+
   it('onCard → POST 配置地址，2xx 后 delivered（ref=webhook-channel）', async () => {
     const channel = await started()
 
@@ -220,7 +230,7 @@ describe('webhook 通道：未配置不投递', () => {
 
   it('宿主未注入 net 能力 → 跳过投递、不 delivered、不抛错', async () => {
     const logs: string[] = []
-    const handlers: Array<(card: ReturnType<typeof cardOf>) => void> = []
+    const handlers: Array<(card: ReturnType<typeof cardOf>, ref: string | null) => void> = []
     const delivered: Array<{ cardId: string; version: number; ref: string }> = []
     // ChannelSdk.net 可选：宿主没有网络原件时这里就是 undefined
     const ctx: ChannelContext = {
@@ -229,6 +239,14 @@ describe('webhook 通道：未配置不投递', () => {
         now: () => 0,
         notify: () => undefined,
         config: <T = Record<string, unknown>>() => ({ url: URL_CONFIG }) as T,
+        // ChannelSdk.process 必填（M42 起）；webhook 通道不需要子进程，碰到即失败
+        process: {
+          spawn: () => {
+            throw new Error('webhook 通道不使用子进程')
+          },
+          resolve: (command) => ({ path: null, error: `不使用子进程：${command}` }),
+          killTree: () => false,
+        },
       },
       onCard: (handler) => {
         handlers.push(handler)
@@ -241,12 +259,12 @@ describe('webhook 通道：未配置不投递', () => {
         delivered.push({ cardId, version, ref })
         return Promise.resolve()
       },
-      answer: () => Promise.resolve(),
+      answer: () => Promise.resolve({ changed: true, status: 'answered' }),
       signal: new AbortController().signal,
     }
     const dispose = await webhookChannel.start(ctx)
 
-    handlers[0](cardOf())
+    handlers[0](cardOf(), null)
 
     await vi.waitFor(() => expect(logs.join('\n')).toContain('未提供 net 能力'))
     expect(delivered).toEqual([])
@@ -293,7 +311,7 @@ describe('webhook 通道：未配置不投递', () => {
     const logs: string[] = []
     const controller = new AbortController()
     controller.abort()
-    const handlers: Array<(card: ReturnType<typeof cardOf>) => void> = []
+    const handlers: Array<(card: ReturnType<typeof cardOf>, ref: string | null) => void> = []
     const ctx: ChannelContext = {
       sdk: fakeSdk({
         config: <T = Record<string, unknown>>() => ({ url: URL_CONFIG }) as T,
@@ -307,7 +325,7 @@ describe('webhook 通道：未配置不投递', () => {
         }
       },
       delivered: () => Promise.resolve(),
-      answer: () => Promise.resolve(),
+      answer: () => Promise.resolve({ changed: true, status: 'answered' }),
       signal: controller.signal,
     }
 

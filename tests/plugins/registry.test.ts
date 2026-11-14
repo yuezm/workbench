@@ -139,12 +139,19 @@ describe('通道插件注册表（M4）', () => {
     expect(() => channelById('')).toThrow(/通道插件未注册/)
   })
 
-  it('内置通道顺序固定：in-app 在前、desktop 其次、webhook-channel 最后（数组顺序即投递顺序）', () => {
-    expect(channels.map((entry) => entry.key)).toEqual(['in-app', 'desktop', 'webhook-channel'])
-    // in-app 不需要副作用能力（投影即送达）；desktop 只声明 notify；webhook 通道声明 net
+  it('内置通道顺序固定：in-app → desktop → webhook-channel → feishu（数组顺序即投递顺序）', () => {
+    expect(channels.map((entry) => entry.key)).toEqual([
+      'in-app',
+      'desktop',
+      'webhook-channel',
+      'feishu',
+    ])
+    // in-app 不需要副作用能力（投影即送达）；desktop 只声明 notify；webhook 通道声明 net；
+    // 飞书通道经本机 lark-cli 收发，只需要 spawn（不出站 HTTP、不监听端口）
     expect(channelById('in-app').manifest.capabilities).toEqual([])
     expect(channelById('desktop').manifest.capabilities).toEqual(['notify'])
     expect(channelById('webhook-channel').manifest.capabilities).toEqual(['net'])
+    expect(channelById('feishu').manifest.capabilities).toEqual(['spawn'])
   })
 
   it('src/plugins/channels/* 目录与注册表清单双向一致', () => {

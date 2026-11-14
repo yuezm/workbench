@@ -333,14 +333,21 @@ export interface CardUpdatedPayload {
 }
 
 /** 至少一个通道已送达；`ref` 是通道键（`in-app` / `desktop` / …）。 */
+/**
+ * 某个通道把卡片送达了：`channel` 是通道注册键（M43，按通道各写一条），`ref` 是该通道侧的
+ * 引用（消息 id）。同一 `(channel, cardId, version)` 重复回报在内核里零事实。
+ */
 export interface CardDeliveredPayload {
   card: Card
+  channel: string
   ref: string
 }
 
 /** 本轮所有通道投递失败；卡片状态不变，重启按 `pending` 补投。 */
 export interface CardDeliveryFailedPayload {
   card: Card
+  /** 触发这次失败的通道（M43，审计用）；聚合判定仍按「本轮全部失败」 */
+  channel?: string
   error: string
 }
 
@@ -353,6 +360,8 @@ export interface CardDeliveryFailedPayload {
 export interface CardAnsweredPayload {
   card: Card
   by: CardAnswerVia
+  /** 回答人（M43，通道回传的操作人标识；UI 回答不带） */
+  byRef?: string
   note?: string
 }
 

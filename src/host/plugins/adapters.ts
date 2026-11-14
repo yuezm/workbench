@@ -158,9 +158,19 @@ export function createExternalChannelPlugin(
             return
           }
           if (frame.type === 'answer') {
-            void ctx.answer(frame.cardId, frame.optionIndex).catch((error: unknown) => {
-              log(`[plugin:${entry.id}] 答案回传失败：${errMsg(error)}`)
-            })
+            void ctx
+              .answer(frame.cardId, frame.optionIndex)
+              .then((outcome) => {
+                // M43：已经不在等你（别处答过 / 已关闭）不是错误，只记一条可追溯的日志
+                if (!outcome.changed) {
+                  log(
+                    `[plugin:${entry.id}] 卡片 ${frame.cardId} 已是 ${outcome.status}，答案未计入`,
+                  )
+                }
+              })
+              .catch((error: unknown) => {
+                log(`[plugin:${entry.id}] 答案回传失败：${errMsg(error)}`)
+              })
             return
           }
           // channel 不该产生 event：只记一条告警（事件入口唯一，不能从这里绕进去）
@@ -178,8 +188,8 @@ export function createExternalChannelPlugin(
         log(`[plugin:${entry.id}] 启动失败：${errMsg(error)}`)
         return () => undefined
       }
-      const unsubscribe = ctx.onCard((card) => {
-        if (!process.send({ v: PLUGIN_HOST_PROTOCOL_VERSION, type: 'card', card })) {
+      const unsubscribe = ctx.onCard((card, ref) => {
+        if (!process.send({ v: PLUGIN_HOST_PROTOCOL_VERSION, type: 'card', card, ref })) {
           log(`[plugin:${entry.id}] 卡片帧未送达（子进程未就绪）`)
         }
       })

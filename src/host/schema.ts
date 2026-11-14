@@ -271,10 +271,12 @@ CREATE TABLE IF NOT EXISTS ${name} (
  * - `run_id` 是卡片归属；run 删除时按外键联删（宿主 `run.removed` 事实同时清卡片）。
  * - `task_id` / `conversation_id` 是展示用的弱引用：阶段 run 挂任务、聊天 run 挂对话，
  *   历史卡片不因任务/对话删除而抹掉归属（不设外键）。
- * - `delivery` 单列 =「已送达至少一个通道」；`delivery_ref` 记最后一个成功通道。
+ * - `delivery` 单列 =「已送达至少一个通道」；`delivery_ref` 记本版本首个成功通道的 ref。
  * - `kind`（M12）= 通知口径的判据：`ask` 要人作答（阻塞续接），`notice` 只知会（不发系统通知）；
  *   老库补列时默认 `ask`，重建投影按事实归一（`kernel/project.normalizeCard`）。
  * - `options_json` 存 `string[]` 的 JSON；`version` 是投递去重键的一部分。
+ * - `delivery_refs_json`（M43）存「按通道的成功投递记录」`Record<通道键, {version,ref,at}>`：
+ *   同一张卡进多个通道，回答后要回到每一处原消息改口。 `answered_by_ref` 是回答人（飞书 open_id）。
  */
 const cardsTable = (name = 'cards'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
@@ -291,11 +293,13 @@ CREATE TABLE IF NOT EXISTS ${name} (
   status TEXT NOT NULL CHECK (status IN ('open','answered','resolved')),
   delivery TEXT NOT NULL CHECK (delivery IN ('pending','delivered','failed')),
   delivery_ref TEXT,
+  delivery_refs_json TEXT NOT NULL DEFAULT '{}',
   delivery_attempts INTEGER NOT NULL DEFAULT 0,
   next_delivery_at TEXT,
   delivery_given_up INTEGER NOT NULL DEFAULT 0,
   option_index INTEGER,
   answered_by TEXT CHECK (answered_by IN ('ui','channel')),
+  answered_by_ref TEXT,
   answered_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -817,6 +821,22 @@ export const CARDS_M41_ADD_COLUMN_SQL: Readonly<
   delivery_attempts: 'ALTER TABLE cards ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0',
   next_delivery_at: 'ALTER TABLE cards ADD COLUMN next_delivery_at TEXT',
   delivery_given_up: 'ALTER TABLE cards ADD COLUMN delivery_given_up INTEGER NOT NULL DEFAULT 0',
+}
+
+/**
+ * M43 给 `cards` 新增的列（按通道的投递记录 / 回答人）。
+ *
+ * 老库补列即可：老事实没有这两项，由 `kernel/project#normalizeCard` 归一成「没发过任何通道」
+ * 与「不知道是谁答的」，与 M43 之前的单一通道口径一致。
+ */
+export const CARDS_M43_ADDED_COLUMNS = ['delivery_refs_json', 'answered_by_ref'] as const
+
+/** `cards` M43 补列语句：JSON 列带常量 DEFAULT `'{}'` 才满足 NOT NULL。 */
+export const CARDS_M43_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof CARDS_M43_ADDED_COLUMNS)[number], string>
+> = {
+  delivery_refs_json: "ALTER TABLE cards ADD COLUMN delivery_refs_json TEXT NOT NULL DEFAULT '{}'",
+  answered_by_ref: 'ALTER TABLE cards ADD COLUMN answered_by_ref TEXT',
 }
 
 /**

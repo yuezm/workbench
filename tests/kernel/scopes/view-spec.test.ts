@@ -127,7 +127,7 @@ const hostSamples: Input[] = [
   { type: 'run.host_settled', runId: 'run-1', status: 'cancelled', errorCode: 'cancelled' },
   { type: 'run.cancel', runId: 'run-1' },
   { type: 'clock.tick' },
-  { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
+  { type: 'card.delivered', cardId: 'card-1', version: 1, channel: 'in-app', ref: 'in-app' },
   { type: 'card.delivery_failed', cardId: 'card-1', version: 1, error: '通道不可用' },
   {
     type: 'event.received',

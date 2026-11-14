@@ -71,7 +71,7 @@ const validInputs: Input[] = [
   { type: 'run.host_settled', runId: 'run-1', leaseId: 'run-1:1', turn: 1, status: 'failed' },
   { type: 'run.cancel', runId: 'run-1' },
   { type: 'clock.tick' },
-  { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
+  { type: 'card.delivered', cardId: 'card-1', version: 1, channel: 'in-app', ref: 'in-app' },
   { type: 'card.delivery_failed', cardId: 'card-1', version: 2, error: '通道不可用' },
   {
     type: 'event.received',
@@ -321,9 +321,19 @@ describe('protocol/inputs', () => {
     expect(rejected(host('card.delivered', { cardId: 'card-1', version: 0, ref: 'in-app' }))).toBe(
       'version必须在 1 到 1000000 之间',
     )
-    expect(rejected(host('card.delivered', { cardId: 'card-1', version: 1 }))).toBe('ref必填')
+    expect(rejected(host('card.delivered', { cardId: 'card-1', version: 1 }))).toBe('channel必填')
     expect(
-      rejected(host('card.delivered', { cardId: 'card-1', version: 1, ref: longText(2001) })),
+      rejected(host('card.delivered', { cardId: 'card-1', version: 1, channel: 'in-app' })),
+    ).toBe('ref必填')
+    expect(
+      rejected(
+        host('card.delivered', {
+          cardId: 'card-1',
+          version: 1,
+          channel: 'in-app',
+          ref: longText(2001),
+        }),
+      ),
     ).toBe('ref最长 2000 个字符')
     expect(rejected(host('card.delivery_failed', { cardId: 'card-1', version: 1 }))).toBe(
       'error必填',

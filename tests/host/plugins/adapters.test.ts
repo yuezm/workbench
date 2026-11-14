@@ -175,22 +175,22 @@ interface ChannelHarness {
   delivered: ReturnType<typeof vi.fn>
   answer: ReturnType<typeof vi.fn>
   unsubscribe: ReturnType<typeof vi.fn>
-  emitCard: (card: Card) => void
+  emitCard: (card: Card, ref?: string | null) => void
 }
 
 function channelHarness(): ChannelHarness {
   const controller = new AbortController()
   controllers.push(controller)
-  let handler: ((card: Card) => void) | null = null
+  let handler: ((card: Card, ref: string | null) => void) | null = null
   const unsubscribe = vi.fn()
   const delivered = vi.fn(async () => undefined)
-  const answer = vi.fn(async () => undefined)
+  const answer = vi.fn(async () => ({ changed: true, status: 'answered' as const }))
   return {
     controller,
     delivered,
     answer,
     unsubscribe,
-    emitCard: (card) => handler?.(card),
+    emitCard: (card: Card, ref: string | null = null) => handler?.(card, ref),
     ctx: {
       sdk: fakeSdk(),
       onCard: (callback) => {
@@ -372,17 +372,35 @@ describe('createExternalChannelPlugin', () => {
     helloChannel(children[0])
     disposers.push(await started)
 
-    harness.emitCard(card)
+    harness.emitCard(card, 'om_9')
     expect(framesOf(children[0])).toContainEqual({
       v: PLUGIN_HOST_PROTOCOL_VERSION,
       type: 'card',
       card,
+      ref: 'om_9',
     })
 
     emitFrame(children[0], { type: 'delivered', cardId: 'card-1', version: 2, ref: 'demo' })
     emitFrame(children[0], { type: 'answer', cardId: 'card-1', optionIndex: 1 })
     await vi.waitFor(() => expect(harness.delivered).toHaveBeenCalledWith('card-1', 2, 'demo'))
     await vi.waitFor(() => expect(harness.answer).toHaveBeenCalledWith('card-1', 1))
+  })
+
+  it('answer 帧回 changed=false（别处已答 / 已关闭）：只记日志，不算失败', async () => {
+    const { spawn, children } = spawnQueue()
+    const log = vi.fn()
+    const plugin = createExternalChannelPlugin(entryOf('channel'), optionsOf(spawn, { log }))
+    const harness = channelHarness()
+    harness.answer.mockResolvedValue({ changed: false, status: 'answered' })
+    const started = plugin.start(harness.ctx)
+    helloChannel(children[0])
+    disposers.push(await started)
+
+    emitFrame(children[0], { type: 'answer', cardId: 'card-1', optionIndex: 0 })
+    await vi.waitFor(() =>
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('已是 answered')),
+    )
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining('答案回传失败'))
   })
 
   it('delivered / answer 回调失败只记日志（不打断进程）', async () => {

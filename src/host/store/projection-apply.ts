@@ -288,20 +288,26 @@ const CARD_FIELDS: ReadonlyArray<readonly [keyof Card, string]> = [
   ['status', 'status'],
   ['delivery', 'delivery'],
   ['deliveryRef', 'delivery_ref'],
+  ['deliveryRefs', 'delivery_refs_json'],
   ['deliveryAttempts', 'delivery_attempts'],
   ['nextDeliveryAt', 'next_delivery_at'],
   ['deliveryGivenUp', 'delivery_given_up'],
   ['optionIndex', 'option_index'],
   ['answeredBy', 'answered_by'],
+  ['answeredByRef', 'answered_by_ref'],
   ['answeredAt', 'answered_at'],
   ['createdAt', 'created_at'],
   ['updatedAt', 'updated_at'],
 ]
 
-/** 行内值 → SQLite 可绑定的值（`options` 存 JSON）。 */
+/** 行内值 → SQLite 可绑定的值（`options` / `deliveryRefs` 存 JSON）。 */
 const cardValue = (field: keyof Card, card: Card): SQLInputValue => {
   if (field === 'options') return JSON.stringify(card.options)
+  // M43：按通道的投递记录是 JSON 列（老行 / 老事实在 normalizeCard 里已归一成 {}）
+  if (field === 'deliveryRefs') return JSON.stringify(card.deliveryRefs ?? {})
   const value = card[field]
+  // 老形状的行（手工构造 / 迁移前的快照）缺可选列：按 NULL 写，不让 undefined 撞到绑定层
+  if (value === undefined) return null
   // M41：deliveryGivenUp 是布尔列（INTEGER 0/1），node:sqlite 不认 boolean
   if (typeof value === 'boolean') return value ? 1 : 0
   return value as SQLInputValue

@@ -275,6 +275,11 @@ export interface CardFrame {
   v: typeof PLUGIN_HOST_PROTOCOL_VERSION
   type: 'card'
   card: Card
+  /**
+   * 这个通道上次成功发出的那条消息引用（M43）；`null` / 省略 = 第一次发。
+   * 外部通道据此原地更新（改口成「已答复」），不需要自己存 message id。
+   */
+  ref?: string | null
 }
 
 export interface ShutdownFrame {

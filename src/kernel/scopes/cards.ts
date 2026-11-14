@@ -140,11 +140,13 @@ export function cardsFromReceipt(
       status: 'open',
       delivery: 'pending',
       deliveryRef: null,
+      deliveryRefs: {},
       deliveryAttempts: 0,
       nextDeliveryAt: null,
       deliveryGivenUp: false,
       optionIndex: null,
       answeredBy: null,
+      answeredByRef: null,
       answeredAt: null,
       createdAt: now,
       updatedAt: now,
@@ -169,11 +171,13 @@ export function cardsFromReceipt(
       status: 'open',
       delivery: 'pending',
       deliveryRef: null,
+      deliveryRefs: {},
       deliveryAttempts: 0,
       nextDeliveryAt: null,
       deliveryGivenUp: false,
       optionIndex: null,
       answeredBy: null,
+      answeredByRef: null,
       answeredAt: null,
       createdAt: now,
       updatedAt: now,
@@ -317,11 +321,14 @@ export function answerFacts(
   }
 
   const by: CardAnswerVia = input.via ?? 'ui'
+  /** 回答人（M43）：通道回传的操作人标识；UI 回答留空 */
+  const byRef = input.byRef?.trim() ?? ''
   const answered: Card = {
     ...card,
     status: 'answered',
     optionIndex: input.optionIndex,
     answeredBy: by,
+    answeredByRef: byRef === '' ? null : byRef,
     answeredAt: now,
     updatedAt: now,
   }
@@ -332,7 +339,12 @@ export function answerFacts(
       type: 'card.answered',
       actor: { kind: 'owner', via: by },
       at: now,
-      payload: { card: answered, by, ...(note === '' ? {} : { note }) },
+      payload: {
+        card: answered,
+        by,
+        ...(byRef === '' ? {} : { byRef }),
+        ...(note === '' ? {} : { note }),
+      },
     },
   ]
 

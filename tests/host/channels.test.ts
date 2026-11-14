@@ -131,7 +131,7 @@ function harness(options: {
 }
 
 describe('createChannels：按 registry 顺序投递与回写', () => {
-  it('多通道都收到 onCard：首个 ack 写一次 delivered，后续 ack 静默丢弃', async () => {
+  it('多通道都收到 onCard：每个通道各写一条 delivered（M43 按通道记账）', async () => {
     const inApp = ackEntry('in-app')
     const desktop = ackEntry('desktop')
     const { hub, dispatch } = harness({ entries: [inApp, desktop] })
@@ -143,12 +143,13 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
     await vi.waitFor(() => expect(desktop.received).toHaveLength(1))
     await new Promise((resolve) => setTimeout(resolve, 20))
 
-    // 两个通道都收到卡片；只有首个 ack 写事实，且没有 failed
+    // 两个通道都收到卡片，各自记一条「我送达了」
     expect(inApp.received.map((item) => item.id)).toEqual(['card-1'])
     expect(desktop.received.map((item) => item.id)).toEqual(['card-1'])
     const inputs = dispatchInputs(dispatch)
     expect(inputs.filter((input) => input['type'] === 'card.delivered')).toEqual([
-      { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
+      { type: 'card.delivered', cardId: 'card-1', version: 1, channel: 'in-app', ref: 'in-app' },
+      { type: 'card.delivered', cardId: 'card-1', version: 1, channel: 'desktop', ref: 'desktop' },
     ])
     expect(inputs.some((input) => input['type'] === 'card.delivery_failed')).toBe(false)
   })
@@ -168,7 +169,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
 
     const inputs = dispatchInputs(dispatch)
     expect(inputs.filter((input) => input['type'] === 'card.delivered')).toEqual([
-      { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'desktop' },
+      { type: 'card.delivered', cardId: 'card-1', version: 1, channel: 'desktop', ref: 'desktop' },
     ])
     expect(inputs.some((input) => input['type'] === 'card.delivery_failed')).toBe(false)
   })
@@ -186,7 +187,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
 
     const inputs = dispatchInputs(dispatch)
     expect(inputs.filter((input) => input['type'] === 'card.delivered')).toEqual([
-      { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'desktop' },
+      { type: 'card.delivered', cardId: 'card-1', version: 1, channel: 'desktop', ref: 'desktop' },
     ])
     expect(inputs.some((input) => input['type'] === 'card.delivery_failed')).toBe(false)
   })
@@ -206,7 +207,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
 
     const inputs = dispatchInputs(dispatch)
     expect(inputs.filter((input) => input['type'] === 'card.delivered')).toEqual([
-      { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'in-app' },
+      { type: 'card.delivered', cardId: 'card-1', version: 1, channel: 'in-app', ref: 'in-app' },
     ])
     expect(inputs.some((input) => input['type'] === 'card.delivery_failed')).toBe(false)
   })
@@ -226,6 +227,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
         type: 'card.delivered',
         cardId: 'card-1',
         version: 1,
+        channel: 'good',
         ref: 'good',
       }),
     )
@@ -244,6 +246,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
         type: 'card.delivered',
         cardId: 'card-1',
         version: 1,
+        channel: 'ack',
         ref: 'ack',
       }),
     )
@@ -260,6 +263,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
         type: 'card.delivery_failed',
         cardId: 'card-2',
         version: 1,
+        channel: 'silent-b',
         error: '所有通道投递失败或超时',
       }),
     )
@@ -284,6 +288,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
           type: 'card.delivered',
           cardId: 'card-1',
           version: 1,
+          channel: 'slow',
           ref: 'slow',
         }),
       { timeout: 2_000 },
@@ -309,7 +314,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
     ).toHaveLength(1)
   })
 
-  it('card.updated 换版本后重新投递；非 open / 非 pending 卡忽略', async () => {
+  it('card.updated 换版本后重新投递；已答 / 已关的卡只补发给发过它的通道', async () => {
     const ack = ackEntry('ack')
     const { hub, dispatch } = harness({ entries: [ack] })
     await hub.startAll()
@@ -320,22 +325,40 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
     await vi.waitFor(() => expect(ack.received).toHaveLength(2))
     expect(ack.received.map((card) => card.version)).toEqual([1, 2])
 
+    // 从没发给过这个通道的已答卡：不必告诉它「已经答复了」
     hub.dispatch([cardOpened(sample.card({ id: 'card-2', status: 'answered' }))])
-    hub.dispatch([cardOpened(sample.card({ id: 'card-3', delivery: 'delivered' }))])
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(ack.received.map((card) => card.id)).toEqual(['card-1', 'card-1'])
+
+    // 发过、但还停在 open 版本的卡：终态要回写（M43）
+    const settled = sample.card({
+      id: 'card-1',
+      version: 2,
+      status: 'answered',
+      optionIndex: 0,
+      deliveryRefs: { ack: { version: 2, status: 'open', ref: 'ack', at: AT } },
+    })
+    hub.dispatch([cardOpened(settled)])
+    await vi.waitFor(() => expect(ack.received).toHaveLength(3))
+    expect(ack.received.at(-1)?.status).toBe('answered')
     expect(
       dispatchInputs(dispatch).filter((input) => input['type'] === 'card.delivered'),
-    ).toHaveLength(2)
+    ).toHaveLength(3)
   })
 
-  it('startAll 补投：只投 open 且 delivery=pending 的卡', async () => {
+  it('startAll 补投：open 卡按通道补齐；已经同步过该通道的卡不再打扰', async () => {
     const ack = ackEntry('ack')
     const pending = sample.card({ id: 'card-pending', version: 1 })
-    const delivered = sample.card({ id: 'card-delivered', version: 1, delivery: 'delivered' })
+    const synced = sample.card({
+      id: 'card-synced',
+      version: 1,
+      delivery: 'delivered',
+      deliveryRef: 'ack',
+      deliveryRefs: { ack: { version: 1, status: 'open', ref: 'ack', at: AT } },
+    })
     const { hub, dispatch } = harness({
       entries: [ack],
-      cards: [pending, delivered],
+      cards: [pending, synced],
     })
     await hub.startAll()
 
@@ -345,6 +368,99 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
       ).toHaveLength(1),
     )
     expect(ack.received.map((card) => card.id)).toEqual(['card-pending'])
+  })
+
+  it('投递进行中再次 dispatch 同一张卡：不重复开一轮', async () => {
+    const slow = fakeEntry('slow', (ctx, card) => {
+      setTimeout(() => {
+        void ctx.delivered(card.id, card.version, 'slow')
+      }, 20)
+    })
+    const { hub } = harness({ entries: [slow], timeoutMs: 500 })
+    await hub.startAll()
+
+    const fact = cardOpened(sample.card({ id: 'card-1', version: 1 }))
+    hub.dispatch([fact])
+    hub.dispatch([fact])
+    await new Promise((resolve) => setTimeout(resolve, 60))
+
+    expect(slow.received).toHaveLength(1)
+  })
+
+  it('同一批里同一张卡重复出现只投一轮；缺卡片体的事实直接跳过', async () => {
+    const ack = ackEntry('ack')
+    const { hub } = harness({ entries: [ack] })
+    await hub.startAll()
+
+    const card = sample.card({ id: 'card-1', version: 1 })
+    hub.dispatch([cardOpened(card), cardUpdated(card)])
+    hub.dispatch([{ type: 'card.opened', payload: {} } as unknown as Fact])
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(ack.received).toHaveLength(1)
+  })
+
+  it('从未投给这个通道的卡被 ack：忽略（不凭空造投递记录）', async () => {
+    let captured: ChannelContext | null = null
+    const entry: ChannelRegistryEntry = {
+      key: 'ghost',
+      label: 'ghost',
+      manifest: MANIFEST('ghost'),
+      plugin: {
+        async start(ctx) {
+          captured = ctx
+          return () => undefined
+        },
+      },
+    }
+    const { hub, dispatch } = harness({ entries: [entry] })
+    await hub.startAll()
+
+    await captured!.delivered('unknown-card', 1, 'om_1')
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it('投递途中卡片被回答：终态那一轮不被进行中的 open 轮挡掉', async () => {
+    const received: Card[] = []
+    const entry: ChannelRegistryEntry = {
+      key: 'slow',
+      label: 'slow',
+      manifest: MANIFEST('slow'),
+      plugin: {
+        async start(ctx) {
+          ctx.onCard((card) => {
+            received.push(card)
+          })
+          return () => undefined
+        },
+      },
+    }
+    const { hub } = harness({ entries: [entry], timeoutMs: 500 })
+    await hub.startAll()
+
+    const open = sample.card({ id: 'card-1', version: 1 })
+    hub.dispatch([cardOpened(open)])
+    // open 那一轮还在等 ack（通道不 ack）：此时回答，终态要能立刻排上
+    hub.dispatch([
+      {
+        type: 'card.answered',
+        actor: { kind: 'owner', via: 'ui' },
+        at: AT,
+        seq: 2,
+        payload: {
+          card: {
+            ...open,
+            status: 'answered',
+            optionIndex: 0,
+            deliveryRefs: { slow: { version: 1, status: 'open', ref: 'om_1', at: AT } },
+          },
+          by: 'ui',
+        },
+      } as unknown as Fact,
+    ])
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    expect(received.map((card) => card.status)).toEqual(['open', 'answered'])
   })
 
   it('没有任何通道时不误判投递失败（T8 前空注册表，pending 卡保持原状）', async () => {
@@ -379,6 +495,7 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
         type: 'card.delivered',
         cardId: 'card-1',
         version: 1,
+        channel: 'good',
         ref: 'good',
       }),
     )
@@ -405,12 +522,15 @@ describe('createChannels：按 registry 顺序投递与回写', () => {
 })
 
 describe('createChannels：answer 入口', () => {
-  it('answer 发 card.answer{via:channel, commandId=card:<id>:<version>}', async () => {
+  it('answer 发 card.answer{via:channel, commandId=card:<id>:<version>}，返回 changed', async () => {
     const card = sample.card({ id: 'card-1', version: 3 })
     const { hub, dispatch, store } = harness({ entries: [], cards: [card] })
     await hub.startAll()
 
-    await hub.answer('card-1', 1)
+    await expect(hub.answer('card-1', 1)).resolves.toEqual({
+      changed: true,
+      status: 'answered',
+    })
 
     expect(store.query).toHaveBeenCalledWith('cards.open')
     expect(dispatch).toHaveBeenCalledWith({
@@ -422,16 +542,29 @@ describe('createChannels：answer 入口', () => {
     })
   })
 
-  it('内核拒绝（effects.dispatch 抛错）时 answer 原样 reject', async () => {
+  it('卡片已经不在等你（别处答过 / 已关闭）：不 dispatch、返回 changed=false', async () => {
     const { hub, dispatch } = harness({ entries: [], cards: [] })
     await hub.startAll()
+
+    await expect(hub.answer('card-1', 0)).resolves.toEqual({
+      changed: false,
+      status: 'resolved',
+    })
+    expect(dispatch).not.toHaveBeenCalled()
+  })
+
+  it('内核拒绝（effects.dispatch 抛错）：返回 changed=false，不伪造状态', async () => {
+    const card = sample.card({ id: 'card-1', version: 3 })
+    const { hub, dispatch } = harness({ entries: [], cards: [card] })
+    await hub.startAll()
     dispatch.mockImplementationOnce(() => {
-      throw new Error('卡片已回答或已关闭: card-1')
+      throw new Error('运行不存在或不在等待状态: run-1')
     })
 
-    await expect(hub.answer('card-1', 0)).rejects.toThrow('卡片已回答或已关闭')
-    // 卡片不在 open 列表里时版本回落 0（内核按 not_found 拒绝，不伪造版本）
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ commandId: 'card:card-1:0' }))
+    await expect(hub.answer('card-1', 0)).resolves.toEqual({
+      changed: false,
+      status: 'open',
+    })
   })
 })
 
@@ -453,6 +586,7 @@ describe('createChannels：隔离与边界分支', () => {
         type: 'card.delivery_failed',
         cardId: 'card-1',
         version: 1,
+        channel: 'listenerless',
         error: '所有通道投递失败或超时',
       }),
     )
@@ -473,6 +607,7 @@ describe('createChannels：隔离与边界分支', () => {
         type: 'card.delivered',
         cardId: 'card-1',
         version: 1,
+        channel: 'race',
         ref: 'race',
       }),
     )
@@ -531,6 +666,7 @@ describe('createChannels：隔离与边界分支', () => {
         type: 'card.delivery_failed',
         cardId: 'card-1',
         version: 1,
+        channel: 'late',
         error: '所有通道投递失败或超时',
       }),
     )
@@ -538,7 +674,7 @@ describe('createChannels：隔离与边界分支', () => {
     // 没有等待者时 ack：按事实回写 delivered
     await captured!.delivered('card-1', 1, 'late')
     expect(dispatchInputs(dispatch).filter((input) => input['type'] === 'card.delivered')).toEqual([
-      { type: 'card.delivered', cardId: 'card-1', version: 1, ref: 'late' },
+      { type: 'card.delivered', cardId: 'card-1', version: 1, channel: 'late', ref: 'late' },
     ])
 
     // 同一 (cardId, version) 再 ack：已记录 delivered，静默丢弃
@@ -590,7 +726,7 @@ describe('createChannels：隔离与边界分支', () => {
     expect(received).toEqual([])
   })
 
-  it('通道经 context.answer 回写 card.answer（via=channel）', async () => {
+  it('通道经 context.answer 回写 card.answer（via=channel，带回答人）', async () => {
     let captured: ChannelContext | null = null
     const entry: ChannelRegistryEntry = {
       key: 'answering',
@@ -603,18 +739,51 @@ describe('createChannels：隔离与边界分支', () => {
         },
       },
     }
-    const { hub, dispatch } = harness({ entries: [entry] })
+    const card = sample.card({ id: 'card-1', version: 3 })
+    const { hub, dispatch } = harness({ entries: [entry], cards: [card] })
     await hub.startAll()
 
-    await captured!.answer('card-1', 2)
+    await expect(captured!.answer('card-1', 2, 'om_1', 'ou_me')).resolves.toEqual({
+      changed: true,
+      status: 'answered',
+    })
 
     expect(dispatch).toHaveBeenCalledWith({
       type: 'card.answer',
-      commandId: 'card:card-1:0',
+      commandId: 'card:card-1:3',
       cardId: 'card-1',
       optionIndex: 2,
       via: 'channel',
+      byRef: 'ou_me',
     })
+  })
+
+  it('点的是这个通道发出去的旧消息（ref 对不上）：不计入', async () => {
+    let captured: ChannelContext | null = null
+    const entry: ChannelRegistryEntry = {
+      key: 'feishu',
+      label: 'feishu',
+      manifest: MANIFEST('feishu'),
+      plugin: {
+        async start(ctx) {
+          captured = ctx
+          return () => undefined
+        },
+      },
+    }
+    const card = sample.card({
+      id: 'card-1',
+      version: 2,
+      deliveryRefs: { feishu: { version: 2, status: 'open', ref: 'om_new', at: AT } },
+    })
+    const { hub, dispatch } = harness({ entries: [entry], cards: [card] })
+    await hub.startAll()
+
+    await expect(captured!.answer('card-1', 0, 'om_old')).resolves.toEqual({
+      changed: false,
+      status: 'open',
+    })
+    expect(dispatch).not.toHaveBeenCalled()
   })
 
   it('stopAll：没有 dispose 的通道跳过，dispose 抛错只记日志、不阻塞退出', async () => {
@@ -700,6 +869,7 @@ describe('createChannels：隔离与边界分支', () => {
         type: 'card.delivered',
         cardId: 'card-1',
         version: 1,
+        channel: 'ack',
         ref: 'ack',
       }),
     )

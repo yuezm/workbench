@@ -13,7 +13,8 @@ export interface SpawnedProcess {
 
 export interface SpawnOptions {
   cwd?: string
-  env: NodeJS.ProcessEnv
+  /** 省略 = 继承宿主进程环境；给值则整体替换（不合并） */
+  env?: NodeJS.ProcessEnv
   /** Windows 的 .cmd/.bat 需要经 shell 启动 */
   shell?: boolean
 }
@@ -24,7 +25,8 @@ export type SpawnFn = (command: string, args: string[], options: SpawnOptions) =
 export const defaultSpawn: SpawnFn = (command, args, options) => {
   const child = spawn(command, args, {
     cwd: options.cwd,
-    env: options.env,
+    // 省略 env 时继承宿主环境：M42 的 IM 通道要跑自带登录态的 CLI（插件拿不到 process.env）
+    env: options.env ?? process.env,
     shell: options.shell ?? false,
     detached: process.platform !== 'win32',
     windowsHide: true,

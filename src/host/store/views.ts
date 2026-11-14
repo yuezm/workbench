@@ -17,6 +17,7 @@ import type {
   Agent,
   Card,
   CardAnswerVia,
+  CardChannelRef,
   CardDelivery,
   CardKind,
   CardStatus,
@@ -281,11 +282,13 @@ interface CardDbRow {
   status: string
   delivery: string
   delivery_ref: string | null
+  delivery_refs_json: string | null
   delivery_attempts: number
   next_delivery_at: string | null
   delivery_given_up: number
   option_index: number | null
   answered_by: string | null
+  answered_by_ref: string | null
   answered_at: string | null
   created_at: string
   updated_at: string
@@ -545,15 +548,26 @@ const mapCard = (row: CardDbRow): Card => ({
   status: row.status as CardStatus,
   delivery: row.delivery as CardDelivery,
   deliveryRef: row.delivery_ref,
+  // M43：按通道的投递记录（JSON 列）；坏值 / 空串按「没发过」归一
+  deliveryRefs: readDeliveryRefs(row.delivery_refs_json),
   deliveryAttempts: Number(row.delivery_attempts ?? 0),
   nextDeliveryAt: (row.next_delivery_at as string | null) ?? null,
   deliveryGivenUp: Number(row.delivery_given_up ?? 0) === 1,
   optionIndex: row.option_index,
   answeredBy: row.answered_by as CardAnswerVia | null,
+  answeredByRef: row.answered_by_ref ?? null,
   answeredAt: row.answered_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 })
+
+/** `delivery_refs_json` → `Record<通道键, CardChannelRef>`：解析失败按空对象（投影不因坏值崩）。 */
+export function readDeliveryRefs(raw: string | null | undefined): Record<string, CardChannelRef> {
+  if (raw === undefined || raw === null || raw.trim() === '') return {}
+  const parsed: unknown = JSON.parse(raw)
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  return parsed as Record<string, CardChannelRef>
+}
 
 const readWorkflows = (db: DatabaseSync): Workflow[] =>
   (
@@ -857,8 +871,9 @@ const readMessages = (db: DatabaseSync): Message[] =>
 
 /** `cards` 投影的列清单（逐列写死，不用 `SELECT *`）。 */
 const CARD_COLUMNS = `id, run_id, task_id, conversation_id, title, text, kind, options_json, key,
-        version, status, delivery, delivery_ref, option_index, answered_by, answered_at,
-        created_at, updated_at`
+        version, status, delivery, delivery_ref, delivery_refs_json, delivery_attempts,
+        next_delivery_at, delivery_given_up, option_index, answered_by, answered_by_ref,
+        answered_at, created_at, updated_at`
 
 const readCards = (db: DatabaseSync): Card[] =>
   (

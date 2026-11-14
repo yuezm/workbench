@@ -37,6 +37,8 @@ const card = (over: Partial<Card> = {}): Card => ({
   deliveryAttempts: 0,
   nextDeliveryAt: null,
   deliveryGivenUp: false,
+  deliveryRefs: {},
+  answeredByRef: null,
   optionIndex: null,
   answeredBy: null,
   answeredAt: null,

@@ -178,7 +178,7 @@ describe('createEffects：卡片投递交给通道 hub（M4）', () => {
     expect(scheduler.wake).not.toHaveBeenCalled()
   })
 
-  it('非卡片事实 / 零事实都不调通道 hub', () => {
+  it('非卡片事实 / 零事实都不调通道 hub；已验证 / 已关闭的卡片要分发（M43）', () => {
     const channelDispatch = vi.fn()
     const effects = createEffects({
       store: { dispatch: vi.fn() },
@@ -186,10 +186,12 @@ describe('createEffects：卡片投递交给通道 hub（M4）', () => {
       channels: () => ({ dispatch: channelDispatch }),
     })
 
-    effects.afterCommit([taskCreated('t-1'), cardAnswered('card-1', 2)])
+    effects.afterCommit([taskCreated('t-1')])
     effects.afterCommit([])
-
     expect(channelDispatch).not.toHaveBeenCalled()
+
+    effects.afterCommit([cardAnswered('card-1')])
+    expect(channelDispatch).toHaveBeenCalledTimes(1)
   })
 
   it('通道 hub 未装配 / 分发抛错：异常隔离，写路径与其它分发不受影响', () => {

@@ -13,7 +13,7 @@ import type { Change } from '../../../src/kernel/core/types'
 import { viewSpec } from '../../../src/kernel/scopes/view-spec'
 import { StoreError } from '../../../src/host/store/errors'
 import { createProjectionWriter } from '../../../src/host/store/projection-apply'
-import { loadView, queryView } from '../../../src/host/store/views'
+import { loadView, queryView, readDeliveryRefs } from '../../../src/host/store/views'
 import { SAMPLE_AT, captureError, createMemoryDb, sample, sampleProbe } from './test-support'
 
 const OLDER_AT = '2025-12-01T00:00:00.000Z'
@@ -466,6 +466,21 @@ describe('loadView：按 viewSpec 装载切片', () => {
 })
 
 describe('queryView：各视图', () => {
+  it('deliveryRefs 列（M43）：坏值 / 空值按「没发过」归一，正常 JSON 原样还原', () => {
+    expect(readDeliveryRefs(undefined)).toEqual({})
+    expect(readDeliveryRefs(null)).toEqual({})
+    expect(readDeliveryRefs('   ')).toEqual({})
+    expect(readDeliveryRefs('[]')).toEqual({})
+    expect(readDeliveryRefs('null')).toEqual({})
+    expect(
+      readDeliveryRefs(
+        '{"feishu":{"version":2,"status":"answered","ref":"om_1","at":"2026-01-01"}}',
+      ),
+    ).toEqual({
+      feishu: { version: 2, status: 'answered', ref: 'om_1', at: '2026-01-01' },
+    })
+  })
+
   it('workflows.all：按创建时间排序，阶段按 position 排序', () => {
     const db = memory()
     seed(db)

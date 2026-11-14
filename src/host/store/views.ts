@@ -1011,6 +1011,92 @@ const readReviewReports = (db: DatabaseSync): ReviewReport[] =>
     updatedAt: row.updated_at,
   }))
 
+/**
+ * 按需装载的 `tasks` 切片（性能整改：装载 + decide 的 p99 瓶颈）。
+ *
+ * 视图里只有 `tasks` 会随数据量线性增长（生产是数万行），而绝大多数命令只按 id 取一两个
+ * 任务。每次决策都把整表 `mapTask` 一遍（逐行 JSON.parse）是 40ms 量级的固定开销，真正
+ * 的内核计算只有几毫秒——瓶颈在装载，不在决策。
+ *
+ * 这里把 `tasks` 做成惰性 Map，语义与「一次性装载整表」等价：
+ * - `get` / `has` 命中缓存直接返回，否则按 id 单行查库并缓存；
+ * - 任何全量遍历（`size` / `values` / `keys` / `entries` / `forEach` / 迭代器）才一次性装载整表。
+ *
+ * 视图在一次 `dispatch` 内同步用完（`loadView` → `decide` → 单事务写入），惰性读不会跨
+ * 写事务，快照一致性（`view.seq`）不受影响；全量遍历看到的仍是同一份快照，只是把装载代价
+ * 推迟到真正需要整表的那一刻（如 handoff / spawn 的 dedup 扫描、cron 规则的 externalRef 去重）。
+ */
+class LazyTaskMap extends Map<Id, Task> {
+  readonly #db: DatabaseSync
+  #loaded = false
+  #byId: ReturnType<DatabaseSync['prepare']> | null = null
+
+  constructor(db: DatabaseSync) {
+    super()
+    this.#db = db
+  }
+
+  #loadAll(): void {
+    if (this.#loaded) return
+    for (const task of readTasks(this.#db)) super.set(task.id, task)
+    this.#loaded = true
+  }
+
+  #readOne(id: Id): Task | undefined {
+    this.#byId ??= this.#db.prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`)
+    const row = this.#byId.get(id) as unknown as TaskRow | undefined
+    if (row === undefined) return undefined
+    const task = mapTask(row)
+    super.set(task.id, task)
+    return task
+  }
+
+  override get(id: Id): Task | undefined {
+    const cached = super.get(id)
+    if (cached !== undefined || this.#loaded) return cached
+    return this.#readOne(id)
+  }
+
+  override has(id: Id): boolean {
+    if (super.has(id)) return true
+    if (this.#loaded) return false
+    return this.#readOne(id) !== undefined
+  }
+
+  override get size(): number {
+    this.#loadAll()
+    return super.size
+  }
+
+  override values() {
+    this.#loadAll()
+    return super.values()
+  }
+
+  override keys() {
+    this.#loadAll()
+    return super.keys()
+  }
+
+  override entries() {
+    this.#loadAll()
+    return super.entries()
+  }
+
+  override forEach(
+    callbackfn: (value: Task, key: Id, map: Map<Id, Task>) => void,
+    thisArg?: unknown,
+  ): void {
+    this.#loadAll()
+    super.forEach(callbackfn, thisArg)
+  }
+
+  override [Symbol.iterator]() {
+    this.#loadAll()
+    return super[Symbol.iterator]()
+  }
+}
+
 /** 按输入声明的切片装载视图：未声明的表不查，`activeTaskIds` 总是装载。 */
 export function loadView(
   db: DatabaseSync,
@@ -1028,7 +1114,7 @@ export function loadView(
     agents: slice.has('agents') ? toMap(readAgents(db)) : new Map(),
     runtimes: slice.has('runtimes') ? toMap(readRuntimes(db)) : new Map(),
     projects: slice.has('projects') ? toMap(readProjects(db)) : new Map(),
-    tasks: slice.has('tasks') ? toMap(readTasks(db)) : new Map(),
+    tasks: slice.has('tasks') ? new LazyTaskMap(db) : new Map(),
     runs: slice.has('runs') ? toMap(readRuns(db)) : new Map(),
     conversations: slice.has('conversations') ? toMap(readConversations(db)) : new Map(),
     messages: slice.has('messages') ? toMap(readMessages(db)) : new Map(),

@@ -227,6 +227,8 @@ src/kernel/
 3. **`core/facts.ts` 没抽**：事实构造器与「收到事件 → 序列化四类事实」绑在一起（`commands/common.ts` 里 `receivedEventFacts` 依赖规则匹配），单抽构造器只会把 `common.ts` 劈成两半、把 `scopes` 的调用点改成两个 import。等真有第二个消费者再抽。
 4. **测试与源码同构**：`tests/kernel/{core,scopes}/…` 跟着移动；`tests/kernel/decide.*.test.ts` 覆盖 `decide.ts` 本身，留在 `tests/kernel/`。
 
+**lead 复核（2026-11-14）**：接受以上四点落地形态。扁平 `scopes/*.ts` + 按域命名的 `commands/` 与计划图等价——边界由 ESLint（`core` 禁 import `scopes`）与行数预算门禁守，目录层数不承载额外约束；`decide.ts` 用 `satisfies` 逐键校验签名的 handler 表，穷尽性没有丢，比 switch 更可查。`core/facts.ts` 暂不抽（构造器与事件→事实序列化耦合、当前只有一个消费者）也接受，等第二个消费者出现再抽。
+
 门禁：`scripts/check-kernel-budget.mjs` 进 `check:fast`（`pnpm check:kernel`），实测 core 640/2000、decide 95/220、scopes 最大 `rules.ts` 674/900；`eslint` 新增 `src/kernel/core/**` 不得 import `scopes/**`（做过一次探针验证：故意加 `from '../scopes/rules'` 报 error 后还原）。顺带修了三个脚本的 `maxBuffer`：内核拆分让 `git diff` 超过 1 MB，`floor-guard` / `check-secrets` / `check-diff-coverage` 把 ENOBUFS 吞成「无法 diff」并以 exit 2 误报。
 
 ### 依赖规则（写进 SPEC-kernel 与 ESLint）
@@ -286,7 +288,8 @@ src/kernel/
 
 | 2026-11-14 | F | 规则预演：内核 `previewEvent` / `nextRuleFires` + `rules.preview` / `rules.next` 两条视图 + 规则页「试跑事件」面板与「下次触发」 | `pnpm vitest run tests/kernel/preview.test.ts tests/host/rule-preview-views.test.ts tests/renderer/src/apps/ai-workflow/components/RulePreviewPanel.test.tsx`（13 passed）；`pnpm check` exit 0 | 预演不判断当前并发 / 线程状态，只回答「会不会被接、落到哪」；试跑结果不落库 |
 
-| 2026-11-14 | G | 性能基线：`scripts/bench.mjs`（造数批量事务、装载 + decide / tick 分位、重建、启动增量、库体积、`--json`）+ `docs/testing/PERF.md` + 冒烟用例 | `node scripts/bench.mjs`；`pnpm vitest run tests/tools/bench.test.ts`（2 passed） | 基线指出「装载 + decide p99 56 ms」与验收表 8 ms 差 7 倍，瓶颈是按需装载缺失，另立改造项 |
+| 2026-11-14 | G | 性能基线：`scripts/bench.mjs`（造数批量事务、装载 + decide / tick 分位、重建、启动增量、库体积、`--json`）+ `docs/testing/PERF.md` + 冒烟用例 | `node scripts/bench.mjs`；`pnpm vitest run tests/tools/bench.test.ts`（2 passed） | 基线指出「装载 + decide p99 56 ms」与验收表 8 ms 差 7 倍，瓶颈是按需装载缺失，另立改造项（同日完成，见下条） |
+| 2026-11-14 | G+ | 按需装载 `tasks`：`View.tasks` 改惰性 Map（`get`/`has` 按 id 单行查库，全量遍历才整表），语义与一次性装载等价 | `node scripts/bench.mjs`：装载 + decide p50 47.3→4.0 ms、p99 56.0→8.0 ms，tick p99 51.1→1.2 ms；`pnpm vitest run tests/host/store` 218 passed；`tests/host/store/lazy-tasks.test.ts` 覆盖各方法 | 整表 5000 行（≈40 ms）装载瓶颈消除；`floor-guard` 补登 M37 cron 测试搬家（rename 阈值退化成 delete+add）；PERF.md 基线同批更新 |
 | 2026-11-14 | H | 数据目录收紧（`host/secure-dir`，Unix 0700 / Windows icacls，失败不阻断）+ 启动接线 + env 凭据点名用例 + SPEC-host 安全边界 | `pnpm vitest run tests/host/secure-dir.test.ts tests/host/plugins/env.test.ts`（15 passed）；`pnpm check` exit 0 | `pnpm e2e` 必须补跑一次（改了主进程启动路径），排在 M37 收尾 |
 | # | 里程碑 | 交付物 | 判定命令 |
 | 2026-11-14 | M37 | 内核拆两层：`core/`（640 行）+ `scopes/`（域文件 + `commands/` + `workflow/`），`decide.ts` 表驱动 95 行；预算门禁进 `check:fast`；ESLint 禁 `core → scopes`；ARCHITECTURE / SPEC-kernel / CAPABILITY-MAP 同步 | `pnpm check` exit 0（212 文件 / 3593 用例，改动行 2720/2729 = 99.67%）；`pnpm e2e` 27 passed | 未按计划的 `scopes/<域>/` 子目录落地（扁平域文件 + `commands/` 已按域命名），差异与理由见 M37「实际落地」 |

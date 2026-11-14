@@ -141,6 +141,9 @@ const RELOCATED_TESTS = {
     'tests/plugins/executors/dsh/port.test.ts',
   'tests/main/ai-workflow/runtime/process.test.ts': 'tests/host/process.test.ts',
   'tests/main/ai-workflow/runtime/executable.test.ts': 'tests/host/executable.test.ts',
+  // M37：内核拆两层，cron 测试随 cron.ts 搬到 core/（import 路径变化使相似度低于 rename 阈值，
+  // git 退化成 delete + add；新位置断言语义等价）
+  'tests/kernel/cron.test.ts': 'tests/kernel/core/cron.test.ts',
 }
 const migratedCounterpart = (f) => {
   const relocated = RELOCATED_TESTS[f]

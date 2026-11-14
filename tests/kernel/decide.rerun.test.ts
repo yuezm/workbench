@@ -15,7 +15,7 @@ import type {
   WorkflowStage,
 } from '../../src/protocol/entities'
 import type { ThreadRow } from '../../src/protocol/thread'
-import type { Environment, IdKind, Limits, View } from '../../src/kernel/types'
+import type { Environment, IdKind, Limits, View } from '../../src/kernel/core/types'
 import { decide } from '../../src/kernel/decide'
 
 const CREATED = '2026-11-01T00:00:00.000Z'
@@ -200,6 +200,8 @@ const view = (
   threads: new Map((seed.threads ?? []).map((row) => [row.id, row])),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

@@ -31,7 +31,7 @@ import type {
   WorkflowStage,
 } from './entities'
 import type { TaskComment } from './task-comment'
-import type { RuleFireRow, RuleSetRow } from './rules'
+import type { EventSkipRow, RuleFireRow, RuleSetRow } from './rules'
 import type { PluginSettingsRow } from './plugins'
 import type { ReviewReport } from './review'
 import type { ThreadCloseReason, ThreadNote, ThreadRow } from './thread'
@@ -83,6 +83,7 @@ export const FACT_TYPES = [
   'event.received',
   'event.dropped',
   'event.merged',
+  'event.skipped',
   'thread.opened',
   'thread.event_attached',
   'thread.task_attached',
@@ -93,6 +94,7 @@ export const FACT_TYPES = [
   'thread.removed',
   'rules.replaced',
   'rule.fired',
+  'rule.replayed',
   'plugins.replaced',
   'review.reported',
   'review.addressed',
@@ -458,6 +460,20 @@ export interface EventMergedPayload {
   eventId: string
 }
 
+/**
+ * 事件命中「停用」规则（M42）：只记账、不建任务，`rule.replay` 可补跑。
+ *
+ * 为什么单独一条事实而不是塞进 `event.received`：跳过是**每条规则各自**的结论
+ * （同一事件可以命中一条启用的、两条停用的），写进事件行会把多对多压成一维。
+ */
+export interface EventSkippedPayload {
+  eventId: string
+  ruleId: string
+  /** 跳过时的规则集版本（补跑时用来判断规则是否换过） */
+  version: number
+  reason: 'rule-disabled'
+}
+
 // ---------- 自动化规则（M6） ----------
 
 /**
@@ -471,6 +487,17 @@ export interface RulesReplacedPayload {
 /** cron 到点触发：payload 携带完整 `RuleFireRow`（append-only 投影）。 */
 export interface RuleFiredPayload {
   fire: RuleFireRow
+}
+
+/**
+ * 补跑一条被跳过的事件（M42）：携带**已标成 replayed 的整行**，投影整行 upsert；
+ * `taskId` 为目标工作流/阶段失效时的 null。
+ */
+export interface RuleReplayedPayload {
+  ruleId: string
+  eventId: string
+  taskId: string | null
+  skipped: EventSkipRow
 }
 
 // ---------- 插件设置（M7） ----------
@@ -591,6 +618,7 @@ export interface FactPayloads {
   'event.received': EventReceivedPayload
   'event.dropped': EventDroppedPayload
   'event.merged': EventMergedPayload
+  'event.skipped': EventSkippedPayload
   'thread.opened': ThreadOpenedPayload
   'thread.event_attached': ThreadEventAttachedPayload
   'thread.task_attached': ThreadTaskAttachedPayload
@@ -601,6 +629,7 @@ export interface FactPayloads {
   'thread.removed': ThreadRemovedPayload
   'rules.replaced': RulesReplacedPayload
   'rule.fired': RuleFiredPayload
+  'rule.replayed': RuleReplayedPayload
   'plugins.replaced': PluginsReplacedPayload
   'review.reported': ReviewReportedPayload
   'review.addressed': ReviewAddressedPayload

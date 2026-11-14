@@ -22,7 +22,7 @@ import type {
   KernelPort,
   Limits,
   Seq,
-} from '../../kernel/types'
+} from '../../kernel/core/types'
 import { validateInput } from '../../protocol/validate'
 import { withTx } from '../schema'
 import { lastSeq, appendFacts, factsBetween, factsCount, factsSince } from './facts'

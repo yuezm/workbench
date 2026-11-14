@@ -5,9 +5,9 @@ import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { decide } from '../../src/kernel/decide'
-import { project } from '../../src/kernel/project'
-import { viewSpec } from '../../src/kernel/view-spec'
-import type { KernelPort } from '../../src/kernel/types'
+import { project } from '../../src/kernel/scopes/project'
+import { viewSpec } from '../../src/kernel/scopes/view-spec'
+import type { KernelPort } from '../../src/kernel/core/types'
 import type {
   Agent,
   AgentInput,

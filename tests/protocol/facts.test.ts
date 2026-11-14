@@ -15,12 +15,14 @@ import {
   type CardUpdatedPayload,
   type EventDroppedPayload,
   type EventReceivedPayload,
+  type EventSkippedPayload,
   type FactPayloads,
   type FactType,
   type SnapshotImportedPayload,
   type TaskMovedPayload,
   type RunFramesPayload,
   type RunSettledPayload,
+  type RuleReplayedPayload,
   type MessageAppendedPayload,
   type FactPayload,
 } from '../../src/protocol/facts'
@@ -28,6 +30,12 @@ import {
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 type Assert<T extends true> = T
+
+/** M42：补跑相关两条 payload 的形状（编译期断言，运行期只是数组长度对照）。 */
+const replayPayloads: [
+  Assert<Equal<FactPayload<'rule.replayed'>, RuleReplayedPayload>>,
+  Assert<Equal<FactPayload<'rule.replayed'>['taskId'], string | null>>,
+] = [true, true]
 
 /** payload 映射的键必须恰好覆盖 FACT_TYPES。 */
 const payloadKeysCover: Assert<Equal<keyof FactPayloads, FactType>> = true
@@ -75,7 +83,8 @@ const cardPayloads: [
 const eventPayloads: [
   Assert<Equal<FactPayload<'event.received'>, EventReceivedPayload>>,
   Assert<Equal<FactPayload<'event.dropped'>, EventDroppedPayload>>,
-] = [true, true]
+  Assert<Equal<FactPayload<'event.skipped'>, EventSkippedPayload>>,
+] = [true, true, true]
 
 const expected = [
   'workflow.created',
@@ -123,6 +132,7 @@ const expected = [
   'event.received',
   'event.dropped',
   'event.merged',
+  'event.skipped',
   'thread.opened',
   'thread.event_attached',
   'thread.task_attached',
@@ -133,6 +143,7 @@ const expected = [
   'thread.removed',
   'rules.replaced',
   'rule.fired',
+  'rule.replayed',
   'plugins.replaced',
   'review.reported',
   'review.addressed',
@@ -183,7 +194,8 @@ describe('protocol/facts', () => {
     expect(settledPayloads).toEqual([true, true, true])
     expect(runChatPayloads).toEqual([true, true])
     expect(cardPayloads).toEqual([true, true, true, true, true, true])
-    expect(eventPayloads).toEqual([true, true])
+    expect(eventPayloads).toEqual([true, true, true])
+    expect(replayPayloads).toEqual([true, true])
   })
 
   it('snapshot.imported 用 table 判别行类型，实体五表 + 运行/对话四表都能导入', () => {
@@ -255,6 +267,9 @@ describe('protocol/facts', () => {
       status: 'answered',
       delivery: 'delivered',
       deliveryRef: 'in-app',
+      deliveryAttempts: 0,
+      nextDeliveryAt: null,
+      deliveryGivenUp: false,
       optionIndex: 1,
       answeredBy: 'channel',
       answeredAt: '2026-11-05T12:00:00.000Z',

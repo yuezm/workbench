@@ -12,9 +12,9 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { project } from '../../../src/kernel/project'
-import { KERNEL_VERSION } from '../../../src/kernel/types'
-import type { Actor, FactDraft } from '../../../src/kernel/types'
+import { project } from '../../../src/kernel/scopes/project'
+import { KERNEL_VERSION } from '../../../src/kernel/core/types'
+import type { Actor, FactDraft } from '../../../src/kernel/core/types'
 import type { Conversation } from '../../../src/protocol/entities'
 import type { FactPayload, FactType } from '../../../src/protocol/facts'
 import { PROJECTION_TABLES, projectionFormat } from '../../../src/host/schema'

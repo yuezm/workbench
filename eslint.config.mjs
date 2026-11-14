@@ -331,7 +331,24 @@ export default tseslint.config(
       'no-restricted-globals': ['error', { name: 'fetch', message: 'kernel 不发起网络请求。' }],
     },
   },
-  // kernel 的纯度测试要读盘扫描源码，测试文件放开上面三条限制。
+  // 两层拆分（M37）：core 是纯基础（类型 / 常量 / cron / 下次唤醒），不得反向依赖 scopes；
+  // 依赖方向只有 scopes → core（以及两者 → protocol）。
+  {
+    files: ['src/kernel/core/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/scopes/**', '**/kernel/scopes/**'],
+              message: 'kernel/core 不得依赖 kernel/scopes：依赖方向只有 scopes → core。',
+            },
+          ],
+        },
+      ],
+    },
+  }, // kernel 的纯度测试要读盘扫描源码，测试文件放开上面三条限制。
   {
     files: ['tests/kernel/**/*.test.{ts,tsx}'],
     rules: {

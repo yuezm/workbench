@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Fact } from '../../src/kernel/types'
+import type { Fact } from '../../src/kernel/core/types'
 import { noticesFromFacts, SETTLEMENT_NOTICE_BODY } from '../../src/host/notices'
 
 const AT = '2026-01-01T00:00:00.000Z'

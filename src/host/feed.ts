@@ -8,7 +8,7 @@
  */
 import type { FactsEvent, KernelEvent } from '../protocol/ipc'
 import type { FactType } from '../protocol/facts'
-import type { Fact } from '../kernel/types'
+import type { Fact } from '../kernel/core/types'
 
 /** 批次上限：超过立即 flush（与 SPEC-host 的 500 条一致）。 */
 export const MAX_FACTS_PER_BATCH = 500

@@ -20,6 +20,28 @@ type Id = string
 export const CHANNEL_PORT_VERSION = 1
 
 /**
+ * 投递重投曲线（M41）：第 N 次失败之后等多少毫秒再投下一次。
+ *
+ * 节奏按「桌面场景」定：第一次失败 30 秒后重投，之后 2 / 10 / 30 分钟，一共 5 次尝试。
+ * 超过曲线就放弃（`card.deliveryGivenUp`），把「通道长期不可用」变成一条可查的事实，
+ * 而不是每次启动都重投一遍。曲线是协议常量：内核算 `retryAt`、宿主按它排期，两边同一份。
+ */
+export const DELIVERY_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000] as const
+
+/** 一条卡片版本最多尝试几次（首次 + 曲线里的每一次）。 */
+export const DELIVERY_MAX_ATTEMPTS = DELIVERY_RETRY_DELAYS_MS.length + 1
+
+/**
+ * 第 `attempt` 次尝试失败后的重投时刻（毫秒延迟）；`null` = 预算用尽，不再排期。
+ *
+ * 纯函数、无时钟：`attempt` 是「本次失败算第几次尝试」（1 基），`now` 由调用方给。
+ */
+export function deliveryRetryDelayMs(attempt: number): number | null {
+  if (attempt >= DELIVERY_MAX_ATTEMPTS) return null
+  return DELIVERY_RETRY_DELAYS_MS[attempt - 1] ?? null
+}
+
+/**
  * 通道可用的网络子集（M7）：只暴露出站请求（回环监听只给 source）。
  * 与 `src/sdk/types` 的 `NetCapability` 结构兼容（宿主按 manifest 的 `net` 声明注入）。
  */

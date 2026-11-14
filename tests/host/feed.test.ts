@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BATCH_WINDOW_MS, createFactFeed, MAX_FACTS_PER_BATCH } from '../../src/host/feed'
-import type { Fact } from '../../src/kernel/types'
+import type { Fact } from '../../src/kernel/core/types'
 
 const fact = (seq: number, type: Fact['type'] = 'task.created'): Fact => ({
   seq,

@@ -122,6 +122,7 @@ const validCommands: Command[] = [
     ],
   },
   { commandId: 'c19', type: 'rule.trigger', ruleId: 'rule-1' },
+  { commandId: 'c19b', type: 'rule.replay', ruleId: 'rule-1' },
   { commandId: 'c20', type: 'thread.note', threadId: 'th-1', text: '备注' },
   { commandId: 'c21', type: 'thread.close', threadId: 'th-1' },
   {
@@ -1011,6 +1012,38 @@ describe('validateQuery（M5：query 动词入口）', () => {
   it('rule.trigger：ruleId 必填', () => {
     expect(rejectedMessage(cmd('rule.trigger', {}))).toBe('ruleId必填')
     expect(validateCommand(cmd('rule.trigger', { ruleId: 'rule-1' })).ok).toBe(true)
+  })
+
+  it('rule.replay：ruleId 必填，时间窗可选但必须是合法 ISO 且 since ≤ until（M42）', () => {
+    expect(rejectedMessage(cmd('rule.replay', {}))).toBe('ruleId必填')
+    expect(validateCommand(cmd('rule.replay', { ruleId: 'rule-1' })).ok).toBe(true)
+    expect(
+      validateCommand(
+        cmd('rule.replay', {
+          ruleId: 'rule-1',
+          since: '2026-11-01T00:00:00.000Z',
+          until: '2026-11-02T00:00:00.000Z',
+        }),
+      ).ok,
+    ).toBe(true)
+    expect(rejectedMessage(cmd('rule.replay', { ruleId: 'rule-1', since: 42 }))).toBe(
+      'since 必须是字符串',
+    )
+    expect(rejectedMessage(cmd('rule.replay', { ruleId: 'rule-1', until: '不是时间' }))).toBe(
+      'until 不是合法时间',
+    )
+    expect(
+      rejectedMessage(
+        cmd('rule.replay', {
+          ruleId: 'rule-1',
+          since: '2026-11-05T00:00:00.000Z',
+          until: '2026-11-01T00:00:00.000Z',
+        }),
+      ),
+    ).toBe('since 不能晚于 until')
+    expect(rejectedMessage(cmd('rule.replay', { ruleId: 'rule-1', since: 'x'.repeat(65) }))).toBe(
+      'since 过长',
+    )
   })
 
   it('thread.note / thread.close / thread.bind：字段必填与长度上限（M6.5）', () => {

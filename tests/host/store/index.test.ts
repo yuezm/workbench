@@ -1,8 +1,8 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Environment } from '../../../src/kernel/types'
-import { KERNEL_VERSION } from '../../../src/kernel/types'
+import type { Environment } from '../../../src/kernel/core/types'
+import { KERNEL_VERSION } from '../../../src/kernel/core/types'
 import type { Command } from '../../../src/protocol/commands'
 import { projectionFormat } from '../../../src/host/schema'
 import { DEFAULT_LIMITS, StoreError, createStore } from '../../../src/host/store/index'

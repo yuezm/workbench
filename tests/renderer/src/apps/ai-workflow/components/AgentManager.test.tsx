@@ -242,7 +242,8 @@ describe('AgentManager', () => {
     await user.click(screen.getAllByRole('button', { name: /删除智能体/ })[0])
     await waitFor(() => expect(kernel.dispatched).toHaveLength(2))
     expect(kernel.dispatched[1]).toMatchObject({ type: 'agent.remove', id: 'a1' })
-  })
+    // 并行全量跑时 userEvent 逐字符输入会排队：给用例更长的超时，断言一条不动
+  }, 30_000)
 
   it('无运行时则禁用添加并提示；未知运行时的智能体显示原始 id 与描述', async () => {
     setup([agent({ id: 'a1', name: 'x', runtimeId: 'ghost', description: '有描述' })], [])

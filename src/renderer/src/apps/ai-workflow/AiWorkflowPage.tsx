@@ -24,6 +24,7 @@ import { SettingsNav, type SettingsSection } from './components/SettingsNav'
 import { TaskDetailPage } from './components/TaskDetailPage'
 import { TaskDialog } from './components/TaskDialog'
 import { ThreadDetailPage } from './components/ThreadDetailPage'
+import { UsagePanel } from './components/UsagePanel'
 import { WorkflowManager } from './components/WorkflowManager'
 import { WorkflowSwitcher } from './components/WorkflowSwitcher'
 import { WorkspaceNav, type WorkspaceSection } from './components/WorkspaceNav'
@@ -628,6 +629,13 @@ export function AiWorkflowPage(): ReactElement {
               <>
                 <SectionHeader title="规则" hint="条件自动建任务" />
                 <RulesManager />
+              </>
+            )}
+
+            {section === 'usage' && (
+              <>
+                <SectionHeader title="用量" hint="近 7 天轮次与成本" />
+                <UsagePanel />
               </>
             )}
 

@@ -2,7 +2,7 @@
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { receiptBlockHint } from '../../src/kernel/prompt'
+import { receiptBlockHint } from '../../src/kernel/scopes/prompt'
 import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
 import { WORKBENCH_EVENT_CHANNEL } from '../../src/protocol/ipc'
 import type { ExternalPluginEntry, ExternalPluginRejection } from '../../src/host/plugins/discover'

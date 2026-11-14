@@ -11,7 +11,7 @@ import type {
   WorkflowStage,
 } from '../../src/protocol/entities'
 import { decide } from '../../src/kernel/decide'
-import type { Environment, IdKind, Limits, View } from '../../src/kernel/types'
+import type { Environment, IdKind, Limits, View } from '../../src/kernel/core/types'
 import type { AutomationRule } from '../../src/protocol/rules'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
@@ -146,6 +146,8 @@ const view = (seed: Seed = {}): View => ({
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   rules: seed.rules ?? [],
   rulesVersion: seed.rulesVersion ?? 0,
   ruleSetReplacedAt: null,

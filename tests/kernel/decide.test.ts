@@ -22,17 +22,17 @@ import type { FactPayload, FactType } from '../../src/protocol/facts'
 import type { ThreadRow } from '../../src/protocol/thread'
 import type { HostInput } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
-import { naturalStageLabel } from '../../src/kernel/commands/task'
-import { indexTarget, sameInstructions } from '../../src/kernel/commands/workflow'
+import { naturalStageLabel } from '../../src/kernel/scopes/commands/task'
+import { indexTarget, sameInstructions } from '../../src/kernel/scopes/commands/workflow'
 import {
   interruptRuleText,
   outputContractText,
   receiptBlockHint,
   taskPrompt,
   taskReceiptKeys,
-} from '../../src/kernel/prompt'
+} from '../../src/kernel/scopes/prompt'
 import { BASE_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
-import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/types'
+import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
 const LATER = '2026-01-02T00:00:00.000Z'
@@ -251,6 +251,9 @@ const card = (over: Partial<Card> = {}): Card => ({
   status: 'open',
   delivery: 'pending',
   deliveryRef: null,
+  deliveryAttempts: 0,
+  nextDeliveryAt: null,
+  deliveryGivenUp: false,
   optionIndex: null,
   answeredBy: null,
   answeredAt: null,
@@ -296,6 +299,8 @@ const view = (seed: Seed = {}): View => ({
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

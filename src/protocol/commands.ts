@@ -57,6 +57,7 @@ export const COMMAND_NAMES = [
   'app.event',
   'rules.replace',
   'rule.trigger',
+  'rule.replay',
   'plugins.replace',
   'plugin.set',
   'thread.note',
@@ -369,6 +370,7 @@ export type Command =
   | AppEventCommand
   | RulesReplaceCommand
   | RuleTriggerCommand
+  | RuleReplayCommand
   | PluginsReplaceCommand
   | PluginSetCommand
   | ThreadNoteCommand
@@ -397,6 +399,22 @@ export interface RulesReplaceCommand extends CommandBase {
 export interface RuleTriggerCommand extends CommandBase {
   type: 'rule.trigger'
   ruleId: string
+}
+
+/**
+ * 补跑被停用规则跳过的事件（M42）。
+ *
+ * 规则必须**先恢复**再补（暂停期间补跑等于补了还是不派活）；`since` / `until` 按事件的
+ * `receivedAt` 圈定范围，缺省补全部；每条跳过的事件只补一次（投影把 `skipped` 改成
+ * `replayed`），重复提交零事实。
+ */
+export interface RuleReplayCommand extends CommandBase {
+  type: 'rule.replay'
+  ruleId: string
+  /** 只补 `receivedAt >= since`（ISO；缺省不限） */
+  since?: string
+  /** 只补 `receivedAt <= until`（ISO；缺省不限） */
+  until?: string
 }
 
 // ---------- 插件设置（M7） ----------

@@ -1,10 +1,10 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { project } from '../../../src/kernel/project'
-import { IMPORT_ROOT_LABEL, timeline } from '../../../src/kernel/timeline'
-import { KERNEL_VERSION } from '../../../src/kernel/types'
-import type { Fact, ProjectionTable } from '../../../src/kernel/types'
+import { project } from '../../../src/kernel/scopes/project'
+import { IMPORT_ROOT_LABEL, timeline } from '../../../src/kernel/scopes/timeline'
+import { KERNEL_VERSION } from '../../../src/kernel/core/types'
+import type { Fact, ProjectionTable } from '../../../src/kernel/core/types'
 import type {
   Agent,
   RunErrorCode,
@@ -607,6 +607,8 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   task_comments: 0,
   // M14：v2 没有评审报告；键要补齐以匹配 `ProjectionTable` 全集
   review_reports: 0,
+  events: 0,
+  event_skips: 0,
 })
 
 describe('importLegacyIfNeeded', () => {
@@ -636,6 +638,9 @@ describe('importLegacyIfNeeded', () => {
       plugin_settings: 0,
       task_comments: 0,
       review_reports: 0,
+      // M42：事件 / 跳过行不由导入产生
+      events: 0,
+      event_skips: 0,
     })
 
     const facts = allFacts(db)
@@ -856,6 +861,8 @@ describe('importLegacyIfNeeded', () => {
       rule_fires: [],
       threads: [],
       plugin_settings: [],
+      events: [],
+      event_skips: [],
     })
   })
 

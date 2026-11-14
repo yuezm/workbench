@@ -114,6 +114,54 @@ export const isCronRule = (rule: AutomationRule): rule is AutomationRule & { whe
  * 整批替换语义：`rules.replaced` 一次事实携带完整行，`project` 只做整行 upsert；
  * 版本与 `replacedAt` 同属一行，避免「规则删空后版本丢失」。
  */
+/**
+ * 被停用规则跳过的事件（M42，`event_skips` 投影行）。
+ *
+ * `id` 由 `<ruleId>:<eventId>` 拼成：同一事件被同一规则跳过只会有一行，补跑把它标成
+ * `replayedAt` 而删不掉行——审计上要能答「这条事件当时被谁跳过、后来补没补」。
+ */
+/**
+ * 规则预演（M36-F）：给一条事件样本，回答「这条事件会被谁接、落到哪」。
+ *
+ * 没有副作用：不建线程、不建任务、不记事实；停用规则与目标失效也照实列出来，
+ * 用户要能看见「本来会接，只是关着 / 落点没了」，而不是看到一片空白。
+ */
+export interface RulePreviewMatch {
+  ruleId: string
+  ruleName: string
+  enabled: boolean
+  /** 目标工作流；目标已删时为 null */
+  workflowId: string | null
+  /** 起始阶段（缺省首阶段）；目标阶段已删时为 null */
+  stageId: string | null
+  /** 任务标题（按 `titleFrom` 取值） */
+  title: string
+  /** 线程入口键（`thread.keyFrom`，缺省 subject） */
+  threadKey: string
+}
+
+export interface RulePreview {
+  matches: RulePreviewMatch[]
+  /** 至少一条启用规则且落点有效时才为真（预演不判断当前并发/线程状态） */
+  wouldCreate: boolean
+}
+
+/** 定时规则的下一次触发（`rules.next` 视图）：`nextAt=null` = 表达式非法或已停用。 */
+export interface RuleNextFire {
+  ruleId: string
+  enabled: boolean
+  nextAt: string | null
+}
+export interface EventSkipRow {
+  id: string
+  ruleId: string
+  eventId: string
+  /** 跳过时的规则集版本 */
+  version: number
+  skippedAt: string
+  /** 补跑时刻；还没补为 null */
+  replayedAt: string | null
+}
 export interface RuleSetRow {
   id: 'current'
   version: number

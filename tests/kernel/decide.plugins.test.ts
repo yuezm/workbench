@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
 import { decide } from '../../src/kernel/decide'
-import { mergePluginSetting, validatePluginSettings } from '../../src/kernel/plugins'
-import { project } from '../../src/kernel/project'
-import type { Environment, Limits, View } from '../../src/kernel/types'
+import { mergePluginSetting, validatePluginSettings } from '../../src/kernel/scopes/plugins'
+import { project } from '../../src/kernel/scopes/project'
+import type { Environment, Limits, View } from '../../src/kernel/core/types'
 import type { PluginSetting } from '../../src/protocol/plugins'
 
 const NOW = '2026-11-05T10:00:00.000Z'
@@ -60,6 +60,8 @@ const view = (seed: { settings?: PluginSetting[]; version?: number } = {}): View
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   activeTaskIds: new Set(),
   rules: [],
   rulesVersion: 0,

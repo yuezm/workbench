@@ -19,7 +19,7 @@ import {
   tableDdl,
   withTx,
 } from '../../src/host/schema'
-import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '../../src/kernel/types'
+import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '../../src/kernel/core/types'
 
 const SAMPLE_AT = '2026-01-01T00:00:00.000Z'
 
@@ -581,13 +581,15 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     }
   })
 
-  it('SCHEMA_SQL 建 17 张表：十七张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
+  it('SCHEMA_SQL 建 19 张表：十九张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
       'agents',
       'cards',
       'conversations',
+      'event_skips',
+      'events',
       'messages',
       'plugin_settings',
       'projects',
@@ -707,7 +709,7 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为十七张投影表（实体五表 + projects + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings + task_comments + review_reports）', () => {
+  it('白名单固定为十九张投影表（实体五表 + projects + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings + task_comments + review_reports + events / event_skips）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
@@ -726,6 +728,8 @@ describe('投影白名单与指纹', () => {
       'plugin_settings',
       'task_comments',
       'review_reports',
+      'events',
+      'event_skips',
     ])
   })
 
@@ -733,7 +737,7 @@ describe('投影白名单与指纹', () => {
     expect(PROJECTION_TABLES).toEqual(KERNEL_PROJECTION_TABLES)
   })
 
-  it('PROJECTION_DDL 覆盖十五表、取自 tableDdl、不含账本表', () => {
+  it('PROJECTION_DDL 覆盖十九张投影表、取自 tableDdl、不含账本表', () => {
     for (const table of PROJECTION_TABLES) {
       expect(PROJECTION_DDL).toContain(`CREATE TABLE IF NOT EXISTS ${table} (`)
     }
@@ -784,6 +788,9 @@ describe('cards 投影（M4）', () => {
       'status',
       'delivery',
       'delivery_ref',
+      'delivery_attempts',
+      'next_delivery_at',
+      'delivery_given_up',
       'option_index',
       'answered_by',
       'answered_at',

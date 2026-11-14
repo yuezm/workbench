@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { decide } from '../../src/kernel/decide'
 import type { EventReceivedPayload } from '../../src/protocol/facts'
-import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
+import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
 
 const NOW = '2026-11-05T12:00:00.000Z'
 const OWNER = { kind: 'owner', via: 'ui' } as const
@@ -58,6 +58,8 @@ const view = (): View => ({
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

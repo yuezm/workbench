@@ -12,7 +12,7 @@ import type {
 } from '../../../src/protocol/entities'
 import type { Command } from '../../../src/protocol/commands'
 import type { FactPayload, FactType } from '../../../src/protocol/facts'
-import type { Change, Environment, Fact, FactDraft, Id, View } from '../../../src/kernel/types'
+import type { Change, Environment, Fact, FactDraft, Id, View } from '../../../src/kernel/core/types'
 import { PROJECTION_TABLES } from '../../../src/host/schema'
 import { DEFAULT_LIMITS } from '../../../src/host/store/index'
 import { createFakeKernel, defaultDecide, defaultProject } from './fake-kernel'
@@ -45,6 +45,8 @@ const view = (seed: Seed = {}): View => ({
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   activeTaskIds: new Set(seed.active ?? []),
   rules: [],
   rulesVersion: 0,

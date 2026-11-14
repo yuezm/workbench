@@ -4,149 +4,91 @@
  * 纯函数：不读时钟/随机数/文件/DB——`now`、id 生成器、视图切片都由宿主在边界注入。
  * 非法输入一律返回 `reject { code, message }`，不抛异常。
  *
- * R2：命令处理按域拆到 `kernel/commands/**`，本文件只保留类型分派与公共契约；
- * 每个 handler 仍是纯函数，行为与拆分前一致。
+ * M37：分派是**表**不是 switch。表用 `satisfies` 逐键校验 handler 签名（哪个命令的输入
+ * 类型对不上，编译期就报在那一行），少一条多一条也报错；分派本身上下只有一次转型（键是
+ * 联合类型，查表后 TS 不能自动收窄到对应成员）。业务分支一律在 `scopes/commands/*`。
  */
 import type { Input } from '../protocol/inputs'
-import type { Decision, Environment, Iso, View } from './types'
-import * as agent from './commands/agent'
-import * as automation from './commands/automation'
-import * as card from './commands/card'
-import * as chat from './commands/chat'
-import * as runtime from './commands/runtime'
-import * as run from './commands/run'
-import * as review from './commands/review'
-import * as task from './commands/task'
-import * as thread from './commands/thread'
-import * as workflow from './commands/workflow'
-import { closeCardsOnFinish } from './cards'
+import type { Decision, Environment, Iso, View } from './core/types'
+import * as agent from './scopes/commands/agent'
+import * as automation from './scopes/commands/automation'
+import * as card from './scopes/commands/card'
+import * as chat from './scopes/commands/chat'
+import * as runtime from './scopes/commands/runtime'
+import * as run from './scopes/commands/run'
+import * as review from './scopes/commands/review'
+import * as task from './scopes/commands/task'
+import * as thread from './scopes/commands/thread'
+import * as workflow from './scopes/commands/workflow'
+import { closeCardsOnFinish } from './scopes/cards'
+
+/** 某个命令的 handler 签名：输入被收窄成该命令自己的形状。 */
+type HandlerOf<T extends Input['type']> = (
+  view: View,
+  input: Extract<Input, { type: T }>,
+  now: Iso,
+  env: Environment,
+) => Decision
+
+/** 命令 → handler。少一条、多一条、签名对不上都会在编译期报错。 */
+const HANDLERS = {
+  'runtime.create': runtime.createRuntime,
+  'runtime.update': runtime.updateRuntime,
+  'runtime.probe': runtime.probeRuntimeUnsupported,
+  'runtime.probed': runtime.probedRuntime,
+  'runtime.remove': runtime.removeRuntime,
+  'project.create': runtime.createProject,
+  'project.update': runtime.updateProject,
+  'project.remove': runtime.removeProject,
+  'agent.create': agent.createAgent,
+  'agent.update': agent.updateAgent,
+  'agent.remove': agent.removeAgent,
+  'workflow.create': workflow.createWorkflow,
+  'workflow.update': workflow.updateWorkflow,
+  'workflow.remove': workflow.removeWorkflow,
+  'task.create': task.createTask,
+  'task.move': task.moveTaskCommand,
+  'task.complete': task.completeTaskCommand,
+  'task.stop': task.stopTask,
+  'task.remove': task.removeTask,
+  'task.comment': task.commentTask,
+  'task.rerun': task.rerunTask,
+  'card.answer': card.answerCard,
+  'card.resolve': card.resolveCard,
+  'card.delivered': card.deliveredCard,
+  'card.delivery_failed': card.failedCardDelivery,
+  'run.claim': run.claimRun,
+  'run.heartbeat': run.heartbeatRun,
+  'run.frames': run.recordRunFrames,
+  'run.receipt': run.receiveRun,
+  'run.cancel': run.cancelRun,
+  'run.host_settled': run.settleRunByHost,
+  // clock.tick 的 handler 不收 input（时钟没有命令载荷）：补一个忽略位保持表形状统一
+  'clock.tick': (_view, _input, now, env) => run.tickClock(_view, now, env),
+  'chat.create': chat.createConversation,
+  'chat.send': chat.sendChat,
+  'chat.remove': chat.removeConversation,
+  'chat.cancel': chat.cancelChat,
+  'chat.archive': chat.archiveChat,
+  'app.event': automation.receiveAppEvent,
+  'event.received': automation.receiveExternalEvent,
+  'rules.replace': automation.replaceRules,
+  'rule.trigger': automation.triggerRule,
+  'rule.replay': automation.replayRuleCommand,
+  'plugins.replace': automation.replacePluginSettings,
+  'plugin.set': automation.setPluginUnsupported,
+  'thread.note': thread.noteThread,
+  'thread.close': thread.closeThread,
+  'thread.remove': thread.removeThread,
+  'thread.bind': thread.bindThread,
+  'review.export': review.exportReview,
+} satisfies { [T in Input['type']]: HandlerOf<T> }
 
 /**
  * 决策出口：命令分派之后统一收起「随运行/任务结束该消失」的卡片（见 closeCardsOnFinish）。
  * 放在这里而不是每个 handler 里，是为了覆盖回执、宿主兜底、取消、任务完成等所有路径。
  */
 export function decide(view: View, input: Input, now: Iso, env: Environment): Decision {
-  return closeCardsOnFinish(view, dispatch(view, input, now, env), now)
-}
-
-function dispatch(view: View, input: Input, now: Iso, env: Environment): Decision {
-  switch (input.type) {
-    // ---------- 运行时 ----------
-    case 'runtime.create':
-      return runtime.createRuntime(view, input, now, env)
-    case 'runtime.update':
-      return runtime.updateRuntime(view, input, now)
-    case 'runtime.probe':
-      return runtime.probeRuntimeUnsupported()
-    case 'runtime.probed':
-      return runtime.probedRuntime(view, input, now)
-    case 'runtime.remove':
-      return runtime.removeRuntime(view, input, now)
-
-    // ---------- 项目（M10） ----------
-    case 'project.create':
-      return runtime.createProject(view, input, now, env)
-    case 'project.update':
-      return runtime.updateProject(view, input, now)
-    case 'project.remove':
-      return runtime.removeProject(view, input, now)
-
-    // ---------- 智能体 ----------
-    case 'agent.create':
-      return agent.createAgent(view, input, now, env)
-    case 'agent.update':
-      return agent.updateAgent(view, input, now)
-    case 'agent.remove':
-      return agent.removeAgent(view, input, now)
-
-    // ---------- 工作流 ----------
-    case 'workflow.create':
-      return workflow.createWorkflow(view, input, now, env)
-    case 'workflow.update':
-      return workflow.updateWorkflow(view, input, now, env)
-    case 'workflow.remove':
-      return workflow.removeWorkflow(view, input, now)
-
-    // ---------- 任务 ----------
-    case 'task.create':
-      return task.createTask(view, input, now, env)
-    case 'task.move':
-      return task.moveTaskCommand(view, input, now, env)
-    case 'task.complete':
-      return task.completeTaskCommand(view, input, now, env)
-    case 'task.stop':
-      return task.stopTask(view, input, now)
-    case 'task.remove':
-      return task.removeTask(view, input, now, env)
-    case 'task.comment':
-      return task.commentTask(view, input, now, env)
-    case 'task.rerun':
-      return task.rerunTask(view, input, now, env)
-
-    // ---------- 卡片（M4 审批） ----------
-    case 'card.answer':
-      return card.answerCard(view, input, now, env)
-    case 'card.resolve':
-      return card.resolveCard(view, input, now)
-    case 'card.delivered':
-      return card.deliveredCard(view, input, now)
-    case 'card.delivery_failed':
-      return card.failedCardDelivery(view, input, now)
-
-    // ---------- 运行（宿主内部输入） ----------
-    case 'run.claim':
-      return run.claimRun(view, input, now, env)
-    case 'run.heartbeat':
-      return run.heartbeatRun(view, input, now, env)
-    case 'run.frames':
-      return run.recordRunFrames(view, input, now)
-    case 'run.receipt':
-      return run.receiveRun(view, input, now, env)
-    case 'run.cancel':
-      return run.cancelRun(view, input, now)
-    case 'run.host_settled':
-      return run.settleRunByHost(view, input, now, env)
-    case 'clock.tick':
-      return run.tickClock(view, now, env)
-
-    // ---------- 对话（聊天并入 purpose='chat' 的统一执行路径） ----------
-    case 'chat.create':
-      return chat.createConversation(view, input, now, env)
-    case 'chat.send':
-      return chat.sendChat(view, input, now, env)
-    case 'chat.remove':
-      return chat.removeConversation(view, input, now)
-    case 'chat.cancel':
-      return chat.cancelChat(view, input, now)
-    case 'chat.archive':
-      return chat.archiveChat(view, input, now)
-
-    // ---------- 外部事件 / 自动化规则 / 插件设置 ----------
-    case 'app.event':
-      return automation.receiveAppEvent(view, input, now, env)
-    case 'event.received':
-      return automation.receiveExternalEvent(view, input, now, env)
-    case 'rules.replace':
-      return automation.replaceRules(view, input, now)
-    case 'rule.trigger':
-      return automation.triggerRule(view, input, now, env)
-    case 'plugins.replace':
-      return automation.replacePluginSettings(view, input, now)
-    case 'plugin.set':
-      return automation.setPluginUnsupported()
-
-    // ---------- 线程（M6.5） ----------
-    case 'thread.note':
-      return thread.noteThread(view, input, now, env)
-    case 'thread.close':
-      return thread.closeThread(view, input, now)
-    case 'thread.remove':
-      return thread.removeThread(view, input, now)
-    case 'thread.bind':
-      return thread.bindThread(view, input, now)
-
-    // ---------- 评审结论（M14） ----------
-    case 'review.export':
-      return review.exportReview(view, input)
-  }
+  const handler = HANDLERS[input.type] as HandlerOf<typeof input.type>
+  return closeCardsOnFinish(view, handler(view, input, now, env), now)
 }

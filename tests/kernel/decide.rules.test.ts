@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../src/protocol/entities'
 import type { AutomationRule } from '../../src/protocol/rules'
-import type { Environment, Limits, View } from '../../src/kernel/types'
+import type { Environment, Limits, View } from '../../src/kernel/core/types'
 import { decide } from '../../src/kernel/decide'
 
 const NOW = '2026-11-05T09:00:00.000Z'
@@ -109,6 +109,8 @@ const view = (seed: Seed = {}): View => ({
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   rules: seed.rules ?? [],
   rulesVersion: seed.rulesVersion ?? 0,
   ruleSetReplacedAt: seed.replacedAt === undefined ? CREATED : seed.replacedAt,

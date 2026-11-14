@@ -744,6 +744,11 @@ export interface RunUsage {
   outputTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number
+  /**
+   * 本轮成本（美元，M36）：只有执行器报得出时才写（Claude Code 的 `total_cost_usd`）。
+   * 缺省 / null = 执行器没报成本（按订阅跑、或该 CLI 不给），统计时**单独计数**，不当 0。
+   */
+  costUsd?: number | null
 }
 
 /**
@@ -986,6 +991,12 @@ export interface Card {
   delivery: CardDelivery
   /** 最后一个成功投递的通道 ref（如 `in-app` / `desktop`）；从未投递为 null */
   deliveryRef: string | null
+  /** 已尝试投递的次数（失败与成功都算，M41）；老事实归一为 0 */
+  deliveryAttempts: number
+  /** 下一次重投时刻（仅「失败且未放弃」时有值，M41）；送达或放弃后清空 */
+  nextDeliveryAt: string | null
+  /** 重投预算用尽（M41）：宿主不再自动补投，等人处理或等新版本 */
+  deliveryGivenUp: boolean
   /** 选中的选项下标（`answered` 后）；信息卡与未回答为 null */
   optionIndex: number | null
   /** 回答来源（`answered` 后）；未回答为 null */

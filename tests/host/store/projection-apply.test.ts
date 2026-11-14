@@ -1,7 +1,7 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Change } from '../../../src/kernel/types'
+import type { Change } from '../../../src/kernel/core/types'
 import type {
   Agent,
   Conversation,

@@ -182,6 +182,9 @@ const card: Card = {
   status: 'open',
   delivery: 'pending',
   deliveryRef: null,
+  deliveryAttempts: 0,
+  nextDeliveryAt: null,
+  deliveryGivenUp: false,
   optionIndex: null,
   answeredBy: null,
   answeredAt: null,
@@ -232,6 +235,9 @@ function seedBase(): void {
   kernel.setView('conversations.byProject', { projectId: 'p1' }, [])
   kernel.setView('rules.all', undefined, { version: 0, rules: [] })
   kernel.setView('plugins.all', undefined, [])
+  // M36：用量面板的窗口参数带「现在」（无法预先枚举），用按视图 id 的兜底值
+  kernel.setViewAnyParams('usage.daily', [])
+  kernel.setViewAnyParams('usage.byAgent', [])
 }
 
 /** dispatch 注入：默认零事实成功；覆盖时按命令返回实体/更新视图 */
@@ -375,6 +381,11 @@ describe('AiWorkflowPage', () => {
     expect(screen.getByRole('button', { name: '新建规则' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Issue 进研发' })).toBeEnabled()
     expect(screen.queryByRole('heading', { name: '工作流' })).not.toBeInTheDocument()
+
+    await openSection(user, '用量')
+    expect(await screen.findByRole('heading', { name: '用量' })).toBeInTheDocument()
+    expect(await screen.findByText('近 7 天还没有已结束的轮次。')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '规则' })).not.toBeInTheDocument()
 
     await openSection(user, '插件')
     expect(await screen.findByRole('heading', { name: '插件' })).toBeInTheDocument()

@@ -25,6 +25,10 @@ export interface FakeKernel {
   failView(view: ViewId, params: ViewParams<ViewId> | undefined, message: string): void
   /** 恢复正常查询（清除失败注入并按最新值重取） */
   clearFailure(view: ViewId, params: ViewParams<ViewId> | undefined): void
+  /** 不区分参数的一次性默认值（参数带时钟 / 随机值、无法预先枚举时用） */
+  setViewAnyParams<T extends ViewId>(view: T, value: ViewResult<T>): void
+  /** 不区分参数地让某个视图查询失败（同上，只按视图 id） */
+  failViewAnyParams(view: ViewId, message: string): void
   /** 直接推一个事实批次（按 types 走失效表） */
   pushFacts(types: FactType[]): void
   /** 推一条聊天流事件 */
@@ -41,6 +45,10 @@ export interface FakeKernel {
 
 export function installFakeKernel(): FakeKernel {
   const viewValues = new Map<string, unknown>()
+  /** 按视图 id 的兜底值：参数不可枚举（带 `now` 之类）时用 */
+  const fallbackValues = new Map<ViewId, unknown>()
+  /** 按视图 id 的失败注入 */
+  const fallbackFailures = new Map<ViewId, string>()
   const failures = new Map<string, string>()
   const dispatched: Command[] = []
   let seq = 0
@@ -66,7 +74,10 @@ export function installFakeKernel(): FakeKernel {
       const failure = failures.get(key)
       if (failure !== undefined) return Promise.reject(new Error(failure))
       if (view === 'kernel.seq') return Promise.resolve(seq as ViewResult<T>)
-      return Promise.resolve(viewValues.get(key) as ViewResult<T>)
+      if (viewValues.has(key)) return Promise.resolve(viewValues.get(key) as ViewResult<T>)
+      const fallbackFailure = fallbackFailures.get(view)
+      if (fallbackFailure !== undefined) return Promise.reject(new Error(fallbackFailure))
+      return Promise.resolve(fallbackValues.get(view) as ViewResult<T>)
     },
     subscribe: () => () => {},
   }
@@ -92,6 +103,15 @@ export function installFakeKernel(): FakeKernel {
     },
     clearFailure: (view, params) => {
       failures.delete(viewKey(view, params))
+      emitFacts(['snapshot.imported'])
+    },
+    setViewAnyParams: (view, value) => {
+      fallbackFailures.delete(view)
+      fallbackValues.set(view, value)
+      emitFacts(['snapshot.imported'])
+    },
+    failViewAnyParams: (view, message) => {
+      fallbackFailures.set(view, message)
       emitFacts(['snapshot.imported'])
     },
     pushFacts: emitFacts,

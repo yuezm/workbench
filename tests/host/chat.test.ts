@@ -12,16 +12,16 @@ import {
   type TestBackendOutcome,
   type TestBackendRequest,
 } from './plugin-support'
-import { chatPrompt, receiptBlockHint } from '../../src/kernel/prompt'
+import { chatPrompt, receiptBlockHint } from '../../src/kernel/scopes/prompt'
 import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
 import { createProcessRegistry } from '../../src/host/process-registry'
 import { createScheduler, type Scheduler } from '../../src/host/scheduler'
 import { createCommandRouter, type CommandRouter } from '../../src/host/commands'
 import { createStore, type Store } from '../../src/host/store/index'
 import { decide } from '../../src/kernel/decide'
-import { project } from '../../src/kernel/project'
-import { viewSpec } from '../../src/kernel/view-spec'
-import type { KernelPort } from '../../src/kernel/types'
+import { project } from '../../src/kernel/scopes/project'
+import { viewSpec } from '../../src/kernel/scopes/view-spec'
+import type { KernelPort } from '../../src/kernel/core/types'
 import type { Conversation, Message, RunEvent } from '../../src/protocol/entities'
 
 /**

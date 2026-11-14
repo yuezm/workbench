@@ -26,7 +26,7 @@
 ## 类型契约
 
 ```ts
-// src/kernel/types.ts
+// src/kernel/core/types.ts
 export type Seq = number
 export type Id = string
 export type Iso = string

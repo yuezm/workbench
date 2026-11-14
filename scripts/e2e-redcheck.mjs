@@ -43,7 +43,7 @@ const CASES = [
   {
     id: 'approval-dup-guard',
     spec: 'tests/e2e/approval.spec.ts',
-    file: 'src/kernel/cards.ts',
+    file: 'src/kernel/scopes/cards.ts',
     find: "if (card.status !== 'open') {",
     replace: "if (String(card.status) === 'never-answered') {",
     defect: '去掉「卡片已回答或已关闭」的重复回答守卫',

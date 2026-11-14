@@ -1,0 +1,220 @@
+/**
+ * 运行时 / 项目命令（R2 从 `decide.ts` 拆出，行为不变）。
+ *
+ * 运行时只描述**连接**：执行器键、命令、profile、参数模板、启停。执行期配置
+ * （模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量）属于智能体，见 `agent.ts`。
+ */
+import type { Agent, Project, Runtime, Task } from '../../../protocol/entities'
+import type { Input } from '../../../protocol/inputs'
+import type { Decision, Environment, FactDraft, Id, Iso, View } from '../../core/types'
+import { done, ownerDraft, reject } from './common'
+
+function runtimeNamed(view: View, name: string, exceptId: Id): Runtime | undefined {
+  for (const runtime of view.runtimes.values()) {
+    if (runtime.name === name && runtime.id !== exceptId) return runtime
+  }
+  return undefined
+}
+
+function projectNamed(view: View, name: string, exceptId: Id): Project | undefined {
+  for (const project of view.projects.values()) {
+    if (project.name === name && project.id !== exceptId) return project
+  }
+  return undefined
+}
+
+function projectAtPath(view: View, path: string, exceptId: Id): Project | undefined {
+  for (const project of view.projects.values()) {
+    if (project.path === path && project.id !== exceptId) return project
+  }
+  return undefined
+}
+
+/** 项目下正在跑的任务（有 queued / running / waiting 的 run）：「执行中」只认 `activeTaskIds`。 */
+function projectActiveTasks(view: View, projectId: Id): Task[] {
+  const active: Task[] = []
+  for (const task of view.tasks.values()) {
+    if (task.projectId === projectId && view.activeTaskIds.has(task.id)) active.push(task)
+  }
+  return active
+}
+
+function agentUsingRuntime(view: View, runtimeId: Id): Agent | undefined {
+  for (const agent of view.agents.values()) {
+    if (agent.runtimeId === runtimeId) return agent
+  }
+  return undefined
+}
+
+export function createRuntime(
+  view: View,
+  input: Extract<Input, { type: 'runtime.create' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  const form = input.input
+  const name = form.name?.trim()
+  if (!name) return reject('invalid_input', '运行时名称必填')
+  const executorKey = form.executorKey?.trim() ?? ''
+  if (!executorKey) return reject('invalid_input', '运行时缺少执行器键（executorKey）')
+  const command = form.command?.trim() ?? ''
+  if (!command) return reject('invalid_input', '运行时缺少启动命令（command）')
+  if (runtimeNamed(view, name, '')) return reject('conflict', '运行时名称已存在: ' + name)
+  const runtime: Runtime = {
+    id: env.nextId('runtime'),
+    name,
+    executorKey,
+    command,
+    profile: form.profile?.trim() ?? '',
+    argsTemplate: form.argsTemplate ?? '',
+    enabled: form.enabled !== false,
+    createdAt: now,
+    lastProbe: null,
+  }
+  return done([ownerDraft('runtime.created', { runtime }, now)])
+}
+
+export function updateRuntime(
+  view: View,
+  input: Extract<Input, { type: 'runtime.update' }>,
+  now: Iso,
+): Decision {
+  const current = view.runtimes.get(input.id)
+  if (!current) return reject('not_found', '运行时不存在: ' + input.id)
+  const patch = input.patch
+  const executorKey =
+    patch.executorKey === undefined ? current.executorKey : patch.executorKey.trim()
+  if (!executorKey) return reject('invalid_input', '运行时缺少执行器键（executorKey）')
+  const name = patch.name?.trim() || current.name
+  if (name !== current.name && runtimeNamed(view, name, current.id)) {
+    return reject('conflict', '运行时名称已存在: ' + name)
+  }
+  const runtime: Runtime = {
+    ...current,
+    name,
+    executorKey,
+    command: patch.command?.trim() || current.command,
+    profile: patch.profile !== undefined ? patch.profile.trim() : current.profile,
+    argsTemplate: patch.argsTemplate !== undefined ? patch.argsTemplate : current.argsTemplate,
+    enabled: patch.enabled !== undefined ? patch.enabled === true : current.enabled,
+  }
+  return done([ownerDraft('runtime.updated', { runtime }, now)])
+}
+
+/** 编排命令：探测需要执行器端口，由宿主命令路由处理。 */
+export function probeRuntimeUnsupported(): Decision {
+  return reject('unsupported', 'runtime.probe 由宿主编排（探测后落 runtime.probed）')
+}
+
+export function probedRuntime(
+  view: View,
+  input: Extract<Input, { type: 'runtime.probed' }>,
+  now: Iso,
+): Decision {
+  const current = view.runtimes.get(input.id)
+  if (!current) return reject('not_found', '运行时不存在: ' + input.id)
+  const runtime: Runtime = { ...current, lastProbe: input.probe }
+  return done([ownerDraft('runtime.probed', { runtime }, now)])
+}
+
+export function removeRuntime(
+  view: View,
+  input: Extract<Input, { type: 'runtime.remove' }>,
+  now: Iso,
+): Decision {
+  const current = view.runtimes.get(input.id)
+  // 旧实现 DELETE 0 行同样静默成功；删除不存在的实体不算非法输入
+  if (!current) return done([])
+  if (agentUsingRuntime(view, current.id)) {
+    return reject('conflict', '运行时被智能体引用，无法删除: ' + current.id)
+  }
+  return done([ownerDraft('runtime.removed', { runtime: current }, now)])
+}
+
+export function createProject(
+  view: View,
+  input: Extract<Input, { type: 'project.create' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  const form = input.input
+  const name = form.name?.trim()
+  if (!name) return reject('invalid_input', '项目名称必填')
+  const path = form.path?.trim()
+  if (!path) return reject('invalid_input', '项目文件夹必填')
+  if (projectNamed(view, name, '')) return reject('conflict', '项目名称已存在: ' + name)
+  if (projectAtPath(view, path, '')) return reject('conflict', '该文件夹已作为项目添加: ' + path)
+  const project: Project = {
+    id: env.nextId('project'),
+    name,
+    path,
+    description: form.description ?? '',
+    createdAt: now,
+    updatedAt: now,
+  }
+  return done([ownerDraft('project.created', { project }, now)])
+}
+
+export function updateProject(
+  view: View,
+  input: Extract<Input, { type: 'project.update' }>,
+  now: Iso,
+): Decision {
+  const current = view.projects.get(input.id)
+  if (!current) return reject('not_found', '项目不存在: ' + input.id)
+  const patch = input.patch
+  const name = patch.name?.trim() || current.name
+  const path = patch.path === undefined ? current.path : patch.path.trim()
+  if (!path) return reject('invalid_input', '项目文件夹必填')
+  if (name !== current.name && projectNamed(view, name, current.id)) {
+    return reject('conflict', '项目名称已存在: ' + name)
+  }
+  if (path !== current.path && projectAtPath(view, path, current.id)) {
+    return reject('conflict', '该文件夹已作为项目添加: ' + path)
+  }
+  const project: Project = {
+    ...current,
+    name,
+    path,
+    description: patch.description !== undefined ? patch.description : current.description,
+    updatedAt: now,
+  }
+  return done([ownerDraft('project.updated', { project }, now)])
+}
+
+export function removeProject(
+  view: View,
+  input: Extract<Input, { type: 'project.remove' }>,
+  now: Iso,
+): Decision {
+  const current = view.projects.get(input.id)
+  // 删除不存在的项目按幂等处理（与 runtime.remove 同口径）
+  if (!current) return done([])
+  // 只有「执行中」拦删除：跑着的任务失去项目就没了工作目录，先停再删由人来决定
+  if (projectActiveTasks(view, current.id).length > 0) {
+    return reject('conflict', '项目下有执行中的任务，无法删除: ' + current.name)
+  }
+  const facts: FactDraft[] = []
+  // 已完成 / 未开始的任务不随项目消失：同 M11 的会话口径，归到默认目录（`projectId: null`），
+  // 逐条产 `task.updated`，避免任务行留下指向已删项目的悬空弱引用
+  for (const task of view.tasks.values()) {
+    if (task.projectId !== current.id) continue
+    facts.push(
+      ownerDraft('task.updated', { task: { ...task, projectId: null, updatedAt: now } }, now),
+    )
+  }
+  // M11：项目下的会话不随项目消失，归到默认目录（`projectId: null`）；
+  // 逐条产 `conversation.updated` 再删项目，重建与增量折出同一行
+  for (const conversation of view.conversations.values()) {
+    if (conversation.projectId !== current.id) continue
+    facts.push(
+      ownerDraft(
+        'conversation.updated',
+        { conversation: { ...conversation, projectId: null, updatedAt: now } },
+        now,
+      ),
+    )
+  }
+  facts.push(ownerDraft('project.removed', { project: current }, now))
+  return done(facts)
+}

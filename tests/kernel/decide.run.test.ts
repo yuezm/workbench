@@ -23,10 +23,14 @@ import type {
 import type { Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
 import type { ReviewReport } from '../../src/protocol/review'
 import { decide } from '../../src/kernel/decide'
-import { runAccessOf } from '../../src/kernel/task-effects'
-import { degradedCommentText, stageRoundCount, stageTimeoutOf } from '../../src/kernel/commands/run'
-import { project } from '../../src/kernel/project'
-import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
+import { runAccessOf } from '../../src/kernel/scopes/task-effects'
+import {
+  degradedCommentText,
+  stageRoundCount,
+  stageTimeoutOf,
+} from '../../src/kernel/scopes/commands/run'
+import { project } from '../../src/kernel/scopes/project'
+import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
 const FUTURE = '2026-11-04T13:00:00.000Z'
@@ -124,6 +128,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
 })
 
 interface Seed {
+  events?: Map<string, import('../../src/kernel/core/types').EventRow>
   conversations?: Conversation[]
   runs?: RunRow[]
   runtimes?: Runtime[]
@@ -152,6 +157,8 @@ const view = (seed: Seed = {}): View => ({
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map((seed.reviewReports ?? []).map((row) => [row.id, row])),
+  events: new Map(),
+  ruleSkips: [],
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,
@@ -980,6 +987,9 @@ describe('kernel/decide run.receipt 回执', () => {
             status: 'open',
             delivery: 'pending',
             deliveryRef: null,
+            deliveryAttempts: 0,
+            nextDeliveryAt: null,
+            deliveryGivenUp: false,
             optionIndex: null,
             answeredBy: null,
             answeredAt: null,

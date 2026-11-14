@@ -1,5 +1,5 @@
-import { legacyExits } from '../kernel/workflow/stage-machine'
-import { legacyHandoffs } from '../kernel/workflow/stage-handoffs'
+import { legacyExits } from '../kernel/scopes/workflow/stage-machine'
+import { legacyHandoffs } from '../kernel/scopes/workflow/stage-handoffs'
 import { DatabaseSync } from 'node:sqlite'
 import {
   LEGACY_TASK_COLUMNS,
@@ -7,6 +7,8 @@ import {
   AGENTS_M27_ADDED_COLUMNS,
   CARDS_M12_ADD_COLUMN_SQL,
   CARDS_M12_ADDED_COLUMNS,
+  CARDS_M41_ADD_COLUMN_SQL,
+  CARDS_M41_ADDED_COLUMNS,
   COMMANDS_SQL,
   CONVERSATIONS_M9_ADD_COLUMN_SQL,
   CONVERSATIONS_M9_ADDED_COLUMNS,
@@ -461,10 +463,14 @@ function legacyStageRow(raw: Record<string, unknown>): {
 export function upgradeLegacyCards(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'cards')
   if (columns.size === 0) return false
-  const missing = CARDS_M12_ADDED_COLUMNS.filter((column) => !columns.has(column))
+  const wanted = [
+    ...CARDS_M12_ADDED_COLUMNS.map((column) => ({ column, sql: CARDS_M12_ADD_COLUMN_SQL[column] })),
+    ...CARDS_M41_ADDED_COLUMNS.map((column) => ({ column, sql: CARDS_M41_ADD_COLUMN_SQL[column] })),
+  ]
+  const missing = wanted.filter((entry) => !columns.has(entry.column))
   if (missing.length === 0) return false
   withTx(db, () => {
-    for (const column of missing) db.exec(CARDS_M12_ADD_COLUMN_SQL[column])
+    for (const entry of missing) db.exec(entry.sql)
   })
   return true
 }

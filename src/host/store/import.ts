@@ -64,7 +64,7 @@ import type {
   KernelPort,
   ProjectionRow,
   ProjectionTable,
-} from '../../kernel/types'
+} from '../../kernel/core/types'
 import { withTx } from '../schema'
 import { currentProjectionFormat, writeProjectionMeta } from './projection'
 import { appendFacts, factsCount, lastSeq } from './facts'
@@ -537,6 +537,9 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   task_comments: 0,
   // M14：v2 没有评审报告；导入不产 review_reports 行。
   review_reports: 0,
+  // M42：事件与跳过行不是导入对象（只由事实产生）
+  events: 0,
+  event_skips: 0,
 })
 
 /** 一组行 + 表名 → `snapshot.imported` 草稿（payload 按表收窄成判别联合）。 */

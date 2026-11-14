@@ -15,9 +15,9 @@ import type {
   Runtime,
 } from '../../src/protocol/entities'
 import { decide } from '../../src/kernel/decide'
-import { receiptBlockHint } from '../../src/kernel/prompt'
+import { receiptBlockHint } from '../../src/kernel/scopes/prompt'
 import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
-import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
+import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
 const CREATED = '2026-01-01T00:00:00.000Z'
@@ -175,6 +175,8 @@ const view = (seed: Seed = {}): View => ({
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

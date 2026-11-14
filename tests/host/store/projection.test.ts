@@ -1,8 +1,8 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { KERNEL_VERSION } from '../../../src/kernel/types'
-import { project as kernelProject } from '../../../src/kernel/project'
+import { KERNEL_VERSION } from '../../../src/kernel/core/types'
+import { project as kernelProject } from '../../../src/kernel/scopes/project'
 import type { Command } from '../../../src/protocol/commands'
 import type { Card } from '../../../src/protocol/entities'
 import { projectionFormat } from '../../../src/host/schema'

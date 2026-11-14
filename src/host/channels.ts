@@ -19,7 +19,7 @@
  */
 import type { Card } from '../protocol/entities'
 import type { ChannelContext } from '../protocol/channels'
-import type { Fact, Iso } from '../kernel/types'
+import type { Fact, Iso } from '../kernel/core/types'
 import type { ChannelRegistryEntry } from '../plugins/registry'
 import type { SdkHost } from '../sdk/types'
 import type { ViewId, ViewParams, ViewResult } from '../protocol/views'
@@ -94,6 +94,8 @@ export function createChannels(options: ChannelsOptions): Channels {
   /** 已经送达过的版本（进程内去重；重启后清空，靠补投 pending 续上） */
   const deliveredVersions = new Set<string>()
   const inFlight = new Set<string>()
+  /** M41 已排期的重投定时器（stopAll 时统一清掉，避免退出后还投一次）。 */
+  const retryTimers = new Set<ReturnType<typeof setTimeout>>()
   let started = false
   let stopping = false
 
@@ -105,22 +107,48 @@ export function createChannels(options: ChannelsOptions): Channels {
     }
   }
 
-  /** 写投递事实：统一经 effects.dispatch（→ decide → 事实），异常自捕获。 */
-  const write = (input: Record<string, unknown>): void => {
+  /**
+   * 写投递事实：统一经 effects.dispatch（→ decide → 事实），异常自捕获。
+   * 返回本次产生的事实：M41 的重投时刻由内核写在 `card.delivery_failed.payload.card` 里，
+   * hub 只负责照它排期（不自己算曲线，也不重复内核的账）。
+   */
+  const write = (input: Record<string, unknown>): Fact[] => {
     try {
-      effects.dispatch(input)
+      return effects.dispatch(input).facts
     } catch (error) {
       log(`投递回写失败（${String(input['type'])}）：${errMsg(error)}`)
+      return []
     }
   }
 
-  const markDelivered = (cardId: string, version: number, ref: string): void => {
+  const markDelivered = (cardId: string, version: number, ref: string): Fact[] => {
     deliveredVersions.add(versionKey(cardId, version))
-    write({ type: 'card.delivered', cardId, version, ref })
+    return write({ type: 'card.delivered', cardId, version, ref })
   }
 
-  const markFailed = (cardId: string, version: number, error: string): void => {
+  const markFailed = (cardId: string, version: number, error: string): Fact[] =>
     write({ type: 'card.delivery_failed', cardId, version, error })
+
+  /** 当前时刻（毫秒）：宿主注入的 `now` 优先，测试与生产同一口径。 */
+  const nowMs = (): number => (options.now === undefined ? Date.now() : Date.parse(options.now()))
+
+  /** 按内核给的 `nextDeliveryAt` 排一次重投；时刻已过就立刻投。 */
+  const arm = (card: Card, atIso: string | null): void => {
+    if (atIso === null) return
+    const delay = Math.max(0, Date.parse(atIso) - nowMs())
+    const timer = setTimeout(() => {
+      retryTimers.delete(timer)
+      void deliver(card)
+    }, delay)
+    retryTimers.add(timer)
+  }
+
+  /** 失败回写之后：读内核算出的下一次重投时刻，排上；放弃（null）就不排。 */
+  const armFromFacts = (card: Card, facts: readonly Fact[]): void => {
+    const failed = facts.find((fact) => fact.type === 'card.delivery_failed')
+    if (failed === undefined) return
+    const next = (failed.payload as { card?: Card }).card ?? card
+    arm(next, next.nextDeliveryAt)
   }
 
   /**
@@ -180,14 +208,16 @@ export function createChannels(options: ChannelsOptions): Channels {
    * 某通道晚到成功也不会再重复写事实（`reportDelivered` 先查 deliveredVersions）。
    */
   const deliver = async (card: Card): Promise<void> => {
+    // M41：已送达 / 已放弃的版本不再投（放弃是内核下过的结论，重投要等新版本）
+    if (card.delivery === 'delivered' || card.deliveryGivenUp) return
     const key = versionKey(card.id, card.version)
     if (deliveredVersions.has(key) || inFlight.has(key)) return
     // 没有任何通道成功启动（空注册表 / 全部 start 失败）时不判定投递失败：
     // T8 之前内置通道清单为空，启动补投不能把 pending 卡误记成 failed。
     if (![...runtimes.values()].some((runtime) => runtime.started)) return
     inFlight.add(key)
+    let deliveredRef: string | null = null
     try {
-      let deliveredRef: string | null = null
       for (const entry of entries) {
         const runtime = runtimes.get(entry.key)
         if (!runtime || !runtime.started) continue
@@ -197,10 +227,12 @@ export function createChannels(options: ChannelsOptions): Channels {
         // 首个成功：只写一条 delivered 事实；后续通道继续投完（它们也要通知）
         markDelivered(card.id, card.version, ref)
       }
-      if (deliveredRef === null) markFailed(card.id, card.version, DELIVERY_FAILED_ERROR)
     } finally {
       inFlight.delete(key)
     }
+    // 全部失败：写 failed（内核据此推进尝试次数与下一次重投时刻），再照它排期
+    if (deliveredRef === null)
+      armFromFacts(card, markFailed(card.id, card.version, DELIVERY_FAILED_ERROR))
   }
 
   const deliverFactCards = (facts: readonly Fact[]): void => {
@@ -213,16 +245,31 @@ export function createChannels(options: ChannelsOptions): Channels {
     }
   }
 
-  /** 启动时补投：只处理 `delivery='pending'` 的 open 卡（已投递/失败的不重复打扰）。 */
+  /**
+   * 启动时补投：除「已送达」之外都交给 `deliver` 判断——`pending` 立刻投、失败未放弃的卡
+   * 按 `nextDeliveryAt` 续上（已过立刻投、未到排期）、已放弃的卡在 `deliver` 里直接返回。
+   * 这样「能不能投」只有一处判据，补投与事实触发不会各写一套。
+   */
   const backfill = (): void => {
-    let pending: Card[]
+    let cards: Card[]
     try {
-      pending = store.query('cards.open').filter((card) => card.delivery === 'pending')
+      cards = store.query('cards.open').filter((card) => card.delivery !== 'delivered')
     } catch (error) {
       log(`补投查询失败：${errMsg(error)}`)
       return
     }
-    for (const card of pending) void deliver(card)
+    const now = nowMs()
+    for (const card of cards) {
+      if (
+        card.delivery === 'failed' &&
+        card.nextDeliveryAt !== null &&
+        Date.parse(card.nextDeliveryAt) > now
+      ) {
+        arm(card, card.nextDeliveryAt)
+        continue
+      }
+      void deliver(card)
+    }
   }
 
   const startAll = async (): Promise<void> => {
@@ -279,6 +326,9 @@ export function createChannels(options: ChannelsOptions): Channels {
     attempts.clear()
     inFlight.clear()
     deliveredVersions.clear()
+    // M41：已排期的重投一并取消，退出后不再产生投递
+    for (const timer of retryTimers) clearTimeout(timer)
+    retryTimers.clear()
     for (const runtime of runtimesToStop) {
       try {
         runtime.abort.abort()

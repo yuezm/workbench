@@ -1,7 +1,7 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { FactDraft } from '../../../src/kernel/types'
+import type { FactDraft } from '../../../src/kernel/core/types'
 import {
   allFacts,
   appendFacts,

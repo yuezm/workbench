@@ -31,7 +31,7 @@ import type {
   ProjectionTable,
   Reason,
   View,
-} from '../../../src/kernel/types'
+} from '../../../src/kernel/core/types'
 import { PROJECTION_TABLES } from '../../../src/host/schema'
 import { sample } from './test-support'
 

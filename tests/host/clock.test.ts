@@ -11,9 +11,9 @@ import { createClock, type ClockStore, type ClockTimer } from '../../src/host/cl
 import { createStore, type Store } from '../../src/host/store'
 import { createProjectionWriter } from '../../src/host/store/projection-apply'
 import { decide } from '../../src/kernel/decide'
-import { nextWakeAt } from '../../src/kernel/next-wake'
-import { project } from '../../src/kernel/project'
-import { viewSpec } from '../../src/kernel/view-spec'
+import { nextWakeAt } from '../../src/kernel/core/next-wake'
+import { project } from '../../src/kernel/scopes/project'
+import { viewSpec } from '../../src/kernel/scopes/view-spec'
 import { SAMPLE_AT, createMemoryDb, sample } from './store/test-support'
 
 const NOW = '2026-11-04T12:00:00.000Z'

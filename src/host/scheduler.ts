@@ -30,7 +30,7 @@ import type {
   StageScript,
 } from '../protocol/entities'
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
-import type { Fact, Id, Iso } from '../kernel/types'
+import type { Fact, Id, Iso } from '../kernel/core/types'
 import { parseModelId } from '../protocol/model-id'
 import { killPidTree } from './process'
 import {

@@ -291,6 +291,9 @@ CREATE TABLE IF NOT EXISTS ${name} (
   status TEXT NOT NULL CHECK (status IN ('open','answered','resolved')),
   delivery TEXT NOT NULL CHECK (delivery IN ('pending','delivered','failed')),
   delivery_ref TEXT,
+  delivery_attempts INTEGER NOT NULL DEFAULT 0,
+  next_delivery_at TEXT,
+  delivery_given_up INTEGER NOT NULL DEFAULT 0,
   option_index INTEGER,
   answered_by TEXT CHECK (answered_by IN ('ui','channel')),
   answered_at TEXT,
@@ -329,6 +332,44 @@ CREATE TABLE IF NOT EXISTS ${name} (
   scheduled_for TEXT NOT NULL,
   fired_at TEXT NOT NULL,
   task_id TEXT
+);`
+
+/**
+ * `events` 投影（M42，第十八张表）：外部 / 派生事件的读模型，只存事件本身。
+ *
+ * 补跑（`rule.replay`）必须能拿到当时的 `source / type / subject / hops / dedupeKey`，
+ * 而事实日志不能当读模型用（内核只接视图）——所以事件入账时同步投影一行。
+ */
+const eventsTable = (name = 'events'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  type TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  detail_ref TEXT,
+  link TEXT,
+  hops INTEGER NOT NULL,
+  origin_run_id TEXT,
+  dedupe_key TEXT,
+  received_at TEXT NOT NULL
+);`
+
+/**
+ * `event_skips` 投影（M42，第十九张表）：被停用规则跳过的事件。
+ *
+ * - 主键 `id = '<ruleId>:<eventId>'`：同一事件被同一规则只跳过一次；
+ * - `replayed_at` 非空 = 已补跑（补跑只处理 null 的行，重复提交因此零事实）；
+ * - 行不删：审计要能回答「这条事件当时被谁跳过、后来补没补」。
+ */
+const eventSkipsTable = (name = 'event_skips'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  rule_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  skipped_at TEXT NOT NULL,
+  replayed_at TEXT
 );`
 
 /**
@@ -457,6 +498,8 @@ export const SCHEMA_SQL = [
   pluginSettingsTable(),
   taskCommentsTable(),
   reviewReportsTable(),
+  eventsTable(),
+  eventSkipsTable(),
   INDEX_SQL,
 ].join('\n')
 
@@ -515,6 +558,8 @@ export const tableDdl = {
   pluginSettings: pluginSettingsTable,
   taskComments: taskCommentsTable,
   reviewReports: reviewReportsTable,
+  events: eventsTable,
+  eventSkips: eventSkipsTable,
 } as const
 
 /**
@@ -754,6 +799,27 @@ export const CARDS_M12_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
+ * M41 给 `cards` 新增的投递账三列（尝试次数 / 下次重投时刻 / 是否已放弃）。
+ *
+ * 老库补列即可：老事实里没有这三项，由 `kernel/project#normalizeCard` 归一成
+ * 「0 次尝试、没有排期、没放弃」，与「首投还没发生」一致。
+ */
+export const CARDS_M41_ADDED_COLUMNS = [
+  'delivery_attempts',
+  'next_delivery_at',
+  'delivery_given_up',
+] as const
+
+/** `cards` M41 补列语句（两列带常量 DEFAULT 才满足 NOT NULL）。 */
+export const CARDS_M41_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof CARDS_M41_ADDED_COLUMNS)[number], string>
+> = {
+  delivery_attempts: 'ALTER TABLE cards ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0',
+  next_delivery_at: 'ALTER TABLE cards ADD COLUMN next_delivery_at TEXT',
+  delivery_given_up: 'ALTER TABLE cards ADD COLUMN delivery_given_up INTEGER NOT NULL DEFAULT 0',
+}
+
+/**
  * M8 给 `tasks` 新增的列（spawn 来源 / 批次 / 幂等键）。 * 注意：M8 同时把 `origin` 的 CHECK 扩成 `('manual','rule','handoff','spawn')`，SQLite 不能
  * `ALTER TABLE` 改 CHECK —— 旧库首启时与 M7 同法物理重建 `tasks`（见 `host/db.ts`）。
  */
@@ -885,6 +951,9 @@ export const PROJECTION_TABLES = [
   'plugin_settings',
   'task_comments',
   'review_reports',
+  // M42：事件投影与「停用规则跳过」的留痕（补跑依据）
+  'events',
+  'event_skips',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -907,9 +976,11 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   plugin_settings: tableDdl.pluginSettings(),
   task_comments: tableDdl.taskComments(),
   review_reports: tableDdl.reviewReports(),
+  events: tableDdl.events(),
+  event_skips: tableDdl.eventSkips(),
 }
 
-/** 十七张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 十九张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */

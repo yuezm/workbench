@@ -14,7 +14,12 @@ const argBase = (() => {
 
 const git = (args) => {
   try {
-    return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    // maxBuffer 放宽到 64 MB：内核拆分这类大改动会让默认 1 MB 溢出（ENOBUFS 被吞成 diff 失败）
+    return execFileSync('git', args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: 64 * 1024 * 1024,
+    })
   } catch {
     return null
   }

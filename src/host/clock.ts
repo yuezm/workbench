@@ -15,7 +15,7 @@
  * 窗口不可见不降频：本模块不感知窗口状态，托盘常驻时照常排期。
  * 定时器与当前时刻都可注入，测试用假时钟推进。
  */
-import type { Iso } from '../kernel/types'
+import type { Iso } from '../kernel/core/types'
 import type { Store } from './store/index'
 
 /** 定时器抽象：默认系统 `setTimeout` / `clearTimeout`，测试注入假实现。 */

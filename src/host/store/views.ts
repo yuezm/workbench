@@ -9,6 +9,9 @@
  * 两张读路径都逐列写死 SELECT，不 `SELECT *`：列名变更必须在这里同步。
  */
 import type { DatabaseSync } from 'node:sqlite'
+import { nextRuleFires, previewEvent } from '../../kernel/scopes/rules'
+import type { UsageAgentRow, UsageDailyRow, UsageTotals } from '../../protocol/views'
+import type { EventRow, RuleSkip } from '../../kernel/core/types'
 import type {
   Access,
   Agent,
@@ -56,7 +59,7 @@ import type {
   WorkflowStageMetrics,
 } from '../../protocol/views'
 import { VIEW_IDS } from '../../protocol/views'
-import type { Id, Iso, ProjectionTable, View } from '../../kernel/types'
+import type { Id, Iso, ProjectionTable, View } from '../../kernel/core/types'
 import { lastSeq } from './facts'
 import { parseAgentEnv } from './agent-env'
 import { StoreError } from './errors'
@@ -278,6 +281,9 @@ interface CardDbRow {
   status: string
   delivery: string
   delivery_ref: string | null
+  delivery_attempts: number
+  next_delivery_at: string | null
+  delivery_given_up: number
   option_index: number | null
   answered_by: string | null
   answered_at: string | null
@@ -539,6 +545,9 @@ const mapCard = (row: CardDbRow): Card => ({
   status: row.status as CardStatus,
   delivery: row.delivery as CardDelivery,
   deliveryRef: row.delivery_ref,
+  deliveryAttempts: Number(row.delivery_attempts ?? 0),
+  nextDeliveryAt: (row.next_delivery_at as string | null) ?? null,
+  deliveryGivenUp: Number(row.delivery_given_up ?? 0) === 1,
   optionIndex: row.option_index,
   answeredBy: row.answered_by as CardAnswerVia | null,
   answeredAt: row.answered_at,
@@ -1025,6 +1034,9 @@ export function loadView(
     messages: slice.has('messages') ? toMap(readMessages(db)) : new Map(),
     cards: slice.has('cards') ? toMap(readCards(db)) : new Map(),
     threads: slice.has('threads') ? toMap(readThreads(db)) : new Map(),
+    // M42：事件投影与「停用规则跳过」的留痕（补跑唯一的数据来源）
+    events: slice.has('events') ? toMap(readEvents(db)) : new Map(),
+    ruleSkips: slice.has('event_skips') ? readRuleSkips(db) : [],
     // M15：产物落盘根随视图给内核（只用于拼「任务索引」里的路径，内核不读文件）。
     artifactsRoot,
     taskComments: slice.has('task_comments') ? toMap(readTaskComments(db)) : new Map(),
@@ -1039,6 +1051,43 @@ export function loadView(
   }
 }
 
+/** M42：事件投影行（补跑还原入参用）。 */
+const readEvents = (db: DatabaseSync): EventRow[] =>
+  (
+    db
+      .prepare(
+        `SELECT id, source, type, subject, summary, detail_ref, link, hops, origin_run_id, dedupe_key, received_at
+         FROM events ORDER BY received_at, rowid`,
+      )
+      .all() as unknown as Array<Record<string, unknown>>
+  ).map((row) => ({
+    id: String(row['id']),
+    source: String(row['source']),
+    type: String(row['type']),
+    subject: String(row['subject']),
+    summary: String(row['summary']),
+    detailRef: (row['detail_ref'] as string | null) ?? null,
+    link: (row['link'] as string | null) ?? null,
+    hops: Number(row['hops']),
+    originRunId: (row['origin_run_id'] as string | null) ?? null,
+    dedupeKey: (row['dedupe_key'] as string | null) ?? null,
+    receivedAt: String(row['received_at']),
+  }))
+
+/** M42：还没补跑的跳过行（按跳过时刻升序，补跑按这个顺序重放）。 */
+const readRuleSkips = (db: DatabaseSync): RuleSkip[] =>
+  (
+    db
+      .prepare(
+        'SELECT rule_id, event_id, version, skipped_at FROM event_skips WHERE replayed_at IS NULL ORDER BY skipped_at, rowid',
+      )
+      .all() as unknown as Array<Record<string, unknown>>
+  ).map((row) => ({
+    ruleId: String(row['rule_id']),
+    eventId: String(row['event_id']),
+    version: Number(row['version']),
+    skippedAt: String(row['skipped_at']),
+  }))
 const readWorkflowsWithStages = (db: DatabaseSync): WorkflowWithStages[] => {
   const stagesByWorkflow = new Map<string, WorkflowStage[]>()
   for (const stage of readStages(db)) {
@@ -1279,6 +1328,86 @@ const readStageMetrics = (db: DatabaseSync, workflowId: string): WorkflowStageMe
 }
 
 /** `query(view, params)` 的实现：视图 id 与参数形状由 `protocol/views` 固定。 */
+/** 用量窗口：`days` 夹在 1–90，`now` 由调用方给（缺省 = 全部历史，仍不读系统时钟）。 */
+interface UsageWindow {
+  cutoff: string | null
+}
+
+const readUsageWindow = (params: unknown): UsageWindow => {
+  const raw = (params ?? {}) as { days?: unknown; now?: unknown }
+  const days =
+    typeof raw.days === 'number' && Number.isFinite(raw.days)
+      ? Math.min(90, Math.max(1, Math.floor(raw.days)))
+      : 7
+  const now = typeof raw.now === 'string' ? raw.now : null
+  return {
+    cutoff: now === null ? null : new Date(Date.parse(now) - days * 86_400_000).toISOString(),
+  }
+}
+
+/**
+ * 用量聚合（M36-E）：只算已结束的 run；`usage_json` 里的四项与成本按 JSON 取值。
+ *
+ * 缺失计数用 `IS NULL` 判定，不把「执行器没报」折成 0——否则成本合计会悄悄偏小。
+ */
+const USAGE_COLUMNS = `COUNT(*) AS rounds,
+  COALESCE(SUM(json_extract(usage_json, '$.inputTokens')), 0) AS inputTokens,
+  COALESCE(SUM(json_extract(usage_json, '$.outputTokens')), 0) AS outputTokens,
+  COALESCE(SUM(json_extract(usage_json, '$.cacheReadTokens')), 0) AS cacheReadTokens,
+  COALESCE(SUM(json_extract(usage_json, '$.cacheWriteTokens')), 0) AS cacheWriteTokens,
+  COALESCE(SUM(json_extract(usage_json, '$.costUsd')), 0) AS costUsd,
+  SUM(CASE WHEN json_extract(usage_json, '$.inputTokens') IS NULL THEN 1 ELSE 0 END) AS missingTokens,
+  SUM(CASE WHEN json_extract(usage_json, '$.costUsd') IS NULL THEN 1 ELSE 0 END) AS missingCost`
+
+const usageWhere = (window: UsageWindow): { clause: string; params: string[] } =>
+  window.cutoff === null
+    ? {
+        clause: "status IN ('succeeded', 'failed', 'cancelled') AND ended_at IS NOT NULL",
+        params: [],
+      }
+    : {
+        clause:
+          "status IN ('succeeded', 'failed', 'cancelled') AND ended_at IS NOT NULL AND ended_at >= ?",
+        params: [window.cutoff],
+      }
+
+const toUsageTotals = (row: Record<string, unknown>): UsageTotals => ({
+  rounds: Number(row['rounds']),
+  inputTokens: Number(row['inputTokens']),
+  outputTokens: Number(row['outputTokens']),
+  cacheReadTokens: Number(row['cacheReadTokens']),
+  cacheWriteTokens: Number(row['cacheWriteTokens']),
+  costUsd: Number(row['costUsd']),
+  missingTokens: Number(row['missingTokens']),
+  missingCost: Number(row['missingCost']),
+})
+
+const readUsageDaily = (db: DatabaseSync, window: UsageWindow): UsageDailyRow[] => {
+  const where = usageWhere(window)
+  const rows = db
+    .prepare(
+      `SELECT substr(ended_at, 1, 10) AS date, ${USAGE_COLUMNS}
+       FROM runs WHERE ${where.clause}
+       GROUP BY date ORDER BY date`,
+    )
+    .all(...where.params) as unknown as Array<Record<string, unknown>>
+  return rows.map((row) => ({ date: String(row['date']), ...toUsageTotals(row) }))
+}
+
+const readUsageByAgent = (db: DatabaseSync, window: UsageWindow): UsageAgentRow[] => {
+  const where = usageWhere(window)
+  const rows = db
+    .prepare(
+      `SELECT agent_id AS agentId, ${USAGE_COLUMNS}
+       FROM runs WHERE ${where.clause}
+       GROUP BY agent_id ORDER BY agent_id`,
+    )
+    .all(...where.params) as unknown as Array<Record<string, unknown>>
+  return rows.map((row) => ({
+    agentId: row['agentId'] === null ? null : String(row['agentId']),
+    ...toUsageTotals(row),
+  }))
+}
 export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unknown {
   if (!(VIEW_IDS as readonly string[]).includes(view)) {
     throw new StoreError('invalid_input', `未知视图: ${String(view)}`)
@@ -1289,6 +1418,36 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'workflow.stage-metrics':
       // M23：阶段运行指标（只读派生，先放后收的判定依据）
       return readStageMetrics(db, readStringParam(params, 'workflowId'))
+    case 'usage.daily':
+      return readUsageDaily(db, readUsageWindow(params))
+    case 'usage.byAgent':
+      return readUsageByAgent(db, readUsageWindow(params))
+    case 'rules.preview': {
+      // M36：预演只读规则集与落点（不建线程、不建任务），内核纯函数算结果
+      const args = (params ?? {}) as {
+        source?: unknown
+        type?: unknown
+        subject?: unknown
+        summary?: unknown
+      }
+      const view = loadView(db, ['rule_sets', 'workflows', 'workflow_stages'])
+      return previewEvent(view, {
+        source: String(args.source ?? ''),
+        type: String(args.type ?? ''),
+        subject: String(args.subject ?? ''),
+        summary: typeof args.summary === 'string' ? args.summary : null,
+      })
+    }
+    case 'rules.next': {
+      const args = (params ?? {}) as { now?: unknown; timezone?: unknown }
+      const now = typeof args.now === 'string' ? args.now : new Date().toISOString()
+      const timezone =
+        typeof args.timezone === 'string'
+          ? args.timezone
+          : Intl.DateTimeFormat().resolvedOptions().timeZone
+      const view = loadView(db, ['rule_sets'])
+      return nextRuleFires(view, now, timezone)
+    }
     case 'agents.all':
       return readAgents(db)
     case 'runtimes.all':

@@ -23,7 +23,7 @@ import type {
   Task,
   WorkflowWithStages,
 } from './entities'
-import type { RuleSetView } from './rules'
+import type { RuleNextFire, RulePreview, RuleSetView } from './rules'
 import type { PluginSettingsView, PluginView } from './plugins'
 import type { ThreadRow } from './thread'
 import type { ReviewReport } from './review'
@@ -74,6 +74,12 @@ export const VIEW_IDS = [
   'run.approvals',
   'runtimes.default-workdir',
   'workflow.stage-metrics',
+  // M36：用量统计（宿主侧聚合 `runs.usage_json`，只读派生，无新表）
+  'usage.daily',
+  'usage.byAgent',
+  // M36：规则预演与下次触发（只读派生）
+  'rules.preview',
+  'rules.next',
 ] as const
 
 /**
@@ -175,6 +181,30 @@ export interface ViewArgs {
   'comments.byTask': { taskId: string }
   'reviews.byTask': { taskId: string }
   'run.approvals': { runId: string }
+  'usage.daily': UsageArgs
+  'usage.byAgent': UsageArgs
+  'rules.preview': RulePreviewArgs
+  'rules.next': RuleNextArgs
+}
+
+/** 预演参数：一条事件样本（只用于匹配，不入账）。 */
+export interface RulePreviewArgs {
+  source: string
+  type: string
+  subject: string
+  summary?: string
+}
+
+/** 下次触发参数：`now` 由调用方给，`timezone` 缺省取宿主时区（视图不读系统时钟本身）。 */
+export interface RuleNextArgs {
+  now?: string
+  timezone?: string
+}
+
+/** 用量视图参数：`days` = 统计窗口（1–90，缺省 7）；`now` 由调用方给（视图不读系统时钟）。 */
+export interface UsageArgs {
+  days?: number
+  now?: string
 }
 
 /**
@@ -242,6 +272,36 @@ export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
 }
 
 /** 视图 id → 返回类型。 */
+/**
+ * 用量汇总（M36-E）：一轮 = 一次已结束的 run。
+ *
+ * `missingTokens` / `missingCost` 是「报了轮数但没报数」的计数：执行器不给成本时
+ * 成本合计会偏小，把它们单列出来，账单才对得上；把缺失当 0 会让人以为「这轮不花钱」。
+ */
+export interface UsageTotals {
+  /** 已结束的轮数 */
+  rounds: number
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheWriteTokens: number
+  /** 报得出的那部分成本合计（美元） */
+  costUsd: number
+  /** 缺 token 计数的轮数 */
+  missingTokens: number
+  /** 缺成本计数的轮数 */
+  missingCost: number
+}
+
+/** 按 UTC 日期（`endedAt` 的 `YYYY-MM-DD`）聚合的一行。 */
+export interface UsageDailyRow extends UsageTotals {
+  date: string
+}
+
+/** 按智能体聚合的一行；`agentId=null` = 没有智能体的轮次（聊天未绑定 / 老数据）。 */
+export interface UsageAgentRow extends UsageTotals {
+  agentId: string | null
+}
 export interface ViewResults {
   'workflows.all': WorkflowWithStages[]
   'agents.all': Agent[]
@@ -317,6 +377,14 @@ export interface ViewResults {
   'runtimes.default-workdir': string
   /** 工作流各阶段的运行指标（M23，只读派生）：用于判断「哪条流程真的在自动跑」 */
   'workflow.stage-metrics': WorkflowStageMetrics
+  /** M36：按天用量（近 N 天，含缺失计数） */
+  'usage.daily': UsageDailyRow[]
+  /** M36：按智能体用量（同一窗口） */
+  'usage.byAgent': UsageAgentRow[]
+  /** M36：规则预演（哪些规则会接、落到哪） */
+  'rules.preview': RulePreview
+  /** M36：定时规则的下一次触发时刻 */
+  'rules.next': RuleNextFire[]
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

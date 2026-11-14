@@ -10,8 +10,8 @@
  * 里恢复；`run_events` / `messages` 的删除顺序由 writer 的 `clear()` 固定。
  */
 import type { DatabaseSync } from 'node:sqlite'
-import type { KernelPort } from '../../kernel/types'
-import { KERNEL_VERSION } from '../../kernel/types'
+import type { KernelPort } from '../../kernel/core/types'
+import { KERNEL_VERSION } from '../../kernel/core/types'
 import { projectionFormat, withTx } from '../schema'
 import { allFacts, lastSeq } from './facts'
 import { createProjectionWriter, type ProjectionWrite } from './projection-apply'

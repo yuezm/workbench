@@ -222,6 +222,7 @@ sequenceDiagram
 ## 边界守则（可检查）
 
 1. `src/kernel/**` 不得出现 `electron`、`node:fs`、`node:child_process`、`fetch`、`node:http`、`Date.now()`、`Math.random()`、`randomUUID()`。
+   1b. 两层方向：`core/` 不得 import `scopes/`（ESLint `no-restricted-imports`）；`decide.ts` 只做表驱动分派，不放业务分支。
 2. `src/renderer/**` 不得 import `electron` / Node 内置（沿用现有 ESLint 规则）。
 3. 只有 `host` 能写库、能 spawn、能发通知；`kernel` 只接收 `view`、只返回 `facts`。
 4. 插件不得 import `src/host/**` 内部实现、不得 import 其它插件、不得直连数据库；副作用只经 `sdk` 且必须声明 `capabilities`；跨插件纯函数只放 `src/plugins/shared/`。宿主不得 import 具体插件实现，只接收装配根注入的注册表清单。

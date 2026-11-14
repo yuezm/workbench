@@ -9,10 +9,10 @@
  */
 import { describe, expect, it } from 'vitest'
 import { decide } from '../../../src/kernel/decide'
-import { nextWakeAt } from '../../../src/kernel/next-wake'
-import { project } from '../../../src/kernel/project'
-import type { KernelPort } from '../../../src/kernel/types'
-import { viewSpec } from '../../../src/kernel/view-spec'
+import { nextWakeAt } from '../../../src/kernel/core/next-wake'
+import { project } from '../../../src/kernel/scopes/project'
+import type { KernelPort } from '../../../src/kernel/core/types'
+import { viewSpec } from '../../../src/kernel/scopes/view-spec'
 import { StoreError, createStore } from '../../../src/host/store/index'
 import { captureError, countRows, createMemoryDb } from './test-support'
 

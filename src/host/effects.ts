@@ -12,7 +12,7 @@
  * 再分发；订阅者之间异常互相隔离——一个通道抛错不影响其它分发，也不影响调用方拿到
  * 提交结果。变更通知按「一次提交」合并成一次推送（同一批事实不重复通知 UI）。
  */
-import type { Fact } from '../kernel/types'
+import type { Fact } from '../kernel/core/types'
 import type { DispatchResult } from './store/index'
 
 /** 分发只需要的 store 能力。 */

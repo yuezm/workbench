@@ -17,9 +17,9 @@ import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { decide } from '../../src/kernel/decide'
-import { project } from '../../src/kernel/project'
-import type { FactDraft, Iso, KernelPort } from '../../src/kernel/types'
-import { viewSpec } from '../../src/kernel/view-spec'
+import { project } from '../../src/kernel/scopes/project'
+import type { FactDraft, Iso, KernelPort } from '../../src/kernel/core/types'
+import { viewSpec } from '../../src/kernel/scopes/view-spec'
 import type { Card } from '../../src/protocol/entities'
 import type { Receipt } from '../../src/protocol/inputs'
 import { openDatabase } from '../../src/host/db'
@@ -365,6 +365,10 @@ describe('cards 投影：实时写入与重建等价（真实 SQLite 临时库 +
         status: 'resolved',
         delivery: 'failed',
         delivery_ref: null,
+        // 这条事实是手工构造的（老形状，没有 M41 三列）→ 归一成 0 / null / 0
+        delivery_attempts: 0,
+        next_delivery_at: null,
+        delivery_given_up: 0,
         option_index: 0,
         answered_by: 'channel',
         answered_at: AT_5,

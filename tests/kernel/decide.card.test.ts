@@ -21,9 +21,9 @@ import type {
 } from '../../src/protocol/facts'
 import type { Receipt } from '../../src/protocol/inputs'
 import { decide } from '../../src/kernel/decide'
-import { nextWakeAt } from '../../src/kernel/next-wake'
-import { answerPrompt, laterPrompt } from '../../src/kernel/prompt'
-import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/types'
+import { nextWakeAt } from '../../src/kernel/core/next-wake'
+import { answerPrompt, laterPrompt } from '../../src/kernel/scopes/prompt'
+import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
 const LATER = '2026-11-04T13:00:00.000Z'
@@ -127,6 +127,9 @@ const card = (over: Partial<Card> = {}): Card => ({
   status: 'open',
   delivery: 'pending',
   deliveryRef: null,
+  deliveryAttempts: 0,
+  nextDeliveryAt: null,
+  deliveryGivenUp: false,
   optionIndex: null,
   answeredBy: null,
   answeredAt: null,
@@ -168,6 +171,8 @@ const view = (seed: Seed = {}): View => ({
   threads: new Map(),
   taskComments: new Map(),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,
@@ -259,6 +264,9 @@ describe('kernel/decide 回执建卡（ask / notices / resolves）', () => {
       status: 'open',
       delivery: 'pending',
       deliveryRef: null,
+      deliveryAttempts: 0,
+      nextDeliveryAt: null,
+      deliveryGivenUp: false,
       optionIndex: null,
       answeredBy: null,
       answeredAt: null,
@@ -816,6 +824,9 @@ describe('kernel/decide 通道投递回写（D9）', () => {
       ...pending,
       delivery: 'delivered',
       deliveryRef: 'desktop',
+      deliveryAttempts: 1,
+      nextDeliveryAt: null,
+      deliveryGivenUp: false,
       updatedAt: NOW,
     })
   })
@@ -835,6 +846,9 @@ describe('kernel/decide 通道投递回写（D9）', () => {
       ...pending,
       delivery: 'failed',
       deliveryRef: null,
+      deliveryAttempts: 1,
+      nextDeliveryAt: '2026-11-04T12:00:30.000Z',
+      deliveryGivenUp: false,
       updatedAt: NOW,
     })
     expect((failed.facts[0]?.payload as CardDeliveryFailedPayload).error).toBe('通道不可用')
@@ -858,11 +872,54 @@ describe('kernel/decide 通道投递回写（D9）', () => {
     expect(deliveryFail(view({ cards: [] })).facts).toEqual([])
   })
 
-  it('已 delivered 的版本不再降级为 failed；同版本重复 failed 也幂等', () => {
+  it('已 delivered 的版本不再降级为 failed', () => {
     const delivered = card({ delivery: 'delivered', deliveryRef: 'in-app' })
     expect(deliveryFail(view({ cards: [delivered] })).facts).toEqual([])
+  })
 
-    const failed = card({ delivery: 'failed' })
-    expect(deliveryFail(view({ cards: [failed] })).facts).toEqual([])
+  it('投递失败按曲线排下一次重投（M41 重试账）', () => {
+    const first = deliveryFail(view({ cards: [card()] })).facts
+    expect(first.map((fact) => fact.type)).toEqual(['card.delivery_failed'])
+    expect((first[0].payload as CardDeliveryFailedPayload).card).toMatchObject({
+      delivery: 'failed',
+      deliveryAttempts: 1,
+      nextDeliveryAt: '2026-11-04T12:00:30.000Z',
+      deliveryGivenUp: false,
+    })
+
+    const later = deliveryFail(
+      view({ cards: [card({ delivery: 'failed', deliveryAttempts: 3 })] }),
+    ).facts
+    expect((later[0].payload as CardDeliveryFailedPayload).card).toMatchObject({
+      deliveryAttempts: 4,
+      nextDeliveryAt: '2026-11-04T12:30:00.000Z',
+      deliveryGivenUp: false,
+    })
+  })
+
+  it('重投预算用尽：放弃并停止排期', () => {
+    const exhausted = deliveryFail(
+      view({ cards: [card({ delivery: 'failed', deliveryAttempts: 4 })] }),
+    ).facts
+    expect((exhausted[0].payload as CardDeliveryFailedPayload).card).toMatchObject({
+      deliveryAttempts: 5,
+      nextDeliveryAt: null,
+      deliveryGivenUp: true,
+    })
+
+    // 已经放弃的卡再来一次失败：零事实（不再烧预算、不再排期）
+    const again = card({ delivery: 'failed', deliveryAttempts: 5, deliveryGivenUp: true })
+    expect(deliveryFail(view({ cards: [again] })).facts).toEqual([])
+  })
+
+  it('送达时清掉重投排期并把本次尝试计入账', () => {
+    const retried = card({ delivery: 'failed', deliveryAttempts: 2, nextDeliveryAt: NOW })
+    const facts = deliver(view({ cards: [retried] })).facts
+    expect((facts[0].payload as CardDeliveredPayload).card).toMatchObject({
+      delivery: 'delivered',
+      deliveryAttempts: 3,
+      nextDeliveryAt: null,
+      deliveryGivenUp: false,
+    })
   })
 })

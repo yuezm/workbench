@@ -19,7 +19,7 @@ import {
   type WorkflowStage,
   type WorkflowWithStages,
 } from '../../protocol/entities'
-import type { FactDraft, Id, Iso, KernelPort } from '../../kernel/types'
+import type { FactDraft, Id, Iso, KernelPort } from '../../kernel/core/types'
 import { withTx } from '../schema'
 import { appendFacts } from './facts'
 import { createProjectionWriter } from './projection-apply'

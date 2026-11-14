@@ -50,7 +50,7 @@ const chatRun = {
 } satisfies ActiveRun
 
 describe('protocol/views', () => {
-  it('VIEW_IDS 是 M1 最小集合 + M4 卡片视图 + M5 客户端视图且顺序稳定', () => {
+  it('VIEW_IDS 是 M1 最小集合 + M4 卡片视图 + M5 客户端视图 + M36 用量视图且顺序稳定', () => {
     expect([...VIEW_IDS]).toEqual([
       'workflows.all',
       'agents.all',
@@ -91,6 +91,10 @@ describe('protocol/views', () => {
       'run.approvals',
       'runtimes.default-workdir',
       'workflow.stage-metrics',
+      'usage.daily',
+      'usage.byAgent',
+      'rules.preview',
+      'rules.next',
     ])
   })
 

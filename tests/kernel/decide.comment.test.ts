@@ -14,7 +14,7 @@ import type {
   WorkflowStage,
 } from '../../src/protocol/entities'
 import type { TaskComment } from '../../src/protocol/task-comment'
-import type { Environment, IdKind, Limits, View } from '../../src/kernel/types'
+import type { Environment, IdKind, Limits, View } from '../../src/kernel/core/types'
 import { decide } from '../../src/kernel/decide'
 
 const CREATED = '2026-11-01T00:00:00.000Z'
@@ -191,6 +191,8 @@ const view = (
   threads: new Map(),
   taskComments: new Map((seed.comments ?? []).map((row) => [row.id, row])),
   reviewReports: new Map(),
+  events: new Map(),
+  ruleSkips: [],
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,

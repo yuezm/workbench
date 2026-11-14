@@ -34,6 +34,8 @@
  * 语句在 writer 创建时一次性 prepare：重建要 fold 上万条事实，不能每条都重新编译 SQL。
  */
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
+import type { EventRow } from '../../kernel/core/types'
+import type { EventSkipRow } from '../../protocol/rules'
 import type {
   Agent,
   Card,
@@ -47,15 +49,15 @@ import type {
   Workflow,
   WorkflowStage,
 } from '../../protocol/entities'
-import type { Change, Iso, ProjectionRow, ProjectionTable } from '../../kernel/types'
+import type { Change, Iso, ProjectionRow, ProjectionTable } from '../../kernel/core/types'
 import type { RuleFireRow, RuleSetRow } from '../../protocol/rules'
 import type { PluginSettingsRow } from '../../protocol/plugins'
 import type { ThreadRow } from '../../protocol/thread'
 import type { TaskComment } from '../../protocol/task-comment'
 import type { ReviewReport } from '../../protocol/review'
 import { StoreError } from './errors'
-import { legacyHandoffs } from '../../kernel/workflow/stage-handoffs'
-import { legacyExits, legacyJudge } from '../../kernel/workflow/stage-machine'
+import { legacyHandoffs } from '../../kernel/scopes/workflow/stage-handoffs'
+import { legacyExits, legacyJudge } from '../../kernel/scopes/workflow/stage-machine'
 
 /** 一条投影变更 + 它所属事实的时间（阶段行首次插入的 created_at 兜底）。 */
 export interface ProjectionWrite {
@@ -286,6 +288,9 @@ const CARD_FIELDS: ReadonlyArray<readonly [keyof Card, string]> = [
   ['status', 'status'],
   ['delivery', 'delivery'],
   ['deliveryRef', 'delivery_ref'],
+  ['deliveryAttempts', 'delivery_attempts'],
+  ['nextDeliveryAt', 'next_delivery_at'],
+  ['deliveryGivenUp', 'delivery_given_up'],
   ['optionIndex', 'option_index'],
   ['answeredBy', 'answered_by'],
   ['answeredAt', 'answered_at'],
@@ -294,8 +299,13 @@ const CARD_FIELDS: ReadonlyArray<readonly [keyof Card, string]> = [
 ]
 
 /** 行内值 → SQLite 可绑定的值（`options` 存 JSON）。 */
-const cardValue = (field: keyof Card, card: Card): SQLInputValue =>
-  field === 'options' ? JSON.stringify(card.options) : (card[field] as SQLInputValue)
+const cardValue = (field: keyof Card, card: Card): SQLInputValue => {
+  if (field === 'options') return JSON.stringify(card.options)
+  const value = card[field]
+  // M41：deliveryGivenUp 是布尔列（INTEGER 0/1），node:sqlite 不认 boolean
+  if (typeof value === 'boolean') return value ? 1 : 0
+  return value as SQLInputValue
+}
 
 /**
  * `ThreadRow` 字段 → `threads` 列（顺序与 schema DDL 一致；整行 upsert 共用）。
@@ -552,6 +562,20 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
   const threadUpdates = THREAD_FIELDS.filter(([field]) => field !== 'id')
     .map(([, column]) => `${column} = excluded.${column}`)
     .join(', ')
+  /** M42：事件投影（按 id upsert：老日志重建时同一事件只来一条，重复也无害）。 */
+  const upsertEvent = db.prepare(
+    `INSERT INTO events (id, source, type, subject, summary, detail_ref, link, hops, origin_run_id, dedupe_key, received_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET received_at = excluded.received_at`,
+  )
+
+  /** M42：跳过行按 id upsert——补跑会把 `replayed_at` 从 null 改成时刻。 */
+  const upsertEventSkip = db.prepare(
+    `INSERT INTO event_skips (id, rule_id, event_id, version, skipped_at, replayed_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET replayed_at = excluded.replayed_at`,
+  )
+
   const insertThread = db.prepare(
     `INSERT INTO threads (${threadColumns}) VALUES (${threadPlaceholders})
      ON CONFLICT(id) DO UPDATE SET ${threadUpdates}`,
@@ -582,6 +606,9 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     /** M14：评审报告没有单独的删除事实，随任务删除联删。 */
     review_reports: db.prepare('DELETE FROM review_reports WHERE id = ?'),
     reviewReportsByTask: db.prepare('DELETE FROM review_reports WHERE task_id = ?'),
+    /** M42：事件与跳过行没有删除事实，语句只为满足 `ProjectionTable` 全集。 */
+    events: db.prepare('DELETE FROM events WHERE id = ?'),
+    event_skips: db.prepare('DELETE FROM event_skips WHERE id = ?'),
   }
 
   const clearAll = {
@@ -602,6 +629,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     plugin_settings: db.prepare('DELETE FROM plugin_settings'),
     task_comments: db.prepare('DELETE FROM task_comments'),
     review_reports: db.prepare('DELETE FROM review_reports'),
+    events: db.prepare('DELETE FROM events'),
+    event_skips: db.prepare('DELETE FROM event_skips'),
   }
 
   const stageOccupant = db.prepare(
@@ -780,6 +809,33 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     threads: (row) => {
       const thread = row as ThreadRow
       insertThread.run(...THREAD_FIELDS.map(([field]) => threadValue(field, thread)))
+    },
+    events: (row) => {
+      const event = row as EventRow
+      upsertEvent.run(
+        event.id,
+        event.source,
+        event.type,
+        event.subject,
+        event.summary,
+        event.detailRef,
+        event.link,
+        event.hops,
+        event.originRunId,
+        event.dedupeKey,
+        event.receivedAt,
+      )
+    },
+    event_skips: (row) => {
+      const skip = row as EventSkipRow
+      upsertEventSkip.run(
+        skip.id,
+        skip.ruleId,
+        skip.eventId,
+        skip.version,
+        skip.skippedAt,
+        skip.replayedAt,
+      )
     },
     task_comments: (row) => {
       const comment = row as TaskComment

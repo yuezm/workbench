@@ -26,9 +26,9 @@ import { join, relative } from 'node:path'
 const SCAN_ROOTS = ['src/kernel', 'src/protocol']
 // 纯类型 / 纯常量 / 纯路由：没有运行时分支，变异只会产出噪音
 const SCAN_EXCLUDE = [
-  'src/kernel/types.ts', // 类型定义
+  'src/kernel/core/types.ts', // 类型定义
   'src/kernel/decide.ts', // 纯命令路由（规则都在 commands/*）
-  'src/kernel/view-spec.ts', // 纯查表
+  'src/kernel/scopes/view-spec.ts', // 纯查表
   'src/protocol/entities.ts', // 类型定义
   'src/protocol/facts.ts', // 类型 + 常量
   'src/protocol/commands.ts', // 命令契约

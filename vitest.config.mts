@@ -21,6 +21,9 @@ export default defineConfig({
         functions: 95,
         lines: 98,
       },
+      // 「项目覆盖率」指产品代码：测试夹具被 import 进来也会被 v8 计入分母
+      // （`tests/sim/world.ts` 这类随机世界天然跑不满 100%），口径上不该算。
+      exclude: ['tests/**'],
     },
   },
 })

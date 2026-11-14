@@ -17,10 +17,10 @@ import { openDatabase } from '../../../src/host/db'
 import { createProcessRegistry } from '../../../src/host/process-registry'
 import { createStore } from '../../../src/host/store/index'
 import { decide } from '../../../src/kernel/decide'
-import { nextWakeAt } from '../../../src/kernel/next-wake'
-import { project } from '../../../src/kernel/project'
-import type { KernelPort } from '../../../src/kernel/types'
-import { viewSpec } from '../../../src/kernel/view-spec'
+import { nextWakeAt } from '../../../src/kernel/core/next-wake'
+import { project } from '../../../src/kernel/scopes/project'
+import type { KernelPort } from '../../../src/kernel/core/types'
+import { viewSpec } from '../../../src/kernel/scopes/view-spec'
 import type {
   Agent,
   Project,

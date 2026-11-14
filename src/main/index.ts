@@ -2,11 +2,11 @@ import { app, BrowserWindow, safeStorage, shell } from 'electron'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { decide } from '../kernel/decide'
-import { chatPrompt } from '../kernel/prompt'
-import { nextWakeAt } from '../kernel/next-wake'
-import { project } from '../kernel/project'
-import { viewSpec } from '../kernel/view-spec'
-import type { KernelPort } from '../kernel/types'
+import { chatPrompt } from '../kernel/scopes/prompt'
+import { nextWakeAt } from '../kernel/core/next-wake'
+import { project } from '../kernel/scopes/project'
+import { viewSpec } from '../kernel/scopes/view-spec'
+import type { KernelPort } from '../kernel/core/types'
 import { backfillRunOutputs } from '../host/artifacts'
 import { createClock, type Clock } from '../host/clock'
 import { createChannels, type Channels } from '../host/channels'
@@ -24,6 +24,7 @@ import { createProcessRegistry } from '../host/process-registry'
 import { reconcile } from '../host/reconcile'
 import { createScheduler, type Scheduler } from '../host/scheduler'
 import { openDatabase } from '../host/db'
+import { secureDataDir } from '../host/secure-dir'
 import { createNetCapability } from '../host/net'
 import { readRunApprovals } from './run-approvals'
 import { resolveWorkdir } from './workdir'
@@ -214,6 +215,9 @@ if (app.requestSingleInstanceLock()) {
       }
     })
     const userData = app.getPath('userData')
+    // M36-H：把数据目录收紧到「只有本账号与 SYSTEM」（Unix 0700 / Windows icacls）。
+    // 失败只记日志：改不了 ACL 也要能启动，真正的隔离靠独立账号或容器。
+    secureDataDir(userData, { log: (line) => process.stderr.write(`${line}\n`) })
     // 产物落盘根：评审报告（review.md）与本轮正文（output.md）都落这里；
     // 内核只拿它拼「任务索引」里的路径，不读文件。
     const artifactsRoot = path.join(userData, 'artifacts')

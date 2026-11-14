@@ -432,6 +432,8 @@ describe('executeClaudeRun 成功路径', () => {
       outputTokens: 23,
       cacheReadTokens: 11,
       cacheWriteTokens: 6,
+      // M36：Claude Code 报 total_cost_usd 时带上来（统计侧按它算成本，缺了单独计数）
+      costUsd: 0.08,
     })
     expect(receipt.durationMs).toBeGreaterThanOrEqual(0)
 

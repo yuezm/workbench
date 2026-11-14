@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { validateStageSet } from '../../../../../../src/kernel/workflow/stage-validation'
+import { validateStageSet } from '../../../../../../src/kernel/scopes/workflow/stage-validation'
 import type { StageInput } from '../../../../../../src/protocol/entities'
 import {
   SOP_TEMPLATES,

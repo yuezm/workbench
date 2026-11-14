@@ -405,7 +405,8 @@ describe('AgentDialog', () => {
       systemPrompt: 'you are coder',
       ...DEFAULT_EXECUTION,
     })
-  })
+    // 并行全量跑时 userEvent 逐字符输入会排队：给用例更长的超时，断言一条不动
+  }, 20_000)
 
   it('编辑态：标题与按钮文案切换，保留不可用的原运行时并提交 trim 后的值', async () => {
     setup()

@@ -385,3 +385,32 @@ describe('RulesManager', () => {
     })
   })
 })
+
+describe('RulesManager：下次触发与预演入口（M36-F）', () => {
+  it('定时规则显示下次触发；事件规则不显示', async () => {
+    seed([issueRule, { ...dailyRule, enabled: true }])
+    kernel.setViewAnyParams('rules.next', [
+      { ruleId: 'r1', enabled: true, nextAt: null },
+      { ruleId: 'r2', enabled: true, nextAt: '2026-11-15T01:00:00.000Z' },
+    ])
+
+    render(<RulesManager />)
+    await waitFor(() => expect(screen.getByText('Issue 进研发')).toBeInTheDocument())
+    // 本地时区不同会让具体时刻变化，只断言「有下一次触发的行」存在且只有一条
+    expect(screen.getAllByText(/^下次触发 /)).toHaveLength(1)
+  })
+
+  it('「试跑事件」开合预演面板（只读，不写规则）', async () => {
+    seed([issueRule])
+    kernel.setViewAnyParams('rules.next', [])
+    kernel.setViewAnyParams('rules.preview', { matches: [], wouldCreate: false })
+
+    render(<RulesManager />)
+    await userEvent.click(screen.getByRole('button', { name: '试跑事件' }))
+    expect(screen.getByRole('button', { name: '试跑' })).toBeInTheDocument()
+    expect(kernel.dispatched).toEqual([])
+
+    await userEvent.click(screen.getByRole('button', { name: '收起试跑' }))
+    expect(screen.queryByRole('button', { name: '试跑' })).not.toBeInTheDocument()
+  })
+})

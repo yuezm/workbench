@@ -42,6 +42,7 @@ const expected = [
   'app.event',
   'rules.replace',
   'rule.trigger',
+  'rule.replay',
   'plugins.replace',
   'plugin.set',
   'thread.note',

@@ -16,7 +16,7 @@
  *
  * 纯函数，只读事实行；同一批事实里同一任务只产一条。
  */
-import type { Fact } from '../kernel/types'
+import type { Fact } from '../kernel/core/types'
 import type { Task } from '../protocol/entities'
 import type { NotifyTarget } from '../protocol/ipc'
 

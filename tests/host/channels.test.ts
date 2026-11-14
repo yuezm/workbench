@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Card } from '../../src/protocol/entities'
 import type { ChannelContext, ChannelPlugin } from '../../src/protocol/channels'
 import type { PluginManifest } from '../../src/protocol/manifest'
-import type { Fact } from '../../src/kernel/types'
+import type { Fact } from '../../src/kernel/core/types'
 import type { ChannelRegistryEntry } from '../../src/plugins/registry'
 import type { SdkHost } from '../../src/sdk/types'
 import type { ChannelsEffects, ChannelsStore } from '../../src/host/channels'
@@ -777,4 +777,151 @@ describe('createChannels：M7 无 configOf 时的配置兜底', () => {
     await hub.startAll()
     expect(configs).toEqual({ plain: {} })
   })
+})
+
+describe('createChannels：投递重试账（M41）', () => {
+  /** 让内核回写「下一次重投时刻」：hub 只按它排期，不自己算曲线。 */
+  const retryEffects = (
+    dispatch: ReturnType<typeof vi.fn>,
+    nextDeliveryAt: string | null,
+    cardId: string,
+  ): void => {
+    dispatch.mockImplementation((input: Record<string, unknown>) => {
+      if (input['type'] !== 'card.delivery_failed') return { facts: [] }
+      return {
+        facts: [
+          {
+            type: 'card.delivery_failed',
+            payload: {
+              card: {
+                ...sample.card({ id: cardId, version: 1 }),
+                delivery: 'failed',
+                nextDeliveryAt,
+              },
+              error: '所有通道投递失败或超时',
+            },
+          },
+        ],
+      }
+    })
+  }
+
+  it('失败后按 nextDeliveryAt 再投一次，成功即停', async () => {
+    let attempts = 0
+    const flaky = fakeEntry('in-app', (ctx, card) => {
+      attempts += 1
+      if (attempts >= 2) void ctx.delivered(card.id, card.version, 'in-app')
+    })
+    const { hub, dispatch } = harness({ entries: [flaky], timeoutMs: 10 })
+    retryEffects(dispatch, new Date(Date.now() + 10).toISOString(), 'card-r')
+
+    await hub.startAll()
+    hub.dispatch([cardOpened(sample.card({ id: 'card-r', version: 1 }))])
+
+    await vi.waitFor(() => expect(flaky.received.length).toBeGreaterThanOrEqual(2), {
+      timeout: 1_000,
+    })
+    const delivered = dispatch.mock.calls
+      .map(([input]) => input as Record<string, unknown>)
+      .filter((input) => input['type'] === 'card.delivered')
+    expect(delivered).toHaveLength(1)
+    // 成功之后不再有新的失败回写
+    const failed = dispatch.mock.calls
+      .map(([input]) => input as Record<string, unknown>)
+      .filter((input) => input['type'] === 'card.delivery_failed')
+    expect(failed).toHaveLength(1)
+  })
+
+  it('内核判定放弃（nextDeliveryAt=null）就不再重投', async () => {
+    const alwaysFails = fakeEntry('in-app')
+    const { hub, dispatch } = harness({ entries: [alwaysFails], timeoutMs: 10 })
+    retryEffects(dispatch, null, 'card-given-up')
+
+    await hub.startAll()
+    hub.dispatch([cardOpened(sample.card({ id: 'card-given-up', version: 1 }))])
+
+    await vi.waitFor(() => expect(alwaysFails.received).toHaveLength(1))
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(alwaysFails.received).toHaveLength(1)
+  })
+})
+
+describe('createChannels：补投与重投排期（M41）', () => {
+  it('启动补投：未到点的失败卡先排期，到点才投', async () => {
+    const inApp = ackEntry('in-app')
+    const pendingRetry = sample.card({
+      id: 'card-later',
+      version: 1,
+      delivery: 'failed',
+      deliveryAttempts: 1,
+      nextDeliveryAt: new Date(Date.now() + 20).toISOString(),
+      deliveryGivenUp: false,
+    })
+    const { hub } = harness({ entries: [inApp], cards: [pendingRetry] })
+
+    await hub.startAll()
+    expect(inApp.received).toHaveLength(0)
+
+    await vi.waitFor(() => expect(inApp.received).toHaveLength(1), { timeout: 1_000 })
+  })
+
+  it('stopAll 取消已排期的重投（退出后不再投）', async () => {
+    const inApp = ackEntry('in-app')
+    const pendingRetry = sample.card({
+      id: 'card-later-2',
+      version: 1,
+      delivery: 'failed',
+      deliveryAttempts: 1,
+      nextDeliveryAt: new Date(Date.now() + 20).toISOString(),
+      deliveryGivenUp: false,
+    })
+    const { hub } = harness({ entries: [inApp], cards: [pendingRetry] })
+
+    await hub.startAll()
+    await hub.stopAll()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(inApp.received).toHaveLength(0)
+  })
+})
+it('补投跳过已放弃的卡（判据只在 deliver 一处）', async () => {
+  const inApp = ackEntry('in-app')
+  const givenUp = sample.card({
+    id: 'card-given-up-backfill',
+    version: 1,
+    delivery: 'failed',
+    deliveryAttempts: 5,
+    nextDeliveryAt: null,
+    deliveryGivenUp: true,
+  })
+  const { hub } = harness({ entries: [inApp], cards: [givenUp] })
+
+  await hub.startAll()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(inApp.received).toHaveLength(0)
+})
+
+it('回写事实缺卡片体时不排期（防御分支），并按注入的 now 计算延迟', async () => {
+  const failing = fakeEntry('in-app')
+  const { hub, dispatch } = harness({ entries: [failing], timeoutMs: 10 })
+  dispatch.mockReturnValue({
+    facts: [{ type: 'card.delivery_failed', payload: { error: '缺卡体' } }],
+  })
+
+  // 注入 now：覆盖「宿主给了时钟」那条分支
+  const withClock = createChannels({
+    store: { query: () => [] } as unknown as ChannelsStore,
+    effects: { dispatch } as unknown as ChannelsEffects,
+    entries: [failing],
+    sdkHost: fakeSdkHost,
+    timeoutMs: 10,
+    now: () => AT,
+  })
+  await withClock.startAll()
+  withClock.dispatch([cardOpened(sample.card({ id: 'card-no-body', version: 1 }))])
+
+  await vi.waitFor(() => expect(failing.received).toHaveLength(1))
+  await new Promise((resolve) => setTimeout(resolve, 40))
+  expect(failing.received).toHaveLength(1)
+  await withClock.stopAll()
+  await hub.stopAll()
 })

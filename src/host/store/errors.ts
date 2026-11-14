@@ -3,7 +3,7 @@
  *
  * IPC 层按 `code` 分支，不匹配中文文案（SPEC-host「错误与诊断」）；`message` 只给人看。
  */
-import type { Reason } from '../../kernel/types'
+import type { Reason } from '../../kernel/core/types'
 
 export type StoreErrorCode = Reason
 

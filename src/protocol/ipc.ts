@@ -79,6 +79,8 @@ export interface CommandResults {
   'rules.replace': RuleSetView
   /** M6：立即运行一条规则后新建的任务 */
   'rule.trigger': Task
+  /** M42：补跑结果（补了几条、建了几个任务），零事实命令由宿主回填 */
+  'rule.replay': { replayed: number; created: number }
   /** M7：整批替换后的插件设置快照 */
   'plugins.replace': PluginSettingsView
   /** M7：改一条插件设置后该插件的视图行（含状态与 config；secret 只回键名） */

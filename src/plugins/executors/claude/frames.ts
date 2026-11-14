@@ -50,6 +50,8 @@ export interface ClaudeFrame {
   message?: { content?: ClaudeBlock[]; usage?: ClaudeUsage } | null
   usage?: ClaudeUsage | null
   modelUsage?: Record<string, ClaudeModelUsage> | null
+  /** M36：本轮总成本（美元）；有些版本 / 网关不给，缺省 undefined */
+  total_cost_usd?: number | null
 }
 
 /** 一个 run 的累计状态（帧流式写入，收尾时归一成回执） */
@@ -116,26 +118,30 @@ export function contentText(content: unknown): string {
   return parts.join('\n')
 }
 
-/** result 帧的用量：modelUsage 各项求和优先，缺失时回落到 usage 的四个计数 */
+/** result 帧的用量：modelUsage 各项求和优先，缺失时回落到 usage 的四个计数。 */
 function resultUsage(frame: ClaudeFrame): RunUsage {
   const modelUsage = frame.modelUsage
   const entries = modelUsage ? Object.values(modelUsage) : []
+  let usage: RunUsage
   if (entries.length > 0) {
-    const usage = emptyUsage()
+    usage = emptyUsage()
     for (const entry of entries) {
       usage.inputTokens += num(entry.inputTokens)
       usage.outputTokens += num(entry.outputTokens)
       usage.cacheReadTokens += num(entry.cacheReadInputTokens)
       usage.cacheWriteTokens += num(entry.cacheCreationInputTokens)
     }
-    return usage
+  } else {
+    usage = {
+      inputTokens: num(frame.usage?.input_tokens),
+      outputTokens: num(frame.usage?.output_tokens),
+      cacheReadTokens: num(frame.usage?.cache_read_input_tokens),
+      cacheWriteTokens: num(frame.usage?.cache_creation_input_tokens),
+    }
   }
-  return {
-    inputTokens: num(frame.usage?.input_tokens),
-    outputTokens: num(frame.usage?.output_tokens),
-    cacheReadTokens: num(frame.usage?.cache_read_input_tokens),
-    cacheWriteTokens: num(frame.usage?.cache_creation_input_tokens),
-  }
+  // M36：成本只在 CLI 报了的时候写；没报就不放这个键（统计侧按「缺」计数，不折成 0）
+  const cost = frame.total_cost_usd
+  return typeof cost === 'number' && Number.isFinite(cost) ? { ...usage, costUsd: cost } : usage
 }
 
 const blocksOf = (frame: ClaudeFrame): ClaudeBlock[] =>

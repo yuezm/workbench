@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from 'react'
 import type { WorkflowWithStages } from '../../../../../protocol/entities'
+import type { RuleNextFire } from '../../../../../protocol/rules'
 import type { AutomationRule } from '../../../../../protocol/rules'
 import { Button } from '../../../components/ui/button'
 import { FormError } from '../../../components/ui/form-error'
@@ -8,6 +9,7 @@ import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
 import { useKernelView, useKernelViewState } from '../../../shell/useKernelView'
 import { RuleDialog } from './RuleDialog'
+import { RulePreviewPanel } from './RulePreviewPanel'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -89,6 +91,16 @@ function conditionLabel(rule: AutomationRule): string {
  * 替换（不乐观更新），事实到达后由失效表自动重取。写操作串行：进行中禁用行内
  * 动作，避免两次整批替换互相覆盖。
  */
+/** 空值引用稳定：避免每次渲染都换一个新的 `[]` 触发重订阅 */
+const EMPTY_NEXT_FIRES: RuleNextFire[] = []
+
+/** 下次触发展示：本地时间 `MM-DD HH:mm`（时区由浏览器给） */
+const formatNextAt = (iso: string): string => {
+  const at = new Date(iso)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+}
+
 export function RulesManager(): ReactElement {
   const rulesState = useKernelViewState('rules.all')
   const workflows = useKernelView('workflows.all') ?? []
@@ -103,6 +115,11 @@ export function RulesManager(): ReactElement {
   const [busy, setBusy] = useState(false)
   /** 正在立即运行的规则 id（行内按钮文案） */
   const [runningId, setRunningId] = useState<string | null>(null)
+  /** M36：预演面板开合（只读，不参与整批写入） */
+  const [previewOpen, setPreviewOpen] = useState(false)
+  /** 定时规则的「下次触发」：窗口时刻取一次，避免每次渲染换参数重订阅 */
+  const [nowForNext] = useState(() => new Date().toISOString())
+  const nextFires = useKernelView('rules.next', { now: nowForNext }) ?? EMPTY_NEXT_FIRES
 
   const error = actionError ?? rulesState.error
   const noWorkflows = workflows.length === 0
@@ -115,6 +132,12 @@ export function RulesManager(): ReactElement {
     if (workflow === undefined) return rule.to.workflowId
     const stage = workflow.stages.find((item) => item.id === rule.to.stageId)
     return stage === undefined ? workflow.name : `${workflow.name} / ${stage.name}`
+  }
+
+  /** M36：定时规则的下次触发（本地时间）；事件规则 / 停用 / 非法 cron 给 null。 */
+  const nextFireLabel = (rule: AutomationRule): string | null => {
+    const next = nextFires.find((item) => item.ruleId === rule.id)?.nextAt ?? null
+    return next === null ? null : formatNextAt(next)
   }
 
   const dispatchRules = async (next: AutomationRule[]): Promise<void> => {
@@ -207,6 +230,15 @@ export function RulesManager(): ReactElement {
           </Button>
           <Button
             type="button"
+            variant="secondary"
+            size="sm"
+            aria-expanded={previewOpen}
+            onClick={() => setPreviewOpen((value) => !value)}
+          >
+            {previewOpen ? '收起试跑' : '试跑事件'}
+          </Button>
+          <Button
+            type="button"
             variant="default"
             size="sm"
             disabled={busy}
@@ -216,6 +248,8 @@ export function RulesManager(): ReactElement {
           </Button>
         </div>
       </div>
+
+      {previewOpen && <RulePreviewPanel />}
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {rules.length} 条</span>
@@ -259,6 +293,11 @@ export function RulesManager(): ReactElement {
                     → {targetLabel(rule)}
                     {rule.prompt ? ' · 含提示词' : ''}
                   </span>
+                  {nextFireLabel(rule) !== null && (
+                    <span className="truncate text-xs text-faint-foreground">
+                      下次触发 {nextFireLabel(rule)}
+                    </span>
+                  )}
                 </span>
 
                 <div className="flex shrink-0 items-center gap-1">

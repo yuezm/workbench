@@ -5,7 +5,7 @@
  * 提交顺序即 seq 顺序；`payload` / `actor_json` 以 JSON 文本存放。
  */
 import type { DatabaseSync } from 'node:sqlite'
-import type { Actor, Fact, FactDraft, Seq } from '../../kernel/types'
+import type { Actor, Fact, FactDraft, Seq } from '../../kernel/core/types'
 
 interface FactRow {
   seq: number

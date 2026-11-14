@@ -98,3 +98,37 @@ describe('buildPluginEnv 白名单', () => {
     expect(env.PATH).toBe('C:/stub-bin')
   })
 })
+
+it('凭据类环境变量一个都进不去（按名字点一遍，不只靠白名单兜底）', () => {
+  const env = buildPluginEnv(
+    {},
+    {
+      PATH: '/usr/bin',
+      // 宿主自己的密钥 / 各家 CLI 的凭据 / 代理与调试开关
+      WORKBENCH_SAFE_STORAGE_KEY: 'secret',
+      OPENAI_API_KEY: 'sk-1',
+      ANTHROPIC_API_KEY: 'sk-2',
+      GITHUB_TOKEN: 'ghp_1',
+      AWS_SECRET_ACCESS_KEY: 'aws',
+      DATABASE_URL: 'postgres://x',
+      HTTPS_PROXY: 'http://proxy',
+      NODE_OPTIONS: '--inspect',
+      ELECTRON_RUN_AS_NODE: '0',
+    },
+  )
+
+  for (const key of [
+    'WORKBENCH_SAFE_STORAGE_KEY',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'GITHUB_TOKEN',
+    'AWS_SECRET_ACCESS_KEY',
+    'DATABASE_URL',
+    'HTTPS_PROXY',
+    'NODE_OPTIONS',
+  ]) {
+    expect(env[key], `${key} 不该进入插件子进程环境`).toBeUndefined()
+  }
+  // 固定项恒为 1：源环境里的 0 覆盖不掉
+  expect(env['ELECTRON_RUN_AS_NODE']).toBe('1')
+})

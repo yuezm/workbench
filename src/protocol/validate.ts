@@ -833,6 +833,30 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
       return checkList(command.rules, 'rules', RULE_LIMITS.rules, checkRule)
     case 'rule.trigger':
       return requiredId(command.ruleId, 'ruleId')
+    case 'rule.replay': {
+      const idError = requiredId(command.ruleId, 'ruleId')
+      if (idError !== null) return idError
+      // 时间窗可选；给了就必须是 ISO 且 since ≤ until（否则静默补不到东西，比报错更难查）
+      const isoField = (value: unknown, label: string): string | null => {
+        if (value === undefined) return null
+        if (typeof value !== 'string') return `${label} 必须是字符串`
+        if (value.length > COMMAND_LIMITS.iso) return `${label} 过长`
+        if (Number.isNaN(Date.parse(value))) return `${label} 不是合法时间`
+        return null
+      }
+      const since = isoField(command.since, 'since')
+      if (since !== null) return since
+      const until = isoField(command.until, 'until')
+      if (until !== null) return until
+      if (
+        typeof command.since === 'string' &&
+        typeof command.until === 'string' &&
+        command.since > command.until
+      ) {
+        return 'since 不能晚于 until'
+      }
+      return null
+    }
     case 'plugins.replace':
       // 整批替换：逐条只校验形状；id 唯一 / 授权 ⊆ 声明能力由内核与宿主视图分别判
       if (!Array.isArray(command.settings)) return 'settings 必须是数组'

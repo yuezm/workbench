@@ -234,6 +234,7 @@ export const sample = {
       title: '新对话',
       agentId: 'ag-1',
       projectId: null,
+      threadId: null,
       sessionId: null,
       archivedAt: null,
       createdAt: SAMPLE_AT,

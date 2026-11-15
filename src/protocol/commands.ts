@@ -282,6 +282,11 @@ export interface ChatCreateCommand extends CommandBase {
    * 给了就必须存在（内核校验）；省 / null = 默认目录。
    */
   projectId?: string | null
+  /**
+   * 所属话题（M47）：话题是 `threads` 行，会话是它下面的一段对话。
+   * 给了就必须存在（内核校验）；省 / null = 没有话题。
+   */
+  threadId?: string | null
 }
 
 /** 发一轮：先落用户消息再入队 `purpose='chat'` 的 run；被拒绝时不落消息。 */

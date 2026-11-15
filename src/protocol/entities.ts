@@ -1058,6 +1058,13 @@ export interface Conversation {
    * 老事实 / 存量行缺该字段，按 null 归一（默认目录）。
    */
   projectId: string | null
+  /**
+   * 所属话题（M47）：会话是话题下的一段对话，话题本身是 `threads` 行（飞书话题 / 手工入口）。
+   * `null` = 没有话题（直接从聊天栏开的对话，行为与 M47 之前一致）。
+   * 聊天 run 继承它，于是智能体在这一轮派出来的任务落进同一话题，而不是各开隐式线程。
+   * 老事实 / 存量行缺该字段，按 null 归一。
+   */
+  threadId?: string | null
   /** 上一轮的协议会话 id；下一轮用它续接，避免整段历史重发 */
   sessionId: string | null
   /**

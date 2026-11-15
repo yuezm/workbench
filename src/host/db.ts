@@ -16,6 +16,8 @@ import {
   CONVERSATIONS_M9_ADDED_COLUMNS,
   CONVERSATIONS_M11_ADD_COLUMN_SQL,
   CONVERSATIONS_M11_ADDED_COLUMNS,
+  CONVERSATIONS_M47_ADD_COLUMN_SQL,
+  CONVERSATIONS_M47_ADDED_COLUMNS,
   FACTS_SQL,
   INDEX_SQL,
   PLUGIN_SECRETS_SQL,
@@ -479,12 +481,13 @@ export function upgradeLegacyCards(db: DatabaseSync): boolean {
 }
 
 /**
- * 旧 `conversations` 补列清单：M9 归档时间 + M11 所属项目（两批都走上表补列）。
- * 两列都可空、无默认值：老对话按「未归档」/「默认目录」归一。
+ * 旧 `conversations` 补列清单：M9 归档时间 + M11 所属项目 + M47 所属话题（都走上表补列）。
+ * 三列都可空、无默认值：老对话按「未归档」/「默认目录」/「没有话题」归一。
  */
 const CONVERSATIONS_ADDED_COLUMNS = [
   ...CONVERSATIONS_M9_ADDED_COLUMNS,
   ...CONVERSATIONS_M11_ADDED_COLUMNS,
+  ...CONVERSATIONS_M47_ADDED_COLUMNS,
 ] as const
 
 type ConversationAddedColumn = (typeof CONVERSATIONS_ADDED_COLUMNS)[number]
@@ -492,10 +495,11 @@ type ConversationAddedColumn = (typeof CONVERSATIONS_ADDED_COLUMNS)[number]
 const CONVERSATIONS_ADD_COLUMN_SQL: Readonly<Record<ConversationAddedColumn, string>> = {
   ...CONVERSATIONS_M9_ADD_COLUMN_SQL,
   ...CONVERSATIONS_M11_ADD_COLUMN_SQL,
+  ...CONVERSATIONS_M47_ADD_COLUMN_SQL,
 }
 
 /**
- * 旧 `conversations` 一次性补列（M9 归档 / M11 项目）：缺哪列补哪列。
+ * 旧 `conversations` 一次性补列（M9 归档 / M11 项目 / M47 话题）：缺哪列补哪列。
  */
 function upgradeLegacyConversations(db: DatabaseSync): boolean {
   const columns = tableColumns(db, 'conversations')

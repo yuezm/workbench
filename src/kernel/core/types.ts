@@ -63,8 +63,10 @@ export type Iso = string
  * M43：卡片按通道记账（`cards.delivery_refs_json` + `answered_by_ref`）——一张卡会同时进
  * 工作台 / 桌面通知 / IM，回答后要回到每一处原消息改口；老行按 ALTER 默认值只能得到
  * 「没发过任何通道」，重建才能按事实折出真实投递记录。
+ * M47：会话挂话题（`conversations.thread_id`）——老行按 ALTER 只能得到「没有话题」，
+ * 而事实里也没有这条信息；重建同样得 null，但它保证新写路径与读侧列形状对齐。
  */
-export const KERNEL_VERSION = 'M43.0.0'
+export const KERNEL_VERSION = 'M47.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

@@ -7,6 +7,8 @@ import {
   AGENTS_M27_ADDED_COLUMNS,
   CONVERSATIONS_M11_ADD_COLUMN_SQL,
   CONVERSATIONS_M11_ADDED_COLUMNS,
+  CONVERSATIONS_M47_ADD_COLUMN_SQL,
+  CONVERSATIONS_M47_ADDED_COLUMNS,
   FACTS_SQL,
   PROJECTION_DDL,
   PROJECTION_TABLES,
@@ -980,8 +982,8 @@ describe('线程投影（M6.5）', () => {
   })
 })
 
-describe('会话投影（M9 / M11）', () => {
-  it('conversations 列：project_id 落在 agent_id 与 session_id 之间，可空、无 DEFAULT', () => {
+describe('会话投影（M9 / M11 / M47）', () => {
+  it('conversations 列：project_id 与 thread_id 落在 agent_id 与 session_id 之间，可空、无 DEFAULT', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(columnShape(db, 'conversations').map((column) => column.split('|')[0])).toEqual([
@@ -989,6 +991,7 @@ describe('会话投影（M9 / M11）', () => {
       'title',
       'agent_id',
       'project_id',
+      'thread_id',
       'session_id',
       'archived_at',
       'created_at',
@@ -997,8 +1000,9 @@ describe('会话投影（M9 / M11）', () => {
     const byName = new Map(
       columnShape(db, 'conversations').map((shape) => [shape.split('|')[0], shape] as const),
     )
-    // 弱引用：可空、无默认值（NULL = 默认目录）
+    // 弱引用：可空、无默认值（NULL = 默认目录 / 没有话题）
     expect(byName.get('project_id')).toBe('project_id|TEXT|0|null|0')
+    expect(byName.get('thread_id')).toBe('thread_id|TEXT|0|null|0')
     expect(byName.get('archived_at')).toBe('archived_at|TEXT|0|null|0')
   })
 
@@ -1017,6 +1021,26 @@ describe('会话投影（M9 / M11）', () => {
       expect(columnShape(memory, 'conversations').map((column) => column.split('|')[0])).toEqual([
         'id',
         'project_id',
+      ])
+    } finally {
+      memory.close()
+    }
+  })
+
+  it('补列清单与 DDL 同步：M47 只给 conversations 加 thread_id', () => {
+    const db = memoryDb()
+    db.exec(SCHEMA_SQL)
+    expect([...CONVERSATIONS_M47_ADDED_COLUMNS]).toEqual(['thread_id'])
+    expect(CONVERSATIONS_M47_ADD_COLUMN_SQL.thread_id).toBe(
+      'ALTER TABLE conversations ADD COLUMN thread_id TEXT',
+    )
+    const memory = new DatabaseSync(':memory:')
+    try {
+      memory.exec('CREATE TABLE conversations (id TEXT PRIMARY KEY)')
+      memory.exec(CONVERSATIONS_M47_ADD_COLUMN_SQL.thread_id)
+      expect(columnShape(memory, 'conversations').map((column) => column.split('|')[0])).toEqual([
+        'id',
+        'thread_id',
       ])
     } finally {
       memory.close()

@@ -433,6 +433,44 @@ describe('openDatabase', () => {
     }
   })
 
+  it('M47：旧库 conversations 缺 thread_id → open 时 ALTER 补齐，老对话按「没有话题」归一', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'hostdb-m47-'))
+    const file = path.join(root, 'ai-workflow.db')
+    const seeded = new DatabaseSync(file)
+    try {
+      seeded.exec(SCHEMA_SQL)
+      seeded
+        .prepare(`INSERT INTO runtimes (id, name, executor_key, created_at) VALUES (?, ?, ?, ?)`)
+        .run('rt-1', '本机', 'dsh', SEED_AT)
+      seeded
+        .prepare(`INSERT INTO agents (id, name, runtime_id, created_at) VALUES (?, ?, ?, ?)`)
+        .run('ag-1', '助手', 'rt-1', SEED_AT)
+      seeded
+        .prepare(
+          `INSERT INTO conversations (id, title, agent_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .run('cv-1', '旧对话', 'ag-1', SEED_AT, SEED_AT)
+      // 回到 M47 之前的表结构（数据行保留）
+      seeded.exec('ALTER TABLE conversations DROP COLUMN thread_id')
+      expect(columnNames(seeded, 'conversations').has('thread_id')).toBe(false)
+    } finally {
+      seeded.close()
+    }
+
+    const local = openDatabase(file)
+    try {
+      expect(columnNames(local, 'conversations').has('thread_id')).toBe(true)
+      // 老行按默认值归一：没挂话题
+      expect(
+        local.prepare('SELECT title, thread_id FROM conversations WHERE id = ?').get('cv-1'),
+      ).toEqual({ title: '旧对话', thread_id: null })
+    } finally {
+      local.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('upgradeLegacyCards：没有 cards 表时不动（返回 false），有 kind 列时也返回 false', () => {
     const db = new DatabaseSync(':memory:')
     try {

@@ -71,7 +71,7 @@ function chatRunRow(
     ruleId: null,
     rulesVersion: 0,
     executorKey: runtime.executorKey,
-    threadId: null,
+    threadId: conversation.threadId ?? null,
     cwd: projects.get(conversation.projectId ?? '')?.path ?? agent.workdir ?? '',
     access: ACCESS_BY_PERMISSION[agent.permissionMode],
     skill: null,
@@ -118,11 +118,17 @@ export function createConversation(
   if (projectId !== null && !view.projects.has(projectId)) {
     return reject('not_found', '项目不存在: ' + projectId)
   }
+  // M47：话题是会话的上一层（threads 行的身份是 (source, externalRef)，由调用方给 id）
+  const threadId = input.threadId?.trim() || null
+  if (threadId !== null && !view.threads.has(threadId)) {
+    return reject('not_found', '话题不存在: ' + threadId)
+  }
   const conversation: Conversation = {
     id: env.nextId('conversation'),
     title: input.title?.trim() || '新对话',
     agentId: agent.id,
     projectId,
+    threadId,
     sessionId: null,
     createdAt: now,
     updatedAt: now,

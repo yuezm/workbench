@@ -17,6 +17,7 @@ import type {
 import { decide } from '../../src/kernel/decide'
 import { receiptBlockHint } from '../../src/kernel/scopes/prompt'
 import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
+import type { ThreadRow } from '../../src/protocol/thread'
 import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
@@ -104,6 +105,24 @@ const message = (over: Partial<Message> = {}): Message => ({
   ...over,
 })
 
+/** 话题线程行（M47：飞书话题 = 一条 issue 形状的线程，会话挂在它上面）。 */
+const thread = (over: Partial<ThreadRow> = {}): ThreadRow => ({
+  id: 'th-1',
+  source: 'feishu',
+  externalRef: 'conn:oc_chat:om_root',
+  title: '报销流程',
+  status: 'open',
+  taskIds: [],
+  rootTaskIds: [],
+  concurrency: 1,
+  notesVersion: 0,
+  notes: [],
+  events: [],
+  lastActivityAt: CREATED,
+  createdAt: CREATED,
+  ...over,
+})
+
 /** 聊天 run 的完整投影行（终态用例与 turn 递增用例复用）。 */
 const chatRun = (over: Partial<RunRow> = {}): RunRow => ({
   id: 'run-1',
@@ -157,6 +176,7 @@ interface Seed {
   conversations?: Conversation[]
   messages?: Message[]
   runs?: RunRow[]
+  threads?: ThreadRow[]
 }
 
 const view = (seed: Seed = {}): View => ({
@@ -172,7 +192,7 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map((seed.messages ?? []).map((row) => [row.id, row])),
   cards: new Map(),
   activeTaskIds: new Set(),
-  threads: new Map(),
+  threads: new Map((seed.threads ?? []).map((row) => [row.id, row])),
   taskComments: new Map(),
   reviewReports: new Map(),
   events: new Map(),
@@ -240,6 +260,7 @@ describe('kernel/decide conversation.create', () => {
               title: '新对话',
               agentId: 'ag-1',
               projectId: null,
+              threadId: null,
               sessionId: null,
               createdAt: NOW,
               updatedAt: NOW,
@@ -285,6 +306,7 @@ describe('kernel/decide 对话归属项目（M11）', () => {
       title: '新对话',
       agentId: 'ag-1',
       projectId: 'pj-1',
+      threadId: null,
       sessionId: null,
       createdAt: NOW,
       updatedAt: NOW,
@@ -780,5 +802,62 @@ describe('kernel/decide 聊天 run 终态', () => {
 
     expect(decision.facts.map((fact) => fact.type)).toEqual(['run.failed', 'message.appended'])
     expect((decision.facts[1]?.payload as { error: string }).error).toBe('进程崩溃')
+  })
+})
+
+describe('kernel/decide 会话挂在话题上（M47）', () => {
+  it('chat.create 带 threadId：会话记住话题', () => {
+    const decision = decide(
+      view({ agents: [agent()], threads: [thread()] }),
+      { commandId: 'm47-chat', type: 'chat.create', agentId: 'ag-1', threadId: 'th-1' },
+      NOW,
+      env(),
+    )
+
+    const created = (decision.facts[0]?.payload as { conversation: Conversation }).conversation
+    expect(created.threadId).toBe('th-1')
+  })
+
+  it('threadId 指向不存在的话题：reject not_found，不建会话', () => {
+    expect(
+      decide(
+        view({ agents: [agent()] }),
+        { commandId: 'm47-chat', type: 'chat.create', agentId: 'ag-1', threadId: 'th-404' },
+        NOW,
+        env(),
+      ),
+    ).toEqual({ facts: [], reject: { code: 'not_found', message: '话题不存在: th-404' } })
+  })
+
+  it('不带 threadId 的会话：话题仍是 null（无话题的聊天行为不变）', () => {
+    const decision = decide(
+      view({ agents: [agent()] }),
+      { commandId: 'm47-chat', type: 'chat.create', agentId: 'ag-1' },
+      NOW,
+      env(),
+    )
+
+    const created = (decision.facts[0]?.payload as { conversation: Conversation }).conversation
+    expect(created.threadId).toBeNull()
+  })
+
+  it('chat.send：聊天 run 继承会话的话题（派生任务因此落进同一话题）', () => {
+    const decision = send(
+      fullChatView({
+        conversations: [conversation({ threadId: 'th-1' })],
+        threads: [thread()],
+      }),
+      '接着聊',
+    )
+
+    const run = (decision.facts.at(-1)?.payload as { run: RunRow }).run
+    expect(run.threadId).toBe('th-1')
+  })
+
+  it('没有话题的会话：聊天 run 的 threadId 仍为 null', () => {
+    const decision = send(fullChatView(), '你好')
+
+    const run = (decision.facts.at(-1)?.payload as { run: RunRow }).run
+    expect(run.threadId).toBeNull()
   })
 })

@@ -31,6 +31,15 @@ export interface InboundText {
   sender: string
   /** 去掉 @ 占位符后的正文 */
   text: string
+  /**
+   * 回复链根消息（M47）：平台给的 `root_id`——用户在这条链里回的每一句都带同一个根，
+   * 是「同一话题」最硬的结构证据（比任何时间窗都可靠）。
+   */
+  rootRef: string | null
+  /** 话题线程 id（M47）：话题群里一条线程的 id（`omt_…`），普通会话为 null */
+  threadRef: string | null
+  /** 直接回复的那条消息（M47）：`reply_to`，用来把「回复机器人某条消息」认成接那个话题 */
+  replyTo: string | null
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -138,5 +147,9 @@ export function readTextMessage(event: Record<string, unknown>): InboundText | n
     chatId: text(message['chat_id']) ?? text(outer['chat_id']),
     sender,
     text: stripMentions(raw, mentionKeys(outer)),
+    // 回复链三件套（M47）：`message` 已是「信封内层或摊平后的本体」，一处取值即可
+    rootRef: text(message['root_id']),
+    threadRef: text(message['thread_id']),
+    replyTo: text(message['reply_to']),
   }
 }

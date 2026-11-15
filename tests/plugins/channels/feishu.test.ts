@@ -1366,7 +1366,24 @@ describe('飞书通道：入站文本解析', () => {
       chatId: 'oc_p2p',
       sender: 'ou_me',
       text: '今天有什么安排',
+      rootRef: null,
+      threadRef: null,
+      replyTo: null,
     })
+  })
+
+  it('回复链证据：root_id / thread_id / reply_to 原样带出（缺省为 null）', () => {
+    const plain = readTextMessage(JSON.parse(textEvent()))
+    expect(plain?.rootRef).toBeNull()
+    expect(plain?.threadRef).toBeNull()
+    expect(plain?.replyTo).toBeNull()
+
+    const threaded = readTextMessage(
+      JSON.parse(textEvent({ root_id: 'om_root', thread_id: 'omt_1', reply_to: 'om_bot_reply' })),
+    )
+    expect(threaded?.rootRef).toBe('om_root')
+    expect(threaded?.threadRef).toBe('omt_1')
+    expect(threaded?.replyTo).toBe('om_bot_reply')
   })
 
   it('@ 机器人占位符去掉（`@_user_1` 对人没意义、对模型是噪音）', () => {
@@ -1413,6 +1430,9 @@ describe('飞书通道：入站文本解析', () => {
       chatId: 'oc_env',
       sender: 'ou_me',
       text: '信封里的正文',
+      rootRef: null,
+      threadRef: null,
+      replyTo: null,
     })
   })
 

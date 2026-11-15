@@ -69,6 +69,9 @@ export const VIEW_IDS = [
   'plugins.settings',
   'plugins.all',
   'thread.byId',
+  // M47：话题（open 线程清单）与话题下的会话
+  'threads.open',
+  'conversations.byThread',
   'comments.byTask',
   'reviews.byTask',
   'run.approvals',
@@ -178,6 +181,8 @@ export interface ViewArgs {
   'cards.byRun': { runId: string }
   'runtimes.models': { runtimeId: string }
   'thread.byId': { threadId: string }
+  /** M47：某个话题下的会话（按最近更新倒序） */
+  'conversations.byThread': { threadId: string }
   'comments.byTask': { taskId: string }
   'reviews.byTask': { taskId: string }
   'run.approvals': { runId: string }
@@ -266,6 +271,8 @@ export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'cards.byRun': 'runId',
   'runtimes.models': 'runtimeId',
   'thread.byId': 'threadId',
+  /** M47：话题下的会话 */
+  'conversations.byThread': 'threadId',
   'comments.byTask': 'taskId',
   'reviews.byTask': 'taskId',
   'run.approvals': 'runId',
@@ -361,6 +368,13 @@ export interface ViewResults {
   'plugins.all': PluginView[]
   /** 线程详情（M6.5）：线程行 + 任务树来源 + 各智能体最近会话 id；不存在时为 null */
   'thread.byId': ThreadDetail | null
+  /**
+   * M47 话题：全部 `open` 线程，按 `lastActivityAt` 倒序（飞书入站按它找「当前话题」，
+   * 界面按它铺话题清单）。已收口的话题不出现。
+   */
+  'threads.open': ThreadRow[]
+  /** M47：某个话题下的会话，按 `updatedAt` 倒序（话题页的消息流从上往下拼） */
+  'conversations.byThread': Conversation[]
   /** 任务上下文 / 反馈（M7.5）：按追加顺序（`createdAt` 升序） */
   'comments.byTask': TaskComment[]
   /** 任务的评审报告（M14）：按 `rev` 升序；没有任何评审时为空数组 */

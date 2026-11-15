@@ -8,6 +8,7 @@ import type {
   WorkflowWithStages,
 } from '../../../src/protocol/entities'
 import type { AutomationRule } from '../../../src/protocol/rules'
+import type { ThreadRow } from '../../../src/protocol/thread'
 import type { ViewId } from '../../../src/protocol/views'
 import type { Change } from '../../../src/kernel/core/types'
 import { viewSpec } from '../../../src/kernel/scopes/view-spec'
@@ -605,10 +606,10 @@ describe('queryView：各视图', () => {
     const db = memory()
     seed(db)
 
-    const unknownView = captureError(() => queryView(db, 'threads.open' as ViewId))
+    const unknownView = captureError(() => queryView(db, 'threads.bogus' as ViewId))
     expect(unknownView).toBeInstanceOf(StoreError)
     expect((unknownView as StoreError).code).toBe('invalid_input')
-    expect((unknownView as StoreError).message).toContain('threads.open')
+    expect((unknownView as StoreError).message).toContain('threads.bogus')
 
     for (const params of [
       undefined,
@@ -1797,5 +1798,68 @@ describe('runs.deliverables（M28：JSON 列往返）', () => {
     createProjectionWriter(db).apply({ table: 'runs', key: run.id, row: run }, SAMPLE_AT)
     const view = loadView(db, ['runs'])
     expect(view.runs.get(run.id)?.deliverables).toEqual(run.deliverables)
+  })
+})
+
+describe('话题视图（M47）', () => {
+  /** 种话题与挂在上面的会话：两条 open 话题 + 一条已收口；两条会话挂 th-1，一条没有话题。 */
+  const seedTopics = (db: DatabaseSync): void => {
+    seedThreads(db)
+    const writer = createProjectionWriter(db)
+    const feishuTopic = sample.thread({
+      id: 'th-4',
+      source: 'feishu',
+      externalRef: 'conn:oc_chat:om_root',
+      title: '报销流程',
+      status: 'open',
+      taskIds: [],
+      rootTaskIds: [],
+      lastActivityAt: THREAD_AT_3,
+      createdAt: THREAD_AT_3,
+    })
+    writer.apply({ table: 'threads', key: feishuTopic.id, row: feishuTopic }, THREAD_AT_3)
+    for (const row of [
+      sample.conversation({
+        id: 'cv-th-old',
+        threadId: 'th-1',
+        createdAt: THREAD_AT,
+        updatedAt: THREAD_AT,
+      }),
+      sample.conversation({
+        id: 'cv-th-new',
+        threadId: 'th-1',
+        createdAt: THREAD_AT_2,
+        updatedAt: THREAD_AT_2,
+      }),
+      sample.conversation({ id: 'cv-loose', title: '没话题', createdAt: THREAD_AT }),
+    ]) {
+      writer.apply({ table: 'conversations', key: row.id, row }, THREAD_AT)
+    }
+  }
+
+  it('threads.open：只给 open 的话题，按最后活动倒序（收口的不出现）', () => {
+    const db = memory()
+
+    seedTopics(db)
+
+    const open = queryView(db, 'threads.open') as ThreadRow[]
+    expect(open.map((row) => row.id)).toEqual(['th-4', 'th-1'])
+  })
+
+  it('conversations.byThread：按话题取会话，按最近更新倒序；参数非法报错', () => {
+    const db = memory()
+
+    seedTopics(db)
+
+    const attached = queryView(db, 'conversations.byThread', {
+      threadId: 'th-1',
+    }) as Conversation[]
+    expect(attached.map((row) => row.id)).toEqual(['cv-th-new', 'cv-th-old'])
+    expect(queryView(db, 'conversations.byThread', { threadId: 'th-404' })).toEqual([])
+
+    for (const params of [undefined, {}, { threadId: '' }, { threadId: 7 }]) {
+      const error = captureError(() => queryView(db, 'conversations.byThread', params))
+      expect((error as StoreError).code).toBe('invalid_input')
+    }
   })
 })

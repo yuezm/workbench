@@ -86,6 +86,8 @@ describe('protocol/views', () => {
       'plugins.settings',
       'plugins.all',
       'thread.byId',
+      'threads.open',
+      'conversations.byThread',
       'comments.byTask',
       'reviews.byTask',
       'run.approvals',
@@ -110,6 +112,8 @@ describe('protocol/views', () => {
     expect(noParams).toBe(true)
     expect(messagesParams).toBe(true)
     expect(chatRunsParams).toBe(true)
+    expect(openThreadsNoParams).toBe(true)
+    expect(byThreadParams).toBe(true)
     expect(resultByView).toBe(true)
   })
 
@@ -125,6 +129,10 @@ const runsByTaskParams: Assert<Equal<ViewParams<'runs.byTask'>, { taskId: string
 const runByIdParams: Assert<Equal<ViewParams<'run.byId'>, { runId: string }>> = true
 const runEventsParams: Assert<Equal<ViewParams<'run.events'>, { runId: string }>> = true
 const lastEventSeqParams: Assert<Equal<ViewParams<'run.last-event-seq'>, { runId: string }>> = true
+// M47：话题清单无参数；按话题取会话要 threadId
+const openThreadsNoParams: Assert<Equal<ViewParams<'threads.open'>, undefined>> = true
+const byThreadParams: Assert<Equal<ViewParams<'conversations.byThread'>, { threadId: string }>> =
+  true
 const workloadsNoParams: Assert<Equal<ViewParams<'runtimes.workloads'>, undefined>> = true
 const staleChatNoParams: Assert<Equal<ViewParams<'runs.stale-chat'>, undefined>> = true
 const runEventsResult: Assert<Equal<ViewResult<'run.events'>, RunEvent[]>> = true

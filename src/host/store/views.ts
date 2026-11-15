@@ -348,6 +348,34 @@ const readConversationsUnassigned = (db: DatabaseSync): Conversation[] =>
       .all() as unknown as object[]
   ).map(mapConversation)
 
+/**
+ * M47 话题：全部 `open` 线程，按最后活动倒序。
+ *
+ * 宿主用它找「这个会话当前属于哪个话题」（飞书入站没有结构证据时的活跃窗口），
+ * 界面用它铺话题清单；已收口的话题不出现（要回看得进线程详情）。
+ */
+const readOpenThreads = (db: DatabaseSync): ThreadRow[] =>
+  (
+    db
+      .prepare(
+        `SELECT ${columnsOf('threads')} FROM threads
+         WHERE status = 'open'
+         ORDER BY last_activity_at DESC, created_at DESC, rowid`,
+      )
+      .all() as unknown as object[]
+  ).map(mapThread)
+
+/** M47：某话题下的会话，排序同会话清单（最近更新在前）。 */
+const readConversationsByThread = (db: DatabaseSync, threadId: string): Conversation[] =>
+  (
+    db
+      .prepare(
+        `SELECT ${columnsOf('conversations')} FROM conversations
+         WHERE thread_id = ? ${CONVERSATION_ORDER}`,
+      )
+      .all(threadId) as unknown as object[]
+  ).map(mapConversation)
+
 const readMessages = (db: DatabaseSync): Message[] =>
   (
     db
@@ -1019,6 +1047,12 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'thread.byId':
       // M6.5：线程详情 = 线程行 + 线程任务（按创建顺序）+ 各智能体最近会话 id
       return readThreadDetail(db, readStringParam(params, 'threadId'))
+    case 'threads.open':
+      // M47：话题清单（宿主找活跃话题、界面铺列表）
+      return readOpenThreads(db)
+    case 'conversations.byThread':
+      // M47：话题下的会话（话题页把几段对话按时间拼起来）
+      return readConversationsByThread(db, readStringParam(params, 'threadId'))
     case 'comments.byTask':
       // M7.5：任务上下文 / 反馈（按追加顺序）
       return readTaskCommentsByTask(db, readStringParam(params, 'taskId'))

@@ -1159,14 +1159,31 @@ describe('createChannels：入站派活与进展（M44）', () => {
     entries: ChannelRegistryEntry[]
     config?: Record<string, unknown>
     configs?: Record<string, Record<string, unknown>>
+    /** M47：话题路由要读的三张视图（缺省都为空 = 「没有话题、没有会话」） */
+    threads?: unknown[]
+    conversations?: unknown[]
+    active?: unknown[]
+    /** 注入时钟（话题活跃窗口按它算；不传走宿主真实时间） */
+    now?: () => string
   }): {
     hub: ReturnType<typeof createChannels>
     dispatch: ReturnType<typeof vi.fn>
   } => {
     const store = {
-      query: vi.fn((view: string) => (view === 'agents.all' ? AGENTS : [])),
+      query: vi.fn((view: string) => {
+        if (view === 'agents.all') return AGENTS
+        if (view === 'threads.open') return options.threads ?? []
+        if (view === 'conversations.byThread') return options.conversations ?? []
+        if (view === 'runs.active-by-conversation') return options.active ?? []
+        return []
+      }),
     } as unknown as ChannelsStore
     const dispatch = vi.fn((input: Record<string, unknown>) => {
+      if (input['type'] === 'thread.open') {
+        return {
+          facts: [{ type: 'thread.opened', payload: { thread: { id: 'thread-1' } } }],
+        }
+      }
       if (input['type'] === 'chat.create') {
         return {
           facts: [
@@ -1186,6 +1203,7 @@ describe('createChannels：入站派活与进展（M44）', () => {
       sdkHost: fakeSdkHost,
       timeoutMs: 20,
       configOf: (entry) => options.configs?.[entry.key] ?? options.config ?? {},
+      ...(options.now === undefined ? {} : { now: options.now }),
     })
     return { hub, dispatch }
   }
@@ -1247,11 +1265,13 @@ describe('createChannels：入站派活与进展（M44）', () => {
 
     expect(first.accepted).toBe(true)
     expect(again.accepted).toBe(true)
-    // 幂等键仍由 ref 决定：同一条平台消息重投不换键
+    // 幂等键仍由 ref 决定：同一条平台消息重投不换键（带了会话 id 会先开话题）
     const keys = dispatchInputs(dispatch).map((input) => input['commandId'])
     expect(keys).toEqual([
+      'channel:feishu:om_9:topic',
       'channel:feishu:om_9:create',
       'channel:feishu:om_9:send',
+      'channel:feishu:om_9:topic',
       'channel:feishu:om_9:create',
       'channel:feishu:om_9:send',
     ])
@@ -1320,6 +1340,161 @@ describe('createChannels：入站派活与进展（M44）', () => {
     expect(feishu.progress).toEqual([
       { conversationId: 'conversation-1', kind: 'failed', text: '执行器崩了' },
     ])
+    await hub.stopAll()
+  })
+
+  // ---------------------------------------------------------------- 话题收敛（M47）
+
+  /** 一条 open 话题（`externalRef` = `<scope>:<chat>:<根消息>`）。 */
+  const topicOf = (over: Record<string, unknown> = {}) => ({
+    id: 'thread-1',
+    source: 'feishu',
+    externalRef: 'default:oc_1:om_root',
+    title: '报销流程',
+    status: 'open',
+    lastActivityAt: AT,
+    ...over,
+  })
+
+  it('同一会话的第二句接在上一轮会话上：不建新会话，回执写明接在哪个话题', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({
+      entries: [feishu],
+      config: { agent: 'a1' },
+      threads: [topicOf()],
+      conversations: [{ id: 'conversation-9' }],
+      now: () => AT,
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '还有个问题', {
+      ref: 'default:om_2',
+      chatId: 'oc_1',
+      scope: 'default',
+    })
+
+    expect(outcome).toEqual({
+      accepted: true,
+      conversationId: 'conversation-9',
+      receipt: '已接在「报销流程」这个话题里，这一轮说完我回在这里。',
+    })
+    const inputs = dispatchInputs(dispatch)
+    expect(inputs).toEqual([
+      {
+        type: 'chat.send',
+        commandId: 'channel:feishu:default:om_2:send',
+        conversationId: 'conversation-9',
+        content: '还有个问题',
+      },
+    ])
+    await hub.stopAll()
+  })
+
+  it('会话正忙：这一句先排队，run 落终态后自动补发（不丢话）', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({
+      entries: [feishu],
+      config: { agent: 'a1' },
+      threads: [topicOf()],
+      conversations: [{ id: 'conversation-9' }],
+      active: [{ id: 'run-1' }],
+      now: () => AT,
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '再补一句', {
+      ref: 'default:om_3',
+      chatId: 'oc_1',
+      scope: 'default',
+    })
+
+    expect(outcome.accepted).toBe(true)
+    expect(outcome.conversationId).toBe('conversation-9')
+    expect(outcome.receipt).toContain('排在当前这轮后面')
+    // 忙时不发：只有等这一轮说完才轮到它
+    expect(dispatchInputs(dispatch)).toEqual([])
+
+    hub.dispatch([progressFact('conversation-9', '这一轮说完了')])
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const sent = dispatchInputs(dispatch).filter((input) => input['type'] === 'chat.send')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({
+      conversationId: 'conversation-9',
+      content: '再补一句',
+    })
+    await hub.stopAll()
+  })
+
+  it('结构证据优先：超出活跃窗口，但回复的是这个话题的根消息 → 仍接上', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({
+      entries: [feishu],
+      config: { agent: 'a1' },
+      threads: [topicOf({ lastActivityAt: '2020-01-01T00:00:00.000Z' })],
+      conversations: [{ id: 'conversation-9' }],
+      now: () => AT,
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '三天后回一句', {
+      ref: 'default:om_4',
+      chatId: 'oc_1',
+      scope: 'default',
+      rootRef: 'om_root',
+    })
+
+    expect(outcome.conversationId).toBe('conversation-9')
+    expect(dispatchInputs(dispatch).map((input) => input['type'])).toEqual(['chat.send'])
+    await hub.stopAll()
+  })
+
+  it('窗口外又没有结构证据：开新话题、建新会话', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({
+      entries: [feishu],
+      config: { agent: 'a1' },
+      threads: [topicOf({ lastActivityAt: '2020-01-01T00:00:00.000Z' })],
+      conversations: [{ id: 'conversation-9' }],
+      now: () => AT,
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '换个事', {
+      ref: 'default:om_5',
+      chatId: 'oc_1',
+      scope: 'default',
+    })
+
+    expect(outcome.accepted).toBe(true)
+    const inputs = dispatchInputs(dispatch)
+    expect(inputs[0]).toMatchObject({
+      type: 'thread.open',
+      source: 'feishu',
+      externalRef: 'default:oc_1:default:om_5',
+    })
+    expect(inputs[1]).toMatchObject({ type: 'chat.create', threadId: 'thread-1' })
+    expect(inputs[2]).toMatchObject({ type: 'chat.send', conversationId: 'conversation-1' })
+    await hub.stopAll()
+  })
+
+  it('没有会话 id 的提交（老调用 / 别的平台）：仍按老行为建新会话，不并话题', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({
+      entries: [feishu],
+      config: { agent: 'a1' },
+      threads: [topicOf()],
+      conversations: [{ id: 'conversation-9' }],
+      now: () => AT,
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好', { ref: 'om_6' })
+
+    expect(outcome.conversationId).toBe('conversation-1')
+    const inputs = dispatchInputs(dispatch)
+    expect(inputs[0]).toMatchObject({ type: 'chat.create' })
+    expect(inputs[0]).not.toHaveProperty('threadId')
     await hub.stopAll()
   })
 })

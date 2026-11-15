@@ -619,7 +619,9 @@ export const feishuChannel: ChannelPlugin = {
           {
             // 幂等键仍由「连接 + 平台消息 id」组成
             ref: `${conn.id}:${incoming.messageId}`,
-            // M47：话题归属的证据全部交出去，判不判由宿主决定
+            // M47：话题前缀按连接分开——两个机器人各自的私聊不串台
+            scope: conn.id,
+            // 话题归属的证据全部交出去，判不判由宿主决定
             chatId: incoming.chatId,
             rootRef: incoming.rootRef,
             threadRef: incoming.threadRef,

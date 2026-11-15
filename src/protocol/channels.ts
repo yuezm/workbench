@@ -206,6 +206,11 @@ export interface ChannelSubmitOutcome {
 export interface ChannelSubmitHints {
   /** 平台消息引用（幂等键；同一条消息重投必须同值） */
   ref?: string
+  /**
+   * 连接 / 应用标识（M47）：多连接通道用它区分同一条通道下的不同机器人。
+   * 与 `chatId` 一起构成话题前缀 `<scope>:<chatId>:`——两个私聊用户的消息因此不会串台。
+   */
+  scope?: string | null
   /** 平台会话 id（`oc_…`）：没有结构证据时按「这个会话最近活跃的话题」收敛 */
   chatId?: string | null
   /** 回复链根消息（`root_id`）：用户在同一链条里回复时不变，最硬的结构证据 */

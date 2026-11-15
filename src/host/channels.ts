@@ -25,7 +25,8 @@
  * - 进展：内核给聊天轮的终态补一条 assistant `message.appended`，hub 只在「这个会话是某个
  *   通道提交的」时，把它转成该通道的 `ChannelProgress`——别的会话不打扰任何人。
  */
-import type { Card } from '../protocol/entities'
+import type { Card, Conversation } from '../protocol/entities'
+import type { ThreadRow } from '../protocol/thread'
 import type {
   ChannelAnswerOutcome,
   ChannelContext,
@@ -122,6 +123,70 @@ interface ChannelRuntime {
 /** 入站派活的会话标题上限（码点）：与内核 `titleFromContent` 同量级，只作会话列表里的标识。 */
 const SUBMIT_TITLE_CHARS = 24
 
+/**
+ * 话题活跃窗口（毫秒）：同一个会话里没有**结构证据**时，这段时间内的消息算「接着上一话题」。
+ *
+ * 30 分钟的理由：IM 里「换个话题」通常伴随一次明显的停顿；比这更长的沉默里再来一句，
+ * 当成新话题比继续旧话题更安全——旧上下文没丢（话题还在清单里），新开一句也不会污染它。
+ */
+export const TOPIC_WINDOW_MS = 30 * 60 * 1000
+
+/** 命中的话题：往哪儿续接。 */
+export interface TopicMatch {
+  threadId: string
+  conversationId: string
+  /** 话题名（回执里写出来，人才知道自己刚才那句落在哪） */
+  title: string
+}
+
+/**
+ * 按「结构证据 > 活跃窗口」在 `open` 话题里挑一个接上（M47）。
+ *
+ * - 结构证据：平台给的 `threadRef` / `rootRef` / `replyTo` 出现在话题入口键末尾——
+ *   用户回复的是这个话题里的某条消息，这条证据**不受时间窗限制**；
+ * - 活跃窗口：都没有结构证据时，取这个会话里最后活动、且还在窗口内的话题。
+ *
+ * 话题键不可读（查视图失败）时按「没有话题」处理：宁可变回老行为（建新会话），
+ * 也不能因为读不到话题就丢话。
+ */
+export function matchTopic(
+  store: ChannelsStore,
+  source: string,
+  prefix: string,
+  hints: ChannelSubmitHints | undefined,
+  nowMs: number,
+  windowMs: number,
+): TopicMatch | null {
+  let threads: ThreadRow[]
+  try {
+    threads = store.query('threads.open')
+  } catch {
+    return null
+  }
+  const candidates = threads.filter(
+    (thread) => thread.source === source && (thread.externalRef ?? '').startsWith(prefix),
+  )
+  if (candidates.length === 0) return null
+  const structural = [hints?.threadRef, hints?.rootRef, hints?.replyTo]
+    .map((ref) => (ref ?? '').trim())
+    .filter((ref) => ref !== '')
+  const byStructure = candidates.find((thread) =>
+    structural.some((ref) => (thread.externalRef ?? '').endsWith(`:${ref}`)),
+  )
+  const fresh = candidates.find((thread) => nowMs - Date.parse(thread.lastActivityAt) <= windowMs)
+  const hit = byStructure ?? fresh
+  if (hit === undefined) return null
+  let conversations: Conversation[]
+  try {
+    conversations = store.query('conversations.byThread', { threadId: hit.id })
+  } catch {
+    return null
+  }
+  const conversation = conversations[0]
+  if (conversation === undefined) return null
+  return { threadId: hit.id, conversationId: conversation.id, title: hit.title }
+}
+
 /** 一句话回执的上限（码点）：平台侧对单条文本也有限制，宿主先截断，别让通道自己猜。 */
 const RECEIPT_CHARS = 200
 
@@ -201,6 +266,8 @@ export function createChannels(options: ChannelsOptions): Channels {
   let stopping = false
   /** M44：通道提交过的会话（conversationId → 通道 key）；只有它该收到这个会话的进展 */
   const submitted = new Map<string, string>()
+  /** M47：会话忙时排住的话（conversationId → 待发正文）；这一轮落终态后按序补发 */
+  const pending = new Map<string, string[]>()
   /** 没有平台消息引用时的幂等键兜底（同一进程内自增） */
   let submitSeq = 0
 
@@ -455,6 +522,9 @@ export function createChannels(options: ChannelsOptions): Channels {
     for (const fact of facts) {
       const progress = progressOf(fact)
       if (progress === null) continue
+      // M47：这一轮落终态了，话题里排着的话接着发（成功与失败都放行：失败时下一句
+      // 会成为新一轮，错误文案已经回帖说清）
+      flushPending(progress.conversationId)
       const owner = submitted.get(progress.conversationId)
       if (owner === undefined) continue
       const runtime = runtimes.get(owner)
@@ -467,6 +537,32 @@ export function createChannels(options: ChannelsOptions): Channels {
         }
       }
     }
+  }
+
+  /** 这个会话现在是不是有一轮在跑（queued / running / waiting 都算占着）。 */
+  const conversationBusy = (conversationId: string): boolean => {
+    try {
+      return store.query('runs.active-by-conversation', { conversationId }).length > 0
+    } catch (error) {
+      // 读不到就当作不忙：宁可让内核按「同一会话一轮」拒绝并回一句，也不要静默排死
+      log(`读会话活跃轮失败（${conversationId}）：${errMsg(error)}`)
+      return false
+    }
+  }
+
+  /** 补发排在这个会话后面的一句（一次一句：发出后由它的终态再来触发）。 */
+  const flushPending = (conversationId: string): void => {
+    const queue = pending.get(conversationId)
+    if (queue === undefined || queue.length === 0) return
+    const [next, ...rest] = queue
+    if (rest.length === 0) pending.delete(conversationId)
+    else pending.set(conversationId, rest)
+    write({
+      type: 'chat.send',
+      commandId: `channel:pending:${conversationId}:${++submitSeq}`,
+      conversationId,
+      content: next,
+    })
   }
 
   const startAll = async (): Promise<void> => {
@@ -534,6 +630,7 @@ export function createChannels(options: ChannelsOptions): Channels {
     deliveredKeys.clear()
     lastCards.clear()
     submitted.clear()
+    pending.clear()
     // M41：已排期的重投一并取消，退出后不再产生投递
     for (const timer of retryTimers) clearTimeout(timer)
     retryTimers.clear()
@@ -640,6 +737,67 @@ export function createChannels(options: ChannelsOptions): Channels {
     // 幂等键：同一个平台消息重复投递（长连接重连/重放）不会派两次活
     const ref = hints?.ref?.trim() ?? ''
     const key = `channel:${channelKey}:${ref !== '' ? ref : `n${++submitSeq}`}`
+    // M47 话题归属：没有会话 id 就没有证据（老调用 / 别的平台），按老行为建新会话
+    const scope = hints?.scope?.trim() || channelKey
+    const chatId = hints?.chatId?.trim() ?? ''
+    const topicPrefix = chatId === '' ? '' : `${scope}:${chatId}:`
+    const match =
+      topicPrefix === ''
+        ? null
+        : matchTopic(store, channelKey, topicPrefix, hints, nowMs(), TOPIC_WINDOW_MS)
+    if (match !== null && conversationBusy(match.conversationId)) {
+      // 忙时不丢话：排在这个话题后面，等这一轮落终态再发（见 `flushPending`）
+      const queue = pending.get(match.conversationId) ?? []
+      queue.push(content)
+      pending.set(match.conversationId, queue)
+      submitted.set(match.conversationId, channelKey)
+      return {
+        accepted: true,
+        conversationId: match.conversationId,
+        receipt: receiptOf(`排在当前这轮后面（「${match.title}」），这一轮说完我接着处理。`),
+      }
+    }
+    if (match !== null) {
+      try {
+        // 拒绝（内核判「同一会话还在跑」）会抛，捕获后回一句人话；接受就是接受，
+        // 不看事实条数——`chat.send` 正常也可能什么都不产
+        effects.dispatch({
+          type: 'chat.send',
+          commandId: `${key}:send`,
+          conversationId: match.conversationId,
+          content,
+        })
+      } catch (error) {
+        log(`通道 ${channelKey} 的消息没接上话题 ${match.threadId}：${errMsg(error)}`)
+        return {
+          accepted: false,
+          conversationId: null,
+          receipt: receiptOf(`没接上「${match.title}」：${errMsg(error)}`),
+        }
+      }
+      submitted.set(match.conversationId, channelKey)
+      return {
+        accepted: true,
+        conversationId: match.conversationId,
+        receipt: receiptOf(`已接在「${match.title}」这个话题里，这一轮说完我回在这里。`),
+      }
+    }
+    // 新话题：先开话题（入口键 = 前缀 + 这条消息的锚点），会话挂在它上面
+    let threadId: string | null = null
+    if (topicPrefix !== '') {
+      const opened = write({
+        type: 'thread.open',
+        commandId: `${key}:topic`,
+        source: channelKey,
+        externalRef: `${topicPrefix}${ref !== '' ? ref : `n${++submitSeq}`}`,
+        title: submitTitleOf(content),
+      })
+      const fact = opened.find((item) => item.type === 'thread.opened')
+      threadId =
+        fact === undefined
+          ? null
+          : ((fact.payload as { thread?: { id?: string } }).thread?.id ?? null)
+    }
     let conversationId: string
     try {
       const created = effects.dispatch({
@@ -647,6 +805,7 @@ export function createChannels(options: ChannelsOptions): Channels {
         commandId: `${key}:create`,
         agentId: agent.id,
         title: submitTitleOf(content),
+        ...(threadId === null ? {} : { threadId }),
       })
       const fact = created.facts.find((item) => item.type === 'conversation.created')
       const conversation =

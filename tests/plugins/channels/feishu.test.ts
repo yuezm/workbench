@@ -1470,6 +1470,7 @@ describe('飞书通道：入站派活与进展（M44）', () => {
         text: '今天有什么安排',
         hints: {
           ref: 'default:om_in_1',
+          scope: 'default',
           chatId: 'oc_p2p',
           rootRef: null,
           threadRef: null,
@@ -1514,6 +1515,7 @@ describe('飞书通道：入站派活与进展（M44）', () => {
         text: '今天有什么安排',
         hints: {
           ref: 'default:om_in_1',
+          scope: 'default',
           chatId: 'oc_p2p',
           rootRef: null,
           threadRef: null,

@@ -455,6 +455,7 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
         text: '今天有什么安排',
         hints: {
           ref: 'wb:om_in_1',
+          scope: 'wb',
           chatId: 'oc_p2p',
           rootRef: null,
           threadRef: null,

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
-import { basename, dirname } from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import type { EnvPatch } from '../sdk/types'
 
 /** 子进程的最小接口（可注入，便于单测不真的 spawn） */
@@ -70,12 +70,24 @@ export function resolveShimScript(shimPath: string): { command: string; args: st
     .replace(/%~dp0/giu, `${dirname(shimPath)}\\`)
     .replace(/%dp0%/giu, dirname(shimPath))
   if (!/^[A-Za-z]:\\/u.test(script)) return null
-  return { command: process.execPath, args: [script] }
+  return { command: shimNode(dirname(shimPath)), args: [script] }
 }
 
-/** Electron 主进程的 `execPath` 是 electron.exe：跑脚本要显式要求「当 Node 用」。 */
-const electronNodeEnv = (): NodeJS.ProcessEnv =>
-  /^electron(\.exe)?$/iu.test(basename(process.execPath)) ? { ELECTRON_RUN_AS_NODE: '1' } : {}
+/**
+ * 折出来的脚本用哪个解释器跑：垫片同目录的 `node.exe` 优先（nvm / 官方安装包把 node.exe
+ * 与 npm 垫片放在一起，这里一定命中），否则交给 PATH 上的 `node`。
+ *
+ * **不用 `process.execPath`**：宿主跑在 Electron 里，它的 `execPath` 是 electron.exe，
+ * 只能靠 `ELECTRON_RUN_AS_NODE=1` 当 Node 用。那条路会让子进程带上 Electron 的运行时
+ * 指纹（Node 24 + V8 electron），而依赖原生模块的 CLI 会按指纹拒跑——dsh 的
+ * `node-addon-require-builtin` 只认 Electron 43 / 44 / 44.7 / 45.0.0-alpha.6，
+ * 在 45.1.0 上直接 `unsupported Electron runtime fingerprint` 崩在启动阶段
+ * （2026-11-16 任务 40eb2134 三轮全废的根因）。
+ */
+function shimNode(dir: string): string {
+  const local = join(dir, 'node.exe')
+  return existsSync(local) ? local : 'node'
+}
 
 /** 真实 spawn：stdout/stderr/stdin 全部走管道，POSIX 下独立进程组便于整树终止 */
 export const defaultSpawn: SpawnFn = (command, args, options) => {
@@ -88,7 +100,7 @@ export const defaultSpawn: SpawnFn = (command, args, options) => {
   const shim = options.shell === true ? resolveShimScript(command) : null
   const child = spawn(shim?.command ?? command, shim === null ? args : [...shim.args, ...args], {
     cwd: options.cwd,
-    env: shim === null ? env : { ...env, ...electronNodeEnv() },
+    env,
     shell: shim === null ? (options.shell ?? false) : false,
     detached: process.platform !== 'win32',
     windowsHide: true,

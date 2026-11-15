@@ -9,8 +9,15 @@ const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
 
-const { createLineReader, applyEnvPatch, defaultSpawn, killPidTree, killProcessTree, tail } =
-  await import('../../src/host/process')
+const {
+  createLineReader,
+  applyEnvPatch,
+  defaultSpawn,
+  killPidTree,
+  killProcessTree,
+  resolveShimScript,
+  tail,
+} = await import('../../src/host/process')
 
 function fakeChild(): {
   pid: number
@@ -187,9 +194,36 @@ describe('defaultSpawn', () => {
           string[],
           { shell: boolean },
         ]
-        expect(calledCommand).toBe(process.execPath)
+        // 用 PATH 上的 node，不是宿主的 electron.exe（后者会把 Electron 运行时指纹带给子进程）
+        expect(calledCommand).toBe('node')
         expect(calledArgs).toEqual([script, '--content', '{"text":"a b & c"}'])
         expect(calledOptions.shell).toBe(false)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.skipIf(process.platform !== 'win32')(
+    'Windows 垫片：同目录有 node.exe 时直接用它的绝对路径',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'wb-shim-'))
+      try {
+        const script = join(dir, 'node_modules', 'pkg', 'run.js')
+        mkdirSync(dirname(script), { recursive: true })
+        writeFileSync(script, 'console.log(1)\n')
+        // nvm / 官方安装包把 node.exe 与 npm 垫片放在同一个目录
+        writeFileSync(join(dir, 'node.exe'), '')
+        const shim = join(dir, 'tool.cmd')
+        writeFileSync(
+          shim,
+          '@ECHO off\r\nendLocal & goto #_undefined_# 2>NUL || "%_prog%"  "%dp0%\\node_modules\\pkg\\run.js" %*\r\n',
+        )
+        spawnMock.mockReturnValue(fakeChild())
+
+        defaultSpawn(shim, ['--version'], { shell: true, env: {} })
+
+        expect(spawnMock.mock.calls[0]?.[0]).toBe(join(dir, 'node.exe'))
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }
@@ -206,6 +240,40 @@ describe('defaultSpawn', () => {
       defaultSpawn(shim, ['x'], { shell: true, env: {} })
 
       expect(spawnMock).toHaveBeenCalledWith(shim, ['x'], expect.objectContaining({ shell: true }))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('resolveShimScript', () => {
+  it('非 Windows：不折，交给调用方走 shell', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    try {
+      expect(resolveShimScript('C:/npm/tool.cmd')).toBeNull()
+    } finally {
+      Object.defineProperty(process, 'platform', descriptor as PropertyDescriptor)
+    }
+  })
+
+  it('不是 .cmd / .bat：不折（原生可执行文件直接 spawn）', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
+    try {
+      expect(resolveShimScript('C:/npm/tool.exe')).toBeNull()
+    } finally {
+      Object.defineProperty(process, 'platform', descriptor as PropertyDescriptor)
+    }
+  })
+
+  it.skipIf(process.platform !== 'win32')('垫片里的脚本不是绝对路径：不折', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wb-shim-'))
+    try {
+      const shim = join(dir, 'tool.cmd')
+      writeFileSync(shim, '@ECHO off\r\n"%_prog%"  "relative\\run.js" %*\r\n')
+
+      expect(resolveShimScript(shim)).toBeNull()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

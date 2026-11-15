@@ -450,7 +450,19 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
     cli.children[1]?.emitStdout(textEvent())
     await flushDeliver()
 
-    expect(harness.submits).toEqual([{ text: '今天有什么安排', ref: 'wb:om_in_1', agent: 'a1' }])
+    expect(harness.submits).toEqual([
+      {
+        text: '今天有什么安排',
+        hints: {
+          ref: 'wb:om_in_1',
+          chatId: 'oc_p2p',
+          rootRef: null,
+          threadRef: null,
+          replyTo: null,
+        },
+        agent: 'a1',
+      },
+    ])
   })
 
   it('没配 agent 的连接不挂入站长连接（少一条长连接）', async () => {

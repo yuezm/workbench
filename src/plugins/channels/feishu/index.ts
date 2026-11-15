@@ -616,7 +616,15 @@ export const feishuChannel: ChannelPlugin = {
       try {
         outcome = await ctx.submit(
           incoming.text,
-          `${conn.id}:${incoming.messageId}`,
+          {
+            // 幂等键仍由「连接 + 平台消息 id」组成
+            ref: `${conn.id}:${incoming.messageId}`,
+            // M47：话题归属的证据全部交出去，判不判由宿主决定
+            chatId: incoming.chatId,
+            rootRef: incoming.rootRef,
+            threadRef: incoming.threadRef,
+            replyTo: incoming.replyTo,
+          },
           conn.agent ?? undefined,
         )
       } catch (error) {

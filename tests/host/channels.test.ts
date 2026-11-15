@@ -1195,7 +1195,7 @@ describe('createChannels：入站派活与进展（M44）', () => {
     const { hub, dispatch } = hubOf({ entries: [feishu], config: { agent: '小助' } })
     await hub.startAll()
 
-    const outcome = await hub.submit('feishu', '帮我看看今天的待办', 'om_1')
+    const outcome = await hub.submit('feishu', '帮我看看今天的待办', { ref: 'om_1' })
 
     expect(outcome).toEqual({
       accepted: true,
@@ -1223,8 +1223,8 @@ describe('createChannels：入站派活与进展（M44）', () => {
     const { hub, dispatch } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
     await hub.startAll()
 
-    await hub.submit('feishu', '第一句', 'om_1')
-    await hub.submit('feishu', '第一句', 'om_1')
+    await hub.submit('feishu', '第一句', { ref: 'om_1' })
+    await hub.submit('feishu', '第一句', { ref: 'om_1' })
 
     const keys = dispatchInputs(dispatch).map((input) => input['commandId'])
     expect(keys).toEqual([
@@ -1236,20 +1236,42 @@ describe('createChannels：入站派活与进展（M44）', () => {
     await hub.stopAll()
   })
 
+  it('入站线索按对象传入：ref 仍是幂等键，别的线索不影响派活', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
+    await hub.startAll()
+
+    const hints = { ref: 'om_9', chatId: 'oc_1', rootRef: 'om_root', threadRef: 'omt_1' }
+    const first = await hub.submit('feishu', '第一句', hints)
+    const again = await hub.submit('feishu', '第一句', hints)
+
+    expect(first.accepted).toBe(true)
+    expect(again.accepted).toBe(true)
+    // 幂等键仍由 ref 决定：同一条平台消息重投不换键
+    const keys = dispatchInputs(dispatch).map((input) => input['commandId'])
+    expect(keys).toEqual([
+      'channel:feishu:om_9:create',
+      'channel:feishu:om_9:send',
+      'channel:feishu:om_9:create',
+      'channel:feishu:om_9:send',
+    ])
+    await hub.stopAll()
+  })
+
   it('没配默认智能体 / 智能体不存在 / 空消息：都不派活，但都回一句人话', async () => {
     const feishu = captureEntry('feishu')
     const { hub, dispatch } = hubOf({ entries: [feishu] })
     await hub.startAll()
 
-    const unset = await hub.submit('feishu', '你好', 'om_1')
+    const unset = await hub.submit('feishu', '你好', { ref: 'om_1' })
     expect(unset.accepted).toBe(false)
     expect(unset.receipt).toContain('没配默认智能体')
 
-    const missing = await hub.submit('feishu', '你好', 'om_2')
+    const missing = await hub.submit('feishu', '你好', { ref: 'om_2' })
     expect(missing.accepted).toBe(false)
     expect(missing.receipt).toContain('没配默认智能体')
 
-    const blank = await hub.submit('feishu', '   ', 'om_3')
+    const blank = await hub.submit('feishu', '   ', { ref: 'om_3' })
     expect(blank.accepted).toBe(false)
     expect(blank.receipt).toContain('空消息')
     expect(dispatch).not.toHaveBeenCalled()
@@ -1261,7 +1283,7 @@ describe('createChannels：入站派活与进展（M44）', () => {
     const { hub } = hubOf({ entries: [feishu], config: { agent: '不存在的' } })
     await hub.startAll()
 
-    const outcome = await hub.submit('feishu', '你好', 'om_1')
+    const outcome = await hub.submit('feishu', '你好', { ref: 'om_1' })
     expect(outcome.accepted).toBe(false)
     expect(outcome.receipt).toContain('找不到智能体「不存在的」')
     await hub.stopAll()
@@ -1272,7 +1294,7 @@ describe('createChannels：入站派活与进展（M44）', () => {
     const desktop = captureEntry('desktop')
     const { hub } = hubOf({ entries: [feishu, desktop], config: { agent: 'a1' } })
     await hub.startAll()
-    await hub.submit('feishu', '帮我看看今天的待办', 'om_1')
+    await hub.submit('feishu', '帮我看看今天的待办', { ref: 'om_1' })
 
     hub.dispatch([progressFact('conversation-1', '已经做完了')])
     hub.dispatch([progressFact('conversation-other', '别人的活')])
@@ -1290,7 +1312,7 @@ describe('createChannels：入站派活与进展（M44）', () => {
     const feishu = captureEntry('feishu')
     const { hub } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
     await hub.startAll()
-    await hub.submit('feishu', '帮我看看今天的待办', 'om_1')
+    await hub.submit('feishu', '帮我看看今天的待办', { ref: 'om_1' })
 
     hub.dispatch([progressFact('conversation-1', '', { error: '执行器崩了' })])
     await new Promise((resolve) => setTimeout(resolve, 20))

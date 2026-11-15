@@ -12,6 +12,7 @@ import type {
   ChannelContext,
   ChannelProgress,
   ChannelProgressHandler,
+  ChannelSubmitHints,
   ChannelSubmitOutcome,
 } from '../../../src/protocol/channels'
 import type { Card } from '../../../src/protocol/entities'
@@ -63,8 +64,8 @@ export interface ChannelHarness {
   delivered: Array<{ cardId: string; version: number; ref: string }>
   /** 通道回报的 answer 参数（`answer` 抛错时仍记录，再抛错） */
   answers: AnswerCall[]
-  /** 通道提交的入站文本（M44/M45：`submit` 的调用参数，含按连接覆盖的智能体） */
-  submits: Array<{ text: string; ref?: string; agent?: string }>
+  /** 通道提交的入站文本（M44/M45/M47：`submit` 的调用参数，含平台线索与按连接覆盖的智能体） */
+  submits: Array<{ text: string; hints: ChannelSubmitHints; agent?: string }>
   /** 已订阅的进展处理器（M44） */
   progressHandlers: ChannelProgressHandler[]
   /** 模拟 hub 把一张卡片分发给所有订阅者（与 hub 的同步调用口径一致） */
@@ -78,7 +79,11 @@ export interface ChannelHarnessOptions {
   /** 自定义 answer 行为：用于「内核拒绝 / 已经 settled」这类路径（缺省总是成功） */
   answer?: (call: AnswerCall) => Promise<ChannelAnswerOutcome>
   /** 自定义 submit 行为：入站派活的结果（缺省 accepted=true，会话 `conversation-1`） */
-  submit?: (text: string, ref?: string, agent?: string) => Promise<ChannelSubmitOutcome>
+  submit?: (
+    text: string,
+    hints: ChannelSubmitHints,
+    agent?: string,
+  ) => Promise<ChannelSubmitOutcome>
 }
 
 export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarness {
@@ -115,13 +120,13 @@ export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarn
         ? Promise.resolve({ changed: true, status: 'answered' })
         : options.answer(call)
     },
-    submit: (text, ref, agent) => {
+    submit: (text, hints, agent) => {
       submits.push({
         text,
-        ...(ref === undefined ? {} : { ref }),
+        hints,
         ...(agent === undefined ? {} : { agent }),
       })
-      if (options.submit !== undefined) return options.submit(text, ref, agent)
+      if (options.submit !== undefined) return options.submit(text, hints, agent)
       return Promise.resolve({
         accepted: true,
         conversationId: 'conversation-1',

@@ -90,8 +90,8 @@ function fakeHub(signal: AbortSignal): {
 }
 
 describe('protocol/channels', () => {
-  it('通道端口版本固定为 5（M45：按连接指定智能体 + envPatch）', () => {
-    expect(CHANNEL_PORT_VERSION).toBe(5)
+  it('通道端口版本固定为 6（M47：入站线索取代裸消息引用）', () => {
+    expect(CHANNEL_PORT_VERSION).toBe(6)
   })
 
   it('start 收到上下文：onCard 收卡片与 ref、delivered / answer 回传参数、dispose 可重复调用', async () => {

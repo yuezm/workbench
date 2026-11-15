@@ -30,8 +30,11 @@ type Id = string
  * - 5（M45）：`submit(text, ref, agent)` 的第三参 + `SpawnOptions.envPatch`——一个通道可以
  *   同时接多个飞书连接（多套应用 / 多套机器人），每条连接派给不同智能体，并且能把宿主环境里
  *   别的 agent 留下的身份变量剔除，避免两个程序抢同一个应用的长连接。
+ * - 6（M47）：`submit(text, hints, agent)` 的第二参从「消息引用」升级为**入站线索**——通道额外
+ *   交出平台结构证据（`chatId` / `rootRef` / `threadRef` / `replyTo`），宿主据此把同一话题的
+ *   消息收进同一会话。派给谁、算不算同一话题仍由宿主决定。
  */
-export const CHANNEL_PORT_VERSION = 5
+export const CHANNEL_PORT_VERSION = 6
 
 /**
  * 投递重投曲线（M41）：第 N 次失败之后等多少毫秒再投下一次。
@@ -191,7 +194,30 @@ export interface ChannelSubmitOutcome {
 }
 
 /**
- * 入站文本回调（M44/M45）：`text` 是人在 IM 里发的那句话，`ref` 是平台消息引用（幂等键用）。
+ * 入站线索（M47，通道端口 6）：通道交出的「这句话从哪儿来」。
+ *
+ * 两项职责分开写：
+ * - `ref` 只做**幂等键**（同一条平台消息重投不派第二次活），必须由平台消息 id 组成；
+ * - `chatId` / `rootRef` / `threadRef` / `replyTo` 是**话题归属证据**：宿主按「结构证据 >
+ *   显式命令 > 活跃窗口」的优先级决定这句话接在哪个话题上。缺哪个就少一条证据，不影响派活。
+ *
+ * 通道只交证据，不判话题——与「派给谁不由通道决定」同一条边界。
+ */
+export interface ChannelSubmitHints {
+  /** 平台消息引用（幂等键；同一条消息重投必须同值） */
+  ref?: string
+  /** 平台会话 id（`oc_…`）：没有结构证据时按「这个会话最近活跃的话题」收敛 */
+  chatId?: string | null
+  /** 回复链根消息（`root_id`）：用户在同一链条里回复时不变，最硬的结构证据 */
+  rootRef?: string | null
+  /** 话题线程 id（`thread_id`）：话题群 / 线程回复给的那条线程 */
+  threadRef?: string | null
+  /** 直接回复的那条消息（`reply_to`）：命中「机器人发过的某条消息」就认那个话题 */
+  replyTo?: string | null
+}
+
+/**
+ * 入站文本回调（M44/M45/M47）：`text` 是人在 IM 里发的那句话，`hints` 是平台侧的线索。
  *
  * 通道**不决定派给谁**：目标由宿主按通道配置选，通道拿到的只有「派出去了 / 没派出去」。
  * `agent`（M45）只用于**多连接通道**给单条连接指定智能体（id 或名称）；省略或空串时
@@ -199,7 +225,7 @@ export interface ChannelSubmitOutcome {
  */
 export type ChannelSubmit = (
   text: string,
-  ref?: string,
+  hints: ChannelSubmitHints,
   agent?: string,
 ) => Promise<ChannelSubmitOutcome>
 
@@ -228,7 +254,8 @@ export type ChannelProgressHandler = (progress: ChannelProgress) => void
  *   引用（从未发过为 null）——有它就走「原地更新」，没有就是第一次发。
  *   返回退订函数。启动时宿主还会补投尚未送达的 open 卡。
  * - `delivered` / `answer`：通道 → 宿主的两个回调；投递状态只经事实回写，不直写投影。
- * - `submit`（M44）：入站文本 → 宿主派活（目标由宿主按通道配置决定），返回一句回执。
+ * - `submit`（M44/M47）：入站文本 + 平台线索 → 宿主派活（目标与话题归属都由宿主决定），
+ *   返回一句回执。
  * - `onProgress`（M44）：订阅这个通道提交过的会话的每轮终态；返回退订函数。
  * - `signal`：宿主退出或停用通道时 abort。
  */

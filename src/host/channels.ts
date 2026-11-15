@@ -30,6 +30,7 @@ import type {
   ChannelAnswerOutcome,
   ChannelContext,
   ChannelProgressHandler,
+  ChannelSubmitHints,
   ChannelSubmitOutcome,
 } from '../protocol/channels'
 import type { Fact, Iso } from '../kernel/core/types'
@@ -79,15 +80,16 @@ export interface Channels {
    */
   answer(cardId: string, optionIndex: number, ref?: string): Promise<ChannelAnswerOutcome>
   /**
-   * 通道侧入站文本（M44）：按该通道配置的默认智能体建会话并发出这一句。
+   * 通道侧入站文本（M44/M47）：按该通道配置的默认智能体建会话并发出这一句。
    *
    * `agent`（M45）只给多连接通道用：一条连接可以派给不同智能体；省略时用通道配置的 `agent`。
+   * `hints`（M47）是平台侧线索：`ref` 做幂等键，其余是话题归属证据（本轮先记账，路由在下一片）。
    * 失败不抛错：返回 `accepted:false` + 原因文案，通道原样回帖。
    */
   submit(
     channelKey: string,
     text: string,
-    ref?: string,
+    hints?: ChannelSubmitHints,
     agent?: string,
   ): Promise<ChannelSubmitOutcome>
 }
@@ -499,7 +501,7 @@ export function createChannels(options: ChannelsOptions): Channels {
           Promise.resolve(reportDelivered(entry.key, cardId, version, ref)),
         answer: (cardId, optionIndex, ref, byRef) =>
           answer(entry.key, cardId, optionIndex, ref, byRef),
-        submit: (text, ref, agent) => submit(entry.key, text, ref, agent),
+        submit: (text, hints, agent) => submit(entry.key, text, hints, agent),
         onProgress: (handler) => {
           runtime.progress.add(handler)
           return () => {
@@ -597,7 +599,7 @@ export function createChannels(options: ChannelsOptions): Channels {
   const submit = async (
     channelKey: string,
     text: string,
-    ref?: string,
+    hints?: ChannelSubmitHints,
     agentOverride?: string,
   ): Promise<ChannelSubmitOutcome> => {
     const content = text.trim()
@@ -636,7 +638,8 @@ export function createChannels(options: ChannelsOptions): Channels {
       }
     }
     // 幂等键：同一个平台消息重复投递（长连接重连/重放）不会派两次活
-    const key = `channel:${channelKey}:${ref !== undefined && ref.trim() !== '' ? ref.trim() : `n${++submitSeq}`}`
+    const ref = hints?.ref?.trim() ?? ''
+    const key = `channel:${channelKey}:${ref !== '' ? ref : `n${++submitSeq}`}`
     let conversationId: string
     try {
       const created = effects.dispatch({
@@ -685,6 +688,6 @@ export function createChannels(options: ChannelsOptions): Channels {
       deliverProgress(facts)
     },
     answer: (cardId, optionIndex, ref) => answer(null, cardId, optionIndex, ref),
-    submit: (channelKey, text, ref, agent) => submit(channelKey, text, ref, agent),
+    submit: (channelKey, text, hints, agent) => submit(channelKey, text, hints, agent),
   }
 }

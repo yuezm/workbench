@@ -1466,7 +1466,17 @@ describe('飞书通道：入站派活与进展（M44）', () => {
 
     // M45：连接里配的智能体会作为第三参交给宿主（按连接派活）
     expect(harness.submits).toEqual([
-      { text: '今天有什么安排', ref: 'default:om_in_1', agent: 'a1' },
+      {
+        text: '今天有什么安排',
+        hints: {
+          ref: 'default:om_in_1',
+          chatId: 'oc_p2p',
+          rootRef: null,
+          threadRef: null,
+          replyTo: null,
+        },
+        agent: 'a1',
+      },
     ])
     const reply = cli.calls.find((call) => call.args.includes('+messages-reply'))
     expect(reply?.args).toEqual([
@@ -1500,7 +1510,17 @@ describe('飞书通道：入站派活与进展（M44）', () => {
     await flushDeliver()
 
     expect(harness.submits).toEqual([
-      { text: '今天有什么安排', ref: 'default:om_in_1', agent: 'a1' },
+      {
+        text: '今天有什么安排',
+        hints: {
+          ref: 'default:om_in_1',
+          chatId: 'oc_p2p',
+          rootRef: null,
+          threadRef: null,
+          replyTo: null,
+        },
+        agent: 'a1',
+      },
     ])
     expect(logs.join('\n')).toContain('认下第一位使用者 ou_me')
 

@@ -659,6 +659,9 @@ if (app.requestSingleInstanceLock()) {
         })
         return agent && messages.length > 0 ? chatPrompt(agent, messages) : null
       },
+      // 调度器写入口自己吞掉单次失败（一次拒收不能打断整轮调度），失败原因只能靠这里留痕：
+      // 回执写不进库时 run 会悬到租约过期，界面上只剩 executor_lost，看不到真因
+      log: console.warn.bind(console),
     })
     // 退出流程据此取消活跃 run（before-quit 在模块作用域，拿不到这里的局部变量）
     activeScheduler = scheduler

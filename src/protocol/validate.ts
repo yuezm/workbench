@@ -61,6 +61,15 @@ export const COMMAND_LIMITS = {
   name: 100,
   title: 200,
   description: 2000,
+  /**
+   * 运行失败文案上限（回执 `error` 与宿主兜底 `error`）：执行器会把 stderr 尾巴
+   * （各插件 `OUTPUT_TAIL_LIMIT = 4000`）连同前缀一起塞进 `error`。
+   *
+   * 用 `description`（2000）会整条拒收回执：dsh 起不来时的 stderr 是 4051 字，回执被判
+   * `invalid_input`，终态进不了库，run 只能等租约过期被兜底成 `executor_lost`，界面再也
+   * 看不到真实原因（2026-11-16 任务 40eb2134 的形状）。
+   */
+  runError: 8_000,
   systemPrompt: 20_000,
   /** 阶段「要干什么」正文上限（与系统提示词同量级） */
   stageInstructions: 20_000,
@@ -1151,7 +1160,7 @@ const checkReceipt = (value: unknown): Check => {
       text(note, at, THREAD_LIMITS.noteText),
     ) ??
     optionalEnum(receipt.errorCode, 'receipt.errorCode', RUN_ERROR_CODES) ??
-    optionalText(receipt.error, 'receipt.error', COMMAND_LIMITS.description) ??
+    optionalText(receipt.error, 'receipt.error', COMMAND_LIMITS.runError) ??
     optionalIntegerIn(receipt.exitCode, 'receipt.exitCode', -1_000_000, 1_000_000) ??
     optionalIntegerIn(receipt.durationMs, 'receipt.durationMs', 0, COMMAND_LIMITS.elapsedMs) ??
     optionalBoolean(receipt.resumeRejected, 'receipt.resumeRejected') ??
@@ -1196,7 +1205,7 @@ const checkHostPayload = (type: HostInputName, input: Obj): Check => {
         optionalIntegerIn(input.turn, 'turn', 1, COMMAND_LIMITS.turn) ??
         requiredEnum(input.status, 'status', RUN_TERMINAL_STATUSES) ??
         optionalEnum(input.errorCode, 'errorCode', RUN_ERROR_CODES) ??
-        optionalText(input.error, 'error', COMMAND_LIMITS.description) ??
+        optionalText(input.error, 'error', COMMAND_LIMITS.runError) ??
         optionalString(input.output, 'output') ??
         optionalText(input.sessionId, 'sessionId', COMMAND_LIMITS.sessionId) ??
         (input.usage === undefined || input.usage === null

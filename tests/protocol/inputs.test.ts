@@ -206,6 +206,9 @@ describe('protocol/inputs', () => {
     expect(rejected(withReceipt({ output: 7 }))).toBe('receipt.output必须是字符串')
     expect(rejected(withReceipt({ sessionId: 7 }))).toBe('receipt.sessionId必须是字符串')
     expect(rejected(withReceipt({ error: 7 }))).toBe('receipt.error必须是字符串')
+    // 执行器会把 stderr 尾巴（4000 字）连同前缀塞进 error：上限必须是能装下它的 8000
+    expect(validateInput(withReceipt({ error: longText(4_051) })).ok).toBe(true)
+    expect(rejected(withReceipt({ error: longText(8_001) }))).toBe('receipt.error最长 8000 个字符')
     expect(rejected(withReceipt({ usage: 'x' }))).toBe('receipt.usage 必须是对象')
     expect(rejected(withReceipt({ usage: { inputTokens: -1 } }))).toBe(
       'receipt.usage.inputTokens必须在 0 到 1000000000000 之间',
@@ -253,6 +256,17 @@ describe('protocol/inputs', () => {
     expect(
       rejected(host('run.host_settled', { runId: 'run-1', status: 'failed', leaseId: '' })),
     ).toBe('leaseId必填')
+    // 兜底文案与回执同一上限：调度器把执行器的 stderr 尾巴原样带过来
+    expect(
+      validateInput(
+        host('run.host_settled', { runId: 'run-1', status: 'failed', error: longText(8_000) }),
+      ).ok,
+    ).toBe(true)
+    expect(
+      rejected(
+        host('run.host_settled', { runId: 'run-1', status: 'failed', error: longText(8_001) }),
+      ),
+    ).toBe('error最长 8000 个字符')
   })
 
   it('run.cancel / clock.tick：run.cancel 必填 runId，clock.tick 无字段要求', () => {

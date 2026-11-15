@@ -20,6 +20,7 @@
  * 本模块只依赖 `protocol` 与宿主内部类型，不 import `main`（ESLint 强制）：
  * 执行器实现与装配在 `main/ai-workflow/executor-port.ts`。
  */
+import { RUN_ERROR_CODES } from '../protocol/entities'
 import type {
   Agent,
   RunErrorCode,
@@ -32,7 +33,8 @@ import type {
 import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../protocol/executor'
 import type { Fact, Id, Iso } from '../kernel/core/types'
 import { parseModelId } from '../protocol/model-id'
-import { killPidTree } from './process'
+import { COMMAND_LIMITS } from '../protocol/validate'
+import { killPidTree, tail } from './process'
 import {
   archiveRunTerminal,
   withRunArtifacts,
@@ -141,6 +143,12 @@ export interface SchedulerDeps {
    * 装配根按投影里的智能体 + 对话消息拼；缺省不提供（重试退回当前 prompt）。
    */
   chatFallbackPrompt?: (run: RunRow) => string | null
+  /**
+   * 写入失败的诊断出口（装配根传 `console.warn`）：调度器的写入口自己吞掉单次失败、
+   * 不让一次拒收打断整轮调度，所以失败必须从这里留痕——否则「回执写不进库、run 悬空到
+   * 租约过期」在外部完全看不到。
+   */
+  log?: (line: string) => void
 }
 
 export interface Scheduler {
@@ -319,13 +327,61 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     })
   }
 
-  /** 写入口：单次写入失败（领取被拒 / run 已随任务删除）不让调度器中断。 */
-  const dispatch = (input: unknown): Fact[] => {
+  /**
+   * 写入口（带结果）：单次写入失败（领取被拒 / run 已随任务删除 / 回执被校验拒）不让
+   * 调度器中断，但把失败原样交回调用方——终态写不进库时调用方要能兜底。
+   */
+  const dispatchOutcome = (input: unknown): { facts: Fact[] } | { error: unknown } => {
     try {
-      return deps.dispatch(input).facts
-    } catch {
+      return { facts: deps.dispatch(input).facts }
+    } catch (error) {
+      return { error }
+    }
+  }
+
+  /** 失败留痕文案：只写类型与原因，不带载荷（回执可能很大）。 */
+  const failureLine = (type: string, error: unknown): string =>
+    `[scheduler] ${type} 写入失败：${error instanceof Error ? error.message : String(error)}`
+
+  /** 写入口：失败只记一条日志、返回零事实（调度继续跑下一条）。 */
+  const dispatch = (input: unknown): Fact[] => {
+    const outcome = dispatchOutcome(input)
+    if ('error' in outcome) {
+      deps.log?.(failureLine(String((input as { type?: unknown }).type), outcome.error))
       return []
     }
+    return outcome.facts
+  }
+
+  /** 回执里的 `errorCode` 未经校验（回执可能整条被拒）：不认识的归类退回兜底值。 */
+  const knownErrorCode = (code: unknown, fallback: RunErrorCode): RunErrorCode =>
+    typeof code === 'string' && (RUN_ERROR_CODES as readonly string[]).includes(code)
+      ? (code as RunErrorCode)
+      : fallback
+
+  /**
+   * 终态没能入账（回执被校验拒 / 事务失败）：立刻补一条宿主兜底终态。
+   *
+   * 不补的话 run 停在 `running`，只能等 2 分钟租约过期被时钟回收；界面上看到的失败原因
+   * 会变成 `executor_lost`，执行器真正报的错（例如 dsh 的 stderr）没人看见，任务停在原阶段。
+   * 兜底文案先截到校验上限：回执被拒的原因很可能就是 `error` 太长，原样再写一次还会被拒。
+   * `tail` 会为省略号多占一个字，所以保留 `上限 - 1` 个字符。
+   */
+  const settleUnrecorded = (run: RunRow, receipt: Receipt, error: unknown): void => {
+    deps.log?.(failureLine('run.receipt', error))
+    const status = receipt.status === 'succeeded' ? 'failed' : receipt.status
+    const fallback = dispatchOutcome({
+      type: 'run.host_settled',
+      runId: run.id,
+      // 只比 turn、不传 leaseId：这一轮的回执已经拿到了（只是没进库），按 turn 匹配足以
+      // 挡住续接轮的旧回执；传 leaseId 只会多出一个「租约为空」的不可达分支。
+      turn: run.turn,
+      status,
+      errorCode:
+        status === 'cancelled' ? 'cancelled' : knownErrorCode(receipt.errorCode, 'executor_lost'),
+      error: tail(receipt.error ?? '终态未入账', COMMAND_LIMITS.runError - 1),
+    })
+    if ('error' in fallback) deps.log?.(failureLine('run.host_settled', fallback.error))
   }
 
   const runtimeOf = (run: RunRow): Runtime | undefined =>
@@ -607,7 +663,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         receipt: finalReceipt,
         at: now(),
       })
-      dispatch({ type: 'run.receipt', runId: run.id, receipt: finalReceipt })
+      const recorded = dispatchOutcome({
+        type: 'run.receipt',
+        runId: run.id,
+        receipt: finalReceipt,
+      })
+      // 终态没进库（回执被校验拒 / 事务失败）：补一条宿主终态，别让 run 悬到租约过期
+      if ('error' in recorded) settleUnrecorded(run, finalReceipt, recorded.error)
     } catch (error) {
       // 宿主兜底终态已写过（执行器迟到的抛错只是收尾信号）
       if (finished) return

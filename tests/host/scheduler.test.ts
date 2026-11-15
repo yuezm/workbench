@@ -2027,3 +2027,153 @@ describe('createScheduler：脚本轮（M40）', () => {
     expect(factTypes()).toContain('run.succeeded')
   })
 })
+
+/**
+ * 终态写不进库的形状（2026-11-16 任务 40eb2134）：回执被校验拒 → 调度器的写入口把异常
+ * 吞掉 → run 停在 running，直到 2 分钟租约过期才被兜底成 `executor_lost`。这里断言改成
+ * 「立刻补一条宿主终态，归类与文案取回执里的真话」。
+ */
+describe('createScheduler：终态写入失败', () => {
+  interface Failing {
+    /** 哪些输入类型要抛错（模拟校验拒 / 事务失败） */
+    fail: (type: string) => boolean
+    /** 抛出的东西：Error 与非 Error 都要留痕 */
+    throwValue?: unknown
+    /** `null` = 装配根没接日志出口（不注入 `log`） */
+    log?: ((line: string) => void) | null
+  }
+
+  const runWith = async (
+    receipt: Partial<Receipt>,
+    failing: Failing,
+  ): Promise<{ runId: string; logs: string[] }> => {
+    const seeded = seed()
+    const logs: string[] = []
+    const log = failing.log === undefined ? (line: string) => logs.push(line) : failing.log
+    const scheduler = makeScheduler(
+      portOf((turn) => receiptOf(turn, receipt)),
+      {
+        ...(log === null ? {} : { log }),
+        dispatch: (input) => {
+          const type = String((input as { type?: unknown }).type)
+          if (failing.fail(type)) throw failing.throwValue ?? new Error('写入被拒')
+          return world.store.dispatch(input)
+        },
+      },
+    )
+    scheduler.wake()
+    await scheduler.idle()
+    return { runId: seeded.runId, logs }
+  }
+
+  it('回执写不进库：立刻补宿主终态，分类与文案取回执的真话（不等租约过期）', async () => {
+    const { runId, logs } = await runWith(
+      {
+        status: 'failed',
+        errorCode: 'protocol_error',
+        error: 'dsh 起不来：unsupported Electron runtime fingerprint',
+      },
+      {
+        fail: (type) => type === 'run.receipt',
+        throwValue: new Error('receipt.error最长 8000 个字符'),
+      },
+    )
+
+    expect(runById(runId)).toMatchObject({ status: 'failed', error_code: 'protocol_error' })
+    expect(String(runById(runId)?.error)).toContain('unsupported Electron runtime fingerprint')
+    expect(logs.some((line) => line.includes('run.receipt 写入失败'))).toBe(true)
+    expect(logs.some((line) => line.includes('receipt.error最长'))).toBe(true)
+  })
+
+  it('回执自称成功但没落库：兜底成 failed（宿主兜底不产成功），归类仍取回执的值', async () => {
+    const { runId } = await runWith(
+      { status: 'succeeded', errorCode: 'spawn_failed', error: '启动失败' },
+      { fail: (type) => type === 'run.receipt' },
+    )
+
+    expect(runById(runId)).toMatchObject({ status: 'failed', error_code: 'spawn_failed' })
+  })
+
+  it('回执是取消：兜底落 cancelled（不改成 failed）', async () => {
+    const { runId } = await runWith(
+      { status: 'cancelled', errorCode: 'cancelled', error: '已取消' },
+      { fail: (type) => type === 'run.receipt' },
+    )
+
+    expect(runById(runId)).toMatchObject({ status: 'cancelled', error_code: 'cancelled' })
+  })
+
+  it('回执没给 errorCode / 文案不认识：退回 executor_lost 与占位文案，抛非 Error 也留痕', async () => {
+    const { runId, logs } = await runWith(
+      {
+        status: 'failed',
+        errorCode: 'not-a-code' as unknown as Receipt['errorCode'],
+        error: undefined,
+      },
+      { fail: (type) => type === 'run.receipt', throwValue: 'db busy' },
+    )
+
+    expect(runById(runId)).toMatchObject({ status: 'failed', error_code: 'executor_lost' })
+    expect(String(runById(runId)?.error)).toBe('终态未入账')
+    expect(logs.some((line) => line.includes('db busy'))).toBe(true)
+  })
+
+  it('兜底文案过长：按校验上限截断（超长正是回执被拒的常见原因）', async () => {
+    const long = 'HEAD' + 'x'.repeat(9_000)
+    const { runId } = await runWith(
+      { status: 'failed', errorCode: 'exit_nonzero', error: long },
+      { fail: (type) => type === 'run.receipt' },
+    )
+
+    const error = String(runById(runId)?.error ?? '')
+    expect(error.length).toBeLessThanOrEqual(8_000)
+    expect(error.startsWith('…')).toBe(true)
+    expect(error.endsWith('x')).toBe(true)
+  })
+
+  it('兜底也写不进库 + 没注入日志出口：不崩、不重试', async () => {
+    const { runId } = await runWith(
+      { status: 'failed', errorCode: 'protocol_error', error: 'x' },
+      {
+        fail: (type) => type === 'run.receipt' || type === 'run.host_settled',
+        log: null,
+        throwValue: new Error('db busy'),
+      },
+    )
+
+    // 两条写入都被拒：run 停在 running，交给租约回收（这里不重复写、不抛）
+    expect(runById(runId)?.status).toBe('running')
+  })
+
+  it('心跳写入失败：只记日志，执行继续跑完', async () => {
+    const seeded = seed()
+    const timer = fakeTimer()
+    const logs: string[] = []
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn) => {
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      {
+        timer,
+        log: (line) => logs.push(line),
+        dispatch: (input) => {
+          if (String((input as { type?: unknown }).type) === 'run.heartbeat') {
+            throw new Error('db locked')
+          }
+          return world.store.dispatch(input)
+        },
+      },
+    )
+
+    scheduler.wake()
+    await vi.waitFor(() => expect(timer.handlers.length).toBeGreaterThan(0))
+    timer.handlers.forEach((fire) => fire())
+    expect(logs.some((line) => line.includes('run.heartbeat 写入失败'))).toBe(true)
+
+    gate.resolve()
+    await scheduler.idle()
+    expect(runById(seeded.runId)?.status).toBe('succeeded')
+  })
+})

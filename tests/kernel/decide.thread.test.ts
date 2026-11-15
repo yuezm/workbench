@@ -753,3 +753,56 @@ describe('decide 回执与线程', () => {
     expect(factTypes(decision)).toContain('event.received')
   })
 })
+
+describe('decide thread.open（M47）', () => {
+  it('按入口键建一条空话题：状态 open、没有任务、标题缺省用 source', () => {
+    const decision = decide(
+      view(),
+      command({ type: 'thread.open', source: 'feishu', externalRef: ' wb:oc_1:om_root ' }),
+      NOW,
+      env(),
+    )
+
+    expect(factTypes(decision)).toEqual(['thread.opened'])
+    const payload = payloadOf<{ thread: ThreadRow }>(decision, 'thread.opened')
+    expect(payload.thread).toMatchObject({
+      source: 'feishu',
+      externalRef: 'wb:oc_1:om_root',
+      title: 'feishu',
+      status: 'open',
+      taskIds: [],
+      rootTaskIds: [],
+    })
+    expect(decision.facts[0]?.actor).toEqual(OWNER)
+  })
+
+  it('带标题：标题记进话题行（话题在界面上的名字）', () => {
+    const decision = decide(
+      view(),
+      command({ type: 'thread.open', source: 'feishu', title: ' 报销流程 ' }),
+      NOW,
+      env(),
+    )
+
+    const payload = payloadOf<{ thread: ThreadRow }>(decision, 'thread.opened')
+    expect(payload.thread.title).toBe('报销流程')
+    // 不给入口键 = 隐式话题（手工入口），之后可用 thread.bind 绑上去
+    expect(payload.thread.externalRef).toBeNull()
+  })
+
+  it('入口键已被别的话题占用：reject conflict，不建第二条', () => {
+    const taken = thread({ id: 'th-x', source: 'feishu', externalRef: 'wb:oc_1:om_root' })
+    const decision = decide(
+      view({ threads: [taken] }),
+      command({ type: 'thread.open', source: 'feishu', externalRef: 'wb:oc_1:om_root' }),
+      NOW,
+      env(),
+    )
+
+    expect(factTypes(decision)).toEqual([])
+    expect(decision.reject).toEqual({
+      code: 'conflict',
+      message: '入口已被话题占用: feishu/wb:oc_1:om_root',
+    })
+  })
+})

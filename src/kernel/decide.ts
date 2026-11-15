@@ -77,6 +77,7 @@ const HANDLERS = {
   'rule.replay': automation.replayRuleCommand,
   'plugins.replace': automation.replacePluginSettings,
   'plugin.set': automation.setPluginUnsupported,
+  'thread.open': thread.openThread,
   'thread.note': thread.noteThread,
   'thread.close': thread.closeThread,
   'thread.remove': thread.removeThread,

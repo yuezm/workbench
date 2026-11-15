@@ -9,11 +9,33 @@ import {
   findThreadByKey,
   makeNote,
   noteFacts,
+  openedFacts,
+  openThreadRow,
   withBinding,
   withNote,
   withStatus,
 } from '../threads'
 import { done, OWNER, ownerDraft, reject, runsOfTask } from './common'
+
+/**
+ * 开一条空话题（M47）：入口键给了就必须唯一——同一入口只能有一个话题，
+ * 否则「这条消息属于哪个话题」永远说不清。
+ */
+export function openThread(
+  view: View,
+  input: Extract<Input, { type: 'thread.open' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  const source = input.source.trim()
+  const externalRef = input.externalRef?.trim() || null
+  if (findThreadByKey(view, source, externalRef) !== undefined) {
+    return reject('conflict', '入口已被话题占用: ' + source + '/' + String(externalRef))
+  }
+  const title = input.title?.trim() || source
+  const thread = openThreadRow(env, { source, externalRef, title, now })
+  return done(openedFacts(thread, OWNER, now))
+}
 
 export function noteThread(
   view: View,

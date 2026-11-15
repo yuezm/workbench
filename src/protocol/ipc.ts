@@ -86,6 +86,8 @@ export interface CommandResults {
   /** M7：改一条插件设置后该插件的视图行（含状态与 config；secret 只回键名） */
   'plugin.set': PluginView
   /** M6.5：线程命令只改线程行，返回值由 UI 重取视图 */
+  /** M47：开话题的 id 由调用方从 `thread.opened` 事实里取，不走返回值 */
+  'thread.open': null
   'thread.note': null
   'thread.close': null
   'thread.bind': null

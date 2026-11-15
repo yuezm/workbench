@@ -885,6 +885,13 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
         checkPluginConfig(command.config, 'config') ??
         checkPluginSecrets(command.secrets, 'secrets')
       )
+    case 'thread.open':
+      // M47：入口键可选（省略 = 隐式话题）；来源必填且必须是合法标识
+      return (
+        checkThreadSource(command.source) ??
+        optionalText(command.externalRef, 'externalRef', THREAD_LIMITS.externalRef) ??
+        optionalText(command.title, 'title', THREAD_LIMITS.title)
+      )
     case 'thread.note':
       // 笔记正文只作资料；上限与回执 notes[] 同值
       return (

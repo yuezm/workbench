@@ -268,6 +268,7 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
         return null
       // 只改状态 / 只入账、没有可回传实体的命令：显式登记成 null，不靠 `default` 吞掉。
       // 新增一条命令却忘了在这里登记时，下面的穷尽断言会直接编译报错。
+      // M47：`thread.open` 的 id 由调用方从 `thread.opened` 事实里取（hub 就是这么做的）。
       case 'workflow.remove':
       case 'agent.remove':
       case 'runtime.remove':
@@ -282,6 +283,7 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       case 'chat.archive':
       case 'app.event':
       case 'rule.replay':
+      case 'thread.open':
       case 'thread.note':
       case 'thread.close':
       case 'thread.bind':

@@ -289,6 +289,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
     case 'review.export':
       // M14：归属校验（任务 / 项目）与报告定位都只看投影
       return ['tasks', 'projects', 'review_reports']
+    case 'thread.open':
+      // M47：建话题要按入口键判唯一（`findThreadByKey` 只读线程行）
+      return ['threads']
     case 'thread.note':
     case 'thread.close':
     case 'thread.bind':

@@ -90,6 +90,7 @@ const commandSamples: Command[] = [
   },
   { commandId: 'c24', type: 'rule.trigger', ruleId: 'rule-1' },
   { commandId: 'c25', type: 'rule.replay', ruleId: 'rule-1' },
+  { commandId: 'c25', type: 'thread.open', source: 'feishu', externalRef: 'wb:oc_1:om_root' },
   { commandId: 'c25', type: 'thread.note', threadId: 'th-1', text: '备注' },
   { commandId: 'c26', type: 'thread.close', threadId: 'th-1' },
   {
@@ -316,6 +317,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   ],
   'plugins.replace': ['plugin_settings'],
   'plugin.set': ['plugin_settings'],
+  'thread.open': ['threads'],
   'thread.note': ['threads'],
   'thread.close': ['threads'],
   'thread.bind': ['threads'],
@@ -328,8 +330,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 39 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(39)
+  it('覆盖 40 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(40)
     expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)

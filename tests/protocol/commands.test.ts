@@ -45,6 +45,7 @@ const expected = [
   'rule.replay',
   'plugins.replace',
   'plugin.set',
+  'thread.open',
   'thread.note',
   'thread.close',
   'thread.bind',

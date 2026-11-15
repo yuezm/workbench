@@ -60,6 +60,7 @@ export const COMMAND_NAMES = [
   'rule.replay',
   'plugins.replace',
   'plugin.set',
+  'thread.open',
   'thread.note',
   'thread.close',
   'thread.bind',
@@ -380,6 +381,7 @@ export type Command =
   | RuleReplayCommand
   | PluginsReplaceCommand
   | PluginSetCommand
+  | ThreadOpenCommand
   | ThreadNoteCommand
   | ThreadCloseCommand
   | ThreadBindCommand
@@ -461,6 +463,24 @@ export interface ReviewExportCommand extends CommandBase {
   reportId?: string
 }
 // ---------- 线程（M6.5） ----------
+
+/**
+ * 开一条空话题（M47）：话题的身份是 `(source, externalRef)`，入口键由调用方给
+ * （飞书那边是「连接 + 会话 + 根消息」，手工入口可以不给）。
+ *
+ * 为什么要有这条命令：话题原先只由事件归并 / 手工建任务**顺带**产生，而「先有人说话、
+ * 之后才派生任务」的入口（IM 入站）需要一个不带任务的起点。
+ * 入口键已被别的话题占用时 reject：同一入口只能有一个话题。
+ */
+export interface ThreadOpenCommand extends CommandBase {
+  type: 'thread.open'
+  /** 来源标识（小写，如 `feishu` / `manual` / `app:pomodoro`） */
+  source: string
+  /** 外部入口键；省略 = 隐式话题（之后可用 `thread.bind` 绑上去） */
+  externalRef?: string | null
+  /** 话题名；缺省用 source */
+  title?: string
+}
 
 /** 给线程追加一条笔记（owner 补录；agent 笔记只能经回执 `notes[]`）。 */
 export interface ThreadNoteCommand extends CommandBase {

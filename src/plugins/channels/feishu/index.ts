@@ -368,6 +368,21 @@ interface ConnectionRuntime {
   warnedNoTarget: boolean
 }
 
+/**
+ * 只知会的卡片（M12 打扰口径）：`kind` 是内核建卡时写的判据，缺列的老数据按「有没有选项」
+ * 兜底——与 `plugins/channels/desktop` 的 `needsAnswer` 同口径，两处各自判一次，
+ * 免得把信息卡当提问发出去。
+ */
+const isNotice = (card: { kind?: string; options: string[] }): boolean =>
+  card.kind === 'notice' || (card.kind === undefined && card.options.length === 0)
+
+/**
+ * 没有对应消息时回报的投递引用：信息卡在飞书里**不落消息**（见 `onCard`），
+ * 但投递语义是「已送达至少一个通道」，照样要 ack。形状与其他引用一致
+ * （`{连接 id → message id}` 的空表），hub 只把它记进 `deliveryRefs`。
+ */
+const NO_MESSAGE_REFS = '{}'
+
 /** 进程内已送达的卡片版本（同一版本重投不再打扰） */
 interface SentMark {
   version: number
@@ -655,7 +670,17 @@ export const feishuChannel: ChannelPlugin = {
             }, onExit)
     }
 
+    /**
+     * 信息卡（`notice`）**不发消息**：IM 里没有「通知栏」可落，正文已经在这一轮回帖里
+     * 说过同一件事，再发一张卡片就是重复打扰（M12 的打扰口径同样适用于 IM 通道）。
+     * 终态（resolved）也跳过——那张卡本来就不在飞书里，没有要改口的消息。
+     * 每种状态都照样 ack：投递语义是「已送达至少一个通道」，in-app 投影已经能看到它。
+     */
     const off = ctx.onCard((card, ref) => {
+      if (isNotice(card)) {
+        void ctx.delivered(card.id, card.version, NO_MESSAGE_REFS)
+        return
+      }
       void deliver(card, ref)
     })
     const offProgress = ctx.onProgress((progress) => {

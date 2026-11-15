@@ -794,6 +794,58 @@ describe('飞书通道：启动与投递', () => {
     ])
   })
 
+  it('信息卡（notice）不发消息：只 ack 送达（IM 里没有通知栏，正文已经说过同一件事）', async () => {
+    const { harness, cli } = await startFeishu({
+      config: { user: '' },
+      behaviors: [
+        { stdout: JSON.stringify({ ok: true, identities: { user: { openId: 'ou_owner' } } }) },
+        { hang: true },
+      ],
+    })
+
+    harness.deliver(inst({ kind: 'notice', options: [], text: '', title: '已定位上上个对话' }))
+    await flushDeliver()
+
+    expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(0)
+    expect(cli.calls.filter((call) => call.args.includes('patch'))).toHaveLength(0)
+    expect(harness.delivered).toEqual([{ cardId: 'card-1', version: 1, ref: '{}' }])
+  })
+
+  it('信息卡的终态也不落消息：本来就不在飞书里，没有要改口的那条', async () => {
+    const { harness, cli } = await startFeishu({
+      config: { user: '' },
+      behaviors: [
+        { stdout: JSON.stringify({ ok: true, identities: { user: { openId: 'ou_owner' } } }) },
+        { hang: true },
+      ],
+    })
+
+    harness.deliver(inst({ kind: 'notice', options: [], text: '', status: 'resolved' }))
+    await flushDeliver()
+
+    expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(0)
+    expect(cli.calls.filter((call) => call.args.includes('patch'))).toHaveLength(0)
+    expect(harness.delivered).toEqual([{ cardId: 'card-1', version: 1, ref: '{}' }])
+  })
+
+  it('缺 kind 的老信息卡（没有选项）：按同一口径不落消息', async () => {
+    const { harness, cli } = await startFeishu({
+      config: { user: '' },
+      behaviors: [
+        { stdout: JSON.stringify({ ok: true, identities: { user: { openId: 'ou_owner' } } }) },
+        { hang: true },
+      ],
+    })
+
+    const legacy = inst({ options: [], text: '', title: '老库里的知会' })
+    delete (legacy as { kind?: string }).kind
+    harness.deliver(legacy)
+    await flushDeliver()
+
+    expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(0)
+    expect(harness.delivered).toEqual([{ cardId: 'card-1', version: 1, ref: '{}' }])
+  })
+
   it('投递失败只记日志：不伪造送达（hub 会按重投曲线再来）', async () => {
     const { harness, logs } = await startFeishu({
       behaviors: [{ hang: true }, { code: 1, stderr: 'no scope' }],

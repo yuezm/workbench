@@ -266,8 +266,33 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       case 'plugin.set':
         // 编排命令：返回值在 `setPlugin` 里按 views 现算
         return null
-      default:
+      // 只改状态 / 只入账、没有可回传实体的命令：显式登记成 null，不靠 `default` 吞掉。
+      // 新增一条命令却忘了在这里登记时，下面的穷尽断言会直接编译报错。
+      case 'workflow.remove':
+      case 'agent.remove':
+      case 'runtime.remove':
+      case 'runtime.probed':
+      case 'project.remove':
+      case 'task.stop':
+      case 'task.remove':
+      case 'task.rerun':
+      case 'chat.send':
+      case 'chat.remove':
+      case 'chat.cancel':
+      case 'chat.archive':
+      case 'app.event':
+      case 'rule.replay':
+      case 'thread.note':
+      case 'thread.close':
+      case 'thread.bind':
+      case 'thread.remove':
+      case 'review.export':
         return null
+      default: {
+        // 穷尽断言：`command` 在这里已是 never；漏一条命令，这一行就编不过
+        const unhandled: never = command
+        return unhandled
+      }
     }
   }
 

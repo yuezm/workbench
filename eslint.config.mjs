@@ -19,6 +19,11 @@ export default tseslint.config(
       '.scratch/**',
       // Stryker 变异测试的沙箱目录（源码副本）；中断的运行会留下残留，不能参与 lint 门禁
       '.stryker-tmp/**',
+      // 排查用的临时用例（约定放 .scratch/，手快时可能落在 tests/ 下）。它们常在 lint
+      // 扫描的同一时刻被建/删，eslint 按目录列表去打开时撞 ENOENT 会整个门禁崩掉
+      // （报错 ENOENT: no such file or directory, open 'tests/tmp-*.test.ts'），
+      // 与代码质量无关。只排除 tmp- 前缀的一次性文件，正常用例照旧全量受检。
+      'tests/**/tmp-*',
     ],
   },
   js.configs.recommended,

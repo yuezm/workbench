@@ -57,6 +57,7 @@ import type {
   WorkflowStage,
 } from '../../protocol/entities'
 import type { SnapshotImportedPayload } from '../../protocol/facts'
+import { PROJECTION_TABLES } from '../../kernel/core/types'
 import type {
   FactDraft,
   Fact,
@@ -514,33 +515,19 @@ function dropLegacyChatTables(db: DatabaseSync): void {
   db.exec('DROP TABLE IF EXISTS chat_conversations')
 }
 
-const emptyCounts = (): Record<ProjectionTable, number> => ({
-  tasks: 0,
-  workflows: 0,
-  workflow_stages: 0,
-  agents: 0,
-  runtimes: 0,
-  // M10：v2 没有项目数据，导入不产 projects 行。
-  projects: 0,
-  runs: 0,
-  run_events: 0,
-  conversations: 0,
-  messages: 0,
-  cards: 0,
-  rule_sets: 0,
-  rule_fires: 0,
-  // M6.5：v2 没有线程数据，导入不产 threads 行；键必须补齐以匹配 `ProjectionTable` 全集。
-  threads: 0,
-  // M7：v2 没有插件设置；导入不产 plugin_settings 行。
-  plugin_settings: 0,
-  // M7.5：v2 没有任务上下文 / 反馈；导入不产 task_comments 行。
-  task_comments: 0,
-  // M14：v2 没有评审报告；导入不产 review_reports 行。
-  review_reports: 0,
-  // M42：事件与跳过行不是导入对象（只由事实产生）
-  events: 0,
-  event_skips: 0,
-})
+/**
+ * 各表的导入行数：先全部置 0，再把真正导入的表填上。
+ *
+ * 从 `PROJECTION_TABLES` 派生而不是手写全集：此前每加一张投影表都要回来补一行
+ * 「`xxx: 0`」，漏了编译报错、补了也是给一条一次性路径交税。v2 没有的表
+ * （projects / threads / plugin_settings / task_comments / review_reports /
+ * events / event_skips / cards / rule_*）在这里恒为 0。
+ */
+const emptyCounts = (): Record<ProjectionTable, number> =>
+  Object.fromEntries(PROJECTION_TABLES.map((table) => [table, 0])) as Record<
+    ProjectionTable,
+    number
+  >
 
 /** 一组行 + 表名 → `snapshot.imported` 草稿（payload 按表收窄成判别联合）。 */
 function buildDraft(table: ImportTable, rows: readonly ProjectionRow[], at: Iso): FactDraft {

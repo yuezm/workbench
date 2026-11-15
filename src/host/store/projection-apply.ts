@@ -33,16 +33,13 @@
  *
  * 语句在 writer 创建时一次性 prepare：重建要 fold 上万条事实，不能每条都重新编译 SQL。
  */
-import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
-import type { EventRow } from '../../kernel/core/types'
+import type { DatabaseSync } from 'node:sqlite'
 import type { EventSkipRow } from '../../protocol/rules'
 import type {
   Agent,
-  Card,
   Conversation,
   Message,
   Project,
-  RunEventRow,
   RunRow,
   Runtime,
   Task,
@@ -56,6 +53,7 @@ import type { ThreadRow } from '../../protocol/thread'
 import type { TaskComment } from '../../protocol/task-comment'
 import type { ReviewReport } from '../../protocol/review'
 import { StoreError } from './errors'
+import { TABLE_SHAPES, insertSql, valuesOf } from './columns'
 import { legacyHandoffs } from '../../kernel/scopes/workflow/stage-handoffs'
 import { legacyExits, legacyJudge } from '../../kernel/scopes/workflow/stage-machine'
 
@@ -80,52 +78,6 @@ export interface ProjectionWriter {
    */
   clear(): void
 }
-
-/** `RunRow` 字段 → `runs` 列（顺序与 schema DDL 一致；整行 upsert 与快照列清单共用）。 */
-const RUN_FIELDS: ReadonlyArray<readonly [keyof RunRow, string]> = [
-  ['purpose', 'purpose'],
-  ['taskId', 'task_id'],
-  ['stageId', 'stage_id'],
-  ['agentId', 'agent_id'],
-  ['runtimeId', 'runtime_id'],
-  ['conversationId', 'conversation_id'],
-  ['ruleId', 'rule_id'],
-  ['rulesVersion', 'rules_version'],
-  ['executorKey', 'executor_key'],
-  ['threadId', 'thread_id'],
-  ['cwd', 'cwd'],
-  ['access', 'access'],
-  ['skill', 'skill'],
-  ['promptRef', 'prompt_ref'],
-  ['eventIds', 'event_ids_json'],
-  ['hops', 'hops'],
-  ['turn', 'turn'],
-  ['resumeSessionId', 'resume_session_id'],
-  ['threadContextRef', 'thread_context_ref'],
-  ['queueSeq', 'queue_seq'],
-  ['status', 'status'],
-  ['prompt', 'prompt'],
-  ['output', 'output'],
-  ['error', 'error'],
-  ['errorCode', 'error_code'],
-  ['exitCode', 'exit_code'],
-  ['sessionId', 'session_id'],
-  ['usage', 'usage_json'],
-  ['durationMs', 'duration_ms'],
-  ['leaseId', 'lease_id'],
-  ['attempt', 'attempt'],
-  ['attempts', 'attempts'],
-  ['leaseUntil', 'lease_until'],
-  ['notBefore', 'not_before'],
-  ['deadlineAt', 'deadline_at'],
-  ['cancelRequested', 'cancel_requested'],
-  ['deliverables', 'deliverables_json'],
-  // M40：脚本 run 的执行配置快照（JSON 文本）
-  ['script', 'script_json'],
-  ['startedAt', 'started_at'],
-  ['endedAt', 'ended_at'],
-  ['createdAt', 'created_at'],
-]
 
 /**
  * M2 及以前的事实 payload 只有 `protocolFamily`（协议族），M3 起换成 `executorKey`。
@@ -205,26 +157,6 @@ const normalizeRun = (run: RunRow): RunRow => ({
   createdAt: run.createdAt,
 })
 
-/** 行内值 → SQLite 可绑定的值（`usage` / `eventIds` 存 JSON、布尔存 0/1）。 */
-const runValue = (field: keyof RunRow, run: RunRow): SQLInputValue => {
-  switch (field) {
-    case 'usage':
-      return run.usage === null ? null : JSON.stringify(run.usage)
-    case 'eventIds':
-      return JSON.stringify(run.eventIds)
-    case 'deliverables':
-      return run.deliverables === null || run.deliverables === undefined
-        ? null
-        : JSON.stringify(run.deliverables)
-    case 'script':
-      return JSON.stringify(run.script ?? null)
-    case 'cancelRequested':
-      return run.cancelRequested ? 1 : 0
-    default:
-      return run[field] as SQLInputValue
-  }
-}
-
 /**
  * 规整任务行的缺省值（M6 / M6.5）：M6 前的 `task.created` / `snapshot.imported` 行没有来源四列，
  * M6.5 前的历史行没有线程两列。`kernel/project` 已归一；这里是投影边界的第二道防线
@@ -273,319 +205,24 @@ const normalizeStage = (row: WorkflowStage): WorkflowStage => {
   }
 }
 
-/** `Card` 字段 → `cards` 列（顺序与 schema DDL 一致；整行 upsert 与快照列清单共用）。 */
-const CARD_FIELDS: ReadonlyArray<readonly [keyof Card, string]> = [
-  ['id', 'id'],
-  ['runId', 'run_id'],
-  ['taskId', 'task_id'],
-  ['conversationId', 'conversation_id'],
-  ['title', 'title'],
-  ['text', 'text'],
-  ['kind', 'kind'],
-  ['options', 'options_json'],
-  ['key', 'key'],
-  ['version', 'version'],
-  ['status', 'status'],
-  ['delivery', 'delivery'],
-  ['deliveryRef', 'delivery_ref'],
-  ['deliveryRefs', 'delivery_refs_json'],
-  ['deliveryAttempts', 'delivery_attempts'],
-  ['nextDeliveryAt', 'next_delivery_at'],
-  ['deliveryGivenUp', 'delivery_given_up'],
-  ['optionIndex', 'option_index'],
-  ['answeredBy', 'answered_by'],
-  ['answeredByRef', 'answered_by_ref'],
-  ['answeredAt', 'answered_at'],
-  ['createdAt', 'created_at'],
-  ['updatedAt', 'updated_at'],
-]
-
-/** 行内值 → SQLite 可绑定的值（`options` / `deliveryRefs` 存 JSON）。 */
-const cardValue = (field: keyof Card, card: Card): SQLInputValue => {
-  if (field === 'options') return JSON.stringify(card.options)
-  // M43：按通道的投递记录是 JSON 列（老行 / 老事实在 normalizeCard 里已归一成 {}）
-  if (field === 'deliveryRefs') return JSON.stringify(card.deliveryRefs ?? {})
-  const value = card[field]
-  // 老形状的行（手工构造 / 迁移前的快照）缺可选列：按 NULL 写，不让 undefined 撞到绑定层
-  if (value === undefined) return null
-  // M41：deliveryGivenUp 是布尔列（INTEGER 0/1），node:sqlite 不认 boolean
-  if (typeof value === 'boolean') return value ? 1 : 0
-  return value as SQLInputValue
-}
-
-/**
- * `ThreadRow` 字段 → `threads` 列（顺序与 schema DDL 一致；整行 upsert 共用）。
- *
- * `taskIds` / `rootTaskIds` / `notes` / `events` 存 JSON 列；`sessions` 不在行里（由 runs 现算），
- * 因此这里没有对应列。
- */
-const THREAD_FIELDS: ReadonlyArray<readonly [keyof ThreadRow, string]> = [
-  ['id', 'id'],
-  ['source', 'source'],
-  ['externalRef', 'external_ref'],
-  ['title', 'title'],
-  ['status', 'status'],
-  ['taskIds', 'task_ids_json'],
-  ['rootTaskIds', 'root_task_ids_json'],
-  ['concurrency', 'concurrency'],
-  ['notesVersion', 'notes_version'],
-  ['notes', 'notes_json'],
-  ['events', 'events_json'],
-  ['lastActivityAt', 'last_activity_at'],
-  ['createdAt', 'created_at'],
-]
-
-/** 行内值 → SQLite 可绑定的值（`taskIds` / `rootTaskIds` / `notes` / `events` 存 JSON）。 */
-const threadValue = (field: keyof ThreadRow, thread: ThreadRow): SQLInputValue => {
-  switch (field) {
-    case 'taskIds':
-    case 'rootTaskIds':
-    case 'notes':
-    case 'events':
-      return JSON.stringify(thread[field])
-    default:
-      return thread[field] as SQLInputValue
-  }
-}
-
-/**
- * `run_events.payload_json` 沿用 v2 的存放口径：事件里除 `runId/seq/type`
- * 之外的字段组成 JSON 对象（旧的 `repository.runEventsList` 按同一口径还原）。
- */
-const runEventPayload = (event: RunEventRow): string => {
-  const payload: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(event)) {
-    if (key === 'runId' || key === 'seq' || key === 'type' || value === undefined) continue
-    payload[key] = value
-  }
-  return JSON.stringify(payload)
-}
-
 export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
-  const upserts = {
-    tasks: db.prepare(
-      `INSERT INTO tasks
-         (id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
-          external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
-          spawn_key, handoff_from_task_id, handoff_from_stage_id, handoff_from_run_id, project_id,
-          gate_fails, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         title = excluded.title,
-         description = excluded.description,
-         workflow_id = excluded.workflow_id,
-         current_stage_id = excluded.current_stage_id,
-         status = excluded.status,
-         origin = excluded.origin,
-         rule_id = excluded.rule_id,
-         external_ref = excluded.external_ref,
-         labels_json = excluded.labels_json,
-         thread_id = excluded.thread_id,
-         parent_task_id = excluded.parent_task_id,
-         spawned_by_run_id = excluded.spawned_by_run_id,
-         batch_no = excluded.batch_no,
-         spawn_key = excluded.spawn_key,
-         handoff_from_task_id = excluded.handoff_from_task_id,
-         handoff_from_stage_id = excluded.handoff_from_stage_id,
-         handoff_from_run_id = excluded.handoff_from_run_id,
-         project_id = excluded.project_id,
-         gate_fails = excluded.gate_fails,
-         created_at = excluded.created_at,
-         updated_at = excluded.updated_at`,
-    ),
-    projects: db.prepare(
-      `INSERT INTO projects (id, name, path, description, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         path = excluded.path,
-         description = excluded.description,
-         created_at = excluded.created_at,
-         updated_at = excluded.updated_at`,
-    ),
-    workflows: db.prepare(
-      `INSERT INTO workflows (id, name, description, created_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         description = excluded.description,
-         created_at = excluded.created_at`,
-    ),
-    workflow_stages: db.prepare(
-      `INSERT INTO workflow_stages
-         (id, workflow_id, name, position, entry_mode, builtin, agent_id, script_json, exits_json, handoffs_json, subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json, run_timeout_ms, judge_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         workflow_id = excluded.workflow_id,
-         name = excluded.name,
-         position = excluded.position,
-         entry_mode = excluded.entry_mode,
-         builtin = excluded.builtin,
-         agent_id = excluded.agent_id,
-         script_json = excluded.script_json,
-         exits_json = excluded.exits_json,
-         handoffs_json = excluded.handoffs_json,
-         subtask_stage_id = excluded.subtask_stage_id,
-         on_children_settled = excluded.on_children_settled,
-         spawn_policy = excluded.spawn_policy,
-         instructions = excluded.instructions,
-         acceptance_json = excluded.acceptance_json,
-         run_timeout_ms = excluded.run_timeout_ms,
-         judge_json = excluded.judge_json`,
-    ),
-    agents: db.prepare(
-      `INSERT INTO agents
-         (id, name, description, runtime_id, system_prompt, model, reasoning_effort,
-          max_concurrent, permission_mode, workdir, env_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         description = excluded.description,
-         runtime_id = excluded.runtime_id,
-         system_prompt = excluded.system_prompt,
-         model = excluded.model,
-         reasoning_effort = excluded.reasoning_effort,
-         max_concurrent = excluded.max_concurrent,
-         permission_mode = excluded.permission_mode,
-         workdir = excluded.workdir,
-         env_json = excluded.env_json,
-         created_at = excluded.created_at`,
-    ),
-    runtimes: db.prepare(
-      `INSERT INTO runtimes
-         (id, name, executor_key, command, profile, args_template, enabled, last_probe_json,
-          created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         executor_key = excluded.executor_key,
-         command = excluded.command,
-         profile = excluded.profile,
-         args_template = excluded.args_template,
-         enabled = excluded.enabled,
-         last_probe_json = excluded.last_probe_json,
-         created_at = excluded.created_at`,
-    ),
-    conversations: db.prepare(
-      `INSERT INTO conversations (id, title, agent_id, project_id, session_id, archived_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         title = excluded.title,
-         agent_id = excluded.agent_id,
-         project_id = excluded.project_id,
-         session_id = excluded.session_id,
-         archived_at = excluded.archived_at,
-         created_at = excluded.created_at,
-         updated_at = excluded.updated_at`,
-    ),
-    messages: db.prepare(
-      `INSERT INTO messages (id, conversation_id, role, content, error, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         conversation_id = excluded.conversation_id,
-         role = excluded.role,
-         content = excluded.content,
-         error = excluded.error,
-         created_at = excluded.created_at`,
-    ),
-    /** 规则集单行（id='current'）整行替换：版本与规则同属一行，不做合并。 */
-    rule_sets: db.prepare(
-      `INSERT INTO rule_sets (id, version, replaced_at, rules_json)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         version = excluded.version,
-         replaced_at = excluded.replaced_at,
-         rules_json = excluded.rules_json`,
-    ),
-    /** 插件设置单行（id='current'）整行替换：版本与非密钥设置同属一行。 */
-    plugin_settings: db.prepare(
-      `INSERT INTO plugin_settings (id, version, replaced_at, settings_json)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         version = excluded.version,
-         replaced_at = excluded.replaced_at,
-         settings_json = excluded.settings_json`,
-    ),
-    /** 评审结论整行 upsert（M14）：findings 的逐条状态在行内演进，不做局部合并。 */
-    review_reports: db.prepare(
-      `INSERT INTO review_reports
-         (id, task_id, stage_id, run_id, thread_id, rev, verdict, checks_json, findings_json,
-          artifact_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         task_id = excluded.task_id,
-         stage_id = excluded.stage_id,
-         run_id = excluded.run_id,
-         thread_id = excluded.thread_id,
-         rev = excluded.rev,
-         verdict = excluded.verdict,
-         checks_json = excluded.checks_json,
-         findings_json = excluded.findings_json,
-         artifact_json = excluded.artifact_json,
-         created_at = excluded.created_at,
-         updated_at = excluded.updated_at`,
-    ),
+  /**
+   * 语句按表缓存：`INSERT` 的列清单、占位符与冲突分支都由列描述符（`./columns`）生成，
+   * 加一列不需要改这里，也不需要同步第二份列清单。
+   */
+  const statements = new Map<ProjectionTable, ReturnType<DatabaseSync['prepare']>>()
+  const statementOf = (table: ProjectionTable) => {
+    const cached = statements.get(table)
+    if (cached !== undefined) return cached
+    const prepared = db.prepare(insertSql(TABLE_SHAPES[table]))
+    statements.set(table, prepared)
+    return prepared
   }
 
-  const runColumns = RUN_FIELDS.map(([, column]) => column).join(', ')
-  const runPlaceholders = RUN_FIELDS.map(() => '?').join(', ')
-  const runUpdates = RUN_FIELDS.map(([, column]) => `${column} = excluded.${column}`).join(', ')
-  const insertRun = db.prepare(
-    `INSERT INTO runs (id, ${runColumns}) VALUES (?, ${runPlaceholders})
-     ON CONFLICT(id) DO UPDATE SET ${runUpdates}`,
-  )
-
-  // 卡片同样是整行 upsert：`card.*` 事实携带完整行，投递/回答/关闭都不需要合并旧行。
-  const cardColumns = CARD_FIELDS.map(([, column]) => column).join(', ')
-  const cardPlaceholders = CARD_FIELDS.map(() => '?').join(', ')
-  const cardUpdates = CARD_FIELDS.map(([, column]) => `${column} = excluded.${column}`).join(', ')
-  const insertCard = db.prepare(
-    `INSERT INTO cards (${cardColumns}) VALUES (${cardPlaceholders})
-     ON CONFLICT(id) DO UPDATE SET ${cardUpdates}`,
-  )
-
-  /** 运行事件纯追加：重复 `(run_id, seq)` 撞主键报错，不覆盖。 */
-  const insertRunEvent = db.prepare(
-    `INSERT INTO run_events (run_id, seq, type, payload_json, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  )
-
-  /** 规则触发纯追加（M6）：重复 `id` 撞主键报错，不覆盖历史触发记录。 */
-  const insertRuleFire =
-    db.prepare(`INSERT INTO rule_fires (id, rule_id, version, scheduled_for, fired_at, task_id)
-     VALUES (?, ?, ?, ?, ?, ?)`)
-
-  /** 任务上下文 / 反馈纯追加（M7.5）：一条事实一行评论，重复 id 撞主键报错。 */
-  const insertTaskComment = db.prepare(
-    `INSERT INTO task_comments (id, task_id, author, text, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  )
-
-  // 线程同样是整行 upsert（M6.5）：`thread.*` 事实携带完整行，按 (source, external_ref) 找线程
-  // 是内核在视图里做的，这里只搬运行。
-  const threadColumns = THREAD_FIELDS.map(([, column]) => column).join(', ')
-  const threadPlaceholders = THREAD_FIELDS.map(() => '?').join(', ')
-  const threadUpdates = THREAD_FIELDS.filter(([field]) => field !== 'id')
-    .map(([, column]) => `${column} = excluded.${column}`)
-    .join(', ')
-  /** M42：事件投影（按 id upsert：老日志重建时同一事件只来一条，重复也无害）。 */
-  const upsertEvent = db.prepare(
-    `INSERT INTO events (id, source, type, subject, summary, detail_ref, link, hops, origin_run_id, dedupe_key, received_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET received_at = excluded.received_at`,
-  )
-
-  /** M42：跳过行按 id upsert——补跑会把 `replayed_at` 从 null 改成时刻。 */
-  const upsertEventSkip = db.prepare(
-    `INSERT INTO event_skips (id, rule_id, event_id, version, skipped_at, replayed_at)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET replayed_at = excluded.replayed_at`,
-  )
-
-  const insertThread = db.prepare(
-    `INSERT INTO threads (${threadColumns}) VALUES (${threadPlaceholders})
-     ON CONFLICT(id) DO UPDATE SET ${threadUpdates}`,
-  )
+  /** 一行 → 一条 upsert；`at` 供 `'@at'` 列（阶段 / 运行事件的 created_at）使用。 */
+  const writeRow = (table: ProjectionTable, row: object, at?: Iso): void => {
+    statementOf(table).run(...valuesOf(TABLE_SHAPES[table], row, at))
+  }
 
   const deletes = {
     tasks: db.prepare('DELETE FROM tasks WHERE id = ?'),
@@ -647,229 +284,28 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     'UPDATE workflow_stages SET position = -position - 1 WHERE workflow_id = ? AND position < 0',
   )
 
-  /** 一行变更 → 一条 upsert；`at` 只给没有 created_at 字段的阶段行兜底。 */
   const writes: Record<ProjectionTable, (row: ProjectionRow, at: Iso) => void> = {
-    tasks: (row) => {
-      const task = normalizeTask(row as Task)
-      upserts.tasks.run(
-        task.id,
-        task.title,
-        task.description,
-        task.workflowId,
-        task.currentStageId,
-        task.status,
-        task.origin,
-        task.ruleId,
-        task.externalRef,
-        JSON.stringify(task.labels),
-        task.threadId,
-        task.parentTaskId,
-        task.spawnedByRunId ?? null,
-        task.batchNo ?? null,
-        task.spawnKey ?? null,
-        task.handoffFromTaskId,
-        task.handoffFromStageId,
-        task.handoffFromRunId ?? null,
-        task.projectId ?? null,
-        // 闸门预算已由 `normalizeTask` 归一（缺省 0），这里不再重复兜底
-        task.gateFails,
-        task.createdAt,
-        task.updatedAt,
-      )
-    },
-    projects: (row) => {
-      const project = row as Project
-      upserts.projects.run(
-        project.id,
-        project.name,
-        project.path,
-        project.description,
-        project.createdAt,
-        project.updatedAt,
-      )
-    },
-    workflows: (row) => {
-      const workflow = row as Workflow
-      upserts.workflows.run(workflow.id, workflow.name, workflow.description, workflow.createdAt)
-    },
-    workflow_stages: (row, at) => {
-      const stage = normalizeStage(row as WorkflowStage)
-      upserts.workflow_stages.run(
-        stage.id,
-        stage.workflowId,
-        stage.name,
-        stage.position,
-        stage.entryMode,
-        stage.builtin ?? null,
-        stage.agentId,
-        JSON.stringify(stage.script ?? null),
-        JSON.stringify(stage.exits ?? {}),
-        JSON.stringify(stage.handoffs ?? []),
-        stage.subtaskStageId ?? null,
-        stage.onChildrenSettled ?? null,
-        stage.spawnPolicy ?? null,
-        stage.instructions ?? '',
-        JSON.stringify(stage.acceptance ?? []),
-        stage.runTimeoutMs ?? null,
-        JSON.stringify(stage.judge ?? null),
-        at,
-      )
-    },
-    agents: (row) => {
-      const agent = normalizeAgent(row as Agent)
-      upserts.agents.run(
-        agent.id,
-        agent.name,
-        agent.description,
-        agent.runtimeId,
-        agent.systemPrompt,
-        agent.model,
-        agent.reasoningEffort,
-        agent.maxConcurrent,
-        agent.permissionMode,
-        agent.workdir,
-        JSON.stringify(agent.env),
-        agent.createdAt,
-      )
-    },
-    runtimes: (row) => {
-      const runtime = normalizeRuntime(row as LegacyRuntime)
-      upserts.runtimes.run(
-        runtime.id,
-        runtime.name,
-        runtime.executorKey,
-        runtime.command,
-        runtime.profile,
-        runtime.argsTemplate,
-        runtime.enabled ? 1 : 0,
-        runtime.lastProbe === null ? null : JSON.stringify(runtime.lastProbe),
-        runtime.createdAt,
-      )
-    },
-    runs: (row) => {
-      const run = normalizeRun(row as RunRow)
-      insertRun.run(run.id, ...RUN_FIELDS.map(([field]) => runValue(field, run)))
-    },
-    run_events: (row, at) => {
-      const event = row as RunEventRow
-      insertRunEvent.run(event.runId, event.seq, event.type, runEventPayload(event), at)
-    },
-    conversations: (row) => {
-      const conversation = row as Conversation
-      upserts.conversations.run(
-        conversation.id,
-        conversation.title,
-        conversation.agentId,
-        // M11：老事实 / 存量导入行没有项目，按 null（默认目录）归一
-        conversation.projectId ?? null,
-        conversation.sessionId,
-        conversation.archivedAt ?? null,
-        conversation.createdAt,
-        conversation.updatedAt,
-      )
-    },
-    messages: (row) => {
-      const message = row as Message
-      upserts.messages.run(
-        message.id,
-        message.conversationId,
-        message.role,
-        message.content,
-        message.error,
-        message.createdAt,
-      )
-    },
-    cards: (row) => {
-      const card = row as Card
-      insertCard.run(...CARD_FIELDS.map(([field]) => cardValue(field, card)))
-    },
-    rule_sets: (row) => {
-      const ruleSet = row as RuleSetRow
-      upserts.rule_sets.run(
-        ruleSet.id,
-        ruleSet.version,
-        ruleSet.replacedAt,
-        JSON.stringify(ruleSet.rules),
-      )
-    },
-    rule_fires: (row) => {
-      const fire = row as RuleFireRow
-      insertRuleFire.run(
-        fire.id,
-        fire.ruleId,
-        fire.version,
-        fire.scheduledFor,
-        fire.firedAt,
-        fire.taskId,
-      )
-    },
-    plugin_settings: (row) => {
-      const settings = row as PluginSettingsRow
-      upserts.plugin_settings.run(
-        settings.id,
-        settings.version,
-        settings.replacedAt,
-        JSON.stringify(settings.settings),
-      )
-    },
-    threads: (row) => {
-      const thread = row as ThreadRow
-      insertThread.run(...THREAD_FIELDS.map(([field]) => threadValue(field, thread)))
-    },
-    events: (row) => {
-      const event = row as EventRow
-      upsertEvent.run(
-        event.id,
-        event.source,
-        event.type,
-        event.subject,
-        event.summary,
-        event.detailRef,
-        event.link,
-        event.hops,
-        event.originRunId,
-        event.dedupeKey,
-        event.receivedAt,
-      )
-    },
-    event_skips: (row) => {
-      const skip = row as EventSkipRow
-      upsertEventSkip.run(
-        skip.id,
-        skip.ruleId,
-        skip.eventId,
-        skip.version,
-        skip.skippedAt,
-        skip.replayedAt,
-      )
-    },
-    task_comments: (row) => {
-      const comment = row as TaskComment
-      insertTaskComment.run(
-        comment.id,
-        comment.taskId,
-        comment.author,
-        comment.text,
-        comment.createdAt,
-      )
-    },
-    review_reports: (row) => {
-      const report = row as ReviewReport
-      upserts.review_reports.run(
-        report.id,
-        report.taskId,
-        report.stageId,
-        report.runId,
-        report.threadId,
-        report.rev,
-        report.verdict,
-        JSON.stringify(report.checks),
-        JSON.stringify(report.findings),
-        report.artifact === null ? null : JSON.stringify(report.artifact),
-        report.createdAt,
-        report.updatedAt,
-      )
-    },
+    tasks: (row) => writeRow('tasks', normalizeTask(row as Task)),
+    projects: (row) => writeRow('projects', row as Project),
+    workflows: (row) => writeRow('workflows', row as Workflow),
+    // 阶段行没有 createdAt 字段：首次插入用事实时刻（描述符里的 `'@at'` 列）
+    workflow_stages: (row, at) =>
+      writeRow('workflow_stages', normalizeStage(row as WorkflowStage), at),
+    agents: (row) => writeRow('agents', normalizeAgent(row as Agent)),
+    runtimes: (row) => writeRow('runtimes', normalizeRuntime(row as LegacyRuntime)),
+    runs: (row) => writeRow('runs', normalizeRun(row as RunRow)),
+    run_events: (row, at) => writeRow('run_events', row, at),
+    conversations: (row) => writeRow('conversations', row as Conversation),
+    messages: (row) => writeRow('messages', row as Message),
+    cards: (row) => writeRow('cards', row),
+    rule_sets: (row) => writeRow('rule_sets', row as RuleSetRow),
+    rule_fires: (row) => writeRow('rule_fires', row as RuleFireRow),
+    plugin_settings: (row) => writeRow('plugin_settings', row as PluginSettingsRow),
+    threads: (row) => writeRow('threads', row as ThreadRow),
+    events: (row) => writeRow('events', row),
+    event_skips: (row) => writeRow('event_skips', row as EventSkipRow),
+    task_comments: (row) => writeRow('task_comments', row as TaskComment),
+    review_reports: (row) => writeRow('review_reports', row as ReviewReport),
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */

@@ -13,34 +13,18 @@ import { nextRuleFires, previewEvent } from '../../kernel/scopes/rules'
 import type { UsageAgentRow, UsageDailyRow, UsageTotals } from '../../protocol/views'
 import type { EventRow, RuleSkip } from '../../kernel/core/types'
 import type {
-  Access,
   Agent,
   Card,
-  CardAnswerVia,
   CardChannelRef,
-  CardDelivery,
-  CardKind,
-  CardStatus,
-  ChatRole,
   Conversation,
-  EntryMode,
   Message,
-  PermissionMode,
   Project,
   Run,
-  RunDeliverables,
-  RunErrorCode,
   RunEvent,
-  RunPurpose,
   RunRow,
-  RunStatus,
-  RunUsage,
   Runtime,
-  RuntimeProbe,
   RuntimeStatus,
   Task,
-  TaskOrigin,
-  TaskStatus,
   Workflow,
   WorkflowStage,
   WorkflowWithStages,
@@ -49,7 +33,7 @@ import type { RuleSetRow, RuleSetView } from '../../protocol/rules'
 import type { PluginSettingsRow, PluginSettingsView } from '../../protocol/plugins'
 import type { ThreadRow } from '../../protocol/thread'
 import type { TaskComment } from '../../protocol/task-comment'
-import type { ReviewArtifact, ReviewReport } from '../../protocol/review'
+import type { ReviewReport } from '../../protocol/review'
 import type {
   ActiveRun,
   RuntimeWorkload,
@@ -62,237 +46,20 @@ import type {
 import { VIEW_IDS } from '../../protocol/views'
 import type { Id, Iso, ProjectionTable, View } from '../../kernel/core/types'
 import { lastSeq } from './facts'
-import { parseAgentEnv } from './agent-env'
+
 import { StoreError } from './errors'
+import { TABLE_SHAPES, fromRow, runEventPayloadCodec, selectList } from './columns'
 
-interface WorkflowRow {
-  id: string
-  name: string
-  description: string
-  created_at: string
-}
+/**
+ * 读路径的两个助手：**列清单**与**行映射**都来自列描述符（`./columns`）。
+ *
+ * 这里不再有第二份列清单，也不再由 `mapX` 各自兜缺省——历史行里 `'null'` / 空串这类
+ * 归一由描述符的 codec 统一负责，写侧与读侧因此不可能再各写一套。
+ */
+const columnsOf = (table: ProjectionTable): string => selectList(TABLE_SHAPES[table])
 
-interface StageRow {
-  id: string
-  workflow_id: string
-  name: string
-  position: number
-  entry_mode: string
-  /** M18 内置阶段键（NULL = 自己添加的阶段） */
-  builtin: string | null
-  agent_id: string | null
-  /** M32 出口表（JSON 对象文本；老行由启动补齐写全） */
-  exits_json: string
-  /** 旧 M11 闸门两列（已不读，保留在表里等清理） */
-  on_complete_stage_id: string | null
-  on_reject_stage_id: string | null
-  /** M29 派单（JSON 数组文本；老行由投影迁移补 '[]'） */
-  handoffs_json: string
-  subtask_stage_id: string | null
-  on_children_settled: string | null
-  spawn_policy: string | null
-  instructions: string
-  /** M20 验收条目（JSON 数组文本；`[]` = 未声明） */
-  acceptance_json: string
-  /** M26 阶段单轮运行超时（毫秒；NULL = 用全局缺省） */
-  run_timeout_ms: number | null
-  /** M32 判定者（JSON 文本；`null` = 不判定） */
-  judge_json: string
-  /** M40 阶段脚本（JSON 文本；`null` = 不是脚本阶段） */
-  script_json: string
-}
-
-interface AgentRow {
-  id: string
-  name: string
-  description: string
-  runtime_id: string
-  system_prompt: string
-  model: string | null
-  reasoning_effort: string | null
-  max_concurrent: number
-  permission_mode: string
-  workdir: string | null
-  env_json: string
-  created_at: string
-}
-
-interface RuntimeRow {
-  id: string
-  name: string
-  executor_key: string
-  command: string
-  profile: string
-  args_template: string
-  enabled: number
-  last_probe_json: string | null
-  created_at: string
-}
-
-interface TaskRow {
-  id: string
-  title: string
-  description: string
-  workflow_id: string
-  project_id: string | null
-  current_stage_id: string | null
-  status: string
-  origin: string
-  rule_id: string | null
-  external_ref: string | null
-  labels_json: string
-  thread_id: string | null
-  parent_task_id: string | null
-  spawned_by_run_id: string | null
-  batch_no: number | null
-  spawn_key: string | null
-  handoff_from_task_id: string | null
-  handoff_from_stage_id: string | null
-  /** M30 派单来源 run（人工离开为 NULL） */
-  handoff_from_run_id: string | null
-  /** M11 闸门预算：当前阶段连续未通过次数 */
-  gate_fails: number
-  created_at: string
-  updated_at: string
-}
-
-/** `projects` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
-interface ProjectRow {
-  id: string
-  name: string
-  path: string
-  description: string
-  created_at: string
-  updated_at: string
-}
-
-/** `threads` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
-interface ThreadDbRow {
-  id: string
-  source: string
-  external_ref: string | null
-  title: string
-  status: string
-  task_ids_json: string
-  root_task_ids_json: string
-  concurrency: number
-  notes_version: number
-  notes_json: string
-  events_json: string
-  last_activity_at: string
-  created_at: string
-}
-
-/** `rule_sets` 单行投影（列与 `host/schema` 的 DDL 一一对应）。 */
-interface RuleSetDbRow {
-  id: string
-  version: number
-  replaced_at: string
-  rules_json: string
-}
-
-/** `plugin_settings` 单行投影（列与 `host/schema` 的 DDL 一一对应）。 */
-interface PluginSettingsDbRow {
-  id: string
-  version: number
-  replaced_at: string
-  settings_json: string
-}
-
-/** `runs` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
-interface RunDbRow {
-  id: string
-  purpose: string
-  task_id: string | null
-  stage_id: string | null
-  agent_id: string | null
-  runtime_id: string | null
-  conversation_id: string | null
-  rule_id: string | null
-  rules_version: number
-  executor_key: string
-  thread_id: string | null
-  cwd: string
-  access: string
-  skill: string | null
-  prompt_ref: string | null
-  event_ids_json: string
-  hops: number
-  turn: number
-  resume_session_id: string | null
-  thread_context_ref: string | null
-  queue_seq: number
-  status: string
-  prompt: string
-  output: string
-  error: string | null
-  error_code: string | null
-  exit_code: number | null
-  session_id: string | null
-  usage_json: string | null
-  duration_ms: number | null
-  lease_id: string | null
-  attempt: number
-  attempts: number
-  lease_until: string | null
-  not_before: string | null
-  deadline_at: string | null
-  cancel_requested: number
-  deliverables_json: string | null
-  /** M40 脚本 run 的执行配置快照（JSON；`null` = 不是脚本轮） */
-  script_json: string
-  started_at: string | null
-  ended_at: string | null
-  created_at: string
-}
-
-interface ConversationRow {
-  id: string
-  title: string
-  agent_id: string
-  /** M11 所属项目（NULL = 默认目录） */
-  project_id: string | null
-  session_id: string | null
-  archived_at: string | null
-  created_at: string
-  updated_at: string
-}
-
-interface MessageRow {
-  id: string
-  conversation_id: string
-  role: string
-  content: string
-  error: string | null
-  created_at: string
-}
-
-/** `cards` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
-interface CardDbRow {
-  id: string
-  run_id: string
-  task_id: string | null
-  conversation_id: string | null
-  title: string
-  text: string
-  kind: string
-  options_json: string
-  key: string | null
-  version: number
-  status: string
-  delivery: string
-  delivery_ref: string | null
-  delivery_refs_json: string | null
-  delivery_attempts: number
-  next_delivery_at: string | null
-  delivery_given_up: number
-  option_index: number | null
-  answered_by: string | null
-  answered_by_ref: string | null
-  answered_at: string | null
-  created_at: string
-  updated_at: string
-}
+/** 一行 → 契约对象；枚举收窄由调用点的 `T` 决定，运行时不做校验。 */
+const rowOf = <T>(table: ProjectionTable, row: object): T => fromRow<T>(TABLE_SHAPES[table], row)
 
 interface ActiveRunRow {
   id: string
@@ -302,264 +69,34 @@ interface ActiveRunRow {
   status: string
 }
 
-const mapWorkflow = (row: WorkflowRow): Workflow => ({
-  id: row.id,
-  name: row.name,
-  description: row.description,
-  createdAt: row.created_at,
-})
+const mapWorkflow = (row: object): Workflow => rowOf<Workflow>('workflows', row)
 
-const mapStage = (row: StageRow): WorkflowStage => ({
-  id: row.id,
-  workflowId: row.workflow_id,
-  name: row.name,
-  position: row.position,
-  entryMode: row.entry_mode as EntryMode,
-  builtin: row.builtin as WorkflowStage['builtin'],
-  agentId: row.agent_id,
-  // M40：坏 JSON / 空串 / 'null' 按「不是脚本阶段」归一
-  script:
-    row.script_json === undefined || row.script_json.trim() === '' || row.script_json === 'null'
-      ? null
-      : (JSON.parse(row.script_json) as WorkflowStage['script']),
-  exits:
-    row.exits_json === undefined || row.exits_json.trim() === ''
-      ? {}
-      : (JSON.parse(row.exits_json) as WorkflowStage['exits']),
-  // M32：判定者只剩护栏；旧行没有该列时按「不判定」归一
-  judge:
-    row.judge_json === undefined || row.judge_json.trim() === '' || row.judge_json === 'null'
-      ? null
-      : (JSON.parse(row.judge_json) as WorkflowStage['judge']),
-  // M29：坏 JSON / 空串按「不派单」归一，不让一条脏行把整张视图读挂
-  handoffs:
-    row.handoffs_json === undefined || row.handoffs_json.trim() === ''
-      ? []
-      : (JSON.parse(row.handoffs_json) as WorkflowStage['handoffs']),
-  subtaskStageId: row.subtask_stage_id,
-  onChildrenSettled: row.on_children_settled as WorkflowStage['onChildrenSettled'],
-  spawnPolicy: row.spawn_policy as WorkflowStage['spawnPolicy'],
-  instructions: row.instructions,
-  // M20：坏 JSON / 空串按「未声明」归一，不让一条脏行把整张视图读挂
-  acceptance:
-    row.acceptance_json.trim() === '' ? [] : (JSON.parse(row.acceptance_json) as string[]),
-  // M26：阶段超时（NULL = 用全局缺省）
-  runTimeoutMs: row.run_timeout_ms ?? null,
-})
+const mapStage = (row: object): WorkflowStage => rowOf<WorkflowStage>('workflow_stages', row)
 
-const mapAgent = (row: AgentRow): Agent => ({
-  id: row.id,
-  name: row.name,
-  description: row.description,
-  runtimeId: row.runtime_id,
-  systemPrompt: row.system_prompt,
-  model: row.model,
-  reasoningEffort: row.reasoning_effort,
-  maxConcurrent: row.max_concurrent,
-  permissionMode: row.permission_mode as PermissionMode,
-  workdir: row.workdir,
-  env: parseAgentEnv(row.env_json),
-  createdAt: row.created_at,
-})
+const mapAgent = (row: object): Agent => rowOf<Agent>('agents', row)
 
-const mapRuntime = (row: RuntimeRow): Runtime => ({
-  id: row.id,
-  name: row.name,
-  executorKey: row.executor_key,
-  command: row.command,
-  profile: row.profile,
-  argsTemplate: row.args_template,
-  enabled: row.enabled === 1,
-  createdAt: row.created_at,
-  lastProbe:
-    row.last_probe_json === null ? null : (JSON.parse(row.last_probe_json) as RuntimeProbe),
-})
+const mapRuntime = (row: object): Runtime => rowOf<Runtime>('runtimes', row)
 
-const mapTask = (row: TaskRow): Task => ({
-  id: row.id,
-  title: row.title,
-  description: row.description,
-  workflowId: row.workflow_id,
-  projectId: row.project_id,
-  currentStageId: row.current_stage_id,
-  status: row.status as TaskStatus,
-  origin: row.origin as TaskOrigin,
-  ruleId: row.rule_id,
-  externalRef: row.external_ref,
-  labels: JSON.parse(row.labels_json) as string[],
-  threadId: row.thread_id,
-  parentTaskId: row.parent_task_id,
-  spawnedByRunId: row.spawned_by_run_id,
-  batchNo: row.batch_no,
-  spawnKey: row.spawn_key,
-  handoffFromTaskId: row.handoff_from_task_id,
-  handoffFromStageId: row.handoff_from_stage_id,
-  handoffFromRunId: row.handoff_from_run_id ?? null,
-  gateFails: row.gate_fails,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-})
+const mapTask = (row: object): Task => rowOf<Task>('tasks', row)
 
 /** `projects` 行 → `Project`：逐列直取（无 JSON 列）。 */
-const mapProject = (row: ProjectRow): Project => ({
-  id: row.id,
-  name: row.name,
-  path: row.path,
-  description: row.description,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-})
+const mapProject = (row: object): Project => rowOf<Project>('projects', row)
 
 /** `threads` 行 → `ThreadRow`：四个 JSON 列还原，其余逐列直取（`sessions` 不落行）。 */
-const mapThread = (row: ThreadDbRow): ThreadRow => ({
-  id: row.id,
-  source: row.source,
-  externalRef: row.external_ref,
-  title: row.title,
-  status: row.status as ThreadRow['status'],
-  taskIds: JSON.parse(row.task_ids_json) as string[],
-  rootTaskIds: JSON.parse(row.root_task_ids_json) as string[],
-  concurrency: row.concurrency,
-  notesVersion: row.notes_version,
-  notes: JSON.parse(row.notes_json) as ThreadRow['notes'],
-  events: JSON.parse(row.events_json) as ThreadRow['events'],
-  lastActivityAt: row.last_activity_at,
-  createdAt: row.created_at,
-})
-
-/** `task_comments` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
-interface TaskCommentDbRow {
-  id: string
-  task_id: string
-  author: string
-  text: string
-  created_at: string
-}
-
-/** `review_reports` 投影的整行（列与 `host/schema` 的 DDL 一一对应）。 */
-interface ReviewReportDbRow {
-  id: string
-  task_id: string
-  stage_id: string
-  run_id: string
-  thread_id: string | null
-  rev: number
-  verdict: string | null
-  checks_json: string
-  findings_json: string
-  artifact_json: string | null
-  created_at: string
-  updated_at: string
-}
+const mapThread = (row: object): ThreadRow => rowOf<ThreadRow>('threads', row)
 
 /** `task_comments` 行 → `TaskComment`：逐列直取（无 JSON 列）。 */
-const mapTaskComment = (row: TaskCommentDbRow): TaskComment => ({
-  id: row.id,
-  taskId: row.task_id,
-  author: row.author as TaskComment['author'],
-  text: row.text,
-  createdAt: row.created_at,
-})
+const mapTaskComment = (row: object): TaskComment => rowOf<TaskComment>('task_comments', row)
 
 /** `runs` 行 → `RunRow`：JSON 列还原、布尔列从 0/1 还原，其余逐列直取。 */
-const mapRun = (row: RunDbRow): RunRow => ({
-  id: row.id,
-  purpose: row.purpose as RunPurpose,
-  taskId: row.task_id,
-  stageId: row.stage_id,
-  agentId: row.agent_id,
-  runtimeId: row.runtime_id,
-  conversationId: row.conversation_id,
-  ruleId: row.rule_id,
-  rulesVersion: row.rules_version,
-  executorKey: row.executor_key,
-  threadId: row.thread_id,
-  cwd: row.cwd,
-  access: row.access as Access,
-  skill: row.skill,
-  promptRef: row.prompt_ref,
-  eventIds: JSON.parse(row.event_ids_json) as string[],
-  hops: row.hops,
-  turn: row.turn,
-  resumeSessionId: row.resume_session_id,
-  threadContextRef: row.thread_context_ref,
-  queueSeq: row.queue_seq,
-  status: row.status as RunStatus,
-  prompt: row.prompt,
-  output: row.output,
-  error: row.error,
-  errorCode: row.error_code as RunErrorCode | null,
-  exitCode: row.exit_code,
-  sessionId: row.session_id,
-  usage: row.usage_json === null ? null : (JSON.parse(row.usage_json) as RunUsage),
-  durationMs: row.duration_ms,
-  leaseId: row.lease_id,
-  attempt: row.attempt,
-  attempts: row.attempts,
-  leaseUntil: row.lease_until,
-  notBefore: row.not_before,
-  deadlineAt: row.deadline_at,
-  cancelRequested: row.cancel_requested === 1,
-  deliverables:
-    row.deliverables_json === null ? null : (JSON.parse(row.deliverables_json) as RunDeliverables),
-  // M40：坏 JSON / 空串按「不是脚本轮」归一，不让一条脏行把整张视图读挂
-  script:
-    row.script_json === undefined || row.script_json.trim() === '' || row.script_json === 'null'
-      ? null
-      : (JSON.parse(row.script_json) as RunRow['script']),
-  startedAt: row.started_at,
-  endedAt: row.ended_at,
-  createdAt: row.created_at,
-})
+const mapRun = (row: object): RunRow => rowOf<RunRow>('runs', row)
 
-const mapConversation = (row: ConversationRow): Conversation => ({
-  id: row.id,
-  title: row.title,
-  agentId: row.agent_id,
-  // M11：列的 NULL 即「没有项目」（默认目录），老行同样落这里
-  projectId: row.project_id,
-  sessionId: row.session_id,
-  archivedAt: row.archived_at,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-})
+const mapConversation = (row: object): Conversation => rowOf<Conversation>('conversations', row)
 
-const mapMessage = (row: MessageRow): Message => ({
-  id: row.id,
-  conversationId: row.conversation_id,
-  role: row.role as ChatRole,
-  content: row.content,
-  error: row.error,
-  createdAt: row.created_at,
-})
+const mapMessage = (row: object): Message => rowOf<Message>('messages', row)
 
 /** `cards` 行 → `Card`：`options_json` 还原为 `string[]`，枚举列按契约收窄。 */
-const mapCard = (row: CardDbRow): Card => ({
-  id: row.id,
-  runId: row.run_id,
-  taskId: row.task_id,
-  conversationId: row.conversation_id,
-  title: row.title,
-  text: row.text,
-  kind: row.kind as CardKind,
-  options: JSON.parse(row.options_json) as string[],
-  key: row.key,
-  version: row.version,
-  status: row.status as CardStatus,
-  delivery: row.delivery as CardDelivery,
-  deliveryRef: row.delivery_ref,
-  // M43：按通道的投递记录（JSON 列）；坏值 / 空串按「没发过」归一
-  deliveryRefs: readDeliveryRefs(row.delivery_refs_json),
-  deliveryAttempts: Number(row.delivery_attempts ?? 0),
-  nextDeliveryAt: (row.next_delivery_at as string | null) ?? null,
-  deliveryGivenUp: Number(row.delivery_given_up ?? 0) === 1,
-  optionIndex: row.option_index,
-  answeredBy: row.answered_by as CardAnswerVia | null,
-  answeredByRef: row.answered_by_ref ?? null,
-  answeredAt: row.answered_at,
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-})
+const mapCard = (row: object): Card => rowOf<Card>('cards', row)
 
 /** `delivery_refs_json` → `Record<通道键, CardChannelRef>`：解析失败按空对象（投影不因坏值崩）。 */
 export function readDeliveryRefs(raw: string | null | undefined): Record<string, CardChannelRef> {
@@ -572,8 +109,8 @@ export function readDeliveryRefs(raw: string | null | undefined): Record<string,
 const readWorkflows = (db: DatabaseSync): Workflow[] =>
   (
     db
-      .prepare('SELECT id, name, description, created_at FROM workflows ORDER BY created_at, rowid')
-      .all() as unknown as WorkflowRow[]
+      .prepare(`SELECT ${columnsOf('workflows')} FROM workflows ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapWorkflow)
 
 /** 阶段按 (workflow_id, position) 排；调用方按 workflow 分组后顺序即稳定。 */
@@ -581,80 +118,51 @@ const readStages = (db: DatabaseSync): WorkflowStage[] =>
   (
     db
       .prepare(
-        `SELECT id, workflow_id, name, position, entry_mode, builtin, agent_id, script_json,
-                exits_json, handoffs_json,
-                subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
-                run_timeout_ms, judge_json
-         FROM workflow_stages ORDER BY workflow_id, position`,
+        `SELECT ${columnsOf('workflow_stages')} FROM workflow_stages ORDER BY workflow_id, position`,
       )
-      .all() as unknown as StageRow[]
+      .all() as unknown as object[]
   ).map(mapStage)
 
 const readAgents = (db: DatabaseSync): Agent[] =>
   (
     db
-      .prepare(
-        `SELECT id, name, description, runtime_id, system_prompt, model, reasoning_effort,
-                max_concurrent, permission_mode, workdir, env_json, created_at
-         FROM agents ORDER BY created_at, rowid`,
-      )
-      .all() as unknown as AgentRow[]
+      .prepare(`SELECT ${columnsOf('agents')} FROM agents ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapAgent)
 
 const readRuntimes = (db: DatabaseSync): Runtime[] =>
   (
     db
-      .prepare(
-        `SELECT id, name, executor_key, command, profile, args_template, enabled,
-                last_probe_json, created_at
-         FROM runtimes ORDER BY created_at, rowid`,
-      )
-      .all() as unknown as RuntimeRow[]
+      .prepare(`SELECT ${columnsOf('runtimes')} FROM runtimes ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapRuntime)
-
-/** `projects` 投影的列清单（逐列写死，装载与 `projects.all` 共用）。 */
-const PROJECT_COLUMNS = 'id, name, path, description, created_at, updated_at'
 
 const readProjects = (db: DatabaseSync): Project[] =>
   (
     db
-      .prepare(`SELECT ${PROJECT_COLUMNS} FROM projects ORDER BY created_at, rowid`)
-      .all() as unknown as ProjectRow[]
+      .prepare(`SELECT ${columnsOf('projects')} FROM projects ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapProject)
-
-/** `tasks` 投影的列清单（逐列写死，不用 `SELECT *`；三处读路径共用）。 */
-const TASK_COLUMNS = `id, title, description, workflow_id, project_id, current_stage_id, status, origin,
-        rule_id, external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id,
-        batch_no, spawn_key, handoff_from_task_id, handoff_from_stage_id, handoff_from_run_id,
-        gate_fails, created_at, updated_at`
 
 const readTasks = (db: DatabaseSync): Task[] =>
   (
     db
-      .prepare(`SELECT ${TASK_COLUMNS} FROM tasks ORDER BY created_at, rowid`)
-      .all() as unknown as TaskRow[]
+      .prepare(`SELECT ${columnsOf('tasks')} FROM tasks ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapTask)
-
-/** `threads` 投影的列清单（逐列写死，不用 `SELECT *`；装载与 `thread.byId` 共用）。 */
-const THREAD_COLUMNS = `id, source, external_ref, title, status, task_ids_json,
-        root_task_ids_json, concurrency, notes_version, notes_json, events_json,
-        last_activity_at, created_at`
 
 const readThreads = (db: DatabaseSync): ThreadRow[] =>
   (
     db
-      .prepare(`SELECT ${THREAD_COLUMNS} FROM threads ORDER BY created_at, rowid`)
-      .all() as unknown as ThreadDbRow[]
+      .prepare(`SELECT ${columnsOf('threads')} FROM threads ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapThread)
-
-/** `task_comments` 的列清单（逐列写死，装载与 `comments.byTask` 共用）。 */
-const TASK_COMMENT_COLUMNS = 'id, task_id, author, text, created_at'
 
 const readTaskComments = (db: DatabaseSync): TaskComment[] =>
   (
     db
-      .prepare(`SELECT ${TASK_COMMENT_COLUMNS} FROM task_comments ORDER BY created_at, rowid`)
-      .all() as unknown as TaskCommentDbRow[]
+      .prepare(`SELECT ${columnsOf('task_comments')} FROM task_comments ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapTaskComment)
 
 /** 某任务的上下文 / 反馈：按追加顺序（`createdAt` 升序，同毫秒按 rowid）。 */
@@ -662,33 +170,25 @@ const readTaskCommentsByTask = (db: DatabaseSync, taskId: string): TaskComment[]
   (
     db
       .prepare(
-        `SELECT ${TASK_COMMENT_COLUMNS} FROM task_comments
+        `SELECT ${columnsOf('task_comments')} FROM task_comments
          WHERE task_id = ?
          ORDER BY created_at, rowid`,
       )
-      .all(taskId) as unknown as TaskCommentDbRow[]
+      .all(taskId) as unknown as object[]
   ).map(mapTaskComment)
-
-/** `runs` 投影的列清单（逐列写死，不用 `SELECT *`）。 */
-const RUN_COLUMNS = `id, purpose, task_id, stage_id, agent_id, runtime_id, conversation_id, rule_id,
-        rules_version, executor_key, thread_id, cwd, access, skill, prompt_ref,
-        event_ids_json, hops, turn, resume_session_id, thread_context_ref, queue_seq,
-        status, prompt, output, error, error_code, exit_code, session_id, usage_json,
-        duration_ms, lease_id, attempt, attempts, lease_until, not_before, deadline_at,
-        cancel_requested, deliverables_json, script_json, started_at, ended_at, created_at`
 
 const readRuns = (db: DatabaseSync): RunRow[] =>
   (
     db
-      .prepare(`SELECT ${RUN_COLUMNS} FROM runs ORDER BY created_at, rowid`)
-      .all() as unknown as RunDbRow[]
+      .prepare(`SELECT ${columnsOf('runs')} FROM runs ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapRun)
 
 /**
  * 投影行 → IPC 运行行：调度列不外露（与 M1 的 `Run` 字段一致）。
  * `taskId` 由调用方传入（`runs.byTask` 的 SQL 已按 `task_id = ? AND purpose='stage'` 过滤）。
  */
-const toRun = (row: RunDbRow, taskId: string): Run => {
+const toRun = (row: object, taskId: string): Run => {
   const run = mapRun(row)
   return {
     id: run.id,
@@ -721,38 +221,31 @@ const readRunsByTask = (db: DatabaseSync, taskId: string): Run[] =>
   (
     db
       .prepare(
-        `SELECT ${RUN_COLUMNS} FROM runs
+        `SELECT ${columnsOf('runs')} FROM runs
          WHERE task_id = ? AND purpose = 'stage'
          ORDER BY created_at, rowid`,
       )
-      .all(taskId) as unknown as RunDbRow[]
+      .all(taskId) as unknown as object[]
   ).map((row) => toRun(row, taskId))
 
 const readRunById = (db: DatabaseSync, runId: string): RunRow | null => {
-  const row = db.prepare(`SELECT ${RUN_COLUMNS} FROM runs WHERE id = ?`).get(runId) as unknown as
-    RunDbRow | undefined
-  return row ? mapRun(row) : null
+  const row = db.prepare(`SELECT ${columnsOf('runs')} FROM runs WHERE id = ?`).get(runId)
+  return row === undefined ? null : rowOf<RunRow>('runs', row)
 }
 
-interface RunEventDbRow {
-  run_id: string
-  seq: number
-  type: string
-  payload_json: string
-}
-
-/** 运行事件流：`payload_json` 还原为协议帧（`seq` / `type` 已在列里）。 */
-const readRunEvents = (db: DatabaseSync, runId: string): RunEvent[] =>
-  (
-    db
-      .prepare(
-        'SELECT run_id, seq, type, payload_json FROM run_events WHERE run_id = ? ORDER BY seq',
-      )
-      .all(runId) as unknown as RunEventDbRow[]
-  ).map((row) => {
-    const payload = JSON.parse(row.payload_json) as Omit<RunEvent, 'seq' | 'type'>
-    return { seq: row.seq, type: row.type as RunEvent['type'], ...payload }
+/** 运行事件流：payload 的编解码与写侧共用同一个 codec（./columns）。 */
+const readRunEvents = (db: DatabaseSync, runId: string): RunEvent[] => {
+  const rows = db
+    .prepare(`SELECT ${columnsOf('run_events')} FROM run_events WHERE run_id = ? ORDER BY seq`)
+    .all(runId) as unknown as Array<Record<string, unknown>>
+  return rows.map((row) => {
+    const payload = runEventPayloadCodec.decode(row['payload_json']) as Omit<
+      RunEvent,
+      'seq' | 'type'
+    >
+    return { seq: Number(row['seq']), type: row['type'] as RunEvent['type'], ...payload }
   })
+}
 
 /** 该 run 已有的最大帧 seq（重启后重跑同一 run 时保证全局单调）；没有事件时为 0。 */
 const readLastEventSeq = (db: DatabaseSync, runId: string): number => {
@@ -823,18 +316,14 @@ const readWaitingRuns = (db: DatabaseSync): WaitingRun[] =>
     hasOpenCard: row.has_open_card === 1,
   }))
 
-/** `conversations` 投影的列清单（逐列写死，装载与三条会话查询共用）。 */
-const CONVERSATION_COLUMNS = `id, title, agent_id, project_id, session_id, archived_at,
-        created_at, updated_at`
-
 /** 会话清单按最近更新排序（与旧仓储 ORDER BY updated_at DESC 一致）。 */
 const CONVERSATION_ORDER = 'ORDER BY updated_at DESC, created_at DESC, rowid'
 
 const readConversations = (db: DatabaseSync): Conversation[] =>
   (
     db
-      .prepare(`SELECT ${CONVERSATION_COLUMNS} FROM conversations ${CONVERSATION_ORDER}`)
-      .all() as unknown as ConversationRow[]
+      .prepare(`SELECT ${columnsOf('conversations')} FROM conversations ${CONVERSATION_ORDER}`)
+      .all() as unknown as object[]
   ).map(mapConversation)
 
 /** 某项目下的会话（M11）：口径与 `tasks.byProject` 一致，排序同会话清单。 */
@@ -842,10 +331,10 @@ const readConversationsByProject = (db: DatabaseSync, projectId: string): Conver
   (
     db
       .prepare(
-        `SELECT ${CONVERSATION_COLUMNS} FROM conversations
+        `SELECT ${columnsOf('conversations')} FROM conversations
          WHERE project_id = ? ${CONVERSATION_ORDER}`,
       )
-      .all(projectId) as unknown as ConversationRow[]
+      .all(projectId) as unknown as object[]
   ).map(mapConversation)
 
 /** 没有项目的会话（M11）：老事实 / 存量行都归入「默认目录」。 */
@@ -853,33 +342,24 @@ const readConversationsUnassigned = (db: DatabaseSync): Conversation[] =>
   (
     db
       .prepare(
-        `SELECT ${CONVERSATION_COLUMNS} FROM conversations
+        `SELECT ${columnsOf('conversations')} FROM conversations
          WHERE project_id IS NULL ${CONVERSATION_ORDER}`,
       )
-      .all() as unknown as ConversationRow[]
+      .all() as unknown as object[]
   ).map(mapConversation)
 
 const readMessages = (db: DatabaseSync): Message[] =>
   (
     db
-      .prepare(
-        `SELECT id, conversation_id, role, content, error, created_at
-         FROM messages ORDER BY created_at, rowid`,
-      )
-      .all() as unknown as MessageRow[]
+      .prepare(`SELECT ${columnsOf('messages')} FROM messages ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapMessage)
-
-/** `cards` 投影的列清单（逐列写死，不用 `SELECT *`）。 */
-const CARD_COLUMNS = `id, run_id, task_id, conversation_id, title, text, kind, options_json, key,
-        version, status, delivery, delivery_ref, delivery_refs_json, delivery_attempts,
-        next_delivery_at, delivery_given_up, option_index, answered_by, answered_by_ref,
-        answered_at, created_at, updated_at`
 
 const readCards = (db: DatabaseSync): Card[] =>
   (
     db
-      .prepare(`SELECT ${CARD_COLUMNS} FROM cards ORDER BY created_at, rowid`)
-      .all() as unknown as CardDbRow[]
+      .prepare(`SELECT ${columnsOf('cards')} FROM cards ORDER BY created_at, rowid`)
+      .all() as unknown as object[]
   ).map(mapCard)
 
 /** 全部 open 卡（顶部待审批条）：只按状态过滤，按创建时间升序。 */
@@ -887,11 +367,11 @@ const readOpenCards = (db: DatabaseSync): Card[] =>
   (
     db
       .prepare(
-        `SELECT ${CARD_COLUMNS} FROM cards
+        `SELECT ${columnsOf('cards')} FROM cards
          WHERE status = 'open'
          ORDER BY created_at, rowid`,
       )
-      .all() as unknown as CardDbRow[]
+      .all() as unknown as object[]
   ).map(mapCard)
 
 /** 某个 run 的卡片（含已答 / 已关闭，回答续接与审计用），按创建时间升序。 */
@@ -899,21 +379,20 @@ const readCardsByRun = (db: DatabaseSync, runId: string): Card[] =>
   (
     db
       .prepare(
-        `SELECT ${CARD_COLUMNS} FROM cards
+        `SELECT ${columnsOf('cards')} FROM cards
          WHERE run_id = ?
          ORDER BY created_at, rowid`,
       )
-      .all(runId) as unknown as CardDbRow[]
+      .all(runId) as unknown as object[]
   ).map(mapCard)
 
 const readMessagesByConversation = (db: DatabaseSync, conversationId: string): Message[] =>
   (
     db
       .prepare(
-        `SELECT id, conversation_id, role, content, error, created_at
-         FROM messages WHERE conversation_id = ? ORDER BY created_at, rowid`,
+        `SELECT ${columnsOf('messages')} FROM messages WHERE conversation_id = ? ORDER BY created_at, rowid`,
       )
-      .all(conversationId) as unknown as MessageRow[]
+      .all(conversationId) as unknown as object[]
   ).map(mapMessage)
 
 const toMap = <T extends { id: string }>(rows: readonly T[]): Map<string, T> =>
@@ -940,15 +419,10 @@ const readActiveTaskIds = (db: DatabaseSync): Set<string> => {
  */
 const readRuleSet = (db: DatabaseSync): RuleSetRow | null => {
   const row = db
-    .prepare("SELECT id, version, replaced_at, rules_json FROM rule_sets WHERE id = 'current'")
-    .get() as unknown as RuleSetDbRow | undefined
+    .prepare(`SELECT ${columnsOf('rule_sets')} FROM rule_sets WHERE id = 'current'`)
+    .get() as unknown as object | undefined
   if (row === undefined) return null
-  return {
-    id: 'current',
-    version: row.version,
-    replacedAt: row.replaced_at,
-    rules: JSON.parse(row.rules_json) as RuleSetRow['rules'],
-  }
+  return rowOf<RuleSetRow>('rule_sets', row)
 }
 
 /**
@@ -977,17 +451,10 @@ const readRuleSetView = (db: DatabaseSync): RuleSetView => {
  */
 const readPluginSettings = (db: DatabaseSync): PluginSettingsRow | null => {
   const row = db
-    .prepare(
-      "SELECT id, version, replaced_at, settings_json FROM plugin_settings WHERE id = 'current'",
-    )
-    .get() as unknown as PluginSettingsDbRow | undefined
+    .prepare(`SELECT ${columnsOf('plugin_settings')} FROM plugin_settings WHERE id = 'current'`)
+    .get() as unknown as object | undefined
   if (row === undefined) return null
-  return {
-    id: 'current',
-    version: row.version,
-    replacedAt: row.replaced_at,
-    settings: JSON.parse(row.settings_json) as PluginSettingsRow['settings'],
-  }
+  return rowOf<PluginSettingsRow>('plugin_settings', row)
 }
 
 /** `plugins.settings` 视图：无快照时 `{ version: 0, replacedAt: null, settings: [] }`。 */
@@ -1005,26 +472,9 @@ const readPluginSettingsView = (db: DatabaseSync): PluginSettingsView => {
 const readReviewReports = (db: DatabaseSync): ReviewReport[] =>
   (
     db
-      .prepare(
-        `SELECT id, task_id, stage_id, run_id, thread_id, rev, verdict, checks_json,
-                findings_json, artifact_json, created_at, updated_at
-           FROM review_reports`,
-      )
-      .all() as unknown as ReviewReportDbRow[]
-  ).map((row) => ({
-    id: row.id,
-    taskId: row.task_id,
-    stageId: row.stage_id,
-    runId: row.run_id,
-    threadId: row.thread_id,
-    rev: row.rev,
-    verdict: row.verdict as ReviewReport['verdict'],
-    checks: JSON.parse(row.checks_json) as ReviewReport['checks'],
-    findings: JSON.parse(row.findings_json) as ReviewReport['findings'],
-    artifact: row.artifact_json === null ? null : (JSON.parse(row.artifact_json) as ReviewArtifact),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  }))
+      .prepare(`SELECT ${columnsOf('review_reports')} FROM review_reports`)
+      .all() as unknown as object[]
+  ).map((row) => rowOf<ReviewReport>('review_reports', row))
 
 /**
  * 按需装载的 `tasks` 切片（性能整改：装载 + decide 的 p99 瓶颈）。
@@ -1058,8 +508,8 @@ class LazyTaskMap extends Map<Id, Task> {
   }
 
   #readOne(id: Id): Task | undefined {
-    this.#byId ??= this.#db.prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`)
-    const row = this.#byId.get(id) as unknown as TaskRow | undefined
+    this.#byId ??= this.#db.prepare(`SELECT ${columnsOf('tasks')} FROM tasks WHERE id = ?`)
+    const row = this.#byId.get(id) as unknown as object | undefined
     if (row === undefined) return undefined
     const task = mapTask(row)
     super.set(task.id, task)
@@ -1156,10 +606,7 @@ export function loadView(
 const readEvents = (db: DatabaseSync): EventRow[] =>
   (
     db
-      .prepare(
-        `SELECT id, source, type, subject, summary, detail_ref, link, hops, origin_run_id, dedupe_key, received_at
-         FROM events ORDER BY received_at, rowid`,
-      )
+      .prepare(`SELECT ${columnsOf('events')} FROM events ORDER BY received_at, rowid`)
       .all() as unknown as Array<Record<string, unknown>>
   ).map((row) => ({
     id: String(row['id']),
@@ -1180,7 +627,7 @@ const readRuleSkips = (db: DatabaseSync): RuleSkip[] =>
   (
     db
       .prepare(
-        'SELECT rule_id, event_id, version, skipped_at FROM event_skips WHERE replayed_at IS NULL ORDER BY skipped_at, rowid',
+        `SELECT ${columnsOf('event_skips')} FROM event_skips WHERE replayed_at IS NULL ORDER BY skipped_at, rowid`,
       )
       .all() as unknown as Array<Record<string, unknown>>
   ).map((row) => ({
@@ -1205,16 +652,20 @@ const readWorkflowsWithStages = (db: DatabaseSync): WorkflowWithStages[] => {
 const readTasksByWorkflow = (db: DatabaseSync, workflowId: string): Task[] =>
   (
     db
-      .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE workflow_id = ? ORDER BY created_at, rowid`)
-      .all(workflowId) as unknown as TaskRow[]
+      .prepare(
+        `SELECT ${columnsOf('tasks')} FROM tasks WHERE workflow_id = ? ORDER BY created_at, rowid`,
+      )
+      .all(workflowId) as unknown as object[]
   ).map(mapTask)
 
 /** 某项目下的任务（M10）：按创建顺序；看板再按工作流过滤，并按最近活动倒序铺开。 */
 const readTasksByProject = (db: DatabaseSync, projectId: string): Task[] =>
   (
     db
-      .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE project_id = ? ORDER BY created_at, rowid`)
-      .all(projectId) as unknown as TaskRow[]
+      .prepare(
+        `SELECT ${columnsOf('tasks')} FROM tasks WHERE project_id = ? ORDER BY created_at, rowid`,
+      )
+      .all(projectId) as unknown as object[]
   ).map(mapTask)
 
 /** 没有项目的任务（M10）：v2 存量与老规则建的任务，界面归入「未归属」。 */
@@ -1222,9 +673,9 @@ const readTasksUnassigned = (db: DatabaseSync): Task[] =>
   (
     db
       .prepare(
-        `SELECT ${TASK_COLUMNS} FROM tasks WHERE project_id IS NULL ORDER BY created_at, rowid`,
+        `SELECT ${columnsOf('tasks')} FROM tasks WHERE project_id IS NULL ORDER BY created_at, rowid`,
       )
-      .all() as unknown as TaskRow[]
+      .all() as unknown as object[]
   ).map(mapTask)
 
 /** 某任务的直接子任务（M8）：按创建顺序；无子任务返回空数组。 */
@@ -1232,22 +683,22 @@ const readTasksByParent = (db: DatabaseSync, parentTaskId: string): Task[] =>
   (
     db
       .prepare(
-        `SELECT ${TASK_COLUMNS} FROM tasks WHERE parent_task_id = ? ORDER BY created_at, rowid`,
+        `SELECT ${columnsOf('tasks')} FROM tasks WHERE parent_task_id = ? ORDER BY created_at, rowid`,
       )
-      .all(parentTaskId) as unknown as TaskRow[]
+      .all(parentTaskId) as unknown as object[]
   ).map(mapTask)
 
 const readTask = (db: DatabaseSync, taskId: string): Task | null => {
   const row = db
-    .prepare(`SELECT ${TASK_COLUMNS} FROM tasks WHERE id = ?`)
-    .get(taskId) as unknown as TaskRow | undefined
+    .prepare(`SELECT ${columnsOf('tasks')} FROM tasks WHERE id = ?`)
+    .get(taskId) as unknown as object | undefined
   return row ? mapTask(row) : null
 }
 
 const readThread = (db: DatabaseSync, threadId: string): ThreadRow | null => {
   const row = db
-    .prepare(`SELECT ${THREAD_COLUMNS} FROM threads WHERE id = ?`)
-    .get(threadId) as unknown as ThreadDbRow | undefined
+    .prepare(`SELECT ${columnsOf('threads')} FROM threads WHERE id = ?`)
+    .get(threadId) as unknown as object | undefined
   return row ? mapThread(row) : null
 }
 
@@ -1261,11 +712,11 @@ const readThreadTasks = (db: DatabaseSync, taskIds: readonly string[]): Task[] =
   return (
     db
       .prepare(
-        `SELECT ${TASK_COLUMNS} FROM tasks
+        `SELECT ${columnsOf('tasks')} FROM tasks
          WHERE id IN (${placeholders})
          ORDER BY created_at, rowid`,
       )
-      .all(...taskIds) as unknown as TaskRow[]
+      .all(...taskIds) as unknown as object[]
   ).map(mapTask)
 }
 

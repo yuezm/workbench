@@ -145,7 +145,7 @@ export function heartbeatFacts(
  * 终态 run 行：`status` 已归一，后续按事实名分派。
  *
  * `verdict` 是回执里的闸门判定（M11），只活在内存与 `run.*` 事实里，不进 runs 投影
- * （投影列由 `RUN_FIELDS` 白名单决定）——它属于「这一轮的结论」，不是调度状态。
+ * （投影列由 `host/store/columns` 的列描述符决定）——它属于「这一轮的结论」，不是调度状态。
  */
 export type SettledRun = RunRow & { status: RunTerminalStatus; verdict?: GateVerdict }
 

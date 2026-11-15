@@ -155,11 +155,11 @@ export async function executeHermesRun(
   const modelSelection = turn.model ?? null
   const cwd = turn.cwd || sdk.paths.cwd
   const launched = startProcess(sdk, runtime.command, ['acp'], cwd, turn.env ?? {})
-  if (!launched.process) {
+  if ('error' in launched) {
     return toReceipt(turn, {
       status: 'failed',
       output: '',
-      error: launched.error ?? '启动失败',
+      error: launched.error,
       errorCode: 'spawn_failed',
       exitCode: null,
       sessionId: null,

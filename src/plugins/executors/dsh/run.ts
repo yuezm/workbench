@@ -157,11 +157,11 @@ export async function executeDshRun(
     cwd,
     dshEnv(permissionModeOfAccess(turn.access), sdk.paths.sessionRoot, turn.env),
   )
-  if (!launched.process) {
+  if ('error' in launched) {
     return toReceipt(turn, {
       status: 'failed',
       output: '',
-      error: launched.error ?? '启动失败',
+      error: launched.error,
       errorCode: 'spawn_failed',
       exitCode: null,
       sessionId: null,

@@ -12,9 +12,8 @@
 import type { RuntimeProbe } from '../../../protocol/entities'
 import type { ExecutorContext } from '../../../sdk/types'
 import { parseArgsTemplate } from '../../shared/argv'
+import { errMsg } from '../../shared/executor-kit'
 import { commandManifest } from './manifest'
-
-const errMsg = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 /** 探测：解析可执行文件 + 解析参数模板；结论由调用方写库 */
 export async function probeCommandRuntime(ctx: ExecutorContext): Promise<RuntimeProbe> {

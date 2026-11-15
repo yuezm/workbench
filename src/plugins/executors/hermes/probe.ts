@@ -53,14 +53,14 @@ export async function probeHermesRuntime(
 
   const cliVersion = await readCliVersion(sdk, command, versionTimeout)
   const launched = startProcess(sdk, command, ['acp'], undefined, {})
-  if (!launched.process) {
+  if ('error' in launched) {
     return {
       state: 'unavailable',
       path: resolved.path,
       cliVersion,
       protocolVersion: null,
       pluginVersion: null,
-      error: `启动探测失败：${launched.error ?? '启动失败'}`,
+      error: `启动探测失败：${launched.error}`,
       output: '',
       elapsedMs: elapsed(),
       checkedAt,

@@ -46,8 +46,8 @@ export async function listHermesModels(
   const cwd = sdk.paths.cwd
 
   const launched = startProcess(sdk, runtime.command, ['acp'], undefined, {})
-  if (!launched.process) {
-    throw new Error(launched.error ?? `找不到可执行文件：${runtime.command}`)
+  if ('error' in launched) {
+    throw new Error(launched.error)
   }
 
   const link = connect(sdk, launched.process)

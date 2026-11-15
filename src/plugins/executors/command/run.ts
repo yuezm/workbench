@@ -14,6 +14,7 @@ import type { RunErrorCode, RunEvent, RunUsage } from '../../../protocol/entitie
 import type { ExecutorIO, Receipt, Turn } from '../../../protocol/executor'
 import type { ExecutorContext, Spawned } from '../../../sdk/types'
 import { expandArgs, parseArgsTemplate } from '../../shared/argv'
+import { errMsg } from '../../shared/executor-kit'
 import { applyReceiptBlock } from '../../shared/receipt-block'
 import { tail, withStderr } from '../../shared/text'
 
@@ -52,9 +53,6 @@ interface CommandOutcome {
   /** 未拿到退出码（超时强杀 / 信号终止）时省略 */
   exitCode?: number | null
 }
-
-/** 错误归一成可读文本（插件内通用，不依赖 node util） */
-const errMsg = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 const emptyUsage = (): RunUsage => ({
   inputTokens: 0,

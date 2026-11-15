@@ -610,12 +610,10 @@ describe('listHermesModels', () => {
     await expect(listHermesModels(ctxOf(h))).rejects.toThrow(/模型目录为空/)
   })
 
-  it('spawn 返回空进程：抛「找不到可执行文件」（startProcess 没给错误文案时）', async () => {
+  it('spawn 返回空进程：抛「启动失败」（骨架不给空句柄兜底文案）', async () => {
     const h = acpHarness()
     const spawn: SpawnFn = () => undefined as unknown as Spawned
-    await expect(listHermesModels(ctxOf(h, {}, { spawn }))).rejects.toThrow(
-      `找不到可执行文件：${NODE}`,
-    )
+    await expect(listHermesModels(ctxOf(h, {}, { spawn }))).rejects.toThrow(/启动失败/)
   })
 
   it('服务端没给 currentModelId：所有模型都不是默认', async () => {

@@ -178,7 +178,7 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
           {hidden && (
             <Button
               type="button"
-              variant="ghost"
+              variant="quiet"
               size="sm"
               className="self-start"
               onClick={() => setExpanded(true)}
@@ -198,7 +198,7 @@ function RunEvents({ run }: { run: Run }): ReactElement | null {
         {process.length > 0 && <ProcessFold process={process} />}
         <Button
           type="button"
-          variant="ghost"
+          variant="quiet"
           size="sm"
           className="self-start"
           onClick={() => setExpanded(false)}

@@ -172,3 +172,96 @@ export const WORKBENCH_EVENT_CHANNEL = 'workbench:kernel-event'
  * 点击发生在系统通知中心，渲染层无从得知；只能由主进程接住点击、把窗口唤到前台再推一次落点。
  */
 export const WORKBENCH_OPEN_TARGET_CHANNEL = 'workbench:open-target'
+/**
+ * 飞书连接管理（M45）：设置页的「飞书连接」面板经它探测本机 `lark-cli`、新建 profile 与登录。
+ *
+ * 走单独的 IPC 而不是命令/视图：它不写工作台事实日志（本机 CLI 的状态不是业务真相），
+ * 也不该让渲染层拿到进程/环境。
+ */
+export const WORKBENCH_LARK_CHANNEL = 'workbench:lark'
+
+/**
+ * 飞书连接管理的载荷形状（M45）：设置页 ↔ 主进程。
+ *
+ * 安全口径：
+ * - app secret 只在 `add-profile` 动作里单向传入，**不经任何返回值 / 日志 / 视图回传**；
+ * - 返回值只有 profile 名、appId、身份与状态这类「可以给人看」的字段。
+ */
+
+/** 一条 lark-cli profile 的可见信息（不含 secret）。 */
+export interface LarkProfileView {
+  name: string
+  appId: string
+  brand: string
+  active: boolean
+  user: string | null
+  tokenStatus: string | null
+}
+
+/** 探测结果：工作台会用哪套凭据、本机还有哪些 profile、是否和别的 agent 撞车。 */
+export interface LarkStatusView {
+  ok: boolean
+  /** 解析到的 lark-cli 可执行文件（找不到为 null） */
+  program: string | null
+  /** 探测失败原因（`ok=false` 时给） */
+  error: string | null
+  /** 本程序（剔除别的 agent 变量后）落到的 CLI 工作区 */
+  workspace: string | null
+  /** 本程序实际用的应用 appId */
+  appId: string | null
+  /** bot / user 身份与可用性 */
+  identity: string | null
+  available: boolean
+  tokenStatus: string | null
+  /** 本机全部 profile（同一工作区） */
+  profiles: LarkProfileView[]
+  /** 宿主环境里别的 agent 绑定的工作区与应用（没有就是 null） */
+  foreign: { workspace: string | null; appId: string | null } | null
+  /** 本程序目前用的 appId 与别的 agent 相同：两边会抢同一个应用的事件长连接 */
+  conflict: boolean
+  /** 给人看的一句话建议（没有为 null） */
+  hint: string | null
+}
+
+/** 登录启动结果：`verificationUrl` 要原样展示（二维码也由调用方据此生成）。 */
+export interface LarkLoginStart {
+  ok: boolean
+  verificationUrl?: string
+  deviceCode?: string
+  expiresIn?: number
+  error?: string
+}
+
+/** 不带数据的动作结果。 */
+export interface LarkActionResult {
+  ok: boolean
+  error?: string
+}
+
+/** 设置页能发起的动作（一次一个，参数都来自本机表单）。 */
+export type LarkAdminAction =
+  | { action: 'status' }
+  | {
+      action: 'add-profile'
+      name: string
+      appId: string
+      secret: string
+      brand?: string
+    }
+  | { action: 'login-start'; profile?: string; domain?: string }
+  | { action: 'login-poll'; profile?: string; deviceCode: string }
+  | { action: 'logout'; profile?: string }
+  /** 删掉本机的 profile（连带它的 app secret 与登录 token，不可撤销） */
+  | { action: 'remove-profile'; name: string }
+
+/** 动作 → 返回值。 */
+export interface LarkAdminResults {
+  status: LarkStatusView
+  'add-profile': LarkActionResult
+  'login-start': LarkLoginStart
+  'login-poll': LarkActionResult
+  logout: LarkActionResult
+  'remove-profile': LarkActionResult
+}
+
+export type LarkAdminResult<A extends LarkAdminAction> = LarkAdminResults[A['action']]

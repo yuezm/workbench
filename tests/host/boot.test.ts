@@ -637,8 +637,10 @@ describe('主进程入口装配', () => {
     await loadEntry()
 
     expect(registerIpcHandlersMock).toHaveBeenCalledTimes(1)
-    // IPC 只注册三动词的宿主实现：拿到的是装配好的同一个命令路由
-    expect(ipcDeps()).toEqual({ router: routerMock })
+    // IPC 只注册三动词的宿主实现：拿到的是装配好的同一个命令路由；M45 另带飞书连接管理
+    const deps = ipcDeps() as unknown as { router: unknown; lark?: unknown }
+    expect(deps).toMatchObject({ router: routerMock })
+    expect(deps.lark).toBeDefined()
     expect(appMock.setAppUserModelId).toHaveBeenCalledWith('com.workbench.desktop')
     expect(windows).toHaveLength(1)
     expect(windows[0].loadFile).toHaveBeenCalledTimes(1)

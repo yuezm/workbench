@@ -185,6 +185,68 @@ describe('parseExternalManifest（M7 外部插件清单）', () => {
     ])
   })
 
+  it('advanced：解析时保留（只影响设置页摆放）；非布尔拒绝', () => {
+    expect(
+      rejectReason(manifest({ config: [{ key: 'k', label: 'l', type: 'text', advanced: 'yes' }] })),
+    ).toContain('advanced 非法')
+    expect(
+      rejectReason(manifest({ config: [{ key: 'k', label: 'l', type: 'number', advanced: 1 }] })),
+    ).toContain('advanced 非法')
+    const parsed = okManifest(
+      manifest({
+        config: [
+          { key: 'a', label: '常用', type: 'text' },
+          { key: 'b', label: '高级', type: 'text', advanced: true },
+          { key: 'c', label: '高级数字', type: 'number', advanced: true },
+        ],
+      }),
+    )
+    expect(parsed.config).toEqual([
+      { key: 'a', label: '常用', type: 'text' },
+      { key: 'b', label: '高级', type: 'text', advanced: true },
+      { key: 'c', label: '高级数字', type: 'number', advanced: true },
+    ])
+  })
+
+  it('optionsFrom：只在 select 上可用、与 options 互斥，解析后原样保留', () => {
+    // 动态来源没有静态选项也能过（候选由设置页订阅内核视图取）
+    expect(
+      okManifest(
+        manifest({
+          config: [{ key: 'agent', label: '智能体', type: 'select', optionsFrom: 'agents' }],
+        }),
+      ).config,
+    ).toEqual([{ key: 'agent', label: '智能体', type: 'select', optionsFrom: 'agents' }])
+    // 未知来源 / 类型不对 / 与 options 同时给 / 非 select 用，全部拒绝
+    expect(
+      rejectReason(
+        manifest({ config: [{ key: 'k', label: 'l', type: 'select', optionsFrom: 'boards' }] }),
+      ),
+    ).toContain('optionsFrom 非法')
+    expect(
+      rejectReason(
+        manifest({ config: [{ key: 'k', label: 'l', type: 'select', optionsFrom: 1 }] }),
+      ),
+    ).toContain('optionsFrom 非法')
+    expect(
+      rejectReason(
+        manifest({
+          config: [{ key: 'k', label: 'l', type: 'select', options: ['a'], optionsFrom: 'agents' }],
+        }),
+      ),
+    ).toContain('只能给一个')
+    expect(
+      rejectReason(
+        manifest({ config: [{ key: 'k', label: 'l', type: 'text', optionsFrom: 'agents' }] }),
+      ),
+    ).toContain('仅 select 可用')
+    expect(
+      rejectReason(
+        manifest({ config: [{ key: 'k', label: 'l', type: 'number', optionsFrom: 'agents' }] }),
+      ),
+    ).toContain('仅 select 可用')
+  })
+
   it('config 键重复拒绝', () => {
     const config = [
       { key: 'k', label: 'l', type: 'text' },

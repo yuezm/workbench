@@ -1,12 +1,15 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
 
 vi.mock('node:child_process', () => ({ spawn: spawnMock }))
 
-const { createLineReader, defaultSpawn, killPidTree, killProcessTree, tail } =
+const { createLineReader, applyEnvPatch, defaultSpawn, killPidTree, killProcessTree, tail } =
   await import('../../src/host/process')
 
 function fakeChild(): {
@@ -64,6 +67,25 @@ describe('tail', () => {
   })
 })
 
+describe('applyEnvPatch', () => {
+  it('先删 unset 再按 set 覆盖，其余键原样继承', () => {
+    const base = { PATH: '/bin', HERMES_HOME: 'C:/hermes', KEEP: '1' }
+    expect(applyEnvPatch(base, { unset: ['HERMES_HOME'], set: { LARK: '1' } })).toEqual({
+      PATH: '/bin',
+      KEEP: '1',
+      LARK: '1',
+    })
+  })
+
+  it('只给 unset / 只给 set / 都不给：都不改动原对象', () => {
+    const base = { A: '1', B: '2' }
+    expect(applyEnvPatch(base, { unset: ['A'] })).toEqual({ B: '2' })
+    expect(applyEnvPatch(base, { set: { B: '3' } })).toEqual({ A: '1', B: '3' })
+    expect(applyEnvPatch(base, {})).toEqual({ A: '1', B: '2' })
+    expect(base).toEqual({ A: '1', B: '2' })
+  })
+})
+
 describe('defaultSpawn', () => {
   it('包装真实子进程：转发事件与 kill', () => {
     const child = fakeChild()
@@ -110,6 +132,83 @@ describe('defaultSpawn', () => {
     defaultSpawn('dsh', [], { env: {} })
 
     expect(spawnMock).toHaveBeenCalledWith('dsh', [], expect.objectContaining({ shell: false }))
+  })
+
+  it('envPatch：在给定的 env 之上增删（剔除别的 agent 的工作区变量）', () => {
+    spawnMock.mockReturnValue(fakeChild())
+
+    defaultSpawn('lark-cli', ['whoami'], {
+      env: { PATH: '/bin', HERMES_HOME: 'C:/hermes', OPENCLAW_HOME: 'C:/oc' },
+      envPatch: { unset: ['HERMES_HOME', 'OPENCLAW_HOME'], set: { LARK: '1' } },
+    })
+
+    expect(spawnMock).toHaveBeenCalledWith(
+      'lark-cli',
+      ['whoami'],
+      expect.objectContaining({ env: { PATH: '/bin', LARK: '1' } }),
+    )
+  })
+
+  it('envPatch 未给 env 时以宿主环境为底（只删指定的键）', () => {
+    spawnMock.mockReturnValue(fakeChild())
+
+    defaultSpawn('lark-cli', [], { envPatch: { unset: ['DSH_TEST_SHOULD_BE_GONE'] } })
+
+    const options = spawnMock.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv }
+    expect(options.env).not.toBe(process.env)
+    expect(options.env['PATH']).toBe(process.env['PATH'])
+    expect('DSH_TEST_SHOULD_BE_GONE' in options.env).toBe(false)
+  })
+
+  it.skipIf(process.platform !== 'win32')(
+    'Windows 垫片：折回 node + 脚本，参数原样进 argv（不经 cmd 吃引号）',
+    () => {
+      const dir = mkdtempSync(join(tmpdir(), 'wb-shim-'))
+      try {
+        const script = join(dir, 'node_modules', 'pkg', 'run.js')
+        mkdirSync(dirname(script), { recursive: true })
+        writeFileSync(script, 'console.log(1)\n')
+        const shim = join(dir, 'tool.cmd')
+        // npm 垫片模板：`%_prog%` 跑 `%dp0%` 下的脚本，`%*` 转发全部参数
+        writeFileSync(
+          shim,
+          [
+            '@ECHO off',
+            'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\pkg\\run.js" %*',
+            '',
+          ].join('\r\n'),
+        )
+        spawnMock.mockReturnValue(fakeChild())
+
+        defaultSpawn(shim, ['--content', '{"text":"a b & c"}'], { shell: true, env: {} })
+
+        const [calledCommand, calledArgs, calledOptions] = spawnMock.mock.calls[0] as [
+          string,
+          string[],
+          { shell: boolean },
+        ]
+        expect(calledCommand).toBe(process.execPath)
+        expect(calledArgs).toEqual([script, '--content', '{"text":"a b & c"}'])
+        expect(calledOptions.shell).toBe(false)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it.skipIf(process.platform !== 'win32')('垫片解析不出绝对脚本：回退 shell（行为不变）', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wb-shim-'))
+    try {
+      const shim = join(dir, 'tool.cmd')
+      writeFileSync(shim, '@ECHO off\r\necho hi\r\n')
+      spawnMock.mockReturnValue(fakeChild())
+
+      defaultSpawn(shim, ['x'], { shell: true, env: {} })
+
+      expect(spawnMock).toHaveBeenCalledWith(shim, ['x'], expect.objectContaining({ shell: true }))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

@@ -3,6 +3,7 @@ import type { AppPlugin } from './types'
 import { appPlugins as registeredApps } from './registry'
 import { selectApp, useActiveAppId } from './openTarget'
 import { ErrorBoundary } from '../components/ui/error-boundary'
+import { ToastHost } from '../components/ui/toast'
 import { TopBar } from './components/TopBar'
 
 interface WorkbenchProps {
@@ -35,6 +36,8 @@ export function Workbench({ apps = registeredApps }: WorkbenchProps): ReactEleme
           {active ? <active.component /> : null}
         </ErrorBoundary>
       </main>
+      {/* 轻提示的落点：挂在根上而不是各个 app 里，切 app 也不会把正在退场的提示一起带走 */}
+      <ToastHost />
     </div>
   )
 }

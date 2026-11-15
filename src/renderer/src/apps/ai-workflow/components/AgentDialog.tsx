@@ -572,7 +572,7 @@ export function AgentDialog({
             )}
             {dangerHint !== null && <p className="text-xs text-faint-foreground">{dangerHint}</p>}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+              <Button type="button" variant="quiet" size="sm" onClick={onCancel}>
                 取消
               </Button>
               <Button

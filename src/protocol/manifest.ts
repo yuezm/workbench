@@ -19,14 +19,34 @@ export const CAPABILITIES = ['net', 'fs.read', 'fs.write', 'spawn', 'notify'] as
 
 export type Capability = (typeof CAPABILITIES)[number]
 
-/** 设置页据此渲染表单并校验（M3 只用于执行器的运行时配置默认值） */
+/**
+ * 下拉候选的**动态来源**：清单只说「去哪取」，清单本身不带业务数据
+ * （智能体清单会变，写死在 manifest 里第二天就过期了）。
+ *
+ * - `agents`：设置页订阅内核视图 `agents.all`，显示名称、存 id（改名不影响绑定）；
+ *   存进去的值由消费方按 id 或名称匹配（如飞书通道的 `agent`）。
+ */
+export const CONFIG_OPTION_SOURCES = ['agents'] as const
+
+export type ConfigOptionSource = (typeof CONFIG_OPTION_SOURCES)[number]
+
+/**
+ * 设置页据此渲染表单并校验（M3 只用于执行器的运行时配置默认值）。
+ *
+ * `advanced` 只影响设置页的**摆放**，不影响内核与插件读取：标了它的字段默认收进
+ * 「高级」里，展开才渲染——第一次就能用的东西不该和「改坏了才需要」的东西平铺在一起。
+ *
+ * `select` 的候选二选一：静态 `options`，或动态 `optionsFrom`（两者都给判非法）。
+ */
 export type ConfigField =
   | {
       key: string
       label: string
       type: 'text' | 'secret' | 'select'
       required?: boolean
+      advanced?: boolean
       options?: readonly string[]
+      optionsFrom?: ConfigOptionSource
       default?: string
       help?: string
     }
@@ -35,6 +55,7 @@ export type ConfigField =
       label: string
       type: 'number' | 'boolean'
       required?: boolean
+      advanced?: boolean
       default?: number | boolean
       help?: string
     }

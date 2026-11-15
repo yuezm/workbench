@@ -9,7 +9,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Card } from '../../src/protocol/entities'
-import type { ChannelContext, ChannelPlugin } from '../../src/protocol/channels'
+import type { ChannelContext, ChannelPlugin, ChannelProgress } from '../../src/protocol/channels'
 import type { PluginManifest } from '../../src/protocol/manifest'
 import type { Fact } from '../../src/kernel/core/types'
 import type { ChannelRegistryEntry } from '../../src/plugins/registry'
@@ -1094,4 +1094,210 @@ it('回写事实缺卡片体时不排期（防御分支），并按注入的 now
   expect(failing.received).toHaveLength(1)
   await withClock.stopAll()
   await hub.stopAll()
+})
+
+// ---------------------------------------------------------------- 入站（M44）
+
+/** 一条 assistant `message.appended`（聊天轮终态时内核补的那条）。 */
+const progressFact = (
+  conversationId: string,
+  body: string,
+  over: { role?: string; error?: string | null; messageId?: string } = {},
+): Fact =>
+  ({
+    type: 'message.appended',
+    actor: { kind: 'host', via: 'scheduler' },
+    at: AT,
+    seq: 1,
+    payload: {
+      conversationId,
+      messageId: over.messageId ?? 'message-1',
+      role: over.role ?? 'assistant',
+      content: body,
+      error: over.error ?? null,
+    },
+  }) as Fact
+
+describe('createChannels：入站派活与进展（M44）', () => {
+  const AGENTS = [
+    { id: 'a1', name: '小助' },
+    { id: 'a2', name: '写手' },
+  ]
+
+  /** 一个会暴露自己 ctx 的假通道：入站派活与进展都靠它观察。 */
+  const captureEntry = (
+    key: string,
+  ): ChannelRegistryEntry & {
+    ctx: ChannelContext | null
+    progress: ChannelProgress[]
+  } => {
+    const state: { ctx: ChannelContext | null; progress: ChannelProgress[] } = {
+      ctx: null,
+      progress: [],
+    }
+    const plugin: ChannelPlugin = {
+      async start(ctx) {
+        state.ctx = ctx
+        ctx.onProgress((p) => state.progress.push(p))
+        return () => undefined
+      },
+    }
+    return Object.assign(
+      { key, label: key, manifest: MANIFEST(key), plugin },
+      {
+        get ctx() {
+          return state.ctx
+        },
+        get progress() {
+          return state.progress
+        },
+      },
+    )
+  }
+
+  const hubOf = (options: {
+    entries: ChannelRegistryEntry[]
+    config?: Record<string, unknown>
+    configs?: Record<string, Record<string, unknown>>
+  }): {
+    hub: ReturnType<typeof createChannels>
+    dispatch: ReturnType<typeof vi.fn>
+  } => {
+    const store = {
+      query: vi.fn((view: string) => (view === 'agents.all' ? AGENTS : [])),
+    } as unknown as ChannelsStore
+    const dispatch = vi.fn((input: Record<string, unknown>) => {
+      if (input['type'] === 'chat.create') {
+        return {
+          facts: [
+            {
+              type: 'conversation.created',
+              payload: { conversation: { id: 'conversation-1' } },
+            },
+          ],
+        }
+      }
+      return { facts: [] }
+    })
+    const hub = createChannels({
+      store,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: options.entries,
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf: (entry) => options.configs?.[entry.key] ?? options.config ?? {},
+    })
+    return { hub, dispatch }
+  }
+
+  it('一句话派活：先建会话（标题取首行），再发这句；回执带上智能体名字', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({ entries: [feishu], config: { agent: '小助' } })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '帮我看看今天的待办', 'om_1')
+
+    expect(outcome).toEqual({
+      accepted: true,
+      conversationId: 'conversation-1',
+      receipt: '已交给「小助」，这一轮说完我回在这里。',
+    })
+    const inputs = dispatchInputs(dispatch)
+    expect(inputs[0]).toEqual({
+      type: 'chat.create',
+      commandId: 'channel:feishu:om_1:create',
+      agentId: 'a1',
+      title: '帮我看看今天的待办',
+    })
+    expect(inputs[1]).toEqual({
+      type: 'chat.send',
+      commandId: 'channel:feishu:om_1:send',
+      conversationId: 'conversation-1',
+      content: '帮我看看今天的待办',
+    })
+    await hub.stopAll()
+  })
+
+  it('同一条平台消息重投：幂等键不变（内核不会派两次活）', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
+    await hub.startAll()
+
+    await hub.submit('feishu', '第一句', 'om_1')
+    await hub.submit('feishu', '第一句', 'om_1')
+
+    const keys = dispatchInputs(dispatch).map((input) => input['commandId'])
+    expect(keys).toEqual([
+      'channel:feishu:om_1:create',
+      'channel:feishu:om_1:send',
+      'channel:feishu:om_1:create',
+      'channel:feishu:om_1:send',
+    ])
+    await hub.stopAll()
+  })
+
+  it('没配默认智能体 / 智能体不存在 / 空消息：都不派活，但都回一句人话', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({ entries: [feishu] })
+    await hub.startAll()
+
+    const unset = await hub.submit('feishu', '你好', 'om_1')
+    expect(unset.accepted).toBe(false)
+    expect(unset.receipt).toContain('没配默认智能体')
+
+    const missing = await hub.submit('feishu', '你好', 'om_2')
+    expect(missing.accepted).toBe(false)
+    expect(missing.receipt).toContain('没配默认智能体')
+
+    const blank = await hub.submit('feishu', '   ', 'om_3')
+    expect(blank.accepted).toBe(false)
+    expect(blank.receipt).toContain('空消息')
+    expect(dispatch).not.toHaveBeenCalled()
+    await hub.stopAll()
+  })
+
+  it('配置里写不存在的智能体：回执说清是哪一个没找到', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub } = hubOf({ entries: [feishu], config: { agent: '不存在的' } })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好', 'om_1')
+    expect(outcome.accepted).toBe(false)
+    expect(outcome.receipt).toContain('找不到智能体「不存在的」')
+    await hub.stopAll()
+  })
+
+  it('进展只回给提交这个会话的通道；别人的会话、人发的消息、别的角色都不吵人', async () => {
+    const feishu = captureEntry('feishu')
+    const desktop = captureEntry('desktop')
+    const { hub } = hubOf({ entries: [feishu, desktop], config: { agent: 'a1' } })
+    await hub.startAll()
+    await hub.submit('feishu', '帮我看看今天的待办', 'om_1')
+
+    hub.dispatch([progressFact('conversation-1', '已经做完了')])
+    hub.dispatch([progressFact('conversation-other', '别人的活')])
+    hub.dispatch([progressFact('conversation-1', '人说的话', { role: 'user' })])
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(feishu.progress).toEqual([
+      { conversationId: 'conversation-1', kind: 'reply', text: '已经做完了' },
+    ])
+    expect(desktop.progress).toEqual([])
+    await hub.stopAll()
+  })
+
+  it('失败的一轮按 failed 转出去（错误文案原样交给通道回帖）', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
+    await hub.startAll()
+    await hub.submit('feishu', '帮我看看今天的待办', 'om_1')
+
+    hub.dispatch([progressFact('conversation-1', '', { error: '执行器崩了' })])
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    expect(feishu.progress).toEqual([
+      { conversationId: 'conversation-1', kind: 'failed', text: '执行器崩了' },
+    ])
+    await hub.stopAll()
+  })
 })

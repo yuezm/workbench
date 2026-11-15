@@ -6,10 +6,12 @@ import type { CommandDispatchResult, IpcResponse, KernelEvent, OpenTarget } from
 import {
   WORKBENCH_DISPATCH_CHANNEL,
   WORKBENCH_EVENT_CHANNEL,
+  WORKBENCH_LARK_CHANNEL,
   WORKBENCH_OPEN_TARGET_CHANNEL,
   WORKBENCH_PICK_FOLDER_CHANNEL,
   WORKBENCH_QUERY_CHANNEL,
 } from '../protocol/ipc'
+import type { LarkAdminAction, LarkAdminResult } from '../protocol/ipc'
 import type { ViewId, ViewParams, ViewResult } from '../protocol/views'
 
 /** 解包 main 的应答信封：失败时抛带可读文案的 Error（renderer 现有 catch 直接展示）。 */
@@ -55,6 +57,8 @@ const workbench: WorkbenchApi = {
   },
   pickFolder: (): Promise<string | null> =>
     unwrap(ipcRenderer.invoke(WORKBENCH_PICK_FOLDER_CHANNEL)) as Promise<string | null>,
+  lark: <A extends LarkAdminAction>(action: A): Promise<LarkAdminResult<A>> =>
+    unwrap(ipcRenderer.invoke(WORKBENCH_LARK_CHANNEL, action)) as Promise<LarkAdminResult<A>>,
   notify: (title, body) => {
     const payload: NotifyPayload = { title, body }
     void ipcRenderer.invoke(NOTIFY_CHANNEL, payload)

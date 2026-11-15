@@ -2,8 +2,10 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ConfigField } from '../../../../../../src/protocol/manifest'
+import type { Agent } from '../../../../../../src/protocol/entities'
 import type { PluginView } from '../../../../../../src/protocol/plugins'
 import {
+  choicesOf,
   numberFieldErrors,
   PluginsManager,
 } from '../../../../../../src/renderer/src/apps/ai-workflow/components/PluginsManager'
@@ -262,7 +264,7 @@ describe('PluginsManager', () => {
     expect(secret).toHaveValue('')
   })
 
-  it('缺省值缺失的字段按 manifest default 回显；空文本不写入 config', async () => {
+  it('缺省值缺失的字段按 manifest default 回显；空文本不写入 config（下拉清空写空串）', async () => {
     kernel.setView('plugins.all', undefined, [
       makePlugin({
         id: 'legacy',
@@ -298,7 +300,8 @@ describe('PluginsManager', () => {
     expect(kernel.dispatched[0]).toMatchObject({ config: { retry: 3, flag: false } })
     const config = (kernel.dispatched[0] as { config: Record<string, unknown> }).config
     expect(config).not.toHaveProperty('suffix')
-    expect(config).not.toHaveProperty('variant')
+    // 下拉例外：空值要显式写进去，否则选了「未设置」旧值还留着
+    expect(config).toHaveProperty('variant', '')
     expect(config).not.toHaveProperty('token')
   })
 
@@ -460,5 +463,201 @@ describe('numberFieldErrors', () => {
     expect(numberFieldErrors(fields, { port: 'abc' })).toEqual({
       port: '必须是数字，留空用缺省值',
     })
+  })
+})
+
+describe('PluginsManager：飞书通道的连接面板（M45）', () => {
+  const feishuFields: ConfigField[] = [
+    { key: 'agent', label: '派给哪个智能体', type: 'select', optionsFrom: 'agents' },
+    { key: 'lark', label: 'lark-cli 命令', type: 'text', advanced: true, default: 'lark-cli' },
+    { key: 'user', label: '接收人 open_id', type: 'text', advanced: true },
+  ]
+
+  /** 智能体清单里的一项（下拉只用到 id / name） */
+  function agentOf(id: string, name: string): Agent {
+    return {
+      id,
+      name,
+      description: '',
+      runtimeId: 'rt-1',
+      systemPrompt: '',
+      model: null,
+      reasoningEffort: null,
+      maxConcurrent: 1,
+      permissionMode: 'workspace-write',
+      workdir: null,
+      env: {},
+      createdAt: '2026-11-15T00:00:00.000Z',
+    }
+  }
+
+  function feishuPlugin(overrides: Partial<PluginView> = {}): PluginView {
+    return makePlugin({
+      id: 'feishu',
+      kind: 'channel',
+      name: '飞书',
+      builtin: true,
+      declared: ['spawn'],
+      granted: ['spawn'],
+      configFields: feishuFields,
+      config: { lark: 'lark-cli' },
+      status: 'ready',
+      error: null,
+      ...overrides,
+    })
+  }
+
+  beforeEach(() => {
+    // 连接面板挂载时会探测本机 CLI：这里给一个最小桥接，避免真去跑子进程
+    window.workbench = {
+      ...window.workbench,
+      lark: (() =>
+        Promise.resolve({
+          ok: true,
+          program: '/usr/local/bin/lark-cli',
+          error: null,
+          workspace: 'local',
+          appId: 'cli_x',
+          identity: 'bot',
+          available: true,
+          tokenStatus: 'ready',
+          profiles: [],
+          foreign: null,
+          conflict: false,
+          hint: null,
+        })) as unknown as typeof window.workbench.lark,
+    }
+  })
+
+  it('choicesOf：静态 options 认值；agents 显示名称存 id；认不出来留说明项', () => {
+    const agents = [agentOf('ag-1', '管家（Moos）'), agentOf('ag-2', '产品经理')]
+    const dynamic: ConfigField = {
+      key: 'agent',
+      label: '智能体',
+      type: 'select',
+      optionsFrom: 'agents',
+    }
+    expect(choicesOf(dynamic, '', agents)).toEqual({
+      choices: [
+        { value: 'ag-1', label: '管家（Moos）' },
+        { value: 'ag-2', label: '产品经理' },
+      ],
+      selected: '',
+    })
+    // 老值：存的是 id → 直接选中
+    expect(choicesOf(dynamic, 'ag-2', agents).selected).toBe('ag-2')
+    // 老值：存的是名字 → 认出来按 id 选中（显示仍是名字）
+    expect(choicesOf(dynamic, '产品经理', agents).selected).toBe('ag-2')
+    // 认不出来：留一条说明项，别静默清空
+    const gone = choicesOf(dynamic, 'ag-gone', agents)
+    expect(gone.selected).toBe('ag-gone')
+    expect(gone.choices[0]).toEqual({ value: 'ag-gone', label: 'ag-gone（找不到对应智能体）' })
+
+    const staticField: ConfigField = {
+      key: 'mode',
+      label: '模式',
+      type: 'select',
+      options: ['a', 'b'],
+    }
+    expect(choicesOf(staticField, 'b', agents)).toEqual({
+      choices: [
+        { value: 'a', label: 'a' },
+        { value: 'b', label: 'b' },
+      ],
+      selected: 'b',
+    })
+    expect(choicesOf(staticField, 'zzz', agents).selected).toBe('')
+  })
+
+  it('常用字段铺开，advanced 字段收进「高级」；连接面板独占 connections', async () => {
+    kernel.setView('plugins.all', undefined, [feishuPlugin()])
+    kernel.setView('agents.all', undefined, [agentOf('ag-1', '管家（Moos）')])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await screen.findByText('飞书')
+    await openDetail(user, '飞书')
+
+    expect(screen.getByLabelText('飞书 派给哪个智能体')).toBeInTheDocument()
+    // 不需要的项不占版面：改坏了才动的字段收起，展开才渲染
+    expect(screen.queryByLabelText('飞书 lark-cli 命令')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('飞书 接收人 open_id')).not.toBeInTheDocument()
+    const toggle = screen.getByRole('button', { name: '飞书 高级设置' })
+    expect(toggle).toHaveTextContent('高级（2 项）')
+
+    await user.click(toggle)
+    expect(screen.getByLabelText('飞书 lark-cli 命令')).toBeInTheDocument()
+    expect(screen.getByLabelText('飞书 接收人 open_id')).toBeInTheDocument()
+
+    await user.click(toggle)
+    expect(screen.queryByLabelText('飞书 lark-cli 命令')).not.toBeInTheDocument()
+
+    // 面板独占 connections：通用表单不渲染它（否则两处写同一个键会互相覆盖）
+    expect(screen.queryByLabelText('飞书 飞书连接（JSON）')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '飞书连接' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '添加连接' })).toBeInTheDocument()
+  })
+
+  it('「派给哪个智能体」是下拉：选项来自智能体清单，保存落 id', async () => {
+    kernel.setView('plugins.all', undefined, [feishuPlugin()])
+    kernel.setView('agents.all', undefined, [
+      agentOf('ag-1', '管家（Moos）'),
+      agentOf('ag-2', '产品经理'),
+    ])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await screen.findByText('飞书')
+    await openDetail(user, '飞书')
+
+    await user.click(screen.getByRole('combobox', { name: '飞书 派给哪个智能体' }))
+    await user.click(await screen.findByRole('option', { name: '产品经理' }))
+    await user.click(screen.getByRole('button', { name: '保存插件 飞书' }))
+
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({
+      type: 'plugin.set',
+      pluginId: 'feishu',
+      config: { agent: 'ag-2' },
+    })
+  })
+
+  it('还没有智能体：下拉空着并给指路提示；选回「只发卡」会把空值写进去', async () => {
+    kernel.setView('plugins.all', undefined, [
+      feishuPlugin({ config: { agent: 'ag-1', lark: 'lark-cli' } }),
+    ])
+    kernel.setView('agents.all', undefined, [])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await screen.findByText('飞书')
+    await openDetail(user, '飞书')
+
+    expect(screen.getByText('还没有智能体：先去「智能体」页新建一个，再回来选')).toBeInTheDocument()
+    // 旧值认不出来：留一条说明项，当前仍选中它
+    await user.click(screen.getByRole('combobox', { name: '飞书 派给哪个智能体' }))
+    await user.click(await screen.findByRole('option', { name: '不接收入站（只发卡）' }))
+    await user.click(screen.getByRole('button', { name: '保存插件 飞书' }))
+
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    // 清空要显式写空串，否则旧 agent 会一直留着（选了「不接收入站」却照旧派活）
+    expect(kernel.dispatched[0]).toMatchObject({ config: { agent: '' } })
+  })
+
+  it('保存：收起的高级字段照样提交，且不会把 connections 一起提交', async () => {
+    kernel.setView('plugins.all', undefined, [
+      feishuPlugin({ config: { lark: '/opt/lark-cli', connections: '[]' } }),
+    ])
+    kernel.setView('agents.all', undefined, [agentOf('ag-1', '管家（Moos）')])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await screen.findByText('飞书')
+    await openDetail(user, '飞书')
+
+    await user.click(screen.getByRole('button', { name: '保存插件 飞书' }))
+    await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
+    expect(kernel.dispatched[0]).toMatchObject({
+      type: 'plugin.set',
+      pluginId: 'feishu',
+      config: { lark: '/opt/lark-cli' },
+    })
+    expect(kernel.dispatched[0]).not.toHaveProperty('config.connections')
   })
 })

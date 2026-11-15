@@ -574,7 +574,7 @@ function ThreadContent({
             <DialogFooter>
               <Button
                 type="button"
-                variant="ghost"
+                variant="quiet"
                 size="sm"
                 disabled={busyNow}
                 onClick={() => setConfirmRemove(false)}

@@ -15,7 +15,8 @@ import {
 } from '../../../components/ui/select'
 import { cn } from '../../../lib/cn'
 import { getKernelStore } from '../../../shell/kernelStore'
-import { useKernelViewState } from '../../../shell/useKernelView'
+import { useKernelView, useKernelViewState } from '../../../shell/useKernelView'
+import { FeishuConnections } from './FeishuConnections'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -94,6 +95,42 @@ export function numberFieldErrors(
     if (message !== null) invalid[field.key] = message
   }
   return invalid
+}
+
+/** 一个下拉候选：显示 label，落库 value。 */
+export interface ConfigChoice {
+  value: string
+  label: string
+}
+
+/**
+ * 下拉字段的候选与当前选中值（纯函数）。
+ *
+ * - 静态 `options`：值即文案；
+ * - 动态 `optionsFrom: 'agents'`：显示名称、落库 id（改名不影响绑定）；
+ * - 当前值不在候选里（智能体被删了 / 旧配置存的是名字）：**留一条说明项**而不是静默清空；
+ *   旧配置存名字时按名字认出来、仍按 id 选中，显示照旧是名字。
+ */
+export function choicesOf(
+  field: ConfigField,
+  current: string,
+  agents: readonly { id: string; name: string }[],
+): { choices: ConfigChoice[]; selected: string } {
+  if (field.type !== 'select') return { choices: [], selected: '' }
+  if (field.optionsFrom !== 'agents') {
+    const choices = (field.options ?? []).map((option) => ({ value: option, label: option }))
+    const known = choices.some((choice) => choice.value === current)
+    return { choices, selected: known ? current : '' }
+  }
+  const choices = agents.map((agent) => ({ value: agent.id, label: agent.name }))
+  if (current === '') return { choices, selected: '' }
+  if (choices.some((choice) => choice.value === current)) return { choices, selected: current }
+  const byName = agents.find((agent) => agent.name === current)
+  if (byName !== undefined) return { choices, selected: byName.id }
+  return {
+    choices: [{ value: current, label: `${current}（找不到对应智能体）` }, ...choices],
+    selected: current,
+  }
 }
 
 function PluginIcon(): ReactElement {
@@ -244,6 +281,8 @@ function PluginDetail({
 }): ReactElement {
   const [granted, setGranted] = useState<string[]>(() => [...plugin.granted])
   const [config, setConfig] = useState<ConfigDraft>(() => initialConfig(plugin))
+  /** 「高级」默认收起：只有改坏了才需要动的项不该和常用项平铺在一起 */
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -253,6 +292,15 @@ function PluginDetail({
   const declared = plugin.declared
   const grantedSet = new Set(granted)
   const secretKeys = new Set(plugin.secretKeys)
+  /**
+   * 字段分两档渲染：常用字段直接铺开，标了 `advanced` 的收进「高级」里默认不出现
+   * （不需要的配置项不该占版面）。校验与保存仍按**全部**字段走：收起不等于丢掉。
+   */
+  const fields = plugin.configFields
+  const commonFields = fields.filter((field) => field.advanced !== true)
+  const advancedFields = fields.filter((field) => field.advanced === true)
+  /** 动态下拉的候选来源：设置页自己订阅（清单里只写「去哪取」，不塞业务数据） */
+  const agents = useKernelView('agents.all') ?? []
 
   const run = (command: () => Promise<unknown>): void => {
     setBusy(true)
@@ -299,16 +347,25 @@ function PluginDetail({
     setConfig((current) => ({ ...current, flags: { ...current.flags, [key]: value } }))
   }
 
-  /** 按字段类型把草稿转成标量；空字符串不写入（保留 manifest 缺省值） */
+  /**
+   * 按字段类型把草稿转成标量。
+   *
+   * 空字符串通常不写入（保留 manifest 缺省值）；**下拉例外**：选回「未设置」要把空值写进去，
+   * 否则旧值会一直留着（用户选了「不接收入站」，保存后却照旧派活）。
+   */
   const configPatch = (): Record<string, string | number | boolean> => {
     const patch: Record<string, string | number | boolean> = {}
-    for (const field of plugin.configFields) {
+    for (const field of fields) {
       if (field.type === 'boolean') {
         patch[field.key] = config.flags[field.key] === true
         continue
       }
       if (field.type === 'secret') continue
       const text = config.text[field.key]
+      if (field.type === 'select') {
+        patch[field.key] = text
+        continue
+      }
       if (text.trim() === '') continue
       patch[field.key] = field.type === 'number' ? Number(text) : text
     }
@@ -317,7 +374,7 @@ function PluginDetail({
 
   const save = (): void => {
     // 先校验再提交：非法数字不落到内核，也不悄悄回落到缺省值
-    const invalid = numberFieldErrors(plugin.configFields, config.text)
+    const invalid = numberFieldErrors(fields, config.text)
     setFieldErrors(invalid)
     if (Object.keys(invalid).length > 0) {
       setActionError(null)
@@ -359,22 +416,24 @@ function PluginDetail({
       )
     }
     if (field.type === 'select') {
-      const choices = field.options ?? []
-      const current = config.text[field.key]
+      // 候选来自静态 options 或动态来源（agents）：显示名称、落库 id
+      const { choices, selected } = choicesOf(field, config.text[field.key] ?? '', agents)
+      const empty = field.optionsFrom === 'agents' ? '不接收入站（只发卡）' : '未设置'
+      const hint =
+        field.optionsFrom === 'agents' && agents.length === 0
+          ? '还没有智能体：先去「智能体」页新建一个，再回来选'
+          : field.help
       return (
-        <Field key={field.key} label={field.label} className="min-w-0">
-          <Select
-            value={choices.includes(current) ? current : ''}
-            onValueChange={(next) => setText(field.key, next)}
-          >
+        <Field key={field.key} label={field.label} className="min-w-0" hint={hint}>
+          <Select value={selected} onValueChange={(next) => setText(field.key, next)}>
             <SelectTrigger aria-label={name} className="w-full">
-              <SelectValue placeholder="未设置" />
+              <SelectValue placeholder={empty} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">未设置</SelectItem>
-              {choices.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {option}
+              <SelectItem value="">{empty}</SelectItem>
+              {choices.map((choice) => (
+                <SelectItem key={choice.value} value={choice.value}>
+                  {choice.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -413,7 +472,7 @@ function PluginDetail({
         className="min-w-0"
         // 数字字段用文本输入：浏览器的 number 控件会把非法输入悄悄清成空串，
         // 用户既看不到自己填了什么，也得不到「为什么没保存成功」的解释
-        hint={field.type === 'number' ? '只填数字；留空用缺省值' : undefined}
+        hint={field.type === 'number' ? (field.help ?? '只填数字；留空用缺省值') : field.help}
         error={fieldErrors[field.key]}
       >
         <Input
@@ -430,7 +489,7 @@ function PluginDetail({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
-        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+        <Button type="button" variant="quiet" size="sm" onClick={onBack}>
           返回插件列表
         </Button>
         <span className="text-xs text-faint-foreground">插件详情</span>
@@ -480,9 +539,47 @@ function PluginDetail({
           <p className="text-xs text-faint-foreground">未授权：勾选声明的能力并保存后才会启动。</p>
         )}
 
-        {plugin.configFields.length > 0 && (
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-            {plugin.configFields.map(renderControl)}
+        {/* M45：飞书的多连接（每连接一个 profile/应用/智能体）用专用面板，不塞进标量表单；
+            对飞书插件它是主体，放在标量配置之前——先接上连接，再看默认值。 */}
+        {plugin.id === 'feishu' && (
+          <div className="border-t border-border pt-3">
+            <FeishuConnections plugin={plugin} />
+          </div>
+        )}
+
+        {(commonFields.length > 0 || advancedFields.length > 0) && (
+          <div
+            className={cn(
+              'flex flex-col gap-3',
+              plugin.id === 'feishu' && 'border-t border-border pt-3',
+            )}
+          >
+            {commonFields.length > 0 && (
+              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                {commonFields.map(renderControl)}
+              </div>
+            )}
+
+            {advancedFields.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <Button
+                  type="button"
+                  variant="quiet"
+                  size="sm"
+                  className="self-start"
+                  aria-expanded={showAdvanced}
+                  aria-label={`${plugin.name} 高级设置`}
+                  onClick={() => setShowAdvanced((cur) => !cur)}
+                >
+                  {showAdvanced ? '收起高级' : `高级（${advancedFields.length} 项）`}
+                </Button>
+                {showAdvanced && (
+                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                    {advancedFields.map(renderControl)}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

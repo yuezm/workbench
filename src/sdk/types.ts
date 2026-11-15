@@ -31,14 +31,29 @@ export interface Spawned {
   kill(signal: NodeJS.Signals): void
 }
 
+/**
+ * 子进程环境的**增量**修改（M45）：插件拿不到 `process.env`，又必须能剔除宿主环境里
+ * 「别的工具留下的身份」——`lark-cli` 会按 `HERMES_HOME` / `OPENCLAW_HOME` 切到对方的
+ * 工作区，通道若原样继承就会和别的 agent 抢同一个应用的事件长连接。
+ *
+ * 语义：先按 `unset` 删键，再按 `set` 覆盖；两者都省略等同于没传 `envPatch`。
+ */
+export interface EnvPatch {
+  unset?: readonly string[]
+  set?: Record<string, string>
+}
+
 export interface SpawnOptions {
   cwd?: string
   /**
    * 子进程环境：**省略 = 继承宿主进程环境**（`host/process.ts` 兜底 `process.env`），
    * 显式给值则整体替换（不合并）。执行器按智能体配置逐键覆盖，通道（M42）直接省略，
    * 让 CLI 自己读本机登录态（如 `lark-cli` 的凭证目录）——插件始终拿不到 `process.env` 本身。
+   * 要在继承的基础上增删个别键，用 `envPatch`（不要为删一个键就整体替换）。
    */
   env?: NodeJS.ProcessEnv
+  /** 继承环境的增量修改（M45）：先删 `unset`，再覆盖 `set`；与 `env` 同时给时以 `env` 为底。 */
+  envPatch?: EnvPatch
   /** Windows 的 .cmd/.bat 需要经 shell 启动 */
   shell?: boolean
 }

@@ -186,7 +186,7 @@ function QuickAddTask({
         <Button type="submit" size="xs" disabled={busy}>
           添加
         </Button>
-        <Button type="button" size="xs" variant="ghost" disabled={busy} onClick={close}>
+        <Button type="button" size="xs" variant="quiet" disabled={busy} onClick={close}>
           取消
         </Button>
         <span className="ml-auto text-xs text-faint-foreground">Esc 取消</span>
@@ -419,7 +419,7 @@ export function KanbanBoard({
           {/* 归档不是删除：给一条回看入口，能翻出已完成的任务点进详情 */}
           <Button
             type="button"
-            variant="ghost"
+            variant="quiet"
             size="xs"
             className="shrink-0"
             aria-label="查看归档任务"

@@ -17,9 +17,21 @@
  *
  * `answer` 走既有写入口（`commandId='card:<cardId>:<version>'`，`via:'channel'`），返回
  * `{ changed, status }`：已经不在等你的卡不再抛错，通道据此把那张卡刷成终态并在日志里说清。
+ *
+ * 入站（M44）：
+ * - `submit`：通道交来一句话，hub 按这个通道的配置找「默认智能体」（`agent`：id 或名称），
+ *   发 `chat.create` + `chat.send` 两条命令（目标与幂等键都在宿主这边定，通道看不到），
+ *   返回一句回执 + 会话 id；没配 / 找不到 / 内核拒绝都返回 `accepted:false` 和原因，不抛错；
+ * - 进展：内核给聊天轮的终态补一条 assistant `message.appended`，hub 只在「这个会话是某个
+ *   通道提交的」时，把它转成该通道的 `ChannelProgress`——别的会话不打扰任何人。
  */
 import type { Card } from '../protocol/entities'
-import type { ChannelAnswerOutcome, ChannelContext } from '../protocol/channels'
+import type {
+  ChannelAnswerOutcome,
+  ChannelContext,
+  ChannelProgressHandler,
+  ChannelSubmitOutcome,
+} from '../protocol/channels'
 import type { Fact, Iso } from '../kernel/core/types'
 import type { ChannelRegistryEntry } from '../plugins/registry'
 import type { SdkHost } from '../sdk/types'
@@ -66,6 +78,18 @@ export interface Channels {
    * 旧消息，不计入。返回 `{ changed, status }`，内核不接受时 `changed=false`（不抛错）。
    */
   answer(cardId: string, optionIndex: number, ref?: string): Promise<ChannelAnswerOutcome>
+  /**
+   * 通道侧入站文本（M44）：按该通道配置的默认智能体建会话并发出这一句。
+   *
+   * `agent`（M45）只给多连接通道用：一条连接可以派给不同智能体；省略时用通道配置的 `agent`。
+   * 失败不抛错：返回 `accepted:false` + 原因文案，通道原样回帖。
+   */
+  submit(
+    channelKey: string,
+    text: string,
+    ref?: string,
+    agent?: string,
+  ): Promise<ChannelSubmitOutcome>
 }
 
 /** 单通道单次投递的默认超时（D9：慢通道不拖住其它通道与写路径）。 */
@@ -89,6 +113,43 @@ interface ChannelRuntime {
   dispose: (() => void) | null
   /** start 成功后才参与投递 */
   started: boolean
+  /** M44：入站文本派活后，这一轮说完话要回给谁 */
+  progress: Set<ChannelProgressHandler>
+}
+
+/** 入站派活的会话标题上限（码点）：与内核 `titleFromContent` 同量级，只作会话列表里的标识。 */
+const SUBMIT_TITLE_CHARS = 24
+
+/** 一句话回执的上限（码点）：平台侧对单条文本也有限制，宿主先截断，别让通道自己猜。 */
+const RECEIPT_CHARS = 200
+
+/** 派活的目标：配置里写的是智能体 id 或名称，两种都认。 */
+const pickAgent = (
+  agents: readonly { id: string; name: string }[],
+  wanted: string,
+): { id: string; name: string } | null => {
+  const target = wanted.trim().toLocaleLowerCase()
+  if (target === '') return null
+  return (
+    agents.find((agent) => agent.id === wanted.trim()) ??
+    agents.find((agent) => agent.name.trim().toLocaleLowerCase() === target) ??
+    null
+  )
+}
+
+/** 会话标题：取首行、按码点截断（不切断代理对）。 */
+export function submitTitleOf(text: string): string {
+  const firstLine = text.split(/\r?\n/).find((line) => line.trim() !== '') ?? text
+  const chars = [...firstLine.trim()]
+  return chars.length <= SUBMIT_TITLE_CHARS
+    ? chars.join('')
+    : chars.slice(0, SUBMIT_TITLE_CHARS).join('')
+}
+
+/** 截断回执：宿主给通道的文案自己保证长度，通道只管发。 */
+const receiptOf = (text: string): string => {
+  const chars = [...text]
+  return chars.length <= RECEIPT_CHARS ? text : `${chars.slice(0, RECEIPT_CHARS).join('')}…`
 }
 
 /** 一次投递尝试的等待键：`通道|卡片:版本:状态`（状态也要算，终态与 open 同版本）。 */
@@ -136,6 +197,10 @@ export function createChannels(options: ChannelsOptions): Channels {
   const retryTimers = new Set<ReturnType<typeof setTimeout>>()
   let started = false
   let stopping = false
+  /** M44：通道提交过的会话（conversationId → 通道 key）；只有它该收到这个会话的进展 */
+  const submitted = new Map<string, string>()
+  /** 没有平台消息引用时的幂等键兜底（同一进程内自增） */
+  let submitSeq = 0
 
   const log = (line: string): void => {
     try {
@@ -351,6 +416,57 @@ export function createChannels(options: ChannelsOptions): Channels {
     }
   }
 
+  /**
+   * 一条事实能不能当「进展」：聊天轮结束时内核补的那条 assistant 消息
+   * （成功是正文，失败/取消是错误文案）。别的 `message.appended`（人发的）不算。
+   */
+  const progressOf = (
+    fact: Fact,
+  ): { conversationId: string; kind: 'reply' | 'failed'; text: string } | null => {
+    if (fact.type !== 'message.appended') return null
+    const payload = fact.payload as {
+      conversationId?: unknown
+      role?: unknown
+      content?: unknown
+      error?: unknown
+    }
+    if (payload.role !== 'assistant') return null
+    const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId : ''
+    if (conversationId === '') return null
+    const failed = typeof payload.error === 'string' && payload.error.trim() !== ''
+    const body =
+      failed === true
+        ? (payload.error as string)
+        : typeof payload.content === 'string'
+          ? payload.content
+          : ''
+    const text = body.trim()
+    if (text === '') return null
+    return { conversationId, kind: failed ? 'failed' : 'reply', text }
+  }
+
+  /**
+   * 把进展交给「提交这个会话的通道」。别的通道既不知道这个会话，也不该被别人的活打扰。
+   * 处理器抛错只记日志：一条回帖失败不该影响其它通道或写路径。
+   */
+  const deliverProgress = (facts: readonly Fact[]): void => {
+    for (const fact of facts) {
+      const progress = progressOf(fact)
+      if (progress === null) continue
+      const owner = submitted.get(progress.conversationId)
+      if (owner === undefined) continue
+      const runtime = runtimes.get(owner)
+      if (runtime === undefined || !runtime.started) continue
+      for (const handler of [...runtime.progress]) {
+        try {
+          handler(progress)
+        } catch (error) {
+          log(`通道 ${owner} 的进展回调失败：${errMsg(error)}`)
+        }
+      }
+    }
+  }
+
   const startAll = async (): Promise<void> => {
     if (started || stopping) return
     started = true
@@ -363,6 +479,7 @@ export function createChannels(options: ChannelsOptions): Channels {
         handlers: new Set(),
         dispose: null,
         started: false,
+        progress: new Set(),
       }
       runtimes.set(entry.key, runtime)
       const channelHost: SdkHost = {
@@ -382,6 +499,13 @@ export function createChannels(options: ChannelsOptions): Channels {
           Promise.resolve(reportDelivered(entry.key, cardId, version, ref)),
         answer: (cardId, optionIndex, ref, byRef) =>
           answer(entry.key, cardId, optionIndex, ref, byRef),
+        submit: (text, ref, agent) => submit(entry.key, text, ref, agent),
+        onProgress: (handler) => {
+          runtime.progress.add(handler)
+          return () => {
+            runtime.progress.delete(handler)
+          }
+        },
         signal: runtime.abort.signal,
       }
       try {
@@ -407,6 +531,7 @@ export function createChannels(options: ChannelsOptions): Channels {
     inFlight.clear()
     deliveredKeys.clear()
     lastCards.clear()
+    submitted.clear()
     // M41：已排期的重投一并取消，退出后不再产生投递
     for (const timer of retryTimers) clearTimeout(timer)
     retryTimers.clear()
@@ -462,13 +587,104 @@ export function createChannels(options: ChannelsOptions): Channels {
     return { changed: true, status: 'answered' }
   }
 
+  /**
+   * 入站文本派活（M44）：目标智能体来自这个通道的配置（`agent` = id 或名称），
+   * 多连接通道可以按连接覆盖（M45 的 `agent` 参数，见 `ChannelSubmit`）。
+   *
+   * 为什么在 hub 里建会话而不是让通道自己发命令：**派给谁不该由平台适配层决定**。
+   * 通道只交文字与它自己的消息引用，命令、幂等键、标题都由这里定；失败一律回一句人话。
+   */
+  const submit = async (
+    channelKey: string,
+    text: string,
+    ref?: string,
+    agentOverride?: string,
+  ): Promise<ChannelSubmitOutcome> => {
+    const content = text.trim()
+    if (content === '') {
+      return { accepted: false, conversationId: null, receipt: receiptOf('空消息，没有派出去。') }
+    }
+    const entry = entries.find((item) => item.key === channelKey)
+    const raw = entry === undefined ? {} : (options.configOf?.(entry) ?? {})
+    const byConnection = agentOverride === undefined ? '' : agentOverride.trim()
+    const byConfig = typeof raw['agent'] === 'string' ? raw['agent'].trim() : ''
+    const wanted = byConnection !== '' ? byConnection : byConfig
+    if (wanted === '') {
+      return {
+        accepted: false,
+        conversationId: null,
+        receipt: receiptOf(`通道「${channelKey}」没配默认智能体，这句话没派出去。`),
+      }
+    }
+    let agents: readonly { id: string; name: string }[]
+    try {
+      agents = store.query('agents.all')
+    } catch (error) {
+      log(`入站派活读智能体列表失败：${errMsg(error)}`)
+      return {
+        accepted: false,
+        conversationId: null,
+        receipt: receiptOf('读不到智能体列表，这句话没派出去。'),
+      }
+    }
+    const agent = pickAgent(agents, wanted)
+    if (agent === null) {
+      return {
+        accepted: false,
+        conversationId: null,
+        receipt: receiptOf(`找不到智能体「${wanted}」，这句话没派出去。`),
+      }
+    }
+    // 幂等键：同一个平台消息重复投递（长连接重连/重放）不会派两次活
+    const key = `channel:${channelKey}:${ref !== undefined && ref.trim() !== '' ? ref.trim() : `n${++submitSeq}`}`
+    let conversationId: string
+    try {
+      const created = effects.dispatch({
+        type: 'chat.create',
+        commandId: `${key}:create`,
+        agentId: agent.id,
+        title: submitTitleOf(content),
+      })
+      const fact = created.facts.find((item) => item.type === 'conversation.created')
+      const conversation =
+        fact === undefined
+          ? null
+          : ((fact.payload as { conversation?: { id?: string } }).conversation ?? null)
+      const id = conversation?.id ?? ''
+      if (id === '') throw new Error('会话没建成')
+      conversationId = id
+      effects.dispatch({
+        type: 'chat.send',
+        commandId: `${key}:send`,
+        conversationId,
+        content,
+      })
+    } catch (error) {
+      log(`通道 ${channelKey} 的入站文本没派出去：${errMsg(error)}`)
+      return {
+        accepted: false,
+        conversationId: null,
+        receipt: receiptOf(`没派出去：${errMsg(error)}`),
+      }
+    }
+    submitted.set(conversationId, channelKey)
+    log(`通道 ${channelKey} 的入站文本已派给 ${agent.id}（会话 ${conversationId}）`)
+    return {
+      accepted: true,
+      conversationId,
+      receipt: receiptOf(`已交给「${agent.name}」，这一轮说完我回在这里。`),
+    }
+  }
+
   return {
     startAll,
     stopAll,
     dispatch: (facts) => {
       if (!started) return
       deliverFactCards(facts)
+      deliverProgress(facts)
     },
     answer: (cardId, optionIndex, ref) => answer(null, cardId, optionIndex, ref),
+    submit: (channelKey, text, ref, agent) => submit(channelKey, text, ref, agent),
   }
 }

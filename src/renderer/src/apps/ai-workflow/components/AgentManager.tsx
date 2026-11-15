@@ -192,7 +192,7 @@ export function AgentManager(): ReactElement {
                 </span>
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet"
                   size="sm"
                   aria-label={`编辑智能体 ${a.name}`}
                   onClick={() =>
@@ -221,9 +221,8 @@ export function AgentManager(): ReactElement {
                 )}
                 <Button
                   type="button"
-                  variant="ghost"
+                  variant="quiet-destructive"
                   size="sm"
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   aria-label={`删除智能体 ${a.name}`}
                   disabled={removingId === a.id}
                   onClick={() => void remove(a.id)}

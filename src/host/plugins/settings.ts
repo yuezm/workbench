@@ -146,6 +146,10 @@ export function createPluginSecrets(options: PluginSecretsOptions): PluginSecret
   }
 }
 
+/** 运行期只认三种标量：投影里的 JSON 可能带进对象/数组/空值，下游承担不起这种形状。 */
+const isConfigScalar = (value: unknown): value is string | number | boolean =>
+  typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+
 /** 设置里的 config 只收标量（形状校验在内核；这里按 manifest 字段类型再收一道）。 */
 const matchesFieldType = (field: ConfigField, value: string | number | boolean): boolean => {
   switch (field.type) {
@@ -173,9 +177,15 @@ const isAuthorized = (
 /**
  * 合并插件运行时配置（`sdk.config()` 的值）。
  *
- * 顺序：manifest 字段默认值 → 设置里的非 secret 值（只认 manifest 声明的字段与类型）→
+ * 顺序：manifest 字段默认值 → 设置里的非 secret 值（按 manifest 字段类型收）→
+ * **内置插件的面板独占键**（manifest 不声明、也不进通用表单，见下）→
  * **授权后**的 secret（内置插件恒可信；外部插件须启用且声明能力全部授权）。
- * 未声明字段（manifest 升级后设置里的残留）一律忽略，避免把旧配置带进新版本。
+ *
+ * 为什么内置插件要透传未声明的标量键：内置插件的配置面由本仓库自己定义，除通用表单外还有
+ * 「只归某个专属面板写」的键（飞书通道的 `connections`）——manifest 声明它就会连表单一起
+ * 渲染出来，不声明又会被白名单整条丢掉，于是面板写进去、插件读不到，配置看着生效实际落空。
+ * 外部插件仍按 manifest 白名单收：第三方插件的配置面由清单唯一决定，声明之外的键（含历史
+ * 残留）不该自动生效。
  */
 export function resolvePluginConfig(
   manifest: PluginManifest,
@@ -190,6 +200,12 @@ export function resolvePluginConfig(
     if (field.default !== undefined) config[field.key] = field.default
     const value = setting?.config?.[field.key]
     if (value !== undefined && matchesFieldType(field, value)) config[field.key] = value
+  }
+  if (builtin) {
+    for (const [key, value] of Object.entries(setting?.config ?? {})) {
+      if (key in config) continue
+      if (isConfigScalar(value)) config[key] = value
+    }
   }
   if (!isAuthorized(manifest, setting, builtin)) return config
   for (const field of fields) {

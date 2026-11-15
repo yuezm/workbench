@@ -251,7 +251,7 @@ export function RuntimeDialog({
           <FormError message={error} onDismiss={() => setError(null)} />
 
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+            <Button type="button" variant="quiet" size="sm" onClick={onCancel}>
               取消
             </Button>
             <Button type="submit" variant="default" size="sm" disabled={saving}>

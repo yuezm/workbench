@@ -57,7 +57,7 @@ export function ProjectSwitcher({
         <span className="text-xs font-medium text-faint-foreground">项目</span>
         <Button
           type="button"
-          variant="ghost"
+          variant="quiet"
           size="sm"
           className="h-6 px-2 text-sm"
           onClick={onCreate}

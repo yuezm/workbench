@@ -7,7 +7,13 @@
  *   通道插件只依赖回调契约）；
  * - `sdk` 用 `fakeSdk`（notify 调用记进 `sdk.notifyCalls`，文案只作参数）。
  */
-import type { ChannelAnswerOutcome, ChannelContext } from '../../../src/protocol/channels'
+import type {
+  ChannelAnswerOutcome,
+  ChannelContext,
+  ChannelProgress,
+  ChannelProgressHandler,
+  ChannelSubmitOutcome,
+} from '../../../src/protocol/channels'
 import type { Card } from '../../../src/protocol/entities'
 import { fakeSdk, type FakeSdk } from '../support/fake-sdk'
 
@@ -57,14 +63,22 @@ export interface ChannelHarness {
   delivered: Array<{ cardId: string; version: number; ref: string }>
   /** 通道回报的 answer 参数（`answer` 抛错时仍记录，再抛错） */
   answers: AnswerCall[]
+  /** 通道提交的入站文本（M44/M45：`submit` 的调用参数，含按连接覆盖的智能体） */
+  submits: Array<{ text: string; ref?: string; agent?: string }>
+  /** 已订阅的进展处理器（M44） */
+  progressHandlers: ChannelProgressHandler[]
   /** 模拟 hub 把一张卡片分发给所有订阅者（与 hub 的同步调用口径一致） */
   deliver(card: Card, ref?: string | null): void
+  /** 模拟 hub 把一条进展分发给所有订阅者（M44） */
+  progress(p: ChannelProgress): void
 }
 
 export interface ChannelHarnessOptions {
   sdk?: FakeSdk
   /** 自定义 answer 行为：用于「内核拒绝 / 已经 settled」这类路径（缺省总是成功） */
   answer?: (call: AnswerCall) => Promise<ChannelAnswerOutcome>
+  /** 自定义 submit 行为：入站派活的结果（缺省 accepted=true，会话 `conversation-1`） */
+  submit?: (text: string, ref?: string, agent?: string) => Promise<ChannelSubmitOutcome>
 }
 
 export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarness {
@@ -73,6 +87,8 @@ export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarn
   const handlers: ChannelHarness['handlers'] = []
   const delivered: ChannelHarness['delivered'] = []
   const answers: ChannelHarness['answers'] = []
+  const submits: ChannelHarness['submits'] = []
+  const progressHandlers: ChannelProgressHandler[] = []
 
   const ctx: ChannelContext = {
     sdk,
@@ -99,6 +115,26 @@ export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarn
         ? Promise.resolve({ changed: true, status: 'answered' })
         : options.answer(call)
     },
+    submit: (text, ref, agent) => {
+      submits.push({
+        text,
+        ...(ref === undefined ? {} : { ref }),
+        ...(agent === undefined ? {} : { agent }),
+      })
+      if (options.submit !== undefined) return options.submit(text, ref, agent)
+      return Promise.resolve({
+        accepted: true,
+        conversationId: 'conversation-1',
+        receipt: '已收到',
+      })
+    },
+    onProgress: (handler) => {
+      progressHandlers.push(handler)
+      return () => {
+        const index = progressHandlers.indexOf(handler)
+        if (index >= 0) progressHandlers.splice(index, 1)
+      }
+    },
     signal: controller.signal,
   }
 
@@ -109,9 +145,14 @@ export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarn
     handlers,
     delivered,
     answers,
+    submits,
+    progressHandlers,
     deliver: (card, ref = null) => {
       // 复制一份：处理器可能在分发过程中退订（与 hub 递归分发时的表现一致）
       for (const handler of [...handlers]) handler(card, ref)
+    },
+    progress: (p) => {
+      for (const handler of [...progressHandlers]) handler(p)
     },
   }
 }

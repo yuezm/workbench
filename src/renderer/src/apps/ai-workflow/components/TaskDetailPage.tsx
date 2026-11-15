@@ -401,7 +401,7 @@ export function TaskDetailPage({
             <DialogFooter>
               <Button
                 type="button"
-                variant="ghost"
+                variant="quiet"
                 size="sm"
                 disabled={action !== null}
                 onClick={() => setConfirmRemove(false)}

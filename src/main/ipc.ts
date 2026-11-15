@@ -3,17 +3,21 @@ import type { NotifyPayload } from '../shared/workbench-api'
 import { NOTIFY_CHANNEL } from '../shared/workbench-api'
 import {
   WORKBENCH_DISPATCH_CHANNEL,
+  WORKBENCH_LARK_CHANNEL,
   WORKBENCH_PICK_FOLDER_CHANNEL,
   WORKBENCH_QUERY_CHANNEL,
   type IpcResponse,
 } from '../protocol/ipc'
 import type { CommandRouter } from '../host/commands'
+import { asLarkAction, runLarkAction, type LarkAdmin } from '../host/lark-admin'
 import { StoreError } from '../host/store/index'
 import { notify } from './notify'
 
 export interface KernelIpcDeps {
   /** 三动词的宿主实现（命令路由 / 读视图） */
   router: CommandRouter
+  /** 飞书连接管理（M45）：探测 / 建 profile / 设备码登录；缺省不接（测试与无 CLI 环境） */
+  lark?: LarkAdmin
 }
 
 /** 统一应答信封：命令/查询的异常转成 `{code,message}`，不把栈序列化给 renderer。 */
@@ -60,6 +64,16 @@ export function registerIpcHandlers(deps: KernelIpcDeps): void {
               properties: [...options.properties],
             })
       return result.canceled ? null : (result.filePaths[0] ?? null)
+    }),
+  )
+  // M45：飞书连接管理。动作未经校验就拒绝（渲染层输入是外部输入），app secret 只进不出。
+  ipcMain.handle(WORKBENCH_LARK_CHANNEL, (_event, action: unknown) =>
+    wrap(async () => {
+      const admin = deps.lark
+      if (admin === undefined) throw new Error('飞书连接管理未装配')
+      const parsed = asLarkAction(action)
+      if (parsed === null) throw new Error('飞书连接动作非法')
+      return await runLarkAction(admin, parsed)
     }),
   )
 }

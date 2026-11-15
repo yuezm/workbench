@@ -72,6 +72,12 @@ const CARD_DISPATCH_TYPES: ReadonlySet<string> = new Set([
   'card.resolved',
 ])
 
+/**
+ * 需要交给通道 hub 的进展事实（M44）：聊天轮终态时内核补的那条 assistant 消息。
+ * hub 只把它转给「提交过这个会话」的通道，别的通道不受影响。
+ */
+const PROGRESS_DISPATCH_TYPES: ReadonlySet<string> = new Set(['message.appended'])
+
 export function createEffects(options: EffectsOptions): Effects {
   const { store } = options
 
@@ -87,8 +93,12 @@ export function createEffects(options: EffectsOptions): Effects {
       }
     }
     if (facts.length === 0) return
-    // 卡片投递：hub 的 dispatch 只做「选集 + 异步投递」，立即返回；异常/超时在 hub 内隔离
-    if (facts.some((fact) => CARD_DISPATCH_TYPES.has(fact.type))) {
+    // 卡片投递 / 入站进展：hub 的 dispatch 只做「选集 + 异步投递」，立即返回；异常/超时在 hub 内隔离
+    if (
+      facts.some(
+        (fact) => CARD_DISPATCH_TYPES.has(fact.type) || PROGRESS_DISPATCH_TYPES.has(fact.type),
+      )
+    ) {
       safely(() => options.channels?.().dispatch(facts))
     }
     safely(() => options.onFacts?.(facts))

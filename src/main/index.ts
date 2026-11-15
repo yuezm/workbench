@@ -46,6 +46,7 @@ import {
 import { createSources, type Sources, type SourceRegistryEntry } from '../host/sources'
 import { createStore, DEFAULT_LIMITS } from '../host/store/index'
 import { importLegacyIfNeeded } from '../host/store/import'
+import { createLarkAdmin } from '../host/lark-admin'
 import { registerIpcHandlers } from './ipc'
 // 系统通知原件（M4）：宿主不 import electron，由装配根注入 sdk（`sdk.notify` 的门控在 sdk 层）
 import { notify } from './notify'
@@ -700,7 +701,11 @@ if (app.requestSingleInstanceLock()) {
       hostView,
       plugins: pluginDeps,
     })
-    registerIpcHandlers({ router })
+    registerIpcHandlers({
+      router,
+      // M45：飞书连接面板用的本机 CLI 探测/登录（宿主 env 由它自己读，secret 只进不出）
+      lark: createLarkAdmin({ log: (line) => process.stderr.write(`${line}\n`) }),
+    })
     // 启动：对账已在上方完成（残留进程已清、超租约已回收），这里先领取遗留 queued run，
     // 再挂唯一定时器（周期回收走 nextWakeAt + clock.tick，不再单独轮询）
     scheduler.wake()

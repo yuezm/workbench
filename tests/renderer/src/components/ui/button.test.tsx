@@ -20,11 +20,45 @@ describe('Button（shadcn 基座）', () => {
     ['secondary', 'bg-secondary'],
     ['outline', 'shadow-xs'],
     ['ghost', 'hover:bg-accent'],
+    ['quiet', 'bg-muted'],
+    ['quiet-destructive', 'bg-destructive/10'],
     ['destructive', 'bg-destructive'],
     ['link', 'underline-offset-4'],
   ] as const)('variant=%s 应用对应主题', (variant, cls) => {
     render(<Button variant={variant}>{variant}</Button>)
     expect(screen.getByRole('button')).toHaveClass(cls)
+  })
+
+  /** 去掉 hover: / focus: 这类状态前缀后剩下的类名 */
+  const restingClasses = (btn: HTMLElement): string =>
+    btn.className
+      .split(/\s+/)
+      .filter((cls) => !cls.includes(':'))
+      .join(' ')
+
+  it('quiet 静止态就有边界：不 hover 也看得出是按钮', () => {
+    render(<Button variant="quiet">编辑</Button>)
+    const btn = screen.getByRole('button', { name: '编辑' })
+    // SPEC-ui §12：行内文字操作不许靠 hover 才显形。
+    // 暗色下 muted 与 card 的亮度比只有 1.07:1，底色本身看不出来，描边才是可辨识的那层。
+    expect(restingClasses(btn)).toContain('border-border')
+    expect(restingClasses(btn)).toContain('bg-muted')
+    expect(btn).toHaveClass('hover:bg-accent')
+  })
+
+  it('quiet-destructive 静止态有危险边界，文字是危险色', () => {
+    render(<Button variant="quiet-destructive">删除</Button>)
+    const btn = screen.getByRole('button', { name: '删除' })
+    expect(restingClasses(btn)).toContain('border-destructive/30')
+    expect(restingClasses(btn)).toContain('bg-destructive/10')
+    expect(restingClasses(btn)).toContain('text-destructive')
+  })
+
+  it('ghost 静止态无边界（只给图标按钮用，§12）', () => {
+    render(<Button variant="ghost">图标位</Button>)
+    const btn = screen.getByRole('button', { name: '图标位' })
+    expect(restingClasses(btn)).not.toMatch(/bg-(muted|accent|primary|secondary|destructive)/)
+    expect(restingClasses(btn)).not.toMatch(/(^|\s)border(-|$)/)
   })
 
   it.each([

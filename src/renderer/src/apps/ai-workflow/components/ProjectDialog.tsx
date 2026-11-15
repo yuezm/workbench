@@ -243,9 +243,8 @@ export function ProjectDialog({
                 {project !== undefined && onRemove !== undefined && (
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet-destructive"
                     size="sm"
-                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     disabled={busy}
                     onClick={() => remove(project.id, onRemove)}
                   >
@@ -260,7 +259,7 @@ export function ProjectDialog({
                   </p>
                 )}
                 <div className="flex items-center gap-2">
-                  <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+                  <Button type="button" variant="quiet" size="sm" onClick={onCancel}>
                     取消
                   </Button>
                   <Button

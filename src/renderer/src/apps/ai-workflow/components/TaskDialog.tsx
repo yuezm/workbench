@@ -154,7 +154,7 @@ export function TaskDialog({
           <FormError message={formError} />
 
           <div className="mt-2 flex items-center justify-end gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+            <Button type="button" variant="quiet" size="sm" onClick={onCancel}>
               取消
             </Button>
             <Button

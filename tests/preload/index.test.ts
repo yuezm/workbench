@@ -5,6 +5,7 @@ import { NOTIFY_CHANNEL, type WorkbenchApi } from '../../src/shared/workbench-ap
 import {
   WORKBENCH_DISPATCH_CHANNEL,
   WORKBENCH_EVENT_CHANNEL,
+  WORKBENCH_LARK_CHANNEL,
   WORKBENCH_OPEN_TARGET_CHANNEL,
   WORKBENCH_PICK_FOLDER_CHANNEL,
   WORKBENCH_QUERY_CHANNEL,
@@ -44,10 +45,11 @@ describe('preload 桥接契约（M5 三动词）', () => {
     expect(names).toEqual(['workbench'])
   })
 
-  it('workbench 形状 = dispatch / query / subscribe / onOpenTarget / pickFolder / notify', async () => {
+  it('workbench 形状 = dispatch / query / subscribe / onOpenTarget / pickFolder / lark / notify', async () => {
     const { workbench } = await loadExposed()
     expect(Object.keys(workbench).sort()).toEqual([
       'dispatch',
+      'lark',
       'notify',
       'onOpenTarget',
       'pickFolder',
@@ -221,5 +223,18 @@ describe('preload 桥接契约（M5 三动词）', () => {
       error: { code: 'internal', message: '对话框不可用' },
     })
     await expect(workbench.pickFolder()).rejects.toThrow('对话框不可用')
+  })
+
+  it('lark：动作原样走飞书管理通道，解包成功信封 / 失败信封抛文案', async () => {
+    const { workbench } = await loadExposed()
+    ipcRendererMock.invoke.mockResolvedValueOnce({ ok: true, value: { ok: true } })
+    await expect(workbench.lark({ action: 'status' })).resolves.toEqual({ ok: true })
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(WORKBENCH_LARK_CHANNEL, { action: 'status' })
+
+    ipcRendererMock.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'internal', message: '飞书连接动作非法' },
+    })
+    await expect(workbench.lark({ action: 'logout' })).rejects.toThrow('飞书连接动作非法')
   })
 })

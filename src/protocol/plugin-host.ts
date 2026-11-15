@@ -17,9 +17,11 @@ import type { Card } from './entities'
 import type { RawEvent } from './inputs'
 import {
   CAPABILITIES,
+  CONFIG_OPTION_SOURCES,
   PLUGIN_KINDS,
   type Capability,
   type ConfigField,
+  type ConfigOptionSource,
   type PluginKind,
   type PluginManifest,
 } from './manifest'
@@ -106,31 +108,59 @@ function parseConfigField(value: unknown, index: number): ConfigField | string {
   if (record['required'] !== undefined && typeof record['required'] !== 'boolean') {
     return `config[${index}].required 非法`
   }
+  // `advanced` 只影响设置页摆放（默认收进「高级」），非法值同样整条拒绝
+  if (record['advanced'] !== undefined && typeof record['advanced'] !== 'boolean') {
+    return `config[${index}].advanced 非法`
+  }
+  const advanced = record['advanced'] === true ? { advanced: true } : {}
+  // `optionsFrom`：动态候选来源（设置页自己订阅内核视图），只有 select 用得上
+  const optionsFrom = record['optionsFrom']
+  if (
+    optionsFrom !== undefined &&
+    !(CONFIG_OPTION_SOURCES as readonly unknown[]).includes(optionsFrom)
+  ) {
+    return `config[${index}].optionsFrom 非法`
+  }
   if (type === 'text' || type === 'secret' || type === 'select') {
     const options = record['options']
     if (type === 'select') {
-      if (!Array.isArray(options) || options.length === 0 || options.length > 50) {
+      // 候选二选一：静态 options 或动态 optionsFrom，两边都给判非法
+      if (optionsFrom !== undefined) {
+        if (options !== undefined) return `config[${index}].options 与 optionsFrom 只能给一个`
+      } else if (!Array.isArray(options) || options.length === 0 || options.length > 50) {
         return `config[${index}].options 非法`
-      }
-      for (const option of options) {
-        if (typeof option !== 'string' || option.length === 0 || option.length > 80) {
-          return `config[${index}].options 非法`
+      } else {
+        for (const option of options) {
+          if (typeof option !== 'string' || option.length === 0 || option.length > 80) {
+            return `config[${index}].options 非法`
+          }
         }
       }
-    } else if (options !== undefined) {
-      return `config[${index}].options 仅 select 可用`
+    } else {
+      if (options !== undefined) return `config[${index}].options 仅 select 可用`
+      if (optionsFrom !== undefined) return `config[${index}].optionsFrom 仅 select 可用`
     }
     const defaultValue = record['default']
     if (defaultValue !== undefined && typeof defaultValue !== 'string') {
       return `config[${index}].default 非法`
     }
-    const field: ConfigField = { key, label, type, ...(help === undefined ? {} : { help }) }
+    const field: ConfigField = {
+      key,
+      label,
+      type,
+      ...advanced,
+      ...(help === undefined ? {} : { help }),
+    }
     if (record['required'] !== undefined) field.required = record['required'] === true
     if (defaultValue !== undefined) field.default = defaultValue
-    if (type === 'select') field.options = options as string[]
+    if (type === 'select') {
+      if (optionsFrom !== undefined) field.optionsFrom = optionsFrom as ConfigOptionSource
+      else field.options = options as string[]
+    }
     return field
   }
   if (record['options'] !== undefined) return `config[${index}].options 仅 select 可用`
+  if (optionsFrom !== undefined) return `config[${index}].optionsFrom 仅 select 可用`
   const defaultValue = record['default']
   if (type === 'number') {
     if (defaultValue !== undefined && typeof defaultValue !== 'number') {
@@ -144,6 +174,7 @@ function parseConfigField(value: unknown, index: number): ConfigField | string {
     key,
     label,
     type: numeric ? 'number' : 'boolean',
+    ...advanced,
     ...(help === undefined ? {} : { help }),
   }
   if (record['required'] !== undefined) field.required = record['required'] === true

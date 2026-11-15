@@ -6,9 +6,9 @@
  * 宿主把能力门控后的 Sdk 实例注入通道插件（`notify` 需 manifest 声明
  * `capabilities: ['notify']`，否则访问即抛 `capability_not_declared`）。
  *
- * 通道的边界：只负责「展示卡片 / 收回答 / 回报投递」，**不改卡片内容、不改派活**。
- * 卡片正文是智能体产出的文字，只能作为平台/通知 API 的参数，不得拼进命令行、脚本或
- * HTML/模板字符串。
+ * 通道的边界：只负责「展示卡片 / 收回答 / 回报投递 / 转发入站文字」，**不改卡片内容、
+ * 不决定派给谁**。卡片正文与入站文字都是外部文本，只能作为平台/通知 API 的参数，不得拼进
+ * 命令行、脚本或 HTML/模板字符串。
  */
 import type { Card } from './entities'
 import type { NotifyTarget } from './ipc'
@@ -25,8 +25,13 @@ type Id = string
  * - 3（M43）：`onCard(card, ref)` 的 `ref` + `answer(cardId, optionIndex, ref)` 与
  *   `{ changed, status }` 返回值——同一张卡会出现在多个通道，回答要能回到**每一处**并
  *   知道「是否已由别处答复」。
+ * - 4（M44）：`submit(text, ref)` + `onProgress(handler)`——IM 里发来的文字可以派活，
+ *   智能体每一轮的终态能回到同一个通道（派活目标与幂等键由宿主决定，通道只转发与回帖）。
+ * - 5（M45）：`submit(text, ref, agent)` 的第三参 + `SpawnOptions.envPatch`——一个通道可以
+ *   同时接多个飞书连接（多套应用 / 多套机器人），每条连接派给不同智能体，并且能把宿主环境里
+ *   别的 agent 留下的身份变量剔除，避免两个程序抢同一个应用的长连接。
  */
-export const CHANNEL_PORT_VERSION = 3
+export const CHANNEL_PORT_VERSION = 5
 
 /**
  * 投递重投曲线（M41）：第 N 次失败之后等多少毫秒再投下一次。
@@ -95,10 +100,14 @@ export interface ChannelSpawned {
  * `spawn` 的选项：与 `src/sdk/types` 的 `SpawnOptions` 同形。
  *
  * `env` 省略 = **继承宿主进程环境**（宿主保证）；显式给值则整体替换（不合并）。
+ * `envPatch` 是在继承（或 `env`）之上做增量增删（M45）：IM 通道要剔除别的 agent 留下的
+ * 身份变量（如 `HERMES_HOME`），否则 CLI 会切到对方的工作区，两个程序抢同一个应用的长连接。
  */
 export interface ChannelSpawnOptions {
   cwd?: string
   env?: Record<string, string | undefined>
+  /** 继承环境的增量修改：先删 `unset`，再覆盖 `set` */
+  envPatch?: { unset?: readonly string[]; set?: Record<string, string> }
   /** Windows 的 `.cmd` / `.bat` 需要经 shell 启动 */
   shell?: boolean
 }
@@ -167,6 +176,50 @@ export type ChannelAnswer = (
 ) => Promise<ChannelAnswerOutcome>
 
 /**
+ * 入站文本的提交结果（M44）：宿主派完活后给通道的一句回执。
+ *
+ * `receipt` 是**宿主写的文案**，通道只负责原样回帖（不通顺也该由宿主改，而不是每个通道各编一套）。
+ * `accepted=false` 时 `conversationId` 为 null，`receipt` 说明为什么没派出去（没配智能体 /
+ * 智能体不存在 / 内核拒绝），通道照样回帖——沉默是最差的反馈。
+ */
+export interface ChannelSubmitOutcome {
+  accepted: boolean
+  /** 派活用的会话 id（accepted=false 时为 null） */
+  conversationId: string | null
+  /** 回帖给发端的一句话 */
+  receipt: string
+}
+
+/**
+ * 入站文本回调（M44/M45）：`text` 是人在 IM 里发的那句话，`ref` 是平台消息引用（幂等键用）。
+ *
+ * 通道**不决定派给谁**：目标由宿主按通道配置选，通道拿到的只有「派出去了 / 没派出去」。
+ * `agent`（M45）只用于**多连接通道**给单条连接指定智能体（id 或名称）；省略或空串时
+ * 宿主沿用通道配置里的 `agent`。它仍然只是「谁来回」，命令与幂等键都在宿主手里。
+ */
+export type ChannelSubmit = (
+  text: string,
+  ref?: string,
+  agent?: string,
+) => Promise<ChannelSubmitOutcome>
+
+/**
+ * 进展（M44）：这个通道提交过的会话里，智能体说完了一轮（或这一轮失败）。
+ *
+ * 只带会话 id 与正文：通道据此把话回帖到发起那条消息下面，不参与判断这一轮算不算成功。
+ */
+export interface ChannelProgress {
+  conversationId: string
+  /** `reply` = 智能体的正常回复；`failed` = 这一轮失败的错误文案 */
+  kind: 'reply' | 'failed'
+  /** 正文（只作平台的文本参数，通道不改写、不拼进命令行） */
+  text: string
+}
+
+/** 进展订阅处理器（返回退订函数由上下文给出）。 */
+export type ChannelProgressHandler = (progress: ChannelProgress) => void
+
+/**
  * 通道插件启动上下文。
  *
  * - `onCard`：订阅卡片投递。宿主按注册表顺序分发**所有需要这个通道知道的版本**：
@@ -175,6 +228,8 @@ export type ChannelAnswer = (
  *   引用（从未发过为 null）——有它就走「原地更新」，没有就是第一次发。
  *   返回退订函数。启动时宿主还会补投尚未送达的 open 卡。
  * - `delivered` / `answer`：通道 → 宿主的两个回调；投递状态只经事实回写，不直写投影。
+ * - `submit`（M44）：入站文本 → 宿主派活（目标由宿主按通道配置决定），返回一句回执。
+ * - `onProgress`（M44）：订阅这个通道提交过的会话的每轮终态；返回退订函数。
  * - `signal`：宿主退出或停用通道时 abort。
  */
 export interface ChannelContext {
@@ -182,6 +237,8 @@ export interface ChannelContext {
   onCard(handler: (card: Card, ref: string | null) => void): () => void
   delivered: ChannelDelivered
   answer: ChannelAnswer
+  submit: ChannelSubmit
+  onProgress(handler: ChannelProgressHandler): () => void
   signal: AbortSignal
 }
 

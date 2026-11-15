@@ -23,6 +23,18 @@ const buttonVariants = cva(
           'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
+        /**
+         * 项目覆盖层：行内文字操作（编辑 / 删除 / 取消 / 展开这类）。
+         *
+         * 上游 `ghost` 只在 hover 时给底色，静止态与正文一模一样——鼠标不扫过去
+         * 就看不出是按钮（SPEC-ui §12）。`quiet` 保留 ghost 的轻量观感，但**静止态
+         * 就有边界**：`muted` 底 + 常规描边（暗色下 `muted` 与 `card` 的亮度比只有
+         * 1.07:1，光靠底色看不出来，**线**才是可辨识的那一层），hover 再到 `accent`。
+         */
+        quiet:
+          'border border-border bg-muted text-foreground hover:bg-accent hover:text-accent-foreground',
+        'quiet-destructive':
+          'border border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive',
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {

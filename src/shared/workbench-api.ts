@@ -6,6 +6,7 @@
  */
 import type { Command } from '../protocol/commands'
 import type { CommandDispatchResult, KernelEvent, OpenTarget } from '../protocol/ipc'
+import type { LarkAdminAction, LarkAdminResult } from '../protocol/ipc'
 import type { ViewId, ViewParams, ViewResult } from '../protocol/views'
 
 export type { OpenTarget }
@@ -29,6 +30,13 @@ export interface WorkbenchApi {
    * 返回绝对路径；用户取消返回 null。
    */
   pickFolder(): Promise<string | null>
+  /**
+   * 飞书连接管理（M45）：探测本机 `lark-cli` 的工作区/应用/登录状态，新建 profile，设备码登录。
+   *
+   * 只给设置页用：不写工作台事实日志（本机 CLI 状态不是业务真相），app secret 单向进去、
+   * 不回读。动作与返回值见 `protocol/ipc` 的 `LarkAdminAction`。
+   */
+  lark<A extends LarkAdminAction>(action: A): Promise<LarkAdminResult<A>>
   /** shell 的通用系统通知（pomodoro 等 app 用） */
   notify(title: string, body?: string): void
 }

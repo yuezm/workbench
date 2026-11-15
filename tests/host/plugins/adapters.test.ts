@@ -199,6 +199,8 @@ function channelHarness(): ChannelHarness {
       },
       delivered,
       answer,
+      submit: async () => ({ accepted: false, conversationId: null, receipt: '测试不派活' }),
+      onProgress: () => () => undefined,
       signal: controller.signal,
     },
   }

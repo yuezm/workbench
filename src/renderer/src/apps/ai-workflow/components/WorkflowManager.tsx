@@ -209,13 +209,12 @@ export function WorkflowManager(): ReactElement {
                   </span>
                 </button>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => openEditor(w)}>
+                  <Button variant="quiet" size="sm" onClick={() => openEditor(w)}>
                     编辑
                   </Button>
                   <Button
-                    variant="ghost"
+                    variant="quiet-destructive"
                     size="sm"
-                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     aria-label={`删除工作流 ${w.name}`}
                     onClick={() => void remove(w.id)}
                   >

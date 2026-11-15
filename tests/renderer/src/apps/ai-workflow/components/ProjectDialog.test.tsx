@@ -33,6 +33,8 @@ function stubBridge(pickFolder: () => Promise<string | null>): void {
     // 落点管道（系统通知 → shell）与本组件无关：装一个空订阅，真被调到也不影响选择文件夹
     onOpenTarget: () => () => {},
     pickFolder,
+    // M45：飞书连接管理面板与本组件无关，被调到就算用例写错了
+    lark: () => Promise.reject(new Error('本组件不用 lark')),
     notify: () => {},
   }
   window.workbench = api

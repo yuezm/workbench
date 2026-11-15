@@ -29,12 +29,33 @@ export interface LarkTarget {
   id: string
 }
 
+/**
+ * 必须从子进程环境里剔除的「别的 agent 的身份」变量（M45）。
+ *
+ * `lark-cli` 会按 `HERMES_HOME` / `OPENCLAW_HOME` 自动把当前会话绑定到对方的工作区
+ * （`lark-cli config bind --source hermes`）——工作台原样继承宿主环境时看到的其实是
+ * hermes 的应用与登录态：两个程序争同一个飞书应用的事件长连接（后启动的一方
+ * `failed_precondition`），发出去的消息也落在对方的机器人上。
+ *
+ * 剔除后 CLI 落回本机默认工作区（`~/.lark-cli/config.json`），再配合 `--profile` 就是
+ * 一套**与别的 agent 完全分开**的应用与事件总线。
+ */
+export const LARK_ENV_UNSET = ['HERMES_HOME', 'OPENCLAW_HOME', 'LARK_CHANNEL'] as const
+
+/** 子进程环境的增量修改（与 `protocol/channels` 的 `envPatch` 同形）。 */
+export interface LarkEnvPatch {
+  unset?: readonly string[]
+  set?: Record<string, string>
+}
+
 export interface LarkOptions {
   sdk: ChannelSdk
   /** CLI 命令名或绝对路径（默认 `lark-cli`） */
   program: string
   log: (line: string) => void
   timeoutMs?: number
+  /** 继承环境的增删（缺省 `{ unset: LARK_ENV_UNSET }`：不继承别的 agent 的工作区） */
+  envPatch?: LarkEnvPatch
 }
 
 export interface Lark {
@@ -44,8 +65,15 @@ export interface Lark {
   patch(messageId: string, cardJson: string): Promise<void>
   /** 当前登录人的 open_id（私聊默认接收人） */
   owner(): Promise<string>
+  /** 回帖到某条消息下面（M44：入站派活的回执与进展） */
+  reply(messageId: string, body: string): Promise<void>
   /** 订阅卡片点击：每行事件交给 `onEvent`；进程退出调用 `onExit`；返回停止函数 */
   watchClicks(
+    onEvent: (event: Record<string, unknown>) => void,
+    onExit: (reason: string) => void,
+  ): () => void
+  /** 订阅入站消息（`im.message.receive_v1`），形状同上（M44） */
+  watchMessages(
     onEvent: (event: Record<string, unknown>) => void,
     onExit: (reason: string) => void,
   ): () => void
@@ -60,6 +88,22 @@ const tail = (text: string, limit: number): string =>
 /** Windows 下 `.cmd` / `.bat` 需要经 shell 启动（与宿主 `needsShell` 同判据）。 */
 export const needsShell = (file: string): boolean => /\.(cmd|bat)$/i.test(file)
 
+/**
+ * 配置里的 `lark` 允许带前置参数（M44）：`lark-cli --profile work2`。
+ *
+ * 为什么要这个：飞书**一个应用全局只允许一处事件长连接**，入站想跟别的工具并存就得换一个
+ * profile（另一套应用凭证）。只解析出「命令 + 前置参数」，其余 argv 由插件自己拼。
+ */
+export function programArgs(program: string): { command: string; prefix: string[] } {
+  const parts = program
+    .trim()
+    .split(/\s+/u)
+    .filter((part) => part !== '')
+  if (parts.length === 0) return { command: program, prefix: [] }
+  const [command, ...prefix] = parts
+  return { command, prefix }
+}
+
 /** 一次性的 CLI 调用：收集 stdout，非零退出 / 超时 / 启动失败都以 reject 表达。 */
 function runOnce(
   sdk: ChannelSdk,
@@ -67,6 +111,7 @@ function runOnce(
   args: string[],
   stdin: string | undefined,
   timeoutMs: number,
+  envPatch: LarkEnvPatch,
 ): Promise<string> {
   const resolved = sdk.process.resolve(program)
   if (resolved.path === null) {
@@ -75,7 +120,10 @@ function runOnce(
 
   let child: ChannelSpawned
   try {
-    child = sdk.process.spawn(resolved.path, args, { shell: needsShell(resolved.path) })
+    child = sdk.process.spawn(resolved.path, args, {
+      shell: needsShell(resolved.path),
+      envPatch,
+    })
   } catch (error) {
     return Promise.reject(error)
   }
@@ -184,9 +232,13 @@ export function ownerOf(status: Record<string, unknown>): string | null {
 export function createLark(options: LarkOptions): Lark {
   const { sdk, program, log } = options
   const timeoutMs = options.timeoutMs ?? LARK_TIMEOUT_MS
+  // M45：默认不继承别的 agent 的工作区变量（否则 CLI 会切到 hermes 的应用上）
+  const envPatch: LarkEnvPatch = options.envPatch ?? { unset: LARK_ENV_UNSET }
+  // `lark-cli --profile work2`：命令与前置参数分开，其余 argv 由各方法自己拼
+  const { command, prefix } = programArgs(program)
 
   const runJson = async (args: string[], stdin?: string): Promise<Record<string, unknown>> => {
-    const output = await runOnce(sdk, program, args, stdin, timeoutMs)
+    const output = await runOnce(sdk, command, [...prefix, ...args], stdin, timeoutMs, envPatch)
     return parseOutput(program, args, output)
   }
 
@@ -227,55 +279,84 @@ export function createLark(options: LarkOptions): Lark {
       return openId
     },
 
-    watchClicks(onEvent, onExit) {
-      const resolved = sdk.process.resolve(program)
-      if (resolved.path === null) {
-        onExit(`找不到 ${program}：${resolved.error ?? '未在 PATH 中'}`)
-        return () => undefined
-      }
-
-      let child: ChannelSpawned
-      try {
-        child = sdk.process.spawn(
-          resolved.path,
-          ['event', 'consume', 'card.action.trigger', '--as', 'bot'],
-          { shell: needsShell(resolved.path) },
-        )
-      } catch (error) {
-        onExit(errMsg(error))
-        return () => undefined
-      }
-
-      // 一行一个 JSON：非 JSON 行是 CLI 的诊断输出，只记日志不当事件
-      const reader = createLineReader((line) => {
-        const event = parseFrame(line)
-        if (event === null) {
-          log(`[lark-cli] ${tail(line, ERROR_TAIL)}`)
-          return
-        }
-        onEvent(event)
-      })
-      child.stdout?.on('data', (chunk: unknown) => {
-        reader.push(String(chunk))
-      })
-      child.stderr?.on('data', (chunk: unknown) => {
-        const text = String(chunk).trim()
-        if (text !== '') log(`[lark-cli] ${tail(text, ERROR_TAIL)}`)
-      })
-      // stop() 之后的退出与新进程无关：不回报，否则宿主会重拉一个刚被停掉的监听
-      let stopped = false
-      child.onError((error) => {
-        if (!stopped) onExit(errMsg(error))
-      })
-      child.onClose((code) => {
-        reader.flush()
-        if (!stopped) onExit(`监听进程退出（退出码 ${String(code)}）`)
-      })
-
-      return () => {
-        stopped = true
-        child.kill('SIGTERM')
-      }
+    async reply(messageId, body) {
+      // 正文走 `--content` 的 JSON（与发卡片同口径）。`+messages-reply` 没有 stdin 形式，
+      // JSON 只能进 argv：Windows 上这个参数能活着到 CLI，靠的是宿主 `defaultSpawn` 把
+      // `.cmd` 垫片折回「node + 脚本」——经 cmd.exe 的话双引号会被吃（见 `host/process.ts`）。
+      await runJson([
+        'im',
+        '+messages-reply',
+        '--message-id',
+        messageId,
+        '--as',
+        'bot',
+        '--msg-type',
+        'text',
+        '--content',
+        JSON.stringify({ text: body }),
+      ])
     },
+
+    watchClicks: (onEvent, onExit) => watch('card.action.trigger', onEvent, onExit),
+    watchMessages: (onEvent, onExit) => watch('im.message.receive_v1', onEvent, onExit),
+  }
+
+  /**
+   * 订阅一个事件键的长连接消费进程（M44：卡片点击与入站消息共用这一段）。
+   *
+   * 一行一个 JSON：非 JSON 行是 CLI 的诊断输出，只记日志不当事件。`stop()` 之后的退出
+   * 与新进程无关——不回报，否则宿主会重拉一个刚被停掉的监听。
+   */
+  function watch(
+    eventKey: string,
+    onEvent: (event: Record<string, unknown>) => void,
+    onExit: (reason: string) => void,
+  ): () => void {
+    const resolved = sdk.process.resolve(command)
+    if (resolved.path === null) {
+      onExit(`找不到 ${command}：${resolved.error ?? '未在 PATH 中'}`)
+      return () => undefined
+    }
+
+    let child: ChannelSpawned
+    try {
+      child = sdk.process.spawn(
+        resolved.path,
+        [...prefix, 'event', 'consume', eventKey, '--as', 'bot'],
+        { shell: needsShell(resolved.path), envPatch },
+      )
+    } catch (error) {
+      onExit(errMsg(error))
+      return () => undefined
+    }
+
+    const reader = createLineReader((line) => {
+      const event = parseFrame(line)
+      if (event === null) {
+        log(`[lark-cli] ${tail(line, ERROR_TAIL)}`)
+        return
+      }
+      onEvent(event)
+    })
+    child.stdout?.on('data', (chunk: unknown) => {
+      reader.push(String(chunk))
+    })
+    child.stderr?.on('data', (chunk: unknown) => {
+      const text = String(chunk).trim()
+      if (text !== '') log(`[lark-cli] ${tail(text, ERROR_TAIL)}`)
+    })
+    let stopped = false
+    child.onError((error) => {
+      if (!stopped) onExit(errMsg(error))
+    })
+    child.onClose((code) => {
+      reader.flush()
+      if (!stopped) onExit(`监听进程退出（退出码 ${String(code)}）`)
+    })
+
+    return () => {
+      stopped = true
+      child.kill('SIGTERM')
+    }
   }
 }

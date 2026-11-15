@@ -9,6 +9,8 @@ import {
   type PluginSecrets,
   type SecretCipher,
 } from '../../../src/host/plugins/settings'
+import { readFeishuConnections } from '../../../src/plugins/channels/feishu'
+import { feishuManifest } from '../../../src/plugins/channels/feishu/manifest'
 
 /**
  * 插件 secret 存储与配置合并（M7 D3/D5）。
@@ -261,6 +263,47 @@ describe('resolvePluginConfig', () => {
     })
   })
 
+  it('内置插件：面板独占键（manifest 不声明）照样下发，声明字段照样按类型收', () => {
+    // 飞书通道的 `connections` 只归连接面板写，不进 manifest 也不进通用表单；
+    // 它必须能到 `sdk.config()`，否则面板写进去、插件读不到（连接与默认智能体一起落空）。
+    const panelOnly = {
+      id: 'feishu',
+      kind: 'channel',
+      name: '飞书',
+      version: '1.0.0',
+      capabilities: ['spawn'],
+      config: [],
+    } as unknown as PluginManifest
+    const setting = settingOf({
+      id: 'feishu',
+      kind: 'channel',
+      granted: ['spawn'],
+      config: { connections: '[{"label":"工作台助手","profile":"feishu_workbench"}]' },
+    })
+    expect(resolvePluginConfig(panelOnly, setting, {}, true)).toEqual({
+      connections: '[{"label":"工作台助手","profile":"feishu_workbench"}]',
+    })
+  })
+
+  it('内置插件：未声明的非标量（脏投影里的对象 / 数组）不下发', () => {
+    const bare: PluginManifest = {
+      id: 'feishu',
+      kind: 'channel',
+      name: '飞书',
+      version: '1.0.0',
+      capabilities: [],
+      config: [],
+    }
+    const setting = settingOf({
+      id: 'feishu',
+      config: { broken: { a: 1 }, list: ['a'], empty: null } as unknown as Record<
+        string,
+        string | number | boolean
+      >,
+    })
+    expect(resolvePluginConfig(bare, setting, {}, true)).toEqual({})
+  })
+
   it('外部插件授权后合并 secret；设置里的 secret 字段值不进 config', () => {
     const setting = settingOf({ config: { secret: 'from-setting' } })
     expect(resolvePluginConfig(manifest, setting, { secret: 'from-cipher' }, false)).toEqual({
@@ -294,6 +337,35 @@ describe('resolvePluginConfig', () => {
       'secret',
     )
     expect(resolvePluginConfig(manifest, settingOf(), {}, false)).not.toHaveProperty('secret')
+  })
+
+  it('飞书：面板写的 connections 能穿到通道（profile 与默认智能体不丢）', () => {
+    // 端到端锁这一环：设置页「飞书连接」面板只写 `connections`（manifest 不声明它），
+    // 若它到不了 `sdk.config()`，通道就退回 legacy 单连接：profile 丢（跑到别的应用上）、
+    // `agent` 丢（入站监听不启动）——飞书里发消息，工作台一声不响。
+    const setting = settingOf({
+      id: 'feishu',
+      kind: 'channel',
+      granted: ['spawn'],
+      config: {
+        connections: JSON.stringify([
+          {
+            label: '岳智明的工作台助手',
+            profile: 'feishu_workbench',
+            agent: '21eb6923-9716-4e47-a04f-1b8bea00e241',
+          },
+        ]),
+      },
+    })
+    const config = resolvePluginConfig(feishuManifest, setting, {}, true)
+    expect(readFeishuConnections(config)).toEqual([
+      expect.objectContaining({
+        label: '岳智明的工作台助手',
+        profile: 'feishu_workbench',
+        program: 'lark-cli --profile feishu_workbench',
+        agent: '21eb6923-9716-4e47-a04f-1b8bea00e241',
+      }),
+    ])
   })
 
   it('manifest 没有 config 字段时返回空对象', () => {

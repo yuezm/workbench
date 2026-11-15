@@ -17,6 +17,8 @@
 //   6. 前景对比度下限：foreground≥12 / muted-foreground≥8 / faint-foreground≥4.5 /
 //      brand≥4.5（对 card 与 muted 两个底色；light / dark 两套主题分别校验）
 //   7. 表单校验静默失败守卫：`if (!x.trim()) return` 这类「点了没反应」
+//   8. 文字按钮静止态可辨认：`ghost` 只能在图标按钮或自带边界（border）的按钮上用，
+//      文字型行内操作走 `quiet` / `quiet-destructive`（SPEC-ui §12）
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
@@ -414,10 +416,63 @@ const orphanTokensIn = (line) => {
   return found
 }
 
+/**
+ * 找到文件里每个 `<Button …>` 的整段源码（含子元素），供「文字按钮可辨认」检查用。
+ *
+ * 只需要粗粒度配对：跳过引号里的内容（className 里可能有 `>`），开始标签遇到 `>` 收尾，
+ * 自闭合（`/>`）就地结束，否则找到配套的 `</Button>`。JSX 里 Button 不会嵌套 Button。
+ */
+const buttonBlocks = (source) => {
+  const blocks = []
+  for (const opening of source.matchAll(/<Button\b/g)) {
+    const start = opening.index
+    let i = start + opening[0].length
+    let quote = null
+    let tagEnd = -1
+    for (; i < source.length; i += 1) {
+      const ch = source[i]
+      if (quote !== null) {
+        if (ch === '\\') i += 1
+        else if (ch === quote) quote = null
+        continue
+      }
+      if (ch === '"' || ch === "'" || ch === '`') quote = ch
+      else if (ch === '>') {
+        tagEnd = i
+        break
+      }
+    }
+    if (tagEnd === -1) continue
+    const selfClosing = source.slice(start, tagEnd).trimEnd().endsWith('/')
+    const close = selfClosing ? tagEnd : source.indexOf('</Button>', tagEnd)
+    const end = selfClosing ? tagEnd + 1 : close === -1 ? source.length : close + '</Button>'.length
+    blocks.push({ start, end, text: source.slice(start, end) })
+  }
+  return blocks
+}
+
+/** 图标按钮或自带可见边界的按钮：`ghost` 在这两种用法上合法 */
+const GHOST_OK = /<svg|Icon\b|size="icon|border/
+
 for (const file of walk(RENDERER)) {
   const path = rel(file)
   const exempt = TYPE_EXEMPT.has(path)
   const source = readFileSync(file, 'utf8')
+  const lineAt = (offset) => source.slice(0, offset).split('\n').length
+  for (const block of buttonBlocks(source)) {
+    if (!block.text.includes('variant="ghost"')) continue
+    if (GHOST_OK.test(block.text)) continue
+    const text = block.text
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 40)
+    flag(
+      'invisible-text-button',
+      path,
+      `L${lineAt(block.start)}: 文字按钮「${text}」用 ghost 没有静止态边界`,
+    )
+  }
   source.split('\n').forEach((line, index) => {
     const at = `L${index + 1}: ${line.trim().slice(0, 100)}`
     if (/\brounded-(3xl|4xl)\b/.test(line)) flag('radius-out-of-scale', path, at)

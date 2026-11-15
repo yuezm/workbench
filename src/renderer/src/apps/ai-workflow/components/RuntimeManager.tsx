@@ -241,7 +241,7 @@ export function RuntimeManager(): ReactElement {
           <ScanIcon className="text-brand" />
           <h3 className="text-base font-medium text-foreground">已安装的运行时</h3>
           <span className={cn(badgeCls, 'ml-auto')}>{detected.length}</span>
-          <Button type="button" variant="ghost" size="sm" disabled={detecting} onClick={rescan}>
+          <Button type="button" variant="quiet" size="sm" disabled={detecting} onClick={rescan}>
             {detecting ? '扫描中…' : '重新扫描'}
           </Button>
         </div>
@@ -283,7 +283,7 @@ export function RuntimeManager(): ReactElement {
                     <span className="flex items-center gap-2">
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="quiet"
                         size="sm"
                         disabled
                         title="当前版本只接入了 DSH 协议，暂时无法把该 CLI 作为运行时接入"
@@ -397,7 +397,7 @@ export function RuntimeManager(): ReactElement {
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     size="sm"
                     aria-label={`测试运行时 ${r.name}`}
                     disabled={probing}
@@ -407,7 +407,7 @@ export function RuntimeManager(): ReactElement {
                   </Button>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     size="sm"
                     aria-label={`编辑运行时 ${r.name}`}
                     onClick={() => setDialog({ runtime: r, initial: null })}
@@ -420,9 +420,8 @@ export function RuntimeManager(): ReactElement {
                   )}
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet-destructive"
                     size="sm"
-                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     aria-label={`删除运行时 ${r.name}`}
                     disabled={deletingId === r.id}
                     onClick={() => void remove(r.id)}

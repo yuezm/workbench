@@ -151,6 +151,7 @@
 | `Segmented`     | 分段控件，上游无对应物                                                                                                             |
 | `ThemeSwitcher` | 主题切换器：图标按钮 + hover 浮层（三个图标），上游无对应物                                                                        |
 | `FormError`     | 错误条含 `role="alert"` + `onDismiss` 关闭入口，项目多处复用                                                                       |
+| `Toast`         | 轻提示：`role="status"` + `aria-live="polite"` + 约 2.4s 自动消失，动作成功 / 知会走它；错误仍走 `FormError`（§11）                |
 | `ErrorBoundary` | 渲染层兜底，上游无对应物                                                                                                           |
 | `SortHandle`    | 拖拽抓手：拖拽本身不可键盘操作，抓手聚焦后 ↑ / ↓ 挪一格（到头的方向不传回调）。上游无对应物，三个清单共用                          |
 
@@ -158,14 +159,14 @@
 
 ### 组件 API 速查
 
-| 组件       | 上游形态要点                                                                                                                                                  |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Button`   | `variant`: `default` / `secondary` / `outline` / `ghost` / `destructive` / `link`；`size`: `default` / `xs` / `sm` / `lg` / `icon` 系列；`asChild` 挂到子元素 |
-| `Input`    | 原生 `input` 透传，`h-9`，非法值走 `aria-invalid:border-destructive`                                                                                          |
-| `Textarea` | 原生 `textarea` 透传，`min-h-16` + `field-sizing-content`                                                                                                     |
-| `Label`    | Radix `Label`，`htmlFor` 关联控件                                                                                                                             |
-| `Select`   | 复合：`Select` > `SelectTrigger` > `SelectValue` + `SelectContent` > `SelectItem`                                                                             |
-| `Dialog`   | 复合：`Dialog` > `DialogContent` > `DialogHeader` / `DialogTitle` / `DialogDescription` / `DialogFooter`                                                      |
+| 组件       | 上游形态要点                                                                                                                                                                                  |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Button`   | `variant`: `default` / `secondary` / `outline` / `ghost` / `quiet` / `quiet-destructive` / `destructive` / `link`；`size`: `default` / `xs` / `sm` / `lg` / `icon` 系列；`asChild` 挂到子元素 |
+| `Input`    | 原生 `input` 透传，`h-9`，非法值走 `aria-invalid:border-destructive`                                                                                                                          |
+| `Textarea` | 原生 `textarea` 透传，`min-h-16` + `field-sizing-content`                                                                                                                                     |
+| `Label`    | Radix `Label`，`htmlFor` 关联控件                                                                                                                                                             |
+| `Select`   | 复合：`Select` > `SelectTrigger` > `SelectValue` + `SelectContent` > `SelectItem`                                                                                                             |
+| `Dialog`   | 复合：`Dialog` > `DialogContent` > `DialogHeader` / `DialogTitle` / `DialogDescription` / `DialogFooter`                                                                                      |
 
 ### Select 的空值项（Radix 语义，踩过的坑）
 
@@ -252,10 +253,10 @@ Radix `DialogContent` 是真模态：打开时 `hideOthers` 把背景整片标 `
 ## 9. 检查方式
 
 ```
-pnpm check:ui   # 圆角越界 / rounded-full 误用 / 玻璃拟态 / 调色板外色值（#hex 与内置色类名）/ 圆角刻度上限 / 前景对比度 / 字阶越界 / 静默校验守卫
+pnpm check:ui   # 圆角越界 / rounded-full 误用 / 玻璃拟态 / 调色板外色值（#hex 与内置色类名）/ 圆角刻度上限 / 前景对比度 / 字阶越界 / 静默校验守卫 / 文字按钮可辨识
 ```
 
-机械规则（对应 §11）：`off-palette-utility`（`text-red-300`、`bg-amber-400/10` 这类 Tailwind 内置色一律拦下，只认 token）与 `silent-validation-guard`（`if (!x.trim()) return` —— 点了没反应的静默校验）。
+机械规则（对应 §11）：`off-palette-utility`（`text-red-300`、`bg-amber-400/10` 这类 Tailwind 内置色一律拦下，只认 token）与 `silent-validation-guard`（`if (!x.trim()) return` —— 点了没反应的静默校验）；对应 §12：`invisible-text-button`（纯文字的 `ghost` 按钮 —— 静止态看不出能点）。
 
 `check:ui` 已并入 `pnpm check:fast` 与 pre-commit。它只拦机械可判定的部分；下面这些靠 review：
 
@@ -283,18 +284,42 @@ pnpm check:ui   # 圆角越界 / rounded-full 误用 / 玻璃拟态 / 调色板�
 
 > 本节由 `Field` 覆盖层承载（§4）：上游 `field.tsx` 无必填星号与 `role="alert"` 错误语义，故 `Field` 保留自研 API。
 
-| 场景             | 必须怎么做                                                                                                            |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 必填字段         | `Field required`（红 `*` + 读屏「必填」）；不靠「按钮灰着不响」表达必填                                               |
-| 空值提交         | `role="alert"` 的就地文案 + 焦点移回出错字段（`aria-invalid`）；禁止 `if (!x) return` 静默返回                        |
-| 字段级错误       | `Field error={...}`                                                                                                   |
-| 表单 / 命令错误  | `<FormError message={...} />`；按钮被拒、宿主探测失败等都在弹窗就地展示，弹窗不关、输入不丢                           |
-| 页面级错误条     | 只放整体状态：视图读失败（不可关）、跨组件写失败（可关）；不放用户能在字段里改的错误                                  |
-| 同一错误的播报   | 一条错误只挂一处。`cards.open` 这类视图错误由页面级错误条播报，通知条自身不重复                                       |
-| 文本字段         | 提交前 `trim()`                                                                                                       |
-| 数字 / JSON 字段 | 非法给文案，不静默回落成默认值（`Number(x) \|\| 1` 是静默改写用户输入）                                               |
-| 禁用按钮         | 必须伴随可见原因：空态提示行、前置条件说明，或已写明的必填错误                                                        |
-| 颜色             | 只用语义 token（`text-destructive` / `border-destructive/30` / `bg-destructive/10`），不写 `red-400` 一类调色板外色值 |
+| 场景             | 必须怎么做                                                                                                                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 必填字段         | `Field required`（红 `*` + 读屏「必填」）；不靠「按钮灰着不响」表达必填                                                                                                                   |
+| 空值提交         | `role="alert"` 的就地文案 + 焦点移回出错字段（`aria-invalid`）；禁止 `if (!x) return` 静默返回                                                                                            |
+| 字段级错误       | `Field error={...}`                                                                                                                                                                       |
+| 表单 / 命令错误  | `<FormError message={...} />`；按钮被拒、宿主探测失败等都在弹窗就地展示，弹窗不关、输入不丢                                                                                               |
+| 动作成功         | `toast('已保存 1 条连接')`：`role="status"`、约 2.4s 自动消失，不占版面、不用人关。**不用 `FormError`**——红底 + `role="alert"` 会给一件已经做完的事加上「出错了」和「必须处理」两层假语义 |
+| 页面级错误条     | 只放整体状态：视图读失败（不可关）、跨组件写失败（可关）；不放用户能在字段里改的错误                                                                                                      |
+| 同一错误的播报   | 一条错误只挂一处。`cards.open` 这类视图错误由页面级错误条播报，通知条自身不重复                                                                                                           |
+| 文本字段         | 提交前 `trim()`                                                                                                                                                                           |
+| 数字 / JSON 字段 | 非法给文案，不静默回落成默认值（`Number(x) \|\| 1` 是静默改写用户输入）                                                                                                                   |
+| 禁用按钮         | 必须伴随可见原因：空态提示行、前置条件说明，或已写明的必填错误                                                                                                                            |
+| 颜色             | 只用语义 token（`text-destructive` / `border-destructive/30` / `bg-destructive/10`），不写 `red-400` 一类调色板外色值                                                                     |
 
 写测试时，「空值提交」用例要断言两件事：**没有发命令** + **出现了可见提示**。
 只断言「没提交」等于把静默失败固化成期望行为。
+
+## 12. 可点性（静止态必须看得出是按钮）
+
+2026-11-15 起为硬规则。由来：行内操作（编辑 / 删除 / 取消 / 展开 / 立即运行）一律用上游 `ghost`——静止态与正文一模一样，只有鼠标扫过去才显出底色，用户根本不知道那行字能点。**「hover 才知道能点」是缺陷，不是克制。**
+
+| 变体                | 用在哪                                                          | 静止态                                                 |
+| ------------------- | --------------------------------------------------------------- | ------------------------------------------------------ |
+| `default`           | 一屏一个主操作（创建 / 保存 / 发送）                            | 主色实底                                               |
+| `secondary`         | 次操作（与主操作并排，但不是主路径）                            | `secondary` 实底                                       |
+| `outline`           | 需要靠描边表达边界的按钮、工具按钮                              | 描边 + 底色                                            |
+| `quiet`             | **行内文字操作**（编辑 / 删除 / 取消 / 展开 / 重新扫描 / 返回） | `muted` 底 + 常规描边，hover 到 `accent`               |
+| `quiet-destructive` | 行内危险文字操作（删除 / 移除）                                 | `destructive/10` 底 + `destructive/30` 描边 + 危险文字 |
+| `ghost`             | **只给图标按钮**，或自带可见边界（`border`）的文字按钮          | 无底色（图标靠形识别，可接受）                         |
+| `link`              | 正文里的行内跳转（外链、文档）                                  | 主题色文字                                             |
+
+规则：
+
+- **文字按钮静止态必须有底色或描边。** 纯文字的 `ghost` 会被 `check:ui` 的 `invisible-text-button` 拦下（脚本按整块 `<Button …>…</Button>` 判断：含 `svg` / `Icon` / `size="icon*"` / `border` 之一即合法）。
+- 行内操作用 `quiet`，不用 `outline`：两者都有描边，差别在 `quiet` 底是 `muted`、不投影、`sm`/`xs` 高，落在列表行里不抢内容；`outline` 留给"按下一个控件"的位置（工具条、弹窗底部的次操作）。
+- **光靠底色不算可辨认**：暗色下 `muted` 与 `card` 的亮度比只有 1.07:1（亮色 1.13:1），人眼几乎分不出相邻两块深色。可辨识的那一层是**描边**，底色只让块有点体积。想再压暗就走 `--muted` 的 token 值，不要在调用点叠 `bg-black/*`。
+- 危险文字一律 `quiet-destructive`，不再手写 `className="text-destructive hover:bg-destructive/10 hover:text-destructive"`——同一串样式散在十几个文件里，改一次就漂一次。
+- 弹窗底部「取消」用 `quiet`，与 `default` 的「保存 / 创建」形成主次；两边都实底太重，两边都没底又回到旧毛病。
+- 图标按钮不受此限：位置与形状已经说了它能点，hover 出底色是常规交互。

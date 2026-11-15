@@ -314,7 +314,7 @@ export function RulesManager(): ReactElement {
                   </label>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     size="sm"
                     aria-label={`立即运行 ${rule.name}`}
                     disabled={busy || runningId !== null || !rule.enabled}
@@ -324,7 +324,7 @@ export function RulesManager(): ReactElement {
                   </Button>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet"
                     size="sm"
                     aria-label={`编辑规则 ${rule.name}`}
                     disabled={busy}
@@ -334,9 +334,8 @@ export function RulesManager(): ReactElement {
                   </Button>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="quiet-destructive"
                     size="sm"
-                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                     aria-label={`删除规则 ${rule.name}`}
                     disabled={busy}
                     onClick={() => remove(rule)}

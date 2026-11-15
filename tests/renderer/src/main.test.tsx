@@ -34,6 +34,8 @@ function fakeBridge(): WorkbenchApi {
     onOpenTarget: onOpenTargetMock,
     // M10：项目文件夹选择器（这里只保证桥接形状完整，不实际弹框）
     pickFolder: vi.fn(async () => null),
+    // M45：飞书连接管理（这里只保证桥接形状完整，不实际跑 CLI）
+    lark: vi.fn(),
     notify: vi.fn(),
   }
 }

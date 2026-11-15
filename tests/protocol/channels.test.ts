@@ -82,14 +82,16 @@ function fakeHub(signal: AbortSignal): {
         answers.push([cardId, optionIndex])
         return { changed: true, status: 'answered' }
       },
+      submit: async () => ({ accepted: false, conversationId: null, receipt: '契约测试不派活' }),
+      onProgress: () => () => undefined,
       signal,
     },
   }
 }
 
 describe('protocol/channels', () => {
-  it('通道端口版本固定为 3（M43：onCard 带 ref、answer 带 ref 与 outcome）', () => {
-    expect(CHANNEL_PORT_VERSION).toBe(3)
+  it('通道端口版本固定为 5（M45：按连接指定智能体 + envPatch）', () => {
+    expect(CHANNEL_PORT_VERSION).toBe(5)
   })
 
   it('start 收到上下文：onCard 收卡片与 ref、delivered / answer 回传参数、dispose 可重复调用', async () => {

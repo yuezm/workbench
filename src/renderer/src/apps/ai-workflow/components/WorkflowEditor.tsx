@@ -895,13 +895,7 @@ export function WorkflowEditor({
               </span>
             )}
             {!builtin && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={removeSelected}
-              >
+              <Button type="button" variant="quiet-destructive" size="sm" onClick={removeSelected}>
                 删除
               </Button>
             )}
@@ -1261,7 +1255,7 @@ export function WorkflowEditor({
                     </p>
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="quiet"
                       size="sm"
                       disabled={handoffWorkflows.length === 0}
                       aria-label={`阶段${n}新增派单`}
@@ -1370,7 +1364,7 @@ export function WorkflowEditor({
                       </Field>
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="quiet"
                         size="sm"
                         aria-label={`阶段${n}删除派单${hi + 1}`}
                         onClick={() =>
@@ -1465,7 +1459,7 @@ export function WorkflowEditor({
         <Button type="submit" variant="default" size="sm" disabled={saving} className="ml-auto">
           {saving ? '保存中…' : '保存'}
         </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+        <Button type="button" variant="quiet" size="sm" onClick={onCancel}>
           取消
         </Button>
       </div>

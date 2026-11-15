@@ -260,6 +260,8 @@ describe('webhook 通道：未配置不投递', () => {
         return Promise.resolve()
       },
       answer: () => Promise.resolve({ changed: true, status: 'answered' }),
+      submit: async () => ({ accepted: false, conversationId: null, receipt: '测试不派活' }),
+      onProgress: () => () => undefined,
       signal: new AbortController().signal,
     }
     const dispose = await webhookChannel.start(ctx)
@@ -326,6 +328,8 @@ describe('webhook 通道：未配置不投递', () => {
       },
       delivered: () => Promise.resolve(),
       answer: () => Promise.resolve({ changed: true, status: 'answered' }),
+      submit: async () => ({ accepted: false, conversationId: null, receipt: '测试不派活' }),
+      onProgress: () => () => undefined,
       signal: controller.signal,
     }
 

@@ -4,10 +4,12 @@ import type { NotifyPayload } from '../../src/shared/workbench-api'
 import { NOTIFY_CHANNEL } from '../../src/shared/workbench-api'
 import {
   WORKBENCH_DISPATCH_CHANNEL,
+  WORKBENCH_LARK_CHANNEL,
   WORKBENCH_PICK_FOLDER_CHANNEL,
   WORKBENCH_QUERY_CHANNEL,
 } from '../../src/protocol/ipc'
 import { StoreError } from '../../src/host/store/index'
+import type { LarkAdmin } from '../../src/host/lark-admin'
 
 const { ipcMainMock, notificationMock, showMock, isSupportedMock, dialogMock, windowMock } =
   vi.hoisted(() => {
@@ -74,6 +76,7 @@ describe('main 进程 IPC（M5 三动词 + 通知）', () => {
         WORKBENCH_DISPATCH_CHANNEL,
         WORKBENCH_QUERY_CHANNEL,
         WORKBENCH_PICK_FOLDER_CHANNEL,
+        WORKBENCH_LARK_CHANNEL,
       ].sort(),
     )
   })
@@ -215,6 +218,76 @@ describe('main 进程 IPC（M5 三动词 + 通知）', () => {
     expect(await handlerFor(WORKBENCH_PICK_FOLDER_CHANNEL)({ sender: {} })).toEqual({
       ok: false,
       error: { code: 'internal', message: '对话框不可用' },
+    })
+  })
+
+  describe('飞书连接管理（M45）', () => {
+    const status = {
+      ok: true,
+      program: '/usr/local/bin/lark-cli',
+      error: null,
+      workspace: 'local',
+      appId: 'cli_a',
+      identity: 'bot',
+      available: true,
+      tokenStatus: 'ready',
+      profiles: [],
+      foreign: null,
+      conflict: false,
+      hint: null,
+    }
+    const admin: LarkAdmin = {
+      status: vi.fn(async () => status),
+      addProfile: vi.fn(async () => ({ ok: true })),
+      loginStart: vi.fn(async () => ({ ok: true, verificationUrl: 'https://x', deviceCode: 'd' })),
+      loginPoll: vi.fn(async () => ({ ok: true })),
+      logout: vi.fn(async () => ({ ok: true })),
+      removeProfile: vi.fn(async () => ({ ok: true })),
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks()
+      registerIpcHandlers({ router, lark: admin })
+    })
+
+    it('status：原样透传探测结果', async () => {
+      expect(await handlerFor(WORKBENCH_LARK_CHANNEL)({}, { action: 'status' })).toEqual({
+        ok: true,
+        value: status,
+      })
+      expect(admin.status).toHaveBeenCalledTimes(1)
+    })
+
+    it('非法动作 / 未装配：都不抛给渲染层，回可读错误信封', async () => {
+      expect(await handlerFor(WORKBENCH_LARK_CHANNEL)({}, { action: 'rm -rf' })).toEqual({
+        ok: false,
+        error: { code: 'internal', message: '飞书连接动作非法' },
+      })
+
+      vi.clearAllMocks()
+      registerIpcHandlers({ router })
+      expect(await handlerFor(WORKBENCH_LARK_CHANNEL)({}, { action: 'status' })).toEqual({
+        ok: false,
+        error: { code: 'internal', message: '飞书连接管理未装配' },
+      })
+    })
+
+    it('add-profile / login-* / logout / remove-profile：参数原样交给实现', async () => {
+      const handler = handlerFor(WORKBENCH_LARK_CHANNEL)
+      await handler({}, { action: 'add-profile', name: 'wb', appId: 'cli_a', secret: 's' })
+      expect(admin.addProfile).toHaveBeenCalledWith({
+        name: 'wb',
+        appId: 'cli_a',
+        secret: 's',
+      })
+      await handler({}, { action: 'login-start', profile: 'wb' })
+      expect(admin.loginStart).toHaveBeenCalledWith({ profile: 'wb' })
+      await handler({}, { action: 'login-poll', profile: 'wb', deviceCode: 'd1' })
+      expect(admin.loginPoll).toHaveBeenCalledWith({ profile: 'wb', deviceCode: 'd1' })
+      await handler({}, { action: 'logout', profile: 'wb' })
+      expect(admin.logout).toHaveBeenCalledWith({ profile: 'wb' })
+      await handler({}, { action: 'remove-profile', name: 'wb' })
+      expect(admin.removeProfile).toHaveBeenCalledWith({ name: 'wb' })
     })
   })
 })

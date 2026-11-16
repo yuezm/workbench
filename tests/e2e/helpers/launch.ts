@@ -2,10 +2,14 @@ import { _electron as electron, type ElectronApplication, type Page } from '@pla
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { seedChannelIsolation } from '../../support/channel-isolation'
 
 /**
  * e2e 启动封装：每次启动都用独立临时 userData，用例之间、用例与本机已开实例之间互不干扰
  * （单实例锁以 userData 为作用域）。临时目录在关闭时删除，不读写真机 %APPDATA%。
+ *
+ * 另外在启动前把外部通道（飞书）停用：临时 userData 隔离不到 `~/.lark-cli` 的真实登录态，
+ * 不停用就会把测试库里的 ask 卡真的发到本人飞书（见 `tests/support/channel-isolation.ts`）。
  */
 export interface LaunchedApp {
   app: ElectronApplication
@@ -52,6 +56,9 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   let app: ElectronApplication | undefined
   try {
     await options.prepare?.(userDataDir)
+    // 隔离必须在应用启动之后、`channels.startAll()` 之前完成——也就是这里。
+    // 放在 `prepare` 之后：spec 自己的种子先写，隔离再整批覆盖一次，谁也「打开」不了外部通道。
+    seedChannelIsolation(path.join(userDataDir, 'ai-workflow.db'))
     app = await electron.launch({
       args: ['.', `--user-data-dir=${userDataDir}`],
       env: childEnv(),

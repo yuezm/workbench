@@ -102,6 +102,14 @@ T4 的回复链证据与 T5 的线索对象，先做会拿不到 chatId）。为
 | T7 话题命令              | 未开始 | —                                                     |
 | T8 workbench 话题清单    | 未开始 | —                                                     |
 
+### 修复记录（2026-11-16）
+
+T1 漏了一处：`chat.create` 校验 `threadId` 必须存在，但 `view-spec` 里这条命令的切片只有
+`agents` / `projects`——装载视图时 `threads` 是空表，hub 刚 `thread.open` 的话题立刻被判
+`话题不存在: <id>`，飞书里每一句入站消息都回「没派出去：话题不存在」。切片补上 `threads`，
+回归用例 `tests/host/store/chat-create-thread.test.ts`（真实 `viewSpec` + 真实投影；只走
+`decide` 单测手搓 view 发现不了，`tests/kernel/scopes/view-spec.test.ts` 的期望值同批改正）。
+
 ## 6. 验收
 
 - `pnpm check` exit 0（覆盖率不下降，改动行 ≥90%）。

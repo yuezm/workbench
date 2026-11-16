@@ -211,8 +211,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
       ]
     case 'chat.create':
       // 对话绑定的智能体必须存在（M5 命令化后沿用原 conversation.create 语义）；
-      // M11：对话可以落到项目上（项目必须存在，否则拒绝）
-      return ['agents', 'projects']
+      // M11：对话可以落到项目上（项目必须存在，否则拒绝）；
+      // M47：对话可以挂到话题上（`threadId` 必须存在，否则 not_found）
+      return ['agents', 'projects', 'threads']
     case 'chat.send':
       // 同一对话同时只跑一轮（runs）+ 智能体/运行时决定 execution 配置；
       // M11：工作目录取对话所属项目的文件夹，没有项目才回落运行时的 workdir

@@ -254,7 +254,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'task_comments',
     'cards',
   ],
-  'chat.create': ['agents', 'projects'],
+  // M47：chat.create 校验 threadId 是否存在，必须装 threads
+  'chat.create': ['agents', 'projects', 'threads'],
   'chat.send': ['conversations', 'messages', 'runs', 'agents', 'runtimes', 'projects'],
   'chat.remove': ['conversations', 'messages'],
   'chat.cancel': ['conversations', 'runs'],
@@ -388,7 +389,7 @@ describe('kernel/view-spec', () => {
   })
 
   it('M11 项目顶层化：聊天要装 projects（工作目录），删项目要装 conversations（归默认目录）', () => {
-    expect(viewSpec(byType.get('chat.create') as Input)).toEqual(['agents', 'projects'])
+    expect(viewSpec(byType.get('chat.create') as Input)).toEqual(['agents', 'projects', 'threads'])
     expect(viewSpec(byType.get('chat.send') as Input)).toContain('projects')
     expect(viewSpec(byType.get('project.remove') as Input)).toEqual([
       'projects',

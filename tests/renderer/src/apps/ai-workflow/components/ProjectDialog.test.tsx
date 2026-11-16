@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { DirListing } from '../../../../../../src/protocol/http'
 import type { Command } from '../../../../../../src/protocol/commands'
 import type { Project } from '../../../../../../src/protocol/entities'
 import type { CommandDispatchResult } from '../../../../../../src/protocol/ipc'
 import type { ViewId, ViewResult } from '../../../../../../src/protocol/views'
+import { FolderPickerDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/FolderPickerDialog'
 import { ProjectDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ProjectDialog'
 import type { WorkbenchApi } from '../../../../../../src/shared/workbench-api'
 
@@ -19,25 +21,39 @@ const project: Project = {
 
 const originalBridge = window.workbench
 
+const listing = (path: string, entries: DirListing['entries'] = []): DirListing => ({
+  path,
+  parent: path === '/' ? null : path.slice(0, path.lastIndexOf('\\')) || null,
+  entries,
+})
+
 /**
- * 只装 pickFolder 的桥接：本组件除了选文件夹不碰内核（读写都走父级的 dispatch），
+ * 只装 listDirs 的桥接：本组件除了列目录不碰内核（读写都走父级的 dispatch），
  * 所以其余动词直接拒绝——真的被调到就是用例写错了。
  */
-function stubBridge(pickFolder: () => Promise<string | null>): void {
+function stubBridge(listDirs: (path?: string) => Promise<DirListing>): void {
   const api: WorkbenchApi = {
     dispatch: <C extends Command>(): Promise<CommandDispatchResult<C>> =>
       Promise.reject(new Error('本组件不用 dispatch')),
     query: <T extends ViewId>(): Promise<ViewResult<T>> =>
       Promise.reject(new Error('本组件不用 query')),
     subscribe: () => () => {},
-    // 落点管道（系统通知 → shell）与本组件无关：装一个空订阅，真被调到也不影响选择文件夹
-    onOpenTarget: () => () => {},
-    pickFolder,
+    onNotice: () => () => {},
+    listDirs,
+    info: () => Promise.reject(new Error('本组件不用 info')),
     // M45：飞书连接管理面板与本组件无关，被调到就算用例写错了
     lark: () => Promise.reject(new Error('本组件不用 lark')),
     notify: () => {},
   }
   window.workbench = api
+}
+
+/** 选择器是独立弹窗：从它的标题定位容器，避免和外层项目弹窗的同名按钮撞车 */
+function picker(): HTMLElement {
+  const title = screen.getByText('选择项目文件夹')
+  const dialog = title.closest('[role="dialog"]')
+  if (dialog === null) throw new Error('没有找到选择器弹窗')
+  return dialog as HTMLElement
 }
 
 afterEach(() => {
@@ -46,7 +62,7 @@ afterEach(() => {
 
 describe('ProjectDialog', () => {
   it('选文件夹后填入路径，并按路径末段预填名称；保存带上输入与无 id（新建）', async () => {
-    stubBridge(() => Promise.resolve('D:\\Codes\\workbench'))
+    stubBridge(() => Promise.resolve(listing('D:\\Codes\\workbench')))
     const onSave = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
@@ -59,6 +75,10 @@ describe('ProjectDialog', () => {
     expect(screen.getByText(/名称与文件夹路径都必填/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    const panel = picker()
+    await waitFor(() => expect(within(panel).getByText('D:\\Codes\\workbench')).toBeInTheDocument())
+    await user.click(within(panel).getByRole('button', { name: '选这个文件夹' }))
+
     await waitFor(() =>
       expect(screen.getByLabelText('文件夹路径')).toHaveValue('D:\\Codes\\workbench'),
     )
@@ -87,13 +107,37 @@ describe('ProjectDialog', () => {
   })
 
   it('取消选择文件夹时不改动任何字段', async () => {
-    stubBridge(() => Promise.resolve(null))
+    stubBridge(() => Promise.resolve(listing('D:\\Codes\\workbench')))
     const user = userEvent.setup()
     render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    await user.click(within(picker()).getByRole('button', { name: '取消' }))
+
     expect(screen.getByLabelText('文件夹路径')).toHaveValue('')
     expect(screen.getByLabelText('项目名称')).toHaveValue('')
+  })
+
+  it('选择器里翻目录：点子目录再确认，路径落到子目录', async () => {
+    const listDirs = vi
+      .fn<(path?: string) => Promise<DirListing>>()
+      .mockResolvedValueOnce(
+        listing('D:\\Codes', [{ name: 'workbench', path: 'D:\\Codes\\workbench' }]),
+      )
+      .mockResolvedValueOnce(listing('D:\\Codes\\workbench'))
+    stubBridge(listDirs)
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    await user.click(within(picker()).getByRole('button', { name: /workbench/u }))
+    await waitFor(() => expect(listDirs).toHaveBeenLastCalledWith('D:\\Codes\\workbench'))
+    await user.click(within(picker()).getByRole('button', { name: '选这个文件夹' }))
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('文件夹路径')).toHaveValue('D:\\Codes\\workbench'),
+    )
+    expect(screen.getByLabelText('项目名称')).toHaveValue('workbench')
   })
 
   it('名称为空时保存禁用（路径已填写也一样）', async () => {
@@ -154,12 +198,15 @@ describe('ProjectDialog', () => {
   })
 
   it('名称已手填时选文件夹只改路径，不用目录名覆盖用户输入', async () => {
-    stubBridge(() => Promise.resolve('D:\\Codes\\workbench'))
+    stubBridge(() => Promise.resolve(listing('D:\\Codes\\workbench')))
     const user = userEvent.setup()
     render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
 
     await user.type(screen.getByLabelText('项目名称'), '我起的名字')
     await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    const panel = picker()
+    await waitFor(() => expect(within(panel).getByText('D:\\Codes\\workbench')).toBeInTheDocument())
+    await user.click(within(panel).getByRole('button', { name: '选这个文件夹' }))
 
     await waitFor(() =>
       expect(screen.getByLabelText('文件夹路径')).toHaveValue('D:\\Codes\\workbench'),
@@ -168,28 +215,30 @@ describe('ProjectDialog', () => {
   })
 
   it('选中文件系统根目录时名称回退为路径本身（末段为空不填空白名）', async () => {
-    stubBridge(() => Promise.resolve('/'))
+    stubBridge(() => Promise.resolve(listing('/')))
     const user = userEvent.setup()
     render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    const panel = picker()
+    await waitFor(() => expect(within(panel).getByText('/')).toBeInTheDocument())
+    await user.click(within(panel).getByRole('button', { name: '选这个文件夹' }))
 
     await waitFor(() => expect(screen.getByLabelText('文件夹路径')).toHaveValue('/'))
     expect(screen.getByLabelText('项目名称')).toHaveValue('/')
   })
 
-  it('选择文件夹失败（非 Error）就地展示原因，字段不变', async () => {
+  it('列目录失败（非 Error）就在选择器里展示原因，字段不变', async () => {
     stubBridge(() => Promise.reject('picker-down'))
     const user = userEvent.setup()
     render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    const panel = picker()
+    expect(await within(panel).findByText('picker-down')).toBeInTheDocument()
+    await user.click(within(panel).getByRole('button', { name: '取消' }))
 
-    expect(await screen.findByText('picker-down')).toBeInTheDocument()
     expect(screen.getByLabelText('文件夹路径')).toHaveValue('')
-    // 选择器失败的文案可关掉，字段与按钮状态不受影响
-    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
-    expect(screen.queryByText('picker-down')).not.toBeInTheDocument()
     // 失败不算致命：仍可手填后保存
     await user.type(screen.getByLabelText('文件夹路径'), 'D:\\tmp')
     await user.type(screen.getByLabelText('项目名称'), '临时')
@@ -276,5 +325,27 @@ describe('ProjectDialog', () => {
 
     expect(onCancel).toHaveBeenCalledTimes(1)
     expect(onSave).not.toHaveBeenCalled()
+  })
+})
+
+describe('FolderPickerDialog', () => {
+  it('打开时从缺省目录开始；上一级在根目录时禁用', async () => {
+    const listDirs = vi.fn(async () => listing('/'))
+    stubBridge(listDirs)
+    render(<FolderPickerDialog onPick={vi.fn()} onCancel={vi.fn()} />)
+
+    await waitFor(() => expect(listDirs).toHaveBeenCalledWith(undefined))
+    expect(await screen.findByText('/')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '上一级' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '选这个文件夹' })).toBeEnabled()
+  })
+
+  it('传入起始目录时按它列目录；空目录给出说明', async () => {
+    const listDirs = vi.fn(async (path?: string) => listing(path ?? '/'))
+    stubBridge(listDirs)
+    render(<FolderPickerDialog start={'D:\\empty'} onPick={vi.fn()} onCancel={vi.fn()} />)
+
+    await waitFor(() => expect(listDirs).toHaveBeenCalledWith('D:\\empty'))
+    expect(await screen.findByText('这个目录下没有子目录')).toBeInTheDocument()
   })
 })

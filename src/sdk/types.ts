@@ -3,11 +3,11 @@
  * `src/sdk/index.ts` 的 `createSdk` 按 manifest 做能力门控）。
  *
  * 依赖方向：`sdk → protocol`。插件只 import 本文件与 `protocol/**`，拿不到
- * `host/**`、node 内置与 electron；副作用一律经 `Sdk` 暴露的能力。
+ * `host/**` 与 node 内置能力；副作用一律经 `Sdk` 暴露的能力。
  *
  * M3 最小面：执行器只需要「跑一轮」所需的 log/now/paths/config/process，
  * 因此不提供 `fs.read/write`、`net`、`emit`（执行器只能经 `ExecutorIO` 回报）。
- * M4 增 `notify`（桌面通道用）：要求 manifest 声明 `capabilities: ['notify']`；
+ * M4 增 `notify`（通知通道用）：要求 manifest 声明 `capabilities: ['notify']`；
  * fs/net 等仍随 M6/M7 的 source 插件另立任务。
  */
 import type {
@@ -185,7 +185,7 @@ export interface Sdk {
 }
 
 /**
- * 系统通知原件：装配根注入 Electron 实现，测试注入假实现。
+ * 系统通知原件：装配根注入实现（服务器形态下走 SSE 推给页面），测试注入假实现。
  *
  * 落点透传而不是在这里解释：`sdk` 层不知道 app 身份（`NotifyTarget` 不含 `appId`），
  * 补 `appId` 只在装配根做一次，原件只管「弹出去 + 记下落点」。

@@ -105,13 +105,43 @@ const hostImportsIn = (files: readonly SourceFile[], prefix: string): string[] =
         .map((entry) => `${file.relative}:${entry.line} 越界 import「${entry.specifier}」`),
     )
 
-/** renderer 不得直接碰 Electron / Node 内置（ESLint 之外的文本兜底）。 */
+/**
+ * renderer 不得直接碰 Node 内置、服务端实现或桌面运行时（ESLint 之外的文本兜底）。
+ *
+ * `electron` 留在清单里是防御性的：服务器形态已经删掉这个依赖，但一旦有人把
+ * 「桌面壳」重新引回来，这条断言先红。
+ */
 const nodeImportsInRenderer = (files: readonly SourceFile[]): string[] =>
   files
     .filter((file) => file.relative.startsWith('renderer/'))
     .flatMap((file) =>
       importSpecifiers(stripLiterals(file.text).withoutComments)
-        .filter((entry) => entry.specifier === 'electron' || entry.specifier.startsWith('node:'))
+        .filter(
+          (entry) =>
+            entry.specifier === 'electron' ||
+            entry.specifier.startsWith('node:') ||
+            /(^|\/)server\//.test(entry.specifier),
+        )
+        .map((entry) => `${file.relative}:${entry.line} 越界 import「${entry.specifier}」`),
+    )
+
+/** server 不得 import renderer（依赖方向 server → host/plugins → sdk → protocol 单向）。 */
+const rendererImportsIn = (files: readonly SourceFile[], prefix: string): string[] =>
+  files
+    .filter((file) => file.relative.startsWith(prefix))
+    .flatMap((file) =>
+      importSpecifiers(stripLiterals(file.text).withoutComments)
+        .filter((entry) => /(^|\/)renderer\//.test(entry.specifier))
+        .map((entry) => `${file.relative}:${entry.line} 越界 import「${entry.specifier}」`),
+    )
+
+/** server 只经插件注册表取插件：不得直接 import 具体 executors / sources / channels 实现。 */
+const pluginImplementationImportsIn = (files: readonly SourceFile[], prefix: string): string[] =>
+  files
+    .filter((file) => file.relative.startsWith(prefix))
+    .flatMap((file) =>
+      importSpecifiers(stripLiterals(file.text).withoutComments)
+        .filter((entry) => /(^|\/)plugins\/(executors|sources|channels)\//.test(entry.specifier))
         .map((entry) => `${file.relative}:${entry.line} 越界 import「${entry.specifier}」`),
     )
 
@@ -138,9 +168,25 @@ describe('arch：分层与真相源', () => {
     expect(violations, `插件只能依赖 sdk 与 protocol：\n${violations.join('\n')}`).toEqual([])
   })
 
-  it('renderer 不 import electron 与 node 内置', () => {
+  it('renderer 不 import node 内置、服务端实现与 electron', () => {
     const violations = nodeImportsInRenderer(sources)
     expect(violations, `renderer 只能走桥接：\n${violations.join('\n')}`).toEqual([])
+  })
+
+  it('server 不 import renderer，也不直接 import 具体插件实现', () => {
+    const renderer = rendererImportsIn(sources, 'server/')
+    expect(renderer, `server 不得 import renderer：\n${renderer.join('\n')}`).toEqual([])
+    const plugins = pluginImplementationImportsIn(sources, 'server/')
+    expect(plugins, `server 只经注册表取插件：\n${plugins.join('\n')}`).toEqual([])
+  })
+
+  it('仓库不再依赖桌面运行时（package.json 里没有 electron*）', () => {
+    const pkg = JSON.parse(readFileSync(resolve(SRC_ROOT, '../package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    const all = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
+    expect(all.filter((name) => name === 'electron' || name.startsWith('electron-'))).toEqual([])
   })
 })
 
@@ -246,6 +292,17 @@ describe('arch：护栏自检', () => {
     ])
     expect(nodeImportsInRenderer(files)).toEqual([
       'renderer/src/app/x.ts:1 越界 import「electron」',
+    ])
+    // 服务端反向依赖 renderer 与直接 import 插件实现同样要被抓出来
+    const serverDirty = [
+      file('server/assembly.ts', "import { Workbench } from '../renderer/src/shell/Workbench'"),
+      file('server/assembly.ts', "import { dsh } from '../plugins/executors/dsh/index'"),
+    ]
+    expect(rendererImportsIn(serverDirty, 'server/')).toEqual([
+      'server/assembly.ts:1 越界 import「../renderer/src/shell/Workbench」',
+    ])
+    expect(pluginImplementationImportsIn(serverDirty, 'server/')).toEqual([
+      'server/assembly.ts:1 越界 import「../plugins/executors/dsh/index」',
     ])
   })
 })

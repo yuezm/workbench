@@ -30,19 +30,19 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 
 ### 架构边界（由 ESLint `no-restricted-imports` 强制）
 
-- `src/renderer/**` 禁止 import `electron` 与 Node 内置（`fs` / `path` / `os` / `child_process` / `crypto` / `node:*`）；只能走 `window.workbench` / `window.aiWorkflow` 桥接。
-- `src/main/**` 禁止 import `renderer`（依赖方向单向：renderer → main）。
-- 测试同层同规：`tests/renderer/**` 禁 Electron/Node 内置，`tests/main/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。
+- `src/renderer/**` 禁止 import Node 内置（`node:*`）与 `src/server/**`；浏览器侧只有 `shared/bridge.ts` 一个传输实现（`window.workbench`）。
+- `src/server/**` 禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。
+- 测试同层同规：`tests/renderer/**` 禁 Node 内置与服务端 import，`tests/server/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。
 - app 之间不互相 import、app 只依赖 shell（`AppDefinition` 契约 + 桥接）——**暂无自动检查，靠 code review**。
 
 ## Measured, not yet enforced（只记录，不动）
 
-| 指标                      | 当前                                            | 方向                     |
-| ------------------------- | ----------------------------------------------- | ------------------------ |
-| 项目覆盖率（st/br/fn/ln） | 100 / 100 / 100 / 100                           | 不得下降                 |
-| 开发依赖 high 漏洞数      | 3（electron-builder → semver 链等；生产依赖 0） | 不得增加                 |
-| SAST（semgrep）           | 未安装                                          | 接入 CI 后启用，本地不跑 |
-| 打包产物大小              | 待测                                            | 后续补基线               |
+| 指标                      | 当前                                                                      | 方向                     |
+| ------------------------- | ------------------------------------------------------------------------- | ------------------------ |
+| 项目覆盖率（st/br/fn/ln） | 100 / 100 / 100 / 100                                                     | 不得下降                 |
+| 开发依赖 high 漏洞数      | 3 → 0（electron-builder → semver 链已随 electron 系依赖删除；生产依赖 0） | 不得增加                 |
+| SAST（semgrep）           | 未安装                                                                    | 接入 CI 后启用，本地不跑 |
+| 打包产物大小              | 待测                                                                      | 后续补基线               |
 
 ## Exceptions
 
@@ -69,14 +69,14 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 
 ## 检查链（生命周期）
 
-| 阶段        | 命令                                    | 内容                                                               | 预算   |
-| ----------- | --------------------------------------- | ------------------------------------------------------------------ | ------ |
-| 编辑后      | `pnpm check:fast`                       | 类型 + lint(含架构边界) + floor + secrets                          | 秒级   |
-| 任务结束    | `pnpm check`                            | `check:fast` + 项目覆盖率 + 改动行覆盖率 + 依赖审计                | ≤ ~90s |
-| 交付 / 推送 | `pnpm e2e`                              | 真实 Electron 关键路径（先 build 再跑；每条用例独立临时 userData） | 分钟级 |
-| 打包验收    | `pnpm e2e:packaged`                     | electron-builder 产物冒烟（打包进程内 node:sqlite / 单实例锁）     | 分钟级 |
-| 数据备份    | `pnpm db:export --db <库> --out <文件>` | 只读导出全表 JSON，确定性输出（M1 前回滚点）                       | 秒级   |
-| 合并前      | `pnpm mutation:changed`（MR 层）        | Stryker 变异评分（假绿自检；`pnpm mutation:scan` 为定期全量层）    | 分钟级 |
+| 阶段        | 命令                                    | 内容                                                                              | 预算   |
+| ----------- | --------------------------------------- | --------------------------------------------------------------------------------- | ------ |
+| 编辑后      | `pnpm check:fast`                       | 类型 + lint(含架构边界) + floor + secrets                                         | 秒级   |
+| 任务结束    | `pnpm check`                            | `check:fast` + 项目覆盖率 + 改动行覆盖率 + 依赖审计                               | ≤ ~90s |
+| 交付 / 推送 | `pnpm e2e`                              | 真实服务进程 + Chromium 关键路径（先 build 再跑；每条用例独立临时数据目录与端口） | 分钟级 |
+| 服务冒烟    | `node out/server/index.js`              | 构建产物起真服务：启动行、`/api/health`、`/api/info`、静态首页都通                | 分钟级 |
+| 数据备份    | `pnpm db:export --db <库> --out <文件>` | 只读导出全表 JSON，确定性输出（M1 前回滚点）                                      | 秒级   |
+| 合并前      | `pnpm mutation:changed`（MR 层）        | Stryker 变异评分（假绿自检；`pnpm mutation:scan` 为定期全量层）                   | 分钟级 |
 
 ## 备注
 
@@ -168,3 +168,5 @@ Last reviewed: 2026-11-04（lead）。适用于 workbench（个人工作台）�
 - 长 URL 撑坏表格复核：2026-11-15。修「点登录后设备码 URL 过长，把表格撑宽，右侧登录 / 删除按钮被挤出可视区，没法再操作」：授权行原来把 `verification_url` 原样铺成链接文字（约 120 字符且不可换行，flex 子项默认 `min-width:auto` 也不收缩），`colSpan=5` 的一行把表格整体撑宽、外框 `overflow-hidden` 直接裁掉操作列。改为：链接文字固定短标签「打开授权页」、完整地址进 `title` 与 `href`；说明文字 `min-w-0 flex-1 truncate`、按钮 `shrink-0`；表格外框 `overflow-x-auto` 兜底（任何长内容都不会再裁掉操作列）。真机构建产物实测（`.scratch/feishu-ui/10-login-row.png`）：授权行展开后表格 `scrollWidth == clientWidth == 621`，删除按钮右边界 842 < 弹窗右边界 879.6，「我已完成授权」也在弹窗内。`FeishuConnections.test.tsx` 的 4 处授权链接断言从「按 URL 找链接」改为「按『打开授权页』找链接 + 断言 `href` 与 `title` 是完整地址」。全量 **219 测试文件 / 3828 用例全绿**，`pnpm check` exit 0。附：真机验证期间发现 `~/.lark-cli/config.json` 里那条「无 name 的默认 app」曾丢失（另有 agent 共用同一 workspace），已用 lark-cli 自身的写前备份 `config.json.bak-20261115-231327` 恢复，`lark-cli profile list` 复查两个 profile 齐全、`active` 与恢复前一致；登录动作本身实测不重写配置（单次 `auth login --no-wait` 后 apps 仍为 2 条）。
 - 登录轮询误报日志为错误复核：2026-11-15。修「点『我已完成授权』弹出红色提示 `[lark-cli] device-flow: token response received`」：`loginPoll` 原来在退出码非零时把 `stderr.trim().slice(0, ERROR_TAIL)` 直接当错误文案——**既取错了方向（要尾巴却取了开头）**，又把 CLI 的进度日志当失败原因。`lark-cli` 在设备码流程里会往 stderr 打 `[lark-cli] …` 日志，而且「token 已拿到、写 token 存储失败 / 抢锁超时」时仍非零退出（binary 里另有 `failed to acquire token storage lock` / `timed out waiting for token storage lock` 文案）。修法三层：①新增纯函数 `reasonLines`（剔掉 `[lark-cli]` 日志行与空行）与 `exitReason(code, stdout, stderr)`（失败信封优先 → 逐行找 JSON 帧 → 剩余行 → 带退出码的兜底建议），`add-profile` / `login-start` / `login-poll` / `logout` / `remove-profile` 的非零分支统一走它；②`loginPoll` 在退出码非零时先用 `--profile <name> whoami` 复查，token 真在就返回 `ok:true`（登录其实成立，不该让人对着红条重复点）；③`remove-profile` 的「无输出 → 空文案」也一并修掉。新增 4 条单测（日志+真实原因 / 全是日志给兜底 / 非零但 token 就绪算成功 / `reasonLines`+`exitReason` 纯函数四支），`remove-profile` 的空文案断言改为带退出码的兜底文案。`pnpm exec vitest run tests/host/lark-admin.test.ts`：29 用例全绿。真机侧：`lark-cli auth login --help` 与 binary 字符串核对确认 `[lark-cli] device-flow: …` 是日志、`token storage lock` 是抢锁失败路径；本机 `~/.lark-cli/config.json` 的 app 条目已于上一条恢复，`profile list` 两个 profile 齐全。
 - 飞书配置面收口（M46 收口，2026-11-15）：把「填了不生效」的五个标量从表单上撤掉。飞书 manifest 改为**零标量字段**（`config: []`，version 1.2.0 → 1.3.0），设置页「插件参数」整块不再渲染（`PluginsManager` 里那段飞书专属标题与说明一并删除）；`agent` / `lark` / `user` / `chat` / `answerers` 五项只在 `connections` 为空时作为旧配置兜底活着（`readFeishuConnections` 的 legacy 分支保留），连接存在时该函数提前返回、五项一行都不读——留它们在版面上只会让人以为「填这里也生效」。**连带两处口径修正**：①连接里 `agent` 留空统一成「只发不接」（`agentLabelOf` 返回值、弹窗 hint、下拉空项三处同文案），原先写的「跟随插件设置」与 `inbound: conn.agent !== null` 的实现不符，标量 `agent` 撤掉后更无从跟随；②`FeishuStatusCard` 底部开放平台入口从「接入还差一步：订阅…」改成陈述「长连接要求订阅 card.action.trigger 与 im.message.receive_v1（订阅状态探测不到，这里只给入口）」，不再对已订阅的应用恒报缺一步（真机核实该应用两个 event 的 `console_event_published` 都是 ok）。同步 SPEC-plugins 的多连接段与 TEST-CASES 的 TC-AIW-127。本轮**只动配置面与文案**：通道收发、`readFeishuConnections` 的连接解析、`start` 编排一字未改。全量 **219 测试文件 / 3832 用例全绿**，覆盖率 **99.48 / 98.12 / 99.54 / 99.74**（与 M45 条目持平；工作区另有未提交的 M46 零配置起步改动一并参与门禁），改动行 **1933/1988 = 97.23%**（门槛 90%），`pnpm check` exit 0（audit 生产依赖 0 漏洞）。阈值与门禁强度不变。
+
+- 服务器部署重写复核：2026-11-16。把产品从 Electron 桌面应用改成「常驻服务 + Web 界面」（决策与逐项对照见 [rewrite-server-deployment](docs/planning/rewrite-server-deployment.md)，运行形态见 [SPEC-server](docs/specs/SPEC-server.md)）。**业务零改动**：`kernel` / `protocol` / `sdk` / `host` / `plugins` 的业务逻辑一行未动（host 本来就不 import Electron，窗口/通知/存储由装配根注入），改动集中在装配根与传输层。删除 `src/main/**`、`src/preload/**`、`electron` / `electron-builder` / `electron-vite` 与打包配置；新增 `src/server/**`（config / auth / http / event-stream / static / fs-browse / secret-cipher / notify / assembly / lifecycle / index）与浏览器桥接 `renderer/src/shared/bridge.ts`。传输收窄为同源 HTTP 三动词 + SSE（零新增运行时依赖，`EventSource` 自带重连）；系统通知换 SSE `notice`；原生文件夹对话框换 `/api/fs/dirs` + `FolderPickerDialog`；`safeStorage` 换 `<dataDir>/secret.key` 主密钥 + AES-256-GCM（失败语义不变：不可用即拒绝写、不落明文）；`ELECTRON_RUN_AS_NODE` 从插件子进程与回执工具里删除。**鉴权**：共享 token（≥16 字符），非回环监听强制要求；浏览器只持 HttpOnly + SameSite=Strict cookie，脚本可用 `x-workbench-token` / Bearer；写请求带 `Origin` 时校验同源。**门禁**：`tests/architecture.test.ts` 的边界断言从 main/preload 改为 server/renderer，并新增「仓库不再依赖 electron*」「server 不 import renderer / 不直接 import 插件实现」；floor-guard 登记搬家用例映射（`tests/main/*`、`tests/host/boot.test.ts`、`tests/e2e-packaged/*` → `tests/server/*`）。**实测**：`pnpm typecheck` 与 `pnpm lint` 全绿；全量 226 测试文件 / 3887 用例全绿；覆盖率 98.73 / 96.79 / 97.96 / 99.02（阈值 98/93/95/98 不变）；改动行 2815/2973 = 94.69%（门槛 90%）；`check:floor` / `check:kernel` / `check:secrets` / `check:ui` 全绿；构建产物冒烟（临时数据目录 + 7799 端口）通过 `/api/health`、`/api/info`、`POST /api/query`、静态首页。**已知缺口**（不掩盖）：①`src/server/assembly.ts` 单文件约 55%，装配根里的调度器/通道回调只有真实运行才触发，后续抽「回调端口」纯函数补测；②本机未装 Playwright Chromium，`pnpm e2e` 本轮未跑；③覆盖率四元组较历史基线（99.60 / 96.71 / 99.39 / 99.79）在语句与行两维下降，原因是新增 server 层，补完第①条应回到基线附近——本次**没有**下调阈值，也没有新建 EX 记录（基线下调需人拍板）。

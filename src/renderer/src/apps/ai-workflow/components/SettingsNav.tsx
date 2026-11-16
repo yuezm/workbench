@@ -2,7 +2,8 @@ import type { ReactElement } from 'react'
 import { cn } from '../../../lib/cn'
 
 /** 设置页的六个二级栏目 */
-export type SettingsSection = 'runtimes' | 'agents' | 'workflows' | 'rules' | 'usage' | 'plugins'
+export type SettingsSection =
+  'runtimes' | 'agents' | 'workflows' | 'rules' | 'usage' | 'plugins' | 'service'
 
 interface SettingsNavProps {
   value: SettingsSection
@@ -31,6 +32,7 @@ const ITEMS: NavItem[] = [
     label: '插件',
     path: 'M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0zM12 16v5',
   },
+  { value: 'service', label: '服务', path: 'M4 7h16v4H4zM4 14h16v4H4zM7 9h.01M7 16h.01' },
 ]
 
 /** 设置页左侧的二级栏目：运行时 / 智能体 / 工作流 / 规则 / 用量 / 插件（外壳由父级侧栏提供） */

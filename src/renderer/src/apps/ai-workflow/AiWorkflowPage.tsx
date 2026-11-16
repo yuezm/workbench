@@ -20,6 +20,7 @@ import { ProjectDialog } from './components/ProjectDialog'
 import { DEFAULT_PROJECT_ID, ProjectSwitcher } from './components/ProjectSwitcher'
 import { RulesManager } from './components/RulesManager'
 import { RuntimeManager } from './components/RuntimeManager'
+import { ServerInfoPanel } from './components/ServerInfoPanel'
 import { SettingsNav, type SettingsSection } from './components/SettingsNav'
 import { TaskDetailPage } from './components/TaskDetailPage'
 import { TaskDialog } from './components/TaskDialog'
@@ -643,6 +644,12 @@ export function AiWorkflowPage(): ReactElement {
               <>
                 <SectionHeader title="插件" hint="外部能力与授权" />
                 <PluginsManager />
+              </>
+            )}
+            {section === 'service' && (
+              <>
+                <SectionHeader title="服务" hint="进程 · 数据目录 · 版本" />
+                <ServerInfoPanel />
               </>
             )}
           </div>

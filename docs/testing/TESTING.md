@@ -7,9 +7,9 @@
 
 ```
             ┌─────────────────────────────┐
-            │  E2E  Playwright + Electron  │  真实应用，关键路径冒烟（慢、少而稳）
+            │  E2E  Playwright + Chromium │  真实服务进程 + 构建产物，关键路径冒烟（慢、少而稳）
             ├─────────────────────────────┤
-            │  集成/契约                    │  main·ipc / preload·桥接 / registry·AppDefinition
+            │  集成/契约                    │  server·HTTP/SSE / web·桥接 / registry·AppPlugin
             ├─────────────────────────────┤
             │  单元                         │  状态机 / audio / cn / button / hooks / 组件
             ├─────────────────────────────┤
@@ -21,48 +21,45 @@
 | --------- | ----------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------- |
 | 静态检查  | 根配置                                                      | tsc（node/web 双工程）、ESLint flat、Prettier | 类型、hooks 规则、格式一致                                 |
 | 单元      | `tests/**`（与 `src/` 同构）                                | Vitest + jsdom + RTL                          | 纯逻辑与孤立组件；业务规则 100% 落在 machine.ts 并分支全测 |
-| 集成/契约 | `tests/host/`、`tests/preload/`                             | Vitest（node 环境 + mock electron）           | 跨进程契约不漂移：channel、payload、暴露的 API 形状        |
-| E2E       | `tests/e2e/*.spec.ts`                                       | Playwright `_electron.launch`                 | 构建产物（out/）里真实 Electron 的关键路径                 |
+| 集成/契约 | `tests/host/`、`tests/server/`                              | Vitest（node 环境 + 假 HTTP/SSE）             | 路由、应答信封、SSE 帧与桥接 API 形状不漂移                |
+| E2E       | `tests/e2e/*.spec.ts`                                       | Playwright + 每用例独立服务进程               | 构建产物（`out/server` + `out/web`）里真实服务的关键路径   |
 | 性质/变异 | 性质用例内联在 `tests/**`；变异范围见 `stryker.config.json` | fast-check / Stryker                          | 不变量穷举 + 断言有效性自检（防假绿）                      |
 
 目录约定（2026-11-04 起）：
 
 - 测试统一放 `tests/`，与 `src/` **同构镜像**：`src/kernel/decide.ts` ↔ `tests/kernel/decide.test.ts`，`src/renderer/src/apps/pomodoro/audio.ts` ↔ `tests/renderer/src/apps/pomodoro/audio.test.ts`。
 - `src/` 只放产品代码；测试夹具（如 `test-support.ts`、`fake-kernel.ts`）也随测试放进 `tests/`。
-- E2E 放 `tests/e2e/`，打包产物冒烟放 `tests/e2e-packaged/`（Playwright 各自的 `testDir`）。
+- E2E 放 `tests/e2e/`（`helpers/launch.ts` 按用例起独立服务进程 + Chromium 页面）；没有打包产物冒烟，`tests/e2e-packaged/` 已删除。
 
 约定：
 
-- 契约测试**只守卫不改**：`WorkbenchApi` / `NOTIFY_CHANNEL` / `AppDefinition` 变更时，先改契约与消费方，再让测试跟随契约走。
-- E2E **有意不覆盖**阶段完成/系统通知（真实等待 ≥60s 且脆），该路径由 machine/usePomodoro 单测 + 手动验收覆盖。
-- **E2E 不得碰真实外部身份**（2026-11-16）：`launchApp` 的临时 userData 隔离不到本机 `~/.lark-cli` 的登录态——装过并登录 `lark-cli` 的人跑 e2e，飞书通道会按 legacy 单连接拿到真实 open_id，把种子库里 `delivery='pending'` 的 ask 卡**真的发到本人飞书**。因此每次启动前由 `tests/support/channel-isolation.ts` 往测试库写一条 `plugins.replace`（`feishu` → `enabled:false`），`channels.startAll()` 因而不启动它：不 spawn `lark-cli`、不挂事件长连接、不发卡。隔离在 spec 自己的 `prepare` **之后**执行，种子也没法把它打开；`in-app` 与 `desktop` 留在测试里（前者就是被测对象，后者只在本机弹通知）。守则由 `tests/e2e/isolation.spec.ts` 三条断言看着，新增通道先问「它会不会把消息交给一个真人」，会就加进 `ISOLATED_CHANNEL_IDS`。
-- **环境按「要不要 DOM」分工**：真正 render 的用例留在默认 jsdom；纯逻辑用例（`kernel` / `protocol` / `host` / `main` / `plugins` / `renderer` 下不 render 的 model 与 lib，以及 main/preload 契约测试）首行标 `// @vitest-environment node`。jsdom 是逐文件冷启动（本机 0.7–1.3s/文件），多标一个 node 就少付一份环境成本；`vitest.setup.ts` 也只在有 DOM 时加载 RTL 与 jest-dom。
+- 契约测试**只守卫不改**：`WorkbenchApi` / `AppPlugin` / `protocol/http` 的载荷形状变更时，先改契约与消费方，再让测试跟随契约走。
+- E2E **有意不覆盖**阶段完成与知会（真实等待 ≥60s 且脆），该路径由 machine/usePomodoro 单测 + 手动验收覆盖。
+- **E2E 不得碰真实外部身份**（2026-11-16）：`launchApp` 的临时数据目录隔离不到本机 `~/.lark-cli` 的登录态——装过并登录 `lark-cli` 的人跑 e2e，飞书通道会按 legacy 单连接拿到真实 open_id，把种子库里 `delivery='pending'` 的 ask 卡**真的发到本人飞书**。因此每次启动前由 `tests/support/channel-isolation.ts` 往测试库写一条 `plugins.replace`（`feishu` → `enabled:false`），`channels.startAll()` 因而不启动它：不 spawn `lark-cli`、不挂事件长连接、不发卡。隔离在 spec 自己的 `prepare` **之后**执行，种子也没法把它打开；`in-app` 与 `desktop` 留在测试里（前者就是被测对象，后者只经 SSE 推知会）。守则由 `tests/e2e/isolation.spec.ts` 三条断言看着，新增通道先问「它会不会把消息交给一个真人」，会就加进 `ISOLATED_CHANNEL_IDS`。
+- **环境按「要不要 DOM」分工**：真正 render 的用例留在默认 jsdom；纯逻辑用例（`kernel` / `protocol` / `host` / `server` / `plugins` / `renderer` 下不 render 的 model 与 lib，以及 server 的 HTTP/SSE 契约测试）首行标 `// @vitest-environment node`。jsdom 是逐文件冷启动（本机 0.7–1.3s/文件），多标一个 node 就少付一份环境成本；`vitest.setup.ts` 也只在有 DOM 时加载 RTL 与 jest-dom。
 - **不要用 `pool: 'vmThreads'` 或 `isolate: false` 换速度**：本仓有用例在文件内改 `window.location`、`vi.stubGlobal('document', undefined)`，环境复用后同一 worker 里跨文件互相污染（实测 2 条用例直接失败）。诊断里的 Isolate 提示按此忽略。
-- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98；项目基线（2026-11-11 复位复核）**100 / 100 / 100 / 100**（188 测试文件 / 3185 用例；服务端 `kernel`/`protocol`/`host`/`main`/`plugins`/`sdk`/`shared`/`preload` 与客户端 `renderer` 各自四维 100%），`pnpm test:coverage` 跌破基线即 finding。
-- M2 起 `runs` / `run_events` / `conversations` / `messages` 是事实投影：崩溃恢复用例在 `tests/e2e/crash-recovery.spec.ts`（临时 userData + 残留 pid + 重启），租约/退避/超时在 `tests/kernel/decide.run.test.ts`，调度/取消/帧在 `tests/host/{scheduler,cancel}.test.ts`。
+- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98；项目基线（2026-11-11 复位复核）**100 / 100 / 100 / 100**（188 测试文件 / 3185 用例；服务端 `kernel`/`protocol`/`host`/`server`/`plugins`/`sdk`/`shared` 与客户端 `renderer` 各自四维 100%），`pnpm test:coverage` 跌破基线即 finding。
+- M2 起 `runs` / `run_events` / `conversations` / `messages` 是事实投影：崩溃恢复用例在 `tests/e2e/crash-recovery.spec.ts`（临时数据目录 + 残留 pid + 重启服务），租约/退避/超时在 `tests/kernel/decide.run.test.ts`，调度/取消/帧在 `tests/host/{scheduler,cancel}.test.ts`。
 
 ## 常用命令
 
-| 命令                                | 作用                                                                                                                 |
-| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `pnpm test` / `pnpm test:watch`     | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式                                                    |
-| `pnpm test:coverage`                | 同上 + 覆盖率阈值门禁                                                                                                |
-| `pnpm lint` / `pnpm lint:fix`       | ESLint（含 react-hooks 规则）                                                                                        |
-| `pnpm format` / `pnpm format:check` | Prettier 全仓写 / 只检查                                                                                             |
-| `pnpm typecheck`                    | tsc node + web 双工程（含 e2e 与测试文件）                                                                           |
-| `pnpm check`                        | check:fast(type+lint+floor+secrets) + test:coverage + 改动行覆盖率 + 依赖审计（本地全量门禁，数值见 CONSTRAINTS.md） |
-| `pnpm e2e`                          | `build:compile`（typecheck+构建 out/）→ Playwright 跑真实 Electron                                                   |
-| `pnpm e2e -- --ui`                  | Playwright UI 模式调试单条用例                                                                                       |
-| `pnpm acceptance`                   | 人工验收前一条命令：`check` + `e2e`（见 [ACCEPTANCE](ACCEPTANCE.md)）                                                |
-| `pnpm acceptance:ui`                | 只跑界面几何审计（含构建），改完 UI 用                                                                               |
-| `pnpm acceptance:startup`           | 只跑启动健康三路径（冷启动 / 重载 / 二次冷启动）                                                                     |
-| `pnpm e2e:redcheck`                 | 缺陷注入红检：把已知修复反向注入，验证对应 spec 真的会红（`--dry-run` 秒级只校验锚点）                               |
+| 命令                                                  | 作用                                                                                                                 |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `pnpm test` / `pnpm test:watch`                       | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式                                                    |
+| `pnpm test:coverage`                                  | 同上 + 覆盖率阈值门禁                                                                                                |
+| `pnpm lint` / `pnpm lint:fix`                         | ESLint（含 react-hooks 规则）                                                                                        |
+| `pnpm format` / `pnpm format:check`                   | Prettier 全仓写 / 只检查                                                                                             |
+| `pnpm typecheck`                                      | tsc node + web 双工程（含 e2e 与测试文件）                                                                           |
+| `pnpm check`                                          | check:fast(type+lint+floor+secrets) + test:coverage + 改动行覆盖率 + 依赖审计（本地全量门禁，数值见 CONSTRAINTS.md） |
+| `pnpm e2e`                                            | `pnpm build`（typecheck + `out/server` + `out/web`）→ Playwright 每用例起独立服务进程跑 Chromium                     |
+| `pnpm e2e -- --ui`                                    | Playwright UI 模式调试单条用例                                                                                       |
+| `pnpm acceptance`                                     | 人工验收前一条命令：`check` + `e2e`（见 [ACCEPTANCE](ACCEPTANCE.md)）                                                |
+| `pnpm e2e:ui`                                         | 只跑界面几何审计（含构建），改完 UI 用                                                                               |
+| `pnpm exec playwright test tests/e2e/startup.spec.ts` | 只跑启动健康三路径（先 `pnpm build`）                                                                                |
 
-E2E 说明：`electron.launch({ args: ['.'] })` 按 package.json `main` 加载 `out/main/index.js`，因此**每次先构建再测**；不需要下载任何 Playwright 浏览器（pnpm 默认也阻止了该下载）。
+E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录 + `WORKBENCH_PORT=0` 起 `out/server/index.js`，解析 stdout 的 `workbench listening on ...` 取实际地址，再用 Playwright Chromium 打开页面；因此**每次先构建再测**；不需要下载任何 Playwright 浏览器（pnpm 默认也阻止了该下载）。
 
 人工验收前另有两关专用 spec：`tests/e2e/startup.spec.ts`（冷启动 / 重载 / 二次冷启动零异常、零兜底页）与 `tests/e2e/ui-geometry.spec.ts`（七类几何判据 + 审计器自检，报告落 `.scratch/acceptance/ui-geometry.md`）。用法、需求覆盖矩阵与 30 分钟走查表见 [ACCEPTANCE](ACCEPTANCE.md)。
-
-> 若在 Electron 宿主进程（如某些 IDE / Agent 环境）里跑 E2E，需先清除继承的 `ELECTRON_RUN_AS_NODE`，否则 Electron 会以 Node 模式启动、`electron.app` 为 undefined。CI 不受影响。
 
 > 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`check:fast` 供编辑后快跑（秒级），`check` 供任务结束/推送（含改动行覆盖率与依赖审计）。
 
@@ -80,7 +77,7 @@ E2E 说明：`electron.launch({ args: ['.'] })` 按 package.json `main` 加载 `
 ## 何时写哪层测试
 
 1. **新业务规则**（如新的状态转移、钳制规则）→ 先写 machine 单测（假时钟），再实现；UI 只订阅不写规则。
-2. **新跨进程能力**（`WorkbenchApi` 加方法）→ 三处同步：契约 + preload 契约测试 + main ipc 契约测试，channel/payload 一处定义（`src/shared/`）。
+2. **新跨层能力**（`WorkbenchApi` 加方法）→ 三处同步：契约 + 桥接测试（`tests/renderer/src/shared/bridge.test.ts`）+ 服务端路由测试（`tests/server/http.test.ts`），路径与载荷一处定义（`src/protocol/http.ts`）。
 3. **新 app** → registry 契约测试自动覆盖（遍历断言）；app 内按 1 执行；E2E 视交互复杂度补关键路径。
 4. **新 UI 基元**（`components/ui/`）→ variant/size/语义类名测试，作为后续使用方的契约锚点。
 5. **某条分支在产品路径上到不了**（防御守卫、脏投影兜底）→ 优先用**正常业务场景**覆盖；场景不成立时，
@@ -110,7 +107,7 @@ E2E 说明：`electron.launch({ args: ['.'] })` 按 package.json `main` 加载 `
 | `kernel/prompt.ts`                                     | 反馈段顺序无关 / 只留最近 N / 不超预算、来源工单保尾、回答提示词的问答对排序                       |
 | `protocol/validate.ts`（负向）                         | 任意值不抛错且结论二元完备、合法命令二次校验逐字相同（封闭）、必填键与形状被破坏必拒且点名到具体键 |
 
-不写性质的层：`renderer/**` 与 `components/ui/**`（随机 DOM 只添噪声）、preload 契约（枚举穷举比随机准）、`host/**` 装配（要真实 SQLite 时序）、`e2e`（随机化等于制造 flaky）。`protocol/validate.ts` 是例外：合法形状仍以枚举为主，另加一组**负向**性质——枚举写不出「我没想到的坏输入」，而校验层面对的是 renderer 传来的不可信数据，`fc.anything()` 正好覆盖那片空白（见下节）。单文件性质用例预算 < 1s，`numRuns` 50–300，靠生成器质量而不是 runs 数；不进 `pnpm check` 快链。
+不写性质的层：`renderer/**` 与 `components/ui/**`（随机 DOM 只添噪声）、桥接契约（枚举穷举比随机准）、`host/**` 装配（要真实 SQLite 时序）、`e2e`（随机化等于制造 flaky）。`protocol/validate.ts` 是例外：合法形状仍以枚举为主，另加一组**负向**性质——枚举写不出「我没想到的坏输入」，而校验层面对的是 renderer 传来的不可信数据，`fc.anything()` 正好覆盖那片空白（见下节）。单文件性质用例预算 < 1s，`numRuns` 50–300，靠生成器质量而不是 runs 数；不进 `pnpm check` 快链。
 
 ### 怎么写性质测试
 
@@ -157,7 +154,7 @@ CI 里代码已经提交、工作区是干净的，**`git diff HEAD` 查不到�
 
 - **CI 里解析不到基准 → 直接失败（exit 2），不放行。** 范围不可知就不能让门禁假绿；请显式传 `--base` 或设 `MUTATION_BASE`。
 - 浅克隆会算不出差异：GitHub Actions 的 `actions/checkout` 要 `fetch-depth: 0`，GitLab 要 `GIT_DEPTH: 0`；否则报「无法与基准比较」。
-- 「值得做变异测试的代码集合」= (`src/kernel` ∪ `src/protocol`) − 排除名单。`src/host`、`src/renderer`、`src/main` 不在内：IO 密集，变异大多被 mock 吸收。只改这些层的 MR 会打印「范围内没有可变异的产品代码」并跳过——这是有意的，不是漏跑。
+- 「值得做变异测试的代码集合」= (`src/kernel` ∪ `src/protocol`) − 排除名单。`src/host`、`src/server`、`src/renderer` 不在内：IO 密集，变异大多被 mock 吸收。只改这些层的 MR 会打印「范围内没有可变异的产品代码」并跳过——这是有意的，不是漏跑。
 - 空范围分两种：**算出来的空**（确实没改内核）→ exit 0 跳过；**算不出来的空**（CI 缺基准）→ exit 2 失败。
 
 固定只盯一个文件是错的用法——范围要**随改动自动扩张**。三层分工：
@@ -172,27 +169,16 @@ CI 里代码已经提交、工作区是干净的，**`git diff HEAD` 查不到�
 
 扫描范围**排除**纯类型 / 纯常量 / 纯路由（变异只产噪音）：`kernel/types.ts`、`kernel/decide.ts`（规则都在 `commands/*`）、`kernel/view-spec.ts`、`protocol/{entities,facts,commands,inputs,ipc,views,plugins,rules,review,thread,task-comment,receipt-keys,channels,manifest,executor,worker,model-id,plugin-host}.ts`。
 
-### e2e 没有变异测试器：三条替代手段（2026-11-13）
+### e2e 没有变异测试器：两条替代手段（2026-11-13）
 
-Stryker 只能变异**被测源码**再跑单测 runner（vitest/jest 一类）；`tests/e2e/*.spec.ts` 靠 Playwright 起真实 Electron，没有任何变异测试器能驱动它。于是「e2e 全绿」这件事本身不被自己证明——断言写歪、选择器恒真、等错元素都会得到一片绿。补三处：
+Stryker 只能变异**被测源码**再跑单测 runner（vitest/jest 一类）；`tests/e2e/*.spec.ts` 靠 Playwright 起真实服务进程与 Chromium，没有任何变异测试器能驱动它。于是「e2e 全绿」这件事本身不被自己证明——断言写歪、选择器恒真、等错元素都会得到一片绿。补两处：
 
 | 手段                         | 抓什么                                                                                                                 | 命令 / 位置                                                         | 进快链 |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------ |
 | 断言强度 lint                | 空断言、漏 `await` 的断言、`force: true`、被跳过（skip / fixme）的用例、**没有断言的用例**、`isVisible()` 取布尔再断言 | `pnpm lint`（`eslint.config.mjs` 末两段：playwright / vitest 插件） | 是     |
-| e2e 红检（缺陷注入）         | 把已知修复反向注入，看对应 spec 会不会红；不红 = 这条 e2e 已失效                                                       | `pnpm e2e:redcheck`（`scripts/e2e-redcheck.mjs`）                   | 否     |
 | `protocol/validate` 负向性质 | 任意不可信输入下不抛错、结论二元完备、必填键与形状被破坏必拒且点名到键                                                 | `pnpm test`（`tests/protocol/validate.test.ts` 末尾的负向性质组）   | 是     |
 
 两条 lint 门槛只对测试文件生效，严重度沿用上游 recommended，只有两处按本仓库口径调整：`vitest/valid-expect` 放开 `maxArgs: 2`（`expect(value, message)` 是合法签名，用来标注「哪个键、哪条规则」）、`vitest/no-conditional-expect` 降到 warn（性质用例与表驱动用例按生成物形状分支断言是真的，逐条改写成不断言的形态只会更难读；真·空转用例由 `expect-expect` 兜住）。`expect-expect` 是这两段里唯一**加严**的地方：提升到 error，并认 `expectDispatched` 这类包装断言。
-
-### e2e 红检（`pnpm e2e:redcheck`）
-
-- 每条用例 = 一处「已知修复」的反向字符串替换 + 一条应当因此失败的 spec；清单在 `scripts/e2e-redcheck.mjs` 顶部，每条写明「注入的缺陷 / 为什么这条 e2e 该红」。
-- 顺序固定：**断点 → 注入 → 构建 → 断言 → 还原**。`find` 锚点在文件里必须恰好命中 1 处（锚点漂了立刻失败，不猜）；注入形态必须仍然通过 `typecheck`（`build:compile` 里含 typecheck，所以注入不能留未使用变量，也不能写 `if (false)` 这类直接报错的形态）。
-- **spec 非 0 退出才算通过**；spec 仍全绿 = 假绿，红检失败并退出 1。
-- 按读取时的字节还原（不依赖 git），并重建 `out/`：不吃掉工作区里的本地改动，也不会让下次手跑 e2e 带着注入跑。
-- 标志：`--dry-run` 只校验断点（秒级，可进 CI）、`--case <id>` 单条复验、`--no-build` 复用当前 `out/`、`--list` 列清单。
-- 加新用例：先手改一处代码把缺陷做出来、确认对应 spec 真的红，再把这处改动写成 `find` / `replace` 反过来的形态，并补 `defect` 与 `why`。只登记「曾经人工验证过会红」的缺陷——清单本身是证据。
-- 现状（3 条）：番茄钟配置钳制上界、卡片重复回答守卫、webhook HMAC 验签。三条都在注入后让对应 spec 变红（2026-11-13 实测），无构建期副作用。
 
 ### 哪些模块值得优先覆盖
 
@@ -240,5 +226,5 @@ Stryker 只能变异**被测源码**再跑单测 runner（vitest/jest 一类）�
 
 ## 与 SPEC 的关系
 
-- SPEC-shell 的 Testing Strategy 写明「v1 不做 Electron E2E」；2026-10-30 按需求**升级**为引入 Playwright E2E，本文件为准。SPEC 中其余测试要求（registry 遍历断言、machine 分支全覆盖、通知走 mock）全部保持有效。
-- 主进程窗口创建、系统通知横幅、铃声等真实感官行为仍以手动验收为准，清单见 [TEST-CASES.md](TEST-CASES.md)。
+- SPEC-shell 的 Testing Strategy 写明「v1 不做 E2E」；2026-10-30 按需求**升级**为引入 Playwright E2E，本文件为准。SPEC 中其余测试要求（registry 遍历断言、machine 分支全覆盖、知会走 mock）全部保持有效。
+- 服务启停、知会轻提示、铃声等真实感官行为仍以手动验收为准，清单见 [TEST-CASES.md](TEST-CASES.md)。

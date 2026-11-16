@@ -121,10 +121,7 @@ test('界面几何审计：看板 / 聊天 / 任务详情 / 设置 / 弹窗 / �
 
   // 7) 窄窗：900x640 下看板与设置页不出现横向滚动 / 元素出界
   await page.getByRole('button', { name: 'AI 工作流' }).click()
-  await launched.app.evaluate(({ BrowserWindow }, size) => {
-    const win = BrowserWindow.getAllWindows()[0]
-    win?.setSize(size.width, size.height)
-  }, NARROW)
+  await page.setViewportSize(NARROW)
   await page.waitForFunction(`window.innerWidth <= ${NARROW.width}`, undefined, { timeout: 10_000 })
   await audit(`窄窗 ${NARROW.width}x${NARROW.height}：任务看板`)
   await page.getByRole('button', { name: '设置', exact: true }).click()

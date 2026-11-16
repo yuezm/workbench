@@ -7,7 +7,8 @@
  *
  * 口径：
  * - 固定白名单 + `LC_*` 前缀（本地化变量）；
- * - `ELECTRON_RUN_AS_NODE=1` 恒存在：子进程用 `process.execPath` 以 Node 模式跑 `plugin.mjs`；
+ * - 子进程就是本机 node（服务端进程本身是 node，`process.execPath` 即 node），
+ *   不需要再借 `ELECTRON_RUN_AS_NODE` 把桌面二进制退化成 Node；
  * - `overrides` 最后合并（宿主显式覆盖，例如测试注入精简环境）。
  */
 /** 允许继承的环境变量（大小写不敏感匹配，输出保留原键名）。 */
@@ -29,9 +30,6 @@ export const PLUGIN_ENV_ALLOWLIST = [
 
 /** 允许继承的前缀（`LC_*`：语言/区域设置）。 */
 export const PLUGIN_ENV_PREFIXES = ['LC_'] as const
-
-/** 以 Node 模式启动 Electron 可执行文件的开关（D2：子进程不启动第二个 app 实例）。 */
-export const PLUGIN_RUN_AS_NODE = 'ELECTRON_RUN_AS_NODE'
 
 const allowlistKeys = new Set(PLUGIN_ENV_ALLOWLIST.map((key) => key.toUpperCase()))
 
@@ -60,7 +58,5 @@ export function buildPluginEnv(
     if (value === undefined) continue
     env[key] = value
   }
-  // 固定项最后写：即使调用方漏传/写错，子进程也一定以 Node 模式启动
-  env[PLUGIN_RUN_AS_NODE] = '1'
   return env
 }

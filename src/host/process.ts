@@ -77,12 +77,10 @@ export function resolveShimScript(shimPath: string): { command: string; args: st
  * 折出来的脚本用哪个解释器跑：垫片同目录的 `node.exe` 优先（nvm / 官方安装包把 node.exe
  * 与 npm 垫片放在一起，这里一定命中），否则交给 PATH 上的 `node`。
  *
- * **不用 `process.execPath`**：宿主跑在 Electron 里，它的 `execPath` 是 electron.exe，
- * 只能靠 `ELECTRON_RUN_AS_NODE=1` 当 Node 用。那条路会让子进程带上 Electron 的运行时
- * 指纹（Node 24 + V8 electron），而依赖原生模块的 CLI 会按指纹拒跑——dsh 的
- * `node-addon-require-builtin` 只认 Electron 43 / 44 / 44.7 / 45.0.0-alpha.6，
- * 在 45.1.0 上直接 `unsupported Electron runtime fingerprint` 崩在启动阶段
- * （2026-11-16 任务 40eb2134 三轮全废的根因）。
+ * **不直接用 `process.execPath`**：服务端进程确实是 node，但它可能来自系统包管理器
+ * （版本与用户 npm 全局目录里的 CLI 不匹配），也可能被进程管理器换过镜像。垫片同目录的
+ * `node.exe` 与该包安装时的解释器一致，跨版本行为最稳定；找不到就退回 PATH，
+ * 与用户手敲命令时的解析结果相同。
  */
 function shimNode(dir: string): string {
   const local = join(dir, 'node.exe')

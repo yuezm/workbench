@@ -24,7 +24,7 @@ const manifest: PluginManifest = {
 }
 
 const DIR = 'C:/userData/plugins/source/demo'
-const EXEC_PATH = 'C:/app/electron.exe'
+const EXEC_PATH = 'C:/Program Files/nodejs/node.exe'
 
 type StdinMode = 'ok' | 'throw' | 'none'
 
@@ -148,14 +148,14 @@ afterEach(async () => {
 })
 
 describe('外部插件子进程启动与 hello 握手', () => {
-  it('spawn 参数：execPath + plugin.mjs、cwd 为插件目录、环境含 ELECTRON_RUN_AS_NODE', async () => {
+  it('spawn 参数：execPath + plugin.mjs、cwd 为插件目录、环境按白名单构造', async () => {
     const { spawn, children } = spawnQueue()
     const process = makeProcess({ spawn })
 
     const started = process.start()
     expect(spawn).toHaveBeenCalledWith(EXEC_PATH, ['plugin.mjs'], {
       cwd: DIR,
-      env: expect.objectContaining({ ELECTRON_RUN_AS_NODE: '1' }),
+      env: expect.not.objectContaining({ ELECTRON_RUN_AS_NODE: expect.anything() }),
       shell: false,
     })
     expect(process.status()).toBe('starting')
@@ -754,7 +754,7 @@ describe('覆盖率收口：缺省值与边界', () => {
     expect(log).toHaveBeenCalledWith('[plugin:demo] stderr: tail without newline')
   })
 
-  it('显式 env：只补 ELECTRON_RUN_AS_NODE，其它键原样传入', async () => {
+  it('显式 env：原样传入，不额外补运行时开关', async () => {
     const { spawn, children } = spawnQueue()
     const proc = makeProcess({ spawn, env: { PATH: 'D:/bin' } })
     const started = proc.start()
@@ -763,7 +763,7 @@ describe('覆盖率收口：缺省值与边界', () => {
 
     expect(spawn).toHaveBeenCalledWith(EXEC_PATH, ['plugin.mjs'], {
       cwd: DIR,
-      env: { PATH: 'D:/bin', ELECTRON_RUN_AS_NODE: '1' },
+      env: { PATH: 'D:/bin' },
       shell: false,
     })
   })

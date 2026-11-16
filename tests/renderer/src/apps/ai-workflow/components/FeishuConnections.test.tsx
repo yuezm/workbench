@@ -116,8 +116,9 @@ function stubBridge(): void {
     query: <T extends ViewId>(_view: T, _params?: ViewParams<T>): Promise<ViewResult<T>> =>
       Promise.reject(new Error('本面板不用 query')),
     subscribe: () => () => {},
-    onOpenTarget: () => () => {},
-    pickFolder: () => Promise.resolve(null),
+    onNotice: () => () => {},
+    listDirs: () => Promise.resolve({ path: '/', parent: null, entries: [] }),
+    info: () => Promise.reject(new Error('本面板不用 info')),
     lark: ((action: LarkAdminAction) => larkMock(action)) as unknown as WorkbenchApi['lark'],
     notify: () => {},
   }

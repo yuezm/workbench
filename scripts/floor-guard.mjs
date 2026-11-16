@@ -132,7 +132,15 @@ const RELOCATED_TESTS = {
   'tests/main/ai-workflow/repository.extra.test.ts': 'tests/host/ipc.test.ts',
   // M5：旧 ai-workflow RPC 表用例 → 三动词命令路由 / 幂等 / 宿主视图用例
   'tests/host/ipc.test.ts': 'tests/host/commands.test.ts',
-  'tests/main/index.test.ts': 'tests/host/boot.test.ts',
+  // 服务器部署重写（Electron → 常驻服务）：装配根与 IPC 用例搬成服务端装配 / HTTP 生命周期用例
+  'tests/main/index.test.ts': 'tests/server/assembly.test.ts',
+  'tests/host/boot.test.ts': 'tests/server/assembly.test.ts',
+  'tests/e2e-packaged/packaged-sqlite.spec.ts': 'tests/server/assembly.test.ts',
+  // 服务器重写：装配根搬到 src/server 后，工作目录与提权记录用例随源码同层搬家
+  'tests/main/workdir.test.ts': 'tests/server/workdir.test.ts',
+  'tests/main/workdir-mkdir-error.test.ts': 'tests/server/workdir-mkdir-error.test.ts',
+  'tests/main/run-approvals.test.ts': 'tests/server/run-approvals.test.ts',
+  'tests/main/run-approvals-read-error.test.ts': 'tests/server/run-approvals-read-error.test.ts',
   // M3：执行器插件化后按层搬家（T5 登记，新位置行为等价覆盖）
   'tests/main/ai-workflow/runtime/dsh.test.ts': 'tests/plugins/executors/dsh/dsh.test.ts',
   'tests/main/ai-workflow/runtime/detect.test.ts': 'tests/plugins/executors/dsh/detect.test.ts',
@@ -230,11 +238,27 @@ const thresholds = (t) => {
   }
   return out
 }
+// 已登记的规则改写：旧规则在新架构下不再成立（不是放松），由右侧新规则等价替代。
+// 服务器部署重写（Electron → 常驻服务）：桌面专属的边界与验收项换成服务端对应项；
+// 只有「替代规则真的出现在新增行里」才算迁移，否则仍按删规则阻断。
+const REWRITTEN_RULES = {
+  '`src/renderer/**` 禁止 import `electron` 与 Node 内置（`fs` / `path` / `os` / `child_process` / `crypto` / `node':
+    '`src/renderer/**` 禁止 import Node 内置（`node',
+  '`src/main/**` 禁止 import `renderer`（依赖方向单向：renderer → main）。':
+    '`src/server/**` 禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。',
+  '测试同层同规：`tests/renderer/**` 禁 Electron/Node 内置，`tests/main/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。':
+    '测试同层同规：`tests/renderer/**` 禁 Node 内置与服务端 import，`tests/server/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。',
+  打包验收: '服务冒烟',
+}
 const removedRules = removed.filter((l) => isConstraints(l.file) && ruleKey(l.text) !== null)
 const addedRules = added.filter((l) => isConstraints(l.file) && ruleKey(l.text) !== null)
 for (const r of removedRules) {
   const a = addedRules.find((x) => ruleKey(x.text) === ruleKey(r.text))
   if (!a) {
+    const replacement = REWRITTEN_RULES[ruleKey(r.text)]
+    if (replacement !== undefined && addedRules.some((x) => ruleKey(x.text) === replacement)) {
+      continue
+    }
     if (!isException(r.text)) flag('rule-removed', r.file, r.text)
     continue
   }

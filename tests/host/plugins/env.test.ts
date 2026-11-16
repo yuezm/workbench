@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   PLUGIN_ENV_ALLOWLIST,
   PLUGIN_ENV_PREFIXES,
-  PLUGIN_RUN_AS_NODE,
   buildPluginEnv,
 } from '../../../src/host/plugins/env'
 
@@ -69,9 +68,8 @@ describe('buildPluginEnv 白名单', () => {
     expect(PLUGIN_ENV_PREFIXES).toEqual(['LC_'])
   })
 
-  it('ELECTRON_RUN_AS_NODE 恒为 1：宿主覆盖也改不掉（固定项最后写）', () => {
-    expect(buildPluginEnv({}, {})[PLUGIN_RUN_AS_NODE]).toBe('1')
-    expect(buildPluginEnv({ [PLUGIN_RUN_AS_NODE]: '0' }, {})[PLUGIN_RUN_AS_NODE]).toBe('1')
+  it('不再注入运行时开关：白名单之外一个键都不多（服务端进程本身就是 node）', () => {
+    expect(buildPluginEnv({}, {})).toEqual({})
   })
 
   it('overrides 覆盖白名单值、追加非白名单键；undefined 值不写入', () => {
@@ -87,7 +85,7 @@ describe('buildPluginEnv 白名单', () => {
   it('源环境里的 undefined 值不写入（不产生 "undefined" 字符串）', () => {
     const env = buildPluginEnv({}, { PATH: undefined })
     expect('PATH' in env).toBe(false)
-    expect(env[PLUGIN_RUN_AS_NODE]).toBe('1')
+    expect(Object.keys(env)).toEqual([])
   })
 
   it('缺省源是 process.env：stub 的敏感变量不会进入子进程环境', () => {
@@ -129,6 +127,6 @@ it('凭据类环境变量一个都进不去（按名字点一遍，不只靠白�
   ]) {
     expect(env[key], `${key} 不该进入插件子进程环境`).toBeUndefined()
   }
-  // 固定项恒为 1：源环境里的 0 覆盖不掉
-  expect(env['ELECTRON_RUN_AS_NODE']).toBe('1')
+  // 连桌面时代的运行时开关也不该被继承：服务端进程本身是 node，没有这层需要
+  expect(env['ELECTRON_RUN_AS_NODE']).toBeUndefined()
 })

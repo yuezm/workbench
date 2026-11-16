@@ -96,8 +96,11 @@ test('启动健康：冷启动 / 重载 / 二次冷启动都零异常、零兜�
   await expectHealthyShell(launched.page, '重载')
   expectNoErrors(firstErrors, '冷启动 + 重载')
 
-  // 主进程还活着（未捕获异常会把 Electron 拉走，后续操作才暴雷）
-  expect(launched.app.process().exitCode, '主进程提前退出').toBeNull()
+  // 服务进程还活着（未捕获异常会让服务退出，后续请求才暴雷）
+  expect(
+    await launched.page.evaluate(async () => (await fetch('/api/health')).ok),
+    '服务已退出',
+  ).toBe(true)
   await launched.close({ removeUserData: false })
   launched = undefined
 

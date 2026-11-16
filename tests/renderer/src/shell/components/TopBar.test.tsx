@@ -1,8 +1,16 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { appPlugins } from '../../../../../src/renderer/src/shell/registry'
 import { TopBar } from '../../../../../src/renderer/src/shell/components/TopBar'
+import {
+  resetServerInfoForTest,
+  setServerInfo,
+} from '../../../../../src/renderer/src/shell/server-info'
+
+afterEach(() => {
+  resetServerInfoForTest()
+})
 
 describe('TopBar', () => {
   it('渲染注册表中所有 app 标签', () => {
@@ -34,9 +42,23 @@ describe('TopBar', () => {
     expect(onSelect).toHaveBeenCalledWith(appPlugins[0]!.id)
   })
 
-  it('右侧显示版本号', () => {
+  it('右侧显示服务端版本号；取到之前不显示（不编一个假版本）', () => {
     render(<TopBar apps={appPlugins} activeId={appPlugins[0]!.id} onSelect={() => {}} />)
-    expect(screen.getByText('v0.1.0')).toBeInTheDocument()
+    expect(screen.queryByText(/^v/u)).toBeNull()
+
+    act(() => {
+      setServerInfo({
+        name: 'workbench',
+        version: '2.0.0',
+        kernelVersion: 'M47.0.0',
+        dataDir: '/data',
+        defaultWorkdir: '/work',
+        startedAt: 't',
+        clients: 1,
+        pid: 1,
+      })
+    })
+    expect(screen.getByText('v2.0.0')).toBeInTheDocument()
   })
 
   it('右侧有主题切换器：全局入口，任何 app 都能切主题', async () => {

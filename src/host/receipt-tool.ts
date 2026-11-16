@@ -8,8 +8,11 @@
  * 两道闸门让「没配好就等于不存在」：
  * 1. `WORKBENCH_RECEIPT_TOOL=0` 才关（默认开——dsh 0.2.1-rc.5 / ACP 两边的注入形状
  *    都已在真机核对，关掉只是为了排查协议问题时能退回纯文本通道）；
- * 2. 脚本必须真的找得到（开发态在 `out/main` 同级、打包态在 resources），找不到就退回
- *    纯文本通道，不会把 CLI 起坏。
+ * 2. 脚本必须真的找得到（与 `out/server/index.js` 同级），找不到就退回纯文本通道，
+ *    不会把 CLI 起坏。
+ *
+ * 服务器形态下子进程就是本机 node：`process.execPath` 直接可用，不再需要
+ * `ELECTRON_RUN_AS_NODE` 把桌面二进制退化成 Node。
  */
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -22,22 +25,15 @@ export const RECEIPT_TOOL_SERVER_ENV_KEY = 'WORKBENCH_RECEIPT_TOOL_SERVER'
 
 export interface ResolveReceiptToolOptions {
   env?: NodeJS.ProcessEnv
-  /** 主进程产物目录（`__dirname`）：未打包时 server 脚本与它同级 */
+  /** 服务端产物目录（`__dirname`）：默认 server 脚本与它同级 */
   mainDir?: string
-  /** 打包后的 resources 目录：`plugins/receipt-mcp-server.cjs` */
-  resourcesDir?: string
   /** 文件存在判断（测试注入） */
   exists?: (path: string) => boolean
-  /** node 可执行；缺省 Electron 自带的 `process.execPath` */
+  /** node 可执行；缺省 `process.execPath` */
   command?: string
 }
 
-/**
- * 解析回执工具 server 的启动配置。
- *
- * 用 `ELECTRON_RUN_AS_NODE=1` 让 Electron 二进制以纯 Node 跑脚本——与外部插件宿主同一
- * 口径，不假设用户装了独立 node。
- */
+/** 解析回执工具 server 的启动配置；找不到脚本返回 null（退回纯文本通道）。 */
 export const resolveReceiptTool = (
   options: ResolveReceiptToolOptions = {},
 ): SdkReceiptTool | null => {
@@ -48,15 +44,12 @@ export const resolveReceiptTool = (
   const candidates = [
     env[RECEIPT_TOOL_SERVER_ENV_KEY],
     options.mainDir === undefined ? undefined : join(options.mainDir, 'receipt-mcp-server.cjs'),
-    options.resourcesDir === undefined
-      ? undefined
-      : join(options.resourcesDir, 'plugins', 'receipt-mcp-server.cjs'),
   ].filter((path): path is string => typeof path === 'string' && path !== '')
   const script = candidates.find((path) => exists(path))
   if (script === undefined) return null
   return {
     command: options.command ?? process.execPath,
     args: [script],
-    env: [{ name: 'ELECTRON_RUN_AS_NODE', value: '1' }],
+    env: [],
   }
 }

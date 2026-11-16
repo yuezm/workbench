@@ -2,6 +2,7 @@ import type { ReactElement } from 'react'
 import type { AppPlugin } from '../types'
 import { cn } from '../../lib/cn'
 import { ThemeSwitcher } from '../../components/ui/theme-switcher'
+import { useServerInfo } from '../server-info'
 
 interface TopBarProps {
   apps: AppPlugin[]
@@ -11,6 +12,8 @@ interface TopBarProps {
 
 /** 顶部栏：品牌 + app 一级导航（原左侧栏的第一层） */
 export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement {
+  // 版本来自服务端 /api/info（不再硬编码）：未取到就不显示，避免显示一个假版本
+  const info = useServerInfo()
   return (
     <header className="relative z-10 flex h-12 shrink-0 items-center gap-4 border-b border-border bg-background px-4">
       {/* 品牌区 */}
@@ -66,7 +69,9 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps): ReactElement 
       <div className="ml-auto flex items-center gap-2">
         {/* 主题切换器：全局设置（亮/暗/跟随系统），任何 app 都从这里切 */}
         <ThemeSwitcher />
-        <span className="text-xs text-faint-foreground">v0.1.0</span>
+        {info === null ? null : (
+          <span className="text-xs text-faint-foreground">v{info.version}</span>
+        )}
       </div>
     </header>
   )

@@ -1,5 +1,5 @@
 /**
- * 外部插件子进程宿主（M7 D2）：`process.execPath` + `ELECTRON_RUN_AS_NODE=1` 跑 `plugin.mjs`，
+ * 外部插件子进程宿主（M7 D2）：`process.execPath`（服务端进程即 node）跑 `plugin.mjs`，
  * stdio 走 JSONL 帧（`protocol/plugin-host.ts` 编解码）。
  *
  * 职责边界：
@@ -25,7 +25,7 @@ import {
 } from '../../protocol/plugin-host'
 import type { Spawned, SpawnFn } from '../../sdk/types'
 import { killProcessTree, tail } from '../process'
-import { PLUGIN_RUN_AS_NODE, buildPluginEnv } from './env'
+import { buildPluginEnv } from './env'
 
 /** 外部插件子进程的生命周期状态（与 `PluginStatus` 的 `error` / `ready` 口径对齐）。 */
 export const EXTERNAL_PLUGIN_PROCESS_STATUSES = [
@@ -51,7 +51,7 @@ export interface ExternalPluginProcessOptions {
   granted?: readonly Capability[]
   /** `welcome` 下发的 config（非 secret + 已授权 secret；不落日志） */
   config?: Record<string, string | number | boolean>
-  /** 子进程环境；缺省 `buildPluginEnv()`（白名单 + `ELECTRON_RUN_AS_NODE=1`） */
+  /** 子进程环境；缺省 `buildPluginEnv()`（白名单构造） */
   env?: NodeJS.ProcessEnv
   /** 宿主日志通道（插件 log 帧与 stderr 都经这里；不含 secret） */
   log?: (line: string) => void
@@ -160,8 +160,8 @@ export function createExternalPluginProcess(
   const killTree = options.killTree ?? ((pid, signal) => killProcessTree(pid, signal))
   const granted = [...(options.granted ?? manifest.capabilities)]
   const config = options.config ?? {}
-  // 环境白名单在创建时算一次：装配根传入自定义环境时也只补 ELECTRON_RUN_AS_NODE
-  const env: NodeJS.ProcessEnv = { ...(options.env ?? buildPluginEnv()), [PLUGIN_RUN_AS_NODE]: '1' }
+  // 环境白名单在创建时算一次：装配根传入自定义环境时原样使用（不再补运行时开关）
+  const env: NodeJS.ProcessEnv = { ...(options.env ?? buildPluginEnv()) }
 
   let status: ExternalPluginProcessStatus = 'idle'
   let lastError: string | null = null

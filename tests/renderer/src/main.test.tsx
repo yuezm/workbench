@@ -1,18 +1,23 @@
 /**
- * renderer 入口（M5）：main.tsx 只做两件事——校验 preload 桥接、装配 kernelStore、挂载 Workbench。
- * 这里 mock react-dom/client，断言「缺桥接直接报错」「有桥接先配置内核再 render」。
+ * renderer 入口：main.tsx 只做三件事——装配浏览器桥接、探一次服务可用性、挂载 Workbench。
  *
- * M27：系统通知点击的落点管道也在入口接线——`bridge.onOpenTarget` 必须在 render **之前**
- * 接上 shell store（一次性推送，晚一步就丢），且接的就是 `pushOpenTarget` 本人。
+ * 与桌面形态的差别：桥接不再是 preload 注入，而是入口自己创建的 HTTP/SSE 桥接；因此这里
+ * mock 掉 `shared/bridge` 的工厂，断言：
+ * ① 服务连不上时渲染启动失败页，不装配内核；
+ * ② 服务可用时先装配内核（取 kernel.seq 快照）再 render；
+ * ③ 知会管道在 render 之前接上，并且接的是 shell store 的 `pushOpenTarget`。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { NoticeEvent } from '../../../src/protocol/http'
 import type { OpenTarget } from '../../../src/protocol/ipc'
 import type { WorkbenchApi } from '../../../src/shared/workbench-api'
 
-const { createRootMock, renderMock } = vi.hoisted(() => {
+const { createRootMock, renderMock, infoMock, onNoticeMock } = vi.hoisted(() => {
   const renderMock = vi.fn()
   const createRootMock = vi.fn(() => ({ render: renderMock }))
-  return { createRootMock, renderMock }
+  const infoMock = vi.fn()
+  const onNoticeMock = vi.fn<(handler: (notice: NoticeEvent) => void) => () => void>(() => () => {})
+  return { createRootMock, renderMock, infoMock, onNoticeMock }
 })
 
 vi.mock('react-dom/client', () => ({
@@ -21,24 +26,22 @@ vi.mock('react-dom/client', () => ({
 
 const queryMock = vi.fn(async (view: string) => (view === 'kernel.seq' ? 0 : ([] as unknown)))
 
-/** 落点订阅：主进程点击系统通知后经它推 `OpenTarget`，返回退订函数 */
-const onOpenTargetMock = vi.fn<(handler: (target: OpenTarget) => void) => () => void>(
-  () => () => {},
-)
-
-function fakeBridge(): WorkbenchApi {
-  return {
-    dispatch: vi.fn(async () => ({ facts: [], value: null })) as WorkbenchApi['dispatch'],
-    query: queryMock as unknown as WorkbenchApi['query'],
-    subscribe: vi.fn(() => () => {}),
-    onOpenTarget: onOpenTargetMock,
-    // M10：项目文件夹选择器（这里只保证桥接形状完整，不实际弹框）
-    pickFolder: vi.fn(async () => null),
-    // M45：飞书连接管理（这里只保证桥接形状完整，不实际跑 CLI）
-    lark: vi.fn(),
-    notify: vi.fn(),
-  }
+/** 被测入口拿到的桥接（`createWebBridge` 的返回值） */
+const fakeBridge: WorkbenchApi = {
+  dispatch: vi.fn(async () => ({ facts: [], value: null })) as WorkbenchApi['dispatch'],
+  query: queryMock as unknown as WorkbenchApi['query'],
+  subscribe: vi.fn(() => () => {}),
+  onNotice: onNoticeMock,
+  listDirs: vi.fn(async () => ({ path: '/home/me', parent: null, entries: [] })),
+  info: infoMock as unknown as WorkbenchApi['info'],
+  lark: vi.fn() as unknown as WorkbenchApi['lark'],
+  notify: vi.fn(),
 }
+
+vi.mock('../../../src/renderer/src/shared/bridge', () => ({
+  createWebBridge: () => fakeBridge,
+  establishSession: vi.fn(async () => true),
+}))
 
 describe('renderer 入口 main.tsx', () => {
   beforeEach(() => {
@@ -47,46 +50,68 @@ describe('renderer 入口 main.tsx', () => {
     delete (window as unknown as { workbench?: WorkbenchApi }).workbench
   })
 
-  it('preload 未注入：渲染启动失败页，不白屏、不挂载 Workbench', async () => {
+  it('服务连不上：渲染启动失败页，不装配内核', async () => {
+    infoMock.mockRejectedValue(new Error('Failed to fetch'))
     const { StartupFailure } =
       await import('../../../src/renderer/src/shell/components/StartupFailure')
     await import('../../../src/renderer/src/main')
 
-    expect(createRootMock).toHaveBeenCalledTimes(1)
-    expect(renderMock).toHaveBeenCalledTimes(1)
-    const element = renderMock.mock.calls[0][0] as { type: unknown }
+    await vi.waitFor(() => expect(renderMock).toHaveBeenCalledTimes(1))
+    const element = renderMock.mock.calls[0]?.[0] as { type: unknown }
     expect(element.type).toBe(StartupFailure)
-    // 没有桥接就不该去装配内核（否则会连不上宿主的订阅）
+    // 没连上就不该去装配内核（否则订阅与快照都会连续失败）
     expect(queryMock).not.toHaveBeenCalled()
-    // 也没有落点管道可接：没有桥接就什么都没有，不能假装订阅成功
-    expect(onOpenTargetMock).not.toHaveBeenCalled()
+    expect(onNoticeMock).not.toHaveBeenCalled()
   })
 
-  it('有桥接：先装配 kernel（取 kernel.seq 快照）再 createRoot().render(Workbench)', async () => {
-    const bridge = fakeBridge()
-    ;(window as unknown as { workbench?: WorkbenchApi }).workbench = bridge
+  it('服务可用：先装配内核（取 kernel.seq 快照）再 createRoot().render(Workbench)', async () => {
+    infoMock.mockResolvedValue({
+      name: 'workbench',
+      version: '2.0.0',
+      kernelVersion: 'M47.0.0',
+      dataDir: '/data',
+      defaultWorkdir: '/work',
+      startedAt: 't',
+      clients: 1,
+      pid: 1,
+    })
     await import('../../../src/renderer/src/main')
 
-    expect(bridge.subscribe).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(renderMock).toHaveBeenCalledTimes(1))
+    expect(infoMock).toHaveBeenCalledTimes(1)
+    expect(fakeBridge.subscribe).toHaveBeenCalledTimes(1)
     expect(queryMock).toHaveBeenCalledWith('kernel.seq')
-    expect(createRootMock).toHaveBeenCalledTimes(1)
-    expect(renderMock).toHaveBeenCalledTimes(1)
+    // 桥接挂到 window.workbench：app 代码沿用同一个入口
+    expect((window as unknown as { workbench?: WorkbenchApi }).workbench).toBe(fakeBridge)
   })
 
-  it('启动时接上落点管道：接到 shell store 的 pushOpenTarget，且在 render 之前', async () => {
-    const bridge = fakeBridge()
-    ;(window as unknown as { workbench?: WorkbenchApi }).workbench = bridge
+  it('知会管道在 render 之前接上：接到 shell store 的 pushOpenTarget', async () => {
+    infoMock.mockResolvedValue({
+      name: 'workbench',
+      version: '2.0.0',
+      kernelVersion: 'M47.0.0',
+      dataDir: '/data',
+      defaultWorkdir: '/work',
+      startedAt: 't',
+      clients: 1,
+      pid: 1,
+    })
     await import('../../../src/renderer/src/main')
-    // 与 main.tsx 拿到的是同一个模块实例（上一步 resetModules 之后才 import）
     const openTargetModule = await import('../../../src/renderer/src/shell/openTarget')
 
-    expect(onOpenTargetMock).toHaveBeenCalledTimes(1)
-    const handler = onOpenTargetMock.mock.calls[0][0]
-    // 接的就是 store 的入口：点击 → push（seq 自增、通知订阅者），不需要中间层
-    expect(handler).toBe(openTargetModule.pushOpenTarget)
-    // 先接管道再挂界面：窗口加载期间的那一次点击也进得来
-    expect(onOpenTargetMock.mock.invocationCallOrder[0]).toBeLessThan(
-      renderMock.mock.invocationCallOrder[0],
+    await vi.waitFor(() => expect(onNoticeMock).toHaveBeenCalledTimes(1))
+    const handler = onNoticeMock.mock.calls[0]?.[0] as (notice: NoticeEvent) => void
+    const target: OpenTarget = { appId: 'ai-workflow', taskId: 't1' }
+    let seen: { appId?: string; taskId?: string } | null = null
+    const off = openTargetModule.subscribeOpenTarget((pending) => {
+      seen = pending
+    })
+    handler({ kind: 'notice', title: '任务完成', body: '甲任务', target })
+    off()
+    // 落点进了 shell store：切 app 与后续消费方都读同一份
+    expect(seen).toMatchObject({ appId: 'ai-workflow', taskId: 't1' })
+    expect(onNoticeMock.mock.invocationCallOrder[0]).toBeLessThan(
+      renderMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     )
   })
 })

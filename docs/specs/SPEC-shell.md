@@ -4,12 +4,12 @@
 
 ## Objective
 
-搭建一个可长期扩展的 Electron 桌面工作台外壳：顶部栏列出所有已注册的 app，内容区挂载当前选中的 app。核心价值在于 **app 注册机制**——未来新增 app 不需要改动外壳代码。shell 自己不包含任何具体 app 的业务逻辑；第一个消费者 `pomodoro` 用于验证这套机制。
+搭建一个可长期扩展的 Web 工作台外壳（浏览器端 SPA，服务端是一个常驻 Node 进程）：顶部栏列出所有已注册的 app，内容区挂载当前选中的 app。核心价值在于 **app 注册机制**——未来新增 app 不需要改动外壳代码。shell 自己不包含任何具体 app 的业务逻辑；第一个消费者 `pomodoro` 用于验证这套机制。
 
 **用户故事：**
 
 - 作为使用者，我打开工作台后能在顶部栏看到所有 app 标签，点击即切换，界面保持无整页刷新。
-- 作为使用者，我点击窗口关闭按钮（X）时窗口隐藏到系统托盘，程序继续在后台运行；从托盘菜单可重新显示窗口或真正退出。
+- 作为使用者，我关掉页面后服务照常在后台跑（常驻由 systemd / pm2 / docker 负责），下次打开页面回到同一份数据与同一批视图。
 - 作为开发者（我自己），我新增一个 app 时只需要：新建 app 目录、实现 `AppPlugin`、在注册表加一行。
 
 ## 界面结构（2026-11-03 调整：一层横置，app 内只留一列）
@@ -25,7 +25,7 @@
 
 ## Tech Stack
 
-- Electron + electron-vite 脚手架（版本以脚手架安装时的最新稳定版为准）
+- Node 22 单进程服务（`node out/server/index.js`）+ Vite 构建（`vite.server.config.mts` / `vite.web.config.mts`）
 - TypeScript（strict）
 - React 18+（函数组件 + hooks，内置状态管理，不引状态库）
 - CSS Modules（不引 UI 框架）
@@ -34,35 +34,31 @@
 ## Commands
 
 ```
-Dev:    npm run dev      # 启动开发模式（含热更新）
-Build:  npm run build    # 类型检查 + 编译 + 打包桌面安装程序（产物在 dist/）
-Dist:   npm run dist     # 只重新打包（复用 out/，不重新编译）
-Test:   npm test         # vitest run
-Lint:   npm run lint
+Dev:    pnpm dev        # vite watch 构建服务端 + node --watch + Web dev server（/api 代理到服务端）
+Build:  pnpm build      # typecheck + build:server（out/server）+ build:web（out/web）
+Start:  pnpm start      # node out/server/index.js（常驻交给进程管理器）
+Test:   pnpm test       # vitest run
+Lint:   pnpm lint
 ```
 
-> 打包由 electron-builder 完成（配置见 `electron-builder.yml`）。Windows 产出 `dist/workbench-<version>-setup.exe`（NSIS 安装包）与 `dist/workbench-<version>-portable.exe`（免安装单文件）。
+> 没有安装包与打包态：`pnpm build` 只产出 `out/server`（服务）与 `out/web`（静态产物），服务自己同源托管 `out/web`。
 
 ## Project Structure
 
-> 实际落地遵循 electron-vite 约定：renderer 源码根为 `src/renderer/src/`（与最初草案的 `src/renderer/*` 对应，多一层 `src/`）。
+> 实际落地：renderer 源码根为 `src/renderer/src/`（Vite 的 Web 入口 `src/renderer/index.html`）；服务端与 Web 各自一份 vite 配置（`vite.server.config.mts` / `vite.web.config.mts`）。
 
 ```
 workbench/
 ├── src/
-│   ├── main/               # 【shell】Electron 主进程
-│   │   ├── index.ts        #   窗口创建、生命周期（关闭即隐藏到托盘）、AppUserModelId
-│   │   ├── tray.ts         #   系统托盘：图标、菜单（显示/退出）
-│   │   └── ipc.ts          #   IPC handlers（notify）
-│   ├── preload/            # 【shell】contextBridge，向 renderer 暴露受控 API
-│   │   └── index.ts
-│   ├── shared/             # 跨进程契约（preload 与 renderer 共用）
-│   │   └── workbench-api.ts
+│   ├── server/             # 【server】装配根 + HTTP/SSE（进程入口 index.ts 起服务）
+│   ├── shared/             # 跨层契约（桥接与 renderer 共用）
+│   │   └── workbench-api.ts #   WorkbenchApi：dispatch/query/subscribe/onNotice/listDirs/info/lark/notify
 │   └── renderer/
 │       ├── index.html
 │       └── src/
-│           ├── main.tsx        # 渲染入口：挂载 Workbench
+│           ├── main.tsx        # 渲染入口：建 HTTP/SSE 桥接并挂到 window.workbench，再挂载 Workbench
 │           ├── shared/
+│           │   ├── bridge.ts   # createWebBridge()：WorkbenchApi 的浏览器实现（fetch + EventSource）
 │           │   └── api.d.ts    # window.workbench 全局类型声明
 │           ├── shell/          # 【shell】渲染侧外壳
 │           │   ├── Workbench.tsx #   Workbench：布局 + 当前 app 状态
@@ -73,9 +69,8 @@ workbench/
 │           │   └── styles/     #   全局深色主题变量（global.css）
 │           └── apps/
 │               └── pomodoro/   # 【pomodoro】见 SPEC-pomodoro.md
-├── resources/             # 打包资源（icon.png / icon.ico）
 ├── docs/                  # CAPABILITY-MAP.md / specs/ / planning/
-├── scripts/               # 构建辅助脚本（make-icon.mjs）
+├── scripts/               # 构建辅助脚本（dev.mjs、检查脚本等）
 └── package.json
 ```
 
@@ -117,26 +112,34 @@ import { pomodoroApp } from '../apps/pomodoro'
 export const appPlugins: AppPlugin[] = [aiWorkflowApp, pomodoroApp]
 ```
 
-**跨进程 API（preload 暴露，契约定义在 `src/shared/workbench-api.ts`）：**
+**跨层 API（契约定义在 `src/shared/workbench-api.ts`，浏览器侧由 `src/renderer/src/shared/bridge.ts` 实现成 HTTP + SSE，入口 `main.tsx` 把它挂到 `window.workbench`）：**
 
-M5 起 renderer 只拿三个动词 + 通知（`dispatch / query / subscribe / notify`，详见
-[SPEC-host](./SPEC-host.md)「IPC 契约」）：
+M5 起 renderer 只拿三个动词 + 知会 + 目录浏览（`dispatch / query / subscribe / onNotice / listDirs / info / lark / notify`，详见
+[SPEC-host](./SPEC-host.md)「HTTP/SSE 契约」）：
 
 ```ts
 export interface WorkbenchApi {
   dispatch<C extends Command>(command: C): Promise<CommandDispatchResult<C>>
   query<T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>>
-  subscribe(handler: (event: KernelEvent) => void): () => void
-  /** 发送一条系统通知 */
+  subscribe(handler: (event: WorkbenchEvent) => void): () => void
+  /** 服务端 SSE 推来的知会：页面自己弹轻提示，target 有值时跳落点 */
+  onNotice(handler: (notice: NoticeEvent) => void): () => void
+  /** 列本机目录（项目 = 文件夹；浏览器读不到文件系统） */
+  listDirs(path?: string): Promise<DirListing>
+  /** 服务信息：数据目录、版本、默认工作目录、在线页面数 */
+  info(): Promise<ServerInfo>
+  lark<A extends LarkAdminAction>(action: A): Promise<LarkAdminResult<A>>
+  /** 知会（番茄钟等 app 用） */
   notify(title: string, body?: string): void
 }
-export const NOTIFY_CHANNEL = 'workbench:notify'
 ```
+
+旧契约里的 `onOpenTarget` / `pickFolder` 已删除：前者由 `onNotice` + 页面内落点取代，后者由 `listDirs`（服务端列目录，页面画选择器）取代。
 
 **内核视图（shell 持有，app 只消费）：** `shell/kernelStore.ts` 统一订阅与缓存，启动顺序
 subscribe → `kernel.seq` 快照 → 回放；app 用 `useKernelView(view, params)`（或
 `useKernelViewState` 取 `error`）读视图、用 `getKernelStore().dispatch(command)` 写命令。
-新增 app 不得自己起 IPC 订阅、不得轮询、不得在组件里推导业务状态。
+新增 app 不得自己起 SSE 订阅、不得轮询、不得在组件里推导业务状态，也不得直接 `fetch('/api/...')` 绕过桥接。
 
 ## Code Style
 
@@ -171,25 +174,25 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 - 测什么：
   - registry：id 唯一、必填字段齐全（遍历断言）。
   - TopBar：渲染出所有注册 app；选中项 `aria-current="page"`；点击切换内容区。
-  - preload/ipc 契约：`window.workbench.notify` 存在（类型层保证 + 渲染侧 mock 测试）。
-- 覆盖率：无硬性数字要求；纯逻辑（契约校验）应完整覆盖。Electron 窗口创建等主进程行为以手动验收为准（v1 不做 Electron E2E）。
+  - 桥接契约（`tests/renderer/src/shared/bridge.test.ts`）：`dispatch` / `query` / `lark` / `listDirs` / `info` 的信封解包与错误文案、`subscribe` 一条 `EventSource`、`onNotice` 走同一路、`notify` 发完就忘。
+- 覆盖率：无硬性数字要求；纯逻辑（契约校验）应完整覆盖。服务启动/退出等进程行为以 `tests/server/lifecycle.test.ts` 与手动验收为准。
 
 ## Boundaries
 
-- **Always：** renderer 访问 Electron 能力必须经 preload 暴露的 `window.workbench` API；新增 app 必须实现 `AppPlugin` 并通过注册表进入；提交前 `npm test` 与 `npm run build` 通过。
-- **Ask first：** 新增 npm 依赖；修改窗口默认尺寸/主题基座；引入路由或状态管理库。
-- **Never：** 在 renderer 进程直接 `require('electron')` 或访问 Node API；把具体 app 的业务逻辑写进 shell；让 shell 依赖任何 app 的内部实现。
+- **Always：** renderer 只能经 `window.workbench`（`src/renderer/src/shared/bridge.ts` 的 HTTP/SSE 实现）访问服务；新增 app 必须实现 `AppPlugin` 并通过注册表进入；提交前 `pnpm test` 与 `pnpm build` 通过。
+- **Ask first：** 新增 npm 依赖；修改服务默认监听地址与端口（`WORKBENCH_HOST` / `WORKBENCH_PORT` 的缺省值）或主题基座；引入路由或状态管理库。
+- **Never：** 在 renderer 里 import `src/server` 或 Node 内置、直接 `fetch('/api/...')` 绕过桥接；把具体 app 的业务逻辑写进 shell；让 shell 依赖任何 app 的内部实现。
 
 ## Success Criteria
 
-1. `npm run dev` 启动后出现桌面窗口：顶部栏按注册表顺序显示 app 标签（当前为「AI 工作流」在前、「番茄时钟」在后），第一个标签处于选中态、内容区挂载对应 app；点另一个 app 标签即切换，无整页刷新。
-2. 新增一个 app 只需三步：新建 `src/renderer/apps/<id>/`、实现 `AppPlugin`、注册表加一行；外壳代码（TopBar/Workbench/主进程）零改动。（验收方式：以 pomodoro 的接入过程为证 + registry 类型约束。）
+1. `pnpm dev` 起服务与 Web dev server 后打开页面：顶部栏按注册表顺序显示 app 标签（当前为「AI 工作流」在前、「番茄时钟」在后），第一个标签处于选中态、内容区挂载对应 app；点另一个 app 标签即切换，无整页刷新。
+2. 新增一个 app 只需三步：新建 `src/renderer/src/apps/<id>/`、实现 `AppPlugin`、注册表加一行；外壳代码（TopBar/Workbench/桥接）零改动。（验收方式：以 pomodoro 的接入过程为证 + registry 类型约束。）
 3. `apps` 注册表被类型与测试双重约束：id 重复或字段缺失会在编译期/测试期暴露。
-4. renderer 调用 `window.workbench.notify(...)` 能弹出系统通知（手动验收）。
-5. 点击窗口 X 后窗口隐藏、程序驻留系统托盘；托盘单击/菜单"显示工作台"可恢复窗口，菜单"退出"才真正退出进程（手动验收）。
-6. `npm run build` 通过；`npm test` 全绿。
+4. renderer 调用 `window.workbench.notify(...)` 后，页面收到服务端经 SSE 推来的 `notice` 并弹轻提示（手动验收）。
+5. 关掉页面后服务进程照常在跑；重开页面回到同一份数据与同一批视图，不需要重启服务（手动验收）。
+6. `pnpm build` 通过；`pnpm test` 全绿。
 
 ## Open Questions
 
 1. 主题默认为跟随系统（亮色 / 暗色两套 token，用户可在顶部栏切换）、UI 文案为中文——按假设执行，如需改请指出。
-2. `notify` 目前只覆盖系统通知；后续如有剪贴板、文件对话框等需求，按同样模式在 `WorkbenchApi` 上扩展。
+2. `notify` 现在落成 SSE 上的 `notice`（页面自己弹轻提示，页面关着时由飞书通道喊人）；剪贴板这类桌面能力不再由服务提供，需要时按同样模式在 `WorkbenchApi` 上扩展（目录浏览已经是这样加的：`listDirs`）。

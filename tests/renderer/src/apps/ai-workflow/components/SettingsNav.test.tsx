@@ -4,16 +4,16 @@ import { describe, expect, it, vi } from 'vitest'
 import { SettingsNav } from '../../../../../../src/renderer/src/apps/ai-workflow/components/SettingsNav'
 
 describe('SettingsNav', () => {
-  it('列出六个栏目，标记当前项，点击回调', async () => {
+  it('列出七个栏目，标记当前项，点击回调', async () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
     render(<SettingsNav value="runtimes" onChange={onChange} />)
 
     expect(screen.getByRole('navigation', { name: '设置栏目' })).toBeInTheDocument()
-    expect(screen.getAllByRole('button')).toHaveLength(6)
+    expect(screen.getAllByRole('button')).toHaveLength(7)
     expect(screen.getByRole('button', { name: '运行时' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: '智能体' })).not.toHaveAttribute('aria-current')
-    expect(screen.getByRole('button', { name: '插件' })).not.toHaveAttribute('aria-current')
+    expect(screen.getByRole('button', { name: '服务' })).not.toHaveAttribute('aria-current')
 
     await user.click(screen.getByRole('button', { name: '智能体' }))
     expect(onChange).toHaveBeenCalledWith('agents')
@@ -25,11 +25,13 @@ describe('SettingsNav', () => {
     expect(onChange).toHaveBeenCalledWith('usage')
     await user.click(screen.getByRole('button', { name: '插件' }))
     expect(onChange).toHaveBeenCalledWith('plugins')
+    await user.click(screen.getByRole('button', { name: '服务' }))
+    expect(onChange).toHaveBeenCalledWith('service')
   })
 
-  it('第六栏为插件：选中时标记当前项', () => {
-    render(<SettingsNav value="plugins" onChange={vi.fn()} />)
-    expect(screen.getByRole('button', { name: '插件' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByRole('button', { name: '运行时' })).not.toHaveAttribute('aria-current')
+  it('第七栏为服务：选中时标记当前项', () => {
+    render(<SettingsNav value="service" onChange={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '服务' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '插件' })).not.toHaveAttribute('aria-current')
   })
 })

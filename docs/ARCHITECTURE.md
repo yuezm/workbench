@@ -23,35 +23,40 @@
 
 ```mermaid
 flowchart TB
-  subgraph 客户端["Renderer（UI 客户端）"]
+  subgraph 浏览器["浏览器（Web 客户端）"]
     shell["shell：顶部栏 + 插件槽 + kernelStore"]
     appA["app 插件：pomodoro"]
     appB["app 插件：ai-workflow 看板/聊天/设置"]
+    bridge["bridge：dispatch / query / subscribe（HTTP + SSE）"]
   end
-  preload["preload：命令 / 查询 / 订阅"]
-  subgraph 主进程["Electron 主进程"]
-    host["host：装配根 + 注入能力（DB/时钟/进程/通知/单定时器）"]
+  subgraph 服务进程["服务进程（node out/server/index.js）"]
+    server["server：装配根 + HTTP/SSE + 鉴权 + 配置"]
+    host["host：注入能力（DB/时钟/进程/通知/单定时器）"]
     kernel["kernel：decide / project / 事实日志 / 投影"]
     plugins["插件：source / executor / channel"]
   end
 
-  shell --> preload
-  appA --> preload
-  appB --> preload
-  preload --> host
+  shell --> bridge
+  appA --> bridge
+  appB --> bridge
+  bridge --> server
+  server --> host
   host --> kernel
   plugins --> kernel
   host --> plugins
 ```
 
+浏览器只经同源 HTTP + 一条 SSE 长连接访问服务；没有 IPC、没有窗口、没有安装包。
+
 依赖方向（谁可以 import 谁；ESLint 强制）：
 
 ```
-kernel   ──▶ protocol（仅类型）；不 import electron / node:fs / node:child_process / 网络
+kernel   ──▶ protocol（仅类型）；不 import node:fs / node:child_process / 网络
 sdk      ──▶ protocol（仅类型）
 plugins  ──▶ sdk + protocol；不 import host 内部实现，不 import 其它插件
-host     ──▶ kernel + protocol + sdk + 插件注册表；不 import renderer
-renderer ──▶ shared 类型 + preload 桥接；不 import electron / Node 内置
+host     ──▶ kernel + protocol + sdk + 插件注册表；不 import renderer / server
+server   ──▶ host + kernel + protocol + 插件注册表；不 import renderer / 具体插件实现
+renderer ──▶ protocol + shared 类型 + 自己的 bridge；不 import server / Node 内置
 ```
 
 插件唯一的跨插件复用例外：`src/plugins/shared/` 只放纯函数（协议帧解析、参数转 argv）。
@@ -162,8 +167,8 @@ Agent 没有选择权：只能在回执里 `ask`（拍板）、`events`（再触
 ## 宿主与客户端
 
 - **host**：开库、迁移/重建、装配插件、对账租约、单定时器、spawn 子进程、发通知、托住窗口与托盘。它是唯一有副作用的层。
-- **IPC**：收窄成三个动词——`dispatch(命令)`、`query(视图)`、`subscribe(事实增量)`；不再是一张 30 余方法的 RPC 表。
-- **renderer**：`kernelStore` 持有快照 + 按 `seq` 应用增量；app 插件只声明视图与组件，不再自己算「执行中」。
+- **传输**：收窄成三个动词——`dispatch(命令)`、`query(视图)`、`subscribe(事实增量)`，走同源 HTTP + SSE（`protocol/http.ts` 的 `API_PATHS`）；不再是一张 30 余方法的 RPC 表。
+- **renderer**：`kernelStore` 持有快照 + 按 `seq` 应用增量；app 插件只声明视图与组件，不再自己算「执行中」。浏览器侧唯一传输实现是 `renderer/src/shared/bridge.ts`。
 - **聊天与运行帧**：执行器的帧实时走旁路给 UI 显示，同时**按批写 `run.frames` 事实**，重建后事件流完整；一轮结束写终态事实与 `message.appended`。逐帧单独入账才是不做的（日志膨胀），不是「不入账」。
 
 ## 一次运行的完整链路
@@ -207,7 +212,7 @@ sequenceDiagram
 
 | 决策         | 选择                                                                                                                                                                                   | 代价 / 不选的理由                                                                                                            |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| 内核形态     | 主进程内的纯 TS 模块，不是独立服务                                                                                                                                                     | 单机自用；进程内 IPC 直推更简单。保留 `decide` 纯函数，未来可原样搬进独立进程                                                |
+| 内核形态     | 服务进程内的纯 TS 模块，不是独立服务                                                                                                                                                   | 单机自用；服务与内核同进程更简单（HTTP 只做传输）。保留 `decide` 纯函数，未来可原样搬进独立进程                              |
 | 派活单位     | 规则与阶段都指向**执行目标**（智能体或脚本）；运行时只提供连接（`runtimeId` → 执行器/命令），执行配置（模型/思考强度/并发/访问权限/工作目录/环境变量，或脚本的命令/参数/超时）在目标上 | 执行器只是协议适配，避免「事件直接调 CLI」绕过目标配置（系统提示词、权限、并发）；同一连接可被多个目标复用，各算各的并发窗口 |
 | 外部事件落点 | 规则只**建任务**（指定工作流与起始阶段），不直接建 run                                                                                                                                 | 外部事件与手工任务共用一套工作流引擎，避免两条并行派活路径                                                                   |
 | 上下文共享   | 线程 + **派生式**上下文（每轮从事实现算），不维护可变共享文件                                                                                                                          | 可重建、可审计、可截断；可变 blob 会漂移且能藏注入                                                                           |
@@ -217,14 +222,14 @@ sequenceDiagram
 | 客户端       | renderer 是纯客户端，不持有业务权威状态                                                                                                                                                | 业务真相（任务/运行/卡片）只在事实日志；计时器、表单草稿这类交互态可以留在 app 本地，跨会话或需要追溯的状态才入内核          |
 | 聊天         | 与阶段执行共用 run 生命周期，`purpose='chat'`                                                                                                                                          | 去掉 runner/chat 两条重复执行路径；看板仍不显示聊天 run                                                                      |
 
-不照抄的 5 条：无界面（产品本体就是 UI）、HTTP 长轮询 + 系统服务（改为 Electron 生命周期 + IPC 直推）、零运行时依赖（内核模块保留，整体不承诺）、`rules.json` 热加载（改 DB 事实）、插件即独立进程（v1 进程内）。
+不照抄的 5 条：无界面（产品本体有 Web UI）、HTTP 长轮询（改为 SSE 推送）、零运行时依赖（内核模块保留，整体不承诺）、`rules.json` 热加载（改 DB 事实）、插件即独立进程（v1 进程内）。
 
 ## 边界守则（可检查）
 
-1. `src/kernel/**` 不得出现 `electron`、`node:fs`、`node:child_process`、`fetch`、`node:http`、`Date.now()`、`Math.random()`、`randomUUID()`。
+1. `src/kernel/**` 不得出现 `node:fs`、`node:child_process`、`fetch`、`node:http`、`Date.now()`、`Math.random()`、`randomUUID()`。
    1b. 两层方向：`core/` 不得 import `scopes/`（ESLint `no-restricted-imports`）；`decide.ts` 只做表驱动分派，不放业务分支。
-2. `src/renderer/**` 不得 import `electron` / Node 内置（沿用现有 ESLint 规则）。
-3. 只有 `host` 能写库、能 spawn、能发通知；`kernel` 只接收 `view`、只返回 `facts`。
+2. `src/renderer/**` 不得 import Node 内置或 `src/server/**`；浏览器侧只有 `shared/bridge.ts` 一个传输实现（ESLint + `tests/architecture.test.ts` 双保险）。
+3. 只有 `host` 能写库、能 spawn；`server` 负责传输与生命周期，不写业务表；`kernel` 只接收 `view`、只返回 `facts`。
 4. 插件不得 import `src/host/**` 内部实现、不得 import 其它插件、不得直连数据库；副作用只经 `sdk` 且必须声明 `capabilities`；跨插件纯函数只放 `src/plugins/shared/`。宿主不得 import 具体插件实现，只接收装配根注入的注册表清单。
 5. `viewSpec(input)` 必须声明投影切片，禁止全表装载；性能预算按「装载 + 决策」一起算。
 6. 事件里的文字只能进资料文件与 `summary` 字段；`cwd/executor/access` 出现在事件里直接拒收；提示词不进命令行拼接。
@@ -247,15 +252,15 @@ sequenceDiagram
 
 ## 验收与度量
 
-| 项       | 目标                                                                                                                                            |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| 内核规模 | 两层预算（`scripts/check-kernel-budget.mjs`，含注释）：`core/` ≤ 2000 行、单个 `scopes/<域>` ≤ 900 行、`decide.ts` ≤ 220 行，零第三方依赖       |
-| 决策性能 | 「装载 + `decide`」p99 < 8 ms（10 万事实、1 万任务规模），按 `viewSpec` 切片计量；`tasks` 按 id 按需装载、全量遍历才整表（`scripts/bench.mjs`） |
-| 可靠性   | 单实例锁 + WAL；强杀重启后投影与事实一致，无残留 `running`                                                                                      |
-| 重建     | 10 万事实 < 5 s；启动增量 < 100 ms                                                                                                              |
-| 可追溯   | 任一 run 能用一条查询还原触发事件、规则版本、智能体、运行时、回执与流转                                                                         |
-| 质量门   | `pnpm check` 全绿；覆盖率不降；阶段状态机分支 100%                                                                                              |
-| 插件独立 | 新增一个运行时协议：只加执行器插件 + registry 一行，`runtimes.executors()` 与 detect 自动纳入，配置里选它即可；kernel / host / renderer 零改动  |
+| 项       | 目标                                                                                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 内核规模 | 两层预算（`scripts/check-kernel-budget.mjs`，含注释）：`core/` ≤ 2000 行、单个 `scopes/<域>` ≤ 900 行、`decide.ts` ≤ 220 行，零第三方依赖               |
+| 决策性能 | 「装载 + `decide`」p99 < 8 ms（10 万事实、1 万任务规模），按 `viewSpec` 切片计量；`tasks` 按 id 按需装载、全量遍历才整表（`scripts/bench.mjs`）         |
+| 可靠性   | 单实例锁 + WAL；强杀重启后投影与事实一致，无残留 `running`                                                                                              |
+| 重建     | 10 万事实 < 5 s；启动增量 < 100 ms                                                                                                                      |
+| 可追溯   | 任一 run 能用一条查询还原触发事件、规则版本、智能体、运行时、回执与流转                                                                                 |
+| 质量门   | `pnpm check` 全绿；覆盖率不降；阶段状态机分支 100%                                                                                                      |
+| 插件独立 | 新增一个运行时协议：只加执行器插件 + registry 一行，`runtimes.executors()` 与 detect 自动纳入，配置里选它即可；kernel / host / server / renderer 零改动 |
 
 ## 术语
 

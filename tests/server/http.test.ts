@@ -69,7 +69,12 @@ async function harness(
     router,
     notify: vi.fn(),
     events,
-    listDirs: vi.fn((): DirListing => ({ path: '/picked', parent: '/', entries: [] })),
+    listDirs: vi.fn((): DirListing => ({
+      path: '/picked',
+      parent: '/',
+      roots: ['/'],
+      entries: [],
+    })),
     info: () => INFO,
     webDir,
     ...overrides,
@@ -244,7 +249,7 @@ describe('三动词与错误', () => {
   })
 
   it('fs/dirs：把 path 参数解出来交给注入的列目录；缺省不传', async () => {
-    const listDirs = vi.fn(() => ({ path: '/picked', parent: '/', entries: [] }))
+    const listDirs = vi.fn(() => ({ path: '/picked', parent: '/', roots: ['/'], entries: [] }))
     const h = await harness({ listDirs })
     await fetch(h.base + '/api/fs/dirs?path=%2Fhome%2Fme')
     expect(listDirs).toHaveBeenCalledWith('/home/me')

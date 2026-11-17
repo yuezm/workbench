@@ -90,7 +90,7 @@ export interface WorkbenchApi {
   subscribe(handler: (event: WorkbenchEvent) => void): () => void
   /** 知会（任务完成 / 运行失败）：页面自行弹轻提示，target 有值时跳落点 */
   onNotice(handler: (notice: NoticeEvent) => void): () => void
-  /** 列表本机目录（项目 = 文件夹；浏览器读不到文件系统，只能问服务端） */
+  /** 列表本机目录（项目 = 文件夹；浏览器读不到文件系统，只能问服务端；盘符在 `roots`） */
   listDirs(path?: string): Promise<DirListing>
   /** 服务信息：数据目录、版本、默认工作目录、在线页面数 */
   info(): Promise<ServerInfo>

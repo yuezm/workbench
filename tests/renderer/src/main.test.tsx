@@ -32,7 +32,7 @@ const fakeBridge: WorkbenchApi = {
   query: queryMock as unknown as WorkbenchApi['query'],
   subscribe: vi.fn(() => () => {}),
   onNotice: onNoticeMock,
-  listDirs: vi.fn(async () => ({ path: '/home/me', parent: null, entries: [] })),
+  listDirs: vi.fn(async () => ({ path: '/home/me', parent: null, roots: ['/'], entries: [] })),
   info: infoMock as unknown as WorkbenchApi['info'],
   lark: vi.fn() as unknown as WorkbenchApi['lark'],
   notify: vi.fn(),

@@ -6,7 +6,6 @@ import type { Command } from '@workbench/protocol/commands'
 import type { Project } from '@workbench/protocol/entities'
 import type { CommandDispatchResult } from '@workbench/protocol/ipc'
 import type { ViewId, ViewResult } from '@workbench/protocol/views'
-import { FolderPickerDialog } from '@workbench/client-app-ai-workflow/components/FolderPickerDialog'
 import { ProjectDialog } from '@workbench/client-app-ai-workflow/components/ProjectDialog'
 import type { WorkbenchApi } from '@workbench/contract-api'
 
@@ -21,9 +20,14 @@ const project: Project = {
 
 const originalBridge = window.workbench
 
-const listing = (path: string, entries: DirListing['entries'] = []): DirListing => ({
+const listing = (
+  path: string,
+  entries: DirListing['entries'] = [],
+  roots: string[] = [],
+): DirListing => ({
   path,
   parent: path === '/' ? null : path.slice(0, path.lastIndexOf('\\')) || null,
+  roots,
   entries,
 })
 
@@ -48,12 +52,9 @@ function stubBridge(listDirs: (path?: string) => Promise<DirListing>): void {
   window.workbench = api
 }
 
-/** 选择器是独立弹窗：从它的标题定位容器，避免和外层项目弹窗的同名按钮撞车 */
+/** 选择器是独立弹窗（覆盖层组件）：按它的标题取容器，避免和外层项目弹窗的同名按钮撞车 */
 function picker(): HTMLElement {
-  const title = screen.getByText('选择项目文件夹')
-  const dialog = title.closest('[role="dialog"]')
-  if (dialog === null) throw new Error('没有找到选择器弹窗')
-  return dialog as HTMLElement
+  return screen.getByRole('dialog', { name: '选择文件夹' })
 }
 
 afterEach(() => {
@@ -325,27 +326,5 @@ describe('ProjectDialog', () => {
 
     expect(onCancel).toHaveBeenCalledTimes(1)
     expect(onSave).not.toHaveBeenCalled()
-  })
-})
-
-describe('FolderPickerDialog', () => {
-  it('打开时从缺省目录开始；上一级在根目录时禁用', async () => {
-    const listDirs = vi.fn(async () => listing('/'))
-    stubBridge(listDirs)
-    render(<FolderPickerDialog onPick={vi.fn()} onCancel={vi.fn()} />)
-
-    await waitFor(() => expect(listDirs).toHaveBeenCalledWith(undefined))
-    expect(await screen.findByText('/')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '上一级' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '选这个文件夹' })).toBeEnabled()
-  })
-
-  it('传入起始目录时按它列目录；空目录给出说明', async () => {
-    const listDirs = vi.fn(async (path?: string) => listing(path ?? '/'))
-    stubBridge(listDirs)
-    render(<FolderPickerDialog start={'D:\\empty'} onPick={vi.fn()} onCancel={vi.fn()} />)
-
-    await waitFor(() => expect(listDirs).toHaveBeenCalledWith('D:\\empty'))
-    expect(await screen.findByText('这个目录下没有子目录')).toBeInTheDocument()
   })
 })

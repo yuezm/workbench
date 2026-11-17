@@ -41,6 +41,13 @@ export interface DirEntryRow {
 export interface DirListing {
   path: string
   parent: string | null
+  /**
+   * 可直接跳转的根：Windows 是各盘符（`C:\`、`D:\`…），POSIX 只有 `/`。
+   *
+   * 盘根处 `parent` 为 null，只靠「上一级」在同一盘内上下走，跨盘没有入口——
+   * 主目录在 C: 的人就永远到不了 D:（选择器曾经的实际 bug）。
+   */
+  roots: string[]
   entries: DirEntryRow[]
 }
 

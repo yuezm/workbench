@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { BrowseError, expandHome, listDirectories } from '@workbench/api-http/fs-browse'
+import { BrowseError, expandHome, listDirectories, listRoots } from '@workbench/api-http/fs-browse'
 
 const HOME = path.resolve(path.join(path.sep, 'home', 'me'))
 const created: string[] = []
@@ -42,6 +42,20 @@ describe('expandHome', () => {
   })
 })
 
+describe('listRoots', () => {
+  it('Windows 只列存在的盘符（不存在的 A:/B: 不出现）', () => {
+    const roots = listRoots({
+      platform: 'win32',
+      exists: (target) => target === 'C:\\' || target === 'D:\\',
+    })
+    expect(roots).toEqual(['C:\\', 'D:\\'])
+  })
+
+  it('POSIX 的根只有 /', () => {
+    expect(listRoots({ platform: 'linux' })).toEqual(['/'])
+  })
+})
+
 describe('listDirectories（注入）', () => {
   it('空路径落在主目录；相对路径按主目录解析', () => {
     expect(listDirectories(undefined, fake({ dirs: [] })).path).toBe(HOME)
@@ -52,6 +66,11 @@ describe('listDirectories（注入）', () => {
     const listing = listDirectories(HOME, fake({ dirs: ['zeta', 'Alpha', '.hidden', 'beta'] }))
     expect(listing.entries.map((entry) => entry.name)).toEqual(['Alpha', 'beta', 'zeta'])
     expect(listing.parent).toBe(path.dirname(HOME))
+  })
+
+  it('结果里带上可跳转的根（盘根没有上一级，跨盘靠它）', () => {
+    const listing = listDirectories(HOME, { ...fake({ dirs: [] }), roots: () => ['C:\\', 'D:\\'] })
+    expect(listing.roots).toEqual(['C:\\', 'D:\\'])
   })
 
   it('isDirectory 抛错的子项跳过（坏软链不该让整个目录不可选）', () => {

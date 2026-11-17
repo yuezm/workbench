@@ -132,7 +132,9 @@ describe('createWebBridge', () => {
   })
 
   it('listDirs：path 做 URL 编码；缺省只发路径本身', async () => {
-    const { calls, fetchImpl } = fakeFetch(ok({ path: '/', parent: null, entries: [] }))
+    const { calls, fetchImpl } = fakeFetch(
+      ok({ path: '/', parent: null, roots: ['/'], entries: [] }),
+    )
     const bridge = createWebBridge({ fetch: fetchImpl })
     await bridge.listDirs('/home/me/项目 A')
     expect(calls[0]?.url).toBe(`${API_PATHS.dirs}?path=%2Fhome%2Fme%2F%E9%A1%B9%E7%9B%AE%20A`)

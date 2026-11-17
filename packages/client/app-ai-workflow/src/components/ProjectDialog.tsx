@@ -8,11 +8,11 @@ import {
   DialogTitle,
 } from '@workbench/client-ui-primitives/dialog'
 import { Field } from '@workbench/client-ui-kit/field'
+import { FolderPickerDialog } from '@workbench/client-ui-kit/folder-picker'
 import { FormError } from '@workbench/client-ui-kit/form-error'
 import { Input } from '@workbench/client-ui-primitives/input'
 import { Label } from '@workbench/client-ui-primitives/label'
 import { Textarea } from '@workbench/client-ui-primitives/textarea'
-import { FolderPickerDialog } from './FolderPickerDialog'
 
 export interface ProjectDialogProps {
   /** 编辑态传入现有项目；新建时省略 */
@@ -206,9 +206,7 @@ export function ProjectDialog({
                   选择文件夹
                 </Button>
               </div>
-              <span className="text-xs text-faint-foreground">
-                从选择器挑，或粘贴绝对路径
-              </span>
+              <span className="text-xs text-faint-foreground">从选择器挑，或粘贴绝对路径</span>
               {fieldErrors.path !== undefined && fieldErrors.path !== '' && (
                 <span role="alert" className="text-xs text-destructive">
                   {fieldErrors.path}
@@ -226,9 +224,7 @@ export function ProjectDialog({
               />
             </Field>
 
-            <p className="text-xs text-faint-foreground">
-              项目文件夹 = 该项目任务的运行目录。
-            </p>
+            <p className="text-xs text-faint-foreground">项目文件夹 = 该项目任务的运行目录。</p>
 
             <FormError message={submitError} onDismiss={() => setSubmitError(null)} />
 
@@ -257,9 +253,7 @@ export function ProjectDialog({
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
                   {!canSave && (
-                    <p className="text-xs text-faint-foreground">
-                      名称与文件夹路径都必填。
-                    </p>
+                    <p className="text-xs text-faint-foreground">名称与文件夹路径都必填。</p>
                   )}
                   <div className="flex items-center gap-2">
                     <Button type="button" variant="quiet" size="sm" onClick={onCancel}>
@@ -285,6 +279,7 @@ export function ProjectDialog({
       {pickerOpen && (
         <FolderPickerDialog
           start={path.trim() === '' ? undefined : path.trim()}
+          list={(target) => window.workbench.listDirs(target)}
           onPick={pickFolder}
           onCancel={() => setPickerOpen(false)}
         />

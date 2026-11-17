@@ -6,6 +6,7 @@ import { Field } from '@workbench/client-ui-kit/field'
 import { FormError } from '@workbench/client-ui-kit/form-error'
 import { Input } from '@workbench/client-ui-primitives/input'
 import { badgeCls, panelCls } from '@workbench/client-ui-kit/panel'
+import { Switch } from '@workbench/client-ui-primitives/switch'
 import {
   Select,
   SelectContent,
@@ -170,7 +171,7 @@ function ChevronIcon(): ReactElement {
   )
 }
 
-/** 启停开关：列表与详情共用（纯展示 + 回调，忙态由调用方给） */
+/** 启停开关：列表与详情共用（走上游 `Switch`，忙态由调用方给） */
 function PluginSwitch({
   plugin,
   disabled,
@@ -181,26 +182,13 @@ function PluginSwitch({
   onToggle: () => void
 }): ReactElement {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={plugin.enabled}
+    <Switch
       aria-label={`启用插件 ${plugin.name}`}
+      className="mt-0.5"
+      checked={plugin.enabled}
       disabled={disabled}
-      onClick={onToggle}
-      className={cn(
-        'relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors duration-200 outline-none',
-        'focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-not-allowed disabled:opacity-40',
-        plugin.enabled ? 'bg-primary' : 'bg-muted',
-      )}
-    >
-      <span
-        className={cn(
-          'absolute top-0.5 left-0.5 size-4 rounded-full bg-background shadow transition-transform duration-200',
-          plugin.enabled && 'translate-x-4',
-        )}
-      />
-    </button>
+      onCheckedChange={onToggle}
+    />
   )
 }
 

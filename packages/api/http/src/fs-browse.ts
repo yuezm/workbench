@@ -7,9 +7,11 @@
  * 边界与取舍：
  * - 只接受绝对路径；`~` 展开到用户主目录；空值落到主目录（选择器的起点）；
  * - 读不了的子项跳过（一个坏掉的软链不该让整个目录不可选）；
- * - 错误只回可读文案（`BrowseError`），不把 errno/栈丢给浏览器。
+ * - 错误只回可读文案（`BrowseError`），不把 errno/栈丢给浏览器；
+ * - 附带可跳转的根（`roots`）：Windows 列各盘符，POSIX 只有 `/`。盘根 `parent` 为 null，
+ *   没有它就只能在本盘内上下走，主目录在 C: 的人到不了 D:。
  */
-import { readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import type { DirEntryRow, DirListing } from '@workbench/protocol/http'
@@ -28,6 +30,31 @@ export interface BrowseDeps {
   readdir?: (dir: string) => Array<{ name: string; isDirectory(): boolean }>
   /** 判断是否为目录（测试注入） */
   isDirectory?: (dir: string) => boolean
+  /** 可跳转的根（测试注入，避免依赖本机盘符） */
+  roots?: () => string[]
+  /** 判断盘符是否存在（测试注入） */
+  exists?: (target: string) => boolean
+}
+
+/**
+ * 可跳转的根。
+ *
+ * Windows 逐个盘符探测（`A:` 到 `Z:`）：不存在的盘 `existsSync` 立刻返回 false，
+ * 不会把不存在的盘摆到选择器里。POSIX 的根只有 `/`。
+ */
+export function listRoots(
+  deps: { platform?: NodeJS.Platform; exists?: (target: string) => boolean } = {},
+): string[] {
+  const platform = deps.platform ?? process.platform
+  if (platform !== 'win32') return [path.posix.sep]
+  const exists = deps.exists ?? ((target: string) => existsSync(target))
+  const roots: string[] = []
+  for (let code = 'A'.charCodeAt(0); code <= 'Z'.charCodeAt(0); code += 1) {
+    // Windows 的根写作 `D:\`（`path.sep` 在 win32 上就是反斜杠）
+    const root = `${String.fromCharCode(code)}:${path.win32.sep}`
+    if (exists(root)) roots.push(root)
+  }
+  return roots
 }
 
 /** 展开 `~` / `~/x`；`~user` 不认（不是本机用户目录的语义）。 */
@@ -96,5 +123,10 @@ export function listDirectories(target: string | undefined, deps: BrowseDeps = {
   entries.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase(), 'zh-CN'))
 
   const parent = path.dirname(resolved)
-  return { path: resolved, parent: parent === resolved ? null : parent, entries }
+  return {
+    path: resolved,
+    parent: parent === resolved ? null : parent,
+    roots: (deps.roots ?? (() => listRoots(deps)))(),
+    entries,
+  }
 }

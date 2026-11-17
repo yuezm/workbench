@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from '@workbench/client-ui-primitives/dialog'
 import { Field } from '@workbench/client-ui-kit/field'
+import { FolderPickerDialog } from '@workbench/client-ui-kit/folder-picker'
 import { FormError } from '@workbench/client-ui-kit/form-error'
 import { Input } from '@workbench/client-ui-primitives/input'
 import { Label } from '@workbench/client-ui-primitives/label'
@@ -146,6 +147,8 @@ export function AgentDialog({
   )
   const [dangerAck, setDangerAck] = useState(false)
   const [workdir, setWorkdir] = useState(initial.workdir ?? '')
+  /** 文件夹选择器是否打开（与项目弹窗共用同一个覆盖层组件） */
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [envText, setEnvText] = useState(formatEnvText(initial.env ?? {}))
   /**
    * 模型目录按运行时缓存一份：`runtimeId` 与缓存不一致就是「正在读」。
@@ -251,8 +254,7 @@ export function AgentDialog({
   ]
 
   /** 按钮禁用必须伴随可见原因：点不动又不说为什么，和静默 return 是同一个毛病 */
-  const disabledHint =
-    runtimeId === '' ? '先到「运行时」新建并测试通过。' : null
+  const disabledHint = runtimeId === '' ? '先到「运行时」新建并测试通过。' : null
   const dangerHint =
     permissionMode === 'danger-full-access' && !dangerAck
       ? '先勾选上面的「我明白风险，仍要选完全访问」。'
@@ -320,285 +322,309 @@ export function AgentDialog({
   }
 
   return (
-    <Dialog
-      open
-      onOpenChange={() => {
-        // Radix 受控弹窗无 Trigger：dismiss 只会发 false，故直接收口
-        onCancel()
-      }}
-    >
-      {/*
+    <>
+      <Dialog
+        open
+        onOpenChange={() => {
+          // Radix 受控弹窗无 Trigger：dismiss 只会发 false，故直接收口
+          onCancel()
+        }}
+      >
+        {/*
         必须有高度上限：System Prompt 能写几千字，`field-sizing-content` 的 textarea 会把
         弹窗撑到比视口还高，而 DialogContent 是 fixed + translate 居中（SPEC-ui §4「Dialog 的
         尺寸」），超出的上下两端会被裁到屏幕外，保存按钮点不到。改为头部 / 底部固定、
         字段区自己滚动的列布局。
       */}
-      <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-2xl">
-        <DialogHeader className="shrink-0">
-          <DialogTitle>{mode === 'edit' ? '编辑智能体' : '新建智能体'}</DialogTitle>
-        </DialogHeader>
-        <form className="flex min-h-0 flex-1 flex-col gap-4" noValidate onSubmit={submit}>
-          {/*
+        <DialogContent className="flex max-h-[85vh] flex-col gap-4 sm:max-w-2xl">
+          <DialogHeader className="shrink-0">
+            <DialogTitle>{mode === 'edit' ? '编辑智能体' : '新建智能体'}</DialogTitle>
+          </DialogHeader>
+          <form className="flex min-h-0 flex-1 flex-col gap-4" noValidate onSubmit={submit}>
+            {/*
             水平内边距是给焦点环留位：`ring-[3px]` 是向外的 box-shadow，滚动容器按 padding box
             裁剪，左边缘原本 0 内边距 → 输入框聚焦时左侧那 3px 紫环被切掉（右侧 4px 刚好够）。
             负外边距抵掉这 8px，字段左右边缘与标题 / 底部按钮对齐，视觉宽度不变。
           */}
-          <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1">
-            {runtimes.length === 0 && (
-              <div className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
-                先添加运行时。
-              </div>
-            )}
+            <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1">
+              {runtimes.length === 0 && (
+                <div className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
+                  先添加运行时。
+                </div>
+              )}
 
-            {runtimes.length > 0 && usable.length === 0 && (
-              <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-                没有可用运行时，先到「运行时」测试通过。
-              </p>
-            )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
-                <Input
-                  aria-label="智能体名称"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value)
-                    setNameError(null)
-                  }}
-                />
-              </Field>
-              <Field label="绑定运行时" required error={runtimeError}>
-                <Select
-                  value={runtimeId}
-                  onValueChange={(next) => {
-                    setSelected(next)
-                    setRuntimeError(null)
-                  }}
-                >
-                  <SelectTrigger aria-label="智能体运行时" className="w-full">
-                    <SelectValue placeholder={runtimes.length === 0 ? '无' : '请选择'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {runtimeOptions.map((option) => (
-                      <SelectItem
-                        key={option.value}
-                        value={option.value}
-                        disabled={option.disabled}
-                      >
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              {unavailable.length > 0 && (
-                <p className="col-span-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-sm text-destructive">
-                  不可用：{unavailable.map((r) => r.name).join('、')}
+              {runtimes.length > 0 && usable.length === 0 && (
+                <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+                  没有可用运行时，先到「运行时」测试通过。
                 </p>
               )}
 
-              <Field label="描述" className="col-span-2">
-                <Input
-                  aria-label="智能体描述"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                />
-              </Field>
-              <Field label="System Prompt" className="col-span-2">
-                <Textarea
-                  aria-label="智能体能力"
-                  // 上限压住自动增高：几千字的提示词也只占这么高，框内自己滚，不把弹窗顶大
-                  className="max-h-56 min-h-24 resize-y font-mono text-sm"
-                  rows={6}
-                  placeholder="角色、做事方式与产出要求；每轮都带上这段"
-                  value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
-                />
-              </Field>
-
-              <Field
-                label="模型"
-                hint={modelsLoading ? '读取模型中…' : '来自运行时连接'}
-                error={
-                  modelError ??
-                  (modelsError === null ? null : `模型加载失败：${modelsError}（可手填）`)
-                }
-              >
-                {/* 空值项（默认模型）显示 placeholder：placeholder 文案 = 该空值项的标签 */}
-                <Select
-                  value={modelChoice}
-                  onValueChange={(value) => {
-                    setModelChoice(value)
-                    setModelError(null)
-                    setReasoningEffort('')
-                  }}
-                  disabled={modelsLoading}
-                >
-                  <SelectTrigger aria-label="智能体模型" className="w-full">
-                    <SelectValue placeholder="默认" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {modelOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              {modelChoice === CUSTOM_MODEL && (
-                <Field
-                  label="模型 id"
-                  className="col-span-2"
-                  hint="provider/model，如 deepseek/deepseek-v4"
-                >
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="名称" required hint="保存时去掉首尾空格" error={nameError}>
                   <Input
-                    aria-label="智能体模型手填"
-                    className="font-mono"
-                    value={customModel}
+                    aria-label="智能体名称"
+                    value={name}
                     onChange={(e) => {
-                      setCustomModel(e.target.value)
-                      setModelError(null)
+                      setName(e.target.value)
+                      setNameError(null)
                     }}
                   />
                 </Field>
-              )}
-              <Field label="思考强度">
-                <Select
-                  value={reasoningEffort}
-                  onValueChange={setReasoningEffort}
-                  disabled={thinkingLevels.length === 0}
-                >
-                  <SelectTrigger aria-label="智能体思考强度" className="w-full">
-                    <SelectValue placeholder="默认" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {effortOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+                <Field label="绑定运行时" required error={runtimeError}>
+                  <Select
+                    value={runtimeId}
+                    onValueChange={(next) => {
+                      setSelected(next)
+                      setRuntimeError(null)
+                    }}
+                  >
+                    <SelectTrigger aria-label="智能体运行时" className="w-full">
+                      <SelectValue placeholder={runtimes.length === 0 ? '无' : '请选择'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {runtimeOptions.map((option) => (
+                        <SelectItem
+                          key={option.value}
+                          value={option.value}
+                          disabled={option.disabled}
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
 
-              <Field
-                label="并发上限"
-                hint="同时执行的任务数，≥1；一个运行时一次只跑一轮"
-                error={concurrentError}
-              >
-                <Input
-                  aria-label="智能体并发上限"
-                  type="number"
-                  min={1}
-                  value={maxConcurrent}
-                  onChange={(e) => {
-                    setMaxConcurrent(e.target.value)
-                    setConcurrentError(null)
-                  }}
-                />
-              </Field>
-              <Field label="访问权限" hint={PERMISSION_HINT}>
-                <Select
-                  value={permissionMode}
-                  onValueChange={(v) => {
-                    setPermissionMode(v as PermissionMode)
-                    // 换了模式就撤销上一次的确认：确认只对当前选择有效
-                    setDangerAck(false)
-                  }}
-                >
-                  <SelectTrigger aria-label="智能体访问权限" className="w-full">
-                    <SelectValue placeholder="请选择" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PERMISSION_OPTIONS.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
+                {unavailable.length > 0 && (
+                  <p className="col-span-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-sm text-destructive">
+                    不可用：{unavailable.map((r) => r.name).join('、')}
+                  </p>
+                )}
 
-              <Field
-                label="工作目录"
-                className="col-span-2"
-                hint="留空 = 项目文件夹，没有项目时用默认目录（WORKBENCH_WORKDIR，缺省 ~/.workbench）"
-              >
-                <Input
-                  aria-label="智能体工作目录"
-                  className="font-mono"
-                  value={workdir}
-                  placeholder={defaultWorkdir === '' ? '留空用默认目录' : defaultWorkdir}
-                  onChange={(e) => setWorkdir(e.target.value)}
-                />
-              </Field>
-
-              <Field
-                label="环境变量"
-                className="col-span-2"
-                hint={`每行一条 KEY=VALUE；最多 ${AGENT_ENV_LIMITS.maxVars} 个`}
-                error={envError}
-              >
-                <Textarea
-                  aria-label="智能体环境变量"
-                  className="max-h-40 min-h-20 resize-y font-mono text-sm"
-                  rows={4}
-                  placeholder="HTTP_PROXY=http://127.0.0.1:7890"
-                  value={envText}
-                  onChange={(e) => {
-                    setEnvText(e.target.value)
-                    setEnvError(null)
-                  }}
-                />
-              </Field>
-            </div>
-
-            {permissionMode === 'danger-full-access' && (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2">
-                <p className="text-xs text-destructive">{DANGER_NOTICE}</p>
-                <Label className="mt-1.5 flex items-center gap-2 text-xs font-normal text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    aria-label="已确认完全访问风险"
-                    className="size-4 accent-[var(--ring)]"
-                    checked={dangerAck}
-                    onChange={(e) => setDangerAck(e.target.checked)}
+                <Field label="描述" className="col-span-2">
+                  <Input
+                    aria-label="智能体描述"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
                   />
-                  <span>我明白风险，仍要选完全访问</span>
-                </Label>
+                </Field>
+                <Field label="System Prompt" className="col-span-2">
+                  <Textarea
+                    aria-label="智能体能力"
+                    // 上限压住自动增高：几千字的提示词也只占这么高，框内自己滚，不把弹窗顶大
+                    className="max-h-56 min-h-24 resize-y font-mono text-sm"
+                    rows={6}
+                    placeholder="角色、做事方式与产出要求；每轮都带上这段"
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                  />
+                </Field>
+
+                <Field
+                  label="模型"
+                  hint={modelsLoading ? '读取模型中…' : '来自运行时连接'}
+                  error={
+                    modelError ??
+                    (modelsError === null ? null : `模型加载失败：${modelsError}（可手填）`)
+                  }
+                >
+                  {/* 空值项（默认模型）显示 placeholder：placeholder 文案 = 该空值项的标签 */}
+                  <Select
+                    value={modelChoice}
+                    onValueChange={(value) => {
+                      setModelChoice(value)
+                      setModelError(null)
+                      setReasoningEffort('')
+                    }}
+                    disabled={modelsLoading}
+                  >
+                    <SelectTrigger aria-label="智能体模型" className="w-full">
+                      <SelectValue placeholder="默认" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modelOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                {modelChoice === CUSTOM_MODEL && (
+                  <Field
+                    label="模型 id"
+                    className="col-span-2"
+                    hint="provider/model，如 deepseek/deepseek-v4"
+                  >
+                    <Input
+                      aria-label="智能体模型手填"
+                      className="font-mono"
+                      value={customModel}
+                      onChange={(e) => {
+                        setCustomModel(e.target.value)
+                        setModelError(null)
+                      }}
+                    />
+                  </Field>
+                )}
+                <Field label="思考强度">
+                  <Select
+                    value={reasoningEffort}
+                    onValueChange={setReasoningEffort}
+                    disabled={thinkingLevels.length === 0}
+                  >
+                    <SelectTrigger aria-label="智能体思考强度" className="w-full">
+                      <SelectValue placeholder="默认" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {effortOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                <Field
+                  label="并发上限"
+                  hint="同时执行的任务数，≥1；一个运行时一次只跑一轮"
+                  error={concurrentError}
+                >
+                  <Input
+                    aria-label="智能体并发上限"
+                    type="number"
+                    min={1}
+                    value={maxConcurrent}
+                    onChange={(e) => {
+                      setMaxConcurrent(e.target.value)
+                      setConcurrentError(null)
+                    }}
+                  />
+                </Field>
+                <Field label="访问权限" hint={PERMISSION_HINT}>
+                  <Select
+                    value={permissionMode}
+                    onValueChange={(v) => {
+                      setPermissionMode(v as PermissionMode)
+                      // 换了模式就撤销上一次的确认：确认只对当前选择有效
+                      setDangerAck(false)
+                    }}
+                  >
+                    <SelectTrigger aria-label="智能体访问权限" className="w-full">
+                      <SelectValue placeholder="请选择" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PERMISSION_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                <Field
+                  label="工作目录"
+                  className="col-span-2"
+                  hint="留空 = 项目文件夹，没有项目时用默认目录（WORKBENCH_WORKDIR，缺省 ~/.workbench）"
+                >
+                  {/* 路径手输 + 选择器同占一行：手输留着给粘贴，选择器负责不猜错目录 */}
+                  <div className="flex items-center gap-2">
+                    <Input
+                      aria-label="智能体工作目录"
+                      className="min-w-0 flex-1 font-mono"
+                      value={workdir}
+                      placeholder={defaultWorkdir === '' ? '留空用默认目录' : defaultWorkdir}
+                      onChange={(e) => setWorkdir(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="shrink-0"
+                      onClick={() => setPickerOpen(true)}
+                    >
+                      选择文件夹
+                    </Button>
+                  </div>
+                </Field>
+
+                <Field
+                  label="环境变量"
+                  className="col-span-2"
+                  hint={`每行一条 KEY=VALUE；最多 ${AGENT_ENV_LIMITS.maxVars} 个`}
+                  error={envError}
+                >
+                  <Textarea
+                    aria-label="智能体环境变量"
+                    className="max-h-40 min-h-20 resize-y font-mono text-sm"
+                    rows={4}
+                    placeholder="HTTP_PROXY=http://127.0.0.1:7890"
+                    value={envText}
+                    onChange={(e) => {
+                      setEnvText(e.target.value)
+                      setEnvError(null)
+                    }}
+                  />
+                </Field>
               </div>
-            )}
-          </div>
 
-          <FormError message={error} onDismiss={() => setError(null)} />
-
-          <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-3">
-            {disabledHint !== null && (
-              <p className="text-xs text-faint-foreground">{disabledHint}</p>
-            )}
-            {dangerHint !== null && <p className="text-xs text-faint-foreground">{dangerHint}</p>}
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="quiet" size="sm" onClick={onCancel}>
-                取消
-              </Button>
-              <Button
-                type="submit"
-                variant="default"
-                size="sm"
-                disabled={
-                  saving ||
-                  runtimeId === '' ||
-                  (permissionMode === 'danger-full-access' && !dangerAck)
-                }
-              >
-                {mode === 'edit' ? '保存' : '添加'}
-              </Button>
+              {permissionMode === 'danger-full-access' && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2">
+                  <p className="text-xs text-destructive">{DANGER_NOTICE}</p>
+                  <Label className="mt-1.5 flex items-center gap-2 text-xs font-normal text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      aria-label="已确认完全访问风险"
+                      className="size-4 accent-[var(--ring)]"
+                      checked={dangerAck}
+                      onChange={(e) => setDangerAck(e.target.checked)}
+                    />
+                    <span>我明白风险，仍要选完全访问</span>
+                  </Label>
+                </div>
+              )}
             </div>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+
+            <FormError message={error} onDismiss={() => setError(null)} />
+
+            <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-3">
+              {disabledHint !== null && (
+                <p className="text-xs text-faint-foreground">{disabledHint}</p>
+              )}
+              {dangerHint !== null && <p className="text-xs text-faint-foreground">{dangerHint}</p>}
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="quiet" size="sm" onClick={onCancel}>
+                  取消
+                </Button>
+                <Button
+                  type="submit"
+                  variant="default"
+                  size="sm"
+                  disabled={
+                    saving ||
+                    runtimeId === '' ||
+                    (permissionMode === 'danger-full-access' && !dangerAck)
+                  }
+                >
+                  {mode === 'edit' ? '保存' : '添加'}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      {pickerOpen && (
+        <FolderPickerDialog
+          start={workdir.trim() === '' ? undefined : workdir.trim()}
+          list={(target) => window.workbench.listDirs(target)}
+          onPick={(picked) => {
+            setWorkdir(picked)
+            setPickerOpen(false)
+          }}
+          onCancel={() => setPickerOpen(false)}
+        />
+      )}
+    </>
   )
 }

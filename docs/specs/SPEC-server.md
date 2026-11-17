@@ -70,18 +70,18 @@ node out/server/index.js
 { "ok": false, "error": { "code": "conflict", "message": "任务已被领取" } }
 ```
 
-| 方法 | 路径                 | 鉴权 | 说明                                                      |
-| ---- | -------------------- | ---- | --------------------------------------------------------- |
-| GET  | `/api/health`        | 否   | 存活探测：`{status:'ok', clients}`                        |
-| POST | `/api/session`       | 口令 | `{token}` → `Set-Cookie: wb_session=…`；错口令 401        |
-| GET  | `/api/info`          | 是   | 版本、内核版本、数据目录、默认工作目录、在线客户端数、pid |
-| POST | `/api/dispatch`      | 是   | `{command}` → 本次事实摘要 + 实体值（与旧 IPC 同形）      |
-| POST | `/api/query`         | 是   | `{view, params?}` → 视图切片                              |
-| POST | `/api/lark`          | 是   | 飞书连接管理动作（不写事实日志）                          |
-| POST | `/api/notify`        | 是   | `{title, body?}` → 广播一条 `notice` 给所有在线页面       |
-| GET  | `/api/fs/dirs?path=` | 是   | 列目录（项目文件夹选择器用）                              |
-| GET  | `/api/events`        | 是   | SSE：事实批次 / 聊天流 / 知会                             |
-| GET  | 其它路径             | —    | 静态产物（`out/web`），无扩展名回落到 `index.html`        |
+| 方法 | 路径                 | 鉴权 | 说明                                                                                     |
+| ---- | -------------------- | ---- | ---------------------------------------------------------------------------------------- |
+| GET  | `/api/health`        | 否   | 存活探测：`{status:'ok', clients}`                                                       |
+| POST | `/api/session`       | 口令 | `{token}` → `Set-Cookie: wb_session=…`；错口令 401                                       |
+| GET  | `/api/info`          | 是   | 版本、内核版本、数据目录、默认工作目录、在线客户端数、pid                                |
+| POST | `/api/dispatch`      | 是   | `{command}` → 本次事实摘要 + 实体值（与旧 IPC 同形）                                     |
+| POST | `/api/query`         | 是   | `{view, params?}` → 视图切片                                                             |
+| POST | `/api/lark`          | 是   | 飞书连接管理动作（不写事实日志）                                                         |
+| POST | `/api/notify`        | 是   | `{title, body?}` → 广播一条 `notice` 给所有在线页面                                      |
+| GET  | `/api/fs/dirs?path=` | 是   | 列目录（文件夹选择器用）：`{path, parent, roots, entries}`；`roots` 是盘符，盘根靠它跨盘 |
+| GET  | `/api/events`        | 是   | SSE：事实批次 / 聊天流 / 知会                                                            |
+| GET  | 其它路径             | —    | 静态产物（`out/web`），无扩展名回落到 `index.html`                                       |
 
 错误码与状态：
 

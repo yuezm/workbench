@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from 'react'
+import { useMemo, useState, type ReactElement } from 'react'
 import type {
   AcceptMode,
   AdmissionCell,
@@ -107,12 +107,8 @@ export function AuthorityPanel({ view, busy, onSave }: AuthorityPanelProps): Rea
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // 视图被整批替换（含别处保存）后，草稿跟着新配置走，避免拿旧草稿覆盖
-  useEffect(() => {
-    setMode(initial.mode)
-    setSources(initial.sources)
-    setError(null)
-  }, [initial])
+  // 视图被整批替换（含别处保存）时由调用方换 key 重挂，草稿随新配置重建：
+  // 不在 effect 里 setState（会级联渲染），也不在这里合并新旧草稿。
 
   const configured = view !== null && view.mode !== 'compat'
   const dirty = mode !== initial.mode || JSON.stringify(sources) !== JSON.stringify(initial.sources)

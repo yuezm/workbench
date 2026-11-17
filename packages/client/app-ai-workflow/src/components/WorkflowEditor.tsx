@@ -34,6 +34,7 @@ import { useRowDrag } from '@workbench/client-ui-kit/use-row-drag'
 import { useKernelView } from '@workbench/client-shell/useKernelView'
 import { STAGE_KIND_META } from '../model/stage-kinds'
 import {
+  addStep,
   applyScriptPatch,
   cleanScript,
   formatArgLines,
@@ -41,6 +42,9 @@ import {
   defaultScript,
   parseArgLines,
   parseEnvLines,
+  patchStep,
+  removeStep,
+  SCRIPT_MAX_STEPS,
   SCRIPT_TIMEOUT_CHOICES,
 } from '../model/stage-script'
 import {
@@ -152,12 +156,22 @@ function hasInstructions(stage: StageInput): boolean {
 }
 
 /**
- * 验收条目只属于**智能体闸门**：判定者逐条给证据（checks 里的 acceptance 序号）。
+ * 脚本块的说明（M42）：脚本没有提示词与会话；每步的退出码是一条闸门证据，
+ * 闸门只认「全部步骤的退出码」这一件事，逐条验收靠步骤上的验收序号对应。
+ */
+const SCRIPT_BLOCK_HINT =
+  '脚本不产生提示词、不续会话；每一步的退出码都是一条闸门证据（全部为 0 才算跑过）。' +
+  '步骤之间共用同一条命令与同一份超时预算，只换参数。'
+
+/**
+ * 验收条目属于**闸门**：判定者逐条给证据（`checks[].acceptance` 序号），漏一条算没给结论。
  *
- * M40：脚本闸门的判据是退出码——一条命令只能证明一件事，逐条验收在这里没有消费者。
+ * M40 起脚本闸门共用同一份证据口径：脚本在输出末尾给回执块 `checks` 时逐条核对，
+ * 不给时只按整条命令的退出码判——两种闸门的验收条数上限相同（`ACCEPTANCE_LIMITS`）。
  */
 function hasAcceptance(stage: StageInput): boolean {
-  return entryKindOf(stage) === 'gate'
+  const kind = entryKindOf(stage)
+  return kind === 'gate' || kind === 'script-gate'
 }
 
 /**
@@ -270,10 +284,10 @@ function pruneByEntryKind(stage: StageInput): StageInput {
       entryMode: isScript ? 'script' : 'agent',
       agentId: isScript ? null : stage.agentId,
       script: isScript ? cleanScript(stage.script) : null,
-      // M40：脚本闸门的三块看不见——要干什么（没有提示词）、验收（判据是退出码）、
-      // 阶段超时（脚本超时优先）。不归一会变成存得下、看不着、也改不动的配置
+      // M40：脚本闸门的两块看不见——要干什么（没有提示词）、阶段超时（脚本超时优先）。
+      // 验收照常展示：脚本回执块里的 `checks[].acceptance` 与智能体闸门是同一份口径
       instructions: isScript ? '' : stage.instructions,
-      acceptance: isScript ? [] : stage.acceptance,
+      acceptance: stage.acceptance,
       runTimeoutMs: isScript ? null : (stage.runTimeoutMs ?? null),
       // 判定阶段跑完不给结论就不算离开，done 这一支永远不触发
       exits: (stage.exits ?? []).filter((exit) => exit.on !== 'done'),
@@ -750,6 +764,8 @@ export function WorkflowEditor({
   const subtaskStageIds = draft.stages.flatMap((s) => (s.id === undefined ? [] : [s.id]))
   /** 当前展开阶段的序号文案（aria-label 用，与阶段列表一致是 1 基） */
   const n = index + 1
+  /** 当前阶段的进入方式：脚本两种类型（执行 / 闸门）共用一个口径 */
+  const entryKind = entryKindOf(stage)
   /** 该阶段的字段级错误只在它被展开时展示（错误面板与字段同屏才有意义） */
   const stageErrors = errors.stageIndex === index ? errors : null
   /** 已填的验收条目（丢掉空行）：按 1 基序号展示，与提示词里给判定者的编号同口径 */
@@ -994,17 +1010,120 @@ export function WorkflowEditor({
                       ? '所选运行时没有命令：脚本跑不起来，先到「运行时」页把它补上。'
                       : `命令用运行时上的「${scriptRuntimeCommand}」（阶段不再单独配命令）。`}
                 </p>
-                <Field label="参数（一行一个，逐项传参）">
-                  <ScriptLinesField
-                    key={`args-${stage.id ?? index}`}
-                    label={`阶段${n}脚本参数`}
-                    rows={3}
-                    placeholder={'check\n--reporter=dot'}
-                    initial={formatArgLines(stage.script.args)}
-                    parse={(text) => parseArgLines(text)}
-                    onCommit={(parsed) => patchScript(index, { args: parsed as readonly string[] })}
-                  />
-                </Field>
+                {/* M42：步骤列表——同一条连接上的多组 argv，一步一条证据 */}
+                <div className="flex flex-col gap-2 border-t border-border pt-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs text-muted-foreground">
+                      步骤（按顺序执行；每一步的退出码都是一条闸门证据）
+                    </p>
+                    <Button
+                      type="button"
+                      variant="quiet"
+                      size="sm"
+                      aria-label={`阶段${n}添加步骤`}
+                      disabled={stage.script.steps.length >= SCRIPT_MAX_STEPS}
+                      onClick={() =>
+                        patchScript(index, { steps: addStep(stage.script?.steps ?? []) })
+                      }
+                    >
+                      添加步骤
+                    </Button>
+                  </div>
+                  {stage.script.steps.map((step, at) => (
+                    <div
+                      key={`step-${stage.id ?? index}-${at}`}
+                      className="flex flex-col gap-2 rounded-md border border-border p-2"
+                    >
+                      <div className="flex flex-wrap items-end gap-2">
+                        <Field label={`步骤 ${at + 1}`} className="min-w-0 flex-1">
+                          <Input
+                            aria-label={`阶段${n}步骤${at + 1}标签`}
+                            value={step.label}
+                            placeholder="这一步证明什么（留空 = 用命令 + 参数）"
+                            onChange={(event) =>
+                              patchScript(index, {
+                                steps: patchStep(stage.script?.steps ?? [], at, {
+                                  label: event.target.value,
+                                }),
+                              })
+                            }
+                          />
+                        </Field>
+                        {/* 验收序号只在脚本闸门上有消费者：把这条证据钉到某条验收上 */}
+                        {entryKind === 'script-gate' && (
+                          <Field label="对应验收" className="w-40">
+                            <Select
+                              value={step.acceptance == null ? 'none' : String(step.acceptance)}
+                              onValueChange={(v) =>
+                                patchScript(index, {
+                                  steps: patchStep(stage.script?.steps ?? [], at, {
+                                    acceptance: v === 'none' ? undefined : Number(v),
+                                  }),
+                                })
+                              }
+                            >
+                              <SelectTrigger
+                                aria-label={`阶段${n}步骤${at + 1}验收`}
+                                className="w-full"
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="none">不与验收挂钩</SelectItem>
+                                {acceptanceItems.map((_, order) => (
+                                  <SelectItem key={order} value={String(order + 1)}>
+                                    {`第 ${order + 1} 条`}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                        )}
+                        <Button
+                          type="button"
+                          variant="quiet"
+                          size="sm"
+                          aria-label={`阶段${n}删除步骤${at + 1}`}
+                          disabled={(stage.script?.steps.length ?? 0) <= 1}
+                          onClick={() =>
+                            patchScript(index, { steps: removeStep(stage.script?.steps ?? [], at) })
+                          }
+                        >
+                          删除
+                        </Button>
+                      </div>
+                      <ScriptLinesField
+                        key={`args-${stage.id ?? index}-${at}`}
+                        label={`阶段${n}步骤${at + 1}参数`}
+                        rows={2}
+                        placeholder={'check\n--reporter=dot'}
+                        initial={formatArgLines(step.args)}
+                        parse={(text) => parseArgLines(text)}
+                        onCommit={(parsed) =>
+                          patchScript(index, {
+                            steps: patchStep(stage.script?.steps ?? [], at, {
+                              args: parsed as readonly string[],
+                            }),
+                          })
+                        }
+                      />
+                    </div>
+                  ))}
+                  <Field label="跑法" className="w-52">
+                    <Select
+                      value={stage.script.runAll === false ? 'stop' : 'all'}
+                      onValueChange={(v) => patchScript(index, { runAll: v === 'all' })}
+                    >
+                      <SelectTrigger aria-label={`阶段${n}脚本跑法`} className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">全部跑完再判（证据全）</SelectItem>
+                        <SelectItem value="stop">首个失败即停（省时间）</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
                 <div className="flex flex-wrap items-end gap-2">
                   <Field label="工作目录" className="min-w-0 flex-1">
                     <Input
@@ -1047,9 +1166,7 @@ export function WorkflowEditor({
                     }
                   />
                 </Field>
-                <p className="text-xs text-faint-foreground">
-                  脚本不产生提示词、不续会话；判定阶段按退出码给结论（0 = 通过，非 0 = 未通过）。
-                </p>
+                <p className="text-xs text-faint-foreground">{SCRIPT_BLOCK_HINT}</p>
               </div>
             )}
           </div>
@@ -1148,14 +1265,16 @@ export function WorkflowEditor({
               )}
 
               <p className="mt-1 text-xs text-faint-foreground">
-                {stage.judge
-                  ? '智能体跑完要给「通过 / 未通过」的判定；拿不出证据时任务停在原地等人。'
-                  : '「出错」指执行器崩溃、超时或失联；「结束并归档」= 这张工单走完。'}
+                {!stage.judge
+                  ? '「出错」指执行器崩溃、超时或失联；「结束并归档」= 这张工单走完。'
+                  : entryKind === 'script-gate'
+                    ? '脚本跑完按退出码给结论（0 = 通过，非 0 = 未通过）；拿不到退出码时任务停在原地等人。'
+                    : '智能体跑完要给「通过 / 未通过」的判定；拿不出证据时任务停在原地等人。'}
               </p>
             </>
           )}
 
-          {/* 要干什么 / 验收 / 单轮超时只对智能体有意义：脚本阶段的这三块都不展示 */}
+          {/* 要干什么 / 单轮超时只对智能体有意义；验收归闸门（脚本闸门也展示） */}
           {hasFlowDetail(stage) && (
             <>
               {/* 阶段要干什么：这段文字会作为提示词的固定指令段交给智能体 */}
@@ -1173,11 +1292,13 @@ export function WorkflowEditor({
                 </Field>
               )}
 
-              {/* M34 验收只属于闸门：执行阶段不给自己判分，验收由后面的另一个智能体逐条给证据 */}
+              {/* M34 验收归闸门：执行阶段不给自己判分；M40 起脚本闸门与智能体闸门共用一份证据口径 */}
               {hasAcceptance(stage) && (
                 <>
                   <p className="mt-3 text-xs text-muted-foreground">
-                    判定者要逐条给证据（checks 里带 acceptance 序号），漏一条算没给结论
+                    {entryKind === 'script-gate'
+                      ? '每条验收都要有步骤指向它（在步骤行的「对应验收」里选序号），漏一条保存时会被拒'
+                      : '判定者要逐条给证据（checks 里带 acceptance 序号），漏一条算没给结论'}
                   </p>
                   <Field label="验收（做完的判据，一条一行）" className="mt-2">
                     <Textarea
@@ -1196,7 +1317,9 @@ export function WorkflowEditor({
                   </Field>
                   {acceptanceItems.length === 0 ? (
                     <p className="mt-1 text-xs text-faint-foreground">
-                      没有验收条目：闸门只要求一条退出码全 0 的 checks。
+                      {entryKind === 'script-gate'
+                        ? '没有验收条目：只按每一步的退出码判。'
+                        : '没有验收条目：闸门只要求一条退出码全 0 的 checks。'}
                     </p>
                   ) : (
                     // 与提示词同口径的 1 基序号：判定者的 checks 用这个号指回条目

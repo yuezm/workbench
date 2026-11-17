@@ -1943,7 +1943,7 @@ describe('createScheduler：脚本轮（M40）', () => {
     })
     const script: StageScript = {
       runtimeId: runtime.id,
-      args: ['check'],
+      steps: [{ label: '自测', args: ['check'] }],
       cwd: null,
       env: { CI: '1' },
       timeoutMs: 300_000,
@@ -1982,7 +1982,7 @@ describe('createScheduler：脚本轮（M40）', () => {
     return { runtime, script, task, runId: String(dbRun(task.id).id) }
   }
 
-  it('Turn 用脚本配置：argv / 环境变量 / 无模型 / 超时取脚本自己的，命令不在 Turn 上', async () => {
+  it('Turn 用脚本配置：步骤 / 环境变量 / 无模型 / 超时取脚本自己的，命令不在 Turn 上', async () => {
     const seeded = seedScript()
     let captured: Turn | null = null
     const scheduler = makeScheduler(
@@ -1998,7 +1998,10 @@ describe('createScheduler：脚本轮（M40）', () => {
     const turn = captured as unknown as Turn
     // 命令只来自运行时连接（`runtime.command`）：Turn 上没有可覆盖命令的字段
     expect(turn).not.toHaveProperty('command')
-    expect(turn.args).toEqual(['check'])
+    expect(turn).not.toHaveProperty('args')
+    expect(turn.steps).toEqual([{ label: '自测', args: ['check'] }])
+    // 全部步骤跑完再判：脚本没写 runAll 时按缺省 true 搬运
+    expect(turn.runAll).toBe(true)
     expect(turn.env).toEqual({ CI: '1' })
     // 脚本没有模型 / 思考强度
     expect(turn.model).toBeNull()
@@ -2012,15 +2015,16 @@ describe('createScheduler：脚本轮（M40）', () => {
     expect(row?.access).toBe('full')
     expect(JSON.parse(String(row?.script_json))).toEqual({
       runtimeId: seeded.script.runtimeId,
-      args: ['check'],
+      steps: [{ label: '自测', args: ['check'] }],
       cwd: null,
       env: { CI: '1' },
       timeoutMs: 300_000,
+      runAll: true,
     })
   })
 
   it('脚本轮没有提示词时也能跑完：回执照常落终态', async () => {
-    seedScript({ args: [] })
+    seedScript({ steps: [{ label: '', args: [] }] })
     const scheduler = makeScheduler(portOf((turn) => receiptOf(turn, { output: '' })))
     scheduler.wake()
     await scheduler.idle()

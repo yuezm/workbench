@@ -368,6 +368,63 @@ describe('kernel/decide run.claim 领取', () => {
     expect(claimedIds(decision)).toEqual(['run-ghost-agent'])
   })
 
+  // M42：脚本 run（`agentId=null`）的窗口按**连接**算。原来所有脚本共用 `null` 这个键，
+  // 一条 `pnpm test` 会让别的工作流的 lint 闸门干等——这两条用例钉住「按连接分窗」。
+  it('脚本窗口按连接：另一条连接上已有脚本在跑，本连接的脚本照常领取', () => {
+    const decision = claim(
+      view({
+        runtimes: [runtime(), runtime({ id: 'rt-2', name: '第二条连接' })],
+        runs: [
+          run({
+            id: 'run-other-running',
+            agentId: null,
+            runtimeId: 'rt-2',
+            status: 'running',
+            attempt: 1,
+            leaseId: 'run-other-running:1',
+            leaseUntil: '2026-11-04T12:02:00.000Z',
+            startedAt: NOW,
+            createdAt: '2026-01-01T00:00:01.000Z',
+          }),
+          run({
+            id: 'run-mine',
+            agentId: null,
+            runtimeId: 'rt-1',
+            createdAt: '2026-01-01T00:00:02.000Z',
+          }),
+        ],
+      }),
+      'rt-1',
+    )
+
+    expect(claimedIds(decision)).toEqual(['run-mine'])
+  })
+
+  it('脚本窗口按连接：同一连接上已有一条在跑，第二条继续排队', () => {
+    const decision = claim(
+      view({
+        runtimes: [runtime()],
+        runs: [
+          run({
+            id: 'run-running',
+            agentId: null,
+            status: 'running',
+            attempt: 1,
+            leaseId: 'run-running:1',
+            leaseUntil: '2026-11-04T12:02:00.000Z',
+            startedAt: NOW,
+            createdAt: '2026-01-01T00:00:01.000Z',
+          }),
+          run({ id: 'run-queued', agentId: null, createdAt: '2026-01-01T00:00:02.000Z' }),
+        ],
+      }),
+      'rt-1',
+    )
+
+    expect(claimedIds(decision)).toEqual([])
+    expect(decision.facts).toEqual([])
+  })
+
   it('capacity 小于候选数：只领上界条数（窗口不是唯一约束）', () => {
     const decision = claim(
       view({
@@ -2003,6 +2060,21 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
       .filter((fact) => fact.type === 'task.moved' || fact.type === 'task.completed')
       .map((fact) => fact.type)
 
+  it('回执没有 verdict：没给结论（零流转、不烧预算）', () => {
+    const decision = receive(gateView(), 'run-1', receipt())
+
+    expect(decision.reject).toBeUndefined()
+    expect(transitionOf(decision)).toEqual([])
+    expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
+    expect(
+      (
+        decision.facts.find((fact) => fact.type === 'run.succeeded')?.payload as {
+          run: RunRow
+        }
+      ).run.id,
+    ).toBe('run-1')
+  })
+
   it('验收 3 条只用 2 条证据覆盖 → 零流转，gateFails 不变', () => {
     const decision = receive(
       gateView({ gateFails: 1 }),
@@ -2298,7 +2370,7 @@ describe('kernel/decide 出错不自动重跑（M34）', () => {
 describe('脚本轮（M40）：退出码即闸门结论', () => {
   const scriptOf = (over: Partial<StageScript> = {}): StageScript => ({
     runtimeId: 'rt-1',
-    args: ['check'],
+    steps: [{ label: '', args: ['check'] }],
     cwd: null,
     env: {},
     timeoutMs: null,
@@ -2364,6 +2436,87 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
     )
     expect(decision.facts.some((fact) => fact.type === 'run.failed')).toBe(true)
     expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
+  })
+
+  // M41：脚本闸门与智能体闸门共用一份证据口径——退出码 0 之后，回执块的 `checks`
+  // 决定「逐条验收是否都被证明」，不再有「脚本闸门只能配一条验收」这条限制。
+  it('验收 3 条：回执块给全 0 且逐条指向 → 走通过分支', () => {
+    const decision = receive(
+      scriptView({ acceptance: ['类型检查', '单测', 'lint'] }),
+      'run-1',
+      receipt({
+        exitCode: 0,
+        checks: [
+          { cmd: 'node tsc.js', exitCode: 0, acceptance: 1 },
+          { cmd: 'node test.js', exitCode: 0, acceptance: 2 },
+          { cmd: 'node lint.js', exitCode: 0, acceptance: 3 },
+        ],
+      }),
+    )
+    expect(decision.reject).toBeUndefined()
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
+  })
+
+  it('验收 3 条：证据漏一条 → 零流转（原地等人补证据，不烧预算）', () => {
+    const decision = receive(
+      scriptView({ acceptance: ['类型检查', '单测', 'lint'] }),
+      'run-1',
+      receipt({
+        exitCode: 0,
+        checks: [
+          { cmd: 'node tsc.js', exitCode: 0, acceptance: 1 },
+          { cmd: 'node test.js', exitCode: 0, acceptance: 2 },
+        ],
+      }),
+    )
+    expect(decision.reject).toBeUndefined()
+    expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
+    expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+  })
+
+  it('退出码 0 但证据里有非 0 → 判未通过（退出码不替证据翻案）', () => {
+    const decision = receive(
+      scriptView({ acceptance: ['类型检查', '单测'] }),
+      'run-1',
+      receipt({
+        exitCode: 0,
+        checks: [
+          { cmd: 'node tsc.js', exitCode: 0, acceptance: 1 },
+          { cmd: 'node test.js', exitCode: 1, acceptance: 2 },
+        ],
+      }),
+    )
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-1' })
+    expect((moved?.payload as { task: Task }).task.gateFails).toBe(1)
+  })
+
+  it('退出码 0 且没给 checks：验收条目只是配置记录，结论按退出码', () => {
+    const decision = receive(
+      scriptView({ acceptance: ['类型检查', '单测'] }),
+      'run-1',
+      receipt({ exitCode: 0 }),
+    )
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
+  })
+
+  it('退出码非 0 + 证据全 0：退出码是进程事实，仍判未通过', () => {
+    const decision = receive(
+      scriptView({ acceptance: ['类型检查'] }),
+      'run-1',
+      receipt({
+        status: 'failed',
+        errorCode: 'exit_nonzero',
+        exitCode: 1,
+        checks: [{ cmd: 'node tsc.js', exitCode: 0, acceptance: 1 }],
+      }),
+    )
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-1' })
+    expect((moved?.payload as { task: Task }).task.gateFails).toBe(1)
   })
 
   it('非闸门脚本阶段：退出码非 0 仍是执行出错，走 errored 分支', () => {

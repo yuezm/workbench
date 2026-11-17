@@ -1,7 +1,13 @@
 /**
  * 运行命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
-import type { GateVerdict, RunRow, Task, WorkflowStage } from '@workbench/protocol/entities'
+import type {
+  GateCheck,
+  GateVerdict,
+  RunRow,
+  Task,
+  WorkflowStage,
+} from '@workbench/protocol/entities'
 import type { EventReceivedPayload } from '@workbench/protocol/facts'
 import type { Input, Receipt } from '@workbench/protocol/inputs'
 import type { TaskComment } from '@workbench/protocol/task-comment'
@@ -87,33 +93,53 @@ function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): 
 }
 
 /**
- * 闸门判定归一（M11/M34）：`pass` 必须带齐证据（至少一条 `checks` 且退出码全为 0）；
- * 阶段声明了验收条目时，每条验收还要有一条 `exitCode=0` 的 `checks` 指向它（`acceptance: n`）。
- * 任一条不满足即视为**没给结论**。不信任模型的自述——说通过却拿不出证据时任务原地停住等人，
- * 既不放行也不消耗预算。`fail` 不需要证据（失败本身就是要修）。
+ * 闸门判定归一（M11/M34/M40）：两条闸门共用一套证据口径——`checks[]`（逐条退出码）
+ * 加 `acceptance: n`（1 基序号指向验收条目），缺证据就是**没给结论**。
+ *
+ * - 智能体闸门：结论来自回执 `verdict`；`pass` 要求至少一条 `checks`、退出码全 0、
+ *   且每条验收都被一条全 0 的证据指向；
+ * - 脚本闸门：结论来自进程退出码。非 0 是进程事实，脚本自报的 `checks` 再好看也不翻案；
+ *   退出码 0 且脚本给了 `checks` 时，同样要求全 0 并逐条覆盖验收（漏一条算没给结论）；
+ *   退出码 0 而脚本没给 `checks` 时，退出码就是全部结论（此时验收条目只是配置记录）。
+ *
+ * 不给结论时任务原地停住：既不放行也不消耗预算（`fail` 不需要证据——失败本身就是要修）。
  */
 function gateVerdictOf(
   receipt: Receipt,
   stage: WorkflowStage,
   run: RunRow,
 ): GateVerdict | undefined {
-  // M40 脚本闸门：真实退出码即结论，不采信脚本自报的 verdict / checks。
-  // `exitCode=null`（超时 / 被杀 / 起不来）按「没给结论」处理：原地停、不消耗预算。
+  const checks = receipt.checks ?? []
   if ((run.script ?? null) !== null) {
+    // 拿不到退出码（超时 / 被杀 / 起不来）：没给结论
     if (run.exitCode === null) return undefined
-    return run.exitCode === 0 ? 'pass' : 'fail'
+    // 非 0 是进程事实：先钉死，再看证据
+    if (run.exitCode !== 0) return 'fail'
+    // 没给证据：退出码即结论
+    if (checks.length === 0) return 'pass'
+    // 证据里有非 0：脚本自己报了没过，按没过算（不回退成退出码 0 的通过）
+    if (!checks.every((check) => check.exitCode === 0)) return 'fail'
+    return coversAcceptance(checks, stage) ? 'pass' : undefined
   }
   const verdict = receipt.verdict
   if (verdict === undefined) return undefined
   if (verdict === 'fail') return 'fail'
-  const checks = receipt.checks ?? []
+  // `pass` 必须有全 0 的证据；没有证据的「通过」不算结论
   if (checks.length === 0 || !checks.every((check) => check.exitCode === 0)) return undefined
-  // M34：验收条目逐条要有全 0 证据指向它，漏一条按没给结论处理
+  return coversAcceptance(checks, stage) ? 'pass' : undefined
+}
+
+/**
+ * 每条验收是否都被一条 `checks` 用 `acceptance: n`（1 基）指向。
+ *
+ * 调用方已保证「证据全 0」与「至少一条证据」；这里只管覆盖：验收为空时恒成立，
+ * 序号越界（指向不存在的验收）不算覆盖。
+ */
+function coversAcceptance(checks: readonly GateCheck[], stage: WorkflowStage): boolean {
   const covered = new Set(
     checks.map((check) => check.acceptance).filter((no): no is number => no !== undefined),
   )
-  const missing = (stage.acceptance ?? []).some((_, index) => !covered.has(index + 1))
-  return missing ? undefined : 'pass'
+  return (stage.acceptance ?? []).every((_, index) => covered.has(index + 1))
 }
 
 /** 闸门放行标记（M11）：预算耗尽后走通过分支时打在任务上的标签，看板可据此筛选。 */

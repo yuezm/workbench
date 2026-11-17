@@ -161,7 +161,7 @@ resumeSessionId: null,   // 脚本无会话
 entryMode='script' 且 script 为空        → 阶段「X」设为执行脚本时必须填写命令
 entryMode='script' 且 agentId 非空        → 阶段「X」只能选一个执行目标（归一成 agentId=null）
 judge 存在且 entryMode 不在 {agent,script} → 阶段「X」设为判定时必须交给智能体或脚本
-脚本闸门 acceptance 超过 1 条              → 阶段「X」的脚本闸门最多一条验收条目
+脚本闸门 acceptance 超过 1 条              → 阶段「X」的脚本闸门最多一条验收条目（**M41 撤销**，见文末补口）
 script.command 为空 / args 越界 / 未知占位符 → 沿用 argsTemplate 的文案句式
 script.runtimeId 查不到                   → 阶段「X」的脚本运行时不存在（在 `commands/workflow.ts:159` 旁按 view 判，与 `agentId` 同法）
 ```
@@ -411,7 +411,7 @@ M40 与 M41 之间不要长期停顿：M40 的阶段脚本写在阶段里，改�
 1. `src/plugins/executors/command/probe.ts`（新）：只解析 `runtime.command`（`sdk.process.resolve`）与 `argsTemplate`，**不 spawn**——通用命令没有统一的版本旗标，猜一个只会把「没实现 `--version`」误报成不可用。空命令给「命令必填」。装配进 `commandPlugin.probe`。
 2. `RuntimeDialog`：命令空就前端拦（清掉从前端到内核的一次无用往返）。
 3. `WorkflowEditor`：`validateDraft` 收脚本运行时候选，脚本阶段没选 / 所选运行时已停用或被删都就地指出并展开该阶段；脚本块在候选为空时给出「去运行时页新建一条」的文案；`toDraft` 回填 `script`。
-4. 表单口径（本轮需求）：脚本两项都不展示「要干什么」「单轮超时」（脚本没有提示词；脚本自带超时且优先级更高），脚本闸门另外不展示「验收」（判据是退出码）；保存时随 `pruneByEntryKind` 归一成空，不留看不见的残留配置。内核的「脚本闸门最多一条验收」上限不动——程序化调用仍受它约束。
+4. 表单口径（本轮需求）：脚本两项都不展示「要干什么」「单轮超时」（脚本没有提示词；脚本自带超时且优先级更高），脚本闸门另外不展示「验收」（判据是退出码，**M41 撤销：脚本闸门恢复验收**，见文末补口）；保存时随 `pruneByEntryKind` 归一成空，不留看不见的残留配置。内核的「脚本闸门最多一条验收」上限**已删除**（M41）。
 5. `command` 的展示名从「命令」改成「通用命令」：运行时表单里已经有一个「命令」输入框，同名会让人以为「选不了命令」。
 
 **验证**：新增 `tests/plugins/executors/command/probe.test.ts`（6 例）、注册表一条「command 必须自带 probe」的不变量、编辑器 5 条（回填 / 两条脚本类型不渲染三块并归一 / 无候选指路 / 运行时停用文案）、运行时表单一条命令必填；旧用例「插件只实现 run（不给 probe）」按新契约改写。
@@ -437,3 +437,90 @@ M40 与 M41 之间不要长期停顿：M40 的阶段脚本写在阶段里，改�
 7. 类型下拉文案（2026-11-13）：`交给智能体` → `智能体`、`闸门（判定）` → `智能体闸门`、`脚本闸门（判定）` → `脚本闸门`；类型列宽 `w-44` 按「智能体闸门」留够。`TaskDialog` 里引用类型名的「「智能体」的阶段会立即执行」随之更新，`执行脚本` / `不交接` / `交给用户` 不动。
 
 **验证**：`tests/protocol/validate.test.ts`（`command` 键被忽略）、`tests/host/scheduler.test.ts`（`Turn` 上没有 `command`、`script_json` 快照不含命令）、`tests/plugins/executors/command/command.test.ts`（可执行文件解析自 `runtime.command`，`resolvedIn` 断言）、`tests/kernel/decide.run.test.ts`、`tests/renderer/.../{WorkflowEditor,stage-script}.test.tsx`（无命令输入框 / 命令只读展示 / 运行时无命令被拦 / `cleanScript` 清掉遗留键）。
+
+## 补口（2026-11-17，M41）：脚本闸门与智能体闸门共用证据口径
+
+**起因**：一条使用反馈——「一个阶段只能跑一条命令，那 `node a.js` + `node b.js` 怎么办？」。这个问法本身是症状：真正缺的是**逐条验收的证据位**。M40 的脚本闸门只有「一个退出码 + 最多一条验收」（`stage-validation.ts` 的那条规则 + `gateVerdictOf` 只读 `run.exitCode`），于是只要多于一件事要证明，就只能去写 `c.js` 包装脚本、或者把流程切成命令清单——两个都比问题更糟（前者把闸门逻辑挪进不受模型管控的文件，后者回到「卡步骤」）。
+
+**口径**（两条闸门一份证据，正式描述见 [SPEC-kernel](../specs/SPEC-kernel.md)「闸门」）：
+
+| 情形                                   | `run.status`            | `exitCode` | 结论                                     |
+| -------------------------------------- | ----------------------- | ---------- | ---------------------------------------- |
+| 退出码 0，没给 `checks`                | `succeeded`             | 0          | `pass`（验收条目此时只是配置记录）       |
+| 退出码 0，`checks` 全 0 且逐条覆盖验收 | `succeeded`             | 0          | `pass`                                   |
+| 退出码 0，`checks` 里有非 0            | `succeeded`             | 0          | `fail`（证据说没过，不拿退出码替它翻案） |
+| 退出码 0，`checks` 漏覆盖某条验收      | `succeeded`             | 0          | 没给结论（原地停、不消耗预算）           |
+| 退出码非 0（闸门阶段）                 | `succeeded`（结算归一） | n          | `fail`，即使 `checks` 全 0               |
+| 拿不到退出码（超时 / 被杀 / 起不来）   | `failed`                | `null`     | 没给结论                                 |
+
+**改动面**
+
+- `kernel/scopes/commands/run.ts`：`gateVerdictOf` 合并成一份证据判定（脚本分支 = 退出码硬结论 + 可选 `checks` 逐条核对），新增 `coversAcceptance`；智能体分支行为逐字不变。
+- `kernel/scopes/workflow/stage-validation.ts`：删「脚本闸门最多一条验收条目」，脚本闸门与智能体闸门同受 `ACCEPTANCE_LIMITS` 约束。
+- 编辑器：脚本闸门恢复「验收」块（`hasAcceptance` 认 `script-gate`），`pruneByEntryKind` 不再把脚本闸门的验收清空，文案改成「回执块 `checks` 逐条核对；不给只按退出码判」。「要干什么」「单轮超时」仍然不展示（脚本没有提示词，脚本超时优先）。
+
+**这不是 steps**：一条命令仍是「一件事」。要让一件事有多条证据，通用做法是让命令在输出末尾给回执块（`applyReceiptBlock` 在 `command` 执行器里本来就会跑）：
+
+```json
+{
+  "checks": [
+    { "cmd": "node tsc.js", "exitCode": 0, "acceptance": 1 },
+    { "cmd": "node test.js", "exitCode": 0, "acceptance": 2 }
+  ]
+}
+```
+
+**未做（下一批）**：`StageScript.steps[]`（同一连接上多组 argv，执行器逐条 spawn、逐条产 `checks`）——把这份回执块搬进阶段配置，同时消掉手写包装脚本；以及 `scripts` 表（M41 原计划）与闸门试跑（`script.tryrun`）。
+
+**验证**：`tests/kernel/decide.run.test.ts`（脚本闸门 6 条：全 0 覆盖 / 漏覆盖原地停 / 证据非 0 判 fail / 无证据按退出码 / 退出码非 0 压过证据 / 超时没结论）、`tests/kernel/scopes/workflow/stage-validation.test.ts`（脚本闸门多条验收放行）、`tests/renderer/.../WorkflowEditor.test.tsx`（脚本闸门展示与保存验收、空验收文案）。`pnpm check:fast` 全门 exit 0。
+
+## 补口（2026-11-17，M42）：脚本变成步骤序列 + 脚本窗口按连接
+
+**起因**：M41 让脚本闸门能消费回执块里的 `checks`，但一份「类型检查 + 单测 + lint」还是要手写一个包装脚本去 echo 回执块——证据是真的，脚本文件却是模型管不到的第二份真相源。这一步把组合搬进阶段配置：**同一连接上的 N 组 argv**，每步实测一条退出码。
+
+**契约**
+
+```ts
+export interface ScriptStep {
+  label: string // 证据标签，落 checks[].cmd（空串 = 执行器用「命令 + 参数」拼）
+  args: readonly string[] // 逐项 argv，不经 shell
+  acceptance?: number // 1 基验收序号；省略 = 与验收无关的环境检查
+}
+
+export interface StageScript {
+  runtimeId: string // 连接唯一：命令仍只来自 runtime.command
+  steps: readonly ScriptStep[] // 1..8 步，按顺序执行
+  cwd: string | null
+  env: Record<string, string>
+  timeoutMs: number | null // **整轮预算**（所有步骤共用），不是每步
+  runAll?: boolean // 缺省 true：全部跑完再判；false = 首个非 0 即停
+}
+
+// Turn：args → steps + runAll（缺省用运行时 argsTemplate 展开成一步）
+export interface TurnStep {
+  label: string
+  args: readonly string[]
+  acceptance?: number
+}
+```
+
+| 取舍               | 选择                  | 理由                                                                                                   |
+| ------------------ | --------------------- | ------------------------------------------------------------------------------------------------------ |
+| 命令是否跟着步骤走 | **否**，步骤只给 argv | 一条命令两处可写就是第二份真相源（M40 撤 `command` 的同一条理由）。要跑别的可执行文件 = 另建一条运行时 |
+| 超时按步还是按轮   | **按轮**              | 看板上「这一轮最多跑 10 分钟」才是人能预判的承诺；按步会变成「10 分钟 × 8」                            |
+| 失败停不停         | 缺省全跑，可关        | 闸门要的是证据完整性；日常快反馈才关（关掉后证据不全，闸门会显示少了哪条）                             |
+| 自报 `checks`      | 被实测覆盖            | 执行器手里有真实退出码，没有理由再采信 echo 出来的                                                     |
+
+**内核 / 执行器**
+
+- `gateVerdictOf` 的脚本分支不变形：退出码是硬结论（非 0 = fail、`null` = 没给结论），退出码 0 时再按 `checks` 逐条核对验收（M41 已落）。M42 只让 `checks` 变成「实测」而不是「自报」。
+- `stage-validation#validateScriptAcceptance`：脚本闸门声明验收时，**每条验收都要有步骤指向它**；先查「步骤指向不存在的验收」（第 n 条越界），再查「第 n 条验收没有步骤指向它」。
+- `sameScript` 逐字段比 `steps`（含顺序、label、acceptance、逐项 argv）与 `runAll`。
+- `command` 执行器：逐步 spawn，多步时每步在输出与事件流里带 `## 步骤标签` 段头；整轮预算耗尽 → 不再开新步骤、按 `timeout` 收口（`exitCode=null`）；聚合退出码 = 首个非 0；提示词只在第一步写 stdin（脚本读 stdin 的老行为）。
+- 投影 `normalizeScript`（`host/store/projection-apply.ts`）：老事实的 `args` 归一成「一步」、`runAll` 缺省 true，`args` 键随之脱落；不需要新列，也不需要动 `KERNEL_VERSION`（重建即归一）。
+
+**并发窗口（P0 修复）**：`pickClaims` 原来把所有脚本 run 挂在 `agentId=null` 这一个键上、窗口 1 —— 等于**全系统脚本共用一个并发位**，一条 `pnpm test` 就让别的工作流的 lint 闸门干等。改成脚本 / 脏行（`agentId=null`）按 `runtimeId` 计窗口（每连接 1 个），智能体仍按 `maxConcurrent`；线程闸门保持，且**只有两道闸门都过了才占位**（原来先占位后判线程会让被挡掉的候选吃掉并发位——M42 实现过程中被 `decide.thread` 的既有用例当场抓住）。
+
+**验证**：`tests/plugins/executors/command/command.test.ts`（10 例：单步证据 / 多步分段与逐条 checks / 默认全跑 / 首个失败即停 / 整轮预算 / 自报被覆盖 / stdin 只喂第一步 / 模板退回不产 checks）、`tests/kernel/scopes/workflow/stage-validation.test.ts`（验收 ↔ 步骤对应三条）、`tests/kernel/decide.run.test.ts`（脚本窗口按连接 2 例）、`tests/kernel/decide.test.ts`、`tests/host/scheduler.test.ts`（`Turn.steps` + `runAll` + 快照）、`tests/host/store/projection-apply.test.ts`（老 `args` → 一步）、`tests/renderer/**`（编辑器步骤列表 / 验收序号 / 跑法 / `cleanScript` 升级）。
+
+**未做（下一批）**：`scripts` 表与复用（原 M41 计划）、闸门试跑（`script.tryrun`）、步骤拖拽排序（当前只能删了重加）、同阶段「先脚本后智能体」的 precheck。

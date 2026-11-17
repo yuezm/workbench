@@ -51,8 +51,13 @@ export function claimCandidates(view: View, runtimeId: Id, now: Iso): RunRow[] {
 }
 
 /**
- * 本次实际领取的 run：并发窗口按**智能体**算——每个智能体最多
+ * 本次实际领取的 run：并发窗口按**执行目标**算——每个智能体最多
  * `agent.maxConcurrent - 该智能体 running 数`，一次领取总量不超过 `capacity`。
+ *
+ * M42：脚本 run（`agentId=null`）的窗口按**连接**（`runtimeId`）算、每个连接 1 个。
+ * 原来它们和「找不到智能体的脏行」共用 `null` 这个键，等于**全系统脚本共用一个窗口**：
+ * 一条 `pnpm test` 就让别的工作流的 lint 闸门干等。按连接算之后，不同连接的脚本互不影响，
+ * 与宿主调度器「一次 pump 只领一个该运行时的 run」同口径。
  *
  * M6.5 线程闸门：同一线程同时 `running` 数 ≥ `thread.concurrency`（缺省 1）时跳过它的
  * 候选；跨线程互不影响。`waiting` 不占位（已释放租约与并发位），`queued` 尚未占位。
@@ -61,31 +66,46 @@ export function claimCandidates(view: View, runtimeId: Id, now: Iso): RunRow[] {
  *
  * 注意「同一运行时不能并发」不在这里收口（M28）：那是**连接**级约束，由宿主调度器
  * 按运行时逐个 pump、一次只领一个来保证（`host/scheduler.ts#claimsPerPump`）。
- * 内核只认智能体与线程的窗口，才能让「一次 claim 多个」在直连内核的路径上仍然成立。
+ * 内核只认执行目标与线程的窗口，才能让「一次 claim 多个」在直连内核的路径上仍然成立。
  */
 export function pickClaims(view: View, runtime: Runtime, capacity: number, now: Iso): RunRow[] {
-  const runningByAgent = new Map<Id | null, number>()
+  const runningByAgent = new Map<Id, number>()
+  const runningByConnection = new Map<string | null, number>()
   const runningByThread = new Map<Id, number>()
   for (const run of view.runs.values()) {
     if (run.status !== 'running') continue
-    runningByAgent.set(run.agentId, (runningByAgent.get(run.agentId) ?? 0) + 1)
+    if (run.agentId === null) {
+      runningByConnection.set(run.runtimeId, (runningByConnection.get(run.runtimeId) ?? 0) + 1)
+    } else {
+      runningByAgent.set(run.agentId, (runningByAgent.get(run.agentId) ?? 0) + 1)
+    }
     if (run.threadId === null) continue
     runningByThread.set(run.threadId, (runningByThread.get(run.threadId) ?? 0) + 1)
   }
   const picked: RunRow[] = []
   for (const run of claimCandidates(view, runtime.id, now)) {
     if (picked.length >= capacity) break
-    const limit = run.agentId === null ? 1 : (view.agents.get(run.agentId)?.maxConcurrent ?? 1)
-    const usedByAgent = runningByAgent.get(run.agentId) ?? 0
-    if (usedByAgent >= limit) continue
-    if (run.threadId !== null) {
-      const thread = view.threads.get(run.threadId)
-      const concurrency = thread?.concurrency ?? 1
-      const used = runningByThread.get(run.threadId) ?? 0
+    // 执行目标窗口：智能体按 maxConcurrent，脚本 / 脏行（agentId=null）按连接固定 1 个
+    const withinWindow =
+      run.agentId === null
+        ? (runningByConnection.get(run.runtimeId) ?? 0) < 1
+        : (runningByAgent.get(run.agentId) ?? 0) <
+          (view.agents.get(run.agentId)?.maxConcurrent ?? 1)
+    if (!withinWindow) continue
+    // 线程闸门：同一个线程同时只跑 `thread.concurrency` 条（缺省 1）
+    const threadId = run.threadId
+    if (threadId !== null) {
+      const concurrency = view.threads.get(threadId)?.concurrency ?? 1
+      const used = runningByThread.get(threadId) ?? 0
       if (used >= concurrency) continue
-      runningByThread.set(run.threadId, used + 1)
+      runningByThread.set(threadId, used + 1)
     }
-    runningByAgent.set(run.agentId, usedByAgent + 1)
+    // 两道闸门都过了才占位：被线程闸门挡掉的候选不能吃掉并发位
+    if (run.agentId === null) {
+      runningByConnection.set(run.runtimeId, (runningByConnection.get(run.runtimeId) ?? 0) + 1)
+    } else {
+      runningByAgent.set(run.agentId, (runningByAgent.get(run.agentId) ?? 0) + 1)
+    }
     picked.push(run)
   }
   return picked

@@ -943,3 +943,122 @@ describe('createProjectionWriter：M20 验收列的旧快照兜底', () => {
     ).toEqual({ acceptance_json: '[]' })
   })
 })
+
+describe('createProjectionWriter：脚本配置的 M42 归一（老 args → steps）', () => {
+  it('workflow_stages：M40 的 `args` 形状归一成一步，并补 runAll=true', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    const stage = {
+      ...sample.stage({ workflowId: workflow.id, entryMode: 'script' }),
+      // M40 事实里的形状：一条 args，没有 steps / runAll
+      script: {
+        runtimeId: 'rt-1',
+        args: ['check'],
+        cwd: null,
+        env: { CI: '1' },
+        timeoutMs: 300_000,
+      },
+    } as unknown as WorkflowStage
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+
+    const row = db
+      .prepare('SELECT script_json FROM workflow_stages WHERE id = ?')
+      .get(stage.id) as { script_json: string }
+    expect(JSON.parse(row.script_json)).toEqual({
+      runtimeId: 'rt-1',
+      steps: [{ label: '', args: ['check'] }],
+      cwd: null,
+      env: { CI: '1' },
+      timeoutMs: 300_000,
+      runAll: true,
+    })
+  })
+
+  it('runs：脚本快照缺 steps 时同样归一成一步，老 `args` 键脱落', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const runtime = sample.runtime()
+    const agent = sample.agent({ runtimeId: runtime.id })
+    const workflow = sample.workflow()
+    const stage = sample.stage({ workflowId: workflow.id, agentId: agent.id })
+    const task = sample.task({ workflowId: workflow.id, currentStageId: stage.id })
+    for (const change of [
+      { table: 'runtimes', key: runtime.id, row: runtime },
+      { table: 'agents', key: agent.id, row: agent },
+      { table: 'workflows', key: workflow.id, row: workflow },
+      { table: 'workflow_stages', key: stage.id, row: stage },
+      { table: 'tasks', key: task.id, row: task },
+    ] as Change[]) {
+      writer.apply(change, SAMPLE_AT)
+    }
+    const run = {
+      ...sample.run({ taskId: task.id, stageId: stage.id, runtimeId: runtime.id }),
+      // M40 事实里的脚本快照：只有一条 args
+      script: { runtimeId: runtime.id, args: ['check'], cwd: null, env: {}, timeoutMs: null },
+    } as unknown as RunRow
+    writer.apply({ table: 'runs', key: run.id, row: run }, SAMPLE_AT)
+
+    const row = db.prepare('SELECT script_json FROM runs WHERE id = ?').get(run.id) as {
+      script_json: string
+    }
+    expect(JSON.parse(row.script_json)).toEqual({
+      runtimeId: runtime.id,
+      steps: [{ label: '', args: ['check'] }],
+      cwd: null,
+      env: {},
+      timeoutMs: null,
+      runAll: true,
+    })
+    // 老键脱落：不留第二份执行配置
+    expect(JSON.parse(row.script_json)).not.toHaveProperty('args')
+  })
+
+  it('workflow_stages：steps 形状原样保留，缺 label / args 补空、acceptance 保留', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    const stage = {
+      ...sample.stage({ workflowId: workflow.id, entryMode: 'script' }),
+      script: {
+        runtimeId: 'rt-1',
+        // 外部写入的脏形状：一步什么都没有，另一步带验收序号
+        steps: [{}, { label: '单测', args: ['test'], acceptance: 2 }],
+        cwd: null,
+        env: {},
+        timeoutMs: null,
+      },
+    } as unknown as WorkflowStage
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+
+    const row = db
+      .prepare('SELECT script_json FROM workflow_stages WHERE id = ?')
+      .get(stage.id) as { script_json: string }
+    expect(JSON.parse(row.script_json)).toEqual({
+      runtimeId: 'rt-1',
+      steps: [
+        { label: '', args: [] },
+        { label: '单测', args: ['test'], acceptance: 2 },
+      ],
+      cwd: null,
+      env: {},
+      timeoutMs: null,
+      runAll: true,
+    })
+  })
+
+  it('非脚本阶段：`script` 缺省（老事实没有这个键）时归一成 null', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    const stage = sample.stage({ workflowId: workflow.id })
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+
+    expect(
+      db.prepare('SELECT script_json FROM workflow_stages WHERE id = ?').get(stage.id),
+    ).toEqual({ script_json: 'null' })
+  })
+})

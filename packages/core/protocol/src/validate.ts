@@ -305,16 +305,16 @@ const checkHandoffs = (value: unknown, label: string): Check => {
 }
 
 /**
- * 阶段脚本（M40）：形状校验。命令不在这里——它只来自运行时连接（`runtime.command`）；
- * 参数逐项、环境变量复用智能体口径、超时与阶段同范围；占位符一律拒绝
- * （脚本没有提示词 / 模型 / 思考强度可展开）。
+ * 阶段脚本（M40 / M42）：形状校验。命令不在这里——它只来自运行时连接（`runtime.command`）；
+ * 步骤逐条校验（参数 / 验收序号），环境变量复用智能体口径、超时与阶段同范围；
+ * 占位符一律拒绝（脚本没有提示词 / 模型 / 思考强度可展开）。
  */
 const checkScript = (value: unknown, label: string): Check => {
   const script = asRecord(value)
   if (!script) return `${label} 必须是对象`
   return (
     requiredId(script.runtimeId, `${label}.runtimeId`) ??
-    checkScriptArgs(script.args, `${label}.args`) ??
+    checkScriptSteps(script.steps, `${label}.steps`) ??
     optionalText(script.cwd, `${label}.cwd`, COMMAND_LIMITS.workdir) ??
     checkEnv(script.env, `${label}.env`) ??
     optionalIntegerIn(
@@ -322,8 +322,31 @@ const checkScript = (value: unknown, label: string): Check => {
       `${label}.timeoutMs`,
       STAGE_TIMEOUT_LIMITS.minMs,
       STAGE_TIMEOUT_LIMITS.maxMs,
-    )
+    ) ??
+    optionalBoolean(script.runAll, `${label}.runAll`)
   )
+}
+
+/**
+ * 脚本步骤（M42）：1..8 步，每步 `{ label, args, acceptance }`。
+ *
+ * `acceptance` 是 1 基验收序号（与回执 `checks[].acceptance` 同一口径），上限沿用验收条数上限。
+ */
+const checkScriptSteps = (value: unknown, label: string): Check => {
+  if (!Array.isArray(value)) return `${label} 必须是步骤数组`
+  if (value.length === 0) return `${label} 至少一步`
+  if (value.length > SCRIPT_LIMITS.maxSteps) return `${label} 最多 ${SCRIPT_LIMITS.maxSteps} 步`
+  for (let index = 0; index < value.length; index += 1) {
+    const at = `${label}[${index}]`
+    const step = asRecord(value[index])
+    if (!step) return `${at} 必须是对象`
+    const error =
+      optionalText(step.label, `${at}.label`, SCRIPT_LIMITS.maxLabelChars) ??
+      (step.args === undefined ? `${at}.args 必填` : checkScriptArgs(step.args, `${at}.args`)) ??
+      optionalIntegerIn(step.acceptance, `${at}.acceptance`, 1, ACCEPTANCE_LIMITS.maxItems)
+    if (error) return error
+  }
+  return null
 }
 
 /** 脚本参数：字符串数组，项数与单项长度受 `SCRIPT_LIMITS` 约束，不允许占位符。 */

@@ -1834,7 +1834,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
   /** 第二条命令执行器：用来覆盖「换运行时」这一支 */
   const spareRuntime: Runtime = { ...commandRuntime, id: 'rt-cmd2', name: '备用命令' }
 
-  it('新建：切到「执行脚本」后能填参数 / 目录 / 环境变量 / 超时，保存原样提交（不带命令）', async () => {
+  it('新建：切到「执行脚本」后能填步骤参数 / 目录 / 环境变量 / 超时，保存原样提交（不带命令）', async () => {
     kernel.setView('agents.all', undefined, [agent])
     // 只列命令执行器：dsh 连接不出现在下拉里
     kernel.setView('runtimes.all', undefined, [commandRuntime, dshRuntime, spareRuntime])
@@ -1861,10 +1861,13 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     expect(screen.queryByLabelText('阶段2脚本命令')).toBeNull()
     expect(screen.getByText(/命令用运行时上的「pnpm」/)).toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('阶段2脚本参数'), 'check{Enter}--reporter=dot')
+    // M42：步骤列表——一步一条证据，标签可填可不填
+    await user.type(screen.getByLabelText('阶段2步骤1标签'), '门禁')
+    await user.type(screen.getByLabelText('阶段2步骤1参数'), 'check{Enter}--reporter=dot')
     await user.type(screen.getByLabelText('阶段2脚本工作目录'), 'C:/repo')
     await user.type(screen.getByLabelText('阶段2脚本环境变量'), 'CI=1')
     await choose(user, '阶段2脚本超时', '5 分钟')
+    await choose(user, '阶段2脚本跑法', '首个失败即停（省时间）')
 
     await user.click(screen.getByRole('button', { name: '保存' }))
 
@@ -1872,10 +1875,11 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     const draft = onSave.mock.calls[0][0] as WorkflowInput
     expect(savedStage(draft, '阶段1').script).toEqual({
       runtimeId: 'rt-cmd2',
-      args: ['check', '--reporter=dot'],
+      steps: [{ label: '门禁', args: ['check', '--reporter=dot'] }],
       cwd: 'C:/repo',
       env: { CI: '1' },
       timeoutMs: 300_000,
+      runAll: false,
     })
     expect(savedStage(draft, '阶段1').entryMode).toBe('script')
     expect(savedStage(draft, '阶段1').agentId ?? null).toBeNull()
@@ -1914,24 +1918,26 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     expect(saved.script).toBeNull()
   })
 
-  /** 一条脚本配置：连接取给定运行时，其余字段是脚本阶段的最小形态 */
-  const stageScript = (runtimeId: string): StageScript => ({
+  /** 一条脚本配置：连接取给定运行时，默认一步（M42） */
+  const stageScript = (
+    runtimeId: string,
+    steps: StageScript['steps'] = [{ label: '门禁', args: ['check'] }],
+  ): StageScript => ({
     runtimeId,
-    args: ['check'],
+    steps,
     cwd: null,
     env: {},
     timeoutMs: 600_000,
   })
 
-  it('编辑既有脚本阶段：运行时 / 参数 / 目录 / 环境变量 / 超时全部回填并原样保存', async () => {
+  it('编辑既有脚本阶段：运行时 / 步骤 / 目录 / 环境变量 / 超时全部回填并原样保存', async () => {
     const existing = workflowWith([
       {
         name: '自测',
         entryMode: 'script',
         agentId: null,
         script: {
-          ...stageScript('rt-cmd'),
-          args: ['check', '-r', 'dot'],
+          ...stageScript('rt-cmd', [{ label: '门禁', args: ['check', '-r', 'dot'] }]),
           cwd: 'C:/repo',
           env: { CI: '1' },
           timeoutMs: 300_000,
@@ -1953,19 +1959,25 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     // 命令不在阶段上：只读展示运行时命中的那条
     expect(screen.queryByLabelText('阶段2脚本命令')).toBeNull()
     expect(screen.getByText(/命令用运行时上的「pnpm」/)).toBeInTheDocument()
-    expect(screen.getByLabelText('阶段2脚本参数')).toHaveValue('check\n-r\ndot')
+    expect(screen.getByLabelText('阶段2步骤1标签')).toHaveValue('门禁')
+    expect(screen.getByLabelText('阶段2步骤1参数')).toHaveValue('check\n-r\ndot')
     expect(screen.getByLabelText('阶段2脚本工作目录')).toHaveValue('C:/repo')
     expect(screen.getByLabelText('阶段2脚本环境变量')).toHaveValue('CI=1')
     expect(screen.getByRole('combobox', { name: '阶段2脚本超时' })).toHaveTextContent('5 分钟')
+    // 没写 runAll 的老配置按「全部跑完」展示
+    expect(screen.getByRole('combobox', { name: '阶段2脚本跑法' })).toHaveTextContent(
+      '全部跑完再判（证据全）',
+    )
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, '自测').script).toEqual({
       runtimeId: 'rt-cmd',
-      args: ['check', '-r', 'dot'],
+      steps: [{ label: '门禁', args: ['check', '-r', 'dot'] }],
       cwd: 'C:/repo',
       env: { CI: '1' },
       timeoutMs: 300_000,
+      runAll: true,
     })
   })
 
@@ -2000,7 +2012,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     expect(saved.runTimeoutMs ?? null).toBeNull()
   })
 
-  it('脚本闸门：只要退出码，不要「要干什么」「验收」「单轮超时」，放行护栏仍在', async () => {
+  it('脚本闸门：不要「要干什么」「单轮超时」，验收由步骤逐条兜住（M42）', async () => {
     const existing = workflowWith([
       { name: '评审', judge: { maxFails: 3 }, acceptance: ['`pnpm check` 退出码 0'] },
     ])
@@ -2016,18 +2028,51 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     await choose(user, '阶段2类型', '脚本闸门')
 
     expect(screen.queryByLabelText('阶段2要干什么')).toBeNull()
-    expect(screen.queryByLabelText('阶段2验收')).toBeNull()
     expect(screen.queryByRole('combobox', { name: '阶段2单轮超时' })).toBeNull()
+    // 验收与智能体闸门同一份口径，保留原值并就地可改
+    const acceptance = screen.getByLabelText('阶段2验收')
+    expect(acceptance).toHaveValue('`pnpm check` 退出码 0')
+    expect(screen.getByText(/每条验收都要有步骤指向它/)).toBeInTheDocument()
     // 放行护栏属于判定本身，与执行目标无关：仍要能配
     expect(screen.getByRole('combobox', { name: '阶段2放行护栏' })).toBeInTheDocument()
+    // 步骤行有「对应验收」：把这条证据钉到第 1 条验收上
+    await choose(user, '阶段2步骤1验收', '第 1 条')
+
+    // 再加一条验收 + 一步：第二条验收也要有步骤兜住
+    fireEvent.change(acceptance, { target: { value: '`pnpm check` 退出码 0\n单测全绿' } })
+    await user.click(screen.getByRole('button', { name: '阶段2添加步骤' }))
+    await user.type(screen.getByLabelText('阶段2步骤2参数'), 'test')
+    await choose(user, '阶段2步骤2验收', '第 2 条')
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     const saved = savedStage(onSave.mock.calls[0][0] as WorkflowInput, '评审')
     expect(saved.entryMode).toBe('script')
     expect(saved.judge).toEqual({ maxFails: 3 })
-    expect(saved.acceptance).toEqual([])
+    expect(saved.acceptance).toEqual(['`pnpm check` 退出码 0', '单测全绿'])
+    expect(saved.script?.steps).toEqual([
+      { label: '', args: [], acceptance: 1 },
+      { label: '', args: ['test'], acceptance: 2 },
+    ])
     expect(saved.instructions).toBe('')
+  })
+
+  it('脚本闸门没有验收条目：说明只按每一步的退出码判，别让人以为漏配了', async () => {
+    const existing = workflowWith([
+      {
+        name: '自测',
+        entryMode: 'script',
+        agentId: null,
+        script: stageScript('rt-cmd'),
+        judge: { maxFails: null },
+      },
+    ])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [commandRuntime])
+    render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    expect(screen.getByLabelText('阶段2验收')).toHaveValue('')
+    expect(screen.getByText('没有验收条目：只按每一步的退出码判。')).toBeInTheDocument()
   })
 
   it('脚本闸门：可以配派单，触发档位按闸门给（没有「跑完时」）', async () => {
@@ -2116,13 +2161,14 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
     const saved = savedStage(onSave.mock.calls[0][0] as WorkflowInput, '阶段1')
     expect(saved.entryMode).toBe('script')
-    // 提交的脚本里没有命令键：命令只在运行时的连接上
+    // 提交的脚本里没有命令键：命令只在运行时的连接上（M42：一步空参数）
     expect(saved.script).toEqual({
       runtimeId: 'rt-npm',
-      args: [],
+      steps: [{ label: '', args: [] }],
       cwd: null,
       env: {},
       timeoutMs: 600_000,
+      runAll: true,
     })
   })
 

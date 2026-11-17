@@ -2322,8 +2322,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
   it('脚本阶段进入：run.queued 带脚本快照、无智能体、access=full、提示词只有资料（M40）', () => {
     const script = {
       runtimeId: 'rt-1',
-      command: 'pnpm',
-      args: ['check'],
+      steps: [{ label: '门禁', args: ['check'], acceptance: 1 }],
       cwd: 'C:/scripts',
       env: { CI: '1' },
       timeoutMs: 600_000,
@@ -2376,8 +2375,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
   it('脚本阶段缺配置 / 缺运行时 / 任务没有项目：零 run 或回落脚本工作目录（M40）', () => {
     const script = {
       runtimeId: 'rt-1',
-      command: 'pnpm',
-      args: ['check'],
+      steps: [{ label: '', args: ['check'] }],
       cwd: 'C:/scripts',
       env: {},
       timeoutMs: null,
@@ -2410,8 +2408,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
   it('脚本阶段任务没有项目时用脚本自己的工作目录（M40）', () => {
     const script = {
       runtimeId: 'rt-1',
-      command: 'pnpm',
-      args: [],
+      steps: [{ label: '', args: [] }],
       cwd: 'C:/scripts',
       env: {},
       timeoutMs: null,
@@ -3179,8 +3176,7 @@ describe('kernel/commands/task 人工跳转留痕的「自然去向」文案', (
 describe('M40：阶段脚本的落库、引用校验与比较', () => {
   const script = {
     runtimeId: 'rt-1',
-    command: 'pnpm',
-    args: ['check'],
+    steps: [{ label: '', args: ['check'] }],
     cwd: null,
     env: { CI: '1' },
     timeoutMs: null,

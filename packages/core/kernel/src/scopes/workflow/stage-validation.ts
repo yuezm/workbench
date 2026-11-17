@@ -1,4 +1,4 @@
-import type { StageExitGuard, StageInput } from '@workbench/protocol/entities'
+import type { ScriptStep, StageExitGuard, StageInput } from '@workbench/protocol/entities'
 
 /**
  * 纯函数：校验一条工作流的阶段配置。
@@ -26,9 +26,9 @@ export function validateStageSet(stages: StageInput[]): string | null {
     if (s.entryMode === 'agent' && !s.agentId) {
       return `阶段「${s.name}」设为交给智能体时必须选择智能体`
     }
-    // M40：脚本阶段必须带脚本；非脚本阶段上残留的脚本由内核归一清空（不报错）
+    // M40 / M42：脚本阶段必须带步骤；非脚本阶段上残留的脚本由内核归一清空（不报错）
     if (s.entryMode === 'script' && (s.script === undefined || s.script === null)) {
-      return `阶段「${s.name}」设为执行脚本时必须填写命令`
+      return `阶段「${s.name}」设为执行脚本时必须配置步骤`
     }
     // 判定必须有判定者：结论来自回执（智能体）或退出码（脚本）
     if (s.judge) {
@@ -40,13 +40,15 @@ export function validateStageSet(stages: StageInput[]): string | null {
         return `阶段「${s.name}」的放行护栏必须是不设或 ≥1 的整数`
       }
     }
-    // M34：验收只属于闸门阶段——执行阶段不给自己判分
+    // M34：验收只属于闸门阶段——执行阶段不给自己判分。
+    // 脚本闸门与智能体闸门共用 `checks[].acceptance` 证据口径，条数不单独设限（总上限看 ACCEPTANCE_LIMITS）
     if (!s.judge && (s.acceptance?.length ?? 0) > 0) {
       return `阶段「${s.name}」不是判定阶段：验收条目只能配在闸门阶段`
     }
-    // M40：一条脚本只能证明一条验收（退出码是一个值，不是逐条证据）
-    if (s.entryMode === 'script' && (s.acceptance?.length ?? 0) > 1) {
-      return `阶段「${s.name}」的脚本闸门最多一条验收条目`
+    // M42：脚本闸门的每条验收都要有一组步骤兜住，否则闸门永远拿不到逐条证据
+    if (s.judge && s.entryMode === 'script' && s.script) {
+      const error = validateScriptAcceptance(s, s.script.steps)
+      if (error) return error
     }
     // M34：判定者不能同时是被验阶段的执行者，否则又变成自己判自己
     if (s.judge) {
@@ -57,6 +59,31 @@ export function validateStageSet(stages: StageInput[]): string | null {
     }
     const error = validateExits(s, i, n)
     if (error) return error
+  }
+  return null
+}
+
+/**
+ * 脚本闸门的验收 ↔ 步骤对应（M42）：每条验收都要有一组步骤用 `acceptance: n` 指向它。
+ *
+ * 没有对应关系的验收永远拿不到证据，闸门只会停在原地等人——保存时就该拒收，
+ * 而不是让人到看板上猜「为什么跑了却不动」。
+ */
+function validateScriptAcceptance(stage: StageInput, steps: readonly ScriptStep[]): string | null {
+  const items = stage.acceptance ?? []
+  // 先查「指向不存在的验收」：那种步骤本身是错的，报「验收没人指向」会把人引向错误的方向
+  const extra = steps.find(
+    (step) => step.acceptance !== undefined && step.acceptance > items.length,
+  )
+  if (extra !== undefined) {
+    return `阶段「${stage.name}」的脚本步骤指向了不存在的验收（第 ${extra.acceptance} 条）`
+  }
+  const mapped = new Set(
+    steps.flatMap((step) => (step.acceptance === undefined ? [] : [step.acceptance])),
+  )
+  const missing = items.findIndex((_, index) => !mapped.has(index + 1))
+  if (missing >= 0) {
+    return `阶段「${stage.name}」的第 ${missing + 1} 条验收没有脚本步骤指向它`
   }
   return null
 }

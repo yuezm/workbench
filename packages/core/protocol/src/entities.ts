@@ -251,32 +251,58 @@ export const ENTRY_MODES = ['none', 'agent', 'script', 'user'] as const
 
 export type EntryMode = (typeof ENTRY_MODES)[number]
 
-/** 阶段脚本的参数上限（与 `argsTemplate` 同口径：逐项 argv，不经 shell）。 */
-export const SCRIPT_LIMITS = { maxArgs: 20, maxArgChars: 500 } as const
+/** 阶段脚本的步数与单项上限（与 `argsTemplate` 同口径：逐项 argv，不经 shell）。 */
+export const SCRIPT_LIMITS = {
+  maxSteps: 8,
+  maxLabelChars: 40,
+  maxArgs: 20,
+  maxArgChars: 500,
+} as const
 
 /** 脚本参数里不允许出现的占位符：脚本没有提示词、模型与思考强度。 */
 export const SCRIPT_FORBIDDEN_PLACEHOLDERS = ['prompt', 'model', 'effort'] as const
 
 /**
- * 阶段脚本（M40 内联在阶段上）：选一条命令运行时 + 参数。
+ * 一条脚本步骤（M42）：同一连接上的另一组 argv，按顺序执行，各自给一个退出码。
+ *
+ * 三个字段各有唯一用途，别再合并：
+ * - `label`：证据标签，进回执的 `checks[].cmd`（为空时执行器用「命令 + 参数」拼）；
+ * - `args`：逐项 argv，不经 shell；
+ * - `acceptance`：1 基验收序号，把这条证据钉到闸门的某条验收上（省略 = 与验收无关）。
+ */
+export interface ScriptStep {
+  /** 证据标签（空串 = 用「命令 + 参数」拼），最长 `SCRIPT_LIMITS.maxLabelChars` */
+  label: string
+  /** 逐项 argv，不经 shell；不允许 `{prompt}` / `{model}` / `{effort}` */
+  args: readonly string[]
+  /** 指向第 n 条验收（1 基）；省略 = 与验收无关的环境检查 */
+  acceptance?: number
+}
+
+/**
+ * 阶段脚本（M40 内联在阶段上；M42 扩成步骤序列）：选一条命令运行时 + 若干步骤。
  *
  * - **命令只来自运行时**：`runtimeId` 指向的那条运行时决定跑哪个可执行文件与执行器协议；
- *   阶段只给参数（`args`）、工作目录、环境变量与超时。选了运行时又以阶段命令覆盖，
+ *   阶段只给步骤（`steps`）、工作目录、环境变量与超时。选了运行时又以阶段命令覆盖，
  *   等于两条真相源——M40 首版的 `command` 字段因此撤掉；
+ * - 步骤共用一条连接（同一个可执行文件），只是 argv 不同：一条命令证明一件事，
+ *   N 步就给 N 条证据（`checks[]`），闸门按 `acceptance` 逐条核对；
  * - 不产生提示词、不续会话、不派活——脚本只回答「命令跑没跑成」；
  * - 闸门阶段读 `exitCode` 当结论（`0` = 通过），非闸门阶段只看成功 / 失败。
  */
 export interface StageScript {
   /** 连接：必须指向一条已存在的运行时（表单预填第一条命令执行器运行时） */
   runtimeId: string
-  /** 逐项 argv，不经 shell；不允许 `{prompt}` / `{model}` / `{effort}` */
-  args: readonly string[]
+  /** 步骤（至少 1 条，按顺序执行）；每条步骤跑完产生一条 `checks` */
+  steps: readonly ScriptStep[]
   /** 工作目录；null = 项目文件夹 > 宿主默认目录 */
   cwd: string | null
   /** 追加给子进程的环境变量（只覆盖，不清空宿主基线） */
   env: Record<string, string>
-  /** 单轮超时；null = 阶段 `runTimeoutMs` > 全局缺省 */
+  /** **整轮**超时（所有步骤共用）；null = 阶段 `runTimeoutMs` > 全局缺省 */
   timeoutMs: number | null
+  /** 全部步骤跑完再判（缺省 true）；false = 首个非 0 退出即停（省时间，证据不全） */
+  runAll?: boolean
 }
 
 /**

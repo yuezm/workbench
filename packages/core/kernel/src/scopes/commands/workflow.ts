@@ -175,7 +175,9 @@ function missingScriptRuntime(view: View, stages: StageInput[]): Id | null {
   return null
 }
 
-/** 脚本配置比较（M40）：逐字段比，缺省与 null 视为同值。命令不在其中——它只属于运行时。 */
+/**
+ * 脚本配置比较（M40 / M42）：逐字段比，缺省与 null 视为同值。命令不在其中——它只属于运行时。
+ */
 function sameScript(a: WorkflowStage['script'], b: WorkflowStage['script']): boolean {
   const one = a ?? null
   const other = b ?? null
@@ -184,10 +186,27 @@ function sameScript(a: WorkflowStage['script'], b: WorkflowStage['script']): boo
     one.runtimeId === other.runtimeId &&
     one.cwd === other.cwd &&
     (one.timeoutMs ?? null) === (other.timeoutMs ?? null) &&
-    one.args.length === other.args.length &&
-    one.args.every((item, index) => item === other.args[index]) &&
+    (one.runAll ?? true) === (other.runAll ?? true) &&
+    sameSteps(one.steps ?? [], other.steps ?? []) &&
     sameEnv(one.env, other.env)
   )
+}
+
+/** 步骤比较：条数、标签、验收序号与逐项参数全等（步骤顺序有意义）。 */
+function sameSteps(
+  a: NonNullable<WorkflowStage['script']>['steps'],
+  b: NonNullable<WorkflowStage['script']>['steps'],
+): boolean {
+  if (a.length !== b.length) return false
+  return a.every((step, index) => {
+    const other = b[index]
+    return (
+      step.label === other.label &&
+      (step.acceptance ?? null) === (other.acceptance ?? null) &&
+      step.args.length === other.args.length &&
+      step.args.every((arg, at) => arg === other.args[at])
+    )
+  })
 }
 
 /** 环境变量比较：键集合与值全等（与 `sameEnv` 在智能体侧同口径）。 */

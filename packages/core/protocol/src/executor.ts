@@ -29,6 +29,21 @@ export type { Receipt } from './inputs'
 export const EXECUTOR_PORT_VERSION = 2
 
 /**
+ * 一条执行步骤（M42 脚本阶段）：同一连接上的另一组 argv，按顺序执行、各自一个退出码。
+ *
+ * `acceptance` 是 1 基验收序号：执行器把它原样带回 `checks[].acceptance`，内核据此逐条核对
+ * 闸门验收（与智能体自报的 `checks` 同一份口径）。
+ */
+export interface TurnStep {
+  /** 证据标签（落 `checks[].cmd`）；空串 = 执行器用「命令 + 参数」拼 */
+  label: string
+  /** 逐项原样传参，不展开占位符 */
+  args: readonly string[]
+  /** 指向第 n 条验收（1 基）；省略 = 与验收无关 */
+  acceptance?: number
+}
+
+/**
  * 一轮执行的入参：宿主已把「派给谁、在哪跑、什么权限、多久超时」定好，
  * 执行器只负责调起进程、把帧读回、给出回执。
  */
@@ -44,12 +59,14 @@ export interface Turn {
   /** 执行目录（项目文件夹 > 智能体工作目录 > 空串 = 宿主默认目录） */
   cwd: string
   /**
-   * argv（M40 脚本阶段）：逐项原样传参，不展开占位符；缺省用运行时的 `argsTemplate`。
+   * 步骤序列（M42 脚本阶段）：按顺序逐条执行，每条产一条 `checks`；
+   * 缺省（智能体轮）用运行时的 `argsTemplate` 展开成一步。
    *
-   * 命令本体不在这里：连哪条连接就跑哪个可执行文件（由 `runtime.command` 唯一决定），
-   * 阶段只给参数这一类执行配置。
+   * 命令本体不在这里：连哪条连接就跑哪个可执行文件（由 `runtime.command` 唯一决定）。
    */
-  args?: readonly string[]
+  steps?: readonly TurnStep[]
+  /** 全部步骤跑完再判（缺省 true）；false = 首个非 0 退出即停 */
+  runAll?: boolean
   /** 访问权限（来自智能体的 `permissionMode`） */
   access: Access
   /** 模型覆盖（来自智能体配置）；null / 缺省 = CLI 默认 */

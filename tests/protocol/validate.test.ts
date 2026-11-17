@@ -345,7 +345,7 @@ describe('protocol/validate', () => {
     ).toBe(true)
   })
 
-  it('workflow.create：阶段脚本形状（M40）', () => {
+  it('workflow.create：阶段脚本形状（M40 / M42）', () => {
     const create = (script: unknown): unknown =>
       cmd('workflow.create', {
         input: {
@@ -355,13 +355,17 @@ describe('protocol/validate', () => {
       })
     const ok = {
       runtimeId: 'rt-1',
-      args: ['check'],
+      steps: [{ label: '门禁', args: ['check'] }],
       cwd: null,
       env: { CI: '1' },
       timeoutMs: 600_000,
     }
+    const step = (over: Record<string, unknown> = {}): unknown => ({
+      ...ok,
+      steps: [{ label: '门禁', args: ['check'], ...over }],
+    })
     expect(validateCommand(create(ok)).ok).toBe(true)
-    expect(validateCommand(create({ ...ok, args: undefined, cwd: undefined })).ok).toBe(true)
+    expect(validateCommand(create({ ...ok, steps: [{ args: [] }], cwd: undefined })).ok).toBe(true)
     expect(validateCommand(create(null)).ok).toBe(true)
     expect(rejectedMessage(create('x'))).toBe('input.stages[0].script 必须是对象')
     expect(rejectedMessage(create({ ...ok, runtimeId: '' }))).toBe(
@@ -370,28 +374,57 @@ describe('protocol/validate', () => {
     // 命令不是阶段字段（只来自运行时连接）：多写一个 `command` 键既不校验也不落库
     expect(validateCommand(create({ ...ok, command: '' })).ok).toBe(true)
     expect(validateCommand(create({ ...ok, command: 'a'.repeat(501) })).ok).toBe(true)
-    expect(rejectedMessage(create({ ...ok, args: 'check' }))).toBe(
-      'input.stages[0].script.args 必须是字符串数组',
+    // 步骤：必须是数组、至少一步、最多 8 步；每步要有 args
+    expect(rejectedMessage(create({ ...ok, steps: undefined }))).toBe(
+      'input.stages[0].script.steps 必须是步骤数组',
     )
-    expect(rejectedMessage(create({ ...ok, args: Array.from({ length: 21 }, () => 'a') }))).toBe(
-      'input.stages[0].script.args 最多 20 项',
+    expect(rejectedMessage(create({ ...ok, steps: [] }))).toBe(
+      'input.stages[0].script.steps 至少一步',
     )
-    expect(rejectedMessage(create({ ...ok, args: [1] }))).toBe(
-      'input.stages[0].script.args[0] 必须是字符串',
+    expect(
+      rejectedMessage(
+        create({
+          ...ok,
+          steps: Array.from({ length: 9 }, () => ({ label: 'x', args: ['a'] })),
+        }),
+      ),
+    ).toBe('input.stages[0].script.steps 最多 8 步')
+    expect(rejectedMessage(create(step({ args: undefined })))).toBe(
+      'input.stages[0].script.steps[0].args 必填',
     )
-    expect(rejectedMessage(create({ ...ok, args: ['a'.repeat(501)] }))).toBe(
-      'input.stages[0].script.args[0] 最长 500 个字符',
+    expect(rejectedMessage(create(step({ args: 'check' })))).toBe(
+      'input.stages[0].script.steps[0].args 必须是字符串数组',
     )
-    expect(rejectedMessage(create({ ...ok, args: ['{prompt}'] }))).toBe(
-      'input.stages[0].script.args[0] 不支持占位符 {prompt}（脚本没有提示词 / 模型）',
+    expect(rejectedMessage(create(step({ args: Array.from({ length: 21 }, () => 'a') })))).toBe(
+      'input.stages[0].script.steps[0].args 最多 20 项',
+    )
+    expect(rejectedMessage(create(step({ args: [1] })))).toBe(
+      'input.stages[0].script.steps[0].args[0] 必须是字符串',
+    )
+    expect(rejectedMessage(create(step({ args: ['a'.repeat(501)] })))).toBe(
+      'input.stages[0].script.steps[0].args[0] 最长 500 个字符',
+    )
+    expect(rejectedMessage(create(step({ args: ['{prompt}'] })))).toBe(
+      'input.stages[0].script.steps[0].args[0] 不支持占位符 {prompt}（脚本没有提示词 / 模型）',
     )
     // 非白名单占位符只是普通文本（脚本参数不展开），不拦
-    expect(validateCommand(create({ ...ok, args: ['{cwd}'] })).ok).toBe(true)
+    expect(validateCommand(create(step({ args: ['{cwd}'] }))).ok).toBe(true)
+    // 验收序号：1–12 的整数，可省略
+    expect(validateCommand(create(step({ acceptance: 1 }))).ok).toBe(true)
+    expect(rejectedMessage(create(step({ acceptance: 0 })))).toBe(
+      'input.stages[0].script.steps[0].acceptance必须在 1 到 12 之间',
+    )
+    expect(rejectedMessage(create(step({ label: 'x'.repeat(41) })))).toBe(
+      'input.stages[0].script.steps[0].label最长 40 个字符',
+    )
     expect(rejectedMessage(create({ ...ok, env: [] }))).toBe(
       'input.stages[0].script.env 必须是键值对象',
     )
     expect(rejectedMessage(create({ ...ok, timeoutMs: 1000 }))).toBe(
       'input.stages[0].script.timeoutMs必须在 300000 到 14400000 之间',
+    )
+    expect(rejectedMessage(create({ ...ok, runAll: 'yes' }))).toBe(
+      'input.stages[0].script.runAll必须是布尔值',
     )
   })
 

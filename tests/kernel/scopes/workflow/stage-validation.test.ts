@@ -38,26 +38,25 @@ describe('validateStageSet', () => {
     )
   })
 
-  it('脚本阶段必须带脚本配置；脚本闸门最多一条验收条目（M40）', () => {
+  it('脚本阶段必须带步骤；脚本闸门的验收条数与智能体闸门同口径（M40/M42）', () => {
     const script = {
       runtimeId: 'rt-1',
-      command: 'pnpm',
-      args: ['check'],
+      steps: [{ label: '', args: ['check'] }],
       cwd: null,
       env: {},
       timeoutMs: null,
     }
     expect(validateStageSet([stage({ name: '自测', entryMode: 'script' })])).toBe(
-      '阶段「自测」设为执行脚本时必须填写命令',
+      '阶段「自测」设为执行脚本时必须配置步骤',
     )
     expect(validateStageSet([stage({ name: '自测', entryMode: 'script', script })])).toBeNull()
-    // 脚本闸门：判定允许，验收最多一条
+    // 脚本闸门：判定允许；验收条数不单独设限，但每条都要有步骤指向它
     expect(
       validateStageSet([
         stage({
           name: '自测',
           entryMode: 'script',
-          script,
+          script: { ...script, steps: [{ label: '门禁', args: ['check'], acceptance: 1 }] },
           judge: { maxFails: null },
           acceptance: ['pnpm check 退出码 0'],
         }),
@@ -68,12 +67,92 @@ describe('validateStageSet', () => {
         stage({
           name: '自测',
           entryMode: 'script',
-          script,
+          script: {
+            ...script,
+            steps: [
+              { label: '类型', args: ['tsc'], acceptance: 1 },
+              { label: '单测', args: ['test'], acceptance: 2 },
+              { label: 'lint', args: ['lint'], acceptance: 3 },
+            ],
+          },
           judge: { maxFails: null },
-          acceptance: ['a', 'b'],
+          acceptance: ['类型检查', '单测', 'lint'],
         }),
       ]),
-    ).toBe('阶段「自测」的脚本闸门最多一条验收条目')
+    ).toBeNull()
+  })
+
+  it('脚本闸门的验收必须被步骤兜住（M42）：漏一条 / 指向不存在的验收都拒', () => {
+    const script = {
+      runtimeId: 'rt-1',
+      steps: [{ label: '类型', args: ['tsc'], acceptance: 1 }],
+      cwd: null,
+      env: {},
+      timeoutMs: null,
+    }
+    expect(
+      validateStageSet([
+        stage({
+          name: '自测',
+          entryMode: 'script',
+          script,
+          judge: { maxFails: null },
+          acceptance: ['类型检查', '单测'],
+        }),
+      ]),
+    ).toBe('阶段「自测」的第 2 条验收没有脚本步骤指向它')
+    expect(
+      validateStageSet([
+        stage({
+          name: '自测',
+          entryMode: 'script',
+          script: { ...script, steps: [{ label: 'x', args: ['x'], acceptance: 2 }] },
+          judge: { maxFails: null },
+          acceptance: ['类型检查'],
+        }),
+      ]),
+    ).toBe('阶段「自测」的脚本步骤指向了不存在的验收（第 2 条）')
+    // 没有验收条目却给步骤标了序号：也算指向不存在的验收
+    expect(
+      validateStageSet([
+        stage({
+          name: '自测',
+          entryMode: 'script',
+          script,
+          judge: { maxFails: null },
+          acceptance: [],
+        }),
+      ]),
+    ).toBe('阶段「自测」的脚本步骤指向了不存在的验收（第 1 条）')
+    // 没有验收条目、步骤也没有序号：放行（脚本闸门只按退出码判）
+    expect(
+      validateStageSet([
+        stage({
+          name: '自测',
+          entryMode: 'script',
+          script: { ...script, steps: [{ label: '', args: ['check'] }] },
+          judge: { maxFails: null },
+        }),
+      ]),
+    ).toBeNull()
+    // 一条验收映射到步骤、另一步不挂钩：放行（不挂钩的步骤是环境检查）
+    expect(
+      validateStageSet([
+        stage({
+          name: '自测',
+          entryMode: 'script',
+          script: {
+            ...script,
+            steps: [
+              { label: '类型', args: ['tsc'], acceptance: 1 },
+              { label: '环境', args: ['node', '-v'] },
+            ],
+          },
+          judge: { maxFails: null },
+          acceptance: ['类型检查'],
+        }),
+      ]),
+    ).toBeNull()
   })
 
   it('出口的 goto 目标越界时报错（过大 / 负数 / 非整数）', () => {

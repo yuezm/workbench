@@ -30,7 +30,13 @@ import type {
   Runtime,
   StageScript,
 } from '@workbench/protocol/entities'
-import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '@workbench/protocol/executor'
+import type {
+  ExecutorIO,
+  ExecutorPort,
+  Receipt,
+  Turn,
+  TurnStep,
+} from '@workbench/protocol/executor'
 import type { Fact, Id, Iso } from '@workbench/kernel/core/types'
 import { parseModelId } from '@workbench/protocol/model-id'
 import { COMMAND_LIMITS } from '@workbench/protocol/validate'
@@ -476,8 +482,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     purpose: run.purpose,
     prompt: run.prompt,
     cwd: run.cwd,
-    // M40：命令只来自运行时连接（`runtime.command`）——阶段不给命令，就没有第二条真相源
-    args: target.kind === 'script' ? [...target.script.args] : undefined,
+    // M40 / M42：命令只来自运行时连接（`runtime.command`）——阶段只给步骤，没有第二条真相源
+    steps: target.kind === 'script' ? turnStepsOf(target.script) : undefined,
+    runAll: target.kind === 'script' ? (target.script.runAll ?? true) : undefined,
     access: run.access,
     model: target.kind === 'agent' ? modelOf(target.agent) : null,
     effort: target.kind === 'agent' ? target.agent.reasoningEffort : null,
@@ -489,6 +496,17 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     contextFile: run.promptRef,
     signal,
   })
+
+  /**
+   * 脚本步骤 → `Turn.steps`（M42）：逐项拷贝，执行器改不动 run 行上的快照。
+   * `acceptance` 原样带上——执行器把它写进 `checks[].acceptance`，内核据此核对验收。
+   */
+  const turnStepsOf = (script: StageScript): TurnStep[] =>
+    script.steps.map((step) => ({
+      label: step.label,
+      args: [...step.args],
+      ...(step.acceptance === undefined ? {} : { acceptance: step.acceptance }),
+    }))
 
   const releaseIdle = (): void => {
     if (controllers.size > 0) return

@@ -12,7 +12,7 @@
 | `channel`  | 卡片送到哪、答案怎么回来                                 | 展示卡片、收回答、回报投递状态                 | 改卡片内容、决定派给谁、自己开聊天入口 |
 | `app`      | 人看到的界面                                             | 注册视图组件、发命令、发自身事件               | 算业务规则、直读数据库                 |
 
-**派活链固定为：规则或阶段 → 执行目标（智能体 `agentId` 或脚本 `script`）→ 运行时 `runtimeId` → 运行时的 `executorKey` 选执行器插件。** 执行器只负责「怎么调起 CLI」，不决定也不领取任务（领取由宿主调度器按运行时发起）。脚本是第二个执行目标（M40）：**命令只来自运行时连接（`runtime.command`），阶段只给 argv**——阶段上再写一条命令就是第二份真相源，因此 `StageScript` 与 `Turn` 都没有命令字段；脚本不产生提示词、不续会话、不派活。
+**派活链固定为：规则或阶段 → 执行目标（智能体 `agentId` 或脚本 `script`）→ 运行时 `runtimeId` → 运行时的 `executorKey` 选执行器插件。** 执行器只负责「怎么调起 CLI」，不决定也不领取任务（领取由宿主调度器按运行时发起）。脚本是第二个执行目标（M40）：**命令只来自运行时连接（`runtime.command`），阶段只给步骤（每条一组 argv）**——阶段上再写一条命令就是第二份真相源，因此 `StageScript` 与 `Turn` 都没有命令字段；一条命令证明一件事，N 步就给 N 条 `checks`（M42），脚本不产生提示词、不续会话、不派活。
 
 交付流水线（CI/CD）**不是第五类插件**：它是「自动化规则 + 智能体 + 项目配置」的组合。
 
@@ -215,7 +215,13 @@ export interface Turn {
   purpose: 'stage' | 'chat'
   prompt: string // 宿主按模板拼好
   cwd: string // 项目文件夹 > 智能体工作目录（脚本阶段为脚本 cwd）> 空串（宿主默认目录）
-  args?: readonly string[] // M40 脚本阶段：argv 逐项原样传参、不展开占位符（缺省用 argsTemplate）；命令不在这里，只来自 runtime.command
+  /**
+   * M42 脚本阶段：步骤序列（每条一组 argv，按顺序执行、各产一条 `checks`）。
+   * 缺省（智能体轮）用运行时的 `argsTemplate` 展开成一步；命令不在这里，只来自 runtime.command。
+   */
+  steps?: readonly TurnStep[]
+  /** 全部步骤跑完再判（缺省 true）；false = 首个非 0 退出即停 */
+  runAll?: boolean
   access: Access // 由智能体的 permissionMode 映射
   model?: { provider: string; id: string } | null // 智能体的模型配置
   effort?: string | null // 智能体的思考强度

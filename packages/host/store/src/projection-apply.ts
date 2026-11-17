@@ -42,6 +42,8 @@ import type {
   Project,
   RunRow,
   Runtime,
+  ScriptStep,
+  StageScript,
   Task,
   Workflow,
   WorkflowStage,
@@ -151,8 +153,8 @@ const normalizeRun = (run: RunRow): RunRow => ({
   deadlineAt: run.deadlineAt ?? null,
   cancelRequested: run.cancelRequested ?? false,
   deliverables: run.deliverables ?? null,
-  // M40：老事实没有脚本快照，按「不是脚本轮」归一
-  script: run.script ?? null,
+  // M40：老事实没有脚本快照，按「不是脚本轮」归一；M42 把老的 `args` 归一成一步
+  script: normalizeScript(run.script),
   startedAt: run.startedAt ?? null,
   endedAt: run.endedAt ?? null,
   createdAt: run.createdAt,
@@ -201,8 +203,38 @@ const normalizeStage = (row: WorkflowStage): WorkflowStage => {
     subtaskStageId: legacy.subtaskStageId ?? null,
     onChildrenSettled: legacy.onChildrenSettled ?? null,
     spawnPolicy: legacy.spawnPolicy ?? null,
-    // M40：老事实没有脚本配置，按「不是脚本阶段」归一
-    script: legacy.script ?? null,
+    // M40：老事实没有脚本配置，按「不是脚本阶段」归一；M42 把老的 `args` 归一成一步
+    script: normalizeScript(legacy.script),
+  }
+}
+
+/** 单步规整：`label` 缺省空串，`acceptance` 缺省「与验收无关」。 */
+const normalizeStep = (step: ScriptStep): ScriptStep => ({
+  label: step.label ?? '',
+  args: step.args ?? [],
+  ...(step.acceptance === undefined || step.acceptance === null
+    ? {}
+    : { acceptance: step.acceptance }),
+})
+
+/**
+ * 规整脚本配置（M40 / M42）：老事实只有一条 `args`（一条命令），归一成「一步」；
+ * `runAll` 缺省 true。步骤内部同样补齐，避免投影里出现半截形状。
+ *
+ * 用途与 `normalizeRun` / `normalizeStage` 一致：任何路径写入的行都能绑参，
+ * 增量与重建折出同一行。`args` 这类已废弃键在这里脱落（不再有第二份真相源）。
+ */
+const normalizeScript = (script: StageScript | null | undefined): StageScript | null => {
+  if (script === undefined || script === null) return null
+  const legacy = script as StageScript & { args?: readonly string[] }
+  const steps = legacy.steps ?? [{ label: '', args: legacy.args ?? [] }]
+  return {
+    runtimeId: legacy.runtimeId,
+    steps: steps.map(normalizeStep),
+    cwd: legacy.cwd ?? null,
+    env: legacy.env ?? {},
+    timeoutMs: legacy.timeoutMs ?? null,
+    runAll: legacy.runAll ?? true,
   }
 }
 

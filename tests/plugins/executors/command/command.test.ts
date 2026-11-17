@@ -245,7 +245,8 @@ describe('executeCommandRun 成功路径', () => {
     })
     expect(receipt.error).toBeUndefined()
     expect(receipt.errorCode).toBeUndefined()
-    expect(receipt.durationMs).toBe(4)
+    // M42：`now()` 多调一次（每步开跑前算剩余预算），步长 4 时耗时口径随之为 8
+    expect(receipt.durationMs).toBe(8)
     expect(events).toEqual([{ seq: 1, type: 'text', text: 'done' }])
     expect(processCalls).toEqual([4242])
     expect(child.stdinEnded).toBe(true)
@@ -720,12 +721,17 @@ describe('cwd 兜底（宿主未提供默认目录）', () => {
   })
 })
 
-describe('脚本轮（M40）：argv 来自 Turn，命令只来自运行时', () => {
-  it('可执行文件解析自 runtime.command、turn.args 逐项传参（不展开占位符）', async () => {
+describe('脚本轮（M40 / M42）：步骤来自 Turn，命令只来自运行时', () => {
+  /** 让出几轮微任务：等「上一步 close → 下一步 spawn」之间的异步推进 */
+  const settle = async (): Promise<void> => {
+    for (let i = 0; i < 8; i += 1) await Promise.resolve()
+  }
+
+  it('可执行文件解析自 runtime.command、steps 逐项传参（不展开占位符），并产一条证据', async () => {
     const h = harness()
     const { running } = startRun(h, {
       runtime: { command: 'pnpm' },
-      turn: { args: ['check', '{cwd}'], prompt: '' },
+      turn: { steps: [{ label: '门禁', args: ['check', '{cwd}'] }], prompt: '' },
     })
 
     // 命令名只认运行时连接上的那一条：Turn 上没有命令字段可以覆盖
@@ -737,11 +743,130 @@ describe('脚本轮（M40）：argv 来自 Turn，命令只来自运行时', () 
     const receipt = await running
     expect(receipt.status).toBe('succeeded')
     expect(receipt.exitCode).toBe(0)
+    // 标签即证据：`checks[].cmd` 用步骤标签，没标签才用「命令 + 参数」
+    expect(receipt.checks).toEqual([{ cmd: '门禁', exitCode: 0 }])
+  })
+
+  it('多步：逐条 spawn、输出按步骤分段、证据逐条带 acceptance', async () => {
+    const h = harness()
+    const steps = [
+      { label: '类型', args: ['tsc'], acceptance: 1 },
+      { label: '单测', args: ['test'], acceptance: 2 },
+    ]
+    const { running, events } = startRun(h, { turn: { steps, prompt: '' } })
+
+    h.children[0].emitStdout('tsc ok\n')
+    h.children[0].close(0)
+    await settle()
+    expect(h.calls).toHaveLength(2)
+    expect(h.calls[1].args).toEqual(['test'])
+
+    h.children[1].emitStdout('test ok\n')
+    h.children[1].close(0)
+    const receipt = await running
+
+    // 段头进 output 也进事件流：多步时看得出哪一段属于哪一步
+    expect(receipt.output).toContain('## 类型')
+    expect(receipt.output).toContain('tsc ok')
+    expect(receipt.output).toContain('## 单测')
+    expect(receipt.output).toContain('test ok')
+    expect(
+      events.some((event) => event.type === 'text' && String(event.text).includes('## 单测')),
+    ).toBe(true)
+    expect(receipt.checks).toEqual([
+      { cmd: '类型', exitCode: 0, acceptance: 1 },
+      { cmd: '单测', exitCode: 0, acceptance: 2 },
+    ])
+    expect(receipt.status).toBe('succeeded')
+  })
+
+  it('默认跑完所有步骤：中间非 0 不打断，退出码取首个非 0、证据仍给全', async () => {
+    const h = harness()
+    const steps = [
+      { label: 'lint', args: ['lint'] },
+      { label: '单测', args: ['test'] },
+    ]
+    const { running } = startRun(h, { turn: { steps, prompt: '' } })
+
+    h.children[0].close(2)
+    await settle()
+    h.children[1].close(0)
+    const receipt = await running
+
+    expect(h.calls).toHaveLength(2)
+    expect(receipt.status).toBe('failed')
+    expect(receipt.errorCode).toBe('exit_nonzero')
+    expect(receipt.exitCode).toBe(2)
+    expect(receipt.checks).toEqual([
+      { cmd: 'lint', exitCode: 2 },
+      { cmd: '单测', exitCode: 0 },
+    ])
+  })
+
+  it('runAll=false：首个非 0 即停，后面的步骤不再 spawn', async () => {
+    const h = harness()
+    const steps = [
+      { label: 'lint', args: ['lint'] },
+      { label: '单测', args: ['test'] },
+    ]
+    const { running } = startRun(h, { turn: { steps, prompt: '', runAll: false } })
+
+    h.children[0].close(1)
+    const receipt = await running
+
+    expect(h.calls).toHaveLength(1)
+    expect(receipt.status).toBe('failed')
+    expect(receipt.exitCode).toBe(1)
+    expect(receipt.checks).toEqual([{ cmd: 'lint', exitCode: 1 }])
+  })
+
+  it('整轮预算是所有步骤共用的：用完就不再开新步骤，按超时收口', async () => {
+    let clock = 0
+    const h = harness()
+    const steps = [
+      { label: '一', args: ['a'] },
+      { label: '二', args: ['b'] },
+    ]
+    const { running } = startRun(h, {
+      sdk: { now: () => clock },
+      turn: { steps, prompt: '', timeoutMs: 1_000 },
+    })
+
+    // 第一步跑完时预算已耗尽：第二步不该被 spawn
+    clock = 2_000
+    h.children[0].close(0)
+    const receipt = await running
+
+    expect(h.calls).toHaveLength(1)
+    expect(receipt.status).toBe('failed')
+    expect(receipt.errorCode).toBe('timeout')
+    expect(receipt.exitCode).toBeUndefined()
+    expect(receipt.checks).toEqual([{ cmd: '一', exitCode: 0 }])
+  })
+
+  it('脚本自报的 checks 被实测结果覆盖（自报只当诊断材料）', async () => {
+    const h = harness()
+    const { running } = startRun(h, {
+      turn: {
+        steps: [{ label: '门禁', args: ['check'], acceptance: 1 }],
+        prompt: '',
+      },
+    })
+
+    h.children[0].emitStdout(
+      ['```json', JSON.stringify({ checks: [{ cmd: '假的', exitCode: 0 }] }), '```'].join('\n'),
+    )
+    h.children[0].close(1)
+    const receipt = await running
+
+    expect(receipt.checks).toEqual([{ cmd: '门禁', exitCode: 1, acceptance: 1 }])
   })
 
   it('空提示词不写 stdin（脚本秒退时管道已关，写入会被当成 spawn_failed）', async () => {
     const h = harness()
-    const { running } = startRun(h, { turn: { args: ['check'], prompt: '' } })
+    const { running } = startRun(h, {
+      turn: { steps: [{ label: '', args: ['check'] }], prompt: '' },
+    })
 
     expect(h.children[0].writes).toEqual([])
     expect(h.children[0].stdinEnded).toBe(false)
@@ -750,11 +875,80 @@ describe('脚本轮（M40）：argv 来自 Turn，命令只来自运行时', () 
     expect((await running).status).toBe('succeeded')
   })
 
-  it('turn.args 缺省时退回运行时的参数模板', async () => {
+  it('提示词是资料：只在第一步写 stdin，后续步骤不再收到', async () => {
+    const h = harness()
+    const steps = [
+      { label: '一', args: ['a'] },
+      { label: '二', args: ['b'] },
+    ]
+    const { running } = startRun(h, { turn: { steps, prompt: '资料正文' } })
+
+    expect(h.children[0].writes).toEqual(['资料正文'])
+    h.children[0].close(0)
+    await settle()
+    expect(h.children[1].writes).toEqual([])
+    h.children[1].close(0)
+    await running
+  })
+
+  it('steps 缺省时退回运行时的参数模板，且不产 checks（智能体轮）', async () => {
     const h = harness()
     const { running } = startRun(h, { runtime: { argsTemplate: template(['--print']) } })
     expect(h.calls[0].args).toEqual(['--print'])
     h.children[0].close(0)
-    await running
+    const receipt = await running
+    expect(receipt.checks).toBeUndefined()
+  })
+
+  it('标签超长时截断到协议上限（checks[].cmd 500）', async () => {
+    const h = harness()
+    const { running } = startRun(h, {
+      turn: { steps: [{ label: 'x'.repeat(600), args: ['a'] }], prompt: '' },
+    })
+    h.children[0].close(0)
+    const receipt = await running
+    expect(receipt.checks?.[0]?.cmd).toHaveLength(500)
+  })
+
+  it('两步都失败：退出码记第一条，证据逐条都留', async () => {
+    const h = harness()
+    const steps = [
+      { label: '一', args: ['a'] },
+      { label: '二', args: ['b'] },
+    ]
+    const { running } = startRun(h, { turn: { steps, prompt: '' } })
+
+    h.children[0].close(3)
+    await settle()
+    h.children[1].emitStderr('boom\n')
+    h.children[1].close(4)
+    const receipt = await running
+
+    expect(receipt.exitCode).toBe(3)
+    expect(receipt.error).toContain('退出码 3')
+    expect(receipt.checks).toEqual([
+      { cmd: '一', exitCode: 3 },
+      { cmd: '二', exitCode: 4 },
+    ])
+  })
+
+  it('步骤之间被取消：后续步骤不再 spawn，证据只留已跑完的那条', async () => {
+    const controller = new AbortController()
+    const h = harness()
+    const steps = [
+      { label: '一', args: ['a'] },
+      { label: '二', args: ['b'] },
+    ]
+    const { running } = startRun(h, {
+      turn: { steps, prompt: '', signal: controller.signal },
+    })
+
+    h.children[0].close(0)
+    controller.abort()
+    const receipt = await running
+
+    expect(h.calls).toHaveLength(1)
+    expect(receipt.status).toBe('cancelled')
+    expect(receipt.checks).toEqual([{ cmd: '一', exitCode: 0 }])
   })
 })

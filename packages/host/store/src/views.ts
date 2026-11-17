@@ -489,6 +489,18 @@ const readAuthorityView = (db: DatabaseSync): AuthorityView => {
  * 内核拿它做 cron 基线（同一到点时刻只触发一次、停机错过只补最近一次）。
  * ISO 字符串字典序即时间序，`MAX` 可直接用；没有触发记录的规则不出现在 Map 里。
  */
+/**
+ * A2 `mandates.byTask` 的单行读取（没有授权返回 null，界面据此显示「历史任务，无授权记录」）。
+ *
+ * 撤销后仍返回该行：历史要能回答「当时凭什么」，删除只随任务一起发生。
+ */
+const readMandateByTask = (db: DatabaseSync, taskId: string): Mandate | null => {
+  const row = db
+    .prepare(`SELECT ${columnsOf('mandates')} FROM mandates WHERE task_id = ? ORDER BY granted_at DESC, id DESC LIMIT 1`)
+    .get(taskId) as unknown as object | undefined
+  return row === undefined ? null : rowOf<Mandate>('mandates', row)
+}
+
 const readRuleFiredAt = (db: DatabaseSync): Map<Id, Iso> => {
   const rows = db
     .prepare('SELECT rule_id, MAX(scheduled_for) AS scheduled_for FROM rule_fires GROUP BY rule_id')
@@ -1091,6 +1103,9 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'tasks.byParent':
       return readTasksByParent(db, readStringParam(params, 'taskId'))
     case 'task.byId':
+    case 'mandates.byTask':
+      // A2：某任务的授权行（一任务一行；没有授权返回 null）
+      return readMandateByTask(db, readStringParam(params, 'taskId'))
       return readTask(db, readStringParam(params, 'taskId'))
     case 'thread.byId':
       // M6.5：线程详情 = 线程行 + 线程任务（按创建顺序）+ 各智能体最近会话 id

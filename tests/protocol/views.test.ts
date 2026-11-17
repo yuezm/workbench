@@ -105,6 +105,8 @@ describe('protocol/views', () => {
       'rules.next',
       // A1：准入配置回显
       'authority.current',
+      // A2：按任务取授权
+      'mandates.byTask',
     ])
   })
 

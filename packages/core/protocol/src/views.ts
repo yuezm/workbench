@@ -6,7 +6,7 @@
  * 卡片审批（`cards.open` / `cards.byRun`，M4）。
  * M5 的完整视图清单（threads / timeline 等）届时在此扩展。
  */
-import type { Authority } from './authority'
+import type { Authority, Mandate } from './authority'
 import type {
   Agent,
   Card,
@@ -86,6 +86,8 @@ export const VIEW_IDS = [
   'rules.next',
   // A1：准入配置回显（规则页渲染模式 / 名单 / 准入表；无该块报 compat）
   'authority.current',
+  // A2：某任务的授权（一任务一行；老任务没有行）
+  'mandates.byTask',
 ] as const
 
 /**
@@ -209,6 +211,8 @@ export interface ViewArgs {
   'usage.byAgent': UsageArgs
   'rules.preview': RulePreviewArgs
   'rules.next': RuleNextArgs
+  /** A2：按任务取授权（一任务一行） */
+  'mandates.byTask': { taskId: string }
 }
 
 /** 预演参数：一条事件样本（只用于匹配，不入账）。 */
@@ -284,6 +288,7 @@ export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'tasks.byWorkflow': 'workflowId',
   'tasks.byParent': 'taskId',
   'task.byId': 'taskId',
+  'mandates.byTask': 'taskId',
   'runs.active-by-task': 'taskId',
   'conversations.byProject': 'projectId',
   'messages.byConversation': 'conversationId',
@@ -425,6 +430,8 @@ export interface ViewResults {
   'rules.next': RuleNextFire[]
   /** A1：准入配置回显（mode='compat' = 规则集没有准入块） */
   'authority.current': AuthorityView
+  /** A2：某任务的授权行；没有授权（老任务 / 未授予）为 null */
+  'mandates.byTask': Mandate | null
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

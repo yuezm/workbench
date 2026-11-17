@@ -101,16 +101,19 @@ describe('admit — 名单内、点名（三档模式一致）', () => {
 
   it('准入表把这一格降成 ignore 时拒绝', () => {
     expect(
-      admit({ source: 'github', identity: human() }, configured('auto', {}, { listedAddressed: 'ignore' })),
+      admit(
+        { source: 'github', identity: human() },
+        configured('auto', {}, { listedAddressed: 'ignore' }),
+      ),
     ).toEqual({ allow: false, reason: 'not-listed' })
   })
 })
 
 describe('admit — 名单内、未点名', () => {
   it('receiveAll=false：未点名一律拒绝（事件必须点名）', () => {
-    expect(admit({ source: 'github', identity: human('octocat', false) }, configured('auto'))).toEqual(
-      { allow: false, reason: 'not-listed' },
-    )
+    expect(
+      admit({ source: 'github', identity: human('octocat', false) }, configured('auto')),
+    ).toEqual({ allow: false, reason: 'not-listed' })
   })
 
   it('receiveAll=true + inferred 格：off 拒绝为 mode-off', () => {
@@ -153,15 +156,18 @@ describe('admit — 名单外', () => {
 
   it('点名 + 准入表给 explicit：off 也接单，basis=table', () => {
     expect(
-      admit({ source: 'github', identity: human('stranger') }, configured('off', {}, { unlistedAddressed: 'explicit' })),
+      admit(
+        { source: 'github', identity: human('stranger') },
+        configured('off', {}, { unlistedAddressed: 'explicit' }),
+      ),
     ).toEqual({ allow: true, strength: 'explicit', basis: 'table' })
   })
 
   it('点名 + 准入表给 inferred：off 拒绝，auto 允许', () => {
     const authority = configured('auto', {}, { unlistedAddressed: 'inferred' })
-    expect(admit({ source: 'github', identity: human('stranger') }, { ...authority, mode: 'off' })).toEqual(
-      { allow: false, reason: 'mode-off' },
-    )
+    expect(
+      admit({ source: 'github', identity: human('stranger') }, { ...authority, mode: 'off' }),
+    ).toEqual({ allow: false, reason: 'mode-off' })
     expect(admit({ source: 'github', identity: human('stranger') }, authority)).toEqual({
       allow: true,
       strength: 'inferred',
@@ -191,10 +197,12 @@ describe('admit — 名单外', () => {
 describe('admit — 机器人', () => {
   it('不在 bots 名单：拒绝为 bot-not-listed（不论模式）', () => {
     for (const mode of ['off', 'observe', 'auto'] as const) {
-      expect(admit({ source: 'github', identity: bot('renovate[bot]') }, configured(mode))).toEqual({
-        allow: false,
-        reason: 'bot-not-listed',
-      })
+      expect(admit({ source: 'github', identity: bot('renovate[bot]') }, configured(mode))).toEqual(
+        {
+          allow: false,
+          reason: 'bot-not-listed',
+        },
+      )
     }
   })
 
@@ -205,29 +213,38 @@ describe('admit — 机器人', () => {
     })
   })
 
-  it.each(['observe', 'auto'] as const)('在 bots 名单 + inferred 格：%s 允许，basis=bot', (mode) => {
-    expect(admit({ source: 'github', identity: bot() }, configured(mode))).toEqual({
-      allow: true,
-      strength: 'inferred',
-      basis: 'bot',
-    })
-  })
+  it.each(['observe', 'auto'] as const)(
+    '在 bots 名单 + inferred 格：%s 允许，basis=bot',
+    (mode) => {
+      expect(admit({ source: 'github', identity: bot() }, configured(mode))).toEqual({
+        allow: true,
+        strength: 'inferred',
+        basis: 'bot',
+      })
+    },
+  )
 
   it('在 bots 名单但该格被设成 explicit：off 也接单，basis=bot', () => {
     expect(
-      admit({ source: 'github', identity: bot() }, configured('off', {}, { botAddressed: 'explicit' })),
+      admit(
+        { source: 'github', identity: bot() },
+        configured('off', {}, { botAddressed: 'explicit' }),
+      ),
     ).toEqual({ allow: true, strength: 'explicit', basis: 'bot' })
   })
 
   it('在 bots 名单但该格被设成 ignore：拒绝', () => {
     expect(
-      admit({ source: 'github', identity: bot() }, configured('auto', {}, { botAddressed: 'ignore' })),
+      admit(
+        { source: 'github', identity: bot() },
+        configured('auto', {}, { botAddressed: 'ignore' }),
+      ),
     ).toEqual({ allow: false, reason: 'not-listed' })
   })
 
   it('机器人不看点名：未点名也按 botAddressed 判', () => {
-    expect(admit({ source: 'github', identity: bot('dependabot[bot]', false) }, configured('auto'))).toEqual(
-      { allow: true, strength: 'inferred', basis: 'bot' },
-    )
+    expect(
+      admit({ source: 'github', identity: bot('dependabot[bot]', false) }, configured('auto')),
+    ).toEqual({ allow: true, strength: 'inferred', basis: 'bot' })
   })
 })

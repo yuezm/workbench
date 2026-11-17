@@ -142,7 +142,8 @@ function normalizeNames(value: unknown): string[] {
 }
 
 export function normalizeAdmissionTable(value: unknown): AdmissionTable {
-  const source = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+  const source =
+    typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
   const cell = (key: keyof AdmissionTable): AdmissionCell => {
     const candidate = source[key]
     return isAdmissionCell(candidate) ? candidate : DEFAULT_ADMISSION_TABLE[key]

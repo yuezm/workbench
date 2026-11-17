@@ -193,12 +193,7 @@ describe('event.received — 名单内点名', () => {
 
   it('命中多条启用规则时每条一条 admitted', () => {
     const rules = [rule(), rule({ id: 'rule-2', name: '第二条' })]
-    const decision = decide(
-      view({ authority: authority(), rules }),
-      received(human()),
-      NOW,
-      env(),
-    )
+    const decision = decide(view({ authority: authority(), rules }), received(human()), NOW, env())
     const admitted = decision.facts.filter((entry) => entry.type === 'event.admitted')
     expect(admitted.map((fact) => (fact.payload as { ruleId: string }).ruleId)).toEqual([
       'rule-1',
@@ -208,12 +203,7 @@ describe('event.received — 名单内点名', () => {
 
   it('停用的规则不产 admitted', () => {
     const rules = [rule(), rule({ id: 'rule-2', name: '第二条', enabled: false })]
-    const decision = decide(
-      view({ authority: authority(), rules }),
-      received(human()),
-      NOW,
-      env(),
-    )
+    const decision = decide(view({ authority: authority(), rules }), received(human()), NOW, env())
     const admitted = decision.facts.filter((entry) => entry.type === 'event.admitted')
     expect(admitted).toHaveLength(1)
   })
@@ -221,7 +211,12 @@ describe('event.received — 名单内点名', () => {
 
 describe('event.received — 拒绝', () => {
   it('名单外点名：只入账 + denied，不建任务', () => {
-    const decision = decide(view({ authority: authority() }), received(human('stranger')), NOW, env())
+    const decision = decide(
+      view({ authority: authority() }),
+      received(human('stranger')),
+      NOW,
+      env(),
+    )
     expect(types(decision.facts)).toEqual(['event.received', 'event.denied'])
     expect(decision.facts[1]?.payload).toEqual({
       eventId: 'event-1',

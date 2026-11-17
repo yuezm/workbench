@@ -9,9 +9,8 @@ import {
 } from '@workbench/protocol/facts'
 import { validateInput } from '@workbench/protocol/validate'
 
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
-  ? true
-  : false
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 const expectType = <T extends true>(): T => true as T
 
 describe('准入相关事实类型', () => {

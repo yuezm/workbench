@@ -399,10 +399,14 @@ export interface RulesReplaceCommand extends CommandBase {
   type: 'rules.replace'
   rules: AutomationRule[]
   /**
-   * 准入配置（A1）：可选整块替换，缺省 = 兼容模式（不判定准入）。
-   * 与规则同一条版本线，不单独提交、不单独版本。
+   * 准入配置（A1）：可选整块替换，与规则同一条版本线，不单独提交、不单独版本。
+   *
+   * 三种取值：
+   * - 省略：**保持现值**（老界面 / 只改规则的调用方不会静默清掉准入配置）；
+   * - `null`：清除，回到兼容模式（不做准入判定）；
+   * - 对象：整块替换，`mode` 必填，其余字段缺省由内核归一。
    */
-  authority?: Authority
+  authority?: Authority | null
 }
 
 /**

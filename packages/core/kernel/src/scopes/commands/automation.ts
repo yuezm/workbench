@@ -16,6 +16,13 @@ export function replaceRules(
   // 整批替换：任一条非法 → 整批 reject（零事实），旧版继续生效；版本由内核 +1。
   const result = validateRuleBatch(view, input.rules)
   if ('error' in result) return reject('invalid_input', result.error)
+  // A1：省略 = 保持现值（只改规则的调用方不清空准入）；显式 null = 清除（回兼容模式）。
+  const authority =
+    input.authority === undefined
+      ? (view.authority ?? undefined)
+      : input.authority === null
+        ? undefined
+        : normalizeAuthority(input.authority)
   return done([
     ownerDraft(
       'rules.replaced',
@@ -25,10 +32,7 @@ export function replaceRules(
           version: result.version,
           replacedAt: now,
           rules: result.rules,
-          // A1：准入与规则同一条版本线；缺省不带该键 = 兼容模式
-          ...(input.authority === undefined
-            ? {}
-            : { authority: normalizeAuthority(input.authority) }),
+          ...(authority === undefined ? {} : { authority }),
         },
       },
       now,

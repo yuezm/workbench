@@ -24,7 +24,7 @@
 ## 3. 非目标
 
 - 不改阶段语义与 `acceptance` / `judge`（产出达标判定）——准入门与验收门是两件事，不共用事实。
-- 不引入 `rules.json` 文件源、配置表或第二版本号：`Authority` 随 `rule_sets` 整批替换，版本号就是 `rulesVersion`。
+- 不引入 `rules.json` 文件源、配置表或第二版本号：`Authority` 随 `rule_sets` 整批替换，版本号就是 `rulesVersion`；`rules.replace` 省略该块表示**保持现值**，显式 `null` 表示清除（回兼容模式）。
 - 不做远端 worker、多机领取、计费结算。
 - 不搬 superagent 的 Engine / Store / Effects / 轮询 pass / 面板实现。
 

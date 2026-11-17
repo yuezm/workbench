@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
 import type { AutomationRule } from '@workbench/protocol/rules'
+import type { Authority } from '@workbench/protocol/authority'
 import type { Environment, Limits, View } from '@workbench/kernel/core/types'
 import { decide } from '@workbench/kernel/decide'
 
@@ -89,6 +90,7 @@ interface Seed {
   rules?: AutomationRule[]
   rulesVersion?: number
   replacedAt?: string | null
+  authority?: Authority | null
   firedAt?: Array<[string, string]>
   tasks?: Task[]
 }
@@ -115,7 +117,7 @@ const view = (seed: Seed = {}): View => ({
   rulesVersion: seed.rulesVersion ?? 0,
   ruleSetReplacedAt: seed.replacedAt === undefined ? CREATED : seed.replacedAt,
   // A1：准入配置；null = 兼容模式
-  authority: null,
+  authority: seed.authority === undefined ? null : seed.authority,
   ruleFiredAt: new Map(seed.firedAt ?? []),
   pluginSettings: [],
   pluginSettingsVersion: 0,
@@ -417,5 +419,76 @@ describe('decide 回执派生事件命中规则', () => {
     )
     expect(types(decision.facts)).toContain('event.received')
     expect(types(decision.facts)).toContain('task.created')
+  })
+})
+
+describe('A1 准入配置随 rules.replace 一起版本化', () => {
+  const existing: Authority = {
+    mode: 'observe',
+    sources: [
+      {
+        id: 'github',
+        allowed: ['octocat'],
+        bots: [],
+        receiveAll: false,
+        admission: {
+          listedAddressed: 'explicit',
+          listedUnaddressed: 'inferred',
+          unlistedAddressed: 'ignore',
+          unlistedUnaddressed: 'ignore',
+          botAddressed: 'inferred',
+        },
+      },
+    ],
+    assessorAgentId: null,
+    assessBatch: 8,
+    assessWindowMs: 5000,
+  }
+
+  it('省略 authority：保持现值（只改规则的调用方不会清空准入）', () => {
+    const decision = decide(
+      view({ rulesVersion: 1, authority: existing }),
+      { type: 'rules.replace', commandId: 'c1', rules: [rule()] },
+      NOW,
+      env(),
+    )
+    expect(decision.facts[0]?.payload).toMatchObject({
+      ruleSet: { version: 2, authority: existing },
+    })
+  })
+
+  it('显式 null：清除准入，回到兼容模式', () => {
+    const decision = decide(
+      view({ rulesVersion: 1, authority: existing }),
+      { type: 'rules.replace', commandId: 'c2', rules: [rule()], authority: null },
+      NOW,
+      env(),
+    )
+    const payload = decision.facts[0]?.payload as unknown as { ruleSet: Record<string, unknown> }
+    expect(payload.ruleSet).not.toHaveProperty('authority')
+  })
+
+  it('给对象：整块替换并归一（缺省格补齐）', () => {
+    const decision = decide(
+      view({ rulesVersion: 1 }),
+      {
+        type: 'rules.replace',
+        commandId: 'c3',
+        rules: [rule()],
+        authority: {
+          mode: 'auto',
+          sources: [{ id: 'github', allowed: [], bots: [], receiveAll: false } as never],
+          assessorAgentId: null,
+          assessBatch: 8,
+          assessWindowMs: 5000,
+        },
+      },
+      NOW,
+      env(),
+    )
+    const payload = decision.facts[0]?.payload as unknown as {
+      ruleSet: { authority: Authority }
+    }
+    expect(payload.ruleSet.authority.sources[0]?.admission).toEqual(existing.sources[0]?.admission)
   })
 })

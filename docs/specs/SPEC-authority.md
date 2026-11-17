@@ -200,14 +200,14 @@ export interface AttentionItem {
 
 ## 输入
 
-| 输入                                | 来源                         | 前置校验                                                                                                                                     | 事实                                                                                                       |
-| ----------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `event.received`（扩字段）          | source 插件 / 回执派生 / app | `identity` 必填：`webhook` / `github` / `feishu` 缺失即拒收；`manual` / `app` / 回执派生缺省 `{kind:'system', id:'unknown', addressed:true}` | 原事实 + `identity`；随后按准入结论产 `event.admitted` 或 `event.denied`                                   |
-| `rules.replace`（扩字段）           | owner（规则页整批保存）      | `authority` 可选块：模式枚举、来源 id 唯一、名单 ≤200 条、单元格枚举、`assessBatch` 1–20、`assessWindowMs` 0–60000                           | `rules.replaced`（版本 +1）；`authority` 缺省 = 兼容模式；换版时对在跑任务逐条产 `mandate.revalidated`     |
-| `run.receipt`（`purpose='assess'`） | 执行器插件                   | `assessments[]` 形状校验；**禁止 `events[]` / `ask[]` / `spawn[]`**（研判 run 不得派生副作用）；`leaseId` + `turn` 匹配                      | `assess.decided` + 终态事实；被拒时 `run.receipt_rejected{reason}`                                         |
-| `approval.request`                  | 宿主（执行器桥接转交）       | run 属于该任务、`approvalId` 未出现过                                                                                                        | `approval.requested`；范围内 → 同时 `approval.decided{allowed-once}`；越界 → `card.opened` + `run.waiting` |
-| `approval.decide`                   | owner（UI）或通道回答        | `approvalId` 存在且未决、run 处于 `waiting`                                                                                                  | `approval.decided{allowed-once\|denied}` + 续接 `run.queued`（deny 时 run 落 `blocked`）                   |
-| `task.stop`（扩语义）               | owner                        | 同现状                                                                                                                                       | 现有 `run.cancel_requested` + 新增 `mandate.revoked{reason:'stop'}`                                        |
+| 输入                                | 来源                         | 前置校验                                                                                                                                     | 事实                                                                                                                                     |
+| ----------------------------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `event.received`（扩字段）          | source 插件 / 回执派生 / app | `identity` 必填：`webhook` / `github` / `feishu` 缺失即拒收；`manual` / `app` / 回执派生缺省 `{kind:'system', id:'unknown', addressed:true}` | 原事实 + `identity`；随后按准入结论产 `event.admitted` 或 `event.denied`                                                                 |
+| `rules.replace`（扩字段）           | owner（规则页整批保存）      | `authority` 可选块：模式枚举、来源 id 唯一、名单 ≤200 条、单元格枚举、`assessBatch` 1–20、`assessWindowMs` 0–60000                           | `rules.replaced`（版本 +1）；省略 `authority` = 保持现值；显式 `null` = 清除（回兼容模式）；换版时对在跑任务逐条产 `mandate.revalidated` |
+| `run.receipt`（`purpose='assess'`） | 执行器插件                   | `assessments[]` 形状校验；**禁止 `events[]` / `ask[]` / `spawn[]`**（研判 run 不得派生副作用）；`leaseId` + `turn` 匹配                      | `assess.decided` + 终态事实；被拒时 `run.receipt_rejected{reason}`                                                                       |
+| `approval.request`                  | 宿主（执行器桥接转交）       | run 属于该任务、`approvalId` 未出现过                                                                                                        | `approval.requested`；范围内 → 同时 `approval.decided{allowed-once}`；越界 → `card.opened` + `run.waiting`                               |
+| `approval.decide`                   | owner（UI）或通道回答        | `approvalId` 存在且未决、run 处于 `waiting`                                                                                                  | `approval.decided{allowed-once\|denied}` + 续接 `run.queued`（deny 时 run 落 `blocked`）                                                 |
+| `task.stop`（扩语义）               | owner                        | 同现状                                                                                                                                       | 现有 `run.cancel_requested` + 新增 `mandate.revoked{reason:'stop'}`                                                                      |
 
 ## 事实
 
@@ -343,7 +343,7 @@ export interface AttentionItem {
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | 规则集无 `authority` 块                   | 兼容模式：全部 explicit，行为等价 M45；`authority.current` 显示 `compat`                                      |
 | 老 `event.received` payload 无 `identity` | 归一为 `{kind:'system', id:'unknown', addressed:true}`，`events.identity_kind='system'`；**不伪造**真实发起者 |
-| 存量任务（A1 前创建）                    | 不补发 `mandate.granted`；`mandates` 无行，UI 标 `legacy`；`attention.revoked` 不对其触发                     |
+| 存量任务（A1 前创建）                     | 不补发 `mandate.granted`；`mandates` 无行，UI 标 `legacy`；`attention.revoked` 不对其触发                     |
 | 存量的 `run.approvals`（只读日志）        | 不迁移为事实（保持「导入不伪造因果」原则），仅后续新提权入账                                                  |
 | `KERNEL_VERSION`                          | 升一档；投影 19 → 22 表；首启全量重建，历史行为由事实日志保留                                                 |
 | 契约演进顺序                              | 先 `normalize*` 再改 DDL/契约（同 [SPEC-kernel.md](./SPEC-kernel.md#重建与指纹) 的教训）                      |
@@ -385,8 +385,8 @@ export interface AttentionItem {
 
 ## 里程碑与验收
 
-| 里程碑                              | 内容                                                                                                                                    | 验收                                                                                                             |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 里程碑                             | 内容                                                                                                                                    | 验收                                                                                                             |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | **A1 准入**（约 2 周）             | `authority.ts` 契约、`admission.ts`、`event.received.identity`、`event.admitted/denied`、`authority.current` 视图、规则页「授权」编辑区 | 模式矩阵 21 条用例全绿；兼容模式零行为变化（现有 e2e 一条不改仍过）；`pnpm check` 全绿                           |
 | **A2 授权**（约 2 周）             | `mandate.ts`、`mandates` 投影、`tasks` 两列、恢复前重校验、换版影响面 + 聚合通知、任务详情「授权」面板                                  | 任一任务能答五问（谁/凭哪条/什么强度/多大范围/哪版）；换版后 `policy.impacted` 列出受影响任务；存量任务标 legacy |
 | **A3 研判**（约 2–3 周）           | `assess.ts`、`purpose='assess'` run、提示词段、`assessments` 投影、`assess.pending` 视图、observe 复盘清单                              | 覆盖/证据校验用例全绿；研判 run 无法派生副作用；`observe` 期自动接单数 = 0                                       |

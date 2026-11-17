@@ -211,6 +211,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   deadline_at TEXT,
   cancel_requested INTEGER NOT NULL DEFAULT 0,
   deliverables_json TEXT,
+  -- M49：判定证据（逐条的 cmd / exitCode / acceptance；闸门读一次就丢等于没有证据）
+  checks_json TEXT NOT NULL DEFAULT '[]',
   started_at TEXT,
   ended_at TEXT,
   created_at TEXT NOT NULL
@@ -650,6 +652,8 @@ export const RUN_M2_ADDED_COLUMNS = [
   'deliverables_json',
   // M40：脚本 run 的执行配置快照（JSON；null = 不是脚本轮）
   'script_json',
+  // M49：判定证据（`GateCheck[]` 的 JSON；老行为空数组）
+  'checks_json',
 ] as const
 
 /**
@@ -664,14 +668,14 @@ export function legacyRunsCopySql(targetTable: string): string {
     executor_key, thread_id, cwd, access, skill, prompt_ref, event_ids_json, hops, turn,
     resume_session_id, thread_context_ref, queue_seq, status, prompt, output, error, error_code,
     exit_code, session_id, usage_json, duration_ms, lease_id, attempt, attempts, lease_until,
-    not_before, deadline_at, cancel_requested, deliverables_json, script_json, started_at, ended_at, created_at
+    not_before, deadline_at, cancel_requested, deliverables_json, script_json, checks_json, started_at, ended_at, created_at
   )
   SELECT
     id, task_id, stage_id, agent_id, runtime_id, 'stage', NULL, NULL, 0,
     '', NULL, '', 'edit', NULL, NULL, '[]', 0, 1,
     NULL, NULL, 0, status, prompt, output, error, error_code,
     exit_code, session_id, usage_json, duration_ms, NULL, 1, 0, NULL,
-    NULL, NULL, 0, NULL, 'null', started_at, ended_at, created_at
+    NULL, NULL, 0, NULL, 'null', '[]', started_at, ended_at, created_at
   FROM runs`
 }
 

@@ -524,3 +524,20 @@ export interface TurnStep {
 **验证**：`tests/plugins/executors/command/command.test.ts`（10 例：单步证据 / 多步分段与逐条 checks / 默认全跑 / 首个失败即停 / 整轮预算 / 自报被覆盖 / stdin 只喂第一步 / 模板退回不产 checks）、`tests/kernel/scopes/workflow/stage-validation.test.ts`（验收 ↔ 步骤对应三条）、`tests/kernel/decide.run.test.ts`（脚本窗口按连接 2 例）、`tests/kernel/decide.test.ts`、`tests/host/scheduler.test.ts`（`Turn.steps` + `runAll` + 快照）、`tests/host/store/projection-apply.test.ts`（老 `args` → 一步）、`tests/renderer/**`（编辑器步骤列表 / 验收序号 / 跑法 / `cleanScript` 升级）。
 
 **未做（下一批）**：`scripts` 表与复用（原 M41 计划）、闸门试跑（`script.tryrun`）、步骤拖拽排序（当前只能删了重加）、同阶段「先脚本后智能体」的 precheck。
+
+## 补口（2026-11-17，M49）：判定证据落库、无结论留痕、脚本配置复制
+
+**起因**：M42 把脚本闸门的证据从「一个退出码」扩到「每步一条 `checks`」，但 `checks` 只在结算时被读一次——`RunRow` 没有这个字段、`run.receipt` 也不产事实，脚本闸门跑完 3 步后，界面上只剩 `output.md` 里的 `## 标签` 段和一句「退出码 2」。**证据生成即丢弃**，恰好把「脚本比智能体准确」的立足点（可核对）丢掉了。同一轮还补了两个小口子：闸门原地停下时不说话、同一套脚本配置在多个阶段各抄一遍。
+
+**口径**
+
+| 改动            | 落点                                               | 说明                                                                                                                                                                                          |
+| --------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 证据随 run 落库 | `Run.checks` / `runs.checks_json` / `normalizeRun` | 结算时从回执带（空证据不写键，投影统一补 `[]`）；老事实 / 非闸门轮次为 `[]`；列走 `RUN_M2_ADDED_COLUMNS` 的 ALTER 路径，不递增 `KERNEL_VERSION`                                               |
+| 任务详情证据表  | `TaskActivity#RunChecks`                           | 每行：标签 / 退出码 / 对应第 n 条验收；没有证据不占版面                                                                                                                                       |
+| 无结论留痕      | `noConclusionCommentText` + `stageTransitionFacts` | 只在「判定没给结论且任务没离开本阶段」时追加一条 `task.comment_added`：拿不到退出码（带 errorCode）/ 第 n 条验收没有全 0 证据（带本轮证据条数）/ 证据不足。跟着去向走（errored 出口）不加噪音 |
+| 复制脚本配置    | 编辑器脚本块「复制自」                             | 同草稿里其它有步骤的脚本阶段，整套复制 steps / cwd / env / timeout / runAll（连接不在候选里时保留原连接）；`ScriptLinesField` 按刷新代号重挂载，避免本地原文盖住新值                          |
+
+**为什么不是卡**：闸门停下需要的是「知道为什么 + 一个可读的下一步」，不是又一个要人点的选项；卡片要回答语义（选项 → 命令），成本是 comment 的十倍，先不加。
+
+**验证**：`tests/kernel/decide.run.test.ts`（证据随 `run.succeeded` 落库、四种「没给结论」都留痕、文案三分支）、`tests/host/store/projection-apply.test.ts`（`checks_json` 落库与老行补 `[]`）、`tests/renderer/.../TaskActivity.test.tsx`（证据表两行 / 无证据不渲染）、`tests/renderer/.../WorkflowEditor.test.tsx`（整套复制 + 重挂载）、`tests/protocol/entities.test.ts`（IPC 形状锁：`Run.checks` 可选）。

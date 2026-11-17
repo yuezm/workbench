@@ -216,6 +216,8 @@ export const sample = {
       deliverables: null,
       // M40：不是脚本轮
       script: null,
+      // M49：判定证据（投影边界把缺省归一成空数组，夹具跟着投影形状走）
+      checks: [],
       ...overrides,
     }
   },

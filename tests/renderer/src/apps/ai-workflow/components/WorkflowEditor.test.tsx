@@ -2214,3 +2214,83 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     expect(onSave).not.toHaveBeenCalled()
   })
 })
+
+describe('WorkflowEditor：从其它阶段复制脚本配置（M49）', () => {
+  const commandRuntime: Runtime = {
+    id: 'rt-cmd',
+    name: '本机命令',
+    executorKey: 'command',
+    command: 'pnpm',
+    profile: '',
+    argsTemplate: '',
+    enabled: true,
+    createdAt: 't',
+    lastProbe: null,
+  }
+  const agent = { id: 'ag1', name: 'coder' } as never
+
+  it('整套复制步骤 / 目录 / 环境变量 / 超时 / 跑法，运行时跟着来源走', async () => {
+    const existing = workflowWith([
+      {
+        name: '自测A',
+        entryMode: 'script',
+        agentId: null,
+        script: {
+          runtimeId: 'rt-cmd',
+          steps: [
+            { label: '类型', args: ['tsc'], acceptance: 1 },
+            { label: '单测', args: ['test'] },
+          ],
+          cwd: 'C:/repo',
+          env: { CI: '1' },
+          timeoutMs: 300_000,
+          runAll: false,
+        },
+      },
+      {
+        name: '自测B',
+        entryMode: 'script',
+        agentId: null,
+        script: {
+          runtimeId: 'rt-cmd',
+          steps: [{ label: '', args: [] }],
+          cwd: null,
+          env: {},
+          timeoutMs: 600_000,
+        },
+      },
+    ])
+    kernel.setView('agents.all', undefined, [agent])
+    kernel.setView('runtimes.all', undefined, [commandRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 展开第二个脚本阶段，再把第一阶段整套复制过来
+    fireEvent.click(screen.getByRole('button', { name: '阶段3' }))
+    await choose(user, '阶段3复制脚本配置', '自测A')
+
+    expect(screen.getByLabelText('阶段3步骤1标签')).toHaveValue('类型')
+    expect(screen.getByLabelText('阶段3步骤1参数')).toHaveValue('tsc')
+    expect(screen.getByLabelText('阶段3步骤2标签')).toHaveValue('单测')
+    expect(screen.getByLabelText('阶段3脚本工作目录')).toHaveValue('C:/repo')
+    expect(screen.getByLabelText('阶段3脚本环境变量')).toHaveValue('CI=1')
+    expect(screen.getByRole('combobox', { name: '阶段3脚本跑法' })).toHaveTextContent(
+      '首个失败即停（省时间）',
+    )
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, '自测B').script).toEqual({
+      runtimeId: 'rt-cmd',
+      steps: [
+        { label: '类型', args: ['tsc'], acceptance: 1 },
+        { label: '单测', args: ['test'] },
+      ],
+      cwd: 'C:/repo',
+      env: { CI: '1' },
+      timeoutMs: 300_000,
+      runAll: false,
+    })
+  })
+})

@@ -26,6 +26,7 @@ import { decide } from '@workbench/kernel/decide'
 import { runAccessOf } from '@workbench/kernel/scopes/task-effects'
 import {
   degradedCommentText,
+  noConclusionCommentText,
   stageRoundCount,
   stageTimeoutOf,
 } from '@workbench/kernel/scopes/commands/run'
@@ -2060,7 +2061,7 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
       .filter((fact) => fact.type === 'task.moved' || fact.type === 'task.completed')
       .map((fact) => fact.type)
 
-  it('回执没有 verdict：没给结论（零流转、不烧预算）', () => {
+  it('回执没有 verdict：没给结论（零流转、不烧预算，并留一句「为什么停」）', () => {
     const decision = receive(gateView(), 'run-1', receipt())
 
     expect(decision.reject).toBeUndefined()
@@ -2073,6 +2074,11 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
         }
       ).run.id,
     ).toBe('run-1')
+    // M49：原地停住时说明原因，别让人只看到任务不动
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment?.payload as { comment: { text: string } }).comment.text).toContain(
+      '闸门「自测」没给结论',
+    )
   })
 
   it('验收 3 条只用 2 条证据覆盖 → 零流转，gateFails 不变', () => {
@@ -2094,7 +2100,8 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
     expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
     expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
-    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment?.payload as { comment: { text: string } }).comment.text).toContain('没给结论')
   })
 
   it('验收 3 条全被覆盖 → 走 passed', () => {
@@ -2132,7 +2139,8 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
     expect(decision.reject).toBeUndefined()
     expect(transitionOf(decision)).toEqual([])
     expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
-    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment?.payload as { comment: { text: string } }).comment.text).toContain('没给结论')
   })
 
   it('与验收无关的多余 checks 不顶替：少了某条的指向就停在闸门', () => {
@@ -2193,7 +2201,8 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
     expect(decision.reject).toBeUndefined()
     expect(transitionOf(decision)).toEqual([])
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
-    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment?.payload as { comment: { text: string } }).comment.text).toContain('没给结论')
   })
 
   it('两条证据指向同一条验收：第三条无人覆盖，仍停在闸门', () => {
@@ -2212,7 +2221,8 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
 
     expect(decision.reject).toBeUndefined()
     expect(transitionOf(decision)).toEqual([])
-    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment?.payload as { comment: { text: string } }).comment.text).toContain('没给结论')
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
   })
 
@@ -2407,11 +2417,19 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
       runs: [scriptRun(runOver)],
     })
 
-  it('退出码 0 → 走通过分支', () => {
-    const decision = receive(scriptView(), 'run-1', receipt({ status: 'succeeded', exitCode: 0 }))
+  it('退出码 0 → 走通过分支，且证据随终态 run 行落库（M49）', () => {
+    const checks = [{ cmd: '类型', exitCode: 0, acceptance: 1 }]
+    const decision = receive(
+      scriptView({ acceptance: ['类型检查'] }),
+      'run-1',
+      receipt({ status: 'succeeded', exitCode: 0, checks }),
+    )
     expect(decision.reject).toBeUndefined()
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
+    // 闸门读一次就丢等于没有证据：checks 跟着 run 行走，任务详情才看得见哪一步没过
+    const succeeded = decision.facts.find((fact) => fact.type === 'run.succeeded')
+    expect((succeeded?.payload as { run: RunRow }).run.checks).toEqual(checks)
   })
 
   it('退出码非 0：结算归一成 succeeded（跑完了），业务判 fail 走未通过分支', () => {
@@ -2473,7 +2491,8 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
     expect(decision.reject).toBeUndefined()
     expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
     expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
-    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment?.payload as { comment: { text: string } }).comment.text).toContain('没给结论')
   })
 
   it('退出码 0 但证据里有非 0 → 判未通过（退出码不替证据翻案）', () => {
@@ -2542,5 +2561,52 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
     expect(timeoutOf(scriptRun())).toBe(1_800_000)
     const plain = stageTimeoutOf(scriptView({ runTimeoutMs: null }), limits())
     expect(plain(scriptRun())).toBe(limits().runTimeoutMs)
+  })
+})
+
+// M49：闸门「没给结论」的留痕文案——三种情形分开说，别让人只看到任务不动
+describe('kernel/decide 闸门无结论的留痕文案（M49）', () => {
+  const gate = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({ id: 'st-2', position: 1, name: '自测', judge: { maxFails: 2 }, ...over })
+  const settled = (over: Partial<RunRow> = {}): Parameters<typeof noConclusionCommentText>[1] =>
+    ({ ...running(over), status: 'failed' }) as unknown as Parameters<
+      typeof noConclusionCommentText
+    >[1]
+
+  it('拿不到退出码：点出原因码', () => {
+    const text = noConclusionCommentText(gate(), settled({ exitCode: null, errorCode: 'timeout' }))
+    expect(text).toContain('没拿到退出码（timeout）')
+  })
+
+  it('有退出码但某条验收没有全 0 证据：点出第几条与证据条数', () => {
+    const text = noConclusionCommentText(
+      gate({ acceptance: ['类型检查', '单测'] }),
+      settled({
+        exitCode: 0,
+        checks: [{ cmd: '类型', exitCode: 0, acceptance: 1 }],
+      }),
+    )
+    expect(text).toContain('第 2 条验收没有全 0 的证据（本轮 1 条）')
+  })
+
+  it('证据里有非 0 或没挂钩验收：那一条不算覆盖', () => {
+    const text = noConclusionCommentText(
+      gate({ acceptance: ['类型检查'] }),
+      settled({ exitCode: 0, checks: [{ cmd: '类型', exitCode: 1, acceptance: 1 }] }),
+    )
+    expect(text).toContain('第 1 条验收没有全 0 的证据')
+  })
+
+  it('闸门没声明验收（脏投影）：有证据也不构成覆盖，给通用说明', () => {
+    const text = noConclusionCommentText(
+      gate({ acceptance: undefined }),
+      settled({ exitCode: 0, checks: [{ cmd: '类型', exitCode: 0 }] }),
+    )
+    expect(text).toContain('本轮证据不足')
+  })
+
+  it('没有验收条目、证据也没覆盖任何东西：给通用说明', () => {
+    const text = noConclusionCommentText(gate({ acceptance: [] }), settled({ exitCode: 0 }))
+    expect(text).toContain('本轮证据不足')
   })
 })

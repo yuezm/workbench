@@ -153,6 +153,8 @@ const normalizeRun = (run: RunRow): RunRow => ({
   deadlineAt: run.deadlineAt ?? null,
   cancelRequested: run.cancelRequested ?? false,
   deliverables: run.deliverables ?? null,
+  // M49：老事实没有证据列，按空数组归一（非闸门轮次也恒为空）
+  checks: run.checks ?? [],
   // M40：老事实没有脚本快照，按「不是脚本轮」归一；M42 把老的 `args` 归一成一步
   script: normalizeScript(run.script),
   startedAt: run.startedAt ?? null,

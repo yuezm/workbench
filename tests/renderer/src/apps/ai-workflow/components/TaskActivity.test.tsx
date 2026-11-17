@@ -526,3 +526,32 @@ describe('TaskActivity', () => {
     expect(items[2]).toHaveTextContent('第 2 轮')
   })
 })
+
+describe('TaskActivity 判定证据（M49）', () => {
+  it('有 checks 的运行把每一步摆出来：标签 / 退出码 / 对应验收', () => {
+    const run = makeRun({
+      status: 'failed',
+      exitCode: 2,
+      checks: [
+        { cmd: '类型', exitCode: 0, acceptance: 1 },
+        { cmd: '单测', exitCode: 2, acceptance: 2 },
+      ],
+    })
+    render(<TaskActivity runs={[run]} comments={[]} stages={stages} />)
+
+    const list = screen.getByRole('list', { name: '判定证据' })
+    const items = within(list).getAllByRole('listitem')
+    expect(items).toHaveLength(2)
+    expect(items[0]).toHaveTextContent('类型')
+    expect(items[0]).toHaveTextContent('退出码 0')
+    expect(items[0]).toHaveTextContent('第 1 条验收')
+    expect(items[1]).toHaveTextContent('单测')
+    expect(items[1]).toHaveTextContent('退出码 2')
+    expect(items[1]).toHaveTextContent('第 2 条验收')
+  })
+
+  it('没有证据的运行不渲染这块（普通执行阶段不占版面）', () => {
+    render(<TaskActivity runs={[makeRun()]} comments={[]} stages={stages} />)
+    expect(screen.queryByRole('list', { name: '判定证据' })).toBeNull()
+  })
+})

@@ -1,5 +1,12 @@
 import { useState, type ReactElement } from 'react'
-import type { Run, RunErrorCode, RunEvent, RunStatus, RunUsage } from '@workbench/protocol/entities'
+import type {
+  GateCheck,
+  Run,
+  RunErrorCode,
+  RunEvent,
+  RunStatus,
+  RunUsage,
+} from '@workbench/protocol/entities'
 import { permissionModeOfAccess } from '@workbench/protocol/entities'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import { Button } from '@workbench/client-ui-primitives/button'
@@ -250,6 +257,48 @@ function RunApprovals({ runId }: { runId: string }): ReactElement | null {
   )
 }
 
+/**
+ * 判定证据（M49）：一步一条（标签 / 退出码 / 对应验收）。
+ *
+ * 脚本闸门跑 3 步就是 3 条证据；这里把它们摆出来，事后能回答「哪一步没过、对应哪条验收」，
+ * 不用去翻 output.md。没有证据的运行（普通执行阶段 / 老数据）不占版面。
+ */
+function RunChecks({ checks }: { checks: readonly GateCheck[] }): ReactElement | null {
+  if (checks.length === 0) return null
+  return (
+    <ul aria-label="判定证据" className="mt-2 flex flex-col gap-1">
+      {checks.map((check, index) => (
+        <li
+          key={`${index}:${check.cmd}`}
+          className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md border border-border bg-muted px-2 py-1 text-sm"
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'size-1.5 rounded-full',
+              check.exitCode === 0 ? 'bg-success' : 'bg-destructive',
+            )}
+          />
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">{check.cmd}</span>
+          <span
+            className={cn(
+              'tabular-nums',
+              check.exitCode === 0 ? 'text-success' : 'text-destructive',
+            )}
+          >
+            退出码 {check.exitCode}
+          </span>
+          {check.acceptance !== undefined && (
+            <span className="text-xs text-faint-foreground tabular-nums">
+              第 {check.acceptance} 条验收
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** 阶段引用（页面传进来的当前工作流阶段，只需要 id + 名字） */
 export type StageRef = { id: string; name: string }
 
@@ -297,6 +346,8 @@ function RunBlock({
       </div>
 
       <FormError message={run.error} className="mt-2" />
+
+      <RunChecks checks={run.checks ?? []} />
 
       <RunApprovals runId={run.id} />
 

@@ -1062,3 +1062,49 @@ describe('createProjectionWriter：脚本配置的 M42 归一（老 args → ste
     ).toEqual({ script_json: 'null' })
   })
 })
+
+describe('createProjectionWriter：run 判定证据列（M49）', () => {
+  it('checks 随行落库；缺省 / 老行按空数组归一', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const runtime = sample.runtime()
+    const agent = sample.agent({ runtimeId: runtime.id })
+    const workflow = sample.workflow()
+    const stage = sample.stage({ workflowId: workflow.id, agentId: agent.id })
+    const task = sample.task({ workflowId: workflow.id, currentStageId: stage.id })
+    for (const change of [
+      { table: 'runtimes', key: runtime.id, row: runtime },
+      { table: 'agents', key: agent.id, row: agent },
+      { table: 'workflows', key: workflow.id, row: workflow },
+      { table: 'workflow_stages', key: stage.id, row: stage },
+      { table: 'tasks', key: task.id, row: task },
+    ] as Change[]) {
+      writer.apply(change, SAMPLE_AT)
+    }
+    const withChecks = {
+      ...sample.run({ taskId: task.id, stageId: stage.id, runtimeId: runtime.id }),
+      checks: [{ cmd: '类型', exitCode: 1, acceptance: 2 }],
+    } as unknown as RunRow
+    writer.apply({ table: 'runs', key: withChecks.id, row: withChecks }, SAMPLE_AT)
+    // 老事实没有这个字段：按空数组落库
+    const legacy = {
+      ...sample.run({
+        id: 'run-legacy',
+        taskId: task.id,
+        stageId: stage.id,
+        runtimeId: runtime.id,
+      }),
+      checks: undefined,
+    } as unknown as RunRow
+    writer.apply({ table: 'runs', key: legacy.id, row: legacy }, SAMPLE_AT)
+
+    const rows = db.prepare('SELECT id, checks_json FROM runs ORDER BY id').all() as Array<{
+      id: string
+      checks_json: string
+    }>
+    expect(rows.find((row) => row.id === withChecks.id)?.checks_json).toBe(
+      '[{"cmd":"类型","exitCode":1,"acceptance":2}]',
+    )
+    expect(rows.find((row) => row.id === legacy.id)?.checks_json).toBe('[]')
+  })
+})

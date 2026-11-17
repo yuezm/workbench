@@ -225,6 +225,11 @@ export function settledRun(run: RunRow, receipt: Receipt, now: Iso): SettledRun 
     error: status === 'succeeded' ? null : (receipt.error ?? null),
     errorCode,
     exitCode: receipt.exitCode ?? null,
+    // M49：本轮判定证据随行落库（闸门读一次就丢，事后看不见哪一步没过）。
+    // 空证据不写这个键——不让每一轮 run 事实都多一条 `checks: []`；投影侧统一补 []。
+    ...(receipt.checks === undefined || receipt.checks.length === 0
+      ? {}
+      : { checks: receipt.checks }),
     sessionId: receipt.sessionId ?? run.sessionId,
     usage: receipt.usage ?? run.usage,
     durationMs: receipt.durationMs ?? null,

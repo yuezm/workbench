@@ -760,6 +760,44 @@ export function WorkflowEditor({
     return (commandRuntimes.find((runtime) => runtime.id === id)?.command ?? '').trim()
   })()
   const handoffWorkflowIds = handoffWorkflows.map((w) => w.id)
+  /**
+   * 脚本块的刷新代号（M49）：`ScriptLinesField` 本地保留原文、只认首次 `initial`，
+   * 整套复制配置后要让它重新挂载，否则输入框里还是旧参数。
+   */
+  const [scriptRevision, setScriptRevision] = useState(0)
+  /**
+   * 可复制的脚本来源（M49）：同一份草稿里其它已有步骤的脚本阶段。
+   *
+   * 只解决「同一套闸门命令在多个阶段各抄一遍」的重复；跨工作流复用留给以后的脚本实体。
+   */
+  const copySources = draft.stages
+    .map((item, at) => ({ item, at }))
+    .filter(
+      ({ item, at }) =>
+        at !== index && item.entryMode === 'script' && (item.script?.steps.length ?? 0) > 0,
+    )
+    .map(({ item, at }) => ({
+      index: at,
+      name: item.name.trim() === '' ? `阶段${at + 1}` : item.name.trim(),
+    }))
+  /** 复制脚本配置：步骤 / 目录 / 环境变量 / 超时 / 跑法整套拿过来，连接在不改变时保留（避免引用不存在的运行时）。 */
+  const copyScriptFrom = (at: number): void => {
+    const source = draft.stages[at]?.script
+    if (!source) return
+    patchScript(index, {
+      ...(commandRuntimeIds.includes(source.runtimeId) ? { runtimeId: source.runtimeId } : {}),
+      steps: source.steps.map((step) => ({
+        label: step.label,
+        args: [...step.args],
+        ...(step.acceptance === undefined ? {} : { acceptance: step.acceptance }),
+      })),
+      cwd: source.cwd,
+      env: { ...source.env },
+      timeoutMs: source.timeoutMs,
+      runAll: source.runAll ?? true,
+    })
+    setScriptRevision((n) => n + 1)
+  }
   const guardChoices = guardChoicesFor(stage)
   const subtaskStageIds = draft.stages.flatMap((s) => (s.id === undefined ? [] : [s.id]))
   /** 当前展开阶段的序号文案（aria-label 用，与阶段列表一致是 1 基） */
@@ -1009,6 +1047,23 @@ export function WorkflowEditor({
                       ? '所选运行时没有命令，到「运行时」页补上。'
                       : `命令：${scriptRuntimeCommand}（用运行时上的那条）`}
                 </p>
+                {/* M49：从别的脚本阶段复制一份配置过来——同一套闸门命令不必手抄第三遍 */}
+                {copySources.length > 0 && (
+                  <Field label="复制自" className="w-44">
+                    <Select value="" onValueChange={(v) => copyScriptFrom(Number(v))}>
+                      <SelectTrigger aria-label={`阶段${n}复制脚本配置`} className="w-full">
+                        <SelectValue placeholder="从其它阶段复制" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {copySources.map((source) => (
+                          <SelectItem key={source.index} value={String(source.index)}>
+                            {source.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                )}
                 {/* M42：步骤列表——同一条连接上的多组 argv，一步一条证据 */}
                 <div className="flex flex-col gap-2 border-t border-border pt-2">
                   <div className="flex items-center justify-between gap-2">
@@ -1030,7 +1085,7 @@ export function WorkflowEditor({
                   </div>
                   {stage.script.steps.map((step, at) => (
                     <div
-                      key={`step-${stage.id ?? index}-${at}`}
+                      key={`step-${stage.id ?? index}-${at}-${scriptRevision}`}
                       className="flex flex-col gap-2 rounded-md border border-border p-2"
                     >
                       <div className="flex flex-wrap items-end gap-2">
@@ -1092,7 +1147,7 @@ export function WorkflowEditor({
                         </Button>
                       </div>
                       <ScriptLinesField
-                        key={`args-${stage.id ?? index}-${at}`}
+                        key={`args-${stage.id ?? index}-${at}-${scriptRevision}`}
                         label={`阶段${n}步骤${at + 1}参数`}
                         rows={2}
                         placeholder={'check\n--reporter=dot'}
@@ -1154,7 +1209,7 @@ export function WorkflowEditor({
                 </div>
                 <Field label="环境变量（一行一个 KEY=VALUE）">
                   <ScriptLinesField
-                    key={`env-${stage.id ?? index}`}
+                    key={`env-${stage.id ?? index}-${scriptRevision}`}
                     label={`阶段${n}脚本环境变量`}
                     rows={2}
                     placeholder="CI=1"

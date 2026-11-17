@@ -328,6 +328,7 @@ export const TABLE_SHAPES: Readonly<Record<ProjectionTable, TableShape>> = {
     col2('deadlineAt', 'deadline_at'),
     col('cancelRequested', 'cancel_requested', bool),
     col('deliverables', 'deliverables_json', jsonNullable),
+    col('checks', 'checks_json', jsonArray),
     col2('startedAt', 'started_at'),
     col2('endedAt', 'ended_at'),
     col2('createdAt', 'created_at'),

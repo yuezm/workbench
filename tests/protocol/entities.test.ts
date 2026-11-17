@@ -37,6 +37,7 @@ import {
   type ChatRole,
   type Conversation,
   type EntryMode,
+  type GateCheck,
   type Message,
   type PermissionMode,
   type Run,
@@ -176,6 +177,8 @@ interface ExpectedIpcRun {
   error: string | null
   errorCode: RunErrorCode | null
   exitCode: number | null
+  /** 本轮判定证据（M49）：随 run 落库，事后能看见「这一轮跑了什么、哪一步没过」 */
+  checks?: GateCheck[]
   sessionId: string | null
   usage: RunUsage | null
   durationMs: number | null

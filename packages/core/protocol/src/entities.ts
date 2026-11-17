@@ -796,6 +796,13 @@ export interface Run {
   errorCode: RunErrorCode | null
   /** CLI 进程退出码；未能启动或超时后强杀为 null */
   exitCode: number | null
+  /**
+   * 本轮的判定证据（M49）：执行器按步骤 / 回执块给的 `{cmd, exitCode, acceptance}`。
+   *
+   * 落库的原因：闸门读一次就丢等于没有证据——事后要能看见「这一轮跑了什么、哪一步没过、
+   * 对应哪条验收」。老事实 / 非闸门轮次为 `[]`。
+   */
+  checks?: GateCheck[]
   /** 协议会话 id（可用于续接） */
   sessionId: string | null
   usage: RunUsage | null

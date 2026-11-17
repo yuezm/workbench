@@ -188,6 +188,29 @@ export function degradedCommentText(
   return `闸门「${stageName}」已连续 ${maxFails ?? 0} 次未通过，按配置放行（任务已打 ${GATE_DEGRADED_LABEL} 标签）。`
 }
 
+/**
+ * 闸门「没给结论」的留痕文案（M49）：任务原地停、零流转，界面上原来看不出为什么。
+ *
+ * 两种情形分开说：拿不到退出码（超时 / 被杀 / 起不来）与「有退出码但证据没覆盖验收」。
+ * 纯函数，`now` / id 都由调用方给。
+ */
+export function noConclusionCommentText(stage: WorkflowStage, run: SettledRun): string {
+  if (run.exitCode === null) {
+    return `闸门「${stage.name}」没给结论：这一轮没拿到退出码（${run.errorCode ?? '原因未知'}），任务停在原地。看本轮步骤证据后重跑，或改脚本配置。`
+  }
+  const checks = run.checks ?? []
+  const covered = new Set(
+    checks.flatMap((check) =>
+      check.exitCode === 0 && check.acceptance !== undefined ? [check.acceptance] : [],
+    ),
+  )
+  const missing = (stage.acceptance ?? []).findIndex((_, index) => !covered.has(index + 1))
+  if (missing >= 0) {
+    return `闸门「${stage.name}」没给结论：第 ${missing + 1} 条验收没有全 0 的证据（本轮 ${checks.length} 条）。给这条验收补一步，或重跑这一轮。`
+  }
+  return `闸门「${stage.name}」没给结论：本轮证据不足，任务停在原地等人。`
+}
+
 function withLabel(labels: readonly string[], label: string): string[] {
   return labels.includes(label) ? [...labels] : [...labels, label]
 }
@@ -257,6 +280,21 @@ function stageTransitionFacts(
     }
     return [hostDraft('task.comment_added', { comment }, now)]
   }
+  /**
+   * 闸门没给结论时的留痕（M49）：任务停在原地、零流转，界面上看不出为什么。
+   * 只在「确实停在闸门里」时留一句，跟着去向走的情形（errored 出口）不加噪音。
+   */
+  const noConclusionFacts = (): FactDraft[] => {
+    if (leftStage || current.judge === null || verdict !== undefined) return []
+    const comment: TaskComment = {
+      id: env.nextId('task-comment'),
+      taskId: task.id,
+      author: 'agent',
+      text: noConclusionCommentText(current, run),
+      createdAt: now,
+    }
+    return [hostDraft('task.comment_added', { comment }, now)]
+  }
   if (next.status === 'completed') {
     return {
       facts: [
@@ -284,9 +322,9 @@ function stageTransitionFacts(
       enter: next,
     }
   }
-  // 阶段没变 = 没有去向（判定没给结论 / 打回原地 / 停在这里等人）：只留可能的放行留痕。
-  // M34 删掉 `retry` 后不再有「原地重排一轮」这条路径——重跑只能由人触发。
-  return { facts: degradedFacts() }
+  // 阶段没变 = 没有去向（判定没给结论 / 打回原地 / 停在这里等人）：只留可能的放行留痕
+  // 与「为什么停下」的说明。M34 删掉 `retry` 后不再有「原地重排一轮」这条路径——重跑只能由人触发。
+  return { facts: [...degradedFacts(), ...noConclusionFacts()] }
 }
 
 export function claimRun(

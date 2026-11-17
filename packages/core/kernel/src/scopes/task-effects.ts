@@ -16,6 +16,7 @@ import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from '../core/types'
 import { taskPrompt } from './prompt'
 import { sourceHandoffOf } from './handoff-source'
+import { narrowAccess } from './access'
 import { locateReport } from './review'
 import { runCountOfTask, stageRoundCount, taskSessions } from './threads'
 import { threadContextText, hasThreadHistory } from './thread-context'
@@ -157,7 +158,13 @@ export function entryRunFacts(
           threadId: thread?.id ?? task.threadId,
           cwd: project?.path ?? ownCwd ?? '',
           access:
-            target.kind === 'script' ? 'full' : runAccessOf(stage, target.agent.permissionMode),
+            target.kind === 'script'
+              ? 'full'
+              : narrowAccess(
+                  runAccessOf(stage, target.agent.permissionMode),
+                  // A2：授权只会收紧权限，不会放宽（没有授权时按原意）
+                  view.mandates?.get(task.id)?.scope.access ?? 'full',
+                ),
           skill: null,
           promptRef: null,
           eventIds: trigger?.eventIds ?? [],

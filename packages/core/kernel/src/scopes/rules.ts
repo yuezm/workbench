@@ -29,6 +29,7 @@ import type { ThreadRow } from '@workbench/protocol/thread'
 import { nextCronTime, parseCron } from '../core/cron'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, View } from '../core/types'
 import { entryRunFacts, type RunTrigger } from './task-effects'
+import { grantFacts } from './mandate'
 import {
   activeTasksOfThread,
   eventAttachedFacts,
@@ -225,6 +226,20 @@ function implicitThreadTaskFacts(
       { thread: attached, turn: 1 },
     ),
   ]
+  if (view.authority != null) {
+    facts.push(
+      ...grantFacts({
+        view,
+        tasks: [task],
+        strength: 'explicit',
+        basis: 'manual',
+        by: { kind: 'manual', via: 'ui' },
+        policyVersion: rulesVersion,
+        now,
+        env,
+      }),
+    )
+  }
   return { task, facts }
 }
 

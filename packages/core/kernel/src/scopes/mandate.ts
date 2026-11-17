@@ -13,6 +13,7 @@
  * `access` 只收紧不放宽：`permissionMode` 是配置侧原意，Mandate 记的是当时被允许的上限。
  */
 import type { Access, Agent, Task, WorkflowStage } from '@workbench/protocol/entities'
+import type { Environment, FactDraft, Id, Iso, View } from '../core/types'
 import type {
   AdmissionBasis,
   AdmissionReason,
@@ -25,14 +26,6 @@ import type {
 } from '@workbench/protocol/authority'
 import { admit } from './admission'
 import { runAccessOf } from './task-effects'
-
-/** 权限宽窄：只用于「取更窄的一个」。 */
-const ACCESS_RANK: Record<Access, number> = { read: 1, edit: 2, full: 3 }
-
-/** 取更窄的权限：`run.access = min(agent 原意, mandate 上限)`。 */
-export function narrowAccess(intended: Access, cap: Access): Access {
-  return ACCESS_RANK[intended] <= ACCESS_RANK[cap] ? intended : cap
-}
 
 export interface GrantInput {
   id: string
@@ -165,4 +158,56 @@ const reasonText = (reason: AdmissionReason): string => {
     case 'assess-failed':
       return '研判未给出结论'
   }
+}
+
+export interface GrantFactsInput {
+  view: View
+  /** 本次刚建出来的任务（同一批事实里已产 `task.created`） */
+  tasks: readonly Task[]
+  strength: Strength
+  basis: AdmissionBasis
+  by: MandateBy
+  policyVersion: number
+  now: Iso
+  env: Environment
+}
+
+/**
+ * 建任务时顺带授予：`mandate.granted` 与 `task.created` 在同一批事实里。
+ *
+ * 只对**本次新建**的任务授予；复用任务 / 派生任务 / 交接任务各自有来源，不在这里补发
+ * （存量任务一律 `legacy`，不伪造因果）。
+ */
+export function grantFacts(input: GrantFactsInput): FactDraft<'mandate.granted'>[] {
+  return input.tasks.map((task) => {
+    const stage =
+      task.currentStageId === null ? null : (input.view.stages.get(task.currentStageId) ?? null)
+    const agent =
+      task.currentStageId === null ? null : agentOfStage(input.view, task.currentStageId)
+    const mandate = grantMandate({
+      id: input.env.nextId('mandate') satisfies Id,
+      task,
+      ruleIds: task.ruleId === null ? [] : [task.ruleId],
+      strength: input.strength,
+      basis: input.basis,
+      by: input.by,
+      policyVersion: input.policyVersion,
+      grantedAt: input.now,
+      stage,
+      agent,
+    })
+    return {
+      type: 'mandate.granted',
+      actor: { kind: 'kernel' } as const,
+      at: input.now,
+      payload: { mandate },
+    }
+  })
+}
+
+/** 阶段绑定的智能体（只取权限字段）；阶段没有智能体或行缺失时为 null。 */
+function agentOfStage(view: View, stageId: string): Pick<Agent, 'permissionMode'> | null {
+  const stage = view.stages.get(stageId)
+  if (stage === undefined || stage.agentId === null) return null
+  return view.agents.get(stage.agentId) ?? null
 }

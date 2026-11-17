@@ -6,6 +6,7 @@ import type { Input } from '@workbench/protocol/inputs'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../../core/types'
 import { handoffOnExit } from '../handoff'
+import { revokeMandate } from '../mandate'
 import { childrenSettledFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
 import {
@@ -263,6 +264,11 @@ export function stopTask(
         now,
       ),
     )
+  }
+  // A2：人工停止同时撤销该任务的授权（只有人能撤，任务完成不算撤销）
+  const mandate = view.mandates?.get(task.id)
+  if (mandate !== undefined && mandate.revokedAt === null) {
+    facts.push(ownerDraft('mandate.revoked', { mandate: revokeMandate(mandate, 'stop', now) }, now))
   }
   return done(facts)
 }

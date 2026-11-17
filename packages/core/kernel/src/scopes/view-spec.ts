@@ -87,7 +87,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
       ]
     case 'task.stop':
       // 按任务取活跃 run 逐条产取消请求（与 chat.cancel 同口径，不动任务行）
-      return ['tasks', 'runs']
+      // A2：人工停止要撤销该任务的授权
+      return ['tasks', 'runs', 'mandates']
     case 'task.complete':
       // 完成后若线程内无 active 任务 → thread.closed{all-tasks-done}；交接产出的新任务
       // 首轮提示词要带上下文（新任务没有评论，按切片装载）
@@ -152,7 +153,8 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 候选 run 来自 runs 投影；运行时配置（启用 / 执行器键）来自 runtimes；
       // 并发窗口按**智能体**（`maxConcurrent`）算，必须装 agents；
       // M6.5：同一线程的并发闸门要读 threads（concurrency 默认 1）
-      return ['runs', 'runtimes', 'agents', 'threads']
+      // A2：领活前按授权重校验（失败即撤、不领）
+      return ['runs', 'runtimes', 'agents', 'threads', 'mandates']
     case 'run.heartbeat':
       // 只校验租约是否匹配，不改其它表
       return ['runs']

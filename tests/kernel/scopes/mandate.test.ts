@@ -9,12 +9,8 @@ import type {
   AdmissionBasis,
 } from '@workbench/protocol/authority'
 import { DEFAULT_ADMISSION_TABLE } from '@workbench/protocol/authority'
-import {
-  grantMandate,
-  narrowAccess,
-  revalidateMandate,
-  revokeMandate,
-} from '@workbench/kernel/scopes/mandate'
+import { grantMandate, revalidateMandate, revokeMandate } from '@workbench/kernel/scopes/mandate'
+import { narrowAccess } from '@workbench/kernel/scopes/access'
 
 const AT = '2026-11-17T11:00:00.000Z'
 

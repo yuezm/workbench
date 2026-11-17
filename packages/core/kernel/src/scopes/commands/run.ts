@@ -49,6 +49,7 @@ import {
   truncateSummary,
   workflowWithStages,
 } from './common'
+import { revalidateMandate, revokeMandate } from '../mandate'
 
 /** 回执派生事件（D8）：每条事件一个 `event.received`，`hops = 父 run.hops + 1`。 */
 function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): FactDraft[] {
@@ -278,10 +279,40 @@ export function claimRun(
   ) {
     return reject('invalid_input', '领取数量必须是 1–8 的整数')
   }
-  const claimed = pickClaims(view, runtime, input.capacity, now)
-  return done(
-    claimFacts(claimed, now, env.limits, HOST_SCHEDULER, stageTimeoutOf(view, env.limits)),
-  )
+  // A2：领活前按授权重校验——已撤销的不领（零事实），重校验失败当场撤销并留痕
+  const picked = pickClaims(view, runtime, input.capacity, now)
+  const mandateFacts: FactDraft[] = []
+  const claimed = picked.filter((run) => {
+    if (run.taskId === null) return true
+    const mandate = view.mandates?.get(run.taskId)
+    if (mandate === undefined) return true
+    if (mandate.revokedAt !== null) return false
+    const verdict = revalidateMandate(mandate, view.authority ?? null)
+    if (verdict.ok) return true
+    mandateFacts.push({
+      type: 'mandate.revalidated',
+      actor: { kind: 'kernel' },
+      at: now,
+      payload: {
+        mandateId: mandate.id,
+        taskId: mandate.taskId,
+        ok: false,
+        reason: verdict.reason,
+        policyVersion: view.rulesVersion,
+      },
+    })
+    mandateFacts.push({
+      type: 'mandate.revoked',
+      actor: { kind: 'kernel' },
+      at: now,
+      payload: { mandate: revokeMandate(mandate, 'revalidate', now) },
+    })
+    return false
+  })
+  return done([
+    ...mandateFacts,
+    ...claimFacts(claimed, now, env.limits, HOST_SCHEDULER, stageTimeoutOf(view, env.limits)),
+  ])
 }
 
 /**

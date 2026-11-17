@@ -25,6 +25,7 @@ import type {
 } from '../../core/types'
 import type { SettledRun } from '../run'
 import { admit } from '../admission'
+import { grantFacts } from '../mandate'
 import { eventThreadFacts, ruleMatchesEvent, skippedRuleFacts } from '../rules'
 
 /** 命令全部来自 owner（renderer 经宿主派发），事实的 actor 不带来源推导。 */
@@ -229,8 +230,8 @@ export function receivedEventFacts(
   }
   const facts: FactDraft[] = [{ type: 'event.received', actor, at: now, payload }]
   const authority = view.authority ?? null
-  if (authority !== null) {
-    const admission = admit({ source: event.source, identity }, authority)
+  const admission = authority === null ? null : admit({ source: event.source, identity }, authority)
+  if (authority !== null && admission !== null) {
     if (!admission.allow) {
       facts.push({
         type: 'event.denied',
@@ -267,5 +268,23 @@ export function receivedEventFacts(
     ...skippedRuleFacts(view, payload, view.rulesVersion, now),
     ...eventThreadFacts(view, payload, view.rulesVersion, now, env),
   )
+  // A2：本次新建的任务顺带授予（与 task.created 同批，范围取落点与智能体权限上限）
+  if (admission !== null && admission.allow) {
+    const created = facts.flatMap((fact) =>
+      fact.type === 'task.created' ? [(fact.payload as { task: Task }).task] : [],
+    )
+    facts.push(
+      ...grantFacts({
+        view,
+        tasks: created,
+        strength: admission.strength,
+        basis: admission.basis,
+        by: { kind: 'identity', source: event.source, identity },
+        policyVersion: view.rulesVersion,
+        now,
+        env,
+      }),
+    )
+  }
   return facts
 }

@@ -190,7 +190,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'runs',
     'cards',
   ],
-  'task.stop': ['tasks', 'runs'],
+    'task.stop': ['tasks', 'runs', 'mandates'],
   'task.remove': ['tasks', 'runs', 'threads', 'cards', 'projects'],
   'task.comment': [
     'tasks',
@@ -219,7 +219,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
   'card.answer': ['runs', 'cards'],
   'card.resolve': ['cards'],
   // 并发窗口按智能体（`maxConcurrent`）算，领取必须装 agents
-  'run.claim': ['runs', 'runtimes', 'agents', 'threads'],
+    'run.claim': ['runs', 'runtimes', 'agents', 'threads', 'mandates'],
   'run.heartbeat': ['runs'],
   'run.receipt': [
     'runs',

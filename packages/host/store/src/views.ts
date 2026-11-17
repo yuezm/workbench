@@ -17,6 +17,7 @@ import type {
   UsageTotals,
 } from '@workbench/protocol/views'
 import { compatAuthority } from '@workbench/protocol/authority'
+import type { Mandate } from '@workbench/protocol/authority'
 import type { EventRow, RuleSkip } from '@workbench/kernel/core/types'
 import type {
   Agent,
@@ -657,9 +658,24 @@ export function loadView(
     // A1：准入配置与规则集同一行；缺该块 = 兼容模式（不做准入判定）
     authority: ruleSet?.authority ?? null,
     ruleFiredAt: slice.has('rule_fires') ? readRuleFiredAt(db) : new Map(),
+    // A2：授权按 taskId 索引（领活前重校验、人工停止撤销都读它）
+    mandates: slice.has('mandates') ? readMandates(db) : new Map(),
     pluginSettings: pluginSettings?.settings ?? [],
     pluginSettingsVersion: pluginSettings?.version ?? 0,
   }
+}
+
+/** A2：授权行按 taskId 索引（一任务一行，最新一次授予；撤销覆盖同一行）。 */
+const readMandates = (db: DatabaseSync): Map<Id, Mandate> => {
+  const rows = db
+    .prepare(`SELECT ${columnsOf('mandates')} FROM mandates ORDER BY granted_at, id`)
+    .all() as unknown as Array<Record<string, unknown>>
+  return new Map(
+    rows.map((row) => {
+      const mandate = rowOf<Mandate>('mandates', row)
+      return [mandate.taskId, mandate] as const
+    }),
+  )
 }
 
 /** M42：事件投影行（补跑还原入参用）。 */

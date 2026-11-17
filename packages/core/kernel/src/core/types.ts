@@ -230,6 +230,12 @@ export interface View {
   authority?: Authority | null
   /** M6：规则 id → 最近一次 cron 触发的计划时刻（去重与「只补最近一次」） */
   ruleFiredAt: Map<Id, Iso>
+  /**
+   * A2：taskId → 该任务当前授权（一任务一行；撤销也覆盖同一行）。
+   *
+   * 只装需要它的输入切片（领活与人工停止）；测试替身可省，缺省按「没有授权」处理。
+   */
+  mandates?: Map<Id, Mandate>
   /** M42：外部事件投影（只存事件本身，不含运行帧）；补跑按它重放 */
   events: Map<Id, EventRow>
   /** M42：被停用规则跳过、尚未补跑的事件（`rule_fires.status='skipped'` 的视图切片） */
@@ -299,6 +305,8 @@ export type IdKind =
   | 'thread-note'
   /** M7.5：任务上下文 / 反馈 id（`task_comments` 投影行） */
   | 'task-comment'
+  /** A2：授权 id（`mandates` 投影行） */
+  | 'mandate'
 
 /** 宿主在边界注入：时区、限制、id 生成器（内核不取随机数）。 */
 export interface Environment {

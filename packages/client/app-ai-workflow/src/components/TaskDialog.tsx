@@ -11,6 +11,7 @@ import {
 import { Field } from '@workbench/client-ui-kit/field'
 import { FormError } from '@workbench/client-ui-kit/form-error'
 import { Input } from '@workbench/client-ui-primitives/input'
+import { Segmented } from '@workbench/client-ui-kit/segmented'
 import {
   Select,
   SelectContent,
@@ -19,6 +20,18 @@ import {
   SelectValue,
 } from '@workbench/client-ui-primitives/select'
 import { Textarea } from '@workbench/client-ui-primitives/textarea'
+import {
+  BRIEF_MODES,
+  BRIEF_TOTAL_LIMIT,
+  briefFields,
+  briefLength,
+  briefModeLabel,
+  briefOverflow,
+  missingRecommended,
+  serializeBrief,
+  suggestBriefMode,
+  type BriefMode,
+} from '../model/task-brief'
 
 interface TaskDialogProps {
   /**
@@ -48,6 +61,10 @@ const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(
  * 别的工作流——只换 `TaskInput.workflowId`，协议与内核不变：`workflowId` / `currentStageId`
  * 仍是任务的必填归属，不存在「没有工作流」的任务。
  *
+ * 描述可按字段填（M43，见 `model/task-brief.ts`）：默认仍是自由文本，切到「需求」/「BUG」
+ * 后按字段录入，提交时**序列化成带 `###` 段头的正文**写进同一个 `description`——协议不动、
+ * 详情页照 Markdown 渲染，不把文本 parse 回字段（那就有两套真相源）。
+ *
  * 选中值的存法：**只存用户点过的那个**，失效就在渲染期派生回落（`workflow` / `stage`），
  * 不用 effect 同步 state——否则切工作流会多一轮渲染，还会在切回来的路上把旧阶段写回去。
  *
@@ -65,20 +82,35 @@ export function TaskDialog({
   onCancel,
 }: TaskDialogProps): ReactElement {
   const [title, setTitle] = useState('')
+  /** 自由文本模式下的正文（老路径，切到字段组时保留，不丢用户已经写的东西） */
   const [description, setDescription] = useState('')
+  /** 字段组模式下的各字段值，按 `BriefField.key` 存 */
+  const [briefValues, setBriefValues] = useState<Record<string, string>>({})
+  /** 默认自由文本：字段化是可选能力，不在用户没要求时改变填写方式 */
+  const [briefMode, setBriefMode] = useState<BriefMode>('free')
   const [workflowId, setWorkflowId] = useState(defaultWorkflowId)
   /** 用户选过的起始阶段；不属于当前工作流时回落到该工作流首阶段 */
   const [chosenStageId, setChosenStageId] = useState('')
   const [saving, setSaving] = useState(false)
   /** 标题字段级错误（必填） */
   const [titleError, setTitleError] = useState<string | null>(null)
-  /** 表单级错误（命令被拒 / 宿主探测失败 / 没有可用阶段） */
+  /** 表单级错误（命令被拒 / 宿主探测失败 / 描述超长 / 没有可用阶段） */
   const [formError, setFormError] = useState<string | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
 
   const workflow = workflows.find((candidate) => candidate.id === workflowId) ?? workflows[0]
   const stage =
     workflow?.stages.find((candidate) => candidate.id === chosenStageId) ?? workflow?.stages[0]
+
+  /** 描述正文：自由文本原样，字段组序列化成带段头的文本 */
+  const body = briefMode === 'free' ? description.trim() : serializeBrief(briefMode, briefValues)
+  const overflow = briefOverflow(body)
+  const missing = missingRecommended(briefMode, briefValues)
+  /** 名字像缺陷类的流程给一句「切过去按字段填」的建议；猜不出就不打扰 */
+  const suggestion = suggestBriefMode({
+    workflowName: workflow?.name ?? '',
+    stageName: stage?.name ?? '',
+  })
 
   const submit = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
@@ -93,13 +125,18 @@ export function TaskDialog({
       setFormError('这条工作流还没有可用的阶段，先到「设置 → 工作流」补一个')
       return
     }
+    // 超长会被宿主整条拒绝，别让用户填完才被打回
+    if (overflow > 0) {
+      setFormError(`任务描述超出上限 ${overflow} 字（含字段段头，上限 ${BRIEF_TOTAL_LIMIT} 字）`)
+      return
+    }
     setTitleError(null)
     setFormError(null)
     setSaving(true)
     try {
       await onSave({
         title: trimmed,
-        description: description.trim(),
+        description: body,
         workflowId: workflow.id,
         stageId: stage.id,
         projectId: project?.id ?? null,
@@ -188,16 +225,60 @@ export function TaskDialog({
               </SelectContent>
             </Select>
           </Field>
-          <Field label="任务描述">
-            <Textarea
-              aria-label="任务描述"
-              className="max-h-48 min-h-24 resize-y"
-              maxLength={COMMAND_LIMITS.description}
-              placeholder="背景、验收标准"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
+          {/* 描述：填写方式与正文分开两行，先选方式再进去填 */}
+          <div className="flex items-center justify-between gap-2">
+            <span aria-hidden="true" className="text-xs font-medium text-muted-foreground">
+              任务描述
+            </span>
+            <Segmented
+              value={briefMode}
+              onChange={setBriefMode}
+              options={[...BRIEF_MODES]}
+              ariaLabel="描述填写方式"
             />
-          </Field>
+          </div>
+          {briefMode === 'free' ? (
+            <Field label="描述正文">
+              <Textarea
+                aria-label="任务描述"
+                className="max-h-48 min-h-24 resize-y"
+                maxLength={COMMAND_LIMITS.description}
+                placeholder="背景、验收标准"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
+            </Field>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {briefFields(briefMode).map((field) => (
+                <Field key={field.key} label={field.label} hint={field.hint}>
+                  <Textarea
+                    aria-label={field.label}
+                    className="max-h-32 min-h-14 resize-y"
+                    maxLength={field.maxLength}
+                    value={briefValues[field.key] ?? ''}
+                    onChange={(e) =>
+                      setBriefValues((current) => ({ ...current, [field.key]: e.target.value }))
+                    }
+                  />
+                </Field>
+              ))}
+              {/* 建议项只提醒、不阻断：逼人填「影响面」只会换来一句「无」 */}
+              {missing.length > 0 && (
+                <p className="text-xs text-faint-foreground">建议补上：{missing.join('、')}</p>
+              )}
+            </div>
+          )}
+          {suggestion !== null && briefMode === 'free' && (
+            <p className="text-xs text-faint-foreground">
+              这条流程更像「{briefModeLabel(suggestion)}」类，切过去按字段填，AI 读到的结构更稳。
+            </p>
+          )}
+          {overflow > 0 && (
+            <p className="text-xs text-destructive">
+              描述已用 {briefLength(body)} / {BRIEF_TOTAL_LIMIT} 字，超出 {overflow} 字
+            </p>
+          )}
           <p className="text-xs text-faint-foreground">「智能体」的阶段会立即执行。</p>
 
           <FormError message={formError} />

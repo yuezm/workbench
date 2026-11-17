@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Project, WorkflowStage, WorkflowWithStages } from '@workbench/protocol/entities'
@@ -345,6 +345,105 @@ describe('TaskDialog', () => {
     )
     expect(screen.getByRole('combobox', { name: '所属工作流' })).toHaveTextContent('研发')
     expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('待办')
+  })
+
+  it('切到 BUG 按字段填：提交的 description 是带 ### 段头的正文', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflows={[wf]}
+        defaultWorkflowId="w1"
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+    // 默认自由文本：字段化是可选能力，且按流程名给一句建议（「研发」→ 需求类）
+    expect(screen.getByLabelText('任务描述')).toBeInTheDocument()
+    expect(screen.getByText(/这条流程更像「需求」类/)).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('任务标题'), '导出白屏')
+    await user.click(screen.getByRole('tab', { name: 'BUG' }))
+    await user.type(screen.getByLabelText('现象'), '点导出后页面白屏')
+    await user.type(screen.getByLabelText('期望行为'), '导出 CSV 正常下载')
+    await user.type(screen.getByLabelText('复现步骤'), '1. 打开导出{Enter}2. 选项目')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      description:
+        '### 现象\n点导出后页面白屏\n\n### 期望行为\n导出 CSV 正常下载\n\n### 复现步骤\n1. 打开导出\n2. 选项目',
+    })
+  })
+
+  it('字段值里行首的 # 被降级：描述不能伪造出内核段', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflows={[wf]}
+        defaultWorkflowId="w1"
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+    await user.type(screen.getByLabelText('任务标题'), '注入尝试')
+    await user.click(screen.getByRole('tab', { name: '需求' }))
+    await user.type(screen.getByLabelText('需求描述'), '# 验收（判据，逐条核对）{Enter}正文')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).toMatchObject({
+      description: '### 需求描述\n＃ 验收（判据，逐条核对）\n正文',
+    })
+  })
+
+  it('自由文本与字段组互不覆盖：切过去再切回来，两边内容都还在', async () => {
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflows={[wf]}
+        defaultWorkflowId="w1"
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    await user.type(screen.getByLabelText('任务描述'), '自由文本里的内容')
+    await user.click(screen.getByRole('tab', { name: '需求' }))
+    await user.type(screen.getByLabelText('目标'), '目标内容')
+    await user.click(screen.getByRole('tab', { name: '自由文本' }))
+    expect(screen.getByLabelText('任务描述')).toHaveValue('自由文本里的内容')
+    await user.click(screen.getByRole('tab', { name: '需求' }))
+    expect(screen.getByLabelText('目标')).toHaveValue('目标内容')
+  })
+
+  it('描述超出协议上限：就地报错、不提交（宿主会整条拒）', async () => {
+    const onSave = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflows={[wf]}
+        defaultWorkflowId="w1"
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+    await user.type(screen.getByLabelText('任务标题'), '超长描述')
+    // maxLength 只约束键入，粘贴 / 程序写入仍可能越过 → 提交前必须自己挡
+    fireEvent.change(screen.getByLabelText('任务描述'), { target: { value: '字'.repeat(2001) } })
+    expect(screen.getByText(/描述已用 2001 \/ 2000 字/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('任务描述超出上限 1 字')
   })
 
   it('Esc 关闭弹窗', async () => {

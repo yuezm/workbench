@@ -105,7 +105,7 @@ src/renderer/src/apps/ai-workflow/
     ├── TaskCommentForm.tsx    # 反馈输入：正文 + 「同时让智能体接着做」勾选
     ├── ThreadDetailPage.tsx   # 线程详情页：元信息 / 任务列表 / 笔记 / 绑定 / 归档 / 删除线程（连带执行记录）
     ├── DetailHeader.tsx       # 二级页面返回条：返回 + 标题线索 + 操作槽
-    ├── TaskDialog.tsx         # 新建任务：所属项目（只读，可为默认目录）/标题/所属工作流/起始阶段/描述（居中模态）
+    ├── TaskDialog.tsx         # 新建任务：所属项目（只读，可为默认目录）/标题/描述/所属工作流/起始阶段（居中模态）
     ├── ProjectSwitcher.tsx    # 顶部项目列表：选中 / 添加 / 编辑 / 「默认目录」入口（M10，M11 提到顶层）
     ├── ProjectDialog.tsx      # 新建/编辑项目：名称 + 文件夹（系统选择器）+ 备注 + 删除（M10）
     ├── WorkflowEditor.tsx     # 工作流编辑：左侧阶段序列（拖动行重排 / 抓手上的 ↑↓）/ 右侧选中阶段详情（含「要干什么」）

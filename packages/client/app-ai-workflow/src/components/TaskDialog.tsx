@@ -192,39 +192,6 @@ export function TaskDialog({
               }}
             />
           </Field>
-          <Field label="所属工作流">
-            {/* 顺序：先定「干什么」（标题），再定「投给哪条流程、从哪一步起」 */}
-            <Select value={workflow?.id ?? ''} onValueChange={setWorkflowId}>
-              <SelectTrigger aria-label="所属工作流" className="w-full">
-                <SelectValue placeholder="请选择" />
-              </SelectTrigger>
-              <SelectContent>
-                {workflows.map((candidate) => (
-                  <SelectItem key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="起始阶段" hint="任务从这里开始执行">
-            <Select
-              value={stage?.id ?? ''}
-              onValueChange={setChosenStageId}
-              // 换工作流后阶段列表整批换掉：这里不重置 chosenStageId，由上面的派生回落兜住
-            >
-              <SelectTrigger aria-label="起始阶段" className="w-full">
-                <SelectValue placeholder="请选择" />
-              </SelectTrigger>
-              <SelectContent>
-                {(workflow?.stages ?? []).map((candidate) => (
-                  <SelectItem key={candidate.id} value={candidate.id}>
-                    {candidate.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
           {/* 描述：填写方式与正文分开两行，先选方式再进去填 */}
           <div className="flex items-center justify-between gap-2">
             <span aria-hidden="true" className="text-xs font-medium text-muted-foreground">
@@ -271,7 +238,7 @@ export function TaskDialog({
           )}
           {suggestion !== null && briefMode === 'free' && (
             <p className="text-xs text-faint-foreground">
-              这条流程更像「{briefModeLabel(suggestion)}」类，切过去按字段填，AI 读到的结构更稳。
+              可切「{briefModeLabel(suggestion)}」按字段填
             </p>
           )}
           {overflow > 0 && (
@@ -279,8 +246,39 @@ export function TaskDialog({
               描述已用 {briefLength(body)} / {BRIEF_TOTAL_LIMIT} 字，超出 {overflow} 字
             </p>
           )}
-          <p className="text-xs text-faint-foreground">「智能体」的阶段会立即执行。</p>
-
+          {/* 投递目标放最后：先把任务写清楚（标题 + 描述），再决定投给哪条流程、从哪一步起 */}
+          <Field label="所属工作流">
+            <Select value={workflow?.id ?? ''} onValueChange={setWorkflowId}>
+              <SelectTrigger aria-label="所属工作流" className="w-full">
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                {workflows.map((candidate) => (
+                  <SelectItem key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="起始阶段">
+            <Select
+              value={stage?.id ?? ''}
+              onValueChange={setChosenStageId}
+              // 换工作流后阶段列表整批换掉：这里不重置 chosenStageId，由上面的派生回落兜住
+            >
+              <SelectTrigger aria-label="起始阶段" className="w-full">
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                {(workflow?.stages ?? []).map((candidate) => (
+                  <SelectItem key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
           <FormError message={formError} />
 
           <div className="mt-2 flex items-center justify-end gap-2">

@@ -700,7 +700,7 @@ export const RUN_ERROR_CODES = [
 export type RunErrorCode = (typeof RUN_ERROR_CODES)[number]
 
 /** 运行目的：`stage` = 阶段执行（挂任务），`chat` = 聊天轮次（挂对话）。 */
-export const RUN_PURPOSES = ['stage', 'chat'] as const
+export const RUN_PURPOSES = ['stage', 'chat', 'assess'] as const
 
 export type RunPurpose = (typeof RUN_PURPOSES)[number]
 

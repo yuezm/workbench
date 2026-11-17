@@ -100,7 +100,7 @@ const contractChecks: [
   Assert<Equal<NonNullable<Run['errorCode']>, RunErrorCode>>,
   Assert<Equal<RunEvent['type'], RunEventType>>,
   Assert<Equal<NonNullable<Run['usage']>, RunUsage>>,
-  Assert<Equal<RunPurpose, 'stage' | 'chat'>>,
+  Assert<Equal<RunPurpose, 'stage' | 'chat' | 'assess'>>,
   Assert<Equal<TaskStatus, (typeof TASK_STATUSES)[number]>>,
   Assert<Equal<Conversation['agentId'], string>>,
   Assert<Equal<Message['role'], ChatRole>>,
@@ -398,7 +398,7 @@ describe('protocol/entities', () => {
       'runtime_disabled',
       'executor_lost',
     ])
-    expect([...RUN_PURPOSES]).toEqual(['stage', 'chat'])
+    expect([...RUN_PURPOSES]).toEqual(['stage', 'chat', 'assess'])
     expect([...RUN_EVENT_TYPES]).toEqual(['status', 'text', 'thinking', 'tool_call', 'tool_result'])
     expect([...CHAT_ROLES]).toEqual(['user', 'assistant'])
     expect([...ACCESS_LEVELS]).toEqual(['read', 'edit', 'full'])

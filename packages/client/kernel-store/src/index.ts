@@ -103,6 +103,8 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
     ],
   },
   { prefix: 'card.', views: ['cards.open', 'cards.byRun'] },
+  // A2：授权行随 mandate.* 整行更新；按任务取（参数视图由 store 按已注册参数重取）
+  { prefix: 'mandate.', views: ['mandates.byTask'] },
   {
     prefix: 'conversation.',
     // M11：会话清单按项目取（`byProject` / `unassigned`），归档、改名、换项目都要重取

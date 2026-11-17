@@ -19,6 +19,7 @@ import { TaskActivity } from './TaskActivity'
 import { TaskBrief } from './TaskBrief'
 import { TaskCommentForm } from './TaskCommentForm'
 import { TaskInfoPanel } from './TaskInfoPanel'
+import { MandateSection } from './MandateSection'
 import { ReviewPanel } from './ReviewPanel'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -284,6 +285,9 @@ export function TaskDetailPage({
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
             <FormError message={actionError} />
             <TaskInfoPanel task={task} stageName={stageName} />
+
+            {/* 授权（A2）：凭什么执行、范围多大、哪版策略、撤没撤 */}
+            <MandateSection taskId={task.id} scopeLabel={hint} />
 
             {/* 待审批：智能体在这一任务上等你回答（正文与选项都在这里，提交后即续接） */}
             {/* 卡片视图读失败时卡片会「凭空少一块」，run 却停在 waiting：把原因就地写出来 */}

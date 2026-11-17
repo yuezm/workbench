@@ -340,7 +340,12 @@ export function AgentDialog({
           <DialogTitle>{mode === 'edit' ? '编辑智能体' : '新建智能体'}</DialogTitle>
         </DialogHeader>
         <form className="flex min-h-0 flex-1 flex-col gap-4" noValidate onSubmit={submit}>
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1">
+          {/*
+            水平内边距是给焦点环留位：`ring-[3px]` 是向外的 box-shadow，滚动容器按 padding box
+            裁剪，左边缘原本 0 内边距 → 输入框聚焦时左侧那 3px 紫环被切掉（右侧 4px 刚好够）。
+            负外边距抵掉这 8px，字段左右边缘与标题 / 底部按钮对齐，视觉宽度不变。
+          */}
+          <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1">
             {runtimes.length === 0 && (
               <div className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
                 先添加运行时。

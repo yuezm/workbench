@@ -250,6 +250,8 @@ Radix `DialogContent` 是真模态：打开时 `hideOthers` 把背景整片标 `
 | disabled      | `opacity-50 cursor-not-allowed`，不再额外改文字色                  |
 | 危险          | `text-destructive` / `bg-destructive/10` + `border-destructive/30` |
 
+焦点环是**向外**画的 box-shadow（3px）。控件放进 `overflow` 容器（内层滚动区、裁切卡片）时，该容器的内边距必须 ≥3px，否则贴着边缘的输入框聚焦时环被沿 `padding box` 裁平——只看见半个高亮，看着像渲染错误。不想让布局变宽就用负外边距抵掉：`-mx-1 px-1`（`AgentDialog` 的字段区即此写法）。
+
 ## 9. 检查方式
 
 ```

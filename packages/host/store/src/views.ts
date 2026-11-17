@@ -10,7 +10,13 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 import { nextRuleFires, previewEvent } from '@workbench/kernel/scopes/rules'
-import type { UsageAgentRow, UsageDailyRow, UsageTotals } from '@workbench/protocol/views'
+import type {
+  AuthorityView,
+  UsageAgentRow,
+  UsageDailyRow,
+  UsageTotals,
+} from '@workbench/protocol/views'
+import { compatAuthority } from '@workbench/protocol/authority'
 import type { EventRow, RuleSkip } from '@workbench/kernel/core/types'
 import type {
   Agent,
@@ -453,6 +459,30 @@ const readRuleSet = (db: DatabaseSync): RuleSetRow | null => {
   return rowOf<RuleSetRow>('rule_sets', row)
 }
 
+/**
+ * A1 `authority.current`：规则页渲染准入配置的唯一来源。
+ *
+ * 兼容模式（规则集没有 `authority` 块）报 `mode='compat'`，其余字段取
+ * `compatAuthority()` 的缺省值，界面据此提示「准入未开启」；配置了就原样回显，
+ * 不做二次归一（写入侧已经归一过，读侧再改会出现「存的和看的不一样」）。
+ */
+const readAuthorityView = (db: DatabaseSync): AuthorityView => {
+  const ruleSet = readRuleSet(db)
+  const policyVersion = ruleSet?.version ?? 0
+  const authority = ruleSet?.authority ?? null
+  if (authority === null) {
+    const compat = compatAuthority()
+    return {
+      mode: 'compat',
+      sources: compat.sources,
+      assessorAgentId: compat.assessorAgentId,
+      assessBatch: compat.assessBatch,
+      assessWindowMs: compat.assessWindowMs,
+      policyVersion,
+    }
+  }
+  return { ...authority, policyVersion }
+}
 /**
  * 每条规则最近一次 cron 触发的**计划时刻**（`scheduled_for`，不是 `fired_at`）：
  * 内核拿它做 cron 基线（同一到点时刻只触发一次、停机错过只补最近一次）。
@@ -1103,6 +1133,9 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'kernel.seq':
       // M5：kernelStore 的快照水位（事实日志最大 seq）
       return lastSeq(db)
+    case 'authority.current':
+      // A1：规则页回显准入配置；没有该块时报 compat（其余字段给兼容缺省）
+      return readAuthorityView(db)
     case 'rules.all':
       // M6：规则页只读视图（版本 + 当前规则清单）；无规则集时返回空版本
       return readRuleSetView(db)

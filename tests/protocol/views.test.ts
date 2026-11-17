@@ -103,6 +103,8 @@ describe('protocol/views', () => {
       'usage.byAgent',
       'rules.preview',
       'rules.next',
+      // A1：准入配置回显
+      'authority.current',
     ])
   })
 

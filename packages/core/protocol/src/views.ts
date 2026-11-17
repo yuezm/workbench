@@ -6,6 +6,7 @@
  * 卡片审批（`cards.open` / `cards.byRun`，M4）。
  * M5 的完整视图清单（threads / timeline 等）届时在此扩展。
  */
+import type { Authority } from './authority'
 import type {
   Agent,
   Card,
@@ -83,6 +84,8 @@ export const VIEW_IDS = [
   // M36：规则预演与下次触发（只读派生）
   'rules.preview',
   'rules.next',
+  // A1：准入配置回显（规则页渲染模式 / 名单 / 准入表；无该块报 compat）
+  'authority.current',
 ] as const
 
 /**
@@ -102,6 +105,22 @@ export const HOST_VIEW_IDS = [
 export type HostViewId = (typeof HOST_VIEW_IDS)[number]
 
 export type ViewId = (typeof VIEW_IDS)[number]
+
+/**
+ * uthority.current（A1）：规则页渲染准入配置用。
+ *
+ * mode='compat' 表示规则集没有准入块（兼容模式，事件命中即建任务）；此时其余字段是
+ * 兼容缺省值，界面据此提示「准入未开启」。policyVersion 与 
+ules.all.version 同源。
+ */
+export interface AuthorityView {
+  mode: Authority['mode'] | 'compat'
+  sources: Authority['sources']
+  assessorAgentId: Authority['assessorAgentId']
+  assessBatch: Authority['assessBatch']
+  assessWindowMs: Authority['assessWindowMs']
+  policyVersion: number
+}
 
 /**
  * 活跃 run 的最小投影：内核用它判断「该任务是否执行中」，看板用它展示进行中的运行。
@@ -404,6 +423,8 @@ export interface ViewResults {
   'rules.preview': RulePreview
   /** M36：定时规则的下一次触发时刻 */
   'rules.next': RuleNextFire[]
+  /** A1：准入配置回显（mode='compat' = 规则集没有准入块） */
+  'authority.current': AuthorityView
 }
 
 export type ViewParams<T extends ViewId> = T extends keyof ViewArgs ? ViewArgs[T] : undefined

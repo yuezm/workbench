@@ -583,11 +583,12 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     }
   })
 
-  it('SCHEMA_SQL 建 20 张表：二十张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
+  it('SCHEMA_SQL 建 21 张表：二十一张投影（旧聊天表已由 T14b 迁成事实并删除）', () => {
     const db = memoryDb()
     db.exec(SCHEMA_SQL)
     expect(tableNames(db)).toEqual([
       'agents',
+      'assessments',
       'cards',
       'conversations',
       'event_skips',
@@ -712,7 +713,7 @@ describe('facts / projection_meta', () => {
 })
 
 describe('投影白名单与指纹', () => {
-  it('白名单固定为二十张投影表（实体五表 + projects + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings + task_comments + review_reports + events / event_skips）', () => {
+  it('白名单固定为二十一张投影表（实体五表 + projects + 运行/聊天四表 + cards + 规则两表 + threads + plugin_settings + task_comments + review_reports + events / event_skips）', () => {
     expect(PROJECTION_TABLES).toEqual([
       'tasks',
       'workflows',
@@ -734,6 +735,7 @@ describe('投影白名单与指纹', () => {
       'events',
       'event_skips',
       'mandates',
+      'assessments',
     ])
   })
 

@@ -50,7 +50,7 @@ import type { Change, Iso, ProjectionRow, ProjectionTable } from '@workbench/ker
 import type { RuleFireRow, RuleSetRow } from '@workbench/protocol/rules'
 import type { PluginSettingsRow } from '@workbench/protocol/plugins'
 import type { ThreadRow } from '@workbench/protocol/thread'
-import type { Mandate } from '@workbench/protocol/authority'
+import type { Assessment, Mandate } from '@workbench/protocol/authority'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { ReviewReport } from '@workbench/protocol/review'
 import { StoreError } from './errors'
@@ -243,6 +243,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     rule_sets: db.prepare('DELETE FROM rule_sets WHERE id = ?'),
     rule_fires: db.prepare('DELETE FROM rule_fires WHERE id = ?'),
     mandates: db.prepare('DELETE FROM mandates WHERE id = ?'),
+    assessments: db.prepare('DELETE FROM assessments WHERE id = ?'),
     mandatesByTask: db.prepare('DELETE FROM mandates WHERE task_id = ?'),
     threads: db.prepare('DELETE FROM threads WHERE id = ?'),
     plugin_settings: db.prepare('DELETE FROM plugin_settings WHERE id = ?'),
@@ -259,6 +260,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
 
   const clearAll = {
     mandates: db.prepare('DELETE FROM mandates'),
+    assessments: db.prepare('DELETE FROM assessments'),
     run_events: db.prepare('DELETE FROM run_events'),
     runs: db.prepare('DELETE FROM runs'),
     messages: db.prepare('DELETE FROM messages'),
@@ -311,6 +313,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     task_comments: (row) => writeRow('task_comments', row as TaskComment),
     review_reports: (row) => writeRow('review_reports', row as ReviewReport),
     mandates: (row) => writeRow('mandates', row as Mandate),
+    assessments: (row) => writeRow('assessments', row as Assessment),
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */

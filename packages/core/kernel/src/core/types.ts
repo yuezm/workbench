@@ -26,7 +26,7 @@ import type {
 import type { FactPayload, FactType } from '@workbench/protocol/facts'
 import type { Input } from '@workbench/protocol/inputs'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '@workbench/protocol/rules'
-import type { Authority, Mandate } from '@workbench/protocol/authority'
+import type { Assessment, Authority, Mandate } from '@workbench/protocol/authority'
 import type { EventSkipRow } from '@workbench/protocol/rules'
 import type { PluginSettingsRow } from '@workbench/protocol/plugins'
 import type { ThreadRow } from '@workbench/protocol/thread'
@@ -111,6 +111,8 @@ export const PROJECTION_TABLES = [
   'event_skips',
   // A2：授权（一任务一行，最新一次授予）
   'mandates',
+  // A3：研判结论（一事件一行最新判定）
+  'assessments',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -136,6 +138,7 @@ export type ProjectionRow =
   | EventRow
   | EventSkipRow
   | Mandate
+  | Assessment
 
 export interface FactDraft<T extends FactType = FactType> {
   type: T

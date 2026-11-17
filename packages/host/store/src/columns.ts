@@ -453,6 +453,16 @@ export const TABLE_SHAPES: Readonly<Record<ProjectionTable, TableShape>> = {
     col2('revokedReason', 'revoked_reason'),
     col('legacy', 'legacy', bool),
   ]),
+  assessments: table('assessments', [
+    col2('id', 'id'),
+    col2('eventId', 'event_id'),
+    col2('policyVersion', 'policy_version'),
+    col('ruleIds', 'rule_ids_json', jsonArray),
+    col('verdicts', 'verdicts_json', jsonArray),
+    col2('decision', 'decision'),
+    col('wouldAccept', 'would_accept', bool),
+    col2('via', 'via'),
+  ]),
   review_reports: table('review_reports', [
     col2('id', 'id'),
     col2('taskId', 'task_id'),

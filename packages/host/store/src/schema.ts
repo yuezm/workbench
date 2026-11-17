@@ -355,6 +355,25 @@ CREATE TABLE IF NOT EXISTS ${name} (
   legacy INTEGER NOT NULL DEFAULT 0
 );`
 
+/**
+ * `assessments` 投影（A3，第二十一张表）：一事件一行（最新一版判定）。
+ *
+ * - 判定、证据、结论整行由 `assess.decided` 事实携带，`project` 只做整行 upsert；
+ * - `would_accept` 记录 `observe` 模式下「本来会接」，是自动接单数为 0 的复盘依据；
+ * - 重判产生新 id 的新行，读侧按 `event_id` 取最新一条。
+ */
+const assessmentsTable = (name = 'assessments'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  policy_version INTEGER NOT NULL,
+  rule_ids_json TEXT NOT NULL DEFAULT '[]',
+  verdicts_json TEXT NOT NULL DEFAULT '[]',
+  decision TEXT NOT NULL,
+  would_accept INTEGER NOT NULL DEFAULT 0,
+  via TEXT NOT NULL
+);`
+
 const ruleFiresTable = (name = 'rule_fires'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
@@ -526,6 +545,7 @@ export const SCHEMA_SQL = [
   ruleSetsTable(),
   ruleFiresTable(),
   mandatesTable(),
+  assessmentsTable(),
   threadsTable(),
   pluginSettingsTable(),
   taskCommentsTable(),
@@ -587,6 +607,7 @@ export const tableDdl = {
   ruleSets: ruleSetsTable,
   ruleFires: ruleFiresTable,
   mandates: mandatesTable,
+  assessments: assessmentsTable,
   threads: threadsTable,
   pluginSettings: pluginSettingsTable,
   taskComments: taskCommentsTable,
@@ -1018,6 +1039,7 @@ export const PROJECTION_TABLES = [
   'event_skips',
   // A2：授权（一任务一行）
   'mandates',
+  'assessments',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -1043,6 +1065,7 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   events: tableDdl.events(),
   event_skips: tableDdl.eventSkips(),
   mandates: tableDdl.mandates(),
+  assessments: tableDdl.assessments(),
 }
 
 /** 二十张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */

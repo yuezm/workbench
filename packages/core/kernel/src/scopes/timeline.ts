@@ -153,6 +153,9 @@ function refsOf(fact: AnyFact): EntityRef[] {
       return [{ scope: 'task', id: fact.payload.mandate.taskId }]
     case 'mandate.revalidated':
       return [{ scope: 'task', id: fact.payload.taskId }]
+    case 'assess.decided':
+      // A3：研判不挂业务实体（它挂在事件上），只在 cause 链上出现
+      return []
     case 'event.admitted':
     case 'event.denied':
       // A1：准入结论与事件同源，事件本身不是 scope，只在 cause 链上出现。

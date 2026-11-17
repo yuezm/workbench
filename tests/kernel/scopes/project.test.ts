@@ -262,6 +262,7 @@ const emptyTables = (): Tables => ({
   events: new Map(),
   event_skips: new Map(),
   mandates: new Map(),
+  assessments: new Map(),
 })
 
 /** 按 seq 顺序 fold 事实：投影应用器的最小等价实现（重建与实时写入共用路径）。 */

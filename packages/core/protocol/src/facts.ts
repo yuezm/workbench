@@ -39,6 +39,7 @@ import type {
   AdmissionBasis,
   AdmissionReason,
   AcceptMode,
+  Assessment,
   EventIdentity,
   Mandate,
   Strength,
@@ -97,6 +98,7 @@ export const FACT_TYPES = [
   'mandate.granted',
   'mandate.revoked',
   'mandate.revalidated',
+  'assess.decided',
   'thread.opened',
   'thread.event_attached',
   'thread.task_attached',
@@ -677,6 +679,7 @@ export interface FactPayloads {
   'mandate.granted': MandateGrantedPayload
   'mandate.revoked': MandateRevokedPayload
   'mandate.revalidated': MandateRevalidatedPayload
+  'assess.decided': AssessDecidedPayload
   'event.merged': EventMergedPayload
   'event.skipped': EventSkippedPayload
   'thread.opened': ThreadOpenedPayload
@@ -724,4 +727,16 @@ export interface MandateRevalidatedPayload {
   ok: boolean
   reason: string | null
   policyVersion: number
+}
+
+// ---------- 研判（A3） ----------
+
+/**
+ * 研判结论（A3）：一次 `purpose='assess'` 的运行对一批候选给出的判定。
+ *
+ * 一行事实携带完整 `Assessment`（判定 + 证据 + 折算后的结论），`project` 只做整行 upsert；
+ * `wouldAccept` 记录「本来会接」——`observe` 期自动接单数为 0，复盘读的就是它。
+ */
+export interface AssessDecidedPayload {
+  assessment: Assessment
 }

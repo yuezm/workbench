@@ -244,6 +244,9 @@ function changesOf(fact: AnyFact): Change[] {
     case 'mandate.revalidated':
       // A2：重校验只作审计；失败时的撤销由同批 mandate.revoked 表达
       return []
+    case 'assess.decided':
+      // A3：研判结论整行落表（一行事实 → 一行投影）
+      return [put('assessments', fact.payload.assessment)]
     case 'event.admitted':
     case 'event.denied':
       // A1：准入结论只作审计（凭什么建 / 为什么不建），投影不新增表；重建时同样回放这两类事实。

@@ -273,3 +273,31 @@ export interface Mandate {
   /** 存量任务（A2 之前创建）：不补发授权，只读展示 */
   legacy: boolean
 }
+
+// ---------- 研判（A3） ----------
+
+/** 对一条启用规则的判定：命中与否，命中必须带证据。 */
+export interface AssessVerdict {
+  ruleId: string
+  match: boolean
+  /** `match=true` 时必填：指向事件或线程里具体文字/链接的一句话证据（≤300 字） */
+  evidence: string | null
+}
+
+/**
+ * 一次研判的结论（A3）。
+ *
+ * `decision` 是**折算后**的结论（覆盖齐、证据足、至少一条命中才算 accept）；
+ * `wouldAccept` 记录 `observe` 模式下「本来会接」——自动接单数为 0 的复盘依据。
+ */
+export interface Assessment {
+  id: string
+  eventId: string
+  policyVersion: number
+  /** 本批判定覆盖的启用规则 id（顺序即规则集顺序） */
+  ruleIds: string[]
+  verdicts: AssessVerdict[]
+  decision: 'accept' | 'ignore'
+  wouldAccept: boolean
+  via: 'assessor' | 'no-assessor' | 'failed'
+}

@@ -487,7 +487,11 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       const validated = validateQuery(view, params)
       if (!validated.ok) throw new StoreError('invalid_input', validated.message)
       if ((HOST_VIEW_IDS as readonly string[]).includes(validated.view)) {
-        return deps.hostView(validated.view as HostViewId, validated.params)
+        // 宿主视图的参数全是字符串 id（`QueryParams` 里的数字只出现在 DB 侧聚合视图）
+        return deps.hostView(
+          validated.view as HostViewId,
+          validated.params as Record<string, string> | undefined,
+        )
       }
       return store.query(validated.view as ViewId, validated.params as ViewParams<ViewId>)
     },

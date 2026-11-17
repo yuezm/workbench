@@ -884,6 +884,120 @@ describe('validateQuery（M5：query 动词入口）', () => {
     expect(validateQuery(undefined)).toEqual({ ok: false, message: '未知视图: undefined' })
   })
 
+  describe('M36 多字段参数视图（窗口 / 事件样本）', () => {
+    const NOW = '2026-11-17T07:00:00.000Z'
+
+    it('usage.daily：窗口参数放行，数字原样保留（不再被判「不接受参数」）', () => {
+      expect(validateQuery('usage.daily', { days: 7, now: NOW })).toEqual({
+        ok: true,
+        view: 'usage.daily',
+        params: { days: 7, now: NOW },
+      })
+      expect(validateQuery('usage.byAgent', { days: 30 })).toEqual({
+        ok: true,
+        view: 'usage.byAgent',
+        params: { days: 30 },
+      })
+      // 不给参数 = 全部历史；空对象等同于没给
+      expect(validateQuery('usage.daily', undefined)).toEqual({
+        ok: true,
+        view: 'usage.daily',
+        params: undefined,
+      })
+      expect(validateQuery('usage.daily', {})).toEqual({
+        ok: true,
+        view: 'usage.daily',
+        params: undefined,
+      })
+    })
+
+    it('usage.daily：窗口越界 / 非整数 / 类型不对 / 未知键拒绝', () => {
+      expect(validateQuery('usage.daily', { days: 0 })).toEqual({
+        ok: false,
+        message: 'days必须在 1 到 90 之间',
+      })
+      expect(validateQuery('usage.daily', { days: 91 })).toEqual({
+        ok: false,
+        message: 'days必须在 1 到 90 之间',
+      })
+      expect(validateQuery('usage.daily', { days: 1.5 })).toEqual({
+        ok: false,
+        message: 'days必须是整数',
+      })
+      expect(validateQuery('usage.daily', { days: '7' })).toEqual({
+        ok: false,
+        message: 'days必须是整数',
+      })
+      expect(validateQuery('usage.daily', { now: 7 })).toEqual({
+        ok: false,
+        message: 'now必须是字符串',
+      })
+      expect(validateQuery('usage.daily', { days: 7, day: 3 })).toEqual({
+        ok: false,
+        message: '参数 day 不属于该视图',
+      })
+      expect(validateQuery('usage.daily', 'days=7')).toEqual({
+        ok: false,
+        message: '视图 usage.daily 需要参数对象',
+      })
+    })
+
+    it('rules.preview：样本字段必填，未知键拒绝', () => {
+      expect(validateQuery('rules.preview', undefined)).toEqual({
+        ok: false,
+        message: 'source必填',
+      })
+      expect(validateQuery('rules.preview', { source: 'gitlab' })).toEqual({
+        ok: false,
+        message: 'type必填',
+      })
+      expect(
+        validateQuery('rules.preview', { source: 'gitlab', type: 'issues.opened', subject: '#1' }),
+      ).toEqual({
+        ok: true,
+        view: 'rules.preview',
+        params: { source: 'gitlab', type: 'issues.opened', subject: '#1' },
+      })
+      expect(
+        validateQuery('rules.preview', {
+          source: 'gitlab',
+          type: 'issues.opened',
+          subject: '#1',
+          summary: '新缺陷',
+        }),
+      ).toEqual({
+        ok: true,
+        view: 'rules.preview',
+        params: { source: 'gitlab', type: 'issues.opened', subject: '#1', summary: '新缺陷' },
+      })
+      expect(
+        validateQuery('rules.preview', {
+          source: 'gitlab',
+          type: 'issues.opened',
+          subject: '#1',
+          label: 'x',
+        }),
+      ).toEqual({ ok: false, message: '参数 label 不属于该视图' })
+    })
+
+    it('rules.next：两个字段都可选，类型不对拒绝', () => {
+      expect(validateQuery('rules.next', { now: NOW, timezone: 'Asia/Shanghai' })).toEqual({
+        ok: true,
+        view: 'rules.next',
+        params: { now: NOW, timezone: 'Asia/Shanghai' },
+      })
+      expect(validateQuery('rules.next', undefined)).toEqual({
+        ok: true,
+        view: 'rules.next',
+        params: undefined,
+      })
+      expect(validateQuery('rules.next', { timezone: 8 })).toEqual({
+        ok: false,
+        message: 'timezone必须是字符串',
+      })
+    })
+  })
+
   it('app.event 的 eventType 上限 100 字符', () => {
     expect(
       rejectedMessage(

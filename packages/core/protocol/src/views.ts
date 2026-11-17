@@ -253,6 +253,11 @@ export interface WorkflowStageMetrics {
 /**
  * 需要参数的视图 → 参数对象里的字段名（宿主在 `query` 入口按它校验形状：
  * 字段必填、字符串、长度上限与 id 一致；renderer 传的是不可信数据）。
+ *
+ * 只登记「一个必填 id」这种形状；参数为窗口 / 事件样本的多字段视图
+ * （`usage.daily` / `usage.byAgent` / `rules.preview` / `rules.next`）由
+ * `validate.ts` 的 `MULTI_PARAM_VIEWS` 校验，别在这里塞（塞不进来的会被判成
+ * 「该视图不接受参数」）。
  */
 export const VIEW_PARAM_FIELDS: Partial<Record<ViewId, string>> = {
   'workflow.stage-metrics': 'workflowId',

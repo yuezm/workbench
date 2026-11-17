@@ -1277,10 +1277,81 @@ export function validateInput(input: unknown): ValidateInputResult {
 
 // ---------- 视图查询（M5：query 动词入口） ----------
 
+/**
+ * 校验后的视图参数：单 id 视图是 `{ <field>: string }`；多字段视图（`usage.*` / `rules.*`）
+ * 另有数字字段（`days`）。值只可能是校验过的字符串或整数，不再含未知形状。
+ */
+export type QueryParams = Record<string, string | number>
+
 /** `query` 的校验结果：视图 id 必须是登记过的，参数按 `VIEW_PARAM_FIELDS` 收窄。 */
 export type ValidateQueryResult =
-  | { ok: true; view: ViewId; params: Record<string, string> | undefined }
-  | { ok: false; message: string }
+  { ok: true; view: ViewId; params: QueryParams | undefined } | { ok: false; message: string }
+
+// ---------- 多字段参数视图（M36）：形状由 `ViewArgs` 给出，不是单个 id ----------
+
+/** 只接受声明过的键：拼错的字段名会被拒，不会静默当成「没传」而跑成默认口径。 */
+const foreignKey = (record: Obj, allowed: readonly string[]): Check => {
+  for (const key of Object.keys(record)) {
+    if (!allowed.includes(key)) return `参数 ${key} 不属于该视图`
+  }
+  return null
+}
+
+/** 从已校验的 record 里摘出声明过的键：只拷贝真给了的值，不给的键不出现。 */
+const pickParams = (record: Obj, keys: readonly string[]): QueryParams => {
+  const params: QueryParams = {}
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' || typeof value === 'number') params[key] = value
+  }
+  return params
+}
+
+/** 用量窗口的取值范围（与 `views.ts` 的 `readUsageWindow` 夹紧区间一致） */
+const USAGE_DAYS_MIN = 1
+const USAGE_DAYS_MAX = 90
+
+/** `usage.daily` / `usage.byAgent`：`days` 可选整数 1–90，`now` 可选 ISO 字符串。 */
+const checkUsageParams = (record: Obj): Check =>
+  foreignKey(record, ['days', 'now']) ??
+  optionalIntegerIn(record['days'], 'days', USAGE_DAYS_MIN, USAGE_DAYS_MAX) ??
+  optionalText(record['now'], 'now', COMMAND_LIMITS.iso)
+
+/** `rules.preview`：一条事件样本；来源/类型/对象必填，摘要可选。 */
+const checkRulePreviewParams = (record: Obj): Check =>
+  foreignKey(record, ['source', 'type', 'subject', 'summary']) ??
+  required(record['source'], 'source', COMMAND_LIMITS.name) ??
+  required(record['type'], 'type', COMMAND_LIMITS.name) ??
+  required(record['subject'], 'subject', COMMAND_LIMITS.title) ??
+  optionalText(record['summary'], 'summary', COMMAND_LIMITS.summary)
+
+/** `rules.next`：`now` / `timezone` 都可选（缺省由宿主取当前时刻与时区）。 */
+const checkRuleNextParams = (record: Obj): Check =>
+  foreignKey(record, ['now', 'timezone']) ??
+  optionalText(record['now'], 'now', COMMAND_LIMITS.iso) ??
+  optionalText(record['timezone'], 'timezone', COMMAND_LIMITS.iso)
+
+interface MultiParamView {
+  /** 该视图接受的键（`ViewArgs` 的字段名） */
+  allowed: readonly string[]
+  /** 形状校验；返回 null = 通过 */
+  check: (record: Obj) => Check
+}
+
+/**
+ * 多字段参数视图表：`VIEW_PARAM_FIELDS` 只能表达「一个必填 id」，这几条视图的参数
+ * 是「窗口」与「事件样本」，登记在这里。漏登记的表现是前端一进页面就报
+ * 「该视图不接受参数」——面板写对了、口径也算对了，只是走不到。
+ */
+const MULTI_PARAM_VIEWS: Partial<Record<ViewId, MultiParamView>> = {
+  'usage.daily': { allowed: ['days', 'now'], check: checkUsageParams },
+  'usage.byAgent': { allowed: ['days', 'now'], check: checkUsageParams },
+  'rules.preview': {
+    allowed: ['source', 'type', 'subject', 'summary'],
+    check: checkRulePreviewParams,
+  },
+  'rules.next': { allowed: ['now', 'timezone'], check: checkRuleNextParams },
+}
 
 /**
  * 校验 renderer 传来的视图 id 与参数：未知视图、参数缺失/类型不对/超长一律拒收。
@@ -1289,6 +1360,26 @@ export type ValidateQueryResult =
 export function validateQuery(view: unknown, params?: unknown): ValidateQueryResult {
   if (typeof view !== 'string' || !(VIEW_IDS as readonly string[]).includes(view)) {
     return { ok: false, message: `未知视图: ${String(view)}` }
+  }
+  const multi = MULTI_PARAM_VIEWS[view as ViewId]
+  if (multi !== undefined) {
+    // 不带参数：仍跑一遍必填校验（`rules.preview` 的样本字段是真必填）
+    if (params === undefined || params === null) {
+      const missing = multi.check({})
+      return missing === null
+        ? { ok: true, view: view as ViewId, params: undefined }
+        : { ok: false, message: missing }
+    }
+    const record = asRecord(params)
+    if (!record) return { ok: false, message: `视图 ${view} 需要参数对象` }
+    const error = multi.check(record)
+    if (error !== null) return { ok: false, message: error }
+    const picked = pickParams(record, multi.allowed)
+    return {
+      ok: true,
+      view: view as ViewId,
+      params: Object.keys(picked).length === 0 ? undefined : picked,
+    }
   }
   const field = VIEW_PARAM_FIELDS[view as ViewId]
   if (field === undefined) {

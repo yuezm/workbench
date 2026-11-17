@@ -6,8 +6,8 @@
  */
 import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import type { Agent, Card, Message, Task } from '../../../src/protocol/entities'
-import { TASK_COMMENT_LIMITS, type TaskComment } from '../../../src/protocol/task-comment'
+import type { Agent, Card, Message, Task } from '@workbench/protocol/entities'
+import { TASK_COMMENT_LIMITS, type TaskComment } from '@workbench/protocol/task-comment'
 import {
   acceptanceText,
   answerPrompt,
@@ -26,12 +26,12 @@ import {
   taskReceiptKeys,
   titleFromContent,
   type HandoffSource,
-} from '../../../src/kernel/scopes/prompt'
+} from '@workbench/kernel/scopes/prompt'
 import {
   BASE_RECEIPT_KEYS,
   CHAT_RECEIPT_KEYS,
   RECEIPT_KEYS,
-} from '../../../src/protocol/receipt-keys'
+} from '@workbench/protocol/receipt-keys'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
 /** 全量回执块说明（十二键；文档口径，也是 `receiptBlockHint()` 的缺省）。 */

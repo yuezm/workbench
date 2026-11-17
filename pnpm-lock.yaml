@@ -130,6 +130,359 @@ importers:
         specifier: ^5.0.5
         version: 5.0.5(@types/node@26.6.5)(@vitest/coverage-v8@5.0.5)(jsdom@30.1.3)(vite@8.3.5(@types/node@26.6.5)(jiti@2.7.0)(yaml@2.9.1))
 
+  apps/server:
+    dependencies:
+      '@workbench/api-http':
+        specifier: workspace:*
+        version: link:../../packages/api/http
+      '@workbench/bundle-base':
+        specifier: workspace:*
+        version: link:../../packages/bundle/base
+      '@workbench/bundle-web':
+        specifier: workspace:*
+        version: link:../../packages/bundle/web
+
+  apps/web:
+    dependencies:
+      '@workbench/client-app-ai-workflow':
+        specifier: workspace:*
+        version: link:../../packages/client/app-ai-workflow
+      '@workbench/client-app-pomodoro':
+        specifier: workspace:*
+        version: link:../../packages/client/app-pomodoro
+      '@workbench/client-shell':
+        specifier: workspace:*
+        version: link:../../packages/client/shell
+
+  packages/api/http:
+    dependencies:
+      '@workbench/host':
+        specifier: workspace:*
+        version: link:../../host/host
+      '@workbench/host-frontend-static':
+        specifier: workspace:*
+        version: link:../../host/frontend-static
+      '@workbench/host-store':
+        specifier: workspace:*
+        version: link:../../host/store
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/bundle/base:
+    dependencies:
+      '@workbench/api-http':
+        specifier: workspace:*
+        version: link:../../api/http
+      '@workbench/host':
+        specifier: workspace:*
+        version: link:../../host/host
+      '@workbench/host-store':
+        specifier: workspace:*
+        version: link:../../host/store
+      '@workbench/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@workbench/plugins-registry':
+        specifier: workspace:*
+        version: link:../../plugins/registry
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/bundle/web:
+    dependencies:
+      '@workbench/bundle-base':
+        specifier: workspace:*
+        version: link:../base
+      '@workbench/host-frontend-static':
+        specifier: workspace:*
+        version: link:../../host/frontend-static
+
+  packages/client/app-ai-workflow:
+    dependencies:
+      '@workbench/app-events':
+        specifier: workspace:*
+        version: link:../../contract/app-events
+      '@workbench/client-shell':
+        specifier: workspace:*
+        version: link:../shell
+      '@workbench/client-ui-kit':
+        specifier: workspace:*
+        version: link:../ui-kit
+      '@workbench/client-ui-primitives':
+        specifier: workspace:*
+        version: link:../ui-primitives
+      '@workbench/contract-api':
+        specifier: workspace:*
+        version: link:../../contract/api
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/client/app-pomodoro:
+    dependencies:
+      '@workbench/app-events':
+        specifier: workspace:*
+        version: link:../../contract/app-events
+      '@workbench/client-shell':
+        specifier: workspace:*
+        version: link:../shell
+      '@workbench/client-ui-kit':
+        specifier: workspace:*
+        version: link:../ui-kit
+      '@workbench/client-ui-primitives':
+        specifier: workspace:*
+        version: link:../ui-primitives
+
+  packages/client/bridge:
+    dependencies:
+      '@workbench/app-events':
+        specifier: workspace:*
+        version: link:../../contract/app-events
+      '@workbench/contract-api':
+        specifier: workspace:*
+        version: link:../../contract/api
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/client/kernel-store:
+    dependencies:
+      '@workbench/contract-api':
+        specifier: workspace:*
+        version: link:../../contract/api
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/client/shell:
+    dependencies:
+      '@workbench/app-events':
+        specifier: workspace:*
+        version: link:../../contract/app-events
+      '@workbench/client-bridge':
+        specifier: workspace:*
+        version: link:../bridge
+      '@workbench/client-kernel-store':
+        specifier: workspace:*
+        version: link:../kernel-store
+      '@workbench/client-ui-kit':
+        specifier: workspace:*
+        version: link:../ui-kit
+      '@workbench/client-ui-primitives':
+        specifier: workspace:*
+        version: link:../ui-primitives
+      '@workbench/contract-api':
+        specifier: workspace:*
+        version: link:../../contract/api
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/client/ui-kit:
+    dependencies:
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/client/ui-primitives:
+    dependencies:
+      '@workbench/client-ui-kit':
+        specifier: workspace:*
+        version: link:../ui-kit
+
+  packages/contract/api:
+    dependencies:
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/contract/app-events: {}
+
+  packages/core/kernel:
+    dependencies:
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
+  packages/core/protocol: {}
+
+  packages/host/frontend-static: {}
+
+  packages/host/host:
+    dependencies:
+      '@workbench/app-events':
+        specifier: workspace:*
+        version: link:../../contract/app-events
+      '@workbench/capabilities':
+        specifier: workspace:*
+        version: link:../../sdk/capabilities
+      '@workbench/host-store':
+        specifier: workspace:*
+        version: link:../store
+      '@workbench/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@workbench/plugins-registry':
+        specifier: workspace:*
+        version: link:../../plugins/registry
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/host/store:
+    dependencies:
+      '@workbench/kernel':
+        specifier: workspace:*
+        version: link:../../core/kernel
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/channel-desktop:
+    dependencies:
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/channel-feishu:
+    dependencies:
+      '@workbench/plugins-kit':
+        specifier: workspace:*
+        version: link:../kit
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/channel-in-app:
+    dependencies:
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/channel-webhook:
+    dependencies:
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/executor-claude:
+    dependencies:
+      '@workbench/capabilities':
+        specifier: workspace:*
+        version: link:../../sdk/capabilities
+      '@workbench/plugins-kit':
+        specifier: workspace:*
+        version: link:../kit
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/executor-command:
+    dependencies:
+      '@workbench/capabilities':
+        specifier: workspace:*
+        version: link:../../sdk/capabilities
+      '@workbench/plugins-kit':
+        specifier: workspace:*
+        version: link:../kit
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/executor-dsh:
+    dependencies:
+      '@workbench/capabilities':
+        specifier: workspace:*
+        version: link:../../sdk/capabilities
+      '@workbench/plugins-kit':
+        specifier: workspace:*
+        version: link:../kit
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/executor-hermes:
+    dependencies:
+      '@workbench/capabilities':
+        specifier: workspace:*
+        version: link:../../sdk/capabilities
+      '@workbench/plugins-kit':
+        specifier: workspace:*
+        version: link:../kit
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/executor-remote:
+    dependencies:
+      '@workbench/capabilities':
+        specifier: workspace:*
+        version: link:../../sdk/capabilities
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/plugins/kit: {}
+
+  packages/plugins/registry:
+    dependencies:
+      '@workbench/capabilities':
+        specifier: workspace:*
+        version: link:../../sdk/capabilities
+      '@workbench/channel-desktop':
+        specifier: workspace:*
+        version: link:../channel-desktop
+      '@workbench/channel-feishu':
+        specifier: workspace:*
+        version: link:../channel-feishu
+      '@workbench/channel-in-app':
+        specifier: workspace:*
+        version: link:../channel-in-app
+      '@workbench/channel-webhook':
+        specifier: workspace:*
+        version: link:../channel-webhook
+      '@workbench/executor-claude':
+        specifier: workspace:*
+        version: link:../executor-claude
+      '@workbench/executor-command':
+        specifier: workspace:*
+        version: link:../executor-command
+      '@workbench/executor-dsh':
+        specifier: workspace:*
+        version: link:../executor-dsh
+      '@workbench/executor-hermes':
+        specifier: workspace:*
+        version: link:../executor-hermes
+      '@workbench/executor-remote':
+        specifier: workspace:*
+        version: link:../executor-remote
+      '@workbench/plugins-kit':
+        specifier: workspace:*
+        version: link:../kit
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+      '@workbench/source-webhook':
+        specifier: workspace:*
+        version: link:../source-webhook
+
+  packages/plugins/source-webhook:
+    dependencies:
+      '@workbench/capabilities':
+        specifier: workspace:*
+        version: link:../../sdk/capabilities
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
+  packages/sdk/capabilities:
+    dependencies:
+      '@workbench/protocol':
+        specifier: workspace:*
+        version: link:../../core/protocol
+
 packages:
 
   '@adobe/css-tools@4.5.0':

@@ -1,14 +1,14 @@
-import type { Command } from '../../../src/protocol/commands'
-import type { CommandDispatchResult, KernelEvent } from '../../../src/protocol/ipc'
-import type { FactType } from '../../../src/protocol/facts'
-import type { ViewId, ViewParams, ViewResult } from '../../../src/protocol/views'
+import type { Command } from '@workbench/protocol/commands'
+import type { CommandDispatchResult, KernelEvent } from '@workbench/protocol/ipc'
+import type { FactType } from '@workbench/protocol/facts'
+import type { ViewId, ViewParams, ViewResult } from '@workbench/protocol/views'
 import {
   configureKernel,
   resetKernelForTest,
   viewKey,
   type KernelStore,
   type KernelTransport,
-} from '../../../src/renderer/src/shell/kernelStore'
+} from '@workbench/client-kernel-store'
 
 /**
  * renderer 组件测试的内核替身（M5）：

@@ -4,10 +4,10 @@
  * 夹具只装 runs 切片；内核不读时钟，`now` 由测试注入。
  */
 import { describe, expect, it } from 'vitest'
-import type { Card, RunRow } from '../../../src/protocol/entities'
-import type { AutomationRule } from '../../../src/protocol/rules'
-import { nextWakeAt } from '../../../src/kernel/core/next-wake'
-import type { Environment, IdKind, Limits, View } from '../../../src/kernel/core/types'
+import type { Card, RunRow } from '@workbench/protocol/entities'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import type { Environment, IdKind, Limits, View } from '@workbench/kernel/core/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
 const FUTURE = '2026-11-04T13:00:00.000Z'

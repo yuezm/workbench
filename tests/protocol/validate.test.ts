@@ -1,28 +1,28 @@
 // @vitest-environment node
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import { COMMAND_NAMES, type Command } from '../../src/protocol/commands'
+import { COMMAND_NAMES, type Command } from '@workbench/protocol/commands'
 import type {
   AgentInput,
   RuntimeInput,
   RuntimeProbe,
   TaskInput,
   WorkflowInput,
-} from '../../src/protocol/entities'
+} from '@workbench/protocol/entities'
 import {
   ACCEPTANCE_LIMITS,
   AGENT_ENV_LIMITS,
   DELIVERABLE_LIMITS,
   STAGE_TIMEOUT_LIMITS,
-} from '../../src/protocol/entities'
+} from '@workbench/protocol/entities'
 import {
   COMMAND_LIMITS,
   validateCommand,
   validateInput,
   validateQuery,
   type ValidateResult,
-} from '../../src/protocol/validate'
-import { REVIEW_LIMITS } from '../../src/protocol/review'
+} from '@workbench/protocol/validate'
+import { REVIEW_LIMITS } from '@workbench/protocol/review'
 
 const workflowInput: WorkflowInput = {
   name: '流程',

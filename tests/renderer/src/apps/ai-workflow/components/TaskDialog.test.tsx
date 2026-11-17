@@ -1,12 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  Project,
-  WorkflowStage,
-  WorkflowWithStages,
-} from '../../../../../../src/protocol/entities'
-import { TaskDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/TaskDialog'
+import type { Project, WorkflowStage, WorkflowWithStages } from '@workbench/protocol/entities'
+import { TaskDialog } from '@workbench/client-app-ai-workflow/components/TaskDialog'
 
 function stage(id: string, name: string, position: number): WorkflowStage {
   return {

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { WorkspaceNav } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkspaceNav'
+import { WorkspaceNav } from '@workbench/client-app-ai-workflow/components/WorkspaceNav'
 
 describe('WorkspaceNav', () => {
   it('横向列出两个栏目，标记当前项，点击回调', async () => {

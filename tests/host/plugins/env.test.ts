@@ -4,7 +4,7 @@ import {
   PLUGIN_ENV_ALLOWLIST,
   PLUGIN_ENV_PREFIXES,
   buildPluginEnv,
-} from '../../../src/host/plugins/env'
+} from '@workbench/host/plugins/env'
 
 /**
  * 外部插件子进程环境白名单（M7 D2）：只继承运行 Node 所需的最小集合，

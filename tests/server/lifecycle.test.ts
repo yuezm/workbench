@@ -9,16 +9,16 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { LarkAdmin } from '../../src/host/lark-admin'
-import type { Workbench } from '../../src/server/assembly'
-import { ConfigError, type ServerConfig } from '../../src/server/config'
+import type { LarkAdmin } from '@workbench/host/lark-admin'
+import type { Workbench } from '@workbench/bundle-base'
+import { ConfigError, type ServerConfig } from '@workbench/server/config'
 import {
   displayHost,
   reportStartupError,
   runServerEntry,
   startWorkbenchServer,
   type StartedServer,
-} from '../../src/server/lifecycle'
+} from '@workbench/server/lifecycle'
 
 const created: string[] = []
 
@@ -53,6 +53,7 @@ const configOf = (overrides: Partial<ServerConfig> = {}): ServerConfig => ({
   port: 0,
   dataDir: tmpdir(),
   webDir: path.join(tmpdir(), 'wb-no-web'),
+  ui: 'auto',
   token: null,
   tokenSource: null,
   ...overrides,
@@ -139,13 +140,15 @@ describe('runServerEntry', () => {
       start: async () => server,
       onSignal: (signal, handler) => handlers.set(signal, handler),
       exit,
-      webDirExists: () => true,
+      resolveUi: () => ({ dir: 'out/web', reason: 'out/web' }),
     })
 
-    expect(log.mock.calls.map((call) => String(call[0]))).toContain(
-      'workbench listening on http://127.0.0.1:7788',
-    )
-    // 口令只报来源，不回显
+    const lines = log.mock.calls.map((call) => String(call[0]))
+    expect(
+      lines.some((line) => line.startsWith('workbench listening on http://127.0.0.1:7788')),
+    ).toBe(true)
+    // 有界面时启动行后缀写明产物目录（运维扫一眼就知道这次挂没挂 UI）
+    expect(lines.some((line) => line.includes('(ui: out/web)'))).toBe(true)
     expect(JSON.stringify(log.mock.calls)).not.toContain('k'.repeat(32))
     expect(handlers.has('SIGINT')).toBe(true)
     expect(handlers.has('SIGTERM')).toBe(true)
@@ -167,9 +170,13 @@ describe('runServerEntry', () => {
       start: async () => started(),
       onSignal: () => undefined,
       exit: () => undefined,
-      webDirExists: () => false,
+      resolveUi: () => ({ dir: null, reason: '没有 Web 产物' }),
     })
-    expect(String(log.mock.calls[0]?.[0])).toContain('Web 产物目录不存在')
+    const lines = log.mock.calls.map((call) => String(call[0]))
+    // 纯 API 模式的启动行要写清原因，且服务照常监听
+    expect(lines.some((line) => line.includes('界面：纯 API 模式（没有 Web 产物）'))).toBe(true)
+    expect(lines.some((line) => line.includes('(api only; 没有 Web 产物)'))).toBe(true)
+    expect(lines.some((line) => line.startsWith('workbench listening on http://'))).toBe(true)
   })
 
   it('退出清理失败：记一条日志，仍然退出（不把进程吊住）', async () => {
@@ -188,7 +195,7 @@ describe('runServerEntry', () => {
       }),
       onSignal: () => undefined,
       exit,
-      webDirExists: () => true,
+      resolveUi: () => ({ dir: 'out/web', reason: 'out/web' }),
     })
     await entry.stop('SIGINT')
     expect(JSON.stringify(log.mock.calls)).toContain('退出清理失败')

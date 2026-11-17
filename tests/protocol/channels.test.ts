@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Card } from '../../src/protocol/entities'
+import type { Card } from '@workbench/protocol/entities'
 import {
   CHANNEL_PORT_VERSION,
   type ChannelContext,
   type ChannelPlugin,
   type ChannelSdk,
-} from '../../src/protocol/channels'
+} from '@workbench/protocol/channels'
 
 /**
  * 通道契约（M4）：`ChannelPlugin.start(ctx)` 拿到能力面与四个回调；

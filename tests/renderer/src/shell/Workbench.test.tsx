@@ -1,13 +1,13 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AppPlugin } from '../../../../src/renderer/src/shell/types'
-import { Workbench } from '../../../../src/renderer/src/shell/Workbench'
+import type { AppPlugin } from '@workbench/client-shell/types'
+import { Workbench } from '@workbench/client-shell/Workbench'
 import {
   clearOpenTarget,
   pushOpenTarget,
   resetOpenTargetForTest,
-} from '../../../../src/renderer/src/shell/openTarget'
+} from '@workbench/client-shell/openTarget'
 
 function FakeIcon(): null {
   return null

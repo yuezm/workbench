@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { parseAgentEnv } from '../../../src/host/store/agent-env'
+import { parseAgentEnv } from '@workbench/host-store/agent-env'
 
 describe('parseAgentEnv：agents.env_json → 环境变量对象', () => {
   it('合法 JSON 原样解析', () => {

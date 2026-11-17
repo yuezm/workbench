@@ -1,19 +1,14 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Command } from '../../../../../../src/protocol/commands'
-import type {
-  Run,
-  Task,
-  WorkflowStage,
-  WorkflowWithStages,
-} from '../../../../../../src/protocol/entities'
-import type { CommandDispatchResult } from '../../../../../../src/protocol/ipc'
-import type { TaskComment } from '../../../../../../src/protocol/task-comment'
+import type { Command } from '@workbench/protocol/commands'
+import type { Run, Task, WorkflowStage, WorkflowWithStages } from '@workbench/protocol/entities'
+import type { CommandDispatchResult } from '@workbench/protocol/ipc'
+import type { TaskComment } from '@workbench/protocol/task-comment'
 import {
   rerunStageLabel,
   TaskDetailPage,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/TaskDetailPage'
+} from '@workbench/client-app-ai-workflow/components/TaskDetailPage'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function stage(

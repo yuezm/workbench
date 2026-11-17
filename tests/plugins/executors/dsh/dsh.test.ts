@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunEvent, Runtime } from '../../../../src/protocol/entities'
-import type { ExecutorIO, Receipt, Turn } from '../../../../src/protocol/executor'
-import type { ExecutorContext, SpawnFn, SpawnOptions, Spawned } from '../../../../src/sdk/types'
+import type { RunEvent, Runtime } from '@workbench/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '@workbench/protocol/executor'
+import type { ExecutorContext, SpawnFn, SpawnOptions, Spawned } from '@workbench/capabilities/types'
 import {
   CANCEL_GRACE_MS,
   DSH_PROTOCOL_VERSION,
@@ -11,15 +11,11 @@ import {
   OUTPUT_TAIL_LIMIT,
   PROBE_TIMEOUT_MS,
   RUN_TIMEOUT_MS,
-} from '../../../../src/plugins/executors/dsh/constants'
-import { listDshModels, providerOf } from '../../../../src/plugins/executors/dsh/models'
-import { probeDshRuntime } from '../../../../src/plugins/executors/dsh/probe'
-import {
-  clearExecutorTimers,
-  executeDshRun,
-  type DshOptions,
-} from '../../../../src/plugins/executors/dsh/run'
-import { parseModelId } from '../../../../src/protocol/model-id'
+} from '@workbench/executor-dsh/constants'
+import { listDshModels, providerOf } from '@workbench/executor-dsh/models'
+import { probeDshRuntime } from '@workbench/executor-dsh/probe'
+import { clearExecutorTimers, executeDshRun, type DshOptions } from '@workbench/executor-dsh/run'
+import { parseModelId } from '@workbench/protocol/model-id'
 import { fakeSdk, type FakeSdkOverrides } from '../../support/fake-sdk'
 
 /** 用 node 自身作为「存在的可执行文件」，避免依赖本机 dsh */

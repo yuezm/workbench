@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { Controls } from '../../../../../../src/renderer/src/apps/pomodoro/components/Controls'
+import { Controls } from '@workbench/client-app-pomodoro/components/Controls'
 
 function setup(running: boolean) {
   const handlers = {

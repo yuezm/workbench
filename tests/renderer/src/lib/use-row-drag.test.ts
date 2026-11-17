@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { useRowDrag } from '../../../../src/renderer/src/lib/use-row-drag'
+import { useRowDrag } from '@workbench/client-ui-kit/use-row-drag'
 
 /**
  * 行内拖拽排序的共享状态机（智能体 / 工作流 / 工作流阶段的清单共用）。

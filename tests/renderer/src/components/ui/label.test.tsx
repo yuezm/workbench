@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { Label } from '../../../../../src/renderer/src/components/ui/label'
-import { Input } from '../../../../../src/renderer/src/components/ui/input'
+import { Label } from '@workbench/client-ui-primitives/label'
+import { Input } from '@workbench/client-ui-primitives/input'
 
 describe('Label（shadcn 基座）', () => {
   it('渲染 label 元素并关联表单控件', () => {

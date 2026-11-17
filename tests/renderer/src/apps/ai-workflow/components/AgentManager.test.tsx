@@ -1,19 +1,14 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Command } from '../../../../../../src/protocol/commands'
-import type {
-  Agent,
-  Runtime,
-  RuntimeProbe,
-  RuntimeProbeState,
-} from '../../../../../../src/protocol/entities'
-import type { DispatchResult } from '../../../../../../src/protocol/ipc'
-import { AgentManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/AgentManager'
+import type { Command } from '@workbench/protocol/commands'
+import type { Agent, Runtime, RuntimeProbe, RuntimeProbeState } from '@workbench/protocol/entities'
+import type { DispatchResult } from '@workbench/protocol/ipc'
+import { AgentManager } from '@workbench/client-app-ai-workflow/components/AgentManager'
 import {
   ENTITY_ORDER_STORAGE_KEYS,
   resetEntityOrderForTest,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/model/entity-order'
+} from '@workbench/client-app-ai-workflow/model/entity-order'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function probe(state: RuntimeProbeState, over: Partial<RuntimeProbe> = {}): RuntimeProbe {

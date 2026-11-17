@@ -7,11 +7,11 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../../src/protocol/entities'
-import type { EventReceivedPayload } from '../../../src/protocol/facts'
-import type { AutomationRule } from '../../../src/protocol/rules'
-import type { ThreadRow } from '../../../src/protocol/thread'
-import type { Environment, Limits, View } from '../../../src/kernel/core/types'
+} from '@workbench/protocol/entities'
+import type { EventReceivedPayload } from '@workbench/protocol/facts'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import type { Environment, Limits, View } from '@workbench/kernel/core/types'
 import {
   cronDue,
   eventThreadFacts,
@@ -20,7 +20,7 @@ import {
   ruleMatchesEvent,
   ruleTypeMatches,
   validateRuleBatch,
-} from '../../../src/kernel/scopes/rules'
+} from '@workbench/kernel/scopes/rules'
 
 const NOW = '2026-11-05T09:00:00.000Z'
 const CREATED = '2026-11-04T00:00:00.000Z'

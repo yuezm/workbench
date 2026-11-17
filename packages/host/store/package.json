@@ -1,0 +1,10 @@
+{
+  "name": "@workbench/host-store",
+  "version": "0.0.0",
+  "private": true,
+  "description": "事实日志 + 投影：唯一写库点（db / schema / facts / projection）",
+  "dependencies": {
+    "@workbench/kernel": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

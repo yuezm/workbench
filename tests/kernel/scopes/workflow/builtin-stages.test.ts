@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { WorkflowStage } from '../../../../src/protocol/entities'
+import type { WorkflowStage } from '@workbench/protocol/entities'
 import {
   builtinStageInput,
   orderStagesByBuiltin,
   resolveBuiltinStages,
-} from '../../../../src/kernel/scopes/workflow/builtin-stages'
+} from '@workbench/kernel/scopes/workflow/builtin-stages'
 
 const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   id: 'st-1',

@@ -1,4 +1,5 @@
 {
+  "extends": "./tsconfig.paths.json",
   "compilerOptions": {
     "composite": true,
     "target": "ES2022",
@@ -25,16 +26,20 @@
     "tests/protocol/**/*",
     "tests/host/**/*",
     "tests/server/**/*",
-    "tests/shared/**/*",
     "tests/sdk/**/*",
     "tests/plugins/**/*",
     "tests/support/**/*",
+    "tests/tools/**/*",
     "src/server/**/*",
-    "src/host/**/*",
-    "src/kernel/**/*",
-    "src/protocol/**/*",
-    "src/sdk/**/*",
-    "src/plugins/**/*",
-    "src/shared/**/*"
+    "packages/host/*/src/**/*",
+    "packages/core/protocol/src/**/*",
+    "packages/core/kernel/src/**/*",
+    "packages/sdk/capabilities/src/**/*",
+    "packages/contract/**/src/**/*",
+    "packages/plugins/*/src/**/*",
+    "packages/api/http/src/**/*",
+    "packages/host/frontend-static/src/**/*",
+    "packages/bundle/*/src/**/*",
+    "apps/server/src/**/*"
   ]
 }

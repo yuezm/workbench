@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { decide } from '../../src/kernel/decide'
-import { mergePluginSetting, validatePluginSettings } from '../../src/kernel/scopes/plugins'
-import { project } from '../../src/kernel/scopes/project'
-import type { Environment, Limits, View } from '../../src/kernel/core/types'
-import type { PluginSetting } from '../../src/protocol/plugins'
+import { decide } from '@workbench/kernel/decide'
+import { mergePluginSetting, validatePluginSettings } from '@workbench/kernel/scopes/plugins'
+import { project } from '@workbench/kernel/scopes/project'
+import type { Environment, Limits, View } from '@workbench/kernel/core/types'
+import type { PluginSetting } from '@workbench/protocol/plugins'
 
 const NOW = '2026-11-05T10:00:00.000Z'
 

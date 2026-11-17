@@ -1,0 +1,9 @@
+{
+  "name": "@workbench/capabilities",
+  "version": "0.0.0",
+  "private": true,
+  "description": "插件能力面：manifest 门控后的 log / now / paths / config / process / notify",
+  "dependencies": {
+    "@workbench/protocol": "workspace:*"
+  }
+}

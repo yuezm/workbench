@@ -6,15 +6,15 @@ import type {
   Runtime,
   RuntimeStatus,
   WorkflowWithStages,
-} from '../../../src/protocol/entities'
-import type { AutomationRule } from '../../../src/protocol/rules'
-import type { ThreadRow } from '../../../src/protocol/thread'
-import type { ViewId } from '../../../src/protocol/views'
-import type { Change } from '../../../src/kernel/core/types'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
-import { StoreError } from '../../../src/host/store/errors'
-import { createProjectionWriter } from '../../../src/host/store/projection-apply'
-import { loadView, queryView, readDeliveryRefs } from '../../../src/host/store/views'
+} from '@workbench/protocol/entities'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import type { ViewId } from '@workbench/protocol/views'
+import type { Change } from '@workbench/kernel/core/types'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import { StoreError } from '@workbench/host-store/errors'
+import { createProjectionWriter } from '@workbench/host-store/projection-apply'
+import { loadView, queryView, readDeliveryRefs } from '@workbench/host-store/views'
 import { SAMPLE_AT, captureError, createMemoryDb, sample, sampleProbe } from './test-support'
 
 const OLDER_AT = '2025-12-01T00:00:00.000Z'

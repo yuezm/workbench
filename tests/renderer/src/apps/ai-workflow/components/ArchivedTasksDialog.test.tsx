@@ -1,12 +1,8 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  Task,
-  WorkflowStage,
-  WorkflowWithStages,
-} from '../../../../../../src/protocol/entities'
-import { ArchivedTasksDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ArchivedTasksDialog'
+import type { Task, WorkflowStage, WorkflowWithStages } from '@workbench/protocol/entities'
+import { ArchivedTasksDialog } from '@workbench/client-app-ai-workflow/components/ArchivedTasksDialog'
 
 function stage(id: string, name: string, position: number): WorkflowStage {
   return {

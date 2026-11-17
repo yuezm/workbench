@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { StageExitInput, StageInput } from '../../../../src/protocol/entities'
-import { STAGE_EXIT_ACTIONS } from '../../../../src/protocol/entities'
-import { validateStageSet } from '../../../../src/kernel/scopes/workflow/stage-validation'
+import type { StageExitInput, StageInput } from '@workbench/protocol/entities'
+import { STAGE_EXIT_ACTIONS } from '@workbench/protocol/entities'
+import { validateStageSet } from '@workbench/kernel/scopes/workflow/stage-validation'
 
 const stage = (over: Partial<StageInput> = {}): StageInput => ({
   name: '待办',

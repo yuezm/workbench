@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import type { LarkAdminAction } from '../../src/protocol/ipc'
-import type { LarkAdmin } from '../../src/host/lark-admin'
-import type { SpawnFn, Spawned, SpawnOptions } from '../../src/sdk/types'
+import type { LarkAdminAction } from '@workbench/protocol/ipc'
+import type { LarkAdmin } from '@workbench/host/lark-admin'
+import type { SpawnFn, Spawned, SpawnOptions } from '@workbench/capabilities/types'
 
-vi.mock('../../src/host/executable', () => ({
+vi.mock('@workbench/host/executable', () => ({
   resolveExecutable: vi.fn((command: string) => ({
     path: `/usr/local/bin/${command}`,
     error: null,
@@ -14,7 +14,7 @@ vi.mock('../../src/host/executable', () => ({
   findInDirs: () => null,
 }))
 
-import { resolveExecutable } from '../../src/host/executable'
+import { resolveExecutable } from '@workbench/host/executable'
 
 const {
   asLarkAction,
@@ -28,7 +28,7 @@ const {
   profileArgs,
   reasonLines,
   runLarkAction,
-} = await import('../../src/host/lark-admin')
+} = await import('@workbench/host/lark-admin')
 
 // ---------------------------------------------------------------- 假 CLI
 

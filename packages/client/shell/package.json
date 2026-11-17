@@ -1,0 +1,15 @@
+{
+  "name": "@workbench/client-shell",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Web 外壳：顶部 app 切换、插件槽、主题与启动失败页",
+  "dependencies": {
+    "@workbench/app-events": "workspace:*",
+    "@workbench/client-bridge": "workspace:*",
+    "@workbench/client-kernel-store": "workspace:*",
+    "@workbench/client-ui-kit": "workspace:*",
+    "@workbench/client-ui-primitives": "workspace:*",
+    "@workbench/contract-api": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

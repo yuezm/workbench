@@ -14,19 +14,19 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { decide } from '../../src/kernel/decide'
-import { project } from '../../src/kernel/scopes/project'
-import type { KernelPort } from '../../src/kernel/core/types'
-import { viewSpec } from '../../src/kernel/scopes/view-spec'
-import type { PluginManifest } from '../../src/protocol/manifest'
-import type { PluginView } from '../../src/protocol/plugins'
-import { openDatabase } from '../../src/host/db'
-import { createStore, type Store } from '../../src/host/store/index'
+import { decide } from '@workbench/kernel/decide'
+import { project } from '@workbench/kernel/scopes/project'
+import type { KernelPort } from '@workbench/kernel/core/types'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import type { PluginManifest } from '@workbench/protocol/manifest'
+import type { PluginView } from '@workbench/protocol/plugins'
+import { openDatabase } from '@workbench/host-store/db'
+import { createStore, type Store } from '@workbench/host-store/index'
 import {
   createCommandRouter,
   type CommandRouter,
   type PluginCommandDeps,
-} from '../../src/host/commands'
+} from '@workbench/host/commands'
 import { dumpProjection } from './store/test-support'
 
 const TZ = 'UTC'

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { ErrorBoundary } from '../../../../../src/renderer/src/components/ui/error-boundary'
+import { ErrorBoundary } from '@workbench/client-ui-kit/error-boundary'
 
 /** 渲染期必炸的组件（ErrorBoundary 只能捕获渲染期错误） */
 function Boom(): never {

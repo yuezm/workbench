@@ -45,9 +45,14 @@ describe('scripts/check-kernel-budget.mjs', () => {
           recursive: true,
         },
       )
-      cpSync(join(ROOT, 'src/kernel'), join(dir, 'src/kernel'), { recursive: true })
+      cpSync(join(ROOT, 'packages/core/kernel/src'), join(dir, 'packages/core/kernel/src'), {
+        recursive: true,
+      })
       // 2000 行预算：写 2100 行塞进 core
-      writeFileSync(join(dir, 'src/kernel/core/blob.ts'), 'export const x = 1\n'.repeat(2_100))
+      writeFileSync(
+        join(dir, 'packages/core/kernel/src/core/blob.ts'),
+        'export const x = 1\n'.repeat(2_100),
+      )
       const result = await run(dir)
       expect(result.code).toBe(1)
       expect(result.stderr).toContain('core/ 合计')

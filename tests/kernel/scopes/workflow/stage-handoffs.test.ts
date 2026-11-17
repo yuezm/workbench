@@ -6,14 +6,14 @@
  * `tests/kernel/handoff.test.ts` 与 `tests/kernel/decide.handoff.test.ts`。
  */
 import { describe, expect, it } from 'vitest'
-import type { StageHandoff, Workflow, WorkflowStage } from '../../../../src/protocol/entities'
-import type { View } from '../../../../src/kernel/core/types'
+import type { StageHandoff, Workflow, WorkflowStage } from '@workbench/protocol/entities'
+import type { View } from '@workbench/kernel/core/types'
 import {
   handoffGuardOf,
   handoffTargetsOf,
   legacyHandoffs,
   sameHandoffs,
-} from '../../../../src/kernel/scopes/workflow/stage-handoffs'
+} from '@workbench/kernel/scopes/workflow/stage-handoffs'
 
 const CREATED = '2026-11-01T00:00:00.000Z'
 

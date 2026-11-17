@@ -21,7 +21,7 @@ vi.mock('node:fs/promises', () => ({
   stat: statMock,
 }))
 
-const { discoverExternalPlugins } = await import('../../../src/host/plugins/discover')
+const { discoverExternalPlugins } = await import('@workbench/host/plugins/discover')
 
 /** 目录项形状（discover 只用 name 与 isDirectory）。 */
 const dirEntry = (name: string): { name: string; isDirectory: () => boolean } => ({

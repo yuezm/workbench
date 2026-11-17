@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { ThemeSwitcher } from '../../../../../src/renderer/src/components/ui/theme-switcher'
-import { resetThemeForTest, useTheme } from '../../../../../src/renderer/src/lib/theme'
+import { ThemeSwitcher } from '@workbench/client-ui-kit/theme-switcher'
+import { resetThemeForTest, useTheme } from '@workbench/client-ui-kit/theme'
 
 /** 探针：把当前偏好显示出来，便于断言主题确实生效 */
 function PreferenceProbe(): React.ReactElement {

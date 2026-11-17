@@ -1,0 +1,175 @@
+// 由 scripts/gen-workspace-paths.mjs 生成，不要手改；改包清单后跑 `pnpm gen:paths`。
+{
+  "compilerOptions": {
+    "paths": {
+      "@renderer/*": [
+        "./src/renderer/src/*"
+      ],
+      "@workbench/api-http/*": [
+        "./packages/api/http/src/*"
+      ],
+      "@workbench/app-events": [
+        "./packages/contract/app-events/src/index.ts"
+      ],
+      "@workbench/app-events/*": [
+        "./packages/contract/app-events/src/*"
+      ],
+      "@workbench/bundle-base": [
+        "./packages/bundle/base/src/index.ts"
+      ],
+      "@workbench/bundle-base/*": [
+        "./packages/bundle/base/src/*"
+      ],
+      "@workbench/bundle-web": [
+        "./packages/bundle/web/src/index.ts"
+      ],
+      "@workbench/bundle-web/*": [
+        "./packages/bundle/web/src/*"
+      ],
+      "@workbench/capabilities": [
+        "./packages/sdk/capabilities/src/index.ts"
+      ],
+      "@workbench/capabilities/*": [
+        "./packages/sdk/capabilities/src/*"
+      ],
+      "@workbench/channel-desktop": [
+        "./packages/plugins/channel-desktop/src/index.ts"
+      ],
+      "@workbench/channel-desktop/*": [
+        "./packages/plugins/channel-desktop/src/*"
+      ],
+      "@workbench/channel-feishu": [
+        "./packages/plugins/channel-feishu/src/index.ts"
+      ],
+      "@workbench/channel-feishu/*": [
+        "./packages/plugins/channel-feishu/src/*"
+      ],
+      "@workbench/channel-in-app": [
+        "./packages/plugins/channel-in-app/src/index.ts"
+      ],
+      "@workbench/channel-in-app/*": [
+        "./packages/plugins/channel-in-app/src/*"
+      ],
+      "@workbench/channel-webhook": [
+        "./packages/plugins/channel-webhook/src/index.ts"
+      ],
+      "@workbench/channel-webhook/*": [
+        "./packages/plugins/channel-webhook/src/*"
+      ],
+      "@workbench/client-app-ai-workflow": [
+        "./packages/client/app-ai-workflow/src/index.tsx"
+      ],
+      "@workbench/client-app-ai-workflow/*": [
+        "./packages/client/app-ai-workflow/src/*"
+      ],
+      "@workbench/client-app-pomodoro": [
+        "./packages/client/app-pomodoro/src/index.tsx"
+      ],
+      "@workbench/client-app-pomodoro/*": [
+        "./packages/client/app-pomodoro/src/*"
+      ],
+      "@workbench/client-bridge": [
+        "./packages/client/bridge/src/index.ts"
+      ],
+      "@workbench/client-bridge/*": [
+        "./packages/client/bridge/src/*"
+      ],
+      "@workbench/client-kernel-store": [
+        "./packages/client/kernel-store/src/index.ts"
+      ],
+      "@workbench/client-kernel-store/*": [
+        "./packages/client/kernel-store/src/*"
+      ],
+      "@workbench/client-shell/*": [
+        "./packages/client/shell/src/*"
+      ],
+      "@workbench/client-ui-kit/*": [
+        "./packages/client/ui-kit/src/*"
+      ],
+      "@workbench/client-ui-primitives/*": [
+        "./packages/client/ui-primitives/src/*"
+      ],
+      "@workbench/contract-api": [
+        "./packages/contract/api/src/index.ts"
+      ],
+      "@workbench/contract-api/*": [
+        "./packages/contract/api/src/*"
+      ],
+      "@workbench/executor-claude": [
+        "./packages/plugins/executor-claude/src/index.ts"
+      ],
+      "@workbench/executor-claude/*": [
+        "./packages/plugins/executor-claude/src/*"
+      ],
+      "@workbench/executor-command": [
+        "./packages/plugins/executor-command/src/index.ts"
+      ],
+      "@workbench/executor-command/*": [
+        "./packages/plugins/executor-command/src/*"
+      ],
+      "@workbench/executor-dsh": [
+        "./packages/plugins/executor-dsh/src/index.ts"
+      ],
+      "@workbench/executor-dsh/*": [
+        "./packages/plugins/executor-dsh/src/*"
+      ],
+      "@workbench/executor-hermes": [
+        "./packages/plugins/executor-hermes/src/index.ts"
+      ],
+      "@workbench/executor-hermes/*": [
+        "./packages/plugins/executor-hermes/src/*"
+      ],
+      "@workbench/executor-remote": [
+        "./packages/plugins/executor-remote/src/index.ts"
+      ],
+      "@workbench/executor-remote/*": [
+        "./packages/plugins/executor-remote/src/*"
+      ],
+      "@workbench/host/*": [
+        "./packages/host/host/src/*"
+      ],
+      "@workbench/host-frontend-static": [
+        "./packages/host/frontend-static/src/index.ts"
+      ],
+      "@workbench/host-frontend-static/*": [
+        "./packages/host/frontend-static/src/*"
+      ],
+      "@workbench/host-store": [
+        "./packages/host/store/src/index.ts"
+      ],
+      "@workbench/host-store/*": [
+        "./packages/host/store/src/*"
+      ],
+      "@workbench/kernel/*": [
+        "./packages/core/kernel/src/*"
+      ],
+      "@workbench/plugins-kit/*": [
+        "./packages/plugins/kit/src/*"
+      ],
+      "@workbench/plugins-registry": [
+        "./packages/plugins/registry/src/index.ts"
+      ],
+      "@workbench/plugins-registry/*": [
+        "./packages/plugins/registry/src/*"
+      ],
+      "@workbench/protocol/*": [
+        "./packages/core/protocol/src/*"
+      ],
+      "@workbench/server": [
+        "./apps/server/src/index.ts"
+      ],
+      "@workbench/server/*": [
+        "./apps/server/src/*"
+      ],
+      "@workbench/source-webhook": [
+        "./packages/plugins/source-webhook/src/index.ts"
+      ],
+      "@workbench/source-webhook/*": [
+        "./packages/plugins/source-webhook/src/*"
+      ],
+      "@workbench/web/*": [
+        "./apps/web/src/*"
+      ]
+    }
+  }
+}

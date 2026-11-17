@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { discoverExternalPlugins } from '../../../src/host/plugins/discover'
+import { discoverExternalPlugins } from '@workbench/host/plugins/discover'
 
 /**
  * 外部插件发现（M7 D1）：扫描 `<pluginsRoot>/<kind>/<id>/` 的 manifest + 入口。

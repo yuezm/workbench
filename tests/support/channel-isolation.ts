@@ -16,14 +16,14 @@
  * 落 `plugins.replace` 而不是 `plugin.set`：后者由宿主编排（要读磁盘 manifest 与 secret
  * 表），测试侧只有内核事实日志，直接换整批快照才是同一条口径。
  */
-import { openDatabase } from '../../src/host/db'
-import { createStore } from '../../src/host/store/index'
-import { decide } from '../../src/kernel/decide'
-import { nextWakeAt } from '../../src/kernel/core/next-wake'
-import { project } from '../../src/kernel/scopes/project'
-import { viewSpec } from '../../src/kernel/scopes/view-spec'
-import type { KernelPort } from '../../src/kernel/core/types'
-import type { PluginSetting } from '../../src/protocol/plugins'
+import { openDatabase } from '@workbench/host-store/db'
+import { createStore } from '@workbench/host-store/index'
+import { decide } from '@workbench/kernel/decide'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import { project } from '@workbench/kernel/scopes/project'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import type { KernelPort } from '@workbench/kernel/core/types'
+import type { PluginSetting } from '@workbench/protocol/plugins'
 
 const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
 

@@ -1,14 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  Agent,
-  Conversation,
-  Message,
-  RunEvent,
-} from '../../../../../../src/protocol/entities'
-import type { Command } from '../../../../../../src/protocol/commands'
-import type { CommandDispatchResult, KernelEvent } from '../../../../../../src/protocol/ipc'
-import { useChat } from '../../../../../../src/renderer/src/apps/ai-workflow/hooks/useChat'
+import type { Agent, Conversation, Message, RunEvent } from '@workbench/protocol/entities'
+import type { Command } from '@workbench/protocol/commands'
+import type { CommandDispatchResult, KernelEvent } from '@workbench/protocol/ipc'
+import { useChat } from '@workbench/client-app-ai-workflow/hooks/useChat'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const agent: Agent = {

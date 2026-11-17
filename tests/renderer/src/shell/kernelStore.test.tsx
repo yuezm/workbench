@@ -9,14 +9,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { act, render, screen } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import type { Command } from '../../../../src/protocol/commands'
-import type { KernelEvent } from '../../../../src/protocol/ipc'
-import {
-  VIEW_IDS,
-  type ViewId,
-  type ViewParams,
-  type ViewResult,
-} from '../../../../src/protocol/views'
+import type { Command } from '@workbench/protocol/commands'
+import type { KernelEvent } from '@workbench/protocol/ipc'
+import { VIEW_IDS, type ViewId, type ViewParams, type ViewResult } from '@workbench/protocol/views'
 import {
   configureKernel,
   createKernelStore,
@@ -25,8 +20,8 @@ import {
   viewKey,
   type KernelStore,
   type KernelTransport,
-} from '../../../../src/renderer/src/shell/kernelStore'
-import { useKernelView, useKernelViewState } from '../../../../src/renderer/src/shell/useKernelView'
+} from '@workbench/client-kernel-store'
+import { useKernelView, useKernelViewState } from '@workbench/client-shell/useKernelView'
 import { installFakeKernel, stopFakeKernel } from '../../shell/fake-kernel'
 
 interface FakeTransport {

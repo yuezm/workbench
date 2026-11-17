@@ -1,0 +1,14 @@
+{
+  "name": "@workbench/client-app-ai-workflow",
+  "version": "0.0.0",
+  "private": true,
+  "description": "AI 工作流 app 插件（看板 / 任务详情 / 聊天 / 设置），全部经 dispatch + query",
+  "dependencies": {
+    "@workbench/app-events": "workspace:*",
+    "@workbench/client-shell": "workspace:*",
+    "@workbench/client-ui-kit": "workspace:*",
+    "@workbench/client-ui-primitives": "workspace:*",
+    "@workbench/contract-api": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

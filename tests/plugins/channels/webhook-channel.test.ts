@@ -7,14 +7,14 @@
  * 非 2xx / 超时只记日志（不 answer、不抛给 hub）；未配置 url 时通道不投递。
  */
 import { describe, expect, it, vi } from 'vitest'
-import type { ChannelContext } from '../../../src/protocol/channels'
+import type { ChannelContext } from '@workbench/protocol/channels'
 import {
   cardPayload,
   readWebhookChannelConfig,
   webhookChannel,
   webhookChannelManifest,
-} from '../../../src/plugins/channels/webhook-channel'
-import type { NetFetchOptions, NetResponse } from '../../../src/sdk/types'
+} from '@workbench/channel-webhook'
+import type { NetFetchOptions, NetResponse } from '@workbench/capabilities/types'
 import { fakeSdk } from '../support/fake-sdk'
 import { fakeNet, type FakeNet } from '../sources/fake-net'
 import { channelHarness, cardOf } from './harness'

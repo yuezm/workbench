@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { StartupFailure } from '../../../../../src/renderer/src/shell/components/StartupFailure'
+import { StartupFailure } from '@workbench/client-shell/components/StartupFailure'
 
 describe('StartupFailure', () => {
   it('缺省指向「服务连不上」，并给出可操作建议', () => {

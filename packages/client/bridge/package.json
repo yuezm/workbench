@@ -1,0 +1,11 @@
+{
+  "name": "@workbench/client-bridge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "浏览器侧唯一传输实现：HTTP 三动词 + SSE（window.workbench 的实现）",
+  "dependencies": {
+    "@workbench/app-events": "workspace:*",
+    "@workbench/contract-api": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

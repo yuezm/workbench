@@ -9,10 +9,17 @@
  * 3. 停用中的规则拒绝补跑（先恢复再补，避免「补了但还是停用」）。
  */
 import { describe, expect, it } from 'vitest'
-import type { Agent, Runtime, Workflow, WorkflowStage } from '../../src/protocol/entities'
-import type { AutomationRule } from '../../src/protocol/rules'
-import { decide } from '../../src/kernel/decide'
-import type { Environment, EventRow, Id, Limits, RuleSkip, View } from '../../src/kernel/core/types'
+import type { Agent, Runtime, Workflow, WorkflowStage } from '@workbench/protocol/entities'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import { decide } from '@workbench/kernel/decide'
+import type {
+  Environment,
+  EventRow,
+  Id,
+  Limits,
+  RuleSkip,
+  View,
+} from '@workbench/kernel/core/types'
 
 const NOW = '2026-11-14T10:00:00.000Z'
 const CREATED = '2026-11-13T00:00:00.000Z'

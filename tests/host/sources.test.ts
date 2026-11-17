@@ -4,14 +4,14 @@
  * 状态记录与 stopAll 幂等。全部用假来源/假 effects，不涉及真实网络与数据库。
  */
 import { describe, expect, it, vi } from 'vitest'
-import type { RawEvent } from '../../src/protocol/inputs'
-import type { PluginManifest } from '../../src/protocol/manifest'
-import type { SdkHost, SourceContext } from '../../src/sdk/types'
+import type { RawEvent } from '@workbench/protocol/inputs'
+import type { PluginManifest } from '@workbench/protocol/manifest'
+import type { SdkHost, SourceContext } from '@workbench/capabilities/types'
 import {
   createSources,
   type SourceRegistryEntry,
   type SourcesEffects,
-} from '../../src/host/sources'
+} from '@workbench/host/sources'
 
 const AT = '2026-01-01T00:00:00.000Z'
 

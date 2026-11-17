@@ -1,14 +1,14 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../../src/protocol/entities'
-import type { SpawnTask } from '../../../src/protocol/inputs'
+import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
+import type { SpawnTask } from '@workbench/protocol/inputs'
 import {
   childrenSettledFacts,
   resolveSubtaskStage,
   spawnDepth,
   spawnFacts,
-} from '../../../src/kernel/scopes/spawn'
-import type { Environment, Limits, View } from '../../../src/kernel/core/types'
+} from '@workbench/kernel/scopes/spawn'
+import type { Environment, Limits, View } from '@workbench/kernel/core/types'
 
 const AT = '2026-11-06T12:00:00.000Z'
 

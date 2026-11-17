@@ -18,7 +18,7 @@ import {
   encryptWithKey,
   loadOrCreateKey,
   createLocalCipher,
-} from '../../src/server/secret-cipher'
+} from '@workbench/api-http/secret-cipher'
 
 const KEY = Buffer.alloc(KEY_BYTES, 7)
 const created: string[] = []

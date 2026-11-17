@@ -9,12 +9,12 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AutomationRule } from '../../../src/protocol/rules'
-import { decide } from '../../../src/kernel/decide'
-import { project } from '../../../src/kernel/scopes/project'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
-import { nextWakeAt } from '../../../src/kernel/core/next-wake'
-import { createStore } from '../../../src/host/store/index'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import { decide } from '@workbench/kernel/decide'
+import { project } from '@workbench/kernel/scopes/project'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import { createStore } from '@workbench/host-store/index'
 import { createMemoryDb, dumpProjection } from './test-support'
 
 const AT = '2026-11-14T10:00:00.000Z'

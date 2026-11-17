@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { COMMAND_NAMES, type Command } from '../../src/protocol/commands'
-import { EXECUTOR_PORT_VERSION } from '../../src/protocol/executor'
+import { COMMAND_NAMES, type Command } from '@workbench/protocol/commands'
+import { EXECUTOR_PORT_VERSION } from '@workbench/protocol/executor'
 import {
   HOST_INPUT_NAMES,
   INPUT_NAMES,
@@ -9,8 +9,8 @@ import {
   type HostInputName,
   type Input,
   type InputName,
-} from '../../src/protocol/inputs'
-import { validateCommand, validateInput } from '../../src/protocol/validate'
+} from '@workbench/protocol/inputs'
+import { validateCommand, validateInput } from '@workbench/protocol/validate'
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false

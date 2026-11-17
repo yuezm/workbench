@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Card } from '../../../../../../src/protocol/entities'
+import type { Card } from '@workbench/protocol/entities'
 import {
   groupNotices,
   isFreeFormOption,
   isNoticeCard,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/model/cards'
+} from '@workbench/client-app-ai-workflow/model/cards'
 
 const card: Card = {
   id: 'card-1',

@@ -1,20 +1,17 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunEvent, Runtime } from '../../../../src/protocol/entities'
-import type { ExecutorIO, Turn } from '../../../../src/protocol/executor'
+import type { RunEvent, Runtime } from '@workbench/protocol/entities'
+import type { ExecutorIO, Turn } from '@workbench/protocol/executor'
 import type {
   ExecutorContext,
   ResolvedExecutable,
   SpawnFn,
   SpawnOptions,
   Spawned,
-} from '../../../../src/sdk/types'
-import { commandManifest } from '../../../../src/plugins/executors/command/manifest'
-import { commandPlugin } from '../../../../src/plugins/executors/command/index'
-import {
-  executeCommandRun,
-  type CommandOptions,
-} from '../../../../src/plugins/executors/command/run'
+} from '@workbench/capabilities/types'
+import { commandManifest } from '@workbench/executor-command/manifest'
+import { commandPlugin } from '@workbench/executor-command/index'
+import { executeCommandRun, type CommandOptions } from '@workbench/executor-command/run'
 import { fakeSdk, type FakeSdkOverrides } from '../../support/fake-sdk'
 
 /** 假流：只实现插件用到的 `on('data')`，避免测试依赖 node:events */

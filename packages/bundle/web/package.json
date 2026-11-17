@@ -1,0 +1,10 @@
+{
+  "name": "@workbench/bundle-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Web 装配层：在 bundle-base 之上挂 frontend-static（有产物才挂）",
+  "dependencies": {
+    "@workbench/bundle-base": "workspace:*",
+    "@workbench/host-frontend-static": "workspace:*"
+  }
+}

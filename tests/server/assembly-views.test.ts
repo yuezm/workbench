@@ -9,9 +9,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Project, RuntimeExecutorChoice } from '../../src/protocol/entities'
-import type { PluginView } from '../../src/protocol/plugins'
-import { createWorkbench, type Workbench } from '../../src/server/assembly'
+import type { Project, RuntimeExecutorChoice } from '@workbench/protocol/entities'
+import type { PluginView } from '@workbench/protocol/plugins'
+import { createWorkbench, type Workbench } from '@workbench/bundle-base'
 
 const created: string[] = []
 let workbench: Workbench | null = null

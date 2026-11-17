@@ -1,12 +1,12 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Run, RunEvent } from '../../../../../../src/protocol/entities'
-import type { TaskComment } from '../../../../../../src/protocol/task-comment'
+import type { Run, RunEvent } from '@workbench/protocol/entities'
+import type { TaskComment } from '@workbench/protocol/task-comment'
 import {
   SUMMARY_MAX_CHARS,
   SUMMARY_MAX_LINES,
   TaskActivity,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/TaskActivity'
+} from '@workbench/client-app-ai-workflow/components/TaskActivity'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function makeRun(over: Partial<Run> = {}): Run {

@@ -1,22 +1,22 @@
 // @vitest-environment node
 import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import type { GateCheck, RunRow, Task, WorkflowStage } from '../../../src/protocol/entities'
-import type { Receipt } from '../../../src/protocol/inputs'
+import type { GateCheck, RunRow, Task, WorkflowStage } from '@workbench/protocol/entities'
+import type { Receipt } from '@workbench/protocol/inputs'
 import {
   REVIEW_LIMITS,
   type FindingAddress,
   type ReviewFinding,
   type ReviewReport,
-} from '../../../src/protocol/review'
-import { exportReview } from '../../../src/kernel/scopes/commands/review'
+} from '@workbench/protocol/review'
+import { exportReview } from '@workbench/kernel/scopes/commands/review'
 import {
   findReportForExport,
   reviewDocFileName,
   reviewMarkdown,
-} from '../../../src/kernel/scopes/review'
-import type { ThreadRow } from '../../../src/protocol/thread'
-import type { View } from '../../../src/kernel/core/types'
+} from '@workbench/kernel/scopes/review'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import type { View } from '@workbench/kernel/core/types'
 import {
   applyAddresses,
   blockedCommentText,
@@ -27,7 +27,7 @@ import {
   reportForThread,
   reportTargetsStage,
   reviewFactsOf,
-} from '../../../src/kernel/scopes/review'
+} from '@workbench/kernel/scopes/review'
 
 const CREATED = '2026-11-01T00:00:00.000Z'
 const NOW = '2026-11-05T09:00:00.000Z'

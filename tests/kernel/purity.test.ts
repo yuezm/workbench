@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const KERNEL_ROOT = resolve(import.meta.dirname, '../../src/kernel')
+const KERNEL_ROOT = resolve(import.meta.dirname, '../../packages/core/kernel/src')
 
 /** 禁用模块：宿主/Node 能力与反向依赖（ARCHITECTURE「边界守则 1」）。 */
 const FORBIDDEN_MODULES = [
@@ -25,8 +25,12 @@ const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bfetch\s*\(/g, label: 'fetch()' },
 ]
 
-/** 跨层 import 前缀：kernel 只允许依赖 src/protocol。 */
+/** 跨层 import 前缀：kernel 只允许依赖 @workbench/protocol。 */
 const FORBIDDEN_IMPORT_PREFIXES = ['shared/', 'main/', 'host/', 'plugins/', 'renderer/']
+
+/** 仓内包：kernel 只准摸 protocol（其余包名同样是跨层依赖）。 */
+const WORKSPACE_SCOPE = '@workbench/'
+const ALLOWED_SCOPE_PACKAGES = ['@workbench/protocol']
 
 const isSourceFile = (name: string): boolean => name.endsWith('.ts') && !name.endsWith('.test.ts')
 
@@ -138,6 +142,10 @@ const importsOf = (code: string): Array<{ specifier: string; index: number }> =>
   return found
 }
 
+/** 仓内包名是否属于 kernel 允许依赖的那一个（`@workbench/protocol`，含其子路径）。 */
+const isAllowedScope = (specifier: string): boolean =>
+  ALLOWED_SCOPE_PACKAGES.some((name) => specifier === name || specifier.startsWith(`${name}/`))
+
 const violationsOf = (file: string, source: string): string[] => {
   const { withoutComments, withoutStrings } = strip(source)
   const found: string[] = []
@@ -150,7 +158,10 @@ const violationsOf = (file: string, source: string): string[] => {
     }
     const posix = toPosix(specifier)
     const hit = FORBIDDEN_IMPORT_PREFIXES.find((prefix) => posix.includes(`/${prefix}`))
-    if (hit) found.push(`${at} 禁止跨层 import「${specifier}」（只允许 src/protocol）`)
+    if (hit) found.push(`${at} 禁止跨层 import「${specifier}」（只允许 @workbench/protocol）`)
+    if (posix.startsWith(WORKSPACE_SCOPE) && !isAllowedScope(posix)) {
+      found.push(`${at} 禁止跨层 import「${specifier}」（只允许 @workbench/protocol）`)
+    }
   }
 
   for (const { pattern, label } of FORBIDDEN_PATTERNS) {
@@ -181,21 +192,23 @@ describe('kernel 纯度', () => {
     const dirty = [
       "import { readFileSync } from 'node:fs'",
       "import type { Task } from '../shared/ai-workflow-api'",
+      "import { host } from '@workbench/host'",
       'export const noise = (): number => Date.now() + Math.random()',
     ].join('\n')
 
     expect(violationsOf('dirty.ts', dirty)).toEqual([
       'dirty.ts:1 禁止 import「node:fs」',
-      'dirty.ts:2 禁止跨层 import「../shared/ai-workflow-api」（只允许 src/protocol）',
-      'dirty.ts:3 禁止使用 Date.now()',
-      'dirty.ts:3 禁止使用 Math.random()',
+      'dirty.ts:2 禁止跨层 import「../shared/ai-workflow-api」（只允许 @workbench/protocol）',
+      'dirty.ts:3 禁止跨层 import「@workbench/host」（只允许 @workbench/protocol）',
+      'dirty.ts:4 禁止使用 Date.now()',
+      'dirty.ts:4 禁止使用 Math.random()',
     ])
   })
 
   it('不把注释与字符串里的禁用词当违规', () => {
     const clean = [
       "// 说明：这里不能写 Date.now()，也不能 import 'node:fs'",
-      "import type { Task } from '../protocol/entities'",
+      "import type { Task } from '@workbench/protocol/entities'",
       "export const label = 'Date.now() 由宿主传入'",
       'export const ok = (task: Task | null): boolean => task !== null',
     ].join('\n')

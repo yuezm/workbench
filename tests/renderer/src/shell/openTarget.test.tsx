@@ -6,7 +6,7 @@
  */
 import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { OpenTarget } from '../../../../src/protocol/ipc'
+import type { OpenTarget } from '@workbench/protocol/ipc'
 import {
   clearOpenTarget,
   pushOpenTarget,
@@ -16,7 +16,7 @@ import {
   useActiveAppId,
   useOpenTarget,
   type PendingOpenTarget,
-} from '../../../../src/renderer/src/shell/openTarget'
+} from '@workbench/client-shell/openTarget'
 
 const taskTarget: OpenTarget = { appId: 'ai-workflow', taskId: 't1', cardId: 'card-1' }
 

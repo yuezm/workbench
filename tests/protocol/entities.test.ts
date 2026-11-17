@@ -62,7 +62,7 @@ import {
   type WorkflowInput,
   type WorkflowStage,
   type WorkflowWithStages,
-} from '../../src/protocol/entities'
+} from '@workbench/protocol/entities'
 
 /** 类型相等断言：A 与 B 必须逐字段相同（任一侧多/少字段都会失败）。 */
 type Equal<A, B> =

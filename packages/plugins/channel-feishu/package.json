@@ -1,0 +1,10 @@
+{
+  "name": "@workbench/channel-feishu",
+  "version": "0.0.0",
+  "private": true,
+  "description": "飞书通道（经本机 lark-cli）",
+  "dependencies": {
+    "@workbench/plugins-kit": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

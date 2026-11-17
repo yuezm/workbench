@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { applyReceiptBlock, parseReceiptBlock } from '../../../src/plugins/shared/receipt-block'
-import type { Receipt } from '../../../src/protocol/inputs'
-import { COMMAND_LIMITS } from '../../../src/protocol/validate'
+import { applyReceiptBlock, parseReceiptBlock } from '@workbench/plugins-kit/receipt-block'
+import type { Receipt } from '@workbench/protocol/inputs'
+import { COMMAND_LIMITS } from '@workbench/protocol/validate'
 
 /** 造一个围栏块（默认 json 标签） */
 const fence = (content: string, tag = 'json'): string => ['```' + tag, content, '```'].join('\n')

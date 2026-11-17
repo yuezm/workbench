@@ -1,12 +1,9 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { appPlugins } from '../../../../../src/renderer/src/shell/registry'
-import { TopBar } from '../../../../../src/renderer/src/shell/components/TopBar'
-import {
-  resetServerInfoForTest,
-  setServerInfo,
-} from '../../../../../src/renderer/src/shell/server-info'
+import { appPlugins } from '@workbench/client-shell/registry'
+import { TopBar } from '@workbench/client-shell/components/TopBar'
+import { resetServerInfoForTest, setServerInfo } from '@workbench/client-shell/server-info'
 
 afterEach(() => {
   resetServerInfoForTest()

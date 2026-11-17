@@ -11,7 +11,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
-import type { WorkbenchApi } from '../../src/shared/workbench-api'
+import type { WorkbenchApi } from '@workbench/contract-api'
 import { FAKE_AGENT_MARKER, writeFakeAgent } from './helpers/fake-agent'
 import { createTempUserDataDir, launchApp, type LaunchedApp } from './helpers/launch'
 import { readAgentState, seedAgentBase, type AgentSeed } from './helpers/seed-agent'

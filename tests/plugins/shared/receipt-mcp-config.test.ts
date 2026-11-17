@@ -9,8 +9,8 @@ import {
   dshReceiptMcpServers,
   dshReceiptServer,
   receiptMcpServers,
-} from '../../../src/plugins/shared/receipt-mcp-config'
-import type { SdkReceiptTool } from '../../../src/sdk/types'
+} from '@workbench/plugins-kit/receipt-mcp-config'
+import type { SdkReceiptTool } from '@workbench/capabilities/types'
 
 const TOOL: SdkReceiptTool = {
   command: '/electron',

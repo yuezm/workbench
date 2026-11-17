@@ -1,13 +1,9 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  Project,
-  WorkflowStage,
-  WorkflowWithStages,
-} from '../../../../../../src/protocol/entities'
-import type { AutomationRule } from '../../../../../../src/protocol/rules'
-import { RuleDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RuleDialog'
+import type { Project, WorkflowStage, WorkflowWithStages } from '@workbench/protocol/entities'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import { RuleDialog } from '@workbench/client-app-ai-workflow/components/RuleDialog'
 
 function stage(id: string, workflowId: string, name: string, position: number): WorkflowStage {
   return {

@@ -1,3 +1,9 @@
+# 仓库内的产品装配（apps/*）与能力包（packages/<域>/<包>）。
+# 拆分方案见 docs/planning/package-split-plan.md；边界由 scripts/check-packages.mjs 机器校验。
+packages:
+  - apps/*
+  - packages/*/*
+
 allowBuilds:
   electron-winstaller: true
 

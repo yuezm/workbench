@@ -1,17 +1,17 @@
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Command } from '../../../../../../src/protocol/commands'
+import type { Command } from '@workbench/protocol/commands'
 import type {
   DetectedRuntime,
   Runtime,
   RuntimeExecutorChoice,
   RuntimeProbe,
   RuntimeStatus,
-} from '../../../../../../src/protocol/entities'
-import type { DispatchResult } from '../../../../../../src/protocol/ipc'
-import type { ViewId, ViewParams, ViewResult } from '../../../../../../src/protocol/views'
-import { RuntimeManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RuntimeManager'
+} from '@workbench/protocol/entities'
+import type { DispatchResult } from '@workbench/protocol/ipc'
+import type { ViewId, ViewParams, ViewResult } from '@workbench/protocol/views'
+import { RuntimeManager } from '@workbench/client-app-ai-workflow/components/RuntimeManager'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 /** 执行器清单：与弹窗共用（顺序即注册表顺序，dsh 首项） */

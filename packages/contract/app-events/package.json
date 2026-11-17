@@ -1,0 +1,6 @@
+{
+  "name": "@workbench/app-events",
+  "version": "0.0.0",
+  "private": true,
+  "description": "内置 app 的事件白名单（renderer 注册表与宿主入口共用）"
+}

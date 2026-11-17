@@ -12,8 +12,8 @@ import {
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { RunEvent } from '../../src/protocol/entities'
-import type { Receipt } from '../../src/protocol/inputs'
+import type { RunEvent } from '@workbench/protocol/entities'
+import type { Receipt } from '@workbench/protocol/inputs'
 import {
   RUN_ARCHIVE_SCHEMA_VERSION,
   archiveRunTerminal,
@@ -40,7 +40,7 @@ import {
   type ArchiveRun,
   type RunArchiveLabels,
   type RunArchiveMeta,
-} from '../../src/host/artifacts'
+} from '@workbench/host/artifacts'
 
 let root = ''
 

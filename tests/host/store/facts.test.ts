@@ -1,14 +1,8 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { FactDraft } from '../../../src/kernel/core/types'
-import {
-  allFacts,
-  appendFacts,
-  factsCount,
-  factsSince,
-  lastSeq,
-} from '../../../src/host/store/facts'
+import type { FactDraft } from '@workbench/kernel/core/types'
+import { allFacts, appendFacts, factsCount, factsSince, lastSeq } from '@workbench/host-store/facts'
 import { SAMPLE_AT, createMemoryDb, sample } from './test-support'
 
 let openDbs: DatabaseSync[] = []

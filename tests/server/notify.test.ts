@@ -6,8 +6,8 @@
  * 日志只记标题，不记正文。
  */
 import { describe, expect, it, vi } from 'vitest'
-import type { ServerEvent } from '../../src/protocol/http'
-import { MAX_NOTICE_CHARS, NOTIFY_APP_ID, createNotifier } from '../../src/server/notify'
+import type { ServerEvent } from '@workbench/protocol/http'
+import { MAX_NOTICE_CHARS, NOTIFY_APP_ID, createNotifier } from '@workbench/api-http/notify'
 
 const collector = () => {
   const events: ServerEvent[] = []

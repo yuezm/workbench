@@ -1,8 +1,8 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ReviewFinding, ReviewReport } from '../../../../../../src/protocol/review'
-import { ReviewPanel } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ReviewPanel'
+import type { ReviewFinding, ReviewReport } from '@workbench/protocol/review'
+import { ReviewPanel } from '@workbench/client-app-ai-workflow/components/ReviewPanel'
 
 afterEach(cleanup)
 

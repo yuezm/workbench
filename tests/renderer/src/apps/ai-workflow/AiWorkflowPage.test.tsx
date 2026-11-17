@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Command } from '../../../../../src/protocol/commands'
+import type { Command } from '@workbench/protocol/commands'
 import type {
   Agent,
   Card,
@@ -13,21 +13,15 @@ import type {
   Task,
   WorkflowStage,
   WorkflowWithStages,
-} from '../../../../../src/protocol/entities'
-import type { CommandDispatchResult } from '../../../../../src/protocol/ipc'
-import type { ThreadRow } from '../../../../../src/protocol/thread'
-import {
-  AiWorkflowPage,
-  cardLanding,
-} from '../../../../../src/renderer/src/apps/ai-workflow/AiWorkflowPage'
+} from '@workbench/protocol/entities'
+import type { CommandDispatchResult } from '@workbench/protocol/ipc'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import { AiWorkflowPage, cardLanding } from '@workbench/client-app-ai-workflow/AiWorkflowPage'
 import {
   resetEntityOrderForTest,
   setEntityOrder,
-} from '../../../../../src/renderer/src/apps/ai-workflow/model/entity-order'
-import {
-  pushOpenTarget,
-  resetOpenTargetForTest,
-} from '../../../../../src/renderer/src/shell/openTarget'
+} from '@workbench/client-app-ai-workflow/model/entity-order'
+import { pushOpenTarget, resetOpenTargetForTest } from '@workbench/client-shell/openTarget'
 import { installFakeKernel, type FakeKernel } from '../../../shell/fake-kernel'
 
 const runtime: Runtime = {

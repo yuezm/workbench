@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { StageInput } from '../../../../../../src/protocol/entities'
+import type { StageInput } from '@workbench/protocol/entities'
 import {
   builtinKeyOfName,
   builtinStageDraft,
@@ -16,7 +16,7 @@ import {
   stageIdAfterWorkflowChange,
   userStageRange,
   withBuiltinStages,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/model/stage-draft'
+} from '@workbench/client-app-ai-workflow/model/stage-draft'
 
 /**
  * 草稿阶段列表（M18）：内置阶段的补齐 / 规范排序 / 下标重映射。

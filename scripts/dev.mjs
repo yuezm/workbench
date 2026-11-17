@@ -1,12 +1,11 @@
 /**
- * 开发脚手架：一条命令起「服务端（watch 构建 + node --watch）+ Web dev server（HMR）」。
+ * 开发脚手架：一条命令起「服务端（watch 构建 + node --watch）+ Web dev server（HMR）」
  *
  * 三个子进程：
- * 1. `vite build --watch --config vite.server.config.mts`：改服务端代码就重打 `out/server/index.js`；
- * 2. `node --watch out/server/index.js`：产物一变就重启服务（端口 7788）；
- * 3. `vite --config vite.web.config.mts`：Web 页面 HMR，`/api` 由 dev server 代理到服务端。
- *
- * 数据目录默认落 `.scratch/dev-data`（不进仓库、不碰 `~/.workbench`），可用 `WORKBENCH_DATA_DIR` 覆盖。
+ * 1. `vite build --watch --config vite.server.config.mts`：改服务端代码就重打 `out/server/index.js`
+ * 2. `node --watch out/server/index.js`：产物一变就重启服务（端口 7788）
+ * 3. `vite --config vite.web.config.mts`：Web 页面 HMR，`/api` 由 dev server 代理到服务端
+ * 数据目录默认落 `.scratch/dev-data`（不进仓库、不碰 `~/.workbench`），可用 `WORKBENCH_DATA_DIR` 覆盖
  */
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'

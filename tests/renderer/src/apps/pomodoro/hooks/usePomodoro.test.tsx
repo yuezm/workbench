@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RingPlayer } from '../../../../../../src/renderer/src/apps/pomodoro/audio'
-import { usePomodoro } from '../../../../../../src/renderer/src/apps/pomodoro/hooks/usePomodoro'
+import type { RingPlayer } from '@workbench/client-app-pomodoro/audio'
+import { usePomodoro } from '@workbench/client-app-pomodoro/hooks/usePomodoro'
 import { installFakeKernel, stopFakeKernel } from '../../../../shell/fake-kernel'
 
 const MIN = 60_000

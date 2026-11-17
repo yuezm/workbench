@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
-import type { Capability, PluginManifest } from '../../src/protocol/manifest'
-import { createSdk } from '../../src/sdk'
-import type { NetCapability, SdkHost, Spawned } from '../../src/sdk/types'
+import type { Capability, PluginManifest } from '@workbench/protocol/manifest'
+import { createSdk } from '@workbench/capabilities'
+import type { NetCapability, SdkHost, Spawned } from '@workbench/capabilities/types'
 
 /**
  * sdk 能力门控（M3 T4 / M4 T6）：`createSdk` 只做「按 manifest 门控 + 原样转发」，

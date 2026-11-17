@@ -13,14 +13,14 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
-import { openDatabase } from '../../../src/host/db'
-import { createProcessRegistry } from '../../../src/host/process-registry'
-import { createStore } from '../../../src/host/store/index'
-import { decide } from '../../../src/kernel/decide'
-import { nextWakeAt } from '../../../src/kernel/core/next-wake'
-import { project } from '../../../src/kernel/scopes/project'
-import type { KernelPort } from '../../../src/kernel/core/types'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
+import { openDatabase } from '@workbench/host-store/db'
+import { createProcessRegistry } from '@workbench/host/process-registry'
+import { createStore } from '@workbench/host-store/index'
+import { decide } from '@workbench/kernel/decide'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import { project } from '@workbench/kernel/scopes/project'
+import type { KernelPort } from '@workbench/kernel/core/types'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
 import type {
   Agent,
   Project,
@@ -29,7 +29,7 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../../src/protocol/entities'
+} from '@workbench/protocol/entities'
 
 const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
 

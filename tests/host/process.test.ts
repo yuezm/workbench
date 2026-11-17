@@ -17,7 +17,7 @@ const {
   killProcessTree,
   resolveShimScript,
   tail,
-} = await import('../../src/host/process')
+} = await import('@workbench/host/process')
 
 function fakeChild(): {
   pid: number

@@ -7,8 +7,8 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../src/protocol/entities'
-import type { ThreadRow } from '../../src/protocol/thread'
+} from '@workbench/protocol/entities'
+import type { ThreadRow } from '@workbench/protocol/thread'
 import type {
   Decision,
   Environment,
@@ -17,8 +17,8 @@ import type {
   IdKind,
   Limits,
   View,
-} from '../../src/kernel/core/types'
-import { decide } from '../../src/kernel/decide'
+} from '@workbench/kernel/core/types'
+import { decide } from '@workbench/kernel/decide'
 
 const CREATED = '2026-11-01T00:00:00.000Z'
 const NOW = '2026-11-05T09:00:00.000Z'

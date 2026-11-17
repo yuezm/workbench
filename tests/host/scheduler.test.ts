@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { decide } from '../../src/kernel/decide'
-import { project } from '../../src/kernel/scopes/project'
-import { viewSpec } from '../../src/kernel/scopes/view-spec'
-import type { KernelPort } from '../../src/kernel/core/types'
+import { decide } from '@workbench/kernel/decide'
+import { project } from '@workbench/kernel/scopes/project'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import type { KernelPort } from '@workbench/kernel/core/types'
 import type {
   Agent,
   AgentInput,
@@ -17,9 +17,9 @@ import type {
   StageScript,
   Task,
   WorkflowStage,
-} from '../../src/protocol/entities'
-import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '../../src/protocol/executor'
-import { openDatabase } from '../../src/host/db'
+} from '@workbench/protocol/entities'
+import type { ExecutorIO, ExecutorPort, Receipt, Turn } from '@workbench/protocol/executor'
+import { openDatabase } from '@workbench/host-store/db'
 import {
   createScheduler,
   remainingRunMs,
@@ -28,8 +28,8 @@ import {
   startCancelChain,
   type Scheduler,
   type SchedulerTimer,
-} from '../../src/host/scheduler'
-import { createStore, type Store } from '../../src/host/store/index'
+} from '@workbench/host/scheduler'
+import { createStore, type Store } from '@workbench/host-store/index'
 
 const kernel: KernelPort = { decide, project, viewSpec }
 

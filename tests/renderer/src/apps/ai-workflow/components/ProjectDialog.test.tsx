@@ -1,14 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DirListing } from '../../../../../../src/protocol/http'
-import type { Command } from '../../../../../../src/protocol/commands'
-import type { Project } from '../../../../../../src/protocol/entities'
-import type { CommandDispatchResult } from '../../../../../../src/protocol/ipc'
-import type { ViewId, ViewResult } from '../../../../../../src/protocol/views'
-import { FolderPickerDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/FolderPickerDialog'
-import { ProjectDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ProjectDialog'
-import type { WorkbenchApi } from '../../../../../../src/shared/workbench-api'
+import type { DirListing } from '@workbench/protocol/http'
+import type { Command } from '@workbench/protocol/commands'
+import type { Project } from '@workbench/protocol/entities'
+import type { CommandDispatchResult } from '@workbench/protocol/ipc'
+import type { ViewId, ViewResult } from '@workbench/protocol/views'
+import { FolderPickerDialog } from '@workbench/client-app-ai-workflow/components/FolderPickerDialog'
+import { ProjectDialog } from '@workbench/client-app-ai-workflow/components/ProjectDialog'
+import type { WorkbenchApi } from '@workbench/contract-api'
 
 const project: Project = {
   id: 'p1',

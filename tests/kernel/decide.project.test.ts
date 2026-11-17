@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Command } from '../../src/protocol/commands'
+import type { Command } from '@workbench/protocol/commands'
 import type {
   Agent,
   Conversation,
@@ -9,10 +9,10 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../src/protocol/entities'
-import { decide } from '../../src/kernel/decide'
-import type { Environment, IdKind, Limits, View } from '../../src/kernel/core/types'
-import type { AutomationRule } from '../../src/protocol/rules'
+} from '@workbench/protocol/entities'
+import { decide } from '@workbench/kernel/decide'
+import type { Environment, IdKind, Limits, View } from '@workbench/kernel/core/types'
+import type { AutomationRule } from '@workbench/protocol/rules'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
 const NOW = '2026-11-04T12:00:00.000Z'

@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '../../../../../src/renderer/src/components/ui/dialog'
+} from '@workbench/client-ui-primitives/dialog'
 
 /**
  * Radix Dialog 打开时给 body 加 pointer-events: none，jsdom 下需关掉这层检查，

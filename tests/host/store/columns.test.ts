@@ -7,15 +7,15 @@
  * 断言用真实库的 `PRAGMA table_info`，不扫源码文本——DDL 改了就一定被抓到。
  */
 import { describe, expect, it } from 'vitest'
-import { PROJECTION_TABLES } from '../../../src/kernel/core/types'
-import { SCHEMA_SQL } from '../../../src/host/schema'
+import { PROJECTION_TABLES } from '@workbench/kernel/core/types'
+import { SCHEMA_SQL } from '@workbench/host-store/schema'
 import {
   TABLE_SHAPES,
   fromRow,
   insertSql,
   selectList,
   valuesOf,
-} from '../../../src/host/store/columns'
+} from '@workbench/host-store/columns'
 import { createMemoryDb } from './test-support'
 
 /** 真实库里的列顺序（DDL 顺序）。 */

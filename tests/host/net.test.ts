@@ -10,8 +10,8 @@ import {
 import type { AddressInfo } from 'node:net'
 import { createConnection } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { NET_LIMITS, createNetCapability } from '../../src/host/net'
-import type { NetReply } from '../../src/sdk/types'
+import { NET_LIMITS, createNetCapability } from '@workbench/host/net'
+import type { NetReply } from '@workbench/capabilities/types'
 
 /**
  * 宿主网络原件（M7 D7）：`fetch` / `listen` / `verifyHmacSha256`。

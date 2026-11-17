@@ -9,10 +9,10 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { RECEIPT_KEYS } from '../../../src/protocol/receipt-keys'
+import { RECEIPT_KEYS } from '@workbench/protocol/receipt-keys'
 
 const SERVER = fileURLToPath(
-  new URL('../../../src/plugins/shared/receipt-mcp-server.cjs', import.meta.url),
+  new URL('../../../packages/plugins/kit/src/receipt-mcp-server.cjs', import.meta.url),
 )
 
 interface RpcResult {

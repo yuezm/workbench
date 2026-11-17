@@ -7,10 +7,10 @@ import type {
   ChannelSpawnOptions,
   ChannelSpawned,
   ChannelStdout,
-} from '../../../src/protocol/channels'
-import type { ProcessCapability } from '../../../src/sdk/types'
-import type { Card } from '../../../src/protocol/entities'
-import { readClick } from '../../../src/plugins/channels/feishu/click'
+} from '@workbench/protocol/channels'
+import type { ProcessCapability } from '@workbench/capabilities/types'
+import type { Card } from '@workbench/protocol/entities'
+import { readClick } from '@workbench/channel-feishu/click'
 import {
   answerersOf,
   clipProgress,
@@ -20,8 +20,8 @@ import {
   readFeishuConfig,
   targetOf,
   WATCH_RESTART_MS,
-} from '../../../src/plugins/channels/feishu/index'
-import { readTextMessage } from '../../../src/plugins/channels/feishu/inbound'
+} from '@workbench/channel-feishu/index'
+import { readTextMessage } from '@workbench/channel-feishu/inbound'
 import {
   createLark,
   LARK_TIMEOUT_MS,
@@ -30,15 +30,15 @@ import {
   programArgs,
   STDOUT_LIMIT,
   type Lark,
-} from '../../../src/plugins/channels/feishu/lark'
-import { feishuManifest } from '../../../src/plugins/channels/feishu/manifest'
+} from '@workbench/channel-feishu/lark'
+import { feishuManifest } from '@workbench/channel-feishu/manifest'
 import {
   FEISHU_CARD_TEMPLATES,
   optionButton,
   renderCard,
   type FeishuCard,
-} from '../../../src/plugins/channels/feishu/render'
-import { channelById } from '../../../src/plugins/registry'
+} from '@workbench/channel-feishu/render'
+import { channelById } from '@workbench/plugins-registry'
 import { fakeSdk } from '../support/fake-sdk'
 import { cardOf, channelHarness, type AnswerCall, type ChannelHarness } from './harness'
 

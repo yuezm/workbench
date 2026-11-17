@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { validateStageSet } from '../../../../../../src/kernel/scopes/workflow/stage-validation'
-import type { StageInput } from '../../../../../../src/protocol/entities'
+import { validateStageSet } from '@workbench/kernel/scopes/workflow/stage-validation'
+import type { StageInput } from '@workbench/protocol/entities'
 import {
   SOP_TEMPLATES,
   draftFromTemplate,
   type SopTemplate,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/model/sop-templates'
+} from '@workbench/client-app-ai-workflow/model/sop-templates'
 
 /**
  * 开箱 SOP 模板（纯数据 + 纯函数）。

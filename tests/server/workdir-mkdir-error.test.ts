@@ -17,7 +17,7 @@ vi.mock('node:fs', async (importOriginal) => {
   }
 })
 
-import { resolveWorkdir, WORKDIR_ENV } from '../../src/server/workdir'
+import { resolveWorkdir, WORKDIR_ENV } from '@workbench/bundle-base/workdir'
 
 describe('main/workdir · 建目录失败（非 Error）', () => {
   it('未注入 log：走默认回调且不抛，退回 fallback', () => {

@@ -14,9 +14,9 @@ import {
   RECEIPT_KEY_DOCS,
   RECEIPT_LIMITS_LINE,
   type ReceiptKey,
-} from '../../src/protocol/receipt-keys'
-import { validateInput } from '../../src/protocol/validate'
-import { RECEIPT_BLOCK_KEYS } from '../../src/plugins/shared/receipt-block'
+} from '@workbench/protocol/receipt-keys'
+import { validateInput } from '@workbench/protocol/validate'
+import { RECEIPT_BLOCK_KEYS } from '@workbench/plugins-kit/receipt-block'
 
 describe('protocol/receipt-keys：键集合是三处共用的一份', () => {
   it('文案表、解析白名单与 RECEIPT_KEYS 逐键一致（顺序也一致）', () => {

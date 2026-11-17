@@ -120,6 +120,13 @@ const sourceCandidates = (f) => {
   }
   return candidates
 }
+// 拆包后源码在 `packages/<域>/<包>/src`（拆分方案 B1–B6），`tests/<layer>` 与源码目录不再同名前缀。
+// 这一层用「文件名」兜底：删掉的源码与被删的测试同名 = 源码与其测试一起删除（死代码清理）。
+const stemOf = (p) =>
+  (p.split('/').pop() ?? '').replace(/\.(test|spec)\.(ts|tsx)$/, '').replace(/\.(ts|tsx)$/, '')
+const deletedSourceStems = new Set(
+  deleted.filter((f) => !isTest(f) && /\.(ts|tsx)$/.test(f)).map(stemOf),
+)
 // 测试搬家（src/**.test.ts → tests/**.test.ts）：旧路径删除 + 新路径新增 = 迁移，不是删测试。
 // git 有时识别不出 rename（相似度阈值），此时会退化成 delete + add，用路径对应关系兜底。
 // 显式登记的「按层搬家」（T16 计划表）：旧测试的行为在新位置重写，断言同等覆盖。
@@ -173,6 +180,7 @@ const ASSERTION_MIGRATIONS = {
 for (const f of deleted) {
   if (!isTest(f)) continue
   if (sourceCandidates(f).some((source) => deletedSet.has(source))) continue
+  if (deletedSourceStems.has(stemOf(f))) continue
   if (migratedCounterpart(f)) continue
   flag('test-deleted', f, 'file deleted')
 }

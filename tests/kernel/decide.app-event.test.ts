@@ -6,9 +6,9 @@
  * `originRunId=null`），摘要按码点截断 200 字，缺省字段落 null；命令本身不读投影。
  */
 import { describe, expect, it } from 'vitest'
-import { decide } from '../../src/kernel/decide'
-import type { EventReceivedPayload } from '../../src/protocol/facts'
-import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
+import { decide } from '@workbench/kernel/decide'
+import type { EventReceivedPayload } from '@workbench/protocol/facts'
+import type { Environment, Id, IdKind, Limits, View } from '@workbench/kernel/core/types'
 
 const NOW = '2026-11-05T12:00:00.000Z'
 const OWNER = { kind: 'owner', via: 'ui' } as const

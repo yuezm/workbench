@@ -16,7 +16,7 @@ import {
   upgradeLegacyCards,
   upgradeLegacyRuns,
   upgradeLegacyRuntimes,
-} from '../../src/host/db'
+} from '@workbench/host-store/db'
 import {
   AGENTS_M27_ADDED_COLUMNS,
   PROJECTION_TABLES,
@@ -28,7 +28,7 @@ import {
   TASKS_M65_ADDED_COLUMNS,
   TASKS_M7_ADDED_COLUMNS,
   tableDdl,
-} from '../../src/host/schema'
+} from '@workbench/host-store/schema'
 
 /**
  * M1/v2 旧库的 `runtimes` DDL 原样：协议族列 + CHECK（M3 换成 `executor_key` + `args_template`）。

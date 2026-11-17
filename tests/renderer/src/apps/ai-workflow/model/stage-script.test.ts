@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { StageScript } from '../../../../../../src/protocol/entities'
+import type { StageScript } from '@workbench/protocol/entities'
 import {
   applyScriptPatch,
   cleanScript,
@@ -11,7 +11,7 @@ import {
   parseEnvLines,
   SCRIPT_DEFAULT_TIMEOUT_MS,
   SCRIPT_TIMEOUT_CHOICES,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/model/stage-script'
+} from '@workbench/client-app-ai-workflow/model/stage-script'
 
 describe('model/stage-script（M40）', () => {
   it('默认脚本配置：空参数 + 10 分钟超时 + 给定运行时（没有命令字段）', () => {

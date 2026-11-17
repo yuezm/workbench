@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createSdkHost } from '../../src/host/sdk-host'
-import { defaultSpawn } from '../../src/host/process'
-import type { NetCapability, SpawnFn, Spawned } from '../../src/sdk/types'
+import { createSdkHost } from '@workbench/host/sdk-host'
+import { defaultSpawn } from '@workbench/host/process'
+import type { NetCapability, SpawnFn, Spawned } from '@workbench/capabilities/types'
 
 /**
  * 宿主能力原件（M3 T4 / M4 T6）：`createSdkHost` 用 `host/process.ts` 与 `host/executable.ts`

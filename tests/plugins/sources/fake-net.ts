@@ -11,7 +11,7 @@ import type {
   NetReply,
   NetRequest,
   NetResponse,
-} from '../../../src/sdk/types'
+} from '@workbench/capabilities/types'
 
 export interface FakeNetListener {
   port: number

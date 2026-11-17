@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { Agent } from '../../../../../../src/protocol/entities'
-import type { UsageAgentRow, UsageDailyRow } from '../../../../../../src/protocol/views'
-import { UsagePanel } from '../../../../../../src/renderer/src/apps/ai-workflow/components/UsagePanel'
+import type { Agent } from '@workbench/protocol/entities'
+import type { UsageAgentRow, UsageDailyRow } from '@workbench/protocol/views'
+import { UsagePanel } from '@workbench/client-app-ai-workflow/components/UsagePanel'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const AT = '2026-11-14T12:00:00.000Z'

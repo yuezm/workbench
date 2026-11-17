@@ -1,0 +1,9 @@
+{
+  "name": "@workbench/client-ui-primitives",
+  "version": "0.0.0",
+  "private": true,
+  "description": "shadcn/ui v4 上游组件源码（Radix 底座）",
+  "dependencies": {
+    "@workbench/client-ui-kit": "workspace:*"
+  }
+}

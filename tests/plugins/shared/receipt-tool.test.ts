@@ -1,12 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { parseReceiptBlock } from '../../../src/plugins/shared/receipt-block'
+import { parseReceiptBlock } from '@workbench/plugins-kit/receipt-block'
 import {
   parseReceiptToolInput,
   RECEIPT_TOOL_NAMES,
   receiptToolDefinition,
-} from '../../../src/plugins/shared/receipt-tool'
-import { RECEIPT_KEYS } from '../../../src/protocol/receipt-keys'
+} from '@workbench/plugins-kit/receipt-tool'
+import { RECEIPT_KEYS } from '@workbench/protocol/receipt-keys'
 
 /** 一个各键齐全的合法回执对象 */
 const fullReceipt = {

@@ -3,5 +3,5 @@
   "singleQuote": true,
   "printWidth": 100,
   "plugins": ["prettier-plugin-tailwindcss"],
-  "tailwindStylesheet": "./src/renderer/src/shell/styles/global.css"
+  "tailwindStylesheet": "./packages/client/shell/src/styles/global.css"
 }

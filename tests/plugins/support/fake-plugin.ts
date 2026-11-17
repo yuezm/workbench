@@ -9,14 +9,14 @@
  * 「新增协议 = 只写插件 + registry 一行」。夹具作为「新写的插件」被验收用例
  * 直接拼进注册表清单，不需要（也不应该）进内置注册表。
  */
-import type { PluginManifest } from '../../../src/protocol/manifest'
+import type { PluginManifest } from '@workbench/protocol/manifest'
 import type {
   DetectedRuntime,
   RuntimeModelOption,
   RuntimeProbe,
-} from '../../../src/protocol/entities'
-import type { ExecutorIO, Receipt, Turn } from '../../../src/protocol/executor'
-import type { ExecutorContext, ExecutorPlugin } from '../../../src/sdk/types'
+} from '@workbench/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '@workbench/protocol/executor'
+import type { ExecutorContext, ExecutorPlugin } from '@workbench/capabilities/types'
 
 /** 假协议 manifest：id 即运行时配置里的 `executorKey`。 */
 export const fakeManifest: PluginManifest = {

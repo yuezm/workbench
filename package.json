@@ -28,17 +28,21 @@
     "check:kernel": "node scripts/check-kernel-budget.mjs",
     "check:secrets": "node scripts/check-secrets.mjs",
     "check:ui": "node scripts/check-ui-rules.mjs",
+    "check:packages": "node scripts/check-packages.mjs",
+    "check:paths": "node scripts/gen-workspace-paths.mjs --check",
     "check:diffcov": "node scripts/check-diff-coverage.mjs",
     "audit": "pnpm audit --prod --registry=https://registry.npmjs.org/ --audit-level=high",
-    "check:fast": "pnpm run typecheck && pnpm run lint && pnpm run check:floor && pnpm run check:kernel && pnpm run check:secrets && pnpm run check:ui",
+    "check:fast": "pnpm run typecheck && pnpm run lint && pnpm run check:floor && pnpm run check:kernel && pnpm run check:secrets && pnpm run check:ui && pnpm run check:packages && pnpm run check:paths",
     "check": "pnpm run check:fast && pnpm run test:coverage && pnpm run check:diffcov && pnpm run audit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "e2e": "pnpm run build && playwright test",
+    "e2e:api": "pnpm run build:server && playwright test tests/e2e/api-only.spec.ts",
     "e2e:ui": "pnpm run build && playwright test tests/e2e/ui-geometry.spec.ts",
     "acceptance": "pnpm run check && pnpm run e2e",
     "db:export": "node scripts/export-db.mjs",
-    "prepare": "husky"
+    "prepare": "husky",
+    "gen:paths": "node scripts/gen-workspace-paths.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../src/protocol/entities'
-import type { AutomationRule } from '../../src/protocol/rules'
-import type { Environment, Limits, View } from '../../src/kernel/core/types'
-import { decide } from '../../src/kernel/decide'
+import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import type { Environment, Limits, View } from '@workbench/kernel/core/types'
+import { decide } from '@workbench/kernel/decide'
 
 const NOW = '2026-11-05T09:00:00.000Z'
 const CREATED = '2026-11-04T00:00:00.000Z'

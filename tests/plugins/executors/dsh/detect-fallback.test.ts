@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
-import { createSdk } from '../../../../src/sdk'
-import { detectDsh } from '../../../../src/plugins/executors/dsh/detect'
-import { dshManifest } from '../../../../src/plugins/executors/dsh/manifest'
-import type { SdkHost } from '../../../../src/sdk/types'
+import { createSdk } from '@workbench/capabilities'
+import { detectDsh } from '@workbench/executor-dsh/detect'
+import { dshManifest } from '@workbench/executor-dsh/manifest'
+import type { SdkHost } from '@workbench/capabilities/types'
 
 /**
  * dsh detect 的「候选清单缺席」回退（覆盖率补口）。
@@ -12,7 +12,7 @@ import type { SdkHost } from '../../../../src/sdk/types'
  * 查不到时按命令名约定回退（`detect.ts` 的 `?? { command, label }`）。本文件整体替换
  * 清单来模拟「清单缺席」——这不改变插件行为，只验证它的独立可测性。
  */
-vi.mock('../../../../src/plugins/shared/cli-catalog', () => ({
+vi.mock('@workbench/plugins-kit/cli-catalog', () => ({
   CLI_CANDIDATES: [{ command: 'claude', label: 'Claude Code' }],
 }))
 

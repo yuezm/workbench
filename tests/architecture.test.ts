@@ -13,14 +13,17 @@
  *
  * 断言本身会 dr 漂：`护栏自检` 用合成样本证明每组检测都能抓出违规（与 purity.test.ts 同款）。
  */
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { PROJECTION_DDL, PROJECTION_TABLES as HOST_PROJECTION_TABLES } from '../src/host/schema'
-import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '../src/kernel/core/types'
-import { COMMAND_NAMES } from '../src/protocol/commands'
-import { FACT_TYPES } from '../src/protocol/facts'
-import { HOST_INPUT_NAMES, INPUT_NAMES } from '../src/protocol/inputs'
+import {
+  PROJECTION_DDL,
+  PROJECTION_TABLES as HOST_PROJECTION_TABLES,
+} from '@workbench/host-store/schema'
+import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '@workbench/kernel/core/types'
+import { COMMAND_NAMES } from '@workbench/protocol/commands'
+import { FACT_TYPES } from '@workbench/protocol/facts'
+import { HOST_INPUT_NAMES, INPUT_NAMES } from '@workbench/protocol/inputs'
 import {
   caseLabels,
   importSpecifiers,
@@ -30,28 +33,128 @@ import {
   type SourceFile,
 } from './support/source'
 
-const SRC_ROOT = resolve(import.meta.dirname, '../src')
-const sources = readSources(SRC_ROOT)
+/**
+ * 服务端与前端已拆成包（拆分 B5/B6）：`src/` 目录整体退役，扫描根改成分层命名空间。
+ *
+ * 前缀约定（断言文案用）：`server/…`、`client/<包>/…`、`web/…`。
+ */
+const API_ROOT = resolve(import.meta.dirname, '../packages/api/http/src')
+const APP_SERVER_ROOT = resolve(import.meta.dirname, '../apps/server/src')
+const CLIENT_ROOT = resolve(import.meta.dirname, '../packages/client')
+const WEB_ROOT = resolve(import.meta.dirname, '../apps/web/src')
+
+const serverSources: SourceFile[] = [
+  ...readSources(API_ROOT).map((file) => ({ ...file, relative: `server/http/${file.relative}` })),
+  ...readSources(APP_SERVER_ROOT).map((file) => ({
+    ...file,
+    relative: `server/app/${file.relative}`,
+  })),
+]
+
+const clientSources: SourceFile[] = [
+  ...readdirSync(CLIENT_ROOT)
+    .filter((name) => existsSync(join(CLIENT_ROOT, name, 'src')))
+    .flatMap((name) =>
+      readSources(join(CLIENT_ROOT, name, 'src')).map((file) => ({
+        ...file,
+        relative: `client/${name.replace(/^client-/u, '')}/${file.relative}`,
+      })),
+    ),
+  ...readSources(WEB_ROOT).map((file) => ({ ...file, relative: `web/${file.relative}` })),
+]
+
+/**
+ * kernel 已搬进 `packages/core/kernel`（拆分 B2）。断言文案继续用 `kernel/` 前缀代表这一层，
+ * 所以这里读包目录后补回前缀——所有调用点（`under('kernel/')`、`textOf('kernel/decide.ts')`）
+ * 都不必跟着改路径。
+ */
+const KERNEL_ROOT = resolve(import.meta.dirname, '../packages/core/kernel/src')
+const kernelSources: SourceFile[] = readSources(KERNEL_ROOT).map((file) => ({
+  ...file,
+  relative: `kernel/${file.relative}`,
+}))
+
+/**
+ * 插件已各自成包（`packages/plugins/<包>/src`，拆分 B4）。断言文案继续用 `plugins/<包>/` 前缀，
+ * 与拆包前的目录形态一致，调用点不用改。
+ */
+const HOST_ROOT = resolve(import.meta.dirname, '../packages/host/host/src')
+const STORE_ROOT = resolve(import.meta.dirname, '../packages/host/store/src')
+
+/**
+ * 宿主已拆成 `@workbench/host` + `@workbench/host-store`（拆分 B3）：断言文案沿用 `host/`、
+ * `host/store/` 前缀，调用点不用改。
+ */
+const hostSources: SourceFile[] = [
+  ...readSources(HOST_ROOT).map((file) => ({ ...file, relative: `host/${file.relative}` })),
+  ...readSources(STORE_ROOT).map((file) => ({
+    ...file,
+    relative: `host/store/${file.relative}`,
+  })),
+]
+
+const PLUGINS_ROOT = resolve(import.meta.dirname, '../packages/plugins')
+const pluginSources: SourceFile[] = readdirSync(PLUGINS_ROOT)
+  .filter((name) => existsSync(join(PLUGINS_ROOT, name, 'src')))
+  .flatMap((name) =>
+    readSources(join(PLUGINS_ROOT, name, 'src')).map((file) => ({
+      ...file,
+      relative: `plugins/${name}/${file.relative}`,
+    })),
+  )
+
+const allSources: SourceFile[] = [
+  ...kernelSources,
+  ...hostSources,
+  ...pluginSources,
+  ...serverSources,
+  ...clientSources,
+]
 
 const textOf = (relative: string): string => {
-  const found = sources.find((file) => file.relative === relative)
+  const pool = relative.startsWith('kernel/')
+    ? kernelSources
+    : relative.startsWith('plugins/')
+      ? pluginSources
+      : relative.startsWith('host/')
+        ? hostSources
+        : relative.startsWith('server/')
+          ? serverSources
+          : relative.startsWith('client/') || relative.startsWith('web/')
+            ? clientSources
+            : []
+  const found = pool.find((file) => file.relative === relative)
   if (found === undefined) throw new Error(`找不到源文件：${relative}`)
   return found.text
 }
 
-/** 取路径前缀下的源文件（`kernel/`、`plugins/` 这类，相对 src/）。 */
+/** 取路径前缀下的源文件（`server/`、`client/`、`host/` 这类分层命名空间）。 */
 const under = (prefix: string): SourceFile[] =>
-  sources.filter((file) => file.relative.startsWith(prefix))
+  allSources.filter((file) => file.relative.startsWith(prefix))
+
+/** 仓库内包名前缀：拆分后跨包一律写包名，不再用 `../protocol/x` 这类相对路径。 */
+const WORKSPACE_SCOPE = '@workbench/'
 
 /**
- * 非相对路径（第三方或 Node 内置）的 import 清单。
- * kernel 允许的写法只有相对路径：`./x`、`../protocol/x`。
+ * 非相对路径、且不是仓库内包的 import 清单（真正的外部依赖 / Node 内置）。
+ *
+ * 拆分后内核依赖 `@workbench/protocol/*` 是合法的（protocol 是纯契约），所以 `@workbench/`
+ * 在这里放行；「内核只准依赖 protocol、不准摸别的仓内包」由下面的用例单独判。
  */
 const thirdPartyImports = (files: readonly SourceFile[]): string[] =>
   files.flatMap((file) =>
     importSpecifiers(stripLiterals(file.text).withoutComments)
       .filter((entry) => !entry.specifier.startsWith('.'))
+      .filter((entry) => !entry.specifier.startsWith(WORKSPACE_SCOPE))
       .map((entry) => `${file.relative}:${entry.line} 第三方 import「${entry.specifier}」`),
+  )
+
+/** 仓库内包的 import 清单（用于把「只准依赖某一个包」写成断言）。 */
+const workspaceImports = (files: readonly SourceFile[]): string[] =>
+  files.flatMap((file) =>
+    importSpecifiers(stripLiterals(file.text).withoutComments)
+      .filter((entry) => entry.specifier.startsWith(WORKSPACE_SCOPE))
+      .map((entry) => `${file.relative}:${entry.line} 仓内包 import「${entry.specifier}」`),
   )
 
 /**
@@ -95,13 +198,19 @@ const projectionWriters = (files: readonly SourceFile[]): string[] => {
     .map((file) => file.relative)
 }
 
+/** 拆包后的形态：`@workbench/host`、`@workbench/host-store` 这类包名也算宿主的副作用面。 */
+const isHostSpecifier = (specifier: string): boolean =>
+  /(^|\/)host\//.test(specifier) ||
+  specifier === '@workbench/host' ||
+  specifier.startsWith('@workbench/host-')
+
 /** plugins 不得 import host（宿主的副作用面只经 sdk 暴露）。 */
 const hostImportsIn = (files: readonly SourceFile[], prefix: string): string[] =>
   files
     .filter((file) => file.relative.startsWith(prefix))
     .flatMap((file) =>
       importSpecifiers(stripLiterals(file.text).withoutComments)
-        .filter((entry) => /(^|\/)host\//.test(entry.specifier))
+        .filter((entry) => isHostSpecifier(entry.specifier))
         .map((entry) => `${file.relative}:${entry.line} 越界 import「${entry.specifier}」`),
     )
 
@@ -113,7 +222,7 @@ const hostImportsIn = (files: readonly SourceFile[], prefix: string): string[] =
  */
 const nodeImportsInRenderer = (files: readonly SourceFile[]): string[] =>
   files
-    .filter((file) => file.relative.startsWith('renderer/'))
+    .filter((file) => file.relative.startsWith('client/') || file.relative.startsWith('web/'))
     .flatMap((file) =>
       importSpecifiers(stripLiterals(file.text).withoutComments)
         .filter(
@@ -126,62 +235,82 @@ const nodeImportsInRenderer = (files: readonly SourceFile[]): string[] =>
     )
 
 /** server 不得 import renderer（依赖方向 server → host/plugins → sdk → protocol 单向）。 */
+/** 拆包后前端形态是 `@workbench/client-*`；`renderer/` 前缀保留给合成样本。 */
+const isFrontendSpecifier = (specifier: string): boolean =>
+  /(^|\/)renderer\//.test(specifier) || specifier.startsWith('@workbench/client-')
+
 const rendererImportsIn = (files: readonly SourceFile[], prefix: string): string[] =>
   files
     .filter((file) => file.relative.startsWith(prefix))
     .flatMap((file) =>
       importSpecifiers(stripLiterals(file.text).withoutComments)
-        .filter((entry) => /(^|\/)renderer\//.test(entry.specifier))
+        .filter((entry) => isFrontendSpecifier(entry.specifier))
         .map((entry) => `${file.relative}:${entry.line} 越界 import「${entry.specifier}」`),
     )
 
 /** server 只经插件注册表取插件：不得直接 import 具体 executors / sources / channels 实现。 */
+const isPluginImplementation = (specifier: string): boolean =>
+  /(^|\/)plugins\/(executors|sources|channels)\//.test(specifier) ||
+  /^@workbench\/(executor|channel|source)-/.test(specifier)
+
 const pluginImplementationImportsIn = (files: readonly SourceFile[], prefix: string): string[] =>
   files
     .filter((file) => file.relative.startsWith(prefix))
     .flatMap((file) =>
       importSpecifiers(stripLiterals(file.text).withoutComments)
-        .filter((entry) => /(^|\/)plugins\/(executors|sources|channels)\//.test(entry.specifier))
+        .filter((entry) => isPluginImplementation(entry.specifier))
         .map((entry) => `${file.relative}:${entry.line} 越界 import「${entry.specifier}」`),
     )
 
 describe('arch：分层与真相源', () => {
-  it('kernel 不 import 第三方模块（只允许相对路径）', () => {
+  it('kernel 不 import 第三方模块（只允许相对路径与仓内契约包）', () => {
     const violations = thirdPartyImports(under('kernel/'))
-    expect(violations, `kernel 只能依赖相对路径与 protocol：\n${violations.join('\n')}`).toEqual([])
+    expect(
+      violations,
+      `kernel 只能依赖相对路径与 @workbench/protocol：\n${violations.join('\n')}`,
+    ).toEqual([])
+  })
+
+  it('kernel 只依赖 @workbench/protocol（不摸其它仓内包）', () => {
+    const violations = workspaceImports(under('kernel/')).filter(
+      (entry) => !entry.includes(`「${WORKSPACE_SCOPE}protocol`),
+    )
+    expect(violations, `kernel 只准依赖 protocol：\n${violations.join('\n')}`).toEqual([])
   })
 
   it('事实只由 host/store 追加', () => {
-    const writers = factWriters(sources)
+    const writers = factWriters(under('host/'))
     expect(writers, `事实写入必须集中在 host/store（实测 ${writers.join(', ')}）`).toEqual([
       'host/store/facts.ts',
     ])
   })
 
   it('投影表只由 host/store 写入（不得绕过事实日志）', () => {
-    const violations = projectionWriters(sources)
+    const violations = projectionWriters([...serverSources, ...clientSources, ...under('host/')])
     expect(violations, `投影表写入必须走 host/store：\n${violations.join('\n')}`).toEqual([])
   })
 
   it('plugins 不 import host', () => {
-    const violations = hostImportsIn(sources, 'plugins/')
+    const violations = hostImportsIn(under('plugins/'), 'plugins/')
     expect(violations, `插件只能依赖 sdk 与 protocol：\n${violations.join('\n')}`).toEqual([])
   })
 
   it('renderer 不 import node 内置、服务端实现与 electron', () => {
-    const violations = nodeImportsInRenderer(sources)
+    const violations = nodeImportsInRenderer(clientSources)
     expect(violations, `renderer 只能走桥接：\n${violations.join('\n')}`).toEqual([])
   })
 
   it('server 不 import renderer，也不直接 import 具体插件实现', () => {
-    const renderer = rendererImportsIn(sources, 'server/')
+    const renderer = rendererImportsIn(serverSources, 'server/')
     expect(renderer, `server 不得 import renderer：\n${renderer.join('\n')}`).toEqual([])
-    const plugins = pluginImplementationImportsIn(sources, 'server/')
+    const plugins = pluginImplementationImportsIn(serverSources, 'server/')
     expect(plugins, `server 只经注册表取插件：\n${plugins.join('\n')}`).toEqual([])
   })
 
   it('仓库不再依赖桌面运行时（package.json 里没有 electron*）', () => {
-    const pkg = JSON.parse(readFileSync(resolve(SRC_ROOT, '../package.json'), 'utf8')) as {
+    const pkg = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8'),
+    ) as {
       dependencies?: Record<string, string>
       devDependencies?: Record<string, string>
     }
@@ -266,7 +395,7 @@ describe('arch：护栏自检', () => {
         'kernel/clean.ts',
         [
           "// 这里不能 import 'node:fs'，也不能写 UPDATE tasks SET x = 1",
-          "import type { Task } from '../protocol/entities'",
+          "import type { Task } from '@workbench/protocol/entities'",
           "export const label = 'Date.now() 由宿主传入'",
         ].join('\n'),
       ),
@@ -284,34 +413,39 @@ describe('arch：护栏自检', () => {
 
   it('能抓出插件越界 import host 与 renderer 越界 import electron', () => {
     const files = [
-      file('plugins/executors/x/run.ts', "import { store } from '../../../host/store'"),
-      file('renderer/src/app/x.ts', "import { ipcRenderer } from 'electron'"),
+      file('plugins/executor-x/src/run.ts', "import { store } from '@workbench/host'"),
+      file('client/shell/src/app/x.ts', "import { ipcRenderer } from 'electron'"),
     ]
     expect(hostImportsIn(files, 'plugins/')).toEqual([
-      'plugins/executors/x/run.ts:1 越界 import「../../../host/store」',
+      'plugins/executor-x/src/run.ts:1 越界 import「@workbench/host」',
     ])
     expect(nodeImportsInRenderer(files)).toEqual([
-      'renderer/src/app/x.ts:1 越界 import「electron」',
+      'client/shell/src/app/x.ts:1 越界 import「electron」',
     ])
     // 服务端反向依赖 renderer 与直接 import 插件实现同样要被抓出来
     const serverDirty = [
-      file('server/assembly.ts', "import { Workbench } from '../renderer/src/shell/Workbench'"),
-      file('server/assembly.ts', "import { dsh } from '../plugins/executors/dsh/index'"),
+      file(
+        'server/app/assembly.ts',
+        "import { Workbench } from '@workbench/client-shell/Workbench'",
+      ),
+      file('server/app/assembly.ts', "import { dsh } from '@workbench/executor-dsh/index'"),
     ]
     expect(rendererImportsIn(serverDirty, 'server/')).toEqual([
-      'server/assembly.ts:1 越界 import「../renderer/src/shell/Workbench」',
+      'server/app/assembly.ts:1 越界 import「@workbench/client-shell/Workbench」',
     ])
     expect(pluginImplementationImportsIn(serverDirty, 'server/')).toEqual([
-      'server/assembly.ts:1 越界 import「../plugins/executors/dsh/index」',
+      'server/app/assembly.ts:1 越界 import「@workbench/executor-dsh/index」',
     ])
   })
 })
 
 // 供上面的「找不到源文件」分支保持可达：清单本身必须非空，否则断言全成空转。
 describe('arch：扫描范围', () => {
-  it('扫描到 src 下四层与内核目录', () => {
-    expect(sources.length).toBeGreaterThan(150)
+  it('扫描到各分层命名空间（内核 / 宿主 / 插件 / 服务端 / 前端）', () => {
+    expect(serverSources.length).toBeGreaterThan(8)
+    expect(clientSources.length).toBeGreaterThan(80)
+    expect(pluginSources.length).toBeGreaterThan(30)
     expect(under('kernel/').length).toBeGreaterThan(20)
-    expect(readFileSync(resolve(SRC_ROOT, 'kernel/decide.ts'), 'utf8').length).toBeGreaterThan(0)
+    expect(readFileSync(resolve(KERNEL_ROOT, 'decide.ts'), 'utf8').length).toBeGreaterThan(0)
   })
 })

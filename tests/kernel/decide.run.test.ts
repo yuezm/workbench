@@ -14,23 +14,23 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../src/protocol/entities'
+} from '@workbench/protocol/entities'
 import type {
   RunClaimedPayload,
   RunRemovedPayload,
   RunWaitingPayload,
-} from '../../src/protocol/facts'
-import type { Receipt, RunHostSettledInput } from '../../src/protocol/inputs'
-import type { ReviewReport } from '../../src/protocol/review'
-import { decide } from '../../src/kernel/decide'
-import { runAccessOf } from '../../src/kernel/scopes/task-effects'
+} from '@workbench/protocol/facts'
+import type { Receipt, RunHostSettledInput } from '@workbench/protocol/inputs'
+import type { ReviewReport } from '@workbench/protocol/review'
+import { decide } from '@workbench/kernel/decide'
+import { runAccessOf } from '@workbench/kernel/scopes/task-effects'
 import {
   degradedCommentText,
   stageRoundCount,
   stageTimeoutOf,
-} from '../../src/kernel/scopes/commands/run'
-import { project } from '../../src/kernel/scopes/project'
-import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
+} from '@workbench/kernel/scopes/commands/run'
+import { project } from '@workbench/kernel/scopes/project'
+import type { Environment, Id, IdKind, Limits, View } from '@workbench/kernel/core/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
 const FUTURE = '2026-11-04T13:00:00.000Z'
@@ -128,7 +128,7 @@ const run = (over: Partial<RunRow> = {}): RunRow => ({
 })
 
 interface Seed {
-  events?: Map<string, import('../../src/kernel/core/types').EventRow>
+  events?: Map<string, import('@workbench/kernel/core/types').EventRow>
   conversations?: Conversation[]
   runs?: RunRow[]
   runtimes?: Runtime[]

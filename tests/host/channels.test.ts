@@ -8,14 +8,14 @@
  * `card.delivery_failed`。同一 `(cardId, version)` 进程内只跑一轮。
  */
 import { describe, expect, it, vi } from 'vitest'
-import type { Card } from '../../src/protocol/entities'
-import type { ChannelContext, ChannelPlugin, ChannelProgress } from '../../src/protocol/channels'
-import type { PluginManifest } from '../../src/protocol/manifest'
-import type { Fact } from '../../src/kernel/core/types'
-import type { ChannelRegistryEntry } from '../../src/plugins/registry'
-import type { SdkHost } from '../../src/sdk/types'
-import type { ChannelsEffects, ChannelsStore } from '../../src/host/channels'
-import { createChannels } from '../../src/host/channels'
+import type { Card } from '@workbench/protocol/entities'
+import type { ChannelContext, ChannelPlugin, ChannelProgress } from '@workbench/protocol/channels'
+import type { PluginManifest } from '@workbench/protocol/manifest'
+import type { Fact } from '@workbench/kernel/core/types'
+import type { ChannelRegistryEntry } from '@workbench/plugins-registry'
+import type { SdkHost } from '@workbench/capabilities/types'
+import type { ChannelsEffects, ChannelsStore } from '@workbench/host/channels'
+import { createChannels } from '@workbench/host/channels'
 import { sample } from './store/test-support'
 
 const AT = '2026-01-01T00:00:00.000Z'

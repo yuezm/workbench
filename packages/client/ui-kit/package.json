@@ -1,0 +1,9 @@
+{
+  "name": "@workbench/client-ui-kit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "项目覆盖层组件（Field / Panel / Menu / Segmented / Toast）与通用工具",
+  "dependencies": {
+    "@workbench/protocol": "workspace:*"
+  }
+}

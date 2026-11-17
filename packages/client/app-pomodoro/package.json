@@ -1,0 +1,12 @@
+{
+  "name": "@workbench/client-app-pomodoro",
+  "version": "0.0.0",
+  "private": true,
+  "description": "番茄钟 app 插件（计时状态机 + UI）",
+  "dependencies": {
+    "@workbench/app-events": "workspace:*",
+    "@workbench/client-shell": "workspace:*",
+    "@workbench/client-ui-kit": "workspace:*",
+    "@workbench/client-ui-primitives": "workspace:*"
+  }
+}

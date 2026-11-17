@@ -1,16 +1,16 @@
 // @vitest-environment node
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PluginManifest } from '../../../src/protocol/manifest'
-import type { PluginSetting } from '../../../src/protocol/plugins'
+import type { PluginManifest } from '@workbench/protocol/manifest'
+import type { PluginSetting } from '@workbench/protocol/plugins'
 import {
   createPluginSecrets,
   resolvePluginConfig,
   type PluginSecrets,
   type SecretCipher,
-} from '../../../src/host/plugins/settings'
-import { readFeishuConnections } from '../../../src/plugins/channels/feishu'
-import { feishuManifest } from '../../../src/plugins/channels/feishu/manifest'
+} from '@workbench/host/plugins/settings'
+import { readFeishuConnections } from '@workbench/channel-feishu'
+import { feishuManifest } from '@workbench/channel-feishu/manifest'
 
 /**
  * 插件 secret 存储与配置合并（M7 D3/D5）。

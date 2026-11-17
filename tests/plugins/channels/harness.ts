@@ -14,8 +14,8 @@ import type {
   ChannelProgressHandler,
   ChannelSubmitHints,
   ChannelSubmitOutcome,
-} from '../../../src/protocol/channels'
-import type { Card } from '../../../src/protocol/entities'
+} from '@workbench/protocol/channels'
+import type { Card } from '@workbench/protocol/entities'
 import { fakeSdk, type FakeSdk } from '../support/fake-sdk'
 
 /** 合法卡片夹具（open / pending，字段齐全） */

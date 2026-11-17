@@ -44,7 +44,11 @@ export default tseslint.config(
   // 桥接，不得碰 Node 内置，也不得 import 服务端实现。依赖方向 renderer → protocol/shared 单向。
   // 测试目录与源码同构，tests/ 下对应层的用例同样受约束（门禁强度不因搬家而下降）。
   {
-    files: ['src/renderer/**/*.{ts,tsx}', 'tests/renderer/**/*.{ts,tsx}'],
+    files: [
+      'packages/client/*/src/**/*.{ts,tsx}',
+      'apps/web/src/**/*.{ts,tsx}',
+      'tests/renderer/**/*.{ts,tsx}',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -54,37 +58,43 @@ export default tseslint.config(
               // 只按 `node:` 前缀判 Node 内置：裸名字（`http` / `path`）会误伤
               // `protocol/http` 这类同名的跨层契约模块
               group: ['node:*'],
-              message: 'renderer 禁止使用 Node 内置能力，请走 shell 暴露的桥接。',
+              message: '前端包禁止使用 Node 内置能力，请走 shell 暴露的桥接。',
             },
             {
-              group: ['**/src/server/**', '**/server/**'],
-              message:
-                'renderer 不得 import 服务端模块（依赖方向 renderer → protocol/shared 单向）。',
+              group: [
+                '@workbench/server',
+                '@workbench/api-http',
+                '@workbench/bundle-base',
+                '@workbench/bundle-web',
+                '@workbench/host',
+                '@workbench/host-store',
+              ],
+              message: '前端包不得 import 服务端模块（依赖方向 client → protocol/contract 单向）。',
             },
           ],
         },
       ],
     },
   },
-  // 服务端（`src/server`）是装配根 + HTTP 层：不得 import renderer，也不得直接 import 具体插件实现
+  // 服务端（`apps/server` + `@workbench/api-http`）是装配根 + HTTP 层：不得 import 前端包，也不得直接 import 具体插件实现
   // （插件只经注册表取；与 host 同一条口径，方便测试注入）。
   {
-    files: ['src/server/**/*.{ts,tsx}', 'tests/server/**/*.{ts,tsx}'],
+    files: [
+      'apps/server/src/**/*.{ts,tsx}',
+      'packages/api/http/src/**/*.{ts,tsx}',
+      'tests/server/**/*.{ts,tsx}',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
         {
           patterns: [
-            { group: ['**/renderer/**'], message: 'server 不得 import renderer（依赖方向单向）。' },
             {
-              group: [
-                '**/src/plugins/executors/**',
-                '**/plugins/executors/**',
-                '**/src/plugins/sources/**',
-                '**/plugins/sources/**',
-                '**/src/plugins/channels/**',
-                '**/plugins/channels/**',
-              ],
+              group: ['@workbench/client-*'],
+              message: '服务端包不得 import 前端包（依赖方向单向）。',
+            },
+            {
+              group: ['@workbench/executor-*', '@workbench/source-*', '@workbench/channel-*'],
               message: 'server 只通过插件注册表取插件，不直接 import 具体插件实现。',
             },
           ],
@@ -97,29 +107,28 @@ export default tseslint.config(
   // 具体插件实现（executors/sources/channels/apps）由装配根 server 组装，host 不得直接 import。
   // 窗口/HTTP 同样在 server，host 不反向 import（host 本来就与传输无关）。
   {
-    files: ['src/host/**/*.{ts,tsx}'],
+    files: ['packages/host/*/src/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
         {
           patterns: [
             {
-              group: [
-                '**/src/plugins/executors/**',
-                '**/plugins/executors/**',
-                '**/src/plugins/sources/**',
-                '**/plugins/sources/**',
-                '**/src/plugins/channels/**',
-                '**/plugins/channels/**',
-              ],
+              group: ['@workbench/executor-*', '@workbench/source-*', '@workbench/channel-*'],
               message:
                 'host 只通过插件注册表取插件，不直接 import 具体插件实现（依赖方向 host → 注册表）。',
             },
             {
-              group: ['**/src/server/**', '**/server/**'],
+              group: [
+                '@workbench/server',
+                '@workbench/api-http',
+                '@workbench/bundle-base',
+                '@workbench/bundle-web',
+                '@workbench/host-frontend-static',
+              ],
               message: 'host 不得 import 服务端装配层（依赖方向 server → host 单向）。',
             },
-            { group: ['**/renderer/**'], message: 'host 不得 import renderer。' },
+            { group: ['@workbench/client-*'], message: '宿主不得 import 前端包。' },
           ],
         },
       ],
@@ -130,7 +139,7 @@ export default tseslint.config(
   // 插件之间禁止互相 import 用相对路径表达不了（specifier 里没有 plugins 段），由
   // tests/plugins/boundary.test.ts 的源码扫描兜住；tests/ 与 src/ 同构，强度一致。
   {
-    files: ['src/plugins/**/*.{ts,tsx}', 'tests/plugins/**/*.{ts,tsx}'],
+    files: ['packages/plugins/*/src/**/*.{ts,tsx}', 'tests/plugins/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -154,15 +163,17 @@ export default tseslint.config(
             },
             {
               group: [
-                '**/src/host/**',
-                '**/host/**',
-                '**/src/server/**',
-                '**/server/**',
-                '**/renderer/**',
-                '**/src/shared/**',
+                '@workbench/kernel',
+                '@workbench/host',
+                '@workbench/host-store',
+                '@workbench/api-http',
+                '@workbench/server',
+                '@workbench/bundle-*',
+                '@workbench/client-*',
+                '@workbench/contract-api',
               ],
               message:
-                '插件只允许依赖 src/sdk 与 src/protocol（依赖方向 plugins → sdk + protocol）。',
+                '插件只允许依赖 @workbench/protocol、@workbench/capabilities 与 @workbench/plugins-kit。',
             },
           ],
         },
@@ -195,14 +206,16 @@ export default tseslint.config(
             },
             {
               group: [
-                '**/src/host/**',
-                '**/host/**',
-                '**/src/server/**',
-                '**/server/**',
-                '**/renderer/**',
-                '**/src/shared/**',
+                '@workbench/kernel',
+                '@workbench/host',
+                '@workbench/host-store',
+                '@workbench/api-http',
+                '@workbench/server',
+                '@workbench/bundle-*',
+                '@workbench/client-*',
+                '@workbench/contract-api',
               ],
-              message: '插件测试只允许依赖 src/plugins、src/sdk 与 src/protocol。',
+              message: '插件测试只允许依赖插件包、@workbench/capabilities 与 @workbench/protocol。',
             },
           ],
         },
@@ -235,7 +248,12 @@ export default tseslint.config(
               message: '插件 detect 测试不得启动进程或发起网络请求。',
             },
             {
-              group: ['**/src/server/**', '**/server/**', '**/renderer/**', '**/src/shared/**'],
+              group: [
+                '@workbench/server',
+                '@workbench/api-http',
+                '@workbench/client-*',
+                '@workbench/contract-api',
+              ],
               message: '插件 detect 测试只允许依赖插件、sdk、protocol 与宿主可执行文件解析能力。',
             },
           ],
@@ -247,7 +265,7 @@ export default tseslint.config(
   // 能力原件（子进程、可执行文件解析、时钟）由宿主注入，所以 sdk 不直接碰 Node。
   // 与 kernel 段不同，这里不限制 Date.now：sdk 的时钟本来就是宿主注入的。
   {
-    files: ['src/sdk/**/*.{ts,tsx}', 'tests/sdk/**/*.{ts,tsx}'],
+    files: ['packages/sdk/capabilities/src/**/*.{ts,tsx}', 'tests/sdk/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -271,13 +289,20 @@ export default tseslint.config(
             },
             {
               group: [
-                '**/host/**',
-                '**/plugins/**',
-                '**/server/**',
-                '**/renderer/**',
-                '**/shared/**',
+                '@workbench/kernel',
+                '@workbench/host',
+                '@workbench/host-store',
+                '@workbench/api-http',
+                '@workbench/server',
+                '@workbench/bundle-*',
+                '@workbench/client-*',
+                '@workbench/contract-api',
+                '@workbench/plugins-*',
+                '@workbench/executor-*',
+                '@workbench/channel-*',
+                '@workbench/source-*',
               ],
-              message: 'sdk 只允许依赖 src/protocol（依赖方向 sdk → protocol）。',
+              message: 'sdk 只允许依赖 @workbench/protocol（依赖方向 sdk → protocol）。',
             },
           ],
         },
@@ -287,7 +312,7 @@ export default tseslint.config(
   // 架构边界（ARCHITECTURE「边界守则 1」）：kernel 是纯模块，只依赖 src/protocol 的类型；
   // 时间、ID、随机数由宿主在边界传入，所以连 Date.now / Math.random 也禁。
   {
-    files: ['src/kernel/**/*.{ts,tsx}'],
+    files: ['packages/core/kernel/src/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -311,13 +336,21 @@ export default tseslint.config(
             },
             {
               group: [
-                '**/shared/**',
-                '**/server/**',
-                '**/host/**',
-                '**/plugins/**',
-                '**/renderer/**',
+                '@workbench/kernel',
+                '@workbench/host',
+                '@workbench/host-store',
+                '@workbench/api-http',
+                '@workbench/server',
+                '@workbench/bundle-*',
+                '@workbench/client-*',
+                '@workbench/contract-api',
+                '@workbench/capabilities',
+                '@workbench/plugins-*',
+                '@workbench/executor-*',
+                '@workbench/channel-*',
+                '@workbench/source-*',
               ],
-              message: 'kernel 只允许依赖 src/protocol 的类型。',
+              message: 'kernel 只允许依赖 @workbench/protocol 的类型。',
             },
           ],
         },
@@ -333,14 +366,14 @@ export default tseslint.config(
   // 两层拆分（M37）：core 是纯基础（类型 / 常量 / cron / 下次唤醒），不得反向依赖 scopes；
   // 依赖方向只有 scopes → core（以及两者 → protocol）。
   {
-    files: ['src/kernel/core/**/*.{ts,tsx}'],
+    files: ['packages/core/kernel/src/core/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-imports': [
         'error',
         {
           patterns: [
             {
-              group: ['**/scopes/**', '**/kernel/scopes/**'],
+              group: ['@workbench/kernel/scopes/*', '**/scopes/**'],
               message: 'kernel/core 不得依赖 kernel/scopes：依赖方向只有 scopes → core。',
             },
           ],
@@ -402,14 +435,16 @@ export default tseslint.config(
             },
             {
               group: [
-                '**/src/host/**',
-                '**/host/**',
-                '**/src/server/**',
-                '**/server/**',
-                '**/renderer/**',
-                '**/src/shared/**',
+                '@workbench/kernel',
+                '@workbench/host',
+                '@workbench/host-store',
+                '@workbench/api-http',
+                '@workbench/server',
+                '@workbench/bundle-*',
+                '@workbench/client-*',
+                '@workbench/contract-api',
               ],
-              message: '回执 server 契约测试只依赖 src/plugins 与 src/protocol。',
+              message: '回执 server 契约测试只依赖插件包与 @workbench/protocol。',
             },
           ],
         },

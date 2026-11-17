@@ -12,8 +12,8 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
-import type { PluginView } from '../../src/protocol/plugins'
-import type { WorkbenchApi } from '../../src/shared/workbench-api'
+import type { PluginView } from '@workbench/protocol/plugins'
+import type { WorkbenchApi } from '@workbench/contract-api'
 import {
   ISOLATED_CHANNEL_IDS,
   isolatedPluginSettings,

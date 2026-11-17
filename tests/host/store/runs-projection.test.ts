@@ -12,14 +12,14 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { project } from '../../../src/kernel/scopes/project'
-import { KERNEL_VERSION } from '../../../src/kernel/core/types'
-import type { Actor, FactDraft } from '../../../src/kernel/core/types'
-import type { Conversation } from '../../../src/protocol/entities'
-import type { FactPayload, FactType } from '../../../src/protocol/facts'
-import { PROJECTION_TABLES, projectionFormat } from '../../../src/host/schema'
-import { createStore } from '../../../src/host/store/index'
-import { readProjectionMeta } from '../../../src/host/store/projection'
+import { project } from '@workbench/kernel/scopes/project'
+import { KERNEL_VERSION } from '@workbench/kernel/core/types'
+import type { Actor, FactDraft } from '@workbench/kernel/core/types'
+import type { Conversation } from '@workbench/protocol/entities'
+import type { FactPayload, FactType } from '@workbench/protocol/facts'
+import { PROJECTION_TABLES, projectionFormat } from '@workbench/host-store/schema'
+import { createStore } from '@workbench/host-store/index'
+import { readProjectionMeta } from '@workbench/host-store/projection'
 import { createFakeKernel } from './fake-kernel'
 import {
   captureError,

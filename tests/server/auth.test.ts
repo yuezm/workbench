@@ -14,7 +14,7 @@ import {
   parseCookie,
   tokenDigest,
   tokenMatches,
-} from '../../src/server/auth'
+} from '@workbench/api-http/auth'
 
 const TOKEN = 't'.repeat(32)
 

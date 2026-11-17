@@ -8,7 +8,7 @@ import {
   WORKDIR_ENV,
   expandHome,
   resolveWorkdir,
-} from '../../src/server/workdir'
+} from '@workbench/bundle-base/workdir'
 
 const roots: string[] = []
 const tempRoot = (): string => {

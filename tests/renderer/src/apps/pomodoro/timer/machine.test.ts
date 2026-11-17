@@ -5,11 +5,8 @@ import {
   DEFAULT_CONFIG,
   createInitialState,
   reduce,
-} from '../../../../../../src/renderer/src/apps/pomodoro/timer/machine'
-import type {
-  PomodoroConfig,
-  PomodoroState,
-} from '../../../../../../src/renderer/src/apps/pomodoro/timer/types'
+} from '@workbench/client-app-pomodoro/timer/machine'
+import type { PomodoroConfig, PomodoroState } from '@workbench/client-app-pomodoro/timer/types'
 
 const MIN = 60_000
 

@@ -6,7 +6,7 @@
  * 单行 `get` 不会把整表读进来，只有全量遍历才装载全部。
  */
 import { describe, expect, it } from 'vitest'
-import { loadView } from '../../../src/host/store/views'
+import { loadView } from '@workbench/host-store/views'
 import { createMemoryDb, sample } from './test-support'
 
 /** 内存库 + 关闭外键（本用例只测装载路径，不建依赖行）。 */

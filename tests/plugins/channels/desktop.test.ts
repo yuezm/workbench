@@ -1,13 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { NotifyTarget } from '../../../src/protocol/ipc'
+import type { NotifyTarget } from '@workbench/protocol/ipc'
 import {
   desktopChannel,
   desktopManifest,
   NOTIFICATION_BODY,
   notifyTargetOf,
-} from '../../../src/plugins/channels/desktop'
-import { channelById, channels } from '../../../src/plugins/registry'
+} from '@workbench/channel-desktop'
+import { channelById, channels } from '@workbench/plugins-registry'
 import { cardOf, channelHarness } from './harness'
 import { fakeSdk } from '../support/fake-sdk'
 

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { appPlugins } from '../../../../src/renderer/src/shell/registry'
-import { APP_EVENTS } from '../../../../src/shared/apps'
+import { appPlugins } from '@workbench/client-shell/registry'
+import { APP_EVENTS } from '@workbench/app-events'
 
 describe('app 注册表', () => {
   it('注册表非空', () => {

@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { dismissToast, toast, ToastHost } from '../../../../../src/renderer/src/components/ui/toast'
+import { dismissToast, toast, ToastHost } from '@workbench/client-ui-kit/toast'
 
 /**
  * 轻提示：一句成功文案浮一下就走，不占版面、不用人关。

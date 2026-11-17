@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { cn } from '../../../../src/renderer/src/lib/cn'
+import { cn } from '@workbench/client-ui-kit/cn'
 
 describe('cn（shadcn 同款类名合并）', () => {
   it('拼接多个类名', () => {

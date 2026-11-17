@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { Panel } from '../../../../../src/renderer/src/components/ui/panel'
+import { Panel } from '@workbench/client-ui-kit/panel'
 
 describe('Panel', () => {
   it('渲染统一玻璃面板样式与子内容', () => {

@@ -5,14 +5,14 @@
  * 否则 app 就会重新长出自己的 fetch 调用。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { API_PATHS } from '../../../../src/protocol/http'
+import { API_PATHS } from '@workbench/protocol/http'
 import {
   createWebBridge,
   establishSession,
   type EventSourceLike,
   type FetchLike,
   type FetchResponseLike,
-} from '../../../../src/renderer/src/shared/bridge'
+} from '@workbench/client-bridge'
 
 interface Call {
   url: string

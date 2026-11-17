@@ -1,0 +1,6 @@
+{
+  "name": "@workbench/plugins-kit",
+  "version": "0.0.0",
+  "private": true,
+  "description": "插件纯函数工具箱：协议帧解析、argv 展开、回执块、状态归一（只有纯函数，不碰 IO）"
+}

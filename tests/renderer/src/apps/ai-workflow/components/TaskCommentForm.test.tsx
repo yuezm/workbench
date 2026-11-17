@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState, type FormEvent, type ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { TaskCommentForm } from '../../../../../../src/renderer/src/apps/ai-workflow/components/TaskCommentForm'
+import { TaskCommentForm } from '@workbench/client-app-ai-workflow/components/TaskCommentForm'
 
 interface HarnessProps {
   initialValue?: string

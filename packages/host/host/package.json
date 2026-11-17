@@ -1,0 +1,14 @@
+{
+  "name": "@workbench/host",
+  "version": "0.0.0",
+  "private": true,
+  "description": "宿主层：事务/重建、单定时器、spawn、资料落盘、知会、插件装载、启动对账、命令路由",
+  "dependencies": {
+    "@workbench/app-events": "workspace:*",
+    "@workbench/capabilities": "workspace:*",
+    "@workbench/host-store": "workspace:*",
+    "@workbench/kernel": "workspace:*",
+    "@workbench/plugins-registry": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

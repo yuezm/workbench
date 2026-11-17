@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { SettingsNav } from '../../../../../../src/renderer/src/apps/ai-workflow/components/SettingsNav'
+import { SettingsNav } from '@workbench/client-app-ai-workflow/components/SettingsNav'
 
 describe('SettingsNav', () => {
   it('列出七个栏目，标记当前项，点击回调', async () => {

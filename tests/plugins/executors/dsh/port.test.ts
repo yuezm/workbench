@@ -5,10 +5,10 @@
  * 三条能力（probe/models/run）的等价行为，不再经 `createRuntimeExecutors`。
  */
 import { describe, expect, it } from 'vitest'
-import type { RunEvent, Runtime } from '../../../../src/protocol/entities'
-import type { Turn } from '../../../../src/protocol/executor'
-import { dshPlugin } from '../../../../src/plugins/executors/dsh'
-import type { ExecutorContext, SpawnFn } from '../../../../src/sdk/types'
+import type { RunEvent, Runtime } from '@workbench/protocol/entities'
+import type { Turn } from '@workbench/protocol/executor'
+import { dshPlugin } from '@workbench/executor-dsh'
+import type { ExecutorContext, SpawnFn } from '@workbench/capabilities/types'
 import { fakeSdk } from '../../support/fake-sdk'
 
 /** 用真实 node 可执行文件路径，保证 sdk.resolve 命中（spawn 被注入的桩接管）。 */

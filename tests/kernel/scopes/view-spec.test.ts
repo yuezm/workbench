@@ -1,17 +1,17 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { COMMAND_NAMES, type Command } from '../../../src/protocol/commands'
+import { COMMAND_NAMES, type Command } from '@workbench/protocol/commands'
 import type {
   AgentInput,
   ProjectInput,
   RuntimeInput,
   TaskInput,
   WorkflowInput,
-} from '../../../src/protocol/entities'
-import { ENTITY_TABLES } from '../../../src/protocol/entities'
-import { HOST_INPUT_NAMES, type Input } from '../../../src/protocol/inputs'
-import { PROJECTION_TABLES, type ProjectionTable } from '../../../src/kernel/core/types'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
+} from '@workbench/protocol/entities'
+import { ENTITY_TABLES } from '@workbench/protocol/entities'
+import { HOST_INPUT_NAMES, type Input } from '@workbench/protocol/inputs'
+import { PROJECTION_TABLES, type ProjectionTable } from '@workbench/kernel/core/types'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
 
 const workflowInput: WorkflowInput = {
   name: '研发',

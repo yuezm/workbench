@@ -7,7 +7,7 @@
  * `${timestamp}.${body}` 原样交给宿主、以及签名头格式判定）。
  */
 import { describe, expect, it, vi } from 'vitest'
-import type { NetRequest } from '../../../src/sdk/types'
+import type { NetRequest } from '@workbench/capabilities/types'
 import {
   DEFAULT_EVENT_SOURCE,
   createWebhookHandler,
@@ -15,7 +15,7 @@ import {
   readWebhookConfig,
   webhookManifest,
   webhookSource,
-} from '../../../src/plugins/sources/webhook'
+} from '@workbench/source-webhook'
 import { fakeNet, fakeSignatureHeader, type FakeNet } from './fake-net'
 import { sourceHarness } from './harness'
 

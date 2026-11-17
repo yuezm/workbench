@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { RunEvent } from '../../src/protocol/entities'
-import type { Receipt, Turn } from '../../src/protocol/executor'
+import type { RunEvent } from '@workbench/protocol/entities'
+import type { Receipt, Turn } from '@workbench/protocol/executor'
 import {
   WORKER_FRAME_TYPES,
   WORKER_PROTOCOL_VERSION,
@@ -9,7 +9,7 @@ import {
   parseWorkerFrame,
   type HostToWorkerFrame,
   type WorkerClaim,
-} from '../../src/protocol/worker'
+} from '@workbench/protocol/worker'
 
 /**
  * 远端 Worker 协议形状（M7 架构位）：只测纯函数编解码，不碰网络与进程。

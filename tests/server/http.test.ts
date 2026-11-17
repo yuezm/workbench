@@ -9,12 +9,12 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { DirListing, ServerInfo } from '../../src/protocol/http'
-import type { CommandRouter } from '../../src/host/commands'
-import { createAuthenticator, SESSION_COOKIE } from '../../src/server/auth'
-import { createEventStream, type EventStream } from '../../src/server/event-stream'
-import { isSameOrigin, readJsonBody, startWebServer, type ApiDeps } from '../../src/server/http'
-import { StoreError } from '../../src/host/store/index'
+import type { DirListing, ServerInfo } from '@workbench/protocol/http'
+import type { CommandRouter } from '@workbench/host/commands'
+import { createAuthenticator, SESSION_COOKIE } from '@workbench/api-http/auth'
+import { createEventStream, type EventStream } from '@workbench/api-http/event-stream'
+import { isSameOrigin, readJsonBody, startWebServer, type ApiDeps } from '@workbench/api-http/http'
+import { StoreError } from '@workbench/host-store/index'
 
 const TOKEN = 'k'.repeat(32)
 const INFO: ServerInfo = {

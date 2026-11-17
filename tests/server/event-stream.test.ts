@@ -12,7 +12,7 @@ import {
   createEventStream,
   formatSse,
   type StreamSink,
-} from '../../src/server/event-stream'
+} from '@workbench/api-http/event-stream'
 
 interface FakeSink extends StreamSink {
   chunks: string[]

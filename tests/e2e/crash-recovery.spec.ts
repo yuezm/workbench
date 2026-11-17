@@ -9,7 +9,7 @@
  * 应用启动后走与生产完全相同的对账 / 调度路径。
  */
 import { expect, test, type Page } from '@playwright/test'
-import type { WorkbenchApi } from '../../src/shared/workbench-api'
+import type { WorkbenchApi } from '@workbench/contract-api'
 import path from 'node:path'
 import { createTempUserDataDir, launchApp, type LaunchedApp } from './helpers/launch'
 import { isPidAlive, readRecoveryState, seedCrashState, type CrashSeed } from './helpers/seed-crash'

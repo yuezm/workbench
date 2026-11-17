@@ -20,8 +20,8 @@ import {
   projectionFormat,
   tableDdl,
   withTx,
-} from '../../src/host/schema'
-import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '../../src/kernel/core/types'
+} from '@workbench/host-store/schema'
+import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '@workbench/kernel/core/types'
 
 const SAMPLE_AT = '2026-01-01T00:00:00.000Z'
 

@@ -1,8 +1,8 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Command } from '../../../src/protocol/commands'
-import { createStore, StoreError } from '../../../src/host/store/index'
+import type { Command } from '@workbench/protocol/commands'
+import { createStore, StoreError } from '@workbench/host-store/index'
 import { createFakeKernel } from './fake-kernel'
 import { SAMPLE_AT, captureError, createMemoryDb, sequenceIds } from './test-support'
 

@@ -10,8 +10,8 @@ import {
   parseExternalManifest,
   parsePluginFrame,
   secretFieldKeys,
-} from '../../src/protocol/plugin-host'
-import type { PluginManifest } from '../../src/protocol/manifest'
+} from '@workbench/protocol/plugin-host'
+import type { PluginManifest } from '@workbench/protocol/manifest'
 
 const manifest = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   id: 'my-plugin',

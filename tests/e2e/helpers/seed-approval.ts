@@ -12,13 +12,13 @@
  * 返回 id 与只读复查函数所需的键；所有断言都从库文件读，应用运行中亦可（WAL + busy_timeout）。
  */
 import { DatabaseSync } from 'node:sqlite'
-import { openDatabase } from '../../../src/host/db'
-import { createStore } from '../../../src/host/store/index'
-import { decide } from '../../../src/kernel/decide'
-import { nextWakeAt } from '../../../src/kernel/core/next-wake'
-import { project } from '../../../src/kernel/scopes/project'
-import type { Fact, KernelPort } from '../../../src/kernel/core/types'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
+import { openDatabase } from '@workbench/host-store/db'
+import { createStore } from '@workbench/host-store/index'
+import { decide } from '@workbench/kernel/decide'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import { project } from '@workbench/kernel/scopes/project'
+import type { Fact, KernelPort } from '@workbench/kernel/core/types'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
 import type {
   Agent,
   Card,
@@ -27,7 +27,7 @@ import type {
   Runtime,
   Task,
   Workflow,
-} from '../../../src/protocol/entities'
+} from '@workbench/protocol/entities'
 
 const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
 

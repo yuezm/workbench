@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { expandArgs, parseArgsTemplate, type ArgvVars } from '../../../src/plugins/shared/argv'
+import { expandArgs, parseArgsTemplate, type ArgvVars } from '@workbench/plugins-kit/argv'
 
 /** 默认变量：测试按需覆盖单项 */
 const varsOf = (over: Partial<ArgvVars> = {}): ArgvVars => ({

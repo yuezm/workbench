@@ -7,7 +7,7 @@
  * 这层代码也被计入覆盖率，所以适配规则本身要有钉子用例。
  */
 import { describe, expect, it } from 'vitest'
-import type { ExecutorIO, Turn } from '../../src/protocol/executor'
+import type { ExecutorIO, Turn } from '@workbench/protocol/executor'
 import { pluginFromBackend, testContext, type TestBackendOutcome } from './plugin-support'
 
 const usage = { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 }

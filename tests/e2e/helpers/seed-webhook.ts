@@ -8,15 +8,15 @@
  * 4. 断言读临时 userData 里的库文件：`event.received` 事实与规则任务。
  */
 import { DatabaseSync } from 'node:sqlite'
-import { openDatabase } from '../../../src/host/db'
-import { createStore } from '../../../src/host/store/index'
-import { decide } from '../../../src/kernel/decide'
-import { nextWakeAt } from '../../../src/kernel/core/next-wake'
-import { project } from '../../../src/kernel/scopes/project'
-import type { Fact, KernelPort } from '../../../src/kernel/core/types'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
-import type { AutomationRule } from '../../../src/protocol/rules'
-import type { Workflow } from '../../../src/protocol/entities'
+import { openDatabase } from '@workbench/host-store/db'
+import { createStore } from '@workbench/host-store/index'
+import { decide } from '@workbench/kernel/decide'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import { project } from '@workbench/kernel/scopes/project'
+import type { Fact, KernelPort } from '@workbench/kernel/core/types'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import type { Workflow } from '@workbench/protocol/entities'
 
 const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
 

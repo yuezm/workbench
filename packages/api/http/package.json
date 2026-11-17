@@ -1,0 +1,12 @@
+{
+  "name": "@workbench/api-http",
+  "version": "0.0.0",
+  "private": true,
+  "description": "HTTP 传输：三动词路由 / SSE / 鉴权 / 应答信封 / 目录浏览 / 知会",
+  "dependencies": {
+    "@workbench/host": "workspace:*",
+    "@workbench/host-store": "workspace:*",
+    "@workbench/host-frontend-static": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

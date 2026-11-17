@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { COMMAND_NAMES, type Command, type CommandName } from '../../src/protocol/commands'
+import { COMMAND_NAMES, type Command, type CommandName } from '@workbench/protocol/commands'
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false

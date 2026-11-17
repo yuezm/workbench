@@ -1,10 +1,7 @@
 // @vitest-environment node
 import { vi } from 'vitest'
 import { describe, expect, it } from 'vitest'
-import {
-  createRingPlayer,
-  type RingAudioContext,
-} from '../../../../../src/renderer/src/apps/pomodoro/audio'
+import { createRingPlayer, type RingAudioContext } from '@workbench/client-app-pomodoro/audio'
 
 interface RecordedOscillator {
   type: string

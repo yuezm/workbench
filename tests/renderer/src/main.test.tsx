@@ -8,9 +8,9 @@
  * ③ 知会管道在 render 之前接上，并且接的是 shell store 的 `pushOpenTarget`。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NoticeEvent } from '../../../src/protocol/http'
-import type { OpenTarget } from '../../../src/protocol/ipc'
-import type { WorkbenchApi } from '../../../src/shared/workbench-api'
+import type { NoticeEvent } from '@workbench/protocol/http'
+import type { OpenTarget } from '@workbench/protocol/ipc'
+import type { WorkbenchApi } from '@workbench/contract-api'
 
 const { createRootMock, renderMock, infoMock, onNoticeMock } = vi.hoisted(() => {
   const renderMock = vi.fn()
@@ -38,7 +38,7 @@ const fakeBridge: WorkbenchApi = {
   notify: vi.fn(),
 }
 
-vi.mock('../../../src/renderer/src/shared/bridge', () => ({
+vi.mock('@workbench/client-bridge', () => ({
   createWebBridge: () => fakeBridge,
   establishSession: vi.fn(async () => true),
 }))
@@ -52,9 +52,8 @@ describe('renderer 入口 main.tsx', () => {
 
   it('服务连不上：渲染启动失败页，不装配内核', async () => {
     infoMock.mockRejectedValue(new Error('Failed to fetch'))
-    const { StartupFailure } =
-      await import('../../../src/renderer/src/shell/components/StartupFailure')
-    await import('../../../src/renderer/src/main')
+    const { StartupFailure } = await import('@workbench/client-shell/components/StartupFailure')
+    await import('@workbench/web/main')
 
     await vi.waitFor(() => expect(renderMock).toHaveBeenCalledTimes(1))
     const element = renderMock.mock.calls[0]?.[0] as { type: unknown }
@@ -75,7 +74,7 @@ describe('renderer 入口 main.tsx', () => {
       clients: 1,
       pid: 1,
     })
-    await import('../../../src/renderer/src/main')
+    await import('@workbench/web/main')
 
     await vi.waitFor(() => expect(renderMock).toHaveBeenCalledTimes(1))
     expect(infoMock).toHaveBeenCalledTimes(1)
@@ -96,8 +95,8 @@ describe('renderer 入口 main.tsx', () => {
       clients: 1,
       pid: 1,
     })
-    await import('../../../src/renderer/src/main')
-    const openTargetModule = await import('../../../src/renderer/src/shell/openTarget')
+    await import('@workbench/web/main')
+    const openTargetModule = await import('@workbench/client-shell/openTarget')
 
     await vi.waitFor(() => expect(onNoticeMock).toHaveBeenCalledTimes(1))
     const handler = onNoticeMock.mock.calls[0]?.[0] as (notice: NoticeEvent) => void

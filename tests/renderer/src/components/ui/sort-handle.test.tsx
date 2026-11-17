@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { SortHandle } from '../../../../../src/renderer/src/components/ui/sort-handle'
+import { SortHandle } from '@workbench/client-ui-kit/sort-handle'
 
 /**
  * 拖拽抓手：拖拽本身不可键盘操作，抓手上的 ↑ / ↓ 是排序的键盘路径（SPEC-ui §10 可操作性）。

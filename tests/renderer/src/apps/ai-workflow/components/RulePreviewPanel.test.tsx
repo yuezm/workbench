@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { RulePreview } from '../../../../../../src/protocol/rules'
-import { RulePreviewPanel } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RulePreviewPanel'
+import type { RulePreview } from '@workbench/protocol/rules'
+import { RulePreviewPanel } from '@workbench/client-app-ai-workflow/components/RulePreviewPanel'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 let kernel: FakeKernel

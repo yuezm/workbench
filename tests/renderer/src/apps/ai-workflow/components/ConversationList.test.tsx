@@ -1,11 +1,11 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { Agent, Conversation } from '../../../../../../src/protocol/entities'
+import type { Agent, Conversation } from '@workbench/protocol/entities'
 import {
   ConversationList,
   type ConversationListProps,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/ConversationList'
+} from '@workbench/client-app-ai-workflow/components/ConversationList'
 
 const agent: Agent = {
   id: 'a1',

@@ -11,7 +11,7 @@ import {
   sortByEntityOrder,
   subscribeEntityOrder,
   useEntityOrder,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/model/entity-order'
+} from '@workbench/client-app-ai-workflow/model/entity-order'
 
 /**
  * 实体显示顺序（智能体 / 工作流）。
@@ -129,8 +129,7 @@ describe('顺序 store（渲染层偏好，落 localStorage）', () => {
   it('模块加载时从本地存储恢复顺序', async () => {
     window.localStorage.setItem(ENTITY_ORDER_STORAGE_KEYS.agent, '["a2","a1"]')
     vi.resetModules()
-    const fresh =
-      await import('../../../../../../src/renderer/src/apps/ai-workflow/model/entity-order')
+    const fresh = await import('@workbench/client-app-ai-workflow/model/entity-order')
     expect(fresh.getEntityOrder('agent')).toEqual(['a2', 'a1'])
     expect(fresh.getEntityOrder('workflow')).toEqual([])
   })
@@ -148,8 +147,7 @@ describe('顺序 store（渲染层偏好，落 localStorage）', () => {
       throw new Error('access denied')
     })
     vi.resetModules()
-    const fresh =
-      await import('../../../../../../src/renderer/src/apps/ai-workflow/model/entity-order')
+    const fresh = await import('@workbench/client-app-ai-workflow/model/entity-order')
     expect(fresh.getEntityOrder('agent')).toEqual([])
     expect(fresh.getEntityOrder('workflow')).toEqual([])
   })

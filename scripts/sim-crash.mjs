@@ -11,7 +11,7 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { createServer } from 'vite'
+import { createLoader } from './ts-loader.mjs'
 
 const restarts = Number(process.argv[2] ?? 20)
 const seed = Number(process.argv[3] ?? 1)
@@ -27,20 +27,14 @@ const rng = () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296
 }
 
-const server = await createServer({
-  configFile: false,
-  server: { middlewareMode: true },
-  appType: 'custom',
-  logLevel: 'error',
-})
-const load = async (path) => server.ssrLoadModule(path)
-const { openDatabase } = await load('/src/host/db.ts')
-const { createStore } = await load('/src/host/store/index.ts')
+const { load, close } = await createLoader()
+const { openDatabase } = await load('/packages/host/store/src/db.ts')
+const { createStore } = await load('/packages/host/store/src/index.ts')
 const kernel = {
-  decide: (await load('/src/kernel/decide.ts')).decide,
-  project: (await load('/src/kernel/scopes/project.ts')).project,
-  viewSpec: (await load('/src/kernel/scopes/view-spec.ts')).viewSpec,
-  nextWakeAt: (await load('/src/kernel/core/next-wake.ts')).nextWakeAt,
+  decide: (await load('/packages/core/kernel/src/decide.ts')).decide,
+  project: (await load('/packages/core/kernel/src/scopes/project.ts')).project,
+  viewSpec: (await load('/packages/core/kernel/src/scopes/view-spec.ts')).viewSpec,
+  nextWakeAt: (await load('/packages/core/kernel/src/core/next-wake.ts')).nextWakeAt,
 }
 const { checkInvariants } = await load('/tests/sim/invariants.ts')
 
@@ -125,7 +119,7 @@ for (let round = 1; round <= restarts; round += 1) {
   rmSync(`${dbPath}-shm`, { force: true })
 }
 
-await server.close()
+await close()
 if (process.exitCode !== 1) {
   process.stdout.write(`crash-sim ok restarts=${restarts} facts=${totalFacts} db=${dbPath}\n`)
 }

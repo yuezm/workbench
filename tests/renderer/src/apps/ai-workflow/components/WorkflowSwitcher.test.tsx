@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { WorkflowWithStages } from '../../../../../../src/protocol/entities'
-import { WorkflowSwitcher } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowSwitcher'
+import type { WorkflowWithStages } from '@workbench/protocol/entities'
+import { WorkflowSwitcher } from '@workbench/client-app-ai-workflow/components/WorkflowSwitcher'
 
 function wf(id: string, name: string): WorkflowWithStages {
   return { id, name, description: '', createdAt: 't', stages: [] }

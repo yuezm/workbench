@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { Input } from '../../../../../src/renderer/src/components/ui/input'
+import { Input } from '@workbench/client-ui-primitives/input'
 
 describe('Input（shadcn 基座）', () => {
   it('渲染原生 input 语义与统一外观', () => {

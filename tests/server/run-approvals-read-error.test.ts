@@ -19,7 +19,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   }
 })
 
-import { readRunApprovals } from '../../src/server/run-approvals'
+import { readRunApprovals } from '@workbench/api-http/run-approvals'
 
 describe('main/run-approvals · 读取失败降级', () => {
   const dirs: string[] = []

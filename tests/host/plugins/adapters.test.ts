@@ -1,19 +1,19 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { Card } from '../../../src/protocol/entities'
-import type { ChannelContext } from '../../../src/protocol/channels'
-import type { PluginManifest } from '../../../src/protocol/manifest'
-import { PLUGIN_HOST_PROTOCOL_VERSION } from '../../../src/protocol/plugin-host'
-import type { RawEvent } from '../../../src/protocol/inputs'
-import type { SourceContext } from '../../../src/sdk/types'
-import type { Spawned, SpawnFn } from '../../../src/sdk/types'
+import type { Card } from '@workbench/protocol/entities'
+import type { ChannelContext } from '@workbench/protocol/channels'
+import type { PluginManifest } from '@workbench/protocol/manifest'
+import { PLUGIN_HOST_PROTOCOL_VERSION } from '@workbench/protocol/plugin-host'
+import type { RawEvent } from '@workbench/protocol/inputs'
+import type { SourceContext } from '@workbench/capabilities/types'
+import type { Spawned, SpawnFn } from '@workbench/capabilities/types'
 import {
   createExternalChannelPlugin,
   createExternalSourcePlugin,
   type ExternalAdapterOptions,
-} from '../../../src/host/plugins/adapters'
-import type { ExternalPluginEntry } from '../../../src/host/plugins/discover'
+} from '@workbench/host/plugins/adapters'
+import type { ExternalPluginEntry } from '@workbench/host/plugins/discover'
 import { fakeSdk } from '../../plugins/support/fake-sdk'
 
 /**

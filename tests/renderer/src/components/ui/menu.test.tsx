@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { Menu, type MenuSection } from '../../../../../src/renderer/src/components/ui/menu'
+import { Menu, type MenuSection } from '@workbench/client-ui-kit/menu'
 
 /** 两条分组、三个条目：第一组无标题，第二组带标题 */
 function buildSections(calls: string[]): MenuSection[] {

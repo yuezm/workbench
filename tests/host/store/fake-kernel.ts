@@ -5,7 +5,7 @@
  * 默认覆盖 store 用得到的最小命令集（工作流增删、任务增删移、运行时/智能体新建）；
  * 用例可整体替换 `decide` / `project` / `viewSpec` 来模拟拒绝、抛错、并发写者。
  */
-import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '../../../src/protocol/entities'
+import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
 import type {
   AgentCreateCommand,
   RuntimeCreateCommand,
@@ -15,9 +15,9 @@ import type {
   TaskRemoveCommand,
   WorkflowCreateCommand,
   WorkflowRemoveCommand,
-} from '../../../src/protocol/commands'
-import type { Input } from '../../../src/protocol/inputs'
-import type { StageInput } from '../../../src/protocol/entities'
+} from '@workbench/protocol/commands'
+import type { Input } from '@workbench/protocol/inputs'
+import type { StageInput } from '@workbench/protocol/entities'
 import type {
   Actor,
   Change,
@@ -31,8 +31,8 @@ import type {
   ProjectionTable,
   Reason,
   View,
-} from '../../../src/kernel/core/types'
-import { PROJECTION_TABLES } from '../../../src/host/schema'
+} from '@workbench/kernel/core/types'
+import { PROJECTION_TABLES } from '@workbench/host-store/schema'
 import { sample } from './test-support'
 
 const OWNER: Actor = { kind: 'owner', via: 'ui' }

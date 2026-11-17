@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { FormError } from '../../../../../src/renderer/src/components/ui/form-error'
+import { FormError } from '@workbench/client-ui-kit/form-error'
 
 describe('FormError', () => {
   it('空文案不渲染（null / undefined / 空串）', () => {

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
-import { detectClaude } from '../../../../src/plugins/executors/claude/detect'
+import { detectClaude } from '@workbench/executor-claude/detect'
 import { fakeSdk } from '../../support/fake-sdk'
 
 /**
@@ -10,7 +10,7 @@ import { fakeSdk } from '../../support/fake-sdk'
  * 查找，查不到时按命令名约定回退（`detect.ts` 的 `?? { command, label }`）。本文件整体
  * 替换清单来模拟「清单缺席」——不改变插件行为，只验证它的独立可测性。
  */
-vi.mock('../../../../src/plugins/shared/cli-catalog', () => ({
+vi.mock('@workbench/plugins-kit/cli-catalog', () => ({
   CLI_CANDIDATES: [{ command: 'dsh', label: 'DeepSeek Harness' }],
 }))
 

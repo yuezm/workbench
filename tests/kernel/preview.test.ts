@@ -6,10 +6,10 @@
  * 停用规则也要列出来（标 `enabled:false`）——用户要能看见「这条规则本来会接，只是关着」。
  */
 import { describe, expect, it } from 'vitest'
-import type { Workflow, WorkflowStage } from '../../src/protocol/entities'
-import type { AutomationRule } from '../../src/protocol/rules'
-import { previewEvent } from '../../src/kernel/scopes/rules'
-import type { View } from '../../src/kernel/core/types'
+import type { Workflow, WorkflowStage } from '@workbench/protocol/entities'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import { previewEvent } from '@workbench/kernel/scopes/rules'
+import type { View } from '@workbench/kernel/core/types'
 
 const CREATED = '2026-11-13T00:00:00.000Z'
 

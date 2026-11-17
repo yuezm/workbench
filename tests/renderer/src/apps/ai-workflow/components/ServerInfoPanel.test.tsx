@@ -1,10 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
-import { ServerInfoPanel } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ServerInfoPanel'
-import {
-  resetServerInfoForTest,
-  setServerInfo,
-} from '../../../../../../src/renderer/src/shell/server-info'
+import { ServerInfoPanel } from '@workbench/client-app-ai-workflow/components/ServerInfoPanel'
+import { resetServerInfoForTest, setServerInfo } from '@workbench/client-shell/server-info'
 
 /** 设置 / 服务：只读展示服务状态与数据目录 */
 describe('ServerInfoPanel', () => {

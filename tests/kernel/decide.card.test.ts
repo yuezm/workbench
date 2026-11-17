@@ -7,7 +7,7 @@
  * 夹具只装内核判定需要的切片（runs / runs 的 taskId / cards），其余投影表留空。
  */
 import { describe, expect, it } from 'vitest'
-import type { Card, Conversation, RunRow } from '../../src/protocol/entities'
+import type { Card, Conversation, RunRow } from '@workbench/protocol/entities'
 import type {
   CardAnsweredPayload,
   CardDeliveredPayload,
@@ -18,12 +18,12 @@ import type {
   EventReceivedPayload,
   RunQueuedPayload,
   RunWaitingPayload,
-} from '../../src/protocol/facts'
-import type { Receipt } from '../../src/protocol/inputs'
-import { decide } from '../../src/kernel/decide'
-import { nextWakeAt } from '../../src/kernel/core/next-wake'
-import { answerPrompt, laterPrompt } from '../../src/kernel/scopes/prompt'
-import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
+} from '@workbench/protocol/facts'
+import type { Receipt } from '@workbench/protocol/inputs'
+import { decide } from '@workbench/kernel/decide'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import { answerPrompt, laterPrompt } from '@workbench/kernel/scopes/prompt'
+import type { Environment, Id, IdKind, Limits, View } from '@workbench/kernel/core/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
 const LATER = '2026-11-04T13:00:00.000Z'

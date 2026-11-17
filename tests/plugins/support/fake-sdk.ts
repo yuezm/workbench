@@ -15,7 +15,7 @@ import type {
   Sdk,
   SpawnFn,
   SdkPaths,
-} from '../../../src/sdk/types'
+} from '@workbench/capabilities/types'
 
 export interface FakeSdkOverrides {
   spawn?: SpawnFn

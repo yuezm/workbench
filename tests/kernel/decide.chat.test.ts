@@ -13,12 +13,12 @@ import type {
   Project,
   RunRow,
   Runtime,
-} from '../../src/protocol/entities'
-import { decide } from '../../src/kernel/decide'
-import { receiptBlockHint } from '../../src/kernel/scopes/prompt'
-import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
-import type { ThreadRow } from '../../src/protocol/thread'
-import type { Environment, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
+} from '@workbench/protocol/entities'
+import { decide } from '@workbench/kernel/decide'
+import { receiptBlockHint } from '@workbench/kernel/scopes/prompt'
+import { CHAT_RECEIPT_KEYS } from '@workbench/protocol/receipt-keys'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import type { Environment, Id, IdKind, Limits, View } from '@workbench/kernel/core/types'
 
 const NOW = '2026-11-04T12:00:00.000Z'
 const CREATED = '2026-01-01T00:00:00.000Z'

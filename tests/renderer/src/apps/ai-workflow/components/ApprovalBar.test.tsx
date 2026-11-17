@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type { Card } from '../../../../../../src/protocol/entities'
-import { ApprovalBar } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ApprovalBar'
+import type { Card } from '@workbench/protocol/entities'
+import { ApprovalBar } from '@workbench/client-app-ai-workflow/components/ApprovalBar'
 
 const card: Card = {
   id: 'card-1',

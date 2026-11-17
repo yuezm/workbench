@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { RunEvent } from '../../../src/protocol/entities'
-import type { ExecutorIO, Receipt, Turn } from '../../../src/protocol/executor'
-import type { RemoteTransport } from '../../../src/protocol/worker'
-import type { ExecutorContext } from '../../../src/sdk/types'
-import { createRemoteExecutor } from '../../../src/plugins/executors/remote'
-import { remoteManifest } from '../../../src/plugins/executors/remote/manifest'
+import type { RunEvent } from '@workbench/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '@workbench/protocol/executor'
+import type { RemoteTransport } from '@workbench/protocol/worker'
+import type { ExecutorContext } from '@workbench/capabilities/types'
+import { createRemoteExecutor } from '@workbench/executor-remote'
+import { remoteManifest } from '@workbench/executor-remote/manifest'
 
 /**
  * `remote` 执行器插件（M7 架构位）：只测「无传输的明确失败」与「有传输时的转发」。

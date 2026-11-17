@@ -48,18 +48,24 @@ flowchart TB
 
 浏览器只经同源 HTTP + 一条 SSE 长连接访问服务；没有 IPC、没有窗口、没有安装包。
 
-依赖方向（谁可以 import 谁；ESLint 强制）：
+依赖方向（谁可以 import 谁；包名 + ESLint + `scripts/check-packages.mjs` 三重强制）：
 
 ```
-kernel   ──▶ protocol（仅类型）；不 import node:fs / node:child_process / 网络
-sdk      ──▶ protocol（仅类型）
-plugins  ──▶ sdk + protocol；不 import host 内部实现，不 import 其它插件
-host     ──▶ kernel + protocol + sdk + 插件注册表；不 import renderer / server
-server   ──▶ host + kernel + protocol + 插件注册表；不 import renderer / 具体插件实现
-renderer ──▶ protocol + shared 类型 + 自己的 bridge；不 import server / Node 内置
+@workbench/kernel       ──▶ @workbench/protocol；不 import node:* / 时钟 / 随机数 / 网络
+@workbench/capabilities ──▶ @workbench/protocol
+@workbench/plugins-*    ──▶ @workbench/protocol + capabilities + plugins-kit；不 import host / 其它插件
+@workbench/host         ──▶ kernel + protocol + capabilities + plugins-registry；不 import server / 前端
+@workbench/host-store   ──▶ kernel + protocol（唯一写库点）
+@workbench/api-http     ──▶ host + protocol + host-frontend-static
+@workbench/bundle-*     ──▶ 服务端全域（装配层）；闭包里不得出现前端包
+apps/server             ──▶ bundle-base + bundle-web + api-http
+@workbench/client-*     ──▶ protocol（仅类型）+ contract + client 内部；不 import 服务端 / Node 内置
+apps/web                ──▶ client-* + protocol + contract
 ```
 
-插件唯一的跨插件复用例外：`src/plugins/shared/` 只放纯函数（协议帧解析、参数转 argv）。
+拆分前的老文档里 `src/<层>/` 的写法，一律理解为对应的 `packages/<域>/<包>/src/`（对照表见 [package-split-plan](./planning/package-split-plan.md)）。
+
+插件唯一的跨插件复用例外：`@workbench/plugins-kit`（原 `plugins/shared/`）只放纯函数（协议帧解析、参数转 argv）。
 
 ## 内核
 
@@ -149,7 +155,7 @@ Agent 没有选择权：只能在回执里 `ask`（拍板）、`events`（再触
 - 交付流水线**不是新插件类型**：它是「自动化规则 + 智能体 + 项目配置」的组合（照抄 autoloop 结论）。
 - **定时（cron）不是 source 插件**：规则里的 cron 由内核 `clock.tick` 派生事实，解析与下一次触发时刻都在纯内核里。
 - 插件之间禁止互相 import；副作用只能经 `sdk` 暴露的能力（M3：日志、毫秒时钟、路径、配置、受 `capabilities` 约束的 process）并受 `capabilities` 约束。
-- **注册表是唯一静态注册点**：`src/plugins/registry.ts` 导出 `executors: ReadonlyArray<{ key, label, manifest, plugin }>`，数组顺序即 UI 下拉与 detect 输出顺序。`main` 是唯一 import 它的装配根；`host/executor-registry.ts` 只按 `runtime.executorKey` 从注入的清单里取端口，未知 key 返回 `null`，由调度器落 `runtime_missing` 兜底终态——宿主不 import 任何具体插件实现。
+- **注册表是唯一静态注册点**：`@workbench/plugins-registry` 导出 `executors: ReadonlyArray<{ key, label, manifest, plugin }>`，数组顺序即 UI 下拉与 detect 输出顺序。`main` 是唯一 import 它的装配根；`@workbench/host` 的 `executor-registry` 只按 `runtime.executorKey` 从注入的清单里取端口，未知 key 返回 `null`，由调度器落 `runtime_missing` 兜底终态——宿主不 import 任何具体插件实现。
 - 内置插件编译期注册；第三方插件从 `userData/plugins/<kind>/<id>/` 加载，v1 不开放执行，M7 后以**子进程 + stdio JSONL** 接入。
 
 ### 对象分层（什么算插件）
@@ -168,7 +174,7 @@ Agent 没有选择权：只能在回执里 `ask`（拍板）、`events`（再触
 
 - **host**：开库、迁移/重建、装配插件、对账租约、单定时器、spawn 子进程、发通知、托住窗口与托盘。它是唯一有副作用的层。
 - **传输**：收窄成三个动词——`dispatch(命令)`、`query(视图)`、`subscribe(事实增量)`，走同源 HTTP + SSE（`protocol/http.ts` 的 `API_PATHS`）；不再是一张 30 余方法的 RPC 表。
-- **renderer**：`kernelStore` 持有快照 + 按 `seq` 应用增量；app 插件只声明视图与组件，不再自己算「执行中」。浏览器侧唯一传输实现是 `renderer/src/shared/bridge.ts`。
+- **renderer**：`kernelStore` 持有快照 + 按 `seq` 应用增量；app 插件只声明视图与组件，不再自己算「执行中」。浏览器侧唯一传输实现是 `@workbench/client-bridge`。
 - **聊天与运行帧**：执行器的帧实时走旁路给 UI 显示，同时**按批写 `run.frames` 事实**，重建后事件流完整；一轮结束写终态事实与 `message.appended`。逐帧单独入账才是不做的（日志膨胀），不是「不入账」。
 
 ## 一次运行的完整链路
@@ -206,7 +212,7 @@ sequenceDiagram
 - 启动时 `projection_meta.format` 不匹配或 `seq` 落后 → 同一事务内从 `facts` 重建；不再手写 12-step 迁移。
 - v2 存量数据在 M1 按表分批写成 `snapshot.imported` 事实（无 `cause` 的导入根，`timeline` 标明「迁移导入」，不伪造因果）；此后日志即唯一权威。
 - `run_events` 由 `run.frames` 批量事实派生，可重建；聊天帧同规则。
-- 组织：`src/kernel/`（纯）· `src/protocol/`（校验）· `src/sdk/`（插件能力类型）· `src/host/`（装配）· `src/plugins/`（四类）· `src/renderer/src/{shell,apps}`。
+- 组织：`apps/{server,web}`（可启动/可构建的壳）+ `packages/{core,host,api,plugins,bundle,client,contract,sdk}/<包>`（能力与装配）。服务端是产品本体：`apps/server` 没有 Web 产物也照常起（`/` 返回纯 API 说明），`packages/bundle/web` 只是可选的界面挂载层。拆分过程与包清单见 [package-split-plan](./planning/package-split-plan.md)；`scripts/check-packages.mjs` 守依赖方向，`scripts/gen-workspace-paths.mjs` 守包名解析。
 
 ## 关键决策
 
@@ -226,11 +232,11 @@ sequenceDiagram
 
 ## 边界守则（可检查）
 
-1. `src/kernel/**` 不得出现 `node:fs`、`node:child_process`、`fetch`、`node:http`、`Date.now()`、`Math.random()`、`randomUUID()`。
+1. `packages/core/kernel/src/**` 不得出现 `node:fs`、`node:child_process`、`fetch`、`node:http`、`Date.now()`、`Math.random()`、`randomUUID()`。
    1b. 两层方向：`core/` 不得 import `scopes/`（ESLint `no-restricted-imports`）；`decide.ts` 只做表驱动分派，不放业务分支。
-2. `src/renderer/**` 不得 import Node 内置或 `src/server/**`；浏览器侧只有 `shared/bridge.ts` 一个传输实现（ESLint + `tests/architecture.test.ts` 双保险）。
+2. `packages/client/*` 与 `apps/web` 不得 import Node 内置或服务端包；浏览器侧只有 `@workbench/client-bridge` 一个传输实现（ESLint + `tests/architecture.test.ts` 双保险）。
 3. 只有 `host` 能写库、能 spawn；`server` 负责传输与生命周期，不写业务表；`kernel` 只接收 `view`、只返回 `facts`。
-4. 插件不得 import `src/host/**` 内部实现、不得 import 其它插件、不得直连数据库；副作用只经 `sdk` 且必须声明 `capabilities`；跨插件纯函数只放 `src/plugins/shared/`。宿主不得 import 具体插件实现，只接收装配根注入的注册表清单。
+4. 插件不得 import 宿主包内部实现、不得 import 其它插件、不得直连数据库；副作用只经 `@workbench/capabilities` 且必须声明 `capabilities`；跨插件纯函数只放 `@workbench/plugins-kit`。宿主不得 import 具体插件实现，只接收装配根注入的注册表清单。
 5. `viewSpec(input)` 必须声明投影切片，禁止全表装载；性能预算按「装载 + 决策」一起算。
 6. 事件里的文字只能进资料文件与 `summary` 字段；`cwd/executor/access` 出现在事件里直接拒收；提示词不进命令行拼接。
 7. 阶段语义（`SPEC-ai-workflow.md` 的 15 条硬约束）一条不改；阶段 id 稳定、删除用 tombstone。
@@ -247,7 +253,7 @@ sequenceDiagram
 | 运行帧不入账，重建丢事件流    | 帧按批写 `run.frames` 事实（单批 ≤500），`run_events` 可重建；实时旁路只是显示                                                  |
 | 投影表清单三处不一致          | 以「数据」一节为准；`rules`/`plugin_config` 都从事实派生                                                                        |
 | cron 归属三处矛盾             | cron 是内核规则，解析与时区墙钟在 `kernel/cron.ts`；夏令时跳过不补、重复只触发一次                                              |
-| 执行器没有合法 spawn 途径     | 副作用统一走 `src/sdk`，按 `capabilities` 授权；跨插件复用只放 `plugins/shared/` 纯函数                                         |
+| 执行器没有合法 spawn 途径     | 副作用统一走 `@workbench/capabilities`，按 `capabilities` 授权；跨插件复用只放 `plugins-kit` 纯函数                             |
 | 单实例/WAL/导出缺失           | M0 起强制：单实例锁、WAL、`integrity_check`、事实导出                                                                           |
 
 ## 验收与度量

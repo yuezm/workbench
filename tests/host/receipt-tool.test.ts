@@ -14,7 +14,7 @@ import {
   RECEIPT_TOOL_ENV_KEY,
   RECEIPT_TOOL_SERVER_ENV_KEY,
   resolveReceiptTool,
-} from '../../src/host/receipt-tool'
+} from '@workbench/host/receipt-tool'
 
 const ENABLED = { [RECEIPT_TOOL_ENV_KEY]: '1' }
 

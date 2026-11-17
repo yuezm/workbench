@@ -5,8 +5,8 @@
  * - `emit` 把事件记进 `emitted`，供「通过才产事件、失败零事件」断言；
  * - `logs` 收集插件 `sdk.log` 的调用，供「未配置时说明原因」断言。
  */
-import type { RawEvent } from '../../../src/protocol/inputs'
-import type { Sdk, SourceContext } from '../../../src/sdk/types'
+import type { RawEvent } from '@workbench/protocol/inputs'
+import type { Sdk, SourceContext } from '@workbench/capabilities/types'
 import { fakeSdk, type FakeSdk } from '../support/fake-sdk'
 import { fakeNet, type FakeNet } from './fake-net'
 

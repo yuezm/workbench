@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PomodoroPage } from '../../../../../src/renderer/src/apps/pomodoro/PomodoroPage'
+import { PomodoroPage } from '@workbench/client-app-pomodoro/PomodoroPage'
 
 afterEach(() => {
   vi.unstubAllGlobals()

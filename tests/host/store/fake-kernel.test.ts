@@ -9,12 +9,12 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../../src/protocol/entities'
-import type { Command } from '../../../src/protocol/commands'
-import type { FactPayload, FactType } from '../../../src/protocol/facts'
-import type { Change, Environment, Fact, FactDraft, Id, View } from '../../../src/kernel/core/types'
-import { PROJECTION_TABLES } from '../../../src/host/schema'
-import { DEFAULT_LIMITS } from '../../../src/host/store/index'
+} from '@workbench/protocol/entities'
+import type { Command } from '@workbench/protocol/commands'
+import type { FactPayload, FactType } from '@workbench/protocol/facts'
+import type { Change, Environment, Fact, FactDraft, Id, View } from '@workbench/kernel/core/types'
+import { PROJECTION_TABLES } from '@workbench/host-store/schema'
+import { DEFAULT_LIMITS } from '@workbench/host-store/index'
 import { createFakeKernel, defaultDecide, defaultProject } from './fake-kernel'
 import { SAMPLE_AT, sample, sampleProbe } from './test-support'
 

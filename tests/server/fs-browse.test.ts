@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { BrowseError, expandHome, listDirectories } from '../../src/server/fs-browse'
+import { BrowseError, expandHome, listDirectories } from '@workbench/api-http/fs-browse'
 
 const HOME = path.resolve(path.join(path.sep, 'home', 'me'))
 const created: string[] = []

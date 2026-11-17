@@ -5,9 +5,9 @@
  * 只构造 `View` 假数据，不起 DB；排版在 `tests/kernel/prompt.test.ts`。
  */
 import { describe, expect, it } from 'vitest'
-import type { RunRow, Task, Workflow, WorkflowStage } from '../../../src/protocol/entities'
-import type { View } from '../../../src/kernel/core/types'
-import { sourceHandoffOf } from '../../../src/kernel/scopes/handoff-source'
+import type { RunRow, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
+import type { View } from '@workbench/kernel/core/types'
+import { sourceHandoffOf } from '@workbench/kernel/scopes/handoff-source'
 
 const AT = '2026-11-01T00:00:00.000Z'
 

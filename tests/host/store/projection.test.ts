@@ -1,14 +1,14 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { KERNEL_VERSION } from '../../../src/kernel/core/types'
-import { project as kernelProject } from '../../../src/kernel/scopes/project'
-import type { Command } from '../../../src/protocol/commands'
-import type { Card } from '../../../src/protocol/entities'
-import { projectionFormat } from '../../../src/host/schema'
-import { createStore } from '../../../src/host/store/index'
+import { KERNEL_VERSION } from '@workbench/kernel/core/types'
+import { project as kernelProject } from '@workbench/kernel/scopes/project'
+import type { Command } from '@workbench/protocol/commands'
+import type { Card } from '@workbench/protocol/entities'
+import { projectionFormat } from '@workbench/host-store/schema'
+import { createStore } from '@workbench/host-store/index'
 import { createFakeKernel } from './fake-kernel'
-import { readProjectionMeta, rebuildProjection } from '../../../src/host/store/projection'
+import { readProjectionMeta, rebuildProjection } from '@workbench/host-store/projection'
 import {
   SAMPLE_AT,
   countRows,

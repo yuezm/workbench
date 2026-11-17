@@ -8,12 +8,12 @@
  * `agent.removed` 时就会撞外键。
  */
 import { describe, expect, it } from 'vitest'
-import { decide } from '../../../src/kernel/decide'
-import { nextWakeAt } from '../../../src/kernel/core/next-wake'
-import { project } from '../../../src/kernel/scopes/project'
-import type { KernelPort } from '../../../src/kernel/core/types'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
-import { StoreError, createStore } from '../../../src/host/store/index'
+import { decide } from '@workbench/kernel/decide'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import { project } from '@workbench/kernel/scopes/project'
+import type { KernelPort } from '@workbench/kernel/core/types'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import { StoreError, createStore } from '@workbench/host-store/index'
 import { captureError, countRows, createMemoryDb } from './test-support'
 
 const realKernel: KernelPort = { decide, project, viewSpec, nextWakeAt }

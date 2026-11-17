@@ -8,7 +8,7 @@
  * 用 vite 的 SSR loader 加载 TS（仓库没有 ts-node / vite-node，vite 本来就在 devDeps 里）。
  * 每写 10 条命令往 stdout 打一次 `seq=<n>`，父进程据此核对「已确认的不丢」。
  */
-import { createServer } from 'vite'
+import { createLoader } from './ts-loader.mjs'
 
 const [dbPath, seedArg] = process.argv.slice(2)
 if (dbPath === undefined) throw new Error('用法：node scripts/sim-crash-child.mjs <dbPath> [seed]')
@@ -22,21 +22,14 @@ const rng = () => {
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296
 }
 
-const server = await createServer({
-  configFile: false,
-  server: { middlewareMode: true },
-  appType: 'custom',
-  logLevel: 'error',
-})
-
-const load = async (path) => server.ssrLoadModule(path)
-const { openDatabase } = await load('/src/host/db.ts')
-const { createStore } = await load('/src/host/store/index.ts')
+const { load } = await createLoader()
+const { openDatabase } = await load('/packages/host/store/src/db.ts')
+const { createStore } = await load('/packages/host/store/src/index.ts')
 const kernel = {
-  decide: (await load('/src/kernel/decide.ts')).decide,
-  project: (await load('/src/kernel/scopes/project.ts')).project,
-  viewSpec: (await load('/src/kernel/scopes/view-spec.ts')).viewSpec,
-  nextWakeAt: (await load('/src/kernel/core/next-wake.ts')).nextWakeAt,
+  decide: (await load('/packages/core/kernel/src/decide.ts')).decide,
+  project: (await load('/packages/core/kernel/src/scopes/project.ts')).project,
+  viewSpec: (await load('/packages/core/kernel/src/scopes/view-spec.ts')).viewSpec,
+  nextWakeAt: (await load('/packages/core/kernel/src/core/next-wake.ts')).nextWakeAt,
 }
 
 const db = openDatabase(dbPath)

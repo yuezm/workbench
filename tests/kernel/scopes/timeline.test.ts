@@ -9,10 +9,10 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../../src/protocol/entities'
-import type { FactPayload, FactType } from '../../../src/protocol/facts'
-import { IMPORT_ROOT_LABEL, timeline } from '../../../src/kernel/scopes/timeline'
-import type { Fact } from '../../../src/kernel/core/types'
+} from '@workbench/protocol/entities'
+import type { FactPayload, FactType } from '@workbench/protocol/facts'
+import { IMPORT_ROOT_LABEL, timeline } from '@workbench/kernel/scopes/timeline'
+import type { Fact } from '@workbench/kernel/core/types'
 
 const ACTOR = { kind: 'kernel' } as const
 const AT = '2026-11-04T12:00:00.000Z'

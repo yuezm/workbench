@@ -43,13 +43,13 @@ vi.mock('node:fs', async (importOriginal) => {
   }
 })
 
-const { createSdk } = await import('../../../../src/sdk')
-const { dshManifest } = await import('../../../../src/plugins/executors/dsh/manifest')
-const { detectDsh } = await import('../../../../src/plugins/executors/dsh/detect')
-const { defaultScanDirs, findInDirs } = await import('../../../../src/host/executable')
+const { createSdk } = await import('@workbench/capabilities')
+const { dshManifest } = await import('@workbench/executor-dsh/manifest')
+const { detectDsh } = await import('@workbench/executor-dsh/detect')
+const { defaultScanDirs, findInDirs } = await import('@workbench/host/executable')
 
-import type { DetectedRuntime } from '../../../../src/protocol/entities'
-import type { SdkHost } from '../../../../src/sdk/types'
+import type { DetectedRuntime } from '@workbench/protocol/entities'
+import type { SdkHost } from '@workbench/capabilities/types'
 
 let root: string
 

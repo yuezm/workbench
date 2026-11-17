@@ -13,16 +13,10 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../../src/protocol/entities'
-import type { FactPayload, FactType } from '../../../src/protocol/facts'
-import { normalizeCard, normalizeTask, project } from '../../../src/kernel/scopes/project'
-import type {
-  Change,
-  Fact,
-  Id,
-  ProjectionRow,
-  ProjectionTable,
-} from '../../../src/kernel/core/types'
+} from '@workbench/protocol/entities'
+import type { FactPayload, FactType } from '@workbench/protocol/facts'
+import { normalizeCard, normalizeTask, project } from '@workbench/kernel/scopes/project'
+import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from '@workbench/kernel/core/types'
 
 const ACTOR = { kind: 'owner', via: 'ui' } as const
 const AT = '2026-11-04T12:00:00.000Z'

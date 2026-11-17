@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
-import type { Fact } from '../../src/kernel/core/types'
-import { createEffects, type EffectsScheduler } from '../../src/host/effects'
+import type { Fact } from '@workbench/kernel/core/types'
+import { createEffects, type EffectsScheduler } from '@workbench/host/effects'
 
 const AT = '2026-01-01T00:00:00.000Z'
 

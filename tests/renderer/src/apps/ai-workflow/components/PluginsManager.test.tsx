@@ -1,14 +1,14 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { ConfigField } from '../../../../../../src/protocol/manifest'
-import type { Agent } from '../../../../../../src/protocol/entities'
-import type { PluginView } from '../../../../../../src/protocol/plugins'
+import type { ConfigField } from '@workbench/protocol/manifest'
+import type { Agent } from '@workbench/protocol/entities'
+import type { PluginView } from '@workbench/protocol/plugins'
 import {
   choicesOf,
   numberFieldErrors,
   PluginsManager,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/PluginsManager'
+} from '@workbench/client-app-ai-workflow/components/PluginsManager'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 /** webhook 来源插件的 config 字段：覆盖 text / number / boolean / select / secret 五种 */

@@ -1,10 +1,10 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createClock } from '../../src/host/clock'
-import { openDatabase } from '../../src/host/db'
-import { createEffects } from '../../src/host/effects'
-import { createExecutorPort } from '../../src/host/executor'
+import { createClock } from '@workbench/host/clock'
+import { openDatabase } from '@workbench/host-store/db'
+import { createEffects } from '@workbench/host/effects'
+import { createExecutorPort } from '@workbench/host/executor'
 import {
   pluginFromBackend,
   testContext,
@@ -12,17 +12,17 @@ import {
   type TestBackendOutcome,
   type TestBackendRequest,
 } from './plugin-support'
-import { chatPrompt, receiptBlockHint } from '../../src/kernel/scopes/prompt'
-import { CHAT_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
-import { createProcessRegistry } from '../../src/host/process-registry'
-import { createScheduler, type Scheduler } from '../../src/host/scheduler'
-import { createCommandRouter, type CommandRouter } from '../../src/host/commands'
-import { createStore, type Store } from '../../src/host/store/index'
-import { decide } from '../../src/kernel/decide'
-import { project } from '../../src/kernel/scopes/project'
-import { viewSpec } from '../../src/kernel/scopes/view-spec'
-import type { KernelPort } from '../../src/kernel/core/types'
-import type { Conversation, Message, RunEvent } from '../../src/protocol/entities'
+import { chatPrompt, receiptBlockHint } from '@workbench/kernel/scopes/prompt'
+import { CHAT_RECEIPT_KEYS } from '@workbench/protocol/receipt-keys'
+import { createProcessRegistry } from '@workbench/host/process-registry'
+import { createScheduler, type Scheduler } from '@workbench/host/scheduler'
+import { createCommandRouter, type CommandRouter } from '@workbench/host/commands'
+import { createStore, type Store } from '@workbench/host-store/index'
+import { decide } from '@workbench/kernel/decide'
+import { project } from '@workbench/kernel/scopes/project'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import type { KernelPort } from '@workbench/kernel/core/types'
+import type { Conversation, Message, RunEvent } from '@workbench/protocol/entities'
 
 /**
  * T14b：聊天执行链（scheduler + effects + 命令）端到端用例。

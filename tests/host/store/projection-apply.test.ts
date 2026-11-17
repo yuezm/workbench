@@ -1,7 +1,7 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Change } from '../../../src/kernel/core/types'
+import type { Change } from '@workbench/kernel/core/types'
 import type {
   Agent,
   Card,
@@ -10,12 +10,12 @@ import type {
   Runtime,
   Task,
   WorkflowStage,
-} from '../../../src/protocol/entities'
-import type { PluginSettingsRow } from '../../../src/protocol/plugins'
-import type { AutomationRule, RuleFireRow, RuleSetRow } from '../../../src/protocol/rules'
-import { withTx } from '../../../src/host/schema'
-import { StoreError } from '../../../src/host/store/errors'
-import { createProjectionWriter } from '../../../src/host/store/projection-apply'
+} from '@workbench/protocol/entities'
+import type { PluginSettingsRow } from '@workbench/protocol/plugins'
+import type { AutomationRule, RuleFireRow, RuleSetRow } from '@workbench/protocol/rules'
+import { withTx } from '@workbench/host-store/schema'
+import { StoreError } from '@workbench/host-store/errors'
+import { createProjectionWriter } from '@workbench/host-store/projection-apply'
 import {
   SAMPLE_AT,
   captureError,

@@ -23,14 +23,17 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const ROOT = process.cwd()
-const RENDERER = join(ROOT, 'src', 'renderer')
-const CSS = join(RENDERER, 'src', 'shell', 'styles', 'global.css')
+const RENDERER = join(ROOT, 'packages', 'client')
+const WEB = join(ROOT, 'apps', 'web')
+const CSS = join(RENDERER, 'shell', 'src', 'styles', 'global.css')
 
 const findings = []
 const flag = (rule, file, detail) => findings.push({ rule, file, detail })
 
 const walk = (dir, out = []) => {
   for (const entry of readdirSync(dir)) {
+    // workspace 包在 apps/web/node_modules 下有软链，扫进去会把同一份源码算两次
+    if (entry === 'node_modules') continue
     const path = join(dir, entry)
     if (statSync(path).isDirectory()) walk(path, out)
     else if (/\.(tsx|ts)$/.test(path)) out.push(path)
@@ -202,7 +205,7 @@ const BUILTIN_COLOR =
 const SILENT_GUARD = /if\s*\(\s*![^)]*\.trim\(\)\s*\)\s*return\b/
 
 /** 任意 px 字号：唯一豁免是番茄钟计时器（等宽数字） */
-const TYPE_EXEMPT = new Set(['src/renderer/src/apps/pomodoro/components/TimerDisplay.tsx'])
+const TYPE_EXEMPT = new Set(['packages/client/app-pomodoro/src/components/TimerDisplay.tsx'])
 const ARBITRARY_SIZE = /\btext-\[[0-9.]+px\]/
 /** 粗体：shadcn 用 medium / semibold，不用 bold */
 const BOLD_WEIGHT = /\bfont-(?:bold|extrabold|black)\b/
@@ -454,7 +457,7 @@ const buttonBlocks = (source) => {
 /** 图标按钮或自带可见边界的按钮：`ghost` 在这两种用法上合法 */
 const GHOST_OK = /<svg|Icon\b|size="icon|border/
 
-for (const file of walk(RENDERER)) {
+for (const file of [...walk(RENDERER), ...walk(WEB)]) {
   const path = rel(file)
   const exempt = TYPE_EXEMPT.has(path)
   const source = readFileSync(file, 'utf8')

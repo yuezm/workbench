@@ -1,11 +1,11 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Environment } from '../../../src/kernel/core/types'
-import { KERNEL_VERSION } from '../../../src/kernel/core/types'
-import type { Command } from '../../../src/protocol/commands'
-import { projectionFormat } from '../../../src/host/schema'
-import { DEFAULT_LIMITS, StoreError, createStore } from '../../../src/host/store/index'
+import type { Environment } from '@workbench/kernel/core/types'
+import { KERNEL_VERSION } from '@workbench/kernel/core/types'
+import type { Command } from '@workbench/protocol/commands'
+import { projectionFormat } from '@workbench/host-store/schema'
+import { DEFAULT_LIMITS, StoreError, createStore } from '@workbench/host-store/index'
 import { createFakeKernel, defaultDecide, defaultProject } from './fake-kernel'
 import {
   SAMPLE_AT,

@@ -8,14 +8,14 @@
  * 手搓 view）永远发现不了，必须用真实 `viewSpec` + 真实投影走一遍 store。
  */
 import { describe, expect, it } from 'vitest'
-import { decide } from '../../../src/kernel/decide'
-import { nextWakeAt } from '../../../src/kernel/core/next-wake'
-import { project } from '../../../src/kernel/scopes/project'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
-import type { Fact, KernelPort } from '../../../src/kernel/core/types'
-import type { Conversation } from '../../../src/protocol/entities'
-import type { ThreadRow } from '../../../src/protocol/thread'
-import { StoreError, createStore } from '../../../src/host/store/index'
+import { decide } from '@workbench/kernel/decide'
+import { nextWakeAt } from '@workbench/kernel/core/next-wake'
+import { project } from '@workbench/kernel/scopes/project'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import type { Fact, KernelPort } from '@workbench/kernel/core/types'
+import type { Conversation } from '@workbench/protocol/entities'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import { StoreError, createStore } from '@workbench/host-store/index'
 import { captureError, createMemoryDb } from './test-support'
 
 /** 真实内核端口：这条链路的坑就在「事实 → 投影 → 视图切片」，假内核会盖住它。 */

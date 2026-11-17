@@ -1,13 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  Runtime,
-  RuntimeExecutorChoice,
-  RuntimeProbe,
-} from '../../../../../../src/protocol/entities'
-import type { ViewId, ViewParams, ViewResult } from '../../../../../../src/protocol/views'
-import { RuntimeDialog } from '../../../../../../src/renderer/src/apps/ai-workflow/components/RuntimeDialog'
+import type { Runtime, RuntimeExecutorChoice, RuntimeProbe } from '@workbench/protocol/entities'
+import type { ViewId, ViewParams, ViewResult } from '@workbench/protocol/views'
+import { RuntimeDialog } from '@workbench/client-app-ai-workflow/components/RuntimeDialog'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 /** 执行器清单：顺序即注册表顺序（dsh 首项），command 的 command 默认值可体现「切执行器预填」 */

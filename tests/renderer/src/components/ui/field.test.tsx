@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { Field } from '../../../../../src/renderer/src/components/ui/field'
+import { Field } from '@workbench/client-ui-kit/field'
 
 describe('Field', () => {
   it('用 label 包裹控件并渲染小标签', () => {

@@ -11,7 +11,7 @@ describe('server/index（入口守卫）', () => {
   it('被 import 时不注册信号、不绑端口', async () => {
     const sigintBefore = process.listenerCount('SIGINT')
     const sigtermBefore = process.listenerCount('SIGTERM')
-    await import('../../src/server/index')
+    await import('@workbench/server/index')
     expect(process.listenerCount('SIGINT')).toBe(sigintBefore)
     expect(process.listenerCount('SIGTERM')).toBe(sigtermBefore)
   })

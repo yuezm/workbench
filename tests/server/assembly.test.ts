@@ -9,9 +9,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ServerEvent } from '../../src/protocol/http'
-import { createWorkbench } from '../../src/server/assembly'
-import { SERVER_NAME, SERVER_VERSION } from '../../src/server/version'
+import type { ServerEvent } from '@workbench/protocol/http'
+import { createWorkbench } from '@workbench/bundle-base'
+import { SERVER_NAME, SERVER_VERSION } from '@workbench/bundle-base/version'
 
 const created: string[] = []
 

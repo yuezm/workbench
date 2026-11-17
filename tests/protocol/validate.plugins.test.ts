@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { validateCommand } from '../../src/protocol/validate'
+import { validateCommand } from '@workbench/protocol/validate'
 
 const command = (type: string, payload: Record<string, unknown>): Record<string, unknown> => ({
   type,

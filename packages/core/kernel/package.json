@@ -1,0 +1,9 @@
+{
+  "name": "@workbench/kernel",
+  "version": "0.0.0",
+  "private": true,
+  "description": "纯内核：decide / project / 阶段状态机 / 规则匹配；无 IO、无时钟、无随机、无网络",
+  "dependencies": {
+    "@workbench/protocol": "workspace:*"
+  }
+}

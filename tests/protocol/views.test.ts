@@ -1,6 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Card, Conversation, RunEvent, RuntimeStatus, Task } from '../../src/protocol/entities'
+import type {
+  Card,
+  Conversation,
+  RunEvent,
+  RuntimeStatus,
+  Task,
+} from '@workbench/protocol/entities'
 import {
   HOST_VIEW_IDS,
   VIEW_IDS,
@@ -14,7 +20,7 @@ import {
   type ViewResult,
   type ViewResults,
   type WaitingRun,
-} from '../../src/protocol/views'
+} from '@workbench/protocol/views'
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false

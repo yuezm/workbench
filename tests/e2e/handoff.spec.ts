@@ -13,7 +13,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import path from 'node:path'
-import type { WorkbenchApi } from '../../src/shared/workbench-api'
+import type { WorkbenchApi } from '@workbench/contract-api'
 import { createTempUserDataDir, launchApp, type LaunchedApp } from './helpers/launch'
 import { readHandoffState, seedHandoffBase, type HandoffSeed } from './helpers/seed-handoff'
 

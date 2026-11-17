@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { inAppChannel, inAppManifest } from '../../../src/plugins/channels/in-app'
-import { channelById, channels } from '../../../src/plugins/registry'
+import { inAppChannel, inAppManifest } from '@workbench/channel-in-app'
+import { channelById, channels } from '@workbench/plugins-registry'
 import { cardOf, channelHarness } from './harness'
 
 describe('in-app 通道 manifest 与注册', () => {

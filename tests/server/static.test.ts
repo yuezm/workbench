@@ -12,7 +12,7 @@ import {
   cacheControlOf,
   contentTypeOf,
   resolveStaticFile,
-} from '../../src/server/static'
+} from '@workbench/host-frontend-static'
 
 const ROOT = path.resolve('/app/out/web')
 

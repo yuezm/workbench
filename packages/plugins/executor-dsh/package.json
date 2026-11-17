@@ -1,0 +1,11 @@
+{
+  "name": "@workbench/executor-dsh",
+  "version": "0.0.0",
+  "private": true,
+  "description": "DeepSeek Harness stdio 执行器",
+  "dependencies": {
+    "@workbench/capabilities": "workspace:*",
+    "@workbench/plugins-kit": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

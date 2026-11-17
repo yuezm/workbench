@@ -2,11 +2,11 @@
 import { existsSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { CAPABILITIES, PLUGIN_KINDS } from '../../src/protocol/manifest'
+import { CAPABILITIES, PLUGIN_KINDS } from '@workbench/protocol/manifest'
 import {
   CAPABILITIES as PLUGINS_CAPABILITIES,
   PLUGIN_KINDS as PLUGINS_KINDS,
-} from '../../src/plugins/manifest'
+} from '@workbench/plugins-registry/manifest'
 import {
   channelById,
   channels,
@@ -18,11 +18,11 @@ import {
   executors,
   withTimeout,
   type ExecutorRegistryEntry,
-} from '../../src/plugins/registry'
-import { CLI_CANDIDATES } from '../../src/plugins/shared/cli-catalog'
-import type { PluginManifest } from '../../src/protocol/manifest'
-import type { DetectedRuntime } from '../../src/protocol/entities'
-import type { ExecutorPlugin, SdkHost } from '../../src/sdk/types'
+} from '@workbench/plugins-registry'
+import { CLI_CANDIDATES } from '@workbench/plugins-kit/cli-catalog'
+import type { PluginManifest } from '@workbench/protocol/manifest'
+import type { DetectedRuntime } from '@workbench/protocol/entities'
+import type { ExecutorPlugin, SdkHost } from '@workbench/capabilities/types'
 
 /**
  * 执行器插件注册表契约（SPEC-plugins「Manifest / 测试 / 内置插件清单」）。
@@ -32,8 +32,8 @@ import type { ExecutorPlugin, SdkHost } from '../../src/sdk/types'
  * ② 目录与清单双向一致——漏注册（目录在、清单没有）和幽灵注册（清单有、目录没了）都失败。
  */
 
-const EXECUTORS_ROOT = resolve(import.meta.dirname, '../../src/plugins/executors')
-const CHANNELS_ROOT = resolve(import.meta.dirname, '../../src/plugins/channels')
+const EXECUTORS_ROOT = resolve(import.meta.dirname, '../../packages/plugins')
+const CHANNELS_ROOT = resolve(import.meta.dirname, '../../packages/plugins')
 
 const KEBAB_CASE = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
@@ -91,23 +91,24 @@ describe('执行器插件注册表', () => {
     expect(() => executorById('')).toThrow(/执行器插件未注册/)
   })
 
-  it('src/plugins/executors/* 目录与注册表清单双向一致', () => {
-    if (!existsSync(EXECUTORS_ROOT)) return
-
+  it('packages/plugins/executor-* 目录与注册表清单双向一致', () => {
+    // 拆包后「目录 → 注册 id」的映射是包名去掉前缀（`executor-dsh` → `dsh`）
     const dirIds = readdirSync(EXECUTORS_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('executor-'))
+      .map((entry) => entry.name.slice('executor-'.length))
       .sort()
     const registeredIds = executors.map((entry) => entry.key).sort()
 
     expect(
       registeredIds,
-      `执行器目录与注册表不一致：多出/缺少注册项（目录 [${dirIds.join(', ')}]，清单 [${registeredIds.join(', ')}]）`,
+      `执行器包与注册表不一致：多出/缺少注册项（包 [${dirIds.join(', ')}]，清单 [${registeredIds.join(', ')}]）`,
     ).toEqual(dirIds)
 
     for (const id of dirIds) {
-      for (const file of ['manifest.ts', 'index.ts']) {
-        expect(existsSync(join(EXECUTORS_ROOT, id, file)), `${id} 缺少 ${file}`).toBe(true)
+      for (const file of ['src/manifest.ts', 'src/index.ts']) {
+        expect(existsSync(join(EXECUTORS_ROOT, `executor-${id}`, file)), `${id} 缺少 ${file}`).toBe(
+          true,
+        )
       }
     }
   })
@@ -154,27 +155,25 @@ describe('通道插件注册表（M4）', () => {
     expect(channelById('feishu').manifest.capabilities).toEqual(['spawn'])
   })
 
-  it('src/plugins/channels/* 目录与注册表清单双向一致', () => {
-    // 防御空转：通道目录不存在时清单必须为空
-    if (!existsSync(CHANNELS_ROOT)) {
-      expect(channels).toEqual([])
-      return
-    }
-
+  it('packages/plugins/channel-* 目录与注册表清单双向一致', () => {
+    // 包名与注册 key 有一处历史差异：包 `channel-webhook` 的 key 是 `webhook-channel`
     const dirIds = readdirSync(CHANNELS_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('channel-'))
+      .map((entry) => entry.name.slice('channel-'.length))
       .sort()
     const registeredIds = channels.map((entry) => entry.key).sort()
+    const packageIds = dirIds.map((id) => (id === 'webhook' ? 'webhook-channel' : id)).sort()
 
     expect(
       registeredIds,
-      `通道目录与注册表不一致：多出/缺少注册项（目录 [${dirIds.join(', ')}]，清单 [${registeredIds.join(', ')}]）`,
-    ).toEqual(dirIds)
+      `通道包与注册表不一致：多出/缺少注册项（包 [${packageIds.join(', ')}]，清单 [${registeredIds.join(', ')}]）`,
+    ).toEqual(packageIds)
 
     for (const id of dirIds) {
-      for (const file of ['manifest.ts', 'index.ts']) {
-        expect(existsSync(join(CHANNELS_ROOT, id, file)), `${id} 缺少 ${file}`).toBe(true)
+      for (const file of ['src/manifest.ts', 'src/index.ts']) {
+        expect(existsSync(join(CHANNELS_ROOT, `channel-${id}`, file)), `${id} 缺少 ${file}`).toBe(
+          true,
+        )
       }
     }
   })
@@ -413,7 +412,7 @@ describe('withTimeout（detect 单插件超时）', () => {
 })
 
 describe('来源插件注册表（M7）', () => {
-  const SOURCES_ROOT = resolve(import.meta.dirname, '../../src/plugins/sources')
+  const SOURCES_ROOT = resolve(import.meta.dirname, '../../packages/plugins')
 
   it('内置来源清单非空且 key 等于 manifest.id、kind 合法', () => {
     expect(sources.length).toBeGreaterThan(0)
@@ -437,14 +436,10 @@ describe('来源插件注册表（M7）', () => {
     expect(() => sourceById('')).toThrow(/来源插件未注册/)
   })
 
-  it('src/plugins/sources/* 目录与注册表清单双向一致', () => {
-    if (!existsSync(SOURCES_ROOT)) {
-      expect(sources).toEqual([])
-      return
-    }
+  it('packages/plugins/source-* 目录与注册表清单双向一致', () => {
     const dirIds = readdirSync(SOURCES_ROOT, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
+      .filter((entry) => entry.isDirectory() && entry.name.startsWith('source-'))
+      .map((entry) => entry.name.slice('source-'.length))
       .sort()
     const registryIds = sources.map((entry) => entry.key).sort()
     expect(registryIds).toEqual(dirIds)

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Card } from '../../../../../../src/protocol/entities'
-import { ApprovalCards } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ApprovalCards'
+import type { Card } from '@workbench/protocol/entities'
+import { ApprovalCards } from '@workbench/client-app-ai-workflow/components/ApprovalCards'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const card: Card = {

@@ -7,13 +7,13 @@
  */
 import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import type { Card, RunRow } from '../../../src/protocol/entities'
+import type { Card, RunRow } from '@workbench/protocol/entities'
 import {
   CARD_TIMEOUT_MS,
   closeCardsOnFinish,
   expiredCardFacts,
-} from '../../../src/kernel/scopes/cards'
-import type { Decision, FactDraft, View } from '../../../src/kernel/core/types'
+} from '@workbench/kernel/scopes/cards'
+import type { Decision, FactDraft, View } from '@workbench/kernel/core/types'
 
 const NOW = '2026-11-09T00:00:00.000Z'
 const CREATED = '2026-01-01T00:00:00.000Z'

@@ -1,0 +1,21 @@
+{
+  "name": "@workbench/plugins-registry",
+  "version": "0.0.0",
+  "private": true,
+  "description": "内置插件静态注册表：唯一 import 具体插件的文件（数组顺序即 UI 与 detect 顺序）",
+  "dependencies": {
+    "@workbench/capabilities": "workspace:*",
+    "@workbench/plugins-kit": "workspace:*",
+    "@workbench/protocol": "workspace:*",
+    "@workbench/executor-dsh": "workspace:*",
+    "@workbench/executor-claude": "workspace:*",
+    "@workbench/executor-hermes": "workspace:*",
+    "@workbench/executor-command": "workspace:*",
+    "@workbench/executor-remote": "workspace:*",
+    "@workbench/source-webhook": "workspace:*",
+    "@workbench/channel-in-app": "workspace:*",
+    "@workbench/channel-desktop": "workspace:*",
+    "@workbench/channel-webhook": "workspace:*",
+    "@workbench/channel-feishu": "workspace:*"
+  }
+}

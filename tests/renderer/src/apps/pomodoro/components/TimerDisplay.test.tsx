@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   TimerDisplay,
   formatRemaining,
-} from '../../../../../../src/renderer/src/apps/pomodoro/components/TimerDisplay'
+} from '@workbench/client-app-pomodoro/components/TimerDisplay'
 
 describe('formatRemaining', () => {
   it.each([

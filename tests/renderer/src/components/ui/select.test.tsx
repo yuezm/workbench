@@ -10,7 +10,7 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
-} from '../../../../../src/renderer/src/components/ui/select'
+} from '@workbench/client-ui-primitives/select'
 
 /**
  * Radix Select 打开时会给 body 加 pointer-events: none（disableOutsidePointerEvents），

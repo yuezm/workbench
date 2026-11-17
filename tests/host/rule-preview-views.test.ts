@@ -4,10 +4,10 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AutomationRule } from '../../src/protocol/rules'
-import type { RuleNextFire, RulePreview } from '../../src/protocol/rules'
-import { createProjectionWriter } from '../../src/host/store/projection-apply'
-import { queryView } from '../../src/host/store/views'
+import type { AutomationRule } from '@workbench/protocol/rules'
+import type { RuleNextFire, RulePreview } from '@workbench/protocol/rules'
+import { createProjectionWriter } from '@workbench/host-store/projection-apply'
+import { queryView } from '@workbench/host-store/views'
 import { createMemoryDb, sample } from './store/test-support'
 
 const AT = '2026-11-14T10:00:00.000Z'

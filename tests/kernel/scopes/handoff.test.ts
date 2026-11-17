@@ -15,23 +15,16 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../../src/protocol/entities'
-import type { ThreadRow } from '../../../src/protocol/thread'
-import type {
-  Environment,
-  FactDraft,
-  Id,
-  IdKind,
-  Limits,
-  View,
-} from '../../../src/kernel/core/types'
+} from '@workbench/protocol/entities'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import type { Environment, FactDraft, Id, IdKind, Limits, View } from '@workbench/kernel/core/types'
 import {
   HANDOFF_MAX_DEPTH,
   handoffDepth,
   handoffOnExit,
   handedOffAlready,
   validateStageHandoffs,
-} from '../../../src/kernel/scopes/handoff'
+} from '@workbench/kernel/scopes/handoff'
 
 const CREATED = '2026-11-01T00:00:00.000Z'
 const NOW = '2026-11-05T09:00:00.000Z'

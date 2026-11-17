@@ -1,10 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { ACCEPTANCE_LIMITS } from '../../../../src/protocol/entities'
-import {
-  normalizeAcceptance,
-  sameAcceptance,
-} from '../../../../src/kernel/scopes/workflow/acceptance'
+import { ACCEPTANCE_LIMITS } from '@workbench/protocol/entities'
+import { normalizeAcceptance, sameAcceptance } from '@workbench/kernel/scopes/workflow/acceptance'
 
 /**
  * 验收条目归一（M20）：trim → 丢空 → 去重 → 逐条截断 → 整体截断。

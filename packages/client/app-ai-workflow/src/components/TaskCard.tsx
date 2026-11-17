@@ -1,0 +1,142 @@
+import type { ReactElement } from 'react'
+import type { Task, WorkflowStage } from '@workbench/protocol/entities'
+import { cn } from '@workbench/client-ui-kit/cn'
+
+interface TaskCardProps {
+  task: Task
+  stage: WorkflowStage
+  /** 是否存在 queued/running 的 run：执行中的卡片由 run 结果推进，不可拖拽 */
+  executing: boolean
+  /** 正在被拖动：本卡片半透明，表示这是拖拽源 */
+  dragging?: boolean
+  onDragStart: (task: Task) => void
+  onDragEnd: () => void
+  /** 父任务标题（父任务也在当前看板里时由上层按任务列表查得，不另发视图查询） */
+  parentTitle?: string
+  /** 子任务进度（M8）：本卡是父任务且有子任务时显示 `done/total` */
+  childProgress?: { done: number; total: number }
+  /** 单击卡片进入任务详情页（页面跳转，由上层路由处理） */
+  onOpenTask?: (task: Task) => void
+  /** 打开线程详情页：不传或任务没有 threadId 时不渲染线程入口 */
+  onOpenThread?: (threadId: string) => void
+}
+
+/** 卡片底部状态文案：按进入方式提示下一步怎么走 */
+const HINTS: Record<WorkflowStage['entryMode'], string> = {
+  none: '拖动推进',
+  user: '等待你处理',
+  agent: '可拖走重试',
+  script: '等待执行脚本',
+}
+
+/**
+ * 看板任务卡（M6.5 增加任务树线索与线程入口）：
+ *
+ * - `parentTaskId` 非空 = 派生任务，显示「子任务」徽标（父任务在看板里时带上标题）；
+ * - `origin='handoff'`（或 `handoffFromTaskId` 非空）= 跨工作流交接产出，显示「交接」徽标；
+ * - `threadId` 非空 = 挂在线程上，提供打开线程详情页的按钮，回调由上层传；
+ * - 单击卡片（或聚焦后 Enter / Space）= 进入任务详情页；拖拽照旧，点击不影响拖拽；
+ * - 卡片本身只读任务行 + 阶段，不推导线程 / 派活规则。
+ */
+export function TaskCard({
+  task,
+  stage,
+  executing,
+  dragging = false,
+  onDragStart,
+  onDragEnd,
+  parentTitle,
+  childProgress,
+  onOpenTask,
+  onOpenThread,
+}: TaskCardProps): ReactElement {
+  const parentId = task.parentTaskId
+  /** 交接任务（M7）：由其它工作流的阶段完成时创建；origin 与来源任务两列任一即可判 */
+  const isHandoff = task.origin === 'handoff' || task.handoffFromTaskId !== null
+  const threadId = task.threadId
+
+  /** 卡片既是拖拽源也是详情入口：键盘走 Enter / Space，鼠标点卡片任意空白处即可 */
+  const openTask = (): void => onOpenTask?.(task)
+
+  return (
+    <article
+      draggable={!executing}
+      role="button"
+      tabIndex={0}
+      aria-label={`任务：${task.title}`}
+      onClick={openTask}
+      onKeyDown={(e) => {
+        // 只处理卡片本体上的按键：卡片内的「线程」按钮自己处理
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          openTask()
+        }
+      }}
+      onDragStart={() => onDragStart(task)}
+      onDragEnd={onDragEnd}
+      className={cn(
+        'flex flex-col gap-2 rounded-xl border border-border bg-muted p-3',
+        'shadow-[0_1px_0_rgb(255_255_255/4%)_inset] transition-all duration-200',
+        'focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none',
+        executing
+          ? 'cursor-default'
+          : 'cursor-grab hover:border-input hover:bg-accent active:cursor-grabbing',
+        dragging && 'opacity-40',
+      )}
+    >
+      <h3 className="text-base font-medium text-foreground">{task.title}</h3>
+      {task.description && (
+        <p className="line-clamp-3 text-sm text-muted-foreground">{task.description}</p>
+      )}
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-faint-foreground">
+        {childProgress !== undefined && childProgress.total > 0 && (
+          <span
+            className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-xs text-brand"
+            title="子任务完成进度"
+          >
+            子任务 {childProgress.done}/{childProgress.total}
+          </span>
+        )}
+        {parentId !== null && (
+          <span
+            className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground"
+            title={parentId}
+          >
+            {parentTitle === undefined || parentTitle === '' ? '子任务' : `子任务 · ${parentTitle}`}
+          </span>
+        )}
+        {isHandoff && (
+          <span
+            className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground"
+            title="由其它工作流的阶段完成时自动创建"
+          >
+            交接
+          </span>
+        )}
+        {executing && (
+          <span className="size-1.5 animate-pulse rounded-full bg-primary" aria-hidden="true" />
+        )}
+        {executing ? '执行中…' : HINTS[stage.entryMode]}
+        {threadId !== null && onOpenThread !== undefined && (
+          <button
+            type="button"
+            aria-label={`打开线程：${task.title}`}
+            onClick={(e) => {
+              // 线程入口不触发卡片的详情跳转
+              e.stopPropagation()
+              onOpenThread(threadId)
+            }}
+            className={cn(
+              'ml-auto rounded-md px-1.5 py-0.5 text-sm font-medium text-brand',
+              'transition-colors duration-200 hover:bg-accent hover:text-foreground',
+              'focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:outline-none',
+            )}
+          >
+            线程
+          </button>
+        )}
+      </div>
+    </article>
+  )
+}

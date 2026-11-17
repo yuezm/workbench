@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Command } from '../../src/protocol/commands'
-import type { Input } from '../../src/protocol/inputs'
+import type { Command } from '@workbench/protocol/commands'
+import type { Input } from '@workbench/protocol/inputs'
 import type {
   Agent,
   BuiltinStageKey,
@@ -16,23 +16,23 @@ import type {
   Workflow,
   WorkflowInput,
   WorkflowStage,
-} from '../../src/protocol/entities'
-import { BUILTIN_STAGE_NAMES } from '../../src/protocol/entities'
-import type { FactPayload, FactType } from '../../src/protocol/facts'
-import type { ThreadRow } from '../../src/protocol/thread'
-import type { HostInput } from '../../src/protocol/inputs'
-import { decide } from '../../src/kernel/decide'
-import { naturalStageLabel } from '../../src/kernel/scopes/commands/task'
-import { indexTarget, sameInstructions } from '../../src/kernel/scopes/commands/workflow'
+} from '@workbench/protocol/entities'
+import { BUILTIN_STAGE_NAMES } from '@workbench/protocol/entities'
+import type { FactPayload, FactType } from '@workbench/protocol/facts'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import type { HostInput } from '@workbench/protocol/inputs'
+import { decide } from '@workbench/kernel/decide'
+import { naturalStageLabel } from '@workbench/kernel/scopes/commands/task'
+import { indexTarget, sameInstructions } from '@workbench/kernel/scopes/commands/workflow'
 import {
   interruptRuleText,
   outputContractText,
   receiptBlockHint,
   taskPrompt,
   taskReceiptKeys,
-} from '../../src/kernel/scopes/prompt'
-import { BASE_RECEIPT_KEYS } from '../../src/protocol/receipt-keys'
-import type { Environment, FactDraft, Id, IdKind, Limits, View } from '../../src/kernel/core/types'
+} from '@workbench/kernel/scopes/prompt'
+import { BASE_RECEIPT_KEYS } from '@workbench/protocol/receipt-keys'
+import type { Environment, FactDraft, Id, IdKind, Limits, View } from '@workbench/kernel/core/types'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
 const LATER = '2026-01-02T00:00:00.000Z'

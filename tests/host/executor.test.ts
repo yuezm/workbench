@@ -1,9 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { Runtime, RunUsage } from '../../src/protocol/entities'
-import type { ExecutorIO, Receipt, Turn } from '../../src/protocol/executor'
-import { createExecutorPort } from '../../src/host/executor'
-import type { ExecutorContext, ExecutorPlugin, Sdk } from '../../src/sdk/types'
+import type { Runtime, RunUsage } from '@workbench/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '@workbench/protocol/executor'
+import { createExecutorPort } from '@workbench/host/executor'
+import type { ExecutorContext, ExecutorPlugin, Sdk } from '@workbench/capabilities/types'
 
 const usage: RunUsage = {
   inputTokens: 1,

@@ -7,7 +7,7 @@ import type {
   RunRow,
   Runtime,
   Task,
-} from '../../src/protocol/entities'
+} from '@workbench/protocol/entities'
 import {
   FACT_TYPES,
   type CardAnsweredPayload,
@@ -25,7 +25,7 @@ import {
   type RuleReplayedPayload,
   type MessageAppendedPayload,
   type FactPayload,
-} from '../../src/protocol/facts'
+} from '@workbench/protocol/facts'
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false

@@ -1,11 +1,11 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { Project } from '../../../../../../src/protocol/entities'
+import type { Project } from '@workbench/protocol/entities'
 import {
   DEFAULT_PROJECT_ID,
   ProjectSwitcher,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/ProjectSwitcher'
+} from '@workbench/client-app-ai-workflow/components/ProjectSwitcher'
 
 function project(id: string, name: string, path: string): Project {
   return { id, name, path, description: '', createdAt: 't', updatedAt: 't' }

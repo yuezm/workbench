@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { STAGE_KINDS, stageKindOf } from '../../../../../../src/protocol/entities'
-import { STAGE_KIND_META } from '../../../../../../src/renderer/src/apps/ai-workflow/model/stage-kinds'
+import { STAGE_KINDS, stageKindOf } from '@workbench/protocol/entities'
+import { STAGE_KIND_META } from '@workbench/client-app-ai-workflow/model/stage-kinds'
 
 /**
  * 阶段类别的配色表（M18）。

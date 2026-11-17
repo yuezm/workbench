@@ -1,0 +1,9 @@
+{
+  "name": "@workbench/channel-in-app",
+  "version": "0.0.0",
+  "private": true,
+  "description": "应用内卡片通道",
+  "dependencies": {
+    "@workbench/protocol": "workspace:*"
+  }
+}

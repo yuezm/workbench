@@ -1,12 +1,12 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Command } from '../../../../../../src/protocol/commands'
-import type { Task } from '../../../../../../src/protocol/entities'
-import type { CommandDispatchResult } from '../../../../../../src/protocol/ipc'
-import type { ThreadRow } from '../../../../../../src/protocol/thread'
-import type { ThreadDetail } from '../../../../../../src/protocol/views'
-import { ThreadDetailPage } from '../../../../../../src/renderer/src/apps/ai-workflow/components/ThreadDetailPage'
+import type { Command } from '@workbench/protocol/commands'
+import type { Task } from '@workbench/protocol/entities'
+import type { CommandDispatchResult } from '@workbench/protocol/ipc'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import type { ThreadDetail } from '@workbench/protocol/views'
+import { ThreadDetailPage } from '@workbench/client-app-ai-workflow/components/ThreadDetailPage'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const parentTask: Task = {

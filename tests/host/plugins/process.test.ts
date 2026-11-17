@@ -1,14 +1,14 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { PluginManifest } from '../../../src/protocol/manifest'
-import { PLUGIN_HOST_LIMITS, PLUGIN_HOST_PROTOCOL_VERSION } from '../../../src/protocol/plugin-host'
+import type { PluginManifest } from '@workbench/protocol/manifest'
+import { PLUGIN_HOST_LIMITS, PLUGIN_HOST_PROTOCOL_VERSION } from '@workbench/protocol/plugin-host'
 import {
   createExternalPluginProcess,
   type ExternalPluginProcess,
   type ExternalPluginProcessOptions,
-} from '../../../src/host/plugins/process'
-import type { Spawned, SpawnFn } from '../../../src/sdk/types'
+} from '@workbench/host/plugins/process'
+import type { Spawned, SpawnFn } from '@workbench/capabilities/types'
 
 /**
  * 外部插件子进程宿主（M7 D2）：用假 spawn / 假流覆盖 hello 握手、帧收发、崩溃重拉与停止，

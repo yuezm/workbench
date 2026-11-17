@@ -1,0 +1,10 @@
+{
+  "name": "@workbench/client-kernel-store",
+  "version": "0.0.0",
+  "private": true,
+  "description": "客户端状态：快照 + 按 seq 应用事实增量 + 失效重取",
+  "dependencies": {
+    "@workbench/contract-api": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

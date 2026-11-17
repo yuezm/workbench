@@ -1,10 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import {
-  Button,
-  buttonVariants,
-  type ButtonProps,
-} from '../../../../../src/renderer/src/components/ui/button'
+import { Button, buttonVariants, type ButtonProps } from '@workbench/client-ui-primitives/button'
 
 describe('Button（shadcn 基座）', () => {
   it('缺省为 default 变体 / default 尺寸', () => {

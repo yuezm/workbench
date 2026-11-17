@@ -6,11 +6,11 @@
  * `executorKey='command'` 的运行时，没有 probe 就一个都建不出来。
  */
 import { describe, expect, it } from 'vitest'
-import type { Runtime } from '../../../../src/protocol/entities'
-import type { ExecutorContext, ResolvedExecutable } from '../../../../src/sdk/types'
-import { commandPlugin } from '../../../../src/plugins/executors/command/index'
-import { commandManifest } from '../../../../src/plugins/executors/command/manifest'
-import { probeCommandRuntime } from '../../../../src/plugins/executors/command/probe'
+import type { Runtime } from '@workbench/protocol/entities'
+import type { ExecutorContext, ResolvedExecutable } from '@workbench/capabilities/types'
+import { commandPlugin } from '@workbench/executor-command/index'
+import { commandManifest } from '@workbench/executor-command/manifest'
+import { probeCommandRuntime } from '@workbench/executor-command/probe'
 import { fakeSdk } from '../../support/fake-sdk'
 
 const FIXED_NOW = 1_760_000_000_000

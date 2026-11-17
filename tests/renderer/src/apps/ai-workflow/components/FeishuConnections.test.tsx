@@ -1,12 +1,12 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Command } from '../../../../../../src/protocol/commands'
-import type { Agent } from '../../../../../../src/protocol/entities'
-import type { CommandDispatchResult } from '../../../../../../src/protocol/ipc'
-import type { LarkAdminAction, LarkStatusView } from '../../../../../../src/protocol/ipc'
-import type { PluginView } from '../../../../../../src/protocol/plugins'
-import type { ViewId, ViewParams, ViewResult } from '../../../../../../src/protocol/views'
+import type { Command } from '@workbench/protocol/commands'
+import type { Agent } from '@workbench/protocol/entities'
+import type { CommandDispatchResult } from '@workbench/protocol/ipc'
+import type { LarkAdminAction, LarkStatusView } from '@workbench/protocol/ipc'
+import type { PluginView } from '@workbench/protocol/plugins'
+import type { ViewId, ViewParams, ViewResult } from '@workbench/protocol/views'
 import {
   agentLabelOf,
   answerersTextOf,
@@ -18,16 +18,16 @@ import {
   FeishuConnections,
   statusToneOf,
   targetKindOf,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/FeishuConnections'
-import { toast } from '../../../../../../src/renderer/src/components/ui/toast'
-import type { WorkbenchApi } from '../../../../../../src/shared/workbench-api'
+} from '@workbench/client-app-ai-workflow/components/FeishuConnections'
+import { toast } from '@workbench/client-ui-kit/toast'
+import type { WorkbenchApi } from '@workbench/contract-api'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 /**
  * 成功提示走轻提示（toast），不走错误条。面板这边的职责只是「把话交出去」：
  * 真实渲染、语义与自动消失由 `components/ui/toast.test.tsx` 覆盖，这里断言文案对得上。
  */
-vi.mock('../../../../../../src/renderer/src/components/ui/toast', () => ({
+vi.mock('@workbench/client-ui-kit/toast', () => ({
   toast: vi.fn(),
   ToastHost: (): null => null,
 }))

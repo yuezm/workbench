@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { RunEvent } from '../../src/protocol/entities'
-import type { ExecutorIO, Receipt, Turn } from '../../src/protocol/executor'
-import { createMemoryRemoteTransport } from '../../src/host/worker-transport'
+import type { RunEvent } from '@workbench/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '@workbench/protocol/executor'
+import { createMemoryRemoteTransport } from '@workbench/host/worker-transport'
 
 /**
  * 远端 Worker 的内存传输（M7 架构位）：验证端口形状与时序，不监听端口、不 spawn 进程。

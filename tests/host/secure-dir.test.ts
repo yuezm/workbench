@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { secureDataDir } from '../../src/host/secure-dir'
+import { secureDataDir } from '@workbench/host/secure-dir'
 
 const posixDeps = () => ({
   platform: 'darwin' as NodeJS.Platform,

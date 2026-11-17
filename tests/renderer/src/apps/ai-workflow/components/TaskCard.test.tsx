@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type { Task, WorkflowStage } from '../../../../../../src/protocol/entities'
-import { TaskCard } from '../../../../../../src/renderer/src/apps/ai-workflow/components/TaskCard'
+import type { Task, WorkflowStage } from '@workbench/protocol/entities'
+import { TaskCard } from '@workbench/client-app-ai-workflow/components/TaskCard'
 
 function stage(entryMode: WorkflowStage['entryMode']): WorkflowStage {
   return {

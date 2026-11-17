@@ -9,9 +9,9 @@
  *
  * 生产路径没有这个适配层：`host/executor.ts` 只做回执归一与续接重试。
  */
-import type { RunErrorCode, RunEvent, Runtime, RunUsage } from '../../src/protocol/entities'
-import type { ExecutorIO, Receipt, Turn } from '../../src/protocol/executor'
-import type { ExecutorContext, ExecutorPlugin, Sdk } from '../../src/sdk/types'
+import type { RunErrorCode, RunEvent, Runtime, RunUsage } from '@workbench/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '@workbench/protocol/executor'
+import type { ExecutorContext, ExecutorPlugin, Sdk } from '@workbench/capabilities/types'
 
 /** 一轮请求（旧后端形态：turn + 派生的协议字段 + 回调） */
 export interface TestBackendRequest {

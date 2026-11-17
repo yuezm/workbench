@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { RunEvent, Runtime } from '../../../../src/protocol/entities'
-import type { ExecutorIO, Receipt, Turn } from '../../../../src/protocol/executor'
-import type { ExecutorContext, SpawnFn, SpawnOptions, Spawned } from '../../../../src/sdk/types'
+import type { RunEvent, Runtime } from '@workbench/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '@workbench/protocol/executor'
+import type { ExecutorContext, SpawnFn, SpawnOptions, Spawned } from '@workbench/capabilities/types'
 import {
   CLAUDE_PROTOCOL_VERSION,
   HELP_TIMEOUT_MS,
@@ -10,20 +10,20 @@ import {
   OUTPUT_TAIL_LIMIT,
   RUN_TIMEOUT_MS,
   VERSION_TIMEOUT_MS,
-} from '../../../../src/plugins/executors/claude/constants'
-import { detectClaude } from '../../../../src/plugins/executors/claude/detect'
-import { contentText, jsonText } from '../../../../src/plugins/executors/claude/frames'
-import { claudePlugin } from '../../../../src/plugins/executors/claude/index'
-import { claudeManifest } from '../../../../src/plugins/executors/claude/manifest'
-import { probeClaudeRuntime } from '../../../../src/plugins/executors/claude/probe'
-import { collect, errMsg } from '../../../../src/plugins/executors/claude/process'
+} from '@workbench/executor-claude/constants'
+import { detectClaude } from '@workbench/executor-claude/detect'
+import { contentText, jsonText } from '@workbench/executor-claude/frames'
+import { claudePlugin } from '@workbench/executor-claude/index'
+import { claudeManifest } from '@workbench/executor-claude/manifest'
+import { probeClaudeRuntime } from '@workbench/executor-claude/probe'
+import { collect, errMsg } from '@workbench/executor-claude/process'
 import {
   claudeArgs,
   executeClaudeRun,
   mapResultSubtype,
   WORKSPACE_ALLOWED_TOOLS,
   type ClaudeOptions,
-} from '../../../../src/plugins/executors/claude/run'
+} from '@workbench/executor-claude/run'
 import { fakeSdk, type FakeSdkOverrides } from '../../support/fake-sdk'
 
 /** 用 node 自身作为「存在的可执行文件」，避免依赖本机 claude */

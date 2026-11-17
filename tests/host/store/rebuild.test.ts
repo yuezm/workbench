@@ -10,12 +10,12 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { decide } from '../../../src/kernel/decide'
-import { project } from '../../../src/kernel/scopes/project'
-import { IMPORT_ROOT_LABEL, timeline } from '../../../src/kernel/scopes/timeline'
-import type { Actor, Fact, FactDraft, KernelPort } from '../../../src/kernel/core/types'
-import { viewSpec } from '../../../src/kernel/scopes/view-spec'
-import type { Command } from '../../../src/protocol/commands'
+import { decide } from '@workbench/kernel/decide'
+import { project } from '@workbench/kernel/scopes/project'
+import { IMPORT_ROOT_LABEL, timeline } from '@workbench/kernel/scopes/timeline'
+import type { Actor, Fact, FactDraft, KernelPort } from '@workbench/kernel/core/types'
+import { viewSpec } from '@workbench/kernel/scopes/view-spec'
+import type { Command } from '@workbench/protocol/commands'
 import type {
   Agent,
   Runtime,
@@ -24,13 +24,13 @@ import type {
   Workflow,
   WorkflowStage,
   WorkflowWithStages,
-} from '../../../src/protocol/entities'
-import { openDatabase } from '../../../src/host/db'
-import { withTx } from '../../../src/host/schema'
-import { allFacts, appendFacts, lastSeq } from '../../../src/host/store/facts'
-import { createStore, type Store } from '../../../src/host/store/index'
-import { importLegacyIfNeeded } from '../../../src/host/store/import'
-import { readProjectionMeta, rebuildProjection } from '../../../src/host/store/projection'
+} from '@workbench/protocol/entities'
+import { openDatabase } from '@workbench/host-store/db'
+import { withTx } from '@workbench/host-store/schema'
+import { allFacts, appendFacts, lastSeq } from '@workbench/host-store/facts'
+import { createStore, type Store } from '@workbench/host-store/index'
+import { importLegacyIfNeeded } from '@workbench/host-store/import'
+import { readProjectionMeta, rebuildProjection } from '@workbench/host-store/projection'
 import { countRows, createMemoryDb, dumpProjection } from './test-support'
 
 const AT = '2026-03-03T03:03:03.000Z'

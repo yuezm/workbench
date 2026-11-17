@@ -1,12 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Agent, Card, Conversation, Message } from '../../../../../../src/protocol/entities'
-import type { ChatStreamState } from '../../../../../../src/renderer/src/apps/ai-workflow/hooks/useChat'
+import type { Agent, Card, Conversation, Message } from '@workbench/protocol/entities'
+import type { ChatStreamState } from '@workbench/client-app-ai-workflow/hooks/useChat'
 import {
   ChatPanel,
   type ChatPanelProps,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/ChatPanel'
+} from '@workbench/client-app-ai-workflow/components/ChatPanel'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 const agent: Agent = {

@@ -5,8 +5,8 @@ import type {
   ChannelSpawned,
   ChannelSpawnOptions,
   ChannelStdout,
-} from '../../../src/protocol/channels'
-import type { Card } from '../../../src/protocol/entities'
+} from '@workbench/protocol/channels'
+import type { Card } from '@workbench/protocol/entities'
 import {
   connectionIdOf,
   feishuChannel,
@@ -15,9 +15,9 @@ import {
   parseConnections,
   programWithProfile,
   readFeishuConnections,
-} from '../../../src/plugins/channels/feishu/index'
-import { LARK_ENV_UNSET } from '../../../src/plugins/channels/feishu/lark'
-import type { ProcessCapability } from '../../../src/sdk/types'
+} from '@workbench/channel-feishu/index'
+import { LARK_ENV_UNSET } from '@workbench/channel-feishu/lark'
+import type { ProcessCapability } from '@workbench/capabilities/types'
 import { fakeSdk } from '../support/fake-sdk'
 import { cardOf, channelHarness, type ChannelHarness } from './harness'
 

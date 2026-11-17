@@ -2,9 +2,9 @@
  * 内核行数预算（M37）：拆两层之后，「内核膨胀」要有一个当场能判定的读数。
  *
  * 预算（写进 ARCHITECTURE 验收表）：
- * - `src/kernel/core/**` 合计 ≤ 2000 行（真正的纯基础：类型 / 常量 / cron / 下次唤醒）；
- * - `src/kernel/scopes/**` 里**单个文件** ≤ 900 行（域可以多文件，但一个文件不许长成巨石）；
- * - `src/kernel/decide.ts` ≤ 220 行（只做表驱动分派）。
+ * - `packages/core/kernel/src/core/**` 合计 ≤ 2000 行（真正的纯基础：类型 / 常量 / cron / 下次唤醒）；
+ * - `packages/core/kernel/src/scopes/**` 里**单个文件** ≤ 900 行（域可以多文件，但一个文件不许长成巨石）；
+ * - `packages/core/kernel/src/decide.ts` ≤ 220 行（只做表驱动分派）。
  *
  * 只数非空行（去掉注释与空行会掩盖「注释比代码多」的文件，这里不区分：行数就是维护成本）。
  * 超限 exit 1；`pnpm check:fast` 已接入。
@@ -13,7 +13,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
 const ROOT = process.cwd()
-const KERNEL = join(ROOT, 'src', 'kernel')
+const KERNEL = join(ROOT, 'packages', 'core', 'kernel', 'src')
 const CORE = join(KERNEL, 'core')
 const SCOPES = join(KERNEL, 'scopes')
 const DECIDE = join(KERNEL, 'decide.ts')

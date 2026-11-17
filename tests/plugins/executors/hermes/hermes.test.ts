@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
-import type { RunEvent, Runtime } from '../../../../src/protocol/entities'
-import type { ExecutorIO, Receipt, Turn } from '../../../../src/protocol/executor'
-import type { ExecutorContext, SpawnFn, SpawnOptions, Spawned } from '../../../../src/sdk/types'
+import type { RunEvent, Runtime } from '@workbench/protocol/entities'
+import type { ExecutorIO, Receipt, Turn } from '@workbench/protocol/executor'
+import type { ExecutorContext, SpawnFn, SpawnOptions, Spawned } from '@workbench/capabilities/types'
 import {
   ACP_PROTOCOL_VERSION,
   CANCEL_GRACE_MS,
@@ -12,30 +12,30 @@ import {
   PROBE_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
   RUN_TIMEOUT_MS,
-} from '../../../../src/plugins/executors/hermes/constants'
-import { connect, stopLink, type AcpLink } from '../../../../src/plugins/executors/hermes/wire'
-import { detectHermes } from '../../../../src/plugins/executors/hermes/detect'
+} from '@workbench/executor-hermes/constants'
+import { connect, stopLink, type AcpLink } from '@workbench/executor-hermes/wire'
+import { detectHermes } from '@workbench/executor-hermes/detect'
 import {
   decidePermission,
   handleSessionUpdate,
   type HermesRunState,
-} from '../../../../src/plugins/executors/hermes/frames'
+} from '@workbench/executor-hermes/frames'
 import {
   createAcpClient,
   feedLine,
   type AcpClient,
   type AcpHandlers,
-} from '../../../../src/plugins/executors/hermes/acp'
-import { hermesManifest, hermesPlugin } from '../../../../src/plugins/executors/hermes/index'
+} from '@workbench/executor-hermes/acp'
+import { hermesManifest, hermesPlugin } from '@workbench/executor-hermes/index'
 import {
   listHermesModels,
   providerOfModel,
   toRuntimeModelId,
-} from '../../../../src/plugins/executors/hermes/models'
-import { readCliVersion } from '../../../../src/plugins/executors/hermes/process'
-import { probeHermesRuntime } from '../../../../src/plugins/executors/hermes/probe'
-import { executeHermesRun, type HermesOptions } from '../../../../src/plugins/executors/hermes/run'
-import { readSessionState } from '../../../../src/plugins/executors/hermes/session'
+} from '@workbench/executor-hermes/models'
+import { readCliVersion } from '@workbench/executor-hermes/process'
+import { probeHermesRuntime } from '@workbench/executor-hermes/probe'
+import { executeHermesRun, type HermesOptions } from '@workbench/executor-hermes/run'
+import { readSessionState } from '@workbench/executor-hermes/session'
 import { fakeSdk, type FakeSdkOverrides } from '../../support/fake-sdk'
 
 /** 用 node 自身作为「存在的可执行文件」，避免依赖本机 hermes */

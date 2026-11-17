@@ -17,11 +17,11 @@ import {
   type Runtime,
   type WorkflowInput,
   type WorkflowWithStages,
-} from '../../../../../../src/protocol/entities'
+} from '@workbench/protocol/entities'
 import {
   moveStageToIndex,
   WorkflowEditor,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowEditor'
+} from '@workbench/client-app-ai-workflow/components/WorkflowEditor'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 /** 拖一行到另一行（序号 1 基，与左侧列表一致）：整行是拖拽源与落点，抓到目标行松手 */

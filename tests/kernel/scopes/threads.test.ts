@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { RunRow, Task } from '../../../src/protocol/entities'
-import { THREAD_LIMITS, type ThreadEventRef, type ThreadRow } from '../../../src/protocol/thread'
-import type { Environment, Limits, View } from '../../../src/kernel/core/types'
+import type { RunRow, Task } from '@workbench/protocol/entities'
+import { THREAD_LIMITS, type ThreadEventRef, type ThreadRow } from '@workbench/protocol/thread'
+import type { Environment, Limits, View } from '@workbench/kernel/core/types'
 import {
   activeTasksOfThread,
   closeIfAllDone,
@@ -22,7 +22,7 @@ import {
   withNote,
   withStatus,
   withTask,
-} from '../../../src/kernel/scopes/threads'
+} from '@workbench/kernel/scopes/threads'
 
 const CREATED = '2026-11-01T00:00:00.000Z'
 const NOW = '2026-11-05T09:00:00.000Z'

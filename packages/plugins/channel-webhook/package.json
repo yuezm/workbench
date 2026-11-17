@@ -1,0 +1,9 @@
+{
+  "name": "@workbench/channel-webhook",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Webhook 出站通道",
+  "dependencies": {
+    "@workbench/protocol": "workspace:*"
+  }
+}

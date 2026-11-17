@@ -1,0 +1,7 @@
+{
+  "name": "@workbench/host-frontend-static",
+  "version": "0.0.0",
+  "private": true,
+  "description": "唯一的 Web 产物知识：dist 探测 / URL→文件 / Content-Type / 缺产物时降级为纯 API",
+  "dependencies": {}
+}

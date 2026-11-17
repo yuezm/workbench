@@ -9,10 +9,10 @@
  */
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { RunRow } from '../../src/protocol/entities'
-import { createProjectionWriter } from '../../src/host/store/projection-apply'
-import { queryView } from '../../src/host/store/views'
-import type { UsageAgentRow, UsageDailyRow } from '../../src/protocol/views'
+import type { RunRow } from '@workbench/protocol/entities'
+import { createProjectionWriter } from '@workbench/host-store/projection-apply'
+import { queryView } from '@workbench/host-store/views'
+import type { UsageAgentRow, UsageDailyRow } from '@workbench/protocol/views'
 import { createMemoryDb, sample } from './store/test-support'
 
 const NOW = '2026-11-14T12:00:00.000Z'

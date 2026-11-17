@@ -6,20 +6,26 @@ import { describe, expect, it } from 'vitest'
 /**
  * 插件边界门禁（SPEC-plugins「插件边界与审查要点 / 测试」）。
  *
- * ESLint 只能按 import specifier 的字面量拦跨层路径，表达不了两件事：
- * ① 插件之间用相对路径互相 import（specifier 里没有 `plugins` 段）；
- * ② manifest 的 `capabilities` 声明与源码里 `sdk.*` 的实际用法是否一致。
- * 这两件事落成本文件的源码扫描（范式照抄 tests/kernel/purity.test.ts：剥注释/字符串 + 正则取 import）。
+ * 拆包后（B4）插件各自是 `packages/plugins/<包>/`，边界变成两条可判定的规则：
+ * ① 相对 import 解析后必须仍在自己的包里（跨包只能写包名）；
+ * ② 包名 import 只允许 `@workbench/protocol`、`@workbench/capabilities`、`@workbench/plugins-kit`
+ *    （注册表包是唯一例外：它是静态导入点，可以 import 全部插件包）。
+ * 外加 manifest 的 `capabilities` 声明与源码里 `sdk.*` 的实际用法是否一致。
  *
- * 只读 src/plugins，不 import 任何插件实现；executors 目录还没落盘时按「目录存在才断言」降级。
+ * 只读包目录，不 import 任何插件实现（范式沿用 tests/kernel/purity.test.ts：剥注释/字符串 + 正则取 import）。
  */
 
-const PLUGINS_ROOT = resolve(import.meta.dirname, '../../src/plugins')
+const PLUGINS_ROOT = resolve(import.meta.dirname, '../../packages/plugins')
 
-/** 允许的跨插件共享面：只有 sdk、protocol 与 plugins/shared（shared 仅纯函数）。 */
-const SHARED_PREFIXES = ['src/plugins/shared', 'src/sdk', 'src/protocol']
+/** 允许插件依赖的仓内包（plugins → protocol + capabilities + plugins-kit）。 */
+const ALLOWED_PACKAGES = [
+  '@workbench/protocol',
+  '@workbench/capabilities',
+  '@workbench/plugins-kit',
+]
 
-const KIND_DIRS = ['executors', 'sources', 'channels', 'apps']
+/** 插件包的目录前缀：`executor-*` / `channel-*` / `source-*`。 */
+const PLUGIN_PREFIXES = ['executor-', 'channel-', 'source-']
 
 const toPosix = (p: string): string => p.split(sep).join('/')
 
@@ -117,7 +123,9 @@ const importsOf = (code: string): Array<{ specifier: string; index: number }> =>
 }
 
 interface PluginFile {
-  /** 相对 src/plugins 的 posix 路径，例如 `executors/dsh/index.ts`。 */
+  /** 所属包（目录名，例如 `executor-dsh`）。 */
+  packageName: string
+  /** 相对 `packages/plugins/` 的 posix 路径，例如 `executor-dsh/src/index.ts`。 */
   path: string
   source: string
 }
@@ -127,6 +135,7 @@ const isSourceFile = (name: string): boolean => name.endsWith('.ts') && !name.en
 const listSources = (dir: string): string[] => {
   const files: string[] = []
   const walk = (current: string): void => {
+    if (!existsSync(current)) return
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       if (entry.isDirectory()) walk(join(current, entry.name))
       else if (isSourceFile(entry.name)) files.push(join(current, entry.name))
@@ -136,25 +145,25 @@ const listSources = (dir: string): string[] => {
   return files
 }
 
-const readPluginFiles = (root: string): PluginFile[] =>
-  listSources(root).map((file) => ({
-    path: toPosix(relative(PLUGINS_ROOT, file)),
+/** 插件包清单（`packages/plugins/*`，按目录名）。 */
+const pluginPackages = (): string[] =>
+  readdirSync(PLUGINS_ROOT, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => existsSync(join(PLUGINS_ROOT, name, 'src')))
+
+const packageFiles = (packageName: string): PluginFile[] =>
+  listSources(join(PLUGINS_ROOT, packageName, 'src')).map((file) => ({
+    packageName,
+    path: `${packageName}/src/${toPosix(relative(join(PLUGINS_ROOT, packageName, 'src'), file))}`,
     source: readFileSync(file, 'utf8'),
   }))
 
-/** 文件所属的插件目录（相对仓库根的虚拟路径）：具体插件是自己的目录，注册表/契约再导出是整个 plugins。 */
-const pluginScopeOf = (filePath: string): string => {
-  const segments = filePath.split('/')
-  if (segments.length > 1 && KIND_DIRS.includes(segments[0])) {
-    return `src/plugins/${segments[0]}/${segments[1]}`
-  }
-  if (segments.length > 1 && segments[0] === 'shared') return 'src/plugins/shared'
-  return 'src/plugins'
-}
+const readAllPluginFiles = (): PluginFile[] => pluginPackages().flatMap(packageFiles)
 
-/** 把相对 specifier 解析成相对仓库根的虚拟路径（只做字符串解析，不读盘）。 */
+/** 把相对 specifier 解析成相对 `packages/plugins/` 的虚拟路径（只做字符串解析，不读盘）。 */
 const resolveSpecifier = (filePath: string, specifier: string): string => {
-  const parts = ['src', 'plugins', ...filePath.split('/').slice(0, -1)]
+  const parts = filePath.split('/').slice(0, -1)
   for (const segment of specifier.split('/')) {
     if (segment === '' || segment === '.') continue
     if (segment === '..') parts.pop()
@@ -163,27 +172,37 @@ const resolveSpecifier = (filePath: string, specifier: string): string => {
   return parts.join('/')
 }
 
-const isUnder = (target: string, prefix: string): boolean =>
-  target === prefix || target.startsWith(`${prefix}/`)
+const isAllowedPackageSpecifier = (specifier: string): boolean =>
+  ALLOWED_PACKAGES.some((name) => specifier === name || specifier.startsWith(`${name}/`))
+
+/** 注册表包是唯一静态导入点：允许 import 全部插件包。 */
+const isPluginPackageSpecifier = (specifier: string): boolean =>
+  PLUGIN_PREFIXES.some((prefix) => specifier.startsWith(`@workbench/${prefix}`))
 
 /**
- * 跨插件 import：相对 import 解析后必须落在自己插件目录、`src/plugins/shared`、`src/sdk`
- * 或 `src/protocol` 之内；`src/plugins/registry.ts` 是唯一静态导入点，可以 import 任何插件。
+ * 跨插件 import 判定：
+ * - 相对 import 解析后必须仍在自己的包内；
+ * - 包名 import 必须落在 ALLOWED_PACKAGES；`registry` 包额外允许全部插件包。
  */
 const importViolationsOf = (files: readonly PluginFile[]): string[] => {
   const found: string[] = []
   for (const file of files) {
     const { withoutComments } = strip(file.source)
-    const scope = pluginScopeOf(file.path)
-    const allowed = [scope, ...SHARED_PREFIXES]
+    const isRegistry = file.packageName === 'registry'
     for (const { specifier, index } of importsOf(withoutComments)) {
-      if (!specifier.startsWith('.')) continue
-      const resolved = resolveSpecifier(file.path, specifier)
-      if (allowed.some((prefix) => isUnder(resolved, prefix))) continue
-      found.push(
-        `${file.path}:${lineOf(withoutComments, index)} 禁止跨插件 import「${specifier}」` +
-          `（解析到 ${resolved}；只允许本插件目录、src/plugins/shared、src/sdk、src/protocol）`,
-      )
+      const at = `${file.path}:${lineOf(withoutComments, index)}`
+      if (specifier.startsWith('.')) {
+        const resolved = resolveSpecifier(file.path, specifier)
+        if (resolved.startsWith(`${file.packageName}/`)) continue
+        found.push(
+          `${at} 禁止跨插件 import「${specifier}」（解析到 ${resolved}；包内相对 import 只能留在本包，跨包请写包名）`,
+        )
+        continue
+      }
+      if (!specifier.startsWith('@workbench/')) continue
+      if (isRegistry && isPluginPackageSpecifier(specifier)) continue
+      if (isAllowedPackageSpecifier(specifier)) continue
+      found.push(`${at} 禁止跨插件 import「${specifier}」（只允许 ${ALLOWED_PACKAGES.join('、')}）`)
     }
   }
   return found
@@ -243,10 +262,23 @@ const capabilityViolationsOf = (
   return found
 }
 
+/** 某一类插件包的 capabilities 双向一致性检查（manifest 与源码都在包内）。 */
+const capabilityFindingsFor = (prefix: string): { findings: string[]; count: number } => {
+  const packages = pluginPackages().filter((name) => name.startsWith(prefix))
+  const findings: string[] = []
+  for (const packageName of packages) {
+    const manifestPath = join(PLUGINS_ROOT, packageName, 'src', 'manifest.ts')
+    expect(existsSync(manifestPath), `插件包 ${packageName} 缺少 src/manifest.ts`).toBe(true)
+    const declared = declaredCapabilitiesOf(readFileSync(manifestPath, 'utf8'))
+    findings.push(...capabilityViolationsOf(packageName, packageFiles(packageName), declared))
+  }
+  return { findings, count: packages.length }
+}
+
 describe('插件边界', () => {
-  it('插件源码只 import 本插件目录、plugins/shared、sdk 与 protocol', () => {
-    const files = readPluginFiles(PLUGINS_ROOT)
-    expect(files.length, 'src/plugins 至少要有 1 个源文件，否则护栏空转').toBeGreaterThan(0)
+  it('插件源码只 import 本包、@workbench/protocol、@workbench/capabilities、@workbench/plugins-kit', () => {
+    const files = readAllPluginFiles()
+    expect(files.length, '插件包至少要有 1 个源文件，否则护栏空转').toBeGreaterThan(0)
 
     const violations = importViolationsOf(files)
 
@@ -257,103 +289,72 @@ describe('插件边界', () => {
   })
 
   it('执行器插件的 capabilities 声明与 sdk 用法双向一致', () => {
-    const executorsRoot = join(PLUGINS_ROOT, 'executors')
-    if (!existsSync(executorsRoot)) return
-
-    const executorDirs = readdirSync(executorsRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-
-    const findings: string[] = []
-    for (const id of executorDirs) {
-      const dir = join(executorsRoot, id)
-      const manifestPath = join(dir, 'manifest.ts')
-      expect(existsSync(manifestPath), `执行器插件 ${id} 缺少 manifest.ts`).toBe(true)
-      const declared = declaredCapabilitiesOf(readFileSync(manifestPath, 'utf8'))
-      findings.push(...capabilityViolationsOf(id, readPluginFiles(dir), declared))
-    }
-
+    const { findings, count } = capabilityFindingsFor('executor-')
+    expect(count, '至少要有一个执行器包').toBeGreaterThan(0)
     expect(
       findings,
-      `capabilities 是授权声明，必须与 sdk 用法一致：\n${findings.join('\n')}\n（扫描 ${executorDirs.length} 个执行器插件）`,
+      `capabilities 是授权声明，必须与 sdk 用法一致：\n${findings.join('\n')}\n（扫描 ${count} 个执行器包）`,
     ).toEqual([])
   })
 
   it('通道插件的 capabilities 声明与 sdk 用法双向一致（M4 T8）', () => {
-    const channelsRoot = join(PLUGINS_ROOT, 'channels')
-    if (!existsSync(channelsRoot)) return
-
-    const channelDirs = readdirSync(channelsRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-
-    const findings: string[] = []
-    for (const id of channelDirs) {
-      const dir = join(channelsRoot, id)
-      const manifestPath = join(dir, 'manifest.ts')
-      expect(existsSync(manifestPath), `通道插件 ${id} 缺少 manifest.ts`).toBe(true)
-      const declared = declaredCapabilitiesOf(readFileSync(manifestPath, 'utf8'))
-      findings.push(...capabilityViolationsOf(id, readPluginFiles(dir), declared))
-    }
-
+    const { findings, count } = capabilityFindingsFor('channel-')
+    expect(count, '至少要有一个通道包').toBeGreaterThan(0)
     expect(
       findings,
-      `通道的 capabilities 是授权声明，必须与源码用法一致（含跨插件 import 扫描）：\n${findings.join('\n')}\n（扫描 ${channelDirs.length} 个通道插件）`,
+      `通道的 capabilities 是授权声明，必须与源码用法一致：\n${findings.join('\n')}\n（扫描 ${count} 个通道包）`,
     ).toEqual([])
   })
 
   it('来源插件的 capabilities 声明与 sdk 用法双向一致（M7 T4）', () => {
-    const sourcesRoot = join(PLUGINS_ROOT, 'sources')
-    if (!existsSync(sourcesRoot)) return
-
-    const sourceDirs = readdirSync(sourcesRoot, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-
-    const findings: string[] = []
-    for (const id of sourceDirs) {
-      const dir = join(sourcesRoot, id)
-      const manifestPath = join(dir, 'manifest.ts')
-      expect(existsSync(manifestPath), `来源插件 ${id} 缺少 manifest.ts`).toBe(true)
-      const declared = declaredCapabilitiesOf(readFileSync(manifestPath, 'utf8'))
-      findings.push(...capabilityViolationsOf(id, readPluginFiles(dir), declared))
-    }
-
+    const { findings, count } = capabilityFindingsFor('source-')
+    expect(count, '至少要有一个来源包').toBeGreaterThan(0)
     expect(
       findings,
-      `来源的 capabilities 是授权声明，必须与源码用法一致（含跨插件 import 扫描）：\n${findings.join('\n')}\n（扫描 ${sourceDirs.length} 个来源插件）`,
+      `来源的 capabilities 是授权声明，必须与源码用法一致：\n${findings.join('\n')}\n（扫描 ${count} 个来源包）`,
     ).toEqual([])
   })
 })
 
 describe('插件边界护栏自检', () => {
-  it('能抓到跨插件 import 与越界 import，并给出文件与行号', () => {
+  const file = (packageName: string, path: string, source: string): PluginFile => ({
+    packageName,
+    path: `${packageName}/src/${path}`,
+    source,
+  })
+
+  it('能抓到跨包相对 import、越界包名与 registry 之外的插件互引', () => {
     const dirty: PluginFile[] = [
-      { path: 'executors/dsh/index.ts', source: "import { runCommand } from '../command/index'" },
-      { path: 'executors/dsh/index.ts', source: "import { spawn } from '../../../host/process'" },
-      { path: 'shared/jsonl.ts', source: "import { dsh } from '../executors/dsh/index'" },
+      file(
+        'executor-dsh',
+        'process.ts',
+        "import { runCommand } from '../../executor-command/src/index'",
+      ),
+      file('executor-dsh', 'process.ts', "import { store } from '@workbench/host-store'"),
+      file('channel-desktop', 'index.ts', "import { dsh } from '@workbench/executor-dsh'"),
     ]
 
     expect(importViolationsOf(dirty)).toEqual([
-      'executors/dsh/index.ts:1 禁止跨插件 import「../command/index」（解析到 src/plugins/executors/command/index；只允许本插件目录、src/plugins/shared、src/sdk、src/protocol）',
-      'executors/dsh/index.ts:1 禁止跨插件 import「../../../host/process」（解析到 src/host/process；只允许本插件目录、src/plugins/shared、src/sdk、src/protocol）',
-      'shared/jsonl.ts:1 禁止跨插件 import「../executors/dsh/index」（解析到 src/plugins/executors/dsh/index；只允许本插件目录、src/plugins/shared、src/sdk、src/protocol）',
+      'executor-dsh/src/process.ts:1 禁止跨插件 import「../../executor-command/src/index」（解析到 executor-command/src/index；包内相对 import 只能留在本包，跨包请写包名）',
+      'executor-dsh/src/process.ts:1 禁止跨插件 import「@workbench/host-store」（只允许 @workbench/protocol、@workbench/capabilities、@workbench/plugins-kit）',
+      'channel-desktop/src/index.ts:1 禁止跨插件 import「@workbench/executor-dsh」（只允许 @workbench/protocol、@workbench/capabilities、@workbench/plugins-kit）',
     ])
   })
 
-  it('不把合法依赖与注释里的 import 当违规', () => {
+  it('不把合法依赖与注释里的 import 当违规（registry 允许 import 插件包）', () => {
     const clean: PluginFile[] = [
-      {
-        path: 'executors/dsh/index.ts',
-        source: [
-          "// 说明：这里不能写 import { x } from '../command/index'",
-          "import type { Sdk } from '../../../sdk/types'",
+      file(
+        'executor-dsh',
+        'index.ts',
+        [
+          "// 说明：这里不能写 import { x } from '../../executor-command/src/index'",
+          "import type { Sdk } from '@workbench/capabilities/types'",
           "import { manifest } from './manifest'",
-          "import { splitLines } from '../../shared/jsonl'",
-          "import type { Turn } from '../../../protocol/executor'",
+          "import { splitLines } from '@workbench/plugins-kit/jsonl'",
+          "import type { Turn } from '@workbench/protocol/executor'",
         ].join('\n'),
-      },
-      { path: 'registry.ts', source: "import { dshExecutor } from './executors/dsh/index'" },
+      ),
+      file('registry', 'index.ts', "import { dshExecutor } from '@workbench/executor-dsh'"),
     ]
 
     expect(importViolationsOf(clean)).toEqual([])
@@ -361,59 +362,60 @@ describe('插件边界护栏自检', () => {
 
   it('能力护栏能抓到「用了没声明」与「声明了没用」', () => {
     const files: PluginFile[] = [
-      {
-        path: 'executors/fake/run.ts',
-        source: 'export const run = (sdk: Sdk): Promise<string> => sdk.fs.read("/tmp/x")',
-      },
+      file(
+        'executor-fake',
+        'run.ts',
+        'export const run = (sdk: Sdk): Promise<string> => sdk.fs.read("/tmp/x")',
+      ),
     ]
 
-    expect(capabilityViolationsOf('fake', files, ['spawn'])).toEqual([
-      'fake: 源码用了 sdk 的「fs.read」能力，但 manifest.capabilities 未声明',
-      'fake: manifest.capabilities 声明了「spawn」，但源码没有对应用法',
+    expect(capabilityViolationsOf('executor-fake', files, ['spawn'])).toEqual([
+      'executor-fake: 源码用了 sdk 的「fs.read」能力，但 manifest.capabilities 未声明',
+      'executor-fake: manifest.capabilities 声明了「spawn」，但源码没有对应用法',
     ])
   })
 
   it('notify 护栏：通道用 sdk.notify 必须声明 notify，声明了不用也报（M4 T6）', () => {
     // 通道插件经 `ctx.sdk` 拿能力面，规则必须同时认命名空间访问
     const usesNotify: PluginFile[] = [
-      {
-        path: 'channels/desktop/index.ts',
-        source:
-          "export const start = (ctx: ChannelContext): void => ctx.sdk.notify('待审批', '正文')",
-      },
+      file(
+        'channel-desktop',
+        'index.ts',
+        "export const start = (ctx: ChannelContext): void => ctx.sdk.notify('待审批', '正文')",
+      ),
     ]
-    expect(capabilityViolationsOf('desktop', usesNotify, [])).toEqual([
-      'desktop: 源码用了 sdk 的「notify」能力，但 manifest.capabilities 未声明',
+    expect(capabilityViolationsOf('channel-desktop', usesNotify, [])).toEqual([
+      'channel-desktop: 源码用了 sdk 的「notify」能力，但 manifest.capabilities 未声明',
     ])
-    expect(capabilityViolationsOf('desktop', usesNotify, ['notify'])).toEqual([])
+    expect(capabilityViolationsOf('channel-desktop', usesNotify, ['notify'])).toEqual([])
 
     // 反向：声明了 notify 但源码没调 → 也是违规（声明 = 授权面，实际未用）
     const noUsage: PluginFile[] = [
-      { path: 'channels/desktop/index.ts', source: 'export const start = (): void => undefined' },
+      file('channel-desktop', 'index.ts', 'export const start = (): void => undefined'),
     ]
-    expect(capabilityViolationsOf('desktop', noUsage, ['notify'])).toEqual([
-      'desktop: manifest.capabilities 声明了「notify」，但源码没有对应用法',
+    expect(capabilityViolationsOf('channel-desktop', noUsage, ['notify'])).toEqual([
+      'channel-desktop: manifest.capabilities 声明了「notify」，但源码没有对应用法',
     ])
   })
 
   it('net 护栏：来源用 sdk.net 必须声明 net，声明了不用也报（M7 T3）', () => {
     const usesNet: PluginFile[] = [
-      {
-        path: 'sources/webhook/index.ts',
-        source:
-          'export const start = (ctx: SourceContext): void => { void ctx.sdk.net.listen(0, async () => ({ status: 200 })) }',
-      },
+      file(
+        'source-webhook',
+        'index.ts',
+        'export const start = (ctx: SourceContext): void => { void ctx.sdk.net.listen(0, async () => ({ status: 200 })) }',
+      ),
     ]
-    expect(capabilityViolationsOf('webhook', usesNet, [])).toEqual([
-      'webhook: 源码用了 sdk 的「net」能力，但 manifest.capabilities 未声明',
+    expect(capabilityViolationsOf('source-webhook', usesNet, [])).toEqual([
+      'source-webhook: 源码用了 sdk 的「net」能力，但 manifest.capabilities 未声明',
     ])
-    expect(capabilityViolationsOf('webhook', usesNet, ['net'])).toEqual([])
+    expect(capabilityViolationsOf('source-webhook', usesNet, ['net'])).toEqual([])
 
     const noUsage: PluginFile[] = [
-      { path: 'sources/webhook/index.ts', source: 'export const start = (): void => undefined' },
+      file('source-webhook', 'index.ts', 'export const start = (): void => undefined'),
     ]
-    expect(capabilityViolationsOf('webhook', noUsage, ['net'])).toEqual([
-      'webhook: manifest.capabilities 声明了「net」，但源码没有对应用法',
+    expect(capabilityViolationsOf('source-webhook', noUsage, ['net'])).toEqual([
+      'source-webhook: manifest.capabilities 声明了「net」，但源码没有对应用法',
     ])
   })
 })

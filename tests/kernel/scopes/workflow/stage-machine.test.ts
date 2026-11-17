@@ -9,8 +9,8 @@ import type {
   Task,
   WorkflowStage,
   WorkflowWithStages,
-} from '../../../../src/protocol/entities'
-import { STAGE_EXIT_ACTIONS } from '../../../../src/protocol/entities'
+} from '@workbench/protocol/entities'
+import { STAGE_EXIT_ACTIONS } from '@workbench/protocol/entities'
 import {
   completeExits,
   completeTask,
@@ -23,7 +23,7 @@ import {
   resolveNextStage,
   applyExit,
   type StageEvent,
-} from '../../../../src/kernel/scopes/workflow/stage-machine'
+} from '@workbench/kernel/scopes/workflow/stage-machine'
 
 const stage = (id: string, over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   id,

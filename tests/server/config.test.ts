@@ -19,7 +19,7 @@ import {
   loadServerConfig,
   parsePort,
   readTokenFile,
-} from '../../src/server/config'
+} from '@workbench/server/config'
 
 const HOME = path.join(path.sep, 'home', 'me')
 const CWD = path.join(path.sep, 'app')

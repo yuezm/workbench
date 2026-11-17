@@ -14,7 +14,7 @@
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createServer } from 'vite'
+import { createLoader } from './ts-loader.mjs'
 
 const args = new Map(
   process.argv
@@ -32,22 +32,16 @@ const JSON_OUT = args.get('json') === 'true'
 
 const AT = '2026-11-15T00:00:00.000Z'
 
-const server = await createServer({
-  configFile: false,
-  server: { middlewareMode: true },
-  appType: 'custom',
-  logLevel: 'error',
-})
-const load = async (path) => server.ssrLoadModule(path)
-const { openDatabase } = await load('/src/host/db.ts')
-const { createStore } = await load('/src/host/store/index.ts')
-const schema = await load('/src/host/schema.ts')
+const { load, close } = await createLoader()
+const { openDatabase } = await load('/packages/host/store/src/db.ts')
+const { createStore } = await load('/packages/host/store/src/index.ts')
+const schema = await load('/packages/host/store/src/schema.ts')
 const { withTx } = schema
 const kernel = {
-  decide: (await load('/src/kernel/decide.ts')).decide,
-  project: (await load('/src/kernel/scopes/project.ts')).project,
-  viewSpec: (await load('/src/kernel/scopes/view-spec.ts')).viewSpec,
-  nextWakeAt: (await load('/src/kernel/core/next-wake.ts')).nextWakeAt,
+  decide: (await load('/packages/core/kernel/src/decide.ts')).decide,
+  project: (await load('/packages/core/kernel/src/scopes/project.ts')).project,
+  viewSpec: (await load('/packages/core/kernel/src/scopes/view-spec.ts')).viewSpec,
+  nextWakeAt: (await load('/packages/core/kernel/src/core/next-wake.ts')).nextWakeAt,
 }
 
 const dir = mkdtempSync(join(tmpdir(), 'workbench-bench-'))
@@ -67,7 +61,7 @@ const store = createStore({ db, kernel, now, timezone: 'UTC' })
 store.ensureProjection()
 
 // ---- 造数：直接写事实 + 走同一条投影路径（不经过 decide，避免把造数时间算进指标） ----
-const { appendFacts } = await load('/src/host/store/facts.ts')
+const { appendFacts } = await load('/packages/host/store/src/facts.ts')
 
 const seedAt = Date.now()
 const workflowId = 'wf-bench'
@@ -229,7 +223,7 @@ const startupMs = Number(process.hrtime.bigint() - startupStart) / 1e6
 const sizeBytes = statSync(dbPath).size
 db.close()
 rmSync(dir, { recursive: true, force: true })
-await server.close()
+await close()
 
 const result = {
   facts: factCount,

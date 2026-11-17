@@ -4,7 +4,7 @@ import {
   normalizeModelId,
   parseModelId,
   stripModelDisplaySuffix,
-} from '../../src/protocol/model-id'
+} from '@workbench/protocol/model-id'
 
 describe('protocol/model-id', () => {
   it('stripModelDisplaySuffix：只剥末尾一组方括号，其它位置原样', () => {

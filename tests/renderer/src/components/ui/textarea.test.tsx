@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { Textarea } from '../../../../../src/renderer/src/components/ui/textarea'
+import { Textarea } from '@workbench/client-ui-primitives/textarea'
 
 describe('Textarea（shadcn 基座）', () => {
   it('渲染原生 textarea 语义与统一外观', () => {

@@ -1,0 +1,11 @@
+{
+  "name": "@workbench/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "服务端产品入口（bin: workbench）：装配、配置、生命周期；没有 Web 端也能跑",
+  "dependencies": {
+    "@workbench/api-http": "workspace:*",
+    "@workbench/bundle-base": "workspace:*",
+    "@workbench/bundle-web": "workspace:*"
+  }
+}

@@ -4,7 +4,7 @@ import {
   resetServerInfoForTest,
   setServerInfo,
   useServerInfo,
-} from '../../../../src/renderer/src/shell/server-info'
+} from '@workbench/client-shell/server-info'
 
 /** 服务信息 store：页面启动时写一次、所有组件读同一份 */
 describe('shell/server-info', () => {

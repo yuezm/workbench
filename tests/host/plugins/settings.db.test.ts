@@ -1,8 +1,8 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { openDatabase } from '../../../src/host/db'
-import { createPluginSecrets, type SecretCipher } from '../../../src/host/plugins/settings'
+import { openDatabase } from '@workbench/host-store/db'
+import { createPluginSecrets, type SecretCipher } from '@workbench/host/plugins/settings'
 
 /**
  * `plugin_secrets` × 真实 schema（M7 D5）：用 `openDatabase` 建库（不是测试自建 DDL），

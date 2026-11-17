@@ -12,7 +12,7 @@ import {
   subscribeTheme,
   systemPrefersDark,
   useTheme,
-} from '../../../../src/renderer/src/lib/theme'
+} from '@workbench/client-ui-kit/theme'
 
 /**
  * matchMedia 替身：主题模块只缓存首个 MediaQueryList，
@@ -232,7 +232,7 @@ describe('降级路径（脏存储 / 存储不可用 / 无 matchMedia）', () =>
   /** 重新载入一份全新的主题模块（模块级状态重来一遍） */
   const importFreshTheme = async () => {
     vi.resetModules()
-    return import('../../../../src/renderer/src/lib/theme')
+    return import('@workbench/client-ui-kit/theme')
   }
 
   it('存储里是脏值时按跟随系统回落', async () => {

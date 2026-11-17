@@ -1,0 +1,14 @@
+{
+  "name": "@workbench/bundle-base",
+  "version": "0.0.0",
+  "private": true,
+  "description": "服务端装配（无 Web）：内核 + 宿主 + 插件注册表 + 命令路由",
+  "dependencies": {
+    "@workbench/api-http": "workspace:*",
+    "@workbench/host": "workspace:*",
+    "@workbench/host-store": "workspace:*",
+    "@workbench/kernel": "workspace:*",
+    "@workbench/plugins-registry": "workspace:*",
+    "@workbench/protocol": "workspace:*"
+  }
+}

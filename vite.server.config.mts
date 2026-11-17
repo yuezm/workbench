@@ -2,6 +2,7 @@ import { copyFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import type { Plugin } from 'vite'
+import { workspaceAliases } from './scripts/workspace-aliases.mjs'
 
 /**
  * 服务端构建（服务器部署形态）：把 `src/server/index.ts` 打成一份 CJS 入口。
@@ -26,15 +27,19 @@ const copyReceiptMcpServer = (): Plugin => ({
     const target = resolve('out/server')
     mkdirSync(target, { recursive: true })
     copyFileSync(
-      resolve('src/plugins/shared/receipt-mcp-server.cjs'),
+      resolve('packages/plugins/kit/src/receipt-mcp-server.cjs'),
       resolve(target, 'receipt-mcp-server.cjs'),
     )
   },
 })
 
 export default defineConfig({
+  resolve: {
+    // 拆分后跨包一律写包名；别名与 tsconfig paths 同源（`pnpm gen:paths`）
+    alias: [...workspaceAliases],
+  },
   build: {
-    ssr: resolve('src/server/index.ts'),
+    ssr: resolve('apps/server/src/index.ts'),
     outDir: resolve('out/server'),
     emptyOutDir: true,
     target: 'node22',

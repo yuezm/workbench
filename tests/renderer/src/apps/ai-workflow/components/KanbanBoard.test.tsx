@@ -1,12 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  Task,
-  WorkflowStage,
-  WorkflowWithStages,
-} from '../../../../../../src/protocol/entities'
-import { KanbanBoard } from '../../../../../../src/renderer/src/apps/ai-workflow/components/KanbanBoard'
+import type { Task, WorkflowStage, WorkflowWithStages } from '@workbench/protocol/entities'
+import { KanbanBoard } from '@workbench/client-app-ai-workflow/components/KanbanBoard'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function stage(

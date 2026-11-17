@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { DEFAULT_CONFIG } from '../../../../../../src/renderer/src/apps/pomodoro/timer/machine'
-import { SettingsPanel } from '../../../../../../src/renderer/src/apps/pomodoro/components/SettingsPanel'
+import { DEFAULT_CONFIG } from '@workbench/client-app-pomodoro/timer/machine'
+import { SettingsPanel } from '@workbench/client-app-pomodoro/components/SettingsPanel'
 
 describe('SettingsPanel', () => {
   it('渲染四个配置项，值来自 config', () => {

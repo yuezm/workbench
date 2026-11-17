@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { Segmented } from '../../../../../src/renderer/src/components/ui/segmented'
+import { Segmented } from '@workbench/client-ui-kit/segmented'
 
 const options = [
   { value: 'board', label: '工作台' },

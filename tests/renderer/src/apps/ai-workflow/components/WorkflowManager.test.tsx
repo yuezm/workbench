@@ -1,15 +1,15 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { Command } from '../../../../../../src/protocol/commands'
-import type { WorkflowWithStages } from '../../../../../../src/protocol/entities'
-import type { DispatchResult } from '../../../../../../src/protocol/ipc'
-import { WorkflowManager } from '../../../../../../src/renderer/src/apps/ai-workflow/components/WorkflowManager'
+import type { Command } from '@workbench/protocol/commands'
+import type { WorkflowWithStages } from '@workbench/protocol/entities'
+import type { DispatchResult } from '@workbench/protocol/ipc'
+import { WorkflowManager } from '@workbench/client-app-ai-workflow/components/WorkflowManager'
 import {
   ENTITY_ORDER_STORAGE_KEYS,
   resetEntityOrderForTest,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/model/entity-order'
-import { SOP_TEMPLATES } from '../../../../../../src/renderer/src/apps/ai-workflow/model/sop-templates'
+} from '@workbench/client-app-ai-workflow/model/entity-order'
+import { SOP_TEMPLATES } from '@workbench/client-app-ai-workflow/model/sop-templates'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function wf(id: string, name: string, stages = 0, description = ''): WorkflowWithStages {

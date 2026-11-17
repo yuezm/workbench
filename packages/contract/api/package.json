@@ -1,0 +1,9 @@
+{
+  "name": "@workbench/contract-api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Web API 契约：三动词 + 知会 + 目录浏览（window.workbench 的类型面）",
+  "dependencies": {
+    "@workbench/protocol": "workspace:*"
+  }
+}

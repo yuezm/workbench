@@ -6,3 +6,6 @@ coverage/
 resources/
 pnpm-lock.yaml
 .husky/_/
+# 派生文件：字节由 scripts/gen-workspace-paths.mjs 决定，`pnpm check:paths` 逐字节比对
+tsconfig.paths.json
+scripts/workspace-aliases.mjs

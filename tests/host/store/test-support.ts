@@ -18,9 +18,9 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../../src/protocol/entities'
-import type { ThreadRow } from '../../../src/protocol/thread'
-import { COMMANDS_SQL, FACTS_SQL, SCHEMA_SQL } from '../../../src/host/schema'
+} from '@workbench/protocol/entities'
+import type { ThreadRow } from '@workbench/protocol/thread'
+import { COMMANDS_SQL, FACTS_SQL, SCHEMA_SQL } from '@workbench/host-store/schema'
 
 export const SAMPLE_AT = '2026-01-01T00:00:00.000Z'
 

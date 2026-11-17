@@ -1,4 +1,5 @@
 {
+  "extends": "./tsconfig.paths.json",
   "compilerOptions": {
     "composite": true,
     "target": "ES2022",
@@ -15,17 +16,15 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "forceConsistentCasingInFileNames": true,
-    "paths": {
-      "@renderer/*": ["./src/renderer/src/*"]
-    }
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "src/renderer/src/**/*",
-    "src/kernel/**/*",
-    "src/protocol/**/*",
-    "src/shared/**/*",
+    "packages/client/*/src/**/*",
+    "apps/web/src/**/*",
+    "packages/core/kernel/src/**/*",
     "tests/renderer/**/*",
+    "packages/core/protocol/src/**/*",
+    "packages/contract/**/src/**/*",
     "vitest.config.mts",
     "vitest.setup.ts"
   ]

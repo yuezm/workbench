@@ -8,7 +8,7 @@ import {
   nextCronTime,
   parseCron,
   wallClockInstants,
-} from '../../../src/kernel/core/cron'
+} from '@workbench/kernel/core/cron'
 
 const parse = (expression: string) => {
   const spec = parseCron(expression)

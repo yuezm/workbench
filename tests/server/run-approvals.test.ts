@@ -10,8 +10,8 @@ import {
   locateSessionLog,
   parseApprovals,
   readRunApprovals,
-} from '../../src/server/run-approvals'
-import type { RunApproval } from '../../src/protocol/views'
+} from '@workbench/api-http/run-approvals'
+import type { RunApproval } from '@workbench/protocol/views'
 
 const ASKED = (id: string, over: Record<string, unknown> = {}): string =>
   JSON.stringify({

@@ -1,10 +1,10 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { project } from '../../../src/kernel/scopes/project'
-import { IMPORT_ROOT_LABEL, timeline } from '../../../src/kernel/scopes/timeline'
-import { KERNEL_VERSION } from '../../../src/kernel/core/types'
-import type { Fact, ProjectionTable } from '../../../src/kernel/core/types'
+import { project } from '@workbench/kernel/scopes/project'
+import { IMPORT_ROOT_LABEL, timeline } from '@workbench/kernel/scopes/timeline'
+import { KERNEL_VERSION } from '@workbench/kernel/core/types'
+import type { Fact, ProjectionTable } from '@workbench/kernel/core/types'
 import type {
   Agent,
   RunErrorCode,
@@ -18,21 +18,17 @@ import type {
   Task,
   Workflow,
   WorkflowStage,
-} from '../../../src/protocol/entities'
-import { openDatabase } from '../../../src/host/db'
-import { projectionFormat } from '../../../src/host/schema'
-import { allFacts, appendFacts, factsCount } from '../../../src/host/store/facts'
+} from '@workbench/protocol/entities'
+import { openDatabase } from '@workbench/host-store/db'
+import { projectionFormat } from '@workbench/host-store/schema'
+import { allFacts, appendFacts, factsCount } from '@workbench/host-store/facts'
 import { createFakeKernel } from './fake-kernel'
-import {
-  IMPORT_BATCH_SIZE,
-  IMPORT_ORDER,
-  importLegacyIfNeeded,
-} from '../../../src/host/store/import'
+import { IMPORT_BATCH_SIZE, IMPORT_ORDER, importLegacyIfNeeded } from '@workbench/host-store/import'
 import {
   ensureProjection,
   readProjectionMeta,
   rebuildProjection,
-} from '../../../src/host/store/projection'
+} from '@workbench/host-store/projection'
 import { dumpProjection, sample } from './test-support'
 
 /** 导入事实的统一时间：阶段 created_at 与事件 created_at 都对齐到它。 */

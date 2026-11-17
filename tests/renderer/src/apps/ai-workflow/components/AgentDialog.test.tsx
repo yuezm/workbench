@@ -6,13 +6,13 @@ import type {
   RuntimeModelOption,
   RuntimeProbe,
   RuntimeProbeState,
-} from '../../../../../../src/protocol/entities'
-import type { ViewId, ViewParams, ViewResult } from '../../../../../../src/protocol/views'
+} from '@workbench/protocol/entities'
+import type { ViewId, ViewParams, ViewResult } from '@workbench/protocol/views'
 import {
   AgentDialog,
   formatEnvText,
   parseEnvText,
-} from '../../../../../../src/renderer/src/apps/ai-workflow/components/AgentDialog'
+} from '@workbench/client-app-ai-workflow/components/AgentDialog'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
 
 function probe(state: RuntimeProbeState, over: Partial<RuntimeProbe> = {}): RuntimeProbe {

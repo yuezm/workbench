@@ -10,9 +10,11 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { dirname, join } from 'node:path'
 
 const require = createRequire(import.meta.url)
-const viteBin = require.resolve('vite/bin/vite.js')
+// vite 8 起 exports 只暴露包根，`vite/bin/vite.js` 不再可 resolve：从包根拼 bin 路径
+const viteBin = join(dirname(require.resolve('vite/package.json')), 'bin/vite.js')
 
 const PORT = process.env.WORKBENCH_PORT ?? '7788'
 const DATA_DIR = process.env.WORKBENCH_DATA_DIR ?? '.scratch/dev-data'

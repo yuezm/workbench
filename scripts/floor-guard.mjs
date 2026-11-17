@@ -203,6 +203,20 @@ const touchedSources = new Set([...addedPaths, ...deleted])
 for (const { file: changed } of [...added, ...removed]) touchedSources.add(changed)
 // diff 基线是 merge-base：拆包后新建的文件在基线里还不存在，它们的删除在 diff 里不可见
 // （净效果是「原本也没有」），必须再从工作区状态确认一次，否则功能删除豁免永远命不中。
+// 同一批次里「先新增、后删除」的路径净 diff 里同样看不到（包拆分新增 app-pomodoro、下一个
+// 提交又整包删掉）：豁免条件是「源码在本次交付里被动过」，按提交序列取路径并集才算数。
+const rangeLog = git([
+  'log',
+  '--name-only',
+  '--no-renames',
+  '--pretty=format:',
+  `${mergeBase}..HEAD`,
+])
+if (rangeLog === null) bail('could not list changed paths in range')
+for (const p of rangeLog.split('\n')) {
+  const path = p.trim().replace(/^"|"$/g, '')
+  if (path !== '') touchedSources.add(path.replace(/\\/g, '/'))
+}
 const worktreeStatus = git(['status', '--porcelain'])
 if (worktreeStatus === null) bail('could not read working tree status')
 for (const line of worktreeStatus.split('\n')) {

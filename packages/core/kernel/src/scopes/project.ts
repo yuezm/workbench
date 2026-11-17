@@ -237,6 +237,10 @@ function changesOf(fact: AnyFact): Change[] {
     case 'event.dropped':
       // M4 只入账、不投影；M6 起命中规则建任务由 decide 直接产 task.created，不回收这些事实。
       return []
+    case 'event.admitted':
+    case 'event.denied':
+      // A1：准入结论只作审计（凭什么建 / 为什么不建），投影不新增表；重建时同样回放这两类事实。
+      return []
     case 'event.skipped':
       // M42：停用规则命中的留痕（一条 rule × event 一行，id 确定性拼成）
       return [

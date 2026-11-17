@@ -31,10 +31,11 @@ import type {
   WorkflowStage,
 } from './entities'
 import type { TaskComment } from './task-comment'
-import type { EventSkipRow, RuleFireRow, RuleSetRow } from './rules'
+import type { RuleFireRow, RuleSetRow, EventSkipRow } from './rules'
 import type { PluginSettingsRow } from './plugins'
 import type { ReviewReport } from './review'
 import type { ThreadCloseReason, ThreadNote, ThreadRow } from './thread'
+import type { AdmissionBasis, AdmissionReason, AcceptMode, EventIdentity, Strength } from './authority'
 
 /** 事实名全集。M4 加卡片与派生事件；M6 加规则；M6.5 加线程与事件合并；M7 加插件设置。 */
 export const FACT_TYPES = [
@@ -82,6 +83,8 @@ export const FACT_TYPES = [
   'card.resolved',
   'event.received',
   'event.dropped',
+  'event.admitted',
+  'event.denied',
   'event.merged',
   'event.skipped',
   'thread.opened',
@@ -393,6 +396,39 @@ export interface EventReceivedPayload {
   /** 派生出该事件的 run；外部来源的事件为 null */
   originRunId: string | null
   dedupeKey: string | null
+  /**
+   * 发起者身份（A1）：外部来源必填，手工 / app / 回执派生由内核补
+   * `{kind:'system', id:'unknown', addressed:true}`。历史事实没有这个字段，
+   * 读侧按 system 归一——**不伪造**真实发起者，所以这里保持可选。
+   */
+  identity?: EventIdentity
+}
+
+/**
+ * 准入通过（A1）：确定性判定的结论，一条事件命中一条规则产一条。
+ *
+ * 与建任务分开记：`task.created` 只回答「建了什么」，这里回答「凭什么建」。
+ * 不可建任务时产 `event.denied`；同一事件可命中多条规则，因此 `ruleId` 必填。
+ */
+export interface EventAdmittedPayload {
+  eventId: string
+  ruleId: string
+  strength: Strength
+  basis: AdmissionBasis
+  mode: AcceptMode
+  /** 判定时的规则集版本（与 `rule_sets.version` 同一口径） */
+  policyVersion: number
+}
+
+/**
+ * 准入拒绝（A1）：与 `event.skipped`（规则停用）严格区分——这里拒的是「来源 / 名单 /
+ * 强度 / 接受模式」，`ruleId=null` 表示还没走到规则匹配（无策略来源）。
+ */
+export interface EventDeniedPayload {
+  eventId: string
+  ruleId: string | null
+  reason: AdmissionReason
+  policyVersion: number
 }
 
 /** 跳数熔断：`hops > maxHops` 只写这条，不派活、不建卡。 */
@@ -626,6 +662,8 @@ export interface FactPayloads {
   'card.resolved': CardResolvedPayload
   'event.received': EventReceivedPayload
   'event.dropped': EventDroppedPayload
+  'event.admitted': EventAdmittedPayload
+  'event.denied': EventDeniedPayload
   'event.merged': EventMergedPayload
   'event.skipped': EventSkippedPayload
   'thread.opened': ThreadOpenedPayload

@@ -147,6 +147,10 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'event.dropped':
       // 熔断审计事实只带 eventId：不归入任何实体，只在 cause 链上出现。
       return []
+    case 'event.admitted':
+    case 'event.denied':
+      // A1：准入结论与事件同源，事件本身不是 scope，只在 cause 链上出现。
+      return []
     case 'event.merged':
       // 合并事件归到被合并的 run 的时间线
       return [{ scope: 'run', id: fact.payload.run.id }]

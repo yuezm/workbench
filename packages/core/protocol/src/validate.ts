@@ -7,6 +7,7 @@
  * 引用是否存在、名称是否唯一、阶段流转是否合法由 `decide` 判断。
  */
 import { COMMAND_NAMES, type Command, type CommandName } from './commands'
+import { AUTHORITY_LIMITS, IDENTITY_KINDS } from './authority'
 import {
   ACCEPTANCE_LIMITS,
   AGENT_ENV_LIMITS,
@@ -981,6 +982,22 @@ const checkAsk = (value: unknown, label: string): Check => {
   )
 }
 
+/**
+ * 事件发起者身份（A1）：可省略（手工 / app / 回执派生 / 历史宿主），给了就必须完整。
+ * `id` 是来源内的稳定标识，长度上限与 `protocol/authority` 的名单口径一致；
+ * 越权字段（`cwd` / `agent` / `access`）仍由 `checkRawEvent` 的白名单挡在外面。
+ */
+const checkIdentity = (value: unknown, label: string): Check => {
+  if (value === undefined || value === null) return null
+  const identity = asRecord(value)
+  if (!identity) return `${label} 必须是对象`
+  return (
+    enumOf(identity.kind, `${label}.kind`, IDENTITY_KINDS) ??
+    required(identity.id, `${label}.id`, AUTHORITY_LIMITS.identityId) ??
+    (typeof identity.addressed === 'boolean' ? null : `${label}.addressed 必须是布尔值`)
+  )
+}
+
 const checkRawEvent = (value: unknown, label: string): Check => {
   const event = asRecord(value)
   if (!event) return `${label} 必须是对象`
@@ -991,7 +1008,8 @@ const checkRawEvent = (value: unknown, label: string): Check => {
     optionalText(event.summary, `${label}.summary`, COMMAND_LIMITS.summary) ??
     optionalString(event.detail, `${label}.detail`) ??
     optionalText(event.link, `${label}.link`, COMMAND_LIMITS.workdir) ??
-    optionalText(event.dedupeKey, `${label}.dedupeKey`, COMMAND_LIMITS.id)
+    optionalText(event.dedupeKey, `${label}.dedupeKey`, COMMAND_LIMITS.id) ??
+    checkIdentity(event.identity, `${label}.identity`)
   )
 }
 

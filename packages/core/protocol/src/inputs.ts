@@ -14,6 +14,7 @@
  */
 import type { Command } from './commands'
 import { COMMAND_NAMES } from './commands'
+import type { EventIdentity } from './authority'
 import type {
   GateCheck,
   GateVerdict,
@@ -75,6 +76,8 @@ export interface RawEvent {
   detail?: string
   link?: string
   dedupeKey?: string
+  /** 发起者身份（A1）：外部来源必填；回执派生事件由内核补 system */
+  identity?: EventIdentity
 }
 
 /**

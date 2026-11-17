@@ -237,6 +237,13 @@ function changesOf(fact: AnyFact): Change[] {
     case 'event.dropped':
       // M4 只入账、不投影；M6 起命中规则建任务由 decide 直接产 task.created，不回收这些事实。
       return []
+    case 'mandate.granted':
+    case 'mandate.revoked':
+      // A2：授权整行事实 → 一任务一行的投影（撤销也只是覆盖同一行）
+      return [put('mandates', fact.payload.mandate)]
+    case 'mandate.revalidated':
+      // A2：重校验只作审计；失败时的撤销由同批 mandate.revoked 表达
+      return []
     case 'event.admitted':
     case 'event.denied':
       // A1：准入结论只作审计（凭什么建 / 为什么不建），投影不新增表；重建时同样回放这两类事实。

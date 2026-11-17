@@ -147,6 +147,12 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'event.dropped':
       // 熔断审计事实只带 eventId：不归入任何实体，只在 cause 链上出现。
       return []
+    case 'mandate.granted':
+    case 'mandate.revoked':
+      // A2：授权挂在任务的 why 链上（撤销也是对同一任务的一次动作）
+      return [{ scope: 'task', id: fact.payload.mandate.taskId }]
+    case 'mandate.revalidated':
+      return [{ scope: 'task', id: fact.payload.taskId }]
     case 'event.admitted':
     case 'event.denied':
       // A1：准入结论与事件同源，事件本身不是 scope，只在 cause 链上出现。

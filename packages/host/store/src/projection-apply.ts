@@ -50,6 +50,7 @@ import type { Change, Iso, ProjectionRow, ProjectionTable } from '@workbench/ker
 import type { RuleFireRow, RuleSetRow } from '@workbench/protocol/rules'
 import type { PluginSettingsRow } from '@workbench/protocol/plugins'
 import type { ThreadRow } from '@workbench/protocol/thread'
+import type { Mandate } from '@workbench/protocol/authority'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { ReviewReport } from '@workbench/protocol/review'
 import { StoreError } from './errors'
@@ -241,6 +242,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     /** 规则两表、线程表与插件设置表都没有删除事实，语句只为满足 `ProjectionTable` 全集。 */
     rule_sets: db.prepare('DELETE FROM rule_sets WHERE id = ?'),
     rule_fires: db.prepare('DELETE FROM rule_fires WHERE id = ?'),
+    mandates: db.prepare('DELETE FROM mandates WHERE id = ?'),
+    mandatesByTask: db.prepare('DELETE FROM mandates WHERE task_id = ?'),
     threads: db.prepare('DELETE FROM threads WHERE id = ?'),
     plugin_settings: db.prepare('DELETE FROM plugin_settings WHERE id = ?'),
     /** 任务上下文没有删除事实：按 id 与按父任务联删（任务删除时）两条路径。 */
@@ -255,6 +258,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
   }
 
   const clearAll = {
+    mandates: db.prepare('DELETE FROM mandates'),
     run_events: db.prepare('DELETE FROM run_events'),
     runs: db.prepare('DELETE FROM runs'),
     messages: db.prepare('DELETE FROM messages'),
@@ -306,6 +310,7 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     event_skips: (row) => writeRow('event_skips', row as EventSkipRow),
     task_comments: (row) => writeRow('task_comments', row as TaskComment),
     review_reports: (row) => writeRow('review_reports', row as ReviewReport),
+    mandates: (row) => writeRow('mandates', row as Mandate),
   }
 
   /** 目标 position 被另一行占用时，把占用行挪到负区间；返回需要还原的 workflow。 */
@@ -333,6 +338,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         deletes.taskCommentsByTask.run(change.key)
         // M14：评审报告同样随任务删除联删（无独立删除事实）
         deletes.reviewReportsByTask.run(change.key)
+        // A2：授权随任务删除联删（历史要跟着任务走，不留孤儿行）
+        deletes.mandatesByTask.run(change.key)
       }
       deletes[change.table].run(change.key)
       return

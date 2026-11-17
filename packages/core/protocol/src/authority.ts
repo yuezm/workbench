@@ -10,6 +10,8 @@
  * 让投影重建与实时写入走同一条路径。
  */
 
+import type { Access } from './entities'
+
 /** 来源种类：只影响缺省值推导，内核不认具体产品名。 */
 export type SourceKey = 'manual' | 'app' | 'webhook' | 'feishu' | 'github'
 
@@ -218,4 +220,56 @@ function windowOf(value: unknown): number {
   if (typeof value !== 'number' || !Number.isInteger(value)) return COMPAT_WINDOW_MS
   if (value < 0 || value > AUTHORITY_LIMITS.assessWindowMsMax) return COMPAT_WINDOW_MS
   return value
+}
+
+// ---------- 授权（A2） ----------
+
+/** 授权撤销的三种原因：人叫停 / 恢复前重校验失败 / 换版后依据不再成立。 */
+export const MANDATE_REVOKED_REASONS = ['stop', 'revalidate', 'policy'] as const
+export type MandateRevokedReason = (typeof MANDATE_REVOKED_REASONS)[number]
+
+/**
+ * 一次授权的范围：任务能做什么、花多少、到什么时候。
+ *
+ * `access` 是运行期权限的**上限**：`run.access = min(agent.permissionMode, scope.access)`，
+ * 也就是说授权只会收紧、不会放宽（`permissionMode` 才是配置侧的原意）。
+ */
+export interface MandateScope {
+  workflowId: string
+  stageId: string | null
+  projectId: string | null
+  access: Access
+  /** 最多再跑几轮；null = 不限 */
+  maxRuns: number | null
+  /** Token 上限；null = 不限 */
+  maxTokens: number | null
+  /** 到期时刻（ISO）；null = 不过期 */
+  expiresAt: string | null
+}
+
+/** 谁授的：来源里的某个人 / 某个机器人，或本机手工创建。 */
+export type MandateBy =
+  { kind: 'identity'; source: string; identity: EventIdentity } | { kind: 'manual'; via: 'ui' }
+
+/**
+ * 一张授权（A2）：任务凭它执行。
+ *
+ * 生命周期只有三种改变：授予（accept）、人叫停、重校验失败（含换版后依据不再成立）。
+ * 任务完成**不撤销**授权——历史要能回答「当时凭什么」，`legacy` 标出 A2 之前的存量任务。
+ */
+export interface Mandate {
+  id: string
+  taskId: string
+  scope: MandateScope
+  strength: Strength
+  basis: AdmissionBasis
+  /** 授予时的规则集版本（与 `rule_sets.version` 同一口径） */
+  policyVersion: number
+  ruleIds: string[]
+  by: MandateBy
+  grantedAt: string
+  revokedAt: string | null
+  revokedReason: MandateRevokedReason | null
+  /** 存量任务（A2 之前创建）：不补发授权，只读展示 */
+  legacy: boolean
 }

@@ -605,6 +605,7 @@ const emptyCounts = (): Record<ProjectionTable, number> => ({
   review_reports: 0,
   events: 0,
   event_skips: 0,
+  mandates: 0,
 })
 
 describe('importLegacyIfNeeded', () => {
@@ -637,6 +638,7 @@ describe('importLegacyIfNeeded', () => {
       // M42：事件 / 跳过行不由导入产生
       events: 0,
       event_skips: 0,
+      mandates: 0,
     })
 
     const facts = allFacts(db)

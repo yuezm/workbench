@@ -204,7 +204,7 @@ function userVersion(d: DatabaseSync): number {
 }
 
 describe('openDatabase', () => {
-  it(':memory: 建全 schema（十九张投影 + facts / projection_meta + 宿主私有 process_registry、commands、plugin_secrets）并写 user_version', () => {
+  it(':memory: 建全 schema（二十张投影 + facts / projection_meta + 宿主私有 process_registry、commands、plugin_secrets）并写 user_version', () => {
     db = openDatabase(':memory:')
     expect(tableNames(db)).toEqual([
       'agents',
@@ -214,6 +214,7 @@ describe('openDatabase', () => {
       'event_skips',
       'events',
       'facts',
+      'mandates',
       'messages',
       'plugin_secrets',
       'plugin_settings',
@@ -638,6 +639,7 @@ describe('openDatabase', () => {
         'event_skips',
         'events',
         'facts',
+        'mandates',
         'messages',
         'plugin_secrets',
         'plugin_settings',

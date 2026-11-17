@@ -331,6 +331,30 @@ CREATE TABLE IF NOT EXISTS ${name} (
  * - `task_id` 是弱引用：目标工作流/阶段已不存在时只记账（null），任务删除后也保留审计；
  *   不设外键（与 `cards.task_id` 同口径）。
  */
+/**
+ * `mandates` 投影（A2，第二十张表）：一任务一行，最新一次授予。
+ *
+ * - 授予与撤销都携带完整 `Mandate` 行，`project` 只做整行 upsert；
+ * - `scope_json` / `by_json` / `rule_ids_json` 是 JSON 列，读侧按列形状还原；
+ * - `revoked_at` 非空即已撤销，`revoked_reason` 给三种原因之一；
+ * - `legacy=1` 标出 A2 之前的存量任务（不补发授权，不伪造因果）。
+ */
+const mandatesTable = (name = 'mandates'): string => `
+CREATE TABLE IF NOT EXISTS ${name} (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  scope_json TEXT NOT NULL DEFAULT '{}',
+  strength TEXT NOT NULL,
+  basis TEXT NOT NULL,
+  policy_version INTEGER NOT NULL,
+  rule_ids_json TEXT NOT NULL DEFAULT '[]',
+  by_json TEXT NOT NULL DEFAULT '{}',
+  granted_at TEXT NOT NULL,
+  revoked_at TEXT,
+  revoked_reason TEXT,
+  legacy INTEGER NOT NULL DEFAULT 0
+);`
+
 const ruleFiresTable = (name = 'rule_fires'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
@@ -501,6 +525,7 @@ export const SCHEMA_SQL = [
   cardsTable(),
   ruleSetsTable(),
   ruleFiresTable(),
+  mandatesTable(),
   threadsTable(),
   pluginSettingsTable(),
   taskCommentsTable(),
@@ -561,6 +586,7 @@ export const tableDdl = {
   cards: cardsTable,
   ruleSets: ruleSetsTable,
   ruleFires: ruleFiresTable,
+  mandates: mandatesTable,
   threads: threadsTable,
   pluginSettings: pluginSettingsTable,
   taskComments: taskCommentsTable,
@@ -990,6 +1016,8 @@ export const PROJECTION_TABLES = [
   // M42：事件投影与「停用规则跳过」的留痕（补跑依据）
   'events',
   'event_skips',
+  // A2：授权（一任务一行）
+  'mandates',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -1014,9 +1042,10 @@ const projectionTableDdl: Record<ProjectionTable, string> = {
   review_reports: tableDdl.reviewReports(),
   events: tableDdl.events(),
   event_skips: tableDdl.eventSkips(),
+  mandates: tableDdl.mandates(),
 }
 
-/** 十九张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
+/** 二十张投影表的 DDL 文本（按 PROJECTION_TABLES 顺序），投影指纹的 DDL 输入。 */
 export const PROJECTION_DDL = PROJECTION_TABLES.map((table) => projectionTableDdl[table]).join('\n')
 
 /** 指纹计算本身；参数化 DDL 只为验证「DDL 改一个字符 → 指纹不同」这类输入敏感度。 */

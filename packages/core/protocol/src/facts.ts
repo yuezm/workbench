@@ -35,7 +35,14 @@ import type { RuleFireRow, RuleSetRow, EventSkipRow } from './rules'
 import type { PluginSettingsRow } from './plugins'
 import type { ReviewReport } from './review'
 import type { ThreadCloseReason, ThreadNote, ThreadRow } from './thread'
-import type { AdmissionBasis, AdmissionReason, AcceptMode, EventIdentity, Strength } from './authority'
+import type {
+  AdmissionBasis,
+  AdmissionReason,
+  AcceptMode,
+  EventIdentity,
+  Mandate,
+  Strength,
+} from './authority'
 
 /** 事实名全集。M4 加卡片与派生事件；M6 加规则；M6.5 加线程与事件合并；M7 加插件设置。 */
 export const FACT_TYPES = [
@@ -87,6 +94,9 @@ export const FACT_TYPES = [
   'event.denied',
   'event.merged',
   'event.skipped',
+  'mandate.granted',
+  'mandate.revoked',
+  'mandate.revalidated',
   'thread.opened',
   'thread.event_attached',
   'thread.task_attached',
@@ -664,6 +674,9 @@ export interface FactPayloads {
   'event.dropped': EventDroppedPayload
   'event.admitted': EventAdmittedPayload
   'event.denied': EventDeniedPayload
+  'mandate.granted': MandateGrantedPayload
+  'mandate.revoked': MandateRevokedPayload
+  'mandate.revalidated': MandateRevalidatedPayload
   'event.merged': EventMergedPayload
   'event.skipped': EventSkippedPayload
   'thread.opened': ThreadOpenedPayload
@@ -688,3 +701,27 @@ export interface FactPayloads {
 }
 
 export type FactPayload<T extends FactType> = FactPayloads[T]
+
+// ---------- 授权（A2） ----------
+
+/** 授予：一行事实携带完整 `Mandate` 行（重建不回查）。 */
+export interface MandateGrantedPayload {
+  mandate: Mandate
+}
+
+/** 撤销：payload 仍是完整行，`revokedAt` / `revokedReason` 已填。 */
+export interface MandateRevokedPayload {
+  mandate: Mandate
+}
+
+/**
+ * 恢复前的重校验（A2）：只作审计，不改授权行；`ok=false` 时会同时产一条 `mandate.revoked`。
+ * `reason` 是给人看的一句话（例如「请求人已不在名单里」），不参与任何流转判断。
+ */
+export interface MandateRevalidatedPayload {
+  mandateId: string
+  taskId: string
+  ok: boolean
+  reason: string | null
+  policyVersion: number
+}

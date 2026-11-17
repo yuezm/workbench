@@ -26,7 +26,7 @@ import type {
 import type { FactPayload, FactType } from '@workbench/protocol/facts'
 import type { Input } from '@workbench/protocol/inputs'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '@workbench/protocol/rules'
-import type { Authority } from '@workbench/protocol/authority'
+import type { Authority, Mandate } from '@workbench/protocol/authority'
 import type { EventSkipRow } from '@workbench/protocol/rules'
 import type { PluginSettingsRow } from '@workbench/protocol/plugins'
 import type { ThreadRow } from '@workbench/protocol/thread'
@@ -109,6 +109,8 @@ export const PROJECTION_TABLES = [
   // M42：事件投影与「停用规则跳过」的留痕
   'events',
   'event_skips',
+  // A2：授权（一任务一行，最新一次授予）
+  'mandates',
 ] as const
 
 export type ProjectionTable = (typeof PROJECTION_TABLES)[number]
@@ -133,6 +135,7 @@ export type ProjectionRow =
   | ReviewReport
   | EventRow
   | EventSkipRow
+  | Mandate
 
 export interface FactDraft<T extends FactType = FactType> {
   type: T

@@ -41,8 +41,8 @@ describe('app 注册表', () => {
     }
   })
 
-  it('顺序即导航顺序：AI 工作流排在番茄时钟前面', () => {
-    expect(appPlugins.map((a) => a.id)).toEqual(['ai-workflow', 'pomodoro'])
+  it('注册表只剩内置的 AI 工作流（唯一 app）', () => {
+    expect(appPlugins.map((a) => a.id)).toEqual(['ai-workflow'])
   })
 
   it('第一个注册的 app 是默认打开的 app（外壳取 apps[0]）', () => {

@@ -44,7 +44,7 @@ describe('parsePort', () => {
 
   it('0 表示由系统分配，1..65535 原样接受', () => {
     expect(parsePort('0')).toBe(0)
-    expect(parsePort(' 7788 ')).toBe(7788)
+    expect(parsePort(' 3000 ')).toBe(3000)
     expect(parsePort('65535')).toBe(65535)
   })
 

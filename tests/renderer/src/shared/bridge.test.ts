@@ -152,12 +152,12 @@ describe('createWebBridge', () => {
   it('notify：发完就忘——失败不打断调用方', async () => {
     const { calls, fetchImpl } = fakeFetch(() => Promise.reject(new Error('offline')))
     const bridge = createWebBridge({ fetch: fetchImpl })
-    expect(() => bridge.notify('番茄时钟', '休息一下')).not.toThrow()
+    expect(() => bridge.notify('任务完成', '已完成')).not.toThrow()
     await Promise.resolve()
     expect(calls[0]?.url).toBe(API_PATHS.notify)
     expect(JSON.parse(String(calls[0]?.init.body))).toEqual({
-      title: '番茄时钟',
-      body: '休息一下',
+      title: '任务完成',
+      body: '已完成',
     })
   })
 

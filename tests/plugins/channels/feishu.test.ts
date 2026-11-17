@@ -13,15 +13,12 @@ import type { Card } from '@workbench/protocol/entities'
 import { readClick } from '@workbench/channel-feishu/click'
 import {
   answerersOf,
-  clipProgress,
   feishuChannel,
   idempotencyKeyOf,
-  PROGRESS_CHARS,
   readFeishuConfig,
   targetOf,
   WATCH_RESTART_MS,
 } from '@workbench/channel-feishu/index'
-import { readTextMessage } from '@workbench/channel-feishu/inbound'
 import {
   createLark,
   LARK_TIMEOUT_MS,
@@ -206,10 +203,16 @@ describe('飞书通道 manifest 与注册', () => {
     expect(feishuManifest.kind).toBe('channel')
     expect(feishuManifest.name).toBe('飞书')
     expect(feishuManifest.capabilities).toEqual(['spawn'])
-    // M46：标量表单整体撤掉——派给谁 / 发到哪 / 谁能答都属于「一条连接」，
+    // M46：标量表单整体撤掉——发到哪 / 谁能拍板都属于「一条连接」，
     // 由设置页的「飞书连接」面板独占（两边写同一个键会互相覆盖，留着只会让人以为填了也生效）。
     expect(feishuManifest.config ?? []).toEqual([])
     expect(channelById('feishu').plugin.start).toBeTypeOf('function')
+  })
+
+  it('manifest 描述只讲拍板，不提聊天（产品口径：飞书不是聊天入口）', () => {
+    expect(feishuManifest.version).toBe('1.4.0')
+    expect(feishuManifest.description).toContain('拍板')
+    expect(feishuManifest.description).toContain('不在飞书聊天')
   })
 })
 
@@ -220,19 +223,15 @@ describe('飞书通道：配置归一化', () => {
       user: null,
       chat: null,
       answerers: [],
-      inbound: false,
     })
   })
 
   it('非字符串与空白值一律当没配（配置坏不该让通道不启动）', () => {
-    expect(
-      readFeishuConfig({ lark: '  ', user: 42, chat: '   ', answerers: null, agent: 7 }),
-    ).toEqual({
+    expect(readFeishuConfig({ lark: '  ', user: 42, chat: '   ', answerers: null })).toEqual({
       program: 'lark-cli',
       user: null,
       chat: null,
       answerers: [],
-      inbound: false,
     })
   })
 
@@ -247,10 +246,11 @@ describe('飞书通道：配置归一化', () => {
     expect(readFeishuConfig({ answerers: many }).answerers).toHaveLength(50)
   })
 
-  it('配了默认智能体才开入站（没配 = 只发卡片）', () => {
-    expect(readFeishuConfig({}).inbound).toBe(false)
-    expect(readFeishuConfig({ agent: '  ' }).inbound).toBe(false)
-    expect(readFeishuConfig({ agent: ' a1 ' }).inbound).toBe(true)
+  it('入站开关不再存在：配置里的 agent 一行都不读（只在连接里解析，也已删掉）', () => {
+    const withAgent = readFeishuConfig({ agent: 'a1', user: 'ou_me' })
+    expect(withAgent).not.toHaveProperty('inbound')
+    expect(withAgent).not.toHaveProperty('agent')
+    expect(withAgent.user).toBe('ou_me')
   })
 
   it('trim 后的字符串配置项原样保留', () => {
@@ -261,7 +261,6 @@ describe('飞书通道：配置归一化', () => {
       user: 'ou_u',
       chat: 'oc_1',
       answerers: [],
-      inbound: false,
     })
   })
 })
@@ -741,33 +740,34 @@ const flushDeliver = async (): Promise<void> => {
 }
 
 describe('飞书通道：启动与投递', () => {
-  it('没登录：连接照样起来等第一条私聊认人，卡片暂时不发，dispose 可重复调用', async () => {
+  it('没有发送目标（没配接收人也没登录人）：不投递，日志只记一次，dispose 可重复调用', async () => {
     const { harness, cli, logs, dispose } = await startFeishu({
       config: { user: '' },
       behaviors: [{ code: 1, stderr: 'not logged in' }, { hang: true }],
     })
 
-    // M46：拿不到登录人不该让整条连接消失——入站事件自己带着「谁发的、会话是哪个」
+    // 读不到登录人不该让整条连接消失，只是没有落点
     expect(harness.handlers).toHaveLength(1)
-    expect(logs.join('\n')).toContain('还没有登录人')
 
-    // 还没认人：这张卡不发（也不报错），提示只记一次
     harness.deliver(inst())
     await flushDeliver()
     harness.deliver(inst({ version: 2 }))
     await flushDeliver()
     expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(0)
-    expect(logs.filter((line) => line.includes('还没有发送目标'))).toHaveLength(1)
+    // 文案要能直接照做（产品口径：没有聊天，别指望私聊一句自动认人）
+    expect(logs.filter((line) => line.includes('还没有发送目标'))).toEqual([
+      expect.stringContaining('先在设置里填接收人或群，否则拍板卡发不出去'),
+    ])
 
     expect(() => dispose()).not.toThrow()
     expect(() => dispose()).not.toThrow()
   })
 
-  it('发群但没配可答复人：不订阅卡片（群里谁都能答是不可接受的默认）', async () => {
+  it('发群但没配拍板人：不订阅卡片（群里谁都能答是不可接受的默认）', async () => {
     const { harness, logs } = await startFeishu({ config: { user: '', chat: 'oc_1' } })
 
     expect(harness.handlers).toHaveLength(0)
-    expect(logs.join('\n')).toContain('发群但没配可答复人')
+    expect(logs.join('\n')).toContain('发群但没配拍板人')
   })
 
   it('私聊：接收人取 CLI 登录人，卡片整串作为 --content 发出并回报 delivered', async () => {
@@ -846,6 +846,24 @@ describe('飞书通道：启动与投递', () => {
     expect(harness.delivered).toEqual([{ cardId: 'card-1', version: 1, ref: '{}' }])
   })
 
+  it('终态卡从未发过：只 ack，不凭空在飞书里多一张卡', async () => {
+    const { harness, cli } = await startFeishu({
+      config: { user: '' },
+      behaviors: [
+        { stdout: JSON.stringify({ ok: true, identities: { user: { openId: 'ou_owner' } } }) },
+        { hang: true },
+      ],
+    })
+
+    // 这张 ask 卡是通道起来之前就答掉的：没有 message_id 可改，也不该新发一条
+    harness.deliver(inst({ status: 'answered', optionIndex: 1 }))
+    await flushDeliver()
+
+    expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(0)
+    expect(cli.calls.filter((call) => call.args.includes('patch'))).toHaveLength(0)
+    expect(harness.delivered).toEqual([{ cardId: 'card-1', version: 1, ref: '{}' }])
+  })
+
   it('投递失败只记日志：不伪造送达（hub 会按重投曲线再来）', async () => {
     const { harness, logs } = await startFeishu({
       behaviors: [{ hang: true }, { code: 1, stderr: 'no scope' }],
@@ -857,6 +875,31 @@ describe('飞书通道：启动与投递', () => {
     expect(harness.delivered).toEqual([])
     expect(logs.join('\n')).toContain('飞书投递失败')
     expect(logs.join('\n')).toContain('no scope')
+  })
+
+  it('改口失败又新发失败：不 ack（下次重投），旧消息引用留着不丢', async () => {
+    const { harness, cli, logs } = await startFeishu({
+      behaviors: [
+        { hang: true },
+        { stdout: okBody({ message_id: 'om_1' }) },
+        { code: 1, stderr: 'not the sender' },
+        { code: 1, stderr: 'still failing' },
+      ],
+    })
+
+    harness.deliver(inst({ version: 1 }))
+    await flushDeliver()
+    harness.deliver(inst({ version: 2 }))
+    await flushDeliver()
+
+    // 改动失败后改新发，新发也失败：这一版没有送达，宿主按重投曲线再来；
+    // 不能拿旧消息 id 冒充「已更新」
+    expect(harness.delivered).toEqual([
+      { cardId: 'card-1', version: 1, ref: refsOf({ default: 'om_1' }) },
+    ])
+    expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(2)
+    expect(logs.join('\n')).toContain('改为新发')
+    expect(logs.join('\n')).toContain('飞书投递失败')
   })
 
   it('同一版本重投：原地更新同一条消息，不再发第二条', async () => {
@@ -1210,17 +1253,17 @@ describe('飞书通道：失败与边界', () => {
     await expect(larkOf(cli).owner()).rejects.toThrow(`…${'y'.repeat(500)}`)
   })
 
-  it('宿主没给配置（null）：按未配置处理，连接起来等认人、卡片不发', async () => {
+  it('宿主没给配置（null）：按未配置处理，连接照样起来但没有发送目标', async () => {
     const { harness, cli, logs, dispose } = await startFeishu({
       nullConfig: true,
       behaviors: [{ code: 1, stderr: 'not logged in' }, { hang: true }],
     })
 
     expect(harness.handlers).toHaveLength(1)
-    expect(logs.join('\n')).toContain('还没有登录人')
     harness.deliver(inst())
     await flushDeliver()
     expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(0)
+    expect(logs.join('\n')).toContain('先在设置里填接收人或群')
     expect(() => dispose()).not.toThrow()
   })
 
@@ -1339,317 +1382,7 @@ describe('飞书通道：失败与边界', () => {
   })
 })
 
-// ---------------------------------------------------------------- 入站（M44）
-
-/**
- * 一条 `im.message.receive_v1` 事件：**CLI 摊平成一层**（见 `lark-cli event schema`），
- * `content` 已经是渲染好的人话。
- */
-const textEvent = (over: Record<string, unknown> = {}): string =>
-  JSON.stringify({
-    type: 'im.message.receive_v1',
-    message_id: 'om_in_1',
-    chat_id: 'oc_p2p',
-    chat_type: 'p2p',
-    message_type: 'text',
-    content: '今天有什么安排',
-    sender_id: 'ou_me',
-    sender_type: 'user',
-    ...over,
-  })
-
-describe('飞书通道：入站文本解析', () => {
-  it('私聊纯文本：取消息 id、会话类型、会话 id、发送人与正文', () => {
-    expect(readTextMessage(JSON.parse(textEvent()))).toEqual({
-      messageId: 'om_in_1',
-      chatType: 'p2p',
-      chatId: 'oc_p2p',
-      sender: 'ou_me',
-      text: '今天有什么安排',
-      rootRef: null,
-      threadRef: null,
-      replyTo: null,
-    })
-  })
-
-  it('回复链证据：root_id / thread_id / reply_to 原样带出（缺省为 null）', () => {
-    const plain = readTextMessage(JSON.parse(textEvent()))
-    expect(plain?.rootRef).toBeNull()
-    expect(plain?.threadRef).toBeNull()
-    expect(plain?.replyTo).toBeNull()
-
-    const threaded = readTextMessage(
-      JSON.parse(textEvent({ root_id: 'om_root', thread_id: 'omt_1', reply_to: 'om_bot_reply' })),
-    )
-    expect(threaded?.rootRef).toBe('om_root')
-    expect(threaded?.threadRef).toBe('omt_1')
-    expect(threaded?.replyTo).toBe('om_bot_reply')
-  })
-
-  it('@ 机器人占位符去掉（`@_user_1` 对人没意义、对模型是噪音）', () => {
-    const event = JSON.parse(textEvent({ content: '@_user_1 帮我列一下待办' }))
-    expect(readTextMessage(event)?.text).toBe('帮我列一下待办')
-    // mentions[].key 是别的形状时也照清
-    const named = JSON.parse(
-      textEvent({ content: '@_u_9 总结一下', mentions: [{ key: '@_u_9', name: '小助' }] }),
-    )
-    expect(readTextMessage(named)?.text).toBe('总结一下')
-  })
-
-  it('机器人自己发的、非文本类型一律不认（否则会自问自答）', () => {
-    expect(readTextMessage(JSON.parse(textEvent({ sender_type: 'bot' })))).toBeNull()
-    expect(readTextMessage(JSON.parse(textEvent({ sender_type: 'app' })))).toBeNull()
-    expect(readTextMessage(JSON.parse(textEvent({ message_type: 'image' })))).toBeNull()
-    expect(readTextMessage(JSON.parse(textEvent({ content: '   ' })))).toBeNull()
-  })
-
-  it('正文是 {"text":…} 形状时也认（平台形状变过来不至于哑掉）', () => {
-    const event = JSON.parse(textEvent({ content: JSON.stringify({ text: '你好' }) }))
-    expect(readTextMessage(event)?.text).toBe('你好')
-  })
-
-  it('v2 信封（未经 CLI 摊平）也能解析', () => {
-    const envelope = JSON.parse(
-      JSON.stringify({
-        schema: '2.0',
-        event: {
-          sender: { sender_id: { open_id: 'ou_me' }, sender_type: 'user' },
-          message: {
-            message_id: 'om_env_1',
-            chat_id: 'oc_env',
-            chat_type: 'p2p',
-            message_type: 'text',
-            content: JSON.stringify({ text: '信封里的正文' }),
-          },
-        },
-      }),
-    )
-    expect(readTextMessage(envelope)).toEqual({
-      messageId: 'om_env_1',
-      chatType: 'p2p',
-      chatId: 'oc_env',
-      sender: 'ou_me',
-      text: '信封里的正文',
-      rootRef: null,
-      threadRef: null,
-      replyTo: null,
-    })
-  })
-
-  it('群消息照常解析（只做私聊是通道策略，解析层不替它做主）', () => {
-    expect(readTextMessage(JSON.parse(textEvent({ chat_type: 'group' })))?.chatType).toBe('group')
-  })
-})
-
-describe('飞书通道：入站派活与进展（M44）', () => {
-  it('配了默认智能体才接第一条入站长连接', async () => {
-    const off = await startFeishu({ config: { agent: '' }, behaviors: [{ hang: true }] })
-    expect(off.cli.calls.filter((call) => call.args[1] === 'consume')).toHaveLength(1)
-    off.dispose()
-
-    const on = await startFeishu({
-      config: { agent: 'a1' },
-      behaviors: [{ hang: true }, { hang: true }],
-    })
-    expect(on.cli.calls.filter((call) => call.args[1] === 'consume')).toHaveLength(2)
-    on.dispose()
-  })
-
-  it('私聊一句话 → ctx.submit(正文, 平台消息 id)，并把回执回帖到那条消息', async () => {
-    const { harness, cli } = await startFeishu({
-      config: { agent: 'a1' },
-      behaviors: [{ hang: true }, { hang: true }, { stdout: okBody({ message_id: 'om_reply' }) }],
-    })
-
-    cli.children[1].emitStdout(`${textEvent()}\n`)
-    await flushDeliver()
-
-    // M45：连接里配的智能体会作为第三参交给宿主（按连接派活）
-    expect(harness.submits).toEqual([
-      {
-        text: '今天有什么安排',
-        hints: {
-          ref: 'default:om_in_1',
-          scope: 'default',
-          chatId: 'oc_p2p',
-          rootRef: null,
-          threadRef: null,
-          replyTo: null,
-        },
-        agent: 'a1',
-      },
-    ])
-    const reply = cli.calls.find((call) => call.args.includes('+messages-reply'))
-    expect(reply?.args).toEqual([
-      'im',
-      '+messages-reply',
-      '--message-id',
-      'om_in_1',
-      '--as',
-      'bot',
-      '--msg-type',
-      'text',
-      '--content',
-      JSON.stringify({ text: '已收到' }),
-    ])
-  })
-
-  it('没登录也没配接收人：第一条私聊认下发送人与会话，卡片随后发到那个会话（M46）', async () => {
-    const { harness, cli, logs } = await startFeishu({
-      config: { user: '', agent: 'a1' },
-      behaviors: [
-        { code: 1, stderr: 'not logged in' }, // auth status 失败 = 没有登录人
-        { hang: true }, // card.action.trigger 长连接
-        { hang: true }, // im.message.receive_v1 长连接
-        { stdout: okBody({ message_id: 'om_reply' }) }, // 回执
-        { stdout: okBody({ message_id: 'om_card' }) }, // 卡片
-      ],
-    })
-
-    // children：0=auth status，1=card.action.trigger，2=im.message.receive_v1
-    cli.children[2].emitStdout(`${textEvent()}\n`)
-    await flushDeliver()
-
-    expect(harness.submits).toEqual([
-      {
-        text: '今天有什么安排',
-        hints: {
-          ref: 'default:om_in_1',
-          scope: 'default',
-          chatId: 'oc_p2p',
-          rootRef: null,
-          threadRef: null,
-          replyTo: null,
-        },
-        agent: 'a1',
-      },
-    ])
-    expect(logs.join('\n')).toContain('认下第一位使用者 ou_me')
-
-    // 认下来之后：卡片发给这条私聊的会话（`--chat-id oc_…`），不再是「没有目标」
-    harness.deliver(inst())
-    await flushDeliver()
-    const send = cli.calls.find((call) => call.args.includes('+messages-send'))
-    expect(send?.args).toContain('--chat-id')
-    expect(send?.args).toContain('oc_p2p')
-    expect(harness.delivered).toEqual([
-      { cardId: 'card-1', version: 1, ref: refsOf({ default: 'om_card' }) },
-    ])
-  })
-
-  it('认过人之后：别人再发消息一律忽略（不因为「谁先说」多放一个人进来）', async () => {
-    const { harness, cli, logs } = await startFeishu({
-      config: { user: '', agent: 'a1' },
-      behaviors: [
-        { code: 1, stderr: 'not logged in' },
-        { hang: true },
-        { hang: true },
-        { stdout: okBody({ message_id: 'om_reply' }) },
-      ],
-    })
-
-    cli.children[2].emitStdout(`${textEvent()}\n`)
-    await flushDeliver()
-    cli.children[2].emitStdout(`${textEvent({ message_id: 'om_in_2', sender_id: 'ou_other' })}\n`)
-    await flushDeliver()
-
-    expect(harness.submits).toHaveLength(1)
-    expect(logs.join('\n')).toContain('不在名单')
-  })
-
-  it('有登录人时不认新发送人：名单之外的消息忽略（默认拒绝不动）', async () => {
-    const { harness, cli, logs } = await startFeishu({
-      config: { user: '', agent: 'a1' },
-      behaviors: [
-        { stdout: JSON.stringify({ ok: true, identities: { user: { openId: 'ou_owner' } } }) },
-        { hang: true },
-        { hang: true },
-      ],
-    })
-
-    cli.children[2].emitStdout(`${textEvent()}\n`)
-    await flushDeliver()
-
-    expect(harness.submits).toEqual([])
-    expect(logs.join('\n')).toContain('不在名单')
-  })
-
-  it('群聊不派活；名单外的人不派活（都只记一行日志）', async () => {
-    const { harness, cli, logs } = await startFeishu({
-      config: { agent: 'a1' },
-      behaviors: [{ hang: true }, { hang: true }],
-    })
-
-    cli.children[1].emitStdout(`${textEvent({ chat_type: 'group' })}\n`)
-    const stranger = JSON.parse(textEvent())
-    stranger.sender_id = 'ou_stranger'
-    cli.children[1].emitStdout(`${JSON.stringify(stranger)}\n`)
-    await flushDeliver()
-
-    expect(harness.submits).toEqual([])
-    expect(logs.join('\n')).toContain('入站只认私聊')
-    expect(logs.join('\n')).toContain('不在名单')
-  })
-
-  it('没派出去的正文也回帖（沉默是最差的反馈）', async () => {
-    const logs: string[] = []
-    const cli = fakeCli({ behaviors: [{ hang: true }, { hang: true }, { stdout: okBody({}) }] })
-    const sdk = fakeSdk({
-      config: <T = Record<string, unknown>>() => ({ user: 'ou_me', agent: 'a1' }) as T,
-      log: (line) => logs.push(line),
-    })
-    const harness = channelHarness({
-      sdk: { ...sdk, process: cli.process as unknown as ProcessCapability },
-      submit: async () => ({
-        accepted: false,
-        conversationId: null,
-        receipt: '找不到智能体「a1」',
-      }),
-    })
-    await feishuChannel.start(harness.ctx)
-
-    cli.children[1].emitStdout(`${textEvent()}\n`)
-    await flushDeliver()
-
-    const reply = cli.calls.find((call) => call.args.includes('+messages-reply'))
-    expect(JSON.parse(reply?.args.at(-1) ?? '{}')).toEqual({ text: '找不到智能体「a1」' })
-    expect(logs).toEqual([])
-  })
-
-  it('进展回帖到发起那条消息下面（按会话锚点，不串台）', async () => {
-    const { harness, cli } = await startFeishu({
-      config: { agent: 'a1' },
-      behaviors: [
-        { hang: true },
-        { hang: true },
-        { stdout: okBody({ message_id: 'om_reply' }) },
-        { stdout: okBody({ message_id: 'om_reply2' }) },
-        { stdout: okBody({ message_id: 'om_reply3' }) },
-      ],
-    })
-
-    cli.children[1].emitStdout(`${textEvent()}\n`)
-    await flushDeliver()
-
-    harness.progress({ conversationId: 'conversation-1', kind: 'reply', text: '已经做完了' })
-    // 别的会话（不是这个通道提交的）不该回帖
-    harness.progress({ conversationId: 'conversation-other', kind: 'reply', text: '别人的活' })
-    await flushDeliver()
-
-    const replies = cli.calls.filter((call) => call.args.includes('+messages-reply'))
-    expect(replies).toHaveLength(2)
-    expect(replies[1].args).toContain('om_in_1')
-    expect(JSON.parse(replies[1].args.at(-1) ?? '{}')).toEqual({ text: '已经做完了' })
-  })
-
-  it('超长进展按上限截断（完整内容留在工作台里看）', async () => {
-    const clip = clipProgress('x'.repeat(PROGRESS_CHARS + 500))
-    expect([...clip].length).toBeLessThan(PROGRESS_CHARS + 120)
-    expect(clip).toContain('已截断')
-  })
-})
-
-describe('飞书通道：lark 配置带前置参数（多应用换 profile，M44）', () => {
+describe('飞书通道：lark 配置带前置参数（多应用换 profile）', () => {
   it('programArgs：拆出命令与前缀参数，多余空白忽略', () => {
     expect(programArgs(' lark-cli  --profile  work2 ')).toEqual({
       command: 'lark-cli',

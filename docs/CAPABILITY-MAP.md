@@ -6,9 +6,10 @@
 ## 意图来源
 
 - 「常驻服务 + Web 界面」的工作台：自用、单用户、本地运行、无登录。
-- 第一个内置 app 是番茄时钟，用于学习/工作时专注计时。
+- 内置 app 是 `ai-workflow`（AI 工作流），定位是 AI 自动化运行：运行时 / 智能体 / 多阶段工作流 / 看板。
+- **不再提供的界面能力**：聊天（2026-11-17 起产品只跑自动化，工作台没有会话清单与消息输入；内核仍留 `chat.*` 命令、`conversations` / `messages` 投影与 `purpose='chat'` 运行，供历史数据与重建用，只是没有界面入口、不再产生新对话）、番茄钟（`app-pomodoro` 整个包已删，注册表只剩 `ai-workflow`）。
 - v1 数据不落盘；明确不做：历史统计、任务关联、全局快捷键、开机自启、云同步、多语言。（服务形态下没有窗口与托盘：关掉页面服务照常在跑，常驻交给进程管理器。）
-- 2026-11-02 起新增第二个 app `ai-workflow`（个人AI工作流，本地最小闭环）。它**自行**引入本地 SQLite（`node:sqlite`）持久化，仅限该模块；v1 "不落盘"仍适用于 pomodoro 等其它模块。设计参考 Multica 的「本地 UI/状态 + 本机 CLI 执行」边界。注册表顺序为 `ai-workflow` → `pomodoro`（`ai-workflow` 在前且默认打开）。
+- `ai-workflow` **自行**引入本地 SQLite（`node:sqlite`）持久化，仅限该模块。设计参考 Multica 的「本地 UI/状态 + 本机 CLI 执行」边界。注册表当前只有 `ai-workflow` 一项（即默认打开的那个）。
 - **2026-11-04 重设架构**：把「事件 → 规则 → 派活 → 记账」抽成纯内核，事件来源、执行器、审批通道、界面全部变为插件；目标是真相源唯一（事实日志）、可追溯（why）、加运行时只改插件。参考卡兹克《开源我这折腾了 1 年的「Agent 自动化系统」》与 `agent-autoloop`。落地分阶段见 [refactor-plan](./planning/refactor-plan.md)。
 
 ## 目标模块（重构后）
@@ -23,8 +24,7 @@
 | `plugins`                                                               | 插件体系：`source` / `executor` / `channel` / `app` 四类，manifest 声明 + `registry.ts` 静态注册（数组顺序即 UI 下拉与 detect 顺序）；执行器按运行时的 `executorKey` 选择                                                                   | `sdk`、`protocol`                                | [SPEC-plugins.md](./specs/SPEC-plugins.md)                                           |
 | `shell`                                                                 | Web 外壳：顶部 app 标签栏、插件槽、`kernelStore`（快照 + 增量失效）、经 `bridge.ts` 消费 HTTP/SSE                                                                                                                                           | `protocol`、`shared`（`WorkbenchApi`）           | [SPEC-host.md](./specs/SPEC-host.md)                                                 |
 | `ui`                                                                    | 视觉基座：**shadcn/ui v4 基线**（`shell/styles/global.css` 双主题变量 + `components/ui/` 上游组件）、项目覆盖层组件（Field / Panel / Menu / Segmented / ThemeSwitcher / FormError / SortHandle）、圆角/前景/对比度硬规则（`pnpm check:ui`） | —                                                | [SPEC-ui.md](./specs/SPEC-ui.md)                                                     |
-| `app-pomodoro`                                                          | 番茄钟 app 插件：计时状态机与 UI；可发 `pomodoro.*` 事件                                                                                                                                                                                    | `shell`                                          | [SPEC-pomodoro.md](./specs/SPEC-pomodoro.md)                                         |
-| `app-ai-workflow`                                                       | AI 工作流 app 插件：运行时/智能体/多阶段工作流/看板/聊天/设置，全部经 `dispatch` + `query` 访问内核                                                                                                                                         | `shell`、`plugins`                               | [SPEC-ai-workflow.md](./specs/SPEC-ai-workflow.md)（行为基线）                       |
+| `app-ai-workflow`                                                       | AI 工作流 app 插件：运行时/智能体/多阶段工作流/看板/设置，全部经 `dispatch` + `query` 访问内核                                                                                                                                              | `shell`、`plugins`                               | [SPEC-ai-workflow.md](./specs/SPEC-ai-workflow.md)（行为基线）                       |
 
 ## 迁移期模块（M0–M6.5 内有效）
 
@@ -33,7 +33,6 @@
 | Module id       | 职责                                                                                                                                      | 依赖     | Spec                                               |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------- |
 | `shell`（现状） | 顶部 app 标签栏、`AppPlugin` 契约与注册表、`kernelStore`（快照 + seq + 失效）                                                             | protocol | [SPEC-shell.md](./specs/SPEC-shell.md)             |
-| `pomodoro`      | 番茄钟 app                                                                                                                                | shell    | [SPEC-pomodoro.md](./specs/SPEC-pomodoro.md)       |
 | `ai-workflow`   | 运行时 + 智能体 + 工作流 + 看板 + 聊天 + SQLite 持久化（重构前实现在 `src/main/ai-workflow/`，现在落在 `src/host/**` + `src/plugins/**`） | shell    | [SPEC-ai-workflow.md](./specs/SPEC-ai-workflow.md) |
 
 > 状态（2026-11-05）：**M0–M6.5 已落地**。M0：kernel 边界、WAL + `integrity_check`、单实例锁、只读数据导出、打包冒烟。M1：`facts` 事实日志 + `project` 投影 + 重建 + `snapshot.imported` 存量导入；五张业务表已是投影。M2：运行生命周期全部入账（`run.*` 事实、租约/心跳/退避/超时、`runs`/`run_events` 投影）、`host/scheduler` + 注入执行器端口、启动对账与 `process_registry`、聊天并入 `purpose='chat'`、取消链路；`repository`/`runner`/`ChatService` 已删除。M3a：执行器插件化落地——`src/sdk` 能力面、`src/plugins/registry.ts` + `plugins/executors/dsh`、运行时 `executorKey` 取代旧协议族字段（`runtimes` 一次性物理升级 + 重建归一），`src/main/ai-workflow/runtime/**` 删除；假协议端到端验收通过。M3b/M3c：detect 归插件（`detectAll` 串行汇总、2 s 超时、失败隔离、同 command 先到先得）、`runtimes.executors()` 与运行时表单执行器选择、`command` 插件（`argsTemplate`、`{prompt}` 只在 argv 元素或 stdin、Windows `.cmd` 固定包装）、未知执行器落 `runtime_missing` 兜底终态。M4：审批与通道落地——`cards` 第 10 张投影表与 6 条 `card.*` 事实、`card.answer`/`card.resolve` 命令与两条投递宿主输入、`cards.open`/`cards.byRun`/`runs.waiting` 视图、回执块解析（ask/notices/resolves/later/events）、回答续接（同会话、`turn+1`）、`in-app`/`desktop` 通道与 `sdk.notify`、无卡 waiting 的启动对账兜底、顶部待审批条、`event.received`/`event.dropped` 只入账；`KERNEL_VERSION=m4.0.0`。M5：客户端插件落地——IPC 收敛为 `dispatch/query/subscribe` 三动词 + `commands` 幂等表（事务内回放）、聊天命令化（`chat.*`）与 `app.event`、`runtime.probe` 编排命令、宿主视图（executors/detected/models）与 `tasks.executing`/`runtimes.statuses`/`kernel.seq` 读视图、事实批次 feed 与聊天流旁路、renderer `kernelStore`（先订阅后快照、按 seq 续传、失效重取、单订阅）、`AppPlugin` 契约与 pomodoro 事件；`window.aiWorkflow` / `src/main/ai-workflow/ipc.ts` 已删除。退出证据以 [refactor-plan](./planning/refactor-plan.md) 的 M5 记录为准。M6：自动化规则落地——`rule_sets` / `rule_fires` 两张投影表与 `rules.replaced` / `rule.fired` 事实、`rules.replace` 整批替换（版本 +1）与 `rule.trigger` 手动运行命令、宿主输入 `event.received` 统一外部事件入口（app.event 与回执派生事件同路径）、事件命中规则建任务（`tasks` 新增 origin/ruleId/externalRef/labels，同规则同入口键去重）、`kernel/cron` 纯函数 + `clock.tick` 到点建任务、设置页「规则」栏与 Issue/早报模板；`KERNEL_VERSION=m6.0.0`。M6.5：线程落地——`threads` 第 13 张投影表与 7 条 `thread.*` 事实（整行 payload）、`event.merged`、`thread.note`/`thread.close`/`thread.bind` 命令、事件按 `(source, externalRef)` 归并（复用任务 / `event.merged` / `onExisting=new-task`）、线程上下文派生（`kernel/thread-context`，≤6000 码点确定性截断）、按 (thread, agent) 会话续接、`run.claim` 线程并发闸门、手工/cron 任务隐式线程、派生任务 `parentTaskId`、任务完成/删除/14 天无活动的线程归档与新事件重开、`thread.byId` 视图与看板线程面板；`KERNEL_VERSION=m6.5.0`。source 插件进程 / webhook / 外部插件 / 跨工作流交接留 M7（可选）。下一步：M7 仅在明确要做时启动。
@@ -62,4 +61,4 @@
 
 ## 构建顺序
 
-`kernel` → `protocol` → `host` → `plugins` → `server` → `shell` → app 插件（`pomodoro` 先验证槽位，`ai-workflow` 后迁移）
+`kernel` → `protocol` → `host` → `plugins` → `server` → `shell` → app 插件（`ai-workflow`）

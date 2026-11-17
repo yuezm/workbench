@@ -98,7 +98,7 @@ export type LarkResponse<A extends LarkAdminAction = LarkAdminAction> = IpcRespo
   LarkAdminResult<A>
 >
 
-/** `POST /api/notify` 的请求体（番茄钟等 app 的通用知会） */
+/** `POST /api/notify` 的请求体（宿主 outcome 通知等通用知会） */
 export interface NotifyRequest {
   title: string
   body?: string

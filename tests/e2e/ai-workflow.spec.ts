@@ -13,25 +13,16 @@ test.afterEach(async () => {
   await launched.close()
 })
 
-test('AI 工作流：顶部标签可进入，单列侧栏切换栏目，设置里各配置页且新建才弹表单', async () => {
+test('AI 工作流：顶部标签可进入，侧栏是项目 + 工作流，设置里各配置页且新建才弹表单', async () => {
   await page.getByRole('button', { name: 'AI 工作流' }).click()
   await expect(page.getByRole('heading', { name: 'AI 工作流' })).toBeVisible()
 
-  // 工作台默认落在任务栏：侧栏顶部是任务/聊天切换条 + 工作流切换器；聊天输入区与设置栏目都不可见
-  await expect(page.getByRole('navigation', { name: '工作台栏目' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '任务', exact: true })).toHaveAttribute(
-    'aria-current',
-    'page',
-  )
+  // 工作台只有任务一栏：侧栏顶部是项目切换器 + 工作流切换器；没有栏目切换条与消息输入
+  await expect(page.getByRole('region', { name: '项目列表' })).toBeVisible()
   await expect(page.getByRole('combobox', { name: '选择工作流' })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: '工作台栏目' })).toBeHidden()
   await expect(page.getByLabel('消息输入')).toBeHidden()
   await expect(page.getByRole('navigation', { name: '设置栏目' })).toBeHidden()
-
-  // 切到聊天栏：侧栏换成会话清单，内容区让给消息流
-  await page.getByRole('button', { name: '聊天', exact: true }).click()
-  await expect(page.getByRole('button', { name: '新对话' })).toBeVisible()
-  await expect(page.getByLabel('消息输入')).toBeVisible()
-  await expect(page.getByRole('combobox', { name: '选择工作流' })).toBeHidden()
 
   // 侧栏底部切到设置：设置栏目；出口（返回工作台）在侧栏顶部，带文字，不再藏在左下角图标里
   await page.getByRole('button', { name: '设置', exact: true }).click()

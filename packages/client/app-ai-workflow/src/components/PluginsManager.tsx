@@ -351,7 +351,7 @@ function PluginDetail({
    * 按字段类型把草稿转成标量。
    *
    * 空字符串通常不写入（保留 manifest 缺省值）；**下拉例外**：选回「未设置」要把空值写进去，
-   * 否则旧值会一直留着（用户选了「不接收入站」，保存后却照旧派活）。
+   * 否则旧值会一直留着（用户选了「不指定智能体」，保存后却照旧带着旧绑定）。
    */
   const configPatch = (): Record<string, string | number | boolean> => {
     const patch: Record<string, string | number | boolean> = {}
@@ -418,7 +418,7 @@ function PluginDetail({
     if (field.type === 'select') {
       // 候选来自静态 options 或动态来源（agents）：显示名称、落库 id
       const { choices, selected } = choicesOf(field, config.text[field.key] ?? '', agents)
-      const empty = field.optionsFrom === 'agents' ? '不接收入站（只发卡）' : '未设置'
+      const empty = field.optionsFrom === 'agents' ? '不指定智能体（只发卡）' : '未设置'
       const hint =
         field.optionsFrom === 'agents' && agents.length === 0
           ? '还没有智能体：先去「智能体」页新建一个，再回来选'

@@ -25,7 +25,7 @@ import { cardOf, channelHarness, type ChannelHarness } from './harness'
  * 飞书通道：多连接（M45）。
  *
  * 覆盖「一个通道接多个飞书应用」的三件事：连接配置怎么读、每条连接各自发到什么消息、
- * 以及点击/入站按连接分流。全部走假 CLI，不发真消息、不连真长连接。
+ * 以及点击按连接分流。全部走假 CLI，不发真消息、不连真长连接。
  */
 
 type Listener = (chunk: unknown) => void
@@ -142,19 +142,6 @@ const clickEvent = (over: Record<string, unknown> = {}): string =>
     ...over,
   })}\n`
 
-const textEvent = (over: Record<string, unknown> = {}): string =>
-  `${JSON.stringify({
-    type: 'im.message.receive_v1',
-    message_id: 'om_in_1',
-    chat_id: 'oc_p2p',
-    chat_type: 'p2p',
-    message_type: 'text',
-    content: '今天有什么安排',
-    sender_id: 'ou_me',
-    sender_type: 'user',
-    ...over,
-  })}\n`
-
 const inst = (over: Partial<Card> = {}): Card => cardOf(over)
 
 const flushDeliver = async (): Promise<void> => {
@@ -217,7 +204,6 @@ describe('飞书通道：连接配置（M45）', () => {
           id: 'wb',
           label: '工作台',
           profile: 'workbench',
-          agent: 'a1',
           user: 'ou_me',
           answerers: 'ou_a, ou_b',
         },
@@ -231,7 +217,6 @@ describe('飞书通道：连接配置（M45）', () => {
       label: '工作台',
       program: 'lark-cli --profile workbench',
       profile: 'workbench',
-      agent: 'a1',
       user: 'ou_me',
       chat: null,
       answerers: ['ou_a', 'ou_b'],
@@ -243,6 +228,13 @@ describe('飞书通道：连接配置（M45）', () => {
       chat: 'oc_2',
       answerers: [],
     })
+  })
+
+  it('readFeishuConnections：连接里没有「派给哪个智能体」（飞书不做聊天，只承载拍板卡）', () => {
+    const [connection] = readFeishuConnections({
+      connections: JSON.stringify([{ label: '工作台', agent: 'a1' }]),
+    })
+    expect(connection).not.toHaveProperty('agent')
   })
 
   it('readFeishuConnections：非法 profile 整条丢弃（它要进 argv）', () => {
@@ -284,7 +276,6 @@ describe('飞书通道：连接配置（M45）', () => {
   it('readFeishuConnections：没有 connections 时把旧字段当唯一连接（兼容旧配置）', () => {
     const connections = readFeishuConnections({
       lark: 'lark-cli --profile legacy',
-      agent: 'a1',
       user: 'ou_me',
       chat: 'oc_1',
       answerers: 'ou_a',
@@ -295,7 +286,6 @@ describe('飞书通道：连接配置（M45）', () => {
         label: '默认连接',
         program: 'lark-cli --profile legacy',
         profile: null,
-        agent: 'a1',
         user: 'ou_me',
         chat: 'oc_1',
         answerers: ['ou_a'],
@@ -318,14 +308,13 @@ describe('飞书通道：连接配置（M45）', () => {
 describe('飞书通道：多连接投递与分流（M45）', () => {
   const TWO = {
     connections: JSON.stringify([
-      { id: 'wb', label: '工作台', profile: 'workbench', user: 'ou_me', agent: 'a1' },
+      { id: 'wb', label: '工作台', profile: 'workbench', user: 'ou_me' },
       { id: 'me', label: '私人', profile: 'mine', chat: 'oc_2', answerers: ['ou_me'] },
     ]),
   }
 
   it('两条连接各发一条卡片：ref 按连接聚合成一个 JSON，各条都带自己的 --profile', async () => {
     const { harness, cli } = await startWith(TWO, [
-      { hang: true },
       { hang: true },
       { hang: true },
       { stdout: okBody({ message_id: 'om_a' }) },
@@ -352,7 +341,6 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
     const { harness, logs } = await startWith(TWO, [
       { hang: true },
       { hang: true },
-      { hang: true },
       { code: 1, stderr: 'no scope' },
       { stdout: okBody({ message_id: 'om_b' }) },
     ])
@@ -368,7 +356,6 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
 
   it('第二版：按聚合 ref 逐连接原地 patch（各改自己那条消息）', async () => {
     const { harness, cli } = await startWith(TWO, [
-      { hang: true },
       { hang: true },
       { hang: true },
       { stdout: okBody({ message_id: 'om_a' }) },
@@ -389,7 +376,7 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
     expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(2)
   })
 
-  it('某条连接没配接收人也读不到登录人：它等第一条私聊认人，另一条照常工作', async () => {
+  it('某条连接没有发送目标：它不投递（只记一次日志），另一条照常工作', async () => {
     const { harness, cli, logs } = await startWith(
       {
         connections: JSON.stringify([
@@ -405,8 +392,6 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
       ],
     )
 
-    // M46：没落点不等于不可用——这条连接照样起来，等第一条私聊把它认下来
-    expect(logs.join('\n')).toContain('还没有登录人')
     harness.deliver(inst())
     await flushDeliver()
 
@@ -414,11 +399,11 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
       { cardId: 'card-1', version: 1, ref: JSON.stringify({ wb: 'om_1' }) },
     ])
     expect(cli.calls.filter((call) => call.args.includes('+messages-send'))).toHaveLength(1)
+    expect(logs.join('\n')).toContain('先在设置里填接收人或群')
   })
 
   it('点击按连接校验：当前版本那条消息计入，别的消息（旧版/别人的）忽略', async () => {
     const { harness, cli, logs } = await startWith(TWO, [
-      { hang: true },
       { hang: true },
       { hang: true },
       { stdout: okBody({ message_id: 'om_a' }) },
@@ -438,35 +423,7 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
     expect(logs.join('\n')).toContain('不是当前版本的那条消息')
   })
 
-  it('入站派活：每条连接把自己配的智能体交给宿主（第三参）', async () => {
-    const { harness, cli } = await startWith(TWO, [
-      { hang: true },
-      { hang: true },
-      { hang: true },
-      { stdout: okBody({ message_id: 'om_reply' }) },
-    ])
-
-    // conn wb 的消息监听是第 1 个（clicks 在前）
-    cli.children[1]?.emitStdout(textEvent())
-    await flushDeliver()
-
-    expect(harness.submits).toEqual([
-      {
-        text: '今天有什么安排',
-        hints: {
-          ref: 'wb:om_in_1',
-          scope: 'wb',
-          chatId: 'oc_p2p',
-          rootRef: null,
-          threadRef: null,
-          replyTo: null,
-        },
-        agent: 'a1',
-      },
-    ])
-  })
-
-  it('没配 agent 的连接不挂入站长连接（少一条长连接）', async () => {
+  it('每条连接只挂一条长连接，而且只订阅卡片点击（不做入站）', async () => {
     const { cli } = await startWith(
       {
         connections: JSON.stringify([
@@ -480,11 +437,11 @@ describe('飞书通道：多连接投递与分流（M45）', () => {
     const consumes = cli.calls.filter((call) => call.args.includes('event'))
     expect(consumes).toHaveLength(2)
     expect(consumes.every((call) => call.args.includes('card.action.trigger'))).toBe(true)
+    expect(consumes.some((call) => call.args.includes('im.message.receive_v1'))).toBe(false)
   })
 
   it('连接之间不共享消息记录：A 的连接不会替 B 的消息作答', async () => {
     const { harness, cli } = await startWith(TWO, [
-      { hang: true },
       { hang: true },
       { hang: true },
       { stdout: okBody({ message_id: 'om_a' }) },

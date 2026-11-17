@@ -391,35 +391,26 @@ describe('host/commands：命令路由（M5）', () => {
     expect(replay.facts).toEqual(result.facts)
   })
 
-  it('app.event：白名单内的事件落 event.received；未声明的事件类型拒绝', async () => {
+  it('app.event：未声明的事件类型与未知 app 都拒绝（当前没有 app 声明事件）', async () => {
     const { router } = setup()
-    const accepted = await router.dispatch({
-      commandId: 'c-event',
-      type: 'app.event',
-      appId: 'pomodoro',
-      eventType: 'pomodoro.completed',
-      subject: '番茄完成',
-    })
-    expect(accepted.facts.map((fact) => fact.type)).toEqual(['event.received'])
-
     await expect(
       router.dispatch({
         commandId: 'c-event-2',
         type: 'app.event',
-        appId: 'pomodoro',
-        eventType: 'pomodoro.started',
-        subject: '开始',
+        appId: 'ai-workflow',
+        eventType: 'ai-workflow.completed',
+        subject: '完成',
       }),
     ).rejects.toMatchObject({
       code: 'invalid_input',
-      message: '未声明的事件类型: pomodoro/pomodoro.started',
+      message: '未声明的事件类型: ai-workflow/ai-workflow.completed',
     })
     await expect(
       router.dispatch({
         commandId: 'c-event-3',
         type: 'app.event',
         appId: 'unknown',
-        eventType: 'pomodoro.completed',
+        eventType: 'ai-workflow.completed',
         subject: 'x',
       }),
     ).rejects.toMatchObject({ code: 'invalid_input' })

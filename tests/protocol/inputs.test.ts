@@ -321,7 +321,7 @@ describe('protocol/inputs', () => {
     )
     expect(
       rejected(host('app.event', { commandId: 'c5', appId: 'pomodoro', eventType: 'Completed' })),
-    ).toBe('eventType 必须是小写点分标识（如 pomodoro.completed）')
+    ).toBe('eventType 必须是小写点分标识（如 my-app.completed）')
   })
 
   it('card.delivered / card.delivery_failed：卡片 id、版本 1 基、ref/error 上限', () => {

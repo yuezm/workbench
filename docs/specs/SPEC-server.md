@@ -51,7 +51,7 @@ node out/server/index.js
 | 变量                     | 默认           | 约束                                                          |
 | ------------------------ | -------------- | ------------------------------------------------------------- |
 | `WORKBENCH_HOST`         | `127.0.0.1`    | 非回环时必须配 token，否则启动失败（`ConfigError`，退出码 1） |
-| `WORKBENCH_PORT`         | `7788`         | `0..65535`；`0` 表示系统分配                                  |
+| `WORKBENCH_PORT`         | `3000`         | `0..65535`；`0` 表示系统分配                                  |
 | `WORKBENCH_DATA_DIR`     | `~/.workbench` | 相对路径按 `cwd` 解析                                         |
 | `WORKBENCH_WEB_DIR`      | `out/web`      | 不存在只 warn（API 仍可用）                                   |
 | `WORKBENCH_TOKEN`        | 无             | ≥16 字符；优先级高于 `<dataDir>/token`                        |

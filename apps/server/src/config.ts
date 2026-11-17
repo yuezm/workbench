@@ -15,8 +15,8 @@ import type { WebUiMode } from '@workbench/bundle-web'
 
 /** 默认只监听回环：单机自用零配置，也不需要 token */
 export const DEFAULT_HOST = '127.0.0.1'
-/** 默认端口：好记，且不像 3000/8080 那样容易和别的 dev server 撞 */
-export const DEFAULT_PORT = 7788
+/** 默认端口：dev 通用端口，`WORKBENCH_PORT` 可覆盖，`0` 表示由系统分配 */
+export const DEFAULT_PORT = 3000
 /** token 最短长度：太短的 token 在局域网里可被穷举 */
 export const MIN_TOKEN_LENGTH = 16
 /** 数据目录里的 token 文件名（与 `secret.key` 同级） */

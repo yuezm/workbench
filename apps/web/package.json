@@ -5,7 +5,6 @@
   "description": "Web 前端入口：vite 构建产出 out/web（纯静态，由服务端按文件托管）",
   "dependencies": {
     "@workbench/client-app-ai-workflow": "workspace:*",
-    "@workbench/client-app-pomodoro": "workspace:*",
     "@workbench/client-shell": "workspace:*"
   }
 }

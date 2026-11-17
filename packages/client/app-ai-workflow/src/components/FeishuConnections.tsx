@@ -7,9 +7,7 @@ import { badgeCls } from '@workbench/client-ui-kit/panel'
 import { toast } from '@workbench/client-ui-kit/toast'
 import { cn } from '@workbench/client-ui-kit/cn'
 import { getKernelStore } from '@workbench/client-kernel-store'
-import { useKernelView } from '@workbench/client-shell/useKernelView'
 import {
-  agentLabelOf,
   connectionHealthOf,
   connectionLabel,
   connectionsOf,
@@ -21,7 +19,6 @@ import { FeishuConnectionDialog } from './FeishuConnectionDialog'
 import { FeishuStatusCard } from './FeishuStatusCard'
 
 export {
-  agentLabelOf,
   answerersTextOf,
   connectionHealthOf,
   connectionLabel,
@@ -43,12 +40,15 @@ type EditorState = { mode: 'create' } | { mode: 'edit'; index: number } | null
  *
  * 三层，各管一件事：
  * 1. **状态卡**：本机 lark-cli 现在连的是谁、能不能用、开放平台还差哪一步；
- * 2. **连接列表**：一条连接 = 一个 profile + 一个消息落点 + 一个默认智能体，行内可编辑 / 移除；
+ * 2. **连接列表**：一条连接 = 一个 profile + 一个消息落点 + 一份拍板人名单，行内可编辑 / 移除；
  * 3. **本机应用**：新建 profile、设备码登录、删除 profile 收进独立弹窗（一次只做一件事）。
  *
  * 为什么要这么切：原来这些全摊在同一个面板里——四格状态、一段说明、连接列表、新增连接四格
  * 输入、高级四项、新建 profile 四格、删除 profile 一排、登录一排——同一屏里有 14 个输入控件，
  * 用户分不清哪些格子属于已有连接、哪些属于新连接，也不知道点哪个按钮会发生什么。
+ *
+ * 口径（与通道一致）：飞书只承载**需要人拍板的卡**——需要你拍板的卡发到这里，点按钮就是答复；
+ * 不在飞书里聊天，所以这里没有「派给哪个智能体」这类入站配置。
  *
  * 边界：这里只探测与写配置；secret 单向交给 `lark-cli profile add`（不经工作台落库、不回显）。
  * 登录目标由弹窗自己持有，不借「新增连接」的 profile 选择：两块共用一个值时，新建完 profile
@@ -56,8 +56,6 @@ type EditorState = { mode: 'create' } | { mode: 'edit'; index: number } | null
  */
 export function FeishuConnections({ plugin }: { plugin: PluginView }): ReactElement {
   const connections = useMemo(() => connectionsOf(plugin.config['connections']), [plugin.config])
-  // 「派给哪个智能体」的候选来自内核清单：选名字、存 id（改名不影响绑定）
-  const agents = useKernelView('agents.all') ?? []
   const [status, setStatus] = useState<LarkStatusView | null>(null)
   const [busy, setBusy] = useState<'status' | 'save' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -130,8 +128,7 @@ export function FeishuConnections({ plugin }: { plugin: PluginView }): ReactElem
       <div className="flex flex-col gap-1">
         <h3 className="text-base font-medium text-foreground">飞书连接</h3>
         <p className="text-xs text-faint-foreground">
-          一条连接 = 一个 lark-cli profile =
-          一个飞书应用（一个机器人）：私聊它就能派活，卡片与进展也发到这里。
+          一条连接 = 一个 lark-cli profile = 一个飞书应用：需要你拍板的卡发到这里，点按钮就是答复。
         </p>
       </div>
 
@@ -186,8 +183,7 @@ export function FeishuConnections({ plugin }: { plugin: PluginView }): ReactElem
                       </span>
                     </span>
                     <span className="truncate text-xs text-faint-foreground">
-                      {connection.profile ?? '当前 profile'} · {connectionTarget(connection)} ·{' '}
-                      {agentLabelOf(agents, connection.agent)}
+                      {connection.profile ?? '当前 profile'} · {connectionTarget(connection)}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
@@ -244,7 +240,6 @@ export function FeishuConnections({ plugin }: { plugin: PluginView }): ReactElem
         <FeishuConnectionDialog
           {...(editor.mode === 'edit' ? { connection: connections[editor.index] } : {})}
           profiles={profiles}
-          agents={agents}
           onSubmit={submitConnection}
           onCancel={() => setEditor(null)}
         />

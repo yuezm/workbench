@@ -550,7 +550,7 @@ const checkProbe = (value: unknown): Check => {
   )
 }
 
-/** app 事件类型：`<appId>.<event>` 形式的小写点分标识（如 pomodoro.completed）。 */
+/** app 事件类型：`<appId>.<event>` 形式的小写点分标识（如 my-app.completed）。 */
 const EVENT_TYPE_PATTERN = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/
 
 const checkEventType = (value: unknown): Check => {
@@ -558,10 +558,10 @@ const checkEventType = (value: unknown): Check => {
   if (value.length > COMMAND_LIMITS.name) return `eventType最长 ${COMMAND_LIMITS.name} 个字符`
   return EVENT_TYPE_PATTERN.test(value)
     ? null
-    : 'eventType 必须是小写点分标识（如 pomodoro.completed）'
+    : 'eventType 必须是小写点分标识（如 my-app.completed）'
 }
 
-/** 规则来源：`*` 或小写标识（`:` 允许 app 来源写法，如 `app:pomodoro`）。 */
+/** 规则来源：`*` 或小写标识（`:` 允许 app 来源写法，如 `app:my-app`）。 */
 const RULE_SOURCE_PATTERN = /^(\*|[a-z][a-z0-9:_-]*)$/
 
 /** 规则 type 匹配模式：精确、`*`、前缀 `x.*`。 */
@@ -577,7 +577,7 @@ const checkThreadSource = (value: unknown): Check => {
   }
   return THREAD_SOURCE_PATTERN.test(value)
     ? null
-    : 'source 必须是小写标识（如 github / mail / app:pomodoro）'
+    : 'source 必须是小写标识（如 github / mail / app:my-app）'
 }
 
 const checkRuleWhen = (value: unknown, label: string): Check => {
@@ -593,7 +593,7 @@ const checkRuleWhen = (value: unknown, label: string): Check => {
   if (when.source.length > RULE_LIMITS.source)
     return `${label}.source 最长 ${RULE_LIMITS.source} 个字符`
   if (!RULE_SOURCE_PATTERN.test(when.source)) {
-    return `${label}.source 必须是小写标识或 *（如 github / app:pomodoro）`
+    return `${label}.source 必须是小写标识或 *（如 github / app:my-app）`
   }
   if (!Array.isArray(when.types)) return `${label}.types 必须是数组`
   if (when.types.length === 0) return `${label}.types 至少 1 项`

@@ -4,7 +4,7 @@
 
 ## Objective
 
-搭建一个可长期扩展的 Web 工作台外壳（浏览器端 SPA，服务端是一个常驻 Node 进程）：顶部栏列出所有已注册的 app，内容区挂载当前选中的 app。核心价值在于 **app 注册机制**——未来新增 app 不需要改动外壳代码。shell 自己不包含任何具体 app 的业务逻辑；第一个消费者 `pomodoro` 用于验证这套机制。
+搭建一个可长期扩展的 Web 工作台外壳（浏览器端 SPA，服务端是一个常驻 Node 进程）：顶部栏列出所有已注册的 app，内容区挂载当前选中的 app。核心价值在于 **app 注册机制**——未来新增 app 不需要改动外壳代码。shell 自己不包含任何具体 app 的业务逻辑；当前注册的唯一 app 是 `ai-workflow`（AI 自动化运行）。
 
 **用户故事：**
 
@@ -68,7 +68,7 @@ workbench/
 │           │   ├── components/ #   TopBar（顶部 app 标签栏）
 │           │   └── styles/     #   全局深色主题变量（global.css）
 │           └── apps/
-│               └── pomodoro/   # 【pomodoro】见 SPEC-pomodoro.md
+│               └── ai-workflow/ # 【ai-workflow】见 SPEC-ai-workflow.md
 ├── docs/                  # CAPABILITY-MAP.md / specs/ / planning/
 ├── scripts/               # 构建辅助脚本（dev.mjs、检查脚本等）
 └── package.json
@@ -89,7 +89,7 @@ export interface AppIconProps {
 }
 
 export interface AppPlugin {
-  /** 唯一 id，kebab-case，如 'pomodoro' */
+  /** 唯一 id，kebab-case，如 'ai-workflow' */
   id: string
   /** 顶部导航显示名 */
   name: string
@@ -97,7 +97,7 @@ export interface AppPlugin {
   icon: ComponentType<AppIconProps>
   /** 内容区挂载的入口组件 */
   component: ComponentType
-  /** 可发事件类型（如 pomodoro.completed）；白名单同步 src/shared/apps.ts */
+  /** 可发事件类型（小写点分，形如 `<appId>.<event>`）；白名单在 `@workbench/app-events` */
   events?: readonly string[]
 }
 ```
@@ -106,10 +106,9 @@ export interface AppPlugin {
 // renderer/shell/registry.ts
 import type { AppPlugin } from './types'
 import { aiWorkflowApp } from '../apps/ai-workflow'
-import { pomodoroApp } from '../apps/pomodoro'
 
-// 顺序即顶部栏显示顺序，也是默认打开的 app（外壳取 apps[0]）
-export const appPlugins: AppPlugin[] = [aiWorkflowApp, pomodoroApp]
+// 顺序即顶部栏显示顺序，也是默认打开的 app（外壳取 apps[0]）；当前只有一个内置 app
+export const appPlugins: AppPlugin[] = [aiWorkflowApp]
 ```
 
 **跨层 API（契约定义在 `src/shared/workbench-api.ts`，浏览器侧由 `src/renderer/src/shared/bridge.ts` 实现成 HTTP + SSE，入口 `main.tsx` 把它挂到 `window.workbench`）：**
@@ -129,7 +128,7 @@ export interface WorkbenchApi {
   /** 服务信息：数据目录、版本、默认工作目录、在线页面数 */
   info(): Promise<ServerInfo>
   lark<A extends LarkAdminAction>(action: A): Promise<LarkAdminResult<A>>
-  /** 知会（番茄钟等 app 用） */
+  /** 知会（app 通用的轻提示） */
   notify(title: string, body?: string): void
 }
 ```
@@ -185,8 +184,8 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 
 ## Success Criteria
 
-1. `pnpm dev` 起服务与 Web dev server 后打开页面：顶部栏按注册表顺序显示 app 标签（当前为「AI 工作流」在前、「番茄时钟」在后），第一个标签处于选中态、内容区挂载对应 app；点另一个 app 标签即切换，无整页刷新。
-2. 新增一个 app 只需三步：新建 `src/renderer/src/apps/<id>/`、实现 `AppPlugin`、注册表加一行；外壳代码（TopBar/Workbench/桥接）零改动。（验收方式：以 pomodoro 的接入过程为证 + registry 类型约束。）
+1. `pnpm dev` 起服务与 Web dev server 后打开页面：顶部栏按注册表顺序显示 app 标签（当前只有「AI 工作流」一项，且处于选中态、内容区挂载它），点标签即切换，无整页刷新。
+2. 新增一个 app 只需三步：新建 `packages/client/app-<id>/`、实现 `AppPlugin`、注册表加一行；外壳代码（TopBar/Workbench/桥接）零改动。（验收方式：`ai-workflow` 就是按这三步接进来的，外加 registry 的类型与用例约束。）
 3. `apps` 注册表被类型与测试双重约束：id 重复或字段缺失会在编译期/测试期暴露。
 4. renderer 调用 `window.workbench.notify(...)` 后，页面收到服务端经 SSE 推来的 `notice` 并弹轻提示（手动验收）。
 5. 关掉页面后服务进程照常在跑；重开页面回到同一份数据与同一批视图，不需要重启服务（手动验收）。

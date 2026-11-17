@@ -20,6 +20,6 @@ export interface AppPlugin {
   icon: ComponentType<AppIconProps>
   /** 内容区挂载的入口组件 */
   component: ComponentType
-  /** 可发事件类型（如 pomodoro.completed）；未声明则不能发 `app.event` */
+  /** 可发事件类型（如 `<appId>.<event>`）；未声明则不能发 `app.event` */
   events?: readonly string[]
 }

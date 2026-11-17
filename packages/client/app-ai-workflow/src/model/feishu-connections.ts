@@ -4,7 +4,6 @@ import type { LarkProfileView, LarkStatusView } from '@workbench/protocol/ipc'
 export interface ConnectionDraft {
   label?: string
   profile?: string
-  agent?: string
   user?: string
   chat?: string
   answerers?: string | string[]
@@ -50,25 +49,13 @@ export function answerersTextOf(connection: ConnectionDraft): string {
 }
 
 /**
- * 连接绑的智能体显示成什么：按 id 找名字（新配置存 id），认不出来原样显示（旧配置可能存名字）。
- * 没绑就是「只发不接」——`inbound` 只看这条连接自己的 `agent`，不存在「回退到插件设置」。
+ * 把表单里的一行转回配置对象（空字段不写，避免占位空串）。
+ *
+ * 没有「派给哪个智能体」：飞书只承载需要人拍板的卡，点按钮即答复，不在飞书里聊天。
  */
-export function agentLabelOf(
-  agents: readonly { id: string; name: string }[],
-  agent: string | undefined,
-): string {
-  const wanted = agent?.trim() ?? ''
-  if (wanted === '') return '只发不接'
-  const found =
-    agents.find((item) => item.id === wanted) ?? agents.find((item) => item.name === wanted)
-  return found?.name ?? wanted
-}
-
-/** 把表单里的一行转回配置对象（空字段不写，避免占位空串）。 */
 export function connectionOfForm(form: {
   label: string
   profile: string
-  agent: string
   user: string
   chat: string
   answerers: string
@@ -76,7 +63,6 @@ export function connectionOfForm(form: {
   const connection: ConnectionDraft = {}
   if (form.label.trim() !== '') connection.label = form.label.trim()
   if (form.profile.trim() !== '') connection.profile = form.profile.trim()
-  if (form.agent.trim() !== '') connection.agent = form.agent.trim()
   if (form.user.trim() !== '') connection.user = form.user.trim()
   if (form.chat.trim() !== '') connection.chat = form.chat.trim()
   const answerers = [

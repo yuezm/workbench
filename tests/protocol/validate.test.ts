@@ -888,8 +888,8 @@ describe('validateQuery（M5：query 动词入口）', () => {
     expect(
       rejectedMessage(
         cmd('app.event', {
-          appId: 'pomodoro',
-          eventType: 'pomodoro.' + 'a'.repeat(100),
+          appId: 'demo',
+          eventType: 'demo.' + 'a'.repeat(100),
           subject: 'x',
         }),
       ),
@@ -932,7 +932,7 @@ describe('validateQuery（M5：query 动词入口）', () => {
       )
       expect(replace([rule({ when: { cron: 9 } })])).toBe('rules[0].when.cron必须是字符串')
       expect(replace([rule({ when: { source: 'GitHub', types: ['*'] } })])).toBe(
-        'rules[0].when.source 必须是小写标识或 *（如 github / app:pomodoro）',
+        'rules[0].when.source 必须是小写标识或 *（如 github / app:my-app）',
       )
       expect(replace([rule({ when: { source: 'github', types: [] } })])).toBe(
         'rules[0].when.types 至少 1 项',
@@ -1064,7 +1064,7 @@ describe('validateQuery（M5：query 动词入口）', () => {
     ).toBe('source最长 64 个字符')
     expect(
       rejectedMessage(cmd('thread.bind', { threadId: 'th-1', source: 'GitHub', externalRef: 'x' })),
-    ).toBe('source 必须是小写标识（如 github / mail / app:pomodoro）')
+    ).toBe('source 必须是小写标识（如 github / mail / app:my-app）')
     expect(rejectedMessage(cmd('thread.bind', { threadId: 'th-1', source: 'github' }))).toBe(
       'externalRef必填',
     )

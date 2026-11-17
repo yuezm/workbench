@@ -8,15 +8,17 @@
 export interface AppEventDeclaration {
   /** app 插件 id（与 `AppPlugin.id` 一致，kebab-case） */
   id: string
-  /** 该 app 可发的事件类型全集（小写点分，如 pomodoro.completed） */
+  /** 该 app 可发的事件类型全集（小写点分，形如 `<appId>.<event>`） */
   events: readonly string[]
 }
 
-/** 内置 app 的事件白名单；新增 app 时在这里加一行（与 renderer 注册表同批）。 */
-export const APP_EVENTS: readonly AppEventDeclaration[] = [
-  { id: 'pomodoro', events: ['pomodoro.completed'] },
-  { id: 'ai-workflow', events: [] },
-]
+/**
+ * 内置 app 的事件白名单；新增 app 时在这里加一行（与 renderer 注册表同批）。
+ *
+ * 当前注册的 app 都还没有事件出口，所以清单里的 `events` 是空的；
+ * 将来某个 app 要发事件，只在这里登记它的完整类型串（宿主按字符串精确匹配）。
+ */
+export const APP_EVENTS: readonly AppEventDeclaration[] = [{ id: 'ai-workflow', events: [] }]
 
 /** 某 app 是否可发某事件（宿主入口用；O(app 数 × 事件数)，量级可忽略）。 */
 export function isDeclaredAppEvent(appId: string, eventType: string): boolean {

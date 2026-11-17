@@ -3,7 +3,7 @@
  *
  * 三个子进程：
  * 1. `vite build --watch --config vite.server.config.mts`：改服务端代码就重打 `out/server/index.js`
- * 2. `node --watch out/server/index.js`：产物一变就重启服务（端口 7788）
+ * 2. `node --watch out/server/index.js`：产物一变就重启服务（端口 3000，`WORKBENCH_PORT` 可覆盖）
  * 3. `vite --config vite.web.config.mts`：Web 页面 HMR，`/api` 由 dev server 代理到服务端
  * 数据目录默认落 `.scratch/dev-data`（不进仓库、不碰 `~/.workbench`），可用 `WORKBENCH_DATA_DIR` 覆盖
  */
@@ -16,7 +16,7 @@ const require = createRequire(import.meta.url)
 // vite 8 起 exports 只暴露包根，`vite/bin/vite.js` 不再可 resolve：从包根拼 bin 路径
 const viteBin = join(dirname(require.resolve('vite/package.json')), 'bin/vite.js')
 
-const PORT = process.env.WORKBENCH_PORT ?? '7788'
+const PORT = process.env.WORKBENCH_PORT ?? '3000'
 const DATA_DIR = process.env.WORKBENCH_DATA_DIR ?? '.scratch/dev-data'
 const API = process.env.WORKBENCH_DEV_API ?? `http://127.0.0.1:${PORT}`
 

@@ -295,7 +295,7 @@ export function RuleDialog({
                 <Input
                   aria-label="规则事件来源"
                   maxLength={RULE_LIMITS.source}
-                  placeholder="github / app:pomodoro / *"
+                  placeholder="github / mail / *"
                   value={source}
                   onChange={(e) => setSource(e.target.value)}
                 />

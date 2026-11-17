@@ -33,7 +33,7 @@ export default defineConfig({
     strictPort: false,
     proxy: {
       '/api': {
-        target: process.env['WORKBENCH_DEV_API'] ?? 'http://127.0.0.1:7788',
+        target: process.env['WORKBENCH_DEV_API'] ?? 'http://127.0.0.1:3000',
         changeOrigin: false,
       },
     },

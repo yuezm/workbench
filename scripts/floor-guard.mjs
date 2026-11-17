@@ -127,6 +127,96 @@ const stemOf = (p) =>
 const deletedSourceStems = new Set(
   deleted.filter((f) => !isTest(f) && /\.(ts|tsx)$/.test(f)).map(stemOf),
 )
+// 功能删除（2026-11-17）：整个子功能（实现 + 它的页面 / e2e 用例）一起删除时，随删除消失的
+// 测试与断言不是放松——它们只在测已经不存在的入口。登记项必须列出**本次 diff 里被改动或
+// 删除的源码**：任何一项没被动过，豁免就不成立（源码原样留着就不能拿它当理由）。
+// 只登记「整块功能下线」，新增/改写功能时该补的断言照旧要补。
+const FEATURE_REMOVALS = {
+  'tests/e2e/pomodoro.spec.ts': {
+    sources: [
+      'packages/client/app-pomodoro/src/index.tsx',
+      'packages/client/shell/src/registry.ts',
+    ],
+    reason: '番茄时钟 app 整体删除（包、registry 行、规格）',
+  },
+  'tests/e2e/chat-execution.spec.ts': {
+    sources: [
+      'packages/client/app-ai-workflow/src/components/ChatPanel.tsx',
+      'packages/client/app-ai-workflow/src/hooks/useChat.ts',
+    ],
+    reason: '聊天功能整体删除（面板、状态机、会话清单），工作台只跑自动化',
+  },
+  'tests/e2e/ai-workflow.spec.ts': {
+    sources: ['packages/client/app-ai-workflow/src/AiWorkflowPage.tsx'],
+    reason: '侧栏栏目切换（任务 / 聊天）随聊天一起删除，只留项目 + 工作流',
+  },
+  'tests/e2e/project-dimension.spec.ts': {
+    sources: ['packages/client/app-ai-workflow/src/AiWorkflowPage.tsx'],
+    reason: '项目维度用例里的会话清单断言随聊天删除，只验看板切换',
+  },
+  'tests/e2e/rules.spec.ts': {
+    sources: ['packages/contract/app-events/src/index.ts'],
+    reason: 'app 插件事件白名单清空（番茄移除后无 app 发事件），规则改由 webhook 来源覆盖',
+  },
+  'tests/e2e/smoke.spec.ts': {
+    sources: ['packages/client/shell/src/registry.ts'],
+    reason: '顶部栏只剩一个 app，切番茄与栏目断言随功能删除',
+  },
+  'tests/renderer/src/apps/ai-workflow/AiWorkflowPage.test.tsx': {
+    sources: [
+      'packages/client/app-ai-workflow/src/AiWorkflowPage.tsx',
+      'packages/client/app-ai-workflow/src/components/ChatPanel.tsx',
+      'packages/client/app-ai-workflow/src/components/WorkspaceNav.tsx',
+      'packages/client/app-ai-workflow/src/hooks/useChat.ts',
+    ],
+    reason: '聊天栏目整体移除（会话清单 / 消息流 / 栏目切换），页面用例只留任务栏',
+  },
+  'tests/renderer/src/apps/ai-workflow/components/ApprovalBar.test.tsx': {
+    sources: ['packages/client/app-ai-workflow/src/components/ApprovalBar.tsx'],
+    reason: '卡片落点只剩任务一种，会话落点的标签与跳转断言随落点一起删除',
+  },
+  'tests/e2e/ui-geometry.spec.ts': {
+    sources: ['packages/client/app-pomodoro/src/components/TimerDisplay.tsx'],
+    reason: '几何审计里的番茄钟一屏随 app 删除（大号倒计时的字号豁免一并取消）',
+  },
+  'tests/host/commands.test.ts': {
+    sources: ['packages/contract/app-events/src/index.ts'],
+    reason: 'app 插件事件白名单清空（番茄移除后无 app 发事件），只留拒绝路径',
+  },
+  'tests/plugins/channels/feishu.test.ts': {
+    sources: [
+      'packages/plugins/channel-feishu/src/index.ts',
+      'packages/plugins/channel-feishu/src/inbound.ts',
+    ],
+    reason: '飞书关掉入站与进展回帖（只推需要拍板的卡），入站解析 / 派活 / 回执用例随入口删除',
+  },
+  'tests/renderer/src/apps/ai-workflow/components/FeishuConnections.test.tsx': {
+    sources: [
+      'packages/client/app-ai-workflow/src/components/FeishuConnections.tsx',
+      'packages/client/app-ai-workflow/src/components/FeishuConnectionDialog.tsx',
+    ],
+    reason: '连接不再绑「派给哪个智能体」（飞书不做聊天），相关交互断言随字段删除',
+  },
+}
+/** 本次 diff 里被新增 / 修改 / 删除的源码路径（功能删除豁免的成立条件） */
+const touchedSources = new Set([...addedPaths, ...deleted])
+for (const { file: changed } of [...added, ...removed]) touchedSources.add(changed)
+// diff 基线是 merge-base：拆包后新建的文件在基线里还不存在，它们的删除在 diff 里不可见
+// （净效果是「原本也没有」），必须再从工作区状态确认一次，否则功能删除豁免永远命不中。
+const worktreeStatus = git(['status', '--porcelain'])
+if (worktreeStatus === null) bail('could not read working tree status')
+for (const line of worktreeStatus.split('\n')) {
+  const raw = line.slice(3).trim().replace(/^"|"$/g, '')
+  if (raw === '') continue
+  for (const p of raw.split(' -> ')) touchedSources.add(p.trim().replace(/^"|"$/g, ''))
+}
+/** 命中的功能删除登记（源码必须全部被动过） */
+const featureRemoval = (file) => {
+  const entry = FEATURE_REMOVALS[file]
+  if (entry === undefined) return null
+  return entry.sources.every((source) => touchedSources.has(source)) ? entry : null
+}
+
 // 测试搬家（src/**.test.ts → tests/**.test.ts）：旧路径删除 + 新路径新增 = 迁移，不是删测试。
 // git 有时识别不出 rename（相似度阈值），此时会退化成 delete + add，用路径对应关系兜底。
 // 显式登记的「按层搬家」（T16 计划表）：旧测试的行为在新位置重写，断言同等覆盖。
@@ -182,6 +272,7 @@ for (const f of deleted) {
   if (sourceCandidates(f).some((source) => deletedSet.has(source))) continue
   if (deletedSourceStems.has(stemOf(f))) continue
   if (migratedCounterpart(f)) continue
+  if (featureRemoval(f) !== null) continue
   flag('test-deleted', f, 'file deleted')
 }
 const assertionRe = /\b(expect|assert|should)\b/
@@ -207,6 +298,7 @@ for (const [file, removedCount] of removedAssertions) {
       )
     : 0
   if (counterpart !== undefined && removedCount <= addedCount + movedIn) continue
+  if (featureRemoval(file) !== null) continue
   flag('assertion-removed', file, `assertions ${removedCount} -> ${addedCount}`)
 }
 

@@ -633,11 +633,11 @@ describe('PluginsManager：飞书通道的连接面板（M45）', () => {
     expect(screen.getByText('还没有智能体：先去「智能体」页新建一个，再回来选')).toBeInTheDocument()
     // 旧值认不出来：留一条说明项，当前仍选中它
     await user.click(screen.getByRole('combobox', { name: '飞书 派给哪个智能体' }))
-    await user.click(await screen.findByRole('option', { name: '不接收入站（只发卡）' }))
+    await user.click(await screen.findByRole('option', { name: '不指定智能体（只发卡）' }))
     await user.click(screen.getByRole('button', { name: '保存插件 飞书' }))
 
     await waitFor(() => expect(kernel.dispatched).toHaveLength(1))
-    // 清空要显式写空串，否则旧 agent 会一直留着（选了「不接收入站」却照旧派活）
+    // 清空要显式写空串，否则旧绑定会一直留着（选了「不指定智能体」却照旧带着它）
     expect(kernel.dispatched[0]).toMatchObject({ config: { agent: '' } })
   })
 

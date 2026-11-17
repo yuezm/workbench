@@ -25,8 +25,6 @@ export const workspaceAliases = [
   { find: /^@workbench\/channel-webhook$/, replacement: resolve(ROOT, 'packages/plugins/channel-webhook/src/index.ts') },
   { find: /^@workbench\/client-app-ai-workflow\/(.*)$/, replacement: resolve(ROOT, 'packages/client/app-ai-workflow/src/$1') },
   { find: /^@workbench\/client-app-ai-workflow$/, replacement: resolve(ROOT, 'packages/client/app-ai-workflow/src/index.tsx') },
-  { find: /^@workbench\/client-app-pomodoro\/(.*)$/, replacement: resolve(ROOT, 'packages/client/app-pomodoro/src/$1') },
-  { find: /^@workbench\/client-app-pomodoro$/, replacement: resolve(ROOT, 'packages/client/app-pomodoro/src/index.tsx') },
   { find: /^@workbench\/client-bridge\/(.*)$/, replacement: resolve(ROOT, 'packages/client/bridge/src/$1') },
   { find: /^@workbench\/client-bridge$/, replacement: resolve(ROOT, 'packages/client/bridge/src/index.ts') },
   { find: /^@workbench\/client-kernel-store\/(.*)$/, replacement: resolve(ROOT, 'packages/client/kernel-store/src/$1') },

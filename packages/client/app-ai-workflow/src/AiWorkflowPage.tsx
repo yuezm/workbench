@@ -12,8 +12,6 @@ import {
 import { useKernelViewState } from '@workbench/client-shell/useKernelView'
 import { ApprovalBar } from './components/ApprovalBar'
 import { AgentManager } from './components/AgentManager'
-import { ChatPanel } from './components/ChatPanel'
-import { ConversationList } from './components/ConversationList'
 import { KanbanBoard } from './components/KanbanBoard'
 import { PluginsManager } from './components/PluginsManager'
 import { ProjectDialog } from './components/ProjectDialog'
@@ -28,8 +26,6 @@ import { ThreadDetailPage } from './components/ThreadDetailPage'
 import { UsagePanel } from './components/UsagePanel'
 import { WorkflowManager } from './components/WorkflowManager'
 import { WorkflowSwitcher } from './components/WorkflowSwitcher'
-import { WorkspaceNav, type WorkspaceSection } from './components/WorkspaceNav'
-import { useChat } from './hooks/useChat'
 import { useEntityOrder } from './model/entity-order'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -44,21 +40,16 @@ type View = 'workspace' | 'settings'
 type TaskRoute = { kind: 'task'; taskId: string } | { kind: 'thread'; threadId: string }
 
 /**
- * 卡片的落点：挂任务的卡进任务详情，聊天卡进对应会话；
- * 两者都没有则没有落点（通知条那一行会整行禁用，走不到那里）。
+ * 卡片的落点：挂任务的卡进任务详情，其余的没有落点。
+ *
+ * 工作台只跑自动化（不再有会话），因此卡片只可能挂任务；`conversationId` 是历史数据的列，
+ * 不再参与落点判定——通知条那一行会整行禁用，走不到「点开」。
  */
-export type CardLanding =
-  | { kind: 'task'; taskId: string }
-  | { kind: 'conversation'; conversationId: string }
-  | { kind: 'none' }
+export type CardLanding = { kind: 'task'; taskId: string } | { kind: 'none' }
 
-/** 落点判定（纯函数）：任务卡优先，其次会话卡，都没有就没有落点 */
+/** 落点判定（纯函数）：有任务就进任务详情，没有就没有落点 */
 export function cardLanding(card: Card): CardLanding {
-  if (card.taskId !== null) return { kind: 'task', taskId: card.taskId }
-  if (card.conversationId !== null) {
-    return { kind: 'conversation', conversationId: card.conversationId }
-  }
-  return { kind: 'none' }
+  return card.taskId !== null ? { kind: 'task', taskId: card.taskId } : { kind: 'none' }
 }
 
 /** 设置区页头：标题 + 一句话说明 */
@@ -74,20 +65,23 @@ function SectionHeader({ title, hint }: { title: string; hint: string }): ReactE
 /**
  * ai-workflow 工作台（M5 视图化）。
  *
- * - 读：全部走 `useKernelViewState`（项目 / 工作流 / 智能体 / 任务 / 运行记录 / 审批条 / 聊天），
+ * - 读：全部走 `useKernelViewState`（项目 / 工作流 / 任务 / 运行记录 / 审批条），
  *   未就绪按空态处理；事实到达后视图自动重取，没有 reload 链与变更订阅。
  * - 写：全部走 `getKernelStore().dispatch`，失败沿用原有文案展示。
- * - 选中项（当前项目 / 当前工作流 / 任务栏的详情路由）仍是 UI 本地状态。
+ * - 选中项（当前项目 / 当前工作流 / 任务详情路由）仍是 UI 本地状态。
  *
- * M11：项目提到工作台顶层——聊天与任务都落在项目上，侧栏顶部常驻项目切换器；
+ * 工作台只跑自动化：没有聊天栏目，侧栏是「项目 → 工作流」两级上下文，
+ * 内容区是看板 / 任务详情 / 线程详情，卡片在任务里处理。
+ *
+ * M11：项目提到工作台顶层——任务落在项目上，侧栏顶部常驻项目切换器；
  * 没有项目时落「默认目录」（宿主的 `~/.workbench` / `WORKBENCH_WORKDIR`，数据侧
- * `projectId = null`）。切换项目会同时换掉会话清单与看板，因此详情栈不跨项目保留。
+ * `projectId = null`）。切换项目会换掉看板，因此详情栈不跨项目保留。
  */
 export function AiWorkflowPage(): ReactElement {
   const workflowsState = useKernelViewState('workflows.all')
   /**
-   * 工作流与智能体的显示顺序是渲染层偏好（设置 → 工作流 / 智能体里手动调，见
-   * `model/entity-order.ts`）：命中顺序的排前面，没登记过的按原次序追加在末尾。
+   * 工作流的显示顺序是渲染层偏好（设置 → 工作流里手动调，见 `model/entity-order.ts`）：
+   * 命中顺序的排前面，没登记过的按原次序追加在末尾。
    * 首个工作流是默认选中项，因此顺序也决定看板默认落在哪条流程上。
    */
   const { items: workflows } = useEntityOrder('workflow', workflowsState.data ?? [])
@@ -96,10 +90,6 @@ export function AiWorkflowPage(): ReactElement {
    * 读失败时 `.data` 只是 `undefined`，界面会退化成「还没有项目 / 尚无工作流」这类空态，
    * 骗用户去重建一遍。错误必须进页面级错误条，见下面的 `readError`。
    */
-  const agentsState = useKernelViewState('agents.all')
-  /** 智能体同样按存下的顺序排：聊天的默认智能体取排完的第一个 */
-  const { items: agents } = useEntityOrder('agent', agentsState.data ?? [])
-  /** 项目（M10）：聊天与任务共用的顶层上下文 */
   const projectsState = useKernelViewState('projects.all')
   const projects = projectsState.data ?? []
   /** 默认目录任务（`projectId = null`）：老数据、老规则建的任务与「默认目录」下的新任务 */
@@ -113,13 +103,11 @@ export function AiWorkflowPage(): ReactElement {
    * 失效（被删 / 还没选）时回落：第一个项目，其次是默认目录，回落值都由视图派生。
    */
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>()
-  /** 选了「默认目录」= 没有项目文件夹，任务与聊天都按 `projectId = null` 落库 */
+  /** 选了「默认目录」= 没有项目文件夹，任务按 `projectId = null` 落库 */
   const defaultSelected = selectedProjectId === DEFAULT_PROJECT_ID
   const activeProject = defaultSelected
     ? undefined
     : (projects.find((project) => project.id === selectedProjectId) ?? projects[0])
-  /** 头部与弹窗里交代当前落点 */
-  const activeProjectName = activeProject?.name ?? '默认目录'
   /** 用户选中的工作流：失效（被删/清空）时回落到首个，首个由视图数据派生，不需要 effect */
   const [selectedId, setSelectedId] = useState<string | undefined>()
   const activeId =
@@ -133,25 +121,15 @@ export function AiWorkflowPage(): ReactElement {
   /** 任务栏的详情路由栈：栈顶是当前页面，`[]` = 看板 */
   const [trail, setTrail] = useState<TaskRoute[]>([])
   const [view, setView] = useState<View>('workspace')
-  /**
-   * 工作台侧栏栏目：任务（看板与任务详情）/ 聊天（主动对话）。
-   * 默认落「任务」：看板是日常主入口，聊天是按需进入的第二个栏目。
-   */
-  const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection>('tasks')
   const [section, setSection] = useState<SettingsSection>('runtimes')
   /**
    * 要定位并高亮的卡（卡 id）：点顶部通知条、或系统通知落点带 `cardId` 时给。
-   * 卡本体在 `ApprovalCards` 里（任务详情 / 会话内），由它滚到锚点并闪一下；普通导航
-   * （自己点任务、换项目、换栏目、返回）一律清空——否则下个页面会带着别人的高亮。
+   * 卡本体在 `ApprovalCards` 里（任务详情内），由它滚到锚点并闪一下；普通导航
+   * （自己点任务、换项目、返回）一律清空——否则下个页面会带着别人的高亮。
    */
   const [focusCardId, setFocusCardId] = useState<string | null>(null)
   /** 已经处理过的落点序号：同一个落点只消费一次（重放 / StrictMode 双订阅都不重复跳转） */
   const handledTargetSeq = useRef(0)
-  /**
-   * 聊天状态机：侧栏（会话清单）与内容区（消息流）共用同一份。
-   * 项目是聊天的顶层上下文（M11）：`null` = 默认目录，会话清单按它取。
-   */
-  const chat = useChat(agents, activeProject?.id ?? null)
 
   /**
    * 任务视图按项目取（M10）：`tasks.byProject` 是项目下全部工作流的任务，
@@ -162,15 +140,9 @@ export function AiWorkflowPage(): ReactElement {
     activeProject ? { projectId: activeProject.id } : null,
   )
   const tasks = activeProject === undefined ? unassigned : (tasksState.data ?? [])
-  /** 全部 open 卡：顶部通知条只列标题，卡片本体在任务详情 / 会话里处理 */
+  /** 全部 open 卡：顶部通知条只列标题，卡片本体在任务详情里处理 */
   const cardsState = useKernelViewState('cards.open')
   const openCards = cardsState.data ?? []
-  /**
-   * 全部会话（跨项目）：卡片只带 `conversationId`，点通知条时靠它找到会话所属项目，
-   * 否则切到聊天栏目后会落到当前项目的清单里、看不到那张卡。
-   */
-  const conversationsState = useKernelViewState('conversations.all')
-  const allConversations = conversationsState.data ?? []
   /**
    * 写命令失败优先；否则展示读视图的错误（视图查询失败时 store 会给出文案）。
    *
@@ -181,11 +153,9 @@ export function AiWorkflowPage(): ReactElement {
       workflowsState.error,
       tasksState.error,
       cardsState.error,
-      agentsState.error,
       projectsState.error,
       unassignedState.error,
       defaultPathState.error,
-      conversationsState.error,
     ].find((message) => message !== null) ?? null
   const shownError = error ?? readError
 
@@ -202,49 +172,30 @@ export function AiWorkflowPage(): ReactElement {
   }
 
   /**
-   * 点顶部通知条：把人送到卡片所在的地方去处理。
-   * 任务卡进任务详情（正文与选项在页面里）；聊天卡切到聊天栏目、把项目切到会话所属项目，
-   * 再选中那个会话。没有落点（卡既没任务也没会话）时通知条整行禁用，走不到这里。
+   * 点顶部通知条：把人送到卡片所在的任务里处理（正文与选项都在任务详情）。
+   * 没有落点（卡不挂任务）时通知条整行禁用，走不到这里。
    *
-   * 跳转完把这些卡的 id 交给 `focusCardId`：通知条只给标题，进来必须一眼看到是哪一张在等，
+   * 跳转完把卡 id 交给 `focusCardId`：通知条只给标题，进来必须一眼看到是哪一张在等，
    * 否则还是得在任务详情里自己翻（这正是「点了通知却还要翻找」的那半个问题）。
    */
   const openCard = (card: Card): void => {
     setView('workspace')
     // 落点判定在纯函数里（cardLanding）：没有落点的卡通知条整行禁用，走不到这里
     const landing = cardLanding(card)
-    switch (landing.kind) {
-      case 'task':
-        setWorkspaceSection('tasks')
-        setTrail([{ kind: 'task', taskId: landing.taskId }])
-        break
-      case 'conversation': {
-        // 会话清单按项目取（M11）：跨项目的卡要先换项目，否则选中项会被过滤掉
-        const target = allConversations.find((item) => item.id === landing.conversationId)
-        if (target !== undefined) {
-          setSelectedProjectId(target.projectId ?? DEFAULT_PROJECT_ID)
-          setTrail([])
-        }
-        setWorkspaceSection('chat')
-        chat.selectConversation(landing.conversationId)
-        break
-      }
-    }
+    if (landing.kind === 'task') setTrail([{ kind: 'task', taskId: landing.taskId }])
     setFocusCardId(card.id)
   }
 
   /**
-   * 消费 shell 的落点：系统通知被点击（`main` 接住 → `bridge.onOpenTarget` → shell store）。
+   * 消费 shell 的落点：系统通知被点击（宿主接住 → `bridge.onOpenTarget` → shell store）。
    *
-   * 落到哪里只有三种：带会话 → 聊天栏 + 选会话（同 `openCard` 的会话分支，跨项目要连项目
-   * 一起切）；只有任务 → 任务详情（并把左侧项目切到任务所属项目，否则看板与会话清单都还
-   * 停在原来的项目上）；什么都没有 → 只切回工作台视图。三种落点都带 `cardId` 时交给
+   * 工作台没有会话了，落点只有两种：带任务 → 任务详情（并把左侧项目切到任务所属项目，
+   * 否则看板还停在原来的项目上）；什么都没有 → 只切回工作台视图。带 `cardId` 时交给
    * `focusCardId` 去高亮。
    *
-   * 用 `useEffectEvent`（而不是把这段放进 effect 主体）：这里要读最新的一批视图（会话清单、
-   * 聊天状态机）并连续改多处本地状态，放进 effect 主体就是「effect 里同步 setState」——
-   * 级联渲染，`react-hooks` v7 判 error；而 effect 事件拿到的是**最新一次渲染**的闭包，
-   * 订阅却只建立一次，不会因为视图刷新而反复退订重订。
+   * 用 `useEffectEvent`（而不是把这段放进 effect 主体）：这里连续改多处本地状态，放进
+   * effect 主体就是「effect 里同步 setState」——级联渲染，`react-hooks` v7 判 error；
+   * 而 effect 事件拿到的是**最新一次渲染**的闭包，订阅却只建立一次，不会因为视图刷新而反复重订。
    *
    * 项目归属只能问内核（`task.byId` 单次查询，绕开视图缓存）：任务卡可能来自别的项目。
    * 查询失败**不弹错误条**——任务详情已经从落点打开了，这里只是左侧项目没跟过去，
@@ -254,19 +205,10 @@ export function AiWorkflowPage(): ReactElement {
     if (target === null || handledTargetSeq.current === target.seq) return
     handledTargetSeq.current = target.seq
     const targetSeq = target.seq
-    const { taskId, conversationId, cardId } = target
+    const { taskId, cardId } = target
     setView('workspace')
 
-    if (conversationId !== undefined) {
-      const conversation = allConversations.find((item) => item.id === conversationId)
-      if (conversation !== undefined) {
-        setSelectedProjectId(conversation.projectId ?? DEFAULT_PROJECT_ID)
-        setTrail([])
-      }
-      setWorkspaceSection('chat')
-      chat.selectConversation(conversationId)
-    } else if (taskId !== undefined) {
-      setWorkspaceSection('tasks')
+    if (taskId !== undefined) {
       setTrail([{ kind: 'task', taskId }])
       void (async () => {
         try {
@@ -296,20 +238,13 @@ export function AiWorkflowPage(): ReactElement {
     setTrail((current) => current.slice(0, -1))
   }
 
-  /** 切换栏目 / 视图都回到看板：详情栈不跨栏目保留，避免回来时停在别人家的页面 */
-  const changeWorkspaceSection = (next: WorkspaceSection): void => {
-    setFocusCardId(null)
-    if (next !== 'tasks') setTrail([])
-    setWorkspaceSection(next)
-  }
-
   const changeView = (next: View): void => {
     setFocusCardId(null)
     if (next !== 'workspace') setTrail([])
     setView(next)
   }
 
-  /** 换项目 = 换一批任务与会话：详情栈不跨项目保留（同切换栏目的理由） */
+  /** 换项目 = 换一批任务：详情栈不跨项目保留（同换视图的理由） */
   const selectProject = (id: string): void => {
     setFocusCardId(null)
     setSelectedProjectId(id)
@@ -443,7 +378,7 @@ export function AiWorkflowPage(): ReactElement {
         </h2>
         {view === 'workspace' ? (
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3">
-            {/* 项目在最顶层：聊天与任务都落在项目上，切栏目不换项目 */}
+            {/* 项目在最顶层：任务落在项目文件夹里 */}
             <ProjectSwitcher
               projects={projects}
               activeId={activeProject?.id ?? DEFAULT_PROJECT_ID}
@@ -452,30 +387,9 @@ export function AiWorkflowPage(): ReactElement {
               onCreate={() => setProjectDialog({})}
               onEdit={(project) => setProjectDialog({ project })}
             />
-            <WorkspaceNav value={workspaceSection} onChange={changeWorkspaceSection}>
-              {workspaceSection === 'chat' ? (
-                <ConversationList
-                  agents={agents}
-                  agentId={chat.agentId}
-                  onAgentChange={chat.setAgentId}
-                  conversations={chat.conversations}
-                  archived={chat.archivedConversations}
-                  activeId={chat.activeId}
-                  onSelect={chat.selectConversation}
-                  onCreate={() => void chat.createConversation()}
-                  onRemove={(id) => void chat.removeConversation(id)}
-                  onArchive={(id, archived) => void chat.archiveConversation(id, archived)}
-                  creating={chat.creating}
-                />
-              ) : (
-                // 工作流在项目下面：先定「在哪个文件夹干活」，再定「按哪套流程」
-                <WorkflowSwitcher
-                  workflows={workflows}
-                  activeId={activeId}
-                  onSelect={setSelectedId}
-                />
-              )}
-            </WorkspaceNav>
+            <div className="h-px shrink-0 bg-border" />
+            {/* 工作流在项目下面：先定「在哪个文件夹干活」，再定「按哪套流程」 */}
+            <WorkflowSwitcher workflows={workflows} activeId={activeId} onSelect={setSelectedId} />
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-auto p-3">
@@ -520,7 +434,7 @@ export function AiWorkflowPage(): ReactElement {
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {/* 顶部通知条：只列 open 卡标题，点击进任务详情 / 会话处理 */}
+        {/* 顶部通知条：只列 open 卡标题，点击进任务详情处理 */}
         <ApprovalBar cards={openCards} onOpen={openCard} />
 
         {/* 页面级错误条：写命令失败可关掉；读视图错误说明数据没取到，不给关 */}
@@ -530,27 +444,7 @@ export function AiWorkflowPage(): ReactElement {
           onDismiss={error === null ? undefined : () => setError(null)}
         />
 
-        {view === 'workspace' && workspaceSection === 'chat' && (
-          <ChatPanel
-            agents={agents}
-            conversation={chat.active}
-            projectName={activeProjectName}
-            messages={chat.messages}
-            cards={openCards.filter(
-              (card) => chat.activeId !== null && card.conversationId === chat.activeId,
-            )}
-            streaming={chat.streaming}
-            sending={chat.sending}
-            error={chat.error}
-            onSend={chat.sendMessage}
-            onCancel={() => void chat.cancelRun()}
-            // 从通知条 / 系统通知进来时定位那张卡（本会话内的 open 卡）
-            focusCardId={focusCardId}
-          />
-        )}
-
         {view === 'workspace' &&
-          workspaceSection === 'tasks' &&
           (route === undefined ? (
             <div className="flex min-h-0 flex-1 p-6">
               <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">

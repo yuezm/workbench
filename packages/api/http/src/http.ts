@@ -48,7 +48,7 @@ export interface ApiDeps {
   router: CommandRouter
   /** 飞书连接管理：未装配时 `/api/lark` 回可读错误 */
   lark?: LarkAdmin
-  /** 通用知会（番茄钟等 app）：广播给所有在线页面 */
+  /** 通用知会（宿主 outcome 通知）：广播给所有在线页面 */
   notify(payload: NotifyRequest): void
   events: EventStream
   listDirs(target?: string): DirListing

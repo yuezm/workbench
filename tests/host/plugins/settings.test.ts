@@ -339,10 +339,9 @@ describe('resolvePluginConfig', () => {
     expect(resolvePluginConfig(manifest, settingOf(), {}, false)).not.toHaveProperty('secret')
   })
 
-  it('飞书：面板写的 connections 能穿到通道（profile 与默认智能体不丢）', () => {
+  it('飞书：面板写的 connections 能穿到通道（profile 与落点不丢）', () => {
     // 端到端锁这一环：设置页「飞书连接」面板只写 `connections`（manifest 不声明它），
-    // 若它到不了 `sdk.config()`，通道就退回 legacy 单连接：profile 丢（跑到别的应用上）、
-    // `agent` 丢（入站监听不启动）——飞书里发消息，工作台一声不响。
+    // 若它到不了 `sdk.config()`，通道就退回 legacy 单连接：profile 丢（跑到别的应用上）。
     const setting = settingOf({
       id: 'feishu',
       kind: 'channel',
@@ -352,7 +351,6 @@ describe('resolvePluginConfig', () => {
           {
             label: '岳智明的工作台助手',
             profile: 'feishu_workbench',
-            agent: '21eb6923-9716-4e47-a04f-1b8bea00e241',
           },
         ]),
       },
@@ -363,7 +361,6 @@ describe('resolvePluginConfig', () => {
         label: '岳智明的工作台助手',
         profile: 'feishu_workbench',
         program: 'lark-cli --profile feishu_workbench',
-        agent: '21eb6923-9716-4e47-a04f-1b8bea00e241',
       }),
     ])
   })

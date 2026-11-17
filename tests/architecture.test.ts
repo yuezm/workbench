@@ -443,7 +443,9 @@ describe('arch：护栏自检', () => {
 describe('arch：扫描范围', () => {
   it('扫描到各分层命名空间（内核 / 宿主 / 插件 / 服务端 / 前端）', () => {
     expect(serverSources.length).toBeGreaterThan(8)
-    expect(clientSources.length).toBeGreaterThan(80)
+    // 客户端源码随番茄时钟（整包）与聊天组件下线减少到 ~75 个文件：阈值跟着降到 60，
+    // 仍然只做「清单非空、扫描没空转」的守门，不是覆盖率口径。
+    expect(clientSources.length).toBeGreaterThan(60)
     expect(pluginSources.length).toBeGreaterThan(30)
     expect(under('kernel/').length).toBeGreaterThan(20)
     expect(readFileSync(resolve(KERNEL_ROOT, 'decide.ts'), 'utf8').length).toBeGreaterThan(0)

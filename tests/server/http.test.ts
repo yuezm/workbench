@@ -237,9 +237,9 @@ describe('三动词与错误', () => {
     const notify = vi.fn()
     const h = await harness({ notify })
     expect((await post(h, '/api/notify', { title: '  ' })).status).toBe(400)
-    const res = await post(h, '/api/notify', { title: '番茄到点', body: '休息 5 分钟' })
+    const res = await post(h, '/api/notify', { title: '任务失败', body: '3 个任务失败' })
     expect(await res.json()).toEqual({ ok: true, value: { sent: true } })
-    expect(notify).toHaveBeenCalledWith({ title: '番茄到点', body: '休息 5 分钟' })
+    expect(notify).toHaveBeenCalledWith({ title: '任务失败', body: '3 个任务失败' })
     await h.close()
   })
 
@@ -321,10 +321,10 @@ describe('辅助函数', () => {
     const req = (headers: Record<string, string>) =>
       ({ headers }) as unknown as Parameters<typeof isSameOrigin>[0]
     expect(isSameOrigin(req({}))).toBe(true)
-    expect(isSameOrigin(req({ origin: 'http://127.0.0.1:7788', host: '127.0.0.1:7788' }))).toBe(
+    expect(isSameOrigin(req({ origin: 'http://127.0.0.1:3000', host: '127.0.0.1:3000' }))).toBe(
       true,
     )
-    expect(isSameOrigin(req({ origin: 'https://evil.example', host: '127.0.0.1:7788' }))).toBe(
+    expect(isSameOrigin(req({ origin: 'https://evil.example', host: '127.0.0.1:3000' }))).toBe(
       false,
     )
     expect(isSameOrigin(req({ origin: 'http://x' }))).toBe(false)

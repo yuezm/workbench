@@ -7,7 +7,7 @@
  *
  * 启动成功会打印一行固定格式：
  *
- *   workbench listening on http://127.0.0.1:7788
+ *   workbench listening on http://127.0.0.1:3000
  *
  * e2e 与运维脚本按这一行取实际地址（`WORKBENCH_PORT=0` 时端口由系统分配）。
  * 行为全在 `lifecycle.ts`（可测），这里只负责「跑起来」与「失败报告」。

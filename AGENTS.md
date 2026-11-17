@@ -32,7 +32,7 @@
 
 - [ARCHITECTURE](docs/ARCHITECTURE.md)：内核 + 插件 + 服务器形态总纲（架构问题先读这个）
 - [CAPABILITY-MAP](docs/CAPABILITY-MAP.md)：模块索引、边界决定、构建顺序
-- [docs/specs/](docs/specs/)：kernel / plugins / host / server / shell / ui / pomodoro / ai-workflow（ai-workflow 为迁移期行为基线）
+- [docs/specs/](docs/specs/)：kernel / plugins / host / server / shell / ui / ai-workflow（ai-workflow 为迁移期行为基线）
 - [docs/testing/](docs/testing/)：测试策略（TESTING）、用例目录（TEST-CASES）、人工验收自查（ACCEPTANCE，含需求覆盖矩阵与走查表）；改代码前后跑 `pnpm check`
 - [docs/planning/](docs/planning/)：计划与任务；Electron → 服务端的迁移记录见 [rewrite-server-deployment](docs/planning/rewrite-server-deployment.md)，重构分阶段见 [refactor-plan](docs/planning/refactor-plan.md)，包拆分（`apps/*` + `packages/<域>/<包>`）见 [package-split-plan](docs/planning/package-split-plan.md)
 

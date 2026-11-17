@@ -41,7 +41,7 @@ async function boot(): Promise<void> {
   }
 
   configureKernel(bridge)
-  // 知会（任务完成 / 运行失败 / 番茄钟）：弹轻提示；带落点的一条点一下就跳过去。
+  // 知会（任务完成 / 运行失败）：弹轻提示；带落点的一条点一下就跳过去。
   // 订阅发生在渲染前，服务端在页面加载期间推来的知会也进得来。
   bridge.onNotice((notice) => {
     toast(notice.body === '' ? notice.title : `${notice.title}：${notice.body}`, 'info')

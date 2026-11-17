@@ -27,14 +27,14 @@
 
 目录约定（2026-11-04 起）：
 
-- 测试统一放 `tests/`，与 `src/` **同构镜像**：`src/kernel/decide.ts` ↔ `tests/kernel/decide.test.ts`，`src/renderer/src/apps/pomodoro/audio.ts` ↔ `tests/renderer/src/apps/pomodoro/audio.test.ts`。
+- 测试统一放 `tests/`，与 `src/` **同构镜像**：`src/kernel/decide.ts` ↔ `tests/kernel/decide.test.ts`，`packages/client/app-ai-workflow/src/model/entity-order.ts` ↔ `tests/renderer/src/apps/ai-workflow/model/entity-order.test.ts`。
 - `src/` 只放产品代码；测试夹具（如 `test-support.ts`、`fake-kernel.ts`）也随测试放进 `tests/`。
 - E2E 放 `tests/e2e/`（`helpers/launch.ts` 按用例起独立服务进程 + Chromium 页面）；没有打包产物冒烟，`tests/e2e-packaged/` 已删除。
 
 约定：
 
 - 契约测试**只守卫不改**：`WorkbenchApi` / `AppPlugin` / `protocol/http` 的载荷形状变更时，先改契约与消费方，再让测试跟随契约走。
-- E2E **有意不覆盖**阶段完成与知会（真实等待 ≥60s 且脆），该路径由 machine/usePomodoro 单测 + 手动验收覆盖。
+- E2E **有意不覆盖**阶段完成与知会（真实等待 ≥60s 且脆），该路径由阶段机 / 调度单测 + 手动验收覆盖。
 - **E2E 不得碰真实外部身份**（2026-11-16）：`launchApp` 的临时数据目录隔离不到本机 `~/.lark-cli` 的登录态——装过并登录 `lark-cli` 的人跑 e2e，飞书通道会按 legacy 单连接拿到真实 open_id，把种子库里 `delivery='pending'` 的 ask 卡**真的发到本人飞书**。因此每次启动前由 `tests/support/channel-isolation.ts` 往测试库写一条 `plugins.replace`（`feishu` → `enabled:false`），`channels.startAll()` 因而不启动它：不 spawn `lark-cli`、不挂事件长连接、不发卡。隔离在 spec 自己的 `prepare` **之后**执行，种子也没法把它打开；`in-app` 与 `desktop` 留在测试里（前者就是被测对象，后者只经 SSE 推知会）。守则由 `tests/e2e/isolation.spec.ts` 三条断言看着，新增通道先问「它会不会把消息交给一个真人」，会就加进 `ISOLATED_CHANNEL_IDS`。
 - **环境按「要不要 DOM」分工**：真正 render 的用例留在默认 jsdom；纯逻辑用例（`kernel` / `protocol` / `host` / `server` / `plugins` / `renderer` 下不 render 的 model 与 lib，以及 server 的 HTTP/SSE 契约测试）首行标 `// @vitest-environment node`。jsdom 是逐文件冷启动（本机 0.7–1.3s/文件），多标一个 node 就少付一份环境成本；`vitest.setup.ts` 也只在有 DOM 时加载 RTL 与 jest-dom。
 - **不要用 `pool: 'vmThreads'` 或 `isolate: false` 换速度**：本仓有用例在文件内改 `window.location`、`vi.stubGlobal('document', undefined)`，环境复用后同一 worker 里跨文件互相污染（实测 2 条用例直接失败）。诊断里的 Isolate 提示按此忽略。

@@ -147,9 +147,6 @@ importers:
       '@workbench/client-app-ai-workflow':
         specifier: workspace:*
         version: link:../../packages/client/app-ai-workflow
-      '@workbench/client-app-pomodoro':
-        specifier: workspace:*
-        version: link:../../packages/client/app-pomodoro
       '@workbench/client-shell':
         specifier: workspace:*
         version: link:../../packages/client/shell
@@ -219,21 +216,6 @@ importers:
       '@workbench/protocol':
         specifier: workspace:*
         version: link:../../core/protocol
-
-  packages/client/app-pomodoro:
-    dependencies:
-      '@workbench/app-events':
-        specifier: workspace:*
-        version: link:../../contract/app-events
-      '@workbench/client-shell':
-        specifier: workspace:*
-        version: link:../shell
-      '@workbench/client-ui-kit':
-        specifier: workspace:*
-        version: link:../ui-kit
-      '@workbench/client-ui-primitives':
-        specifier: workspace:*
-        version: link:../ui-primitives
 
   packages/client/bridge:
     dependencies:

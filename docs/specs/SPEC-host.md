@@ -41,7 +41,7 @@ src/
 └── renderer/src/
     ├── shared/      # bridge.ts：把 WorkbenchApi 实现成 HTTP + SSE；api.d.ts 声明 window.workbench
     ├── shell/       # Workbench、TopBar、插件槽、kernelStore
-    └── apps/        # app 插件（pomodoro、ai-workflow）
+    └── apps/        # app 插件（当前只有 ai-workflow）
 ```
 
 ## 宿主职责
@@ -88,7 +88,7 @@ export interface WorkbenchApi {
   dispatch<C extends Command>(command: C): Promise<CommandDispatchResult<C>>
   query<T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>>
   subscribe(handler: (event: WorkbenchEvent) => void): () => void
-  /** 知会（任务完成 / 运行失败 / 番茄钟到点）：页面自行弹轻提示，target 有值时跳落点 */
+  /** 知会（任务完成 / 运行失败）：页面自行弹轻提示，target 有值时跳落点 */
   onNotice(handler: (notice: NoticeEvent) => void): () => void
   /** 列表本机目录（项目 = 文件夹；浏览器读不到文件系统，只能问服务端） */
   listDirs(path?: string): Promise<DirListing>
@@ -96,7 +96,7 @@ export interface WorkbenchApi {
   info(): Promise<ServerInfo>
   /** 飞书连接管理（M45）：探测本机 lark-cli、新建 profile、设备码登录 */
   lark<A extends LarkAdminAction>(action: A): Promise<LarkAdminResult<A>>
-  /** shell 的通用知会（pomodoro 等 app 用）；ai-workflow 卡片知会走 channel:desktop 的 sdk.notify（同样落成 SSE notice） */
+  /** shell 的通用知会；ai-workflow 卡片知会走 channel:desktop 的 sdk.notify（同样落成 SSE notice） */
   notify(title: string, body?: string): void
 }
 
@@ -167,7 +167,7 @@ export type WorkbenchEvent =
 
 ## 安全
 
-- 监听：默认 `127.0.0.1:7788`（`WORKBENCH_HOST` / `WORKBENCH_PORT`，`0` = 系统分配）；**绑非回环地址必须设
+- 监听：默认 `127.0.0.1:3000`（`WORKBENCH_HOST` / `WORKBENCH_PORT`，`0` = 系统分配）；**绑非回环地址必须设
   `WORKBENCH_TOKEN`（≥16 字符，也可放 `<dataDir>/token`），否则启动失败**。`GET /api/health` 不鉴权，其余
   `/api/*` 走共享 token：`x-workbench-token` 头、`Authorization: Bearer`，或 `POST /api/session` 用 token
   换来的 `wb_session`（HttpOnly + SameSite=Strict）cookie。token 不进 URL、不进日志、不进前端存储。

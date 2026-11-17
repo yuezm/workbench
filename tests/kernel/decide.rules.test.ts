@@ -214,14 +214,14 @@ describe('decide 事件入口建任务', () => {
   it('app.event 走同一匹配路径（M6 起可建任务）', () => {
     const decision = decide(
       view({
-        rules: [rule({ when: { source: 'app', types: ['pomodoro.completed'] } })],
+        rules: [rule({ when: { source: 'app', types: ['demo.completed'] } })],
         rulesVersion: 1,
       }),
       {
         type: 'app.event',
         commandId: 'c1',
-        appId: 'pomodoro',
-        eventType: 'pomodoro.completed',
+        appId: 'demo',
+        eventType: 'demo.completed',
         subject: '番茄结束',
       },
       NOW,

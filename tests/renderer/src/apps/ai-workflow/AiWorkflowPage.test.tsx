@@ -5,8 +5,6 @@ import type { Command } from '@workbench/protocol/commands'
 import type {
   Agent,
   Card,
-  Conversation,
-  Message,
   Project,
   Run,
   Runtime,
@@ -17,10 +15,7 @@ import type {
 import type { CommandDispatchResult } from '@workbench/protocol/ipc'
 import type { ThreadRow } from '@workbench/protocol/thread'
 import { AiWorkflowPage, cardLanding } from '@workbench/client-app-ai-workflow/AiWorkflowPage'
-import {
-  resetEntityOrderForTest,
-  setEntityOrder,
-} from '@workbench/client-app-ai-workflow/model/entity-order'
+import { resetEntityOrderForTest } from '@workbench/client-app-ai-workflow/model/entity-order'
 import { pushOpenTarget, resetOpenTargetForTest } from '@workbench/client-shell/openTarget'
 import { installFakeKernel, type FakeKernel } from '../../../shell/fake-kernel'
 
@@ -143,25 +138,6 @@ const run: Run = {
   createdAt: 't',
 }
 
-const conversation: Conversation = {
-  id: 'c1',
-  title: '第一段对话',
-  agentId: 'a1',
-  projectId: 'p1',
-  sessionId: null,
-  createdAt: 't',
-  updatedAt: 't',
-}
-
-const chatMessage: Message = {
-  id: 'm1',
-  conversationId: 'c1',
-  role: 'user',
-  content: '你好',
-  error: null,
-  createdAt: 't',
-}
-
 const card: Card = {
   id: 'card-1',
   runId: 'run-1',
@@ -226,7 +202,6 @@ function seedBase(): void {
     { key: 'dsh', label: 'DeepSeek Harness', command: 'dsh', profile: 'multica' },
   ])
   kernel.setView('runtimes.detected', undefined, [])
-  kernel.setView('conversations.byProject', { projectId: 'p1' }, [])
   kernel.setView('rules.all', undefined, { version: 0, rules: [] })
   kernel.setView('plugins.all', undefined, [])
   // M36：用量面板的窗口参数带「现在」（无法预先枚举），用按视图 id 的兜底值
@@ -267,16 +242,6 @@ async function openSection(
   await user.click(screen.getByRole('button', { name: section }))
 }
 
-/** 工作台默认落在「任务」栏：看板相关用例先切到「任务」栏 */
-async function openTasks(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getByRole('button', { name: '任务' }))
-}
-
-/** 聊天相关用例先切到「聊天」栏（默认是任务栏） */
-async function openChat(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getByRole('button', { name: '聊天' }))
-}
-
 /** 把任务卡拖到落点：cardLabel 为卡片 aria-label，targetLabel 为阶段列 / 归档区 aria-label */
 function dragTo(cardLabel: string, targetLabel: string): void {
   fireEvent.dragStart(screen.getByLabelText(cardLabel))
@@ -300,7 +265,6 @@ describe('AiWorkflowPage', () => {
     })
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
 
@@ -347,7 +311,6 @@ describe('AiWorkflowPage', () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.queryByText('运行时')).not.toBeInTheDocument()
@@ -441,7 +404,6 @@ describe('AiWorkflowPage', () => {
     kernel.failView('runs.byTask', { taskId: 't1' }, 'rboom')
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await user.click(await screen.findByLabelText('任务：任务A'))
     expect(await screen.findByText('rboom')).toBeInTheDocument()
   })
@@ -449,9 +411,7 @@ describe('AiWorkflowPage', () => {
   it('拖拽失败展示错误', async () => {
     seedBase()
     dispatchWith(() => Promise.reject(new Error('mboom')))
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     dragTo('任务：任务A', '阶段：审核')
     expect(await screen.findByText('mboom')).toBeInTheDocument()
@@ -460,9 +420,7 @@ describe('AiWorkflowPage', () => {
   it('写命令失败为非 Error 时按字符串展示', async () => {
     seedBase()
     dispatchWith(() => Promise.reject('纯文本失败'))
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     dragTo('任务：任务A', '阶段：审核')
     expect(await screen.findByText('纯文本失败')).toBeInTheDocument()
@@ -471,9 +429,7 @@ describe('AiWorkflowPage', () => {
   it('拖到归档失败展示错误', async () => {
     seedBase()
     dispatchWith(() => Promise.reject(new Error('dboom')))
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     dragTo('任务：任务A', '归档区')
     expect(await screen.findByText('dboom')).toBeInTheDocument()
@@ -484,7 +440,6 @@ describe('AiWorkflowPage', () => {
     dispatchWith(() => Promise.reject(new Error('cboom')))
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.type(screen.getByLabelText('任务标题'), 'x')
@@ -500,7 +455,6 @@ describe('AiWorkflowPage', () => {
     dispatchWith(() => Promise.reject('纯文本创建失败'))
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
     await user.click(screen.getByRole('button', { name: '新建任务' }))
     await user.type(screen.getByLabelText('任务标题'), 'x')
@@ -513,7 +467,6 @@ describe('AiWorkflowPage', () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await user.click(await screen.findByRole('button', { name: '新建任务' }))
     await user.click(screen.getByRole('button', { name: '创建' }))
 
@@ -528,7 +481,6 @@ describe('AiWorkflowPage', () => {
     dispatchWith(() => Promise.reject(new Error('可关闭的错误')))
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await user.click(await screen.findByRole('button', { name: '新建任务' }))
     await user.type(screen.getByLabelText('任务标题'), 'x')
     await user.click(screen.getByRole('button', { name: '创建' }))
@@ -569,18 +521,9 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText('projects-boom')).toBeInTheDocument()
   })
 
-  it('智能体视图读失败：同样进页面级错误条（否则「没智能体」看起来像没配置）', async () => {
-    seedBase()
-    kernel.failView('agents.all', undefined, 'agents-boom')
-    render(<AiWorkflowPage />)
-    expect(await screen.findByText('agents-boom')).toBeInTheDocument()
-  })
-
   it('工作流视图失效后看板跟随刷新', async () => {
     seedBase()
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
 
     kernel.setView('workflows.all', undefined, [{ ...wf, name: '研发v2' }])
@@ -592,7 +535,6 @@ describe('AiWorkflowPage', () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
 
     dragTo('任务：任务A', '阶段：审核')
@@ -615,9 +557,7 @@ describe('AiWorkflowPage', () => {
 
   it('事实批次让任务视图重取；工作流清空后看板回到空态', async () => {
     seedBase()
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
 
     const second: Task = { ...task, id: 't2', title: '任务B' }
@@ -632,9 +572,7 @@ describe('AiWorkflowPage', () => {
 
   it('任务视图失效后查询失败展示错误', async () => {
     seedBase()
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText('任务A')
 
     kernel.failView('tasks.byProject', { projectId: 'p1' }, 'tb')
@@ -643,9 +581,7 @@ describe('AiWorkflowPage', () => {
 
   it('工作流视图失效后查询失败展示错误', async () => {
     seedBase()
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
 
     kernel.failView('workflows.all', undefined, 'reload-boom')
@@ -660,7 +596,6 @@ describe('AiWorkflowPage', () => {
     render(<AiWorkflowPage />)
 
     // 没有当前工作流时不订阅任务视图：不出现「必填」类参数错误
-    await openTasks(user)
     expect(await screen.findByText(/尚无工作流/)).toBeInTheDocument()
     expect(screen.queryByText(/必填/)).toBeNull()
 
@@ -703,46 +638,31 @@ describe('AiWorkflowPage', () => {
     kernel.setView('projects.all', undefined, [project])
     kernel.setView('workflows.all', undefined, [wf])
     kernel.setView('agents.all', undefined, [agent])
-    const user = userEvent.setup()
     const { unmount } = render(<AiWorkflowPage />)
-    await openTasks(user)
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.queryByText('任务A')).not.toBeInTheDocument()
     expect(kernel.store.peek('tasks.byProject', { projectId: 'p1' })).toBeUndefined()
     unmount()
   })
 
-  it('工作台默认落在任务栏；聊天栏显示会话清单；切回任务隐藏聊天', async () => {
+  it('工作台只有任务一栏：侧栏是项目 + 工作流，内容区是看板，没有聊天入口', async () => {
     seedBase()
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
     // 页头已移除：一级标题归 shell 顶部栏；app 侧栏用 h2 标识当前所在
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
-    // 默认任务：看板就位，侧栏顶部是栏目切换 + 工作流切换器
-    expect(await screen.findByRole('navigation', { name: '工作台栏目' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '任务' })).toHaveAttribute('aria-current', 'page')
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '选择工作流' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '项目：工作台' })).toBeInTheDocument()
+    // 聊天栏目已移除：没有栏目切换条、没有会话清单与消息输入
+    expect(screen.queryByRole('navigation', { name: '工作台栏目' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '聊天' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '新对话' })).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
 
-    // 切到聊天：会话清单与会话消息流就位，看板让位
-    await openChat(user)
-    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '新对话' })).toBeInTheDocument()
-    expect(screen.queryByText(/工作流「研发」/)).not.toBeInTheDocument()
-    // 工作流切换器只在任务栏目显示
-    expect(screen.queryByRole('combobox', { name: '选择工作流' })).not.toBeInTheDocument()
-
-    // 切回任务：看板回来，聊天让位
-    await openTasks(user)
-    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
-    expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
-
-    // 设置视图不显示工作台栏目
-    await openSection(user, '运行时')
+    // 设置视图同样没有工作台栏目，只有设置栏目
+    await userEvent.setup().click(screen.getByRole('button', { name: '设置' }))
     expect(screen.queryByRole('navigation', { name: '工作台栏目' })).not.toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: '设置栏目' })).toBeInTheDocument()
   })
@@ -765,11 +685,9 @@ describe('AiWorkflowPage', () => {
     expect(back.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // 默认设置栏目 = 运行时配置
     expect(await screen.findByRole('heading', { name: '运行时' })).toBeInTheDocument()
-    // 内容区让位给设置内容
-    expect(screen.queryByLabelText('消息输入')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '返回工作台' }))
-    expect(screen.getByRole('button', { name: '任务' })).toHaveAttribute('aria-current', 'page')
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '运行时' })).not.toBeInTheDocument()
     expect(screen.queryByRole('navigation', { name: '设置栏目' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '设置' })).toBeInTheDocument()
@@ -791,7 +709,6 @@ describe('AiWorkflowPage', () => {
     ])
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
     // 研发看板里不出现写作工作流的任务
     expect(screen.queryByText('写稿')).not.toBeInTheDocument()
@@ -823,26 +740,12 @@ describe('AiWorkflowPage', () => {
     expect(await screen.findByText(/工作流「写作」/)).toBeInTheDocument()
   })
 
-  it('智能体顺序也决定聊天默认智能体：新对话按排完后的第一个派活', async () => {
-    seedBase()
-    kernel.setView('agents.all', undefined, [agent, { ...agent, id: 'a2', name: 'writer' }])
-    setEntityOrder('agent', ['a2', 'a1'])
-    const user = userEvent.setup()
-    render(<AiWorkflowPage />)
-    await openChat(user)
-
-    await user.click(await screen.findByRole('button', { name: '新对话' }))
-    await waitFor(() => expectDispatched({ type: 'chat.create', agentId: 'a2', projectId: 'p1' }))
-  })
-
   it('没有项目时落在默认目录：看板照常可用，新建入口仍在', async () => {
     kernel.setView('projects.all', undefined, [])
     kernel.setView('workflows.all', undefined, [wf])
     kernel.setView('agents.all', undefined, [agent])
     kernel.setView('runtimes.default-workdir', undefined, DEFAULT_PATH)
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     // 项目列表空态 + 默认目录行（当前选中）
     expect(await screen.findByText('还没有项目，可先落到默认目录')).toBeInTheDocument()
@@ -861,7 +764,6 @@ describe('AiWorkflowPage', () => {
     kernel.setView('runtimes.default-workdir', undefined, DEFAULT_PATH)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '默认目录' }))
     await user.click(await screen.findByRole('button', { name: '新建任务' }))
@@ -883,7 +785,6 @@ describe('AiWorkflowPage', () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '新建任务' }))
     // 所属项目是只读展示：弹窗里给出项目名与文件夹路径（侧栏也有同名文字，按弹窗取）
@@ -906,7 +807,6 @@ describe('AiWorkflowPage', () => {
     kernel.setView('runtimes.default-workdir', undefined, DEFAULT_PATH)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     // 先切到默认目录：此时没有选中项目，快速新建必须把归属落成 null
     await user.click(await screen.findByRole('button', { name: '默认目录' }))
@@ -938,7 +838,6 @@ describe('AiWorkflowPage', () => {
     )
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '在「待办」阶段添加任务' }))
     await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '会失败的')
@@ -965,7 +864,6 @@ describe('AiWorkflowPage', () => {
     })
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '+ 添加' }))
     await user.type(screen.getByLabelText('项目名称'), '新项目')
@@ -995,7 +893,6 @@ describe('AiWorkflowPage', () => {
     dispatchWith(() => Promise.reject(new Error('项目下有执行中的任务')))
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
     await user.click(screen.getByRole('button', { name: '删除项目' }))
@@ -1016,7 +913,6 @@ describe('AiWorkflowPage', () => {
     ])
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     const entry = await screen.findByRole('button', { name: '默认目录' })
     await user.click(entry)
@@ -1040,103 +936,11 @@ describe('AiWorkflowPage', () => {
     kernel.setView('tasks.unassigned', undefined, [
       { ...task, id: 't0', title: '老任务', projectId: null, threadId: null },
     ])
-    const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     expect(await screen.findByText('老任务')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: '新建任务' })).toBeInTheDocument()
-  })
-
-  it('项目切换同时换聊天上下文：会话清单按项目取，头部显示项目名', async () => {
-    seedBase()
-    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
-    kernel.setView('conversations.unassigned', undefined, [
-      { ...conversation, id: 'c-default', title: '默认目录会话', projectId: null },
-    ])
-    const user = userEvent.setup()
-    render(<AiWorkflowPage />)
-    await openChat(user)
-
-    // 默认落在第一个项目：清单是该项目的会话，头部交代项目名
-    expect(await screen.findByRole('button', { name: /^第一段对话/ })).toBeInTheDocument()
-    expect(screen.getByLabelText('所属项目')).toHaveTextContent('工作台')
-
-    // 切到默认目录：清单换成没有项目的会话
-    await user.click(screen.getByRole('button', { name: '默认目录' }))
-    expect(await screen.findByRole('button', { name: /^默认目录会话/ })).toBeInTheDocument()
-    expect(screen.queryByText('第一段对话')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('所属项目')).toHaveTextContent('默认目录')
-  })
-
-  it('聊天栏：新对话 dispatch chat.create、删除对话 dispatch chat.remove、归档 dispatch chat.archive', async () => {
-    seedBase()
-    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
-    const user = userEvent.setup()
-    render(<AiWorkflowPage />)
-    await openChat(user)
-
-    await user.click(await screen.findByRole('button', { name: '新对话' }))
-    // 聊天与任务同口径落项目：新对话带当前项目 id
-    await waitFor(() => expectDispatched({ type: 'chat.create', agentId: 'a1', projectId: 'p1' }))
-
-    // 删除收在 hover 才出现的三点菜单里
-    await user.click(await screen.findByRole('button', { name: '会话 第一段对话 更多操作' }))
-    await user.click(await screen.findByRole('menuitem', { name: '删除' }))
-    await waitFor(() => expectDispatched({ type: 'chat.remove', conversationId: 'c1' }))
-
-    await user.click(screen.getByRole('button', { name: '会话 第一段对话 更多操作' }))
-    await user.click(await screen.findByRole('menuitem', { name: '归档' }))
-    await waitFor(() =>
-      expectDispatched({ type: 'chat.archive', conversationId: 'c1', archived: true }),
-    )
-  })
-
-  it('聊天栏：发送中「停止」dispatch chat.cancel', async () => {
-    seedBase()
-    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
-    dispatchWith(
-      <C extends Command>(
-        command: C,
-      ): CommandDispatchResult<C> | Promise<CommandDispatchResult<C>> => {
-        // 发送挂起：保持 sending=true，「停止」按钮出现
-        if (command.type === 'chat.send') return new Promise<CommandDispatchResult<C>>(() => {})
-        return { facts: [], value: null } as CommandDispatchResult<C>
-      },
-    )
-    const user = userEvent.setup()
-    render(<AiWorkflowPage />)
-    await openChat(user)
-
-    await user.type(await screen.findByLabelText('消息输入'), '你好')
-    await user.click(screen.getByRole('button', { name: '发送' }))
-    await user.click(await screen.findByRole('button', { name: '停止' }))
-
-    expectDispatched({ type: 'chat.cancel', conversationId: 'c1' })
-  })
-
-  it('聊天：消息来自当前会话的消息视图', async () => {
-    seedBase()
-    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
-    kernel.setView('messages.byConversation', { conversationId: 'c1' }, [chatMessage])
-    const user = userEvent.setup()
-    render(<AiWorkflowPage />)
-    await openChat(user)
-
-    expect(await screen.findByRole('heading', { name: '第一段对话' })).toBeInTheDocument()
-    expect(await screen.findByText('你好')).toBeInTheDocument()
-    expect(screen.getAllByText('coder').length).toBeGreaterThanOrEqual(2)
-    expect(screen.queryByText('正在输出…')).not.toBeInTheDocument()
-    // 消息视图失效后界面跟随刷新
-    kernel.setView('messages.byConversation', { conversationId: 'c1' }, [
-      chatMessage,
-      { ...chatMessage, id: 'm2', role: 'assistant', content: '在的' },
-    ])
-    kernel.pushFacts(['message.appended'])
-    expect(await screen.findByText('在的')).toBeInTheDocument()
-    // 未输入不发消息
-    expect(kernel.dispatched).toHaveLength(0)
   })
 
   it('顶部通知条只列标题：点条目进任务详情，在任务内部作答', async () => {
@@ -1167,61 +971,8 @@ describe('AiWorkflowPage', () => {
     )
   })
 
-  it('聊天卡跨项目：点通知条先切到会话所属项目（默认目录）再选中会话', async () => {
-    seedBase()
-    // 卡片挂的会话属于默认目录，而当前上下文是项目 p1：点通知条必须连项目一起切
-    const defaultConversation = {
-      ...conversation,
-      id: 'c-default',
-      title: '默认目录会话',
-      projectId: null,
-    }
-    kernel.setView('conversations.all', undefined, [conversation, defaultConversation])
-    kernel.setView('conversations.byProject', { projectId: 'p1' }, [conversation])
-    kernel.setView('conversations.unassigned', undefined, [defaultConversation])
-    kernel.setView('cards.open', undefined, [
-      { ...card, id: 'card-c', taskId: null, conversationId: 'c-default', title: '要继续吗' },
-    ])
-    const user = userEvent.setup()
-    render(<AiWorkflowPage />)
-    await openChat(user)
-
-    expect(await screen.findByLabelText('所属项目')).toHaveTextContent('工作台')
-    const bar = await screen.findByRole('region', { name: '待审批' })
-    await user.click(within(bar).getByRole('button', { name: /要继续吗/ }))
-
-    expect(await screen.findByRole('heading', { name: '默认目录会话' })).toBeInTheDocument()
-    expect(screen.getByLabelText('所属项目')).toHaveTextContent('默认目录')
-    expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute('aria-current', 'page')
-  })
-
-  it('聊天卡：点通知条切到对应会话，在会话内作答', async () => {
-    seedBase()
-    kernel.setView('conversations.byProject', { projectId: 'p1' }, [
-      conversation,
-      { ...conversation, id: 'c2', title: '第二段对话' },
-    ])
-    kernel.setView('cards.open', undefined, [
-      { ...card, id: 'card-c', taskId: null, conversationId: 'c2', title: '要继续吗' },
-    ])
-    const user = userEvent.setup()
-    render(<AiWorkflowPage />)
-
-    const bar = await screen.findByRole('region', { name: '待审批' })
-    expect(within(bar).getByText('对话')).toBeInTheDocument()
-    await user.click(within(bar).getByRole('button', { name: /要继续吗/ }))
-
-    // 切换会话后卡片本体出现在会话里
-    expect(await screen.findByRole('heading', { name: '第二段对话' })).toBeInTheDocument()
-    await user.click(screen.getByRole('radio', { name: '停止' }))
-    await user.click(screen.getByRole('button', { name: '提交所选' }))
-    await waitFor(() =>
-      expectDispatched({ type: 'card.answer', cardId: 'card-c', optionIndex: 1, via: 'ui' }),
-    )
-  })
-
   /**
-   * 落点（M27）：系统通知 / 通知条点进来之后，除了「进任务详情 / 会话」还要**定位到那张卡**。
+   * 落点（M27）：系统通知 / 通知条点进来之后，除了「进任务详情」还要**定位到那张卡**。
    * 通知条只给标题，落点不给高亮的话人还得在任务里自己翻——那正是要修的半个问题。
    * 锚点与高亮由 `ApprovalCards` 打在卡片元素上（`data-card-id` / `data-focused`）。
    */
@@ -1254,7 +1005,6 @@ describe('AiWorkflowPage', () => {
       const user = userEvent.setup()
       render(<AiWorkflowPage />)
       // 先落到看板：落点必须自己把人送到任务详情，而不是等用户点
-      await user.click(await screen.findByRole('button', { name: '任务' }))
       expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
 
       act(() => pushOpenTarget({ appId: 'ai-workflow', taskId: 't1', cardId: 'card-1' }))
@@ -1269,41 +1019,9 @@ describe('AiWorkflowPage', () => {
       expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
     })
 
-    it('聊天落点（conversationId + cardId）：切到聊天栏目、选中会话并定位卡片', async () => {
-      seedBase()
-      // 跨项目会话：`openCard` 与新落点都靠 `conversations.all` 反查会话所属项目，切完项目再选中
-      kernel.setView('conversations.all', undefined, [
-        conversation,
-        { ...conversation, id: 'c2', title: '第二段对话', projectId: 'p2' },
-      ])
-      kernel.setView('projects.all', undefined, [project, otherProject])
-      kernel.setView('conversations.byProject', { projectId: 'p2' }, [
-        { ...conversation, id: 'c2', title: '第二段对话', projectId: 'p2' },
-      ])
-      kernel.setView('cards.open', undefined, [
-        { ...card, id: 'card-c', taskId: null, conversationId: 'c2', title: '要继续吗' },
-      ])
-      const user = userEvent.setup()
-      render(<AiWorkflowPage />)
-      // 先在任务栏，落点要自己切回聊天
-      await user.click(await screen.findByRole('button', { name: '任务' }))
-      expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
-
-      act(() => pushOpenTarget({ appId: 'ai-workflow', conversationId: 'c2', cardId: 'card-c' }))
-
-      expect(await screen.findByRole('heading', { name: '第二段对话' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: '聊天' })).toHaveAttribute('aria-current', 'page')
-      // 项目跟着会话走（会话挂在 p2）
-      expect(screen.getByRole('button', { name: '项目：另一个项目' })).toHaveAttribute(
-        'aria-current',
-        'page',
-      )
-      await expectFocused('card-c')
-    })
-
     it('系统通知落点：左侧项目跟着任务所属项目切（task.byId 单次查询）', async () => {
       seedBase()
-      // 任务属于 p2，而页面当前在 p1：只打开详情不切项目的话，看板与会话清单都还停在 p1
+      // 任务属于 p2，而页面当前在 p1：只打开详情不切项目的话，看板还停在 p1
       kernel.setView('projects.all', undefined, [project, otherProject])
       kernel.setView('tasks.byProject', { projectId: 'p2' }, [{ ...task, projectId: 'p2' }])
       kernel.setView('task.byId', { taskId: 't1' }, { ...task, projectId: 'p2' })
@@ -1392,53 +1110,7 @@ describe('AiWorkflowPage', () => {
       }
     })
 
-    it('落点会话不在本地清单里：仍切到聊天栏目，项目不动', async () => {
-      seedBase()
-      // 会话刚被别处删掉 / 清单还没取回来：找不到就只切栏目，别把项目也切走
-      kernel.setView('conversations.all', undefined, [])
-      render(<AiWorkflowPage />)
-
-      act(() => pushOpenTarget({ appId: 'ai-workflow', conversationId: 'c-missing' }))
-
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: '聊天' })).toHaveAttribute(
-          'aria-current',
-          'page',
-        ),
-      )
-      expect(screen.getByRole('button', { name: '项目：工作台' })).toHaveAttribute(
-        'aria-current',
-        'page',
-      )
-    })
-
-    it('落点会话属于默认目录（projectId 为空）：项目回落到默认目录', async () => {
-      seedBase()
-      const orphan: Conversation = {
-        ...conversation,
-        id: 'c3',
-        title: '默认目录里的对话',
-        projectId: null,
-      }
-      kernel.setView('conversations.all', undefined, [orphan])
-      kernel.setView('conversations.unassigned', undefined, [orphan])
-      render(<AiWorkflowPage />)
-      // 视图是异步取的：等会话清单就绪再点通知（真实点击发生在启动完成之后）
-      await waitFor(() => expect(kernel.store.peek('conversations.all')).toEqual([orphan]))
-
-      act(() => pushOpenTarget({ appId: 'ai-workflow', conversationId: 'c3' }))
-
-      expect(await screen.findByRole('heading', { name: '默认目录里的对话' })).toBeInTheDocument()
-      await waitFor(() =>
-        expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute(
-          'aria-current',
-          'page',
-        ),
-      )
-      expect(await screen.findByRole('heading', { name: '默认目录里的对话' })).toBeInTheDocument()
-    })
-
-    it('落点只有 appId（没有任务 / 会话）：只切回工作台视图', async () => {
+    it('落点只有 appId（没有任务）：只切回工作台视图', async () => {
       seedBase()
       const user = userEvent.setup()
       render(<AiWorkflowPage />)
@@ -1492,7 +1164,6 @@ describe('AiWorkflowPage', () => {
     )
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
     await screen.findByText(/工作流「研发」/)
 
     await user.click(screen.getByRole('button', { name: '打开线程：任务A' }))
@@ -1521,9 +1192,8 @@ describe('AiWorkflowPage', () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
-    await user.click(screen.getByRole('button', { name: '在「审核」阶段添加任务' }))
+    await user.click(await screen.findByRole('button', { name: '在「审核」阶段添加任务' }))
     await user.type(screen.getByLabelText('阶段「审核」的新任务标题'), '列内新任务')
     await user.type(screen.getByLabelText('阶段「审核」的新任务要求'), '把按钮改成绿色')
     await user.keyboard('{Control>}{Enter}{/Control}')
@@ -1551,7 +1221,6 @@ describe('AiWorkflowPage', () => {
     )
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '在「审核」阶段添加任务' }))
     const input = screen.getByLabelText('阶段「审核」的新任务标题')
@@ -1572,7 +1241,6 @@ describe('AiWorkflowPage', () => {
     )
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '打开线程：任务A' }))
     await screen.findByRole('region', { name: '线程详情' })
@@ -1592,7 +1260,6 @@ describe('AiWorkflowPage', () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByLabelText('任务：任务A'))
     await screen.findByRole('region', { name: '任务详情' })
@@ -1609,24 +1276,15 @@ describe('AiWorkflowPage', () => {
     expectDispatched({ type: 'task.remove', id: 't1' })
   })
 
-  it('详情页在切换栏目 / 视图后回到看板，不残留上一页', async () => {
+  it('详情页在切换视图后回到看板，不残留上一页', async () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByLabelText('任务：任务A'))
     expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '聊天' }))
-    expect(screen.getByLabelText('消息输入')).toBeInTheDocument()
-    await openTasks(user)
-    expect(screen.queryByRole('region', { name: '任务详情' })).not.toBeInTheDocument()
-    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
-
-    // 设置视图同样清空详情栈
-    await user.click(screen.getByLabelText('任务：任务A'))
-    expect(await screen.findByRole('region', { name: '任务详情' })).toBeInTheDocument()
+    // 设置视图清空详情栈：回来时是看板，不是刚才那一页
     await openSection(user, '运行时')
     await user.click(screen.getByRole('button', { name: '返回工作台' }))
     expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
@@ -1643,7 +1301,6 @@ describe('AiWorkflowPage', () => {
     })
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
     await user.clear(screen.getByLabelText('项目名称'))
@@ -1670,7 +1327,6 @@ describe('AiWorkflowPage', () => {
     // 默认 dispatch 返回 { value: null }：没有可用的新项目实体
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '+ 添加' }))
     await user.type(screen.getByLabelText('项目名称'), '无返回值')
@@ -1691,7 +1347,6 @@ describe('AiWorkflowPage', () => {
     dispatchWith(() => Promise.reject(new Error('项目改名失败')))
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
     await user.clear(screen.getByLabelText('项目名称'))
@@ -1708,7 +1363,6 @@ describe('AiWorkflowPage', () => {
     dispatchWith(() => Promise.reject('纯文本保存失败'))
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
     await user.click(screen.getByRole('button', { name: '保存' }))
@@ -1727,14 +1381,13 @@ describe('AiWorkflowPage', () => {
     })
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
     await user.click(screen.getByRole('button', { name: '删除项目' }))
 
     await waitFor(() => expectDispatched({ type: 'project.remove', id: 'p1' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    // 项目没了：回落默认目录（聊天与任务都还能用，不是空看板）
+    // 项目没了：回落默认目录（任务照常可用，不是空看板）
     expect(await screen.findByText('还没有项目，可先落到默认目录')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '默认目录' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: '新建任务' })).toBeInTheDocument()
@@ -1745,7 +1398,6 @@ describe('AiWorkflowPage', () => {
     dispatchWith(() => Promise.reject('纯文本删除失败'))
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '编辑项目 工作台' }))
     await user.click(screen.getByRole('button', { name: '删除项目' }))
@@ -1761,7 +1413,6 @@ describe('AiWorkflowPage', () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
-    await openTasks(user)
 
     await user.click(await screen.findByRole('button', { name: '+ 添加' }))
     expect(screen.getByRole('dialog')).toBeInTheDocument()
@@ -1776,16 +1427,9 @@ describe('AiWorkflowPage', () => {
 })
 
 describe('cardLanding', () => {
-  it('落点判定：任务卡优先、其次会话卡，都没有则没有落点', () => {
-    expect(cardLanding({ ...card, taskId: 't1', conversationId: null })).toEqual({
-      kind: 'task',
-      taskId: 't1',
-    })
-    expect(cardLanding({ ...card, taskId: null, conversationId: 'c1' })).toEqual({
-      kind: 'conversation',
-      conversationId: 'c1',
-    })
-    // 既没有任务也没有会话：通知条那一行整行禁用，走不到落点
-    expect(cardLanding({ ...card, taskId: null, conversationId: null })).toEqual({ kind: 'none' })
+  it('落点判定：挂任务的卡进任务详情，不挂任务的没有落点', () => {
+    expect(cardLanding({ ...card, taskId: 't1' })).toEqual({ kind: 'task', taskId: 't1' })
+    // 没有任务（历史会话卡）：通知条那一行整行禁用，走不到落点
+    expect(cardLanding({ ...card, taskId: null })).toEqual({ kind: 'none' })
   })
 })

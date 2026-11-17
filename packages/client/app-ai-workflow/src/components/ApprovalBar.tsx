@@ -4,14 +4,10 @@ import { badgeCls } from '@workbench/client-ui-kit/panel'
 import { cn } from '@workbench/client-ui-kit/cn'
 import { groupNotices, isNoticeCard } from '../model/cards'
 
-/** 卡片的落点：挂任务的卡进任务详情，聊天卡进对应会话 */
-const targetOf = (card: Card): 'task' | 'conversation' | null =>
-  card.taskId !== null ? 'task' : card.conversationId !== null ? 'conversation' : null
+/** 卡片的落点：只有挂任务的卡才有落点（任务详情），其余整行禁用 */
+const targetOf = (card: Card): 'task' | null => (card.taskId !== null ? 'task' : null)
 
-const TARGET_LABEL: Record<'task' | 'conversation', string> = {
-  task: '任务',
-  conversation: '对话',
-}
+const TARGET_LABEL: Record<'task', string> = { task: '任务' }
 
 export interface ApprovalBarProps {
   /** 全部 open 卡（`cards.open` 视图），由页面读取后下传 */

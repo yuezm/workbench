@@ -65,15 +65,8 @@ export interface Lark {
   patch(messageId: string, cardJson: string): Promise<void>
   /** 当前登录人的 open_id（私聊默认接收人） */
   owner(): Promise<string>
-  /** 回帖到某条消息下面（M44：入站派活的回执与进展） */
-  reply(messageId: string, body: string): Promise<void>
   /** 订阅卡片点击：每行事件交给 `onEvent`；进程退出调用 `onExit`；返回停止函数 */
   watchClicks(
-    onEvent: (event: Record<string, unknown>) => void,
-    onExit: (reason: string) => void,
-  ): () => void
-  /** 订阅入站消息（`im.message.receive_v1`），形状同上（M44） */
-  watchMessages(
     onEvent: (event: Record<string, unknown>) => void,
     onExit: (reason: string) => void,
   ): () => void
@@ -89,9 +82,9 @@ const tail = (text: string, limit: number): string =>
 export const needsShell = (file: string): boolean => /\.(cmd|bat)$/i.test(file)
 
 /**
- * 配置里的 `lark` 允许带前置参数（M44）：`lark-cli --profile work2`。
+ * 配置里的 `lark` 允许带前置参数：`lark-cli --profile work2`。
  *
- * 为什么要这个：飞书**一个应用全局只允许一处事件长连接**，入站想跟别的工具并存就得换一个
+ * 为什么要这个：飞书**一个应用全局只允许一处事件长连接**，要同时接多个应用就得换一个
  * profile（另一套应用凭证）。只解析出「命令 + 前置参数」，其余 argv 由插件自己拼。
  */
 export function programArgs(program: string): { command: string; prefix: string[] } {
@@ -279,36 +272,16 @@ export function createLark(options: LarkOptions): Lark {
       return openId
     },
 
-    async reply(messageId, body) {
-      // 正文走 `--content` 的 JSON（与发卡片同口径）。`+messages-reply` 没有 stdin 形式，
-      // JSON 只能进 argv：Windows 上这个参数能活着到 CLI，靠的是宿主 `defaultSpawn` 把
-      // `.cmd` 垫片折回「node + 脚本」——经 cmd.exe 的话双引号会被吃（见 `host/process.ts`）。
-      await runJson([
-        'im',
-        '+messages-reply',
-        '--message-id',
-        messageId,
-        '--as',
-        'bot',
-        '--msg-type',
-        'text',
-        '--content',
-        JSON.stringify({ text: body }),
-      ])
-    },
-
-    watchClicks: (onEvent, onExit) => watch('card.action.trigger', onEvent, onExit),
-    watchMessages: (onEvent, onExit) => watch('im.message.receive_v1', onEvent, onExit),
+    watchClicks: (onEvent, onExit) => watch(onEvent, onExit),
   }
 
   /**
-   * 订阅一个事件键的长连接消费进程（M44：卡片点击与入站消息共用这一段）。
+   * 订阅卡片点击的长连接消费进程（`card.action.trigger`）。
    *
    * 一行一个 JSON：非 JSON 行是 CLI 的诊断输出，只记日志不当事件。`stop()` 之后的退出
    * 与新进程无关——不回报，否则宿主会重拉一个刚被停掉的监听。
    */
   function watch(
-    eventKey: string,
     onEvent: (event: Record<string, unknown>) => void,
     onExit: (reason: string) => void,
   ): () => void {
@@ -322,7 +295,7 @@ export function createLark(options: LarkOptions): Lark {
     try {
       child = sdk.process.spawn(
         resolved.path,
-        [...prefix, 'event', 'consume', eventKey, '--as', 'bot'],
+        [...prefix, 'event', 'consume', 'card.action.trigger', '--as', 'bot'],
         { shell: needsShell(resolved.path), envPatch },
       )
     } catch (error) {

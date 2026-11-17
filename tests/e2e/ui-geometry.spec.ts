@@ -9,8 +9,8 @@
  * 判据与排除理由见 `helpers/geometry.ts` 顶部注释。**不追求覆盖所有视觉问题**：
  * 只拦「明确是缺陷」的七类，宁少勿误报——误报会让人关掉这条用例。
  *
- * 场景用真实种子（`seedProjectDimension`：两个项目 / 两个任务 / 一个会话），
- * 因此看板卡片、聊天消息流、任务详情这些「有数据才撑得开」的布局也会被量到。
+ * 场景用真实种子（`seedProjectDimension`：两个项目 / 两个任务），
+ * 因此看板卡片、任务详情这些「有数据才撑得开」的布局也会被量到。
  */
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
@@ -38,7 +38,7 @@ test.afterEach(async () => {
 /** 窄窗：验证「窗口不最大化时」布局是否还站得住（默认 1100x720） */
 const NARROW = { width: 900, height: 640 }
 
-test('界面几何审计：看板 / 聊天 / 任务详情 / 设置 / 弹窗 / 番茄钟 / 窄窗', async () => {
+test('界面几何审计：看板 / 任务详情 / 设置 / 弹窗 / 窄窗', async () => {
   test.setTimeout(240_000)
 
   const userDataDir = createTempUserDataDir()
@@ -84,18 +84,13 @@ test('界面几何审计：看板 / 聊天 / 任务详情 / 设置 / 弹窗 / �
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toBeHidden()
 
-  // 3) 聊天栏目：会话清单 + 消息流 + 输入区
-  await page.getByRole('button', { name: '聊天', exact: true }).click()
-  await audit('聊天栏目（有会话）')
-
-  // 4) 任务详情页：信息区 / 说明卡 / 活动流 / 底部动作区
-  await page.getByRole('button', { name: '任务', exact: true }).click()
+  // 3) 任务详情页：信息区 / 说明卡 / 活动流 / 底部动作区
   await page.getByRole('button', { name: '任务：甲任务' }).click()
   await expect(page.getByRole('button', { name: '返回' })).toBeVisible()
   await audit('任务详情页')
   await page.getByRole('button', { name: '返回' }).click()
 
-  // 5) 设置：五个栏目逐个量
+  // 4) 设置：逐个栏目量
   await page.getByRole('button', { name: '设置', exact: true }).click()
   await expect(page.getByRole('navigation', { name: '设置栏目' })).toBeVisible()
   await audit('设置 / 运行时')
@@ -113,14 +108,8 @@ test('界面几何审计：看板 / 聊天 / 任务详情 / 设置 / 弹窗 / �
     await audit(`设置 / ${section}`)
   }
 
-  // 6) 番茄钟：大号数字与控件行
+  // 5) 窄窗：900x640 下看板与设置页不出现横向滚动 / 元素出界
   await page.getByRole('button', { name: '返回工作台' }).click()
-  await page.getByRole('button', { name: '番茄时钟' }).click()
-  await expect(page.getByText('25:00', { exact: true })).toBeVisible()
-  await audit('番茄钟')
-
-  // 7) 窄窗：900x640 下看板与设置页不出现横向滚动 / 元素出界
-  await page.getByRole('button', { name: 'AI 工作流' }).click()
   await page.setViewportSize(NARROW)
   await page.waitForFunction(`window.innerWidth <= ${NARROW.width}`, undefined, { timeout: 10_000 })
   await audit(`窄窗 ${NARROW.width}x${NARROW.height}：任务看板`)

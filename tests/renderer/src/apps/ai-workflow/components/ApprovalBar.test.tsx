@@ -75,25 +75,14 @@ describe('ApprovalBar', () => {
     expect(within(notices).getByText('版本不一致')).toBeInTheDocument()
   })
 
-  it('聊天卡落点写「对话」，并能把卡片交给上层切会话', () => {
-    const chatCard: Card = { ...card, id: 'card-3', taskId: null, conversationId: 'c-1' }
-    const onOpen = vi.fn()
-    render(<ApprovalBar cards={[chatCard]} onOpen={onOpen} />)
-
-    const pending = screen.getByRole('region', { name: '待审批' })
-    expect(within(pending).getByText('对话')).toBeInTheDocument()
-
-    fireEvent.click(within(pending).getByRole('button', { name: /包名怎么定/ }))
-    expect(onOpen).toHaveBeenCalledWith(chatCard)
-  })
-
-  it('没有落点的卡（既无任务也无会话）：行禁用，点了不跳转', () => {
-    const orphan: Card = { ...card, id: 'card-4', taskId: null, conversationId: null }
+  it('不挂任务的卡（历史会话卡）：整行禁用、不写落点标签，点了不跳转', () => {
+    const orphan: Card = { ...card, id: 'card-4', taskId: null, conversationId: 'c-1' }
     const onOpen = vi.fn()
     render(<ApprovalBar cards={[orphan]} onOpen={onOpen} />)
 
     const row = screen.getByRole('button', { name: /包名怎么定/ })
     expect(row).toBeDisabled()
+    expect(screen.queryByText('任务')).toBeNull()
     fireEvent.click(row)
     expect(onOpen).not.toHaveBeenCalled()
   })
@@ -135,15 +124,14 @@ describe('ApprovalBar', () => {
     expect(onOpen.mock.calls[0][0].id).toBe('card-1')
   })
 
-  it('任务卡不写「对话」，聊天卡不写「任务」：落点标签互斥', () => {
-    const chatCard: Card = { ...card, id: 'card-3', taskId: null, conversationId: 'c-1' }
+  it('挂任务的卡写「任务」，不挂任务的卡不写落点标签：落点只有任务一种', () => {
     const { unmount } = render(<ApprovalBar cards={[card]} onOpen={vi.fn()} />)
-    expect(screen.queryByText('对话')).toBeNull()
+    expect(screen.getByText('任务')).toBeInTheDocument()
     unmount()
 
-    render(<ApprovalBar cards={[chatCard]} onOpen={vi.fn()} />)
+    const orphan: Card = { ...card, id: 'card-3', taskId: null }
+    render(<ApprovalBar cards={[orphan]} onOpen={vi.fn()} />)
     expect(screen.queryByText('任务')).toBeNull()
-    expect(screen.getByText('对话')).toBeInTheDocument()
   })
 
   it('无 open 卡：整块不渲染', () => {
@@ -196,7 +184,7 @@ describe('ApprovalBar', () => {
     ).toHaveLength(1)
   })
 
-  it('聊天信息卡也按文案合并，落点仍写「对话」', () => {
+  it('不挂任务的信息卡也按文案合并，且不写落点标签', () => {
     const notice: Card = {
       ...card,
       id: 'card-8',
@@ -211,7 +199,7 @@ describe('ApprovalBar', () => {
     const notices = screen.getByRole('region', { name: '通知' })
     expect(within(notices).getAllByRole('button')).toHaveLength(1)
     expect(within(notices).getByText('×2')).toBeInTheDocument()
-    expect(within(notices).getByText('对话')).toBeInTheDocument()
+    expect(within(notices).queryByText('任务')).toBeNull()
   })
 
   it('缺 kind 的老数据：无选项按信息卡进「通知」，有选项仍进「待审批」', () => {

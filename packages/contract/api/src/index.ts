@@ -30,7 +30,7 @@ export interface WorkbenchApi {
   query<T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>>
   /** 订阅事实批次与聊天流；返回取消订阅函数。同一页面只订阅一次 */
   subscribe(handler: (event: WorkbenchEvent) => void): () => void
-  /** 知会（任务完成 / 运行失败 / 番茄钟到点）：页面自行弹轻提示，`target` 有值时跳落点 */
+  /** 知会（任务完成 / 运行失败）：页面自行弹轻提示，`target` 有值时跳落点 */
   onNotice(handler: (notice: NoticeEvent) => void): () => void
   /** 列表本机目录（项目 = 文件夹；浏览器读不到文件系统，只能问服务端） */
   listDirs(path?: string): Promise<DirListing>

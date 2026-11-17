@@ -72,8 +72,8 @@ const command = (over: Record<string, unknown> = {}): Parameters<typeof decide>[
   ({
     commandId: 'cmd-1',
     type: 'app.event',
-    appId: 'pomodoro',
-    eventType: 'pomodoro.completed',
+    appId: 'demo',
+    eventType: 'demo.completed',
     subject: '番茄结束',
     ...over,
   }) as Parameters<typeof decide>[1]
@@ -90,7 +90,7 @@ describe('kernel/decide app.event', () => {
         payload: {
           eventId: 'event-new-1',
           source: 'app',
-          type: 'pomodoro.completed',
+          type: 'demo.completed',
           subject: '番茄结束',
           summary: '',
           detailRef: null,
@@ -107,13 +107,13 @@ describe('kernel/decide app.event', () => {
     const long = '🍅'.repeat(205)
     const decision = decide(
       view(),
-      command({ summary: long, link: 'https://example.com/pomodoro', dedupeKey: 'k-1' }),
+      command({ summary: long, link: 'https://example.com/demo', dedupeKey: 'k-1' }),
       NOW,
       env(),
     )
     const payload = decision.facts[0]?.payload as EventReceivedPayload
     expect(Array.from(payload.summary)).toHaveLength(200)
-    expect(payload.link).toBe('https://example.com/pomodoro')
+    expect(payload.link).toBe('https://example.com/demo')
     expect(payload.dedupeKey).toBe('k-1')
   })
 

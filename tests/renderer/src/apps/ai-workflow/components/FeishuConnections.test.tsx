@@ -2,13 +2,11 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Command } from '@workbench/protocol/commands'
-import type { Agent } from '@workbench/protocol/entities'
 import type { CommandDispatchResult } from '@workbench/protocol/ipc'
 import type { LarkAdminAction, LarkStatusView } from '@workbench/protocol/ipc'
 import type { PluginView } from '@workbench/protocol/plugins'
 import type { ViewId, ViewParams, ViewResult } from '@workbench/protocol/views'
 import {
-  agentLabelOf,
   answerersTextOf,
   connectionHealthOf,
   connectionLabel,
@@ -56,24 +54,6 @@ const STATUS: LarkStatusView = {
   foreign: null,
   conflict: false,
   hint: null,
-}
-
-/** 智能体清单里的一项（面板只用到 id / name，其余字段给足形状即可） */
-function agentOf(id: string, name: string): Agent {
-  return {
-    id,
-    name,
-    description: '',
-    runtimeId: 'rt-1',
-    systemPrompt: '',
-    model: null,
-    reasoningEffort: null,
-    maxConcurrent: 1,
-    permissionMode: 'workspace-write',
-    workdir: null,
-    env: {},
-    createdAt: '2026-11-15T00:00:00.000Z',
-  }
 }
 
 function pluginOf(overrides: Partial<PluginView> = {}): PluginView {
@@ -175,20 +155,10 @@ describe('FeishuConnections：配置解析', () => {
     expect(answerersTextOf({})).toBe('')
   })
 
-  it('agentLabelOf：id 查名字；旧配置存名字照旧显示；认不出来原样给；没绑就是「只发不接」', () => {
-    const agents = [agentOf('ag-1', '管家（Moos）'), agentOf('ag-2', '产品经理')]
-    expect(agentLabelOf(agents, 'ag-2')).toBe('产品经理')
-    expect(agentLabelOf(agents, '产品经理')).toBe('产品经理')
-    expect(agentLabelOf(agents, 'ag-gone')).toBe('ag-gone')
-    expect(agentLabelOf(agents, undefined)).toBe('只发不接')
-    expect(agentLabelOf(agents, '  ')).toBe('只发不接')
-  })
-
   it('connectionOfForm：空字段不写入；名单按分隔符归一', () => {
     const filled = connectionOfForm({
       label: ' 工作台 ',
       profile: 'wb',
-      agent: ' ',
       user: '',
       chat: 'oc_1',
       answerers: 'ou_1, ou_2， ou_1',
@@ -196,11 +166,12 @@ describe('FeishuConnections：配置解析', () => {
     expect(filled.label).toBe('工作台')
     expect(filled.profile).toBe('wb')
     expect(filled.chat).toBe('oc_1')
-    expect(filled.agent).toBeUndefined()
     expect(filled.user).toBeUndefined()
     expect(filled.answerers).toEqual(['ou_1', 'ou_2'])
+    // 没有「派给哪个智能体」这一项：飞书只承载拍板卡，不在飞书里聊天
+    expect(filled).not.toHaveProperty('agent')
     expect(
-      connectionOfForm({ label: '', profile: '', agent: '', user: '', chat: '', answerers: ' ' }),
+      connectionOfForm({ label: '', profile: '', user: '', chat: '', answerers: ' ' }),
     ).toEqual({})
   })
 
@@ -296,21 +267,19 @@ describe('FeishuConnections：连接列表', () => {
     expect(screen.getByRole('button', { name: '添加连接' })).toBeTruthy()
   })
 
-  it('列出已有连接：名称 + 健康度 + profile/目标/智能体', async () => {
+  it('列出已有连接：名称 + 健康度 + profile/落点', async () => {
     render(
       <FeishuConnections
         plugin={pluginOf({
           config: {
-            connections: JSON.stringify([
-              { label: '工作台', profile: 'wb', user: 'ou_me', agent: '小酱' },
-            ]),
+            connections: JSON.stringify([{ label: '工作台', profile: 'wb', user: 'ou_me' }]),
           },
         })}
       />,
     )
 
     expect(await screen.findByText('工作台')).toBeTruthy()
-    expect(screen.getByText('wb · 私聊 ou_me · 小酱')).toBeTruthy()
+    expect(screen.getByText('wb · 私聊 ou_me')).toBeTruthy()
     // profile 不在本机：行内直接标出来，用户不用去命令行核对
     expect(screen.getByText('本机没有这个 profile')).toBeTruthy()
   })
@@ -369,7 +338,6 @@ describe('FeishuConnections：连接列表', () => {
 
 describe('FeishuConnections：连接弹窗', () => {
   it('添加连接：弹窗里填完写回 connections JSON（不碰其它字段）', async () => {
-    kernel.setView('agents.all', undefined, [agentOf('ag-1', '管家（Moos）')])
     const user = userEvent.setup()
     render(<FeishuConnections plugin={pluginOf()} />)
 
@@ -382,8 +350,7 @@ describe('FeishuConnections：连接弹窗', () => {
     await user.click(await screen.findByRole('option', { name: /workbench/ }))
     await user.click(screen.getByRole('tab', { name: '私聊某人' }))
     await user.type(screen.getByLabelText('飞书连接接收人'), 'ou_me')
-    await user.click(screen.getByRole('combobox', { name: '飞书连接默认智能体' }))
-    await user.click(await screen.findByRole('option', { name: '管家（Moos）' }))
+    await user.type(screen.getByLabelText('飞书连接拍板人'), 'ou_boss')
     await user.click(screen.getByRole('button', { name: '保存连接' }))
 
     await waitFor(() => {
@@ -395,7 +362,7 @@ describe('FeishuConnections：连接弹窗', () => {
       enabled: true,
       config: {
         connections: JSON.stringify([
-          { label: '工作台', profile: 'workbench', agent: 'ag-1', user: 'ou_me' },
+          { label: '工作台', profile: 'workbench', user: 'ou_me', answerers: ['ou_boss'] },
         ]),
       },
     })

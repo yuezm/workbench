@@ -30,17 +30,8 @@ export interface FeishuConnectionDialogProps {
   /** 编辑态传入现有连接；新建时省略 */
   connection?: ConnectionDraft
   profiles: readonly LarkProfileView[]
-  agents: readonly { id: string; name: string }[]
   onSubmit: (connection: ConnectionDraft) => void
   onCancel: () => void
-}
-
-/** 智能体下拉的选中值：id 命中用 id，旧配置存名字时按名字认出 id，认不出来原样带着 */
-function agentSelection(agents: readonly { id: string; name: string }[], agent: string): string {
-  const wanted = agent.trim()
-  if (wanted === '') return ''
-  if (agents.some((item) => item.id === wanted)) return wanted
-  return agents.find((item) => item.name === wanted)?.id ?? wanted
 }
 
 const TARGET_OPTIONS: { value: ConnectionTargetKind; label: string }[] = [
@@ -53,16 +44,18 @@ const TARGET_OPTIONS: { value: ConnectionTargetKind; label: string }[] = [
  * 一条飞书连接的编辑弹窗。
  *
  * 为什么从「面板里一排输入框」改成弹窗：连接是**一条独立配置**（一个 profile + 一个落点 +
- * 一个默认智能体），在面板里和状态、profile 管理挤在同一屏时，用户分不清哪些格子属于
+ * 一份拍板人名单），在面板里和状态、profile 管理挤在同一屏时，用户分不清哪些格子属于
  * 已有连接、哪些属于新连接。弹窗把「一条连接」收成一个对象，编辑与新增共用同一张表单。
  *
  * 「消息落在哪」用分段控件而不是两个并排输入框：配置里 `chat` 优先于 `user`，
  * 两个都能填时用户无法预判消息会落到群还是私聊。
+ *
+ * 没有「派给哪个智能体」这一项：飞书只承载需要人拍板的卡（点按钮就是答复），
+ * 不在飞书里聊天，因此没有可以派活的对象。
  */
 export function FeishuConnectionDialog({
   connection,
   profiles,
-  agents,
   onSubmit,
   onCancel,
 }: FeishuConnectionDialogProps): ReactElement {
@@ -72,7 +65,6 @@ export function FeishuConnectionDialog({
   const [target, setTarget] = useState<ConnectionTargetKind>(targetKindOf(connection ?? {}))
   const [user, setUser] = useState(connection?.user ?? '')
   const [chat, setChat] = useState(connection?.chat ?? '')
-  const [agent, setAgent] = useState(connection?.agent ?? '')
   const [answerers, setAnswerers] = useState(
     Array.isArray(connection?.answerers)
       ? connection.answerers.join(', ')
@@ -111,7 +103,6 @@ export function FeishuConnectionDialog({
       connectionOfForm({
         label,
         profile,
-        agent,
         user: target === 'user' ? user : '',
         chat: target === 'chat' ? chat : '',
         answerers,
@@ -132,7 +123,7 @@ export function FeishuConnectionDialog({
           <DialogTitle>{editing ? '编辑飞书连接' : '添加飞书连接'}</DialogTitle>
           <DialogDescription>
             一条连接 = 一个 lark-cli profile =
-            一个飞书应用：私聊这个机器人就能派活，卡片与进展也发到这里。
+            一个飞书应用：需要你拍板的卡发到这里，点按钮就是答复。
           </DialogDescription>
         </DialogHeader>
 
@@ -224,34 +215,9 @@ export function FeishuConnectionDialog({
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field
-              label="派给哪个智能体"
-              hint={
-                agents.length === 0
-                  ? '还没有智能体：先去「智能体」页新建一个'
-                  : '留空 = 只发不接：卡片照发，私聊不派活'
-              }
-            >
-              <Select
-                value={agentSelection(agents, agent)}
-                onValueChange={(next) => setAgent(next)}
-              >
-                <SelectTrigger aria-label="飞书连接默认智能体" className="w-full">
-                  <SelectValue placeholder="只发不接" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">只发不接</SelectItem>
-                  {agents.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label="可答复人" hint="逗号分隔；留空只认接收人">
+            <Field label="谁能拍板" hint="逗号分隔的 open_id；留空只认接收人">
               <Input
-                aria-label="飞书连接可答复人"
+                aria-label="飞书连接拍板人"
                 placeholder="ou_1, ou_2"
                 value={answerers}
                 onChange={(e) => setAnswerers(e.target.value)}

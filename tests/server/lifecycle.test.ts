@@ -123,8 +123,8 @@ describe('startWorkbenchServer', () => {
 
 describe('runServerEntry', () => {
   const started = (): StartedServer & { stop: ReturnType<typeof vi.fn> } => ({
-    port: 7788,
-    url: 'http://127.0.0.1:7788',
+    port: 3000,
+    url: 'http://127.0.0.1:3000',
     stop: vi.fn(async () => undefined),
   })
 
@@ -145,7 +145,7 @@ describe('runServerEntry', () => {
 
     const lines = log.mock.calls.map((call) => String(call[0]))
     expect(
-      lines.some((line) => line.startsWith('workbench listening on http://127.0.0.1:7788')),
+      lines.some((line) => line.startsWith('workbench listening on http://127.0.0.1:3000')),
     ).toBe(true)
     // 有界面时启动行后缀写明产物目录（运维扫一眼就知道这次挂没挂 UI）
     expect(lines.some((line) => line.includes('(ui: out/web)'))).toBe(true)

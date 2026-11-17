@@ -3,7 +3,7 @@
 常驻服务形态的个人 Agent 工作台：一个 Node 进程收事件、按规则派活、记账，Web 界面用来观察执行情况和改配置。
 
 - **服务**：`node out/server/index.js`，同源托管 Web 产物并提供 HTTP 三动词 + SSE 推送。
-- **界面**：浏览器打开 `http://127.0.0.1:7788`（默认只监听回环）。看板、任务详情、聊天、设置、插件、运行时、规则都在这里。
+- **界面**：浏览器打开 `http://127.0.0.1:3000`（默认只监听回环）。看板、任务详情、聊天、设置、插件、运行时、规则都在这里。
 - **执行**：内核只决定「派给谁」，具体跑什么由执行器插件（dsh 等本机 CLI）负责；进程与目录都由服务端管理。
 - **数据**：默认 `~/.workbench`（库、产物、插件、密钥、会话），可用 `WORKBENCH_DATA_DIR` 改。
 
@@ -14,7 +14,7 @@
 ```bash
 pnpm install
 pnpm build        # 类型检查 + 服务端产物 out/server + Web 产物 out/web
-pnpm start        # 前台运行，日志里会打印 workbench listening on http://127.0.0.1:7788
+pnpm start        # 前台运行，日志里会打印 workbench listening on http://127.0.0.1:3000
 ```
 
 开发态（服务端 watch 构建 + `node --watch` + Web HMR，`/api` 代理到服务端）：
@@ -30,7 +30,7 @@ pnpm dev          # 数据目录默认 .scratch/dev-data，不碰 ~/.workbench
 | 变量                     | 默认           | 说明                                           |
 | ------------------------ | -------------- | ---------------------------------------------- |
 | `WORKBENCH_HOST`         | `127.0.0.1`    | 监听地址。**非回环必须配 token，否则启动失败** |
-| `WORKBENCH_PORT`         | `7788`         | 端口；`0` 表示由系统分配（日志会打印实际地址） |
+| `WORKBENCH_PORT`         | `3000`         | 端口；`0` 表示由系统分配（日志会打印实际地址） |
 | `WORKBENCH_DATA_DIR`     | `~/.workbench` | 库、产物、插件、密钥、会话                     |
 | `WORKBENCH_WEB_DIR`      | `out/web`      | Web 产物目录                                   |
 | `WORKBENCH_TOKEN`        | 无             | 共享口令（≥16 字符）。也可放 `<dataDir>/token` |
@@ -66,7 +66,7 @@ WantedBy=multi-user.target
 ```bash
 # 容器
 docker run -d --name workbench \
-  -p 127.0.0.1:7788:7788 \
+  -p 127.0.0.1:3000:3000 \
   -v workbench-data:/data \
   -e WORKBENCH_HOST=0.0.0.0 -e WORKBENCH_DATA_DIR=/data \
   -e WORKBENCH_TOKEN=$(openssl rand -hex 32) \

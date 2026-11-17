@@ -47,7 +47,7 @@ describe('openTarget store', () => {
 
     unmount()
     // 退订之后再推：没有组件在听，不该抛错（这就是 shell 里清空 / 推送的常态）
-    act(() => pushOpenTarget({ appId: 'pomodoro' }))
+    act(() => pushOpenTarget({ appId: 'demo' }))
     expect(result.current?.appId).toBe('ai-workflow')
   })
 
@@ -79,10 +79,10 @@ describe('openTarget store', () => {
     expect(result.current?.seq).toBe(1)
 
     resetOpenTargetForTest()
-    act(() => pushOpenTarget({ appId: 'pomodoro' }))
+    act(() => pushOpenTarget({ appId: 'demo' }))
     // 序号从头数：新用例里第一条落点就是 1
     const fresh = renderHook(() => useOpenTarget()).result.current
-    expect(fresh).toMatchObject({ appId: 'pomodoro', seq: 1 })
+    expect(fresh).toMatchObject({ appId: 'demo', seq: 1 })
     // 旧订阅者在 reset 时被丢掉：不再被新的落点唤醒（界面已卸载，无从更新）
     expect(result.current?.appId).toBe('ai-workflow')
   })
@@ -107,8 +107,8 @@ describe('openTarget：当前 app', () => {
   it('顶部栏点选（selectApp）切 app；同一个 app 重复点不惊动订阅者', () => {
     const { result } = renderHook(() => useActiveAppId())
 
-    act(() => selectApp('pomodoro'))
-    expect(result.current).toBe('pomodoro')
+    act(() => selectApp('demo'))
+    expect(result.current).toBe('demo')
 
     // 重复点当前 app：同一笔状态，不发通知（避免一次无意义的重渲染）
     let renders = 0
@@ -117,15 +117,15 @@ describe('openTarget：当前 app', () => {
       return useActiveAppId()
     })
     const before = renders
-    act(() => selectApp('pomodoro'))
-    expect(counter.current).toBe('pomodoro')
+    act(() => selectApp('demo'))
+    expect(counter.current).toBe('demo')
     expect(renders).toBe(before)
   })
 
   it('reset 一并清掉当前 app：下个用例从「没选过」开始', () => {
     const { result } = renderHook(() => useActiveAppId())
-    act(() => selectApp('pomodoro'))
-    expect(result.current).toBe('pomodoro')
+    act(() => selectApp('demo'))
+    expect(result.current).toBe('demo')
 
     resetOpenTargetForTest()
     expect(renderHook(() => useActiveAppId()).result.current).toBeNull()

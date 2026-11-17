@@ -10,7 +10,7 @@
 //   2. 零调色板外色值、零 Tailwind 内置色类名
 //   3. 无重玻璃（backdrop-blur）
 //   4. 圆角只走刻度：任意值圆角仅允许 ≤4px 或 inherit（上游 checkbox/tooltip/scroll-area 用法）
-//   5. 字号不写任意 px（唯一豁免：番茄钟计时器）；字重不用 bold
+//   5. 字号不写任意 px；字重不用 bold
 //   6. 圆角基数封顶：--radius ≤ 0.5rem（macOS 小圆角，刻度由 Tailwind 派生）
 //
 // 覆盖层（docs/specs/SPEC-ui.md）：
@@ -204,8 +204,8 @@ const BUILTIN_COLOR =
 /** 静默校验（SPEC-ui §11）：`if (!title.trim()) return` 让点击毫无反馈，禁止 */
 const SILENT_GUARD = /if\s*\(\s*![^)]*\.trim\(\)\s*\)\s*return\b/
 
-/** 任意 px 字号：唯一豁免是番茄钟计时器（等宽数字） */
-const TYPE_EXEMPT = new Set(['packages/client/app-pomodoro/src/components/TimerDisplay.tsx'])
+/** 任意 px 字号：当前没有豁免（计时器类大号数字随番茄钟一起移除） */
+const TYPE_EXEMPT = new Set([])
 const ARBITRARY_SIZE = /\btext-\[[0-9.]+px\]/
 /** 粗体：shadcn 用 medium / semibold，不用 bold */
 const BOLD_WEIGHT = /\bfont-(?:bold|extrabold|black)\b/

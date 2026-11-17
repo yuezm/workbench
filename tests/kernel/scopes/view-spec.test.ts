@@ -70,8 +70,8 @@ const commandSamples: Command[] = [
   {
     commandId: 'c21',
     type: 'app.event',
-    appId: 'pomodoro',
-    eventType: 'pomodoro.completed',
+    appId: 'demo',
+    eventType: 'demo.completed',
     subject: '番茄结束',
   },
   { commandId: 'c22', type: 'runtime.probe', id: 'rt-1' },

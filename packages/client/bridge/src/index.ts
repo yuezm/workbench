@@ -158,7 +158,7 @@ export function createWebBridge(options: BridgeOptions = {}): WorkbenchApi {
     },
     notify: (title, body) => {
       const payload: NotifyRequest = { title, ...(body === undefined ? {} : { body }) }
-      // 发完就忘：知会失败不该让调用方（番茄钟）中断
+      // 发完就忘：知会失败不该让调用方中断
       void post<unknown>(API_PATHS.notify, payload).catch(() => undefined)
     },
   }

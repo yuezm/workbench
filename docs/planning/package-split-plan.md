@@ -106,7 +106,7 @@ bundle/web             → base + host/frontend-static                （有 out
 解析顺序：`--ui=on|off` 显式参数 → `WORKBENCH_UI` 环境变量 → 探测 `out/web/index.html` 是否存在。任一步为 off 就只起 base，打印：
 
 ```
-workbench listening on http://127.0.0.1:7788 (api only; web ui not built)
+workbench listening on http://127.0.0.1:3000 (api only; web ui not built)
 ```
 
 这条与现在的启动行兼容（e2e 与运维脚本按 `workbench listening on` 取地址）。

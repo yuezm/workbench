@@ -260,7 +260,7 @@ function BindSection({
               <Input
                 aria-label="入口来源"
                 maxLength={THREAD_LIMITS.source}
-                placeholder="github / mail / app:pomodoro"
+                placeholder="github / mail / webhook"
                 value={source}
                 disabled={busy}
                 onChange={(e) => onChangeSource(e.target.value)}

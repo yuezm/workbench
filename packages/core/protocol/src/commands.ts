@@ -323,7 +323,7 @@ export interface ChatArchiveCommand extends CommandBase {
 // ---------- app 事件（M5） ----------
 
 /**
- * app 插件发出的事件（如番茄结束）：宿主先按 `src/shared/apps.ts` 的
+ * app 插件发出的事件（如 `<appId>.<event>`）：宿主先按 `packages/contract/app-events` 的
  * `APP_EVENTS` 白名单校验 `appId` 与 `eventType`，内核产一条 `event.received`
  * （`source='app'`、`hops=1`、`originRunId=null`）。M6 才消费事件建任务。
  */
@@ -331,7 +331,7 @@ export interface AppEventCommand extends CommandBase {
   type: 'app.event'
   /** app 插件 id（kebab-case），必须在白名单内 */
   appId: string
-  /** 事件类型，如 pomodoro.completed；必须在白名单内 */
+  /** 事件类型，如 my-app.completed；必须在白名单内 */
   eventType: string
   /** 事项标识（用于合并/去重） */
   subject: string
@@ -474,7 +474,7 @@ export interface ReviewExportCommand extends CommandBase {
  */
 export interface ThreadOpenCommand extends CommandBase {
   type: 'thread.open'
-  /** 来源标识（小写，如 `feishu` / `manual` / `app:pomodoro`） */
+  /** 来源标识（小写，如 `feishu` / `manual` / `app:my-app`） */
   source: string
   /** 外部入口键；省略 = 隐式话题（之后可用 `thread.bind` 绑上去） */
   externalRef?: string | null

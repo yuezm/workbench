@@ -279,7 +279,12 @@ ull\ 是「清除」而不是「没改」——省略规则里的 \uthority\ �
 
       {previewOpen && <RulePreviewPanel />}
 
-      <AuthorityPanel view={authorityState.data ?? null} busy={busy} onSave={saveAuthority} />
+      <AuthorityPanel
+        key={authorityState.data?.policyVersion ?? -1}
+        view={authorityState.data ?? null}
+        busy={busy}
+        onSave={saveAuthority}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {rules.length} 条</span>

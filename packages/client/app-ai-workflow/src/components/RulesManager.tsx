@@ -2,12 +2,14 @@ import { useState, type ReactElement } from 'react'
 import type { WorkflowWithStages } from '@workbench/protocol/entities'
 import type { RuleNextFire } from '@workbench/protocol/rules'
 import type { AutomationRule } from '@workbench/protocol/rules'
+import type { Authority } from '@workbench/protocol/authority'
 import { Button } from '@workbench/client-ui-primitives/button'
 import { FormError } from '@workbench/client-ui-kit/form-error'
 import { badgeCls } from '@workbench/client-ui-kit/panel'
 import { cn } from '@workbench/client-ui-kit/cn'
 import { getKernelStore } from '@workbench/client-kernel-store'
 import { useKernelView, useKernelViewState } from '@workbench/client-shell/useKernelView'
+import { AuthorityPanel } from './AuthorityPanel'
 import { RuleDialog } from './RuleDialog'
 import { RulePreviewPanel } from './RulePreviewPanel'
 
@@ -103,6 +105,7 @@ const formatNextAt = (iso: string): string => {
 
 export function RulesManager(): ReactElement {
   const rulesState = useKernelViewState('rules.all')
+  const authorityState = useKernelViewState('authority.current')
   const workflows = useKernelView('workflows.all') ?? []
   /** 项目的候选只用于规则任务的落点（M10）：项目存在与否由内核在触发时再校验 */
   const projects = useKernelView('projects.all') ?? []
@@ -142,6 +145,31 @@ export function RulesManager(): ReactElement {
 
   const dispatchRules = async (next: AutomationRule[]): Promise<void> => {
     await getKernelStore().dispatch({ type: 'rules.replace', commandId: '', rules: next })
+  }
+
+  /**
+   * 准入配置保存（A1）：与规则同一条命令、同一条版本线。
+   *
+   * \
+ull\ 是「清除」而不是「没改」——省略规则里的 \uthority\ 才会保留现值，
+   * 所以这里必须显式带上，界面上的「兼容」才对得上内核行为。
+   */
+  const saveAuthority = async (authority: Authority | null): Promise<void> => {
+    setBusy(true)
+    setActionError(null)
+    try {
+      await getKernelStore().dispatch({
+        type: 'rules.replace',
+        commandId: '',
+        rules,
+        authority,
+      })
+    } catch (e) {
+      setActionError(errMsg(e))
+      throw e
+    } finally {
+      setBusy(false)
+    }
   }
 
   /** 整批替换：成功后等 `rules.replaced` 失效重取，不在这里改本地列表 */
@@ -250,6 +278,8 @@ export function RulesManager(): ReactElement {
       </div>
 
       {previewOpen && <RulePreviewPanel />}
+
+      <AuthorityPanel view={authorityState.data ?? null} busy={busy} onSave={saveAuthority} />
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {rules.length} 条</span>

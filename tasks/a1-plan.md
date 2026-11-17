@@ -29,8 +29,8 @@
 | T2 事实与校验                                                                        | 完成 | `8ecb2aa`            |
 | T3 判定纯函数（含模式矩阵 26 用例）                                                  | 完成 | `6891af8`            |
 | T4 接线（`View.authority` / `rule_sets.authority_json` / `event.admitted`·`denied`） | 完成 | `35a83b4`、`5c4c138` |
-| T5 `authority.current` 视图                                                          | 待做 | —                    |
-| T6 规则页授权区                                                                      | 待做 | —                    |
+| T5 `authority.current` 视图                                                          | 完成 | `c2cd273`            |
+| T6 规则页授权区                                                                      | 完成 | 本次提交（A1-T6）    |
 
 实现记录（与计划的差异）：
 

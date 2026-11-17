@@ -123,7 +123,7 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
     ],
   },
   // 规则集是整批投影：两条事实都只影响 rules.all；任务类事实由既有 `task.` 前缀处理
-  { prefix: 'rules.replaced', views: ['rules.all'] },
+  { prefix: 'rules.replaced', views: ['rules.all', 'authority.current'] },
   { prefix: 'rule.fired', views: ['rules.all'] },
   // 插件设置整批替换（M7）：设置快照 + 磁盘目录视图（状态由宿主按设置现算）一起失效
   { prefix: 'plugins.replaced', views: ['plugins.all', 'plugins.settings'] },

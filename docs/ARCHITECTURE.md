@@ -139,6 +139,18 @@ Agent 没有选择权：只能在回执里 `ask`（拍板）、`events`（再触
 
 `decide(view, input, now, env)` 是纯函数：不读时钟、不取随机数、不读文件、不发请求、不写库。时间、ID、规则版本、主密钥全部由宿主在边界传入。同样的 `(view, input, now, env)` 必得同样的 `facts`。
 
+### 准入、授权与研判（A1+）
+
+规则匹配是确定性的一步，它回答「这条事件命中哪条规则」。再往下还有三个问题不归规则管，归 `authority` 域（[SPEC-authority.md](./specs/SPEC-authority.md)）：
+
+| 问题                                       | 落点                  | 产出                                                                                                 |
+| ------------------------------------------ | --------------------- | ---------------------------------------------------------------------------------------------------- |
+| 这件事该不该被它接（谁发起的、以什么强度） | `scopes/admission.ts` | `event.admitted` / `event.denied`，强度 `explicit` / `inferred`，接受模式 `off` / `observe` / `auto` |
+| 接了之后凭什么、做到哪、撤了没             | `scopes/mandate.ts`   | `mandate.granted` / `.revoked` / `.revalidated`，记规则集版本与范围，恢复新一轮前重校验              |
+| 语义上属于哪类活（规则匹配不到时）         | `scopes/assess.ts`    | 一次 `purpose='assess'` 的运行，对每条启用规则给判定与证据；`observe` 期只记 `wouldAccept`           |
+
+三条边界：**判定产出**（`acceptance` / `judge`）与**判定准入**（`admission` / `mandate`）不共用事实；`Authority` 随 `rule_sets` 一起版本化，不另立配置表；研判 run 不得派生事件，规则始终是唯一指令入口。「需要我处理」只有 `attention.open` 一个入口，信息卡不进。
+
 ## 插件
 
 四类，目录与 manifest 统一：

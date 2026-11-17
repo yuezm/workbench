@@ -1,124 +1,70 @@
-# SPEC — 飞书话题收敛（M47）
+# SPEC — 准入与授权（A1–A4）
 
 > 本文件是**当前工作计划的规格入口**（`/agent-skills-build auto` 只认仓库根 / `docs/SPEC.md` / `spec/`）。
-> 行为条款在实现落地时同步进 `docs/specs/SPEC-ai-workflow.md`（会话与续接、界面分层）与
-> `docs/specs/SPEC-plugins.md`（channel 端口）——那两处才是长期真相源，本文件是本次施工的计划书。
+> 长期真相源是 [SPEC-authority](specs/SPEC-authority.md)（契约、事实、投影、视图、模式矩阵、里程碑），本文件是本次施工的规格摘要与验收口径。
+> 取代关系：原「飞书话题收敛（M47）」以聊天为承载体，而 `6fbd392` 已把产品切成纯自动化（界面无聊天入口）；该计划随载体消失作废，历史留在 git 里。
 
 ## 1. 问题
 
-飞书里与工作台助手对话，三种情况目前都会散：
+工作台已经能「收事件 → 按规则建任务 → 派给智能体 → 记账」，但有三处缺口让外部事件不能放心接进来：
 
-1. **顺手接着聊** → 每条入站消息都 `chat.create` 一条新会话（`host/channels.ts#submit`），第二条就丢上下文，会话清单里一堆一行对话。
-2. **任务阻塞要人答** → 卡片是独立消息，链不上「这是哪个话题的第几个问题」。
-3. **换话题** → 与 1 同形，无法分辨「继续说」与「另起一题」。
+1. **没有发起者身份**：`event.received` 只有来源与类型，全库 17 条真实事件没有一条答得出「谁让它做」（`facts.ts:383-396`）。
+2. **没有准入与授权**：规则只有 `enabled`，事件命中即建任务；规则换版不通知在跑任务，恢复新一轮也不校验授权是否还成立（`rules.ts:93-105`、`run.ts:99-122`）。
+3. **沉默的放行与散落的打扰**：执行器提权恒回 `allowed-once`，只落会话日志（`run-approvals.ts:1-12`）；「需要人」散在 `cards.open` / `runs.waiting` / `run.approvals` 三处，38 张卡里 34 张是 `notice`。
 
 ## 2. 目标
 
-**收敛单位是话题**。一个话题 = 一条 issue 形状的实体 + 飞书里一条可追溯的线程；消息、任务、卡片、run 都挂在它下面。
+把 superagent 的 Gate / Mandate 语义落进现有事实日志，**不新增基础设施**：
 
-- 飞书侧：同一话题的所有回执 / 进展 / 提问落进**同一条话题线程**，重启后仍能认出来。
-- workbench 侧：同一话题的会话、任务、卡片收成一个条目，不是三个列表里各散一份。
+- **准入（admission）**：身份 × 名单 × 准入表 × 接受模式 → `explicit` / `inferred` / 拒绝，纯函数，不花 token。
+- **授权（mandate）**：任务被授予范围与依据，记规则集版本；恢复新一轮前重校验，换版只通知不中止。
+- **研判（assess）**：规则匹配不到时的一次 `purpose='assess'` 运行，每条启用规则给判定与证据；`observe` 期只记「本来会接」。
+- **注意力（attention）**：`attention.open` 一个入口，五类排序；`notice` 永不进入。
 
 ## 3. 非目标
 
-- 不做 LLM 判「这句是不是新话题」：不可解释、有延迟、误切丢上下文。话题切换由**结构证据**（回复链）与**显式命令**决定，兜底是活跃窗口。
-- 不改内核「同一会话同时只跑一轮」的并发规则；聊天忙时的排队在宿主（hub）。
-- 不给每个话题建一个群。
+- 不改阶段语义与 `acceptance` / `judge`（产出达标判定）——准入门与验收门是两件事，不共用事实。
+- 不引入 `rules.json` 文件源、配置表或第二版本号：`Authority` 随 `rule_sets` 整批替换，版本号就是 `rulesVersion`。
+- 不做远端 worker、多机领取、计费结算。
+- 不搬 superagent 的 Engine / Store / Effects / 轮询 pass / 面板实现。
 
-## 4. 规格
+## 4. 规格（A1 准入）
 
-### 4.1 数据契约
+完整契约见 [SPEC-authority](specs/SPEC-authority.md)。A1 施工只取其中四块：
 
-- `Conversation.threadId: Id | null`（投影列 `conversations.thread_id`，老行 / 老事实归一 `null`）。
-- `ChatCreateCommand.input.threadId?`：给了就必须存在（`not_found` 拒绝），聊天 run 的 `run.threadId` 继承它（`chatRunRow`）。
-  于是智能体在聊天轮里派出来的任务 / 子任务落进同一话题，而不是各开隐式线程。
-- `TaskInput.threadId?`：可选的「在哪个话题下建任务」，缺省仍是隐式线程（`source='manual'`）。
-- 话题身份沿用 `threads` 的 `(source, externalRef)`：`source='feishu'`、`externalRef` 由 hub 生成（不透明串，内核不认产品名）。
+### 4.1 契约（`packages/core/protocol/src/authority.ts`）
 
-### 4.2 话题判定（优先级固定）
+- `EventIdentity { kind: 'human'|'bot'|'system'; id: string; addressed: boolean }`
+- `AdmissionTable`（五格：listedAddressed / listedUnaddressed / unlistedAddressed / unlistedUnaddressed / botAddressed）+ `SourcePolicy { id, allowed[], bots[], receiveAll, admission }` + `Authority { mode, sources[], assessorAgentId, assessBatch, assessWindowMs }`
+- 上限常量 `AUTHORITY_LIMITS`（名单 ≤200、来源 ≤32、id ≤64、assessBatch 1–20、assessWindowMs 0–60000）
+- `compatAuthority()`：规则集没有 `authority` 块时的兼容值（`mode='auto'`、无来源策略），行为等价于今日「命中即建任务」
+- `normalizeAuthority(value)`：把历史上没有该块 / 缺字段的规则集归一成合法 `Authority`
 
-| 级         | 证据                                       | 说明                                  |
-| ---------- | ------------------------------------------ | ------------------------------------- |
-| 1 结构     | `thread_ref` / `root_ref` / `reply_to`     | 用户回复话题内任一消息 → 必然同一话题 |
-| 2 显式     | `/new` `/topic <n>` `/done` `/topics`      | 用户自己声明，命令不进模型            |
-| 3 活跃窗口 | 该 chat 最近一个 `open` 话题 + TTL 30 分钟 | 顺手接着聊的兜底                      |
+### 4.2 事实（`protocol/facts.ts`）
 
-同一 chat 有两个活跃话题时取 `lastActivityAt` 最新者，回执写明「接在『X』下」，不让用户猜。
+- `event.received` payload 增 `identity: EventIdentity`（老事实归一为 `{kind:'system', id:'unknown', addressed:true}`，不伪造发起者）
+- 新增 `event.admitted { eventId, ruleId, strength, basis, mode, policyVersion }`
+- 新增 `event.denied { eventId, ruleId: string|null, reason, policyVersion }`，`reason ∈ not-listed | mode-off | bot-not-listed | no-rule | assess-failed`
+- `event.skipped`（规则停用）保持不变，两者不合并
 
-### 4.3 入站与排队（宿主 hub，不改内核并发规则）
+### 4.3 判定（`kernel/src/scopes/admission.ts`）
 
-- 命中话题且会话空闲 → `chat.send` 到该会话（续接 `session_id`）。
-- 命中话题但会话忙（`queued`/`running`/`waiting`）→ 进 hub 的排队表，run 落终态后排空；回执写「排在当前这轮后面」。
-  现在的 `chat.send` 忙时 `conflict` 拒绝会直接丢话，这一条必须补。
-- 未命中 → 建话题（`thread.opened`）+ 建会话（`chat.create{threadId}`）+ `chat.send`。
+`admit(view, input, authority): Admission` 纯函数，返回 `{ strength, basis, allow }` 或 `{ allow: false, reason }`；`admissionFacts(...)` 产出上面两类事实。矩阵按 SPEC-authority §模式矩阵：名单内/外 × 点名/未点名、机器人、手工/系统，三种模式各一列。
 
-### 4.4 飞书侧
+### 4.4 接线（`scopes/commands/common.ts` + `view-spec.ts` + store）
 
-- 新话题发一条**话题头** interactive 卡（标题 / 状态 / 挂的任务数），其 `message_id` 作为话题锚点。
-- 之后回执、进展、`ask` 卡一律 `im +messages-reply --reply-in-thread` 挂在话题头下（`--reply-in-thread` 已核实存在于 `lark-cli im +messages-reply`）。
-- 收口时 patch 话题头为灰（结论 + 一句话状态）。话题头只在状态迁移时 patch（`running` → `waiting` → 终态），不每轮刷。
-- 通道端口 5 → **6**：`submit(text, hints, agent)`，`hints = { ref, chatId, rootRef, threadRef, replyTo }`。通道只交平台结构证据，派给谁与话题归属由宿主决定。
+- `receivedEventFacts` 在建任务前先判准入：`allow=false` 只产 `event.denied`，不建任务；`allow=true` 产 `event.admitted` 后照旧建任务。
+- `View.authority` 新切片（来自 `rule_sets.authority_json`），`viewSpec('event.received'|'app.event'|'rule.trigger'|'clock.tick')` 已有 `rule_sets`，无需新增表。
+- 宿主：`rule_sets` 增列 `authority_json`，`rules.replace` 接受 `authority`，投影写入 + 老行归一。
 
-### 4.5 workbench 侧
+## 5. 验收
 
-- 聊天栏的一级清单从「会话」换成「话题」：标题 + 状态徽标（执行中 / 等你 N / 空闲 / 已收口）+ 挂任务数 + 来源 + 最后活动。
-- 话题页 = issue 时间线（消息 + run + 卡 + 任务事件混排），沿用 `TaskActivity` 的呈现形状。
-- 看板仍按阶段分列，任务卡加话题徽标。
+- `pnpm check` 全绿（typecheck / lint / floor-guard / kernel 预算 / secrets / ui / packages / paths / 覆盖率 / diffcov / audit）。
+- `pnpm build` 成功；`check:kernel` 打印 `core` 行数不增、`admission.ts` ≤420 行。
+- 新增用例（`tests/kernel/admission.test.ts`、`tests/protocol/authority.test.ts`）覆盖模式矩阵 7×3 = 21 格。
+- **兼容模式零行为变化**：现有 `tests/kernel/commands*.test.ts` 与 `tests/host/*` 一条不改仍过；未配置 `authority` 的规则集，事件照旧建任务。
+- 存量数据：老 `event.received` 事实重建后 `identity_kind='system'`；规则集无 `authority` 时视图 `authority.current` 报 `mode='compat'`（A1 后半）。
 
-## 5. 任务分解（依赖顺序，每任务一个 RED→GREEN→回归→commit）
+## 6. 任务清单
 
-| #   | 任务                                                                                                                     | RED 落点                                                                                                  | 提交                                                    |
-| --- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| T1  | `Conversation.threadId` + `chat.create{threadId}` + 聊天 run 继承话题（列 / DDL / 补列 / `KERNEL_VERSION=M47.0.0` 重建） | `tests/kernel/decide.chat.test.ts`、`tests/host/store/columns.test.ts`、`tests/host/db.test.ts`           | `feat(kernel): 会话挂在话题线程上，聊天 run 继承话题`   |
-| T2  | 读视图：`threads.open`（按 `lastActivityAt` 倒序）+ `conversations.byThread`                                             | `tests/host/views.test.ts`（或既有 views 用例文件）                                                       | `feat(host): 话题线程与按话题取会话的读视图`            |
-| T3  | hub 话题路由 + 忙时排队 + 回执文案（活跃窗口 TTL）                                                                       | `tests/host/channels.test.ts`                                                                             | `feat(channels): 入站消息按话题收敛，忙时排队不丢话`    |
-| T4  | `InboundText` 增 `rootRef` / `threadRef` / `replyTo`（纯函数解析）                                                       | `tests/plugins/channels/feishu-inbound.test.ts`                                                           | `feat(feishu): 入站消息带上回复链证据`                  |
-| T5  | 通道端口 6：`submit(text, hints, agent)`，飞书传结构证据，hub 优先用结构证据命中话题                                     | `tests/protocol/channels.test.ts`、`tests/host/channels.test.ts`、`tests/plugins/channels/feishu.test.ts` | `feat(channels): 入站提交带上平台结构证据（端口 6）`    |
-| T6  | 飞书侧：`reply(..., {inThread})` / `replyCard`、话题头、进展与回执进线程、收口 patch                                     | `tests/plugins/channels/feishu.test.ts`                                                                   | `feat(feishu): 回执与进展落进话题线程，话题头承载状态`  |
-| T7  | 话题命令：`/new` `/topics` `/topic <n>` `/done` `/help`                                                                  | `tests/host/channels.test.ts`                                                                             | `feat(channels): 话题命令（新建 / 列表 / 切换 / 收口）` |
-| T8  | workbench 话题清单与话题页                                                                                               | `tests/renderer/...`（`ConversationList` 同位置）                                                         | `feat(ui): 聊天栏换成话题清单`                          |
-
-每个任务完成时：`pnpm check`（类型 / lint / floor / kernel 预算 / secrets / ui + 覆盖率 + 改动行 + 审计）exit 0，再单独 commit。
-
-### 施工记录（2026-11-16）
-
-按依赖实际落地顺序 **T1 → T2 → T4 → T5 → T3**（原表里 T3 排第三是笔误：hub 的话题判定要用
-T4 的回复链证据与 T5 的线索对象，先做会拿不到 chatId）。为此多出一片基础设施：
-
-- `thread.open` 命令（T3 的入口）：话题原先只由事件归并或建任务时顺带产生，IM 入站需要
-  「不带任务的起点」。命令面 39 → 40。
-- 通道端口 6 的线索对象里补 `scope`（连接 / 应用标识）：话题前缀是 `<scope>:<chatId>:`，
-  两个机器人各自的私聊因此不串台。
-
-| 原编号                   | 状态   | 提交                                                  |
-| ------------------------ | ------ | ----------------------------------------------------- |
-| T1 会话挂在话题上        | 完成   | `feat(kernel): 会话挂在话题线程上，聊天 run 继承话题` |
-| T2 读视图                | 完成   | `feat(host): 话题清单与按话题取会话的读视图`          |
-| T4 入站回复链证据        | 完成   | `feat(feishu): 入站消息带上回复链证据`                |
-| T5 端口 6                | 完成   | `feat(channels): 入站提交带上平台线索（端口 6）`      |
-| — `thread.open`          | 完成   | `feat(kernel): thread.open——先有话题、后有任务`       |
-| T3 hub 话题路由 + 排队   | 完成   | `feat(channels): 入站消息按话题收敛，忙时排队不丢话`  |
-| T6 飞书侧落线程 + 话题头 | 未开始 | —                                                     |
-| T7 话题命令              | 未开始 | —                                                     |
-| T8 workbench 话题清单    | 未开始 | —                                                     |
-
-### 修复记录（2026-11-16）
-
-T1 漏了一处：`chat.create` 校验 `threadId` 必须存在，但 `view-spec` 里这条命令的切片只有
-`agents` / `projects`——装载视图时 `threads` 是空表，hub 刚 `thread.open` 的话题立刻被判
-`话题不存在: <id>`，飞书里每一句入站消息都回「没派出去：话题不存在」。切片补上 `threads`，
-回归用例 `tests/host/store/chat-create-thread.test.ts`（真实 `viewSpec` + 真实投影；只走
-`decide` 单测手搓 view 发现不了，`tests/kernel/scopes/view-spec.test.ts` 的期望值同批改正）。
-
-## 6. 验收
-
-- `pnpm check` exit 0（覆盖率不下降，改动行 ≥90%）。
-- `pnpm e2e` 关键路径不回归（T8 之后跑）。
-- 有真机飞书可用时人工走一遍：连发两句 → 同一话题；`/new` → 新话题；任务 ask 出现在话题线程里。
-
-## 7. 已知边界
-
-- 私聊里 `--reply-in-thread` 的客户端可见形态需真机确认；不支持则退回「话题头 + 普通 reply 链」，命中判据改为按 `reply_to` 反查锚点表。
-- 话题头 `message_id` 是唯一跨重启锚点；内存里的活跃表只做加速，启动从 `threads.open` 补。
-- `card.answer` 是单选语义，多个问题不合成一张卡；话题头只做索引。
-- 群聊仍默认不收纯文本（沿用既有策略）。
+见 [tasks/a1-plan.md](../tasks/a1-plan.md)。执行顺序按依赖：T1 契约 → T2 事实 → T3 判定 → T4 接线 → T5 视图 → T6 规则页。

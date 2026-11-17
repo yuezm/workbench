@@ -496,7 +496,9 @@ const readAuthorityView = (db: DatabaseSync): AuthorityView => {
  */
 const readMandateByTask = (db: DatabaseSync, taskId: string): Mandate | null => {
   const row = db
-    .prepare(`SELECT ${columnsOf('mandates')} FROM mandates WHERE task_id = ? ORDER BY granted_at DESC, id DESC LIMIT 1`)
+    .prepare(
+      `SELECT ${columnsOf('mandates')} FROM mandates WHERE task_id = ? ORDER BY granted_at DESC, id DESC LIMIT 1`,
+    )
     .get(taskId) as unknown as object | undefined
   return row === undefined ? null : rowOf<Mandate>('mandates', row)
 }
@@ -1103,10 +1105,10 @@ export function queryView(db: DatabaseSync, view: ViewId, params?: unknown): unk
     case 'tasks.byParent':
       return readTasksByParent(db, readStringParam(params, 'taskId'))
     case 'task.byId':
+      return readTask(db, readStringParam(params, 'taskId'))
     case 'mandates.byTask':
       // A2：某任务的授权行（一任务一行；没有授权返回 null）
       return readMandateByTask(db, readStringParam(params, 'taskId'))
-      return readTask(db, readStringParam(params, 'taskId'))
     case 'thread.byId':
       // M6.5：线程详情 = 线程行 + 线程任务（按创建顺序）+ 各智能体最近会话 id
       return readThreadDetail(db, readStringParam(params, 'threadId'))

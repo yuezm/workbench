@@ -66,6 +66,8 @@ const view = (seed: { settings?: PluginSetting[]; version?: number } = {}): View
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,
+  // A1：准入配置；null = 兼容模式
+  authority: null,
   ruleFiredAt: new Map(),
   pluginSettings: seed.settings ?? [],
   pluginSettingsVersion: seed.version ?? 0,

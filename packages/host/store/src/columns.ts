@@ -392,6 +392,8 @@ export const TABLE_SHAPES: Readonly<Record<ProjectionTable, TableShape>> = {
     col2('version', 'version'),
     col2('replacedAt', 'replaced_at'),
     col('rules', 'rules_json', jsonArray),
+    // A1：准入配置随规则集同行；没有该块（兼容模式）时是 NULL
+    col('authority', 'authority_json', jsonNullable),
   ]),
   rule_fires: table(
     'rule_fires',

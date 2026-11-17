@@ -63,6 +63,8 @@ const view = (): View => ({
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,
+  // A1：准入配置；null = 兼容模式
+  authority: null,
   ruleFiredAt: new Map(),
   pluginSettings: [],
   pluginSettingsVersion: 0,
@@ -98,6 +100,8 @@ describe('kernel/decide app.event', () => {
           hops: 1,
           originRunId: null,
           dedupeKey: null,
+          // A1：app 事件没有外部发起者，身份恒为 system
+          identity: { kind: 'system', id: 'unknown', addressed: true },
         },
       },
     ])

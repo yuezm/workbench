@@ -205,6 +205,8 @@ const view = (
   rules: [],
   rulesVersion: 0,
   ruleSetReplacedAt: null,
+  // A1：准入配置；null = 兼容模式
+  authority: null,
   ruleFiredAt: new Map(),
   pluginSettings: [],
   pluginSettingsVersion: 0,

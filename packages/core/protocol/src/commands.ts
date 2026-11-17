@@ -16,6 +16,7 @@ import type {
   WorkflowInput,
 } from './entities'
 import type { AutomationRule } from './rules'
+import type { Authority } from './authority'
 import type { PluginSetCommandPayload, PluginSetting } from './plugins'
 
 /**
@@ -397,6 +398,11 @@ export type Command =
 export interface RulesReplaceCommand extends CommandBase {
   type: 'rules.replace'
   rules: AutomationRule[]
+  /**
+   * 准入配置（A1）：可选整块替换，缺省 = 兼容模式（不判定准入）。
+   * 与规则同一条版本线，不单独提交、不单独版本。
+   */
+  authority?: Authority
 }
 
 /**

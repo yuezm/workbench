@@ -133,6 +133,8 @@ const expected = [
   'card.resolved',
   'event.received',
   'event.dropped',
+  'event.admitted',
+  'event.denied',
   'event.merged',
   'event.skipped',
   'thread.opened',

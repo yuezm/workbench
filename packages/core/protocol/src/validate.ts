@@ -7,7 +7,7 @@
  * 引用是否存在、名称是否唯一、阶段流转是否合法由 `decide` 判断。
  */
 import { COMMAND_NAMES, type Command, type CommandName } from './commands'
-import { AUTHORITY_LIMITS, IDENTITY_KINDS } from './authority'
+import { AUTHORITY_LIMITS, ACCEPT_MODES, ADMISSION_CELLS, IDENTITY_KINDS } from './authority'
 import {
   ACCEPTANCE_LIMITS,
   AGENT_ENV_LIMITS,
@@ -668,6 +668,64 @@ const checkRule = (value: unknown, label: string): Check => {
   )
 }
 
+// ---------- 准入配置（A1） ----------
+
+/** 准入表：可有可无的五格，给了就必须是 `explicit|inferred|ignore`。 */
+const checkAdmissionTable = (value: unknown, label: string): Check => {
+  if (value === undefined || value === null) return null
+  const table = asRecord(value)
+  if (!table) return `${label} 必须是对象`
+  return (
+    optionalEnum(table.listedAddressed, `${label}.listedAddressed`, ADMISSION_CELLS) ??
+    optionalEnum(table.listedUnaddressed, `${label}.listedUnaddressed`, ADMISSION_CELLS) ??
+    optionalEnum(table.unlistedAddressed, `${label}.unlistedAddressed`, ADMISSION_CELLS) ??
+    optionalEnum(table.unlistedUnaddressed, `${label}.unlistedUnaddressed`, ADMISSION_CELLS) ??
+    optionalEnum(table.botAddressed, `${label}.botAddressed`, ADMISSION_CELLS)
+  )
+}
+
+/** 单条来源策略：`id` 必填；两个名单逐条非空、不超过单条长度上限。 */
+const checkSourcePolicy = (value: unknown, label: string): Check => {
+  const policy = asRecord(value)
+  if (!policy) return `${label} 必须是对象`
+  const name = (entry: unknown, at: string): Check => text(entry, at, AUTHORITY_LIMITS.identityId)
+  return (
+    required(policy.id, `${label}.id`, AUTHORITY_LIMITS.sourceId) ??
+    checkList(policy.allowed, `${label}.allowed`, AUTHORITY_LIMITS.identitiesPerSource, name) ??
+    checkList(policy.bots, `${label}.bots`, AUTHORITY_LIMITS.identitiesPerSource, name) ??
+    optionalBoolean(policy.receiveAll, `${label}.receiveAll`) ??
+    checkAdmissionTable(policy.admission, `${label}.admission`)
+  )
+}
+
+/**
+ * 准入配置整块（A1）：可选；给了 `mode` 必填，其余字段可省（缺省值由内核归一）。
+ * 形状只在这里判一次——`protocol/authority` 的 `normalizeAuthority` 与它对同一份数据
+ * 得出同样的结论，避免「校验放行、归一改成另一个值」。
+ */
+const checkAuthority = (value: unknown, label: string): Check => {
+  if (value === undefined || value === null) return null
+  const authority = asRecord(value)
+  if (!authority) return `${label} 必须是对象`
+  return (
+    enumOf(authority.mode, `${label}.mode`, ACCEPT_MODES) ??
+    checkList(authority.sources, `${label}.sources`, AUTHORITY_LIMITS.sources, checkSourcePolicy) ??
+    optionalId(authority.assessorAgentId, `${label}.assessorAgentId`) ??
+    optionalIntegerIn(
+      authority.assessBatch,
+      `${label}.assessBatch`,
+      AUTHORITY_LIMITS.assessBatchMin,
+      AUTHORITY_LIMITS.assessBatchMax,
+    ) ??
+    optionalIntegerIn(
+      authority.assessWindowMs,
+      `${label}.assessWindowMs`,
+      0,
+      AUTHORITY_LIMITS.assessWindowMsMax,
+    )
+  )
+}
+
 // ---------- 插件设置（M7） ----------
 
 /** 能力列表：枚举内、不重复、条数不超过能力全集。 */
@@ -842,7 +900,10 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'rules.replace':
       // 整批替换：逐条只校验形状；引用存在性 / cron 合法性 / id 唯一由内核判（整批拒绝）
       if (!Array.isArray(command.rules)) return 'rules 必须是数组'
-      return checkList(command.rules, 'rules', RULE_LIMITS.rules, checkRule)
+      return (
+        checkList(command.rules, 'rules', RULE_LIMITS.rules, checkRule) ??
+        checkAuthority(command.authority, 'authority')
+      )
     case 'rule.trigger':
       return requiredId(command.ruleId, 'ruleId')
     case 'rule.replay': {

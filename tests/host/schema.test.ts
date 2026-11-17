@@ -843,6 +843,7 @@ describe('规则投影（M6）', () => {
       'version',
       'replaced_at',
       'rules_json',
+      'authority_json',
     ])
     db.prepare(
       "INSERT INTO rule_sets (id, version, replaced_at, rules_json) VALUES ('current', 1, ?, '[]')",

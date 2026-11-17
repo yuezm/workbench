@@ -114,6 +114,8 @@ const view = (seed: Seed = {}): View => ({
   rules: seed.rules ?? [],
   rulesVersion: seed.rulesVersion ?? 0,
   ruleSetReplacedAt: seed.replacedAt === undefined ? CREATED : seed.replacedAt,
+  // A1：准入配置；null = 兼容模式
+  authority: null,
   ruleFiredAt: new Map(seed.firedAt ?? []),
   pluginSettings: [],
   pluginSettingsVersion: 0,

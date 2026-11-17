@@ -319,7 +319,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY CHECK (id = 'current'),
   version INTEGER NOT NULL,
   replaced_at TEXT NOT NULL,
-  rules_json TEXT NOT NULL DEFAULT '[]'
+  rules_json TEXT NOT NULL DEFAULT '[]',
+  authority_json TEXT
 );`
 
 /**

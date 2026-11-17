@@ -149,6 +149,8 @@ const view = (seed: Seed = {}): View => ({
   rules: seed.rules ?? [],
   rulesVersion: 1,
   ruleSetReplacedAt: CREATED,
+  // A1：准入配置；null = 兼容模式
+  authority: null,
   ruleFiredAt: new Map(),
   pluginSettings: [],
   pluginSettingsVersion: 0,

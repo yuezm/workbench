@@ -12,6 +12,7 @@ import type {
   WorkflowWithStages,
 } from '@workbench/protocol/entities'
 import type { FactPayload, FactType } from '@workbench/protocol/facts'
+import type { EventIdentity } from '@workbench/protocol/authority'
 import type {
   Actor,
   Decision,
@@ -23,7 +24,8 @@ import type {
   View,
 } from '../../core/types'
 import type { SettledRun } from '../run'
-import { eventThreadFacts, skippedRuleFacts } from '../rules'
+import { admit } from '../admission'
+import { eventThreadFacts, ruleMatchesEvent, skippedRuleFacts } from '../rules'
 
 /** 命令全部来自 owner（renderer 经宿主派发），事实的 actor 不带来源推导。 */
 export const OWNER: Actor = { kind: 'owner', via: 'ui' }
@@ -170,9 +172,17 @@ export function chatMessageFacts(
   ]
 }
 
+/** 没有发起者身份时（手工 / app / 派生 / 老宿主）统一按 system 处理。 */
+const SYSTEM_IDENTITY: EventIdentity = { kind: 'system', id: 'unknown', addressed: true }
+
 /**
- * 外部事件入账 + 规则匹配（M6）：产一条 `event.received`，超过跳数上限只产
- * `event.dropped`（熔断，不建任务）；否则立即按当前规则集建任务。
+ * 外部事件入账 + 准入 + 规则匹配（M6 / A1）。
+ *
+ * 顺序固定：跳数熔断 → 入账 → 准入 → 规则匹配建任务。准入只在规则集带了
+ * `authority` 块时生效（`view.authority !== null`）；兼容模式下与 M45 一字不差，
+ * 不产 `event.admitted` / `event.denied`，避免给存量库灌无用事实。
+ *
+ * 超出跳数上限只产 `event.dropped`；准入拒绝只产 `event.denied` 且**不建任务**。
  */
 export function receivedEventFacts(
   view: View,
@@ -186,6 +196,7 @@ export function receivedEventFacts(
     hops: number
     originRunId: string | null
     dedupeKey: string | null
+    identity?: EventIdentity
   },
   now: Iso,
   env: Environment,
@@ -202,6 +213,7 @@ export function receivedEventFacts(
       },
     ]
   }
+  const identity = event.identity ?? SYSTEM_IDENTITY
   const payload = {
     eventId,
     source: event.source,
@@ -213,11 +225,47 @@ export function receivedEventFacts(
     hops: event.hops,
     originRunId: event.originRunId,
     dedupeKey: event.dedupeKey,
+    identity,
   }
-  return [
-    { type: 'event.received', actor, at: now, payload },
+  const facts: FactDraft[] = [{ type: 'event.received', actor, at: now, payload }]
+  const authority = view.authority ?? null
+  if (authority !== null) {
+    const admission = admit({ source: event.source, identity }, authority)
+    if (!admission.allow) {
+      facts.push({
+        type: 'event.denied',
+        actor,
+        at: now,
+        payload: {
+          eventId,
+          ruleId: null,
+          reason: admission.reason,
+          policyVersion: view.rulesVersion,
+        },
+      })
+      return facts
+    }
+    for (const rule of view.rules) {
+      if (!rule.enabled || !ruleMatchesEvent(rule, payload)) continue
+      facts.push({
+        type: 'event.admitted',
+        actor,
+        at: now,
+        payload: {
+          eventId,
+          ruleId: rule.id,
+          strength: admission.strength,
+          basis: admission.basis,
+          mode: authority.mode,
+          policyVersion: view.rulesVersion,
+        },
+      })
+    }
+  }
+  facts.push(
     // M42：命中停用规则也要留痕（补跑的依据），再按启用规则建任务
     ...skippedRuleFacts(view, payload, view.rulesVersion, now),
     ...eventThreadFacts(view, payload, view.rulesVersion, now, env),
-  ]
+  )
+  return facts
 }

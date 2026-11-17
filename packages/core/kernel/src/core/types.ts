@@ -26,6 +26,7 @@ import type {
 import type { FactPayload, FactType } from '@workbench/protocol/facts'
 import type { Input } from '@workbench/protocol/inputs'
 import type { AutomationRule, RuleFireRow, RuleSetRow } from '@workbench/protocol/rules'
+import type { Authority } from '@workbench/protocol/authority'
 import type { EventSkipRow } from '@workbench/protocol/rules'
 import type { PluginSettingsRow } from '@workbench/protocol/plugins'
 import type { ThreadRow } from '@workbench/protocol/thread'
@@ -219,6 +220,11 @@ export interface View {
   rulesVersion: number
   /** M6：本版规则集的替换时刻（cron 规则首次触发的基线）；无规则集为 null */
   ruleSetReplacedAt: Iso | null
+  /**
+   * A1：准入配置（与规则集同一条版本线）。`null` / 缺省 = 规则集没有该块 = 兼容模式，
+   * 事件命中即建任务（M45 行为）。宿主恒装这一片；测试替身可省，缺省按兼容模式。
+   */
+  authority?: Authority | null
   /** M6：规则 id → 最近一次 cron 触发的计划时刻（去重与「只补最近一次」） */
   ruleFiredAt: Map<Id, Iso>
   /** M42：外部事件投影（只存事件本身，不含运行帧）；补跑按它重放 */

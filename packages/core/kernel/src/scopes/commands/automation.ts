@@ -2,6 +2,7 @@
  * 自动化规则 / 插件设置 / 外部事件命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
 import type { Input } from '@workbench/protocol/inputs'
+import { normalizeAuthority } from '@workbench/protocol/authority'
 import type { Decision, Environment, Iso, View } from '../../core/types'
 import { validatePluginSettings, replacedPluginSettings } from '../plugins'
 import { manualTriggerFacts, replayRule, validateRuleBatch } from '../rules'
@@ -24,6 +25,10 @@ export function replaceRules(
           version: result.version,
           replacedAt: now,
           rules: result.rules,
+          // A1：准入与规则同一条版本线；缺省不带该键 = 兼容模式
+          ...(input.authority === undefined
+            ? {}
+            : { authority: normalizeAuthority(input.authority) }),
         },
       },
       now,
@@ -86,6 +91,7 @@ export function receiveAppEvent(
   env: Environment,
 ): Decision {
   // app 插件事件（M5 只入账，M6 起命中规则建任务）：类型白名单由宿主入口先校验。
+  // A1：app 事件没有外部发起者，身份恒为 system（准入按「手工 / 系统」口径放行）。
   return done(
     receivedEventFacts(
       view,
@@ -114,6 +120,7 @@ export function receiveExternalEvent(
   env: Environment,
 ): Decision {
   // source 插件 / 宿主注入的外部事件（M6）：入账后立即匹配规则建任务。
+  // A1：发起者身份随事件进入准入判定；缺失时按 system 处理（老宿主）。
   return done(
     receivedEventFacts(
       view,
@@ -127,6 +134,7 @@ export function receiveExternalEvent(
         hops: input.hops ?? 1,
         originRunId: input.originRunId ?? null,
         dedupeKey: input.event.dedupeKey ?? null,
+        identity: input.event.identity,
       },
       now,
       env,

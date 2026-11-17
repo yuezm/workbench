@@ -8,6 +8,7 @@
  * 形状上限在这里定义一次：`protocol/validate` 用它校验不可信输入，
  * 内核 `kernel/rules` 用它做决策前的前置校验（两端同一口径）。
  */
+import type { Authority } from './authority'
 
 /** 规则字段上限（renderer / 内核共用；超限拒收，不截断）。 */
 export const RULE_LIMITS = {
@@ -168,6 +169,11 @@ export interface RuleSetRow {
   /** 本次替换的事实时间（cron 规则首次触发的基线） */
   replacedAt: string
   rules: AutomationRule[]
+  /**
+   * 准入配置（A1）：与规则集同一条版本线，缺省 = 兼容模式（不做准入判定）。
+   * 不单独成表、不单独版本——Mandate 记的 `policyVersion` 就是这里的 `version`。
+   */
+  authority?: Authority
 }
 
 /**

@@ -624,6 +624,8 @@ export function loadView(
     rules: ruleSet?.rules ?? [],
     rulesVersion: ruleSet?.version ?? 0,
     ruleSetReplacedAt: ruleSet?.replacedAt ?? null,
+    // A1：准入配置与规则集同一行；缺该块 = 兼容模式（不做准入判定）
+    authority: ruleSet?.authority ?? null,
     ruleFiredAt: slice.has('rule_fires') ? readRuleFiredAt(db) : new Map(),
     pluginSettings: pluginSettings?.settings ?? [],
     pluginSettingsVersion: pluginSettings?.version ?? 0,

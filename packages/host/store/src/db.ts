@@ -481,6 +481,22 @@ export function upgradeLegacyCards(db: DatabaseSync): boolean {
 }
 
 /**
+ * 旧 `rule_sets` 一次性补列（A1 准入配置）：缺 `authority_json` 就补，可空、无默认值。
+ *
+ * 补出来的 NULL 就是兼容模式（规则集没有准入块），与 `kernel` 读侧 `?? null` 同口径；
+ * 真正的历史值仍由投影重建按事实重放，这里只保证「列存在、写入不失败」。
+ */
+export function upgradeLegacyRuleSets(db: DatabaseSync): boolean {
+  const columns = tableColumns(db, 'rule_sets')
+  if (columns.size === 0) return false
+  if (columns.has('authority_json')) return false
+  withTx(db, () => {
+    db.exec('ALTER TABLE rule_sets ADD COLUMN authority_json TEXT')
+  })
+  return true
+}
+
+/**
  * 旧 `conversations` 补列清单：M9 归档时间 + M11 所属项目 + M47 所属话题（都走上表补列）。
  * 三列都可空、无默认值：老对话按「未归档」/「默认目录」/「没有话题」归一。
  */
@@ -553,6 +569,8 @@ export function openDatabase(filePath: string): DatabaseSync {
     upgradeLegacyConversations(db)
     // M12：卡片补类型列（只增不改；历史行由投影重建按事实归一）
     upgradeLegacyCards(db)
+    // A1：规则集补准入配置列（只增不改；NULL = 兼容模式）
+    upgradeLegacyRuleSets(db)
     // M6 / M6.5 / M7：tasks 需要时物理重建（M7 扩展 origin CHECK），否则只补缺列；必须在导入/写入之前完成。
     rebuildLegacyTasks(db)
     upgradeLegacyTasks(db)

@@ -286,10 +286,14 @@ export function AiWorkflowPage(): ReactElement {
   /**
    * 新建任务：失败时既要挂页面顶部错误条，也要把错误抛回弹窗（`TaskDialog` 就地展示）。
    * 只 `setError` 不抛的话，弹窗里看不到任何原因，用户只会觉得「点了没反应」。
+   *
+   * 建成后把侧栏工作流切到任务所属的那条（M41）：任务可以投给别的工作流，而看板只显示
+   * 当前工作流的卡，不跟着切就看不到刚建的任务，人只会当成没建成。
    */
   const createTask = async (input: TaskInput): Promise<void> => {
     try {
       await getKernelStore().dispatch({ type: 'task.create', commandId: '', input })
+      setSelectedId(input.workflowId)
       setError(null)
       setDialogOpen(false)
     } catch (e) {
@@ -336,37 +340,6 @@ export function AiWorkflowPage(): ReactElement {
   }
 
   const active = workflows.find((w) => w.id === activeId)
-
-  /**
-   * 列内快速新建：点某列底部的「+ 新建任务」，回车即以该阶段为起始阶段建任务。
-   * 标题 + 描述一起提交（`agent` 阶段的列建完立刻派活，只有标题智能体没法干）；
-   * 失败挂页面错误条并抛回列内。
-   * `workflowId` 由调用处给（看板只在有工作流时渲染，这里不重复判空）。
-   */
-  const quickCreateTask = async (
-    workflowId: string,
-    stageId: string,
-    title: string,
-    description: string,
-  ): Promise<void> => {
-    try {
-      await getKernelStore().dispatch({
-        type: 'task.create',
-        commandId: '',
-        input: {
-          title,
-          description,
-          workflowId,
-          stageId,
-          projectId: activeProject?.id ?? null,
-        },
-      })
-      setError(null)
-    } catch (e) {
-      setError(errMsg(e))
-      throw e instanceof Error ? e : new Error(String(e))
-    }
-  }
 
   return (
     // 两栏：单列侧栏（w-64）+ 内容区，吃满 shell 顶部栏以下的高度
@@ -456,9 +429,6 @@ export function AiWorkflowPage(): ReactElement {
                     onMoveToStage={moveToStage}
                     onCompleteTask={completeTask}
                     onNewTask={() => setDialogOpen(true)}
-                    onQuickCreateTask={(stageId, title, description) =>
-                      quickCreateTask(active.id, stageId, title, description)
-                    }
                     onOpenTask={(task) => openTask(task.id)}
                     onOpenThread={openThread}
                   />
@@ -550,9 +520,10 @@ export function AiWorkflowPage(): ReactElement {
         )}
       </main>
 
-      {dialogOpen && active && (
+      {dialogOpen && workflows.length > 0 && (
         <TaskDialog
-          workflow={active}
+          workflows={workflows}
+          defaultWorkflowId={activeId ?? ''}
           // 默认目录不传 project：弹窗只读展示落点路径
           project={activeProject}
           defaultPath={defaultPath}

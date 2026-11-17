@@ -53,7 +53,7 @@ test('任务详情页：补一条反馈，上下文与运行记录一起展示',
 
   // 1) 建任务（首阶段 agent：入队一条 run，运行时停用所以不会执行）
   await page.getByRole('button', { name: 'AI 工作流' }).click()
-  await page.getByRole('button', { name: '新建任务' }).click()
+  await page.getByRole('button', { name: '新建任务', exact: true }).click()
   await page.getByLabel('任务标题').fill('e2e 反馈任务')
   // M18：默认落内置「待办」（不派活），要进 agent 阶段得显式选
   await page.getByLabel('起始阶段').click()
@@ -94,5 +94,5 @@ test('任务详情页：补一条反馈，上下文与运行记录一起展示',
   // 6) 返回看板
   await page.getByRole('button', { name: '返回' }).click()
   await expect(detail).toBeHidden()
-  await expect(page.getByRole('button', { name: '新建任务' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建任务', exact: true })).toBeVisible()
 })

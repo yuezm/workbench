@@ -4,10 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Project, WorkflowStage, WorkflowWithStages } from '@workbench/protocol/entities'
 import { TaskDialog } from '@workbench/client-app-ai-workflow/components/TaskDialog'
 
-function stage(id: string, name: string, position: number): WorkflowStage {
+function stage(id: string, name: string, position: number, workflowId = 'w1'): WorkflowStage {
   return {
     id,
-    workflowId: 'w1',
+    workflowId,
     name,
     position,
     entryMode: 'none',
@@ -24,6 +24,15 @@ const wf: WorkflowWithStages = {
   description: '',
   createdAt: 't',
   stages: [stage('s0', '待办', 0), stage('s1', '进行中', 1)],
+}
+
+/** 第二条工作流：弹窗里可以换投递目标（M41） */
+const wfOther: WorkflowWithStages = {
+  id: 'w2',
+  name: '缺陷修复',
+  description: '',
+  createdAt: 't',
+  stages: [stage('o0', '定位复现', 0, 'w2'), stage('o1', '修复', 1, 'w2')],
 }
 
 const project: Project = {
@@ -44,7 +53,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={onSave}
@@ -71,7 +81,8 @@ describe('TaskDialog', () => {
   it('所属项目是只读展示：项目名 + 文件夹路径', () => {
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={vi.fn()}
@@ -88,7 +99,13 @@ describe('TaskDialog', () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(
-      <TaskDialog workflow={wf} defaultPath={DEFAULT_PATH} onSave={onSave} onCancel={vi.fn()} />,
+      <TaskDialog
+        workflows={[wf]}
+        defaultWorkflowId="w1"
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
     )
     const row = screen.getByLabelText('所属项目')
     expect(row).toHaveTextContent('默认目录')
@@ -101,7 +118,15 @@ describe('TaskDialog', () => {
   })
 
   it('默认目录路径未知时给兜底文案', () => {
-    render(<TaskDialog workflow={wf} defaultPath="" onSave={vi.fn()} onCancel={vi.fn()} />)
+    render(
+      <TaskDialog
+        workflows={[wf]}
+        defaultWorkflowId="w1"
+        defaultPath=""
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
     expect(screen.getByLabelText('所属项目')).toHaveTextContent('未配置项目时的工作目录')
   })
 
@@ -110,7 +135,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={onSave}
@@ -130,7 +156,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={onSave}
@@ -149,7 +176,8 @@ describe('TaskDialog', () => {
   it('标题与描述带上协议上限：超长在输入阶段就挡住', () => {
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={vi.fn()}
@@ -163,7 +191,8 @@ describe('TaskDialog', () => {
   it('必填标识常驻：任务标题带星号与读屏说明', () => {
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={vi.fn()}
@@ -178,7 +207,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={vi.fn()}
@@ -198,7 +228,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={onSave}
@@ -217,7 +248,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={onSave}
@@ -236,7 +268,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={onSave}
@@ -248,17 +281,70 @@ describe('TaskDialog', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('纯文本失败')
   })
 
-  it('工作流没有阶段时兜底为空起始阶段', () => {
+  it('工作流没有阶段时兜底为空起始阶段，提交就地报错', async () => {
+    const onSave = vi.fn()
+    const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={{ ...wf, stages: [] }}
+        workflows={[{ ...wf, stages: [] }]}
+        defaultWorkflowId="w1"
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('请选择')
+
+    await user.type(screen.getByLabelText('任务标题'), '没有阶段可投')
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByRole('alert')).toHaveTextContent('这条工作流还没有可用的阶段')
+  })
+
+  it('可以在弹窗里换工作流：起始阶段跟着回落，创建时带新的 workflowId / stageId', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <TaskDialog
+        workflows={[wf, wfOther]}
+        defaultWorkflowId="w1"
+        project={project}
+        defaultPath={DEFAULT_PATH}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+    // 默认停在看板当前那条工作流与其首阶段
+    expect(screen.getByRole('combobox', { name: '所属工作流' })).toHaveTextContent('研发')
+    expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('待办')
+
+    await user.type(screen.getByLabelText('任务标题'), '换个流程投')
+    // 先选一个非首阶段，再换工作流：阶段必须回落到新工作流的首阶段，不能留着旧阶段 id
+    await user.click(screen.getByRole('combobox', { name: '起始阶段' }))
+    await user.click(await screen.findByRole('option', { name: '进行中' }))
+    await user.click(screen.getByRole('combobox', { name: '所属工作流' }))
+    await user.click(await screen.findByRole('option', { name: '缺陷修复' }))
+    expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('定位复现')
+
+    await user.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave.mock.calls[0][0]).toMatchObject({ workflowId: 'w2', stageId: 'o0' })
+  })
+
+  it('默认工作流 id 已失效时回落到第一个工作流', () => {
+    render(
+      <TaskDialog
+        workflows={[wf, wfOther]}
+        defaultWorkflowId="已被删掉的工作流"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={vi.fn()}
         onCancel={vi.fn()}
       />,
     )
-    expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('请选择')
+    expect(screen.getByRole('combobox', { name: '所属工作流' })).toHaveTextContent('研发')
+    expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('待办')
   })
 
   it('Esc 关闭弹窗', async () => {
@@ -266,7 +352,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={vi.fn()}
@@ -282,7 +369,8 @@ describe('TaskDialog', () => {
     const user = userEvent.setup()
     render(
       <TaskDialog
-        workflow={wf}
+        workflows={[wf]}
+        defaultWorkflowId="w1"
         project={project}
         defaultPath={DEFAULT_PATH}
         onSave={vi.fn()}

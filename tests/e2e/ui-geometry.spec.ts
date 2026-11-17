@@ -78,7 +78,7 @@ test('界面几何审计：看板 / 任务详情 / 设置 / 弹窗 / 窄窗', as
   await audit('首屏：任务看板')
 
   // 2) 新建任务弹窗（表单布局最容易错位：label 与输入框宽度、底部按钮行）
-  await page.getByRole('button', { name: '新建任务' }).click()
+  await page.getByRole('button', { name: '新建任务', exact: true }).click()
   await expect(page.getByRole('dialog')).toBeVisible()
   await audit('弹窗：新建任务')
   await page.keyboard.press('Escape')

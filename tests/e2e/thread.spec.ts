@@ -83,7 +83,7 @@ test('线程详情页：手工任务隐式线程 → 笔记 → 绑定入口 →
 
   // 1) 建手工任务：自动挂隐式线程（source=manual / externalRef=null）
   await page.getByRole('button', { name: 'AI 工作流' }).click()
-  await page.getByRole('button', { name: '新建任务' }).click()
+  await page.getByRole('button', { name: '新建任务', exact: true }).click()
   await page.getByLabel('任务标题').fill('e2e 线程任务')
   await page.getByRole('button', { name: '创建' }).click()
   await expect(page.getByText('e2e 线程任务', { exact: true })).toBeVisible()
@@ -129,7 +129,7 @@ test('线程详情页：手工任务隐式线程 → 笔记 → 绑定入口 →
   await expect(threadPage).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(threadPage).toBeHidden()
-  await expect(page.getByRole('button', { name: '新建任务' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '新建任务', exact: true })).toBeVisible()
 
   await expect
     .poll(() => readThreadState(seed.dbPath), { timeout: 15_000 })
@@ -204,7 +204,7 @@ test('删除线程：连带任务与执行记录一起清掉，并回到看板�
   expect(archiveBox.width).toBeGreaterThan(stageBox.width)
 
   // 建任务：起始阶段选「待办」（entryMode=none，不产 run），线程与任务各一条
-  await page.getByRole('button', { name: '新建任务' }).click()
+  await page.getByRole('button', { name: '新建任务', exact: true }).click()
   await page.getByLabel('任务标题').fill('e2e 待删任务')
   await page.getByLabel('起始阶段').click()
   await page.getByRole('option', { name: '待办' }).click()
@@ -235,7 +235,7 @@ test('删除线程：连带任务与执行记录一起清掉，并回到看板�
   expect(existsSync(path.join(userDataDir, 'artifacts', 'threads', threadId))).toBe(false)
 })
 
-test('看板列内快速新建：标题 + 描述落到该阶段，agent 列建完即带内容派活', async () => {
+test('新建任务弹窗：标题 + 描述落到指定起始阶段，agent 阶段建完即带内容派活', async () => {
   test.setTimeout(120_000)
 
   const userDataDir = createTempUserDataDir()
@@ -246,34 +246,47 @@ test('看板列内快速新建：标题 + 描述落到该阶段，agent 列建�
 
   await page.getByRole('button', { name: 'AI 工作流' }).click()
 
-  // 「待办」（entryMode=none）：标题 + 描述一起提交，描述里的 Enter 只换行
-  const stage = page.getByRole('group', { name: '阶段：待办' })
-  await stage.getByRole('button', { name: '在「待办」阶段添加任务' }).click()
-  const input = stage.getByLabel('阶段「待办」的新任务标题')
-  await expect(input).toBeFocused()
-  await input.fill('列内任务一')
-  await stage.getByLabel('阶段「待办」的新任务要求').fill('把按钮改成绿色\n并补一条用例')
-  await stage.getByLabel('阶段「待办」的新任务要求').press('Control+Enter')
-  await expect(page.getByRole('button', { name: '任务：列内任务一' })).toBeVisible()
+  /**
+   * 弹窗建一张卡：起始阶段默认首阶段，要别的阶段就显式选。
+   * 列内快速新建已下线（M41），「从指定阶段起卡」只剩这一条路径。
+   */
+  const createInStage = async (
+    title: string,
+    stageName: string,
+    description = '',
+  ): Promise<void> => {
+    await page.getByRole('button', { name: '新建任务', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel('任务标题').fill(title)
+    await dialog.getByRole('combobox', { name: '起始阶段' }).click()
+    await page.getByRole('option', { name: stageName }).click()
+    // 空描述也照样填：fill('') 只是清空，不引入分支
+    await dialog.getByLabel('任务描述').fill(description)
+    await dialog.getByRole('button', { name: '创建' }).click()
+    await expect(dialog).toBeHidden()
+    await expect(page.getByRole('button', { name: `任务：${title}` })).toBeVisible()
+  }
 
-  // 成功后在原列清空输入、保持展开：接着敲第二张（这次用「添加」按钮）
-  await expect(stage.getByLabel('阶段「待办」的新任务标题')).toHaveValue('')
-  await stage.getByLabel('阶段「待办」的新任务标题').fill('列内任务二')
-  await stage.getByRole('button', { name: '添加' }).click()
-  await expect(page.getByRole('button', { name: '任务：列内任务二' })).toBeVisible()
+  // 「待办」（entryMode=none）：多行描述原样落库
+  await createInStage('弹窗任务一', '待办', '把按钮改成绿色\n并补一条用例')
+  // 只有标题也能建：「待办」列不派活，描述可空
+  await createInStage('弹窗任务二', '待办')
+  // 「执行」（entryMode=agent）：建完立刻派活，要求随任务一起落库，智能体才有内容可做
+  await createInStage('执行任务', '执行', '跑一遍构建并汇报失败项')
 
-  // 「执行」（entryMode=agent）：建完立刻派活，但要求随任务一起落库，智能体有内容可做
-  const exec = page.getByRole('group', { name: '阶段：执行' })
-  await exec.getByRole('button', { name: '在「执行」阶段添加任务' }).click()
-  await exec.getByLabel('阶段「执行」的新任务标题').fill('执行任务')
-  await exec.getByLabel('阶段「执行」的新任务要求').fill('跑一遍构建并汇报失败项')
-  await exec.getByLabel('阶段「执行」的新任务要求').press('Control+Enter')
-  await expect(page.getByRole('button', { name: '任务：执行任务' })).toBeVisible()
+  // 卡片真的进了目标列：待办 2 张、执行 1 张（不是都堆在首列）
+  await expect(
+    page.getByRole('group', { name: '阶段：待办' }).getByRole('button', { name: /^任务：/ }),
+  ).toHaveCount(2)
+  await expect(
+    page.getByRole('group', { name: '阶段：执行' }).getByRole('button', { name: /^任务：/ }),
+  ).toHaveCount(1)
 
   const db = new DatabaseSync(seed.dbPath)
   try {
     db.exec('PRAGMA busy_timeout = 5000')
-    // 三张卡都落在各自阶段（不是首阶段，也不是别的列），描述随行落库
+    // 两张卡都落在「待办」（不是首阶段以外的列），描述随行落库
     const todoRows = db
       .prepare(
         `SELECT t.title, t.description FROM tasks t
@@ -282,8 +295,8 @@ test('看板列内快速新建：标题 + 描述落到该阶段，agent 列建�
       )
       .all() as Array<{ title: string; description: string }>
     expect(todoRows).toEqual([
-      { title: '列内任务一', description: '把按钮改成绿色\n并补一条用例' },
-      { title: '列内任务二', description: '' },
+      { title: '弹窗任务一', description: '把按钮改成绿色\n并补一条用例' },
+      { title: '弹窗任务二', description: '' },
     ])
 
     const execRow = db
@@ -294,7 +307,7 @@ test('看板列内快速新建：标题 + 描述落到该阶段，agent 列建�
       )
       .get() as { id: string; description: string } | undefined
     expect(execRow).toMatchObject({ description: '跑一遍构建并汇报失败项' })
-    // agent 列建完立刻入队一轮 run（运行时停用 → 停在 queued，不起子进程）
+    // agent 阶段建完立刻入队一轮 run（运行时停用 → 停在 queued，不起子进程）
     const queued = db
       .prepare("SELECT COUNT(*) AS n FROM runs WHERE task_id = ? AND status = 'queued'")
       .get(execRow?.id ?? '') as { n: number }

@@ -197,6 +197,14 @@ const FEATURE_REMOVALS = {
     ],
     reason: '连接不再绑「派给哪个智能体」（飞书不做聊天），相关交互断言随字段删除',
   },
+  'tests/renderer/src/apps/ai-workflow/components/KanbanBoard.test.tsx': {
+    sources: [
+      'packages/client/app-ai-workflow/src/components/KanbanBoard.tsx',
+      'packages/client/app-ai-workflow/src/AiWorkflowPage.tsx',
+    ],
+    reason:
+      '列内快速新建整体下线（M41：新建入口收敛到弹窗），就地建卡的整组用例随入口删除；等价断言迁到 AiWorkflowPage / TaskDialog 的弹窗路径用例与 thread.spec 的 e2e',
+  },
 }
 /** 本次 diff 里被新增 / 修改 / 删除的源码路径（功能删除豁免的成立条件） */
 const touchedSources = new Set([...addedPaths, ...deleted])

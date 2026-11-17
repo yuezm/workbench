@@ -73,6 +73,17 @@ const wf: WorkflowWithStages = {
   stages: [stage('s0', '待办', 0, 'none'), stage('s1', '审核', 1, 'user')],
 }
 
+/** 第二条工作流：新建任务弹窗里可以换投递目标（M41），阶段 id 与 `wf` 不重叠 */
+const secondWorkflow: WorkflowWithStages = {
+  ...wf,
+  id: 'w2',
+  name: '缺陷流程',
+  stages: [
+    { ...stage('o0', '报告', 0, 'none'), workflowId: 'w2' },
+    { ...stage('o1', '修复', 1, 'none'), workflowId: 'w2' },
+  ],
+}
+
 /** 当前项目（M10）：任务都落在它下面，看板与新建任务都依赖它存在 */
 const project: Project = {
   id: 'p1',
@@ -802,24 +813,24 @@ describe('AiWorkflowPage', () => {
     )
   })
 
-  it('列内快速新建（默认目录）：projectId 落成 null，标题与要求一起提交', async () => {
+  it('新建任务（默认目录）：projectId 落成 null，标题与描述一起提交', async () => {
     seedBase()
     kernel.setView('runtimes.default-workdir', undefined, DEFAULT_PATH)
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    // 先切到默认目录：此时没有选中项目，快速新建必须把归属落成 null
+    // 先切到默认目录：此时没有选中项目，新建任务必须把归属落成 null
     await user.click(await screen.findByRole('button', { name: '默认目录' }))
-    await user.click(await screen.findByRole('button', { name: '在「待办」阶段添加任务' }))
-    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '快速建的')
-    await user.type(screen.getByLabelText('阶段「待办」的新任务要求'), '只写标题也行')
-    await user.click(screen.getByRole('button', { name: '添加' }))
+    await user.click(await screen.findByRole('button', { name: '新建任务' }))
+    await user.type(screen.getByLabelText('任务标题'), '默认目录建的')
+    await user.type(screen.getByLabelText('任务描述'), '只写标题也行')
+    await user.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() =>
       expectDispatched({
         type: 'task.create',
         input: expect.objectContaining({
-          title: '快速建的',
+          title: '默认目录建的',
           description: '只写标题也行',
           workflowId: 'w1',
           stageId: 's0',
@@ -829,7 +840,7 @@ describe('AiWorkflowPage', () => {
     )
   })
 
-  it('列内快速新建失败且后端抛非 Error：页面错误条与列内都按字符串展示，输入不丢', async () => {
+  it('新建任务失败且后端抛非 Error：页面错误条与弹窗都按字符串展示，输入不丢', async () => {
     seedBase()
     dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
       command.type === 'task.create'
@@ -839,13 +850,13 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    await user.click(await screen.findByRole('button', { name: '在「待办」阶段添加任务' }))
-    await user.type(screen.getByLabelText('阶段「待办」的新任务标题'), '会失败的')
-    await user.click(screen.getByRole('button', { name: '添加' }))
+    await user.click(await screen.findByRole('button', { name: '新建任务' }))
+    await user.type(screen.getByLabelText('任务标题'), '会失败的')
+    await user.click(screen.getByRole('button', { name: '创建' }))
 
-    // 页面顶部一条 + 列内一条：同一个字符串，界面不崩、输入留着可重试
+    // 页面顶部一条 + 弹窗一条：同一个字符串，界面不崩、输入留着可重试
     await waitFor(() => expect(screen.getAllByText('看板写不进去')).toHaveLength(2))
-    expect(screen.getByLabelText('阶段「待办」的新任务标题')).toHaveValue('会失败的')
+    expect(screen.getByLabelText('任务标题')).toHaveValue('会失败的')
   })
 
   it('项目弹窗：新建项目 dispatch project.create，成功后选中新项目', async () => {
@@ -1188,21 +1199,24 @@ describe('AiWorkflowPage', () => {
     expect(screen.getByText(/工作流「研发」/)).toBeInTheDocument()
   })
 
-  it('列内快速新建：标题 + 描述一起 dispatch task.create（带 stageId 与项目）', async () => {
+  it('新建任务：标题 + 描述 + 所选起始阶段一起 dispatch task.create（带项目）', async () => {
     seedBase()
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    await user.click(await screen.findByRole('button', { name: '在「审核」阶段添加任务' }))
-    await user.type(screen.getByLabelText('阶段「审核」的新任务标题'), '列内新任务')
-    await user.type(screen.getByLabelText('阶段「审核」的新任务要求'), '把按钮改成绿色')
-    await user.keyboard('{Control>}{Enter}{/Control}')
+    await user.click(await screen.findByRole('button', { name: '新建任务' }))
+    await user.type(screen.getByLabelText('任务标题'), '弹窗新任务')
+    // 起始阶段默认首阶段，这里显式选中间那一列：弹窗是「从指定阶段起卡」的唯一入口
+    await user.click(screen.getByRole('combobox', { name: '起始阶段' }))
+    await user.click(await screen.findByRole('option', { name: '审核' }))
+    await user.type(screen.getByLabelText('任务描述'), '把按钮改成绿色')
+    await user.click(screen.getByRole('button', { name: '创建' }))
 
     await waitFor(() =>
       expectDispatched({
         type: 'task.create',
         input: {
-          title: '列内新任务',
+          title: '弹窗新任务',
           description: '把按钮改成绿色',
           workflowId: 'w1',
           stageId: 's1',
@@ -1212,7 +1226,7 @@ describe('AiWorkflowPage', () => {
     )
   })
 
-  it('列内新建失败：列内与页面顶部各展示一份原因，输入保留', async () => {
+  it('新建任务失败：弹窗与页面顶部各展示一份原因，输入保留', async () => {
     seedBase()
     dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
       command.type === 'task.create'
@@ -1222,12 +1236,40 @@ describe('AiWorkflowPage', () => {
     const user = userEvent.setup()
     render(<AiWorkflowPage />)
 
-    await user.click(await screen.findByRole('button', { name: '在「审核」阶段添加任务' }))
-    const input = screen.getByLabelText('阶段「审核」的新任务标题')
-    await user.type(input, '重复任务{Enter}')
+    await user.click(await screen.findByRole('button', { name: '新建任务' }))
+    const input = screen.getByLabelText('任务标题')
+    await user.type(input, '重复任务')
+    await user.click(screen.getByRole('button', { name: '创建' }))
 
     expect(await screen.findAllByText('任务标题重复')).toHaveLength(2)
     expect(input).toHaveValue('重复任务')
+  })
+
+  it('建成后看板切到任务所属的工作流：不切就看不到刚建的卡', async () => {
+    seedBase()
+    kernel.setView('workflows.all', undefined, [wf, secondWorkflow])
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    // 默认停在第一条工作流
+    expect(await screen.findByText(/工作流「研发」/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新建任务' }))
+    // 弹窗默认也是当前看板那条工作流
+    expect(screen.getByRole('combobox', { name: '所属工作流' })).toHaveTextContent('研发')
+    await user.type(screen.getByLabelText('任务标题'), '投给缺陷流程')
+    await user.click(screen.getByRole('combobox', { name: '所属工作流' }))
+    await user.click(await screen.findByRole('option', { name: '缺陷流程' }))
+    await user.click(screen.getByRole('button', { name: '创建' }))
+
+    // 看板跟着切过去，而不是停在「研发」让人以为没建成
+    expect(await screen.findByText(/工作流「缺陷流程」/)).toBeInTheDocument()
+    await waitFor(() =>
+      expectDispatched({
+        type: 'task.create',
+        input: expect.objectContaining({ workflowId: 'w2', stageId: 'o0' }),
+      }),
+    )
   })
 
   it('删除线程后回到看板：线程页不残留「线程不存在」', async () => {

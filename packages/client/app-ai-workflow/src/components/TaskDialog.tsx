@@ -21,7 +21,13 @@ import {
 import { Textarea } from '@workbench/client-ui-primitives/textarea'
 
 interface TaskDialogProps {
-  workflow: WorkflowWithStages
+  /**
+   * 全部工作流（不只是看板当前那一条）：任务像 issue，投给哪条流程由人在这里指定。
+   * 调用处保证非空——没有工作流时看板整块不渲染，入口也点不出来。
+   */
+  workflows: readonly WorkflowWithStages[]
+  /** 默认选中的工作流：看板当前停在哪条流程上，就用它当默认值 */
+  defaultWorkflowId: string
   /**
    * 当前项目（M11）：`undefined` = 默认目录（类别与聊天同口径，`projectId` 传 null）。
    * 弹窗只读展示「建在哪个目录」，选择由侧栏顶层的项目切换器负责。
@@ -36,15 +42,23 @@ interface TaskDialogProps {
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /**
- * 新建任务弹窗：可指定从哪个阶段开始（默认首阶段）。
+ * 新建任务弹窗：指定投给哪条工作流、从哪个阶段开始（默认当前看板的工作流 + 首阶段）。
  *
- * 校验与反馈（2026-11-08 修）：标题是内核的必填项，所以
+ * 工作流可选（M41）：弹窗不再是「当前看板的附属动作」，任务可以在建的时候直接投到
+ * 别的工作流——只换 `TaskInput.workflowId`，协议与内核不变：`workflowId` / `currentStageId`
+ * 仍是任务的必填归属，不存在「没有工作流」的任务。
+ *
+ * 选中值的存法：**只存用户点过的那个**，失效就在渲染期派生回落（`workflow` / `stage`），
+ * 不用 effect 同步 state——否则切工作流会多一轮渲染，还会在切回来的路上把旧阶段写回去。
+ *
+ * 校验与反馈（2026-11-08 修，2026-11 仍适用）：标题是内核的必填项，所以
  * 1. 标题字段带必填标记（红色星号 + 读屏「必填」）；
  * 2. 空标题点「创建」不再静默 return —— 就地给 `role="alert"` 的文案并把焦点移回标题框；
  * 3. 命令被内核拒绝时把文案留在弹窗里（父级只负责页面级提示），弹窗不关、输入不丢。
  */
 export function TaskDialog({
-  workflow,
+  workflows,
+  defaultWorkflowId,
   project,
   defaultPath,
   onSave,
@@ -52,13 +66,19 @@ export function TaskDialog({
 }: TaskDialogProps): ReactElement {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [stageId, setStageId] = useState(workflow.stages[0]?.id ?? '')
+  const [workflowId, setWorkflowId] = useState(defaultWorkflowId)
+  /** 用户选过的起始阶段；不属于当前工作流时回落到该工作流首阶段 */
+  const [chosenStageId, setChosenStageId] = useState('')
   const [saving, setSaving] = useState(false)
   /** 标题字段级错误（必填） */
   const [titleError, setTitleError] = useState<string | null>(null)
-  /** 表单级错误（命令被拒 / 宿主探测失败） */
+  /** 表单级错误（命令被拒 / 宿主探测失败 / 没有可用阶段） */
   const [formError, setFormError] = useState<string | null>(null)
   const titleRef = useRef<HTMLInputElement>(null)
+
+  const workflow = workflows.find((candidate) => candidate.id === workflowId) ?? workflows[0]
+  const stage =
+    workflow?.stages.find((candidate) => candidate.id === chosenStageId) ?? workflow?.stages[0]
 
   const submit = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
@@ -66,6 +86,11 @@ export function TaskDialog({
     if (trimmed === '') {
       setTitleError('任务标题必填')
       titleRef.current?.focus()
+      return
+    }
+    // 类型收口用的分支，正常走不到：调用处只在有工作流时渲染本弹窗
+    if (workflow === undefined || stage === undefined) {
+      setFormError('这条工作流还没有可用的阶段，先到「设置 → 工作流」补一个')
       return
     }
     setTitleError(null)
@@ -76,7 +101,7 @@ export function TaskDialog({
         title: trimmed,
         description: description.trim(),
         workflowId: workflow.id,
-        stageId,
+        stageId: stage.id,
         projectId: project?.id ?? null,
       })
     } catch (e) {
@@ -130,6 +155,39 @@ export function TaskDialog({
               }}
             />
           </Field>
+          <Field label="所属工作流">
+            {/* 顺序：先定「干什么」（标题），再定「投给哪条流程、从哪一步起」 */}
+            <Select value={workflow?.id ?? ''} onValueChange={setWorkflowId}>
+              <SelectTrigger aria-label="所属工作流" className="w-full">
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                {workflows.map((candidate) => (
+                  <SelectItem key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="起始阶段" hint="任务从这里开始执行">
+            <Select
+              value={stage?.id ?? ''}
+              onValueChange={setChosenStageId}
+              // 换工作流后阶段列表整批换掉：这里不重置 chosenStageId，由上面的派生回落兜住
+            >
+              <SelectTrigger aria-label="起始阶段" className="w-full">
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                {(workflow?.stages ?? []).map((candidate) => (
+                  <SelectItem key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
           <Field label="任务描述">
             <Textarea
               aria-label="任务描述"
@@ -139,20 +197,6 @@ export function TaskDialog({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
-          </Field>
-          <Field label="起始阶段">
-            <Select value={stageId} onValueChange={setStageId}>
-              <SelectTrigger aria-label="起始阶段" className="w-full">
-                <SelectValue placeholder="请选择" />
-              </SelectTrigger>
-              <SelectContent>
-                {workflow.stages.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </Field>
           <p className="text-xs text-faint-foreground">「智能体」的阶段会立即执行。</p>
 

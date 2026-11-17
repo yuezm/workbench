@@ -495,6 +495,8 @@ describe('RuleDialog', { timeout: 20_000 }, () => {
     )
 
     expect(screen.getByText(/先到「工作流」新建一个/)).toBeInTheDocument()
+    // 没有工作流就没有可选阶段：起始阶段触发器一并禁用，与保存禁用同一个前置条件
+    expect(screen.getByLabelText('规则起始阶段')).toBeDisabled()
     // 禁用要写原因：例外情况是「先建工作流」这条前置条件本身，用户一眼能看到
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })

@@ -2,6 +2,13 @@
 @import 'tw-animate-css';
 
 /*
+ * 扫描范围：本文件住在包里，但构建入口（vite root）是 `apps/web`，
+ * Tailwind v4 的自动源检测只从 root 起扫，扫不到 `packages/client/**` 的类名，
+ * 产出的 CSS 里 utilities 会是空的（页面完全没有样式）。这里显式补上包内的源码。
+ */
+@source '../../../**/*.{ts,tsx}';
+
+/*
  * shadcn/ui v4 主题（CSS Variables 模式）。
  *
  * 变量语义与官方一致：background / foreground / card / popover / primary /

@@ -109,7 +109,7 @@ export function TaskCard({
         {isHandoff && (
           <span
             className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground"
-            title="由其它工作流的阶段完成时自动创建"
+            title="由其它工作流阶段自动创建"
           >
             交接
           </span>

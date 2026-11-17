@@ -201,7 +201,7 @@ export function RuntimeDialog({
             <Field
               label="命令"
               required
-              hint="命令名或绝对路径；脚本阶段用的就是这一条（阶段上不再单独填命令）；保存前会探测这条连接能否起来"
+              hint="命令名或绝对路径；脚本阶段用的就是这条；保存前会探测能否起来"
               error={commandError}
             >
               <Input
@@ -234,7 +234,7 @@ export function RuntimeDialog({
           </div>
 
           <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
-            模型、思考强度、并发、访问权限、工作目录、环境变量都在「智能体」里配：同一个连接可以被多个智能体复用。
+            模型、并发、权限、目录与环境变量在「智能体」里配；一条连接可被多个智能体复用。
           </p>
 
           {editing && (

@@ -179,7 +179,7 @@ export function ApprovalCards({ cards, focusCardId }: ApprovalCardsProps): React
             待审批
             <span className={badgeCls}>{pending.length}</span>
             <span className="ml-auto text-xs font-normal text-faint-foreground">
-              选中一项 → 提交
+              选中一项再提交
             </span>
           </h3>
           <ul className="flex flex-col gap-2">
@@ -189,9 +189,9 @@ export function ApprovalCards({ cards, focusCardId }: ApprovalCardsProps): React
               const localError = errors[card.id]
               const hint =
                 index === undefined
-                  ? '先选一项，再提交'
+                  ? '先选一项'
                   : needsText
-                    ? '这一项要写下具体内容才能提交'
+                    ? '这一项要填具体内容'
                     : '提交后不能撤回'
               return (
                 <li key={card.id}>
@@ -281,9 +281,7 @@ export function ApprovalCards({ cards, focusCardId }: ApprovalCardsProps): React
                       {/* 补充说明：选了「说点其他的」就是答案本身（必填），其余选项是可选资料 */}
                       <label className="mt-3 block">
                         <span className="mb-1 block text-xs text-muted-foreground">
-                          {needsText
-                            ? '补充说明（必填）：写下你选这一项的具体内容'
-                            : '补充说明（可选）：有异议或想追问的写在这里，会随所选项一起交给它'}
+                          {needsText ? '补充说明（必填）' : '补充说明（可选）'}
                         </span>
                         <Textarea
                           ref={(node) => {
@@ -299,7 +297,7 @@ export function ApprovalCards({ cards, focusCardId }: ApprovalCardsProps): React
                           disabled={busy === card.id}
                           placeholder={
                             needsText
-                              ? '写下你选这一项的具体内容'
+                              ? '写清你选这一项的具体内容'
                               : '例如：第 2 条我不同意，先说说依据'
                           }
                           onChange={(event) => {

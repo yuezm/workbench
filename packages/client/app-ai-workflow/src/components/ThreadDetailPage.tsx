@@ -280,7 +280,7 @@ function BindSection({
           {/* 内核拒绝绑定的原因（入口键被占用等）就地贴在提交按钮上方 */}
           <FormError message={formError} />
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-faint-foreground">同一入口的新事件续进本线程。</p>
+            <p className="text-xs text-faint-foreground">同一入口的新事件归到本线程。</p>
             <Button type="submit" variant="secondary" size="sm" disabled={busy}>
               绑定
             </Button>
@@ -475,13 +475,12 @@ function ThreadContent({
       </dl>
 
       {/* 写操作进行中：按钮会一起变灰，这里说清楚为什么点不动其它动作 */}
-      {busyNow && <p className="text-xs text-faint-foreground">正在提交，其他操作暂不可用。</p>}
+      {busyNow && <p className="text-xs text-faint-foreground">正在提交…</p>}
 
       <section aria-label="任务列表" className="flex flex-col gap-1.5">
         <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
           任务列表
           <span className={badgeCls}>{thread.taskIds.length}</span>
-          <span className="text-xs font-normal text-faint-foreground">点任务看详情</span>
         </h3>
         {roots.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
@@ -534,7 +533,7 @@ function ThreadContent({
         className="flex items-center justify-between gap-3 border-t border-border pt-3"
       >
         <p className="text-xs text-faint-foreground">
-          {closed ? '线程已归档。' : '归档只影响界面；删除会连同任务与执行记录一起清掉。'}
+          {closed ? '线程已归档。' : '归档只改界面；删除会清掉任务与执行记录。'}
         </p>
         <div className="flex shrink-0 items-center gap-2">
           {!closed && (

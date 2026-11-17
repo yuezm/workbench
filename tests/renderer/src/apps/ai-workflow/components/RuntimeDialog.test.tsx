@@ -103,7 +103,7 @@ describe('RuntimeDialog', () => {
     expect(screen.queryByRole('combobox', { name: '运行时推理强度' })).not.toBeInTheDocument()
     expect(screen.queryByLabelText('运行时模型手填')).not.toBeInTheDocument()
     // 但要说清「这些去哪配」：弹窗里给出指向智能体的说明
-    expect(screen.getByText(/都在「智能体」里配/)).toBeInTheDocument()
+    expect(screen.getByText(/在「智能体」里配/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '添加' }))
     await waitFor(() => expect(onSubmit).toHaveBeenCalled())

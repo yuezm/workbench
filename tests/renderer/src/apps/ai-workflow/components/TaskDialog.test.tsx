@@ -362,7 +362,7 @@ describe('TaskDialog', () => {
     )
     // 默认自由文本：字段化是可选能力，且按流程名给一句建议（「研发」→ 需求类）
     expect(screen.getByLabelText('任务描述')).toBeInTheDocument()
-    expect(screen.getByText(/这条流程更像「需求」类/)).toBeInTheDocument()
+    expect(screen.getByText(/可切「需求」按字段填/)).toBeInTheDocument()
 
     await user.type(screen.getByLabelText('任务标题'), '导出白屏')
     await user.click(screen.getByRole('tab', { name: 'BUG' }))

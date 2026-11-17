@@ -128,7 +128,7 @@ export function FeishuConnections({ plugin }: { plugin: PluginView }): ReactElem
       <div className="flex flex-col gap-1">
         <h3 className="text-base font-medium text-foreground">飞书连接</h3>
         <p className="text-xs text-faint-foreground">
-          一条连接 = 一个 lark-cli profile = 一个飞书应用：需要你拍板的卡发到这里，点按钮就是答复。
+          一条连接 = 一个飞书应用；拍板卡发到这里，点按钮就是答复。
         </p>
       </div>
 
@@ -161,8 +161,7 @@ export function FeishuConnections({ plugin }: { plugin: PluginView }): ReactElem
           <div className="flex flex-col gap-1 rounded-xl border border-dashed border-border px-4 py-4">
             <p className="text-sm text-foreground">还没有连接</p>
             <p className="text-xs text-faint-foreground">
-              选一个 profile 添加即可；本机还没有 profile
-              时，先去「管理本机应用」新建一个（需要飞书应用的 App ID / App Secret）。
+              选一个 profile；本机还没有就去「管理本机应用」新建。
             </p>
           </div>
         ) : (

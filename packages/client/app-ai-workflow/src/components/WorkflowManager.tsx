@@ -133,7 +133,7 @@ export function WorkflowManager(): ReactElement {
       />
 
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-faint-foreground">阶段序列与流转 · 拖动行调整清单顺序</p>
+        <p className="text-xs text-faint-foreground">拖动行调整顺序</p>
         {/* 一个入口两种建法：空白起手，或按 SOP 模板预填阶段 */}
         <Menu
           label="新建工作流"
@@ -144,7 +144,7 @@ export function WorkflowManager(): ReactElement {
                 {
                   id: 'blank',
                   label: '从空白创建',
-                  description: '内置待办 / 已阻塞 / 已完成 / 已取消，自己往中间加阶段',
+                  description: '内置四列，中间可加阶段',
                   ariaLabel: '从空白创建工作流',
                   onSelect: () => openEditor(null),
                 },
@@ -236,7 +236,7 @@ export function WorkflowManager(): ReactElement {
         <section className="rounded-xl border border-border">
           <div className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-2">
             <h3 className="text-xs font-medium text-foreground">阶段指标</h3>
-            <p className="text-xs text-faint-foreground">累计值，用来判断哪条流程真的在自动跑</p>
+            <p className="text-xs text-faint-foreground">累计值</p>
           </div>
           <table className="w-full text-xs">
             <thead>

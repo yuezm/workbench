@@ -280,7 +280,7 @@ describe('ThreadDetailPage', () => {
     await user.type(screen.getByLabelText('线程笔记'), '写很久')
     await user.click(screen.getByRole('button', { name: '添加笔记' }))
 
-    expect(await screen.findByText('正在提交，其他操作暂不可用。')).toBeInTheDocument()
+    expect(await screen.findByText('正在提交…')).toBeInTheDocument()
   })
 
   it('未绑定线程提供绑定表单，提交 dispatch thread.bind 后显示已绑定', async () => {
@@ -426,7 +426,7 @@ describe('ThreadDetailPage', () => {
 
     // 位置与任务详情页一致：内容区底部的「页面动作」组里，左侧说明右侧按钮；页头不留删除
     const bar = screen.getByRole('group', { name: '页面动作' })
-    expect(bar).toHaveTextContent('删除会连同任务与执行记录一起清掉')
+    expect(bar).toHaveTextContent('删除会清掉任务与执行记录')
     expect(
       within(screen.getByRole('banner')).queryByRole('button', { name: '删除线程' }),
     ).toBeNull()

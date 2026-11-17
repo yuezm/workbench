@@ -1641,7 +1641,7 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
 
     await user.click(screen.getByRole('button', { name: '阶段3' }))
     // 提示写清判定者的义务：checks 里带 acceptance 序号，漏一条算没给结论
-    expect(screen.getByText(/checks 里带 acceptance 序号/)).toBeInTheDocument()
+    expect(screen.getByText(/checks 带 acceptance 序号/)).toBeInTheDocument()
     const acceptance = screen.getByLabelText('阶段3验收')
     expect(acceptance).toHaveValue('pnpm check 退出码 0\n覆盖每条 Given/When/Then')
 
@@ -1674,7 +1674,7 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
     render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
 
     await user.click(screen.getByRole('button', { name: '阶段3' }))
-    expect(screen.getByText(/闸门只要求一条退出码全 0 的 checks/)).toBeInTheDocument()
+    expect(screen.getByText(/只要求一条全 0 的 checks/)).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: '阶段3验收序号' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '保存' }))
@@ -1859,7 +1859,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
 
     // 命令不可输入：脚本块里根本没有那个输入框，只把运行时命中的命令读出来
     expect(screen.queryByLabelText('阶段2脚本命令')).toBeNull()
-    expect(screen.getByText(/命令用运行时上的「pnpm」/)).toBeInTheDocument()
+    expect(screen.getByText(/命令：pnpm/)).toBeInTheDocument()
 
     // M42：步骤列表——一步一条证据，标签可填可不填
     await user.type(screen.getByLabelText('阶段2步骤1标签'), '门禁')
@@ -1958,7 +1958,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     )
     // 命令不在阶段上：只读展示运行时命中的那条
     expect(screen.queryByLabelText('阶段2脚本命令')).toBeNull()
-    expect(screen.getByText(/命令用运行时上的「pnpm」/)).toBeInTheDocument()
+    expect(screen.getByText(/命令：pnpm/)).toBeInTheDocument()
     expect(screen.getByLabelText('阶段2步骤1标签')).toHaveValue('门禁')
     expect(screen.getByLabelText('阶段2步骤1参数')).toHaveValue('check\n-r\ndot')
     expect(screen.getByLabelText('阶段2脚本工作目录')).toHaveValue('C:/repo')
@@ -2032,7 +2032,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     // 验收与智能体闸门同一份口径，保留原值并就地可改
     const acceptance = screen.getByLabelText('阶段2验收')
     expect(acceptance).toHaveValue('`pnpm check` 退出码 0')
-    expect(screen.getByText(/每条验收都要有步骤指向它/)).toBeInTheDocument()
+    expect(screen.getByText(/每条验收都要有步骤指向/)).toBeInTheDocument()
     // 放行护栏属于判定本身，与执行目标无关：仍要能配
     expect(screen.getByRole('combobox', { name: '阶段2放行护栏' })).toBeInTheDocument()
     // 步骤行有「对应验收」：把这条证据钉到第 1 条验收上
@@ -2072,7 +2072,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
     render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
 
     expect(screen.getByLabelText('阶段2验收')).toHaveValue('')
-    expect(screen.getByText('没有验收条目：只按每一步的退出码判。')).toBeInTheDocument()
+    expect(screen.getByText('没有验收条目：只按退出码判。')).toBeInTheDocument()
   })
 
   it('脚本闸门：可以配派单，触发档位按闸门给（没有「跑完时」）', async () => {
@@ -2155,7 +2155,7 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
 
     // 运行时已自动预填：命令不可输入，只展示「将执行哪一条」
     expect(screen.queryByLabelText('阶段2脚本命令')).toBeNull()
-    expect(screen.getByText(/命令用运行时上的「npm」/)).toBeInTheDocument()
+    expect(screen.getByText(/命令：npm/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))

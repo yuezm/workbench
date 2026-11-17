@@ -69,12 +69,10 @@ export const PERMISSION_OPTIONS: { value: PermissionMode; label: string }[] = [
   { value: 'danger-full-access', label: PERMISSION_LABEL['danger-full-access'] },
 ]
 
-const PERMISSION_HINT =
-  '沙箱基线：越界修改先被拒绝；工具可随后申请提权，而提权请求按所选模式自动放行（不会询问你）。'
+const PERMISSION_HINT = '越界修改先被拒绝；提权请求按所选模式自动放行，不再询问。'
 
 /** 完全访问的风险声明：选中后必须显式勾选才能保存（与旧的运行时表单同口径） */
-const DANGER_NOTICE =
-  '完全访问没有沙箱：agent 可读写本机任意文件、网络不受限制，所有提权请求自动放行。'
+const DANGER_NOTICE = '无沙箱：可读写本机任意文件，网络不受限，提权一律放行。'
 
 /** 环境变量文本 → 对象：`KEY=VALUE` 一行一条，空行忽略；非法行整体报错（不做静默丢弃）。 */
 export function parseEnvText(text: string): { env: Record<string, string>; error: string | null } {
@@ -254,10 +252,10 @@ export function AgentDialog({
 
   /** 按钮禁用必须伴随可见原因：点不动又不说为什么，和静默 return 是同一个毛病 */
   const disabledHint =
-    runtimeId === '' ? '缺少可绑定的运行时：先到「运行时」新建并测试通过再回来。' : null
+    runtimeId === '' ? '先到「运行时」新建并测试通过。' : null
   const dangerHint =
     permissionMode === 'danger-full-access' && !dangerAck
-      ? '先勾选上面的「我明白风险，仍要选完全访问」，才能保存。'
+      ? '先勾选上面的「我明白风险，仍要选完全访问」。'
       : null
 
   const submit = async (ev: React.FormEvent<HTMLFormElement>): Promise<void> => {
@@ -277,7 +275,7 @@ export function AgentDialog({
       return
     }
     if (runtimeId === '') {
-      setRuntimeError('没有可绑定的运行时：先到「运行时」新建并测试通过。')
+      setRuntimeError('先到「运行时」新建并测试通过。')
       focusControl(ev.currentTarget, '智能体运行时')
       return
     }
@@ -413,7 +411,7 @@ export function AgentDialog({
                   // 上限压住自动增高：几千字的提示词也只占这么高，框内自己滚，不把弹窗顶大
                   className="max-h-56 min-h-24 resize-y font-mono text-sm"
                   rows={6}
-                  placeholder="写清这个智能体的角色、做事方式与产出要求；每轮运行都会带上这段。"
+                  placeholder="角色、做事方式与产出要求；每轮都带上这段"
                   value={systemPrompt}
                   onChange={(e) => setSystemPrompt(e.target.value)}
                 />
@@ -487,7 +485,7 @@ export function AgentDialog({
 
               <Field
                 label="并发上限"
-                hint="同一智能体同时执行的任务数，≥1；运行时侧一次只跑一轮，要并行就多配几个运行时"
+                hint="同时执行的任务数，≥1；一个运行时一次只跑一轮"
                 error={concurrentError}
               >
                 <Input
@@ -526,7 +524,7 @@ export function AgentDialog({
               <Field
                 label="工作目录"
                 className="col-span-2"
-                hint="留空 = 任务项目的文件夹；没有项目时用默认目录（改默认值设 WORKBENCH_WORKDIR，缺省 ~/.workbench）"
+                hint="留空 = 项目文件夹，没有项目时用默认目录（WORKBENCH_WORKDIR，缺省 ~/.workbench）"
               >
                 <Input
                   aria-label="智能体工作目录"
@@ -540,7 +538,7 @@ export function AgentDialog({
               <Field
                 label="环境变量"
                 className="col-span-2"
-                hint={`每行一条 KEY=VALUE；最多 ${AGENT_ENV_LIMITS.maxVars} 个，值里的等号原样保留`}
+                hint={`每行一条 KEY=VALUE；最多 ${AGENT_ENV_LIMITS.maxVars} 个`}
                 error={envError}
               >
                 <Textarea

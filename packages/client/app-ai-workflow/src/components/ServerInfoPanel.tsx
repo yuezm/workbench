@@ -51,12 +51,11 @@ export function ServerInfoPanel(): ReactElement {
       <Panel>
         <div className="px-4 py-3">
           <p className="text-xs text-muted-foreground">
-            数据目录里放库（ai-workflow.db）、运行产物（artifacts/）、插件（plugins/）与 secret
-            主密钥（secret.key）。备份就是拷这个目录；换一份目录等于换一套数据。
+            数据目录放库（ai-workflow.db）、产物（artifacts/）、插件（plugins/）与主密钥（secret.key）。
+            备份就是拷这个目录。
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
-            监听地址、端口、token、Web 产物目录都由 WORKBENCH_*
-            环境变量决定，启动时打印在同一份日志里。
+            监听地址、端口、token、Web 产物目录由 WORKBENCH_* 环境变量决定。
           </p>
         </div>
       </Panel>

@@ -160,8 +160,8 @@ function hasInstructions(stage: StageInput): boolean {
  * 闸门只认「全部步骤的退出码」这一件事，逐条验收靠步骤上的验收序号对应。
  */
 const SCRIPT_BLOCK_HINT =
-  '脚本不产生提示词、不续会话；每一步的退出码都是一条闸门证据（全部为 0 才算跑过）。' +
-  '步骤之间共用同一条命令与同一份超时预算，只换参数。'
+  '不产生提示词、不续会话；每一步的退出码就是一条闸门证据（全 0 才算跑过）。' +
+  '步骤共用同一条命令与同一份超时预算，只换参数。'
 
 /**
  * 验收条目属于**闸门**：判定者逐条给证据（`checks[].acceptance` 序号），漏一条算没给结论。
@@ -978,8 +978,7 @@ export function WorkflowEditor({
                 {/* 没有命令运行时 = 这个阶段类型暂时配不上：说清怎么补，别只留一个空下拉 */}
                 {commandRuntimes.length === 0 && (
                   <p className="text-xs text-warning">
-                    还没有「通用命令」运行时：到「运行时」页新建一条（执行器选「通用命令」、命令填
-                    pnpm 这类），再回来选它。
+                    还没有「通用命令」运行时：到「运行时」页新建一条（执行器选「通用命令」），再回来选。
                   </p>
                 )}
                 {/* 命令不在阶段上：选了运行时就用这条运行时的命令，界面只把它读出来给人看 */}
@@ -1005,16 +1004,16 @@ export function WorkflowEditor({
                 {/* 命令只读展示：整行铺开而不是塞进 176px 的列里，长路径也读得全 */}
                 <p className="text-xs text-faint-foreground">
                   {!commandRuntimeIds.includes(stage.script.runtimeId)
-                    ? '先选一条命令运行时：脚本跑的就是它连接上的那条命令。'
+                    ? '先选一条命令运行时。'
                     : scriptRuntimeCommand === ''
-                      ? '所选运行时没有命令：脚本跑不起来，先到「运行时」页把它补上。'
-                      : `命令用运行时上的「${scriptRuntimeCommand}」（阶段不再单独配命令）。`}
+                      ? '所选运行时没有命令，到「运行时」页补上。'
+                      : `命令：${scriptRuntimeCommand}（用运行时上的那条）`}
                 </p>
                 {/* M42：步骤列表——同一条连接上的多组 argv，一步一条证据 */}
                 <div className="flex flex-col gap-2 border-t border-border pt-2">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs text-muted-foreground">
-                      步骤（按顺序执行；每一步的退出码都是一条闸门证据）
+                      步骤（按顺序执行，退出码即证据）
                     </p>
                     <Button
                       type="button"
@@ -1174,14 +1173,14 @@ export function WorkflowEditor({
           {!hasFlowDetail(stage) ? (
             <p className="mt-3 text-xs text-faint-foreground">
               {stage.entryMode === 'user'
-                ? '交给用户：任务进到这个阶段就停下来等人处理，不需要智能体、流转目标、交接或子任务。'
-                : '不交接：任务进到这个阶段不派活，由你在看板上拖到下一阶段；不需要智能体、流转目标、交接或子任务。'}
+                ? '交给用户：进到本阶段就停下等人处理。'
+                : '不交接：不派活，由你在看板上拖到下一阶段。'}
             </p>
           ) : (
             <>
               {/* M32：出口表——每个触发条件一条主去向；缺省由内核保存时补齐，界面上写明缺省是什么 */}
               <div className="mt-3 flex flex-col gap-2">
-                <p className="text-xs text-muted-foreground">出口（离开本阶段时去哪）</p>
+                <p className="text-xs text-muted-foreground">出口</p>
                 {exitRowsFor(stage).map((guard) => {
                   const exit = exitOf(stage, guard)
                   const value = exit === undefined ? 'default' : exit.do
@@ -1259,17 +1258,17 @@ export function WorkflowEditor({
                     </Select>
                   </Field>
                   <p className="pb-2 text-xs text-faint-foreground">
-                    连续未通过达到这个次数后放行（会打标留痕）；「不设护栏」= 一直按未通过走
+                    连续未通过这么多次后放行并留痕；不设护栏 = 一直按未通过走
                   </p>
                 </div>
               )}
 
               <p className="mt-1 text-xs text-faint-foreground">
                 {!stage.judge
-                  ? '「出错」指执行器崩溃、超时或失联；「结束并归档」= 这张工单走完。'
+                  ? '「出错」= 崩溃、超时或失联；「结束并归档」= 工单走完。'
                   : entryKind === 'script-gate'
-                    ? '脚本跑完按退出码给结论（0 = 通过，非 0 = 未通过）；拿不到退出码时任务停在原地等人。'
-                    : '智能体跑完要给「通过 / 未通过」的判定；拿不出证据时任务停在原地等人。'}
+                    ? '按退出码判定（0 通过，非 0 未通过）；拿不到退出码就停下等人。'
+                    : '跑完给「通过 / 未通过」判定；没证据就停下等人。'}
               </p>
             </>
           )}
@@ -1297,10 +1296,10 @@ export function WorkflowEditor({
                 <>
                   <p className="mt-3 text-xs text-muted-foreground">
                     {entryKind === 'script-gate'
-                      ? '每条验收都要有步骤指向它（在步骤行的「对应验收」里选序号），漏一条保存时会被拒'
-                      : '判定者要逐条给证据（checks 里带 acceptance 序号），漏一条算没给结论'}
+                      ? '每条验收都要有步骤指向（步骤行的「对应验收」），漏一条保存被拒'
+                      : '判定时逐条给证据（checks 带 acceptance 序号），漏一条算没结论'}
                   </p>
-                  <Field label="验收（做完的判据，一条一行）" className="mt-2">
+                  <Field label="验收（一条一行）" className="mt-2">
                     <Textarea
                       aria-label={`阶段${n}验收`}
                       className="min-h-20 resize-y"
@@ -1318,8 +1317,8 @@ export function WorkflowEditor({
                   {acceptanceItems.length === 0 ? (
                     <p className="mt-1 text-xs text-faint-foreground">
                       {entryKind === 'script-gate'
-                        ? '没有验收条目：只按每一步的退出码判。'
-                        : '没有验收条目：闸门只要求一条退出码全 0 的 checks。'}
+                        ? '没有验收条目：只按退出码判。'
+                        : '没有验收条目：只要求一条全 0 的 checks。'}
                     </p>
                   ) : (
                     // 与提示词同口径的 1 基序号：判定者的 checks 用这个号指回条目
@@ -1374,7 +1373,7 @@ export function WorkflowEditor({
                 <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs text-faint-foreground">
-                      派单：离开本阶段时在别的流程建一张新工单，本单照常流转。
+                      派单：在别的流程建一张新单，本单照常流转。
                     </p>
                     <Button
                       type="button"

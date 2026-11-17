@@ -258,7 +258,7 @@ describe('AgentDialog', () => {
     )
     expect(screen.getByText(/没有可用运行时/)).toBeInTheDocument()
     // 禁用必须写原因：否则用户只看到点不动
-    expect(screen.getByText(/缺少可绑定的运行时/)).toBeInTheDocument()
+    expect(screen.getByText(/先到「运行时」新建并测试通过/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
   })
 
@@ -438,14 +438,14 @@ describe('AgentDialog', () => {
     const onSubmit = vi.fn()
     render(<AgentDialog runtimes={[]} initial={empty} onSubmit={onSubmit} onCancel={vi.fn()} />)
 
-    expect(screen.getByText(/缺少可绑定的运行时/)).toBeInTheDocument()
+    expect(screen.getByText(/先到「运行时」新建并测试通过/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加' })).toBeDisabled()
 
     // 按钮禁用时表单也可能被回车 / 程序化提交：不能静默 return，要给字段级错误并聚焦
     fireEvent.change(screen.getByLabelText('智能体名称'), { target: { value: 'coder' } })
     // 弹窗内容渲染在 portal 里，表单不在 render 容器内：从弹窗里取
     fireEvent.submit(screen.getByRole('dialog').querySelector('form') as HTMLFormElement)
-    expect(await screen.findByText(/没有可绑定的运行时/)).toBeInTheDocument()
+    expect((await screen.findAllByText(/先到「运行时」新建并测试通过/)).length).toBeGreaterThan(0)
     expect(screen.getByRole('combobox', { name: '智能体运行时' })).toHaveFocus()
     expect(onSubmit).not.toHaveBeenCalled()
   })
@@ -783,7 +783,7 @@ describe('AgentDialog', () => {
     await user.click(screen.getByRole('option', { name: '完全访问' }))
 
     const save = screen.getByRole('button', { name: '添加' })
-    expect(screen.getByText(/完全访问没有沙箱/)).toBeInTheDocument()
+    expect(screen.getByText(/无沙箱/)).toBeInTheDocument()
     expect(save).toBeDisabled()
 
     await user.click(screen.getByLabelText('已确认完全访问风险'))
@@ -816,7 +816,7 @@ describe('AgentDialog', () => {
 
     await user.click(screen.getByRole('combobox', { name: '智能体访问权限' }))
     await user.click(screen.getByRole('option', { name: '可写' }))
-    expect(screen.queryByText(/完全访问没有沙箱/)).toBeNull()
+    expect(screen.queryByText(/无沙箱/)).toBeNull()
     expect(save).toBeEnabled()
 
     await user.click(screen.getByRole('combobox', { name: '智能体访问权限' }))

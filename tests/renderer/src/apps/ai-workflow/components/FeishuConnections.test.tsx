@@ -97,7 +97,7 @@ function stubBridge(): void {
       Promise.reject(new Error('本面板不用 query')),
     subscribe: () => () => {},
     onNotice: () => () => {},
-    listDirs: () => Promise.resolve({ path: '/', parent: null, entries: [] }),
+    listDirs: () => Promise.resolve({ path: '/', parent: null, roots: ['/'], entries: [] }),
     info: () => Promise.reject(new Error('本面板不用 info')),
     lark: ((action: LarkAdminAction) => larkMock(action)) as unknown as WorkbenchApi['lark'],
     notify: () => {},
@@ -379,7 +379,7 @@ describe('FeishuConnections：连接弹窗', () => {
     // 默认跟随登录人：不要两个并排的地址格子
     expect(screen.queryByLabelText('飞书连接接收人')).toBeNull()
     expect(screen.queryByLabelText('飞书连接群')).toBeNull()
-    expect(screen.getByText(/消息发到 profile 的登录人/)).toBeTruthy()
+    expect(screen.getByText(/发到 profile 登录人的私聊/)).toBeTruthy()
 
     await user.click(screen.getByRole('tab', { name: '私聊某人' }))
     expect(screen.getByLabelText('飞书连接接收人')).toBeTruthy()
@@ -533,7 +533,7 @@ describe('FeishuConnections：本机应用弹窗', () => {
     // 一个应用都没有：空态直接给表单，不用再点一次「新建」
     const dialog = within(screen.getByRole('dialog'))
     expect(dialog.getByLabelText('飞书 App ID')).toBeTruthy()
-    expect(dialog.getByText(/本机还没有 profile/)).toBeTruthy()
+    expect(dialog.getByText(/还没有 profile/)).toBeTruthy()
   })
 
   it('新建 profile：顶部展开表单，创建后收起并重探一次', async () => {

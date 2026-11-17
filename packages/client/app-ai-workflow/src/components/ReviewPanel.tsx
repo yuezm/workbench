@@ -45,7 +45,7 @@ export function ReviewPanel({ reports, onExport }: ReviewPanelProps): ReactEleme
       <section aria-label="评审结论" className="flex flex-col gap-2">
         <h3 className="text-base font-medium text-foreground">评审结论</h3>
         <p className="rounded-xl border border-dashed border-border px-3 py-2 text-sm text-faint-foreground">
-          这个任务还没有评审结论（进入评审阶段并给出判定后，清单会出现在这里）。
+          这个任务还没有评审结论。
         </p>
       </section>
     )
@@ -151,7 +151,7 @@ export function ReviewPanel({ reports, onExport }: ReviewPanelProps): ReactEleme
           variant="secondary"
           size="sm"
           disabled={busy}
-          title="把这个版本的评审报告写进项目的 docs/reviews/（由你决定何时提交）"
+          title="写进项目的 docs/reviews/"
           onClick={exportDoc}
         >
           {busy ? '正在写文件…' : '提升为文档'}

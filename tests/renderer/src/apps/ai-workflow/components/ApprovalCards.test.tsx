@@ -97,7 +97,7 @@ describe('ApprovalCards', () => {
     render(<ApprovalCards cards={[card]} />)
 
     expect(screen.getByRole('button', { name: '提交所选' })).toBeDisabled()
-    expect(screen.getByText('先选一项，再提交')).toBeInTheDocument()
+    expect(screen.getByText('先选一项')).toBeInTheDocument()
   })
 
   it('选中后提交：dispatch card.answer(cardId, index, via=ui)', async () => {
@@ -149,12 +149,12 @@ describe('ApprovalCards', () => {
 
     fireEvent.click(screen.getByRole('radio', { name: '说点其他的' }))
     // 必填口径写在标签与输入框语义上，不是靠按钮灰着猜
-    expect(screen.getByText('补充说明（必填）：写下你选这一项的具体内容')).toBeInTheDocument()
+    expect(screen.getByText('补充说明（必填）')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '补充说明：继续吗' })).toHaveAttribute(
       'aria-required',
       'true',
     )
-    expect(screen.getByText('这一项要写下具体内容才能提交')).toBeInTheDocument()
+    expect(screen.getByText('这一项要填具体内容')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '提交所选' }))
 
@@ -196,7 +196,7 @@ describe('ApprovalCards', () => {
     render(<ApprovalCards cards={[{ ...card, options: ['Keep it', 'Something else'] }]} />)
 
     fireEvent.click(screen.getByRole('radio', { name: 'Something else' }))
-    expect(screen.getByText('补充说明（必填）：写下你选这一项的具体内容')).toBeInTheDocument()
+    expect(screen.getByText('补充说明（必填）')).toBeInTheDocument()
   })
 
   it('键盘：方向键换选中项并把焦点带过去，Home / End 直达两端', () => {
@@ -310,13 +310,11 @@ describe('ApprovalCards', () => {
       <ApprovalCards cards={[{ ...card, options: ['一', '二', '说点其他的'] }]} />,
     )
     fireEvent.click(screen.getByRole('radio', { name: '说点其他的' }))
-    expect(screen.getByText('补充说明（必填）：写下你选这一项的具体内容')).toBeInTheDocument()
+    expect(screen.getByText('补充说明（必填）')).toBeInTheDocument()
 
     // 同一张卡 version+1、选项缩到一个：旧下标 2 越界，`options[2]` 不存在
     rerender(<ApprovalCards cards={[{ ...card, options: ['只剩一项'], version: 2 }]} />)
-    expect(
-      screen.getByText('补充说明（可选）：有异议或想追问的写在这里，会随所选项一起交给它'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('补充说明（可选）')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '提交所选' })).toBeEnabled()
   })
 

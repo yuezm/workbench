@@ -123,8 +123,7 @@ export function FeishuStatusCard({
         )}
         {appId !== '' && (
           <p className="text-xs text-faint-foreground">
-            长连接只要求开放平台已订阅 card.action.trigger（拍板卡的按钮回调；订阅状态探测不到，
-            这里只给入口）——{' '}
+            长连接要求开放平台已订阅 card.action.trigger（拍板卡按钮回调）——{' '}
             <a
               className="text-brand underline"
               href={`https://open.feishu.cn/app/${appId}/event`}

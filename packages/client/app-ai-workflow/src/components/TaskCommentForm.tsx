@@ -74,7 +74,7 @@ export function TaskCommentForm({
         }}
       />
 
-      <FormError message={emptyError ? '写点内容再发送：空反馈不会提交。' : null} />
+      <FormError message={emptyError ? '写点内容再发送。' : null} />
       <FormError message={error} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -101,8 +101,8 @@ export function TaskCommentForm({
 
       <p className="text-xs text-muted-foreground">
         {canRerun
-          ? '反馈会作为提示词的「反馈记录」资料段；勾选后若当前没有运行中的轮次，会立刻再跑一轮。'
-          : '当前阶段不交给智能体：反馈只记上下文，任务下次进入智能体阶段时带上。'}
+          ? '反馈进提示词的「反馈记录」；勾选后若当前没有运行中的轮次，会立刻再跑一轮。'
+          : '当前阶段不交给智能体：反馈只记上下文。'}
       </p>
     </form>
   )

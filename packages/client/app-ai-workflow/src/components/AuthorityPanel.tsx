@@ -35,10 +35,10 @@ const MODE_OPTIONS: Array<{ value: ModeDraft; label: string }> = [
 ]
 
 const MODE_HINT: Record<ModeDraft, string> = {
-  compat: '不做准入判定：事件命中规则就建任务（当前默认行为）',
-  off: '只有名单内、点名的人能发起工作；推断候选一律不接',
-  observe: '推断候选交给研判，结论只记「本来会接」，不自动接单',
-  auto: '推断候选在研判命中规则后自动接单',
+  compat: '不判准入：命中规则就建任务',
+  off: '只有名单内点名的人能发起',
+  observe: '推断候选只记「本来会接」，不接单',
+  auto: '推断候选命中规则后自动接单',
 }
 
 const CELLS: Array<{ key: keyof AdmissionTable; label: string }> = [
@@ -220,7 +220,7 @@ export function AuthorityPanel({ view, busy, onSave }: AuthorityPanelProps): Rea
 
       {mode !== 'compat' && sources.length === 0 && (
         <p className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-faint-foreground">
-          还没有来源策略：没列出来的来源会被拒绝（not-listed）。
+          还没有来源策略：未列出的来源一律拒绝。
         </p>
       )}
 
@@ -228,7 +228,7 @@ export function AuthorityPanel({ view, busy, onSave }: AuthorityPanelProps): Rea
         sources.map((source, index) => (
           <div key={index} className="flex flex-col gap-3 rounded-lg border border-border p-3">
             <div className="flex items-end gap-2">
-              <Field label="来源 id" required hint="与事件里的 source 相等，例如 github">
+              <Field label="来源 id" required hint="与事件里的 source 相等，如 github">
                 <Input
                   value={source.id}
                   aria-label={`来源 ${index + 1} 的 id`}
@@ -248,7 +248,7 @@ export function AuthorityPanel({ view, busy, onSave }: AuthorityPanelProps): Rea
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="允许的人" hint="一行一个来源内 id；留空表示不额外允许任何人">
+              <Field label="允许的人" hint="一行一个；留空 = 不额外允许">
                 <Textarea
                   value={source.allowed}
                   aria-label={`来源 ${index + 1} 的允许名单`}

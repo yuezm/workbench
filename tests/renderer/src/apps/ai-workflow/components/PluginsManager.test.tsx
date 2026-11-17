@@ -387,7 +387,7 @@ describe('PluginsManager', () => {
     await screen.findByText('webhook')
     await openDetail(user, 'webhook')
 
-    expect(screen.getByText(/勾选声明的能力并保存后才会启动/)).toBeInTheDocument()
+    expect(screen.getByText(/勾选能力并保存后启动/)).toBeInTheDocument()
   })
 
   it('保存进行中禁用开关与保存按钮（不并发提交）', async () => {
@@ -630,7 +630,7 @@ describe('PluginsManager：飞书通道的连接面板（M45）', () => {
     await screen.findByText('飞书')
     await openDetail(user, '飞书')
 
-    expect(screen.getByText('还没有智能体：先去「智能体」页新建一个，再回来选')).toBeInTheDocument()
+    expect(screen.getByText('还没有智能体，先到「智能体」页新建')).toBeInTheDocument()
     // 旧值认不出来：留一条说明项，当前仍选中它
     await user.click(screen.getByRole('combobox', { name: '飞书 派给哪个智能体' }))
     await user.click(await screen.findByRole('option', { name: '不指定智能体（只发卡）' }))

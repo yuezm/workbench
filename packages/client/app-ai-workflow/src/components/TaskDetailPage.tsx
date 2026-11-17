@@ -372,9 +372,7 @@ export function TaskDetailPage({
               aria-label="页面动作"
               className="flex items-center justify-between gap-3 border-t border-border pt-3"
             >
-              <p className="text-xs text-faint-foreground">
-                删除会连同运行记录、反馈与落盘归档一起清掉；线程里没有别的任务时线程也一并删除。
-              </p>
+              <p className="text-xs text-faint-foreground">删除会清掉运行记录、反馈与落盘归档。</p>
               <div className="flex shrink-0 items-center gap-2">
                 <Button
                   type="button"
@@ -398,8 +396,8 @@ export function TaskDetailPage({
             <DialogHeader>
               <DialogTitle>删除任务</DialogTitle>
               <DialogDescription>
-                任务「{task.title}」与它的执行记录（运行记录、反馈、落盘归档）会一起删除，
-                不能撤销。线程里没有别的任务时，线程也会一并删除。
+                任务「{task.title}」与执行记录（运行记录、反馈、落盘归档）一起删除，不可撤销。
+                线程里没有别的任务时线程也一并删除。
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>

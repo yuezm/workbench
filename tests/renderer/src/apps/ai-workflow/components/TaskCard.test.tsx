@@ -310,7 +310,7 @@ describe('TaskCard', () => {
         onDragEnd={vi.fn()}
       />,
     )
-    const badge = screen.getByTitle('由其它工作流的阶段完成时自动创建')
+    const badge = screen.getByTitle('由其它工作流阶段自动创建')
     expect(badge).toHaveTextContent('交接')
     // 交接任务不再显示子任务徽标（parentTaskId 为 null）
     expect(screen.queryByText(/子任务/)).not.toBeInTheDocument()
@@ -325,7 +325,7 @@ describe('TaskCard', () => {
         onDragEnd={vi.fn()}
       />,
     )
-    expect(screen.getByTitle('由其它工作流的阶段完成时自动创建')).toHaveTextContent('交接')
+    expect(screen.getByTitle('由其它工作流阶段自动创建')).toHaveTextContent('交接')
 
     // 普通任务没有徽标
     rerender(

@@ -207,7 +207,7 @@ export function ProjectDialog({
                 </Button>
               </div>
               <span className="text-xs text-faint-foreground">
-                项目的运行工作目录：从选择器挑，或粘贴绝对路径
+                从选择器挑，或粘贴绝对路径
               </span>
               {fieldErrors.path !== undefined && fieldErrors.path !== '' && (
                 <span role="alert" className="text-xs text-destructive">
@@ -227,7 +227,7 @@ export function ProjectDialog({
             </Field>
 
             <p className="text-xs text-faint-foreground">
-              项目文件夹就是该项目任务的运行工作目录。
+              项目文件夹 = 该项目任务的运行目录。
             </p>
 
             <FormError message={submitError} onDismiss={() => setSubmitError(null)} />
@@ -237,7 +237,7 @@ export function ProjectDialog({
               {project !== undefined && onRemove !== undefined && (
                 // 删除会改任务与会话的归属：先写清后果；执行中的任务由内核拦下
                 <p className="text-xs text-faint-foreground">
-                  删除后，项目里的任务与会话归到默认目录（执行中的任务要先停掉）。
+                  删除后任务与会话归到默认目录；执行中的要先停掉。
                 </p>
               )}
               <div className="flex items-center justify-between gap-2">
@@ -258,7 +258,7 @@ export function ProjectDialog({
                 <div className="flex flex-col items-end gap-1.5">
                   {!canSave && (
                     <p className="text-xs text-faint-foreground">
-                      名称与文件夹路径都必填，填好后才能保存。
+                      名称与文件夹路径都必填。
                     </p>
                   )}
                   <div className="flex items-center gap-2">

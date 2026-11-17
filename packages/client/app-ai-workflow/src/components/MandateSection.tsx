@@ -83,8 +83,7 @@ export function MandateSection({
 
       {mandate === null ? (
         <p className="text-xs text-faint-foreground">
-          没有授权记录：兼容模式（未配置准入）或 A2
-          之前的历史任务。停止执行等高危动作仍受阶段权限约束。
+          没有授权记录：兼容模式或历史任务。停止执行等高危动作仍受阶段权限约束。
         </p>
       ) : (
         <dl className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-2">

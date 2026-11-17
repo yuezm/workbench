@@ -780,7 +780,7 @@ describe('TaskDetailPage', () => {
 
     // 位置与线程详情页一致：内容区底部的「页面动作」组里，左侧说明右侧按钮；页头不留删除
     const bar = screen.getByRole('group', { name: '页面动作' })
-    expect(bar).toHaveTextContent('线程也一并删除')
+    expect(bar).toHaveTextContent('删除会清掉运行记录、反馈与落盘归档')
     expect(
       within(screen.getByRole('banner')).queryByRole('button', { name: '删除任务' }),
     ).toBeNull()
@@ -790,7 +790,7 @@ describe('TaskDetailPage', () => {
     expect(dialog).toHaveTextContent('任务「任务A」')
     expect(dialog).toHaveTextContent('执行记录')
     // 线程可能随最后一个任务一起消失：弹窗里先讲清楚
-    expect(dialog).toHaveTextContent('线程也会一并删除')
+    expect(dialog).toHaveTextContent('线程也一并删除')
 
     await user.click(within(dialog).getByRole('button', { name: '删除' }))
     await waitFor(() =>

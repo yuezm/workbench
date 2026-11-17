@@ -407,7 +407,7 @@ describe('WorkflowManager', () => {
     expect(screen.getByRole('menuitem', { name: '从空白创建工作流' })).toBeInTheDocument()
     // 空白起手的说明与「内置阶段恒在」的新模型一致
     expect(screen.getByRole('menuitem', { name: '从空白创建工作流' })).toHaveTextContent(
-      '内置待办 / 已阻塞 / 已完成 / 已取消，自己往中间加阶段',
+      '内置四列，中间可加阶段',
     )
     for (const template of SOP_TEMPLATES) {
       const item = screen.getByRole('menuitem', { name: `使用模板 ${template.name}` })

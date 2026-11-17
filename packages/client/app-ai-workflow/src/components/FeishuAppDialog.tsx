@@ -164,7 +164,7 @@ export function FeishuAppDialog({
   const renderCreate = (): ReactElement => (
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted px-3 py-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Field label="profile 名" hint="本机的一个具名槽位">
+        <Field label="profile 名">
           <Input
             aria-label="新 profile 名"
             placeholder="如 workbench"
@@ -191,9 +191,7 @@ export function FeishuAppDialog({
         </Field>
       </div>
       <div className="flex items-center gap-2">
-        <p className="text-xs text-faint-foreground">
-          建完在列表里点「登录」做一次设备码授权，之后就能收发消息。
-        </p>
+        <p className="text-xs text-faint-foreground">建完点「登录」做一次设备码授权。</p>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <Button type="button" variant="quiet" size="sm" onClick={() => setCreating(false)}>
             取消
@@ -223,8 +221,7 @@ export function FeishuAppDialog({
         <DialogHeader>
           <DialogTitle>本机飞书应用</DialogTitle>
           <DialogDescription>
-            一个 profile = 一个飞书应用（App ID + Secret + 登录 token）。新建与删除只改本机
-            lark-cli。
+            一个 profile = 一个飞书应用（App ID + Secret + 登录 token）；增删只改本机 lark-cli。
           </DialogDescription>
         </DialogHeader>
 
@@ -251,7 +248,7 @@ export function FeishuAppDialog({
 
         {profiles.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border px-3 py-4 text-xs text-faint-foreground">
-            本机还没有 profile：先在上面新建一个（需要飞书应用的 App ID / App Secret）。
+            还没有 profile，先在上面新建（要 App ID / App Secret）。
           </p>
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border">

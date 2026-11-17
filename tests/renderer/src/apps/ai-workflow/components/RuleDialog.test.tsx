@@ -494,9 +494,8 @@ describe('RuleDialog', { timeout: 20_000 }, () => {
       />,
     )
 
-    expect(screen.getByText(/先建工作流/)).toBeInTheDocument()
+    expect(screen.getByText(/先到「工作流」新建一个/)).toBeInTheDocument()
     // 禁用要写原因：例外情况是「先建工作流」这条前置条件本身，用户一眼能看到
-    expect(screen.getByText(/没有可选工作流/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
   })
 

@@ -145,7 +145,7 @@ export function RuleDialog({
   const noWorkflow = workflows.length === 0
 
   /** 按钮禁用必须伴随可见原因（点不动又不说为什么，等于静默失败） */
-  const disabledHint = noWorkflow ? '没有可选工作流：先到「工作流」新建一个再回来。' : null
+  const disabledHint = noWorkflow ? '先到「工作流」新建一个。' : null
 
   /** 清掉某个字段的错误：用户一改就不再挂着旧红字 */
   const clearError = (field: RuleField): void => {

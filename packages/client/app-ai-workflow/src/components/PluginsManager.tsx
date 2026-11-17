@@ -421,7 +421,7 @@ function PluginDetail({
       const empty = field.optionsFrom === 'agents' ? '不指定智能体（只发卡）' : '未设置'
       const hint =
         field.optionsFrom === 'agents' && agents.length === 0
-          ? '还没有智能体：先去「智能体」页新建一个，再回来选'
+          ? '还没有智能体，先到「智能体」页新建'
           : field.help
       return (
         <Field key={field.key} label={field.label} className="min-w-0" hint={hint}>
@@ -536,7 +536,7 @@ function PluginDetail({
         </div>
 
         {plugin.status === 'unauthorized' && (
-          <p className="text-xs text-faint-foreground">未授权：勾选声明的能力并保存后才会启动。</p>
+          <p className="text-xs text-faint-foreground">未授权：勾选能力并保存后启动。</p>
         )}
 
         {/* M45：飞书的多连接（每连接一个 profile/应用/智能体）用专用面板，不塞进标量表单；
@@ -586,7 +586,7 @@ function PluginDetail({
         <FormError message={actionError} />
 
         <div className="flex items-center gap-2">
-          <p className="text-xs text-faint-foreground">授权只是信任门；secret 不回显。</p>
+          <p className="text-xs text-faint-foreground">secret 不回显。</p>
           <Button
             type="button"
             variant="secondary"
@@ -653,8 +653,6 @@ export function PluginsManager(): ReactElement {
       <FormError message={error} />
       {/* 启停失败是写命令的结果：可关掉；读视图错误是持续状态，不给关闭入口 */}
       <FormError message={toggleError} onDismiss={() => setToggleError(null)} />
-
-      <p className="text-xs text-faint-foreground">未授权的插件不会启动。</p>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn(badgeCls)}>共 {plugins.length} 个</span>

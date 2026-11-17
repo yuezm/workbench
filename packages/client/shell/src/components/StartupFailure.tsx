@@ -21,7 +21,7 @@ export function StartupFailure({
         <h1 className="text-base font-medium text-foreground">界面没有加载成功</h1>
         <p className="text-sm break-words text-destructive">{message}</p>
         <p className="text-xs text-muted-foreground">
-          确认服务进程在跑（`pnpm start` 或进程管理器里的 workbench 服务），并核对地址与端口。
+          确认服务进程在跑（`pnpm start`），并核对地址与端口。
         </p>
       </div>
     </div>

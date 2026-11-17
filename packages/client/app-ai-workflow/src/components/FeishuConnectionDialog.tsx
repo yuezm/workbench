@@ -122,8 +122,7 @@ export function FeishuConnectionDialog({
         <DialogHeader>
           <DialogTitle>{editing ? '编辑飞书连接' : '添加飞书连接'}</DialogTitle>
           <DialogDescription>
-            一条连接 = 一个 lark-cli profile =
-            一个飞书应用：需要你拍板的卡发到这里，点按钮就是答复。
+            一条连接 = 一个飞书应用；拍板卡发到这里，点按钮就是答复。
           </DialogDescription>
         </DialogHeader>
 
@@ -208,9 +207,7 @@ export function FeishuConnectionDialog({
               </Field>
             )}
             {target === 'current' && (
-              <p className="text-xs text-faint-foreground">
-                消息发到 profile 的登录人（也就是你自己）的私聊。
-              </p>
+              <p className="text-xs text-faint-foreground">发到 profile 登录人的私聊。</p>
             )}
           </div>
 

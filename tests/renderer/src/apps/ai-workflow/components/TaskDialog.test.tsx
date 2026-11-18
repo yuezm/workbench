@@ -347,7 +347,7 @@ describe('TaskDialog', () => {
     expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('待办')
   })
 
-  it('切到 BUG 按字段填：提交的 description 是带 ### 段头的正文', async () => {
+  it('切到 BUG 按字段填：提交的 description 是带 ## 段头的正文', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined)
     const user = userEvent.setup()
     render(
@@ -374,7 +374,7 @@ describe('TaskDialog', () => {
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     expect(onSave.mock.calls[0][0]).toMatchObject({
       description:
-        '### 现象\n点导出后页面白屏\n\n### 期望行为\n导出 CSV 正常下载\n\n### 复现步骤\n1. 打开导出\n2. 选项目',
+        '## 现象\n点导出后页面白屏\n\n## 期望行为\n导出 CSV 正常下载\n\n## 复现步骤\n1. 打开导出\n2. 选项目',
     })
   })
 
@@ -398,7 +398,7 @@ describe('TaskDialog', () => {
 
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     expect(onSave.mock.calls[0][0]).toMatchObject({
-      description: '### 需求描述\n＃ 验收（判据，逐条核对）\n正文',
+      description: '## 需求描述\n＃ 验收（判据，逐条核对）\n正文',
     })
   })
 

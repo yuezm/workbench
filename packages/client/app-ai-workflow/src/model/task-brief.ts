@@ -20,8 +20,9 @@
  *    了两套真相源。
  *
  * 段头层级：`prompt.ts` 定死「段用 `#`、段内小节用 `##`」，而 description 是跟随
- * `# 任务` 的一段，所以字段段头用 `###`；字段值里行首的 `#` 必须降级，否则用户能在
- * 描述里伪造出 `# 验收（判据，逐条核对）` 这类内核段——那是提示词注入的入口。
+ * `# 任务` 的正文，所以字段段头用 `##`（与段标题正好差一级）——写成 `###` 就是
+ * 「一级标题下面直接三级」，读起来像漏了一层。字段值里行首的 `#` 必须降级，否则用户可以
+ * 在描述里伪造出 `# 验收（判据，逐条核对）` 这类内核段——那是提示词注入的入口。
  */
 import { COMMAND_LIMITS } from '@workbench/protocol/validate'
 
@@ -159,7 +160,7 @@ export function escapeHeadingLines(value: string): string {
 }
 
 /**
- * 字段值 → 描述正文：每个非空字段一段 `### 段头`，空字段**整段消失**（不留空标题）。
+ * 字段值 → 描述正文：每个非空字段一段 `## 段头`，空字段**整段消失**（不留空标题）。
  * 全空时返回空串——描述保持「可选」，不因为切过一次组就凭空多出内容。
  */
 export function serializeBrief(mode: BriefMode, values: Readonly<Record<string, string>>): string {
@@ -167,7 +168,7 @@ export function serializeBrief(mode: BriefMode, values: Readonly<Record<string, 
   for (const field of briefFields(mode)) {
     const raw = (values[field.key] ?? '').trim()
     if (raw === '') continue
-    sections.push(`### ${field.label}\n${escapeHeadingLines(raw)}`)
+    sections.push(`## ${field.label}\n${escapeHeadingLines(raw)}`)
   }
   return sections.join('\n\n')
 }

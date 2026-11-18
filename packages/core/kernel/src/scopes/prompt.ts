@@ -13,10 +13,16 @@
  * 校对时也看不出段落结构。只有跨段装配（把若干**整段**叠成提示词）才用列表 +
  * `SECTION_SEPARATOR`，因为空段必须整段消失、不留空行。
  *
- * 标题层级也由这条约定定死：**每个段用 `#`，段内小节用 `##`**（再往下由段自己排）。
- * 段与段一律同级——否则后一个段会被读成前一个段的子结构（实测「# 线程上下文」后面
- * 跟「## 回执块」，模型看到的是「回执块属于这块资料」）。段内小节才降一级，
- * 比如线程上下文里的「## 任务索引」、打断规则里的「## 停下先问」。
+ * 标题层级由这两条约定定死：
+ *
+ * 1. **段用 `#`，段内小节用 `##`**（再往下由段自己排）。段与段一律同级——否则后一个段
+ *    会被读成前一个段的子结构（实测「# 线程上下文」后面跟「## 回执块」，模型看到的是
+ *    「回执块属于这块资料」）。
+ * 2. **人写内容进段时整体下移**：段标题是 `#`，人写的任务描述 / 阶段说明 / 系统提示词
+ *    常从 `###` 起笔，原样拼进去就是「一级标题下面直接三级」（`demoteHeadings`）。
+ *
+ * 「阶段」是一段容器：阶段名做段标题，阶段说明 / 验收 / 本轮正文 / 闸门判定 / 打断规则
+ * 都是它的小节——这几条都只在这个阶段成立，平铺成同级段会让读者以为它们与「任务」并列。
  *
  * 提示词只由内核/宿主按模板拼装，事件与消息正文只作为资料段，不进指令段；
  * 回执块说明是确定性文本，同阶段同事实同文本（不含任何外部事件文字）。
@@ -42,6 +48,58 @@ import { TASK_COMMENT_LIMITS } from '@workbench/protocol/task-comment'
 
 /** 段与段之间空一行；`filter(Boolean)` 之后用它拼接，空段不留痕。 */
 const SECTION_SEPARATOR = '\n\n'
+
+/** 标题行：`level` 个 `#` 加一个空格。段落函数都从这里出标题，级别才改得动。 */
+const heading = (level: number, title: string): string => `${'#'.repeat(level)} ${title}`
+
+/** Markdown 标题行（行首 `#` + 空白 + 正文）。 */
+const HEADING_LINE = /^(#{1,6})([ \t]+)(.*)$/
+
+/** 代码围栏行（``` 或 ~~~，允许缩进）——围栏里的 `#` 是注释，不是标题。 */
+const FENCE_LINE = /^\s*(`{3,}|~{3,})/
+
+/**
+ * 人写内容的标题整体对齐到 `level`：最小一级平移过去，其余按相对差同向平移。
+ *
+ * 为什么在拼装时改而不是要求写手守规矩：任务描述与阶段说明是**人**在工作流设置里写的，
+ * 习惯从 `###` 起笔（`serializeBrief` 也照这个习惯产出），段标题却是 `#`。原样拼进去
+ * 就是「一级标题下面直接三级」，模型按缩进读结构时会把这层关系当成疏漏。
+ *
+ * - 代码围栏内一律不动（`# 注释` 不是标题，改了会破坏代码）；
+ * - 没有标题行时原样返回（纯文本内容不产生额外字符）；
+ * - 双向平移并夹在 1..6：写手写得比段深就抬，写得比段浅就压，层级永远自洽。
+ */
+export function demoteHeadings(text: string, level: number): string {
+  const lines = text.split('\n')
+  const levels: number[] = []
+  let fence: string | null = null
+  let min = 7
+  for (const line of lines) {
+    const fenceMatch = FENCE_LINE.exec(line)
+    if (fenceMatch !== null) {
+      const marker = (fenceMatch[1] as string)[0] as string
+      if (fence === null) fence = marker
+      else if (fence === marker) fence = null
+      levels.push(0)
+      continue
+    }
+    const match = fence === null ? HEADING_LINE.exec(line) : null
+    const depth = match === null ? 0 : (match[1] as string).length
+    levels.push(depth)
+    if (depth > 0 && depth < min) min = depth
+  }
+  if (min === 7) return text
+  const shift = level - min
+  if (shift === 0) return text
+  return lines
+    .map((line, index) => {
+      const depth = levels[index] as number
+      if (depth === 0) return line
+      const next = Math.min(6, Math.max(1, depth + shift))
+      return heading(next, line.slice(depth).trimStart())
+    })
+    .join('\n')
+}
 
 /**
  * 回执块开场白（固定文本；键说明与上限由 `protocol/receipt-keys` 提供）。
@@ -104,9 +162,12 @@ export const taskReceiptKeys = (
  *
  * 这段是**指令**而不是资料：它约束「怎么取上下文」的行为。只有拼了线程上下文
  * （即存在「任务索引」）时才出现，无历史的线程不受影响。
+ *
+ * 它是「线程上下文」段的一个小节（`##`）：讲的就是这段资料该怎么用，独立成 `#` 段
+ * 会让读者以为它与线程上下文并列，看不出两者是同一件事的两面。
  */
-export const CROSS_TASK_RULE =
-  '跨任务信息一律按需读取「任务索引」里的产物路径；不要把其他任务的全文贴进对话，也不要凭摘要猜实现细节。'
+export const CROSS_TASK_RULE = `## 跨任务按需取用
+跨任务信息一律按需读取「任务索引」里的产物路径；不要把其他任务的全文贴进对话，也不要凭摘要猜实现细节。`
 
 /** 单条反馈（M7.5）：作者 + 时刻 + 压成一行的正文（超长按码点截断加省略号）。 */
 const commentLine = (comment: TaskComment): string => {
@@ -144,8 +205,12 @@ ${lines.join('\n')}`
  *
  * 固定文案同事实同文本，不由阶段配置改写（否则每个阶段都要重写一遍，且会漂移）。
  * 「一轮只发一张 ask」不在这里约束——由回执块的 `ask` 键文案统一管（`protocol/receipt-keys`）。
+ *
+ * `level`：段标题级别（阶段容器里是 `##`），段内四个小节跟着再降一级。
  */
-export const interruptRuleText = (): string => `# 打断规则
+export const interruptRuleText = (level = 1): string => {
+  const section = (title: string): string => heading(level + 1, title)
+  return `${heading(level, '打断规则')}
 
 三种情况分开处理：
 
@@ -153,26 +218,27 @@ export const interruptRuleText = (): string => `# 打断规则
 - 有多个合理选项的，自己选一个，交付时一句话交代选了什么、为什么、改起来贵不贵
 - 下面这几条，停下先问
 
-## 停下先问
+${section('停下先问')}
 
 1. 不可逆或不可回滚：对外发布、发消息、花钱、改删生产数据、force push。本地能回滚的删除不算
 2. 口径缺失且猜错要返工：波及 ≥3 个模块、动公共契约（AppDefinition / preload 桥接 / 事实日志）、要重写已通过的测试、结论要对外
 3. 越出当前阶段：SPEC 或计划里明确不属于本阶段，或要新增依赖、新基础设施
 4. 同一验收标准下连续两次没过：第二次失败直接问，别试第三次
 
-## 别问
+${section('别问')}
 
 - 答案在仓库里能找到 → 去读
 - 答案已经有最佳实践、业界共识 → 按照最佳实践
 - 选项有明显优劣 → 选优先级高的
 
-## 怎么问
+${section('怎么问')}
 
 一次问完；每题给 2-4 个选项、标推荐、写代价；说清“没人回我按 X 走”。非阻塞的疑问记成清单，交付时一起给
 
-## 不用问但要说
+${section('不用问但要说')}
 
 需求自相矛盾、沿途发现 bug、你正偏离原方案`
+}
 
 /** 提示词只读阶段上的这几项，其余字段缺省也行（老的 stage 夹具不必补齐判定位）。 */
 export interface PromptStage {
@@ -226,13 +292,67 @@ ${summary}`
 }
 
 /**
- * 阶段任务提示词（M6.5 增加线程上下文段，M7.5 增加反馈记录段，M9 增加阶段要干什么，
- * M19 增加打断规则段，M24 回执块按阶段裁剪）。
+ * 系统提示词段：智能体配置里那段自由文本，成段进提示词。
  *
- * 段序：systemPrompt（能力）→ 任务 → 描述 → 阶段 → 阶段要干什么（固定指令段）→
- * 验收 → 本轮正文（挂线程时的固定指令段）→ 闸门判定（指令）→ 打断规则（固定指令段）→
- * 反馈记录（资料）→ 线程上下文（派生资料，不是指令）→ 回执块说明（按 `taskReceiptKeys` 裁出本轮有出口的键）。
- * 阶段说明由人在工作流设置里填写，属于指令段；任务/线程资料段都由内核按事实派生。
+ * 为什么必须带段标题：它拼在最前面，紧跟宿主的派发注释块。裸文本接上 `# 任务：…` 时，
+ * 读者看到的是「注释块下面挂着几条编号规则」，既不属于任何段，也看不出它是**全局约束**
+ * 而不是任务内容（实测那份提示词里前三条规则就是这么悬着的）。空白视为没配，整段消失。
+ *
+ * 正文按 `# 段 / ## 小节` 的约定下移一级（`demoteHeadings`），写手原来用什么级别都不影响结构。
+ */
+export const systemPromptText = (prompt: string): string => {
+  const body = prompt.trim()
+  return body === ''
+    ? ''
+    : `${heading(1, '系统提示')}${SECTION_SEPARATOR}${demoteHeadings(body, 2)}`
+}
+
+/**
+ * 任务段：`# 任务：标题` + 描述正文。
+ *
+ * 描述是人在任务里写的内容（`serializeBrief` 产出或自由文本），标题整体压到 `##`——
+ * 段标题是 `#`，描述里再出现 `###` 就是跳级。描述为空时只有标题行，不留空段。
+ */
+export const taskParagraph = (task: Pick<Task, 'title' | 'description'>): string => {
+  const head = heading(1, `任务：${task.title}`)
+  const body = demoteHeadings(task.description.trim(), 2)
+  return body === '' ? head : `${head}${SECTION_SEPARATOR}${body}`
+}
+
+/**
+ * 阶段段容器：阶段名做段标题，阶段内的小节挂它下面。
+ *
+ * 为什么收成一个容器：阶段说明 / 验收 / 本轮正文 / 闸门判定 / 打断规则**只在这个阶段成立**，
+ * 与被判定的那份交付物、几条资料不是一类东西。平铺成同级 `#` 段时（实测六个一级标题），
+ * 读者分不出哪几段是「这一步怎么做」、哪几段是「这条任务的资料」。
+ *
+ * 没有阶段名（执行约定类调用 / 无阶段任务）时容器标题退成 `# 执行约定`——小节级别恒定，
+ * 不因为有没有阶段名而跳级。
+ */
+const stageParagraph = (stage: PromptStage | null, task: Pick<Task, 'threadId'>): string => {
+  const title = stage?.name ? `阶段：${stage.name}` : '执行约定'
+  /** 容器里的一律是小节：`##`，段内再降一级由各段自己排。 */
+  const level = 2
+  const sections = [
+    stageInstructionsText(stage, level),
+    acceptanceText(stage, level),
+    task.threadId === null ? '' : outputContractText(level),
+    gateInstructionsText(stage, level),
+    interruptRuleText(level),
+  ].filter(Boolean)
+  return `${heading(1, title)}${SECTION_SEPARATOR}${sections.join(SECTION_SEPARATOR)}`
+}
+
+/**
+ * 阶段任务提示词（M6.5 增加线程上下文段，M7.5 增加反馈记录段，M9 增加阶段要干什么，
+ * M19 增加打断规则段，M24 回执块按阶段裁剪，M35+ 段内小节收进阶段容器）。
+ *
+ * 段序：系统提示 → 任务（标题 + 描述）→ 来源工单（资料）→ 阶段（容器：要做什么 / 验收 /
+ * 本轮正文 / 闸门判定 / 打断规则）→ 反馈记录（资料）→ 线程上下文（派生资料，不是指令，
+ * 含「跨任务按需取用」小节）→ 回执块说明（按 `taskReceiptKeys` 裁出本轮有出口的键）。
+ *
+ * 顶层只有这几类 `#`：系统提示 / 任务 / 来源工单 / 阶段 / 反馈记录 / 线程上下文 / 回执块。
+ * 「同类小节挂在同一个容器下」是这次修的重点——此前六个一级标题平铺，读不出从属关系。
  *
  * 每项都是**一整段**（空段整段消失，不留空行），所以这里用列表装配而不是拼模板字面量。
  *
@@ -248,16 +368,10 @@ export const taskPrompt = (
   options?: { reviewing?: boolean; handoffSource?: HandoffSource | null },
 ): string =>
   [
-    agent.systemPrompt,
-    `# 任务：${task.title}`,
-    task.description,
+    systemPromptText(agent.systemPrompt),
+    taskParagraph(task),
     handoffSourceText(options?.handoffSource),
-    stage?.name ? `# 阶段：${stage.name}` : '',
-    stageInstructionsText(stage),
-    acceptanceText(stage),
-    task.threadId === null ? '' : outputContractText(),
-    gateInstructionsText(stage),
-    interruptRuleText(),
+    stageParagraph(stage, task),
     taskCommentsText(comments ?? []),
     threadContext ?? '',
     threadContext ? CROSS_TASK_RULE : '',
@@ -267,38 +381,42 @@ export const taskPrompt = (
     .join(SECTION_SEPARATOR)
 
 /**
- * 阶段「要干什么」段（M9）：空 / 全空白时不产文本，保持老提示词逐字不变。
- * 正文按原样保留换行，只去首尾空白。
+ * 阶段「要做什么」小节（M9）：空 / 全空白时不产文本，保持老提示词的段消失口径。
+ * 正文按原样保留换行，只去首尾空白；标题按段内约定下移（是阶段容器的 `##`）。
+ *
+ * `level`：小节标题级别（阶段容器里是 `##`），正文标题跟着再降一级。
  */
 export const stageInstructionsText = (
   stage: Pick<WorkflowStage, 'instructions'> | null,
+  level = 1,
 ): string => {
-  const body = stage?.instructions?.trim() ?? ''
-  return body === '' ? '' : `# 阶段要做什么\n${body}`
+  const body = demoteHeadings(stage?.instructions?.trim() ?? '', level + 1)
+  return body === '' ? '' : `${heading(level, '要做什么')}${SECTION_SEPARATOR}${body}`
 }
 
 /**
- * 阶段「验收」段（M34）：**只对闸门阶段**产出，是被评阶段交付的判据清单。
+ * 阶段「验收」小节（M34）：**只对闸门阶段**产出，是被评阶段交付的判据清单。
  *
  * 条目逐条原样输出并带 **1 基序号**——判定者的 `checks[].acceptance = n` 就指向这个序号，
  * 内核按它核对覆盖（漏一条按没给结论）。段落只讲「你要验什么」，不讲「你自己做完了吗」：
- * 执行阶段不再有验收段。
+ * 执行阶段不再有验收小节。
  *
  * 空数组 / 非闸门阶段不产文本——没有验收配置的工作流提示词逐字不变。
  */
 export const acceptanceText = (
   stage: (Pick<WorkflowStage, 'acceptance'> & { judge?: WorkflowStage['judge'] }) | null,
+  level = 1,
 ): string => {
   const items = stage?.acceptance ?? []
   if (stage === null || stage.judge == null || items.length === 0) return ''
   const numbered = items.map((item, index) => `${index + 1}. ${item}`).join('\n')
-  return `# 验收（判据，逐条核对）
+  return `${heading(level, '验收（判据，逐条核对）')}
 被评阶段交付的判据。每一条都要有证据，缺一条就等于没给结论：
 ${numbered}`
 }
 
 /**
- * 本轮正文段（M27）：**挂线程的阶段**才出现，规定 `output.md` 的写法。
+ * 本轮正文小节（M27）：**挂线程的阶段**才出现，规定 `output.md` 的写法。
  *
  * 为什么要有它：挂线程的阶段 run 终态会把正文落成 `output.md`，而后续阶段拿到的
  * 上下文只有「骨架 + 路径」（`THREAD_LIMITS.precedingExcerptChars`）与任务索引里的
@@ -309,7 +427,9 @@ ${numbered}`
  * 写进「阶段说明」会每个阶段重写一遍并各自漂移。不挂线程的任务不产这段
  * （没有 `output.md` 消费方），老提示词逐字不变。
  */
-export const outputContractText = (): string => `# 本轮正文（会落盘给后续阶段当上下文）
+export const outputContractText = (
+  level = 1,
+): string => `${heading(level, '本轮正文（会落盘给后续阶段当上下文）')}
 
 这一轮的最终回复正文会原样落盘成 \`output.md\`，后续阶段只读这一段：它看不到你的对话、思考与工具调用。
 
@@ -324,17 +444,17 @@ export const outputContractText = (): string => `# 本轮正文（会落盘给�
 const GATE_ACCEPTANCE_RULE = `- 每条「验收」都要有自己的证据：在对应那条 \`checks\` 里写 \`"acceptance": n\`（n 是上面的条目序号）且 \`exitCode\` 为 0；漏一条就等于没给结论（任务停在闸门，不消耗失败次数）。真无法机检的那条，在正文写清为什么，并按实际情况给 \`fail\` 或停下来问人`
 
 /**
- * 闸门判定段（M11）：固定文案，只对闸门阶段出现。这段是**指令**，不能由人改写——
+ * 闸门判定小节（M11）：固定文案，只对闸门阶段出现。这段是**指令**，不能由人改写——
  * 判定格式一旦走样，内核会把「没给结论」当成停住等人，任务会卡在闸门上。
  *
  * M34：闸门是工作流里唯一做验收的地方——它不实现东西，只验上一个执行阶段的交付。
  * 阶段声明了验收条目时，追加「每条验收都要有自己的证据」；漏一条按没给结论处理。
  */
-export const gateInstructionsText = (stage: PromptStage | null): string => {
+export const gateInstructionsText = (stage: PromptStage | null, level = 1): string => {
   const gate = stage?.judge ?? null
   if (gate === null) return ''
   const acceptanceRule = (stage?.acceptance ?? []).length > 0 ? `\n${GATE_ACCEPTANCE_RULE}` : ''
-  return `# 闸门判定（必须）
+  return `${heading(level, '闸门判定（必须）')}
 本阶段是闸门：不实现任何东西，只对上一个执行阶段的交付下结论，在最终回复末尾的回执块里写 \`verdict\` 与 \`checks\`。
 - \`verdict\`: "pass" = 确实达成；"fail" = 没达成（在正文里写清哪一条没过）
 - \`checks\`: 实际执行的命令与退出码，至少一条；\`verdict\` 为 pass 时每条 \`exitCode\` 必须是 0
@@ -363,19 +483,24 @@ export function titleFromContent(content: string): string {
 
 /**
  * 首轮 prompt：不依赖会话续接时，把 systemPrompt 与完整历史一起带上。
- * 结构：systemPrompt（非空才有） → # 对话记录 → 结尾提示 → 回执块说明。
+ * 结构：# 系统提示（非空才有）→ # 对话记录 → ## 回答要求 → 回执块说明。
+ *
+ * 系统提示不能裸在最前面（与 `taskPrompt` 同一个理由：裸文本接上 `# 对话记录` 时
+ * 看不出它是全局约束）；「请回答最后一条用户消息」是读这段记录之后的动作要求，
+ * 收成对话记录的小节，不再当成一段悬空的句子。
+ *
  * 续接轮不走这里（只发新消息），由 `conversation.send` 决定。
  */
 export function chatPrompt(agent: Agent, messages: readonly Message[]): string {
-  const system = agent.systemPrompt.trim()
-  const sections = [
-    '# 对话记录',
+  return [
+    systemPromptText(agent.systemPrompt),
+    heading(1, '对话记录'),
     messages.map((message) => `${ROLE_LABEL[message.role]}：${message.content}`).join('\n'),
-    ANSWER_HINT,
+    `${heading(2, '回答要求')}\n${ANSWER_HINT}`,
     receiptBlockHint(CHAT_RECEIPT_KEYS),
   ]
-  if (system !== '') sections.unshift(system)
-  return sections.join(SECTION_SEPARATOR)
+    .filter(Boolean)
+    .join(SECTION_SEPARATOR)
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   acceptanceText,
   answerPrompt,
   chatPrompt,
+  demoteHeadings,
   handoffSourceText,
   CROSS_TASK_RULE,
   expiredPrompt,
@@ -21,7 +22,9 @@ import {
   outputContractText,
   receiptBlockHint,
   stageInstructionsText,
+  systemPromptText,
   taskCommentsText,
+  taskParagraph,
   taskPrompt,
   taskReceiptKeys,
   titleFromContent,
@@ -42,10 +45,12 @@ const TASK_HINT = receiptBlockHint(
 )
 /** 聊天首轮的键更少：没有阶段、不挂线程。 */
 const CHAT_HINT = receiptBlockHint(CHAT_RECEIPT_KEYS)
-/** 阶段任务提示词里的打断规则段（M19）：固定文案，紧跟闸门判定。 */
-const INTERRUPT = interruptRuleText()
-/** 本轮正文段（M27）：固定文案，挂线程的阶段才有。 */
-const OUTPUT_CONTRACT = outputContractText()
+/** 阶段容器里的打断规则小节（M19）：固定文案，级别 2（挂在「阶段」容器下）。 */
+const INTERRUPT = interruptRuleText(2)
+/** 阶段容器里的本轮正文小节（M27）：固定文案，级别 2；挂线程的阶段才有。 */
+const OUTPUT_CONTRACT = outputContractText(2)
+/** 系统提示段：段标题 `#`，正文按段内约定下移一级。 */
+const SYSTEM = (body: string): string => `# 系统提示\n\n${body}`
 
 const agent = (over: Partial<Agent> = {}): Agent => ({
   id: 'ag-1',
@@ -139,15 +144,15 @@ describe('kernel/prompt titleFromContent', () => {
 })
 
 describe('kernel/prompt chatPrompt', () => {
-  it('systemPrompt 非空：能力段 + # 对话记录 + 结尾提示 + 回执块说明（段间两空行）', () => {
+  it('systemPrompt 非空：系统提示段 + # 对话记录 + ## 回答要求 + 回执块说明（段间两空行）', () => {
     expect(chatPrompt(agent(), [message()])).toBe(
-      `你是助手。\n\n# 对话记录\n\n用户：早\n\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
+      `${SYSTEM('你是助手。')}\n\n# 对话记录\n\n用户：早\n\n## 回答要求\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
     )
   })
 
-  it('systemPrompt 空白：省略能力段', () => {
+  it('systemPrompt 空白：省略系统提示段', () => {
     expect(chatPrompt(agent({ systemPrompt: '   ' }), [message()])).toBe(
-      `# 对话记录\n\n用户：早\n\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
+      `# 对话记录\n\n用户：早\n\n## 回答要求\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
     )
   })
 
@@ -164,7 +169,7 @@ describe('kernel/prompt chatPrompt', () => {
     ])
 
     expect(prompt).toBe(
-      `你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n今天做什么？\n用户：继续\n\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
+      `${SYSTEM('你是助手。')}\n\n# 对话记录\n\n用户：早\n助手：早呀\n今天做什么？\n用户：继续\n\n## 回答要求\n请回答最后一条用户消息。\n\n${CHAT_HINT}`,
     )
   })
 })
@@ -195,8 +200,10 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
 
   it('固定文案：四类要点齐、禁过程叙述、首尾不带换行', () => {
     const text = outputContractText()
-    expect(text).toBe(OUTPUT_CONTRACT)
+    // 默认一级；阶段容器里用二级（同一份文案，只换标题级别）
+    expect(outputContractText(2)).toBe(OUTPUT_CONTRACT)
     expect(text.split('\n')[0]).toBe('# 本轮正文（会落盘给后续阶段当上下文）')
+    expect(OUTPUT_CONTRACT.split('\n')[0]).toBe('## 本轮正文（会落盘给后续阶段当上下文）')
     expect(text.startsWith('\n')).toBe(false)
     expect(text.endsWith('\n')).toBe(false)
     expect(text).toContain('后续阶段只读这一段')
@@ -216,8 +223,8 @@ describe('kernel/prompt 本轮正文段（M27）', () => {
     }
     const text = taskPrompt(agent(), stageTask(), stage)
     expect(text).toContain(OUTPUT_CONTRACT)
-    expect(text.indexOf('# 验收（判据，逐条核对）')).toBeLessThan(text.indexOf(OUTPUT_CONTRACT))
-    expect(text.indexOf(OUTPUT_CONTRACT)).toBeLessThan(text.indexOf('# 闸门判定（必须）'))
+    expect(text.indexOf('## 验收（判据，逐条核对）')).toBeLessThan(text.indexOf(OUTPUT_CONTRACT))
+    expect(text.indexOf(OUTPUT_CONTRACT)).toBeLessThan(text.indexOf('## 闸门判定（必须）'))
 
     // 不挂线程：没有 output.md 的消费者，逐字不产这段
     const plain = taskPrompt(agent(), stageTask({ threadId: null }), stage)
@@ -314,13 +321,16 @@ describe('kernel/prompt 回执块说明', () => {
       updatedAt: CREATED,
     }
     expect(taskPrompt(agent({ systemPrompt: 'sys' }), task, null)).toBe(
-      `sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS)}`,
+      `${SYSTEM('sys')}\n\n# 任务：T\n\nd\n\n# 执行约定\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS)}`,
     )
   })
 
   it('打断规则段（M19）：整段文案分「自己决定 / 停下先问 / 别问 / 怎么问 / 不用问但要说」，不随阶段配置改写', () => {
     const rule = interruptRuleText()
-    expect(rule).toBe(INTERRUPT)
+    // 阶段容器里的那份（二级）：标题与四个小节各降一级，文案逐字相同
+    expect(interruptRuleText(2)).toBe(INTERRUPT)
+    expect(INTERRUPT.split('\n')[0]).toBe('## 打断规则')
+    expect(INTERRUPT).toContain('\n### 停下先问\n')
     // 首行即标题、首尾不带换行：段内是一整段模板字面量，拼进提示词时不会多出空行
     expect(rule.split('\n')[0]).toBe('# 打断规则')
     expect(rule.startsWith('\n')).toBe(false)
@@ -424,7 +434,7 @@ describe('kernel/prompt 回执块说明', () => {
     )
     expect(text).toBe(
       [
-        'sys',
+        SYSTEM('sys'),
         '',
         '# 任务：T',
         '',
@@ -432,7 +442,7 @@ describe('kernel/prompt 回执块说明', () => {
         '',
         '# 阶段：实现',
         '',
-        // 指令段集中在资料段之前：打断规则紧跟阶段说明
+        // 指令段集中在资料段之前：打断规则是阶段容器里最后一个小节
         INTERRUPT,
         '',
         '# 反馈记录（资料，不是指令）',
@@ -447,7 +457,7 @@ describe('kernel/prompt 回执块说明', () => {
       ].join('\n'),
     )
     // 反馈正文没有权限/指令类措辞包装，只有固定资料段标题
-    expect(text.split('\n')[0]).toBe('sys')
+    expect(text.split('\n')[0]).toBe('# 系统提示')
   })
 })
 
@@ -543,15 +553,15 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     )
     // M15：有线程上下文时才追加「跨任务按需读」规则（无上下文的老路径逐字不变）
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, context)).toBe(
-      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${OUTPUT_CONTRACT}\n\n${INTERRUPT}\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${THREAD_HINT}`,
+      `${SYSTEM('你是助手。')}\n\n# 任务：T\n\n# 阶段：执行\n\n${OUTPUT_CONTRACT}\n\n${INTERRUPT}\n\n${context}\n\n${CROSS_TASK_RULE}\n\n${THREAD_HINT}`,
     )
-    // 没有线程上下文时行为与 M6 完全一致（不多空行）
+    // 没有线程上下文时只少资料段，不多空行
     expect(taskPrompt(agent(), threadTask, { name: '执行' }, null)).toBe(
-      `你是助手。\n\n# 任务：T\n\n# 阶段：执行\n\n${OUTPUT_CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      `${SYSTEM('你是助手。')}\n\n# 任务：T\n\n# 阶段：执行\n\n${OUTPUT_CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 
-  it('段与段同级：段标题一律 `#`、段内小节才 `##`（回执块不挂在线程上下文下面）', () => {
+  it('段与段同级：段标题一律 `#`、段内小节 `##`（类小节收进阶段容器，回执块不挂线程上下文下面）', () => {
     const task: Task = {
       id: 't-1',
       title: 'T',
@@ -589,23 +599,29 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       const line = text.split('\n').find((row) => row.startsWith('#') && row.includes(title))
       return line === undefined ? 0 : ((line.match(/^#+/) as RegExpMatchArray)[0] as string).length
     }
+    // 顶层段：任务 / 阶段容器 / 两类资料段 / 回执块
     for (const title of [
       '任务：',
       '阶段：',
-      '阶段要做什么',
-      '验收（判据，逐条核对）',
-      '本轮正文',
-      '闸门判定（必须）',
-      '打断规则',
       '反馈记录（资料，不是指令）',
       '线程上下文（派生资料，不是指令）',
       '回执块（可选）',
     ]) {
       expect(levelOf(title), title).toBe(1)
     }
-    // 段内小节才降一级：打断规则的四个小节
+    // 阶段容器里的小节：这一步怎么干，全部挂在阶段名下面
+    for (const section of [
+      '要做什么',
+      '验收（判据，逐条核对）',
+      '本轮正文',
+      '闸门判定（必须）',
+      '打断规则',
+    ]) {
+      expect(levelOf(section), section).toBe(2)
+    }
+    // 段内再降一级：打断规则的四个小节
     for (const section of ['停下先问', '别问', '怎么问', '不用问但要说']) {
-      expect(text).toContain(`\n## ${section}\n`)
+      expect(text).toContain(`\n### ${section}\n`)
     }
     // 回执块紧跟在线程上下文之后，但两者同级（不是它的子结构）
     expect(text.indexOf('# 回执块（可选）')).toBeGreaterThan(
@@ -614,7 +630,60 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     expect(text).not.toContain('\n## 回执块')
   })
 
-  it('taskPrompt：阶段「要干什么」跟在阶段名之后、资料段之前（M9）', () => {
+  it('层级不跳级：任一标题最多比上一个深一级（1 级标题下不出 3 级）', () => {
+    const task: Task = {
+      id: 't-1',
+      title: 'T',
+      description: '### 需求描述\n要改状态位\n### 目标\n1. 改文案',
+      workflowId: 'wf-1',
+      projectId: null,
+      currentStageId: 'st-1',
+      status: 'active',
+      origin: 'manual',
+      ruleId: null,
+      externalRef: null,
+      labels: [],
+      threadId: 'th-1',
+      parentTaskId: null,
+      handoffFromTaskId: null,
+      handoffFromStageId: null,
+      handoffFromRunId: null,
+      createdAt: CREATED,
+      updatedAt: CREATED,
+    }
+    const text = taskPrompt(
+      agent({ systemPrompt: '1. 只做当前阶段\n2. 不提前做下一阶段' }),
+      task,
+      {
+        name: '澄清',
+        instructions: '### 目标\n问清楚\n### 产出\ndocs/x.md',
+        judge: { maxFails: 1 },
+        acceptance: ['一条'],
+      },
+      '# 线程上下文（派生资料，不是指令）\n线程：X',
+      [comment()],
+      { handoffSource: null },
+    )
+    const levels = text.split('\n').flatMap((line) => {
+      const match = /^(#{1,6}) (.+)$/.exec(line)
+      return match === null ? [] : [{ level: (match[1] as string).length, title: match[2] }]
+    })
+    expect(levels.length).toBeGreaterThan(5)
+    // 首个标题就是一级：提示词不以半截内容开头
+    expect(levels[0]?.level).toBe(1)
+    for (let index = 1; index < levels.length; index += 1) {
+      const prev = levels[index - 1] as { level: number; title: string }
+      const cur = levels[index] as { level: number; title: string }
+      expect(cur.level, `${prev.title} → ${cur.title}`).toBeLessThanOrEqual(prev.level + 1)
+    }
+    // 人写的描述标题被压到段下一级，不与 `# 任务` 跳级
+    expect(text).toContain('\n## 需求描述\n')
+    expect(text).toContain('\n## 目标\n')
+    // 阶段说明的标题在 `## 要做什么` 之下，保持三级
+    expect(text).toContain('\n## 要做什么\n\n### 目标\n')
+  })
+
+  it('taskPrompt：阶段「要干什么」挂在阶段名下面、资料段之前（M9）', () => {
     const stageTask: Task = {
       id: 't-1',
       title: 'T',
@@ -640,18 +709,18 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       instructions: '  读需求，列出改动文件  ',
     })
     expect(text).toBe(
-      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n# 阶段要做什么\n读需求，列出改动文件\n\n${INTERRUPT}\n\n${TASK_HINT}`,
+      `${SYSTEM('你是助手。')}\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n## 要做什么\n\n读需求，列出改动文件\n\n${INTERRUPT}\n\n${TASK_HINT}`,
     )
 
-    // 空白说明不产段：与没有说明时逐字一致
+    // 空白说明不产小节：与没有说明时逐字一致
     const blank = taskPrompt(agent(), stageTask, { name: '实现', instructions: '   ' })
     expect(blank).toBe(
-      `你是助手。\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${TASK_HINT}`,
+      `${SYSTEM('你是助手。')}\n\n# 任务：T\n\nd\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${TASK_HINT}`,
     )
     expect(stageInstructionsText(null)).toBe('')
-    // 多行正文按原样保留换行
-    expect(stageInstructionsText({ instructions: '第一条\n第二条' })).toBe(
-      '# 阶段要做什么\n第一条\n第二条',
+    // 多行正文按原样保留换行；标题级别跟着调用方（阶段容器里是 `##`）
+    expect(stageInstructionsText({ instructions: '第一条\n第二条' }, 2)).toBe(
+      '## 要做什么\n\n第一条\n第二条',
     )
   })
 })
@@ -719,9 +788,9 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
       instructions: '跑测试',
       judge: { maxFails: 2 },
     })
-    const stageIndex = text.indexOf('# 阶段要做什么')
-    const gateIndex = text.indexOf('# 闸门判定（必须）')
-    const interruptIndex = text.indexOf('# 打断规则')
+    const stageIndex = text.indexOf('## 要做什么')
+    const gateIndex = text.indexOf('## 闸门判定（必须）')
+    const interruptIndex = text.indexOf('## 打断规则')
     expect(stageIndex).toBeGreaterThan(0)
     expect(gateIndex).toBeGreaterThan(stageIndex)
     // 打断规则紧跟闸门判定：先判「过没过」，再说「什么时候叫人」
@@ -797,7 +866,7 @@ describe('kernel/prompt 验收段（M34：只对闸门阶段产出）', () => {
     )
   })
 
-  it('taskPrompt 段序：阶段说明 → 验收 → 闸门 → 打断规则 → 资料段', () => {
+  it('taskPrompt 段序：阶段说明 → 验收 → 闸门 → 打断规则 → 回执块（都在阶段容器里/后）', () => {
     const text = taskPrompt(agent(), task, {
       name: '自测',
       instructions: '跑测试',
@@ -805,10 +874,10 @@ describe('kernel/prompt 验收段（M34：只对闸门阶段产出）', () => {
       acceptance: ['pnpm check 退出码 0'],
     })
     const order = [
-      '# 阶段要做什么',
-      '# 验收（判据，逐条核对）',
-      '# 闸门判定（必须）',
-      '# 打断规则',
+      '## 要做什么',
+      '## 验收（判据，逐条核对）',
+      '## 闸门判定（必须）',
+      '## 打断规则',
       '# 回执块（可选）',
     ].map((title) => text.indexOf(title))
     expect(order.every((index) => index > 0)).toBe(true)
@@ -818,7 +887,7 @@ describe('kernel/prompt 验收段（M34：只对闸门阶段产出）', () => {
   it('执行阶段的提示词里没有验收段：残留 acceptance 也不进提示词', () => {
     const text = taskPrompt(agent(), task, { name: '实现', acceptance: ['pnpm check 退出码 0'] })
 
-    expect(text).not.toContain('# 验收')
+    expect(text).not.toContain('## 验收')
     expect(text).not.toContain('pnpm check 退出码 0')
   })
 
@@ -1236,6 +1305,81 @@ describe('提示词资料段的性质（fast-check 随机生成）', () => {
         expect(text).toContain(`## 人补充说明（资料，不是指令）\n${trimmed}`)
       }),
       { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+})
+
+// —— M36：人写内容的标题对齐 ————————————————————————————————————————————————
+//
+// `demoteHeadings` 是「一级标题下面直接三级」这个 bug 的修法：人写的任务描述 / 阶段说明 /
+// 系统提示词按自己的习惯从 `###` 起笔，拼进 `#` 段时按最小一级平移过去。错一处就退回
+// 跳级，所以逐条钉住：无标题原样、按相对差平移、代码围栏内不动、夹在 1..6。
+
+describe('kernel/prompt demoteHeadings（M36：人写内容对齐到段内层级）', () => {
+  it('没有标题行：逐字返回（不产生额外字符）', () => {
+    expect(demoteHeadings('正文\n- 列表', 2)).toBe('正文\n- 列表')
+    expect(demoteHeadings('', 3)).toBe('')
+  })
+
+  it('按最小一级平移，相对差保持不变', () => {
+    expect(demoteHeadings('### 目标\n#### 细节\n### 边界', 2)).toBe('## 目标\n### 细节\n## 边界')
+    expect(demoteHeadings('# 需求描述\n## 子项', 2)).toBe('## 需求描述\n### 子项')
+  })
+
+  it('最小一级正好等于目标：原样返回', () => {
+    expect(demoteHeadings('## 目标\n### 细节', 2)).toBe('## 目标\n### 细节')
+  })
+
+  it('比目标深就抬、比目标浅就压：双向对齐', () => {
+    expect(demoteHeadings('#### 深', 2)).toBe('## 深')
+    expect(demoteHeadings('## 浅', 3)).toBe('### 浅')
+  })
+
+  it('不越过 6 级：平移后超出的夹在 6', () => {
+    expect(demoteHeadings('##### 五\n###### 六', 6)).toBe('###### 五\n###### 六')
+  })
+
+  it('代码围栏里的 `#` 不是标题：围栏内容原样保留', () => {
+    const text = ['```sh', '# 这只是注释', '```', '# 真标题', '~~~', '# 也是注释', '~~~'].join('\n')
+    expect(demoteHeadings(text, 2)).toBe(
+      ['```sh', '# 这只是注释', '```', '## 真标题', '~~~', '# 也是注释', '~~~'].join('\n'),
+    )
+  })
+
+  it('围栏只用同一 marker 关闭，且标题名多余空白归一', () => {
+    const text = ['```', '~~~', '# 仍在围栏里', '```', '#   宽松标题'].join('\n')
+    expect(demoteHeadings(text, 2)).toBe(
+      ['```', '~~~', '# 仍在围栏里', '```', '## 宽松标题'].join('\n'),
+    )
+  })
+
+  it('只有围栏里的 `#`：没有真标题，整段原样', () => {
+    expect(demoteHeadings('```\n# 注释\n```', 2)).toBe('```\n# 注释\n```')
+  })
+})
+
+describe('kernel/prompt 系统提示段与任务段（M36）', () => {
+  it('系统提示成段：标题 + 空行 + 正文（正文标题对齐到段内一级）', () => {
+    // 正文最小一级是 `##`：正好是段内一级，原样保留
+    expect(systemPromptText('1. 只做当前阶段\n## 不要扩范围')).toBe(
+      '# 系统提示\n\n1. 只做当前阶段\n## 不要扩范围',
+    )
+    // 从 `###` 起笔的内容压到 `##`
+    expect(systemPromptText('### 只做当前阶段')).toBe('# 系统提示\n\n## 只做当前阶段')
+  })
+
+  it('系统提示空白：整段消失', () => {
+    expect(systemPromptText('')).toBe('')
+    expect(systemPromptText('  \n ')).toBe('')
+  })
+
+  it('任务段：描述为空时只有标题行', () => {
+    expect(taskParagraph({ title: 'T', description: '   ' })).toBe('# 任务：T')
+  })
+
+  it('任务段：描述标题压到 `##`，不与 `# 任务` 跳级', () => {
+    expect(taskParagraph({ title: 'T', description: '### 需求描述\n要改文案' })).toBe(
+      '# 任务：T\n\n## 需求描述\n要改文案',
     )
   })
 })

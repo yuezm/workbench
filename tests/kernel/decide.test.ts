@@ -44,10 +44,10 @@ const HINT = receiptBlockHint(taskReceiptKeys({ judge: null, acceptance: [] }, {
 const THREAD_HINT = receiptBlockHint(
   taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: 'th-1' }),
 )
-/** 阶段任务提示词里的打断规则段（M19）。 */
-const INTERRUPT = interruptRuleText()
-/** 本轮正文段（M27）：挂线程的阶段才有。 */
-const CONTRACT = outputContractText()
+/** 阶段容器里的打断规则小节（M19）：级别 2，挂在「# 阶段」/「# 执行约定」下面。 */
+const INTERRUPT = interruptRuleText(2)
+/** 阶段容器里的本轮正文小节（M27）：级别 2；挂线程的阶段才有。 */
+const CONTRACT = outputContractText(2)
 
 const workflow = (over: Partial<Workflow> = {}): Workflow => ({
   id: 'wf-1',
@@ -2231,7 +2231,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       threadContextRef: null,
       queueSeq: 0,
       status: 'queued',
-      prompt: `sys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      prompt: `# 系统提示\n\nsys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
       output: '',
       error: null,
       errorCode: null,
@@ -2479,7 +2479,9 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       attempt: 0,
       queueSeq: 0,
     })
-    expect(run.prompt).toBe(`sys\n\n# 任务：任务\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`)
+    expect(run.prompt).toBe(
+      `# 系统提示\n\nsys\n\n# 任务：任务\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
+    )
   })
 
   it('task.move 原地（from===to）或已完成任务：不产 run.queued', () => {
@@ -2587,7 +2589,9 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     expect(moved).toMatchObject({ from: 'st-1', to: 'st-2' })
     const queued = entryRun(decision.facts)
     expect(queued).toMatchObject({ taskId: 't-1', stageId: 'st-2', status: 'queued' })
-    expect(queued.prompt).toBe(`sys\n\n# 任务：任务\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`)
+    expect(queued.prompt).toBe(
+      `# 系统提示\n\nsys\n\n# 任务：任务\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
+    )
     // 进入效果由宿主调度器发起（actor 标明来源）
     expect(decision.facts[2]?.actor).toEqual({ kind: 'host', via: 'scheduler' })
   })
@@ -2772,7 +2776,7 @@ describe('kernel/prompt taskPrompt', () => {
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
     expect(run.prompt).toBe(
-      `sys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      `# 系统提示\n\nsys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 })
@@ -2781,7 +2785,9 @@ describe('kernel/prompt taskPrompt（无阶段名）', () => {
   it('stageName 为 null 时不拼阶段段', () => {
     expect(
       taskPrompt(agent({ systemPrompt: 'sys' }), task({ title: 'T', description: 'd' }), null),
-    ).toBe(`sys\n\n# 任务：T\n\nd\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS)}`)
+    ).toBe(
+      `# 系统提示\n\nsys\n\n# 任务：T\n\nd\n\n# 执行约定\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS)}`,
+    )
   })
 })
 

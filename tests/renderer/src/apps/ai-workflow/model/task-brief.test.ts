@@ -18,7 +18,7 @@ import {
 } from '@workbench/client-app-ai-workflow/model/task-brief'
 
 describe('task-brief 序列化', () => {
-  it('按字段顺序输出 ### 段头，空字段整段消失', () => {
+  it('按字段顺序输出 ## 段头，空字段整段消失', () => {
     expect(
       serializeBrief('requirement', {
         need: '按项目筛选导出',
@@ -26,7 +26,7 @@ describe('task-brief 序列化', () => {
         scope: '  不改导入逻辑  ',
         refs: '',
       }),
-    ).toBe('### 需求描述\n按项目筛选导出\n\n### 不做什么\n不改导入逻辑')
+    ).toBe('## 需求描述\n按项目筛选导出\n\n## 不做什么\n不改导入逻辑')
   })
 
   it('全空时返回空串：描述保持可选，不因为切过一次组就凭空多出内容', () => {
@@ -35,7 +35,7 @@ describe('task-brief 序列化', () => {
   })
 
   it('缺省的键当作没填（不抛错，也不产段头）', () => {
-    expect(serializeBrief('bug', { symptom: '点导出白屏' })).toBe('### 现象\n点导出白屏')
+    expect(serializeBrief('bug', { symptom: '点导出白屏' })).toBe('## 现象\n点导出白屏')
   })
 
   it('自由文本模式没有字段：直接映射成空描述', () => {
@@ -45,7 +45,7 @@ describe('task-brief 序列化', () => {
 
   it('多行字段值原样保留换行（复现步骤一行一步）', () => {
     expect(serializeBrief('bug', { steps: '1. 打开导出\n2. 选项目\n3. 白屏' })).toBe(
-      '### 复现步骤\n1. 打开导出\n2. 选项目\n3. 白屏',
+      '## 复现步骤\n1. 打开导出\n2. 选项目\n3. 白屏',
     )
   })
 })

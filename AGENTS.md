@@ -9,7 +9,7 @@
 
 ## 质量约束
 
-- 写代码前先读 [CONSTRAINTS.md](CONSTRAINTS.md)，**不得为了过关而放松它**；改代码前后跑 `pnpm check`
+- 写代码前先读 [CONSTRAINTS.md](CONSTRAINTS.md)，**不得为了过关而放松它**；改代码前后跑 `pnpm check`。该文件只放规则（有命令、可判定），复核记录与例外理由在 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md)——新的历史叙述追加到那边，不要写回 CONSTRAINTS.md
 - 一次性运行日志、临时产物、临时测试文件放 `.scratch/`
 
 ## 设计原则

@@ -82,7 +82,11 @@ for (const f of untracked.split('\n').filter(Boolean)) {
 const findings = []
 const flag = (rule, f, text) => findings.push({ rule, file: f, text: text.trim().slice(0, 120) })
 const isTest = (f) => /\.(test|spec)\.|_test\.|test_/.test(f)
-const isConstraints = (f) => /CONSTRAINTS\.md$/.test(f)
+// 规则页与详情页（2026-11-18 拆分）：CONSTRAINTS.md 只放「有命令、可判定」的规则；
+// 复核记录 / 例外理由 / 实测值演进在详情页。两处正文都会合法引用 `@ts-ignore` 这类字样，
+// 一律不做代码类扫描（它们不是源码）。
+const HISTORY_FILE = 'docs/testing/CONSTRAINTS-HISTORY.md'
+const isConstraints = (f) => /CONSTRAINTS(-HISTORY)?\.md$/.test(f)
 
 // 1. 关闭检查器的注释（本仓库生态：TS/ESLint/istanbul）。后续可扩展。
 const SUPPRESSIONS =
@@ -94,7 +98,7 @@ const STUBS =
 const SKIPS = /\.(skip|todo)\b|\bxit\(|\bxdescribe\(|@pytest\.mark\.skip|t\.Skip\(/
 
 for (const { file, text } of added) {
-  // 守卫脚本自身、以及 CONSTRAINTS.md 正文（会合法地引用 @ts-ignore 等字样）不算违规。
+  // 守卫脚本自身、以及 CONSTRAINTS.md / CONSTRAINTS-HISTORY.md 正文（会合法地引用 @ts-ignore 等字样）不算违规。
   if (file.startsWith('scripts/')) continue
   if (isConstraints(file)) {
     if (/^\| *(W|E)\d+ *\|/.test(text.trim())) flag('new-exception', file, text)
@@ -374,7 +378,20 @@ const REWRITTEN_RULES = {
 }
 const removedRules = removed.filter((l) => isConstraints(l.file) && ruleKey(l.text) !== null)
 const addedRules = added.filter((l) => isConstraints(l.file) && ruleKey(l.text) !== null)
+// 规则行迁到详情页（2026-11-18）：正文只留可判定的规则，复核记录 / 例外明细 / 实测值搬进
+// CONSTRAINTS-HISTORY.md。迁移成立的条件是「同一行文本在详情页逐字出现」——迁走即消失
+// （详情页里也没有）照样判 rule-removed；拿详情页当垃圾桶、把规则行塞进去来绕过 diff，
+// 会在详情页里留下一条原样的规则文本，review 时一眼可见。
+//
+// 比较前把连续空白归一成单空格：两边都是 Markdown 表格行，列宽对齐（Prettier）会插入
+// 若干空格，原样比对会把「同一行」判成两行（实测 10 条 EX 行全被误报成 threshold-removed）。
+// 只忽略空白差异，规则文本本身仍要逐字出现。
+const normalizeRow = (text) => text.trim().replace(/\s+/g, ' ')
+const relocatedToHistory = new Set(
+  added.filter((l) => l.file === HISTORY_FILE).map((l) => normalizeRow(l.text)),
+)
 for (const r of removedRules) {
+  if (relocatedToHistory.has(normalizeRow(r.text))) continue
   const a = addedRules.find((x) => ruleKey(x.text) === ruleKey(r.text))
   if (!a) {
     const replacement = REWRITTEN_RULES[ruleKey(r.text)]

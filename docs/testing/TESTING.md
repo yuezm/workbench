@@ -61,7 +61,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 
 人工验收前另有两关专用 spec：`tests/e2e/startup.spec.ts`（冷启动 / 重载 / 二次冷启动零异常、零兜底页）与 `tests/e2e/ui-geometry.spec.ts`（七类几何判据 + 审计器自检，报告落 `.scratch/acceptance/ui-geometry.md`）。用法、需求覆盖矩阵与 30 分钟走查表见 [ACCEPTANCE](ACCEPTANCE.md)。
 
-> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`check:fast` 供编辑后快跑（秒级），`check` 供任务结束/推送（含改动行覆盖率与依赖审计）。
+> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`check:fast` 供编辑后快跑（秒级），`check` 供任务结束/推送（含改动行覆盖率与依赖审计）。复核记录、例外理由与基线演进在 [CONSTRAINTS-HISTORY](CONSTRAINTS-HISTORY.md)，新记录追加到那边。
 
 ## Git hooks（husky，提交即门禁）
 

@@ -20,6 +20,7 @@ import {
   backfillRunOutputs,
   buildRunMeta,
   readRunMetas,
+  recoverRunMeta,
   renderThreadIndex,
   renderTranscript,
   reviewArtifactPath,
@@ -612,7 +613,7 @@ describe('host/artifacts 终态归档与索引（M16）', () => {
     ])
   })
 
-  it('没有 meta.json 的目录不进索引', () => {
+  it('既没有 meta.json 也没有 prompt.md 的目录不进索引', () => {
     mkdirSync(path.join(root, 'threads', 'th-1', 'runs', 'run-orphan'), { recursive: true })
     writeThreadIndex(root, 'th-1')
     expect(readRunMetas(root, 'th-1')).toEqual([])
@@ -872,5 +873,194 @@ describe('host/artifacts 提升为项目文档（writeProjectDoc）', () => {
     expect(existsSync(`${path.join(blocker, 'a.md')}.tmp`)).toBe(false)
     // 失败不留半截文件，目录也没被改成别的形态
     expect(readFileSync(blocker, 'utf8')).toBe('x')
+  })
+})
+
+describe('host/artifacts 缺 meta.json 时的兜底（M47）', () => {
+  /** 按宿主的头部注释格式写一份 `prompt.md`（不带 meta.json：模拟终态前被杀 / 归档失败）。 */
+  const writePromptOnly = (
+    runId: string,
+    fields: {
+      turn?: string
+      任务?: string
+      阶段?: string
+      智能体?: string
+      派发时间?: string
+    } = {},
+  ): string => {
+    const dir = runDirPath(root, 'th-1', runId)
+    mkdirSync(dir, { recursive: true })
+    const lines = [
+      `runId: ${runId}`,
+      `turn: ${fields.turn ?? '3'}`,
+      `任务: ${fields['任务'] ?? '故障绑定编辑语义修改 <task-1>'}`,
+      `阶段: ${fields['阶段'] ?? '编码实现 <st-1>'}`,
+      `智能体: ${fields['智能体'] ?? '研发工程师 <ag-1>'}`,
+      `派发时间: ${fields['派发时间'] ?? '2026-11-15T17:07:32.856Z'}`,
+    ]
+    writeFileSync(
+      path.join(dir, 'prompt.md'),
+      `<!-- 本轮派发信息（宿主写入，修改不影响执行）\n${lines.join('\n')}\n-->\n\n# 任务：故障绑定编辑语义修改\n`,
+      'utf8',
+    )
+    return dir
+  }
+
+  it('只有 prompt.md：仍进索引，状态记 unknown，字段从头部注释读回', () => {
+    writePromptOnly('run-orphan')
+    const metas = readRunMetas(root, 'th-1')
+    expect(metas).toHaveLength(1)
+    expect(metas[0]).toMatchObject({
+      runId: 'run-orphan',
+      threadId: 'th-1',
+      purpose: 'stage',
+      turn: 3,
+      status: 'unknown',
+      taskId: 'task-1',
+      taskTitle: '故障绑定编辑语义修改',
+      stageId: 'st-1',
+      stageName: '编码实现',
+      agentId: 'ag-1',
+      agentName: '研发工程师',
+      createdAt: '2026-11-15T17:07:32.856Z',
+    })
+    expect(metas[0]?.files).toEqual(['prompt.md'])
+    // 索引不再跳号：这一轮出现在表里，而不是「跑了但不在账本上」
+    const index = renderThreadIndex('th-1', metas)
+    expect(index).toContain('run-orphan')
+    expect(index).toContain('编码实现')
+    expect(index).toContain('| 3 |')
+    expect(index).not.toContain('还没有终态 run')
+  })
+
+  it('与归档出来的 meta.json 混在一起：两边都列出，按时间排序', () => {
+    writePromptOnly('run-orphan', { turn: '3', 派发时间: '2026-11-15T17:07:32.856Z' })
+    const archived = runDirPath(root, 'th-1', 'run-later')
+    mkdirSync(archived, { recursive: true })
+    const meta: RunArchiveMeta = {
+      schemaVersion: RUN_ARCHIVE_SCHEMA_VERSION,
+      runId: 'run-later',
+      threadId: 'th-1',
+      taskId: 'task-1',
+      taskTitle: '故障绑定',
+      stageId: 'st-1',
+      stageName: '自测',
+      agentId: null,
+      agentName: null,
+      purpose: 'stage',
+      turn: 4,
+      status: 'failed',
+      executorKey: 'command',
+      createdAt: '2026-11-16T00:00:00.000Z',
+      startedAt: '2026-11-16T00:00:01.000Z',
+      endedAt: '2026-11-16T00:01:00.000Z',
+      durationMs: 59_000,
+      exitCode: 1,
+      errorCode: 'exit_nonzero',
+      error: '退出码 1',
+      sessionId: null,
+      usage: null,
+      frames: { total: 0, thinking: 0, text: 0, toolCall: 0, toolResult: 0 },
+      files: ['prompt.md'],
+    }
+    writeFileSync(runMetaPath(root, 'th-1', 'run-later'), JSON.stringify(meta), 'utf8')
+    const metas = readRunMetas(root, 'th-1')
+    expect(metas.map((item) => item.runId)).toEqual(['run-orphan', 'run-later'])
+    expect(metas[1]?.status).toBe('failed')
+  })
+
+  it('meta.json 坏 JSON：退到 prompt.md 兜底，而不是整条消失', () => {
+    const dir = writePromptOnly('run-broken')
+    writeFileSync(path.join(dir, 'meta.json'), '{ 不是 JSON', 'utf8')
+    const metas = readRunMetas(root, 'th-1')
+    expect(metas).toHaveLength(1)
+    expect(metas[0]).toMatchObject({ runId: 'run-broken', status: 'unknown' })
+  })
+
+  it('有 meta.json 时以归档为准（兜底不覆盖状态与结束时刻）', () => {
+    const dir = writePromptOnly('run-archived')
+    const archived: RunArchiveMeta = {
+      ...(JSON.parse(
+        JSON.stringify(
+          buildRunMeta(
+            {
+              id: 'run-archived',
+              threadId: 'th-1',
+              taskId: 'task-1',
+              stageId: 'st-1',
+              agentId: 'ag-1',
+              purpose: 'stage',
+              turn: 3,
+              status: 'succeeded',
+              executorKey: 'dsh',
+              startedAt: '2026-11-15T17:07:33.000Z',
+              endedAt: '2026-11-15T17:20:00.000Z',
+              createdAt: '2026-11-15T17:07:32.856Z',
+              durationMs: 1,
+              exitCode: 0,
+              errorCode: null,
+              error: null,
+              sessionId: 'sess-1',
+              usage: null,
+            },
+            {
+              taskId: 'task-1',
+              taskTitle: '故障绑定编辑语义修改',
+              stageId: 'st-1',
+              stageName: '编码实现',
+              agentId: 'ag-1',
+              agentName: '研发工程师',
+            },
+            [],
+            { status: 'succeeded' },
+            '2026-11-15T17:20:00.000Z',
+            ['prompt.md'],
+          ),
+        ),
+      ) as RunArchiveMeta),
+    }
+    writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(archived), 'utf8')
+    const metas = readRunMetas(root, 'th-1')
+    expect(metas).toHaveLength(1)
+    expect(metas[0]?.status).toBe('succeeded')
+    expect(metas[0]?.endedAt).toBe('2026-11-15T17:20:00.000Z')
+  })
+
+  it('既没有 meta.json 也没有 prompt.md：跳过（不冒充一轮）', () => {
+    mkdirSync(path.join(runDirPath(root, 'th-1', 'run-empty')), { recursive: true })
+    expect(readRunMetas(root, 'th-1')).toEqual([])
+  })
+
+  it('prompt.md 里没有 runId 行：跳过（解析不出身份就不是一轮）', () => {
+    const dir = runDirPath(root, 'th-1', 'run-headless')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'prompt.md'), '普通提示词，没有头部注释\n', 'utf8')
+    expect(readRunMetas(root, 'th-1')).toEqual([])
+  })
+
+  it('头部注释写成「标题 <id>」以外的形状：整体当标题，id 记 null（不猜）', () => {
+    const dir = runDirPath(root, 'th-1', 'run-loose')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      path.join(dir, 'prompt.md'),
+      '<!-- 本轮派发信息\nrunId: run-loose\nturn: 2\n任务: 没有尖括号的任务名\n阶段: 实现 <st-1>\n-->\n',
+      'utf8',
+    )
+    const meta = recoverRunMeta('th-1', dir)
+    expect(meta?.taskTitle).toBe('没有尖括号的任务名')
+    expect(meta?.taskId).toBeNull()
+    expect(meta?.agentName).toBeNull()
+    expect(meta?.stageName).toBe('实现')
+  })
+  it('脚本轮的占位智能体与缺省字段：归一成 null / 0，不抛错', () => {
+    writePromptOnly('run-script', { 智能体: '- <->', turn: '不是数字', 派发时间: '' })
+    const meta = recoverRunMeta('th-1', runDirPath(root, 'th-1', 'run-script'))
+    expect(meta).toBeDefined()
+    expect(meta?.agentId).toBeNull()
+    expect(meta?.agentName).toBeNull()
+    expect(meta?.turn).toBe(0)
+    expect(meta?.createdAt).toBe('')
+    // 时间缺失也不炸：索引把时间列写成 '-'
+    expect(renderThreadIndex('th-1', readRunMetas(root, 'th-1'))).toContain('| - |')
   })
 })

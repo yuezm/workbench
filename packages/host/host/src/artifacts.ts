@@ -356,7 +356,75 @@ export function buildRunMeta(
   }
 }
 
-/** 读线程下所有 `meta.json`（坏文件跳过：索引是重建出来的，不能因为一行坏 JSON 就空）。 */
+/**
+ * 从 `prompt.md` 的头部注释反推最小元信息（M47）。
+ *
+ * 为什么要有它：`meta.json` 只在终态归档时写。进程在终态前被杀、或归档失败，目录里就只剩
+ * `prompt.md`，而索引只认 `meta.json` —— 「跑了但不在账本上」：实测一条线程的轮次从 2
+ * 直接跳到 4，人（和模型）按索引判断就会把第 3 轮重做一遍。头部注释里本来就有
+ * runId / turn / 任务 / 阶段 / 智能体 / 派发时间，读回来即可。
+ *
+ * 口径：`status` 记 `unknown`（没归档就不知道终态），时间只给 `createdAt`，其余为 null；
+ * 文件清单按磁盘实况，`frames` 全 0 —— 它只是「这一轮存在」的证据，不冒充归档。
+ */
+export function recoverRunMeta(threadId: string, dir: string): RunArchiveMeta | undefined {
+  let head: string
+  try {
+    head = readFileSync(path.join(dir, 'prompt.md'), 'utf8').slice(0, 2_000)
+  } catch {
+    return undefined
+  }
+  const field = (name: string): string | null => {
+    const match = new RegExp(`^${name}: (.*)$`, 'm').exec(head)
+    return match === null ? null : match[1].trim()
+  }
+  /** `任务: 标题 <id>` → 标题与 id；`- <->` 这类占位归一成 null。 */
+  const tagged = (value: string | null): { name: string | null; id: string | null } => {
+    if (value === null) return { name: null, id: null }
+    const match = /^(.*?)\s*<([^<>]*)>$/.exec(value)
+    const name = (match === null ? value : (match[1] ?? '')).trim()
+    const id = (match === null ? '' : (match[2] ?? '')).trim()
+    return {
+      name: name === '' || name === '-' ? null : name,
+      id: id === '' || id === '-' ? null : id,
+    }
+  }
+  const runId = field('runId')
+  if (runId === null) return undefined
+  const turn = Number(field('turn') ?? '')
+  const task = tagged(field('任务'))
+  const stage = tagged(field('阶段'))
+  const agent = tagged(field('智能体'))
+  const files = RUN_ARCHIVE_FILES.filter((file) => existsSync(path.join(dir, file)))
+  return {
+    schemaVersion: RUN_ARCHIVE_SCHEMA_VERSION,
+    runId,
+    threadId,
+    taskId: task.id,
+    taskTitle: task.name,
+    stageId: stage.id,
+    stageName: stage.name,
+    agentId: agent.id,
+    agentName: agent.name,
+    purpose: 'stage',
+    turn: Number.isFinite(turn) && turn > 0 ? turn : 0,
+    status: 'unknown',
+    executorKey: 'unknown',
+    createdAt: field('派发时间') ?? '',
+    startedAt: null,
+    endedAt: null,
+    durationMs: null,
+    exitCode: null,
+    errorCode: null,
+    error: null,
+    sessionId: null,
+    usage: null,
+    frames: { total: 0, thinking: 0, text: 0, toolCall: 0, toolResult: 0 },
+    files,
+  }
+}
+
+/** 读线程下所有 `meta.json`（坏文件与缺失都退到 `prompt.md` 兜底：索引不能因为一次归档失败就少一轮）。 */
 export function readRunMetas(root: string, threadId: string): RunArchiveMeta[] {
   const dir = path.join(root, 'threads', threadId, 'runs')
   let entries: string[]
@@ -368,13 +436,9 @@ export function readRunMetas(root: string, threadId: string): RunArchiveMeta[] {
   const metas: RunArchiveMeta[] = []
   for (const entry of entries) {
     const file = path.join(dir, entry, 'meta.json')
-    if (!existsSync(file)) continue
-    try {
-      const parsed = JSON.parse(readFileSync(file, 'utf8')) as RunArchiveMeta
-      if (typeof parsed?.runId === 'string') metas.push(parsed)
-    } catch {
-      // 单项损坏只丢这一条：其余 run 仍要出现在索引里
-    }
+    const archived = existsSync(file) ? readRunMeta(file) : undefined
+    const meta = archived ?? recoverRunMeta(threadId, path.join(dir, entry))
+    if (meta !== undefined) metas.push(meta)
   }
   return metas.sort((left, right) =>
     (left.startedAt ?? left.createdAt).localeCompare(right.startedAt ?? right.createdAt),

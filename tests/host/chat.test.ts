@@ -288,7 +288,7 @@ describe('chat：一轮执行（首轮 / 续接 / 错误文案）', () => {
     expect(chatRuns(conv.id)[0]?.status).toBe('succeeded')
     // 首轮 prompt 带 systemPrompt + 完整对话记录 + 结尾提示 + 固定的回执块说明（M4 D4）
     expect(script.requests[0]?.turn.prompt).toBe(
-      `# 系统提示\n\n你是助手。\n\n# 对话记录\n\n用户：你好\n\n## 回答要求\n请回答最后一条用户消息。\n\n${receiptBlockHint(CHAT_RECEIPT_KEYS)}`,
+      `# 本轮对话\n\n## 系统提示\n\n你是助手。\n\n## 对话记录\n\n用户：你好\n\n### 回答要求\n请回答最后一条用户消息。\n\n${receiptBlockHint(CHAT_RECEIPT_KEYS, 2)}`,
     )
     expect(endsOf(conv.id)).toBe(1)
   })
@@ -358,7 +358,7 @@ describe('chat：一轮执行（首轮 / 续接 / 错误文案）', () => {
     expect(script.requests).toHaveLength(3)
     const retry = script.requests[2]
     expect(retry?.turn.resumeSessionId).toBeNull()
-    expect(retry?.turn.prompt).toContain('# 对话记录')
+    expect(retry?.turn.prompt).toContain('## 对话记录')
     expect(retry?.turn.prompt).toContain('用户：第一问')
     expect(retry?.turn.prompt).toContain('助手：一')
     expect(retry?.turn.prompt).toContain('用户：第二问')
@@ -463,7 +463,7 @@ describe('chat：一轮执行（首轮 / 续接 / 错误文案）', () => {
     expect(messagesOf(conv.id)[1]?.error).toBe('字符串错误')
   })
 
-  it('首轮 systemPrompt 为空：prompt 直接从对话记录开始', async () => {
+  it('首轮 systemPrompt 为空：prompt 直接从根开始，没有系统提示段', async () => {
     const script = scripted(() => outcome({ output: '答' }))
     start(script.backend)
     const { agentId } = seedAgent('')
@@ -472,7 +472,7 @@ describe('chat：一轮执行（首轮 / 续接 / 错误文案）', () => {
     send(conv.id, '问')
     await world.scheduler.idle()
 
-    expect(script.requests[0]?.turn.prompt.startsWith('# 对话记录')).toBe(true)
+    expect(script.requests[0]?.turn.prompt.startsWith('# 本轮对话\n\n## 对话记录')).toBe(true)
   })
 
   it('首条消息即长文本：会话标题按码点截断', async () => {
@@ -502,7 +502,7 @@ describe('chat：一轮执行（首轮 / 续接 / 错误文案）', () => {
     await world.scheduler.idle()
 
     const second = script.requests[1]?.turn.prompt ?? ''
-    expect(second).toContain('# 对话记录')
+    expect(second).toContain('## 对话记录')
     expect(second).toContain('用户：第一问')
     expect(second).toContain('助手：')
     expect(second).toContain('用户：第二问')

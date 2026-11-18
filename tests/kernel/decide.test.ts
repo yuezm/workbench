@@ -39,15 +39,19 @@ const LATER = '2026-01-02T00:00:00.000Z'
 const NOW = '2026-11-04T12:00:00.000Z'
 const ACTOR = { kind: 'owner', via: 'ui' } as const
 /** 阶段任务提示词末尾固定追加的回执块说明（M4 D4）。 */
-const HINT = receiptBlockHint(taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: null }))
+const HINT = receiptBlockHint(
+  taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: null }),
+  2,
+)
 /** 建任务会开隐式线程：回执比普通阶段多一个 notes 出口（M24 裁剪） */
 const THREAD_HINT = receiptBlockHint(
   taskReceiptKeys({ judge: null, acceptance: [] }, { threadId: 'th-1' }),
+  2,
 )
-/** 阶段容器里的打断规则小节（M19）：级别 2，挂在「# 阶段」/「# 执行约定」下面。 */
-const INTERRUPT = interruptRuleText(2)
-/** 阶段容器里的本轮正文小节（M27）：级别 2；挂线程的阶段才有。 */
-const CONTRACT = outputContractText(2)
+/** 阶段容器里的打断规则小节（M19）：级别 3，挂在「## 阶段」/「## 执行约定」下面。 */
+const INTERRUPT = interruptRuleText(3)
+/** 阶段容器里的本轮正文小节（M27）：级别 3；挂线程的阶段才有。 */
+const CONTRACT = outputContractText(3)
 
 const workflow = (over: Partial<Workflow> = {}): Workflow => ({
   id: 'wf-1',
@@ -2231,7 +2235,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       threadContextRef: null,
       queueSeq: 0,
       status: 'queued',
-      prompt: `# 系统提示\n\nsys\n\n# 任务：写计划\n\n# 阶段：待办\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      prompt: `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：写计划\n\n## 阶段：待办\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
       output: '',
       error: null,
       errorCode: null,
@@ -2480,7 +2484,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       queueSeq: 0,
     })
     expect(run.prompt).toBe(
-      `# 系统提示\n\nsys\n\n# 任务：任务\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
+      `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：任务\n\n## 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
     )
   })
 
@@ -2590,7 +2594,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     const queued = entryRun(decision.facts)
     expect(queued).toMatchObject({ taskId: 't-1', stageId: 'st-2', status: 'queued' })
     expect(queued.prompt).toBe(
-      `# 系统提示\n\nsys\n\n# 任务：任务\n\n# 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
+      `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：任务\n\n## 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
     )
     // 进入效果由宿主调度器发起（actor 标明来源）
     expect(decision.facts[2]?.actor).toEqual({ kind: 'host', via: 'scheduler' })
@@ -2753,7 +2757,7 @@ describe('kernel/prompt taskPrompt', () => {
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
     expect(run.prompt).toBe(
-      `# 任务：T\n\n# 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      `# 本轮提示词\n\n## 任务：T\n\n## 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 
@@ -2776,7 +2780,7 @@ describe('kernel/prompt taskPrompt', () => {
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
     expect(run.prompt).toBe(
-      `# 系统提示\n\nsys\n\n# 任务：T\n\n做点事\n\n# 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：T\n\n做点事\n\n## 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 })
@@ -2786,7 +2790,7 @@ describe('kernel/prompt taskPrompt（无阶段名）', () => {
     expect(
       taskPrompt(agent({ systemPrompt: 'sys' }), task({ title: 'T', description: 'd' }), null),
     ).toBe(
-      `# 系统提示\n\nsys\n\n# 任务：T\n\nd\n\n# 执行约定\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS)}`,
+      `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：T\n\nd\n\n## 执行约定\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS, 2)}`,
     )
   })
 })

@@ -25,7 +25,7 @@ const CREATED = '2026-01-01T00:00:00.000Z'
 const LATER = '2026-01-02T00:00:00.000Z'
 const OWNER = { kind: 'owner', via: 'ui' } as const
 /** 聊天首轮提示词末尾固定追加的回执块说明（M4 D4）。 */
-const HINT = receiptBlockHint(CHAT_RECEIPT_KEYS)
+const HINT = receiptBlockHint(CHAT_RECEIPT_KEYS, 2)
 
 const limits = (over: Partial<Limits> = {}): Limits => ({
   maxStagesPerWorkflow: 50,
@@ -422,7 +422,7 @@ describe('kernel/decide conversation.send', () => {
       threadContextRef: null,
       queueSeq: 0,
       status: 'queued',
-      prompt: `# 系统提示\n\n你是助手。\n\n# 对话记录\n\n用户：帮我看看\n第二行\n\n## 回答要求\n请回答最后一条用户消息。\n\n${HINT}`,
+      prompt: `# 本轮对话\n\n## 系统提示\n\n你是助手。\n\n## 对话记录\n\n用户：帮我看看\n第二行\n\n### 回答要求\n请回答最后一条用户消息。\n\n${HINT}`,
       output: '',
       error: null,
       errorCode: null,
@@ -456,7 +456,7 @@ describe('kernel/decide conversation.send', () => {
     )
 
     expect((decision.facts[1]?.payload as { run: RunRow }).run.prompt).toBe(
-      `# 系统提示\n\n你是助手。\n\n# 对话记录\n\n用户：早\n助手：早呀\n用户：继续\n\n## 回答要求\n请回答最后一条用户消息。\n\n${HINT}`,
+      `# 本轮对话\n\n## 系统提示\n\n你是助手。\n\n## 对话记录\n\n用户：早\n助手：早呀\n用户：继续\n\n### 回答要求\n请回答最后一条用户消息。\n\n${HINT}`,
     )
   })
 

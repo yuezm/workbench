@@ -18,7 +18,7 @@ import { Textarea } from '@workbench/client-ui-primitives/textarea'
 import { cn } from '@workbench/client-ui-kit/cn'
 import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 import { getKernelStore } from '@workbench/client-kernel-store'
-import { useKernelViewState } from '@workbench/client-shell/useKernelView'
+import { useKernelView, useKernelViewState } from '@workbench/client-shell/useKernelView'
 import { DetailHeader } from './DetailHeader'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -91,13 +91,17 @@ function taskTree(tasks: Task[], rootTaskIds: string[]): TaskNode[] {
 function TaskTreeItem({
   node,
   depth,
+  workflowLabel,
   onOpenTask,
 }: {
   node: TaskNode
   depth: number
+  /** 话题跨多个流程时给的工作流名（只有一个流程的旧话题返回 undefined，省得每行都挂徽标） */
+  workflowLabel?: (task: Task) => string | undefined
   onOpenTask: (taskId: string) => void
 }): ReactElement {
   const completed = node.task.status === 'completed'
+  const workflowName = workflowLabel?.(node.task)
   return (
     <li>
       {/* 整行都是详情入口：点标题、状态徽标或行内空白都进任务详情 */}
@@ -121,6 +125,11 @@ function TaskTreeItem({
         <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground transition-colors group-hover:text-foreground">
           {node.task.title}
         </span>
+        {workflowName !== undefined && (
+          <span className="shrink-0 rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground">
+            {workflowName}
+          </span>
+        )}
         <span
           className={cn(
             'shrink-0 rounded-sm px-1.5 py-0.5 text-xs',
@@ -148,6 +157,7 @@ function TaskTreeItem({
               key={child.task.id}
               node={child}
               depth={depth + 1}
+              workflowLabel={workflowLabel}
               onOpenTask={onOpenTask}
             />
           ))}
@@ -302,11 +312,14 @@ function BindSection({
 function ThreadContent({
   thread,
   tasks,
+  workflowNames,
   onOpenTask,
   onRemoved,
 }: {
   thread: ThreadRow
   tasks: Task[]
+  /** 工作流 id → 名称：话题跨流程时给任务行加徽标（同名卡才分得清） */
+  workflowNames: ReadonlyMap<string, string>
   onOpenTask: (taskId: string) => void
   onRemoved?: () => void
 }): ReactElement {
@@ -447,6 +460,13 @@ function ThreadContent({
   }
 
   const roots = taskTree(tasks, thread.rootTaskIds)
+  /**
+   * 话题跨多个流程才显示工作流徽标（M50）：派单卡与来源卡同标题，不标流程就分不清谁是谁；
+   * 只有一条流程的旧话题保持原样，不往每行塞徽标。
+   */
+  const crossFlow = new Set(tasks.map((task) => task.workflowId)).size > 1
+  const badgeOf = (task: Task): string | undefined =>
+    crossFlow ? workflowNames.get(task.workflowId) : undefined
 
   return (
     <>
@@ -490,7 +510,13 @@ function ThreadContent({
         ) : (
           <ul className="rounded-xl border border-border bg-card px-2 py-1">
             {roots.map((node) => (
-              <TaskTreeItem key={node.task.id} node={node} depth={0} onOpenTask={onOpenTask} />
+              <TaskTreeItem
+                key={node.task.id}
+                node={node}
+                depth={0}
+                workflowLabel={badgeOf}
+                onOpenTask={onOpenTask}
+              />
             ))}
           </ul>
         )}
@@ -568,7 +594,7 @@ function ThreadContent({
               <DialogTitle>删除线程</DialogTitle>
               <DialogDescription>
                 线程「{thread.title}」、它下面的 {thread.taskIds.length}{' '}
-                个任务与执行记录（运行记录、落盘归档）会一起删除，不能撤销。
+                个任务与执行记录（运行记录、落盘归档）会一起删除，不能撤销。话题里跨流程的工单会一起删除。
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -610,6 +636,9 @@ export function ThreadDetailPage({
 }: ThreadDetailPageProps): ReactElement {
   const state = useKernelViewState('thread.byId', { threadId })
   const detail = state.data
+  // M50：话题跨流程时任务行要标所属工作流（派单卡与来源卡同标题）
+  const workflows = useKernelView('workflows.all') ?? []
+  const workflowNames = new Map(workflows.map((workflow) => [workflow.id, workflow.name]))
   const title = detail === undefined || detail === null ? '线程' : `线程 · ${detail.thread.title}`
   const hint =
     detail === undefined || detail === null
@@ -634,6 +663,7 @@ export function ThreadDetailPage({
             <ThreadContent
               thread={detail.thread}
               tasks={detail.tasks}
+              workflowNames={workflowNames}
               onOpenTask={onOpenTask}
               onRemoved={onRemoved}
             />

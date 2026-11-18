@@ -176,6 +176,23 @@ const handoff = (over: Partial<StageHandoff> = {}): StageHandoff => ({
   ...over,
 })
 
+/** 话题行（M50 用例用）：只填判定要读的字段。 */
+const threadRow = (id: string, taskIds: string[]): ThreadRow => ({
+  id,
+  source: 'manual',
+  externalRef: null,
+  title: `话题 ${id}`,
+  status: 'open',
+  taskIds,
+  rootTaskIds: taskIds.slice(0, 1),
+  concurrency: 1,
+  notesVersion: 0,
+  notes: [],
+  events: [],
+  lastActivityAt: CREATED,
+  createdAt: CREATED,
+})
+
 /**
  * 两工作流：A（st-a0 配派单）→ B（st-b0 / st-b1，st-b1 是 agent 阶段）。
  * `over` 覆盖 st-a0 的字段，`handoffs` 直接给派单清单。
@@ -476,6 +493,47 @@ describe('kernel/handoff 建任务事实', () => {
     const types = exit(baseView(), task('t-1'), 'done').map((fact) => fact.type)
 
     expect(types).not.toContain('run.queued')
+  })
+
+  // M50：话题统一——派单卡落回来源任务的话题，不再每次派单都切一条新话题
+  it('缺省 inherit：沿用来源任务的话题，不产 thread.opened', () => {
+    const source = task('t-1', { threadId: 'th-1' })
+    const seeded: View = {
+      ...withTasks(baseView(), [source]),
+      threads: new Map([['th-1', threadRow('th-1', ['t-1'])]]),
+    }
+
+    const facts = exit(seeded, source, 'done')
+    const created = payloadsOf<{ task: Task }>(facts, 'task.created')[0].task
+    const attached = payloadsOf<{ thread: ThreadRow; taskId: Id }>(facts, 'thread.task_attached')[0]
+
+    expect(facts.map((fact) => fact.type)).toEqual(['thread.task_attached', 'task.created'])
+    expect(created.threadId).toBe('th-1')
+    // 父任务在同一话题里 → 派单卡不是根，线程树里排在来源任务下
+    expect(attached.thread.taskIds).toEqual(['t-1', created.id])
+    expect(attached.thread.rootTaskIds).toEqual(['t-1'])
+  })
+
+  it('显式 new：即使来源任务有话题也开新隐式线程（source=handoff）', () => {
+    const source = task('t-1', { threadId: 'th-1' })
+    const seeded: View = {
+      ...withTasks(baseView([handoff({ thread: 'new' })]), [source]),
+      threads: new Map([['th-1', threadRow('th-1', ['t-1'])]]),
+    }
+
+    const facts = exit(seeded, source, 'done')
+    const created = payloadsOf<{ task: Task }>(facts, 'task.created')[0].task
+    const opened = payloadsOf<{ thread: ThreadRow }>(facts, 'thread.opened')[0].thread
+
+    expect(opened).toMatchObject({ source: 'handoff', taskIds: [], rootTaskIds: [] })
+    expect(created.threadId).toBe(opened.id)
+    expect(created.threadId).not.toBe('th-1')
+  })
+
+  it('inherit 但来源任务没有话题（老数据）→ 退化为新开线程', () => {
+    const facts = exit(baseView(), task('t-1'), 'done')
+
+    expect(facts.map((fact) => fact.type)).toContain('thread.opened')
   })
 })
 

@@ -4,9 +4,11 @@
  * 触发点收敛到 `decide` 的三处（run 结算、人工拖拽、直接完成），本文件只回答两件事：
  * 「这次离开命中哪些派单目标」与「派单要产哪些事实」。
  *
- * 语义边界（D11）：
- * - 产物 = 目标工作流一条 `task.created`（`origin='handoff'`）+ 新隐式线程
- *   （`source='handoff'`、`externalRef=null`）+ 目标阶段为 agent 时的入口 run；
+ * 语义边界（D11，M50 修订）：
+ * - 产物 = 目标工作流一条 `task.created`（`origin='handoff'`）+ **话题**（缺省沿用来源任务的话题，
+ *   显式 `thread='new'` 才开新隐式线程 `source='handoff'`）+ 目标阶段为 agent 时的入口 run；
+ * - 话题统一（M50）：一条需求跨工作流流转属于同一话题，任务在话题内换工作流，
+ *   不再每次派单都开新话题（否则人在需求话题里看不到后续阶段）；
  * - **不回写来源任务**：不产 `task.updated`，来源任务的状态只由它自己的流转事实表达；
  *   派单产物挂 `parentTaskId = 来源任务`，但只有在来源阶段显式配了 `onChildrenSettled`
  *   时才会参与 rollup（见 `spawn.ts#childrenSettledFacts` 的交接守卫）；
@@ -67,10 +69,13 @@ export function handoffDepth(view: View, task: Task): number {
 }
 
 /**
- * 单个派单目标的事实（D11）：目标工作流的一条任务 + 新隐式线程 + 入口 run。
+ * 单个派单目标的事实（D11）：目标工作流的一条任务 + 话题 + 入口 run。
+ *
+ * M50：话题缺省沿用来源任务的话题——派单卡与来源卡在同一话题里换工作流流转；
+ * 只有显式 `thread='new'` 才新开隐式线程（来源任务没有话题时同样退化为新开）。
  *
  * 事实顺序与 `kernel/rules` 的隐式任务一致（线程 → 挂任务 → 任务 → 入口 run），
- * 保证重建可复现。
+ * 保证重建可复现；沿用已有话题时不再重复 `thread.opened`。
  */
 function handoffFactsFor(
   view: View,
@@ -83,7 +88,12 @@ function handoffFactsFor(
   actor: Actor,
 ): FactDraft[] {
   const title = truncate(sourceTask.title.trim(), 200) || sourceTask.title
-  const thread = openThreadRow(env, { source: 'handoff', externalRef: null, title, now })
+  const inherited =
+    target.thread === 'inherit' && sourceTask.threadId !== null
+      ? view.threads.get(sourceTask.threadId)
+      : undefined
+  const thread =
+    inherited ?? openThreadRow(env, { source: 'handoff', externalRef: null, title, now })
   const task: Task = {
     id: env.nextId('task'),
     title,
@@ -113,7 +123,7 @@ function handoffFactsFor(
   }
   const attached = withTask(thread, task, now)
   return [
-    ...openedFacts(thread, actor, now),
+    ...(inherited === undefined ? openedFacts(thread, actor, now) : []),
     ...taskAttachedFacts(attached, task, null, actor, now),
     { type: 'task.created', actor, at: now, payload: { task } },
     ...entryRunFacts(view, task, now, env, actor, undefined, { thread: attached, turn: 1 }),

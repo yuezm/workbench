@@ -1673,6 +1673,30 @@ describe('protocol/validate 派单形状（M29）', () => {
     ).toBe('input.stages[0].handoffs[0].forwardOnly必须是布尔值')
   })
 
+  it('M50：thread 只认 inherit / new，缺省放行', () => {
+    expect(
+      message(withStage({ handoffs: [{ on: 'done', workflowId: 'wf2', thread: 'self' }] })),
+    ).toBe('input.stages[0].handoffs[0].thread取值必须是 inherit / new')
+    expect(message(withStage({ handoffs: [{ on: 'done', workflowId: 'wf2', thread: 7 }] }))).toBe(
+      'input.stages[0].handoffs[0].thread取值必须是 inherit / new',
+    )
+    // 缺省（不写）与显式 inherit / new 都必须通过：老配置不带这个字段
+    const ok = (thread?: unknown): boolean =>
+      validateCommand(
+        cmd('workflow.create', {
+          input: withStage({
+            handoffs: [
+              { on: 'done', workflowId: 'wf2', ...(thread === undefined ? {} : { thread }) },
+            ],
+          }),
+        }),
+      ).ok
+
+    expect(ok()).toBe(true)
+    expect(ok('inherit')).toBe(true)
+    expect(ok('new')).toBe(true)
+  })
+
   it('合法清单通过', () => {
     const result = validateCommand(
       cmd('workflow.create', {
@@ -1680,6 +1704,7 @@ describe('protocol/validate 派单形状（M29）', () => {
           handoffs: [
             { on: 'done', workflowId: 'wf2', stageId: 'st2' },
             { on: 'errored', workflowId: 'wf2', stageId: null, forwardOnly: false },
+            { on: 'passed', workflowId: 'wf2', stageId: null, thread: 'new' },
           ],
         }),
       }),

@@ -10,6 +10,7 @@ import {
   type StageExitInput,
   type StageHandoff,
   type StageHandoffGuard,
+  type StageHandoffThreadPolicy,
   type StageInput,
   type StageScript,
   type WorkflowInput,
@@ -1536,6 +1537,32 @@ export function WorkflowEditor({
                                 {item.name}
                               </SelectItem>
                             ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="话题" className="w-36">
+                        <Select
+                          value={handoff.thread ?? 'inherit'}
+                          onValueChange={(v) =>
+                            patchHandoffs(
+                              index,
+                              (stage.handoffs ?? []).map((item, k) =>
+                                k === hi
+                                  ? { ...item, thread: v as StageHandoffThreadPolicy }
+                                  : item,
+                              ),
+                            )
+                          }
+                        >
+                          <SelectTrigger
+                            aria-label={`阶段${n}派单${hi + 1}话题`}
+                            className="w-full"
+                          >
+                            <SelectValue placeholder="沿用来源话题" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="inherit">沿用来源话题</SelectItem>
+                            <SelectItem value="new">新开话题</SelectItem>
                           </SelectContent>
                         </Select>
                       </Field>

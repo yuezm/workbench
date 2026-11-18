@@ -328,9 +328,40 @@ export function boundFacts(
 // ---------- 生命周期 ----------
 
 /**
+ * 本批已挂进该话题的行（M50）：`thread.task_attached` 的 payload 是挂任务之后的整行，
+ * 取最后一条同 id 的即可。
+ *
+ * 用途是归档判定：同一批里刚派出去 / 刚派生的卡还不在视图里，只看视图会让话题在
+ * 「刚生出下一张卡」的瞬间被归档（下一轮 run 就落到一条已归档的话题里）。
+ */
+export function threadWithBatchTasks(
+  thread: ThreadRow | undefined,
+  facts: readonly FactDraft[],
+): ThreadRow | undefined {
+  if (thread === undefined) return thread
+  let row = thread
+  for (const fact of facts) {
+    if (fact.type !== 'thread.task_attached') continue
+    const attached = (fact.payload as { thread: ThreadRow }).thread
+    if (attached.id === thread.id) row = attached
+  }
+  return row
+}
+
+/** 本批新建的任务（`task.created`）在归档判定里算 `active`（视图里还没有它们）。 */
+export function batchTaskStatuses(facts: readonly FactDraft[]): Map<Id, Task['status']> {
+  const statuses = new Map<Id, Task['status']>()
+  for (const fact of facts) {
+    if (fact.type === 'task.created')
+      statuses.set((fact.payload as { task: Task }).task.id, 'active')
+  }
+  return statuses
+}
+
+/**
  * 线程内任务全部完成（已删的任务视为完成）→ `thread.closed{all-tasks-done}`。
  *
- * `overrides` 用于「同一批事实里刚完成 / 刚删除的任务」：视图里它们还是 active。
+ * `overrides` 用于「同一批事实里刚完成 / 刚删除 / 刚建出来的任务」：视图里它们还是旧状态。
  */
 export function closeIfAllDone(
   view: View,

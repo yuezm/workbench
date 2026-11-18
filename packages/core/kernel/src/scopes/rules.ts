@@ -315,10 +315,17 @@ export function eventThreadFacts(
     }
 
     // 复用判定：只看视图里既有的 active 任务（排除本批新建），策略缺省 reuse-task。
+    // M50：话题统一后一条话题里会有别的工作流的卡（派单产物），所以候选再收窄两层——
+    // 只认同工作流的任务、且不认派单产物；否则同一入口的新消息会给「审查卡」加一轮 run。
     const policy = rule.to.thread?.onExisting ?? 'reuse-task'
     const reusable =
       parentTask === undefined && policy === 'reuse-task'
-        ? activeTasksOfThread(view, thread).filter((task) => !createdTasks.has(task.id))
+        ? activeTasksOfThread(view, thread).filter(
+            (task) =>
+              !createdTasks.has(task.id) &&
+              task.origin !== 'handoff' &&
+              task.workflowId === taskTarget.workflowId,
+          )
         : []
     const target = reusable.at(-1)
 

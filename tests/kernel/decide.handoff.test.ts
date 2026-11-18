@@ -265,6 +265,43 @@ describe('kernel/decide 派单——直接完成', () => {
     })
   })
 
+  // M50：派单卡落回源话题，同一批里完成源任务不能把话题归档——否则审查 run 落在已归档话题里
+  it('源任务有话题 → 派单卡同批挂进同一话题，且本批不产 thread.closed', () => {
+    const source: Task = task({ threadId: 'th-1' })
+    const row: ThreadRow = {
+      id: 'th-1',
+      source: 'manual',
+      externalRef: null,
+      title: '写计划',
+      status: 'open',
+      taskIds: ['task-1'],
+      rootTaskIds: ['task-1'],
+      concurrency: 1,
+      notesVersion: 0,
+      notes: [],
+      events: [],
+      lastActivityAt: NOW,
+      createdAt: NOW,
+    }
+    const decision = decide(
+      view({ tasks: [source], threads: [row] }),
+      command({ type: 'task.complete', id: 'task-1' }),
+      NOW,
+      env(),
+    )
+    const created = payloadsOf<{ task: Task }>(decision.facts, 'task.created')[0].task
+    const attached = payloadsOf<{ thread: ThreadRow }>(decision.facts, 'thread.task_attached')[0]
+
+    expect(typesOf(decision.facts)).toEqual([
+      'thread.task_attached',
+      'task.created',
+      'task.completed',
+    ])
+    expect(created.threadId).toBe('th-1')
+    expect(attached.thread.taskIds).toEqual(['task-1', created.id])
+    expect(attached.thread.rootTaskIds).toEqual(['task-1'])
+  })
+
   it('当前阶段没配派单 → 只有 task.completed', () => {
     const decision = decide(
       view({ stages: stages({ handoffs: [] }) }),

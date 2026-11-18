@@ -1110,8 +1110,8 @@ describe('kernel/project stage 归一（M29 派单）', () => {
     const row = changes[0]?.row as WorkflowStage
 
     expect(row.handoffs).toEqual([
-      { on: 'done', workflowId: 'wf-b', stageId: 'st-b1' },
-      { on: 'manual', workflowId: 'wf-b', stageId: 'st-b1', forwardOnly: true },
+      { on: 'done', workflowId: 'wf-b', stageId: 'st-b1', thread: 'inherit' },
+      { on: 'manual', workflowId: 'wf-b', stageId: 'st-b1', forwardOnly: true, thread: 'inherit' },
     ])
   })
 
@@ -1129,14 +1129,16 @@ describe('kernel/project stage 归一（M29 派单）', () => {
     expect(row.handoffs?.map((item) => item.on)).toEqual(['passed', 'manual'])
   })
 
-  it('新事实带 handoffs：原样保留，不再看老两列', () => {
+  it('新事实带 handoffs：原样保留（只补话题缺省），不再看老两列', () => {
     const next = stage({
       handoffs: [{ on: 'errored', workflowId: 'wf-b', stageId: null }],
     })
 
     const row = project(fact(7, 'stage.created', { stage: next }))[0]?.row as WorkflowStage
 
-    expect(row.handoffs).toEqual([{ on: 'errored', workflowId: 'wf-b', stageId: null }])
+    expect(row.handoffs).toEqual([
+      { on: 'errored', workflowId: 'wf-b', stageId: null, thread: 'inherit' },
+    ])
   })
 })
 

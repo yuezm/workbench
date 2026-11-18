@@ -782,8 +782,14 @@ describe('M29 派单：老事实重建后按 M7 两列归一（迁移保证）',
     )
 
     expect(stage.handoffs).toEqual([
-      { on: 'done', workflowId: 'wf-target', stageId: 'st-target' },
-      { on: 'manual', workflowId: 'wf-target', stageId: 'st-target', forwardOnly: true },
+      { on: 'done', workflowId: 'wf-target', stageId: 'st-target', thread: 'inherit' },
+      {
+        on: 'manual',
+        workflowId: 'wf-target',
+        stageId: 'st-target',
+        forwardOnly: true,
+        thread: 'inherit',
+      },
     ])
   })
 })

@@ -11,7 +11,9 @@ import type { View } from '@workbench/kernel/core/types'
 import {
   handoffGuardOf,
   handoffTargetsOf,
+  handoffThreadOf,
   legacyHandoffs,
+  normalizeHandoffs,
   sameHandoffs,
 } from '@workbench/kernel/scopes/workflow/stage-handoffs'
 
@@ -126,15 +128,21 @@ describe('handoffTargetsOf 目标解析', () => {
     const targets = handoffTargetsOf(seeded(handoffs), 'wf-a', { handoffs }, 'done')
 
     expect(targets).toEqual([
-      { workflowId: 'wf-b', stageId: 'st-b0' },
-      { workflowId: 'wf-b', stageId: 'st-b1' },
+      { workflowId: 'wf-b', stageId: 'st-b0', thread: 'inherit' },
+      { workflowId: 'wf-b', stageId: 'st-b1', thread: 'inherit' },
     ])
   })
 
   it('stageId 为空 → 目标工作流首阶段（按 position）', () => {
     expect(handoffTargetsOf(seeded([]), 'wf-a', { handoffs: [handoff()] }, 'done')).toEqual([
-      { workflowId: 'wf-b', stageId: 'st-b0' },
+      { workflowId: 'wf-b', stageId: 'st-b0', thread: 'inherit' },
     ])
+  })
+
+  it('话题策略随目标带出（M50）：显式 new 原样传下来', () => {
+    expect(
+      handoffTargetsOf(seeded([]), 'wf-a', { handoffs: [handoff({ thread: 'new' })] }, 'done'),
+    ).toEqual([{ workflowId: 'wf-b', stageId: 'st-b0', thread: 'new' }])
   })
 
   it('没配 / 目标是自身 / 目标工作流已删 / 目标工作流没有阶段 → 无目标', () => {
@@ -227,5 +235,26 @@ describe('sameHandoffs 深比较', () => {
   it('forwardOnly 缺省与 true 等价', () => {
     expect(sameHandoffs([handoff()], [handoff({ forwardOnly: true })])).toBe(true)
     expect(sameHandoffs([handoff()], [handoff({ forwardOnly: false })])).toBe(false)
+  })
+
+  // M50：只改话题策略也算变更——否则编辑器改完保存会静默丢配置
+  it('thread 缺省与 inherit 等价；与 new 不等', () => {
+    expect(handoffThreadOf(handoff())).toBe('inherit')
+    expect(handoffThreadOf(handoff({ thread: 'new' }))).toBe('new')
+    expect(sameHandoffs([handoff()], [handoff({ thread: 'inherit' })])).toBe(true)
+    expect(sameHandoffs([handoff()], [handoff({ thread: 'new' })])).toBe(false)
+  })
+})
+
+describe('normalizeHandoffs 归一（M50）', () => {
+  it('缺 thread 的条目补成 inherit，显式值原样保留', () => {
+    expect(normalizeHandoffs([handoff(), handoff({ thread: 'new' })])).toEqual([
+      { on: 'done', workflowId: 'wf-b', stageId: null, thread: 'inherit' },
+      { on: 'done', workflowId: 'wf-b', stageId: null, thread: 'new' },
+    ])
+  })
+
+  it('不改动 forwardOnly 的缺省语义', () => {
+    expect(normalizeHandoffs([handoff({ on: 'manual' })]).at(0)).not.toHaveProperty('forwardOnly')
   })
 })

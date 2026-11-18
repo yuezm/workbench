@@ -28,6 +28,8 @@ export interface HandoffSeed {
   sourceStageId: string
   targetStageId: string
   sourceTitle: string
+  /** 源任务所在话题（M50：派单缺省落回这条话题） */
+  sourceThreadId: string | null
 }
 
 function payloadOf<T>(facts: readonly Fact[], type: string, what: string): T {
@@ -37,7 +39,10 @@ function payloadOf<T>(facts: readonly Fact[], type: string, what: string): T {
 }
 
 /** 建库 → 种两个工作流 + 源任务 → 返回交接断言需要的 id。 */
-export async function seedHandoffBase(dbPath: string): Promise<HandoffSeed> {
+export async function seedHandoffBase(
+  dbPath: string,
+  options?: { thread?: 'inherit' | 'new' },
+): Promise<HandoffSeed> {
   const db = openDatabase(dbPath)
   try {
     const store = createStore({ db, kernel })
@@ -72,7 +77,15 @@ export async function seedHandoffBase(dbPath: string): Promise<HandoffSeed> {
             entryMode: 'none',
             // M29 起派单按触发条件配置（M7 的 handoffWorkflowId / handoffStageId 已废弃）。
             // `task.complete` 走 `manual` 触发，`forwardOnly` 缺省 true 即可。
-            handoffs: [{ on: 'manual', workflowId: targetWorkflow.id, stageId: targetStage.id }],
+            // M50：话题策略缺省 inherit（落回源任务话题），用例可显式要 new。
+            handoffs: [
+              {
+                on: 'manual',
+                workflowId: targetWorkflow.id,
+                stageId: targetStage.id,
+                ...(options?.thread === undefined ? {} : { thread: options.thread }),
+              },
+            ],
           },
           { name: '收尾', entryMode: 'none' },
         ],
@@ -117,6 +130,7 @@ export async function seedHandoffBase(dbPath: string): Promise<HandoffSeed> {
       sourceStageId: sourceStage.id,
       targetStageId: targetStage.id,
       sourceTitle,
+      sourceThreadId: task.threadId,
     }
   } finally {
     db.close()
@@ -136,6 +150,8 @@ export interface HandoffState {
   title: string | null
   threadId: string | null
   threadSource: string | null
+  /** 派单卡所在话题里的任务数（M50：inherit 时话题里应有 2 张卡） */
+  threadTaskCount: number
   /** 源任务状态 */
   sourceStatus: string | null
   /** `task.created` 事实总数（重复触发不应增加） */
@@ -168,9 +184,10 @@ export function readHandoffState(dbPath: string, seed: HandoffSeed): HandoffStat
     const source = db.prepare('SELECT status FROM tasks WHERE id = ?').get(seed.sourceTaskId) as
       { status: string } | undefined
     const thread = row?.thread_id
-      ? (db.prepare('SELECT source FROM threads WHERE id = ?').get(row.thread_id) as
-          { source: string } | undefined)
+      ? (db.prepare('SELECT source, task_ids_json FROM threads WHERE id = ?').get(row.thread_id) as
+          { source: string; task_ids_json: string } | undefined)
       : undefined
+    const threadTaskIds = thread === undefined ? [] : (JSON.parse(thread.task_ids_json) as string[])
     const factCount = (
       db.prepare("SELECT COUNT(*) AS n FROM facts WHERE type = 'task.created'").get() as {
         n: number
@@ -186,6 +203,7 @@ export function readHandoffState(dbPath: string, seed: HandoffSeed): HandoffStat
       title: row?.title ?? null,
       threadId: row?.thread_id ?? null,
       threadSource: thread?.source ?? null,
+      threadTaskCount: threadTaskIds.length,
       sourceStatus: source?.status ?? null,
       taskCreatedFacts: factCount,
     }

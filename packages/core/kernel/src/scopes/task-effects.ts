@@ -99,7 +99,8 @@ export function entryRunFacts(
   // 判据收在 `hasThreadHistory`：同一任务重跑、打回重做时线程只有它自己，但仍要看到上一轮产出。
   const context =
     thread !== undefined && hasThreadHistory(view, thread)
-      ? threadContextText(view, thread, task.id)
+      ? // M50：把本批刚建的任务行也传进去——派单产物同批就起入口 run，视图里还查不到它
+        threadContextText(view, thread, task.id, task)
       : null
   const comments = [
     ...[...view.taskComments.values()].filter((comment) => comment.taskId === task.id),

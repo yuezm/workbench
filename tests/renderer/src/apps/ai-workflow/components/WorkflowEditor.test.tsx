@@ -435,6 +435,59 @@ describe('WorkflowEditor', () => {
     })
   })
 
+  // M50：派单的话题策略——缺省沿用来源话题，可显式新开
+  it('派单行的话题下拉：缺省「沿用来源话题」，改成「新开话题」后回传 thread=new', async () => {
+    const other: WorkflowWithStages = {
+      id: 'w2',
+      name: '写作',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 'b0',
+          workflowId: 'w2',
+          name: '草稿',
+          position: 0,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          exits: {},
+          judge: null,
+          handoffs: [],
+        },
+        {
+          id: 'b1',
+          workflowId: 'w2',
+          name: '发布',
+          position: 1,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          exits: {},
+          judge: null,
+          handoffs: [],
+        },
+      ],
+    }
+    kernel.setView('workflows.all', undefined, [other])
+    kernel.setView('agents.all', undefined, [])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={null} onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('工作流名称'), '派单流')
+    await choose(user, '阶段1类型', '智能体')
+    await user.click(screen.getByRole('button', { name: '阶段1新增派单' }))
+    // 缺省：沿用来源话题
+    expect(screen.getByRole('combobox', { name: '阶段1派单1话题' })).toHaveTextContent(
+      '沿用来源话题',
+    )
+    await choose(user, '阶段1派单1话题', '新开话题')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(draft.stages[0]?.handoffs?.[0]).toMatchObject({ thread: 'new' })
+  })
+
   it('编辑已有工作流：回显交接目标、排除自身候选、切换工作流重置阶段、回传阶段 id', async () => {
     const current = workflowOf([
       {

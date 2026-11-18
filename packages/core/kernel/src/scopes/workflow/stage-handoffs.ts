@@ -16,6 +16,7 @@ import type {
   RunStatus,
   StageHandoff,
   StageHandoffGuard,
+  StageHandoffThreadPolicy,
   WorkflowStage,
 } from '@workbench/protocol/entities'
 import type { Id, View } from '../../core/types'
@@ -35,10 +36,11 @@ export interface HandoffSignal {
   toPosition?: number | null
 }
 
-/** 派单目标：目标工作流 + 落地阶段。 */
+/** 派单目标：目标工作流 + 落地阶段 + 话题策略（M50）。 */
 export interface HandoffTarget {
   workflowId: Id
   stageId: Id
+  thread: StageHandoffThreadPolicy
 }
 
 /** 工作流下的阶段，按 position 升序（与投影唯一约束一致）。 */
@@ -95,13 +97,40 @@ export function handoffTargetsOf(
     const stages = stagesOfWorkflow(view, workflow.id)
     if (handoff.stageId === null) {
       const first = stages[0]
-      if (first !== undefined) out.push({ workflowId: workflow.id, stageId: first.id })
+      if (first !== undefined) {
+        out.push({
+          workflowId: workflow.id,
+          stageId: first.id,
+          thread: handoffThreadOf(handoff),
+        })
+      }
       continue
     }
     const target = stages.find((candidate) => candidate.id === handoff.stageId)
-    if (target !== undefined) out.push({ workflowId: workflow.id, stageId: target.id })
+    if (target !== undefined) {
+      out.push({ workflowId: workflow.id, stageId: target.id, thread: handoffThreadOf(handoff) })
+    }
   }
   return out
+}
+
+/**
+ * 派单的话题策略（M50）：缺省沿用来源任务的话题——一条需求的流转不该被切成多条话题。
+ *
+ * 归一**只在这里收口**：内核拼事实、`sameHandoffs` 深比较、投影归一都调它，
+ * 不在各处各写一遍默认值（否则「一半 inherit、一半 new」就是两套真相）。
+ */
+export function handoffThreadOf(handoff: Pick<StageHandoff, 'thread'>): StageHandoffThreadPolicy {
+  return handoff.thread ?? 'inherit'
+}
+
+/**
+ * 派单数组归一（M50）：把话题策略补成显式值，投影里不留半截形状。
+ *
+ * 只补 `thread`；`forwardOnly` 保持可选（它的缺省语义是「仅向前」，由消费方判定）。
+ */
+export function normalizeHandoffs(handoffs: readonly StageHandoff[]): StageHandoff[] {
+  return handoffs.map((handoff) => ({ ...handoff, thread: handoffThreadOf(handoff) }))
 }
 
 /**
@@ -150,7 +179,8 @@ export function sameHandoffs(
       item.on === other.on &&
       item.workflowId === other.workflowId &&
       item.stageId === other.stageId &&
-      (item.forwardOnly ?? true) === (other.forwardOnly ?? true)
+      (item.forwardOnly ?? true) === (other.forwardOnly ?? true) &&
+      handoffThreadOf(item) === handoffThreadOf(other)
     )
   })
 }

@@ -37,7 +37,15 @@ import { cronTaskFacts, eventThreadFacts } from '../rules'
 import { childrenSettledFacts, spawnFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
 import { reviewFactsOf } from '../review'
-import { closeIfAllDone, inactivityFacts, makeNote, noteFacts, withNote } from '../threads'
+import {
+  batchTaskStatuses,
+  closeIfAllDone,
+  inactivityFacts,
+  makeNote,
+  noteFacts,
+  threadWithBatchTasks,
+  withNote,
+} from '../threads'
 import { stageRoundCount } from '../threads'
 import { moveTask } from '../workflow/stage-machine'
 import {
@@ -521,18 +529,21 @@ export function receiveRun(
       )
     }
     for (const fact of transition.facts) {
-      // M6.5：阶段流转把任务完成时，若线程内任务已全部完成 → 归档线程
+      // M6.5：阶段流转把任务完成时，若线程内任务已全部完成 → 归档线程。
+      // M50：同一批里可能刚派出一张落回本话题的新卡——它还没进视图，归档判定必须把它算成 active。
       if (fact.type === 'task.completed') {
         const completedTask = (fact.payload as { task: Task }).task
         const thread =
           completedTask.threadId === null ? undefined : view.threads.get(completedTask.threadId)
+        const overrides = batchTaskStatuses(facts)
+        overrides.set(completedTask.id, 'completed')
         facts.push(
           ...closeIfAllDone(
             view,
-            thread,
+            threadWithBatchTasks(thread, facts),
             now,
             HOST_SCHEDULER,
-            new Map([[completedTask.id, 'completed']]),
+            overrides,
           ),
         )
       }

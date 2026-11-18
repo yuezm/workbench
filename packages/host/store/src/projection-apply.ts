@@ -57,7 +57,7 @@ import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { ReviewReport } from '@workbench/protocol/review'
 import { StoreError } from './errors'
 import { TABLE_SHAPES, insertSql, valuesOf } from './columns'
-import { legacyHandoffs } from '@workbench/kernel/scopes/workflow/stage-handoffs'
+import { legacyHandoffs, normalizeHandoffs } from '@workbench/kernel/scopes/workflow/stage-handoffs'
 import { legacyExits, legacyJudge } from '@workbench/kernel/scopes/workflow/stage-machine'
 
 /** 一条投影变更 + 它所属事实的时间（阶段行首次插入的 created_at 兜底）。 */
@@ -197,7 +197,8 @@ const normalizeStage = (row: WorkflowStage): WorkflowStage => {
   return {
     ...row,
     builtin: legacy.builtin ?? null,
-    handoffs: legacy.handoffs ?? legacyHandoffs(legacy),
+    // M50：话题策略补显式值，增量与重建折出同一行
+    handoffs: normalizeHandoffs(legacy.handoffs ?? legacyHandoffs(legacy)),
     exits: legacyExits(legacy),
     judge,
     // M34：验收只属于闸门阶段——执行阶段的条目在投影边界一并作废（与 kernel 归一同步）

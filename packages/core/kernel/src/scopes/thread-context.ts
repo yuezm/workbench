@@ -369,13 +369,25 @@ function noteLines(notes: readonly ThreadNote[]): Item[] {
  *
  * 话题统一后，一条话题里会同时有「需求交付」「审查」等不同流程的卡。判定只看视图里的任务行，
  * 不读配置：跨流程时智能体的作业笔记不该被当成下一流程的输入（那是偏见源，不是资料）。
+ *
+ * `currentTask` 是本批刚建、视图里还查不到的任务行（派单产物与它的入口 run 同批产出）——
+ * 缺它就是「不知道当前任务属于哪个流程」，此时不裁。
  */
-function crossesWorkflow(view: View, thread: ThreadRow, currentTaskId: Id | null): boolean {
-  if (currentTaskId === null) return false
-  const current = view.tasks.get(currentTaskId)
+function crossesWorkflow(
+  view: View,
+  thread: ThreadRow,
+  currentTaskId: Id | null,
+  currentTask?: Pick<Task, 'id' | 'workflowId'>,
+): boolean {
+  const current =
+    currentTask !== undefined && currentTask.id === currentTaskId
+      ? currentTask
+      : currentTaskId === null
+        ? undefined
+        : view.tasks.get(currentTaskId)
   if (current === undefined) return false
   for (const taskId of thread.taskIds) {
-    if (taskId === currentTaskId) continue
+    if (taskId === current.id) continue
     const other = view.tasks.get(taskId)
     if (other !== undefined && other.workflowId !== current.workflowId) return true
   }
@@ -697,17 +709,24 @@ export function dropToFit(
  * M15：`currentTaskId` 用于「任务索引」段的排序（当前任务与祖先链优先保留）；M35 起还用于
  * **去重**——顶部「## 任务 / ## 阶段」已经交代过的当前任务不进「### 任务」树、「### 最近一轮产出」
  * 也不再重复它的标题。传 null（不知道当前任务）时两者都保持原样：任务全列、产出段带任务名。
+ *
+ * M50：`currentTask` 是本批刚建、视图里还没有的任务行（派单产物）；跨流程判定要用它，
+ * 否则第一轮（最该裁的那一轮）会因为没有任务行而判成同流程。
  */
 export function threadContextText(
   view: View,
   thread: ThreadRow,
   currentTaskId: Id | null = null,
+  currentTask?: Pick<Task, 'id' | 'workflowId'>,
 ): string {
   const header = headerLines(thread)
   const taskSection: Section = { title: '### 任务', items: taskLines(view, thread, currentTaskId) }
   const runSection: Section = { title: '### 最近运行（最近 3 条）', items: runLines(view, thread) }
   const cardSection: Section = { title: '### 未决卡片', items: cardLines(view, thread) }
-  const noteSection: Section = noteSectionOf(thread, crossesWorkflow(view, thread, currentTaskId))
+  const noteSection: Section = noteSectionOf(
+    thread,
+    crossesWorkflow(view, thread, currentTaskId, currentTask),
+  )
   const materialSection: Section = {
     title: `### 资料${MATERIAL_LABEL}（最近 10 条事件）`,
     items: eventLines(thread.events),

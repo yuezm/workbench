@@ -286,7 +286,8 @@ src/shared/ai-workflow-api.ts  # 跨进程契约（preload 与 renderer 共用�
 - 判定阶段没有 `done`：跑完但没结论不构成去向；`errored` 仍然可用（执行崩溃与业务过没过是两件事）。
 - **去重按「这一次离开」**（M30）：一条 run 只派一批（`tasks.handoff_from_run_id`），同一阶段第二次成功会**再派一张**——工单模型下每次发起都是新单。人工拖动 / 完成任务没有 run，不去重。链深上限 8。
 - 老事实的 M7 两列按「`done` + `manual`（仅向前）」归一，判定阶段归成「`passed` + `manual`」，见 `kernel/workflow/stage-handoffs.ts#legacyHandoffs`。
-- **接单的人看得到来源**（M31）：派单产物会开新线程（无线程历史），所以提示词单独加「来源工单」段——来源工作流 / 阶段 / 任务、那一轮的 run 与**结论末尾**（保尾 1200 码点，标「前文略」）；人工派出的没有 run，退回来源任务在来源阶段上最后一条终态 run，再没有就写明「没有可引用的执行结论」。解析在 `kernel/handoff-source.ts`，排版在 `kernel/prompt.ts#handoffSourceText`，都是纯函数。
+- **话题策略（M50）**：派单产物的 `thread` 字段取 `inherit`（缺省）/ `new`。`inherit` 让派单卡落回**来源任务的话题**——话题承载「一次入口 / 一次需求」的全生命周期，任务承载一条工作流工单，跨工作流流转不再切成多条话题；`new` 保留给「派出去的是另一件独立事项」（缺陷单独立跟踪 / 独立 SLA），仍开 `source='handoff'` 的隐式线程。归一收口在 `kernel/workflow/stage-handoffs.ts#handoffThreadOf`，口径见 [SPEC-thread-topics](SPEC-thread-topics.md)。
+- **接单的人看得到来源**（M31，M50 起是补强而非唯一入口）：提示词保留「来源工单」段——来源工作流 / 阶段 / 任务、那一轮的 run 与**结论末尾**（保尾 1200 码点，标「前文略」）；人工派出的没有 run，退回来源任务在来源阶段上最后一条终态 run，再没有就写明「没有可引用的执行结论」。解析在 `kernel/handoff-source.ts`，排版在 `kernel/prompt.ts#handoffSourceText`，都是纯函数。同话题后线程上下文本身已带任务树与上一轮产出，两段互补：一段给跨工作流来源，一段给话题内的作业记忆；跨流程时智能体笔记不注入（见 SPEC-thread-topics D3）。
 
 **打回原地不重试：** `RUN_FAILED` 时若 `exits.errored` 未配置（缺省为「停在这里等人」）或解析结果就是当前阶段（显式配 `goto` 自身），任务保持原阶段、不产生 effects——避免 agent 阶段失败后立刻重建 run 形成无限自动重试；此时卡片可拖走重试或完成，详情页也可直接「重新执行」原地重排（`task.rerun`，见下）。
 

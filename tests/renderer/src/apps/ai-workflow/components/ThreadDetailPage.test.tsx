@@ -439,6 +439,8 @@ describe('ThreadDetailPage', () => {
     // 弹窗里的数字与说明都来自线程行：3 个任务、执行记录一起删
     expect(dialog).toHaveTextContent('3 个任务')
     expect(dialog).toHaveTextContent('执行记录')
+    // M50：话题里可能挂着别的流程的工单，删除前要说清连带范围
+    expect(dialog).toHaveTextContent('跨流程的工单会一起删除')
 
     await user.click(within(dialog).getByRole('button', { name: '删除' }))
     await waitFor(() =>
@@ -491,5 +493,48 @@ describe('ThreadDetailPage', () => {
     ).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(onRemoved).not.toHaveBeenCalled()
+  })
+})
+
+describe('ThreadDetailPage 跨流程话题（M50）', () => {
+  const handoffTask: Task = {
+    ...parentTask,
+    id: 'h1',
+    title: '父任务',
+    workflowId: 'w2',
+    origin: 'handoff',
+    parentTaskId: 'p1',
+    handoffFromTaskId: 'p1',
+    handoffFromStageId: 's0',
+  }
+
+  const seedWorkflows = (): void => {
+    kernel.setView('workflows.all', undefined, [
+      { id: 'w1', name: '需求交付', description: '', createdAt: 't', stages: [] },
+      { id: 'w2', name: '审查', description: '', createdAt: 't', stages: [] },
+    ])
+  }
+
+  it('同一话题里有两张同标题卡：每行标出所属工作流', async () => {
+    seedWorkflows()
+    const row: ThreadRow = { ...thread, taskIds: ['p1', 'h1'], rootTaskIds: ['p1'] }
+    setup(detailOf(row, [parentTask, handoffTask]))
+
+    const list = await screen.findByRole('region', { name: '任务列表' })
+
+    expect(list).toHaveTextContent('需求交付')
+    expect(list).toHaveTextContent('审查')
+    // 两张卡同标题，靠徽标区分
+    expect(within(list).getAllByText('父任务')).toHaveLength(2)
+  })
+
+  it('只有一个流程的话题不挂工作流徽标（旧话题保持原样）', async () => {
+    seedWorkflows()
+    setup(detailOf(thread))
+
+    const list = await screen.findByRole('region', { name: '任务列表' })
+
+    expect(list).not.toHaveTextContent('需求交付')
+    expect(list).not.toHaveTextContent('审查')
   })
 })

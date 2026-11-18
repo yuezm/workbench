@@ -16,6 +16,8 @@ import {
   removedIfNoTasksLeft,
   taskAttachedFacts,
   threadOfTask,
+  threadWithBatchTasks,
+  batchTaskStatuses,
   withTask,
 } from '../threads'
 import { completeTask, moveTask, moveTaskToStage } from '../workflow/stage-machine'
@@ -206,21 +208,26 @@ export function completeTaskCommand(
   if (view.activeTaskIds.has(task.id)) return reject('conflict', '执行中的阶段不能完成')
   const completed: Task = { ...completeTask(task), updatedAt: now }
   // M29：完成 = 离开当前阶段且视为向前，派单按 `manual` 触发
+  const handoffFacts = handoffOnExit(view, task, fromStage, 'manual', now, env, OWNER, {
+    forward: true,
+    runId: null,
+  })
   const facts: FactDraft[] = [
-    ...handoffOnExit(view, task, fromStage, 'manual', now, env, OWNER, {
-      forward: true,
-      runId: null,
-    }),
+    ...handoffFacts,
     ownerDraft('task.completed', { task: completed }, now),
   ]
-  // M6.5：线程内任务全部完成 → 归档线程
+  // M6.5：线程内任务全部完成 → 归档线程。
+  // M50：派单卡可能与本任务同批进同一条话题——归档判定要看到这批新卡，否则话题会在
+  // 「刚把自己的下一张卡生出来」的瞬间被归档（审查 run 就落到一条已归档话题里）。
+  const statuses = batchTaskStatuses(handoffFacts)
+  statuses.set(task.id, 'completed')
   facts.push(
     ...closeIfAllDone(
       view,
-      threadOfTask(view, task),
+      threadWithBatchTasks(threadOfTask(view, task), handoffFacts),
       now,
       OWNER,
-      new Map([[task.id, 'completed']]),
+      statuses,
     ),
   )
   // M8：子任务完成 → 父任务 rollup（全部子任务结束才触发）

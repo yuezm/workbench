@@ -462,6 +462,17 @@ export const STAGE_HANDOFF_GUARDS = ['done', 'errored', 'passed', 'failed', 'man
 export type StageHandoffGuard = (typeof STAGE_HANDOFF_GUARDS)[number]
 
 /**
+ * 派单的话题策略（M50）：话题是「一次入口 / 一次需求」的作业容器，任务是「一条工作流工单」。
+ *
+ * - `inherit`：落回**来源任务的话题**——一条需求跨工作流流转时不该被切成多条话题；
+ * - `new`：开新隐式线程（`source='handoff'`），留给「派出去的是另一件独立事项」
+ *   （缺陷单独立跟踪、独立 SLA）。
+ */
+export const STAGE_HANDOFF_THREAD_POLICIES = ['inherit', 'new'] as const
+
+export type StageHandoffThreadPolicy = (typeof STAGE_HANDOFF_THREAD_POLICIES)[number]
+
+/**
  * 一条派单（M29，取代 M7 的 `handoffWorkflowId` / `handoffStageId` 两列）：
  * 任务离开本阶段且触发条件命中时，在目标工作流建一张新工单。
  *
@@ -476,6 +487,11 @@ export interface StageHandoff {
   stageId: string | null
   /** 只对 `manual` 有意义：拖到更前阶段（返工）不派单。缺省 = true */
   forwardOnly?: boolean
+  /**
+   * 话题策略（M50）：缺省 `inherit` —— 派单卡落回来源任务的话题；`new` 开新隐式线程。
+   * 归一收口在 `kernel/workflow/stage-handoffs.ts#handoffThreadOf`。
+   */
+  thread?: StageHandoffThreadPolicy
 }
 
 export interface WorkflowStage {

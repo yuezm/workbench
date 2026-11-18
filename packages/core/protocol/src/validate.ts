@@ -29,6 +29,7 @@ import {
   SCRIPT_LIMITS,
   SPAWN_POLICIES,
   STAGE_HANDOFF_GUARDS,
+  STAGE_HANDOFF_THREAD_POLICIES,
   STAGE_TIMEOUT_LIMITS,
 } from './entities'
 import { HOST_INPUT_NAMES, type HostInputName, type Input } from './inputs'
@@ -282,8 +283,8 @@ const checkAcceptanceList = (value: unknown, label: string): Check => {
 }
 
 /**
- * 派单清单（M29）：触发条件 + 目标工作流 / 阶段。目标的存在性、自指与从属由内核按视图判，
- * 这里只挡形状与条数。
+ * 派单清单（M29；M50 加话题策略）：触发条件 + 目标工作流 / 阶段 + 话题。
+ * 目标的存在性、自指与从属由内核按视图判，这里只挡形状与条数。
  */
 const checkHandoffs = (value: unknown, label: string): Check => {
   if (!Array.isArray(value)) return `${label} 必须是数组`
@@ -298,7 +299,8 @@ const checkHandoffs = (value: unknown, label: string): Check => {
       requiredEnum(handoff.on, `${at}.on`, STAGE_HANDOFF_GUARDS) ??
       requiredId(handoff.workflowId, `${at}.workflowId`) ??
       optionalId(handoff.stageId, `${at}.stageId`) ??
-      optionalBoolean(handoff.forwardOnly, `${at}.forwardOnly`)
+      optionalBoolean(handoff.forwardOnly, `${at}.forwardOnly`) ??
+      optionalEnum(handoff.thread, `${at}.thread`, STAGE_HANDOFF_THREAD_POLICIES)
     if (error) return error
   }
   return null

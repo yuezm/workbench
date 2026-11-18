@@ -20,7 +20,7 @@
 import type { FactType, SnapshotImportedPayload } from '@workbench/protocol/facts'
 import type { Task, Card, WorkflowStage } from '@workbench/protocol/entities'
 import type { Change, Fact, Id, ProjectionRow, ProjectionTable } from '../core/types'
-import { legacyHandoffs } from './workflow/stage-handoffs'
+import { legacyHandoffs, normalizeHandoffs } from './workflow/stage-handoffs'
 import { legacyExits, legacyJudge } from './workflow/stage-machine'
 
 /**
@@ -79,8 +79,8 @@ export function normalizeTask(row: Task): Task {
   const judge = legacyJudge(legacy)
   return {
     ...row,
-    // M29：老事实只有 M7 两列，按触发条件归一出派单数组
-    handoffs: legacy.handoffs ?? legacyHandoffs(legacy),
+    // M29：老事实只有 M7 两列，按触发条件归一出派单数组；M50：话题策略补显式值
+    handoffs: normalizeHandoffs(legacy.handoffs ?? legacyHandoffs(legacy)),
     // M32：四组旧去向归一成出口表；缺的去向由启动补齐按顺序补
     exits: legacyExits(legacy),
     judge,

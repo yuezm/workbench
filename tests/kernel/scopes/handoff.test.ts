@@ -535,6 +535,25 @@ describe('kernel/handoff 建任务事实', () => {
 
     expect(facts.map((fact) => fact.type)).toContain('thread.opened')
   })
+
+  // 派单产物与它的入口 run 同批产出：视图里还查不到这张卡，跨流程判定必须靠传入的任务行
+  it('inherit + 目标阶段是 agent：第一轮入口 run 已按跨流程裁掉智能体笔记', () => {
+    const source = task('t-1', { threadId: 'th-1' })
+    const row: ThreadRow = {
+      ...threadRow('th-1', ['t-1']),
+      notes: [{ id: 'n1', author: 'agent', text: '执行者作业笔记', at: CREATED }],
+    }
+    const seeded: View = {
+      ...withTasks(baseView([handoff({ stageId: 'st-b1' })]), [source]),
+      threads: new Map([['th-1', row]]),
+    }
+
+    const facts = exit(seeded, source, 'done')
+    const run = payloadsOf<{ run: { prompt: string } }>(facts, 'run.queued')[0].run
+
+    expect(run.prompt).toContain('# 线程上下文')
+    expect(run.prompt).not.toContain('执行者作业笔记')
+  })
 })
 
 describe('kernel/handoff 阶段保存校验', () => {

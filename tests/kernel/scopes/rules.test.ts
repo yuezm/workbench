@@ -403,6 +403,70 @@ describe('kernel/rules 建任务', () => {
     expect(run.eventIds).toEqual(['event-1'])
   })
 
+  // M50：话题统一后一条话题里会有别的工作流的卡——复用必须挑回本流程的主任务
+  it('同一话题里有派单卡（别的流程）→ 仍复用本流程的主任务', () => {
+    const main = task({
+      id: 'task-9',
+      origin: 'rule',
+      ruleId: 'rule-1',
+      externalRef: 'issue-1',
+      threadId: 'th-1',
+    })
+    const handed = task({
+      id: 'task-10',
+      origin: 'handoff',
+      workflowId: 'wf-2',
+      threadId: 'th-1',
+      parentTaskId: 'task-9',
+      handoffFromTaskId: 'task-9',
+      handoffFromStageId: 'st-1',
+    })
+    const facts = eventThreadFacts(
+      view({
+        rules: [rule()],
+        // 派单卡排在最后：旧口径「取最后一个 active」会拣到它
+        tasks: [main, handed],
+        threads: [thread({ taskIds: ['task-9', 'task-10'], rootTaskIds: ['task-9'] })],
+      }),
+      event,
+      1,
+      NOW,
+      env(),
+    )
+
+    expect(facts.filter((fact) => fact.type === 'task.created')).toHaveLength(0)
+    expect(
+      (facts.find((fact) => fact.type === 'run.queued')?.payload as { run: { taskId: string } }).run
+        .taskId,
+    ).toBe('task-9')
+  })
+
+  it('同一话题里只有别的流程的派单卡 → 新建本流程任务（不复用别流程的卡）', () => {
+    const handed = task({
+      id: 'task-10',
+      origin: 'handoff',
+      workflowId: 'wf-2',
+      threadId: 'th-1',
+      handoffFromTaskId: 'task-9',
+      handoffFromStageId: 'st-1',
+    })
+    const facts = eventThreadFacts(
+      view({
+        rules: [rule()],
+        tasks: [handed],
+        threads: [thread({ taskIds: ['task-10'], rootTaskIds: ['task-10'] })],
+      }),
+      event,
+      1,
+      NOW,
+      env(),
+    )
+    const created = facts.filter((fact) => fact.type === 'task.created')
+
+    expect(created).toHaveLength(1)
+    expect((created[0]?.payload as { task: Task }).task.workflowId).toBe('wf-1')
+  })
+
   it('onExisting=new-task / 线程里没有 active 任务 / 不同入口键都新建任务', () => {
     const existing = task({
       id: 'task-9',

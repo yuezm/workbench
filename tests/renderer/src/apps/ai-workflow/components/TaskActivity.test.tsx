@@ -8,6 +8,7 @@ import {
   TaskActivity,
 } from '@workbench/client-app-ai-workflow/components/TaskActivity'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 
 function makeRun(over: Partial<Run> = {}): Run {
   return {
@@ -84,7 +85,10 @@ describe('TaskActivity', () => {
     expect(list).toHaveTextContent('成功')
     expect(list).toHaveTextContent('执行')
     expect(list).toHaveTextContent('第 1 轮')
-    expect(list).toHaveTextContent('2026-11-03T00:00:00Z')
+    // 时间按本机时区渲染（口径见 client-ui-kit/time）：具体时刻随机器时区变，
+    // 但不能再出现 ISO 原文——那正是「比真实时间早 8 小时」的根源
+    expect(list).toHaveTextContent(formatLocalDateTime(run.startedAt ?? run.createdAt))
+    expect(list).not.toHaveTextContent('2026-11-03T00:00:00Z')
     expect(list).toHaveTextContent('耗时 1.5s')
     expect(list).toHaveTextContent('退出码 0')
     expect(list).toHaveTextContent('输入 12 / 输出 34 tokens')
@@ -375,7 +379,7 @@ describe('TaskActivity', () => {
     render(<TaskActivity runs={[run]} comments={[]} stages={stages} />)
 
     const list = screen.getByRole('list', { name: '上下文' })
-    expect(await within(list).findByText('2026-01-01')).toBeInTheDocument()
+    expect(await within(list).findByText(formatLocalDateTime('2026-01-01'))).toBeInTheDocument()
     expect(list).not.toHaveTextContent('还没有运行记录或反馈')
     expect(list).not.toHaveTextContent('退出码')
     expect(list).not.toHaveTextContent('耗时')

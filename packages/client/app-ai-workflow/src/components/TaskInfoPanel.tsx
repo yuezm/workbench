@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { Task } from '@workbench/protocol/entities'
 import { cn } from '@workbench/client-ui-kit/cn'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 
 const STATUS_LABEL: Record<Task['status'], string> = {
   active: '进行中',
@@ -57,8 +58,9 @@ export function TaskInfoPanel({ task, stageName }: TaskInfoPanelProps): ReactEle
         <Meta label="阶段" value={stageName ?? '未知阶段'} />
         <Meta label="来源" value={ORIGIN_LABEL[task.origin]} />
         <Meta label="线程" value={task.threadId ?? '未挂线程'} mono={task.threadId !== null} />
-        <Meta label="创建时间" value={task.createdAt} mono />
-        <Meta label="更新时间" value={task.updatedAt} mono />
+        {/* 时间字段内核存 ISO（UTC），展示一律换成本机时区（口径见 client-ui-kit/time） */}
+        <Meta label="创建时间" value={formatLocalDateTime(task.createdAt)} mono />
+        <Meta label="更新时间" value={formatLocalDateTime(task.updatedAt)} mono />
         <div className="col-span-2 flex min-w-0 flex-col gap-0.5 sm:col-span-3">
           <dt className="text-xs text-muted-foreground">任务 ID</dt>
           <dd className="truncate font-mono text-sm text-muted-foreground" title={task.id}>

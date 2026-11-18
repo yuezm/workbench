@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { ServerInfoPanel } from '@workbench/client-app-ai-workflow/components/ServerInfoPanel'
 import { resetServerInfoForTest, setServerInfo } from '@workbench/client-shell/server-info'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 
 /** 设置 / 服务：只读展示服务状态与数据目录 */
 describe('ServerInfoPanel', () => {
@@ -31,6 +32,9 @@ describe('ServerInfoPanel', () => {
     expect(screen.getByText('/var/lib/workbench')).toBeInTheDocument()
     expect(screen.getByText('/work')).toBeInTheDocument()
     expect(screen.getByText('4242')).toBeInTheDocument()
+    // 启动时间按本机时区展示（服务给的是 UTC ISO，直接渲染会显示成早了 8 小时）
+    expect(screen.getByText(formatLocalDateTime('2026-11-16T00:00:00.000Z'))).toBeInTheDocument()
+    expect(screen.queryByText('2026-11-16T00:00:00.000Z')).toBeNull()
     // 地址来自当前页面（服务与页面同源）
     expect(screen.getByText(window.location.origin)).toBeInTheDocument()
     // 只读：没有任何可编辑控件

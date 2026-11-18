@@ -7,6 +7,7 @@ import { Button } from '@workbench/client-ui-primitives/button'
 import { FormError } from '@workbench/client-ui-kit/form-error'
 import { badgeCls } from '@workbench/client-ui-kit/panel'
 import { cn } from '@workbench/client-ui-kit/cn'
+import { formatLocalShort } from '@workbench/client-ui-kit/time'
 import { getKernelStore } from '@workbench/client-kernel-store'
 import { useKernelView, useKernelViewState } from '@workbench/client-shell/useKernelView'
 import { AuthorityPanel } from './AuthorityPanel'
@@ -96,12 +97,8 @@ function conditionLabel(rule: AutomationRule): string {
 /** 空值引用稳定：避免每次渲染都换一个新的 `[]` 触发重订阅 */
 const EMPTY_NEXT_FIRES: RuleNextFire[] = []
 
-/** 下次触发展示：本地时间 `MM-DD HH:mm`（时区由浏览器给） */
-const formatNextAt = (iso: string): string => {
-  const at = new Date(iso)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
-}
+/** 下次触发展示：本地时间 `MM-DD HH:mm`（时区由浏览器给，口径见 client-ui-kit/time） */
+const formatNextAt = (iso: string): string => formatLocalShort(iso)
 
 export function RulesManager(): ReactElement {
   const rulesState = useKernelViewState('rules.all')

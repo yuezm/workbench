@@ -10,6 +10,7 @@ import {
   TaskDetailPage,
 } from '@workbench/client-app-ai-workflow/components/TaskDetailPage'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 
 function stage(
   id: string,
@@ -142,7 +143,9 @@ describe('TaskDetailPage', () => {
     expect(info).toHaveTextContent('执行')
     expect(info).toHaveTextContent('规则创建')
     expect(info).toHaveTextContent('未挂线程')
-    expect(info).toHaveTextContent('2026-11-06T09:00:00.000Z')
+    // 时间按本机时区渲染，具体时刻随机器时区变；ISO 原文不该再出现在界面上
+    expect(info).toHaveTextContent(formatLocalDateTime('2026-11-06T09:00:00.000Z'))
+    expect(info).not.toHaveTextContent('2026-11-06T09:00:00.000Z')
     expect(info).toHaveTextContent('t1')
 
     const labels = screen.getByRole('list', { name: '标签' })

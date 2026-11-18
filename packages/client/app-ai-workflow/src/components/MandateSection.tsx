@@ -3,6 +3,7 @@ import type { Mandate } from '@workbench/protocol/authority'
 import { useKernelViewState } from '@workbench/client-shell/useKernelView'
 import { FormError } from '@workbench/client-ui-kit/form-error'
 import { Panel, badgeCls } from '@workbench/client-ui-kit/panel'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 import { cn } from '@workbench/client-ui-kit/cn'
 
 const STRENGTH: Record<Mandate['strength'], string> = {
@@ -30,11 +31,7 @@ const ACCESS: Record<Mandate['scope']['access'], string> = {
   full: '全权（可跑命令）',
 }
 
-const when = (iso: string): string => {
-  const at = new Date(iso)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
-}
+const when = (iso: string): string => formatLocalDateTime(iso)
 
 const byLabel = (mandate: Mandate): string => {
   if (mandate.by.kind === 'manual') return '本机手工创建'

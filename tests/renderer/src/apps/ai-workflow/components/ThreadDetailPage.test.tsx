@@ -8,6 +8,7 @@ import type { ThreadRow } from '@workbench/protocol/thread'
 import type { ThreadDetail } from '@workbench/protocol/views'
 import { ThreadDetailPage } from '@workbench/client-app-ai-workflow/components/ThreadDetailPage'
 import { installFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 
 const parentTask: Task = {
   id: 'p1',
@@ -138,7 +139,9 @@ describe('ThreadDetailPage', () => {
     const notes = screen.getByRole('region', { name: '笔记' })
     expect(notes).toHaveTextContent('上一轮笔记')
     expect(notes).toHaveTextContent('智能体')
-    expect(notes).toHaveTextContent('2026-11-05T10:00:00.000Z')
+    // 笔记时刻按本机时区渲染（统一口径见 client-ui-kit/time），不再漏 ISO 原文
+    expect(notes).toHaveTextContent(formatLocalDateTime('2026-11-05T10:00:00.000Z'))
+    expect(notes).not.toHaveTextContent('2026-11-05T10:00:00.000Z')
   })
 
   it('任务列表是详情入口：点任务把 taskId 交给上层', async () => {

@@ -16,6 +16,7 @@ import { Input } from '@workbench/client-ui-primitives/input'
 import { badgeCls } from '@workbench/client-ui-kit/panel'
 import { Textarea } from '@workbench/client-ui-primitives/textarea'
 import { cn } from '@workbench/client-ui-kit/cn'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 import { getKernelStore } from '@workbench/client-kernel-store'
 import { useKernelViewState } from '@workbench/client-shell/useKernelView'
 import { DetailHeader } from './DetailHeader'
@@ -189,7 +190,7 @@ function NotesSection({
             <li key={note.id} className="px-3 py-2">
               <div className="flex items-center gap-2 text-xs text-faint-foreground">
                 <span>{note.author === 'owner' ? '我' : '智能体'}</span>
-                <span className="tabular-nums">{note.at}</span>
+                <span className="tabular-nums">{formatLocalDateTime(note.at)}</span>
               </div>
               <p className="text-sm whitespace-pre-wrap text-muted-foreground">{note.text}</p>
             </li>

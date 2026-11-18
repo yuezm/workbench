@@ -12,6 +12,7 @@ import type { TaskComment } from '@workbench/protocol/task-comment'
 import { Button } from '@workbench/client-ui-primitives/button'
 import { FormError } from '@workbench/client-ui-kit/form-error'
 import { cn } from '@workbench/client-ui-kit/cn'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 import { useKernelViewState } from '@workbench/client-shell/useKernelView'
 import { PERMISSION_LABEL } from './AgentDialog'
 
@@ -329,7 +330,8 @@ function RunBlock({
         <span className={cn('rounded-sm bg-accent px-2 py-0.5', STATUS_TONE[run.status])}>
           {STATUS_LABEL[run.status]}
         </span>
-        <span className="tabular-nums">{run.startedAt ?? run.createdAt}</span>
+        {/* 内核存 ISO（UTC），这里给人看本机时刻：直接渲染原文会让界面比真实时间早 8 小时 */}
+        <span className="tabular-nums">{formatLocalDateTime(run.startedAt ?? run.createdAt)}</span>
         {/* 本轮实际权限：闸门阶段由内核抬到「完整访问」，与智能体上配的模式可以不一致，
             所以这里给的是 run 的实际值而不是配置值（事后复核要的正是「这轮跑成了什么」） */}
         <span className="tabular-nums">
@@ -364,7 +366,7 @@ function CommentBlock({ comment }: { comment: TaskComment }): ReactElement {
         <span className="rounded-sm bg-primary/15 px-1.5 py-0.5 text-brand">
           {comment.author === 'owner' ? '我' : '智能体'}
         </span>
-        <span className="tabular-nums">{comment.createdAt}</span>
+        <span className="tabular-nums">{formatLocalDateTime(comment.createdAt)}</span>
       </div>
       <p className="mt-1 text-sm whitespace-pre-wrap text-muted-foreground">{comment.text}</p>
     </div>

@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { Panel } from '@workbench/client-ui-kit/panel'
+import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 import { useServerInfo } from '@workbench/client-shell/server-info'
 
 /** 一行只读信息：标签 + 等宽值（路径类容易看错，一律等宽） */
@@ -42,7 +43,8 @@ export function ServerInfoPanel(): ReactElement {
             <Row label="内核版本" value={info.kernelVersion} />
             <Row label="数据目录" value={info.dataDir} />
             <Row label="默认工作目录" value={info.defaultWorkdir} />
-            <Row label="启动时间" value={info.startedAt} />
+            {/* 服务给的是 ISO（UTC）；排查时看的是本机几点起的，所以按本机时区渲染 */}
+            <Row label="启动时间" value={formatLocalDateTime(info.startedAt)} />
             <Row label="进程号" value={String(info.pid)} />
           </>
         )}

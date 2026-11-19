@@ -23,7 +23,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 
-const SCAN_ROOTS = ['src/kernel', 'src/protocol']
+const SCAN_ROOTS = ['packages/core/kernel/src', 'packages/core/protocol/src']
 // 纯类型 / 纯常量 / 纯路由：没有运行时分支，变异只会产出噪音
 const SCAN_EXCLUDE = [
   'src/kernel/core/types.ts', // 类型定义

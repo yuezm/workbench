@@ -366,12 +366,17 @@ const thresholds = (t) => {
 }
 // 已登记的规则改写：旧规则在新架构下不再成立（不是放松），由右侧新规则等价替代。
 // 服务器部署重写（Electron → 常驻服务）：桌面专属的边界与验收项换成服务端对应项；
-// 只有「替代规则真的出现在新增行里」才算迁移，否则仍按删规则阻断。
+// 包拆分后（2026-11-19）：`src/<层>` 改写成 `packages/<域>/<包>` 与 `apps/<壳>`，
+// 门禁强度与断言集不变，只是路径对齐磁盘现状。同样只有「新规则真的出现在新增行里」才算迁移。
 const REWRITTEN_RULES = {
   '`src/renderer/**` 禁止 import `electron` 与 Node 内置（`fs` / `path` / `os` / `child_process` / `crypto` / `node':
-    '`src/renderer/**` 禁止 import Node 内置（`node',
+    '`packages/client/**` 禁止 import Node 内置（`node',
+  '`src/renderer/**` 禁止 import Node 内置（`node':
+    '`packages/client/**` 禁止 import Node 内置（`node',
   '`src/main/**` 禁止 import `renderer`（依赖方向单向：renderer → main）。':
-    '`src/server/**` 禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。',
+    '`apps/server/**`（+ `packages/api/http/**`）禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。',
+  '`src/server/**` 禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。':
+    '`apps/server/**`（+ `packages/api/http/**`）禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。',
   '测试同层同规：`tests/renderer/**` 禁 Electron/Node 内置，`tests/main/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。':
     '测试同层同规：`tests/renderer/**` 禁 Node 内置与服务端 import，`tests/server/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。',
   打包验收: '服务冒烟',

@@ -34,8 +34,8 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 
 ### 架构边界（由 ESLint `no-restricted-imports` 强制）
 
-- `src/renderer/**` 禁止 import Node 内置（`node:*`）与 `src/server/**`；浏览器侧只有 `shared/bridge.ts` 一个传输实现（`window.workbench`）。
-- `src/server/**` 禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。
+- `packages/client/**` 禁止 import Node 内置（`node:*`）与 `apps/server/**`；浏览器侧只有 `packages/client/bridge` 一个传输实现（`window.workbench`）。
+- `apps/server/**`（+ `packages/api/http/**`）禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。
 - 测试同层同规：`tests/renderer/**` 禁 Node 内置与服务端 import，`tests/server/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。
 - app 之间不互相 import、app 只依赖 shell（`AppDefinition` 契约 + 桥接）——**暂无自动检查，靠 code review**。
 
@@ -46,6 +46,8 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 ## Exceptions（放松门槛的唯一通道）
 
 每条例外必须带 owner 与到期时点；理由、实测数字与关闭结论见 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md) 的「Exceptions 明细」。
+
+- 路径列的 src/** 是登记当时的命名（当时代码在 src/ 下）；现在对应 packages/** 与 pps/**，EX-018 起登记的直接写 packages/**。
 
 | ID     | 规则                         | 路径          | Owner | 到期 / 复核时点       |
 | ------ | ---------------------------- | ------------- | ----- | --------------------- |

@@ -9,7 +9,7 @@ import path from 'node:path'
 
 const argBase = (() => {
   const i = process.argv.indexOf('--base')
-  return i > -1 ? process.argv[i + 1] : process.env.CONSTRAINTS_BASE || 'master'
+  return i > -1 ? process.argv[i + 1] : process.env.CONSTRAINTS_BASE || 'main'
 })()
 const THRESHOLD = Number(process.env.MIN_DIFF_COVERAGE || 90)
 const git = (args) => {
@@ -103,7 +103,9 @@ for (const f of untracked.split('\n').filter(Boolean)) {
   for (let i = 1; i <= n; i++) addLine(rel, i)
 }
 
-const isSource = (f) => /^src\/.*\.(ts|tsx)$/.test(f) && !/\.(test|spec)\./.test(f)
+// 包拆分后产品代码在 `apps/*/src/**` 与 `packages/<域>/<包>/src/**`（旧写法 `src/<层>/**` 已不存在）。
+const isSource = (f) =>
+  /^(apps|packages)\/[^/]+\/(?:[^/]+\/)?src\/.*\.(ts|tsx)$/.test(f) && !/\.(test|spec)\./.test(f)
 // 纯类型文件没有可执行语句，不做覆盖率要求。
 const isTypeOnly = (f) => /(^|\/)(types\.ts|.*\.d\.ts)$/.test(f)
 

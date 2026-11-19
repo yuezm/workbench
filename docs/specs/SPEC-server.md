@@ -1,4 +1,4 @@
-# SPEC：服务器形态（`src/server`）
+# SPEC：服务器形态（`apps/server`）
 
 > 2026-11-16 定稿。本文描述 Workbench 从 Electron 桌面应用改成**常驻服务 + Web 界面**之后的运行形态；
 > 内核对齐 `SPEC-kernel`，宿主对齐 `SPEC-host`，浏览器外壳对齐 `SPEC-shell`。
@@ -46,7 +46,7 @@ node out/server/index.js
 
 ## 配置
 
-全部环境变量（`src/server/config.ts`）：
+全部环境变量（`apps/server/src/config.ts`）：
 
 | 变量                     | 默认           | 约束                                                          |
 | ------------------------ | -------------- | ------------------------------------------------------------- |
@@ -62,7 +62,7 @@ node out/server/index.js
 
 ## HTTP 契约
 
-路由与请求/应答形状的唯一真相源：`src/protocol/http.ts`（`API_PATHS` 与类型）。
+路由与请求/应答形状的唯一真相源：`packages/core/protocol/src/http.ts`（`API_PATHS` 与类型）。
 所有 `/api` 应答统一信封：
 
 ```json
@@ -119,7 +119,7 @@ node out/server/index.js
 
 - 只允许 GET/HEAD；`resolveStaticFile` 做路径规范化与越界检查（`..`、`%2e%2e`、NUL 一律 404）。
 - `index.html` 不缓存，带指纹资源长缓存。
-- 响应头固定 `X-Content-Type-Options: nosniff`；页面自身的 CSP 在 `src/renderer/index.html`。
+- 响应头固定 `X-Content-Type-Options: nosniff`；页面自身的 CSP 在 `apps/web/index.html`。
 
 ## 插件 secret
 
@@ -131,7 +131,7 @@ node out/server/index.js
 
 ## 装配与退出顺序
 
-装配（`src/server/assembly.ts`）：
+装配（`apps/server/src/assembly.ts`）：
 
 1. `mkdir -p` 数据目录 → 收紧 ACL（失败只 warn）→ 产物根 → 回填终态正文；
 2. 开库 → store → 导入 v2 存量 → 对账投影 → 补内置阶段；

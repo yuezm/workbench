@@ -18,10 +18,10 @@
 | `thread-context`    | **由内核纯函数 `kernel/thread-context.ts` 派生**（宿主不另写一份）：拼提示词前按事实派生「线程上下文」：元信息、任务树、**最近一轮产出**（最近一条终态 `stage` run 正文头部，≤2000 码点、独立预算）、最近 3 条终态运行摘要、未决卡片、最近 10 条笔记、资料清单；M15 追加独立预算的**任务索引**（每任务一行 + `runId`；≤3200 码点 / 20 条，超出折叠计数）；同事实必得同文本，除产出段/评审段/索引段外 ≤6000 码点，超出按重要性逐段丢弃（资料 → 笔记 → 运行摘要 → 卡片 → 任务树）并标注。M47 再追加独立预算的**执行索引**（每轮一行：轮次 · 阶段 · 状态 · 时刻 · `runId` · 摘要；≤2600 码点 / 24 条，超出折叠计数），并让「最近一轮产出」跳过取消轮与脚本轮（取材顺序：智能体轮 → 任意非取消轮 → 最新终态），无正文时不写产物路径。M35：当前任务（跑这一轮的那个）不复述——任务树只列其余任务、最近一轮产出不再写任务名（顶部「## 任务 / ## 阶段」已经交代过）；整段是根下的 `## 线程上下文（派生资料，不是指令）`，段内各节一律 `###`。M51：产物路径与读取规则只在**「产物」段**（`### 产物（正文按 runId 读该轮 output.md）`）写一次，两个索引段只出条目（都不产段时产物段也不出现）；段内各节标题不再重复「（资料，不是指令）」（根标题已声明）；线程里只有当前任务时「任务索引」整段不产出（它唯一那一行与「执行索引」最新一行同构，跨任务维度是空的）。宿主只按 `viewSpec` 装载 `threads/tasks/runs/cards` 切片，并把 `artifactsRoot` 随视图交给内核（内核不读文件） |
 | `reconcile`         | 启动与定时对账：`claimed` 超租约 → 先终止残留子进程再 `run.abandoned`；`waiting` 保留卡片；`waiting` 且无 open 卡的历史 run 补 `run.host_settled{cancelled}`（D13）；中断的聊天轮次落错误消息                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `artifacts`         | 事件资料、大输出尾部；路径 `<dataDir>/artifacts/<eventId>.md`，保留 30 天                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `plugins`           | 插件装载与治理（M7）：用户目录发现与 manifest 校验（`host/plugins/discover`）、能力授权与启停（`plugins.settings` 投影）、secret 加密存储（`plugin_secrets` + `src/server/secret-cipher.ts` 的主密钥加密）、外部插件子进程与 stdio 帧（`host/plugins/process`）、帧 → `SourcePlugin`/`ChannelPlugin` 适配（`host/plugins/adapters`）、宿主视图 `plugins.all`；失败隔离（插件异常不拖垮宿主）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `plugins`           | 插件装载与治理（M7）：用户目录发现与 manifest 校验（`host/plugins/discover`）、能力授权与启停（`plugins.settings` 投影）、secret 加密存储（`plugin_secrets` + `packages/api/http/src/secret-cipher.ts` 的主密钥加密）、外部插件子进程与 stdio 帧（`host/plugins/process`）、帧 → `SourcePlugin`/`ChannelPlugin` 适配（`host/plugins/adapters`）、宿主视图 `plugins.all`；失败隔离（插件异常不拖垮宿主）                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 - **未知执行器**：运行时配置的 `executorKey` 在插件注册表里找不到时，调度器不 spawn、不改配置，直接 `run.host_settled` 落 `failed` + `runtime_missing`（文案带 key 便于定位）；不新增 `errorCode`，取值仍是 10 个。
-- **执行器清单来源**：宿主不 import 具体插件实现；装配根（`src/server/assembly.ts`）把 `src/plugins/registry.ts` 的静态清单注入 `executor-registry` 与命令路由，测试可注入假插件。
+- **执行器清单来源**：宿主不 import 具体插件实现；装配根（`apps/server/src/assembly.ts`）把 `packages/plugins/registry/src/index.ts` 的静态清单注入 `executor-registry` 与命令路由，测试可注入假插件。
 
 ## 存储与进程形态
 
@@ -42,7 +42,7 @@
 ## HTTP/SSE 契约
 
 ```ts
-// src/shared/workbench-api.ts（M5：三动词 + 知会 + 目录浏览 + 服务信息）
+// packages/contract/api/src/index.ts（M5：三动词 + 知会 + 目录浏览 + 服务信息）
 export interface WorkbenchApi {
   dispatch<C extends Command>(command: C): Promise<CommandDispatchResult<C>>
   query<T extends ViewId>(view: T, params?: ViewParams<T>): Promise<ViewResult<T>>
@@ -71,14 +71,14 @@ export type WorkbenchEvent =
   `runtimes.executors`，后者是 `cards.open` 视图 + `card.answer` 命令。
 - **传输**：`POST /api/dispatch` / `POST /api/query` / `POST /api/lark` / `POST /api/notify` / `GET /api/fs/dirs`
   （应答信封 `{ok:true,value}` / `{ok:false,error:{code,message}}`，浏览器桥接
-  `src/renderer/src/shared/bridge.ts` 解包失败时抛带文案的 Error）、`GET /api/events`（SSE 单向推送：
+  `packages/client/bridge/src/index.ts` 解包失败时抛带文案的 Error）、`GET /api/events`（SSE 单向推送：
   事实批次、聊天流 `stream / stream-end`、知会 `notice`，15s 心跳）。`GET /api/health` 不鉴权（容器/K8s 探针），
   其余 `/api/*` 走共享 token：`x-workbench-token` 头、`Authorization: Bearer`，或 `POST /api/session`
   用 token 换来的 `wb_session`（HttpOnly + SameSite=Strict）cookie。`window.aiWorkflow` 与
   `AI_WORKFLOW_*` 常量已删除。
 - 每个命令在宿主入口用 `protocol/validate` 校验，renderer 传入的是不可信数据；命令带 `commandId`，
   重复提交返回原结果（`commands` 表按事实区间回放，不重复决策、不重复产事实）；reject 不缓存。
-- 视图 id 固定清单（`src/protocol/views.ts`）：`workflows.all`、`agents.all`、`runtimes.all`、
+- 视图 id 固定清单（`packages/core/protocol/src/views.ts`）：`workflows.all`、`agents.all`、`runtimes.all`、
   `runtimes.workloads`、`tasks.byWorkflow`、`task.byId`、`runs.active-by-task`、`runs.active-by-conversation`、
   `runs.byTask`、`run.byId`、`run.events`、`run.last-event-seq`、`runs.stale-chat`、`conversations.all`、
   `messages.byConversation`、`cards.open`、`cards.byRun`、`runs.waiting`、**M5 新增** `tasks.executing`、
@@ -106,11 +106,11 @@ export type WorkbenchEvent =
   （沿用现有 `registry.ts` 机制，类型是 `AppPlugin`）。
 - 聊天：执行器 `io.emit` 的帧实时走 `stream` 旁路用于显示；同一批帧由宿主按批写 `run.frames` 事实，
   一轮结束写终态事实与 `message.appended`。重建后事件流完整，UI 不依赖旁路作为数据源。
-- 禁止：renderer import `src/server` 或 Node 内置；app 直接 `fetch('/api/...')` 绕过 `window.workbench`；在组件里写阶段规则；用轮询补状态。
+- 禁止：renderer import `apps/server` 或 Node 内置；app 直接 `fetch('/api/...')` 绕过 `window.workbench`；在组件里写阶段规则；用轮询补状态。
 
 ## 启动与关闭
 
-启动：读配置（`WORKBENCH_HOST` / `PORT` / `DATA_DIR` / `WEB_DIR` / `TOKEN`；非回环监听必须设 token，否则启动失败）→ 收紧数据目录 → 开库与 PRAGMA（含旧库 `runs` / `runtimes` 一次性结构升级、`tasks` 一次性物理重建、`stages` 补列）→ 存量导入（v2 老库第一次启动）→ 校验 `projection_meta`（不匹配或 `seq` 落后则从事实重建）→ 构造插件能力面（`sdkHost` 含 `net`）与 secret 加密（`src/server/secret-cipher.ts` 的主密钥）→ 扫描用户插件目录并与内置清单合并 → 构造执行器注册表（内置清单，注入命令路由与调度器）→ 对账 → 构造 effects（`onFacts` 接事实批次 feed）→ **启动通道（M4/M7：`startAll`，补投 `pending` 卡片，用户停用/未授权的通道不启动）** → **启动来源（M7：`startAll`，webhook 来源在此绑定回环端口）** → 启动调度器 → 构造命令路由（含 `plugin.set` 编排依赖）+ 挂 `/api/*` 路由与 SSE、静态托管 → 挂定时器 → 监听并打印 `workbench listening on http://HOST:PORT`（没有窗口与托盘可建）。
+启动：读配置（`WORKBENCH_HOST` / `PORT` / `DATA_DIR` / `WEB_DIR` / `TOKEN`；非回环监听必须设 token，否则启动失败）→ 收紧数据目录 → 开库与 PRAGMA（含旧库 `runs` / `runtimes` 一次性结构升级、`tasks` 一次性物理重建、`stages` 补列）→ 存量导入（v2 老库第一次启动）→ 校验 `projection_meta`（不匹配或 `seq` 落后则从事实重建）→ 构造插件能力面（`sdkHost` 含 `net`）与 secret 加密（`packages/api/http/src/secret-cipher.ts` 的主密钥）→ 扫描用户插件目录并与内置清单合并 → 构造执行器注册表（内置清单，注入命令路由与调度器）→ 对账 → 构造 effects（`onFacts` 接事实批次 feed）→ **启动通道（M4/M7：`startAll`，补投 `pending` 卡片，用户停用/未授权的通道不启动）** → **启动来源（M7：`startAll`，webhook 来源在此绑定回环端口）** → 启动调度器 → 构造命令路由（含 `plugin.set` 编排依赖）+ 挂 `/api/*` 路由与 SSE、静态托管 → 挂定时器 → 监听并打印 `workbench listening on http://HOST:PORT`（没有窗口与托盘可建）。
 
 关闭：收到 SIGINT / SIGTERM → 先停 sources（abort + best-effort dispose，不再接收外部事件）→ 停 channels（abort + best-effort dispose）→ 停事实推送（feed.stop）→ 终止在跑子进程（cancel → SIGTERM → SIGKILL）→ 关闭 DB → 退出（没有窗口与托盘可关）。
 
@@ -131,7 +131,7 @@ export type WorkbenchEvent =
   `/api/*` 走共享 token：`x-workbench-token` 头、`Authorization: Bearer`，或 `POST /api/session` 用 token
   换来的 `wb_session`（HttpOnly + SameSite=Strict）cookie。token 不进 URL、不进日志、不进前端存储。
 - 路径：renderer 不能传任意 `cwd`；执行目录只能来自项目配置、智能体工作目录或宿主默认目录（在入队时折算进 run 行）。
-- 密钥：只存宿主私有表 `plugin_secrets`（`plugin_id` / `key` / `value_cipher` / `updated_at`，由 `src/server/secret-cipher.ts` 用 `<dataDir>/secret.key` 的主密钥做 AES-256-GCM；主密钥读不出时写入口拒绝而不是明文落库），不进快照、不进事实日志、不进日志、不进视图（视图只回 `secretKeys`）；外部插件拿到 secret 的唯一路径是启动时 `welcome` 帧（仅授权后下发），不进命令行与子进程环境。
+- 密钥：只存宿主私有表 `plugin_secrets`（`plugin_id` / `key` / `value_cipher` / `updated_at`，由 `packages/api/http/src/secret-cipher.ts` 用 `<dataDir>/secret.key` 的主密钥做 AES-256-GCM；主密钥读不出时写入口拒绝而不是明文落库），不进快照、不进事实日志、不进日志、不进视图（视图只回 `secretKeys`）；外部插件拿到 secret 的唯一路径是启动时 `welcome` 帧（仅授权后下发），不进命令行与子进程环境。
 - 外部插件子进程：环境变量走白名单（`PATH` / `SystemRoot` / `SystemDrive` / `COMSPEC` / `PATHEXT` / `TEMP` / `TMP` / `USERPROFILE` / `APPDATA` / `LOCALAPPDATA` / `HOME` / `SHELL` / `LANG` + `LC_*`，子进程就是本机 node，不再借 `ELECTRON_RUN_AS_NODE`），**不继承 `process.env` 其他键**；能力授权是信任门不是 OS 沙箱（SPEC-plugins 已写明）。
 - 本机监听：除服务本体（`WORKBENCH_HOST` / `WORKBENCH_PORT`）外，只有 `webhook` 来源自己监听，且**只绑 `127.0.0.1`**、端口/路径/签名密钥必须显式配置、未配置不监听。
 - 外部链接：服务端不代理外部链接；页面里只放 `http(s)` 直链，由浏览器自己打开。

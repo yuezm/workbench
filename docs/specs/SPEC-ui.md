@@ -3,7 +3,7 @@
 > Module id：`ui`。索引见 [CAPABILITY-MAP.md](../CAPABILITY-MAP.md)。确认日期：2026-11-09。
 > **基线是 shadcn/ui v4**（`new-york-v4` 风格，Radix 基座）：token 语义、组件 API、类名约定一律以上游为准。
 > 本文件只记录两件事：**上游基线之上本项目的覆盖层（overlay）**，以及**为什么**。
-> 机器事实来源是 `src/renderer/src/shell/styles/global.css` 与 `scripts/check-ui-rules.mjs`；改 token 必须同步本文件。
+> 机器事实来源是 `packages/client/shell/src/styles/global.css` 与 `scripts/check-ui-rules.mjs`；改 token 必须同步本文件。
 > `pnpm check:ui` 机器校验圆角、调色板外色值、玻璃拟态与对比度；`pnpm check:floor` 校验本文件与 CONSTRAINTS 的门槛未被放松。
 
 ## 1. 方向与分层
@@ -12,7 +12,7 @@
 
 - **组件 API = 上游 API。** `components/ui/` 下的 `button` / `input` / `textarea` / `label` / `select` / `dialog` / `switch` 是上游 v4 源码，只改 import 路径与 token 引用。调用点用上游复合 API（如 `<Select><SelectTrigger><SelectValue/>…`），不写项目自研的扁平封装。
 - **为什么换基座。** 自研的 select / dialog 缺焦点陷阱、缺 `aria-modal`、缺键盘导航，BUG 集中在这些地方；上游是经过验证的实现，AI 辅助开发时也能对上上游文档与 registry。
-- **主题层。** 上游 token 语义（`background` / `foreground` / `card` / `popover` / `primary` / `secondary` / `muted` / `accent` / `destructive` / `border` / `input` / `ring` / `radius`）原样保留，值由本项目决定。**双主题**：亮色值写在 `:root`（`.light` 同值），暗色值写在 `.dark`；`<html>` 上的 `light` / `dark` 类决定用哪一套，同时让组件里的 `dark:` 变体生效。用户在界面里选「亮色 / 暗色 / 跟随系统」，偏好存 localStorage（`src/renderer/src/lib/theme.ts`），渲染层偏好不进工作台事实日志。
+- **主题层。** 上游 token 语义（`background` / `foreground` / `card` / `popover` / `primary` / `secondary` / `muted` / `accent` / `destructive` / `border` / `input` / `ring` / `radius`）原样保留，值由本项目决定。**双主题**：亮色值写在 `:root`（`.light` 同值），暗色值写在 `.dark`；`<html>` 上的 `light` / `dark` 类决定用哪一套，同时让组件里的 `dark:` 变体生效。用户在界面里选「亮色 / 暗色 / 跟随系统」，偏好存 localStorage（`packages/client/ui-kit/src/theme.ts`），渲染层偏好不进工作台事实日志。
 - **覆盖层（本文件的重点）。** 上游没有、项目自己需要的部分，见 §4。
 
 方向三条硬取向（不变）：
@@ -171,7 +171,7 @@
 
 ### Select 的空值项（Radix 语义，踩过的坑）
 
-Radix 2.4.1 支持 `value=""` 的选项，但 **`value === ''` 时触发器显示的是 `SelectValue` 的 `placeholder` 文案**，不是那条空值项自身的文案。所以：
+上游 Radix（仓内锁 `radix-ui ^1.8.1`）支持 `value=""` 的选项，但 **`value === ''` 时触发器显示的是 `SelectValue` 的 `placeholder` 文案**，不是那条空值项自身的文案。所以：
 
 - 有空值项时，`placeholder` 必须写成**该空值项的 label**（如空值项是「未设置」，就写 `placeholder="未设置"`），观感才与迁移前逐字一致。
 - 无空值项时，`placeholder` 用中性文案（如「请选择」）。

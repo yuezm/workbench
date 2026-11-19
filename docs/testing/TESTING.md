@@ -8,15 +8,15 @@
 | 层        | 位置                                                        | 工具                                          | 职责                                                       |
 | --------- | ----------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------- |
 | 静态检查  | 根配置                                                      | tsc（node/web 双工程）、ESLint flat、Prettier | 类型、hooks 规则、格式一致                                 |
-| 单元      | `tests/**`（与 `src/` 同构）                                | Vitest + jsdom + RTL                          | 纯逻辑与孤立组件；业务规则 100% 落在 machine.ts 并分支全测 |
+| 单元      | `tests/**`（与 `packages/*/src`、`apps/*/src` 同构）        | Vitest + jsdom + RTL                          | 纯逻辑与孤立组件；业务规则 100% 落在 machine.ts 并分支全测 |
 | 集成/契约 | `tests/host/`、`tests/server/`                              | Vitest（node 环境 + 假 HTTP/SSE）             | 路由、应答信封、SSE 帧与桥接 API 形状不漂移                |
 | E2E       | `tests/e2e/*.spec.ts`                                       | Playwright + 每用例独立服务进程               | 构建产物（`out/server` + `out/web`）里真实服务的关键路径   |
 | 性质/变异 | 性质用例内联在 `tests/**`；变异范围见 `stryker.config.json` | fast-check / Stryker                          | 不变量穷举 + 断言有效性自检（防假绿）                      |
 
 目录约定（2026-11-04 起）：
 
-- 测试统一放 `tests/`，与 `src/` **同构镜像**：`src/kernel/decide.ts` ↔ `tests/kernel/decide.test.ts`，`packages/client/app-ai-workflow/src/model/entity-order.ts` ↔ `tests/renderer/src/apps/ai-workflow/model/entity-order.test.ts`。
-- `src/` 只放产品代码；测试夹具（如 `test-support.ts`、`fake-kernel.ts`）也随测试放进 `tests/`。
+- 测试统一放 `tests/`，与源码 **同构镜像**：`packages/core/kernel/src/decide.ts` ↔ `tests/kernel/decide.test.ts`，`packages/client/app-ai-workflow/src/model/entity-order.ts` ↔ `tests/renderer/src/apps/ai-workflow/model/entity-order.test.ts`。
+- `packages/*/src` 与 `apps/*/src` 只放产品代码；测试夹具（如 `test-support.ts`、`fake-kernel.ts`）也随测试放进 `tests/`。
 - E2E 放 `tests/e2e/`（`helpers/launch.ts` 按用例起独立服务进程 + Chromium 页面）；没有打包产物冒烟，`tests/e2e-packaged/` 已删除。
 
 约定：
@@ -26,7 +26,7 @@
 - **E2E 不得碰真实外部身份**（2026-11-16）：`launchApp` 的临时数据目录隔离不到本机 `~/.lark-cli` 的登录态——装过并登录 `lark-cli` 的人跑 e2e，飞书通道会按 legacy 单连接拿到真实 open_id，把种子库里 `delivery='pending'` 的 ask 卡**真的发到本人飞书**。因此每次启动前由 `tests/support/channel-isolation.ts` 往测试库写一条 `plugins.replace`（`feishu` → `enabled:false`），`channels.startAll()` 因而不启动它：不 spawn `lark-cli`、不挂事件长连接、不发卡。隔离在 spec 自己的 `prepare` **之后**执行，种子也没法把它打开；`in-app` 与 `desktop` 留在测试里（前者就是被测对象，后者只经 SSE 推知会）。守则由 `tests/e2e/isolation.spec.ts` 三条断言看着，新增通道先问「它会不会把消息交给一个真人」，会就加进 `ISOLATED_CHANNEL_IDS`。
 - **环境按「要不要 DOM」分工**：真正 render 的用例留在默认 jsdom；纯逻辑用例（`kernel` / `protocol` / `host` / `server` / `plugins` / `renderer` 下不 render 的 model 与 lib，以及 server 的 HTTP/SSE 契约测试）首行标 `// @vitest-environment node`。jsdom 是逐文件冷启动（本机 0.7–1.3s/文件），多标一个 node 就少付一份环境成本；`vitest.setup.ts` 也只在有 DOM 时加载 RTL 与 jest-dom。
 - **不要用 `pool: 'vmThreads'` 或 `isolate: false` 换速度**：本仓有用例在文件内改 `window.location`、`vi.stubGlobal('document', undefined)`，环境复用后同一 worker 里跨文件互相污染（实测 2 条用例直接失败）。诊断里的 Isolate 提示按此忽略。
-- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98；项目基线（2026-11-11 复位复核）**100 / 100 / 100 / 100**（188 测试文件 / 3185 用例；服务端 `kernel`/`protocol`/`host`/`server`/`plugins`/`sdk`/`shared` 与客户端 `renderer` 各自四维 100%），`pnpm test:coverage` 跌破基线即 finding。
+- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98（`vitest.config.mts`）；项目基线只以 [CONSTRAINTS.md](../../CONSTRAINTS.md) 的「当前基线」行为准（含实测四元组与演进归因），`pnpm test:coverage` 跌破基线即 finding。
 - M2 起 `runs` / `run_events` / `conversations` / `messages` 是事实投影：崩溃恢复用例在 `tests/e2e/crash-recovery.spec.ts`（临时数据目录 + 残留 pid + 重启服务），租约/退避/超时在 `tests/kernel/decide.run.test.ts`，调度/取消/帧在 `tests/host/{scheduler,cancel}.test.ts`。
 
 ## 常用命令
@@ -51,11 +51,11 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 
 ## Git hooks（husky，提交即门禁）
 
-| Hook         | 内容                                                              | 拦截什么                             |
-| ------------ | ----------------------------------------------------------------- | ------------------------------------ |
-| `pre-commit` | lint-staged（暂存文件 eslint --fix + prettier）→ `pnpm typecheck` | 风格漂移、类型错误、hooks 违规       |
-| `commit-msg` | commitlint（Conventional Commits：`feat:` / `fix:` / `test:` …）  | 不合规范的提交信息                   |
-| `pre-push`   | `pnpm check && pnpm e2e`                                          | 推送前全量：类型/风格/覆盖率阈值/E2E |
+| Hook         | 内容                                                                                | 拦截什么                             |
+| ------------ | ----------------------------------------------------------------------------------- | ------------------------------------ |
+| `pre-commit` | lint-staged（暂存文件 eslint --fix + prettier）→ `pnpm check:ui` → `pnpm typecheck` | 风格漂移、类型错误、hooks 违规       |
+| `commit-msg` | commitlint（Conventional Commits：`feat:` / `fix:` / `test:` …）                    | 不合规范的提交信息                   |
+| `pre-push`   | `pnpm check && pnpm e2e`                                                            | 推送前全量：类型/风格/覆盖率阈值/E2E |
 
 - hook 文件在 `.husky/`，必须保持 **LF** 行尾（`.gitattributes` 已强制）。
 - 覆盖率阈值只在实际跑覆盖率时生效（`check` / `pre-push` 会强制）。
@@ -63,7 +63,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 ## 何时写哪层测试
 
 1. **新业务规则**（如新的状态转移、钳制规则）→ 先写 machine 单测（假时钟），再实现；UI 只订阅不写规则。
-2. **新跨层能力**（`WorkbenchApi` 加方法）→ 三处同步：契约 + 桥接测试（`tests/renderer/src/shared/bridge.test.ts`）+ 服务端路由测试（`tests/server/http.test.ts`），路径与载荷一处定义（`src/protocol/http.ts`）。
+2. **新跨层能力**（`WorkbenchApi` 加方法）→ 三处同步：契约 + 桥接测试（`tests/renderer/src/shared/bridge.test.ts`）+ 服务端路由测试（`tests/server/http.test.ts`），路径与载荷一处定义（`packages/core/protocol/src/http.ts`）。
 3. **新 app** → registry 契约测试自动覆盖（遍历断言）；app 内按 1 执行；E2E 视交互复杂度补关键路径。
 4. **新 UI 基元**（`components/ui/`）→ variant/size/语义类名测试，作为后续使用方的契约锚点。
 5. **某条分支在产品路径上到不了**（防御守卫、脏投影兜底）→ 优先用**正常业务场景**覆盖；场景不成立时，
@@ -112,7 +112,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 - 变异测试比单测慢一个数量级（每个变异体跑一遍相关测试），**不进 `pnpm check` 快链**，只在合并前 / CI 定时跑。
 - pnpm 的隔离布局下 Stryker 从 core 包自己的同级目录找插件、找不到 runner，`stryker.config.json` 里用显式路径声明插件（`./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js`）。
 
-- 成本与被变异代码量近似线性：`src/kernel/cron.ts`（251 行 / 278 个变异体）单轮约 5 分钟；`src/kernel` 全部 8315 行按此推算是小时级，所以**必须用 `--mutate` / 增量模式限定范围**，不要全仓跑。
+- 成本与被变异代码量近似线性：`packages/core/kernel/src/core/cron.ts`（251 行 / 278 个变异体）单轮约 5 分钟；`packages/core/kernel/src` 全部 8315 行按此推算是小时级，所以**必须用 `--mutate` / 增量模式限定范围**，不要全仓跑。
 - 范围圈定：`pnpm mutation:changed` 只变异「本次改动碰过的内核模块」（`scripts/mutation-scope.mjs` 按 git diff 圈定，未触及内核就跳过并放行）；CI 里用 `MUTATION_BASE=origin/main` 把分支差异也算进来。
 
 ### 变异范围分层
@@ -134,7 +134,7 @@ CI 里代码已经提交、工作区是干净的，**`git diff HEAD` 查不到�
 
 - **CI 里解析不到基准 → 直接失败（exit 2），不放行。** 范围不可知就不能让门禁假绿；请显式传 `--base` 或设 `MUTATION_BASE`。
 - 浅克隆会算不出差异：GitHub Actions 的 `actions/checkout` 要 `fetch-depth: 0`，GitLab 要 `GIT_DEPTH: 0`；否则报「无法与基准比较」。
-- 「值得做变异测试的代码集合」= (`src/kernel` ∪ `src/protocol`) − 排除名单。`src/host`、`src/server`、`src/renderer` 不在内：IO 密集，变异大多被 mock 吸收。只改这些层的 MR 会打印「范围内没有可变异的产品代码」并跳过——这是有意的，不是漏跑。
+- 「值得做变异测试的代码集合」= (`packages/core/kernel/src` ∪ `packages/core/protocol/src`) − 排除名单。`packages/host`、`apps/server`、`packages/client` 不在内：IO 密集，变异大多被 mock 吸收。只改这些层的 MR 会打印「范围内没有可变异的产品代码」并跳过——这是有意的，不是漏跑。
 - 空范围分两种：**算出来的空**（确实没改内核）→ exit 0 跳过；**算不出来的空**（CI 缺基准）→ exit 2 失败。
 
 固定只盯一个文件是错的用法——范围要**随改动自动扩张**。三层分工：
@@ -164,23 +164,23 @@ Stryker 只能变异**被测源码**再跑单测 runner（vitest/jest 一类）�
 
 按仓库事实排序（规则密度 = 条件表达式数，改动/修复 = git 历史）：
 
-| 模块                                   | 行数 | 规则数 | 改动 | 修复 | 估算变异体 | 判断                                            |
-| -------------------------------------- | ---- | ------ | ---- | ---- | ---------- | ----------------------------------------------- |
-| `src/protocol/validate.ts`             | 1264 | 264    | 33   | 0    | ~1390      | **最高**：规则密度全仓第一，校验错=放行非法输入 |
-| `src/kernel/commands/run.ts`           | 559  | 95     | 14   | 1    | ~615       | 高：运行生命周期（预算/租约/退避/超时）         |
-| `src/kernel/thread-context.ts`         | 590  | 100    | 11   | 0    | ~649       | 高：上下文截断/预算段规则密                     |
-| `src/kernel/commands/workflow.ts`      | 414  | 94     | 13   | 1    | ~455       | 高：阶段校验与转移                              |
-| `src/kernel/review.ts`                 | 467  | 79     | 4    | 1    | ~514       | 高：评审闭环判定                                |
-| `src/kernel/rules.ts`                  | 471  | 71     | 8    | 0    | ~518       | 高：规则触发（cronDue 恰好一次）                |
-| `src/kernel/commands/task.ts`          | 374  | 61     | 13   | 1    | ~411       | 高：任务派生与 rollup                           |
-| `src/kernel/run.ts`                    | 382  | 59     | 11   | 2    | ~420       | 高：修复密度第一（2 次）                        |
-| `src/kernel/prompt.ts`                 | 428  | 33     | 24   | 1    | ~471       | 中高：改动最频繁                                |
-| `src/kernel/workflow/stage-machine.ts` | 280  | 50     | 11   | 0    | ~308       | 中：阶段状态机                                  |
-| `src/kernel/project.ts`                | 277  | 28     | 21   | 1    | ~305       | 中：项目维度（改动频繁）                        |
+| 模块                                                        | 行数 | 规则数 | 改动 | 修复 | 估算变异体 | 判断                                            |
+| ----------------------------------------------------------- | ---- | ------ | ---- | ---- | ---------- | ----------------------------------------------- |
+| `packages/core/protocol/src/validate.ts`                    | 1264 | 264    | 33   | 0    | ~1390      | **最高**：规则密度全仓第一，校验错=放行非法输入 |
+| `packages/core/kernel/src/commands/run.ts`                  | 559  | 95     | 14   | 1    | ~615       | 高：运行生命周期（预算/租约/退避/超时）         |
+| `packages/core/kernel/src/thread-context.ts`                | 590  | 100    | 11   | 0    | ~649       | 高：上下文截断/预算段规则密                     |
+| `packages/core/kernel/src/commands/workflow.ts`             | 414  | 94     | 13   | 1    | ~455       | 高：阶段校验与转移                              |
+| `packages/core/kernel/src/review.ts`                        | 467  | 79     | 4    | 1    | ~514       | 高：评审闭环判定                                |
+| `packages/core/kernel/src/rules.ts`                         | 471  | 71     | 8    | 0    | ~518       | 高：规则触发（cronDue 恰好一次）                |
+| `packages/core/kernel/src/commands/task.ts`                 | 374  | 61     | 13   | 1    | ~411       | 高：任务派生与 rollup                           |
+| `packages/core/kernel/src/run.ts`                           | 382  | 59     | 11   | 2    | ~420       | 高：修复密度第一（2 次）                        |
+| `packages/core/kernel/src/prompt.ts`                        | 428  | 33     | 24   | 1    | ~471       | 中高：改动最频繁                                |
+| `packages/core/kernel/src/scopes/workflow/stage-machine.ts` | 280  | 50     | 11   | 0    | ~308       | 中：阶段状态机                                  |
+| `packages/core/kernel/src/project.ts`                       | 277  | 28     | 21   | 1    | ~305       | 中：项目维度（改动频繁）                        |
 
-`src/renderer/**` 与 `src/host/**` **不做变异测试**：IO 密集，变异大多被 mock 吸收，噪音远大于信号；那里的价值用**性质测试**（纯函数的格式化/裁剪不变量）拿更划算。
+`packages/client/**` 与 `packages/host/host/src/**` **不做变异测试**：IO 密集，变异大多被 mock 吸收，噪音远大于信号；那里的价值用**性质测试**（纯函数的格式化/裁剪不变量）拿更划算。
 
-### 性能实测（`src/kernel/cron.ts`，278 个变异体，2026-11-13）
+### 性能实测（`packages/core/kernel/src/cron.ts`，278 个变异体，2026-11-13）
 
 | 方式                                    | 耗时  | 说明                             |
 | --------------------------------------- | ----- | -------------------------------- |
@@ -194,7 +194,7 @@ Stryker 只能变异**被测源码**再跑单测 runner（vitest/jest 一类）�
 - **高并发需要更宽的 per-test 超时**：每个变异体都要起一次 vitest 进程，并发 10 时单个变异体墙钟约 5 秒，vitest 默认 5 秒的 per-test 超时会把「跑得慢」误判成「用例失败」，而 Stryker 把超时计作 killed、评分会虚高。变异测试用独立的 `vitest.mutation.config.mts`（继承主配置的 include / setupFiles，只放宽 `testTimeout` 到 30s）。
 - **换机器要重新标定**：`concurrency` 与超时是本机实测值，不是通用最优。
 
-### 试点实测（`src/kernel/cron.ts`，2026-11-13）
+### 试点实测（`packages/core/kernel/src/cron.ts`，2026-11-13）
 
 | 轮次                                                                              | 性质用例数 | 变异评分 | 说明                                                  |
 | --------------------------------------------------------------------------------- | ---------- | -------- | ----------------------------------------------------- |

@@ -19,7 +19,7 @@
 
 ## 为什么不是复用 `events[] + 规则`
 
-现有唯一「派生任务」路径是回执 `events[]` → `event.received` → 命中**已启用规则** → `task.created`（[rules.ts:290](../src/kernel/rules.ts)）。它适合「外部世界发生了一件事」的规则化落点，但对本场景有三个硬伤：
+现有唯一「派生任务」路径是回执 `events[]` → `event.received` → 命中**已启用规则** → `task.created`（[rules.ts:290](../../packages/core/kernel/src/scopes/rules.ts)）。它适合「外部世界发生了一件事」的规则化落点，但对本场景有三个硬伤：
 
 1. **必须先有规则**：用户不预先写一条 `(source,type)` 规则，Agent 拆出的任务只会入账、不建任务——「Agent 自己决定拆几个」没有落点。
 2. **语义错位**：子任务不是一个「外部事件」，而是父任务的执行者主动分解出的结构化产物，用事件+去重键去套规则，`dedupeKey/subject` 会污染规则引擎的去重与线程归并。
@@ -105,7 +105,7 @@ export interface WorkflowStage {
 **规则：任何派生 / spawn 出来的子任务，`parentTaskId` 必填 = 直接父任务 id，由内核从 `run.taskId` 取值填入，不接受 Agent 在 spawn 项里自报的 `parentTaskId`（即使塞了也被校验层忽略并以内核推导为准）。**
 
 - **不可伪造**：Agent 只能在 spawn 项里声明 `subject/summary/stageId/batch/key`；`parentTaskId`、`origin`、`threadId` 全部由内核按「当前 run → 其 task」推导（`spawnFacts` 里 `parent = view.tasks.get(run.taskId)`，子任务 `parentTaskId = parent.id`）。这保证子任务永远挂在**真正执行它的父任务**下，而不是模型随口说的 id。
-- **多层派生**：`parentTaskId` 构成父子链。子任务再 spawn 的孙子，其 `parentTaskId` = 子任务 id（不是根）。任务树按 `parentTaskId` 递归分组（沿用 [thread-context.ts](../src/kernel/thread-context.ts) 的 children 范式），`spawnDepth` 沿该链回溯计深并封顶 8。
+- **多层派生**：`parentTaskId` 构成父子链。子任务再 spawn 的孙子，其 `parentTaskId` = 子任务 id（不是根）。任务树按 `parentTaskId` 递归分组（沿用 [thread-context.ts](../../packages/core/kernel/src/scopes/thread-context.ts) 的 children 范式），`spawnDepth` 沿该链回溯计深并封顶 8。
 - **rollup 沿链级联**：孙子全部终态 → 子任务（其父）rollup → 子任务终态 → 根任务 rollup；每层按各自的 `onChildrenSettled` 处理，天然支持多层，不需要额外的「根 id」字段。
 - **查询**：新增只读视图 `tasks.byParent` 返回某任务的**直接子任务**；「整棵子树」由前端/线程树按 parentTaskId 递归组装（与现有任务树一致）。如后续出现「按根一次查全树」的性能诉求，再加 `rootTaskId`（可选增强，见待定）。
 - **人工路径同样**：`task.create` 带 `parentTaskId` 时，`origin='manual'`、`parentTaskId`=父、`spawnedByRunId=null`，其余规则一致。
@@ -296,7 +296,7 @@ function childrenSettledFacts(view, parentId, now, env, overrides): FactDraft[] 
 
 - **内核黄金测试**（`tests/kernel/spawn.test.ts`，新）：spawn 建 N 子任务（parent/thread/origin/depth 正确）；深度超限丢弃；父非 active 丢弃；`(parent,key)` 幂等；`spawnPolicy='off'` 时丢弃；rollup wake/notify/complete 三分支；rollup 只触发一次；子任务进入 agent 阶段自动派活、user/none 停留；人工 `task.create` 带 `parentTaskId` 建子任务；重建等价（实时 vs 分批重建逐表全等）。
 - **协议/回执块**：`checkReceipt` 的 `spawn` 数量/类型/越界校验；`receipt-block` 解析 `spawn`（畸形整块忽略、不回退）；越权字段被忽略。
-- **纯度**：`src/kernel/**` 禁用符号扫描不回归；`spawn.ts` 无 IO/时钟/随机。
+- **纯度**：`packages/core/kernel/src/**` 禁用符号扫描不回归；`spawn.ts` 无 IO/时钟/随机。
 - **视图**：`tasks.byParent` 查询返回父子集；`view-spec` 新切片断言。
 - **UI**：`TaskCard` 子任务徽标进度与展开（组件测试）。
 - 质量门：`pnpm check` 全绿，覆盖率不降（沿用现有阈值）。

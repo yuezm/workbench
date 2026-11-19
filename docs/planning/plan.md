@@ -2,7 +2,7 @@
 
 > ⚠️ v1（Electron + 番茄钟）实现记录；产物与命令均已删除，当前状态见 [CAPABILITY-MAP](../CAPABILITY-MAP.md)。
 
-> 依据：[CAPABILITY-MAP.md](../CAPABILITY-MAP.md)、[SPEC-shell.md](../specs/SPEC-shell.md)、[SPEC-pomodoro.md](../specs/SPEC-pomodoro.md)（均已批准）。
+> 依据：[CAPABILITY-MAP.md](../CAPABILITY-MAP.md)、[SPEC-shell.md](../specs/SPEC-shell.md)、SPEC-pomodoro.md（该规格文件已删除，仅存本文记录）（均已批准）。
 > spec 的三个 Open Questions 按默认裁决执行：阶段结束自动切换并暂停；跳过专注不计轮；中文深色界面。
 
 ## Overview

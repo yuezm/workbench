@@ -59,7 +59,7 @@ app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区�
 ## Tech Stack
 
 - 与 shell 相同：Electron 45 + electron-vite 6 + React 19 + TypeScript 6（strict）。
-- 样式：Tailwind 4 + `components/ui/`（shadcn 风格），复用 `src/renderer/src/lib/cn.ts`。
+- 样式：Tailwind 4 + `components/ui/`（shadcn 风格），复用 `packages/client/lib/cn.ts`。
 - 存储：**SQLite，使用 Node 内置 `node:sqlite`**（不引原生模块、不引 better-sqlite3）；数据库文件在**主进程**打开与读写。
 - 进程执行：主进程 `child_process.spawn` 本机 CLI，经执行器插件端口与版本化 JSONL 协议通信；执行器插件可注入（测试用假进程/假流，不启真进程）。
 - 测试：Vitest + @testing-library/react。
@@ -95,11 +95,11 @@ Check:    pnpm check           # typecheck + lint + test:coverage（提交前必
 | `messages`        | id, conversation_id → conversations(CASCADE), role, content, error, created_at                                                                                                                                                                                                                                               | `role` = `user`\|`assistant`；助手消息的 `error` 记录失败原因（非零退出/超时/取消）                                                                                                                                                                                                                                                                                                     |
 | `cards`           | id, run_id → runs(CASCADE), task_id?, conversation_id?, title, text, options_json, key, version, status, delivery, delivery_ref, option_index, answered_by, answered_at, created_at, updated_at                                                                                                                              | M4 卡片投影：`status` = `open`\|`answered`\|`resolved`；`delivery` = `pending`\|`delivered`\|`failed`（单列 = 已送达至少一个通道）；投递按 `(id, version)` 去重；正文只作通知/平台 API 参数                                                                                                                                                                                             |
 
-> M2 起十张业务表全部是**事实投影**（另有 `facts` 事实日志、`projection_meta` 指纹/seq、宿主私有 `process_registry`）：写路径只有「追加事实 + 应用投影」，`INSERT/UPDATE/DELETE` 集中在 `src/host/store/projection-apply.ts`；读路径走投影视图（`store.query`）。旧 `chat_conversations` / `chat_messages` 在首次启动时迁成导入事实后删除。
+> M2 起十张业务表全部是**事实投影**（另有 `facts` 事实日志、`projection_meta` 指纹/seq、宿主私有 `process_registry`）：写路径只有「追加事实 + 应用投影」，`INSERT/UPDATE/DELETE` 集中在 `packages/host/store/src/projection-apply.ts`；读路径走投影视图（`store.query`）。旧 `chat_conversations` / `chat_messages` 在首次启动时迁成导入事实后删除。
 
 外键约束开启（`PRAGMA foreign_keys = ON`）。删除工作流/任务由内核显式产 `run.removed` / `stage.deleted` / `task.removed` 事实（不依赖 SQL 级联，重建才等价）；删除被引用的运行时/智能体前先校验或拒绝（见 Boundaries）；运行时被删后 `runs.runtime_id` 置空、历史 run 保留。
 
-**迁移（v1 → v2，`user_version` 1 → 2）：** 按 SQLite 12-step 重建 `runtimes` / `runs` / `chat_conversations`（v2 删掉了 v1 的 `kind` / `args_template` / `prompt_mode`，且新列带 CHECK），新增 `run_events`，最后写 `PRAGMA user_version = 2`。**已有数据保留**：旧运行时按 v2 默认值补齐（`protocol_family=dsh`、`profile=multica`、`permission_mode=workspace-write`、`max_concurrent=1`；其中 `protocol_family` 是旧字段，仅迁移归一用，M3 起由 `executor_key` 取代），旧 run 的 `runtime_id`/`session_id`/`usage_json`/`duration_ms` 为 NULL、`error` 非空的失败 run 归 `exit_nonzero`，旧对话 `session_id` 为 NULL。迁移期间临时关闭外键，失败回滚。不做 v1 兼容读取。**M2 升级：** 旧 `runs` 表缺调度列时首启一次性物理重建；v2 存量（含旧聊天表）由 `src/host/store/import.ts` 写成 `snapshot.imported` 导入根后重建投影。该兼容层 M3 **不删**（真实库仍是 v2 格式，首启必须靠它导入），删除条件与顺序作为 M3 之后的独立清理任务。
+**迁移（v1 → v2，`user_version` 1 → 2）：** 按 SQLite 12-step 重建 `runtimes` / `runs` / `chat_conversations`（v2 删掉了 v1 的 `kind` / `args_template` / `prompt_mode`，且新列带 CHECK），新增 `run_events`，最后写 `PRAGMA user_version = 2`。**已有数据保留**：旧运行时按 v2 默认值补齐（`protocol_family=dsh`、`profile=multica`、`permission_mode=workspace-write`、`max_concurrent=1`；其中 `protocol_family` 是旧字段，仅迁移归一用，M3 起由 `executor_key` 取代），旧 run 的 `runtime_id`/`session_id`/`usage_json`/`duration_ms` 为 NULL、`error` 非空的失败 run 归 `exit_nonzero`，旧对话 `session_id` 为 NULL。迁移期间临时关闭外键，失败回滚。不做 v1 兼容读取。**M2 升级：** 旧 `runs` 表缺调度列时首启一次性物理重建；v2 存量（含旧聊天表）由 `packages/host/store/src/import.ts` 写成 `snapshot.imported` 导入根后重建投影。该兼容层 M3 **不删**（真实库仍是 v2 格式，首启必须靠它导入），删除条件与顺序作为 M3 之后的独立清理任务。
 
 **M3 升级（格式指纹换新，`user_version` 仍为 2）：** `runtimes` 去掉 `protocol_family`（旧字段，仅迁移归一用；该列被 CHECK 引用，SQLite 不能 `DROP COLUMN`）、加 `executor_key`（NOT NULL，无 DEFAULT）与 `args_template`（DEFAULT `''`；语义从 v1 的空格分隔参数串改为 JSON 数组文本），按 12-step 物理重建：外键 OFF → 建临时表 → 拷贝旧行（旧协议族按「旧值 = 执行器键」回填、`args_template` 补空串）→ 删旧表 → 改名。`KERNEL_VERSION` 升到 `m3.0.0`，与 DDL 变化双触发 → **首启全量重建投影**；重建 fold 的是历史事实 payload，老 `runtime.*` payload 缺 `executorKey`，由 `normalizeRuntime` 归一（缺 `executorKey` → 取旧 `protocolFamily`，当前仅 `dsh`；`argsTemplate` 补空串）。回滚只能恢复升级前的 DB 备份。
 
@@ -140,7 +140,7 @@ Check:    pnpm check           # typecheck + lint + test:coverage（提交前必
 
 ## 阶段状态机（核心规则）
 
-阶段流转是**纯逻辑**，集中在 `src/kernel/workflow/stage-machine.ts`（内核纯函数，不依赖 React、不做 IO；renderer 只读视图、只发命令）。UI 与宿主只提交输入，进入效果（建 `run.queued`）由内核在同一决策里产出。
+阶段流转是**纯逻辑**，集中在 `packages/core/kernel/src/scopes/workflow/stage-machine.ts`（内核纯函数，不依赖 React、不做 IO；renderer 只读视图、只发命令）。UI 与宿主只提交输入，进入效果（建 `run.queued`）由内核在同一决策里产出。
 
 **内置阶段（M18）：** 每个工作流恒有四个系统内置阶段，删不掉、改不了名，位置由内核按类别归一：
 
@@ -231,7 +231,7 @@ Check:    pnpm check           # typecheck + lint + test:coverage（提交前必
 
 ## 运行时（v2，2026-11-03 重做）
 
-> 对齐 Multica：运行时 = **一条连接**——执行器插件（`executorKey`）+ 启动方式 + 健康结论；进程间用版本化 JSONL 协议通信，健康由插件探测给出。M3 起执行器全部是插件（`src/plugins/executors/`），新增协议只改插件目录 + registry 一行。M27 起**执行配置（模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量）属于智能体**，运行时不再携带。旧实现（`command` + 空格分隔 `args` + `promptMode` + 探测真跑一次 prompt）已删除，不保留兼容字段。
+> 对齐 Multica：运行时 = **一条连接**——执行器插件（`executorKey`）+ 启动方式 + 健康结论；进程间用版本化 JSONL 协议通信，健康由插件探测给出。M3 起执行器全部是插件（`packages/plugins/executor-`），新增协议只改插件目录 + registry 一行。M27 起**执行配置（模型 / 思考强度 / 并发 / 访问权限 / 工作目录 / 环境变量）属于智能体**，运行时不再携带。旧实现（`command` + 空格分隔 `args` + `promptMode` + 探测真跑一次 prompt）已删除，不保留兼容字段。
 
 ### 运行时模型
 
@@ -245,7 +245,7 @@ Check:    pnpm check           # typecheck + lint + test:coverage（提交前必
 | `lastProbe`    | 最近一次探测结论（见下）；从未探测为 `null`                                                                                                                                  |
 
 - 契约中 `RuntimeInput` 除 `name` 外均可省略。`executorKey` / `command` / `profile` 由 IPC 入口按所选执行器插件 manifest 补齐（未指定 key 取注册表首项）；其余默认 `argsTemplate=''`、`enabled=true`。**内核不写任何产品默认值**。
-- 新增运行时协议不改内核、宿主或 UI：写一个执行器插件（`src/plugins/executors/<id>/`）并在 `src/plugins/registry.ts` 加一行，即可被 `runtimes.executors()` 列出、被 detect 汇总、被配置选中并跑通一轮。
+- 新增运行时协议不改内核、宿主或 UI：写一个执行器插件（`packages/plugins/executor-<id>/`）并在 `packages/plugins/registry/src/index.ts` 加一行，即可被 `runtimes.executors()` 列出、被 detect 汇总、被配置选中并跑通一轮。
 - 命令解析：命令名扫 PATH + 常见全局目录；带路径分隔符的按路径处理，找不到即失败（不做模糊回退）。Windows 下 `.cmd`/`.bat` 经 `cmd.exe /c <脚本> <参数...>` 固定包装、`shell:false`。
 - 凭据：沿用本机 CLI 已有的登录态，**不把任何 token 存进数据库**。
 
@@ -287,8 +287,8 @@ export interface DetectedRuntime {
 }
 ```
 
-- **来源**：各执行器插件的 `detect(ctx)`（`src/plugins/executors/*/detect.ts`）只报自己能接入的命中；`executorKey` 与 `supported` 由 `src/plugins/registry.ts` 的 `detectAll` 汇总时回填，插件不自报。
-- **汇总规则**：按 registry 的 `executors` 数组顺序**串行**调用；单插件超时 2 s、抛错只跳过该插件并记日志（整体不抛）；同一 `command` 被多个插件声明时先到先得并记一条 warn；输出按 `src/plugins/shared/cli-catalog.ts` 的候选顺序稳定排列。
+- **来源**：各执行器插件的 `detect(ctx)`（`packages/plugins/executor-*/detect.ts`）只报自己能接入的命中；`executorKey` 与 `supported` 由 `packages/plugins/registry/src/index.ts` 的 `detectAll` 汇总时回填，插件不自报。
+- **汇总规则**：按 registry 的 `executors` 数组顺序**串行**调用；单插件超时 2 s、抛错只跳过该插件并记日志（整体不抛）；同一 `command` 被多个插件声明时先到先得并记一条 warn；输出按 `packages/plugins/kit/src/cli-catalog.ts` 的候选顺序稳定排列。
 - **扫描目录**（`sdk.process.scanDirs()`）：`process.env.PATH` 全部条目 + 常见全局安装目录（Windows：`%APPDATA%/npm`、`~/.local/bin`、`~/.claude/local`、`%ProgramFiles%/nodejs`；POSIX：`~/.local/bin`、`~/.npm-global/bin`、`~/.bun/bin`、`~/.claude/local`、`/usr/local/bin`、`/opt/homebrew/bin`）；不存在的目录跳过。
 - **候选清单**（`cli-catalog.ts`，顺序即输出顺序）：`dsh`、`claude`、`hermes`、`codex`、`gemini`、`opencode`、`aider`、`cursor-agent`、`qwen`、`goose`、`crush`。没有插件认领的 CLI 仍列出（`supported:false`，`executorKey=''`）。
 - **命中判定**：Windows 命中 `<cmd>.exe|.cmd|.bat|.ps1` 任一（npm 全局装的是 shim）；POSIX 命中同名且有可执行位（`mode & 0o111`）。同一命令多处命中取 PATH 中靠前者。
@@ -371,7 +371,7 @@ export interface DetectedRuntime {
 - 领取按运行时逐个进行、一次一个（`claimsPerPump` 缺省 1）：同一运行时上不会有两个 run 并行，多出来的留队列按 `queueSeq` FIFO；不同运行时并行。智能体的 `maxConcurrent` 仍是内核侧的窗口上限（防止一个智能体被塞满）。
 - 判定阶段（`stage.judge` 非空）的 run 权限由阶段语义决定：`run.access` 至少是 `full`（`kernel/task-effects.ts#runAccessOf`）。理由：验收要求回执给出 `checks` 的命令与退出码，而 `workspace-write` 在 Claude Code 里是 `acceptEdits`——只能改文件，跑 `pnpm` / `pytest` 仍要审批，无审批面时被自动拒。任务详情展示的是 `run.access`（本轮实际值），不是智能体上配的 `permissionMode`。**M34 边界：** 判定者拿到写的权限只是为了跑核对命令，它的产出不参与交付（下一阶段读的是被判阶段的 `output.md`，不是判定者的改动）；把评审者的写权限收回需要执行器侧「可跑命令但不可写文件」的能力位，见 Open Questions。
 - 运行时不存在 / 已停用时不派发，run 直接 `failed` 并记 `runtime_missing` / `runtime_disabled`；配置引用了未注册的 `executorKey` 同样落 `runtime_missing`（文案 `执行器插件未注册: <key>`），不新增 `errorCode`。
-- `src/host/scheduler.ts` 负责：领取（内核按 `notBefore`/`queueSeq` 决定顺序与并发窗口）、调执行器端口跑一轮、帧批量入账、回执转交内核、取消时序（abort → 宽限 → 强杀 → 兜底终态）；租约/超时/退避由唯一 `clock.tick` 驱动。终态后由内核产 `RUN_SUCCEEDED`/`RUN_FAILED` 的阶段流转事实；取消的 run 不推进阶段。
+- `packages/host/host/src/scheduler.ts` 负责：领取（内核按 `notBefore`/`queueSeq` 决定顺序与并发窗口）、调执行器端口跑一轮、帧批量入账、回执转交内核、取消时序（abort → 宽限 → 强杀 → 兜底终态）；租约/超时/退避由唯一 `clock.tick` 驱动。终态后由内核产 `RUN_SUCCEEDED`/`RUN_FAILED` 的阶段流转事实；取消的 run 不推进阶段。
 
 ### 审批与等待（M4）
 
@@ -411,7 +411,7 @@ export interface DetectedRuntime {
 
 ## IPC 契约（M5：三动词）
 
-契约定义在 `src/protocol`（命令/视图/推送）与 `src/shared/workbench-api.ts`，preload 只暴露
+契约定义在 `packages/core/protocol/src`（命令/视图/推送）与 `packages/contract/api/src/index.ts`，preload 只暴露
 `window.workbench`；renderer 禁止直接 import electron/fs/child_process。**旧 `window.aiWorkflow`
 命名空间与 `src/shared/ai-workflow-api.ts` 已删除**（AI 工作流 app 的读写在三动词上完成）。
 
@@ -482,7 +482,7 @@ export function completeTask(task: Task): Task
 
 ## Testing Strategy
 
-- 框架：Vitest + @testing-library/react，测试统一放 `tests/`，与 `src/` 同构镜像（`src/kernel/decide.ts` ↔ `tests/kernel/decide.test.ts`，文件名后缀 `*.test.ts(x)`）。
+- 框架：Vitest + @testing-library/react，测试统一放 `tests/`，与源码同构镜像（`packages/core/kernel/src/decide.ts` ↔ `tests/kernel/decide.test.ts`，文件名后缀 `*.test.ts(x)`）。
 - **阶段状态机（重点，要求分支全覆盖）：** `kernel/workflow/stage-machine.ts` 纯函数单测——三种 `entry_mode` 的进入效果、`on_complete`/`on_reject` 显式配置与默认解析（下一阶段 / 上一阶段 / 终端 completed / 首阶段原地）、多阶段串联、终端完成、`RUN_FAILED` 打回原地时无 effects（不重试）；以及 `moveTaskToStage`（跨阶段落点、目标不存在、落在当前阶段、已完成不参与）与 `completeTask`。
 - **账本与投影（`tests/host/store`）：** 临时 SQLite 文件/`:memory:` 测导入幂等与分批、实时投影与 `rebuild` 逐表全等（含 `run.removed` 等删除事实）、`(run_id, seq)` 纯追加、视图查询；外键/唯一约束、被引用拒绝、起始阶段校验在导入与 schema 用例覆盖。
 - **调度与执行链（`tests/host/scheduler|cancel|reconcile|executor|effects|clock`）：** 注入假执行器端口（不启真进程）测同运行时 `maxConcurrent` 限流、多运行时并行、成功/失败/取消/超时 → 终态与 `errorCode` → 阶段流转；租约/心跳/退避/超时/取消宽限与强杀、启动对账、唯一 `clock` 排期与 `rearm`。
@@ -497,7 +497,7 @@ export function completeTask(task: Task): Task
 
 ## Boundaries
 
-- **Always：** 阶段流转/默认目标解析只写在 `stage-machine.ts`；SQLite 只在主进程读写，renderer 一律经 `window.workbench` 三动词；进程执行经执行器插件端口，事件只来自协议帧；新增运行时协议只写 `src/plugins/executors/<id>/` + registry 一行，不改内核/宿主/UI；提交前 `pnpm check` 通过。
+- **Always：** 阶段流转/默认目标解析只写在 `stage-machine.ts`；SQLite 只在主进程读写，renderer 一律经 `window.workbench` 三动词；进程执行经执行器插件端口，事件只来自协议帧；新增运行时协议只写 `packages/plugins/executor-<id>/` + registry 一行，不改内核/宿主/UI；提交前 `pnpm check` 通过。
 - **Ask first：** 新增 npm 依赖（尤其原生模块）；修改 shell 的 `AppPlugin` 或既有 `WorkbenchApi` 契约；改变数据库文件位置或引入迁移框架。
 - **Never：** 在 renderer 直接 `require('electron')`/用 `fs`/`child_process`；把业务规则写进组件；把凭据/token 明文写库；从原始文本猜测事件或把 stderr 当模型输出；删除失败测试或改测试预期来掩盖问题。
 
@@ -514,7 +514,7 @@ export function completeTask(task: Task): Task
 9. 历史 `conversations` / `messages` 投影仍可从事实日志重建（内核 `chat.*` 与 `purpose='chat'` 运行保留），但**产品不再产生新对话**：界面没有入口，重启后也不会多出会话。
 10. 阶段状态机分支覆盖 100%；`pnpm check` 全绿。
 11. 顶部栏出现"AI 工作流"标签并可切换（由 shell 承载，app 无需感知）。
-12. 新增一个假运行时协议只写 `src/plugins/executors/<id>/` + registry 一行，即可被 `runtimes.detect` 汇总到、在运行时表单里选中并跑通一轮；`git diff` 证明 kernel / host / renderer 未因新增协议改动。
+12. 新增一个假运行时协议只写 `packages/plugins/executor-<id>/` + registry 一行，即可被 `runtimes.detect` 汇总到、在运行时表单里选中并跑通一轮；`git diff` 证明 kernel / host / renderer 未因新增协议改动。
 
 ## Out of scope（本 MVP 不做）
 

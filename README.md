@@ -91,18 +91,22 @@ docker run -d --name workbench \
 
 ```
 workbench/
-├── src/
-│   ├── kernel/            # 纯内核：收事件、按规则分活、派活、记账（不读时钟/文件/网络）
-│   ├── protocol/          # 契约与校验（命令、视图、事实、HTTP 路由、应答信封）
-│   ├── sdk/               # 插件能力面（spawn / net / notify / paths 的门控）
-│   ├── host/              # 宿主：库、调度、通道、进程、插件发现、投影
-│   ├── plugins/           # 四类插件：source / executor / channel / app
-│   ├── server/            # 服务器形态：装配根、配置、鉴权、HTTP/SSE、本地密钥、生命周期
-│   └── renderer/          # 浏览器端 UI（React + Tailwind + shadcn 底座）
-├── tests/                 # 与 src/ 同构镜像；e2e 在 tests/e2e
+├── apps/
+│   ├── server/            # 产品入口：装配根、配置、生命周期（node out/server/index.js）
+│   └── web/               # Vite 壳，产 out/web
+├── packages/
+│   ├── core/{protocol,kernel}          # 契约（含校验）与纯内核：收事件、按规则分活、派活、记账
+│   ├── sdk/capabilities                # 插件能力面（spawn / net / notify / paths 的门控）
+│   ├── contract/{api,app-events}       # 跨端契约（三动词 WorkbenchApi、app 事件白名单）
+│   ├── host/{host,store,frontend-static}  # 宿主：调度、通道、进程、插件发现；store 是唯一写库点
+│   ├── api/http                        # HTTP/SSE/鉴权/应答信封
+│   ├── plugins/                        # 四类插件一包一个：executor-* / source-* / channel-* / kit+registry
+│   ├── bundle/{base,web}               # 服务端装配（Web 可选）
+│   └── client/                         # 浏览器端：shell / kernel-store / bridge / ui-primitives / ui-kit / app-ai-workflow
+├── tests/                 # 按层镜像 packages/*/src 与 apps/*/src；e2e 在 tests/e2e
 ├── docs/                  # 架构、规格、计划、测试
 ├── scripts/               # 构建与门禁脚本（dev / floor-guard / check-* / sim-*）
-└── vite.*.config.mts      # 服务端与 Web 的构建配置
+└── vite.server.config.mts / vite.web.config.mts   # 服务端与 Web 的构建配置
 ```
 
 ## 文档

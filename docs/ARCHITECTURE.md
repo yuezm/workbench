@@ -217,7 +217,7 @@ sequenceDiagram
 
 ## 数据
 
-- 单一 `workbench.db`：`facts`（只追加）+ 投影表（`tasks`/`task_comments`/`runs`/`run_events`/`cards`/`workflows`/`stages`/`agents`/`runtimes`/`threads`/`conversations`/`messages`/`rules`/`plugin_config`/`projection_meta`）。
+- 单一 `ai-workflow.db`：`facts`（只追加）+ 投影表（`tasks`/`task_comments`/`runs`/`run_events`/`cards`/`workflows`/`stages`/`agents`/`runtimes`/`threads`/`conversations`/`messages`/`rules`/`plugin_config`/`projection_meta`）。
 - `project(fact) → Change[]` 是纯函数；实时写入与重建走**同一条**投影路径。
 - 启动时 `projection_meta.format` 不匹配或 `seq` 落后 → 同一事务内从 `facts` 重建；不再手写 12-step 迁移。
 - v2 存量数据在 M1 按表分批写成 `snapshot.imported` 事实（无 `cause` 的导入根，`timeline` 标明「迁移导入」，不伪造因果）；此后日志即唯一权威。
@@ -249,7 +249,7 @@ sequenceDiagram
 4. 插件不得 import 宿主包内部实现、不得 import 其它插件、不得直连数据库；副作用只经 `@workbench/capabilities` 且必须声明 `capabilities`；跨插件纯函数只放 `@workbench/plugins-kit`。宿主不得 import 具体插件实现，只接收装配根注入的注册表清单。
 5. `viewSpec(input)` 必须声明投影切片，禁止全表装载；性能预算按「装载 + 决策」一起算。
 6. 事件里的文字只能进资料文件与 `summary` 字段；`cwd/executor/access` 出现在事件里直接拒收；提示词不进命令行拼接。
-7. 阶段语义（`SPEC-ai-workflow.md` 的 15 条硬约束）一条不改；阶段 id 稳定、删除用 tombstone。
+7. 阶段语义（`SPEC-ai-workflow.md`「阶段状态机」）一条不改；阶段 id 稳定、删除用 tombstone。
 8. 单实例锁 + WAL + `integrity_check` + 事实导出，M0 起就必须有。
 
 ## 评审已冻结的契约细节（2026-11-04）

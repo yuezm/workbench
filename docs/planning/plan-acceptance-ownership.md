@@ -10,16 +10,16 @@ M20/M21 把「这个阶段做完了吗」交给干活的那个 run 自己回答�
 
 ## 行为变更
 
-| 维度 | 改前（M20/M21/M33） | 改后（M34） |
-| --- | --- | --- |
-| 执行阶段 `run.succeeded` | 读 `acceptance[]`，未全达且未超轮次 → 原地续一轮 | 直接走 `exits.done`，不读任何业务结论 |
-| `acceptance` 归属 | 任意 `entry_mode='agent'` 阶段都可配 | 只有闸门阶段（`judge` 非空）可配，其它阶段非空即拒收 |
-| 闸门 `pass` 条件 | 至少一条 `checks` 且退出码全 0 | 同上，且**每条验收**要有一条 `exitCode=0` 且 `acceptance=n` 指向它的 `checks` |
-| 自动重跑 | `maxRounds`（阶段内）+ `retry{max}`（出口表）两套 | 都没有；再来一轮只能人触发（拖回阶段 / 「重新执行」） |
-| 回执键 | 十一个（含 `acceptance`） | 十个；`acceptance` 出现即忽略 |
-| 判定者与被验者 | 无约束 | 同一智能体即拒收 |
-| 阶段指标 | `runs / avgRounds / repairExhausted / degraded / asks / humanComments` | `runs / verdicts / degraded / asks / humanComments` |
-| 提示词轮次段 | 「本阶段第 N 轮（上限 M 轮）」 | 整段删除；同阶段第 2 次起开新会话的会话策略不变（内核算，不进提示词） |
+| 维度                     | 改前（M20/M21/M33）                                                    | 改后（M34）                                                                   |
+| ------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| 执行阶段 `run.succeeded` | 读 `acceptance[]`，未全达且未超轮次 → 原地续一轮                       | 直接走 `exits.done`，不读任何业务结论                                         |
+| `acceptance` 归属        | 任意 `entry_mode='agent'` 阶段都可配                                   | 只有闸门阶段（`judge` 非空）可配，其它阶段非空即拒收                          |
+| 闸门 `pass` 条件         | 至少一条 `checks` 且退出码全 0                                         | 同上，且**每条验收**要有一条 `exitCode=0` 且 `acceptance=n` 指向它的 `checks` |
+| 自动重跑                 | `maxRounds`（阶段内）+ `retry{max}`（出口表）两套                      | 都没有；再来一轮只能人触发（拖回阶段 / 「重新执行」）                         |
+| 回执键                   | 十一个（含 `acceptance`）                                              | 十个；`acceptance` 出现即忽略                                                 |
+| 判定者与被验者           | 无约束                                                                 | 同一智能体即拒收                                                              |
+| 阶段指标                 | `runs / avgRounds / repairExhausted / degraded / asks / humanComments` | `runs / verdicts / degraded / asks / humanComments`                           |
+| 提示词轮次段             | 「本阶段第 N 轮（上限 M 轮）」                                         | 整段删除；同阶段第 2 次起开新会话的会话策略不变（内核算，不进提示词）         |
 
 ## 代码改动清单
 

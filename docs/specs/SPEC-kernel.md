@@ -26,7 +26,7 @@
 ## 类型契约
 
 ```ts
-// src/kernel/core/types.ts
+// packages/core/kernel/src/core/types.ts
 ```
 
 ## 函数
@@ -93,7 +93,7 @@ export interface Change {
 | `workflow.*` / `agent.*` / `runtime.*`                        | owner                                           | 引用完整、名称唯一；有活跃 run 时拒绝改阶段；删运行时前校验被智能体引用                                                                                        | 配置事实                                                                                                                                                                                                                                     |
 | `project.create` / `update` / `remove`                        | owner                                           | 名称与文件夹必填；名称与路径都唯一；项目下有执行中的任务（queued / running / waiting）时拒绝删除（M10）；删除成功时该项目下的其余任务与会话改归默认目录（M11） | `project.created` / `project.updated` / `project.removed`（整行事实，tombstone 删除）+ 归属变化时的 `task.updated` / `conversation.updated`                                                                                                  |
 | `chat.create` / `send` / `remove` / `cancel`                  | owner                                           | 同一对话同时只跑一轮；`cancel` 只取消该对话的活跃 run；`chat.create` 的 `projectId` 可省（M11，省 = 默认目录），给了必须存在；聊天 run 的 cwd 取会话项目文件夹 | `message.appended` + `run.queued`（`purpose='chat'`）；被拒绝时不落消息；`cancel` 逐条产 `run.cancel_requested`                                                                                                                              |
-| `app.event`                                                   | app 插件（经宿主白名单校验）                    | `appId + eventType` 必须在 `src/shared/apps.ts` 的 `APP_EVENTS` 内；摘要 ≤200 字                                                                               | `event.received`（`source='app'`、`hops=1`、`originRunId=null`）；M6 起与外部事件走同一匹配路径建任务                                                                                                                                        |
+| `app.event`                                                   | app 插件（经宿主白名单校验）                    | `appId + eventType` 必须在 `packages/contract/app-events/src/index.ts` 的 `APP_EVENTS` 内；摘要 ≤200 字                                                        | `event.received`（`source='app'`、`hops=1`、`originRunId=null`）；M6 起与外部事件走同一匹配路径建任务                                                                                                                                        |
 | `event.received`                                              | source 插件 / 宿主注入（M6）                    | 字段白名单同 `RawEvent`；`hops` 0–8；不带 `cwd/agent/runtime/access`                                                                                           | `event.received`（外部事件入账）+ 命中规则 `task.created`（同一规则 + 同一入口键只建一次）；超跳数只写 `event.dropped`                                                                                                                       |
 | `rules.replace`                                               | owner                                           | 整批校验：`protocol/rules` 校验形状与字段上限，内核解析 `cron` 合法性，且 `workflowId` / `stageId` 必须存在与从属                                              | `rules.replaced`（版本 +1，整批替换）；整批非法则拒绝，旧版继续生效                                                                                                                                                                          |
 | `rule.trigger`                                                | owner（规则页「立即运行」）                     | 规则存在且启用                                                                                                                                                 | `task.created`（`origin='rule'`、`externalRef=null`、title=规则名）+ 入口 run；不存在/停用 reject                                                                                                                                            |
@@ -162,7 +162,7 @@ export interface Change {
 
 ## 阶段语义（不变）
 
-沿用 `src/shared/stage-machine.ts` 的全部规则与 15 条硬约束（见 `SPEC-ai-workflow.md`「阶段状态机」与 `TEST-CASES.md`）：
+沿用 `packages/core/kernel/src/scopes/workflow/stage-machine.ts` 的全部规则（见 `SPEC-ai-workflow.md`「阶段状态机」与 `TEST-CASES.md`）：
 
 - `entry_mode` = `none` / `agent` / `script` / `user`；每次进入阶段都重新触发进入效果。
 - **脚本阶段（M40）**：`entry_mode='script'` 时阶段带内联脚本 `script = { runtimeId, command, args, cwd, env, timeoutMs }`（`agentId` 必须为空，二者互斥，保存时归一）。派活与智能体阶段同一条链路：产 `run.queued`，`agentId=null`、`script` 快照随 run 行落库、`access='full'`、`resumeSessionId=null`，提示词只有资料（任务 / 阶段说明 / 验收条目），不拼系统提示词与模型。工作目录取「项目文件夹 > 脚本 cwd」，超时取「脚本 `timeoutMs` > 阶段 `runTimeoutMs` > 全局缺省」。并发窗口固定 1。运行时不存在 / 脚本缺失 → 零事实（任务停在列里等人）。
@@ -319,7 +319,7 @@ export interface ThreadRow {
 ## 测试
 
 - **决策黄金测试：** 每个输入×状态组合断言输出事实（对象全等），覆盖三种 `entry_mode`、打回原地零效果、拖拽越权、合并边界（claimed 不合并）、超并发、租约回收、迟到回执、跳数上限、重复回答、`commandId` 幂等、`agentId` 不存在时拒绝派活；M4 卡片：`ask` 建卡（`version=1`/`pending`）、同 `key` 更新、`notices` 信息卡、`resolves` 关闭、多卡**全部答完**才续接、重复/越界/非 `waiting` 拒绝、`later` 回 `queued`、`events` 派生与跳数熔断。
-- **纯度测试：** 扫描 `src/kernel/**`，出现禁用符号即失败（见 ARCHITECTURE「边界守则」）。
+- **纯度测试：** 扫描 `packages/core/kernel/src/**`，出现禁用符号即失败（见 ARCHITECTURE「边界守则」）。
 - **重建等价：** 随机事件序列 → 实时投影 vs 分批重建投影，逐表全等（含 `run_events`）；同一 `(view,input,now,env)` 重复决策结果一致。
 - **阶段状态机：** 分支覆盖 100%（沿用现有阈值）；阶段 id 稳定与 tombstone 删除单测。
 - **线程：** 同一 `(source, externalRef)` 归并、`reuse-task`/`new-task` 两种策略、串行领取、按 agent 续接、上下文派生确定性（同事实同文本）与 6000 字截断、笔记只作资料、关闭后新事件重开、手工任务隐式线程与 `thread.bind`、派生任务继承线程与父任务、`thread.concurrency>1` 的领取边界。

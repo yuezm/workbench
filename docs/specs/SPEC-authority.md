@@ -127,7 +127,7 @@ export interface AttentionItem {
 | `approval.decided`     | `approval: ApprovalRecord`（整行，`decided` 已填）                                                                       | `approvals`                                                         |
 | `policy.impacted`      | `version, taskIds: string[], kinds: ('rule-changed'\|'rule-removed'\|'requester-unlisted'\|'mode-narrowed')[]`           | —（审计；驱动一条聚合通知）                                         |
 
-事实名总数 67 → 76。`FACT_TYPES`、`FactPayloads`、`validate.ts` 的命令名/输入名白名单三处同步，缺一处即编译期失败。
+事实名总数以 `FACT_TYPES`（`packages/core/protocol/src/facts.ts`）为准，当前 71 项。`FACT_TYPES`、`FactPayloads`、`validate.ts` 的命令名/输入名白名单三处同步，缺一处即编译期失败。
 
 ## 投影
 
@@ -139,7 +139,7 @@ export interface AttentionItem {
 | `events`（扩）      | `+ identity_kind, identity_id, addressed`                                                                                      | 供准入视图与列表筛选；老行为 `system/unknown/1`                                   |
 | `tasks`（扩）       | `+ mandate_id, mandate_strength`                                                                                               | 看板与详情页免 join；`legacy` 任务两列为空                                        |
 
-重建与指纹照 [SPEC-kernel.md](./SPEC-kernel.md#重建与指纹) 执行。**顺序铁律**：先加 `normalizeIdentity` / `normalizeAuthority` / `normalizeMandate`（读旧 payload 补缺省），再改 DDL 与契约；颠倒会让老库首启重建失败。`KERNEL_VERSION` 升一档即触发全量重建，19 → 22 张表。
+重建与指纹照 [SPEC-kernel.md](./SPEC-kernel.md#重建与指纹) 执行。**顺序铁律**：先加 `normalizeIdentity` / `normalizeAuthority` / `normalizeMandate`（读旧 payload 补缺省），再改 DDL 与契约；颠倒会让老库首启重建失败。`KERNEL_VERSION` 升一档即触发全量重建；投影表清单以 `PROJECTION_TABLES`（`packages/core/kernel/src/core/types.ts`）为准，当前 21 张。
 
 ## 视图
 
@@ -150,7 +150,7 @@ export interface AttentionItem {
 | `authority.current` | 无           | 当前 `mode`、各来源名单/准入表、研判智能体、`policyVersion`、`wouldAccept` 近 7 天计数 |
 | `assess.pending`    | 无           | 待研判候选（`assessWindowMs` 内攒着的事件），供 UI 解释「为什么还没接单」              |
 
-`VIEW_IDS` 45 → 49；每个新视图必须在 `viewSpec` 里声明最小切片（`attention.open` 只装 `cards`/`runs`/`tasks`/`mandates`/`approvals` 的活跃行，`tasks` 用索引切片，不全表）。
+`VIEW_IDS` 当前 47 项（`packages/core/protocol/src/views.ts`）；`attention.open` 与 `assess.pending` 尚未落地（见「里程碑」A4）。每个新视图必须在 `viewSpec` 里声明最小切片（`attention.open` 落成时只装 `cards`/`runs`/`tasks`/`mandates`/`approvals` 的活跃行，`tasks` 用索引切片，不全表）。
 
 ## 模式矩阵
 
@@ -246,13 +246,13 @@ export interface AttentionItem {
 | 老 `event.received` payload 无 `identity` | 归一为 `{kind:'system', id:'unknown', addressed:true}`，`events.identity_kind='system'`；**不伪造**真实发起者 |
 | 存量任务（A1 前创建）                     | 不补发 `mandate.granted`；`mandates` 无行，UI 标 `legacy`；`attention.revoked` 不对其触发                     |
 | 存量的 `run.approvals`（只读日志）        | 不迁移为事实（保持「导入不伪造因果」原则），仅后续新提权入账                                                  |
-| `KERNEL_VERSION`                          | 升一档；投影 19 → 22 表；首启全量重建，历史行为由事实日志保留                                                 |
+| `KERNEL_VERSION`                          | 升一档；投影表随之变化（清单见 `PROJECTION_TABLES`）；首启全量重建，历史行为由事实日志保留                    |
 | 契约演进顺序                              | 先 `normalize*` 再改 DDL/契约（同 [SPEC-kernel.md](./SPEC-kernel.md#重建与指纹) 的教训）                      |
 
 ## 约束与预算
 
 - **纯度**：本域的四个文件不得出现 `node:*`、`Date.now`、`Math.random`、`fetch`、跨层 import；`tests/kernel/purity.test.ts` 的扫描范围扩到这四文件。
-- **行数**：`scopes/admission.ts` ≤420、`scopes/mandate.ts` ≤520、`scopes/assess.ts` ≤420、`scopes/attention.ts` ≤260、`cards.ts` 增量 ≤80；`core/` 不增；`decide.ts` 只加表项（≤220 行）。`scripts/check-kernel-budget.mjs` 的单文件 900 行上限继续生效。
+- **行数**：`scripts/check-kernel-budget.mjs` 定两个预算——`core/` ≤2000 行、单个 `scopes/<域>` ≤900 行、`decide.ts` ≤220 行；不设逐文件细表（`admission.ts` / `mandate.ts` / `assess.ts` 各自落在 `scopes/` 的 900 行上限内）。`decide.ts` 只加表项。
 - **禁止**：新增配置表或配置文件（`authority` 只在 `rule_sets` 行内）；新增插件类型；在 `admit` 里调用模型；把 `assess` 结论直接写成 `task.created` 而不经 `admission`/`mandate`。
 - **性能**：`attention.open` 的装载 + 派生 p99 ≤ 8 ms（与「装载 + decide」同一预算口径）；单批研判 ≤20 条候选、≤80k 字符提示词。
 
@@ -270,21 +270,24 @@ export interface AttentionItem {
 
 ## 测试
 
-| 测试                                | 覆盖                                                                                                                                             |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tests/kernel/admission.spec.ts`    | 模式矩阵每格一条（7 类 × 3 模式）；名单/机器人/receiveAll；兼容模式退化为 explicit；`identity` 缺失拒收                                          |
-| `tests/kernel/mandate.spec.ts`      | 授予范围计算（阶段/项目/权限上限）、`runAccessOf` 取交集、五种 basis 的重校验、`stop` 撤销、换版影响面、存量任务 legacy 不触发注意力             |
-| `tests/kernel/assess.spec.ts`       | 攒批与上限、覆盖校验（漏一条/多一条/证据缺失）、`via='failed'` 的重试与 `denied{assess-failed}`、observe 的 `wouldAccept`、研判 run 派生事件被拒 |
-| `tests/kernel/attention.spec.ts`    | 五类排序、notice 不进入、同任务 ask 合并与 count、200 条截断、完成/已解卡片排除                                                                  |
-| `tests/protocol/authority.test.ts`  | `authority` 校验边界（名单条数、枚举、上限）、`identity` 白名单、事实 payload 全等                                                               |
-| `tests/host/approval.test.ts`       | 范围内自动放行留痕、越界开卡并释放租约、拒绝回执行器、20 分钟超时按拒绝                                                                          |
-| `tests/host/schema.test.ts`（扩）   | 22 表重建等价；老事实归一后 `events.identity_*` 为 `system`                                                                                      |
-| `tests/e2e/api-only.spec.ts`（扩）  | 「webhook 事件 → 无权 → 拒绝」与「有权 → 研判 → 接单 → 越界提权 → 卡片 → 放行」两条端到端                                                        |
-| `tests/kernel/purity.test.ts`（扩） | 新四文件纯度扫描                                                                                                                                 |
+| 测试                                         | 覆盖                                                                                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `tests/kernel/admission.test.ts`             | 模式矩阵每格一条（7 类 × 3 模式）；名单/机器人/receiveAll；兼容模式退化为 explicit；`identity` 缺失拒收                                          |
+| `tests/kernel/scopes/mandate.test.ts`        | 授予范围计算（阶段/项目/权限上限）、`runAccessOf` 取交集、五种 basis 的重校验、`stop` 撤销、换版影响面、存量任务 legacy 不触发注意力             |
+| `tests/kernel/scopes/assess.test.ts`         | 攒批与上限、覆盖校验（漏一条/多一条/证据缺失）、`via='failed'` 的重试与 `denied{assess-failed}`、observe 的 `wouldAccept`、研判 run 派生事件被拒 |
+| `tests/kernel/attention.test.ts`（A4，未建） | 五类排序、notice 不进入、同任务 ask 合并与 count、200 条截断、完成/已解卡片排除                                                                  |
+| `tests/protocol/authority.test.ts`           | `authority` 校验边界（名单条数、枚举、上限）、`identity` 白名单、事实 payload 全等                                                               |
+| `tests/host/approval.test.ts`（A4，未建）    | 范围内自动放行留痕、越界开卡并释放租约、拒绝回执行器、20 分钟超时按拒绝                                                                          |
+| `tests/host/schema.test.ts`（扩）            | 22 表重建等价；老事实归一后 `events.identity_*` 为 `system`                                                                                      |
+| `tests/e2e/api-only.spec.ts`（扩）           | 「webhook 事件 → 无权 → 拒绝」与「有权 → 研判 → 接单 → 越界提权 → 卡片 → 放行」两条端到端                                                        |
+| `tests/kernel/purity.test.ts`（扩）          | 新四文件纯度扫描                                                                                                                                 |
 
 **决策黄金测试不变式**：同一 `(view, input, now, env)` 重复决策结果全等；`attentionOf` 同输入同序；准入与研判都不读时钟（`now` 由边界传入）。
 
 ## 里程碑与验收
+
+> 状态（2026-11-19）：**A1 / A2 / A3 已落地**（scopes/{admission,mandate,assess}.ts、mandates / ssessments 投影、uthority.current 视图、规则页授权编辑区）；**A4 未开工**——ttention.ts、ttention.open、ApprovalRecord / AttentionItem 全仓零实现，
+> un-approvals.ts 仍是只读日志。
 
 | 里程碑                             | 内容                                                                                                                                    | 验收                                                                                                             |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |

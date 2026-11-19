@@ -1,7 +1,7 @@
 # SPEC-artifacts：执行记录落盘（M16）
 
 > 2026-11-10。回答两个问题：**库里存什么、文件里存什么**，以及**人怎么从目录找回到某一轮**。
-> 实现：`src/host/artifacts.ts`（渲染与原子写）+ `src/host/scheduler.ts`（两个时机点）。
+> 实现：`packages/host/host/src/artifacts.ts`（渲染与原子写）+ `packages/host/host/src/scheduler.ts`（两个时机点）。
 
 ## 1. 边界：库是状态，文件是正文
 

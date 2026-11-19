@@ -27,8 +27,8 @@
 
 - Node 22 单进程服务（`node out/server/index.js`）+ Vite 构建（`vite.server.config.mts` / `vite.web.config.mts`）
 - TypeScript（strict）
-- React 18+（函数组件 + hooks，内置状态管理，不引状态库）
-- CSS Modules（不引 UI 框架）
+- React 19（函数组件 + hooks，内置状态管理，不引状态库）
+- Tailwind v4 + shadcn/ui v4（上游源码在 `packages/client/ui-primitives`，项目覆盖层在 `packages/client/ui-kit`；硬规则见 [SPEC-ui](./SPEC-ui.md)）
 - 测试：Vitest + @testing-library/react
 
 ## Commands
@@ -80,7 +80,7 @@ import { aiWorkflowApp } from '../apps/ai-workflow'
 export const appPlugins: AppPlugin[] = [aiWorkflowApp]
 ```
 
-**跨层 API（契约定义在 `src/shared/workbench-api.ts`，浏览器侧由 `src/renderer/src/shared/bridge.ts` 实现成 HTTP + SSE，入口 `main.tsx` 把它挂到 `window.workbench`）：**
+**跨层 API（契约定义在 `packages/contract/api/src/index.ts`，浏览器侧由 `packages/client/bridge/src/index.ts` 实现成 HTTP + SSE，入口 `main.tsx` 把它挂到 `window.workbench`）：**
 
 M5 起 renderer 只拿三个动词 + 知会 + 目录浏览（`dispatch / query / subscribe / onNotice / listDirs / info / lark / notify`，详见
 [SPEC-host](./SPEC-host.md)「HTTP/SSE 契约」）：
@@ -138,7 +138,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 
 ## Testing Strategy
 
-- 框架：Vitest + @testing-library/react，测试统一放 `tests/`，与 `src/` 同构镜像（`src/shell/registry.ts` ↔ `tests/renderer/src/shell/registry.test.ts`，文件名后缀 `*.test.ts(x)`）。
+- 框架：Vitest + @testing-library/react，测试统一放 `tests/`，与源码同构镜像（`packages/client/shell/src/registry.ts` ↔ `tests/renderer/src/shell/registry.test.ts`，文件名后缀 `*.test.ts(x)`）。
 - 测什么：
   - registry：id 唯一、必填字段齐全（遍历断言）。
   - TopBar：渲染出所有注册 app；选中项 `aria-current="page"`；点击切换内容区。
@@ -147,9 +147,9 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 
 ## Boundaries
 
-- **Always：** renderer 只能经 `window.workbench`（`src/renderer/src/shared/bridge.ts` 的 HTTP/SSE 实现）访问服务；新增 app 必须实现 `AppPlugin` 并通过注册表进入；提交前 `pnpm test` 与 `pnpm build` 通过。
+- **Always：** renderer 只能经 `window.workbench`（`packages/client/bridge/src/index.ts` 的 HTTP/SSE 实现）访问服务；新增 app 必须实现 `AppPlugin` 并通过注册表进入；提交前 `pnpm test` 与 `pnpm build` 通过。
 - **Ask first：** 新增 npm 依赖；修改服务默认监听地址与端口（`WORKBENCH_HOST` / `WORKBENCH_PORT` 的缺省值）或主题基座；引入路由或状态管理库。
-- **Never：** 在 renderer 里 import `src/server` 或 Node 内置、直接 `fetch('/api/...')` 绕过桥接；把具体 app 的业务逻辑写进 shell；让 shell 依赖任何 app 的内部实现。
+- **Never：** 在 renderer 里 import `apps/server` 或 Node 内置、直接 `fetch('/api/...')` 绕过桥接；把具体 app 的业务逻辑写进 shell；让 shell 依赖任何 app 的内部实现。
 
 ## Success Criteria
 

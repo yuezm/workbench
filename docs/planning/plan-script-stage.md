@@ -61,15 +61,15 @@
 
 **症状**：新建运行时选执行器「命令」→ 保存报「执行器不支持探测: command」，一条命令运行时都建不出来；工作流编辑器里选「执行脚本」后运行时下拉恒空，保存报 `input.stages[N].script.runtimeId必填`。**两层是同一个空洞**：M40 让脚本阶段的连接必须是 `executorKey='command'` 的运行时，而这条运行时在真实环境里没有任何创建路径。
 
-| 根因                       | 位置                                     | 说明                                                                                                                                                                                         |
-| -------------------------- | ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `command` 插件没有 `probe` | `src/plugins/executors/command/index.ts` | `runtime.create` 先探测后落库，`probe` 缺失一律 `unsupported`；`command` 也没有 `detect`（不产出候选），所以一条 `executorKey='command'` 的运行时既建不出、也检不到，只有 e2e 直接塞 DB 才有 |
-| 编辑器空候选只留死路       | `WorkflowEditor.tsx` 脚本块              | 候选恒空 → 下拉选不了 → `runtimeId=''`，最后由协议层 `requiredId` 甩一句路径式错误                                                                                                           |
-| 编辑既有脚本阶段丢配置     | `WorkflowEditor.tsx#toDraft`             | 没回传 `script`，脚本块整块不渲染，保存时又以「设为执行脚本时必须填写命令」整份拒收                                                                                                          |
+| 根因                       | 位置                                             | 说明                                                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command` 插件没有 `probe` | `packages/plugins/executor-command/src/index.ts` | `runtime.create` 先探测后落库，`probe` 缺失一律 `unsupported`；`command` 也没有 `detect`（不产出候选），所以一条 `executorKey='command'` 的运行时既建不出、也检不到，只有 e2e 直接塞 DB 才有 |
+| 编辑器空候选只留死路       | `WorkflowEditor.tsx` 脚本块                      | 候选恒空 → 下拉选不了 → `runtimeId=''`，最后由协议层 `requiredId` 甩一句路径式错误                                                                                                           |
+| 编辑既有脚本阶段丢配置     | `WorkflowEditor.tsx#toDraft`                     | 没回传 `script`，脚本块整块不渲染，保存时又以「设为执行脚本时必须填写命令」整份拒收                                                                                                          |
 
 **修法**
 
-1. `src/plugins/executors/command/probe.ts`（新）：只解析 `runtime.command`（`sdk.process.resolve`）与 `argsTemplate`，**不 spawn**——通用命令没有统一的版本旗标，猜一个只会把「没实现 `--version`」误报成不可用。空命令给「命令必填」。装配进 `commandPlugin.probe`。
+1. `packages/plugins/executor-command/src/probe.ts`（新）：只解析 `runtime.command`（`sdk.process.resolve`）与 `argsTemplate`，**不 spawn**——通用命令没有统一的版本旗标，猜一个只会把「没实现 `--version`」误报成不可用。空命令给「命令必填」。装配进 `commandPlugin.probe`。
 2. `RuntimeDialog`：命令空就前端拦（清掉从前端到内核的一次无用往返）。
 3. `WorkflowEditor`：`validateDraft` 收脚本运行时候选，脚本阶段没选 / 所选运行时已停用或被删都就地指出并展开该阶段；脚本块在候选为空时给出「去运行时页新建一条」的文案；`toDraft` 回填 `script`。
 4. 表单口径（本轮需求）：脚本两项都不展示「要干什么」「单轮超时」（脚本没有提示词；脚本自带超时且优先级更高），脚本闸门另外不展示「验收」（判据是退出码，**M41 撤销：脚本闸门恢复验收**，见文末补口）；保存时随 `pruneByEntryKind` 归一成空，不留看不见的残留配置。内核的「脚本闸门最多一条验收」上限**已删除**（M41）。

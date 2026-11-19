@@ -48,4 +48,4 @@
 
 ## 6. 任务清单
 
-见 [tasks/a1-plan.md](../tasks/a1-plan.md)。执行顺序按依赖：T1 契约 → T2 事实 → T3 判定 → T4 接线 → T5 视图 → T6 规则页。
+施工顺序按依赖：T1 契约 → T2 事实 → T3 判定 → T4 接线 → T5 视图 → T6 规则页；契约与里程碑以 [SPEC-authority](specs/SPEC-authority.md) 为准。

@@ -46,12 +46,21 @@ export interface EnvPatch {
 export interface SpawnOptions {
   cwd?: string
   /**
-   * 子进程环境：**省略 = 继承宿主进程环境**（`host/process.ts` 兜底 `process.env`），
-   * 显式给值则整体替换（不合并）。执行器按智能体配置逐键覆盖，通道（M42）直接省略，
-   * 让 CLI 自己读本机登录态（如 `lark-cli` 的凭证目录）——插件始终拿不到 `process.env` 本身。
-   * 要在继承的基础上增删个别键，用 `envPatch`（不要为删一个键就整体替换）。
+   * 子进程环境。语义由 `envMode` 决定，**默认 `'replace'`（向后兼容）**：
+   *
+   * - 省略 `env` = 继承宿主进程环境；
+   * - `env` + `'replace'` = 整体替换（不合并）；
+   * - `env` + `'inherit'` = 宿主环境为底再叠加 `env`，必需键（`PATH` / `PATHEXT` /
+   *   `SystemRoot` …）与路径归一由宿主兜底。
+   *
+   * 执行器要的是 `'inherit'`：它只往 `env` 里放自己的几个键（权限模式、会话根、
+   * 智能体配置的变量），走 `'replace'` 会把宿主环境整块覆盖掉 —— Windows 上没有
+   * `PATHEXT` 的 pwsh 连 `git` 都解析不出来，模型就会在任务里自己修环境。
+   * 要在继承的基础上增删个别键，用 `envPatch`。
    */
   env?: NodeJS.ProcessEnv
+  /** 环境语义（缺省 `'replace'`）；执行器一律 `'inherit'` */
+  envMode?: 'replace' | 'inherit'
   /** 继承环境的增量修改（M45）：先删 `unset`，再覆盖 `set`；与 `env` 同时给时以 `env` 为底。 */
   envPatch?: EnvPatch
   /** Windows 的 .cmd/.bat 需要经 shell 启动 */

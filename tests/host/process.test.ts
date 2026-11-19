@@ -19,6 +19,8 @@ const {
   tail,
 } = await import('@workbench/host/process')
 
+const { normalizePath, shellPlatformOf } = await import('@workbench/host/shell-env')
+
 function fakeChild(): {
   pid: number
   stdin: { end: () => void }
@@ -165,6 +167,63 @@ describe('defaultSpawn', () => {
     expect(options.env).not.toBe(process.env)
     expect(options.env['PATH']).toBe(process.env['PATH'])
     expect('DSH_TEST_SHOULD_BE_GONE' in options.env).toBe(false)
+  })
+
+  it('envMode: inherit：只给增量也能拿到宿主 PATH / PATHEXT（不整体替换）', () => {
+    spawnMock.mockReturnValue(fakeChild())
+
+    defaultSpawn('dsh', [], { env: { DSH_PERMISSION_MODE: 'read-only' }, envMode: 'inherit' })
+
+    const options = spawnMock.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv }
+    // Windows 上 PATH 的真实键名是 Path：用大小写不敏感的方式取值
+    const read = (key: string): string | undefined => {
+      const hit = Object.keys(options.env).find((k) => k.toUpperCase() === key.toUpperCase())
+      return hit === undefined ? undefined : options.env[hit]
+    }
+    expect(options.env['DSH_PERMISSION_MODE']).toBe('read-only')
+    // 宿主 PATH 还在（Windows 上真实键名是 Path），只是被归一过：去重复段、去尾分隔符
+    const hostPath = process.env['PATH'] ?? process.env['Path'] ?? ''
+    expect(read('PATH')).toBe(normalizePath(hostPath, shellPlatformOf(process.platform)))
+    // 不制造 PATH / Path 双键
+    expect(Object.keys(options.env).filter((k) => k.toUpperCase() === 'PATH')).toHaveLength(1)
+  })
+
+  it.skipIf(process.platform !== 'win32')(
+    'envMode: inherit 在 Windows 上一定带 PATHEXT（本次修复的核心）',
+    () => {
+      spawnMock.mockReturnValue(fakeChild())
+
+      defaultSpawn('dsh', [], { env: { DSH_PERMISSION_MODE: 'read-only' }, envMode: 'inherit' })
+
+      const options = spawnMock.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv }
+      const hit = Object.keys(options.env).find((k) => k.toUpperCase() === 'PATHEXT')
+      expect(hit).toBeDefined()
+      expect(options.env[hit!]).toBeTruthy()
+    },
+  )
+
+  it('envMode: inherit 叠加 envPatch：先继承、再按 patch 增删', () => {
+    spawnMock.mockReturnValue(fakeChild())
+
+    defaultSpawn('lark-cli', [], {
+      env: { DSH_PERMISSION_MODE: 'read-only' },
+      envMode: 'inherit',
+      envPatch: { set: { LARK: '1' } },
+    })
+
+    const options = spawnMock.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv }
+    expect(options.env['DSH_PERMISSION_MODE']).toBe('read-only')
+    expect(options.env['LARK']).toBe('1')
+    expect(Object.keys(options.env).length).toBeGreaterThan(2)
+  })
+
+  it('envMode: replace（缺省）：给 env 就整体替换，宿主环境不参与', () => {
+    spawnMock.mockReturnValue(fakeChild())
+
+    defaultSpawn('dsh', [], { env: { ONLY: '1' } })
+
+    const options = spawnMock.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv }
+    expect(options.env).toEqual({ ONLY: '1' })
   })
 
   it.skipIf(process.platform !== 'win32')(

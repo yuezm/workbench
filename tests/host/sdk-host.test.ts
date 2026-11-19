@@ -148,7 +148,10 @@ describe('createSdkHost process 能力', () => {
     expect(createSdkHost().process.scanDirs().slice(0, 2)).toEqual([a, b])
 
     vi.stubEnv('PATH', '')
-    const dirs = createSdkHost().process.scanDirs()
+    // PATH 清空同时触发启动自检：报一行、不拦（扫描目录仍有全局兜底）
+    const lines: string[] = []
+    const dirs = createSdkHost({ log: (line) => lines.push(line) }).process.scanDirs()
+    expect(lines).toEqual(['[env] 宿主环境异常：缺少 PATH'])
     expect(Array.isArray(dirs)).toBe(true)
     expect(dirs.length).toBeGreaterThan(0)
     expect(dirs.every((dir) => typeof dir === 'string' && dir.trim().length > 0)).toBe(true)

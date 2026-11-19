@@ -25,7 +25,12 @@ export interface DshOptions {
  * dsh 需要的额外环境：权限模式 + 会话持久化根 + **智能体配置的环境变量**。
  *
  * 顺序：智能体变量先铺开，权限模式与会话根随后覆盖——权限是宿主的判定，不允许被
- * 智能体配置悄悄改成更宽的模式。宿主基线（PATH 等）由 sdk 合并，插件拿不到 process.env。
+ * 智能体配置悄悄改成更宽的模式。
+ *
+ * 返回值是**增量**：调用方把它交给 `executor-kit` 的 `startProcess()`，后者固定按
+ * `envMode: 'inherit'` 转给宿主；宿主拿进程环境做底、补齐必需键（`PATH` / `PATHEXT` …）
+ * 并归一路径。别把它当完整环境用——曾经按「整体替换」传下去，Windows 子进程丢掉
+ * `PATHEXT`，里头的 pwsh 连 `git` 都解析不出来。
  */
 export function dshEnv(
   permissionMode: string,

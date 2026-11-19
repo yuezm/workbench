@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { EnvPatch } from '@workbench/capabilities/types'
+import { applyEnvPatchOn, buildChildEnv } from './shell-env'
 
 /** 子进程的最小接口（可注入，便于单测不真的 spawn） */
 export interface SpawnedProcess {
@@ -16,8 +17,16 @@ export interface SpawnedProcess {
 
 export interface SpawnOptions {
   cwd?: string
-  /** 省略 = 继承宿主进程环境；给值则整体替换（不合并） */
+  /**
+   * 子进程环境。语义由 `envMode` 决定：
+   * - 省略 `env` = 继承宿主进程环境；
+   * - 给 `env` + `envMode: 'replace'`（默认）= 整体替换（不合并）；
+   * - 给 `env` + `envMode: 'inherit'` = 宿主环境为底再叠加，必需键（`PATH` / `PATHEXT` …）
+   *   与路径归一由 `shell-env.ts` 兜底 —— 执行器只关心自己那几个键，别再把宿主环境覆盖掉。
+   */
   env?: NodeJS.ProcessEnv
+  /** 环境语义（缺省 `'replace'`，向后兼容）；执行器一律用 `'inherit'` */
+  envMode?: 'replace' | 'inherit'
   /** 在 `env`（省略时是宿主环境）之上做增量增删（M45） */
   envPatch?: EnvPatch
   /** Windows 的 .cmd/.bat 需要经 shell 启动 */
@@ -27,14 +36,12 @@ export interface SpawnOptions {
 /**
  * 计算最终子进程环境（M45）：`base` → 删 `unset` → 覆盖 `set`。
  *
- * 抽成导出纯函数：通道侧只声明「要剔除谁的变量」，怎么合并由宿主一处决定，
- * 测试也能直接断言「删干净了、该留的还在」而不去 spawn 真进程。
+ * 键名精确匹配（等价于 POSIX 语义）的老入口，通道侧与测试在用；Windows 上删 `PATH`
+ * 应该连 `Path` 一起删，那条路径走 `shell-env.ts` 的 `applyEnvPatchOn` —— 单一真相源
+ * 在那边，这里只固定成 POSIX 档。
  */
 export function applyEnvPatch(base: NodeJS.ProcessEnv, patch: EnvPatch): NodeJS.ProcessEnv {
-  const merged: NodeJS.ProcessEnv = { ...base }
-  for (const key of patch.unset ?? []) delete merged[key]
-  for (const [key, value] of Object.entries(patch.set ?? {})) merged[key] = value
-  return merged
+  return applyEnvPatchOn(base, patch, 'linux')
 }
 
 export type SpawnFn = (command: string, args: string[], options: SpawnOptions) => SpawnedProcess
@@ -89,10 +96,15 @@ function shimNode(dir: string): string {
 
 /** 真实 spawn：stdout/stderr/stdin 全部走管道，POSIX 下独立进程组便于整树终止 */
 export const defaultSpawn: SpawnFn = (command, args, options) => {
-  const base = options.env ?? process.env
+  // `inherit`：宿主环境为底再叠加调用方的增量，并由 shell-env 补齐必需键、归一路径。
+  // 执行器四家传的都是「只加几个自己的键」，走 replace 会把 PATH / PATHEXT 整块丢掉。
+  const base =
+    options.envMode === 'inherit'
+      ? buildChildEnv(process.env, options.env ?? {})
+      : (options.env ?? process.env)
   // 省略 env 时继承宿主环境：M42 的 IM 通道要跑自带登录态的 CLI（插件拿不到 process.env）；
   // M45 用 envPatch 剔除别的 agent 的身份变量，让同一个 CLI 落在本程序自己的工作区
-  const env = options.envPatch === undefined ? base : applyEnvPatch(base, options.envPatch)
+  const env = options.envPatch === undefined ? base : applyEnvPatchOn(base, options.envPatch)
   // `shell: true` 只为跑 `.cmd` / `.bat`：能折回 node + 脚本就折（见 `resolveShimScript`），
   // 折不回来才真的经 cmd——那条路上的引号与元字符会坏。
   const shim = options.shell === true ? resolveShimScript(command) : null

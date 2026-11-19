@@ -25,6 +25,7 @@ import type {
 } from '@workbench/capabilities/types'
 import { defaultScanDirs, findInDirs, resolveExecutable } from './executable'
 import { defaultSpawn, killProcessTree } from './process'
+import { verifyEnv } from './shell-env'
 
 /** `createSdkHost` 的可注入项：全部有缺省值，装配根只传需要的。 */
 export interface SdkHostOptions {
@@ -62,14 +63,23 @@ const defaultNotify: NotifyFn = (): void => undefined
 /** 组装宿主原件：所有缺省值集中在这里，插件侧不感知来源。 */
 export function createSdkHost(options: SdkHostOptions = {}): SdkHost {
   const spawn: SpawnFn = options.spawn ?? defaultSpawn
+  const log = options.log ?? defaultLog
   const paths: SdkPaths = {
     sessionRoot: options.sessionRoot ?? null,
     cwd: options.cwd ?? process.cwd(),
     receiptTool: options.receiptTool ?? null,
   }
 
+  // 启动自检：宿主环境缺必需键时，子进程会以「看起来像业务失败」的方式坏掉
+  // （Windows 丢 `PATHEXT` → 子进程里的 shell 解析不出任何命令）。在装配这一处报出来，
+  // 比让执行器在任务跑到一半才发现便宜。只报不拦：缺键仍可继续，由调用方决定退让方式。
+  const report = verifyEnv(process.env)
+  if (!report.ok) {
+    log(`[env] 宿主环境异常：缺少 ${report.missing.join('、')}`)
+  }
+
   return {
-    log: options.log ?? defaultLog,
+    log,
     now: options.now ?? Date.now,
     paths,
     config: options.config ?? defaultConfig,

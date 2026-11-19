@@ -50,6 +50,10 @@ export const needsShell = (file: string): boolean => /\.(cmd|bat)$/i.test(file)
  * 启动子进程；解析不到可执行文件或 spawn 抛错时返回 error。
  *
  * `cwd` 为 undefined 时交给宿主/进程默认目录（不传空串，避免 ENOENT）。
+ *
+ * `env` 是**增量**：一律以 `envMode: 'inherit'` 交给宿主，由宿主在进程环境之上叠加它。
+ * 执行器只该往这里放自己那几个键（权限模式、会话根、智能体配置的变量）——早期按
+ * 「整体替换」传下去时，Windows 上的子进程会丢掉 `PATHEXT`，连 `git` 都解析不出来。
  */
 export function startProcess(
   sdk: Sdk,
@@ -67,6 +71,7 @@ export function startProcess(
     const process_ = sdk.process.spawn(resolved.path, args, {
       cwd,
       env,
+      envMode: 'inherit',
       shell: needsShell(resolved.path),
     }) as Spawned | undefined
     if (process_ === undefined) return { error: '启动失败' }
@@ -79,7 +84,8 @@ export function startProcess(
 /**
  * 跑一个一次性命令并收集输出（`--version` / `--probe` / `--list-models` 共用）。
  *
- * 环境传 `{}` 而不是省略：这些命令不需要智能体配置的变量，宿主基线由 `sdk` 合并。
+ * 环境给 `{}` 而不是省略，语义是「没有自己的增量」，宿主按 `envMode: 'inherit'` 补基线：
+ * 探针命令同样需要完整的 `PATH` / `PATHEXT` 才能解析 CLI 与它拉起的子进程。
  */
 export async function collect(
   sdk: Sdk,
@@ -102,6 +108,7 @@ export async function collect(
   try {
     child = sdk.process.spawn(resolved.path, args, {
       env: {},
+      envMode: 'inherit',
       shell: needsShell(resolved.path),
     })
   } catch (e) {

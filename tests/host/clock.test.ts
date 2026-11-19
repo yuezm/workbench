@@ -363,7 +363,9 @@ describe('host/clock 与 store / kernel 装配', () => {
 
     expect(ticks).toBe(1)
     expect(store.factsSince(0).map((fact) => fact.type)).toEqual(['run.abandoned'])
-    expect(clock.nextAt()).toBe('2026-11-04T12:06:00.000Z')
+    // 退避到期时刻 = 租约过期时刻 + backoffBaseMs（M48 起 15 s，此前是 5 min）：
+    // 断言的语义是「nextAt 指向退避到期」，不是「退避一定是 5 分钟」
+    expect(clock.nextAt()).toBe('2026-11-04T12:01:15.000Z')
   })
 
   it('tick 产零事实（退避到期的 queued run）仍然回调 onTick', () => {

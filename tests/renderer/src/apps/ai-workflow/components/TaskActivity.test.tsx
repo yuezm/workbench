@@ -89,7 +89,7 @@ describe('TaskActivity', () => {
     // 但不能再出现 ISO 原文——那正是「比真实时间早 8 小时」的根源
     expect(list).toHaveTextContent(formatLocalDateTime(run.startedAt ?? run.createdAt))
     expect(list).not.toHaveTextContent('2026-11-03T00:00:00Z')
-    expect(list).toHaveTextContent('耗时 1.5s')
+    expect(list).toHaveTextContent('执行 1.5s')
     expect(list).toHaveTextContent('退出码 0')
     expect(list).toHaveTextContent('输入 12 / 输出 34 tokens')
     // 本轮实际权限（闸门阶段被内核抬到 full，所以展示的是 run.access 而不是智能体配置）
@@ -171,7 +171,7 @@ describe('TaskActivity', () => {
     expect(list).toHaveTextContent('非零退出')
     // 失败原因是要人读的，用可播报的 alert 而不是又一段灰字
     expect(within(list).getByRole('alert')).toHaveTextContent('进程非零退出')
-    expect(list).toHaveTextContent('耗时 350ms')
+    expect(list).toHaveTextContent('执行 350ms')
     expect(list).toHaveTextContent('退出码 3')
     expect(list).not.toHaveTextContent('tokens')
     expect(list).not.toHaveTextContent('成功')

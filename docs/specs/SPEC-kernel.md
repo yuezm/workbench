@@ -383,15 +383,15 @@ export interface ThreadRow {
 
 ## 调度
 
-| 事项       | 规则                                                                                                                                                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 领取       | 宿主按运行时发起；按 `notBefore` 升序、同序按 `seq` FIFO；每条 run 所属智能体在跑数 < 该智能体的 `maxConcurrent`；`waiting` 不占位                                                                                  |
-| 租约       | 领取即 `leaseId = runId:attempt`、`leaseUntil = now + leaseMs`、`deadlineAt = now + 本次超时`（M26：阶段 `runTimeoutMs` 优先，否则 `limits.runTimeoutMs` = 60 min）；心跳续租；过期 → `run.abandoned`，`attempts+1` |
-| 超时       | `clock.tick` 到 `deadlineAt` → `run.failed{errorCode:'timeout'}`（actor `{kind:'host',via:'timeout'}`），终止进程同取消时序                                                                                         |
-| 迟到的回执 | 只接受 `leaseId` 与当前 `turn` 匹配的回执；旧 attempt 的回执直接丢弃并记 `run.receipt_rejected` 审计事实，**不覆盖终态**                                                                                            |
-| 宿主兜底   | 执行器不可达、超时或取消无回执时，由宿主发 `run.host_settled` 输入写终态（`timeout` / `executor_lost` / `cancelled`）                                                                                               |
-| 重试       | 退避 `backoffBaseMs × 2^(attempts-1)`，封顶 1 h；`attempts ≥ 3` → `run.failed` + 开卡片通知                                                                                                                         |
-| 取消       | 内核只记 `run.cancel_requested`；终止进程由宿主按「cancel 帧 → 3 s → SIGTERM → 2 s → SIGKILL」执行，回执落终态                                                                                                      |
+| 事项       | 规则                                                                                                                                                                                                                                              |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 领取       | 宿主按运行时发起；按 `notBefore` 升序、同序按 `seq` FIFO；每条 run 所属智能体在跑数 < 该智能体的 `maxConcurrent`；`waiting` 不占位                                                                                                                |
+| 租约       | 领取即 `leaseId = runId:attempt`、`leaseUntil = now + leaseMs`（M48 缺省 10 min，心跳 30 s）、`deadlineAt = now + 本次超时`（M26：阶段 `runTimeoutMs` 优先，否则 `limits.runTimeoutMs` = 60 min）；心跳续租；过期 → `run.abandoned`，`attempts+1` |
+| 超时       | `clock.tick` 到 `deadlineAt` → `run.failed{errorCode:'timeout'}`（actor `{kind:'host',via:'timeout'}`），终止进程同取消时序                                                                                                                       |
+| 迟到的回执 | 只接受 `leaseId` 与当前 `turn` 匹配的回执；旧 attempt 的回执直接丢弃并记 `run.receipt_rejected` 审计事实，**不覆盖终态**                                                                                                                          |
+| 宿主兜底   | 执行器不可达、超时或取消无回执时，由宿主发 `run.host_settled` 输入写终态（`timeout` / `executor_lost` / `cancelled`）                                                                                                                             |
+| 重试       | 退避 `backoffBaseMs × 2^(attempts-1)`，封顶 `backoffCapMs`（M48 缺省：15 s 起、60 s 封顶）；`attempts ≥ 3` → `run.failed` + 开卡片通知                                                                                                            |
+| 取消       | 内核只记 `run.cancel_requested`；终止进程由宿主按「cancel 帧 → 3 s → SIGTERM → 2 s → SIGKILL」执行，回执落终态                                                                                                                                    |
 
 **单轮超时（M26）**：`run.claim` 时按 `run.stageId` 查阶段，阶段 `runTimeoutMs` 非空就按它算 `deadlineAt`，否则（阶段没配 / 阶段行查不到 / 聊天 run 没有阶段）用 `limits.runTimeoutMs`；执行器进程的超时由宿主取「`deadlineAt` 减当前时刻」传入，内核与进程不各留一套时限。
 | 合并 | 仅 `queued` 可合并；`claimed`/`waiting` 期间的新事件排队为下一轮的独立事件，不静默丢弃 |

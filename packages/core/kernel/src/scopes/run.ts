@@ -115,6 +115,13 @@ export function pickClaims(view: View, runtime: Runtime, capacity: number, now: 
  * `run.claimed` 事实：`attempt` = 当前领取次数 + 1（1 基），
  * `leaseId = '<runId>:<attempt>'`、`leaseUntil = now + leaseMs`、
  * `deadlineAt = now + 本次运行超时`（M26：阶段配了 `runTimeoutMs` 用它，否则用 `limits.runTimeoutMs`）。
+ *
+ * 续接（M48）：重试轮（`attempts > 0`）把上一轮留在行上的 `sessionId` 带进
+ * `resumeSessionId`——被租约回收 / 执行器失联打断的那一轮读过的仓库、写过的判断都还在
+ * 那次会话里，接着跑比从零重来便宜得多（实测一次三轮回跑的编码阶段重读 19.66 M tokens）。
+ * 首次领取（`attempts = 0`）没有可续的会话；卡片回答续接的 `resumeSessionId` 已由内核写好，
+ * 这里不覆盖。续接被拒由宿主包装层兜底（换新会话 + 完整提示词重试一次），
+ * 所以这条对「会话已经坏了」是安全的降级，不是新的失败面。
  */
 export function claimFacts(
   claimed: readonly RunRow[],
@@ -128,6 +135,7 @@ export function claimFacts(
   return claimed.map((run) => {
     const attempt = run.attempt + 1
     const leaseId = `${run.id}:${attempt}`
+    const resumeSessionId = run.resumeSessionId ?? (run.attempts > 0 ? run.sessionId : null)
     const next: RunRow = {
       ...run,
       status: 'running',
@@ -136,6 +144,7 @@ export function claimFacts(
       leaseUntil,
       deadlineAt: plusMs(now, timeoutOf(run)),
       startedAt: run.startedAt ?? now,
+      resumeSessionId,
     }
     return { type: 'run.claimed', actor, at: now, payload: { run: next } }
   })
@@ -144,6 +153,9 @@ export function claimFacts(
 /**
  * `run.lease_extended` 事实：`leaseId` 必须等于当前租约，否则零事实。
  * 不产 reject——心跳由调度器定时发，过期租约的迟到心跳只应静默丢弃，避免噪音。
+ *
+ * `sessionId` 是执行器随心跳上报的会话 id（M48）：只在「有值且与行上不同」时写进 next，
+ * 让被回收的轮次也留着会话 id，重排后的领取能续接（见 `claimFacts`）。
  */
 export function heartbeatFacts(
   view: View,
@@ -152,10 +164,15 @@ export function heartbeatFacts(
   now: Iso,
   limits: Limits,
   actor: Actor,
+  sessionId?: string,
 ): FactDraft<'run.lease_extended'>[] {
   const run = view.runs.get(runId)
   if (!run || run.leaseId !== leaseId) return []
-  const next: RunRow = { ...run, leaseUntil: plusMs(now, limits.leaseMs) }
+  const next: RunRow = {
+    ...run,
+    leaseUntil: plusMs(now, limits.leaseMs),
+    ...(sessionId === undefined || sessionId === run.sessionId ? {} : { sessionId }),
+  }
   return [{ type: 'run.lease_extended', actor, at: now, payload: { run: next } }]
 }
 

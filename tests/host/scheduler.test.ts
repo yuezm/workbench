@@ -1046,6 +1046,30 @@ describe('createScheduler：Turn 与旁路会话', () => {
     expect(runById(seeded.runId)?.session_id).toBe('sess-observed')
   })
 
+  it('心跳带上 io.session 上报的会话 id：租约被回收后重排能续接（M48）', async () => {
+    const seeded = seed(1)
+    const timer = fakeTimer()
+    const gate = deferred()
+    const scheduler = makeScheduler(
+      portOf(async (turn, io) => {
+        // 执行器 ready 就上报会话，不等终态：被回收的轮次没有回执
+        io.session?.('sess-live')
+        await gate.promise
+        return receiptOf(turn)
+      }),
+      { timer },
+    )
+
+    scheduler.wake()
+    await Promise.resolve()
+    // 手动触发一次心跳（fakeTimer 把 interval 回调攒在 handlers 里）
+    for (const handler of timer.handlers) handler()
+    expect(runById(seeded.runId)?.session_id).toBe('sess-live')
+
+    gate.resolve()
+    await scheduler.idle()
+  })
+
   it('模型 id 里的 %2F 必须解码：`magpie/auto%2F…` 发给运行时的是 provider + 模型名', async () => {
     // dsh `--list-models` 的 id 形如 `magpie/auto%2Fdeepseek-v4.1-flash`（模型名里的斜杠编码成 %2F）。
     // 不解码就原样发出去，pi-ai 会回 `provider "magpie" has no configured model "auto%2F…"`。

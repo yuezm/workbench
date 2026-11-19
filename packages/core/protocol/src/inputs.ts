@@ -173,11 +173,19 @@ export interface RunClaimInput {
   capacity: number
 }
 
-/** 心跳续租：`leaseId` 必须匹配当前租约，否则内核不产事实 */
+/**
+ * 心跳续租：`leaseId` 必须匹配当前租约，否则内核不产事实。
+ *
+ * `sessionId` 是可选上报（M48）：执行器 ready 后就把会话 id 交上来，宿主随下一次心跳
+ * 写进 run 行——这样租约过期被回收时（`run.abandoned`）run 上已经留着会话 id，
+ * 重排后的领取才能带上 `resumeSessionId` 接着那次会话跑，而不是从零重读整个仓库。
+ * 此前会话 id 只在终态随回执落库，被回收的轮次一律丢，重跑等于换一个新会话。
+ */
 export interface RunHeartbeatInput {
   type: 'run.heartbeat'
   runId: string
   leaseId: string
+  sessionId?: string
 }
 
 /** 回执：run 属于该运行时、`leaseId` 与 `turn` 匹配当前轮，否则只记 `run.receipt_rejected` */

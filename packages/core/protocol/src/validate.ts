@@ -1299,7 +1299,8 @@ const checkHostPayload = (type: HostInputName, input: Obj): Check => {
     case 'run.heartbeat':
       return (
         requiredId(input.runId, 'runId') ??
-        required(input.leaseId, 'leaseId', COMMAND_LIMITS.leaseId)
+        required(input.leaseId, 'leaseId', COMMAND_LIMITS.leaseId) ??
+        optionalText(input.sessionId, 'sessionId', COMMAND_LIMITS.sessionId)
       )
     case 'run.receipt':
       return requiredId(input.runId, 'runId') ?? checkReceipt(input.receipt)

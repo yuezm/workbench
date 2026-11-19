@@ -320,6 +320,15 @@ function RunBlock({
   turn: number
   stages: ReadonlyArray<StageRef>
 }): ReactElement {
+  /**
+   * 时间拆三段（M48）：墙钟是「从入队到落终态」，`durationMs` 只是**最后一轮**执行器
+   * 自报的耗时——租约被回收重排的轮次不写回执，那段既不在 `durationMs` 里、也不在
+   * 任何单轮记录里，只能从墙钟的差额看出来。差额同时含排队、退避与白跑的轮次，
+   * 所以标「等待/重排」而不是「退避」，不假装精确。
+   */
+  const wallMs = run.endedAt === null ? null : Date.parse(run.endedAt) - Date.parse(run.createdAt)
+  const idleMs =
+    wallMs !== null && run.durationMs !== null ? Math.max(0, wallMs - run.durationMs) : null
   return (
     <div className="rounded-xl border border-border bg-card px-4 py-3">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -337,8 +346,14 @@ function RunBlock({
         <span className="tabular-nums">
           权限 {PERMISSION_LABEL[permissionModeOfAccess(run.access)]}
         </span>
+        {wallMs !== null && <span className="tabular-nums">墙钟 {formatDuration(wallMs)}</span>}
         {run.durationMs !== null && (
-          <span className="tabular-nums">耗时 {formatDuration(run.durationMs)}</span>
+          <span className="tabular-nums">执行 {formatDuration(run.durationMs)}</span>
+        )}
+        {idleMs !== null && idleMs >= 1_000 && (
+          <span className="text-faint-foreground tabular-nums">
+            等待/重排 {formatDuration(idleMs)}
+          </span>
         )}
         {run.exitCode !== null && <span className="tabular-nums">退出码 {run.exitCode}</span>}
         {run.errorCode !== null && (

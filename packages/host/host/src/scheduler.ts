@@ -454,14 +454,26 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     frameSeq.set(run.id, seq)
   }
 
-  /** 心跳：每个 `heartbeatMs` 续租一次；租约不匹配时内核静默丢弃（D1）。 */
-  const startHeartbeat = (run: RunRow): unknown => {
+  /**
+   * 心跳：每个 `heartbeatMs` 续租一次；租约不匹配时内核静默丢弃（D1）。
+   *
+   * `sessionOf` 返回本轮执行器已经上报的会话 id（`io.session`），有值就随心跳带上——
+   * 租约过期被回收时 run 行上留着它，重排后的领取才能续接那次会话（M48）。
+   * 会话 id 是执行器 ready 后立刻上报的，所以最迟一次心跳（30 s）就落库，
+   * 而回收判定要等整段租约（10 min）过期，窗口足够。
+   */
+  const startHeartbeat = (run: RunRow, sessionOf: () => string | null): unknown => {
     if (run.leaseId === null) return null
     const leaseId = run.leaseId
-    return timer.setInterval(
-      () => dispatch({ type: 'run.heartbeat', runId: run.id, leaseId }),
-      limits.heartbeatMs,
-    )
+    return timer.setInterval(() => {
+      const sessionId = sessionOf()
+      dispatch({
+        type: 'run.heartbeat',
+        runId: run.id,
+        leaseId,
+        ...(sessionId === null ? {} : { sessionId }),
+      })
+    }, limits.heartbeatMs)
   }
 
   /**
@@ -570,7 +582,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       process: (pid) => registry.attachPid(run.id, pid),
     }
     // 执行开始即登记（spawn 之前）：进程还没起来也不能丢线索（pid 留空，对账只清理）
-    const heartbeat = startHeartbeat(run)
+    const heartbeat = startHeartbeat(run, () => observedSession)
     /** 取消时序的定时器（宽限 / 强杀后等待）；null = 没有进行中的取消链。 */
     let cancelTimers: CancelChain | null = null
     /** 收尾只做一次：flush、清定时器/心跳/登记、释放执行位、唤醒下一条。 */

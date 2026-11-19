@@ -411,7 +411,17 @@ export function heartbeatRun(
   env: Environment,
 ): Decision {
   // 租约不匹配只静默丢弃：心跳由调度器定时发，产 reject 只会变成噪音（D1）
-  return done(heartbeatFacts(view, input.runId, input.leaseId, now, env.limits, HOST_SCHEDULER))
+  return done(
+    heartbeatFacts(
+      view,
+      input.runId,
+      input.leaseId,
+      now,
+      env.limits,
+      HOST_SCHEDULER,
+      input.sessionId,
+    ),
+  )
 }
 
 export function recordRunFrames(

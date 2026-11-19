@@ -214,6 +214,8 @@ export async function executeDshRun(
     let timedOut = false
     let cancelRequested = false
     let spawnError: Error | null = null
+    /** 已经上报给宿主的会话 id（避免每帧都重复上报同一个） */
+    let reportedSession: string | null = null
     // 定时器集中放在可写容器里：finish/terminate 互相引用，便于统一清理
     const timers: ExecutorTimers = {}
 
@@ -221,6 +223,12 @@ export async function executeDshRun(
       const frame = parseFrame<DshFrame>(line)
       if (!frame) return
       handleFrame(frame, requestId, state, emit)
+      // 会话 id 一到就上报，不等终态（M48）：租约被回收时这一轮没有回执，
+      // 会话 id 只在终态上报的话就会丢，重排后的领取只能从零重读整个仓库
+      if (state.sessionId !== null && state.sessionId !== reportedSession) {
+        reportedSession = state.sessionId
+        io.session?.(reportedSession)
+      }
     })
 
     const terminate = (): void => {
@@ -312,7 +320,12 @@ export async function executeDshRun(
         // 管道已关闭：无需收尾
       }
       const outcome = buildOutcome()
-      if (outcome.sessionId !== null) io.session?.(outcome.sessionId)
+      // 终态的会话 id 与 ready 时上报的可能是同一个（正常结束）：同一个不重复上报，
+      // 只有续接被拒后换了新会话（`sess-2`）才再报一次
+      if (outcome.sessionId !== null && outcome.sessionId !== reportedSession) {
+        reportedSession = outcome.sessionId
+        io.session?.(outcome.sessionId)
+      }
       resolve(toReceipt(turn, outcome))
     }
 

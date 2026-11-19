@@ -842,6 +842,86 @@ describe('kernel/decide run.heartbeat 续租', () => {
   })
 })
 
+describe('kernel/decide 重试续接（M48）', () => {
+  const runningWith = (over: Partial<RunRow> = {}): RunRow =>
+    run({
+      id: 'run-1',
+      status: 'running',
+      attempt: 1,
+      leaseId: 'run-1:1',
+      leaseUntil: '2026-11-04T12:00:30.000Z',
+      ...over,
+    })
+
+  it('心跳带会话 id：写进 run 行（被回收的轮次也留着，供重排续接）', () => {
+    const decision = decide(
+      view({ runs: [runningWith()] }),
+      { type: 'run.heartbeat', runId: 'run-1', leaseId: 'run-1:1', sessionId: 'sess-a' },
+      NOW,
+      env({ leaseMs: 1_000 }),
+    )
+
+    expect(decision.facts).toHaveLength(1)
+    expect((decision.facts[0]?.payload as { run: RunRow }).run.sessionId).toBe('sess-a')
+  })
+
+  it('会话 id 与行上相同：续租照产，行上不出现多余键', () => {
+    const active = runningWith({ sessionId: 'sess-a' })
+    const decision = decide(
+      view({ runs: [active] }),
+      { type: 'run.heartbeat', runId: 'run-1', leaseId: 'run-1:1', sessionId: 'sess-a' },
+      NOW,
+      env({ leaseMs: 1_000 }),
+    )
+
+    expect((decision.facts[0]?.payload as { run: RunRow }).run).toEqual({
+      ...active,
+      leaseUntil: '2026-11-04T12:00:01.000Z',
+    })
+  })
+
+  it('心跳未带会话 id：行上原样保留（不清空、不报错）', () => {
+    const active = runningWith({ sessionId: 'sess-a' })
+    const decision = decide(
+      view({ runs: [active] }),
+      { type: 'run.heartbeat', runId: 'run-1', leaseId: 'run-1:1' },
+      NOW,
+      env({ leaseMs: 1_000 }),
+    )
+
+    expect((decision.facts[0]?.payload as { run: RunRow }).run.sessionId).toBe('sess-a')
+  })
+
+  it('重试轮（attempts>0）：领取时把上一轮的会话 id 带进 resumeSessionId', () => {
+    const queued = run({ id: 'run-1', status: 'queued', attempts: 1, sessionId: 'sess-a' })
+    const decision = claim(view({ runtimes: [runtime()], runs: [queued] }), 'rt-1', 1)
+
+    expect((decision.facts[0]?.payload as RunClaimedPayload).run.resumeSessionId).toBe('sess-a')
+  })
+
+  it('首次领取（attempts=0）不续接：没有可续的会话', () => {
+    const queued = run({ id: 'run-1', status: 'queued', sessionId: 'sess-a' })
+    const decision = claim(view({ runtimes: [runtime()], runs: [queued] }), 'rt-1', 1)
+
+    expect((decision.facts[0]?.payload as RunClaimedPayload).run.resumeSessionId).toBeNull()
+  })
+
+  it('卡片回答续接已写好的 resumeSessionId 不被上一轮的 sessionId 覆盖', () => {
+    const queued = run({
+      id: 'run-1',
+      status: 'queued',
+      attempts: 1,
+      sessionId: 'sess-old',
+      resumeSessionId: 'sess-answer',
+    })
+    const decision = claim(view({ runtimes: [runtime()], runs: [queued] }), 'rt-1', 1)
+
+    expect((decision.facts[0]?.payload as RunClaimedPayload).run.resumeSessionId).toBe(
+      'sess-answer',
+    )
+  })
+})
+
 describe('kernel/decide run.receipt 回执', () => {
   it('成功回执：run.succeeded 写终态并清租约/超时；任务不在视图时零流转', () => {
     const active = running()

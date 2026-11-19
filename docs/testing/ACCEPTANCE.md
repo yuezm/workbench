@@ -134,14 +134,3 @@
 ```
 
 能进自动化的就补进去：几何类问题写进 `ui-geometry.spec.ts` 的场景，交互类写进对应 `tests/e2e/*.spec.ts`，规则类先写失败用例再改实现（见 [TESTING](TESTING.md)「何时写哪层测试」）。
-
-## 6. 命令速查
-
-| 命令                                                           | 用途                                          |
-| -------------------------------------------------------------- | --------------------------------------------- |
-| `pnpm acceptance`                                              | 门禁关 + 启动关（= `check && e2e`）           |
-| `pnpm e2e:ui`                                                  | 只跑界面几何审计（含构建），改完 UI 用        |
-| `pnpm exec playwright test tests/e2e/startup.spec.ts`          | 只跑启动健康三路径（先 `pnpm build`）         |
-| `pnpm check:fast`                                              | 秒级：类型 / lint / floor / secrets / ui 规则 |
-| `pnpm e2e`                                                     | 全量 e2e（含启动与几何审计）                  |
-| `pnpm exec playwright test tests/e2e/ui-geometry.spec.ts --ui` | 逐屏调试几何审计                              |

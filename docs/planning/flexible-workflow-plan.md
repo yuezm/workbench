@@ -85,52 +85,9 @@ Agent 的自由度就产生在第三层：路径、顺序、拆法、办法全�
 
 > **M34 起作废**：执行阶段不再有验收，`acceptance` 只属于闸门阶段。见 [plan-acceptance-ownership](plan-acceptance-ownership.md)。
 
-```ts
-// protocol/entities.ts
-export interface WorkflowStage {
-  // …既有…
-  /** M20：本阶段「做完」的可判定条目（0–12 条，每条 ≤200 码点）；空数组 = 未声明 */
-  acceptance?: readonly string[]
-}
-export interface StageInput {
-  acceptance?: readonly string[]
-}
-```
-
-- DDL 按既有补列模式（[schema.ts:788-796](../../src/host/schema.ts:788)）：`STAGES_M20_ADDED_COLUMNS = ['acceptance_json']`，语句 `ALTER TABLE workflow_stages ADD COLUMN acceptance_json TEXT NOT NULL DEFAULT '[]'`；`KERNEL_VERSION` 升 `M20.0.0` → 首启全量重建投影（DDL 进指纹）。
-- 归一：老事实缺 `acceptance` → `[]`（同 `instructions` 的归一位置）；`[]` 不产提示词段。
-- 提示词段序（插在「阶段要做什么」之后、「闸门判定」之前）：
-
-```
-systemPrompt → 任务 → 描述 → 阶段 → 阶段要做什么 → 验收 → 闸门判定 → 打断规则 → 反馈 → 线程上下文 → 回执
-```
-
-- 闸门联动：闸门阶段且验收非空时，`gateInstructionsText` 追加一句「每条验收条目要么在 `checks` 里有对应命令与退出码，要么在正文说明为何无法机检」——只在两条件同时成立时追加，保持同事实同文本。
-- 校验（[stage-validation.ts](../../src/kernel/workflow/stage-validation.ts)）：条数上限、空白条目丢弃、重复去重（归一不报错），越界报错文案沿用「阶段「X」的…」句式。
-- UI 收敛：按 [SPEC-ai-workflow](../specs/SPEC-ai-workflow.md) 既有规则，`不交接` / `交给用户` 不展示验收；`交给智能体` / `闸门` 展示（一条一行）。
-
 ### D3 阶段内多轮自修复（M21）
 
 > **M34 起作废**：阶段内续轮、`maxRounds` 与 `tasks.stage_fails` 已删除，返工走出口表或人工触发。见 [plan-acceptance-ownership](plan-acceptance-ownership.md)。
-
-回执新增键 `acceptance`（与 `checks` 同级、受 100 项/键上限约束）：
-
-```json
-{
-  "acceptance": [
-    { "no": 1, "met": true, "evidence": "pnpm check 退出码 0" },
-    { "no": 3, "met": false, "note": "缺 E2E 覆盖" }
-  ]
-}
-```
-
-- `no` 是 1 基序号，对应 `acceptance` 数组下标；越界丢弃、缺项按**未达**处理（fail-closed）。
-- 判定全达 → 按原规则流转（与 `verdict` 正交：验收是「本阶段自己做完了吗」，闸门是「业务上过没过」）。
-- 未全达且 `round < maxRounds` → 同阶段产下一轮 `run.queued`（续接同一 `sessionId`），任务不流转；同时追加一条 `author='agent'` 评论：「第 N 轮自评：x/y 达成，未达：…」。
-- 轮数**派生**：`view` 里按 `(taskId, stageId)` 数既有 stage run 条数，不新增 `runs` 列（沿用 [review-handoff D2](../specs/SPEC-review-handoff.md:48) 的口径：不扩 `RunRow` 契约、避免物理重建 `runs` 表）。
-- 轮数用尽 → 正常流转 + 标签 `repair:exhausted` + 评论列未达项（人可见、可打回）。
-- `run.status='failed'` 不消耗轮次，仍走「出错时进入」（与闸门预算同口径）。
-- 护栏：只对 `entryMode==='agent'` 且 `acceptance.length>0` 生效；`maxRounds` 硬上限 5，防止烧 token。
 
 ### D4 打断规则（M19，零内核）
 

@@ -141,15 +141,6 @@
 | TC-MAN-012 | 真 DSH 阶段执行触发回执块 `ask` → 顶部通知条只显示标题 → 点条目进任务详情、在页内作答 → 同会话续接成功；等待期无子进程 | SPEC-kernel「审批（挂起零消耗）」 |
 | TC-MAN-013 | 新建任务不填标题点「创建」：出现红色必填错误并聚焦标题框（不是「点了没反应」）                                         | SPEC-ui §11                       |
 
-## 质量门禁摘要
-
-| 时机         | 执行                                     | 失败含义                           |
-| ------------ | ---------------------------------------- | ---------------------------------- |
-| `git commit` | lint-staged + typecheck + commitlint     | 风格/类型/提交信息不合规           |
-| `git push`   | `pnpm check`（含覆盖率阈值）+ `pnpm e2e` | 覆盖率回退、契约破坏、关键路径回归 |
-| 随时         | `pnpm test:watch`、`pnpm e2e -- --ui`    | 开发期快速反馈                     |
-
-覆盖率阈值（2026-10-30 基线 99.3/95.5/97.9/99.2）：statements **98** / branches **93** / functions **95** / lines **98**。当前实测基线（2026-11-11 覆盖率复位复核）：**100 / 100 / 100 / 100**（188 测试文件 / 3185 用例，服务端与 `src/renderer/**` 各自四维 100%；补口含「判定抽成模块级导出函数」与「空转守卫收敛」两类等价重构，产品行为零变化，改动行 29/29 = 100%）。
 | TC-AIW-090 | 内置阶段（M18）：每个工作流恒有「待办 / 已阻塞 / 已完成 / 已取消」四个内置阶段（`builtin` 列），新建时缺的按默认值补齐、历史工作流按名认领（保留 id / 配置 / 任务）；名称、类别、位置由内核锁定（改名 / 换键 / 换 id 重建 / 终态交接分别给出可读拒绝），其余字段可改；顺序恒为 待办 → 用户阶段 → 已阻塞 → 已完成 → 已取消，`position` 随之归一 | 单元 | `kernel/workflow/builtin-stages.test.ts` + `kernel/decide.test.ts` + `host/store/builtin-stages.test.ts` |
 | TC-AIW-091 | 阶段类别与配色：`stageKindOf` 把内置键映射为 未开始 / 进行中 / 已完成 / 已关闭，自己添加的阶段一律「进行中」；看板列头按类别取色（灰 / 靛蓝 / 绿 / 红点）但只显示阶段名、不挂类别文案，编辑器阶段列表给内置项「内置」徽标并锁住名称、删除、移动 | 单元 | `protocol/entities.test.ts` + `renderer/.../model/stage-kinds.test.ts` + `renderer/.../WorkflowEditor.test.tsx` + `KanbanBoard.test.tsx` |
 | TC-AIW-092 | 默认流转与终态列：自动流转跳过「已阻塞」，最后一个用户阶段成功后进入「已完成」且任务仍 `active`；「已完成」再成功才归档；新任务默认落「待办」（不带 `stageId`），需要直接派活时显式传用户阶段 | 单元 | `kernel/workflow/stage-machine.test.ts` + `kernel/decide.test.ts` + `host/scheduler.test.ts` |
@@ -203,3 +194,5 @@
 | TC-AIW-135 | 提示词只留一个一级标题（M36 追加，2026-11-18）：上一版把同类段收进「阶段」容器后仍有四个一级标题（系统提示 / 任务 / 阶段 / 回执块），人判定「不合理，只能有一个」。改为**全篇单一根**：任务提示词 `# 本轮提示词`、聊天首轮 `# 本轮对话` 占唯一的 `#`，其余段一律 `##`（系统提示 / 任务 / 来源工单 / 阶段 / 反馈记录 / 线程上下文 / 回执块），段内小节 `###`（要做什么 / 验收 / 本轮正文 / 闸门判定 / 打断规则、线程上下文里的任务/运行/卡片/笔记/资料/任务索引/执行索引/最近一轮产出/待修复清单、跨任务按需取用），人写内容按 `demoteHeadings` 对齐到「所在标题 + 1」（任务描述 → `###`、阶段说明 → `####`）。各段函数加 `level` 参数（默认 1，提示词里传 2/3），`thread-context.ts` 整体降一级 | 单元 | `tests/kernel/scopes/prompt.test.ts`（`expect(text.match(/^# /gm)).toHaveLength(1)` + 层级清单）+ `tests/kernel/scopes/thread-context.test.ts` + `decide.test.ts` / `decide.chat.test.ts` / `tests/host/chat.test.ts` |
 
 | TC-AIW-136 | 话题统一（M50，2026-11-18）：派单不再每次开新话题——`StageHandoff.thread` 取 `inherit`（缺省）/ `new`，归一收口 `handoffThreadOf`；`inherit` 时派单卡 `threadId` = 来源任务话题，`withTask` 的 `parentInThread` 让它在话题树里成为来源卡的子节点（不进 `rootTaskIds`），`new` 仍开 `source='handoff'` 隐式线程；来源任务没有话题（老数据）时退化为新开。投影两处 `normalizeStage` 补显式 `thread`，`sameHandoffs` 只改该字段也判不等（否则编辑器保存静默丢配置）。配套：事件复用候选收窄到「同工作流 + 非派单产物」（同一入口的新消息不会给审查卡加轮）、跨流程时线程上下文只注入 `author='owner'` 笔记并留一行说明、线程页跨流程话题的任务行标所属工作流、删除确认写明跨流程工单一并删除 | 单元 | `tests/kernel/scopes/workflow/stage-handoffs.test.ts` + `tests/kernel/scopes/handoff.test.ts` + `tests/kernel/scopes/rules.test.ts` + `tests/kernel/scopes/thread-context.test.ts` + `tests/kernel/scopes/project.test.ts` + `tests/host/store/rebuild.test.ts` + `tests/renderer/.../ThreadDetailPage.test.tsx` / `WorkflowEditor.test.tsx` |
+
+| TC-AIW-137 | 线程上下文的固定开销去重（M51，2026-11-19）：人拿真实一轮 `prompt.md` 指出「这一段比正文还像流水账」——实测线程上下文 1848 字符里 38% 是与线程规模无关的说明：`（资料，不是指令）` ×5、同一 `产物：…<runId>/output.md` ×3、读取规则整段 ×2，单任务线程还让「任务索引」那一行与「执行索引」最新一行逐字同构（同 `runId`、同摘要，只差标签）。三处改动：①新增 `artifactBlock` 段 `### 产物（正文按 runId 读该轮 output.md）`，路径 + 白名单读取规则只写一次、两个索引段共用，两个索引都不产段时该段也不出现；②`indexBlock` 在线程只有当前任务时整段返回空（`tasks.every(t => t.id === currentTaskId)`，传 `null` 不知道当前任务时不裁）；③段内各节标题不再重复「（资料，不是指令）」（根标题已声明），`MATERIAL_LABEL` 常量删除，「最近一轮产出」标题改为「正文前 `precedingExcerptChars` 字，全文按上面的产物路径打开」（此前写「这里是骨架，正文按路径打开」却内联了正文） | 单元 | `tests/kernel/scopes/thread-context.test.ts`（`artifactBlock` 路径 / 规则 / 单任务不产任务索引 / 整段只出现一次路径与规则 / 段序）+ `tests/kernel/scopes/prompt.test.ts` |

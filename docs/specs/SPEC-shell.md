@@ -43,37 +43,6 @@ Lint:   pnpm lint
 
 > 没有安装包与打包态：`pnpm build` 只产出 `out/server`（服务）与 `out/web`（静态产物），服务自己同源托管 `out/web`。
 
-## Project Structure
-
-> 实际落地：renderer 源码根为 `src/renderer/src/`（Vite 的 Web 入口 `src/renderer/index.html`）；服务端与 Web 各自一份 vite 配置（`vite.server.config.mts` / `vite.web.config.mts`）。
-
-```
-workbench/
-├── src/
-│   ├── server/             # 【server】装配根 + HTTP/SSE（进程入口 index.ts 起服务）
-│   ├── shared/             # 跨层契约（桥接与 renderer 共用）
-│   │   └── workbench-api.ts #   WorkbenchApi：dispatch/query/subscribe/onNotice/listDirs/info/lark/notify
-│   └── renderer/
-│       ├── index.html
-│       └── src/
-│           ├── main.tsx        # 渲染入口：建 HTTP/SSE 桥接并挂到 window.workbench，再挂载 Workbench
-│           ├── shared/
-│           │   ├── bridge.ts   # createWebBridge()：WorkbenchApi 的浏览器实现（fetch + EventSource）
-│           │   └── api.d.ts    # window.workbench 全局类型声明
-│           ├── shell/          # 【shell】渲染侧外壳
-│           │   ├── Workbench.tsx #   Workbench：布局 + 当前 app 状态
-│           │   ├── types.ts    #   AppPlugin 契约
-│           │   ├── registry.ts #   app 注册表（唯一的数据源，导出 appPlugins）
-│           │   ├── kernelStore.ts #  内核视图 store（快照 + seq + 失效）
-│           │   ├── components/ #   TopBar（顶部 app 标签栏）
-│           │   └── styles/     #   全局深色主题变量（global.css）
-│           └── apps/
-│               └── ai-workflow/ # 【ai-workflow】见 SPEC-ai-workflow.md
-├── docs/                  # CAPABILITY-MAP.md / specs/ / planning/
-├── scripts/               # 构建辅助脚本（dev.mjs、检查脚本等）
-└── package.json
-```
-
 ## 核心契约：AppPlugin
 
 shell 拥有并定义"一个 app 是什么"。注册表是 app 的唯一数据源：

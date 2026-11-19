@@ -210,7 +210,6 @@ Radix `DialogContent` 是真模态：打开时 `hideOthers` 把背景整片标 `
 
 - `rounded-3xl` / `rounded-4xl`、任意值 `rounded-[Npx]` 这类硬编码 —— 全部走刻度。
 - 矩形块用 `rounded-full`（胶囊按钮、胶囊标签）。`rounded-full` 只允许圆点（`size-*`）、开关滑块（`w-9`）、1px 线段端点。
-- 调大刻度：`--radius-*` 只能收紧；`check:ui` 对 sm/md/lg/xl/2xl 设了上限（4/6/8/10/12 px）。
 
 ## 6. 质感
 

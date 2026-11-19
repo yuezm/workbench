@@ -32,25 +32,6 @@
 
 完整契约见 [SPEC-authority](specs/SPEC-authority.md)。A1 施工只取其中四块：
 
-### 4.1 契约（`packages/core/protocol/src/authority.ts`）
-
-- `EventIdentity { kind: 'human'|'bot'|'system'; id: string; addressed: boolean }`
-- `AdmissionTable`（五格：listedAddressed / listedUnaddressed / unlistedAddressed / unlistedUnaddressed / botAddressed）+ `SourcePolicy { id, allowed[], bots[], receiveAll, admission }` + `Authority { mode, sources[], assessorAgentId, assessBatch, assessWindowMs }`
-- 上限常量 `AUTHORITY_LIMITS`（名单 ≤200、来源 ≤32、id ≤64、assessBatch 1–20、assessWindowMs 0–60000）
-- `compatAuthority()`：规则集没有 `authority` 块时的兼容值（`mode='auto'`、无来源策略），行为等价于今日「命中即建任务」
-- `normalizeAuthority(value)`：把历史上没有该块 / 缺字段的规则集归一成合法 `Authority`
-
-### 4.2 事实（`protocol/facts.ts`）
-
-- `event.received` payload 增 `identity: EventIdentity`（老事实归一为 `{kind:'system', id:'unknown', addressed:true}`，不伪造发起者）
-- 新增 `event.admitted { eventId, ruleId, strength, basis, mode, policyVersion }`
-- 新增 `event.denied { eventId, ruleId: string|null, reason, policyVersion }`，`reason ∈ not-listed | mode-off | bot-not-listed | no-rule | assess-failed`
-- `event.skipped`（规则停用）保持不变，两者不合并
-
-### 4.3 判定（`kernel/src/scopes/admission.ts`）
-
-`admit(view, input, authority): Admission` 纯函数，返回 `{ strength, basis, allow }` 或 `{ allow: false, reason }`；`admissionFacts(...)` 产出上面两类事实。矩阵按 SPEC-authority §模式矩阵：名单内/外 × 点名/未点名、机器人、手工/系统，三种模式各一列。
-
 ### 4.4 接线（`scopes/commands/common.ts` + `view-spec.ts` + store）
 
 - `receivedEventFacts` 在建任务前先判准入：`allow=false` 只产 `event.denied`，不建任务；`allow=true` 产 `event.admitted` 后照旧建任务。

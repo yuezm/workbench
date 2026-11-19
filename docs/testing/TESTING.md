@@ -5,18 +5,6 @@
 
 ## 分层策略
 
-```
-            ┌─────────────────────────────┐
-            │  E2E  Playwright + Chromium │  真实服务进程 + 构建产物，关键路径冒烟（慢、少而稳）
-            ├─────────────────────────────┤
-            │  集成/契约                    │  server·HTTP/SSE / web·桥接 / registry·AppPlugin
-            ├─────────────────────────────┤
-            │  单元                         │  状态机 / audio / cn / button / hooks / 组件
-            ├─────────────────────────────┤
-            │  静态检查                     │  typecheck + ESLint(+react-hooks) + Prettier
-            └─────────────────────────────┘
-```
-
 | 层        | 位置                                                        | 工具                                          | 职责                                                       |
 | --------- | ----------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------- |
 | 静态检查  | 根配置                                                      | tsc（node/web 双工程）、ESLint flat、Prettier | 类型、hooks 规则、格式一致                                 |
@@ -43,19 +31,17 @@
 
 ## 常用命令
 
-| 命令                                                  | 作用                                                                                                                 |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `pnpm test` / `pnpm test:watch`                       | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式                                                    |
-| `pnpm test:coverage`                                  | 同上 + 覆盖率阈值门禁                                                                                                |
-| `pnpm lint` / `pnpm lint:fix`                         | ESLint（含 react-hooks 规则）                                                                                        |
-| `pnpm format` / `pnpm format:check`                   | Prettier 全仓写 / 只检查                                                                                             |
-| `pnpm typecheck`                                      | tsc node + web 双工程（含 e2e 与测试文件）                                                                           |
-| `pnpm check`                                          | check:fast(type+lint+floor+secrets) + test:coverage + 改动行覆盖率 + 依赖审计（本地全量门禁，数值见 CONSTRAINTS.md） |
-| `pnpm e2e`                                            | `pnpm build`（typecheck + `out/server` + `out/web`）→ Playwright 每用例起独立服务进程跑 Chromium                     |
-| `pnpm e2e -- --ui`                                    | Playwright UI 模式调试单条用例                                                                                       |
-| `pnpm acceptance`                                     | 人工验收前一条命令：`check` + `e2e`（见 [ACCEPTANCE](ACCEPTANCE.md)）                                                |
-| `pnpm e2e:ui`                                         | 只跑界面几何审计（含构建），改完 UI 用                                                                               |
-| `pnpm exec playwright test tests/e2e/startup.spec.ts` | 只跑启动健康三路径（先 `pnpm build`）                                                                                |
+| 命令                                                  | 作用                                                                  |
+| ----------------------------------------------------- | --------------------------------------------------------------------- |
+| `pnpm test` / `pnpm test:watch`                       | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式     |
+| `pnpm test:coverage`                                  | 同上 + 覆盖率阈值门禁                                                 |
+| `pnpm lint` / `pnpm lint:fix`                         | ESLint（含 react-hooks 规则）                                         |
+| `pnpm format` / `pnpm format:check`                   | Prettier 全仓写 / 只检查                                              |
+| `pnpm typecheck`                                      | tsc node + web 双工程（含 e2e 与测试文件）                            |
+| `pnpm e2e -- --ui`                                    | Playwright UI 模式调试单条用例                                        |
+| `pnpm acceptance`                                     | 人工验收前一条命令：`check` + `e2e`（见 [ACCEPTANCE](ACCEPTANCE.md)） |
+| `pnpm e2e:ui`                                         | 只跑界面几何审计（含构建），改完 UI 用                                |
+| `pnpm exec playwright test tests/e2e/startup.spec.ts` | 只跑启动健康三路径（先 `pnpm build`）                                 |
 
 E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录 + `WORKBENCH_PORT=0` 起 `out/server/index.js`，解析 stdout 的 `workbench listening on ...` 取实际地址，再用 Playwright Chromium 打开页面；因此**每次先构建再测**；不需要下载任何 Playwright 浏览器（pnpm 默认也阻止了该下载）。
 
@@ -119,12 +105,6 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 - 预言机要与被测实现**走两条路径**：例如「下一次触发时刻」用逐分钟穷举扫墙钟，独立核对内核的「按天→按时→按分」扫描。
 
 ### 怎么跑变异测试
-
-| 命令                    | 范围                                                             | 何时                              |
-| ----------------------- | ---------------------------------------------------------------- | --------------------------------- |
-| `pnpm mutation:cron`    | `src/kernel/cron.ts`（`stryker.config.json` 的 `mutate` 默认值） | 单模块快速复核 / 合并前 / CI 定时 |
-| `pnpm mutation:changed` | 本次改动涉及的内核模块（由 `scripts/mutation-scope.mjs` 圈定）   | MR / CI 每次跑                    |
-| `pnpm mutation:scan`    | 内核全部 + `protocol/validate.ts`（33 个文件）                   | 定期 / 夜间                       |
 
 - 增量与预演不单开脚本，直接透传标志：`pnpm mutation:cron -- --incremental`、`pnpm mutation:changed -- --incremental`（命中 `.scratch/mutation/incremental.json` 缓存，迭代复验用）、`pnpm mutation:scan -- --dry-run`（只打印范围）。
 

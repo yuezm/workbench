@@ -18,37 +18,9 @@
 
 ## 目录与注册
 
-```
-src/
-├── sdk/                        # 插件能力接口（宿主注入；见下节）
-└── plugins/
-    ├── registry.ts             # 内置插件清单（唯一静态导入点）
-    ├── shared/                 # 仅纯函数：JSONL 切行、argv 模板展开、CLI 候选清单（cli-catalog）
-    ├── sources/{app,manual,webhook,fs}/
-    ├── executors/{dsh,command,claude,hermes,remote}/
-    └── channels/{in-app,desktop,webhook,feishu}/
-
-src/renderer/src/apps/          # app 插件（UI 侧，见 SPEC-host）
-├── pomodoro/
-└── ai-workflow/
-```
-
 注册表（`src/plugins/registry.ts`）是内置插件的唯一静态导入处：
 
 ```ts
-export interface ExecutorRegistryEntry {
-  key: string // 执行器键 = manifest.id = 运行时配置的 executorKey
-  label: string // 展示名（运行时表单下拉、运行时角标）
-  manifest: PluginManifest
-  plugin: ExecutorPlugin
-}
-
-/** 数组顺序即 UI 下拉顺序与 detect 输出顺序 */
-export const executors: ReadonlyArray<ExecutorRegistryEntry>
-
-/** 按 key 取注册项；未知 key 抛可读错误（调度器把「未注册」落成兜底终态） */
-export function executorById(key: string): ExecutorRegistryEntry
-
 /** 通道清单（M4）：数组顺序即投递顺序（in-app 在前、desktop 在后） */
 export interface ChannelRegistryEntry {
   key: string // 通道键 = manifest.id；写进 card.delivered.ref / cards.deliveryRef

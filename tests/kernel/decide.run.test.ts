@@ -2156,9 +2156,11 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
     ).toBe('run-1')
     // M49：原地停住时说明原因，别让人只看到任务不动
     const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
-    expect((comment?.payload as { comment: { text: string } }).comment.text).toContain(
-      '闸门「自测」没给结论',
-    )
+    const text = (comment?.payload as { comment: { text: string } }).comment.text
+    expect(text).toContain('闸门「自测」没给结论')
+    // R4：真正的原因是「没有 verdict」，不是「第 1 条验收缺证据」
+    expect(text).toContain('没有 `verdict`')
+    expect(text).not.toContain('第 1 条验收')
   })
 
   it('验收 3 条只用 2 条证据覆盖 → 零流转，gateFails 不变', () => {
@@ -2644,49 +2646,42 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
   })
 })
 
-// M49：闸门「没给结论」的留痕文案——三种情形分开说，别让人只看到任务不动
-describe('kernel/decide 闸门无结论的留痕文案（M49）', () => {
+// M49/R4：闸门「没给结论」的留痕文案——每种原因分开说，别把人引到补证据上
+describe('kernel/decide 闸门无结论的留痕文案（M49 / R4）', () => {
   const gate = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
     stage({ id: 'st-2', position: 1, name: '自测', judge: { maxFails: 2 }, ...over })
-  const settled = (over: Partial<RunRow> = {}): Parameters<typeof noConclusionCommentText>[1] =>
-    ({ ...running(over), status: 'failed' }) as unknown as Parameters<
-      typeof noConclusionCommentText
-    >[1]
 
-  it('拿不到退出码：点出原因码', () => {
-    const text = noConclusionCommentText(gate(), settled({ exitCode: null, errorCode: 'timeout' }))
-    expect(text).toContain('没拿到退出码（timeout）')
+  it('没给 verdict：点明「回执里没有 verdict」，不误报验收缺证据', () => {
+    const text = noConclusionCommentText(gate({ acceptance: ['类型检查'] }), {
+      kind: 'missing_verdict',
+    })
+    expect(text).toContain('没有 `verdict`')
+    expect(text).not.toContain('第 1 条验收')
   })
 
-  it('有退出码但某条验收没有全 0 证据：点出第几条与证据条数', () => {
-    const text = noConclusionCommentText(
-      gate({ acceptance: ['类型检查', '单测'] }),
-      settled({
-        exitCode: 0,
-        checks: [{ cmd: '类型', exitCode: 0, acceptance: 1 }],
-      }),
-    )
+  it('pass 但一条证据都没有：说出来，并说明 pass 的门槛', () => {
+    const text = noConclusionCommentText(gate(), { kind: 'no_checks' })
+    expect(text).toContain('一条 `checks` 都没有')
+    expect(text).toContain('`pass` 必须带全 0 的证据')
+  })
+
+  it('pass 但证据里有非 0：别为了让流程前进而填 pass', () => {
+    const text = noConclusionCommentText(gate(), { kind: 'checks_not_zero' })
+    expect(text).toContain('证据里有非 0 退出码')
+    expect(text).toContain('不要为了让流程前进而填 pass')
+  })
+
+  it('某条验收没被覆盖：点出第几条与证据条数', () => {
+    const text = noConclusionCommentText(gate({ acceptance: ['类型检查', '单测'] }), {
+      kind: 'uncovered',
+      index: 2,
+      total: 1,
+    })
     expect(text).toContain('第 2 条验收没有全 0 的证据（本轮 1 条）')
   })
 
-  it('证据里有非 0 或没挂钩验收：那一条不算覆盖', () => {
-    const text = noConclusionCommentText(
-      gate({ acceptance: ['类型检查'] }),
-      settled({ exitCode: 0, checks: [{ cmd: '类型', exitCode: 1, acceptance: 1 }] }),
-    )
-    expect(text).toContain('第 1 条验收没有全 0 的证据')
-  })
-
-  it('闸门没声明验收（脏投影）：有证据也不构成覆盖，给通用说明', () => {
-    const text = noConclusionCommentText(
-      gate({ acceptance: undefined }),
-      settled({ exitCode: 0, checks: [{ cmd: '类型', exitCode: 0 }] }),
-    )
-    expect(text).toContain('本轮证据不足')
-  })
-
-  it('没有验收条目、证据也没覆盖任何东西：给通用说明', () => {
-    const text = noConclusionCommentText(gate({ acceptance: [] }), settled({ exitCode: 0 }))
-    expect(text).toContain('本轮证据不足')
+  it('拿不到退出码：点出原因码', () => {
+    const text = noConclusionCommentText(gate(), { kind: 'no_exit_code', errorCode: 'timeout' })
+    expect(text).toContain('没拿到退出码（timeout）')
   })
 })

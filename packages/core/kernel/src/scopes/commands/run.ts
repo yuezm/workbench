@@ -101,6 +101,22 @@ function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): 
 }
 
 /**
+ * 「没给结论」的具体原因（R4）：文案要能指向真正的问题。
+ *
+ * 旧口径只知道「没有 verdict」，文案却一律落到验收覆盖分支——本轮明明一条证据都没有，
+ * 却提示「第 1 条验收没有全 0 的证据」，把排查带到了补证据上。
+ */
+export type GateNoConclusion =
+  | { kind: 'missing_verdict' }
+  | { kind: 'no_checks' }
+  | { kind: 'checks_not_zero' }
+  | { kind: 'uncovered'; index: number; total: number }
+  | { kind: 'no_exit_code'; errorCode: string | null }
+
+/** 闸门判定归一的结果：给结论，或给出「为什么没结论」。 */
+export type GateOutcome = { verdict: GateVerdict } | { noConclusion: GateNoConclusion }
+
+/**
  * 闸门判定归一（M11/M34/M40）：两条闸门共用一套证据口径——`checks[]`（逐条退出码）
  * 加 `acceptance: n`（1 基序号指向验收条目），缺证据就是**没给结论**。
  *
@@ -112,42 +128,51 @@ function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): 
  *
  * 不给结论时任务原地停住：既不放行也不消耗预算（`fail` 不需要证据——失败本身就是要修）。
  */
-function gateVerdictOf(
-  receipt: Receipt,
-  stage: WorkflowStage,
-  run: RunRow,
-): GateVerdict | undefined {
+function gateVerdictOf(receipt: Receipt, stage: WorkflowStage, run: RunRow): GateOutcome {
   const checks = receipt.checks ?? []
+  const uncovered = (): GateOutcome => {
+    const index = coversAcceptance(checks, stage)
+    return index === null
+      ? { verdict: 'pass' }
+      : { noConclusion: { kind: 'uncovered', index, total: checks.length } }
+  }
   if ((run.script ?? null) !== null) {
     // 拿不到退出码（超时 / 被杀 / 起不来）：没给结论
-    if (run.exitCode === null) return undefined
+    if (run.exitCode === null) {
+      return { noConclusion: { kind: 'no_exit_code', errorCode: run.errorCode ?? null } }
+    }
     // 非 0 是进程事实：先钉死，再看证据
-    if (run.exitCode !== 0) return 'fail'
+    if (run.exitCode !== 0) return { verdict: 'fail' }
     // 没给证据：退出码即结论
-    if (checks.length === 0) return 'pass'
+    if (checks.length === 0) return { verdict: 'pass' }
     // 证据里有非 0：脚本自己报了没过，按没过算（不回退成退出码 0 的通过）
-    if (!checks.every((check) => check.exitCode === 0)) return 'fail'
-    return coversAcceptance(checks, stage) ? 'pass' : undefined
+    if (!checks.every((check) => check.exitCode === 0)) return { verdict: 'fail' }
+    return uncovered()
   }
   const verdict = receipt.verdict
-  if (verdict === undefined) return undefined
-  if (verdict === 'fail') return 'fail'
+  if (verdict === undefined) return { noConclusion: { kind: 'missing_verdict' } }
+  if (verdict === 'fail') return { verdict: 'fail' }
   // `pass` 必须有全 0 的证据；没有证据的「通过」不算结论
-  if (checks.length === 0 || !checks.every((check) => check.exitCode === 0)) return undefined
-  return coversAcceptance(checks, stage) ? 'pass' : undefined
+  if (checks.length === 0) return { noConclusion: { kind: 'no_checks' } }
+  if (!checks.every((check) => check.exitCode === 0)) {
+    return { noConclusion: { kind: 'checks_not_zero' } }
+  }
+  return uncovered()
 }
 
 /**
  * 每条验收是否都被一条 `checks` 用 `acceptance: n`（1 基）指向。
  *
- * 调用方已保证「证据全 0」与「至少一条证据」；这里只管覆盖：验收为空时恒成立，
- * 序号越界（指向不存在的验收）不算覆盖。
+ * 全被覆盖返回 `null`；否则返回第一条没被覆盖的 1 基序号（由调用方给文案）。
+ * 调用方已保证「证据全 0」与「至少一条证据」；验收为空时恒成立，序号越界
+ * （指向不存在的验收）不算覆盖。
  */
-function coversAcceptance(checks: readonly GateCheck[], stage: WorkflowStage): boolean {
+function coversAcceptance(checks: readonly GateCheck[], stage: WorkflowStage): number | null {
   const covered = new Set(
     checks.map((check) => check.acceptance).filter((no): no is number => no !== undefined),
   )
-  return (stage.acceptance ?? []).every((_, index) => covered.has(index + 1))
+  const index = (stage.acceptance ?? []).findIndex((_, position) => !covered.has(position + 1))
+  return index < 0 ? null : index + 1
 }
 
 /** 闸门放行标记（M11）：预算耗尽后走通过分支时打在任务上的标签，看板可据此筛选。 */
@@ -197,26 +222,26 @@ export function degradedCommentText(
 }
 
 /**
- * 闸门「没给结论」的留痕文案（M49）：任务原地停、零流转，界面上原来看不出为什么。
+ * 闸门「没给结论」的留痕文案（M49 / R4）：任务原地停、零流转，界面上原来看不出为什么。
  *
- * 两种情形分开说：拿不到退出码（超时 / 被杀 / 起不来）与「有退出码但证据没覆盖验收」。
- * 纯函数，`now` / id 都由调用方给。
+ * 每种原因分开说：没有 verdict、pass 但没证据、证据里有非 0、某条验收没被覆盖、
+ * 脚本闸门拿不到退出码。纯函数，`now` / id 都由调用方给。
  */
-export function noConclusionCommentText(stage: WorkflowStage, run: SettledRun): string {
-  if (run.exitCode === null) {
-    return `闸门「${stage.name}」没给结论：这一轮没拿到退出码（${run.errorCode ?? '原因未知'}），任务停在原地。看本轮步骤证据后重跑，或改脚本配置。`
+export function noConclusionCommentText(stage: WorkflowStage, reason: GateNoConclusion): string {
+  const head = `闸门「${stage.name}」没给结论：`
+  const tail = '任务停在原地。'
+  switch (reason.kind) {
+    case 'missing_verdict':
+      return `${head}本轮回执里没有 \`verdict\`（也没有被接收的 \`ask\`）。补一次判定，或重跑这一轮。${tail}`
+    case 'no_checks':
+      return `${head}给了 \`pass\` 但一条 \`checks\` 都没有；\`pass\` 必须带全 0 的证据。补证据后重跑这一轮。${tail}`
+    case 'checks_not_zero':
+      return `${head}给了 \`pass\`，但证据里有非 0 退出码。先修再判，不要为了让流程前进而填 pass。${tail}`
+    case 'uncovered':
+      return `${head}第 ${reason.index} 条验收没有全 0 的证据（本轮 ${reason.total} 条）。给这条验收补一步，或重跑这一轮。${tail}`
+    case 'no_exit_code':
+      return `${head}这一轮没拿到退出码（${reason.errorCode ?? '原因未知'}）。看本轮步骤证据后重跑，或改脚本配置。${tail}`
   }
-  const checks = run.checks ?? []
-  const covered = new Set(
-    checks.flatMap((check) =>
-      check.exitCode === 0 && check.acceptance !== undefined ? [check.acceptance] : [],
-    ),
-  )
-  const missing = (stage.acceptance ?? []).findIndex((_, index) => !covered.has(index + 1))
-  if (missing >= 0) {
-    return `闸门「${stage.name}」没给结论：第 ${missing + 1} 条验收没有全 0 的证据（本轮 ${checks.length} 条）。给这条验收补一步，或重跑这一轮。`
-  }
-  return `闸门「${stage.name}」没给结论：本轮证据不足，任务停在原地等人。`
 }
 
 function withLabel(labels: readonly string[], label: string): string[] {
@@ -237,7 +262,7 @@ interface StageTransition {
 function stageTransitionFacts(
   view: View,
   run: SettledRun,
-  verdict: GateVerdict | undefined,
+  outcome: GateOutcome | undefined,
   now: Iso,
   env: Environment,
 ): StageTransition {
@@ -250,6 +275,9 @@ function stageTransitionFacts(
   const current = flow.stages.find((stage) => stage.id === task.currentStageId)
   if (!current) return { facts: [] }
   const succeeded = run.status === 'succeeded'
+  const verdict = outcome !== undefined && 'verdict' in outcome ? outcome.verdict : undefined
+  const noConclusion =
+    outcome !== undefined && 'noConclusion' in outcome ? outcome.noConclusion : undefined
   const event = succeeded
     ? ({ type: 'RUN_SUCCEEDED', runId: run.id, verdict } as const)
     : ({ type: 'RUN_FAILED', runId: run.id } as const)
@@ -293,12 +321,12 @@ function stageTransitionFacts(
    * 只在「确实停在闸门里」时留一句，跟着去向走的情形（errored 出口）不加噪音。
    */
   const noConclusionFacts = (): FactDraft[] => {
-    if (leftStage || current.judge === null || verdict !== undefined) return []
+    if (leftStage || current.judge === null || noConclusion === undefined) return []
     const comment: TaskComment = {
       id: env.nextId('task-comment'),
       taskId: task.id,
       author: 'agent',
-      text: noConclusionCommentText(current, run),
+      text: noConclusionCommentText(current, noConclusion),
       createdAt: now,
     }
     return [hostDraft('task.comment_added', { comment }, now)]
@@ -520,13 +548,13 @@ export function receiveRun(
     // 漏项由 `reviewFactsOf` 追加的任务评论说明「缺哪几条、怎么回应」。
     // M34：执行阶段不看业务结论（succeeded 即成功）；只有闸门阶段读回执 `verdict`，
     // 且 `pass` 要逐条覆盖验收条目（见 `gateVerdictOf`）。
-    const verdict =
+    const outcome =
       stage === undefined || stage.judge === null
         ? undefined
         : gateVerdictOf(input.receipt, stage, settled)
     const transition = review.blocked
       ? { facts: [] as FactDraft[] }
-      : stageTransitionFacts(view, settled, verdict, now, env)
+      : stageTransitionFacts(view, settled, outcome, now, env)
     facts.push(...transition.facts)
     // 进入效果：流转到目标阶段 / 原地重跑后立刻入队下一轮（形成链条）
     if (transition.enter !== undefined) {

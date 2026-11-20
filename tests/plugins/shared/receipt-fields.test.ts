@@ -168,10 +168,16 @@ describe('deliverables：声明了就要进 Receipt', () => {
   it('形状非法只丢 deliverables，同块其它键照常', () => {
     for (const bad of [
       'not-object',
+      { branch: 'x'.repeat(DELIVERABLE_LIMITS.maxChars + 1) },
+      { base: 123 },
       { commits: 'abc' },
       { commits: ['x'.repeat(DELIVERABLE_LIMITS.maxChars + 1)] },
       {
         commits: Array.from({ length: DELIVERABLE_LIMITS.maxCommits + 1 }, (_, i) => `c${i}`),
+      },
+      { files: 'not-array' },
+      {
+        files: Array.from({ length: DELIVERABLE_LIMITS.maxFiles + 1 }, (_, i) => `f${i}.ts`),
       },
       { gates: [{ cmd: '', exitCode: 0 }] },
       { gates: [{ cmd: 'pnpm check', exitCode: '0' }] },

@@ -22,6 +22,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { portInUse } from './dev-port.mjs'
 
 const require = createRequire(import.meta.url)
 // vite 8 起 exports 只暴露包根，`vite/bin/vite.js` 不再可 resolve：从包根拼 bin 路径
@@ -38,6 +39,11 @@ const SERVER_ENTRY = join(SERVER_OUT_DIR, 'index.js')
 const SETTLE_MS = 400
 const POLL_MS = 500
 const IS_WIN = process.platform === 'win32'
+/** 启动失败的重试上限与退避起点：端口占用、库被锁这类瞬时冲突不该把整个 dev 带走 */
+const MAX_START_FAILURES = 5
+const RETRY_BASE_MS = 1000
+/** 跑过这么久就算启动成功，失败计数清零 */
+const STABLE_MS = 5000
 
 const children = []
 let stopping = false
@@ -45,13 +51,18 @@ let poller = null
 let serverChild = null
 let restarting = false
 let restartQueued = false
+let startFailures = 0
 
-function run(name, args, env = {}) {
+function run(name, args, env = {}, onExit) {
   const child = spawn(process.execPath, args, {
     stdio: 'inherit',
     env: { ...process.env, ...env },
   })
   child.on('exit', (code) => {
+    if (onExit !== undefined) {
+      onExit(child, code)
+      return
+    }
     // 主动重启时走 restartServer 的路径，不能把整个 dev 脚本一起带走
     if (stopping || child.intentional === true) return
     console.error(`[dev] ${name} 退出（code=${String(code)}）`)
@@ -82,12 +93,48 @@ function shutdown(code) {
 process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
+/**
+ * 服务端非预期退出：瞬时冲突（端口占用、库被锁）退避重试，连续失败到上限才放弃。
+ *
+ * `node --watch` 时代子进程崩溃不会带走 dev 脚本，这里保持同样手感——否则一次
+ * 端口竞争就能让整个开发环境停摆。
+ */
+function onServerExit(child, code) {
+  clearTimeout(child.stableTimer)
+  if (stopping || child.intentional === true) return
+  startFailures += 1
+  if (startFailures > MAX_START_FAILURES) {
+    console.error(
+      `[dev] server 连续 ${MAX_START_FAILURES} 次启动失败（最后一次 code=${String(code)}），放弃`,
+    )
+    shutdown(code ?? 1)
+    return
+  }
+  const delay = RETRY_BASE_MS * 2 ** (startFailures - 1)
+  console.error(
+    `[dev] server 退出（code=${String(code)}），${delay}ms 后重试（${startFailures}/${MAX_START_FAILURES}）`,
+  )
+  setTimeout(() => {
+    if (stopping) return
+    restartServer().catch((error) => {
+      console.error('[dev] 服务端重启失败', error)
+      shutdown(1)
+    })
+  }, delay)
+}
+
 function startServer() {
   console.log(`[dev] 服务端 http://127.0.0.1:${PORT}（数据目录 ${DATA_DIR}）`)
-  serverChild = run('server', [SERVER_ENTRY], {
-    WORKBENCH_PORT: PORT,
-    WORKBENCH_DATA_DIR: DATA_DIR,
-  })
+  const child = run(
+    'server',
+    [SERVER_ENTRY],
+    { WORKBENCH_PORT: PORT, WORKBENCH_DATA_DIR: DATA_DIR },
+    onServerExit,
+  )
+  child.stableTimer = setTimeout(() => {
+    startFailures = 0
+  }, STABLE_MS)
+  serverChild = child
 }
 
 async function stopServer() {
@@ -131,6 +178,17 @@ function latestStamp(dir) {
     else if (entry.name.endsWith('.js')) latest = Math.max(latest, statSync(full).mtimeMs)
   }
   return latest
+}
+
+// R9：单实例保护。两份 dev 会共写 DATA_DIR 与 out/server，先起的 server 抢不到端口、
+// 活着却不监听；这里直接拒绝启动，并说清该结束谁。
+if (await portInUse(Number(PORT))) {
+  console.error(
+    `[dev] 端口 ${PORT} 已被占用：很可能还有另一个 dev 实例（旧会话没关）。\n` +
+      `      两份实例会共写数据目录 ${DATA_DIR} 与构建产物 ${SERVER_OUT_DIR}，先起的那份 server 会卡在启动上。\n` +
+      `      先结束旧实例（或换 WORKBENCH_PORT / WORKBENCH_DATA_DIR）再启动。`,
+  )
+  process.exit(1)
 }
 
 run('server:build', [viteBin, 'build', '--config', 'vite.server.config.mts', '--watch'])

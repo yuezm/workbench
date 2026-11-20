@@ -15,8 +15,8 @@
  * R1（2026-11-21）：**逐键容错**。旧口径「任一键不合格整块作废」会把同块的 `ask`
  * 一起丢掉（实测一次闸门卡死），现在坏键只丢它自己并留下原因。
  */
-import type { GateCheck, GateVerdict } from '@workbench/protocol/entities'
-import { ACCEPTANCE_LIMITS, GATE_VERDICTS } from '@workbench/protocol/entities'
+import type { GateCheck, GateVerdict, RunDeliverablesInput } from '@workbench/protocol/entities'
+import { ACCEPTANCE_LIMITS, DELIVERABLE_LIMITS, GATE_VERDICTS } from '@workbench/protocol/entities'
 import type { Ask, RawEvent, Receipt, SpawnTask } from '@workbench/protocol/inputs'
 import type { FindingAddress, ReviewFindingInput } from '@workbench/protocol/review'
 import { FINDING_DISPOSITIONS, REVIEW_LIMITS, REVIEW_SEVERITIES } from '@workbench/protocol/review'
@@ -43,6 +43,8 @@ export interface ReceiptBlock {
   findings?: ReviewFindingInput[]
   /** 逐条回应（M14）：`fixed` 必带 `checkRef`，其余必带 `note` */
   addresses?: FindingAddress[]
+  /** 阶段交付物（M28）：分支 / 基线 / 提交 / 文件 / 门禁，可只声明部分项 */
+  deliverables?: RunDeliverablesInput
   /** 验收自评（M21）：`no` 是验收段 1 基序号；越界条目由内核丢弃 */
 }
 
@@ -170,6 +172,31 @@ const parseChecks = (value: unknown): GateCheck[] | null => {
     }
   }
   return value as GateCheck[]
+}
+
+/**
+ * 阶段交付物（M28）：`{ branch?, base?, commits?, files?, gates? }`，可只声明部分项。
+ *
+ * 形状与宿主层 `checkDeliverables` 同口径；`gates` 与闸门 `checks` 同形，直接复用。
+ */
+const parseDeliverables = (value: unknown): RunDeliverablesInput | null => {
+  if (!isRecord(value)) return null
+  const textOf = (field: unknown): boolean =>
+    field === undefined ||
+    field === null ||
+    (typeof field === 'string' && field.length <= DELIVERABLE_LIMITS.maxChars)
+  if (!textOf(value.branch) || !textOf(value.base)) return null
+  const listOf = (field: unknown, max: number): boolean => {
+    if (field === undefined || field === null) return true
+    if (!Array.isArray(field) || field.length > max) return false
+    return field.every((item) => isText(item, DELIVERABLE_LIMITS.maxChars))
+  }
+  if (!listOf(value.commits, DELIVERABLE_LIMITS.maxCommits)) return null
+  if (!listOf(value.files, DELIVERABLE_LIMITS.maxFiles)) return null
+  if (value.gates !== undefined && value.gates !== null && parseChecks(value.gates) === null) {
+    return null
+  }
+  return value as RunDeliverablesInput
 }
 
 /**
@@ -363,6 +390,15 @@ export function receiptFromObject(parsed: unknown): ReceiptParse {
         }
         break
       }
+      case 'deliverables': {
+        const deliverables = parseDeliverables(value)
+        if (!deliverables) drop(key, value)
+        else {
+          block.deliverables = deliverables
+          fields += 1
+        }
+        break
+      }
       case 'findings': {
         const findings = parseFindings(value)
         if (!findings) drop(key, value)
@@ -402,6 +438,7 @@ export function applyReceiptFields(receipt: Receipt, block: ReceiptBlock): void 
   if (block.notes !== undefined) receipt.notes = block.notes
   if (block.verdict !== undefined) receipt.verdict = block.verdict
   if (block.checks !== undefined) receipt.checks = block.checks
+  if (block.deliverables !== undefined) receipt.deliverables = block.deliverables
   if (block.findings !== undefined) receipt.findings = block.findings
   if (block.addresses !== undefined) receipt.addresses = block.addresses
 }

@@ -290,7 +290,7 @@ export interface Receipt {
 
 - **解析位置**：解析器是纯函数 `packages/plugins/kit/src/receipt-block.ts`；`dsh` 执行器从 `result` 帧的 `output` 解析，`command` 执行器从 stdout 解析。解析结果只填 `Receipt` 的十一个字段，**不改 `output` 原文、不改终态、不抛错**。每个执行器的 `toReceipt` 都必须调 `applyReceiptBlock`——漏了任何一个字段，对应能力就整条断路：漏 `verdict` / `checks` 闸门永远停在判定上（含验收覆盖判据），漏 `findings` / `addresses` 评审硬门不触发。
 - **解析失败按键盘收（R1，2026-11-21）**：非法 JSON、非对象、十二键全无 → 整块不成立；**单个键**校验不过（`ask` 标题/选项超限、`later` 非 ISO、`events`/`spawn` 形状非法、`verdict` 非 `pass|fail`、`checks` 命令为空或退出码非整数、`checks[].acceptance` 非正整数、`findings` 小标重复、`addresses` 的 `fixed` 缺 `checkRef` 或 `rejected`/`deferred` 缺 `note` 等）→ **只丢该键**，其余键照常生效（原因随 `receiptFromObject` 的 `dropped` 返回，工具通道据此回错误）。空数组 / `null` 视为未提供（`checks: []` 不连累同块 `verdict`）。旧口径是「任一键不合格整块作废」，实测代价是一次闸门卡死（`findings[].severity` 用了 `Required`，把同块的 `ask` 一起丢掉）。SPEC 原「解析失败只重写最后一条回复、上限 2 次」需要额外 execute 帧与模型调用，**重写机制留 M6**（D15 已知边界），M4 不做。
-- 回执的 `ask / notices / resolves / later / events / spawn / notes / verdict / checks / findings / addresses` 到内核事实的映射见 SPEC-kernel「审批」「M8 任务派生」「M6.5 线程」「M11 闸门」「M14 评审回执」「M34 验收归属」与「事实目录」。
+- 回执的 `ask / notices / resolves / later / events / spawn / notes / verdict / checks / deliverables / findings / addresses` 到内核事实的映射见 SPEC-kernel「审批」「M8 任务派生」「M6.5 线程」「M11 闸门」「M14 评审回执」「M28 交付物」「M34 验收归属」与「事实目录」。`deliverables` 的解析与写回由 `receipt-fields.ts` 负责（M28 一度只在提示词与工具 schema 里有这个键，解析器漏了它，`runs.deliverables_json` 长期为 null；2026-11-21 补齐）。
 - **工具通道（M24）**：回执除了「回复末尾写 ```json 围栏块」，还可以由模型调一次工具交上来。
   - 字段校验只有一份：`packages/plugins/kit/src/receipt-fields.ts` 的 `receiptFromObject`（逐键，返回 `{ block, dropped }`）/ `applyReceiptFields`，`receipt-block`（文本）与 `receipt-tool`（工具）都调它；
   - 工具名白名单 `RECEIPT_TOOL_NAMES`（`workbench.receipt` / `mcp__workbench__receipt`），其余名字一律不认；

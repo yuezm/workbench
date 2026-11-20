@@ -1496,6 +1496,32 @@ describe('工具通道（M24）：tool_call 带回执参数', () => {
     expect(receipt.notices).toEqual(['来自工具'])
   })
 
+  // R1 回归：一次真实事故——findings 的 severity 用了 Required/Optional/Nit（协议只认
+  // blocker/high/medium/low），旧口径把同块的 ask 与 deliverables 一起丢掉，闸门卡死。
+  it('findings 非法时：ask 与 deliverables 仍然进回执（逐键容错）', async () => {
+    const h = harness()
+    const { running } = startRun(h)
+    const child = h.children[0]
+    child.emitStdout(frame({ v: 1, type: 'ready', runtime: 'dsh' }))
+    child.emitStdout(
+      toolCall({
+        ask: [{ title: '拍板', text: '选一个', options: ['A', 'B'], key: 'gate-verdict' }],
+        findings: [{ key: 'R1', severity: 'Required', claim: 'c', requiredAction: 'a' }],
+        deliverables: { branch: 'feat/x', commits: ['267a059'] },
+      }),
+    )
+    child.emitStdout(frame({ v: 1, type: 'result', status: 'completed', output: '评审完了。' }))
+    child.close(0)
+
+    const receipt = await running
+    expect(receipt.ask).toEqual([
+      { title: '拍板', text: '选一个', options: ['A', 'B'], key: 'gate-verdict' },
+    ])
+    expect(receipt.deliverables).toEqual({ branch: 'feat/x', commits: ['267a059'] })
+    expect(receipt.findings).toBeUndefined()
+    expect(receipt.verdict).toBeUndefined()
+  })
+
   it('两条通道都有：工具通道优先（不吃「最后一块围栏块」的歧义）', async () => {
     const h = harness()
     const { running } = startRun(h)

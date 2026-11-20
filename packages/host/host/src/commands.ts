@@ -32,6 +32,7 @@ import { mergePluginSetting, type PluginSettingSeed } from '@workbench/kernel/sc
 import { StoreError } from '@workbench/host-store/errors'
 import { reviewDocFileName, reviewMarkdown } from '@workbench/kernel/scopes/review'
 import { writeProjectDoc } from './artifacts'
+import type { ProjectAgentsInit } from './project-agents'
 import type { ReviewReport } from '@workbench/protocol/review'
 import { isDeclaredAppEvent } from '@workbench/app-events'
 
@@ -73,6 +74,15 @@ export interface CommandRouterDeps {
   hostView: HostViewResolver
   /** 插件命令依赖（M7）；未注入时 `plugin.set` 返回 unsupported */
   plugins?: PluginCommandDeps
+  /**
+   * 生成项目根的 `AGENTS.md`（M53）。装配根注入 `ensureProjectAgents`；未注入时不生成。
+   *
+   * 做成依赖而不是直接 import：写盘要碰文件系统，宿主测试不该真的往 `D:/work` 这类
+   * 夹具路径里落文件。
+   */
+  projectAgents?: (projectPath: string, projectName: string) => ProjectAgentsInit
+  /** 诊断出口（装配根传 `log`）：自动生成 AGENTS.md 失败时留痕，不打断命令 */
+  warn?: (message: string) => void
   /** 幂等键生成器（默认随机 UUID；测试可注入确定性值） */
   newCommandId?: () => string
 }
@@ -308,6 +318,25 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
     return deps.dispatch(command).facts
   }
 
+  /**
+   * 新项目落地后补一份默认 `AGENTS.md`（M53）。
+   *
+   * 只在 `project.created` 出现时动作：改项目（`project.update`）可能是指向一个已有仓库，
+   * 往别人的根目录塞文件不是「改项目」该有的副作用。
+   *
+   * 失败**不阻断**：事实已入账，没有 AGENTS.md 时一切照旧；诊断走 `warn` 出口。
+   */
+  const initAgentsOfCreated = (facts: readonly Fact[]): void => {
+    const ensure = deps.projectAgents
+    if (ensure === undefined) return
+    // `entityIdOf` 给 null 时下面这个比较恒不成立，无需另写一条分支
+    const id = entityIdOf(facts, 'project.created')
+    const project = store.query('projects.all').find((item) => item.id === id)
+    if (project === undefined) return
+    const result = ensure(project.path, project.name)
+    if (result.error !== null) deps.warn?.('AGENTS.md 未生成: ' + result.error)
+  }
+
   /** 编排：创建运行时（先探测通过才落库）。 */
   const createRuntime = async (
     command: Extract<Command, { type: 'runtime.create' }>,
@@ -481,6 +510,7 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       if (parsed.type === 'review.export') return exportReview(parsed)
 
       const facts = executePlain(parsed)
+      if (parsed.type === 'project.create') initAgentsOfCreated(facts)
       return { facts: summarize(facts), value: valueOf(parsed, facts) }
     },
     query: async (view, params) => {

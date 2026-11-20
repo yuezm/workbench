@@ -14,6 +14,7 @@ import { project } from '@workbench/kernel/scopes/project'
 import { viewSpec } from '@workbench/kernel/scopes/view-spec'
 import type { KernelPort } from '@workbench/kernel/core/types'
 import { createCommandRouter, type CommandRouter } from '@workbench/host/commands'
+import type { ProjectAgentsInit } from '@workbench/host/project-agents'
 import { createProjectionWriter } from '@workbench/host-store/projection-apply'
 import { createStore, StoreError } from '@workbench/host-store/index'
 import { createMemoryDb, sample } from './store/test-support'
@@ -54,7 +55,15 @@ interface Harness {
   port: ExecutorPort
 }
 
-function setup(options: { probeResult?: RuntimeProbe } = {}): Harness {
+function setup(
+  options: {
+    probeResult?: RuntimeProbe
+    /** 注入的 AGENTS.md 生成器（缺省 = 宿主不生成，与真实装配解耦） */
+    projectAgents?: (projectPath: string, projectName: string) => ProjectAgentsInit
+    /** 诊断出口（缺省不注入，与真实装配一致：装配根传 log） */
+    warn?: (message: string) => void
+  } = {},
+): Harness {
   const db = createMemoryDb()
   openDbs.push(db)
   const kernel: KernelPort = { decide, project, viewSpec, nextWakeAt }
@@ -93,6 +102,8 @@ function setup(options: { probeResult?: RuntimeProbe } = {}): Harness {
       if (view === 'runtimes.detected') return []
       return { runtimeId: params?.runtimeId ?? '' }
     },
+    ...(options.projectAgents === undefined ? {} : { projectAgents: options.projectAgents }),
+    ...(options.warn === undefined ? {} : { warn: options.warn }),
   })
   return { db, store, router, dispatched, probe, port }
 }
@@ -1457,5 +1468,45 @@ describe('createCommandRouter：review.export 的宿主侧判空（内核已先�
     await expect(
       hostOnlyRouter(h.store).dispatch({ commandId: 'hx5', type: 'review.export', taskId }),
     ).rejects.toThrow('未归属项目')
+  })
+})
+
+describe('host/commands 项目 AGENTS.md（M53）', () => {
+  it('project.create 后用项目路径与名称补一份默认 AGENTS.md', async () => {
+    const ensure = vi.fn((path: string): ProjectAgentsInit => ({
+      path: `${path}/AGENTS.md`,
+      created: true,
+      error: null,
+    }))
+    const { router } = setup({ projectAgents: ensure })
+
+    const result = await router.dispatch(projectCommand())
+
+    expect(ensure).toHaveBeenCalledWith('D:/work', '工作台')
+    expect(result.facts.map((fact) => fact.type)).toEqual(['project.created'])
+  })
+
+  it('生成失败不影响项目创建（诊断走 warn 出口）', async () => {
+    const ensure = vi.fn((): ProjectAgentsInit => ({
+      path: 'D:/work/AGENTS.md',
+      created: false,
+      error: '项目目录不存在',
+    }))
+    const warn = vi.fn()
+    const { router, store } = setup({ projectAgents: ensure, warn })
+
+    const result = await router.dispatch(projectCommand())
+
+    expect(result.value).not.toBeNull()
+    expect(store.query('projects.all')).toHaveLength(1)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('AGENTS.md'))
+  })
+
+  it('未装配时什么都不做（宿主测试与真实装配解耦）', async () => {
+    const { router, store } = setup()
+
+    await router.dispatch(projectCommand())
+
+    expect(store.query('projects.all')).toHaveLength(1)
   })
 })

@@ -44,6 +44,7 @@ import { defaultSpawn, killPidTree } from '@workbench/host/process'
 import { createProcessRegistry } from '@workbench/host/process-registry'
 import { reconcile } from '@workbench/host/reconcile'
 import { createScheduler, type Scheduler } from '@workbench/host/scheduler'
+import { ensureProjectAgents } from '@workbench/host/project-agents'
 import { openDatabase } from '@workbench/host-store/db'
 import { secureDataDir } from '@workbench/host/secure-dir'
 import { createNetCapability } from '@workbench/host/net'
@@ -618,6 +619,9 @@ export async function createWorkbench(options: WorkbenchOptions): Promise<Workbe
     executorDefaults,
     hostView,
     plugins: pluginDeps,
+    // M53：新项目落地后补一份默认 AGENTS.md（项目根没有才写）
+    projectAgents: ensureProjectAgents,
+    warn: log,
   })
   // M45：飞书连接面板用的本机 CLI 探测/登录（宿主 env 由它自己读，secret 只进不出）
   const lark = createLarkAdmin({ log })

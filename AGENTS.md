@@ -30,11 +30,20 @@
 
 ## 文档导航（按需读取）
 
-- [ARCHITECTURE](docs/ARCHITECTURE.md)：内核 + 插件 + 服务器形态总纲（架构问题先读这个）
-- [CAPABILITY-MAP](docs/CAPABILITY-MAP.md)：模块索引、边界决定、构建顺序
-- [docs/specs/](docs/specs/)：kernel / authority（准入·授权·研判·注意力）/ plugins / host / server / shell / ui / ai-workflow（ai-workflow 为迁移期行为基线）
-- [docs/testing/](docs/testing/)：测试策略（TESTING）、用例目录（TEST-CASES）、人工验收自查（ACCEPTANCE，含需求覆盖矩阵与走查表）；改代码前后跑 `pnpm check`
-- [docs/planning/](docs/planning/)：计划与任务；Electron → 服务端的迁移记录见 [rewrite-server-deployment](docs/planning/rewrite-server-deployment.md)，重构分阶段见 [refactor-plan](docs/planning/refactor-plan.md)，包拆分（`apps/*` + `packages/<域>/<包>`）见 [package-split-plan](docs/planning/package-split-plan.md)
+真相源——改动前先读对应的一份，不要凭记忆写：
+
+- 架构总纲：`docs/ARCHITECTURE.md`（内核 + 插件 + 服务器形态；架构问题先读这个）
+- 模块边界：`docs/CAPABILITY-MAP.md`（模块索引、边界决定、构建顺序）
+- 行为契约：`docs/specs/`（kernel / authority / plugins / host / server / shell / ui / ai-workflow，每一份 `SPEC-*.md` 都是对应模块的行为基线）
+- 质量底线：`CONSTRAINTS.md`（只放有命令、可判定的规则；复核记录与例外在 `docs/testing/CONSTRAINTS-HISTORY.md`）
+
+过程与产物：
+
+- 计划与任务：`docs/planning/`（迁移记录 `rewrite-server-deployment.md`、重构分阶段 `refactor-plan.md`、包拆分 `package-split-plan.md`）
+- 需求 / 特性文档：`docs/features/`
+- 测试策略与验收：`docs/testing/`（TESTING 策略 / TEST-CASES 用例目录 / ACCEPTANCE 人工验收与需求覆盖矩阵）
+- 评审报告导出：`docs/reviews/`（任务的「提升为文档」写这里，人决定何时提交）
+- 临时产物：`.scratch/`（一次性日志、临时测试文件，不进 git）
 
 ## 禁止事项
 

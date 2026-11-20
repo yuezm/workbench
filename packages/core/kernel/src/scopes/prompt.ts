@@ -48,6 +48,7 @@ import {
 } from '@workbench/protocol/receipt-keys'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import { TASK_COMMENT_LIMITS } from '@workbench/protocol/task-comment'
+import { balanceFences } from './markdown'
 
 /** 段与段之间空一行；`filter(Boolean)` 之后用它拼接，空段不留痕。 */
 const SECTION_SEPARATOR = '\n\n'
@@ -331,7 +332,7 @@ export const systemPromptText = (prompt: string, level = 1): string => {
   const body = prompt.trim()
   return body === ''
     ? ''
-    : `${heading(level, '系统提示')}${SECTION_SEPARATOR}${demoteHeadings(body, level + 1)}`
+    : `${heading(level, '系统提示')}${SECTION_SEPARATOR}${demoteHeadings(balanceFences(body), level + 1)}`
 }
 
 /**
@@ -342,7 +343,7 @@ export const systemPromptText = (prompt: string, level = 1): string => {
  */
 export const taskParagraph = (task: Pick<Task, 'title' | 'description'>, level = 1): string => {
   const head = heading(level, `任务：${task.title}`)
-  const body = demoteHeadings(task.description.trim(), level + 1)
+  const body = demoteHeadings(balanceFences(task.description.trim()), level + 1)
   return body === '' ? head : `${head}${SECTION_SEPARATOR}${body}`
 }
 
@@ -435,7 +436,7 @@ export const stageInstructionsText = (
   stage: Pick<WorkflowStage, 'instructions'> | null,
   level = 1,
 ): string => {
-  const body = demoteHeadings(stage?.instructions?.trim() ?? '', level + 1)
+  const body = demoteHeadings(balanceFences(stage?.instructions?.trim() ?? ''), level + 1)
   return body === '' ? '' : `${heading(level, '要做什么')}${SECTION_SEPARATOR}${body}`
 }
 

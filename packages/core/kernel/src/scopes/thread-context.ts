@@ -28,6 +28,7 @@ import type { ThreadEventRef, ThreadNote, ThreadRow } from '@workbench/protocol/
 import { THREAD_LIMITS } from '@workbench/protocol/thread'
 import { REVIEW_LIMITS, type ReviewFinding, type ReviewReport } from '@workbench/protocol/review'
 import type { Id, View } from '../core/types'
+import { dataBlock } from './markdown'
 import { openFindings, reportForThread } from './review'
 
 const truncate = (value: string, max: number): string => {
@@ -243,9 +244,14 @@ function precedingBlock(view: View, thread: ThreadRow, currentTaskId: Id | null)
   ].join('｜')
   const body = blank
     ? '（这一轮没有留下正文，原因见「执行索引」与任务动态）'
-    : truncateBlock(
-        output,
-        artifact === null ? THREAD_LIMITS.precedingChars : THREAD_LIMITS.precedingExcerptChars,
+    : // R6：派生正文走数据围栏。**先截断、后包裹**——围栏长度按截断后的文本算，
+      // 截断点落在反引号中间也不会提前闭合，正文里的 ``` 更关不掉外层。
+      dataBlock(
+        `run ${run.id} 正文节选`,
+        truncateBlock(
+          output,
+          artifact === null ? THREAD_LIMITS.precedingChars : THREAD_LIMITS.precedingExcerptChars,
+        ),
       )
   return [
     artifact === null

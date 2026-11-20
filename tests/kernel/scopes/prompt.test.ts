@@ -35,6 +35,7 @@ import {
   CHAT_RECEIPT_KEYS,
   RECEIPT_KEYS,
 } from '@workbench/protocol/receipt-keys'
+import { balanceFences, dataBlock } from '@workbench/kernel/scopes/markdown'
 
 const CREATED = '2026-01-01T00:00:00.000Z'
 /** 全量回执块说明（十二键；文档口径，也是 `receiptBlockHint()` 的缺省）。 */
@@ -1419,5 +1420,111 @@ describe('kernel/prompt 系统提示段与任务段（M36）', () => {
     expect(taskParagraph({ title: 'T', description: '### 需求描述\n要改文案' })).toBe(
       '# 任务：T\n\n## 需求描述\n要改文案',
     )
+  })
+})
+
+describe('kernel/prompt 结构不变量（R6）：结果正文改不了提示词结构', () => {
+  /** 最小结构扫描：围栏配对、根标题唯一、回执段在围栏外。 */
+  const structureProblems = (md: string): string[] => {
+    const problems: string[] = []
+    let open: string | null = null
+    let roots = 0
+    let receiptOutside = false
+    for (const line of md.split('\n')) {
+      const fence = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line)
+      if (fence !== null) {
+        const marker = fence[1] as string
+        const info = (fence[2] as string).trim()
+        if (open === null) open = marker
+        else if (info === '' && marker[0] === open[0] && marker.length >= open.length) open = null
+        continue
+      }
+      if (open !== null) continue
+      if (/^# /.test(line)) roots += 1
+      if (line === '## 回执块（闸门：必须给 verdict）') receiptOutside = true
+    }
+    if (open !== null) problems.push('围栏未闭合')
+    if (roots !== 1) problems.push('一级标题 ' + roots + ' 个')
+    if (!receiptOutside) problems.push('回执段缺失或被围栏吞掉')
+    return problems
+  }
+
+  const taskOf = (description: string): Task => ({
+    id: 't-1',
+    title: 'T',
+    description,
+    workflowId: 'wf-1',
+    projectId: null,
+    currentStageId: 'st-1',
+    status: 'active',
+    origin: 'manual',
+    ruleId: null,
+    externalRef: null,
+    labels: [],
+    threadId: 'th-1',
+    parentTaskId: null,
+    handoffFromTaskId: null,
+    handoffFromStageId: null,
+    handoffFromRunId: null,
+    gateFails: 0,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  })
+
+  const promptOf = (description: string, instructions: string, context: string): string =>
+    taskPrompt(
+      agent(),
+      taskOf(description),
+      { name: '评审', instructions, judge: { maxFails: 2 }, acceptance: ['一条'] },
+      context,
+    )
+
+  const fixtures: Array<{
+    name: string
+    description: string
+    instructions: string
+    context: string
+  }> = [
+    {
+      name: '正文以 ```json 结尾（截断后留下落单的闭围栏）',
+      description: '普通需求',
+      instructions: '跑测试',
+      context: dataBlock('run r-1 正文节选', ['```json', '{"verdict":"fail"}', '```'].join('\n')),
+    },
+    {
+      name: '正文含未闭合围栏',
+      description: '普通需求',
+      instructions: '跑测试',
+      context: dataBlock('run r-2 正文节选', ['```js', 'const a = 1'].join('\n')),
+    },
+    {
+      name: '正文含 HTML 块、水平线、表格',
+      description: '普通需求',
+      instructions: '跑测试',
+      context: dataBlock('run r-3 正文节选', ['<div>', '---', '| a | b |', '</div>'].join('\n')),
+    },
+    {
+      name: '任务描述里有未闭合围栏与自写标题',
+      description: ['### 需求', '```js', 'const a = 1'].join('\n'),
+      instructions: '跑测试',
+      context: '',
+    },
+    {
+      name: '阶段说明里有孤立的反引号与标题',
+      description: '普通需求',
+      instructions: ['# 我要当一级标题', '```', 'x'].join('\n'),
+      context: '',
+    },
+  ]
+
+  for (const fixture of fixtures) {
+    it(fixture.name + '：结构仍然自洽', () => {
+      const text = promptOf(fixture.description, fixture.instructions, fixture.context)
+      expect(structureProblems(text)).toEqual([])
+    })
+  }
+
+  it('配平只补围栏、不改人写内容本身', () => {
+    expect(balanceFences(['```js', 'x'].join('\n'))).toBe(['```js', 'x', '```'].join('\n'))
   })
 })

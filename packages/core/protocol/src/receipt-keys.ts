@@ -74,11 +74,11 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
     shape: '["先跑测试再提交"]',
   },
   verdict: {
-    text: '闸门结论：`pass` 或 `fail`。与 `checks` 成对给；`fail` 要在正文写清哪条没过。',
+    text: '闸门结论：`pass` 或 `fail`。`pass` 必须带全 0 的 `checks`；`fail` 不需要证据（失败本身就是要修），在正文写清哪条没过。',
     shape: '{"verdict":"pass","checks":[{"cmd":"pnpm check","exitCode":0}]}',
   },
   checks: {
-    text: '闸门证据：实际执行过的命令与退出码。`verdict` 为 `pass` 时每条 `exitCode` 必须是 0，且每条验收都要有一条 `acceptance` 指向它的全 0 证据。',
+    text: '闸门证据：**真的执行过**的命令与退出码（不许编造）。`verdict` 为 `pass` 时每条 `exitCode` 必须是 0，且每条验收都要有一条 `acceptance` 指向它的全 0 证据。',
     shape: '[{"cmd":"pnpm check","exitCode":0,"acceptance":1}]',
   },
   deliverables: {
@@ -87,7 +87,7 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
       '{"branch":"feat/x","base":"develop","commits":["57be895"],"files":["src/a.ts"],"gates":[{"cmd":"pnpm check","exitCode":0}]}',
   },
   findings: {
-    text: '评审待改项。`requiredAction` 写成「复跑什么、看到什么算修好」。',
+    text: '评审待改项。`severity` 只接受 blocker / high / medium / low（Critical→blocker、Required→high、Optional→medium、Nit→low；写别的词该键被忽略，不影响同块其它键）。`requiredAction` 写成「复跑什么、看到什么算修好」。',
     shape:
       '[{"key":"R1","severity":"blocker","location":"src/a.ts:42","claim":"...","requiredAction":"..."}]',
   },

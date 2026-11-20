@@ -7,6 +7,7 @@ import {
   receiptToolDefinition,
 } from '@workbench/plugins-kit/receipt-tool'
 import { RECEIPT_KEYS } from '@workbench/protocol/receipt-keys'
+import { REVIEW_SEVERITIES } from '@workbench/protocol/review'
 
 /** 一个各键齐全的合法回执对象 */
 const fullReceipt = {
@@ -53,6 +54,26 @@ describe('receiptToolDefinition', () => {
       expect(properties[key].type).toBe('array')
     }
     expect(properties.later.type).toBe('string')
+  })
+
+  // R3：severity 只在示例里出现过一次，schema 里没有枚举——模型照 review skill 的
+  // Critical/Required/Optional/Nit 写，整条 findings 被丢。枚举必须进 schema。
+  it('findings[].severity 的枚举与协议同源；checks[].exitCode 是整数', () => {
+    const properties = receiptToolDefinition().inputSchema.properties as Record<
+      string,
+      { items?: { properties?: Record<string, { type?: string; enum?: string[] }> } }
+    >
+    const finding = properties.findings.items?.properties ?? {}
+    expect(finding.severity.enum).toEqual([...REVIEW_SEVERITIES])
+    expect(finding.key.type).toBe('string')
+    expect(finding.requiredAction.type).toBe('string')
+
+    const check = properties.checks.items?.properties ?? {}
+    expect(check.cmd.type).toBe('string')
+    expect(check.exitCode.type).toBe('integer')
+
+    const ask = properties.ask.items?.properties ?? {}
+    expect(ask.options.type).toBe('array')
   })
 })
 

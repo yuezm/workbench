@@ -111,7 +111,13 @@ export function demoteHeadings(text: string, level: number): string {
  * 没有就写末尾围栏块。**不能只写围栏块**——工具开着也白开，模型不会主动去用；也不能
  * 只写工具——`command` 执行器与未注入的运行时没有工具，回执就全丢了。
  */
-const RECEIPT_BLOCK_INTRO = `需要人拍板、留知会、给结论或自评时：工具列表里有回执工具（\`mcp__workbench__receipt\` 或 \`workbench.receipt\`）就直接调用它，参数就是下面的对象；没有这个工具时，在**最终回复末尾**放一个 \`\`\`json 围栏块。两种写法等价，执行器都只认最后一份：不认识的键忽略，不是合法 JSON 就当没写——本轮照常结束，不挂起也不报错。用哪个键写哪个，下面每项的缩进行是形状示例：`
+const RECEIPT_BLOCK_INTRO = `需要人拍板、留知会、给结论或自评时：工具列表里有回执工具（\`mcp__workbench__receipt\` 或 \`workbench.receipt\`）就直接调用它，参数就是下面的对象；没有这个工具时，在**最终回复末尾**放一个 \`\`\`json 围栏块。两种写法等价，执行器只取最后一份回执：不认识的键忽略；**单个键不合法只丢该键**（工具通道会回原因，改完把完整回执重发一次）。用哪个键写哪个，下面每项的缩进行是形状示例：`
+
+/**
+ * 闸门轮的回执额外硬约束（R7）：回执段标题写「可选」、开场白又说「不挂起也不报错」，
+ * 与闸门段「必须给 verdict」自相矛盾——实测模型因此干脆不给结论。
+ */
+const GATE_RECEIPT_RULE = `本阶段是**闸门**：回执里必须有 \`verdict\`（\`pass\` / \`fail\`）。\`fail\` 不需要 \`checks\`，但正文要写清哪条没过；\`pass\` 必须有全 0 的 \`checks\` 并逐条覆盖验收。缺 \`verdict\` 会让任务停在闸门等人，不会自动放行。`
 
 /**
  * 回执块说明（确定性文本）：标题 + 开场白 + 逐键「一句话 + 形状示例」+ 上限。
@@ -122,14 +128,20 @@ const RECEIPT_BLOCK_INTRO = `需要人拍板、留知会、给结论或自评时
  *
  * `level`：标题级别（提示词根下是 `##`；单独的聊天提示词同理）。
  */
-export const receiptBlockHint = (keys: readonly ReceiptKey[] = RECEIPT_KEYS, level = 1): string => {
+export const receiptBlockHint = (
+  keys: readonly ReceiptKey[] = RECEIPT_KEYS,
+  level = 1,
+  options: { gate?: boolean } = {},
+): string => {
   const keyLines = keys.map((key) => {
     const doc = RECEIPT_KEY_DOCS[key]
     return `- \`${key}\` ${doc.text}\n  \`${doc.shape}\``
   })
+  const gate = options.gate === true
   return [
-    heading(level, '回执块（可选）'),
+    heading(level, gate ? '回执块（闸门：必须给 verdict）' : '回执块（可选）'),
     RECEIPT_BLOCK_INTRO,
+    ...(gate ? [GATE_RECEIPT_RULE] : []),
     ...keyLines,
     RECEIPT_LIMITS_LINE,
   ].join('\n')
@@ -406,7 +418,9 @@ export const taskPrompt = (
     taskCommentsText(comments ?? [], 2),
     threadContext ?? '',
     threadContext ? CROSS_TASK_RULE : '',
-    receiptBlockHint(taskReceiptKeys(stage, task, options), 2),
+    receiptBlockHint(taskReceiptKeys(stage, task, options), 2, {
+      gate: stage?.judge != null,
+    }),
   ]
     .filter(Boolean)
     .join(SECTION_SEPARATOR)

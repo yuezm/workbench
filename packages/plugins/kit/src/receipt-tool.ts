@@ -18,6 +18,8 @@
 import type { ReceiptBlock } from './receipt-fields'
 import { receiptFromObject } from './receipt-fields'
 import { RECEIPT_KEYS, RECEIPT_KEY_DOCS } from '@workbench/protocol/receipt-keys'
+import { GATE_VERDICTS } from '@workbench/protocol/entities'
+import { FINDING_DISPOSITIONS, REVIEW_SEVERITIES } from '@workbench/protocol/review'
 
 /** 注入给 CLI 的 MCP server 名（公开工具名的前缀） */
 export const RECEIPT_TOOL_SERVER = 'workbench'
@@ -40,20 +42,115 @@ export interface ReceiptToolDefinition {
   inputSchema: Record<string, unknown>
 }
 
-/** 每个键的 JSON Schema 片段（只给类型与一句话，细节留给人读的提示词）。 */
+/**
+ * 每个键的 JSON Schema 片段：**嵌套形状与枚举都写进来**（R3）。
+ *
+ * 只给顶层类型不够：模型照 review skill 写 `severity: "Required"` 时，schema 若不声明
+ * `blocker|high|medium|low`，客户端就没有机会在调用前拦住它。枚举全部取自协议常量，
+ * 不另抄一份（`receipt-mcp-server.cjs` 的镜像由 parity 用例盯着）。
+ */
 const SCHEMA_OF: Record<(typeof RECEIPT_KEYS)[number], Record<string, unknown>> = {
-  ask: { type: 'array', items: { type: 'object' } },
+  ask: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        text: { type: 'string' },
+        options: { type: 'array', items: { type: 'string' } },
+        key: { type: 'string' },
+      },
+      required: ['title', 'options'],
+    },
+  },
   notices: { type: 'array', items: { type: 'string' } },
   resolves: { type: 'array', items: { type: 'string' } },
   later: { type: 'string' },
-  events: { type: 'array', items: { type: 'object' } },
-  spawn: { type: 'array', items: { type: 'object' } },
+  events: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        source: { type: 'string' },
+        type: { type: 'string' },
+        subject: { type: 'string' },
+        summary: { type: 'string' },
+      },
+      required: ['source', 'type', 'subject'],
+    },
+  },
+  spawn: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        subject: { type: 'string' },
+        summary: { type: 'string' },
+        stageId: { type: 'string' },
+        key: { type: 'string' },
+      },
+      required: ['subject'],
+    },
+  },
   notes: { type: 'array', items: { type: 'string' } },
-  verdict: { type: 'string', enum: ['pass', 'fail'] },
-  checks: { type: 'array', items: { type: 'object' } },
-  deliverables: { type: 'object' },
-  findings: { type: 'array', items: { type: 'object' } },
-  addresses: { type: 'array', items: { type: 'object' } },
+  verdict: { type: 'string', enum: [...GATE_VERDICTS] },
+  checks: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        cmd: { type: 'string' },
+        exitCode: { type: 'integer' },
+        acceptance: { type: 'integer' },
+      },
+      required: ['cmd', 'exitCode'],
+    },
+  },
+  deliverables: {
+    type: 'object',
+    properties: {
+      branch: { type: 'string' },
+      base: { type: 'string' },
+      commits: { type: 'array', items: { type: 'string' } },
+      files: { type: 'array', items: { type: 'string' } },
+      gates: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { cmd: { type: 'string' }, exitCode: { type: 'integer' } },
+          required: ['cmd', 'exitCode'],
+        },
+      },
+    },
+  },
+  findings: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', maxLength: 32 },
+        severity: { type: 'string', enum: [...REVIEW_SEVERITIES] },
+        location: { type: 'string', maxLength: 300 },
+        claim: { type: 'string', maxLength: 500 },
+        evidence: { type: 'string', maxLength: 2000 },
+        requiredAction: { type: 'string', maxLength: 500 },
+      },
+      required: ['key', 'severity', 'claim', 'requiredAction'],
+    },
+  },
+  addresses: {
+    type: 'array',
+    items: {
+      type: 'object',
+      properties: {
+        findingId: { type: 'string' },
+        disposition: { type: 'string', enum: [...FINDING_DISPOSITIONS] },
+        checkRef: { type: 'string' },
+        note: { type: 'string' },
+      },
+      required: ['findingId', 'disposition'],
+    },
+  },
 }
 
 /**

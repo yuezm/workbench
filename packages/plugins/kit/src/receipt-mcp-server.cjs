@@ -38,19 +38,100 @@ const RECEIPT_KEYS = [
   'addresses',
 ]
 
-const TYPE_OF = {
-  ask: 'array',
-  notices: 'array',
-  resolves: 'array',
-  later: 'string',
-  events: 'array',
-  spawn: 'array',
-  notes: 'array',
-  verdict: 'string',
-  checks: 'array',
-  deliverables: 'object',
-  findings: 'array',
-  addresses: 'array',
+/**
+ * 枚举镜像（R3）：与 `protocol` 的 `GATE_VERDICTS` / `REVIEW_SEVERITIES` /
+ * `FINDING_DISPOSITIONS` 同源，由 `tests/plugins/shared/receipt-mcp-server.test.ts` 断言。
+ * 手写副本的原因：这是独立子进程，import 不到主进程的 TS 模块。
+ */
+const VERDICTS = ['pass', 'fail']
+const SEVERITIES = ['blocker', 'high', 'medium', 'low']
+const DISPOSITIONS = ['fixed', 'rejected', 'deferred']
+
+const listOf = (item) => ({ type: 'array', items: item })
+const obj = (properties, required) => ({ type: 'object', properties, required })
+
+/** 嵌套 schema：把枚举与必需字段写到模型看得见的地方（同 `receipt-tool.ts` 的 SCHEMA_OF）。 */
+const SCHEMA_OF = {
+  ask: listOf(
+    obj(
+      {
+        title: { type: 'string' },
+        text: { type: 'string' },
+        options: listOf({ type: 'string' }),
+        key: { type: 'string' },
+      },
+      ['title', 'options'],
+    ),
+  ),
+  notices: listOf({ type: 'string' }),
+  resolves: listOf({ type: 'string' }),
+  later: { type: 'string' },
+  events: listOf(
+    obj(
+      {
+        source: { type: 'string' },
+        type: { type: 'string' },
+        subject: { type: 'string' },
+        summary: { type: 'string' },
+      },
+      ['source', 'type', 'subject'],
+    ),
+  ),
+  spawn: listOf(
+    obj(
+      {
+        subject: { type: 'string' },
+        summary: { type: 'string' },
+        stageId: { type: 'string' },
+        key: { type: 'string' },
+      },
+      ['subject'],
+    ),
+  ),
+  notes: listOf({ type: 'string' }),
+  verdict: { type: 'string', enum: VERDICTS },
+  checks: listOf(
+    obj(
+      { cmd: { type: 'string' }, exitCode: { type: 'integer' }, acceptance: { type: 'integer' } },
+      ['cmd', 'exitCode'],
+    ),
+  ),
+  deliverables: {
+    type: 'object',
+    properties: {
+      branch: { type: 'string' },
+      base: { type: 'string' },
+      commits: listOf({ type: 'string' }),
+      files: listOf({ type: 'string' }),
+      gates: listOf(
+        obj({ cmd: { type: 'string' }, exitCode: { type: 'integer' } }, ['cmd', 'exitCode']),
+      ),
+    },
+  },
+  findings: listOf(
+    obj(
+      {
+        key: { type: 'string', maxLength: 32 },
+        severity: { type: 'string', enum: SEVERITIES },
+        location: { type: 'string', maxLength: 300 },
+        claim: { type: 'string', maxLength: 500 },
+        evidence: { type: 'string', maxLength: 2000 },
+        requiredAction: { type: 'string', maxLength: 500 },
+      },
+      ['key', 'severity', 'claim', 'requiredAction'],
+    ),
+  ),
+  addresses: listOf(
+    obj(
+      {
+        findingId: { type: 'string' },
+        disposition: { type: 'string', enum: DISPOSITIONS },
+        checkRef: { type: 'string' },
+        note: { type: 'string' },
+      },
+      ['findingId', 'disposition'],
+    ),
+  ),
 }
 
 const TOOL = {
@@ -62,8 +143,65 @@ const TOOL = {
   inputSchema: {
     type: 'object',
     additionalProperties: true,
-    properties: Object.fromEntries(RECEIPT_KEYS.map((key) => [key, { type: TYPE_OF[key] }])),
+    properties: Object.fromEntries(RECEIPT_KEYS.map((key) => [key, SCHEMA_OF[key]])),
   },
+}
+
+const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/**
+ * 最小校验（R2）：只查协议枚举与必需形状——完整校验仍在内核侧（receipt-fields）。
+ *
+ * 为什么这里也要查：模型拿不到内核的判定结果，server 若照旧回「回执已收到」，
+ * 它会确信自己交上去了（实测正文里宣称「已发卡」而事实里没有）。
+ *
+ * @returns {string[]} 问题清单；空数组表示通过
+ */
+const problemsOf = (args) => {
+  const problems = []
+  const checkList = (key, value, each) => {
+    if (value === undefined || value === null) return
+    if (!Array.isArray(value)) {
+      problems.push(`${key} 必须是数组`)
+      return
+    }
+    value.forEach((entry, index) => each(entry, `${key}[${index}]`))
+  }
+
+  if (args.verdict !== undefined && args.verdict !== null && !VERDICTS.includes(args.verdict)) {
+    problems.push(`verdict 只能是 ${VERDICTS.join(' / ')}（收到 ${JSON.stringify(args.verdict)}）`)
+  }
+  checkList('findings', args.findings, (entry, at) => {
+    if (!isObject(entry)) return problems.push(`${at} 必须是对象`)
+    if (!SEVERITIES.includes(entry.severity)) {
+      problems.push(
+        `${at}.severity 只能是 ${SEVERITIES.join(' / ')}（收到 ${JSON.stringify(entry.severity)}）`,
+      )
+    }
+    for (const field of ['key', 'claim', 'requiredAction']) {
+      if (typeof entry[field] !== 'string' || entry[field].trim() === '') {
+        problems.push(`${at}.${field} 必填`)
+      }
+    }
+  })
+  checkList('checks', args.checks, (entry, at) => {
+    if (!isObject(entry)) return problems.push(`${at} 必须是对象`)
+    if (typeof entry.cmd !== 'string' || entry.cmd.trim() === '') problems.push(`${at}.cmd 必填`)
+    if (!Number.isInteger(entry.exitCode)) problems.push(`${at}.exitCode 必须是整数`)
+  })
+  checkList('ask', args.ask, (entry, at) => {
+    if (!isObject(entry)) return problems.push(`${at} 必须是对象`)
+    if (!Array.isArray(entry.options) || entry.options.length === 0) {
+      problems.push(`${at}.options 需要非空数组`)
+    }
+  })
+  checkList('addresses', args.addresses, (entry, at) => {
+    if (!isObject(entry)) return problems.push(`${at} 必须是对象`)
+    if (!DISPOSITIONS.includes(entry.disposition)) {
+      problems.push(`${at}.disposition 只能是 ${DISPOSITIONS.join(' / ')}`)
+    }
+  })
+  return problems
 }
 
 const send = (message) => {
@@ -112,6 +250,24 @@ const handle = (message) => {
       const name = params && params.name
       if (name !== TOOL.name) {
         failure(id, -32602, `未知工具：${String(name)}`)
+        return
+      }
+      // R2：验不过就回 isError + 可读原因，让模型在同一轮里改；不再一律「已收到」
+      const args = params && params.arguments === undefined ? {} : params && params.arguments
+      const problems = isObject(args) ? problemsOf(args) : ['参数必须是对象（键见 tools/list）']
+      if (problems.length > 0) {
+        result(id, {
+          content: [
+            {
+              type: 'text',
+              text:
+                '回执没有全部被接受，原因：\n- ' +
+                problems.join('\n- ') +
+                '\n修好后请把完整回执重发一次（不要只发修正的那部分）。',
+            },
+          ],
+          isError: true,
+        })
         return
       }
       // 参数不做业务校验：校验在内核侧（receipt-fields），这里只确认收到

@@ -10,6 +10,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { RECEIPT_KEYS } from '@workbench/protocol/receipt-keys'
+import { REVIEW_SEVERITIES } from '@workbench/protocol/review'
 
 const SERVER = fileURLToPath(
   new URL('../../../packages/plugins/kit/src/receipt-mcp-server.cjs', import.meta.url),
@@ -106,5 +107,42 @@ describe('receipt-mcp-server（MCP stdio）', () => {
     await new Promise<void>((resolve) => child.on('close', () => resolve()))
     expect(lines).toHaveLength(1)
     expect(JSON.parse(lines[0])).toMatchObject({ id: 1, result: {} })
+  })
+
+  // R3：schema 里没有枚举，模型只能猜；这里钉住 server 侧镜像与协议同源。
+  it('tools/list 的 findings.severity 枚举与 REVIEW_SEVERITIES 同源', async () => {
+    const [list] = await conversation([request(1, 'tools/list')])
+    const tools = (list.result?.tools ?? []) as Array<{
+      inputSchema: {
+        properties: Record<string, { items?: { properties?: Record<string, { enum?: string[] }> } }>
+      }
+    }>
+    const severity = tools[0]?.inputSchema.properties.findings?.items?.properties?.severity
+    expect(severity?.enum).toEqual([...REVIEW_SEVERITIES])
+  })
+
+  // R2：server 以前不校验就回「回执已收到」，模型据此宣称已发卡，事实里却没有。
+  it('非法载荷回 isError 与可读原因（不再假成功）', async () => {
+    const replies = await conversation([
+      request(1, 'initialize', { protocolVersion: '2024-11-05' }),
+      request(2, 'tools/call', {
+        name: 'receipt',
+        arguments: {
+          findings: [{ key: 'R1', severity: 'Required', claim: 'c', requiredAction: 'a' }],
+        },
+      }),
+    ])
+    const call = replies[1]?.result as
+      { isError?: boolean; content?: Array<{ text?: string }> } | undefined
+    expect(call?.isError).toBe(true)
+    expect(call?.content?.[0]?.text).toContain('severity')
+    expect(call?.content?.[0]?.text).toContain('blocker')
+  })
+
+  it('合法载荷仍回「回执已收到」', async () => {
+    const replies = await conversation([
+      request(1, 'tools/call', { name: 'receipt', arguments: { notices: ['x'] } }),
+    ])
+    expect(replies[0]?.result).toMatchObject({ isError: false })
   })
 })

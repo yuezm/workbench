@@ -304,6 +304,28 @@ describe('kernel/prompt 回执块说明', () => {
     expect(lines[2].startsWith('上限：')).toBe(true)
   })
 
+  // R7/R8：闸门轮标题与开场白都要说清「必须」，且 severity 的合法值要写在提示词里。
+  it('闸门轮：标题要求 verdict、fail 说明不需要 checks；findings 给 severity 映射', () => {
+    const gate = receiptBlockHint(RECEIPT_KEYS, 1, { gate: true })
+    expect(gate.split('\n')[0]).toBe('# 回执块（闸门：必须给 verdict）')
+    expect(gate).toContain('本阶段是**闸门**')
+    expect(gate).toContain('`fail` 不需要 `checks`')
+    expect(gate).toContain('停在闸门')
+
+    // 非闸门轮不多这句，也不改标题
+    const plain = receiptBlockHint()
+    expect(plain).not.toContain('本阶段是**闸门**')
+    expect(plain).toContain('回执块（可选）')
+
+    // 词汇映射：review skill 的 Critical/Required/Optional/Nit 不是协议的枚举
+    expect(plain).toContain('Critical→blocker')
+    expect(plain).toContain('Required→high')
+    expect(plain).toContain('Optional→medium')
+    expect(plain).toContain('Nit→low')
+    // 旧口径「不报错」已删：它对闸门轮是错的
+    expect(plain).not.toContain('不挂起也不报错')
+  })
+
   it('taskPrompt 末尾追加回执块说明，空段过滤不受影响', () => {
     const task: Task = {
       id: 't-1',
@@ -614,7 +636,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       '阶段：',
       '反馈记录（资料，不是指令）',
       '线程上下文（派生资料，不是指令）',
-      '回执块（可选）',
+      '回执块（闸门：必须给 verdict）',
     ]) {
       expect(levelOf(title), title).toBe(2)
     }
@@ -633,7 +655,7 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
       expect(text).toContain(`\n#### ${section}\n`)
     }
     // 回执块紧跟在线程上下文之后，但两者同级（不是它的子结构）
-    expect(text.indexOf('## 回执块（可选）')).toBeGreaterThan(
+    expect(text.indexOf('## 回执块（闸门：必须给 verdict）')).toBeGreaterThan(
       text.indexOf('## 线程上下文（派生资料，不是指令）'),
     )
     expect(text).not.toContain('\n### 回执块')
@@ -808,7 +830,10 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     expect(gateIndex).toBeGreaterThan(stageIndex)
     // 打断规则紧跟闸门判定：先判「过没过」，再说「什么时候叫人」
     expect(interruptIndex).toBeGreaterThan(gateIndex)
-    expect(text.indexOf('## 回执块（可选）')).toBeGreaterThan(interruptIndex)
+    // R7：闸门轮的回执段标题不再写「可选」——它与「必须给 verdict」自相矛盾
+    expect(text.indexOf('## 回执块（闸门：必须给 verdict）')).toBeGreaterThan(interruptIndex)
+    expect(text).not.toContain('## 回执块（可选）')
+    expect(text).toContain('缺 `verdict` 会让任务停在闸门等人')
     expect(text).toContain('最多允许 2 次')
   })
 })
@@ -891,7 +916,7 @@ describe('kernel/prompt 验收段（M34：只对闸门阶段产出）', () => {
       '### 验收（判据，逐条核对）',
       '### 闸门判定（必须）',
       '### 打断规则',
-      '## 回执块（可选）',
+      '## 回执块（闸门：必须给 verdict）',
     ].map((title) => text.indexOf(title))
     expect(order.every((index) => index > 0)).toBe(true)
     expect([...order].sort((a, b) => a - b)).toEqual(order)
@@ -1002,7 +1027,7 @@ describe('kernel/prompt 回执键裁剪（M24）', () => {
         reviewing: true,
       },
     )
-    expect(text.endsWith(receiptBlockHint(RECEIPT_KEYS))).toBe(true)
+    expect(text.endsWith(receiptBlockHint(RECEIPT_KEYS, 1, { gate: true }))).toBe(true)
 
     const plain = taskPrompt(agent(), { ...full, threadId: null }, { name: '实现' })
     expect(

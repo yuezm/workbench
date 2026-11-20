@@ -5,12 +5,15 @@
  * - 文本通道（`receipt-block.ts`）：从输出里切最后一个 ```json 围栏块；
  * - 工具通道（`receipt-tool.ts`）：从 `tool_call` 帧的 `arguments` 里拿。
  *
- * 拿到对象之后一律走 `receiptFromObject`——字段口径、上限、整块忽略的判据只有一份，
+ * 拿到对象之后一律走 `receiptFromObject`——字段口径、上限、丢键判据只有一份，
  * 不会出现「文本能过、工具过不了」这种双标准。
  *
  * 与 protocol 的分工（沿用 M4）：本文件是更严的前置过滤（空选项 `ask`、非 ISO `later`、
  * 重复小标的 `findings`、缺 `checkRef` 的 `fixed` …），宿主层 `protocol/validate` 只做
  * 形状兜底。上限常量共用，不在这里另定义一份。
+ *
+ * R1（2026-11-21）：**逐键容错**。旧口径「任一键不合格整块作废」会把同块的 `ask`
+ * 一起丢掉（实测一次闸门卡死），现在坏键只丢它自己并留下原因。
  */
 import type { GateCheck, GateVerdict } from '@workbench/protocol/entities'
 import { ACCEPTANCE_LIMITS, GATE_VERDICTS } from '@workbench/protocol/entities'
@@ -209,17 +212,68 @@ const parseAddresses = (value: unknown): FindingAddress[] | null => {
   return value as FindingAddress[]
 }
 
+/** 被丢掉的一个键：键名 + 一句可读的原因（R1：坏键只丢它自己）。 */
+export interface ReceiptDrop {
+  key: (typeof RECEIPT_KEYS)[number]
+  reason: string
+}
+
+/** 逐键解析的结果：能用的块（一个键都没成时是 null）+ 被丢掉的键。 */
+export interface ReceiptParse {
+  block: ReceiptBlock | null
+  dropped: ReceiptDrop[]
+}
+
+/**
+ * 被丢键的说明：优先说该键自己的口径（模型照它改就能过），否则给一句通用的。
+ *
+ * 只用于诊断与人读，不参与校验判定。
+ */
+function dropReason(key: (typeof RECEIPT_KEYS)[number], value: unknown): string {
+  switch (key) {
+    case 'verdict':
+      return `${key}: 只能是 pass / fail`
+    case 'checks':
+      return `${key}: 每条需要 cmd（非空）与 exitCode（整数；acceptance 1–12 可选）`
+    case 'findings':
+      return `${key}: severity 只能是 blocker / high / medium / low（Critical / Required / Optional / Nit 不认）`
+    case 'addresses':
+      return `${key}: disposition 只能是 fixed / rejected / deferred；fixed 带 checkRef，其余带 note`
+    case 'ask':
+      return `${key}: 需要 title 与非空 options（≤20 项，每项 ≤200 字）`
+    case 'events':
+      return `${key}: source / type / subject 必填`
+    case 'spawn':
+      return `${key}: subject 必填；batch 1–20 的整数`
+    case 'later':
+      return `${key}: 需要 ISO 8601 时刻`
+    case 'deliverables':
+      return `${key}: 需要对象（branch / base / commits / files / gates）`
+    default:
+      return `${key}: 形状或长度超出上限（${Array.isArray(value) ? '数组' : typeof value}）`
+  }
+}
+
 /**
  * 回执对象 → 回执块（fence 与 tool 共用）。
  *
- * 十一键全无、或任一字段校验不过 → `null`（整块忽略，不做部分采纳）。
- * 空数组 / `null` 视为未提供（`checks: []` 不连累同块 `verdict`）。
+ * **逐键容错（R1）**：每个键独立校验，校验不过的键丢掉、其余照收——一个坏
+ * `findings[].severity` 不能连坐同块的 `ask`（实测代价是一次闸门卡死）。
+ * 未知键与 `null` 值一律忽略；空数组视为未提供。
+ *
+ * 一个合法键都没有时 `block` 为 `null`，但 `dropped` 仍带原因（工具通道据此回错误）。
  */
-export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
-  if (!isRecord(parsed)) return null
+export function receiptFromObject(parsed: unknown): ReceiptParse {
+  if (!isRecord(parsed)) return { block: null, dropped: [] }
 
   const block: ReceiptBlock = {}
+  const dropped: ReceiptDrop[] = []
   let fields = 0
+
+  /** 校验失败：丢掉这个键，记一句原因，继续下一个键。 */
+  const drop = (key: (typeof RECEIPT_KEYS)[number], value: unknown): void => {
+    dropped.push({ key, reason: dropReason(key, value) })
+  }
 
   for (const key of RECEIPT_KEYS) {
     if (!Object.prototype.hasOwnProperty.call(parsed, key)) continue
@@ -229,8 +283,8 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
     switch (key) {
       case 'ask': {
         const ask = parseAskList(value)
-        if (!ask) return null
-        if (ask.length > 0) {
+        if (!ask) drop(key, value)
+        else if (ask.length > 0) {
           block.ask = ask
           fields += 1
         }
@@ -238,8 +292,8 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
       }
       case 'notices': {
         const notices = parseNotices(value)
-        if (!notices) return null
-        if (notices.length > 0) {
+        if (!notices) drop(key, value)
+        else if (notices.length > 0) {
           block.notices = notices
           fields += 1
         }
@@ -247,8 +301,8 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
       }
       case 'resolves': {
         const resolves = parseResolves(value)
-        if (!resolves) return null
-        if (resolves.length > 0) {
+        if (!resolves) drop(key, value)
+        else if (resolves.length > 0) {
           block.resolves = resolves
           fields += 1
         }
@@ -256,15 +310,17 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
       }
       case 'later': {
         const later = parseLater(value)
-        if (!later) return null
-        block.later = later
-        fields += 1
+        if (!later) drop(key, value)
+        else {
+          block.later = later
+          fields += 1
+        }
         break
       }
       case 'events': {
         const events = parseEvents(value)
-        if (!events) return null
-        if (events.length > 0) {
+        if (!events) drop(key, value)
+        else if (events.length > 0) {
           block.events = events
           fields += 1
         }
@@ -272,8 +328,8 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
       }
       case 'spawn': {
         const spawn = parseSpawnList(value)
-        if (!spawn) return null
-        if (spawn.length > 0) {
+        if (!spawn) drop(key, value)
+        else if (spawn.length > 0) {
           block.spawn = spawn
           fields += 1
         }
@@ -281,8 +337,8 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
       }
       case 'notes': {
         const notes = parseNotes(value)
-        if (!notes) return null
-        if (notes.length > 0) {
+        if (!notes) drop(key, value)
+        else if (notes.length > 0) {
           block.notes = notes
           fields += 1
         }
@@ -290,16 +346,18 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
       }
       case 'verdict': {
         const verdict = parseVerdict(value)
-        if (!verdict) return null
-        block.verdict = verdict
-        fields += 1
+        if (!verdict) drop(key, value)
+        else {
+          block.verdict = verdict
+          fields += 1
+        }
         break
       }
       case 'checks': {
         const checks = parseChecks(value)
-        if (!checks) return null
+        if (!checks) drop(key, value)
         // 空数组 = 没给证据：不当作有效键，但也不连累同块的 verdict
-        if (checks.length > 0) {
+        else if (checks.length > 0) {
           block.checks = checks
           fields += 1
         }
@@ -307,8 +365,8 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
       }
       case 'findings': {
         const findings = parseFindings(value)
-        if (!findings) return null
-        if (findings.length > 0) {
+        if (!findings) drop(key, value)
+        else if (findings.length > 0) {
           block.findings = findings
           fields += 1
         }
@@ -316,8 +374,8 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
       }
       case 'addresses': {
         const addresses = parseAddresses(value)
-        if (!addresses) return null
-        if (addresses.length > 0) {
+        if (!addresses) drop(key, value)
+        else if (addresses.length > 0) {
           block.addresses = addresses
           fields += 1
         }
@@ -326,7 +384,7 @@ export function receiptFromObject(parsed: unknown): ReceiptBlock | null {
     }
   }
 
-  return fields > 0 ? block : null
+  return { block: fields > 0 ? block : null, dropped }
 }
 
 /**

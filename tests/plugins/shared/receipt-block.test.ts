@@ -108,7 +108,7 @@ describe('parseReceiptBlock：键与字段', () => {
     expect(parseReceiptBlock(blockOf({}))).toBeNull()
   })
 
-  it('spawn：合法子任务原样返回；空标题 / 批次越界 / 条数超限整块忽略', () => {
+  it('spawn：合法子任务原样返回；空标题 / 批次越界 / 条数超限只丢 spawn，同块其它键照常', () => {
     const spawn = [
       {
         subject: '实现登录页',
@@ -133,7 +133,10 @@ describe('parseReceiptBlock：键与字段', () => {
       [{ subject: 'x', stageId: 's'.repeat(COMMAND_LIMITS.id + 1) }],
       ['not-object'],
     ]) {
-      expect(parseReceiptBlock(blockOf({ spawn: bad, notices: ['同块也不能生效'] }))).toBeNull()
+      // R1：坏键只丢它自己，不再连坐同块的 notices
+      expect(parseReceiptBlock(blockOf({ spawn: bad, notices: ['同块照常生效'] }))).toEqual({
+        notices: ['同块照常生效'],
+      })
     }
     expect(parseReceiptBlock(blockOf({ spawn: 'not-array' }))).toBeNull()
     const tooMany = Array.from({ length: COMMAND_LIMITS.spawnItems + 1 }, (_, i) => ({
@@ -150,7 +153,7 @@ describe('parseReceiptBlock：键与字段', () => {
     expect(parseReceiptBlock(blockOf({ ask: [], notices: [], events: [] }))).toBeNull()
   })
 
-  it('ask 选项为空 / 条数超限 / 标题超限 / 选项超限：整块忽略（连累同块 notices）', () => {
+  it('ask 选项为空 / 条数超限 / 标题超限 / 选项超限：只丢 ask（同块 notices 照常）', () => {
     const tooManyOptions = Array.from(
       { length: COMMAND_LIMITS.askOptions + 1 },
       (_, i) => `选项${i}`,
@@ -163,8 +166,8 @@ describe('parseReceiptBlock：键与字段', () => {
       askOf({ options: ['A', ''] }),
       askOf({ title: '   ' }),
     ]) {
-      const text = blockOf({ ask: [ask], notices: ['同块有效字段也不能生效'] })
-      expect(parseReceiptBlock(text)).toBeNull()
+      const text = blockOf({ ask: [ask], notices: ['同块照常生效'] })
+      expect(parseReceiptBlock(text)).toEqual({ notices: ['同块照常生效'] })
     }
   })
 
@@ -270,13 +273,15 @@ describe('parseReceiptBlock：闸门判定（M11）', () => {
     expect(parseReceiptBlock(blockOf({ checks }))).toEqual({ checks })
   })
 
-  it('verdict 不是 pass / fail：整块忽略', () => {
+  it('verdict 不是 pass / fail：只丢 verdict（同块 notices 照常）', () => {
     for (const verdict of ['PASS', '未通过', '', 1, true, {}]) {
-      expect(parseReceiptBlock(blockOf({ verdict, notices: ['同块也不能生效'] }))).toBeNull()
+      expect(parseReceiptBlock(blockOf({ verdict, notices: ['同块照常生效'] }))).toEqual({
+        notices: ['同块照常生效'],
+      })
     }
   })
 
-  it('checks 非数组 / 条数超限 / cmd 为空或超长 / 退出码非整数或越界：整块忽略', () => {
+  it('checks 非数组 / 条数超限 / cmd 为空或超长 / 退出码非整数或越界：只丢 checks', () => {
     const badChecks = [
       'not-array',
       [{ cmd: '  ', exitCode: 0 }],
@@ -289,7 +294,9 @@ describe('parseReceiptBlock：闸门判定（M11）', () => {
       ['not-object'],
     ]
     for (const checks of badChecks) {
-      expect(parseReceiptBlock(blockOf({ checks, notices: ['同块也不能生效'] }))).toBeNull()
+      expect(parseReceiptBlock(blockOf({ checks, notices: ['同块照常生效'] }))).toEqual({
+        notices: ['同块照常生效'],
+      })
     }
     const tooMany = Array.from({ length: COMMAND_LIMITS.gateChecks + 1 }, () => ({
       cmd: 'pnpm check',
@@ -523,17 +530,17 @@ describe('parseReceiptBlock：评审键与废弃的验收自评键（M14 / M34�
     })
   })
 
-  it('checks[].acceptance 非法（非整数 / 越界 / 字符串）：整块忽略', () => {
+  it('checks[].acceptance 非法（非整数 / 越界 / 字符串）：丢 checks，verdict 照常', () => {
     for (const acceptance of [0, 13, 1.5, '1', true, {}]) {
       expect(
         parseReceiptBlock(
           blockOf({
             verdict: 'pass',
             checks: [{ cmd: 'pnpm check', exitCode: 0, acceptance }],
-            notices: ['同块也不能生效'],
+            notices: ['同块照常生效'],
           }),
         ),
-      ).toBeNull()
+      ).toEqual({ verdict: 'pass', notices: ['同块照常生效'] })
     }
     // null 视为未提供
     expect(

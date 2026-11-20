@@ -81,7 +81,7 @@ export function parseReceiptBlock(output: string): ReceiptBlock | null {
   } catch {
     return null
   }
-  return receiptFromObject(parsed)
+  return receiptFromObject(parsed).block
 }
 
 /**

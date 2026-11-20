@@ -96,5 +96,5 @@ export function parseReceiptToolInput(
   } catch {
     return null
   }
-  return receiptFromObject(parsed)
+  return receiptFromObject(parsed).block
 }

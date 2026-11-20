@@ -403,7 +403,7 @@ export function RuleDialog({
               aria-label="规则提示词"
               className="min-h-20 resize-y"
               maxLength={RULE_LIMITS.prompt}
-              placeholder="追加到本轮提示词"
+              placeholder="追加到本轮任务提示词"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />

@@ -2235,7 +2235,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       threadContextRef: null,
       queueSeq: 0,
       status: 'queued',
-      prompt: `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：写计划\n\n## 阶段：待办\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      prompt: `# 本轮任务提示词\n\n## 系统提示\n\nsys\n\n## 任务：写计划\n\n## 阶段：待办\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
       output: '',
       error: null,
       errorCode: null,
@@ -2484,7 +2484,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
       queueSeq: 0,
     })
     expect(run.prompt).toBe(
-      `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：任务\n\n## 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
+      `# 本轮任务提示词\n\n## 系统提示\n\nsys\n\n## 任务：任务\n\n## 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
     )
   })
 
@@ -2594,7 +2594,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     const queued = entryRun(decision.facts)
     expect(queued).toMatchObject({ taskId: 't-1', stageId: 'st-2', status: 'queued' })
     expect(queued.prompt).toBe(
-      `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：任务\n\n## 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
+      `# 本轮任务提示词\n\n## 系统提示\n\nsys\n\n## 任务：任务\n\n## 阶段：实现\n\n${INTERRUPT}\n\n${HINT}`,
     )
     // 进入效果由宿主调度器发起（actor 标明来源）
     expect(decision.facts[2]?.actor).toEqual({ kind: 'host', via: 'scheduler' })
@@ -2757,7 +2757,7 @@ describe('kernel/prompt taskPrompt', () => {
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
     expect(run.prompt).toBe(
-      `# 本轮提示词\n\n## 任务：T\n\n## 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      `# 本轮任务提示词\n\n## 任务：T\n\n## 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 
@@ -2780,7 +2780,7 @@ describe('kernel/prompt taskPrompt', () => {
     const queued = decision.facts.find((fact) => fact.type === 'run.queued')
     const run = (queued?.payload as { run: RunRow }).run
     expect(run.prompt).toBe(
-      `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：T\n\n做点事\n\n## 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
+      `# 本轮任务提示词\n\n## 系统提示\n\nsys\n\n## 任务：T\n\n做点事\n\n## 阶段：执行\n\n${CONTRACT}\n\n${INTERRUPT}\n\n${THREAD_HINT}`,
     )
   })
 })
@@ -2790,7 +2790,7 @@ describe('kernel/prompt taskPrompt（无阶段名）', () => {
     expect(
       taskPrompt(agent({ systemPrompt: 'sys' }), task({ title: 'T', description: 'd' }), null),
     ).toBe(
-      `# 本轮提示词\n\n## 系统提示\n\nsys\n\n## 任务：T\n\nd\n\n## 执行约定\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS, 2)}`,
+      `# 本轮任务提示词\n\n## 系统提示\n\nsys\n\n## 任务：T\n\nd\n\n## 执行约定\n\n${INTERRUPT}\n\n${receiptBlockHint(BASE_RECEIPT_KEYS, 2)}`,
     )
   })
 })

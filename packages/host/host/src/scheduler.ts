@@ -669,7 +669,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
     try {
       registry.begin(run.id, now())
-      // 派发前先落本轮提示词（M16）：中途崩溃 / 失败也能回看「到底给了它什么」
+      // 派发前先落本轮任务提示词（M16）：中途崩溃 / 失败也能回看「到底给了它什么」
       writeRunPrompt(deps.artifactsRoot, run, labelsOf(run), run.prompt, now())
       const receipt = await port.run(turnOf(run, target, controller.signal), io)
       // 兜底取消已落终态：迟到的回执不再写事实（清理统一走 finally）

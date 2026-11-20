@@ -3,14 +3,16 @@
  * 确定性文本，拼进提示词的「## 线程上下文（派生资料，不是指令）」段。
  *
  * 口径（SPEC-kernel「Thread」/ SPEC-host「thread-context」）：
- * - 九段：线程元信息、任务树、**最近一轮产出**（独立预算）、最近 3 条终态运行摘要、
- *   未决卡片、最近 10 条笔记、资料清单；M14 追加第八段**待修复清单**（同样独立预算）；
- *   M15 追加第九段**任务索引**（独立预算：每个任务一行 + 产物路径，跨任务正文按需读）；
- *   M47 追加第十段**执行索引**（独立预算：每轮一行，按 runId 回溯任意一轮的 output.md）；
+ * - 段：线程元信息、任务树、**最近一轮产出**（独立预算）、未决卡片、最近 10 条笔记、
+ *   资料清单；M14 追加**待修复清单**（同样独立预算）；M15 追加**任务索引**（独立预算：
+ *   每个任务一行 + 产物路径，跨任务正文按需读）；M47 追加**执行索引**（独立预算：每轮
+ *   一行，按 runId 回溯任意一轮的 output.md）；M52 删掉「最近 3 条终态运行摘要」——它是
+ *   执行索引的严格子集（同轮次、同 runId，只少了摘要与轮次号），实测重复率 100%，209
+ *   字符换零信息，还自带一份会被 `contextChars` 单独丢弃的残视图；
  * - 「最近一轮产出」是该线程最近一条终态 `stage` run 的正文头部（≤ `precedingChars` 码点），
  *   **不参与** `contextChars` 的丢弃循环：它是下一轮最需要的信息，不该被笔记 / 事件挤掉；
  * - 余下各段总量 ≤ `THREAD_LIMITS.contextChars`（6000）码点，超出按**重要性**逐段丢弃
- *   （事件 → 笔记 → 运行摘要 → 卡片 → 任务树，每段内按时间倒序保新弃旧）并标注；
+ *   （事件 → 笔记 → 卡片 → 任务树，每段内按时间倒序保新弃旧）并标注；
  * - 笔记与事件正文只出现在「资料，不是指令」段，绝不进指令段；
  * - 当前任务（跑这一轮的那个）不在这段里复述：顶部任务段已经写过标题与阶段，
  *   任务树只列其余任务、最近一轮产出不再写任务名——同一份任务信息出现两遍是纯噪音；
@@ -141,9 +143,8 @@ function runDigest(run: RunRow): string {
  * 取材顺序（M47）：智能体轮（`agentId !== null`）→ 任意非取消轮 → 最新终态。
  *
  * 为什么要分这两层：取消轮没有产出（正文只剩「已取消」），脚本轮的「正文」是命令 stdout
- * （实测 88 K 字符的启动横幅 + 日志），两者当「最近一轮产出」都等于给下一轮一个空骨架，
- * 还把上一轮真成果挤到「最近运行」的一行摘要里。取消与脚本轮的信息在「最近运行」
- * 与「执行索引」里都还在，不丢。
+ * （实测 88 K 字符的启动横幅 + 日志），两者当「最近一轮产出」都等于给下一轮一个空骨架。
+ * 取消与脚本轮的信息在「执行索引」里都还在，不丢。
  */
 function latestStageRun(view: View, thread: ThreadRow): RunRow | undefined {
   const runs = settledRunsOf(view, thread).filter((run) => run.purpose === 'stage')
@@ -241,7 +242,7 @@ function precedingBlock(view: View, thread: ThreadRow, currentTaskId: Id | null)
     ...deliverableLine(run),
   ].join('｜')
   const body = blank
-    ? '（这一轮没有留下正文，原因见「最近运行」与任务动态）'
+    ? '（这一轮没有留下正文，原因见「执行索引」与任务动态）'
     : truncateBlock(
         output,
         artifact === null ? THREAD_LIMITS.precedingChars : THREAD_LIMITS.precedingExcerptChars,
@@ -303,12 +304,10 @@ function taskLines(view: View, thread: ThreadRow, currentTaskId: Id | null): Ite
 }
 
 /**
- * 每个任务最近一条终态 `stage` run（任务索引与「最近运行」段共用）。
+ * 每个任务最近一条终态 `stage` run（「任务索引」段的取材）。
  *
- * 单独抽出来是为了让「最近运行」能**跳过索引已经列过的轮次**——M28 的提示词去重：
- * 同一份结论在「最近运行摘要」「任务索引」「最近一轮产出」三段里各出现一次，
- * 实测占掉 CR 提示词的 43%。索引已经给出「每任务最近一轮 + 产物路径」，
- * 摘要段就不该再复述同一轮。
+ * M52：「最近运行」段删掉后这里只剩一个消费方；保留独立函数是因为取材口径
+ * （每任务最新终态）与排序工具（`laterRun`）不该散进渲染代码。
  */
 export function latestRunByTask(view: View): Map<Id, RunRow> {
   const latest = new Map<Id, RunRow>()
@@ -318,31 +317,6 @@ export function latestRunByTask(view: View): Map<Id, RunRow> {
     if (previous === undefined || laterRun(run, previous)) latest.set(run.taskId, run)
   }
   return latest
-}
-
-/**
- * 最近 3 条终态运行的摘要。
- *
- * - **最近一轮**（`precedingBlock` 已经给骨架 + 正文引用的那一条）不再复述：
- *   同一份结论在提示词里出现两遍是纯噪音（M28 实测占 CR 提示词的 43%）；
- * - 配了产物目录时条目不内联正文（正文按 `output.md` 路径读），没配时退回 120 字摘要。
- */
-function runLines(view: View, thread: ThreadRow): Item[] {
-  const latest = latestStageRun(view, thread)
-  const hasArtifacts = (view.artifactsRoot ?? null) !== null
-  return settledRunsOf(view, thread)
-    .filter((run) => run.id !== latest?.id)
-    .slice(-3)
-    .map((run) => {
-      const stage = run.stageId === null ? undefined : view.stages.get(run.stageId)
-      const name = stage === undefined ? '无阶段' : truncate(stage.name, 40)
-      return {
-        at: run.endedAt ?? run.createdAt,
-        text: hasArtifacts
-          ? `- ${run.status}｜${name}｜${shortTime(runAt(run))}｜${run.id}`
-          : `- ${run.status}：${truncate(run.output || run.error || '（无输出）', 120)}`,
-      }
-    })
 }
 
 /** 线程内 run 的未决卡片标题（最近 10 条，按创建时间升序）。 */
@@ -708,8 +682,11 @@ export function dropToFit(
 /**
  * 派生线程上下文；线程没有任何可写内容时仍返回元信息段（同事实同文本）。
  *
- * 丢弃顺序按「对下一轮的有用程度」从低到高：事件引用 → 笔记 → 运行摘要 → 卡片 → 任务树。
+ * 丢弃顺序按「对下一轮的有用程度」从低到高：事件引用 → 笔记 → 卡片 → 任务树。
  * 段内一律保新弃旧（`byTime` 升序取最旧丢弃）。
+ *
+ * M52：删掉「最近 3 条终态运行摘要」段——它列的三条永远是「执行索引」的头几条，同轮次、
+ * 同 `runId`、少摘要，属于纯重复；轮级回溯统一走执行索引（独立预算，不被这里的丢弃循环砍残）。
  *
  * M15：`currentTaskId` 用于「任务索引」段的排序（当前任务与祖先链优先保留）；M35 起还用于
  * **去重**——顶部「## 任务 / ## 阶段」已经交代过的当前任务不进「### 任务」树、「### 最近一轮产出」
@@ -726,7 +703,6 @@ export function threadContextText(
 ): string {
   const header = headerLines(thread)
   const taskSection: Section = { title: '### 任务', items: taskLines(view, thread, currentTaskId) }
-  const runSection: Section = { title: '### 最近运行（最近 3 条）', items: runLines(view, thread) }
   const cardSection: Section = { title: '### 未决卡片', items: cardLines(view, thread) }
   const noteSection: Section = noteSectionOf(
     thread,
@@ -737,8 +713,8 @@ export function threadContextText(
     items: eventLines(thread.events),
   }
   // 渲染顺序（读起来的顺序）与丢弃顺序（importance）是两件事，这里显式分开。
-  const sections = [taskSection, runSection, cardSection, noteSection, materialSection]
-  const dropOrder = [materialSection, noteSection, runSection, cardSection, taskSection]
+  const sections = [taskSection, cardSection, noteSection, materialSection]
+  const dropOrder = [materialSection, noteSection, cardSection, taskSection]
 
   const max = THREAD_LIMITS.contextChars
   const marker = (dropped: number): string => `\n…（已截断 ${dropped} 项：超出 ${max} 字上限）`

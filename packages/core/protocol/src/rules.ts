@@ -96,7 +96,7 @@ export interface AutomationRule {
   name: string
   when: RuleEventWhen | RuleCronWhen
   to: RuleTarget
-  /** 追加到本轮提示词的规则说明（固定文本，不拼外部事件正文） */
+  /** 追加到本轮任务提示词的规则说明（固定文本，不拼外部事件正文） */
   prompt?: string
   /** 同规则并行数（缺省 1；M6.5 生效） */
   parallel?: number

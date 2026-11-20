@@ -123,7 +123,7 @@ export function handoffThreadOf(handoff: StageHandoff): HandoffThreadPolicy {
 ## 10. Open Questions
 
 1. **线程并发是否同批开放编辑**：同话题串行下，若源任务 goto 到新的 agent 阶段并同时派单，审查 run 会排队（卡片显示「排队中」）。线程详情的 `concurrency` 目前只读。要不要顺手做成可编辑？
-2. **裁剪边界**：`## 最近运行` 段是否也裁（本 spec 只裁笔记；运行摘要保留，因为它是「谁在什么时候做了什么」的低噪声事实）。
+2. **裁剪边界**：~~`## 最近运行` 段是否也裁~~（M52 已删掉这一段，议程消失；本 spec 只裁笔记）。
 3. **`new` 的默认呈现**：编辑器里默认收起为「沿用来源话题」，只在需要时展开？还是每行都显式给下拉？
 4. **存量合并命令**：是否需要一次性「把某条派单卡并回来源话题」的 owner 命令（本 spec 不做，D6）。
 5. **里程碑编号**：暂定 M50（上一里程碑 M49，2026-11-17）。
@@ -158,4 +158,4 @@ export function handoffThreadOf(handoff: StageHandoff): HandoffThreadPolicy {
 
 **存量**：不迁移（D6）。升级前的派单卡仍在自己话题里，从任务详情「子任务」区（`tasks.byParent`，跨话题）可达；新派单按 `inherit` 落到来源话题。
 
-**遗留（Open Questions 的处置）**：① 线程并发保持只读（D5，不改 `pickClaims`）；② `### 最近运行` 段不裁；③ 话题下拉每行都显式给；④ 不做存量合并命令。
+**遗留（Open Questions 的处置）**：① 线程并发保持只读（D5，不改 `pickClaims`）；② ~~`### 最近运行` 段不裁~~（M52 删除该段，此项作废）；③ 话题下拉每行都显式给；④ 不做存量合并命令。

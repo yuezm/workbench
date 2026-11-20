@@ -40,7 +40,7 @@ const CREATED = '2026-01-01T00:00:00.000Z'
 /** 全量回执块说明（十二键；文档口径，也是 `receiptBlockHint()` 的缺省）。 */
 const HINT = receiptBlockHint()
 /** 提示词根：全篇唯一的一级标题（M36）。 */
-const ROOT = '# 本轮提示词'
+const ROOT = '# 本轮任务提示词'
 /** 聊天首轮的根：全篇唯一的一级标题。 */
 const CHAT_ROOT = '# 本轮对话'
 /** 普通阶段（无闸门 / 无验收 / 不挂线程 / 无评审）末尾的回执块说明（M24 裁剪后）。 */
@@ -464,7 +464,7 @@ describe('kernel/prompt 回执块说明', () => {
       ].join('\n'),
     )
     // 反馈正文没有权限/指令类措辞包装，只有固定资料段标题
-    expect(text.split('\n')[0]).toBe('# 本轮提示词')
+    expect(text.split('\n')[0]).toBe('# 本轮任务提示词')
   })
 })
 

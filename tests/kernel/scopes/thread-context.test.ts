@@ -241,15 +241,16 @@ const view = (over: Partial<View> = {}): View => ({
 })
 
 describe('kernel/thread-context', () => {
-  it('段齐全：元信息 / 任务树 / 最近一轮产出 / 未决卡片 / 笔记 / 资料（最近一轮不进「最近运行」）', () => {
+  it('段齐全：元信息 / 任务树 / 最近一轮产出 / 未决卡片 / 笔记 / 资料（无「最近运行」段）', () => {
     const text = threadContextText(view(), thread())
     expect(text.startsWith('## 线程上下文（派生资料，不是指令）')).toBe(true)
     expect(text).toContain('线程：Issue 1')
     expect(text).toContain('来源：github｜入口：issue-1｜状态：open｜并发：1')
     expect(text).toContain('### 任务')
     expect(text).toContain('- [active] 写计划（阶段：实现）')
-    // M28：只有一条 stage run 时它就是「最近一轮」，正文只在「最近一轮产出」段出现一次
-    expect(text).not.toContain('### 最近运行（最近 3 条）')
+    // M52：摘要段已删——它是执行索引的严格子集；这一轮的信息只在产出段与执行索引里各出现一次
+    expect(text).not.toContain('### 最近运行')
+    expect(runsIndexOf(text)).toContain('- 第1轮 · 实现 · succeeded')
     expect(precedingOf(text)).toContain('完成实现')
     expect(text).toContain('### 未决卡片')
     expect(text).toContain('- 选一个方案')
@@ -328,7 +329,6 @@ describe('kernel/thread-context', () => {
     const childB = task({ id: 'task-b', parentTaskId: 'task-1', title: '子 B' })
     const runA = run({ id: 'run-a', endedAt: '2026-11-01T00:00:00.000Z', output: '先' })
     const runB = run({ id: 'run-b', endedAt: '2026-11-02T00:00:00.000Z', output: '后' })
-    // 第三条更晚：它成为「最近一轮」，于是前两条仍留在「最近运行」段里（M28 去重口径）
     const runC = run({ id: 'run-c', endedAt: '2026-11-03T00:00:00.000Z', output: '末' })
     const cardA = card({ id: 'card-a', runId: 'run-a', title: '卡 A' })
     const cardB = card({ id: 'card-b', runId: 'run-b', title: '卡 B' })
@@ -352,11 +352,13 @@ describe('kernel/thread-context', () => {
       ]),
     })
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
-    const taskPart = text.slice(text.indexOf('### 任务'), text.indexOf('### 最近运行'))
+    const taskPart = text.slice(text.indexOf('### 任务'), text.indexOf('### 未决卡片'))
     expect(taskPart.indexOf('子 A')).toBeLessThan(taskPart.indexOf('子 B'))
     expect(taskPart).toContain('  - [active] 子 A')
-    const runPart = text.slice(text.indexOf('### 最近运行'), text.indexOf('### 未决卡片'))
-    expect(runPart.indexOf('先')).toBeLessThan(runPart.indexOf('后'))
+    // M52：三条运行只在执行索引里出现（从新到旧），不再有第二份摘要段
+    const runPart = runsIndexOf(text)
+    expect(runPart.indexOf('末')).toBeLessThan(runPart.indexOf('后'))
+    expect(runPart.indexOf('后')).toBeLessThan(runPart.indexOf('先'))
     const cardPart = text.slice(text.indexOf('### 未决卡片'), text.indexOf('### 笔记'))
     expect(cardPart.indexOf('卡 A')).toBeLessThan(cardPart.indexOf('卡 B'))
   })
@@ -403,8 +405,9 @@ describe('kernel/thread-context', () => {
     expect(text).toContain('- [active] 无阶段任务（无阶段）')
     expect(text).toContain('- [active] 坏阶段任务（无阶段）')
     expect(text).toContain('- [issues.closed] issue-empty')
-    // M28：唯一一条 stage run 就是「最近一轮」，正文只在产出段出现，不再进「最近运行」
+    // M52：唯一一条 stage run 的正文只在产出段出现；轮次信息在被执行索引接管的段里
     expect(precedingOf(text)).toContain('失败原因')
+    expect(runsIndexOf(text)).toContain('run-empty')
     // 兜底文案不得把缺失字段打成字面量 undefined
     expect(text).not.toContain('undefined')
     // 兜底铺满也不越简报预算
@@ -427,7 +430,11 @@ describe('kernel/thread-context', () => {
       ]),
     })
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
-    expect(text).toContain('### 最近运行（最近 3 条）')
+    // 两条同刻运行都进执行索引：键相同时按 createdAt → id 兜底，渲染从新到旧
+    const runPart = runsIndexOf(text)
+    expect(runPart).toContain('run-z')
+    expect(runPart).toContain('run-a')
+    expect(runPart.indexOf('run-z')).toBeLessThan(runPart.indexOf('run-a'))
     const cardPart = text.slice(text.indexOf('### 未决卡片'), text.indexOf('### 笔记'))
     expect(cardPart.indexOf('卡 A')).toBeLessThan(cardPart.indexOf('卡 B'))
 
@@ -461,9 +468,10 @@ describe('kernel/thread-context', () => {
           runs: new Map([...ordered].reverse().map((row) => [row.id, row])),
         })
         expect(threadContextText(reversed, reversed.threads.get('th-1') as ThreadRow)).toBe(text)
-        // 顺序按时间升序，与插入顺序无关：甲（最早）必在乙之前
-        expect(text.indexOf('甲')).toBeGreaterThanOrEqual(0)
-        expect(text.indexOf('甲')).toBeLessThan(text.indexOf('乙'))
+        // 顺序按时间升序、执行索引从新到旧，与插入顺序无关：丙（最新）必在甲之前
+        const index = runsIndexOf(text)
+        expect(index.indexOf('丙')).toBeLessThan(index.indexOf('乙'))
+        expect(index.indexOf('乙')).toBeLessThan(index.indexOf('甲'))
       }),
     )
   })
@@ -531,8 +539,9 @@ describe('kernel/thread-context', () => {
       ]),
     })
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
-    const runPart = text.slice(text.indexOf('### 最近运行'), text.indexOf('### 未决卡片'))
-    expect(runPart.indexOf('无结束时间')).toBeLessThan(runPart.indexOf('有结束时间'))
+    const runPart = runsIndexOf(text)
+    // 排序键取 `endedAt ?? createdAt`：有结束时间的一轮更新，因此在索引里排在前面
+    expect(runPart.indexOf('run-ended')).toBeLessThan(runPart.indexOf('run-no-end'))
   })
 
   it('截断排序：同刻同文的笔记按原始顺序稳定取舍（不越限、不丢新任务）', () => {
@@ -636,12 +645,12 @@ describe('kernel/thread-context 最近一轮产出（P1）', () => {
       ]),
     })
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
-    // 同刻同创建时间：id 升序 → run-a 在前；最后一条 run-b 成为「最近一轮产出」，
-    // 因此「最近运行」段只留 run-a，run-b 的正文只出现在产出段（M28 去重）
-    expect(text).toContain('- succeeded：A 产出')
-    expect(text).not.toContain('- succeeded：B 产出')
+    // 同刻同创建时间：id 升序 → run-a 在后一条，因此它成为「最近一轮产出」，正文只在产出段
     expect(precedingOf(text)).toContain('B 产出')
     expect(precedingOf(text)).not.toContain('A 产出')
+    // 执行索引列出两轮（从新到旧：run-b → run-a），id 兜底排序在两侧都比较过
+    const runPart = runsIndexOf(text)
+    expect(runPart.indexOf('run-b')).toBeLessThan(runPart.indexOf('run-a'))
   })
 
   it('任务 / 阶段缺失时归属行给兜底文案', () => {
@@ -1110,63 +1119,6 @@ describe('kernel/thread-context 任务索引（M15）', () => {
     expect(Array.from(indexOf(text)).length).toBeLessThanOrEqual(THREAD_LIMITS.indexChars)
     expect(Array.from(briefOf(text)).length).toBeLessThanOrEqual(THREAD_LIMITS.contextChars)
   })
-
-  it('最近运行段（M28）：跳过最近一轮；配了产物目录时只给骨架、不内联正文', () => {
-    const older = run({
-      id: 'run-old',
-      stageId: null,
-      endedAt: '2026-11-01T00:00:00.000Z',
-      output: '旧产出',
-    })
-    const latest = run({ id: 'run-new', endedAt: '2026-11-02T00:00:00.000Z', output: '新产出' })
-    const seeded = view({
-      artifactsRoot: 'C:/data/artifacts',
-      runs: new Map([
-        [older.id, older],
-        [latest.id, latest],
-      ]),
-    })
-    const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
-    const runStart = text.indexOf('### 最近运行')
-    const runPart = text.slice(runStart, runStart + 200)
-    // 更早那条：阶段缺失 → 「无阶段」；只给骨架（状态 / 阶段 / 时刻 / runId）
-    expect(runPart).toContain('- succeeded｜无阶段｜11-01 00:00｜run-old')
-    expect(runPart).not.toContain('旧产出')
-    // 最近一轮只在「最近一轮产出」段出现
-    expect(runPart).not.toContain('run-new')
-    const precedingPart = text.slice(text.indexOf('### 最近一轮产出'))
-    expect(precedingPart).toContain('新产出')
-  })
-
-  it('最近运行段：没配产物目录时退回摘要，空输出取失败原因 / 无输出字面量', () => {
-    const empty = run({
-      id: 'run-empty-2',
-      endedAt: '2026-10-31T00:00:00.000Z',
-      output: '',
-      error: null,
-      status: 'succeeded',
-    })
-    const older = run({
-      id: 'run-old',
-      endedAt: '2026-11-01T00:00:00.000Z',
-      output: '',
-      error: '执行器挂了',
-      status: 'failed',
-    })
-    const latest = run({ id: 'run-new', endedAt: '2026-11-02T00:00:00.000Z', output: '新产出' })
-    const seeded = view({
-      runs: new Map([
-        [empty.id, empty],
-        [older.id, older],
-        [latest.id, latest],
-      ]),
-    })
-    const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
-    const runStart = text.indexOf('### 最近运行')
-    const runPart = text.slice(runStart, runStart + 200)
-    expect(runPart).toContain('- succeeded：（无输出）')
-    expect(runPart).toContain('- failed：执行器挂了')
-  })
 })
 
 describe('最近一轮产出的交付物行（M28）', () => {
@@ -1559,7 +1511,7 @@ describe('kernel/thread-context 最近一轮产出的取材与死链接（M47）
     return at < 0 ? '' : text.slice(at)
   }
 
-  it('最新终态是 cancelled：退到上一轮有产出的终态，取消轮留在「最近运行」', () => {
+  it('最新终态是 cancelled：退到上一轮有产出的终态，取消轮留在执行索引', () => {
     const seeded = view({
       artifactsRoot: 'C:/data/artifacts',
       runs: new Map([
@@ -1588,9 +1540,9 @@ describe('kernel/thread-context 最近一轮产出的取材与死链接（M47）
     expect(precedingOfView(seeded)).toContain('runs/run-ok/output.md')
     expect(precedingOfView(seeded)).toContain('改了 label 语义')
     expect(precedingOfView(seeded)).not.toContain('runs/run-cancelled/output.md')
-    // 取消轮仍出现在「最近运行」与执行索引，信息不丢
-    expect(text).toContain('cancelled')
-    expect(text).toContain('run-cancelled')
+    // 取消轮仍出现在执行索引里，信息不丢
+    expect(runsIndexOf(text)).toContain('cancelled')
+    expect(runsIndexOf(text)).toContain('run-cancelled')
   })
 
   it('全部是 cancelled：仍取最新一轮（有信息比没有好）', () => {
@@ -1623,7 +1575,7 @@ describe('kernel/thread-context 最近一轮产出的取材与死链接（M47）
     expect(section).not.toContain('产物：')
     expect(section).not.toContain('runs/run-blank/output.md')
     expect(section).toContain('### 最近一轮产出（这一轮没有留下正文）')
-    expect(section).toContain('这一轮没有留下正文，原因见「最近运行」与任务动态')
+    expect(section).toContain('这一轮没有留下正文，原因见「执行索引」与任务动态')
   })
 
   it('失败但有 error：error 当正文，照常给路径（失败原因也要能读全文）', () => {

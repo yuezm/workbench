@@ -292,6 +292,7 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       case 'task.stop':
       case 'task.remove':
       case 'task.rerun':
+      case 'task.reask':
       case 'chat.send':
       case 'chat.remove':
       case 'chat.cancel':

@@ -14,6 +14,7 @@ import {
   openThreadRow,
   openedFacts,
   removedIfNoTasksLeft,
+  stageRoundCount,
   taskAttachedFacts,
   threadOfTask,
   threadWithBatchTasks,
@@ -312,6 +313,49 @@ export function rerunTask(
   })
   if (facts.length === 0) {
     return reject('conflict', '当前阶段没有可用的智能体 / 脚本或运行时: ' + stage.name)
+  }
+  return done(facts)
+}
+
+/**
+ * 让闸门补一次回执（R5）：跑完却没给结论时，在同一会话里只补 `verdict` / `checks`。
+ *
+ * 触发条件（全部满足才排一轮）：
+ * - 任务进行中、无活跃 run；
+ * - 当前阶段是**智能体闸门**（脚本闸门的结论来自退出码，补回执没有意义）；
+ * - 该阶段只跑过一轮（`stageRoundCount <= 1`）——补过一次仍无结论就交给人，不自动循环。
+ *
+ * 形态是「同阶段新开一轮 run」：复用同一 run 会让第二轮终态归档覆盖第一轮的 `output.md`
+ * （评审正文就没了）。提示词换成 `receiptRepairText`，会话强制续接上一轮。
+ */
+export function reaskGate(
+  view: View,
+  input: Extract<Input, { type: 'task.reask' }>,
+  now: Iso,
+  env: Environment,
+): Decision {
+  const task = view.tasks.get(input.id)
+  if (!task) return reject('not_found', '任务不存在: ' + input.id)
+  if (task.status !== 'active') return reject('conflict', '已完成的任务不需要补回执')
+  if (view.activeTaskIds.has(task.id))
+    return reject('conflict', '当前阶段正在执行，等这一轮结束再补')
+  const stage = task.currentStageId === null ? undefined : view.stages.get(task.currentStageId)
+  if (!stage || stage.workflowId !== task.workflowId) return reject('conflict', '任务当前阶段无效')
+  if (stage.judge === null) {
+    return reject('conflict', '当前阶段不是闸门，没有「补回执」这回事: ' + stage.name)
+  }
+  if (stage.entryMode !== 'agent') {
+    return reject('conflict', '脚本闸门的结论来自退出码，不能补回执: ' + stage.name)
+  }
+  if (stageRoundCount(view, task.id, stage.id) > 1) {
+    return reject('conflict', '这个闸门已经补过一次回执，仍没有结论：请重跑这一轮或人工处理')
+  }
+  const facts = entryRunFacts(view, task, now, env, OWNER, undefined, {
+    roundSession: 'resume',
+    receiptRepair: true,
+  })
+  if (facts.length === 0) {
+    return reject('conflict', '当前阶段没有可用的智能体 / 运行时: ' + stage.name)
   }
   return done(facts)
 }

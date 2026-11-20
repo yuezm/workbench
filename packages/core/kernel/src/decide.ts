@@ -53,6 +53,7 @@ const HANDLERS = {
   'task.remove': task.removeTask,
   'task.comment': task.commentTask,
   'task.rerun': task.rerunTask,
+  'task.reask': task.reaskGate,
   'card.answer': card.answerCard,
   'card.resolve': card.resolveCard,
   'card.delivered': card.deliveredCard,

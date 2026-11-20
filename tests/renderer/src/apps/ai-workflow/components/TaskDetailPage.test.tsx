@@ -652,6 +652,42 @@ describe('TaskDetailPage', () => {
     expect(within(brief).getByText('没有描述')).toBeInTheDocument()
   })
 
+  it('闸门阶段：给「补一次回执」，点击 dispatch task.reask（同会话只补结论）', async () => {
+    const user = userEvent.setup()
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [run])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    const gateWorkflow: WorkflowWithStages = {
+      ...workflow,
+      stages: [{ ...workflow.stages[1]!, judge: { maxFails: 2 } }],
+    }
+    render(
+      <TaskDetailPage
+        taskId="t1"
+        workflows={[gateWorkflow]}
+        onBack={vi.fn()}
+        onOpenThread={vi.fn()}
+        onRemoved={vi.fn()}
+      />,
+    )
+
+    await screen.findByRole('heading', { name: '任务A' })
+    const button = screen.getByRole('button', { name: '补一次回执' })
+    expect(button).toHaveAttribute('title', expect.stringContaining('闸门'))
+    await user.click(button)
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'task.reask', id: 't1' }),
+      ),
+    )
+  })
+
+  it('非闸门阶段不给「补一次回执」', async () => {
+    setup(task, [run])
+    await screen.findByRole('heading', { name: '任务A' })
+    expect(screen.queryByRole('button', { name: '补一次回执' })).toBeNull()
+  })
+
   it('失败后给出「重新执行」：点击 dispatch task.rerun（原地重排当前阶段）', async () => {
     const user = userEvent.setup()
     setup(task, [

@@ -48,6 +48,7 @@ export const COMMAND_NAMES = [
   'task.remove',
   'task.comment',
   'task.rerun',
+  'task.reask',
   'card.answer',
   'card.resolve',
   'chat.create',
@@ -242,6 +243,17 @@ export interface TaskRerunCommand extends CommandBase {
   id: string
 }
 
+/**
+ * 让闸门补一次回执（R5）：跑完却没给结论时，在同一会话里只补 `verdict` / `checks`。
+ *
+ * 与 `task.rerun` 的区别：不重发任务全文、提示词只讲「补回执」，且**每访问闸门一次只补
+ * 一次**（按该阶段已跑轮数判）——补过一次仍无结论就交给人，不自动循环。
+ */
+export interface TaskReaskCommand extends CommandBase {
+  type: 'task.reask'
+  id: string
+}
+
 // ---------- 卡片 ----------
 
 /**
@@ -369,6 +381,7 @@ export type Command =
   | TaskRemoveCommand
   | TaskCommentCommand
   | TaskRerunCommand
+  | TaskReaskCommand
   | CardAnswerCommand
   | CardResolveCommand
   | ChatCreateCommand

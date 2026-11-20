@@ -14,7 +14,7 @@ import { ACCESS_BY_PERMISSION } from '@workbench/protocol/entities'
 import type { ThreadRow } from '@workbench/protocol/thread'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { Actor, Environment, FactDraft, View } from '../core/types'
-import { taskPrompt } from './prompt'
+import { receiptRepairText, taskPrompt } from './prompt'
 import { sourceHandoffOf } from './handoff-source'
 import { narrowAccess } from './access'
 import { locateReport } from './review'
@@ -81,6 +81,11 @@ export function entryRunFacts(
      * - 缺省：本阶段第 1 轮续接，第 2 轮起新开。
      */
     roundSession?: 'resume' | 'fresh'
+    /**
+     * R5：闸门补回执。提示词换成专用短文本（只说「补 verdict」），不重发任务全文，
+     * 也不重新评审；会话仍按 `roundSession` 续接。
+     */
+    receiptRepair?: boolean
   },
 ): FactDraft<'run.queued'>[] {
   if (task.status !== 'active' || task.currentStageId === null) return []
@@ -119,7 +124,10 @@ export function entryRunFacts(
           reviewing,
           handoffSource: sourceHandoffOf(view, task),
         })
-  const prompt = [base, trigger?.promptExtra ?? ''].filter(Boolean).join('\n\n')
+  const prompt =
+    options?.receiptRepair === true
+      ? receiptRepairText(stage)
+      : [base, trigger?.promptExtra ?? ''].filter(Boolean).join('\n\n')
   // M15：会话键 = (taskId, agentId)。同一任务续接（打回重做 / 反馈 / turn+1），
   // 换任务或换智能体都开新会话——跨任务信息走「任务索引 + 产物路径」，不共享历史。
   //

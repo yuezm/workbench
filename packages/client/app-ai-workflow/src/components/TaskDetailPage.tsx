@@ -91,7 +91,9 @@ export function TaskDetailPage({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   /** 顶部结束动作（重新执行 / 停止执行 / 完成任务 / 删除任务）的进行中与失败文案 */
-  const [action, setAction] = useState<'rerun' | 'stop' | 'complete' | 'remove' | null>(null)
+  const [action, setAction] = useState<'rerun' | 'reask' | 'stop' | 'complete' | 'remove' | null>(
+    null,
+  )
   const [actionError, setActionError] = useState<string | null>(null)
   /** 删除确认弹窗：删除连带执行记录（可能连带线程），先问一次 */
   const [confirmRemove, setConfirmRemove] = useState(false)
@@ -121,6 +123,27 @@ export function TaskDetailPage({
     setActionError(null)
     void getKernelStore()
       .dispatch({ type: 'task.rerun', commandId: '', id: taskId })
+      .catch((e: unknown) => setActionError(errMsg(e)))
+      .finally(() => setAction(null))
+  }
+
+  /**
+   * 让闸门补一次回执（R5）：跑完却没给结论时，在同一会话里只补 verdict / checks。
+   * 只对智能体闸门显示；额度（每访问一次只补一次）由内核判，用尽会报可读错误。
+   */
+  const canReask =
+    task !== null &&
+    task.status === 'active' &&
+    stage?.judge != null &&
+    stage.entryMode === 'agent' &&
+    !executing &&
+    runs.length > 0
+
+  const reaskGate = (): void => {
+    setAction('reask')
+    setActionError(null)
+    void getKernelStore()
+      .dispatch({ type: 'task.reask', commandId: '', id: taskId })
       .catch((e: unknown) => setActionError(errMsg(e)))
       .finally(() => setAction(null))
   }
@@ -239,6 +262,18 @@ export function TaskDetailPage({
                 onClick={rerunStage}
               >
                 {action === 'rerun' ? '正在重排…' : '重新执行'}
+              </Button>
+            )}
+            {canReask && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={action !== null}
+                title="上一轮停在闸门且没给结论：在同一会话里只让它补一次 verdict / checks"
+                onClick={reaskGate}
+              >
+                {action === 'reask' ? '正在补回执…' : '补一次回执'}
               </Button>
             )}
             {task !== null && task.status === 'active' && executing && (

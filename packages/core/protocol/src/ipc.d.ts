@@ -70,6 +70,8 @@ export interface CommandResults {
   'task.comment': TaskComment
   /** 失败重跑只产一条 `run.queued`；任务行不动，返回值由 UI 重取视图 */
   'task.rerun': null
+  /** 闸门补回执：同样只产一条 `run.queued`，返回值由 UI 重取视图 */
+  'task.reask': null
   'card.answer': Card
   'card.resolve': Card
   'chat.create': Conversation

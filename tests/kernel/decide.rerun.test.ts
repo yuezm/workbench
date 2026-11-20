@@ -312,3 +312,92 @@ describe('kernel/decide task.rerun', () => {
     expect(decision.facts).toEqual([])
   })
 })
+
+/**
+ * `task.reask`（R5）：闸门跑完却没给结论时，在同一会话里只补一次回执。
+ *
+ * 形态是「同阶段新开一轮 run」，不是复用同一 run——复用会让第二轮终态归档覆盖第一轮的
+ * `output.md`（评审正文就没了）。额度按「该阶段跑过几轮」算（`stageRoundCount`），
+ * 补过一次仍无结论就交给人。
+ */
+describe('kernel/decide task.reask', () => {
+  const gateStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({ judge: { maxFails: 2 }, acceptance: ['无 Required 问题'], ...over })
+
+  const settledRun = (over: Partial<RunRow> = {}): RunRow =>
+    run({
+      status: 'succeeded',
+      error: null,
+      errorCode: null,
+      exitCode: 0,
+      sessionId: 'sess-9',
+      output: '评审完了，但没写回执',
+      ...over,
+    })
+
+  const gateView = (
+    over: { stages?: WorkflowStage[]; runs?: RunRow[]; active?: string[] } = {},
+  ): View =>
+    view({
+      stages: over.stages ?? [gateStage()],
+      runs: over.runs ?? [settledRun()],
+      active: over.active,
+    })
+
+  const reask = (v: View): ReturnType<typeof decide> =>
+    decide(v, { type: 'task.reask', commandId: 'c1', id: 'task-1' }, NOW, env())
+
+  it('停在闸门且只跑过一轮：续接同会话排一轮补回执，提示词只讲补回执', () => {
+    const decision = reask(gateView())
+
+    expect(decision.reject).toBeUndefined()
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['run.queued'])
+    const queued = decision.facts[0]?.payload as { run: RunRow }
+    expect(queued.run).toMatchObject({
+      purpose: 'stage',
+      taskId: 'task-1',
+      stageId: 'st-1',
+      agentId: 'ag-1',
+      status: 'queued',
+      turn: 2,
+      resumeSessionId: 'sess-9',
+    })
+    // 提示词是专用短文本：不重发整份任务提示词，也不重新评审
+    expect(queued.run.prompt).toContain('补回执')
+    expect(queued.run.prompt).toContain('verdict')
+    expect(queued.run.prompt).not.toContain('本轮任务提示词')
+  })
+
+  it('非闸门阶段 / 脚本闸门：reject（脚本结论来自退出码，补回执无意义）', () => {
+    expect(reask(gateView({ stages: [stage()] })).reject?.code).toBe('conflict')
+    const scriptGate = gateView({
+      stages: [
+        gateStage({
+          entryMode: 'script',
+          agentId: null,
+          script: {
+            runtimeId: 'rt-1',
+            steps: [{ label: '', args: ['run', 'check'] }],
+            cwd: null,
+            env: {},
+            timeoutMs: 600000,
+            runAll: false,
+          },
+        }),
+      ],
+    })
+    expect(reask(scriptGate).reject?.code).toBe('conflict')
+  })
+
+  it('已经补过一轮（该阶段两轮 run）：reject，交给人处理', () => {
+    const twice = gateView({ runs: [settledRun(), settledRun({ id: 'run-2', turn: 2 })] })
+    expect(reask(twice).reject?.code).toBe('conflict')
+  })
+
+  it('有活跃 run / 任务不是进行中：reject', () => {
+    expect(reask(gateView({ active: ['task-1'] })).reject?.code).toBe('conflict')
+    expect(
+      reask(view({ stages: [gateStage()], tasks: [task({ status: 'completed' })] })).reject?.code,
+    ).toBe('conflict')
+  })
+})

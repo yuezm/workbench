@@ -105,6 +105,7 @@ const commandSamples: Command[] = [
   { commandId: 'c37', type: 'review.export', taskId: 't-1' },
   { commandId: 'c30', type: 'task.comment', taskId: 't-1', text: '按钮改成粉色', rerun: true },
   { commandId: 'c30b', type: 'task.rerun', id: 't-1' },
+  { commandId: 'c30c', type: 'task.reask', id: 't-1' },
   { commandId: 'c31', type: 'project.create', input: projectInput },
   { commandId: 'c34', type: 'thread.remove', threadId: 'th-1' },
   { commandId: 'c32', type: 'project.update', id: 'pj-1', patch: { name: '新名字' } },
@@ -190,7 +191,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'runs',
     'cards',
   ],
-    'task.stop': ['tasks', 'runs', 'mandates'],
+  'task.stop': ['tasks', 'runs', 'mandates'],
   'task.remove': ['tasks', 'runs', 'threads', 'cards', 'projects'],
   'task.comment': [
     'tasks',
@@ -216,10 +217,21 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'runs',
     'task_comments',
   ],
+  'task.reask': [
+    'tasks',
+    'workflow_stages',
+    'agents',
+    'runtimes',
+    'projects',
+    'threads',
+    'review_reports',
+    'runs',
+    'task_comments',
+  ],
   'card.answer': ['runs', 'cards'],
   'card.resolve': ['cards'],
   // 并发窗口按智能体（`maxConcurrent`）算，领取必须装 agents
-    'run.claim': ['runs', 'runtimes', 'agents', 'threads', 'mandates'],
+  'run.claim': ['runs', 'runtimes', 'agents', 'threads', 'mandates'],
   'run.heartbeat': ['runs'],
   'run.receipt': [
     'runs',
@@ -331,8 +343,8 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
 const byType = new Map(samples.map((input) => [input.type, input]))
 
 describe('kernel/view-spec', () => {
-  it('覆盖 40 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
-    expect(COMMAND_NAMES.length).toBe(40)
+  it('覆盖 41 条命令 + 10 条宿主内部输入，并返回各自的投影切片', () => {
+    expect(COMMAND_NAMES.length).toBe(41)
     expect(HOST_INPUT_NAMES.length).toBe(10)
     expect(commandSamples.length).toBe(COMMAND_NAMES.length)
     expect(hostSamples.length).toBe(HOST_INPUT_NAMES.length)

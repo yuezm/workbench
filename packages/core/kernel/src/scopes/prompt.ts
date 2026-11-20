@@ -181,6 +181,32 @@ export const taskReceiptKeys = (
 }
 
 /**
+ * 补回执提示词（R5）：闸门跑完却没给结论时，这一轮只补 `verdict` / `checks`。
+ *
+ * 为什么不复用整份任务提示词：那一份会要求重新评审、重新跑证据（实测单轮 26 分钟），
+ * 而这里缺的只是「把结论说出来」。会话已续接，上一轮的评审正文与工具结果都在上下文里。
+ *
+ * 文案里不出现字面围栏：它是「指令」不是数据，写 ``` 会改结构（R6）。
+ */
+export const receiptRepairText = (stage: Pick<WorkflowStage, 'name' | 'acceptance'>): string => {
+  const acceptance = stage.acceptance ?? []
+  return [
+    '# 补回执（只做这一件）',
+    `阶段「${stage.name}」上一轮没有给出闸门结论：回执里既没有 \`verdict\`，也没有被接收的 \`ask\`。这一轮不要重新评审、不要重复正文，只把结论交上来。`,
+    '',
+    '## 三条分支（选一条）',
+    '- **事实通过**：`verdict:"pass"`，并给 `checks`——每条验收一条 `{ cmd, exitCode: 0, acceptance: n }`，n 是下面的 1 基序号。',
+    '- **事实不过**：`verdict:"fail"`，正文写清哪条没过。`fail` 不需要 `checks`。',
+    '- **要人拍板**：发一张 `ask`（`key:"gate-verdict"`，三档去向），这一轮不给 `verdict`。',
+    ...(acceptance.length === 0
+      ? []
+      : ['', '## 验收', ...acceptance.map((item, index) => `${index + 1}. ${item}`)]),
+    '',
+    '用回执工具提交，或把回执对象放在最终回复末尾的 json 围栏块里。',
+  ].join('\n')
+}
+
+/**
  * 跨任务上下文规则（M15）：会话键下沉到任务后，任务之间只共享索引与产物文件。
  *
  * 这段是**指令**而不是资料：它约束「怎么取上下文」的行为。只有拼了线程上下文

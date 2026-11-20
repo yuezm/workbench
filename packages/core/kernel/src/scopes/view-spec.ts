@@ -130,6 +130,7 @@ export function viewSpec(input: Input): ProjectionTable[] {
         'task_comments',
       ]
     case 'task.rerun':
+    case 'task.reask':
       // 失败重跑：只复用进入阶段效果（拼反馈段 + 线程上下文、按线程续接会话、
       // 判定是否已有活跃 run）；不追加反馈、不改任务行，因此不需要 workflows / cards
       return [

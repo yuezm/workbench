@@ -869,7 +869,8 @@ const checkPayload = (type: CommandName, command: Obj): Check => {
     case 'task.stop':
     case 'task.remove':
     case 'task.rerun':
-      // 重新执行只带任务 id：阶段 / 智能体 / 运行时都由内核按视图现算
+    case 'task.reask':
+      // 重新执行 / 补回执只带任务 id：阶段 / 智能体 / 运行时都由内核按视图现算
       return requiredId(command.id, 'id')
     case 'review.export':
       // M14：提升为文档只带任务与可选的报告版本；归属与「有没有报告」由内核判

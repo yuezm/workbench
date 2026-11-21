@@ -18,7 +18,7 @@ import type { Actor, Environment, FactDraft, View } from '../core/types'
 import { addressesRepairText, receiptRepairText, taskPrompt } from './prompt'
 import { sourceHandoffOf } from './handoff-source'
 import { narrowAccess } from './access'
-import { locateReport } from './review'
+import { locateReport, reportTargetsStage } from './review'
 import { runCountOfTask, stageRoundCount, taskSessions } from './threads'
 import { threadContextText, hasThreadHistory } from './thread-context'
 
@@ -123,8 +123,14 @@ export function entryRunFacts(
   // M24：本阶段要处理的评审报告决定回执里有没有 `addresses` 的出口——没有报告时
   // 提示词不再念「逐条回应」，省掉一段用不上的指令。
   // 同批产出的报告还没进视图（决策是纯函数），调用方用 `options.review` 显式传入。
+  //
+  // 2026-11-21：只有「本阶段正是这份报告的打回目标」时才算要回应。评审阶段自己也会命中
+  // 线程里的最新报告（`latestReportOf` 兜底），但那一轮要做的是给 `verdict`；把 7 条
+  // 待改项与内联清单塞进去只是噪音（实测评审轮提示词白背 7 条 finding 与 addresses 段）。
   const review = options?.review ?? locateReport(view, task)
-  const reviewing = review !== undefined
+  const addressedReview =
+    review !== undefined && reportTargetsStage(view, review, stage.id) ? review : undefined
+  const reviewing = addressedReview !== undefined
   // M28：本阶段已跑过几次（不含本轮）。它只决定会话策略（第 2 次起开新会话），
   // M34 起不再进提示词——续轮已删除，「第 N 轮」对执行没有行动指引。
   const previousRounds = stageRoundCount(view, task.id, stage.id)
@@ -133,7 +139,7 @@ export function entryRunFacts(
       ? scriptContextText(task, stage)
       : taskPrompt(target.agent, task, stage, context, comments, {
           reviewing,
-          review,
+          review: addressedReview,
           handoffSource: sourceHandoffOf(view, task),
         })
   const prompt =

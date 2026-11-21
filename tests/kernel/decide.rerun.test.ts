@@ -509,4 +509,26 @@ describe('kernel/decide task.reask：修复阶段补评审回执', () => {
     ]
     expect(reask(fixView([finding()], thrice)).reject?.code).toBe('conflict')
   })
+
+  it('评审阶段重跑：命中的报告不是本阶段的目标 → 不塞清单、不给 addresses', () => {
+    const onReview = view({
+      stages: [reviewStage(), fixStage()],
+      tasks: [task({ currentStageId: 'st-review' })],
+      runs: [settledFix({ id: 'run-review', stageId: 'st-review' })],
+      reviewReports: [report([finding()])],
+    })
+    const decision = decide(
+      onReview,
+      { type: 'task.rerun', commandId: 'c1', id: 'task-1' },
+      NOW,
+      env(),
+    )
+    expect(decision.reject).toBeUndefined()
+    const queued = decision.facts[0]?.payload as { run: RunRow }
+    expect(queued.run.prompt).toContain('本轮任务提示词')
+    expect(queued.run.prompt).not.toContain('待修复清单')
+    // addresses 只可能在「上限」那句里被提到，键条目与「必须」标题都不该出现
+    expect(queued.run.prompt).not.toContain('- `addresses`')
+    expect(queued.run.prompt).not.toContain('必须给 addresses')
+  })
 })

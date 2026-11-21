@@ -26,10 +26,11 @@
 import type { RunRow, Task } from '@workbench/protocol/entities'
 import type { ThreadEventRef, ThreadNote, ThreadRow } from '@workbench/protocol/thread'
 import { THREAD_LIMITS } from '@workbench/protocol/thread'
-import { REVIEW_LIMITS, type ReviewFinding, type ReviewReport } from '@workbench/protocol/review'
+import type { ReviewReport } from '@workbench/protocol/review'
 import type { Id, View } from '../core/types'
 import { dataBlock } from './markdown'
-import { openFindings, reportForThread } from './review'
+import { reportForThread } from './review'
+import { findingsText } from './review-text'
 
 const truncate = (value: string, max: number): string => {
   const chars = Array.from(value.replace(/\s+/g, ' ').trim())
@@ -408,70 +409,15 @@ function eventLines(events: readonly ThreadEventRef[]): Item[] {
   })
 }
 
-/** 严重度排序：`blocker` 最前（索引段按它对条目排序，人被截断时也先看到最重的）。 */
-const SEVERITY_RANK: Record<ReviewFinding['severity'], number> = {
-  blocker: 0,
-  high: 1,
-  medium: 2,
-  low: 3,
-}
-
-/** 单条 finding 的索引行：`id` / 严重度 / 位置 / 断言（blocker 与 high 附带验收条件）。 */
-function findingLine(finding: ReviewFinding): string {
-  const place = finding.location === null ? '' : ` ${finding.location}`
-  const claim = truncate(finding.claim, REVIEW_LIMITS.promptClaimChars)
-  const acceptance =
-    finding.severity === 'blocker' || finding.severity === 'high'
-      ? ` → 验收：${truncate(finding.requiredAction, REVIEW_LIMITS.promptClaimChars)}`
-      : ''
-  return `- ${finding.key} [${finding.severity}]${place} — ${claim}${acceptance}`
-}
-
 /**
  * 「待修复清单」段（M14）：报告行 → 索引文本。
  *
- * - 只内联 `open` 条目（按严重度排序），`addressed` / `rejected` / `deferred` 折成计数；
- * - 条数与字数双上限（`promptFindings` / `reviewChars`），超出只记数不静默丢；
- * - 报告正文（长文本）不进这里：段尾给报告 id 与正文引用（落盘时才有路径）；
- * - 与「最近一轮产出」段一样是**独立预算**，不参与 `contextChars` 的丢弃循环。
+ * 渲染口径收在 `review-text.ts`（修复轮提示词用同一份，避免两处清单对不上）。
+ * 与「最近一轮产出」段一样是**独立预算**，不参与 `contextChars` 的丢弃循环。
  */
 export function reviewBlock(view: View, thread: ThreadRow): string {
   const report: ReviewReport | undefined = reportForThread(view, thread)
-  if (report === undefined) return ''
-  const open = openFindings(report).sort(
-    (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.key.localeCompare(b.key),
-  )
-  if (report.findings.length === 0 && report.verdict === null) return ''
-  const done = report.findings.length - open.length
-  const verdict = report.verdict === null ? '无判定' : report.verdict
-  const head = [
-    `### 待修复清单（报告 rev ${report.rev}，${verdict}，` +
-      `open ${open.length} / 共 ${report.findings.length}` +
-      (done === 0 ? '）' : `，已处置 ${done}）`),
-  ]
-  const reference =
-    report.artifact === null
-      ? `（完整清单：报告 ${report.id}，运行 ${report.runId}）`
-      : `（完整清单：${report.artifact.path}）`
-  if (open.length === 0) return [...head, `- 清单已全部处置。${reference}`].join('\n')
-  const lines: string[] = []
-  let used = 0
-  let shown = 0
-  for (const finding of open.slice(0, REVIEW_LIMITS.promptFindings)) {
-    const line = findingLine(finding)
-    if (used + Array.from(line).length > THREAD_LIMITS.reviewChars) break
-    used += Array.from(line).length
-    lines.push(line)
-    shown += 1
-  }
-  const rest = open.length - shown
-  return [
-    ...head,
-    ...lines,
-    rest > 0
-      ? `…（还有 ${rest} 条未在此列出，是全部待办的一部分，见${reference.slice(1, -1)}）`
-      : reference,
-  ].join('\n')
+  return report === undefined ? '' : findingsText(report, 3)
 }
 
 /** 线程元信息（永远保留，不参与截断）。 */

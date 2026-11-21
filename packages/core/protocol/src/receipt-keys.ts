@@ -87,12 +87,12 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
       '{"branch":"feat/x","base":"develop","commits":["57be895"],"files":["src/a.ts"],"gates":[{"cmd":"pnpm check","exitCode":0}]}',
   },
   findings: {
-    text: '评审待改项。`severity` 只接受 blocker / high / medium / low（Critical→blocker、Required→high、Optional→medium、Nit→low；写别的词该键被忽略，不影响同块其它键）。`requiredAction` 写成「复跑什么、看到什么算修好」。',
+    text: '评审待改项。`severity` 只接受 blocker / high / medium / low（Critical→blocker、Required→high、Optional→medium、Nit→low；写别的词该键被忽略，不影响同块其它键）。**blocker / high 是阻断项**（不处置就不推进）；medium / low 只留痕，不要求处置。`requiredAction` 写成「复跑什么、看到什么算修好」。',
     shape:
       '[{"key":"R1","severity":"blocker","location":"src/a.ts:42","claim":"...","requiredAction":"..."}]',
   },
   addresses: {
-    text: '对上轮 `findings` 逐条回应。`fixed` 带 `checkRef`（指向同块里退出码 0 的 `checks`），`rejected` / `deferred` 写 `note`；漏回应的不推进下一阶段。',
+    text: '对上轮 `findings` 逐条回应。`fixed` 带 `checkRef`（指向同块里退出码 0 的 `checks`），`rejected` / `deferred` 写 `note`；**阻断项（blocker / high）漏回应不推进**，建议项（medium / low）可回可不回。',
     shape:
       '[{"findingId":"<报告id>#R1","disposition":"fixed","checkRef":"pnpm check","note":"..."}]',
   },

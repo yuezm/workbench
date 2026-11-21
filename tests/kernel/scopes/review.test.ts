@@ -18,7 +18,9 @@ import {
 import type { ThreadRow } from '@workbench/protocol/thread'
 import type { View } from '@workbench/kernel/core/types'
 import {
+  advisoryFindings,
   applyAddresses,
+  blockingFindings,
   blockedCommentText,
   buildReport,
   latestRev,
@@ -1200,5 +1202,78 @@ describe('kernel/review 逐条处置的性质（fast-check 随机生成）', () 
       }),
       { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
     )
+  })
+})
+
+/**
+ * 阻断口径（2026-11-21）：`blocker` / `high` 不处置就不推进；`medium` / `low` 只留痕。
+ *
+ * 口径来自「Optional 留机器可读的痕，但可以不处理」——报告里照旧写，硬门不看它们。
+ */
+describe('kernel/review 阻断口径（P0/P1 才拦）', () => {
+  const ids = (rows: readonly ReviewFinding[]): string[] => rows.map((row) => row.id)
+
+  it('blockingFindings 只收 open 的 blocker / high；advisoryFindings 收 medium / low', () => {
+    const mixed = report({
+      findings: [
+        finding({ id: 'r#R1', key: 'R1', severity: 'high' }),
+        finding({ id: 'r#O1', key: 'O1', severity: 'medium' }),
+        finding({ id: 'r#N1', key: 'N1', severity: 'low' }),
+        finding({ id: 'r#R2', key: 'R2', severity: 'blocker', status: 'addressed' }),
+      ],
+    })
+    expect(ids(blockingFindings(mixed))).toEqual(['r#R1'])
+    expect(ids(advisoryFindings(mixed))).toEqual(['r#O1', 'r#N1'])
+    // openFindings 仍是「全部未处置」：导出与人工查看要看全量
+    expect(ids(openFindings(mixed))).toEqual(['r#R1', 'r#O1', 'r#N1'])
+  })
+
+  it('只剩建议项没回应：不阻断、不写漏项评论，照常流转', () => {
+    const onlyAdvisory = report({
+      findings: [
+        finding({ id: 'r#O1', key: 'O1', severity: 'medium' }),
+        finding({ id: 'r#N1', key: 'N1', severity: 'low' }),
+      ],
+    })
+    const outcome = reviewFactsOf(
+      view({ reviewReports: new Map([['report-1', onlyAdvisory]]) }),
+      run(),
+      receipt(),
+      null,
+      { kind: 'host', via: 'scheduler' },
+      NOW,
+    )
+    expect(outcome.blocked).toBe(false)
+    expect(outcome.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+  })
+
+  it('漏项评论只列阻断项，建议项折成一句「只留痕」', () => {
+    const mixed = report({
+      findings: [
+        finding({ id: 'r#R1', key: 'R1', severity: 'high' }),
+        finding({ id: 'r#O1', key: 'O1', severity: 'medium' }),
+      ],
+    })
+    const text = blockedCommentText(mixed, blockingFindings(mixed))
+    expect(text).toContain('r#R1')
+    expect(text).not.toContain('r#O1')
+    expect(text).toContain('另有 1 条建议项（medium/low）只留痕，不拦推进')
+  })
+
+  it('reviewFactsOf 带回本批报告行：同批派活用它，不靠旧视图再查', () => {
+    const outcome = reviewFactsOf(
+      view(),
+      run(),
+      receipt({
+        addresses: [{ findingId: 'report-1#R1', disposition: 'fixed', checkRef: 'cmd-0' }],
+        checks: [{ cmd: 'cmd-0', exitCode: 0 }],
+      }),
+      null,
+      { kind: 'host', via: 'scheduler' },
+      NOW,
+    )
+    expect(outcome.report?.id).toBe('report-1')
+    expect(outcome.report?.findings[0]?.status).toBe('addressed')
+    expect(outcome.blocked).toBe(false)
   })
 })

@@ -15,8 +15,9 @@
  *
  * 3. **闭环（`applyAddresses` + 覆盖判定）**：修复回执的 `addresses[]` 逐条改 finding 状态，
  *    产 `review.addressed`；`fixed` 必须有同回执里退出码为 0 的 `checkRef`，`rejected` /
- *    `deferred` 必须写理由。当前阶段正是被该报告打回的目标阶段、且仍有 `open` 条目时
- *    **不推进**（硬门），并追加一条任务评论列出漏项。
+ *    `deferred` 必须写理由。当前阶段正是被该报告打回的目标阶段、且仍有 **阻断项**
+ *    （`blocker` / `high`）`open` 时**不推进**（硬门），并追加一条任务评论列出漏项；
+ *    `medium` / `low` 的 `open` 只留痕，不参与这条判定。
  *
  * 全部纯函数：不读时钟、不读文件、不查库、不取随机数。
  */
@@ -29,15 +30,22 @@ import type {
   ReviewFindingInput,
   ReviewReport,
 } from '@workbench/protocol/review'
-import { REVIEW_LIMITS } from '@workbench/protocol/review'
+import { isBlockingSeverity, REVIEW_LIMITS } from '@workbench/protocol/review'
 import type { ThreadRow } from '@workbench/protocol/thread'
 import type { Actor, FactDraft, Id, Iso, View } from '../core/types'
 
 /** 报告定位与处置的结果：`facts` 直接并入回执决策，`blocked` 决定是否停住阶段流转。 */
 export interface ReviewOutcome {
   facts: FactDraft[]
-  /** 有未处置的评审条目（硬门）：调用方不得推进阶段 */
+  /** 有未处置的**阻断**评审条目（硬门）：调用方不得推进阶段 */
   blocked: boolean
+  /**
+   * 本批要交给后续步骤的报告行（新建 / 逐条处置之后的最新版）。
+   *
+   * 为什么带着走：同批产出的 `review.reported` 还没进视图，派下一轮时 `locateReport`
+   * 查不到它——修复轮会因此丢掉 `addresses` 出口与待修复清单（2026-11-21 实测）。
+   */
+  report?: ReviewReport
 }
 
 const EMPTY: ReviewOutcome = { facts: [], blocked: false }
@@ -54,9 +62,24 @@ export function reportTargetsStage(view: View, report: ReviewReport, stageId: Id
   )
 }
 
-/** 仍为 `open` 的条目（覆盖判定的唯一依据）。 */
+/** 仍为 `open` 的条目（不限严重度；提示词与导出看这一份）。 */
 export function openFindings(report: ReviewReport): ReviewFinding[] {
   return report.findings.filter((finding) => finding.status === 'open')
+}
+
+/**
+ * 仍为 `open` 的**阻断项**（`blocker` / `high`）：硬门、漏项评论、线程待办都只看这一份。
+ *
+ * `medium` / `low` 是建议项，留痕但不要求处置（`advisoryFindings`）——不参与推进判定，
+ * 否则「只关注 P0/P1」的口径会在任何一个 Optional 上报废。
+ */
+export function blockingFindings(report: ReviewReport): ReviewFinding[] {
+  return openFindings(report).filter((finding) => isBlockingSeverity(finding.severity))
+}
+
+/** 仍为 `open` 的建议项（`medium` / `low`）：可读、可处置，但不拦推进。 */
+export function advisoryFindings(report: ReviewReport): ReviewFinding[] {
+  return openFindings(report).filter((finding) => !isBlockingSeverity(finding.severity))
 }
 
 /** 同一 `(taskId, stageId)` 上已有的最大 `rev`；没有报告时为 0。 */
@@ -130,7 +153,7 @@ export function reportForThread(view: View, thread: ThreadRow): ReviewReport | u
     if (task === undefined) continue
     const report = locateReport(view, task)
     if (report === undefined) continue
-    const pending = openFindings(report).length > 0
+    const pending = blockingFindings(report).length > 0
     if (best === undefined) {
       best = report
       bestPending = pending
@@ -299,16 +322,18 @@ export function applyAddresses(
   return { report: { ...report, findings, updatedAt: now }, addressed }
 }
 
-/** 漏项评论：把还没处置的条目写进任务上下文（人一眼能看到卡在哪）。 */
+/** 漏项评论：把还没处置的**阻断项**写进任务上下文（人一眼能看到卡在哪）。 */
 export function blockedCommentText(report: ReviewReport, open: readonly ReviewFinding[]): string {
   const ids = open
     .slice(0, 10)
     .map((finding) => finding.id)
     .join('、')
   const more = open.length > 10 ? ` 等 ${open.length} 条` : ''
+  const advisory = advisoryFindings(report).length
   return (
-    `评审清单（报告 rev ${report.rev}）还有未处置条目：${ids}${more}。` +
-    '在回执块 `addresses` 里逐条回应（`fixed` 需带 `checkRef`，`rejected` / `deferred` 需写理由）后才会进入下一阶段。'
+    `评审清单（报告 rev ${report.rev}）还有未处置条目（阻断级）：${ids}${more}。` +
+    '在回执块 `addresses` 里逐条回应（`fixed` 需带 `checkRef`，`rejected` / `deferred` 需写理由）后才会进入下一阶段。' +
+    (advisory === 0 ? '' : `另有 ${advisory} 条建议项（medium/low）只留痕，不拦推进。`)
   )
 }
 
@@ -334,6 +359,7 @@ export function reviewFactsOf(
   if (task === undefined || run.stageId === null) return EMPTY
   const facts: FactDraft[] = []
   const declared = receipt.findings ?? []
+  let reported: ReviewReport | undefined
   if (receipt.verdict !== undefined || declared.length > 0) {
     const report = buildReport(
       view,
@@ -346,10 +372,12 @@ export function reviewFactsOf(
       artifact,
       now,
     )
+    reported = report
     facts.push({ type: 'review.reported', actor, at: now, payload: { report } })
   }
   const target = locateReport(view, task)
-  if (target === undefined) return { facts, blocked: false }
+  // 同批刚建的报告不在视图里：把它带回去，调用方派下一轮时直接内联，不再查视图。
+  if (target === undefined) return { facts, blocked: false, report: reported }
   const applied = applyAddresses(target, receipt.addresses ?? [], receipt.checks ?? [], run.id, now)
   if (applied.addressed.length > 0) {
     facts.push({
@@ -359,10 +387,10 @@ export function reviewFactsOf(
       payload: { report: applied.report, addressed: applied.addressed },
     })
   }
-  const open = openFindings(applied.report)
+  const open = blockingFindings(applied.report)
   const blocked =
     open.length > 0 && reportTargetsStage(view, applied.report, task.currentStageId ?? '')
-  if (!blocked) return { facts, blocked: false }
+  if (!blocked) return { facts, blocked: false, report: applied.report }
   facts.push({
     type: 'task.comment_added',
     actor,
@@ -377,7 +405,7 @@ export function reviewFactsOf(
       },
     },
   })
-  return { facts, blocked: true }
+  return { facts, blocked: true, report: applied.report }
 }
 /**
  * 导出用的报告定位：给了 `reportId` 就按 id 取（越权取别的任务的报告也算「不存在」），

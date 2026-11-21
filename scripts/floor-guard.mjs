@@ -278,6 +278,8 @@ const RELOCATED_TESTS = {
   // M36：提示词按 scope 拆到 scopes/，测试同层跟着搬；拆分改写了大量断言，相似度低于 rename
   // 阈值，git 退化成 delete + add（2026-11-21 改闸门文案时这条退化才被触发出来）
   'tests/kernel/prompt.test.ts': 'tests/kernel/scopes/prompt.test.ts',
+  // 同上：thread-context 随 M14 待修复清单段改写（2026-11-21）后相似度同样跌破阈值
+  'tests/kernel/thread-context.test.ts': 'tests/kernel/scopes/thread-context.test.ts',
 }
 const migratedCounterpart = (f) => {
   const relocated = RELOCATED_TESTS[f]

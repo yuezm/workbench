@@ -18,10 +18,29 @@
  */
 import type { GateCheck, GateVerdict } from './entities'
 
-/** 严重度：`blocker` / `high` 是必须处理项（提示词里给验收条件）。 */
+/**
+ * 严重度：`blocker` / `high` 是**阻断项**（不处置就不推进阶段）；
+ * `medium` / `low` 是**建议项**（机器可读留痕，但不要求处置）。
+ */
 export const REVIEW_SEVERITIES = ['blocker', 'high', 'medium', 'low'] as const
 
 export type ReviewSeverity = (typeof REVIEW_SEVERITIES)[number]
+
+/**
+ * 会阻断阶段推进的严重度（P0 / P1）。
+ *
+ * 口径来源：2026-11-21 决定「Optional 留痕但不处理」——Optional / Nit 仍写进 `findings[]`
+ * （可检索、可审计、可显式处置），只是不再拦住修复阶段。判定收在内核一处，UI 与提示词
+ * 都读这个常量，避免各层自己写 `severity === 'high'`。
+ */
+export const BLOCKING_SEVERITIES = ['blocker', 'high'] as const
+
+export type BlockingSeverity = (typeof BLOCKING_SEVERITIES)[number]
+
+/** 这条严重度是否阻断推进。 */
+export function isBlockingSeverity(severity: ReviewSeverity): severity is BlockingSeverity {
+  return severity === 'blocker' || severity === 'high'
+}
 
 /**
  * 单条 finding 的处置（修复回执 `addresses[]` 用）：
@@ -33,7 +52,12 @@ export const FINDING_DISPOSITIONS = ['fixed', 'rejected', 'deferred'] as const
 
 export type FindingDisposition = (typeof FINDING_DISPOSITIONS)[number]
 
-/** finding 的当前状态；`open` 是唯一会拦住修复阶段推进的状态。 */
+/**
+ * finding 的当前状态。
+ *
+ * 拦住修复阶段的条件是 `open` **且**严重度属于 `BLOCKING_SEVERITIES`；`medium` / `low`
+ * 的 `open` 只表示「还没人回应」，不拦推进。
+ */
 export const FINDING_STATUSES = ['open', 'addressed', 'rejected', 'deferred'] as const
 
 export type FindingStatus = (typeof FINDING_STATUSES)[number]

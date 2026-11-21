@@ -815,7 +815,7 @@ describe('kernel/thread-context 待修复清单段（M14）', () => {
   const withReport = (over: Partial<ReviewReport> = {}): View =>
     view({ reviewReports: new Map([['run-review:1', report(over)]]) })
 
-  it('内联 open 条目：blocker / high 带验收条件，已处置折成计数', () => {
+  it('内联阻断项：blocker / high 带验收条件，建议项与已处置折成计数', () => {
     const text = reviewBlock(
       withReport({
         findings: [
@@ -826,12 +826,14 @@ describe('kernel/thread-context 待修复清单段（M14）', () => {
       }),
       thread(),
     )
-    expect(text).toContain('### 待修复清单（报告 rev 1，fail，open 2 / 共 3，已处置 1）')
+    expect(text).toContain('### 待修复清单（报告 rev 1，fail，阻断 1 条 / 建议 1 条，已处置 1）')
     expect(text).toContain(
-      '- R1 [blocker] src/a.ts:64 — BOM 文件被判非法 JSON → 验收：改成 utf-8-sig 后复跑',
+      '- r#R1 [blocker] src/a.ts:64 — BOM 文件被判非法 JSON → 验收：改成 utf-8-sig 后复跑',
     )
-    expect(text).toContain('- R2 [low]')
+    // 建议项（medium / low）只留痕、不内联，也不带验收条件
+    expect(text).not.toContain('- r#R2')
     expect(text).not.toContain('不该出现')
+    expect(text).toContain('另有 1 条建议项（medium/low）')
     expect(text).toContain('完整清单：报告 run-review:1')
   })
 
@@ -841,7 +843,7 @@ describe('kernel/thread-context 待修复清单段（M14）', () => {
       thread(),
     )
     expect(text).toContain('清单已全部处置。')
-    expect(text).not.toContain('- R1 [high]')
+    expect(text).not.toContain('- r#R1 [high]')
   })
 
   it('只有 verdict、没有清单：也给段（判定是结论），但没有条目行', () => {
@@ -857,30 +859,30 @@ describe('kernel/thread-context 待修复清单段（M14）', () => {
 
   it('条目没有位置时不留空位标记（整体性问题不属于某一行代码）', () => {
     const text = reviewBlock(
-      withReport({ findings: [finding({ location: null, severity: 'low' })] }),
+      withReport({ findings: [finding({ location: null, severity: 'high' })] }),
       thread(),
     )
-    expect(text).toContain('- R1 [low] — BOM 文件被判非法 JSON')
-    expect(text).not.toContain('[low]  ')
+    expect(text).toContain('- run-review:1#R1 [high] — BOM 文件被判非法 JSON')
+    expect(text).not.toContain('[high]  ')
   })
 
-  it('判定缺省但清单非空：判定位置写「无判定」，清单照常内联', () => {
+  it('判定缺省但清单非空：判定位置写「无判定」，阻断项照常内联', () => {
     const text = reviewBlock(withReport({ verdict: null, findings: [finding()] }), thread())
-    expect(text).toContain('### 待修复清单（报告 rev 1，无判定，open 1 / 共 1）')
-    expect(text).toContain('- R1 [high]')
+    expect(text).toContain('### 待修复清单（报告 rev 1，无判定，阻断 1 条 / 建议 0 条）')
+    expect(text).toContain('- run-review:1#R1 [high]')
   })
 
-  it('条数超上限折叠成计数（blocker / high 排在前）', () => {
+  it('阻断项超条数上限折叠成计数（blocker / high 排在前）', () => {
     const many = Array.from({ length: 45 }, (_, index) =>
       finding({
         id: `r#R${index}`,
         key: `R${String(index).padStart(2, '0')}`,
-        severity: index === 44 ? 'blocker' : 'low',
+        severity: index === 44 ? 'blocker' : 'high',
         claim: '短断言',
       }),
     )
     const text = reviewBlock(withReport({ findings: many }), thread())
-    expect(text).toContain('还有 5 条未在此列出')
+    expect(text).toContain('还有 5 条阻断项未在此列出')
   })
 
   it('字数超 reviewChars 时提前收口（不靠条数上限）', () => {
@@ -888,7 +890,7 @@ describe('kernel/thread-context 待修复清单段（M14）', () => {
       finding({
         id: `r#R${index}`,
         key: `R${index}`,
-        severity: 'low',
+        severity: 'high',
         claim: 'x'.repeat(500),
         requiredAction: 'y',
       }),

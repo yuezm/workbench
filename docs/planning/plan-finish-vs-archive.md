@@ -1,7 +1,7 @@
 # 计划：任务「完成」与「归档」分离（含派单血缘拆分）
 
 > 2026-11-21 起草。起因：人在线程 `0668c0f8-87d8-48f1-a7a5-391dc7fd8b4d`（「故障绑定页面，状态位的语义问题」）上连续踩到三件事——三张流水线工单被画成父子树、停在「已完成」列的任务仍显示「进行中」、派单链的第三张卡从 14:11 起一直卡在「待办」。
-> 状态：**执行中（2026-11-21，`/agent-skills-build auto`）**。规格增量已落 `docs/specs`（SPEC-ai-workflow / SPEC-kernel / SPEC-task-fanout / SPEC-authority），按 P1 → P2 → P3 逐片 RED→GREEN→回归→commit。
+> 状态：**已实施（2026-11-21）**。三片全部落地：P1 `8e5e9b5`、P2 `ef6b762`、P3 `b20c1e0`，规格增量 `b044340`。全量 244 文件 / 4175 用例全绿，`pnpm check:fast` 0 error。实施口径与偏离见文末「实施记录」。
 > 关联：[SPEC-kernel](../specs/SPEC-kernel.md)（任务命令、事实目录）、[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)（阶段类别、出口表、看板、任务状态）、[SPEC-task-fanout](../specs/SPEC-task-fanout.md)（rollup）、[SPEC-ui](../specs/SPEC-ui.md)（看板 / 详情页）。
 
 ## 结论
@@ -194,3 +194,32 @@ pnpm check               # 含依赖审计与改动行 ≥90%
 1. **归档是否该自动发生**：本轮明确不做（人：完成 ≠ 归档，归档 = 不想追踪了）。若以后要，做成独立的「收纳策略」，与完成语义无关。
 2. **`task.archived` 改名是否需要兼容读**：不做双写（单包发布），老版本不回滚到能写归档的方向。
 3. **`close` 出口是否保留**：保留——它表达「本单结束并顺手收纳」，与「结束但留在已完成列回看」是两种意图；P2 之后二者第一次可区分。
+
+## 实施记录（2026-11-21）
+
+### 落地顺序与提交
+
+| 片 | 提交 | 内容 |
+| --- | --- | --- |
+| 规格 | `b044340` | SPEC-ai-workflow / SPEC-kernel / SPEC-task-fanout / SPEC-authority 的 M53 条款 |
+| P1 | `8e5e9b5` | `TASK_PHASES` / `TaskPhase` / `taskPhaseOf` / `isTaskOver`；`model/task-phase`；四处徽标与子任务进度改读阶段语义 |
+| P2 | `ef6b762` | `status` → `archivedAt`；`task.finished` / `task.archived`；`task.complete` → `task.archive`；收尾搬家；守卫改判阶段语义；存储换列 + 版本跳变；UI 动作与看板过滤 |
+| P3 | `b20c1e0` | 派单不写 `parentTaskId`（重建归一）；线程页平铺 + 「承接自」；编辑器默认落点 + `handoffLandingWarning` |
+
+### 与计划的三处偏离
+
+1. **历史 `task.completed` 不回填成 `task.finished`**：只在投影层归一出归档时刻（`normalizeTask(task, fact.at)`），阶段保持原样。原计划写的是「把 `close` 出口的历史任务阶段归一到内置已完成」——放弃的理由是不伪造历史：这些任务确实没进过「已完成」阶段，归档标记 + 当时的阶段是它们真实的状态组合（而 M53 之后「未完成但已归档」本身是合法形态，不再自相矛盾）。
+2. **`close` 出口保留**：计划里的开放问题按「保留」落地——它表达「本单结束并顺手收纳」，一次产 `task.moved` + `task.finished` + `task.archived`。
+3. **rollup 的 `complete` 动作加了兜底**：工作流缺内置「已完成」（脏数据）时产 `task.finished` + `task.archived`，不让父任务挂在半空。
+
+### 实施中发现并修掉的源码问题
+
+- `import.ts` 仍在 `SELECT … status …`（M53 后该列已物理删除）→ 所有导入 / `createWorkbench` 路径必抛 `no such column: status`。改为读 `archived_at`；`import` / `rebuild` / `ruff` 三个测试文件由此转绿。
+- `task.move` 落终态时给 `closeIfAllDone` 的 overrides 写死 `'finished'`，拖进「已取消」也按完成算 → 改按 `outcome` 取 `'cancelled'`。
+- 迟到的 run 结算会重新推进已结束的任务 → 在 `stageTransitionFacts` 恢复「终态阶段零流转」守卫（按阶段语义判）。
+
+### 遗留
+
+- `pnpm e2e`（Playwright）未跑：本轮未动主进程启动与打包路径，`pnpm e2e:api` 档需要 dev 依赖，留给下一次全量验收。
+- `TASKS_M53_ADD_COLUMN_SQL` 兜底路径因 `status` 进 `LEGACY_TASK_COLUMNS` 而几乎不可达，保留作异常库兜底。
+- 开发库 `.scratch/dev-data/ai-workflow.db` 需要重开一次应用触发 `m53.0.0` 重建；重建前备份在 `.scratch/dev-data/ai-workflow-pre-m53.db`。

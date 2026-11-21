@@ -137,7 +137,7 @@ export function handoffThreadOf(handoff: StageHandoff): HandoffThreadPolicy {
 - `StageHandoff.thread?: 'inherit' | 'new'` + `STAGE_HANDOFF_THREAD_POLICIES`；`validate.checkHandoffs` 挡非法取值，缺省放行（老配置不带该字段）。
 - `handoffThreadOf` / `normalizeHandoffs` 收口归一；`sameHandoffs` 比较该字段（只改话题也判不等）；两处 `normalizeStage`（`kernel/scopes/project.ts`、`host/store/src/projection-apply.ts`）补显式值，增量与重建同形。
 - `handoff.ts`：`inherit` 复用来源任务话题（不产 `thread.opened`），来源任务没有话题时退化为新开；`new` 保留 M29 行为。
-- **实现中新发现的竞态**：`task.complete` 先产派单事实、再用视图判 `closeIfAllDone`，视图里还没有刚建出的卡 → 话题在「刚生出下一张卡」的瞬间被归档，`thread.task_ids_json` 又被关闭事实覆盖回 1 张。修法：`threads.ts` 新增 `threadWithBatchTasks`（取同批 `thread.task_attached` 的最后一行）与 `batchTaskStatuses`（本批 `task.created` 算 `active`），`commands/task.ts#completeTaskCommand` 与 `commands/run.ts` 的阶段流转收尾都改用它。E2E 与 `decide.handoff` 用例锁住。
+- **实现中新发现的竞态**：`task.complete`（M53 起拆成 `task.move` 到终态 / `task.archive`）先产派单事实、再用视图判 `closeIfAllDone`，视图里还没有刚建出的卡 → 话题在「刚生出下一张卡」的瞬间被归档，`thread.task_ids_json` 又被关闭事实覆盖回 1 张。修法：`threads.ts` 新增 `threadWithBatchTasks`（取同批 `thread.task_attached` 的最后一行）与 `batchTaskStatuses`（本批 `task.created` 算 `active`），`commands/task.ts#completeTaskCommand` 与 `commands/run.ts` 的阶段流转收尾都改用它。E2E 与 `decide.handoff` 用例锁住。
 - `rules.ts`：事件复用候选收窄到「同工作流 + 非 `origin='handoff'`」。
 - `thread-context.ts`：跨流程时只注入 `author='owner'` 笔记并留一行说明；判定用 `crossesWorkflow`，并接受**本批刚建、视图里还没有的任务行**（`threadContextText` 第 4 个参数，`task-effects.ts` 传入）——否则最该裁的第一轮会漏裁。
 

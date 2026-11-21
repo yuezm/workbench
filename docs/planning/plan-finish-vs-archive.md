@@ -8,11 +8,11 @@
 
 系统的「完成」和「归档」是同一个动作（`task.completed`），而「流程走完」只是换了个列——三者纠缠在一起。按人的口径拆成三条互不覆盖的轴：
 
-| 轴 | 载体 | 谁写 | 业务后果 |
-| --- | --- | --- | --- |
-| 流程位置 | `tasks.current_stage_id` + 阶段类别 `pending / active / done / closed` | 内核流转 | 派活、闸门、拖拽 |
+| 轴       | 载体                                                                                              | 谁写         | 业务后果                                     |
+| -------- | ------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------- |
+| 流程位置 | `tasks.current_stage_id` + 阶段类别 `pending / active / done / closed`                            | 内核流转     | 派活、闸门、拖拽                             |
 | 业务完成 | **派生**：阶段类别 ∈ `done / closed`（类别区分完成与取消），另落 `task.finished` 事实供同批收尾用 | 进入终态阶段 | rollup、线程收尾、结局通知、收卡、子任务进度 |
-| 追踪意图 | `tasks.archived_at`（可清空，可逆） | 只有人 | **零业务后果**，只影响看板与清单默认过滤 |
+| 追踪意图 | `tasks.archived_at`（可清空，可逆）                                                               | 只有人       | **零业务后果**，只影响看板与清单默认过滤     |
 
 派单（handoff）与派生子任务（spawn）拆成两种关系：`handoff_from_task_id` = 血缘（回溯、链深、去重，不缩进、不 rollup），`parent_task_id` = 从属（只 spawn 写，树形 + rollup + 上下文注入）。
 
@@ -20,24 +20,24 @@
 
 ## 证据（真实库，`dev-data/ai-workflow.db`）
 
-| 任务 | 来源 | 工作流 / 阶段 | status | 关键事实 |
-| --- | --- | --- | --- | --- |
-| `5c0a0bc9` | manual | FULL需求交付 / **已完成**(done) | completed | 11-20 14:36 建；**11-21 14:22:40 owner 点「完成任务」**才变 completed |
-| `a6e02161` | handoff ← `5c0a0bc9` | 审查 / **已完成**(done) | completed | 15:49「自测 passed」派单建；**14:20:57 owner 点「完成任务」** |
-| `3bfe91bd` | handoff ← `a6e02161` | 验收 / **待办**(todo) | active | 14:11「Code Review passed」派单建；派单目标阶段 `entry_mode=none`，无人拖动即停 |
+| 任务       | 来源                 | 工作流 / 阶段                   | status    | 关键事实                                                                        |
+| ---------- | -------------------- | ------------------------------- | --------- | ------------------------------------------------------------------------------- |
+| `5c0a0bc9` | manual               | FULL需求交付 / **已完成**(done) | completed | 11-20 14:36 建；**11-21 14:22:40 owner 点「完成任务」**才变 completed           |
+| `a6e02161` | handoff ← `5c0a0bc9` | 审查 / **已完成**(done)         | completed | 15:49「自测 passed」派单建；**14:20:57 owner 点「完成任务」**                   |
+| `3bfe91bd` | handoff ← `a6e02161` | 验收 / **待办**(todo)           | active    | 14:11「Code Review passed」派单建；派单目标阶段 `entry_mode=none`，无人拖动即停 |
 
 三张卡是 A→B→C 的流水线，线程页按 `parentTaskId` 建树（`ThreadDetailPage.tsx:64-89`），渲染成 1 父 + 2 子、缩进、挂「子任务」徽标；`depth > 0` 一律打标，spawn 与 handoff 在界面上无法区分。前两张卡的「已完成」徽标是在 owner 手动归档后才出现的——在那之前它们停在「已完成」列却显示「进行中」。
 
 ## 问题清单
 
-| ID | 级别 | 症状 | 根因 | 位置 |
-| --- | --- | --- | --- | --- |
-| F1 | P0 | 停在「已完成 / 已取消」列的任务显示「进行中」，子任务进度停在 `0/1` | 徽标与进度读 `task.status`（= 是否归档），不读阶段类别 | `ThreadDetailPage.tsx:103`、`TaskDetailPage.tsx:342,361,366`、`KanbanBoard.tsx:96` |
-| F2 | P0 | 「完成」没有独立概念：只有归档才触发 rollup / 线程收尾 / 结局通知 | 收尾全套挂在 `task.completed` 上，而它同时是「移出看板」 | `commands/run.ts:364`、`commands/task.ts:207-256` |
-| F3 | P0 | agent 跑完自动落到「已完成」列零后果；人点「完成任务」= 完成 + 归档，两条路径不对称 | 同上（`goto` 只产 `task.moved`，`close` / `task.complete` 才产 `task.completed`） | `stage-machine.ts:158`、`run.ts:321,364` |
-| F4 | P1 | 流水线工单被画成父子树，缩进 + 「子任务」徽标 | handoff 同时写 `handoff_from_task_id` 与 `parent_task_id` | `handoff.ts:114`、`spawn.ts:199-206` |
-| F5 | P1 | 已归档任务不能拖回阶段（安全网缺失）；反向「取消归档」入口不存在 | `moveTaskToStage` 用 `status === 'completed'` 早退，归档不可逆 | `stage-machine.ts:216` |
-| F6 | P2 | 派单链停在不派活的目标阶段，无人知晓原因 | 阶段派单只校验「目标阶段属于目标工作流」，不校验是否派活 | `workflow/stage-handoffs.ts:163-193` |
+| ID  | 级别 | 症状                                                                                | 根因                                                                              | 位置                                                                               |
+| --- | ---- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| F1  | P0   | 停在「已完成 / 已取消」列的任务显示「进行中」，子任务进度停在 `0/1`                 | 徽标与进度读 `task.status`（= 是否归档），不读阶段类别                            | `ThreadDetailPage.tsx:103`、`TaskDetailPage.tsx:342,361,366`、`KanbanBoard.tsx:96` |
+| F2  | P0   | 「完成」没有独立概念：只有归档才触发 rollup / 线程收尾 / 结局通知                   | 收尾全套挂在 `task.completed` 上，而它同时是「移出看板」                          | `commands/run.ts:364`、`commands/task.ts:207-256`                                  |
+| F3  | P0   | agent 跑完自动落到「已完成」列零后果；人点「完成任务」= 完成 + 归档，两条路径不对称 | 同上（`goto` 只产 `task.moved`，`close` / `task.complete` 才产 `task.completed`） | `stage-machine.ts:158`、`run.ts:321,364`                                           |
+| F4  | P1   | 流水线工单被画成父子树，缩进 + 「子任务」徽标                                       | handoff 同时写 `handoff_from_task_id` 与 `parent_task_id`                         | `handoff.ts:114`、`spawn.ts:199-206`                                               |
+| F5  | P1   | 已归档任务不能拖回阶段（安全网缺失）；反向「取消归档」入口不存在                    | `moveTaskToStage` 用 `status === 'completed'` 早退，归档不可逆                    | `stage-machine.ts:216`                                                             |
+| F6  | P2   | 派单链停在不派活的目标阶段，无人知晓原因                                            | 阶段派单只校验「目标阶段属于目标工作流」，不校验是否派活                          | `workflow/stage-handoffs.ts:163-193`                                               |
 
 ## 数据模型目标
 
@@ -48,7 +48,9 @@
 export const TASK_PHASES = ['todo', 'active', 'finished', 'cancelled'] as const
 export type TaskPhase = (typeof TASK_PHASES)[number]
 
-export function taskPhaseOf(stage: { builtin?: BuiltinStageKey | null } | null | undefined): TaskPhase
+export function taskPhaseOf(
+  stage: { builtin?: BuiltinStageKey | null } | null | undefined,
+): TaskPhase
 // pending → 'todo'；active → 'active'；done → 'finished'；closed → 'cancelled'；阶段缺失 → 'todo'
 
 export interface Task {
@@ -63,22 +65,22 @@ export interface Task {
 
 ### 事实
 
-| 变化 | 类型 | payload | 何时产 |
-| --- | --- | --- | --- |
-| 新增 | `task.finished` | `{ task, outcome: 'done' \| 'cancelled' }` | 进入 `builtin ∈ {done, cancelled}` 的同一批（与 `task.moved` 并出）；`close` 出口、rollup `complete`、人工拖到终态列都走它 |
-| 改名 | `task.completed` → **`task.archived`** | `{ task }`（含 `archivedAt`） | 人点归档 / 取消归档；`close` 出口额外补一条 |
-| 不变 | `task.moved` | 原样 | 换阶段 |
+| 变化 | 类型                                   | payload                                    | 何时产                                                                                                                     |
+| ---- | -------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| 新增 | `task.finished`                        | `{ task, outcome: 'done' \| 'cancelled' }` | 进入 `builtin ∈ {done, cancelled}` 的同一批（与 `task.moved` 并出）；`close` 出口、rollup `complete`、人工拖到终态列都走它 |
+| 改名 | `task.completed` → **`task.archived`** | `{ task }`（含 `archivedAt`）              | 人点归档 / 取消归档；`close` 出口额外补一条                                                                                |
+| 不变 | `task.moved`                           | 原样                                       | 换阶段                                                                                                                     |
 
 同批收尾（`closeIfAllDone`、`childrenSettledFacts`、`closeCardsOnFinish`、结局通知）全部改挂 `task.finished`，不再看 `task.completed`。
 
 ### 命令面
 
-| 命令 | 变化 |
-| --- | --- |
-| `task.complete` | **删除**，由 `task.archive` 取代（`{ id, archived?: boolean }`，缺省归档，`false` 取消归档；幂等） |
-| `task.move` | 语义扩到「移动到任意阶段」，含内置「已完成 / 已取消」；进入终态即完成（F3 的对称性由此补齐） |
+| 命令                        | 变化                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `task.complete`             | **删除**，由 `task.archive` 取代（`{ id, archived?: boolean }`，缺省归档，`false` 取消归档；幂等）                 |
+| `task.move`                 | 语义扩到「移动到任意阶段」，含内置「已完成 / 已取消」；进入终态即完成（F3 的对称性由此补齐）                       |
 | `task.rerun` / `task.reask` | 拒绝条件从 `status !== 'active'` 改为「阶段类别不是 `active`」（文案：`任务已结束（阶段「已完成」）不能重新执行`） |
-| `task.create` | 父任务校验改「父任务未结束」（阶段类别 ∈ `pending/active`），与归档无关 |
+| `task.create`               | 父任务校验改「父任务未结束」（阶段类别 ∈ `pending/active`），与归档无关                                            |
 
 命令数 41 → 41（删一加一）。
 
@@ -92,12 +94,12 @@ export interface Task {
 
 ## 守卫分流表（`status` 的 44 处按语义重新归属）
 
-| 归属新轴 | 判定改法 | 位置 |
-| --- | --- | --- |
+| 归属新轴       | 判定改法                                           | 位置                                                                                                                                                                                                                                                                            |
+| -------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 关**业务结束** | `taskPhaseOf(stage) === 'finished' \| 'cancelled'` | `commands/task.ts:62,301,350`（父任务校验、rerun、reask）、`spawn.ts:111,198`（父任务拦截）、`commands/run.ts:301`（已结束任务零流转）、`threads.ts:154`（`activeTasksOfThread`：规则复用只看还没结束的任务）、`threads.ts:376`（`closeIfAllDone`：线程内还有任务没结束就不收） |
-| 关**归档** | `archivedAt !== null` | `KanbanBoard.tsx:76,78,96`、`TaskDetailPage.tsx:303`、归档清单 |
-| 关**展示** | `taskPhaseOf(stage)` | `ThreadDetailPage.tsx:103`、`TaskDetailPage.tsx:342,361,366`、`TaskInfoPanel` |
-| 直接删 | 不再需要 | `stage-machine.ts:216`（归档任务不在看板，无法拖动）、`enterStage` 里的 `status: 'active'` |
+| 关**归档**     | `archivedAt !== null`                              | `KanbanBoard.tsx:76,78,96`、`TaskDetailPage.tsx:303`、归档清单                                                                                                                                                                                                                  |
+| 关**展示**     | `taskPhaseOf(stage)`                               | `ThreadDetailPage.tsx:103`、`TaskDetailPage.tsx:342,361,366`、`TaskInfoPanel`                                                                                                                                                                                                   |
+| 直接删         | 不再需要                                           | `stage-machine.ts:216`（归档任务不在看板，无法拖动）、`enterStage` 里的 `status: 'active'`                                                                                                                                                                                      |
 
 `closeIfAllDone` 的 `overrides?: ReadonlyMap<Id, TaskStatus>` 同步改 `ReadonlyMap<Id, TaskPhase | 'removed'>`（同批刚流转 / 刚删除的任务在视图里还是旧态）。
 
@@ -135,14 +137,14 @@ export interface Task {
 
 **验收**
 
-| 场景 | 期望 |
-| --- | --- |
-| agent 跑完自动落「已完成」列 | 产 `task.moved` + `task.finished`；结局通知、收卡、线程收尾、rollup 全部触发；任务**仍在看板上** |
-| 拖到「已取消」列 | 产 `task.finished{outcome:'cancelled'}`；不被算作「完成」，归档清单徽标为「已取消」 |
-| 点「归档」 | 只写 `archivedAt`；零业务事实；卡片移出看板、进归档清单；可「取消归档」拖回来 |
-| 已归档任务被 rollout 或人工再次 move | 允许；不自动清 `archivedAt`（归档是人的意图，不静默改） |
-| 执行中点归档 | 内核拒绝（`执行中的阶段不能归档`） |
-| 老库重建（`m52` → `m53`） | `task.completed` 展开成 `archivedAt` + 阶段归一到终态；看板与归档清单的历史结果逐条不变 |
+| 场景                                 | 期望                                                                                             |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| agent 跑完自动落「已完成」列         | 产 `task.moved` + `task.finished`；结局通知、收卡、线程收尾、rollup 全部触发；任务**仍在看板上** |
+| 拖到「已取消」列                     | 产 `task.finished{outcome:'cancelled'}`；不被算作「完成」，归档清单徽标为「已取消」              |
+| 点「归档」                           | 只写 `archivedAt`；零业务事实；卡片移出看板、进归档清单；可「取消归档」拖回来                    |
+| 已归档任务被 rollout 或人工再次 move | 允许；不自动清 `archivedAt`（归档是人的意图，不静默改）                                          |
+| 执行中点归档                         | 内核拒绝（`执行中的阶段不能归档`）                                                               |
+| 老库重建（`m52` → `m53`）            | `task.completed` 展开成 `archivedAt` + 阶段归一到终态；看板与归档清单的历史结果逐条不变          |
 
 **测试**：改 4 条锁旧口径的用例（`stage-machine.test.ts:615`、`scheduler.test.ts:964`、`decide.test.ts:1932,1997`）与 TC-AIW-092；新增 6 条（完成后果、归档零后果、取消归档、执行中拒绝、重建归一、徽标四态）。受影响全量约 90 处断言（`tests/` 内 `task.complete|status: 'completed'` 共 139 处，其余是与 run 状态无关的匹配）。
 
@@ -199,12 +201,12 @@ pnpm check               # 含依赖审计与改动行 ≥90%
 
 ### 落地顺序与提交
 
-| 片 | 提交 | 内容 |
-| --- | --- | --- |
-| 规格 | `b044340` | SPEC-ai-workflow / SPEC-kernel / SPEC-task-fanout / SPEC-authority 的 M53 条款 |
-| P1 | `8e5e9b5` | `TASK_PHASES` / `TaskPhase` / `taskPhaseOf` / `isTaskOver`；`model/task-phase`；四处徽标与子任务进度改读阶段语义 |
-| P2 | `ef6b762` | `status` → `archivedAt`；`task.finished` / `task.archived`；`task.complete` → `task.archive`；收尾搬家；守卫改判阶段语义；存储换列 + 版本跳变；UI 动作与看板过滤 |
-| P3 | `b20c1e0` | 派单不写 `parentTaskId`（重建归一）；线程页平铺 + 「承接自」；编辑器默认落点 + `handoffLandingWarning` |
+| 片   | 提交      | 内容                                                                                                                                                             |
+| ---- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 规格 | `b044340` | SPEC-ai-workflow / SPEC-kernel / SPEC-task-fanout / SPEC-authority 的 M53 条款                                                                                   |
+| P1   | `8e5e9b5` | `TASK_PHASES` / `TaskPhase` / `taskPhaseOf` / `isTaskOver`；`model/task-phase`；四处徽标与子任务进度改读阶段语义                                                 |
+| P2   | `ef6b762` | `status` → `archivedAt`；`task.finished` / `task.archived`；`task.complete` → `task.archive`；收尾搬家；守卫改判阶段语义；存储换列 + 版本跳变；UI 动作与看板过滤 |
+| P3   | `b20c1e0` | 派单不写 `parentTaskId`（重建归一）；线程页平铺 + 「承接自」；编辑器默认落点 + `handoffLandingWarning`                                                           |
 
 ### 与计划的三处偏离
 
@@ -223,3 +225,29 @@ pnpm check               # 含依赖审计与改动行 ≥90%
 - `pnpm e2e`（Playwright）未跑：本轮未动主进程启动与打包路径，`pnpm e2e:api` 档需要 dev 依赖，留给下一次全量验收。
 - `TASKS_M53_ADD_COLUMN_SQL` 兜底路径因 `status` 进 `LEGACY_TASK_COLUMNS` 而几乎不可达，保留作异常库兜底。
 - 开发库 `.scratch/dev-data/ai-workflow.db` 需要重开一次应用触发 `m53.0.0` 重建；重建前备份在 `.scratch/dev-data/ai-workflow-pre-m53.db`。
+
+## 复核修复（2026-11-22，五轴评审后返工）
+
+首轮评审（correctness / readability / architecture / security / performance）实测出四类问题，全部就地修掉，未新增基础设施：
+
+**交付链（评审标 Critical）**
+
+- **e2e 被机械改名改坏**：`handoff.spec` / `spawn.spec` 把 `task.complete` 直接换成 `task.archive`，而归档零业务事实 —— 派单不触发、rollup 不触发，两条用例必然红。改为 `task.move` 到该工作流内置「已完成」（完成 = 进入终态阶段），断言也从 `sourceStatus: 'completed'` 换成「停在 `builtin='done'` 且未归档」。
+- **e2e helper 仍在读已删除的列**：`seed-handoff.ts` / `seed-agent.ts` 都 `SELECT … status FROM tasks`，`tasks.status` 已被物理重建删除 → 运行即 `no such column: status`。改读 `archived_at` / `current_stage_id`，`gate-execution.spec` 的 `task.status === 'active'` 换成 `archivedAt === null`。
+- **floor 门禁在 HEAD 上红**：`floor-guard` 报 `decide.test.ts` 7→6、`spawn.test.ts` 3→2 两处 assertion-removed（首轮记录写的「0 error」不成立）。修法不是登记豁免，而是补回**真断言**：`task.archive{archived:false}` 的取消归档与双方向幂等（此前零覆盖）、`childrenOf` 的「派单产物不是子任务」不变量。`--base b044340` 与默认 base 均 clean。
+
+**语义与展示**
+
+- `ArchivedTasksDialog` 仍硬编码「已完成」徽标 → 按阶段语义渲染（未开始 / 进行中 / 已完成 / 已取消），文案改「已归档 N 个」，补三态用例。
+- `notices` 只看事实类型不看 `outcome` → 取消任务会弹「任务完成」。改为按 `outcome` 说「任务完成 / 任务已取消」，补正文字段与原有用例。
+- `task.finished{outcome:'cancelled'}` 全链路零测试（变异实验：把 cancelled 分支改成 null，1056 个用例全绿）→ 补两条冻结用例（线程按结束归档、父任务 rollup），变异体转为被杀。
+- 归档口径的三份重复：`terminalOutcomeOf` 收进 `@workbench/protocol/entities`（走 `stageKindOf`，与 `taskPhaseOf` 同源），内核与 `handoff-warning` 共用；提示词任务树改用中文阶段语义（原来打 `[finished]`）。
+
+**内核与 UI 收口**
+
+- `close` 出口原地结束，不再产 `from === to` 的 `task.moved`。
+- `task.archive` 视图切片由照抄 `task.move` 的 10 张表收到 `tasks + runs`。
+- `batchTaskPhases` 对同批新建的卡按**落点阶段**判（派单投到终态时不再一律当「未开始」）；`closeIfAllDone` 去掉 `as TaskPhase` 断言并合并两处 `removed` 规则；`childrenOf` 写清「只有 manual 子任务与 spawn 会写 `parentTaskId`」。
+- UI 命名改口：`completeTask` / `onCompleteTask` / `doneTasks` / `completedCount` → `archive*`；`finishTask` 的注释与实现对齐（缺内置「已完成」时按钮直接不显示）；归档按钮在执行中给出「执行中：先停止归档」；`handoffLandingWarning` 抽成组件只算一次，换目标工作流时目标阶段落到新流程第一个会派活的阶段（与新建一致）。
+
+**验证**：全量 **244** 测试文件 / **4181** 用例全绿，`pnpm typecheck` 0 error，`pnpm lint` 0 error（51 条既有 warning），`pnpm test:coverage` 与 `check:diffcov` 均通过（改动 43 行全部命中），`floor-guard` clean，`check:ui` / `check:secrets` / `check:packages` clean。`pnpm e2e` **本轮跑过**：`pnpm build` 之后 `playwright test` 全量 **28/28 通过（43.7s）**，含改过的 `handoff`（2 条）/ `spawn` / `gate-execution`。首轮「本轮未动主进程启动路径所以跳过 e2e」这个判断是错的——M53 改了 e2e 依赖的列与命令语义，跳过等于把断掉的用例留在库里。

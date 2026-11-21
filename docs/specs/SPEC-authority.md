@@ -236,7 +236,7 @@ export interface AttentionItem {
 
 - 排序：kind 序 → `since` 升序 → `id`；同一任务多条 `ask` 合并为一条并带 `count`（UI 展开）。
 - 上限 200 条，超出按顺序截断并在视图里给 `truncated: true`。
-- 「不打扰」硬规则：`notice`、已 `resolved` 的卡、`task.completed` 的任务、人自己点的完成，一律不进。
+- 「不打扰」硬规则：`notice`、已 `resolved` 的卡、`task.finished` 的任务（M53：完成即任务进入终态阶段，不再等归档）、人自己点的完成，一律不进。
 
 ## 兼容、重建与迁移
 

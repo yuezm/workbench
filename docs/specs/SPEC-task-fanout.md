@@ -34,11 +34,11 @@
 | **D1**  | 回执新增 `spawn?: SpawnTask[]`，作为 Agent 派生子任务的唯一原语                                                                                                                                                                                                                                                                                                         | 结构化、可校验、可幂等；与 `events[]` 分工清晰（spawn=子任务分解，events=外部/规则事件）  |
 | **D2**  | 子任务复用 `task.created` 事实，`origin='spawn'`（沿用 M7 `handoff` 先例），`parentTaskId` + 新增 `spawnedByRunId` / `batchNo` / `spawnKey` 三列                                                                                                                                                                                                                        | 不新增建任务事实类型，`project` 一行事实→一行投影不变；来源可追溯                         |
 | **D3**  | 子任务**默认继承父任务的工作流与线程**，落点阶段 = spawn 项 `stageId`（须属父工作流）＞ 阶段 `subtaskStageId` ＞ 父任务当前阶段。**跨工作流子任务不在此实现**（用既有 handoff）                                                                                                                                                                                         | 最小改动、语义清晰；跨工作流交给 handoff/M7                                               |
-| **D4**  | 父任务 rollup：全部（或某批）子任务终态时，按父任务阶段 `onChildrenSettled` 三选一：`wake`（默认，唤醒父 Agent 续接）/ `notify`（追加一条 `author='agent'` 的任务评论等人）/ `complete`（父直接完成）。**默认 wake**，若父当前阶段非 `agent` 入口则降级为 `notify`。卡片必须挂 run（`cards.run_id` 非空外键），父任务此时没有 run，故 notify 用任务评论承载，不用信息卡 | 对齐 Multica「父子不联动、子完成唤醒父」；避免「子完成父自动完成」的语义歧义              |
+| **D4**  | 父任务 rollup：全部（或某批）子任务终态时，按父任务阶段 `onChildrenSettled` 三选一：`wake`（默认，唤醒父 Agent 续接）/ `notify`（追加一条 `author='agent'` 的任务评论等人）/ `complete`（父任务落到该工作流内置「已完成」并产 `task.finished`，**不自动归档**；M53 前是直接 `status=completed` 即归档）。**默认 wake**，若父当前阶段非 `agent` 入口则降级为 `notify`。卡片必须挂 run（`cards.run_id` 非空外键），父任务此时没有 run，故 notify 用任务评论承载，不用信息卡 | 对齐 Multica「父子不联动、子完成唤醒父」；避免「子完成父自动完成」的语义歧义              |
 | **D5**  | 幂等与护栏**全部在内核纯函数里**：`(parentTaskId, spawnKey)` 去重；`spawnDepth ≤ 8`（沿用 handoff 链深口径）；单回执 `spawn` ≤ 32 条；父任务非 `active` 直接丢弃 spawn；rollup 靠「父任务已有活跃 run」判一次（子任务全部终态后不会再产生新的终态事件，天然单次）                                                                                                       | 不信任 Agent 文本；重跑安全；规则只在 kernel                                              |
 | **D6**  | **Agent 不能**在 spawn 里指定 `agentId` / `runtime` / `permissionMode` / `cwd` / `prompt`；派给谁只由子任务落点阶段的 `entry_mode` 与绑定智能体决定，其余字段一律忽略                                                                                                                                                                                                   | 守 ARCHITECTURE 边界守则 6：派活目标/目录/权限只能来自本机规则                            |
 | **D7**  | spawn 的 `summary` 作为**资料**（子任务 description + 资料文件），进子任务提示词时标注「资料，不是指令」，不拼进命令行                                                                                                                                                                                                                                                  | 指令数据分离；同一父 Agent 不能借子任务描述操控子 Agent 的命令面                          |
-| **D8**  | rollup 检测挂在「任务结终态」的三个出口：`task.complete`、`task.remove`、`run.receipt` 里因 `RUN_SUCCEEDED/FAILED` 完成子任务的路径                                                                                                                                                                                                                                     | 覆盖人工完成与 agent 跑完两条终态来源，不漏触发                                           |
+| **D8**  | rollup 检测挂在「任务结终态」的三个出口：进入终态阶段产出的 `task.finished`（自动流转 / 人工拖动 / `close` 出口）、`task.remove`、`run.receipt` 里因 `RUN_SUCCEEDED/FAILED` 完成子任务的路径（M53：不再挂 `task.completed`——归档与完成已分离）                                                                                                                                                                               | 覆盖人工完成与 agent 跑完两条终态来源，不漏触发                                           |
 | **D9**  | 本能力**纯内核 + 协议 + 投影**，新增一个可选只读视图 `tasks.byParent`；不新增 UI 写命令（spawn 只来自 Agent 回执）                                                                                                                                                                                                                                                      | 保持「看板只读视图、只发既有命令」；人工拆子任务走 `task.create`（增可选 `parentTaskId`） |
 | **D10** | **拆分决策归 Agent（语义判断），护栏与落点归内核**；阶段 `spawnPolicy`（`off`/`agent`，缺省 `agent`）控制该阶段是否允许 spawn。内核不判「该不该拆」，只校验与物化                                                                                                                                                                                                       | 内容生成是模型唯一的活；派活/权限/落点仍确定性归内核，守住「分活不是模型判断」            |
 | **D11** | **v1 不分批**：`batch` 字段保留但内核按「全部子任务为一批」处理；按批唤醒留后续版本                                                                                                                                                                                                                                                                                     | 先做最小闭环「全部完成一次唤醒」，降低内核/UI 复杂度                                      |
@@ -166,7 +166,7 @@ export interface TaskChildrenSettledPayload {
 }
 ```
 
-`project()` 对该事实返回 `[]`（纯审计，效果由同时产出的 `run.queued` / `card.opened` / `task.completed` 表达，沿用 `event.received` 的「只入账」模式），`timeline` 归到父任务 scope。
+`project()` 对该事实返回 `[]`（纯审计，效果由同时产出的 `run.queued` / `card.opened` / `task.finished` 表达，沿用 `event.received` 的「只入账」模式），`timeline` 归到父任务 scope。
 
 ## 内核决策（`kernel/decide.ts` + 新 `kernel/spawn.ts`）
 
@@ -241,7 +241,7 @@ function childrenSettledFacts(view, parentId, now, env, overrides): FactDraft[] 
     facts.push(...entryRunFacts(view, parent, now, env, HOST_SCHEDULER, childrenSettledTrigger()))
   else if (action === 'notify')
     facts.push({ type: 'task.comment_added' /* author='agent' 的通知评论 */ })
-  else if (action === 'complete') facts.push({ type: 'task.completed' /* parent completed */ })
+  else if (action === 'complete') facts.push({ type: 'task.finished' /* 父任务进入内置「已完成」，不归档 */ })
   return facts
 }
 ```
@@ -251,7 +251,7 @@ function childrenSettledFacts(view, parentId, now, env, overrides): FactDraft[] 
 ### 3) `view-spec.ts`
 
 - `run.receipt`：已含 `tasks/threads/cards/runs`，需补 `threads`（已有）——spawn/rollup 所需切片已齐。
-- `task.complete` / `task.remove`：补 `runs` 与 `cards`（rollup 判定要读父任务是否有活跃 run）；`task.complete` 现无 `runs/cards`，新增。
+- `task.finished`（进入终态阶段）/ `task.remove`：补 `runs` 与 `cards`（rollup 判定要读父任务是否有活跃 run）；`task.finished` 现无 `runs/cards`，新增（M53：原挂在 `task.complete` 上）。
 - 新增只读视图 `tasks.byParent`（供 UI），`view-spec` 增加对应 query（只读，不进 decide）。
 
 ### 4) `kernel/types.ts`

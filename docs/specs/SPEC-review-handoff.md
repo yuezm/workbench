@@ -12,9 +12,9 @@
 
 成功的样子：
 
-- 修复轮 prompt 里 `finding id / severity / 位置 / 验收条件` **完整率 100%**，不受上下文预算影响，也不会被截断。
+- 修复轮 prompt 里 `finding id / severity / 位置 / 验收条件` **完整率 100%**，不受上下文预算影响，也不会被截断。`finding id` 一律用完整形态 `<reportId>#<key>`（可直接粘进 `addresses[].findingId`），不写裸 `key`。
 - 报告全文不再进上下文预算，只在需要细节时**按引用读**（文件路径或只读 ref）。
-- 修复回执逐条回应（`addresses[]`），内核算出漏项；漏项非空不推进，除显式 `deferred`（带理由）。
+- 修复回执逐条回应（`addresses[]`），内核算出漏项；**阻断项**（`blocker` / `high`）漏项非空不推进，除显式 `deferred`（带理由）；`medium` / `low` 只留痕，不阻断。
 - 取不到报告时**显式降级**并留痕，绝不静默用摘要顶替。
 - 同一事实集两次拼装 prompt 全等（沿用现有确定性口径）。
 
@@ -161,7 +161,7 @@ export interface ReviewReportedPayload {
 1. 修复轮结束，内核读回执 `addresses[]`：每条 `findingId` 必须属于该报告且状态为 `open`；`checkRef` 指向同回执 `checks` 里的 `cmd`（不存在则该条视为未覆盖）。
 2. `disposition='fixed'` 要求有 `checkRef` 且该 `cmd` 的 `exitCode === 0`；否则降为 `open`。
 3. `rejected` / `deferred` 必须带 `note`（≤500 字），否则该条保持 `open`。
-4. 推进判定：`open` 集合为空 → 正常推进；非空且全部为 `deferred` → 推进并打 `review:deferred` 标签 + 一条任务评论列出延后项；其余情况 → **不推进**，把漏项写进下一轮索引段的「未覆盖」子段（硬门）。
+4. 推进判定（2026-11-21 按严重度收窄）：**阻断项**（`blocker` / `high`）的 `open` 集合为空 → 正常推进；阻断项非空且全部为 `deferred` → 推进并打 `review:deferred` 标签 + 一条任务评论列出延后项；其余情况 → **不推进**，把漏项写进下一轮索引段的「未覆盖」子段（硬门）。**建议项**（`medium` / `low`）无论 `open` 与否都不参与推进判定；它们的机器可读痕迹保留在 `review_reports.findings` 里，可被 `addresses` 顺手处置，也可一直 `open`。
 5. 上游出新 `rev` → 差集入索引段；已被 `addressed` 且新 `rev` 仍存在的 finding 保持状态；被撤销的自动关闭。
 
 ## 缺报告的降级三档
@@ -278,3 +278,15 @@ S1+S2 已能解决「修复阶段看不到结论」；S3 才解决「修没修�
 - 命令面 36 → 37、视图面 +1；`KERNEL_VERSION` 不变（投影语义未变）。
 
 验证（S5）：`pnpm check` 全绿（改动行 89/96 = 92.71% ≥ 90%，项目覆盖率 99.87 / 99.51 / 99.91 / 99.93），全量 2810 用例通过。
+
+## 口径修正（2026-11-21）：严重度阻断 / 同批提示词 / 补回执兜底
+
+线上实测（任务 `a6e02161`）暴露三个缺口，本版一并收口：
+
+1. **严重度口径**：`findings[]` 里 `medium` / `low`（Optional / Nit）此前与 `blocker` / `high` 同等阻断，导致「只关注 P0/P1」的闸门被 6 条建议项卡死。现在阻断集合固定在 `protocol/review.ts` 的 `BLOCKING_SEVERITIES`（`blocker` / `high`）；建议项仍写进 `findings[]`（机器可读留痕、可在 UI 查看、可用 `addresses` 处置），只是不参与硬门、漏项评论、线程待办与提示词折叠优先级。
+2. **同批提示词的证据缺口**：评审报告与「进入修复阶段」在同一批决策里产出，而 `review.reported` 只进 `facts`、不进 `view`。于是修复轮提示词：`addresses` 键被裁掉、待修复清单段为空、一条 finding id 都没有（实测 `runs.prompt` 6 325 字，零 finding）。现在 `ReviewOutcome.report` 把本批报告带出来，`entryRunFacts` 显式接收（`options.review`），提示词据此内联清单并打开 `addresses` 出口；清单行使用完整 `findingId`。
+3. **格式缺失的兜底**：硬门挡住后此前只写一条评论、不派下一轮，任务静默挂死。现在阻断项未处置时**自动补一轮**「只交 `addresses`」的回执（`addressesRepairText`：不要求重新改代码 / 重跑验证，清单内联）；每阶段最多自动补一次，之后 `task.reask` 还可人工补，额度用尽（本阶段第 3 轮起）交人处理。
+
+配套文案：执行阶段的回执块标题在 `addresses` 有出口时改为「必须给 `addresses` 或 ask」；`findings` / `addresses` 的单键说明写明「阻断项漏回应不推进，建议项可回可不回」。
+
+验证：`pnpm vitest run` 全量见提交信息；新增/更新用例覆盖 `protocol/review`、`kernel/scopes/review`、`kernel/scopes/prompt`、`kernel/scopes/thread-context`、`kernel/decide.run`（同批清单 / 自动补轮 / 建议项不阻断 / 二次不派）、`kernel/decide.rerun`（`task.reask` 第二形态）。

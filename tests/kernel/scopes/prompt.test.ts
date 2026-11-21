@@ -306,12 +306,14 @@ describe('kernel/prompt 回执块说明', () => {
   })
 
   // R7/R8：闸门轮标题与开场白都要说清「必须」，且 severity 的合法值要写在提示词里。
-  it('闸门轮：标题要求 verdict、fail 说明不需要 checks；findings 给 severity 映射', () => {
+  it('闸门轮：标题要求 verdict、缺了会停在闸门；findings 给 severity 映射', () => {
     const gate = receiptBlockHint(RECEIPT_KEYS, 1, { gate: true })
     expect(gate.split('\n')[0]).toBe('# 回执块（闸门：必须给 verdict）')
     expect(gate).toContain('本阶段是**闸门**')
-    expect(gate).toContain('`fail` 不需要 `checks`')
+    expect(gate).toContain('回执里必须有 `verdict`')
     expect(gate).toContain('停在闸门')
+    // 证据口径只在闸门判定段与单键文案里讲：这里不再重复「fail 免证据」
+    expect(gate).not.toContain('`fail` 不需要 `checks`')
 
     // 非闸门轮不多这句，也不改标题
     const plain = receiptBlockHint()
@@ -810,11 +812,12 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
       judge: { maxFails: 2 },
     })
     // 判 fail 的那一轮只发 ask：verdict 要在人答完的续接轮里再给
-    expect(text).toContain('不要给 `verdict`')
-    expect(text).toContain('gate-verdict')
+    expect(text).toContain('不给 `verdict`')
+    // 卡片的稳定 key 不再是闸门提示词的约定（落卡去重按 run 计，闸门路径上永远匹配不到）
+    expect(text).not.toContain('gate-verdict')
     expect(text).toContain('我要和你再讨论')
     // 附言 + 同一会话续谈，是「和判定者讨论」的落地口径
-    expect(text).toContain('附一段自己的意见或追问')
+    expect(text).toContain('附一段意见')
     expect(text).toContain('同一会话')
   })
 
@@ -930,19 +933,19 @@ describe('kernel/prompt 验收段（M34：只对闸门阶段产出）', () => {
     expect(text).not.toContain('pnpm check 退出码 0')
   })
 
-  it('闸门 + 验收：判定段追加「每条验收都要有自己的证据」；无验收时不追加', () => {
+  it('闸门 + 验收：判定段追加「每条验收一条 checks」；无验收时不追加', () => {
     const withAcceptance = gateInstructionsText({
       judge: { maxFails: 2 },
       acceptance: ['pnpm check 退出码 0'],
     })
-    expect(withAcceptance).toContain('每条「验收」都要有自己的证据')
-    expect(withAcceptance).toContain('"acceptance": n')
+    expect(withAcceptance).toContain('验收：每条验收一条 `checks`')
+    expect(withAcceptance).toContain('`acceptance: n`')
 
     const withoutAcceptance = gateInstructionsText({
       judge: { maxFails: 2 },
       acceptance: [],
     })
-    expect(withoutAcceptance).not.toContain('每条「验收」都要有自己的证据')
+    expect(withoutAcceptance).not.toContain('验收：每条验收一条')
   })
 })
 

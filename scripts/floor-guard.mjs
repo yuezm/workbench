@@ -275,6 +275,9 @@ const RELOCATED_TESTS = {
   // M37：内核拆两层，cron 测试随 cron.ts 搬到 core/（import 路径变化使相似度低于 rename 阈值，
   // git 退化成 delete + add；新位置断言语义等价）
   'tests/kernel/cron.test.ts': 'tests/kernel/core/cron.test.ts',
+  // M36：提示词按 scope 拆到 scopes/，测试同层跟着搬；拆分改写了大量断言，相似度低于 rename
+  // 阈值，git 退化成 delete + add（2026-11-21 改闸门文案时这条退化才被触发出来）
+  'tests/kernel/prompt.test.ts': 'tests/kernel/scopes/prompt.test.ts',
 }
 const migratedCounterpart = (f) => {
   const relocated = RELOCATED_TESTS[f]

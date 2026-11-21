@@ -78,7 +78,7 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
     shape: '{"verdict":"pass","checks":[{"cmd":"pnpm check","exitCode":0}]}',
   },
   checks: {
-    text: '闸门证据：**真的执行过**的命令与退出码（不许编造）。`verdict` 为 `pass` 时每条 `exitCode` 必须是 0，且每条验收都要有一条 `acceptance` 指向它的全 0 证据。',
+    text: '闸门证据：**真的执行过**的命令与退出码（不许编造）。`verdict` 为 `pass` 时每条 `exitCode` 必须是 0。',
     shape: '[{"cmd":"pnpm check","exitCode":0,"acceptance":1}]',
   },
   deliverables: {

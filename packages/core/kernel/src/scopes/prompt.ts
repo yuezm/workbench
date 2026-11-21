@@ -117,8 +117,12 @@ const RECEIPT_BLOCK_INTRO = `需要人拍板、留知会、给结论或自评时
 /**
  * 闸门轮的回执额外硬约束（R7）：回执段标题写「可选」、开场白又说「不挂起也不报错」，
  * 与闸门段「必须给 verdict」自相矛盾——实测模型因此干脆不给结论。
+ *
+ * 只留「必须有 verdict + 缺了会停住」：`fail` 免证据、`pass` 要全 0 证据这两句在闸门段与
+ * 单键文案（`RECEIPT_KEY_DOCS.verdict` / `checks`）里已经各讲一次，同一份提示词里重复三遍
+ * 只会让读者以为三处口径不同。
  */
-const GATE_RECEIPT_RULE = `本阶段是**闸门**：回执里必须有 \`verdict\`（\`pass\` / \`fail\`）。\`fail\` 不需要 \`checks\`，但正文要写清哪条没过；\`pass\` 必须有全 0 的 \`checks\` 并逐条覆盖验收。缺 \`verdict\` 会让任务停在闸门等人，不会自动放行。`
+const GATE_RECEIPT_RULE = `本阶段是**闸门**：回执里必须有 \`verdict\`（\`pass\` / \`fail\`）。缺 \`verdict\` 会让任务停在闸门等人，不会自动放行。`
 
 /**
  * 回执块说明（确定性文本）：标题 + 开场白 + 逐键「一句话 + 形状示例」+ 上限。
@@ -197,7 +201,7 @@ export const receiptRepairText = (stage: Pick<WorkflowStage, 'name' | 'acceptanc
     '## 三条分支（选一条）',
     '- **事实通过**：`verdict:"pass"`，并给 `checks`——每条验收一条 `{ cmd, exitCode: 0, acceptance: n }`，n 是下面的 1 基序号。',
     '- **事实不过**：`verdict:"fail"`，正文写清哪条没过。`fail` 不需要 `checks`。',
-    '- **要人拍板**：发一张 `ask`（`key:"gate-verdict"`，三档去向），这一轮不给 `verdict`。',
+    '- **要人拍板**：发一张 `ask`（三档去向），这一轮不给 `verdict`。',
     ...(acceptance.length === 0
       ? []
       : ['', '## 验收', ...acceptance.map((item, index) => `${index + 1}. ${item}`)]),
@@ -513,7 +517,7 @@ export const outputContractText = (
 写法：先给结论再给依据；不复述过程（「我先读了…」「接下来准备…」这类句子删掉）；不贴整份文档，给路径与关键段落。`
 
 /** 闸门段里「验收要落到证据」的那一句：只在阶段声明了验收条目时追加。 */
-const GATE_ACCEPTANCE_RULE = `- 每条「验收」都要有自己的证据：在对应那条 \`checks\` 里写 \`"acceptance": n\`（n 是上面的条目序号）且 \`exitCode\` 为 0；漏一条就等于没给结论（任务停在闸门，不消耗失败次数）。真无法机检的那条，在正文写清为什么，并按实际情况给 \`fail\` 或停下来问人`
+const GATE_ACCEPTANCE_RULE = `- 验收：每条验收一条 \`checks\`，写 \`acceptance: n\`（n 是上面的条目序号）且 \`exitCode\` 为 0；漏一条就等于没给结论，无法机检的那条在正文写清为什么，并按实际情况给 \`fail\` 或停下来问人`
 
 /**
  * 闸门判定小节（M11）：固定文案，只对闸门阶段出现。这段是**指令**，不能由人改写——
@@ -527,13 +531,11 @@ export const gateInstructionsText = (stage: PromptStage | null, level = 1): stri
   if (gate === null) return ''
   const acceptanceRule = (stage?.acceptance ?? []).length > 0 ? `\n${GATE_ACCEPTANCE_RULE}` : ''
   return `${heading(level, '闸门判定（必须）')}
-本阶段是闸门：不实现任何东西，只对上一个执行阶段的交付下结论，在最终回复末尾的回执块里写 \`verdict\` 与 \`checks\`。
-- \`verdict\`: "pass" = 确实达成；"fail" = 没达成（在正文里写清哪一条没过）
-- \`checks\`: 实际执行的命令与退出码，至少一条；\`verdict\` 为 pass 时每条 \`exitCode\` 必须是 0
+闸门不实现东西：只对上一阶段的交付下结论，回执块里给 \`verdict\`，\`pass\` 时再给 \`checks\`。
+- \`pass\` = 确实达成：\`checks\` 至少一条，每条 \`exitCode\` 为 0（真跑过的命令，不许编造）
+- \`fail\` = 没达成：正文写清哪条没过，不需要 \`checks\`
 - 未通过会退回修复${gate.maxFails === null ? '' : `，最多允许 ${gate.maxFails} 次`}；不要为了让流程前进而填 pass
-- 判定 fail 且要人决定去向时，这一轮**不要给 \`verdict\`**，改发一张 \`ask\` 卡（同一轮只发一张）：正文写清哪一条没过、证据是什么，\`options\` 给「同意，按打回走」/「我要和你再讨论」/「情况有变，直接放行」三档，\`key\` 固定写 \`gate-verdict\`
-- 人在这张卡上除了选一行，还可以附一段自己的意见或追问（会作为资料交给你）；答完之后你在**同一会话**里接着谈：把异议逐条回应，谈清楚了再给最终 \`verdict\` 与 \`checks\`，还需要人拍板就再发一张 \`ask\`
-- 缺少 verdict 或拿不出证据时，任务会停在闸门等人处理${acceptanceRule}`
+- 要人定去向：这一轮不给 \`verdict\`，改发一张 \`ask\`（一轮只发一张）——正文写清哪条没过与证据，选项给「同意，按打回走」/「我要和你再讨论」/「情况有变，直接放行」；人可以附一段意见，答完后你在**同一会话**里逐条回应，谈清楚再给最终 \`verdict\` 与 \`checks\`，仍要人拍板就再发一张 \`ask\`${acceptanceRule}`
 }
 
 /** prompt 里的角色文案（与旧 chat.ts 一致） */

@@ -13,8 +13,9 @@ import type { Access, PermissionMode } from '@workbench/protocol/entities'
 import { ACCESS_BY_PERMISSION } from '@workbench/protocol/entities'
 import type { ThreadRow } from '@workbench/protocol/thread'
 import type { TaskComment } from '@workbench/protocol/task-comment'
+import type { ReviewReport } from '@workbench/protocol/review'
 import type { Actor, Environment, FactDraft, View } from '../core/types'
-import { receiptRepairText, taskPrompt } from './prompt'
+import { addressesRepairText, receiptRepairText, taskPrompt } from './prompt'
 import { sourceHandoffOf } from './handoff-source'
 import { narrowAccess } from './access'
 import { locateReport } from './review'
@@ -82,10 +83,18 @@ export function entryRunFacts(
      */
     roundSession?: 'resume' | 'fresh'
     /**
-     * R5：闸门补回执。提示词换成专用短文本（只说「补 verdict」），不重发任务全文，
+     * R5：闸门补回执。提示词换成专用短文本（`verdict` 或 `addresses`），不重发任务全文，
      * 也不重新评审；会话仍按 `roundSession` 续接。
+     *
+     * - `true` / `'verdict'`：闸门跑完没给结论，只补 `verdict` + `checks`；
+     * - `'addresses'`：修复轮跑完仍有阻断项没逐条回应，只补 `addresses`。
      */
-    receiptRepair?: boolean
+    receiptRepair?: boolean | 'verdict' | 'addresses'
+    /**
+     * 本轮要处置的评审报告（M14 补充，2026-11-21）：同批刚产出的 `review.reported` 还没进
+     * 视图，靠它把「待修复清单」与 `addresses` 出口带进提示词。缺省时退回 `locateReport`。
+     */
+    review?: ReviewReport
   },
 ): FactDraft<'run.queued'>[] {
   if (task.status !== 'active' || task.currentStageId === null) return []
@@ -113,7 +122,9 @@ export function entryRunFacts(
   ]
   // M24：本阶段要处理的评审报告决定回执里有没有 `addresses` 的出口——没有报告时
   // 提示词不再念「逐条回应」，省掉一段用不上的指令。
-  const reviewing = locateReport(view, task) !== undefined
+  // 同批产出的报告还没进视图（决策是纯函数），调用方用 `options.review` 显式传入。
+  const review = options?.review ?? locateReport(view, task)
+  const reviewing = review !== undefined
   // M28：本阶段已跑过几次（不含本轮）。它只决定会话策略（第 2 次起开新会话），
   // M34 起不再进提示词——续轮已删除，「第 N 轮」对执行没有行动指引。
   const previousRounds = stageRoundCount(view, task.id, stage.id)
@@ -122,12 +133,15 @@ export function entryRunFacts(
       ? scriptContextText(task, stage)
       : taskPrompt(target.agent, task, stage, context, comments, {
           reviewing,
+          review,
           handoffSource: sourceHandoffOf(view, task),
         })
   const prompt =
-    options?.receiptRepair === true
-      ? receiptRepairText(stage)
-      : [base, trigger?.promptExtra ?? ''].filter(Boolean).join('\n\n')
+    options?.receiptRepair === 'addresses' && review !== undefined
+      ? addressesRepairText(review, stage)
+      : options?.receiptRepair === true || options?.receiptRepair === 'verdict'
+        ? receiptRepairText(stage)
+        : [base, trigger?.promptExtra ?? ''].filter(Boolean).join('\n\n')
   // M15：会话键 = (taskId, agentId)。同一任务续接（打回重做 / 反馈 / turn+1），
   // 换任务或换智能体都开新会话——跨任务信息走「任务索引 + 产物路径」，不共享历史。
   //

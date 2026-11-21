@@ -48,7 +48,9 @@ import {
 } from '@workbench/protocol/receipt-keys'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import { TASK_COMMENT_LIMITS } from '@workbench/protocol/task-comment'
+import type { ReviewReport } from '@workbench/protocol/review'
 import { balanceFences } from './markdown'
+import { findingsText } from './review-text'
 
 /** 段与段之间空一行；`filter(Boolean)` 之后用它拼接，空段不留痕。 */
 const SECTION_SEPARATOR = '\n\n'
@@ -136,15 +138,25 @@ const GATE_RECEIPT_RULE = `本阶段是**闸门**：回执里必须有 \`verdict
 export const receiptBlockHint = (
   keys: readonly ReceiptKey[] = RECEIPT_KEYS,
   level = 1,
-  options: { gate?: boolean } = {},
+  options: { gate?: boolean; mustAddress?: boolean } = {},
 ): string => {
   const keyLines = keys.map((key) => {
     const doc = RECEIPT_KEY_DOCS[key]
     return `- \`${key}\` ${doc.text}\n  \`${doc.shape}\``
   })
   const gate = options.gate === true
+  // `addresses` 有出口且本轮确实要处置时不能写「可选」：阻断项漏回应会让任务停在当前阶段。
+  // 默认全量（文档 / 聊天）不算「必须」——那是键表参考，不是本轮要求。
+  const mustAddress = !gate && options.mustAddress === true && keys.includes('addresses')
   return [
-    heading(level, gate ? '回执块（闸门：必须给 verdict）' : '回执块（可选）'),
+    heading(
+      level,
+      gate
+        ? '回执块（闸门：必须给 verdict）'
+        : mustAddress
+          ? '回执块（必须给 addresses 或 ask）'
+          : '回执块（可选）',
+    ),
     RECEIPT_BLOCK_INTRO,
     ...(gate ? [GATE_RECEIPT_RULE] : []),
     ...keyLines,
@@ -209,6 +221,29 @@ export const receiptRepairText = (stage: Pick<WorkflowStage, 'name' | 'acceptanc
     '用回执工具提交，或把回执对象放在最终回复末尾的 json 围栏块里。',
   ].join('\n')
 }
+
+/**
+ * 补回执提示词（R5 第二类，2026-11-21）：修复轮跑完仍有阻断项没逐条回应时，只补 `addresses`。
+ *
+ * 与 `receiptRepairText` 同一个理由：修复工作已经做完、证据也已经跑过，缺的只是「把处置
+ * 说出来」。所以这一轮不重发任务全文、不要求重新改代码或重跑验证；清单直接内联，连
+ * finding id 都不必让模型自己去查。
+ */
+export const addressesRepairText = (
+  report: ReviewReport,
+  stage: Pick<WorkflowStage, 'name'>,
+): string =>
+  [
+    '# 补回执（只做这一件）',
+    `阶段「${stage.name}」上一轮已经交付，但评审清单里还有阻断项（blocker / high）没有逐条回应。这一轮**不要改代码、不要重跑验证、不要重复上一轮正文**，只把 \`addresses\` 交上来。`,
+    '',
+    '## 逐条处置',
+    '每个阻断项一条：`fixed` 必须带 `checkRef`（指向同一份回执 `checks` 里退出码 0 的命令，字符串逐字相等）；`rejected` / `deferred` 必须写 `note` 理由。建议项（medium / low）可回可不回，不拦推进。',
+    '',
+    findingsText(report, 2),
+    '',
+    '用回执工具提交，或把回执对象放在最终回复末尾的 json 围栏块里。',
+  ].join('\n')
 
 /**
  * 跨任务上下文规则（M15）：会话键下沉到任务后，任务之间只共享索引与产物文件。
@@ -431,6 +466,8 @@ const stageParagraph = (
  *
  * `options.reviewing` 由宿主在定位到「打回本阶段的那次评审」时置 true——
  * 只有这时 `addresses` 才有对象，其余阶段念它只是噪音。
+ * `options.review` 是本轮要处置的报告行（同批刚产出的也算）：它被内联成「待修复清单」段，
+ * 不依赖视图里是否已经落库。
  */
 export const taskPrompt = (
   agent: Agent,
@@ -438,7 +475,11 @@ export const taskPrompt = (
   stage: PromptStage | null,
   threadContext?: string | null,
   comments?: readonly TaskComment[],
-  options?: { reviewing?: boolean; handoffSource?: HandoffSource | null },
+  options?: {
+    reviewing?: boolean
+    handoffSource?: HandoffSource | null
+    review?: ReviewReport | null
+  },
 ): string =>
   [
     heading(1, '本轮任务提示词'),
@@ -446,11 +487,13 @@ export const taskPrompt = (
     taskParagraph(task, 2),
     handoffSourceText(options?.handoffSource, 2),
     stageParagraph(stage, task),
+    options?.review ? findingsText(options.review, 2) : '',
     taskCommentsText(comments ?? [], 2),
     threadContext ?? '',
     threadContext ? CROSS_TASK_RULE : '',
     receiptBlockHint(taskReceiptKeys(stage, task, options), 2, {
       gate: stage?.judge != null,
+      mustAddress: stage?.judge == null && options?.reviewing === true,
     }),
   ]
     .filter(Boolean)

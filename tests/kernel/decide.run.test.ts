@@ -25,11 +25,13 @@ import type { ReviewReport } from '@workbench/protocol/review'
 import { decide } from '@workbench/kernel/decide'
 import { runAccessOf } from '@workbench/kernel/scopes/task-effects'
 import {
+  addressRepairFacts,
   degradedCommentText,
   noConclusionCommentText,
   stageRoundCount,
   stageTimeoutOf,
 } from '@workbench/kernel/scopes/commands/run'
+import type { ReviewOutcome } from '@workbench/kernel/scopes/review'
 import { project } from '@workbench/kernel/scopes/project'
 import type { Environment, Id, IdKind, Limits, View } from '@workbench/kernel/core/types'
 
@@ -1933,7 +1935,10 @@ describe('kernel/decide run.receipt 评审结论（M14）', () => {
 
   const reviewView = (taskOver: Partial<Task> = {}, reportOver: Partial<ReviewReport> = {}): View =>
     view({
-      runs: [running()],
+      runs: [running({ stageId: 'st-fix' })],
+      // 修复轮 blocked 时会自动补一轮「只交 addresses」的回执，派活要能查到智能体与运行时
+      agents: [agent()],
+      runtimes: [runtime()],
       workflows: [workflow()],
       stages: reviewStages(),
       tasks: [task({ currentStageId: 'st-fix', ...taskOver })],
@@ -1968,7 +1973,7 @@ describe('kernel/decide run.receipt 评审结论（M14）', () => {
     expect(row.checks).toEqual([{ cmd: 'pnpm check', exitCode: 1 }])
   })
 
-  it('修复轮没逐条回应：停在原阶段（不打回、不前进），并追加漏项评论', () => {
+  it('修复轮没逐条回应：停在原阶段，并自动补一轮「只交 addresses」的回执', () => {
     const decision = receive(reviewView(), 'run-1', receipt())
     expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
     expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
@@ -1979,6 +1984,14 @@ describe('kernel/decide run.receipt 评审结论（M14）', () => {
         (fact.payload as { comment: { text: string } }).comment.text.includes('未处置条目'),
     )
     expect(comment).toBeDefined()
+    // 自动补一轮：同一阶段、续接会话、提示词只讲逐条回应，且把 finding id 内联
+    const queued = decision.facts.find((fact) => fact.type === 'run.queued')
+    const row = (queued?.payload as { run: RunRow } | undefined)?.run
+    expect(row?.stageId).toBe('st-fix')
+    expect(row?.turn).toBe(2)
+    expect(row?.prompt).toContain('补回执')
+    expect(row?.prompt).toContain('run-review:1#R1')
+    expect(row?.prompt).toContain('checkRef')
   })
 
   it('修复轮逐条回应且检查通过：照常前进到下一阶段', () => {
@@ -2005,6 +2018,193 @@ describe('kernel/decide run.receipt 评审结论（M14）', () => {
     )
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect((moved?.payload as { to: string }).to).toBe('st-done')
+  })
+
+  it('建议项（medium / low）没回应：不阻断，照常前进且不补回执', () => {
+    const decision = receive(
+      reviewView(
+        {},
+        {
+          findings: [
+            {
+              id: 'run-review:1#O1',
+              key: 'O1',
+              severity: 'medium',
+              location: null,
+              claim: '命名可以再短一点',
+              evidence: null,
+              requiredAction: '可选',
+              status: 'open',
+              note: null,
+              addressedByRunId: null,
+              updatedAt: CREATED,
+            },
+            {
+              id: 'run-review:1#N1',
+              key: 'N1',
+              severity: 'low',
+              location: null,
+              claim: '注释措辞',
+              evidence: null,
+              requiredAction: '可选',
+              status: 'open',
+              note: null,
+              addressedByRunId: null,
+              updatedAt: CREATED,
+            },
+          ],
+        },
+      ),
+      'run-1',
+      receipt(),
+    )
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-done')
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
+  })
+
+  it('同一阶段已经补过一次（两轮终态 run）：不再自动派，只留评论交人', () => {
+    const twice = view({
+      runs: [
+        running({ stageId: 'st-fix' }),
+        run({ id: 'run-0', stageId: 'st-fix', status: 'succeeded', endedAt: CREATED }),
+        run({ id: 'run-0b', stageId: 'st-fix', status: 'succeeded', endedAt: CREATED }),
+      ],
+      agents: [agent()],
+      runtimes: [runtime()],
+      workflows: [workflow()],
+      stages: reviewStages(),
+      tasks: [task({ currentStageId: 'st-fix' })],
+      reviewReports: [seeded()],
+    })
+    const decision = receive(twice, 'run-1', receipt())
+    expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
+    expect(
+      decision.facts.some(
+        (fact) =>
+          fact.type === 'task.comment_added' &&
+          (fact.payload as { comment: { text: string } }).comment.text.includes('未处置条目'),
+      ),
+    ).toBe(true)
+  })
+
+  it('评审轮 fail：同批进入修复轮，提示词直接带清单与 addresses 出口（不等报告落库）', () => {
+    const gateStages = (): WorkflowStage[] => [
+      stage({
+        id: 'st-review',
+        name: '评审',
+        position: 0,
+        judge: { maxFails: null },
+        acceptance: ['无阻断项'],
+        exits: { failed: { do: 'goto', stageId: 'st-fix' } },
+      }),
+      stage({ id: 'st-fix', name: '修复', position: 1 }),
+      stage({ id: 'st-done', name: '归档', position: 2, entryMode: 'none', agentId: null }),
+    ]
+    const decision = receive(
+      view({
+        runs: [running({ stageId: 'st-review' })],
+        agents: [agent()],
+        runtimes: [runtime()],
+        workflows: [workflow()],
+        stages: gateStages(),
+        tasks: [task({ currentStageId: 'st-review' })],
+      }),
+      'run-1',
+      receipt({
+        verdict: 'fail',
+        findings: [
+          { key: 'R1', severity: 'high', claim: 'BOM', requiredAction: '复跑冒烟' },
+          { key: 'O1', severity: 'medium', claim: '命名', requiredAction: '可选' },
+        ],
+      }),
+    )
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect((moved?.payload as { to: string }).to).toBe('st-fix')
+    const queued = decision.facts.find((fact) => fact.type === 'run.queued')
+    const prompt = (queued?.payload as { run: RunRow } | undefined)?.run.prompt ?? ''
+    expect(prompt).toContain('## 待修复清单（报告 rev 1，fail，阻断 1 条 / 建议 1 条）')
+    expect(prompt).toContain('- run-1:1#R1 [high]')
+    expect(prompt).toContain('run-1:1#R1')
+    expect(prompt).toContain('- `addresses`')
+    expect(prompt).toContain('## 回执块（必须给 addresses 或 ask）')
+  })
+})
+
+/**
+ * 补回执兜底（2026-11-21）：阻断项没处置时自动补一轮「只交 addresses」。
+ * 这里只测派活函数本身的边界（何时零事实 / 何时派），流转判定在 M14 那组用例里。
+ */
+describe('kernel/commands/run addressRepairFacts', () => {
+  const fixStage = (over: Partial<WorkflowStage> = {}): WorkflowStage =>
+    stage({ id: 'st-1', name: '修复', position: 0, exits: {}, ...over })
+
+  const report = (): ReviewReport => ({
+    id: 'run-review:1',
+    taskId: 't-1',
+    stageId: 'st-review',
+    runId: 'run-review',
+    threadId: null,
+    rev: 1,
+    verdict: 'fail',
+    checks: [],
+    findings: [],
+    artifact: null,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  })
+
+  const outcome = (withReport = true): ReviewOutcome => ({
+    facts: [],
+    blocked: true,
+    report: withReport ? report() : undefined,
+  })
+
+  const base = (
+    over: Partial<{
+      stages: WorkflowStage[]
+      tasks: Task[]
+      runs: RunRow[]
+    }> = {},
+  ): View =>
+    view({
+      stages: over.stages ?? [fixStage()],
+      tasks: over.tasks ?? [task()],
+      runs: over.runs ?? [run({ stageId: 'st-1' })],
+      agents: [agent()],
+      runtimes: [runtime()],
+      workflows: [workflow()],
+    })
+
+  const noFacts = (target: View, row = run({ stageId: 'st-1' }), review = outcome()): boolean =>
+    addressRepairFacts(target, row, review, NOW, env()).length === 0
+
+  it('没有报告 / 任务缺失 / 阶段缺失：零事实（不编造派活）', () => {
+    expect(noFacts(base(), run({ stageId: 'st-1' }), outcome(false))).toBe(true)
+    expect(noFacts(base({ tasks: [] }))).toBe(true)
+    expect(noFacts(base(), run({ stageId: 'st-gone' }))).toBe(true)
+  })
+
+  it('闸门阶段 / 已补过一轮：零事实，交给闸门补回执或人工处理', () => {
+    const gated = base({ stages: [fixStage({ judge: { maxFails: null } })] })
+    expect(noFacts(gated)).toBe(true)
+    const twice = base({
+      runs: [
+        run({ id: 'run-1', stageId: 'st-1', status: 'running' }),
+        run({ id: 'run-0', stageId: 'st-1', status: 'succeeded' }),
+      ],
+    })
+    expect(noFacts(twice)).toBe(true)
+  })
+
+  it('修复阶段第一次缺处置：派一轮续接的补回执，提示词内联清单', () => {
+    const facts = addressRepairFacts(base(), run({ stageId: 'st-1' }), outcome(), NOW, env())
+    expect(facts).toHaveLength(1)
+    const queued = (facts[0]?.payload as { run: RunRow }).run
+    expect(queued).toMatchObject({ purpose: 'stage', stageId: 'st-1', status: 'queued', turn: 2 })
+    expect(queued.prompt).toContain('补回执')
+    expect(queued.prompt).toContain('addresses')
   })
 })
 

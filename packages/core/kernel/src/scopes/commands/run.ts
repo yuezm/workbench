@@ -36,7 +36,7 @@ import {
 import { cronTaskFacts, eventThreadFacts } from '../rules'
 import { childrenSettledFacts, spawnFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
-import { reviewFactsOf } from '../review'
+import { reviewFactsOf, type ReviewOutcome } from '../review'
 import {
   batchTaskStatuses,
   closeIfAllDone,
@@ -257,6 +257,36 @@ function withLabel(labels: readonly string[], label: string): string[] {
 interface StageTransition {
   facts: FactDraft[]
   enter?: Task
+}
+
+/**
+ * 硬门兜底（2026-11-21）：阻断项没处置时不推进阶段，但自动补一轮「只交 `addresses`」的回执。
+ *
+ * 为什么自动补：修复工作与验证都已在上一轮完成，缺的只是机器可读的逐条处置；靠人点
+ * 「重新执行」才能补，会让任务在界面上静默挂死（实测 2026-11-21 任务 `a6e02161` 挂了两小时）。
+ *
+ * 只补**一次**（该阶段已跑过 ≥2 轮就不再派）：第二次仍缺说明模型稳定给不出格式，
+ * 交给人处理，不自动循环——与 R5「闸门补回执只补一次」同一纪律。
+ */
+export function addressRepairFacts(
+  view: View,
+  run: RunRow,
+  review: ReviewOutcome,
+  now: Iso,
+  env: Environment,
+): FactDraft[] {
+  if (review.report === undefined) return []
+  const task = run.taskId === null ? undefined : view.tasks.get(run.taskId)
+  const stage = run.stageId === null ? undefined : view.stages.get(run.stageId)
+  if (task === undefined || stage === undefined) return []
+  // 闸门自己的「没给结论」走 `receiptRepairText`；这里只管执行阶段缺评审处置。
+  if (stage.entryMode !== 'agent' || stage.judge !== null) return []
+  if (stageRoundCount(view, task.id, stage.id) > 1) return []
+  return entryRunFacts(view, task, now, env, HOST_SCHEDULER, undefined, {
+    roundSession: 'resume',
+    receiptRepair: 'addresses',
+    review: review.report,
+  })
 }
 
 function stageTransitionFacts(
@@ -553,7 +583,7 @@ export function receiveRun(
         ? undefined
         : gateVerdictOf(input.receipt, stage, settled)
     const transition = review.blocked
-      ? { facts: [] as FactDraft[] }
+      ? { facts: addressRepairFacts(view, run, review, now, env) }
       : stageTransitionFacts(view, settled, outcome, now, env)
     facts.push(...transition.facts)
     // 进入效果：流转到目标阶段 / 原地重跑后立刻入队下一轮（形成链条）
@@ -563,6 +593,7 @@ export function receiveRun(
       facts.push(
         ...entryRunFacts(view, transition.enter, now, env, HOST_SCHEDULER, undefined, {
           roundSession: 'fresh',
+          review: review.report,
         }),
       )
     }

@@ -7,9 +7,11 @@
 import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import type { Agent, Card, Message, Task } from '@workbench/protocol/entities'
+import type { ReviewReport } from '@workbench/protocol/review'
 import { TASK_COMMENT_LIMITS, type TaskComment } from '@workbench/protocol/task-comment'
 import {
   acceptanceText,
+  addressesRepairText,
   answerPrompt,
   chatPrompt,
   demoteHeadings,
@@ -1529,5 +1531,106 @@ describe('kernel/prompt 结构不变量（R6）：结果正文改不了提示词
 
   it('配平只补围栏、不改人写内容本身', () => {
     expect(balanceFences(['```js', 'x'].join('\n'))).toBe(['```js', 'x', '```'].join('\n'))
+  })
+})
+
+/**
+ * 修复轮提示词（2026-11-21）：报告与「进入修复阶段」在同一批决策里产出，视图里还查不到它。
+ * 所以报告由调用方显式传入（`options.review`），提示词据此内联清单并打开 `addresses` 出口。
+ */
+describe('kernel/prompt 修复轮：待修复清单与 addresses 出口', () => {
+  const review = (over: Partial<ReviewReport> = {}): ReviewReport => ({
+    id: 'run-review:1',
+    taskId: 't-1',
+    stageId: 'st-review',
+    runId: 'run-review',
+    threadId: null,
+    rev: 1,
+    verdict: 'fail',
+    checks: [],
+    findings: [
+      {
+        id: 'run-review:1#R1',
+        key: 'R1',
+        severity: 'high',
+        location: 'src/a.ts:64',
+        claim: 'BOM 文件被判非法 JSON',
+        evidence: null,
+        requiredAction: '改成 utf-8-sig 后复跑',
+        status: 'open',
+        note: null,
+        addressedByRunId: null,
+        updatedAt: CREATED,
+      },
+      {
+        id: 'run-review:1#O1',
+        key: 'O1',
+        severity: 'medium',
+        location: null,
+        claim: '命名可以再短一点',
+        evidence: null,
+        requiredAction: '可选',
+        status: 'open',
+        note: null,
+        addressedByRunId: null,
+        updatedAt: CREATED,
+      },
+    ],
+    artifact: null,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+    ...over,
+  })
+
+  const fixTask = (): Task => ({
+    id: 't-1',
+    title: '修复 BOM',
+    description: '',
+    workflowId: 'wf-1',
+    projectId: null,
+    currentStageId: 'st-fix',
+    status: 'active',
+    origin: 'manual',
+    ruleId: null,
+    externalRef: null,
+    labels: [],
+    threadId: null,
+    parentTaskId: null,
+    handoffFromTaskId: null,
+    handoffFromStageId: null,
+    handoffFromRunId: null,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  })
+
+  it('带报告：内联阻断项清单，回执块给 addresses 并写「必须」', () => {
+    const text = taskPrompt(agent(), fixTask(), { name: '修复' }, null, [], {
+      reviewing: true,
+      review: review(),
+    })
+    expect(text).toContain('## 待修复清单（报告 rev 1，fail，阻断 1 条 / 建议 1 条）')
+    expect(text).toContain('- run-review:1#R1 [high] src/a.ts:64')
+    expect(text).not.toContain('- O1 [medium]')
+    expect(text).toContain('另有 1 条建议项（medium/low）')
+    expect(text).toContain('- `addresses`')
+    expect(text).toContain('## 回执块（必须给 addresses 或 ask）')
+  })
+
+  it('不带报告：不产清单段、回执块仍是「可选」（老提示词逐字不变）', () => {
+    const text = taskPrompt(agent(), fixTask(), { name: '修复' }, null, [], { reviewing: false })
+    expect(text).not.toContain('待修复清单')
+    expect(text).toContain('## 回执块（可选）')
+    expect(text).not.toContain('- `addresses`')
+  })
+
+  it('addressesRepairText：只讲补 addresses，列全 finding id、给 checkRef 口径、禁止重跑', () => {
+    const text = addressesRepairText(review(), { name: '修复' })
+    expect(text).toContain('# 补回执（只做这一件）')
+    expect(text).toContain('不要改代码、不要重跑验证')
+    expect(text).toContain('- run-review:1#R1 [high]')
+    expect(text).toContain('checkRef')
+    expect(text).toContain('`fixed` 必须带 `checkRef`')
+    // 与闸门补回执的专用文本不是同一份：这里不提 verdict
+    expect(text).not.toContain('verdict')
   })
 })

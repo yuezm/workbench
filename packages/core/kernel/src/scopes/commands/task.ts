@@ -7,6 +7,7 @@ import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../../core/types'
 import { handoffOnExit } from '../handoff'
 import { revokeMandate } from '../mandate'
+import { blockingFindings, locateReport, reportTargetsStage } from '../review'
 import { childrenSettledFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
 import {
@@ -328,6 +329,16 @@ export function rerunTask(
  * 形态是「同阶段新开一轮 run」：复用同一 run 会让第二轮终态归档覆盖第一轮的 `output.md`
  * （评审正文就没了）。提示词换成 `receiptRepairText`，会话强制续接上一轮。
  */
+/**
+ * 让阶段补一次回执（R5，2026-11-21 扩成两类）：
+ *
+ * 1. **闸门**跑完却没给结论：在同一会话里只补 `verdict` / `checks`；
+ * 2. **修复阶段**跑完仍有阻断项（blocker / high）没逐条回应：只补 `addresses`，
+ *    清单直接内联（不要求重新改代码或重跑验证）。
+ *
+ * 触发条件（两类共有）：任务进行中、无活跃 run、当前阶段是智能体阶段。
+ * 额度按该阶段已跑轮数算：闸门补一次、修复阶段最多补到第 3 轮，之后交给人，不自动循环。
+ */
 export function reaskGate(
   view: View,
   input: Extract<Input, { type: 'task.reask' }>,
@@ -341,11 +352,29 @@ export function reaskGate(
     return reject('conflict', '当前阶段正在执行，等这一轮结束再补')
   const stage = task.currentStageId === null ? undefined : view.stages.get(task.currentStageId)
   if (!stage || stage.workflowId !== task.workflowId) return reject('conflict', '任务当前阶段无效')
-  if (stage.judge === null) {
-    return reject('conflict', '当前阶段不是闸门，没有「补回执」这回事: ' + stage.name)
-  }
   if (stage.entryMode !== 'agent') {
-    return reject('conflict', '脚本闸门的结论来自退出码，不能补回执: ' + stage.name)
+    return reject('conflict', '脚本阶段没有回执可补: ' + stage.name)
+  }
+  // 第二类：执行阶段缺评审处置（当前阶段正是被那份报告打回的目标）。
+  if (stage.judge === null) {
+    const report = locateReport(view, task)
+    const targets = report !== undefined && reportTargetsStage(view, report, stage.id)
+    const blocking = report === undefined ? [] : blockingFindings(report)
+    if (report === undefined || !targets || blocking.length === 0) {
+      return reject('conflict', '当前阶段不是闸门，也没有待补的评审处置: ' + stage.name)
+    }
+    if (stageRoundCount(view, task.id, stage.id) > 2) {
+      return reject('conflict', '这个阶段已经补过评审回执，仍没有逐条回应：请人工处理')
+    }
+    const facts = entryRunFacts(view, task, now, env, OWNER, undefined, {
+      roundSession: 'resume',
+      receiptRepair: 'addresses',
+      review: report,
+    })
+    if (facts.length === 0) {
+      return reject('conflict', '当前阶段没有可用的智能体 / 运行时: ' + stage.name)
+    }
+    return done(facts)
   }
   if (stageRoundCount(view, task.id, stage.id) > 1) {
     return reject('conflict', '这个闸门已经补过一次回执，仍没有结论：请重跑这一轮或人工处理')

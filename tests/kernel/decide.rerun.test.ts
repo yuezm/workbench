@@ -15,6 +15,7 @@ import type {
   WorkflowStage,
 } from '@workbench/protocol/entities'
 import type { ThreadRow } from '@workbench/protocol/thread'
+import type { ReviewReport } from '@workbench/protocol/review'
 import type { Environment, IdKind, Limits, View } from '@workbench/kernel/core/types'
 import { decide } from '@workbench/kernel/decide'
 
@@ -183,6 +184,7 @@ const view = (
     runs?: RunRow[]
     threads?: ThreadRow[]
     active?: string[]
+    reviewReports?: ReviewReport[]
   } = {},
 ): View => ({
   seq: 7,
@@ -199,7 +201,7 @@ const view = (
   activeTaskIds: new Set(seed.active ?? []),
   threads: new Map((seed.threads ?? []).map((row) => [row.id, row])),
   taskComments: new Map(),
-  reviewReports: new Map(),
+  reviewReports: new Map((seed.reviewReports ?? []).map((row) => [row.id, row])),
   events: new Map(),
   ruleSkips: [],
   rules: [],
@@ -399,5 +401,112 @@ describe('kernel/decide task.reask', () => {
     expect(
       reask(view({ stages: [gateStage()], tasks: [task({ status: 'completed' })] })).reject?.code,
     ).toBe('conflict')
+  })
+})
+
+/**
+ * `task.reask` 第二形态（2026-11-21）：修复阶段跑完仍有阻断项（blocker / high）没逐条回应时，
+ * 只补 `addresses`。与闸门补 `verdict` 同一纪律：续接会话、专用短提示词、有限额度。
+ */
+describe('kernel/decide task.reask：修复阶段补评审回执', () => {
+  const reviewStage = (): WorkflowStage =>
+    stage({
+      id: 'st-review',
+      name: '评审',
+      position: 0,
+      exits: { errored: { do: 'goto', stageId: 'st-fix' } },
+    })
+  const fixStage = (): WorkflowStage =>
+    stage({ id: 'st-fix', name: '修复', position: 1, exits: {} })
+
+  const finding = (
+    over: Partial<ReviewReport['findings'][number]> = {},
+  ): ReviewReport['findings'][number] => ({
+    id: 'run-review:1#R1',
+    key: 'R1',
+    severity: 'high',
+    location: 'src/a.ts:64',
+    claim: 'BOM 文件被判非法 JSON',
+    evidence: null,
+    requiredAction: '改成 utf-8-sig 后复跑',
+    status: 'open',
+    note: null,
+    addressedByRunId: null,
+    updatedAt: CREATED,
+    ...over,
+  })
+
+  const report = (findings: ReviewReport['findings'] = [finding()]): ReviewReport => ({
+    id: 'run-review:1',
+    taskId: 'task-1',
+    stageId: 'st-review',
+    runId: 'run-review',
+    threadId: null,
+    rev: 1,
+    verdict: 'fail',
+    checks: [],
+    findings,
+    artifact: null,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  })
+
+  const settledFix = (over: Partial<RunRow> = {}): RunRow =>
+    run({
+      id: 'run-fix',
+      stageId: 'st-fix',
+      status: 'succeeded',
+      sessionId: 'sess-9',
+      error: null,
+      errorCode: null,
+      exitCode: 0,
+      endedAt: NOW,
+      ...over,
+    })
+
+  const fixView = (
+    findings: ReviewReport['findings'] | null = [finding()],
+    runs: RunRow[] = [settledFix()],
+  ): View =>
+    view({
+      stages: [reviewStage(), fixStage()],
+      tasks: [task({ currentStageId: 'st-fix' })],
+      runs,
+      reviewReports: findings === null ? [] : [report(findings)],
+    })
+
+  const reask = (v: View): ReturnType<typeof decide> =>
+    decide(v, { type: 'task.reask', commandId: 'c1', id: 'task-1' }, NOW, env())
+
+  it('有阻断项没处置：续接会话排一轮补 addresses，提示词内联清单与 finding id', () => {
+    const decision = reask(fixView())
+
+    expect(decision.reject).toBeUndefined()
+    const queued = decision.facts[0]?.payload as { run: RunRow }
+    expect(queued.run).toMatchObject({
+      stageId: 'st-fix',
+      taskId: 'task-1',
+      status: 'queued',
+      turn: 2,
+      resumeSessionId: 'sess-9',
+    })
+    expect(queued.run.prompt).toContain('补回执')
+    expect(queued.run.prompt).toContain('run-review:1#R1')
+    expect(queued.run.prompt).toContain('checkRef')
+    expect(queued.run.prompt).not.toContain('本轮任务提示词')
+  })
+
+  it('没有报告 / 只剩建议项：conflict，不猜要补什么', () => {
+    expect(reask(fixView(null)).reject?.code).toBe('conflict')
+    expect(reask(fixView([finding({ severity: 'medium' })])).reject?.code).toBe('conflict')
+  })
+
+  it('已经补过两轮（本阶段三份终态 run）：conflict，交人处理', () => {
+    const thrice = [
+      settledFix({ id: 'run-fix-0' }),
+      settledFix({ id: 'run-fix-1' }),
+      settledFix({ id: 'run-fix-2' }),
+    ]
+    expect(reask(fixView([finding()], thrice)).reject?.code).toBe('conflict')
   })
 })

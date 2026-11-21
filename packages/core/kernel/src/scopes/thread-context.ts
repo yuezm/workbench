@@ -24,6 +24,7 @@
  * - 同一事实集两次派生文本全等（不读时钟/随机数，全部按稳定排序）。
  */
 import type { RunRow, Task } from '@workbench/protocol/entities'
+import { taskPhaseOf, type TaskPhase } from '@workbench/protocol/entities'
 import type { ThreadEventRef, ThreadNote, ThreadRow } from '@workbench/protocol/thread'
 import { THREAD_LIMITS } from '@workbench/protocol/thread'
 import type { ReviewReport } from '@workbench/protocol/review'
@@ -70,6 +71,14 @@ export function headTailSplit(
 }
 
 const TERMINAL: ReadonlySet<string> = new Set(['succeeded', 'failed', 'cancelled'])
+
+/** 任务阶段语义的中文说法（M53：任务树与执行索引里说人话，不再打印内部枚举值）。 */
+const PHASE_LABEL: Record<TaskPhase, string> = {
+  todo: '未开始',
+  active: '进行中',
+  finished: '已完成',
+  cancelled: '已取消',
+}
 
 export interface Item {
   /** 时间戳；截断时按它升序丢弃（null 视为永不丢弃） */
@@ -287,7 +296,7 @@ function taskLines(view: View, thread: ThreadRow, currentTaskId: Id | null): Ite
   }
   const line = (task: Task, depth: number): Item => ({
     at: null,
-    text: `${'  '.repeat(depth)}- [${task.status}] ${truncate(task.title, 80)}（${stageName(task)}）`,
+    text: `${'  '.repeat(depth)}- [${taskPhaseOf(task.currentStageId === null ? undefined : view.stages.get(task.currentStageId))}] ${truncate(task.title, 80)}（${stageName(task)}）`,
   })
   const children = new Map<Id, Task[]>()
   const roots: Task[] = []
@@ -493,9 +502,17 @@ export function indexBlock(view: View, thread: ThreadRow, currentTaskId: Id | nu
     const tag = `[${task.id.slice(0, 8)}]`
     const name = stage === undefined ? '无阶段' : truncate(stage.name, 40)
     const current = task.id === currentTaskId ? ' ←当前' : ''
-    // 没有终态 run 时：有活跃 run 的任务说「进行中」（比任务状态 `active` 更贴近读者关心的东西）。
+    // 没有终态 run 时：有活跃 run 的说「进行中」，其余按阶段语义说（M53：不再读 status）
     const state =
-      run === undefined ? (view.activeTaskIds.has(task.id) ? '进行中' : task.status) : run.status
+      run === undefined
+        ? view.activeTaskIds.has(task.id)
+          ? '进行中'
+          : PHASE_LABEL[
+              taskPhaseOf(
+                task.currentStageId === null ? undefined : view.stages.get(task.currentStageId),
+              )
+            ]
+        : run.status
     const line =
       run === undefined
         ? `- ${tag} ${name} · ${state} · —${current}`

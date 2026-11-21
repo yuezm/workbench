@@ -8,6 +8,7 @@
  * `withXxx` 都返回**新行**：调用方按事实顺序演进，重建 fold 得到同一结果。
  */
 import type { RunRow, Task } from '@workbench/protocol/entities'
+import { isTaskOver, taskPhaseOf, type TaskPhase } from '@workbench/protocol/entities'
 import type { EventReceivedPayload } from '@workbench/protocol/facts'
 import {
   THREAD_INACTIVITY_MS,
@@ -149,9 +150,14 @@ export function tasksOfThread(view: View, thread: ThreadRow): Task[] {
   return tasks
 }
 
-/** 线程内的 active 任务（复用策略只看它们）。 */
-export function activeTasksOfThread(view: View, thread: ThreadRow): Task[] {
-  return tasksOfThread(view, thread).filter((task) => task.status === 'active')
+/** 任务的阶段语义（M53：结束与否只看阶段类别，与归档无关）。 */
+export function phaseOf(view: View, task: Task): TaskPhase {
+  return taskPhaseOf(task.currentStageId === null ? undefined : view.stages.get(task.currentStageId))
+}
+
+/** 线程内还没结束的任务（完成 / 取消都算结束；复用策略只看它们）。 */
+export function unfinishedTasksOfThread(view: View, thread: ThreadRow): Task[] {
+  return tasksOfThread(view, thread).filter((task) => !isTaskOver(phaseOf(view, task)))
 }
 
 const TERMINAL_RUN: ReadonlySet<string> = new Set(['succeeded', 'failed', 'cancelled'])
@@ -348,14 +354,26 @@ export function threadWithBatchTasks(
   return row
 }
 
-/** 本批新建的任务（`task.created`）在归档判定里算 `active`（视图里还没有它们）。 */
-export function batchTaskStatuses(facts: readonly FactDraft[]): Map<Id, Task['status']> {
-  const statuses = new Map<Id, Task['status']>()
+/**
+ * 本批新建的任务（`task.created`）在结束判定里算「未结束」（视图里还没有它们），
+ * 本批刚完成 / 删除的任务按事实记成终态（M53：阶段语义，不再用 `status`）。
+ */
+export function batchTaskPhases(facts: readonly FactDraft[]): Map<Id, TaskPhase | 'removed'> {
+  const phases = new Map<Id, TaskPhase | 'removed'>()
   for (const fact of facts) {
-    if (fact.type === 'task.created')
-      statuses.set((fact.payload as { task: Task }).task.id, 'active')
+    if (fact.type === 'task.created') {
+      phases.set((fact.payload as { task: Task }).task.id, 'todo')
+    } else if (fact.type === 'task.finished') {
+      const { task, outcome } = fact.payload as {
+        task: Task
+        outcome: 'done' | 'cancelled'
+      }
+      phases.set(task.id, outcome === 'done' ? 'finished' : 'cancelled')
+    } else if (fact.type === 'task.removed') {
+      phases.set((fact.payload as { task: Task }).task.id, 'removed')
+    }
   }
-  return statuses
+  return phases
 }
 
 /**
@@ -368,12 +386,15 @@ export function closeIfAllDone(
   thread: ThreadRow | undefined,
   now: Iso,
   actor: Actor,
-  overrides?: ReadonlyMap<Id, Task['status']>,
+  overrides?: ReadonlyMap<Id, TaskPhase | 'removed'>,
 ): FactDraft[] {
   if (thread === undefined || thread.status === 'closed') return []
   for (const taskId of thread.taskIds) {
-    const status = overrides?.get(taskId) ?? view.tasks.get(taskId)?.status
-    if (status === 'active') return []
+    const override = overrides?.get(taskId)
+    if (override === 'removed') continue
+    const task = view.tasks.get(taskId)
+    const phase = override ?? (task === undefined ? 'removed' : phaseOf(view, task))
+    if (!isTaskOver(phase as TaskPhase) && phase !== 'removed') return []
   }
   return closedFacts(withStatus(thread, 'closed', now), 'all-tasks-done', actor, now)
 }

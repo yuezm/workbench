@@ -98,7 +98,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -320,7 +320,7 @@ describe('kernel/decide task.comment', () => {
     expect(noneStage.facts.map((fact) => fact.type)).toEqual(['task.comment_added'])
 
     const completed = decide(
-      view({ tasks: [task({ status: 'completed' })] }),
+      view({ stages: [stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null })], tasks: [task({ currentStageId: 'st-done' })] }),
       { type: 'task.comment', commandId: 'c2', taskId: 'task-1', text: 'hi', rerun: true },
       NOW,
       env(),

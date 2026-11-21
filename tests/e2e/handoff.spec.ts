@@ -43,7 +43,7 @@ test('跨工作流派单：完成阶段在目标工作流建关联工单（同�
   await page.evaluate(
     ({ taskId }) => {
       const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
-      return bridge.dispatch({ type: 'task.complete', commandId: 'e2e-handoff-1', id: taskId })
+      return bridge.dispatch({ type: 'task.archive', commandId: 'e2e-handoff-1', id: taskId })
     },
     { taskId: seeded.sourceTaskId },
   )
@@ -70,7 +70,7 @@ test('跨工作流派单：完成阶段在目标工作流建关联工单（同�
   await page.evaluate(
     ({ taskId }) => {
       const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
-      return bridge.dispatch({ type: 'task.complete', commandId: 'e2e-handoff-1', id: taskId })
+      return bridge.dispatch({ type: 'task.archive', commandId: 'e2e-handoff-1', id: taskId })
     },
     { taskId: seeded.sourceTaskId },
   )
@@ -95,7 +95,7 @@ test('派单显式 thread=new：另开 source=handoff 的话题（独立事项�
   await page.evaluate(
     ({ taskId }) => {
       const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
-      return bridge.dispatch({ type: 'task.complete', commandId: 'e2e-handoff-new', id: taskId })
+      return bridge.dispatch({ type: 'task.archive', commandId: 'e2e-handoff-new', id: taskId })
     },
     { taskId: seeded.sourceTaskId },
   )

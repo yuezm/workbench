@@ -81,7 +81,7 @@ test('任务派生：人工挂子任务继承父线程，子任务完成后父�
   await page.evaluate(
     ({ childId }) => {
       const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
-      return bridge.dispatch({ type: 'task.complete', commandId: 'e2e-spawn-done', id: childId })
+      return bridge.dispatch({ type: 'task.archive', commandId: 'e2e-spawn-done', id: childId })
     },
     { childId: child?.id as string },
   )

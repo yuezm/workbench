@@ -95,11 +95,14 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'project.removed':
       // M10：项目事实归到项目时间线（任务由 task.created 的 projectId 关联，不在这里串）
       return [{ scope: 'project', id: fact.payload.project.id }]
+    // M53 之前「完成 = 归档」的单一事实 `task.completed` 也在这里：只为重建老库保留读取
     case 'task.created':
     case 'task.updated':
     case 'task.moved':
-    case 'task.completed':
+    case 'task.finished':
+    case 'task.archived':
     case 'task.removed':
+    case 'task.completed':
     case 'task.comment_added':
       // M7.5：上下文 / 反馈归到任务的时间线（评论行自带 taskId）
       return [

@@ -263,7 +263,7 @@ const PROPERTY_RUNS = 100
 
 const taskFinished = (taskId: string): FactDraft =>
   ({
-    type: 'task.completed',
+    type: 'task.finished',
     actor: HOST,
     at: NOW,
     payload: { task: { id: taskId } },
@@ -334,7 +334,7 @@ const finishedOf = (facts: readonly FactDraft[]): { runs: Set<string>; tasks: Se
     ) {
       runs.add((fact.payload as { run: { id: string } }).run.id)
     }
-    if (fact.type === 'task.completed') {
+    if (fact.type === 'task.finished') {
       tasks.add((fact.payload as { task: { id: string } }).task.id)
     }
   }

@@ -108,6 +108,8 @@ const expected = [
   'task.created',
   'task.updated',
   'task.moved',
+  'task.finished',
+  'task.archived',
   'task.completed',
   'task.removed',
   'task.comment_added',

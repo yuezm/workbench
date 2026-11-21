@@ -93,7 +93,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'rule',
   ruleId: 'rule-1',
   externalRef: 'issue-1',
@@ -186,6 +186,15 @@ const note = (over: Partial<ThreadNote> = {}): ThreadNote => ({
   ...over,
 })
 
+/** 内置终态阶段（M53）：任务进到这里才算结束，任务树与索引按它说「已完成」。 */
+const DONE_STAGE = stage({
+  id: 'st-done',
+  name: '已完成',
+  position: 2,
+  entryMode: 'none',
+  builtin: 'done',
+})
+
 const thread = (over: Partial<ThreadRow> = {}): ThreadRow => ({
   id: 'th-1',
   source: 'github',
@@ -216,7 +225,10 @@ const thread = (over: Partial<ThreadRow> = {}): ThreadRow => ({
 const view = (over: Partial<View> = {}): View => ({
   seq: 1,
   workflows: new Map(),
-  stages: new Map([['st-1', stage()]]),
+  stages: new Map([
+    ['st-1', stage()],
+    [DONE_STAGE.id, DONE_STAGE],
+  ]),
   agents: new Map(),
   runtimes: new Map(),
   projects: new Map(),
@@ -267,11 +279,12 @@ describe('kernel/thread-context', () => {
   })
 
   it('任务树：根任务 + 派生子任务缩进，子任务的父任务不出现在根清单', () => {
+    // M53：子任务的「完成」由它落在内置「已完成」阶段表达（归档与完成无关）
     const child = task({
       id: 'task-2',
       parentTaskId: 'task-1',
       title: '子任务',
-      status: 'completed',
+      currentStageId: DONE_STAGE.id,
     })
     const seeded = view({
       tasks: new Map([
@@ -284,7 +297,7 @@ describe('kernel/thread-context', () => {
     })
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
     expect(text).toContain('- [active] 写计划（阶段：实现）')
-    expect(text).toContain('  - [completed] 子任务（阶段：实现）')
+    expect(text).toContain('  - [finished] 子任务（阶段：已完成）')
   })
 
   it('传当前任务：任务树不复述它（顶部已写「# 任务 / # 阶段」），只剩子任务时子任务升为顶层', () => {
@@ -292,7 +305,7 @@ describe('kernel/thread-context', () => {
       id: 'task-2',
       parentTaskId: 'task-1',
       title: '子任务',
-      status: 'completed',
+      currentStageId: DONE_STAGE.id,
     })
     const seeded = view({
       tasks: new Map([
@@ -306,7 +319,7 @@ describe('kernel/thread-context', () => {
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow, 'task-1')
     expect(text).not.toContain('- [active] 写计划')
     // 父任务不在树里：子任务按顶层渲染（缩进按「树里可见的父任务层数」算）
-    expect(text).toContain('### 任务\n- [completed] 子任务（阶段：实现）')
+    expect(text).toContain('### 任务\n- [finished] 子任务（阶段：已完成）')
 
     // 线程里只有当前任务：整段消失，不产一行业务复述
     const alone = threadContextText(view(), thread(), 'task-1')
@@ -402,8 +415,9 @@ describe('kernel/thread-context', () => {
       unbound,
     )
     expect(text).toContain('入口：（未绑定）')
-    expect(text).toContain('- [active] 无阶段任务（无阶段）')
-    expect(text).toContain('- [active] 坏阶段任务（无阶段）')
+    // M53：阶段缺失 → 阶段语义「未开始」（不再有 status 字段可打印）
+    expect(text).toContain('- [todo] 无阶段任务（无阶段）')
+    expect(text).toContain('- [todo] 坏阶段任务（无阶段）')
     expect(text).toContain('- [issues.closed] issue-empty')
     // M52：唯一一条 stage run 的正文只在产出段出现；轮次信息在被执行索引接管的段里
     expect(precedingOf(text)).toContain('失败原因')

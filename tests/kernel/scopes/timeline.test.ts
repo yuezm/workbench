@@ -38,6 +38,9 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   ...over,
 })
 
+/** 终态阶段（M53）：完成由「进入内置已完成」表达，归档是另一条事实。 */
+const doneStage = stage({ id: 'st-done', name: '已完成', position: 2, builtin: 'done' })
+
 const agent = (over: Partial<Agent> = {}): Agent => ({
   id: 'ag-1',
   name: '实现者',
@@ -75,7 +78,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -192,7 +195,7 @@ const kinds = (entries: ReturnType<typeof timeline>): string[] =>
 describe('kernel/timeline', () => {
   it('任务时间线按 seq 升序，只含该任务的事实', () => {
     const facts: Fact[] = [
-      fact(3, 'task.completed', { task: task({ status: 'completed' }) }),
+      fact(3, 'task.finished', { outcome: 'done', task: task({ currentStageId: doneStage.id }) }),
       fact(1, 'task.created', { task: task() }),
       fact(2, 'task.moved', { task: task({ currentStageId: 'st-2' }), from: 'st-1', to: 'st-2' }),
       fact(4, 'task.created', { task: task({ id: 't-2' }) }),
@@ -205,7 +208,7 @@ describe('kernel/timeline', () => {
     expect(kinds(entries)).toEqual([
       '1:task.created',
       '2:task.moved',
-      '3:task.completed',
+      '3:task.finished',
       '5:task.updated',
     ])
     expect(entries.every((entry) => entry.imported === false)).toBe(true)
@@ -314,8 +317,10 @@ describe('kernel/timeline', () => {
       fact(13, 'runtime.probed', { runtime: runtime() }),
       fact(14, 'task.created', { task: task() }),
       fact(15, 'task.moved', { task: task(), from: 'st-2', to: 'st-1' }),
-      fact(16, 'task.completed', { task: task() }),
-      fact(17, 'task.removed', { task: task() }),
+      fact(16, 'task.finished', { outcome: 'done', task: task({ currentStageId: doneStage.id }) }),
+      // M53：close 出口同批产 finished + archived，两条都归任务时间线
+      fact(17, 'task.archived', { task: task({ archivedAt: 'archived-at' }) }),
+      fact(18, 'task.removed', { task: task() }),
     ]
 
     expect(kinds(timeline(facts, 'workflow', 'wf-1'))).toEqual([
@@ -342,8 +347,9 @@ describe('kernel/timeline', () => {
     expect(kinds(timeline(facts, 'task', 't-1'))).toEqual([
       '14:task.created',
       '15:task.moved',
-      '16:task.completed',
-      '17:task.removed',
+      '16:task.finished',
+      '17:task.archived',
+      '18:task.removed',
     ])
   })
 
@@ -365,18 +371,23 @@ describe('kernel/timeline', () => {
         1,
       ),
       fact(1, 'task.created', { task: task() }),
-      fact(3, 'task.completed', { task: task({ status: 'completed' }) }, 1),
+      fact(
+        3,
+        'task.finished',
+        { outcome: 'done', task: task({ currentStageId: doneStage.id }) },
+        1,
+      ),
     ]
 
     expect(kinds(timeline(facts, 'task', 't-1'))).toEqual([
       '1:task.created',
       '2:task.moved',
-      '3:task.completed',
+      '3:task.finished',
     ])
     expect(kinds(timeline([...facts].reverse(), 'task', 't-1'))).toEqual([
       '1:task.created',
       '2:task.moved',
-      '3:task.completed',
+      '3:task.finished',
     ])
   })
 

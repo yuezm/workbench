@@ -55,7 +55,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-fix',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,

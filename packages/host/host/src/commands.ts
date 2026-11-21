@@ -244,7 +244,7 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       }
       case 'task.create':
       case 'task.move':
-      case 'task.complete': {
+      case 'task.archive': {
         const id = command.type === 'task.create' ? entityIdOf(facts, 'task.created') : command.id
         return id === null ? null : taskById(id)
       }

@@ -52,7 +52,6 @@ import type {
   Runtime,
   RuntimeProbe,
   Task,
-  TaskStatus,
   Workflow,
   WorkflowStage,
 } from '@workbench/protocol/entities'
@@ -162,7 +161,7 @@ interface TaskRow {
   description: string
   workflow_id: string
   current_stage_id: string | null
-  status: string
+  archived_at: string | null
   created_at: string
   updated_at: string
 }
@@ -380,7 +379,7 @@ function readLegacyEntityRows(
   const tasks = (
     db
       .prepare(
-        `SELECT id, title, description, workflow_id, current_stage_id, status, created_at, updated_at
+        `SELECT id, title, description, workflow_id, current_stage_id, archived_at, created_at, updated_at
          FROM tasks ORDER BY created_at, rowid`,
       )
       .all() as unknown as TaskRow[]
@@ -392,7 +391,8 @@ function readLegacyEntityRows(
     // M10：v2 存量没有项目概念——按「未归属」归一（与投影层 `normalizeTask` 一致）。
     projectId: null,
     currentStageId: row.current_stage_id,
-    status: row.status as TaskStatus,
+    // M53：v2 存量的 status='completed' 已由旧表重建折成 archived_at；完成与否由阶段语义表达
+    archivedAt: row.archived_at,
     // M6：v2 存量没有来源概念——导入后一律视为手工任务，规则列留空。
     origin: 'manual',
     ruleId: null,

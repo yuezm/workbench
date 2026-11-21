@@ -275,7 +275,7 @@ export function AiWorkflowPage(): ReactElement {
   const completeTask = (id: string): void => {
     void (async () => {
       try {
-        await getKernelStore().dispatch({ type: 'task.complete', commandId: '', id })
+        await getKernelStore().dispatch({ type: 'task.archive', commandId: '', id, archived: true })
         setError(null)
       } catch (e) {
         setError(errMsg(e))

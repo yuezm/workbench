@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { RunRow, Task } from '@workbench/protocol/entities'
+import type { RunRow, Task, WorkflowStage } from '@workbench/protocol/entities'
 import { THREAD_LIMITS, type ThreadEventRef, type ThreadRow } from '@workbench/protocol/thread'
 import type { Environment, Limits, View } from '@workbench/kernel/core/types'
 import {
-  activeTasksOfThread,
+  unfinishedTasksOfThread,
   closeIfAllDone,
   eventRefOf,
   findThreadByKey,
@@ -76,7 +76,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -90,6 +90,34 @@ const task = (over: Partial<Task> = {}): Task => ({
   updatedAt: CREATED,
   ...over,
 })
+
+/** 阶段夹具（M53）：任务在做 / 完成 / 取消都由当前阶段的 builtin 派生。 */
+const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
+  id: 'st-1',
+  workflowId: 'wf-1',
+  name: '实现',
+  position: 0,
+  entryMode: 'agent',
+  agentId: 'ag-1',
+  exits: {},
+  judge: null,
+  handoffs: [],
+  ...over,
+})
+
+const STAGES = new Map(
+  [
+    stage(),
+    stage({ id: 'st-done', name: '已完成', position: 1, entryMode: 'none', builtin: 'done' }),
+    stage({
+      id: 'st-cancelled',
+      name: '已取消',
+      position: 2,
+      entryMode: 'none',
+      builtin: 'cancelled',
+    }),
+  ].map((row) => [row.id, row]),
+)
 
 const run = (over: Partial<RunRow> = {}): RunRow => ({
   id: 'run-1',
@@ -306,21 +334,36 @@ describe('kernel/threads 兜底分支', () => {
 })
 
 describe('kernel/threads 读视图', () => {
-  it('tasksOfThread / activeTasksOfThread 跳过已删任务', () => {
+  it('tasksOfThread 跳过已删任务；unfinishedTasksOfThread 按阶段语义排掉完成 / 取消', () => {
     const thread = openThreadRow(env(), { source: 'm', externalRef: null, title: 't', now: NOW })
     const rows = new Map([
       ['task-1', task({ id: 'task-1' })],
-      ['task-2', task({ id: 'task-2', status: 'completed' })],
-      ['task-3', task({ id: 'task-3' })],
+      // M53：归档只是收纳，任务还在阶段里 → 仍是未结束
+      ['task-2', task({ id: 'task-2', archivedAt: 'archived-at' })],
+      ['task-3', task({ id: 'task-3', currentStageId: 'st-done' })],
+      ['task-4', task({ id: 'task-4', currentStageId: 'st-cancelled' })],
     ])
-    const withIds = withTask(
-      withTask(thread, rows.get('task-1') as Task, NOW),
-      rows.get('task-2') as Task,
-      NOW,
+    const attached = ['task-1', 'task-2', 'task-3', 'task-4'].reduce(
+      (row, id) => withTask(row, rows.get(id) as Task, NOW),
+      thread,
     )
-    const view = emptyView({ tasks: rows, threads: new Map([[withIds.id, withIds]]) })
-    expect(tasksOfThread(view, withIds).map((row) => row.id)).toEqual(['task-1', 'task-2'])
-    expect(activeTasksOfThread(view, withIds).map((row) => row.id)).toEqual(['task-1'])
+    // 线程行里登记过、但任务行已被删：读视图跳过，不炸也不补空位
+    const withIds = { ...attached, taskIds: [...attached.taskIds, 'task-gone'] }
+    const view = emptyView({
+      tasks: rows,
+      stages: STAGES,
+      threads: new Map([[withIds.id, withIds]]),
+    })
+    expect(tasksOfThread(view, withIds).map((row) => row.id)).toEqual([
+      'task-1',
+      'task-2',
+      'task-3',
+      'task-4',
+    ])
+    expect(unfinishedTasksOfThread(view, withIds).map((row) => row.id)).toEqual([
+      'task-1',
+      'task-2',
+    ])
   })
 
   it('threadSessions：每个 agent 取最近一次终态 run 的 sessionId，首轮 / 非终态不计', () => {
@@ -411,7 +454,7 @@ describe('kernel/threads 读视图', () => {
 })
 
 describe('kernel/threads 生命周期', () => {
-  it('closeIfAllDone：有 active 任务不关闭；全完成 / 已删 / overrides 完成时关闭', () => {
+  it('closeIfAllDone：有未结束任务不关闭；全完成 / 已删 / overrides 完成时关闭', () => {
     const thread = openThreadRow(env(), { source: 'm', externalRef: null, title: 't', now: NOW })
     const withTwo = withTask(
       withTask(thread, task({ id: 'task-1' }), NOW),
@@ -423,20 +466,43 @@ describe('kernel/threads 生命周期', () => {
         ['task-1', task({ id: 'task-1' })],
         ['task-2', task({ id: 'task-2' })],
       ]),
+      stages: STAGES,
       threads: new Map([[withTwo.id, withTwo]]),
     })
     expect(closeIfAllDone(view, withTwo, NOW, { kind: 'kernel' })).toEqual([])
     expect(
-      closeIfAllDone(view, withTwo, NOW, { kind: 'kernel' }, new Map([['task-1', 'completed']])),
+      closeIfAllDone(view, withTwo, NOW, { kind: 'kernel' }, new Map([['task-1', 'finished']])),
     ).toEqual([])
+    // M53：不用 overrides 也能判——两条任务都在内置「已完成」阶段里
+    const settledView = emptyView({
+      tasks: new Map([
+        ['task-1', task({ id: 'task-1', currentStageId: 'st-done' })],
+        ['task-2', task({ id: 'task-2', currentStageId: 'st-done' })],
+      ]),
+      stages: STAGES,
+      threads: new Map([[withTwo.id, withTwo]]),
+    })
+    expect(
+      closeIfAllDone(settledView, withTwo, NOW, { kind: 'kernel' }).map((fact) => fact.type),
+    ).toEqual(['thread.closed'])
+    // M53：归档过的任务还没结束，线程不关（归档 ≠ 完成）
+    const archivedView = emptyView({
+      tasks: new Map([
+        ['task-1', task({ id: 'task-1', archivedAt: 'archived-at' })],
+        ['task-2', task({ id: 'task-2', currentStageId: 'st-done' })],
+      ]),
+      stages: STAGES,
+      threads: new Map([[withTwo.id, withTwo]]),
+    })
+    expect(closeIfAllDone(archivedView, withTwo, NOW, { kind: 'kernel' })).toEqual([])
     const facts = closeIfAllDone(
       view,
       withTwo,
       NOW,
       { kind: 'kernel' },
       new Map([
-        ['task-1', 'completed'],
-        ['task-2', 'completed'],
+        ['task-1', 'finished'],
+        ['task-2', 'finished'],
       ]),
     )
     expect(facts.map((fact) => fact.type)).toEqual(['thread.closed'])

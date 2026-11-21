@@ -8,7 +8,7 @@ const AT = '2026-01-01T00:00:00.000Z'
 /** 智能体 / 宿主推进的完成（该弹通知） */
 const completed = (taskId: string, title: string, seq = 1): Fact =>
   ({
-    type: 'task.completed',
+    type: 'task.finished',
     actor: { kind: 'host', via: 'scheduler' },
     at: AT,
     seq,
@@ -18,7 +18,7 @@ const completed = (taskId: string, title: string, seq = 1): Fact =>
 /** 人自己点的完成（不该弹） */
 const completedByOwner = (taskId: string, title: string, seq = 1): Fact =>
   ({
-    type: 'task.completed',
+    type: 'task.finished',
     actor: { kind: 'owner', via: 'ui' },
     at: AT,
     seq,

@@ -66,6 +66,9 @@ export const FACT_TYPES = [
   'task.created',
   'task.updated',
   'task.moved',
+  'task.finished',
+  'task.archived',
+  /** M53 之前「完成 = 归档」只有一个事实；只为重建老库保留读取，新代码不再产出 */
   'task.completed',
   'task.removed',
   'task.comment_added',
@@ -224,6 +227,21 @@ export interface TaskMovedPayload {
   to: string | null
 }
 
+/**
+ * 任务完成（M53）：进入内置「已完成 / 已取消」阶段时与 `task.moved` 同批产出。
+ * `outcome` 区分「做完了」与「取消了」——归档不再承担这个信息。
+ */
+export interface TaskFinishedPayload {
+  task: Task
+  outcome: 'done' | 'cancelled'
+}
+
+/** 归档 / 取消归档（M53）：任务行整行（含 `archivedAt`），零业务后果。 */
+export interface TaskArchivedPayload {
+  task: Task
+}
+
+/** M53 之前的事实：既表示完成也表示归档（只为重建老库保留，新代码不再产出）。 */
 export interface TaskCompletedPayload {
   task: Task
 }
@@ -243,7 +261,7 @@ export interface TaskCommentAddedPayload {
 
 /**
  * 子任务全部结束（M8）：审计事实，`project` 不写表；真正的效果由同时产出的
- * `run.queued`（唤醒父 Agent）/ `card.opened`（通知）/ `task.completed`（父完成）表达。
+ * `run.queued`（唤醒父 Agent）/ `card.opened`（通知）/ `task.finished`（父任务落到「已完成」）表达。
  * `childIds` 是本次判定为终态的子任务 id；`batchNo` 为 null 表示未分批（v1 恒 null）。
  */
 export interface TaskChildrenSettledPayload {
@@ -649,6 +667,8 @@ export interface FactPayloads {
   'task.created': TaskCreatedPayload
   'task.updated': TaskUpdatedPayload
   'task.moved': TaskMovedPayload
+  'task.finished': TaskFinishedPayload
+  'task.archived': TaskArchivedPayload
   'task.completed': TaskCompletedPayload
   'task.removed': TaskRemovedPayload
   'task.comment_added': TaskCommentAddedPayload

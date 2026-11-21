@@ -97,7 +97,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -315,8 +315,8 @@ describe('kernel/project', () => {
         }),
       ),
     ).toEqual([put('tasks', task({ currentStageId: 'st-2' }))])
-    expect(project(fact(12, 'task.completed', { task: task({ status: 'completed' }) }))).toEqual([
-      put('tasks', task({ status: 'completed' })),
+    expect(project(fact(12, 'task.archived', { task: task({ archivedAt: 'archived-at' }) }))).toEqual([
+      put('tasks', task({ archivedAt: 'archived-at' })),
     ])
     // M10：删项目时遗留任务归默认目录 —— 整行更新，阶段不动
     expect(project(fact(20, 'task.updated', { task: task({ projectId: null }) }))).toEqual([
@@ -455,7 +455,7 @@ describe('kernel/project', () => {
         from: 'st-1',
         to: 'st-2',
       }),
-      fact(8, 'task.completed', { task: task({ currentStageId: 'st-2', status: 'completed' }) }),
+      fact(8, 'task.finished', { outcome: 'done', task: task({ currentStageId: 'st-2', archivedAt: 'archived-at' }) }),
       fact(9, 'stage.deleted', { stage: stage() }),
     ]
 
@@ -468,7 +468,7 @@ describe('kernel/project', () => {
     expect(first.workflow_stages.get('st-2')).toEqual(
       stage({ id: 'st-2', position: 1, name: '进行中' }),
     )
-    expect(first.tasks.get('t-1')).toEqual(task({ currentStageId: 'st-2', status: 'completed' }))
+    expect(first.tasks.get('t-1')).toEqual(task({ currentStageId: 'st-2', archivedAt: 'archived-at' }))
     expect(first.agents.get('ag-1')).toEqual(agent())
     expect(first.runtimes.get('rt-1')).toEqual(runtime())
   })
@@ -934,7 +934,7 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
       description: '',
       workflowId: 'wf-1',
       currentStageId: 'st-1',
-      status: 'active',
+      archivedAt: null,
       createdAt: AT,
       updatedAt: AT,
     } as unknown as Task
@@ -1051,7 +1051,7 @@ describe('kernel/project：卡片与派生事件（M4）', () => {
       description: '',
       workflowId: 'wf-1',
       currentStageId: null,
-      status: 'completed',
+      archivedAt: 'archived-at',
       createdAt: AT,
       updatedAt: AT,
     } as unknown as Task
@@ -1182,7 +1182,7 @@ const taskRowArb: Arbitrary<Task> = fc
     workflowId: fc.constant('wf-1'),
     projectId: nullableIdArb,
     currentStageId: fc.oneof(fc.constant<string | null>(null), fc.constant('st-1')),
-    status: fc.constantFrom<Task['status']>('active', 'completed'),
+    archivedAt: fc.constantFrom<string | null>(null, 'archived-at'),
     origin: fc.constantFrom<Task['origin']>('manual', 'rule', 'handoff', 'spawn'),
     ruleId: nullableIdArb,
     externalRef: nullableIdArb,

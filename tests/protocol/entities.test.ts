@@ -21,7 +21,6 @@ import {
   RUN_STATUSES,
   RUN_TERMINAL_STATUSES,
   STAGE_KINDS,
-  TASK_STATUSES,
   builtinStageKind,
   isBuiltinStageName,
   normalizeDeliverables,
@@ -59,8 +58,8 @@ import {
   type StageInput,
   type StageKind,
   type Task,
+  type TaskPhase,
   type TaskInput,
-  type TaskStatus,
   type Workflow,
   type WorkflowInput,
   type WorkflowStage,
@@ -97,14 +96,14 @@ const contractChecks: [
   Assert<Equal<WorkflowWithStages['stages'], WorkflowStage[]>>,
   Assert<Equal<WorkflowInput['stages'], StageInput[]>>,
   Assert<Equal<Workflow['id'], string>>,
-  Assert<Equal<Task['status'], TaskStatus>>,
+  Assert<Equal<Task['archivedAt'], string | null>>,
   Assert<Equal<TaskInput['workflowId'], string>>,
   Assert<Equal<Run['status'], RunStatus>>,
   Assert<Equal<NonNullable<Run['errorCode']>, RunErrorCode>>,
   Assert<Equal<RunEvent['type'], RunEventType>>,
   Assert<Equal<NonNullable<Run['usage']>, RunUsage>>,
   Assert<Equal<RunPurpose, 'stage' | 'chat' | 'assess'>>,
-  Assert<Equal<TaskStatus, (typeof TASK_STATUSES)[number]>>,
+  Assert<Equal<TaskPhase, (typeof TASK_PHASES)[number]>>,
   Assert<Equal<Conversation['agentId'], string>>,
   Assert<Equal<Message['role'], ChatRole>>,
   Assert<Equal<RunRow['purpose'], RunPurpose>>,
@@ -270,7 +269,7 @@ const sampleTask = {
   workflowId: 'wf1',
   projectId: 'pj1',
   currentStageId: 'st1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -381,7 +380,7 @@ describe('protocol/entities', () => {
     expect([...PERMISSION_MODES]).toEqual(['read-only', 'workspace-write', 'danger-full-access'])
     expect([...PROBE_STATES]).toEqual(['ready', 'unavailable'])
     expect([...ENTRY_MODES]).toEqual(['none', 'agent', 'script', 'user'])
-    expect([...TASK_STATUSES]).toEqual(['active', 'completed'])
+    expect([...TASK_PHASES]).toEqual(['todo', 'active', 'finished', 'cancelled'])
     expect([...RUN_STATUSES]).toEqual([
       'queued',
       'running',
@@ -437,6 +436,7 @@ describe('protocol/entities', () => {
 
   it('五张表的行字段与现有投影列（camelCase 映射）逐一对应', () => {
     expect(keysOf(sampleTask)).toEqual([
+      'archivedAt',
       'createdAt',
       'currentStageId',
       'description',
@@ -450,7 +450,6 @@ describe('protocol/entities', () => {
       'parentTaskId',
       'projectId',
       'ruleId',
-      'status',
       'threadId',
       'title',
       'updatedAt',

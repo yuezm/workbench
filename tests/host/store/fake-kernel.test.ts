@@ -470,8 +470,8 @@ describe('defaultDecide：运行时与智能体', () => {
 
   it('未覆盖的命令：reject unsupported', () => {
     expect(
-      defaultDecide(view(), command({ type: 'task.complete', id: 'tk-1' }), SAMPLE_AT, env()),
-    ).toEqual(rejected('unsupported', '假内核未覆盖命令: task.complete'))
+      defaultDecide(view(), command({ type: 'task.archive', id: 'tk-1' }), SAMPLE_AT, env()),
+    ).toEqual(rejected('unsupported', '假内核未覆盖命令: task.archive'))
     expect(
       defaultDecide(view(), command({ type: 'agent.remove', id: 'ag-1' }), SAMPLE_AT, env()),
     ).toEqual(rejected('unsupported', '假内核未覆盖命令: agent.remove'))
@@ -505,7 +505,7 @@ describe('defaultProject：事实 → 投影变更', () => {
       { task, from: 'st-1', to: 'st-1' },
       [{ table: 'tasks', key: 'tk-1', row: task }],
     ],
-    ['task.completed', { task }, [{ table: 'tasks', key: 'tk-1', row: task }]],
+    ['task.finished', { outcome: 'done', task }, [{ table: 'tasks', key: 'tk-1', row: task }]],
     ['task.removed', { task }, [{ table: 'tasks', key: 'tk-1', row: null }]],
   ]
 

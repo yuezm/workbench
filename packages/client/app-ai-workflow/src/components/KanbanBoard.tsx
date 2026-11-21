@@ -74,9 +74,9 @@ export function KanbanBoard({
    * 刚建好的、刚推进到本列的、刚改过的卡片先看到。
    */
   const activeTasks = boardTasks
-    .filter((t) => t.status === 'active')
+    .filter((t) => t.archivedAt === null)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  const doneTasks = boardTasks.filter((t) => t.status === 'completed')
+  const doneTasks = boardTasks.filter((t) => t.archivedAt !== null)
   const completedCount = doneTasks.length
 
   // 「执行中」由内核判定（queued/running/waiting 的任务 id 集合），看板不自己现算

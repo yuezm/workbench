@@ -132,10 +132,10 @@ function seedLegacyDatabase(file: string, runsDdl = LEGACY_RUNS_DDL): void {
       .run('st-1', 'wf-1', '待办', 0, 'none', SEED_AT)
     seeded
       .prepare(
-        `INSERT INTO tasks (id, title, workflow_id, current_stage_id, status, created_at, updated_at)
+        `INSERT INTO tasks (id, title, workflow_id, current_stage_id, archived_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run('tk-1', '旧任务', 'wf-1', 'st-1', 'active', SEED_AT, SEED_AT)
+      .run('tk-1', '旧任务', 'wf-1', 'st-1', null, SEED_AT, SEED_AT)
 
     const statuses = ['queued', 'running', 'succeeded', 'failed', 'cancelled']
     const insertRun = seeded.prepare(
@@ -1089,11 +1089,11 @@ describe('openDatabase：旧库 tasks 结构升级（M6 / M6.5 / M7 一次性物
           expect(columns, column).toContain(column)
         }
 
-        // 旧业务列逐列保留
+        // 旧业务列逐列保留（M53：`status` 列已被 `archived_at` 取代，值 NULL = 仍在追踪）
         expect(
           db
             .prepare(
-              `SELECT id, title, description, workflow_id, current_stage_id, status,
+              `SELECT id, title, description, workflow_id, current_stage_id, archived_at,
                       created_at, updated_at
                FROM tasks ORDER BY id`,
             )
@@ -1105,7 +1105,7 @@ describe('openDatabase：旧库 tasks 结构升级（M6 / M6.5 / M7 一次性物
             description: '旧描述',
             workflow_id: 'wf-1',
             current_stage_id: 'st-1',
-            status: 'active',
+            archived_at: null,
             created_at: SEED_AT,
             updated_at: SEED_AT,
           },
@@ -1289,23 +1289,29 @@ describe('openDatabase：旧库 tasks 结构升级（M6 / M6.5 / M7 一次性物
     const root = mkdtempSync(path.join(tmpdir(), 'hostdb-tasks-rollback-'))
     const file = path.join(root, 'ai-workflow.db')
     try {
-      seedLegacyTasksDatabase(file)
-      // 异常状态：M6.5 / M7 / M8 列已在（`needsTasksRebuild` 为 false，走 ALTER 补列路径），
-      // 但 M6 的 `labels_json` 缺；同时造一个大小写同名残留列 `LABELS_JSON`。
-      // SQLite 列名大小写不敏感，补 `labels_json` 时会撞 duplicate column，
-      // 用来验证「后一条 ALTER 失败 → 前面已成功的补列一起回滚」。
-      const raw = new DatabaseSync(file)
+      // 异常状态：结构已是 M53 口径（没有 `status` / `stage_fails` 这些已废弃列，所以
+      // `needsTasksRebuild` 为 false，走 ALTER 补列路径），但 M6 的来源四列缺；同时造一个
+      // 大小写同名残留列 `LABELS_JSON`。SQLite 列名大小写不敏感，补 `labels_json` 时会撞
+      // duplicate column，用来验证「后一条 ALTER 失败 → 前面已成功的补列一起回滚」。
+      const seeded = new DatabaseSync(file)
       try {
-        raw.exec('ALTER TABLE tasks ADD COLUMN thread_id TEXT')
-        raw.exec('ALTER TABLE tasks ADD COLUMN parent_task_id TEXT')
-        raw.exec('ALTER TABLE tasks ADD COLUMN handoff_from_task_id TEXT')
-        raw.exec('ALTER TABLE tasks ADD COLUMN handoff_from_stage_id TEXT')
-        raw.exec('ALTER TABLE tasks ADD COLUMN spawned_by_run_id TEXT')
-        raw.exec('ALTER TABLE tasks ADD COLUMN batch_no INTEGER')
-        raw.exec('ALTER TABLE tasks ADD COLUMN spawn_key TEXT')
-        raw.exec("ALTER TABLE tasks ADD COLUMN LABELS_JSON TEXT NOT NULL DEFAULT '[]'")
+        seeded.exec(tableDdl.workflows())
+        seeded.exec(tableDdl.stages())
+        seeded.exec(tableDdl.tasks())
+        for (const column of ['origin', 'rule_id', 'external_ref', 'labels_json']) {
+          seeded.exec(`ALTER TABLE tasks DROP COLUMN ${column}`)
+        }
+        seeded.exec("ALTER TABLE tasks ADD COLUMN LABELS_JSON TEXT NOT NULL DEFAULT '[]'")
+        // 弱引用：只备好被引用的表结构，不插阶段行
+        seeded.exec('PRAGMA foreign_keys = OFF')
+        seeded
+          .prepare(
+            `INSERT INTO tasks (id, title, description, workflow_id, current_stage_id, created_at, updated_at)
+             VALUES ('tk-1', '旧任务', '', 'wf-1', 'st-1', ?, ?)`,
+          )
+          .run(SEED_AT, SEED_AT)
       } finally {
-        raw.close()
+        seeded.close()
       }
 
       const inspectBefore = new DatabaseSync(file)
@@ -1352,11 +1358,11 @@ describe('openDatabase：旧库 tasks 结构升级（M6 / M6.5 / M7 一次性物
           .run('wf-1', '旧流程', SEED_AT)
         seeded
           .prepare(
-            `INSERT INTO tasks (id, title, description, workflow_id, current_stage_id, status, created_at, updated_at)
+            `INSERT INTO tasks (id, title, description, workflow_id, current_stage_id, archived_at, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           // current_stage_id 留空：阶段行是弱引用，省掉一层外键准备
-          .run('tk-1', '旧任务', '', 'wf-1', null, 'active', SEED_AT, SEED_AT)
+          .run('tk-1', '旧任务', '', 'wf-1', null, null, SEED_AT, SEED_AT)
         seeded.exec('UPDATE tasks SET stage_fails = 3')
         // 表里还有 stage_fails：M34 需要重建一次把它物理删掉
         expect(needsTasksRebuild(seeded)).toBe(true)

@@ -34,7 +34,7 @@ function task(id: string, title: string, updatedAt: string, currentStageId = 's1
     workflowId: 'w1',
     projectId: 'p1',
     currentStageId,
-    status: 'completed',
+    archivedAt: 'archived-at',
     origin: 'manual',
     ruleId: null,
     externalRef: null,

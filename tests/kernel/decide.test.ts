@@ -178,7 +178,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -1929,11 +1929,11 @@ describe('kernel/decide 任务', () => {
     })
   })
 
-  it('task.move：已完成任务不再改阶段，但仍刷新 updatedAt', () => {
+  it('task.move：归档过的任务照常改阶段（M53：归档不拦业务，标记原样保留）', () => {
     const seeded = view({
       workflows: [workflow()],
       stages: [stage({ id: 'st-1', position: 0 }), stage({ id: 'st-2', position: 1 })],
-      tasks: [task({ id: 't-1', status: 'completed' })],
+      tasks: [task({ id: 't-1', archivedAt: 'archived-at' })],
     })
 
     expect(
@@ -1941,9 +1941,9 @@ describe('kernel/decide 任务', () => {
     ).toEqual({
       facts: [
         at('task.moved', {
-          task: task({ id: 't-1', status: 'completed', updatedAt: NOW }),
+          task: task({ id: 't-1', currentStageId: 'st-2', archivedAt: 'archived-at', updatedAt: NOW }),
           from: 'st-1',
-          to: 'st-1',
+          to: 'st-2',
         }),
       ],
     })
@@ -1994,60 +1994,48 @@ describe('kernel/decide 任务', () => {
     ).toEqual({ facts: [], reject: { code: 'not_found', message: '工作流不存在: wf-404' } })
   })
 
-  it('task.complete：置为 completed 并刷新 updatedAt；已完成再完成也发事实', () => {
+  it('task.archive：只写 archivedAt 并刷新 updatedAt；已是归档态时零事实（幂等）', () => {
     const seeded = view({
       workflows: [workflow()],
       stages: [stage({ id: 'st-1' })],
-      tasks: [task({ id: 't-1' }), task({ id: 't-2', status: 'completed', createdAt: LATER })],
+      tasks: [task({ id: 't-1' }), task({ id: 't-2', archivedAt: 'archived-at', createdAt: LATER })],
     })
 
-    expect(decide(seeded, command({ type: 'task.complete', id: 't-1' }), NOW, env())).toEqual({
+    expect(decide(seeded, command({ type: 'task.archive', id: 't-1' }), NOW, env())).toEqual({
       facts: [
-        at('task.completed', { task: task({ id: 't-1', status: 'completed', updatedAt: NOW }) }),
+        at('task.archived', { task: task({ id: 't-1', archivedAt: NOW, updatedAt: NOW }) }),
       ],
     })
 
-    expect(decide(seeded, command({ type: 'task.complete', id: 't-2' }), NOW, env())).toEqual({
-      facts: [
-        at('task.completed', {
-          task: task({ id: 't-2', status: 'completed', createdAt: LATER, updatedAt: NOW }),
-        }),
-      ],
+    // 已经归档过：不重复产事实（可逆，取消归档走 archived:false）
+    expect(decide(seeded, command({ type: 'task.archive', id: 't-2' }), NOW, env())).toEqual({
+      facts: [],
     })
   })
 
-  it('task.complete：任务/工作流不存在、当前阶段无效、执行中都 reject', () => {
+  it('task.archive：任务不存在 / 执行中都 reject（M53：归档不看阶段与工作流）', () => {
     const seed: Seed = {
       workflows: [workflow()],
       stages: [stage({ id: 'st-1' })],
       tasks: [task({ id: 't-1' }), task({ id: 't-2', currentStageId: null, createdAt: LATER })],
     }
-    const seeded = view(seed)
 
-    expect(decide(view(), command({ type: 'task.complete', id: 't-404' }), NOW, env())).toEqual({
+    expect(decide(view(), command({ type: 'task.archive', id: 't-404' }), NOW, env())).toEqual({
       facts: [],
       reject: { code: 'not_found', message: '任务不存在: t-404' },
     })
-    expect(decide(seeded, command({ type: 'task.complete', id: 't-2' }), NOW, env())).toEqual({
-      facts: [],
-      reject: { code: 'conflict', message: '任务当前阶段无效' },
+    // 阶段缺失也能归档：归档只写一个时刻
+    expect(decide(view(seed), command({ type: 'task.archive', id: 't-2' }), NOW, env())).toEqual({
+      facts: [at('task.archived', { task: task({ id: 't-2', currentStageId: null, createdAt: LATER, archivedAt: NOW, updatedAt: NOW }) })],
     })
     expect(
       decide(
         view({ ...seed, active: ['t-1'] }),
-        command({ type: 'task.complete', id: 't-1' }),
+        command({ type: 'task.archive', id: 't-1' }),
         NOW,
         env(),
       ),
-    ).toEqual({ facts: [], reject: { code: 'conflict', message: '执行中的阶段不能完成' } })
-    expect(
-      decide(
-        view({ workflows: [], stages: [stage()], tasks: [task({ workflowId: 'wf-404' })] }),
-        command({ type: 'task.complete', id: 't-1' }),
-        NOW,
-        env(),
-      ),
-    ).toEqual({ facts: [], reject: { code: 'not_found', message: '工作流不存在: wf-404' } })
+    ).toEqual({ facts: [], reject: { code: 'conflict', message: '执行中的阶段不能归档' } })
   })
 
   it('task.stop：活跃 run 逐条请求取消，终态与已请求的跳过；任务行不动', () => {
@@ -2098,10 +2086,10 @@ describe('kernel/decide 任务', () => {
     ).toEqual({ facts: [] })
   })
 
-  it('task.complete：任务名下还 open 的卡随任务一起收起（reason=cancelled，别的任务/已答的卡不动）', () => {
+  it('移到「已完成」：任务名下还 open 的卡随任务一起收起（reason=cancelled，别的任务/已答的卡不动）', () => {
     const seeded = view({
       workflows: [workflow()],
-      stages: [stage({ id: 'st-1' })],
+      stages: [stage({ id: 'st-1' }), stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null })],
       tasks: [task({ id: 't-1' }), task({ id: 't-2', createdAt: LATER })],
       cards: [
         card({ id: 'card-1', runId: 'run-1', taskId: 't-1' }),
@@ -2110,9 +2098,18 @@ describe('kernel/decide 任务', () => {
       ],
     })
 
-    const decision = decide(seeded, command({ type: 'task.complete', id: 't-1' }), NOW, env())
-    expect(decision.facts.map((fact) => fact.type)).toEqual(['task.completed', 'card.resolved'])
-    const resolved = decision.facts[1]?.payload as { card: Card; reason: string }
+    const decision = decide(
+      seeded,
+      command({ type: 'task.move', id: 't-1', stageId: 'st-done' }),
+      NOW,
+      env(),
+    )
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'task.moved',
+      'task.finished',
+      'card.resolved',
+    ])
+    const resolved = decision.facts[2]?.payload as { card: Card; reason: string }
     expect(resolved.card.id).toBe('card-1')
     expect(resolved.card.status).toBe('resolved')
     expect(resolved.card.updatedAt).toBe(NOW)
@@ -2488,7 +2485,7 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     )
   })
 
-  it('task.move 原地（from===to）或已完成任务：不产 run.queued', () => {
+  it('task.move 原地（from===to）不产 run.queued；归档过的任务换阶段照常入队（M53）', () => {
     const sameStage = decide(
       view({
         workflows: [workflow()],
@@ -2503,19 +2500,19 @@ describe('kernel/decide 进入效果（run.queued）', () => {
     )
     expect(sameStage.facts.map((fact) => fact.type)).toEqual(['task.moved'])
 
-    const completed = decide(
+    const archived = decide(
       agentView({
         stages: [
           stage({ id: 'st-1', position: 0 }),
           stage({ id: 'st-2', position: 1, entryMode: 'agent', agentId: 'ag-1' }),
         ],
-        tasks: [task({ id: 't-1', status: 'completed' })],
+        tasks: [task({ id: 't-1', archivedAt: 'archived-at' })],
       }),
       command({ type: 'task.move', id: 't-1', stageId: 'st-2' }),
       NOW,
       env(),
     )
-    expect(completed.facts.map((fact) => fact.type)).toEqual(['task.moved'])
+    expect(archived.facts.map((fact) => fact.type)).toEqual(['task.moved', 'run.queued'])
   })
 
   it('同一任务每次进入 agent 阶段都重新建 run（往返两次各一条）', () => {
@@ -2972,8 +2969,8 @@ describe('kernel/decide M8：任务派生', () => {
 
     const doneParent = view({
       workflows: [workflow()],
-      stages: [stage()],
-      tasks: [task({ status: 'completed' })],
+      stages: [stage(), stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null })],
+      tasks: [task({ currentStageId: 'st-done' })],
     })
     expect(
       decide(
@@ -2987,7 +2984,7 @@ describe('kernel/decide M8：任务派生', () => {
       ),
     ).toEqual({
       facts: [],
-      reject: { code: 'conflict', message: '父任务已完成，不能挂子任务: t-1' },
+      reject: { code: 'conflict', message: '父任务已结束，不能挂子任务: t-1' },
     })
   })
 
@@ -3002,8 +2999,14 @@ describe('kernel/decide M8：任务派生', () => {
         task({ id: 't-2', parentTaskId: 't-1', threadId: 'th-1', origin: 'spawn' }),
       ],
     })
+    seeded.stages.set('st-done', stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }))
     seeded.threads.set('th-1', threadRow({ taskIds: ['t-1', 't-2'] }))
-    const decision = decide(seeded, command({ type: 'task.complete', id: 't-2' }), NOW, env())
+    const decision = decide(
+      seeded,
+      command({ type: 'task.move', id: 't-2', stageId: 'st-done' }),
+      NOW,
+      env(),
+    )
     expect(decision.facts.some((fact) => fact.type === 'task.children_settled')).toBe(true)
     const wake = decision.facts.find((fact) => fact.type === 'run.queued')
     expect((wake?.payload as { run: { taskId: string } }).run.taskId).toBe('t-1')
@@ -3077,7 +3080,7 @@ describe('kernel/decide M8：任务派生', () => {
     expect(
       decision.facts.some(
         (fact) =>
-          fact.type === 'task.completed' && (fact.payload as { task: Task }).task.id === 't-2',
+          fact.type === 'task.finished' && (fact.payload as { task: Task }).task.id === 't-2',
       ),
     ).toBe(true)
     expect(decision.facts.some((fact) => fact.type === 'task.children_settled')).toBe(true)
@@ -3112,7 +3115,7 @@ describe('kernel/decide M8：任务派生', () => {
       env(),
     )
     const completedIds = decision.facts
-      .filter((fact) => fact.type === 'task.completed')
+      .filter((fact) => fact.type === 'task.finished')
       .map((fact) => (fact.payload as { task: Task }).task.id)
     expect(completedIds).toEqual(expect.arrayContaining(['c', 'p', 'g']))
   })

@@ -52,10 +52,15 @@ const runEventKey = (runId: Id, seq: number): Id => `${runId}:${seq}`
  * `origin/ruleId/externalRef/labels`，M6.5 前的 payload 没有 `threadId/parentTaskId`；
  * 重建时按默认值补齐，避免投影列写入 undefined。
  */
-export function normalizeTask(row: Task): Task {
-  const legacy = row as Partial<Task>
+export function normalizeTask(row: Task, at?: string): Task {
+  const legacy = row as Partial<Task> & { status?: 'active' | 'completed' }
+  // M53：老事实只有一个 `status`（completed = 完成 + 归档）。重建时把归档拆出来记时刻，
+  // 完成改由阶段语义表达；没给 `at` 的调用方按 null 归一（仍在追踪）。
+  const archivedAt = legacy.archivedAt ?? (legacy.status === 'completed' ? (at ?? null) : null)
+  const { status: _legacyStatus, ...rest } = legacy
   return {
-    ...row,
+    ...(rest as Task),
+    archivedAt,
     origin: legacy.origin ?? 'manual',
     ruleId: legacy.ruleId ?? null,
     externalRef: legacy.externalRef ?? null,
@@ -171,9 +176,12 @@ function changesOf(fact: AnyFact): Change[] {
     case 'task.created':
     case 'task.updated':
     case 'task.moved':
+    case 'task.finished':
+    case 'task.archived':
     case 'task.completed':
       // M6：规则任务带 origin/ruleId/externalRef/labels；老事实缺字段由归一补齐。
-      return [put('tasks', normalizeTask(fact.payload.task))]
+      // M53：老 `task.completed` 事实在这里拆成「归档时刻」（完成改由阶段语义表达）。
+      return [put('tasks', normalizeTask(fact.payload.task, fact.at))]
     case 'task.removed':
       return [remove('tasks', fact.payload.task.id)]
     case 'task.comment_added':

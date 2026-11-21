@@ -211,7 +211,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -1218,7 +1218,7 @@ describe('kernel/decide run.receipt 回执', () => {
     ])
   })
 
-  it('成功且已是最后阶段：产 task.completed', () => {
+  it('成功且已是最后阶段（close 出口）：产 task.moved + task.finished + task.archived（M53）', () => {
     const active = running()
     const current = task()
     const decision = receive(
@@ -1232,11 +1232,23 @@ describe('kernel/decide run.receipt 回执', () => {
       receipt(),
     )
 
-    expect(decision.facts[1]).toEqual({
-      type: 'task.completed',
+    const settled = { ...current, updatedAt: NOW, gateFails: 0 }
+    expect(decision.facts.slice(1).map((fact) => fact.type)).toEqual([
+      'task.moved',
+      'task.finished',
+      'task.archived',
+    ])
+    expect(decision.facts[2]).toEqual({
+      type: 'task.finished',
       actor: HOST,
       at: NOW,
-      payload: { task: { ...current, status: 'completed', updatedAt: NOW, gateFails: 0 } },
+      payload: { task: settled, outcome: 'done' },
+    })
+    expect(decision.facts[3]).toEqual({
+      type: 'task.archived',
+      actor: HOST,
+      at: NOW,
+      payload: { task: { ...settled, archivedAt: NOW } },
     })
   })
 
@@ -1301,13 +1313,16 @@ describe('kernel/decide run.receipt 回执', () => {
     })
   })
 
-  it('任务已完成 / 阶段无效：只落终态，零流转事实', () => {
-    const completed = task({ status: 'completed' })
+  it('任务已结束（停在终态阶段）/ 阶段无效：只落终态，零流转事实', () => {
+    const completed = task({ currentStageId: 'st-done' })
     const completedDecision = receive(
       view({
         runs: [running()],
         workflows: [workflow()],
-        stages: [stage()],
+        stages: [
+          stage(),
+          stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }),
+        ],
         tasks: [completed],
       }),
       'run-1',
@@ -1818,7 +1833,7 @@ describe('kernel/decide 闸门流转（M11）', () => {
       receipt({ verdict: 'pass', checks: [{ cmd: 'pnpm check', exitCode: 1 }] }),
     )
     expect(
-      decision.facts.some((fact) => fact.type === 'task.moved' || fact.type === 'task.completed'),
+      decision.facts.some((fact) => fact.type === 'task.moved' || fact.type === 'task.finished'),
     ).toBe(false)
   })
 
@@ -1977,7 +1992,7 @@ describe('kernel/decide run.receipt 评审结论（M14）', () => {
     const decision = receive(reviewView(), 'run-1', receipt())
     expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
     expect(decision.facts.some((fact) => fact.type === 'task.moved')).toBe(false)
-    expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.finished')).toBe(false)
     const comment = decision.facts.find(
       (fact) =>
         fact.type === 'task.comment_added' &&
@@ -2239,11 +2254,15 @@ describe('kernel/commands/run 验收归属（M34）', () => {
   const submit = (target: View, body: Receipt, environment = env()): ReturnType<typeof decide> =>
     decide(target, { type: 'run.receipt', runId: 'run-1', receipt: body }, NOW, environment)
 
-  it('执行阶段 run.succeeded → 恰好一条流转事实、零 run.queued、零评论（黄金用例）', () => {
+  it('执行阶段 run.succeeded → 一组流转事实（moved + finished）、零 run.queued、零评论（黄金用例）', () => {
     const decision = submit(view(baseSeed()), receipt())
 
     expect(decision.reject).toBeUndefined()
-    expect(decision.facts.map((fact) => fact.type)).toEqual(['run.succeeded', 'task.moved'])
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'run.succeeded',
+      'task.moved',
+      'task.finished',
+    ])
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect((moved?.payload as { to: string }).to).toBe('st-done')
     // 结算行照旧：终态 + 清租约 + 结束时刻（执行阶段不额外读任何业务结论）
@@ -2268,11 +2287,13 @@ describe('kernel/commands/run 验收归属（M34）', () => {
       'review.reported',
       'run.succeeded',
       'task.moved',
+      'task.finished',
     ])
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect((moved?.payload as { to: string }).to).toBe('st-done')
     expect((moved?.payload as { task: Task }).task.gateFails).toBe(0)
-    expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
+    // M53：落到终态阶段即完成（task.finished 与 task.moved 同批）
+    expect(decision.facts.some((fact) => fact.type === 'task.finished')).toBe(true)
     expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
   })
 
@@ -2287,7 +2308,11 @@ describe('kernel/commands/run 验收归属（M34）', () => {
     )
 
     expect(decision.reject).toBeUndefined()
-    expect(decision.facts.map((fact) => fact.type)).toEqual(['run.succeeded', 'task.moved'])
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'run.succeeded',
+      'task.moved',
+      'task.finished',
+    ])
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
     expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
@@ -2338,7 +2363,7 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
 
   const transitionOf = (decision: ReturnType<typeof decide>): string[] =>
     decision.facts
-      .filter((fact) => fact.type === 'task.moved' || fact.type === 'task.completed')
+      .filter((fact) => fact.type === 'task.moved' || fact.type === 'task.finished')
       .map((fact) => fact.type)
 
   it('回执没有 verdict：没给结论（零流转、不烧预算，并留一句「为什么停」）', () => {
@@ -2380,7 +2405,7 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
     expect(transitionOf(decision)).toEqual([])
     // run 照常落终态，只是任务不动（停在闸门等人补证据）
     expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
-    expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.finished')).toBe(false)
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
     const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
     expect((comment?.payload as { comment: { text: string } }).comment.text).toContain('没给结论')
@@ -2631,7 +2656,7 @@ describe('kernel/decide 出错不自动重跑（M34）', () => {
 
     expect(decision.facts.map((fact) => fact.type)).toEqual(['run.failed'])
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
-    expect(decision.facts.some((fact) => fact.type === 'task.completed')).toBe(false)
+    expect(decision.facts.some((fact) => fact.type === 'task.finished')).toBe(false)
     expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
   })
 

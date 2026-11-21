@@ -398,7 +398,7 @@ export function closeCardsOnFinish(view: View, decision: Decision, now: Iso): De
       case 'run.cancelled':
         finishedRuns.add((fact.payload as { run: RunRow }).run.id)
         break
-      case 'task.completed':
+      case 'task.finished':
         finishedTasks.add((fact.payload as { task: { id: Id } }).task.id)
         break
       case 'card.answered':

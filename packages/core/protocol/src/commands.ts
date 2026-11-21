@@ -43,7 +43,7 @@ export const COMMAND_NAMES = [
   'project.remove',
   'task.create',
   'task.move',
-  'task.complete',
+  'task.archive',
   'task.stop',
   'task.remove',
   'task.comment',
@@ -191,9 +191,17 @@ export interface TaskMoveCommand extends CommandBase {
   stageId: string
 }
 
-export interface TaskCompleteCommand extends CommandBase {
-  type: 'task.complete'
+/**
+ * 归档 / 取消归档（M53，取代 `task.complete`）：只写 `archivedAt`，不产任何业务后果。
+ *
+ * 归档是「这条我不想再跟了」，与「完成」无关——完成由任务进入内置「已完成 / 已取消」阶段
+ * 表达（`task.move`）。可逆：`archived: false` 把任务放回看板。
+ */
+export interface TaskArchiveCommand extends CommandBase {
+  type: 'task.archive'
   id: string
+  /** 缺省 true（归档）；false = 取消归档 */
+  archived?: boolean
 }
 
 /**
@@ -376,7 +384,7 @@ export type Command =
   | ProjectRemoveCommand
   | TaskCreateCommand
   | TaskMoveCommand
-  | TaskCompleteCommand
+  | TaskArchiveCommand
   | TaskStopCommand
   | TaskRemoveCommand
   | TaskCommentCommand

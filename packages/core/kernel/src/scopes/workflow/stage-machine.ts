@@ -1,4 +1,5 @@
 import type {
+  BuiltinStageKey,
   GateVerdict,
   JudgeConfig,
   StageExitGuard,
@@ -8,13 +9,14 @@ import type {
   WorkflowStage,
   WorkflowWithStages,
 } from '@workbench/protocol/entities'
+import type { Iso } from '../../core/types'
 
 /** 进入某阶段后需要执行的效果（由 runner / UI 实际落地）。 */
 export type StageEffect =
   { type: 'createRun'; stageId: string; agentId: string } | { type: 'waitUser' } | { type: 'none' }
 
 /**
- * 阶段流转事件（只含自动流转；手动流转走 moveTaskToStage / completeTask）。
+ * 阶段流转事件（只含自动流转；手动流转走 moveTaskToStage / archiveTask）。
  *
  * `verdict` 只对判定阶段有意义（M11）：`run.status='succeeded'` 说明执行器跑完了，
  * `verdict` 才说明业务上过没过。缺省 = 没给结论，任务原地停住等人。
@@ -29,6 +31,20 @@ export interface MoveResult {
   effects: StageEffect[]
   /** 判定预算耗尽后按配置放行：本次是 fail 但走了通过分支 */
   gateExhausted?: boolean
+  /** 出口 `close`：本单结束并顺手归档（归档只写 `archivedAt`，M53） */
+  archive?: boolean
+}
+
+/**
+ * 终态阶段的完成口径（M53）：内置「已完成」= `done`、内置「已取消」= `cancelled`，
+ * 自己添加的阶段与「待办 / 已阻塞」一律 null（还在流程里）。
+ */
+export function terminalOutcomeOf(
+  stage: { builtin?: BuiltinStageKey | null } | null | undefined,
+): 'done' | 'cancelled' | null {
+  if (stage?.builtin === 'done') return 'done'
+  if (stage?.builtin === 'cancelled') return 'cancelled'
+  return null
 }
 
 /** 读取某阶段「进入时」应产生的效果。 */
@@ -116,7 +132,7 @@ export function enterStage(
   gateFails = 0,
 ): { task: Task; effects: StageEffect[] } {
   return {
-    task: { ...task, currentStageId: stage.id, status: 'active', gateFails },
+    task: { ...task, currentStageId: stage.id, gateFails },
     effects: entryEffects(stage),
   }
 }
@@ -126,7 +142,7 @@ export function enterStage(
  *
  * - `goto`：目标阶段不存在（脏投影 / 已删）时零流转，宁可不走；
  * - `await`：不产效果，`gateFails` 按传入值落下（判定预算要能累计）；
- * - `close`：任务 `completed`（工单走完），预算清零。
+ * - `close`：本单结束（工单走完），预算清零；调用方据此产完成事实并顺手归档（M53）。
  *
  * M34 删掉 `retry`：执行阶段不设轮次，原地再来一轮只能由人触发（拖回阶段 / 重新执行）。
  */
@@ -135,7 +151,7 @@ export function applyExit(
   exit: StagePrimary,
   workflow: WorkflowWithStages,
   options?: { gateFails?: number },
-): { task: Task; effects: StageEffect[] } {
+): MoveResult {
   switch (exit.do) {
     case 'goto': {
       const target = workflow.stages.find((stage) => stage.id === exit.stageId)
@@ -155,7 +171,7 @@ export function applyExit(
         effects: [],
       }
     case 'close':
-      return { task: { ...task, status: 'completed', gateFails: 0 }, effects: [] }
+      return { task: { ...task, gateFails: 0 }, effects: [], archive: true }
   }
 }
 
@@ -168,7 +184,7 @@ export function applyExit(
  */
 export function moveTask(task: Task, event: StageEvent, workflow: WorkflowWithStages): MoveResult {
   const current = workflow.stages.find((s) => s.id === task.currentStageId)
-  if (!current || task.status === 'completed') {
+  if (!current) {
     return { task, effects: [] }
   }
   // 缺失的出口按顺序补（老行 / 刚加的阶段）：`completeExits` 是唯一一份缺省规则
@@ -205,7 +221,7 @@ export function moveTask(task: Task, event: StageEvent, workflow: WorkflowWithSt
 
 /**
  * 纯函数：看板拖拽 —— 把任务直接放到目标阶段，不套用出口表。
- * 任务已完成、目标不存在或就落在当前阶段时原样返回。人工落位视为重新开始，预算清零。
+ * 目标不存在或就落在当前阶段时原样返回（归档不拦业务，M53）。人工落位视为重新开始，预算清零。
  */
 export function moveTaskToStage(
   task: Task,
@@ -213,15 +229,19 @@ export function moveTaskToStage(
   workflow: WorkflowWithStages,
 ): { task: Task; effects: StageEffect[] } {
   const target = workflow.stages.find((s) => s.id === stageId)
-  if (task.status === 'completed' || !target || target.id === task.currentStageId) {
+  if (!target || target.id === task.currentStageId) {
     return { task, effects: [] }
   }
   return enterStage(task, target, workflow)
 }
 
-/** 纯函数：看板拖到「归档」区 —— 任务移出看板。 */
-export function completeTask(task: Task): Task {
-  return { ...task, status: 'completed' }
+/**
+ * 纯函数：看板拖到「归档」区 —— 只打归档时刻，任务移出看板（M53）。
+ *
+ * 归档不表达「做完了」（那由阶段语义表达），也不产任何业务后果：可逆、可忽略。
+ */
+export function archiveTask(task: Task, now: Iso): Task {
+  return { ...task, archivedAt: now }
 }
 
 /** 老事实的判定者（M11 的 gate → M32 的 judge）：只保留护栏，去向搬进出口表。 */

@@ -337,7 +337,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       workflowId: 'wf-1',
       projectId: null,
       currentStageId: 'st-2',
-      status: 'active',
+      archivedAt: null,
       // M6：v2 存量导入后一律是手工任务
       origin: 'manual',
       ruleId: null,
@@ -363,7 +363,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       workflowId: 'wf-1',
       projectId: null,
       currentStageId: null,
-      status: 'completed',
+      archivedAt: 'archived-at',
       origin: 'manual',
       ruleId: null,
       externalRef: null,
@@ -458,7 +458,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
 
   const insertTask = db.prepare(
     `INSERT INTO tasks
-       (id, title, description, workflow_id, current_stage_id, status, created_at, updated_at)
+       (id, title, description, workflow_id, current_stage_id, archived_at, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   for (const task of tasks) {
@@ -468,7 +468,7 @@ function seedEntities(db: DatabaseSync): Omit<LegacySeed, 'runs'> {
       task.description,
       task.workflowId,
       task.currentStageId,
-      task.status,
+      task.archivedAt,
       task.createdAt,
       task.updatedAt,
     )
@@ -933,9 +933,9 @@ describe('importLegacyIfNeeded', () => {
     db.exec('PRAGMA foreign_keys = OFF')
     db.prepare(
       `INSERT INTO tasks
-         (id, title, description, workflow_id, current_stage_id, status, created_at, updated_at)
+         (id, title, description, workflow_id, current_stage_id, archived_at, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run('tk-bad', '坏任务', '', 'missing-wf', null, 'active', seedAt(1), seedAt(1))
+    ).run('tk-bad', '坏任务', '', 'missing-wf', null, null, seedAt(1), seedAt(1))
     db.exec('PRAGMA foreign_keys = ON')
     const before = dumpProjection(db)
 

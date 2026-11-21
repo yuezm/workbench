@@ -27,7 +27,7 @@ const expected = [
   'project.remove',
   'task.create',
   'task.move',
-  'task.complete',
+  'task.archive',
   'task.stop',
   'task.remove',
   'task.comment',

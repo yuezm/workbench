@@ -102,7 +102,7 @@ function handoffFactsFor(
     // M10：交接产物沿用来源任务的项目（同一工作目录）
     projectId: sourceTask.projectId,
     currentStageId: target.stageId,
-    status: 'active',
+    archivedAt: null,
     origin: 'handoff',
     ruleId: null,
     externalRef: null,

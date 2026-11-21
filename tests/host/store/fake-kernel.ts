@@ -260,7 +260,7 @@ export const defaultProject: KernelPort['project'] = (fact) => {
     case 'task.created':
     case 'task.updated':
     case 'task.moved':
-    case 'task.completed':
+    case 'task.finished':
       return upsert('tasks', (fact.payload as { task: Task }).task)
     case 'task.removed':
       return removeRow('tasks', (fact.payload as { task: Task }).task.id)

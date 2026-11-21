@@ -57,7 +57,7 @@ const commandSamples: Command[] = [
   },
   { commandId: 'c11', type: 'task.create', input: taskInput },
   { commandId: 'c12', type: 'task.move', id: 't-1', stageId: 'st-2' },
-  { commandId: 'c13', type: 'task.complete', id: 't-1' },
+  { commandId: 'c13', type: 'task.archive', id: 't-1' },
   { commandId: 'c13b', type: 'task.stop', id: 't-1' },
   { commandId: 'c14', type: 'task.remove', id: 't-1' },
   { commandId: 'c15', type: 'card.answer', cardId: 'card-1', optionIndex: 0, via: 'channel' },
@@ -178,7 +178,7 @@ const expected: Record<Input['type'], ProjectionTable[]> = {
     'cards',
     'task_comments',
   ],
-  'task.complete': [
+  'task.archive': [
     'tasks',
     'workflows',
     'workflow_stages',
@@ -381,7 +381,7 @@ describe('kernel/view-spec', () => {
 
   it('删除命令要装载 runs（run.removed 事实替代 SQL 级联，D13）', () => {
     expect(viewSpec(byType.get('task.move') as Input)).toContain('tasks')
-    expect(viewSpec(byType.get('task.complete') as Input)).toContain('tasks')
+    expect(viewSpec(byType.get('task.archive') as Input)).toContain('tasks')
     expect(viewSpec(byType.get('task.remove') as Input)).toEqual([
       'tasks',
       'runs',

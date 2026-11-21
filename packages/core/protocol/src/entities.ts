@@ -369,6 +369,11 @@ export const TASK_PHASES = ['todo', 'active', 'finished', 'cancelled'] as const
 
 export type TaskPhase = (typeof TASK_PHASES)[number]
 
+/** 任务的阶段语义是否已经结束（完成或取消）——「还能不能派活 / 重排 / 挂子任务」都看它。 */
+export function isTaskOver(phase: TaskPhase): boolean {
+  return phase === 'finished' || phase === 'cancelled'
+}
+
 /** 当前阶段的阶段语义（阶段缺失按「未开始」）。 */
 export function taskPhaseOf(
   stage: { builtin?: BuiltinStageKey | null } | null | undefined,
@@ -651,11 +656,6 @@ export interface WorkflowInput {
 
 // ---------- 任务 ----------
 
-/** 任务状态：active = 看板上进行中，completed = 移出看板 */
-export const TASK_STATUSES = ['active', 'completed'] as const
-
-export type TaskStatus = (typeof TASK_STATUSES)[number]
-
 /**
  * 任务来源（M6/M7/M8）：`manual` = 人手建；`rule` = 自动化规则命中（含 cron / 手动触发）；
  * `handoff` = 跨工作流交接产物（来源任务的某阶段完成时在目标工作流建的任务）；
@@ -678,7 +678,13 @@ export interface Task {
    */
   projectId: string | null
   currentStageId: string | null
-  status: TaskStatus
+  /**
+   * 归档时刻（M53）：`null` = 仍在追踪（看板与清单默认显示）。
+   *
+   * 归档只表达「这条我不想再跟了」，**不是完成**：完成由阶段语义（`taskPhaseOf`）表达，
+   * 归档可有可无、可逆（`task.archive{archived:false}`），且零业务后果。
+   */
+  archivedAt: string | null
   /**
    * 闸门预算（M11）：**当前阶段**连续未通过次数。进入阶段时清零（失败回环保留累计值），
    * 闸门判定 `pass` 或预算耗尽放行时清零。老事实 / 存量导入缺该字段时按 0 归一。

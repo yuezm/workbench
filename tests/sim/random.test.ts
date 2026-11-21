@@ -44,7 +44,7 @@ describe('sim：随机序列下的系统不变量', () => {
       for (const type of [
         'task.create',
         'task.move',
-        'task.complete',
+        'task.archive',
         'run.claim',
         'run.receipt',
         'card.answer',

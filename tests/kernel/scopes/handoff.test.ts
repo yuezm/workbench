@@ -91,7 +91,7 @@ const task = (id: string, over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-a',
   projectId: null,
   currentStageId: 'st-a0',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -466,7 +466,7 @@ describe('kernel/handoff 建任务事实', () => {
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
       handoffFromRunId: null,
-      status: 'active',
+      archivedAt: null,
     })
     expect(attached).toMatchObject({ taskId: created.id, ruleId: null })
     expect(attached.thread.taskIds).toEqual([created.id])

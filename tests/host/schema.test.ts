@@ -15,6 +15,7 @@ import {
   SCHEMA_SQL,
   SCHEMA_VERSION,
   LEGACY_STAGE_COLUMNS,
+  LEGACY_TASK_COLUMNS,
   STAGES_REQUIRED_COLUMNS,
   formatOfProjection,
   projectionFormat,
@@ -102,7 +103,8 @@ const TASKS_M7_COLUMNS = [
   'description',
   'workflow_id',
   'current_stage_id',
-  'status',
+  // M53：v2 的 `status` 换成归档时刻（NULL = 仍在追踪）
+  'archived_at',
   'origin',
   'rule_id',
   'external_ref',
@@ -346,7 +348,7 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     }
   })
 
-  it('tasks 按 M7/M8 结构：来源四列 + 线程两列 + spawn 三列 + 交接两列插在 status 与时间列之间，旧 8 列逐列不变', () => {
+  it('tasks 按 M7/M8/M53 结构：来源四列 + 线程两列 + spawn 三列 + 交接两列插在 archived_at 与时间列之间，旧 8 列逐列不变（status 换成 archived_at）', () => {
     const legacy = memoryDb()
     legacy.exec(PRE_M1_FIVE_TABLE_DDL)
 
@@ -362,8 +364,12 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     )
     for (const shape of columnShape(legacy, 'tasks')) {
       const name = shape.split('|')[0]
+      // M53：`status` 已被 `archived_at` 取代（进 LEGACY_TASK_COLUMNS，重建时物理删掉）
+      if ((LEGACY_TASK_COLUMNS as readonly string[]).includes(name)) continue
       expect(byName.get(name), name).toBe(shape)
     }
+    // 归档列可空、无默认值：NULL = 仍在追踪
+    expect(byName.get('archived_at')).toBe('archived_at|TEXT|0|null|0')
   })
 
   it('workflow_stages 按 M7/M8/M18 结构：交接两列 + 子任务三列插在 on_reject_stage_id 与时间列之间，M1 列逐列不变', () => {

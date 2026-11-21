@@ -102,5 +102,5 @@ test('闸门闭环：真实执行带回执块判定 → 任务通过闸门进入
   }, seeded.projectId)
   expect(tasks).toHaveLength(1)
   expect(tasks[0].currentStageId).toBe(seeded.stageIds[1])
-  expect(tasks[0].status).toBe('active')
+  expect(tasks[0].archivedAt).toBeNull()
 })

@@ -13,7 +13,7 @@ import type {
 import { STAGE_EXIT_ACTIONS } from '@workbench/protocol/entities'
 import {
   completeExits,
-  completeTask,
+  archiveTask,
   enterStage,
   entryEffects,
   legacyExits,
@@ -53,7 +53,7 @@ const task = (currentStageId: string | null): Task => ({
   workflowId: 'wf',
   projectId: null,
   currentStageId,
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -152,7 +152,7 @@ function sWf(stages: WorkflowStage[]): WorkflowWithStages {
   return { id: 'w1', name: 'wf', description: '', createdAt: 't', stages }
 }
 
-function sTask(currentStageId: string | null, status: Task['status'] = 'active'): Task {
+function sTask(currentStageId: string | null, archivedAt: string | null = null): Task {
   return {
     id: 't1',
     title: '任务',
@@ -160,7 +160,7 @@ function sTask(currentStageId: string | null, status: Task['status'] = 'active')
     workflowId: 'w1',
     projectId: null,
     currentStageId,
-    status,
+    archivedAt,
     origin: 'manual',
     ruleId: null,
     externalRef: null,
@@ -245,20 +245,22 @@ describe('stage-machine applyExit（M32：主去向）', () => {
     expect(r.task.gateFails).toBe(2)
   })
 
-  it('close：任务完成并清零预算', () => {
+  it('close：本单结束并标记归档，预算清零（M53：归档不再是「完成」的同义词）', () => {
     const r = applyExit({ ...sTask('s1'), gateFails: 2 }, { do: 'close' }, flow())
 
-    expect(r.task.status).toBe('completed')
+    expect(r.archive).toBe(true)
+    expect(r.task.archivedAt).toBeNull()
     expect(r.task.gateFails).toBe(0)
   })
 })
 
 describe('stage-machine（shared 用例并入）enterStage', () => {
-  it('进入阶段：更新 currentStageId、status=active、返回效果', () => {
+  it('进入阶段：更新 currentStageId、返回效果；归档标记不被静默改写', () => {
     const userStage = sStage({ id: 'u', position: 0, entryMode: 'user' })
-    const r = enterStage(sTask(null, 'completed'), userStage, sWf([userStage]))
+    const r = enterStage(sTask(null, 'archived-at'), userStage, sWf([userStage]))
     expect(r.task.currentStageId).toBe('u')
-    expect(r.task.status).toBe('active')
+    // M53：归档是人的意图——拖回阶段不等于「取消归档」
+    expect(r.task.archivedAt).toBe('archived-at')
     expect(r.effects).toEqual([{ type: 'waitUser' }])
   })
 })
@@ -272,29 +274,30 @@ describe('stage-machine（shared 用例并入）moveTask（自动流转）', () 
     expect(moveTask(t, e, flow)).toEqual({ task: t, effects: [] })
   })
 
-  it('任务已完成 → 原样返回', () => {
-    const t = sTask('s1', 'completed')
-    const e: StageEvent = { type: 'RUN_FAILED', runId: 'r' }
-    expect(moveTask(t, e, flow)).toEqual({ task: t, effects: [] })
+  it('归档过的任务照常流转（M53：归档不拦业务）', () => {
+    const t = sTask('s1', 'archived-at')
+    const r = moveTask(t, { type: 'RUN_SUCCEEDED', runId: 'r' }, flow)
+    expect(r.task.currentStageId).toBe('s2')
+    expect(r.task.archivedAt).toBe('archived-at')
   })
 
   it('RUN_SUCCEEDED 推进到下一阶段', () => {
     const r = moveTask(sTask('s1'), { type: 'RUN_SUCCEEDED', runId: 'r' }, flow)
     expect(r.task.currentStageId).toBe('s2')
-    expect(r.task.status).toBe('active')
+    expect(r.task.archivedAt).toBeNull()
     expect(r.effects).toEqual([{ type: 'none' }])
   })
 
-  it('RUN_SUCCEEDED 在最后阶段 → 任务完成', () => {
+  it('RUN_SUCCEEDED 在最后阶段 → 本单结束（close 出口，命令层据此产完成 + 归档事实）', () => {
     const r = moveTask(sTask('s2'), { type: 'RUN_SUCCEEDED', runId: 'r' }, flow)
-    expect(r.task.status).toBe('completed')
+    expect(r.archive).toBe(true)
     expect(r.effects).toEqual([])
   })
 
   it('RUN_FAILED 未配置打回目标 → 原地不动', () => {
     const r = moveTask(sTask('s2'), { type: 'RUN_FAILED', runId: 'r' }, flow)
     expect(r.task.currentStageId).toBe('s2')
-    expect(r.task.status).toBe('active')
+    expect(r.task.archivedAt).toBeNull()
     expect(r.effects).toEqual([])
   })
 
@@ -321,7 +324,7 @@ describe('stage-machine（shared 用例并入）moveTaskToStage（手动拖拽�
     const f = sWf([from, s1, s2])
     const r = moveTaskToStage(sTask('s0'), 's1', f)
     expect(r.task.currentStageId).toBe('s1')
-    expect(r.task.status).toBe('active')
+    expect(r.task.archivedAt).toBeNull()
     expect(r.effects).toEqual([{ type: 'none' }])
   })
 
@@ -351,16 +354,19 @@ describe('stage-machine（shared 用例并入）moveTaskToStage（手动拖拽�
     expect(moveTaskToStage(t, 's1', flow)).toEqual({ task: t, effects: [] })
   })
 
-  it('已完成任务不参与拖拽', () => {
-    const t = sTask('s1', 'completed')
-    expect(moveTaskToStage(t, 's2', flow)).toEqual({ task: t, effects: [] })
+  it('归档过的任务照常拖拽（M53：归档不拦业务，完成与否只看阶段）', () => {
+    const t = sTask('s1', 'archived-at')
+    const r = moveTaskToStage(t, 's2', flow)
+    expect(r.task.currentStageId).toBe('s2')
+    expect(r.task.archivedAt).toBe('archived-at')
+    expect(r.effects).toEqual([{ type: 'none' }])
   })
 })
 
-describe('stage-machine（shared 用例并入）completeTask', () => {
-  it('标记为 completed，其余字段不变', () => {
+describe('stage-machine（shared 用例并入）archiveTask', () => {
+  it('只打归档时刻，其余字段不变（完成由阶段语义表达，M53）', () => {
     const t = sTask('s1')
-    expect(completeTask(t)).toEqual({ ...t, status: 'completed' })
+    expect(archiveTask(t, 'archived-at')).toEqual({ ...t, archivedAt: 'archived-at' })
   })
 })
 
@@ -506,7 +512,7 @@ describe('stage-machine 闸门（M11）', () => {
       { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' },
       f,
     )
-    expect(r.task.status).toBe('completed')
+    expect(r.archive).toBe(true)
     expect(r.task.gateFails).toBe(0)
     expect(r.gateExhausted).toBe(true)
   })
@@ -612,10 +618,10 @@ describe('stage-machine 内置阶段（M18）', () => {
     expect(resolveNextStage(explicit, flow())?.id).toBe('bs-blocked')
   })
 
-  it('进入「已完成」仍是 active（归档走 task.complete），离开「已阻塞」成功后也回「已完成」', () => {
+  it('进入「已完成」＝完成但仍留在看板（M53：归档是另一件事），离开「已阻塞」成功后也回「已完成」', () => {
     const { task: next } = moveTask(task('u2'), { type: 'RUN_SUCCEEDED', runId: 'run-1' }, flow())
     expect(next.currentStageId).toBe('bs-done')
-    expect(next.status).toBe('active')
+    expect(next.archivedAt).toBeNull()
     const fromBlocked = moveTask(
       task('bs-blocked'),
       { type: 'RUN_SUCCEEDED', runId: 'run-1' },
@@ -668,10 +674,10 @@ describe('stage-machine 去向与位置无关（M29 删掉 exitsForward）', () 
     expect(moveTaskToStage(task('s1'), 's2', workflow()).effects).toEqual([{ type: 'waitUser' }])
   })
 
-  it('完成任务只改状态，不动阶段', () => {
-    const done = completeTask(task('s1'))
+  it('归档只打时刻，不动阶段（M53：完成与否不由归档表达）', () => {
+    const done = archiveTask(task('s1'), 'archived-at')
 
-    expect(done.status).toBe('completed')
+    expect(done.archivedAt).toBe('archived-at')
     expect(done.currentStageId).toBe('s1')
   })
 })
@@ -697,7 +703,7 @@ describe('stage-machine applyExit 出口只有三种动作（M34 移除 retry）
     const r = applyExit(sTask('ag'), { do: 'await' }, flow())
 
     expect(r.task.currentStageId).toBe('ag')
-    expect(r.task.status).toBe('active')
+    expect(r.task.archivedAt).toBeNull()
     expect(r.effects).toEqual([])
     expect(Object.hasOwn(r, 'retryExhausted')).toBe(false)
   })
@@ -751,10 +757,10 @@ describe('stage-machine legacyExits（M34：老 retry 归一成 await）', () =>
 // —— 性质测试（fast-check）：阶段流转的不变量 ————————————————————————————————————
 //
 // 阶段图是随机的：阶段数、顺序、内置终态、缺省出口、判定护栏都随机生成，任务是「任意
-// 阶段 + 任意状态」。断言：
+// 阶段 + 任意归档时刻」。断言：
 // ① `completeExits` 幂等且形状封闭（非终态必有 done/errored，判定阶段才有 passed/failed）；
 // ② `applyExit` 只在目标真实存在且不是当前阶段时才动任务，预算按传入值落下；
-// ③ 脏投影（当前阶段不存在）、已完成的任任务、自指 goto 一律零流转；
+// ③ 脏投影（当前阶段不存在）与自指 goto 一律零流转，与归档标记无关（M53）；
 // ④ 判定预算只在 `verdict='fail'` 时累计，达到 maxFails 才放行；`RUN_FAILED` 不消耗预算。
 // 固定种子，反例可复现（`FC_SEED` 换一批）。
 
@@ -861,10 +867,10 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
           if (target === undefined || target.id === before.currentStageId) {
             expect(result.effects).toEqual([])
             expect(result.task.currentStageId).toBe('s2')
-            expect(result.task.status).toBe('active')
+            expect(result.task.archivedAt).toBeNull()
           } else {
             expect(result.task.currentStageId).toBe(target.id)
-            expect(result.task.status).toBe('active')
+            expect(result.task.archivedAt).toBeNull()
             expect(result.effects).toEqual(entryEffects(target))
           }
           // 预算按传入值落下（清不清零由调用方决定，不是这里猜）
@@ -881,11 +887,11 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
         const flow = judgedFlow(1)
         const before = { ...task('s0'), gateFails: 5 }
         const closed = applyExit(before, { do: 'close' }, flow)
-        expect(closed.task.status).toBe('completed')
+        expect(closed.archive).toBe(true)
         expect(closed.task.gateFails).toBe(0)
         expect(closed.effects).toEqual([])
         const awaited = applyExit(before, { do: 'await' }, flow, { gateFails })
-        expect(awaited.task.status).toBe('active')
+        expect(awaited.task.archivedAt).toBeNull()
         expect(awaited.task.currentStageId).toBe('s0')
         expect(awaited.task.gateFails).toBe(gateFails)
         expect(awaited.effects).toEqual([])
@@ -894,16 +900,13 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
     )
   })
 
-  it('脏投影与已完成任务：moveTask 零流转并返回同一对象', () => {
+  it('脏投影：当前阶段不在工作流里时 moveTask 零流转并返回同一对象（与归档无关）', () => {
     fc.assert(
       fc.property(
         flowArb,
-        fc.constantFrom<Task['status']>('active', 'completed'),
-        (flow, status) => {
-          const row: Task =
-            status === 'completed'
-              ? { ...task(flow.stages[0]?.id ?? 'ghost'), status, gateFails: 2 }
-              : { ...task('ghost'), status }
+        fc.constantFrom<string | null>(null, 'archived-at'),
+        (flow, archivedAt) => {
+          const row: Task = { ...task('ghost'), archivedAt, gateFails: 2 }
           const result = moveTask(row, { type: 'RUN_SUCCEEDED', runId: 'r1' }, flow)
           expect(result.task).toBe(row)
           expect(result.effects).toEqual([])
@@ -913,7 +916,7 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
     )
   })
 
-  it('moveTaskToStage：目标缺失 / 已在目标 / 已完成时原样返回，否则落位并清零预算', () => {
+  it('moveTaskToStage：目标缺失 / 已在目标时原样返回，否则落位并清零预算', () => {
     fc.assert(
       fc.property(flowArb, fc.constantFrom('s0', 's1', 's2', 's3', 'ghost'), (flow, targetId) => {
         const before = { ...task('s0'), gateFails: 3 }

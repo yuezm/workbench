@@ -23,7 +23,7 @@ const task: Task = {
   workflowId: 'w',
   projectId: 'p1',
   currentStageId: 's',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,

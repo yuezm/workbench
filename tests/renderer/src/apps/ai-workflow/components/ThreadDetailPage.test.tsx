@@ -17,7 +17,7 @@ const parentTask: Task = {
   workflowId: 'w1',
   projectId: 'p1',
   currentStageId: 's0',
-  status: 'active',
+  archivedAt: null,
   origin: 'rule',
   ruleId: 'r1',
   externalRef: 'issue-1',
@@ -36,7 +36,7 @@ const childTask: Task = {
   id: 'c1',
   title: '子任务任务',
   parentTaskId: 'p1',
-  status: 'active',
+  archivedAt: null,
 }
 
 const doneTask: Task = {
@@ -47,7 +47,7 @@ const doneTask: Task = {
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
-  status: 'completed',
+  archivedAt: 'archived-at',
 }
 
 const thread: ThreadRow = {

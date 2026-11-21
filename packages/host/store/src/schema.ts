@@ -122,7 +122,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   description TEXT NOT NULL DEFAULT '',
   workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
   current_stage_id TEXT REFERENCES workflow_stages(id) ON DELETE SET NULL,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','completed')),
+  -- M53：归档时刻（NULL = 仍在追踪）。归档不是完成：完成由当前阶段类别表达
+  archived_at TEXT,
   origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','rule','handoff','spawn')),
   rule_id TEXT,
   external_ref TEXT,
@@ -951,13 +952,28 @@ export const TASKS_M11_ADD_COLUMN_SQL: Readonly<
  * 已废弃的 `tasks` 列（M34 删 `stage_fails`）：表里还有它就重建一次把它物理删掉。
  * 原值只服务已删除的自动重跑，不迁移。
  */
-export const LEGACY_TASK_COLUMNS = ['stage_fails'] as const
+export const LEGACY_TASK_COLUMNS = ['stage_fails', 'status'] as const
 
 /**
  * M30 给 `tasks` 新增的列（派单来源 run）：可空 TEXT，弱引用不设外键。
  * 老行按「不知道来自哪一轮」归一成 NULL（人工离开）——升级前的派单本来也不记这一层。
  */
 export const TASKS_M30_ADDED_COLUMNS = ['handoff_from_run_id'] as const
+
+/**
+ * M53 给 `tasks` 换的列：`status`（active/completed）→ `archived_at`（归档时刻）。
+ *
+ * 旧库由 `rebuildLegacyTasks` 物理重建（`status` 进 `LEGACY_TASK_COLUMNS`，
+ * `status='completed'` 的行按 `updated_at` 补成归档时刻）；这条补列只兜「列缺但已是新口径」
+ * 的异常状态，保证写入不会因缺列失败。
+ */
+export const TASKS_M53_ADDED_COLUMNS = ['archived_at'] as const
+
+export const TASKS_M53_ADD_COLUMN_SQL: Readonly<
+  Record<(typeof TASKS_M53_ADDED_COLUMNS)[number], string>
+> = {
+  archived_at: 'ALTER TABLE tasks ADD COLUMN archived_at TEXT',
+}
 
 /** `tasks` M30 补列语句（可空、无 DEFAULT）。 */
 export const TASKS_M30_ADD_COLUMN_SQL: Readonly<
@@ -976,13 +992,19 @@ export function legacyTasksCopySql(targetTable: string, columns: ReadonlySet<str
   const pick = (column: string, fallback: string): string =>
     columns.has(column) ? column : fallback
   return `INSERT INTO ${targetTable} (
-    id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
+    id, title, description, workflow_id, current_stage_id, archived_at, origin, rule_id,
     external_ref, labels_json, thread_id, parent_task_id, spawned_by_run_id, batch_no,
     spawn_key, handoff_from_task_id, handoff_from_stage_id, project_id, gate_fails,
     created_at, updated_at
   )
   SELECT
-    id, title, description, workflow_id, current_stage_id, status,
+    id, title, description, workflow_id, current_stage_id,
+    ${
+      columns.has('status')
+        ? // M53：老库的 status='completed' 就是「归档过」，时刻取最后一次更新
+          "CASE WHEN status = 'completed' THEN updated_at ELSE NULL END"
+        : pick('archived_at', 'NULL')
+    },
     ${pick('origin', "'manual'")}, ${pick('rule_id', 'NULL')},
     ${pick('external_ref', 'NULL')}, ${pick('labels_json', "'[]'")},
     ${pick('thread_id', 'NULL')}, ${pick('parent_task_id', 'NULL')},

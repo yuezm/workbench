@@ -36,7 +36,11 @@ const workflow: WorkflowWithStages = {
   name: '研发',
   description: '',
   createdAt: 't',
-  stages: [stage('s0', '待办', 0, 'none'), stage('s1', '执行', 1, 'agent')],
+  stages: [
+    stage('s0', '待办', 0, 'none'),
+    stage('s1', '执行', 1, 'agent'),
+    { ...stage('s-done', '已完成', 2, 'none'), builtin: 'done' },
+  ],
 }
 
 const task: Task = {
@@ -46,7 +50,7 @@ const task: Task = {
   workflowId: 'w1',
   projectId: 'p1',
   currentStageId: 's1',
-  status: 'active',
+  archivedAt: null,
   origin: 'rule',
   ruleId: 'r1',
   externalRef: null,
@@ -748,7 +752,7 @@ describe('TaskDetailPage', () => {
     expect(screen.queryByRole('button', { name: '重新执行' })).toBeNull()
     cleanup()
 
-    setup({ ...task, status: 'completed' })
+    setup({ ...task, archivedAt: 'archived-at' })
     await screen.findByRole('heading', { name: '任务A' })
     expect(screen.queryByRole('button', { name: '重新执行' })).toBeNull()
   })
@@ -770,15 +774,16 @@ describe('TaskDetailPage', () => {
     expect(await screen.findByText('当前阶段正在执行，先停止执行再重排')).toBeInTheDocument()
   })
 
-  it('执行中：出现「停止执行」，点击 dispatch task.stop；「完成任务」禁用', async () => {
+  it('执行中：出现「停止执行」，点击 dispatch task.stop；「移到已完成」与「归档」都禁用', async () => {
     kernel.setView('tasks.executing', undefined, ['t1'])
     const user = userEvent.setup()
     setup()
 
     await screen.findByRole('heading', { name: '任务A' })
-    const complete = screen.getByRole('button', { name: '完成任务' })
+    const complete = screen.getByRole('button', { name: '移到已完成' })
     expect(complete).toBeDisabled()
     expect(complete).toHaveAttribute('title', '执行中：先停止执行')
+    expect(screen.getByRole('button', { name: '归档' })).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: '停止执行' }))
     await waitFor(() =>
@@ -788,28 +793,42 @@ describe('TaskDetailPage', () => {
     )
   })
 
-  it('不在执行中：没有「停止执行」，「完成任务」可点并 dispatch task.complete', async () => {
+  it('不在执行中：没有「停止执行」，「移到已完成」dispatch task.move 到内置「已完成」（M53）', async () => {
     const user = userEvent.setup()
     setup()
 
     await screen.findByRole('heading', { name: '任务A' })
     expect(screen.queryByRole('button', { name: '停止执行' })).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: '完成任务' }))
+    await user.click(screen.getByRole('button', { name: '移到已完成' }))
     await waitFor(() =>
       expect(kernel.dispatched).toContainEqual(
-        expect.objectContaining({ type: 'task.complete', id: 't1' }),
+        expect.objectContaining({ type: 'task.move', id: 't1', stageId: 's-done' }),
       ),
     )
   })
 
-  it('已完成的任务：右上角只写「已完成」，不再给结束动作', async () => {
-    setup({ ...task, status: 'completed' })
+  it('「归档」dispatch task.archive，已归档时改为「取消归档」', async () => {
+    const user = userEvent.setup()
+    setup()
 
     await screen.findByRole('heading', { name: '任务A' })
-    // 信息面板的状态字段与右上角的收尾标记都会写「已完成」
+    await user.click(screen.getByRole('button', { name: '归档' }))
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({ type: 'task.archive', id: 't1', archived: true }),
+      ),
+    )
+  })
+
+  it('已归档的任务：只标「已归档」，不再给「移到已完成」（阶段已终态）', async () => {
+    setup({ ...task, currentStageId: 's-done', archivedAt: 'archived-at' })
+
+    await screen.findByRole('heading', { name: '任务A' })
     expect(screen.getAllByText('已完成').length).toBeGreaterThan(0)
-    expect(screen.queryByRole('button', { name: '完成任务' })).toBeNull()
+    expect(screen.getByText('已归档')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '取消归档' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '移到已完成' })).toBeNull()
     expect(screen.queryByRole('button', { name: '停止执行' })).toBeNull()
   })
 
@@ -830,16 +849,16 @@ describe('TaskDetailPage', () => {
 
   it('结束动作失败：亮后端文案，页面不崩', async () => {
     dispatchWith(<C extends Command>(command: C): Promise<CommandDispatchResult<C>> =>
-      command.type === 'task.complete'
-        ? Promise.reject(new Error('执行中的阶段不能完成'))
+      command.type === 'task.move'
+        ? Promise.reject(new Error('执行中的阶段不能拖动'))
         : Promise.resolve({ facts: [], value: null } as CommandDispatchResult<C>),
     )
     const user = userEvent.setup()
     setup()
 
     await screen.findByRole('heading', { name: '任务A' })
-    await user.click(screen.getByRole('button', { name: '完成任务' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('执行中的阶段不能完成')
+    await user.click(screen.getByRole('button', { name: '移到已完成' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('执行中的阶段不能拖动')
   })
 
   it('删除任务：确认弹窗说明连带执行记录与线程，确认后 dispatch 并出栈', async () => {

@@ -28,7 +28,7 @@ const task: Task = {
   workflowId: 'w1',
   projectId: null,
   currentStageId: 's1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -78,7 +78,7 @@ describe('model/task-phase', () => {
   })
 
   it('phaseOfTask 与任务状态无关：归档与否不影响阶段语义（M53）', () => {
-    const archived: Task = { ...task, currentStageId: 's-done', status: 'completed' }
+    const archived: Task = { ...task, currentStageId: 's-done', archivedAt: 'archived-at' }
     expect(phaseOfTask(archived, workflows)).toBe('finished')
   })
 })

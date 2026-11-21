@@ -59,7 +59,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -75,6 +75,16 @@ const task = (over: Partial<Task> = {}): Task => ({
   createdAt: AT,
   updatedAt: AT,
   ...over,
+})
+
+/** M53：内置「已完成」阶段（完成与否由阶段类别表达，不再用归档表示）。 */
+const doneStage = stage({
+  id: 'st-done',
+  name: '已完成',
+  position: 9,
+  entryMode: 'none',
+  agentId: null,
+  builtin: 'done',
 })
 
 const workflow: Workflow = { id: 'wf-1', name: '研发', description: '', createdAt: AT }
@@ -127,7 +137,10 @@ function makeView(over: Partial<View> = {}): View {
   return {
     seq: 0,
     workflows: new Map([[workflow.id, workflow]]),
-    stages: new Map([['st-1', stage()]]),
+    stages: new Map([
+      ['st-1', stage()],
+      ['st-done', doneStage],
+    ]),
     agents: new Map([[agent.id, agent]]),
     runtimes: new Map([[runtime.id, runtime]]),
     projects: new Map(),
@@ -214,7 +227,9 @@ describe('kernel/spawn：spawnFacts', () => {
   })
 
   it('父任务非 active / 阶段 spawnPolicy=off / 深度超限：零事实', () => {
-    const inactive = makeView({ tasks: new Map([['tk-1', task({ status: 'completed' })]]) })
+    const inactive = makeView({
+      tasks: new Map([['tk-1', task({ currentStageId: 'st-done' })]]),
+    })
     expect(
       spawnFacts(inactive, run, [spawn()], AT, env(), { kind: 'host', via: 'scheduler' }),
     ).toEqual([])
@@ -229,7 +244,7 @@ describe('kernel/spawn：spawnFacts', () => {
     let parentId: string | null = null
     for (let i = 0; i < 9; i += 1) {
       const id = `deep-${i}`
-      chain.set(id, task({ id, parentTaskId: parentId, status: 'active' }))
+      chain.set(id, task({ id, parentTaskId: parentId, archivedAt: null }))
       parentId = id
     }
     const deepest = [...chain.values()].at(-1) as Task
@@ -269,7 +284,7 @@ describe('kernel/spawn：childrenSettledFacts', () => {
   const doneChild = task({
     id: 'tk-child',
     parentTaskId: 'tk-1',
-    status: 'completed',
+    currentStageId: 'st-done',
     origin: 'spawn',
   })
 
@@ -317,7 +332,7 @@ describe('kernel/spawn：childrenSettledFacts', () => {
       {
         action: 'complete' as const,
         assert: (facts: ReturnType<typeof childrenSettledFacts>) =>
-          expect(facts.some((fact) => fact.type === 'task.completed')).toBe(true),
+          expect(facts.some((fact) => fact.type === 'task.finished')).toBe(true),
       },
       {
         action: 'notify' as const,
@@ -327,7 +342,7 @@ describe('kernel/spawn：childrenSettledFacts', () => {
     ]
     for (const item of cases) {
       const view = makeView({
-        stages: new Map([['st-1', stage({ onChildrenSettled: item.action })]]),
+        stages: new Map([['st-1', stage({ onChildrenSettled: item.action })], ['st-done', doneStage]]),
         tasks: new Map([
           ['tk-1', task()],
           ['tk-child', doneChild],
@@ -344,7 +359,7 @@ describe('kernel/spawn：childrenSettledFacts', () => {
 
   it('非 agent 阶段且未配置：降级 notify', () => {
     const view = makeView({
-      stages: new Map([['st-1', stage({ entryMode: 'user', agentId: null })]]),
+      stages: new Map([['st-1', stage({ entryMode: 'user', agentId: null })], ['st-done', doneStage]]),
       tasks: new Map([
         ['tk-1', task()],
         ['tk-child', doneChild],
@@ -359,7 +374,7 @@ describe('kernel/spawn：childrenSettledFacts', () => {
     const handed = task({
       id: 'tk-handed',
       parentTaskId: 'tk-1',
-      status: 'completed',
+      currentStageId: 'st-done',
       origin: 'handoff',
       handoffFromTaskId: 'tk-1',
       handoffFromStageId: 'st-1',
@@ -379,7 +394,7 @@ describe('kernel/spawn：childrenSettledFacts', () => {
 
     // 父阶段显式配了 wake：缺陷全修完 → 唤醒测试任务去回归
     const explicit = makeView({
-      stages: new Map([['st-1', stage({ onChildrenSettled: 'wake' })]]),
+      stages: new Map([['st-1', stage({ onChildrenSettled: 'wake' })], ['st-done', doneStage]]),
       tasks: new Map([
         ['tk-1', task()],
         ['tk-handed', handed],
@@ -401,7 +416,7 @@ describe('kernel/spawn：childrenSettledFacts', () => {
     const handed = task({
       id: 'tk-handed',
       parentTaskId: 'tk-1',
-      status: 'completed',
+      currentStageId: 'st-done',
       origin: 'handoff',
     })
     const view = makeView({
@@ -447,7 +462,7 @@ describe('kernel/spawn：边界分支', () => {
   })
 
   it('父阶段不存在：rollup 降级 notify（不产 run）', () => {
-    const child = task({ id: 'tk-child', parentTaskId: 'tk-1', status: 'completed' })
+    const child = task({ id: 'tk-child', parentTaskId: 'tk-1', currentStageId: 'st-done' })
     const view = makeView({
       tasks: new Map([
         ['tk-1', task({ currentStageId: 'st-missing' })],
@@ -477,7 +492,7 @@ describe('kernel/spawn：边界分支', () => {
     const view = makeView({ tasks: new Map([['tk-1', task({ currentStageId: null })]]) })
     expect(resolveSubtaskStage(view, task({ currentStageId: null }), undefined)).toBe('st-1')
 
-    const child = task({ id: 'tk-child', parentTaskId: 'tk-1', status: 'completed' })
+    const child = task({ id: 'tk-child', parentTaskId: 'tk-1', currentStageId: 'st-done' })
     const withCard = makeView({
       tasks: new Map([
         ['tk-1', task()],
@@ -506,7 +521,7 @@ describe('kernel/spawn：边界分支', () => {
     })
     expect(spawnFacts(noStages, run, [spawn()], AT, env(), actor)).toEqual([])
 
-    const child = task({ id: 'tk-child', parentTaskId: 'tk-1', status: 'completed' })
+    const child = task({ id: 'tk-child', parentTaskId: 'tk-1', currentStageId: 'st-done' })
     const nullStage = makeView({
       tasks: new Map([
         ['tk-1', task({ currentStageId: null })],

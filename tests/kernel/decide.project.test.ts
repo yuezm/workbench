@@ -101,7 +101,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: 'pj-1',
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -332,7 +332,7 @@ describe('kernel/decide 项目（M10）', () => {
     // 没在跑的任务（含已完成）不拦：归默认目录，`projectId` 不悬空
     const ok = decide(
       view({
-        tasks: [task({ status: 'completed' }), task({ id: 't-2', projectId: 'pj-2' })],
+        tasks: [task({ archivedAt: 'archived-at' }), task({ id: 't-2', projectId: 'pj-2' })],
       }),
       command({ type: 'project.remove', id: 'pj-1' }),
       NOW,
@@ -341,7 +341,7 @@ describe('kernel/decide 项目（M10）', () => {
     expect(ok.reject).toBeUndefined()
     expect(ok.facts.map((fact) => fact.type)).toEqual(['task.updated', 'project.removed'])
     expect(ok.facts[0]?.payload).toEqual({
-      task: { ...task({ status: 'completed' }), projectId: null, updatedAt: NOW },
+      task: { ...task({ archivedAt: 'archived-at' }), projectId: null, updatedAt: NOW },
     })
     expect((ok.facts[1]?.payload as { project: Project }).project.id).toBe('pj-1')
   })

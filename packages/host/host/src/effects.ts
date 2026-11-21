@@ -5,7 +5,7 @@
  * - `run.cancel_requested` → 中止执行中的 run（终止时序由执行器负责）；
  * - `card.opened` / `card.updated` → 交给通道 hub（fire-and-forget：hub 自己异步投递、
  *   自捕获异常与超时，不拖住写路径）；
- * - 结局通知（M12）→ `announce`：`task.completed` / `run.failed` 由装配根翻成系统通知；
+ * - 结局通知（M12）→ `announce`：`task.finished` / `run.failed` 由装配根翻成系统通知；
  * - 其余事实 → 只做变更通知。
  *
  * **所有写入口统一走 `effects.dispatch`**（IPC、scheduler、clock、通道）：先提交事实，

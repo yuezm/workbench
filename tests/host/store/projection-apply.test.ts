@@ -68,7 +68,7 @@ describe('createProjectionWriter：显式行映射', () => {
     })
     const workflow = sample.workflow()
     const stage = sample.stage()
-    const task = sample.task({ status: 'completed' })
+    const task = sample.task({ archivedAt: 'archived-at' })
 
     const changes: Change[] = [
       { table: 'runtimes', key: runtime.id, row: runtime },
@@ -149,8 +149,8 @@ describe('createProjectionWriter：显式行映射', () => {
     expect(
       db
         .prepare(
-          `SELECT id, title, description, workflow_id, current_stage_id, status, origin, rule_id,
-                  external_ref, labels_json, thread_id, parent_task_id, created_at, updated_at
+          `SELECT id, title, description, workflow_id, current_stage_id, archived_at, origin,
+                  rule_id, external_ref, labels_json, thread_id, parent_task_id, created_at, updated_at
            FROM tasks`,
         )
         .get(),
@@ -160,7 +160,7 @@ describe('createProjectionWriter：显式行映射', () => {
       description: '',
       workflow_id: 'wf-1',
       current_stage_id: 'st-1',
-      status: 'completed',
+      archived_at: 'archived-at',
       origin: 'manual',
       rule_id: null,
       external_ref: null,

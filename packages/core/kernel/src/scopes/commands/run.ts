@@ -8,6 +8,7 @@ import type {
   Task,
   WorkflowStage,
 } from '@workbench/protocol/entities'
+import { isTaskOver, taskPhaseOf } from '@workbench/protocol/entities'
 import type { EventReceivedPayload } from '@workbench/protocol/facts'
 import type { Input, Receipt } from '@workbench/protocol/inputs'
 import type { TaskComment } from '@workbench/protocol/task-comment'
@@ -38,7 +39,7 @@ import { childrenSettledFacts, spawnFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
 import { reviewFactsOf, type ReviewOutcome } from '../review'
 import {
-  batchTaskStatuses,
+  batchTaskPhases,
   closeIfAllDone,
   inactivityFacts,
   makeNote,
@@ -47,7 +48,7 @@ import {
   withNote,
 } from '../threads'
 import { stageRoundCount } from '../threads'
-import { moveTask } from '../workflow/stage-machine'
+import { moveTask, terminalOutcomeOf } from '../workflow/stage-machine'
 import {
   chatMessageFacts,
   CONCURRENCY_CAP,
@@ -298,12 +299,14 @@ function stageTransitionFacts(
 ): StageTransition {
   if (run.status === 'cancelled' || run.taskId === null) return { facts: [] }
   const task = view.tasks.get(run.taskId)
-  if (!task || task.status === 'completed') return { facts: [] }
+  if (!task) return { facts: [] }
   const workflow = view.workflows.get(task.workflowId)
   if (!workflow) return { facts: [] }
   const flow = workflowWithStages(view, workflow)
   const current = flow.stages.find((stage) => stage.id === task.currentStageId)
   if (!current) return { facts: [] }
+  // M53：任务已经停在终态阶段（完成 / 取消）时，迟到的结算只落 run 终态，不再流转
+  if (isTaskOver(taskPhaseOf(current))) return { facts: [] }
   const succeeded = run.status === 'succeeded'
   const verdict = outcome !== undefined && 'verdict' in outcome ? outcome.verdict : undefined
   const noConclusion =
@@ -317,8 +320,12 @@ function stageTransitionFacts(
     : moved.task
   // M29：派单按触发条件分组——执行成功但被判定挡下是 `failed`，判定缺结论 / 打回原地
   // 都不算「离开」，一条都不派（与 M7 的「向前完成才交接」等价，但不再靠位置猜）。
+  const targetStage =
+    next.currentStageId === null ? undefined : flow.stages.find((s) => s.id === next.currentStageId)
+  /** 终态阶段的完成口径（M53）：落到内置「已完成 / 已取消」即完成 */
+  const finishOutcome = terminalOutcomeOf(targetStage)
   const leftStage =
-    next.status === 'completed' ||
+    moved.archive === true ||
     (next.currentStageId !== null && next.currentStageId !== task.currentStageId)
   const guard = leftStage
     ? handoffGuardOf(current, {
@@ -361,11 +368,21 @@ function stageTransitionFacts(
     }
     return [hostDraft('task.comment_added', { comment }, now)]
   }
-  if (next.status === 'completed') {
+  if (finishOutcome !== null || moved.archive === true) {
+    // M53：完成 = 落到终态阶段（或出口 `close` 直接结束并归档），两者都产 `task.finished`
+    const settled: Task = { ...next, updatedAt: now }
     return {
       facts: [
         ...handoffFacts(),
-        hostDraft('task.completed', { task: { ...next, updatedAt: now } }, now),
+        hostDraft(
+          'task.moved',
+          { task: settled, from: task.currentStageId, to: settled.currentStageId },
+          now,
+        ),
+        hostDraft('task.finished', { task: settled, outcome: finishOutcome ?? 'done' }, now),
+        ...(moved.archive === true
+          ? [hostDraft('task.archived', { task: { ...settled, archivedAt: now } }, now)]
+          : []),
         ...degradedFacts(),
       ],
     }
@@ -600,12 +617,11 @@ export function receiveRun(
     for (const fact of transition.facts) {
       // M6.5：阶段流转把任务完成时，若线程内任务已全部完成 → 归档线程。
       // M50：同一批里可能刚派出一张落回本话题的新卡——它还没进视图，归档判定必须把它算成 active。
-      if (fact.type === 'task.completed') {
+      if (fact.type === 'task.finished') {
         const completedTask = (fact.payload as { task: Task }).task
         const thread =
           completedTask.threadId === null ? undefined : view.threads.get(completedTask.threadId)
-        const overrides = batchTaskStatuses(facts)
-        overrides.set(completedTask.id, 'completed')
+        const overrides = batchTaskPhases(facts)
         facts.push(
           ...closeIfAllDone(
             view,
@@ -618,17 +634,12 @@ export function receiveRun(
       }
     }
     // M8：任务完成 → 父任务 rollup（全部子任务结束才触发；批内去重 + 沿链级联）
-    const settledOverrides = new Map<Id, 'completed'>()
-    for (const fact of facts) {
-      if (fact.type === 'task.completed') {
-        settledOverrides.set((fact.payload as { task: Task }).task.id, 'completed')
-      }
-    }
+    const settledOverrides = batchTaskPhases(facts)
     const rolledUp = new Set<Id>()
     for (let round = 0; round < 8; round += 1) {
       let changed = false
       for (const fact of [...facts]) {
-        if (fact.type !== 'task.completed') continue
+        if (fact.type !== 'task.finished') continue
         const completedTask = (fact.payload as { task: Task }).task
         if (completedTask.parentTaskId === null || rolledUp.has(completedTask.parentTaskId))
           continue
@@ -644,8 +655,12 @@ export function receiveRun(
         rolledUp.add(completedTask.parentTaskId)
         facts.push(...extra)
         for (const item of extra) {
-          if (item.type === 'task.completed') {
-            settledOverrides.set((item.payload as { task: Task }).task.id, 'completed')
+          if (item.type === 'task.finished') {
+            const { task, outcome } = item.payload as {
+              task: Task
+              outcome: 'done' | 'cancelled'
+            }
+            settledOverrides.set(task.id, outcome === 'done' ? 'finished' : 'cancelled')
           }
         }
         changed = true

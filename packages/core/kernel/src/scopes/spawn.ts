@@ -11,12 +11,14 @@
  *
  * v1 不分批：`batch` 只入账 `batchNo`，rollup 按「全部子任务」判定。
  */
-import type { Task, TaskStatus } from '@workbench/protocol/entities'
+import type { Task, TaskPhase } from '@workbench/protocol/entities'
+import { isTaskOver, taskPhaseOf } from '@workbench/protocol/entities'
 import type { SpawnTask } from '@workbench/protocol/inputs'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { Actor, Environment, FactDraft, Id, Iso, View } from '../core/types'
 import { entryRunFacts } from './task-effects'
 import { taskAttachedFacts, withTask } from './threads'
+import { stagesOfWorkflow } from './workflow/stage-handoffs'
 
 /** 派生子任务深度上限（沿 parentTaskId 链回溯）。 */
 export const SPAWN_MAX_DEPTH = 8
@@ -108,7 +110,8 @@ export function spawnFacts(
   actor: Actor,
 ): FactDraft[] {
   const parent = run.taskId === null ? undefined : view.tasks.get(run.taskId)
-  if (parent === undefined || parent.status !== 'active') return []
+  // M53：父任务「结束没有」看阶段语义（完成 / 取消），与归档无关
+  if (parent === undefined || isTaskOver(phaseOf(view, parent))) return []
   if (!canSpawn(view, parent)) return []
   if (spawnDepth(view, parent) >= (env.limits.maxSpawnDepth ?? SPAWN_MAX_DEPTH)) return []
 
@@ -133,7 +136,7 @@ export function spawnFacts(
       // M10：子任务继承父任务的项目（Agent 不能指定项目）
       projectId: parent.projectId,
       currentStageId: stageId,
-      status: 'active',
+      archivedAt: null,
       origin: 'spawn',
       ruleId: null,
       externalRef: null,
@@ -160,6 +163,11 @@ export function spawnFacts(
   return facts
 }
 
+/** 任务的阶段语义（M53）：结束与否只看阶段类别。 */
+function phaseOf(view: View, task: Task): TaskPhase {
+  return taskPhaseOf(task.currentStageId === null ? undefined : view.stages.get(task.currentStageId))
+}
+
 /** 父阶段配置的 rollup 动作；未配置时按父阶段入口模式推断（agent → wake，否则 notify）。 */
 export function resolveRollupAction(view: View, parent: Task): 'wake' | 'notify' | 'complete' {
   const stage = parent.currentStageId === null ? undefined : view.stages.get(parent.currentStageId)
@@ -180,9 +188,9 @@ export function childrenSettledPrompt(children: Task[]): string {
 /**
  * 「父任务的子任务全部结束」判定 + 动作事实。
  *
- * - 父任务必须 active；没有任何子任务时零事实；
- * - 子任务状态以 `overrides` 为准（本批刚产出的 `task.completed` / `task.removed`
- *   还没进视图，用覆盖表把它们视为已完成）；
+ * - 父任务必须还没结束（阶段语义）；没有任何子任务时零事实；
+ * - 子任务阶段语义以 `overrides` 为准（本批刚产出的 `task.finished` / `task.removed`
+ *   还没进视图，用覆盖表把它们视为已结束）；
  * - 幂等：父任务已有活跃 run，或已有 open 的 `children-settled` 卡 → 不再触发；
  * - `overrides` 里把已删除的子任务视为完成 —— 删除即放弃，不阻塞 rollup。
  */
@@ -192,10 +200,10 @@ export function childrenSettledFacts(
   now: Iso,
   env: Environment,
   actor: Actor,
-  overrides?: ReadonlyMap<Id, TaskStatus>,
+  overrides?: ReadonlyMap<Id, TaskPhase | 'removed'>,
 ): FactDraft[] {
   const parent = view.tasks.get(parentTaskId)
-  if (parent === undefined || parent.status !== 'active') return []
+  if (parent === undefined || isTaskOver(phaseOf(view, parent))) return []
   const children = childrenOf(view, parentTaskId)
   if (children.length === 0) return []
   // 交接任务（M7）也挂 parentTaskId，但「交接不回写来源任务」是既有语义：
@@ -206,8 +214,10 @@ export function childrenSettledFacts(
     return []
   }
   for (const child of children) {
-    const status = overrides?.get(child.id) ?? child.status
-    if (status === 'active') return []
+    const override = overrides?.get(child.id)
+    if (override === 'removed') continue
+    const phase = override ?? phaseOf(view, child)
+    if (!isTaskOver(phase)) return []
   }
   if (view.activeTaskIds.has(parentTaskId)) return []
   for (const card of view.cards.values()) {
@@ -254,12 +264,37 @@ export function childrenSettledFacts(
       ),
     )
   } else if (action === 'complete') {
+    // M53：父任务「完成」= 落到本工作流的「已完成」阶段（仍在看板，不归档）
+    const doneStage = stagesOfWorkflow(view, parent.workflowId).find(
+      (item) => item.builtin === 'done',
+    )
+    const moved: Task =
+      doneStage === undefined
+        ? parent
+        : { ...parent, currentStageId: doneStage.id, updatedAt: now }
+    if (doneStage !== undefined) {
+      facts.push({
+        type: 'task.moved',
+        actor,
+        at: now,
+        payload: { task: moved, from: parent.currentStageId, to: doneStage.id },
+      })
+    }
     facts.push({
-      type: 'task.completed',
+      type: 'task.finished',
       actor,
       at: now,
-      payload: { task: { ...parent, status: 'completed', updatedAt: now } },
+      payload: { task: moved, outcome: 'done' },
     })
+    // 脏数据（工作流没有内置「已完成」）兜底：本单结束并归档，别让父任务永远挂在半空
+    if (doneStage === undefined) {
+      facts.push({
+        type: 'task.archived',
+        actor,
+        at: now,
+        payload: { task: { ...moved, archivedAt: now } },
+      })
+    }
   } else {
     // notify：卡片必须挂在 run 上（DDL 非空外键），这里用任务评论承载通知，
     // 在任务详情页可见，且不改任务状态。

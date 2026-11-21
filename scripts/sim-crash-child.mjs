@@ -72,7 +72,7 @@ for (;;) {
   counter += 1
   const workflowId = idOf('workflows')
   const taskId = db
-    .prepare("SELECT id FROM tasks WHERE status = 'active' ORDER BY id LIMIT 1")
+    .prepare('SELECT id FROM tasks WHERE archived_at IS NULL ORDER BY id LIMIT 1')
     .get()?.id
   if (workflowId !== undefined && rng() < 0.5) {
     send({

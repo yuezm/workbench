@@ -25,7 +25,7 @@ function insertTask(
   const nn = <T>(value: T | null | undefined): T | null => value ?? null
   db.prepare(
     `INSERT INTO tasks (id, title, description, workflow_id, project_id, current_stage_id,
-       status, origin, rule_id, external_ref, labels_json, thread_id, parent_task_id,
+       archived_at, origin, rule_id, external_ref, labels_json, thread_id, parent_task_id,
        spawned_by_run_id, batch_no, spawn_key, handoff_from_task_id, handoff_from_stage_id,
        handoff_from_run_id, gate_fails, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -36,7 +36,7 @@ function insertTask(
     task.workflowId,
     nn(task.projectId),
     nn(task.currentStageId),
-    task.status,
+    nn(task.archivedAt),
     task.origin,
     nn(task.ruleId),
     nn(task.externalRef),

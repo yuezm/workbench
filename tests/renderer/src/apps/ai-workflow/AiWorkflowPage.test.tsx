@@ -114,7 +114,7 @@ const task: Task = {
   workflowId: 'w1',
   projectId: 'p1',
   currentStageId: 's0',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -315,7 +315,7 @@ describe('AiWorkflowPage', () => {
     // 拖到「归档」区：发 task.complete 命令
     expect(await screen.findByText('新任务')).toBeInTheDocument()
     dragTo('任务：新任务', '归档区')
-    await waitFor(() => expectDispatched({ type: 'task.complete', id: 't2' }))
+    await waitFor(() => expectDispatched({ type: 'task.archive', id: 't2' }))
   })
 
   it('配置项都收在设置里，左侧二级栏目切换，互不混排', async () => {

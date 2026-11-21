@@ -89,10 +89,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // 按任务取活跃 run 逐条产取消请求（与 chat.cancel 同口径，不动任务行）
       // A2：人工停止要撤销该任务的授权
       return ['tasks', 'runs', 'mandates']
-    case 'task.complete':
-      // 完成后若线程内无 active 任务 → thread.closed{all-tasks-done}；交接产出的新任务
-      // 首轮提示词要带上下文（新任务没有评论，按切片装载）
-      // M8：父任务 rollup 要读父任务是否有活跃 run / open 的 children-settled 卡
+    case 'task.archive':
+      // M53：归档只写 archivedAt，但要带上任务行与执行中判定（执行中拒绝归档）
+      // 交接产出的新任务首轮提示词要带上下文（新任务没有评论，按切片装载）
       return [
         'tasks',
         'workflows',

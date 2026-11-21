@@ -337,11 +337,11 @@ describe('renderer/shell/kernelStore', () => {
     const store = createKernelStore(fake.transport)
     await started(store)
 
-    await store.dispatch({ type: 'task.complete', id: 't-1' } as Command)
+    await store.dispatch({ type: 'task.archive', id: 't-1' } as Command)
     const first = fake.dispatchSpy.mock.calls[0][0] as Command
     expect(first.commandId).toBeTruthy()
 
-    await store.dispatch({ type: 'task.complete', id: 't-1', commandId: 'fixed' } as Command)
+    await store.dispatch({ type: 'task.archive', id: 't-1', commandId: 'fixed' } as Command)
     const second = fake.dispatchSpy.mock.calls[1][0] as Command
     expect(second.commandId).toBe('fixed')
   })
@@ -599,7 +599,7 @@ describe('renderer/shell/kernelStore：边界路径', () => {
     await store.start()
     vi.stubGlobal('crypto', {})
     try {
-      await store.dispatch({ type: 'task.complete', id: 't-1' } as Command)
+      await store.dispatch({ type: 'task.archive', id: 't-1' } as Command)
       const command = fake.dispatchSpy.mock.calls[0][0] as Command
       expect(command.commandId).toMatch(/^cmd-/)
     } finally {

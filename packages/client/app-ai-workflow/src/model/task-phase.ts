@@ -28,7 +28,4 @@ export function phaseOfTask(task: Task, workflows: readonly WorkflowWithStages[]
   return taskPhaseOf(stageOfTask(task, workflows))
 }
 
-/** 任务是否已经结束（完成或取消）——「还能不能派活 / 重排 / 挂子任务」都看它。 */
-export function isTaskOver(phase: TaskPhase): boolean {
-  return phase === 'finished' || phase === 'cancelled'
-}
+export { isTaskOver } from '@workbench/protocol/entities'

@@ -145,8 +145,9 @@ const list = (
 ): Array<Record<string, string | number | null>> =>
   rows<Record<string, string | number | null>>(world.db, sql, ...params)
 
+/** 看板上的任务（M53：`archived_at IS NULL` = 仍在追踪；归档不是完成） */
 const activeTasks = (world: SimWorld): string[] =>
-  list(world, "SELECT id FROM tasks WHERE status = 'active' ORDER BY id").map((row) =>
+  list(world, 'SELECT id FROM tasks WHERE archived_at IS NULL ORDER BY id').map((row) =>
     String(row['id']),
   )
 
@@ -240,7 +241,7 @@ export function step(world: SimWorld): boolean {
   if (n <= 27) {
     const taskId = world.rng.pick(tasks)
     if (taskId === null) return false
-    dispatch(world, { type: 'task.complete', commandId: commandId(), id: taskId })
+    dispatch(world, { type: 'task.archive', commandId: commandId(), id: taskId })
     return true
   }
 

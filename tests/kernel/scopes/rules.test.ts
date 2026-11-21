@@ -111,7 +111,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -193,10 +193,12 @@ const view = (seed: Seed = {}): View => ({
   seq: 10,
   workflows: new Map([workflow()].map((row) => [row.id, row])),
   stages: new Map(
-    [stage(), stage({ id: 'st-2', position: 1, name: '完成', entryMode: 'none' })].map((row) => [
-      row.id,
-      row,
-    ]),
+    [
+      stage(),
+      stage({ id: 'st-2', position: 1, name: '完成', entryMode: 'none' }),
+      // 内置终态（M53）：任务进到这里才算结束，归档不表达完成
+      stage({ id: 'st-done', position: 2, name: '已完成', entryMode: 'none', builtin: 'done' }),
+    ].map((row) => [row.id, row]),
   ),
   agents: new Map([agent()].map((row) => [row.id, row])),
   runtimes: new Map([runtime()].map((row) => [row.id, row])),
@@ -467,7 +469,7 @@ describe('kernel/rules 建任务', () => {
     expect((created[0]?.payload as { task: Task }).task.workflowId).toBe('wf-1')
   })
 
-  it('onExisting=new-task / 线程里没有 active 任务 / 不同入口键都新建任务', () => {
+  it('onExisting=new-task / 线程里没有未结束任务 / 不同入口键都新建任务', () => {
     const existing = task({
       id: 'task-9',
       origin: 'rule',
@@ -491,9 +493,33 @@ describe('kernel/rules 建任务', () => {
     )
     expect(alwaysNew.filter((fact) => fact.type === 'task.created')).toHaveLength(1)
 
-    const completed = task({
+    // M53：归档只是收纳——任务还在阶段里，照常复用（不新建）
+    const archived = task({
       id: 'task-8',
-      status: 'completed',
+      archivedAt: 'archived-at',
+      origin: 'rule',
+      ruleId: 'rule-1',
+      externalRef: 'issue-1',
+      threadId: 'th-1',
+    })
+    const reused = eventThreadFacts(
+      view({
+        rules: [rule()],
+        tasks: [archived],
+        threads: [thread({ taskIds: ['task-8'], rootTaskIds: ['task-8'] })],
+      }),
+      event,
+      1,
+      NOW,
+      env(),
+    )
+    expect(reused.filter((fact) => fact.type === 'task.created')).toHaveLength(0)
+    expect(reused.filter((fact) => fact.type === 'run.queued')).toHaveLength(1)
+
+    // 真正结束（进入内置「已完成」阶段）→ 没有可复用的任务，新建
+    const finished = task({
+      id: 'task-7',
+      currentStageId: 'st-done',
       origin: 'rule',
       ruleId: 'rule-1',
       externalRef: 'issue-1',
@@ -502,8 +528,8 @@ describe('kernel/rules 建任务', () => {
     const reopened = eventThreadFacts(
       view({
         rules: [rule()],
-        tasks: [completed],
-        threads: [thread({ taskIds: ['task-8'], rootTaskIds: ['task-8'] })],
+        tasks: [finished],
+        threads: [thread({ taskIds: ['task-7'], rootTaskIds: ['task-7'] })],
       }),
       event,
       1,

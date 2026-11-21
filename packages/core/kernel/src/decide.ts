@@ -48,7 +48,7 @@ const HANDLERS = {
   'workflow.remove': workflow.removeWorkflow,
   'task.create': task.createTask,
   'task.move': task.moveTaskCommand,
-  'task.complete': task.completeTaskCommand,
+  'task.archive': task.archiveTaskCommand,
   'task.stop': task.stopTask,
   'task.remove': task.removeTask,
   'task.comment': task.commentTask,

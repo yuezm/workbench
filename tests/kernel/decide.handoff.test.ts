@@ -83,7 +83,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-a',
   projectId: null,
   currentStageId: 'st-a0',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -188,6 +188,7 @@ const stages = (
   stage('st-a0', 'wf-a', 0, { handoffs: [handoff(), handoff({ on: 'manual' })], ...a0 }),
   stage('st-a1', 'wf-a', 1, a1),
   stage('st-a2', 'wf-a', 2, a2),
+  stage('st-a-done', 'wf-a', 3, { builtin: 'done' }),
   stage('st-b0', 'wf-b', 0),
   stage('st-b1', 'wf-b', 1, { entryMode: 'agent', agentId: 'ag-1' }),
 ]
@@ -241,14 +242,16 @@ const stageInput = (over: Partial<StageInput> = {}): StageInput => ({
 })
 
 describe('kernel/decide 派单——直接完成', () => {
-  it('task.complete：先产交接事实（目标工作流建任务），再产 task.completed', () => {
-    const decision = decide(view(), command({ type: 'task.complete', id: 'task-1' }), NOW, env())
+  it('移到「已完成」：先产交接事实（目标工作流建任务），再产 task.moved + task.finished', () => {
+    const decision = decide(view(), command({ type: 'task.move', id: 'task-1', stageId: 'st-a-done' }), NOW, env())
 
     expect(typesOf(decision.facts)).toEqual([
+      'task.moved',
+      'task.comment_added',
       'thread.opened',
       'thread.task_attached',
       'task.created',
-      'task.completed',
+      'task.finished',
     ])
     const thread = payloadsOf<{ thread: ThreadRow }>(decision.facts, 'thread.opened')[0].thread
     const created = payloadsOf<{ task: Task }>(decision.facts, 'task.created')[0].task
@@ -285,7 +288,7 @@ describe('kernel/decide 派单——直接完成', () => {
     }
     const decision = decide(
       view({ tasks: [source], threads: [row] }),
-      command({ type: 'task.complete', id: 'task-1' }),
+      command({ type: 'task.move', id: 'task-1', stageId: 'st-a-done' }),
       NOW,
       env(),
     )
@@ -293,24 +296,26 @@ describe('kernel/decide 派单——直接完成', () => {
     const attached = payloadsOf<{ thread: ThreadRow }>(decision.facts, 'thread.task_attached')[0]
 
     expect(typesOf(decision.facts)).toEqual([
+      'task.moved',
+      'task.comment_added',
       'thread.task_attached',
       'task.created',
-      'task.completed',
+      'task.finished',
     ])
     expect(created.threadId).toBe('th-1')
     expect(attached.thread.taskIds).toEqual(['task-1', created.id])
     expect(attached.thread.rootTaskIds).toEqual(['task-1'])
   })
 
-  it('当前阶段没配派单 → 只有 task.completed', () => {
+  it('当前阶段没配派单 → 只有 task.moved + task.finished', () => {
     const decision = decide(
       view({ stages: stages({ handoffs: [] }) }),
-      command({ type: 'task.complete', id: 'task-1' }),
+      command({ type: 'task.move', id: 'task-1', stageId: 'st-a-done' }),
       NOW,
       env(),
     )
 
-    expect(typesOf(decision.facts)).toEqual(['task.completed'])
+    expect(typesOf(decision.facts)).toEqual(['task.moved', 'task.comment_added', 'task.finished'])
   })
 
   it('同一轮 run 已派过 → 不重复建（人工完成没有 run，再次完成就是新的一张）', () => {
@@ -326,16 +331,18 @@ describe('kernel/decide 派单——直接完成', () => {
     // 人工完成不带 run：不会因为「同一任务同一阶段派过」就吞掉——这是第二次发起
     const decision = decide(
       view({ tasks: [task(), handed] }),
-      command({ type: 'task.complete', id: 'task-1' }),
+      command({ type: 'task.move', id: 'task-1', stageId: 'st-a-done' }),
       NOW,
       env(),
     )
 
     expect(typesOf(decision.facts)).toEqual([
+      'task.moved',
+      'task.comment_added',
       'thread.opened',
       'thread.task_attached',
       'task.created',
-      'task.completed',
+      'task.finished',
     ])
   })
 
@@ -346,7 +353,7 @@ describe('kernel/decide 派单——直接完成', () => {
           handoffs: [handoff({ stageId: 'st-b1' }), handoff({ on: 'manual', stageId: 'st-b1' })],
         }),
       }),
-      command({ type: 'task.complete', id: 'task-1' }),
+      command({ type: 'task.move', id: 'task-1', stageId: 'st-a-done' }),
       NOW,
       env(),
     )
@@ -450,7 +457,8 @@ describe('kernel/decide 派单——运行结算', () => {
       'thread.opened',
       'thread.task_attached',
       'task.created',
-      'task.completed',
+      'task.moved',
+      'task.finished',
     ])
   })
 

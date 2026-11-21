@@ -196,7 +196,7 @@ describe('rebuild：增量应用与重建等价', () => {
         workflowId: 'wf-a',
         projectId: 'pj-1',
         currentStageId: 'st-a2',
-        status: 'active',
+        archivedAt: null,
         origin: 'manual',
         ruleId: null,
         externalRef: null,

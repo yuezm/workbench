@@ -31,7 +31,7 @@ import type { Actor, Decision, Environment, FactDraft, Id, Iso, View } from '../
 import { entryRunFacts, type RunTrigger } from './task-effects'
 import { grantFacts } from './mandate'
 import {
-  activeTasksOfThread,
+  unfinishedTasksOfThread,
   eventAttachedFacts,
   findThreadByKey,
   openThreadRow,
@@ -166,7 +166,7 @@ function buildTask(
     // M10：规则声明的项目（老规则没有 → null，界面归入「未归属」）
     projectId: rule.to.projectId ?? null,
     currentStageId: target.stageId,
-    status: 'active',
+    archivedAt: null,
     origin: 'rule',
     ruleId: rule.id,
     externalRef,
@@ -320,7 +320,7 @@ export function eventThreadFacts(
     const policy = rule.to.thread?.onExisting ?? 'reuse-task'
     const reusable =
       parentTask === undefined && policy === 'reuse-task'
-        ? activeTasksOfThread(view, thread).filter(
+        ? unfinishedTasksOfThread(view, thread).filter(
             (task) =>
               !createdTasks.has(task.id) &&
               task.origin !== 'handoff' &&

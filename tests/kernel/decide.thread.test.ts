@@ -110,7 +110,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -366,7 +366,11 @@ describe('decide 线程命令补充', () => {
 
     const doneThread = decide(
       view({
-        tasks: [task(), task({ id: 'task-2', title: '写实现', status: 'completed' })],
+        stages: [
+          stage({ id: 'st-1', position: 0 }),
+          stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }),
+        ],
+        tasks: [task(), task({ id: 'task-2', title: '写实现', currentStageId: 'st-done' })],
         threads: [thread({ taskIds: ['task-1', 'task-2'], rootTaskIds: ['task-1', 'task-2'] })],
       }),
       command({ type: 'task.remove', id: 'task-1' }),
@@ -497,28 +501,39 @@ describe('decide 删除线程', () => {
 })
 
 describe('decide 线程生命周期', () => {
-  it('task.complete：线程内任务全部完成 → 归档', () => {
+  it('移到「已完成」：线程内任务全部完成 → 归档（M53：完成不再等于归档）', () => {
     const decision = decide(
-      view({ tasks: [task()], threads: [thread()] }),
-      command({ type: 'task.complete', id: 'task-1' }),
+      view({
+        stages: [
+          stage({ id: 'st-1', position: 0 }),
+          stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }),
+        ],
+        tasks: [task()],
+        threads: [thread()],
+      }),
+      command({ type: 'task.move', id: 'task-1', stageId: 'st-done' }),
       NOW,
       env(),
     )
-    expect(factTypes(decision)).toEqual(['task.completed', 'thread.closed'])
+    expect(factTypes(decision)).toEqual(['task.moved', 'task.finished', 'thread.closed'])
     expect(payloadOf<{ reason: string }>(decision, 'thread.closed').reason).toBe('all-tasks-done')
   })
 
-  it('task.complete：线程里还有别的 active 任务 → 不归档', () => {
+  it('移到「已完成」：线程里还有别的未结束任务 → 不归档', () => {
     const decision = decide(
       view({
+        stages: [
+          stage({ id: 'st-1', position: 0 }),
+          stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }),
+        ],
         tasks: [task(), task({ id: 'task-2' })],
         threads: [thread({ taskIds: ['task-1', 'task-2'], rootTaskIds: ['task-1', 'task-2'] })],
       }),
-      command({ type: 'task.complete', id: 'task-1' }),
+      command({ type: 'task.move', id: 'task-1', stageId: 'st-done' }),
       NOW,
       env(),
     )
-    expect(factTypes(decision)).toEqual(['task.completed'])
+    expect(factTypes(decision)).toEqual(['task.moved', 'task.finished'])
   })
 
   it('clock.tick：14 天无活动的 open 线程归档', () => {

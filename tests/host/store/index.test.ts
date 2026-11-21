@@ -487,8 +487,8 @@ describe('dispatch：视图装载切片', () => {
       SAMPLE_AT,
     )
     db.prepare(
-      'INSERT INTO tasks (id, title, workflow_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run('tk-1', '任务', 'wf-1', 'active', SAMPLE_AT, SAMPLE_AT)
+      'INSERT INTO tasks (id, title, workflow_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run('tk-1', '任务', 'wf-1', null, SAMPLE_AT, SAMPLE_AT)
     db.prepare('INSERT INTO runs (id, task_id, status, created_at) VALUES (?, ?, ?, ?)').run(
       'run-1',
       'tk-1',

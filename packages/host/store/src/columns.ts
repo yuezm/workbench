@@ -262,7 +262,7 @@ export const TABLE_SHAPES: Readonly<Record<ProjectionTable, TableShape>> = {
     col2('description', 'description'),
     col2('workflowId', 'workflow_id'),
     col2('currentStageId', 'current_stage_id'),
-    col2('status', 'status'),
+    col2('archivedAt', 'archived_at'),
     col2('origin', 'origin'),
     col2('ruleId', 'rule_id'),
     col2('externalRef', 'external_ref'),

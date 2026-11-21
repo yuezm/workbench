@@ -444,7 +444,7 @@ describe('cancel：执行中 run 的取消时序', () => {
     expect(runById(seeded.runId)).toMatchObject({ status: 'cancelled', error_code: 'cancelled' })
     expect(harness.timer.pending()).toEqual([])
     expect(harness.killPid).not.toHaveBeenCalled()
-    expect(taskById(seeded.taskId)?.status).toBe('active')
+    expect(taskById(seeded.taskId)?.archivedAt).toBeNull()
     expect(taskById(seeded.taskId)?.currentStageId).toBe(seeded.run.stage_id)
   })
 })

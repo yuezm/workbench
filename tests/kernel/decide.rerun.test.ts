@@ -100,7 +100,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   workflowId: 'wf-1',
   projectId: null,
   currentStageId: 'st-1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -263,9 +263,14 @@ describe('kernel/decide task.rerun', () => {
   })
 
   it('已完成的任务 → conflict；执行中 → conflict（先停止再重排）', () => {
-    const completed = rerun(view({ tasks: [task({ status: 'completed' })] }))
+    const completed = rerun(
+      view({
+        stages: [stage(), stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null })],
+        tasks: [task({ currentStageId: 'st-done' })],
+      }),
+    )
     expect(completed.reject?.code).toBe('conflict')
-    expect(completed.reject?.message).toContain('已完成')
+    expect(completed.reject?.message).toContain('已结束')
     expect(completed.facts).toEqual([])
 
     const executing = rerun(view({ active: ['task-1'] }))
@@ -399,7 +404,12 @@ describe('kernel/decide task.reask', () => {
   it('有活跃 run / 任务不是进行中：reject', () => {
     expect(reask(gateView({ active: ['task-1'] })).reject?.code).toBe('conflict')
     expect(
-      reask(view({ stages: [gateStage()], tasks: [task({ status: 'completed' })] })).reject?.code,
+      reask(
+        view({
+          stages: [gateStage(), stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null })],
+          tasks: [task({ currentStageId: 'st-done' })],
+        }),
+      ).reject?.code,
     ).toBe('conflict')
   })
 })

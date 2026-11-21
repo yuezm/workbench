@@ -5,7 +5,7 @@
  * 于是「智能体说了什么」会被弹，「任务跑完了 / 跑挂了」反而没有通知。这里补上后者，
  * 口径对齐 SPEC-ai-workflow「通知分层」的**查看级**：
  *
- * - `task.completed`（智能体 / 宿主推进到完成）→ 一条「任务完成：<标题>」；
+ * - `task.finished`（智能体 / 宿主推进到终态阶段，M53）→ 一条「任务完成：<标题>」；
  * - `run.failed`（终态失败：重试已用尽 / 超时 / 执行器丢失）→ 一条「任务运行失败」，
  *   一批里多个任务同时失败时合成一条并带数量（弹三次不如说「3 个」）；
  * - **人在 UI 里自己点的完成不算**（`fact.actor.kind === 'owner'`）：你刚做完的事不必再提醒；
@@ -58,7 +58,7 @@ export function noticesFromFacts(facts: readonly Fact[]): NoticeRequest[] {
   const failedTasks = new Set<string>()
 
   for (const fact of facts) {
-    if (fact.type === 'task.completed') {
+    if (fact.type === 'task.finished') {
       // 人自己点的完成不打扰：只有 host / agent 推进的完成才是「发生了什么」
       if (fact.actor.kind === 'owner') continue
       const task = (fact.payload as { task: Task }).task

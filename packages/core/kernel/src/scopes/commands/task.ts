@@ -2,6 +2,7 @@
  * 任务命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
 import type { Task, WorkflowWithStages } from '@workbench/protocol/entities'
+import { isTaskOver, taskPhaseOf } from '@workbench/protocol/entities'
 import type { Input } from '@workbench/protocol/inputs'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../../core/types'
@@ -17,12 +18,12 @@ import {
   removedIfNoTasksLeft,
   stageRoundCount,
   taskAttachedFacts,
-  threadOfTask,
   threadWithBatchTasks,
-  batchTaskStatuses,
+  batchTaskPhases,
+  threadOfTask,
   withTask,
 } from '../threads'
-import { completeTask, moveTask, moveTaskToStage } from '../workflow/stage-machine'
+import { archiveTask, moveTask, moveTaskToStage, terminalOutcomeOf } from '../workflow/stage-machine'
 import {
   done,
   hostDraft,
@@ -59,8 +60,11 @@ export function createTask(
     if (parent.workflowId !== workflow.id) {
       return reject('invalid_input', '父任务不属于该工作流: ' + parentId)
     }
-    if (parent.status !== 'active') {
-      return reject('conflict', '父任务已完成，不能挂子任务: ' + parentId)
+    // M53：父任务「结束没有」看阶段语义（完成 / 取消），与归档无关
+    const parentStage =
+      parent.currentStageId === null ? undefined : view.stages.get(parent.currentStageId)
+    if (isTaskOver(taskPhaseOf(parentStage))) {
+      return reject('conflict', '父任务已结束，不能挂子任务: ' + parentId)
     }
   }
   // M11：项目是聊天与任务共用的顶层上下文；省 / 空 = 默认目录（`projectId` 落 null），
@@ -98,7 +102,7 @@ export function createTask(
     workflowId: workflow.id,
     projectId,
     currentStageId: requested ?? parent?.currentStageId ?? stages[0]?.id ?? null,
-    status: 'active',
+    archivedAt: null,
     origin: 'manual',
     ruleId: null,
     externalRef: null,
@@ -192,67 +196,59 @@ export function moveTaskCommand(
       runId: null,
     }),
   )
+  // M53：落到终态阶段 = 完成（与自动流转同一套后果：线程归档 + 父任务 rollup）
+  const outcome = terminalOutcomeOf(target)
+  if (outcome !== null) {
+    facts.push(ownerDraft('task.finished', { task: moved, outcome }, now))
+    // M50：同一批里可能刚派出一张落回本话题的新卡——它还没进视图，归档判定要把它算作未结束
+    const settled = batchTaskPhases(facts)
+    settled.set(task.id, outcome === 'cancelled' ? 'cancelled' : 'finished')
+    facts.push(
+      ...closeIfAllDone(
+        view,
+        threadWithBatchTasks(threadOfTask(view, task), facts),
+        now,
+        OWNER,
+        settled,
+      ),
+    )
+    if (task.parentTaskId !== null) {
+      facts.push(...childrenSettledFacts(view, task.parentTaskId, now, env, OWNER, settled))
+    }
+  }
   return done(facts)
 }
 
-export function completeTaskCommand(
+/**
+ * 归档 / 取消归档（M53，取代 `task.complete`）。
+ *
+ * 归档只表达「这条我不想再跟了」：只写 `archivedAt`、零业务后果、可逆。完成不在这里——
+ * 完成由任务进入内置「已完成 / 已取消」阶段表达（`task.move`）。
+ * 执行中的任务不能归档（先 `task.stop`）；已是目标状态时不产事实（幂等）。
+ */
+export function archiveTaskCommand(
   view: View,
-  input: Extract<Input, { type: 'task.complete' }>,
+  input: Extract<Input, { type: 'task.archive' }>,
   now: Iso,
-  env: Environment,
 ): Decision {
   const task = view.tasks.get(input.id)
   if (!task) return reject('not_found', '任务不存在: ' + input.id)
-  const workflow = view.workflows.get(task.workflowId)
-  if (!workflow) return reject('not_found', '工作流不存在: ' + task.workflowId)
-  const fromStage = stagesOf(view, workflow.id).find((stage) => stage.id === task.currentStageId)
-  if (!fromStage) return reject('conflict', '任务当前阶段无效')
-  if (view.activeTaskIds.has(task.id)) return reject('conflict', '执行中的阶段不能完成')
-  const completed: Task = { ...completeTask(task), updatedAt: now }
-  // M29：完成 = 离开当前阶段且视为向前，派单按 `manual` 触发
-  const handoffFacts = handoffOnExit(view, task, fromStage, 'manual', now, env, OWNER, {
-    forward: true,
-    runId: null,
-  })
-  const facts: FactDraft[] = [
-    ...handoffFacts,
-    ownerDraft('task.completed', { task: completed }, now),
-  ]
-  // M6.5：线程内任务全部完成 → 归档线程。
-  // M50：派单卡可能与本任务同批进同一条话题——归档判定要看到这批新卡，否则话题会在
-  // 「刚把自己的下一张卡生出来」的瞬间被归档（审查 run 就落到一条已归档话题里）。
-  const statuses = batchTaskStatuses(handoffFacts)
-  statuses.set(task.id, 'completed')
-  facts.push(
-    ...closeIfAllDone(
-      view,
-      threadWithBatchTasks(threadOfTask(view, task), handoffFacts),
-      now,
-      OWNER,
-      statuses,
-    ),
-  )
-  // M8：子任务完成 → 父任务 rollup（全部子任务结束才触发）
-  if (task.parentTaskId !== null) {
-    facts.push(
-      ...childrenSettledFacts(
-        view,
-        task.parentTaskId,
-        now,
-        env,
-        OWNER,
-        new Map([[task.id, 'completed']]),
-      ),
-    )
+  const archived = input.archived ?? true
+  if (archived && view.activeTaskIds.has(task.id)) {
+    return reject('conflict', '执行中的阶段不能归档')
   }
-  return done(facts)
+  if (archived === (task.archivedAt !== null)) return done([])
+  const next: Task = archived
+    ? { ...archiveTask(task, now), updatedAt: now }
+    : { ...task, archivedAt: null, updatedAt: now }
+  return done([ownerDraft('task.archived', { task: next }, now)])
 }
 
 /**
  * 停止与智能体的当前交互（`task.stop`）：把该任务的活跃 run 逐条置为「请求取消」。
  *
  * 与 `chat.cancel` 同一收尾链路——只产 `run.cancel_requested`，终态由宿主按取消时序落
- * `run.cancelled`；任务本身不改状态（想收尾再走 `task.complete`）。
+ * `run.cancelled`；任务本身不动位置（想收尾再走 `task.move` 到「已完成」或 `task.archive` 收纳）。
  * 幂等：已请求过的跳过；没有活跃 run 时零事实（重复点不会报错）。
  */
 export function stopTask(
@@ -298,7 +294,10 @@ export function rerunTask(
 ): Decision {
   const task = view.tasks.get(input.id)
   if (!task) return reject('not_found', '任务不存在: ' + input.id)
-  if (task.status !== 'active') return reject('conflict', '已完成的任务不能重新执行')
+  const phase = taskPhaseOf(
+    task.currentStageId === null ? undefined : view.stages.get(task.currentStageId),
+  )
+  if (isTaskOver(phase)) return reject('conflict', '任务已结束，不能重新执行')
   if (view.activeTaskIds.has(task.id)) {
     return reject('conflict', '当前阶段正在执行，先停止执行再重排')
   }
@@ -347,7 +346,13 @@ export function reaskGate(
 ): Decision {
   const task = view.tasks.get(input.id)
   if (!task) return reject('not_found', '任务不存在: ' + input.id)
-  if (task.status !== 'active') return reject('conflict', '已完成的任务不需要补回执')
+  if (
+    isTaskOver(
+      taskPhaseOf(task.currentStageId === null ? undefined : view.stages.get(task.currentStageId)),
+    )
+  ) {
+    return reject('conflict', '任务已结束，不需要补回执')
+  }
   if (view.activeTaskIds.has(task.id))
     return reject('conflict', '当前阶段正在执行，等这一轮结束再补')
   const stage = task.currentStageId === null ? undefined : view.stages.get(task.currentStageId)
@@ -409,7 +414,7 @@ export function removeTask(
   facts.push(
     ...(emptied.length > 0
       ? emptied
-      : closeIfAllDone(view, thread, now, OWNER, new Map([[task.id, 'completed']]))),
+      : closeIfAllDone(view, thread, now, OWNER, new Map([[task.id, 'finished']]))),
   )
   // M8：删掉子任务 → 父任务 rollup（删除视为放弃，不阻塞）
   if (task.parentTaskId !== null) {
@@ -420,7 +425,7 @@ export function removeTask(
         now,
         env,
         OWNER,
-        new Map([[task.id, 'completed']]),
+        new Map([[task.id, 'finished']]),
       ),
     )
   }

@@ -97,7 +97,8 @@ export function entryRunFacts(
     review?: ReviewReport
   },
 ): FactDraft<'run.queued'>[] {
-  if (task.status !== 'active' || task.currentStageId === null) return []
+  // M53：归档不拦业务——只要还落在会派活儿的阶段上就排一轮
+  if (task.currentStageId === null) return []
   const stage = view.stages.get(task.currentStageId)
   if (!stage) return []
   const target = entryTargetOf(view, stage)

@@ -45,7 +45,7 @@ const task: Task = {
   workflowId: 'w',
   projectId: 'p1',
   currentStageId: 's1',
-  status: 'active',
+  archivedAt: null,
   origin: 'manual',
   ruleId: null,
   externalRef: null,
@@ -64,7 +64,7 @@ const doneTask: Task = {
   id: 't0',
   title: '已完成的活',
   currentStageId: 's1',
-  status: 'completed',
+  archivedAt: 'archived-at',
 }
 
 function setup(
@@ -132,7 +132,7 @@ describe('KanbanBoard', () => {
       title: '别家的任务',
       workflowId: 'w-other',
       currentStageId: 's1',
-      status: 'completed',
+      archivedAt: 'archived-at',
     }
     render(
       <KanbanBoard

@@ -193,7 +193,7 @@ describe('重建等价：≥200 条混合命令', () => {
     const firstTaskId = must(mainTasks[0], '主任务 0').id
     send({ type: 'task.move', id: firstTaskId, stageId: main.stages[2].id })
     send({ type: 'task.move', id: must(mainTasks[3], '主任务 3').id, stageId: main.stages[0].id })
-    send({ type: 'task.complete', id: must(mainTasks[1], '主任务 1').id })
+    send({ type: 'task.archive', id: must(mainTasks[1], '主任务 1').id })
     send({ type: 'task.remove', id: must(mainTasks[2], '主任务 2').id })
     send({
       type: 'workflow.update',
@@ -263,7 +263,7 @@ describe('重建等价：≥200 条混合命令', () => {
         id: must(loopTasks[0], `${name} 任务 1`).id,
         stageId: loopWorkflow.stages[1].id,
       })
-      send({ type: 'task.complete', id: must(loopTasks[1], `${name} 任务 2`).id })
+      send({ type: 'task.archive', id: must(loopTasks[1], `${name} 任务 2`).id })
       send({ type: 'task.remove', id: must(loopTasks[0], `${name} 任务 1`).id })
       send({ type: 'workflow.remove', id: loopWorkflow.id })
     }
@@ -467,7 +467,7 @@ describe('强杀重启：事实已提交、投影落后', () => {
           workflowId: aheadWorkflow.id,
           projectId: null,
           currentStageId: aheadStage.id,
-          status: 'active',
+          archivedAt: null,
           origin: 'manual',
           ruleId: null,
           externalRef: null,
@@ -631,7 +631,7 @@ describe('重建边界：运行/聊天四表、规则两表与线程表纳入白
 })
 
 describe('why 时间线：kernel/timeline', () => {
-  it('按 seq 还原 task 的 created → moved → completed 链', () => {
+  it('按 seq 还原 task 的 created → moved → finished → archived 链（M53）', () => {
     const db = memory()
     const store = createStore({ db, kernel: realKernel })
     store.ensureProjection()
@@ -643,11 +643,15 @@ describe('why 时间线：kernel/timeline', () => {
         name: '流程',
         stages: [
           { name: '待办', entryMode: 'none' },
-          { name: '完成', entryMode: 'none' },
+          { name: '已完成', entryMode: 'none' },
         ],
       },
     })
+    // 收尾阶段按名字认领成内置「已完成」：落进去 = 完成（M53，与归档无关）
+    store.ensureBuiltinStages()
     const workflow = findWorkflow(store, '流程')
+    const doneStage = workflow.stages.find((stage) => stage.builtin === 'done')
+    expect(doneStage).toBeDefined()
     store.dispatch({
       type: 'task.create',
       commandId: 'tl-task',
@@ -658,16 +662,17 @@ describe('why 时间线：kernel/timeline', () => {
       type: 'task.move',
       commandId: 'tl-move',
       id: task.id,
-      stageId: workflow.stages[1].id,
+      stageId: doneStage!.id,
     })
-    store.dispatch({ type: 'task.complete', commandId: 'tl-complete', id: task.id })
+    store.dispatch({ type: 'task.archive', commandId: 'tl-archive', id: task.id })
 
     const entries = timeline(store.factsSince(0), 'task', task.id)
 
     expect(entries.map((entry) => entry.fact.type)).toEqual([
       'task.created',
       'task.moved',
-      'task.completed',
+      'task.finished',
+      'task.archived',
     ])
     expect(entries.every((entry) => !entry.imported && entry.label === null)).toBe(true)
     const seqs = entries.map((entry) => entry.fact.seq)
@@ -685,8 +690,8 @@ describe('why 时间线：kernel/timeline', () => {
       INSERT INTO workflow_stages (id, workflow_id, name, position, entry_mode, created_at) VALUES
         ('st-1', 'wf-legacy', '待办', 0, 'none', '${IMPORT_AT}'),
         ('st-2', 'wf-legacy', '完成', 1, 'none', '${IMPORT_AT}');
-      INSERT INTO tasks (id, title, workflow_id, current_stage_id, status, created_at, updated_at)
-        VALUES ('tk-1', '旧任务', 'wf-legacy', 'st-1', 'active', '${IMPORT_AT}', '${IMPORT_AT}');
+      INSERT INTO tasks (id, title, workflow_id, current_stage_id, archived_at, created_at, updated_at)
+        VALUES ('tk-1', '旧任务', 'wf-legacy', 'st-1', NULL, '${IMPORT_AT}', '${IMPORT_AT}');
     `)
 
     const imported = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })

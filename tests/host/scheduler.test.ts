@@ -961,9 +961,9 @@ describe('createScheduler：阶段链', () => {
 
     expect(execute).toHaveBeenCalledTimes(2)
     expect(runStatuses(taskId)).toEqual(['succeeded', 'succeeded'])
-    // M18：最后一个用户阶段成功后进入内置「已完成」，任务仍是 active（归档要显式 task.complete）
+    // M53：最后一个用户阶段成功后进入内置「已完成」＝完成，但仍在看板上（归档是另一件事）
     const chained = world.store.query('task.byId', { taskId }) as Task
-    expect(chained.status).toBe('active')
+    expect(chained.archivedAt).toBeNull()
     expect(chained.currentStageId).toBe(doneStageId)
   })
 })

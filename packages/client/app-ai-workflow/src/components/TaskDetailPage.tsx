@@ -21,7 +21,7 @@ import { TaskCommentForm } from './TaskCommentForm'
 import { TaskInfoPanel } from './TaskInfoPanel'
 import { MandateSection } from './MandateSection'
 import { ReviewPanel } from './ReviewPanel'
-import { phaseOfTask } from '../model/task-phase'
+import { isTaskOver, phaseOfTask } from '../model/task-phase'
 import { TASK_PHASE_LABEL, taskPhaseMeta } from '../model/stage-kinds'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -93,7 +93,9 @@ export function TaskDetailPage({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   /** 顶部结束动作（重新执行 / 停止执行 / 完成任务 / 删除任务）的进行中与失败文案 */
-  const [action, setAction] = useState<'rerun' | 'reask' | 'stop' | 'complete' | 'remove' | null>(
+  const [action, setAction] = useState<
+    'rerun' | 'reask' | 'stop' | 'complete' | 'archive' | 'remove' | null
+  >(
     null,
   )
   const [actionError, setActionError] = useState<string | null>(null)
@@ -114,7 +116,7 @@ export function TaskDetailPage({
   /** 勾选「接着做」只在会跑单的阶段（交给智能体 / 执行脚本）有意义（是否真跑仍由内核判定） */
   const canRerun =
     task !== null &&
-    task.status === 'active' &&
+    !isTaskOver(phase) &&
     (stage?.entryMode === 'agent' || stage?.entryMode === 'script')
   /**
    * 重新执行当前阶段：失败收口后（关机 / CLI 崩了）能原地再排一轮，不用把卡片拖走再拖回。
@@ -138,7 +140,7 @@ export function TaskDetailPage({
    */
   const canReask =
     task !== null &&
-    task.status === 'active' &&
+    !isTaskOver(phase) &&
     stage?.judge != null &&
     stage.entryMode === 'agent' &&
     !executing &&
@@ -207,12 +209,28 @@ export function TaskDetailPage({
     return result.value?.path ?? ''
   }
 
-  /** 完成任务：终态动作；执行中会被内核拒绝，所以按钮先禁用（title 说明原因）。 */
+  /**
+   * 移到「已完成」（M53）：完成的人工入口，任务仍留在看板。
+   * 没有「已完成」阶段（工作流被改坏）时退到「归档」——完成与收纳是两件事，但至少能收尾。
+   */
   const finishTask = (): void => {
+    const doneStage = workflow?.stages.find((item) => item.builtin === 'done')
+    if (doneStage === undefined) return
     setAction('complete')
     setActionError(null)
     void getKernelStore()
-      .dispatch({ type: 'task.complete', commandId: '', id: taskId })
+      .dispatch({ type: 'task.move', commandId: '', id: taskId, stageId: doneStage.id })
+      .catch((e: unknown) => setActionError(errMsg(e)))
+      .finally(() => setAction(null))
+  }
+
+  /** 归档 / 取消归档：只改 archivedAt，可逆、零业务后果（执行中由内核拒绝）。 */
+  const toggleArchive = (): void => {
+    if (task === null) return
+    setAction('archive')
+    setActionError(null)
+    void getKernelStore()
+      .dispatch({ type: 'task.archive', commandId: '', id: taskId, archived: task.archivedAt === null })
       .catch((e: unknown) => setActionError(errMsg(e)))
       .finally(() => setAction(null))
   }
@@ -281,7 +299,7 @@ export function TaskDetailPage({
                 {action === 'reask' ? '正在补回执…' : '补一次回执'}
               </Button>
             )}
-            {task !== null && task.status === 'active' && executing && (
+            {task !== null && executing && (
               <Button
                 type="button"
                 variant="secondary"
@@ -293,20 +311,40 @@ export function TaskDetailPage({
                 {action === 'stop' ? '正在停止…' : '停止执行'}
               </Button>
             )}
-            {task !== null && task.status === 'active' && (
+            {task !== null && !isTaskOver(phase) && (
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
                 disabled={executing || action !== null}
-                title={executing ? '执行中：先停止执行' : undefined}
+                title={executing ? '执行中：先停止执行' : '移到「已完成」：任务仍在看板上'}
                 onClick={finishTask}
               >
-                {action === 'complete' ? '正在完成…' : '完成任务'}
+                {action === 'complete' ? '正在移动…' : '移到已完成'}
               </Button>
             )}
-            {task !== null && task.status === 'completed' && (
-              <span className="text-xs text-faint-foreground">已完成</span>
+            {task !== null && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={executing || action !== null}
+                title={
+                  task.archivedAt === null
+                    ? '归档：从看板收起来（可撤销，不影响完成与否）'
+                    : '取消归档：放回看板'
+                }
+                onClick={toggleArchive}
+              >
+                {action === 'archive'
+                  ? '正在处理…'
+                  : task.archivedAt === null
+                    ? '归档'
+                    : '取消归档'}
+              </Button>
+            )}
+            {task !== null && task.archivedAt !== null && (
+              <span className="text-xs text-faint-foreground">已归档</span>
             )}
           </div>
         }

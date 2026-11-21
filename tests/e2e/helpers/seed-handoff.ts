@@ -4,7 +4,8 @@
  * 1. 用真实 `openDatabase` + `createStore`（真实 kernel）在临时 userData 里建库；
  * 2. 种两个工作流：源工作流 A（首阶段 `entryMode='none'`，配一条 `manual` 派单到 B）与 B（单阶段）；
  * 3. 在 A 首阶段建一条手工任务（不产 run：none 阶段）；
- * 4. e2e 在真实应用里 `task.complete`，断言 B 出现一条 `origin='handoff'` 的关联工单。
+ * 4. e2e 在真实应用里把源任务 `task.move` 到内置「已完成」（M53：完成 = 进入终态阶段，
+ *    归档是另一件事），断言 B 出现一条 `origin='handoff'` 的关联工单。
  *
  * 断言一律读临时 userData 里的库文件（应用运行中亦可，WAL + busy_timeout）。
  */
@@ -26,6 +27,8 @@ export interface HandoffSeed {
   targetWorkflowId: string
   sourceTaskId: string
   sourceStageId: string
+  /** 源工作流的内置「已完成」：M53 之后「完成」只能靠进入终态阶段表达（`task.move`） */
+  sourceDoneStageId: string
   targetStageId: string
   sourceTitle: string
   /** 源任务所在话题（M50：派单缺省落回这条话题） */
@@ -76,7 +79,8 @@ export async function seedHandoffBase(
             name: '完成',
             entryMode: 'none',
             // M29 起派单按触发条件配置（M7 的 handoffWorkflowId / handoffStageId 已废弃）。
-            // `task.complete` 走 `manual` 触发，`forwardOnly` 缺省 true 即可。
+            // `task.move` 走 `manual` 触发，`forwardOnly` 缺省 true 即可（内置「已完成」在
+            // 自己添加的阶段之后，落到那里算向前）。
             // M50：话题策略缺省 inherit（落回源任务话题），用例可显式要 new。
             handoffs: [
               {
@@ -101,6 +105,8 @@ export async function seedHandoffBase(
       (stage) => stage.builtin == null && stage.name === '完成',
     )
     if (sourceStage === undefined) throw new Error('交接种子缺少源阶段')
+    const sourceDoneStage = sourceView?.stages.find((stage) => stage.builtin === 'done')
+    if (sourceDoneStage === undefined) throw new Error('交接种子缺少内置「已完成」阶段')
 
     // M10：任务必须挂在项目下（交接产物沿用来源任务的项目）。
     const projectFacts = store.dispatch({
@@ -128,6 +134,7 @@ export async function seedHandoffBase(
       targetWorkflowId: targetWorkflow.id,
       sourceTaskId: task.id,
       sourceStageId: sourceStage.id,
+      sourceDoneStageId: sourceDoneStage.id,
       targetStageId: targetStage.id,
       sourceTitle,
       sourceThreadId: task.threadId,
@@ -152,8 +159,10 @@ export interface HandoffState {
   threadSource: string | null
   /** 派单卡所在话题里的任务数（M50：inherit 时话题里应有 2 张卡） */
   threadTaskCount: number
-  /** 源任务状态 */
-  sourceStatus: string | null
+  /** 源任务当前阶段（M53：完成与否看阶段类别，不再有 `status` 列） */
+  sourceStageId: string | null
+  /** 源任务是否被归档（归档只是收纳，与完成无关） */
+  sourceArchived: boolean
   /** `task.created` 事实总数（重复触发不应增加） */
   taskCreatedFacts: number
 }
@@ -181,8 +190,10 @@ export function readHandoffState(dbPath: string, seed: HandoffSeed): HandoffStat
         .prepare('SELECT COUNT(*) AS n FROM tasks WHERE workflow_id = ?')
         .get(seed.targetWorkflowId) as { n: number }
     ).n
-    const source = db.prepare('SELECT status FROM tasks WHERE id = ?').get(seed.sourceTaskId) as
-      { status: string } | undefined
+    const source = db
+      .prepare('SELECT current_stage_id, archived_at FROM tasks WHERE id = ?')
+      .get(seed.sourceTaskId) as
+      { current_stage_id: string | null; archived_at: string | null } | undefined
     const thread = row?.thread_id
       ? (db.prepare('SELECT source, task_ids_json FROM threads WHERE id = ?').get(row.thread_id) as
           { source: string; task_ids_json: string } | undefined)
@@ -204,7 +215,8 @@ export function readHandoffState(dbPath: string, seed: HandoffSeed): HandoffStat
       threadId: row?.thread_id ?? null,
       threadSource: thread?.source ?? null,
       threadTaskCount: threadTaskIds.length,
-      sourceStatus: source?.status ?? null,
+      sourceStageId: source?.current_stage_id ?? null,
+      sourceArchived: (source?.archived_at ?? null) !== null,
       taskCreatedFacts: factCount,
     }
   } finally {

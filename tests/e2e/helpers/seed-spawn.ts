@@ -3,8 +3,8 @@
  *
  * 1. 用真实 `openDatabase` + `createStore`（真实 kernel）在临时 userData 里建库；
  * 2. 建一个两阶段工作流（均为 `none`，不启真 CLI），在首阶段建父任务；
- * 3. e2e 在真实应用里 `task.create` 带 `parentTaskId` 挂子任务，再完成子任务，
- *    断言父任务收到 rollup 通知（`none` 阶段降级为任务评论）。
+ * 3. e2e 在真实应用里 `task.create` 带 `parentTaskId` 挂子任务，再把子任务移到内置「已完成」
+ *    （M53：完成 = 进入终态阶段），断言父任务收到 rollup 通知（`none` 阶段降级为任务评论）。
  */
 import { DatabaseSync } from 'node:sqlite'
 import { openDatabase } from '@workbench/host-store/db'
@@ -22,6 +22,8 @@ export interface SpawnSeed {
   dbPath: string
   workflowId: string
   stageId: string
+  /** 该工作流的内置「已完成」（M53：把子任务移到这里才算完成） */
+  doneStageId: string
   /** M10：项目（子任务必须与父任务同项目） */
   projectId: string
   parentTaskId: string
@@ -58,6 +60,8 @@ export async function seedSpawnBase(dbPath: string): Promise<SpawnSeed> {
     const view = store.query('workflows.all').find((row) => row.id === workflow.id)
     const stage = view?.stages[0]
     if (stage === undefined) throw new Error('派生种子缺少阶段')
+    const doneStage = view?.stages.find((item) => item.builtin === 'done')
+    if (doneStage === undefined) throw new Error('派生种子缺少内置「已完成」阶段')
 
     // M10：任务必须挂在项目下（子任务继承父任务的项目）。
     const projectFacts = store.dispatch({
@@ -84,6 +88,7 @@ export async function seedSpawnBase(dbPath: string): Promise<SpawnSeed> {
       dbPath,
       workflowId: workflow.id,
       stageId: stage.id,
+      doneStageId: doneStage.id,
       projectId: project.id,
       parentTaskId: parent.id,
       parentThreadId: parent.threadId,

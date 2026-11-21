@@ -4,7 +4,7 @@
  * 种子（`helpers/seed-spawn.ts`）建 two-stage 工作流与父任务；之后经桥：
  * 1. `task.create` 带 `parentTaskId` → 子任务继承父线程、`parent_task_id` 指向父；
  * 2. `query('tasks.byParent')` 能取到该子任务；
- * 3. `task.complete` 子任务 → 父任务收到 rollup 通知（`none` 阶段降级为任务评论）。
+ * 3. `task.move` 子任务到内置「已完成」（M53）→ 父任务收到 rollup 通知（`none` 阶段降级为任务评论）。
  *
  * 断言一律读临时 userData 里的库文件，不依赖真 CLI、不动真实 %APPDATA%。
  */
@@ -77,13 +77,18 @@ test('任务派生：人工挂子任务继承父线程，子任务完成后父�
   )
   expect(child).not.toBeNull()
 
-  // 3) 完成子任务 → 父任务 rollup 通知（评论）
+  // 3) 把子任务移到内置「已完成」→ 父任务 rollup 通知（评论）
   await page.evaluate(
-    ({ childId }) => {
+    ({ childId, doneStageId }) => {
       const bridge = (globalThis as unknown as { workbench: WorkbenchApi }).workbench
-      return bridge.dispatch({ type: 'task.archive', commandId: 'e2e-spawn-done', id: childId })
+      return bridge.dispatch({
+        type: 'task.move',
+        commandId: 'e2e-spawn-done',
+        id: childId,
+        stageId: doneStageId,
+      })
     },
-    { childId: child?.id as string },
+    { childId: child?.id as string, doneStageId: seeded.doneStageId },
   )
 
   await expect

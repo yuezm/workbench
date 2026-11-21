@@ -1451,135 +1451,143 @@ export function WorkflowEditor({
                     <p className="text-xs text-faint-foreground">不派单。</p>
                   )}
                   {(stage.handoffs ?? []).map((handoff, hi) => (
-                    <div key={`${handoff.on}-${hi}`} className="flex flex-wrap items-end gap-2">
-                      <Field label="触发" className="w-32">
-                        <Select
-                          value={picked(
-                            handoff.on,
-                            guardChoices.map((choice) => choice.value),
-                          )}
-                          onValueChange={(v) =>
+                    <div
+                      key={`${handoff.on}-${hi}`}
+                      className="flex flex-col gap-2 rounded-md border border-border p-2"
+                    >
+                      {/* 两行放：五个字段挤一行时，两个可伸缩字段各剩几十像素，工作流 / 阶段名字全被截断 */}
+                      <div className="flex flex-wrap items-end gap-2">
+                        <Field label="触发" className="w-32 shrink-0">
+                          <Select
+                            value={picked(
+                              handoff.on,
+                              guardChoices.map((choice) => choice.value),
+                            )}
+                            onValueChange={(v) =>
+                              patchHandoffs(
+                                index,
+                                (stage.handoffs ?? []).map((item, k) =>
+                                  k === hi ? { ...item, on: v as StageHandoffGuard } : item,
+                                ),
+                              )
+                            }
+                          >
+                            <SelectTrigger
+                              aria-label={`阶段${n}派单${hi + 1}触发`}
+                              className="w-full"
+                            >
+                              <SelectValue placeholder="触发" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {guardChoices.map((choice) => (
+                                <SelectItem key={choice.value} value={choice.value}>
+                                  {choice.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <Field label="目标工作流" className="min-w-0 grow basis-52">
+                          <Select
+                            value={picked(handoff.workflowId, handoffWorkflowIds)}
+                            onValueChange={(v) =>
+                              patchHandoffs(
+                                index,
+                                (stage.handoffs ?? []).map((item, k) =>
+                                  k === hi ? { ...item, workflowId: v, stageId: null } : item,
+                                ),
+                              )
+                            }
+                          >
+                            <SelectTrigger
+                              aria-label={`阶段${n}派单${hi + 1}目标工作流`}
+                              className="w-full"
+                            >
+                              <SelectValue placeholder="选择工作流" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {handoffWorkflows.map((item) => (
+                                <SelectItem key={item.id} value={item.id}>
+                                  {item.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      </div>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <Field label="目标阶段" className="min-w-0 grow basis-44">
+                          <Select
+                            value={picked(
+                              handoff.stageId,
+                              stagesOfWorkflow(handoff.workflowId).map((s) => s.id),
+                            )}
+                            onValueChange={(v) =>
+                              patchHandoffs(
+                                index,
+                                (stage.handoffs ?? []).map((item, k) =>
+                                  k === hi ? { ...item, stageId: v === '' ? null : v } : item,
+                                ),
+                              )
+                            }
+                          >
+                            <SelectTrigger
+                              aria-label={`阶段${n}派单${hi + 1}目标阶段`}
+                              className="w-full"
+                            >
+                              <SelectValue placeholder="首阶段" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="">首阶段</SelectItem>
+                              {stagesOfWorkflow(handoff.workflowId).map((item) => (
+                                <SelectItem key={item.id} value={item.id}>
+                                  {item.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <Field label="话题" className="w-36 shrink-0">
+                          <Select
+                            value={handoff.thread ?? 'inherit'}
+                            onValueChange={(v) =>
+                              patchHandoffs(
+                                index,
+                                (stage.handoffs ?? []).map((item, k) =>
+                                  k === hi
+                                    ? { ...item, thread: v as StageHandoffThreadPolicy }
+                                    : item,
+                                ),
+                              )
+                            }
+                          >
+                            <SelectTrigger
+                              aria-label={`阶段${n}派单${hi + 1}话题`}
+                              className="w-full"
+                            >
+                              <SelectValue placeholder="沿用来源话题" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="inherit">沿用来源话题</SelectItem>
+                              <SelectItem value="new">新开话题</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <Button
+                          type="button"
+                          variant="quiet"
+                          size="sm"
+                          aria-label={`阶段${n}删除派单${hi + 1}`}
+                          onClick={() =>
                             patchHandoffs(
                               index,
-                              (stage.handoffs ?? []).map((item, k) =>
-                                k === hi ? { ...item, on: v as StageHandoffGuard } : item,
-                              ),
+                              (stage.handoffs ?? []).filter((_, k) => k !== hi),
                             )
                           }
                         >
-                          <SelectTrigger
-                            aria-label={`阶段${n}派单${hi + 1}触发`}
-                            className="w-full"
-                          >
-                            <SelectValue placeholder="触发" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {guardChoices.map((choice) => (
-                              <SelectItem key={choice.value} value={choice.value}>
-                                {choice.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="目标工作流" className="min-w-0 flex-1">
-                        <Select
-                          value={picked(handoff.workflowId, handoffWorkflowIds)}
-                          onValueChange={(v) =>
-                            patchHandoffs(
-                              index,
-                              (stage.handoffs ?? []).map((item, k) =>
-                                k === hi ? { ...item, workflowId: v, stageId: null } : item,
-                              ),
-                            )
-                          }
-                        >
-                          <SelectTrigger
-                            aria-label={`阶段${n}派单${hi + 1}目标工作流`}
-                            className="w-full"
-                          >
-                            <SelectValue placeholder="选择工作流" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {handoffWorkflows.map((item) => (
-                              <SelectItem key={item.id} value={item.id}>
-                                {item.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="目标阶段" className="min-w-0 flex-1">
-                        <Select
-                          value={picked(
-                            handoff.stageId,
-                            stagesOfWorkflow(handoff.workflowId).map((s) => s.id),
-                          )}
-                          onValueChange={(v) =>
-                            patchHandoffs(
-                              index,
-                              (stage.handoffs ?? []).map((item, k) =>
-                                k === hi ? { ...item, stageId: v === '' ? null : v } : item,
-                              ),
-                            )
-                          }
-                        >
-                          <SelectTrigger
-                            aria-label={`阶段${n}派单${hi + 1}目标阶段`}
-                            className="w-full"
-                          >
-                            <SelectValue placeholder="首阶段" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="">首阶段</SelectItem>
-                            {stagesOfWorkflow(handoff.workflowId).map((item) => (
-                              <SelectItem key={item.id} value={item.id}>
-                                {item.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="话题" className="w-36">
-                        <Select
-                          value={handoff.thread ?? 'inherit'}
-                          onValueChange={(v) =>
-                            patchHandoffs(
-                              index,
-                              (stage.handoffs ?? []).map((item, k) =>
-                                k === hi
-                                  ? { ...item, thread: v as StageHandoffThreadPolicy }
-                                  : item,
-                              ),
-                            )
-                          }
-                        >
-                          <SelectTrigger
-                            aria-label={`阶段${n}派单${hi + 1}话题`}
-                            className="w-full"
-                          >
-                            <SelectValue placeholder="沿用来源话题" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="inherit">沿用来源话题</SelectItem>
-                            <SelectItem value="new">新开话题</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Button
-                        type="button"
-                        variant="quiet"
-                        size="sm"
-                        aria-label={`阶段${n}删除派单${hi + 1}`}
-                        onClick={() =>
-                          patchHandoffs(
-                            index,
-                            (stage.handoffs ?? []).filter((_, k) => k !== hi),
-                          )
-                        }
-                      >
-                        删除
-                      </Button>
+                          删除
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>

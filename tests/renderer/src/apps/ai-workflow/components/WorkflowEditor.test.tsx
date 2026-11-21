@@ -558,12 +558,13 @@ describe('WorkflowEditor', () => {
     expect(screen.queryByRole('option', { name: '研发' })).not.toBeInTheDocument()
     await user.keyboard('{Escape}')
 
-    // 删除这一行 → 整行消失；再加一行 → 触发条件回到本阶段的默认（跑完时）、目标为首阶段
+    // 删除这一行 → 整行消失；再加一行 → 触发条件回到本阶段的默认（跑完时）、
+    // 目标阶段落到目标流程第一个会派活的阶段（M53：不再默认落「待办」等人拖）
     await user.click(screen.getByRole('button', { name: '阶段1删除派单1' }))
     expect(screen.queryByRole('combobox', { name: '阶段1派单1目标工作流' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '阶段1新增派单' }))
     expect(screen.getByRole('combobox', { name: '阶段1派单1触发' })).toHaveTextContent('跑完时')
-    expect(screen.getByRole('combobox', { name: '阶段1派单1目标阶段' })).toHaveTextContent('首阶段')
+    expect(screen.getByRole('combobox', { name: '阶段1派单1目标阶段' })).toHaveTextContent('草稿')
     await choose(user, '阶段1派单1目标阶段', '发布')
 
     await user.click(screen.getByRole('button', { name: '保存' }))
@@ -2156,8 +2157,9 @@ describe('WorkflowEditor：阶段脚本（M40）', () => {
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    // M53：新派单默认落到目标流程第一个会派活的阶段（这里是「收尾」，s1）
     expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, '自测').handoffs).toEqual([
-      { on: 'manual', workflowId: 'w2', stageId: null },
+      { on: 'manual', workflowId: 'w2', stageId: 's1' },
     ])
   })
 

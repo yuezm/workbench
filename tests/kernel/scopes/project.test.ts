@@ -1241,6 +1241,11 @@ describe('老事实归一的性质（fast-check 随机生成）', () => {
         expect(Array.isArray(after.labels)).toBe(true)
         for (const [key, value] of Object.entries(before)) {
           if (value === undefined) continue
+          // M53：派单产物在重建时清掉 parentTaskId（血缘只走 handoffFrom*）
+          if (key === 'parentTaskId' && before.origin === 'handoff') {
+            expect(after[key]).toBeNull()
+            continue
+          }
           expect(after[key]).toEqual(value)
         }
       }),

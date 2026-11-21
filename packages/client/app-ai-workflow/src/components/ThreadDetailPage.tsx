@@ -95,6 +95,7 @@ function TaskTreeItem({
   depth,
   workflowLabel,
   phaseOf,
+  sourceOf,
   onOpenTask,
 }: {
   node: TaskNode
@@ -103,10 +104,13 @@ function TaskTreeItem({
   workflowLabel?: (task: Task) => string | undefined
   /** 任务的阶段语义（M53：徽标按阶段类别，不看是否归档） */
   phaseOf: (task: Task) => TaskPhase
+  /** 派单血缘（M53）：承接自哪张工单，行尾小字说明 */
+  sourceOf: (task: Task) => string | undefined
   onOpenTask: (taskId: string) => void
 }): ReactElement {
   const phase = phaseOf(node.task)
   const phaseMeta = taskPhaseMeta(phase)
+  const source = sourceOf(node.task)
   const workflowName = workflowLabel?.(node.task)
   return (
     <li>
@@ -151,6 +155,9 @@ function TaskTreeItem({
             子任务
           </span>
         )}
+        {source !== undefined && (
+          <span className="shrink-0 text-xs text-faint-foreground">承接自 {source}</span>
+        )}
         <span
           aria-hidden="true"
           className="shrink-0 text-xs text-faint-foreground opacity-0 transition-opacity group-hover:opacity-100"
@@ -167,6 +174,7 @@ function TaskTreeItem({
               depth={depth + 1}
               workflowLabel={workflowLabel}
               phaseOf={phaseOf}
+              sourceOf={sourceOf}
               onOpenTask={onOpenTask}
             />
           ))}
@@ -473,6 +481,12 @@ function ThreadContent({
 
   /** 徽标只读阶段语义：完成不依赖归档（M53） */
   const phaseOf = (task: Task): TaskPhase => phaseOfTask(task, workflows)
+  /** 血缘文案：来源工单还在本话题里就给标题，否则给 id 前 8 位 */
+  const titleOf = new Map(tasks.map((task) => [task.id, task.title]))
+  const sourceOf = (task: Task): string | undefined =>
+    task.handoffFromTaskId === null
+      ? undefined
+      : (titleOf.get(task.handoffFromTaskId) ?? task.handoffFromTaskId.slice(0, 8))
 
   const roots = taskTree(tasks, thread.rootTaskIds)
   /**
@@ -531,6 +545,7 @@ function ThreadContent({
                 depth={0}
                 workflowLabel={badgeOf}
                 phaseOf={phaseOf}
+                sourceOf={sourceOf}
                 onOpenTask={onOpenTask}
               />
             ))}

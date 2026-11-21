@@ -462,7 +462,7 @@ describe('kernel/handoff 建任务事实', () => {
       labels: [],
       ruleId: null,
       externalRef: null,
-      parentTaskId: 't-1',
+      parentTaskId: null,
       handoffFromTaskId: 't-1',
       handoffFromStageId: 'st-a0',
       handoffFromRunId: null,
@@ -470,6 +470,7 @@ describe('kernel/handoff 建任务事实', () => {
     })
     expect(attached).toMatchObject({ taskId: created.id, ruleId: null })
     expect(attached.thread.taskIds).toEqual([created.id])
+    // M53：派单产物不再挂父任务 → 它自己就是一条根（链条平铺，不缩进）
     expect(attached.thread.rootTaskIds).toEqual([created.id])
     // 不回写来源任务：整批只有「新建任务」一条任务事实，且不指向来源任务
     const taskFacts = facts.filter((fact) => fact.type.startsWith('task.'))
@@ -509,9 +510,9 @@ describe('kernel/handoff 建任务事实', () => {
 
     expect(facts.map((fact) => fact.type)).toEqual(['thread.task_attached', 'task.created'])
     expect(created.threadId).toBe('th-1')
-    // 父任务在同一话题里 → 派单卡不是根，线程树里排在来源任务下
+    // M53：派单产物不挂父任务 → 它自己也进根清单（链条平铺，不按父任务缩进）
     expect(attached.thread.taskIds).toEqual(['t-1', created.id])
-    expect(attached.thread.rootTaskIds).toEqual(['t-1'])
+    expect(attached.thread.rootTaskIds).toEqual(['t-1', created.id])
   })
 
   it('显式 new：即使来源任务有话题也开新隐式线程（source=handoff）', () => {

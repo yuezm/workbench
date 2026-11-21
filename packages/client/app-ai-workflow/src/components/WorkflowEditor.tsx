@@ -17,6 +17,7 @@ import {
   type WorkflowStage,
   type WorkflowWithStages,
 } from '@workbench/protocol/entities'
+import { handoffLandingWarning } from '../model/handoff-warning'
 import { Button } from '@workbench/client-ui-primitives/button'
 import { Field } from '@workbench/client-ui-kit/field'
 import { FormError } from '@workbench/client-ui-kit/form-error'
@@ -227,10 +228,15 @@ function guardChoicesFor(stage: StageInput): Array<{ value: StageHandoffGuard; l
 /** 新加的一行派单：触发条件按阶段类型取第一项，目标工作流取第一个候选。 */
 function defaultHandoff(stage: StageInput, workflows: readonly WorkflowWithStages[]): StageHandoff {
   const first = guardChoicesFor(stage)[0]
+  const target = workflows[0]
+  // M53：默认落到目标流程第一个会派活的阶段；落到「待办」这类列上，派单卡不会自己跑
+  const landing = target?.stages.find(
+    (item) => item.entryMode === 'agent' || item.entryMode === 'script',
+  )
   return {
     on: first?.value ?? 'done',
-    workflowId: workflows[0]?.id ?? '',
-    stageId: null,
+    workflowId: target?.id ?? '',
+    stageId: landing?.id ?? null,
   }
 }
 
@@ -1546,6 +1552,17 @@ export function WorkflowEditor({
                               ))}
                             </SelectContent>
                           </Select>
+                          {handoffLandingWarning(
+                            stagesOfWorkflow(handoff.workflowId),
+                            handoff.stageId,
+                          ) !== null && (
+                            <p className="text-xs text-warning">
+                              {handoffLandingWarning(
+                                stagesOfWorkflow(handoff.workflowId),
+                                handoff.stageId,
+                              )}
+                            </p>
+                          )}
                         </Field>
                         <Field label="话题" className="w-36 shrink-0">
                           <Select

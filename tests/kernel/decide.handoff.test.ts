@@ -264,7 +264,7 @@ describe('kernel/decide 派单——直接完成', () => {
       handoffFromTaskId: 'task-1',
       handoffFromStageId: 'st-a0',
       handoffFromRunId: null,
-      parentTaskId: 'task-1',
+      parentTaskId: null,
     })
   })
 
@@ -304,7 +304,8 @@ describe('kernel/decide 派单——直接完成', () => {
     ])
     expect(created.threadId).toBe('th-1')
     expect(attached.thread.taskIds).toEqual(['task-1', created.id])
-    expect(attached.thread.rootTaskIds).toEqual(['task-1'])
+    // M53：派单产物不挂父任务 → 它也进 rootTaskIds（链条平铺）
+    expect(attached.thread.rootTaskIds).toEqual(['task-1', created.id])
   })
 
   it('当前阶段没配派单 → 只有 task.moved + task.finished', () => {

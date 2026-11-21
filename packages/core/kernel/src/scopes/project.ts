@@ -67,7 +67,9 @@ export function normalizeTask(row: Task, at?: string): Task {
     labels: legacy.labels ?? [],
     projectId: legacy.projectId ?? null,
     threadId: legacy.threadId ?? null,
-    parentTaskId: legacy.parentTaskId ?? null,
+    // M53：派单产物曾经也挂 parentTaskId，重建时归一回「只有血缘、没有从属」
+    parentTaskId:
+      (legacy.origin ?? 'manual') === 'handoff' ? null : (legacy.parentTaskId ?? null),
     spawnedByRunId: legacy.spawnedByRunId ?? null,
     batchNo: legacy.batchNo ?? null,
     spawnKey: legacy.spawnKey ?? null,

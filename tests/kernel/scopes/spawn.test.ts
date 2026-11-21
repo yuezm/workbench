@@ -370,10 +370,10 @@ describe('kernel/spawn：childrenSettledFacts', () => {
     expect(facts.some((fact) => fact.type === 'task.comment_added')).toBe(true)
   })
 
-  it('交接来的子任务默认不参与 rollup：父阶段没配 onChildrenSettled 就零事实', () => {
+  it('派单产物不进 rollup：它不挂 parentTaskId（血缘只走 handoffFrom*，M53）', () => {
     const handed = task({
       id: 'tk-handed',
-      parentTaskId: 'tk-1',
+      parentTaskId: null,
       currentStageId: 'st-done',
       origin: 'handoff',
       handoffFromTaskId: 'tk-1',
@@ -387,12 +387,12 @@ describe('kernel/spawn：childrenSettledFacts', () => {
       ]),
     })
 
-    // entryMode='agent' 本来会默认 wake，但交接产物不该自己把父任务叫醒
+    // 派单产物没有 parentTaskId：childrenOf 里查不到它，也就不可能触发 rollup
     expect(
       childrenSettledFacts(implicit, 'tk-1', AT, env(), { kind: 'host', via: 'scheduler' }),
     ).toEqual([])
 
-    // 父阶段显式配了 wake：缺陷全修完 → 唤醒测试任务去回归
+    // 父阶段显式配了 wake 也没用：它根本不是「子任务」（血缘走 handoffFrom*）
     const explicit = makeView({
       stages: new Map([['st-1', stage({ onChildrenSettled: 'wake' })], ['st-done', doneStage]]),
       tasks: new Map([
@@ -400,16 +400,9 @@ describe('kernel/spawn：childrenSettledFacts', () => {
         ['tk-handed', handed],
       ]),
     })
-    const facts = childrenSettledFacts(explicit, 'tk-1', AT, env(), {
-      kind: 'host',
-      via: 'scheduler',
-    })
-
-    expect(facts[0]).toMatchObject({
-      type: 'task.children_settled',
-      payload: { parentTaskId: 'tk-1', action: 'wake', childIds: ['tk-handed'] },
-    })
-    expect(facts.filter((fact) => fact.type === 'run.queued')).toHaveLength(1)
+    expect(
+      childrenSettledFacts(explicit, 'tk-1', AT, env(), { kind: 'host', via: 'scheduler' }),
+    ).toEqual([])
   })
 
   it('混有 spawn 子任务时按原口径：未配置也唤醒', () => {

@@ -183,6 +183,26 @@ describe('ThreadDetailPage', () => {
     expect(onOpenTask).toHaveBeenCalledWith('c1')
   })
 
+  it('派单产物不缩进，行尾标「承接自」（M53：触发链不是父子树）', async () => {
+    const source: Task = { ...parentTask, id: 'p1', title: '来源工单' }
+    const handed: Task = {
+      ...parentTask,
+      id: 'h1',
+      title: '派出去的工单',
+      parentTaskId: null,
+      handoffFromTaskId: 'p1',
+      handoffFromStageId: 's0',
+      handoffFromRunId: null,
+    }
+    setup(detailOf({ ...thread, taskIds: ['p1', 'h1'], rootTaskIds: ['p1', 'h1'] }, [source, handed]))
+
+    const row = await screen.findByRole('button', { name: '打开任务：派出去的工单' })
+    // 平铺：没有子任务缩进，也没有「子任务」徽标
+    expect(row).toHaveStyle({ paddingLeft: '0px' })
+    expect(within(row).queryByText('子任务')).toBeNull()
+    expect(within(row).getByText('承接自 来源工单')).toBeInTheDocument()
+  })
+
   it('整行都可点：阶段徽标上也进任务详情', async () => {
     // 徽标文案来自阶段语义（M53）：父任务停在 s0 这个自己添加的阶段上 → 「进行中」
     kernel.setView('workflows.all', undefined, [

@@ -108,10 +108,10 @@ function handoffFactsFor(
     externalRef: null,
     labels: [],
     threadId: thread.id,
-    // 挂来源任务（M25）：派单产物同样是一条「父任务的子任务」，来源阶段显式配了
-    // `onChildrenSettled` 时，它全部结终态就能唤醒来源任务（缺陷全修完 → 自动回归）。
-    // 但「不回写来源任务」的语义不变：这里不产 `task.updated`。
-    parentTaskId: sourceTask.id,
+    // M53：派单是「触发了下一张工单」，不是「拆子任务」——血缘只记 `handoffFrom*`，
+    // 不挂 `parentTaskId`（不缩进、不参与 rollup、不进父任务的子任务进度）。
+    // 需要聚合语义时在来源阶段显式配 `onChildrenSettled`，由 spawn 线承担。
+    parentTaskId: null,
     spawnedByRunId: null,
     batchNo: null,
     spawnKey: null,

@@ -206,13 +206,7 @@ export function childrenSettledFacts(
   if (parent === undefined || isTaskOver(phaseOf(view, parent))) return []
   const children = childrenOf(view, parentTaskId)
   if (children.length === 0) return []
-  // 交接任务（M7）也挂 parentTaskId，但「交接不回写来源任务」是既有语义：
-  // 来源阶段没显式配 `onChildrenSettled` 时，别让一条交接产物把父任务唤醒 / 收掉。
-  // 混有 spawn 子任务时仍走原口径（every 为 false）。
-  const stage = parent.currentStageId === null ? undefined : view.stages.get(parent.currentStageId)
-  if (stage?.onChildrenSettled == null && children.every((child) => child.origin === 'handoff')) {
-    return []
-  }
+  // M53：派单产物不再挂 parentTaskId，所以这里只剩真正的派生（spawn）子任务
   for (const child of children) {
     const override = overrides?.get(child.id)
     if (override === 'removed') continue

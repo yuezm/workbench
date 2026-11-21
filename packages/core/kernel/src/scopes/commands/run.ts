@@ -8,7 +8,7 @@ import type {
   Task,
   WorkflowStage,
 } from '@workbench/protocol/entities'
-import { isTaskOver, taskPhaseOf } from '@workbench/protocol/entities'
+import { isTaskOver, taskPhaseOf, terminalOutcomeOf } from '@workbench/protocol/entities'
 import type { EventReceivedPayload } from '@workbench/protocol/facts'
 import type { Input, Receipt } from '@workbench/protocol/inputs'
 import type { TaskComment } from '@workbench/protocol/task-comment'
@@ -48,7 +48,7 @@ import {
   withNote,
 } from '../threads'
 import { stageRoundCount } from '../threads'
-import { moveTask, terminalOutcomeOf } from '../workflow/stage-machine'
+import { moveTask } from '../workflow/stage-machine'
 import {
   chatMessageFacts,
   CONCURRENCY_CAP,
@@ -371,14 +371,20 @@ function stageTransitionFacts(
   if (finishOutcome !== null || moved.archive === true) {
     // M53：完成 = 落到终态阶段（或出口 `close` 直接结束并归档），两者都产 `task.finished`
     const settled: Task = { ...next, updatedAt: now }
+    /** 阶段真变了才产 `task.moved`：`close` 出口原地结束，别在日志里留一条 from===to 的「移动」 */
+    const movedStage = settled.currentStageId !== task.currentStageId
     return {
       facts: [
         ...handoffFacts(),
-        hostDraft(
-          'task.moved',
-          { task: settled, from: task.currentStageId, to: settled.currentStageId },
-          now,
-        ),
+        ...(movedStage
+          ? [
+              hostDraft(
+                'task.moved',
+                { task: settled, from: task.currentStageId, to: settled.currentStageId },
+                now,
+              ),
+            ]
+          : []),
         hostDraft('task.finished', { task: settled, outcome: finishOutcome ?? 'done' }, now),
         ...(moved.archive === true
           ? [hostDraft('task.archived', { task: { ...settled, archivedAt: now } }, now)]
@@ -621,7 +627,7 @@ export function receiveRun(
         const completedTask = (fact.payload as { task: Task }).task
         const thread =
           completedTask.threadId === null ? undefined : view.threads.get(completedTask.threadId)
-        const overrides = batchTaskPhases(facts)
+        const overrides = batchTaskPhases(view, facts)
         facts.push(
           ...closeIfAllDone(
             view,
@@ -634,7 +640,7 @@ export function receiveRun(
       }
     }
     // M8：任务完成 → 父任务 rollup（全部子任务结束才触发；批内去重 + 沿链级联）
-    const settledOverrides = batchTaskPhases(facts)
+    const settledOverrides = batchTaskPhases(view, facts)
     const rolledUp = new Set<Id>()
     for (let round = 0; round < 8; round += 1) {
       let changed = false

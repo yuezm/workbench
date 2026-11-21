@@ -1,5 +1,4 @@
 import type {
-  BuiltinStageKey,
   GateVerdict,
   JudgeConfig,
   StageExitGuard,
@@ -33,18 +32,6 @@ export interface MoveResult {
   gateExhausted?: boolean
   /** 出口 `close`：本单结束并顺手归档（归档只写 `archivedAt`，M53） */
   archive?: boolean
-}
-
-/**
- * 终态阶段的完成口径（M53）：内置「已完成」= `done`、内置「已取消」= `cancelled`，
- * 自己添加的阶段与「待办 / 已阻塞」一律 null（还在流程里）。
- */
-export function terminalOutcomeOf(
-  stage: { builtin?: BuiltinStageKey | null } | null | undefined,
-): 'done' | 'cancelled' | null {
-  if (stage?.builtin === 'done') return 'done'
-  if (stage?.builtin === 'cancelled') return 'cancelled'
-  return null
 }
 
 /** 读取某阶段「进入时」应产生的效果。 */

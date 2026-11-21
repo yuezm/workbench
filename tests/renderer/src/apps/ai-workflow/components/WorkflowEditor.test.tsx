@@ -577,6 +577,100 @@ describe('WorkflowEditor', () => {
     expect(draft.stages[1]).toMatchObject({ id: 's1', handoffs: [] })
   }, 30_000)
 
+  it('换目标工作流：目标阶段跟着落到新流程第一个会派活的阶段（M53）', async () => {
+    const current = workflowWith([
+      {
+        name: '进行中',
+        entryMode: 'agent',
+        agentId: 'ag1',
+        handoffs: [{ on: 'done', workflowId: 'w2', stageId: 'a0' }],
+      },
+    ])
+    const targetA: WorkflowWithStages = {
+      id: 'w2',
+      name: '写作',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 'a0',
+          workflowId: 'w2',
+          name: '草稿',
+          position: 0,
+          entryMode: 'none',
+          agentId: null,
+          exits: {},
+          judge: null,
+          handoffs: [],
+        },
+        {
+          id: 'a1',
+          workflowId: 'w2',
+          name: '执笔',
+          position: 1,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          exits: {},
+          judge: null,
+          handoffs: [],
+        },
+      ],
+    }
+    const targetB: WorkflowWithStages = {
+      id: 'w3',
+      name: '发布流',
+      description: '',
+      createdAt: 't',
+      stages: [
+        {
+          id: 'b0',
+          workflowId: 'w3',
+          name: '排版',
+          position: 0,
+          entryMode: 'agent',
+          agentId: 'ag1',
+          exits: {},
+          judge: null,
+          handoffs: [],
+        },
+        {
+          id: 'b1',
+          workflowId: 'w3',
+          name: '上线',
+          position: 1,
+          entryMode: 'none',
+          agentId: null,
+          exits: {},
+          judge: null,
+          handoffs: [],
+        },
+      ],
+    }
+    kernel.setView('workflows.all', undefined, [current, targetA, targetB])
+    kernel.setView('agents.all', undefined, [agent])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={current} onSave={onSave} onCancel={vi.fn()} />)
+
+    // 原来指向「写作 / 草稿」（不派活）：界面上先给提示
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    expect(screen.getByRole('combobox', { name: '阶段2派单1目标阶段' })).toHaveTextContent('草稿')
+    expect(screen.getByText(/目标阶段「草稿」不派活/)).toBeInTheDocument()
+
+    // 换到「发布流」：目标阶段自动落到它第一个会派活的阶段，提示随之消失
+    await choose(user, '阶段2派单1目标工作流', '发布流')
+    expect(screen.getByRole('combobox', { name: '阶段2派单1目标阶段' })).toHaveTextContent('排版')
+    expect(screen.queryByText(/不派活/)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(savedStage(draft, '进行中').handoffs?.[0]).toMatchObject({
+      workflowId: 'w3',
+      stageId: 'b0',
+    })
+  })
+
   it('交接目标工作流已不在清单：目标阶段候选为空，仍按视图值回显', () => {
     const existing = workflowOf([
       {

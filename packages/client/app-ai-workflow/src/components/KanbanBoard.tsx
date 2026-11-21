@@ -15,7 +15,7 @@ interface KanbanBoardProps {
   /** 卡片拖到某个阶段列 */
   onMoveToStage: (taskId: string, stageId: string) => void
   /** 卡片拖到「归档」区（完成任务并移出看板） */
-  onCompleteTask: (taskId: string) => void
+  onArchiveTask: (taskId: string) => void
   /** 顶部「新建任务」：唯一的新建入口（弹窗里再定工作流与起始阶段） */
   onNewTask: () => void
   /** 单击任务卡进入任务详情页（页面跳转，回调由上层路由处理） */
@@ -50,7 +50,7 @@ export function KanbanBoard({
   workflow,
   tasks,
   onMoveToStage,
-  onCompleteTask,
+  onArchiveTask,
   onNewTask,
   onOpenTask,
   onOpenThread,
@@ -63,7 +63,7 @@ export function KanbanBoard({
 
   /**
    * 传进来的是 `tasks.byProject`（项目下全部任务，可能混着别的工作流）：
-   * 看板只认当前工作流的任务，列、已完成数、子任务统计、父任务标题都按这份算，
+   * 看板只认当前工作流的任务，列、已归档数、子任务统计、父任务标题都按这份算，
    * 否则别的卡片会被算进本工作流的阶段列。
    */
   const boardTasks = tasks.filter((t) => t.workflowId === workflow.id)
@@ -76,8 +76,8 @@ export function KanbanBoard({
   const activeTasks = boardTasks
     .filter((t) => t.archivedAt === null)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  const doneTasks = boardTasks.filter((t) => t.archivedAt !== null)
-  const completedCount = doneTasks.length
+  const archivedTasks = boardTasks.filter((t) => t.archivedAt !== null)
+  const archivedCount = archivedTasks.length
 
   // 「执行中」由内核判定（queued/running/waiting 的任务 id 集合），看板不自己现算
   const executingIds = new Set(useKernelView('tasks.executing') ?? [])
@@ -124,7 +124,7 @@ export function KanbanBoard({
     const task = dragging
     stopDrag()
     // 执行中的任务归档必被内核拒绝（task.complete）：落点侧再兜一层
-    if (task && !executingIds.has(task.id)) onCompleteTask(task.id)
+    if (task && !executingIds.has(task.id)) onArchiveTask(task.id)
   }
 
   return (
@@ -232,7 +232,7 @@ export function KanbanBoard({
           <div className="flex shrink-0 items-center gap-2">
             <span className="text-base font-medium text-muted-foreground">归档</span>
             <span className="rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
-              {completedCount}
+              {archivedCount}
             </span>
           </div>
           {/* 落点提示占中间，先把规则写出来：执行中的任务拖进来必被内核拒绝 */}
@@ -241,15 +241,15 @@ export function KanbanBoard({
             <span aria-hidden="true">·</span>
             <span>执行中的任务不能归档</span>
           </p>
-          {/* 归档不是删除：给一条回看入口，能翻出已完成的任务点进详情 */}
+          {/* 归档不是删除：给一条回看入口，能翻出已归档的任务（做完的 / 取消的 / 不想跟了的） */}
           <Button
             type="button"
             variant="quiet"
             size="xs"
             className="shrink-0"
             aria-label="查看归档任务"
-            title={completedCount === 0 ? '还没有归档任务' : '查看已完成的任务'}
-            disabled={completedCount === 0}
+            title={archivedCount === 0 ? '还没有归档任务' : '查看已归档的任务'}
+            disabled={archivedCount === 0}
             onClick={() => setArchivedOpen(true)}
           >
             查看归档
@@ -260,7 +260,7 @@ export function KanbanBoard({
       {archivedOpen && (
         <ArchivedTasksDialog
           workflow={workflow}
-          tasks={doneTasks}
+          tasks={archivedTasks}
           onOpenTask={onOpenTask}
           onClose={() => setArchivedOpen(false)}
         />

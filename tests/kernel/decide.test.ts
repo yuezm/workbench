@@ -284,6 +284,8 @@ interface Seed {
   tasks?: Task[]
   runs?: RunRow[]
   cards?: Card[]
+  /** M6.5：线程收尾判定要读线程行（任务全部结束时归档话题） */
+  threads?: ThreadRow[]
   /** 对话（删智能体时按 agentId 查引用） */
   conversations?: Conversation[]
   active?: Id[]
@@ -302,7 +304,7 @@ const view = (seed: Seed = {}): View => ({
   messages: new Map(),
   cards: new Map((seed.cards ?? []).map((row) => [row.id, row])),
   activeTaskIds: new Set(seed.active ?? []),
-  threads: new Map(),
+  threads: new Map((seed.threads ?? []).map((row) => [row.id, row])),
   taskComments: new Map(),
   reviewReports: new Map(),
   events: new Map(),
@@ -1941,7 +1943,12 @@ describe('kernel/decide 任务', () => {
     ).toEqual({
       facts: [
         at('task.moved', {
-          task: task({ id: 't-1', currentStageId: 'st-2', archivedAt: 'archived-at', updatedAt: NOW }),
+          task: task({
+            id: 't-1',
+            currentStageId: 'st-2',
+            archivedAt: 'archived-at',
+            updatedAt: NOW,
+          }),
           from: 'st-1',
           to: 'st-2',
         }),
@@ -1998,19 +2005,36 @@ describe('kernel/decide 任务', () => {
     const seeded = view({
       workflows: [workflow()],
       stages: [stage({ id: 'st-1' })],
-      tasks: [task({ id: 't-1' }), task({ id: 't-2', archivedAt: 'archived-at', createdAt: LATER })],
+      tasks: [
+        task({ id: 't-1' }),
+        task({ id: 't-2', archivedAt: 'archived-at', createdAt: LATER }),
+      ],
     })
 
     expect(decide(seeded, command({ type: 'task.archive', id: 't-1' }), NOW, env())).toEqual({
-      facts: [
-        at('task.archived', { task: task({ id: 't-1', archivedAt: NOW, updatedAt: NOW }) }),
-      ],
+      facts: [at('task.archived', { task: task({ id: 't-1', archivedAt: NOW, updatedAt: NOW }) })],
     })
 
     // 已经归档过：不重复产事实（可逆，取消归档走 archived:false）
     expect(decide(seeded, command({ type: 'task.archive', id: 't-2' }), NOW, env())).toEqual({
       facts: [],
     })
+
+    // 取消归档：`archived: false` 只把 archivedAt 清回 null（可逆，UI 的「取消归档」靠这条）
+    expect(
+      decide(seeded, command({ type: 'task.archive', id: 't-2', archived: false }), NOW, env()),
+    ).toEqual({
+      facts: [
+        at('task.archived', {
+          task: task({ id: 't-2', archivedAt: null, createdAt: LATER, updatedAt: NOW }),
+        }),
+      ],
+    })
+
+    // 本来就没归档：取消归档零事实（同一方向上的幂等）
+    expect(
+      decide(seeded, command({ type: 'task.archive', id: 't-1', archived: false }), NOW, env()),
+    ).toEqual({ facts: [] })
   })
 
   it('task.archive：任务不存在 / 执行中都 reject（M53：归档不看阶段与工作流）', () => {
@@ -2026,7 +2050,17 @@ describe('kernel/decide 任务', () => {
     })
     // 阶段缺失也能归档：归档只写一个时刻
     expect(decide(view(seed), command({ type: 'task.archive', id: 't-2' }), NOW, env())).toEqual({
-      facts: [at('task.archived', { task: task({ id: 't-2', currentStageId: null, createdAt: LATER, archivedAt: NOW, updatedAt: NOW }) })],
+      facts: [
+        at('task.archived', {
+          task: task({
+            id: 't-2',
+            currentStageId: null,
+            createdAt: LATER,
+            archivedAt: NOW,
+            updatedAt: NOW,
+          }),
+        }),
+      ],
     })
     expect(
       decide(
@@ -2089,7 +2123,10 @@ describe('kernel/decide 任务', () => {
   it('移到「已完成」：任务名下还 open 的卡随任务一起收起（reason=cancelled，别的任务/已答的卡不动）', () => {
     const seeded = view({
       workflows: [workflow()],
-      stages: [stage({ id: 'st-1' }), stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null })],
+      stages: [
+        stage({ id: 'st-1' }),
+        stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }),
+      ],
       tasks: [task({ id: 't-1' }), task({ id: 't-2', createdAt: LATER })],
       cards: [
         card({ id: 'card-1', runId: 'run-1', taskId: 't-1' }),
@@ -2114,6 +2151,101 @@ describe('kernel/decide 任务', () => {
     expect(resolved.card.status).toBe('resolved')
     expect(resolved.card.updatedAt).toBe(NOW)
     expect(resolved.reason).toBe('cancelled')
+    // 同一批的完成事实带 outcome：完成与否由阶段类别区分，归档不再承担这个信息
+    expect((decision.facts[1]?.payload as { outcome: string }).outcome).toBe('done')
+  })
+
+  it('移到「已取消」：task.finished 带 outcome=cancelled，线程按结束归档（M53）', () => {
+    const thread: ThreadRow = {
+      id: 'th-1',
+      source: 'manual',
+      externalRef: null,
+      title: '话题',
+      status: 'open',
+      taskIds: ['t-1'],
+      rootTaskIds: ['t-1'],
+      concurrency: 1,
+      notesVersion: 0,
+      notes: [],
+      events: [],
+      lastActivityAt: CREATED,
+      createdAt: CREATED,
+    }
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [
+        stage({ id: 'st-1' }),
+        stage({
+          id: 'st-cancelled',
+          position: 8,
+          builtin: 'cancelled',
+          entryMode: 'none',
+          agentId: null,
+        }),
+      ],
+      tasks: [task({ id: 't-1', threadId: 'th-1' })],
+      threads: [thread],
+    })
+
+    const decision = decide(
+      seeded,
+      command({ type: 'task.move', id: 't-1', stageId: 'st-cancelled' }),
+      NOW,
+      env(),
+    )
+    // M22 人工跳转留痕在前（已取消不是「st-1」的自然去向），随后才是完成事实与线程归档
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'task.moved',
+      'task.comment_added',
+      'task.finished',
+      'thread.closed',
+    ])
+    const finished = decision.facts[2]?.payload as { outcome: string; task: Task }
+    // 「已取消」也是「结束」，但口径必须分清：取消不能当完成
+    expect(finished.outcome).toBe('cancelled')
+    expect(finished.task.currentStageId).toBe('st-cancelled')
+    expect(finished.task.archivedAt).toBeNull()
+    expect(decision.facts[3]?.payload).toMatchObject({ reason: 'all-tasks-done' })
+  })
+
+  it('子任务移到「已取消」也算结束：父任务照常 rollup（M53）', () => {
+    const seeded = view({
+      workflows: [workflow()],
+      stages: [
+        stage({ id: 'st-1', entryMode: 'none', agentId: null }),
+        stage({
+          id: 'st-cancelled',
+          position: 8,
+          builtin: 'cancelled',
+          entryMode: 'none',
+          agentId: null,
+        }),
+      ],
+      tasks: [
+        task({ id: 't-parent' }),
+        task({ id: 't-child', parentTaskId: 't-parent', createdAt: LATER }),
+      ],
+    })
+
+    const decision = decide(
+      seeded,
+      command({ type: 'task.move', id: 't-child', stageId: 'st-cancelled' }),
+      NOW,
+      env(),
+    )
+    // 人工跳转留痕在前（已取消不是「待办」的自然去向），随后是完成事实与父任务 rollup
+    expect(decision.facts.map((fact) => fact.type)).toEqual([
+      'task.moved',
+      'task.comment_added',
+      'task.finished',
+      'task.children_settled',
+      'task.comment_added',
+    ])
+    expect((decision.facts[3]?.payload as { action: string }).action).toBe('notify')
+    // 取消的子任务也算「结束」——rollup 认的是阶段语义，不是「做成没做成」
+    expect((decision.facts[1]?.payload as { comment: { text: string } }).comment.text).toContain(
+      '人工跳转',
+    )
   })
 
   it('run.host_settled(cancelled)：该 run 还 open 的卡一并收起', () => {
@@ -2969,7 +3101,10 @@ describe('kernel/decide M8：任务派生', () => {
 
     const doneParent = view({
       workflows: [workflow()],
-      stages: [stage(), stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null })],
+      stages: [
+        stage(),
+        stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }),
+      ],
       tasks: [task({ currentStageId: 'st-done' })],
     })
     expect(
@@ -2999,7 +3134,10 @@ describe('kernel/decide M8：任务派生', () => {
         task({ id: 't-2', parentTaskId: 't-1', threadId: 'th-1', origin: 'spawn' }),
       ],
     })
-    seeded.stages.set('st-done', stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }))
+    seeded.stages.set(
+      'st-done',
+      stage({ id: 'st-done', position: 9, builtin: 'done', entryMode: 'none', agentId: null }),
+    )
     seeded.threads.set('th-1', threadRow({ taskIds: ['t-1', 't-2'] }))
     const decision = decide(
       seeded,

@@ -391,6 +391,23 @@ export function taskPhaseOf(
   }
 }
 
+/**
+ * 终态阶段的完成口径（M53）：内置「已完成」= `done`、内置「已取消」= `cancelled`，
+ * 自己添加的阶段与「待办 / 已阻塞」一律 null（还在流程里）。
+ *
+ * 与 `taskPhaseOf` 同一份派生（都走 `stageKindOf`），区别只在返回什么：这里给「完成事实带
+ * 什么 outcome / 这个阶段算不算终点」，那边给「界面上写哪个词」。内核与客户端共用这一份，
+ * 别再各自按 `builtin === 'done'` 手写字面量。
+ */
+export function terminalOutcomeOf(
+  stage: { builtin?: BuiltinStageKey | null } | null | undefined,
+): 'done' | 'cancelled' | null {
+  const phase = taskPhaseOf(stage)
+  if (phase === 'finished') return 'done'
+  if (phase === 'cancelled') return 'cancelled'
+  return null
+}
+
 /** 名称是否被内置阶段占用（自己添加的阶段不能叫这些名字）。 */
 export function isBuiltinStageName(name: string): boolean {
   return BUILTIN_STAGE_KEYS.some((key) => BUILTIN_STAGE_NAMES[key] === name.trim())

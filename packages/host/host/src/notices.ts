@@ -5,7 +5,9 @@
  * 于是「智能体说了什么」会被弹，「任务跑完了 / 跑挂了」反而没有通知。这里补上后者，
  * 口径对齐 SPEC-ai-workflow「通知分层」的**查看级**：
  *
- * - `task.finished`（智能体 / 宿主推进到终态阶段，M53）→ 一条「任务完成：<标题>」；
+ * - `task.finished`（智能体 / 宿主推进到终态阶段，M53）→ 一条「任务完成：<标题>」，
+ *   事实里的 `outcome='cancelled'`（移到内置「已取消」）改说「任务已取消：<标题>」——
+ *   都叫「完成」会把人刚取消的事说反；
  * - `run.failed`（终态失败：重试已用尽 / 超时 / 执行器丢失）→ 一条「任务运行失败」，
  *   一批里多个任务同时失败时合成一条并带数量（弹三次不如说「3 个」）；
  * - **人在 UI 里自己点的完成不算**（`fact.actor.kind === 'owner'`）：你刚做完的事不必再提醒；
@@ -37,7 +39,20 @@ export interface NoticeRequest {
 export const SETTLEMENT_NOTICE_BODY = {
   failed: '点开工作台查看失败原因',
   completed: '点开工作台查看结果',
+  cancelled: '点开工作台查看这次取消留下了什么',
 } as const
+
+/**
+ * 结束通知的标题（M53）：`task.finished` 带 `outcome`，取消与完成不能共用一句话——
+ * 人刚把一条任务移进「已取消」，弹「任务完成」是直接说反。
+ */
+const finishedNoticeOf = (
+  title: string,
+  outcome: 'done' | 'cancelled',
+): { title: string; body: string } =>
+  outcome === 'cancelled'
+    ? { title: `任务已取消：${title}`, body: SETTLEMENT_NOTICE_BODY.cancelled }
+    : { title: `任务完成：${title}`, body: SETTLEMENT_NOTICE_BODY.completed }
 
 /** 失败通知的标题（失败事实不带任务行，只能给通用标题 + 数量）。 */
 const FAILED_TITLE = '任务运行失败'
@@ -61,12 +76,14 @@ export function noticesFromFacts(facts: readonly Fact[]): NoticeRequest[] {
     if (fact.type === 'task.finished') {
       // 人自己点的完成不打扰：只有 host / agent 推进的完成才是「发生了什么」
       if (fact.actor.kind === 'owner') continue
-      const task = (fact.payload as { task: Task }).task
+      const { task, outcome } = fact.payload as {
+        task: Task
+        outcome: 'done' | 'cancelled'
+      }
       if (completedTasks.has(task.id)) continue
       completedTasks.add(task.id)
       completed.push({
-        title: `任务完成：${task.title}`,
-        body: SETTLEMENT_NOTICE_BODY.completed,
+        ...finishedNoticeOf(task.title, outcome),
         target: { taskId: task.id },
       })
       continue

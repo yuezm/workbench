@@ -259,7 +259,7 @@ describe('kernel/thread-context', () => {
     expect(text).toContain('线程：Issue 1')
     expect(text).toContain('来源：github｜入口：issue-1｜状态：open｜并发：1')
     expect(text).toContain('### 任务')
-    expect(text).toContain('- [active] 写计划（阶段：实现）')
+    expect(text).toContain('- [进行中] 写计划（阶段：实现）')
     // M52：摘要段已删——它是执行索引的严格子集；这一轮的信息只在产出段与执行索引里各出现一次
     expect(text).not.toContain('### 最近运行')
     expect(runsIndexOf(text)).toContain('- 第1轮 · 实现 · succeeded')
@@ -296,8 +296,8 @@ describe('kernel/thread-context', () => {
       ]),
     })
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
-    expect(text).toContain('- [active] 写计划（阶段：实现）')
-    expect(text).toContain('  - [finished] 子任务（阶段：已完成）')
+    expect(text).toContain('- [进行中] 写计划（阶段：实现）')
+    expect(text).toContain('  - [已完成] 子任务（阶段：已完成）')
   })
 
   it('传当前任务：任务树不复述它（顶部已写「# 任务 / # 阶段」），只剩子任务时子任务升为顶层', () => {
@@ -317,14 +317,14 @@ describe('kernel/thread-context', () => {
       ]),
     })
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow, 'task-1')
-    expect(text).not.toContain('- [active] 写计划')
+    expect(text).not.toContain('- [进行中] 写计划')
     // 父任务不在树里：子任务按顶层渲染（缩进按「树里可见的父任务层数」算）
-    expect(text).toContain('### 任务\n- [finished] 子任务（阶段：已完成）')
+    expect(text).toContain('### 任务\n- [已完成] 子任务（阶段：已完成）')
 
     // 线程里只有当前任务：整段消失，不产一行业务复述
     const alone = threadContextText(view(), thread(), 'task-1')
     expect(alone).not.toContain('### 任务\n')
-    expect(alone).not.toContain('- [active] 写计划（阶段：实现）')
+    expect(alone).not.toContain('- [进行中] 写计划（阶段：实现）')
   })
 
   it('传当前任务：最近一轮产出不再重复任务名（不传时保持原样）', () => {
@@ -367,7 +367,7 @@ describe('kernel/thread-context', () => {
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
     const taskPart = text.slice(text.indexOf('### 任务'), text.indexOf('### 未决卡片'))
     expect(taskPart.indexOf('子 A')).toBeLessThan(taskPart.indexOf('子 B'))
-    expect(taskPart).toContain('  - [active] 子 A')
+    expect(taskPart).toContain('  - [进行中] 子 A')
     // M52：三条运行只在执行索引里出现（从新到旧），不再有第二份摘要段
     const runPart = runsIndexOf(text)
     expect(runPart.indexOf('末')).toBeLessThan(runPart.indexOf('后'))
@@ -416,8 +416,8 @@ describe('kernel/thread-context', () => {
     )
     expect(text).toContain('入口：（未绑定）')
     // M53：阶段缺失 → 阶段语义「未开始」（不再有 status 字段可打印）
-    expect(text).toContain('- [todo] 无阶段任务（无阶段）')
-    expect(text).toContain('- [todo] 坏阶段任务（无阶段）')
+    expect(text).toContain('- [未开始] 无阶段任务（无阶段）')
+    expect(text).toContain('- [未开始] 坏阶段任务（无阶段）')
     expect(text).toContain('- [issues.closed] issue-empty')
     // M52：唯一一条 stage run 的正文只在产出段出现；轮次信息在被执行索引接管的段里
     expect(precedingOf(text)).toContain('失败原因')

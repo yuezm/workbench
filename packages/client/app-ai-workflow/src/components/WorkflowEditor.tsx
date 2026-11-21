@@ -225,19 +225,41 @@ function guardChoicesFor(stage: StageInput): Array<{ value: StageHandoffGuard; l
   return guards.map((value) => ({ value, label: HANDOFF_GUARD_LABELS[value] }))
 }
 
+/**
+ * 目标流程里第一个会派活的阶段（M53）：派单落到「待办」这类列上时卡片不会自己跑，
+ * 所以新建 / 换目标工作流时优先选它；没有这样的阶段就返回 null（= 首阶段）。
+ */
+function landingStageIdOf(target: WorkflowWithStages | undefined): string | null {
+  return (
+    target?.stages.find((item) => item.entryMode === 'agent' || item.entryMode === 'script')?.id ??
+    null
+  )
+}
+
 /** 新加的一行派单：触发条件按阶段类型取第一项，目标工作流取第一个候选。 */
 function defaultHandoff(stage: StageInput, workflows: readonly WorkflowWithStages[]): StageHandoff {
   const first = guardChoicesFor(stage)[0]
   const target = workflows[0]
-  // M53：默认落到目标流程第一个会派活的阶段；落到「待办」这类列上，派单卡不会自己跑
-  const landing = target?.stages.find(
-    (item) => item.entryMode === 'agent' || item.entryMode === 'script',
-  )
   return {
     on: first?.value ?? 'done',
     workflowId: target?.id ?? '',
-    stageId: landing?.id ?? null,
+    stageId: landingStageIdOf(target),
   }
+}
+
+/**
+ * 派单落点提示（M53）：目标阶段不派活 / 已经是终态时，链条不会自己往前跑。
+ * 抽成组件只为算一次——写成 `f() !== null && <p>{f()}</p>` 每次渲染要算两遍。
+ */
+function HandoffLandingHint({
+  stages,
+  stageId,
+}: {
+  stages: readonly WorkflowStage[]
+  stageId: string | null
+}): ReactElement | null {
+  const warning = handoffLandingWarning(stages, stageId)
+  return warning === null ? null : <p className="text-xs text-warning">{warning}</p>
 }
 
 /** 出口表每行的文案（M32）：名字按「谁触发」，缺省按内核补齐后的实际行为写。 */
@@ -1500,7 +1522,16 @@ export function WorkflowEditor({
                               patchHandoffs(
                                 index,
                                 (stage.handoffs ?? []).map((item, k) =>
-                                  k === hi ? { ...item, workflowId: v, stageId: null } : item,
+                                  k === hi
+                                    ? {
+                                        ...item,
+                                        workflowId: v,
+                                        // 换目标流程时一并落到新流程第一个会派活的阶段（与新建一致）
+                                        stageId: landingStageIdOf(
+                                          workflows.find((row) => row.id === v),
+                                        ),
+                                      }
+                                    : item,
                                 ),
                               )
                             }
@@ -1552,17 +1583,10 @@ export function WorkflowEditor({
                               ))}
                             </SelectContent>
                           </Select>
-                          {handoffLandingWarning(
-                            stagesOfWorkflow(handoff.workflowId),
-                            handoff.stageId,
-                          ) !== null && (
-                            <p className="text-xs text-warning">
-                              {handoffLandingWarning(
-                                stagesOfWorkflow(handoff.workflowId),
-                                handoff.stageId,
-                              )}
-                            </p>
-                          )}
+                          <HandoffLandingHint
+                            stages={stagesOfWorkflow(handoff.workflowId)}
+                            stageId={handoff.stageId}
+                          />
                         </Field>
                         <Field label="话题" className="w-36 shrink-0">
                           <Select

@@ -90,21 +90,9 @@ export function viewSpec(input: Input): ProjectionTable[] {
       // A2：人工停止要撤销该任务的授权
       return ['tasks', 'runs', 'mandates']
     case 'task.archive':
-      // M53：归档只写 archivedAt，但要带上任务行与执行中判定（执行中拒绝归档）
-      // 交接产出的新任务首轮提示词要带上下文（新任务没有评论，按切片装载）
-      return [
-        'tasks',
-        'workflows',
-        'workflow_stages',
-        'agents',
-        'runtimes',
-        'projects',
-        'threads',
-        'review_reports',
-        'task_comments',
-        'runs',
-        'cards',
-      ]
+      // M53：归档只写 `archivedAt`、零业务后果——任务行 + 活跃 run（判「执行中不能归档」）
+      // 就够，别照抄 `task.move` 的整份切片
+      return ['tasks', 'runs']
     case 'task.remove':
       // 删除任务前要对其 run 逐条产 run.removed（D13），重建才与增量等价；
       // M6.5：删除后判定线程——还剩任务就按是否全部结束归档，队列删光则连线程一起删

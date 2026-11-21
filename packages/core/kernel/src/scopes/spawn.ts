@@ -46,7 +46,14 @@ export function spawnDepth(view: View, task: Task): number {
   return depth
 }
 
-/** 父任务的直接子任务（含已完成的；已删除的不在视图里）。 */
+/**
+ * 父任务的直接子任务（含已结束的；已删除的不在视图里）。
+ *
+ * **不变量**：`parentTaskId` 只有两种来源写——人工挂子任务（`task.create`，origin=manual）
+ * 与 Agent 派生（origin=spawn）。派单产物只记 `handoffFrom*`（M53），投影归一也会把老派单行
+ * 的 `parentTaskId` 清成 null——所以这里不需要再按 origin 过滤；真要改这条不变量，先改
+ * `normalizeTask` 与 `handoff.ts`。
+ */
 export function childrenOf(view: View, parentTaskId: Id): Task[] {
   const children: Task[] = []
   for (const task of view.tasks.values()) {
@@ -165,7 +172,9 @@ export function spawnFacts(
 
 /** 任务的阶段语义（M53）：结束与否只看阶段类别。 */
 function phaseOf(view: View, task: Task): TaskPhase {
-  return taskPhaseOf(task.currentStageId === null ? undefined : view.stages.get(task.currentStageId))
+  return taskPhaseOf(
+    task.currentStageId === null ? undefined : view.stages.get(task.currentStageId),
+  )
 }
 
 /** 父阶段配置的 rollup 动作；未配置时按父阶段入口模式推断（agent → wake，否则 notify）。 */
@@ -263,9 +272,7 @@ export function childrenSettledFacts(
       (item) => item.builtin === 'done',
     )
     const moved: Task =
-      doneStage === undefined
-        ? parent
-        : { ...parent, currentStageId: doneStage.id, updatedAt: now }
+      doneStage === undefined ? parent : { ...parent, currentStageId: doneStage.id, updatedAt: now }
     if (doneStage !== undefined) {
       facts.push({
         type: 'task.moved',

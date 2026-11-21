@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
 import type { SpawnTask } from '@workbench/protocol/inputs'
 import {
+  childrenOf,
   childrenSettledFacts,
   resolveSubtaskStage,
   spawnDepth,
@@ -342,7 +343,10 @@ describe('kernel/spawn：childrenSettledFacts', () => {
     ]
     for (const item of cases) {
       const view = makeView({
-        stages: new Map([['st-1', stage({ onChildrenSettled: item.action })], ['st-done', doneStage]]),
+        stages: new Map([
+          ['st-1', stage({ onChildrenSettled: item.action })],
+          ['st-done', doneStage],
+        ]),
         tasks: new Map([
           ['tk-1', task()],
           ['tk-child', doneChild],
@@ -359,7 +363,10 @@ describe('kernel/spawn：childrenSettledFacts', () => {
 
   it('非 agent 阶段且未配置：降级 notify', () => {
     const view = makeView({
-      stages: new Map([['st-1', stage({ entryMode: 'user', agentId: null })], ['st-done', doneStage]]),
+      stages: new Map([
+        ['st-1', stage({ entryMode: 'user', agentId: null })],
+        ['st-done', doneStage],
+      ]),
       tasks: new Map([
         ['tk-1', task()],
         ['tk-child', doneChild],
@@ -388,13 +395,17 @@ describe('kernel/spawn：childrenSettledFacts', () => {
     })
 
     // 派单产物没有 parentTaskId：childrenOf 里查不到它，也就不可能触发 rollup
+    expect(childrenOf(implicit, 'tk-1')).toEqual([])
     expect(
       childrenSettledFacts(implicit, 'tk-1', AT, env(), { kind: 'host', via: 'scheduler' }),
     ).toEqual([])
 
     // 父阶段显式配了 wake 也没用：它根本不是「子任务」（血缘走 handoffFrom*）
     const explicit = makeView({
-      stages: new Map([['st-1', stage({ onChildrenSettled: 'wake' })], ['st-done', doneStage]]),
+      stages: new Map([
+        ['st-1', stage({ onChildrenSettled: 'wake' })],
+        ['st-done', doneStage],
+      ]),
       tasks: new Map([
         ['tk-1', task()],
         ['tk-handed', handed],

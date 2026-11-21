@@ -2,7 +2,7 @@
  * 任务命令（R2 从 `decide.ts` 拆出，行为不变）。
  */
 import type { Task, WorkflowWithStages } from '@workbench/protocol/entities'
-import { isTaskOver, taskPhaseOf } from '@workbench/protocol/entities'
+import { isTaskOver, taskPhaseOf, terminalOutcomeOf } from '@workbench/protocol/entities'
 import type { Input } from '@workbench/protocol/inputs'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { Decision, Environment, FactDraft, Id, Iso, View } from '../../core/types'
@@ -23,7 +23,7 @@ import {
   threadOfTask,
   withTask,
 } from '../threads'
-import { archiveTask, moveTask, moveTaskToStage, terminalOutcomeOf } from '../workflow/stage-machine'
+import { archiveTask, moveTask, moveTaskToStage } from '../workflow/stage-machine'
 import {
   done,
   hostDraft,
@@ -201,7 +201,7 @@ export function moveTaskCommand(
   if (outcome !== null) {
     facts.push(ownerDraft('task.finished', { task: moved, outcome }, now))
     // M50：同一批里可能刚派出一张落回本话题的新卡——它还没进视图，归档判定要把它算作未结束
-    const settled = batchTaskPhases(facts)
+    const settled = batchTaskPhases(view, facts)
     settled.set(task.id, outcome === 'cancelled' ? 'cancelled' : 'finished')
     facts.push(
       ...closeIfAllDone(

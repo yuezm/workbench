@@ -12,7 +12,17 @@ const completed = (taskId: string, title: string, seq = 1): Fact =>
     actor: { kind: 'host', via: 'scheduler' },
     at: AT,
     seq,
-    payload: { task: { id: taskId, title } },
+    payload: { task: { id: taskId, title }, outcome: 'done' },
+  }) as unknown as Fact
+
+/** 智能体 / 宿主把任务移进内置「已取消」（M53：也是结束，但话不能说成「完成」） */
+const cancelled = (taskId: string, title: string, seq = 1): Fact =>
+  ({
+    type: 'task.finished',
+    actor: { kind: 'host', via: 'scheduler' },
+    at: AT,
+    seq,
+    payload: { task: { id: taskId, title }, outcome: 'cancelled' },
   }) as unknown as Fact
 
 /** 人自己点的完成（不该弹） */
@@ -22,7 +32,7 @@ const completedByOwner = (taskId: string, title: string, seq = 1): Fact =>
     actor: { kind: 'owner', via: 'ui' },
     at: AT,
     seq,
-    payload: { task: { id: taskId, title } },
+    payload: { task: { id: taskId, title }, outcome: 'done' },
   }) as unknown as Fact
 
 /** 终态失败：`taskId === null` 表示聊天轮次 */
@@ -57,6 +67,26 @@ describe('noticesFromFacts：结局通知（M12）', () => {
 
   it('人自己在 UI 里点的完成不打扰', () => {
     expect(noticesFromFacts([completedByOwner('t1', '写文档')])).toEqual([])
+  })
+
+  it('移到「已取消」：说「任务已取消」，不把取消说成完成（M53）', () => {
+    expect(noticesFromFacts([cancelled('t1', '写文档')])).toEqual([
+      {
+        title: '任务已取消：写文档',
+        body: SETTLEMENT_NOTICE_BODY.cancelled,
+        target: { taskId: 't1' },
+      },
+    ])
+  })
+
+  it('同批里完成与取消各一条，按事实顺序', () => {
+    const notices = noticesFromFacts([completed('t1', 'A', 1), cancelled('t2', 'B', 2)])
+
+    expect(notices.map((n) => n.title)).toEqual(['任务完成：A', '任务已取消：B'])
+    expect(notices.map((n) => n.body)).toEqual([
+      SETTLEMENT_NOTICE_BODY.completed,
+      SETTLEMENT_NOTICE_BODY.cancelled,
+    ])
   })
 
   it('同一任务在一批里被级联多次完成：只留一条', () => {

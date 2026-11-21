@@ -72,22 +72,22 @@ function setup(
   board: WorkflowWithStages = wf,
 ): {
   onMoveToStage: ReturnType<typeof vi.fn>
-  onCompleteTask: ReturnType<typeof vi.fn>
+  onArchiveTask: ReturnType<typeof vi.fn>
   onNewTask: ReturnType<typeof vi.fn>
 } {
   const onMoveToStage = vi.fn()
-  const onCompleteTask = vi.fn()
+  const onArchiveTask = vi.fn()
   const onNewTask = vi.fn()
   render(
     <KanbanBoard
       workflow={board}
       tasks={tasks}
       onMoveToStage={onMoveToStage}
-      onCompleteTask={onCompleteTask}
+      onArchiveTask={onArchiveTask}
       onNewTask={onNewTask}
     />,
   )
-  return { onMoveToStage, onCompleteTask, onNewTask }
+  return { onMoveToStage, onArchiveTask, onNewTask }
 }
 
 let kernel: FakeKernel
@@ -105,7 +105,7 @@ describe('KanbanBoard', () => {
         workflow={wf}
         tasks={[task, doneTask]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={onNewTask}
       />,
     )
@@ -139,7 +139,7 @@ describe('KanbanBoard', () => {
         workflow={wf}
         tasks={[task, foreign]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
       />,
     )
@@ -150,7 +150,7 @@ describe('KanbanBoard', () => {
   })
 
   it('拖到其它阶段列触发 moveToStage，拖拽中空列提示落点', () => {
-    const { onMoveToStage, onCompleteTask } = setup()
+    const { onMoveToStage, onArchiveTask } = setup()
     fireEvent.dragStart(screen.getByLabelText('任务：卡片任务'))
     expect(screen.getByText('拖到这里')).toBeInTheDocument()
 
@@ -162,7 +162,7 @@ describe('KanbanBoard', () => {
     expect(onMoveToStage).toHaveBeenCalledWith('t1', 's0')
     // 拖拽结束后空列恢复原提示
     expect(screen.getByText('空')).toBeInTheDocument()
-    expect(onCompleteTask).not.toHaveBeenCalled()
+    expect(onArchiveTask).not.toHaveBeenCalled()
   })
 
   it('落回当前阶段不触发 moveToStage', () => {
@@ -172,26 +172,26 @@ describe('KanbanBoard', () => {
     expect(onMoveToStage).not.toHaveBeenCalled()
   })
 
-  it('拖到「归档」区触发 completeTask', () => {
-    const { onCompleteTask } = setup()
+  it('拖到「归档」区触发 archiveTask', () => {
+    const { onArchiveTask } = setup()
     const done = screen.getByRole('group', { name: '归档区' })
     fireEvent.dragStart(screen.getByLabelText('任务：卡片任务'))
     fireEvent.dragOver(done)
     fireEvent.dragLeave(done)
     fireEvent.dragOver(done)
     fireEvent.drop(done)
-    expect(onCompleteTask).toHaveBeenCalledWith('t1')
+    expect(onArchiveTask).toHaveBeenCalledWith('t1')
   })
 
   it('没有拖拽来源时，悬停与落下都不触发任何回调', () => {
-    const { onMoveToStage, onCompleteTask } = setup()
+    const { onMoveToStage, onArchiveTask } = setup()
     const target = screen.getByRole('group', { name: '阶段：待办' })
     fireEvent.dragOver(target)
     fireEvent.drop(target)
     fireEvent.dragOver(screen.getByRole('group', { name: '归档区' }))
     fireEvent.drop(screen.getByRole('group', { name: '归档区' }))
     expect(onMoveToStage).not.toHaveBeenCalled()
-    expect(onCompleteTask).not.toHaveBeenCalled()
+    expect(onArchiveTask).not.toHaveBeenCalled()
   })
 
   it('tasks.executing 含该任务时卡片执行中且不可拖', async () => {
@@ -251,7 +251,7 @@ describe('KanbanBoard', () => {
         workflow={agentWf}
         tasks={[task]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
       />,
     )
@@ -266,7 +266,7 @@ describe('KanbanBoard', () => {
         workflow={agentWf}
         tasks={[task]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
       />,
     )
@@ -284,7 +284,7 @@ describe('KanbanBoard', () => {
 
   it('执行中的任务不给落点：拖动途中进入执行中后阶段列与归档区都不高亮、不触发回调', async () => {
     kernel.setView('tasks.executing', undefined, [])
-    const { onMoveToStage, onCompleteTask } = setup([task], agentWf)
+    const { onMoveToStage, onArchiveTask } = setup([task], agentWf)
     // 先把规则写在归档区上，别让用户拖过去才吃内核的「执行中的阶段不能完成」
     expect(screen.getByText('执行中的任务不能归档')).toBeInTheDocument()
 
@@ -309,7 +309,7 @@ describe('KanbanBoard', () => {
     fireEvent.dragOver(done)
     expect(done.className).not.toContain('border-success')
     fireEvent.drop(done)
-    expect(onCompleteTask).not.toHaveBeenCalled()
+    expect(onArchiveTask).not.toHaveBeenCalled()
   })
 
   it('任务有 threadId 时卡片带线程入口，点击把任务交给上层', async () => {
@@ -319,7 +319,7 @@ describe('KanbanBoard', () => {
         workflow={wf}
         tasks={[{ ...task, threadId: 'th1' }]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
         onOpenThread={onOpenThread}
       />,
@@ -336,7 +336,7 @@ describe('KanbanBoard', () => {
         workflow={wf}
         tasks={[task]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
         onOpenTask={onOpenTask}
       />,
@@ -354,7 +354,7 @@ describe('KanbanBoard', () => {
         workflow={wf}
         tasks={[parent, child]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
       />,
     )
@@ -371,7 +371,7 @@ describe('KanbanBoard', () => {
         workflow={wf}
         tasks={[task, doneTask]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
         onOpenTask={onOpenTask}
       />,
@@ -417,7 +417,7 @@ describe('KanbanBoard', () => {
         workflow={withDone}
         tasks={[task, childOpen, childDone]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
       />,
     )
@@ -441,7 +441,7 @@ describe('KanbanBoard', () => {
         workflow={withDone}
         tasks={[task, childInDoneStage]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
       />,
     )
@@ -530,7 +530,7 @@ describe('KanbanBoard 列头类别', () => {
         workflow={withBuiltins()}
         tasks={[]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
       />,
     )
@@ -549,7 +549,7 @@ describe('KanbanBoard 列头类别', () => {
         workflow={withBuiltins()}
         tasks={[]}
         onMoveToStage={vi.fn()}
-        onCompleteTask={vi.fn()}
+        onArchiveTask={vi.fn()}
         onNewTask={vi.fn()}
       />,
     )

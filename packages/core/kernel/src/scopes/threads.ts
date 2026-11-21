@@ -152,7 +152,9 @@ export function tasksOfThread(view: View, thread: ThreadRow): Task[] {
 
 /** 任务的阶段语义（M53：结束与否只看阶段类别，与归档无关）。 */
 export function phaseOf(view: View, task: Task): TaskPhase {
-  return taskPhaseOf(task.currentStageId === null ? undefined : view.stages.get(task.currentStageId))
+  return taskPhaseOf(
+    task.currentStageId === null ? undefined : view.stages.get(task.currentStageId),
+  )
 }
 
 /** 线程内还没结束的任务（完成 / 取消都算结束；复用策略只看它们）。 */
@@ -355,14 +357,20 @@ export function threadWithBatchTasks(
 }
 
 /**
- * 本批新建的任务（`task.created`）在结束判定里算「未结束」（视图里还没有它们），
- * 本批刚完成 / 删除的任务按事实记成终态（M53：阶段语义，不再用 `status`）。
+/**
+ * 本批新建的任务（`task.created`）在结束判定里的阶段语义：按**它自己的落点阶段**判（视图里
+ * 还没有这张卡）；本批刚完成 / 删除的任务按事实记成终态（M53：阶段语义，不再用 `status`）。
  */
-export function batchTaskPhases(facts: readonly FactDraft[]): Map<Id, TaskPhase | 'removed'> {
+export function batchTaskPhases(
+  view: View,
+  facts: readonly FactDraft[],
+): Map<Id, TaskPhase | 'removed'> {
   const phases = new Map<Id, TaskPhase | 'removed'>()
   for (const fact of facts) {
     if (fact.type === 'task.created') {
-      phases.set((fact.payload as { task: Task }).task.id, 'todo')
+      // 落点可能就是终态阶段（派单投到「已完成」是允许的）：按它自己的阶段判，别一律当「未开始」
+      const task = (fact.payload as { task: Task }).task
+      phases.set(task.id, phaseOf(view, task))
     } else if (fact.type === 'task.finished') {
       const { task, outcome } = fact.payload as {
         task: Task
@@ -390,11 +398,10 @@ export function closeIfAllDone(
 ): FactDraft[] {
   if (thread === undefined || thread.status === 'closed') return []
   for (const taskId of thread.taskIds) {
-    const override = overrides?.get(taskId)
-    if (override === 'removed') continue
     const task = view.tasks.get(taskId)
-    const phase = override ?? (task === undefined ? 'removed' : phaseOf(view, task))
-    if (!isTaskOver(phase as TaskPhase) && phase !== 'removed') return []
+    const phase = overrides?.get(taskId) ?? (task === undefined ? 'removed' : phaseOf(view, task))
+    // 「已删」与「已结束」都算走完；先排掉 removed，剩下的才交给 isTaskOver（免掉类型断言）
+    if (phase !== 'removed' && !isTaskOver(phase)) return []
   }
   return closedFacts(withStatus(thread, 'closed', now), 'all-tasks-done', actor, now)
 }

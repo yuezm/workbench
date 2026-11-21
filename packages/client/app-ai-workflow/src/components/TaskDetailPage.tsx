@@ -95,9 +95,7 @@ export function TaskDetailPage({
   /** 顶部结束动作（重新执行 / 停止执行 / 完成任务 / 删除任务）的进行中与失败文案 */
   const [action, setAction] = useState<
     'rerun' | 'reask' | 'stop' | 'complete' | 'archive' | 'remove' | null
-  >(
-    null,
-  )
+  >(null)
   const [actionError, setActionError] = useState<string | null>(null)
   /** 删除确认弹窗：删除连带执行记录（可能连带线程），先问一次 */
   const [confirmRemove, setConfirmRemove] = useState(false)
@@ -106,6 +104,12 @@ export function TaskDetailPage({
   const stage =
     task === null ? undefined : workflow?.stages.find((item) => item.id === task.currentStageId)
   const stageName = stage?.name
+  /**
+   * 本工作流的内置「已完成」（M53）：完成的唯一人工入口要落到它。
+   * 内核保证内置阶段齐全，取不到只可能是脏库——那就干脆不显示这个动作，别给一个点了没反应的按钮。
+   */
+  const doneStage =
+    task === null ? undefined : workflow?.stages.find((item) => item.builtin === 'done')
   const stageNameOf = (child: Task): string =>
     workflow?.stages.find((item) => item.id === child.currentStageId)?.name ?? '未知阶段'
   /** 子任务的阶段语义（M53：停在「已完成 / 已取消」列就算结束，不等归档） */
@@ -211,10 +215,9 @@ export function TaskDetailPage({
 
   /**
    * 移到「已完成」（M53）：完成的人工入口，任务仍留在看板。
-   * 没有「已完成」阶段（工作流被改坏）时退到「归档」——完成与收纳是两件事，但至少能收尾。
+   * 走 `task.move`——完成由「进入终态阶段」表达，归档是另一条轴（见 `toggleArchive`）。
    */
   const finishTask = (): void => {
-    const doneStage = workflow?.stages.find((item) => item.builtin === 'done')
     if (doneStage === undefined) return
     setAction('complete')
     setActionError(null)
@@ -224,13 +227,21 @@ export function TaskDetailPage({
       .finally(() => setAction(null))
   }
 
-  /** 归档 / 取消归档：只改 archivedAt，可逆、零业务后果（执行中由内核拒绝）。 */
+  /**
+   * 归档 / 取消归档：只改 archivedAt，可逆、零业务后果。
+   * 执行中由内核拒绝（先 `task.stop`），按钮在这里先禁用并把原因写进 title。
+   */
   const toggleArchive = (): void => {
     if (task === null) return
     setAction('archive')
     setActionError(null)
     void getKernelStore()
-      .dispatch({ type: 'task.archive', commandId: '', id: taskId, archived: task.archivedAt === null })
+      .dispatch({
+        type: 'task.archive',
+        commandId: '',
+        id: taskId,
+        archived: task.archivedAt === null,
+      })
       .catch((e: unknown) => setActionError(errMsg(e)))
       .finally(() => setAction(null))
   }
@@ -311,7 +322,7 @@ export function TaskDetailPage({
                 {action === 'stop' ? '正在停止…' : '停止执行'}
               </Button>
             )}
-            {task !== null && !isTaskOver(phase) && (
+            {task !== null && !isTaskOver(phase) && doneStage !== undefined && (
               <Button
                 type="button"
                 variant="secondary"
@@ -330,9 +341,11 @@ export function TaskDetailPage({
                 size="sm"
                 disabled={executing || action !== null}
                 title={
-                  task.archivedAt === null
-                    ? '归档：从看板收起来（可撤销，不影响完成与否）'
-                    : '取消归档：放回看板'
+                  executing
+                    ? '执行中：先停止归档'
+                    : task.archivedAt === null
+                      ? '归档：从看板收起来（可撤销，不影响完成与否）'
+                      : '取消归档：放回看板'
                 }
                 onClick={toggleArchive}
               >

@@ -272,7 +272,8 @@ export function AiWorkflowPage(): ReactElement {
     })()
   }
 
-  const completeTask = (id: string): void => {
+  /** 看板「归档」落点（M53）：从看板收起来，可逆、不等于完成 */
+  const archiveTask = (id: string): void => {
     void (async () => {
       try {
         await getKernelStore().dispatch({ type: 'task.archive', commandId: '', id, archived: true })
@@ -427,7 +428,7 @@ export function AiWorkflowPage(): ReactElement {
                     workflow={active}
                     tasks={tasks}
                     onMoveToStage={moveToStage}
-                    onCompleteTask={completeTask}
+                    onArchiveTask={archiveTask}
                     onNewTask={() => setDialogOpen(true)}
                     onOpenTask={(task) => openTask(task.id)}
                     onOpenThread={openThread}

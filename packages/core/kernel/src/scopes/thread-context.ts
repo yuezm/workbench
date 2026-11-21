@@ -294,10 +294,16 @@ function taskLines(view: View, thread: ThreadRow, currentTaskId: Id | null): Ite
     const stage = task.currentStageId === null ? undefined : view.stages.get(task.currentStageId)
     return stage ? `阶段：${stage.name}` : '无阶段'
   }
-  const line = (task: Task, depth: number): Item => ({
-    at: null,
-    text: `${'  '.repeat(depth)}- [${taskPhaseOf(task.currentStageId === null ? undefined : view.stages.get(task.currentStageId))}] ${truncate(task.title, 80)}（${stageName(task)}）`,
-  })
+  const line = (task: Task, depth: number): Item => {
+    // 任务树与执行索引共用一份中文（M53）：提示词里不出现 `finished` / `cancelled` 这类内部枚举
+    const phase = taskPhaseOf(
+      task.currentStageId === null ? undefined : view.stages.get(task.currentStageId),
+    )
+    return {
+      at: null,
+      text: `${'  '.repeat(depth)}- [${PHASE_LABEL[phase]}] ${truncate(task.title, 80)}（${stageName(task)}）`,
+    }
+  }
   const children = new Map<Id, Task[]>()
   const roots: Task[] = []
   for (const task of tasks.values()) {

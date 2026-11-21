@@ -1218,7 +1218,7 @@ describe('kernel/decide run.receipt 回执', () => {
     ])
   })
 
-  it('成功且已是最后阶段（close 出口）：产 task.moved + task.finished + task.archived（M53）', () => {
+  it('成功且已是最后阶段（close 出口）：产 task.finished + task.archived，不留 from===to 的 task.moved（M53）', () => {
     const active = running()
     const current = task()
     const decision = receive(
@@ -1233,18 +1233,18 @@ describe('kernel/decide run.receipt 回执', () => {
     )
 
     const settled = { ...current, updatedAt: NOW, gateFails: 0 }
+    // close 是「原地结束」：阶段没动，就不该多一条 task.moved
     expect(decision.facts.slice(1).map((fact) => fact.type)).toEqual([
-      'task.moved',
       'task.finished',
       'task.archived',
     ])
-    expect(decision.facts[2]).toEqual({
+    expect(decision.facts[1]).toEqual({
       type: 'task.finished',
       actor: HOST,
       at: NOW,
       payload: { task: settled, outcome: 'done' },
     })
-    expect(decision.facts[3]).toEqual({
+    expect(decision.facts[2]).toEqual({
       type: 'task.archived',
       actor: HOST,
       at: NOW,

@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Task, WorkflowStage, WorkflowWithStages } from '@workbench/protocol/entities'
 import { ArchivedTasksDialog } from '@workbench/client-app-ai-workflow/components/ArchivedTasksDialog'
 
-function stage(id: string, name: string, position: number): WorkflowStage {
+function stage(
+  id: string,
+  name: string,
+  position: number,
+  builtin: WorkflowStage['builtin'] = null,
+): WorkflowStage {
   return {
     id,
     workflowId: 'w1',
@@ -12,6 +17,7 @@ function stage(id: string, name: string, position: number): WorkflowStage {
     position,
     entryMode: 'none',
     agentId: null,
+    builtin,
     exits: {},
     judge: null,
     handoffs: [],
@@ -23,7 +29,12 @@ const wf: WorkflowWithStages = {
   name: '研发',
   description: '',
   createdAt: 't',
-  stages: [stage('s0', '待办', 0), stage('s1', '审核', 1)],
+  stages: [
+    stage('s0', '待办', 0),
+    stage('s1', '审核', 1),
+    stage('s2', '已完成', 2, 'done'),
+    stage('s3', '已取消', 3, 'cancelled'),
+  ],
 }
 
 function task(id: string, title: string, updatedAt: string, currentStageId = 's1'): Task {
@@ -50,25 +61,49 @@ function task(id: string, title: string, updatedAt: string, currentStageId = 's1
 }
 
 describe('ArchivedTasksDialog', () => {
-  it('按最近更新倒序列出已完成任务，带阶段名与计数', () => {
+  it('按最近更新倒序列出已归档任务，带阶段名与计数', () => {
     render(
       <ArchivedTasksDialog
         workflow={wf}
         tasks={[
-          task('t1', '早完成的', '2026-11-01T10:00:00.000Z'),
-          task('t2', '晚完成的', '2026-11-08T10:00:00.000Z', 's0'),
+          task('t1', '早归档的', '2026-11-01T10:00:00.000Z'),
+          task('t2', '晚归档的', '2026-11-08T10:00:00.000Z', 's0'),
         ]}
         onOpenTask={vi.fn()}
         onClose={vi.fn()}
       />,
     )
-    expect(screen.getByRole('dialog')).toHaveTextContent('工作流「研发」已完成 2 个任务')
+    expect(screen.getByRole('dialog')).toHaveTextContent('工作流「研发」已归档 2 个任务')
     const rows = within(screen.getByLabelText('归档任务列表')).getAllByRole('button')
     expect(rows).toHaveLength(2)
-    expect(rows[0]).toHaveTextContent('晚完成的')
+    expect(rows[0]).toHaveTextContent('晚归档的')
     expect(rows[0]).toHaveTextContent('待办')
-    expect(rows[1]).toHaveTextContent('早完成的')
+    expect(rows[1]).toHaveTextContent('早归档的')
     expect(rows[1]).toHaveTextContent('审核')
+  })
+
+  it('徽标按阶段类别渲染：归档 ≠ 完成（M53）', () => {
+    render(
+      <ArchivedTasksDialog
+        workflow={wf}
+        tasks={[
+          task('t1', '做完了的', '2026-11-08T10:00:00.000Z', 's2'),
+          task('t2', '取消掉的', '2026-11-07T10:00:00.000Z', 's3'),
+          task('t3', '没做完就不跟了', '2026-11-06T10:00:00.000Z', 's1'),
+        ]}
+        onOpenTask={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    )
+    const rows = within(screen.getByLabelText('归档任务列表')).getAllByRole('button')
+    const phaseOf = (row: HTMLElement): string | null =>
+      row.querySelector('[data-task-phase]')?.getAttribute('data-task-phase') ?? null
+    expect(phaseOf(rows[0])).toBe('finished')
+    expect(rows[0]).toHaveTextContent('已完成')
+    expect(phaseOf(rows[1])).toBe('cancelled')
+    expect(rows[1]).toHaveTextContent('已取消')
+    expect(phaseOf(rows[2])).toBe('active')
+    expect(rows[2]).toHaveTextContent('进行中')
   })
 
   it('点一行进任务详情并关掉弹窗', async () => {

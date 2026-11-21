@@ -393,6 +393,10 @@ describe('KanbanBoard', () => {
   })
 
   it('父任务卡显示子任务完成进度（M8）', () => {
+    const withDone: WorkflowWithStages = {
+      ...wf,
+      stages: [...wf.stages, { ...stage('s-done', '已完成', 2, 'none'), builtin: 'done' }],
+    }
     const childOpen: Task = {
       ...task,
       id: 't2',
@@ -400,16 +404,17 @@ describe('KanbanBoard', () => {
       parentTaskId: 't1',
       currentStageId: 's0',
     }
+    // M53：完成看阶段类别（停在「已完成」列即为完成），不再看是否归档
     const childDone: Task = {
       ...task,
       id: 't3',
       title: '子任务二',
       parentTaskId: 't1',
-      status: 'completed',
+      currentStageId: 's-done',
     }
     render(
       <KanbanBoard
-        workflow={wf}
+        workflow={withDone}
         tasks={[task, childOpen, childDone]}
         onMoveToStage={vi.fn()}
         onCompleteTask={vi.fn()}
@@ -417,6 +422,30 @@ describe('KanbanBoard', () => {
       />,
     )
     expect(screen.getByText('子任务 1/2')).toBeInTheDocument()
+  })
+
+  it('子任务停在「已完成」阶段（未归档）也算完成（M53）', () => {
+    const withDone: WorkflowWithStages = {
+      ...wf,
+      stages: [...wf.stages, { ...stage('s-done', '已完成', 2, 'none'), builtin: 'done' }],
+    }
+    const childInDoneStage: Task = {
+      ...task,
+      id: 't3',
+      title: '子任务二',
+      parentTaskId: 't1',
+      currentStageId: 's-done',
+    }
+    render(
+      <KanbanBoard
+        workflow={withDone}
+        tasks={[task, childInDoneStage]}
+        onMoveToStage={vi.fn()}
+        onCompleteTask={vi.fn()}
+        onNewTask={vi.fn()}
+      />,
+    )
+    expect(screen.getByText('子任务 1/1')).toBeInTheDocument()
   })
 })
 

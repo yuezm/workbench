@@ -1,12 +1,8 @@
 import type { ReactElement } from 'react'
-import type { Task } from '@workbench/protocol/entities'
+import type { Task, TaskPhase } from '@workbench/protocol/entities'
+import { TASK_PHASE_LABEL } from '../model/stage-kinds'
 import { cn } from '@workbench/client-ui-kit/cn'
 import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
-
-const STATUS_LABEL: Record<Task['status'], string> = {
-  active: '进行中',
-  completed: '已完成',
-}
 
 const ORIGIN_LABEL: Record<Task['origin'], string> = {
   manual: '手工创建',
@@ -42,6 +38,11 @@ export interface TaskInfoPanelProps {
   task: Task
   /** 当前阶段名（工作流数据缺失时为 undefined，展示「未知阶段」） */
   stageName: string | undefined
+  /**
+   * 阶段语义（M53）：完成与否只看阶段类别，「状态」这一行不再读归档字段——
+   * 停在「已完成」列的任务当场显示「已完成」，归档与否是另一件事。
+   */
+  phase: TaskPhase
 }
 
 /**
@@ -50,11 +51,11 @@ export interface TaskInfoPanelProps {
  * 只读任务行与阶段名，不推导任何业务规则；状态 / 来源的中文文案属于展示映射。
  * 任务说明（初始输入）不在这里：它单独成卡，见 `TaskBrief`。
  */
-export function TaskInfoPanel({ task, stageName }: TaskInfoPanelProps): ReactElement {
+export function TaskInfoPanel({ task, stageName, phase }: TaskInfoPanelProps): ReactElement {
   return (
     <section aria-label="任务信息" className="flex flex-col gap-3">
       <dl className="grid grid-cols-2 gap-x-6 gap-y-2.5 rounded-xl border border-border bg-card px-4 py-3 sm:grid-cols-3">
-        <Meta label="状态" value={STATUS_LABEL[task.status]} />
+        <Meta label="阶段语义" value={TASK_PHASE_LABEL[phase]} />
         <Meta label="阶段" value={stageName ?? '未知阶段'} />
         <Meta label="来源" value={ORIGIN_LABEL[task.origin]} />
         <Meta label="线程" value={task.threadId ?? '未挂线程'} mono={task.threadId !== null} />

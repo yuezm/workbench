@@ -12,7 +12,7 @@
  *
  * `chip` 是同色的低透明度底：徽标要能读到字，又不能抢过标题。
  */
-import type { StageKind } from '@workbench/protocol/entities'
+import type { StageKind, TaskPhase } from '@workbench/protocol/entities'
 
 export interface StageKindMeta {
   /**
@@ -53,4 +53,27 @@ export const STAGE_KIND_META: Record<StageKind, StageKindMeta> = {
     text: 'text-muted-foreground',
     chip: 'bg-destructive/10',
   },
+}
+
+/**
+ * 任务阶段语义 → 视觉映射（M53）：颜色沿用阶段类别（完成绿 / 取消红点弱字），
+ * 只有文案不同——阶段类别叫「已关闭」，任务的阶段语义叫「已取消」（人看的是任务）。
+ */
+export const TASK_PHASE_KIND: Record<TaskPhase, StageKind> = {
+  todo: 'pending',
+  active: 'active',
+  finished: 'done',
+  cancelled: 'closed',
+}
+
+export const TASK_PHASE_LABEL: Record<TaskPhase, string> = {
+  todo: '未开始',
+  active: '进行中',
+  finished: '已完成',
+  cancelled: '已取消',
+}
+
+/** 任务阶段语义的徽标样式（`chip` + `text` 成对使用）。 */
+export function taskPhaseMeta(phase: TaskPhase): StageKindMeta {
+  return STAGE_KIND_META[TASK_PHASE_KIND[phase]]
 }

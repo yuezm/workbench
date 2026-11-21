@@ -27,6 +27,8 @@ import {
   normalizeDeliverables,
   permissionModeOfAccess,
   stageKindOf,
+  TASK_PHASES,
+  taskPhaseOf,
   type Access,
   type Agent,
   type AgentInput,
@@ -626,6 +628,23 @@ describe('protocol/entities 内置阶段（M18）', () => {
   it('isBuiltinStageName：去首尾空白后匹配，非内置名返回 false', () => {
     expect(isBuiltinStageName(' 已完成 ')).toBe(true)
     expect(isBuiltinStageName('开发')).toBe(false)
+  })
+})
+
+describe('protocol/entities 任务阶段语义（M53）', () => {
+  it('taskPhaseOf：四个内置阶段各有自己的阶段语义，自己添加的一律进行中', () => {
+    expect(TASK_PHASES).toEqual(['todo', 'active', 'finished', 'cancelled'])
+    expect(taskPhaseOf({ builtin: 'todo' })).toBe('todo')
+    expect(taskPhaseOf({ builtin: 'blocked' })).toBe('active')
+    expect(taskPhaseOf({ builtin: 'done' })).toBe('finished')
+    expect(taskPhaseOf({ builtin: 'cancelled' })).toBe('cancelled')
+    expect(taskPhaseOf({ builtin: null })).toBe('active')
+    expect(taskPhaseOf({})).toBe('active')
+  })
+
+  it('taskPhaseOf：阶段缺失（脏投影 / 无当前阶段）按未开始', () => {
+    expect(taskPhaseOf(null)).toBe('todo')
+    expect(taskPhaseOf(undefined)).toBe('todo')
   })
 })
 

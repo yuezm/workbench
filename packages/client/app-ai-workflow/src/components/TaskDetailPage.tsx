@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactElement } from 'react'
-import type { Task, WorkflowWithStages } from '@workbench/protocol/entities'
+import type { Task, TaskPhase, WorkflowWithStages } from '@workbench/protocol/entities'
 import { Button } from '@workbench/client-ui-primitives/button'
 import {
   Dialog,
@@ -21,6 +21,8 @@ import { TaskCommentForm } from './TaskCommentForm'
 import { TaskInfoPanel } from './TaskInfoPanel'
 import { MandateSection } from './MandateSection'
 import { ReviewPanel } from './ReviewPanel'
+import { phaseOfTask } from '../model/task-phase'
+import { TASK_PHASE_LABEL, taskPhaseMeta } from '../model/stage-kinds'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -104,6 +106,9 @@ export function TaskDetailPage({
   const stageName = stage?.name
   const stageNameOf = (child: Task): string =>
     workflow?.stages.find((item) => item.id === child.currentStageId)?.name ?? '未知阶段'
+  /** 子任务的阶段语义（M53：停在「已完成 / 已取消」列就算结束，不等归档） */
+  const phaseOfChild = (child: Task): TaskPhase => phaseOfTask(child, workflows)
+  const phase: TaskPhase = task === null ? 'todo' : phaseOfTask(task, workflows)
   const hint =
     task === null ? '读取任务中' : `${workflow?.name ?? '未知工作流'} · ${stageName ?? '未知阶段'}`
   /** 勾选「接着做」只在会跑单的阶段（交给智能体 / 执行脚本）有意义（是否真跑仍由内核判定） */
@@ -319,7 +324,7 @@ export function TaskDetailPage({
         ) : (
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
             <FormError message={actionError} />
-            <TaskInfoPanel task={task} stageName={stageName} />
+            <TaskInfoPanel task={task} stageName={stageName} phase={phase} />
 
             {/* 授权（A2）：凭什么执行、范围多大、哪版策略、撤没撤 */}
             <MandateSection taskId={task.id} scopeLabel={hint} />
@@ -339,7 +344,7 @@ export function TaskDetailPage({
                 <h3 className="flex items-center gap-2 text-base font-medium text-foreground">
                   子任务
                   <span className={badgeCls}>
-                    {children.filter((child) => child.status === 'completed').length}/
+                    {children.filter((child) => phaseOfChild(child) === 'finished').length}/
                     {children.length}
                   </span>
                 </h3>
@@ -357,13 +362,14 @@ export function TaskDetailPage({
                           {stageNameOf(child)}
                         </span>
                         <span
-                          className={
-                            child.status === 'completed'
-                              ? 'shrink-0 rounded-sm bg-success/15 px-1.5 py-0.5 text-xs text-success'
-                              : 'shrink-0 rounded-sm bg-accent px-1.5 py-0.5 text-xs text-muted-foreground'
-                          }
+                          className={[
+                            'shrink-0 rounded-sm px-1.5 py-0.5 text-xs',
+                            taskPhaseMeta(phaseOfChild(child)).chip,
+                            taskPhaseMeta(phaseOfChild(child)).text,
+                          ].join(' ')}
+                          data-task-phase={phaseOfChild(child)}
                         >
-                          {child.status === 'completed' ? '已完成' : '进行中'}
+                          {TASK_PHASE_LABEL[phaseOfChild(child)]}
                         </span>
                       </button>
                     </li>

@@ -1,5 +1,5 @@
 import { useState, type FormEvent, type ReactElement } from 'react'
-import type { Task } from '@workbench/protocol/entities'
+import type { Task, TaskPhase, WorkflowWithStages } from '@workbench/protocol/entities'
 import { THREAD_LIMITS, type ThreadRow } from '@workbench/protocol/thread'
 import { Button } from '@workbench/client-ui-primitives/button'
 import {
@@ -19,6 +19,8 @@ import { cn } from '@workbench/client-ui-kit/cn'
 import { formatLocalDateTime } from '@workbench/client-ui-kit/time'
 import { getKernelStore } from '@workbench/client-kernel-store'
 import { useKernelView, useKernelViewState } from '@workbench/client-shell/useKernelView'
+import { phaseOfTask } from '../model/task-phase'
+import { TASK_PHASE_LABEL, taskPhaseMeta } from '../model/stage-kinds'
 import { DetailHeader } from './DetailHeader'
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -92,15 +94,19 @@ function TaskTreeItem({
   node,
   depth,
   workflowLabel,
+  phaseOf,
   onOpenTask,
 }: {
   node: TaskNode
   depth: number
   /** 话题跨多个流程时给的工作流名（只有一个流程的旧话题返回 undefined，省得每行都挂徽标） */
   workflowLabel?: (task: Task) => string | undefined
+  /** 任务的阶段语义（M53：徽标按阶段类别，不看是否归档） */
+  phaseOf: (task: Task) => TaskPhase
   onOpenTask: (taskId: string) => void
 }): ReactElement {
-  const completed = node.task.status === 'completed'
+  const phase = phaseOf(node.task)
+  const phaseMeta = taskPhaseMeta(phase)
   const workflowName = workflowLabel?.(node.task)
   return (
     <li>
@@ -133,10 +139,12 @@ function TaskTreeItem({
         <span
           className={cn(
             'shrink-0 rounded-sm px-1.5 py-0.5 text-xs',
-            completed ? 'bg-accent text-faint-foreground' : 'bg-primary/15 text-brand',
+            phaseMeta.chip,
+            phaseMeta.text,
           )}
+          data-task-phase={phase}
         >
-          {completed ? '已完成' : '进行中'}
+          {TASK_PHASE_LABEL[phase]}
         </span>
         {depth > 0 && (
           <span className="shrink-0 rounded-sm bg-accent px-1.5 py-0.5 text-xs text-faint-foreground">
@@ -158,6 +166,7 @@ function TaskTreeItem({
               node={child}
               depth={depth + 1}
               workflowLabel={workflowLabel}
+              phaseOf={phaseOf}
               onOpenTask={onOpenTask}
             />
           ))}
@@ -313,6 +322,7 @@ function ThreadContent({
   thread,
   tasks,
   workflowNames,
+  workflows,
   onOpenTask,
   onRemoved,
 }: {
@@ -320,6 +330,8 @@ function ThreadContent({
   tasks: Task[]
   /** 工作流 id → 名称：话题跨流程时给任务行加徽标（同名卡才分得清） */
   workflowNames: ReadonlyMap<string, string>
+  /** 全部工作流（含阶段）：任务阶段语义按任务自己的流程查阶段（M53） */
+  workflows: WorkflowWithStages[]
   onOpenTask: (taskId: string) => void
   onRemoved?: () => void
 }): ReactElement {
@@ -459,6 +471,9 @@ function ThreadContent({
     )
   }
 
+  /** 徽标只读阶段语义：完成不依赖归档（M53） */
+  const phaseOf = (task: Task): TaskPhase => phaseOfTask(task, workflows)
+
   const roots = taskTree(tasks, thread.rootTaskIds)
   /**
    * 话题跨多个流程才显示工作流徽标（M50）：派单卡与来源卡同标题，不标流程就分不清谁是谁；
@@ -515,6 +530,7 @@ function ThreadContent({
                 node={node}
                 depth={0}
                 workflowLabel={badgeOf}
+                phaseOf={phaseOf}
                 onOpenTask={onOpenTask}
               />
             ))}
@@ -664,6 +680,7 @@ export function ThreadDetailPage({
               thread={detail.thread}
               tasks={detail.tasks}
               workflowNames={workflowNames}
+              workflows={workflows}
               onOpenTask={onOpenTask}
               onRemoved={onRemoved}
             />

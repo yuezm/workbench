@@ -1,5 +1,6 @@
 import { useState, type DragEvent, type ReactElement } from 'react'
 import { stageKindOf, type Task, type WorkflowWithStages } from '@workbench/protocol/entities'
+import { phaseOfTask } from '../model/task-phase'
 import { Button } from '@workbench/client-ui-primitives/button'
 import { cn } from '@workbench/client-ui-kit/cn'
 import { useKernelView } from '@workbench/client-shell/useKernelView'
@@ -93,7 +94,8 @@ export function KanbanBoard({
     if (task.parentTaskId === null) continue
     const stats = childStats.get(task.parentTaskId) ?? { done: 0, total: 0 }
     stats.total += 1
-    if (task.status === 'completed') stats.done += 1
+    // M53：子任务停在「已完成」列就算完成，不等归档
+    if (phaseOfTask(task, [workflow]) === 'finished') stats.done += 1
     childStats.set(task.parentTaskId, stats)
   }
 

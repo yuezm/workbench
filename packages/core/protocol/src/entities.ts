@@ -355,6 +355,37 @@ export function stageKindOf(stage: { builtin?: BuiltinStageKey | null }): StageK
   return stage.builtin ? builtinStageKind(stage.builtin) : 'active'
 }
 
+/**
+ * 任务的阶段语义（M53）：由当前阶段类别派生，**不是独立字段**。
+ *
+ * - `todo`（未开始）：内置「待办」，或当前阶段缺失（脏投影 / 还没落位）；
+ * - `active`（进行中）：自己添加的阶段与内置「已阻塞」——「正在跑」由活跃 run 表达，不在这里；
+ * - `finished`（已完成）：内置「已完成」，业务完成，任务**仍在看板上**；
+ * - `cancelled`（已取消）：内置「已取消」。
+ *
+ * 与归档（`Task.archivedAt`）完全无关：归档只表达「不想再追踪了」，不改这一轴。
+ */
+export const TASK_PHASES = ['todo', 'active', 'finished', 'cancelled'] as const
+
+export type TaskPhase = (typeof TASK_PHASES)[number]
+
+/** 当前阶段的阶段语义（阶段缺失按「未开始」）。 */
+export function taskPhaseOf(
+  stage: { builtin?: BuiltinStageKey | null } | null | undefined,
+): TaskPhase {
+  if (stage === null || stage === undefined) return 'todo'
+  switch (stageKindOf(stage)) {
+    case 'pending':
+      return 'todo'
+    case 'active':
+      return 'active'
+    case 'done':
+      return 'finished'
+    case 'closed':
+      return 'cancelled'
+  }
+}
+
 /** 名称是否被内置阶段占用（自己添加的阶段不能叫这些名字）。 */
 export function isBuiltinStageName(name: string): boolean {
   return BUILTIN_STAGE_KEYS.some((key) => BUILTIN_STAGE_NAMES[key] === name.trim())

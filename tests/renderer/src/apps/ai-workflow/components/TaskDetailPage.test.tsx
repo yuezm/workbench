@@ -574,13 +574,17 @@ describe('TaskDetailPage', () => {
   })
 
   it('有子任务时渲染子任务区（进度 + 点进详情）', async () => {
+    // M53：完成看阶段类别（停在「已完成」列即为完成），不再看是否归档
+    const withDone: WorkflowWithStages = {
+      ...workflow,
+      stages: [...workflow.stages, { ...stage('s-done', '已完成', 2, 'none'), builtin: 'done' }],
+    }
     const childDone: Task = {
       ...task,
       id: 't2',
       title: '子任务A',
       parentTaskId: 't1',
-      status: 'completed',
-      currentStageId: 's1',
+      currentStageId: 's-done',
     }
     const childOpen: Task = {
       ...task,
@@ -598,7 +602,7 @@ describe('TaskDetailPage', () => {
     render(
       <TaskDetailPage
         taskId="t1"
-        workflows={[workflow]}
+        workflows={[withDone]}
         onBack={vi.fn()}
         onOpenThread={vi.fn()}
         onOpenTask={onOpenTask}
@@ -608,6 +612,32 @@ describe('TaskDetailPage', () => {
     expect(section).toHaveTextContent('1/2')
     await user.click(within(section).getByRole('button', { name: /子任务A/ }))
     expect(onOpenTask).toHaveBeenCalledWith('t2')
+  })
+
+  it('子任务停在「已完成」阶段（未归档）也算完成：进度与徽标按阶段类别（M53）', async () => {
+    const withDone: WorkflowWithStages = {
+      ...workflow,
+      stages: [...workflow.stages, { ...stage('s-done', '已完成', 2, 'none'), builtin: 'done' }],
+    }
+    const childInDoneStage: Task = {
+      ...task,
+      id: 't2',
+      title: '子任务A',
+      parentTaskId: 't1',
+      currentStageId: 's-done',
+    }
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    kernel.setView('tasks.byParent', { taskId: 't1' }, [childInDoneStage])
+    render(
+      <TaskDetailPage taskId="t1" workflows={[withDone]} onBack={vi.fn()} onOpenThread={vi.fn()} />,
+    )
+
+    const section = await screen.findByRole('region', { name: '子任务' })
+    expect(section).toHaveTextContent('1/1')
+    // 两处「已完成」：子任务的阶段名 + 阶段类别徽标（未归档也算完成）
+    expect(within(section).getAllByText('已完成')).toHaveLength(2)
   })
 
   it('子任务的阶段不在工作流阶段表里时，阶段名退化为「未知阶段」', async () => {

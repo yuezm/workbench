@@ -116,6 +116,36 @@ function dispatchWith(
 }
 
 describe('ThreadDetailPage', () => {
+  it('徽标按阶段类别：停在「已完成」列但未归档的任务也显示已完成（M53）', async () => {
+    kernel.setView('workflows.all', undefined, [
+      {
+        id: 'w1',
+        name: '需求交付',
+        description: '',
+        createdAt: 't',
+        stages: [
+          {
+            id: 's-done',
+            workflowId: 'w1',
+            name: '已完成',
+            position: 0,
+            entryMode: 'none' as const,
+            agentId: null,
+            exits: {},
+            judge: null,
+            handoffs: [],
+            builtin: 'done' as const,
+          },
+        ],
+      },
+    ])
+    const finishedByStage: Task = { ...parentTask, id: 'p9', title: '停在做完列', currentStageId: 's-done' }
+    setup(detailOf({ ...thread, taskIds: ['p9'], rootTaskIds: ['p9'] }, [finishedByStage]))
+
+    const row = await screen.findByRole('button', { name: '打开任务：停在做完列' })
+    expect(within(row).getByText('已完成')).toBeInTheDocument()
+  })
+
   it('渲染线程元信息、任务列表（根任务 + 子任务缩进与状态）与笔记', async () => {
     setup(detailOf(thread))
 
@@ -153,7 +183,29 @@ describe('ThreadDetailPage', () => {
     expect(onOpenTask).toHaveBeenCalledWith('c1')
   })
 
-  it('整行都可点：状态徽标上也进任务详情', async () => {
+  it('整行都可点：阶段徽标上也进任务详情', async () => {
+    // 徽标文案来自阶段语义（M53）：父任务停在 s0 这个自己添加的阶段上 → 「进行中」
+    kernel.setView('workflows.all', undefined, [
+      {
+        id: 'w1',
+        name: '需求交付',
+        description: '',
+        createdAt: 't',
+        stages: [
+          {
+            id: 's0',
+            workflowId: 'w1',
+            name: '执行',
+            position: 0,
+            entryMode: 'agent' as const,
+            agentId: 'ag-1',
+            exits: {},
+            judge: null,
+            handoffs: [],
+          },
+        ],
+      },
+    ])
     const user = userEvent.setup()
     const { onOpenTask } = setup(detailOf(thread))
     const row = await screen.findByRole('button', { name: '打开任务：父任务' })

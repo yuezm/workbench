@@ -35,9 +35,9 @@
 
 过程与产物：
 
-- 计划与任务：`docs/planning/`
-- 规格文档：`docs/specs`
 - 需求 / 特性文档：`docs/features/`
+- 规格文档：`docs/specs`
+- 计划与任务：`docs/planning/`
 - 测试策略与验收：`docs/testing/`（TESTING 策略 / TEST-CASES 用例目录 / ACCEPTANCE 人工验收与需求覆盖矩阵）
 - 评审报告导出：`docs/reviews/`（任务的「提升为文档」写这里，人决定何时提交）
 - 一次性运行日志、临时产物、临时测试文件：`.scratch/`（一次性日志、临时测试文件，不进 git）

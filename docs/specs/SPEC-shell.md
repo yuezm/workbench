@@ -39,7 +39,7 @@ Build:  pnpm build            # 只产出 out/server + out/web（类型门是 pn
 Start:  pnpm start            # node out/server/index.js（常驻交给进程管理器）
 Test:   pnpm verify:test      # vitest run
 Lint:   pnpm verify:lint      # ESLint（含架构边界）
-Check:  pnpm verify:full      # 全闸门 + E2E（提交前必过）
+Check:  pnpm verify:all      # 全闸门 + E2E（提交前必过）
 ```
 
 > 没有安装包与打包态：`pnpm build` 只产出 `out/server`（服务）与 `out/web`（静态产物），服务自己同源托管 `out/web`。

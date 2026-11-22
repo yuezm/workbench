@@ -20,7 +20,7 @@
     "verify:coverage": "vitest run --coverage && node scripts/check-diff-coverage.mjs",
     "verify:e2e": "pnpm run build && playwright test",
     "verify:mutation": "node scripts/mutation-scope.mjs",
-    "verify:full": "pnpm run verify:types && pnpm run verify:lint && pnpm run verify:guards && pnpm run verify:coverage && pnpm audit --prod --registry=https://registry.npmjs.org/ --audit-level=high && pnpm run verify:e2e",
+    "verify:all": "pnpm run verify:types && pnpm run verify:lint && pnpm run verify:guards && pnpm run verify:coverage && pnpm audit --prod --registry=https://registry.npmjs.org/ --audit-level=high && pnpm run verify:e2e",
     "format": "prettier --write .",
     "gen:paths": "node scripts/gen-workspace-paths.mjs",
     "db:export": "node scripts/export-db.mjs",

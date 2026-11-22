@@ -281,7 +281,7 @@ export interface Receipt {
         "severity": "blocker",
         "location": "src/a.ts:42",
         "claim": "越界下标没有校验",
-        "requiredAction": "复跑 pnpm verify:full 且不红即算修好"
+        "requiredAction": "复跑 pnpm verify:all 且不红即算修好"
       }
     ],
     "addresses": [{ "findingId": "rpt-1#R1", "disposition": "fixed", "checkRef": "git tag" }]

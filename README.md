@@ -100,7 +100,7 @@ docker run -d --name workbench \
 | `pnpm verify:coverage` | 覆盖率阈值 + 改动行覆盖率 ≥ 90%                                                                            |
 | `pnpm verify:e2e`      | 构建后跑全部 E2E（每个用例独立服务进程 + Chromium；单档：`pnpm verify:e2e -- tests/e2e/api-only.spec.ts`） |
 | `pnpm verify:mutation` | 变异测试：默认本次改动，`-- --scan` 全量，`-- packages/core/kernel/src/core/cron.ts` 定点复核              |
-| `pnpm verify:full`     | 全部闸门 + E2E：交付 / 推送用这一条（`pre-push` 自动跑）                                                   |
+| `pnpm verify:all`      | 全部闸门 + E2E：交付 / 推送用这一条（`pre-push` 自动跑）                                                   |
 
 **工具型**
 

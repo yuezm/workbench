@@ -39,7 +39,7 @@
 | `pnpm format` / `pnpm exec prettier --check .`        | Prettier 全仓写 / 只检查                                           |
 | `pnpm verify:types`                                   | tsc node + web 双工程（含 e2e 与测试文件）                         |
 | `pnpm verify:e2e -- --ui`                             | Playwright UI 模式调试单条用例                                     |
-| `pnpm verify:full`                                    | 全闸门 + E2E：人工验收前一条命令（见 [ACCEPTANCE](ACCEPTANCE.md)） |
+| `pnpm verify:all`                                     | 全闸门 + E2E：人工验收前一条命令（见 [ACCEPTANCE](ACCEPTANCE.md)） |
 | `pnpm verify:e2e -- tests/e2e/ui-geometry.spec.ts`    | 只跑界面几何审计（含构建），改完 UI 用                             |
 | `pnpm exec playwright test tests/e2e/startup.spec.ts` | 只跑启动健康三路径（先 `pnpm build`）                              |
 
@@ -47,7 +47,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 
 人工验收前另有两关专用 spec：`tests/e2e/startup.spec.ts`（冷启动 / 重载 / 二次冷启动零异常、零兜底页）与 `tests/e2e/ui-geometry.spec.ts`（七类几何判据 + 审计器自检，报告落 `.scratch/acceptance/ui-geometry.md`）。用法、需求覆盖矩阵与 30 分钟走查表见 [ACCEPTANCE](ACCEPTANCE.md)。
 
-> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`verify` 供编辑后快跑，`verify:coverage` 供任务结束（覆盖率阈值 + 改动行），`verify:full` 供交付 / 推送（上面全部 + E2E）。复核记录、例外理由与基线演进在 [CONSTRAINTS-HISTORY](CONSTRAINTS-HISTORY.md)，新记录追加到那边。
+> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`verify` 供编辑后快跑，`verify:coverage` 供任务结束（覆盖率阈值 + 改动行），`verify:all` 供交付 / 推送（上面全部 + E2E）。复核记录、例外理由与基线演进在 [CONSTRAINTS-HISTORY](CONSTRAINTS-HISTORY.md)，新记录追加到那边。
 
 ## Git hooks（husky，提交即门禁）
 
@@ -55,7 +55,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 | ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------ |
 | `pre-commit` | lint-staged（暂存文件 eslint --fix + prettier）→ `pnpm verify:guards` → `pnpm verify:types` | 风格漂移、类型错误、hooks 违规       |
 | `commit-msg` | commitlint（Conventional Commits：`feat:` / `fix:` / `test:` …）                            | 不合规范的提交信息                   |
-| `pre-push`   | `pnpm verify:full`                                                                          | 推送前全量：类型/风格/覆盖率阈值/E2E |
+| `pre-push`   | `pnpm verify:all`                                                                           | 推送前全量：类型/风格/覆盖率阈值/E2E |
 
 - hook 文件在 `.husky/`，必须保持 **LF** 行尾（`.gitattributes` 已强制）。
 - 覆盖率阈值只在实际跑覆盖率时生效（`check` / `pre-push` 会强制）。
@@ -93,7 +93,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 | `kernel/prompt.ts`                                     | 反馈段顺序无关 / 只留最近 N / 不超预算、来源工单保尾、回答提示词的问答对排序                       |
 | `protocol/validate.ts`（负向）                         | 任意值不抛错且结论二元完备、合法命令二次校验逐字相同（封闭）、必填键与形状被破坏必拒且点名到具体键 |
 
-不写性质的层：`renderer/**` 与 `components/ui/**`（随机 DOM 只添噪声）、桥接契约（枚举穷举比随机准）、`host/**` 装配（要真实 SQLite 时序）、`e2e`（随机化等于制造 flaky）。`protocol/validate.ts` 是例外：合法形状仍以枚举为主，另加一组**负向**性质——枚举写不出「我没想到的坏输入」，而校验层面对的是 renderer 传来的不可信数据，`fc.anything()` 正好覆盖那片空白（见下节）。单文件性质用例预算 < 1s，`numRuns` 50–300，靠生成器质量而不是 runs 数；不进 `pnpm verify:full` 快链。
+不写性质的层：`renderer/**` 与 `components/ui/**`（随机 DOM 只添噪声）、桥接契约（枚举穷举比随机准）、`host/**` 装配（要真实 SQLite 时序）、`e2e`（随机化等于制造 flaky）。`protocol/validate.ts` 是例外：合法形状仍以枚举为主，另加一组**负向**性质——枚举写不出「我没想到的坏输入」，而校验层面对的是 renderer 传来的不可信数据，`fc.anything()` 正好覆盖那片空白（见下节）。单文件性质用例预算 < 1s，`numRuns` 50–300，靠生成器质量而不是 runs 数；不进 `pnpm verify:all` 快链。
 
 ### 怎么写性质测试
 

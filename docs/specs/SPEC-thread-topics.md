@@ -27,7 +27,7 @@
 ```bash
 pnpm verify           # typecheck + lint + guards（floor/kernel/secrets/ui/packages/paths）+ 单测
 pnpm verify:coverage  # 覆盖率（门槛见 CONSTRAINTS.md：98/93/95/98）+ 改动行覆盖率 ≥ 90%
-pnpm verify:full      # 上面全部 + 依赖审计 + E2E（提交前必须 exit 0）
+pnpm verify:all      # 上面全部 + 依赖审计 + E2E（提交前必须 exit 0）
 pnpm verify:e2e       # build + Playwright（含 tests/e2e/handoff.spec.ts）
 ```
 
@@ -77,7 +77,7 @@ export function handoffThreadOf(handoff: StageHandoff): HandoffThreadPolicy {
 
 **Always**
 
-- 改前先读 [CONSTRAINTS.md](../../CONSTRAINTS.md)，改完跑 `pnpm verify:full`。
+- 改前先读 [CONSTRAINTS.md](../../CONSTRAINTS.md)，改完跑 `pnpm verify:all`。
 - 规则只写在 kernel；UI 只读视图、只发命令。
 - 归一逻辑收口在纯函数，投影与内核共用同一份判据。
 
@@ -116,7 +116,7 @@ export function handoffThreadOf(handoff: StageHandoff): HandoffThreadPolicy {
 5. 同一入口再来事件：复用到同工作流的主任务，不会给派单卡加 run。
 6. 同话题内两张同名卡在线程页可区分（显示所属工作流）。
 7. 删除线程的确认文案含「跨流程的工单会一起删除」，执行后两卡都消失。
-8. `pnpm verify:full` exit 0；覆盖率不低于 `CONSTRAINTS.md` 门槛；`tests/e2e/handoff.spec.ts` 通过并断到「同话题 2 张卡」。
+8. `pnpm verify:all` exit 0；覆盖率不低于 `CONSTRAINTS.md` 门槛；`tests/e2e/handoff.spec.ts` 通过并断到「同话题 2 张卡」。
 
 ## 10. Open Questions
 

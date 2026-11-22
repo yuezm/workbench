@@ -27,8 +27,8 @@
 
 `package.json` 只保留 20 条，分四区：**构建**（`dev` / `build` / `build:server` / `build:web`）、**检查**（`verify` 开头的闸门）、**工具型**（`format` / `gen:paths` / `db:export`）、**其他**（`start` / `prepare` / `git:clean` / `git:mr`）。
 
-- 闸门一律 `verify` 开头，除此之外的命令不参与判定：`pnpm verify`（编辑中：类型 + lint + guards + 单测）、`pnpm verify:coverage`（覆盖率 + 改动行）、`pnpm verify:e2e`、`pnpm verify:mutation`、`pnpm verify:full`（全闸门 + E2E，交付 / 推送）。
-- 不知道跑哪条就跑 `pnpm verify`；交付前跑 `pnpm verify:full`。
+- 闸门一律 `verify` 开头，除此之外的命令不参与判定：`pnpm verify`（编辑中：类型 + lint + guards + 单测）、`pnpm verify:coverage`（覆盖率 + 改动行）、`pnpm verify:e2e`、`pnpm verify:mutation`、`pnpm verify:all`（全闸门 + E2E，交付 / 推送）。
+- 不知道跑哪条就跑 `pnpm verify`；交付前跑 `pnpm verify:all`。
 
 ## 文档导航（按需读取）
 

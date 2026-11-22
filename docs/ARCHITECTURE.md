@@ -275,7 +275,7 @@ sequenceDiagram
 | 可靠性   | 单实例锁 + WAL；强杀重启后投影与事实一致，无残留 `running`                                                                                              |
 | 重建     | 10 万事实 < 5 s；启动增量 < 100 ms                                                                                                                      |
 | 可追溯   | 任一 run 能用一条查询还原触发事件、规则版本、智能体、运行时、回执与流转                                                                                 |
-| 质量门   | `pnpm verify:full` 全绿；覆盖率不降；阶段状态机分支 100%                                                                                                |
+| 质量门   | `pnpm verify:all` 全绿；覆盖率不降；阶段状态机分支 100%                                                                                                 |
 | 插件独立 | 新增一个运行时协议：只加执行器插件 + registry 一行，`runtimes.executors()` 与 detect 自动纳入，配置里选它即可；kernel / host / server / renderer 零改动 |
 
 ## 术语

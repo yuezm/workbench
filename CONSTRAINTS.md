@@ -78,7 +78,7 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 | ----------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------ |
 | 编辑后      | `pnpm verify`                                                   | 类型 + lint(含架构边界) + guards（floor / kernel / secrets / ui / packages / paths）+ 单测                  | 半分钟 |
 | 任务结束    | `pnpm verify:coverage` + `pnpm audit --prod --audit-level=high` | 项目覆盖率 + 改动行覆盖率 + 依赖审计                                                                        | ≤ ~90s |
-| 交付 / 推送 | `pnpm verify:full`（pre-push 自动）                             | 上面全部 + `verify:e2e` 的真实服务进程 + Chromium 关键路径（先 build 再跑；每条用例独立临时数据目录与端口） | 分钟级 |
+| 交付 / 推送 | `pnpm verify:all`（pre-push 自动）                              | 上面全部 + `verify:e2e` 的真实服务进程 + Chromium 关键路径（先 build 再跑；每条用例独立临时数据目录与端口） | 分钟级 |
 | 服务冒烟    | `node out/server/index.js`                                      | 构建产物起真服务：启动行、`/api/health`、`/api/info`、静态首页都通                                          | 分钟级 |
 | 数据备份    | `pnpm db:export --db <库> --out <文件>`                         | 只读导出全表 JSON，确定性输出（M1 前回滚点）                                                                | 秒级   |
 | 合并前      | `pnpm verify:mutation`（MR 层）                                 | Stryker 变异评分（假绿自检；`pnpm verify:mutation -- --scan` 为定期全量层）                                 | 分钟级 |

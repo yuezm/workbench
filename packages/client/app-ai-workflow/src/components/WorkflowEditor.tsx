@@ -1372,7 +1372,7 @@ export function WorkflowEditor({
                       aria-label={`阶段${n}验收`}
                       className="min-h-20 resize-y"
                       placeholder={
-                        '一条一句、可核对。例如：\n`pnpm verify:full` 退出码 0\n新增测试覆盖每条 Given/When/Then\n不改数据库 schema'
+                        '一条一句、可核对。例如：\n`pnpm verify:all` 退出码 0\n新增测试覆盖每条 Given/When/Then\n不改数据库 schema'
                       }
                       value={(stage.acceptance ?? []).join('\n')}
                       onChange={(e) =>

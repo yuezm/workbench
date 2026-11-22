@@ -273,7 +273,7 @@ export interface Receipt {
     "verdict": "fail",
     "checks": [
       { "cmd": "pnpm check", "exitCode": 0, "acceptance": 1 },
-      { "cmd": "pnpm test:e2e", "exitCode": 1, "acceptance": 2 }
+      { "cmd": "pnpm verify:e2e", "exitCode": 1, "acceptance": 2 }
     ],
     "findings": [
       {
@@ -281,7 +281,7 @@ export interface Receipt {
         "severity": "blocker",
         "location": "src/a.ts:42",
         "claim": "越界下标没有校验",
-        "requiredAction": "复跑 pnpm check 且不红即算修好"
+        "requiredAction": "复跑 pnpm verify:full 且不红即算修好"
       }
     ],
     "addresses": [{ "findingId": "rpt-1#R1", "disposition": "fixed", "checkRef": "git tag" }]

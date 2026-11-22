@@ -13,7 +13,7 @@
 
 ```bash
 pnpm install
-pnpm build        # 类型检查 + 服务端产物 out/server + Web 产物 out/web
+pnpm build        # 服务端产物 out/server + Web 产物 out/web（不含类型检查）
 pnpm start        # 前台运行，日志里会打印 workbench listening on http://127.0.0.1:3000
 ```
 
@@ -78,14 +78,45 @@ docker run -d --name workbench \
 
 ## 命令
 
-| 命令                            | 用途                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------ |
-| `pnpm dev`                      | 开发：服务端 watch + Web HMR                                             |
-| `pnpm build` / `pnpm start`     | 构建 / 运行                                                              |
-| `pnpm check`                    | 质量门（类型、lint、floor、密钥扫描、UI 规则、覆盖率、改动行、依赖审计） |
-| `pnpm test`                     | 单元 / 集成用例（`tests/server/**` 会真起 HTTP 服务）                    |
-| `pnpm e2e`                      | 端到端：每个用例起独立服务进程 + Chromium                                |
-| `pnpm lint:fix` / `pnpm format` | 自动修 lint / 格式化                                                     |
+分四区，共 20 条。**闸门（判定项目好坏）一律以 `verify` 开头**；其余命令不参与判定，也不该当作「这个项目现在是好的」的证据。
+
+**构建**
+
+| 命令                              | 用途                                                     |
+| --------------------------------- | -------------------------------------------------------- |
+| `pnpm dev`                        | 开发：服务端 watch + Web HMR                             |
+| `pnpm build`                      | 产出 `out/server` + `out/web`（类型门见 `verify:types`） |
+| `pnpm build:server` / `build:web` | 只产出其中一半                                           |
+
+**检查（闸门，`verify` 前缀）**
+
+| 命令                   | 用途                                                                                                       |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `pnpm verify`          | 编辑中随手跑：类型 + lint（ESLint）+ guards + 单测                                                         |
+| `pnpm verify:types`    | 只要类型（tsc node + web 双工程）                                                                          |
+| `pnpm verify:lint`     | ESLint（含架构边界与 react-hooks 规则）                                                                    |
+| `pnpm verify:guards`   | 六个机械守卫：floor / 内核预算 / 密钥 / UI 规则 / 依赖方向 / 派生路径                                      |
+| `pnpm verify:test`     | 单元 + 集成用例（`tests/server/**` 会真起 HTTP 服务；监听模式 `pnpm exec vitest`）                         |
+| `pnpm verify:coverage` | 覆盖率阈值 + 改动行覆盖率 ≥ 90%                                                                            |
+| `pnpm verify:e2e`      | 构建后跑全部 E2E（每个用例独立服务进程 + Chromium；单档：`pnpm verify:e2e -- tests/e2e/api-only.spec.ts`） |
+| `pnpm verify:mutation` | 变异测试：默认本次改动，`-- --scan` 全量，`-- packages/core/kernel/src/core/cron.ts` 定点复核              |
+| `pnpm verify:full`     | 全部闸门 + E2E：交付 / 推送用这一条（`pre-push` 自动跑）                                                   |
+
+**工具型**
+
+| 命令             | 用途                                                      |
+| ---------------- | --------------------------------------------------------- |
+| `pnpm format`    | Prettier 全仓写（只检查：`pnpm exec prettier --check .`） |
+| `pnpm gen:paths` | 改包清单后重建路径解析文件                                |
+| `pnpm db:export` | 只读导出数据库全表 JSON（迁移前回滚点）                   |
+
+**其他**
+
+| 命令                             | 用途                                  |
+| -------------------------------- | ------------------------------------- |
+| `pnpm start`                     | 运行构建产物 `out/server/index.js`    |
+| `pnpm prepare`                   | 安装 husky（`pnpm install` 自动执行） |
+| `pnpm git:clean` / `pnpm git:mr` | 提交前工作区检查 / 提交 MR            |
 
 ## 目录
 

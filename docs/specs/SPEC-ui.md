@@ -4,7 +4,7 @@
 > **基线是 shadcn/ui v4**（`new-york-v4` 风格，Radix 基座）：token 语义、组件 API、类名约定一律以上游为准。
 > 本文件只记录两件事：**上游基线之上本项目的覆盖层（overlay）**，以及**为什么**。
 > 机器事实来源是 `packages/client/shell/src/styles/global.css` 与 `scripts/check-ui-rules.mjs`；改 token 必须同步本文件。
-> `pnpm check:ui` 机器校验圆角、调色板外色值、玻璃拟态与对比度；`pnpm check:floor` 校验本文件与 CONSTRAINTS 的门槛未被放松。
+> `pnpm verify:guards` 机器校验圆角、调色板外色值、玻璃拟态与对比度；`pnpm verify:guards` 校验本文件与 CONSTRAINTS 的门槛未被放松。
 
 ## 1. 方向与分层
 
@@ -75,7 +75,7 @@
 
 规则：
 
-- **只用 token 类名**（`bg-card` / `text-foreground` / `border-border`）；tsx 里出现调色板之外的 `#rrggbb` 会被 `check:ui` 拦下。
+- **只用 token 类名**（`bg-card` / `text-foreground` / `border-border`）；tsx 里出现调色板之外的 `#rrggbb` 会被 `verify:guards` 拦下。
 - **主色只给可交互强调**：主按钮、当前选中、进行中、进度环。单屏主色面积控制在 10% 以内，不做大面积渐变与光斑。
 - **语义色固定为成功 / 信息 / 危险 / 警告四组**，不新增彩色。
 
@@ -101,7 +101,7 @@
 - `muted-foreground`：解释性文字 —— 字段值、辅助说明、未选中项、时间戳。
 - `faint-foreground`：装饰性/极次要 —— 占位符、计数、空态提示。
 
-底线（`pnpm check:ui` 强制，分别对 `card` 与 `muted` 计算）：
+底线（`pnpm verify:guards` 强制，分别对 `card` 与 `muted` 计算）：
 
 | 层级               | 最小对比度 |
 | ------------------ | ---------- |
@@ -255,12 +255,12 @@ Radix `DialogContent` 是真模态：打开时 `hideOthers` 把背景整片标 `
 ## 9. 检查方式
 
 ```
-pnpm check:ui   # 圆角越界 / rounded-full 误用 / 玻璃拟态 / 调色板外色值（#hex 与内置色类名）/ 圆角刻度上限 / 前景对比度 / 字阶越界 / 静默校验守卫 / 文字按钮可辨识
+pnpm verify:guards   # 圆角越界 / rounded-full 误用 / 玻璃拟态 / 调色板外色值（#hex 与内置色类名）/ 圆角刻度上限 / 前景对比度 / 字阶越界 / 静默校验守卫 / 文字按钮可辨识
 ```
 
 机械规则（对应 §11）：`off-palette-utility`（`text-red-300`、`bg-amber-400/10` 这类 Tailwind 内置色一律拦下，只认 token）与 `silent-validation-guard`（`if (!x.trim()) return` —— 点了没反应的静默校验）；对应 §12：`invisible-text-button`（纯文字的 `ghost` 按钮 —— 静止态看不出能点）。
 
-`check:ui` 已并入 `pnpm check:fast` 与 pre-commit。它只拦机械可判定的部分；下面这些靠 review：
+`verify:guards` 已并入 `pnpm verify` 与 pre-commit。它只拦机械可判定的部分；下面这些靠 review：
 
 - [ ] 重要文字用的是 `foreground` 或 `muted-foreground`，没有落进 `faint-foreground`。
 - [ ] 按钮、输入、下拉都是 `rounded-md`；没有胶囊按钮。
@@ -319,7 +319,7 @@ pnpm check:ui   # 圆角越界 / rounded-full 误用 / 玻璃拟态 / 调色板�
 
 规则：
 
-- **文字按钮静止态必须有底色或描边。** 纯文字的 `ghost` 会被 `check:ui` 的 `invisible-text-button` 拦下（脚本按整块 `<Button …>…</Button>` 判断：含 `svg` / `Icon` / `size="icon*"` / `border` 之一即合法）。
+- **文字按钮静止态必须有底色或描边。** 纯文字的 `ghost` 会被 `verify:guards` 的 `invisible-text-button` 拦下（脚本按整块 `<Button …>…</Button>` 判断：含 `svg` / `Icon` / `size="icon*"` / `border` 之一即合法）。
 - 行内操作用 `quiet`，不用 `outline`：两者都有描边，差别在 `quiet` 底是 `muted`、不投影、`sm`/`xs` 高，落在列表行里不抢内容；`outline` 留给"按下一个控件"的位置（工具条、弹窗底部的次操作）。
 - **光靠底色不算可辨认**：暗色下 `muted` 与 `card` 的亮度比只有 1.07:1（亮色 1.13:1），人眼几乎分不出相邻两块深色。可辨识的那一层是**描边**，底色只让块有点体积。想再压暗就走 `--muted` 的 token 值，不要在调用点叠 `bg-black/*`。
 - 危险文字一律 `quiet-destructive`，不再手写 `className="text-destructive hover:bg-destructive/10 hover:text-destructive"`——同一串样式散在十几个文件里，改一次就漂一次。

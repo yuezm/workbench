@@ -25,12 +25,10 @@
 ## 3. Commands
 
 ```bash
-pnpm check:fast      # typecheck + lint + floor/kernel/secrets/ui/packages/paths
-pnpm test            # vitest run
-pnpm test:coverage   # 覆盖率（门槛见 CONSTRAINTS.md：98/93/95/98）
-pnpm check:diffcov   # 改动行覆盖率 ≥ 90%
-pnpm check           # 上面全部 + 依赖审计（提交前必须 exit 0）
-pnpm e2e             # build + Playwright（含 tests/e2e/handoff.spec.ts）
+pnpm verify           # typecheck + lint + guards（floor/kernel/secrets/ui/packages/paths）+ 单测
+pnpm verify:coverage  # 覆盖率（门槛见 CONSTRAINTS.md：98/93/95/98）+ 改动行覆盖率 ≥ 90%
+pnpm verify:full      # 上面全部 + 依赖审计 + E2E（提交前必须 exit 0）
+pnpm verify:e2e       # build + Playwright（含 tests/e2e/handoff.spec.ts）
 ```
 
 ## 4. Project Structure
@@ -73,13 +71,13 @@ export function handoffThreadOf(handoff: StageHandoff): HandoffThreadPolicy {
 | 渲染       | Vitest + Testing Library（`tests/renderer/**`） | 下拉提交形状、任务行徽标、删除文案                               |
 | E2E        | Playwright（`tests/e2e/**`）                    | 界面完成配了派单的卡 → 同话题 2 张卡、分列两个看板               |
 
-门槛：`CONSTRAINTS.md` 的 98/93/95/98 与 `check:diffcov` 90% 不动，不为过关放松。
+门槛：`CONSTRAINTS.md` 的 98/93/95/98 与改动行 90% 不动（`pnpm verify:coverage` 覆盖两者），不为过关放松。
 
 ## 7. Boundaries
 
 **Always**
 
-- 改前先读 [CONSTRAINTS.md](../../CONSTRAINTS.md)，改完跑 `pnpm check`。
+- 改前先读 [CONSTRAINTS.md](../../CONSTRAINTS.md)，改完跑 `pnpm verify:full`。
 - 规则只写在 kernel；UI 只读视图、只发命令。
 - 归一逻辑收口在纯函数，投影与内核共用同一份判据。
 
@@ -118,7 +116,7 @@ export function handoffThreadOf(handoff: StageHandoff): HandoffThreadPolicy {
 5. 同一入口再来事件：复用到同工作流的主任务，不会给派单卡加 run。
 6. 同话题内两张同名卡在线程页可区分（显示所属工作流）。
 7. 删除线程的确认文案含「跨流程的工单会一起删除」，执行后两卡都消失。
-8. `pnpm check` exit 0；覆盖率不低于 `CONSTRAINTS.md` 门槛；`tests/e2e/handoff.spec.ts` 通过并断到「同话题 2 张卡」。
+8. `pnpm verify:full` exit 0；覆盖率不低于 `CONSTRAINTS.md` 门槛；`tests/e2e/handoff.spec.ts` 通过并断到「同话题 2 张卡」。
 
 ## 10. Open Questions
 
@@ -148,10 +146,10 @@ export function handoffThreadOf(handoff: StageHandoff): HandoffThreadPolicy {
 
 **验证**
 
-- `pnpm check:fast` exit 0（50 条既有 lint 警告，0 error；kernel 预算最大 `thread-context.ts` 758/900）。
-- `pnpm test:coverage`：236 文件 / **4043** 用例全绿，覆盖率 **98.31 / 96.15 / 97.43 / 98.6**（门槛 98/93/95/98）。
-- `pnpm check:diffcov`：本仓 `master` 与本工作分支的 merge-base 早于当前历史，脚本判「无改动的可执行源码行」跳过（exit 0）；不是本轮引入的问题。
-- `pnpm e2e -- tests/e2e/handoff.spec.ts`：**2/2 通过**（同话题 2 张卡 + 显式 `new` 单卡两档）。
+- `pnpm verify` exit 0（50 条既有 lint 警告，0 error；kernel 预算最大 `thread-context.ts` 758/900）。
+- `pnpm verify:coverage`（覆盖率）：236 文件 / **4043** 用例全绿，覆盖率 **98.31 / 96.15 / 97.43 / 98.6**（门槛 98/93/95/98）。
+- `pnpm verify:coverage`（改动行）：本仓 `master` 与本工作分支的 merge-base 早于当前历史，脚本判「无改动的可执行源码行」跳过（exit 0）；不是本轮引入的问题。
+- `pnpm verify:e2e -- tests/e2e/handoff.spec.ts`：**2/2 通过**（同话题 2 张卡 + 显式 `new` 单卡两档）。
 - 并行执行期间 `tests/server/assembly*.test.ts` / `tests/plugins/executors/dsh/dsh.test.ts` 偶发失败，单跑通过，属既有并发抖动，与本轮改动无关。
 
 **新增/修改的用例**：`tests/kernel/scopes/workflow/stage-handoffs.test.ts`（归一 / 深比较 / 话题随目标带出）、`tests/kernel/scopes/handoff.test.ts`（inherit / new / 退化 / 第一轮裁剪）、`tests/kernel/decide.handoff.test.ts`（同话题不误归档）、`tests/kernel/scopes/rules.test.ts`（不复用派单卡）、`tests/kernel/scopes/thread-context.test.ts`（裁剪三例 + 无当前任务不裁）、`tests/kernel/scopes/project.test.ts`、`tests/host/store/rebuild.test.ts`、`tests/protocol/validate.test.ts`、`tests/renderer/.../ThreadDetailPage.test.tsx` / `WorkflowEditor.test.tsx`、`tests/e2e/handoff.spec.ts` + `helpers/seed-handoff.ts`。

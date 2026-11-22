@@ -16,17 +16,17 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 
 ## Enforced with numbers
 
-| 维度               | 规则                                                                                                                                               | 检查命令                                   | 何时                  |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ | --------------------- |
-| 类型               | 零类型错误                                                                                                                                         | `pnpm typecheck`                           | 每次编辑 / pre-commit |
-| Lint（含架构边界） | 零 error                                                                                                                                           | `pnpm lint`                                | 每次编辑 / pre-commit |
-| 覆盖率（项目）     | 全局阈值 statements≥98 / branches≥93 / functions≥95 / lines≥98，且不得低于基线                                                                     | `pnpm test:coverage`                       | 任务结束 / CI         |
-| 覆盖率（改动行）   | 改动的可执行源码行 ≥ **90%**                                                                                                                       | `pnpm test:coverage && pnpm check:diffcov` | 任务结束              |
-| 密钥               | diff 内零命中                                                                                                                                      | `pnpm check:secrets`                       | 每次编辑 / pre-commit |
-| 依赖漏洞           | 生产依赖无 high 及以上                                                                                                                             | `pnpm audit`                               | 任务结束 / CI         |
-| Floor              | 零违规                                                                                                                                             | `pnpm check:floor`                         | 每次编辑 / pre-commit |
-| UI 规则            | shadcn 基线零违规：只用语义 token 类名、零调色板外色值、无重玻璃；前景对比度 foreground≥12 / muted-foreground≥8 / faint-foreground≥4.5 / brand≥4.5 | `pnpm check:ui`                            | 每次编辑 / pre-commit |
-| 变异分数（试点）   | `src/kernel/cron.ts` 变异评分 ≥ **80**（killed+timeout 占总变异体比例；基线 2026-11-13 实测 85.61）                                                | `pnpm mutation:cron`                       | 合并前 / CI 定时      |
+| 维度               | 规则                                                                                                                                               | 检查命令                                                        | 何时                  |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------- |
+| 类型               | 零类型错误                                                                                                                                         | `pnpm verify:types`                                             | 每次编辑 / pre-commit |
+| Lint（含架构边界） | 零 error                                                                                                                                           | `pnpm verify:lint`                                              | 每次编辑 / pre-commit |
+| 覆盖率（项目）     | 全局阈值 statements≥98 / branches≥93 / functions≥95 / lines≥98，且不得低于基线                                                                     | `pnpm verify:coverage`                                          | 任务结束 / CI         |
+| 覆盖率（改动行）   | 改动的可执行源码行 ≥ **90%**                                                                                                                       | `pnpm verify:coverage`                                          | 任务结束              |
+| 密钥               | diff 内零命中                                                                                                                                      | `pnpm verify:guards`                                            | 每次编辑 / pre-commit |
+| 依赖漏洞           | 生产依赖无 high 及以上                                                                                                                             | `pnpm audit`                                                    | 任务结束 / CI         |
+| Floor              | 零违规                                                                                                                                             | `pnpm verify:guards`                                            | 每次编辑 / pre-commit |
+| UI 规则            | shadcn 基线零违规：只用语义 token 类名、零调色板外色值、无重玻璃；前景对比度 foreground≥12 / muted-foreground≥8 / faint-foreground≥4.5 / brand≥4.5 | `pnpm verify:guards`                                            | 每次编辑 / pre-commit |
+| 变异分数（试点）   | `src/kernel/cron.ts` 变异评分 ≥ **80**（killed+timeout 占总变异体比例；基线 2026-11-13 实测 85.61）                                                | `pnpm verify:mutation -- packages/core/kernel/src/core/cron.ts` | 合并前 / CI 定时      |
 
 每一行都写出产生判定的命令；没有命令的维度只是愿望，不是约束。
 
@@ -74,14 +74,14 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 
 ## 检查链（生命周期）
 
-| 阶段        | 命令                                    | 内容                                                                              | 预算   |
-| ----------- | --------------------------------------- | --------------------------------------------------------------------------------- | ------ |
-| 编辑后      | `pnpm check:fast`                       | 类型 + lint(含架构边界) + floor + secrets                                         | 秒级   |
-| 任务结束    | `pnpm check`                            | `check:fast` + 项目覆盖率 + 改动行覆盖率 + 依赖审计                               | ≤ ~90s |
-| 交付 / 推送 | `pnpm e2e`                              | 真实服务进程 + Chromium 关键路径（先 build 再跑；每条用例独立临时数据目录与端口） | 分钟级 |
-| 服务冒烟    | `node out/server/index.js`              | 构建产物起真服务：启动行、`/api/health`、`/api/info`、静态首页都通                | 分钟级 |
-| 数据备份    | `pnpm db:export --db <库> --out <文件>` | 只读导出全表 JSON，确定性输出（M1 前回滚点）                                      | 秒级   |
-| 合并前      | `pnpm mutation:changed`（MR 层）        | Stryker 变异评分（假绿自检；`pnpm mutation:scan` 为定期全量层）                   | 分钟级 |
+| 阶段        | 命令                                                            | 内容                                                                                                        | 预算   |
+| ----------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------ |
+| 编辑后      | `pnpm verify`                                                   | 类型 + lint(含架构边界) + guards（floor / kernel / secrets / ui / packages / paths）+ 单测                  | 半分钟 |
+| 任务结束    | `pnpm verify:coverage` + `pnpm audit --prod --audit-level=high` | 项目覆盖率 + 改动行覆盖率 + 依赖审计                                                                        | ≤ ~90s |
+| 交付 / 推送 | `pnpm verify:full`（pre-push 自动）                             | 上面全部 + `verify:e2e` 的真实服务进程 + Chromium 关键路径（先 build 再跑；每条用例独立临时数据目录与端口） | 分钟级 |
+| 服务冒烟    | `node out/server/index.js`                                      | 构建产物起真服务：启动行、`/api/health`、`/api/info`、静态首页都通                                          | 分钟级 |
+| 数据备份    | `pnpm db:export --db <库> --out <文件>`                         | 只读导出全表 JSON，确定性输出（M1 前回滚点）                                                                | 秒级   |
+| 合并前      | `pnpm verify:mutation`（MR 层）                                 | Stryker 变异评分（假绿自检；`pnpm verify:mutation -- --scan` 为定期全量层）                                 | 分钟级 |
 
 ## 维护须知
 

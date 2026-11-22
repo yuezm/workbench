@@ -34,11 +34,12 @@
 ## Commands
 
 ```
-Dev:    pnpm dev        # vite watch 构建服务端 + node --watch + Web dev server（/api 代理到服务端）
-Build:  pnpm build      # typecheck + build:server（out/server）+ build:web（out/web）
-Start:  pnpm start      # node out/server/index.js（常驻交给进程管理器）
-Test:   pnpm test       # vitest run
-Lint:   pnpm lint
+Dev:    pnpm dev              # vite watch 构建服务端 + node --watch + Web dev server（/api 代理到服务端）
+Build:  pnpm build            # 只产出 out/server + out/web（类型门是 pnpm verify:types）
+Start:  pnpm start            # node out/server/index.js（常驻交给进程管理器）
+Test:   pnpm verify:test      # vitest run
+Lint:   pnpm verify:lint      # ESLint（含架构边界）
+Check:  pnpm verify:full      # 全闸门 + E2E（提交前必过）
 ```
 
 > 没有安装包与打包态：`pnpm build` 只产出 `out/server`（服务）与 `out/web`（静态产物），服务自己同源托管 `out/web`。
@@ -147,7 +148,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 
 ## Boundaries
 
-- **Always：** renderer 只能经 `window.workbench`（`packages/client/bridge/src/index.ts` 的 HTTP/SSE 实现）访问服务；新增 app 必须实现 `AppPlugin` 并通过注册表进入；提交前 `pnpm test` 与 `pnpm build` 通过。
+- **Always：** renderer 只能经 `window.workbench`（`packages/client/bridge/src/index.ts` 的 HTTP/SSE 实现）访问服务；新增 app 必须实现 `AppPlugin` 并通过注册表进入；提交前 `pnpm verify:test` 与 `pnpm build` 通过。
 - **Ask first：** 新增 npm 依赖；修改服务默认监听地址与端口（`WORKBENCH_HOST` / `WORKBENCH_PORT` 的缺省值）或主题基座；引入路由或状态管理库。
 - **Never：** 在 renderer 里 import `apps/server` 或 Node 内置、直接 `fetch('/api/...')` 绕过桥接；把具体 app 的业务逻辑写进 shell；让 shell 依赖任何 app 的内部实现。
 
@@ -158,7 +159,7 @@ export function TopBar({ apps, activeId, onSelect }: TopBarProps) {
 3. `apps` 注册表被类型与测试双重约束：id 重复或字段缺失会在编译期/测试期暴露。
 4. renderer 调用 `window.workbench.notify(...)` 后，页面收到服务端经 SSE 推来的 `notice` 并弹轻提示（手动验收）。
 5. 关掉页面后服务进程照常在跑；重开页面回到同一份数据与同一批视图，不需要重启服务（手动验收）。
-6. `pnpm build` 通过；`pnpm test` 全绿。
+6. `pnpm build` 通过；`pnpm verify:test` 全绿。
 
 ## Open Questions
 

@@ -3,7 +3,7 @@
  *
  * 为什么需要它：`launchApp` 只隔离 `userData`（临时库 + 单实例锁作用域），隔离不到
  * **真实身份**。飞书通道读的是本机 `~/.lark-cli` 的登录态：安装过 `lark-cli` 并登录的人
- * 跑一次 `pnpm e2e`，`readFeishuConnections` 的 legacy 分支总会给出一条 `default` 连接，
+ * 跑一次 `pnpm verify:e2e`，`readFeishuConnections` 的 legacy 分支总会给出一条 `default` 连接，
  * `start` 里 `owner()` 拿到真实 open_id → 目标 = 私聊本人 → 种子库里那张 `delivery='pending'`
  * 的 ask 卡会被补投成**一条真的飞书卡片消息**，`card.answer` 还会原地改口。
  *

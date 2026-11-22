@@ -158,7 +158,7 @@ node out/server/index.js
 
 - `tests/server/**` 覆盖：配置解析、鉴权与 cookie、HTTP 路由与错误码、SSE 推送、静态托管与路径穿越、
   secret 加密往返与密钥不可用、目录浏览、装配（真库 + 真插件目录）、生命周期与退出幂等、入口守卫。
-- e2e（`pnpm e2e`）：每个用例用 `WORKBENCH_DATA_DIR` 临时目录 + `WORKBENCH_PORT=0` 起真服务，
+- e2e（`pnpm verify:e2e`）：每个用例用 `WORKBENCH_DATA_DIR` 临时目录 + `WORKBENCH_PORT=0` 起真服务，
   解析启动行拿地址，再用 Chromium 打开页面；数据隔离与真实进程行为都在这一层验证。
 
 ## 已知边界

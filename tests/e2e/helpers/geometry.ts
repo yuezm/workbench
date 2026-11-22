@@ -348,7 +348,7 @@ export function formatFindings(findings: readonly GeometryFinding[]): string {
   return findings.map((item) => `- [${item.kind}] ${item.selector}\n  ${item.detail}`).join('\n')
 }
 
-/** 写 Markdown 报告：`pnpm e2e` 失败时也能直接打开看是哪一屏哪一行 */
+/** 写 Markdown 报告：`pnpm verify:e2e` 失败时也能直接打开看是哪一屏哪一行 */
 export function writeGeometryReport(scenes: readonly GeometryScene[], file: string): void {
   const lines: string[] = ['# 界面几何审计', '']
   const total = scenes.reduce((sum, scene) => sum + scene.findings.length, 0)

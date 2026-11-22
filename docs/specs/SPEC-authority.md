@@ -291,12 +291,12 @@ export interface AttentionItem {
 
 | 里程碑                             | 内容                                                                                                                                    | 验收                                                                                                             |
 | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| **A1 准入**（约 2 周）             | `authority.ts` 契约、`admission.ts`、`event.received.identity`、`event.admitted/denied`、`authority.current` 视图、规则页「授权」编辑区 | 模式矩阵 21 条用例全绿；兼容模式零行为变化（现有 e2e 一条不改仍过）；`pnpm check` 全绿                           |
+| **A1 准入**（约 2 周）             | `authority.ts` 契约、`admission.ts`、`event.received.identity`、`event.admitted/denied`、`authority.current` 视图、规则页「授权」编辑区 | 模式矩阵 21 条用例全绿；兼容模式零行为变化（现有 e2e 一条不改仍过）；`pnpm verify:full` 全绿                     |
 | **A2 授权**（约 2 周）             | `mandate.ts`、`mandates` 投影、`tasks` 两列、恢复前重校验、换版影响面 + 聚合通知、任务详情「授权」面板                                  | 任一任务能答五问（谁/凭哪条/什么强度/多大范围/哪版）；换版后 `policy.impacted` 列出受影响任务；存量任务标 legacy |
 | **A3 研判**（约 2–3 周）           | `assess.ts`、`purpose='assess'` run、提示词段、`assessments` 投影、`assess.pending` 视图、observe 复盘清单                              | 覆盖/证据校验用例全绿；研判 run 无法派生副作用；`observe` 期自动接单数 = 0                                       |
-| **A4 注意力与提权**（约 1.5–2 周） | `attention.ts`、`attention.open` 视图、`AttentionPanel`、`approval.*` 事实与桥接改造、`run.approvals` 降级为证据                        | 五类排序用例全绿；提权 100% 有事实；`notice` 不进顶部条；`pnpm check` + `e2e` 全绿                               |
+| **A4 注意力与提权**（约 1.5–2 周） | `attention.ts`、`attention.open` 视图、`AttentionPanel`、`approval.*` 事实与桥接改造、`run.approvals` 降级为证据                        | 五类排序用例全绿；提权 100% 有事实；`notice` 不进顶部条；`pnpm verify:full` 全绿                                 |
 
-每个里程碑的完成门槛固定：`pnpm check` 全绿（含 `check:kernel` 预算与 `check:diffcov`）、新增测试文件进 `docs/testing/TEST-CASES.md`、`docs/testing/ACCEPTANCE.md` 补人工走查行、无新增第三方依赖。
+每个里程碑的完成门槛固定：`pnpm verify:full` 全绿（含 `verify:guards` 的内核预算与 `verify:coverage` 的改动行）、新增测试文件进 `docs/testing/TEST-CASES.md`、`docs/testing/ACCEPTANCE.md` 补人工走查行、无新增第三方依赖。
 
 ## 不吸收的部分
 

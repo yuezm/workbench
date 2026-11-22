@@ -7,7 +7,7 @@
  * - `packages/core/kernel/src/decide.ts` ≤ 220 行（只做表驱动分派）。
  *
  * 只数非空行（去掉注释与空行会掩盖「注释比代码多」的文件，这里不区分：行数就是维护成本）。
- * 超限 exit 1；`pnpm check:fast` 已接入。
+ * 超限 exit 1；`pnpm verify:guards` 已接入。
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative } from 'node:path'

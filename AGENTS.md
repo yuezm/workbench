@@ -16,12 +16,19 @@
 
 包分层与依赖方向不在这里复述，读代码或 `docs/CAPABILITY-MAP.md` 即可；下面只留读代码推不出来、又容易被破坏的硬约束
 
-- 服务端是产品本体，没有 Web 产物也能跑。依赖方向以 CAPABILITY-MAP 为准，反向依赖与插件互引由 `pnpm check:packages` 拦截
+- 服务端是产品本体，没有 Web 产物也能跑。依赖方向以 CAPABILITY-MAP 为准，反向依赖与插件互引由 `pnpm verify:guards` 拦截
 - 内核只收事件、按规则分活、派活、记账；不读时钟/随机数/文件/网络，不出现产品名，新能力一律写插件
 - 真相源唯一：事实日志只追加、投影表可重建，改业务状态必须过 `decide`；「执行中」「打回后是否重试」这类派生规则只在 kernel，UI 与插件只读视图、只发命令
 - 传输只有一处：`@workbench/api-http` 三动词（dispatch / query / subscribe）+ SSE；浏览器只经 `@workbench/client-bridge`，app 不发 `/api`
 - 扩张只加两处：新 app = `packages/client/app-<id>/` + shell 的 `registry.ts` 一行；新运行时协议 = `packages/plugins/executor-<id>/` + plugins registry 一行。派活目标始终是智能体，执行器只是协议适配
-- 测试统一放 `tests/`，按层镜像包路径（`packages/api/http/src/http.ts` ↔ `tests/server/http.test.ts`）；包内只放产品代码，夹具 `tests/support/`，E2E `tests/e2e/`（`pnpm e2e:api` 为纯 API 档）
+- 测试统一放 `tests/`，按层镜像包路径（`packages/api/http/src/http.ts` ↔ `tests/server/http.test.ts`）；包内只放产品代码，夹具 `tests/support/`，E2E `tests/e2e/`（`pnpm verify:e2e -- tests/e2e/api-only.spec.ts` 为纯 API 档）
+
+## 命令分区
+
+`package.json` 只保留 20 条，分四区：**构建**（`dev` / `build` / `build:server` / `build:web`）、**检查**（`verify` 开头的闸门）、**工具型**（`format` / `gen:paths` / `db:export`）、**其他**（`start` / `prepare` / `git:clean` / `git:mr`）。
+
+- 闸门一律 `verify` 开头，除此之外的命令不参与判定：`pnpm verify`（编辑中：类型 + lint + guards + 单测）、`pnpm verify:coverage`（覆盖率 + 改动行）、`pnpm verify:e2e`、`pnpm verify:mutation`、`pnpm verify:full`（全闸门 + E2E，交付 / 推送）。
+- 不知道跑哪条就跑 `pnpm verify`；交付前跑 `pnpm verify:full`。
 
 ## 文档导航（按需读取）
 

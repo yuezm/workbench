@@ -261,7 +261,7 @@ describe('SOP_TEMPLATES', () => {
     // M34：编码实现的判据搬进紧接着的评审闸门；执行阶段自己不带验收
     const impl = dev!.stages.find((stage) => stage.name === '编码实现')
     expect(impl?.acceptance ?? []).toEqual([])
-    expect(review?.acceptance ?? []).toContain('`pnpm check` 退出码 0')
+    expect(review?.acceptance ?? []).toContain('`pnpm verify:full` 退出码 0')
     // 模板里没有「任务拆解」阶段：拆分归 Agent（SPEC-task-fanout D10）
     expect(dev!.stages.some((stage) => stage.name.includes('拆解'))).toBe(false)
   })

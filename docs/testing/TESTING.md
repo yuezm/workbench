@@ -26,36 +26,36 @@
 - **E2E 不得碰真实外部身份**（2026-11-16）：`launchApp` 的临时数据目录隔离不到本机 `~/.lark-cli` 的登录态——装过并登录 `lark-cli` 的人跑 e2e，飞书通道会按 legacy 单连接拿到真实 open_id，把种子库里 `delivery='pending'` 的 ask 卡**真的发到本人飞书**。因此每次启动前由 `tests/support/channel-isolation.ts` 往测试库写一条 `plugins.replace`（`feishu` → `enabled:false`），`channels.startAll()` 因而不启动它：不 spawn `lark-cli`、不挂事件长连接、不发卡。隔离在 spec 自己的 `prepare` **之后**执行，种子也没法把它打开；`in-app` 与 `desktop` 留在测试里（前者就是被测对象，后者只经 SSE 推知会）。守则由 `tests/e2e/isolation.spec.ts` 三条断言看着，新增通道先问「它会不会把消息交给一个真人」，会就加进 `ISOLATED_CHANNEL_IDS`。
 - **环境按「要不要 DOM」分工**：真正 render 的用例留在默认 jsdom；纯逻辑用例（`kernel` / `protocol` / `host` / `server` / `plugins` / `renderer` 下不 render 的 model 与 lib，以及 server 的 HTTP/SSE 契约测试）首行标 `// @vitest-environment node`。jsdom 是逐文件冷启动（本机 0.7–1.3s/文件），多标一个 node 就少付一份环境成本；`vitest.setup.ts` 也只在有 DOM 时加载 RTL 与 jest-dom。
 - **不要用 `pool: 'vmThreads'` 或 `isolate: false` 换速度**：本仓有用例在文件内改 `window.location`、`vi.stubGlobal('document', undefined)`，环境复用后同一 worker 里跨文件互相污染（实测 2 条用例直接失败）。诊断里的 Isolate 提示按此忽略。
-- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98（`vitest.config.mts`）；项目基线只以 [CONSTRAINTS.md](../../CONSTRAINTS.md) 的「当前基线」行为准（含实测四元组与演进归因），`pnpm test:coverage` 跌破基线即 finding。
+- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98（`vitest.config.mts`）；项目基线只以 [CONSTRAINTS.md](../../CONSTRAINTS.md) 的「当前基线」行为准（含实测四元组与演进归因），`pnpm verify:coverage` 跌破基线即 finding。
 - M2 起 `runs` / `run_events` / `conversations` / `messages` 是事实投影：崩溃恢复用例在 `tests/e2e/crash-recovery.spec.ts`（临时数据目录 + 残留 pid + 重启服务），租约/退避/超时在 `tests/kernel/decide.run.test.ts`，调度/取消/帧在 `tests/host/{scheduler,cancel}.test.ts`。
 
 ## 常用命令
 
-| 命令                                                  | 作用                                                                  |
-| ----------------------------------------------------- | --------------------------------------------------------------------- |
-| `pnpm test` / `pnpm test:watch`                       | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式     |
-| `pnpm test:coverage`                                  | 同上 + 覆盖率阈值门禁                                                 |
-| `pnpm lint` / `pnpm lint:fix`                         | ESLint（含 react-hooks 规则）                                         |
-| `pnpm format` / `pnpm format:check`                   | Prettier 全仓写 / 只检查                                              |
-| `pnpm typecheck`                                      | tsc node + web 双工程（含 e2e 与测试文件）                            |
-| `pnpm e2e -- --ui`                                    | Playwright UI 模式调试单条用例                                        |
-| `pnpm acceptance`                                     | 人工验收前一条命令：`check` + `e2e`（见 [ACCEPTANCE](ACCEPTANCE.md)） |
-| `pnpm e2e:ui`                                         | 只跑界面几何审计（含构建），改完 UI 用                                |
-| `pnpm exec playwright test tests/e2e/startup.spec.ts` | 只跑启动健康三路径（先 `pnpm build`）                                 |
+| 命令                                                  | 作用                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------ |
+| `pnpm verify:test` / `pnpm exec vitest`               | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式  |
+| `pnpm verify:coverage`                                | 同上 + 覆盖率阈值门禁 + 改动行覆盖率 ≥ 90%                         |
+| `pnpm verify:lint` / `pnpm exec eslint . --fix`       | ESLint（含 react-hooks 规则）                                      |
+| `pnpm format` / `pnpm exec prettier --check .`        | Prettier 全仓写 / 只检查                                           |
+| `pnpm verify:types`                                   | tsc node + web 双工程（含 e2e 与测试文件）                         |
+| `pnpm verify:e2e -- --ui`                             | Playwright UI 模式调试单条用例                                     |
+| `pnpm verify:full`                                    | 全闸门 + E2E：人工验收前一条命令（见 [ACCEPTANCE](ACCEPTANCE.md)） |
+| `pnpm verify:e2e -- tests/e2e/ui-geometry.spec.ts`    | 只跑界面几何审计（含构建），改完 UI 用                             |
+| `pnpm exec playwright test tests/e2e/startup.spec.ts` | 只跑启动健康三路径（先 `pnpm build`）                              |
 
 E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录 + `WORKBENCH_PORT=0` 起 `out/server/index.js`，解析 stdout 的 `workbench listening on ...` 取实际地址，再用 Playwright Chromium 打开页面；因此**每次先构建再测**；不需要下载任何 Playwright 浏览器（pnpm 默认也阻止了该下载）。
 
 人工验收前另有两关专用 spec：`tests/e2e/startup.spec.ts`（冷启动 / 重载 / 二次冷启动零异常、零兜底页）与 `tests/e2e/ui-geometry.spec.ts`（七类几何判据 + 审计器自检，报告落 `.scratch/acceptance/ui-geometry.md`）。用法、需求覆盖矩阵与 30 分钟走查表见 [ACCEPTANCE](ACCEPTANCE.md)。
 
-> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`check:fast` 供编辑后快跑（秒级），`check` 供任务结束/推送（含改动行覆盖率与依赖审计）。复核记录、例外理由与基线演进在 [CONSTRAINTS-HISTORY](CONSTRAINTS-HISTORY.md)，新记录追加到那边。
+> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`verify` 供编辑后快跑，`verify:coverage` 供任务结束（覆盖率阈值 + 改动行），`verify:full` 供交付 / 推送（上面全部 + E2E）。复核记录、例外理由与基线演进在 [CONSTRAINTS-HISTORY](CONSTRAINTS-HISTORY.md)，新记录追加到那边。
 
 ## Git hooks（husky，提交即门禁）
 
-| Hook         | 内容                                                                                | 拦截什么                             |
-| ------------ | ----------------------------------------------------------------------------------- | ------------------------------------ |
-| `pre-commit` | lint-staged（暂存文件 eslint --fix + prettier）→ `pnpm check:ui` → `pnpm typecheck` | 风格漂移、类型错误、hooks 违规       |
-| `commit-msg` | commitlint（Conventional Commits：`feat:` / `fix:` / `test:` …）                    | 不合规范的提交信息                   |
-| `pre-push`   | `pnpm check && pnpm e2e`                                                            | 推送前全量：类型/风格/覆盖率阈值/E2E |
+| Hook         | 内容                                                                                        | 拦截什么                             |
+| ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `pre-commit` | lint-staged（暂存文件 eslint --fix + prettier）→ `pnpm verify:guards` → `pnpm verify:types` | 风格漂移、类型错误、hooks 违规       |
+| `commit-msg` | commitlint（Conventional Commits：`feat:` / `fix:` / `test:` …）                            | 不合规范的提交信息                   |
+| `pre-push`   | `pnpm verify:full`                                                                          | 推送前全量：类型/风格/覆盖率阈值/E2E |
 
 - hook 文件在 `.husky/`，必须保持 **LF** 行尾（`.gitattributes` 已强制）。
 - 覆盖率阈值只在实际跑覆盖率时生效（`check` / `pre-push` 会强制）。
@@ -75,10 +75,10 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 
 覆盖率到 100% 之后，「覆盖率」这个度量对「测试是否真能抓 bug」的信息量基本归零；而 AI 写的实现与 AI 写的测试容易共享同一个错误理解，全绿的断言并不等于断言有效。因此另有两个**有效性**度量：
 
-| 手段                      | 工具           | 回答的问题                              | 产物                                    |
-| ------------------------- | -------------- | --------------------------------------- | --------------------------------------- |
-| 性质测试（property test） | fast-check 4.x | 随机输入下内核不变量还成立吗            | 普通 vitest 用例，随 `pnpm test` 一起跑 |
-| 变异测试（mutation test） | Stryker 10.x   | 把源码改坏，测试会红吗（红 = 断言有效） | 变异评分，报告落在 `.scratch/mutation/` |
+| 手段                      | 工具           | 回答的问题                              | 产物                                           |
+| ------------------------- | -------------- | --------------------------------------- | ---------------------------------------------- |
+| 性质测试（property test） | fast-check 4.x | 随机输入下内核不变量还成立吗            | 普通 vitest 用例，随 `pnpm verify:test` 一起跑 |
+| 变异测试（mutation test） | Stryker 10.x   | 把源码改坏，测试会红吗（红 = 断言有效） | 变异评分，报告落在 `.scratch/mutation/`        |
 
 ### 已覆盖的性质（2026-11-13）
 
@@ -93,7 +93,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 | `kernel/prompt.ts`                                     | 反馈段顺序无关 / 只留最近 N / 不超预算、来源工单保尾、回答提示词的问答对排序                       |
 | `protocol/validate.ts`（负向）                         | 任意值不抛错且结论二元完备、合法命令二次校验逐字相同（封闭）、必填键与形状被破坏必拒且点名到具体键 |
 
-不写性质的层：`renderer/**` 与 `components/ui/**`（随机 DOM 只添噪声）、桥接契约（枚举穷举比随机准）、`host/**` 装配（要真实 SQLite 时序）、`e2e`（随机化等于制造 flaky）。`protocol/validate.ts` 是例外：合法形状仍以枚举为主，另加一组**负向**性质——枚举写不出「我没想到的坏输入」，而校验层面对的是 renderer 传来的不可信数据，`fc.anything()` 正好覆盖那片空白（见下节）。单文件性质用例预算 < 1s，`numRuns` 50–300，靠生成器质量而不是 runs 数；不进 `pnpm check` 快链。
+不写性质的层：`renderer/**` 与 `components/ui/**`（随机 DOM 只添噪声）、桥接契约（枚举穷举比随机准）、`host/**` 装配（要真实 SQLite 时序）、`e2e`（随机化等于制造 flaky）。`protocol/validate.ts` 是例外：合法形状仍以枚举为主，另加一组**负向**性质——枚举写不出「我没想到的坏输入」，而校验层面对的是 renderer 传来的不可信数据，`fc.anything()` 正好覆盖那片空白（见下节）。单文件性质用例预算 < 1s，`numRuns` 50–300，靠生成器质量而不是 runs 数；不进 `pnpm verify:full` 快链。
 
 ### 怎么写性质测试
 
@@ -106,14 +106,14 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 
 ### 怎么跑变异测试
 
-- 增量与预演不单开脚本，直接透传标志：`pnpm mutation:cron -- --incremental`、`pnpm mutation:changed -- --incremental`（命中 `.scratch/mutation/incremental.json` 缓存，迭代复验用）、`pnpm mutation:scan -- --dry-run`（只打印范围）。
+- 增量与预演不单开脚本，直接透传标志：`pnpm verify:mutation -- packages/core/kernel/src/core/cron.ts`（定点复核 cron 试点）、`pnpm verify:mutation -- --incremental`（命中 `.scratch/mutation/incremental.json` 缓存，迭代复验用）、`pnpm verify:mutation -- --scan --dry-run`（只打印范围）。
 
 - 报告落在 `.scratch/mutation/`（一次性产物，已 git 忽略）。
-- 变异测试比单测慢一个数量级（每个变异体跑一遍相关测试），**不进 `pnpm check` 快链**，只在合并前 / CI 定时跑。
+- 变异测试比单测慢一个数量级（每个变异体跑一遍相关测试），**不进 `pnpm verify` 快链**，只在合并前 / CI 定时跑。
 - pnpm 的隔离布局下 Stryker 从 core 包自己的同级目录找插件、找不到 runner，`stryker.config.json` 里用显式路径声明插件（`./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js`）。
 
 - 成本与被变异代码量近似线性：`packages/core/kernel/src/core/cron.ts`（251 行 / 278 个变异体）单轮约 5 分钟；`packages/core/kernel/src` 全部 8315 行按此推算是小时级，所以**必须用 `--mutate` / 增量模式限定范围**，不要全仓跑。
-- 范围圈定：`pnpm mutation:changed` 只变异「本次改动碰过的内核模块」（`scripts/mutation-scope.mjs` 按 git diff 圈定，未触及内核就跳过并放行）；CI 里用 `MUTATION_BASE=origin/main` 把分支差异也算进来。
+- 范围圈定：`pnpm verify:mutation` 只变异「本次改动碰过的内核模块」（`scripts/mutation-scope.mjs` 按 git diff 圈定，未触及内核就跳过并放行）；CI 里用 `MUTATION_BASE=origin/main` 把分支差异也算进来。
 
 ### 变异范围分层
 
@@ -139,13 +139,13 @@ CI 里代码已经提交、工作区是干净的，**`git diff HEAD` 查不到�
 
 固定只盯一个文件是错的用法——范围要**随改动自动扩张**。三层分工：
 
-| 层         | 命令                                  | 范围                                           | 何时        | 成本     |
-| ---------- | ------------------------------------- | ---------------------------------------------- | ----------- | -------- |
-| MR 门禁层  | `pnpm mutation:changed`               | 本次改动碰过的模块（git diff 自动圈定）        | 每次 MR     | ∝ 改动量 |
-| 定点复核层 | `pnpm mutation:cron -- --incremental` | 指定模块 + 增量缓存                            | 迭代复验    | ~45s     |
-| 全量扫描层 | `pnpm mutation:scan`                  | 内核全部 + `protocol/validate.ts`（33 个文件） | 定期 / 夜间 | ~110min  |
+| 层         | 命令                                                                             | 范围                                           | 何时        | 成本     |
+| ---------- | -------------------------------------------------------------------------------- | ---------------------------------------------- | ----------- | -------- |
+| MR 门禁层  | `pnpm verify:mutation`                                                           | 本次改动碰过的模块（git diff 自动圈定）        | 每次 MR     | ∝ 改动量 |
+| 定点复核层 | `pnpm verify:mutation -- packages/core/kernel/src/core/cron.ts -- --incremental` | 指定模块 + 增量缓存                            | 迭代复验    | ~45s     |
+| 全量扫描层 | `pnpm verify:mutation -- --scan`                                                 | 内核全部 + `protocol/validate.ts`（33 个文件） | 定期 / 夜间 | ~110min  |
 
-先用 `pnpm mutation:scan -- --dry-run` 打印扫描范围再决定要不要跑。
+先用 `pnpm verify:mutation -- --scan -- --dry-run` 打印扫描范围再决定要不要跑。
 
 扫描范围**排除**纯类型 / 纯常量 / 纯路由（变异只产噪音）：`kernel/types.ts`、`kernel/decide.ts`（规则都在 `commands/*`）、`kernel/view-spec.ts`、`protocol/{entities,facts,commands,inputs,ipc,views,plugins,rules,review,thread,task-comment,receipt-keys,channels,manifest,executor,worker,model-id,plugin-host}.ts`。
 
@@ -153,10 +153,10 @@ CI 里代码已经提交、工作区是干净的，**`git diff HEAD` 查不到�
 
 Stryker 只能变异**被测源码**再跑单测 runner（vitest/jest 一类）；`tests/e2e/*.spec.ts` 靠 Playwright 起真实服务进程与 Chromium，没有任何变异测试器能驱动它。于是「e2e 全绿」这件事本身不被自己证明——断言写歪、选择器恒真、等错元素都会得到一片绿。补两处：
 
-| 手段                         | 抓什么                                                                                                                 | 命令 / 位置                                                         | 进快链 |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------ |
-| 断言强度 lint                | 空断言、漏 `await` 的断言、`force: true`、被跳过（skip / fixme）的用例、**没有断言的用例**、`isVisible()` 取布尔再断言 | `pnpm lint`（`eslint.config.mjs` 末两段：playwright / vitest 插件） | 是     |
-| `protocol/validate` 负向性质 | 任意不可信输入下不抛错、结论二元完备、必填键与形状被破坏必拒且点名到键                                                 | `pnpm test`（`tests/protocol/validate.test.ts` 末尾的负向性质组）   | 是     |
+| 手段                         | 抓什么                                                                                                                 | 命令 / 位置                                                                | 进快链 |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------ |
+| 断言强度 lint                | 空断言、漏 `await` 的断言、`force: true`、被跳过（skip / fixme）的用例、**没有断言的用例**、`isVisible()` 取布尔再断言 | `pnpm verify:lint`（`eslint.config.mjs` 末两段：playwright / vitest 插件） | 是     |
+| `protocol/validate` 负向性质 | 任意不可信输入下不抛错、结论二元完备、必填键与形状被破坏必拒且点名到键                                                 | `pnpm verify:test`（`tests/protocol/validate.test.ts` 末尾的负向性质组）   | 是     |
 
 两条 lint 门槛只对测试文件生效，严重度沿用上游 recommended，只有两处按本仓库口径调整：`vitest/valid-expect` 放开 `maxArgs: 2`（`expect(value, message)` 是合法签名，用来标注「哪个键、哪条规则」）、`vitest/no-conditional-expect` 降到 warn（性质用例与表驱动用例按生成物形状分支断言是真的，逐条改写成不断言的形态只会更难读；真·空转用例由 `expect-expect` 兜住）。`expect-expect` 是这两段里唯一**加严**的地方：提升到 error，并认 `expectDispatched` 这类包装断言。
 

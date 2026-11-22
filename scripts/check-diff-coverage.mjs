@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // check-diff-coverage.mjs — 改动行覆盖率门禁（默认 ≥90%，可用 MIN_DIFF_COVERAGE 覆盖）。
-// 前置：先跑 `pnpm test:coverage` 生成 coverage/coverage-final.json。
+// 前置：先跑 `pnpm verify:coverage` 生成 coverage/coverage-final.json。
 // 用法: node scripts/check-diff-coverage.mjs [--base <ref>]
 // 退出码: 0 达标 / 1 未达标 / 2 无法运行（无覆盖率数据、无 merge base 等）
 import { execFileSync } from 'node:child_process'
@@ -38,7 +38,7 @@ let cov
 try {
   cov = JSON.parse(readFileSync(path.join(topAbs, 'coverage', 'coverage-final.json'), 'utf8'))
 } catch {
-  bail('缺少 coverage/coverage-final.json，先运行 `pnpm test:coverage`')
+  bail('缺少 coverage/coverage-final.json，先运行 `pnpm verify:coverage`')
 }
 
 // 覆盖率数据：相对路径 -> 语句起始行集合（带计数）

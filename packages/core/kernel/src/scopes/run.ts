@@ -56,7 +56,7 @@ export function claimCandidates(view: View, runtimeId: Id, now: Iso): RunRow[] {
  *
  * M42：脚本 run（`agentId=null`）的窗口按**连接**（`runtimeId`）算、每个连接 1 个。
  * 原来它们和「找不到智能体的脏行」共用 `null` 这个键，等于**全系统脚本共用一个窗口**：
- * 一条 `pnpm test` 就让别的工作流的 lint 闸门干等。按连接算之后，不同连接的脚本互不影响，
+ * 一条 `pnpm verify:test` 就让别的工作流的 lint 闸门干等。按连接算之后，不同连接的脚本互不影响，
  * 与宿主调度器「一次 pump 只领一个该运行时的 run」同口径。
  *
  * M6.5 线程闸门：同一线程同时 `running` 数 ≥ `thread.concurrency`（缺省 1）时跳过它的

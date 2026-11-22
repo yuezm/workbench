@@ -300,7 +300,7 @@ function childrenSettledFacts(view, parentId, now, env, overrides): FactDraft[] 
 - **纯度**：`packages/core/kernel/src/**` 禁用符号扫描不回归；`spawn.ts` 无 IO/时钟/随机。
 - **视图**：`tasks.byParent` 查询返回父子集；`view-spec` 新切片断言。
 - **UI**：`TaskCard` 子任务徽标进度与展开（组件测试）。
-- 质量门：`pnpm check` 全绿，覆盖率不降（沿用现有阈值）。
+- 质量门：`pnpm verify:full` 全绿，覆盖率不降（沿用现有阈值）。
 
 ## 成功标准
 
@@ -308,7 +308,7 @@ function childrenSettledFacts(view, parentId, now, env, overrides): FactDraft[] 
 2. 同一 `spawn` 重放（同 key）不产生重复子任务；父任务已完成后 emit spawn 被丢弃。
 3. 7 个子任务全部终态 → 父任务按配置**恰好触发一次**（默认唤醒）或追加一条通知评论 / 直接完成。
 4. `spawnDepth` 超 8、单回执超 32、含越权字段均被确定性处理，无脏数据。
-5. 重启/重建后投影与增量一致；`pnpm check` 全绿、覆盖率不降。
+5. 重启/重建后投影与增量一致；`pnpm verify:full` 全绿、覆盖率不降。
 
 ## Out of scope
 
@@ -342,4 +342,4 @@ function childrenSettledFacts(view, parentId, now, env, overrides): FactDraft[] 
 - M8b：`kernel/spawn.ts` 的 spawnFacts + 幂等/深度护栏 + 单测。
 - M8c：rollup 三分支 + view-spec + 投影/视图。
 - M8d：UI 徽标 / 任务详情子任务区 / 工作流编辑两个字段。
-- M8e：整体验收（`pnpm check`、重建等价、手动全流程）。
+- M8e：整体验收（`pnpm verify:full`、重建等价、手动全流程）。

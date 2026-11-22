@@ -452,7 +452,7 @@ export const STAGE_TIMEOUT_LIMITS = { minMs: 5 * 60_000, maxMs: 240 * 60_000 } a
  * 闸门 `pass` 要求每条验收至少被一条 `exitCode=0` 的 check 指向，漏判按没给结论处理。
  */
 export interface GateCheck {
-  /** 实际执行的命令（如 `pnpm check`） */
+  /** 实际执行的命令（如 `pnpm verify:full`） */
   cmd: string
   exitCode: number
   /** 指向第 n 条验收（1 基）；省略 = 与验收条目无关的环境检查 */

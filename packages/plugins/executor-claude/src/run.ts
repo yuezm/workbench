@@ -57,12 +57,12 @@ const RESUME_REJECT_RE = /no conversation found|session.*not found|could not fin
  * `workspace-write` 模式下的命令白名单（M28）。
  *
  * `acceptEdits` 只管「改文件」，跑命令仍然要审批；而 print 模式没有审批面
- * （`--permission-prompts none`），于是 `pnpm check` / `pytest` 这类命令被**自动拒**。
+ * （`--permission-prompts none`），于是 `pnpm verify` / `pytest` 这类命令被**自动拒**。
  * 实测（线程 `27787670`）：评审阶段三次 run 共 31 次 permission denied，判据
  * 「checks 全部退出码 0」永远拿不到。
  *
  * 这里只放**仓库内查询 + 构建 + 测试**前缀。范围由 CLI 自己的前缀匹配执行
- * （`Bash(pnpm:*)` 覆盖 `pnpm check`、`pnpm vitest run` 等）。
+ * （`Bash(pnpm:*)` 覆盖 `pnpm verify`、`pnpm exec vitest` 等）。
  *
  * 它保证什么、不保证什么（别按注释想多了）：
  * - 保证：这些前缀不必审批就能跑，所以构建 / 测试门禁能落地；

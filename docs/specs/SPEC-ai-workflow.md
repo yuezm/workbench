@@ -71,10 +71,10 @@ app 内只有一个页面，布局固定为「单列侧栏（w-64）+ 内容区�
 ```
 Dev:      pnpm dev
 Build:    pnpm build
-Test:     pnpm test            # vitest run
-Coverage: pnpm run test:coverage
-Lint:     pnpm run lint
-Check:    pnpm check           # typecheck + lint + test:coverage（提交前必过）
+Test:     pnpm verify:test      # vitest run
+Coverage: pnpm verify:coverage  # 覆盖率阈值 + 改动行
+Lint:     pnpm verify:lint      # ESLint（含架构边界）
+Check:    pnpm verify:full      # 全闸门 + E2E（提交前必过）
 ```
 
 ## 数据模型（SQLite）
@@ -507,11 +507,11 @@ export function completeTask(task: Task): Task
 - **组件：** KanbanBoard 按阶段分列渲染任务，拖拽卡片到列触发 `moveToStage`、拖到「归档」区触发 `archive`（M53），单击卡片把任务交给上层，归档区的「查看归档」在无归档任务时禁用；ArchivedTasksDialog 按最近更新倒序列出已归档任务（阶段名 / 未知阶段兜底 / 计数）、点行交回上层并关闭、空态、不传打开回调时行禁用、Esc 与 × 关闭；TaskCard 可拖拽（有活跃 run 时不可拖）、按进入方式显示提示、点击 / Enter / Space 进详情且线程入口不冒泡；TaskInfoPanel 任务信息（阶段类别徽标 / 阶段 / 来源 / 线程 / 时间 / 标签 + 已归档角标，M53：不再有「状态」这一行）；TaskBrief 任务说明（初始输入单独成卡、空态「没有描述」）；TaskDetailPage 右上动作（失败后可「重新执行」→ `task.rerun`（无历史 run / 执行中 / 已完成不出现；动作失败展示后端文案）；执行中给「停止执行」→ `task.stop`；「完成任务」执行中禁用并带 title；已完成只留标记）；底部动作区「删除任务」（与线程详情同位置，走确认弹窗，成功出栈、失败贴顶部文案）；TaskActivity 上下文活动流（运行与反馈混排、text/thinking/tool 折叠、**提权记录**（`run.approvals`：工具 / 理由 / 结果，未知结果原样显示，无记录不占版面）、errorCode 文案、用量/退出码/耗时、空态与事件流失败）；TaskCommentForm 反馈提交（空文本禁用、勾选接着做、提交中禁用、失败保留输入）；TaskDetailPage 三个视图的加载 / 空态 / 读失败与 `task.comment` 提交；ThreadDetailPage 任务列表与笔记 / 绑定 / 归档；TaskDialog 选择起始阶段；WorkflowEditor 编辑阶段三项目标；RuntimeManager 健康 pill（可用/不可用/未检测）、CLI 版本、负载、探测按钮 pending/成功/失败、行间独立；RuntimeDialog 字段与校验、模型下拉、**完全访问风险确认**（选中 `danger-full-access` 必须勾选才可保存，换模式即撤销）；AgentManager / WorkflowManager 的拖动换序（落点占位）、抓手 ↑ / ↓ 的键盘兜底、顺序落 localStorage 且不发命令；ApprovalBar 只列标题与落点（正文与选项不渲染、无落点的卡禁用、两栏计数互不串栏、读失败只在有卡时提示），ApprovalCards 的正文换行原样展示、选项作答 / 通知只留一个 `×` 关闭（不再有「知道了」）/ 重复回答与关闭失败文案 / 作答中禁用、任务详情只收本任务的卡。
 - **页面：** 工作台只有任务一栏——侧栏是项目切换器 + 工作流切换器，内容区是看板，没有会话清单与消息输入（也没有栏目切换条）；设置里的工作流顺序回到工作台仍生效（默认看板跟着换成排完的第一条）；单击任务卡进入任务详情页、`返回`/Esc 逐级回栈，线程详情页的任务列表可点进任务详情，看板「查看归档」翻出已归档任务并可点进详情；侧栏底部「设置」整行按钮进配置视图、设置视图顶部「返回工作台」整行按钮回工作台（`e2e/agent-dialog.spec.ts` 另验智能体编辑弹窗在超长提示词下不超视口），设置各栏目互不混排。
 - **执行器插件（`tests/plugins`）：** registry 汇总（顺序稳定、`executorKey`/`supported` 回填、同 command 先到先得、单插件抛错或超时隔离、空注册表）、`command` 插件的参数模板展开与 `{prompt}` 二选一（argv 元素 / stdin）、Windows `.cmd` 固定包装、假协议端到端验收（真 registry + 真 scheduler + 内存库）。
-- 覆盖率：`stage-machine.ts` 分支覆盖 100%；其余按 `pnpm check` 阈值。
+- 覆盖率：`stage-machine.ts` 分支覆盖 100%；其余按 `pnpm verify:full` 阈值。
 
 ## Boundaries
 
-- **Always：** 阶段流转/默认目标解析只写在 `stage-machine.ts`；SQLite 只在主进程读写，renderer 一律经 `window.workbench` 三动词；进程执行经执行器插件端口，事件只来自协议帧；新增运行时协议只写 `packages/plugins/executor-<id>/` + registry 一行，不改内核/宿主/UI；提交前 `pnpm check` 通过。
+- **Always：** 阶段流转/默认目标解析只写在 `stage-machine.ts`；SQLite 只在主进程读写，renderer 一律经 `window.workbench` 三动词；进程执行经执行器插件端口，事件只来自协议帧；新增运行时协议只写 `packages/plugins/executor-<id>/` + registry 一行，不改内核/宿主/UI；提交前 `pnpm verify:full` 通过。
 - **Ask first：** 新增 npm 依赖（尤其原生模块）；修改 shell 的 `AppPlugin` 或既有 `WorkbenchApi` 契约；改变数据库文件位置或引入迁移框架。
 - **Never：** 在 renderer 直接 `require('electron')`/用 `fs`/`child_process`；把业务规则写进组件；把凭据/token 明文写库；从原始文本猜测事件或把 stderr 当模型输出；删除失败测试或改测试预期来掩盖问题。
 
@@ -526,7 +526,7 @@ export function completeTask(task: Task): Task
 7. 运行时配置页对每条已配置运行时显示健康 pill（可用/不可用/未检测）与负载；点「测试」得到探测结论（CLI 版本、协议版本、耗时、失败原因）；探测不产生 run。
 8. 工作台只有任务一栏（单列侧栏 w-64 + 内容区）：侧栏是**项目切换器 + 工作流切换器**，内容区是看板 / 任务详情 / 线程详情——单击任务卡进入任务详情页看运行记录、返回回到看板，线程详情可点进任务详情；**没有会话清单、没有消息输入、没有栏目切换条**，产品里不提供聊天入口；侧栏底部「设置」进入配置视图，设置视图顶部「返回工作台」回到工作台（带文字整行按钮，第一屏可见），设置视图里没有工作台栏目；设置 → 工作流里拖动调过的顺序回到工作台仍然生效（默认看板换成排完的第一条）。
 9. 历史 `conversations` / `messages` 投影仍可从事实日志重建（内核 `chat.*` 与 `purpose='chat'` 运行保留），但**产品不再产生新对话**：界面没有入口，重启后也不会多出会话。
-10. 阶段状态机分支覆盖 100%；`pnpm check` 全绿。
+10. 阶段状态机分支覆盖 100%；`pnpm verify:full` 全绿。
 11. 顶部栏出现"AI 工作流"标签并可切换（由 shell 承载，app 无需感知）。
 12. 新增一个假运行时协议只写 `packages/plugins/executor-<id>/` + registry 一行，即可被 `runtimes.detect` 汇总到、在运行时表单里选中并跑通一轮；`git diff` 证明 kernel / host / renderer 未因新增协议改动。
 

@@ -2,7 +2,7 @@
  * 测试环境 ↔ 正式环境的隔离（e2e 不得碰真实飞书）。
  *
  * 起因：`launchApp` 的临时 userData 隔离不到本机 `~/.lark-cli` 的登录态。装过 `lark-cli`
- * 并登录的人跑 `pnpm e2e`，飞书通道会按 legacy 单连接拿到真实 open_id，把种子库里那张
+ * 并登录的人跑 `pnpm verify:e2e`，飞书通道会按 legacy 单连接拿到真实 open_id，把种子库里那张
  * `delivery='pending'` 的 ask 卡**真的发到本人飞书**（`card.answer` 还会原地改口）。
  *
  * 三条断言：

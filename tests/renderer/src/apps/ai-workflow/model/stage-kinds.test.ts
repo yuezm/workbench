@@ -6,7 +6,7 @@ import { STAGE_KIND_META } from '@workbench/client-app-ai-workflow/model/stage-k
 /**
  * 阶段类别的配色表（M18）。
  *
- * 只锁「类名」而不锁具体色值：色值在 `global.css` 的 token 里，`pnpm check:ui` 负责
+ * 只锁「类名」而不锁具体色值：色值在 `global.css` 的 token 里，`pnpm verify:guards` 负责
  * 语义 token 与对比度；这里守住「四个类别都有颜色、且只用语义 token 类名」。
  */
 

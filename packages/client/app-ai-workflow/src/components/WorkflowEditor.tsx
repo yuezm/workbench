@@ -17,7 +17,6 @@ import {
   type WorkflowStage,
   type WorkflowWithStages,
 } from '@workbench/protocol/entities'
-import { handoffLandingWarning } from '../model/handoff-warning'
 import { Button } from '@workbench/client-ui-primitives/button'
 import { Field } from '@workbench/client-ui-kit/field'
 import { FormError } from '@workbench/client-ui-kit/form-error'
@@ -245,21 +244,6 @@ function defaultHandoff(stage: StageInput, workflows: readonly WorkflowWithStage
     workflowId: target?.id ?? '',
     stageId: landingStageIdOf(target),
   }
-}
-
-/**
- * 派单落点提示（M53）：目标阶段不派活 / 已经是终态时，链条不会自己往前跑。
- * 抽成组件只为算一次——写成 `f() !== null && <p>{f()}</p>` 每次渲染要算两遍。
- */
-function HandoffLandingHint({
-  stages,
-  stageId,
-}: {
-  stages: readonly WorkflowStage[]
-  stageId: string | null
-}): ReactElement | null {
-  const warning = handoffLandingWarning(stages, stageId)
-  return warning === null ? null : <p className="text-xs text-warning">{warning}</p>
 }
 
 /** 出口表每行的文案（M32）：名字按「谁触发」，缺省按内核补齐后的实际行为写。 */
@@ -1583,10 +1567,6 @@ export function WorkflowEditor({
                               ))}
                             </SelectContent>
                           </Select>
-                          <HandoffLandingHint
-                            stages={stagesOfWorkflow(handoff.workflowId)}
-                            stageId={handoff.stageId}
-                          />
                         </Field>
                         <Field label="话题" className="w-36 shrink-0">
                           <Select

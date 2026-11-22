@@ -652,15 +652,14 @@ describe('WorkflowEditor', () => {
     const user = userEvent.setup()
     render(<WorkflowEditor workflow={current} onSave={onSave} onCancel={vi.fn()} />)
 
-    // 原来指向「写作 / 草稿」（不派活）：界面上先给提示
+    // 原来指向「写作 / 草稿」（不派活）：照原值回显，不再就地提示
     await user.click(screen.getByRole('button', { name: '阶段2' }))
     expect(screen.getByRole('combobox', { name: '阶段2派单1目标阶段' })).toHaveTextContent('草稿')
-    expect(screen.getByText(/目标阶段「草稿」不派活/)).toBeInTheDocument()
+    expect(screen.queryByText(/不派活/)).not.toBeInTheDocument()
 
-    // 换到「发布流」：目标阶段自动落到它第一个会派活的阶段，提示随之消失
+    // 换到「发布流」：目标阶段自动落到它第一个会派活的阶段
     await choose(user, '阶段2派单1目标工作流', '发布流')
     expect(screen.getByRole('combobox', { name: '阶段2派单1目标阶段' })).toHaveTextContent('排版')
-    expect(screen.queryByText(/不派活/)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '保存' }))
     await waitFor(() => expect(onSave).toHaveBeenCalled())

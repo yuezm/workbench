@@ -84,6 +84,50 @@ describe('startWorkbenchServer', () => {
     await expect(fetch(`${server.url}/api/info`)).rejects.toThrow()
   })
 
+  it('有 SSE 客户端在线：stop 立刻完成，并把事件流合上', async () => {
+    const workbench = fakeWorkbench()
+    const server = await startWorkbenchServer({
+      config: configOf(),
+      assemble: async () => workbench,
+      log: () => undefined,
+    })
+
+    const abort = new AbortController()
+    const sse = await fetch(`${server.url}/api/events`, { signal: abort.signal })
+    expect(sse.status).toBe(200)
+    const reader = sse.body!.getReader()
+    // 首帧 `retry:` 到了才算连上（否则 close 时连接还没建好，测不到死等）
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain('retry:')
+
+    const startedAt = Date.now()
+    await server.stop()
+    expect(Date.now() - startedAt).toBeLessThan(1_000)
+    abort.abort()
+    await reader.cancel().catch(() => undefined)
+    expect(workbench.shutdown).toHaveBeenCalledTimes(1)
+  })
+
+  it('真装配 + 在线 SSE：stop 在宽限内完成（Ctrl+C 不该等浏览器断开）', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'wb-lifecycle-real-'))
+    created.push(dataDir)
+    // 不注入 assemble：跑真的 createWorkbench，退出的另一半风险（来源/通道/库）也在内
+    const server = await startWorkbenchServer({
+      config: configOf({ dataDir }),
+      log: () => undefined,
+    })
+
+    const abort = new AbortController()
+    const sse = await fetch(`${server.url}/api/events`, { signal: abort.signal })
+    const reader = sse.body!.getReader()
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain('retry:')
+
+    const startedAt = Date.now()
+    await server.stop()
+    expect(Date.now() - startedAt).toBeLessThan(1_000)
+    abort.abort()
+    await reader.cancel().catch(() => undefined)
+  })
+
   it('配置了 token：/api/info 需要会话', async () => {
     const server = await startWorkbenchServer({
       config: configOf({ token: 'k'.repeat(32), tokenSource: 'env' }),
@@ -177,6 +221,29 @@ describe('runServerEntry', () => {
     expect(lines.some((line) => line.includes('界面：纯 API 模式（没有 Web 产物）'))).toBe(true)
     expect(lines.some((line) => line.includes('(api only; 没有 Web 产物)'))).toBe(true)
     expect(lines.some((line) => line.startsWith('workbench listening on http://'))).toBe(true)
+  })
+
+  it('退出清理卡住：到时限就放弃清理并退出（信号语义是「一定退」）', async () => {
+    const log = vi.fn()
+    const exit = vi.fn()
+    const entry = await runServerEntry({
+      env: {},
+      log,
+      loadConfig: () => configOf(),
+      start: async () => ({
+        port: 1,
+        url: 'http://127.0.0.1:1',
+        // 永不 resolve：模拟插件留下的死等
+        stop: () => new Promise<void>(() => undefined),
+      }),
+      onSignal: () => undefined,
+      exit,
+      stopDeadlineMs: 20,
+      resolveUi: () => ({ dir: 'out/web', reason: 'out/web' }),
+    })
+    await entry.stop('SIGINT')
+    expect(exit).toHaveBeenCalledWith(0)
+    expect(JSON.stringify(log.mock.calls)).toContain('放弃剩余动作直接退出')
   })
 
   it('退出清理失败：记一条日志，仍然退出（不把进程吊住）', async () => {

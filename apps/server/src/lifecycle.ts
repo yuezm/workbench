@@ -20,6 +20,28 @@ import { listDirectories } from '@workbench/api-http/fs-browse'
 import { startWebServer } from '@workbench/api-http/http'
 import { createNotifier } from '@workbench/api-http/notify'
 
+/** 关服务的收尾宽限与退出总时限：都只为「一定退」服务 */
+export const STOP_DEADLINE_MS = 10_000
+
+/**
+ * 在时限内跑完清理：`false` 表示超时。
+ *
+ * 超时之后并不去中止清理（里面是杀进程、关连接、关库，硬中断只会留半截状态）；
+ * 入口拿到 `false` 只记一条日志，随后 `process.exit(0)` 把残留一起带走。
+ */
+async function withinDeadline(work: Promise<void>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | null = null
+  try {
+    const deadline = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), ms)
+      timer.unref()
+    })
+    return await Promise.race([work.then(() => true), deadline])
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+  }
+}
+
 export interface StartedServer {
   port: number
   /** 实际监听地址（`port=0` 时是系统分配的那个端口） */
@@ -30,8 +52,7 @@ export interface StartedServer {
 
 export interface StartServerOptions {
   config: ServerConfig
-  /** 本次启动是否托管界面（
-ull = 纯 API）；缺省用 config.webDir */
+  /** 本次启动是否托管界面（`null` = 纯 API）；缺省用 config.webDir */
   webDir?: string | null
   log?: (line: string) => void
   /** 装配注入（测试用假装配；生产用 `createWorkbench`） */
@@ -82,8 +103,11 @@ export async function startWorkbenchServer(options: StartServerOptions): Promise
     stop: async () => {
       if (stopped) return
       stopped = true
-      await web.close()
+      // 顺序有讲究：`web.close()` 先停收新连接，但它要等既有连接结束才 resolve；
+      // SSE 是永不自己结束的响应，所以紧接着合上事件流，连接才会收尾。
+      const httpClosed = web.close()
       events.close()
+      await httpClosed
       await workbench.shutdown()
     },
   }
@@ -110,9 +134,10 @@ export interface RunEntryOptions {
   onSignal?: (signal: 'SIGINT' | 'SIGTERM', handler: () => void) => void
   /** 退出（测试注入；生产用 `process.exit`） */
   exit?: (code: number) => void
-  /** 界面托管决策（测试注入；生产用 
-esolveWebUi） */
+  /** 界面托管决策（测试注入；生产用 `resolveWebUi`） */
   resolveUi?: (options: { webDir: string; ui: WebUiMode }) => WebUiResolution
+  /** 退出总时限（测试注入；生产用 `STOP_DEADLINE_MS`） */
+  stopDeadlineMs?: number
 }
 
 export interface RunningEntry {
@@ -145,6 +170,7 @@ export async function runServerEntry(options: RunEntryOptions = {}): Promise<Run
       process.exit(code)
     })
   const resolveUi = options.resolveUi ?? resolveWebUi
+  const stopDeadlineMs = options.stopDeadlineMs ?? STOP_DEADLINE_MS
 
   const config = loadConfig(options.env === undefined ? undefined : { env: options.env })
   const ui = resolveUi({ webDir: config.webDir, ui: config.ui })
@@ -160,11 +186,11 @@ export async function runServerEntry(options: RunEntryOptions = {}): Promise<Run
     if (stopping) return
     stopping = true
     log(`[workbench] 收到 ${signal}，开始退出`)
-    try {
-      await server.stop()
-    } catch (error) {
+    const finished = await withinDeadline(server.stop(), stopDeadlineMs).catch((error: unknown) => {
       log(`[workbench] 退出清理失败：${error instanceof Error ? error.message : String(error)}`)
-    }
+      return true
+    })
+    if (!finished) log(`[workbench] 清理超过 ${stopDeadlineMs}ms，放弃剩余动作直接退出`)
     log('[workbench] 已退出')
     // 所有句柄都已显式关闭；插件子进程理论上可能留下无法取消的句柄（例如挂住的原生库），
     // 显式退出保证「收到 SIGTERM 就一定退」，进程管理器不会等超时再 SIGKILL。

@@ -146,7 +146,13 @@ node out/server/index.js
 2. `clock.stop()`；
 3. 先 `sources.stopAll()`（不再收外部事件），再 `channels.stopAll()`（abort 投递）；
 4. `feed.stop()` → `db.close()`；
-5. HTTP → SSE → 装配层，最后显式 `process.exit(0)`（防止插件留下的句柄吊住进程）。
+5. HTTP 先停收新连接，紧接着合上 SSE（在线浏览器不会挂在永不结束的响应上），再等连接收尾：
+   空闲 keep-alive 反复清扫，3s 宽限到点强制断开（`closeServer`）；
+6. 装配层（`workbench.shutdown()`）；
+7. 显式 `process.exit(0)`（防止插件留下的句柄吊住进程）；整个清理最多等 10s，到点直接退出。
+
+「先关 HTTP 再关 SSE」这种等法会死锁：`server.close()` 要等既有连接结束，而 SSE 只有 `events.close()`
+才会合上。改动退出顺序前先看 `tests/server/lifecycle.test.ts` 里「有 SSE 客户端在线」的两条用例。
 
 ## 部署
 

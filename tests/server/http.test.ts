@@ -45,6 +45,7 @@ interface Harness {
 async function harness(
   overrides: Partial<ApiDeps> = {},
   token: string | null = null,
+  closeGraceMs?: number,
 ): Promise<Harness> {
   // Web 产物目录：一个 index.html + 一个带指纹的 js + 一个越界目标
   const webDir = mkdtempSync(path.join(tmpdir(), 'wb-web-'))
@@ -81,7 +82,7 @@ async function harness(
   }
   const server = await startWebServer(
     { ...deps, log: () => undefined },
-    { host: '127.0.0.1', port: 0 },
+    { host: '127.0.0.1', port: 0, closeGraceMs },
   )
   return {
     base: `http://127.0.0.1:${server.port}`,
@@ -281,6 +282,20 @@ describe('SSE', () => {
     controller.abort()
     await vi.waitFor(() => expect(h.events.size).toBe(0))
     await h.close()
+  })
+
+  it('close：SSE 还连着也不无限等，宽限到点强制断开', async () => {
+    const h = await harness({}, null, 30)
+    const controller = new AbortController()
+    const res = await fetch(h.base + '/api/events', { signal: controller.signal })
+    const reader = res.body?.getReader()
+    if (reader === undefined) throw new Error('没有 body')
+    await reader.read()
+
+    const startedAt = Date.now()
+    await h.close()
+    expect(Date.now() - startedAt).toBeLessThan(1_000)
+    controller.abort()
   })
 })
 

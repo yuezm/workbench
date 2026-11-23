@@ -325,10 +325,52 @@ export interface WebServer {
   close(): Promise<void>
 }
 
+/**
+ * 关服务的收尾宽限：`server.close()` 只是「停收新连接」，已有连接要自己结束；
+ * SSE 是永不结束的响应（`close()` 之前没人合上它），不设上限就会把进程吊在退出流程里。
+ * 所以到点直接切断连接，让 `close()` 一定有个结束。
+ */
+export const CLOSE_GRACE_MS = 3_000
+
+/** 空闲连接补扫间隔：响应合上到连接被回收有延迟，只扫一次会漏掉刚结束的 SSE */
+const IDLE_SWEEP_MS = 50
+
+/**
+ * 关监听：先停收新连接，再反复扫掉空闲 keep-alive（连接空闲下来就断），
+ * `graceMs` 到点仍有连接没走就强制断开（未结束的响应不再等）。
+ */
+export function closeServer(server: Server, graceMs: number = CLOSE_GRACE_MS): Promise<void> {
+  if (!server.listening) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    let done = false
+    let sweep: NodeJS.Timeout | null = null
+    let grace: NodeJS.Timeout | null = null
+    const finish = (): void => {
+      if (done) return
+      done = true
+      if (sweep !== null) clearInterval(sweep)
+      if (grace !== null) clearTimeout(grace)
+      resolve()
+    }
+    sweep = setInterval(
+      () => server.closeIdleConnections(),
+      Math.max(1, Math.min(IDLE_SWEEP_MS, graceMs)),
+    )
+    sweep.unref()
+    grace = setTimeout(() => {
+      server.closeAllConnections()
+      finish()
+    }, graceMs)
+    grace.unref()
+    server.close(finish)
+    server.closeIdleConnections()
+  })
+}
+
 /** 起服务：`port=0` 时由系统分配（e2e 与容器常用），实际端口从 `WebServer.port` 读。 */
 export async function startWebServer(
   deps: RequestHandlerDeps,
-  options: { host: string; port: number },
+  options: { host: string; port: number; closeGraceMs?: number },
 ): Promise<WebServer> {
   const server = createServer(createRequestHandler(deps))
   await new Promise<void>((resolve, reject) => {
@@ -348,9 +390,6 @@ export async function startWebServer(
   return {
     server,
     port: address.port,
-    close: () =>
-      new Promise<void>((resolve) => {
-        server.close(() => resolve())
-      }),
+    close: () => closeServer(server, options.closeGraceMs),
   }
 }

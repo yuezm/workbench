@@ -10,7 +10,12 @@
  */
 import type { Environment, Iso, View } from './types'
 import { isCronRule } from '@workbench/protocol/rules'
+import { STALL_REMIND_DELAYS_MS } from '@workbench/protocol/channels'
 import { nextCronTime, parseCron } from './cron'
+import { nextStallAt } from './stall'
+
+/** ISO 时刻 + 毫秒（本层只做算术，不读时钟）。 */
+const plusMs = (at: Iso, ms: number): Iso => new Date(Date.parse(at) + ms).toISOString()
 
 export function nextWakeAt(view: View, now: Iso, env: Environment): Iso | null {
   let earliest: Iso | null = null
@@ -40,6 +45,19 @@ export function nextWakeAt(view: View, now: Iso, env: Environment): Iso | null {
   for (const card of view.cards.values()) {
     consider(card.nextDeliveryAt)
   }
+
+  // M55：停机卡的下一档提醒（到点由 `clock.tick` 把同一张卡版本 +1 重投）。
+  // 没有这一项，任务停住后宿主定时器就再也不会醒——正是 2026-11-24 那次静默的机制。
+  for (const card of view.cards.values()) {
+    if (card.kind !== 'stall' || card.status !== 'open') continue
+    const delay = STALL_REMIND_DELAYS_MS[card.version - 1]
+    if (delay === undefined) continue
+    consider(plusMs(card.updatedAt, delay))
+  }
+
+  // M55：静默哨兵的下一判时刻。缺它的话「任务停住、没有 run、没有卡」这种形态下
+  // `nextWakeAt` 会返回 null，宿主定时器睡过去——正是那次静默的机制。
+  consider(nextStallAt(view))
 
   return earliest
 }

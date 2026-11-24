@@ -50,6 +50,7 @@ describe('emptyStage / builtinStageDraft', () => {
       instructions: '',
       acceptance: [],
       runTimeoutMs: null,
+      notifyOnPark: false,
       judge: null,
       script: null,
     })

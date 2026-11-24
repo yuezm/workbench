@@ -55,6 +55,8 @@ function stageRow(
     acceptance: normalizeAcceptance(stage.acceptance),
     // M26：阶段单轮超时（毫秒；缺省 = null，用全局缺省）
     runTimeoutMs: stage.runTimeoutMs ?? null,
+    // M55：进入喊人（缺省 false；内置阶段恒 false——与 `normalizeStage` 同一口径）
+    notifyOnPark: (stage.builtin ?? null) === null && (stage.notifyOnPark ?? false),
     // M32：判定者只回答「谁给结论 + 护栏多大」，去向在 exits 里
     judge: stage.judge ? { maxFails: stage.judge.maxFails ?? null } : null,
   }
@@ -153,6 +155,8 @@ function sameStage(a: WorkflowStage, b: WorkflowStage): boolean {
     sameAcceptance(a.acceptance, b.acceptance) &&
     // M26：阶段超时一变要落 stage.updated（缺省与 null 视为同值）
     (a.runTimeoutMs ?? null) === (b.runTimeoutMs ?? null) &&
+    // M55：进入喊人开关一变要落 stage.updated
+    (a.notifyOnPark ?? false) === (b.notifyOnPark ?? false) &&
     // M32：判定者一变就要落 stage.updated
     sameJudge(a.judge, b.judge)
   )

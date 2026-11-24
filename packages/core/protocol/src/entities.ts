@@ -598,6 +598,15 @@ export interface WorkflowStage {
    */
   runTimeoutMs?: number | null
   /**
+   * 进入这个阶段时要不要喊人（M55，默认 `false`）。
+   *
+   * 这条只对「人自己往前走」的阶段有意义（内置阶段恒为 `false`）：打开后，任务被移进该阶段
+   * 的那一刻开一张停机卡（标题「轮到你：〈阶段〉」），走系统通知 / IM 同一套打扰口径——
+   * 适合「人工验收」「等外部依赖」这类**不盯看板就会一直停着**的落点。
+   * 默认关是有意的：人肉排队的消息发多了，真正的停机告警就沉了。
+   */
+  notifyOnPark?: boolean
+  /**
    * 判定者（M32，原闸门）：非 null 时本阶段读回执 `verdict` 决定走 `exits.passed` 还是
    * `exits.failed`。老事实 / 存量导入缺该字段时按 null 归一（不判定）。
    */
@@ -650,6 +659,8 @@ export interface StageInput {
   acceptance?: readonly string[]
   /** 单轮运行超时（M26，可空 = 全局缺省 60 min）：本阶段一次 run 的最长时长（毫秒） */
   runTimeoutMs?: number | null
+  /** 进入本阶段时是否喊人（M55，缺省 = 不喊）：只对非内置阶段有意义 */
+  notifyOnPark?: boolean
   /** 判定者（M32，可空 = 不判定）：非空时本阶段按回执 `verdict` 走 passed / failed 两侧 */
   judge?: JudgeInput | null
 }
@@ -1046,12 +1057,15 @@ export type CardDelivery = (typeof CARD_DELIVERIES)[number]
  *
  * - `ask`：要人作答（`options` 非空），阻塞 run 的续接——系统通知只对这种卡弹；
  * - `notice`：只知会（回执 `notices`，`options` 空），不阻塞续接、**不发系统通知**，
- *   只在应用内通知区与任务详情里出现（打扰级别人为「查看级」，见 SPEC-ai-workflow）。
+ *   只在应用内通知区与任务详情里出现（打扰级别人为「查看级」，见 SPEC-ai-workflow）；
+ * - `stall`（M55）：机器自己走不动了（阶段无法推进 / 预算用尽），**不挂在任何等的 run 上**
+ *   ——它问的不是业务问题，而是「这台机器在这条任务上停了，你来不来接手」。打扰口径与
+ *   `ask` 相同（系统通知 / IM 都投），回答只表示「我知道了」，不续接任何 run。
  *
  * 老事实（M4–M11 落库）没有该字段，由 `kernel/project` 按当时的口径归一：
  * `options` 非空 = `ask`，否则 `notice`。
  */
-export const CARD_KINDS = ['ask', 'notice'] as const
+export const CARD_KINDS = ['ask', 'notice', 'stall'] as const
 
 export type CardKind = (typeof CARD_KINDS)[number]
 
@@ -1102,7 +1116,7 @@ export interface Card {
   conversationId: string | null
   title: string
   text: string
-  /** 卡片类型（M12）：`ask` = 要人作答并阻塞续接，`notice` = 只知会且不打扰 */
+  /** 卡片类型（M12）：`ask` = 要人作答并阻塞续接，`notice` = 只知会且不打扰，`stall` = 机器停机要人接手 */
   kind: CardKind
   /** 可选项文案；回答时回传下标。信息卡（`notices`）为空数组 */
   options: string[]

@@ -21,6 +21,7 @@ import * as task from './scopes/commands/task'
 import * as thread from './scopes/commands/thread'
 import * as workflow from './scopes/commands/workflow'
 import { closeCardsOnFinish } from './scopes/cards'
+import { parkNoticesOnEnter } from './scopes/stall'
 
 /** 某个命令的 handler 签名：输入被收窄成该命令自己的形状。 */
 type HandlerOf<T extends Input['type']> = (
@@ -87,10 +88,15 @@ const HANDLERS = {
 } satisfies { [T in Input['type']]: HandlerOf<T> }
 
 /**
- * 决策出口：命令分派之后统一收起「随运行/任务结束该消失」的卡片（见 closeCardsOnFinish）。
- * 放在这里而不是每个 handler 里，是为了覆盖回执、宿主兜底、取消、任务完成等所有路径。
+ * 决策出口：命令分派之后统一收两件事。
+ *
+ * 1. `parkNoticesOnEnter`（M55）：任务被移进「会喊人」的阶段（`notifyOnPark`）时开一张停机卡；
+ * 2. `closeCardsOnFinish`（M12）：随运行/任务结束该消失的卡片收掉。
+ *
+ * 放在这里而不是每个 handler 里，是为了覆盖回执、宿主兜底、取消、任务完成、人工拖拽等所有路径。
  */
 export function decide(view: View, input: Input, now: Iso, env: Environment): Decision {
   const handler = HANDLERS[input.type] as HandlerOf<typeof input.type>
-  return closeCardsOnFinish(view, handler(view, input, now, env), now)
+  const parked = parkNoticesOnEnter(view, handler(view, input, now, env), now, env)
+  return closeCardsOnFinish(view, parked, now)
 }

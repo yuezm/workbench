@@ -79,6 +79,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   instructions: '',
   acceptance: [],
   runTimeoutMs: null,
+  notifyOnPark: false,
   // M40：不是脚本阶段（投影行恒有该字段）
   script: null,
   ...over,

@@ -14,10 +14,16 @@
  *    智能体自报 id）。判定证据 `checks` 一并入行，闸门不再「读一次就丢」。
  *
  * 3. **闭环（`applyAddresses` + 覆盖判定）**：修复回执的 `addresses[]` 逐条改 finding 状态，
- *    产 `review.addressed`；`fixed` 必须有同回执里退出码为 0 的 `checkRef`，`rejected` /
- *    `deferred` 必须写理由。当前阶段正是被该报告打回的目标阶段、且仍有 **阻断项**
- *    （`blocker` / `high`）`open` 时**不推进**（硬门），并追加一条任务评论列出漏项；
+ *    产 `review.addressed`；`fixed` 必须有退出码为 0 的 `checkRef`（本回执的 `checks`，或该
+ *    报告此前入行的 `checks`——补轮不重跑门禁，只重贴结论），`rejected` / `deferred` 必须写
+ *    理由。当前阶段正是被该报告打回的目标阶段、且仍有 **阻断项**（`blocker` / `high`）
+ *    `open` 时**不推进**（硬门），并追加一条任务评论列出漏项；
  *    `medium` / `low` 的 `open` 只留痕，不参与这条判定。
+ *
+ * 4. **补轮预算（`repairRounds` / `REPAIR_BUDGET`，M55）**：硬门不是无限续命——同一份报告
+ *    打回该阶段后最多自动补 3 轮「只交 addresses」，到顶由调用方转成阶段错误（进「已阻塞」
+ *    并通知人）。轮次按「报告创建时刻 / 任务最后改动时刻」之后的 run 数派生，人把任务拖回
+ *    阶段会推后这个锚点，预算随之重新计。
  *
  * 全部纯函数：不读时钟、不读文件、不查库、不取随机数。
  */
@@ -80,6 +86,36 @@ export function blockingFindings(report: ReviewReport): ReviewFinding[] {
 /** 仍为 `open` 的建议项（`medium` / `low`）：可读、可处置，但不拦推进。 */
 export function advisoryFindings(report: ReviewReport): ReviewFinding[] {
   return openFindings(report).filter((finding) => !isBlockingSeverity(finding.severity))
+}
+
+/**
+ * 同一份报告打回同一阶段后，最多再自动补几轮「只交 addresses」的回执（M55）。
+ *
+ * 为什么要有上限：补轮是给「机器干完了但没交可机读结论」用的窄通道，不是无限续命。
+ * 2026-11-21 那次静默的教训反过来用——只补一次会在修复阶段的正常多轮里失效，补到第 3 次
+ * 仍失败就不再是执行问题，而是提示词/协议形状问题，该让人看见。
+ */
+export const REPAIR_BUDGET = 3
+
+/**
+ * 本轮报告打回该阶段之后，这个阶段已经跑过几轮（含正在结算的这一轮）。
+ *
+ * 锚点取 `max(报告创建时刻, 任务最后改动时刻)`：
+ * - 报告创建时刻 = 打回发生的那一批，之后每一轮都是为它跑的；
+ * - 任务最后改动时刻 = 人把任务拖回这个阶段（`task.moved` 自带 `updatedAt`）时会推后锚点，
+ *   预算随之重新计——否则「拖回去立刻又进阻塞」会变成新的死循环。
+ *
+ * 纯派生：不新增列、不新增计数事实，重建后与增量同一结果。
+ */
+export function repairRounds(view: View, task: Task, stageId: Id, report: ReviewReport): number {
+  const anchor = report.createdAt > task.updatedAt ? report.createdAt : task.updatedAt
+  let rounds = 0
+  for (const run of view.runs.values()) {
+    if (run.purpose !== 'stage' || run.taskId !== task.id || run.stageId !== stageId) continue
+    if (run.createdAt < anchor) continue
+    rounds += 1
+  }
+  return rounds
 }
 
 /** 同一 `(taskId, stageId)` 上已有的最大 `rev`；没有报告时为 0。 */
@@ -276,12 +312,19 @@ export function buildReport(
   }
 }
 
-/** 校验一条处置是否成立：`fixed` 要有同回执里退出码 0 的 `checkRef`，其余要有理由。 */
-function dispositionValid(address: FindingAddress, checks: readonly GateCheck[]): boolean {
+/** 校验一条处置是否成立：`fixed` 要有退出码 0 的 `checkRef`，其余要有理由。 */
+function dispositionValid(
+  address: FindingAddress,
+  checks: readonly GateCheck[],
+  /** 该报告此前入行的 `checks`：补轮只重贴结论、不重跑门禁，历史退出码同样算证据 */
+  verified: readonly GateCheck[],
+): boolean {
   if (address.disposition === 'fixed') {
     const ref = address.checkRef?.trim() ?? ''
     if (ref === '') return false
-    return checks.some((check) => check.cmd.trim() === ref && check.exitCode === 0)
+    return [...checks, ...verified].some(
+      (check) => check.cmd.trim() === ref && check.exitCode === 0,
+    )
   }
   return (address.note?.trim() ?? '') !== ''
 }
@@ -308,7 +351,7 @@ export function applyAddresses(
   const findings = report.findings.map((finding) => {
     const address = byId.get(finding.id)
     if (address === undefined || finding.status !== 'open') return finding
-    if (!dispositionValid(address, checks)) return finding
+    if (!dispositionValid(address, checks, report.checks)) return finding
     addressed.push(finding.id)
     return {
       ...finding,
@@ -390,7 +433,10 @@ export function reviewFactsOf(
   const open = blockingFindings(applied.report)
   const blocked =
     open.length > 0 && reportTargetsStage(view, applied.report, task.currentStageId ?? '')
-  if (!blocked) return { facts, blocked: false, report: applied.report }
+  // 没被硬门挡住时把「本批刚建的报告」优先交出去（M55）：`locateReport` 读的是批处理前的视图，
+  // 打回轮的待修复清单来自上一版 rev，`findingId` 与真正要修的那条对不上
+  // （实测清单写 `:2#R6`，阻断项是 `:3#R6`）。硬门分支仍交被处置的那份——那才是漏项清单。
+  if (!blocked) return { facts, blocked: false, report: reported ?? applied.report }
   facts.push({
     type: 'task.comment_added',
     actor,

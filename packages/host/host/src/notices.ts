@@ -19,6 +19,7 @@
  * 纯函数，只读事实行；同一批事实里同一任务只产一条。
  */
 import type { Fact } from '@workbench/kernel/core/types'
+import type { StageErroredPayload } from '@workbench/protocol/facts'
 import type { Task } from '@workbench/protocol/entities'
 import type { NotifyTarget } from '@workbench/protocol/ipc'
 
@@ -57,6 +58,9 @@ const finishedNoticeOf = (
 /** 失败通知的标题（失败事实不带任务行，只能给通用标题 + 数量）。 */
 const FAILED_TITLE = '任务运行失败'
 
+/** 停机（M55）的正文：说清停在哪、为什么停、去哪儿接着干。 */
+const STALLED_BODY = '阶段无法推进，已移到「已阻塞」，点开工作台接手'
+
 /** 多个任务同时失败时的标题：弹 N 次不如一次说清。 */
 const failedTitleOf = (count: number): string =>
   count > 1 ? `${FAILED_TITLE}（${count} 个）` : FAILED_TITLE
@@ -70,9 +74,25 @@ const failedTitleOf = (count: number): string =>
 export function noticesFromFacts(facts: readonly Fact[]): NoticeRequest[] {
   const completed: NoticeRequest[] = []
   const completedTasks = new Set<string>()
+  const stalled: NoticeRequest[] = []
+  const stalledTasks = new Set<string>()
   const failedTasks = new Set<string>()
 
   for (const fact of facts) {
+    if (fact.type === 'stage.errored') {
+      // M55：机器自己走不动了必须弹——这条路径以前只留一条任务评论，人得自己发现。
+      // 人自己拖出来的阻塞不打扰（actor 是 owner 时说明他知道自己在干什么）。
+      if (fact.actor.kind === 'owner') continue
+      const payload = fact.payload as StageErroredPayload
+      if (stalledTasks.has(payload.task.id)) continue
+      stalledTasks.add(payload.task.id)
+      stalled.push({
+        title: `任务停机待接手：${payload.task.title}`,
+        body: STALLED_BODY,
+        target: { taskId: payload.task.id },
+      })
+      continue
+    }
     if (fact.type === 'task.finished') {
       // 人自己点的完成不打扰：只有 host / agent 推进的完成才是「发生了什么」
       if (fact.actor.kind === 'owner') continue
@@ -96,7 +116,7 @@ export function noticesFromFacts(facts: readonly Fact[]): NoticeRequest[] {
     }
   }
 
-  if (failedTasks.size === 0) return completed
+  if (failedTasks.size === 0) return [...completed, ...stalled]
   const failed = [...failedTasks]
   const failedNotice: NoticeRequest = {
     title: failedTitleOf(failed.length),
@@ -104,5 +124,5 @@ export function noticesFromFacts(facts: readonly Fact[]): NoticeRequest[] {
   }
   // 只有一个任务失败时落点明确；多个任务一起失败时通知本身就是「一批」，不挂落点
   if (failed.length === 1) failedNotice.target = { taskId: failed[0] }
-  return [...completed, failedNotice]
+  return [...completed, ...stalled, failedNotice]
 }

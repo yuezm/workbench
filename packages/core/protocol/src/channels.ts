@@ -51,6 +51,15 @@ export const DELIVERY_RETRY_DELAYS_MS = [30_000, 120_000, 600_000, 1_800_000] as
 export const DELIVERY_MAX_ATTEMPTS = DELIVERY_RETRY_DELAYS_MS.length + 1
 
 /**
+ * 停机提醒梯度（M55）：`kind='stall'` 的卡没人接手时，按这些间隔把**同一张卡**再推一次
+ * （内核到点产 `card.updated`，版本 +1；通道按版本重投，IM 里原地更新而不是堆新卡）。
+ *
+ * 档位 = `version - 1`，到顶后不再提醒（卡仍开着，接手了才关）。间隔放在协议层，与投递
+ * 重投曲线同一处：内核算时刻、宿主排期、通道只认版本，三边同一份常量。
+ */
+export const STALL_REMIND_DELAYS_MS = [15 * 60_000, 60 * 60_000, 4 * 60 * 60_000] as const
+
+/**
  * 第 `attempt` 次尝试失败后的重投时刻（毫秒延迟）；`null` = 预算用尽，不再排期。
  *
  * 纯函数、无时钟：`attempt` 是「本次失败算第几次尝试」（1 基），`now` 由调用方给。

@@ -7,13 +7,20 @@
  */
 import fc, { type Arbitrary } from 'fast-check'
 import { describe, expect, it } from 'vitest'
-import type { Card, RunRow } from '@workbench/protocol/entities'
+import type { Card, RunRow, Task } from '@workbench/protocol/entities'
 import {
   CARD_TIMEOUT_MS,
+  STALL_CARD_ACK,
+  STALL_CARD_KEY,
+  STALL_REMIND_DELAYS_MS,
+  answerFacts,
   closeCardsOnFinish,
   expiredCardFacts,
+  stallCardFacts,
+  stallRemindAt,
+  stallReminderFacts,
 } from '@workbench/kernel/scopes/cards'
-import type { Decision, FactDraft, View } from '@workbench/kernel/core/types'
+import type { Decision, Environment, FactDraft, View } from '@workbench/kernel/core/types'
 
 const NOW = '2026-11-09T00:00:00.000Z'
 const CREATED = '2026-01-01T00:00:00.000Z'
@@ -442,5 +449,139 @@ describe('closeCardsOnFinish 的性质（fast-check 随机生成）', () => {
       }),
       { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
     )
+  })
+})
+
+// ---------- M55：停机卡 ----------
+
+const TASK = (over: Partial<Task> = {}): Task => ({
+  id: 't-1',
+  title: '任务',
+  description: '',
+  workflowId: 'wf-1',
+  projectId: null,
+  currentStageId: 'st-1',
+  archivedAt: null,
+  origin: 'manual',
+  ruleId: null,
+  externalRef: null,
+  labels: [],
+  threadId: null,
+  parentTaskId: null,
+  handoffFromTaskId: null,
+  handoffFromStageId: null,
+  handoffFromRunId: null,
+  createdAt: CREATED,
+  updatedAt: CREATED,
+  ...over,
+})
+
+const kernelEnv = (): Environment => ({
+  timezone: 'Asia/Shanghai',
+  limits: {
+    maxStagesPerWorkflow: 50,
+    maxArrayLength: 500,
+    maxHops: 8,
+    leaseMs: 120_000,
+    heartbeatMs: 30_000,
+    maxAttempts: 3,
+    backoffBaseMs: 300_000,
+    backoffCapMs: 3_600_000,
+    runTimeoutMs: 1_800_000,
+    cancelGraceMs: 3_000,
+    killAfterMs: 2_000,
+    maxFramesPerBatch: 500,
+  },
+  nextId: (kind) => `${kind}-next`,
+})
+
+const laterIso = (ms: number): string => new Date(Date.parse(CREATED) + ms).toISOString()
+
+describe('M55 停机卡（stall）', () => {
+  it('第一次停机：开一张 kind=stall 的卡，唯一按钮是「我去处理」', () => {
+    const facts = stallCardFacts(
+      view(),
+      { task: TASK(), runId: 'run-a', title: '任务停机待接手：任务', text: '阶段无法推进' },
+      NOW,
+      kernelEnv(),
+    )
+    expect(facts).toHaveLength(1)
+    const row = (facts[0]?.payload as { card: Card }).card
+    expect(row).toMatchObject({
+      kind: 'stall',
+      key: STALL_CARD_KEY,
+      options: [STALL_CARD_ACK],
+      status: 'open',
+      delivery: 'pending',
+      runId: 'run-a',
+      taskId: 't-1',
+    })
+  })
+
+  it('同一任务再次停机：原地更新同一张卡（版本 +1，不堆卡）', () => {
+    const open = card({ id: 'card-stall', kind: 'stall', key: STALL_CARD_KEY, title: '旧标题' })
+    const facts = stallCardFacts(
+      view([open]),
+      { task: TASK(), runId: 'run-a', title: '新标题', text: '又停了' },
+      NOW,
+      kernelEnv(),
+    )
+    expect(facts).toHaveLength(1)
+    expect(facts[0]?.type).toBe('card.updated')
+    expect((facts[0]?.payload as { card: Card }).card).toMatchObject({
+      id: 'card-stall',
+      version: 2,
+      title: '新标题',
+      delivery: 'pending',
+    })
+  })
+
+  it('提醒梯度按版本推：首版 15 分钟后，到顶后不再提醒', () => {
+    expect(stallRemindAt(card({ kind: 'stall', version: 1 }))).toBe(
+      laterIso(STALL_REMIND_DELAYS_MS[0] ?? 0),
+    )
+    expect(stallRemindAt(card({ kind: 'stall', version: 3 }))).toBe(
+      laterIso(STALL_REMIND_DELAYS_MS[2] ?? 0),
+    )
+    expect(stallRemindAt(card({ kind: 'stall', version: 4 }))).toBeNull()
+    expect(stallRemindAt(card({ kind: 'ask' }))).toBeNull()
+    expect(stallRemindAt(card({ kind: 'stall', status: 'resolved' }))).toBeNull()
+  })
+
+  it('到点提醒：同一张卡版本 +1、投递回 pending；没到点零事实', () => {
+    const stall = card({ kind: 'stall', version: 1, createdAt: NOW, updatedAt: NOW })
+    expect(stallReminderFacts(view([stall]), NOW)).toEqual([])
+    const dueAt = new Date(Date.parse(NOW) + (STALL_REMIND_DELAYS_MS[0] ?? 0)).toISOString()
+    const due = stallReminderFacts(view([stall]), dueAt)
+    expect(due).toHaveLength(1)
+    expect((due[0]?.payload as { card: Card }).card).toMatchObject({
+      version: 2,
+      delivery: 'pending',
+    })
+  })
+
+  it('run 结束不收停机卡（它问的是「你来不来接手」）', () => {
+    const stall = card({ id: 'card-stall', kind: 'stall', key: STALL_CARD_KEY, runId: 'run-a' })
+    const decision: Decision = { facts: [runFinished('run-a')] }
+    const result = closeCardsOnFinish(view([stall]), decision, NOW)
+    expect(result).toBe(decision)
+  })
+
+  it('点「我去处理」：落 answered + resolved，不续接任何 run（run 早已终态）', () => {
+    const stall = card({
+      id: 'card-stall',
+      kind: 'stall',
+      key: STALL_CARD_KEY,
+      options: [STALL_CARD_ACK],
+    })
+    const decision = answerFacts(
+      view([stall]),
+      { type: 'card.answer', commandId: 'c-1', cardId: 'card-stall', optionIndex: 0, via: 'ui' },
+      NOW,
+      kernelEnv(),
+    )
+    expect(decision.reject).toBeUndefined()
+    expect(decision.facts.map((fact) => fact.type)).toEqual(['card.answered', 'card.resolved'])
+    expect((decision.facts[1]?.payload as { reason: string }).reason).toBe('manual')
   })
 })

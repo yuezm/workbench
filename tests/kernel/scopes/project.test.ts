@@ -45,6 +45,7 @@ const stage = (over: Partial<WorkflowStage> = {}): WorkflowStage => ({
   instructions: '',
   acceptance: [],
   runTimeoutMs: null,
+  notifyOnPark: false,
   ...over,
 })
 
@@ -315,9 +316,9 @@ describe('kernel/project', () => {
         }),
       ),
     ).toEqual([put('tasks', task({ currentStageId: 'st-2' }))])
-    expect(project(fact(12, 'task.archived', { task: task({ archivedAt: 'archived-at' }) }))).toEqual([
-      put('tasks', task({ archivedAt: 'archived-at' })),
-    ])
+    expect(
+      project(fact(12, 'task.archived', { task: task({ archivedAt: 'archived-at' }) })),
+    ).toEqual([put('tasks', task({ archivedAt: 'archived-at' }))])
     // M10：删项目时遗留任务归默认目录 —— 整行更新，阶段不动
     expect(project(fact(20, 'task.updated', { task: task({ projectId: null }) }))).toEqual([
       put('tasks', task({ projectId: null })),
@@ -455,7 +456,10 @@ describe('kernel/project', () => {
         from: 'st-1',
         to: 'st-2',
       }),
-      fact(8, 'task.finished', { outcome: 'done', task: task({ currentStageId: 'st-2', archivedAt: 'archived-at' }) }),
+      fact(8, 'task.finished', {
+        outcome: 'done',
+        task: task({ currentStageId: 'st-2', archivedAt: 'archived-at' }),
+      }),
       fact(9, 'stage.deleted', { stage: stage() }),
     ]
 
@@ -468,7 +472,9 @@ describe('kernel/project', () => {
     expect(first.workflow_stages.get('st-2')).toEqual(
       stage({ id: 'st-2', position: 1, name: '进行中' }),
     )
-    expect(first.tasks.get('t-1')).toEqual(task({ currentStageId: 'st-2', archivedAt: 'archived-at' }))
+    expect(first.tasks.get('t-1')).toEqual(
+      task({ currentStageId: 'st-2', archivedAt: 'archived-at' }),
+    )
     expect(first.agents.get('ag-1')).toEqual(agent())
     expect(first.runtimes.get('rt-1')).toEqual(runtime())
   })

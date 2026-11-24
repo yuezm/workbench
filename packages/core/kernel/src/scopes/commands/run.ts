@@ -14,7 +14,7 @@ import type { Input, Receipt } from '@workbench/protocol/inputs'
 import type { TaskComment } from '@workbench/protocol/task-comment'
 import type { Decision, Environment, FactDraft, Id, Iso, Limits, View } from '../../core/types'
 import type { SettledRun } from '../run'
-import { cardsFromReceipt, expiredCardFacts, resumedRun } from '../cards'
+import { cardsFromReceipt, expiredCardFacts, resumedRun, stallReminderFacts } from '../cards'
 import { handoffOnExit } from '../handoff'
 import { handoffGuardOf } from '../workflow/stage-handoffs'
 import { laterPrompt } from '../prompt'
@@ -37,7 +37,11 @@ import {
 import { cronTaskFacts, eventThreadFacts } from '../rules'
 import { childrenSettledFacts, spawnFacts } from '../spawn'
 import { entryRunFacts } from '../task-effects'
-import { reviewFactsOf, type ReviewOutcome } from '../review'
+import { reviewFactsOf } from '../review'
+import { blockedTransition, stallSweepFacts } from '../stall'
+
+// M55：硬门收口（补轮预算 / 阶段错误 / 停机卡）在 `scopes/stall.ts`，这里转发保持既有引用面。
+export { addressRepairFacts, stageErroredFacts } from '../stall'
 import {
   batchTaskPhases,
   closeIfAllDone,
@@ -258,36 +262,6 @@ function withLabel(labels: readonly string[], label: string): string[] {
 interface StageTransition {
   facts: FactDraft[]
   enter?: Task
-}
-
-/**
- * 硬门兜底（2026-11-21）：阻断项没处置时不推进阶段，但自动补一轮「只交 `addresses`」的回执。
- *
- * 为什么自动补：修复工作与验证都已在上一轮完成，缺的只是机器可读的逐条处置；靠人点
- * 「重新执行」才能补，会让任务在界面上静默挂死（实测 2026-11-21 任务 `a6e02161` 挂了两小时）。
- *
- * 只补**一次**（该阶段已跑过 ≥2 轮就不再派）：第二次仍缺说明模型稳定给不出格式，
- * 交给人处理，不自动循环——与 R5「闸门补回执只补一次」同一纪律。
- */
-export function addressRepairFacts(
-  view: View,
-  run: RunRow,
-  review: ReviewOutcome,
-  now: Iso,
-  env: Environment,
-): FactDraft[] {
-  if (review.report === undefined) return []
-  const task = run.taskId === null ? undefined : view.tasks.get(run.taskId)
-  const stage = run.stageId === null ? undefined : view.stages.get(run.stageId)
-  if (task === undefined || stage === undefined) return []
-  // 闸门自己的「没给结论」走 `receiptRepairText`；这里只管执行阶段缺评审处置。
-  if (stage.entryMode !== 'agent' || stage.judge !== null) return []
-  if (stageRoundCount(view, task.id, stage.id) > 1) return []
-  return entryRunFacts(view, task, now, env, HOST_SCHEDULER, undefined, {
-    roundSession: 'resume',
-    receiptRepair: 'addresses',
-    review: review.report,
-  })
 }
 
 function stageTransitionFacts(
@@ -597,16 +571,18 @@ export function receiveRun(
   const settled = scriptGateSettled(run, input.receipt, stage, now)
   facts.push(...settlementFacts(settled, now, HOST_SCHEDULER))
   if (run.purpose === 'stage') {
-    // M14 硬门：评审清单还有未处置条目时不推进阶段——run 照常落终态、任务停在当前阶段，
-    // 漏项由 `reviewFactsOf` 追加的任务评论说明「缺哪几条、怎么回应」。
+    // M14 硬门：评审清单还有未处置条目时不推进阶段——run 照常落终态，漏项由
+    // `reviewFactsOf` 追加的任务评论说明「缺哪几条、怎么回应」。
+    // M55：硬门不再无限续命——预算内自动补一轮「只交 addresses」，预算用完转阶段错误
+    // （进「已阻塞」+ 停机卡喊人），不再零流转地静默停住。
     // M34：执行阶段不看业务结论（succeeded 即成功）；只有闸门阶段读回执 `verdict`，
     // 且 `pass` 要逐条覆盖验收条目（见 `gateVerdictOf`）。
     const outcome =
       stage === undefined || stage.judge === null
         ? undefined
         : gateVerdictOf(input.receipt, stage, settled)
-    const transition = review.blocked
-      ? { facts: addressRepairFacts(view, run, review, now, env) }
+    const transition: StageTransition = review.blocked
+      ? blockedTransition(view, run, review, now, env)
       : stageTransitionFacts(view, settled, outcome, now, env)
     facts.push(...transition.facts)
     // 进入效果：流转到目标阶段 / 原地重跑后立刻入队下一轮（形成链条）
@@ -746,6 +722,10 @@ export function tickClock(view: View, now: Iso, env: Environment): Decision {
   }
   // M28：等人超过时限的 ask 卡关闭并续接一轮（不让任务挂在「等人拍板」上过夜）
   facts.push(...expiredCardFacts(view, now))
+  // M55：停机卡到点重推（同一张卡版本 +1，通道原地更新；到顶自动停）
+  facts.push(...stallReminderFacts(view, now))
+  // M55：静默哨兵——没有活跃 run、也没有开着的卡的会派活阶段，静默够久就收成阶段错误
+  facts.push(...stallSweepFacts(view, now, env))
   // M6：cron 规则到点建任务（同刻只触发一次；停机错过只补最近一次）
   facts.push(...cronTaskFacts(view, now, env, env.timezone))
   // M6.5：14 天无活动的 open 线程归档（只影响 UI 检索，不改任务/运行）

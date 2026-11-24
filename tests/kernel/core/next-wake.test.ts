@@ -254,3 +254,49 @@ describe('kernel/next-wake · 卡片重投排期（M41）', () => {
     expect(nextWakeAt(view([], [], [given]), NOW, env())).toBeNull()
   })
 })
+
+/**
+ * M55：停机卡到点要能自己把宿主叫醒（否则任务停住后定时器再也不会醒——
+ * 2026-11-24 任务 `8b76d466` 静默挂住就是这个机制）。
+ */
+describe('nextWakeAt · 停机卡提醒（M55）', () => {
+  const stall = (over: Partial<Card> = {}): Card => ({
+    id: 'card-stall',
+    runId: 'run-1',
+    taskId: 't-1',
+    conversationId: null,
+    title: '任务停机待接手',
+    text: '',
+    kind: 'stall',
+    options: ['我去处理'],
+    key: 'stall',
+    version: 1,
+    status: 'open',
+    delivery: 'delivered',
+    deliveryRef: null,
+    deliveryRefs: {},
+    deliveryAttempts: 1,
+    nextDeliveryAt: null,
+    deliveryGivenUp: false,
+    optionIndex: null,
+    answeredBy: null,
+    answeredByRef: null,
+    answeredAt: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...over,
+  })
+
+  it('首版 15 分钟后醒来重推', () => {
+    const due = new Date(Date.parse(NOW) + 15 * 60_000).toISOString()
+    expect(nextWakeAt(view([], [], [stall()]), NOW, env())).toBe(due)
+  })
+
+  it('已接手的卡不参与（不空转）', () => {
+    expect(nextWakeAt(view([], [], [stall({ status: 'resolved' })]), NOW, env())).toBeNull()
+  })
+
+  it('梯度到顶后不再排期', () => {
+    expect(nextWakeAt(view([], [], [stall({ version: 9 })]), NOW, env())).toBeNull()
+  })
+})

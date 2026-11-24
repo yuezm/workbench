@@ -23,6 +23,7 @@ import {
   withTx,
 } from '@workbench/host-store/schema'
 import { PROJECTION_TABLES as KERNEL_PROJECTION_TABLES } from '@workbench/kernel/core/types'
+import { needsCardsRebuild, rebuildLegacyCards } from '@workbench/host-store/db'
 
 const SAMPLE_AT = '2026-01-01T00:00:00.000Z'
 
@@ -148,6 +149,8 @@ const STAGES_M7_COLUMNS = [
   'run_timeout_ms',
   // M32：判定者（JSON 文本；null = 不判定）
   'judge_json',
+  // M55：进入喊人（1 = 移进本阶段时开一张停机卡）
+  'notify_on_park',
   // M18：内置阶段键（null = 自己添加的阶段）
   'builtin',
   'created_at',
@@ -439,7 +442,9 @@ describe('静态表与改前 DDL 一致；runtimes 按 M3 结构；agents 按 M2
     expect(shapeOf('max_rounds')).toBeUndefined()
     // M40：脚本列进入必须列清单（旧库缺它即重建一次）
     expect(shapeOf('script_json')).toBe("script_json|TEXT|1|'null'|0")
-    expect(STAGES_REQUIRED_COLUMNS).toHaveLength(11)
+    // M55：进入喊人列（INTEGER 0/1，默认 0 = 不喊）也进了必须列清单
+    expect(shapeOf('notify_on_park')).toBe('notify_on_park|INTEGER|1|0|0')
+    expect(STAGES_REQUIRED_COLUMNS).toHaveLength(12)
   })
 
   it('M26 阶段超时列：可空无默认、CHECK 认 5 min–4 h，补列语句与 DDL 同口径', () => {
@@ -1115,5 +1120,68 @@ describe('withTx', () => {
     expect(
       (db.prepare('SELECT COUNT(*) AS n FROM facts').get() as unknown as { n: number }).n,
     ).toBe(0)
+  })
+})
+
+describe('M55 卡片类型 CHECK：`stall` 需要整表重建（老库）', () => {
+  /** 旧库的 `cards` 结构（kind 只认 ask / notice）——重建后必须能写 `stall`。 */
+  const oldCardsDdl = `
+CREATE TABLE cards (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  task_id TEXT,
+  conversation_id TEXT,
+  title TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice')),
+  options_json TEXT NOT NULL DEFAULT '[]',
+  key TEXT,
+  version INTEGER NOT NULL DEFAULT 1,
+  status TEXT NOT NULL CHECK (status IN ('open','answered','resolved')),
+  delivery TEXT NOT NULL CHECK (delivery IN ('pending','delivered','failed')),
+  delivery_ref TEXT,
+  delivery_refs_json TEXT NOT NULL DEFAULT '{}',
+  delivery_attempts INTEGER NOT NULL DEFAULT 0,
+  next_delivery_at TEXT,
+  delivery_given_up INTEGER NOT NULL DEFAULT 0,
+  option_index INTEGER,
+  answered_by TEXT CHECK (answered_by IN ('ui','channel')),
+  answered_by_ref TEXT,
+  answered_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`
+
+  it('老库：先重建再写 stall；已有行原样保留', () => {
+    const db = memoryDb()
+    db.exec('CREATE TABLE runs (id TEXT PRIMARY KEY)')
+    db.exec(oldCardsDdl)
+    db.exec("INSERT INTO runs (id) VALUES ('run-1')")
+    db.exec(
+      "INSERT INTO cards (id, run_id, title, kind, status, delivery, created_at, updated_at) VALUES ('card-old', 'run-1', '旧卡', 'notice', 'open', 'pending', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+    )
+    // 旧 CHECK 下写 stall 会被约束拒掉——这正是必须重建的理由
+    expect(() =>
+      db.exec(
+        "INSERT INTO cards (id, run_id, title, kind, status, delivery, created_at, updated_at) VALUES ('card-new', 'run-1', '停机', 'stall', 'open', 'pending', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+      ),
+    ).toThrow()
+
+    expect(needsCardsRebuild(db)).toBe(true)
+    expect(rebuildLegacyCards(db)).toBe(true)
+    expect(needsCardsRebuild(db)).toBe(false)
+    // 幂等：第二次不再重建
+    expect(rebuildLegacyCards(db)).toBe(false)
+
+    const kept = db.prepare("SELECT kind, title FROM cards WHERE id = 'card-old'").get() as {
+      kind: string
+      title: string
+    }
+    expect(kept).toEqual({ kind: 'notice', title: '旧卡' })
+    expect(() =>
+      db.exec(
+        "INSERT INTO cards (id, run_id, title, kind, status, delivery, created_at, updated_at) VALUES ('card-new', 'run-1', '停机', 'stall', 'open', 'pending', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')",
+      ),
+    ).not.toThrow()
   })
 })

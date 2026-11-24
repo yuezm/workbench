@@ -285,8 +285,33 @@ S1+S2 已能解决「修复阶段看不到结论」；S3 才解决「修没修�
 
 1. **严重度口径**：`findings[]` 里 `medium` / `low`（Optional / Nit）此前与 `blocker` / `high` 同等阻断，导致「只关注 P0/P1」的闸门被 6 条建议项卡死。现在阻断集合固定在 `protocol/review.ts` 的 `BLOCKING_SEVERITIES`（`blocker` / `high`）；建议项仍写进 `findings[]`（机器可读留痕、可在 UI 查看、可用 `addresses` 处置），只是不参与硬门、漏项评论、线程待办与提示词折叠优先级。
 2. **同批提示词的证据缺口**：评审报告与「进入修复阶段」在同一批决策里产出，而 `review.reported` 只进 `facts`、不进 `view`。于是修复轮提示词：`addresses` 键被裁掉、待修复清单段为空、一条 finding id 都没有（实测 `runs.prompt` 6 325 字，零 finding）。现在 `ReviewOutcome.report` 把本批报告带出来，`entryRunFacts` 显式接收（`options.review`），提示词据此内联清单并打开 `addresses` 出口；清单行使用完整 `findingId`。
-3. **格式缺失的兜底**：硬门挡住后此前只写一条评论、不派下一轮，任务静默挂死。现在阻断项未处置时**自动补一轮**「只交 `addresses`」的回执（`addressesRepairText`：不要求重新改代码 / 重跑验证，清单内联）；每阶段最多自动补一次，之后 `task.reask` 还可人工补，额度用尽（本阶段第 3 轮起）交人处理。
+3. **格式缺失的兜底**：硬门挡住后此前只写一条评论、不派下一轮，任务静默挂死。现在阻断项未处置时**自动补一轮**「只交 `addresses`」的回执（`addressesRepairText`：不要求重新改代码 / 重跑验证，清单内联）。**M55 改写了额度**：见下节「口径修正（M55）」。
 
 配套文案：执行阶段的回执块标题在 `addresses` 有出口时改为「必须给 `addresses` 或 ask」；`findings` / `addresses` 的单键说明写明「阻断项漏回应不推进，建议项可回可不回」。
 
 验证：`pnpm vitest run` 全量见提交信息；新增/更新用例覆盖 `protocol/review`、`kernel/scopes/review`、`kernel/scopes/prompt`、`kernel/scopes/thread-context`、`kernel/decide.run`（同批清单 / 自动补轮 / 建议项不阻断 / 二次不派）、`kernel/decide.rerun`（`task.reask` 第二形态）。
+
+## 口径修正（M55，2026-11-24）：补轮预算 / 阶段错误 / 停机卡
+
+线上实测（任务 `8b76d466`，停在「修复」阶段 8 小时、零活跃 run、零通知）暴露三件事，本版收口：
+
+1. **补轮额度按报告派生，不再按阶段历史轮次**。旧口径「该阶段已跑过 ≥2 轮就不再补」在修复阶段天然失效——修复阶段本来就是打回循环，第二次打回起预算永远是空的（实测第 3 轮就必然被挡）。现在 `REPAIR_BUDGET = 3`，轮次由 `repairRounds(view, task, stage, report)` 派生：只数「该报告打回该阶段之后」的 run，锚点 `max(报告 createdAt, 任务 updatedAt)`。人把任务拖回阶段会推后锚点，预算重新计——否则「拖回去立刻又进阻塞」会变成新的死循环。
+2. **预算用尽不再零流转**。改为 `stage.errored`（原因分 `review_unaddressed` / `budget_exhausted`）+ `task.moved` 进内置「已阻塞」+ 任务评论 + `kind='stall'` 停机卡。`run` 的终态不动：这一轮是正常跑完的，失败的是阶段能否前进（混进 `run.failed` 会污染执行器成功率与失败文案）。这条路径不读 `exits.errored`：语义是「机器停了」，不是业务上没过。
+3. **消息通道与唤醒**。停机卡与业务提问同口径打扰（desktop / feishu 的 `needsAnswer` 认 `stall`），但没有等的 run：回答只落 `card.answered` + `card.resolved`（停止提醒），不续接任何 run。无人接手时 `clock.tick` 按 `STALL_REMIND_DELAYS_MS`（15min / 1h / 4h）把同一张卡 `version+1` 重推，`nextWakeAt` 把下一档算进去——旧实现的 `nextWakeAt` 只看 run / 卡重投 / cron，任务停住后宿主定时器再也不会醒，这是那次静默的直接机制。`closeCardsOnFinish` 不收停机卡；同一任务同时只留一张。
+
+顺带修的两处（同批实测暴露）：
+
+- **`checkRef` 证据面**：`fixed` 的 `checkRef` 现在可以命中「本回执的 `checks`」或「该报告此前入行的 `checks`」——补轮是重贴结论、不重跑门禁，只认本回执会让每一轮补轮注定失败。
+- **打回轮的提示词**：`reviewFactsOf` 把本批新建的报告 `reported` 优先交给入口 run（此前交出的是 `locateReport` 定位到的旧报告），否则打回轮的待修复清单是上一版 rev、`findingId` 与真正 open 的那条对不上（实测清单写 `:2#R6`，实际阻断项是 `:3#R6`）。
+
+验证：`tests/kernel/decide.run.test.ts`（预算内继续补轮 / 预算用尽转阶段错误 + 进阻塞 + 停机卡）、`tests/kernel/scopes/cards.test.ts`（停机卡开卡与去重、提醒梯度、run 结束不收、点「我去处理」不续接）、`tests/kernel/core/next-wake.test.ts`（停机提醒排期）、`tests/host/notices.test.ts`（停机通知与落点、人自己拖出来的阻塞不打扰）。
+
+### 追加（同一次收口）：静默哨兵
+
+只堵「缺 addresses」这一条路救不了下一次。`clock.tick` 因此多了一步扫描（`core/stall.ts` 的判据 +`scopes/stall.ts` 的 `stallSweepFacts`）：会派活的阶段（`agent` / `script`）+ 没有活跃 run + 没有开着的卡 + 最近一轮终态静默 ≥10 分钟 → 直接按同一套收口处理（`reason='stalled'`）。`next-wake` 把「最早该判停机的时刻」算进唯一唤醒，所以任务停住 10 分钟内一定会被叫醒检查一次——不必等到有人重启服务。
+
+这条兜底也解释了为什么「停机卡」必须是 `ask` 同口径打扰：`notice` 卡在飞书/桌面**投不出去**（它们只认 `needsAnswer`），只有 `stall` / `ask` 能真正把人叫来。
+
+### 追加（同一次收口）：进入「会喊人」的阶段
+
+`notifyOnPark`（阶段级布尔，默认 `false`）打开后，任务被移进该阶段的那一刻开一张 `stall` 卡（标题「轮到你：〈阶段〉」）。只对不派活的阶段生效（`entryMode='user' | 'none'`）；内置阶段恒 `false`。落地在 `decide` 出口，覆盖自动流转、人工拖拽、派单落点。数据库侧两处配套：`workflow_stages` 增 `notify_on_park` 列（进必须列清单，老库启动时整表重建一次，老行一律落 `0` = 不喊）；`cards.kind` 的 CHECK 放行 `stall`（SQLite 不能改 CHECK，`rebuildLegacyCards` 整表重建，幂等）。

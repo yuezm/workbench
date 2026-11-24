@@ -143,3 +143,61 @@ describe('noticesFromFacts：结局通知（M12）', () => {
     expect(noticesFromFacts([])).toEqual([])
   })
 })
+
+/**
+ * M55：阶段走不动（`stage.errored`）必须弹——这条路径以前只留一条任务评论，
+ * 任务在界面上静默挂着，人得自己发现（2026-11-24 任务 `8b76d466`）。
+ */
+describe('noticesFromFacts · 停机待接手（M55）', () => {
+  const errored = (taskId: string, title: string, seq = 1): Fact =>
+    ({
+      type: 'stage.errored',
+      actor: { kind: 'host', via: 'scheduler' },
+      at: AT,
+      seq,
+      payload: {
+        task: { id: taskId, title },
+        stage: 'st-fix',
+        stageName: '修复',
+        reason: 'review_unaddressed',
+        reportId: 'run-review:3',
+        findings: ['run-review:3#R6'],
+      },
+    }) as unknown as Fact
+
+  const erroredByOwner = (taskId: string, title: string): Fact =>
+    ({
+      ...(errored(taskId, title) as unknown as { payload: unknown; type: string }),
+      type: 'stage.errored',
+      actor: { kind: 'owner', via: 'ui' },
+    }) as unknown as Fact
+
+  it('停机 → 一条带任务落点的通知（标题带任务名）', () => {
+    const notices = noticesFromFacts([errored('t1', '地空协议配置')])
+    expect(notices).toHaveLength(1)
+    expect(notices[0]?.title).toBe('任务停机待接手：地空协议配置')
+    expect(notices[0]?.target?.taskId).toBe('t1')
+  })
+
+  it('同一任务在一批里多次停机：只弹一次', () => {
+    expect(noticesFromFacts([errored('t1', 'A', 1), errored('t1', 'A', 2)])).toHaveLength(1)
+  })
+
+  it('人自己拖出来的阻塞不打扰', () => {
+    expect(noticesFromFacts([erroredByOwner('t1', 'A')])).toEqual([])
+  })
+
+  it('完成 + 停机 + 失败混在同一批：三条，各有落点', () => {
+    const notices = noticesFromFacts([
+      completed('t1', 'A', 1),
+      errored('t2', 'B', 2),
+      failed('t3', 3),
+    ])
+    expect(notices.map((n) => n.title)).toEqual([
+      '任务完成：A',
+      '任务停机待接手：B',
+      '任务运行失败',
+    ])
+    expect(notices.map((n) => n.target?.taskId)).toEqual(['t1', 't2', 't3'])
+  })
+})

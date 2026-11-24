@@ -419,6 +419,8 @@ const checkStage = (value: unknown, label: string): Check => {
       STAGE_TIMEOUT_LIMITS.minMs,
       STAGE_TIMEOUT_LIMITS.maxMs,
     ) ??
+    // M55 进入喊人：可选布尔；内置阶段恒不喊由内核归一，这里只挡形状
+    optionalBoolean(stage.notifyOnPark, `${label}.notifyOnPark`) ??
     // M11 闸门：次数范围与目标下标在此校验；是否指向自己 / 是否 agent 阶段由内核判
     (stage.gate === undefined || stage.gate === null
       ? null

@@ -115,13 +115,15 @@ function outcomeText(card: Card): string {
 export function renderCard(card: Card, context: CardContext | null = null): FeishuCard {
   const elements: FeishuCardElement[] = []
   const open = card.status === 'open'
+  /** 要人点一下的卡：业务提问（`ask`）与停机接手（`stall`）同一口径，都出按钮 */
+  const actionable = card.kind === 'ask' || card.kind === 'stall'
   const lines = contextLines(context)
   if (lines.length > 0) elements.push({ tag: 'markdown', content: lines.join('\n') })
   if (card.text.trim() !== '') elements.push({ tag: 'markdown', content: card.text })
   if (!open) {
     elements.push({ tag: 'hr' })
     elements.push({ tag: 'markdown', content: outcomeText(card) })
-  } else if (card.kind === 'ask') {
+  } else if (actionable) {
     if (elements.length > 0) elements.push({ tag: 'hr' })
     card.options.forEach((label, index) => {
       elements.push(optionButton(card.id, label, index))
@@ -134,7 +136,7 @@ export function renderCard(card: Card, context: CardContext | null = null): Feis
     header: {
       title: { tag: 'plain_text', content: card.title },
       template: open
-        ? card.kind === 'ask'
+        ? actionable
           ? FEISHU_CARD_TEMPLATES.ask
           : FEISHU_CARD_TEMPLATES.notice
         : card.status === 'answered'

@@ -13,7 +13,14 @@
  *
  * 卡片正文是智能体产出的文字，这里只做数据搬运，不拼进命令 / 提示词里的可执行内容。
  */
-import type { Card, CardAnswerVia, CardResolveReason, RunRow } from '@workbench/protocol/entities'
+import type {
+  Card,
+  CardAnswerVia,
+  CardResolveReason,
+  RunRow,
+  Task,
+} from '@workbench/protocol/entities'
+import { STALL_REMIND_DELAYS_MS } from '@workbench/protocol/channels'
 import type { CardAnswerCommand } from '@workbench/protocol/commands'
 import type { Receipt } from '@workbench/protocol/inputs'
 import type { Actor, Decision, Environment, FactDraft, Id, Iso, View } from '../core/types'
@@ -198,8 +205,126 @@ export function cardsFromReceipt(
   return { facts, cardIds }
 }
 
-/** 关闭一张 open 卡（`agent` 来自回执 / `manual` 来自命令 / `cancelled` 由 run 取消）；非 open 幂等零事实。 */
-export function resolveFacts(
+// ---------- 停机卡（M55） ----------
+
+/** 停机卡的稳定键：同一任务同时只留一张（重复停机原地更新，不堆卡）。 */
+export const STALL_CARD_KEY = 'stall'
+
+/** 停机卡唯一的按钮：它是「收到，我接手」，不是业务选项。 */
+export const STALL_CARD_ACK = '我去处理'
+
+/**
+ * 停机卡的提醒梯度（M55）：首条即时投递，之后按这些间隔把**同一张卡**再推一次。
+ *
+ * 为什么复用 `card.updated` 而不是新开卡：通道按「同通道 + 同版本」去重（`planFor`），
+ * 版本一变就会原地更新原消息 → IM 里不会堆出一串重复卡；桌面通道也只看版本决定要不要再弹。
+ * 梯度到顶后不再提醒（卡仍然开着，接手了才算完），避免变成刷屏。
+ *
+ * 常量在协议层（`@workbench/protocol/channels`）：下一次唤醒时刻由 `core/next-wake` 算，
+ * 那一层不能反向 import 域代码，两边读同一份。
+ */
+export { STALL_REMIND_DELAYS_MS }
+
+/**
+ * 停机卡下一次提醒时刻；null = 已到顶 / 不是停机卡 / 已不在 open。
+ *
+ * 档位就是 `version - 1`（首版 1 = 已经投过），所以不需要额外记「上次提醒到第几档」。
+ */
+export function stallRemindAt(card: Card): Iso | null {
+  if (card.kind !== 'stall' || card.status !== 'open') return null
+  const delay = STALL_REMIND_DELAYS_MS[card.version - 1]
+  return delay === undefined ? null : plusMs(card.updatedAt, delay)
+}
+
+/**
+ * 到点的停机提醒：只把同一张卡 `version+1`、投递回 `pending`，不改文案也不关卡。
+ *
+ * 纯函数：到期判定用注入的 `now` 与卡上的 `updatedAt`，不读时钟。
+ */
+export function stallReminderFacts(view: View, now: Iso): FactDraft<'card.updated'>[] {
+  const facts: FactDraft<'card.updated'>[] = []
+  for (const card of view.cards.values()) {
+    const at = stallRemindAt(card)
+    if (at === null || at > now) continue
+    facts.push({
+      type: 'card.updated',
+      actor: TIMER,
+      at: now,
+      payload: {
+        card: { ...card, version: card.version + 1, delivery: 'pending', updatedAt: now },
+        changes: ['version', 'delivery'],
+      },
+    })
+  }
+  return facts
+}
+
+/**
+ * 停机卡（M55）：机器自己走不动时喊人接手。
+ *
+ * 与回执 `ask` 的区别：它不挂在任何等的 run 上（那一轮已经落终态），回答只表示「知道了」，
+ * 不续接 run；`kind='stall'` 让通道把它和业务提问同等对待（系统通知 / IM 都投），
+ * 同时让 `closeCardsOnFinish` 不把它随 run 结束收掉。
+ */
+export function stallCardFacts(
+  view: View,
+  input: { task: Task; runId: Id; title: string; text: string },
+  now: Iso,
+  env: Environment,
+): FactDraft[] {
+  const existing = [...view.cards.values()].find(
+    (card) => card.taskId === input.task.id && card.kind === 'stall' && card.status === 'open',
+  )
+  if (existing !== undefined) {
+    return [
+      {
+        type: 'card.updated',
+        actor: HOST,
+        at: now,
+        payload: {
+          card: {
+            ...existing,
+            title: input.title,
+            text: input.text,
+            version: existing.version + 1,
+            delivery: 'pending',
+            nextDeliveryAt: null,
+            updatedAt: now,
+          },
+          changes: ['title', 'text', 'version', 'delivery'],
+        },
+      },
+    ]
+  }
+  const card: Card = {
+    id: env.nextId('card'),
+    runId: input.runId,
+    taskId: input.task.id,
+    conversationId: null,
+    title: input.title,
+    text: input.text,
+    kind: 'stall',
+    options: [STALL_CARD_ACK],
+    key: STALL_CARD_KEY,
+    version: 1,
+    status: 'open',
+    delivery: 'pending',
+    deliveryRef: null,
+    deliveryRefs: {},
+    deliveryAttempts: 0,
+    nextDeliveryAt: null,
+    deliveryGivenUp: false,
+    optionIndex: null,
+    answeredBy: null,
+    answeredByRef: null,
+    answeredAt: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  return [{ type: 'card.opened', actor: HOST, at: now, payload: { card } }]
+}
+
+/** 关闭一张 open 卡（`agent` 来自回执 / `manual` 来自命令 / `cancelled` 由 run 取消）；非 open 幂等零事实。 */ export function resolveFacts(
   view: View,
   cardId: Id,
   reason: CardResolveReason,
@@ -310,6 +435,46 @@ export function answerFacts(
     return {
       facts: [],
       reject: { code: 'invalid_input', message: '选项下标越界: ' + String(input.optionIndex) },
+    }
+  }
+  // M55：停机卡没有等的 run（那一轮已经落终态）：回答只表示「知道了、我接手」——
+  // 落 answered + resolved 后停止提醒，不续接任何 run，也不改阶段。
+  if (card.kind === 'stall') {
+    const via: CardAnswerVia = input.via ?? 'ui'
+    const ref = input.byRef?.trim() ?? ''
+    const answered: Card = {
+      ...card,
+      status: 'answered',
+      optionIndex: input.optionIndex,
+      answeredBy: via,
+      answeredByRef: ref === '' ? null : ref,
+      answeredAt: now,
+      updatedAt: now,
+    }
+    const stallNote = input.note?.trim() ?? ''
+    return {
+      facts: [
+        {
+          type: 'card.answered',
+          actor: { kind: 'owner', via },
+          at: now,
+          payload: {
+            card: answered,
+            by: via,
+            ...(ref === '' ? {} : { byRef: ref }),
+            ...(stallNote === '' ? {} : { note: stallNote }),
+          },
+        },
+        {
+          type: 'card.resolved',
+          actor: RESOLVE_ACTOR.manual,
+          at: now,
+          payload: {
+            card: { ...answered, status: 'resolved', updatedAt: now },
+            reason: 'manual',
+          },
+        },
+      ],
     }
   }
   const run = view.runs.get(card.runId)
@@ -430,6 +595,8 @@ export function closeCardsOnFinish(view: View, decision: Decision, now: Iso): De
   const facts = [...decision.facts]
   for (const card of [...candidates.values()].sort(compareCards)) {
     if (touched.has(card.id)) continue
+    // M55：停机卡问的是「你来不来接手」，与 run 是否结束无关——同批收掉等于刚喊人就闭嘴
+    if (card.kind === 'stall') continue
     // 同批新开的卡不在视图里，不能走 resolveFacts（它按 id 回查视图），直接按行造事实
     const resolved: Card = { ...card, status: 'resolved', updatedAt: now }
     facts.push({

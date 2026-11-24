@@ -97,11 +97,12 @@ CREATE TABLE IF NOT EXISTS ${name} (
   ),
   -- M32 判定者：JSON 文本（对象 = 判定，null = 本阶段不判定；去向在 exits_json 里）
   judge_json TEXT NOT NULL DEFAULT 'null',
+  -- M55 进入喊人：1 = 任务被移进本阶段时开一张停机卡（只在非内置阶段有意义）
+  notify_on_park INTEGER NOT NULL DEFAULT 0,
   -- M18 内置阶段键（待办 / 已阻塞 / 已完成 / 已取消；NULL = 自己添加的阶段）
   builtin TEXT CHECK (builtin IN ('todo','blocked','done','cancelled')),
   created_at TEXT NOT NULL,
-  UNIQUE (workflow_id, position)
-);`
+  UNIQUE (workflow_id, position));`
 
 /**
  * `tasks` 投影：M6 追加来源四列（旧库由 `host/db.ts` 用 `ALTER TABLE ADD COLUMN` 补齐），
@@ -291,7 +292,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   conversation_id TEXT,
   title TEXT NOT NULL,
   text TEXT NOT NULL DEFAULT '',
-  kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice')),
+  -- M12 卡片类型；M55 增 stall（机器停机要人接手）：改 CHECK 必须重建表（rebuildLegacyCards）
+  kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice','stall')),
   options_json TEXT NOT NULL DEFAULT '[]',
   key TEXT,
   version INTEGER NOT NULL DEFAULT 1,
@@ -694,6 +696,8 @@ export const STAGES_REQUIRED_COLUMNS = [
   'spawn_policy',
   // M40：脚本列缺失（且 entry_mode 的 CHECK 还是三档）即重建一次
   'script_json',
+  // M55：进入喊人列缺失即重建一次
+  'notify_on_park',
 ] as const
 
 /**
@@ -867,7 +871,7 @@ export const CARDS_M12_ADDED_COLUMNS = ['kind'] as const
 export const CARDS_M12_ADD_COLUMN_SQL: Readonly<
   Record<(typeof CARDS_M12_ADDED_COLUMNS)[number], string>
 > = {
-  kind: "ALTER TABLE cards ADD COLUMN kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice'))",
+  kind: "ALTER TABLE cards ADD COLUMN kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice','stall'))",
 }
 
 /**

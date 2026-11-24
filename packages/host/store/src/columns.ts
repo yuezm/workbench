@@ -249,6 +249,8 @@ export const TABLE_SHAPES: Readonly<Record<ProjectionTable, TableShape>> = {
       col('acceptance', 'acceptance_json', jsonArray),
       col2('runTimeoutMs', 'run_timeout_ms'),
       col('judge', 'judge_json', jsonLiteral),
+      // M55：进入喊人（INTEGER 0/1）
+      col('notifyOnPark', 'notify_on_park', bool),
       col2('builtin', 'builtin'),
       // 阶段行没有 createdAt 字段：首次插入用事实时刻（写入侧的 `at`）
       col('@at', 'created_at', factAt),

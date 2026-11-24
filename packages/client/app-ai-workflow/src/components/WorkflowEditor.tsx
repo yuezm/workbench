@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from '@workbench/client-ui-primitives/select'
 import { SortHandle } from '@workbench/client-ui-kit/sort-handle'
+import { Switch } from '@workbench/client-ui-primitives/switch'
 import { Textarea } from '@workbench/client-ui-primitives/textarea'
 import { cn } from '@workbench/client-ui-kit/cn'
 import { useRowDrag } from '@workbench/client-ui-kit/use-row-drag'
@@ -184,6 +185,15 @@ function hasStageTimeout(stage: StageInput): boolean {
 }
 
 /**
+ * M55：只有「不派活」的自定义阶段才谈得上「轮到你」——内置阶段（待办 / 已阻塞 / 完成 / 取消）
+ * 本来就不喊人（`normalizeStage` 恒归零），会派活的阶段由静默哨兵兜底。
+ */
+function canNotifyOnPark(stage: StageInput): boolean {
+  const builtin = stage.builtin ?? null
+  return builtin === null && (stage.entryMode === 'user' || stage.entryMode === 'none')
+}
+
+/**
  * M26 阶段单轮超时的可选值：`default` = 不写字段、用全局缺省（60 min）。
  * 只给常用档位——下限 5 min / 上限 4 h 由 `STAGE_TIMEOUT_LIMITS` 硬挡，界面上不让人手填毫秒。
  */
@@ -327,6 +337,8 @@ function pruneByEntryKind(stage: StageInput): StageInput {
     acceptance: [],
     // M26：阶段超时同理
     runTimeoutMs: null,
+    // M55：进入喊人只对人肉阶段有意义（这里就是人肉阶段的归一出口）
+    notifyOnPark: stage.notifyOnPark ?? false,
     judge: null,
     // M40：不派活的阶段也不该留脚本
     script: null,
@@ -488,6 +500,8 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
       acceptance: s.acceptance ?? [],
       // M26：阶段超时原样带回（null = 用全局缺省）
       runTimeoutMs: s.runTimeoutMs ?? null,
+      // M55：进入喊人原样带回（缺省 false）
+      notifyOnPark: s.notifyOnPark ?? false,
       judge: s.judge === null ? null : { maxFails: s.judge.maxFails },
     }
   })
@@ -1425,6 +1439,24 @@ export function WorkflowEditor({
                     </SelectContent>
                   </Select>
                 </Field>
+              )}
+
+              {/* M55：进入这个阶段时喊人——人肉排队默认不打扰，打开后走停机卡那套通道 */}
+              {canNotifyOnPark(stage) && (
+                <div className="mt-3 flex items-center gap-3">
+                  <Switch
+                    aria-label={`阶段${n}进入时提醒我`}
+                    checked={stage.notifyOnPark === true}
+                    onCheckedChange={(checked) => patchStage(index, { notifyOnPark: checked })}
+                  />
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-sm">进入这个阶段时提醒我</span>
+                    <span className="text-xs text-faint-foreground">
+                      任务被移进这里时发一条通知（飞书 /
+                      桌面），点「我去处理」即停。默认关：人肉排队的提醒发多了，真告警会沉。
+                    </span>
+                  </div>
+                </div>
               )}
             </>
           )}

@@ -136,6 +136,7 @@ function workflowOf(specs: StageSpec[]): WorkflowWithStages {
       instructions: spec.instructions ?? '',
       acceptance: spec.acceptance ?? [],
       runTimeoutMs: spec.runTimeoutMs ?? null,
+      notifyOnPark: false,
       script: spec.script ?? null,
     })),
   }
@@ -1021,6 +1022,7 @@ describe('WorkflowEditor', () => {
       // M20：不展示验收的类型保存时归一为空
       acceptance: [],
       runTimeoutMs: null,
+      notifyOnPark: false,
       judge: null,
       // M40：不展示脚本的类型保存时归一为空
       script: null,
@@ -1083,6 +1085,7 @@ describe('WorkflowEditor', () => {
       // M20：不展示验收的类型保存时归一为空
       acceptance: [],
       runTimeoutMs: null,
+      notifyOnPark: false,
       judge: null,
       // M40：不展示脚本的类型保存时归一为空
       script: null,
@@ -1407,6 +1410,7 @@ describe('WorkflowEditor 校验与失败反馈', () => {
           instructions: '',
           acceptance: [],
           runTimeoutMs: null,
+          notifyOnPark: false,
           judge: null,
         },
       ],
@@ -1438,6 +1442,7 @@ describe('WorkflowEditor 校验与失败反馈', () => {
           instructions: '',
           acceptance: [],
           runTimeoutMs: null,
+          notifyOnPark: false,
           judge: null,
         },
       ],

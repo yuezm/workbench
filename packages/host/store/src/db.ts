@@ -336,8 +336,8 @@ export function upgradeLegacyStagesTable(db: DatabaseSync): boolean {
         `INSERT INTO ${STAGES_UPGRADE_TEMP}
            (id, workflow_id, name, position, entry_mode, agent_id, script_json, exits_json, handoffs_json,
             subtask_stage_id, on_children_settled, spawn_policy, instructions, acceptance_json,
-            run_timeout_ms, judge_json, builtin, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            run_timeout_ms, judge_json, builtin, created_at, notify_on_park)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       for (const row of rows) {
         const stage = legacyStageRow(row)
@@ -360,6 +360,8 @@ export function upgradeLegacyStagesTable(db: DatabaseSync): boolean {
           JSON.stringify(stage.judge),
           stage.builtin,
           stage.createdAt,
+          // M55：老库没有这一列，重建时按「不喊人」落地（老行不该凭空开始打扰）
+          0,
         )
       }
       db.exec('DROP TABLE workflow_stages')
@@ -459,6 +461,48 @@ function legacyStageRow(raw: Record<string, unknown>): {
     builtin: text(raw.builtin),
     createdAt: String(raw.created_at),
   }
+}
+
+const CARDS_UPGRADE_TEMP = 'cards_m55_upgrade'
+
+/**
+ * 旧 `cards` 要不要一次性物理重建（M55）：`kind` 的 CHECK 还没放行 `stall`。
+ *
+ * 为什么必须重建：SQLite 不支持改 CHECK，`card.opened` 带 `kind='stall'` 时写入会被约束拒掉，
+ * 停机卡就永远存不下来（内核层测试不到，只有真库会炸）。判据看建表 SQL 里有没有 `'stall'`：
+ * 新建库与已重建的库都命中，无需另存版本号。
+ */
+export function needsCardsRebuild(db: DatabaseSync): boolean {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'cards'")
+    .get() as { sql?: string | null } | undefined
+  const sql = row?.sql ?? null
+  if (sql === null) return false
+  return !sql.includes("'stall'")
+}
+
+/** 旧 `cards` 一次性物理重建（M55）：建新表 → 按共有列挪行 → 删旧表 → 改名。 */
+export function rebuildLegacyCards(db: DatabaseSync): boolean {
+  if (!needsCardsRebuild(db)) return false
+  const before = tableColumns(db, 'cards')
+  const foreignKeys = readForeignKeys(db)
+  if (foreignKeys) db.exec('PRAGMA foreign_keys = OFF')
+  try {
+    withTx(db, () => {
+      db.exec(`DROP TABLE IF EXISTS ${CARDS_UPGRADE_TEMP}`)
+      db.exec(tableDdl.cards(CARDS_UPGRADE_TEMP))
+      const after = tableColumns(db, CARDS_UPGRADE_TEMP)
+      // 只搬两张表都有的列：老库缺的列由新表的 DEFAULT 补（`kind` 因此落 'ask'，随后由投影重建归一）
+      const shared = [...before].filter((column) => after.has(column))
+      const list = shared.join(', ')
+      db.exec(`INSERT INTO ${CARDS_UPGRADE_TEMP} (${list}) SELECT ${list} FROM cards`)
+      db.exec('DROP TABLE cards')
+      db.exec(`ALTER TABLE ${CARDS_UPGRADE_TEMP} RENAME TO cards`)
+    })
+  } finally {
+    if (foreignKeys) db.exec('PRAGMA foreign_keys = ON')
+  }
+  return true
 }
 
 /**
@@ -572,6 +616,8 @@ export function openDatabase(filePath: string): DatabaseSync {
     // M9 / M11：对话补归档时间与所属项目（只增不改）
     upgradeLegacyConversations(db)
     // M12：卡片补类型列（只增不改；历史行由投影重建按事实归一）
+    // M55：`kind` 的 CHECK 放行 `stall` 需要整表重建（SQLite 不能改 CHECK），先重建再补列
+    rebuildLegacyCards(db)
     upgradeLegacyCards(db)
     // A1：规则集补准入配置列（只增不改；NULL = 兼容模式）
     upgradeLegacyRuleSets(db)

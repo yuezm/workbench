@@ -138,6 +138,8 @@ export const sample = {
       instructions: '',
       acceptance: [],
       runTimeoutMs: null,
+      // M55：进入这个阶段时不喊人
+      notifyOnPark: false,
       // M40：不是脚本阶段
       script: null,
       ...overrides,

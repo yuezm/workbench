@@ -68,8 +68,7 @@ export function normalizeTask(row: Task, at?: string): Task {
     projectId: legacy.projectId ?? null,
     threadId: legacy.threadId ?? null,
     // M53：派单产物曾经也挂 parentTaskId，重建时归一回「只有血缘、没有从属」
-    parentTaskId:
-      (legacy.origin ?? 'manual') === 'handoff' ? null : (legacy.parentTaskId ?? null),
+    parentTaskId: (legacy.origin ?? 'manual') === 'handoff' ? null : (legacy.parentTaskId ?? null),
     spawnedByRunId: legacy.spawnedByRunId ?? null,
     batchNo: legacy.batchNo ?? null,
     spawnKey: legacy.spawnKey ?? null,
@@ -100,6 +99,8 @@ export function normalizeTask(row: Task, at?: string): Task {
     acceptance: judge === null ? [] : (legacy.acceptance ?? []),
     // M26：老事实没有阶段超时，按「用全局缺省」归一
     runTimeoutMs: legacy.runTimeoutMs ?? null,
+    // M55：老事实进入时不喊人；内置阶段恒不喊（喊人的是「人肉排队」，内置阶段自己会被人看见）
+    notifyOnPark: (legacy.builtin ?? null) === null && (legacy.notifyOnPark ?? false),
   }
 }
 
@@ -305,6 +306,10 @@ function changesOf(fact: AnyFact): Change[] {
       // M14：评审结论与逐条处置都携带完整报告行（findings 状态已在行内），整行 upsert。
       // 改版是新 rev = 新行 id；处置是同一行 id 的状态演进——与 `card.*` 同口径。
       return [put('review_reports', fact.payload.report)]
+    case 'stage.errored':
+      // M55：审计事实，不写表——任务行进「已阻塞」由同批 `task.moved` 表达，
+      // 这条只记「为什么走不动」，时间线与知会读它。
+      return []
     case 'conversation.created':
     case 'conversation.updated':
       // M9：老事实没有 `archivedAt`，按 null 归一，重建与增量折出同一行；

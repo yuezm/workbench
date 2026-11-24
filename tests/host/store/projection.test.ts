@@ -163,6 +163,7 @@ describe('rebuild：增量应用与重建等价', () => {
             instructions: '',
             acceptance: [],
             runTimeoutMs: null,
+            notifyOnPark: false,
             script: null,
           },
           {
@@ -183,6 +184,7 @@ describe('rebuild：增量应用与重建等价', () => {
             instructions: '',
             acceptance: [],
             runTimeoutMs: null,
+            notifyOnPark: false,
             script: null,
           },
         ],

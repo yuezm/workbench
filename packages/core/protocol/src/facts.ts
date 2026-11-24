@@ -116,6 +116,7 @@ export const FACT_TYPES = [
   'plugins.replaced',
   'review.reported',
   'review.addressed',
+  'stage.errored',
   'conversation.created',
   'conversation.updated',
   'conversation.removed',
@@ -606,6 +607,34 @@ export interface ReviewAddressedPayload {
   addressed: string[]
 }
 
+/**
+ * 阶段无法推进（M55）：机器已经把所有能自动重试的轮次用完，仍不能前进。
+ *
+ * 为什么单独一条事实，而不是把 run 标成 failed：这一轮 run 是**正常跑完**的（exit 0），
+ * 失败的是「阶段能不能往下走」。混进 `run.failed` 会把执行器成功率算错，也会让失败通知
+ * 说错原因。任务行进「已阻塞」由同批的 `task.moved` 表达，这条事实只负责「为什么」——
+ * 时间线、知会、UI 都读它，`project` 不写表。
+ */
+export interface StageErroredPayload {
+  task: Task
+  /** 出错的阶段（任务已不在这个阶段上，所以不能从 `task.currentStageId` 反推） */
+  stage: string
+  /** 阶段名（知会与时间线直接用，不要求读侧再查一次投影） */
+  stageName: string
+  /**
+   * 错误类型：
+   * - `review_unaddressed`：评审阻断项补了额度仍未逐条处置（机器没交可机读结论）；
+   * - `budget_exhausted`：该阶段在这一份评审下已经跑过的轮次到顶；
+   * - `stalled`：静默哨兵判定「没人管了」（没有活跃 run、没有开着的卡、静默超过阈值），
+   *   不依赖任何一条已知的失败路径。
+   */
+  reason: 'review_unaddressed' | 'budget_exhausted' | 'stalled'
+  /** 相关的评审报告 id（没有报告时为 null；与 `reason` 一起供人定位） */
+  reportId: string | null
+  /** 仍未处置的阻断项 id（最多 10 条，超出由 `blockedChars` 另行计数） */
+  findings: string[]
+}
+
 // ---------- 对话 ----------
 
 export interface ConversationCreatedPayload {
@@ -716,6 +745,7 @@ export interface FactPayloads {
   'plugins.replaced': PluginsReplacedPayload
   'review.reported': ReviewReportedPayload
   'review.addressed': ReviewAddressedPayload
+  'stage.errored': StageErroredPayload
   'conversation.created': ConversationCreatedPayload
   'conversation.updated': ConversationUpdatedPayload
   'conversation.removed': ConversationRemovedPayload

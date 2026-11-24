@@ -55,7 +55,9 @@ export function notifyTargetOf(card: Card): NotifyTarget {
  * （与 `kernel/project.normalizeCard` 同口径），免得把信息卡当提问弹出去。
  */
 const needsAnswer = (card: { kind?: string; options: string[] }): boolean =>
-  card.kind === 'ask' || (card.kind === undefined && card.options.length > 0)
+  card.kind === 'ask' ||
+  card.kind === 'stall' ||
+  (card.kind === undefined && card.options.length > 0)
 
 export const desktopChannel: ChannelPlugin = {
   async start(ctx: ChannelContext): Promise<() => void> {

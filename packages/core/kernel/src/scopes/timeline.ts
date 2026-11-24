@@ -194,6 +194,9 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'review.addressed':
       // M14：评审报告归到它所属的任务（时间线上「谁在什么时候评的、改了哪几条」）。
       return [{ scope: 'task', id: fact.payload.report.taskId }]
+    case 'stage.errored':
+      // M55：阶段走不动要人接手——归到任务（时间线能回答「它为什么在已阻塞」）。
+      return [{ scope: 'task', id: fact.payload.task.id }]
     case 'conversation.created':
     case 'conversation.updated':
     case 'conversation.removed':

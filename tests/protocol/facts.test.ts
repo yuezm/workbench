@@ -157,6 +157,7 @@ const expected = [
   'plugins.replaced',
   'review.reported',
   'review.addressed',
+  'stage.errored',
   'conversation.created',
   'conversation.updated',
   'conversation.removed',

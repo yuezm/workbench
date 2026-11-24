@@ -37,6 +37,8 @@ export function emptyStage(name: string): StageInput {
     acceptance: [],
     // M26：阶段超时缺省不写（= 用全局缺省 60 min）
     runTimeoutMs: null,
+    // M55：进入时不喊人（人肉排队的提醒默认关，免得真告警被稀释）
+    notifyOnPark: false,
     judge: null,
     // M40：新阶段不是脚本阶段（切到「执行脚本」时编辑器补默认脚本配置）
     script: null,

@@ -92,7 +92,7 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
       '[{"key":"R1","severity":"blocker","location":"src/a.ts:42","claim":"...","requiredAction":"..."}]',
   },
   addresses: {
-    text: '对上轮 `findings` 逐条回应。`fixed` 带 `checkRef`（指向同块里退出码 0 的 `checks`），`rejected` / `deferred` 写 `note`；**阻断项（blocker / high）漏回应不推进**，建议项（medium / low）可回可不回。',
+    text: '对上轮 `findings` 逐条回应。`fixed` 带 `checkRef`（指向退出码 0 的 `checks` 命令：本块里的，或该报告此前入行的），`rejected` / `deferred` 写 `note`；**阻断项（blocker / high）漏回应不推进**，建议项（medium / low）可回可不回。',
     shape:
       '[{"findingId":"<报告id>#R1","disposition":"fixed","checkRef":"pnpm check","note":"..."}]',
   },

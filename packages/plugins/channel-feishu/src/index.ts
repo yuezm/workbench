@@ -336,7 +336,9 @@ interface ConnectionRuntime {
  * 免得把信息卡当提问发出去。
  */
 const needsAnswer = (card: { kind?: string; options: string[] }): boolean =>
-  card.kind === 'ask' || (card.kind === undefined && card.options.length > 0)
+  card.kind === 'ask' ||
+  card.kind === 'stall' ||
+  (card.kind === undefined && card.options.length > 0)
 
 /**
  * 没有对应消息时回报的投递引用：不需要拍板的卡与「从未发出过的终态卡」在飞书里**不落消息**，

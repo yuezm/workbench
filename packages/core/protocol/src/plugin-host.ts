@@ -14,6 +14,7 @@
  * 不一致按宿主侧的 manifest 为准并终止该插件（防止运行期改写授权面）。
  */
 import type { Card } from './entities'
+import type { CardContext } from './channels'
 import type { RawEvent } from './inputs'
 import {
   CAPABILITIES,
@@ -311,6 +312,11 @@ export interface CardFrame {
    * 外部通道据此原地更新（改口成「已答复」），不需要自己存 message id。
    */
   ref?: string | null
+  /**
+   * 这张卡属于哪件活（M54）：项目 / 任务 / 会话 / 阶段 / 智能体。
+   * 可选字段（老宿主不带、老插件不读），形状见 `protocol/channels` 的 `CardContext`。
+   */
+  context?: CardContext | null
 }
 
 export interface ShutdownFrame {

@@ -7,7 +7,7 @@
  * 非 2xx / 超时只记日志（不 answer、不抛给 hub）；未配置 url 时通道不投递。
  */
 import { describe, expect, it, vi } from 'vitest'
-import type { ChannelContext } from '@workbench/protocol/channels'
+import type { CardContext, ChannelContext } from '@workbench/protocol/channels'
 import {
   cardPayload,
   readWebhookChannelConfig,
@@ -25,7 +25,9 @@ interface StartedChannel {
   net: FakeNet
   logs: string[]
   delivered: Array<{ cardId: string; version: number; ref: string }>
-  handlers: Array<(card: ReturnType<typeof cardOf>, ref: string | null) => void>
+  handlers: Array<
+    (card: ReturnType<typeof cardOf>, ref: string | null, context: CardContext | null) => void
+  >
   deliver: ReturnType<typeof channelHarness>['deliver']
   controller: AbortController
   ctx: ReturnType<typeof channelHarness>['ctx']
@@ -230,7 +232,9 @@ describe('webhook 通道：未配置不投递', () => {
 
   it('宿主未注入 net 能力 → 跳过投递、不 delivered、不抛错', async () => {
     const logs: string[] = []
-    const handlers: Array<(card: ReturnType<typeof cardOf>, ref: string | null) => void> = []
+    const handlers: Array<
+      (card: ReturnType<typeof cardOf>, ref: string | null, context: CardContext | null) => void
+    > = []
     const delivered: Array<{ cardId: string; version: number; ref: string }> = []
     // ChannelSdk.net 可选：宿主没有网络原件时这里就是 undefined
     const ctx: ChannelContext = {
@@ -266,7 +270,7 @@ describe('webhook 通道：未配置不投递', () => {
     }
     const dispose = await webhookChannel.start(ctx)
 
-    handlers[0](cardOf(), null)
+    handlers[0](cardOf(), null, null)
 
     await vi.waitFor(() => expect(logs.join('\n')).toContain('未提供 net 能力'))
     expect(delivered).toEqual([])
@@ -313,7 +317,9 @@ describe('webhook 通道：未配置不投递', () => {
     const logs: string[] = []
     const controller = new AbortController()
     controller.abort()
-    const handlers: Array<(card: ReturnType<typeof cardOf>, ref: string | null) => void> = []
+    const handlers: Array<
+      (card: ReturnType<typeof cardOf>, ref: string | null, context: CardContext | null) => void
+    > = []
     const ctx: ChannelContext = {
       sdk: fakeSdk({
         config: <T = Record<string, unknown>>() => ({ url: URL_CONFIG }) as T,

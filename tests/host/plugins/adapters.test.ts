@@ -2,7 +2,7 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Card } from '@workbench/protocol/entities'
-import type { ChannelContext } from '@workbench/protocol/channels'
+import type { CardContext, ChannelContext } from '@workbench/protocol/channels'
 import type { PluginManifest } from '@workbench/protocol/manifest'
 import { PLUGIN_HOST_PROTOCOL_VERSION } from '@workbench/protocol/plugin-host'
 import type { RawEvent } from '@workbench/protocol/inputs'
@@ -175,13 +175,13 @@ interface ChannelHarness {
   delivered: ReturnType<typeof vi.fn>
   answer: ReturnType<typeof vi.fn>
   unsubscribe: ReturnType<typeof vi.fn>
-  emitCard: (card: Card, ref?: string | null) => void
+  emitCard: (card: Card, ref?: string | null, context?: CardContext | null) => void
 }
 
 function channelHarness(): ChannelHarness {
   const controller = new AbortController()
   controllers.push(controller)
-  let handler: ((card: Card, ref: string | null) => void) | null = null
+  let handler: ((card: Card, ref: string | null, context: CardContext | null) => void) | null = null
   const unsubscribe = vi.fn()
   const delivered = vi.fn(async () => undefined)
   const answer = vi.fn(async () => ({ changed: true, status: 'answered' as const }))
@@ -190,7 +190,8 @@ function channelHarness(): ChannelHarness {
     delivered,
     answer,
     unsubscribe,
-    emitCard: (card: Card, ref: string | null = null) => handler?.(card, ref),
+    emitCard: (card: Card, ref: string | null = null, context: CardContext | null = null) =>
+      handler?.(card, ref, context),
     ctx: {
       sdk: fakeSdk(),
       onCard: (callback) => {
@@ -380,12 +381,38 @@ describe('createExternalChannelPlugin', () => {
       type: 'card',
       card,
       ref: 'om_9',
+      context: null,
     })
 
     emitFrame(children[0], { type: 'delivered', cardId: 'card-1', version: 2, ref: 'demo' })
     emitFrame(children[0], { type: 'answer', cardId: 'card-1', optionIndex: 1 })
     await vi.waitFor(() => expect(harness.delivered).toHaveBeenCalledWith('card-1', 2, 'demo'))
     await vi.waitFor(() => expect(harness.answer).toHaveBeenCalledWith('card-1', 1))
+  })
+
+  it('归属上下文随 card 帧下发（M54：外部通道也能把项目 / 任务摆进消息）', async () => {
+    const { spawn, children } = spawnQueue()
+    const plugin = createExternalChannelPlugin(entryOf('channel'), optionsOf(spawn))
+    const harness = channelHarness()
+    const started = plugin.start(harness.ctx)
+    helloChannel(children[0])
+    disposers.push(await started)
+
+    const context: CardContext = {
+      projectName: 'workbench',
+      taskTitle: '地空协议配置',
+      conversationTitle: null,
+      stageName: '验收',
+      agentName: '评审员',
+    }
+    harness.emitCard(card, 'om_9', context)
+    expect(framesOf(children[0])).toContainEqual({
+      v: PLUGIN_HOST_PROTOCOL_VERSION,
+      type: 'card',
+      card,
+      ref: 'om_9',
+      context,
+    })
   })
 
   it('answer 帧回 changed=false（别处已答 / 已关闭）：只记日志，不算失败', async () => {

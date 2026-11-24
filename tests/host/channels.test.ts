@@ -9,7 +9,12 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { Card } from '@workbench/protocol/entities'
-import type { ChannelContext, ChannelPlugin, ChannelProgress } from '@workbench/protocol/channels'
+import type {
+  CardContext,
+  ChannelContext,
+  ChannelPlugin,
+  ChannelProgress,
+} from '@workbench/protocol/channels'
 import type { PluginManifest } from '@workbench/protocol/manifest'
 import type { Fact } from '@workbench/kernel/core/types'
 import type { ChannelRegistryEntry } from '@workbench/plugins-registry'
@@ -70,13 +75,19 @@ const dispatchInputs = (dispatch: ReturnType<typeof vi.fn>): Array<Record<string
 function fakeEntry(
   key: string,
   onCard?: (ctx: ChannelContext, card: Card) => void,
-): ChannelRegistryEntry & { received: Card[]; disposed: number } {
+): ChannelRegistryEntry & {
+  received: Card[]
+  contexts: Array<CardContext | null>
+  disposed: number
+} {
   const received: Card[] = []
+  const contexts: Array<CardContext | null> = []
   const state = { disposed: 0 }
   const plugin: ChannelPlugin = {
     async start(ctx) {
-      ctx.onCard((card) => {
+      ctx.onCard((card, _ref, context) => {
         received.push(card)
+        contexts.push(context)
         if (onCard) onCard(ctx, card)
       })
       return () => {
@@ -91,6 +102,9 @@ function fakeEntry(
     plugin,
     get received() {
       return received
+    },
+    get contexts() {
+      return contexts
     },
     get disposed() {
       return state.disposed
@@ -108,6 +122,8 @@ const ackEntry = (key: string): ReturnType<typeof fakeEntry> =>
 function harness(options: {
   entries: ChannelRegistryEntry[]
   cards?: Card[]
+  /** 按视图名回答（M54：卡片上下文要查任务 / 项目 / 工作流 / 智能体） */
+  views?: Record<string, unknown>
   timeoutMs?: number
 }): {
   hub: ReturnType<typeof createChannels>
@@ -116,7 +132,11 @@ function harness(options: {
   dispatch: ReturnType<typeof vi.fn>
 } {
   const store = {
-    query: vi.fn((_view: string) => options.cards ?? []),
+    query: vi.fn((view: string) => {
+      const views = options.views ?? {}
+      if (view in views) return views[view]
+      return options.cards ?? []
+    }),
   } as unknown as ChannelsStore
   const dispatch = vi.fn(() => ({ facts: [] }))
   const effects = { dispatch } as unknown as ChannelsEffects
@@ -1495,6 +1515,81 @@ describe('createChannels：入站派活与进展（M44）', () => {
     const inputs = dispatchInputs(dispatch)
     expect(inputs[0]).toMatchObject({ type: 'chat.create' })
     expect(inputs[0]).not.toHaveProperty('threadId')
+    await hub.stopAll()
+  })
+})
+
+describe('createChannels：卡片上下文（M54）', () => {
+  const taskRow = {
+    id: 'task-1',
+    title: '地空协议配置，数据统一存储',
+    description: '',
+    workflowId: 'wf-1',
+    projectId: 'proj-1',
+    currentStageId: 'stage-2',
+    archivedAt: null,
+    createdAt: AT,
+    updatedAt: AT,
+  }
+
+  const views = {
+    'task.byId': taskRow,
+    'run.byId': { id: 'run-1', agentId: 'agent-1', taskId: 'task-1', conversationId: null },
+    'projects.all': [{ id: 'proj-1', name: 'sagc3_monorepo' }],
+    'workflows.all': [
+      {
+        id: 'wf-1',
+        name: '需求交付',
+        description: '',
+        createdAt: AT,
+        stages: [{ id: 'stage-2', name: '验收' }],
+      },
+    ],
+    'agents.all': [{ id: 'agent-1', name: '评审员' }],
+  }
+
+  it('投递时把「项目 / 任务 / 阶段 / 智能体」交给每个通道（同一个投递共一份）', async () => {
+    const inApp = ackEntry('in-app')
+    const desktop = ackEntry('desktop')
+    const { hub } = harness({ entries: [inApp, desktop], views })
+    await hub.startAll()
+
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1, taskId: 'task-1' }))])
+
+    await vi.waitFor(() => expect(desktop.received).toHaveLength(1))
+    const expected = {
+      projectName: 'sagc3_monorepo',
+      taskTitle: '地空协议配置，数据统一存储',
+      conversationTitle: null,
+      stageName: '验收',
+      agentName: '评审员',
+    }
+    expect(inApp.contexts).toEqual([expected])
+    expect(desktop.contexts).toEqual([expected])
+    await hub.stopAll()
+  })
+
+  it('上下文查不到（视图空 / 形状不对）：传 null，投递照常并照常 ack', async () => {
+    const desktop = ackEntry('desktop')
+    const { hub, dispatch } = harness({
+      entries: [desktop],
+      views: { 'task.byId': null, 'run.byId': null },
+    })
+    await hub.startAll()
+
+    hub.dispatch([cardOpened(sample.card({ id: 'card-1', version: 1 }))])
+
+    await vi.waitFor(() => expect(desktop.received).toHaveLength(1))
+    expect(desktop.contexts).toEqual([null])
+    await vi.waitFor(() =>
+      expect(dispatchInputs(dispatch)).toContainEqual({
+        type: 'card.delivered',
+        cardId: 'card-1',
+        version: 1,
+        channel: 'desktop',
+        ref: 'desktop',
+      }),
+    )
     await hub.stopAll()
   })
 })

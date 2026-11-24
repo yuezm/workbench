@@ -8,6 +8,7 @@
  * - `sdk` 用 `fakeSdk`（notify 调用记进 `sdk.notifyCalls`，文案只作参数）。
  */
 import type {
+  CardContext,
   ChannelAnswerOutcome,
   ChannelContext,
   ChannelProgress,
@@ -58,8 +59,8 @@ export interface ChannelHarness {
   ctx: ChannelContext
   sdk: FakeSdk
   controller: AbortController
-  /** 已订阅的 onCard 处理器（模拟 hub 的分发列表） */
-  handlers: Array<(card: Card, ref: string | null) => void>
+  /** 已订阅的 onCard 处理器（模拟 hub 的分发列表；M54：第三参是归属上下文） */
+  handlers: Array<(card: Card, ref: string | null, context: CardContext | null) => void>
   /** 通道回报的 delivered 参数 */
   delivered: Array<{ cardId: string; version: number; ref: string }>
   /** 通道回报的 answer 参数（`answer` 抛错时仍记录，再抛错） */
@@ -69,7 +70,7 @@ export interface ChannelHarness {
   /** 已订阅的进展处理器（M44） */
   progressHandlers: ChannelProgressHandler[]
   /** 模拟 hub 把一张卡片分发给所有订阅者（与 hub 的同步调用口径一致） */
-  deliver(card: Card, ref?: string | null): void
+  deliver(card: Card, ref?: string | null, context?: CardContext | null): void
   /** 模拟 hub 把一条进展分发给所有订阅者（M44） */
   progress(p: ChannelProgress): void
 }
@@ -152,9 +153,9 @@ export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarn
     answers,
     submits,
     progressHandlers,
-    deliver: (card, ref = null) => {
+    deliver: (card, ref = null, context = null) => {
       // 复制一份：处理器可能在分发过程中退订（与 hub 递归分发时的表现一致）
-      for (const handler of [...handlers]) handler(card, ref)
+      for (const handler of [...handlers]) handler(card, ref, context)
     },
     progress: (p) => {
       for (const handler of [...progressHandlers]) handler(p)

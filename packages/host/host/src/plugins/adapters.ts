@@ -188,8 +188,16 @@ export function createExternalChannelPlugin(
         log(`[plugin:${entry.id}] 启动失败：${errMsg(error)}`)
         return () => undefined
       }
-      const unsubscribe = ctx.onCard((card, ref) => {
-        if (!process.send({ v: PLUGIN_HOST_PROTOCOL_VERSION, type: 'card', card, ref })) {
+      const unsubscribe = ctx.onCard((card, ref, context) => {
+        if (
+          !process.send({
+            v: PLUGIN_HOST_PROTOCOL_VERSION,
+            type: 'card',
+            card,
+            ref,
+            context,
+          })
+        ) {
           log(`[plugin:${entry.id}] 卡片帧未送达（子进程未就绪）`)
         }
       })

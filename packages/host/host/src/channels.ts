@@ -10,6 +10,8 @@
  *   投递记录按 `(通道, 卡片, 版本)` 记在 `Card.deliveryRefs` 上；
  * - **状态变化回到原消息（M43）**：`card.answered` / `card.resolved` 也会投给「发过这张卡、
  *   但还停在旧状态」的通道——通道拿 `ref` 原地更新，于是 IM 里那张卡不会永远带按钮；
+ * - **上下文随卡片下发（M54）**：每次投递按投影查一份「项目 / 任务 / 会话 / 阶段 / 智能体」
+ *   交给通道（`card-context.ts`）。只读、best-effort：查不到就不带，投递照常；
  * - **幂等**：同一 `(通道, 卡片, 版本, 状态)` 进程内只投一次；重启后只补 open 卡里该通道
  *   还没同步的版本与状态；
  * - **启停**：`startAll` 建 AbortController 并逐通道 `start`（单个失败只跳过该通道），
@@ -28,6 +30,7 @@
 import type { Card, Conversation } from '@workbench/protocol/entities'
 import type { ThreadRow } from '@workbench/protocol/thread'
 import type {
+  CardContext,
   ChannelAnswerOutcome,
   ChannelContext,
   ChannelProgressHandler,
@@ -40,6 +43,7 @@ import type { SdkHost } from '@workbench/capabilities/types'
 import type { ViewId, ViewParams, ViewResult } from '@workbench/protocol/views'
 import type { DispatchResult } from '@workbench/host-store/index'
 import { createSdk } from '@workbench/capabilities'
+import { cardContextOf } from './card-context'
 
 /** hub 只需要的 store 读能力（补投要查 open 卡）。 */
 export interface ChannelsStore {
@@ -112,7 +116,8 @@ const CARD_FACT_TYPES: ReadonlySet<string> = new Set([
 interface ChannelRuntime {
   key: string
   abort: AbortController
-  handlers: Set<(card: Card, ref: string | null) => void>
+  /** 第三参是这张卡的归属上下文（M54）；读不到就是 null，通道照常投递 */
+  handlers: Set<(card: Card, ref: string | null, context: CardContext | null) => void>
   dispose: (() => void) | null
   /** start 成功后才参与投递 */
   started: boolean
@@ -369,6 +374,7 @@ export function createChannels(options: ChannelsOptions): Channels {
     runtime: ChannelRuntime,
     card: Card,
     ref: string | null,
+    context: CardContext | null,
   ): Promise<string | null> => {
     if (runtime.handlers.size === 0) return Promise.resolve(null)
     const key = attemptKey(runtime.key, card.id, card.version, card.status)
@@ -384,8 +390,8 @@ export function createChannels(options: ChannelsOptions): Channels {
       const timer = setTimeout(() => finish(null), timeoutMs)
       attempts.set(key, (ack) => finish(ack))
       try {
-        // 通道插件可能异步完成投递；这里只负责把卡片与它自己的 ref 交给它。
-        for (const handler of runtime.handlers) handler(card, ref)
+        // 通道插件可能异步完成投递；这里只负责把卡片、它自己的 ref 与归属上下文交给它。
+        for (const handler of runtime.handlers) handler(card, ref, context)
       } catch (error) {
         log(`通道 ${runtime.key} 分发失败：${errMsg(error)}`)
         finish(null)
@@ -419,11 +425,13 @@ export function createChannels(options: ChannelsOptions): Channels {
     if (plans.length === 0) return
     inFlight.add(key)
     lastCards.set(card.id, card)
+    // 上下文按「一次投递」查一遍（各通道共用同一份）：它只用于展示，读不到就是 null。
+    const context = cardContextOf(store, card)
     let delivered = false
     let failedChannel: string | null = null
     try {
       for (const plan of plans) {
-        const ack = await attempt(plan.runtime, card, plan.ref)
+        const ack = await attempt(plan.runtime, card, plan.ref, context)
         if (ack === null) {
           failedChannel = plan.entry.key
           log(`通道 ${plan.entry.key} 未确认（卡片 ${card.id} v${card.version} ${card.status}）`)

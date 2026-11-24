@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest'
 import type {
+  CardContext,
   ChannelAnswerOutcome,
   ChannelProcess,
   ChannelSdk,
@@ -30,6 +31,7 @@ import {
 } from '@workbench/channel-feishu/lark'
 import { feishuManifest } from '@workbench/channel-feishu/manifest'
 import {
+  contextLines,
   FEISHU_CARD_TEMPLATES,
   optionButton,
   renderCard,
@@ -1415,5 +1417,97 @@ describe('飞书通道：lark 配置带前置参数（多应用换 profile）', 
       '--as',
       'bot',
     ])
+  })
+})
+
+describe('飞书通道：卡片上下文（M54）', () => {
+  const context: CardContext = {
+    projectName: 'sagc3_monorepo',
+    taskTitle: '地空协议配置，数据统一存储',
+    conversationTitle: null,
+    stageName: '验收',
+    agentName: '评审员',
+  }
+
+  it('上下文摆在正文最前面：项目 · 任务 / 阶段 · 智能体', () => {
+    const card = renderCard(inst(), context)
+    expect(card.body.elements[0]).toEqual({
+      tag: 'markdown',
+      content: '项目 sagc3_monorepo · 任务 地空协议配置，数据统一存储\n阶段 验收 · 智能体 评审员',
+    })
+    // 正文与按钮的顺序不变（上下文只是多了一块，不改既有结构）
+    expect(card.body.elements.slice(1)).toEqual([
+      { tag: 'markdown', content: '用哪个方案？' },
+      { tag: 'hr' },
+      optionButton('card-1', 'A', 0),
+      optionButton('card-1', 'B', 1),
+    ])
+  })
+
+  it('缺的项不占位：只有任务就只留任务这一项', () => {
+    expect(
+      contextLines({
+        projectName: null,
+        taskTitle: '地空协议配置',
+        conversationTitle: null,
+        stageName: null,
+        agentName: '评审员',
+      }),
+    ).toEqual(['任务 地空协议配置', '智能体 评审员'])
+  })
+
+  it('聊天卡给会话标题：第一行换成「会话」而不是「任务」', () => {
+    expect(
+      contextLines({
+        projectName: null,
+        taskTitle: null,
+        conversationTitle: '帮我看看今天的待办',
+        stageName: null,
+        agentName: '小助',
+      }),
+    ).toEqual(['会话 帮我看看今天的待办', '智能体 小助'])
+  })
+
+  it('没有上下文（null / 全空）：卡片与改动前一模一样', () => {
+    expect(renderCard(inst()).body.elements).toEqual(renderCard(inst(), null).body.elements)
+    expect(contextLines(null)).toEqual([])
+    expect(
+      contextLines({
+        projectName: null,
+        taskTitle: null,
+        conversationTitle: null,
+        stageName: null,
+        agentName: null,
+      }),
+    ).toEqual([])
+  })
+
+  it('已答复的卡也留着上下文（结论在下面，不影响回看是哪个项目的事）', () => {
+    const card = renderCard(inst({ status: 'answered', optionIndex: 0 }), context)
+    expect(card.body.elements[0]).toMatchObject({ tag: 'markdown' })
+    expect(card.body.elements.at(-1)).toEqual({
+      tag: 'markdown',
+      content: '**已记录：A**',
+    })
+  })
+
+  it('投递时把宿主给的上下文渲染进 --content（不是只在渲染函数里生效）', async () => {
+    const { harness, cli } = await startFeishu({
+      config: { user: '' },
+      behaviors: [
+        { stdout: JSON.stringify({ ok: true, identities: { user: { openId: 'ou_owner' } } }) },
+        { hang: true },
+        { stdout: okBody({ message_id: 'om_1' }) },
+      ],
+    })
+
+    harness.deliver(inst(), null, context)
+    await flushDeliver()
+
+    const sent = JSON.parse(cli.calls[2].args.at(-1) ?? '{}') as FeishuCard
+    expect(sent.body.elements[0]).toEqual({
+      tag: 'markdown',
+      content: '项目 sagc3_monorepo · 任务 地空协议配置，数据统一存储\n阶段 验收 · 智能体 评审员',
+    })
   })
 })

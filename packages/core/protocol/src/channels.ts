@@ -33,8 +33,10 @@ type Id = string
  * - 6（M47）：`submit(text, hints, agent)` 的第二参从「消息引用」升级为**入站线索**——通道额外
  *   交出平台结构证据（`chatId` / `rootRef` / `threadRef` / `replyTo`），宿主据此把同一话题的
  *   消息收进同一会话。派给谁、算不算同一话题仍由宿主决定。
+ * - 7（M54）：`onCard(card, ref, context)` 的第三参——宿主把「这张卡属于哪个项目 / 哪条任务 /
+ *   哪一步 / 谁在问」一并交给通道。IM 里只有标题和按钮时，收到卡的人无法判断该不该答。
  */
-export const CHANNEL_PORT_VERSION = 6
+export const CHANNEL_PORT_VERSION = 7
 
 /**
  * 投递重投曲线（M41）：第 N 次失败之后等多少毫秒再投下一次。
@@ -251,12 +253,37 @@ export interface ChannelProgress {
 export type ChannelProgressHandler = (progress: ChannelProgress) => void
 
 /**
+ * 卡片上下文（M54，通道端口 7）：这张卡**属于哪件活**。
+ *
+ * 为什么由宿主给而不是通道自己查：`Card` 只有 `taskId` / `conversationId` 这样的弱引用，
+ * 而通道拿不到投影（也不该拿）。卡片标题是智能体写的自由文本，实测发到飞书里就是
+ * 「覆盖率棘轮红：打回补测还是接受现状？」——收卡的人既不知道这是哪个项目、哪条任务，
+ * 也不知道是哪个智能体在问，于是「不知道该怎么回答」。这些都在投影里，所以由宿主算好随
+ * 卡片一起交下来；通道只负责摆进消息。
+ *
+ * 全部字段都是**只读展示**：不参与任何判定（谁该答仍看 `answerers`），缺值就是 null。
+ */
+export interface CardContext {
+  /** 项目名（null = 默认目录） */
+  projectName: string | null
+  /** 任务标题（聊天卡为 null） */
+  taskTitle: string | null
+  /** 会话标题（聊天卡用；阶段卡为 null） */
+  conversationTitle: string | null
+  /** 当前阶段名（任务卡用） */
+  stageName: string | null
+  /** 这一轮干活的智能体名 */
+  agentName: string | null
+}
+
+/**
  * 通道插件启动上下文。
  *
  * - `onCard`：订阅卡片投递。宿主按注册表顺序分发**所有需要这个通道知道的版本**：
  *   `card.opened` / `card.updated`（新版本）以及 `card.answered` / `card.resolved`
  *   （这张卡在这个通道发过时，回到原消息改口）。第二参 `ref` 是这个通道上次成功发出的
  *   引用（从未发过为 null）——有它就走「原地更新」，没有就是第一次发。
+ *   第三参 `context`（M54）是这张卡的归属上下文，读不到就是 null（通道照常投递）。
  *   返回退订函数。启动时宿主还会补投尚未送达的 open 卡。
  * - `delivered` / `answer`：通道 → 宿主的两个回调；投递状态只经事实回写，不直写投影。
  * - `submit`（M44/M47）：入站文本 + 平台线索 → 宿主派活（目标与话题归属都由宿主决定），
@@ -266,7 +293,7 @@ export type ChannelProgressHandler = (progress: ChannelProgress) => void
  */
 export interface ChannelContext {
   sdk: ChannelSdk
-  onCard(handler: (card: Card, ref: string | null) => void): () => void
+  onCard(handler: (card: Card, ref: string | null, context: CardContext | null) => void): () => void
   delivered: ChannelDelivered
   answer: ChannelAnswer
   submit: ChannelSubmit

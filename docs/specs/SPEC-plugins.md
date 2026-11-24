@@ -317,8 +317,9 @@ export interface ChannelContext {
    * 订阅卡片（M43）：宿主按 registry 顺序分发 `card.opened` / `card.updated`（新版本）与
    * `card.answered` / `card.resolved`（这张卡在这个通道发过时，回到原消息改口）。
    * 第二参 `ref` 是这个通道上次成功发出的引用（从未发过为 null）——有它就原地更新，
-   * 没有就是第一次发。返回退订函数。 */
-  onCard(handler: (card: Card, ref: string | null) => void): () => void
+   * 没有就是第一次发。第三参 `context`（M54）是这张卡的归属上下文（见下），读不到就是 null。
+   * 返回退订函数。 */
+  onCard(handler: (card: Card, ref: string | null, context: CardContext | null) => void): () => void
   /** 回报「这个通道送达了」：每个通道各写一条 card.delivered{channel}，ref 是该通道侧引用 */
   delivered(cardId: Id, version: number, ref: string): Promise<void>
   /**
@@ -365,9 +366,22 @@ export interface ChannelSdk {
    */
   process: ChannelProcess
 }
+
+/**
+ * 卡片上下文（M54）：这张卡**属于哪件活**。宿主从投影里算好随卡片下发（`host/card-context.ts`），
+ * 通道只负责摆进消息——全部字段只读展示，不参与「谁该答」的判定，缺值就是 null。
+ */
+export interface CardContext {
+  projectName: string | null
+  taskTitle: string | null
+  conversationTitle: string | null
+  stageName: string | null
+  agentName: string | null
+}
 ```
 
-- 端口版本：`CHANNEL_PORT_VERSION = 5`（`packages/core/protocol/src/channels.ts`；1 = M4 最小面，2 = M42 增 `process`，3 = M43 的 `onCard(card, ref)` 与 `answer(..., ref, byRef) → { changed, status }`，4 = M44 的 `submit` / `onProgress`，5 = M45 的 `submit(text, ref, agent)` 与 `SpawnOptions.envPatch`）；上下文形状变化时递增，外部通道（M7）按它做兼容判断。外部通道的 `card` 帧带 `ref`，`answer` 帧不带 ref（适配器按 `undefined` 处理，校验退化为「只认 open 状态」）。
+- **卡片上下文（M54）**：卡片标题与正文是智能体写的自由文本，`Card` 只带 `taskId` / `conversationId` 这类弱引用。真机上落到飞书的就是一句「覆盖率棘轮红：打回补测还是接受现状？」——收到的人不知道这是哪个项目、哪条任务、谁在问，于是「不知道该怎么回答」。所以宿主每次投递按视图查一份上下文（`task.byId` / `run.byId` / `projects.all` / `workflows.all` / `agents.all` / `conversations.all`）交给通道：**只读、best-effort**——查询失败或形状不对逐项降级为 null，全部为 null 时整份给 null，投递照常；飞书把它渲染成正文第一块（项目 · 任务 · 会话 / 阶段 · 智能体），外部通道的 `card` 帧同样带 `context`。
+- 端口版本：`CHANNEL_PORT_VERSION = 7`（`packages/core/protocol/src/channels.ts`；1 = M4 最小面，2 = M42 增 `process`，3 = M43 的 `onCard(card, ref)` 与 `answer(..., ref, byRef) → { changed, status }`，4 = M44 的 `submit` / `onProgress`，5 = M45 的 `submit(text, ref, agent)` 与 `SpawnOptions.envPatch`，6 = M47 的 `submit(text, hints, agent)` 入站线索，7 = M54 的 `onCard(card, ref, context)`）；上下文形状变化时递增，外部通道（M7）按它做兼容判断。外部通道的 `card` 帧带 `ref` 与 `context`（可选字段，老插件不读即忽略），`answer` 帧不带 ref（适配器按 `undefined` 处理，校验退化为「只认 open 状态」）。
 - 卡片正文是**别人写的文字**：只能作为参数传进平台/通知 API，绝不能拼进脚本/模板/HTML；`notify(title, body)` 的两个参数同样只作参数。
 - **Windows 的 `.cmd` 垫片要折回真实入口（2026-11-15）**：`spawn(..., { shell: true })` 在 Windows 上经 `cmd.exe`，而 cmd 会先吃掉参数里的双引号（`--content '{"schema":"2.0"}'` 到程序手里变成 `{schema:…}`），正文里的 `&` / `%` 还会被当成命令分隔符与变量展开——飞书卡片 JSON 发不出去（真机复现：`--content is not valid JSON`）。所以宿主 `host/process.ts` 在 `shell: true` 时先读 `.cmd` / `.bat`，把 npm 垫片模板里的 `"%_prog%" "%dp0%\…\x.js" %*` 折回「`node` + 脚本」直接 spawn（`shell:false`；Electron 下补 `ELECTRON_RUN_AS_NODE=1`），参数原样进 argv；解析不出绝对脚本才退回 shell。执行器侧 `command` 插件仍用 `cmd.exe /c <脚本> <参数>`、提示词只走 stdin（那条路不传 JSON，见上文）。
 - 投递状态是**两层账**（M43）：
@@ -479,7 +493,7 @@ export interface AppPlugin {
 - **边界测试：** 扫描插件源码，禁止 import 清单（host/其它插件/DB）；未声明能力被调用时拒绝（含 `notify` 的「声明 ↔ 用法」一致性）。
 - **执行器：** 假进程/假流覆盖帧解析、终态归一、取消时序、迟到回执；`detect` 零副作用；`command` 插件的模板展开（项数与单项长度上限、未知占位符拒绝）、`{prompt}` 存在与否决定 argv/stdin、Windows `.cmd` 固定包装、提示词不出现在 argv 拼接字符串里。
 - **回执块：** 多块取最后一块、块内无十一键视为无回执、非法 JSON/非对象忽略、`ask` 选项为空/超限/标题超限整块忽略、`spawn` 标题为空/批次越界/条数超限整块忽略、`verdict` 非 `pass|fail` 与 `checks` 形状非法整块忽略（`checks: []` 不连累 `verdict`）、`checks[].acceptance` 非正整数整块忽略、`findings` 小标重复或字段超限整块忽略、`addresses` 的 `fixed` 缺 `checkRef` / `rejected`·`deferred` 缺 `note` 整块忽略、**`acceptance` 键出现即忽略（M34 废弃，不连累同块其它键）**、只带 `verdict` 也算回执块、解析不修改 `output` 与终态；dsh 从 `result` 帧、`command` 从 stdout 各一条成功与失败用例。
-- **通道：** 假通知/假平台，不发真消息；断言卡片文字与通知标题/正文只作为参数传递；每个通道各写一条 `card.delivered{channel}`、同一 `(通道, 版本, 状态)` 不重复投递；终态（answered / resolved）只补给「发过这张卡」的通道，从未发过它的通道不打扰；回答返回 `{changed, status}`，旧消息（ref 对不上）的点击不计入。
+- **通道：** 假通知/假平台，不发真消息；断言卡片文字与通知标题/正文只作为参数传递；每个通道各写一条 `card.delivered{channel}`、同一 `(通道, 版本, 状态)` 不重复投递；终态（answered / resolved）只补给「发过这张卡」的通道，从未发过它的通道不打扰；回答返回 `{changed, status}`，旧消息（ref 对不上）的点击不计入；**归属上下文**（M54）覆盖「查得到就随卡片下发 → 各通道各拿一份」「查不到 / 形状不对 → null 且投递照常」，以及飞书侧的「上下文在正文第一块、缺项不占位、全空不出现」。
 - **飞书通道（M42/M43）：** 假 `ChannelProcess`（脚本化 stdout/退出/超时）覆盖：卡片 JSON 结构（ask 三态色、按钮回传值、notice 无按钮、已答 / 已关无按钮且换成结论、越界下标给占位文案）、`card.action.trigger` 解析（对象/JSON 字符串回传值、非按钮组件与表单提交不算答案、下标非整数忽略）、`lark-cli` 适配（argv 顺序、`--content` 整串、patch 走 stdin、非零退出/超时/找不到命令/输出非 JSON 都拒绝）、`start` 编排（未登录与缺答复人时 no-op、同版本重投走原地更新、版本更新走 patch 且失败退回新发、终态更新失败只记日志、白名单外点击不计数、已 settled 只记「未计入」、监听退出 30 s 重连、dispose 幂等）。不发真消息、不连真长连接。
 - **注册表：** id 唯一、`key === manifest.id`、kind 合法、capabilities 在枚举内、必填字段齐全；`executors/*`、`channels/*` 目录与清单双向一致。
 - **detect 汇总：** 按注册表顺序串行且顺序稳定、`executorKey`/`supported` 由汇总回填、输出按候选清单排序、同 `command` 先到先得、单插件抛错或超时被隔离、空注册表返回空数组且不扫盘。

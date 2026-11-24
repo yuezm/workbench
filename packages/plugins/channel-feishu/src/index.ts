@@ -10,6 +10,10 @@
  * 不 `submit`、不回帖进展，也没有「第一条私聊认人」这条零配置捷径——没有发送目标的连接只记
  * 一次日志、不投递。
  *
+ * 卡片要带上下文（M54）：宿主随卡片给一份「项目 / 任务 / 会话 / 阶段 / 智能体」，渲染进卡片
+ * 正文第一块（`render.ts` 的 `contextLines`）。没有它的卡在飞书里只有一句智能体写的标题——
+ * 收到的人不知道该不该答、答的是哪件事。
+ *
  * 多连接（M45）：一个工作台可以同时接**多个飞书应用 / 多套机器人**——每个连接一个
  * `lark-cli` profile、一份接收人与拍板人名单。于是「工作台助手」与别的 agent 的助手各走各的
  * 机器人：消息不混、事件长连接不抢（同一个飞书应用全局只允许一处 event bus）。连接配置为空时
@@ -34,7 +38,7 @@
  * - 点击要配**这条连接当前版本**的消息：不是就算旧消息，只记日志；
  * - 监听进程退出后 30 s 重连（长连接断了不该让通道永久哑掉），dispose 后不再重连。
  */
-import type { ChannelContext, ChannelPlugin } from '@workbench/protocol/channels'
+import type { CardContext, ChannelContext, ChannelPlugin } from '@workbench/protocol/channels'
 import type { Card } from '@workbench/protocol/entities'
 import { readClick } from './click'
 import { createLark, type Lark, type LarkTarget } from './lark'
@@ -447,8 +451,12 @@ export const feishuChannel: ChannelPlugin = {
      * 一条连接失败不该抹掉另一条已经发出去的消息，所以 ref 按连接记账；全部失败才不回报
      * （宿主按超时走重投）。
      */
-    const deliver = async (card: Card, ref: string | null): Promise<void> => {
-      const json = JSON.stringify(renderCard(card))
+    const deliver = async (
+      card: Card,
+      ref: string | null,
+      context: CardContext | null,
+    ): Promise<void> => {
+      const json = JSON.stringify(renderCard(card, context))
       const previous = parseConnectionRefs(ref)
       const next: Record<string, string> = {}
       let delivered = false
@@ -564,12 +572,12 @@ export const feishuChannel: ChannelPlugin = {
      * 只推需要拍板的卡：`notice`（只知会）与老的无选项信息卡一张都不发——IM 里没有「通知栏」
      * 可落，工作台里已经能看到它。每种状态都照样 ack：投递语义是「已送达至少一个通道」。
      */
-    const off = ctx.onCard((card, ref) => {
+    const off = ctx.onCard((card, ref, context) => {
       if (!needsAnswer(card)) {
         void ctx.delivered(card.id, card.version, NO_MESSAGE_REFS)
         return
       }
-      void deliver(card, ref)
+      void deliver(card, ref, context)
     })
 
     for (const runtime of owners) startStream(runtime)

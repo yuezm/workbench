@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 // check-secrets.mjs — diff 范围内的密钥扫描（红线：报告规则与位置，绝不打印密文值）。
-// 用法: node scripts/check-secrets.mjs [--base <ref>]   (默认 base: master)
+// 用法: node scripts/check-secrets.mjs [--base <ref>]   (默认 base: origin/HEAD → 常见分支探测)
 // 退出码: 0 干净 / 1 命中疑似密钥 / 2 无法运行
 // 说明: 本地轻量替代 gitleaks（未安装）；CI 具备后可替换为 gitleaks detect --redact。
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { BASE_MISSING_HINT, resolveBase } from './base-ref.mjs'
 
-const argBase = (() => {
-  const i = process.argv.indexOf('--base')
-  return i > -1 ? process.argv[i + 1] : process.env.CONSTRAINTS_BASE || 'master'
-})()
+const argBase = resolveBase()?.ref ?? ''
 const git = (args) => {
   try {
     return execFileSync('git', args, {
@@ -30,8 +28,9 @@ const bail = (msg) => {
 const top = git(['rev-parse', '--show-toplevel'])?.trim()
 if (!top) bail('not inside a git work tree')
 process.chdir(top)
+if (argBase === '') bail(BASE_MISSING_HINT)
 const mergeBase = git(['merge-base', argBase, 'HEAD'])?.trim()
-if (!mergeBase) bail('no merge base against ' + argBase)
+if (!mergeBase) bail('no merge base against ' + argBase + '（' + BASE_MISSING_HINT + '）')
 const tracked = git(['diff', '--unified=0', mergeBase, '--'])
 if (tracked === null) bail('could not diff against ' + mergeBase)
 

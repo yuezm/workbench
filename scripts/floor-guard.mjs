@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 // floor-guard.mjs — diff 范围内守护 CONSTRAINTS.md 的 Floor。
-// 用法: node scripts/floor-guard.mjs [--base <ref>]   (默认 base: master)
+// 用法: node scripts/floor-guard.mjs [--base <ref>]   (默认 base: origin/HEAD → 常见分支探测)
 // 退出码: 0 干净 / 1 至少一处 floor 违规（应阻断）/ 2 无法运行（无 merge base、非 git 仓库）
 // 来源: 基于 constraint-driven-development 的 references/floor-guard.md 参考实现裁剪，
 //       仅保留本仓库需要的模式；contract 保持不变（exit 0/1/2、只报规则与位置、不报密文值）。
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { BASE_MISSING_HINT, resolveBase } from './base-ref.mjs'
 
-const argBase = (() => {
-  const i = process.argv.indexOf('--base')
-  return i > -1 ? process.argv[i + 1] : process.env.CONSTRAINTS_BASE || 'master'
-})()
+const base = resolveBase()
+const argBase = base?.ref ?? ''
 
 const git = (args) => {
   try {
@@ -33,8 +32,9 @@ const top = git(['rev-parse', '--show-toplevel'])?.trim()
 if (!top) bail('not inside a git work tree')
 process.chdir(top)
 
+if (!argBase) bail(BASE_MISSING_HINT)
 const mergeBase = git(['merge-base', argBase, 'HEAD'])?.trim()
-if (!mergeBase) bail('no merge base against ' + argBase)
+if (!mergeBase) bail('no merge base against ' + argBase + '（' + BASE_MISSING_HINT + '）')
 
 const tracked = git(['diff', '--unified=0', mergeBase, '--'])
 if (tracked === null) bail('could not diff against ' + mergeBase)

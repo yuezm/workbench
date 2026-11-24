@@ -59,6 +59,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 
 - hook 文件在 `.husky/`，必须保持 **LF** 行尾（`.gitattributes` 已强制）。
 - 覆盖率阈值只在实际跑覆盖率时生效（`check` / `pre-push` 会强制）。
+- diff 基线（`floor-guard` / `check-secrets` / `check-diff-coverage` 共用 `scripts/base-ref.mjs`）：`--base` → `CONSTRAINTS_BASE` → `origin/HEAD` → `origin/main` → `origin/master` → `main` → `master`，全不成立即 exit 2。**不写死分支名**：写死 `master` 时仓库实际走 `main`，`merge-base` 会退到一个月的旧提交，把早已推送的历史当成「本次放松」报红（2026-11-24 实测：已上线的 `tests/kernel/cards.test.ts` 删除被误报，pre-push 全红且真问题被淹没）。
 
 ## 何时写哪层测试
 

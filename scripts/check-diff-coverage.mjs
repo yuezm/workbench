@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 // check-diff-coverage.mjs — 改动行覆盖率门禁（默认 ≥90%，可用 MIN_DIFF_COVERAGE 覆盖）。
 // 前置：先跑 `pnpm verify:coverage` 生成 coverage/coverage-final.json。
-// 用法: node scripts/check-diff-coverage.mjs [--base <ref>]
+// 用法: node scripts/check-diff-coverage.mjs [--base <ref>]   (默认 base: origin/HEAD → 常见分支探测)
 // 退出码: 0 达标 / 1 未达标 / 2 无法运行（无覆盖率数据、无 merge base 等）
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { BASE_MISSING_HINT, resolveBase } from './base-ref.mjs'
 
-const argBase = (() => {
-  const i = process.argv.indexOf('--base')
-  return i > -1 ? process.argv[i + 1] : process.env.CONSTRAINTS_BASE || 'main'
-})()
+const argBase = resolveBase()?.ref ?? ''
 const THRESHOLD = Number(process.env.MIN_DIFF_COVERAGE || 90)
 const git = (args) => {
   try {
@@ -53,8 +51,9 @@ for (const [absKey, data] of Object.entries(cov)) {
   stmtByFile.set(rel, stmts)
 }
 
+if (argBase === '') bail(BASE_MISSING_HINT)
 const mergeBase = git(['merge-base', argBase, 'HEAD'])?.trim()
-if (!mergeBase) bail('no merge base against ' + argBase)
+if (!mergeBase) bail('no merge base against ' + argBase + '（' + BASE_MISSING_HINT + '）')
 const tracked = git(['diff', '--unified=0', mergeBase, '--'])
 if (tracked === null) bail('could not diff against ' + mergeBase)
 

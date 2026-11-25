@@ -357,38 +357,40 @@ describe('kernel/prompt 回执块说明', () => {
     )
   })
 
-  it('打断规则段（M19）：整段文案分「自己决定 / 停下先问 / 别问 / 怎么问 / 不用问但要说」，不随阶段配置改写', () => {
+  it('打断规则段（M19）：整段文案分「必须停下先问 / 别问 / 怎么问」，不随阶段配置改写', () => {
     const rule = interruptRuleText()
-    // 阶段容器里的那份（二级）：标题与四个小节各降一级，文案逐字相同
+    // 阶段容器里的那份（二级）：标题与三个小节各降一级，文案逐字相同
     expect(interruptRuleText(3)).toBe(INTERRUPT)
     expect(INTERRUPT.split('\n')[0]).toBe('### 打断规则')
-    expect(INTERRUPT).toContain('\n#### 停下先问\n')
+    expect(INTERRUPT).toContain('\n#### 必须停下先问\n')
+    expect(INTERRUPT).toContain('\n#### 别问\n')
+    expect(INTERRUPT).toContain('\n#### 怎么问\n')
     // 首行即标题、首尾不带换行：段内是一整段模板字面量，拼进提示词时不会多出空行
     expect(rule.split('\n')[0]).toBe('# 打断规则')
     expect(rule.startsWith('\n')).toBe(false)
     expect(rule.endsWith('\n')).toBe(false)
-    // 能自己定的先说清：能查能推的自己决定，多个合理选项自己选一个并交代取舍
-    expect(rule).toContain('能查能推的，自己决定')
-    expect(rule).toContain('有多个合理选项的，自己选一个')
-    expect(rule).toContain('## 停下先问')
-    // 四类触发点一条不少：不可逆 / 口径缺失且返工贵 / 越出阶段 / 同一验收连续两次没过
-    expect(rule).toContain('1. 不可逆或不可回滚：对外发布、发消息、花钱、改删生产数据、force push')
-    expect(rule).toContain('2. 口径缺失且猜错要返工')
-    expect(rule).toContain('3. 越出当前阶段')
-    expect(rule).toContain('4. 同一验收标准下连续两次没过')
-    // 原第 5 条「改 schema / 接口契约 / 事实日志等公共面」已删（人决定）：不再把公共面单列成一类
-    expect(rule).not.toContain('5. ')
-    // 反向判据与提问格式同段给出：能查别问、一次问完、每题带推荐与代价、说清兜底去向
+    // 必须停下先问只有三类（2026-11-26 人改稿）：偏离原方案三条合一 / 不可逆 / 口径缺失且返工贵
+    expect(rule).toContain('## 必须停下先问')
+    expect(rule).toContain('- 自相矛盾、沿途发现严重 BUG、你正偏离原方案')
+    expect(rule).toContain('- 不可逆或不可回滚：对外发布、发消息、花钱、改删生产数据、force push')
+    expect(rule).toContain('- 口径缺失且猜错要返工：波及 ≥3 个模块、动公共契约')
+    // 删掉的口径不再出现在提示词里（原「越出阶段」「连续两次没过」两类与「不用问但要说」小节）
+    expect(rule).not.toContain('越出当前阶段')
+    expect(rule).not.toContain('连续两次没过')
+    expect(rule).not.toContain('不用问但要说')
+    // 自主口径与反向判据收在「别问」：能查能推自己定、多个选项自选一个并交代取舍
     expect(rule).toContain('## 别问')
-    expect(rule).toContain('答案在仓库里能找到 → 去读')
-    expect(rule).toContain('答案已经有最佳实践、业界共识 → 按照最佳实践')
-    expect(rule).toContain('选项有明显优劣 → 选优先级高的')
+    expect(rule).toContain('- 能查能推的，自己决定，不用说（读代码、查 Spec、实现取舍）')
+    expect(rule).toContain(
+      '- 有多个合理选项的，自己选一个，交付时一句话交代选了什么、为什么、改起来贵不贵',
+    )
+    expect(rule).toContain('- 答案在仓库里能找到 → 去读')
+    expect(rule).toContain('- 答案已经有最佳实践、业界共识 → 按照最佳实践')
+    expect(rule).not.toContain('选项有明显优劣')
+    // 提问格式同段给出：一次问完、每题带推荐与代价、说清兜底去向
     expect(rule).toContain('## 怎么问')
     expect(rule).toContain('一次问完')
     expect(rule).toContain('没人回我按 X 走')
-    // 不用问但要出声的三类情形
-    expect(rule).toContain('## 不用问但要说')
-    expect(rule).toContain('需求自相矛盾')
     // 对话提示词不拼打断规则（聊天不是阶段，没有阶段边界可越）
     expect(chatPrompt(agent(), [message()])).not.toContain('打断规则')
   })
@@ -655,8 +657,8 @@ describe('kernel/prompt answerPrompt / laterPrompt', () => {
     ]) {
       expect(levelOf(section), section).toBe(3)
     }
-    // 段内再降一级：打断规则的四个小节
-    for (const section of ['停下先问', '别问', '怎么问', '不用问但要说']) {
+    // 段内再降一级：打断规则的三个小节
+    for (const section of ['必须停下先问', '别问', '怎么问']) {
       expect(text).toContain(`\n#### ${section}\n`)
     }
     // 回执块紧跟在线程上下文之后，但两者同级（不是它的子结构）

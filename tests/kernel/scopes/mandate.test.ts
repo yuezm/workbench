@@ -34,7 +34,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   handoffFromStageId: null,
   handoffFromRunId: null,
   projectId: 'proj-1',
-  gateFails: 0,
+  gateFailsByStage: {},
   createdAt: AT,
   updatedAt: AT,
   ...over,

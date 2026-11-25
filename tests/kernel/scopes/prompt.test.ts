@@ -783,7 +783,7 @@ describe('kernel/prompt 闸门判定段（M11）', () => {
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
-    gateFails: 0,
+    gateFailsByStage: {},
     createdAt: CREATED,
     updatedAt: CREATED,
   }
@@ -1471,7 +1471,7 @@ describe('kernel/prompt 结构不变量（R6）：结果正文改不了提示词
     handoffFromTaskId: null,
     handoffFromStageId: null,
     handoffFromRunId: null,
-    gateFails: 0,
+    gateFailsByStage: {},
     createdAt: CREATED,
     updatedAt: CREATED,
   })

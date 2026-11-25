@@ -112,7 +112,7 @@ export function stageErroredFacts(
   const parked: Task =
     blocked === undefined || blocked.id === task.currentStageId
       ? { ...task, updatedAt: now }
-      : { ...task, currentStageId: blocked.id, gateFails: 0, updatedAt: now }
+      : { ...task, currentStageId: blocked.id, gateFailsByStage: {}, updatedAt: now }
   const facts: FactDraft[] = [
     {
       type: 'stage.errored',

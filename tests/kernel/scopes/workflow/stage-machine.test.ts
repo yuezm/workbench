@@ -220,14 +220,18 @@ describe('stage-machine（shared 用例并入）resolveNextStage', () => {
   })
 })
 
-describe('stage-machine applyExit（M32：主去向）', () => {
+describe('stage-machine applyExit（M32：主去向 / M56：预算按闸门 map）', () => {
   const flow = (): WorkflowWithStages => sWf([s0, s1, s2])
 
-  it('goto：换阶段并清零预算', () => {
-    const r = applyExit({ ...sTask('s0'), gateFails: 2 }, { do: 'goto', stageId: 's1' }, flow())
+  it('goto：换阶段，预算 map 原样带着（不清其它闸门）', () => {
+    const r = applyExit(
+      { ...sTask('s0'), gateFailsByStage: { s0: 2, s1: 1 } },
+      { do: 'goto', stageId: 's1' },
+      flow(),
+    )
 
     expect(r.task.currentStageId).toBe('s1')
-    expect(r.task.gateFails).toBe(0)
+    expect(r.task.gateFailsByStage).toEqual({ s0: 2, s1: 1 })
   })
 
   it('goto 目标不存在（脏投影）→ 原样不动、零效果', () => {
@@ -238,19 +242,19 @@ describe('stage-machine applyExit（M32：主去向）', () => {
     expect(r.effects).toEqual([])
   })
 
-  it('await：不流转，但预算按传入值落下', () => {
-    const r = applyExit({ ...sTask('s1'), gateFails: 1 }, { do: 'await' }, flow(), { gateFails: 2 })
+  it('await：不流转，预算原样留在任务上', () => {
+    const r = applyExit({ ...sTask('s1'), gateFailsByStage: { s1: 2 } }, { do: 'await' }, flow())
 
     expect(r.task.currentStageId).toBe('s1')
-    expect(r.task.gateFails).toBe(2)
+    expect(r.task.gateFailsByStage).toEqual({ s1: 2 })
   })
 
-  it('close：本单结束并标记归档，预算清零（M53：归档不再是「完成」的同义词）', () => {
-    const r = applyExit({ ...sTask('s1'), gateFails: 2 }, { do: 'close' }, flow())
+  it('close：本单结束并标记归档，全部预算清空（M53：归档不再是「完成」的同义词）', () => {
+    const r = applyExit({ ...sTask('s1'), gateFailsByStage: { s1: 2 } }, { do: 'close' }, flow())
 
     expect(r.archive).toBe(true)
     expect(r.task.archivedAt).toBeNull()
-    expect(r.task.gateFails).toBe(0)
+    expect(r.task.gateFailsByStage).toEqual({})
   })
 })
 
@@ -370,7 +374,7 @@ describe('stage-machine（shared 用例并入）archiveTask', () => {
   })
 })
 
-describe('stage-machine 闸门（M11）', () => {
+describe('stage-machine 闸门（M11 / M56 预算按闸门）', () => {
   /** 执行 → 自测（闸门，失败退回执行）→ 结束 */
   const gateFlow = (over: Partial<WorkflowStage> = {}): WorkflowWithStages =>
     sWf([
@@ -387,14 +391,15 @@ describe('stage-machine 闸门（M11）', () => {
       sStage({ id: 'done', position: 2 }),
     ])
 
-  it('通过 → 走 onPassStageId，预算清零', () => {
+  it('通过 → 走 onPassStageId，清掉本闸门的计数', () => {
     const r = moveTask(
-      { ...sTask('test'), gateFails: 2 },
+      { ...sTask('test'), gateFailsByStage: { test: 2, other: 1 } },
       { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'pass' },
       gateFlow(),
     )
     expect(r.task.currentStageId).toBe('done')
-    expect(r.task.gateFails).toBe(0)
+    // 只清「test」这一项，别的闸门的计数不受影响
+    expect(r.task.gateFailsByStage).toEqual({ other: 1 })
     expect(r.gateExhausted).toBeUndefined()
   })
 
@@ -415,25 +420,25 @@ describe('stage-machine 闸门（M11）', () => {
     expect(r.task.currentStageId).toBe('done')
   })
 
-  it('未通过且未达上限 → 走 onFailStageId 并累计次数', () => {
+  it('未通过且未达上限 → 走 onFailStageId 并累计本闸门次数', () => {
     const r = moveTask(
-      { ...sTask('test'), gateFails: 0 },
+      sTask('test'),
       { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' },
       gateFlow(),
     )
     expect(r.task.currentStageId).toBe('exec')
-    expect(r.task.gateFails).toBe(1)
+    expect(r.task.gateFailsByStage).toEqual({ test: 1 })
     expect(r.gateExhausted).toBeUndefined()
   })
 
-  it('第 maxFails 次未通过 → 放行走通过分支，预算清零并标记 gateExhausted', () => {
+  it('第 maxFails 次未通过 → 放行走通过分支，清掉本闸门计数并标记 gateExhausted', () => {
     const r = moveTask(
-      { ...sTask('test'), gateFails: 2 },
+      { ...sTask('test'), gateFailsByStage: { test: 2 } },
       { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' },
       gateFlow(),
     )
     expect(r.task.currentStageId).toBe('done')
-    expect(r.task.gateFails).toBe(0)
+    expect(r.task.gateFailsByStage).toEqual({})
     expect(r.gateExhausted).toBe(true)
   })
 
@@ -452,12 +457,12 @@ describe('stage-machine 闸门（M11）', () => {
     ])
     const r = moveTask(sTask('test'), { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' }, f)
     expect(r.task.currentStageId).toBe('test')
-    expect(r.task.gateFails).toBe(1)
+    expect(r.task.gateFailsByStage).toEqual({ test: 1 })
     expect(r.effects).toEqual([])
   })
 
   it('没给 verdict → 原地停住，不消耗预算也不放行', () => {
-    const before = { ...sTask('test'), gateFails: 1 }
+    const before = { ...sTask('test'), gateFailsByStage: { test: 1 } }
     const r = moveTask(before, { type: 'RUN_SUCCEEDED', runId: 'r' }, gateFlow())
     expect(r.task).toEqual(before)
     expect(r.effects).toEqual([])
@@ -481,9 +486,13 @@ describe('stage-machine 闸门（M11）', () => {
       }),
       sStage({ id: 'done', position: 2 }),
     ])
-    const r = moveTask({ ...sTask('test'), gateFails: 2 }, { type: 'RUN_FAILED', runId: 'r' }, f)
+    const r = moveTask(
+      { ...sTask('test'), gateFailsByStage: { test: 2 } },
+      { type: 'RUN_FAILED', runId: 'r' },
+      f,
+    )
     expect(r.task.currentStageId).toBe('exec')
-    expect(r.task.gateFails).toBe(2)
+    expect(r.task.gateFailsByStage).toEqual({ test: 2 })
   })
 
   it('非闸门阶段带 verdict 也按普通成功流转', () => {
@@ -493,7 +502,7 @@ describe('stage-machine 闸门（M11）', () => {
       gateFlow(),
     )
     expect(r.task.currentStageId).toBe('test')
-    expect(r.task.gateFails).toBe(0)
+    expect(r.task.gateFailsByStage ?? {}).toEqual({})
   })
 
   it('闸门阶段到达终点：放行后任务完成，预算清零', () => {
@@ -507,19 +516,19 @@ describe('stage-machine 闸门（M11）', () => {
         exits: {},
       }),
     ])
-    const r = moveTask(
-      { ...sTask('test'), gateFails: 0 },
-      { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' },
-      f,
-    )
+    const r = moveTask(sTask('test'), { type: 'RUN_SUCCEEDED', runId: 'r', verdict: 'fail' }, f)
     expect(r.archive).toBe(true)
-    expect(r.task.gateFails).toBe(0)
+    expect(r.task.gateFailsByStage).toEqual({})
     expect(r.gateExhausted).toBe(true)
   })
 
   it('人工拖拽落位视为重新开始：预算清零', () => {
-    const r = moveTaskToStage({ ...sTask('exec'), gateFails: 3 }, 'test', gateFlow())
-    expect(r.task.gateFails).toBe(0)
+    const r = moveTaskToStage(
+      { ...sTask('exec'), gateFailsByStage: { test: 3, other: 1 } },
+      'test',
+      gateFlow(),
+    )
+    expect(r.task.gateFailsByStage).toEqual({})
   })
 })
 
@@ -562,7 +571,7 @@ describe('kernel 闸门目标缺失（脏投影）', () => {
       flow,
     )
     expect(next.currentStageId).toBe('s0')
-    expect(next.gateFails).toBe(1)
+    expect(next.gateFailsByStage).toEqual({ s0: 1 })
     expect(effects).toEqual([])
   })
 })
@@ -854,50 +863,39 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
     )
   })
 
-  it('applyExit(goto)：目标存在且不是当前阶段才换阶段，悬空目标与自指原地不动', () => {
+  it('applyExit(goto)：目标存在且不是当前阶段才换阶段，悬空目标与自指原地不动；预算 map 原样带着', () => {
     fc.assert(
-      fc.property(
-        flowArb,
-        fc.constantFrom('s0', 's1', 's2', 's3', 'ghost'),
-        fc.integer({ min: 0, max: 3 }),
-        (flow, targetId, gateFails) => {
-          const before = { ...task('s2'), gateFails: 9 }
-          const target = flow.stages.find((row) => row.id === targetId)
-          const result = applyExit(before, { do: 'goto', stageId: targetId }, flow, { gateFails })
-          if (target === undefined || target.id === before.currentStageId) {
-            expect(result.effects).toEqual([])
-            expect(result.task.currentStageId).toBe('s2')
-            expect(result.task.archivedAt).toBeNull()
-          } else {
-            expect(result.task.currentStageId).toBe(target.id)
-            expect(result.task.archivedAt).toBeNull()
-            expect(result.effects).toEqual(entryEffects(target))
-          }
-          // 预算按传入值落下（清不清零由调用方决定，不是这里猜）
-          expect(result.task.gateFails).toBe(gateFails)
-        },
-      ),
+      fc.property(flowArb, fc.constantFrom('s0', 's1', 's2', 's3', 'ghost'), (flow, targetId) => {
+        const before = { ...task('s2'), gateFailsByStage: { s2: 9 } }
+        const target = flow.stages.find((row) => row.id === targetId)
+        const result = applyExit(before, { do: 'goto', stageId: targetId }, flow)
+        if (target === undefined || target.id === before.currentStageId) {
+          expect(result.effects).toEqual([])
+          expect(result.task.currentStageId).toBe('s2')
+          expect(result.task.archivedAt).toBeNull()
+        } else {
+          expect(result.task.currentStageId).toBe(target.id)
+          expect(result.task.archivedAt).toBeNull()
+          expect(result.effects).toEqual(entryEffects(target))
+        }
+        expect(result.task.gateFailsByStage).toEqual({ s2: 9 })
+      }),
       { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
     )
   })
 
-  it('applyExit(close) 归档并清零预算；(await) 原地保留传入预算', () => {
-    fc.assert(
-      fc.property(fc.integer({ min: 0, max: 3 }), (gateFails) => {
-        const flow = judgedFlow(1)
-        const before = { ...task('s0'), gateFails: 5 }
-        const closed = applyExit(before, { do: 'close' }, flow)
-        expect(closed.archive).toBe(true)
-        expect(closed.task.gateFails).toBe(0)
-        expect(closed.effects).toEqual([])
-        const awaited = applyExit(before, { do: 'await' }, flow, { gateFails })
-        expect(awaited.task.archivedAt).toBeNull()
-        expect(awaited.task.currentStageId).toBe('s0')
-        expect(awaited.task.gateFails).toBe(gateFails)
-        expect(awaited.effects).toEqual([])
-      }),
-      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
-    )
+  it('applyExit(close) 归档并清空预算；(await) 原地保留预算 map', () => {
+    const flow = judgedFlow(1)
+    const before = { ...task('s0'), gateFailsByStage: { s0: 5, other: 2 } }
+    const closed = applyExit(before, { do: 'close' }, flow)
+    expect(closed.archive).toBe(true)
+    expect(closed.task.gateFailsByStage).toEqual({})
+    expect(closed.effects).toEqual([])
+    const awaited = applyExit(before, { do: 'await' }, flow)
+    expect(awaited.task.archivedAt).toBeNull()
+    expect(awaited.task.currentStageId).toBe('s0')
+    expect(awaited.task.gateFailsByStage).toEqual({ s0: 5, other: 2 })
+    expect(awaited.effects).toEqual([])
   })
 
   it('脏投影：当前阶段不在工作流里时 moveTask 零流转并返回同一对象（与归档无关）', () => {
@@ -906,7 +904,7 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
         flowArb,
         fc.constantFrom<string | null>(null, 'archived-at'),
         (flow, archivedAt) => {
-          const row: Task = { ...task('ghost'), archivedAt, gateFails: 2 }
+          const row: Task = { ...task('ghost'), archivedAt, gateFailsByStage: { s2: 2 } }
           const result = moveTask(row, { type: 'RUN_SUCCEEDED', runId: 'r1' }, flow)
           expect(result.task).toBe(row)
           expect(result.effects).toEqual([])
@@ -916,10 +914,10 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
     )
   })
 
-  it('moveTaskToStage：目标缺失 / 已在目标时原样返回，否则落位并清零预算', () => {
+  it('moveTaskToStage：目标缺失 / 已在目标时原样返回，否则落位并清空预算', () => {
     fc.assert(
       fc.property(flowArb, fc.constantFrom('s0', 's1', 's2', 's3', 'ghost'), (flow, targetId) => {
-        const before = { ...task('s0'), gateFails: 3 }
+        const before = { ...task('s0'), gateFailsByStage: { s0: 3 } }
         const target = flow.stages.find((row) => row.id === targetId)
         const result = moveTaskToStage(before, targetId, flow)
         if (target === undefined || target.id === before.currentStageId) {
@@ -927,14 +925,14 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
           return
         }
         expect(result.task.currentStageId).toBe(target.id)
-        expect(result.task.gateFails).toBe(0)
+        expect(result.task.gateFailsByStage).toEqual({})
         expect(result.effects).toEqual(entryEffects(target))
       }),
       { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
     )
   })
 
-  it('判定失败累计到 maxFails 才放行：放行时清零并标 gateExhausted', () => {
+  it('判定失败累计到 maxFails 才放行：放行时清空并标 gateExhausted', () => {
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 3 }), (maxFails) => {
         const flow = judgedFlow(maxFails)
@@ -948,8 +946,7 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
           current = result.task
           const exhausted = round === maxFails
           expect(result.gateExhausted).toBe(exhausted ? true : undefined)
-          expect(current.gateFails).toBe(exhausted ? 0 : round)
-          // 预算没用完时 failed 出口缺省 await：停在原阶段等人
+          expect(current.gateFailsByStage).toEqual(exhausted ? {} : { s0: round })
           expect(current.currentStageId).toBe(exhausted ? 's1' : 's0')
         }
       }),
@@ -957,20 +954,125 @@ describe('kernel 阶段状态机的性质（fast-check 随机生成）', () => {
     )
   })
 
-  it('执行出错不消耗判定预算：RUN_FAILED 保 gateFails 并停在原阶段', () => {
+  it('执行出错不消耗判定预算：RUN_FAILED 保预算并停在原阶段', () => {
     fc.assert(
       fc.property(fc.integer({ min: 0, max: 3 }), (fails) => {
         const flow = judgedFlow(3)
         const result = moveTask(
-          { ...task('s0'), gateFails: fails },
+          { ...task('s0'), gateFailsByStage: fails > 0 ? { s0: fails } : {} },
           { type: 'RUN_FAILED', runId: 'r1' },
           flow,
         )
         expect(result.task.currentStageId).toBe('s0')
-        expect(result.task.gateFails).toBe(fails)
+        expect(result.task.gateFailsByStage).toEqual(fails > 0 ? { s0: fails } : {})
         expect(result.gateExhausted).toBeUndefined()
       }),
       { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
     )
+  })
+})
+
+describe('闸门→修复阶段→闸门 / 整链重跑 的预算（M56：按闸门记，别的闸门通过不清它）', () => {
+  const repairFlow = (maxFails: number): WorkflowWithStages => ({
+    id: 'wf',
+    name: 'wf',
+    description: '',
+    createdAt: AT,
+    stages: [
+      stage('g', {
+        position: 0,
+        entryMode: 'agent',
+        judge: { maxFails },
+        exits: {
+          failed: { do: 'goto', stageId: 'fix' },
+          passed: { do: 'goto', stageId: 'tail' },
+        },
+      }),
+      stage('fix', {
+        position: 1,
+        entryMode: 'agent',
+        exits: { done: { do: 'goto', stageId: 'g' } },
+      }),
+      stage('tail', { position: 2 }),
+    ],
+  })
+
+  it('连续两次 fail 跨修复阶段仍能累计到 maxFails 并放行', () => {
+    const flow = repairFlow(2)
+    const first = moveTask(task('g'), { type: 'RUN_SUCCEEDED', runId: 'r1', verdict: 'fail' }, flow)
+    expect(first.task.currentStageId).toBe('fix')
+    expect(first.task.gateFailsByStage).toEqual({ g: 1 })
+    expect(first.gateExhausted).toBeUndefined()
+
+    const repairDone = moveTask(first.task, { type: 'RUN_SUCCEEDED', runId: 'r2' }, flow)
+    expect(repairDone.task.currentStageId).toBe('g')
+    expect(repairDone.task.gateFailsByStage).toEqual({ g: 1 })
+
+    const second = moveTask(
+      repairDone.task,
+      { type: 'RUN_SUCCEEDED', runId: 'r3', verdict: 'fail' },
+      flow,
+    )
+    expect(second.gateExhausted).toBe(true)
+    expect(second.task.currentStageId).toBe('tail')
+    expect(second.task.gateFailsByStage).toEqual({})
+  })
+
+  it('闸门通过只清自己那一项，别的闸门的计数保留', () => {
+    const flow = repairFlow(3)
+    const start: Task = { ...task('g'), gateFailsByStage: { g: 2, other: 1 } }
+    const passed = moveTask(start, { type: 'RUN_SUCCEEDED', runId: 'r1', verdict: 'pass' }, flow)
+    expect(passed.task.currentStageId).toBe('tail')
+    expect(passed.task.gateFailsByStage).toEqual({ other: 1 })
+  })
+
+  it('整链重跑：后一道闸门 fail 的计数，在前一道闸门 pass 时不被清零', () => {
+    const flow: WorkflowWithStages = {
+      id: 'wf',
+      name: 'wf',
+      description: '',
+      createdAt: AT,
+      stages: [
+        stage('g1', {
+          position: 0,
+          entryMode: 'agent',
+          judge: { maxFails: 3 },
+          exits: { passed: { do: 'goto', stageId: 'g2' }, failed: { do: 'goto', stageId: 'fix1' } },
+        }),
+        stage('g2', {
+          position: 1,
+          entryMode: 'agent',
+          judge: { maxFails: 3 },
+          exits: {
+            passed: { do: 'goto', stageId: 'tail' },
+            failed: { do: 'goto', stageId: 'fix2' },
+          },
+        }),
+        stage('fix1', {
+          position: 2,
+          entryMode: 'agent',
+          exits: { done: { do: 'goto', stageId: 'g1' } },
+        }),
+        stage('fix2', {
+          position: 3,
+          entryMode: 'agent',
+          exits: { done: { do: 'goto', stageId: 'g1' } },
+        }),
+        stage('tail', { position: 4 }),
+      ],
+    }
+    // g2 第一次 fail：{ g2: 1 } → fix2 → 回到 g1
+    let t = moveTask(task('g2'), { type: 'RUN_SUCCEEDED', runId: 'r1', verdict: 'fail' }, flow).task
+    expect(t.currentStageId).toBe('fix2')
+    expect(t.gateFailsByStage).toEqual({ g2: 1 })
+    t = moveTask(t, { type: 'RUN_SUCCEEDED', runId: 'r2' }, flow).task
+    expect(t.currentStageId).toBe('g1')
+    // g1 通过（整链重跑的起点）——不能清掉 g2 的计数
+    t = moveTask(t, { type: 'RUN_SUCCEEDED', runId: 'r3', verdict: 'pass' }, flow).task
+    expect(t.currentStageId).toBe('g2')
+    expect(t.gateFailsByStage).toEqual({ g2: 1 })
+    // g2 再次 fail → 累计到 2
+    t = moveTask(t, { type: 'RUN_SUCCEEDED', runId: 'r4', verdict: 'fail' }, flow).task
+    expect(t.gateFailsByStage).toEqual({ g2: 2 })
   })
 })

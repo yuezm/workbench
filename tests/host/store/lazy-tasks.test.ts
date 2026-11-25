@@ -49,7 +49,7 @@ function insertTask(
     nn(task.handoffFromTaskId),
     nn(task.handoffFromStageId),
     nn(task.handoffFromRunId),
-    nn(task.gateFails),
+    JSON.stringify(task.gateFailsByStage ?? {}),
     task.createdAt,
     task.updatedAt,
   )

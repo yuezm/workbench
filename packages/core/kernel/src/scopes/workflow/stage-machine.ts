@@ -106,20 +106,44 @@ export function completeExits(stages: readonly WorkflowStage[]): WorkflowStage[]
   })
 }
 
+/** 读某道闸门当前的连续未通过次数（缺省 0）。 */
+export function gateFailsAt(task: Pick<Task, 'gateFailsByStage'>, stageId: string): number {
+  return task.gateFailsByStage?.[stageId] ?? 0
+}
+
+/** 把某道闸门的计数设为 `count`（`<=0` 表示删掉该项，不留 0 残项）。 */
+function withGateFails(task: Task, stageId: string, count: number): Task {
+  const next: Record<string, number> = { ...(task.gateFailsByStage ?? {}) }
+  if (count <= 0) delete next[stageId]
+  else next[stageId] = count
+  return { ...task, gateFailsByStage: next }
+}
+
+/** 清空某道闸门的计数（该闸门通过 / 预算耗尽放行时）。 */
+function clearGateFails(task: Task, stageId: string): Task {
+  return withGateFails(task, stageId, 0)
+}
+
+/** 清空全部闸门计数（人工拖拽落位 / 工单结束）。 */
+function clearAllGateFails(task: Task): Task {
+  return { ...task, gateFailsByStage: {} }
+}
+
 /**
  * 进入阶段：产出新任务态与效果。
  *
- * `gateFails` 是判定预算的携带值：新进入一个阶段默认清零（M11），但失败回环要把
- * 累计次数带过去，否则「最多 3 次」永远到不了。
+ * M56：进入阶段**不重置**闸门预算——预算是按闸门分开的 map，跟着任务走。这样
+ * 「闸门 fail → 修复阶段 → 回到闸门」的整链重跑里，各闸门的计数都能保留下来
+ * （只有该闸门自己 pass / 耗尽、或人工拖拽 / 完成时才清）。新任务 / 存量导入由
+ * `normalizeTask` 归一成 `{}`。
  */
 export function enterStage(
   task: Task,
   stage: WorkflowStage,
   _workflow: WorkflowWithStages,
-  gateFails = 0,
 ): { task: Task; effects: StageEffect[] } {
   return {
-    task: { ...task, currentStageId: stage.id, gateFails },
+    task: { ...task, currentStageId: stage.id },
     effects: entryEffects(stage),
   }
 }
@@ -127,9 +151,9 @@ export function enterStage(
 /**
  * 执行一条主去向（M32）：`goto` 换阶段、`await` 停住、`close` 归档。
  *
- * - `goto`：目标阶段不存在（脏投影 / 已删）时零流转，宁可不走；
- * - `await`：不产效果，`gateFails` 按传入值落下（判定预算要能累计）；
- * - `close`：本单结束（工单走完），预算清零；调用方据此产完成事实并顺手归档（M53）。
+ * - `goto`：目标阶段不存在（脏投影 / 已删）时零流转，宁可不走；否则进入目标阶段（预算照旧带着）；
+ * - `await`：不产效果，预算原样留在任务上（判定预算要能累计）；
+ * - `close`：本单结束（工单走完），全部预算清空；调用方据此产完成事实并顺手归档（M53）。
  *
  * M34 删掉 `retry`：执行阶段不设轮次，原地再来一轮只能由人触发（拖回阶段 / 重新执行）。
  */
@@ -137,28 +161,19 @@ export function applyExit(
   task: Task,
   exit: StagePrimary,
   workflow: WorkflowWithStages,
-  options?: { gateFails?: number },
 ): MoveResult {
   switch (exit.do) {
     case 'goto': {
       const target = workflow.stages.find((stage) => stage.id === exit.stageId)
       // 目标不存在（脏投影）或就是当前阶段（旧数据里可能存过自指 goto）：不猜去向，原地停住。
       // 保存时 `validateStageSet` 已拦自指，这里只兜历史数据。
-      if (!target || target.id === task.currentStageId) {
-        return {
-          task: options?.gateFails === undefined ? task : { ...task, gateFails: options.gateFails },
-          effects: [],
-        }
-      }
-      return enterStage(task, target, workflow, options?.gateFails ?? 0)
+      if (!target || target.id === task.currentStageId) return { task, effects: [] }
+      return enterStage(task, target, workflow)
     }
     case 'await':
-      return {
-        task: options?.gateFails === undefined ? task : { ...task, gateFails: options.gateFails },
-        effects: [],
-      }
+      return { task, effects: [] }
     case 'close':
-      return { task: { ...task, gateFails: 0 }, effects: [], archive: true }
+      return { task: clearAllGateFails(task), effects: [], archive: true }
   }
 }
 
@@ -168,6 +183,10 @@ export function applyExit(
  *
  * 判定阶段（M11）只改「成功」这一支：`RUN_FAILED` 仍走 `errored`，且**不消耗**判定预算
  * ——执行器崩了不等于业务上没过。
+ *
+ * M56：闸门预算按闸门分开记（`gateFailsByStage`）。判 `pass` 只清当前闸门那一项；
+ * `fail` 未达 `maxFails` 只加当前闸门那一项，其余闸门（以及整链重跑时前面的闸门通过）
+ * 都动不到它，所以「整链重跑 + 每闸门各自限次」能同时成立。
  */
 export function moveTask(task: Task, event: StageEvent, workflow: WorkflowWithStages): MoveResult {
   const current = workflow.stages.find((s) => s.id === task.currentStageId)
@@ -177,32 +196,33 @@ export function moveTask(task: Task, event: StageEvent, workflow: WorkflowWithSt
   // 缺失的出口按顺序补（老行 / 刚加的阶段）：`completeExits` 是唯一一份缺省规则
   const currentExits = completeExits(workflow.stages).find((s) => s.id === current.id)?.exits ?? {}
 
-  const follow = (guard: StageExitGuard, gateFails?: number): MoveResult => {
+  const follow = (nextTask: Task, guard: StageExitGuard): MoveResult => {
     const exit = currentExits[guard]
-    if (exit === undefined) return { task, effects: [] }
-    return applyExit(task, exit, workflow, gateFails === undefined ? undefined : { gateFails })
+    if (exit === undefined) return { task: nextTask, effects: [] }
+    return applyExit(nextTask, exit, workflow)
   }
 
   switch (event.type) {
     case 'RUN_SUCCEEDED': {
-      if (current.judge === null) return follow('done')
+      // 非闸门阶段完成：预算原样带着（按闸门的 map 在 enterStage 里保留），整链重跑靠这个
+      if (current.judge === null) return follow(task, 'done')
       const verdict = event.verdict
       // 没给结论：既不白过也不烧预算，任务留在判定阶段等人（看板上可见）
       if (verdict === undefined) return { task, effects: [] }
-      if (verdict === 'pass') return follow('passed')
+      if (verdict === 'pass') return follow(clearGateFails(task, current.id), 'passed')
 
-      const fails = (task.gateFails ?? 0) + 1
+      const fails = gateFailsAt(task, current.id) + 1
       const maxFails = current.judge.maxFails
       if (maxFails !== null && fails >= maxFails) {
-        // 预算耗尽：按配置放行，调用方据此打 `gate:degraded` 留痕
-        return { ...follow('passed', 0), gateExhausted: true }
+        // 预算耗尽：按配置放行，清掉本闸门计数，调用方据此打 `gate:degraded` 留痕
+        return { ...follow(clearGateFails(task, current.id), 'passed'), gateExhausted: true }
       }
       // 没有护栏（maxFails=null）时永远走 failed 那一侧
-      return follow('failed', fails)
+      return follow(withGateFails(task, current.id, fails), 'failed')
     }
     case 'RUN_FAILED':
-      // 执行出错不清零预算：崩了不等于业务上没过
-      return follow('errored', task.gateFails ?? 0)
+      // 执行出错不消耗判定预算：崩了不等于业务上没过
+      return follow(task, 'errored')
   }
 }
 
@@ -219,7 +239,7 @@ export function moveTaskToStage(
   if (!target || target.id === task.currentStageId) {
     return { task, effects: [] }
   }
-  return enterStage(task, target, workflow)
+  return enterStage(clearAllGateFails(task), target, workflow)
 }
 
 /**

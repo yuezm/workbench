@@ -166,8 +166,8 @@ export const sample = {
       handoffFromTaskId: null,
       handoffFromStageId: null,
       handoffFromRunId: null,
-      // M11 闸门预算：视图现在按列读出（此前 TASK_COLUMNS 漏了这一列）
-      gateFails: 0,
+      // M11/M56 闸门预算：按闸门分开的 map
+      gateFailsByStage: {},
       createdAt: SAMPLE_AT,
       updatedAt: SAMPLE_AT,
       ...overrides,

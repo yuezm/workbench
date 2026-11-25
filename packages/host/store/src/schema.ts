@@ -139,8 +139,8 @@ CREATE TABLE IF NOT EXISTS ${name} (
   -- M30 派单来源 run（弱引用）：同一 run 只派一批，人工离开为 NULL
   handoff_from_run_id TEXT,
   project_id TEXT,
-  -- M11 闸门预算：当前阶段连续未通过次数（0 = 没失败过；旧行默认 0）
-  gate_fails INTEGER NOT NULL DEFAULT 0,
+  -- M11/M56 闸门预算：stageId → 连续未通过次数 的 JSON 对象（{} = 没失败过）
+  gate_fails TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );`
@@ -940,7 +940,7 @@ export const TASKS_M10_ADD_COLUMN_SQL: Readonly<
 }
 
 /**
- * M11 给 `tasks` 新增的列（闸门预算）：有 DEFAULT 0 —— 旧行按「没失败过」归一，
+ * M11 给 `tasks` 新增的列（闸门预算）：M56 起改为按闸门分开的 JSON 对象（默认 `{}`），
  * 与内核 `normalizeTask` 一致。清单与 `tasksTable()` 的 DDL 保持同步。
  */
 export const TASKS_M11_ADDED_COLUMNS = ['gate_fails'] as const
@@ -949,7 +949,7 @@ export const TASKS_M11_ADDED_COLUMNS = ['gate_fails'] as const
 export const TASKS_M11_ADD_COLUMN_SQL: Readonly<
   Record<(typeof TASKS_M11_ADDED_COLUMNS)[number], string>
 > = {
-  gate_fails: 'ALTER TABLE tasks ADD COLUMN gate_fails INTEGER NOT NULL DEFAULT 0',
+  gate_fails: "ALTER TABLE tasks ADD COLUMN gate_fails TEXT NOT NULL DEFAULT '{}'",
 }
 
 /**
@@ -1015,7 +1015,7 @@ export function legacyTasksCopySql(targetTable: string, columns: ReadonlySet<str
     ${pick('spawned_by_run_id', 'NULL')}, ${pick('batch_no', 'NULL')},
     ${pick('spawn_key', 'NULL')},
     ${pick('handoff_from_task_id', 'NULL')}, ${pick('handoff_from_stage_id', 'NULL')},
-    ${pick('project_id', 'NULL')}, ${pick('gate_fails', '0')},
+    ${pick('project_id', 'NULL')}, ${pick('gate_fails', "'{}'")},
     created_at, updated_at
   FROM tasks`
 }

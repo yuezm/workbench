@@ -283,7 +283,7 @@ export interface AgentState {
     /** M53：`status` 已删，只剩归档时刻（NULL = 仍在追踪） */
     archivedAt: string | null
     currentStageId: string | null
-    gateFails: number
+    gateFailsByStage: Record<string, number>
     labels: string[]
   }>
   /** 事实条数（按类型） */
@@ -337,7 +337,7 @@ export function readAgentState(dbPath: string): AgentState {
         id: string
         archived_at: string | null
         current_stage_id: string | null
-        gate_fails: number
+        gate_fails: string
         labels_json: string
       }>
     ).map((row) => ({
@@ -345,7 +345,7 @@ export function readAgentState(dbPath: string): AgentState {
       // M53：`tasks.status` 已删——完成与否由阶段语义表达，这里只剩「归档时刻」
       archivedAt: row.archived_at,
       currentStageId: row.current_stage_id,
-      gateFails: row.gate_fails,
+      gateFailsByStage: JSON.parse(row.gate_fails) as Record<string, number>,
       labels: JSON.parse(row.labels_json) as string[],
     }))
 

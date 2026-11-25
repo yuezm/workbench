@@ -278,7 +278,8 @@ export const TABLE_SHAPES: Readonly<Record<ProjectionTable, TableShape>> = {
     col2('handoffFromStageId', 'handoff_from_stage_id'),
     col2('handoffFromRunId', 'handoff_from_run_id'),
     col2('projectId', 'project_id'),
-    col2('gateFails', 'gate_fails'),
+    // M56：闸门预算按闸门分开记（`stageId → 连续未通过次数`），存 JSON 对象
+    col('gateFailsByStage', 'gate_fails', jsonObject),
     col2('createdAt', 'created_at'),
     col2('updatedAt', 'updated_at'),
   ]),

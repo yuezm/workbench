@@ -167,7 +167,22 @@ const normalizeRun = (run: RunRow): RunRow => ({
  * M6.5 前的历史行没有线程两列。`kernel/project` 已归一；这里是投影边界的第二道防线
  * （与 `normalizeRun` 同一模式），保证任何路径写入的 `Change` 都能绑参、且增量与重建折出同一行。
  */
-const normalizeTask = (row: Task): Task & { gateFails: number } => {
+/**
+ * M56：闸门预算归一——只接受「stageId → 正整数」的对象。
+ *
+ * 旧版（M11）存的是一个数字、或老事实里根本没有该字段：一律按空对象，不猜它是哪道闸门的计数。
+ */
+const normalizeGateFails = (legacy: Partial<Task>): Record<string, number> => {
+  const raw = (legacy as { gateFailsByStage?: unknown }).gateFailsByStage
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, number> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'number' && Number.isInteger(value) && value > 0) out[key] = value
+  }
+  return out
+}
+
+const normalizeTask = (row: Task): Task & { gateFailsByStage: Record<string, number> } => {
   const legacy = row as Partial<Task>
   return {
     ...row,
@@ -185,8 +200,8 @@ const normalizeTask = (row: Task): Task & { gateFails: number } => {
     handoffFromStageId: legacy.handoffFromStageId ?? null,
     // M30：老行不知道来自哪一轮，按人工离开（null）归一
     handoffFromRunId: legacy.handoffFromRunId ?? null,
-    // M11：闸门预算缺省 0（没失败过）
-    gateFails: legacy.gateFails ?? 0,
+    // M11/M56：闸门预算按闸门分开记；老行（数字 / 缺字段）一律归一成空对象
+    gateFailsByStage: normalizeGateFails(legacy),
   }
 }
 

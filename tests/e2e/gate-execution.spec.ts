@@ -88,7 +88,7 @@ test('闸门闭环：真实执行带回执块判定 → 任务通过闸门进入
   // M53：完成与否看阶段语义；这条任务走到「收尾」还不是终态，也没被归档
   expect(task.archivedAt).toBeNull()
   // 一次通过：预算没消耗，也没有「闸门放行」的降级标签
-  expect(task.gateFails).toBe(0)
+  expect(task.gateFailsByStage).toEqual({})
   expect(task.labels).not.toContain('gate:degraded')
 
   const stageRun = state.runs.find((run) => run.purpose === 'stage')

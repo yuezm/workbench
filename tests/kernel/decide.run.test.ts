@@ -224,6 +224,7 @@ const task = (over: Partial<Task> = {}): Task => ({
   handoffFromTaskId: null,
   handoffFromStageId: null,
   handoffFromRunId: null,
+  gateFailsByStage: {},
   createdAt: CREATED,
   updatedAt: CREATED,
   ...over,
@@ -1213,7 +1214,7 @@ describe('kernel/decide run.receipt 回执', () => {
         actor: HOST,
         at: NOW,
         payload: {
-          task: { ...current, currentStageId: 'st-2', updatedAt: NOW, gateFails: 0 },
+          task: { ...current, currentStageId: 'st-2', updatedAt: NOW, gateFailsByStage: {} },
           from: 'st-1',
           to: 'st-2',
         },
@@ -1235,7 +1236,7 @@ describe('kernel/decide run.receipt 回执', () => {
       receipt(),
     )
 
-    const settled = { ...current, updatedAt: NOW, gateFails: 0 }
+    const settled = { ...current, updatedAt: NOW, gateFailsByStage: {} }
     // close 是「原地结束」：阶段没动，就不该多一条 task.moved
     expect(decision.facts.slice(1).map((fact) => fact.type)).toEqual([
       'task.finished',
@@ -1309,7 +1310,7 @@ describe('kernel/decide run.receipt 回执', () => {
       actor: HOST,
       at: NOW,
       payload: {
-        task: { ...current, currentStageId: 'st-1', updatedAt: NOW, gateFails: 0 },
+        task: { ...current, currentStageId: 'st-1', updatedAt: NOW, gateFailsByStage: {} },
         from: 'st-2',
         to: 'st-1',
       },
@@ -1825,7 +1826,7 @@ describe('kernel/decide 闸门流转（M11）', () => {
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-3' })
     // 通过即进下一阶段：判定预算清零（覆盖完整才算 pass）
-    expect((moved?.payload as { task: Task }).task.gateFails).toBe(0)
+    expect((moved?.payload as { task: Task }).task.gateFailsByStage).toEqual({})
     expect(decision.facts.some((fact) => fact.type === 'run.succeeded')).toBe(true)
   })
 
@@ -1849,16 +1850,35 @@ describe('kernel/decide 闸门流转（M11）', () => {
     const decision = receive(gateView(), 'run-1', receipt({ verdict: 'fail' }))
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-1' })
-    expect((moved?.payload as { task: Task }).task.gateFails).toBe(1)
+    expect((moved?.payload as { task: Task }).task.gateFailsByStage).toEqual({ 'st-2': 1 })
+  })
+
+  it('修复阶段完成后回到同一闸门：累计次数不被清零（回环保留）', () => {
+    // st-1 是修复阶段（非闸门），它 done 的默认去向是下一个自添加阶段 st-2（还是同一闸门）。
+    // 这里 gateFails=1 必须在 st-1 → st-2 这一跳保留，否则闸门计数每轮归零、maxFails 永远到不了。
+    const repairView = view({
+      runs: [running({ stageId: 'st-1' })],
+      workflows: [{ id: 'wf-1', name: '研发', description: '', createdAt: CREATED }],
+      stages: [stage({ id: 'st-1', position: 0 }), gateStage(), stage({ id: 'st-3', position: 2 })],
+      tasks: [task({ currentStageId: 'st-1', gateFailsByStage: { 'st-2': 1 } })],
+    })
+    const decision = receive(repairView, 'run-1', receipt({}))
+    const moved = decision.facts.find((fact) => fact.type === 'task.moved')
+    expect(moved?.payload).toMatchObject({ from: 'st-1', to: 'st-2' })
+    expect((moved?.payload as { task: Task }).task.gateFailsByStage).toEqual({ 'st-2': 1 })
   })
 
   it('fail 达上限 → 放行、打 gate:degraded 标签、记一条反馈', () => {
-    const decision = receive(gateView({ gateFails: 1 }), 'run-1', receipt({ verdict: 'fail' }))
+    const decision = receive(
+      gateView({ gateFailsByStage: { 'st-2': 1 } }),
+      'run-1',
+      receipt({ verdict: 'fail' }),
+    )
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     const movedTask = (moved?.payload as { task: Task }).task
     expect(movedTask.currentStageId).toBe('st-3')
     expect(movedTask.labels).toContain('gate:degraded')
-    expect(movedTask.gateFails).toBe(0)
+    expect(movedTask.gateFailsByStage).toEqual({})
     const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
     expect(comment?.payload).toMatchObject({
       comment: { taskId: 't-1', author: 'agent' },
@@ -1888,7 +1908,7 @@ describe('kernel/decide 闸门标签与放行留痕（M11 补充）', () => {
 
   it('fail 达上限且任务已有 gate:degraded 标签：标签不重复追加', () => {
     const decision = receive(
-      gateView({ gateFails: 1, labels: ['gate:degraded'] }),
+      gateView({ gateFailsByStage: { 'st-2': 1 }, labels: ['gate:degraded'] }),
       'run-1',
       receipt({ verdict: 'fail' }),
     )
@@ -2394,7 +2414,7 @@ describe('kernel/commands/run 验收归属（M34）', () => {
     ])
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect((moved?.payload as { to: string }).to).toBe('st-done')
-    expect((moved?.payload as { task: Task }).task.gateFails).toBe(0)
+    expect((moved?.payload as { task: Task }).task.gateFailsByStage).toEqual({})
     // M53：落到终态阶段即完成（task.finished 与 task.moved 同批）
     expect(decision.facts.some((fact) => fact.type === 'task.finished')).toBe(true)
     expect(decision.facts.some((fact) => fact.type === 'task.comment_added')).toBe(false)
@@ -2493,7 +2513,7 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
 
   it('验收 3 条只用 2 条证据覆盖 → 零流转，gateFails 不变', () => {
     const decision = receive(
-      gateView({ gateFails: 1 }),
+      gateView({ gateFailsByStage: { 'st-2': 1 } }),
       'run-1',
       receipt({
         verdict: 'pass',
@@ -2590,7 +2610,7 @@ describe('kernel/decide 闸门验收覆盖（M34）', () => {
 
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect((moved?.payload as { to: string }).to).toBe('st-3')
-    expect((moved?.payload as { task: Task }).task.gateFails).toBe(0)
+    expect((moved?.payload as { task: Task }).task.gateFailsByStage).toEqual({})
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(false)
   })
 
@@ -2857,7 +2877,25 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
     expect((succeeded?.payload as { run: RunRow }).run.exitCode).toBe(1)
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-1' })
-    expect((moved?.payload as { task: Task }).task.gateFails).toBe(1)
+    expect((moved?.payload as { task: Task }).task.gateFailsByStage).toEqual({ 'st-2': 1 })
+  })
+
+  it('退出码非 0：把脚本失败输出尾部回流成一条任务评论（返工反馈 P1）', () => {
+    const decision = receive(
+      scriptView(),
+      'run-1',
+      receipt({
+        status: 'failed',
+        errorCode: 'exit_nonzero',
+        exitCode: 1,
+        output: 'RUN src/a.test.ts\n  ✕ adds\n  Expected 2, received 3',
+      }),
+    )
+    const comment = decision.facts.find((fact) => fact.type === 'task.comment_added')
+    const payload = comment?.payload as { comment: { author: string; text: string } } | undefined
+    expect(payload?.comment.author).toBe('agent')
+    expect(payload?.comment.text).toContain('未通过')
+    expect(payload?.comment.text).toContain('Expected 2, received 3')
   })
 
   it('拿不到退出码（超时 / 起不来）→ 没给结论：原地停、不消耗预算', () => {
@@ -2923,7 +2961,7 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
     )
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-1' })
-    expect((moved?.payload as { task: Task }).task.gateFails).toBe(1)
+    expect((moved?.payload as { task: Task }).task.gateFailsByStage).toEqual({ 'st-2': 1 })
   })
 
   it('退出码 0 且没给 checks：验收条目只是配置记录，结论按退出码', () => {
@@ -2949,7 +2987,7 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
     )
     const moved = decision.facts.find((fact) => fact.type === 'task.moved')
     expect(moved?.payload).toMatchObject({ from: 'st-2', to: 'st-1' })
-    expect((moved?.payload as { task: Task }).task.gateFails).toBe(1)
+    expect((moved?.payload as { task: Task }).task.gateFailsByStage).toEqual({ 'st-2': 1 })
   })
 
   it('非闸门脚本阶段：退出码非 0 仍是执行出错，走 errored 分支', () => {

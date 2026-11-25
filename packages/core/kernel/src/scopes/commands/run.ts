@@ -70,6 +70,16 @@ import {
 } from './common'
 import { revalidateMandate, revokeMandate } from '../mandate'
 
+/** 脚本闸门失败回流到返工轮的输出尾部上限（码点）：够看清失败断言与报错栈尾。 */
+const GATE_FAIL_OUTPUT_TAIL = 2000
+
+/** 取文本末尾 `max` 个码点，超长时前加省略标记（保尾部：失败结论通常在最后几行）。 */
+function tailText(value: string, max: number): string {
+  const chars = Array.from(value.trim())
+  if (chars.length <= max) return chars.join('')
+  return '…（前文略）\n' + chars.slice(chars.length - max).join('')
+}
+
 /** 回执派生事件（D8）：每条事件一个 `event.received`，`hops = 父 run.hops + 1`。 */
 function eventFacts(run: RunRow, receipt: Receipt, now: Iso, env: Environment): FactDraft[] {
   const events = receipt.events ?? []
@@ -328,6 +338,32 @@ function stageTransitionFacts(
     return [hostDraft('task.comment_added', { comment }, now)]
   }
   /**
+   * 脚本闸门失败 → 返工反馈（P1）：把失败输出尾部落一条任务评论。
+   *
+   * 脚本闸门只给退出码；返工阶段（agent）的「最近一轮产出」刻意跳过脚本轮（`thread-context`），
+   * 拿不到脚本 stdout，提示词里「失败输出原样作为返工反馈」就落不了地。这里把脚本 run 的输出
+   * 尾部压成一条评论，走「反馈记录」资料段进入返工轮。只在脚本闸门「业务未通过且未放行」时产，
+   * 放行（degraded）与评审闸门（findings 另有通路）都不重复。
+   */
+  const gateFailFacts = (): FactDraft[] => {
+    if (current.judge === null || run.script === null) return []
+    if (verdict !== 'fail' || moved.gateExhausted === true) return []
+    const body = run.output.trim() === '' ? (run.error ?? '') : run.output
+    const tail = tailText(body, GATE_FAIL_OUTPUT_TAIL)
+    const text =
+      tail === ''
+        ? `闸门「${current.name}」未通过（退出码 ${run.exitCode ?? '未知'}），退回返工；这一轮没有可回流的输出。`
+        : `闸门「${current.name}」未通过（退出码 ${run.exitCode ?? '未知'}），退回返工。失败输出末尾：\n${tail}`
+    const comment: TaskComment = {
+      id: env.nextId('task-comment'),
+      taskId: task.id,
+      author: 'agent',
+      text,
+      createdAt: now,
+    }
+    return [hostDraft('task.comment_added', { comment }, now)]
+  }
+  /**
    * 闸门没给结论时的留痕（M49）：任务停在原地、零流转，界面上看不出为什么。
    * 只在「确实停在闸门里」时留一句，跟着去向走的情形（errored 出口）不加噪音。
    */
@@ -364,6 +400,7 @@ function stageTransitionFacts(
           ? [hostDraft('task.archived', { task: { ...settled, archivedAt: now } }, now)]
           : []),
         ...degradedFacts(),
+        ...gateFailFacts(),
       ],
     }
   }
@@ -381,6 +418,7 @@ function stageTransitionFacts(
           now,
         ),
         ...degradedFacts(),
+        ...gateFailFacts(),
       ],
       enter: next,
     }

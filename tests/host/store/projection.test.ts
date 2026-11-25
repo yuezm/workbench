@@ -211,8 +211,8 @@ describe('rebuild：增量应用与重建等价', () => {
         handoffFromTaskId: null,
         handoffFromStageId: null,
         handoffFromRunId: null,
-        // M11 闸门预算：TASK_COLUMNS 补齐 gate_fails 后按列读出
-        gateFails: 0,
+        // M11/M56 闸门预算：按闸门分开的 map
+        gateFailsByStage: {},
         createdAt: SAMPLE_AT,
         updatedAt: SAMPLE_AT,
       },

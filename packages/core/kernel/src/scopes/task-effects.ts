@@ -49,6 +49,28 @@ export function runAccessOf(stage: Pick<WorkflowStage, 'judge'>, mode: Permissio
 }
 
 /**
+ * 脚本阶段的工作目录（B）：优先用上游阶段交付的 `worktree`。
+ *
+ * 脚本没有提示词，读不到上一轮声明的「分支 / 工作树」，只能由内核把坐标传下来。
+ * 取值顺序：
+ * 1. `incoming`：本批刚结算 run 的 `deliverables.worktree`（视图里还没更新，调用方显式传）；
+ * 2. 否则扫本任务的运行投影，取最近一条声明过 `worktree` 的 run（修复轮没重申时仍落到同一棵树）；
+ * 3. 都没有返回 null，调用方回落到项目目录（原地交付 / 老数据）。
+ */
+function resolveScriptWorktree(view: View, task: Task, incoming: string | null): string | null {
+  if (incoming !== null && incoming.trim() !== '') return incoming
+  let best: { at: string; worktree: string } | null = null
+  for (const run of view.runs.values()) {
+    if (run.taskId !== task.id) continue
+    const worktree = run.deliverables?.worktree ?? null
+    if (worktree === null || worktree.trim() === '') continue
+    const at = run.endedAt ?? run.createdAt
+    if (best === null || at > best.at) best = { at, worktree }
+  }
+  return best?.worktree ?? null
+}
+
+/**
  * 进入阶段的效果：落点阶段 `entryMode='agent'` 且智能体 / 运行时都在时，产一条
  * `run.queued`。
  *
@@ -95,6 +117,11 @@ export function entryRunFacts(
      * 视图，靠它把「待修复清单」与 `addresses` 出口带进提示词。缺省时退回 `locateReport`。
      */
     review?: ReviewReport
+    /**
+     * 本批刚结算 run 的交付 worktree 绝对路径（B）。视图里还没更新，靠它让紧随其后的
+     * **脚本阶段**直接切到真正有改动的树执行（自测不在项目主仓空跑）。
+     */
+    worktree?: string | null
   },
 ): FactDraft<'run.queued'>[] {
   // M53：归档不拦业务——只要还落在会派活儿的阶段上就排一轮
@@ -167,6 +194,11 @@ export function entryRunFacts(
   // M10：项目文件夹就是本轮的工作目录；任务没有项目（存量 / 未归属）时退回目标自己的配置。
   const project = task.projectId === null ? undefined : view.projects.get(task.projectId)
   const ownCwd = target.kind === 'agent' ? target.agent.workdir : target.script.cwd
+  // B：脚本没有提示词，读不到上游「分支 / 工作树」；由内核把交付 worktree 传下来，
+  // 否则自测永远在项目主仓（没改动的那棵树）空跑。智能体阶段维持原口径。
+  const scriptWorktree =
+    target.kind === 'script' ? resolveScriptWorktree(view, task, options?.worktree ?? null) : null
+  const cwd = scriptWorktree ?? project?.path ?? ownCwd ?? ''
   return [
     {
       type: 'run.queued',
@@ -186,7 +218,7 @@ export function entryRunFacts(
           rulesVersion: trigger?.rulesVersion ?? 0,
           executorKey: runtime.executorKey,
           threadId: thread?.id ?? task.threadId,
-          cwd: project?.path ?? ownCwd ?? '',
+          cwd,
           access:
             target.kind === 'script'
               ? 'full'

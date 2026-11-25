@@ -980,6 +980,9 @@ export interface RunDeliverables {
   branch: string | null
   /** 基线（如 `develop` / 某个 commit） */
   base: string | null
+  /** 交付代码所在的 git worktree 绝对路径；在项目主目录原地交付的阶段为 null。
+   * 下游「脚本阶段」据此把工作目录切到真正有改动的树，而不是永远在项目主仓空跑。 */
+  worktree: string | null
   /** 提交列表（短 hash 即可） */
   commits: string[]
   /** 产出/改动文件（相对项目根） */
@@ -1003,6 +1006,7 @@ export function normalizeDeliverables(input: RunDeliverablesInput): RunDeliverab
   return {
     branch: input.branch ?? null,
     base: input.base ?? null,
+    worktree: input.worktree ?? null,
     commits: [...(input.commits ?? [])],
     files: [...(input.files ?? [])],
     gates: [...(input.gates ?? [])],

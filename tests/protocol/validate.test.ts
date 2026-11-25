@@ -1604,6 +1604,9 @@ describe('receipt.deliverables（M28：阶段交付物形状）', () => {
     expect(validateInput(receipt({})).ok).toBe(true)
     expect(validateInput(receipt({ deliverables: { branch: 'feat/x' } })).ok).toBe(true)
     expect(validateInput(receipt({ deliverables: { base: 'develop' } })).ok).toBe(true)
+    expect(validateInput(receipt({ deliverables: { worktree: 'D:\\\\wt\\\\feat-x' } })).ok).toBe(
+      true,
+    )
     expect(validateInput(receipt({ deliverables: { commits: ['57be895'] } })).ok).toBe(true)
     expect(validateInput(receipt({ deliverables: { files: ['src/a.ts'] } })).ok).toBe(true)
     expect(

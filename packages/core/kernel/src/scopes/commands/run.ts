@@ -593,6 +593,9 @@ export function receiveRun(
         ...entryRunFacts(view, transition.enter, now, env, HOST_SCHEDULER, undefined, {
           roundSession: 'fresh',
           review: review.report,
+          // B：把本批结算 run 的交付 worktree 传给紧随其后的脚本阶段，
+          // 让自测切到真正有改动的树执行，而不是在项目主仓空跑。
+          worktree: input.receipt.deliverables?.worktree ?? null,
         }),
       )
     }

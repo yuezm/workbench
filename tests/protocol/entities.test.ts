@@ -648,11 +648,12 @@ describe('protocol/entities 任务阶段语义（M53）', () => {
 })
 
 describe('normalizeDeliverables（回执输入 → 落库形态）', () => {
-  it('五项齐全时原样（数组是副本，不与入参共享引用）', () => {
+  it('六项齐全时原样（数组是副本，不与入参共享引用）', () => {
     const commits = ['57be895']
     const normalized = normalizeDeliverables({
       branch: 'feat/x',
       base: 'develop',
+      worktree: 'D:\\\\wt\\\\feat-x',
       commits,
       files: ['src/a.ts'],
       gates: [{ cmd: 'pnpm check', exitCode: 0 }],
@@ -660,6 +661,7 @@ describe('normalizeDeliverables（回执输入 → 落库形态）', () => {
     expect(normalized).toEqual({
       branch: 'feat/x',
       base: 'develop',
+      worktree: 'D:\\\\wt\\\\feat-x',
       commits: ['57be895'],
       files: ['src/a.ts'],
       gates: [{ cmd: 'pnpm check', exitCode: 0 }],
@@ -671,6 +673,7 @@ describe('normalizeDeliverables（回执输入 → 落库形态）', () => {
     expect(normalizeDeliverables({})).toEqual({
       branch: null,
       base: null,
+      worktree: null,
       commits: [],
       files: [],
       gates: [],

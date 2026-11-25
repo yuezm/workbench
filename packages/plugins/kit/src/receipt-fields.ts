@@ -185,7 +185,7 @@ const parseDeliverables = (value: unknown): RunDeliverablesInput | null => {
     field === undefined ||
     field === null ||
     (typeof field === 'string' && field.length <= DELIVERABLE_LIMITS.maxChars)
-  if (!textOf(value.branch) || !textOf(value.base)) return null
+  if (!textOf(value.branch) || !textOf(value.base) || !textOf(value.worktree)) return null
   const listOf = (field: unknown, max: number): boolean => {
     if (field === undefined || field === null) return true
     if (!Array.isArray(field) || field.length > max) return false
@@ -275,7 +275,7 @@ function dropReason(key: (typeof RECEIPT_KEYS)[number], value: unknown): string 
     case 'later':
       return `${key}: 需要 ISO 8601 时刻`
     case 'deliverables':
-      return `${key}: 需要对象（branch / base / commits / files / gates）`
+      return `${key}: 需要对象（branch / base / worktree / commits / files / gates）`
     default:
       return `${key}: 形状或长度超出上限（${Array.isArray(value) ? '数组' : typeof value}）`
   }

@@ -1790,6 +1790,7 @@ describe('runs.deliverables（M28：JSON 列往返）', () => {
       deliverables: {
         branch: 'feat/x',
         base: 'develop',
+        worktree: 'D:\\\\wt\\\\feat-x',
         commits: ['57be895'],
         files: ['src/a.ts'],
         gates: [{ cmd: 'pnpm check', exitCode: 0 }],

@@ -1170,18 +1170,20 @@ describe('最近一轮产出的交付物行（M28）', () => {
     deliverables: {
       branch: 'feat/export-integrity',
       base: 'develop',
+      worktree: 'D:\\\\wt\\\\feat-export-integrity',
       commits: ['57be895', '20c2eab'],
       files: ['src/a.ts', 'src/b.ts', 'src/c.ts'],
       gates: [{ cmd: 'pnpm check', exitCode: 0 }],
     },
   })
 
-  it('把分支 / 基线 / 提交 / 文件路径 / 门禁压成一行注入下游', () => {
+  it('把分支 / 基线 / 工作树 / 提交 / 文件路径 / 门禁压成一行注入下游', () => {
     const seeded = view({ runs: new Map([[withDeliverables.id, withDeliverables]]) })
     const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
     const head = precedingOf(text)
     expect(head).toContain('交付物：分支 feat/export-integrity')
     expect(head).toContain('基线 develop')
+    expect(head).toContain('工作树 D:\\\\wt\\\\feat-export-integrity')
     expect(head).toContain('提交 57be895 20c2eab')
     // 文件给路径而不是只给个数：这段的目的就是「下游不用再考古」
     expect(head).toContain('文件 src/a.ts src/b.ts src/c.ts')
@@ -1196,6 +1198,7 @@ describe('最近一轮产出的交付物行（M28）', () => {
       deliverables: {
         branch: null,
         base: null,
+        worktree: null,
         commits: [],
         files: ['a.ts', 'b.ts', 'c.ts', 'd.ts', 'e.ts'],
         gates: [],
@@ -1216,7 +1219,7 @@ describe('最近一轮产出的交付物行（M28）', () => {
       id: 'run-e',
       endedAt: '2026-11-02T00:00:00.000Z',
       output: 'x',
-      deliverables: { branch: null, base: null, commits: [], files: [], gates: [] },
+      deliverables: { branch: null, base: null, worktree: null, commits: [], files: [], gates: [] },
     })
     const seededEmpty = view({ runs: new Map([[empty.id, empty]]) })
     const textEmpty = threadContextText(seededEmpty, seededEmpty.threads.get('th-1') as ThreadRow)

@@ -200,6 +200,8 @@ function deliverableLine(run: RunRow): string[] {
   const parts: string[] = []
   if (items.branch !== null) parts.push(`分支 ${items.branch}`)
   if (items.base !== null) parts.push(`基线 ${items.base}`)
+  // 老行 JSON 里没有 worktree（undefined），不能按 `!== null` 判断否则会印出 `undefined`
+  if (items.worktree != null && items.worktree !== '') parts.push(`工作树 ${items.worktree}`)
   if (items.commits.length > 0) parts.push(`提交 ${items.commits.join(' ')}`)
   if (items.files.length > 0) {
     const shown = items.files.slice(0, DELIVERABLE_FILE_HINTS).join(' ')

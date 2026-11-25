@@ -82,9 +82,9 @@ export const RECEIPT_KEY_DOCS: Record<ReceiptKey, ReceiptKeyDoc> = {
     shape: '[{"cmd":"pnpm check","exitCode":0,"acceptance":1}]',
   },
   deliverables: {
-    text: '阶段交付物：交给下游的坐标（分支 / 基线 / 提交 / 文件 / 门禁）。没有产出的项省略或写 null，别把过程写进来。',
+    text: '阶段交付物：交给下游的坐标（分支 / 基线 / 工作树 / 提交 / 文件 / 门禁）。用 git worktree 交付时务必写 `worktree`（绝对路径），下游脚本阶段会切到该树执行；没有产出的项省略或写 null，别把过程写进来。',
     shape:
-      '{"branch":"feat/x","base":"develop","commits":["57be895"],"files":["src/a.ts"],"gates":[{"cmd":"pnpm check","exitCode":0}]}',
+      '{"branch":"feat/x","base":"develop","worktree":"D:\\\\repo\\\\.worktrees\\\\feat-x","commits":["57be895"],"files":["src/a.ts"],"gates":[{"cmd":"pnpm check","exitCode":0}]}',
   },
   findings: {
     text: '评审待改项。`severity` 只接受 blocker / high / medium / low（Critical→blocker、Required→high、Optional→medium、Nit→low；写别的词该键被忽略，不影响同块其它键）。**blocker / high 是阻断项**（不处置就不推进）；medium / low 只留痕，不要求处置。`requiredAction` 写成「复跑什么、看到什么算修好」。',

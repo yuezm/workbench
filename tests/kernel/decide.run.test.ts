@@ -2685,6 +2685,7 @@ describe('kernel/decide 阶段交付物（M28）', () => {
         deliverables: {
           branch: 'feat/x',
           base: 'develop',
+          worktree: null,
           commits: ['57be895'],
           files: ['src/a.ts', 'src/b.ts'],
           gates: [{ cmd: 'pnpm check', exitCode: 0 }],
@@ -2695,6 +2696,7 @@ describe('kernel/decide 阶段交付物（M28）', () => {
     expect(settled.deliverables).toEqual({
       branch: 'feat/x',
       base: 'develop',
+      worktree: null,
       commits: ['57be895'],
       files: ['src/a.ts', 'src/b.ts'],
       gates: [{ cmd: 'pnpm check', exitCode: 0 }],
@@ -2708,6 +2710,7 @@ describe('kernel/decide 阶段交付物（M28）', () => {
             deliverables: {
               branch: 'feat/x',
               base: 'develop',
+              worktree: null,
               commits: [],
               files: [],
               gates: [],
@@ -2733,6 +2736,7 @@ describe('kernel/decide 阶段交付物（M28）', () => {
     expect(settled.deliverables).toEqual({
       branch: 'feat/x',
       base: null,
+      worktree: null,
       commits: [],
       files: [],
       gates: [],
@@ -2971,6 +2975,69 @@ describe('脚本轮（M40）：退出码即闸门结论', () => {
     expect(timeoutOf(scriptRun())).toBe(1_800_000)
     const plain = stageTimeoutOf(scriptView({ runTimeoutMs: null }), limits())
     expect(plain(scriptRun())).toBe(limits().runTimeoutMs)
+  })
+
+  it('脚本阶段的工作目录跟随上游交付的 worktree（B：不在项目主仓空跑）', () => {
+    const worktree = 'D:\\\\wt\\\\feat-x'
+    const v = view({
+      workflows: [workflow()],
+      agents: [agent()],
+      runtimes: [runtime()],
+      stages: [
+        stage({ id: 'st-code', position: 0, entryMode: 'agent', agentId: 'ag-1' }),
+        judgeStage(),
+        stage({ id: 'st-3', position: 2 }),
+      ],
+      tasks: [task({ currentStageId: 'st-code' })],
+      runs: [
+        running({
+          id: 'run-1',
+          stageId: 'st-code',
+          agentId: 'ag-1',
+          deliverables: {
+            branch: 'feat/x',
+            base: 'develop',
+            worktree,
+            commits: ['a'],
+            files: [],
+            gates: [],
+          },
+        }),
+      ],
+    })
+    const decision = receive(
+      v,
+      'run-1',
+      receipt({ status: 'succeeded', deliverables: { branch: 'feat/x', worktree } }),
+    )
+    const queued = decision.facts
+      .filter((fact) => fact.type === 'run.queued')
+      .map((fact) => (fact.payload as { run: RunRow }).run)
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.stageId).toBe('st-2')
+    expect(queued[0]?.cwd).toBe(worktree)
+  })
+
+  it('上游没声明 worktree：脚本阶段回落到原口径（不凭空切目录）', () => {
+    const v = view({
+      workflows: [workflow()],
+      agents: [agent()],
+      runtimes: [runtime()],
+      stages: [
+        stage({ id: 'st-code', position: 0, entryMode: 'agent', agentId: 'ag-1' }),
+        judgeStage(),
+        stage({ id: 'st-3', position: 2 }),
+      ],
+      tasks: [task({ currentStageId: 'st-code' })],
+      runs: [running({ id: 'run-1', stageId: 'st-code', agentId: 'ag-1' })],
+    })
+    const decision = receive(v, 'run-1', receipt({ status: 'succeeded' }))
+    const queued = decision.facts
+      .filter((fact) => fact.type === 'run.queued')
+      .map((fact) => (fact.payload as { run: RunRow }).run)
+    expect(queued).toHaveLength(1)
+    expect(queued[0]?.stageId).toBe('st-2')
+    expect(queued[0]?.cwd).toBe('')
   })
 })
 

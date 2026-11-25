@@ -1176,13 +1176,14 @@ const checkDeliverables = (value: unknown): Check => {
   const at = 'receipt.deliverables'
   const record = asRecord(value)
   if (!record) return `${at} 必须是对象`
-  const name = (field: 'branch' | 'base'): Check =>
+  const name = (field: 'branch' | 'base' | 'worktree'): Check =>
     record[field] === undefined || record[field] === null
       ? null
       : optionalText(record[field], `${at}.${field}`, DELIVERABLE_LIMITS.maxChars)
   return (
     name('branch') ??
     name('base') ??
+    name('worktree') ??
     checkList(record.commits, `${at}.commits`, DELIVERABLE_LIMITS.maxCommits, (item, where) =>
       text(item, where, DELIVERABLE_LIMITS.maxChars),
     ) ??

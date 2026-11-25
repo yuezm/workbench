@@ -111,6 +111,7 @@ const SCHEMA_OF: Record<(typeof RECEIPT_KEYS)[number], Record<string, unknown>> 
     properties: {
       branch: { type: 'string' },
       base: { type: 'string' },
+      worktree: { type: 'string' },
       commits: { type: 'array', items: { type: 'string' } },
       files: { type: 'array', items: { type: 'string' } },
       gates: {

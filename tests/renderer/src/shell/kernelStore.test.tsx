@@ -317,6 +317,38 @@ describe('renderer/shell/kernelStore', () => {
     offAgents()
   })
 
+  it('run.removed 连带失效卡片视图：删任务 / 删线程后通知条不留死条目', async () => {
+    const fake = fakeTransport({ 'cards.open': [], 'cards.byRun': [], 'run.byId': null })
+    const store = createKernelStore(fake.transport)
+    await started(store)
+    const offOpen = store.watch('cards.open', undefined, () => {})
+    const offByRun = store.watch('cards.byRun', { runId: 'run-1' }, () => {})
+    const offRun = store.watch('run.byId', { runId: 'run-1' }, () => {})
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const countOf = (view: ViewId): number =>
+      fake.queries.filter((entry) => entry.view === view).length
+    const openBefore = countOf('cards.open')
+    const byRunBefore = countOf('cards.byRun')
+    const runBefore = countOf('run.byId')
+
+    // 宿主删 run 行时按 run_id 联删卡片（投影级联），而删任务 / 删线程 / 删工作流只产
+    // 这两类事实：卡片视图不跟着失效，顶部通知条就会留一张点进去只有「任务不存在」、
+    // 也没有关闭入口的死条目（关不掉、点不动）。
+    fake.emit({ kind: 'facts', seq: 2, types: ['run.removed', 'task.removed'] })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(countOf('cards.open')).toBe(openBefore + 1)
+    expect(countOf('cards.byRun')).toBe(byRunBefore + 1)
+    // 通用 run.* 视图照旧失效：为 run.removed 单开的那条不能把它顶掉
+    expect(countOf('run.byId')).toBe(runBefore + 1)
+
+    offOpen()
+    offByRun()
+    offRun()
+  })
+
   it('缓存键包含参数：不同 taskId 各自缓存，重复订阅同一键不再查询', async () => {
     const fake = fakeTransport()
     const store = createKernelStore(fake.transport)

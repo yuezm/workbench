@@ -67,6 +67,24 @@ export interface KernelStore {
 }
 
 /**
+ * 运行类事实影响的视图。
+ *
+ * 抽出来是因为 `run.removed` 要比其它运行事实多失效两张卡片视图（见失效表里那条注释），
+ * 而失效表按前缀取首条命中——那份通用集合不该抄第二遍。
+ */
+const RUN_VIEWS: readonly ViewId[] = [
+  'tasks.executing',
+  'runtimes.statuses',
+  'runs.byTask',
+  'run.byId',
+  'run.events',
+  'run.last-event-seq',
+  'runs.active-by-task',
+  'runs.active-by-conversation',
+  'run.approvals',
+]
+
+/**
  * 事实类型 → 需要失效的视图。前缀匹配；未知类型全量失效兜底
  * （新事实没登记时宁可多取，也不留旧数据）。
  */
@@ -88,20 +106,12 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
       'comments.byTask',
     ],
   },
-  {
-    prefix: 'run.',
-    views: [
-      'tasks.executing',
-      'runtimes.statuses',
-      'runs.byTask',
-      'run.byId',
-      'run.events',
-      'run.last-event-seq',
-      'runs.active-by-task',
-      'runs.active-by-conversation',
-      'run.approvals',
-    ],
-  },
+  // 删 run 会按 `run_id` 联删卡片行（宿主投影级联，`projection-apply` 里显式删），
+  // 而删任务 / 删线程 / 删工作流都只产 `run.removed`——卡片视图不跟着失效，顶部通知条
+  // 就会留一张「点进去只有任务不存在、也没有关闭入口」的死条目。前缀匹配取**首条命中**
+  // （见 `invalidatedViews`），所以这条必须排在通用 `run.` 之前，且自己带上通用集合。
+  { prefix: 'run.removed', views: [...RUN_VIEWS, 'cards.open', 'cards.byRun'] },
+  { prefix: 'run.', views: RUN_VIEWS },
   { prefix: 'card.', views: ['cards.open', 'cards.byRun'] },
   // A2：授权行随 mandate.* 整行更新；按任务取（参数视图由 store 按已注册参数重取）
   { prefix: 'mandate.', views: ['mandates.byTask'] },

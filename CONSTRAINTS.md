@@ -1,6 +1,6 @@
 # Constraints
 
-Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）。
+Last reviewed: 2026-11-26（lead）。适用于 workbench（个人工作台）。
 
 > 每次交付前读本文件。**改代码不得为过关而放松本文件**；放松门槛必须显式、可追溯（走 Exceptions，附 owner 与到期日）。
 >
@@ -30,8 +30,6 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 
 每一行都写出产生判定的命令；没有命令的维度只是愿望，不是约束。
 
-> 当前基线（2026-11-26 起强制）：st 100 / br 100 / fn 100 / ln 100。任何一项跌破即 `pnpm verify:coverage` 失败、pre-commit 拒绝提交。基线演进与每次下降的归因见 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md)。
-
 ### 架构边界（由 ESLint `no-restricted-imports` 强制）
 
 - `packages/client/**` 禁止 import Node 内置（`node:*`）与 `apps/server/**`；浏览器侧只有 `packages/client/bridge` 一个传输实现（`window.workbench`）。
@@ -41,36 +39,19 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 
 ## Measured, not yet enforced（只记录，不动）
 
-只记录、不拦的维度（覆盖率实测四元组、开发依赖漏洞数、SAST 状态、打包体积）与逐轮数值演进见 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md) 的「只记录不拦的实测值」；方向仍是「不得下降」。
+只记录、不拦的维度（开发依赖漏洞数、SAST 状态、打包体积）与逐轮数值演进见 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md) 的「只记录不拦的实测值」；方向仍是「不得下降」。覆盖率不在此列——它是上表的硬门禁。
 
 ## Exceptions（放松门槛的唯一通道）
 
 每条例外必须带 owner 与到期时点；理由、实测数字与关闭结论见 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md) 的「Exceptions 明细」。
 
-- 路径列的 src/** 是登记当时的命名（当时代码在 src/ 下）；现在对应 packages/** 与 pps/**，EX-018 起登记的直接写 packages/**。
+覆盖率是**绝对阈值**（四元组 100 + 改动行 100，见上表），不再有「不得低于基线」这种相对机制，因此「覆盖率基线」类例外失去对象：EX-001…EX-020 的索引行已下线，各条理由、实测四元组与关闭结论原样留在 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md) 的「Exceptions 明细」备查。
 
-| ID     | 规则                         | 路径          | Owner | 到期 / 复核时点       |
-| ------ | ---------------------------- | ------------- | ----- | --------------------- |
-| EX-001 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M9 开工前 （已关闭）  |
-| EX-002 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M11 开工前 （已关闭） |
-| EX-003 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M11 开工前 （已关闭） |
-| EX-004 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M11 开工前 （已关闭） |
-| EX-005 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M13 开工前 （已关闭） |
-| EX-006 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M15 开工前            |
-| EX-007 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M15 开工前            |
-| EX-008 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | 下一阶段开工前        |
-| EX-009 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | 下一阶段开工前        |
-| EX-010 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | 下一阶段开工前        |
-| EX-011 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | 下一阶段开工前        |
-| EX-012 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M37 开工前            |
-| EX-013 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | M37 开工前            |
-| EX-014 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | 下次基线复核时重测    |
-| EX-015 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | 下次基线复核时重测    |
-| EX-016 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | 下次基线复核时重测    |
-| EX-017 | 覆盖率基线（“不得低于基线”） | `src/**`      | lead  | 下一阶段开工前        |
-| EX-018 | 覆盖率基线（“不得低于基线”） | `packages/**` | lead  | 下次基线复核时重测    |
-| EX-019 | 覆盖率基线（“不得低于基线”） | `packages/**` | lead  | 下次基线复核时重测    |
-| EX-020 | 覆盖率基线（“不得低于基线”） | `packages/**` | lead  | 下次基线复核时重测    |
+- 例外索引行已下线（2026-11-26）：EX-001…EX-020 只在 CONSTRAINTS-HISTORY 的明细里出现；路径列当时写 src/**，2026-11-19 包拆分后对应 packages/** 与 apps/**。
+
+| ID     | 规则 | 路径 | Owner | 到期 / 复核时点 |
+| ------ | ---- | ---- | ----- | --------------- |
+| （无） |      |      |       |                 |
 
 ## 检查链（生命周期）
 

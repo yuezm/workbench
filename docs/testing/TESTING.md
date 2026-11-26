@@ -26,7 +26,7 @@
 - **E2E 不得碰真实外部身份**（2026-11-16）：`launchApp` 的临时数据目录隔离不到本机 `~/.lark-cli` 的登录态——装过并登录 `lark-cli` 的人跑 e2e，飞书通道会按 legacy 单连接拿到真实 open_id，把种子库里 `delivery='pending'` 的 ask 卡**真的发到本人飞书**。因此每次启动前由 `tests/support/channel-isolation.ts` 往测试库写一条 `plugins.replace`（`feishu` → `enabled:false`），`channels.startAll()` 因而不启动它：不 spawn `lark-cli`、不挂事件长连接、不发卡。隔离在 spec 自己的 `prepare` **之后**执行，种子也没法把它打开；`in-app` 与 `desktop` 留在测试里（前者就是被测对象，后者只经 SSE 推知会）。守则由 `tests/e2e/isolation.spec.ts` 三条断言看着，新增通道先问「它会不会把消息交给一个真人」，会就加进 `ISOLATED_CHANNEL_IDS`。
 - **环境按「要不要 DOM」分工**：真正 render 的用例留在默认 jsdom；纯逻辑用例（`kernel` / `protocol` / `host` / `server` / `plugins` / `renderer` 下不 render 的 model 与 lib，以及 server 的 HTTP/SSE 契约测试）首行标 `// @vitest-environment node`。jsdom 是逐文件冷启动（本机 0.7–1.3s/文件），多标一个 node 就少付一份环境成本；`vitest.setup.ts` 也只在有 DOM 时加载 RTL 与 jest-dom。
 - **不要用 `pool: 'vmThreads'` 或 `isolate: false` 换速度**：本仓有用例在文件内改 `window.location`、`vi.stubGlobal('document', undefined)`，环境复用后同一 worker 里跨文件互相污染（实测 2 条用例直接失败）。诊断里的 Isolate 提示按此忽略。
-- 覆盖率阈值门禁：statements 98 / branches 93 / functions 95 / lines 98（`vitest.config.mts`）；项目基线只以 [CONSTRAINTS.md](../../CONSTRAINTS.md) 的「当前基线」行为准（含实测四元组与演进归因），`pnpm verify:coverage` 跌破基线即 finding。
+- 覆盖率阈值门禁：statements / branches / functions / lines 全 **100**（`vitest.config.mts` 的 `thresholds`，`tests/**` 不进分母），改动行 **≥100%**（`scripts/check-diff-coverage.mjs` 的 `MIN_DIFF_COVERAGE` 默认值）；口径以 [CONSTRAINTS.md](../../CONSTRAINTS.md)「Enforced with numbers」的覆盖率两行为准，`pnpm verify:coverage` 未达标即 finding，pre-commit 直接拒绝提交。
 - M2 起 `runs` / `run_events` / `conversations` / `messages` 是事实投影：崩溃恢复用例在 `tests/e2e/crash-recovery.spec.ts`（临时数据目录 + 残留 pid + 重启服务），租约/退避/超时在 `tests/kernel/decide.run.test.ts`，调度/取消/帧在 `tests/host/{scheduler,cancel}.test.ts`。
 
 ## 常用命令
@@ -34,7 +34,7 @@
 | 命令                                                  | 作用                                                               |
 | ----------------------------------------------------- | ------------------------------------------------------------------ |
 | `pnpm verify:test` / `pnpm exec vitest`               | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式  |
-| `pnpm verify:coverage`                                | 同上 + 覆盖率阈值门禁 + 改动行覆盖率 ≥ 90%                         |
+| `pnpm verify:coverage`                                | 同上 + 覆盖率阈值门禁 + 改动行覆盖率 ≥ 100%                        |
 | `pnpm verify:lint` / `pnpm exec eslint . --fix`       | ESLint（含 react-hooks 规则）                                      |
 | `pnpm format` / `pnpm exec prettier --check .`        | Prettier 全仓写 / 只检查                                           |
 | `pnpm verify:types`                                   | tsc node + web 双工程（含 e2e 与测试文件）                         |

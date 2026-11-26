@@ -87,6 +87,11 @@ const isTest = (f) => /\.(test|spec)\.|_test\.|test_/.test(f)
 // 一律不做代码类扫描（它们不是源码）。
 const HISTORY_FILE = 'docs/testing/CONSTRAINTS-HISTORY.md'
 const isConstraints = (f) => /CONSTRAINTS(-HISTORY)?\.md$/.test(f)
+// 例外行（Exceptions 表的索引行）：本仓用 `| EX-001 | …`，也认 `| E12 |` / `| W3 |`。
+// 2026-11-26 修：原写法 `/^\| *(W|E)\d+ *\|/` 只认「E 紧跟数字」，认不出实际在用的 `EX-001`，
+// 于是两个方向同时失效——删例外行被判 rule-removed（正当下线也被拦），
+// 新增例外行也不会触发 new-exception（「放松必须显式登记」的守卫形同虚设）。
+const isExceptionRow = (t) => /^\| *(?:W|E)X?-?\d+ *\|/.test(t.trim())
 
 // 1. 关闭检查器的注释（本仓库生态：TS/ESLint/istanbul）。后续可扩展。
 const SUPPRESSIONS =
@@ -101,7 +106,7 @@ for (const { file, text } of added) {
   // 守卫脚本自身、以及 CONSTRAINTS.md / CONSTRAINTS-HISTORY.md 正文（会合法地引用 @ts-ignore 等字样）不算违规。
   if (file.startsWith('scripts/')) continue
   if (isConstraints(file)) {
-    if (/^\| *(W|E)\d+ *\|/.test(text.trim())) flag('new-exception', file, text)
+    if (isExceptionRow(text)) flag('new-exception', file, text)
     continue
   }
   if (SUPPRESSIONS.test(text)) flag('silenced-checker', file, text)
@@ -346,7 +351,7 @@ const ruleKey = (t) => {
   if (/^[-*] /.test(s)) return s.slice(2).split(':')[0].trim()
   return null
 }
-const isException = (t) => /^\| *(W|E)\d+ *\|/.test(t.trim())
+const isException = isExceptionRow
 const MIN_BEFORE = /(>=|>|≥|at least|minimum|\bmin\b|no less than|not fall|not drop)\s*$/
 const MAX_BEFORE =
   /(<=|<|≤|at most|maximum|\bmax\b|no more than|under|below|not grow|not exceed)\s*$/
@@ -384,6 +389,11 @@ const REWRITTEN_RULES = {
     '`apps/server/**`（+ `packages/api/http/**`）禁止 import `renderer`，也不得直接 import 具体插件实现（只经 `plugins/registry`；依赖方向 server → host + 注册表单向）。',
   '测试同层同规：`tests/renderer/**` 禁 Electron/Node 内置，`tests/main/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。':
     '测试同层同规：`tests/renderer/**` 禁 Node 内置与服务端 import，`tests/server/**` 禁 import `renderer`（ESLint 按同一规则集执行，门禁强度不因测试目录搬家而下降）。',
+  // 例外索引下线（2026-11-26）：覆盖率改为绝对阈值后，「覆盖率基线」类例外全部失效、索引行下线，
+  // 这句「路径列当时怎么命名」的说明随之作废。原行还带一个损坏字符（`\u0007` 顶替了 `apps` 的 `a`，
+  // 显示成 `pps/**`），改写顺带修掉；替代句说的是同一件事（历史命名 + 现状），不是放松。
+  '路径列的 src/** 是登记当时的命名（当时代码在 src/ 下）；现在对应 packages/** 与 \u0007pps/**，EX-018 起登记的直接写 packages/**。':
+    '例外索引行已下线（2026-11-26）：EX-001…EX-020 只在 CONSTRAINTS-HISTORY 的明细里出现；路径列当时写 src/**，2026-11-19 包拆分后对应 packages/** 与 apps/**。',
   打包验收: '服务冒烟',
 }
 const removedRules = removed.filter((l) => isConstraints(l.file) && ruleKey(l.text) !== null)

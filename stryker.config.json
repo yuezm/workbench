@@ -8,7 +8,32 @@
   "vitest": {
     "configFile": "vitest.mutation.config.mts"
   },
-  "mutate": ["packages/core/kernel/src/core/cron.ts"],
+  "mutate": [
+    "packages/core/kernel/src/**/*.ts",
+    "packages/core/protocol/src/**/*.ts",
+    "!packages/core/kernel/src/core/types.ts",
+    "!packages/core/kernel/src/decide.ts",
+    "!packages/core/kernel/src/scopes/view-spec.ts",
+    "!packages/core/protocol/src/entities.ts",
+    "!packages/core/protocol/src/facts.ts",
+    "!packages/core/protocol/src/commands.ts",
+    "!packages/core/protocol/src/inputs.ts",
+    "!packages/core/protocol/src/ipc.d.ts",
+    "!packages/core/protocol/src/views.ts",
+    "!packages/core/protocol/src/plugins.ts",
+    "!packages/core/protocol/src/rules.ts",
+    "!packages/core/protocol/src/review.ts",
+    "!packages/core/protocol/src/thread.ts",
+    "!packages/core/protocol/src/task-comment.ts",
+    "!packages/core/protocol/src/receipt-keys.ts",
+    "!packages/core/protocol/src/channels.ts",
+    "!packages/core/protocol/src/manifest.ts",
+    "!packages/core/protocol/src/executor.ts",
+    "!packages/core/protocol/src/worker.ts",
+    "!packages/core/protocol/src/model-id.ts",
+    "!packages/core/protocol/src/plugin-host.ts"
+  ],
+  "ignoreStatic": true,
   "reporters": ["clear-text", "json", "html"],
   "jsonReporter": {
     "fileName": ".scratch/mutation/mutation.json"

@@ -21,33 +21,9 @@
 // 退出码：0 = 无需变异 / 变异测试通过；1 = 变异测试未过阈值或执行失败；2 = 范围不可知。
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
-import { join, relative } from 'node:path'
-
-const SCAN_ROOTS = ['packages/core/kernel/src', 'packages/core/protocol/src']
-// 纯类型 / 纯常量 / 纯路由：没有运行时分支，变异只会产出噪音
-const SCAN_EXCLUDE = [
-  'src/kernel/core/types.ts', // 类型定义
-  'src/kernel/decide.ts', // 纯命令路由（规则都在 commands/*）
-  'src/kernel/scopes/view-spec.ts', // 纯查表
-  'src/protocol/entities.ts', // 类型定义
-  'src/protocol/facts.ts', // 类型 + 常量
-  'src/protocol/commands.ts', // 命令契约
-  'src/protocol/inputs.ts',
-  'src/protocol/ipc.ts',
-  'src/protocol/views.ts',
-  'src/protocol/plugins.ts',
-  'src/protocol/rules.ts',
-  'src/protocol/review.ts',
-  'src/protocol/thread.ts',
-  'src/protocol/task-comment.ts',
-  'src/protocol/receipt-keys.ts',
-  'src/protocol/channels.ts',
-  'src/protocol/manifest.ts',
-  'src/protocol/executor.ts',
-  'src/protocol/worker.ts',
-  'src/protocol/model-id.ts',
-  'src/protocol/plugin-host.ts', // 插件宿主契约校验（IO 边界，mock 会吸收变异）
-]
+import { join } from 'node:path'
+// 变异范围的单一来源（stryker.config.json 的 mutate 也由它展开，见 tests/architecture.test.ts）
+import { SCAN_EXCLUDE, SCAN_ROOTS } from './mutation-targets.mjs'
 
 const cliArgs = process.argv.slice(2)
 const useIncremental = cliArgs.includes('--incremental')
@@ -160,8 +136,8 @@ if (useScan) {
 const targets = [...changed]
   .filter((file) => file.endsWith('.ts'))
   .filter((file) => !/\.(test|spec)\.ts$/.test(file))
-  // 「值得做变异测试的代码集合」= (src/kernel ∪ src/protocol) − 排除名单
-  // src/host、src/renderer、src/main 不在内：IO 密集，变异大多被 mock 吸收，噪音大于信号。
+  // 「值得做变异测试的代码集合」= (kernel/src ∪ protocol/src) − 排除名单（清单在 mutation-targets.mjs）
+  // packages/host、apps/server、packages/client 不在内：IO 密集，变异大多被 mock 吸收，噪音大于信号。
   .filter((file) => SCAN_ROOTS.some((root) => file.startsWith(root + '/')))
   .filter((file) => !SCAN_EXCLUDE.includes(file))
   .sort()

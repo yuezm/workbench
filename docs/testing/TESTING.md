@@ -83,16 +83,20 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 
 ### 已覆盖的性质（2026-11-13）
 
-| 模块                                                   | 不变量                                                                                             |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `kernel/cron.ts`                                       | 解析域、严格晚于、最早命中（逐分钟穷举预言机）、步长 / 区间 / 周 0-7 归一                          |
-| `kernel/review.ts#applyAddresses`                      | 只动 open、已处置不被改写、幂等、去重后顺序无关、未知 id / 不合法处置零变化                        |
-| `kernel/cards.ts#closeCardsOnFinish`                   | 只收本批结束 run / 任务的开卡、非 open 不收、本批已答已关不收、重复调用幂等                        |
-| `kernel/thread-context.ts#headTailSplit` / `dropToFit` | 头尾恰好用满预算、`dropped = len - max`、从低重要性段开始丢、段内保新弃旧                          |
-| `kernel/workflow/stage-machine.ts`                     | `completeExits` 幂等且形状封闭、悬空 / 自指 goto 零流转、判定预算累计口径                          |
-| `kernel/project.ts#normalizeTask` / `normalizeCard`    | 归一幂等、老字段全部补齐且已有值不改、`kind` 按「有没有选项」兜底                                  |
-| `kernel/prompt.ts`                                     | 反馈段顺序无关 / 只留最近 N / 不超预算、来源工单保尾、回答提示词的问答对排序                       |
-| `protocol/validate.ts`（负向）                         | 任意值不抛错且结论二元完备、合法命令二次校验逐字相同（封闭）、必填键与形状被破坏必拒且点名到具体键 |
+| 模块                                                   | 不变量                                                                                                                       |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `kernel/cron.ts`                                       | 解析域、严格晚于、最早命中（逐分钟穷举预言机）、步长 / 区间 / 周 0-7 归一                                                    |
+| `kernel/review.ts#applyAddresses`                      | 只动 open、已处置不被改写、幂等、去重后顺序无关、未知 id / 不合法处置零变化                                                  |
+| `kernel/cards.ts#closeCardsOnFinish`                   | 只收本批结束 run / 任务的开卡、非 open 不收、本批已答已关不收、重复调用幂等                                                  |
+| `kernel/thread-context.ts#headTailSplit` / `dropToFit` | 头尾恰好用满预算、`dropped = len - max`、从低重要性段开始丢、段内保新弃旧                                                    |
+| `kernel/workflow/stage-machine.ts`                     | `completeExits` 幂等且形状封闭、悬空 / 自指 goto 零流转、判定预算累计口径                                                    |
+| `kernel/project.ts#normalizeTask` / `normalizeCard`    | 归一幂等、老字段全部补齐且已有值不改、`kind` 按「有没有选项」兜底                                                            |
+| `kernel/prompt.ts`                                     | 反馈段顺序无关 / 只留最近 N / 不超预算、来源工单保尾、回答提示词的问答对排序                                                 |
+| `kernel/scopes/markdown.ts`                            | 围栏长于正文最长反引号游程（手写状态机预言机）、`dataBlock` 首末围栏同长且扫完不残留开围栏、`balanceFences` 幂等且只补那一条 |
+| `kernel/core/next-wake.ts`                             | 结果 = 候选清单（running 的租约 / 超时、queued 的退避、卡的重投排期、停机卡的提醒梯度）里最早的未来时刻；清单空即 null       |
+| `kernel/core/stall.ts`                                 | 六条判据同时成立才盯、按 id 稳定排序、取 `endedAt` 最大的终态轮、到点 = 结束 + 静默阈值                                      |
+| `kernel/scopes/handoff-source.ts`                      | 取来源任务在来源阶段 `at` 最大的终态轮（活跃轮不算）、显式 runId 优先、纯函数（两次解析逐字相同）                            |
+| `protocol/validate.ts`（负向）                         | 任意值不抛错且结论二元完备、合法命令二次校验逐字相同（封闭）、必填键与形状被破坏必拒且点名到具体键                           |
 
 不写性质的层：`renderer/**` 与 `components/ui/**`（随机 DOM 只添噪声）、桥接契约（枚举穷举比随机准）、`host/**` 装配（要真实 SQLite 时序）、`e2e`（随机化等于制造 flaky）。`protocol/validate.ts` 是例外：合法形状仍以枚举为主，另加一组**负向**性质——枚举写不出「我没想到的坏输入」，而校验层面对的是 renderer 传来的不可信数据，`fc.anything()` 正好覆盖那片空白（见下节）。单文件性质用例预算 < 1s，`numRuns` 50–300，靠生成器质量而不是 runs 数；不进 `pnpm verify:all` 快链。
 
@@ -104,6 +108,11 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 - fast-check v4 的 `fc.date` **默认会生成 Invalid Date**（`noInvalidDate` 默认 false）；要合法时刻必须显式 `noInvalidDate: true`。
 - 性质要挑**内核不变量**（钳制、幂等、单调、解析↔执行往返），不是把实现再写一遍——内核是纯函数、不读时钟，性质才立得住。
 - 预言机要与被测实现**走两条路径**：例如「下一次触发时刻」用逐分钟穷举扫墙钟，独立核对内核的「按天→按时→按分」扫描。
+- **生成器要能造出真正卡住实现的输入**：字符级随机撞不出「闭合围栏带尾随空白」「围栏不在行首」这类边界行，所以 `markdown.ts` 的性质用 `fc.oneof(字符级随机, 按行拼的结构型随机)`——一路覆盖「想不到的坏字符」，一路覆盖「想不到的坏边界」。
+- **断言强度对变异测试是决定性的**（2026-11-26 实测）：
+  - `toContain('某段文字')` 对字符串字面量变异几乎无效——把 `case 'run.succeeded':` 改成 `case '':`、把 `join('\n')` 改成 `join('')`，`toContain` 全绿；改成**整段逐字**（`toBe` 整段提示词）或**全表覆盖**（每个事实类型一条样本 + 不该命中的 scope）才杀得掉。
+  - 反过来，拿实现自己导出的常量来断言是自证（`expect(label).toBe(IMPORT_ROOT_LABEL)` 改坏常量时两边一起错），要比字面量。
+  - 事实批次要**逐条对账**（类型序列 + payload 逐字），只断言「条数 / 抽样字段」时，`payload` 整体变成 `{}`、`nextId('task')` 变成 `nextId('')` 都测不出来。
 
 ### 怎么跑变异测试
 
@@ -113,10 +122,56 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 - 变异测试比单测慢一个数量级（每个变异体跑一遍相关测试），**不进 `pnpm verify` 快链**，只在合并前 / CI 定时跑。
 - pnpm 的隔离布局下 Stryker 从 core 包自己的同级目录找插件、找不到 runner，`stryker.config.json` 里用显式路径声明插件（`./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js`）。
 
-- 成本与被变异代码量近似线性：`packages/core/kernel/src/core/cron.ts`（251 行 / 278 个变异体）单轮约 5 分钟；`packages/core/kernel/src` 全部 8315 行按此推算是小时级，所以**必须用 `--mutate` / 增量模式限定范围**，不要全仓跑。
+- 成本与变异体数近似线性（本机 concurrency 10）：**约 0.2 s / 变异体**。实测（2026-11-26，`ignoreStatic: true`）：7 个内核模块 992 个变异体 3 分 50 秒；`--scan` 全量 44 个文件 11757 个变异体（按此推算 30–40 分钟，属定期层，别在编辑循环里跑）。
 - 范围圈定：`pnpm verify:mutation` 只变异「本次改动碰过的内核模块」（`scripts/mutation-scope.mjs` 按 git diff 圈定，未触及内核就跳过并放行）；CI 里用 `MUTATION_BASE=origin/main` 把分支差异也算进来。
 
-### 变异范围分层
+### 变异范围的单一来源
+
+「哪些代码值得做变异」只写一份：`scripts/mutation-targets.mjs`（`SCAN_ROOTS` / `SCAN_EXCLUDE` / `mutateGlobs()`）。
+
+| 消费者                             | 用法                                                                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `scripts/mutation-scope.mjs`       | 按 `SCAN_ROOTS − SCAN_EXCLUDE` 过滤改动文件                                                                     |
+| `stryker.config.json`              | `mutate` 由 `mutateGlobs()` 展开（无参 `stryker run` 的范围）                                                   |
+| `scripts/check-mutation-scope.mjs` | `pnpm verify:guards` 的一环：核对配置与清单一致、清单不指向不存在的文件、`break` 不低于 80、`ignoreStatic` 开着 |
+
+2026-11-26 复核时在这块翻出两处**静默失效**（已修，护栏就是为它们加的）：
+
+- 排除名单写成 `src/kernel/...` / `src/protocol/...`，而脚本比较的是 `packages/core/kernel/src/...`：过滤器一个都没命中，**等于没有排除**，纯类型 / 常量文件一直在被变异（噪音还计分）。
+- `src/protocol/ipc.ts` 早已改名 `ipc.d.ts`，清单里仍留着那条路径。
+
+`ignoreStatic: true` 的理由：静态变异体（模块级常量）每个都要重跑**全量**用例，实测 250 个变异体里 22 个 static 却占 68% 的耗时。关掉之后常量改用**显式断言**钉住（例：`EVIDENCE_MAX` 的 300/301 边界、`SPAWN_MAX_ITEMS` 的 32 上限、`STALL_REMIND_DELAYS_MS` 的 15/60/1440 分钟梯度）。代价写清楚：改常量不会被变异测试兜住，只能靠断言。
+
+### 变异范围的等价变异体（不要重复investigate）
+
+这些改坏之后行为完全不变，杀掉它们没有意义；评分里它们以「survived」出现是正常的：
+
+| 模式                                                    | 为什么等价                                                      |
+| ------------------------------------------------------- | --------------------------------------------------------------- |
+| `x === null ? undefined : map.get(x)` → `false ? …`     | `Map.get(null)` 恒为 `undefined`，两条路殊途同归                |
+| 取最小值时的 `a < b` → `a <= b`                         | 并列时赋的是同一个值                                            |
+| `/^[ \t]*(…)(.*)$/` 去掉 `$`                            | 输入已按行切分，`$` 不再起约束作用                              |
+| `return []` → `return ['…']`（`refsOf` 这类纯枚举引用） | 数组里放字符串时 `ref.scope` 恒 `undefined`，`.some()` 永不命中 |
+| `case 'x': return []` 整块删掉                          | 落到下一个 `return []` 分支，结果相同                           |
+| `truncate(v, max)` 的 `>` → `>=` / 恒取 slice 分支      | 长度 ≤ max 时 `slice(0, max)` 原样返回                          |
+| `depth > 64` 这类「环保护」的第二道闸                   | `seen` 集合在更早就截住了环，第二道闸不可达                     |
+
+### 本轮复核的分数板（2026-11-26）
+
+起因：`stryker.config.json` 只挂了 `cron.ts` 一个试点，其余内核模块从未被变异过。这一轮对 7 个纯逻辑模块跑了定点变异，按存活体的类型补断言（性质用例 + 事实逐条对账 + 整段逐字对账），再复跑：
+
+| 文件                       | 变异体 | 改前  | 改后  | 剩余存活 | 说明                                                 |
+| -------------------------- | ------ | ----- | ----- | -------- | ---------------------------------------------------- |
+| `scopes/spawn.ts`          | 264    | 69.92 | 95.45 | 12       | 全是 `Map.get(null)` / `truncate` / 环保护一类等价体 |
+| `scopes/assess.ts`         | 182    | 78.69 | 98.35 | 3        | 整段提示词逐字对账 + run 行逐字对账                  |
+| `scopes/timeline.ts`       | 273    | 85.77 | 93.41 | 18       | 新增「每个事实类型 → 归属全表」的行为层覆盖          |
+| `scopes/markdown.ts`       | 41     | 85.42 | 97.56 | 1        | 结构型生成器（按行拼）才撞得到围栏边界               |
+| `core/stall.ts`            | 91     | 93.48 | 97.80 | 2        | 六条判据的性质用例                                   |
+| `core/next-wake.ts`        | 61     | 96.77 | 96.72 | 2        | 候选清单预言机                                       |
+| `scopes/handoff-source.ts` | 67     | 86.57 | 95.52 | 3        | 「取 at 最大的终态轮」的性质用例                     |
+| 本轮合计                   | 979    | —     | 95.81 | 41       | 41 个存活逐个核对过，全部落在上表的等价模式里        |
+
+**还没做的**：`--scan` 清单共 44 个文件、11757 个变异体，本轮只复核了上面 7 个。`scopes/stall.ts`（80.08）、`scopes/commands/*`、`scopes/rules.ts`、`protocol/validate.ts` 等仍按原样计分——它们下一次被改动时会在门禁上暴露真实分数，届时按同一套路补断言（先看存活体类型，再决定补哪一层）。
 
 ### CI 下的范围解析
 

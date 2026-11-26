@@ -5,6 +5,7 @@
  * 只构造 `View` 假数据，不起 DB；排版在 `tests/kernel/prompt.test.ts`。
  */
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import type { RunRow, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
 import type { View } from '@workbench/kernel/core/types'
 import { sourceHandoffOf } from '@workbench/kernel/scopes/handoff-source'
@@ -202,5 +203,131 @@ describe('sourceHandoffOf 来源解析', () => {
     )
 
     expect(source).toMatchObject({ runId: null, runStatus: null, summary: '', stageName: '评审' })
+  })
+})
+
+// —— 性质测试（fast-check）：来源结论的选取 ————————————————————————————————
+//
+// 「上一轮结论」只有一个正确语义：来源任务在来源阶段上**at 最大的一条终态 run**
+// （`at = endedAt ?? createdAt`）。活跃轮（queued / running / waiting）不算、别的任务与
+// 别的阶段的 run 不算、显式给了 runId 就以它为准。
+//
+// 这些正是提示词里「来源工单」段的内容来源：选错一轮，修复阶段就会照着别人的结论干活。
+// 生成器保证每轮的 at 互不相同，于是预言机只需「取最大」，不必约定同刻的先后。
+//
+// 固定种子：同一份输入永远给出同一条反例；`FC_SEED` 可覆盖。
+
+const PROPERTY_SEED = Number(process.env.FC_SEED ?? 20261126)
+const PROPERTY_RUNS = 200
+
+/** 每轮一个互不相同的时刻（endedAt 与 createdAt 是两次不同的排列，顺便打乱「按哪个算」）。 */
+const RUN_TIMES = [
+  '2026-11-01T00:00:00.000Z',
+  '2026-11-01T01:00:00.000Z',
+  '2026-11-01T02:00:00.000Z',
+  '2026-11-01T03:00:00.000Z',
+] as const
+
+const RUN_STATUSES = ['queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled'] as const
+
+const runBatchArb: fc.Arbitrary<RunRow[]> = fc
+  .array(
+    fc.record({
+      status: fc.constantFrom(...RUN_STATUSES),
+      withEndedAt: fc.boolean(),
+      output: fc.string({ maxLength: 6 }),
+    }),
+    { maxLength: 4 },
+  )
+  .map((shapes) =>
+    shapes.map((shape, index) =>
+      run({
+        id: `run-p${index}`,
+        taskId: 't-src',
+        stageId: 'st-review',
+        status: shape.status,
+        output: shape.output,
+        createdAt: RUN_TIMES[index] as string,
+        endedAt: shape.withEndedAt ? (RUN_TIMES[3 - index] as string) : null,
+      }),
+    ),
+  )
+
+/** 独立预言机：来源任务 + 来源阶段 + 终态，取 at 最大的一条。 */
+const latestSettledOf = (runs: RunRow[]): RunRow | undefined => {
+  const settled = runs.filter(
+    (row) =>
+      row.taskId === 't-src' &&
+      row.stageId === 'st-review' &&
+      row.status !== 'queued' &&
+      row.status !== 'running' &&
+      row.status !== 'waiting',
+  )
+  if (settled.length === 0) return undefined
+  return settled.reduce((best, row) =>
+    (row.endedAt ?? row.createdAt) > (best.endedAt ?? best.createdAt) ? row : best,
+  )
+}
+
+describe('sourceHandoffOf 的性质（fast-check 随机生成）', () => {
+  it('人工派出：取 at 最大的终态 run，活跃轮与别的任务 / 阶段都不算', () => {
+    fc.assert(
+      fc.property(runBatchArb, (runs) => {
+        const target = handed()
+        const source = sourceHandoffOf(view({ tasks: [task(), target], runs }), target)
+        const expected = latestSettledOf(runs)
+        const label = JSON.stringify(runs.map((row) => [row.id, row.status, row.endedAt]))
+        expect(source?.runId ?? null, label).toBe(expected?.id ?? null)
+        expect(source?.runStatus, label).toBe(expected?.status ?? null)
+        expect(source?.summary, label).toBe(expected?.output ?? '')
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('显式 handoffFromRunId：就是那一轮，与它是不是最新无关', () => {
+    fc.assert(
+      fc.property(runBatchArb, fc.nat({ max: 3 }), (runs, pick) => {
+        if (runs.length === 0) return
+        const chosen = runs[pick % runs.length] as RunRow
+        const target = handed({ handoffFromRunId: chosen.id })
+        const source = sourceHandoffOf(view({ tasks: [task(), target], runs }), target)
+        expect(source?.runId).toBe(chosen.id)
+        expect(source?.runStatus).toBe(chosen.status)
+        expect(source?.summary).toBe(chosen.output)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('纯函数：同一份视图两次解析逐字相同；任务名 / 阶段名 / 结论都只来自视图', () => {
+    fc.assert(
+      fc.property(runBatchArb, (runs) => {
+        const target = handed()
+        const seeded = view({ tasks: [task(), target], runs })
+        const first = sourceHandoffOf(seeded, target)
+        const second = sourceHandoffOf(seeded, target)
+        expect(first).toEqual(second)
+        expect(first?.taskId).toBe('t-src')
+        expect(first?.taskTitle).toBe('实现登录')
+        expect(first?.workflowName).toBe('研发')
+        expect(first?.stageName).toBe('评审')
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+})
+
+describe('sourceHandoffOf 同刻并列', () => {
+  it('两轮同一时刻结束：取视图里先出现的那条（重建与增量同序，结果可复现）', () => {
+    const seeded = view({
+      tasks: [task(), handed()],
+      runs: [
+        run({ id: 'run-first', output: '先', endedAt: '2026-11-01T03:00:00.000Z' }),
+        run({ id: 'run-second', output: '后', endedAt: '2026-11-01T03:00:00.000Z' }),
+      ],
+    })
+
+    expect(sourceHandoffOf(seeded, handed())?.runId).toBe('run-first')
   })
 })

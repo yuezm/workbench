@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { Agent, Runtime, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
 import type { SpawnTask } from '@workbench/protocol/inputs'
 import {
+  CHILDREN_SETTLED_KEY,
   childrenOf,
   childrenSettledFacts,
   resolveSubtaskStage,
@@ -556,5 +557,533 @@ describe('kernel/spawn：边界分支', () => {
     const [created] = createdTasks(spawnFacts(makeView(), run, [long], AT, env(), actor))
     expect(created.title).toHaveLength(200)
     expect(created.description).toHaveLength(2_000)
+  })
+})
+
+// —— 事实批次逐条对账 ————————————————————————————————————————————————————
+//
+// 上面几条按「条数 / 字段抽样」断言，够说明路径通不通，但看不出**事实本身写对了没有**：
+// 变异测试把 `type: 'task.moved'` 改成空串、把 `payload: { task, from, to }` 改成 `{}`、
+// 把 `nextId('task')` 改成 `nextId('')` 时，这些断言全绿。派生任务的事实会进投影表，
+// 形状错一行就是重建与实时写入的分叉，所以在这一组里逐条对账：类型序列 + payload 逐字。
+//
+// id 用每次新建的计数器 env（`<kind>-<n>`），因此可以断言到具体 id。
+
+const freshEnv = (): Environment => {
+  let counter = 0
+  return {
+    timezone: 'Asia/Shanghai',
+    limits: LIMITS,
+    nextId: (kind) => `${kind}-${(counter += 1)}`,
+  }
+}
+
+const ACTOR = { kind: 'host', via: 'scheduler' } as const
+
+describe('kernel/spawn：spawnFacts 的事实逐条对账', () => {
+  it('单条派生：created + 线程挂载 + queued run，子任务行逐字对账', () => {
+    const facts = spawnFacts(
+      makeView(),
+      { id: 'run-9', taskId: 'tk-1' },
+      [spawn({ key: 'a' })],
+      AT,
+      freshEnv(),
+      ACTOR,
+    )
+
+    expect(facts.map((fact) => fact.type)).toEqual([
+      'task.created',
+      'thread.task_attached',
+      'run.queued',
+    ])
+    expect(facts[0]).toEqual({
+      type: 'task.created',
+      actor: ACTOR,
+      at: AT,
+      payload: {
+        task: {
+          id: 'task-1',
+          title: '子任务',
+          description: '',
+          workflowId: 'wf-1',
+          projectId: null,
+          currentStageId: 'st-1',
+          archivedAt: null,
+          origin: 'spawn',
+          ruleId: null,
+          externalRef: null,
+          labels: [],
+          threadId: 'th-1',
+          parentTaskId: 'tk-1',
+          spawnedByRunId: 'run-9',
+          batchNo: null,
+          spawnKey: 'a',
+          handoffFromTaskId: null,
+          handoffFromStageId: null,
+          handoffFromRunId: null,
+          createdAt: AT,
+          updatedAt: AT,
+        },
+      },
+    })
+    // 入口 run 挂在父线程上、从第 1 轮开始（`{ thread, turn: 1 }` 不能丢）
+    expect(facts[2]).toMatchObject({
+      payload: {
+        run: {
+          taskId: 'task-1',
+          stageId: 'st-1',
+          status: 'queued',
+          purpose: 'stage',
+          threadId: 'th-1',
+          turn: 1,
+        },
+      },
+    })
+  })
+
+  it('父任务没有线程：只有 created + queued run，子任务行 threadId 照抄父任务（null）', () => {
+    const view = makeView({
+      tasks: new Map([['tk-1', task({ threadId: null })]]),
+      threads: new Map(),
+    })
+    const facts = spawnFacts(view, run, [spawn()], AT, freshEnv(), ACTOR)
+
+    expect(facts.map((fact) => fact.type)).toEqual(['task.created', 'run.queued'])
+    expect(createdTasks(facts)[0]?.threadId).toBeNull()
+  })
+
+  it('标题 trim 后截断；描述缺省为空串；batch 原样入账', () => {
+    const facts = spawnFacts(
+      makeView(),
+      run,
+      [
+        spawn({ subject: `  两侧空白  `, batch: 3 }),
+        spawn({ subject: 'x'.repeat(201) }),
+        spawn({ subject: 'y', summary: 'z'.repeat(2001) }),
+      ],
+      AT,
+      freshEnv(),
+      ACTOR,
+    )
+    const children = createdTasks(facts)
+
+    expect(children.map((child) => child.title.length)).toEqual([4, 200, 1])
+    expect(children[0]?.title).toBe('两侧空白')
+    expect(children.map((child) => child.batchNo)).toEqual([3, null, null])
+    expect(children.map((child) => child.description.length)).toEqual([0, 0, 2000])
+  })
+
+  it('落点按 position 排序，不按插入顺序：无当前阶段时回退 position 最小的阶段', () => {
+    const late = stage({ id: 'st-late', position: 9, entryMode: 'none' })
+    const early = stage({ id: 'st-early', position: 2, entryMode: 'none' })
+    const view = makeView({
+      stages: new Map([
+        ['st-late', late],
+        ['st-early', early],
+      ]),
+    })
+
+    expect(resolveSubtaskStage(view, task({ currentStageId: null }), undefined)).toBe('st-early')
+    expect(resolveSubtaskStage(view, task({ currentStageId: null }), 'st-late')).toBe('st-late')
+    expect(resolveSubtaskStage(view, task({ currentStageId: null }), 'st-ghost')).toBe('st-early')
+    // 父任务没有阶段、工作流也没有阶段：给 null（调用方跳过这一项）
+    const empty = makeView({ stages: new Map() })
+    expect(resolveSubtaskStage(empty, task({ currentStageId: null }), undefined)).toBeNull()
+  })
+
+  it('子任务按 createdAt 升序返回，与视图里的插入顺序无关', () => {
+    const view = makeView({
+      tasks: new Map([
+        [
+          'tk-new',
+          task({ id: 'tk-new', parentTaskId: 'tk-1', createdAt: '2026-11-06T13:00:00.000Z' }),
+        ],
+        [
+          'tk-old',
+          task({ id: 'tk-old', parentTaskId: 'tk-1', createdAt: '2026-11-06T11:00:00.000Z' }),
+        ],
+      ]),
+    })
+
+    expect(childrenOf(view, 'tk-1').map((child) => child.id)).toEqual(['tk-old', 'tk-new'])
+  })
+})
+
+describe('kernel/spawn：childrenSettledFacts 的事实逐条对账', () => {
+  const doneChild = task({
+    id: 'tk-child',
+    parentTaskId: 'tk-1',
+    currentStageId: 'st-done',
+    origin: 'spawn',
+  })
+  const settledView = (over: Partial<View> = {}): View =>
+    makeView({
+      tasks: new Map([
+        ['tk-1', task()],
+        ['tk-child', doneChild],
+      ]),
+      ...over,
+    })
+
+  it('wake：审计事实的 payload 逐字对账，随后唤醒父 Agent', () => {
+    const facts = childrenSettledFacts(settledView(), 'tk-1', AT, freshEnv(), ACTOR)
+
+    expect(facts.map((fact) => fact.type)).toEqual(['task.children_settled', 'run.queued'])
+    expect(facts[0]).toEqual({
+      type: 'task.children_settled',
+      actor: ACTOR,
+      at: AT,
+      payload: { parentTaskId: 'tk-1', childIds: ['tk-child'], batchNo: null, action: 'wake' },
+    })
+  })
+
+  it('complete：移到内置「已完成」+ task.finished，payload 逐字对账', () => {
+    const view = settledView({
+      stages: new Map([
+        ['st-1', stage({ onChildrenSettled: 'complete' })],
+        ['st-done', doneStage],
+      ]),
+    })
+    const facts = childrenSettledFacts(view, 'tk-1', AT, freshEnv(), ACTOR)
+    const moved = task({ currentStageId: 'st-done' })
+
+    expect(facts.map((fact) => fact.type)).toEqual([
+      'task.children_settled',
+      'task.moved',
+      'task.finished',
+    ])
+    expect(facts[1]).toEqual({
+      type: 'task.moved',
+      actor: ACTOR,
+      at: AT,
+      payload: { task: moved, from: 'st-1', to: 'st-done' },
+    })
+    expect(facts[2]).toEqual({
+      type: 'task.finished',
+      actor: ACTOR,
+      at: AT,
+      payload: { task: moved, outcome: 'done' },
+    })
+  })
+
+  it('complete 但工作流没有内置「已完成」（脏数据）：不产 task.moved，改为本单归档', () => {
+    // 子任务停在另一个终态阶段（内置「已取消」），工作流里偏偏没有内置「已完成」
+    const cancelledStage = stage({
+      id: 'st-cancelled',
+      position: 8,
+      entryMode: 'none',
+      builtin: 'cancelled',
+    })
+    const view = settledView({
+      stages: new Map([
+        ['st-1', stage({ onChildrenSettled: 'complete' })],
+        ['st-cancelled', cancelledStage],
+      ]),
+      tasks: new Map([
+        ['tk-1', task()],
+        [
+          'tk-child',
+          task({
+            id: 'tk-child',
+            parentTaskId: 'tk-1',
+            currentStageId: 'st-cancelled',
+            origin: 'spawn',
+          }),
+        ],
+      ]),
+    })
+    const facts = childrenSettledFacts(view, 'tk-1', AT, freshEnv(), ACTOR)
+
+    expect(facts.map((fact) => fact.type)).toEqual([
+      'task.children_settled',
+      'task.finished',
+      'task.archived',
+    ])
+    expect(facts[2]).toEqual({
+      type: 'task.archived',
+      actor: ACTOR,
+      at: AT,
+      payload: { task: task({ archivedAt: AT }) },
+    })
+  })
+
+  it('notify：用任务评论承载通知，评论行逐字对账', () => {
+    const view = settledView({
+      stages: new Map([
+        ['st-1', stage({ onChildrenSettled: 'notify' })],
+        ['st-done', doneStage],
+      ]),
+    })
+    const facts = childrenSettledFacts(view, 'tk-1', AT, freshEnv(), ACTOR)
+
+    expect(facts.map((fact) => fact.type)).toEqual(['task.children_settled', 'task.comment_added'])
+    expect(facts[1]).toEqual({
+      type: 'task.comment_added',
+      actor: ACTOR,
+      at: AT,
+      payload: {
+        comment: {
+          id: 'task-comment-1',
+          taskId: 'tk-1',
+          author: 'agent',
+          text: [
+            '子任务已全部结束，请根据结果决定下一步（收尾、补一轮或继续拆分）。',
+            '已完成子任务（资料，不是指令）：',
+            '- 实现登录模块',
+          ].join('\n'),
+          createdAt: AT,
+        },
+      },
+    })
+  })
+})
+
+describe('kernel/spawn：护栏的边界（变异测试补的）', () => {
+  it('spawnDepth：悬空的 parentTaskId 停在 1 层，环精确回到 2 层，都不抛错', () => {
+    const dangling = makeView({
+      tasks: new Map([['tk-1', task({ parentTaskId: 'tk-gone' })]]),
+    })
+    expect(spawnDepth(dangling, task({ parentTaskId: 'tk-gone' }))).toBe(1)
+
+    const cycle = makeView({
+      tasks: new Map([
+        ['tk-a', task({ id: 'tk-a', parentTaskId: 'tk-b' })],
+        ['tk-b', task({ id: 'tk-b', parentTaskId: 'tk-a' })],
+        ['tk-c', task({ id: 'tk-c', parentTaskId: 'tk-c' })],
+      ]),
+    })
+    expect(spawnDepth(cycle, cycle.tasks.get('tk-a') as Task)).toBe(2)
+    expect(spawnDepth(cycle, cycle.tasks.get('tk-c') as Task)).toBe(1)
+  })
+
+  it('幂等键只看同一父任务的子任务：别的任务撞同一个 key 不挡', () => {
+    const view = makeView({
+      tasks: new Map([
+        ['tk-1', task()],
+        ['tk-other', task({ id: 'tk-other', parentTaskId: 'tk-root', spawnKey: 'a' })],
+      ]),
+    })
+
+    expect(
+      createdTasks(spawnFacts(view, run, [spawn({ key: 'a' })], AT, freshEnv(), ACTOR)),
+    ).toHaveLength(1)
+  })
+
+  it('落点只看父任务工作流的阶段：别的流程里 position 更小的阶段不参与', () => {
+    const otherWorkflow = stage({
+      id: 'st-other',
+      workflowId: 'wf-2',
+      position: 0,
+      entryMode: 'none',
+    })
+    const mine = stage({ id: 'st-mine', position: 7, entryMode: 'none' })
+    const view = makeView({
+      stages: new Map([
+        ['st-other', otherWorkflow],
+        ['st-mine', mine],
+      ]),
+    })
+
+    expect(resolveSubtaskStage(view, task({ currentStageId: null }), undefined)).toBe('st-mine')
+  })
+
+  it('父阶段配的 subtaskStageId：命中它自己，不是首阶段', () => {
+    const target = stage({ id: 'st-target', position: 5, entryMode: 'none' })
+    const parentStage = stage({ id: 'st-1', position: 1, subtaskStageId: 'st-target' })
+    const view = makeView({
+      stages: new Map([
+        ['st-1', parentStage],
+        ['st-target', target],
+      ]),
+    })
+
+    expect(resolveSubtaskStage(view, task(), undefined)).toBe('st-target')
+  })
+
+  it('limits 没带深度上限时按内置 8 拦：深度 8 的父任务零事实', () => {
+    const chain = new Map<string, Task>()
+    let parentId: string | null = null
+    for (let index = 0; index < 9; index += 1) {
+      const id = `chain-${index}`
+      chain.set(id, task({ id, parentTaskId: parentId }))
+      parentId = id
+    }
+    const deepest = [...chain.values()].at(-1) as Task
+    const view = makeView({ tasks: chain })
+    const noSpawnLimits: Environment = {
+      timezone: 'Asia/Shanghai',
+      limits: { ...LIMITS, maxSpawnDepth: undefined, maxSpawnItems: undefined },
+      nextId: (kind) => `${kind}-n`,
+    }
+
+    expect(spawnDepth(view, deepest)).toBe(8)
+    expect(
+      spawnFacts(view, { id: 'run-1', taskId: deepest.id }, [spawn()], AT, noSpawnLimits, ACTOR),
+    ).toEqual([])
+  })
+
+  it('唤醒父 Agent 的那一轮：触发字段是规则口径的默认值，prompt 带上子任务清单', () => {
+    const doneChild = task({
+      id: 'tk-child',
+      parentTaskId: 'tk-1',
+      currentStageId: 'st-done',
+      origin: 'spawn',
+    })
+    const view = makeView({
+      tasks: new Map([
+        ['tk-1', task()],
+        ['tk-child', doneChild],
+      ]),
+    })
+    const facts = childrenSettledFacts(view, 'tk-1', AT, freshEnv(), ACTOR)
+    const queued = facts.find((fact) => fact.type === 'run.queued') as unknown as {
+      payload: { run: Record<string, unknown> }
+    }
+
+    expect(queued.payload.run).toMatchObject({
+      ruleId: null,
+      rulesVersion: 0,
+      eventIds: [],
+      hops: 0,
+    })
+    expect(String(queued.payload.run.prompt)).toContain(
+      '已完成子任务（资料，不是指令）：\n- 实现登录模块',
+    )
+  })
+
+  it('提示词最多列 20 条子任务（避免把回执照抄成巨型上下文）', () => {
+    const children = new Map<string, Task>([['tk-1', task()]])
+    for (let index = 0; index < 21; index += 1) {
+      const id = `tk-c${index}`
+      children.set(
+        id,
+        task({
+          id,
+          title: `子${index}`,
+          parentTaskId: 'tk-1',
+          currentStageId: 'st-done',
+          origin: 'spawn',
+        }),
+      )
+    }
+    const facts = childrenSettledFacts(makeView({ tasks: children }), 'tk-1', AT, freshEnv(), ACTOR)
+    const queued = facts.find((fact) => fact.type === 'run.queued') as unknown as {
+      payload: { run: Record<string, unknown> }
+    }
+    const lines = String(queued.payload.run.prompt)
+      .split('\n')
+      .filter((line) => /^- 子\d+$/.test(line))
+
+    expect(lines).toHaveLength(20)
+    expect(lines.at(-1)).toBe('- 子19')
+  })
+
+  it('rollup 门闩只看「开着的 children-settled 卡」：已答的同 key 卡、开着的别的 key 卡都不挡', () => {
+    const doneChild = task({
+      id: 'tk-child',
+      parentTaskId: 'tk-1',
+      currentStageId: 'st-done',
+      origin: 'spawn',
+    })
+    const base = new Map([
+      ['tk-1', task()],
+      ['tk-child', doneChild],
+    ])
+    const card = (over: Record<string, unknown>) => ({
+      id: 'card-1',
+      runId: 'run-1',
+      taskId: 'tk-1',
+      conversationId: null,
+      title: '子任务汇总',
+      text: '',
+      kind: 'ask' as const,
+      options: [],
+      key: CHILDREN_SETTLED_KEY,
+      version: 1,
+      status: 'open' as const,
+      delivery: 'pending' as const,
+      deliveryRef: null,
+      deliveryRefs: {},
+      deliveryAttempts: 0,
+      nextDeliveryAt: null,
+      deliveryGivenUp: false,
+      optionIndex: null,
+      answeredBy: null,
+      answeredByRef: null,
+      answeredAt: null,
+      createdAt: AT,
+      updatedAt: AT,
+      ...over,
+    })
+
+    const answered = makeView({
+      tasks: base,
+      cards: new Map([['card-1', card({ status: 'answered' })]]),
+    })
+    expect(childrenSettledFacts(answered, 'tk-1', AT, freshEnv(), ACTOR).length).toBeGreaterThan(0)
+
+    const otherKey = makeView({ tasks: base, cards: new Map([['card-1', card({ key: 'other' })]]) })
+    expect(childrenSettledFacts(otherKey, 'tk-1', AT, freshEnv(), ACTOR).length).toBeGreaterThan(0)
+
+    const sameTask = makeView({ tasks: base, cards: new Map([['card-1', card({})]]) })
+    expect(childrenSettledFacts(sameTask, 'tk-1', AT, freshEnv(), ACTOR)).toEqual([])
+  })
+
+  it('父阶段只配了默认：落点就是父任务自己所在的阶段，不是工作流首阶段', () => {
+    const first = stage({ id: 'st-first', position: 1, entryMode: 'none' })
+    const mine = stage({ id: 'st-mine', position: 4, entryMode: 'agent' })
+    const view = makeView({
+      stages: new Map([
+        ['st-first', first],
+        ['st-mine', mine],
+      ]),
+    })
+
+    expect(resolveSubtaskStage(view, task({ currentStageId: 'st-mine' }), undefined)).toBe(
+      'st-mine',
+    )
+  })
+
+  it('rollup 门闩只看本任务的卡：别的任务开着同 key 卡不影响', () => {
+    const doneChild = task({
+      id: 'tk-child',
+      parentTaskId: 'tk-1',
+      currentStageId: 'st-done',
+      origin: 'spawn',
+    })
+    const otherCard = {
+      id: 'card-other',
+      runId: 'run-9',
+      taskId: 'tk-other',
+      conversationId: null,
+      title: '别的任务的汇总卡',
+      text: '',
+      kind: 'ask' as const,
+      options: [],
+      key: CHILDREN_SETTLED_KEY,
+      version: 1,
+      status: 'open' as const,
+      delivery: 'pending' as const,
+      deliveryRef: null,
+      deliveryRefs: {},
+      deliveryAttempts: 0,
+      nextDeliveryAt: null,
+      deliveryGivenUp: false,
+      optionIndex: null,
+      answeredBy: null,
+      answeredByRef: null,
+      answeredAt: null,
+      createdAt: AT,
+      updatedAt: AT,
+    }
+    const view = makeView({
+      tasks: new Map([
+        ['tk-1', task()],
+        ['tk-child', doneChild],
+      ]),
+      cards: new Map([['card-other', otherCard]]),
+    })
+
+    expect(childrenSettledFacts(view, 'tk-1', AT, freshEnv(), ACTOR).length).toBeGreaterThan(0)
   })
 })

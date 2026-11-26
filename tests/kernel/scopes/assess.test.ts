@@ -174,3 +174,51 @@ describe('assessmentOutcome — 模式语义', () => {
     }
   })
 })
+
+// —— 输入形状与证据上限的边界（变异测试补的） ————————————————————————————————
+//
+// 研判回执来自模型输出，**不可信**：不是数组、元素是 null、字段类型不对都得落成
+// `failed` 而不是抛异常（抛出去就是整批候选事件一起丢）。证据长度 300 是「一句话」的
+// 上限，正好 300 必须放过——`>` 写成 `>=` 会把合规证据判成失败。
+
+describe('assessmentOutcome — 不可信输入的边界', () => {
+  it('回执元素是 null / 不带 ruleId：判 failed(coverage)，不抛异常', () => {
+    expect(
+      assessmentOutcome({
+        ...base,
+        mode: 'auto',
+        rules: [rule('r1')],
+        verdicts: [null as unknown as AssessVerdict],
+      }),
+    ).toEqual({ ok: false, reason: 'coverage' })
+
+    expect(
+      assessmentOutcome({
+        ...base,
+        mode: 'auto',
+        rules: [rule('r1')],
+        verdicts: [{ ruleId: 42, match: false } as unknown as AssessVerdict],
+      }),
+    ).toEqual({ ok: false, reason: 'coverage' })
+  })
+
+  it('证据正好 300 字放过；301 字判 failed(evidence)', () => {
+    expect(
+      assessmentOutcome({
+        ...base,
+        mode: 'auto',
+        rules: [rule('r1')],
+        verdicts: [verdict('r1', true, '证'.repeat(300))],
+      }).ok,
+    ).toBe(true)
+
+    expect(
+      assessmentOutcome({
+        ...base,
+        mode: 'auto',
+        rules: [rule('r1')],
+        verdicts: [verdict('r1', true, '证'.repeat(301))],
+      }),
+    ).toEqual({ ok: false, reason: 'evidence' })
+  })
+})

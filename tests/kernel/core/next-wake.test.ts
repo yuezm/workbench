@@ -4,8 +4,10 @@
  * 夹具只装 runs 切片；内核不读时钟，`now` 由测试注入。
  */
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import type { Card, RunRow } from '@workbench/protocol/entities'
 import type { AutomationRule } from '@workbench/protocol/rules'
+import { STALL_REMIND_DELAYS_MS } from '@workbench/protocol/channels'
 import { nextWakeAt } from '@workbench/kernel/core/next-wake'
 import type { Environment, IdKind, Limits, View } from '@workbench/kernel/core/types'
 
@@ -218,32 +220,33 @@ describe('kernel/next-wake', () => {
   })
 })
 
-describe('kernel/next-wake · 卡片重投排期（M41）', () => {
-  const card = (over: Partial<Card> = {}): Card => ({
-    id: 'card-1',
-    runId: 'run-1',
-    taskId: 't-1',
-    conversationId: null,
-    title: '确认',
-    text: '',
-    kind: 'ask',
-    options: ['好'],
-    key: null,
-    version: 1,
-    status: 'open',
-    delivery: 'failed',
-    deliveryRef: null,
-    deliveryAttempts: 1,
-    nextDeliveryAt: null,
-    deliveryGivenUp: false,
-    optionIndex: null,
-    answeredBy: null,
-    answeredAt: null,
-    createdAt: CREATED,
-    updatedAt: CREATED,
-    ...over,
-  })
+/** 卡片行（模块级：M41 的重投排期与后面的性质用例共用）。 */
+const card = (over: Partial<Card> = {}): Card => ({
+  id: 'card-1',
+  runId: 'run-1',
+  taskId: 't-1',
+  conversationId: null,
+  title: '确认',
+  text: '',
+  kind: 'ask',
+  options: ['好'],
+  key: null,
+  version: 1,
+  status: 'open',
+  delivery: 'failed',
+  deliveryRef: null,
+  deliveryAttempts: 1,
+  nextDeliveryAt: null,
+  deliveryGivenUp: false,
+  optionIndex: null,
+  answeredBy: null,
+  answeredAt: null,
+  createdAt: CREATED,
+  updatedAt: CREATED,
+  ...over,
+})
 
+describe('kernel/next-wake · 卡片重投排期（M41）', () => {
   it('最早的重投时刻参与下一次唤醒', () => {
     const due = card({ nextDeliveryAt: FUTURE })
     expect(nextWakeAt(view([], [], [due]), NOW, env())).toBe(FUTURE)
@@ -298,5 +301,134 @@ describe('nextWakeAt · 停机卡提醒（M55）', () => {
 
   it('梯度到顶后不再排期', () => {
     expect(nextWakeAt(view([], [], [stall({ version: 9 })]), NOW, env())).toBeNull()
+  })
+})
+
+// —— 性质测试（fast-check）：唤醒时刻的完备性 ————————————————————————————————
+//
+// 「下一次唤醒」只有一个正确语义：**所有候选取值的未来最早者**，没有候选就是 null。
+// 漏掉任何一类候选（running 的 deadlineAt、queued 的 notBefore、卡的重投排期、停机卡的
+// 提醒梯度）都会让宿主定时器睡过头——任务停住却没人喊人，正是 M55 那次静默的机制。
+//
+// 所以这里的预言机不复用被测实现：它直接按「候选清单」把每个字段摊开取最小，
+// 实现漏一项、多算一类状态、把过去的时刻也算进来，都会与清单对不上。
+//
+// 固定种子：同一份输入永远给出同一条反例；`FC_SEED` 可覆盖。
+
+const PROPERTY_SEED = Number(process.env.FC_SEED ?? 20261126)
+const PROPERTY_RUNS = 150
+
+const WAKE_TIMES = [
+  '2026-11-04T11:30:00.000Z', // 已过去
+  '2026-11-04T12:00:00.000Z', // 正好是 now：不算「下一次」
+  '2026-11-04T12:00:01.000Z',
+  '2026-11-04T12:05:00.000Z',
+  '2026-11-04T13:00:00.000Z',
+  '2026-11-05T12:00:00.000Z',
+] as const
+
+const wakeTimeOrNullArb = fc.option(fc.constantFrom(...WAKE_TIMES), { nil: null })
+
+const runShapeArb: fc.Arbitrary<Partial<RunRow>> = fc.record({
+  status: fc.constantFrom<RunRow['status']>(
+    'running',
+    'queued',
+    'waiting',
+    'succeeded',
+    'failed',
+    'cancelled',
+  ),
+  leaseUntil: wakeTimeOrNullArb,
+  deadlineAt: wakeTimeOrNullArb,
+  notBefore: wakeTimeOrNullArb,
+})
+
+const cardShapeArb: fc.Arbitrary<Partial<Card>> = fc.record({
+  kind: fc.constantFrom<Card['kind']>('ask', 'notice', 'stall'),
+  status: fc.constantFrom<Card['status']>('open', 'answered', 'resolved'),
+  version: fc.integer({ min: 1, max: 4 }),
+  updatedAt: fc.constantFrom(...WAKE_TIMES),
+  nextDeliveryAt: wakeTimeOrNullArb,
+})
+
+const runsArb = fc
+  .array(runShapeArb, { maxLength: 4 })
+  .map((rows) => rows.map((row, index) => run({ id: `run-property-${index}`, ...row })))
+
+const cardsArb = fc
+  .array(cardShapeArb, { maxLength: 3 })
+  .map((rows) => rows.map((row, index) => card({ id: `card-property-${index}`, ...row })))
+
+/** 独立预言机：按候选清单取「> now 的最早时刻」，没有候选就是 null。 */
+const earliestCandidate = (runs: RunRow[], cards: Card[]): string | null => {
+  const candidates: string[] = []
+  for (const row of runs) {
+    if (row.status === 'running') {
+      if (row.leaseUntil !== null) candidates.push(row.leaseUntil)
+      if (row.deadlineAt !== null) candidates.push(row.deadlineAt)
+    } else if (row.status === 'queued') {
+      if (row.notBefore !== null) candidates.push(row.notBefore)
+    }
+  }
+  for (const row of cards) {
+    if (row.nextDeliveryAt !== null) candidates.push(row.nextDeliveryAt)
+    if (row.kind !== 'stall' || row.status !== 'open') continue
+    const delay = STALL_REMIND_DELAYS_MS[row.version - 1]
+    if (delay === undefined) continue
+    candidates.push(new Date(Date.parse(row.updatedAt) + delay).toISOString())
+  }
+  const future = candidates.filter((at) => at > NOW).sort()
+  return future.length === 0 ? null : (future[0] as string)
+}
+
+describe('kernel/next-wake 性质（fast-check 随机生成）', () => {
+  it('结果就是候选清单里最早的未来时刻（清单空则 null）', () => {
+    fc.assert(
+      fc.property(runsArb, cardsArb, (runs, cards) => {
+        const target = view(runs, [], cards)
+        const actual = nextWakeAt(target, NOW, env())
+        expect(actual, JSON.stringify({ runs, cards })).toBe(earliestCandidate(runs, cards))
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('非 null 的结果严格晚于 now，且是可直接排期的 ISO 时刻', () => {
+    fc.assert(
+      fc.property(runsArb, cardsArb, (runs, cards) => {
+        const actual = nextWakeAt(view(runs, [], cards), NOW, env())
+        if (actual === null) return
+        expect(actual > NOW, actual).toBe(true)
+        expect(Number.isNaN(Date.parse(actual)), actual).toBe(false)
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('加一个更晚的候选不改变结果（只认最早那个）', () => {
+    fc.assert(
+      fc.property(runsArb, cardsArb, fc.constantFrom(...WAKE_TIMES), (runs, cards, later) => {
+        const base = nextWakeAt(view(runs, [], cards), NOW, env())
+        if (later <= NOW) return
+        const padded = view(
+          [
+            ...runs,
+            run({
+              id: 'run-property-late',
+              status: 'running',
+              leaseUntil: later,
+              deadlineAt: null,
+            }),
+          ],
+          [],
+          cards,
+        )
+        const actual = nextWakeAt(padded, NOW, env())
+        expect(actual, `${later} / base ${base}`).toBe(
+          base !== null && base <= later ? base : later,
+        )
+      }),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
   })
 })

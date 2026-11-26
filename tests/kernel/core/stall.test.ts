@@ -7,6 +7,7 @@
  * 停在等人阶段的任务、非开放卡）比跑整条流水线更能钉住口径。
  */
 import { describe, expect, it } from 'vitest'
+import fc from 'fast-check'
 import type { Card, RunRow, Task, Workflow, WorkflowStage } from '@workbench/protocol/entities'
 import {
   STALL_SILENCE_MS,
@@ -295,5 +296,214 @@ describe('core/stall 下一次唤醒', () => {
 
   it('没有待判任务时给 null', () => {
     expect(nextStallAt(view({ activeTaskIds: new Set(['t-1']) }))).toBeNull()
+  })
+})
+
+// —— 性质测试（fast-check）：判据的完备性 ————————————————————————————————
+//
+// 「谁该被盯」是六条判据的合取（代码注释里逐条列了）：没归档、阶段存在且不是内置、
+// 阶段会派活、没有活跃 run、没有开着的卡、最近一轮已终态并带 endedAt。少算一条就误报，
+// 多算一条就漏报——两者都直接变成假停机卡或永久静默。
+//
+// 预言机把六条判据摊成一次独立的过滤 + 取最大，不复用被测实现的循环；
+// 生成器让每个任务的 endedAt 互不相同，于是「取最大」不必约定同刻先后。
+//
+// 固定种子：同一份输入永远给出同一条反例；`FC_SEED` 可覆盖。
+
+const PROPERTY_SEED = Number(process.env.FC_SEED ?? 20261126)
+const PROPERTY_RUNS = 200
+
+const WATCH_TIMES = [
+  '2026-11-24T09:00:00.000Z',
+  '2026-11-24T09:10:00.000Z',
+  '2026-11-24T09:20:00.000Z',
+  '2026-11-24T09:30:00.000Z',
+] as const
+
+const TASK_IDS = ['t-1', 't-2', 't-3'] as const
+const STAGE_CHOICES = [
+  'st-1',
+  'st-script',
+  'st-park',
+  'st-blocked',
+  'st-builtin-agent',
+  'st-gone',
+  null,
+] as const
+const RUN_STATUSES = ['succeeded', 'failed', 'cancelled', 'running', 'queued', 'waiting'] as const
+
+const taskRowsArb: fc.Arbitrary<Task[]> = fc
+  .array(
+    fc.record({
+      currentStageId: fc.constantFrom(...STAGE_CHOICES),
+      archived: fc.boolean(),
+    }),
+    { maxLength: 3 },
+  )
+  .map((shapes) =>
+    shapes.map((shape, index) =>
+      task({
+        id: TASK_IDS[index] as string,
+        currentStageId: shape.currentStageId,
+        archivedAt: shape.archived ? WATCH_TIMES[0] : null,
+      }),
+    ),
+  )
+
+const runRowsArb: fc.Arbitrary<RunRow[]> = fc
+  .array(
+    fc.record({
+      taskId: fc.constantFrom(...TASK_IDS, 't-other'),
+      status: fc.constantFrom(...RUN_STATUSES),
+      withEndedAt: fc.boolean(),
+    }),
+    { maxLength: 4 },
+  )
+  .map((shapes) =>
+    shapes.map((shape, index) =>
+      run({
+        id: `run-w${index}`,
+        taskId: shape.taskId,
+        status: shape.status,
+        endedAt: shape.withEndedAt ? (WATCH_TIMES[index] as string) : null,
+      }),
+    ),
+  )
+
+const cardRowsArb: fc.Arbitrary<Card[]> = fc
+  .array(
+    fc.record({
+      taskId: fc.constantFrom(...TASK_IDS, 't-other'),
+      status: fc.constantFrom<Card['status']>('open', 'answered', 'resolved'),
+    }),
+    { maxLength: 2 },
+  )
+  .map((shapes) => shapes.map((shape, index) => card({ id: `card-w${index}`, ...shape })))
+
+const activeIdsArb = fc.uniqueArray(fc.constantFrom(...TASK_IDS), { maxLength: 2 })
+
+/**
+ * 内置阶段被配成「会派活」（脏配置，uiltin 与 ntryMode 冲突）：
+ * 判据里必须由 uiltin !== null 拦下，不能靠入口模式顺带挡掉。
+ */
+const builtinAgentStage = stage({
+  id: 'st-builtin-agent',
+  name: '已阻塞',
+  position: 4,
+  entryMode: 'agent',
+  builtin: 'blocked',
+})
+
+const STAGES = [stage(), parkStage(), scriptStage(), blockedStage(), builtinAgentStage]
+const propertyStages = new Map(STAGES.map((item) => [item.id, item]))
+
+interface WatchOracleInput {
+  tasks: Task[]
+  runs: RunRow[]
+  cards: Card[]
+  active: string[]
+}
+
+/** 独立预言机：六条判据一次过滤 + 取 endedAt 最大的那一轮。 */
+const watchOracle = ({ tasks, runs, cards, active }: WatchOracleInput) => {
+  const watched: { taskId: string; stageId: string; runId: string; endedAt: string }[] = []
+  for (const row of [...tasks].sort((left, right) => left.id.localeCompare(right.id))) {
+    if (row.archivedAt !== null) continue
+    const stage = STAGES.find((item) => item.id === row.currentStageId)
+    if (stage === undefined || stage.builtin !== null) continue
+    if (stage.entryMode !== 'agent' && stage.entryMode !== 'script') continue
+    if (active.includes(row.id)) continue
+    if (cards.some((item) => item.taskId === row.id && item.status === 'open')) continue
+    const settled = runs.filter(
+      (item) =>
+        item.taskId === row.id &&
+        (item.status === 'succeeded' || item.status === 'failed' || item.status === 'cancelled') &&
+        item.endedAt !== null,
+    )
+    if (settled.length === 0) continue
+    const latest = settled.reduce((best, item) =>
+      (item.endedAt as string) > (best.endedAt as string) ? item : best,
+    )
+    watched.push({
+      taskId: row.id,
+      stageId: stage.id,
+      runId: latest.id,
+      endedAt: latest.endedAt as string,
+    })
+  }
+  return watched
+}
+
+describe('core/stall 性质（fast-check 随机生成）', () => {
+  it('盯的就是六条判据同时成立的任务，按 id 稳定排序，取最近一轮终态', () => {
+    fc.assert(
+      fc.property(
+        taskRowsArb,
+        runRowsArb,
+        cardRowsArb,
+        activeIdsArb,
+        (tasks, runs, cards, active) => {
+          const target = view({
+            stages: propertyStages,
+            tasks: new Map(tasks.map((item) => [item.id, item])),
+            runs: new Map(runs.map((item) => [item.id, item])),
+            cards: new Map(cards.map((item) => [item.id, item])),
+            activeTaskIds: new Set(active),
+          })
+          const actual = stallWatchList(target).map((watch) => ({
+            taskId: watch.task.id,
+            stageId: watch.stageId,
+            runId: watch.runId,
+            endedAt: watch.endedAt,
+          }))
+          expect(actual).toEqual(watchOracle({ tasks, runs, cards, active }))
+        },
+      ),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+
+  it('到点时刻恰是「最近一轮结束 + 静默阈值」；下一次唤醒就是其中最早的那个', () => {
+    fc.assert(
+      fc.property(
+        taskRowsArb,
+        runRowsArb,
+        cardRowsArb,
+        activeIdsArb,
+        (tasks, runs, cards, active) => {
+          const target = view({
+            stages: propertyStages,
+            tasks: new Map(tasks.map((item) => [item.id, item])),
+            runs: new Map(runs.map((item) => [item.id, item])),
+            cards: new Map(cards.map((item) => [item.id, item])),
+            activeTaskIds: new Set(active),
+          })
+          const watches = stallWatchList(target)
+          for (const watch of watches) {
+            expect(stallDueAt(watch)).toBe(
+              new Date(Date.parse(watch.endedAt) + STALL_SILENCE_MS).toISOString(),
+            )
+          }
+          const due = watches.map((watch) => stallDueAt(watch)).sort()
+          expect(nextStallAt(target)).toBe(due.length === 0 ? null : (due[0] as string))
+        },
+      ),
+      { seed: PROPERTY_SEED, numRuns: PROPERTY_RUNS },
+    )
+  })
+})
+
+describe('core/stall 同刻并列', () => {
+  it('两轮同一时刻结束：取视图里先出现的那条（重建与增量同序，结果可复现）', () => {
+    const watches = stallWatchList(
+      view({
+        runs: new Map([
+          ['run-first', run({ id: 'run-first', endedAt: LATER })],
+          ['run-second', run({ id: 'run-second', endedAt: LATER })],
+        ]),
+      }),
+    )
+
+    expect(watches.map((watch) => watch.runId)).toEqual(['run-first'])
   })
 })

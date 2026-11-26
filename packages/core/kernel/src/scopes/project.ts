@@ -105,13 +105,18 @@ export function normalizeTask(row: Task, at?: string): Task {
 }
 
 /**
- * 老事实 replay 的卡片行归一（M12）：M4–M11 的 `card.*` payload 没有 `kind`，
- * 按当时的口径补齐——`options` 非空 = `ask`，否则 = `notice`。重建后投影列不会写 undefined。
+ * 老事实 replay 的卡片行归一（M12 / M57）：M4–M11 的 `card.*` payload 没有 `kind`，
+ * 按当时的口径补齐——`options` 非空 = `ask`，否则 = `notice`；M56 及以前的「进阶段喊人」
+ * 停机卡把 `runId` 写成空串，这里折成 null（`cards.run_id` 是可空外键）。重建后投影列不会写
+ * undefined，也不会写空串；后加的投递账 / 回答人列同样在这里补缺省。
  */
 export function normalizeCard(row: Card): Card {
   const legacy = row as Partial<Card>
   return {
     ...row,
+    // 不挂 run 的卡（进入「会喊人」阶段开的停机卡）历史事实里写成空串，投影列又声明了
+    // `REFERENCES runs(id)`：空串既不是 NULL 也不是存在的 run，重建会撞外键，所以统一折成 null。
+    runId: legacy.runId === undefined || legacy.runId === '' ? null : legacy.runId,
     kind: legacy.kind ?? (row.options.length > 0 ? 'ask' : 'notice'),
     // M41：投递账三列的老事实归一（老库 / 老日志都没有它们）
     deliveryAttempts: legacy.deliveryAttempts ?? 0,

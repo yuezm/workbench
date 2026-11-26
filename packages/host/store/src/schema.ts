@@ -274,9 +274,12 @@ CREATE TABLE IF NOT EXISTS ${name} (
 /**
  * `cards` 投影（M4，第 10 张表）：与 `Card` 行逐列对应，整行由 `card.*` 事实携带。
  *
- * - `run_id` 是卡片归属；run 删除时按外键联删（宿主 `run.removed` 事实同时清卡片）。
+ * - `run_id` 是卡片归属，**可空**（M57）：进入「会喊人」阶段开的停机卡没有「在等的那一轮」，
+ *   落 NULL；非空时 run 删除按外键联删（宿主 `run.removed` 事实同时清卡片）。M56 及以前这里
+ *   是 NOT NULL，于是那条路径只能塞空串、撞外键——`needsCardsRebuild` 按「run_id 可空」判旧库。
  * - `task_id` / `conversation_id` 是展示用的弱引用：阶段 run 挂任务、聊天 run 挂对话，
- *   历史卡片不因任务/对话删除而抹掉归属（不设外键）。
+ *   历史卡片不因任务/对话删除而抹掉归属（不设外键；任务删除时由投影层按 `task_id` 联删，
+ *   `run_id` 为 NULL 的卡只能靠这一条清掉）。
  * - `delivery` 单列 =「已送达至少一个通道」；`delivery_ref` 记本版本首个成功通道的 ref。
  * - `kind`（M12）= 通知口径的判据：`ask` 要人作答（阻塞续接），`notice` 只知会（不发系统通知）；
  *   老库补列时默认 `ask`，重建投影按事实归一（`kernel/project.normalizeCard`）。
@@ -287,7 +290,7 @@ CREATE TABLE IF NOT EXISTS ${name} (
 const cardsTable = (name = 'cards'): string => `
 CREATE TABLE IF NOT EXISTS ${name} (
   id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  run_id TEXT REFERENCES runs(id) ON DELETE CASCADE,
   task_id TEXT,
   conversation_id TEXT,
   title TEXT NOT NULL,

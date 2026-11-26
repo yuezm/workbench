@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Card, RunRow } from '@workbench/protocol/entities'
 import type { Input } from '@workbench/protocol/inputs'
-import { answerFacts } from '@workbench/kernel/scopes/cards'
+import { answerFacts, expiredCardFacts } from '@workbench/kernel/scopes/cards'
 import { TEST_AT, emptyView, testEnv } from '../../support/kernel-view'
 
 const CREATED = '2026-11-20T09:00:00.000Z'
@@ -144,5 +144,33 @@ describe('answerFacts：问答卡', () => {
     expect((payload['card'] as Card).answeredByRef).toBe('feishu:u-2')
     expect(payload['byRef']).toBe('feishu:u-2')
     expect(decision.facts.some((fact) => fact.type === 'run.queued')).toBe(true)
+  })
+})
+
+/**
+ * M57：`Card.runId` 可以为空（进入「会喊人」阶段开的停机卡）。
+ *
+ * 这两条钉的是「脏数据不放行也炸不了」：问答卡按口径永远挂在 waiting 的 run 上，
+ * 拿不到 run 时只能按「运行不存在」拒绝；超时扫描也跳过它（没有可续接的那一轮）。
+ */
+describe('不挂 run 的卡（M57）', () => {
+  it('ask 卡没有 run：按「运行不存在」拒绝，不静默放行', () => {
+    const decision = answerFacts(
+      emptyView({ cards: new Map([['card-1', card({ runId: null })]]) }),
+      answer(),
+      TEST_AT,
+      testEnv(),
+    )
+    expect(decision.facts).toEqual([])
+    expect(decision.reject).toEqual({
+      code: 'conflict',
+      message: '运行不存在或不在等待状态: null',
+    })
+  })
+
+  it('超时扫描跳过它：没有「等的那一轮」可续接', () => {
+    expect(
+      expiredCardFacts(emptyView({ cards: new Map([['card-1', card({ runId: null })]]) }), TEST_AT),
+    ).toEqual([])
   })
 })

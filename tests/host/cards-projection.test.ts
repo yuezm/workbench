@@ -6,7 +6,8 @@
  * 1. 回执 `ask` → 建卡 / `run.waiting` → `card.answer` → 续接：实时投影与 `rebuild()` 逐表全等；
  * 2. 卡片全生命周期事实（opened / updated / delivered / delivery_failed / answered / resolved）；
  * 3. `cards.open` / `cards.byRun` 的状态过滤与 createdAt 排序；
- * 4. `run.removed` 联删卡片（重建事务关外键时不能只靠 `ON DELETE CASCADE`）。
+ * 4. `run.removed` 联删卡片（重建事务关外键时不能只靠 `ON DELETE CASCADE`）；
+ * 5. M57 不挂 run 的停机卡（进入「会喊人」阶段）：`run_id` 落 NULL，删任务时按 `task_id` 联删。
  *
  * 全部用 `openDatabase` 打开的真实 SQLite 文件库（不是内存库、不是假 project），
  * 内核也是真实的 `decide` / `project` / `viewSpec`——验证的是「事实 → 投影 → 重建」真实链路。
@@ -439,6 +440,84 @@ describe('cards 读路径：cards.open / cards.byRun 的过滤与排序', () => 
   })
 })
 
+describe('M57：不挂 run 的停机卡（进入「会喊人」的阶段）', () => {
+  /** 建「人工验收（notifyOnPark，不派活）」的工作流 + 一张停在「待办」的任务。 */
+  function seedPark(store: Store): { taskId: string; parkStageId: string } {
+    store.dispatch({
+      type: 'workflow.create',
+      commandId: 'park-wf',
+      input: {
+        name: '喊人流程',
+        stages: [{ name: '人工验收', entryMode: 'user', notifyOnPark: true }],
+      },
+    })
+    const workflow = must(
+      store.query('workflows.all').find((item) => item.name === '喊人流程'),
+      '喊人流程',
+    )
+    const parkStage = must(
+      workflow.stages.find((stage) => stage.name === '人工验收'),
+      '人工验收阶段',
+    )
+    store.dispatch({
+      type: 'project.create',
+      commandId: 'park-pj',
+      input: { name: '喊人项目', path: 'D:/work/park' },
+    })
+    const project = must(
+      store.query('projects.all').find((item) => item.name === '喊人项目'),
+      '喊人项目',
+    )
+    // 不指定起始阶段：落在内置「待办」（不派活），所以这张任务一开始没有任何 run
+    store.dispatch({
+      type: 'task.create',
+      commandId: 'park-tk',
+      input: { title: '喊人任务', workflowId: workflow.id, projectId: project.id },
+    })
+    const task = must(
+      store
+        .query('tasks.byWorkflow', { workflowId: workflow.id })
+        .find((item) => item.title === '喊人任务'),
+      '喊人任务',
+    )
+    return { taskId: task.id, parkStageId: parkStage.id }
+  }
+
+  it('拖进 notifyOnPark 阶段：不报外键错，卡行 run_id 为 NULL，删任务时连卡一起清掉', () => {
+    const { db, store } = world()
+    const { taskId, parkStageId } = seedPark(store)
+
+    // 修复前：卡带着 runId '' 落库，撞 `cards.run_id` 的外键 → 整个 task.move 失败
+    expect(() =>
+      store.dispatch({
+        type: 'task.move',
+        commandId: 'park-move',
+        id: taskId,
+        stageId: parkStageId,
+      }),
+    ).not.toThrow()
+
+    expect(
+      db.prepare('SELECT run_id, task_id, kind, status FROM cards').all() as unknown as unknown[],
+    ).toEqual([{ run_id: null, task_id: taskId, kind: 'stall', status: 'open' }])
+    expect(store.query('cards.open').map((card) => [card.runId, card.title])).toEqual([
+      [null, '轮到你：人工验收'],
+    ])
+
+    // 增量与重建等价（`normalizeCard` 把空串折成 null，两条路径折出同一行）
+    const afterMove = dumpProjection(db)
+    store.rebuild()
+    expect(dumpProjection(db)).toEqual(afterMove)
+
+    // 删任务：这张卡没有 run 可级联，只能靠投影层按 task_id 联删
+    store.dispatch({ type: 'task.remove', commandId: 'park-rm', id: taskId })
+    expect(dumpProjection(db).cards).toEqual([])
+    expect(store.query('cards.open')).toEqual([])
+    const afterRemove = dumpProjection(db)
+    store.rebuild()
+    expect(dumpProjection(db)).toEqual(afterRemove)
+  })
+})
 describe('run.removed：卡片随 run 显式联删（重建不被外键差异影响）', () => {
   it('删除任务：run.removed 删 run 与卡片，rebuild 后不复活', () => {
     const { db, store } = world({ now: () => AT })

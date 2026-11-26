@@ -236,8 +236,9 @@ export function parkNoticesOnEnter(
         view,
         {
           task,
-          // 这一路径没有「刚跑完的那一轮」：卡不依赖 run（`answerFacts` 对 stall 直接放行）
-          runId: '',
+          // 这一路径没有「刚跑完的那一轮」：卡不挂 run（`answerFacts` 对 stall 直接放行）。
+          // 塞空串会在投影侧撞 `cards.run_id` 的外键（父行不存在），必须落 null。
+          runId: null,
           title: `轮到你：${stage.name}`,
           text: `任务已进入「${stage.name}」：这一步要人来做，机器不会自己往下走。做完把它拖到下一个阶段即可。`,
         },

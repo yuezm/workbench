@@ -376,6 +376,14 @@ describe('kernel/thread-context', () => {
     expect(cardPart.indexOf('卡 A')).toBeLessThan(cardPart.indexOf('卡 B'))
   })
 
+  it('不挂 run 的未决卡（进入「会喊人」阶段开的停机卡）不进这段', () => {
+    // M57：这段按线程的 run 圈定范围，没有 run 归属的卡无从判断它属不属于本线程
+    const stall = card({ id: 'card-stall', runId: null, kind: 'stall', title: '轮到你：人工验收' })
+    const seeded = view({ cards: new Map([['card-stall', stall]]) })
+    const text = threadContextText(seeded, seeded.threads.get('th-1') as ThreadRow)
+    expect(text).not.toContain('轮到你')
+  })
+
   it('阶段缺失 / 未绑定入口 / 无链接事件 / endedAt 缺失的兜底文案', () => {
     const noStage = task({ id: 'task-a', title: '无阶段任务', currentStageId: null })
     const missingStage = task({ id: 'task-b', title: '坏阶段任务', currentStageId: 'st-gone' })

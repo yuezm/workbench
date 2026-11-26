@@ -349,6 +349,37 @@ describe('renderer/shell/kernelStore', () => {
     offRun()
   })
 
+  it('task.removed 连带失效卡片视图：不挂 run 的停机卡只在删任务这条路上消失', async () => {
+    const fake = fakeTransport({ 'cards.open': [], 'tasks.byProject': [], 'task.byId': null })
+    const store = createKernelStore(fake.transport)
+    await started(store)
+    const offOpen = store.watch('cards.open', undefined, () => {})
+    const offTasks = store.watch('tasks.byProject', { projectId: 'pj-1' }, () => {})
+    const offTask = store.watch('task.byId', { taskId: 't-1' }, () => {})
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const countOf = (view: ViewId): number =>
+      fake.queries.filter((entry) => entry.view === view).length
+    const openBefore = countOf('cards.open')
+    const tasksBefore = countOf('tasks.byProject')
+    const taskBefore = countOf('task.byId')
+
+    // 删任务时宿主按 `task_id` 联删不挂 run 的卡片（进入「会喊人」阶段开的停机卡）：
+    // 这类卡没有 run 可级联，通知条能不能清干净全看这一条失效
+    fake.emit({ kind: 'facts', seq: 2, types: ['task.removed', 'thread.removed'] })
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(countOf('cards.open')).toBe(openBefore + 1)
+    // 通用 task.* 视图照旧失效：为 task.removed 单开的那条不能把它顶掉
+    expect(countOf('tasks.byProject')).toBe(tasksBefore + 1)
+    expect(countOf('task.byId')).toBe(taskBefore + 1)
+
+    offOpen()
+    offTasks()
+    offTask()
+  })
+
   it('缓存键包含参数：不同 taskId 各自缓存，重复订阅同一键不再查询', async () => {
     const fake = fakeTransport()
     const store = createKernelStore(fake.transport)

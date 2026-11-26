@@ -138,8 +138,11 @@ function refsOf(fact: AnyFact): EntityRef[] {
     case 'card.answered':
     case 'card.resolved':
       // 卡片事实同时归到卡片与它所属的 run：运行时间线能看到该轮产生的卡与回答。
+      // 不挂 run 的卡（进入「会喊人」阶段开的停机卡）只归到卡片本身。
       return [
-        { scope: 'run', id: fact.payload.card.runId },
+        ...(fact.payload.card.runId === null
+          ? []
+          : [{ scope: 'run' as const, id: fact.payload.card.runId }]),
         { scope: 'card', id: fact.payload.card.id },
       ]
     case 'event.received':

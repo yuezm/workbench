@@ -94,6 +94,13 @@ describe('normalizeCard：老行没有投递账与回答人', () => {
     expect(normalizeCard(legacyCard({ options: ['好'] })).kind).toBe('ask')
     expect(normalizeCard(legacyCard({ kind: 'stall' })).kind).toBe('stall')
   })
+
+  it('不挂 run 的卡：runId 空串 / 缺字段一律折成 null（写 NULL 才满足 cards 的外键）', () => {
+    expect(normalizeCard(legacyCard({ runId: '' })).runId).toBeNull()
+    expect(normalizeCard(legacyCard({ runId: undefined })).runId).toBeNull()
+    // 正常的卡原样保留，不要顺手把 run 归属抹掉
+    expect(normalizeCard(legacyCard({ runId: 'run-1' })).runId).toBe('run-1')
+  })
 })
 
 describe('project：只作审计的事实不写表', () => {

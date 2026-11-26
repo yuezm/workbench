@@ -314,4 +314,4 @@ S1+S2 已能解决「修复阶段看不到结论」；S3 才解决「修没修�
 
 ### 追加（同一次收口）：进入「会喊人」的阶段
 
-`notifyOnPark`（阶段级布尔，默认 `false`）打开后，任务被移进该阶段的那一刻开一张 `stall` 卡（标题「轮到你：〈阶段〉」）。只对不派活的阶段生效（`entryMode='user' | 'none'`）；内置阶段恒 `false`。落地在 `decide` 出口，覆盖自动流转、人工拖拽、派单落点。数据库侧两处配套：`workflow_stages` 增 `notify_on_park` 列（进必须列清单，老库启动时整表重建一次，老行一律落 `0` = 不喊）；`cards.kind` 的 CHECK 放行 `stall`（SQLite 不能改 CHECK，`rebuildLegacyCards` 整表重建，幂等）。
+`notifyOnPark`（阶段级布尔，默认 `false`）打开后，任务被移进该阶段的那一刻开一张 `stall` 卡（标题「轮到你：〈阶段〉」）。只对不派活的阶段生效（`entryMode='user' | 'none'`）；内置阶段恒 `false`。落地在 `decide` 出口，覆盖自动流转、人工拖拽、派单落点。数据库侧三处配套：`workflow_stages` 增 `notify_on_park` 列（进必须列清单，老库启动时整表重建一次，老行一律落 `0` = 不喊）；`cards.kind` 的 CHECK 放行 `stall`（SQLite 不能改 CHECK，`rebuildLegacyCards` 整表重建，幂等）；**`cards.run_id` 可空（M57）**——这条路径的卡没有「正在等的那一轮」，不能塞空串（`cards.run_id` 是 `REFERENCES runs(id)`，空串既不是 NULL 也不指向存在的 run，写入会撞外键，整个 `task.move` 都会失败）；老事实里的空串由 `normalizeCard` 折成 null，这类卡随后随 `task_id` 联删（没有 run 可级联）。

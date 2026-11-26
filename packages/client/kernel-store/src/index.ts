@@ -85,6 +85,22 @@ const RUN_VIEWS: readonly ViewId[] = [
 ]
 
 /**
+ * 任务类事实影响的视图。
+ *
+ * `task.removed` 同 `run.removed` 一样要多失效卡片视图：删任务时宿主除了按 `run_id` 级联删卡，
+ * 还会按 `task_id` 清掉**不挂 run** 的卡（进入「会喊人」阶段开的停机卡）——那批卡没有 run
+ * 可级联，只在删任务这一条路上消失。
+ */
+const TASK_VIEWS: readonly ViewId[] = [
+  'tasks.byWorkflow',
+  'tasks.byProject',
+  'tasks.unassigned',
+  'task.byId',
+  'tasks.executing',
+  'comments.byTask',
+]
+
+/**
  * 事实类型 → 需要失效的视图。前缀匹配；未知类型全量失效兜底
  * （新事实没登记时宁可多取，也不留旧数据）。
  */
@@ -95,17 +111,10 @@ const INVALIDATION: ReadonlyArray<{ prefix: string; views: readonly ViewId[] }> 
   { prefix: 'runtime.', views: ['runtimes.all', 'runtimes.statuses'] },
   // M10：项目行变化只影响项目清单（任务归属不随项目改名变），但看板标题要重取
   { prefix: 'project.', views: ['projects.all', 'tasks.byProject', 'tasks.unassigned'] },
-  {
-    prefix: 'task.',
-    views: [
-      'tasks.byWorkflow',
-      'tasks.byProject',
-      'tasks.unassigned',
-      'task.byId',
-      'tasks.executing',
-      'comments.byTask',
-    ],
-  },
+  // 删任务时卡片行有两种死法：随 run 级联（同批的 run.removed），或按 `task_id` 联删
+  // （不挂 run 的停机卡）。后者只在这一条路上消失，所以这条也要带上卡片视图。
+  { prefix: 'task.removed', views: [...TASK_VIEWS, 'cards.open', 'cards.byRun'] },
+  { prefix: 'task.', views: TASK_VIEWS },
   // 删 run 会按 `run_id` 联删卡片行（宿主投影级联，`projection-apply` 里显式删），
   // 而删任务 / 删线程 / 删工作流都只产 `run.removed`——卡片视图不跟着失效，顶部通知条
   // 就会留一张「点进去只有任务不存在、也没有关闭入口」的死条目。前缀匹配取**首条命中**

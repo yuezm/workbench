@@ -103,8 +103,9 @@ export type WorkbenchEvent =
   `useKernelViewState(view, params)`（`{data,error,loading}`）。组件不自己拼派生状态（「执行中」由
   `tasks.executing` 给）、不轮询、不重复订阅。
 - 失效表按**前缀取首条命中**，未知类型全量失效兜底。两条容易漏的口径：①删除类事实要连带被级联删掉的
-  投影一起失效——`run.removed` 会按 `run_id` 联删 `cards`，所以它单独一条排在通用 `run.` 之前，额外失效
-  `cards.open` / `cards.byRun`（否则删任务 / 删线程后通知条会留一张点不动的死条目，见 TC-AIW-152）；
+  投影一起失效——`run.removed` 按 `run_id` 联删 `cards`、`task.removed` 按 `task_id` 联删**不挂 run** 的
+  卡片（M57 的停机卡），所以这两条各自单开一条排在通用 `run.` / `task.` 之前，额外失效
+  `cards.open` / `cards.byRun`（否则删任务 / 删线程后通知条会留一张点不动的死条目，见 TC-AIW-152/153）；
   ②为特例新增的条目必须自带通用集合，前缀匹配不会把两条视图拼起来。
 - 插件槽：`Workbench` 从 `appPlugins` 清单渲染顶部栏与内容区；新增 app = 新目录 + `appPlugins` 一行
   （沿用现有 `registry.ts` 机制，类型是 `AppPlugin`）。

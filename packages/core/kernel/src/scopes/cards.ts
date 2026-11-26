@@ -265,10 +265,13 @@ export function stallReminderFacts(view: View, now: Iso): FactDraft<'card.update
  * 与回执 `ask` 的区别：它不挂在任何等的 run 上（那一轮已经落终态），回答只表示「知道了」，
  * 不续接 run；`kind='stall'` 让通道把它和业务提问同等对待（系统通知 / IM 都投），
  * 同时让 `closeCardsOnFinish` 不把它随 run 结束收掉。
+ *
+ * `runId` 可以是 `null`：进入「会喊人」阶段的停机卡由「移进这一步」触发（`parkNoticesOnEnter`），
+ * 那一步没有正在等的一轮，硬塞一个不存在的 run id 会在投影侧撞 `cards.run_id` 的外键。
  */
 export function stallCardFacts(
   view: View,
-  input: { task: Task; runId: Id; title: string; text: string },
+  input: { task: Task; runId: Id | null; title: string; text: string },
   now: Iso,
   env: Environment,
 ): FactDraft[] {
@@ -361,7 +364,8 @@ export function expiredCardFacts(
   const facts: FactDraft<'card.resolved' | 'run.queued'>[] = []
   const byRun = new Map<Id, { run: RunRow; cards: Card[] }>()
   for (const card of view.cards.values()) {
-    if (card.status !== 'open' || card.kind !== 'ask') continue
+    // 不挂 run 的卡（进入「会喊人」阶段开的停机卡）没有「等的哪一轮」，无从续接
+    if (card.status !== 'open' || card.kind !== 'ask' || card.runId === null) continue
     if (expiredAt(card) > now) continue
     const run = view.runs.get(card.runId)
     if (!run || run.status !== 'waiting' || run.purpose !== 'stage') continue
@@ -477,11 +481,13 @@ export function answerFacts(
       ],
     }
   }
-  const run = view.runs.get(card.runId)
+  // 不挂 run 的卡（只可能是进入「会喊人」阶段开的停机卡）走不到这里：它按 `kind='stall'`
+  // 在上面那一支就答完落地了。口径仍按「运行不存在」，不静默放行。
+  const run = card.runId === null ? undefined : view.runs.get(card.runId)
   if (!run || run.status !== 'waiting') {
     return {
       facts: [],
-      reject: { code: 'conflict', message: '运行不存在或不在等待状态: ' + card.runId },
+      reject: { code: 'conflict', message: '运行不存在或不在等待状态: ' + String(card.runId) },
     }
   }
 

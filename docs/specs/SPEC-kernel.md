@@ -288,7 +288,7 @@ export interface ThreadRow {
 6. **续接失败**：执行器 `resume_rejected` 时开新会话重试一次，仍失败按 `failed` 落库。
 7. **拒绝与超时**：重复回答、非 `open` 状态回答、选项越界、run 非 `waiting` 一律拒绝；卡片默认**不超时**（人可以几天后回），`card.resolve` 只关卡片、不改 run 状态。
 8. **随运行 / 任务结束自动收起**：决策出口 `kernel/cards.closeCardsOnFinish` 统一扫一遍——run 落终态（成功 / 失败 / 取消，含宿主兜底与 `clock.tick` 的超时 / 失联）或 `task.finished`（M53，任务进入终态阶段；不再挂 `task.completed`——归档时卡片早已在各 run 终态收过）之后，任务 / 运行名下还 `open` 的卡补一条 `card.resolved{reason:'cancelled'}`（同一批新开的 notices 也收；本批已答 / 已关的卡跳过）。信息卡不阻塞续接，不自动收就会一直挂在任务详情与顶部通知条里；`run.host_settled` / `clock.tick` 的视图切片因此补 `cards`。
-9. **停机卡（M55）**：`kind='stall'` 的卡由内核在「阶段无法推进」时开（见「硬门预算与阶段错误」），**不挂在等的 run 上**、不阻塞任何续接，`closeCardsOnFinish` 不收它。回答只表示「已接手」：落 `card.answered` + `card.resolved{reason:'manual'}` 并停止提醒（同一任务同时只留一张，重复停机原地 `card.updated` 版本 +1，不堆卡）。打扰口径与 `ask` 相同：desktop / feishu 的 `needsAnswer` 都认 `stall`，IM 里出同一个按钮。
+9. **停机卡（M55）**：`kind='stall'` 的卡由内核在「阶段无法推进」时开（见「硬门预算与阶段错误」），**不挂在等的 run 上**、不阻塞任何续接，`closeCardsOnFinish` 不收它。回答只表示「已接手」：落 `card.answered` + `card.resolved{reason:'manual'}` 并停止提醒（同一任务同时只留一张，重复停机原地 `card.updated` 版本 +1，不堆卡）。打扰口径与 `ask` 相同：desktop / feishu 的 `needsAnswer` 都认 `stall`，IM 里出同一个按钮。**`Card.runId` 因此可以是 `null`（M57）**：静默哨兵那条挂「刚结束的那一轮」，进入「会喊人」阶段那条（`notifyOnPark`）**没有任何 run**——两者都写成 `null` 更省事，但静默哨兵留着真实 run 是为了时间线与审计能回到那一轮；按 run 聚合的读侧（超时扫描、未决卡片段、时间线归属、通道上下文）一律先判空。
 
 ## 跳数熔断
 

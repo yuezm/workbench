@@ -298,6 +298,8 @@ describe('M55 进入「会喊人」的阶段', () => {
     const row = (opened?.payload as { card: Card }).card
     expect(row.kind).toBe('stall')
     expect(row.title).toBe('轮到你：人工验收')
+    // M57：这一步没有「正在等的那一轮」，卡不挂 run——塞空串会在投影侧撞 cards.run_id 的外键
+    expect(row.runId).toBeNull()
   })
 
   it('开关关着 / 内置阶段 / 会派活的阶段：都不喊', () => {

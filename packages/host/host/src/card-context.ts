@@ -63,7 +63,10 @@ export function cardContextOf(store: CardContextStore, card: Card): CardContext 
   const taskId = nameOf(card.taskId)
   const task =
     taskId === null ? null : recordOf<Task>(read(() => store.query('task.byId', { taskId })))
-  const run = recordOf<RunRow>(read(() => store.query('run.byId', { runId: card.runId })))
+  // 不挂 run 的卡（进入「会喊人」阶段开的停机卡）没有可查的那一轮：上下文只看任务那一侧
+  const runId = nameOf(card.runId)
+  const run =
+    runId === null ? null : recordOf<RunRow>(read(() => store.query('run.byId', { runId })))
   const conversationId = nameOf(card.conversationId)
   const conversation =
     conversationId === null

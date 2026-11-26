@@ -1118,7 +1118,14 @@ export interface CardChannelRef {
  */
 export interface Card {
   id: string
-  runId: string
+  /**
+   * 挂在哪一轮上；**null = 不挂任何 run**。
+   *
+   * 目前只有一种卡这么来：`task.move` 进入打开了 `notifyOnPark` 的阶段时开的停机卡——
+   * 那一步要人接手，机器刚结束的那一轮已经不是「我在等的那一轮」了。消费方因此不能假定
+   * 卡一定有 run：按 run 聚合、查 run、续接 run 的地方都要先判空。
+   */
+  runId: string | null
   /** 阶段 run 挂的任务；聊天 run 为 null */
   taskId: string | null
   /** 聊天 run 挂的对话；阶段 run 为 null */

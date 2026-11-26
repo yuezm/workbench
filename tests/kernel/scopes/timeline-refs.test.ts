@@ -101,6 +101,13 @@ const SAMPLES: Sample[] = [
       ['card', 'card-1'],
     ],
   })),
+  // M57：不挂 run 的卡（进入「会喊人」阶段开的停机卡）只归到卡片本身——它没有「等的那一轮」，
+  // 硬塞一个 run id 会让时间线指向不存在或不相干的运行。
+  {
+    type: 'card.opened',
+    payload: { card: { id: 'card-2', runId: null } },
+    refs: [['card', 'card-2']],
+  },
   // —— 事件：派生事件挂父 run，其余只在 cause 链上出现 ——
   { type: 'event.received', payload: { originRunId: 'run-1' }, refs: [['run', 'run-1']] },
   { type: 'event.merged', payload: { run: { id: 'run-1' } }, refs: [['run', 'run-1']] },

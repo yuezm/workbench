@@ -350,7 +350,8 @@ function cardLines(view: View, thread: ThreadRow): Item[] {
     if (run.threadId === thread.id) runIds.add(run.id)
   }
   const cards = [...view.cards.values()]
-    .filter((card) => card.status === 'open' && runIds.has(card.runId))
+    // 不挂 run 的卡（进入「会喊人」阶段开的停机卡）不在这段里：它按线程的 run 圈定范围
+    .filter((card) => card.status === 'open' && card.runId !== null && runIds.has(card.runId))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
     .slice(-10)
   return cards.map((card) => ({ at: card.createdAt, text: `- ${truncate(card.title, 80)}` }))

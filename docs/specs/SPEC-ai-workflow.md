@@ -93,7 +93,7 @@ Check:    pnpm verify:all      # 全闸门 + E2E（提交前必过）
 | `run_events`      | run_id → runs(CASCADE), seq, type, payload_json, created_at                                                                                                                                                                                                                                                                  | 运行事件流；`(run_id, seq)` 唯一，按 `seq` 排序；`payload_json` 存事件其余字段；纯追加                                                                                                                                                                                                                                                                                                  |
 | `conversations`   | id, title, agent_id → agents(RESTRICT), project_id, session_id, archived_at, created_at, updated_at                                                                                                                                                                                                                          | 一段对话：绑定智能体，**落在项目上**（M11，`project_id` 可空 = 默认目录）；`session_id` 供下一轮续接，`updated_at` 决定会话列表顺序                                                                                                                                                                                                                                                     |
 | `messages`        | id, conversation_id → conversations(CASCADE), role, content, error, created_at                                                                                                                                                                                                                                               | `role` = `user`\|`assistant`；助手消息的 `error` 记录失败原因（非零退出/超时/取消）                                                                                                                                                                                                                                                                                                     |
-| `cards`           | id, run_id → runs(CASCADE), task_id?, conversation_id?, title, text, options_json, key, version, status, delivery, delivery_ref, option_index, answered_by, answered_at, created_at, updated_at                                                                                                                              | M4 卡片投影：`status` = `open`\|`answered`\|`resolved`；`delivery` = `pending`\|`delivered`\|`failed`（单列 = 已送达至少一个通道）；投递按 `(id, version)` 去重；正文只作通知/平台 API 参数                                                                                                                                                                                             |
+| `cards`           | id, run_id? → runs(CASCADE), task_id?, conversation_id?, title, text, options_json, key, version, status, delivery, delivery_ref, option_index, answered_by, answered_at, created_at, updated_at                                                                                                                             | M4 卡片投影：`status` = `open`\|`answered`\|`resolved`；`delivery` = `pending`\|`delivered`\|`failed`（单列 = 已送达至少一个通道）；投递按 `(id, version)` 去重；正文只作通知/平台 API 参数。M57：`run_id` **可空**——进入「会喊人」阶段开的停机卡没有「等的那一轮」；这类卡随 `task_id` 联删（`run_id` 非空的仍随 run 联删）                                                            |
 
 > M2 起十张业务表全部是**事实投影**（另有 `facts` 事实日志、`projection_meta` 指纹/seq、宿主私有 `process_registry`）：写路径只有「追加事实 + 应用投影」，`INSERT/UPDATE/DELETE` 集中在 `packages/host/store/src/projection-apply.ts`；读路径走投影视图（`store.query`）。旧 `chat_conversations` / `chat_messages` 在首次启动时迁成导入事实后删除。
 
@@ -113,6 +113,14 @@ Check:    pnpm verify:all      # 全闸门 + E2E（提交前必过）
 - **`exits` 里的 `{do:'retry'}` 归一成 `{do:'await'}`**：`legacyExits` 里统一过滤，`await` 是有意的保守选择（不替用户猜目标阶段）。
 - 历史 `tasks.stage_fails` 随列删除丢弃，不迁去别处（它只服务已删除的自动重跑）。
 - 判定阶段若无验收条目，行为与 M32 一致（`pass` 只要有一条全 0 的 `checks`）。
+
+**M57 升级（不挂 run 的停机卡，`KERNEL_VERSION` = `M57.0.0`）：** `cards.run_id` 去掉 `NOT NULL`（仍然
+`REFERENCES runs(id) ON DELETE CASCADE`）。进入「会喊人」阶段（`notifyOnPark`）开的停机卡没有「正在等的
+那一轮」，此前只能塞空串，而空串既不是 NULL 也不指向存在的 run，写入撞外键 → 整个 `task.move` 失败
+（`FOREIGN KEY constraint failed`）。`needsCardsRebuild` 按「`run_id` 列还带 NOT NULL」识别老表并整表
+重建（与 M55 的 `kind` CHECK 重建同一条路径，幂等）；老事实里的空串由 `normalizeCard` 折成 null；
+这类卡没有 run 可级联，删任务时由投影层按 `task_id` 联删，客户端失效表相应让 `task.removed` 一并失效
+`cards.open` / `cards.byRun`。
 
 ## 柔性工作流（M19–M34）
 

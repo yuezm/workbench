@@ -66,8 +66,10 @@ export type Iso = string
  * 「没发过任何通道」，重建才能按事实折出真实投递记录。
  * M47：会话挂话题（`conversations.thread_id`）——老行按 ALTER 只能得到「没有话题」，
  * 而事实里也没有这条信息；重建同样得 null，但它保证新写路径与读侧列形状对齐。
+ * M57：不挂 run 的停机卡——`cards.run_id` 去掉 NOT NULL（进入「会喊人」阶段开的卡没有那一轮），
+ * 老事实里的空串由 `normalizeCard` 折成 null；DDL 变化必须重建，否则老库的表还拒收 NULL。
  */
-export const KERNEL_VERSION = 'M53.0.0'
+export const KERNEL_VERSION = 'M57.0.0'
 
 export type Actor =
   | { kind: 'owner'; via: 'ui' | 'channel' }

@@ -1543,6 +1543,55 @@ describe('openDatabase：一次性升级的边角（cards / rule_sets / stages �
     }
   })
 
+  it('M57：run_id 仍带 NOT NULL → 重建后放行 NULL，老行原样搬过去', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      // M55 口径的旧表：kind 已放行 stall，但 run_id 还是 NOT NULL（M57 前的形状）
+      db.exec(`
+        CREATE TABLE cards (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+          task_id TEXT,
+          title TEXT NOT NULL,
+          text TEXT NOT NULL DEFAULT '',
+          kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice','stall')),
+          options_json TEXT NOT NULL DEFAULT '[]',
+          version INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL CHECK (status IN ('open','answered','resolved')),
+          delivery TEXT NOT NULL CHECK (delivery IN ('pending','delivered','failed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );`)
+      db.exec('CREATE TABLE runs (id TEXT PRIMARY KEY)')
+      db.prepare('INSERT INTO runs (id) VALUES (?)').run('r-1')
+      db.prepare(
+        `INSERT INTO cards (id, run_id, title, kind, status, delivery, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run('c-1', 'r-1', '旧卡', 'stall', 'open', 'delivered', SEED_AT, SEED_AT)
+      expect(needsCardsRebuild(db)).toBe(true)
+
+      expect(rebuildLegacyCards(db)).toBe(true)
+      // 老行还在，run 归属原样搬过去
+      expect(db.prepare('SELECT run_id, kind FROM cards WHERE id = ?').get('c-1')).toEqual({
+        run_id: 'r-1',
+        kind: 'stall',
+      })
+      // 不挂 run 的停机卡现在能落库——M57 的全部目的（老表会 NOT NULL 报错）
+      db.prepare(
+        `INSERT INTO cards (id, run_id, task_id, title, kind, status, delivery, created_at, updated_at)
+         VALUES (?, NULL, ?, ?, 'stall', 'open', 'pending', ?, ?)`,
+      ).run('c-2', 'tk-1', '轮到你：人工验收', SEED_AT, SEED_AT)
+      expect(db.prepare('SELECT run_id FROM cards WHERE id = ?').get('c-2')).toEqual({
+        run_id: null,
+      })
+      // 重建过的库不再需要重建
+      expect(needsCardsRebuild(db)).toBe(false)
+      expect(rebuildLegacyCards(db)).toBe(false)
+    } finally {
+      db.close()
+    }
+  })
+
   it('upgradeLegacyRuleSets：没有表 / 缺 authority_json / 已具备三种状态', () => {
     const db = new DatabaseSync(':memory:')
     try {

@@ -12,7 +12,8 @@
  * - `task_comments`（M7.5）：纯追加；任务删除时按 `task_id` 联删（与 `run_events` 同口径）。
  *
  * 级联删除由父键显式完成（事实只携带父 id）：删除 `runs` 行先按 `run_id` 删 `run_events` 与
- * `cards`；删除 `conversations` 行先按 `conversation_id` 删 `messages`。`cards.run_id` 虽然
+ * `cards`；删除 `conversations` 行先按 `conversation_id` 删 `messages`；删除 `tasks` 行还要按
+ * `task_id` 删 `cards`（M57 那批不挂 run 的停机卡没有 run 可级联）。`cards.run_id` 虽然
  * 也声明了 `ON DELETE CASCADE`，但重建事务会临时关闭外键（见 `projection.ts`），只靠外键
  * 会让「增量删 run」与「重建 fold」得到不同的卡片表；显式删卡片保证两条路径等价。
  * 重建时同样走这条路径，所以「删任务 → `run.removed` → 重建」与旧 SQL 级联的可见结果一致（D13）。
@@ -286,6 +287,11 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
     run_events: db.prepare('DELETE FROM run_events WHERE run_id = ?'),
     /** 卡片随 run 显式联删（重建事务关外键，不能只靠 `cards.run_id` 的级联）。 */
     cardsByRun: db.prepare('DELETE FROM cards WHERE run_id = ?'),
+    /**
+     * 不挂 run 的卡片（M57：进入「会喊人」阶段开的停机卡）没有 `run_id` 可级联，
+     * 只能在任务删除时按 `task_id` 清掉——否则它会在通知条上留一张点不动的死条目。
+     */
+    cardsByTask: db.prepare('DELETE FROM cards WHERE task_id = ?'),
     conversations: db.prepare('DELETE FROM conversations WHERE id = ?'),
     messages: db.prepare('DELETE FROM messages WHERE conversation_id = ?'),
     cards: db.prepare('DELETE FROM cards WHERE id = ?'),
@@ -393,6 +399,8 @@ export function createProjectionWriter(db: DatabaseSync): ProjectionWriter {
         deletes.reviewReportsByTask.run(change.key)
         // A2：授权随任务删除联删（历史要跟着任务走，不留孤儿行）
         deletes.mandatesByTask.run(change.key)
+        // M57：不挂 run 的卡片（进入「会喊人」阶段开的停机卡）走不到 run 级联，按任务清
+        deletes.cardsByTask.run(change.key)
       }
       deletes[change.table].run(change.key)
       return

@@ -86,6 +86,15 @@ export function tableColumns(db: DatabaseSync, table: string): Set<string> {
   return new Set(rows.map((row) => row.name))
 }
 
+/** 某列是否带 NOT NULL；表或列不存在时返回 false（按「没有约束」处理）。 */
+function columnNotNull(db: DatabaseSync, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{
+    name: string
+    notnull: number
+  }>
+  return rows.some((row) => row.name === column && row.notnull === 1)
+}
+
 interface ForeignKeysRow {
   foreign_keys: number
 }
@@ -466,11 +475,14 @@ function legacyStageRow(raw: Record<string, unknown>): {
 const CARDS_UPGRADE_TEMP = 'cards_m55_upgrade'
 
 /**
- * 旧 `cards` 要不要一次性物理重建（M55）：`kind` 的 CHECK 还没放行 `stall`。
+ * 旧 `cards` 要不要一次性物理重建：两处结构差异都会逼出重建。
  *
- * 为什么必须重建：SQLite 不支持改 CHECK，`card.opened` 带 `kind='stall'` 时写入会被约束拒掉，
- * 停机卡就永远存不下来（内核层测试不到，只有真库会炸）。判据看建表 SQL 里有没有 `'stall'`：
- * 新建库与已重建的库都命中，无需另存版本号。
+ * 1. **M55**：`kind` 的 CHECK 还没放行 `stall`。SQLite 不支持改 CHECK，`card.opened` 带
+ *    `kind='stall'` 时写入会被约束拒掉，停机卡就永远存不下来（内核层测试不到，只有真库会炸）。
+ * 2. **M57**：`run_id` 还是 `NOT NULL`。进入「会喊人」阶段开的停机卡没有「在等的那一轮」，
+ *    要落 NULL；老表拒收，那条路径就会以 `NOT NULL constraint failed` 失败。同样只能重建表。
+ *
+ * 判据都看建表 SQL / 列约束本身：新建库与已重建的库都命中，无需另存版本号。
  */
 export function needsCardsRebuild(db: DatabaseSync): boolean {
   const row = db
@@ -478,10 +490,17 @@ export function needsCardsRebuild(db: DatabaseSync): boolean {
     .get() as { sql?: string | null } | undefined
   const sql = row?.sql ?? null
   if (sql === null) return false
-  return !sql.includes("'stall'")
+  if (!sql.includes("'stall'")) return true
+  return columnNotNull(db, 'cards', 'run_id')
 }
 
-/** 旧 `cards` 一次性物理重建（M55）：建新表 → 按共有列挪行 → 删旧表 → 改名。 */
+/**
+ * 旧 `cards` 一次性物理重建（M55 `kind` CHECK / M57 `run_id` 可空）：建新表 → 按共有列挪行
+ * → 删旧表 → 改名。
+ *
+ * 挪行按「两张表都有的列」拷贝：老库缺的列由新表的 DEFAULT 补（`kind` 因此落 'ask'，随后由
+ * 投影重建归一）；`run_id` 两表都有且老行都是真实 run id，原样搬过去即可。
+ */
 export function rebuildLegacyCards(db: DatabaseSync): boolean {
   if (!needsCardsRebuild(db)) return false
   const before = tableColumns(db, 'cards')

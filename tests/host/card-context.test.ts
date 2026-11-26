@@ -128,6 +128,20 @@ describe('cardContextOf：拼出归属上下文', () => {
     expect(cardContextOf(storeOf({}), cardOf())).toBeNull()
   })
 
+  it('不挂 run 的卡（进入「会喊人」阶段开的停机卡）：只看任务那一侧，不去查 run', () => {
+    const seen: ViewId[] = []
+    const store = storeOf(fullTable, (view) => seen.push(view))
+    expect(cardContextOf(store, cardOf({ runId: null, kind: 'stall' }))).toEqual({
+      projectName: 'sagc3_monorepo',
+      taskTitle: '地空协议配置，数据统一存储',
+      conversationTitle: null,
+      stageName: '验收',
+      // 没有 run 就没有「本轮执行者」：这一格留空，不拿别的智能体顶上
+      agentName: null,
+    })
+    expect(seen).not.toContain('run.byId')
+  })
+
   it('上下文读不到不能拖累投递：查询抛错 → 逐项降级为 null', () => {
     const store = {
       query: (view: ViewId) => {

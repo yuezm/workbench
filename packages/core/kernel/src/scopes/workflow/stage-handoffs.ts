@@ -75,14 +75,15 @@ export function handoffGuardOf(
 
 /**
  * 命中这一组触发条件的派单目标。零目标的情况（不 reject，静默跳过）：
- * 没有配、目标工作流已删 / 是自身、`stageId` 已不属目标工作流、目标工作流没有任何阶段、
+ * 没有配、`guard` 为 `null`（这次离开没有触发条件组，`handoff.on` 恒非空所以一条都不命中）、
+ * 目标工作流已删 / 是自身、`stageId` 已不属目标工作流、目标工作流没有任何阶段、
  * 以及 `manual` 下拖回更前阶段而该条派单要求「仅向前」。
  */
 export function handoffTargetsOf(
   view: View,
   sourceWorkflowId: Id,
   stage: Pick<WorkflowStage, 'handoffs'>,
-  guard: StageHandoffGuard,
+  guard: StageHandoffGuard | null,
   options?: { forward?: boolean },
 ): HandoffTarget[] {
   const forward = options?.forward ?? true

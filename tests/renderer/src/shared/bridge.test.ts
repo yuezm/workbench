@@ -51,6 +51,8 @@ function fakeSource() {
     onerror: null,
   }
   return {
+    /** 造出来的那条连接：用来触发 onerror（断线兜底） */
+    instance: source,
     factory: (url: string) => {
       created.push(url)
       return source
@@ -161,6 +163,13 @@ describe('createWebBridge', () => {
       title: '任务完成',
       body: '已完成',
     })
+
+    // 只给标题：正文键整个省略，而不是发一个空串（服务端据此走默认文案）
+    bridge.notify('仅标题')
+    await Promise.resolve()
+    const withoutBody = JSON.parse(String(calls[1]?.init.body)) as Record<string, unknown>
+    expect(withoutBody).toEqual({ title: '仅标题' })
+    expect(withoutBody).not.toHaveProperty('body')
   })
 
   it('subscribe / onNotice：同一条 SSE 按 kind 分流，畸形 JSON 忽略', () => {
@@ -177,6 +186,11 @@ describe('createWebBridge', () => {
 
     // 懒开：第一次订阅才连，且只连一条
     expect(created).toEqual([API_PATHS.events])
+
+    // 断线兜底：挂一个不抛的 onerror，重连交给 EventSource 自己（不在这里 close）
+    expect(source.instance.onerror).toBeTypeOf('function')
+    expect(() => source.instance.onerror?.(new Event('error'))).not.toThrow()
+    expect(source.closed).toBe(false)
 
     source.emit({ kind: 'facts', seq: 7, types: ['task.created'] })
     expect(onFacts).toHaveBeenCalledWith({ kind: 'facts', seq: 7, types: ['task.created'] })
@@ -239,5 +253,19 @@ describe('establishSession', () => {
   it('没口令 / 口令错：返回 false（入口据此决定是否弹登录）', async () => {
     const { fetchImpl } = fakeFetch(fail('token 不正确', 'unauthorized'))
     expect(await establishSession(null, { fetch: fetchImpl })).toBe(false)
+  })
+
+  it('缺省传输：不注入 fetch 时用全局 fetch 建立会话', async () => {
+    type FetchInit = Parameters<FetchLike>[1]
+    const fetchMock = vi.fn(async (_url: string, _init: FetchInit) => ok({ established: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await establishSession(null)).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe(API_PATHS.session)
+    expect(init.method).toBe('POST')
+    expect(init.credentials).toBe('same-origin')
+    expect(JSON.parse(String(init.body))).toEqual({ token: '' })
   })
 })

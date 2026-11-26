@@ -56,6 +56,14 @@ describe('encryptWithKey / decryptWithKey', () => {
     // 错密钥：GCM tag 校验失败
     expect(() => decryptWithKey(Buffer.alloc(KEY_BYTES, 8), good)).toThrow()
   })
+
+  it('四段但段值缺失（外部构造的畸形载荷）：段值按空串处理，长度不符即拒', () => {
+    // split 由调用方提供：任何实现「四段但取不到值」的载荷都不该把 undefined 当密文用
+    const sparse = {
+      split: () => [CIPHER_VERSION, undefined, undefined, undefined],
+    } as unknown as string
+    expect(() => decryptWithKey(KEY, sparse)).toThrow('密文格式不受支持')
+  })
 })
 
 describe('loadOrCreateKey', () => {
@@ -157,5 +165,35 @@ describe('createLocalCipher', () => {
     const cipher = createLocalCipher({ keyFile: '/data/secret.key', io: io().io })
     const other = createLocalCipher({ keyFile: '/data/other.key', io: io().io })
     expect(() => other.decrypt(cipher.encrypt('v'))).toThrow()
+  })
+
+  it('没注入 log：走缺省空日志，可用性照旧按 false 报', () => {
+    const cipher = createLocalCipher({
+      keyFile: '/data/secret.key',
+      io: {
+        exists: () => true,
+        read: () => {
+          throw new Error('EACCES')
+        },
+      },
+    })
+    expect(cipher.available()).toBe(false)
+    expect(() => cipher.encrypt('x')).toThrow(/插件密钥不可用/u)
+  })
+
+  it('密钥 IO 抛的不是 Error：原因取 String(error)，不吞掉也不回显密钥内容', () => {
+    const cipher = createLocalCipher({
+      keyFile: '/data/secret.key',
+      io: {
+        exists: () => true,
+        read: () => {
+          // 某些底层实现（原生 addon / 跨进程桥）抛的是字符串或对象，不是 Error
+          const raw: unknown = 'EACCES-raw'
+          throw raw
+        },
+      },
+    })
+    expect(cipher.available()).toBe(false)
+    expect(() => cipher.encrypt('x')).toThrow('插件密钥不可用：EACCES-raw')
   })
 })

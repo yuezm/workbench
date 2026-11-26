@@ -6,6 +6,8 @@
  * 第一秒抛出可读错误，而不是等浏览器来敲门才发现没有鉴权。
  */
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   ConfigError,
@@ -19,6 +21,7 @@ import {
   loadServerConfig,
   parsePort,
   readTokenFile,
+  TOKEN_FILE,
 } from '@workbench/server/config'
 
 const HOME = path.join(path.sep, 'home', 'me')
@@ -124,6 +127,23 @@ describe('loadServerConfig', () => {
     expect(config.tokenSource).toBe('file')
   })
 
+  it('不注入 token 文件的 IO：按真实文件系统读（缺省就是 existsSync + readFileSync）', () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'wb-config-token-'))
+    try {
+      writeFileSync(path.join(dataDir, TOKEN_FILE), ` ${TOKEN}\n`)
+      const config = loadServerConfig({
+        env: { [SERVER_ENV.dataDir]: dataDir },
+        cwd: CWD,
+        home: HOME,
+      })
+      expect(config.token).toBe(TOKEN)
+      expect(config.tokenSource).toBe('file')
+      expect(config.dataDir).toBe(path.resolve(CWD, dataDir))
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true })
+    }
+  })
+
   it('环境变量优先于 token 文件', () => {
     const config = loadServerConfig({
       ...base,
@@ -153,5 +173,39 @@ describe('loadServerConfig', () => {
     expect(() => loadServerConfig({ ...base, env: { [SERVER_ENV.port]: 'abc' } })).toThrow(
       ConfigError,
     )
+  })
+
+  it('WORKBENCH_UI：auto / on / off 原样收下；空值当 auto', () => {
+    for (const mode of ['auto', 'on', 'off'] as const) {
+      expect(loadServerConfig({ ...base, env: { [SERVER_ENV.ui]: mode } }).ui, mode).toBe(mode)
+    }
+    expect(loadServerConfig({ ...base, env: { [SERVER_ENV.ui]: '  ' } }).ui).toBe('auto')
+  })
+
+  it('WORKBENCH_UI 写了别的值：启动就报错（不静默当 auto，界面其实还在对外发）', () => {
+    expect(() => loadServerConfig({ ...base, env: { [SERVER_ENV.ui]: 'yes' } })).toThrow(
+      ConfigError,
+    )
+    expect(() => loadServerConfig({ ...base, env: { [SERVER_ENV.ui]: 'yes' } })).toThrow(
+      /只支持 auto \/ on \/ off（当前「yes」）/u,
+    )
+  })
+
+  it('一个来源都不注入：env / cwd / home 各自取 process.env / process.cwd() / homedir()', () => {
+    // 真实环境里若带着 WORKBENCH_*（CI 可能有），这一条就不是「零配置」了：暂时摘掉再测
+    const saved = new Map(Object.values(SERVER_ENV).map((key) => [key, process.env[key]]))
+    for (const key of saved.keys()) delete process.env[key]
+    try {
+      const config = loadServerConfig()
+      expect(config.host).toBe(DEFAULT_HOST)
+      expect(config.port).toBe(DEFAULT_PORT)
+      expect(config.dataDir).toBe(path.resolve(process.cwd(), defaultDataDir(homedir())))
+      expect(config.webDir).toBe(path.resolve(process.cwd(), 'out/web'))
+      expect(config.ui).toBe('auto')
+    } finally {
+      for (const [key, value] of saved) {
+        if (value !== undefined) process.env[key] = value
+      }
+    }
   })
 })

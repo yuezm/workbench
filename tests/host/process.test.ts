@@ -226,6 +226,18 @@ describe('defaultSpawn', () => {
     expect(options.env).toEqual({ ONLY: '1' })
   })
 
+  it('envMode: inherit 且不给 env：以宿主环境为底补齐（增量按空对象算）', () => {
+    spawnMock.mockReturnValue(fakeChild())
+
+    defaultSpawn('dsh', [], { envMode: 'inherit' })
+
+    const options = spawnMock.mock.calls[0]?.[2] as { env: NodeJS.ProcessEnv }
+    expect(options.env).not.toBe(process.env)
+    const pathKey = Object.keys(options.env).find((key) => key.toUpperCase() === 'PATH')
+    expect(pathKey).toBeDefined()
+    expect(options.env[pathKey!]).toBeTruthy()
+  })
+
   it.skipIf(process.platform !== 'win32')(
     'Windows 垫片：折回 node + 脚本，参数原样进 argv（不经 cmd 吃引号）',
     () => {

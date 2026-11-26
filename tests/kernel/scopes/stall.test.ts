@@ -197,6 +197,23 @@ const view = (over: Partial<View> = {}): View => ({
   ...over,
 })
 
+/**
+ * 阶段表在第 `dropAt` 次 `get` 落空、其余照常：投影在「扫描 → 收口」之间被并发重建的那一瞬。
+ *
+ * 判据（`core/stall.ts`）与收口（`scopes/stall.ts`）读同一张表，两次读之间行被删掉这一支
+ * 在产品路径上不会自然发生，但它正是「文案不能依赖行还在」的那条防御臂。
+ */
+function stagesMissingOn(dropAt: number, rows: WorkflowStage[]): Map<string, WorkflowStage> {
+  const stages = new Map(rows.map((row) => [row.id, row]))
+  const read = stages.get.bind(stages)
+  let reads = 0
+  stages.get = (key: string) => {
+    reads += 1
+    return reads === dropAt ? undefined : read(key)
+  }
+  return stages
+}
+
 describe('M55 静默哨兵', () => {
   it('盯上：会派活的阶段 + 已终态 run + 没有活跃 run / 开着的卡', () => {
     const watches = stallWatchList(view())
@@ -236,6 +253,21 @@ describe('M55 静默哨兵', () => {
     expect(nextWakeAt(view(), ENDED, env())).toBe(DUE)
     // 已停住的（有活跃 run）不算唤醒依据
     expect(nextWakeAt(view({ activeTaskIds: new Set(['t-1']) }), ENDED, env())).toBeNull()
+  })
+
+  it('阶段行在两次读之间被删：文案退回阶段 id，收口照常产事实', () => {
+    // 第 2 次读 = 收口取当前阶段那一行；行没了也要能写清楚「哪个阶段静默了」
+    const facts = stallSweepFacts(
+      view({ stages: stagesMissingOn(2, [stage(), blockedStage()]) }),
+      DUE,
+      env(),
+    )
+    const errored = facts.find((fact) => fact.type === 'stage.errored')
+    expect((errored?.payload as StageErroredPayload).stageName).toBe('修复')
+    const comment = facts.find((fact) => fact.type === 'task.comment_added')
+    expect((comment?.payload as { comment: { text: string } }).comment.text).toContain(
+      '阶段「st-fix」已静默 10 分钟',
+    )
   })
 })
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { formatLocalDateTime, formatLocalShort } from '@workbench/client-ui-kit/time'
 
 /**
@@ -66,5 +66,27 @@ describe('formatLocalShort', () => {
   it('非法输入原样返回', () => {
     expect(formatLocalShort('', 'Asia/Shanghai')).toBe('')
     expect(formatLocalShort('nope', 'Asia/Shanghai')).toBe('nope')
+  })
+})
+
+describe('残缺分量兜底', () => {
+  it('formatter 少给某个分量时补空再补零，不把 undefined 拼进界面', () => {
+    // 正常 Intl 一定给全五个分量；这里模拟「某个分量缺席」（如残缺的 polyfill / 裁剪实现），
+    // 确认 pick(...) 的 `?? ''` 兜底生效。
+    const parts: Intl.DateTimeFormatPart[] = [
+      { type: 'year', value: '2026' },
+      { type: 'month', value: '11' },
+      { type: 'day', value: '03' },
+      { type: 'hour', value: '08' },
+    ]
+    const spy = vi.spyOn(Intl.DateTimeFormat.prototype, 'formatToParts').mockReturnValue(parts)
+    try {
+      // 缺 minute → 空串 → pad 后补 '00'
+      expect(formatLocalDateTime('2026-11-03T00:00:00.000Z', 'Asia/Tokyo')).toBe('2026-11-03 08:00')
+    } finally {
+      spy.mockRestore()
+    }
+    // 撤销后恢复真实格式化
+    expect(formatLocalDateTime('2026-11-03T00:00:00.000Z', 'Asia/Tokyo')).toBe('2026-11-03 09:00')
   })
 })

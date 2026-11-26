@@ -139,7 +139,12 @@ describe('ThreadDetailPage', () => {
         ],
       },
     ])
-    const finishedByStage: Task = { ...parentTask, id: 'p9', title: '停在做完列', currentStageId: 's-done' }
+    const finishedByStage: Task = {
+      ...parentTask,
+      id: 'p9',
+      title: '停在做完列',
+      currentStageId: 's-done',
+    }
     setup(detailOf({ ...thread, taskIds: ['p9'], rootTaskIds: ['p9'] }, [finishedByStage]))
 
     const row = await screen.findByRole('button', { name: '打开任务：停在做完列' })
@@ -194,7 +199,9 @@ describe('ThreadDetailPage', () => {
       handoffFromStageId: 's0',
       handoffFromRunId: null,
     }
-    setup(detailOf({ ...thread, taskIds: ['p1', 'h1'], rootTaskIds: ['p1', 'h1'] }, [source, handed]))
+    setup(
+      detailOf({ ...thread, taskIds: ['p1', 'h1'], rootTaskIds: ['p1', 'h1'] }, [source, handed]),
+    )
 
     const row = await screen.findByRole('button', { name: '打开任务：派出去的工单' })
     // 平铺：没有子任务缩进，也没有「子任务」徽标
@@ -608,5 +615,22 @@ describe('ThreadDetailPage 跨流程话题（M50）', () => {
 
     expect(list).not.toHaveTextContent('需求交付')
     expect(list).not.toHaveTextContent('审查')
+  })
+
+  it('承接任务的来源工单不在本话题里：血缘退回来源 id 前 8 位', async () => {
+    const orphan: Task = {
+      ...parentTask,
+      id: 'o1',
+      title: '承接来的任务',
+      handoffFromTaskId: 'zzz-not-here',
+      handoffFromStageId: 's9',
+      handoffFromRunId: 'r1',
+      parentTaskId: null,
+    }
+    const row: ThreadRow = { ...thread, taskIds: ['p1', 'o1'], rootTaskIds: ['p1', 'o1'] }
+    setup(detailOf(row, [parentTask, orphan]))
+
+    const list = await screen.findByRole('region', { name: '任务列表' })
+    expect(list).toHaveTextContent('承接自 zzz-not-')
   })
 })

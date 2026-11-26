@@ -285,6 +285,18 @@ describe('resolvePluginConfig', () => {
     })
   })
 
+  it('内置插件：已声明且设置里已写入的键不重复收（声明字段归通用表单）', () => {
+    // `port` 走 manifest 声明那条路进 config；内置插件透传未声明键的那一圈必须跳过它，
+    // 否则同一键会有两个来源（类型收窄被绕过）。
+    const setting = settingOf({ config: { port: 9_001 } })
+    expect(resolvePluginConfig(manifest, setting, {}, true)).toEqual({
+      port: 9_001,
+      path: '/webhook',
+      enabled: true,
+      mode: 'a',
+    })
+  })
+
   it('内置插件：未声明的非标量（脏投影里的对象 / 数组）不下发', () => {
     const bare: PluginManifest = {
       id: 'feishu',

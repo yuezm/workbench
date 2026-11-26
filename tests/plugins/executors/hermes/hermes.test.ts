@@ -32,7 +32,7 @@ import {
   providerOfModel,
   toRuntimeModelId,
 } from '@workbench/executor-hermes/models'
-import { readCliVersion } from '@workbench/executor-hermes/process'
+import { collect, readCliVersion } from '@workbench/executor-hermes/process'
 import { probeHermesRuntime } from '@workbench/executor-hermes/probe'
 import { executeHermesRun, type HermesOptions } from '@workbench/executor-hermes/run'
 import { readSessionState } from '@workbench/executor-hermes/session'
@@ -1579,6 +1579,60 @@ describe('readCliVersion（一次性命令收集）', () => {
     })
     expect(await readCliVersion(exeSdk, 'hermes', 50)).toBe('0.22.5')
     expect(h.calls[1].options.shell).toBe(false)
+  })
+})
+
+describe('collect（一次性命令收集）', () => {
+  it('正常退出：stdout / stderr / 退出码都原样带回，不算超时也不算启动失败', async () => {
+    const h = harness((_args, child) => {
+      child.emitStdout('{"ok":true}\n')
+      child.emitStderr('warn: something\n')
+      child.close(0)
+    })
+
+    await expect(
+      collect(fakeSdk({ spawn: h.spawn }), NODE, ['--probe'], 50),
+    ).resolves.toMatchObject({
+      stdout: '{"ok":true}\n',
+      stderr: 'warn: something\n',
+      code: 0,
+      timedOut: false,
+      spawnError: null,
+    })
+  })
+
+  it('stderr 按插件的 OUTPUT_TAIL_LIMIT 截尾（超长诊断只留尾部）', async () => {
+    const h = harness((_args, child) => {
+      child.emitStderr('x'.repeat(OUTPUT_TAIL_LIMIT + 100))
+      child.close(1)
+    })
+
+    const collected = await collect(fakeSdk({ spawn: h.spawn }), NODE, [], 50)
+    expect(collected.code).toBe(1)
+    expect(collected.stderr.startsWith('…')).toBe(true)
+    expect(collected.stderr).toHaveLength(OUTPUT_TAIL_LIMIT + 1)
+  })
+
+  it('命令解析不到：不打进程，按 spawnError 返回（不 reject）', async () => {
+    const h = harness()
+    const collected = await collect(
+      fakeSdk({ spawn: h.spawn, resolve: () => ({ path: null, error: '没有 hermes' }) }),
+      'hermes',
+      [],
+      50,
+    )
+    expect(collected.spawnError?.message).toBe('没有 hermes')
+    expect(h.calls).toHaveLength(0)
+  })
+
+  it('超时：杀掉进程树并标记 timedOut（结果仍带回已收到的输出）', async () => {
+    const h = harness((_args, child) => {
+      child.emitStdout('慢半拍\n')
+    })
+    const collected = await collect(fakeSdk({ spawn: h.spawn, killTree: h.killTree }), NODE, [], 5)
+    expect(collected.timedOut).toBe(true)
+    expect(h.killedTrees).toHaveLength(1)
+    expect(collected.stdout).toBe('慢半拍\n')
   })
 })
 

@@ -21,8 +21,16 @@ import {
   type StageInput,
 } from '@workbench/protocol/entities'
 
+/**
+ * 规范形态的阶段：出口表恒为数组（缺字段的老数据由下面几个函数补成 `[]`）。
+ *
+ * 用它替代散落的 `stage.exits ?? []`：只要拿到这个类型，就说明出口表已被归一，
+ * 调用方不必再兜底。`handoffs` 不在此列——它允许保持缺省（`undefined`），消费方按需兜底。
+ */
+export type NormalizedStage = StageInput & { exits: readonly StageExitInput[] }
+
 /** 新阶段的默认值（新建工作流 / 添加阶段共用）：进到这个阶段不派活，由人拖着走。 */
-export function emptyStage(name: string): StageInput {
+export function emptyStage(name: string): NormalizedStage {
   return {
     name,
     entryMode: 'none',
@@ -46,7 +54,7 @@ export function emptyStage(name: string): StageInput {
 }
 
 /** 内置阶段的最小输入：进入时停下，等人手动操作。 */
-export function builtinStageDraft(key: BuiltinStageKey): StageInput {
+export function builtinStageDraft(key: BuiltinStageKey): NormalizedStage {
   return { ...emptyStage(BUILTIN_STAGE_NAMES[key]), builtin: key }
 }
 
@@ -91,7 +99,7 @@ export function firstUserStageIndex(stages: readonly StageInput[]): number {
  *
  * 幂等：对已经规范化的列表再跑一次，顺序与字段都不变。
  */
-export function withBuiltinStages(stages: readonly StageInput[]): StageInput[] {
+export function withBuiltinStages(stages: readonly StageInput[]): NormalizedStage[] {
   const claimed = new Map<BuiltinStageKey, { draft: StageInput; from: number }>()
   const users: Array<{ draft: StageInput; from: number }> = []
   stages.forEach((stage, from) => {
@@ -140,7 +148,7 @@ export function withBuiltinStages(stages: readonly StageInput[]): StageInput[] {
 export function dropStageIndexes(
   stages: readonly StageInput[],
   removed: readonly number[],
-): StageInput[] {
+): NormalizedStage[] {
   const gone = new Set(removed)
   const target = (index: number | null | undefined): number | null => {
     if (index == null) return null
@@ -203,7 +211,7 @@ export function nextUserStageName(stages: readonly StageInput[]): string {
 
 /** 插入的结果：新列表与新区段的下标（编辑器要顺手展开它） */
 export interface StageInsert {
-  stages: StageInput[]
+  stages: NormalizedStage[]
   index: number
 }
 
@@ -213,13 +221,16 @@ export interface StageInsert {
  * 与上/下移、删除共用同一套「下标重映射」规则：不重映射的话，指向「已阻塞 / 已完成」的
  * 流转会静默差一位。
  */
-export function insertUserStage(stages: readonly StageInput[], stage: StageInput): StageInsert {
+export function insertUserStage(
+  stages: readonly StageInput[],
+  stage: NormalizedStage,
+): StageInsert {
   const at = insertStageIndex(stages)
   const shift = (index: number | null | undefined): number | null => {
     if (index == null) return null
     return index >= at ? index + 1 : index
   }
-  const next: StageInput[] = stages.map((item) => ({
+  const next: NormalizedStage[] = stages.map((item) => ({
     ...item,
     exits: remapExits(item.exits, shift),
   }))

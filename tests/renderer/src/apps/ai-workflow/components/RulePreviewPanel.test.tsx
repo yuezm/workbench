@@ -63,6 +63,17 @@ describe('RulePreviewPanel（M36-F）', () => {
     expect(screen.getByText('落点已失效')).toBeInTheDocument()
   })
 
+  it('落点只有工作流（阶段未指定）：显示「→ 工作流id」', async () => {
+    kernel.setViewAnyParams('rules.preview', {
+      matches: [match({ stageId: null, workflowId: 'wf-9' })],
+      wouldCreate: true,
+    })
+    render(<RulePreviewPanel />)
+    await userEvent.click(screen.getByRole('button', { name: '试跑' }))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('会建任务'))
+    expect(screen.getByText('→ wf-9')).toBeInTheDocument()
+  })
+
   it('样本字段可改：来源 / 类型 / 对象都跟着输入走', async () => {
     kernel.setViewAnyParams('rules.preview', { matches: [], wouldCreate: false })
     render(<RulePreviewPanel />)

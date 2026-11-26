@@ -19,8 +19,13 @@ import type { PluginManifest } from '@workbench/protocol/manifest'
 import type { Fact } from '@workbench/kernel/core/types'
 import type { ChannelRegistryEntry } from '@workbench/plugins-registry'
 import type { SdkHost } from '@workbench/capabilities/types'
-import type { ChannelsEffects, ChannelsStore } from '@workbench/host/channels'
-import { createChannels } from '@workbench/host/channels'
+import type { ChannelsEffects, ChannelsOptions, ChannelsStore } from '@workbench/host/channels'
+import {
+  TOPIC_WINDOW_MS,
+  createChannels,
+  matchTopic,
+  submitTitleOf,
+} from '@workbench/host/channels'
 import { sample } from './store/test-support'
 
 const AT = '2026-01-01T00:00:00.000Z'
@@ -1516,6 +1521,544 @@ describe('createChannels：入站派活与进展（M44）', () => {
     expect(inputs[0]).toMatchObject({ type: 'chat.create' })
     expect(inputs[0]).not.toHaveProperty('threadId')
     await hub.stopAll()
+  })
+
+  // ---------------------------------------------------------------- 边界形状
+
+  it('平台没给消息引用：幂等键用序号兜底（老调用的口径）', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好')
+
+    expect(outcome.accepted).toBe(true)
+    expect(dispatchInputs(dispatch).map((input) => input['commandId'])).toEqual([
+      'channel:feishu:n1:create',
+      'channel:feishu:n1:send',
+    ])
+    await hub.stopAll()
+  })
+
+  it('有会话 id 但没给消息引用：话题入口键也用序号兜底', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
+    await hub.startAll()
+
+    await hub.submit('feishu', '你好', { chatId: 'oc_1' })
+
+    // 序号同时被幂等键与话题入口键消耗：这里只钉「有兜底键」这件事
+    expect(dispatchInputs(dispatch).find((input) => input['type'] === 'thread.open')).toMatchObject(
+      { externalRef: expect.stringMatching(/^feishu:oc_1:n\d+$/u) },
+    )
+    await hub.stopAll()
+  })
+
+  it('一句话超过回执上限：截断并加省略号（平台侧单条也有上限）', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub } = hubOf({ entries: [feishu], config: { agent: 'x'.repeat(300) } })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好', { ref: 'om_1' })
+
+    expect(outcome.accepted).toBe(false)
+    expect([...outcome.receipt]).toHaveLength(201)
+    expect(outcome.receipt.endsWith('…')).toBe(true)
+    await hub.stopAll()
+  })
+
+  it('会话标题取首行并截断：全是空白行时退回原文，超长按码点切', () => {
+    expect(submitTitleOf('\n  \n\t\n')).toBe('')
+    expect(submitTitleOf('第一行\n第二行')).toBe('第一行')
+    // 24 个码点以内原样；超了按 24 切（不切断代理对）
+    expect(submitTitleOf('🧪'.repeat(30))).toBe('🧪'.repeat(24))
+  })
+
+  it('连接覆盖只有一个空白形状的值：目标归一见底，按「找不到智能体」回人话', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
+    await hub.startAll()
+
+    // 通道把平台字段原样转进来（类型上是 string，运行时可能是别的形状）：trim 完是空白
+    const blank = { trim: () => '   ' } as unknown as string
+    const outcome = await hub.submit('feishu', '你好', { ref: 'om_1' }, blank)
+
+    expect(outcome.accepted).toBe(false)
+    expect(outcome.receipt).toContain('找不到智能体')
+    await hub.stopAll()
+  })
+
+  it('入口找不到这个通道键 + 连接覆盖：配置按空对象算，照样派得出去', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub } = hubOf({ entries: [feishu] })
+    await hub.startAll()
+
+    // registry 里没有 `ghost`（插件已卸载 / 键改名）：`entry === undefined` 那一臂
+    const outcome = await hub.submit('ghost', '你好', { ref: 'om_1' }, 'a1')
+
+    expect(outcome.accepted).toBe(true)
+    await hub.stopAll()
+  })
+
+  it('configOf 没给出配置（undefined）：按空对象算，连接覆盖仍然生效', async () => {
+    const feishu = captureEntry('feishu')
+    const dispatch = vi.fn(() => ({
+      facts: [
+        { type: 'conversation.created', payload: { conversation: { id: 'conversation-1' } } },
+      ],
+    }))
+    // 配置行还没读到（例如刚装的插件）：`configOf` 这时给的是 undefined，不是 {}。
+    // 类型上它承诺一定有配置对象，运行期由装配根决定，所以这里按运行期形状注入。
+    const configOf = (() => undefined) as unknown as ChannelsOptions['configOf']
+    const hub = createChannels({
+      store: { query: vi.fn(() => AGENTS) } as unknown as ChannelsStore,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [feishu],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf,
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好', { ref: 'om_1' }, 'a1')
+
+    expect(outcome.accepted).toBe(true)
+    await hub.stopAll()
+  })
+
+  it('进展事实的形状不对（缺会话 id / 正文为空）：都不算进展', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
+    await hub.startAll()
+    await hub.submit('feishu', '你好', { ref: 'om_1' })
+
+    const weird = (payload: Record<string, unknown>): Fact =>
+      ({
+        type: 'message.appended',
+        actor: { kind: 'host', via: 'scheduler' },
+        at: AT,
+        seq: 1,
+        payload,
+      }) as Fact
+    // conversationId 不是字符串：当没有会话
+    hub.dispatch([weird({ role: 'assistant', conversationId: 42, content: '有正文' })])
+    // 压根没有 conversationId
+    hub.dispatch([weird({ role: 'assistant', content: '没有会话 id' })])
+    // 正文不是字符串且没有 error：归一成空文本
+    hub.dispatch([
+      weird({ conversationId: 'conversation-1', role: 'assistant', content: 42, error: null }),
+    ])
+    // 正文只有空白
+    hub.dispatch([
+      weird({ conversationId: 'conversation-1', role: 'assistant', content: '   ', error: null }),
+    ])
+    // 进展扇出是同步的（`dispatch` → `deliverProgress`）：反例断言不需要等固定毫秒
+    expect(feishu.progress).toEqual([])
+    await hub.stopAll()
+  })
+
+  it('进展的会话不属于任何已启动通道：不吵任何人（runtime 已经不在）', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub } = hubOf({ entries: [feishu], config: { agent: 'a1' } })
+    await hub.startAll()
+    // 用不在 registry 里的键提交：submitted 记的是它，但那份 runtime 不存在
+    await hub.submit('ghost', '别人的话', { ref: 'om_g' }, 'a1')
+
+    hub.dispatch([progressFact('conversation-1', '做完了')])
+    // 进展扇出是同步的：没有人提交过这个会话，所以谁都不该收到（无需等待）
+    expect(feishu.progress).toEqual([])
+    await hub.stopAll()
+  })
+
+  it('进展回调自己抛错：只记日志，别的通道照常收到', async () => {
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const broken: ChannelRegistryEntry = {
+      key: 'feishu',
+      label: 'feishu',
+      manifest: MANIFEST('feishu'),
+      plugin: {
+        async start(ctx) {
+          ctx.onProgress(() => {
+            throw new Error('回帖失败')
+          })
+          return () => undefined
+        },
+      },
+    }
+    const { hub } = hubOf({ entries: [broken], config: { agent: 'a1' } })
+    await hub.startAll()
+    await hub.submit('feishu', '你好', { ref: 'om_1' })
+
+    hub.dispatch([progressFact('conversation-1', '做完了')])
+
+    await vi.waitFor(() =>
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('进展回调失败：回帖失败')),
+    )
+    await hub.stopAll()
+  })
+
+  it('读不到会话的活跃轮：当作不忙（宁可让内核拒绝并回一句，也不静默排死）', async () => {
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const feishu = captureEntry('feishu')
+    const store = {
+      query: vi.fn((view: string) => {
+        if (view === 'agents.all') return AGENTS
+        if (view === 'threads.open') return [topicOf()]
+        if (view === 'conversations.byThread') return [{ id: 'conversation-9' }]
+        if (view === 'runs.active-by-conversation') throw new Error('活跃轮视图坏了')
+        return []
+      }),
+    } as unknown as ChannelsStore
+    const dispatch = vi.fn((input: Record<string, unknown>) =>
+      input['type'] === 'thread.open'
+        ? { facts: [{ type: 'thread.opened', payload: { thread: { id: 'thread-1' } } }] }
+        : { facts: [] },
+    )
+    const hub = createChannels({
+      store,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [feishu],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf: () => ({ agent: 'a1' }),
+      now: () => AT,
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '还有个问题', {
+      ref: 'default:om_2',
+      chatId: 'oc_1',
+      scope: 'default',
+    })
+
+    expect(outcome.accepted).toBe(true)
+    expect(outcome.conversationId).toBe('conversation-9')
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('读会话活跃轮失败'))
+    await hub.stopAll()
+  })
+
+  it('排队两句：终态后先补发第一句，第二句还在队里', async () => {
+    const feishu = captureEntry('feishu')
+    const { hub, dispatch } = hubOf({
+      entries: [feishu],
+      config: { agent: 'a1' },
+      threads: [topicOf()],
+      conversations: [{ id: 'conversation-9' }],
+      active: [{ id: 'run-1' }],
+      now: () => AT,
+    })
+    await hub.startAll()
+    const hints = { chatId: 'oc_1', scope: 'default' }
+    await hub.submit('feishu', '第一句', { ...hints, ref: 'default:om_1' })
+    await hub.submit('feishu', '第二句', { ...hints, ref: 'default:om_2' })
+
+    hub.dispatch([progressFact('conversation-9', '这一轮说完了')])
+    // 一次只补一句：剩下的等这一轮再说（等条件成立，不睡固定毫秒）
+    await vi.waitFor(() =>
+      expect(
+        dispatchInputs(dispatch)
+          .filter((input) => input['type'] === 'chat.send')
+          .map((input) => input['content']),
+      ).toEqual(['第一句']),
+    )
+
+    hub.dispatch([progressFact('conversation-9', '又说完了')])
+    await vi.waitFor(() =>
+      expect(
+        dispatchInputs(dispatch)
+          .filter((input) => input['type'] === 'chat.send')
+          .map((input) => input['content']),
+      ).toEqual(['第一句', '第二句']),
+    )
+    await hub.stopAll()
+  })
+
+  it('通道经 context.submit 派活：与 hub.submit 同一条路', async () => {
+    let capturedCtx: ChannelContext | null = null
+    const entry: ChannelRegistryEntry = {
+      key: 'feishu',
+      label: 'feishu',
+      manifest: MANIFEST('feishu'),
+      plugin: {
+        async start(ctx) {
+          capturedCtx = ctx
+          return () => undefined
+        },
+      },
+    }
+    const { hub, dispatch } = hubOf({ entries: [entry], config: { agent: 'a1' } })
+    await hub.startAll()
+
+    const outcome = await (capturedCtx as unknown as ChannelContext).submit(
+      '帮我看看今天的待办',
+      { ref: 'om_ctx' },
+      '小助',
+    )
+
+    expect(outcome.accepted).toBe(true)
+    expect(dispatchInputs(dispatch)[0]).toMatchObject({
+      type: 'chat.create',
+      commandId: 'channel:feishu:om_ctx:create',
+    })
+    await hub.stopAll()
+  })
+
+  it('onProgress 返回的退订函数生效：退订后不再收到进展', async () => {
+    const progress: ChannelProgress[] = []
+    let unsubscribe: (() => void) | null = null
+    let ctxRef: ChannelContext | null = null
+    const entry: ChannelRegistryEntry = {
+      key: 'feishu',
+      label: 'feishu',
+      manifest: MANIFEST('feishu'),
+      plugin: {
+        async start(ctx) {
+          ctxRef = ctx
+          unsubscribe = ctx.onProgress((item) => progress.push(item))
+          return () => undefined
+        },
+      },
+    }
+    const { hub } = hubOf({ entries: [entry], config: { agent: 'a1' } })
+    await hub.startAll()
+    await hub.submit('feishu', '你好', { ref: 'om_1' })
+
+    unsubscribe!()
+    hub.dispatch([progressFact('conversation-1', '做完了')])
+    // 退订后不再收到：扇出同步，断言立即成立（等待只会掩盖「退订其实没生效」）
+    expect(ctxRef).not.toBeNull()
+    expect(progress).toEqual([])
+    await hub.stopAll()
+  })
+
+  it('开话题没拿到 thread.opened 事实：会话不带 threadId（不猜 id）', async () => {
+    const feishu = captureEntry('feishu')
+    const dispatch = vi.fn((input: Record<string, unknown>) =>
+      input['type'] === 'thread.open'
+        ? { facts: [] }
+        : { facts: [{ type: 'conversation.created', payload: { conversation: { id: 'cv-1' } } }] },
+    )
+    const hub = createChannels({
+      store: { query: vi.fn(() => AGENTS) } as unknown as ChannelsStore,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [feishu],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf: () => ({ agent: 'a1' }),
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好', { ref: 'default:om_1', chatId: 'oc_1' })
+
+    expect(outcome.accepted).toBe(true)
+    const create = dispatchInputs(dispatch).find((input) => input['type'] === 'chat.create')
+    expect(create).not.toHaveProperty('threadId')
+    await hub.stopAll()
+  })
+
+  it('thread.opened 事实缺线程体：同样不猜 threadId', async () => {
+    const feishu = captureEntry('feishu')
+    const dispatch = vi.fn((input: Record<string, unknown>) =>
+      input['type'] === 'thread.open'
+        ? { facts: [{ type: 'thread.opened', payload: {} }] }
+        : { facts: [{ type: 'conversation.created', payload: { conversation: { id: 'cv-1' } } }] },
+    )
+    const hub = createChannels({
+      store: { query: vi.fn(() => AGENTS) } as unknown as ChannelsStore,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [feishu],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf: () => ({ agent: 'a1' }),
+    })
+    await hub.startAll()
+
+    await hub.submit('feishu', '你好', { ref: 'default:om_1', chatId: 'oc_1' })
+
+    expect(
+      dispatchInputs(dispatch).find((input) => input['type'] === 'chat.create'),
+    ).not.toHaveProperty('threadId')
+    await hub.stopAll()
+  })
+
+  it('会话没建成（拿不到 conversation.created）：回一句人话，不把异常抛给通道', async () => {
+    const feishu = captureEntry('feishu')
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const dispatch = vi.fn(() => ({ facts: [] }))
+    const hub = createChannels({
+      store: { query: vi.fn(() => AGENTS) } as unknown as ChannelsStore,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [feishu],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf: () => ({ agent: 'a1' }),
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好', { ref: 'om_1' })
+
+    expect(outcome.accepted).toBe(false)
+    expect(outcome.receipt).toContain('没派出去：会话没建成')
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('入站文本没派出去'))
+    await hub.stopAll()
+  })
+
+  it('会话事实缺会话体：同样按「会话没建成」处理', async () => {
+    const feishu = captureEntry('feishu')
+    const dispatch = vi.fn(() => ({ facts: [{ type: 'conversation.created', payload: {} }] }))
+    const hub = createChannels({
+      store: { query: vi.fn(() => AGENTS) } as unknown as ChannelsStore,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [feishu],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf: () => ({ agent: 'a1' }),
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好', { ref: 'om_1' })
+
+    expect(outcome.accepted).toBe(false)
+    expect(outcome.receipt).toContain('会话没建成')
+    await hub.stopAll()
+  })
+
+  it('读智能体列表失败：回一句「读不到智能体列表」而不是抛', async () => {
+    const feishu = captureEntry('feishu')
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const store = {
+      query: vi.fn((view: string) => {
+        if (view === 'agents.all') throw new Error('智能体视图坏了')
+        return []
+      }),
+    } as unknown as ChannelsStore
+    const hub = createChannels({
+      store,
+      effects: { dispatch: vi.fn(() => ({ facts: [] })) } as unknown as ChannelsEffects,
+      entries: [feishu],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf: () => ({ agent: 'a1' }),
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '你好', { ref: 'om_1' })
+
+    expect(outcome.accepted).toBe(false)
+    expect(outcome.receipt).toContain('读不到智能体列表')
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('读智能体列表失败'))
+    await hub.stopAll()
+  })
+
+  it('接上话题但内核拒绝发送：回一句说明，不抛给通道', async () => {
+    const feishu = captureEntry('feishu')
+    const log = vi.mocked(fakeSdkHost.log)
+    log.mockClear()
+    const store = {
+      query: vi.fn((view: string) => {
+        if (view === 'agents.all') return AGENTS
+        if (view === 'threads.open') return [topicOf()]
+        if (view === 'conversations.byThread') return [{ id: 'conversation-9' }]
+        if (view === 'runs.active-by-conversation') return []
+        return []
+      }),
+    } as unknown as ChannelsStore
+    const dispatch = vi.fn((input: Record<string, unknown>) => {
+      if (input['type'] === 'chat.send') throw new Error('同一会话还在跑')
+      return { facts: [] }
+    })
+    const hub = createChannels({
+      store,
+      effects: { dispatch } as unknown as ChannelsEffects,
+      entries: [feishu],
+      sdkHost: fakeSdkHost,
+      timeoutMs: 20,
+      configOf: () => ({ agent: 'a1' }),
+      now: () => AT,
+    })
+    await hub.startAll()
+
+    const outcome = await hub.submit('feishu', '还有个问题', {
+      ref: 'default:om_2',
+      chatId: 'oc_1',
+      scope: 'default',
+    })
+
+    expect(outcome.accepted).toBe(false)
+    expect(outcome.receipt).toContain('没接上「报销流程」')
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('没接上话题'))
+    await hub.stopAll()
+  })
+})
+
+describe('matchTopic：读不到话题就退化成「没有话题」', () => {
+  const threadOf = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'thread-1',
+    source: 'feishu',
+    externalRef: 'default:oc_1:om_root',
+    title: '报销流程',
+    status: 'open',
+    lastActivityAt: AT,
+    ...over,
+  })
+  const storeOf = (query: (view: string) => unknown): ChannelsStore =>
+    ({ query: vi.fn(query) }) as unknown as ChannelsStore
+  const NOW = Date.parse(AT)
+
+  it('话题清单查询失败：null（宁可变回建新会话，也不丢话）', () => {
+    const store = storeOf(() => {
+      throw new Error('视图坏了')
+    })
+    expect(matchTopic(store, 'feishu', 'default:oc_1:', undefined, NOW, TOPIC_WINDOW_MS)).toBeNull()
+  })
+
+  it('话题下的会话查询失败：null', () => {
+    const store = storeOf((view) => {
+      if (view === 'threads.open') return [threadOf()]
+      throw new Error('会话视图坏了')
+    })
+    expect(matchTopic(store, 'feishu', 'default:oc_1:', undefined, NOW, TOPIC_WINDOW_MS)).toBeNull()
+  })
+
+  it('命中的话题没有任何会话：null', () => {
+    const store = storeOf((view) => (view === 'threads.open' ? [threadOf()] : []))
+    expect(
+      matchTopic(store, 'feishu', 'default:oc_1:', { threadRef: 'om_1' }, NOW, TOPIC_WINDOW_MS),
+    ).toBeNull()
+  })
+
+  it('老话题行没有入口键：不算候选；空前缀时按空键比较（不匹配任何结构证据）', () => {
+    const store = storeOf((view) =>
+      view === 'threads.open' ? [threadOf({ externalRef: undefined })] : [],
+    )
+    expect(
+      matchTopic(store, 'feishu', 'default:oc_1:', { threadRef: 'om_1' }, NOW, TOPIC_WINDOW_MS),
+    ).toBeNull()
+    // 空前缀（没有会话 id 的老调用）：空入口键不会匹配任何结构证据
+    expect(matchTopic(store, 'feishu', '', { threadRef: 'om_1' }, NOW, TOPIC_WINDOW_MS)).toBeNull()
+  })
+
+  it('结构证据优先于活跃窗口：超出窗口但回复的是话题里的消息，仍接上', () => {
+    const store = storeOf((view) => {
+      if (view === 'threads.open') return [threadOf({ lastActivityAt: '2020-01-01T00:00:00.000Z' })]
+      if (view === 'conversations.byThread') return [{ id: 'cv-1' }]
+      return []
+    })
+    const hit = matchTopic(
+      store,
+      'feishu',
+      'default:oc_1:',
+      { rootRef: 'om_root' },
+      NOW,
+      TOPIC_WINDOW_MS,
+    )
+    expect(hit).toEqual({ threadId: 'thread-1', conversationId: 'cv-1', title: '报销流程' })
+    // 没有结构证据、又超出窗口：不接（按新话题处理）
+    expect(matchTopic(store, 'feishu', 'default:oc_1:', undefined, NOW, TOPIC_WINDOW_MS)).toBeNull()
   })
 })
 

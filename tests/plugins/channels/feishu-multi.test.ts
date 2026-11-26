@@ -273,6 +273,30 @@ describe('飞书通道：连接配置（M45）', () => {
     expect(unnamed[0]?.label).toBe('连接 1')
   })
 
+  it('readFeishuConnections：只有 name 时用 name 当 id；空白字段一律当没配', () => {
+    const connections = readFeishuConnections({
+      connections: JSON.stringify([
+        { name: '工作台助手', user: 'ou_1' },
+        { id: '   ', label: '   ', profile: null, user: 'ou_2' },
+      ]),
+    })
+    // 中文名归一成空 slug → id 落回 c1；展示名仍用 name。第二条的 id/label 都是空白 → c2
+    expect(connections.map((conn) => conn.id)).toEqual(['c1', 'c2'])
+    expect(connections[0]?.label).toBe('工作台助手')
+    expect(connections[1]?.label).toBe('连接 2')
+  })
+
+  it('readFeishuConnections：归一后撞名的空白 id 也会加后缀（聚合键必须唯一）', () => {
+    const connections = readFeishuConnections({
+      connections: JSON.stringify([
+        { id: 'c2', user: 'ou_1' },
+        // 归一成空 → 兜底 c2，但 c2 已被占：后缀保证唯一
+        { id: '...', user: 'ou_2' },
+      ]),
+    })
+    expect(connections.map((conn) => conn.id)).toEqual(['c2', 'c2-2'])
+  })
+
   it('readFeishuConnections：没有 connections 时把旧字段当唯一连接（兼容旧配置）', () => {
     const connections = readFeishuConnections({
       lark: 'lark-cli --profile legacy',

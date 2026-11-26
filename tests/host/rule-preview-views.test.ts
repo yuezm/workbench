@@ -92,6 +92,33 @@ describe('rules.preview', () => {
     expect(preview.matches[0]?.enabled).toBe(false)
     expect(preview.wouldCreate).toBe(false)
   })
+
+  it('不给参（渲染层还没填完）：按空事件预演，不抛、不建东西', () => {
+    const db = memory()
+    seed(db, [rule()])
+    expect(queryView(db, 'rules.preview')).toEqual({ matches: [], wouldCreate: false })
+  })
+
+  it('summary 传了就带上（非字符串按 null 归一）', () => {
+    const db = memory()
+    seed(db, [rule()])
+    const withSummary = queryView(db, 'rules.preview', {
+      source: 'github',
+      type: 'issues.opened',
+      subject: '#42 登录页报错',
+      summary: '登录页 500',
+    }) as RulePreview
+    expect(withSummary.matches[0]?.title).toBe('#42 登录页报错')
+    // summary 不是字符串：当没写
+    expect(
+      queryView(db, 'rules.preview', {
+        source: 'github',
+        type: 'issues.opened',
+        subject: '#42 登录页报错',
+        summary: 42,
+      }),
+    ).toMatchObject({ wouldCreate: true })
+  })
 })
 
 describe('rules.next', () => {
@@ -112,5 +139,16 @@ describe('rules.next', () => {
     })
     expect(byId.get('event-1')?.nextAt).toBeNull()
     expect(byId.get('off-1')).toEqual({ ruleId: 'off-1', enabled: false, nextAt: null })
+  })
+
+  it('不给参：用系统时间与本机时区算下一次（渲染层不传也有答案）', () => {
+    const db = memory()
+    seed(db, [rule({ id: 'cron-1', when: { cron: '0 9 * * *' } })])
+
+    const rows = queryView(db, 'rules.next') as RuleNextFire[]
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.ruleId).toBe('cron-1')
+    expect(typeof rows[0]?.nextAt).toBe('string')
   })
 })

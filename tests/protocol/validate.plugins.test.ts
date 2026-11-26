@@ -134,6 +134,11 @@ describe('validateCommand: plugin.set（M7）', () => {
     )
   })
 
+  it('不写 config / secrets：两个可选块都可缺省（只改启停与授权）', () => {
+    const result = validateCommand(command('plugin.set', { pluginId: 'webhook', enabled: true }))
+    expect(result.ok).toBe(true)
+  })
+
   it('secrets：非对象 / 键名非法 / 非字符串 / 超长拒绝', () => {
     expect(invalid(command('plugin.set', { pluginId: 'webhook', secrets: 'x' }))).toContain(
       'secrets 必须是对象',

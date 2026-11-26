@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// check-diff-coverage.mjs — 改动行覆盖率门禁（默认 ≥90%，可用 MIN_DIFF_COVERAGE 覆盖）。
+// check-diff-coverage.mjs — 改动行覆盖率门禁（默认 ≥100%，可用 MIN_DIFF_COVERAGE 覆盖）。
 // 前置：先跑 `pnpm verify:coverage` 生成 coverage/coverage-final.json。
-// 用法: node scripts/check-diff-coverage.mjs [--base <ref>]   (默认 base: origin/HEAD → 常见分支探测)
+// 用法: node scripts/check-diff-coverage.mjs [--base <ref>] [--staged]
+//   --staged：只判**暂存区**（pre-commit 用）。默认判「merge base → 工作区」，
+//   含未暂存改动；部分暂存（git add -p）时两者不是一回事，钩子里必须用 --staged。
 // 退出码: 0 达标 / 1 未达标 / 2 无法运行（无覆盖率数据、无 merge base 等）
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
@@ -9,7 +11,9 @@ import path from 'node:path'
 import { BASE_MISSING_HINT, resolveBase } from './base-ref.mjs'
 
 const argBase = resolveBase()?.ref ?? ''
-const THRESHOLD = Number(process.env.MIN_DIFF_COVERAGE || 90)
+const THRESHOLD = Number(process.env.MIN_DIFF_COVERAGE || 100)
+/** 只判暂存区（pre-commit）：此时「要提交的内容」= index，不等于工作区 */
+const STAGED = process.argv.includes('--staged')
 const git = (args) => {
   try {
     return execFileSync('git', args, {
@@ -54,7 +58,9 @@ for (const [absKey, data] of Object.entries(cov)) {
 if (argBase === '') bail(BASE_MISSING_HINT)
 const mergeBase = git(['merge-base', argBase, 'HEAD'])?.trim()
 if (!mergeBase) bail('no merge base against ' + argBase + '（' + BASE_MISSING_HINT + '）')
-const tracked = git(['diff', '--unified=0', mergeBase, '--'])
+const diffArgs = ['diff', '--unified=0', mergeBase, '--']
+if (STAGED) diffArgs.splice(1, 0, '--cached')
+const tracked = git(diffArgs)
 if (tracked === null) bail('could not diff against ' + mergeBase)
 
 // 每个文件的新增行号集合
@@ -88,7 +94,8 @@ for (const line of tracked.split('\n')) {
   }
 }
 
-const untracked = git(['ls-files', '--others', '--exclude-standard'])
+// 暂存区模式不看未跟踪文件：它们没进 index，不属于「要提交的内容」
+const untracked = STAGED ? '' : git(['ls-files', '--others', '--exclude-standard'])
 if (untracked === null) bail('could not list untracked files')
 for (const f of untracked.split('\n').filter(Boolean)) {
   const rel = f.replace(/\\/g, '/')

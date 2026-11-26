@@ -141,4 +141,64 @@ describe('createEventStream', () => {
     stream.attach(bad)
     expect(() => stream.close()).not.toThrow()
   })
+
+  it('默认调度器（生产口径）：按 HEARTBEAT_MS 起表、unref 定时器，close 时清掉', () => {
+    const unref = vi.fn()
+    const handle = { unref }
+    const scheduled: Array<[unknown, number]> = []
+    const cleared: unknown[] = []
+    const setIntervalStub = vi.fn((callback: () => void, ms: number) => {
+      scheduled.push([callback, ms])
+      return handle
+    })
+    vi.stubGlobal('setInterval', setIntervalStub)
+    vi.stubGlobal('clearInterval', (h: unknown) => cleared.push(h))
+    try {
+      const stream = createEventStream()
+      const a = sink()
+      stream.attach(a)
+      expect(setIntervalStub).toHaveBeenCalledTimes(1)
+      expect(scheduled[0]?.[1]).toBe(HEARTBEAT_MS)
+      expect(unref).toHaveBeenCalledTimes(1)
+
+      // 心跳回调真的被交给定时器：触发一次，在线客户端收到注释行
+      ;(scheduled[0]?.[0] as () => void)()
+      expect(a.chunks.at(-1)).toBe(': ping\n\n')
+
+      stream.close()
+      expect(cleared).toEqual([handle])
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('默认调度器：unref:false 时不碰 unref；句柄没有 unref 也照常工作', () => {
+    let tick: (() => void) | null = null
+    // 宿主注入的假定时器不保证带 unref（部分测试/跨平台实现只给一个 id）
+    vi.stubGlobal('setInterval', (callback: () => void) => {
+      tick = callback
+      return 0
+    })
+    vi.stubGlobal('clearInterval', () => undefined)
+    try {
+      // unref:false：整个 unref 分支不执行
+      const plain = createEventStream({ unref: false })
+      const a = sink()
+      plain.attach(a)
+      ;(tick as unknown as () => void)()
+      expect(a.chunks.at(-1)).toBe(': ping\n\n')
+      plain.close()
+      expect(plain.size).toBe(0)
+
+      // 缺省 unref:true，但句柄是数字（没有 unref 方法）：可选调用直接跳过
+      const numeric = createEventStream()
+      const b = sink()
+      numeric.attach(b)
+      expect(b.chunks[0]).toBe(`retry: ${RETRY_MS}\n\n`)
+      numeric.close()
+      expect(numeric.size).toBe(0)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

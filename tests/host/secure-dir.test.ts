@@ -120,3 +120,59 @@ describe('secureDataDir：默认依赖（真 fs / 真 icacls）', () => {
     expect(result).toEqual({ hardened: false, error: 'boom' })
   })
 })
+
+describe('secureDataDir：账号名来源（USERNAME → USER → 空）', () => {
+  /** 临时改宿主环境：两个账号名都要能删干净，否则分支落不到。 */
+  const withEnv = (patch: Record<string, string | undefined>, run: () => void): void => {
+    const saved = Object.fromEntries(
+      Object.keys(patch).map((key) => [key, process.env[key]] as const),
+    )
+    try {
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+      run()
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  }
+
+  const winDeps = () => ({
+    platform: 'win32' as NodeJS.Platform,
+    chmodSync: vi.fn(),
+    execFileSync: vi.fn(),
+    log: vi.fn(),
+  })
+
+  it('USERNAME 为空时退回 USER（服务端形态下拿得到账号名）', () => {
+    withEnv({ USERNAME: undefined, USER: 'fallback-user' }, () => {
+      const deps = winDeps()
+      expect(secureDataDir('C:\\ud', deps)).toEqual({ hardened: true, error: null })
+      const [, args] = deps.execFileSync.mock.calls[0] as [string, string[]]
+      expect(args).toContain('fallback-user:(OI)(CI)F')
+    })
+  })
+
+  it('两个环境变量都没有：按「拿不到账号名」跳过，不猜账号', () => {
+    withEnv({ USERNAME: undefined, USER: undefined }, () => {
+      const deps = winDeps()
+      expect(secureDataDir('C:\\ud', deps)).toEqual({ hardened: false, error: 'USERNAME 为空' })
+      expect(deps.execFileSync).not.toHaveBeenCalled()
+    })
+  })
+
+  it('chmod 抛非 Error：文案用 String 兜底，仍不抛', () => {
+    const deps = posixDeps()
+    // 外部能力（真 fs / 真 icacls）抛出来的未必是 Error：类型上按 Error 收，运行期可能是字符串
+    const cause = '权限被拒' as unknown as Error
+    deps.chmodSync.mockImplementation(() => {
+      throw cause
+    })
+    expect(secureDataDir('/tmp/ud', deps)).toEqual({ hardened: false, error: '权限被拒' })
+    expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('权限被拒'))
+  })
+})

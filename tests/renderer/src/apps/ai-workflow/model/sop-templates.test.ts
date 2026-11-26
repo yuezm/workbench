@@ -375,3 +375,31 @@ describe('SOP_TEMPLATES', () => {
     expect(byName.get('测试设计')!.acceptance).toEqual([])
   })
 })
+
+describe('draftFromTemplate：目标值是空串（老模板把选项清空过）', () => {
+  it('空串按「没配」处理，产出 stageIndex=null 的 goto（保存前的悬空校验会指出来）', () => {
+    const template: SopTemplate = {
+      id: 'blank-target',
+      name: '空目标',
+      description: '',
+      basis: '',
+      stages: [
+        { name: '甲', entryMode: 'agent', instructions: '', onComplete: '', agentRole: '' },
+        {
+          name: '乙',
+          entryMode: 'agent',
+          instructions: '',
+          gate: { maxFails: 1, onPass: '', onFail: '甲' },
+          agentRole: '',
+        },
+      ],
+    }
+    const byName = new Map(draftFromTemplate(template).stages.map((stage) => [stage.name, stage]))
+    expect(byName.get('甲')!.exits).toEqual([{ on: 'done', do: 'goto', stageIndex: null }])
+    // 「通过」是空串（未指定），「未通过」退回甲（草稿里甲排在待办之后，下标 1）
+    expect(byName.get('乙')!.exits).toEqual([
+      { on: 'passed', do: 'goto', stageIndex: null },
+      { on: 'failed', do: 'goto', stageIndex: 1 },
+    ])
+  })
+})

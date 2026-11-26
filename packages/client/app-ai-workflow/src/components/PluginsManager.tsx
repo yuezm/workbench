@@ -405,7 +405,8 @@ function PluginDetail({
     }
     if (field.type === 'select') {
       // 候选来自静态 options 或动态来源（agents）：显示名称、落库 id
-      const { choices, selected } = choicesOf(field, config.text[field.key] ?? '', agents)
+      // initialConfig 给每个字段都写入了字符串（缺省空串），所以 text[key] 恒有值
+      const { choices, selected } = choicesOf(field, config.text[field.key], agents)
       const empty = field.optionsFrom === 'agents' ? '不指定智能体（只发卡）' : '未设置'
       const hint =
         field.optionsFrom === 'agents' && agents.length === 0

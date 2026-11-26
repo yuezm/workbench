@@ -114,14 +114,17 @@ export function FeishuAppDialog({
 
   const finishLogin = (): void => {
     if (login === null || login.deviceCode === undefined) return
+    // 上面已排除 deviceCode === undefined：就地取出（const 收窄），闭包里不必再兜底
+    const deviceCode = login.deviceCode
+    const profile = login.profile
     setBusy('poll')
     setError(null)
     void (async () => {
       try {
         const result = await window.workbench.lark({
           action: 'login-poll',
-          deviceCode: login.deviceCode ?? '',
-          profile: login.profile,
+          deviceCode,
+          profile,
         })
         if (!result.ok) {
           setError(result.error ?? '还没完成授权，稍后再点一次')

@@ -11,7 +11,8 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { LarkAdmin } from '@workbench/host/lark-admin'
 import type { Workbench } from '@workbench/bundle-base'
-import { ConfigError, type ServerConfig } from '@workbench/server/config'
+import { API_PATHS } from '@workbench/protocol/http'
+import { ConfigError, SERVER_ENV, type ServerConfig } from '@workbench/server/config'
 import {
   displayHost,
   reportStartupError,
@@ -163,6 +164,76 @@ describe('startWorkbenchServer', () => {
       }),
     ).rejects.toThrow('库打不开')
   })
+
+  it('不注入 log：装配层的日志落到 stderr；SSE 广播与在线数是事件流的同一份', async () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      const pushed: unknown[] = []
+      let clients: number | null = null
+      const server = await startWorkbenchServer({
+        config: configOf(),
+        assemble: async (options) => {
+          options.log?.('装配完成')
+          options.publish({ kind: 'notice', title: '装配', body: '' })
+          pushed.push(options.publish)
+          clients = options.clients?.() ?? -1
+          return fakeWorkbench()
+        },
+      })
+      expect(stderr.mock.calls.map((call) => String(call[0]))).toContain('装配完成\n')
+      expect(pushed).toHaveLength(1)
+      // 在线数就是事件流的当前连接数：此刻没有 SSE 客户端
+      expect(clients).toBe(0)
+      await server.stop()
+    } finally {
+      stderr.mockRestore()
+    }
+  })
+
+  it('webDir 显式给 null：纯 API 模式（不托管产物，根路径给一段人话说明）', async () => {
+    const server = await startWorkbenchServer({
+      config: configOf(),
+      assemble: async () => fakeWorkbench(),
+      log: () => undefined,
+      webDir: null,
+    })
+    const res = await fetch(server.url + '/')
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('纯 API 模式')
+    await server.stop()
+  })
+
+  it('目录浏览与知会两条 HTTP 接缝都接到装配层', async () => {
+    const workbench = fakeWorkbench()
+    const server = await startWorkbenchServer({
+      config: configOf(),
+      assemble: async () => workbench,
+      log: () => undefined,
+    })
+
+    const dirsRes = await fetch(`${server.url}${API_PATHS.dirs}`)
+    expect(dirsRes.status).toBe(200)
+    const dirsBody = (await dirsRes.json()) as {
+      ok: boolean
+      value: { path: string | null; roots: string[] }
+    }
+    expect(dirsBody.ok).toBe(true)
+    // listDirs 真的走了 listDirectories：返回的是目录浏览的形状，不是空壳
+    expect(Array.isArray(dirsBody.value.roots)).toBe(true)
+
+    const notifyRes = await fetch(`${server.url}${API_PATHS.notify}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: '跑完了', body: '甲任务' }),
+    })
+    expect(notifyRes.status).toBe(200)
+    expect((await notifyRes.json()) as { value: { sent: boolean } }).toMatchObject({
+      ok: true,
+      value: { sent: true },
+    })
+
+    await server.stop()
+  })
 })
 
 describe('runServerEntry', () => {
@@ -268,6 +339,152 @@ describe('runServerEntry', () => {
     expect(JSON.stringify(log.mock.calls)).toContain('退出清理失败')
     expect(exit).toHaveBeenCalledWith(0)
   })
+
+  it('清理抛出的不是 Error（字符串）：日志按字符串写，照样退出', async () => {
+    const log = vi.fn()
+    const exit = vi.fn()
+    const entry = await runServerEntry({
+      env: {},
+      log,
+      loadConfig: () => configOf(),
+      start: async () => ({
+        port: 1,
+        url: 'http://127.0.0.1:1',
+        stop: () => Promise.reject('句柄关不掉'),
+      }),
+      onSignal: () => undefined,
+      exit,
+      resolveUi: () => ({ dir: 'out/web', reason: 'out/web' }),
+    })
+    await entry.stop('SIGTERM')
+    expect(JSON.stringify(log.mock.calls)).toContain('句柄关不掉')
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it('连退出时限的定时器都起不来：按清理失败记一条，仍然退出', async () => {
+    const log = vi.fn()
+    const exit = vi.fn()
+    const entry = await runServerEntry({
+      env: {},
+      log,
+      loadConfig: () => configOf(),
+      start: async () => started(),
+      onSignal: () => undefined,
+      exit,
+      resolveUi: () => ({ dir: 'out/web', reason: 'out/web' }),
+    })
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementationOnce(() => {
+      throw new Error('定时器不可用')
+    })
+    try {
+      await entry.stop('SIGTERM')
+    } finally {
+      setTimeoutSpy.mockRestore()
+    }
+    expect(JSON.stringify(log.mock.calls)).toContain('定时器不可用')
+    expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  it('口令来自数据目录文件：启动行写清来源（不打印口令）', async () => {
+    const log = vi.fn()
+    await runServerEntry({
+      env: {},
+      log,
+      loadConfig: () => configOf({ token: 'k'.repeat(32), tokenSource: 'file' }),
+      start: async () => started(),
+      onSignal: () => undefined,
+      exit: () => undefined,
+      resolveUi: () => ({ dir: null, reason: '没有 Web 产物' }),
+    })
+    const lines = log.mock.calls.map((call) => String(call[0]))
+    expect(lines.some((line) => line.includes('口令来源：数据目录里的口令文件'))).toBe(true)
+    expect(lines.join('\n')).not.toContain('k'.repeat(32))
+  })
+
+  it('不注入 env：loadConfig 收到 undefined（生产就是让它自己读 process.env）', async () => {
+    const loadConfig = vi.fn(() => configOf())
+    await runServerEntry({
+      log: () => undefined,
+      loadConfig,
+      start: async () => started(),
+      onSignal: () => undefined,
+      exit: () => undefined,
+      resolveUi: () => ({ dir: null, reason: '没有 Web 产物' }),
+    })
+    expect(loadConfig).toHaveBeenCalledWith(undefined)
+  })
+
+  it('不注入 exit：走 process.exit（生产就是这样退的）', async () => {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((code?: string | number | null): never => {
+        throw Object.assign(new Error('process.exit fixture'), { code })
+      })
+    try {
+      const entry = await runServerEntry({
+        env: {},
+        log: () => undefined,
+        loadConfig: () => configOf(),
+        start: async () => started(),
+        onSignal: () => undefined,
+        resolveUi: () => ({ dir: null, reason: '没有 Web 产物' }),
+      })
+      // exit 被换成抛错：断言退出码，并把这次「退出」截在测试里
+      await expect(entry.stop('SIGINT')).rejects.toThrow('process.exit fixture')
+      expect(exitSpy).toHaveBeenCalledWith(0)
+    } finally {
+      exitSpy.mockRestore()
+    }
+  })
+
+  it('一个接缝都不注入：读真实配置、起真装配、挂真信号、日志落 stderr', async () => {
+    const dataDir = mkdtempSync(path.join(tmpdir(), 'wb-entry-defaults-'))
+    const webDir = mkdtempSync(path.join(tmpdir(), 'wb-entry-no-web-'))
+    created.push(dataDir, webDir)
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const exit = vi.fn()
+    const listenersBefore = {
+      SIGINT: process.listeners('SIGINT'),
+      SIGTERM: process.listeners('SIGTERM'),
+    }
+    try {
+      const entry = await runServerEntry({
+        env: {
+          [SERVER_ENV.port]: '0',
+          [SERVER_ENV.dataDir]: dataDir,
+          [SERVER_ENV.webDir]: webDir,
+        },
+        exit,
+      })
+      const added = (signal: 'SIGINT' | 'SIGTERM'): Array<() => void> =>
+        process
+          .listeners(signal)
+          .filter((listener) => !listenersBefore[signal].includes(listener))
+          .map((listener) => listener as unknown as () => void)
+
+      expect(added('SIGINT')).toHaveLength(1)
+      expect(added('SIGTERM')).toHaveLength(1)
+      const printed = stderr.mock.calls.map((call) => String(call[0]))
+      expect(
+        printed.some((line) => line.startsWith('workbench listening on http://127.0.0.1:')),
+      ).toBe(true)
+      expect(printed.some((line) => line.includes('未启用鉴权（仅回环监听）'))).toBe(true)
+
+      // 真信号处理器：SIGINT 与 SIGTERM 走同一条退出流程
+      added('SIGINT')[0]?.()
+      await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0))
+      added('SIGTERM')[0]?.()
+      await entry.stop('SIGTERM')
+      expect(exit).toHaveBeenCalledTimes(1)
+    } finally {
+      for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+        for (const listener of process.listeners(signal)) {
+          if (!listenersBefore[signal].includes(listener)) process.off(signal, listener)
+        }
+      }
+      stderr.mockRestore()
+    }
+  })
 })
 
 describe('reportStartupError', () => {
@@ -282,6 +499,27 @@ describe('reportStartupError', () => {
     expect(configLines).toHaveLength(1)
     expect(configLines[0]).toContain('配置错误')
     process.exitCode = 0
+  })
+
+  it('不注入 log：落到 stderr；抛出的不是 Error 时按字符串写，没有栈就只有一行', () => {
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    try {
+      reportStartupError('库文件被占用')
+      const printed = stderr.mock.calls.map((call) => String(call[0]))
+      expect(printed).toEqual(['[workbench] 启动失败：库文件被占用\n'])
+      expect(process.exitCode).toBe(1)
+
+      stderr.mockClear()
+      const noStack = new Error('栈丢了')
+      Object.defineProperty(noStack, 'stack', { value: undefined })
+      reportStartupError(noStack)
+      expect(stderr.mock.calls.map((call) => String(call[0]))).toEqual([
+        '[workbench] 启动失败：栈丢了\n',
+      ])
+    } finally {
+      stderr.mockRestore()
+      process.exitCode = 0
+    }
   })
 })
 

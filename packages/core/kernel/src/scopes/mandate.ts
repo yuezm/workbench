@@ -145,20 +145,19 @@ export function revalidateMandate(mandate: Mandate, authority: Authority | null)
   }
 }
 
-const reasonText = (reason: AdmissionReason): string => {
-  switch (reason) {
-    case 'not-listed':
-      return '身份已不在允许范围'
-    case 'mode-off':
-      return '来源已不再接受推断候选'
-    case 'bot-not-listed':
-      return '机器人已移出名单'
-    case 'no-rule':
-      return '没有匹配的规则'
-    case 'assess-failed':
-      return '研判未给出结论'
-  }
+/**
+ * 准入拒绝原因的中文文案（查表，不走 switch）：五个原因码全列在这里，
+ * 即使当前只有前三条会走到拒绝路径——文案表跟着协议走，不跟着某一条调用链走。
+ */
+const REASON_TEXT: Record<AdmissionReason, string> = {
+  'not-listed': '身份已不在允许范围',
+  'mode-off': '来源已不再接受推断候选',
+  'bot-not-listed': '机器人已移出名单',
+  'no-rule': '没有匹配的规则',
+  'assess-failed': '研判未给出结论',
 }
+
+const reasonText = (reason: AdmissionReason): string => REASON_TEXT[reason]
 
 export interface GrantFactsInput {
   view: View

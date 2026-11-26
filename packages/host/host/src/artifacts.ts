@@ -382,8 +382,8 @@ export function recoverRunMeta(threadId: string, dir: string): RunArchiveMeta | 
   const tagged = (value: string | null): { name: string | null; id: string | null } => {
     if (value === null) return { name: null, id: null }
     const match = /^(.*?)\s*<([^<>]*)>$/.exec(value)
-    const name = (match === null ? value : (match[1] ?? '')).trim()
-    const id = (match === null ? '' : (match[2] ?? '')).trim()
+    const name = (match === null ? value : match[1]).trim()
+    const id = (match === null ? '' : match[2]).trim()
     return {
       name: name === '' || name === '-' ? null : name,
       id: id === '' || id === '-' ? null : id,

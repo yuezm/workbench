@@ -2054,6 +2054,60 @@ describe('createScheduler：脚本轮（M40）', () => {
     await scheduler.idle()
     expect(factTypes()).toContain('run.succeeded')
   })
+
+  it('步骤带验收序号：原样搬进 Turn.steps（执行器据此把证据钉到第 n 条验收）', async () => {
+    seedScript({
+      steps: [
+        { label: '单测', args: ['test'], acceptance: 1 },
+        { label: '门禁', args: ['lint'] },
+      ],
+    })
+    let captured: Turn | null = null
+    const scheduler = makeScheduler(
+      portOf((turn) => {
+        captured = turn
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    const turn = captured as unknown as Turn
+    expect(turn.steps).toEqual([
+      { label: '单测', args: ['test'], acceptance: 1 },
+      { label: '门禁', args: ['lint'] },
+    ])
+  })
+
+  it('M40 早期的 run 快照没有 runAll：按缺省 true 搬运（历史行照样能跑完）', async () => {
+    const seeded = seedScript()
+    // 老行的 script_json 里还没有 runAll 字段（M40 早期写入的）：读回来就是缺省
+    const legacySnapshot = {
+      runtimeId: seeded.script.runtimeId,
+      steps: seeded.script.steps,
+      cwd: null,
+      env: { CI: '1' },
+      timeoutMs: 300_000,
+    }
+    world.db
+      .prepare('UPDATE runs SET script_json = ? WHERE id = ?')
+      .run(JSON.stringify(legacySnapshot), seeded.runId)
+
+    let captured: Turn | null = null
+    const scheduler = makeScheduler(
+      portOf((turn) => {
+        captured = turn
+        return receiptOf(turn)
+      }),
+    )
+
+    scheduler.wake()
+    await scheduler.idle()
+
+    expect((captured as unknown as Turn | null)?.runAll).toBe(true)
+    expect(runById(seeded.runId)).toMatchObject({ status: 'succeeded' })
+  })
 })
 
 /**

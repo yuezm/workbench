@@ -6,12 +6,15 @@
  * 必须在这里就被挡掉，而不是指望上层再检查一遍。
  */
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   FALLBACK_CONTENT_TYPE,
   cacheControlOf,
   contentTypeOf,
   resolveStaticFile,
+  resolveWebUi,
 } from '@workbench/host-frontend-static'
 
 const ROOT = path.resolve('/app/out/web')
@@ -58,5 +61,47 @@ describe('contentTypeOf / cacheControlOf', () => {
   it('HTML 不缓存，其余长缓存（产物文件名带指纹）', () => {
     expect(cacheControlOf('index.html')).toBe('no-cache')
     expect(cacheControlOf('assets/app-abc.js')).toContain('immutable')
+  })
+})
+
+describe('resolveWebUi（本次启动挂不挂界面）', () => {
+  it('UI=off：显式关掉，连产物目录都不看', () => {
+    const webDir = mkdtempSync(path.join(tmpdir(), 'wb-webui-on-'))
+    try {
+      writeFileSync(path.join(webDir, 'index.html'), '<title>Workbench</title>')
+      expect(resolveWebUi({ webDir, ui: 'off' })).toEqual({
+        dir: null,
+        reason: 'WORKBENCH_UI=off',
+      })
+    } finally {
+      rmSync(webDir, { recursive: true, force: true })
+    }
+  })
+
+  it('有 index.html：托管这个目录（reason 就是目录本身，启动行直接读它）', () => {
+    const webDir = mkdtempSync(path.join(tmpdir(), 'wb-webui-auto-'))
+    try {
+      writeFileSync(path.join(webDir, 'index.html'), '<title>Workbench</title>')
+      for (const ui of ['auto', 'on'] as const) {
+        expect(resolveWebUi({ webDir, ui }), ui).toEqual({ dir: webDir, reason: webDir })
+      }
+    } finally {
+      rmSync(webDir, { recursive: true, force: true })
+    }
+  })
+
+  it('没有产物：纯 API 模式，reason 说清缺哪个文件、怎么补（不抛错、不阻断启动）', () => {
+    const webDir = mkdtempSync(path.join(tmpdir(), 'wb-webui-empty-'))
+    try {
+      const result = resolveWebUi({ webDir, ui: 'auto' })
+      expect(result.dir).toBeNull()
+      expect(result.reason).toContain('没有找到 Web 产物')
+      expect(result.reason).toContain(path.join(webDir, 'index.html'))
+      expect(result.reason).toContain('pnpm build:web')
+      // 声明了 on 也照跑：缺产物只是没有界面
+      expect(resolveWebUi({ webDir, ui: 'on' }).dir).toBeNull()
+    } finally {
+      rmSync(webDir, { recursive: true, force: true })
+    }
   })
 })

@@ -1,6 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DirListing } from '@workbench/protocol/http'
+import type { WorkbenchApi } from '@workbench/contract-api'
 import type {
   Runtime,
   RuntimeModelOption,
@@ -1044,6 +1046,50 @@ describe('AgentDialog', () => {
     expect(screen.getByLabelText('智能体环境变量')).toHaveValue(
       'HTTP_PROXY=http://127.0.0.1:7890\nAGENT_HOME=D:/agents/a1',
     )
+  })
+
+  it('选择文件夹：打开目录选择器，取消不改、选中后写回工作目录', async () => {
+    const originalBridge = window.workbench
+    const listDirs = vi.fn().mockResolvedValue({
+      path: 'C:\\work',
+      parent: null,
+      roots: ['C:\\work'],
+      entries: [],
+    } satisfies DirListing)
+    window.workbench = { listDirs } as unknown as WorkbenchApi
+    const user = userEvent.setup()
+    render(
+      <AgentDialog
+        runtimes={[makeRuntime()]}
+        initial={{ ...empty, runtimeId: 'r1' }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    // 取消：工作目录保持空
+    await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    const first = await screen.findByRole('dialog', { name: '选择文件夹' })
+    await user.click(within(first).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '选择文件夹' })).toBeNull())
+    expect(screen.getByLabelText('智能体工作目录')).toHaveValue('')
+
+    // 再打开并选中当前目录：写回工作目录并关掉选择器
+    await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    const second = await screen.findByRole('dialog', { name: '选择文件夹' })
+    await user.click(within(second).getByRole('button', { name: '选这个文件夹' }))
+    await waitFor(() => expect(screen.getByLabelText('智能体工作目录')).toHaveValue('C:\\work'))
+    expect(screen.queryByRole('dialog', { name: '选择文件夹' })).toBeNull()
+
+    // 已有工作目录时：选择器从该目录开始浏览，而不是从头
+    const workdirInput = screen.getByLabelText('智能体工作目录')
+    await user.clear(workdirInput)
+    await user.type(workdirInput, 'D:/proj')
+    await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    await screen.findByRole('dialog', { name: '选择文件夹' })
+    expect(listDirs.mock.calls.some(([path]) => path === 'D:/proj')).toBe(true)
+
+    window.workbench = originalBridge
   })
 })
 

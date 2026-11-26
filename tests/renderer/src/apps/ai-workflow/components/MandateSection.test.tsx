@@ -91,4 +91,22 @@ describe('MandateSection', () => {
     expect(screen.getByText('无（手工任务）')).toBeTruthy()
     expect(screen.getByText(/本机手工创建/)).toBeTruthy()
   })
+
+  it('授权视图读不到：直接给错误条，不假装「没有授权」', async () => {
+    fake.failView('mandates.byTask', { taskId: 'task-1' }, '授权表读取失败')
+    render(<MandateSection taskId="task-1" scopeLabel="研发 · 实现" />)
+    await waitFor(() => expect(screen.getByText('授权表读取失败')).toBeTruthy())
+    // 错误态不渲染「无记录」空态
+    expect(screen.queryByText('无记录')).toBeNull()
+  })
+
+  it('已撤销但没记撤销时刻：时刻退回授予时刻，不显示空白', async () => {
+    fake.setView(
+      'mandates.byTask',
+      { taskId: 'task-1' },
+      mandate({ revokedAt: null, revokedReason: 'stop' }),
+    )
+    render(<MandateSection taskId="task-1" scopeLabel="研发 · 实现" />)
+    await waitFor(() => expect(screen.getByText(/人工停止/)).toBeTruthy())
+  })
 })

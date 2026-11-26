@@ -111,6 +111,21 @@ describe('UsagePanel（M36-E）', () => {
     )
   })
 
+  it('按智能体拆行时那个智能体已被删（不在 agents.all 里）：退回显示 id', async () => {
+    kernel.setViewAnyParams('usage.daily', [daily()])
+    kernel.setViewAnyParams('usage.byAgent', [agentRow({ agentId: 'ag-gone' })])
+
+    render(<UsagePanel now={() => AT} />)
+    await waitFor(() => expect(screen.getByText('ag-gone')).toBeInTheDocument())
+  })
+
+  it('不注入时间源（生产路径）：默认取当前时刻', async () => {
+    kernel.setViewAnyParams('usage.daily', [])
+    kernel.setViewAnyParams('usage.byAgent', [])
+    render(<UsagePanel />)
+    await waitFor(() => expect(screen.getByText('近 7 天还没有已结束的轮次。')).toBeInTheDocument())
+  })
+
   it('卸载后停止订阅（不残留监听）', () => {
     kernel.setViewAnyParams('usage.daily', [])
     kernel.setViewAnyParams('usage.byAgent', [])

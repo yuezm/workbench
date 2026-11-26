@@ -896,3 +896,14 @@ describe('FeishuConnections：本机应用弹窗', () => {
     expect(calls).toEqual(['status'])
   })
 })
+
+describe('FeishuConnections：探测失败的原因与关闭', () => {
+  it('探测被非 Error 拒绝：原因字符串化后播报，并可手动关掉错误条', async () => {
+    larkMock.mockRejectedValue('连不上 lark-cli')
+    render(<FeishuConnections plugin={pluginOf()} />)
+
+    expect(await screen.findByText('连不上 lark-cli')).toBeTruthy()
+    await userEvent.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    await waitFor(() => expect(screen.queryByText('连不上 lark-cli')).toBeNull())
+  })
+})

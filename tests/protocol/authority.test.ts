@@ -174,6 +174,16 @@ describe('normalizeSourcePolicy', () => {
     ])
   })
 
+  it('名单里的非字符串项直接跳过（历史行 / 手改配置可能混进数字）', () => {
+    const policy = normalizeSourcePolicy({
+      id: 'github',
+      allowed: [42, null, { id: 'x' }, 'octocat'],
+      bots: [true, 'bot_1'],
+    })
+    expect(policy?.allowed).toEqual(['octocat'])
+    expect(policy?.bots).toEqual(['bot_1'])
+  })
+
   it('名单不是数组时为空', () => {
     const policy = normalizeSourcePolicy({ id: 'github', allowed: 'octocat' })
     expect(policy?.allowed).toEqual([])

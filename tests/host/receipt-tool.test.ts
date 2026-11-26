@@ -79,4 +79,26 @@ describe('resolveReceiptTool', () => {
     })
     expect(tool?.args).toEqual(['/custom/server.cjs'])
   })
+
+  it('不给 env：按宿主 process.env 判定（默认开，脚本在就注入）', () => {
+    const tool = resolveReceiptTool({
+      mainDir: '/app/out/server',
+      exists: () => true,
+      command: '/usr/bin/node',
+    })
+    expect(tool?.args).toEqual([join('/app/out/server', 'receipt-mcp-server.cjs')])
+  })
+
+  it('不给 exists：默认用真 fs 判断，脚本不存在就退回文本通道', () => {
+    // 不注入存在性判断：默认的 existsSync 对不存在的路径返回 false（默认闭包也被走到）
+    expect(
+      resolveReceiptTool({
+        env: { [RECEIPT_TOOL_SERVER_ENV_KEY]: join(process.cwd(), '.scratch', 'no-receipt.cjs') },
+      }),
+    ).toBeNull()
+  })
+
+  it('默认路径候选为空（不给 mainDir 也不给环境变量）：直接退回文本通道', () => {
+    expect(resolveReceiptTool({ env: ENABLED, exists: () => true })).toBeNull()
+  })
 })

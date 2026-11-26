@@ -20,8 +20,8 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | --------------------- |
 | 类型               | 零类型错误                                                                                                                                         | `pnpm verify:types`                                             | 每次编辑 / pre-commit |
 | Lint（含架构边界） | 零 error                                                                                                                                           | `pnpm verify:lint`                                              | 每次编辑 / pre-commit |
-| 覆盖率（项目）     | 全局阈值 statements≥98 / branches≥93 / functions≥95 / lines≥98，且不得低于基线                                                                     | `pnpm verify:coverage`                                          | 任务结束 / CI         |
-| 覆盖率（改动行）   | 改动的可执行源码行 ≥ **90%**                                                                                                                       | `pnpm verify:coverage`                                          | 任务结束              |
+| 覆盖率（项目）     | 全局阈值 statements≥100 / branches≥100 / functions≥100 / lines≥100（产品代码，`tests/**` 不计入分母）                                              | `pnpm verify:coverage`                                          | 任务结束 / 提交 / CI  |
+| 覆盖率（改动行）   | 改动的可执行源码行 ≥ **100%**                                                                                                                      | `pnpm verify:coverage`                                          | 任务结束 / 提交       |
 | 密钥               | diff 内零命中                                                                                                                                      | `pnpm verify:guards`                                            | 每次编辑 / pre-commit |
 | 依赖漏洞           | 生产依赖无 high 及以上                                                                                                                             | `pnpm audit`                                                    | 任务结束 / CI         |
 | Floor              | 零违规                                                                                                                                             | `pnpm verify:guards`                                            | 每次编辑 / pre-commit |
@@ -30,7 +30,7 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 
 每一行都写出产生判定的命令；没有命令的维度只是愿望，不是约束。
 
-> 当前基线（2026-11-18 实测，**不得低于**）：st 98.28 / br 96.15 / fn 97.40 / ln 98.58。基线演进与每次下降的归因见 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md)。
+> 当前基线（2026-11-26 起强制）：st 100 / br 100 / fn 100 / ln 100。任何一项跌破即 `pnpm verify:coverage` 失败、pre-commit 拒绝提交。基线演进与每次下降的归因见 [CONSTRAINTS-HISTORY](docs/testing/CONSTRAINTS-HISTORY.md)。
 
 ### 架构边界（由 ESLint `no-restricted-imports` 强制）
 
@@ -77,6 +77,7 @@ Last reviewed: 2026-11-18（lead）。适用于 workbench（个人工作台）�
 | 阶段        | 命令                                                            | 内容                                                                                                        | 预算   |
 | ----------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------ |
 | 编辑后      | `pnpm verify`                                                   | 类型 + lint(含架构边界) + guards（floor / kernel / secrets / ui / packages / paths）+ 单测                  | 半分钟 |
+| 提交前      | `pnpm verify:coverage`（`.husky/pre-commit` 内联执行）          | 四元组 100% + 改动行 100% 双闸门；未达标直接拒绝提交                                                        | ≤ ~90s |
 | 任务结束    | `pnpm verify:coverage` + `pnpm audit --prod --audit-level=high` | 项目覆盖率 + 改动行覆盖率 + 依赖审计                                                                        | ≤ ~90s |
 | 交付 / 推送 | `pnpm verify:all`（pre-push 自动）                              | 上面全部 + `verify:e2e` 的真实服务进程 + Chromium 关键路径（先 build 再跑；每条用例独立临时数据目录与端口） | 分钟级 |
 | 服务冒烟    | `node out/server/index.js`                                      | 构建产物起真服务：启动行、`/api/health`、`/api/info`、静态首页都通                                          | 分钟级 |

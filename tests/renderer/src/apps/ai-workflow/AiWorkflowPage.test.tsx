@@ -14,7 +14,11 @@ import type {
 } from '@workbench/protocol/entities'
 import type { CommandDispatchResult } from '@workbench/protocol/ipc'
 import type { ThreadRow } from '@workbench/protocol/thread'
-import { AiWorkflowPage, cardLanding } from '@workbench/client-app-ai-workflow/AiWorkflowPage'
+import {
+  AiWorkflowPage,
+  cardLanding,
+  trailForCard,
+} from '@workbench/client-app-ai-workflow/AiWorkflowPage'
 import { resetEntityOrderForTest } from '@workbench/client-app-ai-workflow/model/entity-order'
 import { pushOpenTarget, resetOpenTargetForTest } from '@workbench/client-shell/openTarget'
 import { installFakeKernel, type FakeKernel } from '../../../shell/fake-kernel'
@@ -1466,6 +1470,30 @@ describe('AiWorkflowPage', () => {
       0,
     )
   })
+
+  it('设置 → 服务：显示「进程 · 数据目录 · 版本」那一栏', async () => {
+    seedBase()
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+    await screen.findByText(/工作流「研发」/)
+
+    await openSection(user, '服务')
+    expect(await screen.findByRole('heading', { name: '服务' })).toBeInTheDocument()
+    // 没有注入服务信息时给「还没取到」的只读说明，而不是空白
+    expect(screen.getByText('还没有取到服务信息。')).toBeInTheDocument()
+  })
+
+  it('工作流视图的 id 缺失（脏投影）：新建任务弹窗的默认工作流按空串兜底', async () => {
+    seedBase()
+    kernel.setView('workflows.all', undefined, [
+      { ...wf, id: undefined as unknown as string, stages: wf.stages },
+    ])
+    const user = userEvent.setup()
+    render(<AiWorkflowPage />)
+
+    await user.click(await screen.findByRole('button', { name: '新建任务' }))
+    expect(await screen.findByRole('combobox', { name: '所属工作流' })).toBeInTheDocument()
+  })
 })
 
 describe('cardLanding', () => {
@@ -1473,5 +1501,27 @@ describe('cardLanding', () => {
     expect(cardLanding({ ...card, taskId: 't1' })).toEqual({ kind: 'task', taskId: 't1' })
     // 没有任务（历史会话卡）：通知条那一行整行禁用，走不到落点
     expect(cardLanding({ ...card, taskId: null })).toEqual({ kind: 'none' })
+  })
+})
+
+describe('trailForCard', () => {
+  it('挂任务的卡：路由栈是任务详情；没有落点：null（原地不动，不是回看板）', () => {
+    expect(trailForCard({ ...card, taskId: 't1' })).toEqual([{ kind: 'task', taskId: 't1' }])
+    // null 而不是 []：空栈会把正在任务详情里的人踢回看板
+    expect(trailForCard({ ...card, taskId: null })).toBeNull()
+  })
+})
+
+describe('AiWorkflowPage：通知条里的无任务卡（聊天卡）', () => {
+  it('整行禁用；即使被程序化点击也不会误跳任务详情', async () => {
+    seedBase()
+    kernel.setView('cards.open', undefined, [{ ...card, taskId: null }])
+    render(<AiWorkflowPage />)
+
+    const row = await screen.findByRole('button', { name: /继续吗/ })
+    expect(row).toBeDisabled()
+    // 禁用行的 click 不会进 onClick：即使硬派发事件也仍停在看板，不产生「任务不存在」的详情页
+    fireEvent.click(row)
+    expect(screen.queryByText('任务不存在')).toBeNull()
   })
 })

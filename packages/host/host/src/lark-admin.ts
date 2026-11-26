@@ -337,6 +337,15 @@ const ACTIONS = [
 ] as const
 
 /**
+ * 动作名守卫：判定的同时把类型收窄到联合值。
+ *
+ * 有了它，下面的 `switch (action)` 是穷尽的（六个 case 覆盖全部取值），
+ * 不需要「不可达的 default」——那条兜底以前既走不到，也让穷尽性失去了类型保证。
+ */
+const isActionName = (value: string): value is LarkAdminAction['action'] =>
+  (ACTIONS as readonly string[]).includes(value)
+
+/**
  * 校验一条来自 renderer 的动作：只认上表里的动作名，必要字符串字段必须是字符串。
  *
  * 非法输入返回 `null`（调用方回 `{ok:false}`），不抛给 IPC —— 一次坏请求不该让窗口看到异常栈。
@@ -345,7 +354,7 @@ export function asLarkAction(value: unknown): LarkAdminAction | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
   const action = record['action']
-  if (typeof action !== 'string' || !(ACTIONS as readonly string[]).includes(action)) return null
+  if (typeof action !== 'string' || !isActionName(action)) return null
   const text = (key: string): string | null => {
     const raw = record[key]
     if (raw === undefined) return null
@@ -400,8 +409,6 @@ export function asLarkAction(value: unknown): LarkAdminAction | null {
       if (name === null || malformed('name')) return null
       return { action: 'remove-profile', name }
     }
-    default:
-      return null
   }
 }
 

@@ -357,6 +357,15 @@ export function threadWithBatchTasks(
 }
 
 /**
+ * `task.finished` 的 `outcome` → 任务阶段语义（完成 / 取消）。
+ *
+ * 单独成函数是因为同一条映射有两处要读（本批阶段覆盖表、父任务 rollup 覆盖表），
+ * 各写一份三元表达式早晚会漂——取消不能当完成，这条口径只留一处。
+ */
+export function finishedPhaseOf(outcome: 'done' | 'cancelled'): TaskPhase {
+  return outcome === 'done' ? 'finished' : 'cancelled'
+}
+
 /**
  * 本批新建的任务（`task.created`）在结束判定里的阶段语义：按**它自己的落点阶段**判（视图里
  * 还没有这张卡）；本批刚完成 / 删除的任务按事实记成终态（M53：阶段语义，不再用 `status`）。
@@ -376,7 +385,7 @@ export function batchTaskPhases(
         task: Task
         outcome: 'done' | 'cancelled'
       }
-      phases.set(task.id, outcome === 'done' ? 'finished' : 'cancelled')
+      phases.set(task.id, finishedPhaseOf(outcome))
     } else if (fact.type === 'task.removed') {
       phases.set((fact.payload as { task: Task }).task.id, 'removed')
     }

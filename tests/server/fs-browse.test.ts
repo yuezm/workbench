@@ -98,6 +98,21 @@ describe('listDirectories（注入）', () => {
     expect(() => listDirectories(HOME, fake({ dirs: [], throwOn: 'readdir' }))).toThrow(BrowseError)
   })
 
+  it('列目录时 EPERM 与其它 errno：分别归「没有权限」与「无法读取」', () => {
+    const throwing = (code: string | undefined) => ({
+      home: HOME,
+      isDirectory: () => true,
+      readdir: () => {
+        throw Object.assign(new Error('nope'), { code })
+      },
+    })
+    // EACCES 在窗口左侧命中、EPERM 需要右侧参与比较
+    expect(() => listDirectories(HOME, throwing('EPERM'))).toThrow(`没有权限读取：${HOME}`)
+    // 其它 errno（含没有 code 的情况）落到兜底文案，不把 errno 丢给浏览器
+    expect(() => listDirectories(HOME, throwing('EIO'))).toThrow(`无法读取目录：${HOME}`)
+    expect(() => listDirectories(HOME, throwing(undefined))).toThrow(`无法读取目录：${HOME}`)
+  })
+
   it('目录不存在：错误说清哪个路径', () => {
     expect(() =>
       listDirectories('/missing', {

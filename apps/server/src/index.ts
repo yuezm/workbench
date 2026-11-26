@@ -10,17 +10,15 @@
  *   workbench listening on http://127.0.0.1:3000
  *
  * e2e 与运维脚本按这一行取实际地址（`WORKBENCH_PORT=0` 时端口由系统分配）。
- * 行为全在 `lifecycle.ts`（可测），这里只负责「跑起来」与「失败报告」。
  */
-import { reportStartupError, runServerEntry } from './lifecycle'
+import { fileURLToPath } from 'node:url'
+import { startIfDirect } from './lifecycle'
 
 /**
- * 只有「直接执行」才启动。
+ * 只有「被直接执行」才启动（`node out/server/index.js`）。
  *
- * 构建产物是 CJS（`node out/server/index.js`），直接执行时 `require.main === module`；
- * 被测试 import 时 `require.main` 是测试运行器，因此不会真的绑端口、占数据目录。
+ * 判据是「进程入口脚本就是本文件」：被测试 import、被别的模块 require 时都不成立，
+ * 因此不会真的绑端口、占数据目录。判据本体在 `lifecycle.ts#isDirectRun`，
+ * 真假两支都能单测到（这里只负责把两个路径递进去）。
  */
-const isDirectRun =
-  typeof require === 'function' && (require as NodeJS.Require).main === (module as unknown)
-
-if (isDirectRun) runServerEntry().catch(reportStartupError)
+startIfDirect({ entry: fileURLToPath(import.meta.url), argv: process.argv[1] })

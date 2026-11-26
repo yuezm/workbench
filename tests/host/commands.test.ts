@@ -1509,4 +1509,42 @@ describe('host/commands 项目 AGENTS.md（M53）', () => {
 
     expect(store.query('projects.all')).toHaveLength(1)
   })
+
+  it('projects.all 查不到刚建的项目（投影还没就绪）：跳过生成，不抛也不误报', async () => {
+    // 事实已入账、投影行还没读到：这条路上「找不到项目」是正常的中间态，
+    // 不能因为查不到就抛（项目创建已经成功，AGENTS.md 只是附加动作）。
+    const ensure = vi.fn((): ProjectAgentsInit => ({
+      path: 'D:/work/AGENTS.md',
+      created: true,
+      error: null,
+    }))
+    const db = createMemoryDb()
+    openDbs.push(db)
+    const store = createStore({
+      db,
+      kernel: { decide, project, viewSpec, nextWakeAt },
+      now: () => NOW,
+    })
+    const blind = {
+      ...store,
+      query: (view: string, params?: unknown): unknown =>
+        view === 'projects.all' ? [] : store.query(view as never, params as never),
+    }
+
+    const router = createCommandRouter({
+      store: blind as unknown as ReturnType<typeof createStore>,
+      dispatch: (input) => store.dispatch(input),
+      executors: {
+        forRuntime: () => ({ probe: async () => readyProbe }) as unknown as ExecutorPort,
+      },
+      executorDefaults: () => ({ executorKey: 'dsh', command: 'dsh', profile: 'multica' }),
+      hostView: () => [],
+      projectAgents: ensure,
+    })
+
+    const result = await router.dispatch(projectCommand())
+
+    expect(result.facts.map((fact) => fact.type)).toEqual(['project.created'])
+    expect(ensure).not.toHaveBeenCalled()
+  })
 })

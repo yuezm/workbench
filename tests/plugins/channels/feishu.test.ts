@@ -381,6 +381,14 @@ describe('飞书通道：卡片渲染', () => {
     })
   })
 
+  it('已答复但库里没记下标（老数据）：同样给占位文案，而不是「已记录：undefined」', () => {
+    const card = renderCard(inst({ status: 'answered', optionIndex: null }))
+    expect(card.body.elements.at(-1)).toEqual({
+      tag: 'markdown',
+      content: '**已记录：（选项已失效）**',
+    })
+  })
+
   it('没有正文时不留空 markdown 块（ask 直接给按钮，notice 给空 body）', () => {
     const ask = renderCard(inst({ text: '   ' }))
     // 正文为空就不放分隔线：第一块就是选项按钮
@@ -1391,6 +1399,8 @@ describe('飞书通道：lark 配置带前置参数（多应用换 profile）', 
       prefix: ['--profile', 'work2'],
     })
     expect(programArgs('lark-cli')).toEqual({ command: 'lark-cli', prefix: [] })
+    // 只有空白（配置写了个空格）：原样当命令，交给 resolve 去判「找不到」
+    expect(programArgs('   ')).toEqual({ command: '   ', prefix: [] })
   })
 
   it('发消息与监听都带上前缀参数（一个通道一套应用凭证）', async () => {

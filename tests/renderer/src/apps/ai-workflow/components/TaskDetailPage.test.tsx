@@ -1056,6 +1056,39 @@ describe('TaskDetailPage 评审结论（M14）', () => {
     expect(screen.queryByText(/undefined|null/)).toBeNull()
     expect(screen.queryByRole('alert')).toBeNull()
   })
+
+  it('补一次回执被拒：原因贴在页面错误条上，不静默', async () => {
+    const user = userEvent.setup()
+    kernel.setView('task.byId', { taskId: 't1' }, task)
+    kernel.setView('runs.byTask', { taskId: 't1' }, [run])
+    kernel.setView('comments.byTask', { taskId: 't1' }, [])
+    const gateWorkflow: WorkflowWithStages = {
+      ...workflow,
+      stages: [{ ...workflow.stages[1]!, judge: { maxFails: 2 } }],
+    }
+    render(
+      <TaskDetailPage
+        taskId="t1"
+        workflows={[gateWorkflow]}
+        onBack={vi.fn()}
+        onOpenThread={vi.fn()}
+        onRemoved={vi.fn()}
+      />,
+    )
+    await screen.findByRole('heading', { name: '任务A' })
+    dispatchWith(() => Promise.reject(new Error('闸门补回执额度已用尽')))
+    await user.click(screen.getByRole('button', { name: '补一次回执' }))
+    expect(await screen.findByText('闸门补回执额度已用尽')).toBeInTheDocument()
+  })
+
+  it('归档被内核拒绝：原因贴在页面错误条上', async () => {
+    const user = userEvent.setup()
+    setup()
+    await screen.findByRole('heading', { name: '任务A' })
+    dispatchWith(() => Promise.reject(new Error('执行中不能归档')))
+    await user.click(screen.getByRole('button', { name: '归档' }))
+    expect(await screen.findByText('执行中不能归档')).toBeInTheDocument()
+  })
 })
 
 describe('rerunStageLabel', () => {

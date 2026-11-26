@@ -16,7 +16,7 @@ import {
   type Item,
   type Section,
 } from '@workbench/kernel/scopes/thread-context'
-import type { ReviewFinding, ReviewReport } from '@workbench/protocol/review'
+import { REVIEW_LIMITS, type ReviewFinding, type ReviewReport } from '@workbench/protocol/review'
 
 /** 「最近一轮产出」段标题（与实现同文案；未配产物目录时的「仅摘要」变体） */
 const PRECEDING_TITLE = '### 最近一轮产出（仅摘要，完整输出见任务动态）'
@@ -849,6 +849,23 @@ describe('kernel/thread-context 待修复清单段（M14）', () => {
     expect(text).not.toContain('不该出现')
     expect(text).toContain('另有 1 条建议项（medium/low）')
     expect(text).toContain('完整清单：报告 run-review:1')
+  })
+
+  it('超长断言与验收条件按码点截断（带省略号，不把提示词预算撑爆）', () => {
+    const long = 'x'.repeat(REVIEW_LIMITS.promptClaimChars + 10)
+    const text = reviewBlock(
+      withReport({
+        findings: [
+          finding({ id: 'r#R1', key: 'R1', severity: 'high', claim: long, requiredAction: long }),
+        ],
+      }),
+      thread(),
+    )
+    // 截断点是预算值本身：变异成「不截断」时这一行必红（长文本会整段进提示词）
+    const capped = 'x'.repeat(REVIEW_LIMITS.promptClaimChars)
+    expect(text).toContain(`— ${capped}…`)
+    expect(text).toContain(`→ 验收：${capped}…`)
+    expect(text).not.toContain(long)
   })
 
   it('清单已全部处置：只给一行结论（不渲染条目）', () => {

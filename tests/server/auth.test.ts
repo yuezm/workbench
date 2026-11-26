@@ -73,6 +73,9 @@ describe('createAuthenticator', () => {
     const auth = createAuthenticator(TOKEN)
     expect(auth.check({ [TOKEN_HEADER]: [TOKEN, 'other'] })).toBe(true)
     expect(auth.check({ [TOKEN_HEADER]: ['other', TOKEN] })).toBe(false)
+    // 空数组：Node 在「同名头一个都没有但字段存在」时可能给出空数组，取不到值算没带口令
+    expect(auth.check({ [TOKEN_HEADER]: [] })).toBe(false)
+    expect(auth.check({ authorization: [], cookie: [] })).toBe(false)
     expect(auth.check({})).toBe(false)
     expect(auth.check({ cookie: `${SESSION_COOKIE}=wrong` })).toBe(false)
     expect(auth.check({ authorization: `Bearer wrong` })).toBe(false)

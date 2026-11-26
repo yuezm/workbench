@@ -479,4 +479,18 @@ describe('TaskDialog', () => {
     await user.click(screen.getByRole('button', { name: '关闭' }))
     expect(onCancel).toHaveBeenCalled()
   })
+
+  it('一条工作流都没有（视图未就绪 / 全被删）：下拉只给占位，不崩', async () => {
+    render(
+      <TaskDialog
+        workflows={[]}
+        defaultWorkflowId=""
+        defaultPath={DEFAULT_PATH}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('combobox', { name: '所属工作流' })).toHaveTextContent('请选择')
+    expect(screen.getByRole('combobox', { name: '起始阶段' })).toHaveTextContent('请选择')
+  })
 })

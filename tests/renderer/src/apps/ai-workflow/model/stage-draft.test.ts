@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import type { StageInput } from '@workbench/protocol/entities'
+import type { StageExitInput, StageInput } from '@workbench/protocol/entities'
 import {
   builtinKeyOfName,
   builtinStageDraft,
@@ -13,9 +13,11 @@ import {
   isTerminalStage,
   isUserStage,
   nextUserStageName,
+  remapExits,
   stageIdAfterWorkflowChange,
   userStageRange,
   withBuiltinStages,
+  type NormalizedStage,
 } from '@workbench/client-app-ai-workflow/model/stage-draft'
 
 /**
@@ -26,7 +28,7 @@ import {
  */
 
 /** 一个自己添加的阶段（只是名字 + 进入方式，字段形状与草稿一致） */
-const user = (name: string, extra: Partial<StageInput> = {}): StageInput => ({
+const user = (name: string, extra: Partial<StageInput> = {}): NormalizedStage => ({
   ...emptyStage(name),
   ...extra,
 })
@@ -388,5 +390,91 @@ describe('stageIdAfterWorkflowChange（规则弹窗换工作流后的起始阶�
 
   it('新流程读不到（工作流被删 / 还没同步）：同样回到首阶段', () => {
     expect(stageIdAfterWorkflowChange(undefined, 's1')).toBe('')
+  })
+})
+
+describe('remapExits（出口表下标重映射的公共入口）', () => {
+  it('出口表缺失（老数据 / 半迁移）：按空表处理', () => {
+    const calls: number[] = []
+    expect(
+      remapExits(undefined, (index) => {
+        calls.push(index)
+        return index
+      }),
+    ).toEqual([])
+    expect(calls).toEqual([])
+  })
+
+  it('只有 goto 会重映射，其余动作（停在这里等人 / 结束归档）原样保留', () => {
+    const calls: number[] = []
+    const exits: StageExitInput[] = [
+      { on: 'done', do: 'goto', stageIndex: 3 },
+      { on: 'errored', do: 'await' },
+    ]
+    expect(
+      remapExits(exits, (index) => {
+        calls.push(index)
+        return index + 1
+      }),
+    ).toEqual([
+      { on: 'done', do: 'goto', stageIndex: 4 },
+      { on: 'errored', do: 'await' },
+    ])
+    // 非 goto 的出口不该进重映射函数
+    expect(calls).toEqual([3])
+  })
+})
+
+/**
+ * 出口对象在「读到下标」与「重映射该下标」之间被外部改写（同一份数组对象被另一处写入，
+ * 老数据 / 外部进程直接写库都会出现）：第一次读得到 2，之后变空。
+ *
+ * 这让 `remapExits` 里的重映射函数真的收到 null —— 也就是三个上层函数（规范排序 / 删除 /
+ * 插入）各自那个「下标为空 → 原样留空」的防御臂。
+ */
+function exitTurningNull(): StageExitInput {
+  let reads = 0
+  const exit = { on: 'done', do: 'goto' } as StageExitInput
+  Object.defineProperty(exit, 'stageIndex', {
+    enumerable: true,
+    configurable: true,
+    get: () => (++reads === 1 ? 2 : null),
+  })
+  return exit
+}
+
+describe('下标在读取与重映射之间变空：三个入口都原样留空', () => {
+  it('withBuiltinStages：重映射函数收到空下标时留 null（交给保存前的悬空校验）', () => {
+    const stages = withBuiltinStages([user('A', { exits: [exitTurningNull()] })])
+    expect(stages[1].exits).toEqual([{ on: 'done', do: 'goto', stageIndex: null }])
+  })
+
+  it('dropStageIndexes：删别的阶段时，读到空下标的出口保持为空', () => {
+    const stages = draft(user('A', { exits: [exitTurningNull()] }), user('B', { id: 'b' }))
+    const next = dropStageIndexes(stages, [2])
+    expect(next[1].exits).toEqual([{ on: 'done', do: 'goto', stageIndex: null }])
+  })
+
+  it('insertUserStage：插入后重映射读到空下标时保持为空', () => {
+    const result = insertUserStage(draft(user('A', { exits: [exitTurningNull()] })), user('B'))
+    expect(result.stages[1].exits).toEqual([{ on: 'done', do: 'goto', stageIndex: null }])
+  })
+})
+
+describe('阶段缺 exits 字段（老数据）', () => {
+  it('withBuiltinStages：没有出口表的阶段按空表补齐', () => {
+    const stage = user('A')
+    delete (stage as { exits?: unknown }).exits
+    const out = withBuiltinStages([stage])
+    expect(out[1].exits).toEqual([])
+  })
+
+  it('dropStageIndexes / insertUserStage：缺出口表同样按空表处理', () => {
+    const a = user('A')
+    delete (a as { exits?: unknown }).exits
+    expect(dropStageIndexes(draft(a), [2])[1].exits).toEqual([])
+    const b = user('B')
+    delete (b as { exits?: unknown }).exits
+    expect(insertUserStage(draft(b), user('C')).stages[1].exits).toEqual([])
   })
 })

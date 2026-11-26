@@ -22,6 +22,7 @@ import type { FactPayload, FactType } from '@workbench/protocol/facts'
 import type { ThreadRow } from '@workbench/protocol/thread'
 import type { HostInput } from '@workbench/protocol/inputs'
 import { decide } from '@workbench/kernel/decide'
+import { DEFAULT_LIMITS } from '@workbench/kernel/core/limits'
 import { naturalStageLabel } from '@workbench/kernel/scopes/commands/task'
 import { indexTarget, sameInstructions } from '@workbench/kernel/scopes/commands/workflow'
 import {
@@ -320,21 +321,8 @@ const view = (seed: Seed = {}): View => ({
   pluginSettingsVersion: 0,
 })
 
-/** 与 `host/store/index` 的 `DEFAULT_LIMITS` 同值；内核单测不 import 宿主实现。 */
-const LIMITS: Limits = {
-  maxStagesPerWorkflow: 50,
-  maxArrayLength: 500,
-  maxHops: 8,
-  leaseMs: 120_000,
-  heartbeatMs: 30_000,
-  maxAttempts: 3,
-  backoffBaseMs: 300_000,
-  backoffCapMs: 3_600_000,
-  runTimeoutMs: 1_800_000,
-  cancelGraceMs: 3_000,
-  killAfterMs: 2_000,
-  maxFramesPerBatch: 500,
-}
+/** 限制取内核契约的默认值：不 import 宿主实现，也不抄数字（抄的会漂）。 */
+const LIMITS: Limits = DEFAULT_LIMITS
 
 /** 确定性 id 生成器：每类实体独立计数，测试可断言具体 id。 */
 const env = (): Environment => {

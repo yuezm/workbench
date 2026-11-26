@@ -134,13 +134,14 @@ function handoffFactsFor(
  * 阶段离开 → 派单事实：只有触发条件命中且还有目标时才产事实。
  *
  * 打回 / 原地 / 取消不派单由调用方选的 `guard` 表达（见 `handoffGuardOf`）；
+ * `guard` 为 `null`（这次离开没有任何触发条件组）时零目标、零事实，调用点不必自己判一次空。
  * `options.forward` 只影响 `manual` 里标了 `forwardOnly` 的派单。
  */
 export function handoffOnExit(
   view: View,
   task: Task,
   stage: WorkflowStage,
-  guard: StageHandoffGuard,
+  guard: StageHandoffGuard | null,
   now: Iso,
   env: Environment,
   actor: Actor,

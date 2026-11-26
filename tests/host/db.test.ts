@@ -5,17 +5,21 @@ import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
+  needsCardsRebuild,
   needsRunsUpgrade,
   needsRuntimesUpgrade,
   needsStagesRebuild,
   needsTasksRebuild,
   needsTasksUpgrade,
   openDatabase,
+  rebuildLegacyCards,
   rebuildLegacyTasks,
   upgradeLegacyAgents,
   upgradeLegacyCards,
   upgradeLegacyRuns,
   upgradeLegacyRuntimes,
+  upgradeLegacyRuleSets,
+  upgradeLegacyStagesTable,
 } from '@workbench/host-store/db'
 import {
   AGENTS_M27_ADDED_COLUMNS,
@@ -1451,6 +1455,167 @@ describe('openDatabase：旧库升级遇外键已关（foreignKeys=false）', ()
       }
     } finally {
       rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+/**
+ * 卡片 CHECK 重建（M55）、准入列补列（A1）、阶段旧值现算（M34）——这三处都是
+ * 「老库结构与新版本不同」的一次性动作，只有造出对应的老结构才走得到。
+ */
+describe('openDatabase：一次性升级的边角（cards / rule_sets / stages 旧值）', () => {
+  it('needsCardsRebuild：没有 cards 表时判 false（读不到建表 SQL 不等于要重建）', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      expect(needsCardsRebuild(db)).toBe(false)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('upgradeLegacyCards：缺列补一次、补齐后不再改；没有表直接 false', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      db.exec('CREATE TABLE cards (id TEXT PRIMARY KEY, run_id TEXT)')
+      expect(upgradeLegacyCards(db)).toBe(true)
+      const columns = columnNames(db, 'cards')
+      expect(columns.has('kind')).toBe(true)
+      expect(columns.has('delivery_refs_json')).toBe(true)
+      // 第二次：列齐了，什么都不做
+      expect(upgradeLegacyCards(db)).toBe(false)
+    } finally {
+      db.close()
+    }
+
+    const empty = new DatabaseSync(':memory:')
+    try {
+      expect(upgradeLegacyCards(empty)).toBe(false)
+    } finally {
+      empty.close()
+    }
+  })
+
+  it('rebuildLegacyCards：kind 的 CHECK 不含 stall → 重建后放行 stall，外键保持关闭', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      // M12 口径的旧表：kind 只认 ask / notice（M55 才加 stall）
+      db.exec(`
+        CREATE TABLE cards (
+          id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'ask' CHECK (kind IN ('ask','notice')),
+          status TEXT NOT NULL CHECK (status IN ('open','answered','resolved')),
+          delivery TEXT NOT NULL CHECK (delivery IN ('pending','delivered','failed')),
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );`)
+      db.prepare(
+        `INSERT INTO cards (id, run_id, title, kind, status, delivery, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run('c-1', 'r-1', '旧卡', 'notice', 'answered', 'delivered', SEED_AT, SEED_AT)
+      expect(needsCardsRebuild(db)).toBe(true)
+      db.exec('PRAGMA foreign_keys = OFF')
+
+      expect(rebuildLegacyCards(db)).toBe(true)
+      const sql = (
+        db
+          .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'cards'")
+          .get() as { sql: string } | undefined
+      )?.sql
+      expect(sql).toContain("'stall'")
+      expect(countOf(db, 'cards')).toBe(1)
+      // 行还在，老列值原样保留（没共享的列由新表默认值补）
+      expect(db.prepare('SELECT kind, status FROM cards WHERE id = ?').get('c-1')).toEqual({
+        kind: 'notice',
+        status: 'answered',
+      })
+      // 外键本来就是关的：不切换、也不在收尾时打开
+      expect(
+        (db.prepare('PRAGMA foreign_keys').get() as unknown as { foreign_keys: number })
+          .foreign_keys,
+      ).toBe(0)
+      // 重建过的库不再需要重建
+      expect(needsCardsRebuild(db)).toBe(false)
+      expect(rebuildLegacyCards(db)).toBe(false)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('upgradeLegacyRuleSets：没有表 / 缺 authority_json / 已具备三种状态', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      expect(upgradeLegacyRuleSets(db)).toBe(false)
+      db.exec(`CREATE TABLE rule_sets (
+        id TEXT PRIMARY KEY CHECK (id = 'current'),
+        version INTEGER NOT NULL,
+        replaced_at TEXT NOT NULL,
+        rules_json TEXT NOT NULL DEFAULT '[]'
+      );`)
+      expect(upgradeLegacyRuleSets(db)).toBe(true)
+      expect(columnNames(db, 'rule_sets').has('authority_json')).toBe(true)
+      // 补出来的列没有默认值：兼容模式（没有准入块）
+      expect(db.prepare("SELECT authority_json FROM rule_sets WHERE id = 'current'").get()).toBe(
+        undefined,
+      )
+      expect(upgradeLegacyRuleSets(db)).toBe(false)
+    } finally {
+      db.close()
+    }
+  })
+
+  it('upgradeLegacyStagesTable：旧列的出口 / 超时 / 验收按旧列现算，外键保持关闭', () => {
+    const db = new DatabaseSync(':memory:')
+    try {
+      db.exec(tableDdl.workflows())
+      db.exec(tableDdl.stages())
+      // 回到 M11 形状：出口 / 判定者 / 派单三列物理删掉，四组旧去向列加回来
+      db.exec('ALTER TABLE workflow_stages DROP COLUMN exits_json')
+      db.exec('ALTER TABLE workflow_stages DROP COLUMN judge_json')
+      db.exec('ALTER TABLE workflow_stages DROP COLUMN handoffs_json')
+      db.exec('ALTER TABLE workflow_stages ADD COLUMN on_complete_stage_id TEXT')
+      db.exec('ALTER TABLE workflow_stages ADD COLUMN gate_max_fails INTEGER')
+      db.exec('ALTER TABLE workflow_stages ADD COLUMN reject_stage_id TEXT')
+      db.exec('PRAGMA foreign_keys = OFF')
+      db.prepare(
+        `INSERT INTO workflows (id, name, description, created_at) VALUES (?, ?, '', ?)`,
+      ).run('wf-1', '旧流程', SEED_AT)
+      db.prepare(
+        `INSERT INTO workflow_stages
+           (id, workflow_id, name, position, entry_mode, on_complete_stage_id, gate_max_fails,
+            run_timeout_ms, instructions, acceptance_json, created_at)
+         VALUES (?, ?, ?, 0, 'agent', ?, 2, 600000, '照做', '["门禁绿"]', ?)`,
+      ).run('st-1', 'wf-1', '旧阶段', 'st-2', SEED_AT)
+      expect(needsStagesRebuild(db)).toBe(true)
+
+      expect(upgradeLegacyStagesTable(db)).toBe(true)
+      const row = db
+        .prepare(
+          `SELECT exits_json, judge_json, handoffs_json, run_timeout_ms, acceptance_json
+           FROM workflow_stages WHERE id = 'st-1'`,
+        )
+        .get() as {
+        exits_json: string
+        judge_json: string
+        handoffs_json: string
+        run_timeout_ms: number
+        acceptance_json: string
+      }
+      // 旧列现算：完成去向 → done；闸门次数 → 判定者；非闸门阶段（judge 非 null 才算闸门）
+      expect(JSON.parse(row.exits_json)).toEqual({ done: { do: 'goto', stageId: 'st-2' } })
+      expect(JSON.parse(row.judge_json)).toEqual({ maxFails: 2 })
+      expect(JSON.parse(row.handoffs_json)).toEqual([])
+      expect(row.run_timeout_ms).toBe(600_000)
+      expect(JSON.parse(row.acceptance_json)).toEqual(['门禁绿'])
+      expect(
+        (db.prepare('PRAGMA foreign_keys').get() as unknown as { foreign_keys: number })
+          .foreign_keys,
+      ).toBe(0)
+      expect(needsStagesRebuild(db)).toBe(false)
+      expect(upgradeLegacyStagesTable(db)).toBe(false)
+    } finally {
+      db.close()
     }
   })
 })

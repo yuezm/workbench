@@ -133,4 +133,9 @@ describe('task-brief 展示名', () => {
     expect(briefModeLabel('requirement')).toBe('需求')
     expect(briefModeLabel('bug')).toBe('BUG')
   })
+
+  it('未知模式（旧数据 / 半迁移）原样兜底成本值，不抛错', () => {
+    // 运行时可能收到不在枚举里的旧值：找不到展示名就用值本身
+    expect(briefModeLabel('legacy' as unknown as 'free')).toBe('legacy')
+  })
 })

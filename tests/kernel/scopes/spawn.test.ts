@@ -465,6 +465,18 @@ describe('kernel/spawn：边界分支', () => {
     expect(childrenSettledFacts(view, 'tk-1', AT, env(), actor)).toEqual([])
   })
 
+  it('limits 没带 spawn 上限（老宿主 / 手写 env）：按内置缺省 32 / 8 处理', () => {
+    // `maxSpawnItems` / `maxSpawnDepth` 在 Limits 里是可选的：缺省臂必须回落到内置上限，
+    // 否则 `slice(0, undefined as number)` 会把子任务整批丢掉，而深度判定会恒成立（永不派生）。
+    const legacy: Environment = {
+      ...env(),
+      limits: { ...LIMITS, maxSpawnItems: undefined, maxSpawnDepth: undefined },
+    }
+    const view = makeView()
+    const many = Array.from({ length: 40 }, (_, i) => spawn({ key: `k${i}` }))
+    expect(createdTasks(spawnFacts(view, run, many, AT, legacy, actor))).toHaveLength(32)
+  })
+
   it('父阶段不存在：rollup 降级 notify（不产 run）', () => {
     const child = task({ id: 'tk-child', parentTaskId: 'tk-1', currentStageId: 'st-done' })
     const view = makeView({

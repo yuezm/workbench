@@ -2,8 +2,28 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { AGENTS_FILE, agentsDocText, ensureProjectAgents } from '@workbench/host/project-agents'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+/**
+ * 写盘失败要用真实落盘失败来造吗？不必——`writeProjectDoc` 的失败形态（权限 / 磁盘满 /
+ * 目标被占）在各平台上不一样，这里把它切成可注入的失败，只锁「失败不抛、返回诊断」。
+ * 默认仍然走真实实现，其它用例照旧落到真文件上。
+ */
+const failRef = vi.hoisted(() => ({ value: null as unknown }))
+
+vi.mock('@workbench/host/artifacts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@workbench/host/artifacts')>()
+  return {
+    ...actual,
+    writeProjectDoc: (dir: string, fileName: string, text: string): string => {
+      if (failRef.value !== null) throw failRef.value
+      return actual.writeProjectDoc(dir, fileName, text)
+    },
+  }
+})
+
+const { AGENTS_FILE, agentsDocText, ensureProjectAgents } =
+  await import('@workbench/host/project-agents')
 
 const created: string[] = []
 
@@ -15,6 +35,7 @@ const tmp = (): string => {
 }
 
 afterEach(() => {
+  failRef.value = null
   while (created.length > 0) {
     const dir = created.pop()
     if (dir !== undefined) rmSync(dir, { recursive: true, force: true })
@@ -109,5 +130,27 @@ describe('ensureProjectAgents', () => {
 
     expect(result.created).toBe(false)
     expect(result.error).not.toBeNull()
+  })
+
+  it('写盘失败：返回诊断而不是抛（项目创建不该因此失败）', () => {
+    failRef.value = new Error('EACCES: permission denied')
+    const dir = tmp()
+
+    const result = ensureProjectAgents(dir, 'x')
+
+    expect(result).toEqual({
+      path: join(dir, AGENTS_FILE),
+      created: false,
+      error: 'EACCES: permission denied',
+    })
+  })
+
+  it('写盘抛非 Error：文案走 String 兜底，仍然不抛', () => {
+    failRef.value = '磁盘满了' as unknown as Error
+    const dir = tmp()
+
+    const result = ensureProjectAgents(dir, 'x')
+
+    expect(result).toEqual({ path: join(dir, AGENTS_FILE), created: false, error: '磁盘满了' })
   })
 })

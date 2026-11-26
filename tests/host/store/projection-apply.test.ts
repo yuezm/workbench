@@ -2,6 +2,7 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { Change } from '@workbench/kernel/core/types'
+import type { Assessment, Mandate } from '@workbench/protocol/authority'
 import type {
   Agent,
   Card,
@@ -1106,5 +1107,139 @@ describe('createProjectionWriter：run 判定证据列（M49）', () => {
       '[{"cmd":"类型","exitCode":1,"acceptance":2}]',
     )
     expect(rows.find((row) => row.id === legacy.id)?.checks_json).toBe('[]')
+  })
+})
+
+describe('createProjectionWriter：老事实的缺省与脏值（M7 / M34 / M50 / M56）', () => {
+  it('阶段行：没有 handoffs 时按旧去向现算，闸门阶段的验收缺省空数组', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    // 老事实：派单（M50）与验收（M34）都还没有，判定者已经在
+    const stage = {
+      ...sample.stage({ workflowId: workflow.id }),
+      handoffs: undefined,
+      acceptance: undefined,
+      judge: { maxFails: 2 },
+    } as unknown as WorkflowStage
+
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+
+    const row = db
+      .prepare(
+        'SELECT handoffs_json, acceptance_json, judge_json FROM workflow_stages WHERE id = ?',
+      )
+      .get(stage.id) as { handoffs_json: string; acceptance_json: string; judge_json: string }
+    expect(JSON.parse(row.handoffs_json)).toEqual([])
+    expect(JSON.parse(row.acceptance_json)).toEqual([])
+    expect(JSON.parse(row.judge_json)).toEqual({ maxFails: 2 })
+  })
+
+  it('任务行：gateFailsByStage 只收「阶段 id → 正整数」，其余值丢掉', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    const stage = sample.stage({ workflowId: workflow.id })
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+    const task = {
+      ...sample.task({ workflowId: workflow.id, currentStageId: stage.id }),
+      // 脏投影的真实形状：旧的单个数字被折成对象时可能夹带 0 / 小数 / 字符串
+      gateFailsByStage: { 'st-1': 2, 'st-2': 0, 'st-3': 1.5, 'st-4': 'x' },
+    } as unknown as Task
+
+    writer.apply({ table: 'tasks', key: task.id, row: task }, SAMPLE_AT)
+
+    const row = db.prepare('SELECT gate_fails FROM tasks WHERE id = ?').get(task.id) as {
+      gate_fails: string
+    }
+    expect(JSON.parse(row.gate_fails)).toEqual({ 'st-1': 2 })
+  })
+
+  it('脚本快照：既没有 steps 也没有老 args 时归一成一步空命令；env 缺省 {}', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const workflow = sample.workflow()
+    writer.apply({ table: 'workflows', key: workflow.id, row: workflow }, SAMPLE_AT)
+    const stage = {
+      ...sample.stage({ workflowId: workflow.id, entryMode: 'script' }),
+      script: { runtimeId: 'rt-1' },
+    } as unknown as WorkflowStage
+
+    writer.apply({ table: 'workflow_stages', key: stage.id, row: stage }, SAMPLE_AT)
+
+    const row = db
+      .prepare('SELECT script_json FROM workflow_stages WHERE id = ?')
+      .get(stage.id) as { script_json: string }
+    expect(JSON.parse(row.script_json)).toEqual({
+      runtimeId: 'rt-1',
+      steps: [{ label: '', args: [] }],
+      cwd: null,
+      env: {},
+      timeoutMs: null,
+      runAll: true,
+    })
+  })
+})
+
+describe('createProjectionWriter：授权与研判行（A2 / A3）', () => {
+  it('mandates / assessments 整行 upsert（JSON 列按描述符编码）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const mandate: Mandate = {
+      id: 'md-1',
+      taskId: 'task-1',
+      scope: {
+        workflowId: 'wf-1',
+        stageId: null,
+        projectId: null,
+        access: 'edit',
+        maxRuns: 3,
+        maxTokens: null,
+        expiresAt: null,
+      },
+      strength: 'explicit',
+      basis: 'manual',
+      policyVersion: 1,
+      ruleIds: ['rule-1'],
+      by: { kind: 'manual', via: 'ui' },
+      grantedAt: SAMPLE_AT,
+      revokedAt: null,
+      revokedReason: null,
+      legacy: false,
+    }
+    const assessment: Assessment = {
+      id: 'as-1',
+      eventId: 'ev-1',
+      policyVersion: 1,
+      ruleIds: ['rule-1'],
+      verdicts: [{ ruleId: 'rule-1', match: true, evidence: '对方点名要我做' }],
+      decision: 'accept',
+      wouldAccept: true,
+      via: 'assessor',
+    }
+
+    writer.apply({ table: 'mandates', key: mandate.id, row: mandate }, SAMPLE_AT)
+    writer.apply({ table: 'assessments', key: assessment.id, row: assessment }, SAMPLE_AT)
+
+    expect(db.prepare('SELECT task_id, scope_json, by_json, legacy FROM mandates').get()).toEqual({
+      task_id: 'task-1',
+      scope_json: JSON.stringify(mandate.scope),
+      by_json: JSON.stringify(mandate.by),
+      legacy: 0,
+    })
+    expect(
+      db.prepare('SELECT event_id, verdicts_json, would_accept FROM assessments').get(),
+    ).toEqual({
+      event_id: 'ev-1',
+      verdicts_json: JSON.stringify(assessment.verdicts),
+      would_accept: 1,
+    })
+    // 删行：按 id 走同一套表清单
+    writer.apply({ table: 'mandates', key: mandate.id, row: null }, SAMPLE_AT)
+    writer.apply({ table: 'assessments', key: assessment.id, row: null }, SAMPLE_AT)
+    expect(countRows(db, 'mandates')).toBe(0)
+    expect(countRows(db, 'assessments')).toBe(0)
   })
 })

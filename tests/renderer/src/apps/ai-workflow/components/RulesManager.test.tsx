@@ -414,3 +414,49 @@ describe('RulesManager：下次触发与预演入口（M36-F）', () => {
     expect(screen.queryByRole('button', { name: '试跑' })).not.toBeInTheDocument()
   })
 })
+
+describe('RulesManager：准入配置保存（A1）', () => {
+  const authorityView = {
+    mode: 'observe' as const,
+    sources: [],
+    assessorAgentId: null,
+    assessBatch: 8,
+    assessWindowMs: 5000,
+    policyVersion: 4,
+  }
+
+  it('保存准入：dispatch rules.replace 带整块 authority（与规则同一条版本线）', async () => {
+    seed([])
+    kernel.setView('authority.current', undefined, authorityView)
+    const user = userEvent.setup()
+    render(<RulesManager />)
+
+    await screen.findByRole('tab', { name: '只观察' })
+    await user.click(screen.getByRole('tab', { name: '关闭推断' }))
+    await user.click(screen.getByRole('button', { name: '保存准入' }))
+
+    await waitFor(() =>
+      expect(kernel.dispatched).toContainEqual(
+        expect.objectContaining({
+          type: 'rules.replace',
+          authority: expect.objectContaining({ mode: 'off' }),
+        }),
+      ),
+    )
+  })
+
+  it('保存准入失败：错误留在页面（面板与错误条各一处），命令不回滚成第二条', async () => {
+    seed([])
+    kernel.setView('authority.current', undefined, authorityView)
+    kernel.onDispatch(() => Promise.reject(new Error('策略版本冲突')))
+    const user = userEvent.setup()
+    render(<RulesManager />)
+
+    await screen.findByRole('tab', { name: '只观察' })
+    await user.click(screen.getByRole('tab', { name: '自动接单' }))
+    await user.click(screen.getByRole('button', { name: '保存准入' }))
+
+    expect((await screen.findAllByText('策略版本冲突')).length).toBeGreaterThan(0)
+    expect(kernel.dispatched).toHaveLength(1)
+  })
+})

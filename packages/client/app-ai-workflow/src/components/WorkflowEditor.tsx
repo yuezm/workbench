@@ -58,7 +58,14 @@ import {
   nextUserStageName,
   userStageRange,
   withBuiltinStages,
+  type NormalizedStage,
 } from '../model/stage-draft'
+
+/**
+ * 草稿（工作流定义）的收窄形态：阶段出口表已归一为数组（`withBuiltinStages` 等保证），
+ * 组件里可直接 `stage.exits.map(...)`，不必逐处 `?? []`。
+ */
+type DraftWorkflow = { name: string; description?: string; stages: NormalizedStage[] }
 
 const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -245,13 +252,19 @@ function landingStageIdOf(target: WorkflowWithStages | undefined): string | null
   )
 }
 
-/** 新加的一行派单：触发条件按阶段类型取第一项，目标工作流取第一个候选。 */
+/**
+ * 新加的一行派单：触发条件按阶段类型取第一项，目标工作流取第一个候选。
+ *
+ * 上游保证：`guardChoicesFor` 对任何阶段都至少返回一项（含「人工拖动时」），
+ * 「+ 派单」按钮在 `handoffWorkflows.length === 0` 时禁用、根本点不到，
+ * 所以这里的 `first` / `target` 恒有值，不再兜底。
+ */
 function defaultHandoff(stage: StageInput, workflows: readonly WorkflowWithStages[]): StageHandoff {
   const first = guardChoicesFor(stage)[0]
   const target = workflows[0]
   return {
-    on: first?.value ?? 'done',
-    workflowId: target?.id ?? '',
+    on: first.value,
+    workflowId: target.id,
     stageId: landingStageIdOf(target),
   }
 }
@@ -269,8 +282,8 @@ function exitRowsFor(stage: StageInput): StageExitGuard[] {
   return stage.judge ? ['passed', 'failed', 'errored'] : ['done', 'errored']
 }
 
-function exitOf(stage: StageInput, guard: StageExitGuard): StageExitInput | undefined {
-  return (stage.exits ?? []).find((exit) => exit.on === guard)
+function exitOf(stage: NormalizedStage, guard: StageExitGuard): StageExitInput | undefined {
+  return stage.exits.find((exit) => exit.on === guard)
 }
 
 /**
@@ -281,7 +294,7 @@ function exitOf(stage: StageInput, guard: StageExitGuard): StageExitInput | unde
  * M34：验收只属于闸门阶段（`judge` 非空）。执行阶段不渲染验收输入框，保存时归一成空数组，
  * 否则内核按「非闸门阶段配了验收」整份拒收。
  */
-function pruneByEntryKind(stage: StageInput): StageInput {
+function pruneByEntryKind(stage: NormalizedStage): NormalizedStage {
   const kind = entryKindOf(stage)
   const isScript = kind === 'script' || kind === 'script-gate'
   if (kind === 'agent' || kind === 'script') {
@@ -298,7 +311,7 @@ function pruneByEntryKind(stage: StageInput): StageInput {
       instructions: isScript ? '' : stage.instructions,
       runTimeoutMs: isScript ? null : (stage.runTimeoutMs ?? null),
       // 判定两侧的出口只有判定阶段才有，切回普通阶段要一并收掉，否则内核整份拒收
-      exits: (stage.exits ?? []).filter((exit) => exit.on === 'done' || exit.on === 'errored'),
+      exits: stage.exits.filter((exit) => exit.on === 'done' || exit.on === 'errored'),
     }
   }
   if (kind === 'gate' || kind === 'script-gate') {
@@ -313,7 +326,7 @@ function pruneByEntryKind(stage: StageInput): StageInput {
       acceptance: stage.acceptance,
       runTimeoutMs: isScript ? null : (stage.runTimeoutMs ?? null),
       // 判定阶段跑完不给结论就不算离开，done 这一支永远不触发
-      exits: (stage.exits ?? []).filter((exit) => exit.on !== 'done'),
+      exits: stage.exits.filter((exit) => exit.on !== 'done'),
       handoffs: (stage.handoffs ?? []).filter((handoff) => handoff.on !== 'done'),
       subtaskStageId: null,
       onChildrenSettled: null,
@@ -351,7 +364,7 @@ function pruneByEntryKind(stage: StageInput): StageInput {
  * 已完成 / 已取消的交接面板不展示，留着就是看不见的配置；内核也会直接以「不允许交接」拒收，
  * 与其让人对着弹窗里看不到的字段排查，不如在这里归一。
  */
-function pruneStage(stage: StageInput): StageInput {
+function pruneStage(stage: NormalizedStage): NormalizedStage {
   const pruned = pruneByEntryKind(stage)
   if (!isTerminalStage(stage)) return pruned
   // 终态没有「离开」这回事：出口表与派单永远不触发，留着就是看不见的配置
@@ -364,10 +377,8 @@ function outOfRange(index: number | null | undefined, count: number): boolean {
 }
 
 /** 阶段上是否挂着已失效的出口目标（出口表里任一条 goto 指到已删阶段） */
-function hasDanglingTarget(stage: StageInput, count: number): boolean {
-  return (stage.exits ?? []).some(
-    (exit) => exit.do === 'goto' && outOfRange(exit.stageIndex, count),
-  )
+function hasDanglingTarget(stage: NormalizedStage, count: number): boolean {
+  return stage.exits.some((exit) => exit.do === 'goto' && outOfRange(exit.stageIndex, count))
 }
 
 /**
@@ -395,7 +406,7 @@ interface DraftErrors {
   stageName?: string
 }
 
-function validateDraft(draft: WorkflowInput, scriptRuntimes: readonly Runtime[]): DraftErrors {
+function validateDraft(draft: DraftWorkflow, scriptRuntimes: readonly Runtime[]): DraftErrors {
   const scriptRuntimeIds = scriptRuntimes.map((runtime) => runtime.id)
   const errors: DraftErrors = {}
   if (draft.name.trim() === '') errors.name = '工作流名称必填'
@@ -438,19 +449,23 @@ function validateDraft(draft: WorkflowInput, scriptRuntimes: readonly Runtime[])
 
   // 命令不在阶段上，唯一来源是运行时连接：引用通过但那条连接自己没有命令（手工改库 /
   // 老数据）时，脚本连可执行文件都解析不出来，保存前一并指出
-  const noCommand = draft.stages.findIndex((stage) => {
-    if (stage.entryMode !== 'script') return false
-    const runtime = scriptRuntimes.find((item) => item.id === (stage.script?.runtimeId ?? ''))
-    return runtime !== undefined && runtime.command.trim() === ''
+  // 命中第一条「运行时存在但没有命令」的脚本阶段；名字就地取到，免得到时候再查一次（那次必中）
+  let noCommand = -1
+  let noCommandRuntimeName = ''
+  draft.stages.forEach((stage, index) => {
+    if (noCommand >= 0 || stage.entryMode !== 'script') return
+    const runtime = scriptRuntimes.find((item) => item.id === stage.script?.runtimeId)
+    if (runtime !== undefined && runtime.command.trim() === '') {
+      noCommand = index
+      noCommandRuntimeName = runtime.name
+    }
   })
   if (noCommand >= 0) {
     const label = draft.stages[noCommand].name.trim()
-    const runtimeId = draft.stages[noCommand].script?.runtimeId ?? ''
-    const name = scriptRuntimes.find((item) => item.id === runtimeId)?.name ?? ''
     return {
       ...errors,
       stageIndex: noCommand,
-      form: `「${label}」的脚本运行时「${name}」没有命令：命令只来自运行时，先到「运行时」页把它补上`,
+      form: `「${label}」的脚本运行时「${noCommandRuntimeName}」没有命令：命令只来自运行时，先到「运行时」页把它补上`,
     }
   }
   return errors
@@ -514,7 +529,7 @@ function toDraft(workflow: WorkflowWithStages | null): WorkflowInput {
 
 /** 阶段重排的结果：重排后的阶段与新的选中下标 */
 export interface StageMove {
-  stages: StageInput[]
+  stages: NormalizedStage[]
   selected: number
 }
 
@@ -530,13 +545,13 @@ export interface StageMove {
  * 内置阶段不由这里管：界面上不给它们拖动与 ↑↓，位置由内核按类别归一。
  */
 export function moveStageToIndex(
-  stages: StageInput[],
+  stages: readonly NormalizedStage[],
   selected: number,
   i: number,
   j: number,
 ): StageMove {
   if (i === j || i < 0 || j < 0 || i >= stages.length || j >= stages.length) {
-    return { stages, selected }
+    return { stages: [...stages], selected }
   }
   /** 下标重映射：被移动的那一项落到位，被跨过的整体让开一格，其余不动 */
   const shift = (idx: number): number => {
@@ -551,7 +566,7 @@ export function moveStageToIndex(
   // M32：出口表的 goto 也是下标，重排必须同步重映射，否则流转会把任务送错阶段
   const next = stages.map((s) => ({
     ...s,
-    exits: (s.exits ?? []).map((exit) =>
+    exits: s.exits.map((exit) =>
       exit.do === 'goto' ? { ...exit, stageIndex: remap(exit.stageIndex) } : exit,
     ),
   }))
@@ -600,7 +615,7 @@ export function WorkflowEditor({
   onSave,
   onCancel,
 }: WorkflowEditorProps): ReactElement {
-  const [draft, setDraft] = useState<WorkflowInput>(() => {
+  const [draft, setDraft] = useState<DraftWorkflow>(() => {
     const seed = initial ?? toDraft(workflow)
     // 预填草稿（模板）与既有工作流都过一遍规范形态：内置阶段补齐、顺序与下标一致
     return { ...seed, stages: withBuiltinStages(seed.stages) }
@@ -650,7 +665,7 @@ export function WorkflowEditor({
 
   /** 出口表的一行：`default` = 收回这一条，由内核保存时按阶段顺序补缺省 */
   const setExit = (i: number, guard: StageExitGuard, value: string): void => {
-    const others = (draft.stages[i]?.exits ?? []).filter((exit) => exit.on !== guard)
+    const others = draft.stages[i].exits.filter((exit) => exit.on !== guard)
     if (value === 'default') {
       patchStage(i, { exits: others })
       return
@@ -662,12 +677,10 @@ export function WorkflowEditor({
     patchStage(i, { exits: [...others, { on: guard, do: value as 'await' | 'close' }] })
   }
 
-  /** 出口表的目标阶段（下标） */
+  /** 出口表的目标阶段（下标）：下拉里只有具体阶段，没有空值项，「清空」走 setExit 的 default 选项 */
   const setExitTarget = (i: number, guard: StageExitGuard, value: string): void => {
-    const exits = (draft.stages[i]?.exits ?? []).map((exit) =>
-      exit.on === guard
-        ? { ...exit, do: 'goto' as const, stageIndex: value === '' ? null : Number(value) }
-        : exit,
+    const exits = draft.stages[i].exits.map((exit) =>
+      exit.on === guard ? { ...exit, do: 'goto' as const, stageIndex: Number(value) } : exit,
     )
     patchStage(i, { exits })
   }
@@ -730,7 +743,7 @@ export function WorkflowEditor({
   const save = async (ev: React.FormEvent): Promise<void> => {
     ev.preventDefault()
     setSubmitError(null)
-    const input: WorkflowInput = {
+    const input: DraftWorkflow = {
       ...draft,
       name: draft.name.trim(),
       stages: draft.stages.map((stage) => ({
@@ -768,6 +781,10 @@ export function WorkflowEditor({
   const targetOptions = draft.stages.map((s, i) => ({ i, name: s.name || `阶段${i + 1}` }))
   const index = Math.min(selected, draft.stages.length - 1)
   const stage = draft.stages[index]
+  /** 当前阶段脚本（可能为空）；取出成 const 后，闭包里的 `script` 收窄一直有效 */
+  const script = stage.script
+  /** 当前阶段的派单清单：缺字段（老数据）按空数组，后续不再逐处兜底 */
+  const handoffs = stage.handoffs ?? []
   /** 编辑器上的类别（未开始 / 进行中 / 已完成 / 已关闭）与它的配色 */
   const kindMeta = STAGE_KIND_META[stageKindOf(stage)]
   /** 内置阶段：名称 / 位置 / 类别由系统锁定，其它字段照常可编辑 */
@@ -800,17 +817,18 @@ export function WorkflowEditor({
   const copySources = draft.stages
     .map((item, at) => ({ item, at }))
     .filter(
-      ({ item, at }) =>
-        at !== index && item.entryMode === 'script' && (item.script?.steps.length ?? 0) > 0,
+      (entry): entry is { item: NormalizedStage & { script: StageScript }; at: number } =>
+        entry.at !== index &&
+        entry.item.entryMode === 'script' &&
+        (entry.item.script?.steps.length ?? 0) > 0,
     )
     .map(({ item, at }) => ({
       index: at,
       name: item.name.trim() === '' ? `阶段${at + 1}` : item.name.trim(),
+      script: item.script,
     }))
   /** 复制脚本配置：步骤 / 目录 / 环境变量 / 超时 / 跑法整套拿过来，连接在不改变时保留（避免引用不存在的运行时）。 */
-  const copyScriptFrom = (at: number): void => {
-    const source = draft.stages[at]?.script
-    if (!source) return
+  const copyScriptFrom = (source: StageScript): void => {
     patchScript(index, {
       ...(commandRuntimeIds.includes(source.runtimeId) ? { runtimeId: source.runtimeId } : {}),
       steps: source.steps.map((step) => ({
@@ -1038,7 +1056,7 @@ export function WorkflowEditor({
                 </Select>
               </Field>
             )}
-            {stage.entryMode === 'script' && stage.script && (
+            {stage.entryMode === 'script' && script && (
               <div className="mt-3 flex w-full flex-col gap-2 rounded-md border border-border p-3">
                 {/* 没有命令运行时 = 这个阶段类型暂时配不上：说清怎么补，别只留一个空下拉 */}
                 {commandRuntimes.length === 0 && (
@@ -1050,7 +1068,7 @@ export function WorkflowEditor({
                 <div className="flex flex-wrap items-start gap-2">
                   <Field label="运行时" className="w-44">
                     <Select
-                      value={picked(stage.script.runtimeId, commandRuntimeIds)}
+                      value={picked(script.runtimeId, commandRuntimeIds)}
                       onValueChange={(v) => patchScript(index, { runtimeId: v })}
                     >
                       <SelectTrigger aria-label={`阶段${n}脚本运行时`} className="w-full">
@@ -1068,7 +1086,7 @@ export function WorkflowEditor({
                 </div>
                 {/* 命令只读展示：整行铺开而不是塞进 176px 的列里，长路径也读得全 */}
                 <p className="text-xs text-faint-foreground">
-                  {!commandRuntimeIds.includes(stage.script.runtimeId)
+                  {!commandRuntimeIds.includes(script.runtimeId)
                     ? '先选一条命令运行时。'
                     : scriptRuntimeCommand === ''
                       ? '所选运行时没有命令，到「运行时」页补上。'
@@ -1077,13 +1095,16 @@ export function WorkflowEditor({
                 {/* M49：从别的脚本阶段复制一份配置过来——同一套闸门命令不必手抄第三遍 */}
                 {copySources.length > 0 && (
                   <Field label="复制自" className="w-44">
-                    <Select value="" onValueChange={(v) => copyScriptFrom(Number(v))}>
+                    <Select
+                      value=""
+                      onValueChange={(v) => copyScriptFrom(copySources[Number(v)].script)}
+                    >
                       <SelectTrigger aria-label={`阶段${n}复制脚本配置`} className="w-full">
                         <SelectValue placeholder="从其它阶段复制" />
                       </SelectTrigger>
                       <SelectContent>
-                        {copySources.map((source) => (
-                          <SelectItem key={source.index} value={String(source.index)}>
+                        {copySources.map((source, position) => (
+                          <SelectItem key={source.index} value={String(position)}>
                             {source.name}
                           </SelectItem>
                         ))}
@@ -1102,15 +1123,13 @@ export function WorkflowEditor({
                       variant="quiet"
                       size="sm"
                       aria-label={`阶段${n}添加步骤`}
-                      disabled={stage.script.steps.length >= SCRIPT_MAX_STEPS}
-                      onClick={() =>
-                        patchScript(index, { steps: addStep(stage.script?.steps ?? []) })
-                      }
+                      disabled={script.steps.length >= SCRIPT_MAX_STEPS}
+                      onClick={() => patchScript(index, { steps: addStep(script.steps) })}
                     >
                       添加步骤
                     </Button>
                   </div>
-                  {stage.script.steps.map((step, at) => (
+                  {script.steps.map((step, at) => (
                     <div
                       key={`step-${stage.id ?? index}-${at}-${scriptRevision}`}
                       className="flex flex-col gap-2 rounded-md border border-border p-2"
@@ -1123,7 +1142,7 @@ export function WorkflowEditor({
                             placeholder="这一步证明什么（留空 = 用命令 + 参数）"
                             onChange={(event) =>
                               patchScript(index, {
-                                steps: patchStep(stage.script?.steps ?? [], at, {
+                                steps: patchStep(script.steps, at, {
                                   label: event.target.value,
                                 }),
                               })
@@ -1137,7 +1156,7 @@ export function WorkflowEditor({
                               value={step.acceptance == null ? 'none' : String(step.acceptance)}
                               onValueChange={(v) =>
                                 patchScript(index, {
-                                  steps: patchStep(stage.script?.steps ?? [], at, {
+                                  steps: patchStep(script.steps, at, {
                                     acceptance: v === 'none' ? undefined : Number(v),
                                   }),
                                 })
@@ -1165,9 +1184,9 @@ export function WorkflowEditor({
                           variant="quiet"
                           size="sm"
                           aria-label={`阶段${n}删除步骤${at + 1}`}
-                          disabled={(stage.script?.steps.length ?? 0) <= 1}
+                          disabled={script.steps.length <= 1}
                           onClick={() =>
-                            patchScript(index, { steps: removeStep(stage.script?.steps ?? [], at) })
+                            patchScript(index, { steps: removeStep(script.steps, at) })
                           }
                         >
                           删除
@@ -1182,7 +1201,7 @@ export function WorkflowEditor({
                         parse={(text) => parseArgLines(text)}
                         onCommit={(parsed) =>
                           patchScript(index, {
-                            steps: patchStep(stage.script?.steps ?? [], at, {
+                            steps: patchStep(script.steps, at, {
                               args: parsed as readonly string[],
                             }),
                           })
@@ -1192,7 +1211,7 @@ export function WorkflowEditor({
                   ))}
                   <Field label="跑法" className="w-52">
                     <Select
-                      value={stage.script.runAll === false ? 'stop' : 'all'}
+                      value={script.runAll === false ? 'stop' : 'all'}
                       onValueChange={(v) => patchScript(index, { runAll: v === 'all' })}
                     >
                       <SelectTrigger aria-label={`阶段${n}脚本跑法`} className="w-full">
@@ -1209,7 +1228,7 @@ export function WorkflowEditor({
                   <Field label="工作目录" className="min-w-0 flex-1">
                     <Input
                       aria-label={`阶段${n}脚本工作目录`}
-                      value={stage.script.cwd ?? ''}
+                      value={script.cwd ?? ''}
                       placeholder="留空 = 项目文件夹"
                       onChange={(event) =>
                         patchScript(index, { cwd: event.target.value.trim() || null })
@@ -1218,7 +1237,7 @@ export function WorkflowEditor({
                   </Field>
                   <Field label="超时" className="w-36">
                     <Select
-                      value={String(stage.script.timeoutMs ?? SCRIPT_TIMEOUT_CHOICES[1].value)}
+                      value={String(script.timeoutMs ?? SCRIPT_TIMEOUT_CHOICES[1].value)}
                       onValueChange={(v) => patchScript(index, { timeoutMs: Number(v) })}
                     >
                       <SelectTrigger aria-label={`阶段${n}脚本超时`} className="w-full">
@@ -1240,7 +1259,7 @@ export function WorkflowEditor({
                     label={`阶段${n}脚本环境变量`}
                     rows={2}
                     placeholder="CI=1"
-                    initial={formatEnvLines(stage.script.env)}
+                    initial={formatEnvLines(script.env)}
                     parse={(text) => parseEnvLines(text)}
                     onCommit={(parsed) =>
                       patchScript(index, { env: parsed as Record<string, string> })
@@ -1482,19 +1501,16 @@ export function WorkflowEditor({
                       disabled={handoffWorkflows.length === 0}
                       aria-label={`阶段${n}新增派单`}
                       onClick={() =>
-                        patchHandoffs(index, [
-                          ...(stage.handoffs ?? []),
-                          defaultHandoff(stage, handoffWorkflows),
-                        ])
+                        patchHandoffs(index, [...handoffs, defaultHandoff(stage, handoffWorkflows)])
                       }
                     >
                       + 派单
                     </Button>
                   </div>
-                  {(stage.handoffs ?? []).length === 0 && (
+                  {handoffs.length === 0 && (
                     <p className="text-xs text-faint-foreground">不派单。</p>
                   )}
-                  {(stage.handoffs ?? []).map((handoff, hi) => (
+                  {handoffs.map((handoff, hi) => (
                     <div
                       key={`${handoff.on}-${hi}`}
                       className="flex flex-col gap-2 rounded-md border border-border p-2"
@@ -1510,7 +1526,7 @@ export function WorkflowEditor({
                             onValueChange={(v) =>
                               patchHandoffs(
                                 index,
-                                (stage.handoffs ?? []).map((item, k) =>
+                                handoffs.map((item, k) =>
                                   k === hi ? { ...item, on: v as StageHandoffGuard } : item,
                                 ),
                               )
@@ -1537,7 +1553,7 @@ export function WorkflowEditor({
                             onValueChange={(v) =>
                               patchHandoffs(
                                 index,
-                                (stage.handoffs ?? []).map((item, k) =>
+                                handoffs.map((item, k) =>
                                   k === hi
                                     ? {
                                         ...item,
@@ -1578,7 +1594,7 @@ export function WorkflowEditor({
                             onValueChange={(v) =>
                               patchHandoffs(
                                 index,
-                                (stage.handoffs ?? []).map((item, k) =>
+                                handoffs.map((item, k) =>
                                   k === hi ? { ...item, stageId: v === '' ? null : v } : item,
                                 ),
                               )
@@ -1606,7 +1622,7 @@ export function WorkflowEditor({
                             onValueChange={(v) =>
                               patchHandoffs(
                                 index,
-                                (stage.handoffs ?? []).map((item, k) =>
+                                handoffs.map((item, k) =>
                                   k === hi
                                     ? { ...item, thread: v as StageHandoffThreadPolicy }
                                     : item,
@@ -1634,7 +1650,7 @@ export function WorkflowEditor({
                           onClick={() =>
                             patchHandoffs(
                               index,
-                              (stage.handoffs ?? []).filter((_, k) => k !== hi),
+                              handoffs.filter((_, k) => k !== hi),
                             )
                           }
                         >

@@ -16,12 +16,12 @@ export default defineConfig({
     include: ['tests/**/*.test.{ts,tsx}'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
-      // 阈值略低于 2026-10 基线（99.3/95.5/97.9/99.2），跌破即 test 失败
+      // 门槛：产品代码四元组全 100%，跌破即 test 失败（提交前由 pre-commit 的 verify:coverage 拦截）
       thresholds: {
-        statements: 98,
-        branches: 93,
-        functions: 95,
-        lines: 98,
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
       },
       // 「项目覆盖率」指产品代码：测试夹具被 import 进来也会被 v8 计入分母
       // （`tests/sim/world.ts` 这类随机世界天然跑不满 100%），口径上不该算。

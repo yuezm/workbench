@@ -282,7 +282,8 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
         // 编排命令：返回值在 `setPlugin` 里按 views 现算
         return null
       // 只改状态 / 只入账、没有可回传实体的命令：显式登记成 null，不靠 `default` 吞掉。
-      // 新增一条命令却忘了在这里登记时，下面的穷尽断言会直接编译报错。
+      // 新增一条命令却忘了在这里登记时，下面的穷尽断言会直接编译报错（`command` 在这里已是
+      // never）；`v8 ignore` 只豁免覆盖率——这一支在产品路径上不可达，不该靠写测试把它「覆盖」掉。
       // M47：`thread.open` 的 id 由调用方从 `thread.opened` 事实里取（hub 就是这么做的）。
       case 'workflow.remove':
       case 'agent.remove':
@@ -306,12 +307,14 @@ export function createCommandRouter(deps: CommandRouterDeps): CommandRouter {
       case 'thread.remove':
       case 'review.export':
         return null
-      default: {
-        // 穷尽断言：`command` 在这里已是 never；漏一条命令，这一行就编不过
-        const unhandled: never = command
-        return unhandled
-      }
     }
+    // 穷尽断言：switch 已覆盖全部命令，`command` 到这里是 never；漏一条这条就编不过。
+    // 放在 switch **外面**而不是 `default:` 里：switch 的 default 会变成一条永远走不到的
+    // 分支（覆盖率为它扣分，只能靠忽略注释兜），而 switch 外的这段本来就只有这一条路径。
+    /* v8 ignore start */
+    const unhandled: never = command
+    return unhandled
+    /* v8 ignore stop */
   }
 
   const executePlain = (command: Command): Fact[] => {

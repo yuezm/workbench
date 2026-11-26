@@ -1,3 +1,5 @@
 # `--max-arg-length`：包拆分后一次提交常涉及数百个 .ts，Windows 命令行上限约 8k 字符会被撑爆
 # （eslint 报 "The command line is too long."），显式压低让 lint-staged 自行分块。
-pnpm exec lint-staged --max-arg-length 7000 && pnpm run verify:guards && pnpm run verify:types
+# 覆盖率闸门最后跑，且用 `--staged`：钩子该判「要提交的内容」而不是工作区——
+# 部分暂存（git add -p）时两者不同，用工作区口径会拦下不属于本次提交的行。
+pnpm exec lint-staged --max-arg-length 7000 && pnpm run verify:guards && pnpm run verify:types && pnpm exec vitest run --coverage && node scripts/check-diff-coverage.mjs --staged

@@ -62,7 +62,7 @@ export interface ChannelHarness {
   /** 已订阅的 onCard 处理器（模拟 hub 的分发列表；M54：第三参是归属上下文） */
   handlers: Array<(card: Card, ref: string | null, context: CardContext | null) => void>
   /** 通道回报的 delivered 参数 */
-  delivered: Array<{ cardId: string; version: number; ref: string }>
+  delivered: DeliveredCall[]
   /** 通道回报的 answer 参数（`answer` 抛错时仍记录，再抛错） */
   answers: AnswerCall[]
   /** 通道提交的入站文本（M44/M45/M47：`submit` 的调用参数，含平台线索与按连接覆盖的智能体） */
@@ -85,6 +85,15 @@ export interface ChannelHarnessOptions {
     hints: ChannelSubmitHints,
     agent?: string,
   ) => Promise<ChannelSubmitOutcome>
+  /** 自定义 delivered 行为：用于「回报送达失败」这类路径（缺省总是成功） */
+  delivered?: (call: DeliveredCall) => Promise<void>
+}
+
+/** 通道回报送达的参数 */
+export interface DeliveredCall {
+  cardId: string
+  version: number
+  ref: string
 }
 
 export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarness {
@@ -106,8 +115,9 @@ export function channelHarness(options: ChannelHarnessOptions = {}): ChannelHarn
       }
     },
     delivered: (cardId, version, ref) => {
-      delivered.push({ cardId, version, ref })
-      return Promise.resolve()
+      const call: DeliveredCall = { cardId, version, ref }
+      delivered.push(call)
+      return options.delivered === undefined ? Promise.resolve() : options.delivered(call)
     },
     answer: (cardId, optionIndex, ref, byRef) => {
       const call: AnswerCall = {

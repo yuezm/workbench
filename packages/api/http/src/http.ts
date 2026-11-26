@@ -48,8 +48,14 @@ export interface ApiDeps {
   router: CommandRouter
   /** 飞书连接管理：未装配时 `/api/lark` 回可读错误 */
   lark?: LarkAdmin
-  /** 通用知会（宿主 outcome 通知）：广播给所有在线页面 */
-  notify(payload: NotifyRequest): void
+  /**
+   * 通用知会（宿主 outcome 通知）：广播给所有在线页面。
+   *
+   * 参数是**已归一化**的形状（`body` 必有）：请求体里的 `body` 是可选的，补空串是
+   * `POST /api/notify` 这个入口的职责（见本文件的 handler），宿主侧不再二次兜底——
+   * 否则那行 `?? ''` 永远不会被执行，只能靠给死分支写测试来凑覆盖率。
+   */
+  notify(payload: { title: string; body: string }): void
   events: EventStream
   listDirs(target?: string): DirListing
   info(): ServerInfo
@@ -343,20 +349,20 @@ export function closeServer(server: Server, graceMs: number = CLOSE_GRACE_MS): P
   if (!server.listening) return Promise.resolve()
   return new Promise<void>((resolve) => {
     let done = false
-    let sweep: NodeJS.Timeout | null = null
     let grace: NodeJS.Timeout | null = null
-    const finish = (): void => {
-      if (done) return
-      done = true
-      if (sweep !== null) clearInterval(sweep)
-      if (grace !== null) clearTimeout(grace)
-      resolve()
-    }
-    sweep = setInterval(
+    // 补扫定时器先建出来：它一定存在，`finish` 只需清掉它（不再有「可能为 null」的分支）
+    const sweep = setInterval(
       () => server.closeIdleConnections(),
       Math.max(1, Math.min(IDLE_SWEEP_MS, graceMs)),
     )
     sweep.unref()
+    const finish = (): void => {
+      if (done) return
+      done = true
+      clearInterval(sweep)
+      if (grace !== null) clearTimeout(grace)
+      resolve()
+    }
     grace = setTimeout(() => {
       server.closeAllConnections()
       finish()

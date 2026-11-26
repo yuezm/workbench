@@ -45,6 +45,7 @@ export { addressRepairFacts, stageErroredFacts } from '../stall'
 import {
   batchTaskPhases,
   closeIfAllDone,
+  finishedPhaseOf,
   inactivityFacts,
   makeNote,
   noteFacts,
@@ -311,6 +312,7 @@ function stageTransitionFacts(
   const leftStage =
     moved.archive === true ||
     (next.currentStageId !== null && next.currentStageId !== task.currentStageId)
+  /** 本次离开命中的派单触发条件；`null` = 没离开，或这次离开本就不派单（取消 / 判定没给结论）。 */
   const guard = leftStage
     ? handoffGuardOf(current, {
         kind: 'run',
@@ -320,11 +322,9 @@ function stageTransitionFacts(
       })
     : null
   const handoffFacts = (): FactDraft[] =>
-    guard === null
-      ? []
-      : handoffOnExit(view, task, current, guard, now, env, HOST_SCHEDULER, {
-          runId: run.id,
-        })
+    handoffOnExit(view, task, current, guard, now, env, HOST_SCHEDULER, {
+      runId: run.id,
+    })
   /** 预算耗尽放行时的留痕：任务评论（详情页可见，不改状态） */
   const degradedFacts = (): FactDraft[] => {
     if (moved.gateExhausted !== true) return []
@@ -683,7 +683,7 @@ export function receiveRun(
               task: Task
               outcome: 'done' | 'cancelled'
             }
-            settledOverrides.set(task.id, outcome === 'done' ? 'finished' : 'cancelled')
+            settledOverrides.set(task.id, finishedPhaseOf(outcome))
           }
         }
         changed = true

@@ -37,7 +37,7 @@ type View = 'workspace' | 'settings'
  * 任务栏的二级页面：栈式路由（看板 → 任务详情 → 线程详情 → 任务详情 …）。
  * 详情是页面不是弹窗：内容区整块让给详情，返回即出栈；栈空即看板。
  */
-type TaskRoute = { kind: 'task'; taskId: string } | { kind: 'thread'; threadId: string }
+export type TaskRoute = { kind: 'task'; taskId: string } | { kind: 'thread'; threadId: string }
 
 /**
  * 卡片的落点：挂任务的卡进任务详情，其余的没有落点。
@@ -50,6 +50,20 @@ export type CardLanding = { kind: 'task'; taskId: string } | { kind: 'none' }
 /** 落点判定（纯函数）：有任务就进任务详情，没有就没有落点 */
 export function cardLanding(card: Card): CardLanding {
   return card.taskId !== null ? { kind: 'task', taskId: card.taskId } : { kind: 'none' }
+}
+
+/**
+ * 点开一张卡要进入的路由栈：挂任务的卡进任务详情，**没有落点的卡返回 `null`（原地不动）**。
+ *
+ * 抽成模块级导出函数（与 `cardLanding` 同口径）：两种落点都能直接单测，
+ * `openCard` 里不必再留一个只能靠调用方保证的分支。
+ *
+ * 返回值用 `null` 而不是空数组：空数组是「栈空了，回看板」，那会把正在任务详情里的人
+ * 静默踢出来——「没有落点」与「栈为空」必须是两件事。
+ */
+export function trailForCard(card: Card): TaskRoute[] | null {
+  const landing = cardLanding(card)
+  return landing.kind === 'task' ? [{ kind: 'task', taskId: landing.taskId }] : null
 }
 
 /** 设置区页头：标题 + 一句话说明 */
@@ -179,10 +193,14 @@ export function AiWorkflowPage(): ReactElement {
    * 否则还是得在任务详情里自己翻（这正是「点了通知却还要翻找」的那半个问题）。
    */
   const openCard = (card: Card): void => {
+    const next = trailForCard(card)
+    // 没有落点：原地不动（不动视图、不动栈），不是「出栈回看板」。
+    // 通知条对这类卡整行 disabled（ApprovalBar），所以这一支在产品里到不了；留着是为了
+    // 「哪天给线程卡开落点」时不把正在任务详情里的人静默踢出来——届时删掉 ignore 并补 UI 测试。
+    /* v8 ignore next */
+    if (next === null) return
     setView('workspace')
-    // 落点判定在纯函数里（cardLanding）：没有落点的卡通知条整行禁用，走不到这里
-    const landing = cardLanding(card)
-    if (landing.kind === 'task') setTrail([{ kind: 'task', taskId: landing.taskId }])
+    setTrail(next)
     setFocusCardId(card.id)
   }
 

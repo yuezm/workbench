@@ -1,5 +1,8 @@
 // @vitest-environment node
-import type { DatabaseSync } from 'node:sqlite'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
 import { project } from '@workbench/kernel/scopes/project'
 import { IMPORT_ROOT_LABEL, timeline } from '@workbench/kernel/scopes/timeline'
@@ -1326,5 +1329,68 @@ describe('importLegacyIfNeeded：旧聊天表迁移（T14b）', () => {
     expect(result.counts).toMatchObject({ conversations: 0, messages: 0 })
     expect(allFacts(db)).toHaveLength(before)
     expect(legacyChatTables(db)).toEqual([])
+  })
+})
+
+/**
+ * 列可空的老库（手工改过 / 别的工具建的表）：`exits_json` / `judge_json` 读回来是 NULL。
+ * 新 DDL 里这两列是 NOT NULL，但读侧仍要能兜住 NULL——读取是「不信任库里的形状」的那一侧。
+ */
+describe('importLegacyIfNeeded：阶段列可空的老库', () => {
+  it('exits_json / judge_json 为 NULL：导入按空出口 / 不判定归一', () => {
+    const root = mkdtempSync(join(tmpdir(), 'import-null-stages-'))
+    const file = join(root, 'ai-workflow.db')
+    try {
+      const seeded = new DatabaseSync(file)
+      try {
+        // 有全部新列（不必重建），但出口 / 判定两列没有 NOT NULL
+        seeded.exec(`
+          CREATE TABLE workflow_stages (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            entry_mode TEXT NOT NULL,
+            agent_id TEXT,
+            script_json TEXT NOT NULL DEFAULT 'null',
+            exits_json TEXT,
+            handoffs_json TEXT NOT NULL DEFAULT '[]',
+            subtask_stage_id TEXT,
+            on_children_settled TEXT,
+            spawn_policy TEXT,
+            instructions TEXT NOT NULL DEFAULT '',
+            acceptance_json TEXT NOT NULL DEFAULT '[]',
+            run_timeout_ms INTEGER,
+            judge_json TEXT,
+            notify_on_park INTEGER NOT NULL DEFAULT 0,
+            builtin TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE (workflow_id, position)
+          );`)
+      } finally {
+        seeded.close()
+      }
+
+      const db = openDatabase(file)
+      try {
+        seedEntities(db)
+        db.exec('UPDATE workflow_stages SET exits_json = NULL, judge_json = NULL')
+
+        const result = importLegacyIfNeeded(db, realKernel, { at: IMPORT_AT })
+
+        expect(result.imported).toBe(true)
+        expect(result.counts.workflow_stages).toBeGreaterThan(0)
+        const row = db
+          .prepare('SELECT exits_json, judge_json FROM workflow_stages ORDER BY position LIMIT 1')
+          .get() as { exits_json: string; judge_json: string }
+        expect(JSON.parse(row.exits_json)).toEqual({})
+        expect(JSON.parse(row.judge_json)).toBeNull()
+      } finally {
+        // 文件库要先关，否则 Windows 上删不掉临时目录
+        db.close()
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

@@ -1,5 +1,10 @@
 import { useState, type FormEvent, type ReactElement } from 'react'
-import type { Task, TaskPhase, WorkflowWithStages } from '@workbench/protocol/entities'
+import type {
+  Task,
+  TaskPhase,
+  WorkflowStage,
+  WorkflowWithStages,
+} from '@workbench/protocol/entities'
 import { Button } from '@workbench/client-ui-primitives/button'
 import {
   Dialog,
@@ -216,13 +221,14 @@ export function TaskDetailPage({
   /**
    * 移到「已完成」（M53）：完成的人工入口，任务仍留在看板。
    * 走 `task.move`——完成由「进入终态阶段」表达，归档是另一条轴（见 `toggleArchive`）。
+   *
+   * 目标阶段由调用处传入：按钮只在 `doneStage !== undefined` 时渲染，构造时已收窄。
    */
-  const finishTask = (): void => {
-    if (doneStage === undefined) return
+  const finishTask = (stage: WorkflowStage): void => {
     setAction('complete')
     setActionError(null)
     void getKernelStore()
-      .dispatch({ type: 'task.move', commandId: '', id: taskId, stageId: doneStage.id })
+      .dispatch({ type: 'task.move', commandId: '', id: taskId, stageId: stage.id })
       .catch((e: unknown) => setActionError(errMsg(e)))
       .finally(() => setAction(null))
   }
@@ -230,9 +236,10 @@ export function TaskDetailPage({
   /**
    * 归档 / 取消归档：只改 archivedAt，可逆、零业务后果。
    * 执行中由内核拒绝（先 `task.stop`），按钮在这里先禁用并把原因写进 title。
+   *
+   * 目标任务由调用处传入：按钮只在 `task !== null` 时渲染，构造时已收窄。
    */
-  const toggleArchive = (): void => {
-    if (task === null) return
+  const toggleArchive = (target: Task): void => {
     setAction('archive')
     setActionError(null)
     void getKernelStore()
@@ -240,7 +247,7 @@ export function TaskDetailPage({
         type: 'task.archive',
         commandId: '',
         id: taskId,
-        archived: task.archivedAt === null,
+        archived: target.archivedAt === null,
       })
       .catch((e: unknown) => setActionError(errMsg(e)))
       .finally(() => setAction(null))
@@ -329,7 +336,7 @@ export function TaskDetailPage({
                 size="sm"
                 disabled={executing || action !== null}
                 title={executing ? '执行中：先停止执行' : '移到「已完成」：任务仍在看板上'}
-                onClick={finishTask}
+                onClick={() => finishTask(doneStage)}
               >
                 {action === 'complete' ? '正在移动…' : '移到已完成'}
               </Button>
@@ -347,7 +354,7 @@ export function TaskDetailPage({
                       ? '归档：从看板收起来（可撤销，不影响完成与否）'
                       : '取消归档：放回看板'
                 }
-                onClick={toggleArchive}
+                onClick={() => toggleArchive(task)}
               >
                 {action === 'archive'
                   ? '正在处理…'

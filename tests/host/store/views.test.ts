@@ -1,6 +1,7 @@
 // @vitest-environment node
 import type { DatabaseSync } from 'node:sqlite'
 import { afterEach, describe, expect, it } from 'vitest'
+import type { Mandate } from '@workbench/protocol/authority'
 import type {
   Conversation,
   Runtime,
@@ -261,6 +262,41 @@ function seedRunProjection(db: DatabaseSync): void {
 }
 
 describe('loadView：按 viewSpec 装载切片', () => {
+  it('mandates：按 taskId 索引授权行（一任务一行，撤销覆盖同一行）', () => {
+    const db = memory()
+    const writer = createProjectionWriter(db)
+    const mandate: Mandate = {
+      id: 'md-1',
+      taskId: 'tk-1',
+      scope: {
+        workflowId: 'wf-1',
+        stageId: 'st-1',
+        projectId: 'pj-1',
+        access: 'edit',
+        maxRuns: 1,
+        maxTokens: null,
+        expiresAt: null,
+      },
+      strength: 'inferred',
+      basis: 'addressed',
+      policyVersion: 2,
+      ruleIds: ['rule-1'],
+      by: { kind: 'manual', via: 'ui' },
+      grantedAt: SAMPLE_AT,
+      revokedAt: null,
+      revokedReason: null,
+      legacy: false,
+    }
+    writer.apply({ table: 'mandates', key: mandate.id, row: mandate }, SAMPLE_AT)
+
+    const view = loadView(db, ['mandates'])
+
+    expect([...(view.mandates?.keys() ?? [])]).toEqual([mandate.taskId])
+    expect(view.mandates?.get(mandate.taskId)).toEqual(mandate)
+    // 没声明的切片：空 Map（不查库）
+    expect(loadView(db, []).mandates?.size).toBe(0)
+  })
+
   it('只查声明的表，其余为空 Map', () => {
     const db = memory()
     seed(db)

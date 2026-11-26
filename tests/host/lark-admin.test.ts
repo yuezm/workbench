@@ -673,3 +673,285 @@ describe('lark-admin：动作', () => {
     await pending
   })
 })
+
+/**
+ * 边界形状：CLI 找不到、起不来、输出超过上限、退出码非零但结果是好的、
+ * 可选字段给不给——这些都发生在 IPC 边界之外（renderer 传什么就是什么）。
+ */
+describe('lark-admin：边界形状与兜底', () => {
+  const env = { PATH: '/bin' }
+
+  it('action 里 CLI 找不到：文案用解析器的原因，没有原因就退回「未在 PATH 中」', async () => {
+    const cli = fakeCli()
+    const admin = createLarkAdmin({ spawn: cli.spawn, env })
+
+    vi.mocked(resolveExecutable).mockReturnValueOnce({ path: null, error: 'PATH 里没有 lark-cli' })
+    expect(await admin.logout({})).toEqual({
+      ok: false,
+      error: '找不到 lark-cli：PATH 里没有 lark-cli',
+    })
+
+    vi.mocked(resolveExecutable).mockReturnValueOnce({ path: null, error: null })
+    expect(await admin.logout({})).toEqual({ ok: false, error: '找不到 lark-cli：未在 PATH 中' })
+    expect(cli.calls).toHaveLength(0)
+  })
+
+  it('status：找不到 CLI 且解析器没给原因 → 同样退回「未在 PATH 中」', async () => {
+    vi.mocked(resolveExecutable).mockReturnValueOnce({ path: null, error: null })
+    const status = await createLarkAdmin({ spawn: fakeCli().spawn, env: {} }).status()
+    expect(status.error).toBe('找不到 lark-cli：未在 PATH 中')
+    expect(status.hint).toContain('npm i -g')
+  })
+
+  it('spawn 直接抛错：折算成 error 不抛；抛非 Error 时文案走 String 兜底', async () => {
+    const boom = (() => {
+      throw new Error('ENOENT: 找不到命令')
+    }) as unknown as SpawnFn
+    expect(await createLarkAdmin({ spawn: boom, env }).logout({})).toEqual({
+      ok: false,
+      error: 'ENOENT: 找不到命令',
+    })
+
+    // 外部能力抛非 Error 是常态：类型上按 Error 收，运行期可能是字符串
+    const weird = '起不来' as unknown as Error
+    const throwsString = (() => {
+      throw weird
+    }) as unknown as SpawnFn
+    expect(await createLarkAdmin({ spawn: throwsString, env }).logout({})).toEqual({
+      ok: false,
+      error: '起不来',
+    })
+  })
+
+  it('输出超过上限：后续 chunk 直接丢弃（不让一条 CLI 把内存吃满）', async () => {
+    const cli = fakeCli([{ hang: true }])
+    const admin = createLarkAdmin({ spawn: cli.spawn, env })
+    const pending = admin.removeProfile({ name: 'wb' })
+    await flush()
+
+    const child = cli.children[0] as FakeChild
+    // 先灌满上限（全是空行：不构成原因行），再发一帧错误信封——它必须被丢掉
+    child.emitStdout('\n'.repeat(262_144))
+    child.emitStdout(JSON.stringify({ ok: false, error: { message: '不该被读到' } }))
+    child.close(1)
+
+    expect(await pending).toEqual({
+      ok: false,
+      error: 'lark-cli 退出码 1，没有给出原因：稍后再试一次；反复失败就重新发起登录',
+    })
+  })
+
+  it('parseLoginStart：没有 expires_in 时不带 expiresIn', () => {
+    expect(parseLoginStart(JSON.stringify({ device_code: 'dc', verification_url: 'u' }))).toEqual({
+      ok: true,
+      deviceCode: 'dc',
+      verificationUrl: 'u',
+    })
+  })
+
+  it('failureOf：没有 message 的对象按整段 JSON 收尾，超长截断到 400', () => {
+    const long = failureOf(JSON.stringify({ ok: false, error: { detail: 'z'.repeat(500) } }))
+    expect(long?.startsWith('…')).toBe(true)
+    expect(long).toHaveLength(401)
+    // message 只有空白：当没给原因，退回整段
+    expect(failureOf(JSON.stringify({ ok: false, error: { message: '   ' } }))).toBe(
+      '{"message":"   "}',
+    )
+    // ok:false 且没有 error：整条记录就是文案
+    expect(failureOf(JSON.stringify({ ok: false }))).toBe('{"ok":false}')
+  })
+
+  it('exitReason：可选退出码 / 行里不是失败信封时继续找', () => {
+    expect(exitReason(null, '', '')).toBe(
+      'lark-cli 退出码 未知，没有给出原因：稍后再试一次；反复失败就重新发起登录',
+    )
+    // 有一行以 { 开头但不是失败信封：跳过它，用剩下的原因行
+    expect(exitReason(1, '{"ok":true}\n真实原因\n', '')).toBe('{"ok":true}\n真实原因')
+  })
+
+  it('asLarkAction：可选字段给不给都归一（字段在但不是字符串则拒收）', () => {
+    expect(asLarkAction({ action: 'add-profile', name: 'a', appId: 'b', secret: 's' })).toEqual({
+      action: 'add-profile',
+      name: 'a',
+      appId: 'b',
+      secret: 's',
+    })
+    expect(asLarkAction({ action: 'login-start', profile: 'p' })).toEqual({
+      action: 'login-start',
+      profile: 'p',
+    })
+    expect(asLarkAction({ action: 'login-start', domain: 'im' })).toEqual({
+      action: 'login-start',
+      domain: 'im',
+    })
+    expect(asLarkAction({ action: 'login-poll', deviceCode: 'd', profile: 'p' })).toEqual({
+      action: 'login-poll',
+      deviceCode: 'd',
+      profile: 'p',
+    })
+    expect(asLarkAction({ action: 'logout', profile: 'p' })).toEqual({
+      action: 'logout',
+      profile: 'p',
+    })
+    expect(asLarkAction({ action: 'login-poll', deviceCode: 'd', profile: 1 })).toBeNull()
+    expect(asLarkAction({ action: 'login-poll', deviceCode: 2, profile: 'p' })).toBeNull()
+  })
+
+  it('runLarkAction：可选字段都给时原样透传', async () => {
+    const admin = {
+      status: vi.fn(async () => ({ ok: true })),
+      addProfile: vi.fn(async () => ({ ok: true })),
+      loginStart: vi.fn(async () => ({ ok: true })),
+      loginPoll: vi.fn(async () => ({ ok: true })),
+      logout: vi.fn(async () => ({ ok: true })),
+      removeProfile: vi.fn(async () => ({ ok: true })),
+    }
+    await runLarkAction(admin as unknown as LarkAdmin, {
+      action: 'add-profile',
+      name: 'a',
+      appId: 'b',
+      secret: 's',
+      brand: 'lark',
+    })
+    await runLarkAction(admin as unknown as LarkAdmin, {
+      action: 'login-start',
+      profile: 'p',
+      domain: 'im,doc',
+    })
+    await runLarkAction(admin as unknown as LarkAdmin, {
+      action: 'login-poll',
+      deviceCode: 'd',
+      profile: 'p',
+    })
+    await runLarkAction(admin as unknown as LarkAdmin, { action: 'logout', profile: 'p' })
+
+    expect(admin.addProfile).toHaveBeenCalledWith({
+      name: 'a',
+      appId: 'b',
+      secret: 's',
+      brand: 'lark',
+    })
+    expect(admin.loginStart).toHaveBeenCalledWith({ profile: 'p', domain: 'im,doc' })
+    expect(admin.loginPoll).toHaveBeenCalledWith({ deviceCode: 'd', profile: 'p' })
+    expect(admin.logout).toHaveBeenCalledWith({ profile: 'p' })
+  })
+
+  it('status：别的 agent 的 config show 失败或什么都没有 → 不做比对', async () => {
+    const failed = fakeCli([
+      { stdout: SHOW_TEXT },
+      { stdout: WHOAMI },
+      { stdout: PROFILES },
+      { error: new Error('别的环境坏了') },
+    ])
+    const first = await createLarkAdmin({
+      spawn: failed.spawn,
+      env: { HERMES_HOME: 'C:/hermes' },
+    }).status()
+    expect(first.foreign).toBeNull()
+    expect(first.conflict).toBe(false)
+
+    const empty = fakeCli([
+      { stdout: SHOW_TEXT },
+      { stdout: WHOAMI },
+      { stdout: PROFILES },
+      { stdout: 'garbage' },
+    ])
+    const second = await createLarkAdmin({
+      spawn: empty.spawn,
+      env: { HERMES_HOME: 'C:/hermes' },
+    }).status()
+    expect(second.foreign).toBeNull()
+  })
+
+  it('status：别的 agent 只有 appId 没有 workspace，也照样比得出冲突', async () => {
+    const cli = fakeCli([
+      { stdout: SHOW_TEXT },
+      { stdout: WHOAMI },
+      { stdout: PROFILES },
+      { stdout: JSON.stringify({ workspace: null, appId: 'cli_workbench' }) },
+    ])
+    const status = await createLarkAdmin({
+      spawn: cli.spawn,
+      env: { HERMES_HOME: 'C:/hermes' },
+    }).status()
+    expect(status.foreign).toEqual({ workspace: null, appId: 'cli_workbench' })
+    expect(status.conflict).toBe(true)
+    expect(status.hint).toContain('同一个飞书应用')
+  })
+
+  it('login-poll：退出码非零且复查 whoami 也失败 → 给退出码原因', async () => {
+    const crashed = fakeCli([
+      { code: 1, stderr: '抢不到 token 存储锁' },
+      { error: new Error('whoami 也炸了') },
+    ])
+    expect(
+      await createLarkAdmin({ spawn: crashed.spawn, env }).loginPoll({ deviceCode: 'd' }),
+    ).toEqual({ ok: false, error: '抢不到 token 存储锁' })
+
+    const nonzero = fakeCli([
+      { code: 1, stderr: '抢不到 token 存储锁' },
+      { code: 2, stderr: 'x' },
+    ])
+    expect(
+      await createLarkAdmin({ spawn: nonzero.spawn, env }).loginPoll({ deviceCode: 'd' }),
+    ).toEqual({ ok: false, error: '抢不到 token 存储锁' })
+  })
+
+  it('login-poll：spawn 直接报错 → ok:false', async () => {
+    const cli = fakeCli([{ error: new Error('no pipe') }])
+    expect(await createLarkAdmin({ spawn: cli.spawn, env }).loginPoll({ deviceCode: 'd' })).toEqual(
+      {
+        ok: false,
+        error: 'no pipe',
+      },
+    )
+  })
+
+  it('login-start：退出码非零但 stdout 已经带着链接 → 照常给出链接', async () => {
+    const link = JSON.stringify({
+      device_code: 'dc',
+      verification_url: 'https://accounts.feishu.cn/verify',
+      expires_in: 600,
+    })
+    const cli = fakeCli([{ code: 2, stdout: link }])
+    expect(await createLarkAdmin({ spawn: cli.spawn, env }).loginStart({})).toMatchObject({
+      ok: true,
+      deviceCode: 'dc',
+    })
+  })
+
+  it('add-profile：brand=lark 原样交给 CLI（国际版）', async () => {
+    const cli = fakeCli([{ stdout: '' }])
+    expect(
+      await createLarkAdmin({ spawn: cli.spawn, env }).addProfile({
+        name: 'wb',
+        appId: 'cli_abc',
+        secret: 's',
+        brand: 'lark',
+      }),
+    ).toEqual({ ok: true })
+    expect(cli.calls[0]?.args).toEqual([
+      'profile',
+      'add',
+      '--name',
+      'wb',
+      '--app-id',
+      'cli_abc',
+      '--brand',
+      'lark',
+      '--app-secret-stdin',
+    ])
+  })
+
+  it('不注入 spawn / env：按默认实现构造（不跑 CLI）', () => {
+    const admin = createLarkAdmin()
+    expect(Object.keys(admin).sort()).toEqual([
+      'addProfile',
+      'loginPoll',
+      'loginStart',
+      'logout',
+      'removeProfile',
+      'status',
+    ])
+  })
+})

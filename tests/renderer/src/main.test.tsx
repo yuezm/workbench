@@ -7,22 +7,25 @@
  * ② 服务可用时先装配内核（取 kernel.seq 快照）再 render；
  * ③ 知会管道在 render 之前接上，并且接的是 shell store 的 `pushOpenTarget`。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { NoticeEvent } from '@workbench/protocol/http'
 import type { OpenTarget } from '@workbench/protocol/ipc'
 import type { WorkbenchApi } from '@workbench/contract-api'
 
-const { createRootMock, renderMock, infoMock, onNoticeMock } = vi.hoisted(() => {
+const { createRootMock, renderMock, infoMock, onNoticeMock, toastMock } = vi.hoisted(() => {
   const renderMock = vi.fn()
   const createRootMock = vi.fn(() => ({ render: renderMock }))
   const infoMock = vi.fn()
   const onNoticeMock = vi.fn<(handler: (notice: NoticeEvent) => void) => () => void>(() => () => {})
-  return { createRootMock, renderMock, infoMock, onNoticeMock }
+  const toastMock = vi.fn()
+  return { createRootMock, renderMock, infoMock, onNoticeMock, toastMock }
 })
 
 vi.mock('react-dom/client', () => ({
   default: { createRoot: createRootMock },
 }))
+
+vi.mock('@workbench/client-ui-kit/toast', () => ({ toast: toastMock }))
 
 const queryMock = vi.fn(async (view: string) => (view === 'kernel.seq' ? 0 : ([] as unknown)))
 
@@ -48,6 +51,12 @@ describe('renderer 入口 main.tsx', () => {
     vi.resetModules()
     vi.clearAllMocks()
     delete (window as unknown as { workbench?: WorkbenchApi }).workbench
+    // 缺省：页面上没有 #root（产物被改坏 / 挂到了别的文档）——initTheme 与桥接照旧先落地
+    document.body.innerHTML = ''
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
   })
 
   it('服务连不上：渲染启动失败页，不装配内核', async () => {
@@ -112,5 +121,49 @@ describe('renderer 入口 main.tsx', () => {
     expect(onNoticeMock.mock.invocationCallOrder[0]).toBeLessThan(
       renderMock.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
     )
+  })
+
+  it('服务连不上但抛的不是 Error（字符串 / 对象）：启动失败页照样写清原因', async () => {
+    // 页面里有 #root（正常产物）：容器取自它，失败页仍然照常渲染
+    document.body.innerHTML = '<div id="root"></div>'
+    infoMock.mockRejectedValue('连接被重置')
+    const { StartupFailure } = await import('@workbench/client-shell/components/StartupFailure')
+    await import('@workbench/web/main')
+
+    await vi.waitFor(() => expect(renderMock).toHaveBeenCalledTimes(1))
+    expect(createRootMock).toHaveBeenCalledWith(document.getElementById('root'))
+    const element = renderMock.mock.calls[0]?.[0] as {
+      type: unknown
+      props: { message: string }
+    }
+    expect(element.type).toBe(StartupFailure)
+    expect(element.props.message).toContain('连接被重置')
+  })
+
+  it('知会没有正文也没有落点：只弹标题，不动落点队列', async () => {
+    infoMock.mockResolvedValue({
+      name: 'workbench',
+      version: '2.0.0',
+      kernelVersion: 'M47.0.0',
+      dataDir: '/data',
+      defaultWorkdir: '/work',
+      startedAt: 't',
+      clients: 1,
+      pid: 1,
+    })
+    await import('@workbench/web/main')
+    const openTargetModule = await import('@workbench/client-shell/openTarget')
+
+    await vi.waitFor(() => expect(onNoticeMock).toHaveBeenCalledTimes(1))
+    const handler = onNoticeMock.mock.calls[0]?.[0] as (notice: NoticeEvent) => void
+    let seen: unknown = null
+    const off = openTargetModule.subscribeOpenTarget((pending) => {
+      seen = pending
+    })
+    handler({ kind: 'notice', title: '测试全绿', body: '' })
+    off()
+
+    expect(toastMock).toHaveBeenCalledWith('测试全绿', 'info')
+    expect(seen).toBeNull()
   })
 })

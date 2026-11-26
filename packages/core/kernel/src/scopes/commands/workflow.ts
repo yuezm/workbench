@@ -22,7 +22,14 @@ import { sameHandoffs } from '../workflow/stage-handoffs'
 import { normalizeAcceptance, sameAcceptance } from '../workflow/acceptance'
 import { done, hasActiveRun, ownerDraft, reject, runsOfTask, stagesOf, tasksOf } from './common'
 
-function stageRow(
+/**
+ * 一条阶段行的归一（输入形状 → 落行形状）。
+ *
+ * 导出到模块级：`validateStageSet` 会先挡掉「脚本阶段没配脚本」「`goto` 下标越界」，
+ * 所以这两处归一臂（`script ?? null`、越界跳过）在产品路径上不可达；但归一本身要能测，
+ * 导出后由单测直接构造畸形入参覆盖（逻辑与调用点均不变）。
+ */
+export function stageRow(
   workflowId: Id,
   id: Id,
   ids: Id[],

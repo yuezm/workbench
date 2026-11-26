@@ -19,6 +19,22 @@ const listing = (
   entries,
 })
 
+/**
+ * 取 React 提交到 DOM 节点上的 `onClick`。
+ *
+ * 禁用的表单控件收不到真实点击（React 对 disabled 的 button 直接不派发 click），
+ * 而「加载中」的兜底分支只有在 `listing === null` 时才成立——那时按钮必然是禁用的。
+ * 要 pin 住这两条防御分支，只能直接调用提交到节点上的真实处理器。
+ */
+function committedOnClick(node: HTMLElement): () => void {
+  const key = Object.keys(node).find((name) => name.startsWith('__reactProps$'))
+  if (key === undefined) throw new Error('节点上没有 React props：它不是 React 渲染出来的？')
+  const props = (node as unknown as Record<string, { onClick?: () => void }>)[key]
+  const onClick = props?.onClick
+  if (onClick === undefined) throw new Error('该节点没有 onClick')
+  return onClick
+}
+
 describe('FolderPickerDialog', () => {
   it('打开时从缺省目录开始；上一级在盘根禁用', async () => {
     const list = vi.fn(async () => listing('D:\\'))
@@ -104,5 +120,57 @@ describe('FolderPickerDialog', () => {
     expect(await screen.findByText('没有权限读取：D:\\Secret')).toBeInTheDocument()
     expect(screen.getByLabelText('当前目录')).toHaveTextContent('D:\\Codes')
     expect(screen.getByRole('button', { name: '选这个文件夹' })).toBeEnabled()
+  })
+
+  it('宿主抛 Error 时取其 message；错误条可关闭，当前目录不丢', async () => {
+    const list = vi
+      .fn<(path?: string) => Promise<DirListing>>()
+      .mockResolvedValueOnce(listing('D:\\Codes'))
+      .mockRejectedValueOnce(new Error('读取失败：D:\\Secret'))
+    const user = userEvent.setup()
+    render(<FolderPickerDialog list={list} onPick={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.click(await screen.findByRole('button', { name: '上一级' }))
+    expect(await screen.findByText('读取失败：D:\\Secret')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '关闭错误提示' }))
+    expect(screen.queryByText('读取失败：D:\\Secret')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('当前目录')).toHaveTextContent('D:\\Codes')
+  })
+
+  it('右上角关闭等同于取消（受控弹窗的 dismiss 只有 false 一侧）', async () => {
+    const onCancel = vi.fn()
+    const list = vi.fn(async () => listing('D:\\Codes'))
+    const user = userEvent.setup()
+    render(<FolderPickerDialog list={list} onPick={vi.fn()} onCancel={onCancel} />)
+
+    await screen.findByText('D:\\Codes')
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('加载中：上一级兜底到宿主缺省根，确认按钮不发选择', async () => {
+    // 目录列表永不返回：listing 始终是 null，两个按钮停在禁用态（真实点击到不了处理器）
+    const list = vi.fn<(path?: string) => Promise<DirListing>>(() => new Promise(() => {}))
+    const onPick = vi.fn()
+    render(
+      <FolderPickerDialog start={'D:\\start'} list={list} onPick={onPick} onCancel={vi.fn()} />,
+    )
+
+    const back = screen.getByRole('button', { name: '上一级' })
+    const confirm = screen.getByRole('button', { name: '选这个文件夹' })
+    expect(back).toBeDisabled()
+    expect(confirm).toBeDisabled()
+
+    // 打开时按 start 定位一次
+    await waitFor(() => expect(list).toHaveBeenCalledWith('D:\\start'))
+
+    // parent 为 null → 上一级请求宿主缺省目录（undefined），而不是发一个 null
+    committedOnClick(back)()
+    expect(list).toHaveBeenCalledWith(undefined)
+
+    // listing 为 null → 确认按钮不回调（防御分支）
+    committedOnClick(confirm)()
+    expect(onPick).not.toHaveBeenCalled()
   })
 })

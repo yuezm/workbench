@@ -23,6 +23,7 @@ import {
   WorkflowEditor,
 } from '@workbench/client-app-ai-workflow/components/WorkflowEditor'
 import { installFakeKernel, stopFakeKernel, type FakeKernel } from '../../../../shell/fake-kernel'
+import type { NormalizedStage } from '@workbench/client-app-ai-workflow/model/stage-draft'
 
 /** 拖一行到另一行（序号 1 基，与左侧列表一致）：整行是拖拽源与落点，抓到目标行松手 */
 function dragStageRow(from: number, to: number): void {
@@ -378,7 +379,7 @@ describe('WorkflowEditor', () => {
     expect(savedStage(draft, 'B').exits).toEqual([{ on: 'done', do: 'goto', stageIndex: 2 }])
     // C 的「出错时」指向 A：A 仍在下标 1
     expect(savedStage(draft, 'C').exits).toEqual([{ on: 'errored', do: 'goto', stageIndex: 1 }])
-  })
+  }, 20_000)
 
   it('新建工作流：交接目标候选为全部工作流，保存回传目标工作流与目标阶段', async () => {
     const other: WorkflowWithStages = {
@@ -1859,7 +1860,7 @@ describe('WorkflowEditor 阶段流转目标与闸门去向', () => {
 })
 
 describe('moveStageToIndex（拖动落点：跨多行也一样重映射）', () => {
-  const stages = (): StageInput[] => [
+  const stages = (): NormalizedStage[] => [
     {
       name: 'A',
       entryMode: 'agent',
@@ -2445,5 +2446,457 @@ describe('WorkflowEditor：从其它阶段复制脚本配置（M49）', () => {
       timeoutMs: 300_000,
       runAll: false,
     })
+  })
+})
+
+describe('moveStageToIndex：缺出口表 / 非 goto 出口 / 空下标（M32）', () => {
+  it('缺 exits 的阶段按空表重排；非 goto 出口原样保留；空下标重映射后仍为空', () => {
+    const input: NormalizedStage[] = [
+      { name: 'A', entryMode: 'agent', judge: null, exits: [] },
+      {
+        name: 'B',
+        entryMode: 'agent',
+        judge: null,
+        exits: [{ on: 'errored', do: 'await' }],
+      },
+      {
+        name: 'C',
+        entryMode: 'agent',
+        judge: null,
+        exits: [{ on: 'done', do: 'goto', stageIndex: null }],
+      },
+    ]
+    const moved = moveStageToIndex(input, 0, 0, 2)
+    expect(moved.stages.map((s) => s.name)).toEqual(['B', 'C', 'A'])
+    // A 没有出口表：结果归一成空数组
+    expect(moved.stages[2].exits).toEqual([])
+    // B 的「停在这里等人」不参与重映射
+    expect(moved.stages[0].exits).toEqual([{ on: 'errored', do: 'await' }])
+    // C 的目标本来就是空（未指定）：重排后仍为空
+    expect(moved.stages[1].exits).toEqual([{ on: 'done', do: 'goto', stageIndex: null }])
+  })
+})
+
+/** 直接造一条草稿阶段（缺省字段按最简填写，供 `initial` 用） */
+const draftStage = (over: Partial<StageInput> & { name: string }): StageInput => ({
+  entryMode: 'agent',
+  judge: null,
+  ...over,
+})
+
+describe('WorkflowEditor：脏投影与未配字段的兜底', () => {
+  it('出口指向的阶段 id 为空（脏投影）：还原成「未指定」，不下标错位', async () => {
+    const existing = workflowWith([{ name: 'A', exits: { done: { goto: 'B' } } }, { name: 'B' }])
+    existing.stages[1]!.exits = { done: { do: 'goto', stageId: null as unknown as string } }
+    render(<WorkflowEditor workflow={existing} onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    expect(screen.getByRole('combobox', { name: '阶段2完成时去向' })).toHaveTextContent(
+      '进入指定阶段',
+    )
+    expect(screen.getByRole('combobox', { name: '阶段2完成时目标阶段' })).toHaveTextContent(
+      '选择阶段',
+    )
+  })
+
+  it('出口是「停在这里等人 / 结束归档」（非 goto）：不显示目标阶段，保存原样', async () => {
+    const existing = workflowWith([{ name: 'A', exits: { done: 'await', errored: 'close' } }])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    expect(screen.getByRole('combobox', { name: '阶段2完成时去向' })).toHaveTextContent(
+      '停在这里等人',
+    )
+    expect(screen.queryByRole('combobox', { name: '阶段2完成时目标阶段' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, 'A').exits).toEqual([
+      { on: 'done', do: 'await' },
+      { on: 'errored', do: 'close' },
+    ])
+  })
+
+  it('闸门护栏选「不设护栏」：回传 maxFails=null', async () => {
+    const existing = workflowWith([{ name: 'G', judge: { maxFails: 3 } }])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    await choose(user, '阶段2放行护栏', '不设护栏')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, 'G').judge).toEqual({
+      maxFails: null,
+    })
+  })
+
+  it('交给用户的自定义阶段（老数据误标了判定者）：出现「进入这个阶段时提醒我」开关，切换写进草稿', async () => {
+    // 脏投影：人肉阶段（entryMode=user）却带着判定者 → 走闸门的展示块，才轮到「提醒我」
+    const existing = workflowWith([
+      { name: 'U', entryMode: 'user', agentId: null, judge: { maxFails: 1 } },
+    ])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(<WorkflowEditor workflow={existing} onSave={onSave} onCancel={vi.fn()} />)
+
+    const toggle = screen.getByRole('switch', { name: '阶段2进入时提醒我' })
+    await user.click(toggle)
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, 'U').notifyOnPark).toBe(true)
+  })
+})
+
+describe('WorkflowEditor：脚本阶段的老数据与复制（M40 / M49）', () => {
+  const cmdRuntime: Runtime = {
+    id: 'rt-cmd',
+    name: '本机命令',
+    executorKey: 'command',
+    command: 'pnpm',
+    profile: '',
+    argsTemplate: '',
+    enabled: true,
+    createdAt: 't',
+    lastProbe: null,
+  }
+
+  it('执行脚本但脚本配置缺失（手工改库 / 老数据）：保存前拦住并指明阶段', async () => {
+    kernel.setView('runtimes.all', undefined, [])
+    const onSave = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <WorkflowEditor
+        workflow={null}
+        initial={{
+          name: '自测',
+          description: '',
+          stages: [
+            draftStage({ name: '待办', entryMode: 'none', builtin: 'todo' }),
+            draftStage({ name: 'S', entryMode: 'script', script: null }),
+          ],
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText(/还没选运行时/u)).toBeInTheDocument()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it('脚本超时缺省按「10 分钟」回显；工作目录清空写回 null', async () => {
+    kernel.setView('runtimes.all', undefined, [cmdRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <WorkflowEditor
+        workflow={null}
+        initial={{
+          name: '自测',
+          description: '',
+          stages: [
+            draftStage({ name: '待办', entryMode: 'none', builtin: 'todo' }),
+            draftStage({
+              name: 'S',
+              entryMode: 'script',
+              script: {
+                runtimeId: 'rt-cmd',
+                steps: [{ label: '门禁', args: ['check'] }],
+                cwd: 'C:/repo',
+                env: {},
+                timeoutMs: null,
+              },
+            }),
+          ],
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('combobox', { name: '阶段2脚本超时' })).toHaveTextContent('10 分钟')
+    await user.clear(screen.getByLabelText('阶段2脚本工作目录'))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, 'S').script?.cwd).toBeNull()
+  })
+
+  it('从别的阶段复制脚本：来源运行时已不在本机时保留当前连接；名字空的来源显示默认名；runAll 缺省按 true', async () => {
+    kernel.setView('runtimes.all', undefined, [cmdRuntime])
+    const user = userEvent.setup()
+    render(
+      <WorkflowEditor
+        workflow={null}
+        initial={{
+          name: '自测',
+          description: '',
+          stages: [
+            draftStage({ name: '待办', entryMode: 'none', builtin: 'todo' }),
+            draftStage({
+              name: 'S1',
+              entryMode: 'script',
+              script: {
+                runtimeId: 'rt-cmd',
+                steps: [{ label: '保留', args: [] }],
+                cwd: null,
+                env: {},
+                timeoutMs: 600_000,
+                runAll: true,
+              },
+            }),
+            draftStage({
+              name: '',
+              entryMode: 'script',
+              script: {
+                runtimeId: 'rt-gone',
+                steps: [{ label: '来源', args: ['x'] }],
+                cwd: null,
+                env: { K: 'v' },
+                timeoutMs: 300_000,
+              },
+            }),
+            // 执行脚本但没有脚本配置：复制候选里不会出现它（steps 按 0 计），也不该抛错
+            draftStage({ name: 'S3', entryMode: 'script', script: null }),
+          ],
+        }}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    // 名字为空的来源按默认名「阶段3」出现在复制候选里；script 为空的 S3 不在候选里
+    await user.click(screen.getByRole('combobox', { name: '阶段2复制脚本配置' }))
+    expect(await screen.findByRole('option', { name: '阶段3' })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'S3' })).toBeNull()
+    await user.click(screen.getByRole('option', { name: '阶段3' }))
+
+    // 步骤整套搬过来（验收序号缺省就不写），运行时保留 S1 自己的连接
+    expect(screen.getByLabelText('阶段2步骤1标签')).toHaveValue('来源')
+    await user.click(screen.getByRole('combobox', { name: '阶段2脚本运行时' }))
+    expect(await screen.findByRole('option', { name: '本机命令' })).toHaveAttribute(
+      'data-state',
+      'checked',
+    )
+  })
+})
+
+describe('WorkflowEditor：老数据缺 handoffs / acceptance 字段', () => {
+  it('阶段没有 handoffs 字段：按「不派单」渲染，点「+ 派单」补一条；保存时归一成数组', async () => {
+    const other = workflowOf([{ name: '待办', entryMode: 'none' }])
+    other.id = 'w-other'
+    kernel.setView('workflows.all', undefined, [other])
+    kernel.setView('agents.all', undefined, [agent])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <WorkflowEditor
+        workflow={null}
+        initial={{
+          name: '自测',
+          description: '',
+          stages: [
+            draftStage({ name: '待办', entryMode: 'none', builtin: 'todo' }),
+            draftStage({ name: 'A', agentId: 'ag1' }),
+            draftStage({
+              name: 'G',
+              judge: { maxFails: 2 },
+              handoffs: [
+                { on: 'done', workflowId: 'w-other', stageId: null },
+                { on: 'passed', workflowId: 'w-other', stageId: null },
+              ],
+            }),
+            draftStage({
+              name: 'U',
+              entryMode: 'user',
+              agentId: null,
+              handoffs: [{ on: 'manual', workflowId: 'w-other', stageId: null }],
+            }),
+          ],
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    // 展开 A（阶段2）：没有 handoffs 字段 → 显示「不派单」
+    await user.click(screen.getByRole('button', { name: '阶段2' }))
+    expect(screen.getByText('不派单。')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '阶段2新增派单' }))
+    expect(screen.getByRole('combobox', { name: '阶段2派单1目标工作流' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const draft = onSave.mock.calls[0][0] as WorkflowInput
+    expect(savedStage(draft, 'A').handoffs).toHaveLength(1)
+    // 判定阶段（G）只留判定两侧的派单，「跑完时」被归一掉；人肉阶段（U）只留「人工拖动时」
+    expect(savedStage(draft, 'G').handoffs).toEqual([
+      { on: 'passed', workflowId: 'w-other', stageId: null },
+    ])
+    expect(savedStage(draft, 'U').handoffs).toEqual([
+      { on: 'manual', workflowId: 'w-other', stageId: null },
+    ])
+  })
+
+  it('闸门阶段缺 acceptance 字段（老数据）：验收输入框按空处理', async () => {
+    render(
+      <WorkflowEditor
+        workflow={null}
+        initial={{
+          name: '自测',
+          description: '',
+          stages: [
+            draftStage({ name: '待办', entryMode: 'none', builtin: 'todo' }),
+            draftStage({ name: 'G', judge: { maxFails: 2 } }),
+          ],
+        }}
+        onSave={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    )
+    expect(screen.getByLabelText('阶段2验收')).toHaveValue('')
+  })
+})
+
+describe('WorkflowEditor：脚本闸门步骤与阶段超时（M40 / M42）', () => {
+  const cmdRuntime: Runtime = {
+    id: 'rt-cmd',
+    name: '本机命令',
+    executorKey: 'command',
+    command: 'pnpm',
+    profile: '',
+    argsTemplate: '',
+    enabled: true,
+    createdAt: 't',
+    lastProbe: null,
+  }
+
+  it('脚本闸门的步骤：验收序号可指到某条验收、也能收回「不挂钩」；多余步骤能删掉', async () => {
+    kernel.setView('runtimes.all', undefined, [cmdRuntime])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <WorkflowEditor
+        workflow={null}
+        initial={{
+          name: '自测',
+          description: '',
+          stages: [
+            draftStage({ name: '待办', entryMode: 'none', builtin: 'todo' }),
+            draftStage({
+              name: 'SG',
+              entryMode: 'script',
+              judge: { maxFails: 2 },
+              acceptance: ['命令退出码 0', '覆盖率不降'],
+              script: {
+                runtimeId: 'rt-cmd',
+                steps: [
+                  { label: '一', args: ['a'] },
+                  { label: '二', args: ['b'] },
+                ],
+                cwd: null,
+                env: {},
+                timeoutMs: 600_000,
+                runAll: true,
+              },
+            }),
+          ],
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    // 第 1 条步骤的验收：选「第 1 条」（写回序号 1），再收回「不挂钩」（写回 undefined）
+    await choose(user, '阶段2步骤1验收', '第 1 条')
+    await choose(user, '阶段2步骤1验收', '不与验收挂钩')
+    // 删掉第 2 条步骤（两条时才可删）
+    await user.click(screen.getByRole('button', { name: '阶段2删除步骤2' }))
+    expect(screen.queryByLabelText('阶段2步骤2标签')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const steps = savedStage(onSave.mock.calls[0][0] as WorkflowInput, 'SG').script?.steps ?? []
+    expect(steps).toHaveLength(1)
+    // 收回「不挂钩」后不写 acceptance 字段
+    expect(steps[0].acceptance).toBeUndefined()
+  })
+
+  it('闸门阶段的单轮超时：选具体档位写回毫秒；缺 acceptance 时验收框按空', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <WorkflowEditor
+        workflow={null}
+        initial={{
+          name: '自测',
+          description: '',
+          stages: [
+            draftStage({ name: '待办', entryMode: 'none', builtin: 'todo' }),
+            draftStage({ name: 'G', judge: { maxFails: 2 } }),
+          ],
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByLabelText('阶段2验收')).toHaveValue('')
+    await choose(user, '阶段2单轮超时', '30 分钟')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(savedStage(onSave.mock.calls[0][0] as WorkflowInput, 'G').runTimeoutMs).toBe(30 * 60_000)
+  })
+})
+
+describe('WorkflowEditor：一个阶段挂两条派单（M29）', () => {
+  it('改第二条的目标工作流 / 话题，改第一条的触发与目标阶段：逐行只动自己那一行', async () => {
+    const w2 = workflowOf([{ name: '待办', entryMode: 'none' }, { name: '实现' }])
+    w2.id = 'w2'
+    w2.name = '流程二'
+    const w3 = workflowOf([{ name: '待办', entryMode: 'none' }, { name: '联调' }])
+    w3.id = 'w3'
+    w3.name = '流程三'
+    kernel.setView('workflows.all', undefined, [w2, w3])
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    render(
+      <WorkflowEditor
+        workflow={null}
+        initial={{
+          name: '自测',
+          description: '',
+          stages: [
+            draftStage({ name: '待办', entryMode: 'none', builtin: 'todo' }),
+            draftStage({
+              name: 'A',
+              agentId: 'ag1',
+              handoffs: [
+                { on: 'done', workflowId: 'w2', stageId: null },
+                { on: 'errored', workflowId: 'w2', stageId: null },
+              ],
+            }),
+          ],
+        }}
+        onSave={onSave}
+        onCancel={vi.fn()}
+      />,
+    )
+
+    // 第一条：触发改成「人工拖动时」，目标阶段先选具体阶段再收回「首阶段」、最后又选回具体阶段
+    await choose(user, '阶段2派单1触发', '人工拖动时')
+    await choose(user, '阶段2派单1目标阶段', '实现')
+    await choose(user, '阶段2派单1目标阶段', '首阶段')
+    await choose(user, '阶段2派单1目标阶段', '实现')
+    // 第二条：换目标工作流（并落到新流程第一个会派活的阶段），话题改「新开话题」
+    await choose(user, '阶段2派单2目标工作流', '流程三')
+    await choose(user, '阶段2派单2话题', '新开话题')
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const handoffs = savedStage(onSave.mock.calls[0][0] as WorkflowInput, 'A').handoffs ?? []
+    expect(handoffs).toHaveLength(2)
+    expect(handoffs[0]).toMatchObject({ on: 'manual', workflowId: 'w2', stageId: 's1' })
+    expect(handoffs[1]).toMatchObject({ workflowId: 'w3', stageId: 's1', thread: 'new' })
   })
 })

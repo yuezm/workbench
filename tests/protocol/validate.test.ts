@@ -392,6 +392,12 @@ describe('protocol/validate', () => {
     expect(rejectedMessage(create(step({ args: undefined })))).toBe(
       'input.stages[0].script.steps[0].args 必填',
     )
+    // 步骤项不是对象：点名第几步，而不是在属性访问上炸掉
+    expect(rejectedMessage(create({ ...ok, steps: [42] }))).toBe(
+      'input.stages[0].script.steps[0] 必须是对象',
+    )
+    // args 显式给 null：等价没给参数（步骤可无参数），不当作错误
+    expect(validateCommand(create(step({ args: null }))).ok).toBe(true)
     expect(rejectedMessage(create(step({ args: 'check' })))).toBe(
       'input.stages[0].script.steps[0].args 必须是字符串数组',
     )
@@ -1832,5 +1838,195 @@ describe('protocol/validate 负向性质（fast-check 随机生成非法输入�
       }),
       { numRuns: 200 },
     )
+  })
+})
+
+describe('validateCommand：其余命令口径（M42 / M6.5 / M14）', () => {
+  it('runtime.probe：id 必填', () => {
+    expect(rejectedMessage(cmd('runtime.probe', {}))).toBe('id必填')
+    expect(validateCommand(cmd('runtime.probe', { id: 'rt1' })).ok).toBe(true)
+  })
+
+  it('review.export：taskId 必填，reportId 可选但必须是字符串', () => {
+    expect(rejectedMessage(cmd('review.export', {}))).toBe('taskId必填')
+    expect(rejectedMessage(cmd('review.export', { taskId: 't1', reportId: 7 }))).toBe(
+      'reportId必须是字符串',
+    )
+    expect(validateCommand(cmd('review.export', { taskId: 't1' })).ok).toBe(true)
+    expect(validateCommand(cmd('review.export', { taskId: 't1', reportId: 'r1' })).ok).toBe(true)
+  })
+
+  it('chat.send：conversationId 必填，正文非空且不超过 20000 字', () => {
+    expect(rejectedMessage(cmd('chat.send', {}))).toBe('conversationId必填')
+    expect(rejectedMessage(cmd('chat.send', { conversationId: 'c1', content: '   ' }))).toBe(
+      '消息内容不能为空',
+    )
+    expect(
+      rejectedMessage(
+        cmd('chat.send', {
+          conversationId: 'c1',
+          content: longText(COMMAND_LIMITS.content + 1),
+        }),
+      ),
+    ).toBe(`content最长 ${COMMAND_LIMITS.content} 个字符`)
+    expect(validateCommand(cmd('chat.send', { conversationId: 'c1', content: '你好' })).ok).toBe(
+      true,
+    )
+  })
+
+  it('thread.open / thread.remove：来源与 id 必填', () => {
+    expect(validateCommand(cmd('thread.open', { source: 'github' })).ok).toBe(true)
+    expect(rejectedMessage(cmd('thread.open', {}))).toBe('source必须是字符串')
+    expect(rejectedMessage(cmd('thread.remove', {}))).toBe('threadId必填')
+    expect(validateCommand(cmd('thread.remove', { threadId: 'th-1' })).ok).toBe(true)
+  })
+
+  it('app.event：合法事件通过（可选 summary / detail / link / dedupeKey 都可省）', () => {
+    expect(
+      validateCommand(
+        cmd('app.event', {
+          appId: 'demo',
+          eventType: 'demo.completed',
+          subject: '构建完成',
+          summary: '摘要',
+          detail: '长正文',
+          link: 'https://example.test/build/1',
+          dedupeKey: 'build-1',
+        }),
+      ).ok,
+    ).toBe(true)
+    expect(
+      validateCommand(
+        cmd('app.event', { appId: 'demo', eventType: 'demo.completed', subject: '构建完成' }),
+      ).ok,
+    ).toBe(true)
+    expect(rejectedMessage(cmd('app.event', { appId: 'demo' }))).toBe('eventType必须是字符串')
+    expect(rejectedMessage(cmd('app.event', { appId: 'demo', eventType: 'demo.completed' }))).toBe(
+      'subject必填',
+    )
+  })
+})
+
+describe('rules.replace：准入配置（A1）形状', () => {
+  const replace = (authority: unknown): ValidateResult =>
+    validateCommand(cmd('rules.replace', { rules: [], authority }))
+  const message = (authority: unknown): string => {
+    const result = replace(authority)
+    expect(result.ok).toBe(false)
+    return (result as Extract<ValidateResult, { ok: false }>).message
+  }
+
+  it('authority 缺省 / null / 完整合法：都放行（缺省值由内核归一）', () => {
+    expect(replace(undefined).ok).toBe(true)
+    expect(replace(null).ok).toBe(true)
+    expect(
+      replace({
+        mode: 'observe',
+        assessorAgentId: 'judge',
+        assessBatch: 4,
+        assessWindowMs: 1000,
+        sources: [
+          {
+            id: 'feishu',
+            allowed: ['ou_1'],
+            bots: ['bot_1'],
+            receiveAll: true,
+            admission: { listedAddressed: 'inferred' },
+          },
+        ],
+      }).ok,
+    ).toBe(true)
+  })
+
+  it('整块形状：非对象 / mode 非枚举 / 数值越界 / 名单不是数组', () => {
+    expect(message('auto')).toBe('authority 必须是对象')
+    expect(message({})).toBe('authority.mode取值必须是 off / observe / auto')
+    expect(message({ mode: 'compat' })).toBe('authority.mode取值必须是 off / observe / auto')
+    expect(message({ mode: 'auto', assessorAgentId: 7 })).toBe(
+      'authority.assessorAgentId必须是字符串',
+    )
+    expect(message({ mode: 'auto', sources: 'github' })).toBe('authority.sources 必须是数组')
+    expect(message({ mode: 'auto', assessBatch: 0 })).toBe(
+      'authority.assessBatch必须在 1 到 20 之间',
+    )
+    expect(message({ mode: 'auto', assessBatch: 2.5 })).toBe('authority.assessBatch必须是整数')
+    expect(message({ mode: 'auto', assessWindowMs: -1 })).toBe(
+      'authority.assessWindowMs必须在 0 到 60000 之间',
+    )
+    expect(message({ mode: 'auto', assessWindowMs: 60_001 })).toBe(
+      'authority.assessWindowMs必须在 0 到 60000 之间',
+    )
+  })
+
+  it('来源策略：条目必须是对象、id 必填、名单逐条非空、receiveAll 只认布尔', () => {
+    expect(message({ mode: 'auto', sources: ['github'] })).toBe('authority.sources[0] 必须是对象')
+    expect(message({ mode: 'auto', sources: [{}] })).toBe('authority.sources[0].id必填')
+    expect(message({ mode: 'auto', sources: [{ id: 'github', allowed: 'octocat' }] })).toBe(
+      'authority.sources[0].allowed 必须是数组',
+    )
+    expect(message({ mode: 'auto', sources: [{ id: 'github', allowed: [''] }] })).toBe(
+      'authority.sources[0].allowed[0]必填',
+    )
+    expect(message({ mode: 'auto', sources: [{ id: 'github', bots: [7] }] })).toBe(
+      'authority.sources[0].bots[0]必须是字符串',
+    )
+    expect(message({ mode: 'auto', sources: [{ id: 'github', receiveAll: 'yes' }] })).toBe(
+      'authority.sources[0].receiveAll必须是布尔值',
+    )
+  })
+
+  it('准入表：可缺省 / null；给了就必须是对象，五格逐项只认三档', () => {
+    expect(
+      validateCommand(
+        cmd('rules.replace', {
+          rules: [],
+          authority: { mode: 'auto', sources: [{ id: 'github', admission: null }] },
+        }),
+      ).ok,
+    ).toBe(true)
+    expect(
+      validateCommand(
+        cmd('rules.replace', {
+          rules: [],
+          authority: { mode: 'auto', sources: [{ id: 'github', admission: {} }] },
+        }),
+      ).ok,
+    ).toBe(true)
+    expect(message({ mode: 'auto', sources: [{ id: 'github', admission: 'explicit' }] })).toBe(
+      'authority.sources[0].admission 必须是对象',
+    )
+    expect(
+      message({
+        mode: 'auto',
+        sources: [{ id: 'github', admission: { listedAddressed: 'allow' } }],
+      }),
+    ).toBe('authority.sources[0].admission.listedAddressed取值必须是 explicit / inferred / ignore')
+    expect(
+      message({
+        mode: 'auto',
+        sources: [{ id: 'github', admission: { listedUnaddressed: 'allow' } }],
+      }),
+    ).toBe(
+      'authority.sources[0].admission.listedUnaddressed取值必须是 explicit / inferred / ignore',
+    )
+    expect(
+      message({
+        mode: 'auto',
+        sources: [{ id: 'github', admission: { unlistedAddressed: 'allow' } }],
+      }),
+    ).toBe(
+      'authority.sources[0].admission.unlistedAddressed取值必须是 explicit / inferred / ignore',
+    )
+    expect(
+      message({
+        mode: 'auto',
+        sources: [{ id: 'github', admission: { unlistedUnaddressed: 'allow' } }],
+      }),
+    ).toBe(
+      'authority.sources[0].admission.unlistedUnaddressed取值必须是 explicit / inferred / ignore',
+    )
+    expect(
+      message({ mode: 'auto', sources: [{ id: 'github', admission: { botAddressed: 'allow' } }] }),
+    ).toBe('authority.sources[0].admission.botAddressed取值必须是 explicit / inferred / ignore')
   })
 })

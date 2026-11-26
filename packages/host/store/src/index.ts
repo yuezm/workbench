@@ -2,8 +2,9 @@
  * 宿主存储层门面（M1 T5）：一次输入 = 校验 → 装载视图切片 → decide → 单事务
  * 「追加事实 + 应用 project 变更 + 更新投影元信息」。
  *
- * 内核通过注入的 `KernelPort` 使用：本目录只 `import type` 内核契约、不 import 任何内核实现，
- * 因此单测用假 kernel 即可，不依赖 `kernel/decide` 的具体实现。
+ * 内核通过注入的 `KernelPort` 使用：本目录只依赖内核**契约**（类型 + 契约常量
+ * `DEFAULT_LIMITS`）、不 import 任何内核实现，因此单测用假 kernel 即可，
+ * 不依赖 `kernel/decide`、`kernel/project` 的具体实现。
  *
  * 写路径唯一的例外是重建（`ensureProjection` / `rebuild`）：它按 seq 顺序 fold `project`。
  */
@@ -41,38 +42,12 @@ export { StoreError } from './errors'
 export type { StoreErrorCode } from './errors'
 
 /**
- * 默认限制：M1 的两项（阶段上限与 `protocol/validate` 一致、数组上限取迁移/帧批次量级）
- * + M2 的调度口径（SPEC-kernel「类型契约」原值；测试可注入缩短，语义不变）。
+ * 默认限制由内核定义（契约缺省，见 `kernel/core/limits`），这里 import + re-export：
+ * 消费方仍从 `@workbench/host-store/index` 取，数字只有一份。
  */
-export const DEFAULT_LIMITS: Limits = {
-  maxStagesPerWorkflow: 50,
-  maxArrayLength: 500,
-  maxHops: 8,
-  /**
-   * 租约与心跳（M48）：120 s 对 high-effort 模型连一次思考都不够用。
-   *
-   * 实测（任务 `c8ccd24f`）：模型单次 thinking 到过 117 s / 136 s，心跳一旦因宿主重启
-   * 或事件循环卡住断掉，2 分钟就判租约过期、整阶段重跑。租约是用来防「进程死了但没报终态」
-   * 的护栏，不是用来防「模型慢」的，所以放宽到 10 分钟；心跳仍是 30 s。
-   */
-  leaseMs: 600_000,
-  heartbeatMs: 30_000,
-  maxAttempts: 3,
-  /**
-   * 退避（M48）：300 s 起步对交互式场景就是「白等 5 分钟再看一眼」。
-   *
-   * 退避的目的是避开瞬时故障（端口占用、宿主刚重启），不是惩罚重试；15 s 起步、
-   * 60 s 封顶足够错开，也让「宿主重启打断在跑的轮次」变成几乎无感的抖动。
-   */
-  backoffBaseMs: 15_000,
-  backoffCapMs: 60_000,
-  runTimeoutMs: 3_600_000,
-  cancelGraceMs: 3_000,
-  killAfterMs: 2_000,
-  maxFramesPerBatch: 500,
-  maxSpawnItems: 32,
-  maxSpawnDepth: 8,
-}
+import { DEFAULT_LIMITS } from '@workbench/kernel/core/limits'
+
+export { DEFAULT_LIMITS }
 
 export interface StoreOptions {
   db: DatabaseSync

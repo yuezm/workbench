@@ -70,6 +70,16 @@ describe('TaskActivity', () => {
     expect(kernel.store.peekState('run.events', { runId: 'run1' })).toBeUndefined()
   })
 
+  it('还在跑的 run（没有结束时刻）：不写耗时差额，也不崩', async () => {
+    const run = makeRun({ id: 'running', output: '进行中', endedAt: null, durationMs: null })
+    kernel.setView('run.events', { runId: run.id }, [])
+    render(<TaskActivity runs={[run]} comments={[]} stages={stages} />)
+    const list = screen.getByRole('list', { name: '上下文' })
+    expect(await within(list).findByText('进行中')).toBeInTheDocument()
+    // 没有墙钟也就没有「等待/重排」差额
+    expect(list).not.toHaveTextContent('等待')
+  })
+
   it('完成态 run 展示阶段徽标、轮次、中文状态/时间/耗时/退出码/用量；事件为空回落 output', async () => {
     const run = makeRun({
       output: '最终输出',

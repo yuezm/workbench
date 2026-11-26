@@ -26,15 +26,16 @@ const SEVERITY_RANK: Record<ReviewFinding['severity'], number> = {
 }
 
 /**
- * 单条 finding 的索引行：**完整 finding id**（`<reportId>#<key>`，可直接粘进 `addresses`）/
- * 严重度 / 位置 / 断言（阻断项附带验收条件）。
+ * 单条**阻断项**的索引行：**完整 finding id**（`<reportId>#<key>`，可直接粘进 `addresses`）/
+ * 严重度 / 位置 / 断言 → 验收条件。
+ *
+ * 只服务阻断项（调用方按 `blocking` 过滤）：建议项不要求处置，也就不给验收条件，
+ * 走的是另一段文案，不需要在这里判断严重度。
  */
 function findingLine(finding: ReviewFinding): string {
   const place = finding.location === null ? '' : ` ${finding.location}`
   const claim = truncate(finding.claim, REVIEW_LIMITS.promptClaimChars)
-  const acceptance = isBlockingSeverity(finding.severity)
-    ? ` → 验收：${truncate(finding.requiredAction, REVIEW_LIMITS.promptClaimChars)}`
-    : ''
+  const acceptance = ` → 验收：${truncate(finding.requiredAction, REVIEW_LIMITS.promptClaimChars)}`
   return `- ${finding.id} [${finding.severity}]${place} — ${claim}${acceptance}`
 }
 

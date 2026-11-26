@@ -11,8 +11,10 @@ import { PROJECTION_TABLES } from '@workbench/kernel/core/types'
 import { SCHEMA_SQL } from '@workbench/host-store/schema'
 import {
   TABLE_SHAPES,
+  deliveryRefs,
   fromRow,
   insertSql,
+  runEventPayloadCodec,
   selectList,
   valuesOf,
 } from '@workbench/host-store/columns'
@@ -191,5 +193,83 @@ describe('columns：编解码成对且往返一致', () => {
     expect(back.deliveryRefs).toEqual({
       'in-app': { version: 1, ref: 'x', at: '2026-11-14T00:00:00.000Z' },
     })
+  })
+})
+
+/**
+ * 兜底分支：投影边界收的是「事实携带的行」，历史行与脏行都会到这里——空值、坏的 JSON、
+ * 甚至运行时类型不符合契约的值。这些分支不该只看成防御代码：它们是「一条脏行不能把整张
+ * 视图读挂」的实现。
+ */
+describe('columns：脏行 / 历史行的兜底', () => {
+  /** 取某列在绑定值里的位置（按描述符顺序）。 */
+  const indexOf = (shape: (typeof TABLE_SHAPES)[keyof typeof TABLE_SHAPES], prop: string): number =>
+    shape.columns.findIndex((column) => column.prop === prop)
+
+  it('toCell：布尔落 0/1（node:sqlite 不认 boolean），undefined 落 NULL', () => {
+    const shape = TABLE_SHAPES.cards
+    const versionIndex = indexOf(shape, 'version')
+    // 运行时从外部 JSON 反序列化出来的 bool 也要能绑参：0/1 是列协议，不是 JS 的 true/false
+    expect(valuesOf(shape, { version: true as unknown as number })[versionIndex]).toBe(1)
+    expect(valuesOf(shape, { version: false as unknown as number })[versionIndex]).toBe(0)
+    expect(valuesOf(shape, {})[versionIndex]).toBeNull()
+  })
+
+  it('JSON 对象列：空值 / 坏 JSON / 标量 / 数组一律归一成 {}', () => {
+    const exits = (raw: Record<string, unknown>): unknown =>
+      fromRow<{ exits: unknown }>(TABLE_SHAPES.workflow_stages, raw).exits
+    expect(exits({})).toEqual({})
+    expect(exits({ exits_json: '   ' })).toEqual({})
+    expect(exits({ exits_json: '{"done":' })).toEqual({})
+    expect(exits({ exits_json: 'null' })).toEqual({})
+    expect(exits({ exits_json: '"一堆字"' })).toEqual({})
+    expect(exits({ exits_json: '[]' })).toEqual({})
+    expect(exits({ exits_json: '{"done":{"do":"await"}}' })).toEqual({ done: { do: 'await' } })
+  })
+
+  it('JSON 数组列：坏 JSON 按 [] 归一', () => {
+    const labels = (raw: Record<string, unknown>): unknown =>
+      fromRow<{ labels: unknown }>(TABLE_SHAPES.tasks, raw).labels
+    expect(labels({})).toEqual([])
+    expect(labels({ labels_json: '[1,' })).toEqual([])
+    expect(labels({ labels_json: '["a"]' })).toEqual(['a'])
+  })
+
+  it('agents.env_json：缺字段写 {}，空值读回 {}', () => {
+    const shape = TABLE_SHAPES.agents
+    const envIndex = indexOf(shape, 'env')
+    expect(valuesOf(shape, { id: 'ag-1' })[envIndex]).toBe('{}')
+    expect(fromRow<{ env: unknown }>(shape, {}).env).toEqual({})
+    expect(fromRow<{ env: unknown }>(shape, { env_json: '{"CI":"1"}' }).env).toEqual({ CI: '1' })
+  })
+
+  it('deliveryRefs（导出）：空值 / 坏值 / 非对象都按「没发过」', () => {
+    expect(deliveryRefs.decode(undefined)).toEqual({})
+    expect(deliveryRefs.decode('   ')).toEqual({})
+    expect(deliveryRefs.decode('不是 JSON')).toEqual({})
+    expect(deliveryRefs.decode('null')).toEqual({})
+    expect(deliveryRefs.decode('[]')).toEqual({})
+    expect(deliveryRefs.decode('{"in-app":{"version":2,"ref":"om_2","at":"t"}}')).toEqual({
+      'in-app': { version: 2, ref: 'om_2', at: 't' },
+    })
+    expect(deliveryRefs.encode(undefined, {})).toBe('{}')
+  })
+
+  it('run_events 的 payload（导出）：空值按 {} 读回', () => {
+    expect(runEventPayloadCodec.decode(undefined)).toEqual({})
+    expect(runEventPayloadCodec.decode('  ')).toEqual({})
+    expect(runEventPayloadCodec.decode('{坏')).toEqual({})
+    expect(runEventPayloadCodec.decode('{"text":"哈"}')).toEqual({ text: '哈' })
+  })
+
+  it('@at 列：写入取事实时刻，读行不产生字段（描述符的 decode 是恒等）', () => {
+    const shape = TABLE_SHAPES.workflow_stages
+    const atIndex = indexOf(shape, '@at')
+    expect(valuesOf(shape, { id: 'st-1' }, '2026-11-14T00:00:00.000Z')[atIndex]).toBe(
+      '2026-11-14T00:00:00.000Z',
+    )
+    expect(fromRow(shape, { created_at: '2026-11-14T00:00:00.000Z' })).not.toHaveProperty('@at')
+    const column = shape.columns[atIndex]
+    expect(column?.codec.decode('2026-11-14T00:00:00.000Z')).toBe('2026-11-14T00:00:00.000Z')
   })
 })

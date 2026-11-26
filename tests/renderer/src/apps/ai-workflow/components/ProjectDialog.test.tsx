@@ -327,4 +327,29 @@ describe('ProjectDialog', () => {
     expect(onCancel).toHaveBeenCalledTimes(1)
     expect(onSave).not.toHaveBeenCalled()
   })
+
+  it('保存被非 Error 拒绝：错误条退回字符串化', async () => {
+    const onSave = vi.fn().mockRejectedValue('磁盘满了')
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={onSave} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('文件夹路径'), 'D:\\bad')
+    await user.type(screen.getByLabelText('项目名称'), '坏目录')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(await screen.findByText('磁盘满了')).toBeInTheDocument()
+  })
+
+  it('已经手填路径时打开选择器：从当前路径开始浏览，而不是从头', async () => {
+    const starts: Array<string | undefined> = []
+    stubBridge((path) => {
+      starts.push(path)
+      return Promise.resolve(listing(path ?? 'D:\\Codes\\workbench'))
+    })
+    const user = userEvent.setup()
+    render(<ProjectDialog onSave={vi.fn()} onCancel={vi.fn()} />)
+
+    await user.type(screen.getByLabelText('文件夹路径'), 'D:\\Codes\\workbench')
+    await user.click(screen.getByRole('button', { name: '选择文件夹' }))
+    await waitFor(() => expect(starts).toEqual(['D:\\Codes\\workbench']))
+  })
 })

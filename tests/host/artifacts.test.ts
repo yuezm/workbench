@@ -1063,4 +1063,18 @@ describe('host/artifacts 缺 meta.json 时的兜底（M47）', () => {
     // 时间缺失也不炸：索引把时间列写成 '-'
     expect(renderThreadIndex('th-1', readRunMetas(root, 'th-1'))).toContain('| - |')
   })
+
+  it('头部注释里根本没有 turn 行：turn 记 0（取不到就按 0，不猜轮次）', () => {
+    const dir = runDirPath(root, 'th-1', 'run-no-turn')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      path.join(dir, 'prompt.md'),
+      '<!-- 本轮派发信息\nrunId: run-no-turn\n任务: 只有任务名 <task-1>\n阶段: 实现 <st-1>\n-->\n',
+      'utf8',
+    )
+    const meta = recoverRunMeta('th-1', dir)
+    expect(meta?.runId).toBe('run-no-turn')
+    expect(meta?.turn).toBe(0)
+    expect(meta?.taskId).toBe('task-1')
+  })
 })

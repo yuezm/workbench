@@ -569,6 +569,26 @@ describe('PluginsManager：飞书通道的连接面板（M45）', () => {
     expect(choicesOf(staticField, 'zzz', agents).selected).toBe('')
   })
 
+  it('choicesOf：非下拉字段（文本 / 数字 / 布尔 / 密钥）没有候选', () => {
+    const textField: ConfigField = { key: 'name', label: '名称', type: 'text' }
+    expect(choicesOf(textField, '任意值', [])).toEqual({ choices: [], selected: '' })
+  })
+
+  it('下拉字段在 config 里没有值：按空串回显占位，不报错', async () => {
+    kernel.setView('plugins.all', undefined, [
+      makePlugin({
+        config: {},
+        configFields: [{ key: 'mode', label: '模式', type: 'select', options: ['json', 'text'] }],
+      }),
+    ])
+    const user = userEvent.setup()
+    render(<PluginsManager />)
+    await user.click(await screen.findByRole('button', { name: '插件 webhook 详情' }))
+    expect(await screen.findByRole('combobox', { name: 'webhook 模式' })).toHaveTextContent(
+      '未设置',
+    )
+  })
+
   it('常用字段铺开，advanced 字段收进「高级」；连接面板独占 connections', async () => {
     kernel.setView('plugins.all', undefined, [feishuPlugin()])
     kernel.setView('agents.all', undefined, [agentOf('ag-1', '管家（Moos）')])

@@ -5,6 +5,7 @@
  * 单测可以用假装配验证「监听地址从哪来、退出顺序对不对、重复信号会不会把库关两遍」，
  * 不必真跑内核、也不必真发信号。
  */
+import path from 'node:path'
 import type { ServerConfig } from './config'
 import { ConfigError, loadServerConfig, SERVER_ENV } from './config'
 import {
@@ -86,7 +87,7 @@ export async function startWorkbenchServer(options: StartServerOptions): Promise
       auth: createAuthenticator(config.token),
       router: workbench.router,
       lark: workbench.lark,
-      notify: (payload) => notifier(payload.title, payload.body ?? ''),
+      notify: (payload) => notifier(payload.title, payload.body),
       events,
       listDirs: (target) => listDirectories(target),
       info: () => workbench.info(),
@@ -222,4 +223,34 @@ export function reportStartupError(
     if (error instanceof Error && error.stack !== undefined) log(error.stack)
   }
   process.exitCode = 1
+}
+
+/**
+ * 「是否被直接执行」的判据输入。
+ *
+ * 判据是「进程的入口脚本就是本模块」：`node out/server/index.js` 时成立，被测试 import、
+ * 被别的模块 require 时都不成立。以前写成 `require.main === module`，但那两个全局只在
+ * 原生 CJS 存在——ESM 里既没有它们，那条守卫也就永远测不到。改成比较路径后：
+ * 判据是纯字符串比较（无分支），真假两支在单测里直接构造 refs 覆盖。
+ */
+export interface DirectRunRefs {
+  /** 本模块文件的绝对路径（入口传 `fileURLToPath(import.meta.url)`） */
+  entry: string
+  /** 进程入口脚本（`process.argv[1]`；某些嵌入场景可能不存在） */
+  argv: string | undefined
+}
+
+/** 是否「被直接执行」。 */
+export function isDirectRun(refs: DirectRunRefs): boolean {
+  return refs.argv !== undefined && path.resolve(refs.argv) === path.resolve(refs.entry)
+}
+
+/** 直接执行时起服务；被 import 时什么都不做（守卫为假）。 */
+export function startIfDirect(
+  refs: DirectRunRefs,
+  start: () => Promise<unknown> = runServerEntry,
+  onError: (error: unknown) => void = reportStartupError,
+): void {
+  if (!isDirectRun(refs)) return
+  void start().catch(onError)
 }

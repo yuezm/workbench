@@ -24,7 +24,7 @@
     "format": "prettier --write .",
     "gen:paths": "node scripts/gen-workspace-paths.mjs",
     "db:export": "node scripts/export-db.mjs",
-    "start": "node out/server/index.js",
+    "start": "node --disable-warning=ExperimentalWarning out/server/index.js",
     "prepare": "husky",
     "git:clean": "node scripts/git/clean-gate.mjs",
     "git:mr": "node scripts/git/submit-mr.mjs --target main"

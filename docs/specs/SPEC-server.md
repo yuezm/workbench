@@ -27,9 +27,11 @@
 ## 进程与数据目录
 
 ```
-node out/server/index.js
+node --disable-warning=ExperimentalWarning out/server/index.js
 ```
 
+- `--disable-warning=ExperimentalWarning`：`node:sqlite` 目前仍是实验特性，不加这个参数每条启动日志
+  都会先顶一行 `ExperimentalWarning`（`pnpm start` / `pnpm dev` 已内置）。
 - 启动成功打印一行固定格式：`workbench listening on http://HOST:PORT`（e2e 与运维脚本按它取地址）。
 - 数据目录（默认 `~/.workbench`，启动时 `mkdir -p`）：
 

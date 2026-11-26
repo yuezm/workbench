@@ -36,7 +36,7 @@
 ```
 Dev:    pnpm dev              # vite watch 构建服务端 + node --watch + Web dev server（/api 代理到服务端）
 Build:  pnpm build            # 只产出 out/server + out/web（类型门是 pnpm verify:types）
-Start:  pnpm start            # node out/server/index.js（常驻交给进程管理器）
+Start:  pnpm start            # node --disable-warning=ExperimentalWarning out/server/index.js（常驻交给进程管理器）
 Test:   pnpm verify:test      # vitest run
 Lint:   pnpm verify:lint      # ESLint（含架构边界）
 Check:  pnpm verify:all      # 全闸门 + E2E（提交前必过）

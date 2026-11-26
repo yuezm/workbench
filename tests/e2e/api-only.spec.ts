@@ -28,17 +28,21 @@ interface ApiOnlyServer {
 async function startApiOnly(): Promise<ApiOnlyServer> {
   const dataDir = mkdtempSync(path.join(tmpdir(), 'workbench-api-'))
   const output: string[] = []
-  const child: ChildProcess = spawn(process.execPath, ['out/server/index.js'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      WORKBENCH_PORT: '0',
-      WORKBENCH_DATA_DIR: dataDir,
-      WORKBENCH_UI: 'off',
-      WORKBENCH_TOKEN: '',
+  const child: ChildProcess = spawn(
+    process.execPath,
+    ['--disable-warning=ExperimentalWarning', 'out/server/index.js'],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        WORKBENCH_PORT: '0',
+        WORKBENCH_DATA_DIR: dataDir,
+        WORKBENCH_UI: 'off',
+        WORKBENCH_TOKEN: '',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  )
 
   const baseUrl = await new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`服务没起来：\n${output.join('\n')}`)), 30_000)

@@ -108,18 +108,24 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     // 隔离必须在服务启动之后、`channels.startAll()` 之前完成——也就是这里。
     // 放在 `prepare` 之后：spec 自己的种子先写，隔离再整批覆盖一次，谁也「打开」不了外部通道。
     seedChannelIsolation(path.join(userDataDir, 'ai-workflow.db'))
-    child = spawn(process.execPath, ['out/server/index.js'], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        WORKBENCH_DATA_DIR: userDataDir,
-        WORKBENCH_PORT: '0',
-        WORKBENCH_HOST: '127.0.0.1',
-        WORKBENCH_WEB_DIR: path.resolve('out/web'),
-        WORKBENCH_WORKDIR: workdir,
+    // `--disable-warning=ExperimentalWarning`：`node:sqlite` 的实验特性告警会混进服务端日志，
+    // 而 `waitForUrl` 的失败信息就是把这段日志原样带出来的，噪声越小越好定位。
+    child = spawn(
+      process.execPath,
+      ['--disable-warning=ExperimentalWarning', 'out/server/index.js'],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          WORKBENCH_DATA_DIR: userDataDir,
+          WORKBENCH_PORT: '0',
+          WORKBENCH_HOST: '127.0.0.1',
+          WORKBENCH_WEB_DIR: path.resolve('out/web'),
+          WORKBENCH_WORKDIR: workdir,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
+    )
     const { url, read } = await waitForUrl(child, 60_000)
     browser = await chromium.launch()
     const page = await browser.newPage({ viewport: { width: 1100, height: 720 } })

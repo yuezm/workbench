@@ -3,7 +3,7 @@
  *
  * 三个子进程：
  * 1. `vite build --watch --config vite.server.config.mts`：改服务端代码就重打 `out/server/index.js`
- * 2. `node out/server/index.js`：产物一变就重启服务（端口 3000，`WORKBENCH_PORT` 可覆盖）
+ * 2. `node --disable-warning=ExperimentalWarning out/server/index.js`：产物一变就重启服务（端口 3000，`WORKBENCH_PORT` 可覆盖）
  * 3. `vite --config vite.web.config.mts`：Web 页面 HMR，`/api` 由 dev server 代理到服务端
  * 数据目录默认落 `.scratch/dev-data`（不进仓库、不碰 `~/.workbench`），可用 `WORKBENCH_DATA_DIR` 覆盖
  *
@@ -35,6 +35,8 @@ const API = process.env.WORKBENCH_DEV_API ?? `http://127.0.0.1:${PORT}`
 /** 服务端产物目录与入口：产物变化即重启 */
 const SERVER_OUT_DIR = 'out/server'
 const SERVER_ENTRY = join(SERVER_OUT_DIR, 'index.js')
+/** 服务端启动参数：`node:sqlite` 仍是实验特性，`--disable-warning` 免得每条日志都顶一行告警 */
+const SERVER_ARGS = ['--disable-warning=ExperimentalWarning', SERVER_ENTRY]
 /** 产物是分批写入的：最后一次写入后再等这么久才重启 */
 const SETTLE_MS = 400
 const POLL_MS = 500
@@ -127,7 +129,7 @@ function startServer() {
   console.log(`[dev] 服务端 http://127.0.0.1:${PORT}（数据目录 ${DATA_DIR}）`)
   const child = run(
     'server',
-    [SERVER_ENTRY],
+    SERVER_ARGS,
     { WORKBENCH_PORT: PORT, WORKBENCH_DATA_DIR: DATA_DIR },
     onServerExit,
   )

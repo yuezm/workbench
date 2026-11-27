@@ -1,8 +1,6 @@
 ---
 type: plan
 status: archived
-owner: lead
-updated: 2026-11-28
 ---
 
 # Task List: Workbench v1 — ✅ 全部完成（2026-10-28）

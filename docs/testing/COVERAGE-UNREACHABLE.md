@@ -1,8 +1,6 @@
 ---
 type: history
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 覆盖率不可达分支登记（COVERAGE-UNREACHABLE）

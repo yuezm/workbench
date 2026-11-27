@@ -1,8 +1,6 @@
 ---
 type: review
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 全功能验证（按 features 地图逐条走）

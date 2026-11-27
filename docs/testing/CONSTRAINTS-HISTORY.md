@@ -1,8 +1,6 @@
 ---
 type: history
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 质量门禁详情（CONSTRAINTS-HISTORY）

@@ -1,8 +1,6 @@
 ---
 type: plan
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 重构计划：内核 + 插件

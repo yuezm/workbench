@@ -1,8 +1,6 @@
 ---
 type: spec
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # SPEC-artifacts：执行记录落盘（M16）

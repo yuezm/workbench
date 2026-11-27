@@ -1,8 +1,6 @@
 ---
 type: plan
 status: archived
-owner: lead
-updated: 2026-11-28
 ---
 
 # Task List: ai-workflow（个人AI工作流 MVP）

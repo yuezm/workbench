@@ -1,8 +1,6 @@
 ---
 type: spec
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # Spec: review-handoff（评审结论 → 修复阶段的可寻址交接）

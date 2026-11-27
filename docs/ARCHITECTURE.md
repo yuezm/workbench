@@ -1,8 +1,6 @@
 ---
 type: explanation
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 架构：内核 + 插件（Workbench v2）

@@ -1,8 +1,6 @@
 ---
 type: plan
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 方案：柔性工作流（大流程卡死边界，阶段内放开路径）

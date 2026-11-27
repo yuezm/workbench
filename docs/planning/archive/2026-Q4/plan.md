@@ -1,8 +1,6 @@
 ---
 type: plan
 status: archived
-owner: lead
-updated: 2026-11-28
 ---
 
 # Implementation Plan: Workbench v1（shell + pomodoro）

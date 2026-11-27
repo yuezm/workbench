@@ -1,8 +1,6 @@
 ---
 type: spec
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # Spec: shell（工作台外壳）

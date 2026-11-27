@@ -1,8 +1,6 @@
 ---
 type: spec
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # Spec: authority（准入 · 授权 · 研判 · 注意力）

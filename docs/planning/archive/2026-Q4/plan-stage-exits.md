@@ -1,8 +1,6 @@
 ---
 type: plan
 status: archived
-owner: lead
-updated: 2026-11-28
 ---
 
 # 计划：阶段出口表（Stage Exits）

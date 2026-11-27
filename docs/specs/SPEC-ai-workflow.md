@@ -1,8 +1,6 @@
 ---
 type: spec
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # Spec: ai-workflow（个人AI工作流）

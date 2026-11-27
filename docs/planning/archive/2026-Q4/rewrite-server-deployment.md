@@ -1,8 +1,6 @@
 ---
 type: plan
 status: archived
-owner: lead
-updated: 2026-11-28
 ---
 
 # 迁移记录：Electron 桌面 → 常驻服务 + Web

@@ -1,8 +1,6 @@
 ---
 type: plan
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 计划：吸纳 agent-autoloop 的工程优点（M35–M37）

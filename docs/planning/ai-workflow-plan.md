@@ -1,8 +1,6 @@
 ---
 type: plan
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # Implementation Plan: ai-workflow（个人AI工作流 MVP）

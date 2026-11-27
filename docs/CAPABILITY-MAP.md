@@ -1,8 +1,6 @@
 ---
 type: reference
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # Capability Map: Workbench（个人工作台）

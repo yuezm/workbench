@@ -1,8 +1,6 @@
 ---
 type: plan
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 方案：任务级会话 + 任务索引（thread 降级为读边界）

@@ -8,8 +8,8 @@ description: 检查并调整项目文档的结构与冗余：跑零依赖体检�
 ## 判定器
 
 ```bash
-node tools/doc-lint.mjs docs          # 人读摘要
-node tools/doc-lint.mjs docs --json    # 全量明细
+node scripts/doc-lint.mjs docs          # 人读摘要
+node scripts/doc-lint.mjs docs --json    # 全量明细
 ```
 
 每条 finding 带 `rule`，按 rule 决定手法，不要凭感觉改。规则与阈值的真相源是 `docs/README.md` 的「文档规则」表；阈值有分歧时改那张表，不改脚本。
@@ -22,7 +22,7 @@ node tools/doc-lint.mjs docs --json    # 全量明细
 
 | rule | 手法 |
 | ---- | ---- |
-| `fm-missing` / `fm-field-missing` | 补 `type` / `status` / `owner` / `updated`，type 按目录推断：`specs/`→spec、`planning/`→plan、`reviews/`→review、架构类→explanation、清单类→reference |
+| `fm-missing` / `fm-field-missing` | 补 `type` / `status`，type 按目录推断：`specs/`→spec、`planning/`→plan、`reviews/`→review、架构类→explanation、清单类→reference。不写 `owner` / `updated`：单人仓里 owner 恒定，时间查 git |
 | `link-broken` | 相对路径按当前文件位置重算；目标已删除则降级为纯文本并注明"文件已移除" |
 | `h1-multi` / `h1-missing` | 多余 H1 降级为 H2；代码块内的 `#` 不算标题（脚本已跳过） |
 | `heading-jump` | 补中间层级 |

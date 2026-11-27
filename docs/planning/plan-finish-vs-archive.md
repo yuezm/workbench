@@ -1,8 +1,6 @@
 ---
 type: plan
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 计划：任务「完成」与「归档」分离（含派单血缘拆分）

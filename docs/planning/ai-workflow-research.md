@@ -1,8 +1,6 @@
 ---
 type: plan
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 产品调研：AI 工作流的下一步（多运行时 / 多设备 / SOP 串联）

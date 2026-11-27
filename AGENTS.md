@@ -39,7 +39,6 @@
 - 架构总纲：`docs/ARCHITECTURE.md`（架构问题先读这个）
 - 模块边界：`docs/CAPABILITY-MAP.md`（模块索引、边界决定、构建顺序）
 - 质量底线：`CONSTRAINTS.md`（只放有命令、可判定的规则；历史与例外在 `docs/testing/CONSTRAINTS-HISTORY.md`）
-- 文档体检：`node tools/doc-lint.mjs docs`（结构类 error 必须为 0；规则见 `docs/README.md`）
 - 一次性日志、临时产物、临时测试文件：`.scratch/`（不进 git）
 
 ## 禁止事项

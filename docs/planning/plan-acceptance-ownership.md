@@ -1,8 +1,6 @@
 ---
 type: plan
 status: active
-owner: lead
-updated: 2026-11-28
 ---
 
 # 计划：验收归属（M34）——执行阶段不自评，闸门才有验收

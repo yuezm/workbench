@@ -1,8 +1,6 @@
 ---
 type: review
 status: archived
-owner: lead
-updated: 2026-11-28
 ---
 
 # 评审：覆盖率门槛提到 100%（暂存区，125 文件 / +11851 / −558）

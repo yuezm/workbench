@@ -57,7 +57,7 @@ const META_TALK = [
   '简而言之',
 ]
 const VAGUE = ['适当', '尽量', '尽可能', '视情况', '酌情', '必要时应', '等等等']
-const REQUIRED_FM = ['type', 'status', 'owner', 'updated']
+const REQUIRED_FM = ['type', 'status']
 const TYPES = new Set([
   'tutorial',
   'how-to',
@@ -113,7 +113,7 @@ for (const abs of files) {
       }
     }
   }
-  if (!fm) add('error', 'fm-missing', rel, 1, '缺少 YAML frontmatter（type/status/owner/updated）')
+  if (!fm) add('error', 'fm-missing', rel, 1, '缺少 YAML frontmatter（type/status）')
   else {
     for (const k of REQUIRED_FM)
       if (!fm[k]) add('error', 'fm-field-missing', rel, 1, `frontmatter 缺 ${k}`)
@@ -121,8 +121,6 @@ for (const abs of files) {
       add('error', 'fm-type-invalid', rel, 1, `type=${fm.type} 不在 ${[...TYPES].join('|')}`)
     if (fm.status && !STATUS.has(fm.status))
       add('error', 'fm-status-invalid', rel, 1, `status=${fm.status} 不在 ${[...STATUS].join('|')}`)
-    if (fm.updated && !/^\d{4}-\d{2}-\d{2}$/.test(fm.updated))
-      add('warn', 'fm-date-format', rel, 1, `updated=${fm.updated} 非 YYYY-MM-DD`)
   }
 
   // ---------- 体积（正文行，不含 frontmatter）----------

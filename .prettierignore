@@ -1,4 +1,7 @@
 node_modules/
+# 第三方 skill 包原样入库（.agents/skills/*/scripts 自带 bun 工程与测试夹具）：
+# 格式化会改写上游代码，失去与上游逐字节对比的能力。
+.agents/
 out/
 dist/
 release/

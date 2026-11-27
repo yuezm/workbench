@@ -105,6 +105,9 @@ const SKIPS = /\.(skip|todo)\b|\bxit\(|\bxdescribe\(|@pytest\.mark\.skip|t\.Skip
 for (const { file, text } of added) {
   // 守卫脚本自身、以及 CONSTRAINTS.md / CONSTRAINTS-HISTORY.md 正文（会合法地引用 @ts-ignore 等字样）不算违规。
   if (file.startsWith('scripts/')) continue
+  // 第三方 skill 包（`.agents/skills/`）按上游原样入库：里面的 `catch {}`、TODO、`.skip`
+  // 是上游代码本来的样子，不属于本仓库产品质量底线的判定范围（同 eslint / prettier 的忽略口径）。
+  if (file.startsWith('.agents/')) continue
   if (isConstraints(file)) {
     if (isExceptionRow(text)) flag('new-exception', file, text)
     continue

@@ -17,7 +17,7 @@ Work in a scratch folder outside the repo. Write a TLA+ spec and its config. The
 
 `scripts/statechart.ts` is TypeScript, so run it with a runtime that can execute TypeScript. `scripts/statechart` is a POSIX shell script that picks one. On native Windows, run `node --disable-warning=ExperimentalWarning <skill dir>/scripts/statechart.ts` with Node 22.18 to 22.x, or Node 23.6 or later.
 
-The first run installs TLC and Java with mise and needs the network.
+The first run installs TLC and Java with mise and needs the network. Without `mise` on PATH, set `TLA2TOOLS` to a `tla2tools.jar` (1.7.4) and `JAVA` to a Java 11 or later binary; when both are missing the run stops and names exactly those two variables.
 
 ## Write the spec
 

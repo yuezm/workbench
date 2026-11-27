@@ -42,7 +42,7 @@
 
 过程与产物：
 
-- 需求 / 特性文档：`docs/features/`
+- 需求、BUG：`docs/issues/`
 - 规格文档：`docs/specs`
 - 计划与任务：`docs/planning/`
 - 测试策略与验收：`docs/testing/`（TESTING 策略 / TEST-CASES 用例目录 / ACCEPTANCE 人工验收与需求覆盖矩阵）

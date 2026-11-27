@@ -413,6 +413,15 @@ export default tseslint.config(
       'no-restricted-imports': 'off',
     },
   },
+  // 仓库级 Node 工具（`tools/`，如文档体检 `doc-lint.mjs`）跑在 node 里，不是 TS 模块、也不进产物：
+  // `process` 读参数与退出码、`console` 就是它的输出面。只放开这两个全局，其余规则照旧生效。
+  {
+    files: ['tools/**/*.mjs'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { process: 'readonly', console: 'readonly' },
+    },
+  },
   // 回执工具 server 的契约测试必须真起一个子进程按 MCP stdio 说话——被测对象本身就是
   // 独立进程，只能在进程外断言。只放开起进程用的三个内置（子进程/按行读/取脚本路径），
   // 网络与跨层 import 仍然禁止。

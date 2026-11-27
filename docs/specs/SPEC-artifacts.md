@@ -1,3 +1,10 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # SPEC-artifacts：执行记录落盘（M16）
 
 > 2026-11-10。回答两个问题：**库里存什么、文件里存什么**，以及**人怎么从目录找回到某一轮**。
@@ -17,7 +24,7 @@
 `output.md` 除了归档，还是挂线程阶段的**跨阶段上下文载体**：后续阶段按
 `THREAD_LIMITS.precedingExcerptChars` 只拿骨架 + 路径，正文靠执行器按需读。
 所以提示词里有固定的「本轮正文」段规定它自包含（结论 / 契约 / 落盘文件 / 未决项），
-见 [SPEC-ai-workflow](SPEC-ai-workflow.md) 柔性工作流。
+见 [SPEC-ai-workflow](./SPEC-ai-workflow.md) 柔性工作流。
 
 `runs.prompt` / `runs.output` / `run_events.payload_json` 仍留在库里，因为它们是**运行期**需要的
 （派发要读提示词、任务索引要摘要、UI 时间线要帧、投影要能重建）。它们与文件是同一份投影的两种物化，

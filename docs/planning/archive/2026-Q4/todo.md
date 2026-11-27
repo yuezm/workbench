@@ -1,6 +1,13 @@
+---
+type: plan
+status: archived
+owner: lead
+updated: 2026-11-28
+---
+
 # Task List: Workbench v1 — ✅ 全部完成（2026-10-28）
 
-> ⚠️ v1（Electron + 番茄钟）实现记录；产物与命令均已删除，当前状态见 [CAPABILITY-MAP](../CAPABILITY-MAP.md)。
+> ⚠️ v1（Electron + 番茄钟）实现记录；产物与命令均已删除，当前状态见 [CAPABILITY-MAP](../../../CAPABILITY-MAP.md)。
 
 > 索引与架构决策见 [plan.md](./plan.md)。最终验证：72/72 测试通过，`npm run build`、`npm run lint` 全绿。
 

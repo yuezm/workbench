@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 重构计划：内核 + 插件
 
 > 依据 [ARCHITECTURE.md](../ARCHITECTURE.md) 与三份新 Spec。目标：**行为不回退、真相源唯一、扩展只改插件**。

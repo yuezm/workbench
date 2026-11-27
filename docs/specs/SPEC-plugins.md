@@ -1,3 +1,10 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Spec: plugins（插件体系）
 
 > Module id：`plugins`。索引见 [CAPABILITY-MAP.md](../CAPABILITY-MAP.md)。总纲见 [ARCHITECTURE.md](../ARCHITECTURE.md)。

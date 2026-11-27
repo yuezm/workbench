@@ -1,3 +1,10 @@
+---
+type: history
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 覆盖率不可达分支登记（COVERAGE-UNREACHABLE）
 
 > 用途：登记 `pnpm verify:coverage` 里**构造不出输入**的语句/分支，逐条写清"为什么到达不了"以及"覆盖它需要付出什么"，避免下次复核时重复调查，也避免有人为了让数字好看而删守卫或放宽阈值。

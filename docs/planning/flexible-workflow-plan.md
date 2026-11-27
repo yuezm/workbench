@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 方案：柔性工作流（大流程卡死边界，阶段内放开路径）
 
 > 2026-11-10。回答一个问题：**把研发交付流程从「每阶段一份操作清单」改成「卡死边界与验收、放开路径」该怎么落。**
@@ -83,11 +90,11 @@ Agent 的自由度就产生在第三层：路径、顺序、拆法、办法全�
 
 ### D2 `acceptance` 字段（M20，DDL 变）
 
-> **M34 起作废**：执行阶段不再有验收，`acceptance` 只属于闸门阶段。见 [plan-acceptance-ownership](plan-acceptance-ownership.md)。
+> **M34 起作废**：执行阶段不再有验收，`acceptance` 只属于闸门阶段。见 [plan-acceptance-ownership](./plan-acceptance-ownership.md)。
 
 ### D3 阶段内多轮自修复（M21）
 
-> **M34 起作废**：阶段内续轮、`maxRounds` 与 `tasks.stage_fails` 已删除，返工走出口表或人工触发。见 [plan-acceptance-ownership](plan-acceptance-ownership.md)。
+> **M34 起作废**：阶段内续轮、`maxRounds` 与 `tasks.stage_fails` 已删除，返工走出口表或人工触发。见 [plan-acceptance-ownership](./plan-acceptance-ownership.md)。
 
 ### D4 打断规则（M19，零内核）
 

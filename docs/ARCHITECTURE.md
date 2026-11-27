@@ -1,3 +1,10 @@
+---
+type: explanation
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 架构：内核 + 插件（Workbench v2）
 
 > 2026-11-04 设计稿。本文取代 `SPEC-ai-workflow.md` 中「目录与分层」部分；该文的阶段语义、终态归一、取消时序等**行为**仍是迁移基线，直到对应里程碑完成。

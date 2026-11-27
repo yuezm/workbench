@@ -1,8 +1,15 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Spec: thread-topics（话题统一：跨工作流派单落回来源话题）
 
 > Module id：`thread-topics`。里程碑 **M50**。替代「派单每次开新线程」的口径（M29 / D11）。
 > 本文按本仓 spec 体例落盘（`docs/specs/SPEC-*.md`），不另建根目录 `SPEC.md`。
-> 关联：[SPEC-ai-workflow](SPEC-ai-workflow.md)（派单节）、[SPEC-kernel](SPEC-kernel.md)（派单事实）、[SPEC-task-fanout](SPEC-task-fanout.md)（子任务继承线程的先例）。
+> 关联：[SPEC-ai-workflow](./SPEC-ai-workflow.md)（派单节）、[SPEC-kernel](./SPEC-kernel.md)（派单事实）、[SPEC-task-fanout](./SPEC-task-fanout.md)（子任务继承线程的先例）。
 
 ## 1. Objective
 

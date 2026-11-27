@@ -1,3 +1,10 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Spec: authority（准入 · 授权 · 研判 · 注意力）
 
 > Module id：`authority`。契约在 `packages/core/protocol/src/authority.ts`，纯函数在 `packages/core/kernel/src/scopes/{admission,mandate,assess,attention}.ts`。

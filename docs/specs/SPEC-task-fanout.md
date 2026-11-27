@@ -1,8 +1,15 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Spec: task-fanout（一个任务派生多个子任务）
 
 > Module id：`task-fanout`。内核扩展（M8 候选），依赖 `kernel` / `protocol` / `host`，不改 shell / preload 桥接形状。
 > 状态：**待评审**（本文件只做设计，不动代码；评审通过后再出 plan / tasks / 实现）。
-> 关联：[ARCHITECTURE](../ARCHITECTURE.md)、[SPEC-kernel](SPEC-kernel.md)（Thread / 派生任务 / 跳数）、[SPEC-plugins](SPEC-plugins.md)（回执与执行约定）、[ai-workflow-research](../planning/ai-workflow-research.md)（Open Question 3）。
+> 关联：[ARCHITECTURE](../ARCHITECTURE.md)、[SPEC-kernel](./SPEC-kernel.md)（Thread / 派生任务 / 跳数）、[SPEC-plugins](./SPEC-plugins.md)（回执与执行约定）、[ai-workflow-research](../planning/ai-workflow-research.md)（Open Question 3）。
 
 ## Objective
 

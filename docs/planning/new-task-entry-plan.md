@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 新建任务入口收敛 + 可选工作流（M41）
 
 2026-11-17 落地。相关 Spec：[SPEC-ui §13](../specs/SPEC-ui.md)、[SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)。

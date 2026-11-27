@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 包拆分方案：apps + packages（参考 deepseek-harness）
 
 > 2026-11-16。本文定义仓库从「单包 `src/<层>`」迁到「`apps/*` + `packages/<域>/<包>`」的目标形态、边界与批次。

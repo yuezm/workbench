@@ -1,3 +1,10 @@
+---
+type: reference
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 测试用例目录（TEST-CASES）
 
 > SPEC 业务规则 ↔ 自动化测试的映射索引。规则本体以 [SPEC-shell](../specs/SPEC-shell.md) / [SPEC-ai-workflow](../specs/SPEC-ai-workflow.md) 为准；改动业务规则时**先改 SPEC，再同步此表与测试**。

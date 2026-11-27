@@ -1,3 +1,10 @@
+---
+type: reference
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Capability Map: Workbench（个人工作台）
 
 > 确认日期：2026-10-28。2026-11-04 按「内核 + 插件」重设目标架构（见 [ARCHITECTURE.md](./ARCHITECTURE.md)）。

@@ -1,3 +1,10 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Spec: kernel（内核）
 
 > Module id：`kernel`。索引见 [CAPABILITY-MAP.md](../CAPABILITY-MAP.md)。总纲见 [ARCHITECTURE.md](../ARCHITECTURE.md)。

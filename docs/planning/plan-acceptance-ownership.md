@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 计划：验收归属（M34）——执行阶段不自评，闸门才有验收
 
 > 取代 `flexible-workflow-plan` 的 M20/M21（验收自评 + 阶段内续轮）与 `plan-stage-exits` 的 M33（出口 `retry` 计数）。行为基线见 [SPEC-ai-workflow](../specs/SPEC-ai-workflow.md) 的「柔性工作流（M19–M34）」与「M34 升级」，内核口径见 [SPEC-kernel](../specs/SPEC-kernel.md)「验收归属（M34）」，回执口径见 [SPEC-plugins](../specs/SPEC-plugins.md)。

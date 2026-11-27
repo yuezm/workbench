@@ -1,8 +1,15 @@
+---
+type: plan
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 计划：脚本阶段（Script Stage）
 
 > 2026-11-13 起草。回答一个问题：**阶段能不能选「执行脚本」而不是智能体**——例如审查前先跑测试。
 > 状态：**M40 已实施（2026-11-13）**，M41（脚本实体复用）与 M42（同阶段前置脚本）未开工。实施口径与偏离见文末「实施记录」。**2026-11-13 补**：D5 已撤销——命令只来自运行时连接，`StageScript.command` / `Turn.command` 已删除，见文末「命令只来自运行时」。
-> 关联：[ARCHITECTURE](../ARCHITECTURE.md)（派活单位、执行器不是派活目标）、[SPEC-kernel](../specs/SPEC-kernel.md)（阶段 / 闸门 / 调度）、[SPEC-plugins](../specs/SPEC-plugins.md)（executor 端口与 `Turn`）、[plan-stage-exits](plan-stage-exits.md)（出口表）、[flexible-workflow-plan](flexible-workflow-plan.md)（「卡边界不卡步骤」）。
+> 关联：[ARCHITECTURE](../ARCHITECTURE.md)（派活单位、执行器不是派活目标）、[SPEC-kernel](../specs/SPEC-kernel.md)（阶段 / 闸门 / 调度）、[SPEC-plugins](../specs/SPEC-plugins.md)（executor 端口与 `Turn`）、[plan-stage-exits](./archive/2026-Q4/plan-stage-exits.md)（出口表）、[flexible-workflow-plan](./flexible-workflow-plan.md)（「卡边界不卡步骤」）。
 
 ## 结论
 

@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 任务级工作区与并行执行
 
 > 依据：`ARCHITECTURE.md`、`SPEC-ai-workflow.md`、`CAPABILITY-MAP.md`。

@@ -1,3 +1,10 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Spec: UI 设计规则（workbench）
 
 > Module id：`ui`。索引见 [CAPABILITY-MAP.md](../CAPABILITY-MAP.md)。确认日期：2026-11-09。

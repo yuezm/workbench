@@ -1,8 +1,15 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Spec: review-handoff（评审结论 → 修复阶段的可寻址交接）
 
 > Module id：`review-handoff`。内核 + 协议 + 投影扩展，复用宿主落盘，不改 shell / preload 桥接形状。
 > 状态：**S1–S5 已实现（M14）**；实现口径与本文的偏离记在文末「实现记录」。
-> 关联：[ARCHITECTURE](../ARCHITECTURE.md)、[SPEC-kernel](SPEC-kernel.md)（Thread / 闸门 / 打回 / 回执）、[SPEC-ai-workflow](SPEC-ai-workflow.md)（阶段流转与闸门闭环）、[SPEC-host](SPEC-host.md)（artifacts 落盘）、[SPEC-plugins](SPEC-plugins.md)（回执与执行器能力）。
+> 关联：[ARCHITECTURE](../ARCHITECTURE.md)、[SPEC-kernel](./SPEC-kernel.md)（Thread / 闸门 / 打回 / 回执）、[SPEC-ai-workflow](./SPEC-ai-workflow.md)（阶段流转与闸门闭环）、[SPEC-host](./SPEC-host.md)（artifacts 落盘）、[SPEC-plugins](./SPEC-plugins.md)（回执与执行器能力）。
 
 ## Objective
 

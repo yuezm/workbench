@@ -1,3 +1,10 @@
+---
+type: review
+status: archived
+owner: lead
+updated: 2026-11-28
+---
+
 # 评审：覆盖率门槛提到 100%（暂存区，125 文件 / +11851 / −558）
 
 - 评审依据：`code-review-and-quality` 五轴（正确性 / 可读性 / 架构 / 安全 / 性能）+ 「测试先行」「验证验证」「变异自检」三节

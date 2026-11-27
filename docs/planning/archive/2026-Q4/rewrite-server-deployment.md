@@ -1,9 +1,16 @@
+---
+type: plan
+status: archived
+owner: lead
+updated: 2026-11-28
+---
+
 # 迁移记录：Electron 桌面 → 常驻服务 + Web
 
 > 2026-11-16。范围：把 Workbench 从 Electron 桌面应用改成「一个 Node 服务 + 浏览器界面」，
 > 保留全部业务能力（事件/规则/派活/执行/通道/审批/聊天/用量）。行为基线仍是
-> [SPEC-ai-workflow](../specs/SPEC-ai-workflow.md)，架构总纲见 [ARCHITECTURE](../ARCHITECTURE.md)，
-> 服务器形态规格见 [SPEC-server](../specs/SPEC-server.md)。
+> [SPEC-ai-workflow](../../../specs/SPEC-ai-workflow.md)，架构总纲见 [ARCHITECTURE](../../../ARCHITECTURE.md)，
+> 服务器形态规格见 [SPEC-server](../../../specs/SPEC-server.md)。
 
 ## 为什么改
 

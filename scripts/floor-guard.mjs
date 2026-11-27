@@ -102,6 +102,29 @@ const STUBS =
 // 2. 被放松的测试。
 const SKIPS = /\.(skip|todo)\b|\bxit\(|\bxdescribe\(|@pytest\.mark\.skip|t\.Skip\(/
 
+// 例外索引行的键（首格，如 `EX-003`）：判断「这条例外是不是新登记的」。
+const exceptionKeyOf = (t) =>
+  t
+    .trim()
+    .split('|')
+    .map((c) => c.trim())
+    .filter(Boolean)[0] ?? ''
+
+// 基线版本里已存在的例外键。就地改一条已在册的例外（改理由、修链接路径、对齐列宽）不是
+// 「新登记一条放宽」；只有键在基线里找不到，才是真的新增例外。
+const baseExceptionKeys = new Map()
+const baseKeysOf = (file) => {
+  if (!baseExceptionKeys.has(file)) {
+    const raw = git(['show', `${mergeBase}:${file}`])
+    const keys = new Set()
+    for (const line of (raw ?? '').split('\n')) {
+      if (isExceptionRow(line)) keys.add(exceptionKeyOf(line))
+    }
+    baseExceptionKeys.set(file, keys)
+  }
+  return baseExceptionKeys.get(file)
+}
+
 for (const { file, text } of added) {
   // 守卫脚本自身、以及 CONSTRAINTS.md / CONSTRAINTS-HISTORY.md 正文（会合法地引用 @ts-ignore 等字样）不算违规。
   if (file.startsWith('scripts/')) continue
@@ -109,7 +132,9 @@ for (const { file, text } of added) {
   // 是上游代码本来的样子，不属于本仓库产品质量底线的判定范围（同 eslint / prettier 的忽略口径）。
   if (file.startsWith('.agents/')) continue
   if (isConstraints(file)) {
-    if (isExceptionRow(text)) flag('new-exception', file, text)
+    if (isExceptionRow(text) && !baseKeysOf(file).has(exceptionKeyOf(text))) {
+      flag('new-exception', file, text)
+    }
     continue
   }
   if (SUPPRESSIONS.test(text)) flag('silenced-checker', file, text)
@@ -342,8 +367,12 @@ for (const [file, removedCount] of removedAssertions) {
 }
 
 // 1b/2c. CONSTRAINTS.md 的规则被放松或删除（与参考实现一致的阈值方向判定）。
+// 链接目标是文档坐标，不是规则内容（2026-11-28）：文档搬家会改 Markdown 链接路径
+// （`docs/testing/x.md` → `./x.md`），规则文案、阈值数字、例外理由一字未动，却因为整行文本
+// 变了被判成「删规则 / 新增例外」。比对前先把 `](…)` 抹平，其余（文案、数字、示例）仍逐字比对。
+const stripLinks = (t) => t.replace(/\]\([^)]*\)/g, '](…)')
 const ruleKey = (t) => {
-  const s = t.trim()
+  const s = stripLinks(t).trim()
   if (s.startsWith('|'))
     return (
       s
@@ -360,8 +389,9 @@ const MAX_BEFORE =
   /(<=|<|≤|at most|maximum|\bmax\b|no more than|under|below|not grow|not exceed)\s*$/
 const MIN_AFTER = /^\s*\S*\s*(or more|or higher|must not fall|must not drop)/
 const MAX_AFTER = /^\s*\S*\s*(or less|or lower|must not grow|must not exceed)/
-const thresholds = (t) => {
+const thresholds = (tEntry) => {
   const out = []
+  const t = stripLinks(tEntry)
   const re = /\d+(?:\.\d+)?/g
   let m
   while ((m = re.exec(t))) {
@@ -409,7 +439,7 @@ const addedRules = added.filter((l) => isConstraints(l.file) && ruleKey(l.text) 
 // 比较前把连续空白归一成单空格：两边都是 Markdown 表格行，列宽对齐（Prettier）会插入
 // 若干空格，原样比对会把「同一行」判成两行（实测 10 条 EX 行全被误报成 threshold-removed）。
 // 只忽略空白差异，规则文本本身仍要逐字出现。
-const normalizeRow = (text) => text.trim().replace(/\s+/g, ' ')
+const normalizeRow = (text) => stripLinks(text).trim().replace(/\s+/g, ' ')
 const relocatedToHistory = new Set(
   added.filter((l) => l.file === HISTORY_FILE).map((l) => normalizeRow(l.text)),
 )

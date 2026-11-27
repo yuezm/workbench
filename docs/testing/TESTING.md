@@ -1,6 +1,13 @@
+---
+type: reference
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 测试与质量保障体系（TESTING）
 
-> 质量门禁的单一入口文档。用例与 SPEC 规则的映射见 [TEST-CASES.md](TEST-CASES.md)。
+> 质量门禁的单一入口文档。用例与 SPEC 规则的映射见 [TEST-CASES.md](./TEST-CASES.md)。
 > 包管理器统一为 **pnpm**（2026-10-30 起），全部命令用 `pnpm` 执行。
 
 ## 分层策略
@@ -31,23 +38,23 @@
 
 ## 常用命令
 
-| 命令                                                  | 作用                                                               |
-| ----------------------------------------------------- | ------------------------------------------------------------------ |
-| `pnpm verify:test` / `pnpm exec vitest`               | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式  |
-| `pnpm verify:coverage`                                | 同上 + 覆盖率阈值门禁 + 改动行覆盖率 ≥ 100%                        |
-| `pnpm verify:lint` / `pnpm exec eslint . --fix`       | ESLint（含 react-hooks 规则）                                      |
-| `pnpm format` / `pnpm exec prettier --check .`        | Prettier 全仓写 / 只检查                                           |
-| `pnpm verify:types`                                   | tsc node + web 双工程（含 e2e 与测试文件）                         |
-| `pnpm verify:e2e -- --ui`                             | Playwright UI 模式调试单条用例                                     |
-| `pnpm verify:all`                                     | 全闸门 + E2E：人工验收前一条命令（见 [ACCEPTANCE](ACCEPTANCE.md)） |
-| `pnpm verify:e2e -- tests/e2e/ui-geometry.spec.ts`    | 只跑界面几何审计（含构建），改完 UI 用                             |
-| `pnpm exec playwright test tests/e2e/startup.spec.ts` | 只跑启动健康三路径（先 `pnpm build`）                              |
+| 命令                                                  | 作用                                                                 |
+| ----------------------------------------------------- | -------------------------------------------------------------------- |
+| `pnpm verify:test` / `pnpm exec vitest`               | 全部单测+契约测试（本机 20–22s / 198 文件 / 3489 用例）/ 监听模式    |
+| `pnpm verify:coverage`                                | 同上 + 覆盖率阈值门禁 + 改动行覆盖率 ≥ 100%                          |
+| `pnpm verify:lint` / `pnpm exec eslint . --fix`       | ESLint（含 react-hooks 规则）                                        |
+| `pnpm format` / `pnpm exec prettier --check .`        | Prettier 全仓写 / 只检查                                             |
+| `pnpm verify:types`                                   | tsc node + web 双工程（含 e2e 与测试文件）                           |
+| `pnpm verify:e2e -- --ui`                             | Playwright UI 模式调试单条用例                                       |
+| `pnpm verify:all`                                     | 全闸门 + E2E：人工验收前一条命令（见 [ACCEPTANCE](./ACCEPTANCE.md)） |
+| `pnpm verify:e2e -- tests/e2e/ui-geometry.spec.ts`    | 只跑界面几何审计（含构建），改完 UI 用                               |
+| `pnpm exec playwright test tests/e2e/startup.spec.ts` | 只跑启动健康三路径（先 `pnpm build`）                                |
 
 E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录 + `WORKBENCH_PORT=0` 起 `out/server/index.js`，解析 stdout 的 `workbench listening on ...` 取实际地址，再用 Playwright Chromium 打开页面；因此**每次先构建再测**；不需要下载任何 Playwright 浏览器（pnpm 默认也阻止了该下载）。
 
-人工验收前另有两关专用 spec：`tests/e2e/startup.spec.ts`（冷启动 / 重载 / 二次冷启动零异常、零兜底页）与 `tests/e2e/ui-geometry.spec.ts`（七类几何判据 + 审计器自检，报告落 `.scratch/acceptance/ui-geometry.md`）。用法、需求覆盖矩阵与 30 分钟走查表见 [ACCEPTANCE](ACCEPTANCE.md)。
+人工验收前另有两关专用 spec：`tests/e2e/startup.spec.ts`（冷启动 / 重载 / 二次冷启动零异常、零兜底页）与 `tests/e2e/ui-geometry.spec.ts`（七类几何判据 + 审计器自检，报告落 `.scratch/acceptance/ui-geometry.md`）。用法、需求覆盖矩阵与 30 分钟走查表见 [ACCEPTANCE](./ACCEPTANCE.md)。
 
-> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`verify` 供编辑后快跑，`verify:coverage` 供任务结束（覆盖率阈值 + 改动行），`verify:all` 供交付 / 推送（上面全部 + E2E）。复核记录、例外理由与基线演进在 [CONSTRAINTS-HISTORY](CONSTRAINTS-HISTORY.md)，新记录追加到那边。
+> 质量门禁的数值与命令单一来源为根目录 [CONSTRAINTS.md](../../CONSTRAINTS.md)：`verify` 供编辑后快跑，`verify:coverage` 供任务结束（覆盖率阈值 + 改动行），`verify:all` 供交付 / 推送（上面全部 + E2E）。复核记录、例外理由与基线演进在 [CONSTRAINTS-HISTORY](./CONSTRAINTS-HISTORY.md)，新记录追加到那边。
 
 ## Git hooks（husky，提交即门禁）
 
@@ -70,7 +77,7 @@ E2E 说明：`tests/e2e/helpers/launch.ts` 用 `WORKBENCH_DATA_DIR` 临时目录
 5. **某条分支在产品路径上到不了**（防御守卫、脏投影兜底）→ 优先用**正常业务场景**覆盖；场景不成立时，
    把判定**抽成模块级导出函数**再单测它（产品路径的守卫一字不改，只是判定可测），
    或与别处**等价的守卫合并**到一处。禁止删保护性守卫，也禁止加覆盖率抑制注释（`ignore` 类）来绕过。
-   逐条口径见 [COVERAGE-UNREACHABLE](COVERAGE-UNREACHABLE.md)。
+   逐条口径见 [COVERAGE-UNREACHABLE](./COVERAGE-UNREACHABLE.md)。
 
 ## 性质测试与变异测试（假绿防护）
 
@@ -263,4 +270,4 @@ Stryker 只能变异**被测源码**再跑单测 runner（vitest/jest 一类）�
 ## 与 SPEC 的关系
 
 - SPEC-shell 的 Testing Strategy 写明「v1 不做 E2E」；2026-10-30 按需求**升级**为引入 Playwright E2E，本文件为准。SPEC 中其余测试要求（registry 遍历断言、machine 分支全覆盖、知会走 mock）全部保持有效。
-- 服务启停、知会轻提示、铃声等真实感官行为仍以手动验收为准，清单见 [TEST-CASES.md](TEST-CASES.md)。
+- 服务启停、知会轻提示、铃声等真实感官行为仍以手动验收为准，清单见 [TEST-CASES.md](./TEST-CASES.md)。

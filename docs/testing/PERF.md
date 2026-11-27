@@ -1,3 +1,10 @@
+---
+type: reference
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 性能基线（PERF）
 
 > 仪器：`node scripts/bench.mjs [--facts=100000] [--tasks=5000] [--samples=200] [--json]`

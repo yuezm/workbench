@@ -147,7 +147,7 @@ workbench/
 - [服务器形态规格](docs/specs/SPEC-server.md) · [宿主规格](docs/specs/SPEC-host.md) · [外壳规格](docs/specs/SPEC-shell.md)
 - [能力地图 / 模块索引](docs/CAPABILITY-MAP.md)
 - [测试策略](docs/testing/TESTING.md) · [人工验收](docs/testing/ACCEPTANCE.md)
-- [Electron → 服务端 迁移记录](docs/planning/rewrite-server-deployment.md)
+- [Electron → 服务端 迁移记录](docs/planning/archive/2026-Q4/rewrite-server-deployment.md)
 
 ## 约定
 

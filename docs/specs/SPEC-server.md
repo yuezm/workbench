@@ -1,8 +1,15 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # SPEC：服务器形态（`apps/server`）
 
 > 2026-11-16 定稿。本文描述 Workbench 从 Electron 桌面应用改成**常驻服务 + Web 界面**之后的运行形态；
 > 内核对齐 `SPEC-kernel`，宿主对齐 `SPEC-host`，浏览器外壳对齐 `SPEC-shell`。
-> 迁移过程与取舍见 [rewrite-server-deployment](../planning/rewrite-server-deployment.md)。
+> 迁移过程与取舍见 [rewrite-server-deployment](../planning/archive/2026-Q4/rewrite-server-deployment.md)。
 
 ## 一句话
 

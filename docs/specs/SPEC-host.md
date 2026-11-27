@@ -1,3 +1,10 @@
+---
+type: spec
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # Spec: host（宿主）与客户端
 
 > Module ids：`host`（常驻服务里的宿主层）、`server`（装配根 + HTTP/SSE）与 `shell`（Web 外壳）。索引见 [CAPABILITY-MAP.md](../CAPABILITY-MAP.md)。总纲见 [ARCHITECTURE.md](../ARCHITECTURE.md)。

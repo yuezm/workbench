@@ -30,24 +30,17 @@
 - 闸门一律 `verify` 开头，除此之外的命令不参与判定：`pnpm verify`（编辑中：类型 + lint + guards + 单测）、`pnpm verify:coverage`（覆盖率 + 改动行）、`pnpm verify:e2e`、`pnpm verify:mutation`、`pnpm verify:all`（全闸门 + E2E，交付 / 推送）。
 - 不知道跑哪条就跑 `pnpm verify`；交付前跑 `pnpm verify:all`。
 
-## 文档导航（按需读取）
+## 文档导航
 
-真相源——改动前先读对应的一份，不要凭记忆写：
+按用途找文档看 [docs/README.md](docs/README.md)，那是唯一索引；加文档先改那里，不在这里补列表。
 
-- 架构总纲：`docs/ARCHITECTURE.md`（内核 + 插件 + 服务器形态；架构问题先读这个）
+改动前必读三份真相源：
+
+- 架构总纲：`docs/ARCHITECTURE.md`（架构问题先读这个）
 - 模块边界：`docs/CAPABILITY-MAP.md`（模块索引、边界决定、构建顺序）
-- 行为契约（规格文档）：`docs/specs/`（kernel / authority / plugins / host / server / shell / ui / ai-workflow，每一份 `SPEC-*.md` 都是对应模块的行为基线）
-- 质量底线：`CONSTRAINTS.md`（只放有命令、可判定的规则；复核记录与例外在 `docs/testing/CONSTRAINTS-HISTORY.md`）
-- UI规格：[SPEC-ui](docs/specs/SPEC-ui.md)
-
-过程与产物：
-
-- 需求、BUG：`docs/issues/`
-- 规格文档：`docs/specs`
-- 计划与任务：`docs/planning/`
-- 测试策略与验收：`docs/testing/`（TESTING 策略 / TEST-CASES 用例目录 / ACCEPTANCE 人工验收与需求覆盖矩阵）
-- 评审报告导出：`docs/reviews/`（任务的「提升为文档」写这里，人决定何时提交）
-- 一次性运行日志、临时产物、临时测试文件：`.scratch/`（一次性日志、临时测试文件，不进 git）
+- 质量底线：`CONSTRAINTS.md`（只放有命令、可判定的规则；历史与例外在 `docs/testing/CONSTRAINTS-HISTORY.md`）
+- 文档体检：`node tools/doc-lint.mjs docs`（结构类 error 必须为 0；规则见 `docs/README.md`）
+- 一次性日志、临时产物、临时测试文件：`.scratch/`（不进 git）
 
 ## 禁止事项
 

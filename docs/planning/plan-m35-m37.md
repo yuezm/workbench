@@ -1,3 +1,10 @@
+---
+type: plan
+status: active
+owner: lead
+updated: 2026-11-28
+---
+
 # 计划：吸纳 agent-autoloop 的工程优点（M35–M37）
 
 > 定稿：2026-11-13。来源：与 `agent-autoloop` 的双向对照（结构、机制、验证体系），经人拍板：P0/P1 全做；P2 只做「内核拆两层」，`remote` 多机执行器另评。

@@ -5,6 +5,7 @@
  * 单测可以用假装配验证「监听地址从哪来、退出顺序对不对、重复信号会不会把库关两遍」，
  * 不必真跑内核、也不必真发信号。
  */
+import { realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
 import type { ServerConfig } from './config'
 import { ConfigError, loadServerConfig, SERVER_ENV } from './config'
@@ -230,8 +231,12 @@ export function reportStartupError(
  *
  * 判据是「进程的入口脚本就是本模块」：`node out/server/index.js` 时成立，被测试 import、
  * 被别的模块 require 时都不成立。以前写成 `require.main === module`，但那两个全局只在
- * 原生 CJS 存在——ESM 里既没有它们，那条守卫也就永远测不到。改成比较路径后：
- * 判据是纯字符串比较（无分支），真假两支在单测里直接构造 refs 覆盖。
+ * 原生 CJS 存在——ESM 里既没有它们，那条守卫也就永远测不到。
+ *
+ * 两侧都要归一成「Node 实际装载的那个文件」，不能直接比字符串：
+ * - 目录形态 `node out/server`：Node 内部按 `out/server/index.js` 装载，但 `process.argv[1]`
+ *   原样留着那个目录。只比字符串时守卫为假，进程装上模块就静默退出（exit 0、没有一行日志）。
+ * - 软链接形态（`node_modules/.bin/x`）与 Windows 大小写差异：`realpath` 归一。
  */
 export interface DirectRunRefs {
   /** 本模块文件的绝对路径（入口传 `fileURLToPath(import.meta.url)`） */
@@ -240,9 +245,56 @@ export interface DirectRunRefs {
   argv: string | undefined
 }
 
+/** `node <dir>` 时 Node 默认装载的入口文件名（无 `package.json#main` 时的兜底） */
+const DIRECTORY_ENTRY_FILE = 'index.js'
+
+/**
+ * 判据要向磁盘问的两件事（可注入：单测只在需要时碰真磁盘）。
+ *
+ * `realpath` 在路径不存在时返回 `null`——此时回退纯字符串比较，
+ * 于是「被 import 的测试用例拿假路径构造 refs」照样可测。
+ */
+export interface DirectRunDeps {
+  isDirectory?: (target: string) => boolean
+  realpath?: (target: string) => string | null
+}
+
+const isDirectoryOnDisk = (target: string): boolean => {
+  try {
+    return statSync(target).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+const realpathOnDisk = (target: string): string | null => {
+  try {
+    return realpathSync.native(target)
+  } catch {
+    return null
+  }
+}
+
+/** 把一个 argv/entry 路径归一成 Node 实际装载的入口文件路径 */
+function mainFileOf(
+  target: string,
+  isDirectory: (target: string) => boolean,
+  realpath: (target: string) => string | null,
+): string {
+  const absolute = path.resolve(target)
+  const file = isDirectory(absolute) ? path.join(absolute, DIRECTORY_ENTRY_FILE) : absolute
+  // 查不到真路径（未构建 / 不存在的文件）就退回解析后的字符串：两侧同时退回时仍是同一判据
+  return realpath(file) ?? file
+}
+
 /** 是否「被直接执行」。 */
-export function isDirectRun(refs: DirectRunRefs): boolean {
-  return refs.argv !== undefined && path.resolve(refs.argv) === path.resolve(refs.entry)
+export function isDirectRun(refs: DirectRunRefs, deps: DirectRunDeps = {}): boolean {
+  if (refs.argv === undefined) return false
+  const isDirectory = deps.isDirectory ?? isDirectoryOnDisk
+  const realpath = deps.realpath ?? realpathOnDisk
+  return (
+    mainFileOf(refs.argv, isDirectory, realpath) === mainFileOf(refs.entry, isDirectory, realpath)
+  )
 }
 
 /** 直接执行时起服务；被 import 时什么都不做（守卫为假）。 */
